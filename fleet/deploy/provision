@@ -706,7 +706,10 @@ else
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
         echo "substrate     $SUBSTRATE"
-        echo "prefix        ${PROV_PREFIX:-inconnu}"
+        # Sans repli : la lib pose `PROV_PREFIX` et ce runner la source bien plus haut, donc
+        # « inconnu » ne pouvait PAS s'afficher. Un etat que le rapport ne peut pas atteindre est
+        # un etat que le lecteur croit possible, et il n'a jamais existe.
+        echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
         # Une clef par ligne, valeurs fusionnées et dédoublonnées : `apt_ensure` est appelée par
         # plusieurs modules, et trois lignes `apt_installed` pour un même paquet ne disent rien de

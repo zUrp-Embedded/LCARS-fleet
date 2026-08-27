@@ -85,8 +85,10 @@ HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
 # `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
 SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
-# Le compte du service d'autorite — copie du defaut de `provision-lib.sh`, qu'un temoin compare.
-AUTHORITY_USER="${PROV_AUTHORITY_USER:-lcars-authority}"
+# Le compte du service d'autorite. Il se LIT dans `provision-lib.sh`, il ne s'y recopie plus : le
+# `:-lcars-authority` qui vivait ici etait une branche morte (la lib est sourcee au-dessus) et un
+# litteral de plus a faire suivre. Meme geste dans `21-service-accounts`, le meme jour.
+AUTHORITY_USER="$PROV_AUTHORITY_USER"
 # La fenetre d'observation qui separe « forke » de « debout ». Seam de temoin : un bats mesure la
 # DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"

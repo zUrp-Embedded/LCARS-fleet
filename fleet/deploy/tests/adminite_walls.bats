@@ -248,8 +248,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # l'ensemble des detenteurs est VIDE entre deux lancements.
   local f
   for f in "${CODE[@]}"; do
-    absent 'ensure_member[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
-    absent 'usermod[^\n]*-aG[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+    absent 'ensure_member.*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+    absent 'usermod.*-aG.*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
   done
 }
 
@@ -282,20 +282,41 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 @test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {
-  # Quatre fichiers le nomment : la lib (defaut), le module qui le cree, l'unite, et l'image.
-  # Une copie que personne ne compare n'est pas une source unique de verite — meme regle que la
-  # branche protegee du rail toolchain, et elle a deja coute une borne de securite reglable.
+  # DEUX fichiers le copient, et deux seulement : le rail BOITE. `entrypoint.sh` et le `Dockerfile`
+  # ne sourcent pas `provision-lib.sh` — ils ne peuvent pas LIRE le nom, donc ils l'ecrivent. Les
+  # deux modules du rail POSTE le lisaient en `${PROV_AUTHORITY_USER:-lcars-authority}` : une copie
+  # sur une branche morte, retiree le 2026-08-27 (`MUR 2` de `variable_walls` la refuse desormais).
+  # Moins de copies vaut mieux qu'une copie verifiee ; ce mur garde celles qui ne peuvent pas
+  # disparaitre.
+  #
+  # ⚠ ET IL ETAIT SATISFAIT PAR N'IMPORTE QUOI, MESURE DEUX FOIS LE MEME JOUR :
+  #
+  #   1. PAR UNE SOUS-CHAINE FORTUITE. `grep -q -- "lcars-authority"` sur le `Dockerfile` matche
+  #      `lcars-authority-ask`, un nom de BINAIRE. Mutation jouee : le compte renomme en
+  #      `lcars-autoritay` dans le `useradd` — le mur restait VERT. Le verrou cense tenir le nom du
+  #      compte du service d'autorite ne tenait rien dans l'image.
+  #
+  #   2. PAR UN COMMENTAIRE. `grep` brut, sans retrait de la prose. Apres avoir retire les deux
+  #      copies mortes, les deux modules avaient `CODE=0` occurrence du nom — et le mur restait VERT,
+  #      satisfait par le commentaire qui documentait le RETRAIT de la copie qu'il verifiait.
+  #
+  # On mesure donc le CODE, et on ancre sur le GESTE : l'image CREE le compte (`useradd`),
+  # l'entrypoint le POSE dans sa variable. Un nom qui apparait ailleurs ne compte pas.
   local attendu
   attendu="$(sed -n 's/^: "${PROV_AUTHORITY_USER:=\([a-z-]*\)}"$/\1/p' "$REPO/deploy/lib/provision-lib.sh")"
-  [ -n "$attendu" ]
-  local f
-  for f in "$REPO/deploy/modules.d/21-service-accounts.sh" \
-           "$REPO/deploy/modules.d/64-services.sh" \
-           "$REPO/deploy/docker/entrypoint.sh" \
-           "$REPO/deploy/docker/Dockerfile"; do
-    grep -q -- "$attendu" "$f" || {
-      echo "MUR 4 bis rompu — $f ne nomme pas « $attendu »" >&2
+  [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans provision-lib.sh" >&2; return 1; }
+
+  code_of "$REPO/deploy/docker/Dockerfile" \
+    | grep -qE "useradd.*[[:space:]]${attendu}([[:space:]]|\\\\|$)" || {
+      echo "MUR 4 bis rompu — le Dockerfile ne CREE pas le compte « $attendu » (useradd)" >&2
+      code_of "$REPO/deploy/docker/Dockerfile" | grep -nE 'useradd.*lcars' >&2
       return 1
     }
-  done
+
+  code_of "$REPO/deploy/docker/entrypoint.sh" \
+    | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
+      echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
+      code_of "$REPO/deploy/docker/entrypoint.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      return 1
+    }
 }

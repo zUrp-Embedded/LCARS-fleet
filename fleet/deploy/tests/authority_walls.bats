@@ -137,7 +137,7 @@ absent() { # absent <motif etendu> <fichier>
   # chemin (`install -d -m 0710 "$PRIVATE_DIR"`). Python ecrit l'inverse (`os.makedirs("/home/private",
   # mode=0o750)`), donc le mutant python passait encore au vert APRES l'ajout de `makedirs` et de
   # `0o`. Une garde multi-langue doit ignorer la SYNTAXE, pas seulement le lexique.
-  local motif="($verbe)[^\n]*(($mode)[^\n]*($lieu)|($lieu)[^\n]*($mode))"
+  local motif="($verbe).*(($mode).*($lieu)|($lieu).*($mode))"
   local f hits=0
   for f in "${CODE[@]}"; do
     if code_of "$f" | grep -qE -- "$motif"; then
@@ -168,7 +168,7 @@ absent() { # absent <motif etendu> <fichier>
     # Et il ne reste AUCUN 0700 sur cet objet : deux modes dans un meme fichier, c'est celui qu'on
     # n'a pas relu qui gagne.
     local n
-    n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700[^\n]*(PRIVATE_DIR|TOKENS_DIR)' || true)"
+    n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700.*(PRIVATE_DIR|TOKENS_DIR)' || true)"
     [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
   done
   grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
@@ -213,7 +213,7 @@ secret_writers() {
   local f
   while read -r f; do
     absent 'chgrp' "$f"
-    absent '(chown|install)[^\n]*(:|-g )(fleet|\$PROV_FLEET_GROUP|\$\{PROV_FLEET_GROUP\})' "$f"
+    absent '(chown|install).*(:|-g )(fleet|\$PROV_FLEET_GROUP|\$\{PROV_FLEET_GROUP\})' "$f"
   done < <(secret_writers)
 }
 
@@ -260,7 +260,7 @@ secret_writers() {
 @test "MUR 3: aucun FORGE_TOKEN_FILE construit depuis le repertoire des secrets ne part vers une porte" {
   local f
   for f in "${CODE[@]}"; do
-    absent 'FORGE_TOKEN_FILE=[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' "$f"
+    absent 'FORGE_TOKEN_FILE=.*(PRIVATE_DIR|TOKENS_DIR|/home/private)' "$f"
   done
 }
 

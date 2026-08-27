@@ -54,9 +54,15 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# Le nom vit ICI, une fois. Les unites systemd et l'entrypoint le copient — et un temoin compare les
-# copies, parce qu'une copie que personne ne verifie n'est pas une source unique de verite.
-AUTHORITY_USER="${PROV_AUTHORITY_USER:-lcars-authority}"
+# ⚠ LE NOM NE VIT PLUS ICI, ET C'EST LE POINT. Ce commentaire disait « le nom vit ICI, une fois » —
+# alors que `provision-lib.sh` le posait deja, inconditionnellement, avant ce module. Le `:-` etait
+# une SECONDE copie du defaut, sur une branche morte : la lib est sourcee quatre lignes plus haut,
+# et sans elle ce fichier meurt sur `PROVISION_LIB non pose`. Le repli affirmait qu'on peut tourner
+# sans la lib, ce qui est faux, et il faisait un litteral de plus a faire suivre au renommage.
+#
+# Sans repli, l'absence devient un `unbound variable` bruyant — garanti, pas espere : le contrat
+# `shell.sourcers_set_strict` exige `set -u` de tout sourcer de la lib.
+AUTHORITY_USER="$PROV_AUTHORITY_USER"
 # ─── LE GROUPE DU SERVICE, ET POURQUOI IL DOIT EXISTER ──────────────────────────────────────────
 #
 # ⚠ CE MODULE FAISAIT `useradd -g "$PROV_FLEET_GROUP"`, ET C'ETAIT LA MOITIE D'UN PATRON. Donner un

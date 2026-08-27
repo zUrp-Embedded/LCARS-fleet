@@ -112,7 +112,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   n="$(sed 's/#.*//' "$SRC" | grep -cE 'ALL=\(root\)' || true)"
   [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'ALL=\(root\)' >&2; return 1; }
   # Et rien n'ECRIT dans le fichier de sudoers : la seule chose qui lui arrive est `rm`.
-  n="$(sed 's/#.*//' "$SRC" | grep -cE '(write_atomic|install|>|tee)[^\n]*SUDOERS_FILE' || true)"
+  n="$(sed 's/#.*//' "$SRC" | grep -cE '(write_atomic|install|>|tee).*SUDOERS_FILE' || true)"
   [ "$n" -eq 0 ] || { sed 's/#.*//' "$SRC" | grep -nE 'SUDOERS_FILE' >&2; return 1; }
   n="$(sed 's/#.*//' "$SRC" | grep -cE 'LCARS_TOOLCHAIN_CONVERGE_BIN' || true)"
   [ "$n" -eq 0 ]

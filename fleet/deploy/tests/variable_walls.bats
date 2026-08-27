@@ -116,3 +116,112 @@ code_of() { sed 's/#.*//' "$1"; }
     return 1
   }
 }
+
+@test "MUR 2: aucun fichier dans la portee de provision-lib ne RECOPIE un defaut qu'elle pose" {
+  # ⚠ LA REGLE EST DEJA ECRITE DANS LE CORPUS, dans `64-services.sh` : « PAS DE `:-` ICI, ET C'EST
+  # UNE CORRECTION. » Elle etait tenue pour DEUX noms, dans UN fichier, par un temoin qui ne
+  # regardait qu'une seule forme d'ecriture. Une regle tenue par de la discipline est une regle que
+  # le prochain site rate — et quatre sites l'avaient deja ratee.
+  #
+  # ⚠ CE QUI EST INTERDIT EST LA COPIE DU DEFAUT, PAS LE `:-`. `${PROV_X:-}` avec un defaut VIDE
+  # est l'idiome sain de lecture sous `set -u`, et pour un nom que la lib peut poser vide il est
+  # meme le seul juste. Ce qui ne peut pas mordre, c'est `${PROV_X:-<litteral>}` quand la lib pose
+  # deja ce nom a une valeur NON VIDE : la branche est morte, et elle AFFIRME qu'un module peut
+  # tourner sans la lib — alors qu'il meurt sur `PROVISION_LIB non pose` deux lignes plus haut.
+  #
+  # ⚠ ET L'INTERDICTION S'APPUIE SUR UN AUTRE VERROU, ce qui est la raison pour laquelle elle est
+  # sure : `shell.sourcers_set_strict` (contrat Elixir) exige `set -u` de TOUT sourcer de la lib.
+  # Retirer le repli ne rend donc pas la lecture silencieuse — elle devient un `unbound variable`
+  # bruyant. Un echec explicite vaut mieux qu'un succes ambigu, mais seulement si quelque chose
+  # garantit l'echec ; ici, quelque chose le garantit.
+  #
+  # LES DEUX LISTES SE DERIVENT, aucune n'est tenue a la main : les poseurs se lisent dans la lib,
+  # la portee se lit dans les fichiers qui la sourcent. Un nom ajoute a la lib est garde le jour
+  # meme.
+  local lib="$REPO/deploy/lib/provision-lib.sh"
+  [ -r "$lib" ] || { echo "provision-lib.sh introuvable : $lib" >&2; return 1; }
+
+  # Les noms poses a une valeur NON VIDE. `sed` sur la forme `: "${X:=valeur}"`.
+  local poseurs
+  poseurs="$(sed 's/#.*//' "$lib" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{(PROV_[A-Z_]+):=(.+)\}"[[:space:]]*$/\1/p' | sort -u)"
+  [ -n "$poseurs" ] || { echo "aucun poseur lu dans la lib — l'instrument est casse" >&2; return 1; }
+  [ "$(printf '%s\n' "$poseurs" | wc -l)" -ge 15 ] || {
+    echo "seulement $(printf '%s\n' "$poseurs" | wc -l) poseurs lus — le motif ne suit plus la lib" >&2; return 1; }
+
+  # La portee : les fichiers qui sourcent la lib, PLUS le runner qui la source lui-meme.
+  local portee
+  portee="$(grep -rl '\. "\${PROVISION_LIB' "$REPO/deploy" "$REPO/etc" 2>/dev/null; echo "$REPO/deploy/provision")"
+  [ "$(printf '%s\n' "$portee" | wc -l)" -ge 20 ] || {
+    echo "portee a $(printf '%s\n' "$portee" | wc -l) fichiers — le balayage est casse" >&2; return 1; }
+
+  local alt; alt="$(printf '%s\n' "$poseurs" | paste -sd'|')"
+  local f n src rompu=0
+  while read -r f; do
+    [ -r "$f" ] || continue
+    # ⚠ LE POSEUR NE VAUT QU'APRES LE `source`. Une lecture au-dessus de cette ligne est VIVANTE, et
+    # l'ignorer accuserait un repli legitime — la faute symetrique de celle qu'on repare.
+    src="$(grep -nE '^[[:space:]]*(\.|source)[[:space:]].*(PROVISION_LIB|provision-lib)' "$f" | head -1 | cut -d: -f1)"
+    [ -n "$src" ] || continue
+    while IFS=: read -r n _; do
+      [ -n "$n" ] || continue
+      [ "$n" -gt "$src" ] || continue
+      echo "MUR 2 rompu — ${f#"$REPO"/}:$n recopie un defaut que provision-lib.sh pose deja :" >&2
+      sed -n "${n}p" "$f" | sed 's/^/     /' >&2
+      rompu=1
+    done < <(sed 's/#.*//' "$f" | grep -nE "\\\$\{($alt):-[^}]+\}")
+  done <<<"$portee"
+
+  [ "$rompu" -eq 0 ] || {
+    echo "Le geste : lire la variable sans repli. set -u est garanti par le contrat" >&2
+    echo "shell.sourcers_set_strict, donc l'absence devient un echec bruyant, pas une valeur inventee." >&2
+    return 1
+  }
+}
+
+@test "MUR 3: aucun motif de temoin n'utilise la classe qui ne veut pas dire ce qu'elle a l'air de dire" {
+  # ⚠ `[^` + `\` + `n` + `]` N'EST PAS « TOUT SAUF UN SAUT DE LIGNE ». Dans une expression entre
+  # crochets POSIX, la contre-oblique n'echappe rien : la classe dit « ni contre-oblique, ni la
+  # lettre n ». Un motif `verbe.CLASSE.*cible` cesse donc de traverser des mots aussi ordinaires que
+  # `--no-create-home`, `nologin`, `$human`, `os.path.join` ou `--owner`.
+  #
+  # ⚠ ET C'EST INVISIBLE PARCE QUE LE MUR RESTE VERT. Un motif qui ne traverse plus rien ne rougit
+  # pas : il cesse de trouver. Mesure du 2026-08-27 sur les onze occurrences du depot, cinq formes
+  # REALISTES echappaient a leur mur :
+  #     ensure_member "$human" lcars-console          (le `n` de « human »)
+  #     install -d -m 0700 --owner root "$TOKENS_DIR" (le `n` de « owner »)
+  #     FORGE_TOKEN_FILE=$(dirname …)/home/private/t  (le `n` de « dirname »)
+  #     os.chmod(os.path.join(P,"x"), 0o750)          (le `n` de « join »)
+  #     install -d --owner=root -m 0750 "$PRIVATE_DIR"
+  # Les onze sont passees en `.` — dans grep, qui travaille ligne a ligne, le point ne franchit
+  # JAMAIS un saut de ligne : la classe n'apportait rien, et elle retirait beaucoup.
+  #
+  # ⚠ ET LA MESURE ELLE-MEME A MENTI TROIS FOIS AVANT D'ETRE JUSTE. Teste en ligne de commande, le
+  # motif se comportait comme « tout sauf newline » — une couche shell convertissait la sequence
+  # avant grep. Il a fallu ecrire le test DANS UN FICHIER, comme les murs le sont, pour voir le
+  # comportement reel. Un instrument doit etre eprouve dans la forme ou il vit.
+  #
+  # LE MOTIF INTERDIT EST ASSEMBLE, PAS ECRIT. Ecrit en clair, ce mur figurerait dans son propre
+  # perimetre et s'accuserait lui-meme ; l'assembler evite de devoir s'exclure, donc ce mur se garde
+  # AUSSI lui-meme.
+  local bs; bs="$(printf '\\')"
+  local interdit="\\[\\^${bs}n\\]"
+
+  mapfile -t SUITES < <(
+    find "$REPO" "$REPO/../.claude" -type f \( -name '*.bats' -o -name '*.bash' \) \
+      -not -path '*/_build/*' -not -path '*/deps/*' 2>/dev/null | sort -u
+  )
+  [ "${#SUITES[@]}" -ge 60 ] || { echo "corpus de temoins a ${#SUITES[@]} fichiers — balayage casse" >&2; return 1; }
+
+  local f n rompu=0
+  for f in "${SUITES[@]}"; do
+    n="$(grep -cE -- "$interdit" "$f" || true)"
+    [ "$n" -eq 0 ] && continue
+    rompu=1
+    echo "MUR 3 rompu — ${f#"$REPO"/} :" >&2
+    grep -nE -- "$interdit" "$f" >&2
+  done
+  [ "$rompu" -eq 0 ] || {
+    echo "Le geste : remplacer par un point. grep travaille ligne a ligne." >&2
+    return 1
+  }
+}
