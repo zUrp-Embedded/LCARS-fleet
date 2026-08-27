@@ -63,7 +63,12 @@ prefix    /local/LCARS_v2                              0750  root:fleet         
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
 dir       /opt/lcars                                   0755  root:root           wsl+linux
-dir       /opt/lcars/admiral-skills                    0755  root:root           wsl+linux
+# ⚠ `/opt/lcars/admiral-skills` EST UN CHEMIN D'IMAGE, ET IL ETAIT DECLARE SUR LE RAIL POSTE. Seul
+# le `COPY` du Dockerfile le pose ; sur un poste, `45-sudoers-toolchain:88-90` retombe sur le
+# checkout. Mesure du 2026-08-27, install complete sur banc vierge : ZERO occurrence sous
+# `/opt/lcars/`. Une ligne `wsl+linux` pour un objet que ces deux substrats ne posent jamais est un
+# ABSENT structurel a chaque releve — le bruit qui apprend a ignorer le bruit.
+dir       /opt/lcars/admiral-skills                    0755  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
 dir       /usr/share/lcars                             0755  root:root           wsl+linux
@@ -139,15 +144,25 @@ anchor    /etc/systemd/system/lcars-landing.service    0644  root:root          
 anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           linux
 anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           linux
 anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           linux
-anchor    /etc/sudoers.d/lcars-toolchain               0440  root:root           any
+# ⚠ `/etc/sudoers.d/lcars-toolchain` N'EST PLUS DECLARE, ET C'EST DELIBERE. Le rail ne le POSE pas :
+# il le RETIRE (`45-sudoers-toolchain:152`, `rm -f`), depuis que le geste d'outillage passe par
+# `toolchain.sock`. Cette table dit ce qu'on a le DROIT DE POSER ; une absence se converge, elle ne
+# se declare pas. Le declarer faisait passer ISO 2/2 au vert sur le radical trouve du cote du `rm` —
+# un temoin qui ne distingue pas poser de retirer valide les deux. Mesure du 2026-08-27 sur banc
+# vierge : `/etc/sudoers.d/` ne contient que son README apres une install complete.
+# Le contrat d'ABSENCE est tenu par `sudoers_toolchain.bats`, et par lui seul.
 # Le depot upstream de docker, pose par 10-packages SEULEMENT quand aucun daemon ne repond. Les deux
 # fichiers sont les SEULS que ce rail ajoute au systeme de paquets de la machine, et ils sont
 # declares ici pour deux raisons : `provision uninstall` les retire avec le reste, et un operateur
 # qui se demande d'ou sort ce depot tiers trouve la reponse dans l'inventaire plutot qu'au fond d'un
 # module. (Les PAQUETS, eux, ne sont pas ici : c'est `install.journal` qui sait lesquels ce rail a
 # poses et lesquels etaient deja la — la distinction n'est connaissable qu'AVANT l'install.)
-anchor    /etc/apt/keyrings/docker.asc                 0644  root:root           linux
-anchor    /etc/apt/sources.list.d/docker.list          0644  root:root           linux
+# ⚠ LES DEUX LIGNES SONT RETIREES EN ATTENDANT LA CLASSE « POSE SOUS CONDITION ».
+# `10-packages:257` ne les pose que si `substrat == linux` ET qu'aucun daemon ne repond. Sur une
+# machine qui avait DEJA docker, elles existent et sont A L'OPERATEUR — et `uninstall_run` les
+# retirait quand meme (`rm -f`), cassant `apt update` sur un depot que LCARS n'a jamais pose.
+# Mieux vaut un objet non declare qu'un objet detruit a tort. Elles reviendront avec la classe qui
+# sait dire « retire seulement si NOUS l'avons pose », ce que le journal seul peut trancher.
 anchor    /etc/lcars/host-consent                      0644  root:root           linux
 anchor    /etc/lcars/services.env                      0640  root:fleet          linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any

@@ -801,13 +801,39 @@ prov_group_owns_preserved() {
   return 1
 }
 
+# prov_manifest_gid <groupe> -> le GID que la TABLE declare, ou vide
+#
+# ⚠ LE MANIFESTE GAGNE ICI SON PREMIER CONSOMMATEUR DE PRODUCTION, et c'est ce qui change sa nature.
+# Il n'etait lu que par `provision uninstall` — donc une declaration qu'on n'opposait a rien a
+# l'install, et qu'on n'executait qu'a la destruction. Une table qu'on APPLIQUE est une table qu'on
+# ne peut plus laisser mentir.
+prov_manifest_gid() {
+  local grp="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v g="$grp" '$1=="group" && $2==g { print $3; exit }' "$f"
+}
+
 ensure_group() {
-  local grp="$1"
+  local grp="$1" gid="${2:-}"
+  [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
   if ! getent group "$grp" >/dev/null; then
-    run_quiet groupadd "$grp" || return 1
+    # ⚠ LE GID VIENT DE LA TABLE, ET SANS LUI IL FLOTTE. Mesure du 2026-08-27 sur banc vierge :
+    # `groupadd` nu distribue 1001 et 1002 pendant que la table declare 2000 et 2001, et que le
+    # Dockerfile ecrit `groupadd -g 2000` EN LITTERAL. Le meme produit donnait donc des GID
+    # differents selon le rail, et un GID flottant est ce qui a fait naitre `lcars-authority` dans
+    # le groupe `fleet`. Un GID absent de la table reste flottant : on ne l'invente pas.
+    local -a args=()
+    [[ -n "$gid" ]] && args+=(-g "$gid")
+    run_quiet groupadd "${args[@]}" "$grp" || return 1
     getent group "$grp" >/dev/null || { p_fail "groupe $grp absent après groupadd"; return 1; }
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp"
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp${gid:+ (gid $gid, table)}"
+    return 0
   fi
+  # LE GROUPE EXISTE : on ne le DEPLACE pas — changer un GID sous des fichiers qui le portent
+  # produirait exactement les orphelins que la regle 5 vient de fermer. On le DIT.
+  local cur; cur="$(getent group "$grp" | cut -d: -f3)"
+  [[ -z "$gid" || "$cur" == "$gid" ]] \
+    || p_drift "groupe $grp : gid $cur, la table declare $gid — une machine ne se renumerote pas, elle se rebuilde"
 }
 
 # Les membres d'un groupe, secondaires ET primaires — `getent group` ne liste que les premiers, et

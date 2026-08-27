@@ -248,27 +248,40 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$(awk '$1=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -ge 3 ]
 }
 
-@test "AUCUN LECTEUR pour l'instant, et c'est l'etat attendu de la phase A" {
-  # Le manifeste se pose AVANT ses trois lecteurs (`20-groups`, `25-directories`, `uninstall`) :
-  # c'etait le trou d'ordre du corpus. Ce temoin tombera le jour ou le premier lecteur arrive — et
-  # sa chute sera le signal de le reecrire, pas un accident.
-  #
-  # ⚠ IL MESURAIT LA PROSE, ET UN COMMENTAIRE L'A FAIT TOMBER. Un module qui CITE `system.manifest`
-  # comme reference croisee — « /local/LCARS_v2 est 0750 root:fleet (system.manifest) » — ne le LIT
-  # pas : il renvoie le lecteur a la source de verite, ce qui est precisement ce qu'on veut d'un
-  # commentaire. Un temoin qui interdit de citer la source interdit de la documenter.
-  #
-  # On mesure donc le CODE. Et la negation n'est plus nue : `! grep` non terminal est exempte de
-  # `set -e`, donc inerte — la cicatrice du corpus sur ce piege est deja ecrite ailleurs.
-  local n
-  n="$(sed 's/#.*//' "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -c 'system\.manifest' || true)"
-  [ "$n" -eq 0 ] || {
-    echo "un module LIT le manifeste ($n occurrence(s) hors commentaire) — le temoin de phase A tombe, reecris-le" >&2
-    sed 's/#.*//' "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -n 'system\.manifest' >&2
-    return 1
-  }
-  # Garde d'instrument : une coupe qui ne lirait plus aucun module rendrait zero, donc vert, sur rien.
-  [ "$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | wc -l)" -gt 500 ]
+# ⚠ CE TEMOIN DISAIT « AUCUN LECTEUR », ET IL EST TOMBE — pas en rougissant, en RESTANT VERT.
+#
+# Il balayait `modules.d/*.sh`. Le premier lecteur de production est arrive dans
+# `lib/provision-lib.sh` (`prov_manifest_gid`, lu par `ensure_group`), c'est-a-dire hors de sa
+# fenetre : il a continue d'affirmer qu'il n'y en avait aucun. Un temoin qui regarde a cote reste
+# vert sur l'evenement meme qu'il attendait — troisieme fois dans ce lot.
+#
+# Ce qui est epingle maintenant est le FAIT, pas son absence : la table a un lecteur, il est nomme,
+# et il applique la colonne GID. Le jour ou `25-directories` ou le doctor la liront aussi, ce
+# temoin les accueille sans changer de forme.
+
+@test "LA TABLE A UN LECTEUR DE PRODUCTION, et il applique la colonne GID" {
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  # Le lecteur existe et il lit bien CE fichier.
+  grep -q '^prov_manifest_gid()' "$lib"
+  sed 's/#.*//' "$lib" | grep -q 'system\.manifest'
+  # Et il sert : `ensure_group` en derive le `-g`, jamais un litteral.
+  local body; body="$(sed -n '/^ensure_group()/,/^}$/p' "$lib")"
+  grep -q 'prov_manifest_gid' <<<"$body"
+  grep -q 'groupadd' <<<"$body"
+  # Garde d'instrument : une extraction cassee rendrait vide, donc verte sur rien.
+  [ "$(wc -l <<<"$body")" -gt 10 ]
+}
+
+@test "un GID absent de la table reste FLOTTANT — on ne l'invente pas" {
+  # La table dit ce qu'on a le droit de poser ; elle ne fabrique pas de numero. Un groupe qu'elle
+  # ne nomme pas doit passer par `groupadd` nu, sans `-g`.
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  eval "$(sed -n '/^prov_manifest_gid()/,/^}$/p' "$lib")"
+  PROVISION_LIB="$lib"
+  run prov_manifest_gid "groupe-que-la-table-ne-nomme-pas"
+  [ -z "$output" ]
+  run prov_manifest_gid "fleet"
+  [ "$output" = "2000" ]
 }
 
 @test "les GID declares sont FIXES, et ils sont ceux de l'image" {
