@@ -145,8 +145,10 @@ docker_endpoint || fail "$PROV_DOCKER_WHY" \
 # tant que ce fichier lisait ce qu'une porte lui posait ; il n'a plus d'objet maintenant qu'il sonde.
 DOCKER="$PROV_DOCKER_BIN"
 
+# shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
 docker_compose_cmd || fail "$PROV_COMPOSE_WHY" \
   "Sur Docker Desktop il est inclus ; sur linux : apt install docker-compose-plugin"
+# shellcheck disable=SC2206 # eclatement VOULU : « docker compose » est deux mots, jamais un chemin
 COMPOSE=($PROV_COMPOSE_CMD)
 
 [[ -f "$COMPOSE_FILE" ]] || { echo "box: compose introuvable: $COMPOSE_FILE (checkout incomplet ?)" >&2; exit 1; }

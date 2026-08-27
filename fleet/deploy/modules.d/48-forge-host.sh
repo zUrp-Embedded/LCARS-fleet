@@ -560,7 +560,6 @@ apply() {
   LCARS_DEVFORGE_ROOT_URL="$PUBLIC_URL/" \
     run_quiet d compose -f "$COMPOSE_FILE" -p "$PROV_FORGE_PROJECT" up -d \
     || { p_fail "la forge ne converge pas (compose -p $PROV_FORGE_PROJECT)"; verdict_apply; }
-  local i
   for _ in $(seq 1 60); do forge_up && break; sleep 2; done
   forge_up || { p_fail "forge montée mais muette sur $LOCAL_URL après 120 s"; verdict_apply; }
   if [[ "$was_up" -eq 1 ]]; then

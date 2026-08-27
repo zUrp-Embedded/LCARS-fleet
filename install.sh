@@ -146,7 +146,10 @@ done
 # existe aucune autre forme dans ce dépôt. Un poste sans docker installe un runtime qui ne peut pas
 # travailler. ⚖ USER : « ça, on refuse. docker-desktop c'est un clic. »
 preflight_ok=1
-say_ok()   { echo "  ${G}[ok]${N} $1"; }
+# ⚠ REND 0, COMME `p_ok` DU RAIL, ET POUR LA MEME RAISON. Sans ce `return`, son code de sortie est
+# celui d'`echo` : sur les deux sondes en `A && say_ok || say_miss`, une ecriture ratee marquerait le
+# preflight EN ECHEC sur un prerequis PRESENT. Une fonction qui rapporte ne renverse pas son rapport.
+say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
 # UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PRÉREQUIS. `10-packages` pose `docker-ce` sur le
@@ -170,7 +173,11 @@ docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette m
 echo ""
 echo "  ${W}Préflight${N}"
 for t in git curl; do
-  command -v "$t" >/dev/null 2>&1 && say_ok "$t" || say_miss "$t — apt install $t"
+  if command -v "$t" >/dev/null 2>&1; then
+    say_ok "$t"
+  else
+    say_miss "$t — apt install $t"
+  fi
 done
 # ⚠ `sudo` N'EST PAS UN PREREQUIS COMMUN, ET LE METTRE ICI REFUSAIT DES MACHINES SAINES. C'est une
 # exigence du rail POSTE, qui escalade pour provisionner. Le rail BOITE ne monte jamais en root : il
@@ -236,8 +243,12 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
 else
   # Mode standalone : le dépôt n'est pas encore là, donc la sonde partagée non plus. On se contente
   # du minimum honnête, et la vraie sonde tournera après le clone.
-  command -v docker >/dev/null 2>&1 && { DOCKER_OK=1; say_ok "docker (sonde complète après le clone)"; } \
-    || say_miss "docker — Docker Desktop côté Windows, ou un docker natif (le rail le pose sur Linux dédié)"
+  if command -v docker >/dev/null 2>&1; then
+    DOCKER_OK=1
+    say_ok "docker (sonde complète après le clone)"
+  else
+    say_miss "docker — Docker Desktop côté Windows, ou un docker natif (le rail le pose sur Linux dédié)"
+  fi
 fi
 
 if [[ "$preflight_ok" -eq 0 ]]; then

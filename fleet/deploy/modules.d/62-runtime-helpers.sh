@@ -200,7 +200,10 @@ check() {
   # C'est LA question que rien ne posait, et elle a coûté un compte utilisateur le 2026-08-21 : un
   # clone six commits en arrière a reposé l'ancienne allocation d'uid par-dessus la nouvelle, en
   # rendant vert, et le service systemd a tourné dessus jusqu'à la collision suivante.
-  local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  local src posed
+  # shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
+  src="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  posed="$(posed_rev)"
   # ⚠ « ABSENT » ÉTAIT FAUX DANS LE CAS LE PLUS FRÉQUENT, ET IL ENVOYAIT CHERCHER LE MAUVAIS OBJET.
   #
   # `posed_rev` rend « inconnue » pour DEUX états distincts : le fichier n'est pas là, ou il est là
@@ -292,7 +295,10 @@ apply() {
   # peut encore l'empêcher : trois secondes plus tard, l'ancien code est en place et le service qui
   # tourne dessus ne dira plus rien. On ne REFUSE pas — un retour en arrière délibéré est un geste
   # légitime — mais il ne peut plus être silencieux.
-  local src posed; src="${PROV_SOURCE_REV:-$(prov_source_rev)}"; posed="$(posed_rev)"
+  local src posed
+  # shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
+  src="${PROV_SOURCE_REV:-$(prov_source_rev)}"
+  posed="$(posed_rev)"
   if prov_rev_is_behind "$src" "$posed"; then
     p_warn "RETOUR EN ARRIÈRE : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ANCÊTRE — ce qui suit REMPLACE du code par du code plus ancien (convergeur d'humains compris). Si ce n'est pas voulu : git pull, puis relance"
   fi

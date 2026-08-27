@@ -208,6 +208,8 @@ unset _seat_login _seat_uid
 # La seule chose qui manquait était de le DIRE. Un opérateur qui lit « source 4c1820dd » en tête de
 # son apply sait ce qu'il pose ; sans cette ligne, il ne le sait jamais, et il n'a aucune raison
 # d'aller le chercher.
+# shellcheck disable=SC2119 # `prov_source_rev` prend un argument OPTIONNEL ; les args de fonction
+# masquent ceux du script, donc l'appel nu est sur — c'est le cas nominal, pas un oubli.
 PROV_SOURCE_REV="$(prov_source_rev)"
 export PROV_SOURCE_REV
 
@@ -439,6 +441,10 @@ uninstall_run() {
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
   local -a files=() dirs=() groups=() humans=()
+  # ⚠ `sub` EST LU ET JAMAIS UTILISE, ET CE N'EST PAS UN OUBLI DE NETTOYAGE : c'est le defaut
+  # « la colonne substrat ne filtre rien ». Un uninstall `linux` planifie aujourd'hui les objets
+  # `docker`. Le lot le CONSOMME ; faire taire le signalement effacerait le seul rappel automatique.
+  # shellcheck disable=SC2034 # defaut ouvert, pas du bruit — la colonne attend son filtre
   while read -r cls obj mode owner sub; do
     preserved "$obj" && continue
     case "$cls" in
@@ -555,6 +561,10 @@ fi
 run_module() {
   local mod="$1" eff="$2" human="${3:-${PROV_HUMAN:-}}" name
   name="$(basename "$mod" .sh)"
+  # ⚠ LE SOUS-SHELL EST LE MECANISME, PAS UN EFFET DE BORD — cf. les deux lignes au-dessus : sans lui
+  # l'`export PROV_HUMAN` survivrait au retour et le reste de la boucle jouerait sous l'humain du
+  # tour precedent. Que la modification soit « locale » est exactement ce qu'on achete.
+  # shellcheck disable=SC2030,SC2031 # portee voulue : un tour de boucle = un shell
   (
     export PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$human"
     if [[ "$(module_field "$mod" NEEDS)" != "human" || "$(id -un)" == "$human" ]]; then
@@ -648,7 +658,12 @@ done
 # démarrage de la fleet.
 if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
   _fleet_human="${PROV_FLEET_HUMAN:-}"
+  # ⚠ C'EST LA VALEUR D'ORIGINE QU'ON LIT, ET C'EST VOULU. `run_module` exporte `PROV_HUMAN` dans un
+  # SOUS-SHELL par tour de boucle ; ici, au niveau du script, elle n'a jamais bouge — comparer
+  # l'humain de fleet a l'humain COURANT n'aurait aucun sens s'il portait le dernier tour.
+  # shellcheck disable=SC2031 # portee voulue : la boucle ne teinte pas ce niveau
   [[ -n "$_fleet_human" ]] || _fleet_human="${PROV_HUMAN:-}"
+  # shellcheck disable=SC2031
   if [[ "$_fleet_human" != "${PROV_HUMAN:-}" ]] && is_fleet_human "$_fleet_human" 2>/dev/null; then
     [[ "$PORCELAIN" -eq 1 ]] || {
       echo ""

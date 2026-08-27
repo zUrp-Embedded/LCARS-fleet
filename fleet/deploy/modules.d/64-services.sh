@@ -110,6 +110,8 @@ UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 # sur ce rail**, unité ou pilote, et la correspondance est lisible par une machine.
 #
 # Format : <composant de l'entrypoint>:<unit|driven-by>:<nom>
+# shellcheck disable=SC2034 # table DERIVEE par un temoin (`process_iso.bats` la lit au sed sur la
+# source), jamais lue par ce script — comme HELPERS et UNITS.
 STARTERS=(
   "human-converger.sh:unit:lcars-converger"
   "console-landing.sh:unit:lcars-landing"
@@ -582,6 +584,9 @@ converge_humans_now() {
   # l'héritage, le `PATH` est celui que systemd donne par défaut, et le reste vient du fichier qu'on
   # vient d'écrire — la même source, dans le même ordre.
   local rc=0
+  # ⚠ quotes simples VOULUES plus bas : `$1` et `$2` sont les arguments du bash INTERNE, passes
+  # juste apres — les developper ici les remplacerait par ceux de CE script.
+  # shellcheck disable=SC2016
   run_step --ok 1 --ok 2 "convergence des humains (une passe)" -- \
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
     bash -c 'set -a; . "$1"; set +a; exec "$2" --once' _ "$SERVICES_ENV" "$conv" || rc=$?

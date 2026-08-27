@@ -344,12 +344,14 @@ check_members_visible() {
 
   # Un compte sans adhésion a un jeton et AUCUN droit d'écriture : il échoue au premier geste, et
   # tard, parce que la recette ne l'a placé dans aucune team. Le publiciser n'y ferait rien.
+  # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
   [[ -n "$absent" ]] && p_drift \
     "comptes SANS adhésion à l'org :$(printf ' %s' $absent) — jeton valide, zéro droit d'écriture. La recette ne les place dans aucune team (vérifier les listes writers/judges/externals)"
 
   if [[ -z "$hidden" ]]; then
     p_ok "adhésions org visibles (comptes machine)"
   else
+    # shellcheck disable=SC2086 # meme liste, meme rendu
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « fleet/deploy/box forge-apply » (il les publicise juste après la structure)"
   fi
 

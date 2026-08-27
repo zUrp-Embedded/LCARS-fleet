@@ -107,6 +107,8 @@ usable() {
   # lancer de fleet, et le git de l'humain qui les utilise ensuite les refuserait (proprietaire
   # different). Les vrais humains passent par `human-converger.sh`, qui calcule sa liste de modules
   # depuis ce meme en-tete `# NEEDS: human` : ce module les atteint sans etre nomme nulle part.
+  # shellcheck disable=SC2119 # argument OPTIONNEL : sans lui la fonction sonde l'uid COURANT,
+  # ce qui est exactement la question posee ici.
   if ! is_fleet_human; then
     p_ok "$PROV_HUMAN n'est pas un humain de fleet (compte systeme ou sysadmin) — les projets sont converges par les humains, pas par ce cycle"
     return 1

@@ -225,6 +225,8 @@ apply() {
       # n'est pas vitale. Mais elle ne dispense pas de la GARDE : `prov_refuse_symlink_path` refuse
       # un lien dans le chemin AVANT qu'un `install -d` en root le suive. `ensure_dir` ne convient
       # pas ici : il `p_fail`-e, donc il ferait compter un echec la ou on en tolere un.
+      # shellcheck disable=SC2015 # `install -d` PEUT echouer, et le `|| true` est justement le
+      # contrat : ce pas est tolere. Un if/then/else le ferait tuer le module sous `set -e`.
       prov_refuse_symlink_path "$LCARS_STORE_ROOT/state" \
         && install -d -m 2775 "$LCARS_STORE_ROOT/state" 2>/dev/null || true
       # Redirection, JAMAIS un pipe vers write_atomic : ses compteurs de verdict vivraient dans le
