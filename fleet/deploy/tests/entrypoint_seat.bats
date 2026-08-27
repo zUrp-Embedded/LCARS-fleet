@@ -121,7 +121,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # Le home du siege vit dans le volume SOUS SON NOM. Re-deriver au boot suivant laisserait un home
   # orphelin et un compte qui ne le retrouve pas.
   printf '1\t1000\tancien\n' > "$MAP"
-  seat_sh 'resolve_admiral; prov_seat_record neuf; echo "SIEGE=$LCARS_ADMIRAL"'
+  seat_sh 'resolve_admiral; prov_seat_record neuf 1000; echo "SIEGE=$LCARS_ADMIRAL"'
   [ "$status" -eq 0 ]
   run cat "$MAP"
   [ "$output" = "$(printf '1\t1000\tancien')" ]

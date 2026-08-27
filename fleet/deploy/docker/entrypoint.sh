@@ -275,7 +275,9 @@ resolve_admiral() {
   esac
 
   LCARS_ADMIRAL="$PROV_SEAT_LOGIN"
-  prov_seat_record "$LCARS_ADMIRAL" "${LCARS_UID:-1000}" \
+  # `LCARS_UID` est pose sans condition en tete de ce fichier : le re-defauter ici en ferait une
+  # seconde verite, et c'est celle qu'on ne relit pas qui finit par mentir.
+  prov_seat_record "$LCARS_ADMIRAL" "$LCARS_UID" \
     || say "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
   return 0
 }

@@ -845,9 +845,9 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
     export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
     export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
     export PROV_FORGE_URL=""
-    PROV_FORGE_ADMIN=loperateur
+    PROV_FORGE_ADMIN="$(id -un)"
     seat_binding_report apply
-    [ "$(awk -F"\t" "\$1 == 1 { print \$3 }" "$PROV_UID_MAP_FILE")" = loperateur ]
+    [ "$(awk -F"\t" "\$1 == 1 { print \$3 }" "$PROV_UID_MAP_FILE")" = "$(id -un)" ]
     seat_binding_report check
   '
   [ "$status" -eq 0 ]
@@ -859,7 +859,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
     export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
     export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
     export PROV_FORGE_URL=""
-    PROV_FORGE_ADMIN=loperateur
+    PROV_FORGE_ADMIN="$(id -un)"
     seat_binding_report check
     [ ! -e "$PROV_UID_MAP_FILE" ]
   '
@@ -873,12 +873,12 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   head_sh '
     export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
     printf "1\t1000\tzoe\n" > "$PROV_UID_MAP_FILE"
-    PROV_FORGE_ADMIN=loperateur
+    PROV_FORGE_ADMIN="$(id -un)"
     seat_binding_report apply
     [ "$(awk -F"\t" "\$1 == 1 { print \$3 }" "$PROV_UID_MAP_FILE")" = zoe ]
   '
   [ "$status" -eq 0 ]
   [[ "$output" == *"deux acteurs pour un rôle"* ]]
-  [[ "$output" == *"loperateur"* ]]
+  [[ "$output" == *"$(id -un)"* ]]
   [[ "$output" == *"zoe"* ]]
 }

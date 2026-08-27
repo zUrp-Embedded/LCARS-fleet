@@ -502,11 +502,17 @@ seat_binding_report() { # seat_binding_report <check|apply>
       ;;
   esac
 
+  # ⚠ L'UID SE LIT, IL NE SE SUPPOSE PAS — la regle est celle du convergeur, qui enregistre APRES le
+  # `useradd` : « on note l'uid QUE LE SYSTEME A DONNE, pas celui qu'on esperait ». Aucun repli ici :
+  # sur ce rail `PROV_FORGE_ADMIN` vaut `PROV_HUMAN`, donc le candidat n'est jamais vide, donc les
+  # trois verdicts atteignables portent un login qui A un compte unix — ou n'enregistrent rien
+  # (`diverge`). Un `|| 1000` n'aurait servi aucun etat reel, et aurait ecrit l'uid de quelqu'un
+  # d'autre dans la table que le convergeur relit.
   if [[ -n "$(prov_seat_from_map)" ]]; then
     p_ok "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
   elif [[ "$mode" != "apply" ]]; then
     p_drift "siège : « $PROV_SEAT_LOGIN » connu ($PROV_SEAT_SOURCE) mais NON enregistré — l'apply pose la ligne"
-  elif prov_seat_record "$PROV_SEAT_LOGIN" "$(id -u "$PROV_SEAT_LOGIN" 2>/dev/null || echo 1000)"; then
+  elif prov_seat_record "$PROV_SEAT_LOGIN" "$(id -u "$PROV_SEAT_LOGIN")"; then
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
   else

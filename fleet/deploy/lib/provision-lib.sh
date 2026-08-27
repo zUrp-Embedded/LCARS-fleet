@@ -1290,11 +1290,14 @@ prov_seat_from_map() { # le login du siege enregistre, ou vide
 # ⚠ ECRIT UNE FOIS, JAMAIS RE-ECRIT. Le home du siege vit sous son nom ; changer ce nom plus tard
 # laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere resolution fait foi —
 # c'est elle qui correspond a ce qui est sur le disque.
-prov_seat_record() { # prov_seat_record <login> [uid]
-  [[ -n "${1:-}" ]] || return 0
+# Les deux arguments sont REQUIS et sans defaut : l'uid est celui que le systeme a donne, jamais un
+# nombre qu'on espere, et les deux appelants le tiennent deja. Un `:-1000` ici aurait ete la
+# troisieme copie du meme defaut sur une valeur qui ne peut pas etre vide.
+prov_seat_record() { # prov_seat_record <login> <uid>
+  local login="${1:?prov_seat_record: login requis}" uid="${2:?prov_seat_record: uid requis}"
   [[ -n "$(prov_seat_from_map)" ]] && return 0
   mkdir -p "$(dirname "$PROV_UID_MAP_FILE")" 2>/dev/null || true
-  printf '1\t%s\t%s\n' "${2:-${LCARS_UID:-1000}}" "$1" >> "$PROV_UID_MAP_FILE" 2>/dev/null || return 1
+  printf '1\t%s\t%s\n' "$uid" "$login" >> "$PROV_UID_MAP_FILE" 2>/dev/null || return 1
   chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
 }
 
