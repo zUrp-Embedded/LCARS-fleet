@@ -296,18 +296,14 @@ secret_writers() {
   absent '(getent group|LCARS_CONSOLE_GROUP|FLEET_MEMBERS|/etc/group)' "$hum"
 }
 
-@test "MUR 6 bis: l'exclusion du siege est une condition ECRITE, keyee sur l'UID" {
-  # La contrepartie du mur 6. Sans elle, retirer le filtre de groupe ouvrirait une console worker au
-  # siege — un shell sudo-capable derriere la porte WEB de la boite, l'exact inverse de ce que les
-  # pods confinent. Et keyee sur l'UID, pas sur un login : `00` §5, le login du siege est variable.
+@test "MUR 6 bis: l'eligibilite d'une console ne lit ni groupe ni siege — trois faits locaux" {
+  # La contrepartie du mur 6. Ce qui decide est sur la ligne de `passwd` : uid dans la plage, home,
+  # shell. Aucun groupe (une projection que le convergeur reecrit), aucun uid de siege (le siege a
+  # une console comme tout humain ; ce qui lui reste ferme est la fleet, et GUARD B la tient).
   local hum="$REPO/services/console-humans.sh"
-  # Le siege se LIT (fichier `root:root`, puis la variable que le provisionnement exporte), il ne se
-  # devine pas : un `:-1000` ferait entrer le siege dans la liste des humains des qu'il est ailleurs.
-  sed 's/#.*//' "$hum" | grep -qE 'SYSADMIN_UID=.*SEAT_UID_FILE|SEAT_UID_FILE=.*seat\.uid'
-  absent 'LCARS_SYSADMIN_UID:-1000' "$hum"
-  sed 's/#.*//' "$hum" | grep -qE '\$uid.*==.*\$SYSADMIN_UID'
-  # Et JAMAIS sur un nom : un login code en dur serait une seconde verite sur la reservation.
-  absent '(==|=~).*"admiral"' "$hum"
+  absent 'LCARS_SYSADMIN_UID|SEAT_UID_FILE' "$hum"
+  sed 's/#.*//' "$hum" | grep -qE 'uid.*-lt.*UID_MIN'
+  sed 's/#.*//' "$hum" | grep -qE '\-d "\$home"'
 }
 
 # ─── MUR 7 — LE JETON MASTER NE SE GARDE PAS, ET C'EST CE QUI TIENT UN ARBITRAGE ────────────────

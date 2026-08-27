@@ -1532,7 +1532,11 @@ class Deck(BaseHTTPRequestHandler):
                 ), "text/html; charset=utf-8")
             return
 
-        if not any(h["human"] == sess["login"] for h in people):
+        # `and not admin` : meme terme qu'a la porte d'entree. Un site-admin peut n'avoir aucun
+        # compte local — GUARD A ne converge jamais le siege — et son absence de `people` est alors
+        # un etat normal, pas un enrollment en retard. Les deux pages ci-dessous accusent le
+        # convergeur : elles ne sont justes que pour qui l'attend vraiment.
+        if not any(h["human"] == sess["login"] for h in people) and not sess.get("admin"):
             refused = refusal_for(sess["login"])
             if refused is not None:
                 if path == "/api/state":
