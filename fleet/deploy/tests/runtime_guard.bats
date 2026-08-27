@@ -21,25 +21,23 @@ setup() {
   FLEET_DIR="$BATS_TEST_DIRNAME/../.."
   command -v mix >/dev/null 2>&1 || skip "mix absent de ce poste"
   # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CES TEMOINS MESURERAIENT LA MACHINE.
-  # Depuis le 2026-08-27, GUARD B lit `/etc/lcars/seat.uid` et ce FICHIER GAGNE sur la variable :
-  # c'est ce qui empeche le garde de lever sa propre garde. Sur une machine provisionnee, le vrai
-  # fichier ecraserait donc le decor de chaque test ci-dessous — verts ici, rouges sur un poste
-  # installe, meme arbre. On pointe la couture sur un chemin qui n'existe pas : la variable
-  # redevient le levier, et c'est le contrat documente du repli.
+  # GUARD B lit `/etc/lcars/seat.uid` et n'a AUCUN repli : le fichier est la seule source. Chaque
+  # temoin pose donc le sien, et la couture le deplace hors du poste — sans elle, le vrai fichier
+  # d'une machine provisionnee ecraserait le decor de tous les tests ci-dessous.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
 }
 
 @test "R-no-root: l'uid du SIEGE est refuse au boot, avec la phrase GUARD B" {
-  run env LCARS_SYSADMIN_UID="$(id -u)" \
-    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -ne 0 ]]
   [[ "$output" == *"SYSADMIN seat"* ]]
   [[ "$output" == *"GUARD B"* ]]
 }
 
 @test "R-no-root: un uid worker passe (la garde vise le siege, pas les humains de fleet)" {
-  run env LCARS_SYSADMIN_UID="99999" \
-    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  echo "99999" > "$LCARS_SEAT_UID_FILE"
+  run bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -eq 0 ]]
 }
 
@@ -48,21 +46,23 @@ setup() {
   # qu'une et demie (audit). `id` est double en tete de PATH : la config lit uid=999.
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
-  run env PATH="$BIN:$PATH" LCARS_SYSADMIN_UID="1000" \
+  echo "1000" > "$LCARS_SEAT_UID_FILE"
+  run env PATH="$BIN:$PATH" \
     bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -ne 0 ]]
   [[ "$output" == *"SYSTEM account"* ]]
 }
 
-@test "R-no-root: LCARS_SYSADMIN_UID posee VIDE ne desarme PAS la garde du siege" {
-  run env LCARS_SYSADMIN_UID="" \
-    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1" 
-  # Notre uid n'est pas 1000 ici ? Si l'uid des tests EST 1000, la garde tire (refus attendu) ;
-  # sinon elle passe. Les deux etats sont legitimes — ce qu'on epingle : "" == defaut 1000, donc
-  # le MEME comportement qu'avec la variable absente.
-  run2=$status
-  run bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
-  [[ "$run2" -eq "$status" ]]
+@test "aucun fichier de siege : la garde REFUSE au lieu de deviner, et la variable ne la sauve pas" {
+  # Le siege est l'uid de qui a installe LCARS : sur une machine provisionnee il ne peut pas etre
+  # vide. Son absence n'est donc pas « siege inconnu » mais « machine non provisionnee » — un etat
+  # qu'on nomme. Un defaut y repondrait par un nombre, et `1000` accuserait le lecteur le plus
+  # probable : le premier uid humain de toute distro.
+  [[ ! -e "$LCARS_SEAT_UID_FILE" ]]
+  run env LCARS_SYSADMIN_UID="99999" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"R-no-seat"* ]]
 }
 
 # ─── LA CLEF DE LA GARDE N'EST PLUS DANS L'ENVIRONNEMENT DU GARDE ──────────────────────────────
@@ -89,11 +89,14 @@ setup() {
   [[ "$status" -eq 0 ]]
 }
 
-@test "GUARD B miroir: un fichier ILLISIBLE n'arme rien de faux — on retombe sur la variable" {
+@test "GUARD B miroir: un fichier ILLISIBLE se REFUSE, il ne se remplace pas" {
+  # Un contenu non numerique est la meme chose qu'une absence : la garde n'a pas etabli le siege.
+  # Retomber sur la variable rendrait au garde la clef qu'on vient de lui retirer, et le ferait
+  # garder un uid que rien ne designe.
   printf 'pasunuid\n' > "$LCARS_SEAT_UID_FILE"
-  run env LCARS_SEAT_UID_FILE="$LCARS_SEAT_UID_FILE" LCARS_SYSADMIN_UID="$(id -u)" \
+  run env LCARS_SEAT_UID_FILE="$LCARS_SEAT_UID_FILE" LCARS_SYSADMIN_UID="99999" \
     bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -ne 0 ]]
-  [[ "$output" == *"SYSADMIN seat"* ]]
+  [[ "$output" == *"R-no-seat"* ]]
 }
 

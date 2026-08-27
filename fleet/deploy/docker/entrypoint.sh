@@ -219,7 +219,7 @@ if mkdir -p "$(dirname "$SEAT_UID_FILE")" 2>/dev/null \
 else
   # Non fatal, et NOMME : la boite doit rester joignable pour etre reparee — meme regle que la
   # convergence et la console. Ce qui se degrade est la garde, et le message le dit.
-  echo "[lcars-entrypoint] $SEAT_UID_FILE NON pose — GUARD B retombera sur son litteral 1000 au lieu de l'uid $LCARS_UID du siege" >&2
+  echo "[lcars-entrypoint] $SEAT_UID_FILE NON pose — GUARD B refusera tout « fleet_v2 start » : sans ce fichier il ne peut pas etablir le siege (uid $LCARS_UID)" >&2
 fi
 PROVISION=/opt/lcars/fleet/deploy/provision
 HOST_KEYS_DIR=/home/.lcars-container/ssh

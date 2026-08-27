@@ -328,21 +328,21 @@ apply_start_flags() {
 # `LCARS_SEAT_UID_FILE` deplace le CHEMIN (couture de temoin), jamais la valeur : elle ne rend pas
 # au garde le pouvoir qu'on vient de lui retirer.
 #
-# Sans fichier — poste non provisionne, arbre de dev — on retombe sur la variable puis sur `1000`.
-# Refuser tout demarrage la ou LCARS n'a jamais tourne echangerait une garde contre une porte
-# fermee, et `config/runtime.exs` (le miroir) applique la MEME precedence, mot pour mot.
+# AUCUN REPLI : le siege est l'uid de qui a installe LCARS, et cette valeur ne peut pas etre vide sur
+# une machine provisionnee. Un defaut y repondrait par un nombre a la place d'un fait — et `1000`,
+# premier uid humain de toute distro, est le pire des nombres : il accuse le lecteur le plus probable.
+# Fichier absent ou illisible = machine NON PROVISIONNEE. C'est un etat, pas une valeur : on le
+# nomme et on refuse, comme `config/runtime.exs` (le miroir) refuse deja un boot qu'il ne peut pas
+# verifier. `LCARS_SEAT_UID_FILE` deplace le CHEMIN (couture de temoin), jamais la valeur.
 seat_uid() {
   local f v
   f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-  if [[ -r "$f" ]]; then
-    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
-    if [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; return 0; fi
-  fi
-  # ⚠ `:-` NE PROTEGE QUE DU VIDE, PAS DU NON-NUMERIQUE — et `(( x == abc ))` lit `abc` comme un NOM
-  # de variable en contexte arithmetique, donc `unbound variable` sous `set -u` : la garde MEURT au
-  # lieu de refuser. Meme cicatrice que `uid_floor` dans le convergeur.
-  v="${LCARS_SYSADMIN_UID:-1000}"
-  [[ "$v" =~ ^[0-9]+$ ]] || v=1000
+  [[ -r "$f" ]] || die "siege non declare ($f absent ou illisible) — cette machine n'est pas provisionnee, et GUARD B refuse un lancement qu'il ne peut pas verifier. « sudo fleet/deploy/provision apply » le pose."
+  v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+  # ⚠ LE NON-NUMERIQUE SE REFUSE, IL NE SE REMPLACE PAS : `(( x == abc ))` lit `abc` comme un NOM de
+  # variable en contexte arithmetique, donc `unbound variable` sous `set -u` — la garde MEURT au lieu
+  # de refuser. Meme cicatrice que `uid_floor` dans le convergeur.
+  [[ "$v" =~ ^[0-9]+$ ]] || die "siege illisible ($f ne porte pas un uid : « $v ») — GUARD B refuse un lancement qu'il ne peut pas verifier."
   echo "$v"
 }
 

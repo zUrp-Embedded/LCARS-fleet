@@ -227,25 +227,24 @@ if config_env() != :test and not tool_mode? do
   # `LCARS_SEAT_UID_FILE` est une couture de TEMOIN — elle deplace le CHEMIN, jamais la valeur, donc
   # elle ne rend pas au garde le pouvoir qu'on vient de lui retirer.
   #
-  # Sans fichier (poste non provisionne, arbre de dev), on retombe sur la variable puis sur `1000` :
-  # refuser tout demarrage la ou LCARS n'a jamais tourne echangerait une garde contre une porte
-  # fermee. `""` (variable posee VIDE) retomberait sur… rien : une garde desarmee en silence (audit).
-  seat_uid_from_file =
-    with path <- System.get_env("LCARS_SEAT_UID_FILE", "/etc/lcars/seat.uid"),
-         {:ok, body} <- File.read(path),
+  # AUCUN REPLI, et c'est le meme refus que `bin/fleet_v2`. Le siege est l'uid de qui a installe
+  # LCARS : sur une machine provisionnee cette valeur ne peut pas etre vide, donc un defaut y
+  # repondrait par un nombre a la place d'un fait. Fichier absent ou illisible = machine NON
+  # PROVISIONNEE — un etat qu'on nomme, pas une valeur qu'on invente. `LCARS_SYSADMIN_UID` a quitte
+  # ce chemin : l'environnement appartient au processus garde, donc il ne decide plus de sa borne.
+  seat_uid_path = System.get_env("LCARS_SEAT_UID_FILE", "/etc/lcars/seat.uid")
+
+  sysadmin_uid =
+    with {:ok, body} <- File.read(seat_uid_path),
          trimmed <- String.trim(body),
          {n, ""} when n >= 0 <- Integer.parse(trimmed) do
       Integer.to_string(n)
     else
-      _ -> nil
+      _ ->
+        raise "R-no-seat: the seat UID could not be established (#{seat_uid_path} missing or not " <>
+                "an integer) — GUARD B refuses a boot it cannot verify. This machine is not " <>
+                "provisioned: run `sudo fleet/deploy/provision apply`."
     end
-
-  sysadmin_uid =
-    seat_uid_from_file ||
-      case System.get_env("LCARS_SYSADMIN_UID", "1000") do
-        "" -> "1000"
-        v -> v
-      end
 
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
   # ET la frontiere systeme/humain (`uid >= UID_MIN`). Un compte SYSTEME (uid < 1000) lancant la
