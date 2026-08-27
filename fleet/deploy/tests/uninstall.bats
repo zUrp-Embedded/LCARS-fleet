@@ -18,6 +18,10 @@
 # `BATS_TEST_TMPDIR`, et les chemins qu'ils declarent y vivent aussi. Un temoin de desinstalleur qui
 # lirait le vrai manifeste retirerait le vrai systeme.
 
+# ⚠ SC2016 AU NIVEAU DU FICHIER : ce temoin LIT DU CODE. Ses motifs `grep`/`sed` portent des
+# `$o`, `$CMD`, `$EUID` qui doivent atteindre l'outil TELS QUELS — les developper ici chercherait
+# la valeur de CE shell au lieu du texte du script audite. Les quotes simples sont l'instrument.
+# shellcheck disable=SC2016
 load refute
 
 setup() {
@@ -136,13 +140,53 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ "$n_dirs" -lt "$n_groups" ]
 }
 
-@test "un groupe encore porte par un objet PRESERVE se garde, et ce n'est pas une erreur" {
-  # ⚠ REGLE APPRISE A LA MAIN. Les trois faces sont en `2775 root:fleet` : retirer `fleet` les
-  # laisserait avec un GID orphelin. `groupdel fleet` a echoue au nettoyage de .63, et c'etait la
-  # BONNE reponse. Le verbe doit le DIRE au lieu de le compter comme un ratage.
+# ⚠ CE TEMOIN CONSACRAIT LE DEFAUT QU'IL GARDAIT, ET IL A FALLU UNE MACHINE POUR LE VOIR.
+#
+# Il greppait le TEXTE de `uninstall_run` pour une phrase et un compteur — donc il etait vert quoi
+# que fasse `groupdel`. Sa prose citait une mesure a l'appui : « `groupdel fleet` a echoue au
+# nettoyage de .63, et c'etait la BONNE reponse ». MESURE SUR BANC VIERGE le 2026-08-27, install
+# complete puis `uninstall --yes` : `groupdel fleet` REUSSIT, et `/home/projects`,
+# `/home/projects.ops`, `/home/projects.workshop` restent en `root:1001` — un GID orphelin que le
+# prochain `groupadd` reattribuera. Le mode d'echec que la regle pretendait prevenir S'EST PRODUIT.
+#
+# `groupdel` ne refuse qu'un groupe PRIMAIRE d'un compte existant. Il ne regarde jamais qui possede
+# des fichiers. La regle etait juste ; c'est son execution qui etait deleguee au mauvais outil.
+#
+# Le remplacant EXERCE la propriete au lieu de la citer : un repertoire preserve porte un groupe
+# reel (celui du testeur, seul groupe qu'un test non privilegie puisse poser), et la primitive doit
+# le trouver. Le controle de structure ne verifie plus une PHRASE mais un ORDRE : la consultation
+# passe avant `groupdel`.
+
+@test "REGLE 5 : la primitive TROUVE le porteur preserve — mesure, pas citation" {
+  # shellcheck source=../lib/provision-lib.sh
+  PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  # `provision-lib` exige d'etre lue par un module ; on ne veut que la primitive.
+  eval "$(sed -n '/^prov_group_owns_preserved()/,/^}$/p' "$PROVISION_LIB")"
+
+  local g; g="$(id -gn)"
+  run prov_group_owns_preserved "$g" "$FAKE/work"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$FAKE/work"* ]]
+}
+
+@test "REGLE 5 : un groupe que RIEN de preserve ne porte n'est pas retenu" {
+  PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  eval "$(sed -n '/^prov_group_owns_preserved()/,/^}$/p' "$PROVISION_LIB")"
+
+  run prov_group_owns_preserved "decor-groupe-absent" "$FAKE/work"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "REGLE 5 : la consultation passe AVANT groupdel, jamais apres" {
+  # L'ordre EST la propriete : consulter apres avoir retire ne repare rien.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
-  grep -q 'gardé — encore porté par un objet préservé' <<<"$body"
-  grep -q 'kept=\$((kept + 1))' <<<"$body"
+  local n_check n_del
+  n_check="$(grep -n 'prov_group_owns_preserved' <<<"$body" | head -1 | cut -d: -f1)"
+  n_del="$(grep -n 'groupdel "\$o"' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_check" ]
+  [ -n "$n_del" ]
+  [ "$n_check" -lt "$n_del" ]
 }
 
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {

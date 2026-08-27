@@ -779,6 +779,28 @@ ensure_dir() {
 }
 
 # ─── ensure_group / ensure_member — création idempotente (le pattern propre de provision-groups v1) ─
+# prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
+#
+# ⚠ CE CONTROLE NE PEUT PAS ETRE DELEGUE A `groupdel`, ET C'EST LA CICATRICE DE CE FICHIER.
+# `provision` s'appuyait dessus : « un groupe encore porte par un objet preserve n'est pas
+# retirable ». MESURE SUR BANC VIERGE le 2026-08-27 : `groupdel fleet` REUSSIT, et les trois faces
+# `/home/projects*` restent en `root:1001` — un GID orphelin, que le prochain `groupadd` de la
+# machine reattribuera. `groupdel` refuse un groupe PRIMAIRE d'un compte existant ; il ne regarde
+# jamais qui possede des fichiers. La regle etait juste, son execution ne l'etait pas.
+#
+# `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le
+# balayage s'arrete — une face de travail peut porter des dizaines de milliers de fichiers.
+prov_group_owns_preserved() {
+  local grp="$1"; shift
+  local root hit
+  for root in "$@"; do
+    [[ -e "$root" ]] || continue
+    hit="$(find "$root" -xdev -group "$grp" -print -quit 2>/dev/null || true)"
+    [[ -n "$hit" ]] && { printf '%s\n' "$hit"; return 0; }
+  done
+  return 1
+}
+
 ensure_group() {
   local grp="$1"
   if ! getent group "$grp" >/dev/null; then

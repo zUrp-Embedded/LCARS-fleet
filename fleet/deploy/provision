@@ -502,12 +502,19 @@ uninstall_run() {
   done
   for o in "${groups[@]}"; do
     getent group "$o" >/dev/null 2>&1 || continue
-    if groupdel "$o" >/dev/null 2>&1; then
+    # RÈGLE 5 — ET ELLE SE VÉRIFIE ICI, PAS DANS `groupdel`. Mesuré sur banc vierge le 2026-08-27 :
+    # `groupdel fleet` RÉUSSIT alors que les trois faces sont en `root:fleet`, et elles restent avec
+    # un GID orphelin que le prochain `groupadd` réattribuera. `groupdel` ne refuse qu'un groupe
+    # PRIMAIRE d'un compte ; il ne regarde pas qui possède des fichiers.
+    local porteur
+    if porteur="$(prov_group_owns_preserved "$o" "${preserve_roots[@]}")"; then
+      kept=$((kept + 1))
+      echo "  ${_PA}groupe $o gardé — encore porté par du travail préservé ($porteur)${_PN}"
+    elif groupdel "$o" >/dev/null 2>&1; then
       removed=$((removed + 1))
     else
-      # RÈGLE 5 : un groupe encore porté par un objet préservé n'est pas retirable, et c'est JUSTE.
       kept=$((kept + 1))
-      echo "  ${_PA}groupe $o gardé — encore porté par un objet préservé (les faces sont en root:$o)${_PN}"
+      echo "  ${_PA}groupe $o non retiré — « groupdel $o » refuse (groupe primaire d'un compte ?)${_PN}"
     fi
   done
   for o in "${journal_pkgs[@]}"; do
