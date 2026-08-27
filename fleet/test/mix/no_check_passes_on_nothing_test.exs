@@ -37,9 +37,15 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   #
   # `toolchain.branch_single_source` joined on 2026-08-19 and its exemption was weighed here, as
   # this comment asks. Its authority — the frozen literal in `Fleet.Toolchain.branch/0` — DOES ship
-  # in the artifact, and the check fails loudly when that literal becomes unreadable. What it cannot
-  # see in a runtime-only artifact is the three shell copies, and a wall about copies that are not
-  # there has nothing to judge. Same shape, same cause, same answer.
+  # in the artifact, and the check fails loudly when that literal becomes unreadable. A copy that is
+  # not in the tree has nothing to judge. Same shape, same cause, same answer.
+  #
+  # ⚠ ITS EXEMPTION IS NARROWER SINCE 2026-08-27, AND THIS COMMENT IS WHAT WAS WRONG. It read "what
+  # it cannot see is the THREE SHELL COPIES" — the check held four copies then, two of which
+  # (`services/`, `bin/`) the image's build stage DOES carry, since it excludes only `deploy`,
+  # `git-hooks` and `system-prompt`. The check now scopes PER MIRROR, so this entry earns the
+  # exemption only on a root with no mirror tree at all — an empty one, which is exactly what this
+  # test builds. A count written in prose is a claim, and this one had drifted by one and by kind.
   @declares_it_did_not_measure [
     "shell.sourcers_set_strict",
     "layout.face_roots_provisioned",

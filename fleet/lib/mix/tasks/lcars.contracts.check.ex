@@ -3509,16 +3509,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   The tool-request branch is named in ONE place and copied everywhere else, and the copies are
   checked here.
 
-  Four components must agree on that name: the provisioning module that creates the branch, the
-  gesture that protects it, the admiral skill that reads the letterbox, and `Fleet.Toolchain` that
-  polls its head. Three are shell, one is the BEAM — they cannot share a literal, so `Toolchain`
-  DECLARES it and the others copy. A copy nobody verifies is not a single source of truth; this
-  check is what makes the claim true.
+  Six components must agree on that name: the provisioning module that creates the branch, the
+  gesture that protects it, the admiral skill that reads the letterbox, the converger that refuses
+  any other head, the root executor that asks the forge for that head, and `Fleet.Toolchain` that
+  declares it. Four are shell, one is python, one is the BEAM — they cannot share a literal, so
+  `Toolchain` DECLARES it and the others copy. A copy nobody verifies is not a single source of
+  truth; this check is what makes the claim true.
 
   It also refuses `LCARS_SYSADMIN_BRANCH` anywhere under `deploy/`. That variable made the name
   HALF tunable: turning it moved the shell side while the BEAM kept its own default, so the branch
   was created and protected under one name while the reconciler polled another — manifests landing
   where nobody looks, no message, a rail that looks calm.
+
+  ⚠ A PARTIAL LOCK IS THE DANGEROUS SHAPE, AND THIS ONE WAS PARTIAL FOR EIGHT DAYS. It held four
+  of five copies and its own note said "no tunable left". A lock that covers a fraction of its
+  fact is green while the rest drifts, and it reads like a guarantee — strictly worse than no lock
+  at all, which at least prompts someone to look. When a reader of this fact is added, it is added
+  to `mirrors` in the same gesture, or this doc is a lie again.
   """
   @spec check_toolchain_branch_single_source(String.t()) :: result()
   def check_toolchain_branch_single_source(root) do
@@ -3529,13 +3536,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
       # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
       # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
-      "bin/lcars-toolchain-converge"
+      "bin/lcars-toolchain-converge",
+      # FIFTH MIRROR, and it is the OTHER half of that security bound. The converger refuses any
+      # SHA that is not the head of the branch IT names; the root executor ASKS the forge for the
+      # head of the branch IT names. The bound only holds while both names agree — and until
+      # 2026-08-27 this wall watched the second and not the first. Measured: renaming the literal
+      # here alone left the check green, with the only root process on this machine converging on
+      # a branch nobody else writes to.
+      "services/privileged-executor.py"
     ]
+
+    # ⚠ SCOPE IS DECIDED PER MIRROR, AND IT USED TO BE DECIDED BY ONE TREE FOR ALL FIVE. The guard
+    # asked `is deploy/ here?` and, on a miss, declared the whole check "NOT CHECKED" — including
+    # `services/` and `bin/`, which the image's build stage DOES carry (it excludes only `deploy`,
+    # `git-hooks`, `system-prompt`). So in the artifact where this gate runs most often, three
+    # readable mirrors went unread and the check reported a clean skip. A blanket scope is a
+    # coverage hole that answers "not my business" on files it is holding.
+    {checked, skipped} =
+      Enum.split_with(mirrors, fn rel ->
+        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+      end)
 
     id = "toolchain.branch_single_source"
 
     remediation =
-      "copy the literal from `Fleet.Toolchain.branch/0` into the shell file, and never reintroduce " <>
+      "copy the literal from `Fleet.Toolchain.branch/0` into the copy, and never reintroduce " <>
         "`LCARS_SYSADMIN_BRANCH` — a name half of the rail can retune is a rail that splits in " <>
         "silence"
 
@@ -3551,17 +3576,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           nil
       end
 
-    case tree_scope(Path.expand("deploy", root)) do
-      :out_of_scope ->
+    case checked do
+      [] ->
         %{
           id: id,
           remediation: "—",
           status: :pass,
           evidence: [],
-          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+          note:
+            "NOT CHECKED here — no mirror tree present in this artifact (runtime-only context): " <>
+              Enum.join(skipped, ", ")
         }
 
-      :required ->
+      _ ->
         if is_nil(expected) do
           %{
             id: id,
@@ -3576,7 +3603,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           }
         else
           bad =
-            Enum.flat_map(mirrors, fn rel ->
+            Enum.flat_map(checked, fn rel ->
               case File.read(Path.expand(rel, root)) do
                 {:ok, body} ->
                   cond do
@@ -3589,6 +3616,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                       [
                         {rel,
                          "derives the branch from an expansion — the name is frozen, not tunable"}
+                      ]
+
+                    # THE SAME REFUSAL, WRITTEN IN THE OTHER LANGUAGE THIS LIST NOW HOLDS. The
+                    # clause above refuses a shell expansion; a python mirror cannot produce one,
+                    # so on its own it would have watched a file against a shape that file can
+                    # never take. The tunable gesture in python is a read from the environment —
+                    # and in `privileged-executor.py` the line above the branch is exactly that
+                    # (`os.environ.get("LCARS_OPS_REPO", …)`), so the half-tunable this wall
+                    # exists to refuse is one copy-paste away.
+                    Regex.match?(
+                      ~r/os\.(?:environ\.get|getenv)\(\s*["'][^"']*BRANCH|os\.environ\[\s*["'][^"']*BRANCH/,
+                      body
+                    ) ->
+                      [
+                        {rel,
+                         "reads the branch from the environment — the name is frozen, not tunable"}
                       ]
 
                     String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
@@ -3611,10 +3654,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               id: id,
               remediation: "—",
               status: :pass,
-              evidence: mirrors,
+              evidence: checked,
               note:
                 "#{inspect(expected)} declared by Fleet.Toolchain.branch/0 and copied by the " <>
-                  "#{length(mirrors)} shell readers; no tunable left"
+                  "#{length(checked)} readers that carry it; no tunable left" <>
+                  skipped_note(skipped)
             }
           else
             %{
@@ -3624,7 +3668,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               evidence: Enum.map(bad, &elem(&1, 0)),
               note:
                 "authority says #{inspect(expected)} — " <>
-                  Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end)
+                  Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+                  skipped_note(skipped)
             }
           end
         end
