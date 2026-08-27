@@ -780,12 +780,13 @@ apply() {
     # il tombe, sur une machine, sans laisser de ligne.
     local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20 || true)"
     [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
-    # `0600 root:root`, comme le jeton master quelques lignes plus haut : les DEUX secrets d'autorité
+    # `0600`, au détenteur des secrets, comme le jeton master quelques lignes plus haut : les DEUX
     # se ferment ensemble, ou l'install casse entre les deux. Seul `catalogue-executor.py` les ouvre,
-    # et il tourne en root.
+    # et il tourne sous ce compte (`64-services`, `User=$AUTHORITY_USER`) — root n'en est que le
+    # dernier recours, celui qui lit un `0600` d'autrui.
     write_atomic "$SEED_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$seed" \
       || { p_fail "seed non posé ($SEED_FILE)"; verdict_apply; }
-    p_chg "seed des comptes posé ($SEED_FILE, root seul)"
+    p_chg "seed des comptes posé ($SEED_FILE, $PROV_AUTHORITY_USER seul)"
   else
     p_ok "seed des comptes déjà posé ($SEED_FILE)"
   fi
