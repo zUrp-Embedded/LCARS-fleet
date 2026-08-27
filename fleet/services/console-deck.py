@@ -1532,13 +1532,10 @@ class Deck(BaseHTTPRequestHandler):
                 ), "text/html; charset=utf-8")
             return
 
-        # ⚠ ET L'ADMIN N'EST PAS DANS CETTE LISTE, PAR CONCEPTION. `console-humans.sh` ecarte le
-        # siege de la population — uid dans la plage, home, shell, ET pas le siege. Un admin absent
-        # de `people` est donc l'etat NORMAL, pas un enrollment en retard : sans ce `not admin`, les
-        # deux pages ci-dessous accusent le convergeur d'un tort qui n'est pas le sien, aupres de
-        # quelqu'un qui n'a rien a corriger — et le convergeur ne posera JAMAIS ce compte (GUARD A
-        # ne converge jamais le siege). C'est le meme `and not admin` que la porte d'entree, qui
-        # laisse deja entrer un site-admin hors de `fleet:humans`.
+        # `and not admin` : meme terme qu'a la porte d'entree. Un site-admin peut n'avoir aucun
+        # compte local — GUARD A ne converge jamais le siege — et son absence de `people` est alors
+        # un etat normal, pas un enrollment en retard. Les deux pages ci-dessous accusent le
+        # convergeur : elles ne sont justes que pour qui l'attend vraiment.
         if not any(h["human"] == sess["login"] for h in people) and not sess.get("admin"):
             refused = refusal_for(sess["login"])
             if refused is not None:

@@ -384,47 +384,37 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
 #
 # Le groupe n'ouvre plus rien depuis ce chantier. Ce qui reste a garder est la seule exclusion qui
 # ait jamais eu une raison — et elle etait un EFFET DE BORD, jamais une regle : le siege.
-@test "le SIEGE n'a pas de console worker — condition ECRITE, plus un effet de bord du groupe" {
+@test "le SIEGE a une console, comme tout humain de la machine" {
+  # Le siege tient la machine : il a un uid dans la plage, un home et un shell, donc une console.
+  # Elle tourne sous SON uid — sudo-capable, comme son terminal ssh — derriere une porte qui exige
+  # une session de la forge. Ce qui lui reste ferme est la FLEET, et c'est GUARD B qui le tient.
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/zoe" "$home/admiral"
-  # Le siege est eligible sur TOUS les autres criteres : uid dans la plage, home, /bin/bash. Seule
-  # sa qualite de siege le sort — lui ouvrir une console worker mettrait un shell sudo-capable
-  # derriere la porte WEB de la boite, l'exact inverse de ce que les pods confinent.
   printf 'admiral:x:1000:1000::%s/admiral:/bin/bash\n' "$home" > "$pw"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
 
   humans_sh "$pw" ""
   [ "$status" -eq 0 ]
   [[ "$output" == *"zoe"* ]]
-  [[ "$output" != *"admiral"* ]]
-}
-
-@test "le siege se reconnait a son UID, jamais a son login — le login est VARIABLE" {
-  # `00` §5 : `admiral` sur banc, le login que l'installeur a cree en prod. La cle est l'uid, la
-  # meme que GUARD A/B et que le miroir BEAM de `runtime.exs`. Ici le siege s'appelle `patron` et il
-  # est exclu quand meme ; un compte NOMME `admiral` a un uid ordinaire ne l'est PAS.
-  local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
-  mkdir -p "$home/patron" "$home/admiral"
-  printf 'patron:x:1000:1000::%s/patron:/bin/bash\n' "$home" > "$pw"
-  printf 'admiral:x:1042:1042::%s/admiral:/bin/bash\n' "$home" >> "$pw"
-
-  humans_sh "$pw" ""
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"patron"* ]]
   [[ "$output" == *"admiral"* ]]
 }
 
-@test "l'uid du siege est un REGLAGE, pas le chiffre 1000 code en dur" {
+@test "l'eligibilite ne lit NI le siege NI un groupe — trois faits locaux, et c'est tout" {
+  # Un uid de siege pose ne change rien a la liste : la regle ne le consulte plus. Ce qui sort un
+  # compte, c'est son uid hors plage, son home absent ou son shell.
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
-  mkdir -p "$home/zoe" "$home/chef"
-  printf 'chef:x:1077:1077::%s/chef:/bin/bash\n' "$home" > "$pw"
+  mkdir -p "$home/patron" "$home/zoe"
+  printf 'patron:x:1000:1000::%s/patron:/bin/bash\n' "$home" > "$pw"
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" >> "$pw"
+  printf 'nobody:x:65534:65534::/nonexistent:/usr/sbin/nologin\n' >> "$pw"
 
-  LCARS_SYSADMIN_UID=1077 humans_sh "$pw" ""
+  LCARS_SYSADMIN_UID=1000 humans_sh "$pw" ""
   [ "$status" -eq 0 ]
+  [[ "$output" == *"patron"* ]]
   [[ "$output" == *"zoe"* ]]
-  [[ "$output" != *"chef"* ]]
+  [[ "$output" != *"nobody"* ]]
 }
+
 
 # ─── LE MEMBRE QUE `/etc/group` NE NOMMAIT PAS — LA CICATRICE, ET POURQUOI ELLE RESTE ───────────
 #
