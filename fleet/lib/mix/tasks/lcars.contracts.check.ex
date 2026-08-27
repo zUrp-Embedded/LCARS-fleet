@@ -116,6 +116,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_toolchain_branch_single_source(root),
         check_catalogue_roots_single_source(root),
         check_private_dir_single_source(root),
+        check_system_account_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -3620,7 +3621,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     expected =
       case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
         {:ok, src} ->
-          case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"/, src) do
+          # ⚠ ANCRE EN FIN DE LIGNE, ET SANS CA LE FAIL-CLOSED ETAIT UN FAUX. Sans `\s*$`, la regex
+          # accepte un PREFIXE : `do: "tool_" <> "request"` se lit `"tool_"`, et le check compare
+          # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
+          # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
+          # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure du
+          # 2026-08-27, sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
+          case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
             [_, name] -> name
             _ -> nil
           end
@@ -3770,7 +3777,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     attr = fn name ->
       with true <- is_binary(src),
-           [_, v] <- Regex.run(~r/@#{name}\s+"([^"]+)"/, src) do
+           # Ancre de fin de ligne : une valeur composee (`"/opt/" <> "lcars"`) doit rendre
+           # l'autorite ILLISIBLE, pas un prefixe silencieusement tronque.
+           [_, v] <- Regex.run(~r/@#{name}\s+"([^"]+)"\s*$/m, src) do
         v
       else
         _ -> nil
@@ -3903,7 +3912,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # Chaque porteur : {fichier, regex de capture, ce qu'il est}. Le PERIMETRE se dit par fichier —
     # `lib/` part avec l'image, `deploy/` non.
     holders = [
-      {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"/,
+      # Ancre de fin de ligne, meme raison que les trois voisins : une valeur composee doit rendre
+      # la declaration ILLISIBLE, jamais un prefixe.
+      {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
       {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
        "the provisioning default"},
@@ -4020,6 +4031,155 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                   skipped_note(skipped)
             }
         end
+    end
+  end
+
+  @doc """
+  The SYSTEM forge account is named ONCE, in `Fleet.Credentials.ForgeIdentity`, and copied ten
+  times. This is what makes the ten agree.
+
+  ## Why this account, and why an authority had to be designated
+
+  `system_starfleet` is not a service among others. It is in the `Owners` team of the `fleet` org
+  (it owns every project repo), its email is in `allowed_emails/2` of the commit-identity gate (a
+  commit it signs passes the door), it is the default `forge_push_account`, and it sits in the
+  `push_whitelist_usernames` of protected branches. It is also the writing hand of the `starfleet`
+  role, which carries `forge_identity: false` in the canon precisely because every write of its own
+  goes through this account.
+
+  THREE INDEPENDENT DECLARATIONS EXISTED and none was designated: `@system_name` here,
+  `PROV_SYSTEM_ACCOUNT` in `provision-lib.sh`, and — the sharpest — `variable "system_account"` in
+  `forge.tf`, whose default is what actually CREATES the account and which nothing derives and
+  nothing compared. `roles.provisioning_locked` holds `roles`/`system_roles`/`writers`/`judges`/
+  `externals`; this name is in none of those lists, so the account that owns the org was created
+  from a literal outside every lock.
+
+  ⚖ user, 2026-08-27: the BEAM declaration prevails. The reason is structural, not a preference —
+  the account's IDENTITY derives from this literal (`@system_email`, `allowed_emails/2`,
+  `system_identity/0`) and cannot be moved without moving what the fleet signs as.
+
+  ## Why the value is not plumbed through to tofu
+
+  The obvious follow-up — emit `system_account` in `CatalogueRoles.tfvars/1` so tofu consumes it
+  instead of holding a literal — would make `Fleet.Application` reference `Fleet.Credentials`,
+  which is NOT in the root boundary's deps. That is an API change of a domain, a decision to be
+  argued on its own, not a side effect of writing a wall. So this check does what
+  `toolchain.branch_single_source` does for the branch name: one side DECLARES, the others copy,
+  and the copies are verified. Fewer copies would be better; copies nobody compares are the defect.
+  """
+  @spec check_system_account_single_source(String.t()) :: result()
+  def check_system_account_single_source(root) do
+    id = "forge.system_account_single_source"
+
+    remediation =
+      "copy the literal from `Fleet.Credentials.ForgeIdentity` `@system_name` — it is the " <>
+        "designated authority (user, 2026-08-27): the account's email, its signature and the " <>
+        "commit-identity gate all derive from it"
+
+    expected =
+      case File.read(Path.expand("lib/fleet/credentials/forge_identity.ex", root)) do
+        {:ok, src} ->
+          # Ancre de fin de ligne : voir la cicatrice du jumeau `toolchain.branch_single_source`.
+          case Regex.run(~r/@system_name\s+"([^"]+)"\s*$/m, src) do
+            [_, name] -> name
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_nil(expected) do
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/credentials/forge_identity.ex"],
+        note:
+          "`@system_name` no longer reads as a frozen literal — the authority is unreadable, so " <>
+            "nothing was compared"
+      }
+    else
+      e = Regex.escape(expected)
+
+      # Chaque miroir est ancre sur SON GESTE, pas sur la simple presence du nom : un commentaire,
+      # une phrase de doc ou un nom de fichier voisin ne doivent pas pouvoir satisfaire ce mur.
+      # `MUR 4 bis` d'`adminite_walls` a coute exactement cette lecon le meme jour — il etait
+      # satisfait par `lcars-authority-ask`, puis par un commentaire.
+      mirrors = [
+        # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
+        # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
+        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"[^}]*default\s*=\s*"#{e}"/s,
+         "the tofu default that CREATES the account"},
+        {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
+         "the provisioning default (its token file derives from it)"},
+        {"deploy/deps/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
+         "the avatar map key"},
+        {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
+         "the human converger's fallback"},
+        {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+         "the forge gesture's fallback"},
+        {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
+         "the token minter's fallback"},
+        {"deploy/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+         "the admiral skill's fallback"},
+        {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
+        {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,
+         "the publish rewrite's system email"},
+        {"config/runtime.exs", ~r/FORGE_BOT_LOGIN"\)\s*\|\|\s*"#{e}"/,
+         "the runtime's push-account fallback"}
+      ]
+
+      {checked, skipped} =
+        Enum.split_with(mirrors, fn {rel, _rx, _what} ->
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        end)
+
+      bad =
+        Enum.flat_map(checked, fn {rel, rx, what} ->
+          case File.read(Path.expand(rel, root)) do
+            {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
+            _ -> [{rel, "unreadable"}]
+          end
+        end)
+
+      skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      cond do
+        checked == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: [],
+            note:
+              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
+                Enum.join(skipped_labels, ", ")
+          }
+
+        bad == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
+            note:
+              "#{inspect(expected)} declared by ForgeIdentity @system_name and copied by the " <>
+                "#{length(checked)} checked sites" <> skipped_note(skipped_labels)
+          }
+
+        true ->
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: Enum.map(bad, &elem(&1, 0)),
+            note:
+              "authority says #{inspect(expected)} — " <>
+                Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+                skipped_note(skipped_labels)
+          }
+      end
     end
   end
 
