@@ -88,14 +88,28 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ -d "$FAKE/opt/lcars" ]
 }
 
-@test "SANS JOURNAL : aucun paquet, et la raison est DITE" {
-  # Le journal est la seule chose qui distingue ce que LCARS a installe de ce que l'operateur avait
-  # deja. Sans lui, retirer serait un pari sur le bien d'autrui.
+# ⚠ TROIS ETATS DU JOURNAL, ET UN SEUL MESSAGE LES DISAIT. Le code testait la longueur du tableau
+# de paquets puis concluait sur le FICHIER. MESURE DU 2026-08-26 : un journal present, lisible,
+# seize lignes, disant « ce rail n'a pose aucun paquet » etait annonce « absent ou vide ».
+# L'operateur cherche un fichier manquant, le trouve, et reste bloque.
+# Le troisieme etat est le SEUL ou l'uninstall a le droit d'etre serein : il SAIT qu'il n'y a rien
+# a retirer. Le dire comme une ignorance transforme une certitude en alarme.
+
+@test "JOURNAL ABSENT : aucun paquet, et l'IGNORANCE est dite" {
   rm -f "$LCARS_JOURNAL_FILE"
   plan
   [[ "$output" == *"AUCUN"* ]]
-  [[ "$output" == *"journal absent"* ]]
+  [[ "$output" == *"illisible ou absent"* ]]
   [[ "$output" == *"impossible de distinguer"* ]]
+}
+
+@test "JOURNAL PRESENT SANS apt_installed : la CERTITUDE est dite, pas l'ignorance" {
+  # Le rail a tourne et n'a pose aucun paquet — tout etait deja la. C'est un FAIT, pas un trou.
+  printf 'apt_already tmux git\n' > "$LCARS_JOURNAL_FILE"
+  plan
+  [[ "$output" == *"le journal est là"* ]]
+  [[ "$output" == *"Rien à retirer"* ]]
+  refute_out 'impossible de distinguer' <<<"$output"
 }
 
 @test "AVEC journal : seuls les paquets QUE LCARS A POSES sont nommes" {
@@ -187,6 +201,83 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ -n "$n_check" ]
   [ -n "$n_del" ]
   [ "$n_check" -lt "$n_del" ]
+}
+
+# ─── LES QUATRE DEFAUTS MESURES SUR BANC VIERGE LE 2026-08-27 ───────────────────────────────────
+# `uninstall --yes` sur une install complete a laisse 30 450 objets sur 35 136. Ces temoins
+# epinglent les quatre causes que le plan pouvait deja montrer sans root.
+
+@test "JOKER <version> : le plan nomme le chemin REEL, jamais le motif" {
+  # MESURE : `/opt/elixir-1.18.4` et `/opt/node-20.20.2` survivent a `uninstall --yes` — 6 148
+  # fichiers. `provision` ne substituait que `<human>` ; `dir /opt/…-<version>` arrivait LITTERAL,
+  # `[[ -d ]]` rendait faux, et l'arbre restait pendant que ses symlinks partaient.
+  mkdir -p "$FAKE/opt/truc-9.9.9"
+  printf 'dir       %s/opt/truc-<version>  0755 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+  plan
+  [[ "$output" == *"truc-9.9.9"* ]] || {
+    echo "le plan ne nomme pas le chemin resolu :" >&2; echo "$output" >&2; return 1
+  }
+  refute_out '<version>' <<<"$output"
+}
+
+@test "JOKER <version> : un motif que RIEN ne porte n'entre pas au plan" {
+  # Resoudre ne doit pas INVENTER : sans arbre sur le disque, il n'y a rien a retirer.
+  # ⚠ ON COMPTE, on ne cherche pas un nom : le plan n'imprime que des compteurs, et un `refute_out`
+  # sur un nom absent est vert a vide. Meme piege que le temoin du substrat, deux tests plus bas.
+  ndir() { sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output"; }
+  local avant apres
+  plan; avant="$(ndir)"
+  printf 'dir       %s/opt/absent-<version>  0755 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+  plan; apres="$(ndir)"
+  [ "$apres" -eq "$avant" ]
+  refute_out 'résolus' <<<"$output"
+}
+
+@test "SUBSTRAT : un objet declare pour un AUTRE substrat n'entre pas au plan" {
+  # La colonne etait lue et jamais consultee. Sans effet tant que tout finissait en `rm -f` sur un
+  # chemin absent — mais les classes a venir AGISSENT, et agir sur le mauvais substrat detruit sur
+  # la mauvaise machine.
+  # ⚠ ET CE TEMOIN COMPTE, IL NE CHERCHE PAS UN NOM. Premiere version : `refute_out` sur le nom de
+  # l'objet — vert a vide, parce que le plan n'imprime que des COMPTEURS. Mutation jouee : neutraliser
+  # le filtre ne le faisait pas rougir. Ce qui discrimine est le nombre.
+  # ⚠ ET LE SUBSTRAT SE FORCE PAR `--substrate`, PAS PAR L'ENVIRONNEMENT. `PROV_SUBSTRATE` est
+  # EXPORTE par le runner (`:163`), il n'est jamais LU : le poser n'a aucun effet. Premiere version
+  # de ce temoin faite comme ca — elle mesurait le substrat detecte de la machine qui joue la suite.
+  nfic() { sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output"; }
+  local n_avant n_wsl n_docker
+  run bash "$RUNNER" uninstall --substrate wsl; n_avant="$(nfic)"
+
+  : > "$FAKE/etc/lcars/objet-docker-seulement"
+  printf 'anchor    %s/etc/lcars/objet-docker-seulement  0644 root:root docker\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+
+  run bash "$RUNNER" uninstall --substrate wsl;    n_wsl="$(nfic)"
+  run bash "$RUNNER" uninstall --substrate docker; n_docker="$(nfic)"
+
+  [ "$n_wsl" -eq "$n_avant" ]                # `docker` ne concerne pas un poste wsl
+  [ "$n_docker" -eq "$((n_avant + 1))" ]     # et il le concerne sur le substrat qui le declare
+}
+
+@test "ORDRE : les paquets partent AVANT les repertoires — le journal vit dans l'un d'eux" {
+  # LA PROPRIETE EST L'ORDRE. `/etc/lcars` porte le journal et part au `rm -rf` des `dirs`.
+  # Interrompu entre les deux, la regle 3 (« sans journal, aucun paquet ») gele les paquets POUR
+  # TOUJOURS : le fichier qui disait lesquels retirer n'existe plus.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local n_apt n_dirs
+  n_apt="$(grep -n 'apt-get remove' <<<"$body" | head -1 | cut -d: -f1)"
+  n_dirs="$(grep -n 'for o in "\${dirs\[@\]}"' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_apt" ]
+  [ -n "$n_dirs" ]
+  [ "$n_apt" -lt "$n_dirs" ]
+}
+
+@test "HUMAINS : la garde preserve s'evalue sur le chemin RESOLU, pas sur le motif" {
+  # `preserved()` etait teste sur `/home/<human>/.lcars` — un motif qui ne ressemble a aucune racine
+  # preservee. La boucle, elle, itere `/home/*` : donc `/home/projects`, `/home/private`. Un
+  # `--humans` sur une machine qui porte les faces planifiait dedans.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for h in \/home\/\*/,/done/p' <<<"$body")"
+  [ -n "$bloc" ]
+  grep -q 'preserved "$real"' <<<"$bloc"
 }
 
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {

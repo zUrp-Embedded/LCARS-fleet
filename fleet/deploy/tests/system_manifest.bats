@@ -277,6 +277,9 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # ne nomme pas doit passer par `groupadd` nu, sans `-g`.
   local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   eval "$(sed -n '/^prov_manifest_gid()/,/^}$/p' "$lib")"
+  # ⚠ PORTANT, malgre le signalement : la fonction eval-uee lit `$PROVISION_LIB` pour retrouver la
+  # table. Verifie par mutation — un chemin bidon fait rougir ce temoin.
+  # shellcheck disable=SC2034 # lu a l'interieur de l'`eval`, invisible a l'analyse statique
   PROVISION_LIB="$lib"
   run prov_manifest_gid "groupe-que-la-table-ne-nomme-pas"
   [ -z "$output" ]

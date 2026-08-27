@@ -441,18 +441,46 @@ uninstall_run() {
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
   local -a files=() dirs=() groups=() humans=()
-  # ⚠ `sub` EST LU ET JAMAIS UTILISE, ET CE N'EST PAS UN OUBLI DE NETTOYAGE : c'est le defaut
-  # « la colonne substrat ne filtre rien ». Un uninstall `linux` planifie aujourd'hui les objets
-  # `docker`. Le lot le CONSOMME ; faire taire le signalement effacerait le seul rappel automatique.
-  # shellcheck disable=SC2034 # defaut ouvert, pas du bruit — la colonne attend son filtre
+  # ⚠ LA COLONNE SUBSTRAT FILTRE, ET ELLE ETAIT LUE POUR RIEN. `sub` etait extrait puis jamais
+  # consulte : un uninstall sur un poste `wsl` planifiait les objets declares `docker` seuls, et
+  # inversement. Sans effet tant que tout finissait en `rm -f` sur un chemin absent — mais les
+  # classes a venir (comptes, objets docker) rendent ce filtre indispensable, et une classe qui
+  # AGIT sur le mauvais substrat detruit sur la mauvaise machine.
+  applies_here() { # applies_here <colonne substrat> -> 0 si cet objet concerne CE substrat
+    local col="$1"
+    [[ "$col" == "any" ]] && return 0
+    [[ ",${col//+/,}," == *",$SUBSTRATE,"* ]]
+  }
+
+  # ⚠ LE JOKER `<version>` N'ETAIT JAMAIS RESOLU. `provision:447` ne substituait que `<human>`, donc
+  # `dir /opt/elixir-<version>` arrivait LITTERAL dans la boucle, `[[ -d … ]]` rendait faux, et les
+  # deux toolchains restaient. MESURE DU 2026-08-27, banc vierge apres `uninstall --yes` :
+  # `/opt/elixir-1.18.4` et `/opt/node-20.20.2` survivent — 6 148 fichiers que plus rien ne nomme.
+  # Le joker se resout sur le DISQUE : c'est la seule source qui sache quelle version est posee.
+  expand_version() { # expand_version <chemin pouvant porter <version>> -> 0..n chemins reels
+    local pat="$1"
+    [[ "$pat" == *"<version>"* ]] || { printf '%s\n' "$pat"; return 0; }
+    local g; for g in ${pat//<version>/*}; do [[ -e "$g" ]] && printf '%s\n' "$g"; done
+  }
+
+  local resolved
+  local -a jokers=()
   while read -r cls obj mode owner sub; do
+    applies_here "$sub" || continue
     preserved "$obj" && continue
-    case "$cls" in
-      anchor|link|runtime) files+=("$obj") ;;
-      dir|prefix)          dirs+=("$obj") ;;
-      group)               groups+=("$obj") ;;
-      human)               humans+=("$obj") ;;
-    esac
+    while read -r resolved; do
+      [[ -n "$resolved" ]] || continue
+      # ⚠ CE QUI VIENT D'UN JOKER SE NOMME DANS LE PLAN. La regle 4 exige qu'on puisse RELIRE le
+      # plan avant de l'executer ; « 4 repertoire(s) » ne se relit pas. Un chemin resolu depuis un
+      # motif est precisement celui que l'operateur n'a pas ecrit et ne peut pas deviner.
+      [[ "$obj" == "$resolved" ]] || jokers+=("$resolved")
+      case "$cls" in
+        anchor|link|runtime) files+=("$resolved") ;;
+        dir|prefix)          dirs+=("$resolved") ;;
+        group)               groups+=("$resolved") ;;
+        human)               humans+=("$resolved") ;;
+      esac
+    done < <(expand_version "$obj")
   done <<<"$rows"
 
   # Du plus profond au moins profond : `/opt/lcars/tofu/providers` avant `/opt/lcars`.
@@ -462,16 +490,25 @@ uninstall_run() {
   printf '  %-10s %d objet(s)\n' "fichiers" "${#files[@]}"
   printf '  %-10s %d répertoire(s)\n' "dirs" "${#dirs[@]}"
   printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
+  # ⚠ TROIS ETATS DISTINCTS, ET UN SEUL MESSAGE LES DISAIT — celui du mauvais. Le test ne regardait
+  # que la longueur du tableau et concluait sur le FICHIER. Mesure du 2026-08-26 : un journal
+  # present, lisible, seize lignes, disant « le rail n'a pose aucun paquet » etait annonce
+  # « absent ou vide ». Le troisieme etat est le seul ou l'uninstall a le droit d'etre serein : il
+  # SAIT qu'il n'y a rien a retirer. Le dire comme une ignorance transforme une certitude en alarme.
   if [[ "${#journal_pkgs[@]}" -gt 0 ]]; then
     printf '  %-10s %d paquet(s) : %s\n' "apt" "${#journal_pkgs[@]}" "${journal_pkgs[*]}"
+  elif [[ ! -r "$JOURNAL_FILE" ]]; then
+    printf '  %-10s %s\n' "apt" "${_PA}AUCUN — journal illisible ou absent ($JOURNAL_FILE) : impossible de distinguer ce que LCARS a posé de ce qui était déjà là${_PN}"
   else
-    printf '  %-10s %s\n' "apt" "${_PA}AUCUN — journal absent ou vide ($JOURNAL_FILE) : impossible de distinguer ce que LCARS a posé de ce qui était déjà là${_PN}"
+    printf '  %-10s %s\n' "apt" "AUCUN — le journal est là et dit que ce rail n'a posé aucun paquet ($JOURNAL_FILE). Rien à retirer."
   fi
   if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
     printf '  %-10s %d objet(s) dans les homes (--humans)\n' "humains" "${#humans[@]}"
   else
     printf '  %-10s %s\n' "humains" "${#humans[@]} objet(s) LAISSÉS — « --humans » pour les retirer aussi"
   fi
+  [[ "${#jokers[@]}" -eq 0 ]] \
+    || printf '  %-10s %s\n' "résolus" "${jokers[*]}"
   printf '  %-10s %s\n' "préservé" "${preserve_roots[*]}"
 
   if [[ "$UNINSTALL_YES" -ne 1 ]]; then
@@ -482,16 +519,41 @@ uninstall_run() {
 
   # ─── L'EXÉCUTION ──────────────────────────────────────────────────────────────────────────────
   local o removed=0 kept=0
-  for o in "${files[@]}"; do
-    [[ -e "$o" || -L "$o" ]] || continue
-    rm -f "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+
+  # ⚠ LES PAQUETS D'ABORD, ET C'EST UNE PROPRIETE D'ORDRE. Le journal vit dans `/etc/lcars`, que la
+  # boucle `dirs` emporte au `rm -rf`. Dans un run complet c'etait sans effet — il est charge en
+  # memoire bien avant. INTERROMPU entre les deux, la regle 3 (« sans journal, aucun paquet ») gele
+  # les paquets DEFINITIVEMENT : le fichier qui disait lesquels retirer n'existe plus. On retire
+  # donc ce que le journal a nomme AVANT de detruire le journal.
+  for o in "${journal_pkgs[@]}"; do
+    run_quiet env DEBIAN_FRONTEND=noninteractive apt-get remove -y "$o" \
+      && removed=$((removed + 1)) || echo "  ${_PA}paquet non retiré : $o${_PN}"
   done
+
+  # ⚠ `runtime` PORTE DES REPERTOIRES, ET ILS PARTAIENT AU `rm -f`. `/run/lcars`, `…/console`,
+  # `…/authority`, `…/privileged`, `…/toolchain` sont des dossiers : l'uninstall imprimait
+  # « non retiré » a chaque passage. MESURE DU 2026-08-27 : les sept survivent, plus deux sockets de
+  # console. Un fichier se retire par `rm -f`, un repertoire par `rm -rf` — c'est la NATURE de
+  # l'objet sur le disque qui decide, pas sa classe dans la table.
+  for o in "${files[@]}"; do
+    if [[ -d "$o" && ! -L "$o" ]]; then
+      rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+    elif [[ -e "$o" || -L "$o" ]]; then
+      rm -f "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+    fi
+  done
+
   if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
     for o in "${humans[@]}"; do
       # Le joker `<human>` se resout sur les homes reels — le manifeste ne peut pas les nommer.
-      local h
+      local h real
       for h in /home/*; do
-        local real="${o//<human>/$(basename "$h")}"
+        real="${o//<human>/$(basename "$h")}"
+        # ⚠ ET LA GARDE `preserve` NE COUVRAIT PAS CETTE BOUCLE. `preserved()` etait evalue sur le
+        # MOTIF de la table (`/home/<human>/.lcars`), jamais sur le chemin RESOLU. La boucle itere
+        # `/home/*` — donc `/home/projects`, `/home/projects.ops`, `/home/private`. Un `--humans`
+        # sur une machine qui porte les faces planifiait dedans.
+        preserved "$real" && continue
         [[ -e "$real" ]] && { rm -rf "$real" && removed=$((removed + 1)); }
       done
     done
@@ -516,10 +578,6 @@ uninstall_run() {
       kept=$((kept + 1))
       echo "  ${_PA}groupe $o non retiré — « groupdel $o » refuse (groupe primaire d'un compte ?)${_PN}"
     fi
-  done
-  for o in "${journal_pkgs[@]}"; do
-    run_quiet env DEBIAN_FRONTEND=noninteractive apt-get remove -y "$o" \
-      && removed=$((removed + 1)) || echo "  ${_PA}paquet non retiré : $o${_PN}"
   done
 
   echo ""
