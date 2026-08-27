@@ -249,10 +249,40 @@ if config_env() != :test and not tool_mode? do
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
   # ET la frontiere systeme/humain (`uid >= UID_MIN`). Un compte SYSTEME (uid < 1000) lancant la
   # release directement passait le BEAM et n'etait refuse que par le launcher.
+  #
+  # ⚠ ET LA SECONDE REGLE LISAIT SA BORNE DANS L'ENVIRONNEMENT DU PROCESSUS QU'ELLE GARDE. Elle
+  # faisait `System.get_env("LCARS_UID_MIN", "1000")`, et le SEUL site de cette variable dans tout
+  # le depot etait sa propre lecture : personne ne la posait. Une molette qui n'existait que pour
+  # etre tournee contre la garde. Mesure du 2026-08-27 : `LCARS_UID_MIN=0` laissait booter un uid
+  # 999 ; `LCARS_UID_MIN=2000` faisait refuser un uid 1000. La frontiere obeissait a qui la
+  # franchit.
+  #
+  # C'est le meme trou que celui ferme quinze lignes plus haut sur l'autre moitie de GUARD B
+  # (`LCARS_SYSADMIN_UID=99999 fleet_v2 start`), et la reponse est la meme : LA BORNE EST UN FAIT DE
+  # MACHINE. `/etc/login.defs` la DECLARE, `useradd` la lit pour creer les comptes, et QUATRE autres
+  # lecteurs de ce depot la lisent la (`bin/fleet_v2`, `services/console-humans.sh`,
+  # `services/human-converger.sh`, `deploy/lib/provision-lib.sh`). Le BEAM etait le cinquieme, et le
+  # seul a ne pas la lire — donc le seul dont la frontiere pouvait etre autre chose que celle du
+  # systeme qu'il garde.
+  #
+  # `PASSWD_DEFS` est la couture des quatre autres, reprise telle quelle : elle deplace le CHEMIN,
+  # jamais la valeur. Un jeu de noms, un fait.
+  #
+  # AUCUN REPLI SUR 1000, et c'est delibere. Un `login.defs` illisible n'est pas « la frontiere est a
+  # 1000 », c'est « la frontiere n'est pas etablie » — et une garde qui ne peut pas mesurer ne doit
+  # pas laisser passer le boot. Meme phrase que le fichier de siege, deux clauses plus haut.
+  uid_min_path = System.get_env("PASSWD_DEFS", "/etc/login.defs")
+
   uid_min =
-    case System.get_env("LCARS_UID_MIN", "1000") do
-      "" -> 1000
-      v -> String.to_integer(v)
+    with {:ok, body} <- File.read(uid_min_path),
+         [_, raw] <- Regex.run(~r/^UID_MIN\s+(\d+)/m, body),
+         {n, ""} <- Integer.parse(raw) do
+      n
+    else
+      _ ->
+        raise "R-no-uid-min: the system/human boundary could not be established (UID_MIN " <>
+                "unreadable in #{uid_min_path}) — GUARD B refuses a boot it cannot verify. The " <>
+                "bound is declared by the system, not by this process: fix #{uid_min_path}."
     end
 
   case uid_reading do

@@ -100,3 +100,55 @@ setup() {
   [[ "$output" == *"R-no-seat"* ]]
 }
 
+
+# ─── LA BORNE SYSTEME/HUMAIN — MEME REGLE QUE LE SIEGE, ET ELLE N'Y ETAIT PAS ────────────────────
+#
+# ⚠ GUARD B PORTE DEUX REGLES, ET LA SECONDE LISAIT SA BORNE DANS L'ENVIRONNEMENT DU PROCESSUS
+# QU'ELLE GARDE. `config/runtime.exs` faisait `System.get_env("LCARS_UID_MIN", "1000")` : le seul
+# site de cette variable dans tout le depot etait sa PROPRE LECTURE — personne ne la posait. Une
+# molette qui n'existe que pour etre tournee contre la garde.
+#
+# C'est exactement le trou ferme le matin meme sur l'autre moitie (`LCARS_SYSADMIN_UID=99999
+# fleet_v2 start` desarmait la reservation du siege), et la reponse est la meme : la borne est un
+# FAIT DE MACHINE — `/etc/login.defs` la DECLARE, `useradd` la lit, et quatre autres lecteurs de ce
+# depot la lisent la. Le BEAM etait le cinquieme, et le seul a ne pas la lire.
+#
+# `PASSWD_DEFS` est la couture des quatre autres : elle deplace le CHEMIN, jamais la valeur.
+
+@test "GUARD B borne: la molette d'environnement ne desarme PLUS la frontiere systeme/humain" {
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
+  echo "1000" > "$LCARS_SEAT_UID_FILE"
+  printf 'UID_MIN\t1000\n' > "$BATS_TEST_TMPDIR/login.defs"
+  # uid 999 = compte SYSTEME. `LCARS_UID_MIN=0` etait la dispense : elle ne doit plus rien pouvoir.
+  run env PATH="$BIN:$PATH" LCARS_UID_MIN=0 PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"SYSTEM account"* ]]
+}
+
+@test "GUARD B borne: elle se LIT dans login.defs — un plancher deplace deplace la frontiere" {
+  BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
+  printf '#!/usr/bin/env bash\necho 1500\n' > "$BIN/id"; chmod +x "$BIN/id"
+  echo "1000" > "$LCARS_SEAT_UID_FILE"
+  # Un administrateur qui pose la frontiere a 2000 fait de l'uid 1500 un compte SYSTEME. La garde
+  # doit suivre le systeme, pas une convention gravee.
+  printf 'UID_MIN\t2000\n' > "$BATS_TEST_TMPDIR/login.defs"
+  run env PATH="$BIN:$PATH" PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"SYSTEM account"* ]]
+  [[ "$output" == *"2000"* ]]
+}
+
+@test "GUARD B borne: login.defs ILLISIBLE se REFUSE, il ne se remplace pas par 1000" {
+  echo "99999" > "$LCARS_SEAT_UID_FILE"
+  # Meme doctrine que le fichier de siege : une borne qu'on ne peut pas etablir n'est pas une borne
+  # qu'on invente. Un repli sur 1000 rendrait la garde verte sur une machine dont on ignore la
+  # frontiere — un succes ambigu la ou un echec explicite est disponible.
+  run env PASSWD_DEFS="$BATS_TEST_TMPDIR/aucun-login-defs" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"UID_MIN"* ]]
+  [[ "$output" == *"aucun-login-defs"* ]]
+}
