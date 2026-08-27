@@ -1144,6 +1144,62 @@ defmodule Fleet.Forge.Client do
     end
   end
 
+  @doc """
+  Les contextes ACTUELLEMENT rouges sur `sha` — `context`, `description`, `target_url`.
+
+  Un pod est forge-blind : il n'ouvre aucune page. La cause d'un rework CI doit donc voyager DANS
+  le brief, et une cause tient au NOM du contexte en échec — jamais à la liste complète, qui
+  accuserait les verts.
+
+  ⚠ ORDRE INDÉTERMINABLE = PAS D'ACCUSATION, et c'est l'inverse de `commit_ci_state/3`. Quand les
+  ids d'un contexte ne s'ordonnent pas, `current_per_context/1` garde tout le groupe pour que la
+  porte de merge y lise le PIRE. Ici la lecture sert à désigner un coupable : un contexte dont on
+  ne sait pas si le rouge est le dernier mot est écarté, et la section dégrade vers son texte
+  générique, qui ne nomme personne.
+  """
+  @spec commit_ci_failures(String.t(), String.t(), Keyword.t()) ::
+          {:ok, [%{context: String.t(), description: String.t() | nil, target_url: String.t() | nil}]}
+          | {:error, term()}
+  def commit_ci_failures(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
+    with {:ok, config} <- resolve_config(opts),
+         {:ok, statuses} <-
+           paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
+      {:ok, red_contexts(statuses)}
+    end
+  end
+
+  defp red_contexts(statuses) do
+    statuses
+    |> Enum.group_by(& &1["context"])
+    |> Enum.flat_map(fn
+      {context, group} when is_binary(context) ->
+        if Enum.all?(group, &is_integer(&1["id"])) do
+          latest = Enum.max_by(group, & &1["id"])
+
+          if latest["status"] in ~w(failure error),
+            do: [red_context(context, latest)],
+            else: []
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.sort_by(& &1.context)
+  end
+
+  defp red_context(context, entry) do
+    %{
+      context: context,
+      description: presence(entry["description"]),
+      target_url: presence(entry["target_url"])
+    }
+  end
+
+  defp presence(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
+  defp presence(_), do: nil
+
   # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
   #
   # LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE. La regle de redaction jette la recette et

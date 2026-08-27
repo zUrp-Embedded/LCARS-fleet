@@ -319,6 +319,9 @@ defmodule Fleet.Pilot.BriefBuilderTest do
         do: Keyword.get(opts, :_pull, {:ok, %{"head" => %{"sha" => "deadbeef"}}})
 
       def commit_ci_state(_repo, _sha, opts), do: Keyword.get(opts, :_ci, {:ok, :success})
+
+      # Les contextes ROUGES, et eux seuls : le pod est forge-blind, la cause voyage dans le brief.
+      def commit_ci_failures(_repo, _sha, opts), do: Keyword.get(opts, :_reds, {:ok, []})
     end
 
     defp rework(forge_opts),
@@ -351,17 +354,60 @@ defmodule Fleet.Pilot.BriefBuilderTest do
       refute brief =~ "## Raison du rework — NON LUE"
     end
 
+    test "CI ROUGE : les contextes en ECHEC sont NOMMES, et eux seuls" do
+      # La cause doit voyager : le pod ne peut aller la lire nulle part. Ce qui voyage est le NOM
+      # du contexte rouge — pas la liste complète, qui accuserait les verts.
+      brief =
+        rework(
+          _fb: {:ok, []},
+          _ci: {:ok, :failure},
+          _reds:
+            {:ok,
+             [
+               %{
+                 context: "CI / test (pull_request)",
+                 description: "checkout failed",
+                 target_url: "http://forge/run/7"
+               }
+             ]}
+        )
+
+      assert brief =~ "Contexte(s) en ÉCHEC"
+      assert brief =~ "CI / test (pull_request)"
+      assert brief =~ "checkout failed"
+      assert brief =~ "http://forge/run/7"
+      assert brief =~ ".gitea/workflows/"
+    end
+
+    test "CI ROUGE : aucun contexte nommable → le brief ne nomme personne, il ne s'invente rien" do
+      brief = rework(_fb: {:ok, []}, _ci: {:ok, :failure}, _reds: {:ok, []})
+
+      assert brief =~ "## CI ROUGE"
+      refute brief =~ "Contexte(s) en ÉCHEC"
+      refute brief =~ "n'ont pas pu être lus"
+    end
+
+    test "CI ROUGE : contextes ILLISIBLES → le rouge est dit, et l'ignorance aussi" do
+      # « Aucun rouge nommable » et « je n'ai pas pu lire » sont deux faits : les confondre ferait
+      # croire à un rail dont les statuts sont propres.
+      brief = rework(_fb: {:ok, []}, _ci: {:ok, :failure}, _reds: {:error, :boom})
+
+      assert brief =~ "## CI ROUGE"
+      assert brief =~ "n'ont pas pu être lus"
+      refute brief =~ "Contexte(s) en ÉCHEC"
+    end
+
     test "AUCUN feedback + CI ROUGE → le brief DIT que c'est la CI (plus de rework aveugle)" do
-      # Le défaut mesuré (2026-08-23, chifoumi ET pile-ou-face) : un CI rouge ne pose aucune review,
-      # donc `{:ok, []}` rendait un ordre de rework au corps VIDE — « corrige selon la review » sans
-      # review. Ici on interroge l'état CI : rouge → on le dit et on pointe le run. On NE liste PAS
-      # les contextes (`commit_ci_state` rend l'agrégat, pas les rouges — nommer accuserait les verts).
+      # Un CI rouge ne pose aucune review : `{:ok, []}` rendait un ordre de rework au corps VIDE —
+      # « corrige selon la review » sans review.
       brief = rework(_fb: {:ok, []}, _ci: {:ok, :failure})
 
       assert brief =~ "## CI ROUGE"
-      assert brief =~ "onglet Actions"
       assert brief =~ "checkout"
       refute brief =~ "## Feedback de review à traiter"
+      # Le pod est forge-blind et aucun verbe MCP ne rend l'état CI : lui prescrire d'ouvrir une
+      # page est lui prescrire un geste fermé.
+      refute brief =~ "onglet Actions"
     end
 
     test "AUCUN feedback + état CI ILLISIBLE → on TRACE et le brief le dit, jamais un ordre muet" do
