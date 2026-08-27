@@ -53,12 +53,12 @@ source "$DOCKER_DIR/../lib/store.sh"
 FORGE_PROJECT="${PROJECT}forge"
 RUNNER_PROJECT="${PROJECT}-runner"
 BOX="${PROJECT}-lcars-1"
-RUNNER="${RUNNER_PROJECT}-runner-1"
-FORGE="${FORGE_PROJECT}-forge-1"
+RUNNER="${RUNNER_PROJECT}-act-1"
+FORGE="${FORGE_PROJECT}-gitea-1"
 
 # UN BANC A TROIS PROJETS COMPOSE, ET CELUI-CI N'EN VOYAIT QUE DEUX. `bench-up.sh` lance aussi un
 # runner (`forge-runner.sh --project "${PROJECT}-runner"`) ; il n'etait jamais detruit. Mesure du
-# 2026-08-09 : apres un `bench-down` complet, `lcars-faces-runner-runner-1` tournait toujours, et
+# 2026-08-09 : apres un `bench-down` complet, `lcars-faces-act-runner-runner-1` tournait toujours, et
 # le `down` de la forge finissait sur « Network ... Resource is still in use » — le runner est
 # branche sur le reseau de la forge, donc tant qu'il vit ce reseau ne part pas. Il reste enregistre
 # contre une forge qui n'existe plus : le zombie que forge-runner decrit dans son propre en-tete,
@@ -67,7 +67,7 @@ FORGE="${FORGE_PROJECT}-forge-1"
 # ⚠ LE DISCRIMINANT PORTE SUR LE RESIDU, PLUS SUR UNE LISTE DE CONTENEURS ATTENDUS. Il a d'abord
 # regarde la boite seule, puis la boite OU le runner — a chaque fois un membre de plus, jamais la
 # classe. Le membre manquant s'est presente : `bench-up` meurt AVANT de creer la boite (forge qui
-# ne repond pas), il ne reste que `<projet>forge-forge-1` et ses deux volumes, et ce script
+# ne repond pas), il ne reste que `<projet>-forge-gitea-1` et ses deux volumes, et ce script
 # repondait « rien a detruire » sur un banc qui occupait le bind, le port et le nom du projet. Le
 # banc suivant se montait alors sur les restes du precedent.
 #

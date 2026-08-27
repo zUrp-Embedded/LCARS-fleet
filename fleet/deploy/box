@@ -95,7 +95,8 @@ set -euo pipefail
 # La racine du dépôt, vue d'ici : `fleet/deploy/box` → deux niveaux au-dessus.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/fleet/deploy/docker/docker-compose.yml"
-PROJECT="${LCARS_PROJECT:-lcars}"
+# La BASE nomme les trois projets du poste : `<base>-forge`, `<base>-runner`, `<base>-fleet`.
+PROJECT="${LCARS_PROJECT:-${LCARS_BASE:-lcars}-fleet}"
 
 # Les noms des volumes du magasin (le chemin appartient au compose). Aucun effet de bord.
 # shellcheck source=lib/store.sh

@@ -82,7 +82,7 @@ idx_of() {
 @test "a HALF-destroyed bench (box gone, runner up) can still be finished" {
   # The old discriminant was the box alone: this state exited 2 before reaching the runner, and
   # clearing it took a docker rm by hand. That is the state a first, incomplete teardown leaves.
-  PRESENT="bt-runner-runner-1" run_down
+  PRESENT="bt-runner-act-1" run_down
 
   [ "$status" -eq 0 ]
   grep -q -- "-p bt-runner down -v" "$CALLS"
@@ -91,11 +91,11 @@ idx_of() {
 # 2026-08-14 — THE DISCRIMINANT GREW ONE MEMBER AT A TIME AND NEVER CLOSED THE CLASS. First the box,
 # then box-or-runner (the test above). The member it still missed showed up on a real teardown: when
 # bench-up dies BEFORE creating the box — its forge never answered — the only leftovers are
-# `<project>forge-forge-1` and two volumes, and this script answered "rien a detruire" on a bench
+# `<project>forge-gitea-1` and two volumes, and this script answered "rien a detruire" on a bench
 # that still held the bind, the port and the project name. The next bench-up then mounted itself on
 # the previous one's remains.
 @test "only the FORGE survives (bench-up died before creating the box) → still destroyed" {
-  PRESENT="btforge-forge-1" run_down
+  PRESENT="btforge-gitea-1" run_down
 
   [ "$status" -eq 0 ]
   grep -q -- "-p btforge down -v" "$CALLS"

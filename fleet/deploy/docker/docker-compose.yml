@@ -153,7 +153,7 @@ services:
       # c'est la porte de la boîte, et désormais la SEULE avec ssh.
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
-      - lcars-home:/home
+      - home:/home
       # LE MAGASIN — des volumes EXTERNES, donc hors projet, donc `down -v` ne peut pas les
       # emporter. Ce n'est pas de la discipline, c'est le contrat de docker.
       #
@@ -208,11 +208,11 @@ services:
         max-size: "10m"
         max-file: "5"
     restart: unless-stopped
-    networks: [lcars]
+    networks: [default]
 
 volumes:
   # Celui-ci appartient au PROJET : ses humains sont ceux de CETTE boite, et il meurt avec elle.
-  lcars-home:
+  home:
   # Ceux-la n'appartiennent a personne : `external: true` = compose ne les cree pas et ne les
   # detruit pas. Meme forme que le reseau `devforge` du compose de banc, et pour la meme raison —
   # ce qui survit a la boite ne doit pas etre dans son interrupteur de destruction.
@@ -235,4 +235,4 @@ volumes:
     name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
 
 networks:
-  lcars:
+  default:

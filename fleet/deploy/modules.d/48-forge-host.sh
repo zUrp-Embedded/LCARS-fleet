@@ -46,7 +46,14 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-: "${PROV_FORGE_PROJECT:=lcars-forge}"          # projet compose de la forge du poste
+# ⚠ UNE BASE, DEUX PROJETS SYMETRIQUES. `--forge-project bob` nomme la BASE, pas le projet compose :
+# la forge devient `bob-forge`, le runner `bob-runner`. Avant, le drapeau nommait le projet de la
+# forge et le runner en DERIVAIT (`${PROJET}-runner`) — donc `bob` seul cote forge et `bob-runner`
+# cote runner, deux conventions pour deux moities du meme montage, et un `bob` nu que Docker Desktop
+# affiche sans dire de quoi il est le nom. Le defaut `lcars` rend `lcars-forge` (inchange) et
+# `lcars-runner` (au lieu de `lcars-forge-runner`).
+: "${PROV_FORGE_BASE:=lcars}"                   # base des deux projets compose du poste
+PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"   # projet compose de la forge du poste
 # ─── LE PORT : 21000, COMME LE BANC ─────────────────────────────────────────────────────────────
 #
 # ⚖ USER 2026-08-22 : « pour le mode bench, on pose 21000 comme port pour notre forge […] poste
@@ -165,7 +172,7 @@ PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
 PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 
 FORGE_NET="${PROV_FORGE_PROJECT}_default"
-FORGE_CONTAINER="${PROV_FORGE_PROJECT}-forge-1"
+FORGE_CONTAINER="${PROV_FORGE_PROJECT}-gitea-1"
 MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/forge-compose.yml"
@@ -226,7 +233,7 @@ foreign_forge_refusal() {
 # ⚠ LE RUNNER REJOINT LE RESEAU DE LA FORGE, il ne compose pas son adresse publiee : depuis un
 # conteneur, `127.0.0.1:21000` designe ce conteneur-la. `FORGE_NET` le met sur le bridge de la
 # forge, ou elle repond a `http://forge:3000`.
-: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_PROJECT}-runner}"
+: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
 
 # ⚠ TROIS LABELS, TOUS PUBLICS, ET C'EST CE QUI REND CE RAIL AUTONOME. Ils couvrent les `runs-on`
 # des workflows livrés — `shell` (deps-upstream, template projet), `dood` (publish, qui fait du

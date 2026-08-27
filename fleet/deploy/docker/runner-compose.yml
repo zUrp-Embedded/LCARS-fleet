@@ -36,7 +36,7 @@
 name: lcars-runner
 
 services:
-  runner:
+  act:
     # TAG MOUVANT, DELIBERE — runner Gitea officiel (jamais d'image custom pour l'infra CI).
     #
     # ⚠ LE NOM A CHANGE EN AMONT, ET UN TAG MOUVANT NE POUVAIT PAS LE VOIR. Gitea a renomme le
@@ -136,14 +136,29 @@ services:
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"
       DOCKERD_ROOTLESS_ROOTLESSKIT_MTU: "65520"
     volumes:
-      - runner-data:/data
+      - data:/data
       # ⚠ LE MAGASIN DU DAEMON INTERNE, NOMME. L'image DECLARE deja ce chemin comme volume, donc
       # docker en cree un — mais ANONYME : un `down -v` l'emporte et un `recreate` l'orpheline, et
       # les images qu'on y a semees (dont `lcars-build`, qu'aucun registre ne porte) disparaissent
       # avec. C'est le trou de l'exemple officiel, et il coute cette ligne.
-      - runner-dind:/home/rootless/.local/share/docker
+      - dind:/home/rootless/.local/share/docker
+    # ⚠ LE TROISIEME VOLUME DECLARE PAR L'IMAGE MEURT ICI, IL NE SE NOMME PAS.
+    # `gitea/runner:*-dind-rootless` declare TROIS volumes : `/data`, `/home/rootless/.local/share/
+    # docker` et `/var/lib/docker`. Les deux premiers sont nommes ci-dessus parce qu'ils PORTENT
+    # quelque chose. Le troisieme est le magasin du dind ROOTFUL — or ce runner est rootless, son
+    # daemon ecrit dans le second, et celui-ci reste vide.
+    #
+    # MESURE DU 2026-08-27, install neuve : volume ANONYME `a9019628eb78…`, 0 octet, un repertoire
+    # cree au `up` et jamais ecrit. Non mappe, docker en fabrique un a chaque recreation ; le NOMMER
+    # fabriquerait un objet permanent et vide, que le prochain lecteur devra elucider — exactement
+    # la question qui a mene ici. `tmpfs` : le chemin reste inscriptible pour l'image, et il ne
+    # survit a rien.
+    tmpfs:
+      - /var/lib/docker
     restart: unless-stopped
 
+# Les cles portent le ROLE, pas le service : le projet compose prefixe deja (`bob-runner_data`).
+# Les nommer `runner-*` rendait `bob-runner_runner-data` — le mot deux fois pour un seul fait.
 volumes:
-  runner-data:
-  runner-dind:
+  data:
+  dind:

@@ -136,7 +136,7 @@ done
 # manuel : la surcouche declare le reseau de la forge en `external` et compose branche la boite a la
 # CREATION. Meme recette que `forge-runner.sh` pour le runner depuis le 2026-08-02.
 FORGE_PROJECT="${PROJECT}forge"
-FORGE_CONTAINER="${FORGE_PROJECT}-forge-1"
+FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
 COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$PROJECT")
@@ -635,8 +635,8 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
       #
       # Ce n'est PAS une mesure d'attribuabilite : le tag est mouvant par choix (cf. l'en-tete de
       # `runner-compose.yml`), et discriminer une regression amont se fait avec un `docker run` date.
-      RUNNER_VER="$("$DOCKER_BIN" exec "${PROJECT}-runner-runner-1" gitea-runner --version 2>/dev/null | head -1 || true)"
-      RUNNER_IMG="$("$DOCKER_BIN" inspect "${PROJECT}-runner-runner-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
+      RUNNER_VER="$("$DOCKER_BIN" exec "${PROJECT}-runner-act-1" gitea-runner --version 2>/dev/null | head -1 || true)"
+      RUNNER_IMG="$("$DOCKER_BIN" inspect "${PROJECT}-runner-act-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
       RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)
               ${RUNNER_VER:-version illisible} · image ${RUNNER_IMG:-inconnue}
               labels : ${RUNNER_LABELS:-aucun}"

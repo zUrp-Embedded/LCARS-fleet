@@ -256,7 +256,7 @@ printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "$INSTANCE_URL" " " > "$RUN
 
 $DOCKER_BIN compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" down -v >/dev/null 2>&1 || true
 $DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" up --no-start
-$DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-runner-1:/data/bench-config.yaml"
+$DOCKER_BIN cp "$GEN/config.yaml" "$PROJECT-act-1:/data/bench-config.yaml"
 $DOCKER_BIN compose --env-file "$RUNNER_ENV" -f "$HERE/runner-compose.yml" -f "$GEN/override.yml" -p "$PROJECT" start
 say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volume)"
 
@@ -277,7 +277,7 @@ say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volum
 # contenterait du code de retour semerait donc dans le vide en se croyant verte. On EXIGE une sortie
 # NON VIDE : si le relais avale, on refuse en le disant, on ne continue pas en silence.
 seed_dind_images() {
-  local c="$PROJECT-runner-1" i out entry image
+  local c="$PROJECT-act-1" i out entry image
   for i in $(seq 1 30); do
     out="$("$DOCKER_BIN" exec "$c" docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
     [[ -n "$out" ]] && break
@@ -344,7 +344,7 @@ if [[ "$SEEN" -ne 1 ]]; then
   if [[ "$PROBE_HTTP" =~ ^(401|403)$ ]]; then
     say "NON VERIFIE (HTTP $PROBE_HTTP sur /admin/actions/runners — portee du token) : le runner est"
     say "  peut-etre enregistre, cette sonde ne peut pas le dire. Verifier a la main :"
-    say "    $DOCKER_BIN logs ${PROJECT}-runner-1 | grep -i 'registered successfully'"
+    say "    $DOCKER_BIN logs ${PROJECT}-act-1 | grep -i 'registered successfully'"
     exit 0
   fi
   say "ECHEC : la forge ne liste aucun runner apres 60 s (HTTP ${PROBE_HTTP:-?})"

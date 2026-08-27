@@ -107,7 +107,7 @@ seed_project() {
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"REFUS"* ]]
-  grep -q -- "-p lcars down" "$CALLS"
+  grep -q -- "-p lcars-fleet down" "$CALLS"
 }
 
 @test "a project created by ANOTHER compose file is refused, and the refusal names both" {

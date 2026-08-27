@@ -39,7 +39,7 @@
 name: lcars-devforge
 
 services:
-  forge:
+  gitea:
     # PIN par digest — 1.26.1 = la version validée avec le runtime (marqueurs, tokens, webhooks).
     image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
     hostname: devforge

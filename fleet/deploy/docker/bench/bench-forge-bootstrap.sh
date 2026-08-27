@@ -66,7 +66,7 @@
 # sans cabler le systeme troque une panne claire contre une panne qui ressemble a un droit manquant.
 #
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
-#                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
+#                                  [--box lcars-ticket-fleet-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <ignore>] [--no-seed-repos]
 #                                  [--human-admin] [--admin-token TOK]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 admiral admin/token
@@ -79,7 +79,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 
 FORGE_URL="http://127.0.0.1:3600"
-CONTAINER="lcars-ticketforge-forge-1"
+CONTAINER="lcars-ticketforge-gitea-1"
 # `--admin-token` DIT UNE SEULE CHOSE, et elle commande tout le reste : « la forge preexiste et je
 # n'en suis pas l'administrateur, je suis un client qui detient un jeton » — le cas de la PRODUCTION.
 # Sans lui, la forge est a moi et je la fabrique : le cas du BANC.

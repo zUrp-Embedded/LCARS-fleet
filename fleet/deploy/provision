@@ -125,7 +125,8 @@ while [[ $# -gt 0 ]]; do
     # tous (`48-forge-host:157-158,189`). C'est donc le seul geste qui monte une SECONDE forge
     # plutôt que de déplacer celle qui tourne.
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
-                     export PROV_FORGE_PROJECT="$2"; shift 2 ;;
+                     # LA BASE, pas le projet : `bob` donne `bob-forge` et `bob-runner` (48-forge-host).
+                     export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
     # ⚠ `uninstall` NE FAIT RIEN SANS `--yes`, ET CE N'EST PAS UNE COURTOISIE. Le verbe lit une

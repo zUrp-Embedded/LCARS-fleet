@@ -191,9 +191,23 @@ run_runner() {
 @test "le magasin du daemon embarque est un volume NOMME — sinon le semis meurt au recreate" {
   # L'image DECLARE ce chemin comme volume : docker en cree donc un, mais ANONYME. Un `down -v`
   # l'emporte, un `recreate` l'orpheline, et `lcars-build` — qu'aucun registre ne porte — part avec.
+  # ⚠ LA CLEF NE REPETE PLUS LE PROJET (2026-08-27) : le projet compose prefixe deja, donc
+  # `runner-dind` rendait `<base>-runner_runner-dind`, le mot deux fois pour un seul fait.
   C="$BATS_TEST_DIRNAME/../docker/runner-compose.yml"
-  grep -q 'runner-dind:/home/rootless/.local/share/docker' "$C"
-  grep -qE '^\s{2}runner-dind:\s*$' "$C"
+  grep -q 'dind:/home/rootless/.local/share/docker' "$C"
+  grep -qE '^\s{2}dind:\s*$' "$C"
+}
+
+@test "le magasin du dind ROOTFUL n'est PAS un volume — il ne porte rien" {
+  # ⚠ TROISIEME VOLUME DECLARE PAR L'IMAGE, ET LE SEUL QU'ON REFUSE DE NOMMER. `/var/lib/docker` est
+  # le magasin du dind rootful ; ce runner est rootless, son daemon ecrit dans `dind`. Mesure du
+  # 2026-08-27, install neuve : volume anonyme, 0 octet, cree au `up` et jamais ecrit. Le nommer
+  # fabriquerait un objet permanent et vide ; `tmpfs` le fait disparaitre.
+  C="$BATS_TEST_DIRNAME/../docker/runner-compose.yml"
+  grep -qE '^\s{4}tmpfs:\s*$' "$C"
+  grep -qE '^\s{6}- /var/lib/docker\s*$' "$C"
+  # et il n'apparait dans AUCUNE table de volumes
+  sed -n '/^volumes:/,$p' "$C" | refute_out 'var/lib/docker'
 }
 
 @test "le semeur EXIGE une sortie non vide — un exec qui avale ne doit pas passer pour un succes" {
