@@ -76,6 +76,16 @@ set -euo pipefail
 #
 # `admiral` reste le nom du siège DANS LA BOÎTE, où l'entrypoint crée un uid 1000 qu'aucun humain
 # n'a nommé. Ici il y a quelqu'un pour le nommer : c'est lui.
+# ⚠ LA TABLE NOMME DES QU'ELLE EXISTE, ET `PROV_HUMAN` N'EST QUE LA SEMENCE DU PREMIER PASSAGE.
+# Les deux ne sont pas des sources concurrentes : `PROV_HUMAN` sert le seul cas où rien ne préexiste,
+# et dès que la ligne `forge_id=1` est posée c'est elle qui dit qui est le siège. Sans cet ordre, un
+# renommage côté forge laissait ce module continuer à promouvoir, à reposer le mot de passe et à
+# sonder l'adminité d'un compte que plus rien d'autre ne désignait — `seat_binding_report` nommait
+# la divergence, et le reste du module travaillait quand même sur l'autre nom.
+#
+# Un `PROV_FORGE_ADMIN` posé explicitement par l'opérateur l'emporte toujours : `:=` ne remplit que
+# le vide, et la divergence qu'il créerait est justement ce que le rapport de siège dit.
+: "${PROV_FORGE_ADMIN:=$(prov_seat_from_map)}"
 : "${PROV_FORGE_ADMIN:=$PROV_HUMAN}"            # le compte qui ADMINISTRE la forge — l'opérateur
 : "${PROV_DOCKER_BIN:=docker}"
 

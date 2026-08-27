@@ -882,3 +882,26 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [[ "$output" == *"$(id -un)"* ]]
   [[ "$output" == *"zoe"* ]]
 }
+
+@test "siege: la TABLE nomme l'admin forge des qu'elle existe, PROV_HUMAN n'est que la semence" {
+  # Etape 3 : le nom cesse d'avoir deux sources. Sans ca, un renommage cote forge laissait ce module
+  # promouvoir et sonder l'adminite d'un compte que plus rien d'autre ne designait.
+  run bash -c "set -euo pipefail
+    export PROV_UID_MAP_FILE='$BATS_TEST_TMPDIR/map'
+    printf '1\t1000\tzoe\n' > \"\$PROV_UID_MAP_FILE\"
+    export PROV_HUMAN=quelquun-dautre
+    source '$HEAD' >/dev/null 2>&1
+    echo \"ADMIN=\$PROV_FORGE_ADMIN\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADMIN=zoe"* ]]
+}
+
+@test "siege: SANS table, PROV_HUMAN seme — le premier passage n'a rien a lire" {
+  run bash -c "set -euo pipefail
+    export PROV_UID_MAP_FILE='$BATS_TEST_TMPDIR/absente'
+    export PROV_HUMAN=loperateur
+    source '$HEAD' >/dev/null 2>&1
+    echo \"ADMIN=\$PROV_FORGE_ADMIN\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADMIN=loperateur"* ]]
+}
