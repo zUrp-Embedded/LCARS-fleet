@@ -56,8 +56,14 @@ EOF
   chmod +x "$BIN/curl"
 }
 
+# ⚠ CE TEMOIN EPINGLAIT `48-forge-host`, ET CE N'EST PLUS LUI QUI ENROLE. Le decoupage
+# `48 -> 49` (534a46ce3) a sorti le runner CI dans `49-forge-runner` ; le message de `50-forge` a
+# garde l'ancien nom, et ce temoin l'a VERROUILLE — il exigeait precisement le mauvais diagnostic.
+# Un operateur qui suit la phrase rejoue le module qui ne fait plus le geste, et conclut que le rail
+# est casse. Le sens de la ligne se derive maintenant du module qui porte l'enrolement.
+
 @test "zero runner -> DRIFT qui nomme la CONSEQUENCE et le module qui l'enrole" {
-  # Le runner est un etat-cible sur TOUS les rails : le banc monte le sien, `48-forge-host` monte
+  # Le runner est un etat-cible sur TOUS les rails : le banc monte le sien, `49-forge-runner` monte
   # celui du poste. Le verdict est donc le meme partout, et le substrat n'y entre pas.
   stub_curl '{"runners":[],"total_count":0}'
   run env PROV_SUBSTRATE=docker bash "$MODULE" check
@@ -67,7 +73,23 @@ EOF
   # Un drift qui dit « 0 runner » et s'arrete laisse l'operateur deviner que ca bloque tout. La
   # consequence MESUREE est ce qui rend le message actionnable, et le module NOMME est la sortie.
   [[ "$output" == *"aucune PR ne fusionne"* ]]
-  [[ "$output" == *"48-forge-host"* ]]
+  [[ "$output" == *"49-forge-runner"* ]]
+}
+
+@test "le module NOMME dans le drift est celui qui ENROLE vraiment" {
+  # ⚠ LA PROPRIETE, ET PAS LE NOM. Epingler `49-forge-runner` en dur referait le defaut au prochain
+  # decoupage. Ce qui est vrai est : le module cite doit exister ET porter l'enrolement.
+  local cite
+  # Le nom est entoure d'accents graves ECHAPPES dans la source (`\``), d'ou le `[^ ]*` qui les
+  # traverse sans les nommer — un motif qui compte les antislashs se casserait au prochain reformat.
+  cite="$(sed -n 's/.*\([0-9][0-9]-[a-z-]*\)[^ ]* l.enrole.*/\1/p' "$MODULE" | head -1)"
+  [ -n "$cite" ]
+  local f="$BATS_TEST_DIRNAME/../modules.d/${cite}.sh"
+  [ -f "$f" ]
+  # ⚠ « contient le mot runner » NE SUFFIT PAS : `48-forge-host` le porte encore (il nomme le projet
+  # compose du runner) et le temoin restait vert sur le mauvais module — mesure par mutation.
+  # Ce qui distingue le module qui ENROLE est la fonction qui le fait.
+  grep -q 'converge_ci_runner' "$f"
 }
 
 @test "le verdict ne depend PAS du substrat — un etat-cible n'a pas deux valeurs" {

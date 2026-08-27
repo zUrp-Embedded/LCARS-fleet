@@ -18,6 +18,10 @@
 # « pas wsl », ce qui donne le chemin natif de facon deterministe sur n'importe quelle machine.
 # Sans lui, on est sur le substrat reel de la machine qui joue les tests.
 
+# ⚠ SC2016 AU NIVEAU DU FICHIER : ce temoin LIT `install.sh`. Ses motifs portent des `$s`, `$SRC`,
+# `$RAIL` qui doivent atteindre `grep`/`sed` TELS QUELS — les developper chercherait la valeur de
+# CE shell au lieu du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
 load refute
 
 setup() {
@@ -233,14 +237,34 @@ setup() {
   [[ "$output" == *"inconnu"* ]]
 }
 
-@test "--box sans forge : REFUS avant tout build, et les deux voies sont nommees" {
-  # La boite ne fabrique pas la forge, elle la consomme. Sans ce refus, 15 min de build finissaient
-  # sur une boite qui ne peut rien produire — et le diagnostic arrivait apres la depense.
-  run bash "$SRC" --box < /dev/null
+# ⚠ CE TEMOIN S'APPELAIT « REFUS avant tout build » ET NE FORCAIT JAMAIS L'ABSENCE D'IMAGE.
+#
+# Il lancait `install.sh --box` sur la machine qui joue la suite. Si `lcars-fleet:2` y est presente
+# — le cas sur tout poste de dev — la branche de build n'est jamais prise, et le temoin passait sans
+# exercer la propriete qu'il nomme. Mesure du corpus : le controle `FORGE_BASE_URL` etait APRES
+# l'`image inspect`, donc sur une machine NEUVE sans image et sans forge, la porte construisait
+# plusieurs minutes avant d'annoncer qu'elle ne pouvait rien en faire.
+#
+# L'arbre factice existait deja dans ce fichier (`_fake_tree <rc-inspect> <rc-delegue>`), et le
+# premier argument est exactement ce qu'il fallait : image ABSENTE. Le temoin le prend maintenant.
+
+@test "--box sans forge : REFUS avant tout build, IMAGE ABSENTE — les deux voies sont nommees" {
+  local fake; fake="$(_fake_tree 1 0)"
+  run bash "$fake/install.sh" --box < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"FORGE_BASE_URL"* ]]
   [[ "$output" == *"--bench"* ]]
-  [[ "$output" != *"étiquetage du jumeau"* ]]   # rien n'a ete construit
+  # LA PROPRIETE : rien n'a ete construit, alors que l'image etait absente.
+  refute_out 'DOCKERSH:build' <<<"$output"
+}
+
+@test "--box --bench sans forge : PAS de refus — le drapeau dit « fabrique-la moi »" {
+  # La seule exception, et elle doit rester : sans elle, `--bench` deviendrait inutilisable.
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BENCHUP:"* ]]
+  refute_out 'FORGE_BASE_URL' <<<"$output"
 }
 
 @test "le preflight de branche vient APRES la question, jamais avant" {
@@ -426,7 +450,7 @@ SPY
 @test "la porte ne refuse plus docker sur un LINUX NATIF DECLARE — le rail le pose" {
   grep -q 'docker_installable_here' "$SRC"
   # la condition est double : substrat linux ET machine declaree dediee
-  run bash -c "sed -n '/^docker_installable_here()/,/^}/p' "$SRC""
+  run bash -c 'sed -n "/^docker_installable_here()/,/^}/p" "$1"' _ "$SRC"
   [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
   [[ "$output" == *'"$s" == "linux"'* ]]
 }
@@ -509,7 +533,7 @@ SPY
   [ "$ws" -eq 0 ]
   refute grep -q '_wimg' "$SRC"
   # et le motif mort n'est pas reste en prose : un lecteur le lirait comme vrai au present
-  ! grep -q 'la forge du poste en a besoin' "$SRC"
+  refute grep -q 'la forge du poste en a besoin' "$SRC"
 }
 
 @test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {

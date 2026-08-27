@@ -413,7 +413,7 @@ check_ci_runner() {
     # ⚠ « CE RAIL N'EN MONTE PAS » N'EST JAMAIS UNE RAISON DE BAISSER LE VERDICT. Un drift que rien
     # ne peut lever signale un module MANQUANT ; le degrader en constat rend le voyant muet et
     # laisse livrer l'objet incomplet.
-    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`48-forge-host\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
+    p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`49-forge-runner\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
   else
     labels="$(printf '%s' "$body" \
       | jq -r '[.runners[]? | .name + " [" + ([.labels[]?.name] | join(",")) + "]"] | join(" · ")' 2>/dev/null || true)"

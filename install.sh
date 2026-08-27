@@ -654,6 +654,23 @@ if [[ "$RAIL" == "box" ]]; then
   for _i in "${!DELEGATE_ARGS[@]}"; do
     [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"
   done
+  # ⚠ CE REFUS PASSE AVANT LE BUILD, ET IL Y ETAIT APRES. Sur une machine neuve sans image et sans
+  # forge, `install.sh --box` construisait plusieurs minutes AVANT d'annoncer qu'il ne pouvait rien
+  # en faire — le diagnostic arrivait apres la depense. Son propre temoin s'appelait « REFUS avant
+  # tout build » et ne forcait jamais l'absence d'image : il passait sur une machine qui avait deja
+  # l'image, c'est-a-dire celle ou on le jouait.
+  #
+  # `--bench` en est exempt, et c'est la seule exception : ce drapeau dit precisement « fabrique-moi
+  # la forge », donc l'absence de `FORGE_BASE_URL` y est le cas nominal.
+  if [[ "$WITH_BENCH" -ne 1 && -z "${FORGE_BASE_URL:-}" ]]; then
+    echo ""
+    echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
+    echo "  Deux voies :"
+    echo "    ${W}--bench${N}                     LCARS monte une forge jetable + un runner pour toi"
+    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« fleet/deploy/box forge-check »)"
+    exit 1
+  fi
+
   if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
     echo ""
     echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
@@ -683,14 +700,6 @@ if [[ "$RAIL" == "box" ]]; then
     export DOCKER_BIN="$PROV_DOCKER_BIN"
     exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
-  [[ -n "${FORGE_BASE_URL:-}" ]] || {
-    echo ""
-    echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
-    echo "  Deux voies :"
-    echo "    ${W}--bench${N}                     LCARS monte une forge jetable + un runner pour toi"
-    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« fleet/deploy/box forge-check »)"
-    exit 1
-  }
   echo ""
   echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/box"
   # L'image est déjà là : le bloc au-dessus l'a construite si elle manquait, pour les DEUX chemins.
