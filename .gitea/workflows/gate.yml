@@ -17,10 +17,15 @@ on:
   push:
     paths:
       - 'fleet/**'
+      # `shell_gate` audite le shell SUIVI du dépôt entier, hooks et skills compris : sans ce
+      # chemin, une édition de `.claude/` casse le gate sans le déclencher, et la rougeur tombe
+      # sur le commit suivant, qui n'y est pour rien.
+      - '.claude/**'
       - '.gitea/workflows/gate.yml'
   pull_request:
     paths:
       - 'fleet/**'
+      - '.claude/**'
 
 jobs:
   gate:
@@ -79,6 +84,18 @@ jobs:
       # cette action pose en plus ne sont pas chargées, et rien ne dépend de leur chemin.
       - name: Bats (shell_gate)
         uses: bats-core/bats-action@4.0.0
+
+      # `shell_gate` audite maintenant tout le shell SUIVI au même barreau que
+      # `--warnings-as-errors` côté Elixir : un signalement, quelle que soit sa sévérité, est rouge.
+      #
+      # ⚠ `apt-get` ICI, ET PAS L'ACTION OFFICIELLE — la règle inverse de bats juste au-dessus, pour
+      # une raison inverse. Ce qui compte pour bats est le comportement du runner ; ce qui compte
+      # pour shellcheck est **quels contrôles existent**, et il n'a pas d'action amont qui épingle
+      # une version. Le paquet de la distro en sert une, `shell_gate` IMPRIME celle qu'il a jouée,
+      # et une divergence de verdict entre la CI et un poste se lit alors sur cette ligne au lieu de
+      # se deviner.
+      - name: ShellCheck (shell_gate)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck && shellcheck --version
 
       - name: Cache Mix
         uses: actions/cache@v4

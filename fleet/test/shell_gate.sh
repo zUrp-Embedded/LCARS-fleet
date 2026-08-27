@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 2026.232
+# STARDATE: 2026.239
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -13,6 +13,8 @@
 #   - python3 ABSENT               → ECHEC EXPLICITE (jamais un skip silencieux : c'est la lecon du bug).
 #   - 0 test compte OU FAIL>0      → exit != 0 (jamais vert sans compteur positif — la « coquille vide »
 #                                     qui passe est l'anti-pattern precis a tuer).
+#   - shellcheck ABSENT, ou UN signalement → exit != 0. Meme barreau que `--warnings-as-errors`
+#                                     cote Elixir : pas de seuil de severite.
 #   - bats PRESENT + rouge         → exit != 0.
 #   - bats ABSENT                  → PAS d'echec ICI (warning + compte MANQUE). Choix delibere : ce filet
 #                                     est cable dans `mix gate`, l'absence de bats sur une machine sans
@@ -39,7 +41,7 @@ BATS_MISSING_FATAL="${BATS_MISSING_FATAL:-0}"
 
 GATE_FAIL=0
 
-echo "=== shell_gate : tests hors-mix (python + bats des launchers) ==="
+echo "=== shell_gate : tests hors-mix (python + bats des launchers) + shellcheck ==="
 
 # ---------------------------------------------------------------------------
 # 1) Test python du bridge MCP stdio.
@@ -299,6 +301,56 @@ else
   if [[ "$BATS_MISSING_FATAL" != "0" ]]; then
     echo "ECHEC: bats absent et BATS_MISSING_FATAL=$BATS_MISSING_FATAL — durcissement actif." >&2
     GATE_FAIL=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5) shellcheck sur tout le shell SUIVI. AUCUN filtre de severite.
+#
+# Le shell entre au meme barreau que l'Elixir, qui compile en `--warnings-as-errors` : un
+# signalement, quelle que soit sa severite, est rouge. Un seuil (« sous N erreurs ca passe »)
+# fabrique une zone ou l'outil parle et ou personne n'ecoute.
+#
+# LA LISTE EST CELLE DE GIT, PAS D'UN `find`, et ce n'est pas une commodite : les entrees sans
+# extension (`deploy/provision`, `deploy/box`, `bin/lcars`, les hooks) ne se reconnaissent qu'a
+# leur shebang, et `fleet/tmp/` porte des scripts fabriques par les suites ExUnit — les auditer
+# reviendrait a auditer la sortie des tests.
+#
+# ABSENT = ECHEC, jamais un avertissement : c'est un paquet unique, pose en une ligne ici comme en
+# CI. Le prerequis est pose des l'entree, sans la periode molle qui a laisse bats en avertissement.
+# ---------------------------------------------------------------------------
+mapfile -t SHELL_FILES < <(
+  git -C "$REPO_ROOT" ls-files -z 2>/dev/null | while IFS= read -r -d $'\0' f; do
+    [[ -f "$REPO_ROOT/$f" ]] || continue
+    case "$f" in
+      *.sh|*.bash|*.bats) printf '%s\n' "$REPO_ROOT/$f"; continue ;;
+    esac
+    IFS= read -r first < "$REPO_ROOT/$f" || true
+    [[ "$first" =~ ^#!.*(bash|[^a-z]sh)([[:space:]]|$) ]] && printf '%s\n' "$REPO_ROOT/$f"
+  done
+)
+SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
+SC_VERSION="$(command -v shellcheck >/dev/null 2>&1 && shellcheck --version | sed -n 's/^version: //p')"
+
+if [[ -z "$SC_VERSION" ]]; then
+  echo "ECHEC: shellcheck absent — $SHELL_FILE_COUNT fichier(s) shell NON audites. Installer : apt install shellcheck." >&2
+  GATE_FAIL=1
+elif [[ "$SHELL_FILE_COUNT" -eq 0 ]]; then
+  # Zero fichier n'est pas un depot sans shell : c'est une decouverte cassee, et elle rendrait vert.
+  echo "ECHEC: aucun fichier shell suivi trouve — la decouverte est cassee, pas le depot." >&2
+  GATE_FAIL=1
+else
+  echo "--- shellcheck $SC_VERSION : $SHELL_FILE_COUNT fichier(s) suivi(s), aucun filtre ---"
+  set +e
+  SC_OUT="$(shellcheck -f gcc "${SHELL_FILES[@]}" 2>&1)"
+  SC_RC=$?
+  set -e
+  if [[ "$SC_RC" -ne 0 ]]; then
+    printf '%s\n' "$SC_OUT" >&2
+    echo "ECHEC: shellcheck — $(printf '%s\n' "$SC_OUT" | grep -c ':') signalement(s) sur $(printf '%s\n' "$SC_OUT" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
+    GATE_FAIL=1
+  else
+    echo "--- shellcheck : OK ($SHELL_FILE_COUNT fichier(s)) ---"
   fi
 fi
 
