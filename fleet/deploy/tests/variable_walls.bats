@@ -270,3 +270,97 @@ code_of() { sed 's/#.*//' "$1"; }
     return 1
   }
 }
+
+@test "MUR 5: le chemin du fichier de siege est le MEME partout, et le manifeste pose celui-la" {
+  # Le fichier que GUARD B lit — les DEUX moities, le launcher shell et le BEAM — et que le
+  # provisionnement pose. Sept sites le nomment, un huitieme le CREE (la ligne `anchor` du
+  # manifeste). C'est un chemin que j'ai introduit le 2026-08-26 et propage sans verrou ; le
+  # verrou arrive apres, ce qui est l'ordre inverse de celui qu'on recommande.
+  #
+  # ⚠ AUCUNE AUTORITE DESIGNEE, ET ON NE S'EN INVENTE PAS UNE. Comme pour `/home/private`, le
+  # manifeste ne peut pas faire foi : sa ligne est `anchor <chemin> <mode> <proprietaire> <rail>`,
+  # il n'y a AUCUN NOM a interroger — on ne peut que confirmer un chemin qu'on connait deja. Et
+  # aucune des sept declarations n'a ete designee. Ce mur enonce donc la revendication plus faible
+  # mais VRAIE : elles s'accordent, et le manifeste cree celui qu'elles nomment.
+  #
+  # ⚠ CE QUE CE MUR N'EST PAS. Une derive ici ne produit pas un silence : les deux moities de
+  # GUARD B REFUSENT quand le fichier manque (`R-no-seat`, « siege non etabli »). Ce qu'il achete
+  # n'est donc pas la fermeture d'un trou muet, c'est qu'un renommage devienne un geste VISIBLE de
+  # huit fichiers au lieu d'une panne totale decouverte au boot suivant.
+  local sites=(
+    "bin/fleet_v2"
+    "config/runtime.exs"
+    "services/human-converger.sh"
+    "deploy/modules.d/64-services.sh"
+    "deploy/docker/entrypoint.sh"
+    "deploy/lib/provision-lib.sh"
+  )
+  # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la
+  # forme BEAM `System.get_env("LCARS_SEAT_UID_FILE", "<X>")`.
+  local f vus=() v
+  for f in "${sites[@]}"; do
+    [ -r "$REPO/$f" ] || { echo "MUR 5 rompu — $f illisible" >&2; return 1; }
+    while read -r v; do [ -n "$v" ] && vus+=("$v"); done < <(
+      sed 's/#.*//' "$REPO/$f" \
+        | sed -nE -e 's/.*LCARS_SEAT_UID_FILE:-([^}]+)\}.*/\1/p' \
+                  -e 's/.*LCARS_SEAT_UID_FILE", "([^"]+)".*/\1/p'
+    )
+  done
+  [ "${#vus[@]}" -ge 6 ] || {
+    echo "MUR 5 — seulement ${#vus[@]} declarations lues sur ${#sites[@]} fichiers : l'instrument ne lit plus la forme" >&2
+    printf '   vu: %s\n' "${vus[@]}" >&2
+    return 1
+  }
+  local distinctes; distinctes="$(printf '%s\n' "${vus[@]}" | sort -u)"
+  [ "$(printf '%s\n' "$distinctes" | wc -l)" -eq 1 ] || {
+    echo "MUR 5 rompu — ${#vus[@]} declarations, PLUSIEURS chemins :" >&2
+    printf '%s\n' "$distinctes" | sed 's/^/     /' >&2
+    return 1
+  }
+  local attendu="$distinctes"
+  grep -qE "^anchor[[:space:]]+${attendu//\//\\/}[[:space:]]" "$REPO/deploy/system.manifest" || {
+    echo "MUR 5 rompu — les ${#vus[@]} declarations disent « $attendu » et le manifeste ne pose pas ce fichier :" >&2
+    grep -nE '^anchor' "$REPO/deploy/system.manifest" >&2
+    return 1
+  }
+}
+
+@test "MUR 6: le groupe de traversee des consoles a UNE declaration, nom ET gid" {
+  # Le groupe qui accorde le `--x` sur `/run/lcars/console/<humain>/` — rien d'autre. Il porte
+  # ZERO membre declare (`MUR 5 ter` d'`adminite_walls` le garde) : root le rend a l'exec, a un
+  # processus nomme. Ce mur-ci ne garde pas ce pouvoir, il garde que tout le monde parle du MEME
+  # groupe — et du meme gid, parce que les deux rails le CREENT chacun de leur cote.
+  #
+  # ⚠ LE PIEGE EST DANS LES FAUX PORTEURS, ET IL EST EXACTEMENT CELUI QUI A SATISFAIT `MUR 4 bis`
+  # CE MATIN (`lcars-authority-ask`, un nom de binaire). Trois sites portent la chaine sans porter
+  # le fait : `console.sh:58` en fait un PREFIXE DE LOG (`[lcars-console]`),
+  # `/etc/tmpfiles.d/lcars-console.conf` est un NOM DE FICHIER (manifeste + `25-directories`), et
+  # `observation/application.ex` la cite dans sa prose. Un mur qui compterait les occurrences serait
+  # vert en ayant compte des choses qui n'ont rien a voir. Chaque miroir est donc ancre sur SON
+  # GESTE : declarer, lire, creer, posseder.
+  local nom gid
+  nom="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
+         | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_CONSOLE_GROUP:=([a-z0-9_-]+)\}".*$/\1/p' | head -n1)"
+  [ -n "$nom" ] || { echo "MUR 6 — PROV_CONSOLE_GROUP illisible dans provision-lib.sh" >&2; return 1; }
+  # Le gid vient du manifeste, seul endroit ou le groupe est DECLARE avec son numero.
+  gid="$(sed -nE "s/^group[[:space:]]+${nom}[[:space:]]+([0-9]+)[[:space:]].*/\1/p" "$REPO/deploy/system.manifest" | head -n1)"
+  [[ "$gid" =~ ^[0-9]+$ ]] || {
+    echo "MUR 6 rompu — le manifeste ne DECLARE pas le groupe « $nom » avec un gid :" >&2
+    grep -nE '^group' "$REPO/deploy/system.manifest" >&2
+    return 1
+  }
+
+  local rompu=0
+  need() { # need <fichier> <motif> <geste>
+    sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
+      echo "MUR 6 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }
+  }
+  need services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
+  need services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
+  # Les DEUX createurs, un par rail, et ils doivent s'accorder sur le gid : un groupe de meme nom
+  # et de gid different sur les deux rails, c'est un `chown` qui reussit et une traversee qui non.
+  need deploy/docker/Dockerfile     "groupadd -g $gid $nom([[:space:]]|\\\\|$)"  "la creation dans l'image (gid $gid)"
+  need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
+
+  [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
+}
