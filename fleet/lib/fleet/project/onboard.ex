@@ -171,7 +171,7 @@ defmodule Fleet.Project.Onboard do
          {:ok, url} <- repo_url(full_name, opts),
          :ok <- seed_protocol_labels(full_name, opts),
          :ok <- clone_main(url, dirs.code),
-         :ok <- Scaffold.main(dirs.code, name, opts),
+         :ok <- Scaffold.main(dirs.code, name, with_ci_stance(full_name, opts)),
          :ok <- write_declaration(dirs.code, full_name, opts),
          :ok <- commit(dirs.code, "chore(onboard): scaffold initial du projet"),
          :ok <- push(dirs.code, "main", false),
@@ -1535,7 +1535,7 @@ defmodule Fleet.Project.Onboard do
            ensure_ci_workflows(
              dirs.code,
              name,
-             opts,
+             with_ci_stance(full_name, opts),
              "ci(adopt): rail CI du depot (.gitea/workflows)"
            ),
          :ok <- push(dirs.code, "main", true),
@@ -1593,6 +1593,105 @@ defmodule Fleet.Project.Onboard do
   # ⚠ `Scaffold.main/3` NE POUVAIT PAS SERVIR : il ecrit la face ENTIERE (README, CLAUDE.md,
   # .gitignore), ce qui est juste pour un depot que la fleet vient de creer et destructeur pour un
   # depot qu'elle importe. Cette porte-ci n'ajoute que ce qui MANQUE.
+  # LA POSTURE DU RAIL SE LIT SUR LA CARTE, ET LE DEFAUT EST L'INVITATION A PROUVER. Une carte
+  # illisible, absente, ou un catalogue casse rendent `:required` : le projet recoit un rail qui
+  # l'invite a poser sa suite. La dispense ne s'obtient que d'une carte qui la DECLARE.
+  @doc """
+  RÉÉCRIT le rail CI de `full_name` sur `main` depuis le template livré, et le pousse.
+
+  ⚠ **LA SORTIE DE SECOURS DU PLANCHER, ET RIEN D'AUTRE.** `protect_main` exige un statut `CI / *`
+  de tout le monde ; un `ci.yml` cassé — image sans `node`, `runs-on:` qu'aucun runner ne sert,
+  workflow renommé hors de `CI` — n'en produit plus. Aucune PR ne fusionne, et **personne ne peut le
+  réparer côté forge** : les humains y sont en `read`. Ce verbe remet le rail livré, vert par
+  construction, et le pousse par le même lift ponctuel que la révision de carte.
+
+  ⚠ **IL ÉCRASE, ET C'EST TOUT SON OBJET.** `Scaffold.ci_workflows/3` ne touche jamais un fichier
+  existant — la bonne règle quand on ADOPTE. Ici on répare : le fichier existant EST le défaut.
+  D'où `justification` requise, comme pour une révision de carte : ce geste remplace le travail de
+  quelqu'un, il ne se joue pas par accident.
+
+  ⚠ **SUR `main`, PAS SUR UNE BRANCHE DE PR.** Le rail de `main` est ce dont héritent les branches
+  suivantes ; une PR déjà ouverte se répare par son producteur, à qui le brief de rework nomme
+  désormais le job en échec. Pousser sur la branche d'un pod vivant courserait avec lui.
+
+  `opts` : `:justification` (requise), `:reset_by` (le rôle qui agit).
+  Rend `%{repo:, outcome: :reset | :unchanged, files:}`.
+  """
+  @spec reset_ci_rail(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def reset_ci_rail(full_name, opts \\ []) when is_binary(full_name) do
+    name = Fleet.Layout.project_name(full_name)
+    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
+
+    with :ok <- require_on_machine(full_name, proj_dir),
+         :ok <- require_justification(opts),
+         {:ok, url} <- repo_url(full_name, opts) do
+      scratch = scratch_dir(name)
+
+      try do
+        with :ok <- clone_main(url, scratch),
+             {:ok, files} <-
+               Scaffold.reset_ci_workflows(scratch, name, with_ci_stance(full_name, opts)),
+             {:ok, :changed} <- revision_changed(scratch) do
+          publish_ci_rail(full_name, scratch, files, opts)
+        else
+          {:ok, :unchanged} ->
+            {:ok, %{repo: full_name, outcome: :unchanged, files: []}}
+
+          {:error, _} = err ->
+            err
+        end
+      after
+        _ = File.rm_rf(scratch)
+      end
+    end
+  end
+
+  defp publish_ci_rail(full_name, scratch, files, opts) do
+    msg = "ci(reset): rail CI remis a l'etat livre (#{Enum.join(files, ", ")})"
+
+    with :ok <- commit(scratch, msg),
+         :ok <- lift_protection(full_name, opts) do
+      case push(scratch, "main", false) do
+        :ok ->
+          protection = restore_protection(full_name, opts)
+
+          Logger.info(
+            "ProjectOnboard: #{full_name} rail CI remis a l'etat livre — #{Enum.join(files, ", ")}"
+          )
+
+          {:ok,
+           %{repo: full_name, outcome: :reset, files: files, protection: to_string(protection)}}
+
+        {:error, reason} ->
+          _ = restore_protection(full_name, opts)
+          {:error, {:ci_rail_push_failed, reason}}
+      end
+    end
+  end
+
+  defp with_ci_stance(repo, opts),
+    do: Keyword.put_new(opts, :ci_stance, ci_stance(repo, opts))
+
+  defp ci_stance(repo, opts) do
+    case Keyword.get(opts, :workflow_map) do
+      card when is_binary(card) and card != "" ->
+        loader_opts =
+          case Keyword.take(opts, [:workflow_maps_root]) do
+            [] -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+            given -> given
+          end
+
+        try do
+          Fleet.Project.Roles.ci(Fleet.Workflow.Loader.load!(card, loader_opts))
+        rescue
+          _ -> :required
+        end
+
+      _ ->
+        :required
+    end
+  end
+
   defp ensure_ci_workflows(proj_dir, name, opts, msg) do
     case Scaffold.ci_workflows(proj_dir, name, opts) do
       {:ok, []} ->
@@ -1806,7 +1905,7 @@ defmodule Fleet.Project.Onboard do
            ensure_ci_workflows(
              scratch,
              name,
-             opts,
+             with_ci_stance(full_name, opts),
              "ci(import): rail CI du depot (.gitea/workflows)"
            ),
          :ok <- set_origin(scratch, forge_url),

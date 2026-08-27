@@ -37,6 +37,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Workflow.Pinning
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   @doc """
@@ -95,6 +96,104 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         {:skipped, :not_fleet_branch}
     end
   end
+
+  defp ci_pending_or_stalled(pr_number, head, %Ctx{} = ctx) do
+    case CiGate.pending_stalled?(pr_number, head, ctx) do
+      :stalled ->
+        Logger.info(
+          "StepDispatcher: PR #{ctx.repo}##{pr_number} — CI PENDANTE au-delà de la borne → arch"
+        )
+
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :ci_stalled,
+          "plus de #{div(CiGate.pending_deadline_sec(), 60)} min sans verdict sur la tête de la PR"
+        )
+
+      _waiting_or_unknown ->
+        {:skipped, :ci_pending}
+    end
+  end
+
+  # ⚠ LE BUDGET DE `dispatch_rework` NE BORNE PAS CE CHEMIN, et c'est pourquoi ce détour existe.
+  # Il compare `count_change_request_rounds` — des reviews REQUEST_CHANGES — au budget de la carte.
+  # Un CI rouge n'en pose AUCUNE : le compteur reste immobile, `rounds <= budget` reste vrai, et le
+  # producteur est redispatché à chaque fois que le label `in_flight` retombe. Le label empêche la
+  # tempête de ticks ; rien n'empêche la suite infinie de rounds, chacun coûtant un pod.
+  #
+  # Le round dépensé est donc ENREGISTRÉ sur le ticket (`ci_rework_marker`), forge-natif comme les
+  # freins voisins : pas d'état en RAM, un compteur qu'un humain peut lire sur l'issue. Il se compte
+  # par `count_comments_marked/4`, le même compteur que le rail conflit — un seul mécanisme.
+  #
+  # ⚠ LE MARQUEUR EST POSÉ APRÈS UN SPAWN RÉEL, jamais avant. `dispatch_rework` rend
+  # `{:skipped, :role_busy}` ou `{:skipped, :role_at_capacity}` sans rien lancer : marquer là
+  # dépenserait un round que personne n'a joué, et le budget se viderait sur une file d'attente.
+  defp dispatch_ci_rework(pr_number, head, %Ctx{} = ctx) do
+    case Fleet.Forge.Protocol.parse_feature_branch(head) do
+      {:ok, {issue_n, _producer_role}} ->
+        with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
+             {:ok, spent} <-
+               ctx.forge.count_comments_marked(
+                 ctx.repo,
+                 issue_n,
+                 Fleet.Forge.Protocol.ci_rework_prefix(issue_n),
+                 ctx.forge_opts
+               ) do
+          if spent >= budget do
+            ArchEscalation.escalate_rework(
+              arch_seams(ctx),
+              pr_number,
+              head,
+              %{ci_reworks: spent, budget: budget}
+            )
+          else
+            record_ci_rework(pr_number, head, issue_n, ctx, dispatch_rework(pr_number, head, ctx))
+          end
+        else
+          # Un frein invérifiable escalade, il ne boucle pas en aveugle — même posture que
+          # `dispatch_rework`.
+          {:error, reason} ->
+            ArchEscalation.escalate_rework(
+              arch_seams(ctx),
+              pr_number,
+              head,
+              {:budget_unreadable, reason}
+            )
+        end
+
+      :error ->
+        {:skipped, :not_fleet_branch}
+    end
+  end
+
+  defp record_ci_rework(pr_number, head, issue_n, %Ctx{} = ctx, {:ok, _} = dispatched) do
+    sha = head_sha(head, pr_number, ctx)
+    marker = Fleet.Forge.Protocol.ci_rework_marker(issue_n, sha)
+
+    body =
+      "⚠ Rework demandé par une CI ROUGE (aucune review ne l'a demandé) — le round est compté : " <>
+        "les reworks CI s'accumulent sur ce ticket, l'architecte est saisi au-delà du budget de la " <>
+        "carte.\n\n" <> marker
+
+    case ctx.forge.post_comment(ctx.repo, issue_n, body, ctx.forge_opts) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        # Le round est JOUÉ (le pod tourne) et non compté : le frein sous-compte, il ne sur-compte
+        # pas. On le DIT plutôt que de refuser un rework déjà lancé.
+        Logger.warning(
+          "StepDispatcher: ci-rework marker NOT recorded on #{ctx.repo}##{issue_n} " <>
+            "(#{inspect(reason)}) — ce round ne comptera pas dans le frein"
+        )
+    end
+
+    dispatched
+  end
+
+  defp record_ci_rework(_pr_number, _head, _issue_n, %Ctx{}, not_dispatched), do: not_dispatched
 
   # Minimal forge seams without the optional publish counter read zero failures.
   defp count_publish_failures(%Ctx{} = ctx, issue_n) do
@@ -835,11 +934,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           "StepDispatcher: PR #{ctx.repo}##{pr_number} blocked by a RED CI → producer rework"
         )
 
-        dispatch_rework(pr_number, head, ctx)
+        dispatch_ci_rework(pr_number, head, ctx)
 
       {:ok, :pending} ->
-        # The rail is still running. Not an incident and not a decision — the next tick asks again.
-        {:skipped, :ci_pending}
+        # Le rail tourne encore — ni incident ni décision, le tick suivant redemande. MAIS PAS
+        # INDÉFINIMENT : sous une carte `ci: ignore`, ce site est le SEUL lecteur de la CI (le gate
+        # ne s'applique pas), et un job qu'aucun runner ne réclame y attendait en silence pour
+        # toujours. La borne est celle du gate, pas une seconde.
+        ci_pending_or_stalled(pr_number, head, ctx)
 
       # `:success`, `:none`, or an unreadable status: the CI is not what blocks (or we cannot say it
       # is), so the question returns to the one cause this function already knew.

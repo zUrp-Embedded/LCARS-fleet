@@ -23,6 +23,11 @@ name: CI
 # `catthehacker/ubuntu:act-latest` est l'image de référence de gitea/act : elle porte node et les
 # langages courants. Le checkout marche, et un projet python/bash/go n'a RIEN à configurer.
 #
+# ⚠ SI CETTE CI TE BLOQUE, LE FIX SE CONSOMME IMMÉDIATEMENT. Le runner joue le `ci.yml` du commit
+# TESTÉ — la tête de ta branche, pour `push` comme pour `pull_request` (le merge-ref porte la
+# version du head). Corriger ce fichier DANS ta branche et repousser suffit : la PR se débloque
+# elle-même. Il n'y a rien à merger d'abord, rien à sortir de la PR, et pas de chicken-egg.
+#
 # TU CHANGES D'IMAGE ? Mets le nom que tu veux sur `container:`. TU EN VEUX UNE PLUS PETITE pour un
 # projet mono-langage (ex. `python:3-slim`) ? Vérifie qu'elle porte node si tu gardes `checkout` —
 # sinon repli : `container:` sur une image qui l'a, ou `git clone` manuel avec le token du job.
@@ -36,7 +41,15 @@ jobs:
   # `<workflow> / <job> (<déclencheur>)` → ici `CI / no-harness-yet (pull_request)`, sous le glob
   # `CI / *` exigé par la protection de `main`. Le rail est vert, la première PR passe.
   #
-  # `no-harness-yet` est le SIGNAL « ce projet n'a pas encore de vraie suite » : le brief remis au
+  # ⚠ CE VERT EST EXIGE DE TOUT LE MONDE, ET CE QU'IL VEUT DIRE DEPEND DE LA CARTE. La protection de
+# `main` exige un statut `CI / *` quelle que soit la carte du projet — c'est le mur qui empeche une
+# main humaine de passer a cote du rail, et il ne se negocie pas. Une carte qui declare n'avoir rien
+# a prouver (`ci: ignore` — PoC jetable, smoke technique, audit sans code) doit donc quand meme
+# PRODUIRE ce statut : ce job le produit, et la ligne `${CI_STANCE}` dit alors que ce vert est un
+# RECU et pas une preuve. Sur une carte qui a quelque chose a prouver, la meme ligne invite a poser
+# la vraie suite ici.
+#
+# `no-harness-yet` est le SIGNAL « ce projet n'a pas encore de vraie suite » : le brief remis au
   # juge nomme les contextes qui ont tourné, donc « aucun harnais ici » devient une constatation
   # qu'il rend au lieu d'un fait invisible. Le renommer (ex. `test`) est exactement ce qu'un projet
   # FAIT quand il pose sa suite — la disparition de ce nom est le signal, et elle est gratuite.
@@ -50,6 +63,5 @@ jobs:
           echo "CI: le push a atteint la forge, la forge a dispatché, le runner exécute."
           echo "repo=${GITHUB_REPOSITORY} ref=${GITHUB_REF} sha=${GITHUB_SHA}"
           echo "image: node/python3/bash/git disponibles ; checkout OK."
-          echo "⚠ Ce vert ne prouve RIEN du code : ce projet n'a pas encore de harnais."
-          echo "   Remplace ce step par ta commande de test (## Test du CLAUDE.md),"
-          echo "   dans CE job — l'image porte déjà ta toolchain. Renomme le job = le signal."
+          echo "⚠ Ce vert ne prouve RIEN du code."
+          echo "   ${CI_STANCE}"

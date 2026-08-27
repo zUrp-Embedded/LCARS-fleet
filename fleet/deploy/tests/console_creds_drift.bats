@@ -77,7 +77,7 @@ EOF
 #!/usr/bin/env bash
 case "$1 $2" in
   "passwd bt")            echo "bt:x:1000:1000::/tmp/bt-home:/bin/bash" ;;
-  "group 2003")           echo "lcars-admin:x:2003:" ;;
+  "group 2003")           echo "lcars-spare:x:2003:" ;;
   "group 2001")           echo "fleet:x:2001:" ;;
   "group lcars-console")  echo "lcars-console:x:2002:" ;;
   *) exit 2 ;;
@@ -154,7 +154,7 @@ sendkeys_line() { grep -- "tmux send-keys -t .* C-u " "$CALLS" | head -1; }
 
   # The group NAME is resolved from the missing GID, never copied into the script -- the mode of
   # the token file is the source of truth elsewhere, and a second hard-coded name would drift.
-  [[ "$(sendkeys_line)" == *"newgrp lcars-admin"* ]]
+  [[ "$(sendkeys_line)" == *"newgrp lcars-spare"* ]]
 }
 
 @test "promotion: C-u clears the half-typed line before the text is typed" {
@@ -290,7 +290,7 @@ sendkeys_line() { grep -- "tmux send-keys -t .* C-u " "$CALLS" | head -1; }
   printf '%%0\tbash\n' > "$PANES"
   run_console
   [ "$status" -eq 0 ]
-  [[ "$(sendkeys_line)" == *"newgrp lcars-admin"* ]]
+  [[ "$(sendkeys_line)" == *"newgrp lcars-spare"* ]]
 }
 
 @test "a new group after the first repair spends the stamp again" {
@@ -303,7 +303,7 @@ sendkeys_line() { grep -- "tmux send-keys -t .* C-u " "$CALLS" | head -1; }
 #!/usr/bin/env bash
 case "$1 $2" in
   "passwd bt")  echo "bt:x:1000:1000::/tmp/bt-home:/bin/bash" ;;
-  "group 2003") echo "lcars-admin:x:2003:" ;;
+  "group 2003") echo "lcars-spare:x:2003:" ;;
   "group 2004") echo "lcars-extra:x:2004:" ;;
   # ⚠ KEEP IT: `sock_dir_for` fails HARD without this group, and the run dies before ever
   # reaching the drift branch -- the assertion would then blame the stamp for the stub.

@@ -128,12 +128,36 @@ defmodule Fleet.Project.Onboard.Scaffold do
 
     %{
       "REPO_NAME" => name,
+      "CI_STANCE" => ci_stance_line(Keyword.get(opts, :ci_stance, :required)),
       "REPO_DESCRIPTION" => pitch,
       "YEAR" => year,
       "MONTH" => month,
       "DAY" => day
     }
   end
+
+  # LE RAIL LIVRE EST VERT DES DEUX COTES — `protect_main` exige `CI / *` pour TOUT LE MONDE, et ce
+  # mur ne se negocie pas : c'est lui qui empeche une main humaine de passer a cote du rail. Ce qui
+  # change avec la carte n'est donc PAS l'existence du statut, c'est ce que ce vert VEUT DIRE, et
+  # personne ne le disait.
+  #
+  #   `required` — la carte a quelque chose a prouver : ce vert est un PLACEHOLDER, et le projet le
+  #               remplace par sa suite le jour ou il sait ce qu'il est.
+  #   `ignore`   — la carte declare n'avoir rien a prouver (PoC jetable, smoke technique, audit sans
+  #               code) : ce vert est le RECU du plancher, pas une preuve. Y poser une suite
+  #               gaterait un livrable que personne n'attend.
+  #
+  # Le defaut est `required` : une carte qu'on n'a pas su lire recoit l'invitation a prouver, jamais
+  # la dispense.
+  defp ci_stance_line(:ignore),
+    do:
+      "Cette carte declare n'avoir RIEN a prouver (ci: ignore) : ce vert est le recu du plancher " <>
+        "CI / *, pas une preuve. N'y pose pas de suite — elle gaterait un livrable que personne n'attend."
+
+  defp ci_stance_line(_required),
+    do:
+      "Remplace ce step par ta commande de test (## Test du CLAUDE.md), dans CE job — l'image porte " <>
+        "deja ta toolchain. Renommer le job EST le signal que ce projet a pose sa suite."
 
   defp expand(content, vars) do
     Enum.reduce(vars, content, fn {k, v}, acc -> String.replace(acc, "${#{k}}", v) end)
@@ -178,6 +202,41 @@ defmodule Fleet.Project.Onboard.Scaffold do
 
     case write_all(dir, missing) do
       :ok -> {:ok, missing |> Map.keys() |> Enum.sort()}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  RÉÉCRIT le rail CI de `dir` depuis le template — celui-là écrase, et c'est tout ce qui le sépare
+  de `ci_workflows/3`.
+
+  **POURQUOI DEUX PORTES ET PAS UN DRAPEAU.** `ci_workflows/3` n'écrase JAMAIS, délibérément : un
+  dépôt importé porte peut-être sa propre CI, et un humain en a peut-être écrit une à la main après
+  s'être cogné au mur. Les deux sont des réponses, et les remplacer par un placeholder serait pire
+  que le trou. Cette porte-ci fait exactement ce que l'autre refuse, donc elle ne peut pas être une
+  option de l'autre : on ne se trompe pas de porte par défaut.
+
+  **CE QU'ELLE EXISTE POUR DÉBLOQUER.** Un `ci.yml` cassé — image sans `node`, `runs-on:` qu'aucun
+  runner ne sert, workflow renommé hors de `CI` — ne produit plus le statut que la protection de
+  `main` exige. Aucune PR ne fusionne, et personne ne peut le réparer côté forge : les humains y
+  sont en `read`. Le rail livré, lui, est vert par construction (`no-harness-yet` echo). Le
+  remettre est la sortie de secours, et elle est EXPLICITE : personne ne l'appelle par accident.
+  """
+  @spec reset_ci_workflows(Path.t(), String.t(), keyword()) ::
+          {:ok, [String.t()]} | {:error, {:scaffold_write, String.t(), term()}}
+  def reset_ci_workflows(dir, name, opts) do
+    root = face_root("main", opts)
+    vars = template_vars(name, opts, "")
+
+    rail =
+      for path <- face_files(root),
+          rel = Path.relative_to(path, root),
+          String.starts_with?(rel, ".gitea/workflows/"),
+          into: %{},
+          do: {rel, expand(File.read!(path), vars)}
+
+    case write_all(dir, rail) do
+      :ok -> {:ok, rail |> Map.keys() |> Enum.sort()}
       {:error, _} = err -> err
     end
   end

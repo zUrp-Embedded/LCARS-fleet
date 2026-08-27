@@ -43,6 +43,16 @@ defmodule Fleet.Forge.ClientCiStateTest do
     ForgeClient.commit_ci_state("fleet/p", "deadbeef", opts)
   end
 
+  defp ci_failures(items) do
+    opts = [
+      base_url: "http://fake.test",
+      token: "t",
+      req_options: [plug: {Statuses, items}]
+    ]
+
+    ForgeClient.commit_ci_failures("fleet/p", "deadbeef", opts)
+  end
+
   defp ci_report(items) do
     opts = [
       base_url: "http://fake.test",
@@ -177,5 +187,63 @@ defmodule Fleet.Forge.ClientCiStateTest do
 
   test "no status at all is :none, distinct from :success" do
     assert {:ok, :none} = ci_state([])
+  end
+
+  # LES ROUGES NOMMES, ET EUX SEULS. Le pod est forge-blind : la cause d'un rework CI ne peut pas
+  # etre « va voir », elle doit voyager. Ce qui voyage est le nom du contexte en echec — nommer la
+  # liste complete accuserait les verts, qui n'ont rien fait.
+  describe "commit_ci_failures — la cause voyage, l'accusation reste juste" do
+    test "un contexte VERT n'est jamais nomme" do
+      items = [
+        st(1, "CI / lint (pull_request)", "success"),
+        st(2, "CI / test (pull_request)", "failure")
+      ]
+
+      assert {:ok, [%{context: "CI / test (pull_request)"}]} = ci_failures(items)
+    end
+
+    test "`error` compte comme un echec, `skipped` et `warning` non" do
+      items = [
+        st(1, "CI / a", "error"),
+        st(2, "CI / b", "skipped"),
+        st(3, "CI / c", "warning")
+      ]
+
+      assert {:ok, [%{context: "CI / a"}]} = ci_failures(items)
+    end
+
+    test "le DERNIER statut du contexte decide, pas l'ordre de la reponse" do
+      # Rouge puis vert : le contexte est repare, il ne doit accuser personne.
+      assert {:ok, []} = ci_failures([st(2, "CI / t", "success"), st(1, "CI / t", "failure")])
+      # Vert puis rouge : il est rouge, quel que soit l'ordre du payload.
+      assert {:ok, [%{context: "CI / t"}]} =
+               ci_failures([st(2, "CI / t", "failure"), st(1, "CI / t", "success")])
+    end
+
+    test "ORDRE INDETERMINABLE : on n'accuse PERSONNE — l'inverse de la porte de merge" do
+      # `commit_ci_state` garde tout le groupe pour y lire le PIRE : une porte de merge doit se
+      # fermer sur le doute. Ici la lecture DESIGNE un coupable, donc le doute innocente.
+      items = [
+        %{"id" => nil, "context" => "CI / t", "status" => "failure"},
+        %{"id" => nil, "context" => "CI / t", "status" => "success"}
+      ]
+
+      assert {:ok, :failure} = ci_state(items)
+      assert {:ok, []} = ci_failures(items)
+    end
+
+    test "description et target_url voyagent quand ils existent, `nil` quand ils sont vides" do
+      full =
+        Map.merge(st(1, "CI / t", "failure"), %{
+          "description" => "checkout failed",
+          "target_url" => "http://forge/run/7"
+        })
+
+      assert {:ok, [%{description: "checkout failed", target_url: "http://forge/run/7"}]} =
+               ci_failures([full])
+
+      blank = Map.merge(st(1, "CI / t", "failure"), %{"description" => "  ", "target_url" => ""})
+      assert {:ok, [%{description: nil, target_url: nil}]} = ci_failures([blank])
+    end
   end
 end

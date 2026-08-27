@@ -1735,6 +1735,43 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
+  Remet le rail CI d'un projet à l'état livré, sur `main`.
+  """
+  @spec reset_project_ci_rail(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def reset_project_ci_rail(full_name, args, state)
+      when is_binary(full_name) and is_map(args) do
+    case require_onboarder(state) do
+      {:error, reason} -> {:error, reason}
+      {:ok, role} -> do_reset_ci_rail(full_name, args, role)
+    end
+  end
+
+  defp do_reset_ci_rail(full_name, args, role) do
+    with {:ok, onboard} <- conforming_onboard() do
+      opts = [justification: Map.get(args, "justification"), reset_by: role]
+
+      case onboard.reset_ci_rail(full_name, opts) do
+        {:ok, %{repo: repo, outcome: outcome} = result} ->
+          {:ok,
+           %{
+             "status" => "ci_rail_reset",
+             "repo" => repo,
+             "outcome" => to_string(outcome),
+             "files" => Map.get(result, :files, []),
+             # FR : la seule sémantique que l'humain doit entendre à cet instant.
+             "note" =>
+               "le rail de `main` est remis a l'etat livre — une PR DEJA ouverte garde le sien " <>
+                 "jusqu'a ce que son producteur le corrige ou qu'elle rebase"
+           }
+           |> put_present("protection", Map.get(result, :protection))}
+
+        {:error, _reason} = err ->
+          err
+      end
+    end
+  end
+
+  @doc """
   Reopens an existing local project and ensures its per-project architect.
   """
   @spec open_project(String.t(), map()) :: {:ok, map()} | {:error, term()}

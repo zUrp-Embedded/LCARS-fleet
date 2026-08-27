@@ -45,6 +45,7 @@ setup() {
 seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   run env LCARS_UID_MAP_FILE="$MAP" LCARS_MASTER_TOKEN_FILE="$TOKF" \
           FORGE_BASE_URL="${FORGE_BASE_URL:-}" \
+          LCARS_PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
       bash -c 'source "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$HEAD" "$1"
 }
 
@@ -166,10 +167,33 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # Le home du siege vit dans le volume SOUS SON NOM. Re-deriver au boot suivant laisserait un home
   # orphelin et un compte qui ne le retrouve pas.
   printf '1\t1000\tancien\n' > "$MAP"
-  seat_sh 'resolve_admiral; seat_record neuf; echo "SIEGE=$LCARS_ADMIRAL"'
+  seat_sh 'resolve_admiral; prov_seat_record neuf 1000; echo "SIEGE=$LCARS_ADMIRAL"'
   [ "$status" -eq 0 ]
   run cat "$MAP"
   [ "$output" = "$(printf '1\t1000\tancien')" ]
+}
+
+@test "siege : la semence et la TABLE divergent -> REFUS, et le refus nomme les DEUX noms" {
+  # LA QUATRIEME BRANCHE, celle qui n'existait dans aucun rail. Le home du siege vit sous UN des
+  # deux noms : booter sous l'autre creerait un compte de plus et laisserait le premier orphelin.
+  # Ce n'est meme pas une devinette qu'on refuse — c'est un desaccord qu'on CONSTATE.
+  printf '1\t1000\tzoe\n' > "$MAP"
+  LCARS_ADMIRAL=amiral seat_sh 'resolve_admiral; echo "SIEGE=${LCARS_ADMIRAL:-<vide>}"'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DIVERGENCE"* ]]
+  [[ "$output" == *"amiral"* ]]
+  [[ "$output" == *"zoe"* ]]
+  # Et la table n'est PAS reecrite au passage : elle fait foi, c'est elle qui correspond au disque.
+  [ "$(awk -F"\t" '$1 == 1 { print $3 }' "$MAP")" = zoe ]
+}
+
+@test "siege : la semence et la table qui S ACCORDENT ne refusent pas" {
+  # Le pendant du precedent : sans lui, un refus pose sur toute semence passerait pour un succes.
+  printf '1\t1000\tzoe\n' > "$MAP"
+  LCARS_ADMIRAL=zoe seat_sh 'resolve_admiral; echo "SIEGE=$LCARS_ADMIRAL"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SIEGE=zoe"* ]]
+  [[ "$output" != *"DIVERGENCE"* ]]
 }
 
 @test "VERROU : aucun compose ne pose de defaut sur LCARS_ADMIRAL" {

@@ -26,7 +26,7 @@
   grep -q 'compose ps -q lcars' <<<"$body"
   grep -q '/opt/lcars/forge-gestures.sh' <<<"$body"
   # ⚠ ET AUCUN `sudo` : la promesse auditee de ce rail est de n'en jamais demander. Un operateur
-  # hors du groupe `lcars-admin` doit se faire REFUSER par les droits du fichier, pas contourner.
+  # sans droit sur le fichier doit se faire REFUSER par eux, pas les contourner.
   ! grep -q 'sudo' <<<"$body"
 }
 

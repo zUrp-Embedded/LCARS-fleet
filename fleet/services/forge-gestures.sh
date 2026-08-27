@@ -226,14 +226,14 @@ cmd_config_token() {
     || die "ce jeton ne s'authentifie pas sur $FORGE_BASE_URL (HTTP $code) — RIEN n'a ete ecrit" 3
 
   put_secret "$MASTER_TOKEN_FILE" "$tok"
-  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, root seul)"
+  echo "forge-gestures: jeton master pose et VERIFIE ($MASTER_TOKEN_FILE, $AUTHORITY_USER seul)"
 }
 
 cmd_config_seed() {
   local seed; seed="$(read_stdin_secret)"
   [[ -n "$seed" ]] || die "seed vide sur stdin"
   put_secret "$SEED_FILE" "$seed"
-  echo "forge-gestures: seed pose ($SEED_FILE, root seul)"
+  echo "forge-gestures: seed pose ($SEED_FILE, $AUTHORITY_USER seul)"
 }
 
 # ⚠ UN SEUL APPLY A LA FOIS. Deux `forge-apply` concurrents ecriraient le meme `terraform.tfstate`

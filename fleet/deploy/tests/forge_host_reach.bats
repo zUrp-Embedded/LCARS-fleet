@@ -837,3 +837,71 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # Les DEUX portes : `check` ne doit pas rendre CONFORME sur la forge d'un autre non plus.
   [ "$(code | grep -c 'docker_answers && ! forge_is_ours')" -ge 2 ]
 }
+
+# ─── LE SIEGE — le lien unix <-> #1 de la forge, et la branche qui n'existait pas ────────────────
+
+@test "siege: le lien s'ENREGISTRE a l'apply, et le check le voit ensuite" {
+  head_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
+    export PROV_FORGE_URL=""
+    PROV_FORGE_ADMIN="$(id -un)"
+    seat_binding_report apply
+    [ "$(awk -F"\t" "\$1 == 1 { print \$3 }" "$PROV_UID_MAP_FILE")" = "$(id -un)" ]
+    seat_binding_report check
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"enregistré"* ]]
+}
+
+@test "siege: le CHECK ne pose RIEN — un doctor qui ecrit n'est plus un doctor" {
+  head_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
+    export PROV_FORGE_URL=""
+    PROV_FORGE_ADMIN="$(id -un)"
+    seat_binding_report check
+    [ ! -e "$PROV_UID_MAP_FILE" ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NON enregistré"* ]]
+}
+
+@test "siege: DIVERGENCE — deux acteurs pour un role, et RIEN n'est enregistre" {
+  # La quatrieme branche. Renommer un compte unix ou un compte forge est une decision d'operateur :
+  # on NOMME le desaccord, on ne le tranche pas, et surtout on n'entérine pas un des deux noms.
+  head_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    printf "1\t1000\tzoe\n" > "$PROV_UID_MAP_FILE"
+    PROV_FORGE_ADMIN="$(id -un)"
+    seat_binding_report apply
+    [ "$(awk -F"\t" "\$1 == 1 { print \$3 }" "$PROV_UID_MAP_FILE")" = zoe ]
+  '
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deux acteurs pour un rôle"* ]]
+  [[ "$output" == *"$(id -un)"* ]]
+  [[ "$output" == *"zoe"* ]]
+}
+
+@test "siege: la TABLE nomme l'admin forge des qu'elle existe, PROV_HUMAN n'est que la semence" {
+  # Etape 3 : le nom cesse d'avoir deux sources. Sans ca, un renommage cote forge laissait ce module
+  # promouvoir et sonder l'adminite d'un compte que plus rien d'autre ne designait.
+  run bash -c "set -euo pipefail
+    export PROV_UID_MAP_FILE='$BATS_TEST_TMPDIR/map'
+    printf '1\t1000\tzoe\n' > \"\$PROV_UID_MAP_FILE\"
+    export PROV_HUMAN=quelquun-dautre
+    source '$HEAD' >/dev/null 2>&1
+    echo \"ADMIN=\$PROV_FORGE_ADMIN\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADMIN=zoe"* ]]
+}
+
+@test "siege: SANS table, PROV_HUMAN seme — le premier passage n'a rien a lire" {
+  run bash -c "set -euo pipefail
+    export PROV_UID_MAP_FILE='$BATS_TEST_TMPDIR/absente'
+    export PROV_HUMAN=loperateur
+    source '$HEAD' >/dev/null 2>&1
+    echo \"ADMIN=\$PROV_FORGE_ADMIN\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ADMIN=loperateur"* ]]
+}

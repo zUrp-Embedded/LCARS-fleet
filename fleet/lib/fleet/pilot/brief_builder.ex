@@ -196,7 +196,7 @@ defmodule Fleet.Pilot.BriefBuilder do
     with {:ok, %{"head" => %{"sha" => sha}}} when is_binary(sha) <-
            forge.get_pull(repo, pr, forge_opts),
          {:ok, state} <- forge.commit_ci_state(repo, sha, forge_opts) do
-      ci_state_section(state)
+      ci_state_section(state, forge, repo, sha, forge_opts)
     else
       err ->
         # Rail prefix = la FAÇADE dont ce module est extrait (cf. `render_rework_feedback`).
@@ -211,18 +211,56 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # `commit_ci_state` rend l'état AGRÉGÉ, jamais la liste des contextes rouges — et c'est voulu ici :
-  # `commit_ci_report` rendrait TOUS les contextes (verts inclus), donc les nommer accuserait les
-  # verts (relecture 2026-08-23). On donne l'état ; le run est à un clic, l'engineer y lit le job ROUGE.
-  defp ci_state_section(:failure) do
+  # LE POD NE PEUT PAS ALLER VOIR, DONC LA CAUSE VOYAGE. Il est forge-blind (`Fleet.Pilot`) et
+  # aucun verbe MCP ne rend l'état CI : lui prescrire « ouvre l'onglet Actions » est lui prescrire
+  # un geste fermé. `commit_ci_failures/3` rend les contextes ACTUELLEMENT rouges, et eux seuls —
+  # nommer la liste complète accuserait les verts.
+  defp ci_state_section(:failure, forge, repo, sha, forge_opts) do
     "## CI ROUGE — c'est ÇA qu'il faut corriger (pas une review)\n\n" <>
-      "Aucun juge n'a demandé de changement : ce rework vient de la CI, ROUGE sur la tête de la PR. " <>
-      "Ouvre l'onglet Actions du dépôt, repère le job/step en ÉCHEC (pas les verts), corrige, repush. " <>
-      "Piège récurrent : un `actions/checkout` qui meurt = l'image du job n'a pas `node` — vise une " <>
-      "image grasse via `container:` dans le `ci.yml` (cf. son en-tête)."
+      "Aucun juge n'a demandé de changement : ce rework vient de la CI, ROUGE sur la tête de la PR." <>
+      red_contexts_lines(forge, repo, sha, forge_opts) <>
+      "Le job nommé vit dans `.gitea/workflows/` de CE dépôt : c'est là que tu corriges, et le " <>
+      "runner rejoue le fichier de TA branche au push suivant — le fix se consomme sur la PR qu'il " <>
+      "débloque. Piège récurrent : un `actions/checkout` qui meurt = l'image du job n'a pas `node` " <>
+      "— vise une image grasse via `container:` (cf. l'en-tête du `ci.yml`)."
   end
 
-  defp ci_state_section(_green_or_pending), do: ""
+  defp ci_state_section(_green_or_pending, _forge, _repo, _sha, _forge_opts), do: ""
+
+  # Trois sorties, trois faits distincts : des rouges NOMMÉS, aucun rouge nommable (ordre des
+  # statuts indéterminable — on ne désigne personne), ou une lecture en échec, qui se DIT plutôt
+  # que de ressembler à la deuxième.
+  defp red_contexts_lines(forge, repo, sha, forge_opts) do
+    case forge.commit_ci_failures(repo, sha, forge_opts) do
+      {:ok, [_ | _] = reds} ->
+        "\n\nContexte(s) en ÉCHEC :\n" <>
+          Enum.map_join(reds, "\n", &red_context_line/1) <> "\n\n"
+
+      {:ok, []} ->
+        "\n\n"
+
+      {:error, reason} ->
+        Logger.warning(
+          "StepDispatcher: rework CI contexts UNREADABLE repo=#{repo} sha=#{sha} " <>
+            "reason=#{inspect(reason)} — le brief dit le rouge sans pouvoir le nommer"
+        )
+
+        "\n\nLes contextes en échec n'ont pas pu être lus sur la forge : le rouge est certain, " <>
+          "son nom ne l'est pas.\n\n"
+    end
+  end
+
+  defp red_context_line(%{context: ctx} = red) do
+    "  - `#{ctx}`" <>
+      case red.description do
+        nil -> ""
+        d -> " — #{d}"
+      end <>
+      case red.target_url do
+        nil -> ""
+        u -> " (#{u})"
+      end
+  end
 
   # The shape of the brief is a property of the role (cap-profile `brief_kind`), NOT a magic
   # role name. `judge` → defused GateBrief; everything else (`worker`, default) → issue body.
