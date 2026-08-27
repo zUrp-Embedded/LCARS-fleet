@@ -8,6 +8,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepDispatcher
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StubTaskQueue
 
   defp issue(fields) do
@@ -1767,6 +1768,71 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         )
 
       assert {:skipped, :ci_pending} = StepDispatcher.dispatch_review(pr, opts)
+    end
+
+    test "CI PENDANTE au-dela de la borne : l'attente s'arrete et le DIT — sinon elle est infinie" do
+      # Sous une carte `ci: ignore`, ce site est le SEUL lecteur de la CI : le gate ne s'applique
+      # pas. Un job qu'aucun runner ne reclame y attendait en silence, tick apres tick, pour
+      # toujours — « une attente ressemble a du travail », exactement la panne que le gate borne
+      # deja de son cote. Meme horloge, meme nombre, une seule doctrine.
+      vieux =
+        DateTime.utc_now()
+        |> DateTime.add(-(CiGate.pending_deadline_sec() + 60), :second)
+        |> DateTime.to_iso8601()
+
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"},
+              "updated_at" => vieux
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :pending
+          ]
+        )
+
+      assert {:skipped, {:merge_blocked_escalated, 6}} =
+               StepDispatcher.dispatch_review(
+                 pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+                 opts
+               )
+
+      refute_received {:spawned, _issue, _opts}
+    end
+
+    test "CI PENDANTE dont la DATE est illisible : on attend, on n'escalade pas sur ce qu'on n'a pas lu" do
+      opts =
+        dispatch_opts(
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"},
+              "updated_at" => "pas une date"
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :pending
+          ]
+        )
+
+      assert {:skipped, :ci_pending} =
+               StepDispatcher.dispatch_review(
+                 pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+                 opts
+               )
     end
 
     test "…mais une carte `ci: ignore` ne doit PAS attendre la CI, meme sur ce chemin" do

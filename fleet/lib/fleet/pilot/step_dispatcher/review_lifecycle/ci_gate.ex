@@ -361,6 +361,29 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # laisser en place remettrait le zero a portee du prochain appelant.
   defp age_sec(%DateTime{} = dt), do: DateTime.diff(DateTime.utc_now(), dt, :second)
 
+  @doc """
+  La CI attend-elle depuis trop longtemps sur la tête de `pr_number` ?
+
+  `Remediation.reconverge_on_ci/3` lit l'état CI APRÈS un merge refusé, et son `:pending` n'avait
+  aucune borne : un job qu'aucun runner ne réclame y boucle en silence, tick après tick, sans
+  jamais rougir. Ce gate-ci porte déjà la doctrine et le nombre — les exposer évite un second
+  cadran qui dériverait du premier.
+
+  Même horloge : `updated_at` de la PR, qui bouge à chaque push, donc per-sha et sans état à
+  retenir. `:unknown` quand la date est illisible — on attend plutôt que d'escalader sur ce qu'on
+  n'a pas lu, exactement comme `stalled_or_wait/4`.
+  """
+  @spec pending_stalled?(integer(), String.t(), Ctx.t()) :: :stalled | :waiting | :unknown
+  def pending_stalled?(pr_number, head, %Ctx{} = ctx) do
+    case head_commit(pr_number, head, ctx) do
+      {:ok, _sha, %DateTime{} = committed_at} ->
+        if age_sec(committed_at) > @pending_deadline_sec, do: :stalled, else: :waiting
+
+      _ ->
+        :unknown
+    end
+  end
+
   @doc "The deadline, exposed so a test names the same number the code uses."
   @spec pending_deadline_sec() :: pos_integer()
   def pending_deadline_sec, do: @pending_deadline_sec

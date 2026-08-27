@@ -37,6 +37,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Workflow.Pinning
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
 
   @doc """
@@ -93,6 +94,26 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
       :error ->
         {:skipped, :not_fleet_branch}
+    end
+  end
+
+  defp ci_pending_or_stalled(pr_number, head, %Ctx{} = ctx) do
+    case CiGate.pending_stalled?(pr_number, head, ctx) do
+      :stalled ->
+        Logger.info(
+          "StepDispatcher: PR #{ctx.repo}##{pr_number} — CI PENDANTE au-delà de la borne → arch"
+        )
+
+        ArchEscalation.escalate_merge_blocked(
+          arch_seams(ctx),
+          pr_number,
+          head,
+          :ci_stalled,
+          "plus de #{div(CiGate.pending_deadline_sec(), 60)} min sans verdict sur la tête de la PR"
+        )
+
+      _waiting_or_unknown ->
+        {:skipped, :ci_pending}
     end
   end
 
@@ -916,8 +937,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         dispatch_ci_rework(pr_number, head, ctx)
 
       {:ok, :pending} ->
-        # The rail is still running. Not an incident and not a decision — the next tick asks again.
-        {:skipped, :ci_pending}
+        # Le rail tourne encore — ni incident ni décision, le tick suivant redemande. MAIS PAS
+        # INDÉFINIMENT : sous une carte `ci: ignore`, ce site est le SEUL lecteur de la CI (le gate
+        # ne s'applique pas), et un job qu'aucun runner ne réclame y attendait en silence pour
+        # toujours. La borne est celle du gate, pas une seconde.
+        ci_pending_or_stalled(pr_number, head, ctx)
 
       # `:success`, `:none`, or an unreadable status: the CI is not what blocks (or we cannot say it
       # is), so the question returns to the one cause this function already knew.

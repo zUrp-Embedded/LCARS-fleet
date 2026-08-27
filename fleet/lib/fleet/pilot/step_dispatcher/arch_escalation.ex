@@ -194,6 +194,16 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         "les findings rendus par ces mêmes juges, et #{gray_zone_detail(reason)} Aucun conflit " <>
         "git, aucun refus de juge : c'est un arbitrage qui manque, et il te revient."
 
+  # ⚠ SA PROPRE CLAUSE, POUR LA MEME RAISON QUE `:verdict_gray_zone` : dans le fourre-tout, une CI
+  # pendante s'annoncerait comme un « échec de merge non classifié » et l'architecte chercherait un
+  # conflit git qui n'existe pas. Ici rien n'a échoué et rien n'est en désaccord — un job attend un
+  # runner qui ne vient pas, et le geste est côté infrastructure, pas côté code.
+  defp merge_blocked_cause(:ci_stalled, reason),
+    do:
+      "la CI est PENDANTE au-delà de la borne (#{reason}) → aucun verdict ne viendra tant qu'un " <>
+        "runner ne sert pas ce label. Rien à rebaser, rien à arbitrer : vérifie le runner et ses " <>
+        "labels, ou le `runs-on:` du workflow."
+
   defp merge_blocked_cause(_unknown, reason),
     do:
       "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
