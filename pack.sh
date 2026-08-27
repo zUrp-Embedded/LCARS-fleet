@@ -68,7 +68,7 @@ OUT="$PACK_DIR/${NAME}.tar.gz"
 # C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
 # passés. Le sauter ici rendrait le paquet indistinguable d'un `mix release` à la main.
 say "gate (compile strict + suite + bats + contrats + topologie + dialyzer)…"
-( cd fleet && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV=test mix gate ) || die "gate rouge — rien n'est empaqueté"
+( cd fleet && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
 
 say "release prod…"
 ( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"

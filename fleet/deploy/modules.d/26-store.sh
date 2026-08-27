@@ -93,8 +93,8 @@ store_completeness() {
 check() {
   local root spec sub mode owner path cur
   root="$(store_root)"
-  [[ -n "$root" ]] || { p_fail "LCARS_STORE_ROOT absent — le compose ne l'a pas pose"; verdict_check; return; }
-  store_completeness || { verdict_check; return; }
+  [[ -n "$root" ]] || { p_fail "LCARS_STORE_ROOT absent — le compose ne l'a pas pose"; verdict_check; }
+  store_completeness || { verdict_check; }
   while read -r spec; do
     read -r sub mode owner <<< "$spec"
     path="$root/$sub"
@@ -119,8 +119,8 @@ check() {
 apply() {
   local root spec sub mode owner
   root="$(store_root)"
-  [[ -n "$root" ]] || { p_fail "LCARS_STORE_ROOT absent — le compose ne l'a pas pose"; verdict_apply; return; }
-  store_completeness || { verdict_apply; return; }
+  [[ -n "$root" ]] || { p_fail "LCARS_STORE_ROOT absent — le compose ne l'a pas pose"; verdict_apply; }
+  store_completeness || { verdict_apply; }
   while read -r spec; do
     read -r sub mode owner <<< "$spec"
     if [[ "$mode" == "DELEGUE" ]]; then

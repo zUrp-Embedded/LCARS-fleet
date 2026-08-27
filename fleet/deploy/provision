@@ -208,7 +208,8 @@ unset _seat_login _seat_uid
 # La seule chose qui manquait était de le DIRE. Un opérateur qui lit « source 4c1820dd » en tête de
 # son apply sait ce qu'il pose ; sans cette ligne, il ne le sait jamais, et il n'a aucune raison
 # d'aller le chercher.
-export PROV_SOURCE_REV="$(prov_source_rev)"
+PROV_SOURCE_REV="$(prov_source_rev)"
+export PROV_SOURCE_REV
 
 # ─── update : pull VÉRIFIÉ du checkout, puis re-exec du runner pullé en apply ─────────────────────
 if [[ "$CMD" == "update" ]]; then
@@ -416,7 +417,7 @@ MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 uninstall_run() {
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
 
-  local rows preserve_roots=() journal_pkgs=() line cls obj mode owner sub
+  local rows preserve_roots=() journal_pkgs=() cls obj mode owner sub
   rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
 
   while read -r cls obj mode owner sub; do

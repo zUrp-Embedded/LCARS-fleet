@@ -56,10 +56,6 @@ TOFU_OWNER="${LCARS_TOFU_OWNER:-root:root}"
 
 tofu_rc() { echo "$TOFU_DIR/tofurc"; }
 
-# LES DEUX MODULES DE LA RECETTE : la racine et `instance/`. La liste se dérive de l'arbre, pas d'un
-# tableau en dur — c'est la recette que la machine jouera qui décide quels providers il lui faut.
-tofu_modules() { printf '%s\n%s\n' "$(repo_root)/fleet/deploy/deps" "$(repo_root)/fleet/deploy/deps/instance"; }
-
 # L'arch au vocabulaire d'OpenTofu, jamais `uname -m` — qui répond `x86_64` là où les releases
 # disent `amd64`, et qui répondrait pour la machine de build en cross-compilation.
 tofu_arch() {
