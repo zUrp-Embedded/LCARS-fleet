@@ -36,6 +36,12 @@ setup() {
   export LCARS_SERVICES_SETTLE=0
   export PROV_SUBSTRATE=linux
   export PROV_HUMAN="$(id -un)"
+  # ⚠ POSE PAR `deploy/provision`, COMME LES `PROV_*` AU-DESSUS — pas par ce module. Le runner derive
+  # l'uid du SIEGE (l'appelant de l'installeur) avant tout module, et six lecteurs l'attendent :
+  # GUARD B, son miroir BEAM, `is_fleet_human`, `45-sudoers-toolchain`, `console-humans.sh` et le
+  # plancher `uid_floor` du convergeur. Un decor qui l'omet ne decrit aucune machine reelle — et le
+  # temoin d'a cote mesure precisement ce que le module fait quand elle manque VRAIMENT.
+  export LCARS_SYSADMIN_UID="$(id -u)"
   export PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
@@ -110,6 +116,61 @@ mod() { run bash "$MOD" "$1"; }
   grep -q "^PROV_FORGE_ORG=" "$LCARS_SERVICES_ENV"
   grep -q "^PROV_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
   grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/fleet/deploy/provision$" "$LCARS_SERVICES_ENV"
+}
+
+@test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
+  # ⚠ CE N'ETAIT PAS LE CAS, ET LA LIGNE AVAIT POURTANT L'AIR D'UN POSEUR. Elle s'ecrivait
+  # `LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}` : le SEUL ecrivain d'une variable que six
+  # lecteurs attendent recopiait leur defaut au lieu de le remplacer. Les daemons lisaient donc 1000
+  # quel que soit le siege — d'accord avec lui par COINCIDENCE, sur une machine ou l'operateur est
+  # le premier uid, et faux partout ailleurs.
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  [ "$status" -eq 0 ]
+  grep -qx 'LCARS_SYSADMIN_UID=1007' "$LCARS_SERVICES_ENV"
+  refute grep -q 'LCARS_SYSADMIN_UID=1000' "$LCARS_SERVICES_ENV"
+}
+
+@test "sans uid de siege, l'ecriture est ABANDONNEE — jamais tronquee" {
+  # ⚠ LE TEMOIN DE LA CICATRICE, ET ELLE EST DE MOI. Le refus a d'abord ete ecrit DANS
+  # `services_env_body`, sous la forme `${LCARS_SYSADMIN_UID:?…}`. Cette fonction est lue par une
+  # substitution de processus : elle tourne dans un sous-shell dont le parent ignore le code de
+  # sortie. Mesure : le fichier sortait COUPE a cette ligne — `LCARS_LANDING_PORT` et
+  # `LCARS_PROVISION` absents — et l'apply rendait 0. Un refus qui produit un succes ampute est pire
+  # que le litteral qu'il remplacait.
+  #
+  # Ce temoin garde les DEUX moities : l'apply echoue, ET rien de partiel n'est pose.
+  unset LCARS_SYSADMIN_UID
+  mod apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"LCARS_SYSADMIN_UID non posé"* ]]
+  [ ! -e "$LCARS_SERVICES_ENV" ]
+}
+
+@test "le check NOMME le siege qu'il reserve, au lieu de le supposer" {
+  mod apply
+  mod check
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE "^OK .*siege : « $(id -un) » \(uid $(id -u)\)"
+}
+
+@test "un uid de siege que PERSONNE ne porte est un DRIFT — une garde qui ne garde rien" {
+  # 4294967294 : hors de toute plage d'uid attribuable. Une garde posee sur un uid inexistant a
+  # l'air posee et ne reserve rien — c'est exactement l'etat que le litteral 1000 produisait sur
+  # une machine dont le siege n'est pas le premier uid.
+  export LCARS_SYSADMIN_UID=4294967294
+  mod apply
+  mod check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE '^DRIFT .*ne correspond a AUCUN compte'
+}
+
+@test "un environnement SANS ligne de siege derive — le champ absent n'est pas un champ vert" {
+  mod apply
+  sed -i '/^LCARS_SYSADMIN_UID=/d' "$LCARS_SERVICES_ENV"
+  mod check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE '^DRIFT .*aucun LCARS_SYSADMIN_UID'
 }
 
 @test "la landing demarre EN PREMIER PLAN — sinon systemd lit un service mort en une seconde" {

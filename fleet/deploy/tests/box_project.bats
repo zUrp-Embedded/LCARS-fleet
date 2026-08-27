@@ -214,8 +214,8 @@ seed_project() {
 #
 # ⚠ CES TEMOINS EXISTENT PARCE QUE `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort des
 # que le conteneur demarre ; le provisionnement tourne DANS l'entrypoint et dure. Une boite qui n'a
-# rien pu provisionner annoncait « fleet up », se declarait *healthy* (son healthcheck teste le port
-# 22) et ne pouvait demarrer AUCUN pod — le seul endroit ou ca se lisait etant les logs, qu'on ne va
+# rien pu provisionner annoncait « fleet up », se declarait *healthy* (son healthcheck ne sonde que
+# des ports : ssh + le deck) et ne pouvait demarrer AUCUN pod — le seul endroit ou ca se lisait etant les logs, qu'on ne va
 # pas lire apres une commande qui a dit oui.
 #
 # Les quatre etats sont distincts PARCE QU'ILS APPELLENT QUATRE GESTES DIFFERENTS, et le quatrieme

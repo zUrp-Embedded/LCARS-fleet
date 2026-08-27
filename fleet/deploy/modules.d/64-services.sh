@@ -147,7 +147,12 @@ services_env_body() {
   echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
   echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
-  echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"
+  # ⚠ MÊME RÈGLE QUE LES DEUX LIGNES AU-DESSUS, ET ELLE N'ÉTAIT PAS APPLIQUÉE ICI. Le `:-1000` qui
+  # vivait là était le SEUL écrivain d'une variable que six lecteurs attendent — et il recopiait leur
+  # défaut au lieu de le remplacer. Un poseur qui repose le défaut ne pose rien : il rend seulement
+  # impossible de voir que personne n'a décidé. `deploy/provision` dérive la valeur du siège avant
+  # tout module ; son absence est refusée en tête d'`apply`, pas ici (cf. la cicatrice là-bas).
+  echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
   # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
@@ -295,6 +300,37 @@ probe_fleet_humans() {
   fi
 }
 
+# ─── LE SIEGE EST-IL CELUI QUE LES GARDES RESERVENT ? ──────────────────────────────────────────
+#
+# ⚠ CE QUI EST SONDE ICI EST LA VALEUR QUE LES DAEMONS LIRONT, pas celle que ce module vient de
+# calculer. Les deux peuvent diverger — un `apply` joue sous un operateur, la machine en change, ou
+# quelqu'un reinstalle depuis un autre compte — et c'est precisement l'ecart qu'aucun verdict ne
+# voyait quand la variable n'avait aucun poseur.
+#
+# ⚠ ON NE COMPARE PAS AU RE-DERIVE. Rejouer `${SUDO_USER:-$(id -un)}` ici rendrait la meme valeur
+# qu'a l'apply dans le cas nominal et une DERIVE FAUSSE des qu'un second sudoer passe le doctor.
+# Ce qui se verifie sans ambiguite, c'est que l'uid declare designe quelqu'un : une garde qui
+# reserve un uid que personne ne porte ne reserve rien, et elle a l'air posee.
+probe_seat_uid() {
+  local declared name
+  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1)"
+  if [[ -z "$declared" ]]; then
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — les gardes (GUARD B, is_fleet_human, uid_floor) retomberont sur le litteral 1000, qui n'est le siege que par coincidence"
+    return 0
+  fi
+  # ⚠ `|| true` PARCE QU'UN UID ABSENT EST UNE REPONSE, PAS UNE PANNE. `getent` sort en 2 quand la
+  # cle est introuvable ; sous le `pipefail` du module, la substitution echouait et `set -e` tuait la
+  # sonde — un DRIFT parfaitement nommable devenait un code 2 « erreur de sonde », et le check
+  # s'arretait la. Meme regle que le 404 de la forge ailleurs dans ce depot : une reponse negative
+  # PROUVEE se distingue d'une absence de reponse, et seule la seconde est une panne.
+  name="$(getent passwd "$declared" 2>/dev/null | cut -d: -f1 || true)"
+  if [[ -z "$name" ]]; then
+    p_drift "LCARS_SYSADMIN_UID=$declared ne correspond a AUCUN compte de cette machine — GUARD B reserve un uid que personne ne porte, donc il ne reserve rien"
+  else
+    p_ok "siege : « $name » (uid $declared) — GUARD B lui interdit de lancer une fleet"
+  fi
+}
+
 check() {
   local u
 
@@ -310,6 +346,12 @@ check() {
   [[ -s "$SERVICES_ENV" ]] \
     && p_ok "environnement des services posé ($SERVICES_ENV)" \
     || p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
+
+  # ⚠ ICI ET PAS AVANT LA BRANCHE SYSTEMD, et le témoin voisin porte la raison : `probe_fleet_humans`
+  # sort AVANT elle parce que la population est un fait de la machine, vrai sur les deux rails.
+  # Celle-ci lit `$SERVICES_ENV`, qui est un artefact du rail POSTE — la boîte n'en a pas, son
+  # environnement vient du conteneur. Sondée trop tôt, elle rendait ROUGE tout doctor de boîte.
+  probe_seat_uid
 
   for u in "${UNITS[@]}"; do
     if ! unit_current "$u"; then
@@ -348,11 +390,30 @@ apply() {
     verdict_apply
   fi
 
+  # ⚠ LE REFUS EST ICI, ET IL Y A ÉTÉ DÉPLACÉ APRÈS MESURE. Écrit dans `services_env_body` sous la
+  # forme `${LCARS_SYSADMIN_UID:?…}`, il ne refusait RIEN : cette fonction est lue par une
+  # substitution de processus (`< <(…)`, plus bas), donc elle tourne dans un SOUS-SHELL dont le
+  # parent ne voit jamais le code de sortie. Mesuré : le fichier sortait TRONQUÉ à cette ligne —
+  # `LCARS_LANDING_PORT` et `LCARS_PROVISION` disparus, et l'apply rendait 0. Un refus qui produit un
+  # succès amputé est pire que le littéral qu'il remplaçait.
+  [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
+    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que GUARD B, is_fleet_human et uid_floor lisent, et les trois retomberaient sur le littéral 1000"
+    verdict_apply
+  }
+
   ensure_dir "$(dirname "$SERVICES_ENV")" 0755 "$SERVICES_OWNER" || verdict_apply
   # 0640 root:$PROV_FLEET_GROUP : ce n'est pas un secret (une URL, des noms de groupes), mais il n'a
   # aucune raison d'être lisible par tout le monde, et le groupe fleet doit pouvoir le lire pour
   # diagnostiquer sans sudo.
-  write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" < <(services_env_body) \
+  # ⚠ `$( )` ET PAS `< <( )`, ET C'EST LA CLASSE ENTIÈRE QUI SE FERME. Une substitution de processus
+  # jette le code de sortie du corps : n'importe quelle panne à l'intérieur (une variable absente
+  # sous `set -u`, `forge_url` qui meurt) produisait un fichier COUPÉ à cette ligne-là et un apply
+  # VERT. Le témoin qui l'a montré est celui du port du deck — il lit une ligne écrite après.
+  # Une substitution de commande, elle, porte le rc, donc l'échec se dit au lieu de s'écrire à moitié.
+  local env_body
+  env_body="$(services_env_body)" \
+    || { p_fail "environnement des services non calculable — l'écriture est ABANDONNÉE, pas tronquée"; verdict_apply; }
+  write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" <<<"$env_body" \
     || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
   # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
   # lire deux écritures là où il n'y en a qu'une.)

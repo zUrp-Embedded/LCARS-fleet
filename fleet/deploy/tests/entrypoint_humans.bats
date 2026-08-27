@@ -6,7 +6,7 @@
 #
 # CE QUE CES TEMOINS FERMENT. La boite rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le
-# `exec sshd` et sa premiere passe, la boite se declare *healthy* — son healthcheck teste le port 22
+# `exec sshd` et sa premiere passe, la boite se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
 # — et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
 # MODULES, pas la population. Il n'avait aucune raison de douter.
 #

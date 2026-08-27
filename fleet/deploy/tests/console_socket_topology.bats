@@ -23,6 +23,7 @@
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../services/console.sh"
   LANDING="$BATS_TEST_DIRNAME/../../services/console-landing.sh"
+  DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
 
@@ -535,3 +536,43 @@ s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/
   [ "$status" -eq 0 ]
   [ -n "$(ttyd_line console.sock)" ]
 }
+
+# ─── LA CONSEQUENCE QUE PERSONNE N'AVAIT TIREE : LA SONDE DOIT SUIVRE LA PROMESSE ───────────────
+#
+# Tout ce fichier etablit un fait : le terminal n'a plus de port, la landing est le SEUL chemin vers
+# lui. Le healthcheck de l'image, lui, etait reste sur `:22` — vrai du temps ou chaque console
+# publiait son port, faux depuis. Une boite dont le deck etait mort se declarait donc SAINE parce
+# que sshd repondait, alors que plus personne ne pouvait entrer.
+#
+# ⚠ CES TEMOINS LISENT LE `Dockerfile`, PAS UNE BOITE. Ce qui se mesure est la SONDE DEMANDEE — un
+# conteneur vivant serait une autre suite, et une autre machine.
+
+hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
+
+@test "la sonde de l'image teste le DECK, pas seulement sshd" {
+  # Sans cette moitie, le healthcheck mesure une porte d'admin et la presente comme la sante de la
+  # boite. Les deux ports sont testes : sshd reste la porte de secours, le deck est l'entree.
+  hc_cmd | grep -q '/dev/tcp/127.0.0.1/22'
+  hc_cmd | grep -q 'LCARS_LANDING_PORT'
+}
+
+@test "la sonde lit le PORT depuis l'environnement, jamais un littéral" {
+  # `20999` est un defaut, pas une valeur : `LCARS_LANDING_PORT` le deplace. Une sonde qui grave le
+  # nombre testerait un port ou personne n'ecoute des qu'un operateur le change — et elle rendrait
+  # rouge une boite parfaitement saine.
+  hc_cmd | grep -q '${LCARS_LANDING_PORT:-20999}'
+}
+
+@test "une landing DESACTIVEE ne rend pas la boite malade — c'est un reglage, pas une panne" {
+  # `LCARS_LANDING=0` est supporte par l'entrypoint. Sonder son port quand meme transformerait un
+  # reglage en panne definitive : la boite serait *unhealthy* a vie, sans que rien ne soit casse.
+  hc_cmd | grep -q '${LCARS_LANDING:-1}'
+}
+
+@test "la sonde de l'image est du JSON valide — la forme exec, pas un shell devine" {
+  # Un `CMD` en forme exec est un tableau JSON. Une guillemet mal echappee ne casse pas le build :
+  # docker retombe sur la forme SHELL et execute la ligne autrement que ce qu'on a ecrit.
+  run python3 -c 'import json,sys; a=json.loads(sys.stdin.read().strip().removeprefix("CMD ")); sys.exit(0 if len(a)==3 and a[0]=="bash" else 1)'  <<< "$(hc_cmd)"
+  [ "$status" -eq 0 ]
+}
+

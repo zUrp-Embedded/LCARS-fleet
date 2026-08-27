@@ -262,7 +262,7 @@ cmd_up() {
 # ⚠ `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort dès que le conteneur démarre ; le
 # provisionnement, lui, tourne DANS l'entrypoint et dure (le premier boot télécharge ~310 Mo de
 # binaire claude). Une boîte qui n'a rien pu provisionner annonçait donc « fleet up », se déclarait
-# *healthy* — son healthcheck teste le port 22 — et ne pouvait démarrer aucun pod. Le seul endroit
+# *healthy* — son healthcheck ne sonde que des ports : ssh + le deck — et ne pouvait démarrer aucun pod. Le seul endroit
 # où ça se lisait était les logs du conteneur, qu'on ne va pas lire après une commande qui a dit oui.
 #
 # ⚖ ON NE REFUSE PAS LE DÉMARRAGE POUR AUTANT, et ce n'est pas un demi-geste : l'entrypoint porte
@@ -305,7 +305,7 @@ await_provision_verdict() {
   # ⚠ « PROVISIONNEMENT CONVERGÉ » NE VEUT PAS DIRE « QUELQU'UN PEUT S'EN SERVIR ». Le rc ci-dessus
   # mesure les modules ; il ne mesure PAS la population d'humains, parce que le convergeur tournait
   # en boucle détachée et que sa première passe arrivait après. Une boîte pouvait donc annoncer
-  # CONVERGÉ, se déclarer *healthy* (le healthcheck teste le port 22) et refuser tout
+  # CONVERGÉ, se déclarer *healthy* (le healthcheck ne sonde que des ports : ssh + le deck) et refuser tout
   # « fleet_v2 start » — le rail poste avait fermé exactement ça le 2026-08-25, celui-ci non.
   #
   # L'entrypoint publie désormais le verdict de la sonde — la MÊME que le rail poste, celle de

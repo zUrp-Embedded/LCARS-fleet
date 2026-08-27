@@ -182,6 +182,22 @@ fi
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
 LCARS_UID="${LCARS_UID:-1000}"
+
+# ⚠ UN SEUL FAIT, ET IL AVAIT DEUX NOMS DONT UN SEUL ETAIT POSE. `LCARS_UID` est l'uid AUQUEL ce
+# fichier cree le siege (`useradd -u`, plus bas) ; `LCARS_SYSADMIN_UID` est celui que les gardes
+# RESERVENT — GUARD B dans `bin/fleet_v2`, son miroir dans `config/runtime.exs`, `is_fleet_human`,
+# et le plancher `uid_floor` du convergeur. Rien ne posait le second dans cette boite : ni le
+# compose (son bloc `environment:` ne le nomme pas), ni ce fichier. Les six lecteurs retombaient
+# donc sur leur litteral `1000` pendant que le siege etait, lui, a `LCARS_UID`.
+#
+# LES DEUX DEFAUTS VALANT 1000, ILS S'ACCORDAIENT PAR COINCIDENCE. `LCARS_UID=1005` — une molette
+# documentee (`deploy/box`) — suffisait a les separer : le siege naissait a 1005, GUARD B reservait
+# 1000, et admiral pouvait lancer une fleet dont les pods heritent de son uid sudo-capable.
+#
+# Un fait, un nom : `LCARS_UID` reste l'ENTREE de ce rail (c'est par elle qu'un operateur choisit),
+# `LCARS_SYSADMIN_UID` est le NOM DU FAIT que tout le reste lit. Le second derive du premier ici,
+# une fois, avant que quoi que ce soit ne le lise.
+export LCARS_SYSADMIN_UID="$LCARS_UID"
 PROVISION=/opt/lcars/fleet/deploy/provision
 HOST_KEYS_DIR=/home/.lcars-container/ssh
 # ⚠ LA MEME TABLE QUE LE CONVERGEUR, ET C'EST TOUT L'INTERET. Le siege est le #1 de la forge : son
@@ -446,7 +462,7 @@ fi
 #
 # ⚠ ET LE VERDICT SE PUBLIE, parce que « jamais fatal » n'a jamais voulu dire « jamais dit ». Il ne
 # vivait que dans les logs du conteneur, donc `fleet/deploy/box up` rendait la main sur une boîte qui
-# annonce « fleet up », se déclare *healthy* (son healthcheck teste le port 22) et ne peut démarrer
+# annonce « fleet up », se déclare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck) et ne peut démarrer
 # AUCUN pod. Un opérateur n'a aucune raison d'aller lire des logs après une commande qui a dit oui.
 #
 # `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
@@ -495,7 +511,7 @@ publier_verdicts() {
 # `Restart=always`, `RestartSec=10` et `StartLimitBurst=5` ; ce fichier lançait `setsid <cmd> &` et
 # passait à la suite. tini est PID 1 et RÉCOLTE les orphelins — il n'en relance aucun. Un convergeur
 # qui meurt restait mort jusqu'au prochain `box restart`, sur une boîte qui reste *healthy* (son
-# healthcheck teste le port 22). Le rail poste testait donc des politiques de redémarrage que la
+# healthcheck ne sonde que des ports : ssh + le deck). Le rail poste testait donc des politiques de redémarrage que la
 # production n'avait pas, et la production avait un mode de panne que rien ne testait.
 #
 # ⚠ ET LE SUPERVISEUR NE PEUT PAS VIVRE ICI. Ce script finit sur `exec /usr/sbin/sshd -D -e` : le
@@ -538,7 +554,7 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   #
   # ⚠ CETTE BOÎTE RENDAIT LA MAIN SANS SAVOIR SI QUELQU'UN POUVAIT LANCER UNE FLEET. La boucle poll
   # à 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer un boot. Entre le
-  # `exec sshd` et son premier tour, la boîte se déclare *healthy* (son healthcheck teste le port 22)
+  # `exec sshd` et son premier tour, la boîte se déclare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck)
   # et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 : il n'a aucune raison de
   # douter. C'est exactement la panne que le rail poste a fermée le 2026-08-25, restée ouverte ici —
   # et le rail qui compte le moins était donc le mieux vérifié des deux.
@@ -623,8 +639,21 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # le SEUL chemin vers eux — c'était le but — donc s'il ne démarre pas, aucune console n'est
   # atteignable, et seul ssh reste. Un message de repli qui annonce un repli disparu ment à
   # l'opérateur au pire moment : celui où quelque chose vient déjà d'échouer.
+  #
+  # ⚠ PAR `launch`, ET AVEC `--foreground` : LES DEUX MOITIÉS COMPTENT. Ce bloc appelait le script
+  # nu, qui se met lui-même en arrière-plan (`console-landing.sh`, dernière ligne) et rend la main.
+  # tini récolte l'orphelin, il n'en relance aucun : un deck mort restait mort jusqu'au prochain
+  # « box restart », et la boîte continuait de se déclarer saine. Le superviseur existait déjà et
+  # tenait le convergeur et les deux exécuteurs — la landing était le seul persistant hors de lui.
+  #
+  # `--foreground` fait `exec` sur `console-deck.py` : l'enfant de `supervise.sh` EST le deck, donc
+  # son `wait` mesure le bon processus et son relais de TERM l'atteint. SANS lui, on superviserait
+  # un script qui rend la main aussitôt — donc une relance immédiate, en boucle, jusqu'à la borne.
+  # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
+  # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
-    /opt/lcars/console-landing.sh \
+    launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
+      /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"
   fi
 else

@@ -10,7 +10,7 @@
 #                `StartLimitBurst=5`, `StartLimitIntervalSec=60`. Un service qui tombe revient.
 #   rail boite   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
 #                il n'en relance aucun. Un convergeur mort restait mort jusqu'au prochain
-#                `box restart`, sur une boite qui reste *healthy* (healthcheck = port 22).
+#                `box restart`, sur une boite qui reste *healthy* (healthcheck = des ports, ssh + le deck).
 #
 # Le rail poste testait donc des politiques de redemarrage que la PRODUCTION n'avait pas, et la
 # production avait un mode de panne que rien ne testait.

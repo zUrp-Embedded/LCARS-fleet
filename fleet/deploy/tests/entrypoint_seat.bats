@@ -28,6 +28,9 @@ setup() {
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT. Ce fichier lit `LCARS_ADMIRAL` et `FORGE_BASE_URL` : un
   # temoin qui les herite mesure la machine qui le lance, pas la regle.
   unset LCARS_ADMIRAL FORGE_BASE_URL LCARS_UID_MAP_FILE LCARS_MASTER_TOKEN_FILE
+  # L'uid du siege et sa reservation : meme regle de decor. Les heriter ferait mesurer la machine
+  # qui lance les temoins au lieu de la derivation.
+  unset LCARS_UID LCARS_SYSADMIN_UID
   MAP="$BATS_TEST_TMPDIR/forge-uid.map"
   TOKF="$BATS_TEST_TMPDIR/forge-master.token"
   # LA TETE SEULE : tout ce qui precede l'etape 1. La resolution y vit, et ca evite d'embarquer le
@@ -40,6 +43,33 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   run env LCARS_UID_MAP_FILE="$MAP" LCARS_MASTER_TOKEN_FILE="$TOKF" \
           FORGE_BASE_URL="${FORGE_BASE_URL:-}" \
       bash -c 'source "$1" >/dev/null 2>&1; shift; eval "$@"' _ "$HEAD" "$1"
+}
+
+# ─── L'UID DU SIEGE : UN FAIT, UN NOM ──────────────────────────────────────────────────────────
+#
+# ⚠ IL Y AVAIT DEUX NOMS ET UN SEUL POSEUR. `LCARS_UID` est l'uid AUQUEL cet entrypoint cree le
+# siege (`useradd -u`) ; `LCARS_SYSADMIN_UID` est celui que les gardes RESERVENT — GUARD B dans
+# `bin/fleet_v2`, son miroir dans `config/runtime.exs`, `is_fleet_human`, et le plancher `uid_floor`
+# du convergeur. Rien ne posait le second dans la boite : ni le compose, ni ce fichier.
+#
+# LES DEUX DEFAUTS VALANT 1000, ILS S'ACCORDAIENT PAR COINCIDENCE — et le second temoin ci-dessous
+# est le seul des deux qui aurait attrape le defaut : le premier passe aussi bien avant qu'apres.
+
+@test "siege : LCARS_SYSADMIN_UID est POSE, pas laisse a la coincidence de deux defauts" {
+  seat_sh 'echo "UID=$LCARS_UID SYSADMIN=$LCARS_SYSADMIN_UID"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UID=1000 SYSADMIN=1000"* ]]
+}
+
+@test "siege : la garde SUIT l'uid du siege — le cas ou les deux defauts se separent" {
+  # ⚠ LE TEMOIN QUI COMPTE. `LCARS_UID` est une molette documentee (`deploy/box`) : la tourner
+  # creait le siege a 1005 pendant que GUARD B continuait de reserver 1000. admiral pouvait alors
+  # lancer une fleet, et ses pods heritent de son uid sudo-capable — l'exact inverse de la sandbox
+  # que la garde existe pour tenir.
+  export LCARS_UID=1005
+  seat_sh 'echo "UID=$LCARS_UID SYSADMIN=$LCARS_SYSADMIN_UID"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UID=1005 SYSADMIN=1005"* ]]
 }
 
 @test "siege : la TABLE du convergeur fait foi — aucune forge n'est interrogee" {

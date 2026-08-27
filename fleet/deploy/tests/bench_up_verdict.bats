@@ -198,7 +198,7 @@ run_bench() {
 # MEME FAUTE QUE 6-133, AU SITE D'A COTE. L'entrypoint mesure la convergence de la boite et l'ecrit
 # dans `/run/lcars-provision.rc` — precisement parce qu'un echec de convergence NE TUE PAS le
 # conteneur : la boite doit rester joignable pour etre reparee. Elle survit donc a son propre echec,
-# se declare *healthy* (son healthcheck teste le port 22), et `bench-up` ne lisait pas le fichier.
+# se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck), et `bench-up` ne lisait pas le fichier.
 # Un banc dont la boite ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
 #
 # Le geste operateur (`deploy/box`, `await_provision_verdict`) le lisait deja. Deux chemins qui
