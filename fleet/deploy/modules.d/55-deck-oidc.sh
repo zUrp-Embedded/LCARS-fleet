@@ -196,7 +196,7 @@ registered_uris() {
 # pas. Un mensonge operationnel, pas une lacune de confort.
 uris_converged() { # uris_converged <uris-voulues, separees par espace>
   local want got
-  # shellcheck disable=SC2086 -- $1 est une LISTE separee par des espaces, a eclater
+  # shellcheck disable=SC2086 # $1 est une LISTE separee par des espaces, a eclater
   want="$(printf '%s\n' $1 | sort | tr '\n' ' ')"
   got="$(registered_uris) "
   [[ "$want" == "$got" ]]

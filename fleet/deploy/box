@@ -178,7 +178,7 @@ project_config_files() {
   local ids
   ids="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
   [[ -n "$ids" ]] || return 0
-  # shellcheck disable=SC2086 -- liste d'ids séparés par des blancs, à éclater
+  # shellcheck disable=SC2086 # liste d'ids séparés par des blancs, à éclater
   "$DOCKER" inspect $ids \
     --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null | sort -u
 }
