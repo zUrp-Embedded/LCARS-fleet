@@ -2073,7 +2073,10 @@ defmodule Fleet.MCP.PodToolsTest do
          "justification" => "le poc est devenu serieux"
        }},
       {"project_reset_ci_rail",
-       %{"full_name" => "fleet/demo-proj", "justification" => "le rail est casse, aucune PR ne merge"}},
+       %{
+         "full_name" => "fleet/demo-proj",
+         "justification" => "le rail est casse, aucune PR ne merge"
+       }},
       {"project_close", %{"full_name" => "fleet/demo-proj"}},
       {"project_adopt", %{"name" => "demo-proj", "catalogue" => "fleet"}},
       {"project_import",

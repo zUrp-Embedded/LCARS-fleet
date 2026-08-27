@@ -64,6 +64,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
   # Stub seams for dispatch_issue/2
   defmodule StubForge do
     def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+
     # ⚠ BAVARD SUR UN SEUL MARQUEUR, et c'est ce qui permet de l'épingler sans changer la boîte aux
     # lettres des 87 autres tests : eux ne postent jamais de marqueur ci-rework.
     def post_comment(_repo, n, body, _opts) do
@@ -74,6 +75,7 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       {:ok, :posted}
     end
+
     def start_stopwatch(_repo, _n, _opts), do: :ok
 
     # Regression guard: signals `n` — proves that `promote_pr` (poller-driven merge,
@@ -197,7 +199,6 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # what every pre-existing test of this module describes: their policy blocks are re-requests.
     def commit_ci_state(_repo, _sha, opts),
       do: {:ok, Keyword.get(opts, :_test_ci, :none)}
-
   end
 
   defmodule StubLoader do

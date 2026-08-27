@@ -1158,7 +1158,8 @@ defmodule Fleet.Forge.Client do
   générique, qui ne nomme personne.
   """
   @spec commit_ci_failures(String.t(), String.t(), Keyword.t()) ::
-          {:ok, [%{context: String.t(), description: String.t() | nil, target_url: String.t() | nil}]}
+          {:ok,
+           [%{context: String.t(), description: String.t() | nil, target_url: String.t() | nil}]}
           | {:error, term()}
   def commit_ci_failures(repo, sha, opts \\ []) when is_binary(repo) and is_binary(sha) do
     with {:ok, config} <- resolve_config(opts),
