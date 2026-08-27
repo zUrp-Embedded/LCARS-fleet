@@ -232,9 +232,11 @@ check() {
     esac
   fi
 
-  command -v "$TTYD_BIN" >/dev/null \
-    && p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))" \
-    || p_drift "ttyd absent — la console web n'a AUCUN serveur derrière sa socket (page noire)"
+  if command -v "$TTYD_BIN" >/dev/null; then
+    p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))"
+  else
+    p_drift "ttyd absent — la console web n'a AUCUN serveur derrière sa socket (page noire)"
+  fi
 
   for n in "${HELPERS[@]}"; do
     if [[ ! -x "$HELPERS_DIR/$n" ]]; then
@@ -256,18 +258,22 @@ check() {
     fi
   done < <(deck_static_table)
 
-  [[ -x "$TOOLCHAIN_BIN" ]] \
-    && p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)" \
-    || p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
+  if [[ -x "$TOOLCHAIN_BIN" ]]; then
+    p_ok "convergeur de toolchain posé ($TOOLCHAIN_BIN)"
+  else
+    p_drift "$TOOLCHAIN_BIN absent — la règle sudoers de 45-sudoers-toolchain désigne un binaire qui n'existe pas"
+  fi
 
   # ⚠ SON ABSENCE NE SE VOIT QUE SOUS UID HUMAIN, ET C'EST POURQUOI ELLE SE DIT ICI. Les services
   # tournent en root et lisent encore les jetons directement ; ce qui casse sans ce binaire, ce sont
   # les gestes d'OPÉRATEUR — `lcars publish run`, `lcars approve`, la boîte de réception du siège —
   # et ils ne cassent qu'au moment où quelqu'un les tape. Un check qui ne le nomme pas laisse la
   # panne se découvrir au pire moment, avec « commande introuvable » pour tout diagnostic.
-  [[ -x "$AUTHORITY_ASK_BIN" ]] \
-    && p_ok "client d'autorité posé ($AUTHORITY_ASK_BIN)" \
-    || p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
+  if [[ -x "$AUTHORITY_ASK_BIN" ]]; then
+    p_ok "client d'autorité posé ($AUTHORITY_ASK_BIN)"
+  else
+    p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
+  fi
 
   for n in "${EMBEDDED[@]}"; do
     [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && break

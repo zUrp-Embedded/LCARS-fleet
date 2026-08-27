@@ -453,8 +453,11 @@ check() {
   fi
   if forge_up; then
     p_ok "forge du poste vivante ($LOCAL_URL)$(forge_reach_note)"
-    [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)" \
-      || p_drift "forge vivante mais AUCUNE autorité ($PROV_MASTER_TOKEN_FILE) — l'apply la minte"
+    if [[ -s "$PROV_MASTER_TOKEN_FILE" ]]; then
+      p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)"
+    else
+      p_drift "forge vivante mais AUCUNE autorité ($PROV_MASTER_TOKEN_FILE) — l'apply la minte"
+    fi
     # ⚖ D7 : le propriétaire de la machine administre sa forge. Ça se SONDE, sinon la dérive
     # n'existe que le jour où quelqu'un essaie d'ouvrir la page d'administration et se fait jeter.
     seat_binding_report check

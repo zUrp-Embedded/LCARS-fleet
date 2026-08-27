@@ -168,9 +168,12 @@ apply() {
   # CONVERGE, ne se contente pas de creer : un compte pose a la main avec un shell valide est une
   # porte ouverte que ce module doit refermer, pas constater.
   if [[ "$(shell_of "$AUTHORITY_USER")" != "$NOLOGIN" ]]; then
-    run_quiet "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER" \
-      && { PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$AUTHORITY_USER -> $NOLOGIN"; } \
-      || p_fail "$AUTHORITY_USER : shell non convergé vers $NOLOGIN"
+    if run_quiet "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1))
+      p_chg "$AUTHORITY_USER -> $NOLOGIN"
+    else
+      p_fail "$AUTHORITY_USER : shell non convergé vers $NOLOGIN"
+    fi
   fi
 
   ensure_member "$AUTHORITY_USER" "$PROV_FLEET_GROUP" || verdict_apply
@@ -193,9 +196,12 @@ apply() {
   fi
 
   if [[ "$(shell_of "$SYSTEM_USER")" != "$NOLOGIN" ]]; then
-    run_quiet "$USERMOD" -s "$NOLOGIN" -- "$SYSTEM_USER" \
-      && { PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$SYSTEM_USER -> $NOLOGIN"; } \
-      || p_fail "$SYSTEM_USER : shell non convergé vers $NOLOGIN"
+    if run_quiet "$USERMOD" -s "$NOLOGIN" -- "$SYSTEM_USER"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1))
+      p_chg "$SYSTEM_USER -> $NOLOGIN"
+    else
+      p_fail "$SYSTEM_USER : shell non convergé vers $NOLOGIN"
+    fi
   fi
 
   verdict_apply

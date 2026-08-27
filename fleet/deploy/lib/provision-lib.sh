@@ -238,8 +238,12 @@ fi
 # Le remplissage reste A L'INTERIEUR de la teinte : des espaces restent des espaces, l'alignement ne
 # bouge pas, et il n'y a plus aucun endroit ou un motif puisse etre coupe en deux.
 p_step() { printf '%s>>    %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
-p_ok()   { printf '%sOK    %s:%s %s\n' "$_PG" "$PROV_MODULE_TAG" "$_PN" "$*"; }
-p_chg()  { printf '%sPOSÉ  %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
+# ⚠ LES DEUX RENDENT 0, EXPLICITEMENT. Sans ce `return`, leur code de sortie est celui de `printf` —
+# donc une ecriture qui echoue (EPIPE sur un pipe ferme, disque plein) fait partir le `|| p_drift`
+# des appelants : un drift ANNONCE que rien ne justifie, sur un etat qui etait conforme. Une fonction
+# qui RAPPORTE ne doit pas pouvoir renverser le verdict qu'elle rapporte.
+p_ok()   { printf '%sOK    %s:%s %s\n' "$_PG" "$PROV_MODULE_TAG" "$_PN" "$*"; return 0; }
+p_chg()  { printf '%sPOSÉ  %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; return 0; }
 p_drift(){ printf '%sDRIFT %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
 p_warn() { printf '%sWARN  %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; }
 p_fail() { printf '%sFAIL  %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }

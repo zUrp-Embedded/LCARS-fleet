@@ -80,9 +80,11 @@ check() {
     p_drift "$TOFU_BIN absent — la structure de la forge est le territoire de tofu, et rien ne peut la poser sans lui"
   else
     local v; v="$(tofu_installed_version)"
-    [[ "$v" == "$TOFU_VERSION" ]] \
-      && p_ok "tofu $v posé ($TOFU_BIN)" \
-      || p_drift "tofu $v ≠ version épinglée $TOFU_VERSION ($TOFU_BIN) — la recette tournerait avec d'autres providers"
+    if [[ "$v" == "$TOFU_VERSION" ]]; then
+      p_ok "tofu $v posé ($TOFU_BIN)"
+    else
+      p_drift "tofu $v ≠ version épinglée $TOFU_VERSION ($TOFU_BIN) — la recette tournerait avec d'autres providers"
+    fi
   fi
 
   if [[ -s "$(tofu_rc)" && -d "$TOFU_DIR/providers" ]]; then

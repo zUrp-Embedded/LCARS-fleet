@@ -196,9 +196,11 @@ converge_authority_modes() {
       if [[ "$PROV_MODE" == "check" ]]; then
         p_drift "$f est $cur — attendu 600 $want (aucun process d'humain ne doit pouvoir le lire)"
       else
-        chown "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" "$f" && chmod 0600 "$f" \
-          && p_chg "$f -> 0600 $want (seul le service d'autorite l'ouvre)" \
-          || p_fail "$f : mode non convergé"
+        if chown "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" "$f" && chmod 0600 "$f"; then
+          p_chg "$f -> 0600 $want (seul le service d'autorite l'ouvre)"
+        else
+          p_fail "$f : mode non convergé"
+        fi
       fi
     else
       [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0600 $want)"

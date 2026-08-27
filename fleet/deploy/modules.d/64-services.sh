@@ -372,9 +372,11 @@ probe_seat_file() {
     return 0
   fi
   name="$(getent passwd "$v" 2>/dev/null | cut -d: -f1 || true)"
-  [[ -n "$name" ]] \
-    && p_ok "GUARD B lit $SEAT_UID_FILE → uid $v (« $name »)" \
-    || p_drift "$SEAT_UID_FILE dit $v, uid qu'aucun compte ne porte — la garde réserve un siège absent"
+  if [[ -n "$name" ]]; then
+    p_ok "GUARD B lit $SEAT_UID_FILE → uid $v (« $name »)"
+  else
+    p_drift "$SEAT_UID_FILE dit $v, uid qu'aucun compte ne porte — la garde réserve un siège absent"
+  fi
 }
 
 check() {
@@ -389,9 +391,11 @@ check() {
     verdict_check
   fi
 
-  [[ -s "$SERVICES_ENV" ]] \
-    && p_ok "environnement des services posé ($SERVICES_ENV)" \
-    || p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
+  if [[ -s "$SERVICES_ENV" ]]; then
+    p_ok "environnement des services posé ($SERVICES_ENV)"
+  else
+    p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
+  fi
 
   # ⚠ ICI ET PAS AVANT LA BRANCHE SYSTEMD, et le témoin voisin porte la raison : `probe_fleet_humans`
   # sort AVANT elle parce que la population est un fait de la machine, vrai sur les deux rails.
