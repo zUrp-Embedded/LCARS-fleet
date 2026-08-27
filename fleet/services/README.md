@@ -21,7 +21,7 @@ lcars catalogue install                 l'humain
 
 Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
   → sudoers etroit (%fleet, UN binaire nomme, jamais un shell)
-  → toolchain-converger.sh              root
+  → fleet/bin/lcars-toolchain-converge  root  (binaire de PATH, pas un service)
 ```
 
 ## Qui pose quoi
@@ -33,11 +33,18 @@ Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
 | `console-landing.sh` + `console-deck.py` | `/opt/lcars/` | systemd `lcars-landing` |
 | `console.sh` · `console-humans.sh` · `console-status.sh` · `console-pod.sh` | `/opt/lcars/` | piloté par `lcars-converger` |
 | `forge-gestures.sh` | `/opt/lcars/` | l'entrypoint **et** l'exécuteur |
-| `toolchain-converger.sh` | `/usr/local/bin/lcars-toolchain-converge` | le BEAM, via sudo |
 | `console.tmux.conf` · `skel.bashrc` | données du même rail | — |
 
 Deux rails, une source : le `COPY` du Dockerfile côté boîte, `62-runtime-helpers` côté poste. Le
 miroir entre les deux est tenu dans les deux sens par `deploy/tests/runtime_helpers.bats`.
+
+⚠ **CE RÉPERTOIRE NE PORTE QUE DES SERVICES**, c'est-à-dire ce que systemd ou le convergeur
+démarre. Deux binaires y ont vécu et n'en étaient pas : `lcars-toolchain-converge` et
+`lcars-authority-ask`, que le BEAM et `fleet/bin/lcars` INVOQUENT. Rien ne les démarrait, ils
+n'étaient dans aucune unité, dans aucun `STARTERS` — et ils arrivaient sur le `PATH` sous un nom
+différent du leur, parce que la convention d'ici est `*.sh`/`*.py`. Ils vivent depuis le
+2026-08-27 sous `fleet/bin/`, avec leur nom définitif, comme `lcars` et `fleet_v2`. Le renommage
+à la pose a disparu avec le rangement : il ne codait rien, il traduisait l'erreur de répertoire.
 
 ## La règle, et le témoin qui la tient
 

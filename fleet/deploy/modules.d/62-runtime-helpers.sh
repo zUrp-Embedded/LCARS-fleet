@@ -56,6 +56,10 @@ HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
 # le nom de l'outil qui les transporte faisait chercher le code privilegie de cette machine
 # dans un dossier appele `docker`, ou il n'y a pas de docker sur ce rail.
 SRC_DIR="$(repo_root)/fleet/services"
+# ⚠ LES BINAIRES DE PATH NE SONT PAS DES SERVICES, ET ILS NE VIVENT PLUS AVEC EUX. Ils portent leur
+# nom DEFINITIF dans la source (`fleet/bin/lcars-*`), comme `lcars` et `fleet_v2` : plus aucun
+# renommage a la pose, donc plus rien a lire entre le depot et le PATH.
+BIN_SRC_DIR="$(repo_root)/fleet/bin"
 # ⚠ SEAM SUR LE BINAIRE, ET IL EXISTE PARCE QU'UN TEMOIN NE PEUT PAS DESINSTALLER ttyd. Le temoin
 # « le manque de ttyd se DIT » retirait sa doublure du PATH — ce qui ne prouve rien sur une machine
 # ou le VRAI ttyd est installe, c'est-a-dire sur toute machine que ce module a deja convergee.
@@ -318,7 +322,7 @@ apply() {
   done
 
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
-  install -m 0755 "${own[@]}" "$SRC_DIR/toolchain-converger.sh" "$TOOLCHAIN_BIN" \
+  install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN" \
     || { p_fail "pose ratée: $TOOLCHAIN_BIN"; verdict_apply; }
 
   # 0755 : LISIBLE ET EXÉCUTABLE PAR TOUS, ET CE N'EST PAS UN RELÂCHEMENT. Ce script ne détient
@@ -326,7 +330,7 @@ apply() {
   # un groupe rejouerait exactement le défaut que ce chantier retire : une autorisation lue dans
   # `/etc/group` au lieu d'être demandée à la forge.
   ensure_dir "$(dirname "$AUTHORITY_ASK_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
-  install -m 0755 "${own[@]}" "$SRC_DIR/lcars-authority-ask.sh" "$AUTHORITY_ASK_BIN" \
+  install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-authority-ask" "$AUTHORITY_ASK_BIN" \
     || { p_fail "pose ratée: $AUTHORITY_ASK_BIN"; verdict_apply; }
 
   # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —

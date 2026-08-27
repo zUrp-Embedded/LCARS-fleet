@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/lcars-authority-ask.sh   (posé: /usr/local/bin/lcars-authority-ask)
+# SOURCE: fleet/bin/lcars-authority-ask   (posé: /usr/local/bin/lcars-authority-ask)
 # AUTHOR: bob
 # STARDATE: 2026-08-25
 # STATUS: PROTO-V2 — demander un jeton de forge au service d'autorite, depuis un shell
@@ -22,7 +22,7 @@
 # chacun a deviner ou il a atterri — et un `source` importe aussi les options de shell du fichier
 # chez son appelant, ce qui arme ou desarme `set -e` a distance.
 #
-# Meme forme que `toolchain-converger.sh` -> `/usr/local/bin/lcars-toolchain-converge` : un nom sur
+# Meme forme que `fleet/bin/lcars-toolchain-converge` -> `/usr/local/bin/lcars-toolchain-converge` : un nom sur
 # le PATH, pose par `62-runtime-helpers` sur le rail poste et par le `COPY` de l'image sur l'autre.
 #
 # ─── LE CONTRAT ─────────────────────────────────────────────────────────────────────────────────

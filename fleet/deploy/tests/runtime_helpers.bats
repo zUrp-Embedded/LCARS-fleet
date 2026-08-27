@@ -23,6 +23,7 @@ setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$BATS_TEST_DIRNAME/../docker/Dockerfile"
   SRC_DIR="$BATS_TEST_DIRNAME/../../services"
+  BIN_SRC_DIR="$BATS_TEST_DIRNAME/../../bin"
   [ -f "$MOD" ] && [ -f "$DOCKERFILE" ]
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
@@ -135,7 +136,7 @@ helpers() {
   stub_curl "peu importe"
   mod apply
   [ -x "$LCARS_TOOLCHAIN_CONVERGE_BIN" ]
-  cmp -s "$SRC_DIR/toolchain-converger.sh" "$LCARS_TOOLCHAIN_CONVERGE_BIN"
+  cmp -s "$BIN_SRC_DIR/lcars-toolchain-converge" "$LCARS_TOOLCHAIN_CONVERGE_BIN"
 }
 
 @test "apply POSE le client d'autorite sur le PATH — sinon trois gestes d'operateur n'ont aucun jeton" {
@@ -145,7 +146,7 @@ helpers() {
   stub_curl "peu importe"
   mod apply
   [ -x "$LCARS_AUTHORITY_ASK_BIN" ]
-  cmp -s "$SRC_DIR/lcars-authority-ask.sh" "$LCARS_AUTHORITY_ASK_BIN"
+  cmp -s "$BIN_SRC_DIR/lcars-authority-ask" "$LCARS_AUTHORITY_ASK_BIN"
 }
 
 @test "check DIT l'absence du client d'autorite — elle ne se decouvre pas au premier publish" {
@@ -223,11 +224,14 @@ data_srcs() {
     | awk 'NF {print $1}'
 }
 
-# ⚠ ET LE TROISIEME POSEUR : deux fichiers ne passent NI par `HELPERS` NI par `DATA`. Ils vont sur
-# le PATH sous un autre nom — `toolchain-converger.sh` → `lcars-toolchain-converge`,
-# `lcars-authority-ask.sh` → `lcars-authority-ask` — donc chacun a son propre `install`, avec son
-# propre chemin surchargeable. Les inventorier par TABLE reviendrait a recopier ce que le code dit
-# deja ; on lit donc le code : toute source citee comme `$SRC_DIR/<nom>` est posee par ce module.
+# ⚠ LE FILET DU TROISIEME POSEUR, ET IL EST VIDE PAR CONSTRUCTION DEPUIS LE 2026-08-27. Deux
+# fichiers passaient ici : ils allaient sur le PATH sous un AUTRE nom que leur source
+# (`toolchain-converger.sh` → `lcars-toolchain-converge`), donc chacun avait son propre `install`.
+# Le renommage n'encodait rien — il traduisait un rangement faux : ce sont des BINAIRES, pas des
+# services, et rien ne les demarre. Ils vivent sous `fleet/bin/` avec leur nom definitif, comme
+# `lcars` et `fleet_v2`.
+# Ce filet RESTE : il attrape le jour ou quelqu'un pose un fichier de `services/` par un `install`
+# nu au lieu d'une table. Il rend vide aujourd'hui, et c'est le bon etat.
 sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' | sort -u; }
 
 @test "TOUTE destination de l'image a un poseur sur le rail poste — pas seulement /opt/lcars" {

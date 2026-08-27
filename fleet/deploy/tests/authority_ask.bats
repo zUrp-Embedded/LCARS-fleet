@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/tests/authority_ask.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-25
-# SUT: fleet/services/lcars-authority-ask.sh
+# SUT: fleet/bin/lcars-authority-ask
 #
 # ─── CE QUI SE PROUVE ICI ───────────────────────────────────────────────────────────────────────
 #
@@ -30,7 +30,7 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  SUT="${BATS_TEST_DIRNAME}/../../services/lcars-authority-ask.sh"
+  SUT="${BATS_TEST_DIRNAME}/../../bin/lcars-authority-ask"
   [[ -x "$SUT" ]] || skip "SUT absent ou non executable: $SUT"
   command -v socat >/dev/null 2>&1 || command -v nc >/dev/null 2>&1 \
     || skip "ni socat ni nc sur cette machine — le client n'a aucun transport"

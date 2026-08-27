@@ -179,7 +179,7 @@ defmodule Fleet.ToolchainTest do
           work_item_id: "wi-1"
         )
 
-      script = Path.expand("services/toolchain-converger.sh")
+      script = Path.expand("bin/lcars-toolchain-converge")
 
       # LE SCRIPT EST UN ARBRE FRERE QUI N'EST PAS TOUJOURS LA, et sans cette garde le temoin ne
       # mesurait pas ce qu'il croyait. Le stage `build` de l'image copie `fleet/` en EXCLUANT

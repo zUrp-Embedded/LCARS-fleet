@@ -570,7 +570,7 @@ COPY fleet/services/human-converger.sh /opt/lcars/human-converger.sh
 # L'UNIQUE GESTE PRIVILEGIE DU RAIL TOOLCHAIN — au chemin que le sudoers etroit (45-sudoers) et le
 # reconciliateur (`toolchain_reconciler.ex` : `sudo -n <bin> <sha>`) attendent. Dans /usr/local/bin
 # et pas /opt : c'est un binaire d'exploitation, pas un composant de boot.
-COPY fleet/services/toolchain-converger.sh /usr/local/bin/lcars-toolchain-converge
+COPY fleet/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converge
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
 COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
@@ -598,7 +598,7 @@ COPY fleet/services/supervise.sh          /opt/lcars/supervise.sh
 # trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH
 # est le seul rendez-vous qu'aucun des trois n'a a deviner. Il ne DETIENT rien : il demande, et
 # c'est la socket qui decide, sur un uid atteste par le noyau.
-COPY fleet/services/lcars-authority-ask.sh /usr/local/bin/lcars-authority-ask
+COPY fleet/bin/lcars-authority-ask /usr/local/bin/lcars-authority-ask
 COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :

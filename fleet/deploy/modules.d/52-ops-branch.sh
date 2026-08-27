@@ -163,7 +163,7 @@ commune avec `main`, et elle ne porte que des manifestes d'outillage sous `ops/t
 ## Ce que tu approuves en signant une PR ici
 
 Le manifeste qui entre par cette PR sera appliqué **par root, sur la boite**, par
-`toolchain-converger.sh`. Il n'est pas interprété : le convergeur lit des champs typés et joue des
+`fleet/bin/lcars-toolchain-converge`. Il n'est pas interprété : le convergeur lit des champs typés et joue des
 gabarits de commande fixes, au SHA que tu viens d'approuver. Ce que tu lis dans le diff est donc
 exactement ce qui sera fait — c'est la propriété que toute cette mécanique existe pour tenir.
 

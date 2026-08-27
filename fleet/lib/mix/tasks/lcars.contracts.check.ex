@@ -3529,7 +3529,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
       # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
       # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
-      "services/toolchain-converger.sh"
+      "bin/lcars-toolchain-converge"
     ]
 
     id = "toolchain.branch_single_source"

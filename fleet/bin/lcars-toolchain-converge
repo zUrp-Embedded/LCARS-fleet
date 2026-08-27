@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/toolchain-converger.sh
+# SOURCE: fleet/bin/lcars-toolchain-converge   (posé: /usr/local/bin/lcars-toolchain-converge)
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO — l'UNIQUE geste privilegie du rail d'outillage : appliquer un manifeste deja signe
@@ -27,7 +27,7 @@
 # casse a l'edition de liens. `install --print-uris` est ce qui l'evite, et ce n'est pas une astuce
 # d'optimisation : c'est la condition pour que le sysroot linke.
 #
-# USAGE : toolchain-converger.sh <sha>
+# USAGE : lcars-toolchain-converge <sha>
 #   Lit `ops/toolchains.d/*.yaml` du depot ops AU SHA donne, et applique chaque manifeste.
 #   Idempotent : rejouer applique le meme etat. Un ecosysteme deja pose est saute.
 #
@@ -81,7 +81,7 @@ LOCK="${LCARS_TOOLCHAIN_LOCK:-/var/lock/lcars-toolchain.lock}"
 
 die() { echo "toolchain-converger: $2" >&2; exit "$1"; }
 
-[[ $# -eq 1 ]] || die 1 "usage: toolchain-converger.sh <sha>"
+[[ $# -eq 1 ]] || die 1 "usage: lcars-toolchain-converge <sha>"
 SHA="$1"
 [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || die 1 "sha invalide: '$SHA' (attendu 7-40 hex)"
 
@@ -325,8 +325,8 @@ apply_egress() { # apply_egress <yaml> <eco>
 #
 # ⚠ L'INSTALLEUR POSE SOUS LE MAGASIN, PAS SOUS LE $HOME DU CONVERGEUR. Ce script tourne en root :
 # un `export.sh` de SDK calcule ses chemins depuis `$HOME` et rendrait `IDF_PATH=/root/.espressif/…`,
-# un chemin qui N'EXISTE PAS dans le pod (dont le HOME est son sanctuaire). L'install sortirait
-# verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
+# un chemin qui N'EXISTE PAS dans le pod (dont le HOME est un tmpfs monte pour lui seul). L'install
+# sortirait verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
 apply_installer() { # apply_installer <yaml> <eco>
   local name url version sha256 env_script tree
   name="$(field name "$1")"; url="$(field url "$1")"
