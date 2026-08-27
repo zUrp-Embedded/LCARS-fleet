@@ -225,3 +225,48 @@ code_of() { sed 's/#.*//' "$1"; }
     return 1
   }
 }
+
+@test "MUR 4: le port du deck a UNE declaration, et les copies s'accordent" {
+  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `55-deck-oidc` batit les
+  # `redirect_uris` OAuth2 du deck avec `PROV_DECK_PORT` ; le daemon lit `LCARS_LANDING_PORT`. Au
+  # poste, `64-services` relie les deux et `services_units.bats` le garde depuis le 2026-08-23. Sur
+  # le rail BOITE, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
+  # valent tous les deux 20999. La cicatrice du rail poste decrit la panne mot pour mot —
+  # « la panne tombait au RETOUR du login, la ou elle se lit comme un probleme d'identite ».
+  #
+  # L'AUTORITE EST `PROV_DECK_PORT`, et elle se LIT : c'est la seule declaration nommee du fait
+  # (`provision-lib.sh`), celle que `--port-deck` deplace et celle dont les callbacks OIDC derivent.
+  local attendu
+  attendu="$(sed 's/#.*//' "$REPO/deploy/lib/provision-lib.sh" \
+             | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{PROV_DECK_PORT:=([0-9]+)\}".*$/\1/p' | head -n1)"
+  [[ "$attendu" =~ ^[0-9]+$ ]] || {
+    echo "MUR 4 — PROV_DECK_PORT illisible dans provision-lib.sh : l'autorite ne se lit plus" >&2
+    return 1
+  }
+
+  # Chaque miroir avec SON geste. Un nombre present ailleurs dans le fichier ne doit pas suffire —
+  # `MUR 4 bis` d'`adminite_walls` a coute cette lecon le meme jour.
+  local rompu=0
+  check() { # check <fichier> <motif etendu> <ce que c'est>
+    local f="$REPO/$1"
+    [ -r "$f" ] || { echo "MUR 4 rompu — $1 illisible" >&2; rompu=1; return; }
+    sed 's/#.*//' "$f" | grep -qE -- "$2" || {
+      echo "MUR 4 rompu — $1 ne porte pas « $attendu » pour $3 :" >&2
+      sed 's/#.*//' "$f" | grep -nE 'DECK_PORT|LANDING_PORT|20[0-9]{3}' >&2
+      rompu=1
+    }
+  }
+  check services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
+  check services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
+  check deploy/docker/entrypoint.sh   "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
+  check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
+  check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
+  check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
+  check deploy/docker/bench/bench-up.sh          "DECK_PORT=\"$attendu\""     "le banc"
+  check deploy/docker/bench/bench-swap-image.sh  "DECK_PORT=\"$attendu\""     "le banc"
+
+  [ "$rompu" -eq 0 ] || {
+    echo "L'autorite est PROV_DECK_PORT dans provision-lib.sh — les copies la suivent." >&2
+    return 1
+  }
+}

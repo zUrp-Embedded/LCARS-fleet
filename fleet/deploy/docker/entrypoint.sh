@@ -680,6 +680,21 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
   # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
+    # ⚠ LE PORT DU DECK TRAVERSE, ET SUR CE RAIL IL NE TRAVERSAIT PAS. `55-deck-oidc` bâtit les
+    # `redirect_uris` OAuth2 avec `PROV_DECK_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
+    # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$PROV_DECK_PORT` dans `services.env`,
+    # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
+    # que parce que leurs deux défauts indépendants valent tous les deux 20999.
+    #
+    # C'est la panne que la cicatrice du rail poste décrit mot pour mot, restée vivante ici :
+    # « `--port-deck 20997` déplaçait l'identification vers un port où personne n'écoutait pendant
+    # que le deck restait sur 20999 — et la panne tombait au RETOUR du login, là où elle se lit
+    # comme un problème d'identité. »
+    #
+    # L'idiome est celui de `forge-gestures.sh` : la molette du rail d'abord, celle du
+    # provisionnement ensuite, le littéral en dernier recours — et ce littéral est tenu égal à
+    # celui de `provision-lib.sh` par `MUR 4` de `variable_walls.bats`.
+    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-${PROV_DECK_PORT:-20999}}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"

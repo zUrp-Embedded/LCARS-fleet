@@ -10,10 +10,20 @@
 # notre page dessus ne l'ajouterait pas a la console, ca la DETRUIRAIT. Le deck vit donc dans son
 # propre serveur, sur son propre port, et la console n'est pas touchee.
 #
-# ─── PORT : HORS DE L'ESPACE DES BLOCS ──────────────────────────────────────────────────────────
-# Les blocs humains occupent 21000..25999 (`21000 + (uid%500)*10`, +0..9). Cette page n'appartient
-# a AUCUN humain — c'est la porte de la BOITE. Elle prend donc 20999, juste sous l'espace des
-# blocs : impossible de collisionner avec un humain present ou futur.
+# ─── PORT : D'OU VIENT LE NOMBRE, ET CE QUI LE TIENT AUJOURD'HUI ────────────────────────────────
+# ⚠ CE PARAGRAPHE DECLARAIT AU PRESENT UN ESPACE DE PORTS QUI N'EXISTE PLUS. Il disait « les blocs
+# humains occupent 21000..25999 (`21000 + (uid%500)*10`) », et `console.sh` declare ces slots MORTS
+# depuis que le terminal n'est plus joignable que par sa socket : « PLUS AUCUN PORT, ET C'EST
+# L'INVARIANT DU SCRIPT ». La formule ne vit plus que dans des commentaires. 20999 a bien ete choisi
+# « juste sous » cet espace — c'est son HISTOIRE, plus sa garantie.
+#
+# ⚠ ET 21000 A CHANGE DE PROPRIETAIRE ENTRE-TEMPS : c'est `PROV_FORGE_HOST_PORT`, le port de la
+# forge sur l'hote. Un lecteur qui prendrait « juste sous 21000 » pour une regle vivante lirait donc
+# une contrainte vis-a-vis de la forge, qui n'a jamais existe.
+#
+# CE QUI TIENT LE NOMBRE AUJOURD'HUI : `PROV_DECK_PORT` de `provision-lib.sh` en est la seule
+# declaration nommee — c'est elle que `--port-deck` deplace et dont les `redirect_uris` OIDC
+# derivent — et `MUR 4` de `variable_walls.bats` exige que les huit copies la suivent.
 #
 # ─── CE SCRIPT NE FABRIQUE PLUS DE PAGE ─────────────────────────────────────────────────────────
 # Il lance `console-deck.py`, qui sert la coquille ET l'etat (`/api/state`). Une page ecrite au
