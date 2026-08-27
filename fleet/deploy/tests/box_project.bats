@@ -48,6 +48,7 @@ echo "\$*" >> "$CALLS"
 case "\$1 \$2" in
   "compose version") exit 0 ;;
   "ps -aq")          printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0 ;;
+  "volume ls")       printf '%s' "\${STUB_VOLUMES:-}"; [[ -n "\${STUB_VOLUMES:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
 # Le verdict de provisionnement, lu par 'up' DANS la boite. STUB_PROV_RC vide = le fichier n'est
@@ -67,7 +68,7 @@ EOF
   chmod 0755 "$BINDIR/docker"
 
   export PATH="$BINDIR:$PATH"
-  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC
+  unset LCARS_PROJECT STUB_IDS STUB_CONFIG_FILES STUB_PROV_RC STUB_VOLUMES
 
   # ⚠ SANS CETTE LIGNE, CES SEIZE TEMOINS DEPENDENT D'UNE SOCKET SUR LA MACHINE QUI LES JOUE.
   # Le delegue sonde desormais un ENDPOINT QUI REPOND, pas un binaire : sans `DOCKER_HOST`, la
@@ -123,7 +124,7 @@ seed_project() {
   [[ "$output" == *"$CF"* ]]
   [[ "$output" == *"docker compose ls"* ]]
   # Nothing reached compose: the guard is upstream, not a post-mortem.
-  ! grep -q "down" "$CALLS"
+  refute grep -q "down" "$CALLS"
 }
 
 @test "the file must match a WHOLE list element, never a prefix of one" {
@@ -156,7 +157,7 @@ seed_project() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"REFUS"* ]]
   [[ "$output" != *"RESET du projet"* ]]
-  ! grep -q "volume rm" "$CALLS"
+  refute grep -q "volume rm" "$CALLS"
 }
 
 @test "reset NAMES the project it is about to destroy" {
@@ -172,8 +173,41 @@ seed_project() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"lcars-a-moi"* ]]
-  [[ "$output" == *"lcars-a-moi_lcars-home"* ]]
   [[ "$output" == *"annulé"* ]]
+}
+
+# ⚠ CE TEMOIN ASSERAIT `lcars-a-moi_lcars-home`, ET CE VOLUME N'EXISTE PAS.
+#
+# `box` n'ouvre QUE `docker-compose.yml`, qui declare `home:` — donc docker cree `<projet>_home`.
+# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `box` ne lit
+# jamais. Le temoin epinglait donc le nom recopie depuis le mauvais fichier, et il verrouillait le
+# defaut : `reset` annoncait la destruction du /home de la boite, retirait un fantome, et laissait
+# le vrai volume intact — a chaque fois. `compose down` sans `-v` n'y touche pas non plus.
+#
+# Ce qui est epingle maintenant : le nom se DERIVE de docker (meme filtre par label que les
+# conteneurs), il ne se compose plus. Un test qui recopierait le nom attendu referait le defaut.
+
+@test "reset NOMME les volumes que docker declare, il ne les compose pas" {
+  STUB_VOLUMES="$(printf 'lcars-a-moi_home\nlcars-a-moi_cache')" \
+    run setsid --wait bash "$SRC" -p lcars-a-moi reset </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lcars-a-moi_home"* ]]
+  [[ "$output" == *"lcars-a-moi_cache"* ]]
+}
+
+@test "reset le DIT quand le projet ne porte aucun volume — jamais un nom invente" {
+  run setsid --wait bash "$SRC" -p lcars-a-moi reset </dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"<aucun>"* ]]
+}
+
+# shellcheck disable=SC2016 # motif `grep` : `${PROJECT}` doit atteindre grep tel quel
+@test "AUCUN nom de volume n'est compose dans le CODE — c'est docker qui sait" {
+  # La regression exacte : `"${PROJECT}_<quelquechose>"` fabrique un nom au lieu de le demander.
+  # ⚠ HORS COMMENTAIRES, et la cicatrice de ce lot l'exige : la prose qui EXPLIQUE le defaut cite
+  # forcement la forme fautive. Un temoin qui lit la prose interdit d'ecrire pourquoi.
+  run bash -c "grep -vE '^[[:space:]]*#' '$SRC' | grep -nE '\\\$\\{PROJECT\\}_[a-z-]+'"
+  [ "$status" -ne 0 ]
 }
 
 @test "LCARS_PROJECT is read, and -p overrides it" {
@@ -187,7 +221,7 @@ seed_project() {
   LCARS_PROJECT=depuis-env run bash "$SRC" -p depuis-flag down
   [ "$status" -eq 0 ]
   grep -q -- "-p depuis-flag down" "$CALLS"
-  ! grep -q -- "-p depuis-env " "$CALLS"
+  refute grep -q -- "-p depuis-env " "$CALLS"
 }
 
 @test "-p without a value is refused rather than swallowing the command" {
@@ -360,7 +394,7 @@ FAKE
   # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
   # sessions suivantes sans date ni signature.
   local box="$BATS_TEST_DIRNAME/../box"
-  ! grep -q 'qui reste la source unique de l' "$box"
+  refute grep -q 'qui reste la source unique de l' "$box"
 }
 
 # ─── LE DELEGUE EST SA PROPRE PORTE ─────────────────────────────────────────────────────────────
@@ -371,6 +405,7 @@ FAKE
 # EN SILENCE pour echouer plus loin sur une permission. Les deux defauts n'ont plus d'objet
 # maintenant qu'il sonde lui-meme, et les garder serait garder la reponse d'une porte disparue.
 
+# shellcheck disable=SC2016 # motifs `grep` : `$PROV_DOCKER_BIN` doit atteindre grep tel quel
 @test "le delegue SONDE, il ne lit plus ce qu'une porte lui pose" {
   local box="$BATS_TEST_DIRNAME/../box"
   grep -q 'docker_endpoint || fail' "$box"

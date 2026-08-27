@@ -176,6 +176,19 @@ export LCARS_STORE_PREFIX="$PROJECT"
 # `com.docker.compose.project.config_files`, la liste des fichiers qui l'ont réellement créé. On la
 # lit. Un projet SANS conteneur ne se garde pas — il n'y a rien à confondre, et `up` a le droit de
 # le créer.
+# LES VOLUMES DU PROJET, DERIVES — JAMAIS RECOPIES. Meme filtre que `project_config_files` juste
+# en dessous : c'est docker qui sait ce qu'il a cree.
+#
+# ⚠ CE FICHIER NOMMAIT `${PROJECT}_lcars-home`, ET CE VOLUME N'EXISTE PAS. Le compose que `box`
+# emploie (`docker-compose.yml`) declare `home:`, donc docker cree `${PROJECT}_home` ;
+# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `box` n'ouvre
+# jamais. Le `reset` annoncait donc la destruction du /home de la boite, supprimait un fantome, et
+# le laissait intact — a chaque fois, depuis toujours. `compose down` sans `-v` n'y touche pas non
+# plus : cette ligne etait le SEUL retrait.
+project_volumes() {
+  "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort || true
+}
+
 project_config_files() {
   local ids
   ids="$("$DOCKER" ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)" || return 0
@@ -481,7 +494,8 @@ cmd_reset() {
   assert_project_ours reset
   # Le projet est NOMMÉ dans la question. Un poste de dev en porte plusieurs, et « conteneur lcars »
   # ne dit pas LEQUEL : on ne fait pas confirmer une destruction sans dire ce qu'elle vise.
-  echo "box: RESET du projet « $PROJECT » — conteneur + image + volume ${PROJECT}_lcars-home."
+  local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//')"
+  echo "box: RESET du projet « $PROJECT » — conteneur + image + volume(s) ${_vols:-<aucun>}."
   echo "           La forge n'est pas concernée (elle est à toi, dans son propre déploiement)."
   echo "           Ton travail poussé y survit."
   # ⚠ UN GESTE DE DESTRUCTION DOIT NOMMER CE QU'IL EPARGNE. Sans cette ligne, « reset » se lit
@@ -493,7 +507,13 @@ cmd_reset() {
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
   [[ "$a" == "yes" ]] || { echo "box: annulé."; exit 1; }
   compose down --rmi local
-  "$DOCKER" volume rm -f "${PROJECT}_lcars-home" >/dev/null 2>&1 || true
+  # ⚠ APRES le `down`, ET RELU : un volume attache a un conteneur vivant ne se retire pas, et la
+  # liste d'avant la confirmation peut avoir vieilli. On redemande a docker plutot que de reutiliser.
+  local _v
+  while read -r _v; do
+    [[ -n "$_v" ]] || continue
+    "$DOCKER" volume rm -f "$_v" >/dev/null 2>&1 || echo "  volume non retire : $_v"
+  done < <(project_volumes)
   echo "box: reset fait. « fleet/deploy/box up » pour repartir de zéro."
 }
 
