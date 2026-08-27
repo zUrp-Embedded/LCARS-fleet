@@ -564,6 +564,28 @@ check(code == 200 and "PAS ENCORE DE BLOC" in body,
 check(fetch(dport, "/api/state", cookie)[0] == 409,
       "et l'API porte le meme etat, distinct d'un 401")
 
+# (5-ter) ADMIN SANS BLOC LOCAL : il n'est PAS dans la liste, et c'est l'etat nominal.
+# `console-humans.sh` ecarte le siege de la population ; un admin absent de `people` n'attend donc
+# aucun convergeur — GUARD A ne posera jamais son compte. Servir « ca converge tout seul » ici
+# accuse le convergeur d'un retard qui n'existe pas, aupres de quelqu'un qui n'a rien a corriger.
+FAKE["is_admin"] = True
+FAKE["groups"] = ["fleet", "fleet:humans"]
+deck.humans = lambda: []
+code, _, hdrs = fetch(dport, "/auth/login")
+issued = (urllib.parse.parse_qs(urllib.parse.urlparse(hdrs["Location"]).query)["state"])[0]
+code, body, hdrs = fetch(dport, "/auth/callback?state=%s&code=abc" % issued)
+# ⚠ SA PROPRE VARIABLE : `cookie` est la session que les cas suivants REUTILISENT. L'ecraser ici
+# leur donnerait une session admin, donc le fall-through qu'on vient d'ouvrir, et leurs refus
+# passeraient au vert sans mesurer quoi que ce soit.
+admin_cookie = hdrs.get("Set-Cookie", "").split(";")[0]
+code, body, _ = fetch(dport, "/", admin_cookie)
+check(code == 200 and "PAS ENCORE DE BLOC" not in body,
+      "admin sans bloc local : la page du deck, jamais l'accusation du convergeur (vu: %d)" % code)
+code, body, _ = fetch(dport, "/api/state", admin_cookie)
+check(code == 200 and '"admin": true' in body.replace('"admin":true', '"admin": true'),
+      "et l'API rend l'etat avec son drapeau admin, pas un 409 (vu: %d)" % code)
+FAKE["is_admin"] = False   # reset : les cas suivants sont des workers ordinaires
+
 # (5-bis) MEMBRE, ET LE CONVERGEUR A REFUSE SON LOGIN. Etat DIFFERENT du precedent, et c'est tout
 # l'objet de ce cas : Gitea accepte des logins qui ne peuvent PAS devenir un compte Unix (33
 # caracteres, par exemple), donc une personne peut etre enrolee et ne converger JAMAIS. Dire
