@@ -46,14 +46,8 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# ⚠ UNE BASE, DEUX PROJETS SYMETRIQUES. `--forge-project bob` nomme la BASE, pas le projet compose :
-# la forge devient `bob-forge`, le runner `bob-runner`. Avant, le drapeau nommait le projet de la
-# forge et le runner en DERIVAIT (`${PROJET}-runner`) — donc `bob` seul cote forge et `bob-runner`
-# cote runner, deux conventions pour deux moities du meme montage, et un `bob` nu que Docker Desktop
-# affiche sans dire de quoi il est le nom. Le defaut `lcars` rend `lcars-forge` (inchange) et
-# `lcars-runner` (au lieu de `lcars-forge-runner`).
-: "${PROV_FORGE_BASE:=lcars}"                   # base des deux projets compose du poste
-PROV_FORGE_PROJECT="${PROV_FORGE_BASE}-forge"   # projet compose de la forge du poste
+# La base et les trois projets vivent dans `provision-lib` — `49-forge-runner` les lit aussi, et une
+# derivation recopiee est le defaut d'un etage plus bas.
 # ─── LE PORT : 21000, COMME LE BANC ─────────────────────────────────────────────────────────────
 #
 # ⚖ USER 2026-08-22 : « pour le mode bench, on pose 21000 comme port pour notre forge […] poste
@@ -171,9 +165,7 @@ advertise_addr "${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}"
 PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
 PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 
-FORGE_NET="${PROV_FORGE_PROJECT}_default"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-gitea-1"
-MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/forge-compose.yml"
 # ⚠ DEUX URLS, ET CHACUNE A UN SEUL LECTEUR LÉGITIME.
@@ -219,96 +211,6 @@ foreign_forge_refusal() {
   p_fail "  monte la tienne : « --port-forge <autre port> » (ajoute « --forge-project <nom> » si le nom est pris lui aussi)"
 }
 
-# ─── LE RUNNER CI — UNE FORGE QUE RIEN NE PEUT SERVIR N'EST PAS UNE FORGE ────────────────────────
-#
-# Le runner est un etat-cible de ce rail, pas un supplement : une forge sans lui accepte un ticket,
-# depense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas. Il se pose
-# donc ici, apres la forge, sous la meme identite et avec la meme CLI qu'elle.
-#
-# ⚠ UN SEUL MECANISME D'ENROLEMENT. `forge-runner.sh` le porte en entier — jeton d'enregistrement
-# par l'API admin, config des jobs, montage du compose — avec ses cicatrices (portee du jeton,
-# reseau des jobs, `docker cp` plutot que bind). Il est entierement parametre : on l'APPELLE. Un
-# second exemplaire divergerait du premier sur la premiere cicatrice qu'on ne recopierait pas.
-#
-# ⚠ LE RUNNER REJOINT LE RESEAU DE LA FORGE, il ne compose pas son adresse publiee : depuis un
-# conteneur, `127.0.0.1:21000` designe ce conteneur-la. `FORGE_NET` le met sur le bridge de la
-# forge, ou elle repond a `http://forge:3000`.
-: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
-
-# ⚠ TROIS LABELS, TOUS PUBLICS, ET C'EST CE QUI REND CE RAIL AUTONOME. Ils couvrent les `runs-on`
-# des workflows livrés — `shell` (deps-upstream, template projet), `dood` (publish, qui fait du
-# docker), `ubuntu-latest` (le gate, et le `runs-on` que tout workflow importé écrit). Le runner
-# tire chaque image lui-même : rien à bâtir, rien à semer.
-#
-# ⚠ PAS DE LABEL `elixir`, ET C'EST DÉLIBÉRÉ. Le servir honnêtement exigerait `lcars-build`, une
-# image LOCALE que ce rail ne construit pas ; le servir avec l'image Elixir de base donnerait un
-# runner qui prend le job du gate et meurt sur `git` introuvable — vert à l'écran, faux au fond.
-# Le gate n'en a plus besoin : il s'installe son BEAM dans le job (`erlef/setup-beam`).
-# Annoncer un label qu'on ne sait pas servir est pire que ne pas l'annoncer.
-: "${PROV_RUNNER_LABELS:=shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
-
-ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond pas
-  local tok body
-  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
-  [[ -n "$tok" ]] || return 1
-  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-          | curl -K - -s -m 10 "$LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
-  [[ -n "$body" ]] || return 1
-  printf '%s' "$body" | jq -r '.total_count // empty' 2>/dev/null
-}
-
-converge_ci_runner() {
-  local n
-  n="$(ci_runner_count || true)"
-  if [[ "${n:-0}" -gt 0 ]]; then
-    p_ok "$n runner(s) CI déjà enregistré(s) — la CI de cette forge a une machine"
-    return 0
-  fi
-  # On teste la LISIBILITÉ du fichier, on n'en lit pas le contenu : le délégué le lira lui-même.
-  # Un secret qu'on ne met pas dans une variable ne peut être recopié nulle part par accident.
-  [[ -s "$MASTER_TOKEN_FILE" && -r "$MASTER_TOKEN_FILE" ]] \
-    || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($MASTER_TOKEN_FILE)"; return 0; }
-
-  p_step "forge du poste : enrôlement du runner CI (projet $PROV_RUNNER_PROJECT, réseau $FORGE_NET)"
-
-  # ⚠ PAS `run_quiet` ICI, ET POUR DEUX RAISONS QUI SE CUMULENT. (1) Il imprime la COMMANDE quand
-  # elle échoue — donc tout secret passé en argument ressort dans la trace et dans le fichier de
-  # capture qu'il conserve. (2) Il émet déjà `p_fail`, ce qui ferait DEUX verdicts pour un seul
-  # fait et rendrait l'apply en `1` (échec) là où le contrat veut `2` (appliqué, drift résiduel).
-  #
-  # Le jeton part par CHEMIN (`--admin-token-file`) : `/proc` de l'hôte ne le voit pas pendant
-  # l'appel, et rien ne peut le recopier dans une trace.
-  local out rc=0
-  out="$(mktemp "${TMPDIR:-/tmp}/forge-runner.XXXXXX")"
-  # `DOCKER_BIN` porte la CLI RÉSOLUE — sur ce substrat elle vit dans le montage Docker Desktop et
-  # peut être un shim d'escalade. Laisser le délégué chercher « docker » dans le PATH le ferait
-  # échouer sur une machine parfaitement saine : rien n'installe docker dans une VM WSL.
-  DOCKER_BIN="$PROV_DOCKER_BIN" \
-    bash "$(repo_root)/fleet/deploy/docker/forge-runner.sh" \
-      --forge-api "$LOCAL_URL/api/v1" --admin-token-file "$MASTER_TOKEN_FILE" \
-      --network "$FORGE_NET" --project "$PROV_RUNNER_PROJECT" \
-      ${PROV_RUNNER_LABELS:+--labels "$PROV_RUNNER_LABELS"} \
-      ${PROV_RUNNER_ACCEPT_GENERIC:+--accept-generic} \
-      >"$out" 2>&1 || rc=$?
-
-  if [[ "$rc" -eq 0 ]]; then
-    rm -f "$out"
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
-    return 0
-  fi
-
-  # La sortie du délégué SANS la ligne de commande : c'est elle qui dit pourquoi, et elle seule.
-  sed 's/^/     /' "$out" >&2
-  rm -f "$out"
-  # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
-  # que la CI n'a pas de machine. Un apply qui MEURT ici rendrait une forge saine inatteignable.
-  p_drift "runner CI NON enrôlé (rc=$rc — le refus du délégué est au-dessus) — la CI restera en attente"
-}
-
-# LE VERDICT DIT SUR QUOI ELLE ÉCOUTE, parce que c'est la seule chose qu'un opérateur ne peut pas
-# deviner en la voyant répondre en local. Une forge ouverte au réseau et une forme fermée rendent
-# le même `200` sur la loopback.
 forge_reach_note() {
   case "$PROV_FORGE_BIND" in
     127.0.0.1|localhost|::1) printf ' — cette machine SEULE' ;;
@@ -388,7 +290,7 @@ announce_builtin_human_password() {
     return 0
   fi
 
-  tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
 
   pw="$(new_password)"
@@ -457,7 +359,7 @@ forge_admin_state() { # forge_admin_state <login>
   # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
   # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
   #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
-  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  tok="$( { tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
   [[ -n "$tok" ]] || { echo unknown; return 0; }
   body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
           | curl -K - -fsS -m 10 "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" || {
@@ -478,7 +380,7 @@ forge_promote_admin() { # forge_promote_admin <login>
   # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
   # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
   #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
-  tok="$( { tr -d '[:space:]' < "$MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  tok="$( { tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
   [[ -n "$tok" ]] || return 1
   # `login_name` et `source_id` sont EXIGÉS par l'endpoint (Gitea les relit pour la source
   # d'authentification) : les omettre rend 422 sur un corps qui a l'air complet.
@@ -551,8 +453,8 @@ check() {
   fi
   if forge_up; then
     p_ok "forge du poste vivante ($LOCAL_URL)$(forge_reach_note)"
-    [[ -s "$MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($MASTER_TOKEN_FILE)" \
-      || p_drift "forge vivante mais AUCUNE autorité ($MASTER_TOKEN_FILE) — l'apply la minte"
+    [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE)" \
+      || p_drift "forge vivante mais AUCUNE autorité ($PROV_MASTER_TOKEN_FILE) — l'apply la minte"
     # ⚖ D7 : le propriétaire de la machine administre sa forge. Ça se SONDE, sinon la dérive
     # n'existe que le jour où quelqu'un essaie d'ouvrir la page d'administration et se fait jeter.
     seat_binding_report check
@@ -685,12 +587,12 @@ apply() {
   # ne s'exécute que sur une forge SANS jeton master — donc une seule fois dans la vie d'une
   # machine. Un opérateur qui a perdu son mot de passe est, par construction, toujours après ce
   # moment-là : une repose enfermée dedans serait inerte exactement quand on en a besoin.
-  [[ -s "$MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
+  [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && reset_admin_password_if_asked 1
 
   # 2. L'AUTORITÉ. Le compte d'administration et son jeton, mintés DANS le conteneur (`gitea admin`
   #    n'a pas besoin d'un jeton pour créer le premier). Le fichier est le même que celui que la
   #    boîte garde : `50-forge` le lit sans savoir qui l'a posé.
-  if [[ ! -s "$MASTER_TOKEN_FILE" ]]; then
+  if [[ ! -s "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_step "forge du poste : compte d'administration « $PROV_FORGE_ADMIN » et jeton master"
     local pw err rc; pw="$(new_password)"
     err="$(mktemp "${TMPDIR:-/tmp}/forge-admin.XXXXXX")"
@@ -745,11 +647,11 @@ apply() {
     # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne sous `lcars-authority`
     # (`64-services`, `User=$AUTHORITY_USER`) : personne d'autre n'a besoin de ce fichier, donc
     # personne d'autre ne doit pouvoir l'ouvrir — root compris, qui n'en est que le dernier recours.
-    write_atomic "$MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
-      || { p_fail "jeton master non posé ($MASTER_TOKEN_FILE)"; verdict_apply; }
-    p_chg "autorité de création posée ($MASTER_TOKEN_FILE, $PROV_AUTHORITY_USER seul)"
+    write_atomic "$PROV_MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
+      || { p_fail "jeton master non posé ($PROV_MASTER_TOKEN_FILE)"; verdict_apply; }
+    p_chg "autorité de création posée ($PROV_MASTER_TOKEN_FILE, $PROV_AUTHORITY_USER seul)"
   else
-    p_ok "autorité de création déjà posée ($MASTER_TOKEN_FILE)"
+    p_ok "autorité de création déjà posée ($PROV_MASTER_TOKEN_FILE)"
   fi
 
   # 2-bis. SUR UNE FORGE DÉJÀ DEBOUT, L'OPÉRATEUR N'EST PEUT-ÊTRE PAS ENCORE ADMIN. Le bloc
@@ -771,7 +673,7 @@ apply() {
         PROV_CHANGED=$((PROV_CHANGED + 1))
         p_chg "« $PROV_FORGE_ADMIN » promu administrateur de la forge (⚖ D7 : le siège, c'est celui qui installe)"
       else
-        p_fail "« $PROV_FORGE_ADMIN » n'a pas pu être promu administrateur — le jeton master de $MASTER_TOKEN_FILE porte-t-il encore l'adminité ?"
+        p_fail "« $PROV_FORGE_ADMIN » n'a pas pu être promu administrateur — le jeton master de $PROV_MASTER_TOKEN_FILE porte-t-il encore l'adminité ?"
       fi ;;
     *)
       p_warn "adminité de « $PROV_FORGE_ADMIN » non mesurable (forge muette ou jeton absent) — rien n'a été tenté" ;;
@@ -1017,7 +919,6 @@ apply() {
   fi
 
   announce_builtin_human_password
-  converge_ci_runner
   seat_binding_report apply
   verdict_apply
 }

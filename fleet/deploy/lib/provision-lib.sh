@@ -81,6 +81,22 @@ PROVISION_LIB_LOADED=1
 # doit pas ramasser un site-admin en croyant lire un role.
 : "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
 : "${PROV_UID_MAP_FILE:=$PROV_TOKENS_DIR/forge-uid.map}"
+
+# ─── LES TROIS PROJETS COMPOSE DU POSTE, ET LE RESEAU DE LA FORGE ───────────────────────────────
+#
+# ⚠ ILS VIVENT ICI PARCE QUE DEUX MODULES LES LISENT. `48-forge-host` monte la forge, `49-forge-runner`
+# enrole le runner sur SON reseau : les derivations etaient dans 48, donc 49 aurait du les recopier —
+# et une recopie de derivation est le defaut que `toolchain.branch_single_source` existe pour tenir,
+# un etage plus bas. Une seule base, quatre noms derives, un seul endroit.
+#
+# `--forge-project bob` nomme la BASE : la forge devient `bob-forge`, le runner `bob-runner`, la boite
+# `bob-fleet` (celle-la est derivee par `deploy/box`, qui n'est pas un module).
+: "${PROV_FORGE_BASE:=lcars}"
+: "${PROV_FORGE_PROJECT:=${PROV_FORGE_BASE}-forge}"
+: "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
+# Le reseau que compose cree pour un projet sans `networks:` explicite. Le runner le REJOINT : depuis
+# un conteneur, l'adresse publiee de la forge (`127.0.0.1:<port>`) designe ce conteneur-la.
+: "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
 # GRAINE du binaire vendor : un chemin où un binaire `claude` déjà présent SUR LA MACHINE
 # court-circuite l'installeur officiel de 40-claude-bin (donc le réseau). Root-owned, hors de tout
 # home — l'humain du runtime n'existe pas encore quand un semis extérieur le pose. Vide/absent =

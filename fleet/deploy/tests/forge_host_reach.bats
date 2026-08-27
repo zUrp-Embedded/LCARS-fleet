@@ -298,7 +298,10 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # `LCARS_PRIVATE_DIR` suffit : le geste y cherche exactement les deux noms que ce module pose.
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   grep -q 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$SRC"
-  grep -q 'MASTER_TOKEN_FILE="\$PROV_TOKENS_DIR/forge-master.token"' "$SRC"
+  # ⚠ LE NOM VIENT DE LA LIB DEPUIS LE 2026-08-27. `48` le derivait lui-meme — une SECONDE copie de
+  # `PROV_MASTER_TOKEN_FILE`, que `provision-lib` posait deja. Ce qui compte n'a pas bouge :
+  # l'autorite est LUE la ou elle a ete ecrite, jamais recomposee.
+  grep -q 'PROV_MASTER_TOKEN_FILE' "$SRC"
   grep -q 'SEED_FILE="\$PROV_TOKENS_DIR/forge-seed.pass"' "$SRC"
   grep -q 'MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-\$PRIVATE_DIR/forge-master.token}"' "$g"
   grep -q 'SEED_FILE="${LCARS_FORGE_SEED_FILE:-\$PRIVATE_DIR/forge-seed.pass}"' "$g"
@@ -644,7 +647,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # Le bloc de creation ne tourne que sur une forge SANS jeton master : une seule fois par machine.
   # Un operateur qui a perdu son mot de passe est toujours APRES ce moment-la.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -qE '^\s*\[\[ -s "\$MASTER_TOKEN_FILE" \]\] && reset_admin_password_if_asked 1'
+  code | grep -qE '^\s*\[\[ -s "\$PROV_MASTER_TOKEN_FILE" \]\] && reset_admin_password_if_asked 1'
 }
 
 @test "la repose ne se declenche QUE sur demande, et jamais sur un compte tout juste cree" {
