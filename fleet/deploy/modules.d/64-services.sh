@@ -331,7 +331,7 @@ probe_seat_uid() {
   local declared name
   declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1)"
   if [[ -z "$declared" ]]; then
-    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — les gardes (GUARD B, is_fleet_human, uid_floor) retomberont sur le litteral 1000, qui n'est le siege que par coincidence"
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — is_fleet_human et uid_floor retomberont sur le litteral 1000, qui n'est le siege que par coincidence (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
     return 0
   fi
   # ⚠ `|| true` PARCE QU'UN UID ABSENT EST UNE REPONSE, PAS UNE PANNE. `getent` sort en 2 quand la
@@ -349,17 +349,17 @@ probe_seat_uid() {
 
 # ─── LE FICHIER QUE LISENT LES DEUX MOITIES DE GUARD B ─────────────────────────────────────────
 #
-# Absent, les deux gardes retombent sur le litteral `1000` — juste tant que le siege est le premier
-# uid de la machine, et muet quand il ne l'est pas. C'est exactement l'etat d'avant ce lot.
+# Absent, les deux gardes REFUSENT : le siege ne se devine pas, et une machine sans ce fichier n'est
+# pas provisionnee. Ce module est le seul a le poser sur ce rail.
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
-    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) retombera sur le littéral 1000, qui n'est le siège que par coïncidence"
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
     return 0
   fi
   v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
   if [[ ! "$v" =~ ^[0-9]+$ ]]; then
-    p_drift "$SEAT_UID_FILE ne porte pas un uid (« $v ») — les deux gardes l'ignoreront et retomberont sur leur littéral"
+    p_drift "$SEAT_UID_FILE ne porte pas un uid (« $v ») — les deux gardes refuseront un lancement qu'ils ne peuvent pas vérifier"
     return 0
   fi
   # ⚠ LES DEUX ARTEFACTS DOIVENT S'ACCORDER, ET ILS VIENNENT DE LA MEME DERIVATION. `services.env`
@@ -444,7 +444,7 @@ apply() {
   # `LCARS_LANDING_PORT` et `LCARS_PROVISION` disparus, et l'apply rendait 0. Un refus qui produit un
   # succès amputé est pire que le littéral qu'il remplaçait.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
-    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que GUARD B, is_fleet_human et uid_floor lisent, et les trois retomberaient sur le littéral 1000"
+    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et uid_floor, qui retomberaient sur le littéral 1000"
     verdict_apply
   }
 
@@ -468,7 +468,7 @@ apply() {
   # `root:root` parce que c'est ce qui empeche ce meme humain de le REECRIRE — c'est toute la
   # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
-    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B retomberait sur son littéral"; verdict_apply; }
+    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B refusera tout lancement sur cette machine"; verdict_apply; }
   # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
   # lire deux écritures là où il n'y en a qu'une.)
 

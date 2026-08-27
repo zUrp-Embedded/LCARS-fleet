@@ -358,7 +358,9 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   # dit ce qu'il est. Le jour ou quelqu'un lui redonne un sens, il le fera en le renommant.
   local pw="$1"; shift
   [[ $# -gt 0 ]] && shift
-  LCARS_CONSOLE_PASSWD="$pw" \
+  # Le siege se POSE : `console-humans.sh` n'a plus de defaut `:-1000`, et sans siege etabli il ne
+  # rend aucune liste — une liste ou le siege figure se lit comme une population.
+  LCARS_CONSOLE_PASSWD="$pw" LCARS_SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}" \
     run bash "$BATS_TEST_DIRNAME/../../services/console-humans.sh" "$@"
 }
 

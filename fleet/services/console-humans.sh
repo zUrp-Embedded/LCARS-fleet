@@ -75,7 +75,14 @@ UID_MAX="${LCARS_CONSOLE_UID_MAX:-59999}"
 # CE QUI DECIDE MAINTENANT, ET RIEN D'AUTRE : un uid dans la plage humaine, un home qui existe, un
 # shell qui n'est pas `nologin`, et ce n'est pas le siege. Quatre faits LOCAUX, tous lisibles sur la
 # ligne de passwd qu'on parcourt — et aucun n'a de peremption.
-SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
+# ⚠ PAS DE `:-1000`. Le siege est l'uid de qui a installe LCARS, grave en `/etc/lcars/seat.uid` : un
+# defaut ferait entrer le siege dans la liste des humains des qu'il est ailleurs, et le deck lui
+# offrirait une console. Sans siege etabli, on ne rend AUCUNE liste — une liste fausse se lit comme
+# une population.
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+SYSADMIN_UID="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+[[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || SYSADMIN_UID="${LCARS_SYSADMIN_UID:-}"
+
 
 # Deux classes de rejet, et elles ne meritent PAS le meme bruit :
 #   - hors plage d'uid (root, daemon, www-data, nobody…) : ATTENDU a chaque boot. Detailler 19

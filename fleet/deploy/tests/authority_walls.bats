@@ -301,7 +301,10 @@ secret_writers() {
   # siege — un shell sudo-capable derriere la porte WEB de la boite, l'exact inverse de ce que les
   # pods confinent. Et keyee sur l'UID, pas sur un login : `00` §5, le login du siege est variable.
   local hum="$REPO/services/console-humans.sh"
-  grep -qE 'SYSADMIN_UID="\$\{LCARS_SYSADMIN_UID:-1000\}"' "$hum"
+  # Le siege se LIT (fichier `root:root`, puis la variable que le provisionnement exporte), il ne se
+  # devine pas : un `:-1000` ferait entrer le siege dans la liste des humains des qu'il est ailleurs.
+  sed 's/#.*//' "$hum" | grep -qE 'SYSADMIN_UID=.*SEAT_UID_FILE|SEAT_UID_FILE=.*seat\.uid'
+  absent 'LCARS_SYSADMIN_UID:-1000' "$hum"
   sed 's/#.*//' "$hum" | grep -qE '\$uid.*==.*\$SYSADMIN_UID'
   # Et JAMAIS sur un nom : un login code en dur serait une seconde verite sur la reservation.
   absent '(==|=~).*"admiral"' "$hum"

@@ -137,11 +137,22 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
 GROUP="${PROV_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
-# GUARD A — L'UID RESERVE DU SYSADMIN (admiral) N'EST JAMAIS CONVERGE NI REVOQUE. Garde DUR keye sur
-# l'UID (1000), PAS sur un login : en prod le login d'admiral est celui de l'installeur (variable),
-# son uid est le 1000 reserve (fixe). Le revoquer poserait `nologin` sur root et fermerait la boite
-# sur son propre sysadmin — l'enfermement dehors. Keyer sur l'uid survit a un rename du compte.
-SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
+# GUARD A — L'UID DU SIEGE N'EST JAMAIS CONVERGE NI REVOQUE. Garde keye sur l'UID, PAS sur un login :
+# le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
+# Le revoquer poserait `nologin` sur le sysadmin et fermerait la machine sur lui — l'enfermement
+# dehors.
+#
+# ⚠ L'UID N'EST PAS `1000`, ET CE DEFAUT ETAIT UNE COLLISION EN ATTENTE. Le siege est l'uid de qui a
+# installe LCARS (`deploy/provision`), grave en `/etc/lcars/seat.uid`. Avec un plancher fige a 1000
+# pendant que le siege est a 1237, ce convergeur cree des humains AU-DESSUS DE 1000 — donc sur 1237,
+# l'uid de l'admin — et GUARD A ne reconnait plus le compte qu'il doit epargner. Ce process tourne en
+# root et fait `useradd` : sans siege etabli, il ne demarre pas.
+#
+# ⚠ AUCUN EFFET DE BORD AU SOURCING : ce fichier est source par ses temoins (garde ligne 497). Le
+# refus vit dans le preflight, la ou le process VA creer des comptes — pas dans une assignation.
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+SYSADMIN_UID="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+[[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || SYSADMIN_UID="${LCARS_SYSADMIN_UID:-}"
 # Un refus se dit UNE FOIS. Sans cette trace, un login invalide reproche la meme chose toutes les
 # 30 s et noie le journal, ce qui revient a ne rien dire du tout.
 REFUSED_FILE="${LCARS_CONVERGER_REFUSED:-/run/lcars-converger.refused}"
@@ -307,14 +318,16 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
 # — bruyant, donc acceptable. Sous le `set +e` de la BOUCLE, `uid_wanted` rend vide, `uid_args`
 # reste vide, `useradd` repart de `UID_MIN` : le plancher que ce fichier existe pour poser est
 # contourne EN SILENCE. La garde ci-dessous est donc le plancher du plancher.
+# ⚠ LE SIEGE EST UN TROU DANS LA PLAGE, PAS UN PLANCHER. Les deux gardes sont ORTHOGONAUX :
+# « uid >= UID_MIN » est la frontiere systeme/humain, « uid != siege » est la reservation du siege.
+# Partir de `siege + 1` les cumule, et declare inutilisables tous les uid entre UID_MIN et le siege —
+# avec un siege a 1237, c'est 1000..1236 perdus alors que les deux gardes les acceptent. Le plancher
+# est UID_MIN, et rien d'autre ; le siege s'evite en le sautant (`first_free_uid`).
 uid_floor() {
-  local m s
+  local m
   m="$(uid_min)"
   [[ "$m" =~ ^[0-9]+$ ]] || m=1000
-  s="$SYSADMIN_UID"
-  [[ "$s" =~ ^[0-9]+$ ]] || s=1000
-  (( m > s )) && { echo "$m"; return 0; }
-  echo "$(( s + 1 ))"
+  echo "$m"
 }
 
 # ⚠ `getent`, PAS `PASSWD_FILE` — ET C'EST LE SEUL ENDROIT DU FICHIER QUI DIVERGE. Le reste du
@@ -323,8 +336,8 @@ uid_floor() {
 # repond ce que le fichier ignore. `getent` est un sur-ensemble : un uid qu'il declare libre l'est
 # aussi pour `PASSWD_FILE`, donc `uid_taken_by` ne peut pas contredire ce choix a tort.
 first_free_uid() {
-  local uid; uid="$(uid_floor)"
-  while getent passwd "$uid" >/dev/null 2>&1; do uid=$(( uid + 1 )); done
+  local uid seat; uid="$(uid_floor)"; seat="$SYSADMIN_UID"
+  while getent passwd "$uid" >/dev/null 2>&1 || [[ "$uid" == "$seat" ]]; do uid=$(( uid + 1 )); done
   echo "$uid"
 }
 
@@ -495,6 +508,9 @@ command -v jq   >/dev/null || { err "jq absent de l'image"; exit 1; }
 # passer le refus de privilege en premier repondrait a cote de la question posee.
 [[ -n "$FORGE" ]] || { err "FORGE_BASE_URL non pose — aucun enrollment ne peut converger"; exit 2; }
 [[ -r "$TOKEN_FILE" ]] || { err "$TOKEN_FILE illisible — le token systeme est le seul droit de lecture de la team"; exit 2; }
+# Le siege decide GUARD A (qui n'est jamais converge) et le trou de la plage d'uid. Ce process tourne
+# en root et fait `useradd` : sans siege etabli, il creerait un compte sur l'uid de l'admin.
+[[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || { err "siege non etabli ($SEAT_UID_FILE absent ou illisible, LCARS_SYSADMIN_UID non pose) — aucun compte ne se cree sur un plancher devine"; exit 2; }
 
 [[ "$(id -u)" -eq 0 ]] || { err "doit tourner en root (c'est lui qui cree les users)"; exit 1; }
 

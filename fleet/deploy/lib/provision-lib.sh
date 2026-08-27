@@ -1165,12 +1165,35 @@ _uid_bound() { # <UID_MIN|UID_MAX> <défaut>
   [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v" || printf '%s' "$2"
 }
 
+# ─── LE SIÈGE EST UN FAIT, ET IL N'A PAS DE DÉFAUT ──────────────────────────────────────────────
+#
+# `deploy/provision` le dérive de l'appelant de l'installeur avant tout module et l'exporte ;
+# `64-services` le grave ensuite en `/etc/lcars/seat.uid`, `root:root`. Le FICHIER gagne quand il
+# existe — il survit au shell et le gardé ne peut pas le réécrire ; la variable sert la fenêtre du
+# provisionnement, avant que le fichier soit posé. L'absence des deux n'est pas la valeur `1000` :
+# c'est une machine dont le siège n'est pas établi, et ça se dit.
+prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
+  local f v
+  f="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+  if [[ -r "$f" ]]; then
+    v="$(head -n1 -- "$f" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
+  fi
+  v="${LCARS_SYSADMIN_UID:-}"
+  [[ "$v" =~ ^[0-9]+$ ]] && { printf '%s' "$v"; return 0; }
+  return 1
+}
+
+# ⚠ SIÈGE INCONNU ⇒ RÉPONSE NON, POUR TOUT LE MONDE. Un `:-1000` répondait « oui » à quiconque n'est
+# pas 1000 — donc au siège lui-même dès qu'il est ailleurs, c'est-à-dire exactement le compte que
+# cette fonction existe pour écarter. Se fermer est la seule direction sûre quand la borne manque.
 is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
-  local login="${1:-$PROV_HUMAN}" uid uid_min
+  local login="${1:-$PROV_HUMAN}" uid uid_min seat
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
+  seat="$(prov_seat_uid)" || return 1
   uid_min="$(_uid_bound UID_MIN 1000)"
-  (( uid >= uid_min )) && (( uid != ${LCARS_SYSADMIN_UID:-1000} ))
+  (( uid >= uid_min )) && (( uid != seat ))
 }
 
 # ─── fleet_humans — CEUX QUI EXISTENT DÉJÀ SUR CETTE MACHINE ────────────────────────────────────
@@ -1185,8 +1208,15 @@ is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
 # FICHIER, jamais par `id` : c'est ce qui rend la population mesurable par un témoin (`PASSWD_FILE`,
 # même couture que le convergeur d'humains).
 fleet_humans() {
+  local seat
+  # Siège inconnu : on ne rend PAS une liste. Un `:-1000` ferait entrer le siège dans la population
+  # dès qu'il est ailleurs, et une liste fausse ici se lit comme une population.
+  seat="$(prov_seat_uid)" || {
+    echo "fleet_humans: siège non établi (ni ${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
+    return 1
+  }
   awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \
-      -v s="${LCARS_SYSADMIN_UID:-1000}" \
+      -v s="$seat" \
       '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
