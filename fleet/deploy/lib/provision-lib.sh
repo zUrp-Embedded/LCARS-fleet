@@ -80,6 +80,7 @@ PROVISION_LIB_LOADED=1
 # FORGE_ROLE_TOKENS_DIR). Personne ne globbe ce repertoire aujourd'hui — le premier qui le fera ne
 # doit pas ramasser un site-admin en croyant lire un role.
 : "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
+: "${PROV_UID_MAP_FILE:=$PROV_TOKENS_DIR/forge-uid.map}"
 # GRAINE du binaire vendor : un chemin où un binaire `claude` déjà présent SUR LA MACHINE
 # court-circuite l'installeur officiel de 40-claude-bin (donc le réseau). Root-owned, hors de tout
 # home — l'humain du runtime n'existe pas encore quand un semis extérieur le pose. Vide/absent =
@@ -1263,6 +1264,114 @@ prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
 # ⚠ LE MINT NE PERD JAMAIS UN COMPTE QU'IL A DEJA CREE : l'union est cumulative, jamais un
 # remplacement. Un catalogue desinstalle laisse ses comptes derriere lui — c'est deliberé, ses
 # projets existent encore et leurs commits portent ces signatures.
+# ─── LE SIEGE : le #1 de la forge et le compte unix sont le MEME acteur ─────────────────────────
+#
+# La regle : celui des deux qui existe nomme l'autre, et le lien est enregistre — ligne `forge_id=1`
+# de `forge-uid.map`, la meme table que les humains de fleet. Une seconde table pour tenir une ligne
+# de la premiere ferait deux verites d'un meme fait.
+#
+# ⚠ CES PRIMITIVES VIVENT ICI PARCE QUE LES DEUX RAILS EN ONT BESOIN AU MEME MOMENT, ET QUE CE
+# MOMENT EST AVANT L'EXECUTEUR. Mesure : la boite lance `provision apply` (`entrypoint.sh:459`) puis
+# l'executeur (`:655`) ; le poste nomme son admin forge au rang 48 et demarre l'unite au rang 64.
+# Un verbe de l'executeur ne peut donc servir ni l'un ni l'autre. Le second lecteur du jeton master
+# existe deja et il est delibere — `resolve_admiral`, en root, avant que quoi que ce soit d'autre
+# existe : une primitive partagee REMPLACE deux copies de cette derivation, elle n'en ajoute pas.
+#
+# ⚠ ELLES LISENT ET ELLES ENREGISTRENT ; elles ne CREENT aucun compte. Chaque rail a deja son geste
+# de creation (`useradd` a l'entrypoint, le compte forge dans `48-forge-host`) et il le garde : une
+# lib sourcee qui creerait des comptes unix ET forge porterait une autorite que personne ne lui a
+# donnee en la sourcant.
+
+prov_seat_from_map() { # le login du siege enregistre, ou vide
+  [[ -r "$PROV_UID_MAP_FILE" ]] || return 0
+  awk -F'\t' '$1 == 1 { print $3; exit }' "$PROV_UID_MAP_FILE" 2>/dev/null
+}
+
+# ⚠ ECRIT UNE FOIS, JAMAIS RE-ECRIT. Le home du siege vit sous son nom ; changer ce nom plus tard
+# laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere resolution fait foi —
+# c'est elle qui correspond a ce qui est sur le disque.
+prov_seat_record() { # prov_seat_record <login> [uid]
+  [[ -n "${1:-}" ]] || return 0
+  [[ -n "$(prov_seat_from_map)" ]] && return 0
+  mkdir -p "$(dirname "$PROV_UID_MAP_FILE")" 2>/dev/null || true
+  printf '1\t%s\t%s\n' "${2:-${LCARS_UID:-1000}}" "$1" >> "$PROV_UID_MAP_FILE" 2>/dev/null || return 1
+  chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
+}
+
+# Le #1 de la forge, resolu par son ID et jamais par son nom : Gitea conserve l'`id` au renommage,
+# le login est une etiquette. Vide quand la forge est muette ou le jeton illisible — un appelant qui
+# lit du vide ne doit pas conclure « personne », seulement « pas su ».
+prov_forge_seat_login() {
+  local tok
+  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  [[ -n "$tok" && -n "${PROV_FORGE_URL:-}" ]] || return 0
+  # `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hote.
+  printf 'header = "Authorization: token %s"\n' "$tok" \
+    | curl -sS -K - -m 15 "${PROV_FORGE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
+    | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true
+}
+
+# prov_seat_binding [candidat_unix] — POSE TROIS GLOBALES, N'IMPRIME RIEN :
+#
+#   PROV_SEAT_BINDING   le verdict d'ACCORD, un mot
+#   PROV_SEAT_LOGIN     le login du siege, vide seulement sur `unknown`
+#   PROV_SEAT_SOURCE    d'ou il vient — `table` | `forge` | `candidat`, vide sur `unknown`
+#
+# ⚠ TROIS GLOBALES ET PAS UN `echo`, POUR LA MEME RAISON QUE `advertise_addr` — et j'ai reconstruit
+# son defaut avant de relire son commentaire. Un appelant ecrit naturellement
+# `v="$(prov_seat_binding x)"`, or `$( )` ouvre un SOUS-SHELL : la valeur revient par stdout et les
+# globales meurent avec lui.
+#
+# ⚠ LE VERDICT ET LA SOURCE SONT DEUX FAITS. Un verdict qui s'appellerait `forge_only` alors que le
+# login vient de la TABLE nommerait la mauvaise autorite dans le message d'un operateur qui
+# diagnostique — et c'est precisement quand la forge est en carafe qu'il lira cette ligne.
+#
+# Les cinq verdicts :
+#
+#   agree     le cote durable et le candidat unix nomment le meme acteur
+#   diverge   ils nomment deux acteurs — la branche que personne n'avait, et le controle qui
+#             aurait attrape la divergence avant qu'elle casse
+#   derived   le cote durable nomme, unix n'a pas de candidat a confronter
+#   seeded    unix nomme, le cote durable est muet
+#   unknown   ni l'un ni l'autre : on REFUSE de nommer plutot que d'inventer — un siege invente
+#             s'installe et survit a la cause qui l'a produit, un refus se lit et se repare
+#
+# La table PASSE AVANT la forge : elle survit au conteneur et ne demande aucun reseau, donc un
+# redemarrage reste possible pendant que la forge est en carafe.
+PROV_SEAT_BINDING=""
+PROV_SEAT_LOGIN=""
+PROV_SEAT_SOURCE=""
+prov_seat_binding() { # prov_seat_binding [candidat_unix]
+  local candidat="${1:-}" durable source
+
+  PROV_SEAT_BINDING=""
+  PROV_SEAT_LOGIN=""
+  PROV_SEAT_SOURCE=""
+
+  durable="$(prov_seat_from_map)"
+  source=table
+  if [[ -z "$durable" ]]; then
+    durable="$(prov_forge_seat_login)"
+    source=forge
+  fi
+
+  if [[ -n "$durable" && -n "$candidat" ]]; then
+    PROV_SEAT_LOGIN="$durable"
+    PROV_SEAT_SOURCE="$source"
+    if [[ "$durable" == "$candidat" ]]; then PROV_SEAT_BINDING=agree; else PROV_SEAT_BINDING=diverge; fi
+  elif [[ -n "$durable" ]]; then
+    PROV_SEAT_LOGIN="$durable"; PROV_SEAT_SOURCE="$source"; PROV_SEAT_BINDING=derived
+  elif [[ -n "$candidat" ]]; then
+    PROV_SEAT_LOGIN="$candidat"; PROV_SEAT_SOURCE=candidat; PROV_SEAT_BINDING=seeded
+  else
+    PROV_SEAT_BINDING=unknown
+  fi
+
+  # `return 0` EXPLICITE : sans lui la fonction rend le code du dernier `if`, donc 1 sur la branche
+  # `unknown`. Tous les appelants tournent sous `set -e` — meme cicatrice qu'`advertise_addr`.
+  return 0
+}
+
 prov_roles() {
   local out="$PROV_ROLES" root
   local bin="${PROV_RELEASE_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"

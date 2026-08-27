@@ -217,64 +217,67 @@ say() { echo "[lcars-entrypoint] $*"; }
 # runtime possible (la forge n'est pas jointe au moment du useradd) » : vrai de la CONVERGENCE, qui
 # vient a l'etape 3. Resoudre le #1 ne demande que le jeton master, et il vit dans le VOLUME — donc
 # il precede l'entrypoint des que l'operateur a configure sa boite.
-resolve_admiral() {
-  local from_table tok resolved
-  if [[ -n "${LCARS_ADMIRAL:-}" ]]; then
-    say "siege : « $LCARS_ADMIRAL » seme par l'appelant (LCARS_ADMIRAL) — cas from-scratch, rien a deriver"
-    seat_record "$LCARS_ADMIRAL"
-    return 0
-  fi
-  # 1. La table du volume : elle survit au conteneur, `/etc/passwd` non. Aucune forge necessaire, et
-  #    c'est ce qui rend un redemarrage possible pendant que la forge est en carafe.
-  from_table="$(seat_from_map)"
-  if [[ -n "$from_table" ]]; then
-    LCARS_ADMIRAL="$from_table"
-    say "siege : « $LCARS_ADMIRAL » (table $UID_MAP_FILE, forge_id 1)"
-    return 0
-  fi
-  # 2. Le #1 de la forge, resolu par son ID et jamais par son nom — Gitea conserve l'`id` au
-  #    renommage, le login est une etiquette. Puis ENREGISTRE : le boot suivant ne demandera rien.
-  tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  if [[ -n "$tok" && -n "${FORGE_BASE_URL:-}" ]]; then
-    # `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hote (cicatrice 6-141).
-    resolved="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-                | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
-                | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true)"
-    if [[ -n "$resolved" ]]; then
-      LCARS_ADMIRAL="$resolved"
-      seat_record "$LCARS_ADMIRAL"
-      say "siege : « $LCARS_ADMIRAL » derive du #1 de ${FORGE_BASE_URL%/} — enregistre"
-      return 0
-    fi
-  fi
-  # 3. Ni semence, ni table, ni forge : sur un rail reel, ce triplet n'arrive pas. On REFUSE plutot
-  #    que de nommer — un siege invente s'installe dans le volume et survit a la cause qui l'a
-  #    produit, alors qu'un refus se lit et se repare.
-  say "siege : IMPOSSIBLE a determiner — ni semence (LCARS_ADMIRAL), ni ligne forge_id=1 dans $UID_MAP_FILE, ni #1 lisible sur ${FORGE_BASE_URL:-<aucune forge configuree>} ($([[ -z "$tok" ]] && echo "jeton master illisible : $MASTER_TOKEN_FILE" || echo 'forge muette')). « box config » pose la forge et son jeton ; le bench, lui, seme le nom."
-  return 1
-}
-
-seat_from_map() { # le login du siege, ou vide — la ligne `forge_id = 1` de la table du convergeur
-  [[ -r "$UID_MAP_FILE" ]] || return 0
-  awk -F'\t' '$1 == 1 { print $3; exit }' "$UID_MAP_FILE" 2>/dev/null
-}
-
-# ⚠ ECRIT UNE FOIS, JAMAIS RE-ECRIT. Le home du siege vit dans le volume sous son nom ; changer le
-# nom au boot suivant laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere
-# resolution fait foi — c'est elle qui correspond a ce qui est sur le disque.
+# ⚠ LA LIB EST SOURCEE ICI, ET C'EST MESURE. Hors du runner elle n'imprime rien, ne pose aucun trap
+# (sa garde de sortie n'est armee que sous `PROVISION_RUN`) et n'ecrase aucune fonction de ce
+# fichier — zero collision sur les 57 qu'elle definit. Ce qu'on y gagne : UNE derivation du siege
+# pour les deux rails, au lieu de deux copies qui divergent le jour ou l'une est corrigee.
 #
-# Le format est celui du convergeur (`<forge_id>\t<uid>\t<login>`) parce que c'est la MEME table :
-# le siege y est la ligne 1, les humains de fleet les autres. Une seconde table pour tenir une ligne
-# de la premiere ferait deux verites d'un meme fait.
-seat_record() { # seat_record <login>
-  [[ -n "${1:-}" ]] || return 0
-  [[ -n "$(seat_from_map)" ]] && return 0
-  mkdir -p "$(dirname "$UID_MAP_FILE")" 2>/dev/null || true
-  if printf '1\t%s\t%s\n' "${LCARS_UID:-1000}" "$1" >> "$UID_MAP_FILE" 2>/dev/null; then
-    chmod 0640 "$UID_MAP_FILE" 2>/dev/null || true
-  else
-    say "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
-  fi
+# ⚠ ELLE EST REQUISE, ET LE DIRE VAUT MIEUX QUE DE FAIRE SEMBLANT. `resolve_admiral` ne sait plus
+# deriver sans elle ; un repli qui garderait une seconde derivation ici annulerait tout le gain.
+# Dans l'image elle est toujours la — c'est le meme arbre que le `provision` que ce fichier lance a
+# l'etape 3. Absente, le boot ne converge de toute facon pas : on refuse en le nommant.
+PROVISION_LIB_FILE="${LCARS_PROVISION_LIB:-/opt/lcars/fleet/deploy/lib/provision-lib.sh}"
+if [[ ! -r "$PROVISION_LIB_FILE" ]]; then
+  echo "[lcars-entrypoint] provision-lib introuvable ($PROVISION_LIB_FILE) — le siege ne peut pas se deriver, et le provisionnement de l'etape 3 vient du meme arbre. Image incomplete." >&2
+  exit 1
+fi
+# shellcheck source=../lib/provision-lib.sh
+. "$PROVISION_LIB_FILE"
+
+resolve_admiral() {
+  # Les noms de ce fichier sont ceux du conteneur, ceux de la lib ceux du provisionnement : on les
+  # accorde ICI, une fois, plutot que de faire porter a la lib un second jeu de noms.
+  PROV_UID_MAP_FILE="$UID_MAP_FILE"
+  PROV_MASTER_TOKEN_FILE="$MASTER_TOKEN_FILE"
+  PROV_FORGE_URL="${FORGE_BASE_URL:-}"
+
+  prov_seat_binding "${LCARS_ADMIRAL:-}"
+
+  case "$PROV_SEAT_BINDING" in
+    seeded)
+      say "siege : « $PROV_SEAT_LOGIN » seme par l'appelant (LCARS_ADMIRAL) — cas from-scratch, rien a deriver"
+      ;;
+    derived)
+      say "siege : « $PROV_SEAT_LOGIN » ($PROV_SEAT_SOURCE)"
+      ;;
+    agree)
+      say "siege : « $PROV_SEAT_LOGIN » — la semence et $PROV_SEAT_SOURCE nomment le meme acteur"
+      ;;
+    diverge)
+      # ⚠ LA BRANCHE QUE PERSONNE N'AVAIT. La semence disait un nom, le cote durable en dit un
+      # autre : le home du siege vit sous le PREMIER, et booter sous le second creerait un compte
+      # de plus en laissant l'ancien orphelin. On refuse, pour la meme raison qu'on refuse
+      # d'inventer — sauf qu'ici on ne devine meme pas, on CONSTATE le desaccord.
+      say "siege : DIVERGENCE — la semence dit « ${LCARS_ADMIRAL:-} », $PROV_SEAT_SOURCE dit « $PROV_SEAT_LOGIN ». Le home du siege vit sous UN de ces noms : retire la semence pour suivre $PROV_SEAT_SOURCE, ou corrige la table ($UID_MAP_FILE)."
+      return 1
+      ;;
+    *)
+      # ⚠ DEUX CAUSES, DEUX REPARATIONS. « Pas de jeton » et « forge muette » ne s'arrangent pas de
+      # la meme facon, et les fondre renvoie l'operateur regarder le mauvais objet. On teste la
+      # PRESENCE du fichier (`-s`), jamais son contenu : classer un refus ne demande pas de lire
+      # un secret.
+      local pourquoi
+      if [[ -s "$MASTER_TOKEN_FILE" ]]; then pourquoi="forge muette"
+      else pourquoi="jeton master illisible : $MASTER_TOKEN_FILE"; fi
+      say "siege : IMPOSSIBLE a determiner — ni semence (LCARS_ADMIRAL), ni ligne forge_id=1 dans $UID_MAP_FILE, ni #1 lisible sur ${FORGE_BASE_URL:-<aucune forge configuree>} ($pourquoi). « box config » pose la forge et son jeton ; le bench, lui, seme le nom."
+      return 1
+      ;;
+  esac
+
+  LCARS_ADMIRAL="$PROV_SEAT_LOGIN"
+  prov_seat_record "$LCARS_ADMIRAL" "${LCARS_UID:-1000}" \
+    || say "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
+  return 0
 }
 
 # ─── 1. L'humain (idempotent — le home vit dans le volume, le user est recréé à l'identique) ─────

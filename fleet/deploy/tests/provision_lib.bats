@@ -860,3 +860,102 @@ module_sh() {
   '
   [ "$status" -eq 0 ]
 }
+
+# ─── LE SIEGE — les quatre branches, et celle qui n'existait nulle part ──────────────────────────
+#
+# La regle : celui des deux qui existe nomme l'autre, et le lien est enregistre. La QUATRIEME
+# branche — les deux existent et ne s'accordent PAS — n'etait ecrite dans aucun rail : c'est le
+# controle qui aurait attrape la divergence avant qu'elle casse.
+
+@test "siege: la table et le candidat unix s'accordent -> agree" {
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
+    prov_seat_binding amiral
+    [ "$PROV_SEAT_BINDING" = agree ]
+    [ "$PROV_SEAT_LOGIN" = amiral ]
+    # La SOURCE est un fait distinct du verdict : un operateur qui diagnostique une forge en carafe
+    # lit cette ligne, et « forge » y serait un mensonge.
+    [ "$PROV_SEAT_SOURCE" = table ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: la table et le candidat unix DIVERGENT -> diverge, et la table fait foi" {
+  # Le nom enregistre correspond a ce qui est SUR LE DISQUE (le home du siege). Un candidat qui
+  # dit autre chose est le defaut, pas la table.
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
+    prov_seat_binding quelquun-dautre
+    [ "$PROV_SEAT_BINDING" = diverge ]
+    [ "$PROV_SEAT_LOGIN" = amiral ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: le cote durable nomme, unix n'a pas de candidat -> derived, source NOMMEE" {
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
+    prov_seat_binding
+    [ "$PROV_SEAT_BINDING" = derived ]
+    [ "$PROV_SEAT_SOURCE" = table ]
+    [ "$PROV_SEAT_LOGIN" = amiral ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: unix nomme, le cote durable est muet -> seeded" {
+  # Pas de table, pas de jeton, pas d URL : `prov_forge_seat_login` rend vide. Un appelant qui lit
+  # du vide ne conclut pas « personne », seulement « pas su » — et le candidat unix reste.
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/absente"
+    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
+    export PROV_FORGE_URL=""
+    prov_seat_binding loperateur
+    [ "$PROV_SEAT_BINDING" = seeded ]
+    [ "$PROV_SEAT_SOURCE" = candidat ]
+    [ "$PROV_SEAT_LOGIN" = loperateur ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: ni l un ni l autre -> unknown, et AUCUN nom n est pose" {
+  # Un siege invente s installe et survit a la cause qui l a produit ; un refus se lit et se repare.
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/absente"
+    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
+    export PROV_FORGE_URL=""
+    prov_seat_binding
+    [ "$PROV_SEAT_BINDING" = unknown ]
+    [ -z "$PROV_SEAT_LOGIN" ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: l enregistrement ECRIT UNE FOIS et ne se re-ecrit jamais" {
+  # Le home du siege vit sous son nom : changer ce nom plus tard laisserait un home orphelin.
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    prov_seat_record amiral 1000
+    prov_seat_record quelquun-dautre 1000
+    [ "$(prov_seat_from_map)" = amiral ]
+    [ "$(grep -c . "$PROV_UID_MAP_FILE")" -eq 1 ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "siege: la table PASSE AVANT la forge — un redemarrage tient sans reseau" {
+  # `prov_forge_seat_login` n est meme pas appele quand la ligne existe : on le prouve en rendant
+  # son chemin impraticable (aucune URL, aucun jeton) et en exigeant quand meme une reponse.
+  module_sh '
+    export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/map"
+    printf "1\t1000\tamiral\n" > "$PROV_UID_MAP_FILE"
+    export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/pas-de-jeton"
+    export PROV_FORGE_URL=""
+    prov_seat_binding amiral
+    [ "$PROV_SEAT_BINDING" = agree ]
+  '
+  [ "$status" -eq 0 ]
+}

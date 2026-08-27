@@ -473,6 +473,47 @@ forge_promote_admin() { # forge_promote_admin <login>
     | curl -K - -fsS -m 15 "$LOCAL_URL/api/v1/admin/users/$1" >/dev/null 2>&1
 }
 
+# ─── LE SIEGE : le #1 de la forge et l'admin unix sont le MEME acteur ───────────────────────────
+#
+# ⚠ AUCUNE LIGNE `forge_id=1` N'EXISTAIT SUR CE RAIL. La boite enregistre son siege au boot ; le
+# poste, lui, nommait son admin forge (`PROV_FORGE_ADMIN := PROV_HUMAN`) et n'enregistrait rien. Le
+# lien n'etait donc ecrit nulle part, et la quatrieme branche — les deux cotes nomment deux acteurs
+# — n'avait aucun controle.
+#
+# La derivation est celle de la lib, la MEME que la boite appelle : une seule autorite sur « qui est
+# le siege », donc pas de second cadran a tenir accorde.
+#
+# UNE SEULE FONCTION POUR LES DEUX VERBES, et le mode ne change QUE l'ecriture. Deux blocs auraient
+# diverge : le doctor aurait fini par mesurer autre chose que ce que l'apply converge.
+seat_binding_report() { # seat_binding_report <check|apply>
+  local mode="${1:?}"
+  prov_seat_binding "$PROV_FORGE_ADMIN"
+
+  case "$PROV_SEAT_BINDING" in
+    diverge)
+      # Le desaccord ne se repare pas ici : renommer un compte unix ou un compte forge est une
+      # decision d'operateur, pas une convergence. On le NOMME, et le module derive.
+      p_drift "siège : « $PROV_FORGE_ADMIN » côté unix, « $PROV_SEAT_LOGIN » côté $PROV_SEAT_SOURCE — deux acteurs pour un rôle, et le lien n'est PAS enregistré tant qu'ils ne s'accordent pas"
+      return 0
+      ;;
+    unknown)
+      p_warn "siège : ni compte unix nommé, ni #1 lisible sur la forge — le lien n'est pas mesurable"
+      return 0
+      ;;
+  esac
+
+  if [[ -n "$(prov_seat_from_map)" ]]; then
+    p_ok "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
+  elif [[ "$mode" != "apply" ]]; then
+    p_drift "siège : « $PROV_SEAT_LOGIN » connu ($PROV_SEAT_SOURCE) mais NON enregistré — l'apply pose la ligne"
+  elif prov_seat_record "$PROV_SEAT_LOGIN" "$(id -u "$PROV_SEAT_LOGIN" 2>/dev/null || echo 1000)"; then
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
+  else
+    p_drift "siège : « $PROV_SEAT_LOGIN » NON enregistré dans $PROV_UID_MAP_FILE"
+  fi
+}
+
 check() {
   if ! docker_endpoint; then
     # Même mot que 00-preflight, et pour la même raison : ce rail ne PEUT pas tenir son état-cible
@@ -491,6 +532,7 @@ check() {
       || p_drift "forge vivante mais AUCUNE autorité ($MASTER_TOKEN_FILE) — l'apply la minte"
     # ⚖ D7 : le propriétaire de la machine administre sa forge. Ça se SONDE, sinon la dérive
     # n'existe que le jour où quelqu'un essaie d'ouvrir la page d'administration et se fait jeter.
+    seat_binding_report check
     case "$(forge_admin_state "$PROV_FORGE_ADMIN")" in
       admin)   p_ok "« $PROV_FORGE_ADMIN » administre la forge" ;;
       plain)   p_drift "« $PROV_FORGE_ADMIN » n'est PAS administrateur de sa propre forge — l'apply le promeut" ;;
@@ -677,11 +719,12 @@ apply() {
     # module. Un secret dont la fermeture dépend d'un module qui n'a pas encore tourné est ouvert
     # pendant l'intervalle, et ouvert tout court le jour où ce module rend la main plus tôt.
     #
-    # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne en root : personne d'autre
-    # n'a besoin de ce fichier, donc personne d'autre ne doit pouvoir l'ouvrir.
+    # Le seul lecteur légitime est `catalogue-executor.py`, qui tourne sous `lcars-authority`
+    # (`64-services`, `User=$AUTHORITY_USER`) : personne d'autre n'a besoin de ce fichier, donc
+    # personne d'autre ne doit pouvoir l'ouvrir — root compris, qui n'en est que le dernier recours.
     write_atomic "$MASTER_TOKEN_FILE" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" <<<"$tok" \
       || { p_fail "jeton master non posé ($MASTER_TOKEN_FILE)"; verdict_apply; }
-    p_chg "autorité de création posée ($MASTER_TOKEN_FILE, root seul)"
+    p_chg "autorité de création posée ($MASTER_TOKEN_FILE, $PROV_AUTHORITY_USER seul)"
   else
     p_ok "autorité de création déjà posée ($MASTER_TOKEN_FILE)"
   fi
@@ -951,6 +994,7 @@ apply() {
 
   announce_builtin_human_password
   converge_ci_runner
+  seat_binding_report apply
   verdict_apply
 }
 

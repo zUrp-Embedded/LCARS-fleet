@@ -65,7 +65,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   printf '%s\n' "${CODE[@]}" | grep -q 'bin/lcars'
 }
 
-@test "MUR 1: le jeton master et le seed ne sont poses QUE root seul" {
+@test "MUR 1: le jeton master et le seed ne sont poses QUE pour leur detenteur, sans groupe" {
   # ⚠ CE MUR NE PEUT PAS SE DERIVER DU MANIFESTE, et le croire etait une erreur d'ecriture du plan.
   # `system.manifest` porte les REPERTOIRES ; le mode des deux secrets est pose ailleurs, par TROIS
   # ecrivains — `48-forge-host` au mint, `50-forge converge_authority_modes()` a chaque apply, et
