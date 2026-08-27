@@ -1682,6 +1682,41 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:ci_rework_marked, 42}
     end
 
+    test "CI rouge mais le producteur est OCCUPE : rien n'est lance, donc RIEN n'est facture" do
+      # LE ROUND SE PAIE A LA DEPENSE, PAS A L'INTENTION. `dispatch_rework` rend
+      # `{:skipped, :role_busy}` sans rien lancer quand le pod du producteur travaille deja. Marquer
+      # la viderait le budget de la carte sur une FILE D'ATTENTE : au tick suivant le producteur est
+      # libre, mais le frein a compte des rounds que personne n'a joues, et l'architecte est saisi
+      # pour un rework qui n'a jamais eu lieu.
+      opts =
+        dispatch_opts(
+          spawner: StubSpawnerAlive,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved, "reviewer" => :approved},
+            _test_merge_result: {:error, {:http, 405, "policy"}},
+            _test_pull: %{
+              "number" => 6,
+              "state" => "open",
+              "draft" => false,
+              "mergeable" => true,
+              "head" => %{"sha" => "abcdef0123456789abcdef0123456789abcdef01"}
+            },
+            _test_rerequested: [],
+            _test_route: {:ok, {"g", "build"}},
+            _test_ci: :failure,
+            _test_ci_reworks: {:ok, 0}
+          ]
+        )
+
+      StepDispatcher.dispatch_review(
+        pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+        opts
+      )
+
+      refute_received {:spawned, _issue, _opts}
+      refute_received {:ci_rework_marked, 42}
+    end
+
     test "CI rouge AU-DELA du budget : l'architecte est saisi, et aucun pod de plus" do
       # `max_rework_rounds` vaut 2 dans ces fixtures : deux rounds deja depenses ferment la porte.
       opts =
