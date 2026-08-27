@@ -29,6 +29,8 @@
 # ne demarrait plus, les fichiers parce qu'une recette a plante. Celui-ci a ete trouve parce qu'un
 # operateur s'est plaint. Trois fois le meme aveuglement ; c'est le troisieme temoin qui le ferme.
 
+load refute
+
 setup() {
   ENTRY="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   SERVICES="$BATS_TEST_DIRNAME/../modules.d/64-services.sh"
@@ -53,6 +55,61 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   while read -r s; do
     [[ "$s" =~ ^[a-z0-9._-]+:(unit|driven-by):[a-z0-9-]+$ ]] || { echo "entree malformee : $s"; return 1; }
   done < <(starters)
+}
+
+# ─── LE SECOND ISO DE LA MEME TABLE : DEMARRE N'EST PAS TENU ───────────────────────────────────
+#
+# Le temoin ci-dessus mesure qu'un composant est LANCE. Il ne dit rien de ce qui arrive quand il
+# MEURT — et c'est la que les deux rails ont diverge une seconde fois. Le rail poste pose
+# `Restart=always` sur chaque unite ; la boite lancait `setsid <cmd> &` et tini recoltait sans
+# relancer. `supervise.sh` a ferme l'ecart pour trois composants sur quatre : la landing appelait
+# encore le script nu, qui se met lui-meme en arriere-plan et rend la main.
+#
+# LA SYMETRIE EST DANS LA TABLE, et c'est ce qui la rend verifiable : une ligne `unit:` dit que le
+# rail poste donne un superviseur a ce composant ; la boite lui en doit un aussi, et son superviseur
+# s'appelle `launch`. Une ligne `driven-by:` dit l'inverse — `console.sh` est rejoue par le
+# convergeur a chaque tour, il n'a pas de superviseur et n'en veut pas.
+joined() { code "$1" | sed -e :a -e '/\\$/N; s/\\\n//; ta'; }
+launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
+
+@test "ISO supervision : autant de sites d'appel a launch que d'unites declarees" {
+  local units sites
+  units="$(starters | grep -c ':unit:')"
+  sites="$(joined "$ENTRY" | grep -cE '^[[:space:]]*launch ')"
+  [ "$units" -ge 4 ]
+  [ "$units" -eq "$sites" ] || {
+    echo "$units composants ont une unite sur le rail poste, mais $sites passent par launch dans la boite"
+    joined "$ENTRY" | grep -E '^[[:space:]]*launch ' | cut -c1-80
+    return 1
+  }
+}
+
+@test "ISO supervision : setsid ne vit QUE dans launch — rien ne se lance nu a cote" {
+  # ⚠ LE SENS QUI ATTRAPE LE PROCHAIN. Compter les sites d'appel ne voit pas un composant AJOUTE
+  # demain avec son propre `setsid <cmd> &` : il n'aurait pas d'unite non plus, donc les deux
+  # nombres resteraient egaux. Ce que ce temoin garde, c'est qu'il n'existe qu'UNE porte de
+  # lancement dans ce fichier — celle qui sait relancer et borner.
+  local total inside
+  total="$(code "$ENTRY" | grep -c 'setsid')"
+  inside="$(launch_body | grep -c 'setsid')"
+  [ "$inside" -ge 2 ]
+  [ "$total" -eq "$inside" ] || {
+    echo "setsid apparait $total fois dans le code, dont $inside dans launch() — un composant se lance hors de la seule porte qui supervise"
+    return 1
+  }
+}
+
+@test "la landing passe par launch AVEC --foreground — sans lui, la relance boucle" {
+  # ⚠ LES DEUX MOITIES, ET LA SECONDE EST LA MOINS EVIDENTE. `console-landing.sh` nu se met en
+  # arriere-plan et rend la main aussitot : supervise le verrait sortir en 0 a chaque fois et le
+  # relancerait jusqu'a sa borne, sur une machine parfaitement saine. `--foreground` fait `exec` sur
+  # `console-deck.py`, donc l'enfant du superviseur EST le deck — la meme forme que l'`ExecStart` de
+  # `lcars-landing.service`, qu'un temoin de `services_units` epingle de son cote.
+  joined "$ENTRY" | grep -qE "^[[:space:]]*launch .*console-landing\.sh --foreground" || {
+    echo "la landing n'est pas lancee par launch avec --foreground :"
+    joined "$ENTRY" | grep -n 'console-landing' | cut -c1-100
+    return 1
+  }
 }
 
 @test "ISO : chaque composant persistant de l'entrypoint a un DEMARREUR DECLARE" {
@@ -120,7 +177,7 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
   # pas un composant LCARS : sur le rail natif, c'est le systeme qui le tient. L'exclure est une
   # decision ; l'exclure en silence serait un oubli, et le prochain lecteur compterait quatre.
   code "$ENTRY" | grep -qE 'exec .*sshd'
-  ! starters | grep -q '^sshd:'
+  starters | refute_out '^sshd:'
   grep -q 'sshd' "$BATS_TEST_DIRNAME/process_iso.bats"
 }
 

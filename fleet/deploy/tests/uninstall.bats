@@ -18,6 +18,8 @@
 # `BATS_TEST_TMPDIR`, et les chemins qu'ils declarent y vivent aussi. Un temoin de desinstalleur qui
 # lirait le vrai manifeste retirerait le vrai systeme.
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -60,7 +62,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   # inventaire, et celui qui derive est toujours celui qu'on ne relit pas.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   [ -n "$body" ]
-  ! grep -qE '/opt/lcars|/usr/share/lcars|/etc/lcars|/home/private|/var/lib/lcars' <<<"$body"
+  refute grep -qE '/opt/lcars|/usr/share/lcars|/etc/lcars|/home/private|/var/lib/lcars' <<<"$body"
   grep -q 'MANIFEST_FILE' <<<"$body"
   grep -q 'JOURNAL_FILE' <<<"$body"
 }

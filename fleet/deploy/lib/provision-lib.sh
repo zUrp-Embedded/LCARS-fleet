@@ -61,7 +61,7 @@ PROVISION_LIB_LOADED=1
 # commentaire retire faisait faire.
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
 # Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
-# CONSOMMATEUR (le deck, sous `nobody`) doivent se rencontrer sans que ni l'un ni l'autre ne change
+# CONSOMMATEUR (le deck, sous `lcars-system`) doivent se rencontrer sans que ni l'un ni l'autre ne change
 # d'identite. Le repertoire de chaque humain est `2710 <humain>:lcars-console` : le setgid fait
 # heriter ce groupe a la socket, et le `--x` du groupe donne la traversee sans le listage.
 #

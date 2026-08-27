@@ -18,13 +18,20 @@
 # La question posee etait « present et non vide », jamais « quel contenu ». L'en-tete du flux tar de
 # `docker cp … -` y repond sans qu'un octet touche le disque.
 
+load refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../docker/bench/bench-swap-image.sh"
   [ -f "$SUT" ]
 }
 
 @test "aucun secret n'est ecrit sur l'hote : pas de mktemp, et le cp des creds STREAME" {
-  ! grep -q 'mktemp' "$SUT"
+  # ⚠ LE CODE, PAS LE FICHIER — ET LA CONVERSION EN `refute` L'A REVELE. Tant que cette ligne etait
+  # `! grep …` non-derniere de son bloc, son statut etait jete : elle ne pouvait pas rougir. Rendue
+  # mordante, elle a accuse la CICATRICE de `bench-swap-image.sh:227`, qui cite `mktemp` pour
+  # expliquer le defaut qu'elle a ferme. Un temoin qui lit la prose accuse le commentaire qui
+  # documente le correctif — et la seule reponse est de lire ce qui S'EXECUTE.
+  grep -vE '^[[:space:]]*#' "$SUT" | refute_out 'mktemp'
   # tout `docker cp` des credentials doit finir par « - » (stdout), jamais par un chemin d'hote
   run bash -c "grep -n 'credentials.json' '$SUT' | grep -v '^\\s*#' | grep 'cp '"
   [ -n "$output" ]

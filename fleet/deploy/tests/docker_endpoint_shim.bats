@@ -20,6 +20,8 @@
 # machines, c'est-a-dire un test qui mesure la machine. On epingle donc la FORME du shim genere : le
 # filtre existe, il refuse la bonne classe de noms, et les deux listes ne sont pas inversees.
 
+load refute
+
 setup() {
   LIB="$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh"
   [ -f "$LIB" ]
@@ -110,7 +112,7 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   local box="$BATS_TEST_DIRNAME/../box"
   grep -q 'docker_compose_cmd || fail' "$box"
   grep -q 'COMPOSE=(\$PROV_COMPOSE_CMD)' "$box"
-  ! grep -q 'LCARS_COMPOSE_CMD:-' "$box"
+  refute grep -q 'LCARS_COMPOSE_CMD:-' "$box"
   # Et personne ne redecouvre : une seconde detection dans l'arbre rendrait deux verdicts possibles.
   [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../.." --include='*.sh' --include=box --include=provision 2>/dev/null | wc -l)" -le 1 ]
 }

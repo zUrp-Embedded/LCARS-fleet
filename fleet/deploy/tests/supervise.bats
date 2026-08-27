@@ -10,7 +10,7 @@
 #                `StartLimitBurst=5`, `StartLimitIntervalSec=60`. Un service qui tombe revient.
 #   rail boite   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
 #                il n'en relance aucun. Un convergeur mort restait mort jusqu'au prochain
-#                `box restart`, sur une boite qui reste *healthy* (healthcheck = port 22).
+#                `box restart`, sur une boite qui reste *healthy* (healthcheck = des ports, ssh + le deck).
 #
 # Le rail poste testait donc des politiques de redemarrage que la PRODUCTION n'avait pas, et la
 # production avait un mode de panne que rien ne testait.
@@ -131,7 +131,7 @@ setup() {
   kill -TERM "$sup" 2>/dev/null || true
   wait "$sup" 2>/dev/null || true
   local dt=$(( SECONDS - t0 ))
-  ! kill -0 "$enfant" 2>/dev/null || { kill -9 "$enfant" 2>/dev/null; echo "ORPHELIN survivant"; return 1; }
+  if kill -0 "$enfant" 2>/dev/null; then kill -9 "$enfant" 2>/dev/null; echo "ORPHELIN survivant"; return 1; fi
   # Avec le defaut (5 s) inerte, l'arret prendrait ~5 s : on exige la grace DEMANDEE.
   [ "$dt" -le 3 ] || { echo "arret en ${dt}s — la grace demandee (1s) n'a pas ete lue"; return 1; }
   grep -q 'ignore TERM' "$LOG"

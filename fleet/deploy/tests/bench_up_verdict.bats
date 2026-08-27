@@ -16,6 +16,8 @@
 # `bench-up.sh` dans un faux arbre pour que ses voisins appeles par chemin (`bench-forge-bootstrap.sh`,
 # `forge-runner.sh`) soient les notres : `HERE` derive de `BASH_SOURCE`, et `REPO_ROOT` de `HERE`.
 
+load refute
+
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
   BENCH="$ROOT/fleet/deploy/docker/bench"
@@ -198,7 +200,7 @@ run_bench() {
 # MEME FAUTE QUE 6-133, AU SITE D'A COTE. L'entrypoint mesure la convergence de la boite et l'ecrit
 # dans `/run/lcars-provision.rc` — precisement parce qu'un echec de convergence NE TUE PAS le
 # conteneur : la boite doit rester joignable pour etre reparee. Elle survit donc a son propre echec,
-# se declare *healthy* (son healthcheck teste le port 22), et `bench-up` ne lisait pas le fichier.
+# se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck), et `bench-up` ne lisait pas le fichier.
 # Un banc dont la boite ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
 #
 # Le geste operateur (`deploy/box`, `await_provision_verdict`) le lisait deja. Deux chemins qui
@@ -494,8 +496,8 @@ run_bench() {
   #
   # TEMOIN STRUCTUREL, et il l'est par necessite : la ligne ne s'imprime que sur un substrat WSL en
   # NAT. Un temoin qui l'executerait mesurerait la machine qui joue les tests, pas le script.
-  ! grep -qE '^[[:space:]]*say .*netsh' "$SRC"
-  ! grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
+  refute grep -qE '^[[:space:]]*say .*netsh' "$SRC"
+  refute grep -qE '^[[:space:]]*say .*portproxy' "$SRC"
   grep -q "n'est joignable que depuis CETTE machine" "$SRC"
 }
 

@@ -20,6 +20,8 @@
 # final, pour appeler les deux fonctions directement — `check()`/`apply()` complets ecriraient dans
 # le home reel de celui qui joue les tests.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../modules.d/70-human.sh"
   [ -f "$SRC" ]
@@ -124,7 +126,7 @@ account() { # account <full_name> <email>
   # La regression exacte : un bloc d'identite dans l'entrypoint vise UN compte — celui de l'entree
   # du conteneur — et rate par construction tout humain enrole apres le boot.
   EP="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
-  ! grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
+  refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   ! grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }
 

@@ -19,6 +19,8 @@
 # pins, l'arch, la version sondee, et le fait que le miroir se refasse sur un verdict et pas a
 # chaque passage.
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -183,7 +185,7 @@ mod() { run bash "$MOD" "$1"; }
   grep -q 'cp -a "\$src/\." "\$work/"' "$body"
   grep -q 'rm -rf "\$work/.terraform" "\$work/instance/.terraform"' "$body"
   # et AUCUN init/mirror ne vise un chemin derive de repo_root
-  ! grep -E 'init -input=false|providers mirror' "$body" | grep -q 'repo_root'
+  grep -E 'init -input=false|providers mirror' "$body" | refute_out 'repo_root'
   # la copie est effacee sur CHAQUE sortie : les quatre echecs et les deux succes
   local n_exit n_rm
   n_exit="$(grep -c 'verdict_apply' "$body")"

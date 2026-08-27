@@ -491,7 +491,7 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api
 # LA BOITE MESURE SA PROPRE CONVERGENCE ET L'ECRIT, ET CE SCRIPT NE LA LISAIT PAS. L'entrypoint pose
 # `/run/lcars-provision.rc` a chaque boot, precisement parce qu'un echec de convergence NE TUE PAS le
 # conteneur : la boite doit rester joignable pour etre reparee, donc elle survit a son propre echec
-# et se declare *healthy* (son healthcheck teste le port 22). Sans cette lecture, un banc dont la
+# et se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck). Sans cette lecture, un banc dont la
 # boite ne peut demarrer AUCUN pod sortait `banc PRET` et rendait 0.
 #
 # C'est la faute de 6-133 au site d'a cote : le detail existait — dans les logs du conteneur, cette

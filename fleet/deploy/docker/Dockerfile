@@ -340,6 +340,22 @@ RUN apt-get update -qq \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
     `# convergeur d'humains, qui a useradd et ne detient rien.` \
     && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
+    `# LE COMPTE DE LA LANDING, MIROIR DE 21-service-accounts DU RAIL POSTE. Il N'EST QUE quelqu'un :` \
+    `# le deck ne detient rien de durable et n'a aucun privilege, il a seulement besoin de ne PAS` \
+    `# etre nobody. Le prix de nobody se lit sur son GROUPE : deck-oidc.json porte le client_secret` \
+    `# OAuth2 et se posait 0640 root:nogroup — or nogroup (gid 65534) est le groupe PRIMAIRE de` \
+    `# sync, _apt, nobody et dhcpcd sur une Debian/Ubuntu ordinaire (releve du 2026-08-27). Un demon` \
+    `# reseau lisait le secret. Un groupe a lui, et le fichier ne nomme plus qu'un lecteur.` \
+    `#` \
+    `# ⚠ PAS MEMBRE DE fleet, ET C'EST LA DIFFERENCE AVEC SON VOISIN CI-DESSUS. Le deck ne lit RIEN` \
+    `# sous /local/LCARS_v2 : sa doc a ete deplacee en /usr/share/lcars/doc precisement parce qu'il` \
+    `# ne pouvait pas l'y lire. Lui rendre le groupe annulerait le motif de ce deplacement.` \
+    `#` \
+    `# ⚠ ET PAS MEMBRE DE lcars-console NON PLUS. Ce groupe-la lui est accorde PAR PROCESSUS a` \
+    `# l'exec (setpriv --groups, dans console-landing.sh), jamais par une adhesion : c'est ce qui` \
+    `# lui garde zero membre, donc un ensemble de detenteurs vide entre deux lancements.` \
+    && groupadd --system lcars-system \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-system lcars-system \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :
@@ -574,7 +590,7 @@ COPY fleet/services/privileged-executor.py /opt/lcars/privileged-executor.py
 # LE SUPERVISEUR — ce que `Restart=always` fait sur le rail poste, et que ce rail-ci n'avait PAS.
 # `entrypoint.sh` lancait `setsid <cmd> &` : tini recolte les orphelins, il n'en relance aucun. Un
 # convergeur mort restait mort jusqu'au prochain `box restart`, sur une boite qui reste *healthy*
-# (son healthcheck teste le port 22). Il ne peut pas vivre DANS l'entrypoint, qui finit sur
+# (son healthcheck ne sonde que des ports : ssh + le deck). Il ne peut pas vivre DANS l'entrypoint, qui finit sur
 # `exec sshd` — le shell y est remplace, et toute boucle qu'il porterait disparaitrait la.
 COPY fleet/services/supervise.sh          /opt/lcars/supervise.sh
 # LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
@@ -669,8 +685,24 @@ EXPOSE 22
 # Aucun compose n'a `condition: service_healthy` sur `lcars` aujourd'hui, donc rien ne se bloquait —
 # mais tout ce qui observe la sante (un orchestrateur, une supervision, un operateur) lisait un
 # mensonge. La grace couvre desormais le pire cas de la passe synchrone avec de la marge.
+#
+# ⚠ ET LA SONDE NE SUIVAIT PAS LA PROMESSE DE LA BOITE. Elle ne testait que sshd — vrai quand chaque
+# console publiait son port, FAUX depuis qu'elles sont sur des sockets AF_UNIX : le deck est
+# desormais le SEUL chemin vers elles (l'entrypoint le dit au moment de le lancer). Une boite dont
+# le deck etait mort se declarait donc SAINE, parce que sshd, lui, repondait — et sshd n'est plus
+# que la porte d'admin, pas celle par laquelle on entre.
+#
+# Le port du deck se sonde depuis L'ENV DU CONTENEUR, jamais depuis un litteral : `LCARS_LANDING` et
+# `LCARS_LANDING_PORT` ne sont pas declares dans le bloc `environment:` du compose, donc ils sont
+# ABSENTS par defaut — et presents exactement quand quelqu'un les pose, c'est-a-dire lisibles ici
+# par la meme lecture que celle de l'entrypoint. Les deux cotes lisent la meme chose ou rien.
+#
+# ⚠ LE CAS DESACTIVE SORT VERT, ET CE N'EST PAS UNE COMPLAISANCE. `LCARS_LANDING=0` est une
+# configuration supportee ; sonder son port quand meme rendrait une boite volontairement sans deck
+# definitivement *unhealthy* — un reglage transforme en panne. Ce qui reste sonde alors est ce qui
+# reste promis : sshd.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
-  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22"]
+  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/22 && { [ \"${LCARS_LANDING:-1}\" = 1 ] || exit 0; exec 4<>/dev/tcp/127.0.0.1/\"${LCARS_LANDING_PORT:-20999}\"; }"]
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).

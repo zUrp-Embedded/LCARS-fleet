@@ -18,6 +18,8 @@
 # « pas wsl », ce qui donne le chemin natif de facon deterministe sur n'importe quelle machine.
 # Sans lui, on est sur le substrat reel de la machine qui joue les tests.
 
+load refute
+
 setup() {
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT, PAS SEULEMENT LE PATH — ET CE FICHIER L'A APPRIS EN SE
   # TROMPANT LUI-MEME. Le 2026-08-21, le temoin « SANS le drapeau, linux natif refuse » est tombe
@@ -272,7 +274,7 @@ setup() {
   ws_start="$(grep -n 'LA BRANCHE POSTE' "$SRC" | head -1 | cut -d: -f1)"
   branche="$(sed -n "${box_start},${ws_start}p" "$SRC")"
   # Ni paquet, ni utilisateur, ni groupe, ni ecriture dans /etc ou /usr.
-  ! grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
+  refute grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
   # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
   # ⚠ CE TEMOIN EPINGLAIT UN NOM DE FICHIER, PAS UNE PROPRIETE. Il cherchait le litteral
   # un litteral d'exec vers un chemin precis — donc il rougissait au renommage du delegue sans qu'aucune
@@ -480,7 +482,7 @@ SPY
   # celui du rail poste, non : ni son invocation, ni la racine qu'il derivait
   ws="$(grep -c '_wroot/fleet/deploy/box" build' "$SRC" || true)"
   [ "$ws" -eq 0 ]
-  ! grep -q '_wimg' "$SRC"
+  refute grep -q '_wimg' "$SRC"
   # et le motif mort n'est pas reste en prose : un lecteur le lirait comme vrai au present
   ! grep -q 'la forge du poste en a besoin' "$SRC"
 }

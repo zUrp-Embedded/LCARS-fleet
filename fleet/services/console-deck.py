@@ -109,7 +109,8 @@ DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 #
 # ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON. Elle a vecu en `/local/LCARS_v2/doc`,
 # sous le verrou RO du prefixe (`750 root:fleet`, fichiers `640`). Ce serveur largue ses privileges
-# vers `nobody:nogroup` : il ne pouvait ni traverser ni ouvrir. Chaque `open()` levait et la route
+# vers son compte de service (`nobody` a l'epoque, `lcars-system` depuis) : il ne pouvait ni
+# traverser ni ouvrir. Chaque `open()` levait et la route
 # `/doc/` rendait 404 sur des fichiers parfaitement presents — mesure du 2026-08-20, session
 # authentifiee, les 9 pages dans l'image et les trois routes en 404.
 DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/usr/share/lcars/doc")
@@ -281,7 +282,7 @@ def oidc_config():
     except FileNotFoundError:
         return None, f"{OIDC_CONFIG} absent"
     except PermissionError:
-        return None, f"{OIDC_CONFIG} illisible par {os.geteuid()} (le deck tourne en nobody)"
+        return None, f"{OIDC_CONFIG} illisible par uid {os.geteuid()} (le deck tourne sous « lcars-system » ; le fichier se pose 0640 root:lcars-system)"
     except (OSError, ValueError) as e:
         return None, f"{OIDC_CONFIG} illisible: {e}"
     missing = [k for k in ("client_id", "client_secret", "public_url") if not cfg.get(k)]
@@ -535,7 +536,7 @@ def claude_credentials(home):
     `credentials_invalid`. The authority is the runtime's credentials gate, at spawn; this only
     reports that the file is there.
 
-    We can see this as `nobody` because the home and `.claude` are traversable while the file
+    We can see this as the deck's service account because the home and `.claude` are traversable while the file
     itself stays 0600 -- presence is observable, content is not, which is exactly the right amount.
     A human who tightens their home gets "unknown", and an unknown is never rendered as an absence.
     """
@@ -738,7 +739,7 @@ def page_unconfigured(why):
             "la liste complete des humains rendrait l'absence de configuration invisible, et "
             "personne n'irait la corriger.</p>"
             '<p class="dim">C\'est le provisioning qui pose ce fichier (client_id, client_secret, '
-            "public_url, internal_url), lisible par l'utilisateur <code>nobody</code>.</p>"
+            "public_url, internal_url), lisible par le seul compte du deck, <code>lcars-system</code>.</p>"
         ),
     }
 

@@ -20,6 +20,13 @@
 setup() {
   FLEET_DIR="$BATS_TEST_DIRNAME/../.."
   command -v mix >/dev/null 2>&1 || skip "mix absent de ce poste"
+  # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CES TEMOINS MESURERAIENT LA MACHINE.
+  # Depuis le 2026-08-27, GUARD B lit `/etc/lcars/seat.uid` et ce FICHIER GAGNE sur la variable :
+  # c'est ce qui empeche le garde de lever sa propre garde. Sur une machine provisionnee, le vrai
+  # fichier ecraserait donc le decor de chaque test ci-dessous — verts ici, rouges sur un poste
+  # installe, meme arbre. On pointe la couture sur un chemin qui n'existe pas : la variable
+  # redevient le levier, et c'est le contrat documente du repli.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/seat.uid"
 }
 
 @test "R-no-root: l'uid du SIEGE est refuse au boot, avec la phrase GUARD B" {
@@ -57,3 +64,36 @@ setup() {
   run bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$run2" -eq "$status" ]]
 }
+
+# ─── LA CLEF DE LA GARDE N'EST PLUS DANS L'ENVIRONNEMENT DU GARDE ──────────────────────────────
+#
+# ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait GUARD B, des DEUX
+# cotes. Une garde qui lit sa politique dans l'environnement du processus qu'elle garde ne garde
+# rien : cet environnement appartient au garde. Le fichier `root:root` la lui retire — encore
+# faut-il qu'il GAGNE, sinon il suffit de reposer la variable.
+
+@test "GUARD B miroir: le FICHIER gagne sur la variable — la dispense ne se pose plus en prefixe" {
+  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
+  run env LCARS_SEAT_UID_FILE="$LCARS_SEAT_UID_FILE" LCARS_SYSADMIN_UID="99999" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"SYSADMIN seat"* ]]
+}
+
+@test "GUARD B miroir: le fichier fait AUTORITE aussi quand il innocente — pas seulement quand il accuse" {
+  # LE PENDANT, ET SANS LUI LE PRECEDENT NE PROUVE PAS LA PRECEDENCE : une garde qui refuserait
+  # TOUJOURS passerait le temoin d'a cote sans lire quoi que ce soit.
+  echo "99999" > "$LCARS_SEAT_UID_FILE"
+  run env LCARS_SEAT_UID_FILE="$LCARS_SEAT_UID_FILE" LCARS_SYSADMIN_UID="$(id -u)" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -eq 0 ]]
+}
+
+@test "GUARD B miroir: un fichier ILLISIBLE n'arme rien de faux — on retombe sur la variable" {
+  printf 'pasunuid\n' > "$LCARS_SEAT_UID_FILE"
+  run env LCARS_SEAT_UID_FILE="$LCARS_SEAT_UID_FILE" LCARS_SYSADMIN_UID="$(id -u)" \
+    bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"SYSADMIN seat"* ]]
+}
+

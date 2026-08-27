@@ -10,7 +10,7 @@
 #
 # LA CAUSE : la doc etait posee dans `/local/LCARS_v2/doc`, sous le verrou RO du prefixe de release
 # (`750 root:fleet`, fichiers `640`) — pose par le `chmod -R u=rwX,g=rX,o=` du meme Dockerfile. Le
-# deck largue ses privileges vers `nobody:nogroup` : il ne pouvait ni traverser le repertoire ni
+# deck largue ses privileges vers son compte de service (`lcars-system`) : il ne pouvait ni traverser le repertoire ni
 # ouvrir un fichier. Chaque `open()` levait, le handler rendait son 404, et ce 404 est honnete sur
 # « je n'ai pas pu lire » tout en etant MUET sur la raison : il ne distingue pas l'absent de
 # l'interdit. Mesure du 2026-08-20, banc neuf et session OIDC reelle : 9 pages dans l'image,
@@ -45,7 +45,7 @@ setup() {
 }
 
 @test "la doc est HORS du prefixe de release — le verrou RO y interdit sa lecture" {
-  # Le prefixe est `750 root:fleet` et le deck tourne en `nobody:nogroup` : tout ce qui vit dessous
+  # Le prefixe est `750 root:fleet` et le deck ne tourne PAS dans le groupe `fleet` : tout ce qui vit dessous
   # lui est illisible, quel que soit le mode du fichier lui-meme.
   [[ "$DOC_DEST" != /local/LCARS_v2* ]]
   [[ "$DECK_DEFAULT" != /local/LCARS_v2* ]]

@@ -14,6 +14,8 @@
 # sandbox tree (provision + lib + stub modules) in BATS_TEST_TMPDIR and runs the real
 # runner as a real process. Stubs log "<name>:<mode>" to RUN_LOG and exit STUB_RC.
 
+load refute
+
 setup() {
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT DE PROVISIONNEMENT, PAS SEULEMENT SES FICHIERS. Ces temoins
   # jugent ce que le runner fait d'un environnement DONNE ; s'ils heritent de celui de l'appelant,
@@ -98,7 +100,7 @@ EOF
   run "$SANDBOX/provision" apply --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-deploystub:check" "$RUN_LOG"
-  ! grep -q "60-deploystub:apply" "$RUN_LOG"
+  refute grep -q "60-deploystub:apply" "$RUN_LOG"
   [[ "$output" == *"APPLY-ON=wsl linux"* ]]
 }
 
@@ -123,7 +125,7 @@ EOF
   stub_module 20-anystub any any human
   run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
-  ! grep -q "15-toolstub" "$RUN_LOG"
+  refute grep -q "15-toolstub" "$RUN_LOG"
   grep -q "20-anystub:check" "$RUN_LOG"
 }
 
@@ -604,8 +606,8 @@ EOF
   # la structure vient du GESTE, joue sur la machine
   grep -q -- 'forge-gestures.sh" apply' "$code"
   # et jamais d'un LCARS qui tourne
-  ! grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
-  ! grep -q -- "forge-apply" "$code"
+  refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
+  refute grep -q -- "forge-apply" "$code"
   # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
   grep -q '"forge-apply"' "$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
 }
@@ -624,9 +626,9 @@ EOF
   local code; code="$BATS_TEST_TMPDIR/48-code2.sh"
   grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
   # aucun montage, d'aucune sorte : ni chemin d'hote, ni volume nomme
-  ! grep -qE -- '\-v "' "$code"
-  ! grep -q -- "volume create" "$code"
-  ! grep -q -- "d cp " "$code"
+  refute grep -qE -- '\-v "' "$code"
+  refute grep -q -- "volume create" "$code"
+  refute grep -q -- "d cp " "$code"
   # l'autorite est nommee par un chemin de la MACHINE, lu la ou 48 l'a ecrit
   grep -q -- 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$code"
   ! grep -q -- "LCARS_PRIVATE_DIR=/authority" "$code"
@@ -869,8 +871,8 @@ EOF
   run bash "$SANDBOX/provision" list --port-forge 80
   [ "$status" -ne 0 ]
   [[ "$output" == *"hors plage"* ]]
-  # `nobody` ne binde pas un port privilegie, et c'est le deck qui tourne sous cet uid.
-  [[ "$output" == *"nobody"* ]]
+  # Le refus doit NOMMER le compte qui ne peut pas binder, sinon il enonce une regle sans son sujet.
+  [[ "$output" == *"lcars-system"* ]]
 
   run bash "$SANDBOX/provision" list --port-deck pasunport
   [ "$status" -ne 0 ]

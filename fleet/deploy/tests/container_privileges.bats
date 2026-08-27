@@ -23,6 +23,8 @@
 # The gap is named on purpose: only the bench proves the profile WORKS. This proves nobody quietly
 # undid it.
 
+load refute
+
 setup() {
   HERE="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
   DOCKER_DIR="$(cd "$HERE/../docker" && pwd)"
@@ -37,7 +39,7 @@ setup() {
     found=$((found + 1))
     grep -q "seccomp=./lcars-hardened-seccomp.json" "$f"
     # LA REGRESSION FACILE, celle qu'on ecrit a 2 h du matin quand un pod ne demarre plus.
-    ! grep -qE "^\s*-\s*seccomp=unconfined" "$f"
+    refute grep -qE "^\s*-\s*seccomp=unconfined" "$f"
   done
 
   # Sans ce garde, supprimer les deux fichiers rendrait ce test vert.

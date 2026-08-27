@@ -15,7 +15,7 @@
 #                RECOLTE les orphelins — il n'en relance aucun.
 #
 # Un convergeur d'humains qui meurt dans la boite reste mort jusqu'au prochain `box restart`, et
-# personne ne le sait : la boite reste *healthy* (son healthcheck teste le port 22). Le rail poste
+# personne ne le sait : la boite reste *healthy* (son healthcheck ne sonde que des ports : ssh + le deck). Le rail poste
 # testait donc des politiques de redemarrage que la PRODUCTION n'avait pas, et la production avait
 # un mode de panne que rien ne testait — l'asymetrie exactement a l'envers de ce qu'on veut.
 #

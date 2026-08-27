@@ -355,7 +355,7 @@ already_refused() { grep -q "^$1	" "$REFUSED_FILE" 2>/dev/null; }
 # dont le login est inutilisable EST membre de la team : le deck lui repondait « ca converge tout
 # seul, rien a faire de ton cote » — pour une convergence qui n'arrivera JAMAIS. Le convergeur est
 # le seul a savoir pourquoi ; il l'ecrit donc la ou le deck peut le lire.
-# 0644 delibere : le deck tourne en `nobody`. Le fichier ne porte qu'un login public et une raison,
+# 0644 delibere : le deck tourne sous son propre compte de service, pas sous root. Le fichier ne porte qu'un login public et une raison,
 # aucun secret.
 mark_refused() { # mark_refused <login> <raison lisible>
   mkdir -p "$(dirname "$REFUSED_FILE")"

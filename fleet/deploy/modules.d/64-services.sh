@@ -28,13 +28,22 @@
 #
 # Le convergeur a besoin de `useradd` : il n'y a pas de version non privilégiée de créer un humain.
 # La landing démarre en root et se DÉPOSE elle-même — `console-landing.sh` fait
-# `setpriv --reuid nobody --regid nogroup --groups lcars-console`, exactement comme dans l'image.
-# Ne PAS mettre `User=nobody` dans l'unité : ça retirerait au script le droit de faire ce drop, et
-# surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket de
-# console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
+# `setpriv --reuid lcars-system --regid lcars-system --groups lcars-console`, exactement comme dans
+# l'image. Ne PAS mettre `User=` dans l'unité : ça retirerait au script le droit de faire ce drop,
+# et surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket
+# de console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
 #
-# (Le compte système dédié `lcars-system` du Lot 5 est un durcissement à venir : il remplacerait
-# `nobody`, partagé par tout le système. Tant qu'il n'existe pas, on fait ce que fait l'image.)
+# ⚠ `lcars-system` EXISTE DEPUIS LE 2026-08-27, ET CE PARAGRAPHE ANNONÇAIT LE CONTRAIRE. Il disait
+# « un durcissement à venir ; tant qu'il n'existe pas, on fait ce que fait l'image ». Ce qui l'a fait
+# poser n'est pas le principe mais une mesure : `nobody` n'est pas une identité, et son groupe
+# `nogroup` (gid 65534) est le groupe PRIMAIRE de `sync`, `_apt`, `nobody` et `dhcpcd` sur une
+# Debian/Ubuntu ordinaire. Le fichier d'identification du deck — qui porte le `client_secret`
+# OAuth2 — s'y posait `0640 root:nogroup` : un démon réseau le lisait. Il est désormais
+# `0640 root:lcars-system`, et le groupe nomme exactement un lecteur.
+#
+# ⚠ CE QUE CE COMPTE NE FERME PAS : le deck reçoit toujours `lcars-console` à l'exec, et ce groupe
+# est à un `connect()` d'un shell sous n'importe quel humain. On a rangé QUI partage son identité,
+# pas ce qu'il peut faire.
 #
 # ─── POURQUOI `wsl` AUSSI, ET CE MODULE A PORTÉ `linux` SEUL PENDANT UNE JOURNÉE ────────────────
 #
@@ -64,6 +73,13 @@ set -euo pipefail
 
 SYSTEMD_DIR="${LCARS_SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
+# ⚠ LE FICHIER QUE LIT GUARD B, ET IL N'EST PAS DANS `services.env`. Celui-ci sert les DAEMONS par
+# `EnvironmentFile=` ; la garde, elle, tourne dans le shell d'un HUMAIN, qui n'herite d'aucun des
+# deux. Et surtout : une garde ne peut pas prendre sa clef dans l'environnement de ce qu'elle garde
+# — `LCARS_SYSADMIN_UID=99999 fleet_v2 start` la desarmait (mesure du 2026-08-27). D'ou un fichier
+# `root:root` que le garde ne peut pas reecrire, et qui GAGNE sur la variable chez ses deux lecteurs
+# (`bin/fleet_v2` et son miroir `config/runtime.exs`).
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
 HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
@@ -147,7 +163,12 @@ services_env_body() {
   echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
   echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
-  echo "LCARS_SYSADMIN_UID=${LCARS_SYSADMIN_UID:-1000}"
+  # ⚠ MÊME RÈGLE QUE LES DEUX LIGNES AU-DESSUS, ET ELLE N'ÉTAIT PAS APPLIQUÉE ICI. Le `:-1000` qui
+  # vivait là était le SEUL écrivain d'une variable que six lecteurs attendent — et il recopiait leur
+  # défaut au lieu de le remplacer. Un poseur qui repose le défaut ne pose rien : il rend seulement
+  # impossible de voir que personne n'a décidé. `deploy/provision` dérive la valeur du siège avant
+  # tout module ; son absence est refusée en tête d'`apply`, pas ici (cf. la cicatrice là-bas).
+  echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
   # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
@@ -295,6 +316,67 @@ probe_fleet_humans() {
   fi
 }
 
+# ─── LE SIEGE EST-IL CELUI QUE LES GARDES RESERVENT ? ──────────────────────────────────────────
+#
+# ⚠ CE QUI EST SONDE ICI EST LA VALEUR QUE LES DAEMONS LIRONT, pas celle que ce module vient de
+# calculer. Les deux peuvent diverger — un `apply` joue sous un operateur, la machine en change, ou
+# quelqu'un reinstalle depuis un autre compte — et c'est precisement l'ecart qu'aucun verdict ne
+# voyait quand la variable n'avait aucun poseur.
+#
+# ⚠ ON NE COMPARE PAS AU RE-DERIVE. Rejouer `${SUDO_USER:-$(id -un)}` ici rendrait la meme valeur
+# qu'a l'apply dans le cas nominal et une DERIVE FAUSSE des qu'un second sudoer passe le doctor.
+# Ce qui se verifie sans ambiguite, c'est que l'uid declare designe quelqu'un : une garde qui
+# reserve un uid que personne ne porte ne reserve rien, et elle a l'air posee.
+probe_seat_uid() {
+  local declared name
+  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1)"
+  if [[ -z "$declared" ]]; then
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — les gardes (GUARD B, is_fleet_human, uid_floor) retomberont sur le litteral 1000, qui n'est le siege que par coincidence"
+    return 0
+  fi
+  # ⚠ `|| true` PARCE QU'UN UID ABSENT EST UNE REPONSE, PAS UNE PANNE. `getent` sort en 2 quand la
+  # cle est introuvable ; sous le `pipefail` du module, la substitution echouait et `set -e` tuait la
+  # sonde — un DRIFT parfaitement nommable devenait un code 2 « erreur de sonde », et le check
+  # s'arretait la. Meme regle que le 404 de la forge ailleurs dans ce depot : une reponse negative
+  # PROUVEE se distingue d'une absence de reponse, et seule la seconde est une panne.
+  name="$(getent passwd "$declared" 2>/dev/null | cut -d: -f1 || true)"
+  if [[ -z "$name" ]]; then
+    p_drift "LCARS_SYSADMIN_UID=$declared ne correspond a AUCUN compte de cette machine — GUARD B reserve un uid que personne ne porte, donc il ne reserve rien"
+  else
+    p_ok "siege : « $name » (uid $declared) — GUARD B lui interdit de lancer une fleet"
+  fi
+}
+
+# ─── LE FICHIER QUE LISENT LES DEUX MOITIES DE GUARD B ─────────────────────────────────────────
+#
+# Absent, les deux gardes retombent sur le litteral `1000` — juste tant que le siege est le premier
+# uid de la machine, et muet quand il ne l'est pas. C'est exactement l'etat d'avant ce lot.
+probe_seat_file() {
+  local v name
+  if [[ ! -r "$SEAT_UID_FILE" ]]; then
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) retombera sur le littéral 1000, qui n'est le siège que par coïncidence"
+    return 0
+  fi
+  v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ ! "$v" =~ ^[0-9]+$ ]]; then
+    p_drift "$SEAT_UID_FILE ne porte pas un uid (« $v ») — les deux gardes l'ignoreront et retomberont sur leur littéral"
+    return 0
+  fi
+  # ⚠ LES DEUX ARTEFACTS DOIVENT S'ACCORDER, ET ILS VIENNENT DE LA MEME DERIVATION. `services.env`
+  # sert `uid_floor` (le plancher de creation des humains), ce fichier sert GUARD B (le refus de
+  # lancement). Deux valeurs differentes creeraient des humains sur l'uid que la garde reserve.
+  local declared
+  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1 || true)"
+  if [[ -n "$declared" && "$declared" != "$v" ]]; then
+    p_fail "$SEAT_UID_FILE dit $v et $SERVICES_ENV dit $declared — GUARD B et uid_floor ne réservent pas le même uid ; le convergeur créerait des humains sur celui que la garde refuse"
+    return 0
+  fi
+  name="$(getent passwd "$v" 2>/dev/null | cut -d: -f1 || true)"
+  [[ -n "$name" ]] \
+    && p_ok "GUARD B lit $SEAT_UID_FILE → uid $v (« $name »)" \
+    || p_drift "$SEAT_UID_FILE dit $v, uid qu'aucun compte ne porte — la garde réserve un siège absent"
+}
+
 check() {
   local u
 
@@ -310,6 +392,13 @@ check() {
   [[ -s "$SERVICES_ENV" ]] \
     && p_ok "environnement des services posé ($SERVICES_ENV)" \
     || p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
+
+  # ⚠ ICI ET PAS AVANT LA BRANCHE SYSTEMD, et le témoin voisin porte la raison : `probe_fleet_humans`
+  # sort AVANT elle parce que la population est un fait de la machine, vrai sur les deux rails.
+  # Celle-ci lit `$SERVICES_ENV`, qui est un artefact du rail POSTE — la boîte n'en a pas, son
+  # environnement vient du conteneur. Sondée trop tôt, elle rendait ROUGE tout doctor de boîte.
+  probe_seat_uid
+  probe_seat_file
 
   for u in "${UNITS[@]}"; do
     if ! unit_current "$u"; then
@@ -348,12 +437,38 @@ apply() {
     verdict_apply
   fi
 
+  # ⚠ LE REFUS EST ICI, ET IL Y A ÉTÉ DÉPLACÉ APRÈS MESURE. Écrit dans `services_env_body` sous la
+  # forme `${LCARS_SYSADMIN_UID:?…}`, il ne refusait RIEN : cette fonction est lue par une
+  # substitution de processus (`< <(…)`, plus bas), donc elle tourne dans un SOUS-SHELL dont le
+  # parent ne voit jamais le code de sortie. Mesuré : le fichier sortait TRONQUÉ à cette ligne —
+  # `LCARS_LANDING_PORT` et `LCARS_PROVISION` disparus, et l'apply rendait 0. Un refus qui produit un
+  # succès amputé est pire que le littéral qu'il remplaçait.
+  [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
+    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que GUARD B, is_fleet_human et uid_floor lisent, et les trois retomberaient sur le littéral 1000"
+    verdict_apply
+  }
+
   ensure_dir "$(dirname "$SERVICES_ENV")" 0755 "$SERVICES_OWNER" || verdict_apply
   # 0640 root:$PROV_FLEET_GROUP : ce n'est pas un secret (une URL, des noms de groupes), mais il n'a
   # aucune raison d'être lisible par tout le monde, et le groupe fleet doit pouvoir le lire pour
   # diagnostiquer sans sudo.
-  write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" < <(services_env_body) \
+  # ⚠ `$( )` ET PAS `< <( )`, ET C'EST LA CLASSE ENTIÈRE QUI SE FERME. Une substitution de processus
+  # jette le code de sortie du corps : n'importe quelle panne à l'intérieur (une variable absente
+  # sous `set -u`, `forge_url` qui meurt) produisait un fichier COUPÉ à cette ligne-là et un apply
+  # VERT. Le témoin qui l'a montré est celui du port du deck — il lit une ligne écrite après.
+  # Une substitution de commande, elle, porte le rc, donc l'échec se dit au lieu de s'écrire à moitié.
+  local env_body
+  env_body="$(services_env_body)" \
+    || { p_fail "environnement des services non calculable — l'écriture est ABANDONNÉE, pas tronquée"; verdict_apply; }
+  write_atomic "$SERVICES_ENV" 0640 "${SERVICES_OWNER%%:*}:$PROV_FLEET_GROUP" <<<"$env_body" \
     || { p_fail "environnement des services non posé ($SERVICES_ENV)"; verdict_apply; }
+
+  # ⚠ `0644 root:root`, ET LES DEUX MOITIES DU MODE COMPTENT. Le `644` parce que le lecteur est le
+  # shell d'un humain quelconque : un fichier que le garde ne peut pas ouvrir ne garde rien. Le
+  # `root:root` parce que c'est ce qui empeche ce meme humain de le REECRIRE — c'est toute la
+  # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
+  write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
+    || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B retomberait sur son littéral"; verdict_apply; }
   # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
   # lire deux écritures là où il n'y en a qu'une.)
 
