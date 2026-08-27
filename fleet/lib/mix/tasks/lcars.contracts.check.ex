@@ -1939,7 +1939,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT (measured, both forms, in isolation): `\`` survives
   # the eval and renders as a plain backtick. So this wall does not ban the repository's habit of
   # quoting code in a test name — it requires the one backslash that makes the name inert.
-  defp check_bats_descriptions_inert(root) do
+  @doc false
+  @spec check_bats_descriptions_inert(String.t()) :: result()
+  def check_bats_descriptions_inert(root) do
     # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Ce check a d'abord nomme `test/` et `deploy/tests/` :
     # il ratait les six suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement
     # les repertoires qu'on oublie. Un mur qui enumere ses arbres ne protege que ceux qu'on avait
@@ -2020,7 +2022,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  defp check_site_build_inputs(root) do
+  @doc false
+  @spec check_site_build_inputs(String.t()) :: result()
+  def check_site_build_inputs(root) do
     repo = Path.expand("..", root)
     wf = Path.join(repo, ".github/workflows/site.yml")
     lib = Path.join(repo, "assets/github.io/src/lib")
@@ -2262,7 +2266,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  defp check_gitea_template_expansion(root) do
+  @doc false
+  @spec check_gitea_template_expansion(String.t()) :: result()
+  def check_gitea_template_expansion(root) do
     face = Path.join([root, "priv", "catalogue", "project_template", "main"])
     control = Path.join([face, ".gitea", "template"])
     vars = ~w(REPO_NAME REPO_DESCRIPTION YEAR MONTH DAY)
@@ -2277,11 +2283,37 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           MapSet.new()
       end
 
-    bearing =
+    # ⚠ GARDE D'INSTRUMENT, ET IL MANQUAIT. `bearing` vient d'un `Path.wildcard` — repertoire absent
+    # rend l'ensemble VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les
+    # deux vides rendent les deux differences vides, donc `:pass`. Prouve par mutation le
+    # 2026-08-27 : renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
+    # `pass — 0 fail, 58 pass`. Cinq autres contrats passent aussi sur perimetre vide, mais ILS LE
+    # DISENT ; celui-ci etait le seul muet.
+    #
+    # ⚠ ET IL ECHAPPAIT AU FILET QUI EXISTE POUR CA. `no_check_passes_on_nothing_test` enumere les
+    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC — ce check etait `defp`. La
+    # garantie « aucun check ne passe sur rien » couvrait 55 des 58, et le trou etait exactement la
+    # ou personne ne regardait. Les trois checks prives sont passes `def` dans le meme geste.
+    #
+    # ICI ON ECHOUE, on ne declare pas « hors perimetre » : `priv/catalogue` part avec CHAQUE
+    # artefact — le stage `build` de l'image copie `fleet` en entier moins `deploy`, `git-hooks` et
+    # `system-prompt`. Une face absente n'est donc pas un contexte, c'est une face perdue.
+    files =
       face
       |> Path.join("**")
       |> Path.wildcard(match_dot: true)
       |> Enum.filter(&File.regular?/1)
+
+    broken =
+      cond do
+        not File.dir?(face) -> "face priv/catalogue/project_template/main"
+        files == [] -> "fichier sous la face project_template/main"
+        not File.regular?(control) -> "liste de controle .gitea/template sous la face"
+        true -> nil
+      end
+
+    bearing =
+      files
       |> Enum.filter(&Regex.match?(re, File.read!(&1)))
       |> Enum.map(&Path.relative_to(&1, face))
       |> MapSet.new()
@@ -2289,20 +2321,24 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     missing = MapSet.difference(bearing, listed) |> Enum.sort()
     extra = MapSet.difference(listed, bearing) |> Enum.sort()
 
-    %{
-      id: "template.gitea_expansion",
-      status: if(missing == [] and extra == [], do: :pass, else: :fail),
-      remediation:
-        "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
-          "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
-          "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
-      evidence:
-        Enum.map(missing, &"porteur NON liste: #{&1}") ++
-          Enum.map(extra, &"liste mais sans variable: #{&1}"),
-      note:
-        "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
-          "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
-    }
+    if broken do
+      broken_result("template.gitea_expansion", broken)
+    else
+      %{
+        id: "template.gitea_expansion",
+        status: if(missing == [] and extra == [], do: :pass, else: :fail),
+        remediation:
+          "aligner priv/catalogue/project_template/main/.gitea/template sur les fichiers qui " <>
+            "portent une variable de Onboard.Scaffold (#{Enum.join(vars, ", ")}) — un fichier " <>
+            "porteur hors liste sort du projet livre avec ses ${VAR} litteraux",
+        evidence:
+          Enum.map(missing, &"porteur NON liste: #{&1}") ++
+            Enum.map(extra, &"liste mais sans variable: #{&1}"),
+        note:
+          "expansion Gitea de la face main : la liste de controle doit couvrir exactement les " <>
+            "fichiers porteurs (les faces writer passent par Scaffold, qui expanse tout)"
+      }
+    end
   end
 
   # Jumeau du precedent, et meme raison d'exister : un ORDRE dans `start/2` que le compilateur ne

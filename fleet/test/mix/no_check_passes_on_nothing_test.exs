@@ -46,10 +46,19 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # `git-hooks` and `system-prompt`. The check now scopes PER MIRROR, so this entry earns the
   # exemption only on a root with no mirror tree at all — an empty one, which is exactly what this
   # test builds. A count written in prose is a claim, and this one had drifted by one and by kind.
+  # ⚠ DEUX ENTREES AJOUTEES LE 2026-08-27, ET ELLES N'ONT PAS CHANGE DE COMPORTEMENT — ELLES SONT
+  # DEVENUES VISIBLES. `bats.descriptions_inert` et `site.build_inputs` etaient `defp`, donc hors de
+  # la reflexion, donc hors de la garantie que ce fichier annonce. Les deux declaraient DEJA leur
+  # abstention par ecrit (« HORS PERIMETRE — pas de suite bats ici », « HORS PERIMETRE —
+  # assets/github.io absent de cet arbre »), et leur cause est la meme que les trois du dessus : un
+  # arbre voisin que le stage `build` de l'image ne copie pas. Le troisieme invisible,
+  # `template.gitea_expansion`, N'EST PAS ICI : il ne declarait rien, il est passe fail-closed.
   @declares_it_did_not_measure [
     "shell.sourcers_set_strict",
     "layout.face_roots_provisioned",
-    "toolchain.branch_single_source"
+    "toolchain.branch_single_source",
+    "bats.descriptions_inert",
+    "site.build_inputs"
   ]
 
   defp empty_root do
@@ -101,7 +110,38 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     # it exists to catch, arriving inside it.
     found = check_functions()
 
+    # ⚠ CE GARDE ETAIT UN PLANCHER A 25 PENDANT QUE LA TACHE EN JOUAIT 58, ET C'EST CE QUI A LAISSE
+    # PASSER LE TROU. `__info__(:functions)` ne voit que les fonctions PUBLIQUES : trois checks
+    # d'arite 1 etaient `defp`, donc invisibles a la reflexion — la garantie « aucun check ne passe
+    # sur rien » ne couvrait que 55 des 58, et l'un des trois (`template.gitea_expansion`) rendait
+    # bel et bien un vert muet sur un repertoire renomme. Un plancher a 25 ne pouvait pas le voir :
+    # 55 >= 25.
+    #
+    # Le garde COMPTE DESORMAIS CE QUE LA TACHE APPELLE, dans sa propre source. Un check ajoute a
+    # `run_checks` sans etre joignable par reflexion — parce qu'il est prive — rougit ici, au lieu
+    # d'echapper en silence a la garantie que ce fichier annonce.
+    called = called_check_names()
+
+    assert MapSet.subset?(MapSet.new(called), MapSet.new(found)),
+           "checks appeles par run_checks mais INVISIBLES a la reflexion (donc hors de la " <>
+             "garantie de ce fichier) : " <>
+             inspect(Enum.sort(called -- found)) <>
+             " — un check d'arite 1 doit etre `def`, pas `defp`"
+
     assert length(found) >= 25, "only #{length(found)} check functions found by reflection"
     assert :check_test_corpora_on_record in found
+  end
+
+  # Les `check_*(root)` que `run_checks/0` appelle, lus dans la source de la tache. C'est la MEME
+  # famille de mesure que les contrats eux-memes : la liste d'appels est la seule autorite sur « ce
+  # que le gate joue », et la recopier ici en ferait une seconde qui derive.
+  defp called_check_names do
+    src = File.read!(Path.join(File.cwd!(), "lib/mix/tasks/lcars.contracts.check.ex"))
+    [_, body] = Regex.run(~r/def run_checks do\n(.*?)\n  end\n/s, src)
+
+    ~r/^\s*(check_[a-z0-9_]+)\(root\),?$/m
+    |> Regex.scan(body)
+    |> Enum.map(fn [_, name] -> String.to_atom(name) end)
+    |> Enum.uniq()
   end
 end
