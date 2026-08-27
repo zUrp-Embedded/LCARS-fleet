@@ -364,3 +364,51 @@ code_of() { sed 's/#.*//' "$1"; }
 
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
 }
+
+@test "MUR 7: tout PROV_* qu'un daemon lit figure dans la table de transport" {
+  # ⚠ CE MUR SE CONSTRUIT DEPUIS LES DEUX LISTES ET N'EN RECOPIE AUCUNE. La table de transport est
+  # `services_env_body` de `64-services.sh` ; la population des daemons se lit dans les `ExecStart`
+  # des unites que ce meme fichier ecrit. Recopier l'une ou l'autre ici en ferait une troisieme, qui
+  # derive — et c'est exactement le defaut que ce chantier poursuit.
+  #
+  # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `etc/provision-role-tokens.sh`
+  # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
+  # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
+  # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
+  # Les inclure ferait rougir ce mur pour des noms que la table ne peut pas leur transmettre.
+  local svc="$REPO/deploy/modules.d/64-services.sh"
+  [ -r "$svc" ] || { echo "MUR 7 — 64-services.sh illisible" >&2; return 1; }
+
+  # (1) La TABLE : ce que `services_env_body` ecrit.
+  local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
+                        | sed -nE 's/.*echo "(PROV_[A-Z_]+)=.*/\1/p' | sort -u)"
+  [ -n "$table" ] || { echo "MUR 7 — la table de transport ne se lit plus dans services_env_body" >&2; return 1; }
+
+  # (2) LES DAEMONS : les fichiers que les `ExecStart` des unites lancent.
+  local daemons; daemons="$(sed 's/#.*//' "$svc" \
+                            | sed -nE 's;.*ExecStart=.*/([a-z0-9-]+\.(sh|py)).*;\1;p' | sort -u)"
+  [ "$(printf '%s\n' "$daemons" | grep -c .)" -ge 3 ] || {
+    echo "MUR 7 — seulement $(printf '%s\n' "$daemons" | grep -c .) daemon(s) lus dans les ExecStart : l'instrument est casse" >&2
+    return 1
+  }
+
+  # (3) Ce que ces daemons LISENT, formes shell et python.
+  local d lus="" f
+  for d in $daemons; do
+    f="$REPO/services/$d"
+    [ -r "$f" ] || { echo "MUR 7 — daemon introuvable : services/$d" >&2; return 1; }
+    lus="$lus$(sed 's/#.*//' "$f" | grep -oE 'PROV_[A-Z_]+' | sort -u)
+"
+  done
+  lus="$(printf '%s\n' "$lus" | grep . | sort -u)"
+
+  local manquants; manquants="$(comm -23 <(printf '%s\n' "$lus") <(printf '%s\n' "$table"))"
+  [ -z "$manquants" ] || {
+    echo "MUR 7 rompu — des daemons lisent des PROV_* que la table ne transporte pas :" >&2
+    printf '     %s\n' $manquants >&2
+    echo "   Sans transport, le daemon retombe sur SON defaut : la valeur choisie au provisionnement" >&2
+    echo "   ne l'atteint jamais, et rien ne le dit." >&2
+    return 1
+  }
+}
