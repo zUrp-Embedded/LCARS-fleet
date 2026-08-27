@@ -170,6 +170,68 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   code_of "$c" | grep -q 'TOKEN_FILE='
 }
 
+# ─── MUR 5 — LE DECK A UNE IDENTITE A LUI, ET LE FICHIER DE SON SECRET LA NOMME ─────────────────
+#
+# ⚠ `nobody` N'EST PAS UNE IDENTITE, c'est la convention de ceux qui n'en ont pas choisi. Le prix ne
+# se lisait pas sur l'uid mais sur le GROUPE : `deck-oidc.json` porte le `client_secret` OAuth2 de la
+# boite et se posait `0640 root:nogroup`, avec pour motif « le mode le plus etroit qui marche ».
+# Releve sur une Debian/Ubuntu ordinaire le 2026-08-27 : `nogroup` (gid 65534) est le groupe PRIMAIRE
+# de `sync`, `_apt`, `nobody` et `dhcpcd`. Un demon reseau lisait le secret.
+#
+# ⚠ ET LE MANIFESTE EN DECLARAIT UN TROISIEME. Il disait `root:fleet` — ce qui aurait ouvert le
+# secret a tout HUMAIN de la fleet, l'exact contraire de ce que le module annoncait. Deux documents,
+# deux valeurs, et RIEN qui les compare : c'est le temoin qui manquait autant que la valeur. Le
+# second test ci-dessous est ce temoin, et il vaut independamment du compte qu'on choisit.
+
+@test "MUR 5: le deck ne se depose plus sur une identite partagee, et son compte existe des DEUX cotes" {
+  local landing="$REPO/services/console-landing.sh"
+  local dockerfile="$REPO/deploy/docker/Dockerfile"
+  local mod="$REPO/deploy/modules.d/21-service-accounts.sh"
+
+  # Le drop ne nomme plus `nobody` : ni en uid, ni en gid.
+  absent 'reuid nobody' "$landing"
+  absent 'regid nogroup' "$landing"
+  # ... et il nomme un compte, par une variable dont le defaut est lisible.
+  code_of "$landing" | grep -q 'DECK_USER="\${LCARS_DECK_USER:-lcars-system}"'
+
+  # LES DEUX RAILS POSENT LE COMPTE. En verifier un seul laisserait l'autre demarrer un `setpriv`
+  # vers un nom que `/etc/passwd` ne connait pas — et `setpriv` echoue alors en parlant de lui-meme.
+  grep -q 'useradd --system .* lcars-system' "$dockerfile"
+  code_of "$mod" | grep -q 'SYSTEM_USER="\${PROV_SYSTEM_USER:-lcars-system}"'
+  code_of "$mod" | grep -q -- '-g "\$SYSTEM_GROUP" -- "\$SYSTEM_USER"'
+}
+
+@test "MUR 5 bis: le groupe du secret OIDC est le compte du deck, et le MANIFESTE dit la meme chose" {
+  # LE TEMOIN QUI MANQUAIT. Deux documents portent le proprietaire de ce fichier : le module qui
+  # l'ecrit et le manifeste qui declare l'empreinte machine. Rien ne les comparait, et ils ont
+  # diverge — `nogroup` d'un cote, `fleet` de l'autre. Un manifeste qui ment sur un secret est pire
+  # qu'un manifeste absent : on le lit pour savoir qui peut lire.
+  local mod="$REPO/deploy/modules.d/55-deck-oidc.sh"
+  local manifest="$REPO/deploy/system.manifest"
+  local row group
+
+  group="$(code_of "$mod" | sed -n 's/^OIDC_GROUP="\${PROV_SYSTEM_GROUP:-\([a-z0-9-]*\)}"$/\1/p')"
+  [ -n "$group" ] || { echo "OIDC_GROUP illisible dans $mod" >&2; return 1; }
+
+  row="$(grep -E '^anchor[[:space:]]+/etc/lcars/deck-oidc\.json[[:space:]]' "$manifest")"
+  [ -n "$row" ] || { echo "deck-oidc.json n'est plus declare dans le manifeste" >&2; return 1; }
+  [[ "$row" == *0640* ]] || { echo "mode attendu 0640 : $row" >&2; return 1; }
+  [[ "$row" == *"root:$group"* ]] \
+    || { echo "le module pose root:$group, le manifeste declare autre chose : $row" >&2; return 1; }
+}
+
+@test "MUR 5 ter: lcars-console n'a AUCUN membre declare — il s'accorde a l'exec, jamais par adhesion" {
+  # C'EST CE QUI LE GARDE ETROIT. Le groupe donne la traversee vers la socket du terminal de CHAQUE
+  # humain : une adhesion persistante rendrait ce pouvoir disponible a tout ce qui prendrait cette
+  # identite ensuite. Root le rend a un processus nomme, a l'exec (`setpriv --groups`), et
+  # l'ensemble des detenteurs est VIDE entre deux lancements.
+  local f
+  for f in "${CODE[@]}"; do
+    absent 'ensure_member[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+    absent 'usermod[^\n]*-aG[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+  done
+}
+
 @test "MUR 4: le detenteur des secrets n'a AUCUN privilege noyau, sur les DEUX rails" {
   # ⚠ LE PARTAGE QUI TIENT TOUT LE MODELE : celui qui DETIENT ne peut pas escalader, celui qui
   # ESCALADE ne detient rien. `lcars-authority` porte les secrets de la forge et tourne sous un

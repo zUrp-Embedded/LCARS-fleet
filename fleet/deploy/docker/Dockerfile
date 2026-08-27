@@ -340,6 +340,22 @@ RUN apt-get update -qq \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
     `# convergeur d'humains, qui a useradd et ne detient rien.` \
     && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
+    `# LE COMPTE DE LA LANDING, MIROIR DE 21-service-accounts DU RAIL POSTE. Il N'EST QUE quelqu'un :` \
+    `# le deck ne detient rien de durable et n'a aucun privilege, il a seulement besoin de ne PAS` \
+    `# etre nobody. Le prix de nobody se lit sur son GROUPE : deck-oidc.json porte le client_secret` \
+    `# OAuth2 et se posait 0640 root:nogroup — or nogroup (gid 65534) est le groupe PRIMAIRE de` \
+    `# sync, _apt, nobody et dhcpcd sur une Debian/Ubuntu ordinaire (releve du 2026-08-27). Un demon` \
+    `# reseau lisait le secret. Un groupe a lui, et le fichier ne nomme plus qu'un lecteur.` \
+    `#` \
+    `# ⚠ PAS MEMBRE DE fleet, ET C'EST LA DIFFERENCE AVEC SON VOISIN CI-DESSUS. Le deck ne lit RIEN` \
+    `# sous /local/LCARS_v2 : sa doc a ete deplacee en /usr/share/lcars/doc precisement parce qu'il` \
+    `# ne pouvait pas l'y lire. Lui rendre le groupe annulerait le motif de ce deplacement.` \
+    `#` \
+    `# ⚠ ET PAS MEMBRE DE lcars-console NON PLUS. Ce groupe-la lui est accorde PAR PROCESSUS a` \
+    `# l'exec (setpriv --groups, dans console-landing.sh), jamais par une adhesion : c'est ce qui` \
+    `# lui garde zero membre, donc un ensemble de detenteurs vide entre deux lancements.` \
+    && groupadd --system lcars-system \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-system lcars-system \
     && mkdir -p /run/sshd
 
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :

@@ -869,8 +869,8 @@ EOF
   run bash "$SANDBOX/provision" list --port-forge 80
   [ "$status" -ne 0 ]
   [[ "$output" == *"hors plage"* ]]
-  # `nobody` ne binde pas un port privilegie, et c'est le deck qui tourne sous cet uid.
-  [[ "$output" == *"nobody"* ]]
+  # Le refus doit NOMMER le compte qui ne peut pas binder, sinon il enonce une regle sans son sujet.
+  [[ "$output" == *"lcars-system"* ]]
 
   run bash "$SANDBOX/provision" list --port-deck pasunport
   [ "$status" -ne 0 ]

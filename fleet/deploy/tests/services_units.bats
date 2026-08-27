@@ -180,11 +180,11 @@ mod() { run bash "$MOD" "$1"; }
 }
 
 @test "AUCUNE unite ne pose User= — la landing se depose ELLE-MEME, avec son groupe de console" {
-  # `User=nobody` retirerait au script le droit de faire son `setpriv`, et surtout le groupe
-  # `lcars-console` : la page s'ouvrirait sur une liste vide en annoncant que tout va bien.
+  # Un `User=` retirerait au script le droit de faire son `setpriv` vers `lcars-system`, et surtout
+  # le groupe `lcars-console` : la page s'ouvrirait sur une liste vide en annoncant que tout va bien.
   mod apply
   # ⚠ `refute`, PAS `! grep` — ET LA PREMIERE DES DEUX ETAIT INERTE. Mutation du 2026-08-26 :
-  # `User=nobody` reinjecte dans la SEULE unite `lcars-landing` laissait ce temoin VERT, parce que
+  # un `User=` reinjecte dans la SEULE unite `lcars-landing` laissait ce temoin VERT, parce que
   # bash exempte d'`errexit` une commande niee par `!` et que la seconde ligne, elle, reussissait.
   # La regle porte sur les DEUX unites ; une seule des deux etait gardee. Detail : `refute.bash`.
   refute grep -q "^User=" "$LCARS_SYSTEMD_DIR/lcars-landing.service"

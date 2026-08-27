@@ -157,7 +157,7 @@ absent() { # absent <motif etendu> <fichier>
 # Ce mur-ci garde ce qui EST visible : le geste de DONNER un secret a un groupe.
 # ⚠ ET IL EST SCOPE AUX ECRIVAINS DE SECRETS, PAS AU DEPOT ENTIER. Premiere ecriture : un `chgrp`
 # interdit PARTOUT dans le perimetre. C'etait rouge des le premier passage, sur `55-deck-oidc.sh` —
-# qui `chgrp` legitimement son fichier OIDC pour que le deck (`nobody:nogroup`) puisse le lire. Un
+# qui `chgrp` legitimement son fichier OIDC pour que le deck (`lcars-system`) puisse le lire. Un
 # mur qui accuse un geste sain n'est pas severe, il est FAUX, et un mur faux se fait desarmer.
 #
 # La regle n'a jamais ete « aucun chgrp » : c'est « aucun SECRET DE FORGE donne a un groupe ». Le

@@ -28,13 +28,22 @@
 #
 # Le convergeur a besoin de `useradd` : il n'y a pas de version non privilégiée de créer un humain.
 # La landing démarre en root et se DÉPOSE elle-même — `console-landing.sh` fait
-# `setpriv --reuid nobody --regid nogroup --groups lcars-console`, exactement comme dans l'image.
-# Ne PAS mettre `User=nobody` dans l'unité : ça retirerait au script le droit de faire ce drop, et
-# surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket de
-# console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
+# `setpriv --reuid lcars-system --regid lcars-system --groups lcars-console`, exactement comme dans
+# l'image. Ne PAS mettre `User=` dans l'unité : ça retirerait au script le droit de faire ce drop,
+# et surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket
+# de console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
 #
-# (Le compte système dédié `lcars-system` du Lot 5 est un durcissement à venir : il remplacerait
-# `nobody`, partagé par tout le système. Tant qu'il n'existe pas, on fait ce que fait l'image.)
+# ⚠ `lcars-system` EXISTE DEPUIS LE 2026-08-27, ET CE PARAGRAPHE ANNONÇAIT LE CONTRAIRE. Il disait
+# « un durcissement à venir ; tant qu'il n'existe pas, on fait ce que fait l'image ». Ce qui l'a fait
+# poser n'est pas le principe mais une mesure : `nobody` n'est pas une identité, et son groupe
+# `nogroup` (gid 65534) est le groupe PRIMAIRE de `sync`, `_apt`, `nobody` et `dhcpcd` sur une
+# Debian/Ubuntu ordinaire. Le fichier d'identification du deck — qui porte le `client_secret`
+# OAuth2 — s'y posait `0640 root:nogroup` : un démon réseau le lisait. Il est désormais
+# `0640 root:lcars-system`, et le groupe nomme exactement un lecteur.
+#
+# ⚠ CE QUE CE COMPTE NE FERME PAS : le deck reçoit toujours `lcars-console` à l'exec, et ce groupe
+# est à un `connect()` d'un shell sous n'importe quel humain. On a rangé QUI partage son identité,
+# pas ce qu'il peut faire.
 #
 # ─── POURQUOI `wsl` AUSSI, ET CE MODULE A PORTÉ `linux` SEUL PENDANT UNE JOURNÉE ────────────────
 #

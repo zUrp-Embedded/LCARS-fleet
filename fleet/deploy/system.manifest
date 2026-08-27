@@ -148,7 +148,7 @@ anchor    /etc/apt/keyrings/docker.asc                 0644  root:root          
 anchor    /etc/apt/sources.list.d/docker.list          0644  root:root           linux
 anchor    /etc/lcars/host-consent                      0644  root:root           linux
 anchor    /etc/lcars/services.env                      0640  root:fleet          linux
-anchor    /etc/lcars/deck-oidc.json                    0640  root:fleet          wsl+linux
+anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
 # ⚠ CES DEUX-LA SONT DES BINAIRES, PAS DES ANCRES DE L'OS, et la classe est un pis-aller assume :
 # rien dans le PATH n'a de raison d'etre a un chemin fixe. La phase B du plan les deplace sous le
 # prefixe et ils deviendront des `link`. Les declarer aujourd'hui est ce qui permet au temoin de

@@ -28,10 +28,22 @@ set -euo pipefail
 
 APP_NAME="lcars-deck"
 TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
-# `nobody` runs the deck (it reads and pilots nothing), and it reads this file. Group `nogroup` is
-# what `setpriv --regid nogroup` gives it, so 0640 root:nogroup is the narrowest mode that works:
-# the client_secret stays unreadable to every human on the box.
-OIDC_GROUP="nogroup"
+# ⚠ CE FICHIER PORTE LE `client_secret` OAUTH2 DE CETTE BOITE, ET SON GROUPE A ETE FAUX DEUX FOIS.
+#
+# Il s'ecrivait `0640 root:nogroup`, avec pour motif : « le mode le plus etroit qui marche — le
+# secret reste illisible par tout HUMAIN de la boite. » Les deux moities sont vraies et la
+# conclusion ne l'etait pas : `nogroup` n'est pas le groupe du deck, c'est le groupe de ceux qui
+# n'en ont pas choisi. Releve sur une Debian/Ubuntu ordinaire le 2026-08-27, gid 65534 est le
+# groupe PRIMAIRE de `sync`, `_apt`, `nobody` et `dhcpcd` — un demon reseau lisait le secret.
+#
+# ⚠ ET `system.manifest` EN DECLARAIT UN TROISIEME : `root:fleet`, ce qui l'aurait ouvert a tout
+# HUMAIN de la fleet — l'exact contraire de ce que la phrase ci-dessus annoncait. Deux documents,
+# deux valeurs, et aucun temoin qui les compare : c'est le temoin qui manquait, autant que la valeur.
+#
+# Le deck tourne desormais sous `lcars-system`, un compte a lui (`21-service-accounts`), de groupe
+# primaire homonyme. `0640 root:lcars-system` nomme donc EXACTEMENT un lecteur, et c'est celui qui
+# lit le fichier. Le mode n'a pas change ; ce qui a change, c'est que le groupe designe quelqu'un.
+OIDC_GROUP="${PROV_SYSTEM_GROUP:-lcars-system}"
 
 # The entrances, as full callback URIs. Loopback always: it is how the box's own operator reaches
 # the deck, and it is the one address that is true everywhere.
@@ -319,7 +331,7 @@ apply() {
         '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,
           redirect_uris:($uris|split(" "))}' > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $PROV_DECK_OIDC_FILE restera illisible par le deck (il tourne en nobody)"
+  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $PROV_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte ; « provision apply --only 21-service-accounts » le pose)"
   mv -f "$tmp" "$PROV_DECK_OIDC_FILE"
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "client OAuth2 « $APP_NAME » posé → $PROV_DECK_OIDC_FILE (retours : $uris)"
