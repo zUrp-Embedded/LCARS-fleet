@@ -1,7 +1,8 @@
 # fleet/deploy — machine nue → `fleet_v2 start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-25 (le runtime privilégié sort vers `fleet/services/`)
+**Dernière révision** : 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
+quatre gestes qui lui obéissaient déjà, et la soustraction assumée qui en découle)
 **Statut** : **EN SERVICE**, et le nord voulu reste un déployeur GÉNÉRIQUE catalogue-driven plutôt que
 ce code hardcodé LCARS — c'est une direction de conception, pas une interdiction d'usage. Analyse et
 ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
@@ -44,7 +45,7 @@ un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé
 (v1, archivée dans ses feuilles `v1/` — elle provisionnait la fleet bash v1, users-par-rôle,
 morte avec le modèle).
 
-## L'idée en 4 lois
+## L'idée en 5 lois
 
 1. **L'état, c'est le système.** Aucune sentinelle (`.install_ok`…), aucun fichier d'état :
    chaque module SONDE le réel (`check`) et le converge (`apply`). Re-lancer est toujours sûr,
@@ -56,6 +57,22 @@ morte avec le modèle).
    ligne, un échec dump tout. Rien n'est étouffé en `2>/dev/null`.
 4. **Atomicité partout.** Tout fichier est écrit tmp-même-dossier puis `mv`. Un crash ne laisse
    jamais un fichier tronqué ni un état à moitié armé (wsl.conf s'écrit EN DERNIER de son module).
+5. **La frontière est l'API docker.** LCARS agit à partir d'elle et au-dessus : conteneurs,
+   volumes, réseaux, et ce qui vit dedans. En dessous — daemon, paquets, kernel, réseau de
+   l'hôte — il est INVITÉ, et un invité ne pose rien. UN seul acte le rend propriétaire, et cet
+   acte a un nom : `LCARS_ALLOW_ANY_HOST` / `/etc/lcars/host-consent`. C'est le rail POSTE, et
+   lui seul.
+
+   Quatre gestes la portent, et c'est d'eux qu'elle se lit :
+   - le bandeau du rail boîte promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
+     /etc ni /usr » — `docker-ce` le contredirait mot pour mot (dépôt tiers, `/etc/apt/keyrings`,
+     `sources.list.d`, unité systemd, groupe) ;
+   - la même branche s'interdit l'`exec sudo`, sans quoi l'image sort bâtie en root : elle ne peut
+     pas poser un paquet ;
+   - `10-packages.sh` pose `docker-ce` sur le substrat `linux` seul, gardé par
+     `LCARS_ALLOW_ANY_HOST` — le rail poste, celui à qui la machine a été donnée ;
+   - `00-preflight.sh` refuse le rail poste hors WSL sans ce drapeau : « on ne le lâche pas sur une
+     machine dont on ne sait pas si c'est celle de quelqu'un ».
 
 ## Usage
 
@@ -150,6 +167,20 @@ côtés.
   sondés et instruits, jamais exécutés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
+- **Pas de docker auto-installé sur le rail boîte** (loi 5) : ce rail installe LCARS DANS un
+  conteneur, sur une machine que l'admin sys définit et maintient comme il l'entend, avec ses
+  contraintes. Le daemon y est un PRÉREQUIS qu'on NOMME, jamais un manque qu'on comble — le
+  combler exigerait un dépôt tiers, `/etc/apt`, une unité systemd et une escalade, c'est-à-dire
+  tout ce que le bandeau de ce rail promet de ne pas faire. Le rail POSTE le pose, lui, parce
+  qu'il a reçu la machine.
+  ⚖ USER 2026-08-26 : « le rail boîte, c'est pour un système destiné à la production, dans un
+  environnement contrôlé, défini et maintenu par l'admin sys — de la façon qu'il souhaite, avec
+  les contraintes qu'il a. Notre job, c'est pas de provisionner un serveur de prod complet en le
+  promettant résilient. On demande docker pour installer LCARS dans un conteneur ; la couche
+  bare-metal, c'est pas notre scope. »
+  `docker_installable_here` (`install.sh`) lit donc le rail autant que le substrat : tant que
+  personne n'a choisi, le préflight annonce les deux moitiés, et l'option boîte se barre quand le
+  daemon manque au lieu de s'offrir.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
   le profil `forge` : runner Gitea officiel, label `elixir` = la même image que le stage
   build). Son enregistrement est un geste bootstrap (`fleet/deploy/docker/forge-runner.sh`

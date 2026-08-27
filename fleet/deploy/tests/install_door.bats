@@ -452,6 +452,31 @@ SPY
   [ "$output" = "oui" ]
 }
 
+@test "le rail BOITE ne pose JAMAIS docker, meme sur une machine declaree (loi 5)" {
+  # Loi 5 (fleet/deploy/README.md) : poser un paquet est reserve au rail qui a RECU la machine.
+  # La boite est invitee, et aucun drapeau ne change ca.
+  run bash -c "
+    export LCARS_ALLOW_ANY_HOST=1
+    RAIL=box
+    FORCED_SUBSTRATE=linux
+    detect_substrate() { echo linux; }
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "non" ]
+}
+
+@test "rail POSTE explicite sur machine declaree : la porte laisse toujours passer" {
+  # Le garde ci-dessus ne doit pas fermer le rail qui, lui, a le droit de poser docker.
+  run bash -c "
+    export LCARS_ALLOW_ANY_HOST=1
+    RAIL=workstation
+    FORCED_SUBSTRATE=linux
+    detect_substrate() { echo linux; }
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "oui" ]
+}
+
 @test "declaree mais WSL : docker reste un prerequis — rien ici n'installe Docker Desktop" {
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1

@@ -93,6 +93,17 @@ callback_uris() {
   echo "$out"
 }
 
+# Le resolveur du visiteur n'est pas mesurable d'ici : on nomme ce qui est local au daemon docker —
+# le domaine `.internal`, et les noms de service (sans point). `localhost` n'a pas de point non plus
+# et se resout : c'est l'adresse juste d'un operateur sur sa machine, donc jamais un drift.
+browser_unreachable() {   # 0 si l'hôte de $1 ne peut pas être résolu par un navigateur
+  local host="${1#*://}"; host="${host%%/*}"; host="${host%%:*}"
+  [[ -z "$host" || "$host" == localhost ]] && return 1
+  [[ "$host" == *.internal ]] && return 0
+  [[ "$host" != *.* ]] && return 0
+  return 1
+}
+
 forge_tok() { tr -d '[:space:]' < "$TOKEN_FILE" 2>/dev/null || true; }
 
 # LES DEUX ADRESSES DU FICHIER, COMPARÉES À CE QU'ON POSERAIT — une seule fonction pour le check et
@@ -214,8 +225,8 @@ check() {
   fi
   # The browser-facing address is its own failure mode: it is only wrong once somebody tries from
   # another machine, and by then the error looks like a broken login rather than a config value.
-  if [[ -n "$PROV_FORGE_PUBLIC_URL" && "$PROV_FORGE_PUBLIC_URL" == *"://forge:"* ]]; then
-    p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom de service docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
+  if [[ -n "$PROV_FORGE_PUBLIC_URL" ]] && browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
+    p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom local au daemon docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
   fi
   # ⚠ ET LE FICHIER QU'ON ÉCRIT SE SONDE AUSSI, PAS SEULEMENT CE QUE LA FORGE ENREGISTRE. Cette
   # sonde ne comparait que la liste des retours ; `public_url` et `internal_url`, qu'elle POSE dans
@@ -336,8 +347,8 @@ apply() {
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "client OAuth2 « $APP_NAME » posé → $PROV_DECK_OIDC_FILE (retours : $uris)"
 
-  if [[ "$PROV_FORGE_PUBLIC_URL" == *"://forge:"* ]]; then
-    p_warn "public_url=$PROV_FORGE_PUBLIC_URL est un nom de service docker — le navigateur ne le résoudra pas ; pose FORGE_PUBLIC_URL sur l'adresse réelle de la forge"
+  if browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
+    p_warn "public_url=$PROV_FORGE_PUBLIC_URL est local au daemon docker — le navigateur ne le résoudra pas ; pose FORGE_PUBLIC_URL sur l'adresse réelle de la forge"
   fi
   verdict_apply
 }

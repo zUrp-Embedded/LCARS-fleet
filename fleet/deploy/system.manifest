@@ -137,6 +137,8 @@ dir       /opt/node-<version>                          0755  root:root          
 anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
 anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           linux
 anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           linux
+anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           linux
+anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           linux
 anchor    /etc/sudoers.d/lcars-toolchain               0440  root:root           any
 # Le depot upstream de docker, pose par 10-packages SEULEMENT quand aucun daemon ne repond. Les deux
 # fichiers sont les SEULS que ce rail ajoute au systeme de paquets de la machine, et ils sont
