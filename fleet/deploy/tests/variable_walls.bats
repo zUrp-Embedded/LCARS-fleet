@@ -534,3 +534,71 @@ PYX
   done < <(sort -u "$BATS_TEST_TMPDIR/vus")
   [ "$rompu" -eq 0 ] || return 1
 }
+
+@test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
+  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `etc/install.sh` et `provision-lib.sh`
+  # declarent le prefixe chacun de leur cote ; `.claude/hooks/runtime-guard.sh` REFUSE les ecritures
+  # dans l'arbre d'install, en le nommant. Si le prefixe bougeait sans que le hook suive, la garde
+  # cesserait de proteger l'install reelle — sans un mot, et c'est le pire mode : elle continuerait
+  # de dire non sur un chemin que plus personne n'utilise.
+  #
+  # ⚠ AUCUNE AUTORITE N'EST DESIGNEE, et on ne s'en invente pas. `60-deploy` passe `PROV_PREFIX` a
+  # `install.sh`, donc `provision-lib` est en amont — mais `install.sh` joue aussi SEUL, avec son
+  # propre repli. Ce qui se verifie est donc l'ACCORD, comme pour `/home/private`. Une designation
+  # pourra s'ajouter ; l'inventer ici serait une decision que personne n'a prise.
+  local inst="$REPO/etc/install.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  local guard="$REPO/../.claude/hooks/runtime-guard.sh"
+  [ -r "$inst" ] && [ -r "$lib" ] || { echo "MUR 10 — install.sh ou provision-lib.sh illisible" >&2; return 1; }
+
+  local a b
+  a="$(sed 's/#.*//' "$inst" | sed -nE 's/.*LCARS_INSTALL_PREFIX:-([^}]+)\}.*/\1/p' | head -n1)"
+  b="$(sed 's/#.*//' "$lib"  | sed -nE 's/^: "\$\{PROV_PREFIX:=([^}]+)\}".*/\1/p' | head -n1)"
+  [ -n "$a" ] || { echo "MUR 10 — le repli de LCARS_INSTALL_PREFIX ne se lit plus dans install.sh" >&2; return 1; }
+  [ -n "$b" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus dans provision-lib.sh" >&2; return 1; }
+  [ "$a" = "$b" ] || {
+    echo "MUR 10 rompu — deux prefixes declares : install.sh dit « $a », provision-lib.sh dit « $b »" >&2
+    return 1
+  }
+
+  # La garde doit NOMMER ce prefixe. Elle protege aussi l'arbre v1 (`/local/LCARS`), ce qui est
+  # deliberé et hors sujet ici : on ne verifie que la presence du prefixe COURANT.
+  if [ -r "$guard" ]; then
+    sed 's/#.*//' "$guard" | grep -qF -- "$a" || {
+      echo "MUR 10 rompu — .claude/hooks/runtime-guard.sh ne protege pas « $a » : la garde vise un" >&2
+      echo "   arbre que l'install n'utilise plus, et laisse le vrai ouvert" >&2
+      return 1
+    }
+  fi
+
+  # Et aucun litteral du corpus ne nomme un AUTRE prefixe de la meme forme.
+  local orphelins
+  #
+  # ⚠ LA TRONCATURE GARDE LE POINT. Sans lui `/local/LCARS-v1.5` sortait en `/local/LCARS-v1`, et
+  # l'exemption ecrite plus bas ne le reconnaissait pas : le mur accusait un arbre qu'il declarait
+  # connaitre. Un motif qui mutile le nom qu'il compare ne compare rien.
+  #
+  # LES ARBRES NON-INSTALL SE DECLARENT PAR LEUR NOM, chacun avec sa raison :
+  #   /local/LCARS      — l'arbre v1, que la garde protege AUSSI et deliberement
+  #   /local/LCARS-v1.5 — cite par une donnee de CATALOGUE (`systemPrompt:` d'un cap-profile) ;
+  #                       un catalogue est substituable, son contenu n'est pas un fait de la fleet
+  #   /local/LCARS-fleet— un nom d'avant, qui ne vit plus que dans le CHANGELOG et un plan
+  #
+  # ⚠ ET LES `tests/` SONT HORS BALAYAGE, PARCE QUE CE MUR S'EST ACCUSE LUI-MEME. La cicatrice
+  # ci-dessus cite le nom tronque pour expliquer le defaut ; le balayage l'a lue et l'a comptee
+  # comme un prefixe etranger. C'est la lecon nº2 du chantier, mot pour mot : « un temoin qui lit
+  # la prose accuse la prose ». `adminite_walls` la porte deja — « un mur qui attraperait
+  # l'explication d'un defaut interdirait de l'expliquer ».
+  orphelins="$(grep -rhoE '/local/LCARS[A-Za-z0-9_.-]*' "$REPO" "$REPO/../.claude" \
+                 --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
+                 --exclude-dir=tests 2>/dev/null \
+               | sed -E 's|(/local/LCARS[A-Za-z0-9_.-]*).*|\1|' | sed -E 's|\.$||' | sort -u \
+               | grep -vxF -- "$a" \
+               | grep -vxF -- '/local/LCARS' \
+               | grep -vxF -- '/local/LCARS-v1.5' \
+               | grep -vxF -- '/local/LCARS-fleet' || true)"
+  [ -z "$orphelins" ] || {
+    echo "MUR 10 rompu — prefixe(s) etranger(s) sous /local, ni « $a » ni un arbre v1 declare :" >&2
+    printf '     %s\n' $orphelins >&2
+    return 1
+  }
+}
