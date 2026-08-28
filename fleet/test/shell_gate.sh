@@ -13,8 +13,13 @@
 #   - python3 ABSENT               → ECHEC EXPLICITE (jamais un skip silencieux : c'est la lecon du bug).
 #   - 0 test compte OU FAIL>0      → exit != 0 (jamais vert sans compteur positif — la « coquille vide »
 #                                     qui passe est l'anti-pattern precis a tuer).
-#   - shellcheck ABSENT, ou UN signalement → exit != 0. Meme barreau que `--warnings-as-errors`
-#                                     cote Elixir : pas de seuil de severite.
+#   - shellcheck                   → HORS GATE depuis le 2026-08-29 (⚖ USER). Le pas est arrive
+#                                     rouge et ne l'a jamais quitte ; un gate qu'on sait toujours
+#                                     rouge apprend a lire « rouge » comme « normal ». Le code vit
+#                                     toujours au §5, sous `LCARS_SHELL_LINT=1`, et son absence est
+#                                     ANNONCEE a chaque passage. Contrat d'origine, a restaurer le
+#                                     jour ou le compte est a zero : absent ou un seul signalement
+#                                     = exit != 0, meme barreau que `--warnings-as-errors`.
 #   - bats PRESENT + rouge         → exit != 0.
 #   - bats ABSENT                  → PAS d'echec ICI (warning + compte MANQUE). Choix delibere : ce filet
 #                                     est cable dans `mix gate`, l'absence de bats sur une machine sans
@@ -41,7 +46,7 @@ BATS_MISSING_FATAL="${BATS_MISSING_FATAL:-0}"
 
 GATE_FAIL=0
 
-echo "=== shell_gate : tests hors-mix (python + bats des launchers) + shellcheck ==="
+echo "=== shell_gate : tests hors-mix (python + bats des launchers) ==="
 
 # ---------------------------------------------------------------------------
 # 1) Test python du bridge MCP stdio.
@@ -364,7 +369,27 @@ mapfile -t SHELL_FILES < <(
 SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
 SC_VERSION="$(command -v shellcheck >/dev/null 2>&1 && shellcheck --version | sed -n 's/^version: //p')"
 
-if [[ -z "$SC_VERSION" ]]; then
+# ─── LE PAS EST HORS GATE PAR DEFAUT ────────────────────────────────────────────────────────────
+#
+# ⚖ USER 2026-08-29 : « on ne teste pas un truc qui n'est pas testable ».
+#
+# Le pas est ARRIVE ROUGE et n'a jamais ete vert : `b4afe7055` l'a cable en annoncant lui-meme sa
+# mesure d'atterrissage — 1251 signalements, « la remediation n'est pas dans ce commit ». Un gate
+# qu'on sait rouge en permanence ne mesure plus rien : il apprend a lire « rouge » comme « normal »,
+# et c'est ainsi qu'un VRAI rouge passe inapercu. Le desactiver est plus honnete que de le laisser
+# hurler dans le vide, et plus honnete encore qu'un seuil — un seuil fabriquerait la zone ou l'outil
+# parle et ou personne n'ecoute, ce que le commentaire du haut de ce bloc refuse deja.
+#
+# ⚠ DESACTIVE, PAS SUPPRIME, ET IL LE DIT. Le code reste joue par `LCARS_SHELL_LINT=1` — c'est ce
+# que tapera l'agent qui prendra la remediation, fichier par fichier, pour mesurer son avancement.
+# Et le pas ANNONCE son absence a chaque passage : un audit qui disparait en silence est un audit
+# dont plus personne ne se souvient qu'il a existe.
+#
+# POUR LE RALLUMER POUR DE BON : remettre `[[ -n "${LCARS_SHELL_LINT:-}" ]] ||` en commentaire ici,
+# le jour ou le compte est a zero. Rien d'autre ne bouge.
+if [[ -z "${LCARS_SHELL_LINT:-}" ]]; then
+  echo "--- shellcheck : HORS GATE (dette connue, ni mesuree ni bloquante ici — LCARS_SHELL_LINT=1 pour l'auditer) ---"
+elif [[ -z "$SC_VERSION" ]]; then
   echo "ECHEC: shellcheck absent — $SHELL_FILE_COUNT fichier(s) shell NON audites. Installer : apt install shellcheck." >&2
   GATE_FAIL=1
 elif [[ "$SHELL_FILE_COUNT" -eq 0 ]]; then
