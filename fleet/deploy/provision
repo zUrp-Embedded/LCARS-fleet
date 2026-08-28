@@ -434,6 +434,13 @@ uninstall_run() {
     return 1
   }
 
+  # LES PROJETS DOCKER : le journal, et lui seul. Leur nom se DERIVE de `PROV_FORGE_PROJECT`,
+  # surchargeable par `--forge-project` — aucune table statique ne peut le porter, et `uninstall.bats`
+  # interdit de le recopier. `48-forge-host` et `49-forge-runner` le notent au moment ou ils montent.
+  local -a docker_projects=()
+  [[ -r "$JOURNAL_FILE" ]] && mapfile -t docker_projects < <(
+    awk '$1=="posed_docker"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
+
   # LES PAQUETS : le journal, et lui seul.
   if [[ -r "$JOURNAL_FILE" ]]; then
     mapfile -t journal_pkgs < <(awk '$1=="apt_installed"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
@@ -492,6 +499,9 @@ uninstall_run() {
   printf '  %-10s %d répertoire(s)\n' "dirs" "${#dirs[@]}"
   printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
   printf '  %-10s %d compte(s) de service\n' "comptes" "${#accounts[@]}"
+  if [[ "${#docker_projects[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "docker" "${docker_projects[*]}"
+  fi
   # ⚠ TROIS ETATS DISTINCTS, ET UN SEUL MESSAGE LES DISAIT — celui du mauvais. Le test ne regardait
   # que la longueur du tableau et concluait sur le FICHIER. Mesure du 2026-08-26 : un journal
   # present, lisible, seize lignes, disant « le rail n'a pose aucun paquet » etait annonce
@@ -564,6 +574,35 @@ uninstall_run() {
     [[ -d "$o" ]] || continue
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
   done
+  # ─── LES OBJETS DOCKER ────────────────────────────────────────────────────────────────────────
+  #
+  # ⚠ LES VOLUMES NE PARTENT PAS, ET C'EST DELIBERE TANT QUE `/home/forge` N'EXISTE PAS.
+  #
+  # `<projet>_data` porte LES DEPOTS DE LA FORGE — le travail, pas de l'etat. Ils survivent
+  # aujourd'hui par ACCIDENT : ce verbe ne touchait aucun objet docker. Les retirer maintenant
+  # transformerait cet accident en destruction. La cible (`/home/forge` en bind, classe `preserve`)
+  # est la phase B ; d'ici la, on retire ce qui se reconstruit — conteneurs et reseaux — et on NOMME
+  # ce qu'on laisse. Un effacement silencieux sur ce qu'il EPARGNE est un mensonge par omission.
+  local proj cid vol
+  for proj in ${docker_projects[@]+"${docker_projects[@]}"}; do
+    command -v docker >/dev/null 2>&1 || { echo "  ${_PA}docker absent — projet « $proj » laissé entier${_PN}"; break; }
+    while read -r cid; do
+      [[ -n "$cid" ]] || continue
+      docker rm -f "$cid" >/dev/null 2>&1 && removed=$((removed + 1)) \
+        || echo "  ${_PA}conteneur non retiré : $cid${_PN}"
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=$proj" 2>/dev/null)
+    # Le reseau part avec le projet. Un reseau absent n'est pas une erreur — un `up` qui n'a jamais
+    # eu lieu n'en a pas cree.
+    if docker network rm "${proj}_default" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+    fi
+    while read -r vol; do
+      [[ -n "$vol" ]] || continue
+      kept=$((kept + 1))
+      echo "  ${_PC}volume $vol GARDÉ — il porte du travail (les dépôts de la forge). « docker volume rm $vol » si tu en es sûr.${_PN}"
+    done < <(docker volume ls -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null)
+  done
+
   # ⚠ LES COMPTES AVANT LES GROUPES, ET L'ORDRE EST UNE CONTRAINTE DE `groupdel` : il refuse un
   # groupe qui est le PRIMAIRE d'un compte existant. Retirer le groupe d'abord le laisserait donc
   # en place, et le compte avec — c'est ce que la machine montrait le 2026-08-28.

@@ -312,6 +312,49 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   refute_out 'person'    <<<"$bloc"
 }
 
+# ─── LA CLASSE `docker`, ET LE VOLUME QU'ELLE NE DOIT PAS PRENDRE ───────────────────────────────
+#
+# MESURE DU 2026-08-27 : apres `uninstall --yes`, TROIS conteneurs et QUATRE volumes survivent, dont
+# `<projet>_data` qui porte les depots de la forge. Le verbe ne touchait aucun objet docker.
+#
+# ⚠ LE NOM DU PROJET NE PEUT PAS ETRE DANS LA TABLE. Il se derive de `PROV_FORGE_PROJECT`,
+# surchargeable par `--forge-project` — mesure du 2026-08-28, le banc tournait sur `lcars-alice`.
+# `uninstall.bats` interdit deja de recopier un nom ici. Le JOURNAL est le seul endroit qui sache ce
+# que CETTE machine a monte, et c'est exactement ce qu'il existe pour dire.
+
+@test "DOCKER : le plan lit les projets dans le JOURNAL, jamais dans la table" {
+  printf 'posed_docker lcars-essai lcars-essai-runner\n' >> "$LCARS_JOURNAL_FILE"
+  plan
+  [[ "$output" == *"lcars-essai"* ]]
+  [[ "$output" == *"lcars-essai-runner"* ]]
+}
+
+@test "DOCKER : aucun nom de projet n'est ecrit dans le code" {
+  # La regression exacte : recopier `lcars-forge` ici ferait un second inventaire, et celui qui
+  # derive est toujours celui qu'on ne relit pas.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  refute grep -qE 'lcars-forge|lcars-alice' <<<"$body"
+  grep -q 'posed_docker' <<<"$body"
+}
+
+@test "DOCKER : les VOLUMES ne sont jamais retires — ils portent le travail" {
+  # ⚠ LE TEMOIN LE PLUS CHER DE CE VERBE. `<projet>_data` porte les depots de la forge. Ils
+  # survivent aujourd'hui par ACCIDENT — rien ne touchait docker ; les retirer maintenant
+  # transformerait cet accident en destruction. La cible (`/home/forge` en bind, classe `preserve`)
+  # est la phase B. D'ici la : on retire ce qui se reconstruit, on NOMME ce qu'on laisse.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for proj in /,/^  done/p' <<<"$body")"
+  [ -n "$bloc" ]
+  grep -q 'docker rm -f'      <<<"$bloc"
+  grep -q 'docker network rm' <<<"$bloc"
+  # ⚠ HORS LIGNES D'AFFICHAGE : le message SUGGERE la commande a l'operateur (« docker volume rm
+  # <vol> si tu en es sur »). Un refute qui lit la prose interdirait de nommer le geste qu'on epargne
+  # — meme piege que le temoin anti-litteral de `box`, deux commits plus tot.
+  refute grep -qE '^[^e]*docker (volume rm|volume prune)' <<<"$(grep -v 'echo ' <<<"$bloc")"
+  # et il DIT ce qu'il epargne
+  grep -q 'GARDÉ' <<<"$bloc"
+}
+
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {
   # Refuser la lecture sans root obligerait l'operateur a escalader pour SAVOIR ce qui va
   # disparaitre — c'est-a-dire a decider apres avoir escalade.

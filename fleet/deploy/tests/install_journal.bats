@@ -203,11 +203,21 @@ SH
   # ⚠ LA PROPRIETE, ET PAS LE NOMBRE. La poser dans chaque module demanderait a 53 sites d'appel de
   # s'en souvenir — un poseur qui doit se souvenir oubliera, et c'est exactement ce qui s'est passe
   # pour les deux modules qui sondent avant `apt_ensure`.
-  local n_lib n_mod
+  #
+  # ⚠ ET LA PROPRIETE N'EST PAS « AUCUN MODULE NE NOTE ». Premiere version ecrite comme ca — elle est
+  # tombee des qu'un module a du noter un nom de projet compose, que RIEN dans la lib ne peut
+  # connaitre : il se derive de `PROV_FORGE_PROJECT`, surchargeable au drapeau. La regle juste est
+  # plus etroite : ce qu'une PRIMITIVE pose, elle le note elle-meme ; un module ne note que ce
+  # qu'aucune primitive ne voit passer.
+  local n_lib
   n_lib="$(grep -c 'prov_journal_note ' "$LIB")"
-  n_mod="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -c 'prov_journal_note ' || true)"
   [ "$n_lib" -ge 6 ]
-  [ "$n_mod" -eq 0 ]
+  # Les quatre clefs du systeme de fichiers sont l'affaire de la lib, et d'elle seule.
+  local cle
+  for cle in posed_dir posed_file posed_link posed_group; do
+    grep -q "prov_journal_note $cle" "$LIB" || { echo "la lib ne note pas $cle"; return 1; }
+    refute grep -qh "prov_journal_note $cle" "$BATS_TEST_DIRNAME"/../modules.d/*.sh
+  done
 }
 
 # ─── LA FUSION ──────────────────────────────────────────────────────────────────────────────────
