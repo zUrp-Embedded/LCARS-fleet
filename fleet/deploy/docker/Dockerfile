@@ -10,14 +10,26 @@
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
 # et vérifiable par LE MÊME doctor. Deux substrats, une seule vérité.
 #
-# Pins par DIGEST (l'imutabilité ne se déclare pas, elle s'épingle) :
-#   - build   : hexpm/elixir 1.18.4 + Erlang/OTP 25.3.2.8 — la même paire que
-#     `modules.d/15-toolchain.sh` (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_ZIP_SHA256`). Les deux
-#     bougent ENSEMBLE ou l'image bâtit sur un OTP que la machine n'a pas.
-#   - runtime : debian bookworm-slim — même base que l'image build (l'ERTS bundlé y est chez lui).
-# Bump = nouvelle paire tag+digest ICI (et le pin 15-toolchain en face) — nulle part ailleurs.
-ARG BUILD_IMAGE=hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim@sha256:8cae38d9bfbe3d14fc73b687cf36a9a7d5ebd6aea894dc294f35e708320d06e1
-ARG RUNTIME_IMAGE=debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+# ⚠ UNE SEULE BASE POUR LES DEUX ÉTAGES, ET C'EST LA CIBLE DU RAIL POSTE (⚖ user 2026-08-28).
+# L'image bâtissait sur `hexpm/elixir:…-debian-bookworm-slim` et tournait sur `debian:bookworm-slim`
+# — une distro que rien ne déployait. Ce que bookworm coûtait était payé en corrections de bookworm,
+# et chacune est nommée là où elle vivait : un dépôt `bookworm-backports` pour un git assez récent
+# (2.39 < 2.42, `git worktree add --orphan`), ttyd téléchargé en binaire avec deux sha256 épinglés
+# (« pas dans bookworm : no installation candidate »), une mesure PEP 668 faite sur `libpython3.11`.
+# Sur Ubuntu 26.04 les trois tombent : git 2.53, `ttyd 1.7.7-4build1` — la version qui était
+# épinglée — et l'apt qui sert `erlang 1:27.3.4.6` (OTP 27) et `elixir 1.18.3`.
+#
+# ⚠ ET LE PIN DE TOOLCHAIN PART AVEC LA BASE. `hexpm/elixir` était une SECONDE autorité sur la
+# version d'Elixir, en face de `provision-lib.sh` — le Dockerfile écrivait « les deux bougent
+# ENSEMBLE » et c'était une convention de PROCESSUS, que `provision_lib.bats` a fini par garder.
+# Deux autorités qu'un mur surveille valent mieux qu'une divergence muette, mais moins qu'UNE
+# autorité : les deux rails demandent maintenant leur toolchain au même apt, celui de la même
+# image de base. Le mur reste, et il compare ce qui subsiste — la base, pas deux versions.
+#
+# Pins par DIGEST (l'imutabilité ne se déclare pas, elle s'épingle) : bump = nouveau digest ICI,
+# les deux ensemble, nulle part ailleurs.
+ARG BUILD_IMAGE=ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
+ARG RUNTIME_IMAGE=ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
 
 # ─── Stage 1 : build — la release self-contained, par l'autorité etc/install.sh ─────────────────
 FROM ${BUILD_IMAGE} AS build
@@ -41,11 +53,18 @@ ARG TARGETARCH
 # un stage sans tmux/bubblewrap fait échouer le script trop TÔT et rougit 62 cas qui n'ont rien à
 # voir. Un stage build qui ne peut pas jouer le gate entier ne doit pas produire d'image : on
 # outille le stage plutôt que d'affaiblir le gate. (Liste = celle de 10-packages + les 2 du gate.)
-# git vient de BACKPORTS (bookworm = 2.39) : un fixture du gate construit un worktree orphelin
-# avec `git worktree add --orphan`, option apparue en git 2.42 — sans elle, exit 129 et un test
-# rouge qui ne parle pas du code. C'est un besoin du GATE seul : le runtime, lui, crée ses
-# worktrees en `add -f -B` (vérifié dans pilot/conflict_apply + project_onboard), donc l'image
-# finale garde le git de bookworm sans rien perdre.
+# ⚠ LA TOOLCHAIN ENTRE ICI PAR APT, ET C'EST LE MÊME GESTE QUE `15-toolchain` SUR UN POSTE.
+# Elle venait de l'image de base (`hexpm/elixir`), qui la pinnait à un cran que le rail poste
+# pinnait de son côté. Une seule base sert maintenant les deux, et `erlang`+`elixir` s'y demandent
+# comme partout ailleurs — mêmes paquets, même distro, même OTP. Le plancher qui juge cette paire
+# vit dans `provision-lib.sh` (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN`) ; il n'est pas recopié
+# ici, il est VÉRIFIÉ en face par `provision doctor` sur la machine qui déploie.
+#
+# ⚠ UN DÉPÔT `bookworm-backports` VIVAIT SUR CETTE LIGNE, POUR GIT SEUL. Un fixture du gate
+# construit un worktree orphelin avec `git worktree add --orphan`, option apparue en git 2.42, et
+# bookworm servait 2.39 — sans le backport, exit 129 et un test rouge qui ne parle pas du code.
+# Ubuntu 26.04 sert git 2.53 : le dépôt supplémentaire, son fichier dans `sources.list.d` et le
+# second `apt-get install -t` partent tous les trois.
 # LES RACINES DE FACE SONT DES CONSTANTES DE COMPILATION, DONC DES DÉPENDANCES DU STAGE.
 # `Fleet.Layout` fige `@work_root "/home/projects.ops"` et `@doc_root "/home/projects.workshop"` ; le
 # test d'admission du poller crée son répertoire de
@@ -58,11 +77,10 @@ ARG TARGETARCH
 # token-saver — LE mur d'ancrage amont, celui qui dit ce qui se rouvre à chaque update du vendor —
 # et il REFUSE de les sauter en silence si pytest manque. La boîte de dev l'a, l'image ne l'avait
 # pas : le gate en image était donc vert sur une suite de moins, jusqu'à ce que ce refus le dise.
-RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/backports.list \
-    && apt-get update -qq \
+RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       tmux bubblewrap curl jq unzip ca-certificates python3 python3-pytest bats procps \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -t bookworm-backports git \
+       erlang elixir \
+       tmux bubblewrap git curl jq unzip ca-certificates python3 python3-pytest bats procps \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
@@ -162,6 +180,7 @@ WORKDIR /src/fleet
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
 
+
 # hex/rebar + build + pose sous /opt/lcars/runtime — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
 # c'est une release). Les caches appartiennent à builder (uid/gid explicites : un cache root
@@ -230,7 +249,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 # tourner, pas la derniere en ligne, pas une copie a resynchroniser.
 #
 # UN STAGE A ELLE, ET NODE N'ENTRE JAMAIS DANS LE RUNTIME. Meme patron que le stage `build` : on ne
-# copie que le resultat, ~300 Ko de HTML statique. Le runtime reste Elixir/Debian, sans node, sans
+# copie que le resultat, ~300 Ko de HTML statique. Le runtime reste Elixir/Ubuntu, sans node, sans
 # npm, sans node_modules.
 #
 # ⚠ L'ARBORESCENCE EST LE CONTRAT. Les lecteurs du site remontent quatre crans depuis
@@ -294,7 +313,7 @@ ENV LANG=C.UTF-8 LCARS_DOCKER=1
 # Paquets du RUNTIME (la liste miroir de modules.d/10-packages.sh + le substrat conteneur :
 # openssh-server = le login-manager du modèle « l'humain SSH en tant que lui », tini = PID 1
 # (reaper + signaux), procps = sondes pgrep du provisioning. Un seul layer apt, cache purgé.
-# util-linux-extra = runuser (B4) : absent de bookworm-slim, et TOUT le per-humain du provision
+# util-linux-extra = runuser (B4) : absent d'une base ubuntu minimale, et TOUT le per-humain du provision
 # convergent (as_human) passe par lui — sans ce paquet l'entrypoint casse au premier module humain.
 # python3 = l'interpréteur du bridge MCP des pods (fleet_mcp_stdio_bridge.py, lancé « python3
 # <path> » dans le sanctuaire, qui projette CE /usr) — absent, AUCUN pod n'a ses outils
@@ -326,8 +345,8 @@ RUN apt-get update -qq \
        `# devrait alors passer par une approbation humaine — six mois a faire signer ce qui aurait` \
        `# du etre dans l'image. Les voici une fois, pour tous les pods (le /usr du bac est CELUI-CI).` \
        `#` \
-       `# python3-venv N'EST PAS UN CONFORT, c'est le seul chemin. MESURE sur bookworm :` \
-       `# libpython3.11-stdlib livre /usr/lib/python3.11/EXTERNALLY-MANAGED, donc PEP 668 est` \
+       `# python3-venv N'EST PAS UN CONFORT, c'est le seul chemin. MESURE sur ubuntu 26.04 :` \
+       `# libpython3.14-stdlib livre /usr/lib/python3.14/EXTERNALLY-MANAGED, donc PEP 668 est` \
        `# ACTIF et un pip install hors venv ECHOUE PAR CONCEPTION. python3-pip seul ne suffit pas.` \
        `# Effet de bord favorable : le chemin sans privilege devient obligatoire cote pod, gratis.` \
        python3-venv python3-pip \
@@ -341,6 +360,14 @@ RUN apt-get update -qq \
        `# ci-dessus, dont 60 pour build-essential seul. C'est le prix d'un compilateur, et une boite` \
        `# qui n'en a pas envoie CHAQUE build natif par la garde humaine.` \
        build-essential pkg-config python3-dev libssl-dev \
+       `# ─── LA CONSOLE WEB, ET ELLE ARRIVE ENFIN PAR LE MEME CHEMIN QUE SUR UN POSTE ──────────` \
+       `# ttyd etait recupere en binaire STATIQUE, deux sha256 epingles, un layer et un fetch pour` \
+       `# lui seul — parce qu'il n'est pas empaquete par Debian (« no installation candidate »).` \
+       `# Ubuntu 26.04 sert ttyd 1.7.7-4build1 dans universe : EXACTEMENT la version qui etait` \
+       `# epinglee. Le pin, les deux ARG de sha, le case sur TARGETARCH et le curl partent ensemble.` \
+       `# Il est desormais dans PACKAGES (10-packages.sh), donc sur le rail natif : c'est ce qui` \
+       `# autorise sa presence ici sans exemption dans deploy_manifest.bats.` \
+       ttyd \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     `# LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : traverser les repertoires de socket des consoles.` \
@@ -429,34 +456,21 @@ COPY assets/favicon  /opt/lcars/share/favicon
 # n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.
 RUN chmod -R a+rX /opt/lcars/share
 
-# ─── La console web : ttyd, binaire STATIQUE pinné par sha256 ────────────────────────────────────
-# La porte d'entrée demandée : une page web avec un shell SOUS L'IDENTITÉ DE L'HUMAIN, dans lequel
-# il lance `claude`. ttyd n'est PAS dans bookworm (vérifié : « no installation candidate ») ; on
-# prend l'officiel statique — même discipline que le précompilé Elixir de 15-toolchain : version +
-# sha256 épinglés ICI, nulle part ailleurs. Bump = changer la paire.
+# ─── La console web : ttyd, ET IL N'A PLUS DE BLOC A LUI ────────────────────────────────────────
+# La porte d'entrée demandée reste la même : une page web avec un shell SOUS L'IDENTITÉ DE L'HUMAIN,
+# dans lequel il lance `claude`. Ce qui a changé, c'est d'où vient le binaire.
 #
-# DEUX ARCHS, DEUX PINS, ET LE CHOIX N'EST PAS DEVINÉ. `TARGETARCH` est posé par BuildKit (`amd64`,
-# `arm64`) : c'est la seule source qui sait pour quelle plateforme on construit, y compris en
-# cross-build. Un `uname -m` répondrait pour la machine de BUILD, ce qui est faux dès qu'on bâtit
-# une image arm64 depuis un poste x86 — et l'erreur ne se verrait qu'au premier boot sur la cible.
-# Une arch inconnue ÉCHOUE ici, avec son nom : mieux vaut refuser de bâtir que livrer une image
-# dont la console web ne démarre pas.
-ARG TTYD_VERSION=1.7.7
-ARG TTYD_SHA256_AMD64=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
-ARG TTYD_SHA256_ARM64=b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165
-ARG TARGETARCH
-RUN set -eu; \
-    case "${TARGETARCH}" in \
-      amd64) ttyd_asset="ttyd.x86_64";  ttyd_sha="${TTYD_SHA256_AMD64}" ;; \
-      arm64) ttyd_asset="ttyd.aarch64"; ttyd_sha="${TTYD_SHA256_ARM64}" ;; \
-      *) echo "ttyd: arch de build non supportee: '${TARGETARCH}' (attendu amd64 ou arm64)" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL --proto '=https' -m 120 -o /tmp/ttyd \
-      "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/${ttyd_asset}" \
-    && echo "${ttyd_sha}  /tmp/ttyd" | sha256sum -c - \
-    && install -m 0755 /tmp/ttyd /usr/local/bin/ttyd \
-    && rm -f /tmp/ttyd \
-    && ttyd --version
+# CE QUI VIVAIT ICI, ET POURQUOI PLUS RIEN N'Y VIT. `ttyd n'est PAS dans bookworm (vérifié : « no
+# installation candidate ») ; on prend l'officiel statique — version + sha256 épinglés ICI. » Suivait
+# un `case` sur `TARGETARCH`, deux sha256, un `curl`, un `sha256sum -c` et un `install` : dix-sept
+# lignes pour ce qu'Ubuntu 26.04 livre sous le nom `ttyd 1.7.7-4build1` — la version exacte qui était
+# épinglée. Le paquet est monté dans le `apt-get install` du runtime, et il est entré dans
+# `PACKAGES` (10-packages.sh) du même geste : les deux rails le posent maintenant pareil.
+#
+# ⚠ LE BINAIRE A CHANGÉ DE CHEMIN, ET RIEN NE LE CODE EN DUR. Il était installé en
+# `/usr/local/bin/ttyd`, le paquet le pose en `/usr/bin/ttyd`. Le seul consommateur est
+# `62-runtime-helpers`, dont la couture (`TTYD_BIN="${LCARS_TTYD_BIN:-ttyd}"`) nomme la COMMANDE et
+# pas son chemin — le PATH tranche, et il tranchait déjà avant.
 
 # ─── LE CLIENT DE TERMINAL, ET C'EST LA PREMIERE DEPENDANCE FRONTEND DE CE DEPOT ────────────────
 # ⚠ CA SE DIT, CA NE SE GLISSE PAS DANS UN COMMIT. Ce depot ne portait AUCUN JS tiers : tout le
@@ -622,7 +636,7 @@ COPY fleet/bin/lcars-authority-ask /usr/local/bin/lcars-authority-ask
 COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
-# le Debian etendu (ll/la/l, couleurs, completion, lesspipe) que bookworm-slim n'a PAS, plus le
+# le bashrc etendu (ll/la/l, couleurs, completion, lesspipe) qu'une base ubuntu minimale n'a PAS, plus le
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 COPY fleet/services/skel.bashrc      /etc/skel/.bashrc

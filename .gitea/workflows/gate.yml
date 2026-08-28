@@ -50,18 +50,24 @@ jobs:
           got="$(git rev-parse HEAD)"
           [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA"; exit 1; }
 
-      # ⚠ LES VERSIONS SE LISENT, ELLES NE SE RECOPIENT PAS. `provision-lib.sh` les épingle pour
-      # toutes les machines du parc ; les réécrire ici en ferait une seconde autorité, et c'est
+      # ⚠ LES VERSIONS SE LISENT, ELLES NE SE RECOPIENT PAS. `provision-lib.sh` pose les planchers
+      # de toutes les machines du parc ; les réécrire ici en ferait une seconde autorité, et c'est
       # celle qu'on ne relit pas qui finit par diverger d'un `mix compile` qui passe ailleurs.
-      - name: Versions de la toolchain (depuis le provisionnement)
+      - name: Planchers de la toolchain (depuis le provisionnement)
         id: toolchain
         working-directory: .
         run: |
           set -eu
           lib=fleet/deploy/lib/provision-lib.sh
-          ex="$(sed -n 's/^: "${PROV_ELIXIR_VERSION:=\([^}]*\)}".*/\1/p' "$lib")"
+          # ⚠ CE SONT DES PLANCHERS, PLUS DES PINS, ET `setup-beam` SAIT LES LIRE. Le rail poste
+          # epinglait `PROV_ELIXIR_VERSION` (1.18.4) parce que l'apt de la distro d'alors servait
+          # 1.14 ; sur la cible (ubuntu 26.04) il sert 1.18.3, donc le pin est tombe et il ne reste
+          # que « au moins ». Une specification PARTIELLE (`1.18`, `27`) demande a l'action la
+          # derniere version de cette serie — ce qui est exactement ce que la distro fera de son
+          # cote, et ce qu'un pin exact ici empecherait de mesurer.
+          ex="$(sed -n 's/^: "${PROV_ELIXIR_MIN:=\([^}]*\)}".*/\1/p' "$lib")"
           otp="$(sed -n 's/^: "${PROV_ELIXIR_OTP_MAJOR:=\([^}]*\)}".*/\1/p' "$lib")"
-          [ -n "$ex" ] && [ -n "$otp" ] || { echo "versions illisibles dans $lib"; exit 1; }
+          [ -n "$ex" ] && [ -n "$otp" ] || { echo "planchers illisibles dans $lib"; exit 1; }
           echo "elixir=$ex" >> "$GITHUB_OUTPUT"
           echo "otp=$otp"   >> "$GITHUB_OUTPUT"
           echo "elixir=$ex otp=$otp"

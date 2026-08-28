@@ -112,7 +112,7 @@ Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seul
 `PROV_PREFIX` (/opt/lcars/runtime — le défaut d'etc/install.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
 `PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
-pins toolchain (`PROV_ELIXIR_*`).
+planchers toolchain (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN` — la distro sert, le rail vérifie).
 
 ## Modules (`modules.d/NN-*.sh`)
 

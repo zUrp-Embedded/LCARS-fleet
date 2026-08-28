@@ -51,9 +51,21 @@ setup() {
   # `/home/projects/LCARS` est le CHECKOUT, monte dans la boite par l'operateur
   # (`entrypoint.sh:226`, `LCARS_SOURCE_DIR`). LCARS le LIT ; il ne le pose pas, et un uninstall qui
   # y toucherait detruirait le depot de quelqu'un.
+  #
+  # ⚠ `/opt/elixir-` EST LA SIXIEME, ET ELLE N'EST PAS DE LA MEME NATURE QUE LES CINQ AUTRES : ce
+  # n'est pas un repertoire de l'OS, c'est un objet que le rail RETIRE. `15-toolchain` le nommait
+  # pour le POSER (precompile telecharge) ; il le nomme maintenant pour le DETRUIRE sur les postes
+  # qui l'ont encore — et ce mur, qui lit du code, ne distingue pas les deux (c'est son angle mort
+  # connu : le radical apparait, donc il reclame une declaration).
+  #
+  # LA TABLE DECLARE CE QU'ON POSE ; L'ABSENCE SE CONVERGE, ELLE NE SE DECLARE PAS. L'y remettre
+  # dirait « on a le droit de poser ca » d'un objet dont l'etat-cible est l'absence — exactement la
+  # faute corrigee sur `/etc/sudoers.d/lcars-toolchain`, qui n'echappe a ce mur que parce que son
+  # repertoire parent est exempte pour une TOUTE AUTRE raison. Le contrat d'absence est tenu par
+  # `toolchain_legacy.bats`, et par lui seul.
   EXEMPT="$BATS_TEST_TMPDIR/exempt"
   printf '%s\n' /usr/local/bin /etc/systemd/system /etc/sudoers.d /etc/tmpfiles.d \
-                /home/projects/LCARS > "$EXEMPT"
+                /home/projects/LCARS /opt/elixir- > "$EXEMPT"
 }
 
 # Les lignes de donnees du manifeste : ni commentaire, ni vide.
@@ -96,7 +108,11 @@ posed() {
   code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/opt/lcars/runtime|/etc/lcars|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
-          -e 's#/opt/elixir-[^ ]*#/opt/elixir-<version>#' \
+          `# ⚠ LA NORMALISATION D'ELIXIR EST PARTIE AVEC SON OBJET. Elle ramenait` \
+          `# \`/opt/elixir-$PROV_ELIXIR_VERSION\` sur le joker de la table ; le precompile pinne a` \
+          `# ete remplace par le paquet apt de la distro, donc plus aucun module ne nomme ce chemin.` \
+          `# Une normalisation qui survit a l'objet qu'elle normalise est un decor : elle fait croire` \
+          `# que la sonde couvre un cas que le code ne produit plus.` \
           -e 's#/opt/node-[^ ]*#/opt/node-<version>#' \
           `# le joker de l'humain s'ecrit <humain> dans la prose du code et <human> dans la table :` \
           `# deux orthographes pour UN meme fait. La table gagne — code et identifiants en anglais.` \

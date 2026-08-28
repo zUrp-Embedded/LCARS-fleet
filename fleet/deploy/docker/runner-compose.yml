@@ -110,7 +110,7 @@ services:
       #     doit la servir. `check_labels` la pré-tire → le `container:` du template tape le cache.
       #   `elixir` — le gate (.gitea/workflows/gate.yml). Le job tourne dans LA MÊME image que le
       #     stage build du Dockerfile : une seule vérité toolchain, trois rendus (15-toolchain WSL,
-      #     stage build, CI). Bump = les DEUX pins ensemble.
+      #     stage build, CI). Bump = le digest de la base, une seule fois.
       #     ⚠ C'est aussi ce qui rend le gate REPRODUCTIBLE : le runner hôte actuel exécute les jobs
       #     sous son propre compte système, donc la suite mesure l'environnement de ce compte et pas
       #     celui du dépôt — trois tests de sondes tombent pour cette seule raison.
@@ -118,19 +118,20 @@ services:
       #     parle au daemon de l'HÔTE par le socket monté ci-dessous. Docker-out-of-docker : le cache
       #     de layers de la machine est réutilisé, et l'image nommée doit être résoluble par CE daemon.
       #
-      # ⚠ CE DEFAUT NE SAIT PAS JOUER `mix gate`. L'image nommee pour `elixir` est l'image de BASE
-      # du stage build, pas le stage CONSTRUIT : elle porte Elixir et rien d'autre — ni git, ni
-      # tmux, ni bwrap, ni bats, ni python3, que le gate exige et que le Dockerfile installe
-      # justement dans ce stage (mesure du 2026-08-04 : `command -v git` vide dans l'image). Une
-      # couche trop tot, et c'est celle qui porte tout l'outillage. Le defaut reste celui-ci parce
-      # qu'un operateur quelconque ne peut pas resoudre une image locale de LCARS ; qui veut faire
-      # tourner LE gate sert le stage build de SON build :
+      # ⚠ CE DEFAUT NE SAIT PAS JOUER `mix gate`, ET IL EN SAIT MOINS QU'AVANT. L'image nommee pour
+      # `elixir` est l'image de BASE du stage build, pas le stage CONSTRUIT — et depuis que cette
+      # base est `ubuntu:26.04`, elle ne porte meme plus Elixir : le stage l'installe par apt, comme
+      # `15-toolchain` sur un poste. Elle n'a ni erlang, ni elixir, ni git, ni tmux, ni bwrap, ni
+      # bats, ni python3, que le gate exige. Le defaut reste celui-ci parce qu'un operateur
+      # quelconque ne peut pas resoudre une image locale de LCARS, et parce qu'un defaut qui echoue
+      # NET au premier `mix` vaut mieux qu'un defaut qui porte une toolchain PROCHE de la bonne :
+      # qui veut faire tourner LE gate sert le stage build de SON build :
       #   docker build --target build -t lcars-build:<tag> -f .../Dockerfile .
       #   LCARS_RUNNER_LABELS="shell:docker://alpine:3.20,elixir:docker://lcars-build:<tag>,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"
-      # ⚠ LE TAG SUIT `PROV_ELIXIR_*` DE `provision-lib.sh`, ET RIEN NE LE VERIFIE. Un runner qui
-      # sert une toolchain autre que celle du deploiement fait juger sur un OTP ce qui tourne sur un
-      # autre — un mensonge operationnel, pas un ecart de confort.
-      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://hexpm/elixir:1.18.4-erlang-25.3.2.8-debian-bookworm-20260610-slim,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
+      # ⚠ LE TAG SUIT LA BASE DU `Dockerfile`, ET RIEN NE LE VERIFIE. Un runner qui sert une
+      # toolchain autre que celle du deploiement fait juger sur un OTP ce qui tourne sur un autre —
+      # un mensonge operationnel, pas un ecart de confort.
+      GITEA_RUNNER_LABELS: "${LCARS_RUNNER_LABELS:-shell:docker://alpine:3.20,elixir:docker://ubuntu:26.04,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
       # Le daemon EMBARQUE, rootless : c'est lui que les jobs utilisent, plus celui de la machine.
       DOCKER_HOST: "unix:///var/run/user/1000/docker.sock"
       DOCKERD_ROOTLESS_ROOTLESSKIT_NET: "slirp4netns"

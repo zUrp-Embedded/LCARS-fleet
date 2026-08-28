@@ -166,7 +166,16 @@ dir       /etc/lcars                                   0755  root:root          
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
 # Versionnes dans leur nom : deux versions cohabitent sans se marcher dessus, et le `rm` de
 # l'ancienne est un geste separe et sur.
-dir       /opt/elixir-<version>                        0755  root:root           wsl+linux
+#
+# ⚠ ELIXIR N'EST PLUS ICI, ET C'EST UN OBJET DE MOINS SUR LA MACHINE, PAS UNE OMISSION.
+# `/opt/elixir-<version>` etait le depot du precompile pinne. Sur la cible — Ubuntu 26.04 — l'apt
+# sert `elixir 1.18.3`, au-dessus du plancher `mix.exs` : `15-toolchain` le demande a apt, et un
+# paquet apt n'est pas un objet de cette table (les paquets ont leur propre classe, et leur propre
+# journal). Partent avec lui les quatre symlinks `/usr/local/bin/{elixir,elixirc,iex,mix}` plus bas.
+# NODE RESTE, et pour la raison exacte qui a fait tomber Elixir, prise a l'envers : `16-node` pin
+# `20.20.2`, l'apt de 26.04 sert `22.22` — un saut de MAJEURE, qui est un changement de spec et pas
+# de l'entretien. Le jour ou ce pin descend dans l'apt, cette ligne suit, et `expand_version` perd
+# son dernier client.
 dir       /opt/node-<version>                          0755  root:root           wsl+linux
 
 # ─── ANCRES — fichiers a chemin fixe hors prefixe ───────────────────────────────────────────────
@@ -236,10 +245,6 @@ link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  
 
 link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
 link      /usr/local/bin/lcars                         -     -                   wsl+linux
-link      /usr/local/bin/elixir                        -     -                   wsl+linux
-link      /usr/local/bin/elixirc                       -     -                   wsl+linux
-link      /usr/local/bin/iex                           -     -                   wsl+linux
-link      /usr/local/bin/mix                           -     -                   wsl+linux
 link      /usr/local/bin/node                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
 link      /usr/local/bin/npx                           -     -                   wsl+linux

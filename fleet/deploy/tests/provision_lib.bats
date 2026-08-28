@@ -807,47 +807,79 @@ module_sh() {
   [[ "$output" == *"FAIL"* ]]
 }
 
-# ─── LE PIN ELIXIR/OTP EST UN MIROIR, ET IL N'AVAIT AUCUN GARDIEN ───────────────────────────────
+# ─── LA TOOLCHAIN N'EST PLUS UN MIROIR : ELLE EST UN SEUL OBJET, ET C'EST LUI QU'ON GARDE ───────
 #
-# ⚠ DEUX RAILS, DEUX MECANISMES, UNE SEULE VERSION — mais rien ne le VERIFIAIT pour Elixir.
+# ⚠ CE QUI VIVAIT ICI, ET POURQUOI CE N'EST PLUS CE QU'IL FAUT SURVEILLER. Deux rails posaient la
+# meme toolchain par deux mecanismes, avec deux versions ecrites a deux endroits :
 #
 #   rail poste   `provision-lib.sh` : PROV_ELIXIR_VERSION + PROV_ELIXIR_OTP_MAJOR, zip verifie sha256
 #   rail boite   `Dockerfile`       : ARG BUILD_IMAGE=hexpm/elixir:<ver>-erlang-<otp>...@sha256:...
 #
-# Le Dockerfile ecrit « les deux bougent ENSEMBLE ». C'etait une convention de PROCESSUS : aucune
-# machine ne la lisait. Le pin tofu, lui, a son mur depuis toujours (`tofu_tool.bats`) — celui-ci
-# est ecrit sur le meme patron, et son absence etait un trou par symetrie manquante.
+# Ce temoin comparait les deux chiffres. Il etait juste, et il a tenu — mais surveiller l'accord de
+# deux autorites est le second choix : les DEUX rails demandent maintenant `erlang` et `elixir` a
+# l'apt de la MEME image de base (ubuntu 26.04, la cible du rail poste). Il n'y a plus deux versions
+# a accorder ; il y a une base, et deux planchers qui la jugent.
 #
-# CE QUE CA COUTERAIT : un bump du zip Elixir sans bump de l'image (ou l'inverse) donne un poste et
-# une boite qui compilent la MEME release avec deux compilateurs differents. Les artefacts BEAM sont
-# sensibles a la version d'OTP — c'est exactement la panne mesuree le 2026-08-22 (« un hote 26.04 a
-# servi OTP 27 sous un plancher 25 »), transposee d'un rail a l'autre.
-@test "le pin Elixir/OTP de la lib est IDENTIQUE a celui du Dockerfile" {
+# CE QUI EST GARDE ICI EST DONC LE FAIT QUI A REMPLACE LE MIROIR, EN TROIS MURS :
+#   1. la lib ne porte plus de pin EXACT — un cliquet, parce qu'un pin qui revient rouvre la
+#      divergence sans qu'aucune ligne ne dise qu'elle est rouverte ;
+#   2. les deux etages du Dockerfile portent la MEME image de base, digest compris — c'est ce qui
+#      fait que l'ERTS bundle au build est chez lui au runtime, et que la toolchain de compilation
+#      EST celle de la machine cible ;
+#   3. les deux rails demandent la paire a apt, chacun dans son fichier.
+#
+# ⚠ CE QUI N'EST PAS VERIFIABLE ICI, ET QUI NE DOIT PAS ETRE DEDUIT : l'OTP que cet apt SERT. Un
+# mur statique lit des noms de paquets, pas le contenu d'un depot. Le plancher est tenu a
+# l'execution par `15-toolchain` (`check` le sonde, `apply` echoue en le nommant), et c'est le seul
+# endroit qui puisse le savoir.
+@test "la lib ne porte plus de pin EXACT de toolchain — le cliquet du retour au zip" {
+  # ⚠ GARDE D'INSTRUMENT INVERSEE. Un temoin d'ABSENCE est vert quand son sujet a disparu — donc
+  # aussi quand le FICHIER a disparu, ou que le chemin est faux. On prouve d'abord qu'on lit bien
+  # la lib, par un defaut qui doit y etre.
+  [ -f "$LIB" ]
+  grep -qE '^: "\$\{PROV_ELIXIR_OTP_MAJOR:=[0-9]+\}"' "$LIB" \
+    || { echo "extraction ratee : PROV_ELIXIR_OTP_MAJOR introuvable dans $LIB — ce temoin ne lit pas ce qu'il croit"; return 1; }
+
+  ! grep -qE '^: "\$\{PROV_ELIXIR_VERSION:=' "$LIB" \
+    || { echo "PROV_ELIXIR_VERSION est revenu dans $LIB : un pin exact en face d'une distro qui sert sa propre version"; return 1; }
+  ! grep -qE '^: "\$\{PROV_ELIXIR_ZIP_SHA256:=' "$LIB" \
+    || { echo "PROV_ELIXIR_ZIP_SHA256 est revenu dans $LIB : le precompile telecharge est de retour"; return 1; }
+  grep -qE '^: "\$\{PROV_ELIXIR_MIN:=[0-9]+\.[0-9]+\}"' "$LIB" \
+    || { echo "PROV_ELIXIR_MIN absent de $LIB : plus rien ne dit quel Elixir la distro doit au moins servir"; return 1; }
+}
+
+@test "les deux etages de l'image partent de la MEME base, digest compris" {
   local dockerfile="$BATS_TEST_DIRNAME/../docker/Dockerfile"
   [ -f "$dockerfile" ]
 
-  # La lib : les deux defauts, lus a la source (`: "${VAR:=valeur}"`).
-  local v_lib otp_lib
-  v_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_VERSION:=[0-9.]+' "$LIB" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
-  otp_lib="$(grep -oE '^: "\$\{PROV_ELIXIR_OTP_MAJOR:=[0-9]+' "$LIB" | grep -oE '[0-9]+$')"
+  local build runtime
+  build="$(sed -n 's/^ARG BUILD_IMAGE=//p' "$dockerfile")"
+  runtime="$(sed -n 's/^ARG RUNTIME_IMAGE=//p' "$dockerfile")"
 
-  # Le Dockerfile : la balise de l'image de build porte les deux, `<ver>-erlang-<otp>.<...>`.
-  local tag v_docker otp_docker
-  tag="$(grep -oE '^ARG BUILD_IMAGE=hexpm/elixir:[0-9.]+-erlang-[0-9.]+' "$dockerfile")"
-  v_docker="$(grep -oE 'elixir:[0-9.]+' <<<"$tag" | cut -d: -f2)"
-  otp_docker="$(grep -oE 'erlang-[0-9]+' <<<"$tag" | cut -d- -f2)"
+  # ⚠ GARDE D'INSTRUMENT : deux extractions ratees rendent deux chaines VIDES, donc EGALES. Un mur
+  # qui compare du vide a du vide est vert sur n'importe quelle derive.
+  [ -n "$build" ]   || { echo "extraction ratee : ARG BUILD_IMAGE dans $dockerfile"; return 1; }
+  [ -n "$runtime" ] || { echo "extraction ratee : ARG RUNTIME_IMAGE dans $dockerfile"; return 1; }
 
-  # ⚠ GARDE D'INSTRUMENT : quatre extractions, et une seule qui rate rendrait deux chaines VIDES
-  # donc EGALES. Un mur qui compare du vide a du vide est vert sur n'importe quelle derive.
-  [ -n "$v_lib" ]    || { echo "extraction ratee : PROV_ELIXIR_VERSION dans $LIB"; return 1; }
-  [ -n "$otp_lib" ]  || { echo "extraction ratee : PROV_ELIXIR_OTP_MAJOR dans $LIB"; return 1; }
-  [ -n "$v_docker" ] || { echo "extraction ratee : ARG BUILD_IMAGE dans $dockerfile"; return 1; }
-  [ -n "$otp_docker" ] || { echo "extraction ratee : erlang-<otp> dans $dockerfile"; return 1; }
+  [ "$build" = "$runtime" ] \
+    || { echo "les deux etages divergent — build « $build », runtime « $runtime ». L'ERTS bundle au build n'est chez lui au runtime que si la base est la meme."; return 1; }
 
-  [ "$v_lib" = "$v_docker" ] \
-    || { echo "Elixir : lib $v_lib, Dockerfile $v_docker"; return 1; }
-  [ "$otp_lib" = "$otp_docker" ] \
-    || { echo "OTP majeur : lib $otp_lib, Dockerfile $otp_docker"; return 1; }
+  # Et cette base EST la cible du rail poste, pas une distro tierce.
+  [[ "$build" == ubuntu:* ]] \
+    || { echo "base « $build » : le rail poste cible ubuntu, l'image doit batir dessus"; return 1; }
+  [[ "$build" == *@sha256:* ]] \
+    || { echo "base « $build » sans digest : l'immutabilite ne se declare pas, elle s'epingle"; return 1; }
+}
+
+@test "les deux rails demandent erlang ET elixir a apt — un mecanisme, deux fichiers" {
+  local dockerfile="$BATS_TEST_DIRNAME/../docker/Dockerfile"
+  local mod="$BATS_TEST_DIRNAME/../modules.d/15-toolchain.sh"
+  [ -f "$dockerfile" ] && [ -f "$mod" ]
+
+  grep -qE '^\s+erlang elixir \\?$' "$dockerfile" \
+    || { echo "l'etage build du Dockerfile ne demande plus « erlang elixir » a apt"; return 1; }
+  grep -qE 'apt_ensure erlang elixir' "$mod" \
+    || { echo "15-toolchain ne demande plus « erlang elixir » a apt"; return 1; }
 }
 
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {

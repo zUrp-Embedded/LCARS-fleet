@@ -30,11 +30,16 @@
 # qui n'a de sens que dans un conteneur. `CHECK-ON: any` et `APPLY-ON` sans docker : le doctor sonde
 # les deux rails, seul le rail poste a quelque chose à poser.
 #
-# ⚠ `ttyd` N'EST PAS DANS `10-packages`, ET C'EST DÉLIBÉRÉ. Cette liste-là est celle des paquets que
-# les DEUX rails obtiennent par apt ; `ttyd` n'est pas empaqueté par Debian (l'image le récupère en
-# binaire statique épinglé par sha256), il l'est par Ubuntu — mesuré le 2026-08-21 sur Launchpad :
-# `ttyd 1.7.7-4build1`, `universe`, la version exacte que le Dockerfile épingle. Deux mécanismes pour
-# un même outil, donc deux sites : les mélanger ferait mentir le témoin d'égalité des deux rails.
+# ⚠ `ttyd` EST ENTRÉ DANS `10-packages`, ET CE MODULE A CESSÉ DE LE POSER. La raison de l'exception
+# était écrite ici : « `ttyd` n'est pas empaqueté par Debian (l'image le récupère en binaire statique
+# épinglé par sha256), il l'est par Ubuntu — `ttyd 1.7.7-4build1`, `universe`, la version exacte que
+# le Dockerfile épingle. Deux mécanismes pour un même outil, donc deux sites. » Le second mécanisme
+# est parti avec bookworm : l'image bâtit sur Ubuntu 26.04 et demande le paquet. Un seul mécanisme,
+# un seul site, et le témoin d'égalité des deux rails le couvre enfin.
+#
+# CE QUI RESTE ICI EST LA SONDE, ET ELLE N'A PAS BOUGÉ D'UN MOT. Poser et constater sont deux
+# métiers : `10-packages` pose, ce module DIT ce que vaut la console si le binaire manque — une
+# socket sans serveur derrière, donc une page noire. La sonde survit à son poseur, c'est le point.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -304,11 +309,15 @@ apply() {
     p_warn "RETOUR EN ARRIÈRE : $HELPERS_DIR sort de $posed, cet arbre est $src, qui en est un ANCÊTRE — ce qui suit REMPLACE du code par du code plus ancien (convergeur d'humains compris). Si ce n'est pas voulu : git pull, puis relance"
   fi
 
-  # ttyd : APT, et rien d'autre. Ubuntu le livre en 1.7.7, la version que l'image épingle.
+  # ttyd : POSÉ PAR `10-packages`, CONSTATÉ ICI. L'`apt_ensure` qui vivait sur cette ligne était le
+  # second poseur d'un paquet qui a maintenant sa place dans la liste des deux rails ; un module qui
+  # rattrape ce qu'un autre pose plus tôt masque l'ordre au lieu de le tenir. Si le paquet manque,
+  # c'est `10-packages` qui a échoué, et c'est là qu'il faut regarder — ce message le dit.
   if command -v "$TTYD_BIN" >/dev/null; then
     p_ok "ttyd présent ($("$TTYD_BIN" --version 2>&1 | head -1))"
   else
-    apt_ensure ttyd || { p_fail "ttyd introuvable par apt — le dépôt « universe » est-il activé ? (sans lui, la console web n'a aucun serveur)"; verdict_apply; }
+    p_fail "ttyd absent — la console web n'aura AUCUN serveur derrière sa socket (page noire). Il est dans \`PACKAGES\` (10-packages) : ce module-là a-t-il convergé, et le dépôt « universe » est-il activé ?"
+    verdict_apply
   fi
 
   local -a own; mapfile -t own < <(owner_args)

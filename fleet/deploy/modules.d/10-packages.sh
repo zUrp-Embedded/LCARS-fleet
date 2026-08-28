@@ -99,6 +99,17 @@ PACKAGES=(
   # `less` et `bash-completion` sont du confort de shell, et ils sont dans l'image : les garder
   # alignés coûte deux mots et évite deux consoles qui ne se comportent pas pareil.
   util-linux-extra sudo less bash-completion
+  # ─── LA CONSOLE WEB, ET ELLE ENTRE ICI PARCE QUE LES DEUX RAILS L'OBTIENNENT ENFIN PAREIL ────
+  # ⚠ `ttyd` ÉTAIT HORS DE CETTE LISTE, ET LA RAISON ÉCRITE EN FACE A CESSÉ D'ÊTRE VRAIE.
+  # `62-runtime-helpers` disait : « `ttyd` n'est pas empaqueté par Debian (l'image le récupère en
+  # binaire statique pinné par sha256) ; Ubuntu 26.04 sert `ttyd 1.7.7-4build1`, `universe`, la
+  # version exacte que le Dockerfile épingle. Deux mécanismes pour un même fait. » Le second
+  # mécanisme est parti avec bookworm : l'image bâtit sur Ubuntu 26.04 et demande le paquet, comme
+  # ici. Un fait, un mécanisme, une liste — et `deploy_manifest.bats` peut enfin l'exiger des deux
+  # rails, ce qu'il ne pouvait pas faire d'un binaire téléchargé.
+  # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
+  # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.
+  ttyd
 )
 
 # ─── CE QUE SEUL LE LINUX NATIF DOIT SE FAIRE POSER ─────────────────────────────────────────────

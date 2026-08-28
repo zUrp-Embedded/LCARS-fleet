@@ -216,6 +216,10 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   # MESURE : `/opt/elixir-1.18.4` et `/opt/node-20.20.2` survivent a `uninstall --yes` — 6 148
   # fichiers. `provision` ne substituait que `<human>` ; `dir /opt/…-<version>` arrivait LITTERAL,
   # `[[ -d ]]` rendait faux, et l'arbre restait pendant que ses symlinks partaient.
+  # ⚠ LE JOKER N'A PLUS QU'UN CLIENT, ET LE TEMOIN N'EN DEPEND PAS. Elixir vient de l'apt de la
+  # distro depuis que la cible sert 1.18.3 : `/opt/elixir-<version>` a quitte la table, `node` y
+  # reste seul. Ce temoin monte son propre `truc-<version>` — il mesure la SUBSTITUTION, pas
+  # l'inventaire, et il tiendra encore le jour ou le dernier joker de la table disparaitra.
   mkdir -p "$FAKE/opt/truc-9.9.9"
   printf 'dir       %s/opt/truc-<version>  0755 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
   plan
