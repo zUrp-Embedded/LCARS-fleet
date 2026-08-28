@@ -152,7 +152,11 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   grep -q 'sort -rn' <<<"$body"
   local n_files n_dirs n_groups
-  n_files="$(grep -n 'for o in "\${files\[@\]}"' <<<"$body" | cut -d: -f1)"
+  # ⚠ LE MOTIF NE COLLE PLUS AU DEBUT DE LA BOUCLE, ET C'EST VOULU. Elle itere desormais DEUX
+  # sources — le depot apt du journal, puis les fichiers de la table — donc `for o in "${files[@]}"`
+  # n'est plus en tete de ligne. On accroche `${files[@]}` la ou il est : ce qui est mesure ici est
+  # l'ORDRE des trois boucles, pas la forme de l'une d'elles.
+  n_files="$(grep -n 'for o in .*\${files\[@\]}' <<<"$body" | cut -d: -f1)"
   n_dirs="$(grep -n 'for o in "\${dirs\[@\]}"' <<<"$body" | cut -d: -f1)"
   n_groups="$(grep -n 'for o in "\${groups\[@\]}"' <<<"$body" | cut -d: -f1)"
   [ "$n_files" -lt "$n_dirs" ]
@@ -338,6 +342,55 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [[ "$output" == *"lcars-essai-runner"* ]]
 }
 
+# ─── LE DEPOT APT POSE SOUS CONDITION, ET POURQUOI LUI AUSSI VIT DANS LE JOURNAL ────────────────
+#
+# ⚠ CES DEUX OBJETS AVAIENT PERDU TOUT CONTRAT DE SORTIE, ET L'ETAT ETAIT PIRE QUE L'ORIGINAL.
+# `10-packages` pose `/etc/apt/sources.list.d/docker.list` et sa cle SI le substrat est `linux` et
+# qu'aucun daemon docker ne repond. Ils ont ete DECLARES dans `system.manifest`, puis retires — parce
+# qu'une ligne statique aurait autorise un `uninstall` a detruire le depot d'un operateur qui l'avait
+# deja. Correct pour la question posee ; sauf que l'absence de declaration les a rendus
+# indestructibles la ou LCARS les avait bel et bien poses.
+#
+# LE JOURNAL EST LA SEULE SOURCE QUI CONNAISSE LA CONDITION. Il ne dit pas ce qu'on a le DROIT de
+# poser — c'est le metier de la table — mais ce que CETTE passe A pose sur CETTE machine.
+
+@test "DEPOT APT : le plan lit la paire dans le JOURNAL, jamais dans la table" {
+  printf 'posed_apt_repo /etc/apt/sources.list.d/essai.list /etc/apt/keyrings/essai.asc
+' >> "$LCARS_JOURNAL_FILE"
+  plan
+  [[ "$output" == *"essai.list"* ]]
+  [[ "$output" == *"essai.asc"* ]]
+}
+
+@test "DEPOT APT : sans journal, RIEN n'est planifie — le depot d'un tiers n'est pas a nous" {
+  # ⚠ C'EST LA MOITIE QUI COMPTE. Un operateur qui avait deja le depot docker n'a aucune ligne
+  # `posed_apt_repo` dans son journal : le plan ne doit rien nommer, et surtout rien retirer.
+  # On COMPTE, on ne cherche pas un nom : `refute_out` sur un nom absent est vert a vide.
+  local avant apres
+  plan; avant="$(grep -c 'essai' <<<"$output" || true)"
+  [ "$avant" -eq 0 ] || { echo "un depot est planifie sans journal :"; echo "$output"; return 1; }
+  printf 'posed_apt_repo /etc/apt/sources.list.d/essai.list\n' >> "$LCARS_JOURNAL_FILE"
+  plan; apres="$(grep -c 'essai' <<<"$output" || true)"
+  [ "$apres" -gt 0 ] || { echo "le journal revendique la paire et le plan l'ignore"; return 1; }
+}
+
+@test "DEPOT APT : aucun chemin de depot n'est ecrit dans le code" {
+  # Meme regle que pour docker : recopier `/etc/apt/sources.list.d/docker.list` ici ferait un second
+  # inventaire, et celui qui derive est toujours celui qu'on ne relit pas.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  refute grep -qE 'sources\.list\.d|apt/keyrings' <<<"$body"
+  grep -q 'posed_apt_repo' <<<"$body"
+
+  # ⚠ NOMMER AU PLAN N'EST PAS RETIRER, ET LA PREMIERE VERSION DE CES TEMOINS S'ARRETAIT LA.
+  # Mutation jouee le 2026-08-29 : la boucle de retrait ramenee a `for o in "${files[@]}"` — le plan
+  # continuait de nommer la paire, les trois temoins restaient VERTS, et plus rien ne la retirait.
+  # Un plan qui annonce ce qu'il ne fait pas est pire qu'un plan muet : il atteste.
+  # Le retrait lui-meme exige root et `--yes` ; ce qui se mesure ici est que la boucle ITERE bien
+  # les deux sources.
+  grep -qE 'for o in .*apt_repo_files\[@\].*\$\{files\[@\]\}' <<<"$body" \
+    || { echo "la boucle de retrait n'itere plus le depot du journal — il serait annonce au plan et laisse sur la machine"; return 1; }
+}
+
 @test "DOCKER : aucun nom de projet n'est ecrit dans le code" {
   # La regression exacte : recopier `lcars-forge` ici ferait un second inventaire, et celui qui
   # derive est toujours celui qu'on ne relit pas.
@@ -425,7 +478,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   local n_stop n_rm n_userdel
   n_stop="$(grep -n 'systemctl disable --now' <<<"$body" | head -1 | cut -d: -f1)"
-  n_rm="$(grep -n 'for o in "\${files\[@\]}"' <<<"$body" | head -1 | cut -d: -f1)"
+  n_rm="$(grep -n 'for o in .*\${files\[@\]}' <<<"$body" | head -1 | cut -d: -f1)"
   n_userdel="$(grep -n 'userdel "\$o"' <<<"$body" | head -1 | cut -d: -f1)"
   [ -n "$n_stop" ]
   [ "$n_stop" -lt "$n_rm" ]        # avant le retrait des fichiers
