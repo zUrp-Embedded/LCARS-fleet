@@ -62,9 +62,9 @@ HOME_DIR="$HOME"
 check_path() {
     local path="$1"
     # /local/LCARS* — always protected. The glob covers BOTH generations: v1 (/local/LCARS) and the
-    # v2 install (/local/LCARS_v2), which is the one actually running today. Naming only v1 left the
+    # v2 install (/opt/lcars/runtime), which is the one actually running today. Naming only v1 left the
     # LIVE runtime unguarded — the guard protected the retired artifact and not the deployed one.
-    if [[ "$path" == /local/LCARS/* || "$path" == /local/LCARS || "$path" == /local/LCARS_v2/* || "$path" == /local/LCARS_v2 ]]; then
+    if [[ "$path" == /local/LCARS/* || "$path" == /local/LCARS || "$path" == /opt/lcars/runtime/* || "$path" == /opt/lcars/runtime ]]; then
         return 0
     fi
     # ~/.claude/ — protected
@@ -93,7 +93,7 @@ case "$TOOL" in
             # Patterns: sed -i, tee, >, >>, cp, mv targeting protected dirs
             PROTECTED_PATTERNS=(
                 "/local/LCARS/"
-                "/local/LCARS_v2/"
+                "/opt/lcars/runtime/"
                 "$HOME_DIR/.claude/"
                 "$HOME_DIR/.local/bin/"
             )

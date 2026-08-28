@@ -352,7 +352,7 @@ _load_box_env() {
 
 # Le binaire de release — un seul defaut, pose ici. L'appelant decide ce qu'il fait de son absence :
 # `catalogue list` la rend en 127 pour la dire, les autres portes meurent dessus.
-_release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"; }
+_release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"; }
 
 # ─── LE JETON DE FORGE NE SE LIT PLUS, IL SE DEMANDE ────────────────────────────────────────────
 #
@@ -451,7 +451,10 @@ cmd_catalogue_list() {
 # hors boite il n'existe pas, et on le DIT au lieu de deviner une commande de repli.
 cat_verify_root() {
   local root="$1"
-  local bin="${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  # ⚠ `_release_bin`, PAS UN SECOND DEFAUT. Cette ligne en portait un — alors que le commentaire
+  # de `_release_bin` dit « un seul defaut, pose ici ». Le commentaire mentait, et c'est la forme la
+  # plus chere : il decourageait precisement la verification qui l'aurait dementi.
+  local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "catalogue verify: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN, ou lancer « mix lcars.catalogue.verify $root » depuis le depot"
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Application.CatalogueVerify.eval_main(\"$root\")"

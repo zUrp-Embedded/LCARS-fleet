@@ -71,7 +71,7 @@
 # `apt_already` — et il est genere par machine, pas declare ici.
 
 # ─── LA RACINE ──────────────────────────────────────────────────────────────────────────────────
-prefix    /local/LCARS_v2                              0750  root:fleet          wsl+linux
+prefix    /opt/lcars/runtime                              0750  root:fleet          wsl+linux
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
 dir       /opt/lcars                                   0755  root:root           wsl+linux

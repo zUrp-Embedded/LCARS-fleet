@@ -106,7 +106,7 @@ setup() {
 }
 
 @test "hors WSL : aucune question — une seule option est permise, et on le DIT" {
-  # Le rail poste ecrit /local et /opt/lcars/var/tokens : le garde de cible du provisionnement l'interdit
+  # Le rail poste ecrit sous /opt/lcars : le garde de cible du provisionnement l'interdit
   # hors WSL. Poser la question la-bas offrirait un choix qui n'existe pas.
   run env LCARS_DOCKER=1 bash "$SRC" --box < /dev/null
   [[ "$output" == *"une seule option"* ]] || [[ "$output" != *"1 ou 2"* ]]

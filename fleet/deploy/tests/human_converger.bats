@@ -536,7 +536,8 @@ EOF
   lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
-    declared="$(bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\${$prov}\"")"
+    # Meme garde qu'ailleurs : `env -i` pour lire le DEFAUT et pas une surcharge de temoin.
+    declared="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\${$prov}\"")"
     used="$(bash -c "source '$SUT' 2>/dev/null; printf '%s' \"\${$local_var}\"")"
     [ -n "$declared" ]
     [ "$declared" = "$used" ] || {

@@ -43,6 +43,11 @@ set -euo pipefail
 #
 # Un appelant deja non-root n'a RIEN a abaisser : il est deja depourvu. On ne simule donc pas
 # `nobody` — on constate qu'il n'y a plus rien a retirer, et on execute en place.
+# Le binaire de release — un seul defaut pour les quatre portes `catalogue-*` ci-dessous, qui le
+# lancaient chacune en litteral. Le prefixe d'install est declare par `etc/install.sh` ; ce defaut
+# doit s'accorder avec lui, et `deploy/tests/racine_prefixe.bats` l'exige.
+RELEASE_BIN="${LCARS_RELEASE_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"
+
 drop_priv() { # drop_priv <cmd...>
   if [[ "$(id -u)" -eq 0 ]]; then
     exec setpriv --reuid 65534 --regid 2000 --clear-groups "$@"
@@ -67,7 +72,7 @@ if [[ "${1:-}" == "verify" ]]; then
   # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "$RELEASE_BIN" eval \
     "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
 fi
 
@@ -101,7 +106,7 @@ if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
   if [[ -n "$root" ]]; then arg="\"${root}\""; else arg="Fleet.Catalogue.root()"; fi
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "$RELEASE_BIN" eval \
     "${fun}(${arg})"
 fi
 
@@ -121,7 +126,7 @@ fi
 if [[ "${1:-}" == "catalogue-root" ]]; then
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "$RELEASE_BIN" eval \
     'IO.puts(Fleet.Catalogue.root())'
 fi
 
@@ -174,7 +179,7 @@ if [[ "${1:-}" == "catalogue-source" ]]; then
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
     FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
     FORGE_TOKEN="${FORGE_TOKEN:-}" \
-    /local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet eval \
+    "$RELEASE_BIN" eval \
     "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
 fi
 

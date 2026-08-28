@@ -71,7 +71,7 @@ command -v python3 >/dev/null || { echo "console-landing.sh: python3 absent de l
 # `/run/lcars/console/<human>/`. C'est STRICTEMENT MOINS que ce qu'il a deja — il lit
 # `/etc/lcars/deck-oidc.json`, qui porte le secret OIDC.
 #
-# ⚠ SURTOUT PAS le groupe `fleet` (gid 2000) : il porte deja la lecture de `/local/LCARS_v2` et
+# ⚠ SURTOUT PAS le groupe `fleet` (gid 2000) : il porte deja la lecture de `/opt/lcars/runtime` et
 # d'ailleurs. Le reutiliser aurait ete plus rapide et aurait accorde tout le reste par la meme
 # occasion.
 #

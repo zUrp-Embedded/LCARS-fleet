@@ -33,7 +33,10 @@ setup() {
   # Elle a rendu les SIX temoins rouges le jour ou la lib s'est mise a DERIVER (`$PROV_ROOT/var/…`)
   # — l'extraction rendait le texte non developpe. Un instrument qui lit une valeur doit la faire
   # calculer par celui qui la definit, sinon il mesure une syntaxe et pas un chemin.
-  ATTENDU="$(bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  # ⚠ `env -i` : on resout le DEFAUT, pas la surcharge de l'appelant. Un `setup()` qui exporte
+  # cette variable — plusieurs le font — la rendrait telle quelle, et le mur mesurerait le
+  # temoin au lieu de la SSoT. Le motif complet est dans `deploy_manifest.bats`.
+  ATTENDU="$(env -i PATH="$PATH" bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
 }
 
 # Rend la racine que porte un defaut, quel que soit le langage.

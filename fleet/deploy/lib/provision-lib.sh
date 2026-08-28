@@ -60,10 +60,13 @@ PROVISION_LIB_LOADED=1
 #
 # `/opt/lcars` et pas autre chose : c'est deja le mot du runtime (`Fleet.Layout.@platform_root`) et
 # la seule racine que la norme reserve a un paquet applicatif autonome. Le rail poste avait invente
-# un SECOND prefixe (`/local/LCARS_v2`) ; c'est lui qui rejoindra celui-ci, pas l'inverse.
+# un SECOND prefixe (`/opt/lcars/runtime`) ; c'est lui qui rejoindra celui-ci, pas l'inverse.
 : "${PROV_ROOT:=/opt/lcars}"
 
-: "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
+# ⚠ QUATRIEME RACINE FERMEE. `/opt/lcars/runtime` etait une racine de premier niveau pour l'install RO
+# du runtime. Elle descend sous la racine unique. Deux SSoT la nomment — celle-ci VERIFIE, celle
+# d'`etc/install.sh` POSE — et `racine_prefixe.bats` exige qu'elles s'accordent : rien ne le faisait.
+: "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 # Le compte du service d'autorite : il DETIENT les secrets de forge et n'a AUCUN privilege
@@ -91,7 +94,7 @@ PROVISION_LIB_LOADED=1
 # heriter ce groupe a la socket, et le `--x` du groupe donne la traversee sans le listage.
 #
 # ⚠ SURTOUT PAS `$PROV_FLEET_GROUP`, ET C'EST LE PIEGE QUI A MORDU. Celui-la porte deja la lecture
-# de `/local/LCARS_v2`, des role-tokens et de `/opt/lcars/var/tokens` : le reutiliser ici serait plus court
+# de `/opt/lcars/runtime`, des role-tokens et de `/opt/lcars/var/tokens` : le reutiliser ici serait plus court
 # et accorderait tout le reste par la meme occasion. L'image le dit deja dans son Dockerfile — « un
 # pouvoir qu'on ne sait pas dire en une phrase est trop large » — et le rail poste, lui, cablait
 # `fleet`. Mesure du 2026-08-21 : `/run/lcars/console/lcars` en `lcars:fleet`, deck sous
@@ -1522,7 +1525,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 
 prov_roles() {
   local out="$PROV_ROLES" root
-  local bin="${PROV_RELEASE_BIN:-/local/LCARS_v2/rel/lcars_fleet/bin/lcars_fleet}"
+  local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
   local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
 
   # ⚠ `roles-tfvars` ET NON `roles`, ET LES DEUX PORTES NE RENDENT PAS LA MEME CHOSE. `roles` rend

@@ -19,7 +19,7 @@
 #
 #       --workstation   LCARS s'installe DANS ce système (WSL2 seulement).
 #                       Modèle 3 zones : SOURCE (ce checkout) → INSTALL
-#                       (/local/LCARS_v2, RO) → STATE (~/.lcars per-humain).
+#                       (/opt/lcars/runtime, RO) → STATE (~/.lcars per-humain).
 #       --box           LCARS tourne dans un conteneur. Rien hors de ton
 #                       clone et de docker.
 #       --bench         fournit les annexes (forge jetable + runner CI) au
@@ -297,7 +297,7 @@ if [[ -z "$RAIL" ]]; then
     RAIL=box
     echo ""
     echo "  ${W}Linux natif${N} — une seule option est permise ici : la boîte."
-    echo "  (le rail poste écrit dans /etc, /local et /opt/lcars : il est réservé à WSL,"
+    echo "  (le rail poste écrit dans /etc, /opt/lcars : il est réservé à WSL,"
     echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
   else
     # Les deux sont possibles. On demande, et la question dit ce que chaque branche PREND —
@@ -311,10 +311,10 @@ if [[ -z "$RAIL" ]]; then
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /local et /opt/lcars · la convergence ajoute et ne retire pas."
+     /opt/lcars · la convergence ajoute et ne retire pas."
     else
       _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
-      _prend="sudo · un groupe système · /local et /opt/lcars · des paquets ·
+      _prend="sudo · un groupe système · /opt/lcars · des paquets ·
      la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
     # DOCKER_OK=0 ici signifie : le préflight a laissé passer parce que le rail POSTE peut poser
@@ -533,7 +533,7 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo "    sudo … bash $0 --workstation --fleet-human <nom>"
     fi
   fi
-  _banner_body=("  sudo · paquets · groupe fleet · /local · /opt/lcars")
+  _banner_body=("  sudo · paquets · groupe fleet · /opt/lcars")
   if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
   _banner_body+=(
     "  ${R}Mode dev : la convergence AJOUTE, elle ne retire pas.${N}"

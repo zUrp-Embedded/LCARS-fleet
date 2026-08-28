@@ -31,9 +31,9 @@ mobile). Détail config : `etc/fleet_v2.env.template`.
   Un dashboard web « start fleet » (futur) est une surface alternative, pas une dépendance.
   Pas de systemd-in-docker (pas de boîte dans la boîte). La forge tourne dans son conteneur à côté.
 
-## Install canonique & deploy — `/local/LCARS_v2` (SSoT, ne pas re-dériver)
+## Install canonique & deploy — `/opt/lcars/runtime` (SSoT, ne pas re-dériver)
 
-**UNE install partagée multi-humains** : `/local/LCARS_v2/` (LCARS = le projet ; `fleet_*` = l'applicatif ;
+**UNE install partagée multi-humains** : `/opt/lcars/runtime/` (LCARS = le projet ; `fleet_*` = l'applicatif ;
 le `_v2` est provisoire, reste du dev v1→v2). Elle contient **rel/ ET bin/ co-localisés** — les launchers
 sont lus depuis `$BIN_DIR` de l'install (`bin/fleet_v2` exporte `LCARS_*_LAUNCH_PATH=$BIN_DIR/...`) :
 **ZÉRO copie de launcher dans `/usr/local/bin`** (les copies éparpillées de juin ont divergé 3 semaines —
@@ -41,8 +41,8 @@ cicatrice 2026-07-18 : deux installs parallèles, deux fleets sur des builds à 
 d'alerté). Seuls les **symlinks PATH** vivent dans `/usr/local/bin` :
 
 ```bash
-/usr/local/bin/fleet_v2 -> /local/LCARS_v2/bin/fleet_v2
-/usr/local/bin/lcars    -> /local/LCARS_v2/bin/lcars
+/usr/local/bin/fleet_v2 -> /opt/lcars/runtime/bin/fleet_v2
+/usr/local/bin/lcars    -> /opt/lcars/runtime/bin/lcars
 ```
 
 Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c'est le contrat.
@@ -51,10 +51,10 @@ Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c
 
 ```bash
 MIX_ENV=prod mix release --overwrite
-sudo rsync -a --delete _build/prod/rel/lcars_fleet/ /local/LCARS_v2/rel/lcars_fleet/
+sudo rsync -a --delete _build/prod/rel/lcars_fleet/ /opt/lcars/runtime/rel/lcars_fleet/
 # la liste des fichiers bin/ vit dans etc/install.manifest (données) — plus jamais recopiée ici :
-sudo cp $(awk 'NF && $1 !~ /^#/ { print "bin/" $1 }' etc/install.manifest) /local/LCARS_v2/bin/
-sudo chgrp -R fleet /local/LCARS_v2 && sudo chmod g+rx /local/LCARS_v2/bin/*
+sudo cp $(awk 'NF && $1 !~ /^#/ { print "bin/" $1 }' etc/install.manifest) /opt/lcars/runtime/bin/
+sudo chgrp -R fleet /opt/lcars/runtime && sudo chmod g+rx /opt/lcars/runtime/bin/*
 # CHAQUE humain relance SA fleet pour recharger le BEAM : fleet_v2 stop && fleet_v2 start
 ```
 

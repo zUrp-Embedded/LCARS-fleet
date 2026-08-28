@@ -14,7 +14,7 @@
 #
 #     +-----------------------------------------------------------+
 #     | MODULE: TOKEN-SAVER     | SUBSYSTEM: CC RUNTIME / HOOK     |
-#     | LICENSE: AGPL-3         | STARDATE: 2026.217               |
+#     | LICENSE: AGPL-3         | STARDATE: 2026.240               |
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  Shim PreToolUse : resout la brique et lui passe stdin.   |
@@ -60,7 +60,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 _candidats=(
     "${LCARS_TOKEN_SAVER_HOME:-}"
     "/opt/lcars/fleet/vendor/token_saver"
-    "/local/LCARS_v2/fleet/vendor/token_saver"
+    "/opt/lcars/runtime/fleet/vendor/token_saver"
     "${LCARS_ROOT:-}/fleet/vendor/token_saver"
 )
 

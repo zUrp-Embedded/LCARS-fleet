@@ -31,7 +31,10 @@ setup() {
   # ⚠ ON SOURCE, ON N'EXTRAIT PAS LE TEXTE. Un `sed` sur `${PROV_PREFIX:=…}` mesure une SYNTAXE :
   # le jour ou la lib se met a DERIVER (`$PROV_ROOT/rt`), il rend le texte non developpe et le mur
   # rougit sur un geste correct. La lecon vient du mur des jetons, qui a rendu six rouges d'un coup.
-  ATTENDU="$(bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
+  # ⚠ `env -i` : on resout le DEFAUT, pas la surcharge de l'appelant. Un `setup()` qui exporte
+  # cette variable — plusieurs le font — la rendrait telle quelle, et le mur mesurerait le
+  # temoin au lieu de la SSoT. Le motif complet est dans `deploy_manifest.bats`.
+  ATTENDU="$(env -i PATH="$PATH" bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
   BIN_REL="$ATTENDU/rel/lcars_fleet/bin/lcars_fleet"
 }
 
@@ -45,19 +48,24 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   [ -n "$BIN_REL" ]
 }
 
-@test "LES DEUX SSoT s'accordent — celle qui POSE et celle qui VERIFIE" {
-  # `install.sh` pose sous `LCARS_INSTALL_PREFIX`, le rail verifie sous `PROV_PREFIX`. Rien d'autre
-  # ne les confronte, et leur desaccord est SILENCIEUX : la release existe, le rail ne la voit pas.
-  local pose
-  pose="$(sed -n 's/^PREFIX="${LCARS_INSTALL_PREFIX:-\([^}]*\)}".*/\1/p' "$R/etc/install.sh" | head -1)"
-  [ -n "$pose" ] || { echo "le defaut de LCARS_INSTALL_PREFIX n'est plus lisible dans etc/install.sh" >&2; return 1; }
-  [ "$pose" = "$ATTENDU" ] \
-    || { echo "install.sh pose sous « $pose », le rail verifie sous « $ATTENDU »" >&2; return 1; }
-}
+# ⚠ L'ACCORD DES DEUX SSoT N'EST PAS TENU ICI, ET CE FICHIER L'A AFFIRME A TORT. Il disait « rien
+# ne les confronte » : faux. `deploy_manifest.bats` porte « UN FAIT, DEUX RENDUS », ecrit pour ce
+# chantier meme, et il a rougi au deplacement — exactement comme prevu. Je ne l'avais pas cherche.
+# Deux murs sur une meme propriete derivent, et celui qu'on lit n'est jamais celui qu'on a corrige :
+# l'accord reste la-bas, avec son jumeau sur `PROV_LINK_DIR`. Ce fichier-ci garde ce que l'autre ne
+# regarde pas — les chemins de binaire, le Dockerfile, la table.
 
-@test "LES SEPT chemins de binaire de release sont le MEME, derive du prefixe" {
-  # Sept litteraux, aucune variable pour les porter. Le mur les compte ET les compare : un compte
-  # seul passerait au vert le jour ou l'un d'eux change ailleurs.
+@test "LES DEUX chemins de binaire de release sont le MEME, derive du prefixe" {
+  # ⚠ ILS ETAIENT SEPT, ILS SONT DEUX — et ce mur a exige le geste. Ecrit avant le deplacement, il
+  # comptait sept litteraux : une dans la lib du rail, deux dans `bin/lcars`, quatre dans
+  # l'entrypoint, et aucune variable pour les porter. Au deplacement, la lib a DERIVE de
+  # `$PROV_PREFIX`, `bin/lcars` a rappele son propre `_release_bin` (dont le commentaire disait
+  # deja « un seul defaut, pose ici » alors qu'il y en avait deux), et l'entrypoint a hisse ses
+  # quatre invocations sur un `RELEASE_BIN`. Restent les deux defauts qui ne peuvent pas deriver :
+  # ces deux fichiers ne sourcent pas la lib du rail.
+  #
+  # Le mur COMPTE autant qu'il compare : un compte seul passerait au vert le jour ou l'un d'eux
+  # change ailleurs, et une comparaison seule ne dirait rien d'un huitieme qui apparait.
   local f n=0 b
   for f in "$R/deploy/lib/provision-lib.sh" "$R/bin/lcars" "$R/deploy/docker/entrypoint.sh"; do
     while read -r b; do
@@ -66,7 +74,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
       [ "$b" = "$BIN_REL" ] || { echo "$f : « $b » au lieu de « $BIN_REL »" >&2; return 1; }
     done < <(bins_de "$f")
   done
-  [ "$n" -eq 7 ] || { echo "sept chemins de release attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  [ "$n" -eq 2 ] || { echo "deux chemins de release attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
 }
 
 @test "LE DOCKERFILE construit, copie et cable sous le MEME prefixe" {
@@ -93,6 +101,6 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   grep -qE "^prefix[[:space:]]+$ATTENDU[[:space:]]" "$R/deploy/system.manifest" \
     || { echo "« $ATTENDU » n'est pas declare en classe \`prefix\` dans le manifeste" >&2; return 1; }
   # ⚠ AUCUN CLIQUET SUR L'ANCIENNE VALEUR ICI, ET C'EST DELIBERE. L'interdit du retour appartient
-  # a `racines_ssot.bats`, qui porte deja `/local/LCARS_v2` dans sa liste. Un cliquet ecrit AVANT
+  # a `racines_ssot.bats`, qui porte deja `/opt/lcars/runtime` dans sa liste. Un cliquet ecrit AVANT
   # le deplacement interdit la valeur qui est encore la bonne : il rougirait sur un depot sain.
 }

@@ -309,11 +309,25 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   # Ce temoin existe pour le chantier EMPREINTE, qui va precisement deplacer ce prefixe. Sans lui,
   # la phase B pouvait bouger la lib, laisser `etc/install.sh` derriere, et produire une machine ou
   # le provisionnement cherche la release a un endroit ou l'installeur ne l'a pas posee.
+  # ⚠ ON SOURCE LA LIB, ON N'EXTRAIT PLUS SON TEXTE — ET C'EST CE TEMOIN QUI A EXIGE LE CHANGEMENT.
+  # Il a rougi au deplacement du prefixe, comme prevu, mais pour la MAUVAISE raison : la lib s'etait
+  # mise a DERIVER (`$PROV_ROOT/runtime`) et l'extraction rendait le texte non developpe. Un
+  # instrument qui lit une valeur doit la faire calculer par celui qui la definit, sinon il mesure
+  # une syntaxe. Troisieme occurrence de cette lecon dans ce chantier ; celle-ci est la derniere.
   local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
   local from_lib from_inst
-  from_lib="$(grep -oE '\$\{PROV_PREFIX:=[^}]+\}' "$lib" | head -1 | sed 's/.*:=//')"
-  from_inst="$(grep -oE '\$\{LCARS_INSTALL_PREFIX:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//')"
+  # ⚠ `env -i`, ET C'EST ICI QUE CA S'EST DECOUVERT. Le `setup()` de ce fichier EXPORTE
+  # `PROV_PREFIX` et `PROV_LINK_DIR` vers des tmpdirs, pour les tests de `60-deploy`. Sourcer la lib
+  # dans cet environnement rend la SURCHARGE, jamais le defaut : `:=` ne remplace pas une variable
+  # deja posee. Le mur comparait donc le tmpdir du temoin a l'installeur, et rougissait sur un depot
+  # sain. Resoudre un defaut exige un environnement VIDE — sinon on mesure son propre montage.
+  from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
+  # ⚠ LE `}` FERMANT, ET IL A TENU CE TEMOIN VERT SUR DEUX EXTRACTIONS CASSEES. `sed 's/.*:-//'`
+  # laisse l'accolade : la valeur lue etait « /local/LCARS_v2} ». L'autre cote la portait AUSSI —
+  # meme motif, meme defaut — donc les deux chaines etaient egales et le mur passait. Il n'a jamais
+  # compare des chemins ; il comparait deux fois la meme erreur. Resoudre un seul cote l'a decouvert.
+  from_inst="$(grep -oE '\$\{LCARS_INSTALL_PREFIX:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"
   [ -n "$from_lib" ]
   [ -n "$from_inst" ]
   [ "$from_lib" = "$from_inst" ]
@@ -324,8 +338,8 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
   local from_lib from_inst
-  from_lib="$(grep -oE '\$\{PROV_LINK_DIR:=[^}]+\}' "$lib" | head -1 | sed 's/.*:=//')"
-  from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//')"
+  from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_LINK_DIR\"")"
+  from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"
   [ -n "$from_lib" ]
   [ -n "$from_inst" ]
   [ "$from_lib" = "$from_inst" ]

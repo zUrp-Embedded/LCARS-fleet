@@ -337,7 +337,7 @@ ports_of() {
 }
 
 @test "the deck gains the console group and NOT fleet" {
-  # `fleet` (gid 2000) already carries read access to /local/LCARS_v2 and elsewhere; reusing it would
+  # `fleet` (gid 2000) already carries read access to /opt/lcars/runtime and elsewhere; reusing it would
   # have been shorter and would have granted all of that too. The power granted here has to be
   # sayable in one sentence: traverse the consoles' socket directories.
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"

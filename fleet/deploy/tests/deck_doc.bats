@@ -8,7 +8,7 @@
 # le stage `site` du Dockerfile, copiee dans l'image, et le deck la sert sous `/doc/`. Toute cette
 # chaine etait juste en source, et elle rendait 404 sur des fichiers presents.
 #
-# LA CAUSE : la doc etait posee dans `/local/LCARS_v2/doc`, sous le verrou RO du prefixe de release
+# LA CAUSE : la doc etait posee dans `/opt/lcars/runtime/doc`, sous le verrou RO du prefixe de release
 # (`750 root:fleet`, fichiers `640`) — pose par le `chmod -R u=rwX,g=rX,o=` du meme Dockerfile. Le
 # deck largue ses privileges vers son compte de service (`lcars-system`) : il ne pouvait ni traverser le repertoire ni
 # ouvrir un fichier. Chaque `open()` levait, le handler rendait son 404, et ce 404 est honnete sur
@@ -47,8 +47,8 @@ setup() {
 @test "la doc est HORS du prefixe de release — le verrou RO y interdit sa lecture" {
   # Le prefixe est `750 root:fleet` et le deck ne tourne PAS dans le groupe `fleet` : tout ce qui vit dessous
   # lui est illisible, quel que soit le mode du fichier lui-meme.
-  [[ "$DOC_DEST" != /local/LCARS_v2* ]]
-  [[ "$DECK_DEFAULT" != /local/LCARS_v2* ]]
+  [[ "$DOC_DEST" != /opt/lcars/runtime* ]]
+  [[ "$DECK_DEFAULT" != /opt/lcars/runtime* ]]
 }
 
 @test "le COPY de la doc vient APRES le chmod qui retire les droits « autres »" {
@@ -58,7 +58,7 @@ setup() {
   # ligne ne mentionne la doc.
   local copy_line chmod_line
   copy_line="$(grep -nE '^COPY --from=site ' "$DOCKERFILE" | cut -d: -f1)"
-  chmod_line="$(grep -nE '^\s+&& chmod -R u=rwX,g=rX,o= /local/LCARS_v2' "$DOCKERFILE" | cut -d: -f1)"
+  chmod_line="$(grep -nE '^\s+&& chmod -R u=rwX,g=rX,o= /opt/lcars/runtime' "$DOCKERFILE" | cut -d: -f1)"
   [ -n "$copy_line" ]
   [ -n "$chmod_line" ]
   [ "$copy_line" -gt "$chmod_line" ]

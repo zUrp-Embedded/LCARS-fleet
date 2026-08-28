@@ -378,7 +378,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), """
       prov_dirs() {
         printf '%s\\n' \\
-          "/local 0755 root:root" \\
+          "/opt/lcars 0755 root:root" \\
       #{rows}
       }
       """)

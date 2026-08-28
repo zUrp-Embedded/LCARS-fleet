@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/25-directories.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — arborescence systeme : /local + /opt/lcars/var/tokens, les ZONES DE FACE, et la racine
+# STATUS: PROTO-V2 — arborescence systeme : /opt/lcars + sa zone de jetons, les ZONES DE FACE, et la racine
 #         des sockets de console sous /run (avec sa declaration tmpfiles, car /run est un tmpfs)
 # APPLY-ON: any
 # CHECK-ON: any
@@ -12,8 +12,10 @@
 # fleet-state, spool, projects, tmp — pour l'IPC de sa fleet bash ; le runtime v2 n'a besoin
 # d'AUCUN d'eux : son etat vit sous ~/.lcars per-humain, pose par `fleet_v2 start` lui-meme.)
 #
-#   /local          0755 root:root — les prefixes d'install y sont crees par 60-deploy ;
-#                   root-only en ecriture = personne ne remplace un runtime deploye par surprise.
+#   /opt/lcars      0755 root:root — LA RACINE UNIQUE. Le prefixe d'install (`PROV_PREFIX`) y est
+#                   cree par 60-deploy ; root-only en ecriture = personne ne remplace un runtime
+#                   deploye par surprise. Elle s'appelait `/local`, une racine de premier niveau
+#                   qui n'existait que pour porter ce prefixe — et que la table ne declarait pas.
 #   /opt/lcars/var/tokens   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
 #                   jeton master, seed). UN SEUL process les OUVRE : le service d'autorite.
 #                   ⚠ `0710` ET PAS `0700` : le groupe TRAVERSE, il ne LISTE pas. Ce repertoire ne
@@ -105,7 +107,7 @@ set -euo pipefail
 # composant tout etait conforme.
 #
 # Et `fleet` etait le mauvais groupe pour une raison de fond, pas seulement d'accord : il porte deja
-# la lecture de `/local/LCARS_v2`, des role-tokens et de `/opt/lcars/var/tokens`. Le donner au deck pour qu'il
+# la lecture de `/opt/lcars/runtime`, des role-tokens et de `/opt/lcars/var/tokens`. Le donner au deck pour qu'il
 # traverse un repertoire lui aurait accorde tout le reste au passage.
 # ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
 # differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
@@ -161,7 +163,13 @@ prov_runtime_dirs() {
 
 prov_dirs() {
   printf '%s\n' \
-    "/local 0755 root:root" \
+    `# ⚠ CETTE LIGNE POSAIT "/local", ET C'ETAIT LE PARENT DU PREFIXE — rien d'autre. Le prefixe est` \
+    `# descendu sous la racine unique, donc "/local" n'a plus de contenu et cesse d'etre pose. Ce` \
+    `# qui compte est la PROPRIETE, pas le chemin : le parent du prefixe se pose explicitement, avec` \
+    `# un mode connu, plutot que d'apparaitre par le "mkdir -p" du premier ecrivain.` \
+    `# "/local" n'etait declare NULLE PART dans la table — il echappait au mur des objets poses,` \
+    `# dont le scraper ne connaissait que "/local/LCARS_v2". Une racine invisible aux deux bouts.` \
+    "$PROV_ROOT 0755 root:root" \
     "$PROV_TOKENS_DIR 0710 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \

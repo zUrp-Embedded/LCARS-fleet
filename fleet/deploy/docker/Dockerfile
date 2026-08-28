@@ -5,7 +5,7 @@
 # STATUS: PROTO-V2 — image LCARS fleet v2 : build multi-stage (mix release) + runtime slim (sshd login-manager)
 #
 # ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/install.sh (l'autorité
-# build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/local/LCARS_v2 RO
+# build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/opt/lcars/runtime RO
 # root:fleet, /usr/local/bin câblé) que le module 60-deploy pose sur WSL. Ce qui converge au
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
 # et vérifiable par LE MÊME doctor. Deux substrats, une seule vérité.
@@ -66,7 +66,7 @@ RUN echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/s
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
-    && install -d -o builder -g fleet /local /src /src/fleet /src/fleet \
+    && install -d -o builder -g fleet /opt/lcars /src /src/fleet /src/fleet \
     && install -d -o builder -g fleet /home/projects.ops /home/projects.workshop \
     && install -d -m 0755 /run/user \
     && install -d -m 0700 -o builder -g fleet /run/user/1000
@@ -143,7 +143,7 @@ WORKDIR /src/fleet
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
 
-# hex/rebar + build + pose sous /local/LCARS_v2 — le cache BuildKit évite de re-télécharger
+# hex/rebar + build + pose sous /opt/lcars/runtime — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
 # c'est une release). Les caches appartiennent à builder (uid/gid explicites : un cache root
 # serait illisible pour lui). Gate complet + warnings-as-errors : un build rouge NE produit PAS
@@ -200,7 +200,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
     mix local.hex --force && mix local.rebar --force \
-    && { LCARS_INSTALL_PREFIX=/local/LCARS_v2 bash etc/install.sh || [ "$?" -eq 3 ]; }
+    && { LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/install.sh || [ "$?" -eq 3 ]; }
 
 # ─── Stage 1bis : la DOC, batie depuis le meme arbre ─────────────────────────────────────────────
 #
@@ -330,13 +330,13 @@ RUN apt-get update -qq \
     `# socket que ttyd cree, et le --x du groupe donne la traversee sans le listage.` \
     `#` \
     `# ⚠ PAS le groupe fleet (gid 2000), ET C'EST LE PIEGE A EVITER : celui-la porte deja la lecture de` \
-    `# /local/LCARS_v2 et d'ailleurs. Le reutiliser aurait ete plus court et aurait accorde tout le` \
+    `# /opt/lcars/runtime et d'ailleurs. Le reutiliser aurait ete plus court et aurait accorde tout le` \
     `# reste par la meme occasion. Un pouvoir qu'on ne sait pas dire en une phrase est trop large.` \
     && groupadd -g 2001 lcars-console \
     `# LE COMPTE DU SERVICE D'AUTORITE, MIROIR DE 21-service-accounts DU RAIL POSTE. Sans lui,` \
     `# l'entrypoint ne peut pas deposer le service et le geste catalogue est injouable dans la boite.` \
     `#` \
-    `# ⚠ MEMBRE DE fleet POUR TRAVERSER /local/LCARS_v2 (0750 root:fleet), JAMAIS POUR DECIDER.` \
+    `# ⚠ MEMBRE DE fleet POUR TRAVERSER /opt/lcars/runtime (0750 root:fleet), JAMAIS POUR DECIDER.` \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
     `# convergeur d'humains, qui a useradd et ne detient rien.` \
     && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
@@ -348,7 +348,7 @@ RUN apt-get update -qq \
     `# reseau lisait le secret. Un groupe a lui, et le fichier ne nomme plus qu'un lecteur.` \
     `#` \
     `# ⚠ PAS MEMBRE DE fleet, ET C'EST LA DIFFERENCE AVEC SON VOISIN CI-DESSUS. Le deck ne lit RIEN` \
-    `# sous /local/LCARS_v2 : sa doc a ete deplacee en /opt/lcars/share/doc precisement parce qu'il` \
+    `# sous /opt/lcars/runtime : sa doc a ete deplacee en /opt/lcars/share/doc precisement parce qu'il` \
     `# ne pouvait pas l'y lire. Lui rendre le groupe annulerait le motif de ce deplacement.` \
     `#` \
     `# ⚠ ET PAS MEMBRE DE lcars-console NON PLUS. Ce groupe-la lui est accorde PAR PROCESSUS a` \
@@ -362,14 +362,14 @@ RUN apt-get update -qq \
 # owner root (personne ne remplace un runtime déployé), groupe fleet r-x, autres rien.
 # /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
 # $PREFIX/bin, fleet_v2 pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
-COPY --from=build /local/LCARS_v2 /local/LCARS_v2
-RUN chown -R root:fleet /local/LCARS_v2 \
-    && chmod -R u=rwX,g=rX,o= /local/LCARS_v2 \
-    && ln -sf /local/LCARS_v2/bin/fleet_v2 /usr/local/bin/fleet_v2 \
-    && ln -sf /local/LCARS_v2/bin/lcars    /usr/local/bin/lcars
+COPY --from=build /opt/lcars/runtime /opt/lcars/runtime
+RUN chown -R root:fleet /opt/lcars/runtime \
+    && chmod -R u=rwX,g=rX,o= /opt/lcars/runtime \
+    && ln -sf /opt/lcars/runtime/bin/fleet_v2 /usr/local/bin/fleet_v2 \
+    && ln -sf /opt/lcars/runtime/bin/lcars    /usr/local/bin/lcars
 
 # LA DOC DE CETTE VERSION, ET ELLE EST HORS DU PREFIXE DE RELEASE — c'est le fond de l'affaire, pas
-# du rangement. Elle a vecu en `/local/LCARS_v2/doc`, « meme prefixe, meme verrou RO que le reste ».
+# du rangement. Elle a vecu en `/opt/lcars/runtime/doc`, « meme prefixe, meme verrou RO que le reste ».
 # Ce verrou est `750 root:fleet` (fichiers `640`), pose deux lignes plus haut, et le deck largue ses
 # privileges vers `nobody:nogroup` : il ne pouvait ni traverser le repertoire ni ouvrir un fichier.
 # Son `open()` levait, et le handler rendait 404 — un 404 honnete sur « je n'ai pas pu lire », muet

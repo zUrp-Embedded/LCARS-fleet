@@ -34,7 +34,7 @@ setup() {
   # plus un accord — ca interdit son RETOUR, ce qui est le seul service qu'une racine fermee peut
   # encore rendre. L'accord des huit defauts qui nomment la nouvelle, lui, est tenu par
   # `racine_jetons.bats` : un mur par propriete, jamais un mur qui fait les deux a moitie.
-  RACINES='/local/LCARS_v2|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues'
+  RACINES='/opt/lcars/runtime|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues'
   # ⚠ `/opt/lcars` N'EST PAS DANS LA LISTE, ET C'EST DELIBERE : c'est la racine de l'IMAGE, que le
   # Dockerfile pose litteralement (`COPY fleet/services/X /opt/lcars/X`). Un `COPY` derive serait un
   # Dockerfile qui ne se lit plus. Elle entrera ici le jour ou la phase B en fait un prefixe unique.

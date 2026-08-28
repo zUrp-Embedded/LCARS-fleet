@@ -47,7 +47,10 @@ setup() {
   # cherche une ABSENCE : le jour ou la racine des jetons a demenage, un motif grave aurait cesse de
   # pouvoir matcher quoi que ce soit et serait reste vert en ne gardant plus rien. Un mur de presence
   # qui perd sa cible rougit ; un mur d'absence, lui, felicite.
-  TOKENS_DIR="$(bash -c ". '${BATS_TEST_DIRNAME}/../lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  # ⚠ `env -i` : on resout le DEFAUT, pas la surcharge de l'appelant. Un `setup()` qui exporte
+  # cette variable — plusieurs le font — la rendrait telle quelle, et le mur mesurerait le
+  # temoin au lieu de la SSoT. Le motif complet est dans `deploy_manifest.bats`.
+  TOKENS_DIR="$(env -i PATH="$PATH" bash -c ". '${BATS_TEST_DIRNAME}/../lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
   [[ "$TOKENS_DIR" == /* ]] || { echo "la lib ne rend pas de racine de jetons absolue : « $TOKENS_DIR »" >&2; return 1; }
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
   export LCARS_TOOLCHAIN_WORK="$BATS_TEST_TMPDIR/work"

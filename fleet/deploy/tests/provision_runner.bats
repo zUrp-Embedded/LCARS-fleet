@@ -503,7 +503,7 @@ EOF
 # ⚖ ARBITRAGE USER 2026-08-18 : « jamais on s'installe sur le poste de l'user directement » et
 # « tu fais le script pour installer sur WSL, avec docker dispo, et tu arretes de vouloir gerer
 # toutes les configs de la terre ». Ce provisionnement possede /etc/wsl.conf, cree un groupe
-# systeme, pose /local et /opt/lcars/var/tokens — et n'a aucun desinstalleur.
+# systeme, pose /opt/lcars — et n'a aucun desinstalleur.
 
 @test "cible : un substrat linux est REFUSE, et le refus nomme la cible et l'echappatoire" {
   run env PROV_SUBSTRATE=linux PROVISION_MODULE=00-preflight \

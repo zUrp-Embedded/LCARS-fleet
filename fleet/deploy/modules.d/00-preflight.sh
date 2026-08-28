@@ -86,7 +86,7 @@ check() {
   # tout seul. Ce n'est pas une restriction de capacité, c'est une restriction de PROMESSE.
   #
   # CE QUE CE PROVISIONNEMENT VA FAIRE S'IL SE TAIT : `30-wsl` possède `/etc/wsl.conf` en entier,
-  # `20-groups` crée un groupe système, `25-directories` pose `/local` et `/opt/lcars`, et
+  # `20-groups` crée un groupe système, `25-directories` pose `/opt/lcars`, et
   # `60-deploy` verrouille un préfixe en root:fleet. Sur une machine de travail ce n'est pas une
   # installation, c'est un dégât — et il n'existe aucun désinstalleur.
   #
@@ -108,7 +108,7 @@ check() {
     elif [[ -s "$consent_file" ]]; then
       p_warn "Linux natif, accepté une fois sur cette machine ($consent_file) — hors cible : rien ici n'est mesuré sur ce substrat, et il n'y a pas de désinstalleur"
     else
-      p_fail "HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /local et /opt/lcars, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici. Sur du Linux natif, clone le dépôt et sers-toi de ce que tu veux — ou LCARS_ALLOW_ANY_HOST=1 si tu sais ce que tu fais"
+      p_fail "HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /opt/lcars, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici. Sur du Linux natif, clone le dépôt et sers-toi de ce que tu veux — ou LCARS_ALLOW_ANY_HOST=1 si tu sais ce que tu fais"
     fi
   fi
 

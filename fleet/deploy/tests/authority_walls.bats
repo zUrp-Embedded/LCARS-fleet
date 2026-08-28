@@ -41,7 +41,10 @@ setup() {
   # troisieme — celui qui cherche une ABSENCE — serait passe au vert sur un motif qui ne peut plus
   # rien matcher. C'est l'asymetrie a retenir : un mur d'absence ne signale pas qu'on lui a retire
   # sa cible, il felicite.
-  TOKENS_DIR="$(bash -c ". '$REPO/deploy/lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  # ⚠ `env -i` : on resout le DEFAUT, pas la surcharge de l'appelant. Un `setup()` qui exporte
+  # cette variable — plusieurs le font — la rendrait telle quelle, et le mur mesurerait le
+  # temoin au lieu de la SSoT. Le motif complet est dans `deploy_manifest.bats`.
+  TOKENS_DIR="$(env -i PATH="$PATH" bash -c ". '$REPO/deploy/lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
   [[ "$TOKENS_DIR" == /* ]] || { echo "la lib ne rend pas de racine de jetons absolue : « $TOKENS_DIR »" >&2; return 1; }
 }
 

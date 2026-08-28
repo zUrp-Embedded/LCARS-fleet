@@ -3,7 +3,7 @@
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
 # STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
-#         /local/LCARS_v2). Self-contained: the runtime runs WITHOUT the repo (bundled priv, embedded
+#         /opt/lcars/runtime). Self-contained: the runtime runs WITHOUT the repo (bundled priv, embedded
 #         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
 # Three-zone model: SOURCE (this repo, build only) → INSTALL ($PREFIX, RO, system-owned) → STATE
@@ -11,7 +11,7 @@
 # PREFIX=/local/lcars, which is one `mv` plus a symlink repoint, with no edit.
 #
 # TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
-#   LCARS_INSTALL_PREFIX    where everything is installed (default /local/LCARS_v2)
+#   LCARS_INSTALL_PREFIX    where everything is installed (default /opt/lcars/runtime)
 #   LCARS_INSTALL_LINK_DIR  where the PATH symlinks go (default /usr/local/bin)
 #
 # EXIT CODES — 0 install complete · 1 hard failure (nothing usable posted) · 3 RELEASE POSTED, PATH
@@ -33,7 +33,7 @@
 # into place (an atomic rename at the directory-entry level) — keeping the previous generation as
 # `<name>.prev` for rollback. The live target is never a half-copied tree.
 #
-# Usage: etc/install.sh                        # → /local/LCARS_v2
+# Usage: etc/install.sh                        # → /opt/lcars/runtime
 #        LCARS_INSTALL_PREFIX=/x etc/install.sh
 #        LCARS_INSTALL_LINK_DIR=~/bin etc/install.sh
 set -euo pipefail
@@ -165,7 +165,10 @@ wire_path_links() {
 # suite drives atomic_swap_dir / atomic_swap_file / wire_path_links directly, without a mix build.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
-PREFIX="${LCARS_INSTALL_PREFIX:-/local/LCARS_v2}"
+# ⚠ LITTERAL, ET IL LE RESTE. Ce script est AUTONOME — il s'installe sans le rail de
+# provisionnement et ne source pas sa lib : il ne peut pas deriver de `PROV_ROOT`. L'accord des deux
+# defauts est tenu par `deploy/tests/racine_prefixe.bats`, pas par un partage de variable.
+PREFIX="${LCARS_INSTALL_PREFIX:-/opt/lcars/runtime}"
 
 SELF="$(readlink -f "$0")"
 ETC_DIR="$(dirname "$SELF")"

@@ -146,7 +146,7 @@ setup_env() {
   # LCARS_FLEET_MCP_SOCK_BASE); only the bridge path is still an MCP-spec env var.
   export LCARS_FLEET_MCP_BRIDGE_PATH="${LCARS_FLEET_MCP_BRIDGE_PATH:-$BIN_DIR/fleet_mcp_stdio_bridge.py}"
 
-  # Pod launchers (N0/N1), taken from $BIN_DIR (= the install /local/LCARS_v2/bin, OR the source tree in
+  # Pod launchers (N0/N1), taken from $BIN_DIR (= the install /opt/lcars/runtime/bin, OR the source tree in
   # dev). Everything under the install, ZERO copies scattered in /usr/local/bin. The parent dir is bound
   # RO into the sandbox (pod.ex `system_mounts`, derived from claude_launch_path). cap-profiles are NOT
   # set here → the release reads its bundled priv (`:code.priv_dir`) and dev mode points at the source
@@ -429,7 +429,7 @@ cmd_start() {
   local mix_env="${MIX_ENV:-$MIX_ENV_DEFAULT}"
 
   # Mode follows the deployment (derived from where this launcher sits — nothing hardcoded):
-  #   - INSTALL (/local/LCARS_v2): the self-contained RELEASE (`rel/.../bin/lcars_fleet start`) runs
+  #   - INSTALL (/opt/lcars/runtime): the self-contained RELEASE (`rel/.../bin/lcars_fleet start`) runs
   #     WITHOUT the repo (bundled priv, embedded ERTS).
   #   - SOURCE (dev): `mix run --no-halt` from the repo (fast iteration). The catalogue is the live
   #     source tree either way — `_build/<env>/lib/lcars_fleet/priv` is a symlink to `priv/`.

@@ -107,7 +107,7 @@ DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 # resynchroniser. Le Dockerfile la pose au meme titre que le runtime : si elle manque, l'image est
 # ratee, et ca doit se voir.
 #
-# ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON. Elle a vecu en `/local/LCARS_v2/doc`,
+# ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON. Elle a vecu en `/opt/lcars/runtime/doc`,
 # sous le verrou RO du prefixe (`750 root:fleet`, fichiers `640`). Ce serveur largue ses privileges
 # vers son compte de service (`nobody` a l'epoque, `lcars-system` depuis) : il ne pouvait ni
 # traverser ni ouvrir. Chaque `open()` levait et la route

@@ -30,7 +30,7 @@
 # comptes : `sync`, `_apt`, `nobody`, `dhcpcd`. Un demon reseau lisait donc le secret.
 #
 # ⚠ ET IL NE PREND PAS `fleet`, LUI. `lcars-authority` en est membre pour traverser
-# `/local/LCARS_v2` ; la landing n'y lit RIEN — sa doc a ete deplacee hors du prefixe de release
+# `/opt/lcars/runtime` ; la landing n'y lit RIEN — sa doc a ete deplacee hors du prefixe de release
 # (`/opt/lcars/share/doc`) precisement parce que ce process ne pouvait pas l'y lire. Lui donner
 # `fleet` « au cas ou » rendrait faux le motif qui a coute ce deplacement.
 #
@@ -44,7 +44,7 @@
 # porte, et l'absence de home evite un `/home/lcars-authority` que le convergeur d'humains devrait
 # ensuite apprendre a ignorer.
 #
-# ⚠ MEMBRE DU GROUPE `fleet`, ET CE N'EST PAS UNE AUTORITE — C'EST UNE TRAVERSEE. `/local/LCARS_v2`
+# ⚠ MEMBRE DU GROUPE `fleet`, ET CE N'EST PAS UNE AUTORITE — C'EST UNE TRAVERSEE. `/opt/lcars/runtime`
 # est `0750 root:fleet` (system.manifest), et `catalogue install` y execute le binaire de release par
 # `entrypoint catalogue-source`. Sans le groupe, le geste echoue sur un repertoire qu'il ne peut pas
 # ouvrir. Le groupe donne la LECTURE d'un arbre installe ; l'adminite, elle, se demande a la forge a
@@ -114,13 +114,13 @@ check() {
   fi
 
   # ⚠ L'ADHESION EST UNE PRECONDITION DU GESTE, PAS UN CONFORT. Sans elle, `catalogue install`
-  # meurt sur `/local/LCARS_v2` (0750 root:fleet) — un refus de catalogue pour un probleme de
+  # meurt sur `/opt/lcars/runtime` (0750 root:fleet) — un refus de catalogue pour un probleme de
   # traversee, exactement la classe de diagnostic faux que ce rail a deja payee deux fois.
   if account_exists "$AUTHORITY_USER" \
      && id -nG "$AUTHORITY_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
     p_ok "$AUTHORITY_USER ∈ $PROV_FLEET_GROUP (traversée de l'install RO)"
   elif account_exists "$AUTHORITY_USER"; then
-    p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser /local/LCARS_v2, et « catalogue install » échouera sur un refus qui accuse le catalogue"
+    p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser /opt/lcars/runtime, et « catalogue install » échouera sur un refus qui accuse le catalogue"
   fi
 
   # ⚠ SA CONSEQUENCE EST A LUI, ET C'EST LA LECON DE `64-services`. Un message generique ferait dire
