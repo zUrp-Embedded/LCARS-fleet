@@ -117,6 +117,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_catalogue_roots_single_source(root),
         check_private_dir_single_source(root),
         check_system_account_single_source(root),
+        check_platform_root_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -4198,6 +4199,148 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               "authority says #{inspect(expected)} — " <>
                 Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
                 skipped_note(skipped_labels)
+          }
+      end
+    end
+  end
+
+  @doc """
+  The platform root is declared ONCE, in `Fleet.Layout`, and 121 literals in the corpus repeat it.
+  This makes them agree.
+
+  ## Why an allow-list of OTHER roots, and not a list of mirrors
+
+  Its four siblings name their mirrors. Here the mirrors are 22 files and growing — a hand-kept
+  list of that size is the defect, not the guard: it goes stale, and a stale list is a wall that
+  is green about files it no longer holds. So the check is INVERTED. It does not ask "do these 22
+  files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
+
+  `/opt` is not ours alone — the image also carries `/opt/homebrew`, `/opt/elixir-*`, `/opt/node-*`,
+  `/opt/bin`, `/opt/skills`, `/opt/token-saver` and the vendor launcher. Those are DECLARED below,
+  by name, each one a decision a reviewer can see — the same shape as
+  `no_check_passes_on_nothing`'s exemption list, and for the same reason: matching on a pattern
+  would let any new root earn its exemption by looking plausible.
+
+  What this catches, and nothing else did: `@platform_root` moves, the 22 literals do not, and the
+  set of roots in use no longer contains the authority's value. Measured 2026-08-28 as part of
+  redoing §21 from a derived sweep — `/opt/lcars` is the single most copied fact of the corpus
+  (121 occurrences, 22 files) and it had no lock at all.
+  """
+  @spec check_platform_root_single_source(String.t()) :: result()
+  def check_platform_root_single_source(root) do
+    id = "layout.platform_root_single_source"
+
+    remediation =
+      "every `/opt/...` path of LCARS derives from `Fleet.Layout` `@platform_root` — a second " <>
+        "root means half the box installs somewhere the other half never looks"
+
+    # ⚠ CHAQUE ENTREE EST UNE DECISION ECRITE, PAS UN MOTIF. Ce sont les racines de `/opt` qui
+    # n'appartiennent PAS a LCARS et vivent dans la meme image.
+    etrangeres = [
+      # la frontiere vendor N1 : le launcher de Claude, pose par le Dockerfile
+      "/opt/claude_launch",
+      # outillage du substrat, hors LCARS
+      "/opt/homebrew",
+      "/opt/bin",
+      "/opt/skills",
+      "/opt/my",
+      "/opt/token-saver"
+    ]
+
+    expected =
+      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
+        {:ok, src} ->
+          case Regex.run(~r/@platform_root\s+"([^"]+)"\s*$/m, src) do
+            [_, v] -> v
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_nil(expected) do
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/layout.ex"],
+        note:
+          "`@platform_root` no longer reads as a frozen literal — the authority is unreadable, " <>
+            "so nothing was compared"
+      }
+    else
+      # ⚠ LES VERSIONNEES SONT ECARTEES PAR LEUR FORME, PAS PAR LEUR NOM : `/opt/elixir-1.18.4` et
+      # `/opt/node-20` portent leur version, donc les nommer serait une liste a maintenir a chaque
+      # montee de version — exactement le genre d'entretien qu'on ne fait pas.
+      # ⚠ ET LA FORME SE MESURE APRES TRONCATURE, pas avant — ma premiere ecriture l'ignorait et
+      # rendait CINQ fausses accusations. `/opt/elixir-${ELIXIR_VERSION}` laisse `/opt/elixir-` dans
+      # le code (la version est une expansion), et une ellipse de prose `/opt/lcars/...` laisse
+      # `/opt/...`. Une racine qui se termine par `-` est donc une racine CONSTRUITE, et une racine
+      # qui porte un point n'est pas une racine.
+      # ⚠ delimiteur `{}` : le sigil `~r|…|` prend `|` pour sa borne, et l'alternance le coupe.
+      versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
+      pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
+
+      {racines, fichiers} =
+        Path.wildcard(Path.join(root, "**"), match_dot: true)
+        |> Enum.filter(&File.regular?/1)
+        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
+          case File.read(path) do
+            {:ok, body} ->
+              vus =
+                body
+                |> String.split("\n")
+                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+                |> Enum.flat_map(&Regex.scan(~r|/opt/\.?[A-Za-z0-9_.-]+|, &1))
+                |> Enum.map(&hd/1)
+                |> Enum.map(&Regex.replace(~r|(/opt/\.?[A-Za-z0-9_-]+).*|, &1, "\\1"))
+                |> MapSet.new()
+
+              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
+
+            _ ->
+              {acc, n}
+          end
+        end)
+
+      inconnues =
+        racines
+        |> Enum.reject(&(&1 == expected))
+        |> Enum.reject(&(&1 in etrangeres))
+        |> Enum.reject(&Regex.match?(versionnee, &1))
+        |> Enum.reject(&(not Regex.match?(pas_une_racine, &1)))
+        |> Enum.sort()
+
+      cond do
+        # Garde d'instrument : l'autorite DOIT figurer parmi les racines vues. Si elle n'y est pas,
+        # le balayage n'a pas lu le corpus — et un ensemble vide n'accuse personne.
+        not MapSet.member?(racines, expected) ->
+          broken_result(id, "occurrence of #{expected} in the corpus")
+
+        inconnues == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: [],
+            note:
+              "#{inspect(expected)} declared by Fleet.Layout @platform_root is the ONLY LCARS root " <>
+                "under /opt (#{fichiers} files carry a /opt path; #{length(etrangeres)} foreign " <>
+                "roots declared, versioned toolchains excluded by shape)"
+          }
+
+        true ->
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: inconnues,
+            note:
+              "authority says #{inspect(expected)} — #{length(inconnues)} other root(s) under " <>
+                "/opt are neither the authority nor declared foreign: " <>
+                Enum.join(inconnues, ", ")
           }
       end
     end
