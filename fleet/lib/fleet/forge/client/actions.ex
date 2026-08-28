@@ -61,7 +61,7 @@ defmodule Fleet.Forge.Client.Actions do
   `forge.payload_fields_read` a rappele a ce module le jour de son ecriture :
 
   > *une URL fournie par la forge porte l'hote qui a REPONDU, qui n'est pas necessairement celui
-  > qu'on adresse — le conteneur atteint `http://forge:3000` la ou un navigateur atteint un port
+  > qu'on adresse — le conteneur atteint `http://gitea:3000` la ou un navigateur atteint un port
   > publie, donc la transmettre telle quelle propagerait le mauvais hote.*
 
   Un appelant qui veut un lien le construit depuis le `base_url` qu'il utilise VRAIMENT. L'id, lui,

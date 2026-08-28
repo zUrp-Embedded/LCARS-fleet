@@ -162,8 +162,8 @@ mkdir -p "$(dirname "$SWAP_ENV")"
 cat > "$SWAP_ENV" <<ENVEOF
 LCARS_IMAGE=$IMAGE
 LCARS_ADMIRAL=admiral
-FORGE_BASE_URL=http://forge:3000
-LCARS_SOURCE_REMOTE=http://forge:3000/fleet/lcars.git
+FORGE_BASE_URL=http://gitea:3000
+LCARS_SOURCE_REMOTE=http://gitea:3000/fleet/lcars.git
 LCARS_BIND=$BIND
 LCARS_SSH_PORT=${BIND}:${SSH_PORT}
 LCARS_LANDING_PORT_BIND=${BIND}:${DECK_PORT}

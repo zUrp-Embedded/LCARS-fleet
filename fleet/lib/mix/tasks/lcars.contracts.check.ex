@@ -5408,7 +5408,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "not a justification",
     "html_url" =>
       "a forge-supplied URL carries whatever host ANSWERED, which is not necessarily the one we " <>
-        "address — the container reaches `http://forge:3000` where a browser reaches a published " <>
+        "address — the container reaches `http://gitea:3000` where a browser reaches a published " <>
         "port, so handing it on as-is would propagate the wrong host. No reader today: that is " <>
         "the state, not a plan"
   }

@@ -54,7 +54,7 @@ services:
       # une URL fabriquée par la forge — `lcars.contracts.check` porte déjà le mur, où `html_url`
       # est inscrit « no reader today » avec ce motif exact (le conteneur joint `forge:3000` là où
       # un navigateur joint un port publié). La fleet, elle, adresse `FORGE_BASE_URL`, jamais ceci.
-      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://forge:3000/}"
+      GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://gitea:3000/}"
       GITEA__server__HTTP_PORT: "3000"
       # Démarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le
       # wizard /install — `/` répond 200, l'API 404, le healthcheck reste rouge à vie et il n'y

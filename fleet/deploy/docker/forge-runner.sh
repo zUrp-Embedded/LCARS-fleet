@@ -47,7 +47,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # `INSTANCE_URL`, lui, garde le sien : c'est le nom de service de la forge SUR SON PROPRE RESEAU,
 # identique des deux cotes puisque les deux montent le meme `forge-compose.yml`.
-FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK=""
+# ⚠ `gitea`, ET PAS `forge` : c'est le nom du SERVICE compose, donc l'entree DNS que le reseau
+# publie. `forge` etait le nom interne qu'on s'etait donne ; `b01fe3164` a renomme le service
+# (`forge:` -> `gitea:`) et les URL internes sont restees sur l'ancien. Le renommage ne se voit
+# QUE sur une forge fraiche — le rail ne reapplique pas un compose a une forge debout — d'ou
+# quinze jours sans rien casser, puis un runner qui boucle sur « lookup forge : no such host »
+# a la premiere install neuve (mesure du 2026-08-28, banc).
+FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://gitea:3000" ; NETWORK=""
 PROJECT="" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
 # Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
 LABELS="${LCARS_RUNNER_LABELS:-}"
