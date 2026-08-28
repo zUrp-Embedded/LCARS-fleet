@@ -203,8 +203,28 @@ code_of() { sed 's/#.*//' "$1"; }
   # LE MOTIF INTERDIT EST ASSEMBLE, PAS ECRIT. Ecrit en clair, ce mur figurerait dans son propre
   # perimetre et s'accuserait lui-meme ; l'assembler evite de devoir s'exclure, donc ce mur se garde
   # AUSSI lui-meme.
+  #
+  # ⚠ ET CE MUR A ETE MORT PENDANT SIX JOURS, DANS LE PIEGE VOISIN DE CELUI QU'IL GARDE. Il cherchait
+  # en ERE (`grep -E`) un motif assemble en `\[\^\n\]` : dans une expression reguliere, `\n` vaut le
+  # SAUT DE LIGNE, pas les deux caracteres. Le mur cherchait donc `[^<newline>]` — introuvable dans un
+  # fichier texte — au lieu de `[^` `\` `n` `]`. Mesure du 2026-08-29, sur un fichier temoin portant
+  # la vraie cible : la forme ERE rend 0, la forme LITTERALE rend 1, et le fichier sain rend 0 aux
+  # deux.
+  #
+  # ⚠ ET CETTE CICATRICE NE PEUT PAS EPELER SA PROPRE CIBLE. Ecrite en clair, elle serait la premiere
+  # prise du mur repare — mesure faite, il l'a accusee. C'est la contrainte que l'assemblage du motif
+  # existe pour tenir, appliquee a la prose qui l'explique.
+  #
+  # C'est la MEME famille que ce que le mur interdit : une sequence `\n` qui ne veut pas dire ce
+  # qu'elle a l'air de dire, une couche plus haut. Le motif interdit est une SUITE D'OCTETS, pas une
+  # expression : il se cherche en LITTERAL (`-F`), ou rien ne le trouve.
+  #
+  # ⚠ ET LE COMMIT QUI A « REPARE » CE MUR ANNONCAIT DEJA CE CORRECTIF. `0fbc7ae97` ecrit : « Elle
+  # cherche desormais en LITTERAL (grep -F) […] verifie, les deux mutations rougissent. » Le `-F`
+  # n'a jamais ete pose ; les `-E` sont restes. Une verification declaree et non tenue est plus
+  # couteuse qu'une absence de verification : elle clot le sujet.
   local bs; bs="$(printf '\\')"
-  local interdit="\\[\\^${bs}n\\]"
+  local interdit="[^${bs}n]"
 
   mapfile -t SUITES < <(
     find "$REPO" "$REPO/../.claude" -type f \( -name '*.bats' -o -name '*.bash' \) \
@@ -214,11 +234,11 @@ code_of() { sed 's/#.*//' "$1"; }
 
   local f n rompu=0
   for f in "${SUITES[@]}"; do
-    n="$(grep -cE -- "$interdit" "$f" || true)"
+    n="$(grep -cF -- "$interdit" "$f" || true)"
     [ "$n" -eq 0 ] && continue
     rompu=1
     echo "MUR 3 rompu — ${f#"$REPO"/} :" >&2
-    grep -nE -- "$interdit" "$f" >&2
+    grep -nF -- "$interdit" "$f" >&2
   done
   [ "$rompu" -eq 0 ] || {
     echo "Le geste : remplacer par un point. grep travaille ligne a ligne." >&2
@@ -788,9 +808,20 @@ print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
   [ -n "$forge_svc" ] || { echo "MUR 14 — le service de forge-compose.yml ne se lit plus" >&2; return 1; }
 
   # ⚠ CODE SEUL — ET LA PROSE COMPTE QUAND MEME, AILLEURS. Ce mur ne lit que le code (quatrieme
-  # fois aujourd'hui que la prose entre dans un extracteur). Mais les commentaires qui NOMMAIENT
-  # `http://forge:3000` ont ete corriges dans le meme geste : ils disaient a l'operateur d'utiliser
-  # une URL qui ne resout plus. Un mur ne doit pas les accuser ; un humain doit les reparer.
+  # fois qu'un extracteur de ce fichier avale de la prose). Un mur qui accuserait un commentaire
+  # interdirait d'expliquer le defaut qu'il garde ; la prose se repare a la main.
+  #
+  # ⚠ ET CETTE PHRASE DISAIT « les commentaires qui nommaient `http://forge:3000` ont ete corriges
+  # dans le meme geste ». C'ETAIT FAUX, mesure le 2026-08-29 : SEIZE lignes de prose survivaient
+  # dans six fichiers de production — `forge-runner.sh` (7), `entrypoint.sh` (2), `bench-up.sh` (2),
+  # `forge-compose.yml` (2), `provision-lib.sh` (2), un commentaire de temoin (1). Deux d'entre
+  # elles documentaient l'ENTREE `FORGE_BASE_URL` a l'operateur, et `bench-up.sh` se contredisait
+  # dans un seul fichier : la ligne 17 prescrivait `forge:3000`, la ligne 364 passait `gitea:3000`.
+  #
+  # LA LECON EST SUR L'ANGLE, PAS SUR LE COMPTE. Deux relectures adverses ont debattu de la GRAVITE
+  # de deux de ces lignes sans jamais demander CE QU'ELLES DEVRAIENT DIRE — et la question, posee,
+  # transforme l'arbitrage en balayage et rend les quatorze autres. Un mur ne peut pas poser cette
+  # question a notre place : il ne lit pas la prose, et c'est bien.
   local hotes
   hotes="$(grep -rhE 'https?://[a-z][a-z0-9_.-]*:3000' "$REPO" \
              --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \

@@ -1784,6 +1784,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     |> List.to_string()
   end
 
+  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE, AND FOUR OF THEM WERE. The `*_single_source`
+  # locks read the RAW body of each mirror and ask `Regex.match?`. A file whose CODE carries the
+  # wrong value stays green as long as the right one appears in a COMMENT — and the context that
+  # makes it likely is the ordinary one: `# Note: was <old value>` on the very line a migration
+  # touches. Measured 2026-08-29 on three of them: code mutated + the pattern quoted in a comment
+  # → `status: pass`.
+  #
+  # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
+  # strips comments on every sweep. This side never did. Same doctrine, one language short.
+  #
+  # `#` opens a comment in every file type these locks read (sh, ex, tf, yml), so ONE stripper
+  # serves them all; `strip_comment/1` below already honours `"` so an interpolation `#{}` or a `#`
+  # inside a string survives. Known limit, stated rather than hidden: a `#` inside SINGLE quotes is
+  # truncated — that direction is fail-CLOSED (a real code site stops matching, the lock reddens and
+  # names it), never fail-open.
+  defp code_of(body), do: body |> String.split("\n") |> Enum.map(&strip_comment/1) |> Enum.join("\n")
+
   defp do_strip_comment([], acc, _in_str), do: acc
   defp do_strip_comment([?# | _rest], acc, false), do: acc
 
@@ -3842,7 +3859,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Enum.flat_map(checked, fn {rel, rx, what} ->
           case File.read(Path.expand(rel, root)) do
             {:ok, body} ->
-              if Regex.match?(rx, body), do: [], else: [{rel, what}]
+              if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
 
             _ ->
               [{rel, "unreadable"}]
@@ -3936,7 +3953,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     read_holder = fn {rel, rx, what} ->
       case File.read(Path.expand(rel, root)) do
         {:ok, body} ->
-          case Regex.run(rx, body) do
+          case Regex.run(rx, code_of(body)) do
             [_, v] -> {:ok, rel, what, v}
             _ -> {:unreadable, rel, what}
           end
@@ -4155,13 +4172,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           # boucles qui deriveraient.
           {rel, rx, what, :forbidden} ->
             case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, body), do: [{rel, what}], else: []
+              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [{rel, what}], else: []
               _ -> [{rel, "unreadable"}]
             end
 
           {rel, rx, what} ->
             case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
+              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
               _ -> [{rel, "unreadable"}]
             end
         end)
@@ -4674,7 +4691,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       bad =
         Enum.flat_map(checked, fn {rel, rx, what} ->
           case File.read(Path.expand(rel, root)) do
-            {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
+            {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
             _ -> [{rel, "unreadable"}]
           end
         end)

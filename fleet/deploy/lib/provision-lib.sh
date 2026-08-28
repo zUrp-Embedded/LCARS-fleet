@@ -116,8 +116,8 @@ PROVISION_LIB_LOADED=1
 # En conteneur ce fichier n'existe pas : l'environnement du compose gagne, rien ne change.
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
-# le SERVEUR compose (dans un conteneur, le nom du service : `http://forge:3000`) ; celle-ci est
-# celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `forge:3000`
+# le SERVEUR compose (dans un conteneur, le nom du service : `http://gitea:3000`) ; celle-ci est
+# celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `gitea:3000`
 # ne résout nulle part hors du réseau docker, et l'adresse de l'hôte peut ne pas résoudre dedans.
 # ⚠ ET LE DÉFAUT « ÉGALE L'INTERNE » EST UN PIÈGE SUR LE RAIL POSTE, où les deux ne coïncident
 # JAMAIS. `48-forge-host` dérive les deux adresses, publie la forge sur `PROV_FORGE_BIND` et écrit

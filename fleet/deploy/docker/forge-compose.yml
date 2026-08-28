@@ -48,11 +48,11 @@ services:
       # l'INTÉRIEUR, au motif que « le consommateur principal d'une forge de dév est la fleet, pas
       # l'humain depuis son navigateur ». CE MOTIF EST TOMBÉ : le deck de la boîte s'identifie
       # désormais par OpenID sur cette forge, donc un navigateur DOIT l'atteindre, et un lien en
-      # `forge:3000` ne résout sur aucune machine. Le défaut vise l'extérieur ; `bench-up.sh` passe
+      # `gitea:3000` ne résout sur aucune machine. Le défaut vise l'extérieur ; `bench-up.sh` passe
       # l'adresse publiée.
       # Ce que ça NE casse pas, et c'est vérifié plutôt que supposé : aucune ligne du runtime ne lit
       # une URL fabriquée par la forge — `lcars.contracts.check` porte déjà le mur, où `html_url`
-      # est inscrit « no reader today » avec ce motif exact (le conteneur joint `forge:3000` là où
+      # est inscrit « no reader today » avec ce motif exact (le conteneur joint `gitea:3000` là où
       # un navigateur joint un port publié). La fleet, elle, adresse `FORGE_BASE_URL`, jamais ceci.
       GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://gitea:3000/}"
       GITEA__server__HTTP_PORT: "3000"

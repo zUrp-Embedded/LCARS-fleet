@@ -24,7 +24,7 @@
 #                   possible » etait ecrit ici : c'etait vrai de la CONVERGENCE, pas du jeton master.
 #   LCARS_UID       uid du sysadmin (défaut : 1000, réservé) — stable = ownership du volume stable
 #   LCARS_SSH_AUTHORIZED_KEYS  contenu authorized_keys (sinon : accès par `docker exec` seulement)
-#   FORGE_BASE_URL  forge cible (avec le profil compose `forge` : http://forge:3000)
+#   FORGE_BASE_URL  forge cible (avec le profil compose `gitea` : http://gitea:3000)
 
 set -euo pipefail
 
@@ -142,7 +142,7 @@ fi
 # legitime ici, la ou il aurait ete un piege avant ce chantier.
 #
 # L'appelant fournit : `--network <reseau-de-la-forge>`, `-v /home/private:/home/private`,
-# `-e FORGE_BASE_URL=http://forge:3000`. Le jeton peut aussi arriver sur stdin (jamais en argv).
+# `-e FORGE_BASE_URL=http://gitea:3000`. Le jeton peut aussi arriver sur stdin (jamais en argv).
 if [[ "${1:-}" == "forge-apply" ]]; then
   [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /home/private — elle exige root dans le conteneur" >&2; exit 1; }
   exec /opt/lcars/forge-gestures.sh apply

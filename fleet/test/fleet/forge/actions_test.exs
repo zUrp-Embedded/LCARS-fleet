@@ -63,7 +63,7 @@ defmodule Fleet.Forge.Client.ActionsTest do
       # ⚠ LE RESULTAT NE PORTE QUE `run_id`, ET LE STUB REND POURTANT LES DEUX URL. C'est un refus,
       # pas un oubli : le contrat `forge.payload_fields_read` du dépôt inscrit que `html_url` n'a
       # AUCUN lecteur, parce qu'une URL rendue par la forge porte l'hôte qui a RÉPONDU — le
-      # conteneur atteint `http://forge:3000` là où un navigateur atteint un port publié. Ce module
+      # conteneur atteint `http://gitea:3000` là où un navigateur atteint un port publié. Ce module
       # a été écrit en les lisant, le contrat l'a repris, et il avait raison.
       assert {:ok, run_ref} =
                Actions.dispatch_workflow(
