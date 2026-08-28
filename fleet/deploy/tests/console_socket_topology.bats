@@ -219,8 +219,10 @@ ttyd_line() {
 }
 
 @test "un humain dont le groupe primaire est NOMMÉ démarre quand même — la faute d'origine" {
-  # `lcars`, gid 1003 (fleet) : la forme exacte que 22-fleet-human pose sur le rail poste, et celle
-  # sur laquelle setpriv refusait de parser.
+  # `lcars`, gid 1003 (fleet) : la forme que le rail poste a posee jusqu'au 2026-08-25 (`useradd -g
+  # fleet`, dans `22-fleet-human`), et celle sur laquelle setpriv refusait de parser. Le createur a
+  # change — c'est le convergeur, et il ne passe plus `-g` — mais tout poste installe avant cette
+  # date porte encore cette ligne, et un compte pose a la main l'aura aussi.
   cat > "$BINDIR/getent" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2" in
@@ -444,20 +446,22 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
 # dans son champ 4 — ce champ ne porte que les ajouts secondaires. `id -nG` le disait membre, le
 # fichier non : deux reponses vraies a deux questions differentes, et la regle lisait la mauvaise.
 #
-# Mesure du 2026-08-21, poste natif : `lcars`, l'humain de fleet pose par 22-fleet-human, tenait le
+# Mesure du 2026-08-21, poste natif : `lcars`, l'humain de fleet du poste, tenait le
 # BEAM et sa `deck.sock` — et etait absent de cette liste. Le deck ne lisait donc jamais sa socket
 # et affichait « 0 pod » sur une fleet vivante. Le mode de defaillance est le pire qui soit : un
 # compteur a zero, identique a celui d'une fleet reellement vide.
 #
-# ⚠ CE PIEGE N'EXISTE PLUS, ET LE TEMOIN RESTE PARCE QUE SON CAS EST REEL. `lcars` est le compte que
-# `22-fleet-human` pose sur toute boite native, avec exactement cette forme de ligne de passwd — il
-# DOIT etre servi. Il l'est maintenant pour une raison plus simple : plus rien ne regarde son gid.
+# ⚠ CE PIEGE N'EXISTE PLUS, ET LE TEMOIN RESTE PARCE QUE SON CAS EST REEL. Cette forme de ligne de
+# passwd est celle que le rail poste produisait jusqu'au 2026-08-25 ; elle survit sur toute machine
+# installee avant, et un compte pose a la main la porte aussi — il DOIT etre servi. Il l'est maintenant pour une raison plus simple : plus rien ne regarde son gid.
 # Garder le cas coute une ligne et attrape le jour ou quelqu'un rebranche une lecture de groupe ;
 # le retirer parce que « sa cause a disparu » retirerait la preuve que la cause a disparu.
 @test "l'humain de fleet du rail poste (useradd -g fleet) est servi — le cas qui affichait « 0 pod »" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
   mkdir -p "$home/lcars"
-  # La forme EXACTE que `22-fleet-human` produit : gid primaire = celui de `fleet`, champ 4 vide.
+  # La forme en question : gid primaire = celui de `fleet`, champ 4 vide. Le convergeur, lui, ne
+  # passe pas `-g` — il produit un groupe prive — donc ce cas n'est plus le NOMINAL, il est le LEGACY,
+  # et c'est exactement ce qu'un temoin doit continuer de servir.
   printf 'lcars:x:1001:2000::%s/lcars:/bin/bash\n' "$home" > "$pw"
 
   humans_sh "$pw" ""

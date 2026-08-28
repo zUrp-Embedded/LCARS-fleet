@@ -135,7 +135,7 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
   @tag :tmp_dir
   test "le LOGIN d'un role prend le prefixe du catalogue qui le DECLARE" do
     # La regle est "le prefixe suit le TIER", et le tier d'un role metier est LE CATALOGUE QUI LE
-    # DECLARE — pas "celui par defaut". La projection venait de `CatalogueRoles`, ou elle tournait
+    # DECLARE — pas "celui par defaut". La projection venait de `Fleet.Roster`, ou elle tournait
     # avec UN catalogue emprunte dans `:lcars_fleet, :catalogue_root` : `Catalogue.name()` y etait le
     # catalogue declarant, et l'interroger etait juste. Remontee dans un contexte global, ce nom
     # n'est plus que le catalogue par defaut — mesure : `biz-dev` projetait `fleet_biz-dev` alors

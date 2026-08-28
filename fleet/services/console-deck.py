@@ -273,7 +273,7 @@ def oidc_config():
     TWO FORGE URLS, AND CONFLATING THEM IS THE CLASSIC FIRST-TRY FAILURE. The browser is sent to
     `public_url` (an address a person's machine can reach); the code-for-token exchange goes to
     `internal_url` (which inside a container is the compose service name). One value cannot be
-    both: `http://forge:3000` resolves nowhere outside the network, and the host's address may not
+    both: `http://gitea:3000` resolves nowhere outside the network, and the host's address may not
     resolve inside it.
     """
     try:

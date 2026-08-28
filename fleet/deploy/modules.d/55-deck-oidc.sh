@@ -43,7 +43,14 @@ TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
 # Le deck tourne desormais sous `lcars-system`, un compte a lui (`21-service-accounts`), de groupe
 # primaire homonyme. `0640 root:lcars-system` nomme donc EXACTEMENT un lecteur, et c'est celui qui
 # lit le fichier. Le mode n'a pas change ; ce qui a change, c'est que le groupe designe quelqu'un.
-OIDC_GROUP="${PROV_SYSTEM_GROUP:-lcars-system}"
+# ⚠ LE REPLI DERIVE, IL NE GRAVE PLUS. Cette ligne portait `${PROV_SYSTEM_GROUP:-lcars-system}`
+# pendant que `21-service-accounts:89` — le module qui CREE le compte — ecrit
+# `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}`. Deux replis pour une variable, et ils ne disent pas la meme
+# chose : regler `PROV_SYSTEM_USER` sans `PROV_SYSTEM_GROUP` faisait creer le groupe `<autre>` d'un
+# cote et donner le fichier d'identification du deck au groupe `lcars-system` de l'autre — un
+# groupe qui n'existe alors nulle part. Le deck sert 503 en nommant un fichier qu'il ne peut pas
+# lire, et la cause est deux lignes plus loin dans un autre module.
+OIDC_GROUP="${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-lcars-system}}"
 
 # The entrances, as full callback URIs. Loopback always: it is how the box's own operator reaches
 # the deck, and it is the one address that is true everywhere.

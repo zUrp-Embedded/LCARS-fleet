@@ -173,46 +173,59 @@ setup() {
 # ─── LE COMPTE SE DIT AVANT D'EXISTER ───────────────────────────────────────────────────────────
 # ⚖ USER 2026-08-21 : « on cree pas un user sur une machine nue. dans docker c'est sans gravite, la
 # ca demande au moins une validation user. » C'est la SEULE mutation de ce rail qui fait apparaitre
-# un UTILISATEUR sur la machine de quelqu'un. Nommer le compte EST la validation ; l'annoncer dans
-# le bandeau du cout est ce qui la rend consentie, et la taire la rendrait subie.
+# un UTILISATEUR sur la machine de quelqu'un. L'annoncer dans le bandeau du cout est ce qui la rend
+# consentie, et la taire la rendrait subie.
+#
+# ⚠ ET CE BANDEAU A EU UNE BRANCHE QUI MENTAIT. Tant que `--fleet-human` existait, il annoncait sans
+# le drapeau que RIEN ne serait cree — alors que la recette posait quand meme le compte integre sous
+# le defaut de `forge-gestures.sh`, et que le convergeur le materialisait vingt rangs plus loin. Le
+# bandeau du COUT taisait donc exactement la mutation qu'il existe pour annoncer. Le pre-semis est la
+# raison d'etre de ce rail (⚖ USER 2026-08-25 : « livrer out of the box un user fleet enabled »), et
+# il se dit maintenant sans condition.
 
-@test "sans --fleet-human : la porte annonce que RIEN ne sera cree, et donne le geste" {
+@test "le bandeau annonce le compte SANS CONDITION — il n'y a plus de cas « rien ne sera cree »" {
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
-  [[ "$output" == *"Aucun humain de fleet nommé"* ]]
-  [[ "$output" == *"rien ne sera créé"* ]]
-  [[ "$output" == *"--fleet-human"* ]]
-}
-
-@test "avec --fleet-human : le compte est NOMME dans le bandeau, avant d'exister" {
-  # Le nom n'est pas un detail : sur ce parc les humains s'appellent `vanille`, `bob`, `alice`.
-  # Un defaut cable (`lcars`) ferait apparaitre un utilisateur que personne n'a demande.
-  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --fleet-human vanille --check < /dev/null
-  [[ "$output" == *"créera l'utilisateur « vanille »"* ]]
+  [[ "$output" == *"créera l'utilisateur"* ]]
   [[ "$output" != *"Aucun humain de fleet nommé"* ]]
+  [[ "$output" != *"rien ne sera créé"* ]]
 }
 
-@test "le nom voyage jusqu'au rail — la porte le lit ET le transmet" {
-  # Lu ici pour le bandeau, transmis au rail pour l'acte. Le lire sans le transmettre annoncerait
-  # une creation qui n'aurait pas lieu ; le transmettre sans le lire creerait un compte que le
-  # bandeau n'a pas annonce. Les deux moities sont la meme promesse.
-  run grep -c 'PASSTHRU+=("\$1" "\$2"); shift 2 ;;' "$SRC"
+@test "le nom annonce est celui de l'AUTORITE, pas un litteral de ce fichier" {
+  # Le bandeau doit nommer le compte que la recette creera vraiment. La seule facon de le savoir est
+  # de le DEMANDER : un litteral ici resterait d'accord avec l'autorite jusqu'au jour ou l'un des
+  # deux bouge, et c'est celui qu'on ne relit pas qui gagne ce jour-la.
+  local attendu
+  attendu="$(bash "$REPO/fleet/services/forge-gestures.sh" builtin-human)"
+  [ -n "$attendu" ]
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
+  [[ "$output" == *"créera l'utilisateur « $attendu »"* ]]
+  # ET LE NOM N'EST PAS GRAVE ICI : la porte interroge le verbe, elle ne recopie pas sa reponse.
+  run grep -c 'builtin-human' "$SRC"
   [ "$status" -eq 0 ]
-  run grep -A1 -- '--fleet-human) FLEET_HUMAN=' "$SRC"
-  [[ "$output" == *"PASSTHRU+="* ]]
+}
+
+@test "VERROU : « --fleet-human » est REFUSE, il ne revient pas en passe-plat muet" {
+  # Un drapeau retire doit RATER, pas etre accepte et ignore. La branche BOITE de cette porte le
+  # montrait deja : elle parsait `--fleet-human` et n'utilisait jamais `PASSTHRU`, donc l'operateur
+  # nommait un compte et repartait sans un mot. Un drapeau mort qu'on accepte est pire que pas de
+  # drapeau du tout — il documente une capacite qui n'existe pas.
+  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --fleet-human vanille --check < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Option inconnue : --fleet-human"* ]]
 }
 
 @test "la DERNIERE instruction lue est vraie sur CE terrain — pas celle d'un autre" {
   # Le bandeau de cloture disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
   # « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-  # l'humain de fleet (22-fleet-human), pas sous l'operateur : GUARD B refuse l'uid du siege, qui
-  # est justement le sien sur une machine standard. Un operateur qui suit cette ligne se fait
-  # refuser par un garde, sans savoir pourquoi.
+  # l'humain de fleet que la forge seme (48) et que le convergeur materialise (64), pas sous
+  # l'operateur : GUARD B refuse l'uid du siege, qui est justement le sien sur une machine standard.
+  # Un operateur qui suit cette ligne se fait refuser par un garde, sans savoir pourquoi.
   #
   # ⚠ ON MESURE LE TEXTE DU SCRIPT, PAS UNE EXECUTION : atteindre ce bandeau demande un
   # provisionnement complet (paquets, /local, une forge), ce qu'un temoin ne joue pas. Ce qui se
   # garde ici est que les deux formes EXISTENT et sont choisies par le terrain — un bandeau qui
   # redeviendrait inconditionnel le perdrait sans que rien ne rougisse.
-  run grep -c 'sudo -u \$FLEET_HUMAN fleet_v2 start' "$SRC"
+  run grep -c 'sudo -u \$_step3_human fleet_v2 start' "$SRC"
   [ "$output" = "1" ]
   run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
   [ "$output" = "1" ]

@@ -25,8 +25,6 @@
 #       --bench         fournit les annexes (forge jetable + runner CI) au
 #                       lieu d'exiger que tu les aies déjà.
 #       --check         sonde read-only, rien n'est modifié.
-#       --fleet-human N nomme le compte de fleet à créer — le nommer, c'est
-#                       l'autoriser ; sans lui, aucun humain n'est créé.
 #       --port-forge N  le port que publie la forge du poste (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
 #       --forge-project N  nomme l'instance de forge (défaut lcars-forge) —
@@ -83,13 +81,35 @@ fi
 # La regle : un script qui refuse d'etre pipe doit le detecter AVANT tout ce qui suppose un fichier.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
+# ─── LE NOM DE L'HUMAIN DE FLEET — DEMANDÉ, JAMAIS RECOPIÉ ──────────────────
+#
+# ⚠ CE NOM A EU DEUX SOURCES, ET C'ÉTAIT LE DÉFAUT. `--fleet-human` le posait ici, `forge-gestures.sh`
+# posait le sien là-bas, et quatre sites arbitraient entre les deux chacun de son côté. Le drapeau
+# est retiré ; il reste UNE autorité, et cette porte l'INTERROGE au lieu d'en tenir une copie. Un
+# littéral « lcars » dans ce fichier serait la seconde vérité, et c'est celle qu'on ne relit pas qui
+# dérive — la leçon que ce dépôt a déjà payée sur le nom du compte système et sur celui de la forge.
+#
+# ⚠ ELLE PEUT NE RIEN RENDRE, ET C'EST UN ÉTAT ATTEIGNABLE, pas une précaution. Cette porte tourne
+# aussi depuis un fichier téléchargé SEUL — le mode standalone clone la source plus bas, après le
+# bandeau. Sans l'arbre, on ne devine pas : on rend vide, et chaque lecteur dit ce qu'il ne peut pas
+# nommer plutôt que d'inventer un nom qui n'aurait aucune autorité derrière lui.
+fleet_human_name() {
+  local g
+  # Après l'escalade, `PROVISION` désigne le checkout RÉEL (il peut venir d'être cloné) ; avant, il
+  # n'y a que celui d'où cette porte est lue. Les deux se DÉRIVENT d'un arbre, jamais d'un chemin gravé.
+  if [[ -n "${PROVISION:-}" ]]; then g="$(dirname "$PROVISION")/../services/forge-gestures.sh"
+  else                               g="$SCRIPT_DIR/fleet/services/forge-gestures.sh"
+  fi
+  [[ -r "$g" ]] || return 0
+  bash "$g" builtin-human 2>/dev/null || true
+}
+
 # ─── Options ────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 BRANCH="main"
 DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
-FLEET_HUMAN=""       # posé par --fleet-human : NOMMER le compte, c'est autoriser sa création
 WITH_BENCH=0
 # ⚠ LE CONSENTEMENT TRAVERSE L'ESCALADE. Ce rail se ré-exécute sous `sudo` (plus bas) ; sans ce
 # drapeau la seconde instance rejoue tout l'accueil et REDEMANDE la validation — une seconde fois,
@@ -116,12 +136,15 @@ while [[ $# -gt 0 ]]; do
     # forcer le substrat doit valoir pour la porte ET pour le rail, jamais pour un seul des deux.
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
-    # ⚖ USER 2026-08-21 : « on crée pas un user sur une machine nue. » Ce drapeau EST la validation :
-    # le nom autorise la création, et il est LU ici — pas seulement transmis — parce que le bandeau
-    # de consentement doit ANNONCER le compte qui va apparaître. Un coût qui se découvre après coup
-    # n'a pas été consenti.
-    --fleet-human) FLEET_HUMAN="${2:?--fleet-human attend un nom}"
-                   PASSTHRU+=("$1" "$2"); shift 2 ;;
+    # ⚠ IL N'Y A PLUS DE `--fleet-human`, ET SON RETRAIT EST LE GESTE, PAS UNE SIMPLIFICATION. Il
+    # laissait l'opérateur CHOISIR LE NOM de l'humain de fleet pré-semé ; le pré-semis, lui, a
+    # toujours eu lieu sans lui (`forge-gestures.sh` applique son défaut, la recette crée le compte,
+    # le convergeur le matérialise). Deux sources décidaient donc d'un seul nom, et quatre sites
+    # arbitraient entre elles chacun de son côté. Le nom a désormais UNE autorité, interrogeable :
+    # « fleet/services/forge-gestures.sh builtin-human ».
+    #
+    # ⚠ ET CE RAIL EST LE SEUL CONCERNÉ. Le drapeau n'atteignait que le poste — la branche BOÎTE sort
+    # par `exec box up` sans jamais lire `PASSTHRU` — donc son retrait ne touche pas la production.
     # Les deux ports publiés. PASSTHRU les porte à travers le `sudo` ET jusqu'à `provision`, qui les
     # valide — un seul valideur, chez celui qui s'en sert. Le rail BOÎTE ne les lit pas : ses ports
     # sont ceux du compose, et `--` les passe au délégué.
@@ -519,20 +542,29 @@ if [[ "$RAIL" == "workstation" ]]; then
   fi
   # ⚖ LE COMPTE SE DIT AVANT D'EXISTER (USER 2026-08-21). C'est la seule mutation de ce rail qui
   # crée un UTILISATEUR sur la machine de quelqu'un ; l'annoncer dans le bandeau du coût est ce qui
-  # la rend consentie, et la taire la rendrait subie. Sans `--fleet-human`, rien n'est créé : le
-  # module dérive en nommant le geste, et le bandeau dit ce qui manquera.
-  if [[ "$RAIL" == "workstation" ]]; then
-    if [[ -n "$FLEET_HUMAN" ]]; then
-      echo ""
-      echo "  ${AMBER}Ce rail créera l'utilisateur « $FLEET_HUMAN »${N} (uid libre au-dessus du siège,"
-      echo "  groupe fleet) : c'est lui qui fera tourner la fleet. Toi, tu restes le siège."
-    else
-      echo ""
-      echo "  ${W}Aucun humain de fleet nommé${N} — rien ne sera créé, et personne ne pourra lancer"
-      echo "  la fleet ici (ton compte est le siège, GUARD B le lui interdit). Pour en poser un :"
-      echo "    sudo … bash $0 --workstation --fleet-human <nom>"
-    fi
+  # la rend consentie, et la taire la rendrait subie.
+  #
+  # ⚠ ET LA BRANCHE « PERSONNE NE SERA CRÉÉ » ÉTAIT FAUSSE. Tant que `--fleet-human` existait, ce
+  # bandeau annonçait, faute de drapeau, que rien n'apparaîtrait — alors que la recette posait quand
+  # même son compte par défaut et que le convergeur le matérialisait vingt rangs plus loin. Le
+  # bandeau du COÛT taisait donc la seule mutation qu'il existe pour annoncer. Le rail pré-sème
+  # toujours, c'est sa raison d'être (⚖ USER 2026-08-25 : « livrer out of the box un user fleet
+  # enabled, puisqu'on verrouille admin hors de la fleet »). Il le dit maintenant sans condition.
+  #
+  # ⚠ ET LE `if [[ "$RAIL" == "workstation" ]]` QUI ENTOURAIT CE BLOC EST PARTI AVEC. Il était
+  # imbriqué dans celui de la ligne 517, donc toujours vrai — invisible tant que le bloc avait deux
+  # branches, tautologique dès qu'il n'en a plus qu'une. Une condition qui ne peut pas être fausse
+  # se lit comme une décision et n'en est pas une.
+  _banner_human="$(fleet_human_name)"
+  echo ""
+  if [[ -n "$_banner_human" ]]; then
+    echo "  ${AMBER}Ce rail créera l'utilisateur « $_banner_human »${N} (uid libre au-dessus du siège,"
+  else
+    # Mode standalone : la source n'est pas encore là, donc l'autorité du nom non plus. On annonce
+    # la mutation — c'est elle qui se consent — sans inventer le nom qu'elle portera.
+    echo "  ${AMBER}Ce rail créera un utilisateur de fleet${N} (uid libre au-dessus du siège,"
   fi
+  echo "  groupe fleet) : c'est lui qui fera tourner la fleet. Toi, tu restes le siège."
   _banner_body=("  sudo · paquets · groupe fleet · /opt/lcars")
   if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
   _banner_body+=(
@@ -957,14 +989,14 @@ else
   _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
   _step1b=""
 fi
-if [[ "$RAIL" == "workstation" && -n "${FLEET_HUMAN:-}" ]]; then
-  _step3="${W}3.${N} ${W}sudo -u $FLEET_HUMAN fleet_v2 start${N} — la fleet tourne sous"
-  _step3b="     « $FLEET_HUMAN » ; toi tu l'atteins par le groupe ${W}fleet${N}."
-elif [[ "$RAIL" == "workstation" ]]; then
-  # Aucun humain nommé : la ligne 3 ne peut pas donner une commande qui marche, donc elle donne le
-  # geste qui manque. Nommer une commande vouée au refus serait pire que de ne rien dire.
-  _step3="${W}3.${N} Nomme un humain de fleet, sinon personne ne peut la lancer :"
-  _step3b="     ${W}bash $0 --workstation --fleet-human <nom>${N}"
+# ⚠ CETTE LIGNE A EU DEUX BRANCHES, ET LA SECONDE ENVOYAIT CHERCHER UN GESTE QUI N'EXISTE PLUS. Sans
+# `--fleet-human` elle disait « nomme un humain, sinon personne ne peut la lancer » — sur une machine
+# où le rail venait justement d'en pré-semer un. Le nom se demande à son autorité, et l'acceptation
+# qui suit MESURE que `fleet_v2 start` marche sous lui : la ligne 3 n'a donc plus à supposer.
+if [[ "$RAIL" == "workstation" ]]; then
+  _step3_human="$(fleet_human_name)"
+  _step3="${W}3.${N} ${W}sudo -u $_step3_human fleet_v2 start${N} — la fleet tourne sous"
+  _step3b="     « $_step3_human » ; toi tu l'atteins par le groupe ${W}fleet${N}."
 else
   # ssh entre en `admiral`, le siege, a qui GUARD B refuse `fleet_v2 start`. La fleet se lance sous
   # un humain de fleet, et sa porte est sa console (`console.sh` : ssh est la porte d'admin).
@@ -987,8 +1019,10 @@ fi
 # Son verdict N'ÉCRASE PAS celui du provisionnement : les deux se cumulent, parce qu'ils ne mesurent
 # pas la même chose. Un rail qui converge et ne sert à rien doit dire les deux.
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/deploy/accept" ]]; then
+  # ⚠ LE NOM NE VOYAGE PLUS : `accept` vit dans le MÊME arbre que l'autorité et l'interroge lui-même.
+  # Le passer d'ici en ferait une copie de plus à tenir d'accord, pour un destinataire qui peut lire
+  # la source. Une donnée qu'on transmet à quelqu'un qui la possède déjà est une occasion de mentir.
   _accept_args=(--announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}")
-  [[ -n "${FLEET_HUMAN:-}" ]] && _accept_args+=(--fleet-human "$FLEET_HUMAN")
   # ⚠ SA PROPRE VARIABLE : `_apply_rc` a DÉJÀ été lu et tranché par le `case` bien plus haut — s'y
   # ranger ici ne changerait rien, et une acceptation qui échoue sans porter à conséquence est
   # exactement le défaut qu'elle existe pour fermer. Elle décide du code de sortie tout en bas.

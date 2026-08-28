@@ -241,14 +241,23 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 # refuse — « can not delete the last admin user [uid: 1] ». Structure non posee, et trois modules en
 # cascade derriere.
 
-@test "l'humain integre vient de PROV_FLEET_HUMAN, jamais de l'operateur" {
-  grep -q 'LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}"' "$SRC"
-  refute grep -q 'LCARS_BUILTIN_HUMAN="\$PROV_HUMAN"' "$SRC"
+@test "le module ne pose AUCUN nom d'humain integre — la recette est alimentee par son autorite" {
+  # ⚠ CETTE LIGNE A PORTE LE MAUVAIS NOM DEUX FOIS. D'abord `SUDO_USER` — l'operateur, cf. la
+  # cicatrice ci-dessus. Puis `PROV_FLEET_HUMAN`, vide dans le cas nominal : une variable qui ne
+  # portait un nom que si un drapeau l'avait dit, donc une seconde source pour un fait qui en a une.
+  # Le drapeau est retire ; la bonne valeur ici est AUCUNE.
+  local code
+  code="$(sed 's/#.*//' "$SRC")"
+  run grep -c 'LCARS_BUILTIN_HUMAN' <<<"$code"
+  [ "$output" = "0" ]
+  # GARDE D'INSTRUMENT : le depouillement laisse le reste de la commande, sinon deux zeros pourraient
+  # venir d'un `sed` casse plutot que du code.
+  grep -qE 'TF_CLI_CONFIG_FILE=' <<<"$code"
 }
 
-@test "sans humain de fleet, on ne passe RIEN — le defaut vit dans forge-gestures, pas ici" {
-  # Un litteral `lcars` ici en ferait un SECOND defaut pour un meme fait, et deux defauts ne restent
-  # d'accord que tant que personne n'en touche un.
+@test "le defaut de l'humain integre vit dans forge-gestures, et LUI SEUL le declare" {
+  # Un litteral `lcars` dans le module en ferait un SECOND defaut pour un meme fait, et deux defauts
+  # ne restent d'accord que tant que personne n'en touche un.
   # ⚠ ON EPINGLE QUE LA RECETTE EST ALIMENTEE DEPUIS LA-BAS, PAS LA FORME DE LA LIGNE. Ce temoin
   # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
   # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
@@ -256,8 +265,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
-  # et le module ne redit pas ce defaut
-  refute grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
+  # et le module ne grave aucun nom de compte humain, sous aucune forme
+  ! grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
 }
 
 # ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
@@ -424,8 +433,41 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # `forge-gestures.sh` publie la demo et la reference APRES la structure, et les deux echecs sont
   # NON FATAUX. Sans recablage : forge structuree, deux depots absents, aucun verdict qui baisse.
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
-  # le geste defaute bien sur des chemins de conteneur — c'est le fait qui rend le recablage requis
-  grep -q 'DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"' "$g"
+  # ⚠ LA RACINE SE DERIVE DU `COPY`, ELLE NE S'EPINGLE PLUS. Cette ligne portait
+  # `/opt/lcars/catalogues/web-demo` en dur, et l'assertion voisine le `COPY` du Dockerfile de meme.
+  # Deux litteraux epingles ne sont pas un accord : ils defendent LA VALEUR, pas l'entente. Mesure
+  # du 2026-08-27 — `@platform_root` de `Fleet.Layout` deplace vers `/opt/lcars2`, ces deux
+  # assertions restaient VERTES sur l'ancienne valeur pendant que le contrat Elixir
+  # `layout.catalogue_roots_single_source` rougissait en nommant les trois porteurs.
+  #
+  # Le partage est net : le contrat tient l'accord BEAM <-> tout le monde ; ce temoin tient l'accord
+  # LOCAL entre le geste de forge et l'image qui depose l'arbre. Deriver ici retire la seule chose
+  # que ce fichier ajoutait de faux — un troisieme exemplaire du litteral.
+  #
+  # ⚠ ET IL Y A DEUX `COPY catalogues` DANS CE DOCKERFILE : `/src/catalogues` pour l'etage `site`
+  # (qui construit la plaquette) et `/opt/lcars/catalogues` pour l'etage `runtime`. La premiere
+  # ecriture de cette derivation les prenait TOUS LES DEUX — `$racine` valait deux lignes, et
+  # `grep` traite un motif multi-ligne comme deux motifs ALTERNATIFS : le test passait par la
+  # seconde, donc par chance. Un instrument qui rend le bon verdict pour la mauvaise raison est un
+  # instrument qui rendra le mauvais des que l'ordre change.
+  #
+  # On ecarte donc l'etage de construction et on EXIGE l'unicite de ce qui reste : deux cibles
+  # runtime, ou zero, sont un Dockerfile que ce temoin ne sait pas lire — il le dit au lieu d'en
+  # choisir une.
+  local racines racine
+  racines="$(sed -nE 's|^COPY[[:space:]]+catalogues[[:space:]]+([^[:space:]]+)[[:space:]]*$|\1|p' \
+               "$BATS_TEST_DIRNAME/../docker/Dockerfile" | grep -v '^/src/' || true)"
+  [ "$(printf '%s\n' "$racines" | grep -c .)" -eq 1 ] || {
+    echo "le Dockerfile ne depose pas UN arbre de catalogues runtime, il en depose : ${racines:-aucun}" >&2
+    return 1
+  }
+  racine="$racines"
+  # le geste defaute bien sur un chemin d'image, et sur CELUI que l'image depose
+  grep -q "DEMO_CATALOGUE=\"\${LCARS_DEMO_CATALOGUE:-$racine/web-demo}\"" "$g" || {
+    echo "le defaut de DEMO_CATALOGUE ne suit pas « $racine » depose par le Dockerfile :" >&2
+    grep -n 'DEMO_CATALOGUE=' "$g" >&2
+    return 1
+  }
 
   # ⚠ `ENTRYPOINT` ETAIT LE TROISIEME DE CETTE LISTE, ET IL N'Y EST PLUS — son defaut ne se recable
   # plus, il se RESOUT. Il etait bien un chemin d'image, et il a coute une install le 2026-08-22 sur
@@ -455,9 +497,10 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_DEMO_CATALOGUE='
   code | grep -q 'LCARS_REFERENCE_CATALOGUE='
-  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`)
+  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`).
+  # La ligne du `COPY` est deja lue plus haut (`$racine`) : la re-epingler par sa valeur ferait le
+  # troisieme exemplaire du meme litteral dans ce seul test.
   [ -d "$BATS_TEST_DIRNAME/../../../catalogues/web-demo" ]
-  grep -q '^COPY catalogues /opt/lcars/catalogues' "$BATS_TEST_DIRNAME/../docker/Dockerfile"
 }
 
 @test "la REFERENCE se demande a son autorite, elle ne se recompose pas" {
@@ -702,17 +745,20 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
-@test "sans humain NOMME, le login se DEMANDE — sortir en silence rendait la fonction morte" {
-  # ⚠ SANS `--fleet-human` — LE CAS NOMINAL — le compte integre est cree par la recette sous le
-  # defaut de `forge-gestures.sh`. Une fonction qui sortirait en silence faute de nom ne poserait
-  # donc jamais le mot de passe de ce compte, c'est-a-dire jamais dans le cas ou elle sert.
+@test "le login se DEMANDE, et il n'a plus qu'une origine" {
+  # Le compte integre est cree par la recette sous le defaut de `forge-gestures.sh`. Une fonction qui
+  # sortirait en silence faute de nom ne poserait donc jamais le mot de passe de ce compte,
+  # c'est-a-dire jamais dans le cas ou elle sert.
   #
-  # Ne pas recopier ce defaut reste la regle ; on l'INTERROGE. Pas de litteral ici, pas de silence.
+  # ⚠ ELLE A LU `PROV_FLEET_HUMAN` D'ABORD, ET C'ETAIT UNE SECONDE ORIGINE. Elle ne portait un nom
+  # que si un drapeau l'avait dit ; sinon elle retombait sur l'autorite — donc le chemin nominal
+  # etait le REPLI, et le chemin nomme etait celui que personne n'exercait. Le drapeau retire, il ne
+  # reste que la question, et elle est posee sans condition.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
-  grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"
   grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
-  refute grep -q '"lcars"' <<<"$body"
+  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
+  ! grep -q '"lcars"' <<<"$body"
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {
@@ -736,8 +782,13 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
   grep -q 'announce_builtin_human_password' <<<"$body"
-  # Et quand le nom manque, il le DIT au lieu de reposer la moitie en silence.
-  grep -qE 'p_warn .*--fleet-human' <<<"$body"
+  # ⚠ ET L'APPEL EST INCONDITIONNEL. Il vivait sous un `if [[ -n "$PROV_FLEET_HUMAN" ]]`, donc la
+  # moitie « humain integre » de cette porte ne rouvrait que si l'operateur avait tape un drapeau —
+  # c'est-a-dire presque jamais, pendant que la perte qu'elle repare, elle, arrivait a l'identique.
+  # Une porte qui ne rouvre que la moitie de ce qu'on a perdu n'est pas une porte, et une porte
+  # conditionnee a un geste que personne ne fait n'en est pas une non plus.
+  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
+  ! grep -q 'fleet-human' <<<"$body"
 }
 
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
@@ -778,7 +829,68 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # refuserait un montage legitime en citant le port de quelqu'un d'autre.
   code() { grep -vE '^\s*#' "$SRC"; }
   code | grep -q 'com.docker.compose.project=\$PROV_FORGE_PROJECT'
-  code | grep -q 'com.docker.compose.service=forge'
+  # ⚠ CETTE LIGNE EPINGLAIT `service=forge`, C'EST-A-DIRE LA FAUTE. `b01fe3164` a renomme le service
+  # `forge:` en `gitea:` ; ce temoin a fige l'ancien nom et l'a protege pendant quinze jours. Un mur
+  # qui recopie ce qu'il devrait deriver ne garde pas l'invariant : il garde la copie.
+  code | grep -q 'com.docker.compose.service=\$FORGE_SERVICE'
+  run bash -c "! { $(declare -f code); code; } | grep -q 'compose.service=forge\b'"
+  [ "$status" -eq 0 ]
+}
+
+@test "la garde du nom de service est posee sur les DEUX chemins, apres le verdict docker" {
+  # ⚠ CE TEMOIN EXISTE PARCE QUE LA MUTATION NE POUVAIT PAS L'ATTRAPER. Retirer la garde ne change
+  # RIEN au seul cas qu'un test sans docker sait jouer — sans daemon, le module refuse avant de
+  # l'atteindre. Elle serait donc supprimable en silence, et le compose illisible redeviendrait un
+  # filtre vide : une sonde qui ne reconnait plus AUCUNE forge, donc un refus qui accuse la machine.
+  #
+  # ⚠ ET L'ORDRE EST L'INVARIANT, PAS LA PRESENCE. Posee AVANT le verdict docker, elle tue le module
+  # sur un compose absent alors que le fait utile est « aucun daemon » — c'est exactement la
+  # regression que la premiere ecriture de ce correctif a produite, et que le temoin voisin
+  # « sans daemon, un REFUS » a rattrapee.
+  code() { grep -vE '^\s*#' "$SRC"; }
+  local mode
+  for mode in check apply; do
+    local ldocker lgarde
+    ldocker="$(code | grep -n "verdict_$mode\$" | head -1 | cut -d: -f1)"
+    lgarde="$(code | grep -n "forge_service_known || verdict_$mode" | head -1 | cut -d: -f1)"
+    [ -n "$ldocker" ] || { echo "pas de verdict_$mode trouve" >&2; return 1; }
+    [ -n "$lgarde" ]  || { echo "la garde manque sur le chemin $mode" >&2; return 1; }
+    [ "$lgarde" -gt "$ldocker" ] || {
+      echo "la garde du chemin $mode est posee AVANT le verdict docker : un compose absent" >&2
+      echo "   masquerait « aucun daemon », qui est le fait utile" >&2; return 1; }
+  done
+}
+
+@test "le nom de service que le module derive EST celui que le compose declare" {
+  # Le seul temoin qui puisse voir revenir la divergence : il ne compare pas le module a une
+  # constante ecrite ici — il rejoue la derivation DU MODULE sur le compose REEL et confronte le
+  # resultat au premier service du bloc `services:`. Une troisieme copie ne peut plus s'installer.
+  #
+  # ⚠ MESURE DU 2026-08-28 (banc 1241) : le filtre cherchait `forge`, le conteneur s'appelait
+  # `vanille_3-forge-gitea-1`. Une DEUXIEME install sur une machine dont la forge tourne deja
+  # echouait sur « ce n'est pas la forge de cette machine » — a propos de sa propre forge.
+  local compose derive declared
+  compose="$BATS_TEST_DIRNAME/../docker/forge-compose.yml"
+  [ -f "$compose" ]
+
+  # La derivation, telle qu'elle est ECRITE dans le module — extraite du module, pas recopiee.
+  # ⚠ ON CAPTURE TOUT L'INTERIEUR DE `$( )`, PAS UNE LIGNE DE FORME FIXE. Ma premiere ecriture
+  # ancrait sur « … | head -n1)" » : ajouter un `|| true` a la ligne du module — un correctif
+  # legitime, et necessaire sous `set -e` — faisait rougir ce temoin sans qu'aucun invariant
+  # n'ait bouge. Un mur qui epingle la MISE EN FORME d'une ligne se casse a chaque retouche.
+  derive="$(grep -vE '^\s*#' "$SRC" | sed -n 's/^FORGE_SERVICE="\$(\(.*\))"$/\1/p' | head -n1)"
+  [ -n "$derive" ]
+
+  # Ce que le compose declare : premier service du bloc, borne pour ne pas mordre sur `volumes:`.
+  declared="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$compose" | head -n1)"
+  [ -n "$declared" ]
+
+  run bash -c "$(sed "s#\"\$COMPOSE_FILE\"#'$compose'#" <<<"$derive") | head -n1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$declared" ]
+
+  # Et le nom de conteneur derive du MEME fait, sans le recopier non plus.
+  grep -vE '^\s*#' "$SRC" | grep -q 'FORGE_CONTAINER="\${PROV_FORGE_PROJECT}-\${FORGE_SERVICE}-1"'
 }
 
 @test "le refus de deplacement vient AVANT le montage, et il nomme les DEUX intentions" {

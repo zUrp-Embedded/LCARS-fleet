@@ -346,12 +346,22 @@ say "forge up"
 export LCARS_STORE_PREFIX="$PROJECT"
 store_ensure_volumes "$DOCKER_BIN" || die "magasin non pose — la boite ne peut pas se creer" 3
 say "boite : projet $PROJECT, image $IMAGE, bind $BIND"
+# ⚠ « gitea » ET PAS « forge » DANS LES DEUX URL INTERNES CI-DESSOUS. C'est le nom du SERVICE
+# compose, donc l'entree DNS que le reseau publie. « forge » etait le nom interne qu'on s'etait
+# donne ; b01fe3164 a renomme le service et les URL internes sont restees sur l'ancien. Le
+# renommage ne se voit QUE sur une forge fraiche — le rail ne reapplique pas un compose a une forge
+# debout — d'ou quinze jours sans rien casser, puis un runner qui boucle sur « lookup forge : no
+# such host » a la premiere install neuve (mesure du 2026-08-28, banc).
+#
+# ⚠ ET NE PAS COMMENTER A L'INTERIEUR DE LA COMMANDE : elle est continuee par des « \ », et un
+# commentaire nu y coupe la continuation. Ce fichier a son idiome pour ca (une substitution qui ne
+# rend rien) ; je l'ai ignore et j'ai casse vingt-cinq temoins du banc en une ligne.
 env LCARS_IMAGE="$IMAGE" \
     `# identite-v2 : le box materialise admiral (master/sysadmin, uid 1000). Le worker "$HUMAN" (lcars)` \
     `# n'est PAS cree par le box — il vient de la forge (team fleet:humans) via le convergeur.` \
     LCARS_ADMIRAL="admiral" \
-    FORGE_BASE_URL="http://forge:3000" \
-    LCARS_SOURCE_REMOTE="http://forge:3000/fleet/lcars.git" \
+    FORGE_BASE_URL="http://gitea:3000" \
+    LCARS_SOURCE_REMOTE="http://gitea:3000/fleet/lcars.git" \
     LCARS_BIND="$BIND" \
     LCARS_SSH_PORT="${BIND}:${SSH_PORT}" \
     LCARS_LANDING_PORT_BIND="${BIND}:${DECK_PORT}" \

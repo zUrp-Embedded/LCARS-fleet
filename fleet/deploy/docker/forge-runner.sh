@@ -47,7 +47,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # `INSTANCE_URL`, lui, garde le sien : c'est le nom de service de la forge SUR SON PROPRE RESEAU,
 # identique des deux cotes puisque les deux montent le meme `forge-compose.yml`.
-FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://forge:3000" ; NETWORK=""
+# ⚠ `gitea`, ET PAS `forge` : c'est le nom du SERVICE compose, donc l'entree DNS que le reseau
+# publie. `forge` etait le nom interne qu'on s'etait donne ; `b01fe3164` a renomme le service
+# (`forge:` -> `gitea:`) et les URL internes sont restees sur l'ancien. Le renommage ne se voit
+# QUE sur une forge fraiche — le rail ne reapplique pas un compose a une forge debout — d'ou
+# quinze jours sans rien casser, puis un runner qui boucle sur « lookup forge : no such host »
+# a la premiere install neuve (mesure du 2026-08-28, banc).
+FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://gitea:3000" ; NETWORK=""
 PROJECT="" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
 # Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
 LABELS="${LCARS_RUNNER_LABELS:-}"
@@ -188,17 +194,22 @@ say "token d'enregistrement minte (${#REG} car)"
 # `config_files` du projet, donc l'effacer casserait un `compose` ultérieur sur ce meme projet.
 # Quelques ko qui restent valent mieux qu'un projet compose qui ne se relit plus.
 GEN="$(mktemp -d)"
-# ⚠ HEREDOC QUOTE, ET IL NE DOIT PLUS JAMAIS CESSER DE L'ETRE. Ce corps est de la PROSE, et elle
-# porte des accents graves. Non quote, bash y fait de la substitution de commande : `getent hosts
-# forge`, `wget http://forge:3000/…` et `git ls-remote …` etaient EXECUTES a chaque generation.
-# Mesure : ici la forge ne resout pas, les commandes ecrivent sur stderr et la prose sort AMPUTEE
-# (« n'a que , , . ») ; sur l'hote du runner, ou elle resout, `git ls-remote` rend deux lignes a
-# tabulations qui atterrissent HORS du `#` — et le config.yaml produit n'est plus du YAML valide
-# (« found character '\t' that cannot start any token »). Le runner refuse alors sa config.
-# `wget`, lui, telecharge un fichier `version` dans le cwd au passage.
-# Rien dans ce corps n'a besoin d'etre expanse : le seul `$` de la ligne est la cible du `>`.
+# ⚠ HEREDOC QUOTE (`<<'EOF'`), ET IL NE L'ETAIT PAS. Ce bloc n'a AUCUNE expansion a faire — il
+# n'y a pas un seul `$` dedans — mais il etait ouvert en `<<EOF`, donc le shell y evaluait tout.
+# Sa prose cite du code entre accents graves ; les accents graves sont des SUBSTITUTIONS DE
+# COMMANDE. Mesure du 2026-08-28, install reelle sur banc : `bridge`, `host` et `none` (les trois
+# drivers reseau, cites dans la phrase juste en dessous) ont ete EXECUTES — `bridge` a vide son
+# usage dans le log de l'install, les deux autres ont rendu « command not found » — et
+# `getent hosts forge`, `wget http://forge:3000/…` et `git ls-remote …` avec eux, ce qui a rempli
+# la sortie de « Temporary failure in name resolution » sur une machine dont le reseau va tres
+# bien. L'operateur lisait une panne reseau ; il n'y en avait aucune.
+#
+# ET LE FICHIER PRODUIT MENTAIT AUSSI : les mots cites sont remplaces par la sortie (vide) de leur
+# execution. Le config.yaml pose sur le banc porte « le daemon embarque du runner n'a que , , . »
+#
+# C'est le defaut que `bats.descriptions_inert` garde pour les descriptions de test — « un accent
+# grave nu y EXECUTE une commande » — a un autre endroit, qu'aucun mur ne regardait.
 cat > "$GEN/config.yaml" <<'EOF'
-
 # Genere par forge-runner.sh.
 #
 # ⚠ CE FICHIER FORÇAIT LES CONTENEURS DE JOB SUR LE RESEAU DE LA FORGE, et depuis que le runner
@@ -220,10 +231,27 @@ EOF
 # bind d'un chemin de CETTE distro WSL lui est invisible — il cree un repertoire vide a la place,
 # en silence (troisieme incarnation du piege des deux points de vue, apres l'URL navigateur et le
 # reseau des jobs). Le fichier est copie dans le volume du runner (/data), qui appartient a la VM.
+# ⚠ LE NOM DU SERVICE SE LIT DANS LA BASE, IL NE SE RECOPIE PLUS. Cette ligne disait `runner:`
+# alors que `runner-compose.yml` a renomme son service en `act` (b01fe3164, « des noms qui ne se
+# repetent plus »). Six consommateurs ont suivi ce renommage — `docker cp` cinquante lignes plus
+# bas, deux sondes ici, `bench-up`, `bench-down`, un bats. Le septieme a ete manque parce qu'il vit
+# DANS UN HEREDOC : c'est une chaine, invisible a tout grep sur le nom du service.
+#
+# CE QUE CA COUTAIT : compose fusionne les deux fichiers, ne trouve pas `runner` dans la base, et
+# CREE un service neuf qui n'a qu'un `environment:` — « service "runner" has neither an image nor a
+# build context specified: invalid compose project ». L'enrolement du runner echouait donc a CHAQUE
+# install fraiche, et avec lui toute la CI : « aucune PR ne fusionne, le rail de livraison est mort
+# avant son premier ticket ». Trouve au banc du 2026-08-28, pas par relecture.
+# ⚠ BORNE AU BLOC `services:`, ET MA PREMIERE ECRITURE NE L'ETAIT PAS. `runner-compose.yml` porte
+# aussi un bloc `volumes:` dont les entrees (`data:`, `dind:`) sont au MEME indent : un balayage du
+# fichier entier ne rendait le bon nom que parce que `services:` vient en premier. Vert par ordre
+# de fichier — exactement le defaut que ce correctif repare.
+SERVICE="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$HERE/runner-compose.yml" | head -n1)"
+[[ -n "$SERVICE" ]] || { echo "forge-runner: service introuvable dans runner-compose.yml — l'override ne peut pas le nommer" >&2; exit 1; }
 cat > "$GEN/override.yml" <<EOF
 # Genere par forge-runner.sh — additif au runner-compose de l'operateur, jamais un remplacement.
 services:
-  runner:
+  $SERVICE:
     environment:
       CONFIG_FILE: /data/bench-config.yaml
 networks:

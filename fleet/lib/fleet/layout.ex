@@ -63,6 +63,17 @@ defmodule Fleet.Layout do
   # What holds the placement now is WHO the tree is for, not which layer carries it.
   @installed_catalogues_root "/home/catalogues"
 
+  # L'ETAT RUNTIME DE LA BOITE — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
+  # `/run` et pas sous `@platform_root` pour la meme raison que `/home/catalogues` : ce qui MEURT au
+  # redemarrage ne doit pas cohabiter avec ce qui EST l'image. `/run` est un tmpfs ; poser cet etat
+  # ailleurs le ferait survivre a un boot, et un marqueur qui survit ment sur le boot qu'il decrit.
+  #
+  # ⚠ CETTE DECLARATION N'EXISTAIT PAS AVANT LE 2026-08-28, et quatorze faits la recopiaient.
+  # `/run/lcars` porte les sockets de l'autorite, du privilegie, du MCP, de l'egress et des consoles
+  # — c'est-a-dire toute la surface par laquelle un pod parle au reste de la machine. Le balayage
+  # derive du §21 l'a rendue deuxieme du corpus, sans une source.
+  @runtime_root "/run/lcars"
+
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
   @mcp_activity_marker "last_tool_call"
   # A pod's deliverable workspace subfolder. It lives HERE and not in either consumer because BOTH
@@ -199,6 +210,16 @@ defmodule Fleet.Layout do
   """
   @spec ops_root() :: Path.t()
   def ops_root, do: @ops_root
+
+  @doc """
+  Runtime state root (`#{@runtime_root}`) — the tmpfs tree that dies with the boot.
+
+  Sockets (authority, privileged, MCP, egress, consoles), boot markers and convergence locks live
+  here. It is NOT under `platform_root/0`: that tree IS the image, and a marker that survives a
+  reboot lies about the boot it describes.
+  """
+  @spec runtime_root() :: Path.t()
+  def runtime_root, do: @runtime_root
 
   @doc """
   DRAFTING root (`/home/projects.workshop`) — the project's workshop, authored by a producer.

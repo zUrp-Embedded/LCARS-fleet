@@ -34,8 +34,12 @@ setup() {
   # de console appartient a qui LANCE la fleet, et le module retombe sur `--human` seulement quand
   # cet humain n'existe pas encore. Sans cette ligne, le resultat depend de la presence d'un compte
   # `lcars` sur le poste qui joue les tests — vert ici, rouge ailleurs, pour un code identique.
-  export PROV_FLEET_HUMAN
-  PROV_FLEET_HUMAN="$(id -un)"
+  #
+  # ⚠ ET LA COUTURE A CHANGE DE MAISON : le decor posait `PROV_FLEET_HUMAN`, la variable du drapeau
+  # `--fleet-human`, retire. Le module interroge desormais l'AUTORITE du nom, et la seule facon
+  # honnete de la piloter est sa propre surcharge — celle que `forge-gestures.sh` declare. Poser une
+  # variable que le code ne lit plus aurait rendu ces temoins verts sur la machine du lanceur.
+  export LCARS_BUILTIN_HUMAN="$(id -un)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/catalogues-work"
@@ -69,7 +73,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   PROV_SUBSTRATE=linux mod 'prov_runtime_dirs'
   [ "$status" -eq 0 ]
   [[ "$output" == *"/run/lcars/console 0711 root:root"* ]]
-  [[ "$output" == *"/run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN:lcars-console"* ]]
+  [[ "$output" == *"/run/lcars/console/$LCARS_BUILTIN_HUMAN 2710 $LCARS_BUILTIN_HUMAN:lcars-console"* ]]
   # Le parent aussi : sans lui, `install -d` du dossier de console echoue sur un /run nu.
   [[ "$output" == *"/run/lcars 0755 root:root"* ]]
 }
@@ -86,11 +90,27 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 }
 
 @test "humain de fleet PAS ENCORE la : repli sur --human, jamais aucune racine du tout" {
-  # `22-fleet-human` peut deriver (useradd refuse). Sans repli, la machine perdrait AUSSI sa racine
-  # de console — deux pannes pour une cause, et la seconde sans rapport visible avec la premiere.
-  PROV_SUBSTRATE=linux PROV_FLEET_HUMAN="n-existe-pas-$$" mod 'prov_runtime_dirs'
+  # C'est le cas NOMINAL d'une install neuve, pas l'exotique : ce module joue au rang 25, la forge
+  # seme le compte au rang 48 et le convergeur le materialise au rang 64. Sans repli, la machine
+  # perdrait AUSSI sa racine de console — deux pannes pour une cause, et la seconde sans rapport
+  # visible avec la premiere.
+  PROV_SUBSTRATE=linux LCARS_BUILTIN_HUMAN="n-existe-pas-$$" mod 'prov_runtime_dirs'
   [ "$status" -eq 0 ]
   [[ "$output" == *"/run/lcars/console/temoin 2710 temoin:lcars-console"* ]]
+}
+
+@test "le nom vient de l'AUTORITE, pas d'un litteral ni d'un drapeau" {
+  # ⚠ CE RATTRAPAGE ETAIT MORT DANS LE CAS NOMINAL. La fonction lisait `PROV_FLEET_HUMAN`, pose par
+  # `--fleet-human` : sans le drapeau elle rendait l'operateur IMMEDIATEMENT, y compris sur un
+  # re-roll ou le compte existe depuis l'install precedente. La declaration tmpfiles — celle qui
+  # survit au reboot — nommait donc le mauvais humain pour toujours, pendant que le commentaire
+  # promettait que « le prochain apply corrigera ».
+  #
+  # On mesure les DEUX moities : le module demande le nom, et il n'en grave aucun.
+  local code; code="$(sed 's/#.*//' "$SRC")"
+  grep -q 'forge-gestures.sh" builtin-human' <<<"$code"
+  run grep -cE 'PROV_FLEET_HUMAN|"lcars"|:-lcars\}' <<<"$code"
+  [ "$output" = "0" ]
 }
 
 @test "le dossier de l'humain ne NOMME jamais un groupe homonyme — le groupe primaire est celui de la fleet" {
@@ -164,7 +184,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   PROV_SUBSTRATE=linux mod 'prov_tmpfiles_body'
   [ "$status" -eq 0 ]
   [[ "$output" == *"d /run/lcars/console 0711 root root -"* ]]
-  [[ "$output" == *"d /run/lcars/console/$PROV_FLEET_HUMAN 2710 $PROV_FLEET_HUMAN lcars-console -"* ]]
+  [[ "$output" == *"d /run/lcars/console/$LCARS_BUILTIN_HUMAN 2710 $LCARS_BUILTIN_HUMAN lcars-console -"* ]]
   # Autant de lignes `d ` que d'entrees dans la table : une entree ajoutee a la table arrive ici
   # sans geste, et une entree qui n'y est pas ne peut pas y apparaitre.
   PROV_SUBSTRATE=linux mod 'prov_tmpfiles_body | grep -c "^d "'

@@ -94,7 +94,7 @@ echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
 # EN SILENCE sous le `|| true`. Un runner zombie survivrait a la destruction du banc.
 RUNNER_ENV_DOWN="$(mktemp "${TMPDIR:-/tmp}/bench-down-runner.XXXXXX")"
 chmod 0600 "$RUNNER_ENV_DOWN"
-printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://forge:3000" " " > "$RUNNER_ENV_DOWN"
+printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "$RUNNER_ENV_DOWN"
 "$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -p "$RUNNER_PROJECT" \
   down -v --remove-orphans || true
 rm -f "$RUNNER_ENV_DOWN"

@@ -35,11 +35,16 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
   # Le perimetre : ce qui S'EXECUTE. Les temoins (`deploy/tests`, `test/`) nomment legitimement ce
   # qu'ils epinglent, et les documents de chantier ne tournent nulle part.
+  # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, ET C'EST CE QUI REND LE GARDE DERIVABLE. Ecrite en
+  # dur dans le `find`, elle ne pouvait etre comparee a rien : le garde plus bas devait la RECOPIER,
+  # donc il aurait fallu maintenir deux listes pour qu'un arbre perdu se voie. Une seule source, et
+  # le garde la consomme.
+  ARBRES=("$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/priv")
   mapfile -t CODE < <(
     # ⚠ `services` EST DANS LE PERIMETRE, ET C EST LA MOITIE QUI COMPTE : c'est la que vivent
     # l'executeur de catalogue, le convergeur d'humains et le convergeur d'outillage — le code
     # privilegie de la machine. L'oublier ferait passer les murs au vert en n'ayant rien lu.
-    find "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/priv" -type f \
+    find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name '*.yaml' -o -name 'lcars' -o -name 'box' \
          -o -name 'accept' -o -name 'provision' -o -name 'Dockerfile' -o -name '*.manifest' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
@@ -68,7 +73,23 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 @test "MUR: le perimetre n'est pas VIDE — un balayage casse compte zero, comme un sans-faute" {
   # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, extension renommee) rendrait
   # les deux murs verts en n'ayant rien lu. C'est la forme d'echec la plus chere : elle certifie.
-  [ "${#CODE[@]}" -ge 30 ]
+  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE, ET CELUI-CI ETAIT A 30 POUR 123 FICHIERS
+  # (mesure du 2026-08-27 : deploy 43, priv 59, services 12, bin 9). Perdre `priv` en entier laisse
+  # 64 fichiers — vert. Perdre `services`, la moitie qui compte selon le commentaire du `find`
+  # ci-dessus, en laisse 111 — vert. Le plancher ne detecte que le balayage TOTALEMENT casse.
+  #
+  # CHAQUE ARBRE NOMME DOIT DONC CONTRIBUER, et la regle se DERIVE de `ARBRES` — elle ne le recopie
+  # pas. Un arbre ajoute au `find` est garde le jour meme, sans que personne y pense.
+  local a
+  for a in "${ARBRES[@]}"; do
+    printf '%s\n' "${CODE[@]}" | grep -q "^$a/" || {
+      echo "MUR 0 rompu — l'arbre « ${a#"$REPO"/} » ne contribue AUCUN fichier au perimetre" >&2
+      return 1
+    }
+  done
+  # Le plancher reste, un cran sous la mesure : il attrape la perte massive qu'un arbre encore
+  # represente par un seul fichier laisserait passer.
+  [ "${#CODE[@]}" -ge 100 ]
   printf '%s\n' "${CODE[@]}" | grep -q 'forge-gestures.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'catalogue-executor.py'
   printf '%s\n' "${CODE[@]}" | grep -q 'bin/lcars'
@@ -219,7 +240,13 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   local manifest="$REPO/deploy/system.manifest"
   local row group
 
-  group="$(code_of "$mod" | sed -n 's/^OIDC_GROUP="\${PROV_SYSTEM_GROUP:-\([a-z0-9-]*\)}"$/\1/p')"
+  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `55-deck-oidc`
+  # gravait `${PROV_SYSTEM_GROUP:-lcars-system}` pendant que `21-service-accounts`, qui CREE le
+  # compte, derive `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}` : deux replis pour une variable, qui
+  # divergent des qu'on regle `PROV_SYSTEM_USER` seul. Le module derive desormais lui aussi
+  # (`${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-<nom>}}`), et ce temoin lit LE NOM AU FOND de la
+  # chaine — c'est lui que le manifeste doit porter, quel que soit le nombre de replis devant.
+  group="$(code_of "$mod" | sed -nE 's@^OIDC_GROUP=.*:-([a-z0-9-]+)\}+"$@\1@p')"
   [ -n "$group" ] || { echo "OIDC_GROUP illisible dans $mod" >&2; return 1; }
 
   row="$(grep -E '^anchor[[:space:]]+/etc/lcars/deck-oidc\.json[[:space:]]' "$manifest")"
@@ -236,8 +263,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # l'ensemble des detenteurs est VIDE entre deux lancements.
   local f
   for f in "${CODE[@]}"; do
-    absent 'ensure_member[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
-    absent 'usermod[^\n]*-aG[^\n]*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+    absent 'ensure_member.*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
+    absent 'usermod.*-aG.*(lcars-console|PROV_CONSOLE_GROUP)' "$f"
   done
 }
 
@@ -270,20 +297,41 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 @test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {
-  # Quatre fichiers le nomment : la lib (defaut), le module qui le cree, l'unite, et l'image.
-  # Une copie que personne ne compare n'est pas une source unique de verite — meme regle que la
-  # branche protegee du rail toolchain, et elle a deja coute une borne de securite reglable.
+  # DEUX fichiers le copient, et deux seulement : le rail BOITE. `entrypoint.sh` et le `Dockerfile`
+  # ne sourcent pas `provision-lib.sh` — ils ne peuvent pas LIRE le nom, donc ils l'ecrivent. Les
+  # deux modules du rail POSTE le lisaient en `${PROV_AUTHORITY_USER:-lcars-authority}` : une copie
+  # sur une branche morte, retiree le 2026-08-27 (`MUR 2` de `variable_walls` la refuse desormais).
+  # Moins de copies vaut mieux qu'une copie verifiee ; ce mur garde celles qui ne peuvent pas
+  # disparaitre.
+  #
+  # ⚠ ET IL ETAIT SATISFAIT PAR N'IMPORTE QUOI, MESURE DEUX FOIS LE MEME JOUR :
+  #
+  #   1. PAR UNE SOUS-CHAINE FORTUITE. `grep -q -- "lcars-authority"` sur le `Dockerfile` matche
+  #      `lcars-authority-ask`, un nom de BINAIRE. Mutation jouee : le compte renomme en
+  #      `lcars-autoritay` dans le `useradd` — le mur restait VERT. Le verrou cense tenir le nom du
+  #      compte du service d'autorite ne tenait rien dans l'image.
+  #
+  #   2. PAR UN COMMENTAIRE. `grep` brut, sans retrait de la prose. Apres avoir retire les deux
+  #      copies mortes, les deux modules avaient `CODE=0` occurrence du nom — et le mur restait VERT,
+  #      satisfait par le commentaire qui documentait le RETRAIT de la copie qu'il verifiait.
+  #
+  # On mesure donc le CODE, et on ancre sur le GESTE : l'image CREE le compte (`useradd`),
+  # l'entrypoint le POSE dans sa variable. Un nom qui apparait ailleurs ne compte pas.
   local attendu
   attendu="$(sed -n 's/^: "${PROV_AUTHORITY_USER:=\([a-z-]*\)}"$/\1/p' "$REPO/deploy/lib/provision-lib.sh")"
-  [ -n "$attendu" ]
-  local f
-  for f in "$REPO/deploy/modules.d/21-service-accounts.sh" \
-           "$REPO/deploy/modules.d/64-services.sh" \
-           "$REPO/deploy/docker/entrypoint.sh" \
-           "$REPO/deploy/docker/Dockerfile"; do
-    grep -q -- "$attendu" "$f" || {
-      echo "MUR 4 bis rompu — $f ne nomme pas « $attendu »" >&2
+  [ -n "$attendu" ] || { echo "MUR 4 bis — l'autorite est illisible dans provision-lib.sh" >&2; return 1; }
+
+  code_of "$REPO/deploy/docker/Dockerfile" \
+    | grep -qE "useradd.*[[:space:]]${attendu}([[:space:]]|\\\\|$)" || {
+      echo "MUR 4 bis rompu — le Dockerfile ne CREE pas le compte « $attendu » (useradd)" >&2
+      code_of "$REPO/deploy/docker/Dockerfile" | grep -nE 'useradd.*lcars' >&2
       return 1
     }
-  done
+
+  code_of "$REPO/deploy/docker/entrypoint.sh" \
+    | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
+      echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
+      code_of "$REPO/deploy/docker/entrypoint.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      return 1
+    }
 }

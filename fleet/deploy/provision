@@ -132,12 +132,14 @@ while [[ $# -gt 0 ]]; do
     --substrate) SUBSTRATE="${2:?--substrate attend une valeur}"; shift 2 ;;
     --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
-    # ⚖ USER 2026-08-21 : « on crée pas un user sur une machine nue. dans docker c'est sans gravité,
-    # là ça demande au moins une validation user. » Ce drapeau EST cette validation : nommer le
-    # compte, c'est l'autoriser. Sans lui, `22-fleet-human` ne crée RIEN — il dérive en nommant le
-    # geste. Un défaut câblé (`lcars`) ferait apparaître un utilisateur que personne n'a demandé sur
-    # une machine qui n'a aucun désinstalleur.
-    --fleet-human) export PROV_FLEET_HUMAN="${2:?--fleet-human attend un user}"; shift 2 ;;
+    # ⚠ `--fleet-human` A ÉTÉ RETIRÉ, ET IL NE SE RÉINTRODUIT PAS. Il prétendait AUTORISER la création
+    # de l'humain de fleet en le nommant (⚖ USER 2026-08-21, « on crée pas un user sur une machine
+    # nue ») — mais depuis que ce module ne crée plus (2026-08-25), le compte apparaît de toute façon :
+    # `48-forge-host` le sème sur la forge sous le défaut de `forge-gestures.sh`, et le convergeur le
+    # matérialise. Le drapeau ne validait donc plus rien ; il ne choisissait qu'un NOM, en concurrence
+    # avec l'autorité qui en tenait un autre. Le nom se DEMANDE désormais, et il n'a qu'une source :
+    # « fleet/services/forge-gestures.sh builtin-human ». Le consentement, lui, vit là où il a du sens
+    # — le bandeau de coût d'`install.sh`, qui annonce le compte avant qu'il existe.
     # Les deux ports que la machine PUBLIE. Ils ont un défaut (21000, 20999) et une sonde qui refuse
     # si le port est déjà pris par autre chose — mais le geste de changer d'avis n'existait que par
     # variable d'environnement, et une variable ne survit pas au `sudo` d'`install.sh`.
@@ -212,11 +214,12 @@ export PROV_SUBSTRATE="$SUBSTRATE"
 # par `sudo -u`. Toute autre valeur est une affirmation fausse sur cette machine.
 #
 # ⚠ ET SURTOUT PAS DEPUIS `PROV_HUMAN`, MÊME S'IL PORTE LA MÊME VALEUR ICI. Il vaut l'appelant par
-# défaut (`provision-lib`), mais `run_module` le REMPLACE par l'humain de fleet pour les modules
-# `NEEDS: human`. Une dérivation posée dans la lib rendrait donc, dans ces modules-là, l'uid de
-# l'humain de FLEET : la garde réserverait exactement le compte qu'elle doit laisser passer, et le
-# siège deviendrait libre. Le runner n'a pas encore d'humain cible à cet endroit — c'est le seul
-# point du rail où la question a une seule réponse.
+# défaut (`provision-lib`), mais le convergeur le REMPLACE par l'humain de fleet quand il rejoue les
+# modules `NEEDS: human` pour un compte qu'il vient de matérialiser (`provision apply --human <login>
+# --only …`). Une dérivation posée dans la lib rendrait donc, dans CETTE passe-là, l'uid de l'humain
+# de FLEET : la garde réserverait exactement le compte qu'elle doit laisser passer, et le siège
+# deviendrait libre. Ici, le runner n'a pas encore d'humain cible — c'est le seul point du rail où la
+# question a une seule réponse.
 #
 # `:=` et pas `=` : une valeur posée par l'appelant reste la sienne (le banc en a besoin).
 _seat_login="${SUDO_USER:-$(id -un)}"
@@ -851,7 +854,7 @@ if [[ "$CMD" == "apply" ]]; then
   export PROV_JOURNAL_ACC
 fi
 
-# ─── run_module <mod> <eff> [humain] — L'UID SE DÉCIDE ICI, ET UNE SEULE FOIS ────────────────────
+# ─── run_module <mod> <eff> — L'UID SE DÉCIDE ICI, ET UNE SEULE FOIS ─────────────────────────────
 #
 # Un module `# NEEDS: human` pose l'état d'UN humain DANS le home de cet humain. Il ne fait aucune
 # opération root — pas une seule sur les quatre qui le déclarent. Il tournait pourtant en root, et
@@ -871,11 +874,17 @@ fi
 # son humain est DANS le groupe de fleet. `20-groups` l'y met, et son rang est ce qui rend la
 # lecture possible aux rangs 40, 70 et 75 — réordonner casserait ça en silence, sur une lecture.
 #
-# L'humain passe en ARGUMENT, jamais en préfixe d'affectation : `PROV_HUMAN=x run_module …` devant
-# une FONCTION laisse la variable posée dans le shell appelant après le retour, donc le reste de la
-# boucle jouerait sous l'humain du dernier tour.
+# ⚠ CETTE FONCTION A PORTÉ UN TROISIÈME PARAMÈTRE — l'humain — et il est retiré avec le second
+# passage per-humain qui était son unique appelant. Un paramètre optionnel dont le repli est la seule
+# valeur atteignable AFFIRME qu'il existe un appelant qui passe autre chose ; contre l'impossible, un
+# repli documente faux, et le lecteur suivant écrit son propre code en croyant cette affirmation.
+#
+# L'humain cible reste `PROV_HUMAN`, et il n'a plus qu'un poseur : le drapeau `--human`. C'est par lui
+# que le convergeur joue les modules per-humain d'un compte (`provision apply --human <login>
+# --only …`), dans un PROCESSUS séparé — donc la variable est posée à l'entrée, une fois, et le
+# sous-shell ci-dessous n'a plus à arbitrer entre deux origines.
 run_module() {
-  local mod="$1" eff="$2" human="${3:-${PROV_HUMAN:-}}" name
+  local mod="$1" eff="$2" human="${PROV_HUMAN:-}" name
   name="$(basename "$mod" .sh)"
   # ⚠ LE SOUS-SHELL EST LE MECANISME, PAS UN EFFET DE BORD — cf. les deux lignes au-dessus : sans lui
   # l'`export PROV_HUMAN` survivrait au retour et le reste de la boucle jouerait sous l'humain du
@@ -946,71 +955,25 @@ for i in "${!SELECTED[@]}"; do
   esac
 done
 
-# ─── SECOND PASSAGE : L'ÉTAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────────
-# `--human` désigne QUI joue les modules `# NEEDS: human`, et sur le rail poste c'est l'opérateur
-# (SUDO_USER) — c'est-à-dire, presque toujours, le compte uid 1000 que GUARD B réserve au siège.
-# ⚠ CETTE PHRASE DISAIT « `22-fleet-human` vient de créer l'humain de fleet », ET ELLE EST FAUSSE
-# DEPUIS LE 2026-08-25. `22` NOMME ; `48-forge-host` sème le compte sur la forge ; `64-services`
-# tire le convergeur, qui matérialise le compte ET joue lui-même les modules `NEEDS: human` pour lui
-# (`converge_human` fait `provision apply --human <login> --only …`). Un lecteur qui dérivait de
-# cette phrase le moment où l'état per-humain apparaît cherchait au rang 22 ce qui se passe au 64.
+# ─── IL N'Y A PLUS DE SECOND PASSAGE PER-HUMAIN, ET C'EST UN RETRAIT MESURÉ ─────────────────────
 #
-# CE PASSAGE-CI RESTE, ET IL SERT L'AUTRE CAS : l'humain nommé avec `--fleet-human`. Sans lui, son
-# `~/.lcars`, son `~/pods` et son `fleet_v2.env` dépendraient entièrement d'un convergeur qui peut
-# être absent ou dériver — et `fleet_v2 start` échouerait sous lui pour une raison sans rapport avec
-# ce qu'on a passé la nuit à corriger. Les deux chemins sont idempotents et se recouvrent.
+# Ce fichier portait ici une seconde boucle : les modules `# NEEDS: human` rejoués sous l'humain de
+# fleet, en plus de l'opérateur. Elle ne pouvait s'armer que si `--fleet-human` nommait quelqu'un
+# d'AUTRE que `--human` ; le drapeau retiré, sa condition était morte, et 60 lignes seraient restées
+# vertes sous les témoins sans que rien ne les exécute — un instrument qui RESSEMBLE à une couverture.
 #
-# LA LISTE SE CALCULE, ELLE NE SE RECOPIE PAS — même règle et même code que `converge_human` du
-# convergeur de boîte : le provisionnement DÉCLARE lesquels de ses modules sont per-humain
-# (`# NEEDS: human`), on lit la déclaration. Une liste en dur redevient fausse au prochain module
-# ajouté ; c'est arrivé deux fois côté boîte (la console, puis le binaire `claude`).
+# ⚠ ET LE FILET QU'ELLE PRÉTENDAIT ÊTRE NE POUVAIT PAS COUVRIR SON PROPRE CAS. Elle se justifiait par
+# « si le convergeur est absent ou dérive, l'humain de fleet n'aurait ni `~/.lcars` ni `fleet_v2.env` ».
+# Or c'est le convergeur qui CRÉE ce compte depuis le 2026-08-25 : convergeur en panne, le compte
+# n'existe pas, `is_fleet_human` refuse, la boucle est inerte. Elle ne mordait donc que sur un re-roll
+# où le compte survit d'une install précédente ET où le convergeur échoue — cas où l'unité
+# `lcars-converger`, posée par `64-services`, échoue elle aussi toutes les 30 s. Elle rattrapait un
+# tour, jamais la panne.
 #
-# ⚠ EN BOUCLE INTERNE, JAMAIS EN RÉ-INVOQUANT `provision` : le verrou est tenu par CE processus, et
-# une ré-entrée se refuserait elle-même — « un autre apply est en cours ». Le convergeur de boîte,
-# lui, tourne dans un processus séparé et peut se permettre l'appel.
-#
-# ⚠ ET LES VERDICTS DE CE PASSAGE COMPTENT COMME LES AUTRES. Les faire taire donnerait un bilan qui
-# ignore la moitié per-humain de l'installation — c'est-à-dire précisément la moitié dont dépend le
-# démarrage de la fleet.
-if [[ "$CMD" == "apply" && "$SUBSTRATE" != "docker" ]]; then
-  _fleet_human="${PROV_FLEET_HUMAN:-}"
-  # ⚠ C'EST LA VALEUR D'ORIGINE QU'ON LIT, ET C'EST VOULU. `run_module` exporte `PROV_HUMAN` dans un
-  # SOUS-SHELL par tour de boucle ; ici, au niveau du script, elle n'a jamais bouge — comparer
-  # l'humain de fleet a l'humain COURANT n'aurait aucun sens s'il portait le dernier tour.
-  # shellcheck disable=SC2031 # portee voulue : la boucle ne teinte pas ce niveau
-  [[ -n "$_fleet_human" ]] || _fleet_human="${PROV_HUMAN:-}"
-  # shellcheck disable=SC2031
-  if [[ "$_fleet_human" != "${PROV_HUMAN:-}" ]] && is_fleet_human "$_fleet_human" 2>/dev/null; then
-    [[ "$PORCELAIN" -eq 1 ]] || {
-      echo ""
-      echo "${_PC}=== état per-humain de « $_fleet_human » (l'humain qui lancera la fleet) ===${_PN}"
-    }
-    # ⚠ ON REJOUE `SELECTED`, ON NE RE-PARCOURT PAS `modules.d`. La sélection est déjà calculée plus
-    # haut, et elle porte TROIS décisions qu'un second parcours perdrait : le filtre `--only`, le
-    # gating de substrat (`CHECK-ON`), et le choix apply-vs-check (`APPLY-ON`). Les refaire ici,
-    # c'est en oublier une — et un `--only 70-human` qui ne vaudrait que pour la première moitié du
-    # geste est exactement le genre d'asymétrie que personne ne remarque avant longtemps.
-    for i in "${!SELECTED[@]}"; do
-      mod="${SELECTED[$i]}"
-      [[ "$(module_field "$mod" NEEDS)" == "human" ]] || continue
-      name="$(basename "$mod" .sh)"
-      eff="${EFFECTIVE[$i]}"
-      total=$((total + 1))
-      [[ "$PORCELAIN" -eq 1 ]] || echo "${_PC}=== $name ($eff — humain $_fleet_human) ===${_PN}"
-      rc=0
-      run_module "$mod" "$eff" "$_fleet_human" || rc=$?
-      # Les codes s'interprètent selon le VERBE joué, jamais selon la commande demandée : `check`
-      # rend 1 pour un drift, `apply` rend 2. Confondre les deux ferait compter un drift comme un
-      # échec sur tout module hors de son substrat d'application.
-      case "$eff:$rc" in
-        *:0)        ok=$((ok + 1));     REPORT+=("$name@$_fleet_human=OK") ;;
-        apply:2|check:1) drift=$((drift + 1)); REPORT+=("$name@$_fleet_human=DRIFT") ;;
-        *)          failed=$((failed + 1)); REPORT+=("$name@$_fleet_human=FAIL")
-                    echo "${_PR}ERREUR $name ($_fleet_human):${_PN} $eff en echec (rc=$rc)" >&2 ;;
-      esac
-    done
-  fi
-fi
+# UN SEUL CRÉATEUR, UNE SEULE CONVERGENCE. C'est la décision du 2026-08-25 appliquée au geste suivant :
+# `converge_human` du convergeur calcule la même liste, à partir de la même déclaration
+# (`# NEEDS: human`), pour le même compte. Deux implémentations d'un même état-cible dérivent — et
+# celle qu'on ne relit pas est celle qui gagne le jour où elles ne disent plus la même chose.
 
 # ─── Verdict ──────────────────────────────────────────────────────────────────────────────────────
 if [[ "$PORCELAIN" -eq 1 ]]; then
@@ -1053,7 +1016,10 @@ else
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
         echo "substrate     $SUBSTRATE"
-        echo "prefix        ${PROV_PREFIX:-inconnu}"
+        # Sans repli : la lib pose `PROV_PREFIX` et ce runner la source bien plus haut, donc
+        # « inconnu » ne pouvait PAS s'afficher. Un etat que le rapport ne peut pas atteindre est
+        # un etat que le lecteur croit possible, et il n'a jamais existe.
+        echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
         # Une clef par ligne, valeurs fusionnées et dédoublonnées : `apt_ensure` est appelée par
         # plusieurs modules, et trois lignes `apt_installed` pour un même paquet ne disent rien de

@@ -28,20 +28,30 @@
 # canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash. Une recette jouee plus
 # tard ne pourrait pas verifier « je peux me connecter » — elle verifierait autre chose.
 #
-# USAGE : accept --announce-file <chemin> [--forge-url URL] [--fleet-human LOGIN]
+# USAGE : accept --announce-file <chemin> [--forge-url URL]
 # EXIT  : 0 les trois tiennent · 1 au moins une echoue · 2 argument manquant
 
 set -euo pipefail
 
-ANNOUNCE="" ; FORGE_URL="" ; FLEET_HUMAN=""
+ANNOUNCE="" ; FORGE_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --announce-file) ANNOUNCE="${2:?}"; shift 2 ;;
     --forge-url)     FORGE_URL="${2:?}"; shift 2 ;;
-    --fleet-human)   FLEET_HUMAN="${2:?}"; shift 2 ;;
     *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
   esac
 done
+
+# ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PLUS ────────────────────────────────
+#
+# ⚠ IL ARRIVAIT PAR `--fleet-human`, ET LA PORTE POUVAIT NE PAS LE PASSER. Sans le drapeau, cette
+# recette SAUTAIT la troisieme question — « est-ce que la fleet demarre ? » — sur une machine ou le
+# rail venait pourtant de pre-semer un humain : la capacite la plus chere a verifier etait celle
+# qu'on ne verifiait jamais dans le cas nominal.
+#
+# Ce fichier vit dans le MEME arbre que l'autorite du nom. Le recevoir d'un appelant qui l'a lu au
+# meme endroit en ferait une copie de plus a tenir d'accord — on le demande.
+FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 [[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
@@ -147,16 +157,66 @@ check_ci() {
 # On la laisse dans l'etat ou on l'a trouvee : arretee si elle l'etait.
 check_fleet_start() {
   local login="$FLEET_HUMAN" home
-  [[ -n "$login" ]] || { skip "fleet : aucun humain de fleet nomme — rien a demarrer"; return; }
+  # Le nom est indeterminable : l'arbre est incomplet ou l'autorite ne repond pas. On saute en le
+  # DISANT — un « rien a demarrer » ferait croire que la machine n'attend personne.
+  [[ -n "$login" ]] || { skip "fleet : le nom de l'humain de fleet est indeterminable (forge-gestures.sh builtin-human) — rien a demarrer"; return; }
   home="$(getent passwd "$login" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { no "fleet : « $login » inconnu du systeme"; return; }
   command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }
 
   local as=(runuser -u "$login" -- env "HOME=$home" "USER=$login" "LOGNAME=$login")
-  "${as[@]}" command -v fleet_v2 >/dev/null 2>&1 \
+
+  # ⚠ `command` EST UN BUILTIN DE SHELL, ET CETTE LIGNE LE PASSAIT A `env`. Il n'existe aucun
+  # `/usr/bin/command` : `env … command -v fleet_v2` rend `env: 'command': No such file or
+  # directory` et rc=127 SUR TOUTE MACHINE, quel que soit l'etat mesure. L'assertion ne pouvait donc
+  # pas reussir, et son NON accusait le PATH d'un compte parfaitement equipe.
+  #
+  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE. Cette fonction sortait plus haut, sur
+  # « aucun humain de fleet nomme », des que `--fleet-human` n'etait pas passe — c'est-a-dire dans le
+  # cas NOMINAL. Le seul chemin qui atteignait cette ligne demandait un drapeau que personne ne
+  # tapait. Elle a rougi au premier passage reel, le jour ou le nom a cesse de venir d'un drapeau.
+  # Mesure du 2026-08-28, banc poste : `runuser -u lcars -- bash -lc 'command -v fleet_v2'` rend
+  # `/usr/local/bin/fleet_v2` rc=0, pendant que la forme ci-dessus rendait 127.
+  #
+  # LE SHELL EST AUSSI LA BONNE QUESTION, pas seulement le bon outil : ce qui compte est que
+  # l'humain, dans SA session, atteigne le lanceur. `-l` charge son profil, donc on mesure le PATH
+  # qu'il aura vraiment, pas celui que le provisionnement traine.
+  "${as[@]}" bash -lc 'command -v fleet_v2' >/dev/null 2>&1 \
     || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
 
-  if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then
+  # ─── LE SONDAGE NE PASSE PLUS PAR UN TUYAU, ET C'EST UN CORRECTIF ─────────────────────────────
+  #
+  # ⚠ `… | grep -q` SOUS `set -o pipefail` REND FAUX QUAND GREP TROUVE. `grep -q` sort au PREMIER
+  # match et ferme le tuyau ; le producteur, qui a encore des lignes a ecrire, meurt sur SIGPIPE.
+  # `pipefail` prend alors le dernier code non nul du pipeline — celui du producteur — et le `if`
+  # est faux alors que la chaine cherchee a bien ete trouvee.
+  #
+  # MESURE DU 2026-08-28, banc poste, fleet PROUVEE vivante avant et apres la mesure :
+  #
+  #     sans pipefail    rc=0    PIPESTATUS=141 0
+  #     avec pipefail    rc=141  PIPESTATUS=141 0     <- le shell de ce fichier (ligne 34)
+  #
+  # 141 = 128+13 = SIGPIPE cote producteur ; 0 = grep A TROUVE. Les deux moities du pipeline
+  # disaient la verite, et c'est `pipefail` qui lisait la mauvaise.
+  #
+  # CE QUE CA COUTAIT : les DEUX sondages ci-dessous rendaient faux en permanence, donc la branche
+  # « deja demarree » ne pouvait jamais s'armer et la boucle ne pouvait jamais reussir. La troisieme
+  # capacite de ce fichier ne pouvait rendre que `NON` — sur toute machine, dans tout etat.
+  #
+  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE, comme l'assertion de PATH juste au-dessus :
+  # `check_fleet_start` sortait sur « aucun humain de fleet nomme » des que `--fleet-human` n'etait
+  # pas passe, c'est-a-dire dans le cas nominal. Deux instruments casses dans la meme fonction,
+  # decouverts le meme jour, par le meme retrait de drapeau.
+  #
+  # LA FORME QUI TIENT : on CAPTURE, puis on compare. Pas de tuyau, donc pas de SIGPIPE, donc pas
+  # d'interaction avec `pipefail` — et le `|| true` sur la capture dit que « status » qui echoue est
+  # une REPONSE (la fleet n'est pas la), jamais une panne de ce script.
+  fleet_up() { # fleet_up -> 0 si le BEAM de $login est vivant
+    local out; out="$("${as[@]}" fleet_v2 status 2>/dev/null || true)"
+    [[ "$out" == *"BEAM vivant"* ]]
+  }
+
+  if fleet_up; then
     ok "fleet : deja demarree sous « $login » (laissee telle quelle)"
     return
   fi
@@ -168,7 +228,7 @@ check_fleet_start() {
   # Le demarrage est asynchrone (tmux + BEAM) : on laisse le temps qu'il faut, borne.
   local alive=0
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then alive=1; break; fi
+    if fleet_up; then alive=1; break; fi
     sleep 2
   done
   "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true

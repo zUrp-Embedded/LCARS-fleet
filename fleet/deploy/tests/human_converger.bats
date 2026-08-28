@@ -39,6 +39,23 @@ lcars:x:1000:1000::/home/lcars:/bin/bash
 EOF
   echo "UID_MIN			 1000" > "$PASSWD_DEFS"
   export PASSWD_FILE PASSWD_DEFS
+
+  # ⚠ LE TROISIEME SEAM, ET SANS LUI LA PREMISSE DE CE FICHIER APPARTIENT A LA MACHINE. Le SUT
+  # resout le siege par FICHIER D'ABORD (`/etc/lcars/seat.uid`), `LCARS_SYSADMIN_UID` seulement en
+  # second — c'est voulu, c'est GUARD B : la variable appartient au processus garde, donc elle ne
+  # decide pas de sa borne. Consequence pour un temoin : sur une machine PROVISIONNEE, le fichier
+  # existe, il gagne, et les `LCARS_SYSADMIN_UID=…` que ces tests posent ne sont plus lus du tout.
+  #
+  # MESURE DU 2026-08-27 : avec un siege etabli a 1001, SEPT temoins de ce fichier rougissent sur du
+  # code juste — les deux GUARD A, l'ecart des comptes systeme, et le plancher d'uid. Ils sont verts
+  # sur ce poste de dev pour une seule raison : `/etc/lcars/seat.uid` n'y existe pas. Un temoin dont
+  # le verdict depend de qui le lance n'atteste rien.
+  #
+  # On pointe le seam vers un chemin QUI N'EXISTE PAS, et c'est le geste juste plutot que d'y ecrire
+  # 1000 : chaque test declare SON siege via `LCARS_SYSADMIN_UID` (1000, 1237, et deux valeurs
+  # malformees pour le garde d'arithmetique). Fermer le canal fichier rend leur declaration
+  # effective ; y poser une valeur les ecraserait toutes par une seule.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
 }
 
 # Helper: source the SUT in a fresh shell and run a predicate on <login>.
@@ -358,7 +375,11 @@ converged() { # converged -> la liste calculee
   run bash -c "
     set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' GROUP_FILE='$GROUP_FILE'
-    export LCARS_SYSADMIN_UID='${LCARS_SYSADMIN_UID:-1000}'
+    # ⚠ 1000 EN DUR, ET C'ETAIT '\${LCARS_SYSADMIN_UID:-1000}'. Le repli lisait l'environnement du
+    # LANCEUR : un operateur qui exporte cette variable pour tout autre motif retunait la premisse
+    # des deux GUARD A sans le savoir. Mesure : \`LCARS_SYSADMIN_UID=1001\` a l'appel de la suite,
+    # trois temoins rouges. Un temoin declare sa premisse, il ne la recoit pas.
+    export LCARS_SYSADMIN_UID=1000
     source '$SUT'
     converged_humans"
 }

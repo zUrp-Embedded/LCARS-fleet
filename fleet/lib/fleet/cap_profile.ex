@@ -768,7 +768,7 @@ defmodule Fleet.CapProfile do
   The forge LOGIN a role writes under — `<tier>_<role>`, or `{:error, _}`.
 
   THE RULE WAS ALREADY HERE, AND ONLY THE PROVISIONING SIDE COULD SEE IT. It lived private inside
-  `Fleet.Application.CatalogueRoles`, which emits the tofu roster, so the accounts got CREATED as
+  `Fleet.Roster`, which emits the tofu roster, so the accounts got CREATED as
   `fleet_qualifier` while the runtime kept addressing them as `qualifier`. Measured 2026-08-11: a
   deliverable PR opened, `request_review` answered `404 User 'qualifier' not exist`, and the PR sat
   with no judge — the review leg simply never started. The read half fails the same way and more
@@ -781,7 +781,7 @@ defmodule Fleet.CapProfile do
   decides, and a role declared only by the business catalogue takes that catalogue's name.
 
   Memoized per catalogue root: the poller resolves a jury on every tick and this reads YAML off
-  disk. The key carries the root, so a test or `CatalogueRoles` borrowing the catalogue gets its
+  disk. The key carries the root, so a test or `Fleet.Roster` borrowing the catalogue gets its
   own entry rather than a stale answer from the previous one.
   """
   @spec forge_login(String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -842,7 +842,7 @@ defmodule Fleet.CapProfile do
 
   # ONE PASS PER INSTALLED CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
   # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
-  # projection came from `Fleet.Application.CatalogueRoles`, where it ran with a single catalogue
+  # projection came from `Fleet.Roster`, where it ran with a single catalogue
   # BORROWED into `:lcars_fleet, :catalogue_root`, so `Fleet.Catalogue.name()` was the declaring
   # catalogue and asking it was correct. Lifted here it runs globally, where that name is only the
   # DEFAULT catalogue: measured, a role declared by `biz` projected to `fleet_biz-dev` while its

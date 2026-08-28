@@ -168,6 +168,60 @@ PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 FORGE_CONTAINER="${PROV_FORGE_PROJECT}-gitea-1"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/forge-compose.yml"
+
+# ─── LE NOM DU SERVICE COMPOSE — LU DANS LE COMPOSE, PAS RECOPIE ────────────────────────────────
+#
+# ⚠ CE MODULE PORTAIT DEUX COPIES DE CE NOM ET ELLES AVAIENT DIVERGE. `b01fe3164` a renomme le
+# service `forge:` en `gitea:` ; le nom de conteneur a suivi (`-gitea-1`), le filtre de
+# `forge_running_port` NON — il cherchait encore `com.docker.compose.service=forge`.
+#
+# ⚠ ET LE DEFAUT EST MUET AU PREMIER PASSAGE, CE QUI EXPLIQUE QUINZE JOURS DE SILENCE. Forge
+# absente, la sonde ne rend rien : c'est la BONNE reponse, et le module monte la forge. Le filtre
+# faux ne se voit que sur une machine ou une forge TOURNE DEJA — elle n'est plus reconnue, et
+# `foreign_forge_refusal` accuse « ce n'est pas la forge de cette machine » a propos de la forge de
+# cette machine. Mesure du 2026-08-28, banc 1241, deuxieme passe sur une forge debout :
+#
+#     FAIL 48-forge-host: une forge repond sur http://127.0.0.1:21060, mais AUCUN conteneur du
+#     projet « vanille_3-forge » ne publie 21060 — ce n'est pas la forge de cette machine
+#
+# Aucune suite ne pouvait le voir : la CI n'installe jamais deux fois de suite sur la meme machine.
+# C'est le TROISIEME consommateur oublie du meme renommage, apres le heredoc (`e4056cde1`) et l'URL
+# interne (`6306aa1de`) — un fait recopie a une quinzaine d'endroits, sans source designee.
+#
+# ⚠ BORNE AU BLOC `services:`. `forge-compose.yml` porte aussi un bloc `volumes:` dont les entrees
+# sont au MEME indent ; un balayage du fichier entier ne rendrait le bon nom que parce que
+# `services:` vient en premier — vert par ordre de fichier, exactement ce qu'on repare. Meme forme
+# que `deploy/docker/forge-runner.sh`, qui a paye la meme lecon la meme semaine.
+#
+# ⚠ FAIL-CLOSED SUR L'ANCRE. Un compose illisible ne rend pas « rien a filtrer » : il rendrait un
+# filtre VIDE, donc une sonde qui ne reconnait plus aucune forge, donc un refus qui accuse la
+# machine au lieu du fichier. On meurt ici, en nommant le fichier.
+# ⚠ `|| true` OBLIGATOIRE, ET SON ABSENCE A PRODUIT UN MORT SILENCIEUX. Ce module tourne sous
+# `set -euo pipefail` : une assignation dont la substitution echoue TUE le script sur place, sans
+# un mot. Compose absent -> `sed` sort en 2 -> le module mourait avant d'avoir rien imprime.
+# ⚠ ET LE TEMOIN VOISIN PASSAIT QUAND MEME, ce qui est le vrai enseignement : il verifiait
+# `status -eq 2`, et le 2 rendu par `sed` sur un fichier absent est le meme entier que le 2 du
+# verdict. Un code de sortie juste pour une raison fausse — il n'a rougi que sur l'assertion
+# SUIVANTE, celle qui lisait le texte. Une valeur attendue ne prouve pas le chemin qui la produit.
+FORGE_SERVICE="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$COMPOSE_FILE" 2>/dev/null | head -n1 || true)"
+FORGE_CONTAINER="${PROV_FORGE_PROJECT}-${FORGE_SERVICE}-1"
+
+# ⚠ LE REFUS NE SE POSE PAS ICI, ET MA PREMIERE ECRITURE LE POSAIT. Un `p_die` au chargement tue le
+# module AVANT qu'il ait pu constater ce qui compte davantage : sans daemon docker, ce module n'a
+# rien a faire du nom d'un service, et son verdict utile est « aucun daemon ». Mesure : le temoin
+# « 48-forge-host : sans daemon, un REFUS » est parti au rouge — son decor ne porte pas le compose
+# (`repo_root` derive de `PROVISION_LIB`, qui pointe le sandbox), donc le module mourait sur le
+# compose en masquant le refus daemon. Un refus qui en cache un plus utile est une regression.
+#
+# ⚠ ET PAS DE `p_die` DANS UNE SUBSTITUTION NON PLUS. `$(forge_service)` s'evalue dans un
+# SOUS-SHELL : l'`exit` n'y tue que le sous-shell, le module continue avec une chaine vide, et le
+# fail-closed devient un fail-open muet. La garde est donc une INSTRUCTION, appelee sur le chemin
+# nominal une fois docker acquis — la ou le nom sert vraiment.
+forge_service_known() {
+  [[ -n "$FORGE_SERVICE" ]] && return 0
+  p_fail "aucun service lisible dans $COMPOSE_FILE — le nom du conteneur et le filtre docker en derivent tous les deux, et sans lui la sonde ne reconnaitrait AUCUNE forge"
+  return 1
+}
 # ⚠ DEUX URLS, ET CHACUNE A UN SEUL LECTEUR LÉGITIME.
 #   LOCAL_URL   par où CE module et ses voisins parlent à la forge — toujours la loopback, parce
 #               qu'ils tournent sur la machine. C'est elle qui va dans `forge.url`, lue par
@@ -188,7 +242,7 @@ forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null
 # exactement quand il change — c'est-a-dire quand la reponse compte.
 forge_running_port() {
   d ps --filter "label=com.docker.compose.project=$PROV_FORGE_PROJECT" \
-       --filter "label=com.docker.compose.service=forge" \
+       --filter "label=com.docker.compose.service=$FORGE_SERVICE" \
        --format '{{.Ports}}' 2>/dev/null \
     | sed -n 's/.*:\([0-9]\{1,5\}\)->3000\/tcp.*/\1/p' | head -n1
 }
@@ -275,13 +329,16 @@ BUILTIN_PW_MARK="$PROV_TOKENS_DIR/forge-builtin-human.posed"
 
 announce_builtin_human_password() {
   local login tok pw code
-  # ⚠ ON DEMANDE LE NOM, ON NE LE DEVINE NI NE LE RECOPIE. Sans humain de fleet nommé, c'est le
-  # défaut de `forge-gestures.sh` qui a été appliqué à la recette : ce module doit poser un mot de
-  # passe sur CE compte-là. Un littéral ici en ferait un second défaut ; sortir en silence — ce que
-  # faisait la première écriture — rendait la fonction morte dans le cas NOMINAL, c'est-à-dire
-  # exactement quand elle sert. Le verbe `builtin-human` est la porte : une autorité, interrogée.
-  login="${PROV_FLEET_HUMAN:-}"
-  [[ -n "$login" ]] || login="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  # ⚠ ON DEMANDE LE NOM, ON NE LE DEVINE NI NE LE RECOPIE. C'est le défaut de `forge-gestures.sh` qui
+  # a été appliqué à la recette : ce module doit poser un mot de passe sur CE compte-là. Un littéral
+  # ici en ferait un second défaut ; sortir en silence — ce que faisait la première écriture —
+  # rendait la fonction morte dans le cas NOMINAL, c'est-à-dire exactement quand elle sert. Le verbe
+  # `builtin-human` est la porte : une autorité, interrogée.
+  #
+  # ⚠ CETTE LIGNE LISAIT `PROV_FLEET_HUMAN` D'ABORD, ET C'ÉTAIT UNE SECONDE SOURCE. Le drapeau qui la
+  # posait est retiré : deux origines pour un nom, c'est celle qu'on ne relit pas qui gagne le jour où
+  # elles divergent. Il n'en reste qu'une, et elle répond.
+  login="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   [[ -n "$login" ]] || { p_warn "mot de passe forge de l'humain intégré NON posé : son nom est indéterminable"; return 0; }
 
   if [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] \
@@ -340,14 +397,12 @@ reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste 
   # sautée, et l'opérateur qui a perdu ses identifiants n'avait de recours que pour l'admin. Une
   # porte qui ne rouvre que la moitié de ce qu'on a perdu n'est pas une porte.
   #
-  # Elle exige le nom, et ce n'est pas une lacune : le compte intégré tient son nom du défaut de
-  # `forge-gestures.sh`, et le recopier ici en ferait un second. « --fleet-human <nom> » le NOMME,
-  # et nommer est déjà le geste par lequel ce rail autorise ce qui touche à un humain.
-  if [[ -n "${PROV_FLEET_HUMAN:-}" ]]; then
-    announce_builtin_human_password
-  else
-    p_warn "seul « $PROV_FORGE_ADMIN » a été reposé — pour l'humain de fleet aussi, nomme-le : « --fleet-human <nom> »"
-  fi
+  # ⚠ ET ELLE ÉTAIT CONDITIONNÉE À UN DRAPEAU, DONC LA MOITIÉ QU'ELLE PROMET NE ROUVRAIT PRESQUE
+  # JAMAIS. Ce bloc n'appelait l'annonce que si `--fleet-human` avait nommé quelqu'un, et renvoyait
+  # sinon l'opérateur vers ce drapeau — c'est-à-dire, dans le cas nominal, vers un geste qui ne
+  # changeait rien à QUEL compte existe. Le nom se demande à son autorité, `announce_builtin_human_password`
+  # le fait déjà, et son seul refus légitime est « l'autorité ne répond pas ».
+  announce_builtin_human_password
 }
 
 # ─── L'ADMINITÉ SE MESURE SUR LA FORGE, ET SEULE LA FORGE PEUT LA CHANGER ───────────────────────
@@ -447,6 +502,7 @@ check() {
     p_fail "$PROV_DOCKER_WHY — la forge du poste est un CONTENEUR, il n'en existe aucune autre forme"
     verdict_check
   fi
+  forge_service_known || verdict_check
   if forge_up && docker_answers && ! forge_is_ours; then
     foreign_forge_refusal
     verdict_check
@@ -478,6 +534,7 @@ apply() {
     p_fail "$PROV_DOCKER_WHY — forge NON montée, et elle ne peut pas l'être autrement"
     verdict_apply
   fi
+  forge_service_known || verdict_apply
   # ⚠ CE MODULE NE DÉPEND PLUS D'UNE IMAGE, IL DÉPEND DE `46-tofu`. Il exigeait ici la présence de
   # `lcars-fleet:2` — 1,18 Go bâtis pour exécuter 100 ko de recette dans un conteneur jetable, sur un
   # rail qui ne démarre jamais cette image. Ce qu'elle apportait de réel (une version figée, des
@@ -883,24 +940,19 @@ apply() {
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
     LCARS_REFERENCE_CATALOGUE="$ref_catalogue" \
     TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-    `# ⚠ L'HUMAIN INTÉGRÉ N'EST PAS L'OPÉRATEUR, ET CETTE LIGNE LES CONFONDAIT.` \
-    `# La recette le dit d'elle-même : « CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du` \
-    `# compte que l'admin d'une forge crée à son installation […] Un déploiement réel ne "passe` \
-    `# pas le sien" — les vraies personnes s'inscrivent seules et un admin les ajoute à humans ».` \
-    `# Les deux autres rails le savent : forge-gestures.sh défaute sur "lcars", bench-forge-` \
-    `# bootstrap passe l'humain de banc. Le rail poste était le seul à y mettre SUDO_USER.` \
+    `# ⚠ AUCUN « LCARS_BUILTIN_HUMAN » ICI, ET SON ABSENCE EST LA DÉCISION. Ce module a porté deux` \
+    `# fois de suite le mauvais nom sur cette ligne : d'abord SUDO_USER — donc l'OPÉRATEUR, que la` \
+    `# recette pose en admin=false, et qui devenu le #1 de la forge en était le DERNIER admin :` \
+    `# « can not delete the last admin user [uid: 1] », structure NON posée, ni jetons de rôle, ni` \
+    `# OIDC, ni branche ops, quatre modules tombés pour une ligne — puis PROV_FLEET_HUMAN, vide dans` \
+    `# le cas nominal, donc une variable qui ne portait un nom que quand un drapeau l'avait dit.` \
     `#` \
-    `# Ce que ça coûtait n'a été visible qu'à froid, et seulement depuis D7. La recette pose` \
-    `# admin = false sur ce compte ; tant que le #1 de la forge était "admiral", l'opérateur` \
-    `# était le #2 et personne ne s'en apercevait. Devenu #1 et admin, il est le DERNIER admin —` \
-    `# et Gitea refuse net : « can not delete the last admin user [uid: 1] ». Structure NON posée,` \
-    `# donc pas de jetons de rôle, donc pas d'OIDC ni de branche ops. Quatre modules pour une` \
-    `# ligne qui visait le mauvais humain depuis le début.` \
-    `#` \
-    `# VIDE EST UNE RÉPONSE : sans humain de fleet nommé, on ne passe rien et forge-gestures.sh` \
-    `# applique SON défaut. Un littéral "lcars" ici en ferait un second, et deux défauts pour un` \
-    `# fait ne restent d'accord que tant que personne n'en touche un.` \
-    LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}" \
+    `# LE COMPTE INTÉGRÉ N'EST PAS UNE PERSONNE, et la recette le dit d'elle-même : « il tient le` \
+    `# siège du compte que l'admin d'une forge crée à son installation […] les vraies personnes` \
+    `# s'inscrivent seules et un admin les ajoute à humans ». Son nom appartient donc à` \
+    `# forge-gestures.sh, qui l'applique lui-même. NE RIEN PASSER est ce qui garde UNE source : un` \
+    `# littéral, une variable ou un repli ici en feraient un second, d'accord avec elle jusqu'au` \
+    `# jour où l'un des deux bouge — et c'est arrivé deux fois sur cette ligne exactement.` \
     bash "$(repo_root)/fleet/services/forge-gestures.sh" apply 2>&1 | tee "$tf_out" || rc="${PIPESTATUS[0]}"
   rm -rf "$recipe" "$enroll"
   [[ "$rc" -eq 0 ]] \

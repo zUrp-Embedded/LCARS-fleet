@@ -121,6 +121,13 @@ defmodule Mix.Tasks.Lcars.Topology do
     # this boundary alone.
     "Fleet.Forge" => "work",
     "Fleet.MCP" => "work",
+    # La PROJECTION du roster de forge d'un catalogue. Son etage se deduit de sa plus haute dep :
+    # `Fleet.Credentials` (pod primitives), donc elle est au-dessus. Ni composition de pod, ni
+    # pilotage — elle ne tourne pas au runtime : elle est lue par les portes CLI et par le gate.
+    # `work` est le premier etage qui la contienne honnetement, avec ses voisins qui dependent
+    # eux aussi de Credentials. Elle vivait sous `Fleet.Application` sans etre du code de boot
+    # (2026-08-27, arbitrage user) — le rangement precedent la mettait au sommet du graphe.
+    "Fleet.Roster" => "work",
     "Fleet.Observation" => "surface",
     "Fleet.Pilot" => "steering",
     "Fleet.Admiral" => "steering",

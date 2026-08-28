@@ -293,70 +293,57 @@ stub_impersonation() {
   echo 'as_human() { "$@"; }' >> "$SANDBOX/lib/provision-lib.sh"
 }
 
-# ─── LE SECOND PASSAGE : L'ETAT PER-HUMAIN DE L'HUMAIN DE FLEET ─────────────────────────────────
-# `--human` designe l'OPERATEUR (SUDO_USER), qui sur un poste est presque toujours l'uid 1000 que
-# GUARD B reserve au siege. `22-fleet-human` cree l'humain de fleet ; sans ce passage, son
-# `~/.lcars`, son `~/pods` et son `fleet_v2.env` n'existeraient jamais, et `fleet_v2 start`
-# echouerait sous lui pour une raison sans rapport avec ce qu'on vient d'installer.
+# ─── IL N'Y A PLUS DE SECOND PASSAGE PER-HUMAIN, ET C'EST CE QUI SE GARDE ICI ───────────────────
+#
+# Ce fichier portait quatre temoins sur une seconde boucle du runner : les modules `# NEEDS: human`
+# rejoues sous l'humain de fleet, en plus de l'operateur. Elle ne pouvait s'armer que si
+# `--fleet-human` nommait quelqu'un d'AUTRE que `--human` ; le drapeau retire, sa condition etait
+# morte, et les quatre temoins seraient restes verts sur du code que rien n'execute.
+#
+# ⚠ ET ILS NE MESURAIENT PAS CE QUE LEUR NOM DISAIT. Ils jouaient un module DOUBLURE (`50-perhuman`)
+# pour compter les passages du RUNNER — le module 22 n'y entrait jamais. Ce qu'ils perdent n'est donc
+# pas une propriete du rail, c'est leur sujet.
+#
+# CE QUI RESTE VRAI, ET QUI DOIT LE RESTER : un module per-humain est joue UNE FOIS par passe, sous
+# l'humain que `--human` designe. C'est le convergeur qui rejoue les modules d'un humain de fleet,
+# dans un processus separe (`provision apply --human <login> --only …`), parce qu'il est le seul a
+# savoir quand ce compte apparait. Une seconde boucle ici doublerait son travail et poserait l'etat
+# d'un humain que la forge n'a peut-etre pas declare.
 
-@test "second passage: les modules per-humain sont REJOUES pour l'humain de fleet" {
+@test "un module per-humain est joue UNE SEULE FOIS, sous l'humain que --human designe" {
+  # ⚠ LE PENDANT DE CE TEMOIN EST SA RAISON D'ETRE : il rougit si quelqu'un reintroduit une boucle
+  # per-humain dans le runner. Un rejeu doublerait chaque module `NEEDS: human` de chaque apply, et
+  # le bilan compterait deux fois les memes modules sans que rien ne le dise.
   stub_impersonation
   lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
-  # Le siege est ecarte de l'uid courant pour que `is_fleet_human` accepte le compte qui joue les
-  # tests — sinon ce temoin mesurerait la composition de la machine au lieu du mecanisme.
-  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="$(id -un)" \
-    "$SANDBOX/provision" apply --substrate linux --human root
+  run env LCARS_SYSADMIN_UID=0 "$SANDBOX/provision" apply --substrate linux --human root
 
   [ "$status" -eq 0 ]
   run grep -c "^human=" "$RUN_LOG"
-  [ "$output" = "2" ]
+  [ "$output" = "1" ]
   grep -qx "human=root" "$RUN_LOG"
-  grep -qx "human=$(id -un)" "$RUN_LOG"
 }
 
-@test "second passage: l'humain de fleet EGAL a l'operateur ne rejoue rien" {
-  # Sans ce pendant, un correctif qui rejouerait TOUJOURS passerait le temoin ci-dessus, et chaque
-  # apply de boite doublerait ses modules per-humain — deux fois le travail, et un bilan qui compte
-  # deux fois les memes modules.
-  stub_impersonation
-  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
-  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN=root \
-    "$SANDBOX/provision" apply --substrate linux --human root
-
-  [ "$status" -eq 0 ]
-  run grep -c "^human=" "$RUN_LOG"
-  [ "$output" = "1" ]
-}
-
-@test "second passage: JAMAIS sur docker — c'est le convergeur qui y possede les humains" {
-  # Dans la boite, `human-converger.sh` materialise N humains depuis la team `humans` de la forge et
-  # rejoue leurs modules. Un second passage ici doublerait son travail et poserait l'etat d'un
-  # humain que la forge n'a peut-etre pas declare.
-  stub_impersonation
-  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
-  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="$(id -un)" \
-    "$SANDBOX/provision" apply --substrate docker --human root
-
-  [ "$status" -eq 0 ]
-  run grep -c "^human=" "$RUN_LOG"
-  [ "$output" = "1" ]
-}
-
-@test "second passage: un humain de fleet INEXISTANT ne declenche rien, et ne casse rien" {
-  # ⚠ CE COMMENTAIRE DISAIT « `22-fleet-human` derive quand `useradd` echoue », ET CE MODULE NE FAIT
-  # PLUS DE `useradd` depuis le 2026-08-25 — il NOMME, la forge seme, le convergeur materialise. Le
-  # temoin, lui, est intact : il mesure le RUNNER sur un module doublure, pas le module 22. Seule sa
-  # raison affichee etait perimee, et une raison fausse envoie chercher au mauvais endroit.
+@test "VERROU : le runner ne lit AUCUN nom d'humain de fleet — un seul poseur, « --human »" {
+  # `PROV_FLEET_HUMAN` etait la seconde origine de l'humain cible, et elle arrivait par un drapeau
+  # retire. La rouvrir redonnerait deux sources a un fait que `--human` porte seul, et la seconde ne
+  # serait posee par personne — donc silencieusement vide, donc invisible jusqu'a ce qu'elle ne le
+  # soit plus.
   #
-  # Ce qui reste vrai, et qui est le sujet : un humain de fleet qui n'existe pas cote unix laisse ce
-  # second passage INERTE, plutot que de jouer des modules per-humain pour un compte absent.
-  stub_impersonation
-  lib_module 50-perhuman 'echo "human=$PROV_HUMAN" >> "$RUN_LOG"; p_ok "converge"'
-  run env LCARS_SYSADMIN_UID=0 PROV_FLEET_HUMAN="n-existe-pas-$$" \
-    "$SANDBOX/provision" apply --substrate linux --human root
-
-  [ "$status" -eq 0 ]
-  run grep -c "^human=" "$RUN_LOG"
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE, et ce fichier-la en porte : le retrait a laisse ses
+  # cicatrices, qui NOMMENT le drapeau pour interdire son retour. Un temoin qui compterait les
+  # occurrences brutes accuserait l'explication du defaut — la faute que `adminite_walls` documente
+  # (« un mur qui attraperait l'explication d'un defaut interdirait de l'expliquer »).
+  local code
+  code="$(sed 's/#.*//' "$SANDBOX/provision")"
+  run grep -c 'PROV_FLEET_HUMAN' <<<"$code"
+  [ "$output" = "0" ]
+  run grep -c -- '--fleet-human' <<<"$code"
+  [ "$output" = "0" ]
+  # GARDE D'INSTRUMENT : le depouillement ne doit pas avoir tout mange. `--human`, lui, est du CODE
+  # et il reste — sans ce controle, un `sed` casse rendrait un fichier vide, donc deux zeros, donc
+  # un temoin vert qui n'a rien lu.
+  run grep -c -- '--human)' <<<"$code"
   [ "$output" = "1" ]
 }
 

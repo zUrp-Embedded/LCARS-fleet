@@ -37,13 +37,42 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   #
   # `toolchain.branch_single_source` joined on 2026-08-19 and its exemption was weighed here, as
   # this comment asks. Its authority — the frozen literal in `Fleet.Toolchain.branch/0` — DOES ship
-  # in the artifact, and the check fails loudly when that literal becomes unreadable. What it cannot
-  # see in a runtime-only artifact is the three shell copies, and a wall about copies that are not
-  # there has nothing to judge. Same shape, same cause, same answer.
+  # in the artifact, and the check fails loudly when that literal becomes unreadable. A copy that is
+  # not in the tree has nothing to judge. Same shape, same cause, same answer.
+  #
+  # ⚠ ITS EXEMPTION IS NARROWER SINCE 2026-08-27, AND THIS COMMENT IS WHAT WAS WRONG. It read "what
+  # it cannot see is the THREE SHELL COPIES" — the check held four copies then, two of which
+  # (`services/`, `bin/`) the image's build stage DOES carry, since it excludes only `deploy`,
+  # `git-hooks` and `system-prompt`. The check now scopes PER MIRROR, so this entry earns the
+  # exemption only on a root with no mirror tree at all — an empty one, which is exactly what this
+  # test builds. A count written in prose is a claim, and this one had drifted by one and by kind.
+  # ⚠ DEUX ENTREES AJOUTEES LE 2026-08-27, ET ELLES N'ONT PAS CHANGE DE COMPORTEMENT — ELLES SONT
+  # DEVENUES VISIBLES. `bats.descriptions_inert` et `site.build_inputs` etaient `defp`, donc hors de
+  # la reflexion, donc hors de la garantie que ce fichier annonce. Les deux declaraient DEJA leur
+  # abstention par ecrit (« HORS PERIMETRE — pas de suite bats ici », « HORS PERIMETRE —
+  # assets/github.io absent de cet arbre »), et leur cause est la meme que les trois du dessus : un
+  # arbre voisin que le stage `build` de l'image ne copie pas. Le troisieme invisible,
+  # `template.gitea_expansion`, N'EST PAS ICI : il ne declarait rien, il est passe fail-closed.
+  # ⚠ `layout.private_dir_single_source` A ETE ATTRAPE PAR CE FICHIER LE JOUR DE SON ECRITURE, et
+  # c'est le garde renforce le matin meme qui l'a vu. Son exemption est pesee ici, comme ce
+  # commentaire l'exige, et elle n'a PAS la meme cause que les cinq du dessus.
+  #
+  # Ce check ne compare pas des copies a une autorite : il verifie que N declarations d'un meme
+  # repertoire s'ACCORDENT — aucune n'a ete designee comme faisant foi. En dessous de DEUX
+  # declarations lisibles, il n'y a pas d'accord a verifier : ni faute, ni preuve. Sur un arbre
+  # vide il y en a zero ; dans l'artefact runtime il y en a UNE (le `@default_dir` du BEAM), les
+  # quatre autres vivant sous `deploy/`.
+  #
+  # Le rendre fail-closed la ferait rougir la construction de l'image sur un artefact CORRECT —
+  # exactement la faute que `site.build_inputs` documente deux lignes plus haut, et qui a deja
+  # coute un build. Il passe donc, EN LE DISANT, et sa note nomme les declarations qu'il n'a pas vues.
   @declares_it_did_not_measure [
     "shell.sourcers_set_strict",
     "layout.face_roots_provisioned",
-    "toolchain.branch_single_source"
+    "toolchain.branch_single_source",
+    "bats.descriptions_inert",
+    "site.build_inputs",
+    "layout.private_dir_single_source"
   ]
 
   defp empty_root do
@@ -95,7 +124,38 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     # it exists to catch, arriving inside it.
     found = check_functions()
 
+    # ⚠ CE GARDE ETAIT UN PLANCHER A 25 PENDANT QUE LA TACHE EN JOUAIT 58, ET C'EST CE QUI A LAISSE
+    # PASSER LE TROU. `__info__(:functions)` ne voit que les fonctions PUBLIQUES : trois checks
+    # d'arite 1 etaient `defp`, donc invisibles a la reflexion — la garantie « aucun check ne passe
+    # sur rien » ne couvrait que 55 des 58, et l'un des trois (`template.gitea_expansion`) rendait
+    # bel et bien un vert muet sur un repertoire renomme. Un plancher a 25 ne pouvait pas le voir :
+    # 55 >= 25.
+    #
+    # Le garde COMPTE DESORMAIS CE QUE LA TACHE APPELLE, dans sa propre source. Un check ajoute a
+    # `run_checks` sans etre joignable par reflexion — parce qu'il est prive — rougit ici, au lieu
+    # d'echapper en silence a la garantie que ce fichier annonce.
+    called = called_check_names()
+
+    assert MapSet.subset?(MapSet.new(called), MapSet.new(found)),
+           "checks appeles par run_checks mais INVISIBLES a la reflexion (donc hors de la " <>
+             "garantie de ce fichier) : " <>
+             inspect(Enum.sort(called -- found)) <>
+             " — un check d'arite 1 doit etre `def`, pas `defp`"
+
     assert length(found) >= 25, "only #{length(found)} check functions found by reflection"
     assert :check_test_corpora_on_record in found
+  end
+
+  # Les `check_*(root)` que `run_checks/0` appelle, lus dans la source de la tache. C'est la MEME
+  # famille de mesure que les contrats eux-memes : la liste d'appels est la seule autorite sur « ce
+  # que le gate joue », et la recopier ici en ferait une seconde qui derive.
+  defp called_check_names do
+    src = File.read!(Path.join(File.cwd!(), "lib/mix/tasks/lcars.contracts.check.ex"))
+    [_, body] = Regex.run(~r/def run_checks do\n(.*?)\n  end\n/s, src)
+
+    ~r/^\s*(check_[a-z0-9_]+)\(root\),?$/m
+    |> Regex.scan(body)
+    |> Enum.map(fn [_, name] -> String.to_atom(name) end)
+    |> Enum.uniq()
   end
 end

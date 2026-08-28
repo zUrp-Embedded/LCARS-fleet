@@ -177,7 +177,10 @@ SEED
 
   # `git init` + premier commit = un commit SANS PARENT, donc une branche orpheline par
   # construction. Aucun `--orphan`, donc aucun plancher de version git.
-  local ident_n="${PROV_SYSTEM_ACCOUNT:-system_starfleet}"
+  # Sans repli : `provision-lib.sh` pose ce nom avant tout module. Le `:-system_starfleet` qui
+  # vivait ici etait une copie morte d'un litteral qui en a deja trop (cf. le chantier du compte
+  # systeme) — et une copie sur une branche injoignable ne peut meme pas etre corrigee par l'usage.
+  local ident_n="$PROV_SYSTEM_ACCOUNT"
   (
     cd "$tmp"
     git init -q -b "$OPS_BRANCH" .

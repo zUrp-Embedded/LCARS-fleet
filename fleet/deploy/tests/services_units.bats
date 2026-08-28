@@ -583,24 +583,35 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   printf '%s\n' "$output" | refute_out '^POSÉ .*(déjà présent|lcars.*matérialis)'
 }
 
-@test "AUCUN humain a materialiser n'est PAS une faute — zero et vide se distinguent" {
+@test "AUCUN humain a materialiser : la team vide est DITE, et l'absence du pre-seme est la DERIVE" {
   # ⚖ USER 2026-08-25 : « en prod (le mode boite), on peut se passer de pre-seed un user (…) et
-  # l'inscription reste ouverte sur la forge. » Une team `humans` vide est donc un etat legitime.
-  # Un DRIFT ici ferait rougir toute install de production qui n'a pre-seme personne.
+  # l'inscription reste ouverte sur la forge. » Une team `humans` vide est donc un etat legitime —
+  # DANS LA BOITE. Et cette passe n'y tourne jamais : elle vit dans `apply()`, et ce module est
+  # `APPLY-ON: wsl linux`. Sur le poste, le rail pre-seme (⚖ meme arbitrage, meme phrase, autre
+  # moitie), donc repartir sans personne est un manquement.
+  #
+  # LES DEUX PHRASES COEXISTENT, ET C'EST LE POINT : la premiere explique POURQUOI la population est
+  # vide (la team l'est), la seconde dit ce que ca COUTE ici. Fusionner les deux ferait perdre la
+  # cause ou la consequence, et c'est toujours celle qui manque qu'on cherche.
   humans_are
   stub_converger 0
   mod apply
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]     # applique, drift residuel
   [[ "$output" == *"aucun humain à matérialiser"* ]]
   # ⚠ LA SEVERITE SE MESURE AUSSI. Une mutation `p_ok`→`p_warn` sur cette branche laissait les
-  # trente temoins verts : en production, une forge dont la team se remplit encore verrait un WARN
-  # a chaque apply — du bruit permanent sur un etat normal.
+  # trente temoins verts : une forge dont la team se remplit encore verrait un WARN a chaque apply —
+  # du bruit permanent sur l'explication d'un etat, pas sur le verdict.
   [[ "$output" != *"WARN"*"aucun humain"* ]]
+  # Et le verdict, lui, NOMME le compte que ce rail devait livrer.
+  [[ "$output" == *"est l'humain que ce rail pré-sème, et rien ne l'a matérialisé"* ]]
 }
 
-@test "un humain NOMME que rien n'a materialise est un DRIFT — pas « la team est vide »" {
-  # ⚠ « ce n'est pas une faute » EST VRAI QUAND PERSONNE N'A RIEN DEMANDE, et devient un mensonge
-  # des que l'operateur a tape `--fleet-human bob` : il a nomme, et il repart sans bob.
+@test "la garde nomme le compte que L'AUTORITE declare, pas un litteral de ce module" {
+  # ⚠ CETTE GARDE ETAIT ARMEE PAR UN DRAPEAU, DONC MUETTE DANS LE CAS NOMINAL. Elle ne se declenchait
+  # que si l'operateur avait tape `--fleet-human <nom>` — c'est-a-dire presque jamais — pendant que
+  # la panne qu'elle decrit, elle, se produisait a l'identique. Le nom se demande desormais a son
+  # autorite, et le temoin le pilote par la MEME porte (`LCARS_BUILTIN_HUMAN`), jamais par une
+  # variable que le code ne lirait plus.
   #
   # Le cas qui mord n'est pas exotique : `48-forge-host` derive si `tofu` manque, mais la forge est
   # DEBOUT (le compose a reussi). Le convergeur l'interroge, obtient une team vide, rend 0 — et sans
@@ -608,19 +619,37 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   # plus haut. Une cause fausse coute plus cher a celui qui debugge que pas de cause du tout.
   humans_are
   stub_converger 0
-  PROV_FLEET_HUMAN=bob mod apply
+  LCARS_BUILTIN_HUMAN=bob mod apply
   [ "$status" -eq 2 ]     # applique, drift residuel
-  [[ "$output" == *"« bob » a été NOMMÉ et rien ne l'a matérialisé"* ]]
+  [[ "$output" == *"« bob » est l'humain que ce rail pré-sème, et rien ne l'a matérialisé"* ]]
   [[ "$output" == *"48-forge-host"* ]]
 }
 
-@test "un humain NOMME et BIEN materialise ne derive pas — le pendant du precedent" {
-  # Sans lui, une garde qui deriverait TOUJOURS des qu'un nom est pose passerait le temoin ci-dessus.
+@test "le compte pre-seme BIEN materialise ne derive pas — le pendant du precedent" {
+  # Sans lui, une garde qui deriverait TOUJOURS passerait le temoin ci-dessus.
   humans_are
   stub_converger 0 'bob:x:1001:1001::/home/bob:/bin/bash'
-  PROV_FLEET_HUMAN=bob mod apply
+  LCARS_BUILTIN_HUMAN=bob mod apply
   [ "$status" -eq 0 ]
-  [[ "$output" != *"a été NOMMÉ et rien"* ]]
+  [[ "$output" != *"rien ne l'a matérialisé"* ]]
+}
+
+@test "AUTORITE MUETTE : on ne devine pas un nom, on dit qu'on ne peut pas mesurer" {
+  # Un nom indeterminable et un compte absent appellent deux gestes opposes : l'un fait chercher un
+  # compte manquant, l'autre fait reparer l'arbre du provisionnement. Les confondre envoie l'operateur
+  # au mauvais endroit — et un repli cable ici ferait pire : il accuserait un compte precis sur la foi
+  # d'un nom que personne n'a declare.
+  humans_are
+  stub_converger 0
+  # L'arbre est deplace dans un bac ou `repo_root` ne trouve PAS `fleet/services/` : le module ne
+  # peut plus interroger l'autorite. La lib emmene son voisin — elle le source par chemin relatif, et
+  # sans lui l'echec viendrait du decor au lieu du sujet.
+  local orph="$BATS_TEST_TMPDIR/vide/fleet/deploy/lib"
+  mkdir -p "$orph"
+  cp "$PROVISION_LIB" "$(dirname "$PROVISION_LIB")/docker-endpoint.sh" "$orph/"
+  PROVISION_LIB="$orph/provision-lib.sh" mod apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"indéterminable"* ]]
 }
 
 @test "un environnement de services NON POSE arrete l'apply AVANT la passe — pas de garde en double" {

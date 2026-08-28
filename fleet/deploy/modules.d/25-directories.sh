@@ -111,7 +111,8 @@ set -euo pipefail
 # traverse un repertoire lui aurait accorde tout le reste au passage.
 # ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
 # differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
-# que GUARD B reserve au siege, et la fleet tourne sous l'HUMAIN DE FLEET pose par `22-fleet-human`.
+# que GUARD B reserve au siege, et la fleet tourne sous l'HUMAIN DE FLEET, seme sur la forge par
+# `48-forge-host` et materialise par le convergeur que `64-services` tire.
 # Le deck derive son chemin du `USER` du BEAM (`Fleet.Observation.deck_socket/0`), donc c'est cet
 # humain-la qui doit posseder le dossier.
 #
@@ -123,16 +124,43 @@ set -euo pipefail
 # ⚠ ET C'EST POURQUOI `22-fleet-human` PORTE LE NUMERO 22. Il s'appelait 65 : le compte etait donc
 # cree APRES ce module, qui ne pouvait pas lui donner son dossier. Une identite precede les
 # repertoires qu'elle possede — l'ordre est le prefixe, et le prefixe porte le sens.
+#
+# ⚠ MAIS L'ORDRE NE SUFFIT PLUS, ET IL FAUT LE DIRE : DEPUIS LE 2026-08-25, `22` NE CREE PLUS. Le
+# compte est seme sur la forge au rang 48 et materialise par le convergeur au rang 64 — donc au rang
+# 25 d'une install NEUVE, l'humain de fleet n'existe dans aucun cas, et cette fonction retombe sur
+# l'operateur. Ce n'est pas un accident a reparer ici : c'est le prix de l'ordre reel, et la table
+# est CORRIGEE au passage suivant, quand le compte est la. Entre les deux, le boot ne casse pas —
+# `console.sh` cree lui-meme `/run/lcars/console/<login>` au lancement de la console (mode 2710,
+# proprietaire relu). Ce qui reste faux jusqu'au second apply est la declaration tmpfiles, celle qui
+# survit au reboot.
+#
+# ⚠ ET CE RATTRAPAGE ETAIT MORT, PARCE QUE LE NOM ARRIVAIT D'UN DRAPEAU. La fonction lisait
+# `PROV_FLEET_HUMAN`, pose par `--fleet-human` : sans le drapeau — le cas nominal — elle rendait
+# l'operateur IMMEDIATEMENT, y compris sur un re-roll ou le compte existe depuis l'install
+# precedente. La promesse « le prochain apply corrigera » ne pouvait donc jamais s'exercer. Le nom
+# vient desormais de son autorite, qui repond toujours, et le rattrapage marche.
+#
+# ⚠ RESOLU UNE FOIS, ET SOUS LA GARDE DOCKER. `prov_runtime_dirs` est appelee quatre fois par passe ;
+# sans memo, chacune forkerait le script d'autorite. Et l'appel vit DANS cette fonction, jamais au
+# chargement du module : la boite n'a pas de table de runtime a produire, elle n'a pas a payer une
+# resolution dont elle ne fera rien.
+_PROV_CONSOLE_HUMAN=""
 prov_console_human() {
-  # ⚖ AUCUN NOM PAR DÉFAUT (USER 2026-08-21). Tant que l'opérateur n'a pas NOMMÉ l'humain de fleet,
-  # il n'y en a pas — et la console revient à `--human`, qui existe forcément.
-  local h="${PROV_FLEET_HUMAN:-}"
-  [[ -n "$h" ]] || { echo "$PROV_HUMAN"; return 0; }
+  [[ -n "$_PROV_CONSOLE_HUMAN" ]] && { echo "$_PROV_CONSOLE_HUMAN"; return 0; }
+  local h
+  h="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   # Repli sur `--human` tant que l'humain de fleet n'existe pas : mieux vaut un dossier pour
-  # quelqu'un que pas de dossier du tout, et le prochain apply corrigera. Sans ce repli, une
-  # machine dont `22-fleet-human` a derive (useradd refuse) perdrait aussi sa racine de console.
-  id -u -- "$h" >/dev/null 2>&1 && { echo "$h"; return 0; }
-  echo "$PROV_HUMAN"
+  # quelqu'un que pas de dossier du tout. Sans ce repli, une machine ou le convergeur n'a pas encore
+  # pose le compte perdrait AUSSI sa racine de console.
+  #
+  # ⚠ DEUX CONDITIONS, DEUX LIGNES. Un `[[ -n "$h" ]] && id … || h=…` les enchaine correctement, mais
+  # il cache la troisieme branche qu'il produit — et ce fichier se relit plus souvent qu'il ne
+  # s'ecrit.
+  if [[ -z "$h" ]] || ! id -u -- "$h" >/dev/null 2>&1; then
+    h="$PROV_HUMAN"
+  fi
+  _PROV_CONSOLE_HUMAN="$h"
+  echo "$h"
 }
 
 prov_runtime_dirs() {

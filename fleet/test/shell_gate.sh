@@ -284,8 +284,40 @@ if [[ "$BATS_FILE_COUNT" -eq 0 ]]; then
   echo "--- bats : aucun fichier .bats trouve sous $HERE (rien a lancer) ---"
 elif command -v bats >/dev/null 2>&1; then
   echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills+provisioning+hooks — execution ---"
+
+  # ─── L'ENVIRONNEMENT DU LANCEUR N'ENTRE PAS DANS LE VERDICT ────────────────────────────────────
+  #
+  # Un temoin DECLARE sa premisse, il ne la RECOIT pas. Les SUT de ce depot lisent leurs reglages
+  # dans `LCARS_*`, `PROV_*` et `FORGE_*` ; une seule de ces variables presente dans le shell qui
+  # lance le gate retune ce que les temoins croient mesurer, et ils rougissent sur du code sain.
+  #
+  # ⚠ CE N'EST PAS UNE PRECAUTION, C'EST UNE PANNE QUI S'EST PRODUITE TROIS FOIS :
+  #   · 2026-08-18 — `provision --env` exporte `FORGE_BASE_URL` (`set -a`) pour tout le run, gate
+  #     compris : quatre temoins rouges sur une installation parfaitement saine.
+  #   · 2026-08-27 — un `LCARS_SEAT_UID_FILE` pose a la main : huit temoins rouges, dont les deux
+  #     GUARD A, sur du code juste.
+  #   · 2026-08-27 (fuzz) — `PROV_FLEET_GROUP` retune six temoins. Et cette variable-la VOYAGE :
+  #     `64-services` l'ECRIT dans `services.env`, que `fleet_v2` et le convergeur chargent en
+  #     `set -a`. Elle est donc dans l'environnement de tout ce qui tourne sur une machine
+  #     provisionnee. `LCARS_CONSOLE_GROUP` en retune vingt-huit ; personne ne l'exporte
+  #     aujourd'hui, ce qui rend la panne latente et pas moins reelle.
+  #
+  # Mesure a l'appui : le corpus a ete rejoue sous DIX variables hostiles, une a la fois.
+  # Deux ont change le verdict. Le fait qu'il en reste huit sans effet ne dit rien de la onzieme.
+  #
+  # ON NEUTRALISE, ET ON NOMME CE QU'ON A RETIRE. Un scrub silencieux serait la meme faute d'un cran
+  # plus loin : l'operateur qui a pose la variable exprès doit voir qu'elle n'est pas entree.
+  # `setup()` reste souverain — chaque temoin exporte ce dont il a besoin, et ca, rien ne l'enleve.
+  BATS_ENV=()
+  while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(
+    compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort
+  )
+  if [[ "${#BATS_ENV[@]}" -gt 0 ]]; then
+    echo "--- bats : $(( ${#BATS_ENV[@]} / 2 )) variable(s) du lanceur NEUTRALISEE(S) : ${BATS_ENV[*]//-u/}"
+  fi
+
   set +e
-  bats "${BATS_FILES[@]}"
+  env "${BATS_ENV[@]}" bats "${BATS_FILES[@]}"
   BATS_RC=$?
   set -e
   if [[ "$BATS_RC" -ne 0 ]]; then

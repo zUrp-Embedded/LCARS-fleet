@@ -30,6 +30,7 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | surface | `Fleet.Observation` | 11 |
 | steering | `Fleet.Pilot` | 8 |
 | steering | `Fleet.Admiral` | 9 |
+| work | `Fleet.Roster` | 3 |
 | work | `Fleet.Workflow` | 5 |
 | work | `Fleet.Forge` | 6 |
 | work | `Fleet.Project` | 7 |

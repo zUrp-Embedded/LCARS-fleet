@@ -29,8 +29,11 @@ setup() {
   # l'exclusion `-not -path '*/tests/*'` viderait alors TOUT le perimetre — les murs passeraient au
   # vert sur une liste vide. Le voisin a paye exactement ce defaut ; on ne le rejoue pas.
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
+  # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, pour que le garde du perimetre la CONSOMME au lieu de
+  # la recopier. Deux listes a maintenir, c'est une liste qui derive et un garde qui ne garde plus.
+  ARBRES=("$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/etc")
   mapfile -t CODE < <(
-    find "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/etc" -type f \
+    find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'box' \
          -o -name 'provision' -o -name 'Dockerfile' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
@@ -67,7 +70,19 @@ absent() { # absent <motif etendu> <fichier>
   # Sans ce garde, un `find` qui ne trouve plus rien (arbre deplace, extension renommee) rendrait
   # tous les murs verts en n'ayant RIEN lu. Une population vide et zero violation se ressemblent
   # exactement dans la sortie ; seul ce test les separe.
-  [ "${#CODE[@]}" -gt 30 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
+  # ⚠ UN PLANCHER NE VOIT PAS LA PERTE D'UN ARBRE. Celui-ci etait a 30 pour 65 fichiers (mesure du
+  # 2026-08-27 : deploy 41, services 12, bin 9, etc 3) — perdre `services`, `bin` ET `etc` EN ENTIER
+  # laisse 41 fichiers, donc vert. Le plancher n'attrape que le balayage totalement casse.
+  #
+  # Chaque arbre nomme doit contribuer, et la regle se DERIVE de `ARBRES`.
+  local a
+  for a in "${ARBRES[@]}"; do
+    printf '%s\n' "${CODE[@]}" | grep -q "^$a/" || {
+      echo "MUR 0 rompu — l'arbre « ${a#"$REPO"/} » ne contribue AUCUN fichier au perimetre" >&2
+      return 1
+    }
+  done
+  [ "${#CODE[@]}" -gt 55 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
   printf '%s\n' "${CODE[@]}" | grep -q 'services/forge-gestures.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'etc/provision-role-tokens.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'modules.d/25-directories.sh'
@@ -113,13 +128,36 @@ absent() { # absent <motif etendu> <fichier>
 # ⚠ ET `other` EST FERME AUSSI, CE QUI EST NEUF. L'ancien mur avait `[0-7]` en derniere position :
 # `0704` et `0707` passaient. Ca n'a jamais ete une regression, mais maintenant que les modes de
 # FICHIERS sont porteurs (0710), un `other` ouvert sur ce repertoire ne doit plus passer non plus.
+# ⚠ LE MOTIF ETAIT ECRIT EN SHELL SUR UN PERIMETRE QUI PORTE DU PYTHON, et c'est mesurable :
+# `services/lcars_socket.py` est DANS `CODE` et il pose des modes de repertoire — `os.makedirs(parent,
+# mode=0o750)`, `os.chmod(parent, 0o750)`. Deux raisons independantes le rendaient invisible :
+# `makedirs` n'etait dans aucune alternative, et l'octal python s'ecrit `0o750`, que
+# `0[0-7][2-7][0-7]` ne peut pas lire — le `o` n'est pas un chiffre.
+#
+# Ce n'est donc pas une forme hypothetique : le perimetre contient deja du code qui pose des modes
+# dans cette notation. Il ne vise simplement pas encore le repertoire des secrets. Meme classe que
+# la clause de branche du contrat Elixir le meme jour : une garde ecrite dans UNE langue sur un
+# perimetre qui en parle plusieurs ne garde qu'une partie de son sujet, et elle a l'air complete.
 @test "MUR 1: le groupe TRAVERSE le repertoire des secrets — il ne le lit ni ne l'ecrit, et « other » est ferme" {
+  # ⚠ ET LE MOTIF ETAIT ECRIT DEUX FOIS, une pour juger et une pour rapporter. Deux copies d'une
+  # regle sont deux regles : elargir l'une et pas l'autre donne un mur qui rougit sans savoir dire
+  # sur quelle ligne. Une seule source, consommee deux fois.
+  #
+  # Chiffre de groupe ∈ {0,1} : `x` seul, jamais `r` ni `w`. Et `other` a zero.
+  local mode='0o?[0-7][2-7][0-7]|0o?[0-7][0-7][1-7]'
+  local lieu='PRIVATE_DIR|TOKENS_DIR|/home/private'
+  local verbe='install -d|ensure_dir|chmod|makedirs|mkdir'
+  # ⚠ LES DEUX ORDRES, ET C'EST LA MOITIE QUE MA PREMIERE CORRECTION AVAIT RATEE. Elargir le
+  # vocabulaire ne suffit pas : le motif encodait aussi l'ORDRE DES ARGUMENTS du shell — mode PUIS
+  # chemin (`install -d -m 0710 "$PRIVATE_DIR"`). Python ecrit l'inverse (`os.makedirs("/home/private",
+  # mode=0o750)`), donc le mutant python passait encore au vert APRES l'ajout de `makedirs` et de
+  # `0o`. Une garde multi-langue doit ignorer la SYNTAXE, pas seulement le lexique.
+  local motif="($verbe).*(($mode).*($lieu)|($lieu).*($mode))"
   local f hits=0
   for f in "${CODE[@]}"; do
-    # Chiffre de groupe ∈ {0,1} : `x` seul, jamais `r` ni `w`. Et `other` a zero.
-    if code_of "$f" | grep -qE "(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|$TOKENS_DIR)"; then
+    if code_of "$f" | grep -qE -- "$motif"; then
       echo "MUR rompu — le groupe LIT le repertoire des secrets dans $f :" >&2
-      code_of "$f" | grep -nE "(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|$TOKENS_DIR)" >&2
+      code_of "$f" | grep -nE -- "$motif" >&2
       hits=$((hits + 1))
     fi
   done
@@ -145,7 +183,7 @@ absent() { # absent <motif etendu> <fichier>
     # Et il ne reste AUCUN 0700 sur cet objet : deux modes dans un meme fichier, c'est celui qu'on
     # n'a pas relu qui gagne.
     local n
-    n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700[^\n]*(PRIVATE_DIR|TOKENS_DIR)' || true)"
+    n="$(sed 's/#.*//' "$f" | grep -cE 'install -d -m 0700.*(PRIVATE_DIR|TOKENS_DIR)' || true)"
     [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
   done
   grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
@@ -190,7 +228,7 @@ secret_writers() {
   local f
   while read -r f; do
     absent 'chgrp' "$f"
-    absent '(chown|install)[^\n]*(:|-g )(fleet|\$PROV_FLEET_GROUP|\$\{PROV_FLEET_GROUP\})' "$f"
+    absent '(chown|install).*(:|-g )(fleet|\$PROV_FLEET_GROUP|\$\{PROV_FLEET_GROUP\})' "$f"
   done < <(secret_writers)
 }
 
