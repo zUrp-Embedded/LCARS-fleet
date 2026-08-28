@@ -3933,11 +3933,38 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
        "the box's master-token path"}
     ]
 
+    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme desormais sa
+    # racine UNE fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au
+    # litteral des quatre autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus
+    # parfaitement d'accord — et la seule facon de faire taire ce faux rouge serait de RECOPIER le
+    # littéral dans provision-lib, c'est-a-dire de reintroduire la copie que ce mur existe pour
+    # interdire. Un mur qui punit la forme correcte pousse a la forme fausse.
+    #
+    # La resolution est DELIBEREMENT bornee aux defauts `: "${VAR:=valeur}"` de provision-lib, une
+    # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait
+    # pas resoudre reste telle quelle et le desaccord se voit — c'est le comportement d'avant.
+    prov_defauts =
+      case File.read(Path.expand("deploy/lib/provision-lib.sh", root)) do
+        {:ok, src} ->
+          ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
+          |> Regex.scan(src)
+          |> Map.new(fn [_, nom, val] -> {nom, val} end)
+
+        _ ->
+          %{}
+      end
+
+    resoudre = fn v ->
+      Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, v, fn entier, nom ->
+        Map.get(prov_defauts, nom, entier)
+      end)
+    end
+
     read_holder = fn {rel, rx, what} ->
       case File.read(Path.expand(rel, root)) do
         {:ok, body} ->
           case Regex.run(rx, body) do
-            [_, v] -> {:ok, rel, what, v}
+            [_, v] -> {:ok, rel, what, resoudre.(v)}
             _ -> {:unreadable, rel, what}
           end
 
@@ -4247,7 +4274,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       "/opt/bin",
       "/opt/skills",
       "/opt/my",
-      "/opt/token-saver"
+      "/opt/token-saver",
+      # ⚠ DECOR DE TEMOIN, PAS UNE RACINE DE LA MACHINE. `deploy/tests/audit_machine.bats` fabrique
+      # ces deux-la pour mesurer que l'audit ne laisse PAS un prefixe commun couvrir un objet voisin
+      # (« /opt/decor couvrirait /opt/decor-autre »). Elles n'existent sur aucune image et ne sont
+      # posees par aucun module ; les taire par un motif `^/opt/decor` masquerait aussi une vraie
+      # racine qui s'appellerait ainsi un jour, donc elles sont nommees une par une, comme les autres.
+      "/opt/decor",
+      "/opt/decor-autre"
     ]
 
     expected =
