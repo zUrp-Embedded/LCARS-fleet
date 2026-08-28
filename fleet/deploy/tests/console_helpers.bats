@@ -12,6 +12,14 @@
 # CE QUI EST MESURE : la DECISION de chaque script — ce qu'il refuse, ce qu'il compte, ce qu'il rend.
 # `tmux` et `lcars` sont des doublures en tete de PATH ; aucune session, aucun pod reel.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2016,SC2030,SC2031
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \

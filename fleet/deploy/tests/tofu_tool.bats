@@ -19,6 +19,11 @@
 # pins, l'arch, la version sondee, et le fait que le miroir se refasse sur un verdict et pas a
 # chaque passage.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -33,8 +38,10 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=46-tofu
   export PROV_SUBSTRATE=linux
-  export PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
@@ -44,7 +51,8 @@ setup() {
   # Quatrieme occurrence de ce piege en deux jours, apres `/etc/lcars/host-consent` et `ttyd`.
   export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/bin/tofu"
   export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/lcars/tofu"
-  export LCARS_TOFU_OWNER="$(id -un):$(id -gn)"
+  export LCARS_TOFU_OWNER
+  LCARS_TOFU_OWNER="$(id -un):$(id -gn)"
 }
 
 mod() { run bash "$MOD" "$1"; }

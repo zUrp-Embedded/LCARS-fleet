@@ -18,6 +18,11 @@
 # la prochaine session referait le defaut faute de savoir pourquoi il en etait un. Chaque balayage
 # retire donc les commentaires avant de compter.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   # ⚠ LE CHEMIN EST RESOLU, ET SANS CA LE MUR MESURAIT ZERO FICHIER. `$BATS_TEST_DIRNAME/../..`
   # garde `deploy/tests/` dans la chaine, donc l'exclusion `-not -path '*/tests/*'` plus bas

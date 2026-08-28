@@ -17,6 +17,11 @@
 # conteneur n'existe pas — la fleet y tourne nativement et seule la forge est conteneurisee — donc
 # tout verbe qui passe par la mourait sur l'absence d'un objet sans rapport avec la demande. Le meme
 # script est pose sur l'hote par `62-runtime-helpers` : la porte doit chercher les DEUX.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2030,SC2031
+
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand la boite n'est pas la" {
   local box="$BATS_TEST_DIRNAME/../box"
   [ -f "$box" ]

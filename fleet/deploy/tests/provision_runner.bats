@@ -14,6 +14,14 @@
 # sandbox tree (provision + lib + stub modules) in BATS_TEST_TMPDIR and runs the real
 # runner as a real process. Stubs log "<name>:<mode>" to RUN_LOG and exit STUB_RC.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2016,SC2030,SC2031
+
 load refute
 
 setup() {

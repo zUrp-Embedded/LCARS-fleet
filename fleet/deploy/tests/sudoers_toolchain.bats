@@ -12,6 +12,11 @@
 #     `/state/pilot.assignee` naitrait a la racine, jamais lu) ;
 #   - le module est charge SANS son dispatch, patron `human_git_identity.bats`.
 
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2030,SC2031
+
 load refute
 
 setup() {
@@ -23,14 +28,17 @@ setup() {
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=45-sudoers-toolchain
-  export PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP="$(id -gn)"   # un chgrp qui marche sous l'uid des tests
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"   # un chgrp qui marche sous l'uid des tests
 
   export LCARS_SUDOERS_DIR="$BATS_TEST_TMPDIR/sudoers.d"; mkdir -p "$LCARS_SUDOERS_DIR"
   export LCARS_TOOLCHAIN_RUN_STATE="$BATS_TEST_TMPDIR/run-state"
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"; mkdir -p "$LCARS_STORE_ROOT"
   # Le siege des tests, c'est NOUS : la cle est l'uid, on la fait coincider.
-  export LCARS_SYSADMIN_UID="$(id -u)"
+  export LCARS_SYSADMIN_UID
+  LCARS_SYSADMIN_UID="$(id -u)"
 
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   export PATH="$BIN:$PATH"

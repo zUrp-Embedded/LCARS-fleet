@@ -20,6 +20,11 @@
 # final, pour appeler les deux fonctions directement — `check()`/`apply()` complets ecriraient dans
 # le home reel de celui qui joue les tests.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -37,7 +42,8 @@ SH
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=70-human
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   export PROV_FORGE_URL="http://forge.test"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
   echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"

@@ -14,6 +14,11 @@
 # socket et ne clonent rien de reel. Ce qui est mesure est la DECISION du module, qui est tout ce
 # qu'il apporte — le clone lui-meme est le travail de git.
 
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2030,SC2031
+
 setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/45-catalogues.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"

@@ -28,6 +28,11 @@
 # adresses — c'est la que la faute etait, et c'est la seule partie qui serait silencieuse. Monter la
 # forge demande docker et plusieurs minutes ; ce n'est pas ce qu'un temoin joue.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -41,7 +46,8 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=48-forge-host
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   # L'EN-TETE SEULE : tout ce qui precede `check()`. C'est la que vivent les deux derivations, et

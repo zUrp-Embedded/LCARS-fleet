@@ -17,6 +17,11 @@
 # ET son stdin. Chaque assertion d'attaque va par paire avec un temoin (P-40) : « le secret n'est
 # pas dans argv » est satisfait par un correctif qui supprimerait l'auth.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../deps/provision-forge-charte.sh"
   [ -f "$SCRIPT" ]

@@ -52,7 +52,8 @@ setup() {
   export PROVISION_LIB="$LIB"
   export PROV_FORGE_URL="http://forge.invalid"
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin"
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   mkdir -p "$PROV_LINK_DIR"
 
   # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris.
@@ -195,7 +196,8 @@ EOF
   # 1000). Sans cette garde, les faces des projets seraient posees sous le seul compte qui ne peut
   # pas lancer de fleet — et le git de l'humain qui les utilise ensuite les refuserait, proprietaire
   # different. Ce n'est pas une derive : les humains, eux, les convergent.
-  export LCARS_SYSADMIN_UID="$(id -u)"
+  export LCARS_SYSADMIN_UID
+  LCARS_SYSADMIN_UID="$(id -u)"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
   run bash "$MOD" check
   [ "$status" -eq 0 ]

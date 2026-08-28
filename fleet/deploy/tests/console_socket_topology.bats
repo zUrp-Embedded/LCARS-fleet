@@ -20,6 +20,11 @@
 # 2026-08-14 (`nobody` without the group -> connection refused; with `--groups` -> 200) and recorded
 # in the chantier design. A stub can only prove we ASK for the right mode.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -52,13 +57,13 @@ if [[ "\$(cat "$TTYD_MAKES_SOCK")" == "1" ]]; then
   # script's \`-S\` guard pass on something that is not a socket, i.e. test the wrong property.
   sock=""; prev=""
   for a in "\$@"; do [[ "\$prev" == "-i" ]] && sock="\$a"; prev="\$a"; done
-  # BIND *ET* LISTEN, comme le vrai ttyd. Un `bind` seul cree bien un fichier de socket, mais toute
+  # BIND *ET* LISTEN, comme le vrai ttyd. Un \`bind\` seul cree bien un fichier de socket, mais toute
   # connexion dessus est REFUSEE — et c'est exactement ce que la sonde d'idempotence mesure. Une
   # doublure qui ne fait que binder rendrait « morte » une console que le vrai ttyd sert.
-  # BIND *ET* LISTEN, comme le vrai ttyd. Un `bind` seul cree bien un fichier de socket, mais toute
+  # BIND *ET* LISTEN, comme le vrai ttyd. Un \`bind\` seul cree bien un fichier de socket, mais toute
   # connexion dessus est REFUSEE — et c'est exactement ce que la sonde d'idempotence mesure. Une
   # doublure qui ne fait que binder rendrait « morte » une console que le vrai ttyd sert. Le
-  # `setsid` + les redirections detachent l'ecouteur du tuyau de bats, qui attendrait sinon sa fin.
+  # \`setsid\` + les redirections detachent l'ecouteur du tuyau de bats, qui attendrait sinon sa fin.
   if [[ -n "\$sock" ]]; then
     setsid python3 -c 'import socket,sys,time
 s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(8); time.sleep(6)' "\$sock" \

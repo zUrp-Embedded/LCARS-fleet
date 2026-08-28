@@ -11,6 +11,11 @@
 # unprivileged sandbox — assertions therefore target the bin/link lines, not the exit code,
 # except where the exit code is the contract (missing manifest = probe ERROR = rc 2).
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/.."
   ROOT="$BATS_TEST_TMPDIR/repo"

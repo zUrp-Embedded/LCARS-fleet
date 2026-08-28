@@ -44,7 +44,8 @@ EOF
   : > "$CURL_LOG"
 
   export PROVISION_LIB="$SANDBOX/lib/provision-lib.sh"
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   export PATH="$BINDIR:$PATH"
 
   # ⚠ `HOME` EST DU DECOR ICI, ET SON ABSENCE COUTE LE BINAIRE DU DEVELOPPEUR. Le module ne

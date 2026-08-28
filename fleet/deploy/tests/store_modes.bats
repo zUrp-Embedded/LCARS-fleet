@@ -20,6 +20,11 @@
 # human B. That needs two humans, a mounted volume and a real spawn — it belongs to the box, not to
 # a witness that must run in CI as an unprivileged user.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   MODULE="$DEPLOY/modules.d/26-store.sh"

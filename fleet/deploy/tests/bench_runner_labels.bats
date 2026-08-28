@@ -18,6 +18,11 @@
 # The probe therefore works on both sockets — a probe that only works on the good one would be
 # absent exactly when it is needed.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -44,7 +49,7 @@ if [[ "\$1 \$2" == "image inspect" ]]; then
 fi
 if [[ "\$1" == "pull" ]]; then
   img="\${@: -1}"
-  # Un tag LOCAL (`lcars-build:*`) n'est sur aucun registre — le tir echoue, comme en vrai.
+  # Un tag LOCAL (\`lcars-build:*\`) n'est sur aucun registre — le tir echoue, comme en vrai.
   case "\$img" in lcars-build:*) exit 1 ;; esac
   grep -qxF "\$img" "$UNPULLABLE" && exit 1
   echo "\$img" >> "$KNOWN"

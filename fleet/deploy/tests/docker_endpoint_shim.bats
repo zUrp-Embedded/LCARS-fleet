@@ -20,6 +20,11 @@
 # machines, c'est-a-dire un test qui mesure la machine. On epingle donc la FORME du shim genere : le
 # filtre existe, il refuse la bonne classe de noms, et les deux listes ne sont pas inversees.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {

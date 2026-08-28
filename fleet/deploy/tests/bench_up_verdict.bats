@@ -145,8 +145,8 @@ case "\$argv" in
   *forge-master.token*)   cat "$MASTER_TOKEN_OUT" ;;
   *forge-gestures.sh\ runner-token*) echo REG-TOKEN-TEMOIN ;;
   # LE JETON SYSTEME PORTE LE NOM DE SON COMPTE, comme les neuf autres. Il s'appelait
-  # `system.gitea_token` pour un compte nomme `lcars-system` — un nom derive de rien, qu'une table
-  # devait porter. Cette doublure epinglait l'ancien nom : au renommage, `bench-up` cherchait le
+  # \`system.gitea_token\` pour un compte nomme \`lcars-system\` — un nom derive de rien, qu'une table
+  # devait porter. Cette doublure epinglait l'ancien nom : au renommage, \`bench-up\` cherchait le
   # bon fichier et la doublure servait l'ancien, donc le banc se declarait « token systeme absent
   # apres deux passes » sur un banc parfaitement sain. Le motif suit desormais le COMPTE.
   *system_starfleet.gitea_token*) echo TOKEN-SYSTEME ;;

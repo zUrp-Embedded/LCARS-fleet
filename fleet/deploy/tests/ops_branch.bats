@@ -21,6 +21,14 @@
 # Le contrat des codes est celui de tous les modules : apply 0 = convergé · 1 = ECHEC · 2 = applique
 # avec drift residuel. « Pas encore » vaut 2, jamais 1.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2016,SC2030,SC2031
+
 load refute
 
 setup() {

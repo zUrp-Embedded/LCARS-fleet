@@ -22,6 +22,14 @@
 # une boite composee. Le dernier temoin de ce fichier garde ca, et c'est le seul qui aurait attrape
 # le defaut — les autres appellent la fonction avec un decor qui efface la variable.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2016,SC2030,SC2031
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   [ -f "$SRC" ]

@@ -29,6 +29,11 @@
 # ne demarrait plus, les fichiers parce qu'une recette a plante. Celui-ci a ete trouve parce qu'un
 # operateur s'est plaint. Trois fois le meme aveuglement ; c'est le troisieme temoin qui le ferme.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {

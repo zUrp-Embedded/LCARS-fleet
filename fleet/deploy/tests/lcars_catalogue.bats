@@ -22,6 +22,11 @@
 # ⚠ EXIGE PAR `run -<code>`, ET C'EST UNE DECLARATION DE CONTRAT, PAS UNE FORMALITE. Sans cette
 # ligne, bats avertit qu'il ne garantit pas la semantique de `run -127` avant 1.5 — et en 1.11 un
 # avertissement suffit a rendre la suite ROUGE. Le fichier dit donc de quelle version il depend.
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 bats_require_minimum_version 1.5.0
 
 setup() {

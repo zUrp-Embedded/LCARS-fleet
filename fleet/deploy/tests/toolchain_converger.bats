@@ -18,6 +18,11 @@
 # defaut faux passe INVISIBLE ici, et il l'a ete : il pointait dans l'etat tofu. Le temoin qui suit
 # est le seul a regarder la valeur elle-meme.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 @test "le repertoire de travail par defaut ne s'ouvre ni dans l'etat tofu ni dans le magasin" {
   local default
   default="$(sed -n 's/^WORK="\${LCARS_TOOLCHAIN_WORK:-\(.*\)}"$/\1/p' "$SUT")"

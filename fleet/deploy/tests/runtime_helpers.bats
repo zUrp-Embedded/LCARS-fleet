@@ -15,6 +15,11 @@
 # (pin sha256) : ce qui se mesure ici est la TABLE, l'egalite des pins avec le Dockerfile, et le
 # REFUS d'un contenu non conforme — pas la capacite de jsdelivr a repondre.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -40,10 +45,13 @@ setup() {
   # ou aucun temoin n'ecrit. Sans cette ligne, `apply` echoue sur la pose et CINQ temoins voisins
   # rougissent sur une cause qui n'est pas la leur — mesure du 2026-08-26, en ajoutant la table DATA.
   export LCARS_SKEL_FILE="$BATS_TEST_TMPDIR/etc/skel/.bashrc"
-  export LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
+  export LCARS_HELPERS_OWNER
+  LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
   export PROV_SUBSTRATE=linux
-  export PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 

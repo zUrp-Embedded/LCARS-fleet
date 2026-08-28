@@ -15,6 +15,14 @@
 # doublure — ce qui se mesure est la DERIVATION (contenu des unites, ordre des gestes) et le fait
 # que « posee » ne soit jamais lu comme « debout ».
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2016,SC2030,SC2031
+
 load refute
 
 setup() {
@@ -32,19 +40,23 @@ setup() {
   # Le fichier que lisent les DEUX moities de GUARD B. Couture de chemin, jamais de valeur.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   export LCARS_HELPERS_DIR="$BATS_TEST_TMPDIR/opt/lcars"
-  export LCARS_SERVICES_OWNER="$(id -un):$(id -gn)"
+  export LCARS_SERVICES_OWNER
+  LCARS_SERVICES_OWNER="$(id -un):$(id -gn)"
   # La fenetre qui separe « forke » de « debout » dure douze secondes sur une vraie machine. Ce qui
   # se mesure ici est la DECISION prise a ses deux bords, jamais le temps qui passe.
   export LCARS_SERVICES_SETTLE=0
   export PROV_SUBSTRATE=linux
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   # ⚠ POSE PAR `deploy/provision`, COMME LES `PROV_*` AU-DESSUS — pas par ce module. Le runner derive
   # l'uid du SIEGE (l'appelant de l'installeur) avant tout module, et six lecteurs l'attendent :
   # GUARD B, son miroir BEAM, `is_fleet_human`, `45-sudoers-toolchain`, `console-humans.sh` et le
   # plancher `uid_floor` du convergeur. Un decor qui l'omet ne decrit aucune machine reelle — et le
   # temoin d'a cote mesure precisement ce que le module fait quand elle manque VRAIMENT.
-  export LCARS_SYSADMIN_UID="$(id -u)"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export LCARS_SYSADMIN_UID
+  LCARS_SYSADMIN_UID="$(id -u)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
@@ -382,7 +394,8 @@ time.sleep(120)
   for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$BATS_TEST_TMPDIR/port" ] && break; sleep 0.2; done
   [ -s "$BATS_TEST_TMPDIR/port" ]
 
-  export PROV_DECK_PORT="$(cat "$BATS_TEST_TMPDIR/port")"
+  export PROV_DECK_PORT
+  PROV_DECK_PORT="$(cat "$BATS_TEST_TMPDIR/port")"
   : > "$LOOP"
   mod apply
   kill "$squatter" 2>/dev/null || true

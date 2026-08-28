@@ -68,8 +68,8 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
   run bash -c "
     set -euo pipefail
     say() { printf '%s\n' \"\$*\" >> '$JOURNAL'; }
-    # `launch` est definie plus haut dans l'entrypoint, hors du bloc extrait — et c'est le sujet
-    # d'un AUTRE corpus (`supervise.bats`). Ici on double, sinon ces temoins mesureraient deux
+    # \`launch\` est definie plus haut dans l'entrypoint, hors du bloc extrait — et c'est le sujet
+    # d'un AUTRE corpus (\`supervise.bats\`). Ici on double, sinon ces temoins mesureraient deux
     # choses a la fois et rougiraient pour la mauvaise.
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
@@ -188,8 +188,8 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
   run bash -c "
     set -euo pipefail
     say() { printf '%s\n' \"\$*\" >> '$JOURNAL'; }
-    # `launch` est definie plus haut dans l'entrypoint, hors du bloc extrait — et c'est le sujet
-    # d'un AUTRE corpus (`supervise.bats`). Ici on double, sinon ces temoins mesureraient deux
+    # \`launch\` est definie plus haut dans l'entrypoint, hors du bloc extrait — et c'est le sujet
+    # d'un AUTRE corpus (\`supervise.bats\`). Ici on double, sinon ces temoins mesureraient deux
     # choses a la fois et rougiraient pour la mauvaise.
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }

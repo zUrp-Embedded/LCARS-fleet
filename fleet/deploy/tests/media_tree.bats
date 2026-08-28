@@ -14,6 +14,11 @@
 # un poste de dev. Cinquieme occurrence de ce piege apres `/etc/lcars/host-consent`, `ttyd`, `tofu`
 # et le reseau de `deck_origins`.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -27,13 +32,16 @@ setup() {
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
   export PROVISION_MODULE=44-media
   export PROV_SUBSTRATE=linux
-  export PROV_HUMAN="$(id -un)"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   export LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/share/lcars"
-  export LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"
+  export LCARS_MEDIA_OWNER
+  LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"
 
   # ⚠ AUCUN TEMOIN NE BATIT LE SITE, ET CE N'EST PAS UNE COMMODITE. Sans ces deux coutures la suite
   # jouait un `npm ci` REEL dans le checkout de celui qui la lance : des minutes, du reseau, et un

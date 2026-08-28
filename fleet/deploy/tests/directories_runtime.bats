@@ -34,7 +34,8 @@ setup() {
   # de console appartient a qui LANCE la fleet, et le module retombe sur `--human` seulement quand
   # cet humain n'existe pas encore. Sans cette ligne, le resultat depend de la presence d'un compte
   # `lcars` sur le poste qui joue les tests — vert ici, rouge ailleurs, pour un code identique.
-  export PROV_FLEET_HUMAN="$(id -un)"
+  export PROV_FLEET_HUMAN
+  PROV_FLEET_HUMAN="$(id -un)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/catalogues-work"

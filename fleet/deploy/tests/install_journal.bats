@@ -19,6 +19,11 @@
 # `forge.url` : mesure du 2026-08-18, deux modules en derive parce qu'on croyait qu'un `export`
 # traversait d'un module a l'autre.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 load refute
 
 setup() {
@@ -33,7 +38,8 @@ setup() {
   export PROVISION_LIB="$LIB"
   export PROVISION_MODULE=test-journal
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   ACC="$BATS_TEST_TMPDIR/acc"

@@ -20,6 +20,11 @@
 # verrou de cette frontiere. Ils sourcent le script (garde de sourcing) : aucune boucle, aucun
 # reseau, aucun user cree.
 
+# ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
+# doivent atteindre l'outil TELS QUELS — les developper chercherait la valeur dans CE shell au lieu
+# du texte audite. Les quotes simples sont l'instrument, pas un oubli.
+# shellcheck disable=SC2016
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../services/human-converger.sh"
   export SUT
@@ -195,7 +200,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes'
     export LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map' LCARS_SYSADMIN_UID=1000
     mkdir -p \"\$LCARS_HOME_ROOT\"
-    # `getent` double : sans ca ce temoin rend un uid libre de la MACHINE qui le joue.
+    # \`getent\` double : sans ca ce temoin rend un uid libre de la MACHINE qui le joue.
     mkdir -p \"$BATS_TEST_TMPDIR/b8\"
     printf '%s\n' '#!/usr/bin/env bash' 'exit 2' > \"$BATS_TEST_TMPDIR/b8/getent\"
     chmod 0755 \"$BATS_TEST_TMPDIR/b8/getent\"

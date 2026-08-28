@@ -22,6 +22,11 @@
 # qui, faux, serait silencieux. La creation elle-meme est un `useradd` nu, et un `useradd` qui
 # echoue le DIT.
 
+# ⚠ SC2030/SC2031 : CHAQUE `@test` DE BATS EST UN SOUS-SHELL, et c'est la propriete qu'on veut —
+# un test ne teinte pas le suivant. Que les variables posees dans un test soient « locales » est
+# l'isolation, pas une fuite.
+# shellcheck disable=SC2030,SC2031
+
 load refute
 
 setup() {
@@ -38,7 +43,8 @@ setup() {
   # `:-1000` dans la lib, une fixture qui ne le pose pas mesure une machine sans siege.
   export LCARS_SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
   export PROVISION_MODULE=22-fleet-human
-  export PROV_FLEET_GROUP="$(id -gn)"
+  export PROV_FLEET_GROUP
+  PROV_FLEET_GROUP="$(id -gn)"
 
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
   mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
@@ -146,7 +152,8 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   # parle pas de `useradd`. Ce temoin tient la branche « aucun », il doit donc poser une machine
   # sans aucun — sinon il est vert ou rouge selon le poste, ce qui ne mesure plus rien.
   passwd_with
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   mod 'check'
   [ "$status" -eq 1 ]     # check : 1 = DRIFT (le contrat INVERSE les codes entre check et apply)
   [[ "$output" == *"DRIFT"* ]]
@@ -163,7 +170,8 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   # Meme raison qu'au temoin precedent : la machine du decor ne porte aucun humain de fleet, sinon
   # c'est l'autre branche du verdict qu'on lirait.
   passwd_with
-  export PROV_HUMAN="$(id -un)"
+  export PROV_HUMAN
+  PROV_HUMAN="$(id -un)"
   mod 'apply'
   [[ "$output" == *"aucun humain de fleet"* ]] || [[ "$output" == *"DÉCLARÉ"* ]]
   [[ "$output" != *"cree ("* ]]
