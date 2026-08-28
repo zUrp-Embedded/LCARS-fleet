@@ -28,7 +28,7 @@
 #   FORGE_BASE_URL=http://localhost:3000 FORGE_ADMIN_TOKEN=<tok> provision-forge-charte.sh
 #   provision-forge-charte.sh --forge URL --admin-token-file /root/forge/test/admin.token
 #   provision-forge-charte.sh --forge URL --admin-token-file … --check      # sonde seule
-# Options : --avatars-dir DIR (défaut : $LCARS_MEDIA_ROOT/avatars, soit /usr/share/lcars/avatars —
+# Options : --avatars-dir DIR (défaut : $LCARS_MEDIA_ROOT/avatars, soit /opt/lcars/share/avatars —
 #           ce que l'installation a POSÉ depuis assets/) · --org NAME (défaut fleet ; --org "" pour
 #           sauter l'org) · --admiral LOGIN (le master de CETTE forge : il reçoit le delta simple,
 #           `admiral.png`. Absent = aucun avatar posé sur un compte humain).
@@ -146,9 +146,9 @@ FORGE="${FORGE%/}"
 # (`assets/avatars/`) et du deck d'observation. Mesure du 2026-08-20 : sept des neuf roles communs
 # avaient DERIVE entre ces copies, parce qu'une mise a jour touchait un dossier et pas les autres.
 #
-# `assets/` est desormais la source, et l'installation la pose en `/usr/share/lcars/avatars` a cote
+# `assets/` est desormais la source, et l'installation la pose en `/opt/lcars/share/avatars` a cote
 # de la doc. Ce script lit donc ce que la boite a INSTALLE, pas ce qui traine a cote de lui.
-: "${LCARS_MEDIA_ROOT:=/usr/share/lcars}"
+: "${LCARS_MEDIA_ROOT:=/opt/lcars/share}"
 [[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$LCARS_MEDIA_ROOT/avatars"
 # AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
 # installation degradee : servir des identicons en silence rendrait vert un deploiement a moitie

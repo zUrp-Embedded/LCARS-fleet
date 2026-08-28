@@ -83,10 +83,10 @@ dir       /opt/lcars                                   0755  root:root          
 dir       /opt/lcars/admiral-skills                    0755  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
-dir       /usr/share/lcars                             0755  root:root           wsl+linux
-dir       /usr/share/lcars/avatars                     0755  root:root           wsl+linux
-dir       /usr/share/lcars/favicon                     0755  root:root           wsl+linux
-dir       /usr/share/lcars/doc                         0755  root:root           wsl+linux
+dir       /opt/lcars/share                                  0755  root:root           wsl+linux
+dir       /opt/lcars/share/avatars                     0755  root:root           wsl+linux
+dir       /opt/lcars/share/favicon                     0755  root:root           wsl+linux
+dir       /opt/lcars/share/doc                         0755  root:root           wsl+linux
 # ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
 # HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
 # du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la

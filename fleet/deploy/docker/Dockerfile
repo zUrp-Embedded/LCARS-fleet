@@ -348,7 +348,7 @@ RUN apt-get update -qq \
     `# reseau lisait le secret. Un groupe a lui, et le fichier ne nomme plus qu'un lecteur.` \
     `#` \
     `# ⚠ PAS MEMBRE DE fleet, ET C'EST LA DIFFERENCE AVEC SON VOISIN CI-DESSUS. Le deck ne lit RIEN` \
-    `# sous /local/LCARS_v2 : sa doc a ete deplacee en /usr/share/lcars/doc precisement parce qu'il` \
+    `# sous /local/LCARS_v2 : sa doc a ete deplacee en /opt/lcars/share/doc precisement parce qu'il` \
     `# ne pouvait pas l'y lire. Lui rendre le groupe annulerait le motif de ce deplacement.` \
     `#` \
     `# ⚠ ET PAS MEMBRE DE lcars-console NON PLUS. Ce groupe-la lui est accorde PAR PROCESSUS a` \
@@ -384,7 +384,7 @@ RUN chown -R root:fleet /local/LCARS_v2 \
 #
 # Ce qu'elle garde de l'ancien emplacement, parce que c'etait le vrai motif : le MEME COMMIT produit
 # le runtime et sa doc, donc la boite ne peut pas servir la doc d'une autre version qu'elle-meme.
-COPY --from=site /src/assets/github.io/dist /usr/share/lcars/doc
+COPY --from=site /src/assets/github.io/dist /opt/lcars/share/doc
 
 # ─── LES MEDIAS DE MARQUE — UNE SOURCE, POSEE UNE FOIS, LUE PAR TOUS ────────────────────────────
 # ⚠ IL Y EN AVAIT TROIS EXEMPLAIRES, ET ILS AVAIENT DERIVE. Les memes avatars vivaient dans
@@ -401,13 +401,13 @@ COPY --from=site /src/assets/github.io/dist /usr/share/lcars/doc
 # Le favicon ne se recopie pas non plus : `deps/avatars/favicon.png` etait l'octet pour octet le
 # meme fichier que `assets/favicon/favicon-512.png` (md5 identique), sous un autre nom, pour servir
 # l'avatar de l'org.
-COPY assets/avatars  /usr/share/lcars/avatars
-COPY assets/favicon  /usr/share/lcars/favicon
+COPY assets/avatars  /opt/lcars/share/avatars
+COPY assets/favicon  /opt/lcars/share/favicon
 
 # Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
 # (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
 # n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.
-RUN chmod -R a+rX /usr/share/lcars
+RUN chmod -R a+rX /opt/lcars/share
 
 # ─── La console web : ttyd, binaire STATIQUE pinné par sha256 ────────────────────────────────────
 # La porte d'entrée demandée : une page web avec un shell SOUS L'IDENTITÉ DE L'HUMAIN, dans lequel

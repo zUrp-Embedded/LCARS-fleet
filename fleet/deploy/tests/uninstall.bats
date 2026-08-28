@@ -426,7 +426,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ "$n_stop" -lt "$n_userdel" ]   # et avant les comptes, qui sinon sont refuses
 }
 
-@test "UNITES : seules les `.service` declarees sont arretees — pas un glob sur le systeme" {
+@test "UNITES : seules les \`.service\` declarees sont arretees — pas un glob sur le systeme" {
   # Un `systemctl stop lcars-*` toucherait ce que ce rail n'a pas pose. La liste vient de `files`,
   # c'est-a-dire de la table, et le filtre nomme le repertoire qu'il vise.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"

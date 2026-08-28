@@ -50,7 +50,7 @@ config :lcars_fleet, observation_start_listener: false
 config :lcars_fleet, observation_start_readmodel: false
 
 # LES MEDIAS, POINTES SUR LA SOURCE DU DEPOT. En prod l'installation les pose en
-# `/usr/share/lcars` ; ce poste ne l'a pas, et le defaut ferait tourner toute la suite sur un
+# `/opt/lcars/share` ; ce poste ne l'a pas, et le defaut ferait tourner toute la suite sur un
 # `:enoent`. `assets/` a EXACTEMENT la forme attendue d'une racine de medias — `avatars/` et
 # `favicon/` en freres — donc les tests mesurent le vrai arbre plutot qu'un decor, et un fichier
 # retire de la marque casse le temoin qui le nomme.

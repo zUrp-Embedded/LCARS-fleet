@@ -31,7 +31,7 @@
 #
 # ⚠ ET IL NE PREND PAS `fleet`, LUI. `lcars-authority` en est membre pour traverser
 # `/local/LCARS_v2` ; la landing n'y lit RIEN — sa doc a ete deplacee hors du prefixe de release
-# (`/usr/share/lcars/doc`) precisement parce que ce process ne pouvait pas l'y lire. Lui donner
+# (`/opt/lcars/share/doc`) precisement parce que ce process ne pouvait pas l'y lire. Lui donner
 # `fleet` « au cas ou » rendrait faux le motif qui a coute ce deplacement.
 #
 # ─── CE QUE CE COMPTE EST, ET CE QU'IL N'EST PAS ────────────────────────────────────────────────

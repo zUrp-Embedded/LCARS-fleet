@@ -9,7 +9,7 @@
 #
 # ─── UN TROU QUE LE CONTENEUR CACHAIT ───────────────────────────────────────────────────────────
 #
-# `assets/` est la SOURCE ; le Dockerfile la pose en `/usr/share/lcars/{avatars,favicon}` (lignes
+# `assets/` est la SOURCE ; le Dockerfile la pose en `/opt/lcars/share/{avatars,favicon}` (lignes
 # `COPY assets/avatars` et `COPY assets/favicon`). Aucun module de provision ne le faisait : le rail
 # natif n'a jamais eu ce répertoire.
 #
@@ -18,7 +18,7 @@
 # existaient. En sortant tofu du conteneur (2026-08-22), la même recette s'exécute SUR la machine —
 # et l'absence devient un ÉCHEC DUR de toute la structure de forge :
 #
-#   provision-forge-charte: dossier avatars introuvable: /usr/share/lcars/avatars
+#   provision-forge-charte: dossier avatars introuvable: /opt/lcars/share/avatars
 #   Error: local-exec provisioner error
 #
 # C'est la leçon des paquets, au niveau fichier : deux rails qui livrent le même produit doivent
@@ -27,7 +27,7 @@
 # ─── TROIS CONSOMMATEURS, PAS UN ────────────────────────────────────────────────────────────────
 #
 # Ce n'est pas un correctif pour la recette : le préfixe est LU par trois choses distinctes —
-# `Fleet.Observation.Deck` (`media_root`, défaut `/usr/share/lcars`), `console-deck.py`
+# `Fleet.Observation.Deck` (`media_root`, défaut `/opt/lcars/share`), `console-deck.py`
 # (`DECK_FAVICON`) et la recette de charte. Le rail natif les servait tous les trois en générique.
 #
 # ─── ET `doc/`, QUI SE BÂTIT ICI ────────────────────────────────────────────────────────────────
@@ -66,7 +66,8 @@ set -euo pipefail
 
 # Le seam est celui du PRODUIT : `runtime.exs` lit `LCARS_MEDIA_ROOT` avec ce même défaut, et
 # `deck.ex` le documente. On n'en invente pas un second.
-MEDIA_ROOT="${LCARS_MEDIA_ROOT:-/usr/share/lcars}"
+# La racine vient de la lib — les medias descendent sous la racine unique (phase B).
+MEDIA_ROOT="${LCARS_MEDIA_ROOT:-$PROV_ROOT/share}"
 MEDIA_OWNER="${LCARS_MEDIA_OWNER:-root:root}"
 
 # Les arbres livrés, et leur source unique. `doc` n'y est pas (cf. en-tête).

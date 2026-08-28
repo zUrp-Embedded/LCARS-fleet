@@ -720,7 +720,7 @@ if config_env() != :test and not tool_mode? do
   # installation ratee, et un repli servirait justement l'ancienne generation.
   config :lcars_fleet,
          :media_root,
-         System.get_env("LCARS_MEDIA_ROOT", "/usr/share/lcars")
+         System.get_env("LCARS_MEDIA_ROOT", "/opt/lcars/share")
 
   # ============================================================
   # fleet_pilot — only the forge-state-machine rail exists (config `LCARS_PILOT_STEP`). There is no

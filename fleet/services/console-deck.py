@@ -113,11 +113,11 @@ DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 # traverser ni ouvrir. Chaque `open()` levait et la route
 # `/doc/` rendait 404 sur des fichiers parfaitement presents — mesure du 2026-08-20, session
 # authentifiee, les 9 pages dans l'image et les trois routes en 404.
-DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/usr/share/lcars/doc")
+DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/opt/lcars/share/doc")
 # Le favicon vit a cote de la doc, MEME source unique dans l'image (`assets/favicon` -> Dockerfile).
 # Le deck n'en declarait aucun : l'onglet du navigateur prend l'icone du document du HAUT, jamais de
 # l'iframe /doc/ — donc sans ca, onglet muet meme quand la doc, elle, en a un.
-DECK_FAVICON = os.environ.get("LCARS_DECK_FAVICON", "/usr/share/lcars/favicon")
+DECK_FAVICON = os.environ.get("LCARS_DECK_FAVICON", "/opt/lcars/share/favicon")
 # Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
 # pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
 DOC_TYPES = {

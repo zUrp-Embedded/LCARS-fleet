@@ -229,9 +229,9 @@ defmodule Fleet.Observation.Deck do
   # jour touchait un dossier et pas les autres. Le deck affichait donc une generation d'avatars
   # pendant que la forge en posait une autre.
   #
-  # `assets/` est la source ; l'installation la pose en `/usr/share/lcars/{avatars,favicon}`, a cote
+  # `assets/` est la source ; l'installation la pose en `/opt/lcars/share/{avatars,favicon}`, a cote
   # de la doc, et le rail de deploiement (`provision-forge-charte.sh`) lit le meme endroit.
-  defp media_root, do: Application.get_env(:lcars_fleet, :media_root, "/usr/share/lcars")
+  defp media_root, do: Application.get_env(:lcars_fleet, :media_root, "/opt/lcars/share")
 
   # ⚠ AUCUN REPLI SUR `priv/`, ET C'EST UNE DECISION. Une installation qui n'a pas pose ses medias
   # est RATEE, pas degradee : un repli servirait l'ancienne generation d'avatars — c'est-a-dire

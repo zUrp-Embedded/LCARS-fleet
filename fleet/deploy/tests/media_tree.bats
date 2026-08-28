@@ -99,7 +99,7 @@ mod() { run bash "$MOD" "$1"; }
   # C'est la definition du trou : ce que l'image livre et que le rail natif ne livrait pas.
   local t
   for t in avatars favicon; do
-    grep -qE "^COPY assets/$t +/usr/share/lcars/$t" "$DOCKERFILE"
+    grep -qE "^COPY assets/$t +/opt/lcars/share/$t" "$DOCKERFILE"
     grep -vE '^\s*#' "$MOD" | grep -q "MEDIA_TREES=(.*$t"
   done
 }
@@ -151,9 +151,12 @@ mod() { run bash "$MOD" "$1"; }
   # `runtime.exs` et `deck.ex` lisent `/usr/share/lcars`. Un module qui inventerait son propre chemin
   # servirait des avatars que personne ne regarde.
   local rt="$BATS_TEST_DIRNAME/../../config/runtime.exs" deck="$BATS_TEST_DIRNAME/../../lib/fleet/observation/deck.ex"
-  grep -q 'LCARS_MEDIA_ROOT", "/usr/share/lcars"' "$rt"
-  grep -q ':media_root, "/usr/share/lcars"' "$deck"
-  grep -vE '^\s*#' "$MOD" | grep -q 'LCARS_MEDIA_ROOT:-/usr/share/lcars'
+  # ⚠ LES TROIS DEFAUTS S'ACCORDENT, ET C'EST CE TEMOIN QUI L'EXIGE — il a rougi au demenagement
+  # sous la racine unique, ce qui est exactement son metier : un seul des trois oublie, et le deck
+  # sert des avatars que personne ne regarde.
+  grep -q 'LCARS_MEDIA_ROOT", "/opt/lcars/share"' "$rt"
+  grep -q ':media_root, "/opt/lcars/share"' "$deck"
+  grep -vE '^\s*#' "$MOD" | grep -q 'LCARS_MEDIA_ROOT:-\$PROV_ROOT/share'
 }
 
 @test "absent : DRIFT qui nomme les DEUX consequences" {

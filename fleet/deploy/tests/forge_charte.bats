@@ -100,7 +100,7 @@ run_avatars() {
   # du deck d'observation. Mesure du 2026-08-20 : sept des neuf roles communs avaient DERIVE entre
   # ces copies, parce qu'une mise a jour touchait un dossier et pas les autres. Un defaut qui
   # repointerait a cote du script ressusciterait la copie, en silence.
-  grep -qE '^: "\$\{LCARS_MEDIA_ROOT:=/usr/share/lcars\}"' "$SCRIPT"
+  grep -qE '^: "\$\{LCARS_MEDIA_ROOT:=/opt/lcars/share\}"' "$SCRIPT"
   grep -qE 'AVATARS_DIR="\$LCARS_MEDIA_ROOT/avatars"' "$SCRIPT"
   # Et le favicon de l'org se lit dans SON arbre, pas parmi les avatars : il n'est pas un role.
   grep -qE 'org_file="\$LCARS_MEDIA_ROOT/favicon/favicon-512\.png"' "$SCRIPT"
