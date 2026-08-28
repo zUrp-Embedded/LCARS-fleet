@@ -604,3 +604,81 @@ SPY
   [[ "$output" == *"sous l'humain de fleet"* ]]
   [[ "$output" != *"la fleet sous TON uid"* ]]
 }
+
+# ============ LES DRAPEAUX DE LA PORTE ATTEIGNENT LE RAIL BOITE, OU SONT REFUSES ================
+#
+# ⚠ CES TEMOINS FERMENT UN AVALEMENT SILENCIEUX, MESURE SUR UNE INSTALL REELLE (2026-08-28).
+# `--forge-project`, `--port-forge` et `--port-deck` partent dans `PASSTHRU`, qui n'est lu QUE par
+# le rail POSTE — le re-exec sudo et les appels a `provision`. Sur `--box` ils n'atteignaient
+# personne : la porte les acceptait, n'imprimait rien, et le delegue tournait sur ses defauts.
+#
+# `--box --bench --forge-project alice4 --port-forge 21090` a monte un banc sur le projet
+# `lcars-nuit` et le port 21000, puis a refuse sur une collision avec un banc de la veille.
+# L'operateur decouvre cinq minutes plus tard qu'aucune de ses trois valeurs n'a ete lue.
+#
+# ET `--help` PROMETTAIT LE GESTE. Il decrit `--forge-project` comme « le geste qui en monte une
+# SECONDE au lieu de deplacer celle qui tourne », sans le qualifier de rail. Une porte qui documente
+# une option et ne la lit pas ment plus surement qu'une porte qui la refuse.
+#
+# LA REGLE TENUE ICI : traduire ce qui a un sens pour le delegue, REFUSER le reste, ne jamais avaler.
+
+@test "PORTE->BANC : \`--forge-project\` devient le \`--project\` du delegue" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench --forge-project alice4 < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BENCHUP:--project alice4"* ]]
+}
+
+@test "PORTE->BANC : les deux ports aussi, sous les noms du delegue" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench --port-forge 21090 --port-deck 21091 < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--forge-port 21090"* ]]
+  [[ "$output" == *"--deck-port 21091"* ]]
+}
+
+@test "PRECEDENCE : ce que l'operateur ecrit APRES \`--\` gagne sur la traduction" {
+  # Le delegue lit en dernier-gagne ; la traduction est donc PREPOSEE. Celui qui nomme les deux
+  # obtient celui qu'il a ecrit pour le delegue — sinon la porte deciderait a sa place.
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench --forge-project traduit -- --project explicite < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--project traduit"* ]]
+  [[ "$output" == *"--project explicite"* ]]
+  [[ "${output##*--project }" == "explicite"* ]]
+}
+
+@test "SANS BANC : \`--forge-project\` passe par l'environnement — l'autre delegue n'a pas de drapeaux" {
+  local fake; fake="$(_fake_tree 0 0)"
+  cat > "$fake/fleet/deploy/box" <<'SPY'
+#!/usr/bin/env bash
+echo "DOCKERSH:$* LCARS_PROJECT=${LCARS_PROJECT:-<vide>}"
+SPY
+  chmod 0755 "$fake/fleet/deploy/box"
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --forge-project alice4 < /dev/null
+  [[ "$output" == *"LCARS_PROJECT=alice4"* ]]
+}
+
+@test "REFUS : un port sans banc est REFUSE, il n'est pas avale" {
+  # Sans `--bench`, les ports de la boite sont ceux du compose : il n'y a rien a fixer. Le refus
+  # coute une seconde ; l'avalement coutait cinq minutes et une collision.
+  local fake; fake="$(_fake_tree 0 0)"
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --port-forge 21090 < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--port-forge"* ]]
+  [[ "$output" == *"compose"* ]]
+  # ⚠ `<<<"$output"` : `refute_out` lit STDIN. Sans redirection il herite de celui du test —
+  # vide — et passe au vert en n'ayant rien compare. Un mur d'absence prive de sa source felicite.
+  refute_out 'DOCKERSH' <<<"$output"
+}
+
+@test "REFUS : un drapeau du rail POSTE est REFUSE sur la boite, en le nommant" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --only 60-deploy < /dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--only"* ]]
+  [[ "$output" == *"provision"* ]]
+  # ⚠ `<<<"$output"` : `refute_out` lit STDIN. Sans redirection il herite de celui du test —
+  # vide — et passe au vert en n'ayant rien compare. Un mur d'absence prive de sa source felicite.
+  refute_out 'DOCKERSH' <<<"$output"
+}

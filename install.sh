@@ -650,6 +650,55 @@ if [[ "$RAIL" == "box" ]]; then
   #
   # L'image PRÉSENTE n'est jamais reconstruite : rebâtir à chaque passage ferait d'un `--check` de
   # dix secondes un quart d'heure, et le re-run doit rester sûr ET court.
+  # ⚠ CE RAIL AVALAIT TROIS DRAPEAUX DE SA PROPRE PORTE, EN SILENCE. `--forge-project`,
+  # `--port-forge` et `--port-deck` partent dans `PASSTHRU`, qui n'est lu QUE par le rail poste
+  # (le re-exec sudo et les appels a `provision`). Sur `--box` ils n'atteignaient personne : la
+  # porte les acceptait, n'imprimait rien, et le delegue tournait sur ses defauts.
+  #
+  # MESURE, install reelle du 2026-08-28 : `--box --bench --forge-project alice4 --port-forge 21090`
+  # a monte un banc sur le projet `lcars-nuit` et le port 21000, puis a REFUSE sur une collision avec
+  # un banc d'hier. L'operateur decouvre cinq minutes plus tard qu'aucune de ses trois valeurs n'a
+  # ete lue. Et `--help` decrit `--forge-project` comme « le geste qui en monte une SECONDE au lieu
+  # de deplacer celle qui tourne » — sans le qualifier de rail : la porte promettait ce geste et ne
+  # le faisait pas.
+  #
+  # ON TRADUIT CE QUI A UN SENS ICI, ON REFUSE LE RESTE — jamais d'avalement. Les deux delegues ne
+  # se pilotent pas pareil : `bench-up.sh` a des drapeaux, `fleet/deploy/box` n'en a aucun et se lit
+  # dans l'environnement.
+  _box_reject=()
+  _i=0
+  while [[ "$_i" -lt "${#PASSTHRU[@]}" ]]; do
+    case "${PASSTHRU[$_i]}" in
+      --forge-project)
+        # Le seul qui vaut sur LES DEUX chemins : il nomme l'instance, pas une publication.
+        if [[ "$WITH_BENCH" -eq 1 ]]; then
+          # PREPOSE, donc un `-- --project X` explicite passe APRES et gagne : le delegue lit en
+          # dernier-gagne. L'operateur qui nomme les deux obtient celui qu'il a ecrit pour le delegue.
+          DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
+        else
+          export LCARS_PROJECT="${PASSTHRU[$((_i + 1))]}"
+        fi ;;
+      --port-forge|--port-deck)
+        if [[ "$WITH_BENCH" -eq 1 ]]; then
+          _d="--forge-port"; [[ "${PASSTHRU[$_i]}" == "--port-deck" ]] && _d="--deck-port"
+          DELEGATE_ARGS=("$_d" "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
+        else
+          # Sans banc, les ports de la boite sont ceux du compose : il n'y a rien a fixer ici.
+          _box_reject+=("${PASSTHRU[$_i]} (les ports de la boite sont ceux du compose — ajoute --bench, ou edite le compose)")
+        fi ;;
+      --env|--human|--only)
+        _box_reject+=("${PASSTHRU[$_i]} (drapeau du rail POSTE : il pilote « provision », que la boite n'appelle pas)") ;;
+    esac
+    _i=$((_i + 2))
+  done
+  if [[ "${#_box_reject[@]}" -gt 0 ]]; then
+    echo ""
+    echo "  ${R}Ce rail ne peut pas honorer ces options :${N}"
+    printf '    %s\n' "${_box_reject[@]}"
+    echo "  Rien n'a ete fait. Les accepter sans les lire serait pire que les refuser."
+    exit 1
+  fi
+
   BOX_IMAGE="${LCARS_IMAGE:-lcars-fleet:2}"
   for _i in "${!DELEGATE_ARGS[@]}"; do
     [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"

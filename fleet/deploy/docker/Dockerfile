@@ -140,7 +140,32 @@ WORKDIR /src/fleet
 # coute ~10 min, domine par le gate joue ici ; avec le `rm -rf`, toucher un fichier de `deploy/`
 # les payait en entier pour rien. La correction (inclure par defaut) est conservee, son cout
 # d'iteration ne l'est pas.
-COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
+# ⚠ `deploy` A QUITTE CETTE LISTE, ET C'EST UN CORRECTIF MESURE. Le raisonnement ci-dessus est
+# juste et sa conclusion etait fausse sur un point : `deploy/` N'EST PAS hors perimetre du gate.
+# `test/fleet/catalogue_store_address_test.exs` lit `deploy/modules.d/45-catalogues.sh` pour
+# croiser deux ecrivains shell avec ce que le BEAM declare. Sans l'arbre, il ne rougit pas sur la
+# propriete : il meurt sur `File.Error`.
+#
+# MESURE, install a froid du 2026-08-28 (Ubuntu 26.04 neuve, image batie pour de vrai) :
+#   1) test les DEUX ecrivains shell portent exactement l'adresse que le BEAM declare
+#      ** (File.Error) could not read file "deploy/modules.d/45-catalogues.sh"
+#   2) test TEMOIN de non-vacuite : les fichiers existent et portent bien la ligne
+# 3368 tests, 2 echecs — le build ne produit AUCUNE image, et le rail boite ne s'installe plus.
+#
+# ⚠ CE TROU A SURVECU PARCE QUE PERSONNE NE BATIT. Sous WSL le daemon est partage par toute la VM :
+# une distro vierge n'est PAS un docker vierge, l'image etait toujours deja la. Meme raison que la
+# cicatrice d'`install.sh` sur le chemin « image absente ». Il a fallu batir sous un tag neuf pour
+# que le chemin se joue.
+#
+# ET LE MODULEDOC DU TEMOIN PORTE LA PREMISSE FAUSSE : « un temoin `mix test` n'a pas ce probleme :
+# il tourne sur le DEPOT, ou `deploy/` existe toujours ». Le gate tourne ICI, et ici il n'existait
+# pas. Un temoin qui raisonne sur l'endroit ou il croit tourner est aveugle a celui ou il tourne.
+#
+# LE COUT EST REEL ET IL EST ACCEPTE : editer un compose ou un module de `deploy/` invalide
+# desormais ce layer et rejoue le gate (~10 min). C'est le prix d'un gate qui voit l'arbre qu'il
+# atteste. L'arbitrage d'origine choisissait « le mode de defaillance benin » — sauf que celui-ci
+# ne l'etait pas : il nommait deja « le pire, une suite qui ne tourne plus sans le dire ».
+COPY --chown=builder:fleet --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
 
 # hex/rebar + build + pose sous /opt/lcars/runtime — le cache BuildKit évite de re-télécharger
