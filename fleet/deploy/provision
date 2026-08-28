@@ -45,6 +45,19 @@
 #   provision doctor [--substrate S] [--only MODULE]… [--human USER] [--env FILE] [--porcelain] [--verbose]
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
+#   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
+#
+# `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
+# Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
+# passees sous le mur ISO parce que leur nom se compose a l'execution sous un repertoire exempte,
+# et `lcars-system` — un second compte de service — est ne sans que rien ne le signale. Le
+# balayage d'une machine n'a aucun de ces angles : il voit ce QUI EST, pas ce qui est ecrit.
+#
+#   find / … > avant ; <install> ; find / … > apres ; provision audit --before avant --after apres
+#
+# Les deux instantanes se prennent avec le meme filtre ; le format attendu est
+# « <type> <mode> <uid>:<gid> <chemin> », une ligne par objet. Ce que le diff montre et que la
+# table ne couvre pas est un DEFAUT — pas une curiosite.
 #
 # `update` = la jambe runtime du triangle (source→forge→runtime) : pull --ff-only du checkout,
 # APRÈS vérification d'autorité (le remote DOIT matcher PROV_EXPECTED_REPO — déclaré, jamais
@@ -80,6 +93,8 @@ SUBSTRATE="auto"
 PORCELAIN=0
 ENV_FILE=""
 UNINSTALL_YES=0
+AUDIT_BEFORE=""
+AUDIT_AFTER=""
 UNINSTALL_HUMANS=0
 declare -a ONLY=()
 
@@ -140,11 +155,17 @@ while [[ $# -gt 0 ]]; do
     # Le détail d'une étape longue, pour celui qui veut savoir sur quoi elle traîne. Hérité par les
     # modules (qui sont des processus) : d'où l'export.
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
+    # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS. Le parseur consomme tout `$@` avant que le verbe ne
+    # tourne : un `audit <avant> <apres>` mourait sur « option inconnue » sans jamais atteindre sa
+    # fonction. Toutes les entrees de ce fichier passent par un drapeau nomme ; ceci ne fait pas
+    # exception.
+    --before)    AUDIT_BEFORE="${2:?--before attend un fichier}"; shift 2 ;;
+    --after)     AUDIT_AFTER="${2:?--after attend un fichier}"; shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *) die "option inconnue: $1 (--help)" ;;
   esac
 done
-case "$CMD" in apply|doctor|update|list|uninstall) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
+case "$CMD" in apply|doctor|update|list|uninstall|audit) ;; ""|-h|--help) usage; exit 0 ;; *) die "commande inconnue: $CMD (--help)" ;; esac
 [[ "$CMD" == "update" && "${#ONLY[@]}" -gt 0 ]] && die "update est TOUJOURS un converge complet — pas de --only (lance apply --only pour un module isolé)"
 
 if [[ -n "$ENV_FILE" ]]; then
@@ -712,6 +733,91 @@ uninstall_run() {
   return 0
 }
 
+# ─── audit — LA TABLE CONTRE LA MACHINE ─────────────────────────────────────────────────────────
+#
+# ⚠ IL NE LIT AUCUN CODE, ET C'EST TOUT SON INTERET. Les deux murs ISO de `system_manifest.bats`
+# extraient des litteraux d'un source ; ils sont donc aveugles a ce qu'un nom compose a l'execution,
+# a ce qu'un tiers pose, et a tout ce qui vit sous un repertoire exempte. Celui-ci lit la MACHINE.
+audit_run() {
+  local avant="${1:-}" apres="${2:-}"
+  [[ -r "$avant" && -r "$apres" ]] \
+    || die "audit attend deux instantanes lisibles : provision audit --before <f> --after <f>"
+  [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE)"
+
+  local rows; rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
+  local -a declares=()
+  local cls obj mode owner sub
+  while read -r cls obj mode owner sub; do declares+=("$obj"); done <<<"$rows"
+
+  # ⚠ COUVERT PAR UN ANCETRE, PAS SEULEMENT PAR LUI-MEME. Declarer `dir /opt/lcars` couvre tout ce
+  # qu'il porte : exiger une ligne par fichier ferait une table de dix mille lignes que personne ne
+  # relirait — et une table qu'on ne relit pas ne declare rien.
+  couvert() {
+    local p="$1" d
+    for d in "${declares[@]}"; do
+      case "$d" in
+        *"<"*) d="${d%%<*}"; [[ "$p" == "$d"* ]] && return 0 ;;
+        *)     [[ "$p" == "$d" || "$p" == "$d"/* ]] && return 0 ;;
+      esac
+    done
+    return 1
+  }
+
+  # ⚠ CE QU'APT POSSEDE N'EST PAS A NOUS, ET SANS CETTE COUPE L'INSTRUMENT CRIE 10 190 FOIS.
+  #
+  # MESURE DU 2026-08-28, banc vierge : 35 143 objets apparus, dont ~10 000 sous `/usr/lib`,
+  # `/usr/include`, `/usr/share` et `/var/lib` — le CONTENU des seize paquets que le rail a
+  # installes. La table ne les declare pas DELIBEREMENT : ils ont leur propre inventaire
+  # (`10-packages.sh`) et leur temoin bidirectionnel, et le journal sait lesquels ce rail a poses.
+  #
+  # Un instrument qui signale dix mille objets legitimes apprend a etre ignore — c'est le mode
+  # d'echec que ce chantier nomme partout ailleurs, et il serait absurde de le fabriquer ici.
+  # `dpkg -L` rend ce que chaque paquet POSSEDE ; ce qui en sort est du ressort du journal, pas de
+  # cette table.
+  # ⚠ CET AUDIT SE JOUE SUR LA MACHINE DANS L'ETAT QUE DECRIT SON « APRES », ET PAS PLUS TARD.
+  # `dpkg -L` interroge ce qui est INSTALLE MAINTENANT : rejoue apres une desinstallation, il ne
+  # rend plus rien et les dix mille fichiers des paquets ressortent comme non declares. Mesure du
+  # 2026-08-28 : audit joue sur des instantanes d'install, dpkg interroge apres l'uninstall — zero
+  # exclusion, 10 190 faux positifs. Un instrument dont la reponse depend de QUAND on le lance doit
+  # le dire, sinon c'est le lecteur qui paie.
+  local -A _apt=()
+  local _dpkg="${LCARS_DPKG:-dpkg}"
+  if [[ -r "$JOURNAL_FILE" ]] && command -v "$_dpkg" >/dev/null 2>&1; then
+    local _pkg _f
+    # ⚠ ECLATEMENT VOULU : `apt_installed` porte UNE ligne de noms separes par des espaces, et c'est
+    # le mot qu'on veut, pas la ligne. Un `while read` lirait la ligne entiere comme un seul paquet.
+    # shellcheck disable=SC2013
+    for _pkg in $(awk '$1=="apt_installed"{ $1=""; print }' "$JOURNAL_FILE"); do
+      while read -r _f; do [[ -n "$_f" ]] && _apt["$_f"]=1; done < <("$_dpkg" -L "$_pkg" 2>/dev/null || true)
+    done
+  fi
+
+  local n_apparu=0 n_nu=0 n_apt=0 p
+  while read -r _t _m _o p; do
+    [[ -n "$p" ]] || continue
+    n_apparu=$((n_apparu + 1))
+    [[ -n "${_apt[$p]:-}" ]] && { n_apt=$((n_apt + 1)); continue; }
+    couvert "$p" || { n_nu=$((n_nu + 1)); printf '  %s\n' "$p"; }
+  done < <(comm -13 <(sort "$avant") <(sort "$apres"))
+
+  echo ""
+  printf '  %d objet(s) apparu(s), %d appartenant a un paquet apt journalise, %d NON couvert(s) par la table.\n' \
+    "$n_apparu" "$n_apt" "$n_nu"
+  # Sans journal lisible, l'exclusion apt n'a pas eu lieu : le compte de « non couverts » porte alors
+  # le contenu des paquets, et il ne veut pas dire ce qu'il a l'air de dire.
+  [[ -r "$JOURNAL_FILE" ]] \
+    || echo "  ${_PA}⚠ journal illisible ($JOURNAL_FILE) — les fichiers des paquets apt sont comptes comme non declares${_PN}"
+  [[ "$n_nu" -eq 0 ]] || {
+    echo "  ${_PA}Chacun est un DEFAUT : soit on le declare, soit on cesse de le poser.${_PN}"
+    return 1
+  }
+  echo "  ${_PG}La machine ne porte rien que la table ne declare.${_PN}"
+}
+
+if [[ "$CMD" == "audit" ]]; then
+  audit_run "$AUDIT_BEFORE" "$AUDIT_AFTER"
+  exit $?
+fi
 if [[ "$CMD" == "uninstall" ]]; then
   # ⚠ ROOT N'EST EXIGÉ QUE POUR RETIRER. Lire un plan est une lecture : le refuser sans root
   # obligerait l'opérateur à `sudo` pour SAVOIR ce qui va disparaître — c'est-à-dire à escalader

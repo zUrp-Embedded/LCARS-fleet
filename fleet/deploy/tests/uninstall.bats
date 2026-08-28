@@ -445,5 +445,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
 }
 
 @test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {
-  code | grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|uninstall\)'
+  # ⚠ LA LISTE EXACTE, ET C'EST VOULU : ajouter un verbe doit etre un geste VISIBLE, pas un effet
+  # de bord. Ce temoin a rougi le jour ou `audit` est arrive — c'est exactement son metier.
+  code | grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|uninstall\|audit\)'
 }
