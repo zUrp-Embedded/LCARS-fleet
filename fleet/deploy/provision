@@ -440,7 +440,7 @@ uninstall_run() {
   fi
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
-  local -a files=() dirs=() groups=() humans=()
+  local -a files=() dirs=() groups=() humans=() accounts=()
   # ⚠ LA COLONNE SUBSTRAT FILTRE, ET ELLE ETAIT LUE POUR RIEN. `sub` etait extrait puis jamais
   # consulte : un uninstall sur un poste `wsl` planifiait les objets declares `docker` seuls, et
   # inversement. Sans effet tant que tout finissait en `rm -f` sur un chemin absent — mais les
@@ -479,6 +479,7 @@ uninstall_run() {
         dir|prefix)          dirs+=("$resolved") ;;
         group)               groups+=("$resolved") ;;
         human)               humans+=("$resolved") ;;
+        account)             accounts+=("$resolved") ;;
       esac
     done < <(expand_version "$obj")
   done <<<"$rows"
@@ -490,6 +491,7 @@ uninstall_run() {
   printf '  %-10s %d objet(s)\n' "fichiers" "${#files[@]}"
   printf '  %-10s %d répertoire(s)\n' "dirs" "${#dirs[@]}"
   printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
+  printf '  %-10s %d compte(s) de service\n' "comptes" "${#accounts[@]}"
   # ⚠ TROIS ETATS DISTINCTS, ET UN SEUL MESSAGE LES DISAIT — celui du mauvais. Le test ne regardait
   # que la longueur du tableau et concluait sur le FICHIER. Mesure du 2026-08-26 : un journal
   # present, lisible, seize lignes, disant « le rail n'a pose aucun paquet » etait annonce
@@ -561,6 +563,22 @@ uninstall_run() {
   for o in "${dirs[@]}"; do
     [[ -d "$o" ]] || continue
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+  done
+  # ⚠ LES COMPTES AVANT LES GROUPES, ET L'ORDRE EST UNE CONTRAINTE DE `groupdel` : il refuse un
+  # groupe qui est le PRIMAIRE d'un compte existant. Retirer le groupe d'abord le laisserait donc
+  # en place, et le compte avec — c'est ce que la machine montrait le 2026-08-28.
+  #
+  # ⚠ ET SEULEMENT LES COMPTES DE SERVICE. La classe `person` n'est pas ici : un compte d'humain ne
+  # se retire jamais sans qu'on le demande, et il n'a pas encore de verbe. Les fondre ferait un
+  # desinstalleur qui supprime des gens.
+  for o in "${accounts[@]}"; do
+    getent passwd "$o" >/dev/null 2>&1 || continue
+    if userdel "$o" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+    else
+      kept=$((kept + 1))
+      echo "  ${_PA}compte $o non retiré — « userdel $o » refuse (process encore vivant ?)${_PN}"
+    fi
   done
   for o in "${groups[@]}"; do
     getent group "$o" >/dev/null 2>&1 || continue

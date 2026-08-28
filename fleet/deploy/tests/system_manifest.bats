@@ -127,6 +127,14 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     cls="$(awk '{print $1}' <<<"$line")"
     case "$cls" in
       prefix|dir|anchor|link|group|runtime|human|preserve) ;;
+      # ⚠ TROIS CLASSES AJOUTEES LE 2026-08-28, chacune sur une mesure de banc vierge :
+      #   account  deux comptes de service survivaient a `uninstall --yes`, avec leur groupe
+      #   person   `/home/lcars` portait 32 objets qu'aucune classe ne nommait
+      #   docker   quatre volumes survivaient, dont celui qui porte les depots de la forge
+      # `account` et `person` sont DEUX classes et pas une avec un drapeau : un compte de service se
+      # retire toujours, un compte d'humain jamais sans qu'on le demande. Les fondre ferait un
+      # desinstalleur qui supprime des gens.
+      account|person|docker) ;;
       *) echo "classe inconnue « $cls » : $line"; return 1 ;;
     esac
   done < "$BATS_TEST_TMPDIR/rows"

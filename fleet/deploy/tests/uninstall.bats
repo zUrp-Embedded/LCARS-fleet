@@ -280,6 +280,38 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   grep -q 'preserved "$real"' <<<"$bloc"
 }
 
+# ─── LA CLASSE `account`, ET LES DEUX COMPTES QUE LE BANC A VUS SURVIVRE ────────────────────────
+# MESURE DU 2026-08-28, install complete puis `uninstall --yes` : `lcars-authority` et `lcars-system`
+# survivent avec leurs groupes propres. Aucune classe ne les nommait — donc le plan ne les voyait
+# pas, et le desinstalleur laissait derriere lui un compte systeme qui detenait les secrets de forge.
+
+@test "ACCOUNT : un compte de service declare entre au plan et se COMPTE" {
+  printf 'account   compte-de-service-decor  -  /usr/sbin/nologin  any\n' >> "$LCARS_SYSTEM_MANIFEST"
+  plan
+  [[ "$output" == *"compte(s) de service"* ]]
+  [ "$(sed -n 's/^  comptes *\([0-9]*\) compte.*/\1/p' <<<"$output")" -eq 1 ]
+}
+
+@test "ACCOUNT : les comptes partent AVANT les groupes — `groupdel` l'exige" {
+  # `groupdel` refuse un groupe qui est le PRIMAIRE d'un compte existant. Retirer le groupe d'abord
+  # le laisserait en place, et le compte avec.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local n_acc n_grp
+  n_acc="$(grep -n 'userdel' <<<"$body" | head -1 | cut -d: -f1)"
+  n_grp="$(grep -n 'groupdel' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_acc" ] && [ -n "$n_grp" ] && [ "$n_acc" -lt "$n_grp" ]
+}
+
+@test "ACCOUNT n'est PAS person : aucun `userdel` ne touche un compte d'humain" {
+  # ⚠ LA PROPRIETE LA PLUS CHERE DE CE VERBE. Un compte de service se retire toujours, un compte
+  # d'humain jamais sans qu'on le demande. Les fondre ferait un desinstalleur qui supprime des gens.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for o in "\${accounts\[@\]}"/,/done/p' <<<"$body")"
+  [ -n "$bloc" ]
+  refute_out 'humans\[' <<<"$bloc"
+  refute_out 'person'    <<<"$bloc"
+}
+
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {
   # Refuser la lecture sans root obligerait l'operateur a escalader pour SAVOIR ce qui va
   # disparaitre — c'est-a-dire a decider apres avoir escalade.

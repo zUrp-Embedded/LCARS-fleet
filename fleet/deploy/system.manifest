@@ -41,7 +41,19 @@
 #              group    un groupe unix, avec son GID
 #              runtime  un objet volatile, refait au boot (tmpfs)
 #              human    un objet dans le home d'une personne — POSE, jamais preserve
+#              account  un compte unix de SERVICE, avec son groupe propre — retire TOUJOURS
+#              person   un compte unix d'HUMAIN — retire JAMAIS sans `--humans` explicite
+#              docker   un objet docker : conteneur, reseau ou volume
 #              preserve ce qu'une desinstallation ne doit JAMAIS toucher
+#
+# ⚠ `account` ET `person` SONT DEUX CLASSES, PAS UNE AVEC UN DRAPEAU. Un compte de service se retire
+# toujours ; un compte d'humain jamais sans qu'on le demande. Les fondre ferait un desinstalleur qui
+# supprime des gens — et la difference ne se rattrape pas apres coup. MESURE DU 2026-08-28, banc
+# vierge : apres `uninstall --yes`, `lcars-authority` et `lcars-system` survivent avec leurs groupes,
+# et `/home/lcars` porte 32 objets. Aucune classe ne les nommait.
+#
+# ⚠ POUR `account`, LE `mode` PORTE LE GID et le `proprietaire` porte le shell — une reutilisation de
+# colonnes, assumee, plutot qu'un sixieme champ que sept classes sur neuf laisseraient vide.
 #   mode       octal, ou `-` quand la classe n'en porte pas
 #   proprietaire `user:group`, ou `-`
 #   substrat   `any` | `wsl` | `linux` | `docker`, ou une combinaison separee par `+`
@@ -202,6 +214,20 @@ link      /usr/local/bin/npx                           -     -                  
 # projeter, donc plus de groupe. Un gid retire ne se recycle pas : 2002 reste libre.
 group     fleet                                        2000  -                   any
 group     lcars-console                                2001  -                   any
+
+# ─── COMPTES DE SERVICE ─────────────────────────────────────────────────────────────────────────
+#
+# Poses par `21-service-accounts`. Ils n'etaient declares NULLE PART, alors que quatre lignes de
+# cette table les nomment deja comme proprietaires. MESURE DU 2026-08-28 : tous deux survivent a
+# `uninstall --yes`, avec leur groupe propre — un compte systeme qui detenait les secrets de forge,
+# laisse derriere.
+#
+# ⚠ LEUR GID N'EST PAS FIXE ICI, ET C'EST DELIBERE. `21-service-accounts` cree le groupe par
+# `ensure_group`, qui lit cette table : y poser un GID le figerait. Mesure du 2026-08-28 : ils
+# tombent en 2002/2003 parce que 2000 et 2001 sont pris. Les figer demande de choisir des numeros
+# qu'aucune machine installee ne porte — un geste separe, pas un effet de bord de cette ligne.
+account   lcars-authority                              -     /usr/sbin/nologin   any
+account   lcars-system                                 -     /usr/sbin/nologin   any
 
 # ─── VOLATILES — refaits au boot ────────────────────────────────────────────────────────────────
 runtime   /run/lcars                                   0755  root:root           wsl+linux
