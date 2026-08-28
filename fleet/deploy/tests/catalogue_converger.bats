@@ -19,6 +19,10 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2030,SC2031
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2086 — eclatement VOULU d'une liste separee par des espaces
+# shellcheck disable=SC2086
+
 setup() {
   MOD="$BATS_TEST_DIRNAME/../modules.d/45-catalogues.sh"
   LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"

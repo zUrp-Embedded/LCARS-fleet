@@ -24,6 +24,10 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
+# shellcheck disable=SC2034
+
 load refute
 
 setup() {
@@ -75,7 +79,15 @@ mod() { run bash "$MOD" "$1"; }
   local d="$BATS_TEST_DIRNAME/../modules.d"
   [ -f "$d/46-tofu.sh" ]
   [ -f "$d/48-forge-host.sh" ]
-  [[ "46-tofu" < "48-forge-host" ]]
+  # ⚠ CETTE LIGNE COMPARAIT DEUX LITTERAUX. `[[ "46-tofu" < "48-forge-host" ]]` prouve que « 46 »
+  # trie avant « 48 » — de l'arithmetique, pas une propriete de ce depot. Elle serait restee
+  # verte apres un renommage de l'un ou l'autre, c'est-a-dire au moment precis ou l'ordre casse.
+  # Ce qui est vrai : les deux modules EXISTENT, et le glob du runner met le premier avant.
+  local _mods _ia _ib
+  _mods="$(cd "$BATS_TEST_DIRNAME/../modules.d" && printf '%s\n' *.sh)"
+  _ia="$(grep -nx '46-tofu.sh' <<<"$_mods" | cut -d: -f1)"
+  _ib="$(grep -nx '48-forge-host.sh' <<<"$_mods" | cut -d: -f1)"
+  [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
 }
 
 @test "les pins sont IDENTIQUES a ceux du Dockerfile — deux rails, deux mecanismes, UNE version" {

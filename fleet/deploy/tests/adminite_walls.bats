@@ -23,6 +23,10 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2013 — lecture mot a mot VOULUE : le champ mesure ne contient pas d'espace
+# shellcheck disable=SC2013
+
 setup() {
   # ⚠ LE CHEMIN EST RESOLU, ET SANS CA LE MUR MESURAIT ZERO FICHIER. `$BATS_TEST_DIRNAME/../..`
   # garde `deploy/tests/` dans la chaine, donc l'exclusion `-not -path '*/tests/*'` plus bas

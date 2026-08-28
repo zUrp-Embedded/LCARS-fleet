@@ -19,6 +19,11 @@
 # mesurerait que l'orthographe d'une correction : la prochaine forme fautive s'ecrira autrement.
 # On extrait les deux lignes qui calculent le chemin, on les evalue, et on regarde ou ca tombe.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2013 — lecture mot a mot VOULUE : le champ mesure ne contient pas d'espace
+#   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
+# shellcheck disable=SC2013,SC2034
+
 load refute
 
 setup() {

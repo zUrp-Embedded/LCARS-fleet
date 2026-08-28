@@ -21,6 +21,10 @@
 # and hands back a shell carrying it. That is the tool's behaviour, measured by the operator on the
 # live box on 2026-08-20 -- it is what unblocked `catalogue install` when nothing else did.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2015 — le `|| C` est le contrat de tolerance, pas une branche d'echec
+# shellcheck disable=SC2015
+
 load refute
 
 setup() {

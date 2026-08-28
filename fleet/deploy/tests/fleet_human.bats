@@ -27,6 +27,11 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2030,SC2031
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2097 — prefixe d'environnement sur `run` : bats le transmet a la commande forkee
+#   SC2098 — idem — la seconde affectation recalcule depuis le PATH d'origine, sans effet de bord
+# shellcheck disable=SC2097,SC2098
+
 load refute
 
 setup() {

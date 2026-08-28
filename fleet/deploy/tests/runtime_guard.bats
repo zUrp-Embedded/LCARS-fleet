@@ -17,6 +17,10 @@
 # complete en plus du budget. Pas de contournement propre : la garde n'existe qu'en dev/prod, et
 # un skip conditionnel serait un temoin qui ne mesure rien exactement la ou la CI passe.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2005 — `echo $(...)` garde la sortie sur UNE ligne, ce que le motif attend
+# shellcheck disable=SC2005
+
 setup() {
   FLEET_DIR="$BATS_TEST_DIRNAME/../.."
   command -v mix >/dev/null 2>&1 || skip "mix absent de ce poste"

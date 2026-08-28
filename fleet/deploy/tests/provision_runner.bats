@@ -22,6 +22,11 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2010 — idem : le filtre porte sur des noms poses par le rail
+#   SC2012 — `ls` sur des noms que ce depot controle — pas de nom exotique a manier
+# shellcheck disable=SC2010,SC2012
+
 load refute
 
 setup() {

@@ -24,6 +24,11 @@
 # texte epinglerait la presence d'une boucle `while` ; ce qui compte est ce qui se passe au
 # cinquieme echec, et si le processus s'arrete VRAIMENT.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
+#   SC2086 — eclatement VOULU d'une liste separee par des espaces
+# shellcheck disable=SC2034,SC2086
+
 load refute
 
 setup() {

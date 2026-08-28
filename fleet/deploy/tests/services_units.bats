@@ -23,6 +23,10 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
+# shellcheck disable=SC2034
+
 load refute
 
 setup() {

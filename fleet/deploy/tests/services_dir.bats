@@ -13,6 +13,10 @@
 # Un fichier range est un fichier dont plus personne ne se demande s'il sert. Ces temoins
 # refusent qu'un fichier vive ici sans etre pose quelque part.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2012 — `ls` sur des noms que ce depot controle — pas de nom exotique a manier
+# shellcheck disable=SC2012
+
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # fleet/
   MOD="$REPO/deploy/modules.d/62-runtime-helpers.sh"

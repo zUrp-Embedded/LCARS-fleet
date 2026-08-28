@@ -16,6 +16,11 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC1003 — antislash litteral VOULU dans le motif
+#   SC2020 — `tr` sur des CARACTERES, et c'est ce que le temoin mesure
+# shellcheck disable=SC1003,SC2020
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/.."
   ROOT="$BATS_TEST_TMPDIR/repo"

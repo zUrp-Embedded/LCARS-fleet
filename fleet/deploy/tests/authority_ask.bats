@@ -27,6 +27,10 @@
 # lirait la cause imprimee sur stderr et rougirait sur un client parfaitement correct — ou, pire,
 # passerait au vert sur un client qui imprime bien la cause sur stdout. Le contrat teste ici est
 # precisement la SEPARATION des deux flux ; le harnais doit donc les separer aussi.
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2154 — `$stderr` est pose par `run --separate-stderr`, invisible a l'analyse statique
+# shellcheck disable=SC2154
+
 bats_require_minimum_version 1.5.0
 
 setup() {

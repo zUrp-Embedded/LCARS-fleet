@@ -30,6 +30,10 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2209 — affectation d'une CHAINE qui porte un nom de commande, pas d'une sortie
+# shellcheck disable=SC2209
+
 load refute
 
 setup() {

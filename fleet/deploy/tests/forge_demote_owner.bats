@@ -27,6 +27,10 @@
 # Le script est SOURCE, pas execute : appeler la fonction seule evite de monter un `cmd_apply`
 # entier (tofu, secrets, depot modele) pour mesurer quatre appels.
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC1090 — sources dynamiques : le chemin de la lib se calcule, c'est le contrat de ces temoins
+# shellcheck disable=SC1090
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$SCRIPT" ]

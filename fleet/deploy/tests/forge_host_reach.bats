@@ -370,7 +370,15 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code | refute_out '--image "\$PROV_FORGE_IMAGE"'
   # et le toolchain vient AVANT — l'ordre est le prefixe
   [ -f "$d/15-toolchain.sh" ]
-  [[ "15-toolchain" < "48-forge-host" ]]
+  # ⚠ CETTE LIGNE COMPARAIT DEUX LITTERAUX. `[[ "15-toolchain" < "48-forge-host" ]]` prouve que « 15 »
+  # trie avant « 48 » — de l'arithmetique, pas une propriete de ce depot. Elle serait restee
+  # verte apres un renommage de l'un ou l'autre, c'est-a-dire au moment precis ou l'ordre casse.
+  # Ce qui est vrai : les deux modules EXISTENT, et le glob du runner met le premier avant.
+  local _mods _ia _ib
+  _mods="$(cd "$d" && printf '%s\n' *.sh)"
+  _ia="$(grep -nx '15-toolchain.sh' <<<"$_mods" | cut -d: -f1)"
+  _ib="$(grep -nx '48-forge-host.sh' <<<"$_mods" | cut -d: -f1)"
+  [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
 }
 
 # ─── LES TROIS TROUS DE LA BASCULE, TROUVES EN REVUE (2026-08-22) ───────────────────────────────

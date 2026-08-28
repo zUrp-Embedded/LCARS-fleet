@@ -23,6 +23,10 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+# ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
+#   SC2034 — variable posee pour un sous-processus ou lue par un helper, pas par ce fichier
+# shellcheck disable=SC2034
+
 load refute
 
 setup() {
