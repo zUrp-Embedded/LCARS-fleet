@@ -1799,7 +1799,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # inside a string survives. Known limit, stated rather than hidden: a `#` inside SINGLE quotes is
   # truncated — that direction is fail-CLOSED (a real code site stops matching, the lock reddens and
   # names it), never fail-open.
-  defp code_of(body), do: body |> String.split("\n") |> Enum.map(&strip_comment/1) |> Enum.join("\n")
+  defp code_of(body),
+    do: body |> String.split("\n") |> Enum.map(&strip_comment/1) |> Enum.join("\n")
 
   defp do_strip_comment([], acc, _in_str), do: acc
   defp do_strip_comment([?# | _rest], acc, false), do: acc
