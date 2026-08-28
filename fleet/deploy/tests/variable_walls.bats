@@ -798,6 +798,29 @@ print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
            | sed 's/#.*//' | grep -oE 'https?://[a-z][a-z0-9_.-]*:3000' \
            | sed -E 's@https?://([a-z][a-z0-9_.-]*):3000@\1@' | sort -u \
            | grep -vE '^(localhost|127\.0\.0\.1|0\.0\.0\.0)$' || true)"
+  # ⚠ ET LE PORT EST L'AUTRE MOITIE DE L'ADRESSE. Ce mur tenait l'HOTE et pas le PORT : un
+  # `http://gitea:3001` aurait passe, alors que le conteneur ecoute sur ce que le compose MAPPE.
+  # Garder une moitie d'une adresse est la forme exacte que le §22 denonce — et c'est la deuxieme
+  # fois aujourd'hui qu'on la trouve sur ce meme fait (le depot ops etait garde sans sa branche).
+  local port_conteneur
+  port_conteneur="$(sed 's/#.*//' "$REPO/deploy/docker/forge-compose.yml" \
+                    | sed -nE 's@^[[:space:]]*-[[:space:]]*".*:([0-9]{2,5})"[[:space:]]*$@\1@p' | head -n1)"
+  [ -n "$port_conteneur" ] || { echo "MUR 14 — le port du conteneur ne se lit plus dans forge-compose.yml" >&2; return 1; }
+
+  local ports
+  ports="$(grep -rhE 'https?://[a-z][a-z0-9_.-]*:[0-9]+' "$REPO" \
+             --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
+             --exclude-dir=tests --exclude-dir=test 2>/dev/null \
+           | sed 's/#.*//' | grep -oE "https?://$forge_svc:[0-9]+" \
+           | sed -E 's@.*:([0-9]+)$@\1@' | sort -u || true)"
+  local pt
+  for pt in $ports; do
+    [ "$pt" = "$port_conteneur" ] && continue
+    echo "MUR 14 rompu — une URL interne vise « $forge_svc:$pt » alors que le compose fait ecouter" >&2
+    echo "   le conteneur sur $port_conteneur : l'hote est bon, le port ne repond pas" >&2
+    rompu=1
+  done
+
   local h
   for h in $hotes; do
     [ "$h" = "$forge_svc" ] && continue
@@ -884,6 +907,53 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   printf '%s\n' $trouvees | grep -qx "$declaree" || {
     echo "MUR 15 — « $declaree » introuvable : le balayage ne lit plus le compose d'install" >&2
     return 1
+  }
+  [ "$rompu" -eq 0 ] || return 1
+}
+
+@test "MUR 16: le fichier d'environnement de l'humain — un chemin, deux ecrivains, un lecteur" {
+  # ⚠ QUATORZE PORTEURS, AUCUNE AUTORITE. `bin/fleet_v2` LIT `$HOME/.lcars/fleet_v2.env` (deux
+  # fois), `70-human` l'ECRIT depuis un template, et le template lui-meme porte le nom. Le
+  # repertoire d'etat a une autorite — `Fleet.Layout` `@state_dirname` — le NOM DU FICHIER n'en a
+  # aucune, et c'est lui qui porte `FORGE_BASE_URL` : sans ce fichier, `fleet_v2 start` refuse.
+  #
+  # UNE DIVERGENCE ICI EST MUETTE DANS LE PIRE SENS : `70-human` ecrirait un fichier que personne
+  # ne lit, `fleet_v2` lirait un fichier que personne n'ecrit, et le module RAPPORTERAIT « posé »
+  # pendant que le lanceur dit « FORGE_BASE_URL manquant — édite <un autre chemin> ». L'operateur
+  # editerait le fichier que le module nomme, sans effet.
+  #
+  # LE REPERTOIRE SE DERIVE DE `Fleet.Layout`, le nom du fichier se compare entre ses porteurs :
+  # c'est l'ACCORD, faute d'autorite designee — meme forme que `/home/private`.
+  local dir_etat
+  # ⚠ DELIMITEUR `,` : `@` separe le `sed` ET ouvre `@state_dirname`. Troisieme fois aujourd'hui
+  # qu'un delimiteur mange son propre motif — apres `~r|…|` en Elixir et `s|(anchor|file)|` plus
+  # haut dans ce fichier. Le choix du delimiteur n'est pas cosmetique : c'est une partie du motif.
+  dir_etat="$(sed -nE 's,^[[:space:]]*@state_dirname[[:space:]]+"([^"]+)".*,\1,p' "$REPO/lib/fleet/layout.ex" | head -n1)"
+  [ -n "$dir_etat" ] || { echo "MUR 16 — @state_dirname ne se lit plus dans Fleet.Layout" >&2; return 1; }
+
+  # Le nom, lu chez le LECTEUR (`bin/fleet_v2`), puis compare chez les ecrivains.
+  local nom
+  nom="$(sed 's/#.*//' "$REPO/bin/fleet_v2" \
+         | sed -nE "s@.*LCARS_FLEET_V2_ENV:-\\\$HOME/$dir_etat/([A-Za-z0-9_.-]+)\\}.*@\1@p" | head -n1)"
+  [ -n "$nom" ] || {
+    echo "MUR 16 — le lecteur ne compose plus son chemin depuis « $dir_etat » : bin/fleet_v2 a change de forme" >&2
+    return 1
+  }
+
+  local rompu=0
+  need16() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qF -- "$2" || {
+      echo "MUR 16 rompu — $1 ne porte pas « $2 » ($3)" >&2; rompu=1; }; }
+  need16 deploy/modules.d/70-human.sh "$dir_etat/$nom" "l'ecrivain du rail poste"
+  need16 deploy/modules.d/70-human.sh "$nom.template"  "le template dont il derive le fichier"
+  [ -r "$REPO/etc/$nom.template" ] || {
+    echo "MUR 16 rompu — etc/$nom.template n'existe pas : l'ecrivain derive d'un fichier absent" >&2
+    rompu=1
+  }
+  # Les DEUX lectures de `bin/fleet_v2` doivent viser le meme fichier — une seule corrigee serait
+  # un demarrage qui lit un fichier et un arret qui en lit un autre.
+  [ "$(sed 's/#.*//' "$REPO/bin/fleet_v2" | grep -cF "$dir_etat/$nom")" -ge 2 ] || {
+    echo "MUR 16 rompu — bin/fleet_v2 ne vise plus le meme fichier a ses deux lectures" >&2
+    rompu=1
   }
   [ "$rompu" -eq 0 ] || return 1
 }
