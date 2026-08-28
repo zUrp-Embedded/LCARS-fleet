@@ -140,32 +140,26 @@ WORKDIR /src/fleet
 # coute ~10 min, domine par le gate joue ici ; avec le `rm -rf`, toucher un fichier de `deploy/`
 # les payait en entier pour rien. La correction (inclure par defaut) est conservee, son cout
 # d'iteration ne l'est pas.
-# ⚠ `deploy` A QUITTE CETTE LISTE, ET C'EST UN CORRECTIF MESURE. Le raisonnement ci-dessus est
-# juste et sa conclusion etait fausse sur un point : `deploy/` N'EST PAS hors perimetre du gate.
-# `test/fleet/catalogue_store_address_test.exs` lit `deploy/modules.d/45-catalogues.sh` pour
-# croiser deux ecrivains shell avec ce que le BEAM declare. Sans l'arbre, il ne rougit pas sur la
-# propriete : il meurt sur `File.Error`.
+# ⚠ `deploy` EST RESSORTI DE CET ETAGE, ET LE DETOUR VAUT D'ETRE DIT. Il en avait ete RETIRE de la
+# liste d'exclusion quelques heures plus tot, parce que le gate tournait ici et lisait
+# `deploy/modules.d/45-catalogues.sh` — sans l'arbre, le temoin mourait sur `File.Error` au lieu de
+# juger sa propriete. Correctif juste pour la question posee ; la question a change.
 #
-# MESURE, install a froid du 2026-08-28 (Ubuntu 26.04 neuve, image batie pour de vrai) :
-#   1) test les DEUX ecrivains shell portent exactement l'adresse que le BEAM declare
-#      ** (File.Error) could not read file "deploy/modules.d/45-catalogues.sh"
-#   2) test TEMOIN de non-vacuite : les fichiers existent et portent bien la ligne
-# 3368 tests, 2 echecs — le build ne produit AUCUNE image, et le rail boite ne s'installe plus.
+# CE QUE LA MESURE A MONTRE ENSUITE : le gate n'est pas un gate de `fleet/`, c'est un gate de DEPOT.
+# Une fois `deploy/tests` present, il a echoue plus loin — sur `bash /src/install.sh` (exit 127 :
+# l'entree est a la RACINE, pas sous `fleet/`), sur `assets/` (meme raison), et sa decouverte
+# shellcheck part d'un `git ls-files` qui n'a pas de `.git` ici. Aucun `COPY fleet` ne repare ca ;
+# seul un `COPY .` du depot entier le ferait, en invalidant le layer a chaque edition.
 #
-# ⚠ CE TROU A SURVECU PARCE QUE PERSONNE NE BATIT. Sous WSL le daemon est partage par toute la VM :
-# une distro vierge n'est PAS un docker vierge, l'image etait toujours deja la. Meme raison que la
-# cicatrice d'`install.sh` sur le chemin « image absente ». Il a fallu batir sous un tag neuf pour
-# que le chemin se joue.
+# ⚖ ARBITRAGE USER 2026-08-28 : l'image NE REJOUE PAS le gate, elle fait confiance au paquet. C'est
+# l'intention deja ecrite dans `pack.sh` — « le gate tournait DEUX FOIS sur le meme commit, et la
+# premiere ne produisait rien ». L'etage ne porte donc que ce qu'il COMPILE, et `deploy/` n'en est
+# pas : l'exclusion revient, et son benefice de cache avec elle.
 #
-# ET LE MODULEDOC DU TEMOIN PORTE LA PREMISSE FAUSSE : « un temoin `mix test` n'a pas ce probleme :
-# il tourne sur le DEPOT, ou `deploy/` existe toujours ». Le gate tourne ICI, et ici il n'existait
-# pas. Un temoin qui raisonne sur l'endroit ou il croit tourner est aveugle a celui ou il tourne.
-#
-# LE COUT EST REEL ET IL EST ACCEPTE : editer un compose ou un module de `deploy/` invalide
-# desormais ce layer et rejoue le gate (~10 min). C'est le prix d'un gate qui voit l'arbre qu'il
-# atteste. L'arbitrage d'origine choisissait « le mode de defaillance benin » — sauf que celui-ci
-# ne l'etait pas : il nommait deja « le pire, une suite qui ne tourne plus sans le dire ».
-COPY --chown=builder:fleet --exclude=git-hooks --exclude=system-prompt \
+# LE COUT EST NOMME, PAS MASQUE : une image batie depuis un checkout BRUT n'est attestee par
+# personne. `etc/install.sh` l'imprime — « la release n'est PAS attestee par le gate de ce commit ».
+# Le paquet, lui, porte son attestation : `pack.sh` joue le gate complet sur le depot avant de tarer.
+COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
 
 # hex/rebar + build + pose sous /opt/lcars/runtime — le cache BuildKit évite de re-télécharger
@@ -225,7 +219,8 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
     mix local.hex --force && mix local.rebar --force \
-    && { LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/install.sh || [ "$?" -eq 3 ]; }
+    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/install.sh \
+         || [ "$?" -eq 3 ]; }
 
 # ─── Stage 1bis : la DOC, batie depuis le meme arbre ─────────────────────────────────────────────
 #
