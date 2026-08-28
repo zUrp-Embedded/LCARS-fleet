@@ -497,7 +497,7 @@ apply() {
   # ACTIF. Ce qui ne ment pas est le COMPTEUR DE REDÉMARRAGES : lu avant, relu après une fenêtre plus
   # longue que le `RestartSec` le plus long du lot. S'il a bougé, le service boucle sur son échec.
   local -a was=()
-  local i n
+  local i n n2
   for u in "${UNITS[@]}"; do
     was+=("$(restarts_of "$u")")
     "$SYSTEMCTL" enable --now "$u.service" >/dev/null 2>&1 \
@@ -507,11 +507,29 @@ apply() {
   if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep "$SETTLE_SECS"; fi
   for i in "${!UNITS[@]}"; do
     u="${UNITS[$i]}"
+    # ⚠ CE QUI DISTINGUE UN REBOND D'UNE BOUCLE EST QU'ELLE GRIMPE ENCORE — pas l'etat a un instant.
+    #
+    # Le delta de `NRestarts` etait teste EN PREMIER, et un service qui a rebondi pendant la fenetre
+    # d'attente puis s'est stabilise etait declare « en boucle » alors qu'il TOURNE. MESURE SUR BANC
+    # le 2026-08-28 : `lcars-catalogue` et `lcars-privileged` rendus FAIL avec `NRestarts=33`, tous
+    # deux `active` — ils rebondissaient en attendant la forge, montee pendant la passe.
+    #
+    # ⚠ ET `is-active` SEUL NE SUFFIT PAS : un service qui boucle vraiment est `active` par
+    # intermittence, donc une sonde instantanee le declarerait sain une fois sur deux. Le seul
+    # discriminant est un SECOND echantillon : s'il grimpe encore, ca boucle ; s'il s'est fige et
+    # que le service repond, il a rebondi puis tenu — et le rebond se DIT, parce qu'un service qui
+    # a attendu quelque chose a quelque chose a raconter.
     n="$(restarts_of "$u")"
-    if [[ "${n:-0}" -gt "${was[$i]:-0}" ]]; then
+    if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep 2; fi
+    n2="$(restarts_of "$u")"
+    if [[ "${n2:-0}" -gt "${n:-0}" ]]; then
       p_fail "$u.service redémarre en boucle — $(loop_hint "$u")"
     elif "$SYSTEMCTL" is-active --quiet "$u.service"; then
-      p_chg "$u.service activé et debout"
+      if [[ "${n2:-0}" -gt "${was[$i]:-0}" ]]; then
+        p_chg "$u.service debout, apres $(( ${n2:-0} - ${was[$i]:-0} )) redemarrage(s) — il a attendu quelque chose"
+      else
+        p_chg "$u.service activé et debout"
+      fi
     else
       p_fail "$u.service posé mais pas debout — « $SYSTEMCTL status $u.service » dit pourquoi"
     fi

@@ -80,10 +80,16 @@ setup() {
   # sur une vraie machine. C'est LUI qui distingue « demarre » de « debout ».
   RESTARTS="$BATS_TEST_TMPDIR/restarts.d"; mkdir -p "$RESTARTS"
   LOOP="$BATS_TEST_TMPDIR/looping"
+  SPIN="$BATS_TEST_TMPDIR/spinning"
   cat > "$BINDIR/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "systemctl \$*" >> "$CALLS"
 [[ "\$1" == "is-active" ]] && exit "\$(cat "$ACTIVE")"
+# ⚠ DEUX DECORS DISTINCTS, ET LE PREMIER NE MODELISAIT PAS CE QUE SON TEMOIN NOMMAIT.
+#   $LOOP    -> le compteur SAUTE une fois puis se fige : un REBOND (le service a attendu quelque
+#               chose, puis a tenu). C'est ce que le decor faisait deja, sous le nom « boucle ».
+#   $SPIN    -> le compteur grimpe a CHAQUE lecture : une vraie BOUCLE.
+[[ "\$1" == "show" && -f "$SPIN" ]] && { u="\${@: -1}"; f="$RESTARTS/\${u%.service}"; v=\$(cat "\$f" 2>/dev/null || echo 0); echo \$((v+1)) > "\$f"; echo "\$v"; exit 0; }
 [[ "\$1" == "show" ]] && { u="\${@: -1}"; cat "$RESTARTS/\${u%.service}" 2>/dev/null || echo 0; exit 0; }
 [[ "\$1" == "enable" && -f "$LOOP" ]] && { u="\${@: -1}"; echo 9 > "$RESTARTS/\${u%.service}"; }
 exit 0
@@ -353,11 +359,28 @@ mod() { run bash "$MOD" "$1"; }
   grep -q '^StartLimitBurst=' "$LCARS_SYSTEMD_DIR/lcars-converger.service"
 }
 
-@test "un service qui BOUCLE sur son echec fait echouer l'apply" {
-  : > "$LOOP"
+# ⚠ CE TEMOIN NOMMAIT « BOUCLE » UN DECOR QUI MODELISAIT UN REBOND. Son stub posait `NRestarts=9`
+# UNE fois, puis le compteur ne bougeait plus — c'est-a-dire un service qui a redemarre en attendant
+# quelque chose, puis a tenu. MESURE SUR BANC le 2026-08-28 : `lcars-catalogue` et `lcars-privileged`
+# rendus FAIL « redemarre en boucle » avec `NRestarts=33` et `is-active` = OUI, tous deux debout et
+# servant — ils avaient attendu la forge, montee pendant la passe. Le verbe accusait un service sain.
+#
+# Le discriminant n'est ni le compteur seul ni `is-active` seul : une vraie boucle est `active` par
+# intermittence, et un rebond laisse un compteur eleve. C'est de savoir s'il GRIMPE ENCORE.
+
+@test "un service qui BOUCLE VRAIMENT (le compteur grimpe encore) fait echouer l'apply" {
+  : > "$SPIN"
   mod apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"redémarre en boucle"* ]]
+}
+
+@test "un service qui a REBONDI puis tient rend un apply vert — et le rebond est DIT" {
+  : > "$LOOP"
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"redemarrage(s)"* ]]
+  refute_out 'redémarre en boucle' <<<"$output"
 }
 
 @test "un service stable ET actif rend un apply vert" {
@@ -400,7 +423,7 @@ time.sleep(120)
 
   export PROV_DECK_PORT
   PROV_DECK_PORT="$(cat "$BATS_TEST_TMPDIR/port")"
-  : > "$LOOP"
+  : > "$SPIN"   # une VRAIE boucle : ces deux temoins veulent atteindre `loop_hint`
   mod apply
   kill "$squatter" 2>/dev/null || true
 
@@ -412,7 +435,7 @@ time.sleep(120)
 # ⚠ CONTRE-TEMOIN, ET C'EST LUI QUI TIENT LE PRECEDENT : sans lui, un module qui collerait la phrase
 # « port deja pris » a TOUTE unite en boucle passerait. Le convergeur n'ecoute sur rien.
 @test "une unite qui n'ecoute sur rien renvoie au journal, pas au port" {
-  : > "$LOOP"
+  : > "$SPIN"   # une VRAIE boucle : ces deux temoins veulent atteindre `loop_hint`
   mod apply
   [[ "$output" == *"lcars-converger.service redémarre en boucle — « journalctl"* ]]
   [[ "$output" != *"lcars-converger.service redémarre en boucle — le port"* ]]
