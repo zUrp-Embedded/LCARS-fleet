@@ -255,7 +255,14 @@ nu() { # nu <check|apply>
     PROV_FLEET_GROUP="groupe-absent-$$" mod 'check'
   [ "$status" -eq 1 ]
   [[ "$output" == *"hors du groupe"* ]]
-  [[ "$output" == *"/home/private"* ]]
+  # ⚠ LE REPERTOIRE SE DEMANDE, IL NE SE GRAVE PAS. Ce temoin attendait `/home/private` en dur ;
+  # depuis que la racine est unique il derive, et un litteral fige aurait fait rougir ce temoin sur
+  # un module parfaitement correct — ou pire, l'aurait fait passer au vert sur un module qui nomme
+  # encore l'ancien chemin. On lit le meme fait que le sujet.
+  local secdir
+  secdir="$(env -i PATH="$PATH" bash -c ". '$PROVISION_LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  [ -n "$secdir" ] || { echo "PROV_TOKENS_DIR ne se lit plus dans provision-lib" >&2; return 1; }
+  [[ "$output" == *"$secdir"* ]]
 }
 
 @test "TEMOIN DU TEMOIN : la population, elle, ne regarde AUCUN groupe" {

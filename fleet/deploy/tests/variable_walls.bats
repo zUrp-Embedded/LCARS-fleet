@@ -552,7 +552,12 @@ PYX
 
   local a b
   a="$(sed 's/#.*//' "$inst" | sed -nE 's/.*LCARS_INSTALL_PREFIX:-([^}]+)\}.*/\1/p' | head -n1)"
-  b="$(sed 's/#.*//' "$lib"  | sed -nE 's/^: "\$\{PROV_PREFIX:=([^}]+)\}".*/\1/p' | head -n1)"
+  # ⚠ LU RESOLU, PAS EN TEXTE. Depuis que la racine est nommee UNE fois (`PROV_ROOT`), ce repli est
+  # DERIVE : `$PROV_ROOT/runtime`. Comparer son TEXTE a celui d'install.sh rendrait « deux prefixes
+  # declares » sur deux declarations parfaitement d'accord — et la seule facon de faire taire ce
+  # mur serait de regraver le litteral ici, c'est-a-dire d'ajouter la copie qu'il traque. L'idiome
+  # est celui d'`authority_walls.bats` : sourcer dans un env vierge et lire la valeur.
+  b="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_PREFIX\"")"
   [ -n "$a" ] || { echo "MUR 10 — le repli de LCARS_INSTALL_PREFIX ne se lit plus dans install.sh" >&2; return 1; }
   [ -n "$b" ] || { echo "MUR 10 — PROV_PREFIX ne se lit plus dans provision-lib.sh" >&2; return 1; }
   [ "$a" = "$b" ] || {
@@ -688,18 +693,26 @@ PYX
   local hors_derivation="forge-role-passwords.json"
 
   : > "$BATS_TEST_TMPDIR/sec"
+  # ⚠ LE REPERTOIRE SE DEMANDE, IL NE SE GRAVE PLUS. Il valait `/home/private` en dur ici, aux trois
+  # endroits de ce mur ; depuis que la racine est unique il derive (`$PROV_ROOT/var/tokens`), et un
+  # littéral fige laisse le balayage sans AUCUN porteur — la garde d'instrument rougit alors sur un
+  # dépôt sain. Sourcer la lib, c'est lire le meme fait que le code qu'on mesure.
+  local secdir
+  secdir="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  [ -n "$secdir" ] || { echo "MUR 12 — PROV_TOKENS_DIR ne se lit plus dans provision-lib" >&2; return 1; }
+
   local f
   while read -r f; do
     [ -r "$f" ] || continue
-    python3 - "$f" <<'PYX' >> "$BATS_TEST_TMPDIR/sec" 2>/dev/null || true
+    python3 - "$f" "$secdir" <<'PYX' >> "$BATS_TEST_TMPDIR/sec" 2>/dev/null || true
 import io, re, sys
 s = io.open(sys.argv[1], encoding='utf-8', errors='replace').read()
 if '\x00' in s[:4096]: raise SystemExit
 s = re.sub(r'@(?:module)?doc\s+"""(.*?)"""', '', s, flags=re.S)
 s = '\n'.join(re.sub(r'#.*', '', l) for l in s.split('\n'))
-for m in re.finditer(r'/home/private/([A-Za-z0-9_.$-]+)', s):
+for m in re.finditer(re.escape(sys.argv[2]) + r'/([A-Za-z0-9_.$-]+)', s):
     nom = re.sub(r'[.\-]+$', '', m.group(1))
-    # ⚠ UNE EXPANSION N'EST PAS UN NOM. `/home/private/$SYSTEM_ACCOUNT.gitea_token` compose son
+    # ⚠ UNE EXPANSION N'EST PAS UN NOM. `<secrets>/$SYSTEM_ACCOUNT.gitea_token` compose son
     # nom a l'execution : ce mur ne peut pas le lire, et l'accuser serait accuser une derivation.
     if nom.startswith('$') or not nom:
         continue
@@ -709,7 +722,7 @@ PYX
   # accusait `test_catalogue_executor.py`, dont un fixture porte « ../../home/private/forge-master »
   # — une tentative de traversee que le temoin REFUSE. Accuser un temoin pour la chaine qu'il
   # interdit est la meme faute que lire la prose : on punit celui qui documente le defaut.
-  done < <(grep -rl '/home/private/' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
+  done < <(grep -rl "$secdir/" "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
              --exclude-dir=.expert --exclude-dir=tests --exclude-dir=test 2>/dev/null | grep -v '/deps/[a-z_]*/')
 
   [ -s "$BATS_TEST_TMPDIR/sec" ] || { echo "MUR 12 — aucun porteur lu : le balayage est casse" >&2; return 1; }
@@ -719,7 +732,7 @@ PYX
     printf '%s\n' "$derives" | grep -qx "$nom" && continue
     printf '%s\n' "$derives" | grep -q -- "\\${nom##*.}\$" && [ "${nom#*.}" = "gitea_token" ] && continue
     printf '%s\n' $hors_derivation | grep -qx "$nom" && continue
-    echo "MUR 12 rompu — /home/private/$nom est grave, mais provision-lib ne compose ce nom nulle part" >&2
+    echo "MUR 12 rompu — $secdir/$nom est grave, mais provision-lib ne compose ce nom nulle part" >&2
     rompu=1
   done < <(sort -u "$BATS_TEST_TMPDIR/sec")
   [ "$rompu" -eq 0 ] || return 1
