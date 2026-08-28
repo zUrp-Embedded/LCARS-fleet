@@ -295,7 +295,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ "$(sed -n 's/^  comptes *\([0-9]*\) compte.*/\1/p' <<<"$output")" -eq 1 ]
 }
 
-@test "ACCOUNT : les comptes partent AVANT les groupes — `groupdel` l'exige" {
+@test "ACCOUNT : les comptes partent AVANT les groupes — \`groupdel\` l'exige" {
   # `groupdel` refuse un groupe qui est le PRIMAIRE d'un compte existant. Retirer le groupe d'abord
   # le laisserait en place, et le compte avec.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
@@ -305,7 +305,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ -n "$n_acc" ] && [ -n "$n_grp" ] && [ "$n_acc" -lt "$n_grp" ]
 }
 
-@test "ACCOUNT n'est PAS person : aucun `userdel` ne touche un compte d'humain" {
+@test "ACCOUNT n'est PAS person : aucun \`userdel\` ne touche un compte d'humain" {
   # ⚠ LA PROPRIETE LA PLUS CHERE DE CE VERBE. Un compte de service se retire toujours, un compte
   # d'humain jamais sans qu'on le demande. Les fondre ferait un desinstalleur qui supprime des gens.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
@@ -390,7 +390,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   refute_out 'comptes h\.' <<<"$output"
 }
 
-@test "PERSON : le retrait est sous `--humans`, et il passe par `preserved`" {
+@test "PERSON : le retrait est sous \`--humans\`, et il passe par \`preserved\`" {
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   local bloc; bloc="$(sed -n '/for per in /,/^    done/p' <<<"$body")"
   [ -n "$bloc" ]

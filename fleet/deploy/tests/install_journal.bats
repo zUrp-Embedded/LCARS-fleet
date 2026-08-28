@@ -181,7 +181,7 @@ SH
 # metadonnees et deux colonnes apt. Zero repertoire, zero fichier, zero lien, zero groupe —
 # `prov_journal_note` avait DEUX appelants, tous deux dans `apt_ensure`.
 
-@test "PRIMITIVES : `ensure_dir` note ce qu'il pose, sans qu'un module y pense" {
+@test "PRIMITIVES : \`ensure_dir\` note ce qu'il pose, sans qu'un module y pense" {
   lib "PROV_JOURNAL_ACC='$ACC'; ensure_dir '$BATS_TEST_TMPDIR/n1' 0755 >/dev/null"
   grep -qE "^posed_dir $BATS_TEST_TMPDIR/n1\$" "$ACC"
 }
@@ -192,7 +192,7 @@ SH
   refute grep -q 'posed_dir' "$ACC"
 }
 
-@test "PRIMITIVES : `write_atomic` et `ensure_symlink` notent aussi" {
+@test "PRIMITIVES : \`write_atomic\` et \`ensure_symlink\` notent aussi" {
   lib "PROV_JOURNAL_ACC='$ACC'; echo x | write_atomic '$BATS_TEST_TMPDIR/f1' 0644 >/dev/null"
   lib "PROV_JOURNAL_ACC='$ACC'; ensure_symlink '$BATS_TEST_TMPDIR/l1' '$BATS_TEST_TMPDIR/f1' >/dev/null"
   grep -qE "^posed_file $BATS_TEST_TMPDIR/f1\$" "$ACC"
