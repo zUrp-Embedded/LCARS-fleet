@@ -667,9 +667,22 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh
 
-# /home = LE volume d'état (les humains : ~/.lcars, ~/.claude, ~/pods ; /home/private : tokens ;
-# les clés d'hôte sshd y persistent aussi — un conteneur recréé garde son identité SSH).
-VOLUME ["/home"]
+# DEUX volumes d'état, et ils portent deux choses différentes.
+#
+# /home           = les HUMAINS (~/.lcars, ~/.claude, ~/pods) et les clés d'hôte sshd — un conteneur
+#                   recréé garde son identité SSH.
+# /opt/lcars/var  = l'ÉTAT de l'installation : les jetons de forge (`PROV_TOKENS_DIR`) et l'état des
+#                   recettes tofu (`PROV_CATALOGUES_WORK`).
+#
+# ⚠ LE SECOND EST UN CORRECTIF, PAS UN AJOUT DE CONFORT. Les jetons vivaient dans `/opt/lcars/var/tokens`,
+# donc sur le premier volume ; l'état tofu, lui, était sous `/var/lib/lcars/tofu`, où AUCUN volume
+# ne le portait — les quatre volumes du magasin sont `cache`, `toolchains`, `sysroots`, `state`, et
+# `tofu` n'en fait pas partie. Il repartait donc à zéro à chaque échange d'image, sans un mot.
+# Regrouper l'état sous la racine unique rend le trou visible et le ferme d'une seule ligne.
+#
+# Les deux composes le NOMMENT : une déclaration `VOLUME` non nommée donne un volume ANONYME, qu'un
+# `recreate` orpheline (c'est le piège que `runner-compose.yml` paie déjà pour le magasin dind).
+VOLUME ["/home", "/opt/lcars/var"]
 EXPOSE 22
 
 # sshd répond = le conteneur tient sa promesse (login-manager). Sonde TCP réelle, pas un pgrep

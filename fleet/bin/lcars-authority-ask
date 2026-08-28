@@ -6,7 +6,7 @@
 #
 # ─── POURQUOI CE FICHIER ────────────────────────────────────────────────────────────────────────
 #
-# Trois gestes de shell lisaient `/home/private/<compte>.gitea_token` sous l'uid d'un humain :
+# Trois gestes de shell lisaient `/opt/lcars/var/tokens/<compte>.gitea_token` sous l'uid d'un humain :
 # `lcars publish run`, `lcars approve`, et le skill `system-issues` du siege. Le fichier etait
 # `0640 root:fleet`, et ce groupe etait une PROJECTION de l'equipe `humans` de la forge, refaite
 # toutes les trente secondes — donc le droit de porter une identite de travail avait la peremption

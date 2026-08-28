@@ -69,7 +69,9 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   # inventaire, et celui qui derive est toujours celui qu'on ne relit pas.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   [ -n "$body" ]
-  refute grep -qE '/opt/lcars|/usr/share/lcars|/etc/lcars|/home/private|/var/lib/lcars' <<<"$body"
+  # `/home/private` a quitte cette liste avec la racine : les jetons vivent sous `/opt/lcars`, deja
+  # couvert par la premiere alternative. Une alternative qui ne peut plus rien matcher ne garde rien.
+  refute grep -qE '/opt/lcars|/usr/share/lcars|/etc/lcars|/var/lib/lcars' <<<"$body"
   grep -q 'MANIFEST_FILE' <<<"$body"
   grep -q 'JOURNAL_FILE' <<<"$body"
 }

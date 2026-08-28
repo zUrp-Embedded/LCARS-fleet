@@ -36,7 +36,7 @@ PROVISION_LIB_LOADED=1
 # `detect_substrate`, `docker_endpoint` et `docker_stream_ok` vivaient ICI et sont partis dans une
 # lib SANS effet de bord — parce que le script d'entree du depot en a besoin AVANT tout clone, et
 # qu'il n'a rien a faire des ~40 defauts poses plus bas (chemins d'install, groupe fleet, org de la
-# forge, lecture de /home/private/forge.url). Aucune copie n'est restee : deux sondes, ce serait
+# forge, lecture de /opt/lcars/var/tokens/forge.url). Aucune copie n'est restee : deux sondes, ce serait
 # deux jugements possibles sur la meme machine selon la porte empruntee.
 # shellcheck source=docker-endpoint.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-endpoint.sh"
@@ -47,7 +47,7 @@ PROVISION_LIB_LOADED=1
 # /local/fleet_v2 est MORT, renommé *.OBSOLETE le 2026-07-18). Un fait, deux rendus : sync à la main.
 # ⚠ LA RACINE UNIQUE — CELLE QUE LA PHASE B GENERALISE, ET ELLE COMMENCE ICI.
 #
-# Ce rail pose aujourd'hui DIX racines de premier niveau (`/local`, `/opt/lcars`, `/home/private`,
+# Ce rail pose aujourd'hui DIX racines de premier niveau (`/local`, `/opt/lcars`, `/opt/lcars/var/tokens`,
 # `/home/catalogues`, `/var/lib/lcars`, `/usr/share/lcars`, `/etc/lcars`, `/opt/elixir-*`,
 # `/opt/node-*`, `/run/lcars`). La cible en garde DEUX, dont une en tmpfs — et ce qu'on achete n'est
 # pas de l'esthetique de `/` : c'est que `rm -rf <racine>` DEVIENNE la desinstallation, et qu'un
@@ -91,7 +91,7 @@ PROVISION_LIB_LOADED=1
 # heriter ce groupe a la socket, et le `--x` du groupe donne la traversee sans le listage.
 #
 # ⚠ SURTOUT PAS `$PROV_FLEET_GROUP`, ET C'EST LE PIEGE QUI A MORDU. Celui-la porte deja la lecture
-# de `/local/LCARS_v2`, des role-tokens et de `/home/private` : le reutiliser ici serait plus court
+# de `/local/LCARS_v2`, des role-tokens et de `/opt/lcars/var/tokens` : le reutiliser ici serait plus court
 # et accorderait tout le reste par la meme occasion. L'image le dit deja dans son Dockerfile — « un
 # pouvoir qu'on ne sait pas dire en une phrase est trop large » — et le rail poste, lui, cablait
 # `fleet`. Mesure du 2026-08-21 : `/run/lcars/console/lcars` en `lcars:fleet`, deck sous
@@ -102,7 +102,11 @@ PROVISION_LIB_LOADED=1
 # (`LCARS_STORE_ROOT`), est `docker` seulement (`26-store`, APPLY-ON: docker). Une racine de moins,
 # mesurable : dix -> neuf.
 : "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
-: "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
+# ⚠ TROISIEME RACINE FERMEE. Les jetons descendent sous la racine unique : `/opt/lcars/var/tokens` etait
+# une racine de premier niveau pour un contenu qui est de l'ETAT, pas du travail — il se refabrique
+# contre la forge. Huit defauts la nomment, dans trois langages, et `racine_jetons.bats` exige
+# qu'ils s'accordent : c'est lui qui rend ce deplacement sur.
+: "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 # L'AUTORITE DE CREATION, posee par `box config` et QUI RESTE (⚖ user 2026-08-16). Le suffixe
 # n'est PAS `.gitea_token` : celui-la designe un jeton de ROLE (`<login>.gitea_token`, contrat

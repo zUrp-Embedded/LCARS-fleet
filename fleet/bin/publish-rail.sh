@@ -44,7 +44,7 @@
 #
 # USAGE:
 #   publish-rail.sh --project fleet/lcars-fleet --forge http://localhost:3000 \
-#       --forge-token-file /home/private/system.gitea_token \
+#       --forge-token-file /opt/lcars/var/tokens/system.gitea_token \
 #       --host github --dest-repo lordzurp/LCARS-fleet --work /tmp/pub-lcars-fleet
 #   Optional: --host gitlab (default github) · --dest-host HOST (default github.com / gitlab.com;
 #             set it for Enterprise / self-hosted) · --branch lcars/publish · --base main ·

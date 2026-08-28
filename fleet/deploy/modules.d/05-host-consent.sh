@@ -10,7 +10,7 @@
 # ─── UN CONSENTEMENT QUI NE SURVIT PAS À SON INSTALL N'EN EST PAS UN ────────────────────────────
 #
 # `00-preflight` refuse le Linux natif : ce provisionnement possède /etc, crée un groupe système,
-# pose /local et /home/private, et n'a AUCUN désinstalleur. Le refus est délibérément levable —
+# pose /local et /opt/lcars, et n'a AUCUN désinstalleur. Le refus est délibérément levable —
 # `LCARS_ALLOW_ANY_HOST=1` —, et c'est la forme voulue : sur une machine dédiée, on lève le drapeau
 # et ça DOIT marcher (⚖ user, 2026-08-20).
 #

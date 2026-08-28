@@ -15,7 +15,7 @@
 # ce qui est exactement son metier, et c'est lui qui a rendu ce geste sur. Ici il n'y avait rien.
 # Ecrire le mur AVANT de bouger est la seule facon de savoir qu'on n'a rien manque.
 #
-# ⚠ ET IL N'EPINGLE PAS `/home/private`. Il epingle que les huit disent LA MEME CHOSE que la SSoT.
+# ⚠ ET IL N'EPINGLE PAS `/opt/lcars/var/tokens`. Il epingle que les huit disent LA MEME CHOSE que la SSoT.
 # Un temoin qui grave la valeur devrait etre reecrit a chaque deplacement — et un mur qu'on reecrit
 # a chaque passage ne garde rien, il suit.
 
@@ -27,8 +27,13 @@ setup() {
   R="$BATS_TEST_DIRNAME/../.."          # fleet/
   LIB="$R/deploy/lib/provision-lib.sh"
   [ -f "$LIB" ]
-  # LA SOURCE : ce que la lib declare, et rien d'autre ne decide.
-  ATTENDU="$(sed -n 's/^: "${PROV_TOKENS_DIR:=\([^}]*\)}".*/\1/p' "$LIB" | head -1)"
+  # LA SOURCE : ce que la lib RESOUT, et rien d'autre ne decide.
+  #
+  # ⚠ ON SOURCE, ON N'EXTRAIT PAS LE TEXTE. Premiere version : un `sed` sur `${PROV_TOKENS_DIR:=…}`.
+  # Elle a rendu les SIX temoins rouges le jour ou la lib s'est mise a DERIVER (`$PROV_ROOT/var/…`)
+  # — l'extraction rendait le texte non developpe. Un instrument qui lit une valeur doit la faire
+  # calculer par celui qui la definit, sinon il mesure une syntaxe et pas un chemin.
+  ATTENDU="$(bash -c ". '$LIB' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
 }
 
 # Rend la racine que porte un defaut, quel que soit le langage.
@@ -67,7 +72,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   [ "$bad" -eq 0 ]
 }
 
-@test "BASH : le verbe `accept` aussi — il lit les memes jetons" {
+@test "BASH : le verbe \`accept\` aussi — il lit les memes jetons" {
   local vu; vu="$(racine_de "$R/deploy/accept" 'LCARS_PRIVATE_DIR:-[^}]*')"
   [ "$vu" = "$ATTENDU" ]
 }
@@ -82,7 +87,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   [ "$vu" = "$ATTENDU" ]
 }
 
-@test "ELIXIR : le defaut de `RoleToken` s'accorde avec le rail" {
+@test "ELIXIR : le defaut de \`RoleToken\` s'accorde avec le rail" {
   # Le runtime lit ces jetons par `Fleet.Credentials.RoleToken`. Son `@default_dir` est le huitieme
   # decideur, et le seul que ni bash ni python ne verraient diverger.
   local vu; vu="$(racine_de "$R/lib/fleet/credentials/role_token.ex" '@default_dir "[^"]*')"

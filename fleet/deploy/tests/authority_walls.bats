@@ -11,9 +11,9 @@
 # fichier dont personne ne saurait quelle regle il defend.
 #
 # LES INVARIANTS :
-#   1. aucun ecrivain ne pose un mode de GROUPE sur `/home/private` ni sur ce qu'il contient ;
+#   1. aucun ecrivain ne pose un mode de GROUPE sur `/opt/lcars/var/tokens` ni sur ce qu'il contient ;
 #   2. le repertoire compte autant que les fichiers — un ecrivain qui le rouvre annule les autres ;
-#   3. aucun chemin de `/home/private` n'est passe a un process qui ne peut pas l'ouvrir.
+#   3. aucun chemin de `/opt/lcars/var/tokens` n'est passe a un process qui ne peut pas l'ouvrir.
 #
 # ⚠ ON MESURE LE CODE, PAS LA PROSE. Les cicatrices de ce depot NOMMENT ce qu'elles ont retire —
 # c'est leur metier, et un mur qui attraperait l'explication d'un defaut interdirait de l'expliquer.
@@ -36,6 +36,13 @@ setup() {
       -not -path '*/tests/*' 2>/dev/null | sort
   )
   MANIFEST="$REPO/deploy/system.manifest"
+  # ⚠ RESOLU DEPUIS LA LIB, JAMAIS GRAVE. Ce fichier gravait `/opt/lcars/var/tokens` en trois endroits ; le
+  # jour ou la racine est descendue sous `/opt/lcars`, DEUX murs sont devenus rouges et le
+  # troisieme — celui qui cherche une ABSENCE — serait passe au vert sur un motif qui ne peut plus
+  # rien matcher. C'est l'asymetrie a retenir : un mur d'absence ne signale pas qu'on lui a retire
+  # sa cible, il felicite.
+  TOKENS_DIR="$(bash -c ". '$REPO/deploy/lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  [[ "$TOKENS_DIR" == /* ]] || { echo "la lib ne rend pas de racine de jetons absolue : « $TOKENS_DIR »" >&2; return 1; }
 }
 
 code_of() { sed 's/#.*//' "$1"; }
@@ -107,9 +114,9 @@ absent() { # absent <motif etendu> <fichier>
   local f hits=0
   for f in "${CODE[@]}"; do
     # Chiffre de groupe ∈ {0,1} : `x` seul, jamais `r` ni `w`. Et `other` a zero.
-    if code_of "$f" | grep -qE '(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)'; then
+    if code_of "$f" | grep -qE "(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|$TOKENS_DIR)"; then
       echo "MUR rompu — le groupe LIT le repertoire des secrets dans $f :" >&2
-      code_of "$f" | grep -nE '(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' >&2
+      code_of "$f" | grep -nE "(install -d|ensure_dir|chmod)[^\n]*(0[0-7][2-7][0-7]|0[0-7][0-7][1-7])[^\n]*(PRIVATE_DIR|TOKENS_DIR|$TOKENS_DIR)" >&2
       hits=$((hits + 1))
     fi
   done
@@ -139,7 +146,7 @@ absent() { # absent <motif etendu> <fichier>
     [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
   done
   grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
-  grep -qE '^dir[[:space:]]+/home/private[[:space:]]+0710' "$MANIFEST"
+  grep -qE "^dir[[:space:]]+$TOKENS_DIR[[:space:]]+0710" "$MANIFEST"
 }
 
 # ─── MUR 2 — LES SECRETS NE SONT LISIBLES PAR AUCUN GROUPE ──────────────────────────────────────
@@ -196,7 +203,7 @@ secret_writers() {
   [ "$n" -eq 5 ]
 }
 
-@test "MUR 2 bis: le manifeste declare /home/private au detenteur, traversable et non listable" {
+@test "MUR 2 bis: le manifeste declare la racine des jetons au detenteur, traversable et non listable" {
   # ⚠ LE MANIFESTE N'EST PAS LA SOURCE DES MODES — QUATRE ecrivains le sont, d'ou le mur 1. Il est
   # la DECLARATION, et un `uninstall` s'en sert. Une table qui dirait encore `0750 root:fleet`
   # decrirait une machine qui n'existe plus.
@@ -208,8 +215,8 @@ secret_writers() {
   # lister. Ce qui se verifie ici est donc : le detenteur est le service, le mode accorde `x` au
   # groupe et pas `r`.
   local row
-  row="$(grep -E '^dir[[:space:]]+/home/private[[:space:]]' "$MANIFEST")"
-  [ -n "$row" ] || { echo "/home/private n'est plus declare dans le manifeste" >&2; return 1; }
+  row="$(grep -E "^dir[[:space:]]+$TOKENS_DIR[[:space:]]" "$MANIFEST")"
+  [ -n "$row" ] || { echo "« $TOKENS_DIR » n'est plus declare dans le manifeste" >&2; return 1; }
   [[ "$row" == *0710* ]] || { echo "mode attendu 0710 (le groupe traverse, il ne liste pas) : $row" >&2; return 1; }
   [[ "$row" == *lcars-authority:fleet* ]] \
     || { echo "attendu « lcars-authority:fleet » — le service detient, le groupe traverse : $row" >&2; return 1; }
@@ -227,7 +234,7 @@ secret_writers() {
 @test "MUR 3: aucun FORGE_TOKEN_FILE construit depuis le repertoire des secrets ne part vers une porte" {
   local f
   for f in "${CODE[@]}"; do
-    absent 'FORGE_TOKEN_FILE=[^\n]*(PRIVATE_DIR|TOKENS_DIR|/home/private)' "$f"
+    absent 'FORGE_TOKEN_FILE=[^\n]*(PRIVATE_DIR|TOKENS_DIR|/opt/lcars/var/tokens)' "$f"
   done
 }
 
@@ -280,7 +287,7 @@ secret_writers() {
   # vole. C'est la regle qui donne sa forme a tout ce chantier, lue de l'autre cote.
   local svc="$REPO/services/privileged-executor.py"
   [ -f "$svc" ] || { echo "service privilegie introuvable : $svc" >&2; return 1; }
-  absent '/home/private' "$svc"
+  absent "$TOKENS_DIR" "$svc"
   absent '(MASTER_TOKEN|gitea_token|forge-master|forge-seed)' "$svc"
 }
 

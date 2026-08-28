@@ -277,7 +277,7 @@ module_sh() {
 
 @test "ensure_mode: TEMOIN — un groupe NOMME se compare toujours en entier" {
   # Sans ce pendant, un correctif qui ignorerait le groupe en toutes circonstances passerait le
-  # temoin ci-dessus, et `root:fleet` cesserait d'etre converge — c'est-a-dire que /home/private
+  # temoin ci-dessus, et `root:fleet` cesserait d'etre converge — c'est-a-dire que /opt/lcars/var/tokens
   # pourrait deriver de groupe sans que rien ne le dise.
   module_sh '
     f="$BATS_TEST_TMPDIR/nomme"; : > "$f"

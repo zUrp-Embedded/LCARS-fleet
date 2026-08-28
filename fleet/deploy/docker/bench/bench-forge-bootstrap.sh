@@ -146,7 +146,7 @@ curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $
 # l'humain worker (HUMAN_PASSWORD, deja fixe dans ce script). Bench : fixe (`toto1234`), pour tester,
 # dans un banc JETABLE sur LAN sur ; prod : l'installeur choisit. Ce qui ne doit jamais persister
 # dans un fichier SUIVI, c'est le MASTER TOKEN qu'admiral minte. Il ne disparait pas pour autant :
-# il est confie a la boite plus bas, en 0600 root dans /home/private, et il y RESTE.
+# il est confie a la boite plus bas, en 0600 root dans /opt/lcars/var/tokens, et il y RESTE.
 ADMIN_PW="${LCARS_BENCH_ADMIRAL_PW:-toto1234}"
 
 # LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES
@@ -197,7 +197,7 @@ fi
 # 2026-08-16 sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
 # correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
 # manque. On relit celui que la boite garde ; on n'en fabrique un que s'il n'y en a pas.
-SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /home/private/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
+SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
 if [[ -z "$SEED_PW" ]]; then
   SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
   say "seed de banc genere (aucun dans $BOX)"
@@ -387,7 +387,7 @@ printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "cha
 # Un projet neuf se peuple depuis le catalogue sur DISQUE, que la boite porte deja : il n'y a plus
 # rien a semer pour qu'un onboard aboutisse.
 if [[ "$SEED_REPOS" -eq 1 ]]; then
-  SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
+  SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 
   if [[ -z "$SYS_TOKEN" ]]; then
     say "token systeme absent de la boite — semis SAUTE (relance la boite puis rejoue ce script)"

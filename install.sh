@@ -286,7 +286,7 @@ fi
 if [[ -z "$RAIL" ]]; then
   if [[ "$SUBSTRATE" != "wsl" ]] && [[ -z "${LCARS_ALLOW_ANY_HOST:-}" || "$SUBSTRATE" != "linux" ]]; then
     # Sur un Linux natif il n'y a rien à deviner : le poste est INTERDIT par le garde de cible du
-    # provisionnement (il écrirait `/local` et `/home/private` sur la machine de quelqu'un). Une
+    # provisionnement (il écrirait `/local` et `/opt/lcars` sur la machine de quelqu'un). Une
     # seule option permise ⇒ pas de question, mais on le DIT.
     #
     # ⚠ « UNE SEULE OPTION » DEVIENT FAUX DÈS QUE `LCARS_ALLOW_ANY_HOST` EST POSÉ, d'où la condition
@@ -297,7 +297,7 @@ if [[ -z "$RAIL" ]]; then
     RAIL=box
     echo ""
     echo "  ${W}Linux natif${N} — une seule option est permise ici : la boîte."
-    echo "  (le rail poste écrit dans /etc, /local et /home/private : il est réservé à WSL,"
+    echo "  (le rail poste écrit dans /etc, /local et /opt/lcars : il est réservé à WSL,"
     echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
   else
     # Les deux sont possibles. On demande, et la question dit ce que chaque branche PREND —
@@ -311,10 +311,10 @@ if [[ -z "$RAIL" ]]; then
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /local et /home/private · la convergence ajoute et ne retire pas."
+     /local et /opt/lcars · la convergence ajoute et ne retire pas."
     else
       _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
-      _prend="sudo · un groupe système · /local et /home/private · des paquets ·
+      _prend="sudo · un groupe système · /local et /opt/lcars · des paquets ·
      la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
     # DOCKER_OK=0 ici signifie : le préflight a laissé passer parce que le rail POSTE peut poser
@@ -378,7 +378,7 @@ if [[ "$RAIL" == "workstation" ]]; then
   #
   # ⚠ ET LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ — la distinction est tout ce qui change ici.
   # Ce rail est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système, /local,
-  # /home/private, et une convergence qui ne retire pas), pas parce qu'il ne saurait pas y tourner :
+  # /opt/lcars, et une convergence qui ne retire pas), pas parce qu'il ne saurait pas y tourner :
   # sur une machine DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
   # quelqu'un ; il ne décrète pas que le natif est hors d'atteinte.
   #
@@ -394,7 +394,7 @@ if [[ "$RAIL" == "workstation" ]]; then
     if [[ "$SUBSTRATE" == "linux" && -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
       echo ""
       echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
-      echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /home/private."
+      echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /opt/lcars."
       echo "  « provision uninstall » retire ce que le journal a noté ; le reste, la convergence"
       echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
     else
@@ -533,7 +533,7 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo "    sudo … bash $0 --workstation --fleet-human <nom>"
     fi
   fi
-  _banner_body=("  sudo · paquets · groupe fleet · /local · /home/private")
+  _banner_body=("  sudo · paquets · groupe fleet · /local · /opt/lcars")
   if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
   _banner_body+=(
     "  ${R}Mode dev : la convergence AJOUTE, elle ne retire pas.${N}"

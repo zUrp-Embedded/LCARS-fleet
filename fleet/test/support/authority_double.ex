@@ -151,7 +151,7 @@ defmodule Fleet.Test.AuthorityDouble do
 
   defp resolve(account) do
     if Regex.match?(@role_rx, account) do
-      dir = Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || "/home/private"
+      dir = Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || "/opt/lcars/var/tokens"
 
       case File.read(Path.join(dir, "#{account}.gitea_token")) do
         {:ok, raw} ->

@@ -220,7 +220,7 @@ wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 # l'absence. Vecu : ce script a tue un swap avec « la boite ne voit pas le seed » sur une boite dont
 # les dix jetons etaient en place, et l'operateur a passe l'heure suivante a chercher une panne de
 # forge. `cp`, `logs` et `inspect` traversent, eux — donc la mesure passe par eux.
-ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/home/private" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
+ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
 
 # ⚠ LE SECRET NE DESCEND PLUS SUR L'HOTE, ET IL Y RESTAIT. Cette mesure copiait
@@ -250,7 +250,7 @@ say "─────────────────────────
 say "boite remplacee"
 say "  image     : $IMAGE   (revision $REVISION)"
 say "  forge     : $FORGE_URL   (PRESERVEE — ni resemee ni redemarree)"
-say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
+say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
 say "  creds     : $CREDS_OK"
 say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet_v2 start'"
 say "─────────────────────────────────────────────────────────"

@@ -48,7 +48,7 @@ defmodule Fleet.Layout do
   # faces: where things sit on the box is one authority, what is inside them is another.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The INSTALLED cache — a sibling of the project faces and of `/home/private`, on the volume the
+  # The INSTALLED cache — a sibling of the project faces and of `/opt/lcars/var/tokens`, on the volume the
   # image does not rewrite. Not under `@platform_root`: that tree IS the image, and mixing runtime
   # state into it makes an update look like an uninstall.
   @installed_catalogues_root "/home/catalogues"

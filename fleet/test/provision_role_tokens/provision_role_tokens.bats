@@ -176,7 +176,7 @@ teardown() { rm -rf "$TMP"; }
 # fichiers. Une CLASSE D'OBJET entiere avait ete inventoriee a moitie.
 #
 # ⚠ ET CE TEMOIN EPINGLAIT `700`, CE QUI EST DEVENU FAUX. Mesure du 2026-08-25 sur une install
-# reelle : `/home/private` ne contient pas que des secrets — `forge.url` et `forge.public.url` y sont
+# reelle : `/opt/lcars/var/tokens` ne contient pas que des secrets — `forge.url` et `forge.public.url` y sont
 # en 0644 — et TROIS modules `NEEDS: human` les lisent sous l'uid de l'humain. En `0700` ils
 # prenaient « Permission denied » et la boite finissait sans `FORGE_BASE_URL`.
 #

@@ -457,7 +457,7 @@ uninstall_run() {
 
   # LES COMPTES D'HUMAINS : la carte du convergeur, LUE AVANT TOUT.
   #
-  # ⚠ ELLE VIT DANS `/home/private`, QUE CE VERBE RETIRE. Meme defaut d'ordre que le journal et les
+  # ⚠ ELLE VIT DANS `/opt/lcars/var/tokens`, QUE CE VERBE RETIRE. Meme defaut d'ordre que le journal et les
   # paquets : la seule source qui sache quels comptes LCARS a materialises est detruite par la passe
   # qui en a besoin. On la lit ici, en tete, avant qu'aucun objet ne parte.
   #
@@ -629,7 +629,7 @@ uninstall_run() {
         real="${o//<human>/$(basename "$h")}"
         # ⚠ ET LA GARDE `preserve` NE COUVRAIT PAS CETTE BOUCLE. `preserved()` etait evalue sur le
         # MOTIF de la table (`/home/<human>/.lcars`), jamais sur le chemin RESOLU. La boucle itere
-        # `/home/*` — donc `/home/projects`, `/home/projects.ops`, `/home/private`. Un `--humans`
+        # `/home/*` — donc `/home/projects`, `/home/projects.ops`, `/opt/lcars/var/tokens`. Un `--humans`
         # sur une machine qui porte les faces planifiait dedans.
         preserved "$real" && continue
         [[ -e "$real" ]] && { rm -rf "$real" && removed=$((removed + 1)); }

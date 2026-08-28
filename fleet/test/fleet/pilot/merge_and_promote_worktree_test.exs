@@ -24,7 +24,7 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
 
     # `merge_and_promote` signs INTERNALLY (les deux jetons de rail → RoleToken) and is FAIL-CLOSED
     # (soft-default #3: no system fallback). We place a resolvable gatekeeper token in a hermetic tmp
-    # (never the runner's real `/home/private`) → the seal proceeds; this test verifies the worktree
+    # (never the runner's real `/opt/lcars/var/tokens`) → the seal proceeds; this test verifies the worktree
     # projection, not the token.
     # Les DEUX rails du sceau depuis le 2026-08-20 : `chief` fusionne, `gatekeeper` promeut.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)

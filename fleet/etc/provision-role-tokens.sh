@@ -44,7 +44,7 @@
 #                                                            # les 6 roles + le systeme = A4 complet
 #   provision-role-tokens.sh --forge URL --check             # sonde seule (nuke-drill)
 #   provision-role-tokens.sh --help                          # cette aide
-# Options : --tokens-dir DIR (defaut /home/private) · --roles "a b c" (defaut : les 6) ·
+# Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : les 6) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
 #             fichier. Le compte systeme en etait le seul usager ; il suit le contrat de role depuis
 #             qu'il s'appelle `system_starfleet`) · --owner USER (defaut lcars-authority) ·
@@ -72,7 +72,7 @@ FORGE="${FORGE_BASE_URL:-}"
 # (`provision-lib.sh`) ; un litteral ici serait un SECOND endroit qui decide ou vivent les jetons,
 # et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
 # operateur lance a la main hors du rail.
-TOKENS_DIR="${PROV_TOKENS_DIR:-/home/private}"
+TOKENS_DIR="${PROV_TOKENS_DIR:-/opt/lcars/var/tokens}"
 # vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-45) — account + token minted,
 # both inert until the box opens. A seat = a full identity, no branch here. (The older note
 # claiming vulcan "absent rightly, external Codex agent" described the pre-seat world and is

@@ -111,7 +111,7 @@ dir       /opt/lcars/share/doc                         0755  root:root          
 # voir ». J'avais suivi le LECTEUR sans regarder l'UID SOUS LEQUEL il est source. Trois modules sont
 # `NEEDS: human` et tournent sous l'humain via `as_human` — `40-claude-bin`, `70-human`,
 # `75-projects` — et ils sourcent tous cette lib. Mesure du 2026-08-25, install reelle :
-# `cat: /home/private/forge.url: Permission denied`, `PROV_FORGE_URL=[]`, donc `fleet_v2.env` sans
+# `cat: /opt/lcars/var/tokens/forge.url: Permission denied`, `PROV_FORGE_URL=[]`, donc `fleet_v2.env` sans
 # `FORGE_BASE_URL`, donc `fleet_v2 start` qui refuse. L'axe manquant n'etait pas un fichier, c'etait
 # un CROISEMENT : `NEEDS: human` x `source provision-lib`.
 #
@@ -132,7 +132,15 @@ dir       /opt/lcars/share/doc                         0755  root:root          
 # pose, et `onboard_v2` en lit un SANS `sudo` (`SKILL.md:314`). Cette lecture-la meurt avec cette
 # ligne. Ce sont des vestiges d'un rail retire ; les reparer est un autre chantier, pas un effet de
 # bord de celui-ci.
-dir       /home/private                                0710  lcars-authority:fleet  any
+#
+# ⚠ CE REPERTOIRE S'APPELAIT `/opt/lcars/var/tokens`, ET SON DEPLACEMENT A EXIGE UN VOLUME. Dans la boite,
+# `/home` est le SEUL volume d'etat (`Dockerfile: VOLUME`) : les jetons y survivaient a un echange
+# d'image. Sous `/opt/lcars`, ils seraient tombes sur une COUCHE D'IMAGE, que le prochain `up`
+# remplace — une perte silencieuse, decouverte a la premiere convergence qui redemande un mot de
+# passe. Le volume `/opt/lcars/var` des deux composes leur rend exactement la duree de vie qu'ils
+# avaient. LA REGLE : quand de l'ETAT change de racine, c'est le VOLUME qui suit l'etat, jamais
+# l'etat qui reste ou le volume se trouve.
+dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
 dir       /home/catalogues                             0750  root:fleet          any
 # ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
 # (`LCARS_STORE_ROOT`, lu par `fleet/bin/lcars-toolchain-converge`) ; `/var/lib/lcars/tofu` est l'etat des
@@ -146,7 +154,12 @@ dir       /var/lib/lcars                               0755  root:root          
 # ⚠ L'ETAT TOFU A DEMENAGE SOUS LA RACINE UNIQUE. Il etait le SEUL objet pose sous `/var/lib/lcars`
 # sur `wsl`/`linux` ; en descendant sous `/opt/lcars`, il fait disparaitre une racine de premier
 # niveau du rail poste — la premiere des huit que la phase B doit fermer.
-dir       /opt/lcars/var                               0755  root:root           wsl+linux
+#
+# ⚠ `any`, ET CE N'ETAIT PAS `any` : les jetons sont descendus ici, et ils sont poses sur LES TROIS
+# substrats. Un parent declare `wsl+linux` sous un enfant declare `any` sort du plan sur `docker`
+# alors qu'il y est pose — la neuvieme occurrence de la colonne substrat qui ment, et celle-ci
+# aurait laisse `/opt/lcars/var` en root:root 0755 non converge dans la boite.
+dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
 dir       /etc/lcars                                   0755  root:root           wsl+linux
 

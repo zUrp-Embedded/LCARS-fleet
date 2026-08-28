@@ -43,6 +43,12 @@ load refute
 
 setup() {
   SUT="${BATS_TEST_DIRNAME}/../../bin/lcars-toolchain-converge"
+  # ⚠ RESOLU, PAS GRAVE — et ce mur-ci est de ceux qui ne PEUVENT pas se permettre un litteral. Il
+  # cherche une ABSENCE : le jour ou la racine des jetons a demenage, un motif grave aurait cesse de
+  # pouvoir matcher quoi que ce soit et serait reste vert en ne gardant plus rien. Un mur de presence
+  # qui perd sa cible rougit ; un mur d'absence, lui, felicite.
+  TOKENS_DIR="$(bash -c ". '${BATS_TEST_DIRNAME}/../lib/provision-lib.sh' >/dev/null 2>&1; printf '%s' \"\$PROV_TOKENS_DIR\"")"
+  [[ "$TOKENS_DIR" == /* ]] || { echo "la lib ne rend pas de racine de jetons absolue : « $TOKENS_DIR »" >&2; return 1; }
   export LCARS_STORE_ROOT="$BATS_TEST_TMPDIR/store"
   export LCARS_TOOLCHAIN_WORK="$BATS_TEST_TMPDIR/work"
   export LCARS_TOOLCHAIN_LOCK="$BATS_TEST_TMPDIR/lock"
@@ -127,12 +133,12 @@ EOF
 # `/repos/fleet/lcars/branches/tool_request` et `/contents/ops` repondent 200 SANS aucun en-tete
 # d'autorisation. La lecture part donc en anonyme, et ce temoin garde la propriete INVERSE.
 
-@test "AUCUN SECRET: ce script n'OUVRE aucun fichier de /home/private" {
+@test "AUCUN SECRET: ce script n'OUVRE aucun fichier de la racine des jetons" {
   # ⚠ ON MESURE LE CODE, PAS LA PROSE : la cicatrice de ce fichier NOMME le chemin qu'elle a retire,
   # et c'est son metier. Ce qui est interdit est de le LIRE.
   local n
-  n="$(sed 's/#.*//' "$SUT" | grep -cE '/home/private' || true)"
-  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SUT" | grep -nE '/home/private' >&2; return 1; }
+  n="$(sed 's/#.*//' "$SUT" | grep -cE "$TOKENS_DIR" || true)"
+  [ "$n" -eq 0 ] || { sed 's/#.*//' "$SUT" | grep -nE "$TOKENS_DIR" >&2; return 1; }
   n="$(sed 's/#.*//' "$SUT" | grep -cE 'TOKEN_FILE' || true)"
   [ "$n" -eq 0 ]
 }

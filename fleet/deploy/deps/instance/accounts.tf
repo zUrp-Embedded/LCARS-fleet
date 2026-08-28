@@ -98,7 +98,7 @@ resource "gitea_user" "system_role" {
 # donnee disait ne pas exister.
 #
 # MESURE DU 2026-08-15 (banc), avant retrait : zero site `as_role("starfleet")` dans tout `fleet/`
-# (marcheur independant, pas un grep) · aucun `starfleet.gitea_token` dans `/home/private` (dix
+# (marcheur independant, pas un grep) · aucun `starfleet.gitea_token` dans `/opt/lcars/var/tokens` (dix
 # tokens, aucun pour lui) · absent du `forge-role-passwords.json` · absent de la liste `ROLES` de
 # `provision-role-tokens.sh` · aucune org, aucun depot. Aucun secret ne vivait nulle part pour ce
 # compte : rien ne pouvait s'authentifier sous lui, et il etait site-admin.

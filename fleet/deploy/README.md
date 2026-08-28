@@ -109,7 +109,7 @@ Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=err
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
-`PROV_PREFIX` (/local/LCARS_v2 — le défaut d'etc/install.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/home/private) ·
+`PROV_PREFIX` (/local/LCARS_v2 — le défaut d'etc/install.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
 `PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
 pins toolchain (`PROV_ELIXIR_*`).
@@ -134,7 +134,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 20-groups | any | any | groupe `fleet` + membership de l'humain (AUCUN user créé : le modèle est per-humain) |
 | 21-service-accounts | any | any | les comptes SYSTEME des services de la machine — aujourd'hui `lcars-authority`, qui DETIENT les secrets de forge et n'a AUCUN privilège noyau (l'inverse exact du convergeur, qui a le privilège et ne détient rien). Membre de `fleet` pour TRAVERSER `/local/LCARS_v2`, jamais pour décider : l'adminité se demande à la forge. Rang 21 et pas moins : le compte a besoin du groupe que 20 vient de créer |
 | 22-fleet-human | wsl linux | wsl linux | l'humain de fleet du poste : un compte unix qui n'est PAS le siège (GUARD B interdit à l'uid 1000 de lancer une fleet). Le nom vient de l'opérateur — sans lui c'est un DRIFT, jamais une création silencieuse |
-| 25-directories | any | any | `/local` 0755 root + `/home/private` 0750 root:fleet — c'est tout |
+| 25-directories | any | any | `/local` 0755 root + `/opt/lcars/var/tokens` 0710 lcars-authority:fleet — c'est tout |
 | 26-store | docker | docker | les MODES du magasin d'outillage sur les quatre volumes externes — PRESENT est un magasin ACTIF : un répertoire vide se bind quand même en `ro` dans chaque pod |
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via l'installeur officiel joué TEL QUEL — deux gestes (download, puis run), aucune machinerie qui double la sienne — frontière vendor N1 |

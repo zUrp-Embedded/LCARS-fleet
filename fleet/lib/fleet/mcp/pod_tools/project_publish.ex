@@ -130,7 +130,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   # ─── LE JETON SE DEMANDE, ET IL FINIT QUAND MEME DANS UN FICHIER ──────────────────────────────
   #
-  # `env("FORGE_TOKEN_FILE")` rendait ici le chemin de `/home/private/<compte>.gitea_token`, ouvert
+  # `env("FORGE_TOKEN_FILE")` rendait ici le chemin de `/opt/lcars/var/tokens/<compte>.gitea_token`, ouvert
   # par le rail SOUS L'UID DU POD — donc sous celui de l'humain, a travers le groupe `fleet`, qui
   # etait une projection de l'equipe `humans` refaite toutes les trente secondes.
   #

@@ -116,7 +116,7 @@ TEAM="${PROV_HUMANS_TEAM:-humans}"
 # démarrage, et un convergeur mort ne crée aucun humain : la panne se lit comme « la forge ne
 # répond pas ».
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
-TOKEN_FILE="${FORGE_TOKEN_FILE:-/home/private/$SYSTEM_ACCOUNT.gitea_token}"
+TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 # CADENCE DE RECONCILIATION DE L'ETAT DES HUMAINS DEJA LA. La boucle rapide ci-dessus ne cree que
@@ -252,7 +252,7 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
 # L'ANCRE N'EST PAS LE NOM, C'EST L'ID DE FORGE. Gitea conserve l'`id` au renommage : le login est
 # une etiquette que chaque convergence reecrit, l'`id` ne bouge jamais. Une table keyee sur le nom
 # perdrait la personne au premier renommage — exactement ce que le home, lui, n'a jamais perdu.
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/home/private/forge-uid.map}"
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
 
 uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
   [[ -r "$UID_MAP_FILE" ]] || return 0

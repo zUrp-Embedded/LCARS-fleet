@@ -213,7 +213,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 # ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
 #
 # ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,
-# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/home/private` a donc
+# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/opt/lcars/var/tokens` a donc
 # coute SEPT objets sans aucun rapport avec lui : les trois racines de face, la racine des consoles,
 # l'etat tofu, et la declaration tmpfiles — celle-la meme dont le temoin d'au-dessus dit qu'elle
 # porte « la fleet ne demarrera pas ». La machine a fini avec `lcars-landing` debout et aucune

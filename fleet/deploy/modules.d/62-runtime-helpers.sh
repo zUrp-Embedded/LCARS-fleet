@@ -82,7 +82,7 @@ HELPERS=(
   human-converger.sh
   # Les gestes de forge. Dans l'image, l'entrypoint les atteint par son verbe `forge-apply` ; sur un
   # poste, `48-forge-host` les appelle DIRECTEMENT, sans conteneur — le script n'a jamais eu la
-  # moindre hypothèse de conteneur, son `PRIVATE_DIR` défaute même sur `/home/private`, un chemin
+  # moindre hypothèse de conteneur, son `PRIVATE_DIR` défaute même sur `/opt/lcars/var/tokens`, un chemin
   # d'hôte. C'est l'appelant qui le forçait dans un `docker create`.
   forge-gestures.sh
   # L'exécuteur de catalogue : le seul process de la boîte qui tienne l'autorité de la forge. Il est

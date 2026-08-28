@@ -16,7 +16,7 @@
 # `as_role` (système-side, forge_client.ex) ne sert QU'À l'authorship (la PR affiche
 # « engineer »). Les comptes de rôle ne sont donc pas des acteurs indépendants → leur
 # niveau exact (read/write) n'est PAS sécurité-critique : détourner un token de rôle
-# suppose l'accès à /home/private, qui porte AUSSI le token système (org-power).
+# suppose l'accès à /opt/lcars/var/tokens, qui porte AUSSI le token système (org-power).
 #
 # Le SEUL acteur indépendant à verrouiller, c'est l'HUMAIN (gestes UI manuels) → team
 # `humans` en READ : il voit et commente, il ne relabellise (issues:write requis) ni

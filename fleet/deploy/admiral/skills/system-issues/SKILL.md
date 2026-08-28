@@ -13,7 +13,7 @@ Lance `~/.claude/skills/system-issues/list.sh`. Deux lectures, dans l'ordre :
    signature d'un admin (l'approbation se fait sur la forge, pas ici).
 
 Le script fait **deux lectures d'un dépôt public**, avec le **jeton système** de la boîte
-(`/home/private/<compte-système>.gitea_token`) — jamais le master. Mesuré : `fleet/lcars` est
+(`/opt/lcars/var/tokens/<compte-système>.gitea_token`) — jamais le master. Mesuré : `fleet/lcars` est
 public, et ses deux points d'entrée répondent même en anonyme. Aucune de ces lectures n'est
 site-admin, donc aucune n'a besoin d'une autorité.
 

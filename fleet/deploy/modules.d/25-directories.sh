@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/25-directories.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — arborescence systeme : /local + /home/private, les ZONES DE FACE, et la racine
+# STATUS: PROTO-V2 — arborescence systeme : /local + /opt/lcars/var/tokens, les ZONES DE FACE, et la racine
 #         des sockets de console sous /run (avec sa declaration tmpfiles, car /run est un tmpfs)
 # APPLY-ON: any
 # CHECK-ON: any
@@ -14,7 +14,7 @@
 #
 #   /local          0755 root:root — les prefixes d'install y sont crees par 60-deploy ;
 #                   root-only en ecriture = personne ne remplace un runtime deploye par surprise.
-#   /home/private   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
+#   /opt/lcars/var/tokens   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
 #                   jeton master, seed). UN SEUL process les OUVRE : le service d'autorite.
 #                   ⚠ `0710` ET PAS `0700` : le groupe TRAVERSE, il ne LISTE pas. Ce repertoire ne
 #                   contient pas que des secrets — `forge.url` et `forge.public.url` y sont en 0644,
@@ -105,7 +105,7 @@ set -euo pipefail
 # composant tout etait conforme.
 #
 # Et `fleet` etait le mauvais groupe pour une raison de fond, pas seulement d'accord : il porte deja
-# la lecture de `/local/LCARS_v2`, des role-tokens et de `/home/private`. Le donner au deck pour qu'il
+# la lecture de `/local/LCARS_v2`, des role-tokens et de `/opt/lcars/var/tokens`. Le donner au deck pour qu'il
 # traverse un repertoire lui aurait accorde tout le reste au passage.
 # ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
 # differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
@@ -236,7 +236,7 @@ check_tmpfiles() {
 # raté en abandon du module : tout ce qui suivait dans la table n'était jamais posé, et
 # `apply_tmpfiles` non plus.
 #
-# MESURE DU 2026-08-25, install réelle sur WSL. Un groupe manquant sur `/home/private` a coûté SEPT
+# MESURE DU 2026-08-25, install réelle sur WSL. Un groupe manquant sur `/opt/lcars/var/tokens` a coûté SEPT
 # objets sans aucun rapport avec lui :
 #   /home/projects · /home/projects.ops · /home/projects.workshop   les racines de face
 #   /run/lcars/console · /run/lcars/console/<humain>                la racine des consoles

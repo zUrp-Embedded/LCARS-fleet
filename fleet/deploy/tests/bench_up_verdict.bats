@@ -42,7 +42,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../lib/store.sh" "$ROOT/fleet/deploy/lib/store.sh"
 
   # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
-  # 2026-08-16 l'autorite vit DANS la boite (`/home/private/forge-master.token`, pose par
+  # 2026-08-16 l'autorite vit DANS la boite (`/opt/lcars/var/tokens/forge-master.token`, pose par
   # `forge-gestures.sh config-token`), et `bench-up` l'y lit. Cette doublure ecrivait dans le
   # `--tofu-dir` que le banc n'a plus.
   # ⚠ LA DOUBLURE REFUSE CE QU'ELLE NE COMPREND PAS, comme le vrai script. Elle etait `exit 0` nu :
@@ -151,7 +151,7 @@ case "\$argv" in
   # apres deux passes » sur un banc parfaitement sain. Le motif suit desormais le COMPTE.
   *system_starfleet.gitea_token*) echo TOKEN-SYSTEME ;;
   *"*.gitea_token"*)      echo 9 ;;
-  # Le token OPERATEUR, dans le home du worker — distinct du glob /home/private ci-dessus, qui vise
+  # Le token OPERATEUR, dans le home du worker — distinct du glob /opt/lcars/var/tokens ci-dessus, qui vise
   # les tokens de ROLE. Deux fichiers homonymes, deux rails : celui-ci est la voie de la boite vers
   # la forge, et 'bench-up.sh' l'EXIGE depuis 2026-08-15 (saute par les deux passes, sinon).
   *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;

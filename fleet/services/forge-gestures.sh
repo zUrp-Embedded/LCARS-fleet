@@ -50,9 +50,9 @@
 set -euo pipefail
 
 # Les chemins sont SURCHARGEABLES, comme ceux de `provision-lib.sh`, et pour la meme raison : un
-# temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /home/private. Les defauts
+# temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /opt/lcars/var/tokens. Les defauts
 # sont les chemins reels ; aucun appelant de production ne les passe.
-PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER. Son nom etait ecrit en dur dans les deux
 # projections de catalogue (`git -c user.name=...`), donc le renommer demandait de les retrouver.
 # Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
@@ -67,7 +67,7 @@ SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
 # compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
 AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}"
-# Le groupe qui TRAVERSE `/home/private` — jamais celui qui lit. Meme defaut que partout ailleurs
+# Le groupe qui TRAVERSE `/opt/lcars/var/tokens` — jamais celui qui lit. Meme defaut que partout ailleurs
 # dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
 # et la table diraient deux choses differentes du meme objet.
 FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
@@ -674,7 +674,7 @@ cmd_runner_token() {
 # faux depuis que le detenteur des secrets a perdu tout privilege noyau. Il tourne sous
 # `lcars-authority` — assez pour ouvrir les secrets qu'il possede, pas assez pour quoi que ce soit
 # d'autre. La consequence pratique est plus bas, dans `cmd_install` : les portes qui tombent en
-# `nobody` ne peuvent plus lire les fichiers de `/home/private`, donc ce qu'on leur passe est une
+# `nobody` ne peuvent plus lire les fichiers de `/opt/lcars/var/tokens`, donc ce qu'on leur passe est une
 # VALEUR, plus un chemin.
 #
 # Le mode du jeton a ete le gate — « la capacite EST la permission » — et c'est precisement ce qui

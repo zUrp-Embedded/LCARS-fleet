@@ -106,7 +106,7 @@ setup() {
 }
 
 @test "hors WSL : aucune question — une seule option est permise, et on le DIT" {
-  # Le rail poste ecrit /local et /home/private : le garde de cible du provisionnement l'interdit
+  # Le rail poste ecrit /local et /opt/lcars/var/tokens : le garde de cible du provisionnement l'interdit
   # hors WSL. Poser la question la-bas offrirait un choix qui n'existe pas.
   run env LCARS_DOCKER=1 bash "$SRC" --box < /dev/null
   [[ "$output" == *"une seule option"* ]] || [[ "$output" != *"1 ou 2"* ]]
@@ -122,7 +122,7 @@ setup() {
 
 # ─── LA MACHINE DÉDIÉE — LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ ──────────────────────────
 # Le rail poste est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système,
-# /local, /home/private, aucun désinstalleur) — pas parce qu'il ne saurait pas y tourner. Sur une
+# /local, /opt/lcars/var/tokens, aucun désinstalleur) — pas parce qu'il ne saurait pas y tourner. Sur une
 # machine DÉDIÉE, c'est exactement l'installation qu'on veut.
 #
 # ⚠ CE DRAPEAU EXISTAIT DÉJÀ, ET IL ÉTAIT INATTEIGNABLE PAR LA PORTE. `00-preflight` lit

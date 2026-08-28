@@ -14,7 +14,7 @@
 # POURQUOI CE FICHIER EXISTE SEPAREMENT DE `provision-lib.sh`. La sonde est le premier geste du
 # script d'entree a la racine du depot — c'est lui qui doit dire « docker ne repond pas » avant
 # qu'on clone ou qu'on construise quoi que ce soit. Or `provision-lib.sh` pose ~40 defauts au
-# source (chemins d'install, groupe fleet, org de la forge) et LIT `/home/private/forge.url` : rien
+# source (chemins d'install, groupe fleet, org de la forge) et LIT `/opt/lcars/var/tokens/forge.url` : rien
 # de tout ca n'a de sens cote hote, et un script d'entree qui les traine ment sur ce qu'il est.
 #
 # Ce fichier n'a AUCUN effet de bord : des fonctions, et trois variables qu'elles remplissent. Il

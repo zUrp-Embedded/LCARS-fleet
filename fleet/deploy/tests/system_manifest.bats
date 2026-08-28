@@ -93,7 +93,7 @@ code() {
 # d'un chemin de fichier ; le sortir de la classe rend la sonde plus juste, pas plus permissive —
 # `/usr/local/bin` seul est toujours attrape, et il est declare.
 posed() {
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/private|/home/catalogues|/home/projects|/var/lib/lcars|/local/LCARS_v2|/etc/lcars|/run/lcars)[^"$ ),;:'"'"']*' \
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/local/LCARS_v2|/etc/lcars|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           -e 's#/opt/elixir-[^ ]*#/opt/elixir-<version>#' \

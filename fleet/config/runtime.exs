@@ -746,7 +746,7 @@ if config_env() != :test and not tool_mode? do
 
   # Multi-forge by config (one forge per boot, chosen by env profile). The ROLE tokens
   # (`Fleet.Credentials.RoleToken`) are read from `<role_tokens_dir>/<role>.gitea_token`;
-  # default `/home/private` (primary forge). To target a 2nd forge (e.g. backup :3000), a
+  # default `/opt/lcars/var/tokens` (primary forge). To target a 2nd forge (e.g. backup :3000), a
   # distinct env profile sets FORGE_BASE_URL + FORGE_TOKEN_FILE + this dir → a token set
   # ISOLATED per forge (no clobber). The system token is already per-forge via
   # FORGE_TOKEN_FILE. Absent = default (strict backward-compat). No SIMULTANEOUS multi-forge

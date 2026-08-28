@@ -300,7 +300,7 @@ EOS
   export LCARS_FORGE_URL="http://forge.test"
   # ⚠ LE JETON NE SE LIT PLUS DANS UN FICHIER, IL SE DEMANDE. La fixture n'est donc plus un fichier
   # de jeton mais une doublure du CLIENT d'autorite — c'est par la que le skill obtient son
-  # credential depuis que le groupe `fleet` a cesse d'ouvrir `/home/private`.
+  # credential depuis que le groupe `fleet` a cesse d'ouvrir `/opt/lcars/var/tokens`.
   export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask-ok"
   printf '#!/usr/bin/env bash\nprintf "TOK\\n"\n' > "$LCARS_AUTHORITY_ASK_BIN"
   chmod +x "$LCARS_AUTHORITY_ASK_BIN"

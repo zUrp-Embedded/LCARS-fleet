@@ -354,7 +354,7 @@ done <<< "${LCARS_SKILLS_PATHS:-}"
 # ###################### /!\ NEVER DELETE /!\ ###################### ADR-F
 # THIS BIND IS NOT A SECURITY HOLE. IT IS THE PLATE. Read it before proposing to close it.
 # The Anthropic credential BUYS THE TOKENS the model eats — it is a meter, it signs nothing.
-# What signs is the ROLE token (`/home/private/<role>.gitea_token`): per role, on every forge act.
+# What signs is the ROLE token (`/opt/lcars/var/tokens/<role>.gitea_token`): per role, on every forge act.
 # Two rails, two jobs. Do NOT conflate them into "the pod authenticates as the human", and do NOT
 # turn this into a per-pod identity: a single credential RW-bound and refreshed IN PLACE is the
 # pattern Anthropic recommends for multi-agent refresh, and it is the only shape without the ~8h

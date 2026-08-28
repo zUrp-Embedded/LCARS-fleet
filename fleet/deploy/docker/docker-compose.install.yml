@@ -129,6 +129,8 @@ services:
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - lcars-home:/home
+      # L'ETAT DE L'INSTALLATION — au PROJET comme `lcars-home`. Motif dans `docker-compose.yml`.
+      - lcars-var:/opt/lcars/var
       # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER. Quatre volumes EXTERNES —
       # hors projet, donc `down -v` ne peut pas les emporter — et NOMMES PAR LE PROJET, sans quoi
       # deux installations sur une machine partageraient leur magasin. Le POURQUOI (les quatre durees
@@ -162,8 +164,13 @@ services:
     networks: [lcars]
 
 volumes:
-  # Au PROJET : ses humains sont ceux de cette boite, il meurt avec elle.
+  # Au PROJET : ses humains et son etat sont ceux de cette boite, ils meurent avec elle.
   lcars-home:
+  # `lcars-var`, sur le chemin qu'il porte — et SURTOUT pas `lcars-state` : ce dernier est un volume
+  # EXTERNE du magasin, monte quatre lignes plus haut sur `/var/lib/lcars/state`. Reutiliser son nom
+  # ici collerait de l'etat de projet dans un volume qui survit au `down -v`, partage par deux
+  # installations. Un prefixe d'ecart entre deux durees de vie se paie en donnees.
+  lcars-var:
   # Hors projet : compose ne les cree pas et ne les detruit pas — mais il ne les prefixe pas non
   # plus, d'ou le `name:` derive du projet. Cf. `docker-compose.yml`, source unique.
   lcars-cache:

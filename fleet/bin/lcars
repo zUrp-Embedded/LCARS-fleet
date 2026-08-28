@@ -356,7 +356,7 @@ _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/local/LCARS_v2/rel/lcars_fle
 
 # ─── LE JETON DE FORGE NE SE LIT PLUS, IL SE DEMANDE ────────────────────────────────────────────
 #
-# `publish run` et `approve` ouvraient tous deux `$FORGE_TOKEN_FILE` — `/home/private/<compte>.gitea_token`,
+# `publish run` et `approve` ouvraient tous deux `$FORGE_TOKEN_FILE` — `/opt/lcars/var/tokens/<compte>.gitea_token`,
 # `0640 root:fleet`. Ils y arrivaient parce que le groupe `fleet` etait une PROJECTION de l'equipe
 # `humans` de la forge, reconstruite toutes les trente secondes : le droit de porter l'identite du
 # systeme avait donc la peremption d'un cache, et se retirer demandait un `pkill`.
@@ -703,7 +703,7 @@ cmd_catalogue() {
 }
 
 # --- publish forges (pool) + approve (phase-1 gate) -----------------------
-# PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /home/private —
+# PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /opt/lcars/var/tokens —
 # that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
 # its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
 # (mode 600), read host-side by this CLI (it runs as the human), and NEVER enter a pod.

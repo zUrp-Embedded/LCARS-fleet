@@ -283,7 +283,7 @@ setup_install() {
   # diagnostic pour le mauvais probleme, sur le geste central du chantier.
   #
   # ⚠ CE TEMOIN MESURAIT LE MECANISME, ET LE MECANISME A CHANGE SOUS LUI. Il epinglait un CHEMIN
-  # (`TOKFILE=<…>/system_starfleet.gitea_token`). Depuis que `/home/private` est
+  # (`TOKFILE=<…>/system_starfleet.gitea_token`). Depuis que `/opt/lcars/var/tokens` est
   # `0700 lcars-authority`, la porte `nobody` ne peut plus ouvrir AUCUN fichier d'ici — pas plus le
   # jeton systeme que le master. Ce qui traverse est donc la VALEUR, lue par le service qui la
   # possede et transmise par l'environnement (`/proc/<pid>/environ` n'est lisible que du

@@ -503,7 +503,7 @@ EOF
 # ⚖ ARBITRAGE USER 2026-08-18 : « jamais on s'installe sur le poste de l'user directement » et
 # « tu fais le script pour installer sur WSL, avec docker dispo, et tu arretes de vouloir gerer
 # toutes les configs de la terre ». Ce provisionnement possede /etc/wsl.conf, cree un groupe
-# systeme, pose /local et /home/private — et n'a aucun desinstalleur.
+# systeme, pose /local et /opt/lcars/var/tokens — et n'a aucun desinstalleur.
 
 @test "cible : un substrat linux est REFUSE, et le refus nomme la cible et l'echappatoire" {
   run env PROV_SUBSTRATE=linux PROVISION_MODULE=00-preflight \
@@ -626,7 +626,7 @@ EOF
 }
 
 @test "48-forge-host : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
-  # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /home/private:/home/private` a donne au conteneur
+  # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens` a donne au conteneur
   # un dossier VIDE, et le geste a repondu « la boite ne detient pas ce qu'il faut » en nommant des
   # fichiers qui existaient a trente centimetres. Le daemon vit dans une autre VM : un chemin de
   # cette distro lui est invisible, et il cree un repertoire vide a la place, EN SILENCE.

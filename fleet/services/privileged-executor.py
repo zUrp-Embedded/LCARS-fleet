@@ -21,7 +21,7 @@
 #   celui qui a le PRIVILEGE ne detient aucun secret          -> ce fichier
 #
 # Les deux ne se melangent pas : celui qui detient ne peut pas escalader, celui qui escalade n'a
-# rien a voler. Ce service ouvre ZERO fichier de `/home/private`, et le mur `MUR P1` le tient.
+# rien a voler. Ce service ouvre ZERO fichier de `/opt/lcars/var/tokens`, et le mur `MUR P1` le tient.
 #
 # ⚠ COMMENT UN PROCESS SANS SECRET LIT-IL LA FORGE ? EN ANONYME, ET C'EST MESURE, PAS SUPPOSE.
 # Mesure du 2026-08-25 sur forge vivante : `fleet/lcars` est `private=false, internal=false`, et

@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
+PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 [[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
 
 _G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'

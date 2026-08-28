@@ -133,7 +133,7 @@ fi
 #
 # ⚠ CETTE PORTE N'EST PAS `nobody`, CONTRAIREMENT AUX AUTRES. `roles`, `catalogue-source` et
 # consorts sont des LECTURES ; celle-ci ecrit sur une forge et lit le jeton master et le seed dans
-# `/home/private` (0710 lcars-authority:fleet — le groupe TRAVERSE, il ne lit pas ; les secrets eux-
+# `/opt/lcars/var/tokens` (0710 lcars-authority:fleet — le groupe TRAVERSE, il ne lit pas ; les secrets eux-
 # memes sont 0600). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
 #
 # ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
@@ -141,10 +141,10 @@ fi
 # C'est exactement pourquoi `--tofu-dir` est devenu un argument ignore. Un run `--rm` est donc
 # legitime ici, la ou il aurait ete un piege avant ce chantier.
 #
-# L'appelant fournit : `--network <reseau-de-la-forge>`, `-v /home/private:/home/private`,
+# L'appelant fournit : `--network <reseau-de-la-forge>`, `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens`,
 # `-e FORGE_BASE_URL=http://forge:3000`. Le jeton peut aussi arriver sur stdin (jamais en argv).
 if [[ "${1:-}" == "forge-apply" ]]; then
-  [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /home/private — elle exige root dans le conteneur" >&2; exit 1; }
+  [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /opt/lcars/var/tokens — elle exige root dans le conteneur" >&2; exit 1; }
   exec /opt/lcars/forge-gestures.sh apply
 fi
 
@@ -158,7 +158,7 @@ fi
 if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
   # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
-  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/home/private`.
+  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/opt/lcars/var/tokens`.
   # ⚠ ET LA RAISON ECRITE ICI A ETE FAUSSE UN TEMPS : elle disait « qui est 0700 lcars-authority »,
   # donc « elle ne traverse meme pas ». Le repertoire est `0710 …:fleet` — cette porte TRAVERSE.
   # Ce qui la tient est le mode des FICHIERS (0600), pas celui du dossier. La conclusion n'a pas
@@ -228,8 +228,8 @@ HOST_KEYS_DIR=/home/.lcars-container/ssh
 # seconde table pour tenir une ligne de la premiere aurait fait deux verites d'un meme fait — celle
 # qu'on ne lit pas finit toujours par mentir — et deux formats a maintenir la ou le convergeur en a
 # deja un (`<forge_id>\t<uid>\t<login>`, keye sur l'id parce que Gitea le conserve au renommage).
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/home/private/forge-uid.map}"
-MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/home/private/forge-master.token}"
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
+MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/opt/lcars/var/tokens/forge-master.token}"
 
 say() { echo "[lcars-entrypoint] $*"; }
 

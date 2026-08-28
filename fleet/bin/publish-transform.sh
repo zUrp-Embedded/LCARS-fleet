@@ -35,7 +35,7 @@
 #
 # USAGE:
 #   publish-transform.sh --repo fleet/mon-projet --forge http://localhost:3000 \
-#       --token-file /home/private/test/system.gitea_token --out /tmp/mon-projet-gh
+#       --token-file /opt/lcars/var/tokens/test/system.gitea_token --out /tmp/mon-projet-gh
 #   Options: --vendor-identity FILE (default: bin/claude_launch.identity, co-located with the active N1
 #            launcher — NAME=/EMAIL=) · --filter-repo-bin BIN (default: git-filter-repo on PATH, or
 #            $FILTER_REPO_BIN) · --system-email EMAIL (default: system_starfleet@lcars.local — MUST match

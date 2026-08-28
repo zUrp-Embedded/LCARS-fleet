@@ -182,7 +182,7 @@ observe() {
   if id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
     p_ok "« $FLEET_HUMAN » ∈ $PROV_FLEET_GROUP"
   else
-    p_drift "« $FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /home/private ni les zones de face"
+    p_drift "« $FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /opt/lcars/var/tokens ni les zones de face"
   fi
 }
 

@@ -154,6 +154,10 @@ services:
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - home:/home
+      # L'ETAT DE L'INSTALLATION — jetons de forge et etat tofu. Meme duree de vie que `home` (au
+      # PROJET : il meurt avec la boite), parce que c'est celle que les jetons avaient quand ils
+      # vivaient dans `/opt/lcars/var/tokens`. Le motif complet est dans le `VOLUME` du Dockerfile.
+      - var:/opt/lcars/var
       # LE MAGASIN — des volumes EXTERNES, donc hors projet, donc `down -v` ne peut pas les
       # emporter. Ce n'est pas de la discipline, c'est le contrat de docker.
       #
@@ -211,8 +215,13 @@ services:
     networks: [default]
 
 volumes:
-  # Celui-ci appartient au PROJET : ses humains sont ceux de CETTE boite, et il meurt avec elle.
+  # Ceux-ci appartiennent au PROJET : ses humains et son etat sont ceux de CETTE boite, et ils
+  # meurent avec elle.
   home:
+  # `var`, sur le chemin qu'il porte — et SURTOUT pas `state` : `lcars-state` est un volume
+  # EXTERNE du magasin, monte quatre lignes plus haut. Un prefixe d'ecart entre un volume qui meurt
+  # avec le projet et un qui lui survit, c'est une confusion qui se paie en donnees.
+  var:
   # Ceux-la n'appartiennent a personne : `external: true` = compose ne les cree pas et ne les
   # detruit pas. Meme forme que le reseau `devforge` du compose de banc, et pour la meme raison —
   # ce qui survit a la boite ne doit pas etre dans son interrupteur de destruction.

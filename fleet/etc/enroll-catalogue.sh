@@ -183,7 +183,7 @@ if [[ -d "$TOFU_DIR/instance" ]]; then
   say "  Retire-le du dossier de travail si la forge porte deja ses comptes systeme."
 fi
 say '⚠ PIEGE 2 — le mot de passe. tofu cree les comptes avec UN seul seed_password ; la boite,' 
-say "  elle, tient une carte PAR ROLE (/home/private/forge-role-passwords.json). Les deux ne se"
+say "  elle, tient une carte PAR ROLE (/opt/lcars/var/tokens/forge-role-passwords.json). Les deux ne se"
 say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des jetons rend"
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""

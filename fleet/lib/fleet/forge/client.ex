@@ -1475,7 +1475,7 @@ defmodule Fleet.Forge.Client do
 
   La frontiere de F059 est intacte, et c'etait tout l'enjeu : un `[step_run:fake:ccc]` pose par un
   tiers ne compte pas, puisque son auteur n'est pas le compte du role `fake` — et un compte de role
-  n'est detenu que par le daemon, dans `/home/private`.
+  n'est detenu que par le daemon, dans `/opt/lcars/var/tokens`.
 
   Un role dont le login est irresolvable est une ERREUR, jamais un sous-compte permissif.
   """

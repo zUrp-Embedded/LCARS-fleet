@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   source of truth — NEVER a "merged" claim before reality (F-MERGE-CLAIM-BEFORE-REALITY). The
   gatekeeper signature is applied INTERNALLY by `merge_and_promote` (les deux jetons de rail → RoleToken): the
   gatekeeper account token comes from a controlled tmp_dir (never the runner's real
-  `/home/private`). async: false (mutates the global `:role_tokens_dir` config).
+  `/opt/lcars/var/tokens`). async: false (mutates the global `:role_tokens_dir` config).
   """
   use ExUnit.Case, async: false
 

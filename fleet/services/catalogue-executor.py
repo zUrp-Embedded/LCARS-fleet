@@ -62,13 +62,13 @@ SOCKET_MODE = 0o660
 # l'identite — rien de ce que l'appelant ECRIT ne decide de ce qui s'execute.
 ROLES_SOCKET_PATH = os.environ.get(
     "LCARS_ROLES_SOCKET", os.path.join(os.path.dirname(SOCKET_PATH), "roles.sock"))
-ROLE_TOKENS_DIR = os.environ.get("LCARS_ROLE_TOKENS_DIR", "/home/private")
+ROLE_TOKENS_DIR = os.environ.get("LCARS_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
 FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
 HUMANS_TEAM = os.environ.get("PROV_HUMANS_TEAM", "humans")
 
 # Un nom de compte de role est un nom de compte forge, et il devient un CHEMIN juste en dessous.
 ROLE_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-MASTER_TOKEN_FILE = os.environ.get("LCARS_MASTER_TOKEN_FILE", "/home/private/forge-master.token")
+MASTER_TOKEN_FILE = os.environ.get("LCARS_MASTER_TOKEN_FILE", "/opt/lcars/var/tokens/forge-master.token")
 GESTURES = os.environ.get("LCARS_FORGE_GESTURES", "/opt/lcars/forge-gestures.sh")
 FORGE_BASE_URL = os.environ.get("FORGE_BASE_URL", "")
 HTTP_TIMEOUT = int(os.environ.get("LCARS_CATALOGUE_HTTP_TIMEOUT", "15"))

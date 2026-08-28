@@ -7,7 +7,7 @@ defmodule Fleet.Credentials.RoleToken do
 
   require Logger
 
-  @default_dir "/home/private"
+  @default_dir "/opt/lcars/var/tokens"
 
   @doc """
   Forge token of the `role` account, or `nil` if absent/unreadable/invalid role.

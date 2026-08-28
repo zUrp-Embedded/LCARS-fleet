@@ -821,7 +821,7 @@ apply() {
   # les fichiers d'autorité sont déjà là, et il n'y a rien à traverser.
   #
   # Le script, lui, n'a JAMAIS eu d'hypothèse de conteneur : `PRIVATE_DIR` défaute sur
-  # `/home/private`, `CATALOGUE_WORK` sur `/var/lib/lcars/tofu` — deux chemins d'hôte. C'est
+  # `/opt/lcars/var/tokens`, `CATALOGUE_WORK` sur `/var/lib/lcars/tofu` — deux chemins d'hôte. C'est
   # l'appelant qui le forçait dans un `docker create`.
   #
   # CE QUI EST GARDÉ : l'hermétisme, par `46-tofu` — version épinglée et providers en miroir

@@ -468,10 +468,10 @@ DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
 [[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 2 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
 # ─── 7. verdict MESURE ───────────────────────────────────────────────────────────────────────────
-SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/home/private/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
+SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 [[ -n "$SYS_TOKEN" ]] || die "token systeme absent apres deux passes — le banc n'est PAS pret" 6
 
-ROLE_TOKENS="$("$DOCKER_BIN" exec "$BOX" bash -c 'ls /home/private/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
+ROLE_TOKENS="$("$DOCKER_BIN" exec "$BOX" bash -c 'ls /opt/lcars/var/tokens/*.gitea_token 2>/dev/null | wc -l' || echo 0)"
 CREDS_OK="$("$DOCKER_BIN" exec -u "$HUMAN" "$BOX" bash -c '[ -s ~/.claude/.credentials.json ] && echo oui || echo non')"
 # LE TOKEN OPERATEUR EST EXIGE ICI, ET C'EST CE QUI REND LE SAUT DE LA PASSE 1 SUR. `bench-forge-bootstrap`
 # ne peut pas le poser a la passe 1 (le worker vient de la forge et n'existe qu'apres la relance), il le
@@ -531,7 +531,7 @@ RUNNER_STATE="non demarre"
 # L'AUTORITE SE LIT DANS LA BOITE, plus dans un fichier que ce banc aurait persiste. Elle y est
 # posee par le geste generique (`forge-gestures.sh config-token`), 0600 root, et elle y RESTE —
 # c'est l'arbitrage du 2026-08-16. Le banc n'a donc plus de credential a lui a faire survivre.
-MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /home/private/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
+MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /opt/lcars/var/tokens/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
 
 # ⚠ LE DIAGNOSTIC ETAIT DEJA JUSTE, ET LE VERDICT DISAIT LE CONTRAIRE (6-133). Les branches
 # ci-dessous ecrivent « ABSENT », « BLOCAGE, pas degradation », « enregistrement rate » — puis le
@@ -717,7 +717,7 @@ fi
 say "  image     : $IMAGE"
 say "  revision  : $IMAGE_REV_STATE"
 say "  runner    : $RUNNER_STATE"
-say "  tokens    : $ROLE_TOKENS fichiers dans /home/private"
+say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
 say "  op-token  : $OP_TOKEN_OK (~/.gitea_token de $HUMAN — la voie de la boite vers la forge)"
 say "  creds     : $CREDS_OK"
 say "  admin     : $HUMAN_ADMIN_STATE"

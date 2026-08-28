@@ -41,7 +41,7 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
 # ⚠ CE SCRIPT N'OUVRE PLUS AUCUN SECRET, ET C'EST UNE PROPRIETE DU RAIL, PAS UNE ECONOMIE.
 #
-# Il lisait `/home/private/<compte>.gitea_token` — donc il DETENAIT un credential de forge en meme
+# Il lisait `/opt/lcars/var/tokens/<compte>.gitea_token` — donc il DETENAIT un credential de forge en meme
 # temps qu'il portait le seul geste root de la machine. La regle qui donne sa forme a ce rail est
 # l'inverse exact : celui qui a le PRIVILEGE ne detient AUCUN secret, et celui qui detient n'a aucun
 # privilege. Un process qui a les deux peut escalader ce qu'il vole.
