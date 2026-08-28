@@ -171,7 +171,15 @@ defmodule Fleet.Spawner.Pod.Egress do
   """
   @spec socket_path(String.t()) :: Path.t()
   def socket_path(pod_id) when is_binary(pod_id) do
-    base = Application.get_env(:lcars_fleet, :spawner_egress_sock_base, "/run/lcars/egress")
+    base =
+      Application.get_env(
+        :lcars_fleet,
+        :spawner_egress_sock_base,
+        # DERIVE, plus recopie : `Fleet.Layout` declare la racine runtime depuis le 2026-08-28.
+        # Spawner a Layout dans ses deps, donc l'arete est legale et le litteral disparait.
+        Path.join(Fleet.Layout.runtime_root(), "egress")
+      )
+
     Path.join([base, pod_id, "sock"])
   end
 

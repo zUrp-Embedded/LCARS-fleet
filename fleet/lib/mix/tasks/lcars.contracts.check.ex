@@ -118,6 +118,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_private_dir_single_source(root),
         check_system_account_single_source(root),
         check_platform_root_single_source(root),
+        check_runtime_root_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -4341,6 +4342,130 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
               "authority says #{inspect(expected)} — #{length(inconnues)} other root(s) under " <>
                 "/opt are neither the authority nor declared foreign: " <>
                 Enum.join(inconnues, ", ")
+          }
+      end
+    end
+  end
+
+  @doc """
+  The runtime state root is declared ONCE, in `Fleet.Layout`, and fourteen literals repeat it.
+
+  `/run/lcars` carries the sockets of the authority, the privileged executor, MCP, egress and the
+  consoles — the whole surface by which a pod talks to the rest of the machine — plus the boot
+  markers (`/run/lcars-provision.rc`, `/run/lcars-humans.rc`) and the converger's refusal lock.
+  The derived sweep of 2026-08-28 ranked it SECOND of the corpus, with no source at all. The
+  authority (`@runtime_root`) was created that day; this check is what makes it true.
+
+  ## Two shapes, one rule
+
+  The tree (`/run/lcars/...`) and its flat siblings (`/run/lcars-provision.rc`) are both LCARS
+  runtime state, and both begin with the authority's value as a STRING. So one rule covers both:
+  every `/run` path that names LCARS must start with `@runtime_root`.
+
+  ## Where the value is derived, and where it cannot be
+
+  `Fleet.Spawner` has `Fleet.Layout` in its boundary deps, so `Pod.Egress` DERIVES its default and
+  its literal is gone. `Fleet.MCP` does NOT have Layout in its deps: `PodSocketSupervisor` keeps a
+  literal, because deriving it would widen a domain's API — a decision to argue on its own, not a
+  side effect of writing a wall. The shell and the manifest cannot call the BEAM at all. What this
+  check buys is that all of them AGREE, and the ones that can derive, do.
+  """
+  @spec check_runtime_root_single_source(String.t()) :: result()
+  def check_runtime_root_single_source(root) do
+    id = "layout.runtime_root_single_source"
+
+    remediation =
+      "every `/run` path of LCARS starts with `Fleet.Layout` `@runtime_root` — a second runtime " <>
+        "root means a socket written where nobody listens, on a tmpfs that forgets between boots"
+
+    expected =
+      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
+        {:ok, src} ->
+          case Regex.run(~r/@runtime_root\s+"([^"]+)"\s*$/m, src) do
+            [_, v] -> v
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_nil(expected) do
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/layout.ex"],
+        note:
+          "`@runtime_root` no longer reads as a frozen literal — the authority is unreadable, so " <>
+            "nothing was compared"
+      }
+    else
+      {vus, porteurs} =
+        Path.wildcard(Path.join(root, "**"), match_dot: true)
+        |> Enum.filter(&File.regular?/1)
+        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
+          case File.read(path) do
+            {:ok, body} ->
+              # ⚠ ON NE RETIENT QUE CE QUI NOMME LCARS. `/run/user`, `/run/systemd`, `/run/sshd`
+              # appartiennent au systeme : les compter ferait accuser la machine hote.
+              vus =
+                body
+                |> String.split("\n")
+                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+                |> Enum.flat_map(&Regex.scan(~r|/run/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*|, &1))
+                |> Enum.map(&hd/1)
+                |> MapSet.new()
+
+              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
+
+            _ ->
+              {acc, n}
+          end
+        end)
+
+      # ⚠ UN PREFIXE N'EST PAS UNE APPARTENANCE, ET LA MUTATION L'A MONTRE. `String.starts_with?`
+      # seul laisse passer `/run/lcarsx/...` : il commence bien par `/run/lcars`. C'est la TROISIEME
+      # coincidence de sous-chaine de la journee — `MUR 4 bis` etait satisfait par
+      # `lcars-authority-ask`, un nom de binaire. Le prefixe doit etre suivi d'une FRONTIERE : `/`
+      # pour l'arbre, `-` ou `.` pour les fichiers freres (`/run/lcars-provision.rc`), ou la fin.
+      sous_la_racine? = fn v ->
+        String.starts_with?(v, expected) and
+          (byte_size(v) == byte_size(expected) or
+             String.at(v, byte_size(expected)) in ["/", "-", "."])
+      end
+
+      orphelins = vus |> Enum.reject(sous_la_racine?) |> Enum.sort()
+
+      cond do
+        # Garde d'instrument : sans une seule occurrence de l'autorite, le balayage n'a rien lu et
+        # un ensemble vide n'accuse personne.
+        not Enum.any?(vus, sous_la_racine?) ->
+          broken_result(id, "occurrence of #{expected} in the corpus")
+
+        orphelins == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: [],
+            note:
+              "every LCARS path under /run starts with #{inspect(expected)}, declared by " <>
+                "Fleet.Layout @runtime_root (#{MapSet.size(vus)} distinct ROOTS — the scan stops " <>
+                "at the first `/`, so `/run/lcars/authority/roles.sock` counts as `/run/lcars` — " <>
+                "across #{porteurs} files)"
+          }
+
+        true ->
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: orphelins,
+            note:
+              "authority says #{inspect(expected)} — #{length(orphelins)} LCARS path(s) under " <>
+                "/run do not start with it: " <> Enum.join(orphelins, ", ")
           }
       end
     end
