@@ -89,7 +89,14 @@ fleet_v2_stub() { # fleet_v2_stub <vivant|mort|start-casse>
     printf '%s\n' '  status)'
     printf '%s\n' '    printf "fleet_v2: build deadbeef (source=release)\n"'
     printf '%s\n' '    [[ -f "$MARQUEUR" || "$ETAT" == vivant ]] && printf "fleet_v2: BEAM vivant. Logs : tmux -S …\n"'
-    printf '%s\n' '    sleep 0.3'
+    # ⚠ LA PAUSE EST LE COEUR DE LA DOUBLURE, ET SA DUREE EST UNE COURSE. Elle laisse a `grep -q`
+    # le temps de trouver sa ligne et de FERMER le tuyau, pour que l'ecriture suivante prenne le
+    # SIGPIPE. 0.3 s tenait dans une suite de 1503 temoins ; a 1544, sur une machine qui joue le
+    # gate entier, l'ordonnanceur ne rend plus la main assez vite et le producteur ecrit tout avant
+    # que le lecteur ne parte — rc=0 au lieu de 141, et le TEMOIN DU TEMOIN rougit sans qu'aucun
+    # code n'ait change. Surcharge-able pour que le temoin de la course s'accorde la marge dont il
+    # a besoin sans ralentir les cinq autres qui n'en veulent pas.
+    printf '%s\n' '    sleep "${STUB_PAUSE:-0.3}"'
     printf '%s\n' '    printf "fleet_v2: visibilite debug : off\n"'
     printf '%s\n' '    printf "(aucun pod vivant)\n"'
     printf '%s\n' '    ;;'
@@ -132,7 +139,12 @@ joue() { run env PATH="$BINDIR:$PATH" HOME="$HOME_DIR" \
   # c'est-a-dire sans avoir rien prouve. On mesure ici que la forme en TUYAU, sous `pipefail`, rend
   # bien FAUX contre cette doublure — 141 (SIGPIPE) cote producteur, 0 cote grep.
   fleet_v2_stub vivant
-  run env PATH="$BINDIR:$PATH" bash -uo pipefail -c \
+  # ⚠ CINQ SECONDES, PAS 0.3, ET C'EST LE SEUL TEMOIN QUI EN A BESOIN. Lui seul depend de l'ORDRE
+  # entre le depart du lecteur et l'ecriture suivante du producteur ; les cinq autres se contentent
+  # de la sortie. La marge est large a dessein : ce temoin doit rougir quand la doublure cesse de
+  # reproduire la condition, JAMAIS quand la machine est occupee. Un temoin qui depend de la charge
+  # apprend a se faire ignorer, et c'est ce qui etait en train d'arriver a celui-ci.
+  run env STUB_PAUSE=5 PATH="$BINDIR:$PATH" bash -uo pipefail -c \
     'fleet_v2 status 2>/dev/null | grep -q "BEAM vivant"; echo "rc=$? PIPESTATUS=${PIPESTATUS[*]}"'
   [[ "$output" == *"rc=141"* ]]
   [[ "$output" == *"PIPESTATUS=141 0"* ]]
