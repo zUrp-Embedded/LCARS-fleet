@@ -55,7 +55,10 @@ preserve  $FAKE/work                         2775  root:fleet any
 EOF
 
   export LCARS_JOURNAL_FILE="$BATS_TEST_TMPDIR/install.journal"
+  # La carte du convergeur : `<forge_id>\t<uid>\t<login>`. `forge_id = 1` EST le siege.
+  export PROV_UID_MAP_FILE="$BATS_TEST_TMPDIR/forge-uid.map"
 }
+carte() { printf '%s\n' "$@" > "$PROV_UID_MAP_FILE"; }
 
 journal() { printf 'apt_installed %s\n' "$*" > "$LCARS_JOURNAL_FILE"; }
 plan()    { run bash "$RUNNER" uninstall; }
@@ -353,6 +356,53 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   refute grep -qE '^[^e]*docker (volume rm|volume prune)' <<<"$(grep -v 'echo ' <<<"$bloc")"
   # et il DIT ce qu'il epargne
   grep -q 'GARDÉ' <<<"$bloc"
+}
+
+# ─── LA CLASSE `person` — LA SEULE DU VERBE QUI PUISSE SUPPRIMER QUELQU'UN ──────────────────────
+#
+# MESURE DU 2026-08-27 : `/home/lcars` porte 32 objets apres `uninstall --yes`, et le compte `lcars`
+# survit. Aucune classe ne le nommait.
+#
+# ⚠ SA SOURCE VIT DANS CE QUE LE VERBE DETRUIT. La carte du convergeur est sous `/home/private` —
+# meme defaut d'ordre que le journal et les paquets : la seule source qui sache quels comptes LCARS
+# a materialises est effacee par la passe qui en a besoin. Elle se lit EN TETE.
+
+@test "PERSON : les comptes se lisent dans la carte, et le SIEGE en est ecarte" {
+  # `forge_id = 1` est l'operateur qui a lance l'install. Ce n'est PAS un compte que LCARS a cree :
+  # le retirer supprimerait la personne qui desinstalle.
+  carte "1	1000	lordzurp" "2	1001	lcars" "3	1002	zoe"
+  plan
+  [[ "$output" == *"lcars"* ]]
+  [[ "$output" == *"zoe"* ]]
+  refute_out 'lordzurp' <<<"$output"
+}
+
+@test "PERSON : LAISSES par defaut, et le plan dit ce que --humans ferait" {
+  carte "1	1000	lordzurp" "2	1001	lcars"
+  plan
+  [[ "$output" == *"LAISSÉS"* ]]
+  [[ "$output" == *"EUX ET LEUR HOME"* ]]
+}
+
+@test "PERSON : sans carte, aucun compte n'est planifie — on n'invente personne" {
+  rm -f "$PROV_UID_MAP_FILE"
+  plan
+  refute_out 'comptes h\.' <<<"$output"
+}
+
+@test "PERSON : le retrait est sous `--humans`, et il passe par `preserved`" {
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for per in /,/^    done/p' <<<"$body")"
+  [ -n "$bloc" ]
+  grep -q 'userdel -r'      <<<"$bloc"
+  grep -q 'preserved "$home"' <<<"$bloc"
+  # ⚠ ET LE GARDE EST CELUI DE CE BLOC, PAS « un garde quelque part avant ». Premiere version :
+  # `tail -1` sur toutes les occurrences de `UNINSTALL_HUMANS` puis comparaison de rangs — elle
+  # trouvait le garde de la boucle VOISINE et restait verte quand celui-ci sautait. Mesure par
+  # mutation. Ce qui est vrai : les lignes qui precedent IMMEDIATEMENT le bloc le gardent.
+  local avant
+  avant="$(grep -B6 'for per in ' <<<"$body")"
+  grep -q 'UNINSTALL_HUMANS" -eq 1 \]\]; then' <<<"$avant"
 }
 
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {
