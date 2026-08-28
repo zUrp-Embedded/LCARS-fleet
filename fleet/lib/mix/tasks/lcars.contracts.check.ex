@@ -119,6 +119,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_system_account_single_source(root),
         check_platform_root_single_source(root),
         check_runtime_root_single_source(root),
+        check_face_roots_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -4468,6 +4469,141 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                 "/run do not start with it: " <> Enum.join(orphelins, ", ")
           }
       end
+    end
+  end
+
+  @doc """
+  The three project faces are declared ONCE, in `Fleet.Layout`, and this makes every `/home/projects`
+  root in the corpus agree with them.
+
+  `face_root/1` names three faces — `code`, `workshop`, `ops` — and RAISES on a fourth, so the
+  BEAM side cannot invent one. The shell, the Dockerfile and the manifest have no such door: they
+  write the paths as literals, twenty-nine times across the corpus. This check is what stops a
+  fourth root appearing there without passing through the declaration.
+
+  ⚠ ITS SIBLING `layout.face_roots_provisioned` CHECKS A DIFFERENT THING and the two are not
+  redundant: that one asks whether the machine CREATES the faces the code declares; this one asks
+  whether the corpus NAMES any root the code does not declare. Creation and agreement fail apart —
+  a face can be created under a name nobody reads, and a name can be read that nothing creates.
+
+  ## The one non-face tree, declared by name
+
+  `/home/projects.work` is the agents' work tree — six carriers, all under `.claude/hooks/`. It is
+  not a project face and has no business being derived from one; naming it here is the decision,
+  visible to a reviewer, rather than a pattern that would let any future `/home/projects.*` pass.
+  """
+  @spec check_face_roots_single_source(String.t()) :: result()
+  def check_face_roots_single_source(root) do
+    id = "layout.face_roots_single_source"
+
+    remediation =
+      "every `/home/projects*` root is a face declared by `Fleet.Layout.face_root/1` — a root the " <>
+        "declaration does not know is a tree the runtime will never look at"
+
+    src =
+      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    # Les faces se lisent par leurs CLAUSES, pas par une liste : `face_root("code"), do: @code_root`
+    # dit a la fois le nom de la face et l'attribut qui porte sa racine.
+    faces =
+      if src do
+        ~r/def face_root\("([a-z]+)"\), do: @([a-z_]+)/
+        |> Regex.scan(src)
+        |> Enum.map(fn [_, face, attr] ->
+          case Regex.run(~r/@#{attr}\s+"([^"]+)"\s*$/m, src) do
+            [_, v] -> {face, v}
+            _ -> {face, nil}
+          end
+        end)
+      else
+        []
+      end
+
+    racines = faces |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1)
+
+    # ⚠ DECLARE PAR SON NOM, pas par un motif : l'arbre de travail des agents.
+    hors_face = ["/home/projects.work"]
+
+    cond do
+      length(faces) < 3 or Enum.any?(faces, fn {_, v} -> is_nil(v) end) ->
+        %{
+          id: id,
+          remediation: remediation,
+          status: :fail,
+          evidence: ["lib/fleet/layout.ex"],
+          note:
+            "the faces no longer read as frozen literals in Fleet.Layout " <>
+              "(#{length(faces)} clause(s) found, #{length(racines)} with a readable root) — " <>
+              "nothing was compared"
+        }
+
+      true ->
+        vues =
+          Path.wildcard(Path.join([root, "..", "**"]), match_dot: true)
+          |> Enum.filter(&File.regular?/1)
+          |> Enum.reject(
+            &String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/")
+          )
+          |> Enum.reduce(MapSet.new(), fn path, acc ->
+            case File.read(path) do
+              {:ok, body} ->
+                if String.contains?(body, <<0>>) do
+                  acc
+                else
+                  body
+                  |> String.split("\n")
+                  |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+                  |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
+                  |> Enum.map(&hd/1)
+                  # ⚠ LE POINT FINAL D'UNE PHRASE N'EST PAS UNE RACINE. « … sous /home/projects. »
+                  # rendait `/home/projects.`, une quatrieme face inexistante. Deuxieme fois qu'une
+                  # ponctuation pollue un extracteur aujourd'hui — `/opt/...` etait la premiere.
+                  |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
+                  |> MapSet.new()
+                  |> MapSet.union(acc)
+                end
+
+              _ ->
+                acc
+            end
+          end)
+
+        inconnues =
+          vues
+          |> Enum.reject(&(&1 in racines or &1 in hors_face))
+          |> Enum.sort()
+
+        cond do
+          not Enum.all?(racines, &MapSet.member?(vues, &1)) ->
+            broken_result(id, "occurrence of every declared face root in the corpus")
+
+          inconnues == [] ->
+            %{
+              id: id,
+              remediation: "—",
+              status: :pass,
+              evidence: [],
+              note:
+                "the #{length(racines)} faces declared by Fleet.Layout.face_root/1 " <>
+                  "(#{Enum.join(racines, ", ")}) are the only /home/projects roots in the corpus, " <>
+                  "plus #{length(hors_face)} declared non-face tree"
+            }
+
+          true ->
+            %{
+              id: id,
+              remediation: remediation,
+              status: :fail,
+              evidence: inconnues,
+              note:
+                "Fleet.Layout declares #{Enum.join(racines, ", ")} — " <>
+                  "#{length(inconnues)} other /home/projects root(s) are neither a face nor " <>
+                  "declared: " <> Enum.join(inconnues, ", ")
+            }
+        end
     end
   end
 
