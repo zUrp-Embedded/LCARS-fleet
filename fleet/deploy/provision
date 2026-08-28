@@ -77,9 +77,20 @@
 set -euo pipefail
 
 SELF="$(readlink -f "$0")"
-PROV_ROOT="$(dirname "$SELF")"                      # LA racine, résolue UNE fois puis propagée par
-MODULES_DIR="$PROV_ROOT/modules.d"                  # env — jamais d'heuristique ../.. par module
-export PROVISION_LIB="$PROV_ROOT/lib/provision-lib.sh"
+# ⚠ CETTE VARIABLE S'APPELAIT `PROV_ROOT`, ET LA LIB EN A FAIT SON CONTRAT. Ici elle designe
+# l'arbre `deploy/` de CE script ; dans `provision-lib.sh`, `PROV_ROOT` designe la RACINE D'INSTALL
+# (`/opt/lcars`), dont derivent `PROV_PREFIX`, `PROV_TOKENS_DIR` et `PROV_CATALOGUES_WORK`. Le
+# runner posait la sienne AVANT de sourcer la lib, donc le `:=` de la lib ne tirait pas, et le
+# runner resolvait tout sous son propre repertoire :
+#     PROV_TOKENS_DIR = <depot>/fleet/deploy/var/tokens
+# Consequence mesuree : le plan d'`uninstall` ne nommait pas les vrais chemins, l'`audit` mesurait
+# a cote, et le JOURNAL enregistrait « prefix <depot>/fleet/deploy/runtime » — il mentait sur ce
+# qui venait d'etre installe, ce qui est precisement ce qu'un journal existe pour ne pas faire.
+# Rien ne le voyait : les MODULES sont des processus separes et n'heritaient pas de la variable,
+# donc eux posaient au bon endroit. Seul le runner divergeait, en silence.
+DEPLOY_DIR="$(dirname "$SELF")"                     # l'arbre deploy/ de ce script, résolu UNE fois
+MODULES_DIR="$DEPLOY_DIR/modules.d"                 # puis propagé par env — jamais d'heuristique ../..
+export PROVISION_LIB="$DEPLOY_DIR/lib/provision-lib.sh"
 
 usage() { sed -n '6,52p' "$SELF" | sed 's/^# \{0,1\}//'; }
 die()   { echo "provision: $*" >&2; exit 1; }
@@ -409,7 +420,15 @@ fi
 #
 # ⚠ APPLY SEULEMENT. Un `doctor` ne pose rien ; lui faire écrire un journal ferait raconter à la
 # machine une pose qui n'a pas eu lieu.
-JOURNAL_FILE="${LCARS_JOURNAL_FILE:-/etc/lcars/install.journal}"
+# ⚠ IL VIVAIT DANS `/etc/lcars`, ET C'ETAIT DE L'ETAT DANS UN REPERTOIRE DE CONFIG. `/etc` porte
+# la configuration d'HOTE — ce qu'un admin edite : `host-consent`, `seat.uid`, `deck-oidc.json`,
+# `services.env`, `fleet.json`. Ce fichier-ci n'est edite par personne : c'est le REGISTRE de ce que
+# cette passe a pose, une variable de la machine. Il descend avec le reste de l'etat.
+#
+# L'ORDRE NE CHANGE PAS, ET IL EST DEJA TENU : `uninstall` charge le journal en tableaux AVANT ses
+# boucles de `rm -rf` (meme scar que la carte du convergeur). Sa racine etait deja retiree par le
+# meme verbe — `/etc/lcars` est de classe `dir` dans la table — donc le risque est identique.
+JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
 MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 
 # ─── uninstall — IL NE CONTIENT AUCUNE LISTE ────────────────────────────────────────────────────

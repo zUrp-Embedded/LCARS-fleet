@@ -113,3 +113,53 @@ code_seul() {
   n="$(grep -rhE "(p_drift|p_fail|say|echo)[^|]*($RACINES)" "$DEPLOY"/modules.d/*.sh 2>/dev/null | grep -c . || true)"
   [ "$n" -ge 1 ]
 }
+
+# ─── AUCUN CONSOMMATEUR NE MASQUE UN DEFAUT DE LA LIB AVANT DE LA SOURCER ────────────────────────
+#
+# ⚠ LE DEFAUT QUE CE MUR FERME A TOURNE EN SILENCE. `deploy/provision` posait `PROV_ROOT` en tete
+# — l'arbre `deploy/` de ce script — puis sourçait la lib, dont `PROV_ROOT` designe la RACINE
+# D'INSTALL. Le `:=` de la lib ne tire pas sur une variable deja posee : le runner resolvait donc
+# `PROV_PREFIX`, `PROV_TOKENS_DIR` et `PROV_CATALOGUES_WORK` sous son propre repertoire.
+#
+# CE QUE CA COUTAIT : le plan d'`uninstall` ne nommait pas les vrais chemins, l'`audit` mesurait a
+# cote, et le JOURNAL enregistrait « prefix <depot>/fleet/deploy/runtime » — il mentait sur ce qui
+# venait d'etre installe. Les MODULES, eux, posaient au bon endroit : ce sont des processus separes
+# et la variable n'etait pas exportee. Seul le runner divergeait, ce qui est le pire des deux
+# mondes — la machine juste, sa trace fausse.
+#
+# ⚠ AVANT LE `source`, ET PAS APRES : le runner exporte deliberement `PROV_SUBSTRATE` APRES, pour
+# le propager aux modules. Une surcharge voulue et une collision de nom ont la meme forme ; seule
+# leur POSITION les distingue. Un mur qui interdirait les deux serait faux.
+
+consommateurs() { printf '%s\n' "$DEPLOY/provision" "$DEPLOY"/modules.d/*.sh; }
+
+# Les noms que la lib DECLARE avec un defaut.
+noms_lib() { sed -n 's/^: "${\([A-Z_][A-Z0-9_]*\):[=-].*/\1/p' "$DEPLOY/lib/provision-lib.sh" | sort -u; }
+
+@test "GARDE D'INSTRUMENT : la lib declare des defauts, et des fichiers la sourcent" {
+  [ "$(noms_lib | wc -l)" -ge 20 ]
+  [ "$(consommateurs | wc -l)" -ge 10 ]
+}
+
+@test "RACINE : nul ne pose un nom de la lib AVANT de la sourcer" {
+  local f n src bad=()
+  while read -r f; do
+    [[ -f "$f" ]] || continue
+    # La ligne qui source la lib. Sans elle, le fichier n'est pas un consommateur : rien a verifier.
+    src="$(grep -nE '^[[:space:]]*(\.|source)[[:space:]].*(PROVISION_LIB|provision-lib\.sh)' "$f" \
+           | head -1 | cut -d: -f1)"
+    [[ -n "$src" ]] || continue
+    while read -r n; do
+      [[ -n "$n" ]] || continue
+      awk -v n="$n" -v lim="$src" 'NR<lim && $0 ~ "^(export[ \t]+)?" n "=" { print NR; exit }' "$f" \
+        | while read -r l; do echo "${f##*/}:$l: $n"; done
+    done < <(noms_lib)
+  done < <(consommateurs) > "$BATS_TEST_TMPDIR/hits"
+  mapfile -t bad < "$BATS_TEST_TMPDIR/hits"
+  [ "${#bad[@]}" -eq 0 ] || {
+    echo "MASQUAGE — ces noms sont poses AVANT le source, donc le defaut de la lib ne tire pas :" >&2
+    printf '  %s\n' "${bad[@]}" >&2
+    echo "  renomme la variable locale : le nom appartient au contrat de la lib." >&2
+    return 1
+  }
+}

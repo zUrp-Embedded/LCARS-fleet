@@ -48,9 +48,19 @@ defmodule Fleet.Layout do
   # faces: where things sit on the box is one authority, what is inside them is another.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The INSTALLED cache — a sibling of the project faces and of `/opt/lcars/var/tokens`, on the volume the
-  # image does not rewrite. Not under `@platform_root`: that tree IS the image, and mixing runtime
-  # state into it makes an update look like an uninstall.
+  # The INSTALLED cache — a sibling of the project faces, where the operator already looks for what
+  # they work on. It is OPERATOR-FACING business material: they read it, they may want to keep a
+  # copy. `dir` in `system.manifest`, not `preserve` — so an uninstall does remove it; the class
+  # column carries that, never the path.
+  #
+  # ⚠ THIS COMMENT USED TO SAY « on the volume the image does not rewrite. Not under
+  # `@platform_root`: that tree IS the image ». That reason has EXPIRED. `/opt/lcars/var` is a named
+  # project volume in both composes since the forge tokens moved there — it survives an image swap
+  # exactly like `/home` does. The old reason no longer separates the two candidates, and a reason
+  # that no longer discriminates is worse than none: the next reader takes it as still weighing, and
+  # moves the tree on a premise that stopped being true.
+  #
+  # What holds the placement now is WHO the tree is for, not which layer carries it.
   @installed_catalogues_root "/home/catalogues"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.

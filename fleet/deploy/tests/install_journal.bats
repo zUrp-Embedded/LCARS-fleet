@@ -171,7 +171,10 @@ SH
 @test "le chemin du journal a une couture, et son defaut vit AVEC l'etat machine" {
   # `/etc/lcars` porte deja `host-consent`, `services.env` et `deck-oidc.json` — l'etat machine qui
   # n'est pas le runtime. La phase B du chantier empreinte deplacera les quatre ensemble.
-  code "$RUNNER" | grep -q 'LCARS_JOURNAL_FILE:-/etc/lcars/install.journal'
+  # ⚠ DERIVE, PAS GRAVE. Ce temoin epinglait `/etc/lcars/install.journal` en litteral ; le journal
+  # a demenage sous la racine unique et il aurait rougi sur un geste correct. Ce qu'il garde est que
+  # le runner NOMME son defaut a un seul endroit, pas la valeur de ce defaut.
+  code "$RUNNER" | grep -qE 'LCARS_JOURNAL_FILE:-\$PROV_ROOT/var/install\.journal' 
   grep -qE '^dir +/etc/lcars ' "$BATS_TEST_DIRNAME/../system.manifest"
 }
 
