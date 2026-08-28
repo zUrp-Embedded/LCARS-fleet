@@ -175,7 +175,8 @@ put_secret() { # $1=chemin  $2=valeur
   else
     install -d -m 0710 "$PRIVATE_DIR"
   fi
-  local tmp="${1%/*}/.$(basename "$1").tmp"
+  local tmp
+  tmp="${1%/*}/.$(basename "$1").tmp"   # SC2155 : `local` masquerait le statut de `basename`
   umask 077
   printf '%s\n' "$2" > "$tmp"
 
@@ -776,7 +777,8 @@ cmd_install() {
   # Rien de secret n'atterrit ici : le materiel d'un catalogue est public par construction, et le
   # jeton voyage par l'ENVIRON de git, jamais dans le `.git/config` du clone.
   chmod 0755 "$work"
-  # shellcheck disable=SC2064 -- on veut la valeur d'ICI
+  # SC2064 : on veut la valeur d'ICI, pas celle du moment ou le trap se declenche.
+  # shellcheck disable=SC2064
   trap "rm -rf '$work'" EXIT
   GIT_TERMINAL_PROMPT=0 \
   GIT_CONFIG_COUNT=1 \
@@ -892,8 +894,21 @@ cmd_install() {
 # repertoire copie n'a pas de `.git`, donc pas de sha. Il serait re-clone au premier boot, ce qui
 # marche mais fait mentir le premier `check` (« materiel absent ») sur une boite qui vient
 # d'installer. Cloner depuis la meme autorite met les deux d'accord immediatement.
+# ⚠ DEUX `local`, ET LE PREMIER JET N'EN AVAIT QU'UN. `local name="$1" dir=".../$name"` : bash
+# expanse TOUS les arguments du builtin AVANT de l'executer, donc ce `$name` n'est pas celui qu'on
+# vient d'ecrire. Mesure : `f(){ local a="$1" b="/base/$a"; }` rend `b=/base/`.
+#
+# Ca marchait — par PORTEE DYNAMIQUE : l'appelant `cmd_install` a un `local name` qui porte deja la
+# meme valeur, et c'est lui que l'expansion trouvait. La ligne etait donc correcte tant que son
+# appelant gardait ce nom de variable. Renommer un local dans `cmd_install` — un refactor sans
+# aucune intention de changer quoi que ce soit — rendait `$name` VIDE, donc `dir` egal a la racine
+# des catalogues, et le `rm -rf "$dir"` de trois lignes plus bas emportait TOUS les catalogues.
+#
+# Le defaut etait invisible : une directive `disable=SC2064 -- raison` malformee (le `--` n'est pas
+# une syntaxe shellcheck) faisait ABANDONNER l'analyse du fichier entier.
 install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
-  local name="$1" dir="${LCARS_CATALOGUES_DIR:-/home/catalogues}/$name"
+  local name="$1"
+  local dir="${LCARS_CATALOGUES_DIR:-/home/catalogues}/$name"
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
   GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \

@@ -782,3 +782,62 @@ FAKE
   [[ "$output" == *"alice/cat"* ]]
   [ "$(grep -c clone "$GIT_LOG" 2>/dev/null || echo 0)" -eq 0 ]
 }
+
+# ─── LA RACINE DES CATALOGUES N'EST PAS UNE CIBLE DE `rm -rf` ────────────────────────────────────
+#
+# ⚠ CE QUI EST GARDE ICI N'EST PAS UN COMPORTEMENT, C'EST UNE INDEPENDANCE. `install_material`
+# calcule son repertoire cible ; ces trois temoins exigent qu'il le calcule depuis SON ARGUMENT et
+# depuis rien d'autre. La version d'avant le faisait depuis la PORTEE DYNAMIQUE de son appelant —
+# `local name="$1" dir=".../$name"`, ou bash expanse tout avant d'executer le builtin, donc ce
+# `$name` est celui d'ailleurs. C'etait juste tant que l'appelant gardait un `local` de ce nom.
+#
+# TROIS CAS, ET ILS NE SE VALENT PAS — mesures un par un sur la version defectueuse :
+#   `name` ABSENT       : `set -u` tue le script avant le `rm -rf`. Bruyant, rien de perdu.
+#   `name` POSE MAIS VIDE : `set -u` ne dit rien d'une variable vide. `dir` devient LA RACINE des
+#                         catalogues, le `rm -rf "$dir"` l'emporte entiere — y compris le clone
+#                         qui venait d'arriver — et l'erreur qui sort accuse un `.tmp` introuvable.
+#   `name` HOMONYME     : le catalogue s'installe sous l'AUTRE nom, `install` sort vert, et le
+#                         catalogue demande n'existe nulle part.
+# Le deuxieme est le cher, et c'est le seul que `set -u` ne couvre pas.
+
+setup_material() {
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
+  mkdir -p "$LCARS_CATALOGUES_DIR/deja-la"
+  echo "NE ME PERDS PAS" > "$LCARS_CATALOGUES_DIR/deja-la/marqueur"
+  cat > "$BIN/git" <<'FAKE'
+#!/usr/bin/env bash
+# `clone … <dest>` : la destination est le DERNIER argument.
+[[ "$1" == clone ]] && { mkdir -p "${!#}"; echo clone > "${!#}/.cloned"; }
+exit 0
+FAKE
+  chmod +x "$BIN/git"
+  export PATH="$BIN:$PATH"
+}
+
+@test "install_material: un « name » VIDE dans la portee appelante n'emporte pas les voisins" {
+  # LE TEMOIN QUI COMPTE. `set -u` ne protege pas d'une variable posee-mais-vide, et c'est
+  # exactement la forme qu'un `local name` declare puis assigne conditionnellement produit.
+  setup_material
+  run bash -c "source '$SCRIPT'; name=''; install_material demo /inutile"
+  [ -f "$LCARS_CATALOGUES_DIR/deja-la/marqueur" ]
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_CATALOGUES_DIR/demo/.cloned" ]
+}
+
+@test "install_material: sans « name » dans la portee appelante, la cible reste l'argument" {
+  setup_material
+  run bash -c "source '$SCRIPT'; install_material demo /inutile"
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_CATALOGUES_DIR/deja-la/marqueur" ]
+  [ -f "$LCARS_CATALOGUES_DIR/demo/.cloned" ]
+}
+
+@test "install_material: c'est l'ARGUMENT qui nomme le repertoire, pas un « name » d'ailleurs" {
+  # Meme propriete par l'autre bout : une variable homonyme HOSTILE ne deplace pas la cible.
+  setup_material
+  run bash -c "source '$SCRIPT'; name=AUTRE; install_material demo /inutile"
+  [ "$status" -eq 0 ]
+  [ -f "$LCARS_CATALOGUES_DIR/demo/.cloned" ]
+  [ ! -e "$LCARS_CATALOGUES_DIR/AUTRE" ]
+  [ -f "$LCARS_CATALOGUES_DIR/deja-la/marqueur" ]
+}
