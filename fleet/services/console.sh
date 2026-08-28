@@ -370,7 +370,7 @@ launch_one() {
       have="$(cat "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true)"
       if [[ "$want" != "$have" ]]; then
         nudge_console_creds "$human" "$login_shell" "$grp" \
-          && printf '%s' "$want" > "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true
+          && { printf '%s' "$want" > "$(creds_stamp_path "$sock_dir")" 2>/dev/null || true; }
       fi
     fi
     launch_pod_console "$human" "$home_dir" "$login_shell" "$sock_dir" "$primary_gid"
@@ -486,7 +486,9 @@ if [[ "$ALL" -eq 1 ]]; then
   # eu sa console doit laisser une trace avec son motif ; un silence ferait croire a un oubli.
   while read -r login _uid _home; do
     [[ -n "$login" ]] || continue
-    launch_one "$login" && n=$(( n + 1 )) || say "console de $login NON lancee"
+    # `n=$(( … ))` rend toujours 0, donc le `||` ne se declenche que sur `launch_one` — mais la
+    # forme est celle qui a fait mentir `p_ok` et `say_ok` dans ce meme lot. On la retire partout.
+    if launch_one "$login"; then n=$(( n + 1 )); else say "console de $login NON lancee"; fi
   done < <("$HUMANS_SH" --verbose)
 
   say "$n console(s) lancee(s)"

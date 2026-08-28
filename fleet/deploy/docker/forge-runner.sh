@@ -188,7 +188,17 @@ say "token d'enregistrement minte (${#REG} car)"
 # `config_files` du projet, donc l'effacer casserait un `compose` ultérieur sur ce meme projet.
 # Quelques ko qui restent valent mieux qu'un projet compose qui ne se relit plus.
 GEN="$(mktemp -d)"
-cat > "$GEN/config.yaml" <<EOF
+# ⚠ HEREDOC QUOTE, ET IL NE DOIT PLUS JAMAIS CESSER DE L'ETRE. Ce corps est de la PROSE, et elle
+# porte des accents graves. Non quote, bash y fait de la substitution de commande : `getent hosts
+# forge`, `wget http://forge:3000/…` et `git ls-remote …` etaient EXECUTES a chaque generation.
+# Mesure : ici la forge ne resout pas, les commandes ecrivent sur stderr et la prose sort AMPUTEE
+# (« n'a que , , . ») ; sur l'hote du runner, ou elle resout, `git ls-remote` rend deux lignes a
+# tabulations qui atterrissent HORS du `#` — et le config.yaml produit n'est plus du YAML valide
+# (« found character '\t' that cannot start any token »). Le runner refuse alors sa config.
+# `wget`, lui, telecharge un fichier `version` dans le cwd au passage.
+# Rien dans ce corps n'a besoin d'etre expanse : le seul `$` de la ligne est la cible du `>`.
+cat > "$GEN/config.yaml" <<'EOF'
+
 # Genere par forge-runner.sh.
 #
 # ⚠ CE FICHIER FORÇAIT LES CONTENEURS DE JOB SUR LE RESEAU DE LA FORGE, et depuis que le runner
@@ -277,8 +287,8 @@ say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volum
 # contenterait du code de retour semerait donc dans le vide en se croyant verte. On EXIGE une sortie
 # NON VIDE : si le relais avale, on refuse en le disant, on ne continue pas en silence.
 seed_dind_images() {
-  local c="$PROJECT-act-1" i out entry image
-  for i in $(seq 1 30); do
+  local c="$PROJECT-act-1" out entry image
+  for _ in $(seq 1 30); do
     out="$("$DOCKER_BIN" exec "$c" docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
     [[ -n "$out" ]] && break
     sleep 2

@@ -719,7 +719,13 @@ converge_once() {
     # ici comme un NOM et pas comme un drapeau. La validation l'interdit deja ; ceci est la
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
-      getent group "$GROUP" >/dev/null 2>&1 && usermod -aG "$GROUP" -- "$login" 2>/dev/null || true
+      # Meme correctif que l'entrypoint : le `|| true` couvrait le groupe absent (voulu) ET le
+      # `usermod` en echec (pas voulu) — un humain hors de son groupe, en silence, est precisement
+      # ce qui a coute sept passes sur la racine des jetons.
+      if getent group "$GROUP" >/dev/null 2>&1; then
+        usermod -aG "$GROUP" -- "$login" 2>/dev/null \
+          || say "ATTENTION: « $login » n'a PAS ete ajoute au groupe $GROUP — il ne lira pas ce que ce groupe ouvre"
+      fi
       # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS.
       #
       # ⚠ CE COMMENTAIRE DISAIT « `want_uid` est vide dans le cas nominal (c'est `useradd` qui a

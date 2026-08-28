@@ -374,6 +374,10 @@ fi
 # (il lit des champs publics, sans master-token) et ne peut donc rien reposer par megarde ; il rend
 # les memes lignes de verdict, sur l'etat REEL de la forge plutot que sur l'intention du script.
 # La sonde vit DANS la boite avec le reste de la recette (l'hote n'en a plus de copie).
+# SC2016 : les guillemets SIMPLES sont le geste. `$FORGE_BASE_URL` doit s'expanser DANS la boite,
+# ou il est defini ; `$ADMIN` vient de l'hote et est episse par la sortie de quotes. Doubler les
+# quotes ferait resoudre les deux ici, et l'URL de la forge y est vide.
+# shellcheck disable=SC2016
 charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
     'cd /opt/lcars/fleet/deploy/deps && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
@@ -398,11 +402,13 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
 
     LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
     git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
-      && say "fleet/lcars : main pousse" || say "fleet/lcars : main NON pousse"
+      && _main_ok=1 || _main_ok=0
+    if [[ "$_main_ok" -eq 1 ]]; then say "fleet/lcars : main pousse"; else say "fleet/lcars : main NON pousse"; fi
 
     WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
     [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
-      && say "fleet/lcars : ops pousse" || say "fleet/lcars : ops NON pousse" ; }
+      && _ops_ok=1 || _ops_ok=0
+    if [[ "$_ops_ok" -eq 1 ]]; then say "fleet/lcars : ops pousse"; else say "fleet/lcars : ops NON pousse"; fi ; }
 
   fi
 fi

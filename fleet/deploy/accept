@@ -70,11 +70,12 @@ skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
 #
 # `-K -` : ni le login ni le mot de passe dans argv (cicatrice 6-141).
 check_forge_login() {
-  local line label login pw code tested=0
+  # `_label` : la colonne existe dans le flux et doit etre consommee, personne ne la lit.
+  local _label login pw code tested=0
   [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PRIVATE_DIR/forge.url)"; return; }
   [[ -s "$ANNOUNCE" ]] || { skip "forge : aucun identifiant annonce par cette passe — rien a verifier"; return; }
 
-  while IFS=$'\t' read -r label login pw; do
+  while IFS=$'\t' read -r _label login pw; do
     [[ -n "$pw" ]] || continue
     tested=$((tested + 1))
     code="$(printf 'user = "%s:%s"\n' "$login" "$pw" \
@@ -165,8 +166,8 @@ check_fleet_start() {
     return
   fi
   # Le demarrage est asynchrone (tmux + BEAM) : on laisse le temps qu'il faut, borne.
-  local i alive=0
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  local alive=0
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then alive=1; break; fi
     sleep 2
   done

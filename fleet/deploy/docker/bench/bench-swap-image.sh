@@ -182,8 +182,7 @@ say "boite branchee sur $FORGE_NET — 'forge' resout AVANT le premier boot"
 "$DOCKER_BIN" compose -p "$PROJECT" start || die "la boite ne demarre pas" 3
 
 wait_healthy() {
-  local i
-  for i in $(seq 1 90); do
+  for _ in $(seq 1 90); do
     [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] && return 0
     sleep 2
   done
@@ -194,9 +193,13 @@ say "boite healthy"
 
 # Mot de passe de banc d'admiral (ssh + sudo) — miroir de bench-up.sh "2ter". L'entrypoint cree le
 # siege (uid 1000) sans secret ; on le pose ici pour pouvoir ssh/sudo apres un swap. Jamais lu par la prod.
-printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null \
-  && say "mot de passe de banc pose sur admiral (ssh/sudo)" \
-  || say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
+# ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
+# ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
+if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null; then
+  say "mot de passe de banc pose sur admiral (ssh/sudo)"
+else
+  say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
+fi
 
 # ─── 3. les creds repartent avec l'ancien conteneur (piege 2) ────────────────────────────────────
 if [[ "$WITH_CREDS" -eq 1 ]]; then

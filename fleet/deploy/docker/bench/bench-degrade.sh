@@ -94,7 +94,10 @@ print(next((str(a['id']) for a in apps if a.get('name')=='$CLIENT_NAME'), ''))" 
     say "client OAuth « $CLIENT_NAME » declare"
   fi
   cid="$(printf '%s' "$body" | python3 -c "import json,sys;print(json.load(sys.stdin).get('client_id',''))" 2>/dev/null || true)"
-  [[ -n "$cid" ]] && say "client_id : $cid" || say "client_id illisible dans la reponse — a verifier a la main"
+  # `A && say … || say …` : `say` rend le statut de son `echo`. Un tube ferme (un `| head`) le fait
+  # echouer, et le banc annonce « illisible » sur un client_id parfaitement lu.
+  if [[ -n "$cid" ]]; then say "client_id : $cid"
+  else say "client_id illisible dans la reponse — a verifier a la main"; fi
   say "redirection declaree : $REDIRECT"
 else
   say "pas de --redirect : client OAuth non declare (le deck ne pourra pas deleguer l'auth)"

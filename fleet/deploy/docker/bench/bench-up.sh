@@ -56,7 +56,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
-REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
 
 PROJECT="lcars-nuit"
 # ⚖ ARBITRAGE USER 2026-08-18 — LE BANC S'OUVRE SUR LE LAN, ET DEUX PORTS SONT FIXES : 20999 pour
@@ -399,9 +398,13 @@ say "boite healthy"
 # admiral (uid 1000, sysadmin) est cree par l'entrypoint sans secret — l'entrypoint pose le siege,
 # pas le mot de passe. On lui donne ici un secret de BANC CONNU (meme convention jetable que la forge,
 # `LCARS_BENCH_ADMIRAL_PW`), pour pouvoir ssh/sudo sans aller le chercher. Jamais lu par la prod.
-printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null \
-  && say "mot de passe de banc pose sur admiral (ssh/sudo)" \
-  || say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
+# ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
+# ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
+if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null; then
+  say "mot de passe de banc pose sur admiral (ssh/sudo)"
+else
+  say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
+fi
 
 # ─── 3. les creds anthropic : DEPLACEES APRES LA RELANCE (piege 3) ───────────────────────────────
 # Elles vivaient ICI, et depuis identite-v2 c'etait trop tot. L'entrypoint ne fabrique plus le

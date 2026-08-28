@@ -337,7 +337,12 @@ fi
 # root du sysadmin : membre du groupe sudo (le paquet sudo pose la regle %sudo par defaut). Idempotent.
 # Le mot de passe est POSE HORS d'ici (bench: fixe, pour tester ; prod: l'installeur) — l'entrypoint
 # cree le siege, il ne choisit pas le secret.
-getent group sudo >/dev/null 2>&1 && usermod -aG sudo "$LCARS_ADMIRAL" || true
+# ⚠ LE `|| true` COUVRAIT DEUX CHOSES, ET UNE SEULE ETAIT VOULUE. Il etait la pour qu'un groupe
+# `sudo` absent ne tue pas le boot — mais il avalait AUSSI un `usermod` en echec, et le siege
+# repartait alors sans sudo, sans un mot. Le groupe absent reste non fatal ; l'echec se dit.
+if getent group sudo >/dev/null 2>&1; then
+  usermod -aG sudo "$LCARS_ADMIRAL" || say "ATTENTION: « $LCARS_ADMIRAL » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
+fi
 
 if [[ -n "${LCARS_SSH_AUTHORIZED_KEYS:-}" ]]; then
   HOME_DIR="$(getent passwd "$LCARS_ADMIRAL" | cut -d: -f6)"
@@ -555,6 +560,10 @@ launch() { # launch <nom> <log> -- <cmd...>
   local name="$1" log="$2"; shift 2
   [[ "${1:-}" == "--" ]] && shift
   if [[ -x "$SUPERVISE" ]]; then
+    # SC2094 : `--log "$log"` et `>>"$log"` visent bien le meme fichier, et c'est voulu — les deux
+    # AJOUTENT (`O_APPEND`), pour que les messages du superviseur et la sortie du service tiennent
+    # le meme journal. Un `>` ici tronquerait a l'ouverture ; c'est l'autre moitie du meme piege.
+    # shellcheck disable=SC2094
     setsid "$SUPERVISE" --name "$name" --log "$log" -- "$@" </dev/null >>"$log" 2>&1 &
     say "$name ACTIF (pid $!, supervisé — relance automatique, bornée)"
   else
