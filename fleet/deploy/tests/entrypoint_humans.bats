@@ -24,6 +24,8 @@
 # l'orthographe d'un appel ; ce qui compte est ce que le bloc FAIT quand le convergeur echoue,
 # quand la sonde derive, et ce qu'il ECRIT pour son lecteur.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   [ -f "$SRC" ]
@@ -175,7 +177,7 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
   [ ! -e "$LCARS_HUMANS_RC_FILE" ]
   grep -q 'DÉSACTIVÉE' "$JOURNAL"
   # Et surtout : la passe n'a PAS ete tentee.
-  ! grep -q 'premier tour' "$JOURNAL"
+  refute grep -q 'premier tour' "$JOURNAL"
 }
 
 @test "le convergeur ABSENT : rien n'est publie, et le bloc le dit — pas de verdict invente" {

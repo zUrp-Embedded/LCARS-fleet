@@ -164,7 +164,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 
 @test "D7: plus AUCUNE pause — un module ne retient pas un installeur au rang 48" {
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  ! code | sed -n '/^announce_password()/,/^}/p' | grep -q 'read -r'
+  code | sed -n '/^announce_password()/,/^}/p' | refute_out 'read -r'
 }
 
 @test "D7: sans jeton master, l'adminite est INCONNUE — jamais supposee absente" {
@@ -237,7 +237,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 
 @test "l'humain integre vient de PROV_FLEET_HUMAN, jamais de l'operateur" {
   grep -q 'LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}"' "$SRC"
-  ! grep -q 'LCARS_BUILTIN_HUMAN="\$PROV_HUMAN"' "$SRC"
+  refute grep -q 'LCARS_BUILTIN_HUMAN="\$PROV_HUMAN"' "$SRC"
 }
 
 @test "sans humain de fleet, on ne passe RIEN — le defaut vit dans forge-gestures, pas ici" {
@@ -251,7 +251,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne redit pas ce defaut
-  ! grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
+  refute grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
 }
 
 # ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
@@ -312,7 +312,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # machine, ce nom ne resout pas : c'est le port PUBLIE qu'on compose.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'FORGE_BASE_URL="\$LOCAL_URL"'
-  ! code | grep -q 'FORGE_BASE_URL="http://forge:3000"'
+  code | refute_out 'FORGE_BASE_URL="http://forge:3000"'
 }
 
 @test "la recette est une COPIE — le checkout de l'operateur ne recoit pas le roster genere" {
@@ -349,7 +349,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # version : `46-tofu` est l'autorite du pin, un second avis ici en ferait un second defaut.
   grep -q '46-tofu' "$SRC"
   grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  ! grep -q 'box build' "$SRC"
+  refute grep -q 'box build' "$SRC"
 }
 
 @test "le roster se derive de l'ARBRE sur ce rail — Elixir y est pose 33 crans plus tot" {
@@ -574,7 +574,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # "$PROV_FORGE_BIND"` mot pour mot et est tombe des que l'argument est devenu
   # `${PROV_FORGE_ADVERTISE:-$PROV_FORGE_BIND}` — une correction qui RENFORCE la regle qu'il garde.
   code | grep -qE 'advertise_addr "\$\{?PROV_FORGE'
-  ! code | grep -q 'lan_addr'
+  code | refute_out 'lan_addr'
 }
 
 @test "sous WSL en NAT, l'adresse annoncee est COMPOSABLE, et le motif remonte" {
@@ -685,7 +685,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
   grep -q 'curl -K -' <<<"$body"
-  ! grep -qE 'curl[^|]* -d ' <<<"$body"
+  refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
 @test "sans humain NOMME, le login se DEMANDE — sortir en silence rendait la fonction morte" {
@@ -698,7 +698,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
   grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"
   grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
-  ! grep -q '"lcars"' <<<"$body"
+  refute grep -q '"lcars"' <<<"$body"
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {

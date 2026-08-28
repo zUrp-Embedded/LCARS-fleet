@@ -137,7 +137,7 @@ apps_with() { # apps_with <uris...>
   [ "$status" -eq 0 ]
   [[ "$output" == *"déjà posé et vivant"* ]]
   refute grep -q "DELETE" "$TRACE"
-  ! grep -q "POST" "$TRACE"
+  refute grep -q "POST" "$TRACE"
 }
 
 # ─── L'ADRESSE QU'UN TIERS COMPOSE ──────────────────────────────────────────────────────────────

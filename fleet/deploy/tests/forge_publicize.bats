@@ -28,6 +28,8 @@
 # fonction seule evite de monter un `cmd_apply` entier (tofu, secrets, depot modele) pour mesurer
 # une boucle de trois appels.
 
+load refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
@@ -82,7 +84,7 @@ EOF
   # `bot_b` etait deja public : aucun PUT ne doit le concerner.
   grep -q "PUT bot_a" "$PUT_LOG"
   grep -q "PUT bot_c" "$PUT_LOG"
-  ! grep -q "PUT bot_b" "$PUT_LOG"
+  refute grep -q "PUT bot_b" "$PUT_LOG"
 }
 
 @test "AUTO-LIMITANT : un 403 est un compte hors de notre autorite, pas une panne" {
@@ -108,7 +110,7 @@ EOF
   grep -q "PUT bot_b as=bot_b" "$PUT_LOG"
   # Le jeton de lecture ne doit JAMAIS servir a poser : il rendrait 403 sur autrui, et un geste qui
   # l'utiliserait echouerait partout en ayant l'air d'essayer.
-  ! grep -q "as=TOK" "$PUT_LOG"
+  refute grep -q "as=TOK" "$PUT_LOG"
 }
 
 @test "org dont les membres ne se lisent pas -> on ne pose RIEN et on le DIT" {

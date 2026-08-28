@@ -21,6 +21,8 @@
 # Le contrat des codes est celui de tous les modules : apply 0 = convergé · 1 = ECHEC · 2 = applique
 # avec drift residuel. « Pas encore » vaut 2, jamais 1.
 
+load refute
+
 setup() {
   MODULE="$BATS_TEST_DIRNAME/../modules.d/52-ops-branch.sh"
   [ -f "$MODULE" ]
@@ -156,7 +158,7 @@ EOF
   # gate tient la recopie. Ce temoin-ci garde l'autre moitie : que ce fichier ne rouvre pas une
   # molette locale, ce qui redonnerait au nom deux sources dont une seule serait verifiee.
   grep -qE '^readonly OPS_BRANCH="tool_request"' "$MODULE"
-  ! grep -q 'LCARS_SYSADMIN_BRANCH' "$MODULE"
+  refute grep -q 'LCARS_SYSADMIN_BRANCH' "$MODULE"
 }
 
 @test "le depot ops est CREE par l'amorcage — il etait lu par trois domaines et cree par aucun" {

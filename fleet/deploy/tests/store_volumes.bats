@@ -132,7 +132,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # script serait une seconde verite, et c'est celle qu'on ne relit pas qui derive.
   grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE"
   grep -q "LCARS_STORE_ROOT: /var/lib/lcars" "$COMPOSE_INSTALL"
-  ! grep -q "/var/lib/lcars" "$STORE_LIB"
+  refute grep -q "/var/lib/lcars" "$STORE_LIB"
 }
 
 @test "store_ensure_volumes cree TOUS les volumes, et rejouer ne casse rien" {
@@ -165,7 +165,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 
   [ "$(grep -c '^volume rm -f banc2-' "$calls")" -eq 4 ]
   # Le temoin qui compte : AUCUN nom nu, donc rien qui appartienne a une autre installation.
-  ! grep -qE '^volume rm -f lcars-(cache|toolchains|sysroots|state)$' "$calls"
+  refute grep -qE '^volume rm -f lcars-(cache|toolchains|sysroots|state)$' "$calls"
 }
 
 @test "store_ensure_volumes ECHOUE bruyamment quand docker refuse — jamais un up sur un magasin absent" {
@@ -201,7 +201,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   grep -q "store_spared_line" "$DEPLOY/box"
   refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
-  ! grep -q "store_destroy_volumes" "$DEPLOY/box"
+  refute grep -q "store_destroy_volumes" "$DEPLOY/box"
 }
 
 @test "tout appelant du magasin POSE le prefixe avant d'appeler compose ou la lib" {

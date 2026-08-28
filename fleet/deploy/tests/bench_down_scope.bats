@@ -23,6 +23,8 @@
 # behaviour, and a stub cannot answer for them. Assertions read the CALL LOG, never the exit
 # status: the stub does not fake compose's output.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../docker/bench/bench-down.sh"
   BINDIR="$BATS_TEST_TMPDIR/bin"
@@ -117,7 +119,7 @@ idx_of() {
   PRESENT="someone-elses-box" VOLUMES="someoneelses_data" run_down
 
   [ "$status" -eq 2 ]
-  ! grep -q -- "down -v" "$CALLS"
+  refute grep -q -- "down -v" "$CALLS"
 }
 
 @test "--yes is still required, and its absence destroys nothing" {
@@ -125,5 +127,5 @@ idx_of() {
   run bash "$SRC" --project bt
 
   [ "$status" -eq 1 ]
-  ! grep -q -- "down -v" "$CALLS"
+  refute grep -q -- "down -v" "$CALLS"
 }

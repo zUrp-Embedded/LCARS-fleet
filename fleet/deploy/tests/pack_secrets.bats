@@ -24,6 +24,8 @@
 # mesurerait l'orthographe d'une correction, pas son effet : la prochaine forme fautive s'ecrira
 # autrement. On extrait le bloc, on lui donne un jeton sentinelle, et on regarde ce qui sort.
 
+load refute
+
 setup() {
   PACK="$BATS_TEST_DIRNAME/../../../pack.sh"
   [ -f "$PACK" ]
@@ -83,5 +85,5 @@ verdict_block() { sed -n '/_tok_state=/,/jeton :/p' "$PACK"; }
   # commentaire de `pack.sh` l'affirme depuis toujours ; rien ne le mesurait.
   local code; code="$(grep -vE '^\s*#' "$PACK")"
   # Un jeton Gitea est 40 hexa. On epingle la FORME, pas un nom de variable : c'est elle qui fuite.
-  ! grep -qE '[0-9a-f]{40}' <<<"$code"
+  refute grep -qE '[0-9a-f]{40}' <<<"$code"
 }

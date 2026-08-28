@@ -107,5 +107,5 @@ SH
   # ET SANS `--catalogue` : nommer l'arbre de l'hote le fait monter dans le conteneur, ou la porte
   # tourne en `nobody`. Ca passe la ou le clone est world-readable et ca echoue ailleurs — une
   # dependance a la permission d'un parent, invisible sur la machine qui l'a ecrite.
-  ! grep -q -- "--catalogue \"\$REPO_ROOT" "$SRC"
+  refute grep -q -- "--catalogue \"\$REPO_ROOT" "$SRC"
 }

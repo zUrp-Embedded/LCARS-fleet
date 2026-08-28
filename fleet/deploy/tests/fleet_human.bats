@@ -22,6 +22,8 @@
 # qui, faux, serait silencieux. La creation elle-meme est un `useradd` nu, et un `useradd` qui
 # echoue le DIT.
 
+load refute
+
 setup() {
   # Le decor possede l'environnement : ces temoins jugent ce que le module fait d'un environnement
   # DONNE (plancher d'uid, siege, groupe). L'heriter reviendrait a juger la machine qui les joue.
@@ -309,5 +311,5 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
   # est legitime dans ce module. Un grep nu sur « lcars » rougit dessus et fait croire a une regle
   # enfreinte la ou il n'y a qu'un chemin.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  refute grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
 }

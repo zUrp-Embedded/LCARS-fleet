@@ -257,7 +257,7 @@ EOS
   # La preuve du tri — nuance : le sysroot appelle AUSSI apt-get (racine privee, `-o Dir::Etc`).
   # Ce qui est interdit est libssl-dev dans un appel SANS `Dir::` (l'appel HOTE) : on refuse tout
   # PARAGRAPHE (= une invocation, separee par la ligne vide du stub) hote portant le paquet cible.
-  ! awk 'BEGIN{RS=""} !/Dir::/ && /libssl-dev/ {found=1} END{exit !found}' "$BATS_TEST_TMPDIR/apt-args"
+  refute awk 'BEGIN{RS=""} !/Dir::/ && /libssl-dev/ {found=1} END{exit !found}' "$BATS_TEST_TMPDIR/apt-args"
 }
 
 @test "EGRESS: les hotes approuves sont poses sur le volume d'etat" {

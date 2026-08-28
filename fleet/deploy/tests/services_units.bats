@@ -248,7 +248,7 @@ mod() { run bash "$MOD" "$1"; }
   mod apply
   : > "$CALLS"
   mod apply
-  ! grep -q "daemon-reload" "$CALLS"
+  refute grep -q "daemon-reload" "$CALLS"
 }
 
 @test "POSEE n'est pas DEBOUT : le check DERIVE sur une unite presente mais inactive" {
@@ -321,7 +321,7 @@ mod() { run bash "$MOD" "$1"; }
   export PROV_DECK_PORT=31337
   mod apply
   grep -qx 'LCARS_LANDING_PORT=31337' "$LCARS_SERVICES_ENV"
-  ! grep -q '20999' "$LCARS_SERVICES_ENV"
+  refute grep -q '20999' "$LCARS_SERVICES_ENV"
 }
 
 # ─── DEBOUT N'EST PAS DEMARRE ───────────────────────────────────────────────────────────────────
@@ -540,7 +540,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   # Un CONSTAT, pas une mutation : la ligne porte `OK`, jamais `POSÉ`. Meme raison qu'au temoin
   # precedent — l'ancrage est sur la ligne, sinon un `POSÉ` d'unite systemd suffit a la rendre verte.
   printf '%s\n' "$output" | grep -qE '^OK .*déjà présent\(s\) : lcars'
-  ! printf '%s\n' "$output" | grep -qE '^POSÉ .*(déjà présent|lcars.*matérialis)'
+  printf '%s\n' "$output" | refute_out '^POSÉ .*(déjà présent|lcars.*matérialis)'
 }
 
 @test "AUCUN humain a materialiser n'est PAS une faute — zero et vide se distinguent" {

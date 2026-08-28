@@ -27,7 +27,7 @@
   grep -q '/opt/lcars/forge-gestures.sh' <<<"$body"
   # ⚠ ET AUCUN `sudo` : la promesse auditee de ce rail est de n'en jamais demander. Un operateur
   # sans droit sur le fichier doit se faire REFUSER par eux, pas les contourner.
-  ! grep -q 'sudo' <<<"$body"
+  refute grep -q 'sudo' <<<"$body"
 }
 
 load refute
@@ -305,7 +305,7 @@ FAKE
   refute grep -q "catalogue-source cat TOK=TOK " "$ENTRY_LOG"
   # ET PLUS AUCUN CHEMIN NE TRAVERSE : le passer reviendrait a donner a la porte un fichier qu'elle
   # ne peut pas ouvrir — un refus de permission presente comme un catalogue introuvable.
-  ! grep -q "catalogue-source .*TOKFILE=$PRIV" "$ENTRY_LOG"
+  refute grep -q "catalogue-source .*TOKFILE=$PRIV" "$ENTRY_LOG"
 }
 
 # ⚠ LE TEMOIN DU VIDE, ET IL GARDE UN DIAGNOSTIC. Un jeton systeme present mais VIDE donnerait
@@ -680,7 +680,7 @@ EOF
 
   run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
   grep -q "^VOISIN catalogue-source cat" "$ENTRY_LOG"
-  ! grep -q "^EMBARQUE" "$ENTRY_LOG"
+  refute grep -q "^EMBARQUE" "$ENTRY_LOG"
 }
 
 @test "entrypoint: SANS voisin, l'arbre EMBARQUE repond — c'est le cas du poste" {

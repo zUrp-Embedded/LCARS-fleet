@@ -86,7 +86,7 @@ run_runner() {
   [[ "$output" == *"--target build"* ]]
   [[ "$output" == *"--accept-generic"* ]]
   # Upstream of the forge: nothing was minted, nothing registered.
-  ! grep -q '^CURL' "$CALLS"
+  refute grep -q '^CURL' "$CALLS"
 }
 
 @test "--accept-generic proceeds, and SAYS what was accepted" {
@@ -105,7 +105,7 @@ run_runner() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"lcars-build:absente"* ]]
   [[ "$output" == *"rate chaque job"* ]]
-  ! grep -q '^CURL' "$CALLS"
+  refute grep -q '^CURL' "$CALLS"
 }
 
 @test "labels whose images all resolve pass, and the check reaches the forge after" {
@@ -123,7 +123,7 @@ run_runner() {
   run_runner --labels "host,shell:docker://alpine:3.20"
 
   [[ "$output" != *"introuvable"* ]]
-  ! grep -q "image inspect host" "$CALLS"
+  refute grep -q "image inspect host" "$CALLS"
 }
 
 # ─── une image publique absente se TIRE avant de se refuser ──────────────────────────────────────
@@ -154,7 +154,7 @@ run_runner() {
   [[ "$output" == *"REFUS"* ]]
   [[ "$output" == *"lcars-build:absente"* ]]
   [[ "$output" == *"--target build"* ]]
-  ! grep -q '^CURL' "$CALLS"
+  refute grep -q '^CURL' "$CALLS"
 }
 
 # ─── UN SEUL RAIL, ET C'EST LE SECURISE ──────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@
 # `forge.url` : mesure du 2026-08-18, deux modules en derive parce qu'on croyait qu'un `export`
 # traversait d'un module a l'autre.
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -105,7 +107,7 @@ SH
   [[ "$output" == *"apt_already git curl"* ]]
   [[ "$output" == *"apt_installed socat"* ]]
   # et `git`/`curl` ne partent JAMAIS a l'install : c'est ce que la separation protege
-  ! grep -q 'install.*git' "$APT_TRACE"
+  refute grep -q 'install.*git' "$APT_TRACE"
 }
 
 @test "la separation est notee AVANT l'appel a apt — apres, elle n'existe plus" {
@@ -137,7 +139,7 @@ SH
   [ "$n_seal" -lt "$n_recap" ]
   # une ecriture ratee se DIT, elle ne `die` pas
   grep -q 'journal NON écrit' <<<"$body"
-  ! grep -qE 'journal.*\|\| die' <<<"$body"
+  refute grep -qE 'journal.*\|\| die' <<<"$body"
 }
 
 @test "le repli DEDOUBLONNE — apt_ensure est appelee par plusieurs modules" {

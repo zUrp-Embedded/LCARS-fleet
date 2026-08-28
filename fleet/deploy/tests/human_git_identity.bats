@@ -127,7 +127,7 @@ account() { # account <full_name> <email>
   # du conteneur — et rate par construction tout humain enrole apres le boot.
   EP="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
-  ! grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
+  refute grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }
 
 # ─── L'ADRESSE DE LA FORGE CONVERGE, ELLE NE S'INSTRUIT PLUS ────────────────────────────────────
@@ -155,7 +155,7 @@ account() { # account <full_name> <email>
   # Le module ne doit porter AUCUN sed/awk qui remplace une ligne FORGE_BASE_URL existante : la
   # convergence porte sur le trou, pas sur la decision.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE "sed .*FORGE_BASE_URL|s\|\^FORGE_BASE_URL" <<<"$code"
+  refute grep -qE "sed .*FORGE_BASE_URL|s\|\^FORGE_BASE_URL" <<<"$code"
 }
 
 @test "URL inconnue ET cle absente = DRIFT, jamais un warn qui laisse le verdict vert" {
@@ -163,7 +163,7 @@ account() { # account <full_name> <email>
   # `fleet_v2 start` refuse, et le module suivant tombait sans nommer la cause.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   grep -q 'p_drift "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
-  ! grep -q 'p_warn "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
+  refute grep -q 'p_warn "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
 }
 
 @test "les deux cles derivees suivent la MEME regle — jeton et adresse" {

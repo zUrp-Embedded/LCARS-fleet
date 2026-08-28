@@ -264,7 +264,7 @@ EOF
   run env LCARS_SYSADMIN_UID=0 "$SANDBOX/provision" apply --substrate linux --human root
 
   [ "$status" -ne 0 ]
-  ! grep -q "^human=" "$RUN_LOG"
+  refute grep -q "^human=" "$RUN_LOG"
 }
 
 # ⚠ BATS NE CHANGE PAS D'UID, ET CES TEMOINS NE MESURENT PAS L'UID. Le second passage joue les
@@ -631,7 +631,7 @@ EOF
   refute grep -q -- "d cp " "$code"
   # l'autorite est nommee par un chemin de la MACHINE, lu la ou 48 l'a ecrit
   grep -q -- 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$code"
-  ! grep -q -- "LCARS_PRIVATE_DIR=/authority" "$code"
+  refute grep -q -- "LCARS_PRIVATE_DIR=/authority" "$code"
 }
 
 @test "48-forge-host : la forge ANNONCE son adresse — les modules sont des processus" {

@@ -196,7 +196,7 @@ sendkeys_line() { grep -- "tmux send-keys -t .* C-u " "$CALLS" | head -1; }
   # ⚠ THE POINT OF THE WHOLE DESIGN. Killing ttyd refreshes the groups too -- and takes the
   # human's console, and whatever runs in it, with it.
   refute grep -q -- "kill-server" "$CALLS"
-  ! grep -qE "^ttyd .*console\.sock" "$CALLS"
+  refute grep -qE "^ttyd .*console\.sock" "$CALLS"
 }
 
 @test "a pane that is not at a shell is left alone" {
@@ -336,5 +336,5 @@ EOF
   [ "$status" -eq 0 ]
 
   [ "$(grep -c -- "^runuser .* env -u TMUX -u TMUX_PANE tmux " "$CALLS")" -ge 2 ]
-  ! grep -qE -- "^runuser -u bt -- tmux " "$CALLS"
+  refute grep -qE -- "^runuser -u bt -- tmux " "$CALLS"
 }

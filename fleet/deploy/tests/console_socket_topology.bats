@@ -145,7 +145,7 @@ ttyd_line() {
   [ -n "$(ttyd_line pod.sock)" ]
 
   refute grep -qE "^ttyd .* -p( |$)" "$CALLS"
-  ! grep -q -- "-i 0.0.0.0" "$CALLS"
+  refute grep -q -- "-i 0.0.0.0" "$CALLS"
 }
 
 @test "JG-072: each ttyd listens on an AF_UNIX socket under the console root" {
@@ -188,7 +188,7 @@ ttyd_line() {
   [ "$status" -eq 0 ]
 
   grep -q -- "setpriv --reuid bt --regid 1000" "$CALLS"
-  ! grep -qE "^setpriv .*--reuid (root|0)( |$)" "$CALLS"
+  refute grep -qE "^setpriv .*--reuid (root|0)( |$)" "$CALLS"
 }
 
 # ─── LE GID EST UN NOMBRE QU'ON LIT, PAS UN NOM QU'ON SUPPOSE ───────────────────────────────────
@@ -231,7 +231,7 @@ EOF
   [ "$status" -eq 0 ]
 
   grep -q -- "setpriv --reuid lcars --regid 1003" "$CALLS"
-  ! grep -q -- "--regid lcars" "$CALLS"
+  refute grep -q -- "--regid lcars" "$CALLS"
 }
 
 @test "a live process with NO socket is a FAILURE, not a running console" {
@@ -266,7 +266,7 @@ EOF
   run_console
   [ "$status" -ne 0 ]
   [[ "$output" == *"lcars-console"* ]]
-  ! grep -q "^ttyd" "$CALLS"
+  refute grep -q "^ttyd" "$CALLS"
 }
 
 # ─── L'ESPACE DES BLOCS N'EST PLUS PUBLIE DU TOUT ──────────────────────────────────────────────
@@ -292,7 +292,7 @@ ports_of() {
 @test "6-072: neither compose publishes a RANGE of ports" {
   local dir="$BATS_TEST_DIRNAME/../docker"
   refute grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.yml"
-  ! grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.install.yml"
+  refute grep -qE '[0-9]+-[0-9]+:[0-9]+-[0-9]+' "$dir/docker-compose.install.yml"
 }
 
 @test "6-072: NOTHING of the per-human block space is published, by either compose" {
@@ -341,7 +341,9 @@ ports_of() {
   # (util-linux 2.38.1), not on a dev box, because a tool's argument handling is a property of the
   # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
   # and names the flag, and a grep over the whole file would fail on the prose that documents it.
-  ! grep -E '^[^#]*setpriv' "$LANDING" | grep -q -- '--init-groups'
+  # `refute_out` porte son propre `--` devant le motif : ne pas le repasser ici, il serait pris
+  # POUR le motif. La regle est deja ecrite dans `forge_host_reach.bats:362`.
+  grep -E '^[^#]*setpriv' "$LANDING" | refute_out '--init-groups'
 }
 
 # ─── `console-humans.sh` EST LA REGLE, ET SA SORTIE EST UN CONTRAT ────────────────────────────────

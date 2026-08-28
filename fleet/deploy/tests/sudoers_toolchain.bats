@@ -12,6 +12,8 @@
 #     `/state/pilot.assignee` naitrait a la racine, jamais lu) ;
 #   - le module est charge SANS son dispatch, patron `human_git_identity.bats`.
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../modules.d/45-sudoers-toolchain.sh"
   [ -f "$SRC" ]
@@ -346,7 +348,7 @@ EOS
   run grep -c 'PRIVATE_DIR' "$src"
   [ "$output" -eq 0 ]
   # Et le skill ne PROMET plus un privilege de siege, qui n'existe pas.
-  ! grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
+  refute grep -q 'master token' "$LCARS_ADMIRAL_SKILLS_SRC/system-issues/SKILL.md"
 }
 
 # ⚠ LE TEMOIN QUI GARDE LA CORRECTION AU PASSAGE. L'en-tete d'authentification etait construit dans

@@ -15,6 +15,8 @@
 # (pin sha256) : ce qui se mesure ici est la TABLE, l'egalite des pins avec le Dockerfile, et le
 # REFUS d'un contenu non conforme — pas la capacite de jsdelivr a repondre.
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -215,7 +217,7 @@ helpers() {
   # remplace : il lit les `COPY` QUELLE QUE SOIT leur cible, et accepte les trois poseurs du module
   # (executables, donnees, binaires nommes). Le garder ici en double aurait fait deux regles pour un
   # fait, dont une plus etroite — et c'est toujours la plus etroite qu'on croit avoir lue.
-  ! grep -qE '^\s+entrypoint\.sh$' "$MOD"
+  refute grep -qE '^\s+entrypoint\.sh$' "$MOD"
 }
 
 # La seconde table du module : <source> <destination> <mode>, une par ligne.
