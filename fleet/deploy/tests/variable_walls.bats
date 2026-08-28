@@ -841,3 +841,49 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 
   [ "$rompu" -eq 0 ] || return 1
 }
+
+@test "MUR 15: aucune adresse de LAN gravee, sauf celle qui est declaree et sa raison" {
+  # ⚠ CE MUR NE RETIRE PAS L'ADRESSE EXISTANTE, ET C'EST DELIBERE. `docker-compose.install.yml`
+  # defaute l'image sur `10.42.0.118:80` et son commentaire dit pourquoi, avec sa condition de
+  # sortie : « c'est la seule registry ou l'image existe REELLEMENT aujourd'hui. ADR 012 vise GHCR
+  # pour la release publique ; tant que `publish.yml` n'existe pas, mettre un defaut GHCR serait un
+  # chemin qui rend 404 — un defaut qui ment est pire qu'un defaut local. Le jour ou GHCR est
+  # alimente, ce defaut change, et LUI SEUL. »
+  #
+  # Ce mur garde exactement cette derniere phrase : LUI SEUL. Une seconde adresse gravee ailleurs
+  # rendrait la promesse fausse — il faudrait alors en changer deux, et personne ne saurait ou est
+  # la seconde. Le §4 du chantier disait « les defauts du compose cessent de pointer une machine » ;
+  # la mesure dit autre chose : le defaut est unique, documente, et sa raison tient. Ce qui manquait
+  # n'etait pas de le retirer, c'etait d'empecher le deuxieme.
+  #
+  # LES DEUX FORMES DE PROSE SONT HORS SUJET et le mur ne les lit pas : les exemples d'un template
+  # ou d'un `@doc` (`http://10.42.0.118` comme illustration) et la sortie de banc recopiee dans les
+  # README. Ce sont des ILLUSTRATIONS, pas des defauts — un mur qui les accuserait interdirait de
+  # montrer une URL.
+  local declaree="10.42.0.118"
+
+  local trouvees
+  trouvees="$(grep -rhE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
+                "$REPO/deploy" "$REPO/services" "$REPO/bin" "$REPO/etc" \
+                --exclude-dir=tests 2>/dev/null \
+              | sed 's/#.*//' \
+              | grep -oE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
+              | sort -u || true)"
+
+  local rompu=0 ip
+  for ip in $trouvees; do
+    [ "$ip" = "$declaree" ] && continue
+    # Les reseaux docker par defaut (172.16/12) sont attribues par le daemon, pas graves par nous ;
+    # une occurrence en code les nomme quand meme, donc on ne les exempte PAS : si elle est la,
+    # quelqu'un l'a ecrite.
+    echo "MUR 15 rompu — adresse de LAN gravee : « $ip ». La seule declaree est « $declaree »," >&2
+    echo "   et son commentaire promet qu'elle change SEULE le jour ou GHCR est alimente." >&2
+    rompu=1
+  done
+  # Garde d'instrument : l'adresse declaree DOIT etre trouvee, sinon le balayage n'a rien lu.
+  printf '%s\n' $trouvees | grep -qx "$declaree" || {
+    echo "MUR 15 — « $declaree » introuvable : le balayage ne lit plus le compose d'install" >&2
+    return 1
+  }
+  [ "$rompu" -eq 0 ] || return 1
+}

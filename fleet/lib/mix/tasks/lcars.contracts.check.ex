@@ -120,6 +120,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_platform_root_single_source(root),
         check_runtime_root_single_source(root),
         check_face_roots_single_source(root),
+        check_ops_repo_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -4604,6 +4605,117 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                   "declared: " <> Enum.join(inconnues, ", ")
             }
         end
+    end
+  end
+
+  @doc """
+  The ops repository is named by `Fleet.Toolchain.ops_repo/0` and copied by the two services that
+  reach it without the BEAM. This makes the copies agree.
+
+  ⚠ ITS TWIN `toolchain.branch_single_source` LOCKS THE BRANCH OF THE SAME REPOSITORY AND NOT THE
+  REPOSITORY. The pair `<org>/<repo>` and the branch name are two halves of one address: the
+  converger refuses any SHA that is not the head of `<repo>@<branch>`, and the root executor asks
+  the forge for that head. Locking one half and not the other leaves the address half-guarded —
+  the exact shape §22 found for the branch itself, one field over.
+
+  `services/forge-gestures.sh` and `services/privileged-executor.py` carry the literal because they
+  run as CHILD processes of modules and cannot call the BEAM: measured, `provision-lib` exports
+  nothing and `deploy/provision` exports only its CLI flags. Their fallback is their only source —
+  it is not removed, it is held equal.
+  """
+  @spec check_ops_repo_single_source(String.t()) :: result()
+  def check_ops_repo_single_source(root) do
+    id = "toolchain.ops_repo_single_source"
+
+    remediation =
+      "copy the literal from `Fleet.Toolchain.ops_repo/0` — the repository and its branch are two " <>
+        "halves of one address, and the branch is already locked"
+
+    expected =
+      case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
+        {:ok, src} ->
+          case Regex.run(
+                 ~r/def ops_repo, do: Application\.get_env\([^,]+,\s*[^,]+,\s*"([^"]+)"\)/,
+                 src
+               ) do
+            [_, v] -> v
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+    if is_nil(expected) do
+      %{
+        id: id,
+        remediation: remediation,
+        status: :fail,
+        evidence: ["lib/fleet/toolchain.ex"],
+        note:
+          "`Fleet.Toolchain.ops_repo/0` no longer reads as a frozen default — the authority is " <>
+            "unreadable, so nothing was compared"
+      }
+    else
+      e = Regex.escape(expected)
+
+      mirrors = [
+        {"services/forge-gestures.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
+         "the forge gesture's ops-repo fallback"},
+        {"services/privileged-executor.py", ~r/os\.environ\.get\("LCARS_OPS_REPO",\s*"#{e}"\)/,
+         "the root executor's ops-repo fallback"}
+      ]
+
+      {checked, skipped} =
+        Enum.split_with(mirrors, fn {rel, _, _} ->
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        end)
+
+      bad =
+        Enum.flat_map(checked, fn {rel, rx, what} ->
+          case File.read(Path.expand(rel, root)) do
+            {:ok, body} -> if Regex.match?(rx, body), do: [], else: [{rel, what}]
+            _ -> [{rel, "unreadable"}]
+          end
+        end)
+
+      labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+
+      cond do
+        checked == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: [],
+            note:
+              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
+                Enum.join(labels, ", ")
+          }
+
+        bad == [] ->
+          %{
+            id: id,
+            remediation: "—",
+            status: :pass,
+            evidence: Enum.map(checked, &elem(&1, 0)),
+            note:
+              "#{inspect(expected)} declared by Fleet.Toolchain.ops_repo/0 and copied by the " <>
+                "#{length(checked)} services that cannot call the BEAM" <> skipped_note(labels)
+          }
+
+        true ->
+          %{
+            id: id,
+            remediation: remediation,
+            status: :fail,
+            evidence: Enum.map(bad, &elem(&1, 0)),
+            note:
+              "authority says #{inspect(expected)} — " <>
+                Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
+                skipped_note(labels)
+          }
+      end
     end
   end
 
