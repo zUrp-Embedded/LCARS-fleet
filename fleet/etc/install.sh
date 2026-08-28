@@ -82,13 +82,38 @@ atomic_swap_file() {
 build_release() {
   local runtime_dir="$1"
 
-  # LA RELEASE EST DEJA LA : c'est un paquet, pas un checkout. `pack.sh` a joue le gate et le build
-  # ici, et le tar porte `_build/prod/rel/` — exactement le chemin que `REL_SRC` lit plus bas. Il n'y
-  # a donc rien a compiler, et rien d'autre ne change : la pose, les symlinks, les perms sont les
-  # memes gestes.
-  if [[ -x "$runtime_dir/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ]]; then
-    echo "install: release deja batie ($runtime_dir/_build/prod/rel) — ni gate ni compilation" >&2
-    return 0
+  # ⚠ CETTE CONDITION ETAIT « UN BINAIRE EXISTE », ET RIEN D'AUTRE. Elle disait : « c'est un paquet,
+  # pas un checkout ». C'est une DEDUCTION, et elle est fausse des que ce script tourne depuis un
+  # clone — ce qui est le chemin nominal du rail poste, ou `60-deploy` l'appelle. Un `_build/prod/rel`
+  # laisse par un `mix release` d'il y a trois semaines suffisait a sauter LE GATE ET LA
+  # COMPILATION, et a poser cette release-la.
+  #
+  # ET LE GARDE D'EN FACE ETAIT DEFAIT EXACTEMENT QUAND IL SERVAIT. `60-deploy` verifie trois choses
+  # avant de ne rien faire — sha deploye == HEAD, arbre `fleet` propre, release presente. Quand
+  # l'une manque, il conclut « il faut batir » et delegue ICI... qui reutilisait le vieux build. Le
+  # rail annonçait alors un deploiement du HEAD en ayant pose autre chose.
+  #
+  # LE DISCRIMINANT EST EXPLICITE, PAS DEDUIT. `pack.sh` ecrit `.source-revision` a la racine du
+  # paquet (convention dont la SSoT est `PROV_SOURCE_STAMP`, dans `deploy/lib/provision-lib.sh` —
+  # que ce script ne peut pas lire : il est autonome et ne source pas la lib du rail). Sa presence
+  # DIT « paquet », au lieu de le deviner de l'absence d'un `.git` — un paquet detare dans un depot
+  # aurait trompe la deduction.
+  local rel="$runtime_dir/_build/prod/rel/lcars_fleet"
+  if [[ -x "$rel/bin/lcars_fleet" ]]; then
+    if [[ -f "$runtime_dir/../.source-revision" ]]; then
+      echo "install: paquet — release batie par pack.sh (gate joue la-bas), ni gate ni compilation" >&2
+      return 0
+    fi
+    local src_sha built_sha m
+    src_sha="$(git -C "$runtime_dir" rev-parse --short HEAD 2>/dev/null || true)"
+    m=("$rel"/lib/lcars_fleet-*/priv/api/build_info.txt)
+    [[ -f "${m[0]}" ]] && built_sha="$(sed -n 's/^sha=//p' "${m[0]}" 2>/dev/null | head -1)"
+    if [[ -n "$src_sha" && "$src_sha" == "${built_sha:-}" ]] \
+       && git -C "$runtime_dir" diff --quiet HEAD -- . 2>/dev/null; then
+      echo "install: release deja batie et ATTESTEE ($src_sha, arbre propre) — ni gate ni compilation" >&2
+      return 0
+    fi
+    echo "install: un _build/prod/rel existe mais n'atteste pas cette source (build ${built_sha:-inconnu} vs HEAD ${src_sha:-inconnu}) — on rebatit" >&2
   fi
 
   # `set -e` explicit in the subshell: bats' `run` disables errexit in the caller and a subshell
@@ -103,7 +128,10 @@ build_release() {
       echo "install: ATTENTION — gate saute (LCARS_INSTALL_SKIP_GATE=1) : la release n'est PAS attestee par le gate de ce commit" >&2
     else
       echo "install: gate complet sur l'arbre source (compile-strict + tests + bats + topologie + dialyzer)…" >&2
-      MIX_ENV=test mix gate || exit 1
+      # SC2209 : `MIX_ENV="test"` avec les guillemets — sans eux, shellcheck lit `test` comme un
+      # NOM DE COMMANDE et croit a un `MIX_ENV=$(test)` oublie. Le signalement est un faux positif,
+      # la paire de guillemets le ferme sans rien changer d'autre.
+      MIX_ENV="test" mix gate || exit 1
     fi
 
     MIX_ENV=prod mix release --overwrite || exit 1
@@ -120,6 +148,12 @@ build_release() {
 # The privileged half is the FILE PLACEMENT, not the build. Run this as the account that owns the
 # install (or grant it write on the prefix); elevate only the copy, as etc/README.md's manual
 # procedure does. Elevating the whole script is what conflates the two.
+# ⚠ `$1` EST UN JOINT DE TEST, ET C'EST POURQUOI SC2120 EST DECLARE. `install.bats` appelle
+# `refuse_root 0` et `refuse_root 1000` pour exercer les deux cotes sans etre root ni changer d'uid.
+# La production n'en passe jamais : le defaut `${EUID}` est le cas reel. Un parametre qu'aucun
+# appelant de production ne fournit est exactement ce que SC2120 signale — la decision est prise,
+# elle se dit ici plutot que de laisser le signalement se faire ignorer chaque semaine.
+# shellcheck disable=SC2120
 refuse_root() {
   local uid="${1:-${EUID:-$(id -u)}}"
   [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
@@ -211,6 +245,7 @@ done < "$MANIFEST"
 command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
 
 # Both guards BEFORE the build: a refusal must cost a second, not a full gate.
+# shellcheck disable=SC2119  # sans argument = le defaut `$EUID` : c'est le cas de production.
 refuse_root
 require_prefix_writable "$PREFIX"
 
