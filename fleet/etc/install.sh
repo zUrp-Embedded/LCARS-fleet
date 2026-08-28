@@ -7,8 +7,12 @@
 #         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
 # Three-zone model: SOURCE (this repo, build only) → INSTALL ($PREFIX, RO, system-owned) → STATE
-# (~/.lcars, per-human, RW). `v2` means cohabiting with the v1 runtime (/local/LCARS); eventually
-# PREFIX=/local/lcars, which is one `mv` plus a symlink repoint, with no edit.
+# (~/.lcars, per-human, RW). PREFIX defaults to /opt/lcars/runtime.
+# ⚠ THIS PARAGRAPH DESCRIBED A MOVE THAT HAS SINCE HAPPENED, IN THE FUTURE TENSE. It read: "`v2`
+# means cohabiting with the v1 runtime (/local/LCARS); eventually PREFIX=/local/lcars, which is one
+# `mv` plus a symlink repoint". The move landed elsewhere — under /opt/lcars, the vendor directory
+# the norm reserves — and /local disappeared with it. A plan kept in the present tense after it was
+# carried out reads as a plan still to come.
 #
 # TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
 #   LCARS_INSTALL_PREFIX    where everything is installed (default /opt/lcars/runtime)
