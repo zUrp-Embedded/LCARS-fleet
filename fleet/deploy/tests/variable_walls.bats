@@ -862,6 +862,39 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     rompu=1
   done
 
+  # (3) LES FILTRES PAR LABEL — LA TROISIEME FORME, ET CE MUR NE LA GARDAIT PAS.
+  #
+  # ⚠ CE MUR ETAIT VERT PENDANT QUE `48-forge-host.sh` PORTAIT LE NOM MORT, ET C'EST LA CLASSE §22 :
+  # il tenait l'hote DNS, le port, et le segment de nom de conteneur — trois expressions du meme
+  # fait sur QUATRE. La quatrieme est `docker ps --filter label=com.docker.compose.service=<nom>`,
+  # et c'est celle qui avait garde `forge` apres `b01fe3164`.
+  #
+  # ⚠ ET IL NE POUVAIT PAS LA VOIR EN CHERCHANT DES COPIES DE `gitea` : une copie qui a DEJA diverge
+  # ne ressemble plus au fait qu'elle copie. Un verrou qui balaie les occurrences du bon nom est
+  # aveugle a celle qui porte l'ancien — il faut balayer les EMPLOIS, puis confronter chacun a la
+  # declaration. C'est la difference entre « toutes les copies se ressemblent » et « toute copie est
+  # une valeur que le compose definit ».
+  #
+  # ⚠ MESURE DU 2026-08-28, banc 1241 : sur une machine dont la forge TOURNE DEJA, la sonde ne
+  # reconnaissait plus sa propre forge, et le module refusait l'install en accusant l'operateur —
+  # « ce n'est pas la forge de cette machine ». Invisible en CI : on n'y installe jamais deux fois.
+  #
+  # Une valeur DERIVEE (`$VAR`) passe : c'est la forme qu'on veut. Seul un litteral est confronte.
+  local filtres
+  filtres="$(grep -rhE 'com\.docker\.compose\.service=' "$REPO/deploy" "$REPO/bin" "$REPO/services" \
+               --exclude-dir=tests 2>/dev/null \
+             | sed 's/#.*//' | grep -oE 'com\.docker\.compose\.service=[A-Za-z0-9_${}-]+' \
+             | sed -E 's/^com\.docker\.compose\.service=//' | sort -u || true)"
+  local ft
+  for ft in $filtres; do
+    case "$ft" in '$'*) continue ;; esac
+    printf '%s\n' "$services" | grep -qx "$ft" && continue
+    echo "MUR 14 rompu — un filtre docker selectionne le service « $ft », qu'AUCUN compose ne" >&2
+    echo "   definit : la sonde ne trouvera jamais de conteneur, et son appelant conclura que le" >&2
+    echo "   service n'existe pas (services definis : $(printf '%s ' $services))" >&2
+    rompu=1
+  done
+
   [ "$rompu" -eq 0 ] || return 1
 }
 

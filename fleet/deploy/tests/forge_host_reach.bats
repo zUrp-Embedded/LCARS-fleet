@@ -795,7 +795,68 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # refuserait un montage legitime en citant le port de quelqu'un d'autre.
   code() { grep -vE '^\s*#' "$SRC"; }
   code | grep -q 'com.docker.compose.project=\$PROV_FORGE_PROJECT'
-  code | grep -q 'com.docker.compose.service=forge'
+  # ⚠ CETTE LIGNE EPINGLAIT `service=forge`, C'EST-A-DIRE LA FAUTE. `b01fe3164` a renomme le service
+  # `forge:` en `gitea:` ; ce temoin a fige l'ancien nom et l'a protege pendant quinze jours. Un mur
+  # qui recopie ce qu'il devrait deriver ne garde pas l'invariant : il garde la copie.
+  code | grep -q 'com.docker.compose.service=\$FORGE_SERVICE'
+  run bash -c "! { $(declare -f code); code; } | grep -q 'compose.service=forge\b'"
+  [ "$status" -eq 0 ]
+}
+
+@test "la garde du nom de service est posee sur les DEUX chemins, apres le verdict docker" {
+  # ⚠ CE TEMOIN EXISTE PARCE QUE LA MUTATION NE POUVAIT PAS L'ATTRAPER. Retirer la garde ne change
+  # RIEN au seul cas qu'un test sans docker sait jouer — sans daemon, le module refuse avant de
+  # l'atteindre. Elle serait donc supprimable en silence, et le compose illisible redeviendrait un
+  # filtre vide : une sonde qui ne reconnait plus AUCUNE forge, donc un refus qui accuse la machine.
+  #
+  # ⚠ ET L'ORDRE EST L'INVARIANT, PAS LA PRESENCE. Posee AVANT le verdict docker, elle tue le module
+  # sur un compose absent alors que le fait utile est « aucun daemon » — c'est exactement la
+  # regression que la premiere ecriture de ce correctif a produite, et que le temoin voisin
+  # « sans daemon, un REFUS » a rattrapee.
+  code() { grep -vE '^\s*#' "$SRC"; }
+  local mode
+  for mode in check apply; do
+    local ldocker lgarde
+    ldocker="$(code | grep -n "verdict_$mode\$" | head -1 | cut -d: -f1)"
+    lgarde="$(code | grep -n "forge_service_known || verdict_$mode" | head -1 | cut -d: -f1)"
+    [ -n "$ldocker" ] || { echo "pas de verdict_$mode trouve" >&2; return 1; }
+    [ -n "$lgarde" ]  || { echo "la garde manque sur le chemin $mode" >&2; return 1; }
+    [ "$lgarde" -gt "$ldocker" ] || {
+      echo "la garde du chemin $mode est posee AVANT le verdict docker : un compose absent" >&2
+      echo "   masquerait « aucun daemon », qui est le fait utile" >&2; return 1; }
+  done
+}
+
+@test "le nom de service que le module derive EST celui que le compose declare" {
+  # Le seul temoin qui puisse voir revenir la divergence : il ne compare pas le module a une
+  # constante ecrite ici — il rejoue la derivation DU MODULE sur le compose REEL et confronte le
+  # resultat au premier service du bloc `services:`. Une troisieme copie ne peut plus s'installer.
+  #
+  # ⚠ MESURE DU 2026-08-28 (banc 1241) : le filtre cherchait `forge`, le conteneur s'appelait
+  # `vanille_3-forge-gitea-1`. Une DEUXIEME install sur une machine dont la forge tourne deja
+  # echouait sur « ce n'est pas la forge de cette machine » — a propos de sa propre forge.
+  local compose derive declared
+  compose="$BATS_TEST_DIRNAME/../docker/forge-compose.yml"
+  [ -f "$compose" ]
+
+  # La derivation, telle qu'elle est ECRITE dans le module — extraite du module, pas recopiee.
+  # ⚠ ON CAPTURE TOUT L'INTERIEUR DE `$( )`, PAS UNE LIGNE DE FORME FIXE. Ma premiere ecriture
+  # ancrait sur « … | head -n1)" » : ajouter un `|| true` a la ligne du module — un correctif
+  # legitime, et necessaire sous `set -e` — faisait rougir ce temoin sans qu'aucun invariant
+  # n'ait bouge. Un mur qui epingle la MISE EN FORME d'une ligne se casse a chaque retouche.
+  derive="$(grep -vE '^\s*#' "$SRC" | sed -n 's/^FORGE_SERVICE="\$(\(.*\))"$/\1/p' | head -n1)"
+  [ -n "$derive" ]
+
+  # Ce que le compose declare : premier service du bloc, borne pour ne pas mordre sur `volumes:`.
+  declared="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$compose" | head -n1)"
+  [ -n "$declared" ]
+
+  run bash -c "$(sed "s#\"\$COMPOSE_FILE\"#'$compose'#" <<<"$derive") | head -n1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$declared" ]
+
+  # Et le nom de conteneur derive du MEME fait, sans le recopier non plus.
+  grep -vE '^\s*#' "$SRC" | grep -q 'FORGE_CONTAINER="\${PROV_FORGE_PROJECT}-\${FORGE_SERVICE}-1"'
 }
 
 @test "le refus de deplacement vient AVANT le montage, et il nomme les DEUX intentions" {

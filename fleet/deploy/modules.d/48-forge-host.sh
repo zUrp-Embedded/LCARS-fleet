@@ -172,10 +172,63 @@ PROV_FORGE_ADVERTISE="$PROV_ADVERTISE"
 PROV_FORGE_ADVERTISE_WHY="$PROV_ADVERTISE_WHY"
 
 FORGE_NET="${PROV_FORGE_PROJECT}_default"
-FORGE_CONTAINER="${PROV_FORGE_PROJECT}-gitea-1"
 MASTER_TOKEN_FILE="$PROV_TOKENS_DIR/forge-master.token"
 SEED_FILE="$PROV_TOKENS_DIR/forge-seed.pass"
 COMPOSE_FILE="$(repo_root)/fleet/deploy/docker/forge-compose.yml"
+
+# ─── LE NOM DU SERVICE COMPOSE — LU DANS LE COMPOSE, PAS RECOPIE ────────────────────────────────
+#
+# ⚠ CE MODULE PORTAIT DEUX COPIES DE CE NOM ET ELLES AVAIENT DIVERGE. `b01fe3164` a renomme le
+# service `forge:` en `gitea:` ; le nom de conteneur a suivi (`-gitea-1`), le filtre de
+# `forge_running_port` NON — il cherchait encore `com.docker.compose.service=forge`.
+#
+# ⚠ ET LE DEFAUT EST MUET AU PREMIER PASSAGE, CE QUI EXPLIQUE QUINZE JOURS DE SILENCE. Forge
+# absente, la sonde ne rend rien : c'est la BONNE reponse, et le module monte la forge. Le filtre
+# faux ne se voit que sur une machine ou une forge TOURNE DEJA — elle n'est plus reconnue, et
+# `foreign_forge_refusal` accuse « ce n'est pas la forge de cette machine » a propos de la forge de
+# cette machine. Mesure du 2026-08-28, banc 1241, deuxieme passe sur une forge debout :
+#
+#     FAIL 48-forge-host: une forge repond sur http://127.0.0.1:21060, mais AUCUN conteneur du
+#     projet « vanille_3-forge » ne publie 21060 — ce n'est pas la forge de cette machine
+#
+# Aucune suite ne pouvait le voir : la CI n'installe jamais deux fois de suite sur la meme machine.
+# C'est le TROISIEME consommateur oublie du meme renommage, apres le heredoc (`e4056cde1`) et l'URL
+# interne (`6306aa1de`) — un fait recopie a une quinzaine d'endroits, sans source designee.
+#
+# ⚠ BORNE AU BLOC `services:`. `forge-compose.yml` porte aussi un bloc `volumes:` dont les entrees
+# sont au MEME indent ; un balayage du fichier entier ne rendrait le bon nom que parce que
+# `services:` vient en premier — vert par ordre de fichier, exactement ce qu'on repare. Meme forme
+# que `deploy/docker/forge-runner.sh`, qui a paye la meme lecon la meme semaine.
+#
+# ⚠ FAIL-CLOSED SUR L'ANCRE. Un compose illisible ne rend pas « rien a filtrer » : il rendrait un
+# filtre VIDE, donc une sonde qui ne reconnait plus aucune forge, donc un refus qui accuse la
+# machine au lieu du fichier. On meurt ici, en nommant le fichier.
+# ⚠ `|| true` OBLIGATOIRE, ET SON ABSENCE A PRODUIT UN MORT SILENCIEUX. Ce module tourne sous
+# `set -euo pipefail` : une assignation dont la substitution echoue TUE le script sur place, sans
+# un mot. Compose absent -> `sed` sort en 2 -> le module mourait avant d'avoir rien imprime.
+# ⚠ ET LE TEMOIN VOISIN PASSAIT QUAND MEME, ce qui est le vrai enseignement : il verifiait
+# `status -eq 2`, et le 2 rendu par `sed` sur un fichier absent est le meme entier que le 2 du
+# verdict. Un code de sortie juste pour une raison fausse — il n'a rougi que sur l'assertion
+# SUIVANTE, celle qui lisait le texte. Une valeur attendue ne prouve pas le chemin qui la produit.
+FORGE_SERVICE="$(sed -nE '/^services:/,/^[a-z]/{ s/^  ([a-z][a-z0-9_-]*):[[:space:]]*$/\1/p }' "$COMPOSE_FILE" 2>/dev/null | head -n1 || true)"
+FORGE_CONTAINER="${PROV_FORGE_PROJECT}-${FORGE_SERVICE}-1"
+
+# ⚠ LE REFUS NE SE POSE PAS ICI, ET MA PREMIERE ECRITURE LE POSAIT. Un `p_die` au chargement tue le
+# module AVANT qu'il ait pu constater ce qui compte davantage : sans daemon docker, ce module n'a
+# rien a faire du nom d'un service, et son verdict utile est « aucun daemon ». Mesure : le temoin
+# « 48-forge-host : sans daemon, un REFUS » est parti au rouge — son decor ne porte pas le compose
+# (`repo_root` derive de `PROVISION_LIB`, qui pointe le sandbox), donc le module mourait sur le
+# compose en masquant le refus daemon. Un refus qui en cache un plus utile est une regression.
+#
+# ⚠ ET PAS DE `p_die` DANS UNE SUBSTITUTION NON PLUS. `$(forge_service)` s'evalue dans un
+# SOUS-SHELL : l'`exit` n'y tue que le sous-shell, le module continue avec une chaine vide, et le
+# fail-closed devient un fail-open muet. La garde est donc une INSTRUCTION, appelee sur le chemin
+# nominal une fois docker acquis — la ou le nom sert vraiment.
+forge_service_known() {
+  [[ -n "$FORGE_SERVICE" ]] && return 0
+  p_fail "aucun service lisible dans $COMPOSE_FILE — le nom du conteneur et le filtre docker en derivent tous les deux, et sans lui la sonde ne reconnaitrait AUCUNE forge"
+  return 1
+}
 # ⚠ DEUX URLS, ET CHACUNE A UN SEUL LECTEUR LÉGITIME.
 #   LOCAL_URL   par où CE module et ses voisins parlent à la forge — toujours la loopback, parce
 #               qu'ils tournent sur la machine. C'est elle qui va dans `forge.url`, lue par
@@ -196,7 +249,7 @@ forge_up() { curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null
 # exactement quand il change — c'est-a-dire quand la reponse compte.
 forge_running_port() {
   d ps --filter "label=com.docker.compose.project=$PROV_FORGE_PROJECT" \
-       --filter "label=com.docker.compose.service=forge" \
+       --filter "label=com.docker.compose.service=$FORGE_SERVICE" \
        --format '{{.Ports}}' 2>/dev/null \
     | sed -n 's/.*:\([0-9]\{1,5\}\)->3000\/tcp.*/\1/p' | head -n1
 }
@@ -545,6 +598,7 @@ check() {
     p_fail "$PROV_DOCKER_WHY — la forge du poste est un CONTENEUR, il n'en existe aucune autre forme"
     verdict_check
   fi
+  forge_service_known || verdict_check
   if forge_up && docker_answers && ! forge_is_ours; then
     foreign_forge_refusal
     verdict_check
@@ -573,6 +627,7 @@ apply() {
     p_fail "$PROV_DOCKER_WHY — forge NON montée, et elle ne peut pas l'être autrement"
     verdict_apply
   fi
+  forge_service_known || verdict_apply
   # ⚠ CE MODULE NE DÉPEND PLUS D'UNE IMAGE, IL DÉPEND DE `46-tofu`. Il exigeait ici la présence de
   # `lcars-fleet:2` — 1,18 Go bâtis pour exécuter 100 ko de recette dans un conteneur jetable, sur un
   # rail qui ne démarre jamais cette image. Ce qu'elle apportait de réel (une version figée, des
