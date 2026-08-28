@@ -81,7 +81,8 @@ SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
 # (`bin/fleet_v2` et son miroir `config/runtime.exs`).
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
-HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
+# La racine vient de la lib — un second defaut ici serait un second decideur.
+HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
 # Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
 # `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
 SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"

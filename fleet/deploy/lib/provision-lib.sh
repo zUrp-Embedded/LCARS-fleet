@@ -45,6 +45,24 @@ PROVISION_LIB_LOADED=1
 #     consommée par les modules ; jamais re-défautée module par module comme en v1) ───────────────
 # DOIT égaler le défaut d'etc/install.sh (SSoT du layout : etc/README.md §Install canonique —
 # /local/fleet_v2 est MORT, renommé *.OBSOLETE le 2026-07-18). Un fait, deux rendus : sync à la main.
+# ⚠ LA RACINE UNIQUE — CELLE QUE LA PHASE B GENERALISE, ET ELLE COMMENCE ICI.
+#
+# Ce rail pose aujourd'hui DIX racines de premier niveau (`/local`, `/opt/lcars`, `/home/private`,
+# `/home/catalogues`, `/var/lib/lcars`, `/usr/share/lcars`, `/etc/lcars`, `/opt/elixir-*`,
+# `/opt/node-*`, `/run/lcars`). La cible en garde DEUX, dont une en tmpfs — et ce qu'on achete n'est
+# pas de l'esthetique de `/` : c'est que `rm -rf <racine>` DEVIENNE la desinstallation, et qu'un
+# `.deb` puisse empaqueter une empreinte qu'on sait nommer.
+#
+# ⚠ CE N'EST PAS UN BOUTON D'OPERATEUR. Une racine structurelle ne se configure pas — `Fleet.Layout`
+# le dit deja pour le runtime (« These are NOT deployment knobs »), et il a raison sur la forme. Ce
+# qu'on veut est UN endroit qui la nomme, pas la liberte de la deplacer : un developpeur change une
+# valeur et l'arbre suit. La surcharge existe pour les TEMOINS, comme partout ailleurs ici.
+#
+# `/opt/lcars` et pas autre chose : c'est deja le mot du runtime (`Fleet.Layout.@platform_root`) et
+# la seule racine que la norme reserve a un paquet applicatif autonome. Le rail poste avait invente
+# un SECOND prefixe (`/local/LCARS_v2`) ; c'est lui qui rejoindra celui-ci, pas l'inverse.
+: "${PROV_ROOT:=/opt/lcars}"
+
 : "${PROV_PREFIX:=/local/LCARS_v2}"            # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
@@ -79,7 +97,11 @@ PROVISION_LIB_LOADED=1
 # `fleet`. Mesure du 2026-08-21 : `/run/lcars/console/lcars` en `lcars:fleet`, deck sous
 # `nobody:lcars-console`, traversee REFUSEE — une console vivante et injoignable.
 : "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
-: "${PROV_CATALOGUES_WORK:=/var/lib/lcars/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
+# ⚠ PREMIER OBJET SOUS LA RACINE UNIQUE, ET IL FAIT DISPARAITRE `/var/lib/lcars` DU RAIL POSTE.
+# Cet etat tofu etait le SEUL objet pose la-bas sur `wsl`/`linux` — l'autre, le magasin d'outillage
+# (`LCARS_STORE_ROOT`), est `docker` seulement (`26-store`, APPLY-ON: docker). Une racine de moins,
+# mesurable : dix -> neuf.
+: "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
 : "${PROV_TOKENS_DIR:=/home/private}"          # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 # L'AUTORITE DE CREATION, posee par `box config` et QUI RESTE (⚖ user 2026-08-16). Le suffixe

@@ -51,7 +51,8 @@ TOFU_SHA256_ARM64=b2110d1ce46e366ce861b7f53d293dad99080075629aed7fb50d7328916d91
 # déjà porter un `tofu` posé à la main (mesuré le 2026-08-22 : un symlink de juillet sur cette
 # machine), et un témoin qui ne le nomme pas mesure la machine au lieu de la règle.
 TOFU_BIN="${LCARS_TOFU_BIN:-/usr/local/bin/tofu}"
-TOFU_DIR="${LCARS_TOFU_DIR:-/opt/lcars/tofu}"
+# La racine vient de la lib — un second defaut ici serait un second decideur.
+TOFU_DIR="${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}"
 TOFU_OWNER="${LCARS_TOFU_OWNER:-root:root}"
 
 tofu_rc() { echo "$TOFU_DIR/tofurc"; }

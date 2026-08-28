@@ -43,7 +43,8 @@ set -euo pipefail
 # Seams de test — l'emplacement des deux dépôts, la racine des sources, et le propriétaire à poser.
 # Le dernier existe parce qu'un témoin ne peut pas `chown root` : sans lui, la POSE — le sujet même
 # de ce module — ne serait épinglée par personne.
-HELPERS_DIR="${LCARS_HELPERS_DIR:-/opt/lcars}"
+# La racine vient de la lib — un second defaut ici serait un second decideur.
+HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 # Le client shell du service d'autorité, sur le PATH — et il y est pour la même raison que le
 # convergeur de toolchain juste au-dessus : ses appelants vivent dans trois arbres qui ne se voient

@@ -137,8 +137,17 @@ dir       /home/catalogues                             0750  root:fleet         
 # ⚠ DEUX OBJETS, PAS UN PARENT ET SON ENFANT. `/var/lib/lcars` est la racine du MAGASIN d'outillage
 # (`LCARS_STORE_ROOT`, lu par `fleet/bin/lcars-toolchain-converge`) ; `/var/lib/lcars/tofu` est l'etat des
 # recettes (`PROV_CATALOGUES_WORK`). Ne declarer que le second laissait le premier hors de la table.
-dir       /var/lib/lcars                               0755  root:root           any
-dir       /var/lib/lcars/tofu                          0700  lcars-authority:lcars-authority  any
+# ⚠ LE MAGASIN EST `docker` SEUL, ET IL ETAIT DECLARE `any`. `26-store` porte `APPLY-ON: docker` :
+# sur un poste, rien ne pose cette racine. Meme classe de mensonge que les neuf objets `linux` qui
+# n'entraient plus au plan sur WSL — une colonne fausse est sans consequence tant qu'on ne la lit
+# pas, et le filtre substrat la lit maintenant.
+dir       /var/lib/lcars                               0755  root:root           docker
+
+# ⚠ L'ETAT TOFU A DEMENAGE SOUS LA RACINE UNIQUE. Il etait le SEUL objet pose sous `/var/lib/lcars`
+# sur `wsl`/`linux` ; en descendant sous `/opt/lcars`, il fait disparaitre une racine de premier
+# niveau du rail poste — la premiere des huit que la phase B doit fermer.
+dir       /opt/lcars/var                               0755  root:root           wsl+linux
+dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
 dir       /etc/lcars                                   0755  root:root           wsl+linux
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────

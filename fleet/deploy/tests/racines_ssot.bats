@@ -78,6 +78,29 @@ code_seul() {
   [ "$bad" -eq 0 ]
 }
 
+# ─── LA RACINE UNIQUE ───────────────────────────────────────────────────────────────────────────
+#
+# `PROV_ROOT` est l'endroit — le seul — qui nomme la racine du produit. Ce que la phase B fait
+# ensuite est de faire descendre les huit autres dessous ; ce que ce temoin empeche est qu'un
+# SECOND endroit se remette a la nommer entre-temps, ce qui rendrait le deplacement suivant aussi
+# cher que celui-ci.
+
+@test "RACINE : \`PROV_ROOT\` est declaree UNE fois, dans la lib" {
+  local lib="$DEPLOY/lib/provision-lib.sh"
+  [ "$(grep -c '^: "\${PROV_ROOT:=' "$lib")" -eq 1 ]
+}
+
+@test "RACINE : aucun module ne redefinit \`/opt/lcars\` en dur — il derive" {
+  # Trois modules portaient leur propre `${LCARS_…:-/opt/lcars}`. Trois defauts pour une racine, ce
+  # sont trois endroits a corriger le jour ou elle bouge — et deux qu'on oubliera.
+  local f bad=0 hit
+  while read -r f; do
+    hit="$(grep -vE '^[[:space:]]*#' "$f" | grep -nE '^[A-Z_]+="\$\{[A-Z_]+:-/opt/lcars' || true)"
+    [[ -z "$hit" ]] || { echo "$(basename "$f") : racine du produit redefinie"; echo "$hit"; bad=1; }
+  done < <(printf '%s\n' "$DEPLOY"/modules.d/*.sh)
+  [ "$bad" -eq 0 ]
+}
+
 @test "un MESSAGE a le droit de nommer une racine — c'est son metier" {
   # Contre-temoin des deux precedents. Sans lui, quelqu'un « reparerait » le mur en interdisant le
   # litteral partout, et les messages cesseraient de dire OU ca casse.
