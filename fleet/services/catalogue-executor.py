@@ -62,7 +62,15 @@ SOCKET_MODE = 0o660
 # l'identite — rien de ce que l'appelant ECRIT ne decide de ce qui s'execute.
 ROLES_SOCKET_PATH = os.environ.get(
     "LCARS_ROLES_SOCKET", os.path.join(os.path.dirname(SOCKET_PATH), "roles.sock"))
-ROLE_TOKENS_DIR = os.environ.get("LCARS_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
+# ⚠ `FORGE_ROLE_TOKENS_DIR`, ET PAS UN NOM A NOUS. Ce service lisait `LCARS_ROLE_TOKENS_DIR` — un
+# troisieme nom pour un repertoire qui en avait deja deux : `PROV_TOKENS_DIR` cote rail (celui qui
+# POSE) et `FORGE_ROLE_TOKENS_DIR` cote contrat (celui que les consommateurs LISENT, et le seul que
+# `etc/fleet_v2.env.template` documente). Le notre n'etait documente nulle part.
+# CE QUE CA COUTAIT, ET CE N'EST PAS COSMETIQUE : en multi-forge — le cas d'usage que le template
+# decrit — un operateur qui pose `FORGE_ROLE_TOKENS_DIR` pour un profil secondaire alignait le
+# runtime Elixir et laissait CE service lire le repertoire de la forge primaire. Les gestes de
+# catalogue vises sur la seconde forge auraient presente les jetons de la premiere.
+ROLE_TOKENS_DIR = os.environ.get("FORGE_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
 FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
 HUMANS_TEAM = os.environ.get("PROV_HUMANS_TEAM", "humans")
 

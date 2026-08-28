@@ -105,7 +105,13 @@ code() {
 # d'un chemin de fichier ; le sortir de la classe rend la sonde plus juste, pas plus permissive —
 # `/usr/local/bin` seul est toujours attrape, et il est declare.
 posed() {
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/opt/lcars/runtime|/etc/lcars|/run/lcars)[^"$ ),;:'"'"']*' \
+  # ⚠ `/run/lock` MANQUAIT A CETTE CLASSE, ET L'ANGLE MORT EST DOUBLE. `/run/lock/lcars` est pose par
+  # `provision-lib.sh` (le verrou de `provision apply`) et declare dans la table — mais la sonde ne
+  # l'attrapait PAS : ISO 1/2 ne le voyait pas parce que le motif ne le nomme pas, et ISO 2/2 passait
+  # par le radical `lcars`, trop generique pour discriminer quoi que ce soit. Les deux sens etaient
+  # donc muets sur cet objet : un second `/run/lock/<truc>` pose sans declaration serait invisible,
+  # et la ligne de la table pourrait disparaitre sans que rien ne crie.
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           `# ⚠ LA NORMALISATION D'ELIXIR EST PARTIE AVEC SON OBJET. Elle ramenait` \

@@ -1074,21 +1074,39 @@ apt_ensure() {
   for pkg in "$@"; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then already+=("$pkg"); else missing+=("$pkg"); fi
   done
-  # ⚠ LA SÉPARATION EST NOTÉE AVANT L'INSTALL, ET C'EST LE SEUL MOMENT OÙ ELLE EST CONNAISSABLE.
+  # ⚠ LA SÉPARATION SE MESURE AVANT L'INSTALL, ET C'EST LE SEUL MOMENT OÙ ELLE EST CONNAISSABLE.
   # Une seconde plus tard, `dpkg -s` répond « présent » pour les deux listes et plus rien ne
   # distingue ce que LCARS a posé de ce que l'opérateur avait déjà. C'est exactement le fait
   # qu'aucun fichier statique ne peut porter — et sans lui, une désinstallation retire des paquets
   # que quelqu'un avait avant, ce qui est pire que d'en laisser.
+  #
+  # ⚠ MAIS MESURER N'EST PAS ÉCRIRE, ET LES DEUX ÉTAIENT CONFONDUS ICI. `apt_installed` était noté
+  # AVANT l'`apt-get`, donc sur une INTENTION. Un dépôt injoignable, et le journal revendiquait des
+  # paquets que la machine n'a jamais portés : la passe suivante les reclasse en `missing` et les
+  # note à nouveau, pendant qu'un `uninstall` lance un `apt-get remove` sur des absents. La
+  # propriété que ce journal existe pour tenir — « savoir ce que LCARS a posé » — était fausse
+  # exactement dans le cas où elle sert, celui de la passe interrompue.
+  # La classification reste ici ; l'écriture descend après la vérification `dpkg`.
   [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
-  prov_journal_note apt_installed "${missing[@]}"
   p_chg "apt: install ${missing[*]}"
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
   run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" || return 1
-  local rc=0
+  # ⚠ ON NOTE CE QUI RÉPOND, PAS CE QU'ON A DEMANDÉ. `apt-get install` peut rendre 0 en ayant servi
+  # moins que la liste ; c'est `dpkg -s`, paquet par paquet, qui dit ce qui est là. Le journal ne
+  # revendique donc que des paquets vérifiés présents.
+  local rc=0 posed=()
   for pkg in "${missing[@]}"; do
-    dpkg -s "$pkg" >/dev/null 2>&1 || { p_fail "apt: $pkg toujours absent après install"; rc=1; }
+    if dpkg -s "$pkg" >/dev/null 2>&1; then
+      posed+=("$pkg")
+    else
+      p_fail "apt: $pkg toujours absent après install"; rc=1
+    fi
   done
+  # ⚠ ET ON ÉCRIT MÊME EN ÉCHEC PARTIEL. Ce qui EST posé doit être journalisé, sinon le mode
+  # dégradé échange un mensonge contre un orphelin : des paquets sur la machine que l'uninstall
+  # ne saura jamais retirer. Le `rc` porte l'échec, le journal porte le fait.
+  [[ "${#posed[@]}" -gt 0 ]] && prov_journal_note apt_installed "${posed[@]}"
   [[ "$rc" -eq 0 ]] && PROV_CHANGED=$((PROV_CHANGED + 1))
   return "$rc"
 }

@@ -78,35 +78,69 @@ code() { grep -vE '^\s*#' "$1"; }
   [ "$output" = "survecu" ]
 }
 
-@test "apt_ensure SEPARE les deux listes, et le fait AVANT d'installer" {
-  # Le coeur du fichier. On double `dpkg` : `git` est deja la, `socat` non.
+# ─── LE DECOR APT, ET IL EST PARTAGE PAR TROIS TEMOINS ──────────────────────────────────────────
+# ⚠ CHAQUE `@test` A SON PROPRE `BATS_TEST_TMPDIR`. Ce bloc vivait dans le corps d'un seul test ;
+# les deux temoins ecrits ensuite ont herite d'un `$bin` qui n'existait pas chez eux et sont morts
+# sur `No such file or directory` — un decor absent, pas un code faux. Une fonction, appelee par
+# chacun, et le decor suit son test.
+# ⚠ ELLE POSE `APT_BIN`, ELLE NE L'ECRIT PAS SUR STDOUT. Premiere version : `bin="$(apt_decor)"`.
+# Une substitution de commande est un SOUS-SHELL — les trois `export` y naissaient et y mouraient,
+# et les trois temoins recevaient un `APT_TRACE` vide (`grep: : No such file or directory`). C'est
+# le meme piege que SC2030/SC2031 signale ailleurs dans ce depot, et il se voit mal parce que la
+# fonction, elle, a bien tout fait.
+apt_decor() { # -> pose bin/dpkg + bin/apt-get, exporte APT_TRACE, APT_POSED_DIR et APT_BIN
   local bin="$BATS_TEST_TMPDIR/bin"; mkdir -p "$bin"
   # ⚠ LA DOUBLURE REPOND AUSSI A CE QUE LA LIB DEMANDE AU SOURCE. Reduite au seul `-s`, elle rendait
   # une chaine VIDE sur `--print-architecture` et la lib mourait avant le premier test — un decor
   # qui casse ce qu'il devait seulement observer.
+  # ⚠ LA DOUBLURE DOIT CHANGER D'AVIS QUAND LA MACHINE CHANGE, ET LA PREMIERE VERSION NE LE FAISAIT
+  # PAS. Elle repondait « socat absent » AVANT comme APRES l'install : le seul journal qu'elle
+  # pouvait valider etait celui qui note une INTENTION. Depuis que `apt_ensure` ne journalise que ce
+  # que `dpkg` confirme, un decor fige mesure l'ancien contrat et rougit sur le nouveau — c'est ce
+  # qu'il a fait, et c'est le decor qui avait tort. Un marqueur par paquet pose porte l'etat.
   cat > "$bin/dpkg" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
   --print-architecture) echo amd64; exit 0 ;;
-  -s) case "$2" in git|curl) exit 0 ;; *) exit 1 ;; esac ;;
+  -s) case "$2" in
+        git|curl) exit 0 ;;
+        *) [[ -f "${APT_POSED_DIR:-/nonexistent}/$2" ]] && exit 0 || exit 1 ;;
+      esac ;;
   *) exit 0 ;;
 esac
 SH
-  # `apt-get` ne doit jamais tourner pour de vrai : s'il est appele, il TRACE et ment sur le succes.
+  # `apt-get` ne doit jamais tourner pour de vrai : s'il est appele, il TRACE, pose ses marqueurs et
+  # ment sur le succes. `APT_FAIL=1` le fait echouer SANS rien poser — le depot injoignable.
   cat > "$bin/apt-get" <<'SH'
 #!/usr/bin/env bash
 echo "apt-get $*" >> "${APT_TRACE:?}"
+# `APT_FAIL=1` : l'`update` passe, l'`install` echoue. C'est la forme reelle d'un depot qui
+# refuse un paquet — et la seule qui laisse `apt_ensure` aller jusqu'a la ligne qu'on mesure.
+[[ "${APT_FAIL:-0}" == 1 && "${1:-}" == "install" ]] && exit 100
+if [[ "${1:-}" == "install" ]]; then
+  for a in "$@"; do
+    case "$a" in install|-y|--no-install-recommends) continue ;; esac
+    : > "${APT_POSED_DIR:?}/$a"
+  done
+fi
 exit 0
 SH
   chmod +x "$bin/dpkg" "$bin/apt-get"
   export APT_TRACE="$BATS_TEST_TMPDIR/apt.trace"; : > "$APT_TRACE"
+  export APT_POSED_DIR="$BATS_TEST_TMPDIR/posed"; mkdir -p "$APT_POSED_DIR"
+  APT_BIN="$bin"
+}
+
+@test "apt_ensure SEPARE les deux listes, et le fait AVANT d'installer" {
+  # Le coeur du fichier. On double `dpkg` : `git` est deja la, `socat` non.
+  local bin; apt_decor; bin="$APT_BIN"
 
   # ⚠ GUILLEMETS DOUBLES SUR LE PATH, ET CE N'EST PAS DU STYLE. En simples, `$PATH` ne s'expanse pas :
   # on écrase le PATH entier par une chaîne littérale, `dirname` disparaît, et la lib meurt à son
   # `source` — sur une ligne qui n'a rien à voir avec ce qu'on mesure. Mesuré le 2026-08-22 : la
   # doublure ne cassait pas la lib, elle cassait le shell.
   run bash -c "set -euo pipefail
-    export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE'
+    export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE' APT_POSED_DIR='$APT_POSED_DIR'
     . '$LIB' >/dev/null 2>&1
     apt_ensure git socat curl >/dev/null 2>&1 || true
     cat '$ACC'"
@@ -114,6 +148,47 @@ SH
   [[ "$output" == *"apt_installed socat"* ]]
   # et `git`/`curl` ne partent JAMAIS a l'install : c'est ce que la separation protege
   refute grep -q 'install.*git' "$APT_TRACE"
+}
+
+@test "un apt EN ECHEC ne fait revendiquer AUCUN paquet au journal" {
+  # ⚠ LE JOURNAL NOTAIT UNE INTENTION. `apt_installed` s'ecrivait AVANT l'`apt-get` : un depot
+  # injoignable, et la machine declarait porter des paquets qu'elle n'a jamais eus. La passe
+  # suivante les reclasse en `missing` et les note a nouveau ; un `uninstall` lance alors un
+  # `apt-get remove` sur des absents. La propriete que ce journal existe pour tenir — « savoir ce
+  # que LCARS a pose » — etait fausse exactement dans le cas ou elle sert.
+  local bin; apt_decor; bin="$APT_BIN"
+  run bash -c "set -euo pipefail
+    export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE' APT_POSED_DIR='$APT_POSED_DIR' APT_FAIL=1
+    . '$LIB' >/dev/null 2>&1
+    apt_ensure socat jq >/dev/null 2>&1 || true
+    cat '$ACC' 2>/dev/null || true"
+  # GARDE D'INSTRUMENT : sans elle, un `apt_ensure` qui n'aurait meme pas tourne rendrait ce
+  # temoin vert. On exige la PREUVE que l'install a ete tentee.
+  grep -q 'install' "$APT_TRACE" || { echo "apt-get install n'a jamais ete appele — le decor est casse, pas le code"; return 1; }
+  refute grep -q 'apt_installed' <<<"$output"
+}
+
+@test "apt rend 0 mais un paquet MANQUE : seul le pose entre au journal, et le verdict echoue" {
+  # `apt-get install` peut rendre 0 en ayant servi moins que la liste. C'est `dpkg -s`, paquet par
+  # paquet, qui dit ce qui est la — et le journal ne doit porter que ceux-la.
+  local bin; apt_decor; bin="$APT_BIN"
+  # `jq` est pose par la doublure, `socat` non : on remplace `apt-get` par une version qui ne pose que lui.
+  cat > "$bin/apt-get" <<'SH'
+#!/usr/bin/env bash
+echo "apt-get $*" >> "${APT_TRACE:?}"
+if [[ "${1:-}" == "install" ]]; then : > "${APT_POSED_DIR:?}/jq"; fi
+exit 0
+SH
+  chmod +x "$bin/apt-get"
+  run bash -c "set -euo pipefail
+    export PATH=\"$bin:\$PATH\" PROV_JOURNAL_ACC='$ACC' APT_TRACE='$APT_TRACE' APT_POSED_DIR='$APT_POSED_DIR'
+    . '$LIB' >/dev/null 2>&1
+    rc=0; apt_ensure socat jq >/dev/null 2>&1 || rc=\$?; echo \"rc=\$rc\"
+    cat '$ACC' 2>/dev/null || true"
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"apt_installed jq"* ]]
+  # et `socat`, qui n'a pas repondu, n'est revendique nulle part
+  refute grep -qE 'apt_installed.*socat' <<<"$output"
 }
 
 @test "la separation est notee AVANT l'appel a apt — apres, elle n'existe plus" {
@@ -248,7 +323,14 @@ SH
   local body; body="$(code "$RUNNER")"
   # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
   # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
-  grep -qE 'apt_installed\|apt_already\|posed_\(dir\|file\|link\|group\|docker\)' <<<"$body"
+  # ⚠ LA LISTE DES CLEFS CUMULATIVES GRANDIT, ET LE MOTIF DOIT SUIVRE SANS SE RELACHER.
+  # `posed_apt_repo` s'y est ajoute (le depot docker pose sous condition). Le nommer une a une reste
+  # le point : `^posed_` attraperait `posed_at`, la METADONNEE de la passe, qui se ferait fusionner
+  # et ferait porter DEUX dates au journal.
+  grep -qE 'apt_installed\|apt_already\|posed_\(dir\|file\|link\|group\|docker\|apt_repo\)' <<<"$body"
+  # et la clef neuve est bien cumulative des DEUX cotes : notee a la pose, relue au plan
+  grep -q 'posed_apt_repo' <<<"$body" \
+    || { echo "le runner ne lit plus posed_apt_repo — le depot pose sous condition redevient orphelin"; return 1; }
   refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
 }
 

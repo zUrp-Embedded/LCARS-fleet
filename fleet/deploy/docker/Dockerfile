@@ -288,7 +288,13 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 # `LCARS_SITE_BASE=/doc/` : le deck la sert sous ce chemin, et tout lien interne se compose depuis
 # cette base (`src/lib/href.js`). Batie a la racine, la copie locale s'afficherait et tous ses liens
 # partiraient a la racine du deck — cassee en silence.
-FROM node:24-slim AS site
+# ⚠ EPINGLE PAR DIGEST, COMME LES DEUX ETAGES UBUNTU. Ce `FROM` etait nu quand les trois autres
+# portaient leur sha256, dans un fichier dont l'en-tete dit « l'imutabilite ne se declare pas, elle
+# s'epingle » — une doctrine affichee et non tenue vaut moins que pas de doctrine. Docker Hub
+# republie `24-slim` regulierement : sans digest, deux builds du MEME commit peuvent bâtir la doc
+# avec deux toolchains, et la seule chose qui le dirait serait une regression d'Astro sans cause
+# visible. La majeure est gardee par `node_pin.bats` ; le patch ne l'etait par rien.
+FROM node:24-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS site
 # La provenance vient de l'APPELANT : ce stage n'a ni git ni `.git`, et la plaquette affiche le sha
 # en pied de page. Sans cet argument elle imprime « unknown », ce qui est honnete et visible.
 ARG GIT_SHA=unknown

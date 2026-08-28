@@ -84,7 +84,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   # Ce service DETIENT l'autorite de la forge. Un repli qui pointe ailleurs, et il demarre en
   # refusant chaque geste sur un fichier absent.
   local f="$R/services/catalogue-executor.py" vu
-  vu="$(racine_de "$f" 'LCARS_ROLE_TOKENS_DIR", "[^"]*')"
+  vu="$(racine_de "$f" 'FORGE_ROLE_TOKENS_DIR", "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
   vu="$(racine_de "$f" 'LCARS_MASTER_TOKEN_FILE", "[^"]*')"
   [ "$vu" = "$ATTENDU" ]

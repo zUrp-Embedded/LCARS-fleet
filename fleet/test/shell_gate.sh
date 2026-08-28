@@ -265,7 +265,11 @@ fi
 #    provisioning est ce qui fabrique la machine sur laquelle tout le reste tourne. Absence du
 #    repertoire = pas une erreur (meme regle que les skills).
 # ---------------------------------------------------------------------------
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+# ⚠ `REPO_ROOT` N'EST PAS REDEFINI ICI, ET IL L'ETAIT. La meme derivation vivait deux fois dans ce
+# fichier, a l'identique. Sans consequence tant que les deux disent la meme chose — et c'est
+# exactement ce qui rend la seconde dangereuse : le jour ou l'une des deux bouge, celle qu'on ne
+# relit pas gagne pour la moitie du gate. La definition d'en haut (avec le motif de sa position)
+# fait autorite pour tout le fichier.
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
 PROVISION_TESTS="$REPO_ROOT/fleet/deploy/tests"
 HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"

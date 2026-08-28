@@ -501,6 +501,15 @@ uninstall_run() {
   [[ -r "$JOURNAL_FILE" ]] && mapfile -t docker_projects < <(
     awk '$1=="posed_docker"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
 
+  # LE DEPOT APT POSE SOUS CONDITION : le journal, et lui seul. `10-packages` pose la source docker
+  # et sa cle SI le substrat est `linux` et qu'aucun daemon ne repond — une condition qu'aucune ligne
+  # statique ne sait porter. Les declarer dans la table autoriserait a detruire le depot d'un
+  # operateur qui l'avait deja ; ne rien declarer les laissait sur la machine pour toujours. Le
+  # journal dit ce que CETTE passe a pose, et c'est la seule source qui puisse le dire.
+  local -a apt_repo_files=()
+  [[ -r "$JOURNAL_FILE" ]] && mapfile -t apt_repo_files < <(
+    awk '$1=="posed_apt_repo"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
+
   # LES PAQUETS : le journal, et lui seul.
   if [[ -r "$JOURNAL_FILE" ]]; then
     mapfile -t journal_pkgs < <(awk '$1=="apt_installed"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
@@ -552,9 +561,73 @@ uninstall_run() {
   done <<<"$rows"
 
   # Du plus profond au moins profond : `/opt/lcars/tofu/providers` avant `/opt/lcars`.
+  # ─── CE QUE LE JOURNAL SAIT ET QUE LA TABLE A OUBLIE ──────────────────────────────────────────
+  #
+  # ⚠ LES PRIMITIVES JOURNALISENT DEPUIS `2c8f56b04`, ET PERSONNE NE LISAIT. `write_atomic` note
+  # `posed_file`, `ensure_dir` note `posed_dir`, `ensure_symlink` note `posed_link` — 53 sites
+  # d'appel dans 18 modules, traces par construction. Le commit qui les a poses le disait :
+  # « le journal ne connaissait que les paquets ». Il les connait desormais, et jusqu'ici l'uninstall
+  # ne consommait QUE `apt_installed`, `posed_docker` et `posed_apt_repo` : l'inventaire le plus
+  # large du fichier n'avait aucun lecteur.
+  #
+  # CE QUE CA RATTRAPE, ET C'EST TOUT L'OBJET DE CE CHANTIER. La table dit ce qu'on a le DROIT de
+  # poser ; elle est statique, et elle a des angles morts prouves (un nom compose a l'execution, un
+  # repertoire exempte, un objet pose sous condition). Le journal, lui, dit ce que CETTE passe a
+  # REELLEMENT pose sur CETTE machine — il ne peut pas avoir d'angle mort de declaration, puisqu'il
+  # est ecrit par le geste qui pose. Un objet que la table a oublie survivait a l'uninstall ; il est
+  # maintenant emporte.
+  #
+  # ⚠ LE JOURNAL NE PRIME JAMAIS SUR `preserve`. Un chemin protege le reste, meme si nous l'avons
+  # pose : c'est la seule classe de la table dont l'autorite est absolue, et un second inventaire ne
+  # doit pas pouvoir la contourner par la porte de derriere.
+  #
+  # ⚠ ET ON NE PLANIFIE PAS DEUX FOIS. Un objet deja nomme par la table, ou vivant sous un
+  # repertoire que la table emporte, est deja au plan : le re-lister ferait un compteur qui ment sur
+  # le nombre d'objets et un operateur qui relit deux fois la meme ligne.
+  local -a journal_files=() journal_dirs=()
+  if [[ -r "$JOURNAL_FILE" ]]; then
+    local _o _known
+    while read -r _o; do
+      [[ -n "$_o" ]] || continue
+      preserved "$_o" && continue
+      _known=0
+      for _k in ${files[@]+"${files[@]}"} ${dirs[@]+"${dirs[@]}"}; do
+        [[ "$_o" == "$_k" || "$_o" == "$_k"/* ]] && { _known=1; break; }
+      done
+      [[ "$_known" -eq 1 ]] && continue
+      journal_files+=("$_o")
+    done < <(awk '$1=="posed_file"||$1=="posed_link"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" \
+               | tr ' ' '\n' | grep -v '^$' | sort -u)
+    while read -r _o; do
+      [[ -n "$_o" ]] || continue
+      preserved "$_o" && continue
+      _known=0
+      for _k in ${dirs[@]+"${dirs[@]}"}; do
+        [[ "$_o" == "$_k" || "$_o" == "$_k"/* ]] && { _known=1; break; }
+      done
+      [[ "$_known" -eq 1 ]] && continue
+      journal_dirs+=("$_o")
+    done < <(awk '$1=="posed_dir"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" \
+               | tr ' ' '\n' | grep -v '^$' | sort -u)
+    # Ils rejoignent le plan : meme ordre, memes boucles, meme verdict. Un objet du journal n'est
+    # pas d'une autre nature — il a seulement une autre PROVENANCE, et c'est le plan qui la dit.
+    files+=(${journal_files[@]+"${journal_files[@]}"})
+    dirs+=(${journal_dirs[@]+"${journal_dirs[@]}"})
+  fi
+
   mapfile -t dirs < <(printf '%s\n' "${dirs[@]}" | awk '{ print gsub(/\//,"/"), $0 }' | sort -rn | cut -d' ' -f2-)
 
   echo "${_PC}=== provision uninstall — plan lu dans $(basename "$MANIFEST_FILE") ===${_PN}"
+  # ⚠ CES DEUX-LA SE NOMMENT, ILS NE SE COMPTENT PAS. Ils ne viennent pas de la table mais du
+  # journal : l'operateur ne peut pas les retrouver en relisant `system.manifest`, donc le plan les
+  # ecrit en toutes lettres — meme regle que les chemins resolus depuis un joker.
+  if [[ "${#apt_repo_files[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "dépôt apt" "${apt_repo_files[*]} — posés par CETTE install (journal)"
+  fi
+  if [[ "${#journal_files[@]}" -gt 0 || "${#journal_dirs[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "hors table" \
+      "${journal_files[*]-}${journal_files[*]+ }${journal_dirs[*]-} — POSÉS par cette install, ABSENTS de la table (journal)"
+  fi
   printf '  %-10s %d objet(s)\n' "fichiers" "${#files[@]}"
   printf '  %-10s %d répertoire(s)\n' "dirs" "${#dirs[@]}"
   printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
@@ -635,7 +708,7 @@ uninstall_run() {
   # « non retiré » a chaque passage. MESURE DU 2026-08-27 : les sept survivent, plus deux sockets de
   # console. Un fichier se retire par `rm -f`, un repertoire par `rm -rf` — c'est la NATURE de
   # l'objet sur le disque qui decide, pas sa classe dans la table.
-  for o in "${files[@]}"; do
+  for o in ${apt_repo_files[@]+"${apt_repo_files[@]}"} "${files[@]}"; do
     if [[ -d "$o" && ! -L "$o" ]]; then
       rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
     elif [[ -e "$o" || -L "$o" ]]; then
@@ -650,9 +723,14 @@ uninstall_run() {
       for h in /home/*; do
         real="${o//<human>/$(basename "$h")}"
         # ⚠ ET LA GARDE `preserve` NE COUVRAIT PAS CETTE BOUCLE. `preserved()` etait evalue sur le
-        # MOTIF de la table (`/home/<human>/.lcars`), jamais sur le chemin RESOLU. La boucle itere
-        # `/home/*` — donc `/home/projects`, `/home/projects.ops`, `/opt/lcars/var/tokens`. Un `--humans`
-        # sur une machine qui porte les faces planifiait dedans.
+        # MOTIF de la table (`/home/<human>/.lcars`), jamais sur le chemin RESOLU. Or `/home/*` itere
+        # TOUT ce qui est sous `/home`, et rien ne garantit que ce soit un home d'humain : une racine
+        # de travail partagee y vit aussi, et le `basename` la traite comme un login. Un `--humans`
+        # planifiait donc dedans.
+        # ⚠ CE COMMENTAIRE NOMMAIT `/opt/lcars/var/tokens` DANS CETTE LISTE, ce qui est impossible —
+        # ce chemin n'est pas sous `/home`. C'etait `/home/private` avant le demenagement des jetons,
+        # et la reecriture a suivi la variable au lieu de suivre le SENS. Un exemple faux dans un
+        # commentaire de garde apprend une topologie fausse a qui le lit.
         preserved "$real" && continue
         [[ -e "$real" ]] && { rm -rf "$real" && removed=$((removed + 1)); }
       done
@@ -1000,7 +1078,7 @@ else
     # avec les inventaires, et le fichier portait DEUX lignes `posed_at`, dont une accumulant trois
     # horodatages. Mesure du 2026-08-28 sur banc. C'est le « raconte deux dates a la fois » que la
     # regle voisine dit vouloir eviter, produit par la regle elle-meme.
-    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already|posed_(dir|file|link|group|docker)) ' "$JOURNAL_FILE" || true)"
+    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already|posed_(dir|file|link|group|docker|apt_repo)) ' "$JOURNAL_FILE" || true)"
     if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
       {
         echo "# SOURCE: $JOURNAL_FILE"

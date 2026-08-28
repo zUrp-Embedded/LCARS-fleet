@@ -229,6 +229,17 @@ EOF
   # tard, sur une erreur que personne ne rattachera à LCARS. Les trois gardes ci-dessus refusent
   # AVANT d'écrire ; celui-ci doit défaire, sinon la propriété « un refus ne laisse rien » n'est
   # vraie que sur les chemins faciles.
+  # ⚠ CE QU'ON POSE ICI N'AVAIT AUCUN CONTRAT DE SORTIE. Ces deux objets sont poses SOUS CONDITION
+  # (substrat `linux`, et seulement si aucun daemon docker ne repond) : `system.manifest` ne peut pas
+  # les declarer sans autoriser un `uninstall` a les detruire sur une machine ou l'operateur les
+  # avait DEJA — c'est pour ca qu'ils en ont ete retires. Mais l'absence de declaration a produit
+  # l'inverse : la ou LCARS les a reellement poses, plus rien ne les retire jamais.
+  #
+  # LE JOURNAL TRANCHE, ET C'EST LE MECANISME QUI EXISTE DEJA POUR EXACTEMENT CETTE QUESTION. Il ne
+  # decrit pas ce qu'on a le DROIT de poser (c'est le metier de la table) mais ce que CETTE passe A
+  # pose sur CETTE machine. `uninstall` ne retire donc que ce que le journal revendique — jamais le
+  # depot d'un operateur qui l'avait avant nous.
+  prov_journal_note posed_apt_repo "$DOCKER_LIST" "$DOCKER_KEYRING"
   if ! run_quiet apt-get update -o Dir::Etc::sourcelist="$DOCKER_LIST" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
     rm -f "$DOCKER_LIST" "$DOCKER_KEYRING"
     p_fail "dépôt docker : « apt-get update » refuse la source — RETIRÉE, ainsi que sa clé ($DOCKER_LIST, $DOCKER_KEYRING) ; la machine repart comme avant, voir la sortie ci-dessus pour la cause"

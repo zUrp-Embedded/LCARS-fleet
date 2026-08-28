@@ -82,7 +82,12 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # `chown -R`, le `chmod -R` et les deux `ln -sf`. Un seul en desaccord donne une image ou le
   # runtime est pose a un endroit et les symlinks pointent ailleurs — `lcars` en « No such file ».
   local d="$R/deploy/docker/Dockerfile" n
-  grep -qE "LCARS_INSTALL_PREFIX=$ATTENDU\b" "$d" \
+  # ⚠ `\b` N'EST PAS UNE BORNE DE CHEMIN, ET CE MUR ETAIT MORT. Mutation jouee le 2026-08-29 :
+  # `LCARS_INSTALL_PREFIX=/opt/lcars/runtime-drift` dans le Dockerfile — le test restait VERT. `\b`
+  # marque une frontiere de MOT : le tiret n'est pas un caractere de mot, donc `runtime-drift`
+  # satisfait `runtime\b`. Tout suffixe commencant par un tiret, un point ou un espace passait. Ce
+  # qui borne un chemin dans un `ENV`/`ARG`, c'est l'espace, la fin de ligne ou le slash suivant.
+  grep -qE "LCARS_INSTALL_PREFIX=$ATTENDU([[:space:]/]|\$)" "$d" \
     || { echo "le build du Dockerfile n'installe pas sous « $ATTENDU »" >&2; return 1; }
   grep -qE "^COPY --from=build $ATTENDU $ATTENDU\$" "$d" \
     || { echo "le COPY du Dockerfile ne porte pas « $ATTENDU » des deux cotes" >&2; return 1; }

@@ -37,7 +37,12 @@ setup() {
 # La majeure de chacun des trois. Chaque extraction est nommee : une seule qui rate rendrait une
 # chaine VIDE, et deux vides sont EGAUX — un mur vert sur n'importe quelle derive.
 maj_module()   { sed -n 's/^NODE_VERSION="${LCARS_NODE_VERSION:-\([0-9]\+\)\..*/\1/p' "$MOD"; }
-maj_image()    { sed -n 's/^FROM node:\([0-9]\+\)-slim AS site.*/\1/p' "$DOCKERFILE"; }
+# ⚠ L'EXTRACTION TOLERE LE DIGEST, ET C'EST LE POINT. La ligne est passee de `FROM node:24-slim AS
+# site` a `FROM node:24-slim@sha256:… AS site` : un motif qui exigeait `-slim AS site` colles rendait
+# la chaine VIDE, et deux extractions vides sont EGALES — le mur serait devenu vert a vide au moment
+# meme ou on l'epinglait. La garde d'instrument du test l'aurait attrape ; le motif est corrige pour
+# qu'elle n'ait pas a le faire.
+maj_image()    { sed -n 's/^FROM node:\([0-9]\+\)-slim[^ ]* AS site.*/\1/p' "$DOCKERFILE"; }
 maj_workflow() { sed -n 's/^ *node-version: *\([0-9]\+\) *$/\1/p' "$SITE_WF"; }
 
 @test "les trois producteurs de la doc sont sur la MEME majeure de node" {

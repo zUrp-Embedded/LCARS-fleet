@@ -152,7 +152,11 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   grep -q 'sort -rn' <<<"$body"
   local n_files n_dirs n_groups
-  n_files="$(grep -n 'for o in "\${files\[@\]}"' <<<"$body" | cut -d: -f1)"
+  # ⚠ LE MOTIF NE COLLE PLUS AU DEBUT DE LA BOUCLE, ET C'EST VOULU. Elle itere desormais DEUX
+  # sources — le depot apt du journal, puis les fichiers de la table — donc `for o in "${files[@]}"`
+  # n'est plus en tete de ligne. On accroche `${files[@]}` la ou il est : ce qui est mesure ici est
+  # l'ORDRE des trois boucles, pas la forme de l'une d'elles.
+  n_files="$(grep -n 'for o in .*\${files\[@\]}' <<<"$body" | cut -d: -f1)"
   n_dirs="$(grep -n 'for o in "\${dirs\[@\]}"' <<<"$body" | cut -d: -f1)"
   n_groups="$(grep -n 'for o in "\${groups\[@\]}"' <<<"$body" | cut -d: -f1)"
   [ "$n_files" -lt "$n_dirs" ]
@@ -338,6 +342,133 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [[ "$output" == *"lcars-essai-runner"* ]]
 }
 
+# ─── L'INVENTAIRE DU JOURNAL, ET IL N'AVAIT AUCUN LECTEUR ───────────────────────────────────────
+#
+# ⚠ LES PRIMITIVES JOURNALISENT DEPUIS `2c8f56b04` — `write_atomic` -> `posed_file`, `ensure_dir` ->
+# `posed_dir`, `ensure_symlink` -> `posed_link`, 53 sites dans 18 modules. L'uninstall ne consommait
+# QUE `apt_installed`, `posed_docker` et `posed_apt_repo` : l'inventaire le plus large du fichier
+# etait ecrit a chaque passe et lu par personne.
+#
+# CE QU'IL RATTRAPE : la table a des angles morts PROUVES — un nom compose a l'execution, un
+# repertoire exempte, un objet pose sous condition. Le journal est ecrit par le geste QUI POSE : il
+# ne peut pas avoir d'angle mort de declaration. C'est le filet sous la table.
+
+# ⚠ ON COMPTE, ON NE CHERCHE PAS LE NOM DANS LA SORTIE — ET LA PREMIERE VERSION DE CES DEUX TEMOINS
+# CHERCHAIT LE NOM. Le plan porte une ligne « hors table » qui NOMME ces objets : elle reste imprimee
+# meme si rien ne les fait entrer dans le plan executable. Mutation jouee le 2026-08-29 :
+# `files+=(…)` et `dirs+=(…)` remplaces par `:` — les deux temoins restaient VERTS, l'annonce
+# survivant a la disparition du geste. Nommer au plan n'est pas retirer, et c'est la DEUXIEME fois
+# que ce piege se referme dans ce fichier (cf. le depot apt, plus bas).
+@test "JOURNAL : un fichier pose et ABSENT de la table entre au plan EXECUTABLE" {
+  local avant apres
+  plan; avant="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  [ -n "$avant" ] || { echo "extraction ratee : le compteur de fichiers du plan"; return 1; }
+  printf 'posed_file /etc/hors-table-essai.conf\n' >> "$LCARS_JOURNAL_FILE"
+  plan; apres="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  [ "$apres" -eq "$((avant + 1))" ] \
+    || { echo "le compteur de fichiers n'a pas bouge ($avant -> $apres) : l'objet est annonce, pas planifie"; echo "$output"; return 1; }
+  # et il est NOMME, parce qu'il ne vient pas de la table
+  [[ "$output" == *"hors-table-essai.conf"* ]]
+}
+
+@test "JOURNAL : un repertoire pose et ABSENT de la table entre au plan EXECUTABLE" {
+  local avant apres
+  plan; avant="$(sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output")"
+  [ -n "$avant" ] || { echo "extraction ratee : le compteur de repertoires du plan"; return 1; }
+  printf 'posed_dir /etc/hors-table-dir-essai\n' >> "$LCARS_JOURNAL_FILE"
+  plan; apres="$(sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output")"
+  [ "$apres" -eq "$((avant + 1))" ] \
+    || { echo "le compteur de repertoires n'a pas bouge ($avant -> $apres)"; echo "$output"; return 1; }
+  [[ "$output" == *"hors-table-dir-essai"* ]]
+}
+
+# ⚠ AUCUN ACCENT GRAVE DANS CE TITRE, ET CE N'EST PAS DU STYLE. bats EXECUTE la description d'un
+# `@test` : la premiere version portait « `preserve` PRIME », et bats a cherche une commande nommee
+# `preserve` (« command not found » dans la sortie du run). Meme faute que `e45092fb2` a balayee sur
+# cinq descriptions, refaite ici quatre jours plus tard.
+@test "JOURNAL : preserve PRIME sur le journal — meme si c'est nous qui l'avons pose" {
+  # La seule classe de la table dont l'autorite est absolue. Un second inventaire ne doit pas
+  # pouvoir la contourner par la porte de derriere.
+  # ⚠ LE DECOR POSE SON PROPRE MANIFESTE, ET CE TEMOIN DOIT LUI PARLER. Premiere version : un chemin
+  # sous `/home/projects`, preserve dans le VRAI `system.manifest` — donc pas dans celui du decor,
+  # et le temoin mesurait une regle que la passe ne connaissait pas.
+  printf 'preserve  %s/precieux  2775  root:fleet  any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+  printf 'posed_dir %s/precieux/essai-journal\n' "$FAKE" >> "$LCARS_JOURNAL_FILE"
+  plan
+  refute_out 'essai-journal' <<<"$output"
+}
+
+@test "JOURNAL : un objet DEJA couvert par la table n'est pas planifie DEUX fois" {
+  # `/opt/lcars/runtime` est le prefixe declare : ce qui vit dessous part avec lui. Le re-lister
+  # ferait un compteur qui ment et un operateur qui relit deux fois la meme ligne.
+  local avant apres
+  plan; avant="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  [ -n "$avant" ] || { echo "extraction ratee : le compteur de fichiers du plan"; return 1; }
+  # `$FAKE/opt/lcars` est declare `dir` par le decor : ce qui vit dessous part avec lui.
+  printf 'posed_file %s/opt/lcars/bin/quelque-chose\n' "$FAKE" >> "$LCARS_JOURNAL_FILE"
+  plan; apres="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  [ "$apres" -eq "$avant" ] \
+    || { echo "un objet deja couvert par la table a ete replanifie ($avant -> $apres)"; return 1; }
+}
+
+@test "JOURNAL : ce qui vient du journal se NOMME dans le plan, il ne se compte pas" {
+  # Meme regle que les chemins resolus depuis un joker : l'operateur ne peut pas les retrouver en
+  # relisant la table, donc le plan les ecrit en toutes lettres avant qu'on l'execute.
+  printf 'posed_file /etc/hors-table-essai.conf\n' >> "$LCARS_JOURNAL_FILE"
+  plan
+  [[ "$output" == *"hors table"* ]] \
+    || { echo "le plan ne dit pas d'ou vient cet objet :"; echo "$output"; return 1; }
+}
+
+# ─── LE DEPOT APT POSE SOUS CONDITION, ET POURQUOI LUI AUSSI VIT DANS LE JOURNAL ────────────────
+#
+# ⚠ CES DEUX OBJETS AVAIENT PERDU TOUT CONTRAT DE SORTIE, ET L'ETAT ETAIT PIRE QUE L'ORIGINAL.
+# `10-packages` pose `/etc/apt/sources.list.d/docker.list` et sa cle SI le substrat est `linux` et
+# qu'aucun daemon docker ne repond. Ils ont ete DECLARES dans `system.manifest`, puis retires — parce
+# qu'une ligne statique aurait autorise un `uninstall` a detruire le depot d'un operateur qui l'avait
+# deja. Correct pour la question posee ; sauf que l'absence de declaration les a rendus
+# indestructibles la ou LCARS les avait bel et bien poses.
+#
+# LE JOURNAL EST LA SEULE SOURCE QUI CONNAISSE LA CONDITION. Il ne dit pas ce qu'on a le DROIT de
+# poser — c'est le metier de la table — mais ce que CETTE passe A pose sur CETTE machine.
+
+@test "DEPOT APT : le plan lit la paire dans le JOURNAL, jamais dans la table" {
+  printf 'posed_apt_repo /etc/apt/sources.list.d/essai.list /etc/apt/keyrings/essai.asc
+' >> "$LCARS_JOURNAL_FILE"
+  plan
+  [[ "$output" == *"essai.list"* ]]
+  [[ "$output" == *"essai.asc"* ]]
+}
+
+@test "DEPOT APT : sans journal, RIEN n'est planifie — le depot d'un tiers n'est pas a nous" {
+  # ⚠ C'EST LA MOITIE QUI COMPTE. Un operateur qui avait deja le depot docker n'a aucune ligne
+  # `posed_apt_repo` dans son journal : le plan ne doit rien nommer, et surtout rien retirer.
+  # On COMPTE, on ne cherche pas un nom : `refute_out` sur un nom absent est vert a vide.
+  local avant apres
+  plan; avant="$(grep -c 'essai' <<<"$output" || true)"
+  [ "$avant" -eq 0 ] || { echo "un depot est planifie sans journal :"; echo "$output"; return 1; }
+  printf 'posed_apt_repo /etc/apt/sources.list.d/essai.list\n' >> "$LCARS_JOURNAL_FILE"
+  plan; apres="$(grep -c 'essai' <<<"$output" || true)"
+  [ "$apres" -gt 0 ] || { echo "le journal revendique la paire et le plan l'ignore"; return 1; }
+}
+
+@test "DEPOT APT : aucun chemin de depot n'est ecrit dans le code" {
+  # Meme regle que pour docker : recopier `/etc/apt/sources.list.d/docker.list` ici ferait un second
+  # inventaire, et celui qui derive est toujours celui qu'on ne relit pas.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  refute grep -qE 'sources\.list\.d|apt/keyrings' <<<"$body"
+  grep -q 'posed_apt_repo' <<<"$body"
+
+  # ⚠ NOMMER AU PLAN N'EST PAS RETIRER, ET LA PREMIERE VERSION DE CES TEMOINS S'ARRETAIT LA.
+  # Mutation jouee le 2026-08-29 : la boucle de retrait ramenee a `for o in "${files[@]}"` — le plan
+  # continuait de nommer la paire, les trois temoins restaient VERTS, et plus rien ne la retirait.
+  # Un plan qui annonce ce qu'il ne fait pas est pire qu'un plan muet : il atteste.
+  # Le retrait lui-meme exige root et `--yes` ; ce qui se mesure ici est que la boucle ITERE bien
+  # les deux sources.
+  grep -qE 'for o in .*apt_repo_files\[@\].*\$\{files\[@\]\}' <<<"$body" \
+    || { echo "la boucle de retrait n'itere plus le depot du journal — il serait annonce au plan et laisse sur la machine"; return 1; }
+}
+
 @test "DOCKER : aucun nom de projet n'est ecrit dans le code" {
   # La regression exacte : recopier `lcars-forge` ici ferait un second inventaire, et celui qui
   # derive est toujours celui qu'on ne relit pas.
@@ -425,7 +556,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   local n_stop n_rm n_userdel
   n_stop="$(grep -n 'systemctl disable --now' <<<"$body" | head -1 | cut -d: -f1)"
-  n_rm="$(grep -n 'for o in "\${files\[@\]}"' <<<"$body" | head -1 | cut -d: -f1)"
+  n_rm="$(grep -n 'for o in .*\${files\[@\]}' <<<"$body" | head -1 | cut -d: -f1)"
   n_userdel="$(grep -n 'userdel "\$o"' <<<"$body" | head -1 | cut -d: -f1)"
   [ -n "$n_stop" ]
   [ "$n_stop" -lt "$n_rm" ]        # avant le retrait des fichiers

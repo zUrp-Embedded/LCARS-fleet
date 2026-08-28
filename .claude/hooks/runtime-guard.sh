@@ -19,13 +19,17 @@
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  PreToolUse hook — blocks writes to runtime paths.        |
-#     |  Protected: /local/LCARS/, ~/.claude/, ~/.local/bin/      |
+#     |  Protected: /opt/lcars/runtime/, ~/.claude/, ~/.local/bin  |
 #     |  Bypass: FLEET_CONTEXT=deploy (deploy.sh is legitimate).  |
 #     |                                                           |
 #     +-----------------------------------------------------------+
 #
 #     [FR]
-#     Bloque les écritures dans les paths runtime (/local/LCARS, ~/.claude, ~/.local/bin).
+#     Bloque les écritures dans les paths runtime (/opt/lcars/runtime, ~/.claude, ~/.local/bin).
+#     ⚠ CETTE LISTE DISAIT `/local/LCARS` APRES LE DEMENAGEMENT SOUS `/opt/lcars`, ET LE CODE, LUI,
+#     PROTEGEAIT LE BON CHEMIN. Un en-tete de GARDE qui nomme la mauvaise adresse est le pire endroit
+#     du depot ou laisser un commentaire faux : il ne casse rien, il fait croire que le live runtime
+#     est ouvert — et la prochaine session le lit comme vrai.
 #     Triangle strict : source → GitHub → runtime. Bypass si FLEET_CONTEXT=deploy.
 #
 #     [EN]
