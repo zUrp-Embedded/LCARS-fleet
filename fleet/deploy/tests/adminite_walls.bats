@@ -231,7 +231,13 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   local manifest="$REPO/deploy/system.manifest"
   local row group
 
-  group="$(code_of "$mod" | sed -n 's/^OIDC_GROUP="\${PROV_SYSTEM_GROUP:-\([a-z0-9-]*\)}"$/\1/p')"
+  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `55-deck-oidc`
+  # gravait `${PROV_SYSTEM_GROUP:-lcars-system}` pendant que `21-service-accounts`, qui CREE le
+  # compte, derive `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}` : deux replis pour une variable, qui
+  # divergent des qu'on regle `PROV_SYSTEM_USER` seul. Le module derive desormais lui aussi
+  # (`${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-<nom>}}`), et ce temoin lit LE NOM AU FOND de la
+  # chaine — c'est lui que le manifeste doit porter, quel que soit le nombre de replis devant.
+  group="$(code_of "$mod" | sed -nE 's@^OIDC_GROUP=.*:-([a-z0-9-]+)\}+"$@\1@p')"
   [ -n "$group" ] || { echo "OIDC_GROUP illisible dans $mod" >&2; return 1; }
 
   row="$(grep -E '^anchor[[:space:]]+/etc/lcars/deck-oidc\.json[[:space:]]' "$manifest")"

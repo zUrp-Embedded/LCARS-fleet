@@ -724,3 +724,38 @@ PYX
   done < <(sort -u "$BATS_TEST_TMPDIR/sec")
   [ "$rompu" -eq 0 ] || return 1
 }
+
+@test "MUR 13: le compte de service du deck — un nom, et les replis qui le nomment derivent" {
+  # `lcars-system` est le compte SANS shell et SANS home sous lequel tourne le deck de la boite. Il
+  # a ete cree le 2026-08-26 pour sortir le deck de `nobody`, dont le groupe `nogroup` est partage
+  # par `sync`, `_apt` et `dhcpcd` — le fichier d'identification OIDC du deck s'y posait en
+  # `0640 root:nogroup`, donc un demon reseau le lisait. C'est MON compte, propage sans verrou.
+  #
+  # ⚠ ET SES DEUX REPLIS NE DISAIENT PAS LA MEME CHOSE. `21-service-accounts` (qui CREE le compte)
+  # derive le groupe du user ; `55-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
+  # seul faisait creer un groupe d'un cote et chown vers un autre — un groupe inexistant, un deck
+  # qui sert 503, et la cause dans un autre module.
+  local nom
+  nom="$(sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
+         | sed -nE 's@^SYSTEM_USER="\$\{PROV_SYSTEM_USER:-([a-z0-9_-]+)\}".*@\1@p' | head -n1)"
+  [ -n "$nom" ] || { echo "MUR 13 — le nom du compte ne se lit plus dans 21-service-accounts" >&2; return 1; }
+
+  local rompu=0
+  # (1) Le groupe se DERIVE du compte partout, il ne se grave pas.
+  sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
+    | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
+      echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
+  sed 's/#.*//' "$REPO/deploy/modules.d/55-deck-oidc.sh" \
+    | grep -qE 'PROV_SYSTEM_GROUP:-\$\{PROV_SYSTEM_USER:-'"$nom"'\}' || {
+      echo "MUR 13 rompu — 55-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
+
+  # (2) Les autres porteurs nomment le MEME compte, chacun sur son geste.
+  need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
+      echo "MUR 13 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }; }
+  need13 deploy/docker/Dockerfile   "useradd .*-g $nom $nom([[:space:]]|\\\\|$)" "la creation dans l'image"
+  need13 deploy/docker/Dockerfile   "groupadd --system $nom([[:space:]]|\\\\|$)"  "le groupe dans l'image"
+  need13 services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
+  need13 deploy/system.manifest      "^anchor[[:space:]]+/etc/lcars/deck-oidc.json[[:space:]]+0640[[:space:]]+root:$nom" \
+                                     "le proprietaire du secret OIDC"
+  [ "$rompu" -eq 0 ] || return 1
+}
