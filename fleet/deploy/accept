@@ -164,7 +164,23 @@ check_fleet_start() {
   command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }
 
   local as=(runuser -u "$login" -- env "HOME=$home" "USER=$login" "LOGNAME=$login")
-  "${as[@]}" command -v fleet_v2 >/dev/null 2>&1 \
+
+  # ⚠ `command` EST UN BUILTIN DE SHELL, ET CETTE LIGNE LE PASSAIT A `env`. Il n'existe aucun
+  # `/usr/bin/command` : `env … command -v fleet_v2` rend `env: 'command': No such file or
+  # directory` et rc=127 SUR TOUTE MACHINE, quel que soit l'etat mesure. L'assertion ne pouvait donc
+  # pas reussir, et son NON accusait le PATH d'un compte parfaitement equipe.
+  #
+  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE. Cette fonction sortait plus haut, sur
+  # « aucun humain de fleet nomme », des que `--fleet-human` n'etait pas passe — c'est-a-dire dans le
+  # cas NOMINAL. Le seul chemin qui atteignait cette ligne demandait un drapeau que personne ne
+  # tapait. Elle a rougi au premier passage reel, le jour ou le nom a cesse de venir d'un drapeau.
+  # Mesure du 2026-08-28, banc poste : `runuser -u lcars -- bash -lc 'command -v fleet_v2'` rend
+  # `/usr/local/bin/fleet_v2` rc=0, pendant que la forme ci-dessus rendait 127.
+  #
+  # LE SHELL EST AUSSI LA BONNE QUESTION, pas seulement le bon outil : ce qui compte est que
+  # l'humain, dans SA session, atteigne le lanceur. `-l` charge son profil, donc on mesure le PATH
+  # qu'il aura vraiment, pas celui que le provisionnement traine.
+  "${as[@]}" bash -lc 'command -v fleet_v2' >/dev/null 2>&1 \
     || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
 
   if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then
