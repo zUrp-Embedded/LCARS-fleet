@@ -14,7 +14,7 @@
 # cran plus haut. Ici, la sequence complete.
 #
 # ─── LES QUATRE PIEGES QUE CE SCRIPT DESAMORCE, ET QU'UN LECTEUR NE DEVINE PAS ──────────────────
-# 1. LA BOITE DOIT ETRE SUR LE RESEAU DE LA FORGE AVANT DE DEMARRER. `FORGE_BASE_URL=http://forge:3000`
+# 1. LA BOITE DOIT ETRE SUR LE RESEAU DE LA FORGE AVANT DE DEMARRER. `FORGE_BASE_URL=http://gitea:3000`
 #    ne resout que depuis le reseau du projet forge, et le compose de la boite ne connait pas ce
 #    reseau. D'ou `create` → `network connect` → `start` plutot qu'un `up` : un `up` demarre la
 #    boite sur un nom qui ne resout pas, et tout le provisioning forge part en drift au premier boot.
@@ -536,7 +536,7 @@ esac
 # reprendrait de plein fouet. Le projet unique en desamorce UN : le runner joint la forge parce
 # qu'ils partagent le reseau. Le SECOND reste entier et n'a rien a voir avec le notre — les
 # conteneurs de JOB n'heritent pas du reseau du runner, act_runner les cree sur son reseau par
-# defaut, et le clone echoue sur `forge:3000` introuvable. Son en-tete le nomme : « un runner vert
+# defaut, et le clone echoue sur `gitea:3000` introuvable. Son en-tete le nomme : « un runner vert
 # qui rate tous ses jobs, le pire des etats ». Il pose la config `container.network` pour ca, et il
 # la copie par `docker cp` parce qu'un bind depuis cette distro WSL est invisible au daemon.
 # Reecrire tout ca ici aurait produit un runner qui s'enregistre et ne sert rien.

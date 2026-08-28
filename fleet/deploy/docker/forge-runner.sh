@@ -14,14 +14,14 @@
 #
 # ─── LES DEUX PIEGES RESEAU, ET POURQUOI UN OVERRIDE ────────────────────────────────────────────
 # 1. Le RUNNER doit joindre la forge pour s'enregistrer : sur le banc elle n'existe que dans le
-#    reseau compose de la forge jetable (`http://forge:3000`). L'override branche donc le projet
+#    reseau compose de la forge jetable (`http://gitea:3000`). L'override branche donc le projet
 #    runner sur CE reseau (network externe), au lieu d'un `docker network connect` a la main que
 #    le prochain nuke oublierait.
 # 2. Les JOBS ne heritent PAS du reseau du runner : act_runner cree les conteneurs de job sur son
-#    propre reseau par defaut, d'ou un clone qui echoue sur `forge:3000` introuvable — un runner
+#    propre reseau par defaut, d'ou un clone qui echoue sur `gitea:3000` introuvable — un runner
 #    vert qui rate tous ses jobs, le pire des etats. La config `container.network` force les jobs
 #    sur le meme reseau que la forge. C'est la troisieme incarnation du meme piege : une URL n'est
-#    jamais absolue, elle est relative au reseau d'ou on la joint — `http://forge:3000` resout
+#    jamais absolue, elle est relative au reseau d'ou on la joint — `http://gitea:3000` resout
 #    depuis un conteneur du reseau de la forge, jamais depuis un navigateur de l'hote.
 #
 # IDEMPOTENT : re-jouable apres chaque nuke. L'identite du runner vit dans le volume du projet
@@ -30,7 +30,7 @@
 #
 # USAGE : forge-runner.sh --forge-api <url-api AVEC /api/v1 — ex http://127.0.0.1:3600/api/v1>
 #                         (--admin-token <tok> | --admin-token-file <chemin>)
-#                         [--instance-url http://forge:3000] [--network lcars-ticketforge_default]
+#                         [--instance-url http://gitea:3000] [--network lcars-ticketforge_default]
 #                         [--project lcars-ticket-runner] [--verify-repo fleet/lcars]
 #                         [--labels "shell:docker://alpine:3.20,elixir:docker://lcars-build:3,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest"]
 #                         [--accept-generic]
@@ -200,7 +200,7 @@ GEN="$(mktemp -d)"
 # COMMANDE. Mesure du 2026-08-28, install reelle sur banc : `bridge`, `host` et `none` (les trois
 # drivers reseau, cites dans la phrase juste en dessous) ont ete EXECUTES — `bridge` a vide son
 # usage dans le log de l'install, les deux autres ont rendu « command not found » — et
-# `getent hosts forge`, `wget http://forge:3000/…` et `git ls-remote …` avec eux, ce qui a rempli
+# `getent hosts gitea`, `wget http://gitea:3000/…` et `git ls-remote …` avec eux, ce qui a rempli
 # la sortie de « Temporary failure in name resolution » sur une machine dont le reseau va tres
 # bien. L'operateur lisait une panne reseau ; il n'y en avait aucune.
 #
@@ -220,8 +220,8 @@ cat > "$GEN/config.yaml" <<'EOF'
 #
 # Et le forçage n'est plus necessaire, ce qui est le point : le runner, LUI, est sur le reseau de
 # la forge, et ses conteneurs de job heritent de son resolveur. Mesure du meme jour, depuis le
-# bridge interne : `getent hosts forge` -> 172.18.0.2, `wget http://forge:3000/api/v1/version` ->
-# {"version":"1.26.1"}, et `git ls-remote http://forge:3000/fleet/lcars.git` rend le sha. Le clone
+# bridge interne : `getent hosts gitea` -> 172.18.0.2, `wget http://gitea:3000/api/v1/version` ->
+# {"version":"1.26.1"}, et `git ls-remote http://gitea:3000/fleet/lcars.git` rend le sha. Le clone
 # — la seule chose que ce forçage protegeait — passe sans lui.
 container:
   # Aucun reseau force : le bridge du daemon embarque suffit, et lui existe.
