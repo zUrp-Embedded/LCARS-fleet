@@ -602,3 +602,125 @@ PYX
     return 1
   }
 }
+
+@test "MUR 11: tout fichier de /etc/lcars est DECLARE par le manifeste, ou nomme ici" {
+  # `/etc/lcars` est la configuration MACHINE : le siege, le secret OIDC du deck, le consentement
+  # d'hote, la table de transport des services. Le manifeste est l'inventaire de ce que le
+  # provisionnement TIENT — mode, proprietaire, rail. Un fichier qui y vit sans y figurer n'a ni
+  # mode garanti ni proprietaire garanti, et personne ne le sait.
+  #
+  # ⚠ DEUX FICHIERS N'Y SONT PAS, ET C'EST LEGITIME — POUR DEUX RAISONS DIFFERENTES. Les nommer
+  # separement est le point : une exemption groupee cacherait qu'elles ne disent pas la meme chose.
+  local manifeste="$REPO/deploy/system.manifest"
+  [ -r "$manifeste" ] || { echo "MUR 11 — manifeste introuvable" >&2; return 1; }
+
+  local declares
+  # ⚠ DELIMITEUR `@`, ET PAS `|` : `sed` prend le premier `|` pour sa borne, donc une alternance
+  # `(anchor|file|…)` coupe le motif en deux et l'extraction rend VIDE. Deuxieme fois aujourd'hui
+  # que ce delimiteur mord — le sigil `~r|…|` d'Elixir avait le meme piege dans la famille A.
+  declares="$(sed -nE 's@^(anchor|file|dir|preserve|runtime)[[:space:]]+/etc/lcars/([A-Za-z0-9_.-]+)[[:space:]].*@\2@p' "$manifeste" | sort -u)"
+  [ "$(printf '%s\n' "$declares" | grep -c .)" -ge 3 ] || {
+    echo "MUR 11 — moins de 3 declarations lues sous /etc/lcars : l'instrument ne lit plus le manifeste" >&2
+    return 1
+  }
+
+  # fleet.json      — ADMIN-OWNED. `Fleet.SystemConfig` le LIT au boot ; rien ne le cree, et c'est
+  #                   voulu : le provisionnement ne pose pas les reglages de l'administrateur.
+  # install.journal — l'artefact de l'INSTALLEUR lui-meme (`deploy/provision`), pas un etat converge.
+  local hors_manifeste="fleet.json install.journal"
+
+  : > "$BATS_TEST_TMPDIR/etcl"
+  local f
+  while read -r f; do
+    [ -r "$f" ] || continue
+    python3 - "$f" <<'PYX' >> "$BATS_TEST_TMPDIR/etcl" 2>/dev/null || true
+import io, re, sys
+s = io.open(sys.argv[1], encoding='utf-8', errors='replace').read()
+if '\x00' in s[:4096]: raise SystemExit
+s = re.sub(r'@(?:module)?doc\s+"""(.*?)"""', '', s, flags=re.S)
+s = '\n'.join(re.sub(r'#.*', '', l) for l in s.split('\n'))
+for m in re.finditer(r'/etc/lcars/([A-Za-z0-9_.-]+)', s):
+    print(re.sub(r'[.\-]+$', '', m.group(1)))
+PYX
+  done < <(grep -rl '/etc/lcars/' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
+             --exclude-dir=.expert --exclude-dir=tests 2>/dev/null | grep -v '/deps/[a-z_]*/')
+
+  [ -s "$BATS_TEST_TMPDIR/etcl" ] || { echo "MUR 11 — aucun porteur lu : le balayage est casse" >&2; return 1; }
+  local rompu=0 nom
+  while read -r nom; do
+    [ -n "$nom" ] || continue
+    printf '%s\n' "$declares" | grep -qx "$nom" && continue
+    printf '%s\n' $hors_manifeste | grep -qx "$nom" && continue
+    echo "MUR 11 rompu — /etc/lcars/$nom est utilise mais le manifeste ne le declare pas : ni mode," >&2
+    echo "   ni proprietaire, ni rail — et rien ne le dira" >&2
+    rompu=1
+  done < <(sort -u "$BATS_TEST_TMPDIR/etcl")
+  [ "$rompu" -eq 0 ] || return 1
+}
+
+@test "MUR 12: tout fichier grave sous le repertoire des secrets est un fichier que provision-lib DERIVE" {
+  # ⚠ LA DERIVATION EXISTE DEJA, ET SEPT SITES LA CONTOURNENT. `provision-lib.sh` compose les
+  # chemins des secrets depuis `$PROV_TOKENS_DIR` — le seed, le jeton master, la carte d'uid, le
+  # jeton systeme. Sept fichiers gravent le chemin complet a la place : l'entrypoint (deux fois),
+  # `catalogue-executor.py`, `human-converger.sh`, deux bancs, un message d'`enroll-catalogue`.
+  #
+  # CE MUR NE LEUR RETIRE RIEN — ils tournent hors de la portee de la lib et leur repli est leur
+  # seule source (mesure du §7b : `provision-lib` n'exporte pas, et ces scripts sont des enfants).
+  # Ce qu'il exige est que le NOM DE FICHIER grave soit un nom que la lib derive. Un secret qui
+  # apparaitrait sous un nom que le provisionnement ne compose nulle part serait un fichier que
+  # personne ne cree, lu par quelqu'un qui l'attend.
+  local lib="$REPO/deploy/lib/provision-lib.sh"
+  [ -r "$lib" ] || { echo "MUR 12 — provision-lib.sh introuvable" >&2; return 1; }
+
+  # Les noms DERIVES, lus a la source. `$PROV_SYSTEM_ACCOUNT.gitea_token` est une composition : on
+  # garde son suffixe, parce que le compte, lui, est verrouille ailleurs (forge.system_account).
+  local derives
+  derives="$(sed 's/#.*//' "$lib" \
+             | sed -nE 's@.*PROV_[A-Z_]+:=\$PROV_TOKENS_DIR/([A-Za-z0-9_.$-]+).*@\1@p' \
+             | sed -E 's@^\$[A-Z_]+@@' | sort -u)"
+  [ "$(printf '%s\n' "$derives" | grep -c .)" -ge 3 ] || {
+    echo "MUR 12 — moins de 3 chemins derives lus dans provision-lib : l'instrument est casse" >&2
+    return 1
+  }
+
+  # forge-role-passwords.json — la carte des mots de passe par role, posee par `provision-forge-charte`
+  # et jamais composee par la lib. Nommee ici plutot que laissee passer par un motif.
+  local hors_derivation="forge-role-passwords.json"
+
+  : > "$BATS_TEST_TMPDIR/sec"
+  local f
+  while read -r f; do
+    [ -r "$f" ] || continue
+    python3 - "$f" <<'PYX' >> "$BATS_TEST_TMPDIR/sec" 2>/dev/null || true
+import io, re, sys
+s = io.open(sys.argv[1], encoding='utf-8', errors='replace').read()
+if '\x00' in s[:4096]: raise SystemExit
+s = re.sub(r'@(?:module)?doc\s+"""(.*?)"""', '', s, flags=re.S)
+s = '\n'.join(re.sub(r'#.*', '', l) for l in s.split('\n'))
+for m in re.finditer(r'/home/private/([A-Za-z0-9_.$-]+)', s):
+    nom = re.sub(r'[.\-]+$', '', m.group(1))
+    # ⚠ UNE EXPANSION N'EST PAS UN NOM. `/home/private/$SYSTEM_ACCOUNT.gitea_token` compose son
+    # nom a l'execution : ce mur ne peut pas le lire, et l'accuser serait accuser une derivation.
+    if nom.startswith('$') or not nom:
+        continue
+    print(nom)
+PYX
+  # ⚠ `test` AU SINGULIER AUSSI. `--exclude-dir=tests` ne couvre pas `fleet/test/`, et ce mur
+  # accusait `test_catalogue_executor.py`, dont un fixture porte « ../../home/private/forge-master »
+  # — une tentative de traversee que le temoin REFUSE. Accuser un temoin pour la chaine qu'il
+  # interdit est la meme faute que lire la prose : on punit celui qui documente le defaut.
+  done < <(grep -rl '/home/private/' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp \
+             --exclude-dir=.expert --exclude-dir=tests --exclude-dir=test 2>/dev/null | grep -v '/deps/[a-z_]*/')
+
+  [ -s "$BATS_TEST_TMPDIR/sec" ] || { echo "MUR 12 — aucun porteur lu : le balayage est casse" >&2; return 1; }
+  local rompu=0 nom
+  while read -r nom; do
+    [ -n "$nom" ] || continue
+    printf '%s\n' "$derives" | grep -qx "$nom" && continue
+    printf '%s\n' "$derives" | grep -q -- "\\${nom##*.}\$" && [ "${nom#*.}" = "gitea_token" ] && continue
+    printf '%s\n' $hors_derivation | grep -qx "$nom" && continue
+    echo "MUR 12 rompu — /home/private/$nom est grave, mais provision-lib ne compose ce nom nulle part" >&2
+    rompu=1
+  done < <(sort -u "$BATS_TEST_TMPDIR/sec")
+  [ "$rompu" -eq 0 ] || return 1
+}
