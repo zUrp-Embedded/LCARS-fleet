@@ -462,3 +462,75 @@ code_of() { sed 's/#.*//' "$1"; }
     return 1
   }
 }
+
+@test "MUR 9: le chemin du magasin s'accorde partout avec celui que le compose declare" {
+  # ⚠ LA REGLE EXISTE DEJA, ECRITE ET GARDEE — SUR UN FICHIER SUR CINQ. `store_volumes.bats` dit :
+  # « store.sh possede les NOMS, le compose possede le CHEMIN. Un `/var/lib/lcars` en dur dans un
+  # script serait une seconde verite, et c'est celle qu'on ne relit pas qui derive. » Son assertion
+  # ne porte que sur `store.sh`. Mesure du 2026-08-28 : TROIS autres scripts portent le chemin
+  # (`bin/lcars-toolchain-converge`, `services/forge-gestures.sh`, `deploy/lib/provision-lib.sh`),
+  # plus le manifeste. Une regle gardee sur un cinquieme de son sujet est le verrou partiel du §22.
+  #
+  # ⚠ ET J'AI FAILLI L'ENFREINDRE. Le balayage derive m'a fait conclure « la racine n'a aucun
+  # foyer » et j'ai declare un `LCARS_STORE_ROOT_DEFAULT` dans `store.sh` — exactement la seconde
+  # verite que la regle interdit. C'est le temoin existant qui m'a arrete, en rougissant. Le
+  # balayage voit les COPIES ; il ne voit pas qui a deja ete DESIGNE.
+  #
+  # CE MUR N'INVENTE DONC AUCUNE AUTORITE : il consomme celle que la regle designe (le compose) et
+  # l'etend aux porteurs que le temoin d'origine ne regardait pas. Rien n'est retire : ce qui se
+  # verifie est l'ACCORD.
+  local compose="$REPO/deploy/docker/docker-compose.yml"
+  local lib="$REPO/deploy/lib/store.sh"
+  [ -r "$compose" ] && [ -r "$lib" ] || { echo "MUR 9 — compose ou store.sh illisible" >&2; return 1; }
+
+  local racine
+  racine="$(sed -nE 's/^[[:space:]]*LCARS_STORE_ROOT:[[:space:]]*([^[:space:]]+)[[:space:]]*$/\1/p' "$compose" | head -n1)"
+  [ -n "$racine" ] || { echo "MUR 9 — le compose ne declare plus LCARS_STORE_ROOT : l'autorite est illisible" >&2; return 1; }
+
+  local natures
+  natures="$(sed -n '/^LCARS_STORE_TREES=(/,/^)/p' "$lib" | sed -nE 's/^  ([a-z]+)\b.*/\1/p')"
+  [ "$(printf '%s\n' "$natures" | grep -c .)" -ge 3 ] || {
+    echo "MUR 9 — moins de 3 natures lues dans store.sh : l'instrument ne lit plus la liste" >&2; return 1; }
+
+  # ⚠ LES SOUS-ARBRES HORS NATURE SE DECLARENT PAR LEUR NOM, chacun une decision visible.
+  #   tofu — l'arbre de travail d'OpenTofu, pose par le manifeste en 0700 lcars-authority. Ce n'est
+  #          pas une nature de magasin (il ne se purge pas par duree de vie) mais il partage la
+  #          persistance de la racine.
+  local hors_nature="tofu"
+
+  : > "$BATS_TEST_TMPDIR/vus"
+  local f
+  while read -r f; do
+    [ -r "$f" ] || continue
+    # ⚠ CODE SEUL, ET LES DOCSTRINGS ELIXIR COMPTENT. Sans les depouiller, ce mur accusait
+    # `admiral/toolchain_reconciler.ex`, dont le `@moduledoc` cite `/var/lib/lcars/toolchain` (au
+    # SINGULIER) pour raconter une faute de la v2 — 0 occurrence en code, 1 en prose. Un mur qui lit
+    # la prose interdit de l'ecrire, et `MUR 4 bis` a coute cette lecon le meme jour.
+    python3 - "$f" "$racine" <<'PYX' >> "$BATS_TEST_TMPDIR/vus" 2>/dev/null || true
+import io, re, sys
+s = io.open(sys.argv[1], encoding='utf-8', errors='replace').read()
+s = re.sub(r'@(?:module)?doc\s+"""(.*?)"""', '', s, flags=re.S)
+s = '\n'.join(re.sub(r'#.*', '', l) for l in s.split('\n'))
+racine = sys.argv[2]
+for m in re.finditer(r'/var/lib/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*(?:/([a-z.]+))?', s):
+    tete = '/'.join(m.group(0).split('/')[:4])
+    print('ORPHELIN:' + tete if tete != racine else (m.group(1) or ''))
+PYX
+  done < <(grep -rl '/var/lib/.*lcars' "$REPO" --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp 2>/dev/null | grep -v '/deps/[a-z_]*/')
+
+  [ -s "$BATS_TEST_TMPDIR/vus" ] || { echo "MUR 9 — aucun porteur lu : le balayage est casse" >&2; return 1; }
+  local rompu=0 sub
+  while read -r sub; do
+    [ -n "$sub" ] || continue
+    case "$sub" in
+      ORPHELIN:*)
+        echo "MUR 9 rompu — « ${sub#ORPHELIN:} » ne s'accorde pas avec la racine que le compose declare (« $racine »)" >&2
+        rompu=1; continue ;;
+    esac
+    printf '%s\n' "$natures" | grep -qx "$sub" && continue
+    printf '%s\n' "$hors_nature" | grep -qx "$sub" && continue
+    echo "MUR 9 rompu — « $racine/$sub » n'est ni une NATURE de LCARS_STORE_TREES ni un sous-arbre declare" >&2
+    rompu=1
+  done < <(sort -u "$BATS_TEST_TMPDIR/vus")
+  [ "$rompu" -eq 0 ] || return 1
+}
