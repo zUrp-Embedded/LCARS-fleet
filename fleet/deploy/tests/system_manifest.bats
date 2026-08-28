@@ -337,6 +337,33 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$bad" -eq 0 ]
 }
 
+# ⚠ LA COLONNE SUBSTRAT MENTAIT, ET RIEN NE POUVAIT LE DIRE TANT QU'ELLE N'ETAIT PAS LUE.
+#
+# Les quatre unites, leurs quatre liens et `services.env` etaient declares `linux` SEUL. Or
+# `64-services` porte `APPLY-ON: wsl linux` et les POSE sur WSL — mesure du 2026-08-28, le banc en
+# portait quatre. Sans consequence tant que l'uninstall retirait tout sans lire la colonne ; le
+# filtre substrat (iteration 2) l'a rendue mordante, et sur un poste WSL ces neuf objets
+# n'entraient plus au plan DU TOUT.
+#
+# Le geste n'est pas de corriger neuf lignes : c'est de DERIVER le substrat du module qui pose.
+# Un module qui gagne un terrain, ou une unite qui change de main, doit faire rougir ICI.
+
+@test "SUBSTRAT : celui des unites suit l'APPLY-ON du module qui les pose" {
+  local mod="$BATS_TEST_DIRNAME/../modules.d/64-services.sh"
+  local applique u col bad=0
+  applique="$(grep -m1 '^# APPLY-ON:' "$mod" | sed 's/^# APPLY-ON: *//' | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
+  # Garde d'instrument : un en-tete illisible rendrait vide, donc vert sur rien.
+  [ -n "$applique" ]
+  for u in $(grep '^UNITS=' "$mod" | head -1 | tr -d '()' | sed 's/^UNITS=//'); do
+    col="$(awk -v u="/etc/systemd/system/$u.service" '$1=="anchor" && $2==u { print $5 }' "$MANIFEST")"
+    [ -n "$col" ] || { echo "unite non declaree : $u"; bad=1; continue; }
+    # `wsl+linux` en table doit couvrir `wsl linux` en en-tete, dans les deux sens.
+    local vu; vu="$(tr '+' '\n' <<<"$col" | sort | tr '\n' ' ')"
+    [ "$vu" = "$applique" ] || { echo "$u : table dit « $col », le module pose sur « $applique »"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
+
 @test "les GID declares sont FIXES, et ils sont ceux de l'image" {
   # Mesure .63 : fleet 1001, lcars-admin 1002, lcars-console 1003 — flottants, distribues par
   # `groupadd`. Le Dockerfile, lui, fixe fleet 2000 et lcars-console 2001. Les deux substrats

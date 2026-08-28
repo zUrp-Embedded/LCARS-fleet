@@ -152,10 +152,10 @@ dir       /opt/node-<version>                          0755  root:root          
 # le fichier pose s'appelle `lcars-console.conf`. Un desinstalleur ecrit depuis la table fausse le
 # raterait, silencieusement et pour toujours. C'est l'ecart qui justifie a lui seul ce fichier.
 anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
-anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           linux
-anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           linux
-anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           linux
-anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           linux
+anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           wsl+linux
 # ⚠ `/etc/sudoers.d/lcars-toolchain` N'EST PLUS DECLARE, ET C'EST DELIBERE. Le rail ne le POSE pas :
 # il le RETIRE (`45-sudoers-toolchain:152`, `rm -f`), depuis que le geste d'outillage passe par
 # `toolchain.sock`. Cette table dit ce qu'on a le DROIT DE POSER ; une absence se converge, elle ne
@@ -176,7 +176,7 @@ anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root          
 # Mieux vaut un objet non declare qu'un objet detruit a tort. Elles reviendront avec la classe qui
 # sait dire « retire seulement si NOUS l'avons pose », ce que le journal seul peut trancher.
 anchor    /etc/lcars/host-consent                      0644  root:root           linux
-anchor    /etc/lcars/services.env                      0640  root:fleet          linux
+anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any
 anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
 # ⚠ CES DEUX-LA SONT DES BINAIRES, PAS DES ANCRES DE L'OS, et la classe est un pis-aller assume :
@@ -192,16 +192,25 @@ anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root          
 anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
 
 # ─── SYMLINKS DE PATH ───────────────────────────────────────────────────────────────────────────
+# ⚠ CES OBJETS ETAIENT DECLARES `linux` SEUL, ET LE BANC EST `wsl`. `64-services` porte
+# `APPLY-ON: wsl linux` et POSE les quatre unites sur WSL — mesure du 2026-08-28, le banc en
+# portait quatre. La colonne mentait donc sur le substrat, et c'est sans consequence tant que
+# l'uninstall retire TOUT sans la lire. Le filtre substrat (iteration 2) l'a rendue mordante : sur
+# un poste WSL, les unites, leurs liens et `services.env` n'entraient plus au plan du tout.
+#
+# Le filtre n'a pas cree ce defaut, il l'a REVELE — et c'est exactement ce qu'on achete en
+# appliquant une table qu'on ne lisait pas.
+
 # ⚠ LES LIENS D'ACTIVATION DE SYSTEMD, POSES PAR `systemctl enable`, JAMAIS PAR NOUS.
 # `64-services:497` fait `enable --now` ; systemd ecrit le lien dans la cible. Ils n'etaient declares
 # nulle part — MESURE DU 2026-08-28 : les quatre survivent a `uninstall --yes`, pointant vers des
 # unites SUPPRIMEES, donc quatre liens morts dans `multi-user.target` que le prochain boot signale.
 # Le nom se compose a l'execution (`unit_path() { "$1.service" }`) sous un repertoire exempte : ni
 # ISO 1/2 ni ISO 2/2 ne pouvaient les voir. Les declarer est ce qui les rend retirables.
-link      /etc/systemd/system/multi-user.target.wants/lcars-landing.service     -  -  linux
-link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   -  -  linux
-link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  linux
-link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-landing.service     -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
 
 link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
 link      /usr/local/bin/lcars                         -     -                   wsl+linux
