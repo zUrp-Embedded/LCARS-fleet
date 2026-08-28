@@ -28,20 +28,30 @@
 # canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash. Une recette jouee plus
 # tard ne pourrait pas verifier « je peux me connecter » — elle verifierait autre chose.
 #
-# USAGE : accept --announce-file <chemin> [--forge-url URL] [--fleet-human LOGIN]
+# USAGE : accept --announce-file <chemin> [--forge-url URL]
 # EXIT  : 0 les trois tiennent · 1 au moins une echoue · 2 argument manquant
 
 set -euo pipefail
 
-ANNOUNCE="" ; FORGE_URL="" ; FLEET_HUMAN=""
+ANNOUNCE="" ; FORGE_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --announce-file) ANNOUNCE="${2:?}"; shift 2 ;;
     --forge-url)     FORGE_URL="${2:?}"; shift 2 ;;
-    --fleet-human)   FLEET_HUMAN="${2:?}"; shift 2 ;;
     *) echo "accept: option inconnue: $1" >&2; exit 2 ;;
   esac
 done
+
+# ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PLUS ────────────────────────────────
+#
+# ⚠ IL ARRIVAIT PAR `--fleet-human`, ET LA PORTE POUVAIT NE PAS LE PASSER. Sans le drapeau, cette
+# recette SAUTAIT la troisieme question — « est-ce que la fleet demarre ? » — sur une machine ou le
+# rail venait pourtant de pre-semer un humain : la capacite la plus chere a verifier etait celle
+# qu'on ne verifiait jamais dans le cas nominal.
+#
+# Ce fichier vit dans le MEME arbre que l'autorite du nom. Le recevoir d'un appelant qui l'a lu au
+# meme endroit en ferait une copie de plus a tenir d'accord — on le demande.
+FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/home/private}"
 [[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
@@ -146,7 +156,9 @@ check_ci() {
 # On la laisse dans l'etat ou on l'a trouvee : arretee si elle l'etait.
 check_fleet_start() {
   local login="$FLEET_HUMAN" home
-  [[ -n "$login" ]] || { skip "fleet : aucun humain de fleet nomme — rien a demarrer"; return; }
+  # Le nom est indeterminable : l'arbre est incomplet ou l'autorite ne repond pas. On saute en le
+  # DISANT — un « rien a demarrer » ferait croire que la machine n'attend personne.
+  [[ -n "$login" ]] || { skip "fleet : le nom de l'humain de fleet est indeterminable (forge-gestures.sh builtin-human) — rien a demarrer"; return; }
   home="$(getent passwd "$login" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { no "fleet : « $login » inconnu du systeme"; return; }
   command -v runuser >/dev/null 2>&1 || { no "fleet : runuser absent — impossible de jouer sous « $login »"; return; }

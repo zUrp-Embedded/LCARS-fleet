@@ -235,14 +235,23 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
 # refuse — « can not delete the last admin user [uid: 1] ». Structure non posee, et trois modules en
 # cascade derriere.
 
-@test "l'humain integre vient de PROV_FLEET_HUMAN, jamais de l'operateur" {
-  grep -q 'LCARS_BUILTIN_HUMAN="${PROV_FLEET_HUMAN:-}"' "$SRC"
-  ! grep -q 'LCARS_BUILTIN_HUMAN="\$PROV_HUMAN"' "$SRC"
+@test "le module ne pose AUCUN nom d'humain integre — la recette est alimentee par son autorite" {
+  # ⚠ CETTE LIGNE A PORTE LE MAUVAIS NOM DEUX FOIS. D'abord `SUDO_USER` — l'operateur, cf. la
+  # cicatrice ci-dessus. Puis `PROV_FLEET_HUMAN`, vide dans le cas nominal : une variable qui ne
+  # portait un nom que si un drapeau l'avait dit, donc une seconde source pour un fait qui en a une.
+  # Le drapeau est retire ; la bonne valeur ici est AUCUNE.
+  local code
+  code="$(sed 's/#.*//' "$SRC")"
+  run grep -c 'LCARS_BUILTIN_HUMAN' <<<"$code"
+  [ "$output" = "0" ]
+  # GARDE D'INSTRUMENT : le depouillement laisse le reste de la commande, sinon deux zeros pourraient
+  # venir d'un `sed` casse plutot que du code.
+  grep -qE 'TF_CLI_CONFIG_FILE=' <<<"$code"
 }
 
-@test "sans humain de fleet, on ne passe RIEN — le defaut vit dans forge-gestures, pas ici" {
-  # Un litteral `lcars` ici en ferait un SECOND defaut pour un meme fait, et deux defauts ne restent
-  # d'accord que tant que personne n'en touche un.
+@test "le defaut de l'humain integre vit dans forge-gestures, et LUI SEUL le declare" {
+  # Un litteral `lcars` dans le module en ferait un SECOND defaut pour un meme fait, et deux defauts
+  # ne restent d'accord que tant que personne n'en touche un.
   # ⚠ ON EPINGLE QUE LA RECETTE EST ALIMENTEE DEPUIS LA-BAS, PAS LA FORME DE LA LIGNE. Ce temoin
   # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
   # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
@@ -250,8 +259,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
-  # et le module ne redit pas ce defaut
-  ! grep -qE 'LCARS_BUILTIN_HUMAN="\$\{PROV_FLEET_HUMAN:-lcars\}"' "$SRC"
+  # et le module ne grave aucun nom de compte humain, sous aucune forme
+  ! grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
 }
 
 # ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
@@ -719,16 +728,19 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   ! grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
-@test "sans humain NOMME, le login se DEMANDE — sortir en silence rendait la fonction morte" {
-  # ⚠ SANS `--fleet-human` — LE CAS NOMINAL — le compte integre est cree par la recette sous le
-  # defaut de `forge-gestures.sh`. Une fonction qui sortirait en silence faute de nom ne poserait
-  # donc jamais le mot de passe de ce compte, c'est-a-dire jamais dans le cas ou elle sert.
+@test "le login se DEMANDE, et il n'a plus qu'une origine" {
+  # Le compte integre est cree par la recette sous le defaut de `forge-gestures.sh`. Une fonction qui
+  # sortirait en silence faute de nom ne poserait donc jamais le mot de passe de ce compte,
+  # c'est-a-dire jamais dans le cas ou elle sert.
   #
-  # Ne pas recopier ce defaut reste la regle ; on l'INTERROGE. Pas de litteral ici, pas de silence.
+  # ⚠ ELLE A LU `PROV_FLEET_HUMAN` D'ABORD, ET C'ETAIT UNE SECONDE ORIGINE. Elle ne portait un nom
+  # que si un drapeau l'avait dit ; sinon elle retombait sur l'autorite — donc le chemin nominal
+  # etait le REPLI, et le chemin nomme etait celui que personne n'exercait. Le drapeau retire, il ne
+  # reste que la question, et elle est posee sans condition.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
-  grep -qE 'login="\$\{PROV_FLEET_HUMAN:-\}"' <<<"$body"
   grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
+  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
   ! grep -q '"lcars"' <<<"$body"
 }
 
@@ -753,8 +765,13 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
   grep -q 'announce_builtin_human_password' <<<"$body"
-  # Et quand le nom manque, il le DIT au lieu de reposer la moitie en silence.
-  grep -qE 'p_warn .*--fleet-human' <<<"$body"
+  # ⚠ ET L'APPEL EST INCONDITIONNEL. Il vivait sous un `if [[ -n "$PROV_FLEET_HUMAN" ]]`, donc la
+  # moitie « humain integre » de cette porte ne rouvrait que si l'operateur avait tape un drapeau —
+  # c'est-a-dire presque jamais, pendant que la perte qu'elle repare, elle, arrivait a l'identique.
+  # Une porte qui ne rouvre que la moitie de ce qu'on a perdu n'est pas une porte, et une porte
+  # conditionnee a un geste que personne ne fait n'en est pas une non plus.
+  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
+  ! grep -q 'fleet-human' <<<"$body"
 }
 
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {

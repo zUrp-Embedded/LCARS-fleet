@@ -240,8 +240,9 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
 # esperer une collision de moins que le hasard n'en donne.
 #
 # MESURE DU 2026-08-21, poste natif : `admiral` (id de forge 1) veut l'uid 1001, deja porte par
-# `lcars`, l'humain de fleet cree par `22-fleet-human`. REFUS, sans recours, sur une machine ou
-# rien n'etait casse — c'est la formule qui l'etait.
+# `lcars`, l'humain de fleet — qui vient de CE convergeur depuis le 2026-08-25, seme sur la forge
+# par `48-forge-host`. REFUS, sans recours, sur une machine ou rien n'etait casse — c'est la formule
+# qui l'etait.
 #
 # LA DERIVATION EST DONC MORTE, ET SON BENEFICE EST REMPLACE, PAS PERDU. Ce qu'elle achetait —
 # « deux boites reconstruites donnent le meme uid a la meme personne » — n'a jamais eu besoin

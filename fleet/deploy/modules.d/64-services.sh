@@ -58,8 +58,9 @@
 #
 # Et le fond suit la forme : sur WSL, tout le reste du runtime natif est déjà posé — les scripts de
 # console et `ttyd` par `62-runtime-helpers` (`wsl linux`), les dossiers de socket par
-# `25-directories`, la release par `60-deploy`, l'humain de fleet par `22-fleet-human`. Tout existe
-# SAUF ce qui démarre. Un poste WSL avait donc une fleet et pas de porte.
+# `25-directories`, la release par `60-deploy`, l'humain de fleet par le convergeur que CE module
+# tire lui-même (`48` le sème sur la forge, `64` le matérialise). Tout existe SAUF ce qui démarre.
+# Un poste WSL avait donc une fleet et pas de porte.
 #
 # L'INVARIANT QUE CE MODULE VIOLAIT, ET QU'UN TÉMOIN TIENT DÉSORMAIS : un module n'est légitimement
 # en check-seul que sur `docker`, où l'IMAGE fournit l'état. Sur `wsl` ou `linux`, « check-seul »
@@ -621,17 +622,35 @@ converge_humans_now() {
     p_ok "aucun humain à matérialiser — la team « $PROV_HUMANS_TEAM » de la forge est vide. Ce n'est pas une faute : les gens s'enrôlent sur la forge, un propriétaire les ajoute à la team, et le convergeur les matérialise au tour suivant"
   fi
 
-  # ⚠ UN NOM DONNÉ QUE RIEN N'A MATÉRIALISÉ EST UNE DÉRIVE, ET ELLE N'AVAIT AUCUN LECTEUR.
-  # « la team est vide, ce n'est pas une faute » est vrai quand personne n'a rien demandé. Ça devient
-  # un mensonge dès que l'opérateur a tapé `--fleet-human bob` : il a nommé, et il repart sans bob.
+  # ⚠ L'HUMAIN QUE CE RAIL PRÉ-SÈME ET QUE RIEN N'A MATÉRIALISÉ EST UNE DÉRIVE.
+  # « la team est vide, ce n'est pas une faute » est vrai dans la boîte, où personne n'a rien promis.
+  # Sur le poste, c'en est une : ce rail EXISTE pour livrer une machine sur laquelle quelqu'un peut
+  # lancer une fleet sans geste (⚖ USER 2026-08-25), la recette a semé le compte intégré vingt rangs
+  # plus haut, et repartir sans lui est un manquement, pas un état légitime.
   #
   # LE CAS QUI MORD N'EST PAS EXOTIQUE : `48-forge-host` dérive si `tofu` est absent, mais la forge
   # elle-même est DEBOUT (le compose a réussi). Le convergeur l'interroge, obtient une team vide,
   # rend 0 — et sans cette garde le module concluait « ce n'est pas une faute » alors que la vraie
   # cause est vingt rangs plus haut. Une cause fausse donnée à quelqu'un qui debugge coûte plus cher
   # que pas de cause du tout.
-  if [[ -n "${PROV_FLEET_HUMAN:-}" ]] && ! grep -qxF -- "$PROV_FLEET_HUMAN" <<<"$apres"; then
-    p_drift "« $PROV_FLEET_HUMAN » a été NOMMÉ et rien ne l'a matérialisé — regarde le verdict de « 48-forge-host » (la forge a-t-elle reçu le compte ?) avant celui du convergeur"
+  #
+  # ⚠ ET ELLE ÉTAIT ARMÉE PAR UN DRAPEAU, DONC MUETTE DANS LE CAS NOMINAL. Elle ne se déclenchait que
+  # si l'opérateur avait tapé `--fleet-human <nom>` — c'est-à-dire jamais, presque toujours, pendant
+  # que la panne qu'elle décrit, elle, se produisait à l'identique. Le nom se demande désormais à son
+  # autorité, donc la garde est TOUJOURS armée sur le rail qui pré-sème.
+  #
+  # ⚠ ET IL N'Y A PAS DE GARDE DE SUBSTRAT ICI, PARCE QU'ELLE SERAIT INATTEIGNABLE. Dans la boîte il
+  # n'y a pas de pré-semis — `48-forge-host` n'y tourne pas, les gens s'enrôlent seuls, une team vide
+  # y est un état d'attente — et accuser là-bas ferait dériver toute boîte neuve. Ce qui l'empêche est
+  # déjà écrit deux étages plus haut : cette fonction n'est appelée que par `apply()`, et ce module
+  # est `APPLY-ON: wsl linux`. Un `!= docker` de plus se lirait comme une décision, et serait un
+  # repli contre un état que le sélecteur du runner rend impossible.
+  local builtin_human
+  builtin_human="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  if [[ -z "$builtin_human" ]]; then
+    p_drift "le nom de l'humain intégré est indéterminable (« forge-gestures.sh builtin-human ») — impossible de vérifier que ce rail a livré quelqu'un qui puisse lancer une fleet"
+  elif ! grep -qxF -- "$builtin_human" <<<"$apres"; then
+    p_drift "« $builtin_human » est l'humain que ce rail pré-sème, et rien ne l'a matérialisé — regarde le verdict de « 48-forge-host » (la forge a-t-elle reçu le compte ?) avant celui du convergeur"
   fi
 }
 
