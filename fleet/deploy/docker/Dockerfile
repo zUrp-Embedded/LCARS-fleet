@@ -180,6 +180,21 @@ WORKDIR /src/fleet
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
 
+# ─── L'ATTESTATION DU PAQUET, SI LE CONTEXTE EN EST UN ──────────────────────────────────────────
+#
+# ⚠ CE STAGE RECOMPILAIT CE QUI VENAIT D'ETRE COMPILE, ET LE MECANISME POUR NE PAS LE FAIRE EXISTE
+# DEPUIS `f36593757`. `etc/install.sh` (`build_release`) lit `<parent>/.source-revision` : present a
+# cote d'une release dans `_build/prod/rel`, il DIT « paquet — release batie par pack.sh (gate joue
+# la-bas) » et rend 0 sans rien rejouer. C'est ce chemin que le rail poste emprunte, et c'est
+# pourquoi une install y roule en trente secondes. Ici, deux lignes du `.dockerignore` le
+# rendaient inatteignable : `fleet/_build` emportait la release, le `*` de tete emportait le stamp.
+#
+# LE PATTERN EST OPTIONNEL, ET LA FORME EST L'IDIOME, PAS UNE COQUETTERIE. `.source-revisio[n]` est
+# un glob : depuis un checkout ordinaire il ne matche RIEN, et un `COPY` dont aucun terme ne matche
+# ECHOUE. `LICENSE` est la pour cela — il est dans le contexte par construction (`.dockerignore`
+# l'inclut), donc le COPY a toujours au moins une source, et l'attestation entre quand elle existe.
+# Elle a sa place a cote : le kit de `pack.sh` porte les deux a la racine.
+COPY --chown=builder:fleet LICENSE .source-revisio[n] /src/
 
 # hex/rebar + build + pose sous /opt/lcars/runtime — le cache BuildKit évite de re-télécharger
 # hex/deps à chaque build (le layer, lui, se rebuild à chaque changement de source : voulu,
@@ -234,10 +249,22 @@ ENV LCARS_GIT_SHA=${GIT_SHA} LCARS_BUILD_DATE=${BUILD_DATE}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+# ⚠ DEUX CHEMINS, ET C'EST `etc/install.sh` QUI TRANCHE — PAS CE FICHIER (⚖ user 2026-08-28).
+# Depuis un KIT (`.source-revision` copié juste au-dessus), `build_release` voit la release attestée
+# par `pack.sh` et rend 0 : ni gate, ni compilation, la pose seule. Depuis un CHECKOUT NU, il
+# compile — et il le DIT, comme il dit déjà que le gate est sauté. L'option de REFUSER de bâtir sans
+# kit a été écartée : une image qui ne se bâtit plus depuis un clone est un outil de moins, et le
+# trou qu'elle fermerait est déjà nommé à l'écran. Le `echo` ci-dessous met les deux chemins dans le
+# log de build, à l'endroit où on les cherche quand un build est trop long ou trop court.
 RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \
-    mix local.hex --force && mix local.rebar --force \
+    if [ -f /src/.source-revision ]; then \
+      echo "image: PAQUET — .source-revision $(cat /src/.source-revision) : la release vient de pack.sh, ni gate ni compilation ici"; \
+    else \
+      echo "image: CHECKOUT NU — aucun .source-revision : la release est COMPILEE dans ce stage, et le gate n'est PAS rejoue (l'attestation vient du paquet, ce build n'en a pas)"; \
+    fi \
+    && mix local.hex --force && mix local.rebar --force \
     && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/install.sh \
          || [ "$?" -eq 3 ]; }
 
