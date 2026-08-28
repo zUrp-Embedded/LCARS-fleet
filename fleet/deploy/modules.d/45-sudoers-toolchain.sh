@@ -84,8 +84,12 @@ SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 # recopie pas un chemin, on demande. La couture de test garde la priorité sur les deux.
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-}"
 if [[ -z "$SKILL_SRC" ]]; then
-  if [[ -d /opt/lcars/admiral-skills ]]; then
-    SKILL_SRC=/opt/lcars/admiral-skills
+  # ⚠ CE CHEMIN EST CELUI DE L'IMAGE, ET IL SE DERIVE. `LCARS_HELPERS_DIR` porte la racine que le
+  # Dockerfile emploie ; l'ecrire en dur ici ferait un second endroit a corriger le jour ou elle
+  # bouge — et la phase B la fait precisement bouger.
+  _skills_image="${LCARS_HELPERS_DIR:-/opt/lcars}/admiral-skills"
+  if [[ -d "$_skills_image" ]]; then
+    SKILL_SRC="$_skills_image"
   else
     SKILL_SRC="$(repo_root)/fleet/deploy/admiral/skills"
   fi

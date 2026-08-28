@@ -68,7 +68,11 @@
 set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
-TOKENS_DIR="/home/private"
+# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `PROV_TOKENS_DIR` est la SSoT
+# (`provision-lib.sh`) ; un litteral ici serait un SECOND endroit qui decide ou vivent les jetons,
+# et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
+# operateur lance a la main hors du rail.
+TOKENS_DIR="${PROV_TOKENS_DIR:-/home/private}"
 # vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-45) — account + token minted,
 # both inert until the box opens. A seat = a full identity, no branch here. (The older note
 # claiming vulcan "absent rightly, external Codex agent" described the pre-seat world and is
