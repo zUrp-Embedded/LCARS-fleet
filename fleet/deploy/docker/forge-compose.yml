@@ -27,7 +27,7 @@
 # BRANCHER LCARS DESSUS : attacher le conteneur LCARS au réseau de CE projet, puis pointer
 #   l'URL sur le nom de service :
 #     docker network connect lcars-devforge_default <conteneur-lcars>
-#     FORGE_BASE_URL=http://forge:3000
+#     FORGE_BASE_URL=http://gitea:3000
 #   (`host.docker.internal` n'est PAS une option par défaut sous Linux — il faut un
 #    `extra_hosts: host-gateway`. Le réseau partagé est le chemin qui marche sans supposition.)
 #

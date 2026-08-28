@@ -76,7 +76,7 @@
 #   LCARS_HOSTNAME             hostname du conteneur (défaut bridge)
 #   FORGE_BASE_URL             URL de TA forge VUE DU CONTENEUR (Docker Desktop :
 #                              http://host.docker.internal:3300 · docker natif : le nom de service
-#                              sur un réseau partagé, http://forge:3000). « localhost » y désigne
+#                              sur un réseau partagé, http://gitea:3000). « localhost » y désigne
 #                              la BOÎTE — vide = modules forge en instruct-only, le doctor le dit
 #   FORGE_PUBLIC_URL           la MÊME forge VUE DU NAVIGATEUR (ce que TU tapes). Défaute sur
 #                              FORGE_BASE_URL, et ce défaut n'est juste que si les deux
@@ -554,7 +554,7 @@ dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
        · Docker natif (Linux)         → host.docker.internal N'EXISTE PAS sans un
          « extra_hosts: host-gateway » que ce compose ne déclare pas. Attache la boîte au
          réseau de ta forge et vise le NOM DE SERVICE avec son port INTERNE :
-         http://forge:3000 — surtout pas le port publié.
+         http://gitea:3000 — surtout pas le port publié.
          (fleet/deploy/docker/forge-compose.yml porte cette règle et son motif)
 
   2. SON ADRESSE VUE DU NAVIGATEUR → FORGE_PUBLIC_URL=http://<ce que TU tapes>:<port>

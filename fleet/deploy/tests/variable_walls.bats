@@ -759,3 +759,85 @@ PYX
                                      "le proprietaire du secret OIDC"
   [ "$rompu" -eq 0 ] || return 1
 }
+
+@test "MUR 14: un nom de service compose est une ENTREE DNS et un nom de CONTENEUR — ses lecteurs le derivent" {
+  # ⚠ CETTE CLASSE A CASSE LA CI DEUX FOIS LE 2026-08-28, ET LES DEUX FOIS PAR LE MEME COMMIT.
+  # `b01fe3164` a renomme deux services compose — `forge` -> `gitea`, `runner` -> `act` — et compose
+  # publie le nom du service a la fois comme ENTREE DNS du reseau et comme segment du nom de
+  # conteneur (`<projet>-<service>-1`). Les consommateurs le portent en CHAINE :
+  #
+  #   · l'override genere de `forge-runner.sh` nommait `runner:` -> compose creait un service sans
+  #     image, « invalid compose project », le runner ne demarrait pas ;
+  #   · une fois cela repare, l'URL interne disait encore `http://forge:3000` -> le runner tournait
+  #     et bouclait sur « lookup forge : no such host ».
+  #
+  # Un nom dans une URL et un nom dans un nom de conteneur ne RESSEMBLENT pas a des references :
+  # aucun grep sur « le nom du service » ne les trouve. Ce mur les trouve.
+  #
+  # ⚠ ET LE RENOMMAGE NE SE VOIT QUE SUR UN CONTENEUR NEUF — le rail ne reapplique pas un compose a
+  # une forge debout. D'ou quinze jours sans rien casser, puis deux pannes a la premiere install
+  # fraiche. Un mur est le seul instrument qui puisse voir ca sans monter une machine.
+  local rompu=0
+
+  # (1) LA FORGE : le service que `forge-compose.yml` definit EST l'hote des URL internes.
+  local forge_svc
+  forge_svc="$(python3 -c "
+import yaml,io
+d=yaml.safe_load(io.open('$REPO/deploy/docker/forge-compose.yml'))
+print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
+  [ -n "$forge_svc" ] || { echo "MUR 14 — le service de forge-compose.yml ne se lit plus" >&2; return 1; }
+
+  # ⚠ CODE SEUL — ET LA PROSE COMPTE QUAND MEME, AILLEURS. Ce mur ne lit que le code (quatrieme
+  # fois aujourd'hui que la prose entre dans un extracteur). Mais les commentaires qui NOMMAIENT
+  # `http://forge:3000` ont ete corriges dans le meme geste : ils disaient a l'operateur d'utiliser
+  # une URL qui ne resout plus. Un mur ne doit pas les accuser ; un humain doit les reparer.
+  local hotes
+  hotes="$(grep -rhE 'https?://[a-z][a-z0-9_.-]*:3000' "$REPO" \
+             --exclude-dir=_build --exclude-dir=.git --exclude-dir=tmp --exclude-dir=.expert \
+             --exclude-dir=tests --exclude-dir=test 2>/dev/null \
+           | sed 's/#.*//' | grep -oE 'https?://[a-z][a-z0-9_.-]*:3000' \
+           | sed -E 's@https?://([a-z][a-z0-9_.-]*):3000@\1@' | sort -u \
+           | grep -vE '^(localhost|127\.0\.0\.1|0\.0\.0\.0)$' || true)"
+  local h
+  for h in $hotes; do
+    [ "$h" = "$forge_svc" ] && continue
+    echo "MUR 14 rompu — une URL interne vise « $h:3000 » alors que le compose definit le service" >&2
+    echo "   « $forge_svc » : c'est le nom DNS que le reseau publie, et « $h » n'existe pas" >&2
+    rompu=1
+  done
+
+  # (2) LE RUNNER : le service que `runner-compose.yml` definit EST le segment du nom de conteneur.
+  # (2) LES NOMS DE CONTENEUR : `<projet>-<service>-1`. Le segment doit etre un service qu'UN des
+  # compose definit — pas forcement celui du runner : ce depot en a trois (`lcars` pour la boite,
+  # `gitea` pour la forge, `act` pour le runner) et les references les nomment tous les trois.
+  # Ma premiere ecriture comparait tout au service du RUNNER et accusait `${PROJECT}-lcars-1`, une
+  # reference parfaitement juste vers la boite. Comparer a l'ENSEMBLE evite d'avoir a deviner quel
+  # compose une variable de projet designe — et c'est aussi ce qui rend le mur juste quand un
+  # quatrieme compose arrive.
+  local services
+  services="$(python3 -c "
+import yaml, io, glob
+noms = set()
+for f in glob.glob('$REPO/deploy/docker/*compose*.yml'):
+    try: d = yaml.safe_load(io.open(f)) or {}
+    except Exception: continue
+    noms |= set((d.get('services') or {}).keys())
+print('\n'.join(sorted(noms)))" 2>/dev/null)"
+  [ "$(printf '%s\n' "$services" | grep -c .)" -ge 2 ] || {
+    echo "MUR 14 — moins de deux services lus dans les compose : l'instrument est casse" >&2; return 1; }
+
+  local segs
+  segs="$(grep -rhoE '\$\{?[A-Z_]*PROJECT\}?-(runner-)?[a-z]+-1' "$REPO/deploy" "$REPO/bin" "$REPO/services" \
+            --exclude-dir=tests 2>/dev/null \
+          | sed -E 's@.*-([a-z]+)-1$@\1@' | sort -u || true)"
+  [ -n "$segs" ] || { echo "MUR 14 — aucune reference de conteneur lue : le balayage est casse" >&2; return 1; }
+  local sg
+  for sg in $segs; do
+    printf '%s\n' "$services" | grep -qx "$sg" && continue
+    echo "MUR 14 rompu — un nom de conteneur vise le service « $sg », qu'AUCUN compose ne definit :" >&2
+    echo "   le conteneur n'existera jamais sous ce nom (services definis : $(printf '%s ' $services))" >&2
+    rompu=1
+  done
+
+  [ "$rompu" -eq 0 ] || return 1
+}

@@ -232,7 +232,7 @@ foreign_forge_refusal() {
 #
 # ⚠ LE RUNNER REJOINT LE RESEAU DE LA FORGE, il ne compose pas son adresse publiee : depuis un
 # conteneur, `127.0.0.1:21000` designe ce conteneur-la. `FORGE_NET` le met sur le bridge de la
-# forge, ou elle repond a `http://forge:3000`.
+# forge, ou elle repond a `http://gitea:3000`.
 : "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
 
 # ⚠ TROIS LABELS, TOUS PUBLICS, ET C'EST CE QUI REND CE RAIL AUTONOME. Ils couvrent les `runs-on`
