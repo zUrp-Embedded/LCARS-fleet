@@ -288,7 +288,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 # `LCARS_SITE_BASE=/doc/` : le deck la sert sous ce chemin, et tout lien interne se compose depuis
 # cette base (`src/lib/href.js`). Batie a la racine, la copie locale s'afficherait et tous ses liens
 # partiraient a la racine du deck — cassee en silence.
-FROM node:20-slim AS site
+FROM node:24-slim AS site
 # La provenance vient de l'APPELANT : ce stage n'a ni git ni `.git`, et la plaquette affiche le sha
 # en pied de page. Sans cet argument elle imprime « unknown », ce qui est honnete et visible.
 ARG GIT_SHA=unknown

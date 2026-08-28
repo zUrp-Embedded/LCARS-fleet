@@ -50,9 +50,18 @@ elixir_version() { elixir --short-version 2>/dev/null || echo absent; }
 #
 # ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE. `/opt/elixir-<version>`
 # et ses quatre symlinks ont quitte `system.manifest` en meme temps que ce module a cesse de les
-# poser — sur une machine NEUVE, c'est exact et complet. Sur une machine deja provisionnee, ils
-# sont toujours la, et plus rien ne les nomme : `provision uninstall` ne les emporterait pas, et
-# personne ne saurait dire d'ou ils viennent.
+# poser — sur une machine NEUVE, c'est exact et complet. La ou l'ancien mecanisme a tourne, ils sont
+# toujours la, et plus rien ne les nomme : `provision uninstall` ne les emporterait pas, et personne
+# ne saurait dire d'ou ils viennent.
+#
+# ⚠ ET « LA OU IL A TOURNE » N'EST PAS UN PARC — C'EST ICI. Aucun systeme LCARS n'est deploye a ce
+# jour (⚖ user 2026-08-28 : « ya PAS de systeme deja deploye ; pour ca il faut d'abord avoir un
+# systeme qui fonctionne »). Les machines concernees sont les POSTES DE TRAVAIL ou le rail a ete
+# joue en partie — celui qui ecrit ces lignes en est un : `/opt/elixir-1.18.4` y est pose, et ses
+# quatre symlinks pointent dessus (mesure du 2026-08-28). Ce geste n'entretient pas une flotte, il
+# rattrape des postes de dev ; c'est plus petit que ce que la premiere version de ce commentaire
+# laissait croire, et ca ne le rend pas facultatif — un seul poste qui compile avec le mauvais
+# binaire suffit a produire une release que personne n'a decidee.
 #
 # ⚠ ET LE SYMLINK EST PIRE QUE L'ARBRE, PARCE QU'IL GAGNE. `/usr/local/bin` passe AVANT `/usr/bin`
 # dans le PATH par defaut : tant que `/usr/local/bin/elixir` pointe vers l'ancien precompile, la

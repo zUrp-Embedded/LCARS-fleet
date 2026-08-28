@@ -9,10 +9,14 @@
 # ca — et `system.manifest` a perdu les cinq lignes correspondantes.
 #
 # ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE, et c'est ce trou que ces
-# temoins gardent. Sur un poste deja provisionne les cinq objets sont toujours la ; le symlink est
-# le pire des deux, parce qu'il GAGNE : `PROV_LINK_DIR` passe avant `/usr/bin` dans le PATH, donc
-# la machine continuerait de compiler avec l'ancien binaire pendant que le paquet apt est pose,
+# temoins gardent. La ou l'ancien mecanisme a tourne les cinq objets sont toujours la ; le symlink
+# est le pire des deux, parce qu'il GAGNE : `PROV_LINK_DIR` passe avant `/usr/bin` dans le PATH,
+# donc la machine continuerait de compiler avec l'ancien binaire pendant que le paquet apt est pose,
 # sonde vert et jamais appele.
+#
+# ⚠ LE SUJET DE CE GESTE EST UN POSTE DE DEV, PAS UN PARC. Aucun systeme LCARS n'est deploye a ce
+# jour (⚖ user 2026-08-28) : les machines concernees sont celles ou le rail a ete joue en partie,
+# a commencer par celle qui a ecrit ce fichier.
 #
 # ⚠ ET UN GESTE QUI SUPPRIME SE MESURE D'ABORD SUR CE QU'IL NE SUPPRIME PAS. Le rang 4 du chantier
 # empreinte nomme la faute : detruire le bien d'autrui. Un operateur a le droit d'avoir SON elixir

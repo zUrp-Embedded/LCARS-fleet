@@ -172,10 +172,16 @@ dir       /etc/lcars                                   0755  root:root          
 # sert `elixir 1.18.3`, au-dessus du plancher `mix.exs` : `15-toolchain` le demande a apt, et un
 # paquet apt n'est pas un objet de cette table (les paquets ont leur propre classe, et leur propre
 # journal). Partent avec lui les quatre symlinks `/usr/local/bin/{elixir,elixirc,iex,mix}` plus bas.
-# NODE RESTE, et pour la raison exacte qui a fait tomber Elixir, prise a l'envers : `16-node` pin
-# `20.20.2`, l'apt de 26.04 sert `22.22` — un saut de MAJEURE, qui est un changement de spec et pas
-# de l'entretien. Le jour ou ce pin descend dans l'apt, cette ligne suit, et `expand_version` perd
-# son dernier client.
+# NODE RESTE, ET LA RAISON N'EST PAS CELLE QUE J'AVAIS ECRITE ICI. Le premier jet disait « un saut
+# de MAJEURE, qui est un changement de spec » — le saut a eu lieu depuis (20.20.2 -> 24.20.0, ⚖ user
+# 2026-08-28) et node est TOUJOURS un tarball. Le vrai motif est celui que `16-node` porte en tete,
+# et il est MESURE sur la cible : `apt install nodejs npm` tire 459 paquets (l'empaquetage Debian de
+# npm traine tout l'ecosysteme node-*), `nodejs` seul en tire 21 mais n'a pas npm, donc ne batit
+# rien. Le tarball officiel embarque npm : zero paquet apt.
+# C'est ce qui distingue node d'Elixir — dont le pin est tombe parce que l'apt servait deja la bonne
+# minor, pour 0 paquet de plus. La symetrie est trompeuse : ce qui decide n'est pas « la distro
+# l'a-t-elle », c'est ce qu'il en coute de le lui demander.
+# Le jour ou ce calcul s'inverse, cette ligne suit, et `expand_version` perd son dernier client.
 dir       /opt/node-<version>                          0755  root:root           wsl+linux
 
 # ─── ANCRES — fichiers a chemin fixe hors prefixe ───────────────────────────────────────────────

@@ -83,7 +83,7 @@ rail porte le groupe et l'ordre de lecture, qu'un nom de fichier ne dit pas.
 pointe ici par `working-directory`.
 
     push sur main, si assets/** ou le catalogue ou le schéma de verdict ont bougé
-      -> checkout, setup-node 20 (cache npm), npm ci, npm run build
+      -> checkout, setup-node 24 (cache npm), npm ci, npm run build
       -> upload-pages-artifact (dist/) -> deploy-pages
 
 Permissions minimales (`contents: read`, `pages: write`, `id-token: write`), un seul déploiement à

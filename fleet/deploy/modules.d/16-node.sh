@@ -40,12 +40,22 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# ⚠ LA VERSION SUIT LES DEUX AUTRES BUILDS, ET UN TÉMOIN L'ÉPINGLE. Le Dockerfile bâtit le site sous
-# `node:20-slim`, le workflow GitHub sous `node-version: 20`. Trois producteurs de la MÊME doc : une
-# majeure différente ici rendrait un artefact que personne d'autre ne produit.
-NODE_VERSION="${LCARS_NODE_VERSION:-20.20.2}"
-NODE_SHA256_X64=df770b2a6f130ed8627c9782c988fda9669fa23898329a61a871e32f965e007d
-NODE_SHA256_ARM64=73093db209e4e9e09dd7d15a47aeaab1b74833830df03efa5f942a1122c5fa71
+# ⚠ LA VERSION SUIT LES DEUX AUTRES BUILDS, ET UN TÉMOIN L'ÉPINGLE — CE QUI ÉTAIT FAUX QUAND CETTE
+# PHRASE A ÉTÉ ÉCRITE. Le Dockerfile bâtit le site sous `node:<majeure>-slim`, le workflow GitHub
+# sous `node-version: <majeure>` : trois producteurs de la MÊME doc, et rien ne les confrontait. Le
+# témoin existe maintenant (`node_pin.bats`), et c'est lui qui rend cette ligne vraie.
+#
+# ⚠ 20 ÉTAIT EN FIN DE VIE. « Iron » est sorti de support en avril 2026 ; son dernier patch date du
+# 2026-03-24 et il n'en aura plus. Un toolchain de produit qui ne reçoit plus de correctif n'est pas
+# un pin stable, c'est un pin ARRÊTÉ — la différence ne se voit pas tant qu'aucun CVE ne tombe.
+# 24 « Krypton » est la LTS courante (relevé sur `nodejs.org/dist/index.json` le 2026-08-28).
+#
+# ⚠ ET CE BUMP-CI EST UN SAUT DE MAJEURE, PAS DE L'ENTRETIEN (⚖ user 2026-08-28 : « node, on
+# bump »). Il est ARBITRÉ, à la différence du pin Elixir qui est tombé parce que la distro servait
+# déjà la bonne minor. Les sha256 sont ceux de `SHASUMS256.txt` de la release, relevés le 2026-08-28.
+NODE_VERSION="${LCARS_NODE_VERSION:-24.20.0}"
+NODE_SHA256_X64=2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2
+NODE_SHA256_ARM64=5f4ddab610c1ab2016b3c227cebdbf6d9495161487e4739c7b90090595f465f7
 
 NODE_HOME="${LCARS_NODE_HOME:-/opt/node-${NODE_VERSION}}"
 NODE_BINS=(node npm npx)

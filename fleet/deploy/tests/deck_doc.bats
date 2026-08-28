@@ -65,7 +65,7 @@ setup() {
 }
 
 @test "l'arbre servi est rendu lisible EXPLICITEMENT, jamais par heritage du COPY" {
-  # `COPY` conserve les modes de l'etage source (`node:20-slim`), qui ne nous doit rien. Un arbre
+  # `COPY` conserve les modes de l'etage source (`node:<majeure>-slim`), qui ne nous doit rien. Un arbre
   # servi doit dire lui-meme qu'il est lisible ; l'heritage est une hypothese sur une image amont.
   grep -qE "^RUN chmod -R a\+rX ${DOC_DEST%/doc}\$" "$DOCKERFILE"
 }
