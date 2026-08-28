@@ -183,7 +183,39 @@ check_fleet_start() {
   "${as[@]}" bash -lc 'command -v fleet_v2' >/dev/null 2>&1 \
     || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
 
-  if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then
+  # ─── LE SONDAGE NE PASSE PLUS PAR UN TUYAU, ET C'EST UN CORRECTIF ─────────────────────────────
+  #
+  # ⚠ `… | grep -q` SOUS `set -o pipefail` REND FAUX QUAND GREP TROUVE. `grep -q` sort au PREMIER
+  # match et ferme le tuyau ; le producteur, qui a encore des lignes a ecrire, meurt sur SIGPIPE.
+  # `pipefail` prend alors le dernier code non nul du pipeline — celui du producteur — et le `if`
+  # est faux alors que la chaine cherchee a bien ete trouvee.
+  #
+  # MESURE DU 2026-08-28, banc poste, fleet PROUVEE vivante avant et apres la mesure :
+  #
+  #     sans pipefail    rc=0    PIPESTATUS=141 0
+  #     avec pipefail    rc=141  PIPESTATUS=141 0     <- le shell de ce fichier (ligne 34)
+  #
+  # 141 = 128+13 = SIGPIPE cote producteur ; 0 = grep A TROUVE. Les deux moities du pipeline
+  # disaient la verite, et c'est `pipefail` qui lisait la mauvaise.
+  #
+  # CE QUE CA COUTAIT : les DEUX sondages ci-dessous rendaient faux en permanence, donc la branche
+  # « deja demarree » ne pouvait jamais s'armer et la boucle ne pouvait jamais reussir. La troisieme
+  # capacite de ce fichier ne pouvait rendre que `NON` — sur toute machine, dans tout etat.
+  #
+  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE, comme l'assertion de PATH juste au-dessus :
+  # `check_fleet_start` sortait sur « aucun humain de fleet nomme » des que `--fleet-human` n'etait
+  # pas passe, c'est-a-dire dans le cas nominal. Deux instruments casses dans la meme fonction,
+  # decouverts le meme jour, par le meme retrait de drapeau.
+  #
+  # LA FORME QUI TIENT : on CAPTURE, puis on compare. Pas de tuyau, donc pas de SIGPIPE, donc pas
+  # d'interaction avec `pipefail` — et le `|| true` sur la capture dit que « status » qui echoue est
+  # une REPONSE (la fleet n'est pas la), jamais une panne de ce script.
+  fleet_up() { # fleet_up -> 0 si le BEAM de $login est vivant
+    local out; out="$("${as[@]}" fleet_v2 status 2>/dev/null || true)"
+    [[ "$out" == *"BEAM vivant"* ]]
+  }
+
+  if fleet_up; then
     ok "fleet : deja demarree sous « $login » (laissee telle quelle)"
     return
   fi
@@ -195,7 +227,7 @@ check_fleet_start() {
   # Le demarrage est asynchrone (tmux + BEAM) : on laisse le temps qu'il faut, borne.
   local i alive=0
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    if "${as[@]}" fleet_v2 status 2>/dev/null | grep -q 'BEAM vivant'; then alive=1; break; fi
+    if fleet_up; then alive=1; break; fi
     sleep 2
   done
   "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true
