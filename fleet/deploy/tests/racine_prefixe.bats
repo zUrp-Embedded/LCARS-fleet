@@ -91,7 +91,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
     || { echo "le build du Dockerfile n'installe pas sous « $ATTENDU »" >&2; return 1; }
   grep -qE "^COPY --from=build $ATTENDU $ATTENDU\$" "$d" \
     || { echo "le COPY du Dockerfile ne porte pas « $ATTENDU » des deux cotes" >&2; return 1; }
-  n="$(grep -cE "(chown -R|chmod -R)[^\n]* $ATTENDU( |\$)" "$d" || true)"
+  n="$(grep -cE "(chown -R|chmod -R).* $ATTENDU( |\$)" "$d" || true)"
   [ "$n" -eq 2 ] || { echo "attendu 2 verrouillages (chown/chmod) sur « $ATTENDU », vu $n" >&2; return 1; }
   n="$(grep -cE "ln -sf $ATTENDU/bin/" "$d" || true)"
   [ "$n" -eq 2 ] || { echo "attendu 2 symlinks depuis « $ATTENDU/bin/ », vu $n" >&2; return 1; }

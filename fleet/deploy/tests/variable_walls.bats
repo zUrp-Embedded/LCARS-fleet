@@ -607,6 +607,11 @@ PYX
   #   /local/LCARS-v1.5 — cite par une donnee de CATALOGUE (`systemPrompt:` d'un cap-profile) ;
   #                       un catalogue est substituable, son contenu n'est pas un fait de la fleet
   #   /local/LCARS-fleet— un nom d'avant, qui ne vit plus que dans le CHANGELOG et un plan
+  #   /local/LCARS_v2   — le prefixe d'AVANT la descente sous `/opt/lcars`. Il n'a pas eu besoin
+  #                       d'etre declare tant qu'il ETAIT `$a` : le balayage l'excluait a ce titre.
+  #                       La migration l'a rendu orphelin sans que personne ne le nomme, et il ne
+  #                       vit plus que dans la cicatrice de `25-directories` qui raconte le scraper
+  #                       qui ne connaissait que lui. Meme statut que ses trois voisins ci-dessus.
   #
   # ⚠ ET LES `tests/` SONT HORS BALAYAGE, PARCE QUE CE MUR S'EST ACCUSE LUI-MEME. La cicatrice
   # ci-dessus cite le nom tronque pour expliquer le defaut ; le balayage l'a lue et l'a comptee
@@ -620,7 +625,8 @@ PYX
                | grep -vxF -- "$a" \
                | grep -vxF -- '/local/LCARS' \
                | grep -vxF -- '/local/LCARS-v1.5' \
-               | grep -vxF -- '/local/LCARS-fleet' || true)"
+               | grep -vxF -- '/local/LCARS-fleet' \
+               | grep -vxF -- '/local/LCARS_v2' || true)"
   [ -z "$orphelins" ] || {
     echo "MUR 10 rompu — prefixe(s) etranger(s) sous /local, ni « $a » ni un arbre v1 declare :" >&2
     printf '     %s\n' $orphelins >&2

@@ -275,7 +275,7 @@ secret_writers() {
 @test "MUR 3: aucun FORGE_TOKEN_FILE construit depuis le repertoire des secrets ne part vers une porte" {
   local f
   for f in "${CODE[@]}"; do
-    absent 'FORGE_TOKEN_FILE=[^\n]*(PRIVATE_DIR|TOKENS_DIR|/opt/lcars/var/tokens)' "$f"
+    absent 'FORGE_TOKEN_FILE=.*(PRIVATE_DIR|TOKENS_DIR|/opt/lcars/var/tokens)' "$f"
   done
 }
 
