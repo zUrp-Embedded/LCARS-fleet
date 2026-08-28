@@ -556,6 +556,27 @@ uninstall_run() {
   # ─── L'EXÉCUTION ──────────────────────────────────────────────────────────────────────────────
   local o removed=0 kept=0
 
+  # ─── LES UNITES SYSTEMD — ARRETEES AVANT D'ETRE RETIREES ──────────────────────────────────────
+  #
+  # ⚠ RETIRER LE FICHIER D'UNITE N'ARRETE PAS LE SERVICE. MESURE DU 2026-08-28, banc vierge, apres
+  # `uninstall --yes` : les quatre unites sont supprimees, et les quatre services TOURNENT encore —
+  # `lcars-catalogue` sous `lcars-authority`, `lcars-landing` sous `lcars-system`. Consequence
+  # directe : `userdel` refuse les deux comptes (« process encore vivant »), et la classe `account`
+  # ne retire rien. Le message de refus l'avait predit ; la machine l'a confirme.
+  #
+  # L'ordre est donc : arreter, PUIS retirer. Un service qu'on desactive apres avoir efface son
+  # fichier survit jusqu'au reboot, sur une machine que l'operateur croit desinstallee.
+  local _unit
+  for _unit in "${files[@]}"; do
+    case "$_unit" in
+      */systemd/system/*.service) ;;
+      *) continue ;;
+    esac
+    command -v systemctl >/dev/null 2>&1 || break
+    systemctl disable --now "$(basename "$_unit")" >/dev/null 2>&1 || true
+  done
+
+
   # ⚠ LES PAQUETS D'ABORD, ET C'EST UNE PROPRIETE D'ORDRE. Le journal vit dans `/etc/lcars`, que la
   # boucle `dirs` emporte au `rm -rf`. Dans un run complet c'etait sans effet — il est charge en
   # memoire bien avant. INTERROMPU entre les deux, la regle 3 (« sans journal, aucun paquet ») gele
@@ -886,7 +907,12 @@ else
     # l'interieur lirait du vide et la fusion serait silencieusement sans effet. shellcheck le dit
     # (SC2094, « read and write the same file in the same pipeline ») et il a raison.
     _journal_ancien=""
-    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_|posed_)' "$JOURNAL_FILE" || true)"
+    # ⚠ LES CLEFS D'INVENTAIRE SE NOMMENT, ELLES NE SE DEVINENT PAS A UN PREFIXE. Premiere version :
+    # `^(apt_|posed_)` — et `posed_at` matchait. La METADONNEE de la passe se faisait donc fusionner
+    # avec les inventaires, et le fichier portait DEUX lignes `posed_at`, dont une accumulant trois
+    # horodatages. Mesure du 2026-08-28 sur banc. C'est le « raconte deux dates a la fois » que la
+    # regle voisine dit vouloir eviter, produit par la regle elle-meme.
+    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_installed|apt_already|posed_(dir|file|link|group|docker)) ' "$JOURNAL_FILE" || true)"
     if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
       {
         echo "# SOURCE: $JOURNAL_FILE"

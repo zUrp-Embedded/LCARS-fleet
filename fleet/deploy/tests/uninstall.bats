@@ -405,6 +405,37 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   grep -q 'UNINSTALL_HUMANS" -eq 1 \]\]; then' <<<"$avant"
 }
 
+# ─── LES UNITES S'ARRETENT AVANT DE PARTIR ──────────────────────────────────────────────────────
+#
+# MESURE DU 2026-08-28, banc vierge, apres `uninstall --yes` : les quatre unites sont SUPPRIMEES et
+# les quatre services TOURNENT encore — `lcars-catalogue` sous `lcars-authority`, `lcars-landing`
+# sous `lcars-system`, mesures a `is-active` et au `ps`. Retirer un fichier d'unite n'arrete rien.
+#
+# CONSEQUENCE EN CHAINE, ET C'EST CE QUI REND L'ORDRE OBLIGATOIRE : `userdel` refuse un compte dont
+# un process vit. La classe `account` ne retirait donc RIEN, et le message de refus de ce verbe
+# — « process encore vivant ? » — avait predit exactement ce que la machine a montre.
+
+@test "UNITES : elles sont ARRETEES avant que quoi que ce soit ne parte" {
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local n_stop n_rm n_userdel
+  n_stop="$(grep -n 'systemctl disable --now' <<<"$body" | head -1 | cut -d: -f1)"
+  n_rm="$(grep -n 'for o in "\${files\[@\]}"' <<<"$body" | head -1 | cut -d: -f1)"
+  n_userdel="$(grep -n 'userdel "\$o"' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_stop" ]
+  [ "$n_stop" -lt "$n_rm" ]        # avant le retrait des fichiers
+  [ "$n_stop" -lt "$n_userdel" ]   # et avant les comptes, qui sinon sont refuses
+}
+
+@test "UNITES : seules les `.service` declarees sont arretees — pas un glob sur le systeme" {
+  # Un `systemctl stop lcars-*` toucherait ce que ce rail n'a pas pose. La liste vient de `files`,
+  # c'est-a-dire de la table, et le filtre nomme le repertoire qu'il vise.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for _unit in /,/^  done/p' <<<"$body")"
+  [ -n "$bloc" ]
+  grep -q 'systemd/system/\*\.service' <<<"$bloc"
+  refute grep -qE 'lcars-\*|systemctl stop \*' <<<"$bloc"
+}
+
 @test "root n'est exige que pour RETIRER, jamais pour LIRE le plan" {
   # Refuser la lecture sans root obligerait l'operateur a escalader pour SAVOIR ce qui va
   # disparaitre — c'est-a-dire a decider apres avoir escalade.

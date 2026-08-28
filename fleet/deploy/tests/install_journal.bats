@@ -243,7 +243,10 @@ SH
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
   local body; body="$(code "$RUNNER")"
-  grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
+  # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
+  # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
+  grep -qE 'apt_installed\|apt_already\|posed_\(dir\|file\|link\|group\|docker\)' <<<"$body"
+  refute grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
 }
 
 @test "FUSION : le journal s'ecrit MEME si la passe n'a rien pose" {
