@@ -98,7 +98,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # ⚠ ACCENTS GRAVES ECHAPPES. Dans une chaine a guillemets DOUBLES, bash fait de la substitution
   # de commande : le premier jet de cette ligne executait `prefix`. Meme famille que la prose des
   # heredocs non quotes — un message d'erreur qui lance une commande.
-  grep -qE "^prefix[[:space:]]+$ATTENDU[[:space:]]" "$R/deploy/system.manifest" \
+  grep -qE "^prefix[[:space:]]+${ATTENDU}[[:space:]]" "$R/deploy/system.manifest" \
     || { echo "« $ATTENDU » n'est pas declare en classe \`prefix\` dans le manifeste" >&2; return 1; }
   # ⚠ AUCUN CLIQUET SUR L'ANCIENNE VALEUR ICI, ET C'EST DELIBERE. L'interdit du retour appartient
   # a `racines_ssot.bats`, qui porte deja `/opt/lcars/runtime` dans sa liste. Un cliquet ecrit AVANT

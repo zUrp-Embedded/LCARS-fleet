@@ -149,7 +149,7 @@ absent() { # absent <motif etendu> <fichier>
     [ "$n" -eq 0 ] || { echo "$f pose ENCORE 0700 sur le repertoire des secrets" >&2; return 1; }
   done
   grep -qE 'PROV_TOKENS_DIR 0710' "$REPO/deploy/modules.d/25-directories.sh"
-  grep -qE "^dir[[:space:]]+$TOKENS_DIR[[:space:]]+0710" "$MANIFEST"
+  grep -qE "^dir[[:space:]]+${TOKENS_DIR}[[:space:]]+0710" "$MANIFEST"
 }
 
 # ─── MUR 2 — LES SECRETS NE SONT LISIBLES PAR AUCUN GROUPE ──────────────────────────────────────
@@ -218,7 +218,7 @@ secret_writers() {
   # lister. Ce qui se verifie ici est donc : le detenteur est le service, le mode accorde `x` au
   # groupe et pas `r`.
   local row
-  row="$(grep -E "^dir[[:space:]]+$TOKENS_DIR[[:space:]]" "$MANIFEST")"
+  row="$(grep -E "^dir[[:space:]]+${TOKENS_DIR}[[:space:]]" "$MANIFEST")"
   [ -n "$row" ] || { echo "« $TOKENS_DIR » n'est plus declare dans le manifeste" >&2; return 1; }
   [[ "$row" == *0710* ]] || { echo "mode attendu 0710 (le groupe traverse, il ne liste pas) : $row" >&2; return 1; }
   [[ "$row" == *lcars-authority:fleet* ]] \
