@@ -201,6 +201,16 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     fi
     base="$(basename "$p")"
     [[ "$base" == "<human>" ]] && continue
+    # ⚠ POSE PAR UN TIERS QU'ON INVOQUE — exemption NOMMEE, une ligne par objet, jamais une regex.
+    # `/root/.terraform.d` est le cache de plugins que le binaire `tofu` ecrit sous le HOME de root
+    # quand `46-tofu` l'invoque : aucun module ne l'ecrit, donc ISO 2/2 le refuse a juste titre. On
+    # le declare parce qu'on le PROVOQUE — c'est ce que l'uninstall doit pouvoir retirer — et
+    # l'exemption dit pourquoi il n'a pas de poseur dans ce depot.
+    # Elargir cette liste sans nommer l'outil rouvrirait la porte que ce temoin ferme : un objet
+    # declare que personne ne pose est, par defaut, une ligne qui ment.
+    case "$p" in
+      /root/.terraform.d) continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
+    esac
     stem="$(sed -e 's#-<version>$##' -e 's#\.service$##' <<<"$base")"
     grep -qF "$stem" <<<"$CODE" || { echo "DECLARE, aucun poseur : $p (radical « $stem »)"; bad=1; }
   done < "$BATS_TEST_TMPDIR/rows"
@@ -293,6 +303,38 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ -z "$output" ]
   run prov_manifest_gid "fleet"
   [ "$output" = "2000" ]
+}
+
+# ⚠ L'ANGLE MORT QUE NI ISO 1/2 NI ISO 2/2 NE PEUVENT VOIR, ET IL A COUTE QUATRE LIENS MORTS.
+#
+# `unit_path()` compose `"$1.service"` a l'execution : aucun des quatre noms n'existe LITTERALEMENT
+# dans le code. ISO 1/2 extrait des litteraux — il ne les trouve pas. ISO 2/2 cherche le radical
+# dans le code — il le trouve, mais dans `UNITS=`, pas au site de pose. Un objet dont le nom se
+# compose sous un repertoire exempte est invisible aux DEUX sens du contrat.
+#
+# MESURE DU 2026-08-28 : apres `uninstall --yes`, les quatre liens `multi-user.target.wants/` sont
+# encore la, pointant vers des unites SUPPRIMEES — quatre liens morts dans une cible systemd, que le
+# prochain boot signale sans que rien ne le repare.
+#
+# LE GESTE N'EST PAS D'AGRANDIR UNE REGEX, c'est de DERIVER la liste de sa source. `UNITS=` est la
+# seule autorite sur ce qui est active ; la table doit la refleter, et ajouter une cinquieme unite
+# sans la declarer doit rougir ICI.
+
+@test "ACTIVATION : chaque unite de UNITS= a son lien declare dans la table" {
+  local mod="$BATS_TEST_DIRNAME/../modules.d/64-services.sh"
+  local units u bad=0
+  # ⚠ `UNITS=(…)` TIENT SUR UNE SEULE LIGNE, donc une plage `sed '/^UNITS=(/,/)/'` ne s'arrete pas :
+  # le `)` de fin est celui de l'ouverture, et la plage court jusqu'au suivant — elle avalait la
+  # prose du module. Le voisin `services_dir.bats` peut utiliser une plage parce que `HELPERS=(` est
+  # multi-ligne et se ferme sur `^)`. Ici, la ligne suffit.
+  units="$(grep '^UNITS=' "$mod" | head -1 | tr -d '()' | sed 's/^UNITS=//' | tr ' ' '\n' | grep -v '^$')"
+  # Garde d'instrument : une extraction cassee rendrait vide, donc verte sur rien.
+  [ "$(grep -c . <<<"$units")" -ge 4 ]
+  for u in $units; do
+    grep -qE "^link +/etc/systemd/system/multi-user\.target\.wants/${u}\.service " "$MANIFEST" \
+      || { echo "unite ACTIVEE mais lien NON declare : $u"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
 }
 
 @test "les GID declares sont FIXES, et ils sont ceux de l'image" {

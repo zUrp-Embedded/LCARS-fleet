@@ -192,6 +192,17 @@ anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root          
 anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
 
 # ─── SYMLINKS DE PATH ───────────────────────────────────────────────────────────────────────────
+# ⚠ LES LIENS D'ACTIVATION DE SYSTEMD, POSES PAR `systemctl enable`, JAMAIS PAR NOUS.
+# `64-services:497` fait `enable --now` ; systemd ecrit le lien dans la cible. Ils n'etaient declares
+# nulle part — MESURE DU 2026-08-28 : les quatre survivent a `uninstall --yes`, pointant vers des
+# unites SUPPRIMEES, donc quatre liens morts dans `multi-user.target` que le prochain boot signale.
+# Le nom se compose a l'execution (`unit_path() { "$1.service" }`) sous un repertoire exempte : ni
+# ISO 1/2 ni ISO 2/2 ne pouvaient les voir. Les declarer est ce qui les rend retirables.
+link      /etc/systemd/system/multi-user.target.wants/lcars-landing.service     -  -  linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   -  -  linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  linux
+
 link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
 link      /usr/local/bin/lcars                         -     -                   wsl+linux
 link      /usr/local/bin/elixir                        -     -                   wsl+linux
@@ -273,6 +284,18 @@ runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet         
 # c'est la lecture du RUNTIME et de l'entrypoint qui les a rendus visibles, et le second n'est
 # apparu qu'en ELARGISSANT les sources du temoin. Un instrument etroit rend un verdict etroit.
 runtime   /run/lcars-converger.refused                 0644  root:root           any
+
+# ⚠ LE VERROU DU PROVISIONNEMENT, ET IL VIT HORS DE L'ARBRE `/run/lcars/`. Pose par
+# `provision-lib.sh:577` (`0700 root:root`), il survit a un `rm -rf /run/lcars` — MESURE DU
+# 2026-08-28 : les trois objets sont encore la apres `uninstall --yes`. Meme angle mort que les
+# deux marqueurs voisins, et pour la meme raison : une sonde qui balaie `/run/lcars/` ne le voit pas.
+runtime   /run/lock/lcars                              0700  root:root           any
+
+# ⚠ POSE PAR TOFU LUI-MEME, PAS PAR UN MODULE. `46-tofu` invoque le binaire, qui ecrit son cache de
+# plugins sous le HOME de root. Mesure du 2026-08-28 : present apres l'install, survivant a
+# l'uninstall, et dans aucune liste — ni la mienne, ni celle du plan. C'est le cas « pose par un
+# tiers » : on le declare parce qu'on le PROVOQUE, pas parce qu'on l'ecrit.
+dir       /root/.terraform.d                           0755  root:root           wsl+linux
 runtime   /run/lcars-provision.rc                      0644  root:root           docker
 # ⚠ SON VOISIN NE DIT PAS LA MEME CHOSE, ET C'EST POUR CA QU'IL EXISTE. Le rc ci-dessus mesure les
 # MODULES ; celui-ci mesure la POPULATION — « quelqu'un peut-il lancer une fleet ici ». Une boite
