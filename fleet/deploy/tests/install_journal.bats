@@ -174,3 +174,71 @@ SH
   code "$RUNNER" | grep -q 'LCARS_JOURNAL_FILE:-/etc/lcars/install.journal'
   grep -qE '^dir +/etc/lcars ' "$BATS_TEST_DIRNAME/../system.manifest"
 }
+
+# ─── LES PRIMITIVES NOTENT, ET LE JOURNAL FUSIONNE ──────────────────────────────────────────────
+#
+# MESURE DU 2026-08-27, banc vierge : le journal portait DIX-SEPT lignes, dont dix d'en-tete, cinq
+# metadonnees et deux colonnes apt. Zero repertoire, zero fichier, zero lien, zero groupe —
+# `prov_journal_note` avait DEUX appelants, tous deux dans `apt_ensure`.
+
+@test "PRIMITIVES : `ensure_dir` note ce qu'il pose, sans qu'un module y pense" {
+  lib "PROV_JOURNAL_ACC='$ACC'; ensure_dir '$BATS_TEST_TMPDIR/n1' 0755 >/dev/null"
+  grep -qE "^posed_dir $BATS_TEST_TMPDIR/n1\$" "$ACC"
+}
+
+@test "PRIMITIVES : un repertoire DEJA la ne se note pas — on note la POSE, pas la passe" {
+  mkdir -p "$BATS_TEST_TMPDIR/n2"
+  lib "PROV_JOURNAL_ACC='$ACC'; ensure_dir '$BATS_TEST_TMPDIR/n2' 0755 >/dev/null"
+  refute grep -q 'posed_dir' "$ACC"
+}
+
+@test "PRIMITIVES : `write_atomic` et `ensure_symlink` notent aussi" {
+  lib "PROV_JOURNAL_ACC='$ACC'; echo x | write_atomic '$BATS_TEST_TMPDIR/f1' 0644 >/dev/null"
+  lib "PROV_JOURNAL_ACC='$ACC'; ensure_symlink '$BATS_TEST_TMPDIR/l1' '$BATS_TEST_TMPDIR/f1' >/dev/null"
+  grep -qE "^posed_file $BATS_TEST_TMPDIR/f1\$" "$ACC"
+  grep -qE "^posed_link $BATS_TEST_TMPDIR/l1\$" "$ACC"
+}
+
+@test "PRIMITIVES : la note est dans la LIB, pas dans les modules" {
+  # ⚠ LA PROPRIETE, ET PAS LE NOMBRE. La poser dans chaque module demanderait a 53 sites d'appel de
+  # s'en souvenir — un poseur qui doit se souvenir oubliera, et c'est exactement ce qui s'est passe
+  # pour les deux modules qui sondent avant `apt_ensure`.
+  local n_lib n_mod
+  n_lib="$(grep -c 'prov_journal_note ' "$LIB")"
+  n_mod="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -c 'prov_journal_note ' || true)"
+  [ "$n_lib" -ge 6 ]
+  [ "$n_mod" -eq 0 ]
+}
+
+# ─── LA FUSION ──────────────────────────────────────────────────────────────────────────────────
+#
+# MESURE DU 2026-08-28, banc vierge, DEUX passes d'apply :
+#   passe 1 installe 16 paquets  -> apt_installed = les 16
+#   passe 2 les trouve presents  -> apt_already = 16, apt_installed = VIDE
+#   uninstall                    -> « rien a retirer », et les 16 restent
+# `jq`, `socat`, `erlang`, `ttyd` etaient la en `ii`, poses par LCARS, invisibles au verbe qui devait
+# les retirer. Le rail est CONCU pour etre rejoue : ce n'est pas un cas de bord, c'est le nominal.
+
+@test "FUSION : le scelleur LIT l'ancien journal AVANT d'ouvrir le nouveau" {
+  # ⚠ L'ORDRE EST LA PROPRIETE. `> "$JOURNAL_FILE"` tronque a l'ouverture : un `grep` place DANS le
+  # bloc redirige lirait du vide, et la fusion serait silencieusement sans effet (SC2094).
+  local body; body="$(code "$RUNNER")"
+  local n_lire n_ecrire
+  n_lire="$(grep -n '_journal_ancien=' <<<"$body" | head -1 | cut -d: -f1)"
+  n_ecrire="$(grep -n '} > "\$JOURNAL_FILE"' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_lire" ] && [ -n "$n_ecrire" ] && [ "$n_lire" -lt "$n_ecrire" ]
+}
+
+@test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
+  # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
+  # ferait un fichier qui raconte deux dates a la fois.
+  local body; body="$(code "$RUNNER")"
+  grep -qE "grep -E '\^\(apt_\|posed_\)'" <<<"$body"
+}
+
+@test "FUSION : le journal s'ecrit MEME si la passe n'a rien pose" {
+  # Sinon l'ANCIEN survit, avec son `posed_at` et son `prefix` d'une autre passe — un fichier qui se
+  # declare « mesure » et date d'avant est pire qu'absent : il repond avec assurance.
+  local body; body="$(code "$RUNNER")"
+  refute grep -qE '\$CMD" == "apply" && -n "\$\{PROV_JOURNAL_ACC:-\}" && -s' <<<"$body"
+}

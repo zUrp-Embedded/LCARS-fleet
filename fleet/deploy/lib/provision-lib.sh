@@ -715,6 +715,7 @@ write_atomic() {
   mv -f "$tmp" "$dest" || { rm -f "$tmp"; p_fail "write_atomic: mv final: $dest"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "$dest"
+  prov_journal_note posed_file "$dest"
 }
 
 # ─── ensure_mode <path> <mode> [owner:group] — converge mode/owner, verdict par re-stat ──────────
@@ -774,6 +775,7 @@ ensure_dir() {
   if [[ ! -d "$path" ]]; then
     mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "dir $path"
+    prov_journal_note posed_dir "$path"
   fi
   ensure_mode "$path" "$mode" "$owner"
 }
@@ -827,6 +829,7 @@ ensure_group() {
     run_quiet groupadd "${args[@]}" "$grp" || return 1
     getent group "$grp" >/dev/null || { p_fail "groupe $grp absent après groupadd"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe $grp${gid:+ (gid $gid, table)}"
+    prov_journal_note posed_group "$grp"
     return 0
   fi
   # LE GROUPE EXISTE : on ne le DEPLACE pas — changer un GID sous des fichiers qui le portent
@@ -872,6 +875,7 @@ ensure_symlink() {
   ln -sfn "$target" "$link" || { p_fail "ensure_symlink: ln refusé: $link"; return 1; }
   [[ "$(readlink "$link")" == "$target" ]] || { p_fail "ensure_symlink: cible inattendue après ln: $link"; return 1; }
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$link → $target"
+  prov_journal_note posed_link "$link"
 }
 
 # ─── ensure_managed_block <file> <marker> <mode> [owner:group] — bloc géré BEGIN/END ─────────────
@@ -947,6 +951,16 @@ fetch_verify() {
 # ⚠ ET C'EST UNE NOTE, PAS UN VERDICT. Un journal qui échoue ne fait pas échouer un apply : il
 # raconte, il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est
 # muette et rend 0 — un appelant n'a jamais à savoir si le journal existe.
+# ⚠ LA NOTE VIT DANS LES PRIMITIVES, PAS DANS LES MODULES — ET C'EST LE GESTE CENTRAL DU JOURNAL.
+#
+# Cette fonction avait DEUX appelants, tous deux dans `apt_ensure`. Le journal ne connaissait donc
+# que les paquets : zero repertoire, zero fichier, zero lien, zero groupe. MESURE DU 2026-08-27,
+# banc vierge : dix-sept lignes, dont dix d'en-tete, cinq metadonnees et deux colonnes apt.
+#
+# La poser dans chaque module aurait demande a 53 sites d'appel de S'EN SOUVENIR. Un poseur qui doit
+# se souvenir oubliera — c'est exactement ce qui s'est passe pour les deux modules qui sondent avant
+# `apt_ensure`. Posee dans les primitives, elle trace ces 53 sites dans 18 modules sans qu'un seul
+# module ne change, et le prochain poseur est trace par construction.
 prov_journal_note() { # prov_journal_note <clef> <valeur…>
   [[ -n "${PROV_JOURNAL_ACC:-}" ]] || return 0
   [[ "$#" -ge 2 ]] || return 0

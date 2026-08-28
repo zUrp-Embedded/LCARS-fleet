@@ -789,7 +789,17 @@ else
   # ⚠ LE JOURNAL SE SCELLE AVANT LE RÉCAP, ET IL NE PEUT PAS FAIRE ÉCHOUER UNE PASSE. Il RACONTE ce
   # qui vient d'être posé ; il ne décide de rien. Un journal illisible est une perte d'information —
   # elle se DIT, elle ne renverse pas un verdict que 25 modules viennent de rendre.
-  if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" && -s "$PROV_JOURNAL_ACC" ]]; then
+  # ⚠ ON ECRIT MEME SI L'ACCUMULATEUR EST VIDE. La condition portait `-s` : une passe qui ne pose
+  # RIEN — un `--only`, ou une machine deja convergee — laissait donc l'ANCIEN journal en place, avec
+  # son `posed_at`, son `source_rev` et son `prefix` d'une autre passe. Un fichier qui se declare
+  # « mesure » et date d'avant est pire qu'absent : il repond avec assurance.
+  if [[ "$CMD" == "apply" && -n "${PROV_JOURNAL_ACC:-}" ]]; then
+    # ⚠ L'ANCIEN JOURNAL SE LIT AVANT, DANS UNE VARIABLE — jamais dans le bloc redirige. Le
+    # `> "$JOURNAL_FILE"` de la fin TRONQUE le fichier a l'ouverture, donc un `grep` place a
+    # l'interieur lirait du vide et la fusion serait silencieusement sans effet. shellcheck le dit
+    # (SC2094, « read and write the same file in the same pipeline ») et il a raison.
+    _journal_ancien=""
+    [[ -r "$JOURNAL_FILE" ]] && _journal_ancien="$(grep -E '^(apt_|posed_)' "$JOURNAL_FILE" || true)"
     if mkdir -p "$(dirname "$JOURNAL_FILE")" 2>/dev/null; then
       {
         echo "# SOURCE: $JOURNAL_FILE"
@@ -810,11 +820,26 @@ else
         # Une clef par ligne, valeurs fusionnées et dédoublonnées : `apt_ensure` est appelée par
         # plusieurs modules, et trois lignes `apt_installed` pour un même paquet ne disent rien de
         # plus qu'une.
-        awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
+        # ⚠ LE JOURNAL FUSIONNE AVEC LE PRECEDENT, ET C'EST UN DEFAUT MESURE, PAS UNE PRUDENCE.
+        #
+        # Il etait REECRIT a chaque apply. Or le rail est CONCU pour etre rejoue — « aucune
+        # sentinelle, le re-run converge toujours ». MESURE DU 2026-08-28, banc vierge :
+        #   passe 1 installe 16 paquets  -> apt_installed = les 16
+        #   passe 2 les trouve presents  -> apt_already = 16, apt_installed = VIDE
+        #   uninstall                    -> « rien a retirer », et les 16 restent
+        # `jq`, `socat`, `erlang`, `ttyd` etaient la en `ii`, poses par LCARS, invisibles au verbe
+        # qui devait les retirer. Le fichier disait « CE QUI A ETE POSE SUR CETTE MACHINE » et
+        # decrivait la DERNIERE PASSE.
+        #
+        # ⚠ ET LA FUSION NE VAUT QUE POUR CE QUI EST CUMULATIF. `posed_at`, `source_rev`,
+        # `substrate`, `prefix` et `modules` decrivent LA passe : ils s'ecrasent, c'est leur sens.
+        # Seules les clefs `apt_*` et `posed_*` s'additionnent — ce sont des inventaires.
+        { printf '%s\n' "$_journal_ancien"; cat "$PROV_JOURNAL_ACC"; } \
+        | awk '{ k=$1; $1=""; sub(/^ /,""); acc[k]=acc[k] " " $0 }
              END { for (k in acc) {
                      n=split(acc[k], w, " "); delete seen; out=""
                      for (i=1;i<=n;i++) if (w[i]!="" && !(w[i] in seen)) { seen[w[i]]=1; out=out " " w[i] }
-                     printf "%-13s%s\n", k, out } }' "$PROV_JOURNAL_ACC" | sort
+                     printf "%-13s%s\n", k, out } }' | sort
       } > "$JOURNAL_FILE" 2>/dev/null \
         && chmod 0644 "$JOURNAL_FILE" 2>/dev/null \
         || echo "  ${_PA}journal NON écrit ($JOURNAL_FILE) — l'install est faite, sa trace ne l'est pas${_PN}"
