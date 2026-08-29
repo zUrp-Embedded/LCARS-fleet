@@ -39,26 +39,18 @@ detect_substrate() {
 #   PROV_DOCKER_BIN     la CLI à appeler — c'est AUSSI une entrée, cf. la déclaration plus bas
 #   PROV_DOCKER_HOST    l'endpoint retenu, vide s'il vient déjà de l'environnement
 #   PROV_DOCKER_WHY     vide si docker répond ; sinon la phrase qui dit ce qui manque
-#   PROV_DOCKER_DENIED  1 quand le daemon répond mais REFUSE cet utilisateur — un fait différent
-#                       d'« injoignable », et les deux appellent des gestes différents
+#   PROV_DOCKER_DENIED  1 quand le daemon répond mais REFUSE cet utilisateur
 #   PROV_DOCKER_SUDO    le préfixe d'escalade retenu, vide s'il n'en a pas fallu
 #   PROV_DOCKER_SOCK    la socket qui a refusé — interne au diagnostic
 # Rend 0 si un daemon a répondu, 1 sinon.
 #
-# ⚠ `command -v docker` SE TROMPE DANS LES DEUX SENS, ET LA SECONDE ERREUR EST LA PLUS COÛTEUSE.
+# ⚠ `command -v docker` SE TROMPE DANS LES DEUX SENS : sa présence n'exclut pas un daemon éteint, et
+# son ABSENCE ne prouve rien du tout — sur WSL le daemon vit dans la VM Docker Desktop et s'expose
+# par un MONTAGE partagé, CLI comprise, donc une distro sans aucun binaire joint docker. On cherche
+# une PAIRE, CLI et endpoint, et la seule preuve est qu'elle réponde.
 #
-#   1. Sa présence ne prouve rien : le binaire peut être là et le daemon éteint.
-#   2. Son ABSENCE ne prouve rien non plus. Sur WSL, le daemon vit dans la VM Docker Desktop et
-#      s'expose par un MONTAGE partagé par toutes les distros — CLI comprise. Une distro peut donc
-#      n'avoir aucun binaire installé et joindre docker parfaitement. Mesuré sur instance vierge :
-#      aucun `docker` dans le PATH, pas de `/var/run/docker.sock`, et le daemon répond à travers la
-#      socket du montage. Refuser sur l'absence du binaire refuse cette machine-là.
-#
-# D'ou : on cherche une PAIRE — une CLI et un endpoint — et la seule preuve est qu'elle reponde.
-#
-# ⚠ CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ (`exec`, `cp`, `run`)
-# rendent quelque chose. Un relais peut répondre parfaitement à `version` et rendre ZÉRO OCTET avec
-# EXIT 0 sur un `exec` — cf. `docker_stream_ok`, la sonde des appelants qui CAPTURENT.
+# ⚠ CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ rendent quelque chose —
+# cf. `docker_stream_ok`.
 # ⚠ LA FORME `${VAR:-}` EST DELIBEREE, ET `=""` CASSERAIT LA COUTURE D'ENTREE : la fonction lit
 # `want="${PROV_DOCKER_BIN:-}"` pour honorer une CLI imposee — un shim, une doublure de test — et
 # cette initialisation-ci s'execute AVANT elle.
@@ -69,25 +61,17 @@ PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
 # LE PREFIXE D'ESCALADE : vide, ou de quoi joindre un daemon dont la socket appartient a root.
 #
-# ⚠ POURQUOI IL EXISTE, ET CE N'EST PAS UNE REGRESSION DE LA PROMESSE. Sur WSL la socket Docker
-# Desktop est `root:root 755` : le daemon repond, et pas a l'utilisateur qui lance. Des deux sorties
-# possibles, la moins invasive n'est pas celle qu'on croit :
-#
-#   - `chgrp` sur la socket : elle vit sous `/mnt/wsl`, PARTAGE PAR TOUTES LES DISTROS de la VM. Le
-#     geste ouvre donc la socket bien au-dela de l'instance dediee — et il faut le re-poser a chaque
-#     demarrage de Docker Desktop, qui recree la socket. Deux defauts pour un confort ;
-#   - `sudo` sur l'APPEL : ne modifie RIEN, n'a rien a converger, et laisse intacte la promesse
-#     auditee du rail boite — « rien hors de ton clone et de docker ».
+# ⚠ POURQUOI IL EXISTE. Sur WSL la socket Docker Desktop est `root:root 755` : le daemon repond, et
+# pas a l'utilisateur qui lance. `chgrp` dessus l'ouvrirait a TOUTES les distros de la VM (elle vit
+# sous `/mnt/wsl`) et serait a re-poser a chaque demarrage de Docker Desktop, qui la recree. `sudo`
+# sur l'APPEL ne modifie RIEN, et laisse intacte la promesse auditee du rail boite.
 #
 # ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
 # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La promesse porte sur
 # ce qu'on MODIFIE, jamais sur l'uid qui appelle.
 #
-# ⚠ TROIS PIEGES, TOUS DEJA PAYES ICI. (1) `sudo` remet l'environnement a zero : `DOCKER_HOST` meurt
-# en traversant, d'ou les assignations EN TETE de commande — jamais `sudo -E`, refuse sans `SETENV`.
-# (2) `sudo` impose `secure_path` : une CLI hors des chemins systeme devient introuvable, d'ou le
-# chemin ABSOLU. (3) L'escalade est PAR COMMANDE : un re-exec global ferait tourner `git` en root sur
-# le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
+# ⚠ L'ESCALADE EST PAR COMMANDE, JAMAIS UN RE-EXEC GLOBAL : celui-ci ferait tourner `git` en root
+# sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
 PROV_DOCKER_SUDO=""
 
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
@@ -141,12 +125,10 @@ PYCFG
 
 # ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
 #
-# ⚠ L'adresse du daemon est FIXE pour un substrat donne : sur WSL, Docker Desktop expose toujours sa
-# socket au meme endroit du montage partage, et `/var/run/docker.sock` s'y ajoute quand
-# l'integration est activee pour la distro. Une sonde qui PARCOURT des chemins « au cas ou » finit
-# par y mettre ceux de la machine de son auteur, et fait juger toutes les autres a travers son
-# cablage particulier. L'operateur qui a sa topologie pose `DOCKER_HOST` : c'est une DECISION,
-# honoree avant tout le reste, pas quelque chose que la sonde devine en fouillant.
+# ⚠ AUCUN CHEMIN « AU CAS OU » : une sonde qui fouille finit par porter le cablage de la machine de
+# son auteur, et juge toutes les autres a travers lui. L'operateur qui a sa topologie pose
+# `DOCKER_HOST`, honore avant tout le reste.
+# Sur WSL, `/var/run/docker.sock` ne s'ajoute que si l'integration est activee pour la distro.
 #
 # ⚠ COUTURE DE DECOR, MEME IDIOME QUE `LCARS_HOST_CONSENT_FILE` ET `LCARS_SYSADMIN_UID` : les
 # chemins sont des litteraux, et `DOCKER_HOST` n'est plus un levier — pointer une socket absente
@@ -172,25 +154,21 @@ docker_endpoint() {
   PROV_DOCKER_SUDO=""
   local cli sock
 
-  # 1. La CLI. Le choix de l'appelant l'emporte — c'est son droit, et il peut viser un shim.
+  # 1. La CLI.
   #
-  # ⚠ SUR WSL, LA CLI DU MONTAGE PASSE AVANT LE PATH, ET CE N'EST PAS UN DÉTAIL D'ORDRE.
-  # ⚖ USER : « ya PAS, JAMAIS de "binaire docker" dans WSL. C'est DÉJÀ une VM, et on a docker
-  # installé côté Windows. » Ce qui existe dans la distro est un MONTAGE, CLI comprise. Un `docker`
-  # trouvé dans un PATH y est donc soit une copie que quelqu'un a posée, soit un wrapper — jamais
-  # « le » docker, et le préférer risque une CLI qui ne correspond pas au daemon. Le PATH ne sert
-  # que là où il est l'autorité : un linux natif.
-  #
-  # ⚠ UN NOM NU ET UN CHEMIN NE SE TESTENT PAS PAREIL, ET LA FORME NAÏVE RETIENT UN RÉPERTOIRE.
-  # `[[ -x docker ]]` est VRAI dès que le CWD contient un dossier `docker` — un dossier est
-  # exécutable, c'est-à-dire traversable. Un nom nu n'a de sens QUE par le PATH ; un chemin doit
-  # être un fichier.
+  # ⚠ SUR WSL, LA CLI DU MONTAGE PASSE AVANT LE PATH. ⚖ USER : « ya PAS, JAMAIS de "binaire docker"
+  # dans WSL. C'est DÉJÀ une VM, et on a docker installé côté Windows. » Ce qu'un PATH y offre est
+  # une copie ou un wrapper, jamais « le » docker : le préférer risque une CLI qui ne correspond pas
+  # au daemon. Le PATH ne fait autorité que sur un linux natif.
   local -a candidats
   if [[ "$(detect_substrate)" == "wsl" ]]; then
     candidats=("$want" "$(_docker_mount_cli)" docker)
   else
     candidats=("$want" docker "$(_docker_mount_cli)")
   fi
+  # ⚠ UN NOM NU ET UN CHEMIN NE SE TESTENT PAS PAREIL : `[[ -x docker ]]` est VRAI dès que le CWD
+  # contient un DOSSIER `docker` — un dossier est exécutable, c'est-à-dire traversable. Un nom nu
+  # n'a de sens que par le PATH ; un chemin doit être un fichier.
   for cli in "${candidats[@]}"; do
     [[ -n "$cli" ]] || continue
     if [[ "$cli" == */* ]]; then
@@ -215,14 +193,11 @@ docker_endpoint() {
     local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
   fi
 
-  # 2. L'endpoint. Un `DOCKER_HOST` present est sonde EN PREMIER, tel quel — s'il repond, on s'arrete
-  #    la. Sinon on essaie les sockets connues, du plus standard au plus specifique au substrat.
+  # 2. L'endpoint.
   #
-  # ⚠ ET IL N'EST PAS TOUJOURS UNE DECISION : l'integration WSL de Docker Desktop l'INJECTE dans le
-  # shell de la distro. Traiter l'injection comme un choix humain et s'arreter la refuse des
-  # machines saines — la socket injectee appartient a root, l'humain n'y ecrit pas, et le balayage
-  # ci-dessous sait quoi en faire (DENIED, puis escalade). La valeur garde donc sa priorite, mais
-  # son echec n'est pas un cul-de-sac.
+  # ⚠ UN `DOCKER_HOST` PRESENT N'EST PAS TOUJOURS UNE DECISION : l'integration WSL de Docker Desktop
+  # l'INJECTE dans le shell de la distro, et cette socket-la appartient a root. Traiter l'injection
+  # comme un choix humain et s'arreter sur son echec refuse des machines saines.
   local _envhost="" _dh=""
   if [[ -n "${DOCKER_HOST:-}" ]]; then
     if "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then return 0; fi
@@ -255,15 +230,14 @@ docker_endpoint() {
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
     fi
-    # Elle existe et je ne peux pas ecrire dedans : le daemon est la, la porte ne m'est pas ouverte.
     [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
   done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    # LA SOCKET REFUSE CET UTILISATEUR — on tente l'escalade AVANT de conclure. Elle ne modifie rien
-    # (cf. l'en-tete de PROV_DOCKER_SUDO) et c'est le seul chemin vers un daemon dont la socket
-    # appartient a root. `sudo -n` : on ne bloque JAMAIS sur une invite de mot de passe dans une
-    # sonde — sans NOPASSWD, on rend le fait tel quel et l'appelant decide d'escalader lui-meme.
+    # ⚠ `sudo -n` : une sonde ne bloque JAMAIS sur une invite de mot de passe. Sans NOPASSWD, on
+    # rend le fait tel quel et l'appelant decide d'escalader lui-meme.
+    # ⚠ CHEMIN ABSOLU : `sudo` impose `secure_path`, ou une CLI hors des repertoires systeme — celle
+    # du montage Docker Desktop, par exemple — devient introuvable.
     local abs; abs="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
     if [[ "$EUID" -ne 0 ]] && command -v sudo >/dev/null 2>&1 \
        && sudo -n DOCKER_HOST="unix://$PROV_DOCKER_SOCK" "$abs" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
@@ -285,22 +259,14 @@ docker_endpoint() {
       # regardes, et `docker compose` n'existe plus.
       local cfg; cfg="$(_docker_plugin_config "$shim_dir/config")" || cfg="$shim_dir/config"
 
-      # ⚠ LE SHIM DOIT FAIRE TRAVERSER L'ENVIRONNEMENT, SINON IL CASSE TOUT CE QUI PILOTE COMPOSE.
-      # `sudo` remet l'environnement a zero, et le rail conduit compose PAR DES VARIABLES : un port
-      # demande en tete de commande se perd, le compose monte son DEFAUT, et le banc meurt sur « la
-      # forge ne repond pas » en accusant la forge.
+      # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO, et le rail conduit compose PAR DES VARIABLES : un
+      # port demande en tete de commande se perd, le compose monte son DEFAUT, et le banc meurt en
+      # accusant la forge. `-E` exigerait un `SETENV` que personne n'a pose dans le sudoers.
       #
-      # On les NOMME par prefixe plutot que d'ouvrir `-E`, qui exige un `SETENV` dans le sudoers que
-      # personne n'a pose. C'est la forme que sudo accepte partout : des assignations en tete.
-      #
-      # ⚠ ET ON N'Y MET JAMAIS UN SECRET. Une assignation `sudo VAR=valeur` vit dans la LIGNE DE
-      # COMMANDE, que `/proc/<pid>/cmdline` expose a tout l'hote pendant l'appel — cicatrice 6-141,
-      # payee deux fois. Les credentials de ce rail voyagent par STDIN, pas par l'environnement ; le
-      # filtre ci-dessous refuse tout nom qui en porte la marque, et la liste est volontairement
-      # large : un faux positif coute une variable non transmise, un faux negatif coute un secret.
-      #
-      # Une valeur qui porte un saut de ligne est SAUTEE : `sudo VAR=val` ne sait pas la representer,
-      # et la transmettre tronquee serait pire que ne pas la transmettre.
+      # ⚠ JAMAIS UN SECRET : `sudo VAR=valeur` vit dans la LIGNE DE COMMANDE, que
+      # `/proc/<pid>/cmdline` expose a tout l'hote pendant l'appel — cicatrice 6-141. Denylist large
+      # a dessein : un faux positif coute une variable, un faux negatif un secret. Valeur a saut de
+      # ligne SAUTEE — `sudo VAR=val` ne sait pas la representer.
       cat > "$shim_dir/docker" <<'SHIM'
 #!/usr/bin/env bash
 declare -a keep=()
@@ -330,14 +296,13 @@ SHIM
     return 1
   fi
 
-  # 3. Rien ne répond. LE MESSAGE NE DIT PAS « INSTALLE DOCKER » — sur WSL le montage prouverait le
-  #    contraire, et sur linux natif le paquet n'est pas forcément le geste juste. Il dit ce qui a
-  #    été essayé et ce que ça signifie.
+  # 3. Rien ne répond.
   #
-  # ⚠ ET IL DIT LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » ne se diagnostique pas : il ne
-  # dit ni QUEL fichier a été retenu, ni quelles sockets ont été essayées — deux environnements
-  # différents rendent alors le même refus. Un refus qui ne porte pas ses propres mesures oblige à
-  # le rejouer pour savoir ce qu'il a vu.
+  # ⚠ LE MESSAGE NE DIT PAS « INSTALLE DOCKER » : sur WSL le montage prouverait le contraire, et sur
+  # linux natif le paquet n'est pas forcément le geste juste.
+  # ⚠ ET IL PORTE LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » ne se diagnostique pas —
+  # deux environnements différents rendent le même refus, qu'il faut rejouer pour savoir ce qu'il a
+  # vu.
   local resolved tried=""
   resolved="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
   while read -r sock; do
@@ -354,16 +319,11 @@ SHIM
   return 1
 }
 
-# ─── docker_stream_ok <conteneur> — LA SONDE DES APPELANTS QUI CAPTURENT ──────────────────────────
+# ─── docker_stream_ok <conteneur> — UN ALLER-RETOUR RÉEL, AVANT DE CAPTURER UN `docker exec` ─────
 #
-# ⚠ UN INSTRUMENT QUI RÉPOND À MOITIÉ EST PIRE QU'UN INSTRUMENT ABSENT. Un relais docker peut
-# répondre parfaitement aux commandes qui LISENT (`version`, `ps`, `inspect`) et rendre ZÉRO OCTET,
-# EXIT 0, sur toute commande à flux attaché — `exec`, `cp`, `run`, `attach`. Le code prend alors une
-# chaîne VIDE pour un fait, et le diagnostic qui en sort accuse l'objet sain : « la forge n'a rendu
-# aucun jeton master », alors que la forge allait bien et que c'est le tuyau qui était muet.
-#
-# Tout appelant qui fait `x="$(docker exec …)"` doit passer par ici D'ABORD. La sonde est un
-# aller-retour RÉEL sur un conteneur vivant — jamais une supposition sur la topologie.
+# ⚠ Un relais docker peut répondre parfaitement à `version`/`ps` et rendre ZÉRO OCTET, EXIT 0, sur
+# toute commande à flux attaché. La capture vide devient alors un fait, et le diagnostic accuse
+# l'objet sain — la forge, pas le tuyau.
 docker_stream_ok() {
   local ctr="${1:?docker_stream_ok: nom ou id de conteneur requis}" out
   out="$("${PROV_DOCKER_BIN:-docker}" exec "$ctr" printf 'lcars-stream-ok' 2>/dev/null || true)"
