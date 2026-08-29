@@ -21,13 +21,14 @@ installer sur ton système.
 
 ## Ce qu'il te faut
 
-Trois choses, et ta distribution les a presque certainement toutes les trois :
+Quatre choses, et ta distribution a presque certainement les trois premières :
 
 | | pourquoi |
 |---|---|
 | **docker** | tout tourne en conteneurs — la boîte, la forge, le runner |
 | **curl** | l'amorçage parle à la forge en HTTP |
 | **python3** | il lit les réponses JSON de la forge |
+| **WSL 2** | sous Windows seulement — WSL 1 n'a pas de namespaces, donc pas de pods |
 
 Rien d'autre. **Pas d'Elixir, pas d'Erlang, aucun toolchain sur ta machine** — le runtime est
 compilé dans un conteneur de build jetable, et seul le résultat est gardé.

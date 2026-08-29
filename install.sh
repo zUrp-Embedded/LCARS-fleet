@@ -39,14 +39,7 @@
 
 set -euo pipefail
 
-# MEME REGLE QUE `provision-lib.sh`, ET C'EST POURQUOI ELLE EST ICI AUSSI. Ce script colorisait
-# sans condition : redirige vers un fichier, son bandeau y laissait des `[1;37m` en clair pendant
-# que le provisionnement, lui, se taisait proprement. Un log a moitie colorise est le pire des deux
-# — illisible a la relecture ET incoherent. `-t 1` tranche pour les deux moities du meme geste.
-# ⚠ UN SEUL INTERRUPTEUR POUR LES DEUX MOITIES : `PROV_COLOR=1` force la couleur jusque DANS le
-# fichier (utile a qui relit ses installs au `cat`, qui rend les sequences), `NO_COLOR` la coupe
-# partout, et sans rien c'est le terminal qui decide. Le defaut est le log NU : une sequence ANSI
-# dans un fichier casse le grep et se lit en clair dans un editeur.
+# Même règle que `provision-lib.sh`.
 if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
    || { [[ -z "${PROV_COLOR:-}" ]] && [[ ! -t 1 ]]; }; then
   AMBER=''; CYAN=''; W=''; G=''; R=''; N=''; BA=''
@@ -56,11 +49,7 @@ else
   G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
 fi
 
-# ─── Refus curl|bash (un installeur se lit avant de s'exécuter) ─────────────
-# ⚖ USER 2026-08-19 : « si on refuse stdin c'est que ça nous a emmerdé, je paye pas une 2ᵉ fois. »
-# Ce refus RESTE, et il commande la forme publique : on télécharge, on lit, on exécute. Les
-# drapeaux `--box`/`--workstation` servent le cas SANS TTY (ssh non interactif, CI, cron) sur un
-# fichier posé, jamais un pipe.
+# ─── Refus curl|bash ───────────────────────────────────────────────────────
 if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
   echo ""
   echo "  ${R}ERREUR : install.sh doit être exécuté depuis un fichier, pas pipé depuis stdin.${N}"
@@ -70,37 +59,17 @@ if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
   exit 1
 fi
 
-# ⚠ ET IL PASSE AVANT `SCRIPT_DIR`, PAS APRES — LA GARDE ETAIT INJOIGNABLE QUAND ON PIPAIT.
-# `SCRIPT_DIR` derive de `${BASH_SOURCE[0]}`, qui est NON LIE quand bash lit son script sur stdin.
-# Sous `set -u`, la ligne mourait donc AVANT la garde, en rendant une erreur brute de bash a la
-# place de la phrase calme — exactement le defaut que le `/dev/tty` de la pause documente deja.
-# Mesure sur instance vierge (Ubuntu 26.04) : « BASH_SOURCE[0]: unbound variable », ligne 53,
-# refus jamais imprime. Ca PASSAIT sur un poste au bash plus ancien, plus tolerant sur les
-# elements de tableau non lies : un test vert qui ne prouvait que la version de bash de sa machine.
-#
-# La regle : un script qui refuse d'etre pipe doit le detecter AVANT tout ce qui suppose un fichier.
+# `${BASH_SOURCE[0]}` est NON LIÉ quand bash lit sur stdin : sous `set -u`, cette ligne meurt avant
+# la garde ci-dessus si elle remonte. Le repli `:-$0` et cette position sont la même précaution.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# ─── LE NOM DE L'HUMAIN DE FLEET — DEMANDÉ, JAMAIS RECOPIÉ ──────────────────
-#
-# ⚠ CE NOM A EU DEUX SOURCES, ET C'ÉTAIT LE DÉFAUT. `--fleet-human` le posait ici, `forge-gestures.sh`
-# posait le sien là-bas, et quatre sites arbitraient entre les deux chacun de son côté. Le drapeau
-# est retiré ; il reste UNE autorité, et cette porte l'INTERROGE au lieu d'en tenir une copie. Un
-# littéral « lcars » dans ce fichier serait la seconde vérité, et c'est celle qu'on ne relit pas qui
-# dérive — la leçon que ce dépôt a déjà payée sur le nom du compte système et sur celui de la forge.
-#
-# ⚠ ELLE PEUT NE RIEN RENDRE, ET C'EST UN ÉTAT ATTEIGNABLE, pas une précaution. Cette porte tourne
-# aussi depuis un fichier téléchargé SEUL — le mode standalone clone la source plus bas, après le
-# bandeau. Sans l'arbre, on ne devine pas : on rend vide, et chaque lecteur dit ce qu'il ne peut pas
-# nommer plutôt que d'inventer un nom qui n'aurait aucune autorité derrière lui.
+# ─── LE COMPTE QUE LE RAIL VA CRÉER — ni le siège qui lance, ni root ────────
 fleet_human_name() {
   local g
-  # Après l'escalade, `PROVISION` désigne le checkout RÉEL (il peut venir d'être cloné) ; avant, il
-  # n'y a que celui d'où cette porte est lue. Les deux se DÉRIVENT d'un arbre, jamais d'un chemin gravé.
   if [[ -n "${PROVISION:-}" ]]; then g="$(dirname "$PROVISION")/../services/forge-gestures.sh"
   else                               g="$SCRIPT_DIR/fleet/services/forge-gestures.sh"
   fi
-  [[ -r "$g" ]] || return 0
+  [[ -r "$g" ]] || return 0        # standalone : pas d'arbre, donc pas d'autorité — vide, pas une erreur
   bash "$g" builtin-human 2>/dev/null || true
 }
 
@@ -111,12 +80,7 @@ DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 WITH_BENCH=0
-# ⚠ LE CONSENTEMENT TRAVERSE L'ESCALADE. Ce rail se ré-exécute sous `sudo` (plus bas) ; sans ce
-# drapeau la seconde instance rejoue tout l'accueil et REDEMANDE la validation — une seconde fois,
-# et cette fois APRÈS le mot de passe, quand l'opérateur croit avoir fini de décider. Il passe en
-# ARGUMENT et non en variable d'environnement : `sudo` fait `env_reset`, c'est le piège que la
-# construction de REEXEC_ENV documente déjà quatre fois.
-CONSENTED=0
+CONSENTED=0          # posé par le re-exec sudo : la 2ᵉ instance saute l'accueil et la pause
 declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
@@ -129,33 +93,12 @@ while [[ $# -gt 0 ]]; do
     --consented)      CONSENTED=1; shift ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
-    # ⚠ `--substrate` EST AUSSI LU ICI, PAS SEULEMENT TRANSMIS. Il était en passe-plat pur : la porte
-    # détectait son substrat, décidait le rail dessus, puis remettait au rail un `--substrate` qui
-    # pouvait dire l'inverse. Les deux étages raisonnaient alors sur deux terrains différents dans le
-    # même geste — et c'est précisément l'étage du haut qui refuse ou autorise. Il reste TRANSMIS :
-    # forcer le substrat doit valoir pour la porte ET pour le rail, jamais pour un seul des deux.
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
-    # ⚠ IL N'Y A PLUS DE `--fleet-human`, ET SON RETRAIT EST LE GESTE, PAS UNE SIMPLIFICATION. Il
-    # laissait l'opérateur CHOISIR LE NOM de l'humain de fleet pré-semé ; le pré-semis, lui, a
-    # toujours eu lieu sans lui (`forge-gestures.sh` applique son défaut, la recette crée le compte,
-    # le convergeur le matérialise). Deux sources décidaient donc d'un seul nom, et quatre sites
-    # arbitraient entre elles chacun de son côté. Le nom a désormais UNE autorité, interrogeable :
-    # « fleet/services/forge-gestures.sh builtin-human ».
-    #
-    # ⚠ ET CE RAIL EST LE SEUL CONCERNÉ. Le drapeau n'atteignait que le poste — la branche BOÎTE sort
-    # par `exec box up` sans jamais lire `PASSTHRU` — donc son retrait ne touche pas la production.
-    # Les deux ports publiés. PASSTHRU les porte à travers le `sudo` ET jusqu'à `provision`, qui les
-    # valide — un seul valideur, chez celui qui s'en sert. Le rail BOÎTE ne les lit pas : ses ports
-    # sont ceux du compose, et `--` les passe au délégué.
+    # ports et nom d'instance : validés par `provision`, jamais ici
     --port-forge|--port-deck) PASSTHRU+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
     --forge-project)          PASSTHRU+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
-    # ⚠ TOUT CE QUI SUIT `--` VA AU DÉLÉGUÉ, VERBATIM — et sans ça `--bench` était une impasse.
-    # Il délègue à `bench-up.sh`, qui a ses propres options (`--project`, `--ssh-port`, `--image`),
-    # et le parseur ci-dessous refuse ce qu'il ne connaît pas : aucune d'elles ne pouvait donc
-    # l'atteindre. Trouvé en rejouant sur une vraie machine, pas en relisant — un délégué qu'on ne
-    # peut pas paramétrer n'est utilisable que dans le cas par défaut, c'est-à-dire une fois.
     --) shift; DELEGATE_ARGS=("$@"); break ;;
     --help|-h)
       sed -n '/^#     install.sh — LA porte/,/^#     système/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
@@ -165,27 +108,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ─── PRÉFLIGHT COMMUN — ce dont les DEUX branches ont besoin ────────────────
-# Et docker en fait partie, y compris pour le poste : la forge de LCARS est un CONTENEUR, il n'en
-# existe aucune autre forme dans ce dépôt. Un poste sans docker installe un runtime qui ne peut pas
-# travailler. ⚖ USER : « ça, on refuse. docker-desktop c'est un clic. »
+# Docker en fait partie même pour le poste : la forge est un conteneur, il n'en existe pas
+# d'autre forme dans ce dépôt.
 preflight_ok=1
-# ⚠ REND 0, COMME `p_ok` DU RAIL, ET POUR LA MEME RAISON. Sans ce `return`, son code de sortie est
-# celui d'`echo` : sur les deux sondes en `A && say_ok || say_miss`, une ecriture ratee marquerait le
-# preflight EN ECHEC sur un prerequis PRESENT. Une fonction qui rapporte ne renverse pas son rapport.
+# `return 0` : sans lui le code de sortie est celui d'`echo`, et un `A && say_ok || say_miss`
+# bascule en MANQUE sur un prérequis présent. Même règle que `p_ok` (provision-lib.sh).
 say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
-# UN MANQUE QUE LA SUITE COMBLE N'EST PAS UN PRÉREQUIS. `10-packages` pose `docker-ce` sur le
-# substrat `linux` et sur lui SEUL — sur WSL le daemon vient de Docker Desktop, que rien ici ne peut
-# installer, et dans un conteneur il n'y a rien à monter. La condition est donc la même des deux
-# côtés, et elle se dit une fois : Linux natif, machine déclarée dédiée.
-#
-# ⚠ LA DÉCLARATION COMPTE AUTANT QUE LE SUBSTRAT. Sans `LCARS_ALLOW_ANY_HOST`, ce provisionnement
-# n'a pas le droit de toucher cette machine — donc promettre qu'il y installera docker serait une
-# promesse qu'il ne tiendra pas : `00-preflight` refusera trois lignes plus loin.
-# Loi 5 (fleet/deploy/README.md) : poser un paquet est réservé au rail qui a REÇU la machine. La
-# boîte est invitée — elle exige un daemon debout et n'en installe aucun, quel que soit le drapeau.
-# Le rail fait donc partie de la question : sans lui, la réponse vaut pour un rail qu'on ignore.
+# `10-packages` pose `docker-ce`, et lui seul : Linux natif, machine déclarée dédiée. La boîte est
+# exclue par la loi 5 (fleet/deploy/README.md) — elle exige un daemon debout, elle n'en pose aucun.
 docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
   [[ "${RAIL:-}" != "box" ]] || return 1
   [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
@@ -202,22 +134,9 @@ for t in git curl; do
     say_miss "$t — apt install $t"
   fi
 done
-# ⚠ `sudo` N'EST PAS UN PREREQUIS COMMUN, ET LE METTRE ICI REFUSAIT DES MACHINES SAINES. C'est une
-# exigence du rail POSTE, qui escalade pour provisionner. Le rail BOITE ne monte jamais en root : il
-# n'a besoin de sudo que si la socket docker appartient a root — et la sonde le dit deja
-# (`PROV_DOCKER_DENIED`). Sur une machine ou l'humain atteint docker directement, exiger sudo est un
-# refus sans objet.
-#
-# Mesure : le gate CI tourne dans `lcars-build:2`, sous `builder`, SANS sudo — et il a docker par
-# son daemon embarque. Le preflight commun y refusait tout, donc cinq temoins de ce rail tombaient
-# en CI en passant partout ailleurs. C'est la meme regle que le preflight de branche : ce qui n'est
-# vrai que d'une branche se verifie DANS cette branche.
-
-# ⚠ ON SONDE UN ENDPOINT QUI RÉPOND, PAS UN BINAIRE. Mesuré sur une instance VIERGE — la seule
-# mesure qui vaille, un poste de travail portant des années de câblage à la main : une distro sans
-# intégration activée n'a NI `/usr/bin/docker` NI `/var/run/docker.sock`, et le daemon répond quand
-# même, la CLI et la socket vivant dans le montage partagé par toutes les distros de la VM.
-# Refuser sur l'absence du binaire refuserait cette machine-là, qui a pourtant docker.
+# On sonde un endpoint qui RÉPOND, pas un binaire : sous WSL, une distro sans intégration activée
+# n'a ni `/usr/bin/docker` ni `/var/run/docker.sock`, et le daemon répond quand même — CLI et socket
+# vivent dans le montage partagé par la VM. `command -v docker` y refuserait une machine qui a docker.
 DOCKER_OK=0
 if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
   # shellcheck source=fleet/deploy/lib/docker-endpoint.sh
@@ -225,29 +144,11 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
   if docker_endpoint; then
     DOCKER_OK=1; say_ok "docker répond ($PROV_DOCKER_BIN)"
   elif [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    # ⚠ « REFUSE À MOI » N'EST PAS « ABSENT », ET LE VERDICT DIFFÈRE SELON LA BRANCHE. Mesuré le
-    # sur une instance vierge : la socket est `root:root 755`, donc le daemon répond et
-    # l'utilisateur ne l'atteint pas. Le rail POSTE escalade en root trois lignes plus bas et s'en
-    # moque ; le rail BOÎTE tourne sous l'humain et ne peut pas travailler. Refuser ici, c'était
-    # refuser une machine saine sur la moitié des cas — la décision descend donc à la branche.
+    # Pas de verdict ici : le poste escalade et s'en moque, la boîte tourne sous l'humain et ne
+    # peut pas travailler. Même fait, deux conclusions — la branche tranche.
     echo "  ${W}[à voir]${N} $PROV_DOCKER_WHY"
   elif docker_installable_here; then
-    # ⚠ LA PORTE REFUSAIT CE QUE LE RAIL SAIT DÉSORMAIS COMBLER, et les deux ne peuvent pas rester
-    # en désaccord. Le motif d'origine — ⚖ « ça, on refuse. docker-desktop c'est un clic » — parle
-    # de WSL, où Docker Desktop EST un clic et où rien ici ne peut l'installer. Sur du Linux natif
-    # il n'y a pas de Docker Desktop : la réponse est un docker posé par apt, et c'est exactement
-    # ce que `10-packages` fait depuis le 2026-08-21 (⚖ user : « tu peux toujours l'installer si tu
-    # ne trouves pas »). Depuis le 2026-08-23 c'est le dépôt upstream — la ligne affichée plus bas
-    # NOMME ce qui sera posé, et elle doit le suivre : une promesse faite au préflight qui ne
-    # correspond pas à ce que l'opérateur voit vingt lignes plus loin est un mensonge, pas un détail.
-    #
-    # MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche : la porte s'arrêtait sur « aucune CLI docker », en
-    # renvoyant vers un montage Docker Desktop qui n'existe pas sur une machine sans Windows — et le
-    # module capable de le poser n'était jamais atteint. Un préflight ne doit refuser que ce que la
-    # suite ne peut pas réparer.
-    # Rail encore ouvert = les deux moitiés sont vraies en même temps, et une seule phrase ne peut
-    # pas les porter : le poste posera docker, la boîte jamais. Les deux se disent, sinon on laisse
-    # choisir un chemin condamné.
+    # Ces messages NOMMENT ce que `10-packages` posera : ils suivent le module, sinon ils promettent.
     if [[ -z "$RAIL" ]]; then
       echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com) ;"
       echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
@@ -255,8 +156,6 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
       echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker-ce, dépôt upstream download.docker.com)"
     fi
   elif [[ "$RAIL" == "box" ]]; then
-    # Loi 5 : ce rail est invité ici. Le daemon est un prérequis qu'on nomme, pas un manque qu'on
-    # comble — le refus porte donc les deux sorties, pas seulement la cause.
     say_miss "$PROV_DOCKER_WHY"
     echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
     echo "           ou donne cette machine au rail poste — sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
@@ -264,8 +163,7 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     say_miss "$PROV_DOCKER_WHY"
   fi
 else
-  # Mode standalone : le dépôt n'est pas encore là, donc la sonde partagée non plus. On se contente
-  # du minimum honnête, et la vraie sonde tournera après le clone.
+  # Standalone : pas d'arbre, donc pas de sonde partagée.
   if command -v docker >/dev/null 2>&1; then
     DOCKER_OK=1
     say_ok "docker (sonde complète après le clone)"
@@ -281,26 +179,17 @@ if [[ "$preflight_ok" -eq 0 ]]; then
 fi
 
 # ─── DÉTECTION : ce que la machine PERMET, jamais ce qu'elle VEUT ───────────
-# La distinction est tout le sujet. Deviner « poste », c'est posséder `/etc` de quelqu'un sans son
-# accord ; deviner « boîte », c'est bâtir 3 Go que personne n'a demandés. Les deux erreurs sont
-# graves et asymétriques : une question dont aucune réponse n'est sûre ne doit pas avoir de défaut.
 SUBSTRATE="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || { grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo linux; })}"
 case "$SUBSTRATE" in
   wsl|docker|linux) ;;
   *) echo ""; echo "  ${R}--substrate $SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
 esac
 
-if [[ "$SUBSTRATE" == "wsl" ]]; then
-  # WSL1 n'a pas de vrai kernel, donc pas de namespaces, donc pas de bwrap : rien ne peut aboutir.
-  # `wslinfo` absent = WSL antérieur au mode miroir, donc WSL2 — le refus ne se déclenche que sur
-  # une preuve, jamais sur un doute.
-  if [[ "$(wslinfo --wsl-version 2>/dev/null | cut -d. -f1)" == "1" ]]; then
-    echo ""
-    echo "  ${R}WSL1 détecté — LCARS ne peut pas y tourner.${N}"
-    echo "  Les pods s'exécutent sous bwrap, qui exige des namespaces : WSL1 n'a pas de vrai kernel."
-    echo "    wsl --set-version <distro> 2   (PowerShell), puis relance."
-    exit 1
-  fi
+if [[ "$SUBSTRATE" == "wsl" ]] && ! unshare -Ur true 2>/dev/null; then
+  echo ""
+  echo "  ${R}Pas de namespaces utilisateur — les pods tournent sous bwrap, qui les exige.${N}"
+  echo "  WSL1 ? passe en WSL2 :  wsl --set-version <distro> 2   (PowerShell)"
+  exit 1
 fi
 
 # ─── LE CHOIX ───────────────────────────────────────────────────────────────
@@ -308,29 +197,13 @@ fi
 # c'est juste le kickstart ; soit on monte un poste, et on s'installe dans WSL. »
 if [[ -z "$RAIL" ]]; then
   if [[ "$SUBSTRATE" != "wsl" ]] && [[ -z "${LCARS_ALLOW_ANY_HOST:-}" || "$SUBSTRATE" != "linux" ]]; then
-    # Sur un Linux natif il n'y a rien à deviner : le poste est INTERDIT par le garde de cible du
-    # provisionnement (il écrirait `/local` et `/opt/lcars` sur la machine de quelqu'un). Une
-    # seule option permise ⇒ pas de question, mais on le DIT.
-    #
-    # ⚠ « UNE SEULE OPTION » DEVIENT FAUX DÈS QUE `LCARS_ALLOW_ANY_HOST` EST POSÉ, d'où la condition
-    # ci-dessus. Le drapeau est un ACTE : il dit « cette machine-ci est dédiée, je sais ce que le
-    # rail poste y prend ». Continuer à afficher « une seule option est permise » pendant qu'une
-    # seconde l'est serait le mensonge que ce dépôt refuse partout ailleurs — et il enverrait
-    # l'opérateur monter une boîte alors qu'il vient de déclarer vouloir l'inverse.
     RAIL=box
     echo ""
     echo "  ${W}Linux natif${N} — une seule option est permise ici : la boîte."
     echo "  (le rail poste écrit dans /etc, /opt/lcars : il est réservé à WSL,"
     echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
   else
-    # Les deux sont possibles. On demande, et la question dit ce que chaque branche PREND —
-    # le coût est dans la question, pas après.
-    #
-    # ⚠ LA QUESTION DIT OÙ ON EST, et les deux terrains n'ont pas le même coût. Sur WSL le rail
-    # poste possède `/etc/wsl.conf` en entier ; sur une machine dédiée il n'y a pas de wsl.conf mais
-    # il n'y a pas non plus de distro jetable derrière — `wsl --unregister` n'existe pas, et la
-    # convergence monotone y pèse d'un cran de plus. Une question qui décrirait le mauvais terrain
-    # ferait choisir sur un coût qui n'est pas celui qu'on paie.
+    # Les deux sont possibles : on demande, et la question porte le coût du terrain où l'on est.
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
@@ -340,8 +213,8 @@ if [[ -z "$RAIL" ]]; then
       _prend="sudo · un groupe système · /opt/lcars · des paquets ·
      la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
-    # DOCKER_OK=0 ici signifie : le préflight a laissé passer parce que le rail POSTE peut poser
-    # docker. La BOÎTE ne le peut pas (loi 5), donc son option se barre au lieu de s'offrir.
+    # `DOCKER_OK=0` ici = le préflight a laissé passer parce que le POSTE peut poser docker ; la
+    # boîte, non (loi 5) — son option se barre au lieu de s'offrir.
     if [[ "$DOCKER_OK" -eq 0 ]]; then
       _opt2_etat="${R}INDISPONIBLE ici${N} — docker n'est pas debout, et la boîte ne l'installe pas."
     else
@@ -375,7 +248,6 @@ EOF
          fi
          RAIL=box ;;
       __NO_TTY__)
-        # PAS DE DÉFAUT. Les deux erreurs sont graves et opposées ; on nomme les deux drapeaux.
         echo ""
         echo "  ${R}Pas de TTY : impossible de demander, et il n'y a pas de défaut sûr.${N}"
         echo "  Redis-le dans la ligne :"
@@ -388,31 +260,12 @@ EOF
 fi
 
 # ─── PRÉFLIGHT DE LA BRANCHE ────────────────────────────────────────────────
-# ⚠ APRÈS LA QUESTION, JAMAIS AVANT, et ce n'est pas un détail d'ordre. Sur la branche boîte, la
-# distro n'est PAS la cible : on n'y pose ni /local, ni groupe, ni wsl.conf. Exiger une distro
-# vierge dans le préflight commun refuserait la machine de travail de quelqu'un qui voulait
-# simplement lancer une boîte depuis elle — c'est le cas de la machine où ce rail a été écrit.
+# Après la question, jamais avant : la boîte ne prend pas la distro pour cible, et exiger une
+# distro vierge plus haut refuserait une machine de travail qui voulait juste lancer une boîte.
 if [[ "$RAIL" == "workstation" ]]; then
-  # ⚠ LE SUBSTRAT D'ABORD, SUDO ENSUITE — ON NOMME LA RAISON LA PLUS FONDAMENTALE. Sur une machine
-  # qui n'est pas WSL, ce rail est refusé QUOI QU'IL ARRIVE : dire « sudo manque » y enverrait
-  # installer sudo pour se faire refuser ensuite. Mesuré en CI, où le job tourne non-root et sans
-  # sudo dans un conteneur : le refus sortait « sudo est absent » sur une machine dont le vrai
-  # problème est qu'elle n'est pas un poste de travail.
-  #
-  # ⚠ ET LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ — la distinction est tout ce qui change ici.
-  # Ce rail est refusé hors WSL parce qu'il POSSÈDE la machine (paquets, groupe système, /local,
-  # /opt/lcars, et une convergence qui ne retire pas), pas parce qu'il ne saurait pas y tourner :
-  # sur une machine DÉDIÉE, c'est exactement l'installation qu'on veut. Le refus par défaut protège la machine de
-  # quelqu'un ; il ne décrète pas que le natif est hors d'atteinte.
-  #
-  # `LCARS_ALLOW_ANY_HOST` est donc lu ICI comme il l'est dans `00-preflight` — MÊME drapeau, même
-  # sens, aux deux étages. Il ne l'était qu'en bas : la porte refusait avant que le rail n'ait la
-  # chance de le lire, donc le drapeau était inatteignable par le chemin nominal et ne servait qu'à
-  # qui appelait `provision` à la main. Un drapeau qu'on ne peut pas atteindre par la porte est un
-  # drapeau qui n'existe pas.
-  #
-  # `docker` reste refusé QUOI QU'IL ARRIVE : installer le rail poste DANS un conteneur n'a pas de
-  # sens (c'est le rail boîte qui fait ça, au build de l'image), et aucun drapeau ne rend ça vrai.
+  # Le substrat AVANT sudo : hors WSL ce rail est refusé quoi qu'il arrive, et « sudo manque »
+  # enverrait installer sudo pour se faire refuser ensuite. `LCARS_ALLOW_ANY_HOST` est lu ici ET
+  # dans `00-preflight` — même drapeau, même sens, aux deux étages.
   if [[ "$SUBSTRATE" != "wsl" ]]; then
     if [[ "$SUBSTRATE" == "linux" && -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
       echo ""
@@ -432,10 +285,6 @@ if [[ "$RAIL" == "workstation" ]]; then
       exit 1
     fi
   fi
-  # ⚠ `--bench` N'A AUCUN OBJET ICI, ET L'AVALER EN SILENCE EST LA FAUTE QU'ON CORRIGE PARTOUT
-  # AILLEURS. Ce drapeau FOURNIT les annexes (forge jetable + runner) au rail boîte ; le rail poste,
-  # lui, monte sa propre forge par `48-forge-host`, dans son propre cycle de convergence. Le lire
-  # nulle part sur cette branche, c'est laisser quelqu'un croire qu'il a demandé quelque chose.
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     echo ""
     echo "  ${R}--bench n'a pas d'objet sur le rail poste.${N}"
@@ -445,8 +294,6 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   fi
 
-  # Ce rail escalade pour provisionner : sans sudo il ne peut rien faire. Ici et pas dans le
-  # préflight commun — le rail boîte n'escalade que pour joindre le daemon, et la sonde le dit.
   if [[ "$EUID" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
     echo ""
     echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
@@ -454,25 +301,8 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   fi
 
-  # Le seul fichier système que ce rail PREND en entier. Le reste (paquets, groupe, /local) est
-  # additif ; `wsl.conf` est une propriété exclusive.
-  #
-  # ⚠ CE BLOC REFUSAIT, ET C'ÉTAIT TROP BRUTAL — mesuré sur une WSL 26.04 neuve le 2026-08-19.
-  # Toute distro correctement préparée porte un `wsl.conf` : `[boot] systemd=true` est un prérequis
-  # de LCARS lui-même, et `[user] default=` est ce que pose n'importe quel setup soigné. Refuser
-  # sur son existence, c'était refuser précisément les machines prêtes, et n'accepter que celles
-  # qui ne le sont pas.
-  #
-  # On MONTRE ce qui va disparaître, et la pause qui suit est le consentement. C'est la même règle
-  # que le bandeau : le coût s'annonce, il ne se découvre pas. Ce qui serait faux, c'est d'écraser
-  # en silence : un `[user] default=` présent partirait sans un mot, et la distro se rouvrirait
-  # sur un autre utilisateur au prochain `wsl --shutdown`. Constaté sur une instance vierge.
-  #
-  # ⚠ ET IL NE S'ANNONCE QUE LÀ OÙ IL EST VRAI. `30-wsl` porte `APPLY-ON: wsl` : sur une machine
-  # dédiée non-WSL, ce rail ne touche JAMAIS `/etc/wsl.conf`. Un fichier de ce nom peut pourtant s'y
-  # trouver — recopié, hérité d'une image, posé par un outil tiers — et le bloc l'annonçait alors
-  # comme condamné. Promettre une destruction qui n'aura pas lieu est du même ordre qu'en taire une
-  # qui aura lieu : dans les deux cas l'opérateur consent à autre chose que ce qui se passe.
+  # Le seul fichier système que ce rail prenne EN ENTIER — le reste (paquets, groupe, /local) est
+  # additif. On montre ce qui va disparaître ; la pause du bandeau, plus bas, est le consentement.
   if [[ "$CONSENTED" -eq 0 ]] && [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
@@ -526,13 +356,6 @@ ${AMBER}     ____________________________________________________
 EOF
 
 if [[ "$RAIL" == "workstation" ]]; then
-  # `/etc/wsl.conf` n'est pris QUE sur WSL (`30-wsl`, APPLY-ON: wsl). Le bandeau annonce le coût :
-  # y nommer un fichier qu'on ne touchera pas sur cette machine-ci est un coût inventé, et un coût
-  # inventé décrédibilise ceux qui sont vrais.
-  #
-  # La convergence ajoute et ne retire pas : revenir en arrière demande un point de restauration,
-  # gratuit sous WSL, apporté par l'opérateur ailleurs. Aucune sonde ne peut le constater — le
-  # bandeau le nomme, il ne le vérifie pas, et il ne refuse pas faute de l'avoir.
   if [[ "$SUBSTRATE" == "wsl" ]]; then
     _banner_wslconf="  · /etc/wsl.conf, pris en entier."
     _banner_back="  sous WSL il est gratuit — « wsl --unregister »."
@@ -540,28 +363,13 @@ if [[ "$RAIL" == "workstation" ]]; then
     _banner_wslconf=""
     _banner_back="  snapshot ou image, et le rail n'en fournit aucun."
   fi
-  # ⚖ LE COMPTE SE DIT AVANT D'EXISTER (USER 2026-08-21). C'est la seule mutation de ce rail qui
-  # crée un UTILISATEUR sur la machine de quelqu'un ; l'annoncer dans le bandeau du coût est ce qui
-  # la rend consentie, et la taire la rendrait subie.
-  #
-  # ⚠ ET LA BRANCHE « PERSONNE NE SERA CRÉÉ » ÉTAIT FAUSSE. Tant que `--fleet-human` existait, ce
-  # bandeau annonçait, faute de drapeau, que rien n'apparaîtrait — alors que la recette posait quand
-  # même son compte par défaut et que le convergeur le matérialisait vingt rangs plus loin. Le
-  # bandeau du COÛT taisait donc la seule mutation qu'il existe pour annoncer. Le rail pré-sème
-  # toujours, c'est sa raison d'être (⚖ USER 2026-08-25 : « livrer out of the box un user fleet
-  # enabled, puisqu'on verrouille admin hors de la fleet »). Il le dit maintenant sans condition.
-  #
-  # ⚠ ET LE `if [[ "$RAIL" == "workstation" ]]` QUI ENTOURAIT CE BLOC EST PARTI AVEC. Il était
-  # imbriqué dans celui de la ligne 517, donc toujours vrai — invisible tant que le bloc avait deux
-  # branches, tautologique dès qu'il n'en a plus qu'une. Une condition qui ne peut pas être fausse
-  # se lit comme une décision et n'en est pas une.
+  # ⚖ USER 2026-08-21 : le compte se dit AVANT d'exister — c'est la seule mutation de ce rail qui
+  # crée un utilisateur sur la machine de quelqu'un, et l'annoncer est ce qui la rend consentie.
   _banner_human="$(fleet_human_name)"
   echo ""
   if [[ -n "$_banner_human" ]]; then
     echo "  ${AMBER}Ce rail créera l'utilisateur « $_banner_human »${N} (uid libre au-dessus du siège,"
   else
-    # Mode standalone : la source n'est pas encore là, donc l'autorité du nom non plus. On annonce
-    # la mutation — c'est elle qui se consent — sans inventer le nom qu'elle portera.
     echo "  ${AMBER}Ce rail créera un utilisateur de fleet${N} (uid libre au-dessus du siège,"
   fi
   echo "  groupe fleet) : c'est lui qui fera tourner la fleet. Toi, tu restes le siège."
@@ -602,11 +410,8 @@ echo ""
 echo "  ${G}    ▶  Entrée pour continuer${N}  /  ${R}Ctrl+C pour annuler${N}"
 echo ""
 
-# ⚠ LES ACCOLADES PORTENT LA REDIRECTION D'ERREUR, PAS LE `read`. Sans elles, l'echec du
-# `< /dev/tty` est signale par le SHELL lui-meme — « install.sh: line NNN: /dev/tty: No such
-# device or address » — avant la phrase calme qui l'explique, et le `2>/dev/null` du `read` ne
-# l'attrape pas. Mesure du 2026-08-18, install joue par ssh sans TTY : l'operateur voit d'abord
-# une erreur brute, puis apprend que tout va bien. On ne montre que la seconde.
+# Les accolades portent la redirection d'erreur, pas le `read` : sans elles, l'échec de
+# `< /dev/tty` est signalé par le shell lui-même, avant la phrase calme qui l'explique.
 { read -r _ < /dev/tty; } 2>/dev/null || {
   echo "  [install] Pas de TTY — continue automatiquement (le rail est déjà choisi)."
   [[ -n "${LCARS_COLOR_HINT:-}" ]] && echo "  [install] Sortie non-terminal : couleurs coupées (PROV_COLOR=1 pour les garder dans le log)."
@@ -614,26 +419,13 @@ echo ""
 fi
 
 # ─── LA BRANCHE BOÎTE : aucune escalade, on délègue à la porte docker ───────
-# Elle ne demande PAS root, et c'est la promesse auditée du rail : « rien hors de ton clone et de
-# docker ». Un `sudo` ici la casserait sans rien acheter.
 if [[ "$RAIL" == "box" ]]; then
-  # ⚠ CE BLOC DICTAIT UN GESTE QU'ON SAIT FAIRE, et c'est la faute qu'il fallait retirer. Il
-  # renvoyait l'opérateur cliquer dans Docker Desktop ou ouvrir la socket à un groupe — pendant que
-  # la seule chose qui avait jamais fait tourner ce rail, c'était un `sudo` posé À LA MAIN, hors du
-  # code, par celui qui l'écrivait. Un refus qui dicte double le rail ; et un rail dont la démo tient
-  # par un geste non écrit ne tient pas.
-  #
   # ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
-  # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La sonde escalade
-  # donc elle-même quand la socket appartient à root — et ce qui reste ici est le cas où même ça ne
-  # suffit pas.
-  # `sudo -v` et pas un vrai sudo : il DEMANDE le mot de passe et met en cache, sans rien exécuter.
-  # Le shim de la sonde consomme ensuite ce cache, commande par commande.
+  # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. »
   #
-  # ⚠ NE PAS REMPLACER PAR UN `exec sudo`. Ce rail bâtit une image sous l'uid de l'humain : en root,
-  # `git` lirait son clone en « dubious ownership » et l'image sortirait estampée `unknown`.
-  #
-  # ⚠ TTY OBLIGATOIRE : sans terminal, une invite pend jusqu'au timeout au lieu de refuser.
+  # ⚠ NE PAS REMPLACER PAR UN `exec sudo` : ce rail bâtit une image sous l'uid de l'humain ; en root,
+  # `git` lirait le clone en « dubious ownership » et l'image sortirait estampée `unknown`.
+  # TTY exigé : sans terminal, l'invite pend jusqu'au timeout au lieu de refuser.
   if [[ "$DOCKER_OK" -eq 0 && "${PROV_DOCKER_DENIED:-0}" == "1" ]] \
      && command -v sudo >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
     echo ""
@@ -663,40 +455,10 @@ if [[ "$RAIL" == "box" ]]; then
     exec "$SCRIPT_DIR/fleet/deploy/box" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
-  # `--bench` promet « forge jetable + boîte + runner CI, EN UN GESTE », et la porte entière existe
-  # pour FOURNIR les préconditions au lieu de les exiger. L'image était bâtie plus bas, sur le chemin
-  # sans `--bench` UNIQUEMENT — et `--bench` `exec`ute son délégué bien avant d'y arriver. Donc sur
-  # une machine sans image, le seul rail qui promet « en un geste » mourait sur « image absente
-  # localement » en DICTANT `fleet/deploy/box build`. Le geste ne bouge pas, il REMONTE : un seul endroit,
-  # les deux chemins.
+  # Les délégués, eux, refusent de bâtir : un build rend SON verdict, jamais en effet de bord.
   #
-  # ⚠ ET LES DÉLÉGUÉS GARDENT LEUR REFUS. `up` porte `--no-build` sur une cicatrice mesurée (un `up`
-  # qui masquait un build `--no-cache` raté en repartant du cache de layers) et `bench-up` refuse pour
-  # la même raison : un build rend SON verdict, il n'est jamais l'effet de bord d'autre chose. La
-  # porte, elle, a le droit de l'appeler — c'est son métier — et le verdict reste celui du build.
-  #
-  # ⚠ LE TROU A SURVÉCU À QUATRE REJEUX SUR TROIS MACHINES, et la raison est dans le substrat : sous
-  # WSL le daemon est partagé par toute la VM, donc une distro vierge n'est PAS un docker vierge —
-  # l'image était toujours déjà là. Le chemin sans image ne s'est joué qu'une fois toutes les images
-  # supprimées. Les témoins de `install_door.bats` le couvrent maintenant avec un `box` espion.
-  #
-  # L'image PRÉSENTE n'est jamais reconstruite : rebâtir à chaque passage ferait d'un `--check` de
-  # dix secondes un quart d'heure, et le re-run doit rester sûr ET court.
-  # ⚠ CE RAIL AVALAIT TROIS DRAPEAUX DE SA PROPRE PORTE, EN SILENCE. `--forge-project`,
-  # `--port-forge` et `--port-deck` partent dans `PASSTHRU`, qui n'est lu QUE par le rail poste
-  # (le re-exec sudo et les appels a `provision`). Sur `--box` ils n'atteignaient personne : la
-  # porte les acceptait, n'imprimait rien, et le delegue tournait sur ses defauts.
-  #
-  # MESURE, install reelle du 2026-08-28 : `--box --bench --forge-project alice4 --port-forge 21090`
-  # a monte un banc sur le projet `lcars-nuit` et le port 21000, puis a REFUSE sur une collision avec
-  # un banc d'hier. L'operateur decouvre cinq minutes plus tard qu'aucune de ses trois valeurs n'a
-  # ete lue. Et `--help` decrit `--forge-project` comme « le geste qui en monte une SECONDE au lieu
-  # de deplacer celle qui tourne » — sans le qualifier de rail : la porte promettait ce geste et ne
-  # le faisait pas.
-  #
-  # ON TRADUIT CE QUI A UN SENS ICI, ON REFUSE LE RESTE — jamais d'avalement. Les deux delegues ne
-  # se pilotent pas pareil : `bench-up.sh` a des drapeaux, `fleet/deploy/box` n'en a aucun et se lit
-  # dans l'environnement.
+  # Les deux ne se pilotent pas pareil — `bench-up.sh` a des drapeaux, `fleet/deploy/box` n'en a
+  # aucun et se lit dans l'environnement. On traduit ce qui a un sens ici, on refuse le reste.
   _box_reject=()
   _i=0
   while [[ "$_i" -lt "${#PASSTHRU[@]}" ]]; do
@@ -704,8 +466,7 @@ if [[ "$RAIL" == "box" ]]; then
       --forge-project)
         # Le seul qui vaut sur LES DEUX chemins : il nomme l'instance, pas une publication.
         if [[ "$WITH_BENCH" -eq 1 ]]; then
-          # PREPOSE, donc un `-- --project X` explicite passe APRES et gagne : le delegue lit en
-          # dernier-gagne. L'operateur qui nomme les deux obtient celui qu'il a ecrit pour le delegue.
+          # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
           export LCARS_PROJECT="${PASSTHRU[$((_i + 1))]}"
@@ -715,7 +476,6 @@ if [[ "$RAIL" == "box" ]]; then
           _d="--forge-port"; [[ "${PASSTHRU[$_i]}" == "--port-deck" ]] && _d="--deck-port"
           DELEGATE_ARGS=("$_d" "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          # Sans banc, les ports de la boite sont ceux du compose : il n'y a rien a fixer ici.
           _box_reject+=("${PASSTHRU[$_i]} (les ports de la boite sont ceux du compose — ajoute --bench, ou edite le compose)")
         fi ;;
       --env|--human|--only)
@@ -735,14 +495,8 @@ if [[ "$RAIL" == "box" ]]; then
   for _i in "${!DELEGATE_ARGS[@]}"; do
     [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"
   done
-  # ⚠ CE REFUS PASSE AVANT LE BUILD, ET IL Y ETAIT APRES. Sur une machine neuve sans image et sans
-  # forge, `install.sh --box` construisait plusieurs minutes AVANT d'annoncer qu'il ne pouvait rien
-  # en faire — le diagnostic arrivait apres la depense. Son propre temoin s'appelait « REFUS avant
-  # tout build » et ne forcait jamais l'absence d'image : il passait sur une machine qui avait deja
-  # l'image, c'est-a-dire celle ou on le jouait.
-  #
-  # `--bench` en est exempt, et c'est la seule exception : ce drapeau dit precisement « fabrique-moi
-  # la forge », donc l'absence de `FORGE_BASE_URL` y est le cas nominal.
+  # Ce refus passe AVANT le build : après, on aurait dépensé plusieurs minutes pour annoncer qu'on
+  # ne peut rien en faire.
   if [[ "$WITH_BENCH" -ne 1 && -z "${FORGE_BASE_URL:-}" ]]; then
     echo ""
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
@@ -755,11 +509,8 @@ if [[ "$RAIL" == "box" ]]; then
   if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
     echo ""
     echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
-    # ⚠ PAS DE `DOCKER_BIN=` ICI, ET C'EST DELIBERE : le delegue SONDE lui-meme et lit
-    # `PROV_DOCKER_BIN` de sa propre sonde. Le prefixe a vecu ici sans lecteur — ni l'ancienne
-    # porte ni `box` ne l'ont jamais lu. ⚠ NE PAS L'AJOUTER PAR SYMETRIE avec le `--bench`
-    # plus bas : celui-la est REEL, `bench-up.sh` compose `"$DOCKER_BIN" <verbe>` et retombe
-    # sinon sur un `docker` nu, contournant le shim d'escalade.
+    # ⚠ PAS DE `DOCKER_BIN=` ICI, ET C'EST DÉLIBÉRÉ : `box` sonde lui-même. Ne pas l'ajouter par
+    # symétrie avec le `--bench` plus bas — celui-là est réel, `bench-up.sh` le lit.
     LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/fleet/deploy/box" build || {
       echo "  ${R}Le build a échoué — son verdict est le sien, rien n'a été déployé.${N}"
       exit 1
@@ -769,21 +520,15 @@ if [[ "$RAIL" == "box" ]]; then
   fi
 
   if [[ "$WITH_BENCH" -eq 1 ]]; then
-    # `--bench` FOURNIT les préconditions au lieu de les exiger : forge jetable, boîte, runner CI.
-    # Après lui, l'état est le MÊME qu'un déploiement où l'opérateur les avait déjà — c'est ce qui
-    # empêche « flux banc » et « flux prod » de diverger.
     echo ""
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI, en un geste."
-    # ⚠ LE DÉLÉGUÉ REÇOIT LA RÉSOLUTION, IL NE LA REFAIT PAS. Mesuré sur une instance vierge : sans
-    # cette ligne, `bench-up.sh` retombe sur son défaut `docker` et meurt sur « docker introuvable »
-    # — sur une machine où la porte venait d'annoncer « docker répond ». Deux résolutions pour un
-    # fait, donc deux verdicts selon qui regarde. Le shim d'escalade voyage avec.
+    # Le délégué reçoit la résolution, il ne la refait pas : sans cette ligne `bench-up.sh` retombe
+    # sur un `docker` nu et meurt là où la porte vient d'annoncer « docker répond ». Le shim voyage avec.
     export DOCKER_BIN="$PROV_DOCKER_BIN"
     exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""
   echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/box"
-  # L'image est déjà là : le bloc au-dessus l'a construite si elle manquait, pour les DEUX chemins.
   exec "$SCRIPT_DIR/fleet/deploy/box" up
 fi
 
@@ -793,21 +538,10 @@ if [[ "$EUID" -ne 0 ]]; then
   echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
   REEXEC_ARGS=(--workstation --repo "$REPO_URL" --branch "$BRANCH" --consented)
   [[ "$DOCTOR_MODE" -eq 1 ]] && REEXEC_ARGS+=(--check)
-  # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO (env_reset), ET C'EST LE TROISIEME PIEGE DE CETTE FAMILLE
-  # MESURE SUR CETTE MACHINE. Les reglages de provisionnement posés AVANT l'escalade meurent en la
-  # traversant : `PROV_COLOR=1 bash install.sh` colorisait le preflight puis rendait un
-  # provisionnement blanc, sans que rien ne dise pourquoi. Les assignations en tete de commande
-  # sont la forme que sudo laisse passer — on les nomme, une par une, plutot que d'ouvrir `-E`.
-  #
-  # ⚠ QUATRIÈME EXEMPLAIRE, ET LE PLUS COÛTEUX : `LCARS_ALLOW_ANY_HOST`. Sans lui dans cette liste,
-  # la machine dédiée est INSTALLABLE EN THÉORIE ET REFUSÉE EN PRATIQUE — la porte lit le drapeau,
-  # décide de laisser passer, escalade… et la seconde instance ne le voit plus, donc se refuse
-  # elle-même avec le message qui invite à poser le drapeau qu'on vient de poser. Le refus est alors
-  # parfaitement circulaire, et rien dans la sortie ne dit que sudo est passé entre les deux.
+  # ⚠ `sudo` FAIT `env_reset` : tout réglage posé avant l'escalade meurt en la traversant. Cette
+  # liste est le SEUL passage — une variable qui n'y figure pas est mangée en silence, et le geste
+  # qu'elle commande ne produit rien. On les nomme une par une plutôt que d'ouvrir `-E`.
   REEXEC_ENV=()
-  # ⚠ CINQUIÈME EXEMPLAIRE : `PROV_FORGE_ADMIN_RESET`. Le drapeau par lequel un opérateur demande un
-  # mot de passe neuf pour sa forge — posé avant l'escalade, mangé par `env_reset`, et l'apply
-  # repartait sans lui : le geste ne produisait RIEN, et rien ne disait pourquoi.
   for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET; do
     [[ -n "${!_v:-}" ]] && REEXEC_ENV+=("$_v=${!_v}")
   done
@@ -818,8 +552,7 @@ fi
 PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
 
 if [[ ! -x "$PROVISION" ]]; then
-  # Mode standalone (script téléchargé seul) : cloner la source CHEZ L'HUMAIN — c'est SON
-  # checkout (3 zones : la source ne vit pas sous /local, seul l'install déployé y va).
+  # Standalone : la source se clone CHEZ L'HUMAIN — c'est son checkout, pas celui de root.
   HUMAN="${SUDO_USER:-root}"
   HUMAN_HOME="$(getent passwd "$HUMAN" | cut -d: -f6)"
   SRC_DIR="${LCARS_SRC:-$HUMAN_HOME/LCARS-fleet}"
@@ -889,72 +622,31 @@ if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
   docker_endpoint >/dev/null 2>&1 || true
 fi
 
-# ⚖ LE RAIL POSTE NE BÂTIT PLUS D'IMAGE, et l'absence de ce bloc est le gain du chantier.
-#
-# Il bâtissait ici `lcars-fleet:2` — dix minutes, 1,18 Go — sous le motif « la forge du poste en a
-# besoin (tofu, recette, gestes) ». C'était vrai, et c'était le SEUL motif : ce rail installe un
-# LCARS natif, il ne démarre jamais cette image. Il la bâtissait pour en extraire 124 Mo d'outil
-# dans un conteneur jetable.
-#
-# ⚖ USER 2026-08-22 : « tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette
-# tofu ? » — `46-tofu` pose désormais tofu et son miroir de providers SUR la machine, avec les mêmes
-# pins que le Dockerfile, et `48-forge-host` appelle le geste directement.
-#
-# ⚠ LE RAIL BOÎTE, LUI, BÂTIT TOUJOURS (plus haut) : là, l'image EST le produit livré.
-
 # ─── Déléguer TOUT au provisioning (l'autorité) ─────────────────────────────
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$PROVISION" doctor "${PASSTHRU[@]}"
 fi
-# ⚠ LE CODE DE RETOUR DE L'APPLY SE LIT, ET IL A TROIS SENS — LA PORTE N'EN CONNAISSAIT AUCUN.
-# `provision apply` rend 0 (tout convergé), 2 (appliqué, drift résiduel : un geste manque, rien
-# n'est cassé) ou 1 (au moins un échec). Cette ligne était nue : sous `set -e`, 1 ET 2 tuaient
-# install.sh au même endroit, sans un mot, et le bandeau de fin — celui qui dit « les verdicts
-# ci-dessus font foi » — n'était imprimé QUE sur une convergence parfaite.
+# `provision apply` rend 0 (convergé), 2 (appliqué, drift résiduel — rien n'est cassé) ou 1 (échec) :
+# sous `set -e`, une ligne nue tuerait la porte sur 1 ET 2, sans un mot. Même lecture que
+# `deploy/box` (`await_provision_verdict`) — deux portes qui en tirent deux verdicts, c'est un code
+# de retour qui ne veut plus rien dire.
 #
-# Conséquences mesurées le 2026-08-21 sur une install à froid : la première passe d'une machine
-# dédiée dérive forcément (la forge n'existe pas encore), donc la porte mourait muette sur une
-# installation qui venait de poser un runtime complet. L'opérateur voyait des lignes DRIFT puis
-# plus rien — et rien ne lui disait si l'install avait abouti.
-#
-# La sémantique est celle du geste opérateur `deploy/box` (`await_provision_verdict`), reprise à
-# dessein plutôt que réinventée : deux portes qui lisent le même code de retour et en tirent deux
-# verdicts, c'est un code de retour qui ne veut plus rien dire.
-# ⚠ LE CANAL DES IDENTIFIANTS, ET IL EST À NOUS PARCE QUE LE BANNER FINAL EST À NOUS. Les modules
-# qui fabriquent un mot de passe tournent au rang 22 ou 48 : afficher sur place, c'est afficher puis
-# faire défiler deux cents lignes par-dessus. Ils écrivent donc ici, et on imprime à la fin.
-#
-# 0600 root, et DÉTRUIT juste après l'impression : le secret ne survit pas à l'installation qui l'a
-# produit. C'est la propriété qui rend l'affichage différé acceptable — sans elle on aurait échangé
-# « défilé » contre « posé en clair sur le disque ».
+# Le canal des identifiants : les modules qui fabriquent un mot de passe tournent au rang 22 ou 48,
+# et afficher sur place, c'est afficher puis faire défiler deux cents lignes. Ils écrivent ici, on
+# imprime à la fin — 0600, détruit ensuite : le secret ne survit pas à l'install qui l'a produit.
 PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
 export PROV_ANNOUNCE_FILE
 
-# ─── DÉTRUIRE, OUI — MAIS APRÈS AVOIR IMPRIMÉ, ET C'EST LA CORRECTION DU 2026-08-23 ──────────────
-#
-# ⚠ CE CANAL A PERDU UN MOT DE PASSE POUR DE BON. Sur un poste natif, la première passe a généré le
-# mot de passe forge de l'humain intégré, l'a POSÉ sur la forge, l'a écrit ici — et a écrit son
-# marqueur « déjà posé ». Puis `60-deploy` a échoué au gate, `install.sh` est sorti en erreur, et le
-# `trap` a détruit le fichier AVANT le banner final, qu'on n'atteint jamais sur ce chemin. Aux onze
-# relances suivantes, le marqueur a fait sauter la pose. Le compte existait, avec un mot de passe
-# que personne n'avait jamais vu : exactement « un compte d'administration où personne ne peut
-# entrer », le défaut que ce canal existait pour fermer.
-#
-# La propriété « le secret ne survit pas à l'installation qui l'a produit » est juste. Ce qui était
-# faux, c'est de la faire porter par un geste qui peut s'exécuter SANS que l'impression ait eu lieu.
-# Détruire est la seconde moitié d'un geste dont imprimer est la première — les deux vivent
-# ensemble, dans la sortie, quel que soit le code de retour.
-#
-# ⚠ ET SUR CTRL-C AUSSI. Un secret déjà posé sur la forge est perdu de la même manière si on
-# l'efface sans le dire ; l'interruption ne rend pas le compte inexistant.
+# ⚠ IMPRIMER PUIS DÉTRUIRE, DANS LE MÊME GESTE ET SUR TOUS LES CHEMINS DE SORTIE (Ctrl-C compris).
+# Un `rm` qui s'exécute sans l'impression perd POUR DE BON un secret déjà posé sur la forge : le
+# compte existe, avec un mot de passe que personne n'a jamais vu.
 _CREDS_PRINTED=0
 print_credentials_once() {
   [[ "$_CREDS_PRINTED" -eq 0 ]] || return 0
   [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]] || return 0
   _CREDS_PRINTED=1
-  # ⚠ SANS `PROVISION_RUN` : ce drapeau arme la garde de sortie de la lib, qui réclame un verdict de
-  # module. On n'en est pas un — on emprunte UNE mise en forme, et le poser ferait crier « MORT
-  # avant de rendre son verdict » juste après un install réussi.
+  # Sans `PROVISION_RUN` : il arme la garde de sortie de la lib, qui réclame un verdict de module.
+  # On n'en est pas un — on emprunte une mise en forme, pas un contrat.
   # shellcheck source=fleet/deploy/lib/provision-lib.sh
   ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
       && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
@@ -979,9 +671,8 @@ case "$_apply_rc" in
     ;;
 esac
 
-# La derniere instruction lue est celle qu'on suit : chaque ligne est derivee du terrain ET du
-# rail. Sur le poste la fleet appartient a l'humain de fleet — GUARD B refuse l'uid du siege, qui
-# porte sudo — et l'operateur la lance par `sudo -u`, puis atteint son deck par le groupe `fleet`.
+# GUARD B refuse l'uid du siège — celui qui porte sudo. D'où le `sudo -u <humain de fleet>` des
+# instructions ci-dessous : le siège atteint son deck par le groupe `fleet`, il ne lance pas la fleet.
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
   _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
@@ -989,43 +680,27 @@ else
   _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
   _step1b=""
 fi
-# ⚠ CETTE LIGNE A EU DEUX BRANCHES, ET LA SECONDE ENVOYAIT CHERCHER UN GESTE QUI N'EXISTE PLUS. Sans
-# `--fleet-human` elle disait « nomme un humain, sinon personne ne peut la lancer » — sur une machine
-# où le rail venait justement d'en pré-semer un. Le nom se demande à son autorité, et l'acceptation
-# qui suit MESURE que `fleet_v2 start` marche sous lui : la ligne 3 n'a donc plus à supposer.
 if [[ "$RAIL" == "workstation" ]]; then
   _step3_human="$(fleet_human_name)"
   _step3="${W}3.${N} ${W}sudo -u $_step3_human fleet_v2 start${N} — la fleet tourne sous"
   _step3b="     « $_step3_human » ; toi tu l'atteins par le groupe ${W}fleet${N}."
 else
-  # ssh entre en `admiral`, le siege, a qui GUARD B refuse `fleet_v2 start`. La fleet se lance sous
-  # un humain de fleet, et sa porte est sa console (`console.sh` : ssh est la porte d'admin).
   _step3="${W}3.${N} ${W}fleet_v2 start${N} — depuis la console de ton humain de"
   _step3b="     fleet (deck sur 20999) ; ssh entre en admiral, que GUARD B refuse."
 fi
 
 # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
 #
-# ⚠ LE BILAN DE MODULES NE DIT PAS CE QU'ON PEUT FAIRE. « 26 modules · 0 échec » signifie que chaque
-# module est d'accord avec lui-même ; il a déjà été vert sur une forge que rien ne pouvait servir,
-# sans identifiants affichés et sans humain de fleet. Les trois capacités qui font qu'une
-# installation vaut quelque chose n'étaient mesurées par personne.
+# Un bilan de modules dit que chacun est d'accord avec lui-même, pas ce qu'on peut FAIRE ensuite.
 #
 # ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette
-# passe — le `trap` ci-dessus détruit le fichier en sortant, et la forge n'en garde qu'un hash. Une
-# recette lancée plus tard ne pourrait pas vérifier « je peux me connecter », seulement « le compte
-# existe », qui est une autre question.
-#
-# Son verdict N'ÉCRASE PAS celui du provisionnement : les deux se cumulent, parce qu'ils ne mesurent
-# pas la même chose. Un rail qui converge et ne sert à rien doit dire les deux.
+# passe — le `trap` détruit le fichier en sortant, et la forge n'en garde qu'un hash. Plus tard, on
+# ne pourrait plus vérifier « je peux me connecter », seulement « le compte existe ».
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/deploy/accept" ]]; then
-  # ⚠ LE NOM NE VOYAGE PLUS : `accept` vit dans le MÊME arbre que l'autorité et l'interroge lui-même.
-  # Le passer d'ici en ferait une copie de plus à tenir d'accord, pour un destinataire qui peut lire
-  # la source. Une donnée qu'on transmet à quelqu'un qui la possède déjà est une occasion de mentir.
+  # Le nom de l'humain ne voyage pas : `accept` vit dans le même arbre que l'autorité et l'interroge.
   _accept_args=(--announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}")
-  # ⚠ SA PROPRE VARIABLE : `_apply_rc` a DÉJÀ été lu et tranché par le `case` bien plus haut — s'y
-  # ranger ici ne changerait rien, et une acceptation qui échoue sans porter à conséquence est
-  # exactement le défaut qu'elle existe pour fermer. Elle décide du code de sortie tout en bas.
+  # Sa propre variable : `_apply_rc` est déjà tranché plus haut, et c'est celle-ci qui décide du
+  # code de sortie tout en bas.
   _accept_rc=0
   bash "$SCRIPT_DIR/fleet/deploy/accept" "${_accept_args[@]}" || _accept_rc=$?
 fi
@@ -1044,13 +719,9 @@ _box_body+=("  Sonde à tout moment : ${W}bash install.sh --check${N}")
 echo ""
 _box_emit --rule "$_box_title" "${_box_body[@]}"
 
-# LES IDENTIFIANTS EN DERNIER, APRÈS le bloc « suite » : c'est la dernière chose à l'écran, donc la
-# seule qu'on est sûr de ne pas avoir fait défiler. Le `trap` les imprimerait de toute façon en
-# sortant — l'appel ici sert à les placer AVANT le code de sortie plutôt qu'après, sur le chemin
-# nominal. Sur un chemin d'échec, le trap reste le seul à passer, et c'est tout l'objet.
+# Les identifiants en dernier : la dernière chose à l'écran est la seule qu'on est sûr de ne pas
+# avoir fait défiler. Le `trap` les imprimerait de toute façon — cet appel les place avant le code
+# de sortie sur le chemin nominal.
 print_credentials_once
 
-# ⚠ LE CODE DE SORTIE PORTE L'ACCEPTATION, ET IL EST EN DERNIER PARCE QU'ELLE EST EN DERNIER. Les
-# identifiants s'impriment quoi qu'il arrive : une capacité manquante ne doit pas les emporter avec
-# elle — l'opérateur en a besoin PRÉCISÉMENT pour réparer.
 exit "${_accept_rc:-0}"

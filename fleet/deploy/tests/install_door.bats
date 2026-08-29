@@ -22,6 +22,8 @@
 # `$RAIL` qui doivent atteindre `grep`/`sed` TELS QUELS — les developper chercherait la valeur de
 # CE shell au lieu du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
+bats_require_minimum_version 1.5.0
+
 load refute
 
 setup() {
@@ -60,6 +62,12 @@ setup() {
   unset FORGE_BASE_URL
 }
 
+
+@test "la porte refuse d'etre pipee, et c'est un REFUS, pas un crash" {
+  run --separate-stderr bash -c "cat '$SRC' | bash -s -- --box"
+  [ "$status" -ne 0 ]
+  [ -z "$stderr" ]
+}
 
 @test "l'aide marche SANS docker — un --help qui exige l'outil qu'il documente est une porte fermee" {
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help
