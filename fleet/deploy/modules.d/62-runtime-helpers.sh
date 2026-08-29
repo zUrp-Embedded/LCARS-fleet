@@ -175,7 +175,7 @@ helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.sourc
 
 posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
-  [[ -r "$f" ]] && head -n1 "$f" | tr -d '[:space:]' || echo inconnue
+  if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
 }
 
 # <fichier> <url> <sha256> — la table, lue par le check ET par l'apply : une seule description.

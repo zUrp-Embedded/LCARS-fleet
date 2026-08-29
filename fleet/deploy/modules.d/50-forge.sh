@@ -246,7 +246,7 @@ ensure_passwords_entries() {
   seed="$(tr -d '[:space:]' < "$PROV_FORGE_SEED_FILE")"
   [[ -n "$seed" ]] || { p_fail "seed vide : $PROV_FORGE_SEED_FILE"; return 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/prov-pwd.XXXXXX")" || { p_fail "tmp passwords-file"; return 1; }
-  if ! { [[ -r "$PROV_PASSWORDS_FILE" ]] && cat "$PROV_PASSWORDS_FILE" || printf '{}'; } \
+  if ! { if [[ -r "$PROV_PASSWORDS_FILE" ]]; then cat "$PROV_PASSWORDS_FILE"; else printf '{}'; fi; } \
       | jq --arg s "$seed" '. + ($ARGS.positional | map({(.): $s}) | add)' --args "${absents[@]}" > "$tmp"; then
     rm -f "$tmp"; p_fail "complétion jq du passwords-file"; return 1
   fi

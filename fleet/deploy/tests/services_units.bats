@@ -750,3 +750,17 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'body="\$\(unit_body "\$u"\)"'
   grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'write_atomic "\$\(unit_path "\$u"\)" [^<]*<<<"\$body"'
 }
+
+@test "forge_url : sans forge.url, vide et 0 — une adresse pas encore annoncee n'est pas un echec" {
+  # `[[ -r "$f" ]] && head …` rendait 1 sur un fichier absent : tout appelant qui capture par
+  # affectation sous set -e mourrait sans verdict. Mur I3 (idiom_walls).
+  eval "$(sed -n '/^forge_url()/,/^}/p' "$MOD")"
+  PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
+  run forge_url
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  mkdir -p "$PROV_TOKENS_DIR"; printf 'http://forge.test:3000\n' > "$PROV_TOKENS_DIR/forge.url"
+  run forge_url
+  [ "$status" -eq 0 ]
+  [ "$output" = "http://forge.test:3000" ]
+}

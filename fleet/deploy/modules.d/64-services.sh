@@ -150,9 +150,9 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
 # Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
 # le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
 # provisionnement vient d'établir — et jamais recopié à la main dans deux unités.
-forge_url() {
+forge_url() { # vide tant que 48-forge-host n'a pas annonce d'adresse — ce n'est pas un echec
   local f="$PROV_TOKENS_DIR/forge.url"
-  [[ -r "$f" ]] && head -n1 "$f" | tr -d '[:space:]'
+  if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]'; fi
 }
 
 services_env_body() {

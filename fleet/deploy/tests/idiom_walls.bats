@@ -61,3 +61,25 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   # la forme sure — un en-tete ecrit dans une config lue sur stdin — n'est pas prise pour la fragile
   refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
 }
+
+# Derniere instruction d une fonction : `[[ … ]] && cmd` sans `||`. Sous set -e, le rc du test
+# devient celui de la fonction, et un appelant qui capture par affectation — `x="$(f)"` — meurt sans
+# verdict. Un PREDICAT (nom en `_ok`) est exempte : son rc EST son contrat, ses appelants sont des if.
+I3_AWK='
+  FNR==1 { fn="" }
+  /^[a-z_][a-z0-9_]*\(\)[ \t]*\{/ { fn=$1; sub(/\(\).*/, "", fn); last=""; next }
+  fn!="" && /^\}/ {
+    if (last ~ /^[ \t]*\[\[.*\]\][ \t]*&&[ \t]/ && last !~ /\|\|/ && fn !~ /_ok$/) print FILENAME ": " fn
+    fn=""; next
+  }
+  fn!="" && !/^[ \t]*(#|$)/ { last=$0 }
+'
+
+@test "MUR I3: aucune fonction ne finit sur [[ … ]] && cmd — son rc tuerait l appelant qui l affecte" {
+  local hits
+  hits="$(awk "$I3_AWK" "${SOURCES[@]}")"
+  [ -z "$hits" ] || { echo "MUR I3 rompu —" >&2; echo "$hits" >&2; false; }
+  # le mur mord : une fonction fautive est vue, un predicat _ok ne l est pas
+  printf 'get_x() {\n  [[ -n "$x" ]] && echo "$x"\n}\nx_ok() {\n  [[ -x "$b" ]] && "$b" --version\n}\n' > "$BATS_TEST_TMPDIR/probe.sh"
+  [ "$(awk "$I3_AWK" "$BATS_TEST_TMPDIR/probe.sh")" = "$BATS_TEST_TMPDIR/probe.sh: get_x" ]
+}

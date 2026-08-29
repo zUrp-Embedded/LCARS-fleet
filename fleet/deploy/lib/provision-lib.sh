@@ -1110,7 +1110,7 @@ human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 # s'évanouit sur une lecture ratée est pire que pas de garde.
 _uid_bound() { # <UID_MIN|UID_MAX> <défaut>
   local v; v="$(awk -v k="^$1" '$0 ~ k {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
-  [[ "$v" =~ ^[0-9]+$ ]] && printf '%s' "$v" || printf '%s' "$2"
+  if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '%s' "$2"; fi
 }
 
 # ─── LE SIÈGE EST UN FAIT, ET IL N'A PAS DE DÉFAUT ──────────────────────────────────────────────

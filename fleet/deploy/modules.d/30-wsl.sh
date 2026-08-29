@@ -60,9 +60,9 @@ c_drive_open() {
   return 1
 }
 
-gpg_socket_mask_path() {
+gpg_socket_mask_path() { # vide quand l'humain n'a pas de home — a l'appelant de le dire, pas de mourir
   local home; home="$(human_home)"
-  [[ -n "$home" ]] && echo "$home/.config/systemd/user/gpg-agent-ssh.socket"
+  if [[ -n "$home" ]]; then echo "$home/.config/systemd/user/gpg-agent-ssh.socket"; fi
 }
 
 check() {
