@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SC2034 AU NIVEAU DU FICHIER, ET C'EST LE CONTRAT DE CETTE LIB QUI LE JUSTIFIE. Ses fonctions
 # rendent leurs resultats par des GLOBALES que l'APPELANT lit — `docker_endpoint` pose les
-# `PROV_DOCKER_*`, `docker_compose_cmd` les `PROV_COMPOSE_*` — et aucune n'est relue ici, donc elles
-# sont toutes vues inutilisees. La directive doit preceder TOUTE commande, `set -` compris, sinon
-# elle est inerte.
+# `PROV_DOCKER_*`, `docker_compose_cmd` les `PROV_COMPOSE_*`. Cinq ne sont jamais relues ici et sont
+# donc vues inutilisees (mesure : `PROV_DOCKER_WHY`, `_SOCK`, `_SUDO`, `PROV_COMPOSE_CMD`, `_WHY`).
+# La directive doit preceder TOUTE commande, `set -` compris, sinon elle est inerte.
 # shellcheck disable=SC2034
 # SOURCE: fleet/deploy/lib/docker-endpoint.sh
 # AUTHOR: DrDree
@@ -43,6 +43,9 @@ detect_substrate() {
 #   PROV_DOCKER_SUDO    le préfixe d'escalade retenu, vide s'il n'en a pas fallu
 #   PROV_DOCKER_SOCK    la socket qui a refusé — interne au diagnostic
 # Rend 0 si un daemon a répondu, 1 sinon.
+# ⚠ ELLE MUTE AUSSI L'ENVIRONNEMENT DE L'APPELANT, ce qu'aucune globale ci-dessus ne dit : `unset
+# DOCKER_HOST` quand celui qui arrivait ne répond pas, puis `export DOCKER_HOST` sur l'endpoint
+# retenu, et `export DOCKER_CONFIG` sur WSL quand la CLI du montage est prise.
 #
 # ⚠ `command -v docker` SE TROMPE DANS LES DEUX SENS : sa présence n'exclut pas un daemon éteint, et
 # son ABSENCE ne prouve rien du tout — sur WSL le daemon vit dans la VM Docker Desktop et s'expose
@@ -91,7 +94,7 @@ _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/
 # (`auths`, `credHelpers`, `credsStore`) ; forcer un repertoire vide les rendrait invisibles, et un
 # `pull` d'image privee echouerait en accusant le reseau. Le repli qui ecrit un `config.json` reduit
 # aux seuls `cliPluginsExtraDirs` EFFACE ces clefs : il ne sert que quand il n'y a rien a preserver.
-# python3 est un prerequis DECLARE de ce rail (`10-packages`), jq ne l'est pas.
+# Le repli n'existe que pour une machine sans python3 : il n'a rien a preserver, il ecrase.
 _docker_plugin_config() {
   local dir="${1:-}" plug src
   plug="$(_docker_mount_plugins)"
@@ -207,7 +210,8 @@ docker_endpoint() {
     else
       _envhost=" ${DOCKER_HOST}[env,rien-a-cette-adresse]"
     fi
-    # Sans cet `unset`, chaque essai du balayage re-heriterait la valeur qui vient d'echouer.
+    # L'`unset` ne sert PAS au balayage — chaque essai porte `DOCKER_HOST=` en tete de commande, qui
+    # ecrase l'heritage. Il empeche un endpoint MORT de survivre a la fonction chez l'appelant.
     unset DOCKER_HOST
   fi
   # ⚠ « REFUSE » ET « INJOIGNABLE » NE SONT PAS LE MEME FAIT, et les confondre refuse des machines
