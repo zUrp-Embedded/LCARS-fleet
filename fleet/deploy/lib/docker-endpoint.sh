@@ -64,11 +64,8 @@ PROV_DOCKER_SOCK=""
 # ⚠ POURQUOI IL EXISTE. Sur WSL la socket Docker Desktop est `root:root 755` : le daemon repond, et
 # pas a l'utilisateur qui lance. `chgrp` dessus l'ouvrirait a TOUTES les distros de la VM (elle vit
 # sous `/mnt/wsl`) et serait a re-poser a chaque demarrage de Docker Desktop, qui la recree. `sudo`
-# sur l'APPEL ne modifie RIEN, et laisse intacte la promesse auditee du rail boite.
-#
-# ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
-# sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. » La promesse porte sur
-# ce qu'on MODIFIE, jamais sur l'uid qui appelle.
+# sur l'APPEL ne modifie RIEN : la promesse auditee du rail boite porte sur ce qu'on MODIFIE, jamais
+# sur l'uid qui appelle.
 #
 # ⚠ L'ESCALADE EST PAR COMMANDE, JAMAIS UN RE-EXEC GLOBAL : celui-ci ferait tourner `git` en root
 # sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
@@ -156,10 +153,9 @@ docker_endpoint() {
 
   # 1. La CLI.
   #
-  # ⚠ SUR WSL, LA CLI DU MONTAGE PASSE AVANT LE PATH. ⚖ USER : « ya PAS, JAMAIS de "binaire docker"
-  # dans WSL. C'est DÉJÀ une VM, et on a docker installé côté Windows. » Ce qu'un PATH y offre est
-  # une copie ou un wrapper, jamais « le » docker : le préférer risque une CLI qui ne correspond pas
-  # au daemon. Le PATH ne fait autorité que sur un linux natif.
+  # ⚠ SUR WSL, LA CLI DU MONTAGE PASSE AVANT LE PATH : docker est installé côté Windows, ce qu'un
+  # PATH offre dans la distro est une copie ou un wrapper, jamais « le » docker — le préférer risque
+  # une CLI qui ne correspond pas au daemon. Le PATH ne fait autorité que sur un linux natif.
   local -a candidats
   if [[ "$(detect_substrate)" == "wsl" ]]; then
     candidats=("$want" "$(_docker_mount_cli)" docker)
