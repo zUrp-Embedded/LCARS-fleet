@@ -1,71 +1,55 @@
 #!/usr/bin/env bash
 # ⚠ SC2034 AU NIVEAU DU FICHIER, ET C'EST LE CONTRAT DE CETTE LIB QUI LE JUSTIFIE. Ses fonctions
 # rendent leurs resultats par des GLOBALES `PROV_*` que l'APPELANT lit : `prov_seat_binding` pose
-# trois variables et n'imprime rien, `run_step` laisse le code reel dans `PROV_LAST_RC`,
-# `docker_endpoint` pose `PROV_DOCKER_*`. Aucune n'est lue DANS ce fichier, donc shellcheck les voit
-# toutes inutilisees ; six modules les lisent, verifie. Une directive par site serait la meme phrase
-# treize fois — et la directive doit preceder TOUTE commande, `set -` compris, sinon elle est inerte.
+# trois variables et n'imprime rien, `run_step` laisse le code reel dans `PROV_LAST_RC`. Aucune n'est
+# relue ici, donc elles sont toutes vues inutilisees. Une directive par site serait la meme phrase
+# a chaque fois — et elle doit preceder TOUTE commande, `set -` compris, sinon elle est inerte.
 # shellcheck disable=SC2034
 # SOURCE: fleet/deploy/lib/provision-lib.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — bibliothèque des modules : primitives convergentes, écriture atomique, verdicts réels
 #
-# Sourcée par CHAQUE module — qui sont des PROCESSUS SÉPARÉS, jamais un namespace partagé.
-# (La v1 sourçait ses 9 modules dans UN shell sous `set -e` hérité : un chown en échec avortait
-# TOUT le provisioning à mi-durcissement, et les compteurs globaux se marchaient dessus.)
+# Sourcée par CHAQUE module — qui sont des PROCESSUS SÉPARÉS, jamais un namespace partagé : un
+# module qui meurt ne peut pas avorter les autres à mi-durcissement, ni marcher sur leurs compteurs.
 #
 # Contrat des primitives, les trois lois :
-#   1. CONVERGENTES — elles amènent l'état déclaré et ne font RIEN s'il y est déjà.
-#      Appliquer N fois = appliquer 1 fois, et re-converger vers la source COURANTE
-#      (pas « append-once » : le .bashrc v1 gardait à jamais son premier état écrit).
-#   2. VERDICT RÉEL — l'état est re-sondé APRÈS l'action, jamais déduit de l'intention.
-#      (La v1 imprimait des `pass` inconditionnels par-dessus des setfacl étouffés en 2>/dev/null.)
-#   3. ATOMIQUES — tout fichier est écrit tmp-même-dossier puis mv. Un crash ne laisse JAMAIS
-#      un fichier tronqué. (La v1 écrivait /etc/sudoers.d et /etc/wsl.conf en place : un write
-#      interrompu = lockout sudo fleet-wide / distro qui ne boote plus.)
+#   1. CONVERGENTES — elles amènent l'état déclaré et ne font RIEN s'il y est déjà. Appliquer N fois
+#      = appliquer 1 fois, et re-converger vers la source COURANTE. Pas « append-once », qui
+#      garderait à jamais le premier état écrit.
+#   2. VERDICT RÉEL — l'état est re-sondé APRÈS l'action, jamais déduit de l'intention. Rien n'est
+#      étouffé en `2>/dev/null` : un `pass` imprimé par-dessus une commande rendue muette est pire
+#      qu'une absence de sonde.
+#   3. ATOMIQUES — tout fichier est écrit tmp-même-dossier puis mv. Écrire `/etc/sudoers.d` ou
+#      `/etc/wsl.conf` EN PLACE, c'est un lockout sudo fleet-wide ou une distro qui ne boote plus,
+#      au premier write interrompu.
 #
 # Toute mutation effective incrémente PROV_CHANGED (le module le rapporte en fin d'apply).
-# Les commandes sont passées en ARGV, jamais en strings évaluées (le `bash -c "$fix_cmd"` v1
-# interpolait des valeurs dans du code — injection dès qu'un chemin porte un métacaractère).
+# Les commandes sont passées en ARGV, jamais en strings évaluées : une string interpole des valeurs
+# dans du code — injection dès qu'un chemin porte un métacaractère.
 
 # Garde de double-source (un module qui se ferait sourcer deux fois ne doit pas ré-écraser l'état).
 [[ -n "${PROVISION_LIB_LOADED:-}" ]] && return 0
 PROVISION_LIB_LOADED=1
 
-# `detect_substrate`, `docker_endpoint` et `docker_stream_ok` vivaient ICI et sont partis dans une
-# lib SANS effet de bord — parce que le script d'entree du depot en a besoin AVANT tout clone, et
-# qu'il n'a rien a faire des ~40 defauts poses plus bas (chemins d'install, groupe fleet, org de la
-# forge, lecture de /opt/lcars/var/tokens/forge.url). Aucune copie n'est restee : deux sondes, ce serait
-# deux jugements possibles sur la meme machine selon la porte empruntee.
+# La sonde docker vit dans une lib SANS effet de bord, sourcee ici et jamais recopiee : le script
+# d'entree du depot en a besoin AVANT tout clone, et n'a rien a faire des defauts d'INSTALLATION
+# poses plus bas.
 # shellcheck source=docker-endpoint.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-endpoint.sh"
 
-# ─── Données par défaut (chaque valeur est overridable par l'environnement — une SEULE définition,
-#     consommée par les modules ; jamais re-défautée module par module comme en v1) ───────────────
-# DOIT égaler le défaut d'etc/install.sh (SSoT du layout : etc/README.md §Install canonique —
-# /local/fleet_v2 est MORT, renommé *.OBSOLETE le 2026-07-18). Un fait, deux rendus : sync à la main.
-# ⚠ LA RACINE UNIQUE — CELLE QUE LA PHASE B GENERALISE, ET ELLE COMMENCE ICI.
+# ─── Données par défaut — une SEULE définition, consommée par tous les modules ───────────────────
 #
-# Ce rail pose aujourd'hui DIX racines de premier niveau (`/local`, `/opt/lcars`, `/opt/lcars/var/tokens`,
-# `/home/catalogues`, `/var/lib/lcars`, `/usr/share/lcars`, `/etc/lcars`, `/opt/elixir-*`,
-# `/opt/node-*`, `/run/lcars`). La cible en garde DEUX, dont une en tmpfs — et ce qu'on achete n'est
-# pas de l'esthetique de `/` : c'est que `rm -rf <racine>` DEVIENNE la desinstallation, et qu'un
-# `.deb` puisse empaqueter une empreinte qu'on sait nommer.
+# LA RACINE UNIQUE : tout objet d'installation descend sous `PROV_ROOT`. Ce qu'on achete n'est pas
+# l'esthetique de `/`, c'est que `rm -rf <racine>` SOIT la desinstallation, et qu'un `.deb` puisse
+# empaqueter une empreinte qu'on sait nommer.
 #
-# ⚠ CE N'EST PAS UN BOUTON D'OPERATEUR. Une racine structurelle ne se configure pas — `Fleet.Layout`
-# le dit deja pour le runtime (« These are NOT deployment knobs »), et il a raison sur la forme. Ce
-# qu'on veut est UN endroit qui la nomme, pas la liberte de la deplacer : un developpeur change une
-# valeur et l'arbre suit. La surcharge existe pour les TEMOINS, comme partout ailleurs ici.
-#
-# `/opt/lcars` et pas autre chose : c'est deja le mot du runtime (`Fleet.Layout.@platform_root`) et
-# la seule racine que la norme reserve a un paquet applicatif autonome. Le rail poste avait invente
-# un SECOND prefixe (`/opt/lcars/runtime`) ; c'est lui qui rejoindra celui-ci, pas l'inverse.
+# `/opt/lcars` est deja le mot du runtime (`Fleet.Layout.@platform_root`), et la seule racine que la
+# norme reserve a un paquet applicatif autonome.
 : "${PROV_ROOT:=/opt/lcars}"
 
-# ⚠ QUATRIEME RACINE FERMEE. `/opt/lcars/runtime` etait une racine de premier niveau pour l'install RO
-# du runtime. Elle descend sous la racine unique. Deux SSoT la nomment — celle-ci VERIFIE, celle
-# d'`etc/install.sh` POSE — et `racine_prefixe.bats` exige qu'elles s'accordent : rien ne le faisait.
+# Deux SSoT nomment ce prefixe — celle-ci le VERIFIE, celle d'`etc/install.sh` le POSE — et
+# `racine_prefixe.bats` exige qu'elles s'accordent.
 : "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
@@ -74,46 +58,28 @@ PROVISION_LIB_LOADED=1
 # `21-service-accounts`, membre de `$PROV_FLEET_GROUP` pour TRAVERSER l'install RO — jamais
 # pour decider : l'adminite se demande a la forge a l'instant du geste.
 : "${PROV_AUTHORITY_USER:=lcars-authority}"
-# ⚠ ONZE LIGNES DECRIVANT UN GROUPE D'ADMINITE VIVAIENT ICI, ET LEUR VARIABLE EST PARTIE SANS
-# ELLES. Elles disaient qu'un groupe Unix PROJETTE le `is_admin` de la forge et ouvre la lecture de
-# l'autorite de la boite — c'etait vrai, ca ne l'est plus, et le pire est qu'elles etaient
-# accrochees a la ligne `PROV_FLEET_GROUP` ci-dessus : un lecteur attachait donc l'histoire de la
-# projection au groupe `fleet`, qui n'a jamais eu ce metier.
-#
-# L'ADMINITE NE SE PROJETTE PLUS : elle se DEMANDE a la forge a l'instant du geste, par un service
-# joignable sur une socket, qui lit l'uid de son pair dans le noyau (`catalogue-executor.py`). Il
-# n'y a plus de groupe a peupler, donc plus rien a defauter ici.
-#
-# `PROV_FLEET_GROUP` ci-dessus n'est PAS cet objet : il donne la lecture des jetons et de l'install
-# RO. C'est du partage de fichiers, pas une autorite — et le confondre est exactement ce que le
-# commentaire retire faisait faire.
+# L'ADMINITE NE SE PROJETTE DANS AUCUN GROUPE UNIX : elle se DEMANDE a la forge a l'instant du
+# geste, par un service qui lit l'uid de son pair dans le noyau (`catalogue-executor.py`).
+# `PROV_FLEET_GROUP` ci-dessus n'est PAS cet objet — il ouvre la lecture des jetons et de l'install
+# RO, c'est du partage de fichiers.
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
-# Il existe parce que le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son
-# CONSOMMATEUR (le deck, sous `lcars-system`) doivent se rencontrer sans que ni l'un ni l'autre ne change
-# d'identite. Le repertoire de chaque humain est `2710 <humain>:lcars-console` : le setgid fait
-# heriter ce groupe a la socket, et le `--x` du groupe donne la traversee sans le listage.
+# Le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son CONSOMMATEUR (le deck, sous
+# `lcars-system`) doivent se rencontrer sans que ni l'un ni l'autre ne change d'identite. Le
+# repertoire de chaque humain est `2710 <humain>:lcars-console` : le setgid fait heriter ce groupe a
+# la socket, et le `--x` du groupe donne la traversee sans le listage.
 #
-# ⚠ SURTOUT PAS `$PROV_FLEET_GROUP`, ET C'EST LE PIEGE QUI A MORDU. Celui-la porte deja la lecture
-# de `/opt/lcars/runtime`, des role-tokens et de `/opt/lcars/var/tokens` : le reutiliser ici serait plus court
-# et accorderait tout le reste par la meme occasion. L'image le dit deja dans son Dockerfile — « un
-# pouvoir qu'on ne sait pas dire en une phrase est trop large » — et le rail poste, lui, cablait
-# `fleet`. Mesure du 2026-08-21 : `/run/lcars/console/lcars` en `lcars:fleet`, deck sous
-# `nobody:lcars-console`, traversee REFUSEE — une console vivante et injoignable.
+# ⚠ SURTOUT PAS `$PROV_FLEET_GROUP` : celui-la porte deja la lecture de l'install RO et des jetons,
+# le reutiliser ici accorderait tout le reste par la meme occasion. Une console montee sous le
+# mauvais groupe est vivante et injoignable — un pouvoir qu'on ne sait pas dire en une phrase est
+# trop large.
 : "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
-# ⚠ PREMIER OBJET SOUS LA RACINE UNIQUE, ET IL FAIT DISPARAITRE `/var/lib/lcars` DU RAIL POSTE.
-# Cet etat tofu etait le SEUL objet pose la-bas sur `wsl`/`linux` — l'autre, le magasin d'outillage
-# (`LCARS_STORE_ROOT`), est `docker` seulement (`26-store`, APPLY-ON: docker). Une racine de moins,
-# mesurable : dix -> neuf.
 : "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
-# ⚠ TROISIEME RACINE FERMEE. Les jetons descendent sous la racine unique : `/opt/lcars/var/tokens` etait
-# une racine de premier niveau pour un contenu qui est de l'ETAT, pas du travail — il se refabrique
-# contre la forge. Huit defauts la nomment, dans trois langages, et `racine_jetons.bats` exige
-# qu'ils s'accordent : c'est lui qui rend ce deplacement sur.
+# Les jetons sont de l'ETAT, pas du travail : ils se refabriquent contre la forge. Plusieurs defauts
+# nomment ce repertoire dans trois langages, et `racine_jetons.bats` exige qu'ils s'accordent.
 : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
-# L'AUTORITE DE CREATION, posee par `box config` et QUI RESTE (⚖ user 2026-08-16). Le suffixe
-# n'est PAS `.gitea_token` : celui-la designe un jeton de ROLE (`<login>.gitea_token`, contrat
-# FORGE_ROLE_TOKENS_DIR). Personne ne globbe ce repertoire aujourd'hui — le premier qui le fera ne
+# L'AUTORITE DE CREATION, posee par `box config`. ⚠ SON SUFFIXE N'EST PAS `.gitea_token`, celui des
+# jetons de ROLE (`<login>.gitea_token`, contrat FORGE_ROLE_TOKENS_DIR) : qui globbe ce repertoire ne
 # doit pas ramasser un site-admin en croyant lire un role.
 : "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
 : "${PROV_UID_MAP_FILE:=$PROV_TOKENS_DIR/forge-uid.map}"
@@ -133,15 +99,10 @@ PROVISION_LIB_LOADED=1
 # Le reseau que compose cree pour un projet sans `networks:` explicite. Le runner le REJOINT : depuis
 # un conteneur, l'adresse publiee de la forge (`127.0.0.1:<port>`) designe ce conteneur-la.
 : "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
-# GRAINE du binaire vendor : un chemin où un binaire `claude` déjà présent SUR LA MACHINE
-# court-circuite l'installeur officiel de 40-claude-bin (donc le réseau). Root-owned, hors de tout
-# home — l'humain du runtime n'existe pas encore quand un semis extérieur le pose. Vide/absent =
-# comportement inchangé : le module télécharge.
-# QUATRIÈME liste de rôles du système (avec forge.tf, provision-role-tokens.sh, le catalogue
-# cap-profiles) — et elle GAGNE : 50-forge passe --roles "$PROV_ROLES" au mint A4, écrasant le
-# défaut du .sh. un producteur absent ICI = pas de token sur une fleet fraîche = rail ops en
-# role_token_unavailable (la cause racine de BL-6-34 — vécu deux fois : eng_doc, puis son rename scribe). Le verrou
-# d'égalité des listes est BL-6-45 ; d'ici sa dérivation, cette ligne se tient à la main.
+# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `50-forge` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
+# le defaut du `.sh`. Un role absent ICI = pas de token sur une fleet fraiche = rail ops en
+# `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
+# elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 # LE MATERIEL DES CATALOGUES INSTALLES — miroir shell de `Fleet.Layout.catalogues_installed_dir/0`,
 # verrouille par `catalogue.install_paths_locked` de `mix lcars.contracts.check`. Diverger d'avec le
@@ -149,42 +110,24 @@ PROVISION_LIB_LOADED=1
 # tourne sur le catalogue livre en annonçant qu'elle en sert trois.
 : "${PROV_CATALOGUES_DIR:=/home/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
-# SON JETON SE DÉRIVE DE SON LOGIN, COMME LES NEUF AUTRES. Il s'appelait `system.gitea_token` pour
-# un compte nommé `lcars-system` : ni dérivé, ni cohérent, et il fallait donc une TABLE — le
-# `--extra-token "<compte>:system.gitea_token"` que `50-forge.sh` portait à deux endroits pour ce
-# seul compte. Le contrat des jetons de rôle est `<login>.gitea_token` ; ce compte-ci le respecte
-# désormais, et le cas particulier disparaît avec lui.
+# SON JETON SE DÉRIVE DE SON LOGIN, COMME LES AUTRES : le contrat est `<login>.gitea_token`, et un
+# nom qui s'en écarte réclame une table de cas particuliers.
 : "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
-# La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck. Elle n'avait pas de nom
-# ici — elle vivait en `LCARS_HUMANS_TEAM` cote boite, seconde famille de variables pour un fait
-# que ce fichier declare deja pour ses voisins (org, groupes). Un jeu de noms, un fait.
+# La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck.
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
-# ⚠ TROISIÈME SOURCE, ET ELLE EXISTE PARCE QUE LES MODULES SONT DES PROCESSUS. `48-forge-host` monte
-# la forge du poste — et ne peut rien exporter vers `50-forge`, qui tourne dans un autre shell. Il
-# écrit donc son adresse là, et c'est ici qu'on la relit. Mesure du 2026-08-18 : sans cette ligne,
-# une install qui vient de créer une forge parfaitement vivante rendait « FORGE_BASE_URL non posé »
-# sur les deux modules qui en dépendent.
-# En conteneur ce fichier n'existe pas : l'environnement du compose gagne, rien ne change.
+# LE FICHIER EST LE SEUL CANAL ENTRE MODULES : ils sont des PROCESSUS, donc `48-forge-host` ne peut
+# rien exporter vers `50-forge`. Il écrit son adresse, on la relit ici.
+# En conteneur ce fichier n'existe pas : l'environnement du compose gagne.
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
 # le SERVEUR compose (dans un conteneur, le nom du service : `http://gitea:3000`) ; celle-ci est
 # celle qu'un NAVIGATEUR doit atteindre. Une seule valeur ne peut pas être les deux — `gitea:3000`
 # ne résout nulle part hors du réseau docker, et l'adresse de l'hôte peut ne pas résoudre dedans.
-# ⚠ ET LE DÉFAUT « ÉGALE L'INTERNE » EST UN PIÈGE SUR LE RAIL POSTE, où les deux ne coïncident
-# JAMAIS. `48-forge-host` dérive les deux adresses, publie la forge sur `PROV_FORGE_BIND` et écrit
-# `PUBLIC_URL` dans le `ROOT_URL` de Gitea — puis ne persiste QUE la loopback dans `forge.url`.
-# Tout ce qui vient après défaute donc l'adresse NAVIGATEUR sur l'adresse SERVEUR.
 #
-# MESURE DU 2026-08-21, poste natif installé à froid, opérateur sur une autre machine : le bouton
-# « s'identifier sur la forge » du deck envoyait sur
-# `http://127.0.0.1:3000/login/oauth/authorize?…&redirect_uri=http://10.42.0.63:20999/…` — le
-# RETOUR juste, l'ALLER chez le visiteur. Le module qui connaît l'adresse publique était le seul à
-# la connaître, et il la jetait.
-#
-# Le fichier voisin la porte maintenant. Même forme que `forge.url` et même raison : les modules
-# sont des processus, aucun ne peut exporter vers un autre. En conteneur il n'existe pas, et
-# l'environnement du compose gagne — rien ne change là-bas.
+# ⚠ ET LE REPLI « ÉGALE L'INTERNE » DE LA LIGNE SUIVANTE EST UN PIÈGE SUR LE RAIL POSTE, où les deux
+# ne coïncident JAMAIS : le deck sort alors un `redirect_uri` juste et un ALLER en loopback, donc un
+# bouton « s'identifier » qui n'arrive nulle part depuis une autre machine.
 : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
 : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
 # Le deck de la BOÎTE (porte d'entrée, hors de l'espace des blocs humains) et son client OAuth2.
@@ -194,29 +137,19 @@ PROVISION_LIB_LOADED=1
 : "${PROV_DECK_PORT:=20999}"
 : "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
-# Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
-# PROV_EXPECTED_REPO n'a PAS de défaut : l'autorité se DÉCLARE, elle ne se devine pas (héritage
-# F-E1 de fleet-update v1 : vérifier le remote APRÈS le pull était une inversion de chaîne payée).
 # Combien de lignes d'une commande en échec atterrissent à l'écran (le reste vit dans le fichier).
 : "${PROV_DUMP_LINES:=40}"
+# Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
+# ⚠ `PROV_EXPECTED_REPO` N'A PAS DE DÉFAUT, ET C'EST L'INVARIANT : l'autorité se DÉCLARE, elle ne se
+# devine pas. Vérifier le remote APRÈS le pull inverse la chaîne (F-E1).
 : "${PROV_UPDATE_REMOTE:=origin}"
 : "${PROV_EXPECTED_REPO:=}"
-# Toolchain build — CELLE DE LA DISTRO, et plus un pin. Deux PLANCHERS, aucun téléchargement.
+# Toolchain build : CELLE DE LA DISTRO. Deux PLANCHERS, aucun téléchargement.
 #
-# ⚠ CE BLOC PORTAIT TROIS DÉFAUTS, DONT UN ZIP ET SON SHA256, ET LA CIBLE LES A RENDUS INUTILES.
-# Le pin Elixir existait pour une raison écrite ici même : « l'apt distro est PRÉHISTORIQUE (1.14
-# sur noble) ». Sur Ubuntu 26.04 — la cible du rail poste — l'apt sert `elixir 1.18.3` et
-# `erlang 1:27.3.4.6` (OTP 27). Le motif du pin est tombé avec la distro qui le motivait, et ce
-# qu'il coûtait ne l'est pas : un zip à télécharger, un sha256 à rebumper, un arbre
-# `/opt/elixir-<version>` hors table, quatre symlinks à poser et à retirer, et une VARIANTE d'OTP
-# qui pouvait diverger de la VM sous elle.
-#
-# ⚠ C'ÉTAIT LA PANNE DU 2026-08-22, ET ELLE N'EST PLUS ATTEIGNABLE. `PROV_ELIXIR_OTP_MAJOR` portait
-# DEUX choses : le plancher apt d'Erlang, et la variante du zip Elixir (`elixir-otp-<major>.zip`).
-# Un plancher tolère un écart, une variante non — l'hôte est passé en 26.04, l'apt a livré OTP 27,
-# le plancher 25 l'a accepté en vert, et la boîte a posé la variante OTP 25 par-dessus : du bytecode
-# compilé par le compilateur de 25 sur une VM 27. Un paquet apt d'Elixir est compilé CONTRE l'Erlang
-# de sa propre distro. La divergence n'a plus de lieu où naître.
+# ⚠ NE PINNE PAS UNE VARIANTE D'OTP À CÔTÉ DE L'APT : un paquet apt d'Elixir est compilé CONTRE
+# l'Erlang de sa propre distro. Un plancher tolère un écart, une variante non — poser un Elixir bâti
+# pour OTP 25 sur une VM 27 passe le plancher en vert et fait tourner du bytecode d'un compilateur
+# sur la machine d'un autre.
 #
 # ⚠ `mix.exs` EXIGE `~> 1.18`, ET C'EST LUI L'AUTORITÉ. Ce plancher-ci n'est pas une seconde
 # exigence : il est ce que le rail vérifie AVANT de bâtir, pour que l'échec dise « distro trop
@@ -237,18 +170,9 @@ PROV_FAILED=0
 
 # ─── LA PALETTE — LA MÊME QUE CELLE DU BANDEAU D'ENTRÉE ─────────────────────────────────────────
 #
-# Le préflight de `install.sh` sortait en couleurs et le provisionnement en blanc : deux moitiés du
-# même geste, dont celle qu'on regarde pendant vingt minutes était la terne. Les quatre teintes sont
-# reprises telles quelles de l'en-tête (vert / cyan du cadre / ambre du bandeau / rouge).
-#
-# ⚠ LA COULEUR NE SORT QUE SUR UN TERMINAL. Une séquence ANSI dans un fichier de log, c'est du
-# `[1;32m` au milieu du texte : illisible à la relecture et cassé au grep. `-t 1` tranche, `NO_COLOR`
-# (convention de fait) coupe, et `PROV_COLOR=1` force pour un `script`/`unbuffer`.
-#
-# ⚠ ET LA COULEUR N'ENTOURE QUE L'ÉTIQUETTE, JAMAIS LE REMPLISSAGE. Les espaces qui suivent restent
-# littéraux : une séquence ANSI compte des caractères et s'affiche sur zéro colonne, donc tout
-# alignement qui l'inclurait se décalerait sans que personne ne le voie. Ici les six colonnes de
-# l'étiquette sont tenues par des espaces nus, et il n'y a rien à réaligner.
+# ⚠ LA COULEUR NE SORT QUE SUR UN TERMINAL : une séquence ANSI dans un fichier de log, c'est du
+# `[1;32m` au milieu du texte, illisible à la relecture et cassé au grep. `PROV_COLOR=1` la force
+# pour un `script`/`unbuffer`.
 if [[ -n "${NO_COLOR:-}" ]]; then PROV_COLOR=0
 elif [[ -n "${PROV_COLOR:-}" ]]; then :
 elif [[ -t 1 ]]; then PROV_COLOR=1
@@ -260,21 +184,13 @@ else
   _PG=''; _PC=''; _PA=''; _PR=''; _PN=''
 fi
 
-# UNE ACTION LONGUE ET MUETTE N'EST PAS DISCERNABLE D'UN BLOCAGE. `60-deploy` construit la release
-# — gate complet compris — et `run_quiet` n'imprime rien pendant plusieurs minutes : l'écran est
-# figé, et la seule interprétation disponible est « c'est planté ». La v1 n'a jamais eu ce problème
-# parce que sa plus longue action durait trente secondes ; elle annonçait un résultat PAR OBJET
-# (`package:tmux — installed`). Un `mix gate` n'a pas d'objets à égrener : il lui faut donc ce que
-# la v1 n'avait pas besoin d'avoir — dire ce qui commence, avant de dire comment ça s'est terminé.
-# Les six colonnes de l'étiquette sont tenues en ASCII pur, pour la même raison que les autres.
-# ⚠ LA TEINTE ENVELOPPE TOUT LE PREFIXE « ETIQUETTE  module: », JAMAIS SON INTERIEUR.
-# Une sequence ANSI glissee entre l'etiquette et le nom du module COUPE le jeton : la sortie devient
-# « <ESC>ERREUR<ESC> 90-mort » et la chaine litterale « ERREUR 90-mort » n'y est plus. Mesure du
-# 2026-08-18 : plusieurs temoins cherchent exactement ce bloc (`"OK    engineer"`, `"FAIL  engineer"`,
-# `"DRIFT 60-deploy: bin/"`, `"ERREUR 90-mort"`) et sont passes au rouge le jour ou la couleur a ete
-# allumee — et seulement ce jour-la, donc sur la machine de quelqu'un d'autre.
-# Le remplissage reste A L'INTERIEUR de la teinte : des espaces restent des espaces, l'alignement ne
-# bouge pas, et il n'y a plus aucun endroit ou un motif puisse etre coupe en deux.
+# Une action longue et muette n'est pas discernable d'un blocage : `p_step` dit ce qui COMMENCE,
+# pour les etapes ou `run_quiet` reste silencieux plusieurs minutes.
+#
+# ⚠ LA TEINTE ENVELOPPE TOUT LE PREFIXE « ETIQUETTE  module: », REMPLISSAGE COMPRIS. Une sequence
+# ANSI glissee entre l'etiquette et le nom du module COUPE le jeton — la sortie devient
+# « <ESC>ERREUR<ESC> 90-mort », et la chaine litterale « ERREUR 90-mort » que des temoins cherchent
+# n'y est plus.
 p_step() { printf '%s>>    %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
 # ⚠ LES DEUX RENDENT 0, EXPLICITEMENT. Sans ce `return`, leur code de sortie est celui de `printf` —
 # donc une ecriture qui echoue (EPIPE sur un pipe ferme, disque plein) fait partir le `|| p_drift`
@@ -287,19 +203,17 @@ p_warn() { printf '%sWARN  %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2
 p_fail() { printf '%sFAIL  %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
 p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; exit 1; }
 
-# Sortie standard d'un module : à appeler en FIN de check() et d'apply().
-# check  : exit 0 conforme · 1 drift constaté · (2 réservé erreur de sonde, via p_die)
-# apply  : exit 0 convergé · 1 au moins un échec
+# Sortie standard d'un module : à appeler en FIN de check() et d'apply(). Le runner lit ces codes
+# tels quels — les changer ici change son bilan.
+#   check   0 conforme · 1 drift constaté · 2 échec de sonde (un `p_fail` a été appelé)
+#   apply   0 convergé · 1 au moins un échec · 2 appliqué, DRIFT RÉSIDUEL
+#   p_die   1, verdict rendu — fatal immédiat
+#   tout    3 MORT avant d'avoir rendu son verdict, posé par `_prov_exit_guard` ci-dessous
 # ─── UN MODULE QUI MEURT DOIT LE DIRE LUI-MEME ──────────────────────────────────────────────────
 #
-# Mesure du 2026-08-18, banc lcars-l8 : `70-human` sondait `root`, imprimait trois lignes DRIFT
-# justes, puis MOURAIT — `pipefail` sur un `sed` d'un `fleet_v2.env` absent, rc 2, avant tout
-# verdict. Le doctor affichait « échecs: 1 » sans nommer personne. Pire du cote apply : rc 2 y
-# signifie « appliqué, drift résiduel », donc le bilan disait « rien n'est cassé, il manque un
-# geste » sur un module qui n'avait pas fini de tourner.
-#
-# Le runner ne peut pas distinguer ces deux 2 : c'est le meme entier. Le module, lui, SAIT s'il a
-# rendu son verdict. Il le dit, et il rend un code qui n'appartient qu'a ce cas.
+# Le 3 existe parce que `2` est pris DES DEUX COTES, et qu'un module tue par `set -e` rend justement
+# 2 : le runner ne peut pas distinguer « appliqué, drift résiduel » de « mort en route ». Le module,
+# lui, SAIT s'il a rendu son verdict.
 #
 # ⚠ La garde n'est armee que sous le RUNNER (`PROVISION_RUN`). Un extrait qui source cette lib pour
 # appeler une primitive — les temoins bats — n'est pas un module et n'a aucun verdict a rendre.
@@ -313,14 +227,9 @@ _prov_exit_guard() {
 }
 if [[ -n "${PROVISION_RUN:-}" ]]; then
   trap _prov_exit_guard EXIT
-  # ⚠ ET LE DRAPEAU EST RETIRE AUSSITOT. Il arrive par l'ENVIRONNEMENT (le runner le pose devant la
-  # commande du module), donc il DESCEND a tout ce que le module lance ensuite. Or seul le module
-  # doit rendre un verdict : `bench-up.sh` source cette lib et n'en rend aucun — il sortait donc 3
-  # avec un « MORT avant de rendre son verdict » mensonger, apres un `exit 0` parfaitement propre.
-  #
-  # Mesure du 2026-08-18 : 12 temoins de `bench_up_verdict.bats` rouges pendant `mix gate`, verts
-  # joues a la main, et la difference tenait a ce seul mot dans l'environnement. Un garde pose pour
-  # rendre les echecs bruyants transformait des succes en echecs, un etage plus bas.
+  # ⚠ ET LE DRAPEAU EST RETIRE AUSSITOT : il arrive par l'ENVIRONNEMENT, donc il DESCEND a tout ce
+  # que le module lance ensuite. Un script qui source cette lib sans etre un module — `bench-up.sh`
+  # — sortirait 3 sur un `exit 0` parfaitement propre, avec un « MORT avant son verdict » mensonger.
   unset PROVISION_RUN
 fi
 
@@ -330,19 +239,9 @@ verdict_check() {
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 1
   exit 0
 }
-# ⚠ LE COMPTEUR DE DRIFT N'ETAIT PAS LU, ET LE RESUME MENTAIT DEUX FOIS. Un module dont l'`apply`
-# constate une non-convergence (`p_drift`) puis rend ce verdict sortait **0** : le runner le comptait
-# « convergé », et sa ligne de bilan affichait « drift: 0 » alors qu'une ligne DRIFT venait d'etre
-# imprimee. MESURE 2026-08-14 sur un module bac-a-sable : `EXIT 0`, « conformes/convergés: 1 ·
-# drift: 0 ». Deux modules vivants portent exactement cette forme (`50-forge`, `55-deck-oidc`).
-#
-# ⚠ ET CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort
-# 1 sur drift, et le runner mappe `apply:apply:*` non-zero en echec : ce chemin-la etait deja juste,
-# mesure. Le defaut vit un cran a cote, dans les modules qui rendent un verdict d'APPLY.
-#
-# Code **2** = « applique, drift residuel » : ni 0 (ce serait le mensonge qu'on retire) ni 1 (ce
-# serait confondre « je n'ai pas pu converger » avec « j'ai casse »). L'operateur a besoin des deux
-# mots, et l'entrypoint conteneur les distingue desormais dans son message.
+# ⚠ LE DRIFT D'UN APPLY SORT EN 2, JAMAIS EN 0 : rendre 0 ferait compter « convergé » un module qui
+# vient d'imprimer une ligne DRIFT. Et jamais 1 non plus — ce serait confondre « je n'ai pas pu
+# converger » avec « j'ai cassé », deux mots dont l'opérateur a besoin séparément.
 verdict_apply() {
   PROV_VERDICT_RENDERED=1
   [[ "$PROV_FAILED" -gt 0 ]] && exit 1
