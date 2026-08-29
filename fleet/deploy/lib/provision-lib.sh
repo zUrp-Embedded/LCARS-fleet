@@ -56,12 +56,10 @@ PROVISION_LIB_LOADED=1
 # Le compte du service d'autorite : il DETIENT les secrets de forge et n'a AUCUN privilege
 # noyau. L'inverse exact du convergeur, qui a le privilege et ne detient rien. Pose par
 # `21-service-accounts`, membre de `$PROV_FLEET_GROUP` pour TRAVERSER l'install RO — jamais
-# pour decider : l'adminite se demande a la forge a l'instant du geste.
+# pour decider : l'adminite ne se projette dans AUCUN groupe unix, elle se demande a la forge a
+# l'instant du geste, par un service qui lit l'uid de son pair dans le noyau.
 : "${PROV_AUTHORITY_USER:=lcars-authority}"
-# L'ADMINITE NE SE PROJETTE DANS AUCUN GROUPE UNIX : elle se DEMANDE a la forge a l'instant du
-# geste, par un service qui lit l'uid de son pair dans le noyau (`catalogue-executor.py`).
-# `PROV_FLEET_GROUP` ci-dessus n'est PAS cet objet — il ouvre la lecture des jetons et de l'install
-# RO, c'est du partage de fichiers.
+
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
 # Le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son CONSOMMATEUR (le deck, sous
 # `lcars-system`) doivent se rencontrer sans que ni l'un ni l'autre ne change d'identite. Le
@@ -948,38 +946,30 @@ apt_ensure() {
 #
 # ⚠ CE N'EST PAS LA MÊME QUESTION QUE « quelle est mon IP », et c'est le substrat qui les sépare.
 #
-# La forme historique — `ip route get 1.1.1.1`, l'adresse SOURCE utilisée pour sortir — répond
-# « par où je pars », et on la lisait comme « par où on m'atteint ». Les deux coïncident sur une
-# machine posée sur son LAN. Sous WSL2 en mode NAT, elles ne coïncident pas :
+# `ip route get 1.1.1.1` rend l'adresse SOURCE utilisée pour sortir — « par où je pars », qu'on lit
+# volontiers comme « par où on m'atteint ». Les deux coïncident sur une machine posée sur son LAN.
+# Sous WSL2 en mode NAT, non :
 #
-#   · l'eth0 de la VM (172.25.115.129/20 ici) vit sur un commutateur Hyper-V NATé. AUCUNE autre
-#     machine ne la route — pas « pare-feu à ouvrir » : pas de route, par construction ;
+#   · l'eth0 de la VM vit sur un commutateur Hyper-V NATé. AUCUNE autre machine ne la route — pas
+#     « pare-feu à ouvrir » : pas de route, par construction ;
 #   · elle est RÉATTRIBUÉE à chaque redémarrage de WSL, donc même juste, elle périme seule ;
 #   · ce qui marche depuis Windows, c'est `localhost` : WSL relaie les ports publiés vers la VM.
-#
-# Mesure du 2026-08-18 (ce poste, `wslinfo --networking-mode` = nat) : le banc annonçait
-# `172.25.115.129:20999`, le navigateur arrivait en `localhost:20999`, et la porte du deck refusait
-# — correctement — une entrée non déclarée. L'adresse annoncée était fausse depuis le début ; c'est
-# le premier accès par le navigateur de l'hôte qui l'a dit.
 #
 # Le mode miroir (`--networking-mode mirrored`) supprime le NAT : la VM porte alors les interfaces
 # de l'hôte et `ip route get` redevient vrai. Le discriminant est donc le MODE, pas « est-ce WSL ».
 #
-# ⚖ ARBITRAGE USER 2026-08-18 : sous WSL on RESTE host-only, et ce n'est pas un pis-aller. Le NAT
-# est le défaut de WSL et de Docker Desktop — donc l'état de presque tous les postes Windows — et
-# l'ouvrir sur le LAN demanderait de reconfigurer la pile réseau Hyper-V de la machine. Ce substrat
-# est celui du test/dev ; la cible d'un déploiement joignable 24/7 sur le LAN, c'est le Linux natif,
-# où la dérivation nominale donne la vraie adresse et où il n'y a rien à régler. Quelqu'un qui a
-# déjà tuné son réseau saura le retuner : `--advertise` est là pour ça, et il n'est pas ignoré.
+# SOUS WSL ON RESTE HOST-ONLY, et ce n'est pas un pis-aller : le NAT est le défaut de WSL comme de
+# Docker Desktop, et l'ouvrir sur le LAN demanderait de reconfigurer la pile réseau Hyper-V. La cible
+# d'un déploiement joignable 24/7 sur le LAN est le Linux natif, où la dérivation nominale donne la
+# vraie adresse. Qui a déjà tuné son réseau saura le retuner : `--advertise` n'est pas ignoré.
 PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
 PROV_LAST_RC=0
 
-# ⚠ COUTURE DE DÉCOR, MÊME IDIOME QUE `LCARS_SYSADMIN_UID` ET `LCARS_DOCKER`. Sans elle, tout témoin
-# du mode réseau MESURE LA MACHINE qui le joue : la règle « sous WSL en NAT, on annonce localhost »
-# n'est exerçable que sur un WSL en NAT, donc elle passe au vert chez son auteur et rougit ailleurs
-# sans qu'aucune règle ait bougé. Mesuré le 2026-08-22 sur `.63` (Linux natif) : le témoin y tombait
-# alors que le produit était juste. Un témoin qui n'est vrai que sur une machine ne garde rien.
+# COUTURE DE DÉCOR, MÊME IDIOME QUE `LCARS_SYSADMIN_UID` ET `LCARS_DOCKER`. Sans elle, tout témoin du
+# mode réseau MESURE LA MACHINE qui le joue : « sous WSL en NAT, on annonce localhost » n'est
+# exerçable que sur un WSL en NAT, donc la règle passe au vert chez son auteur et rougit ailleurs
+# sans avoir bougé. Un témoin qui n'est vrai que sur une machine ne garde rien.
 wsl_networking_mode() {
   [[ -n "${LCARS_WSL_NETWORKING_MODE:-}" ]] && { echo "$LCARS_WSL_NETWORKING_MODE"; return 0; }
   local m
@@ -992,12 +982,10 @@ wsl_networking_mode() {
 
 # L'adresse source de sortie — vide si indéterminable. Vraie SEULEMENT là où on est joignable par
 # elle : `advertise_addr` en est le seul appelant légitime.
-# ⚠ `|| true` — MEME CLASSE QUE B5, TROISIEME FOIS DANS LA MEME JOURNEE. `ip` n'existe pas partout
-# (l'image du job CI ne l'a pas), et sous `pipefail` une commande introuvable rend 127 que le
-# pipeline propage : la fonction rend 127, l'assignation echoue, `set -e` tue l'appelant. Mesure du
-# 2026-08-18 : huit temoins de `bench_up_verdict.bats` rouges DANS la CI et verts partout ailleurs,
-# parce que `bench-up.sh` mourait a la ligne qui derive une adresse. « Vide si indeterminable » est
-# le contrat de cette fonction ; sans ce garde elle ne le tenait pas.
+# ⚠ `|| true` LOAD-BEARING (B5) : `ip` n'existe pas partout — une image CI minimale ne l'a pas — et
+# sous `pipefail` une commande introuvable rend 127, que le pipeline propage. La fonction rendrait
+# 127, l'assignation echouerait, `set -e` tuerait l'appelant. « Vide si indeterminable » est le
+# contrat de cette fonction, et ce garde est ce qui le tient.
 lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 
 # advertise_addr <bind> — POSE DEUX GLOBALES, N'IMPRIME RIEN :
@@ -1005,10 +993,10 @@ lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\
 #   PROV_ADVERTISE_WHY  vide si c'est une vraie adresse de réseau ; sinon la phrase qui dit ce
 #                       qu'elle vaut. Un appelant qui l'ignore annonce sans savoir ce qu'il annonce.
 #
-# ⚠ POURQUOI DEUX GLOBALES ET PAS UN `echo` — c'est un piège de langage, pas un goût. Un appelant
-# écrit naturellement `a="$(advertise_addr ...)"`, or `$( )` ouvre un SOUS-SHELL : la valeur revient
-# par stdout, et TOUTE variable posée dedans meurt avec lui. La forme « j'imprime l'un, je pose
-# l'autre » perd donc silencieusement le second — mesuré ici même en écrivant cette fonction.
+# ⚠ DEUX GLOBALES ET PAS UN `echo`, ET C'EST UN PIÈGE DE LANGAGE : un appelant écrit naturellement
+# `a="$(advertise_addr …)"`, or `$( )` ouvre un SOUS-SHELL — la valeur revient par stdout, et TOUTE
+# variable posée dedans meurt avec lui. La forme « j'imprime l'un, je pose l'autre » perdrait donc
+# silencieusement le second.
 advertise_addr() {
   local bind="${1:-0.0.0.0}"
   PROV_ADVERTISE=""; PROV_ADVERTISE_WHY=""
@@ -1018,10 +1006,9 @@ advertise_addr() {
     *) PROV_ADVERTISE="$bind"; return 0 ;;
   esac
   # ⚠ `PROV_SUBSTRATE` D'ABORD, LA SONDE SEULEMENT EN REPLI. Le runner a DÉJÀ tranché le substrat
-  # (`provision --substrate`, `provision:126-128`) et l'exporte ; re-sonder ici en ferait une seconde
-  # dérivation du même fait — celle-là même que l'en-tête de `48-forge-host` reproche à la version
-  # d'avant. Conséquence concrète et pas seulement doctrinale : `--substrate linux` joué sur une
-  # machine WSL prenait quand même la branche NAT, donc le drapeau ne portait pas jusqu'ici.
+  # (`provision --substrate`) et l'exporte. Re-sonder ici en ferait une seconde dérivation du même
+  # fait, et `--substrate linux` joué sur une machine WSL prendrait quand même la branche NAT : le
+  # drapeau ne porterait pas jusqu'ici.
   local _sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
   if [[ "$_sub" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
     PROV_ADVERTISE="localhost"
@@ -1033,31 +1020,22 @@ advertise_addr() {
     PROV_ADVERTISE="127.0.0.1"
     PROV_ADVERTISE_WHY="aucune adresse de sortie détectée — les liens ne valent que sur cette machine"
   fi
-  # ⚠ `return 0` EXPLICITE. Sans lui, la fonction rend le code du dernier `if` — donc 1 quand la
-  # dérivation a RÉUSSI (le test `-z` est faux). Tous les appelants tournent sous `set -e` : un
-  # succès y avortait le script. Trouvé par le témoin « n'imprime rien », sur le chemin linux —
-  # celui qu'aucun appel de cette machine ne prend.
+  # ⚠ `return 0` EXPLICITE : sans lui, la fonction rend le code du dernier `if` — donc 1 quand la
+  # dérivation a RÉUSSI, le test `-z` étant faux. Les appelants tournent sous `set -e`, où un succès
+  # avorte alors le script.
   return 0
 }
 
-# ─── as_human <cmd…> — exécute comme PROV_HUMAN avec le HOME de PROV_HUMAN ───────────────────────
-# Depuis root : runuser + env EXPLICITE (runuser sans -l garde le HOME de root — piège classique).
-# Déjà cet utilisateur : exécution directe. Autre user non-root : impossible proprement → échec dit.
-# ─── LES PORTS — FIXES PAR DÉFAUT, ET PERSONNE NE LES SONDAIT ───────────────────────────────────
+# ─── LES PORTS — FIXES PAR DÉFAUT, SURCHARGEABLES, ET SONDÉS AVANT D'ÊTRE PRIS ──────────────────
 #
-# ⚖ USER 2026-08-22 : « les ports que tu montes, 3000 et 20999, ils sont fixes ? ils sont testés
-# pour voir si c'est dispo ? » — fixes et surchargeables ; sondés, non.
+# ⚠ UN PORT OCCUPÉ N'EST PAS SILENCIEUX, IL EST MAL NOMMÉ — et c'est pire. `compose up -d` échoue
+# sur « port is already allocated » et le module conclut « la forge ne converge pas » ; le deck ne
+# bind pas et l'unité meurt en « posé mais PAS actif ». La cause vit dans une sortie dumpée, jamais
+# dans le verdict, et l'opérateur cherche un défaut de LCARS quand le fait est « autre chose tient
+# ce port ».
 #
-# ⚠ CE N'ÉTAIT PAS SILENCIEUX, C'ÉTAIT MAL NOMMÉ, et c'est pire. Un port occupé fait échouer
-# `compose up -d` (« port is already allocated ») et le module conclut « la forge ne converge pas » ;
-# le deck, lui, ne bind pas et l'unité meurt en « posé mais PAS actif ». Dans les deux cas la cause
-# est dans une sortie dumpée, jamais dans le verdict — l'opérateur cherche un défaut de LCARS quand
-# le fait est « autre chose tient ce port ».
-#
-# ⚠ ET LE RISQUE N'EST PAS SYMÉTRIQUE. `3000` est le défaut de la moitié de l'écosystème de dev —
-# React, Rails, Vite, Grafana. `20999` est choisi pour être improbable. Mesuré sur le poste de
-# l'auteur : `3000` est tenu par la forge de LCARS elle-même, et les bancs sont déjà décalés en
-# 3001/3002. Le produit CONNAÎT donc le besoin de ports distincts ; il ne le vérifiait pas.
+# Le risque n'est pas symétrique : `3000` est le défaut de la moitié de l'écosystème de dev — React,
+# Rails, Vite, Grafana — quand `20999` est choisi pour être improbable.
 #
 # ⚠ « PRIS PAR NOUS » N'EST PAS « PRIS PAR UN AUTRE », et confondre les deux rendrait la sonde
 # nuisible : au second passage, notre propre service tient le port, et refuser là serait casser
@@ -1076,6 +1054,9 @@ port_holder() { # port_holder <port> -> description, ou VIDE
     | sed -e 's/users:((//' -e 's/))$//' -e 's/,fd=[0-9]*//' | head -1
 }
 
+# ─── as_human <cmd…> — exécute comme PROV_HUMAN avec le HOME de PROV_HUMAN ───────────────────────
+# ⚠ Depuis root : `runuser` + env EXPLICITE — sans `-l`, `runuser` garde le HOME de root. Déjà cet
+# utilisateur : exécution directe. Autre user non-root : impossible proprement, l'échec est dit.
 as_human() {
   local home
   # `|| true` : même classe que B5 — sous pipefail, getent sur un user inconnu ferait échouer
@@ -1085,19 +1066,12 @@ as_human() {
   if [[ "$(id -un)" == "$PROV_HUMAN" ]]; then
     "$@"
   elif [[ "$EUID" -eq 0 ]]; then
-    # ⚠ LE `cd` FAIT PARTIE DE L'IDENTITE, ET SON ABSENCE A CASSE UNE INSTALLATION NATIVE. Cette
-    # ligne posait HOME/USER/LOGNAME et laissait le REPERTOIRE COURANT de root. Un humain qui hérite
-    # d'un cwd qu'il ne peut pas lire est un demi-humain : tout ce qui résout un chemin RELATIF
-    # échoue, et le message n'accuse jamais le cwd.
+    # ⚠ LE `cd` FAIT PARTIE DE L'IDENTITE. Poser HOME/USER/LOGNAME en laissant le REPERTOIRE COURANT
+    # de root donne un demi-humain : tout ce qui résout un chemin RELATIF échoue depuis un `/root` en
+    # 0700, et le message n'accuse jamais le cwd — l'ERTS rend vingt lignes de
+    # `File operation error: eacces. Target: ./Elixir.Logger.beam`, dont aucune ne nomme le fait.
     #
-    # Mesure du 2026-08-20, poste natif Mintie : `75-projects` lance la porte `lcars project
-    # reconcile` depuis un `provision apply` démarré en root avec cwd `/root` (0700). L'ERTS y
-    # cherche ses modules par chemin relatif et rend `File operation error: eacces. Target:
-    # ./Elixir.Logger.beam` — vingt lignes de `.beam` illisibles, aucune ne nommant le vrai fait :
-    # le répertoire courant n'appartient pas à celui qui lit.
-    #
-    # `cd` dans un SOUS-SHELL : le cwd du module appelant n'est pas touché. Les 39 appelants
-    # travaillent en chemins absolus, donc aucun ne dépend du cwd hérité — vérifié avant de changer.
+    # `cd` dans un SOUS-SHELL : le cwd du module appelant n'est pas touché.
     ( cd "$home" && runuser -u "$PROV_HUMAN" -- env HOME="$home" USER="$PROV_HUMAN" LOGNAME="$PROV_HUMAN" "$@" )
   else
     p_fail "as_human: je suis $(id -un), pas root ni $PROV_HUMAN — relance en root"
@@ -1105,9 +1079,9 @@ as_human() {
   fi
 }
 
-# home de PROV_HUMAN (vide si inconnu — l'appelant DOIT tester). B5 : `|| true`, sinon sous
-# `set -euo pipefail` (tous les modules) un user inconnu tue l'assignation `home="$(human_home)"`
-# AVANT la garde p_fail de l'appelant — abort muet, le contrat « vide si inconnu » était un mensonge.
+# home de PROV_HUMAN, vide si inconnu — l'appelant DOIT tester. ⚠ `|| true` LOAD-BEARING (B5) :
+# sous `set -euo pipefail`, un user inconnu tuerait l'assignation `home="$(human_home)"` AVANT la
+# garde `p_fail` de l'appelant, et le contrat « vide si inconnu » ne tiendrait pas.
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
@@ -1126,8 +1100,8 @@ human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 #      UID_MIN vaut 1000 et le sysadmin EST 1000, donc le système le classe utilisateur régulier.
 #
 # La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet_v2` parce que le provisioning ne peut
-# pas dépendre de l'artefact qu'il INSTALLE : `60-deploy` pose ce binaire, et une machine vierge
-# n'en a aucun quand ce cycle démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
+# pas dépendre de l'artefact qu'il INSTALLE : une machine vierge n'a pas ce binaire quand le cycle
+# démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
 #
 # ⚠ ARITHMÉTIQUE, jamais des chaînes : en comparaison lexicographique `"999" < "1000"` est FAUX, et
 # un compte système à uid 999 passerait la garde.
@@ -1158,7 +1132,7 @@ prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
   return 1
 }
 
-# ⚠ SIÈGE INCONNU ⇒ RÉPONSE NON, POUR TOUT LE MONDE. Un `:-1000` répondait « oui » à quiconque n'est
+# ⚠ SIÈGE INCONNU ⇒ RÉPONSE NON, POUR TOUT LE MONDE. Un `:-1000` répondrait « oui » à quiconque n'est
 # pas 1000 — donc au siège lui-même dès qu'il est ailleurs, c'est-à-dire exactement le compte que
 # cette fonction existe pour écarter. Se fermer est la seule direction sûre quand la borne manque.
 is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
@@ -1173,10 +1147,9 @@ is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
 # ─── fleet_humans — CEUX QUI EXISTENT DÉJÀ SUR CETTE MACHINE ────────────────────────────────────
 #
 # ⚠ ÉNUMÉRER N'EST PAS TESTER UN NOM, ET LA DIFFÉRENCE EST UNE BORNE. `is_fleet_human` répond « ce
-# login-là peut-il lancer une fleet » : on le lui a nommé, donc la borne HAUTE ne sert à rien. Balayer
-# `passwd` pose l'autre question, et `nobody` — uid 65534, présent sur toute machine — répond OUI à la
-# règle basse seule. Mesuré le 2026-08-22 : une première écriture de cette fonction annonçait
-# « cette machine porte déjà : nobody ».
+# login-là peut-il lancer une fleet » : on le lui a nommé, donc la borne HAUTE ne sert à rien.
+# Balayer `passwd` pose l'autre question, et `nobody` — uid 65534, présent sur toute machine —
+# répond OUI à la règle basse seule.
 #
 # `UID_MAX` est la borne que login.defs déclare pour exactement ça. Et la lecture passe par le
 # FICHIER, jamais par `id` : c'est ce qui rend la population mesurable par un témoin (`PASSWD_FILE`,
@@ -1200,16 +1173,10 @@ repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
 
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
 #
-# UN PROVISIONNEMENT NE DIT PAS D'OÙ IL VIENT, ET C'EST LA PANNE QU'ON NE VOIT JAMAIS. Chaque module
-# converge son état-cible vers ce que dit SA source — et « conforme » ne veut alors dire que
-# « conforme à l'arbre que j'ai sous la main ». Un checkout en retard réinstalle donc l'état d'avant,
-# **en rendant vert**, parce que du point de vue du module il n'y a rien à redire.
-#
-# MESURE DU 2026-08-21, ET ELLE A COÛTÉ UN COMPTE UTILISATEUR. Un correctif d'allocation d'uid était
-# posé et vérifié sur une machine ; `62-runtime-helpers` a ensuite reposé ses auxiliaires depuis un
-# clone resté six commits en arrière, ce qui a REMIS EN PLACE l'ancienne formule. Le service systemd
-# tournait dessus. La collision d'uid suivante était mécanique, et rien nulle part ne pouvait la
-# relier à un arbre en retard : le module avait fait exactement son travail.
+# ⚠ UN PROVISIONNEMENT QUI NE DIT PAS D'OÙ IL VIENT EST LA PANNE QU'ON NE VOIT JAMAIS. Chaque module
+# converge son état-cible vers ce que dit SA source, donc « conforme » ne veut dire que « conforme à
+# l'arbre que j'ai sous la main » : un checkout en retard REMET EN PLACE l'état d'avant en rendant
+# vert, un correctif deja pose est defait, et rien ne relie le symptome suivant a l'arbre en retard.
 #
 # ⚠ ET LA COPIE, ELLE, N'EST PAS UN CHECKOUT. `/opt/lcars/fleet` est un `cp -a` : `git rev-parse`
 # n'y répond rien, donc un `provision` lancé depuis cette copie — c'est le cas du convergeur —
@@ -1249,21 +1216,14 @@ prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
 
 # ─── prov_roles — LE ROSTER FORGE, DERIVE DU MATERIEL ─────────────────────────────────────────────
 #
-# LA QUATRIEME LISTE DE ROLES TENUE A LA MAIN EST MORTE ICI. `PROV_ROLES` enumerait neuf comptes
-# `<catalogue>_<role>` en dur, a cote de trois autres inventaires du meme fait (forge.tf,
-# provision-role-tokens.sh, les cap-profiles du catalogue) — et c'est ELLE qui gagnait, puisque
-# `50-forge` la passe au mint. Un producteur absent de cette ligne = pas de jeton sur une fleet
-# fraiche = rail ops en `role_token_unavailable` (BL-6-34, vecu deux fois : eng_doc, puis son rename
-# scribe). Une liste ecrite a la main pour un ensemble qui grandit avec chaque catalogue installe ne
-# pouvait que rester en retard.
-#
-# Elle se derive maintenant de ce que les catalogues DECLARENT : le release lit leurs cap-profiles
+# LE ROSTER SE DERIVE DE CE QUE LES CATALOGUES DECLARENT : le release lit leurs cap-profiles
 # (`entrypoint roles <racine>`), la meme porte que la recette tofu emprunte pour son roster. Un
-# catalogue installe apporte donc ses comptes sans qu'aucun fichier de deploiement ne le sache.
+# catalogue installe apporte donc ses comptes sans qu'aucun fichier de deploiement ne le sache — une
+# liste ecrite a la main pour un ensemble qui grandit a chaque catalogue reste en retard.
 #
-# LA LISTE EN DUR SURVIT COMME PLANCHER, et pas par prudence : les comptes `system_*` vivent dans le
+# `PROV_ROLES` SURVIT COMME PLANCHER, et pas par prudence : les comptes `system_*` vivent dans le
 # catalogue SYSTEME, qui n'est pas installe — il est le substrat. Et une boite dont le release n'est
-# pas encore pose (chemin WSL, avant `60-deploy`) doit quand meme minter de quoi demarrer.
+# pas encore pose doit quand meme minter de quoi demarrer.
 #
 # ⚠ LE MINT NE PERD JAMAIS UN COMPTE QU'IL A DEJA CREE : l'union est cumulative, jamais un
 # remplacement. Un catalogue desinstalle laisse ses comptes derriere lui — c'est deliberé, ses
@@ -1274,12 +1234,9 @@ prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
 # de `forge-uid.map`, la meme table que les humains de fleet. Une seconde table pour tenir une ligne
 # de la premiere ferait deux verites d'un meme fait.
 #
-# ⚠ CES PRIMITIVES VIVENT ICI PARCE QUE LES DEUX RAILS EN ONT BESOIN AU MEME MOMENT, ET QUE CE
-# MOMENT EST AVANT L'EXECUTEUR. Mesure : la boite lance `provision apply` (`entrypoint.sh:459`) puis
-# l'executeur (`:655`) ; le poste nomme son admin forge au rang 48 et demarre l'unite au rang 64.
-# Un verbe de l'executeur ne peut donc servir ni l'un ni l'autre. Le second lecteur du jeton master
-# existe deja et il est delibere — `resolve_admiral`, en root, avant que quoi que ce soit d'autre
-# existe : une primitive partagee REMPLACE deux copies de cette derivation, elle n'en ajoute pas.
+# ⚠ CES PRIMITIVES VIVENT ICI PARCE QUE LES DEUX RAILS EN ONT BESOIN AVANT L'EXECUTEUR : la boite
+# lance `provision apply` avant lui, le poste nomme son admin forge au rang 48 et ne demarre l'unite
+# qu'au rang 64. Un verbe de l'executeur ne peut donc servir ni l'un ni l'autre.
 #
 # ⚠ ELLES LISENT ET ELLES ENREGISTRENT ; elles ne CREENT aucun compte. Chaque rail a deja son geste
 # de creation (`useradd` a l'entrypoint, le compte forge dans `48-forge-host`) et il le garde : une
@@ -1295,8 +1252,7 @@ prov_seat_from_map() { # le login du siege enregistre, ou vide
 # laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere resolution fait foi —
 # c'est elle qui correspond a ce qui est sur le disque.
 # Les deux arguments sont REQUIS et sans defaut : l'uid est celui que le systeme a donne, jamais un
-# nombre qu'on espere, et les deux appelants le tiennent deja. Un `:-1000` ici aurait ete la
-# troisieme copie du meme defaut sur une valeur qui ne peut pas etre vide.
+# nombre qu'on espere.
 prov_seat_record() { # prov_seat_record <login> <uid>
   local login="${1:?prov_seat_record: login requis}" uid="${2:?prov_seat_record: uid requis}"
   [[ -n "$(prov_seat_from_map)" ]] && return 0
@@ -1324,10 +1280,9 @@ prov_forge_seat_login() {
 #   PROV_SEAT_LOGIN     le login du siege, vide seulement sur `unknown`
 #   PROV_SEAT_SOURCE    d'ou il vient — `table` | `forge` | `candidat`, vide sur `unknown`
 #
-# ⚠ TROIS GLOBALES ET PAS UN `echo`, POUR LA MEME RAISON QUE `advertise_addr` — et j'ai reconstruit
-# son defaut avant de relire son commentaire. Un appelant ecrit naturellement
-# `v="$(prov_seat_binding x)"`, or `$( )` ouvre un SOUS-SHELL : la valeur revient par stdout et les
-# globales meurent avec lui.
+# ⚠ TROIS GLOBALES ET PAS UN `echo`, POUR LA MEME RAISON QUE `advertise_addr` : un appelant ecrit
+# naturellement `v="$(prov_seat_binding x)"`, or `$( )` ouvre un SOUS-SHELL — la valeur revient par
+# stdout et les globales meurent avec lui.
 #
 # ⚠ LE VERDICT ET LA SOURCE SONT DEUX FAITS. Un verdict qui s'appellerait `forge_only` alors que le
 # login vient de la TABLE nommerait la mauvaise autorite dans le message d'un operateur qui
@@ -1336,8 +1291,7 @@ prov_forge_seat_login() {
 # Les cinq verdicts :
 #
 #   agree     le cote durable et le candidat unix nomment le meme acteur
-#   diverge   ils nomment deux acteurs — la branche que personne n'avait, et le controle qui
-#             aurait attrape la divergence avant qu'elle casse
+#   diverge   ils nomment deux acteurs
 #   derived   le cote durable nomme, unix n'a pas de candidat a confronter
 #   seeded    unix nomme, le cote durable est muet
 #   unknown   ni l'un ni l'autre : on REFUSE de nommer plutot que d'inventer — un siege invente
@@ -1384,16 +1338,13 @@ prov_roles() {
   local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
   local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
 
-  # ⚠ `roles-tfvars` ET NON `roles`, ET LES DEUX PORTES NE RENDENT PAS LA MEME CHOSE. `roles` rend
-  # des noms de ROLE (`dev`, `writer`) ; `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`).
-  # Mesure sur banc du 2026-08-16 : la derivation branchee sur `roles` faisait entrer `dev`,
-  # `writer`, `architect` dans le roster — le mint aurait cree des comptes forge portant le nom nu
-  # d'un role, a cote des vrais. Le commentaire de l'entrypoint annoncait `roles -> PROV_ROLES`, et
-  # c'est ce qui m'a fait prendre la mauvaise porte : il est corrige la-bas.
+  # ⚠ `roles-tfvars` ET NON `roles` : les deux portes ne rendent pas la meme chose. `roles` rend des
+  # noms de ROLE (`dev`, `writer`) quand `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`) —
+  # brancher la derivation sur la premiere fait creer des comptes forge portant le nom nu d'un role,
+  # a cote des vrais.
   #
   # `.roles` porte les comptes du catalogue, `.system_roles` ceux du substrat partage. Le canon ne
-  # connait pas cette coupure — il connait des comptes — donc on recolle ici, comme le fait deja le
-  # verrou d'egalite des listes.
+  # connait pas cette coupure — il connait des comptes — donc on recolle ici.
   if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
     for root in "$PROV_CATALOGUES_DIR"/*/; do
       [[ -f "${root}catalogue.yaml" ]] || continue
