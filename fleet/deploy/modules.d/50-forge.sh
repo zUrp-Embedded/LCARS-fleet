@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 45-catalogues 48-forge-host
 #
 # La forge n'est PAS installée ici (sidecar compose en Docker, app TrueNAS, service externe —
 # créée par LE SYSTÈME, jamais par LCARS), et sa STRUCTURE n'est plus créée ici non plus :
@@ -61,10 +62,6 @@ A4_SCRIPT="$(repo_root)/fleet/etc/provision-role-tokens.sh"
 # INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
 # deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
-#
-# ⚠ `45-catalogues` TOURNE AVANT CE MODULE, et c'est ce qui rend la derivation vraie du premier
-# coup : le materiel est deja la quand cette ligne s'evalue. Inverser l'ordre ferait minter le
-# roster du cycle PRECEDENT — un catalogue installe passerait son premier boot sans jetons.
 ROLES="$(prov_roles)"
 ACCOUNTS="$ROLES $PROV_SYSTEM_ACCOUNT"
 

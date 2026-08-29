@@ -49,11 +49,6 @@
 # (⚖ user : « une install hors ligne bloque déjà au apt primaire »). `npm ci` va sur le réseau comme
 # `apt`, comme le précompilé Elixir, comme le miroir de providers. Il n'y a pas de mode hors-ligne à
 # préserver.
-#
-# ─── POURQUOI 16 ────────────────────────────────────────────────────────────────────────────────
-#
-# `44-media` bâtit la doc et la pose ; il lui faut node AVANT. 16 le met juste après `15-toolchain`,
-# dont il est le jumeau : deux précompilés épinglés, une seule raison — ce poste bâtit le produit.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 20-groups
 #
 # ─── POURQUOI UN MODULE, ET PAS UNE LIGNE DANS `20-groups` ──────────────────────────────────────
 #
@@ -153,8 +154,6 @@ check() {
 }
 
 apply() {
-  # `20-groups` a deja pose `$PROV_FLEET_GROUP` — ce module tourne apres lui, et son rang le dit.
-  #
   # ⚠ LE GROUPE AVANT LE COMPTE, ET L'ORDRE EST UN CONTRAT : `useradd -g "$AUTHORITY_GROUP"` refuse
   # net si le groupe n'existe pas. `ensure_group` est idempotent et verifie son propre `groupadd`
   # (provision-lib) — un groupe qu'on croit pose et qui ne l'est pas est le defaut qu'on repare ici.

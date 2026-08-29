@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
+# AFTER: 48-forge-host
 #
 # ─── POURQUOI CE MODULE EXISTE SÉPARÉMENT ───────────────────────────────────────────────────────
 #

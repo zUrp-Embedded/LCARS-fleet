@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
+# AFTER: 45-catalogues 50-forge 70-human
 #
 # LA FORGE SAIT QUELS PROJETS EXISTENT, LE DISQUE NE LE SAIT PLUS.
 #
@@ -28,9 +29,6 @@
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$PROV_HUMAN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet_v2.env` qui porte l'adresse de la forge et le jeton.
-#
-# APRES 45-catalogues (le materiel des catalogues installes, dont ce module tire la liste des orgs),
-# 50-forge (les comptes et les jetons) et 70-human (le compte Unix, son HOME et son env).
 #
 # `APPLY-ON: any` et pas l'enumeration des trois substrats, qui vaudrait pourtant la meme chose
 # aujourd'hui : les faces ne sont bâties NULLE PART ailleurs — ni au stage image, ni au build —

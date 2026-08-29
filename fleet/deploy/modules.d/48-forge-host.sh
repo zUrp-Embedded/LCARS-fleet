@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
+# AFTER: 44-media 46-tofu
 #
 # ⚖ ARBITRAGE USER 2026-08-18 : « soit on fait rien, l'user clone et monte des bancs docker ; soit
 # on installe et on crée la forge dans le pack ». C'est la seconde.

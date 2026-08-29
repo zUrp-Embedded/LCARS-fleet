@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 00-preflight
 # (CHECK-ON any, APPLY-ON sans docker : les paquets sont des layers de l'image — mais bwrap
 # opérationnel et l'outillage présent doivent être VRAIS en conteneur, et le doctor les y sonde.)
 #

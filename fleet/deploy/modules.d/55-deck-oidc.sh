@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 50-forge
 #
 # THE BOX'S FRONT DOOR NEEDS A CLIENT, AND NOTHING WAS CREATING ONE. The deck (port 20999) now
 # refuses to serve anything until it can ask the forge "who are you" — deliberately, because a deck
@@ -16,8 +17,6 @@
 # `POST /api/v1/user/applications/oauth2` refuses on SCOPE (`required=[write:user]`) and not on
 # auth METHOD — unlike minting a token, which Gitea only accepts over basic auth. So a token is
 # enough, and the system account has carried `write:user` since that measurement.
-#
-# ORDER: after 50-forge (which mints the system token this needs), before 70-human.
 #
 # Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_PUBLIC_URL (adresse NAVIGATEUR) ·
 #           PROV_DECK_ORIGINS · PROV_DECK_PORT · PROV_DECK_OIDC_FILE · PROV_TOKENS_DIR

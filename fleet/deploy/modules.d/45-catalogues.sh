@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 25-directories
 #
 # INSTALLE EST UN FAIT DE FORGE, ET CE MODULE EST CE QUI LE REND VRAI SUR LE DISQUE.
 # `lcars catalogue install <nom>` pose deux choses sur la forge : l'org avec ses comptes de role, et
@@ -16,12 +17,6 @@
 # qu'il efface est re-clonable depuis l'autorite, donc effacer ne perd rien. Un repertoire que la
 # forge ne signe plus est un catalogue qu'on aurait continue a servir — des roles, des cartes et des
 # projets qui tournent sur un metier que plus personne ne declare.
-#
-# ⚠ IL TOURNE AVANT `50-forge`, ET CET ORDRE PORTE LE ROSTER. Les comptes de role a minter se
-# derivent du materiel present (`prov_roles`, provision-lib) : sans le materiel, la derivation
-# retombe sur la liste tenue a la main, et un catalogue installe passe un cycle entier sans ses
-# jetons — donc en `role_token_unavailable` au premier dispatch. La convergence doit precede le
-# mint, pas le suivre.
 #
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc

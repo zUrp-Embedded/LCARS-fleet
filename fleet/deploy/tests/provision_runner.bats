@@ -910,3 +910,72 @@ EOF
   local n; n="$(ls -1 "$dir"/*.sh 2>/dev/null | wc -l)"
   [[ "$n" -ge 20 ]]
 }
+
+# ─── AFTER — l'ordre entre modules est DECLARE, plus dit en prose ───────────────────────────────
+
+@test "AFTER : un module qui nomme un rang qui ne le precede pas est REFUSE au demarrage" {
+  # L'ordre d'execution est le prefixe numerique. Une dependance dite en prose ne survit pas a une
+  # renumerotation ; declaree en champ, le runner la verifie avant de jouer quoi que ce soit.
+  stub_module 40-amont any any human
+  cat > "$SANDBOX/modules.d/30-aval.sh" <<'MOD'
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+# AFTER: 40-amont
+exit 0
+MOD
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"30-aval"* ]]
+  [[ "$output" == *"40-amont"* ]]
+  [[ "$output" == *"precede"* ]]
+}
+
+@test "AFTER : un module INCONNU est un refus qui le nomme — le vide ne satisfait aucune dependance" {
+  cat > "$SANDBOX/modules.d/30-aval.sh" <<'MOD'
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+# AFTER: 20-fantome
+exit 0
+MOD
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"20-fantome"* ]]
+}
+
+@test "AFTER satisfait : les deux modules jouent dans l'ordre, et list le montre" {
+  stub_module 20-amont any any human
+  cat > "$SANDBOX/modules.d/30-aval.sh" <<MOD
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+# AFTER: 20-amont
+set -euo pipefail
+echo "30-aval:\$1" >> "\$RUN_LOG"
+exit 0
+MOD
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 0 ]
+  [ "$(grep -n '20-amont:check' "$RUN_LOG" | cut -d: -f1)" -lt "$(grep -n '30-aval:check' "$RUN_LOG" | cut -d: -f1)" ]
+  run "$SANDBOX/provision" list --substrate docker
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AFTER=20-amont"* ]]
+}
+
+@test "AFTER : les modules REELS declarent un ordre que leur rang respecte — sinon le runner refuse au boot" {
+  # Le sandbox porte des stubs ; ce temoin lit le vrai modules.d et rejoue la meme regle.
+  local mod name dep n=0
+  for mod in "$BATS_TEST_DIRNAME"/../modules.d/[0-9][0-9]-*.sh; do
+    name="$(basename "$mod" .sh)"
+    for dep in $(sed -n 's/^# AFTER: *//p' "$mod" | head -1); do
+      n=$((n+1))
+      [ -f "$BATS_TEST_DIRNAME/../modules.d/$dep.sh" ]
+      [[ "$dep" < "$name" ]]
+    done
+  done
+  [ "$n" -ge 10 ]
+}

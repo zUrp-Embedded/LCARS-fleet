@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 16-node
 #
 # ─── UN TROU QUE LE CONTENEUR CACHAIT ───────────────────────────────────────────────────────────
 #
@@ -53,12 +54,6 @@
 # `dist/` — les deux sont gitignorés, comme `_build` et `deps` pour mix. En root, il laisserait à
 # l'opérateur un arbre qu'il ne peut plus effacer : c'est la leçon du `.terraform` de `46-tofu`,
 # payée au nettoyage de .63.
-#
-# ─── POURQUOI 44 ────────────────────────────────────────────────────────────────────────────────
-#
-# `48-forge-host` joue la recette et en a besoin POUR ÇA. `62-runtime-helpers`, qui pose le reste des
-# auxiliaires, tourne dix-huit crans plus tard. L'ordre est le préfixe — même leçon que `46-tofu`,
-# et que `22-fleet-human` renommé de 65 à 22.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

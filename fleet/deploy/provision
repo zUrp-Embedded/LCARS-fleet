@@ -294,6 +294,13 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
   [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
   [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
+  # `# AFTER: <module>…` — l'ordre d'execution est le prefixe numerique ; ce champ declare ce que le
+  # rang doit respecter, et une renumerotation qui l'enfreint est refusee ici, avant tout geste.
+  after="$(module_field "$mod" AFTER)"
+  for dep in $after; do
+    [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"
+    [[ "$dep" < "$name" ]] || die "$name: AFTER « $dep », mais $dep ne le precede pas — le rang est l'ordre, renomme l'un des deux"
+  done
   if [[ "$check_on" != "any" ]]; then
     for s in $apply_on; do
       [[ "$s" == "any" ]] && die "$name: APPLY-ON any exige CHECK-ON any"
@@ -318,8 +325,9 @@ done
 
 if [[ "$CMD" == "list" ]]; then
   for mod in "${SELECTED[@]}"; do
-    printf '%-28s APPLY-ON=%-12s CHECK-ON=%-10s NEEDS=%s\n' "$(basename "$mod" .sh)" \
-      "$(module_field "$mod" APPLY-ON)" "$(module_field "$mod" CHECK-ON)" "$(module_field "$mod" NEEDS)"
+    printf '%-28s APPLY-ON=%-12s CHECK-ON=%-10s NEEDS=%-6s AFTER=%s\n' "$(basename "$mod" .sh)" \
+      "$(module_field "$mod" APPLY-ON)" "$(module_field "$mod" CHECK-ON)" "$(module_field "$mod" NEEDS)" \
+      "$(module_field "$mod" AFTER)"
   done
   exit 0
 fi

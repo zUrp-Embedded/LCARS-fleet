@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 48-forge-host
 #
 # ─── CE QUE CETTE BRANCHE EST ──────────────────────────────────────────────────────────────────
 # Un pod bloque y ouvre une PR qui demande un outil, un humain signe, le convergeur applique. Elle

@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 48-forge-host
 #
 # ─── DEUX PROCESSUS QUE PERSONNE NE LANÇAIT ─────────────────────────────────────────────────────
 #
@@ -149,9 +150,6 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
 # Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
 # le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
 # provisionnement vient d'établir — et jamais recopié à la main dans deux unités.
-#
-# `FORGE_BASE_URL` vient du fichier que `48-forge-host` écrit en annonçant l'adresse de la forge
-# (les modules sont des processus : aucun ne peut exporter vers un autre).
 forge_url() {
   local f="$PROV_TOKENS_DIR/forge.url"
   [[ -r "$f" ]] && head -n1 "$f" | tr -d '[:space:]'
