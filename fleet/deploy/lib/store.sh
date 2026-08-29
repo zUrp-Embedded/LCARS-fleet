@@ -8,36 +8,32 @@
 # compose, et lui seul l'ecrit ; ce qui vit DANS la boite le recoit par `LCARS_STORE_ROOT`. Un
 # chemin recopie ici en serait une seconde verite — MUR 9 de `variable_walls.bats` le refuse.
 #
-# ⚠ NE MONTE JAMAIS UN VOLUME SUR LA RACINE DU MAGASIN — SEULEMENT SUR SES ENFANTS. La racine a
+# NE MONTE JAMAIS UN VOLUME SUR LA RACINE DU MAGASIN — SEULEMENT SUR SES ENFANTS. La racine a
 # deja un locataire porte par la COUCHE CONTENEUR : `PROV_CATALOGUES_WORK`, cree par
 # `25-directories.sh`. Un volume monte a la racine le masquerait — l'etat tofu des catalogues
 # disparaitrait derriere un point de montage vide, sans un message. Les volumes de ce fichier sont
 # ses FRERES, jamais son parent.
 #
-# POURQUOI `external: true` (pose par le compose, pas ici) : hors projet, donc `compose down -v` ne
-# peut pas les emporter. Le prix est la bonne propriete : un volume externe doit exister AVANT le
-# `up`, sinon compose refuse de demarrer. C'est `store_ensure_volumes` qui le pose, et c'est pour ca
-# qu'elle est appelee par le script d'ENTREE — aucun autre endroit ne s'execute avant le `up`.
+# `external: true` (pose par le compose, pas ici) les met hors projet, donc `compose down -v` ne peut
+# pas les emporter. En echange ils doivent exister AVANT le `up`, sinon compose refuse de demarrer :
+# c'est `store_ensure_volumes` qui les pose, depuis le script d'ENTREE.
 #
-# ⚠ ET C'EST POUR CA QUE LE NOM PORTE LE PROJET : `external` sort le volume du projet DANS LES DEUX
+# ET C'EST POUR CA QUE LE NOM PORTE LE PROJET : `external` sort le volume du projet DANS LES DEUX
 # SENS — compose ne le detruit pas, et il ne le prefixe pas non plus. Sans prefixe pose a la main,
 # deux installations sur une machine tombent sur les MEMES volumes, et jouer avec le test vide la
-# prod. Le prefixe est le NOM DU PROJET COMPOSE, que `box` porte deja (`-p`, defaut `lcars`) et
-# dont il refuse de devier : deux installations different par construction, et l'installation par
-# defaut garde les noms d'avant (`lcars-cache`).
+# prod. Le prefixe est le nom du projet compose, que `box` porte deja (`-p`, defaut `lcars`).
 #
 # Pour `/home` la question ne se pose pas : ses humains sont ceux de CETTE boite, il reste dans le
 # projet et meurt avec lui.
 #
-# ⚠ CE QUI N'EST PAS ICI : la toolchain BATIE (crosstool-NG, GCC+glibc construits a la main). Elle
-# est la seule des quatre natures d'artefact SANS recette amont, donc la seule qui porte un digest —
-# c'est une image DOCKER, pas une arborescence. Elle herite en echange de la faiblesse du magasin
-# d'images : `docker system prune -a` moissonne ce que `down -v` epargne.
+# CE QUI N'EST PAS ICI : la toolchain BATIE (crosstool-NG, GCC+glibc construits a la main). C'est une
+# image DOCKER, pas une arborescence — elle porte un digest, et elle herite de la faiblesse du
+# magasin d'images : `docker system prune -a` moissonne ce que `down -v` epargne.
 
 # Quatre volumes, un par DUREE DE VIE — c'est-a-dire par « qu'est-ce qu'on accepterait de purger
 # separement », la seule question qui justifie de les separer plutot que d'en monter un seul.
 #
-# ⚠ CE SONT LES NATURES, PAS LES NOMS. Ce que cette liste enumere est stable et ne depend d'aucune
+# CE SONT LES NATURES, PAS LES NOMS. Ce que cette liste enumere est stable et ne depend d'aucune
 # installation : c'est aussi le nom du sous-repertoire sous `LCARS_STORE_ROOT`, et c'est la clef que
 # `26-store.sh` met en regard de sa table de modes. Le NOM DU VOLUME, lui, porte le projet et se
 # derive par `store_volume_name` — les deux ne se confondent pas.
@@ -76,7 +72,7 @@ store_volume_names() {
 
 # store_ensure_volumes <docker-bin> — cree ce qui manque, ne touche a rien d'autre.
 #
-# ⚠ UN BINAIRE, PAS UNE LIGNE DE COMMANDE. `store_ensure_volumes "sudo -E docker"` cherche un
+# UN BINAIRE, PAS UNE LIGNE DE COMMANDE. `store_ensure_volumes "sudo -E docker"` cherche un
 # executable dont le NOM contient des espaces, et echoue en annoncant que le volume n'a pas pu etre
 # cree — un diagnostic qui accuse docker alors que c'est l'appel qui est mal forme. Une escalade se
 # met dans un shim, dont on passe le chemin.
@@ -118,12 +114,12 @@ store_destroy_volumes() {
 
 # store_spared_line — CE QUE LA DESTRUCTION EPARGNE, dit par celui qui sait.
 #
-# ⚠ CONTREPARTIE NON NEGOCIABLE DES VOLUMES EXTERNES. Un geste qui annonce « ceci efface les
+# CONTREPARTIE NON NEGOCIABLE DES VOLUMES EXTERNES. Un geste qui annonce « ceci efface les
 # volumes » alors qu'il en epargne fabrique la croyance « la machine est propre » : des heures de
 # toolchain dorment invisibles jusqu'a ce que quelqu'un purge un cache et se demande ce qu'il vient
 # de perdre. Un silence sur ce qu'on LAISSE ne se decouvre qu'au pire moment.
 #
-# ⚠ NE S'APPELLE QUE D'UN GESTE AUQUEL LE MAGASIN SURVIT — `box reset` reinitialise une boite, il ne
+# NE S'APPELLE QUE D'UN GESTE AUQUEL LE MAGASIN SURVIT — `box reset` reinitialise une boite, il ne
 # jette pas l'installation. Un geste qui JETTE detruit (`store_destroy_volumes`) : y annoncer une
 # epargne serait un mensonge sur le mot.
 store_spared_line() {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ⚠ SC2034 AU NIVEAU DU FICHIER, ET C'EST LE CONTRAT DE CETTE LIB QUI LE JUSTIFIE. Ses fonctions
+# SC2034 AU NIVEAU DU FICHIER, ET C'EST LE CONTRAT DE CETTE LIB QUI LE JUSTIFIE. Ses fonctions
 # rendent leurs resultats par des GLOBALES que l'APPELANT lit — `docker_endpoint` pose les
 # `PROV_DOCKER_*`, `docker_compose_cmd` les `PROV_COMPOSE_*` — et aucune n'est relue ici, donc elles
 # sont toutes vues inutilisees. La directive doit preceder TOUTE commande, `set -` compris, sinon
@@ -49,7 +49,7 @@ detect_substrate() {
 # par un MONTAGE partagé, CLI comprise, donc une distro sans aucun binaire joint docker. On cherche
 # une PAIRE, CLI et endpoint, et la seule preuve est qu'elle réponde.
 #
-# ⚠ CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ rendent quelque chose —
+# CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ rendent quelque chose —
 # cf. `docker_stream_ok`.
 # ⚠ LA FORME `${VAR:-}` EST DELIBEREE, ET `=""` CASSERAIT LA COUTURE D'ENTREE : la fonction lit
 # `want="${PROV_DOCKER_BIN:-}"` pour honorer une CLI imposee — un shim, une doublure de test — et
@@ -61,7 +61,7 @@ PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
 # LE PREFIXE D'ESCALADE : vide, ou de quoi joindre un daemon dont la socket appartient a root.
 #
-# ⚠ POURQUOI IL EXISTE. Sur WSL la socket Docker Desktop est `root:root 755` : le daemon repond, et
+# POURQUOI IL EXISTE. Sur WSL la socket Docker Desktop est `root:root 755` : le daemon repond, et
 # pas a l'utilisateur qui lance. `chgrp` dessus l'ouvrirait a TOUTES les distros de la VM (elle vit
 # sous `/mnt/wsl`) et serait a re-poser a chaque demarrage de Docker Desktop, qui la recree. `sudo`
 # sur l'APPEL ne modifie RIEN : la promesse auditee du rail boite porte sur ce qu'on MODIFIE, jamais
@@ -122,12 +122,12 @@ PYCFG
 
 # ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
 #
-# ⚠ AUCUN CHEMIN « AU CAS OU » : une sonde qui fouille finit par porter le cablage de la machine de
+# AUCUN CHEMIN « AU CAS OU » : une sonde qui fouille finit par porter le cablage de la machine de
 # son auteur, et juge toutes les autres a travers lui. L'operateur qui a sa topologie pose
 # `DOCKER_HOST`, honore avant tout le reste.
 # Sur WSL, `/var/run/docker.sock` ne s'ajoute que si l'integration est activee pour la distro.
 #
-# ⚠ COUTURE DE DECOR, MEME IDIOME QUE `LCARS_HOST_CONSENT_FILE` ET `LCARS_SYSADMIN_UID` : les
+# COUTURE DE DECOR, MEME IDIOME QUE `LCARS_HOST_CONSENT_FILE` ET `LCARS_SYSADMIN_UID` : les
 # chemins sont des litteraux, et `DOCKER_HOST` n'est plus un levier — pointer une socket absente
 # fait CONTINUER la resolution. Sans cette couture, « rien ne repond » n'est mesurable que sur une
 # machine sans docker, c'est-a-dire nulle part ou ce contrat compte.
@@ -143,7 +143,7 @@ _docker_sockets() {
 }
 
 docker_endpoint() {
-  # ⚠ `PROV_DOCKER_BIN` est À LA FOIS L'ENTRÉE ET LA SORTIE, et c'est délibéré : un second nom pour
+  # `PROV_DOCKER_BIN` est À LA FOIS L'ENTRÉE ET LA SORTIE, et c'est délibéré : un second nom pour
   # « la CLI que l'appelant veut » ferait deux variables pour un objet, et c'est celle qu'on ne lit
   # pas qui gagne. On capture donc la valeur entrante d'abord.
   local want="${PROV_DOCKER_BIN:-}"
@@ -178,12 +178,12 @@ docker_endpoint() {
     return 1
   fi
 
-  # ⚠ LE CHEMIN DES PLUGINS SE POSE ICI, PARCE QU'IL DEPEND DE LA CLI CHOISIE ET DE RIEN D'AUTRE.
+  # LE CHEMIN DES PLUGINS SE POSE ICI, PARCE QU'IL DEPEND DE LA CLI CHOISIE ET DE RIEN D'AUTRE.
   # Accroche au shim d'escalade plus bas, il ne couvrirait que les appelants NON-ROOT : le module
   # qui a besoin de `compose` tourne en root, ou l'escalade n'a pas lieu, et recevrait la CLI du
   # montage toute nue.
   #
-  # ⚠ UN `DOCKER_CONFIG` POSE PAR L'OPERATEUR EST UNE DECISION : on ne l'ecrase pas.
+  # UN `DOCKER_CONFIG` POSE PAR L'OPERATEUR EST UNE DECISION : on ne l'ecrase pas.
   if [[ "$(detect_substrate)" == "wsl" && "$PROV_DOCKER_BIN" == "$(_docker_mount_cli)" \
         && -z "${DOCKER_CONFIG:-}" ]]; then
     local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
@@ -239,7 +239,7 @@ docker_endpoint() {
        && sudo -n DOCKER_HOST="unix://$PROV_DOCKER_SOCK" "$abs" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       PROV_DOCKER_HOST="unix://$PROV_DOCKER_SOCK"
       PROV_DOCKER_SUDO="sudo DOCKER_HOST=unix://$PROV_DOCKER_SOCK"
-      # ⚠ L'ESCALADE PREND LA FORME D'UN SHIM, ET C'EST CE QUI PRESERVE TOUS LES CONTRATS : les
+      # L'ESCALADE PREND LA FORME D'UN SHIM, ET C'EST CE QUI PRESERVE TOUS LES CONTRATS : les
       # appelants recoivent un BINAIRE et composent `"$DOCKER_BIN" <verbe>`. Rendre ici une LIGNE DE
       # COMMANDE ferait chercher un executable dont le nom contient des espaces, avec un diagnostic
       # qui accuserait docker. Le shim est un fichier, et tout le rail ne manipule qu'un chemin.
@@ -250,7 +250,7 @@ docker_endpoint() {
       local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
       chmod 0700 "$shim_dir"
 
-      # ⚠ ET LE SHIM PORTE SON PROPRE `DOCKER_CONFIG` — cf. `_docker_plugin_config`. Sous `sudo`,
+      # ET LE SHIM PORTE SON PROPRE `DOCKER_CONFIG` — cf. `_docker_plugin_config`. Sous `sudo`,
       # `HOME` devient celui de root : meme les plugins ranges chez l'humain cessent d'etre
       # regardes, et `docker compose` n'existe plus.
       local cfg; cfg="$(_docker_plugin_config "$shim_dir/config")" || cfg="$shim_dir/config"
@@ -279,7 +279,7 @@ SHIM
       chmod 0700 "$shim_dir/docker"
       PROV_DOCKER_BIN="$shim_dir/docker"
 
-      # ⚠ ON VERIFIE QUE LA PAIRE EST COMPLETE, PAS SEULEMENT QU'ELLE REPOND. Un shim qui rend
+      # ON VERIFIE QUE LA PAIRE EST COMPLETE, PAS SEULEMENT QU'ELLE REPOND. Un shim qui rend
       # `version` et pas `compose` est pire qu'une absence : il passe le preflight et meurt trois
       # etapes plus loin, sur un message qui accuse un fichier compose.
       if ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
@@ -294,9 +294,9 @@ SHIM
 
   # 3. Rien ne répond.
   #
-  # ⚠ LE MESSAGE NE DIT PAS « INSTALLE DOCKER » : sur WSL le montage prouverait le contraire, et sur
+  # LE MESSAGE NE DIT PAS « INSTALLE DOCKER » : sur WSL le montage prouverait le contraire, et sur
   # linux natif le paquet n'est pas forcément le geste juste.
-  # ⚠ ET IL PORTE LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » ne se diagnostique pas —
+  # ET IL PORTE LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » ne se diagnostique pas —
   # deux environnements différents rendent le même refus, qu'il faut rejouer pour savoir ce qu'il a
   # vu.
   local resolved tried=""
@@ -333,7 +333,7 @@ docker_stream_ok() {
 # (`docker-compose`) — et une install récente n'a que la première. La question se pose donc
 # vraiment ; ce qui ne doit pas se poser deux fois, c'est la RÉPONSE.
 #
-# ⚠ ELLE SE NOMME AU DÉLÉGUÉ, ELLE NE SE REDÉCOUVRE PAS : chaque porte joue la sonde une fois, puis
+# ELLE SE NOMME AU DÉLÉGUÉ, ELLE NE SE REDÉCOUVRE PAS : chaque porte joue la sonde une fois, puis
 # TRANSMET son résultat.
 #
 # ⚠ LE BINAIRE VIENT DE L'APPELANT, PAS DU PATH. Sur WSL la CLI vit dans le montage Docker Desktop,
