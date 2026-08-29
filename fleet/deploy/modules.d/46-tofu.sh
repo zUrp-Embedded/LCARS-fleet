@@ -57,13 +57,7 @@ TOFU_OWNER="${LCARS_TOFU_OWNER:-root:root}"
 
 tofu_rc() { echo "$TOFU_DIR/tofurc"; }
 
-# L'arch au vocabulaire d'OpenTofu, jamais `uname -m` — qui répond `x86_64` là où les releases
-# disent `amd64`, et qui répondrait pour la machine de build en cross-compilation.
-tofu_arch() {
-  case "$(dpkg --print-architecture 2>/dev/null)" in
-    amd64) echo amd64 ;; arm64) echo arm64 ;; *) echo "" ;;
-  esac
-}
+tofu_arch() { arch_tag debian; }
 
 tofu_installed_version() {
   "$TOFU_BIN" version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
@@ -99,7 +93,7 @@ apply() {
   case "$arch" in
     amd64) want_sha="$TOFU_SHA256_AMD64" ;;
     arm64) want_sha="$TOFU_SHA256_ARM64" ;;
-    *) p_fail "arch non épinglée pour tofu : « $(dpkg --print-architecture 2>/dev/null) » (attendu amd64 ou arm64)"; verdict_apply ;;
+    *) p_fail "arch non épinglée pour tofu : « $(arch_tag raw) » (attendu amd64 ou arm64)"; verdict_apply ;;
   esac
 
   if [[ "$(tofu_installed_version)" != "$TOFU_VERSION" ]]; then

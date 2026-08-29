@@ -1261,6 +1261,21 @@ prov_seat_record() { # prov_seat_record <login> <uid>
   chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
 }
 
+# arch_tag <raw|debian|node> — l'architecture au vocabulaire de la cible. `raw` rend ce que dpkg dit
+# (vide s'il est absent) ; `debian` et `node` rendent le tag d'une release, ou VIDE si l'arch n'est
+# pas epinglee — a l'appelant de refuser en la nommant. Jamais `uname -m` : il repond `x86_64` la
+# ou les releases disent `amd64` ou `x64`, et il repond pour la machine de build en cross-compilation.
+arch_tag() {
+  local deb; deb="$(dpkg --print-architecture 2>/dev/null || true)"
+  case "$1:$deb" in
+    raw:*)                       echo "$deb" ;;
+    debian:amd64|debian:arm64)   echo "$deb" ;;
+    node:amd64)                  echo x64 ;;
+    node:arm64)                  echo arm64 ;;
+    *)                           echo "" ;;
+  esac
+}
+
 # forge_curl <fichier-jeton> <args curl…> — le jeton part par `-K -` (config sur stdin), jamais par
 # argv, ou il serait lisible dans /proc de tout l'hote pendant l'appel. Un fichier absent, vide ou
 # illisible fait une requete ANONYME : une config vide est valide pour curl. Rend le rc de curl.

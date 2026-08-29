@@ -1040,3 +1040,29 @@ STUB
   [ ! -s "$STUB_STDIN" ]
   refute grep -qi 'authorization' "$STUB_ARGV" "$STUB_STDIN"
 }
+
+# ─── arch_tag — une seule table d architecture ────────────────────────────────────────────────────
+stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de dpkg du tout
+  export STUB_BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$STUB_BIN"; rm -f "$STUB_BIN/dpkg"
+  [[ -n "$1" ]] || return 0
+  printf '#!/usr/bin/env bash\n[ "$1" = --print-architecture ] && echo %s\n' "$1" > "$STUB_BIN/dpkg"
+  chmod +x "$STUB_BIN/dpkg"
+}
+
+@test "arch_tag : amd64 se dit x64 chez node, amd64 chez debian, et raw rend dpkg tel quel" {
+  stub_dpkg amd64
+  module_sh 'PATH="$STUB_BIN:$PATH"; [ "$(arch_tag node)" = x64 ] && [ "$(arch_tag debian)" = amd64 ] && [ "$(arch_tag raw)" = amd64 ]'
+  [ "$status" -eq 0 ]
+  stub_dpkg arm64
+  module_sh 'PATH="$STUB_BIN:$PATH"; [ "$(arch_tag node)" = arm64 ] && [ "$(arch_tag debian)" = arm64 ]'
+  [ "$status" -eq 0 ]
+}
+
+@test "arch_tag : une arch non epinglee rend VIDE — jamais un repli, jamais uname" {
+  stub_dpkg riscv64
+  module_sh 'PATH="$STUB_BIN:$PATH"; [ -z "$(arch_tag node)" ] && [ -z "$(arch_tag debian)" ] && [ "$(arch_tag raw)" = riscv64 ]'
+  [ "$status" -eq 0 ]
+  stub_dpkg ""
+  module_sh 'PATH="$STUB_BIN"; [ -z "$(arch_tag node)" ] && [ -z "$(arch_tag raw)" ]'
+  [ "$status" -eq 0 ]
+}

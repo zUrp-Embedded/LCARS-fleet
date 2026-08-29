@@ -152,8 +152,9 @@ mod() { run bash "$MOD" "$1"; }
   code() { grep -vE '^\s*#' "$MOD"; }
   grep -q 'arch non épinglée pour tofu' "$MOD"
   grep -q 'attendu amd64 ou arm64' "$MOD"
-  code | grep -q 'dpkg --print-architecture'
+  code | grep -q 'arch_tag'
   code | refute_out 'uname -m'
+  code | refute_out 'dpkg --print-architecture'
 }
 
 @test "le miroir se refait sur le VERDICT d'un init hors-ligne, pas a chaque passage" {

@@ -218,7 +218,8 @@ ensure_docker_repo() {
     fetch_verify "$url/gpg" "$DOCKER_GPG_SHA256" "$DOCKER_KEYRING" 0644 || return 1
   fi
 
-  arch="$(dpkg --print-architecture)"
+  arch="$(arch_tag debian)"
+  [[ -n "$arch" ]] || { p_fail "arch non épinglée pour le dépôt docker : « $(arch_tag raw) » (attendu amd64 ou arm64)"; return 1; }
   write_atomic "$DOCKER_LIST" 0644 "root:root" <<EOF || return 1
 deb [arch=$arch signed-by=$DOCKER_KEYRING] $url $codename stable
 EOF

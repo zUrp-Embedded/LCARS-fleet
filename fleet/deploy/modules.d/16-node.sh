@@ -75,13 +75,7 @@ NODE_HOME="${LCARS_NODE_HOME:-/opt/node-${NODE_VERSION}}"
 NODE_BINS=(node npm npx)
 NODE_LINK_DIR="${LCARS_NODE_LINK_DIR:-/usr/local/bin}"
 
-# L'arch au vocabulaire de nodejs.org, jamais `uname -m` — qui répond `x86_64` là où les tarballs
-# disent `x64`. Même règle que `46-tofu`, et même refus sur une arch non épinglée.
-node_arch() {
-  case "$(dpkg --print-architecture 2>/dev/null)" in
-    amd64) echo x64 ;; arm64) echo arm64 ;; *) echo "" ;;
-  esac
-}
+node_arch() { arch_tag node; }
 
 node_version_posee() { "$NODE_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'; }
 
@@ -105,7 +99,7 @@ apply() {
   case "$arch" in
     x64)   want_sha="$NODE_SHA256_X64" ;;
     arm64) want_sha="$NODE_SHA256_ARM64" ;;
-    *) p_fail "arch non épinglée pour node : « $(dpkg --print-architecture 2>/dev/null) » (attendu amd64 ou arm64)"; verdict_apply ;;
+    *) p_fail "arch non épinglée pour node : « $(arch_tag raw) » (attendu amd64 ou arm64)"; verdict_apply ;;
   esac
 
   if [[ "$(node_version_posee)" == "$NODE_VERSION" ]]; then

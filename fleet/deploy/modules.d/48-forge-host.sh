@@ -288,11 +288,7 @@ forge_reach_note() {
 #
 # Random 10 alphabétiques : assez pour n'être pas devinable sur un LAN, assez court pour être RECOPIÉ
 # À LA MAIN sans se tromper — c'est un mot de passe qu'un humain note sur un papier, une fois.
-#
-# ⚠ `tr -dc` SUR UN FLUX INFINI TUE LE SCRIPT. `/dev/urandom` ne se termine pas : `tr -dc … | head`
-# ferme le tube et `tr` meurt sur SIGPIPE, ce que `set -o pipefail` remonte en échec de la commande
-# entière. On borne la SOURCE, pas la sortie.
-new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | head -c 10; }
+new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | cut -c1-10; }
 
 # ⚠ L'AFFICHAGE N'A PLUS LIEU ICI, ET S'ARRÊTER ICI ÉTAIT LA FAUTE. Ce module tourne au rang 48 :
 # l'encadré était suivi de quarante modules de sortie, donc il avait défilé avant que quiconque
@@ -748,11 +744,7 @@ apply() {
   #    (mesure 2026-08-16), donc un seed neuf donnerait un fichier qui ne correspond plus aux
   #    comptes et le mint des jetons de rôle partirait en 401.
   if [[ ! -s "$SEED_FILE" ]]; then
-    # `|| true` : même classe que la dérivation du catalogue plus haut. `head -c 20` ferme le tuyau
-    # dès qu'il a ses 20 octets, ce qui SIGPIPE l'amont ; sous `pipefail` le pipeline rend 141 et
-    # `set -e` abat le module. Latent — il dépend du bufferisation — donc invisible jusqu'au jour où
-    # il tombe, sur une machine, sans laisser de ligne.
-    local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20 || true)"
+    local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
     [[ -n "$seed" ]] || { p_fail "seed non générable (/dev/urandom illisible ?)"; verdict_apply; }
     # `0600`, au détenteur des secrets, comme le jeton master quelques lignes plus haut : les DEUX
     # se ferment ensemble, ou l'install casse entre les deux. Seul `catalogue-executor.py` les ouvre,

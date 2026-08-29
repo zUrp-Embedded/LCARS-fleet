@@ -83,3 +83,35 @@ I3_AWK='
   printf 'get_x() {\n  [[ -n "$x" ]] && echo "$x"\n}\nx_ok() {\n  [[ -x "$b" ]] && "$b" --version\n}\n' > "$BATS_TEST_TMPDIR/probe.sh"
   [ "$(awk "$I3_AWK" "$BATS_TEST_TMPDIR/probe.sh")" = "$BATS_TEST_TMPDIR/probe.sh: get_x" ]
 }
+
+@test "MUR I4: toute lecture de /dev/urandom est BORNEE par un head -c en tete de pipeline" {
+  # `tr -dc … < /dev/urandom | head -c N` : tr lit un flux infini, head ferme le tuyau, tr meurt de
+  # SIGPIPE — et sous pipefail c est le rc du pipeline. `head -c N /dev/urandom | …` en tete est la
+  # seule forme qui termine par elle-meme. Et un `| head -c` EN AVAL d un flux fini peut encore
+  # fermer le tuyau avant le dernier write de l amont — latent, il depend du buffer. La longueur se
+  # borne par `cut -c1-N`, qui lit tout et ne ferme rien.
+  local f l hits=0
+  for f in "${SOURCES[@]}"; do
+    while IFS= read -r l; do
+      grep -qE 'head -c [0-9]+ /dev/urandom' <<<"$l" || { echo "MUR I4 rompu — $f : source non bornee : $l" >&2; hits=$((hits+1)); }
+      grep -qE '\|[[:space:]]*head -c' <<<"$l" && { echo "MUR I4 rompu — $f : head -c en aval : $l" >&2; hits=$((hits+1)); }
+    done < <(code "$f" | grep -E '(^|[[:space:]<])/dev/urandom' || true)   # une LECTURE, pas un message qui le cite
+  done
+  [ "$hits" -eq 0 ]
+  refute grep -qE 'head -c [0-9]+ /dev/urandom' <<<'  tr -dc A-Z < /dev/urandom | head -c 10'
+  grep -qE '\|[[:space:]]*head -c' <<<'  head -c 200 /dev/urandom | tr -dc A-Z | head -c 10'
+}
+
+@test "MUR I5: l architecture se demande a arch_tag — dpkg et uname -m ne se lisent dans aucun module" {
+  # Trois modules mappaient dpkg vers le vocabulaire d une release, chacun a sa facon. Une seule
+  # table, dans la lib. `00-preflight` garde son `uname -m` : il verifie le NOYAU (x86_64, aarch64),
+  # pas le nom d un tarball — l exemption est nommee, pas devinee.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -q 'dpkg --print-architecture'; then echo "MUR I5 rompu — $f : dpkg" >&2; hits=$((hits+1)); fi
+    [[ "$f" == */00-preflight.sh ]] && continue
+    if code "$f" | grep -q 'uname -m'; then echo "MUR I5 rompu — $f : uname -m" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  code "$DEPLOY/lib/provision-lib.sh" | grep -q 'dpkg --print-architecture'
+}
