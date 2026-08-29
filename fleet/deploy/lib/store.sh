@@ -16,12 +16,13 @@
 #
 # `external: true` (pose par le compose, pas ici) les met hors projet, donc `compose down -v` ne peut
 # pas les emporter. En echange ils doivent exister AVANT le `up`, sinon compose refuse de demarrer :
-# c'est `store_ensure_volumes` qui les pose, depuis le script d'ENTREE.
+# c'est `store_ensure_volumes` qui les pose, et TOUT geste qui monte la boite doit l'appeler.
 #
 # ET C'EST POUR CA QUE LE NOM PORTE LE PROJET : `external` sort le volume du projet DANS LES DEUX
 # SENS — compose ne le detruit pas, et il ne le prefixe pas non plus. Sans prefixe pose a la main,
 # deux installations sur une machine tombent sur les MEMES volumes, et jouer avec le test vide la
-# prod. Le prefixe est le nom du projet compose, que `box` porte deja (`-p`, defaut `lcars`).
+# prod. Le prefixe est le NOM DU PROJET COMPOSE, que `box` exporte en `LCARS_STORE_PREFIX` : son
+# defaut est `lcars-fleet`, donc le volume par defaut est `lcars-fleet-cache`.
 #
 # Pour `/home` la question ne se pose pas : ses humains sont ceux de CETTE boite, il reste dans le
 # projet et meurt avec lui.
@@ -46,10 +47,10 @@ LCARS_STORE_TREES=(
 
 # store_volume_name <nature> — le nom REEL du volume docker pour cette installation.
 #
-# ⚠ GARDE EXPLICITE, PAS `${VAR:?message}` — mesure bash 5, et les deux raisons sont
-# operateur-facing : (1) `:?` tue le shell non-interactif et sort en 127, le code de « commande
-# introuvable », qui envoie l'appelant chercher un binaire manquant ; (2) le mot du `:?` subit la
-# suppression des quotes, donc les apostrophes DISPARAISSENT du message affiche.
+# ⚠ GARDE EXPLICITE, PAS `${VAR:?message}` : (1) `:?` tue le SHELL ENTIER, il ne rend pas la main a
+# l'appelant qui voudrait decider ; (2) le mot du `:?` subit la suppression des quotes, donc les
+# apostrophes DISPARAISSENT du message affiche — « l'identite de l'installation » sort en
+# « lidentite de linstallation ».
 store_volume_name() {
   if [[ -z "${LCARS_STORE_PREFIX:-}" ]]; then
     echo "store: LCARS_STORE_PREFIX absent — le nom du projet compose EST l'identite d'une installation ; sans lui, deux installations sur cette machine partageraient leur magasin" >&2
