@@ -669,15 +669,13 @@ ensure_dir() {
   ensure_mode "$path" "$mode" "$owner"
 }
 
-# ─── ensure_group / ensure_member — création idempotente (le pattern propre de provision-groups v1) ─
+# ─── ensure_group / ensure_member — création idempotente ─────────────────────────────────────────
 # prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
 #
-# ⚠ CE CONTROLE NE PEUT PAS ETRE DELEGUE A `groupdel`, ET C'EST LA CICATRICE DE CE FICHIER.
-# `provision` s'appuyait dessus : « un groupe encore porte par un objet preserve n'est pas
-# retirable ». MESURE SUR BANC VIERGE le 2026-08-27 : `groupdel fleet` REUSSIT, et les trois faces
-# `/home/projects*` restent en `root:1001` — un GID orphelin, que le prochain `groupadd` de la
-# machine reattribuera. `groupdel` refuse un groupe PRIMAIRE d'un compte existant ; il ne regarde
-# jamais qui possede des fichiers. La regle etait juste, son execution ne l'etait pas.
+# ⚠ CE CONTROLE NE PEUT PAS ETRE DELEGUE A `groupdel` : il refuse un groupe PRIMAIRE d'un compte
+# existant, et ne regarde JAMAIS qui possede des fichiers. Un groupe encore porte par un objet
+# preserve se supprime donc sans un mot, et ses fichiers restent sur un GID orphelin que le prochain
+# `groupadd` de la machine reattribuera.
 #
 # `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le
 # balayage s'arrete — une face de travail peut porter des dizaines de milliers de fichiers.
@@ -694,10 +692,8 @@ prov_group_owns_preserved() {
 
 # prov_manifest_gid <groupe> -> le GID que la TABLE declare, ou vide
 #
-# ⚠ LE MANIFESTE GAGNE ICI SON PREMIER CONSOMMATEUR DE PRODUCTION, et c'est ce qui change sa nature.
-# Il n'etait lu que par `provision uninstall` — donc une declaration qu'on n'opposait a rien a
-# l'install, et qu'on n'executait qu'a la destruction. Une table qu'on APPLIQUE est une table qu'on
-# ne peut plus laisser mentir.
+# ⚠ CETTE TABLE EST APPLIQUEE, PAS SEULEMENT LUE A LA DESTRUCTION : une table qu'on execute est une
+# table qu'on ne peut plus laisser mentir.
 prov_manifest_gid() {
   local grp="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
   [[ -r "$f" ]] || return 0
@@ -708,11 +704,9 @@ ensure_group() {
   local grp="$1" gid="${2:-}"
   [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
   if ! getent group "$grp" >/dev/null; then
-    # ⚠ LE GID VIENT DE LA TABLE, ET SANS LUI IL FLOTTE. Mesure du 2026-08-27 sur banc vierge :
-    # `groupadd` nu distribue 1001 et 1002 pendant que la table declare 2000 et 2001, et que le
-    # Dockerfile ecrit `groupadd -g 2000` EN LITTERAL. Le meme produit donnait donc des GID
-    # differents selon le rail, et un GID flottant est ce qui a fait naitre `lcars-authority` dans
-    # le groupe `fleet`. Un GID absent de la table reste flottant : on ne l'invente pas.
+    # ⚠ LE GID VIENT DE LA TABLE, ET SANS LUI IL FLOTTE : `groupadd` nu prend le premier libre, donc
+    # le meme produit rend des GID differents selon le rail qui l'a pose. Un GID absent de la table
+    # reste flottant — on ne l'invente pas ici.
     local -a args=()
     [[ -n "$gid" ]] && args+=(-g "$gid")
     run_quiet groupadd "${args[@]}" "$grp" || return 1
@@ -721,15 +715,17 @@ ensure_group() {
     prov_journal_note posed_group "$grp"
     return 0
   fi
-  # LE GROUPE EXISTE : on ne le DEPLACE pas — changer un GID sous des fichiers qui le portent
-  # produirait exactement les orphelins que la regle 5 vient de fermer. On le DIT.
+  # LE GROUPE EXISTE : on ne le DEPLACE pas — changer un GID sous des fichiers qui le portent les
+  # rendrait orphelins. On le DIT.
   local cur; cur="$(getent group "$grp" | cut -d: -f3)"
   [[ -z "$gid" || "$cur" == "$gid" ]] \
     || p_drift "groupe $grp : gid $cur, la table declare $gid — une machine ne se renumerote pas, elle se rebuilde"
 }
 
-# Les membres d'un groupe, secondaires ET primaires — `getent group` ne liste que les premiers, et
-# un humain dont le groupe d'admin serait primaire aurait disparu du rapport.
+# ⚠ MORTE ET MENTEUSE — aucun appelant dans le depot, et elle ne rend QUE les membres secondaires.
+# Son en-tete promettait « secondaires ET primaires » en expliquant qu'un humain dont le groupe
+# d'admin est primaire disparaitrait du rapport : c'est exactement ce qu'elle fait. Un `getent group`
+# ne liste que le champ 4 ; les primaires se lisent dans `passwd`. A refaire ou a retirer.
 members_of() {
   local grp="$1" sec
   sec="$(getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' ' ')"
@@ -743,7 +739,7 @@ ensure_member() {
     run_quiet usermod -aG "$grp" "$user" || return 1
     id -nG "$user" | tr ' ' '\n' | grep -qx "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    # usermod -aG ne prend effet qu'au PROCHAIN login (dette de guerre v1) : on le DIT.
+    # `usermod -aG` ne prend effet qu'au PROCHAIN login : on le DIT.
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi
 }
@@ -768,10 +764,10 @@ ensure_symlink() {
 }
 
 # ─── ensure_managed_block <file> <marker> <mode> [owner:group] — bloc géré BEGIN/END ─────────────
-# Contenu du bloc sur stdin. Le bloc ENTRE marqueurs est REMPLACÉ intégralement à chaque run →
-# converge vers la source COURANTE. (Le grep-marker+append v1 convergeait vers le PREMIER état
-# écrit : un bloc corrigé dans le source ne se réparait jamais chez l'installé.) Tout ce qui est
-# HORS marqueurs est préservé octet pour octet (l'humain garde la main sur SON fichier).
+# Contenu du bloc sur stdin. Le bloc ENTRE marqueurs est REMPLACÉ intégralement à chaque run, donc
+# il converge vers la source COURANTE — un grep-marker suivi d'un append convergerait vers le
+# PREMIER état écrit, et un bloc corrigé dans le source ne se réparerait jamais chez l'installé.
+# Tout ce qui est HORS marqueurs est préservé octet pour octet.
 ensure_managed_block() {
   local file="$1" marker="$2" mode="$3" owner="${4:-}"
   local begin="# >>> lcars:${marker} >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)"
@@ -799,9 +795,9 @@ ensure_managed_block() {
 }
 
 # ─── fetch_verify <url> <sha256> <dest> <mode> — download pinné obligatoire ──────────────────────
-# JAMAIS de download direct vers la destination (le yq v1 se téléchargeait EN PLACE : un curl
-# tronqué laissait un binaire cassé installé). Mismatch = dump attendu-vs-trouvé + rm + échec
-# (le workflow de bump : changer le pin, lancer, copier le sha réel depuis le message).
+# ⚠ JAMAIS DE DOWNLOAD DIRECT VERS LA DESTINATION : un curl tronqué y laisserait un binaire cassé,
+# installé. Mismatch = dump attendu-vs-trouvé + rm + échec — le workflow de bump est de changer le
+# pin, lancer, et copier le sha réel depuis le message.
 fetch_verify() {
   local url="$1" sha="$2" dest="$3" mode="$4"
   local dir tmp actual
@@ -824,7 +820,6 @@ fetch_verify() {
   PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$dest (sha256 vérifié)"
 }
 
-# ─── apt_ensure <pkg…> — le pattern MISSING-array v1 (le bon), avec verdict réel par paquet ──────
 # ─── prov_journal_note <clef> <valeur…> — CE QUI A ÉTÉ POSÉ *ICI* ───────────────────────────────
 #
 # `system.manifest` déclare ce que le provisionnement a le DROIT de poser. Il est statique, versionné,
@@ -832,31 +827,21 @@ fetch_verify() {
 # seul fait qu'aucun fichier statique ne peut connaître : la séparation entre ce que LCARS a
 # installé et ce qui était déjà là.
 #
-# ⚠ LE CANAL EST UN FICHIER, PARCE QUE LES MODULES SONT DES PROCESSUS. Le runner les lance ; une
-# variable posée dans l'un ne remonte pas au suivant. C'est la même leçon que `forge.url`, écrite
-# par `48-forge-host` pour que `50-forge` et `55-deck-oidc` la lisent — mesure du 2026-08-18, deux
-# modules en dérive parce qu'on croyait qu'un `export` traversait.
+# Le canal est un fichier (cf. l'en-tête : les modules sont des processus).
 #
-# ⚠ ET C'EST UNE NOTE, PAS UN VERDICT. Un journal qui échoue ne fait pas échouer un apply : il
-# raconte, il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est
-# muette et rend 0 — un appelant n'a jamais à savoir si le journal existe.
-# ⚠ LA NOTE VIT DANS LES PRIMITIVES, PAS DANS LES MODULES — ET C'EST LE GESTE CENTRAL DU JOURNAL.
+# ⚠ C'EST UNE NOTE, PAS UN VERDICT. Un journal qui échoue ne fait pas échouer un apply : il raconte,
+# il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est muette et
+# rend 0 — un appelant n'a jamais à savoir si le journal existe.
 #
-# Cette fonction avait DEUX appelants, tous deux dans `apt_ensure`. Le journal ne connaissait donc
-# que les paquets : zero repertoire, zero fichier, zero lien, zero groupe. MESURE DU 2026-08-27,
-# banc vierge : dix-sept lignes, dont dix d'en-tete, cinq metadonnees et deux colonnes apt.
-#
-# La poser dans chaque module aurait demande a 53 sites d'appel de S'EN SOUVENIR. Un poseur qui doit
-# se souvenir oubliera — c'est exactement ce qui s'est passe pour les deux modules qui sondent avant
-# `apt_ensure`. Posee dans les primitives, elle trace ces 53 sites dans 18 modules sans qu'un seul
-# module ne change, et le prochain poseur est trace par construction.
+# ⚠ LA NOTE VIT DANS LES PRIMITIVES, JAMAIS DANS LES MODULES : la poser dans chaque module
+# demanderait à chaque site d'appel de S'EN SOUVENIR, et un poseur qui doit se souvenir oubliera.
+# Ici, le prochain poseur est tracé par construction, sans qu'aucun module ne change.
 prov_journal_note() { # prov_journal_note <clef> <valeur…>
   [[ -n "${PROV_JOURNAL_ACC:-}" ]] || return 0
   [[ "$#" -ge 2 ]] || return 0
   # ⚠ `2>/dev/null` AVANT `>>`, ET L'ORDRE EST LOAD-BEARING. Les redirections se traitent de GAUCHE
-  # A DROITE : écrite après, elle arrive trop tard — l'ouverture du fichier a déjà échoué et le
-  # shell a déjà imprimé son « No such file » sur stderr. La fonction survivait, et polluait quand
-  # même la sortie de son appelant. Mesuré le 2026-08-22 par le témoin qui vérifie qu'elle survit.
+  # A DROITE : écrite après, elle arrive trop tard — l'ouverture a déjà échoué et le shell a déjà
+  # imprimé son « No such file » sur stderr. La fonction survit, et pollue la sortie de son appelant.
   printf '%s %s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_JOURNAL_ACC" || true
   return 0
 }
@@ -868,9 +853,8 @@ prov_journal_note() { # prov_journal_note <clef> <valeur…>
 # modules plus tard, l'encadré a défilé. Le seul endroit où un opérateur regarde vraiment, c'est la
 # FIN — donc c'est là qu'ils s'impriment, tous ensemble, une fois.
 #
-# ⚠ MÊME CANAL QUE LE JOURNAL, ET POUR LA MÊME RAISON : les modules sont des processus, une variable
-# posée dans l'un ne remonte pas. Le fichier est créé par l'appelant racine (`install.sh`), en 0600,
-# et il le DÉTRUIT après l'avoir imprimé — le secret ne survit pas à l'installation qui l'a produit.
+# ⚠ LE FICHIER EST EN 0600 ET IL EST DÉTRUIT APRÈS IMPRESSION, par l'appelant racine qui l'a créé :
+# le secret ne survit pas à l'installation qui l'a produit.
 #
 # ⚠ ET SANS ACCUMULATEUR, ON IMPRIME SUR PLACE. Un `provision apply` joué à la main n'a pas de
 # banner final : s'y taire échangerait un secret défilé contre un secret jamais montré, ce qui est
@@ -920,6 +904,7 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
   return 0
 }
 
+# ─── apt_ensure <pkg…> — install par liste des MANQUANTS, verdict réel paquet par paquet ─────────
 apt_ensure() {
   local missing=() already=() pkg
   for pkg in "$@"; do
@@ -931,13 +916,10 @@ apt_ensure() {
   # qu'aucun fichier statique ne peut porter — et sans lui, une désinstallation retire des paquets
   # que quelqu'un avait avant, ce qui est pire que d'en laisser.
   #
-  # ⚠ MAIS MESURER N'EST PAS ÉCRIRE, ET LES DEUX ÉTAIENT CONFONDUS ICI. `apt_installed` était noté
-  # AVANT l'`apt-get`, donc sur une INTENTION. Un dépôt injoignable, et le journal revendiquait des
-  # paquets que la machine n'a jamais portés : la passe suivante les reclasse en `missing` et les
-  # note à nouveau, pendant qu'un `uninstall` lance un `apt-get remove` sur des absents. La
-  # propriété que ce journal existe pour tenir — « savoir ce que LCARS a posé » — était fausse
-  # exactement dans le cas où elle sert, celui de la passe interrompue.
-  # La classification reste ici ; l'écriture descend après la vérification `dpkg`.
+  # ⚠ MESURER N'EST PAS ÉCRIRE : la classification se fait ici, mais l'écriture du journal descend
+  # APRÈS la vérification `dpkg`. Notée avant l'`apt-get`, elle porterait sur une INTENTION — un
+  # dépôt injoignable, et le journal revendique des paquets que la machine n'a jamais portés, sur
+  # lesquels un `uninstall` lancera un `apt-get remove`.
   [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
   p_chg "apt: install ${missing[*]}"
@@ -961,10 +943,6 @@ apt_ensure() {
   [[ "$rc" -eq 0 ]] && PROV_CHANGED=$((PROV_CHANGED + 1))
   return "$rc"
 }
-
-# ─── Substrat ─────────────────────────────────────────────────────────────────────────────────────
-# docker : /.dockerenv (posé par le runtime Docker) ou LCARS_DOCKER=1 (posé par notre image).
-# wsl    : kernel Microsoft. linux : le reste. La détection vit ICI, une fois (v1 la recopiait).
 
 # ─── PAR QUELLE ADRESSE CETTE MACHINE EST-ELLE ATTEINTE DU DEHORS ? ─────────────────────────────
 #
