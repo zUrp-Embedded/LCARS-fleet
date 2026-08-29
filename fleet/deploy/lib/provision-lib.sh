@@ -251,34 +251,26 @@ verdict_apply() {
 
 # ─── run_quiet — succès silencieux, échec verbeux (l'école mail-in-a-box `hide_output`) ──────────
 # La commande est un ARGV. En échec : la commande, son code, et TOUTE sa sortie sont dumpés.
-# Rien n'est jamais étouffé en 2>/dev/null (le silence v1 cachait des perms cassées).
+# Rien n'est jamais étouffé en `2>/dev/null` — un silence cache des permissions cassées.
 # ─── run_step <label> -- <cmd…> — UNE ETAPE LONGUE QUI DIT OU ELLE EN EST ───────────────────────
 #
-# `run_quiet` est muet par contrat, et c'est juste pour trente secondes. Pour le build de la release
-# — gate complet puis `mix release`, plusieurs minutes — le mutisme n'est plus de la sobriete : rien
-# ne distingue « ca travaille » de « c'est fige », et la seule chose qu'un humain peut faire d'un
-# ecran immobile, c'est l'interrompre.
+# Pour les etapes de plusieurs minutes, ou le mutisme de `run_quiet` ne distingue plus « ca
+# travaille » de « c'est fige ». Sur un terminal : UNE ligne reecrite en place. Ailleurs (log, CI) :
+# une ligne par CHANGEMENT de phase.
 #
-# ⚠ AUCUN POURCENTAGE INVENTE. On ne connait pas la duree totale et la deviner produirait une barre
-# qui ment — le pire des deux mondes, puisqu'elle serait crue. Ce qui est affiche est ce que
-# l'enfant a REELLEMENT annonce : la derniere phase reconnue dans sa propre sortie, et le temps
-# ecoule. Si les marqueurs changent un jour, la phase se fige et le chrono continue : on perd du
-# detail, jamais la verite.
-#
-# Sur un terminal : UNE ligne reecrite en place. Ailleurs (log, CI) : une ligne par CHANGEMENT de
-# phase — un log n'a que faire de soixante redessins de la meme seconde.
+# ⚠ AUCUN POURCENTAGE INVENTE : la duree totale est inconnue, et une barre qui la devine ment tout
+# en etant crue. On affiche ce que l'enfant a REELLEMENT annonce — derniere phase reconnue dans sa
+# propre sortie, et temps ecoule. Si les marqueurs changent, la phase se fige et le chrono continue :
+# on perd du detail, jamais la verite.
 _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase reconnue
   local m
-  # ⚠ `|| true` LOAD-BEARING, ET LA FONCTION NE MARCHAIT QUE PAR SA FORME D'APPEL. « aucune ligne
-  # reconnue » est le cas NORMAL — la premiere seconde de toute etape, et toute la duree d'une
-  # commande dont la sortie ne parle pas notre langue. grep rend alors 1, et sous `pipefail` c'est le
-  # code du pipeline, donc celui de l'assignation. Mesure du 2026-08-20 sous `set -euo pipefail`, sur
-  # un fichier sans correspondance :
+  # ⚠ `|| true` LOAD-BEARING, ET LA FONCTION NE SURVIT QUE PAR SA FORME D'APPEL. « Aucune ligne
+  # reconnue » est le cas NORMAL, et `grep` rend alors 1 — sous `pipefail`, c'est le code du
+  # pipeline, donc celui de l'assignation. Sous `set -euo pipefail`, sur un fichier sans
+  # correspondance :
   #   _prov_phase_of "$f"          -> le shell MEURT, aucune sortie
   #   p="$(_prov_phase_of "$f")"   -> survit, rend « demarrage »
-  # `run_step` n'utilise que la seconde forme : la sonde tenait a ca, pas a son code. Le premier
-  # appelant qui l'ecrirait autrement tuerait son module au premier tick, sur un fichier parfaitement
-  # normal.
+  # L'appelant qui ecrirait la premiere forme tuerait son module au premier tick.
   m="$(grep -oE 'Compiling [0-9]+ files|Running ExUnit|Finished in |=== shell_gate|--- bats|contracts\.check green|lcars\.topology|Checking [0-9]+ modules|Total errors|done \(passed|Release created at' "$1" 2>/dev/null | tail -n1 || true)"
   case "$m" in
     "Compiling"*)        echo "compilation" ;;
@@ -296,14 +288,13 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
   esac
 }
 
-# ⚠ `--ok N` : UN CODE QUI N'EST PAS UN ECHEC, DIT AU POINT D'APPEL.
-# `etc/install.sh` rend 3 quand la release est posee mais le cablage PATH incomplet — un FAIT, pas
-# un verdict, et c'est le cas NOMINAL des qu'il tourne en tant qu'humain (il n'ecrit pas dans
-# /usr/local/bin). Sans ce drapeau la primitive p_fail-ait dessus, donc PROV_FAILED montait, donc
-# le module rendait un echec sur un succes.
-# Le code reel reste lisible dans PROV_LAST_RC ; la fonction, elle, rend 0 pour un code tolere,
-# sinon `set -e` tuerait l'appelant AVANT la ligne qui lit `$?` — c'est ce qui rendait la tolerance
-# ecrite dans 60-deploy litteralement inatteignable (mesure du 2026-08-18).
+# `--ok N` : UN CODE QUI N'EST PAS UN ECHEC, DIT AU POINT D'APPEL. Sans lui, un rc qui est un FAIT et
+# non un verdict — `etc/install.sh` rend 3 pour « release posee, cablage PATH incomplet », le cas
+# nominal sous un humain — ferait monter `PROV_FAILED` et le module rendrait un echec sur un succes.
+#
+# ⚠ LA FONCTION REND 0 POUR UN CODE TOLERE, et le code reel reste lisible dans `PROV_LAST_RC` : sous
+# `set -e`, rendre le rc tuerait l'appelant AVANT la ligne qui lit `$?`, ce qui rend une tolerance
+# ecrite au point d'appel litteralement inatteignable.
 run_step() { # run_step [--ok N]… <label> -- <cmd…>
   local ok_codes=()
   while [[ "${1:-}" == "--ok" ]]; do ok_codes+=("${2:?--ok attend un code}"); shift 2; done
@@ -312,15 +303,12 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   local rc=0 c
   # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
   #
-  # ⚠ CETTE BRANCHE DELEGUAIT A `run_quiet`, ET ELLE JETAIT `--ok` EN CHEMIN. `run_quiet` `p_fail`-e
-  # sur TOUT rc non nul et ne connait aucune tolerance : sous `--verbose`, un code declare acceptable
-  # par l'appelant redevenait un echec, et `PROV_LAST_RC` n'etait meme pas pose — donc l'appelant qui
-  # le relit lisait la valeur d'un appel PRECEDENT. La tolerance rc-3 de `60-deploy`, ecrite pour que
-  # `etc/install.sh` puisse dire « pose, cablage PATH incomplet » sans faire echouer le module,
-  # disparaissait sur un drapeau d'affichage. Un mode de sortie ne change pas un verdict.
+  # ⚠ NE DELEGUE PAS CETTE BRANCHE A `run_quiet` : il `p_fail`-e sur TOUT rc non nul, ne connait
+  # aucune tolerance et ne pose pas `PROV_LAST_RC` — `--ok` se perdrait, et un mode d'AFFICHAGE
+  # changerait un verdict.
   #
-  # Le detail est le meme que plus bas, delibrement : ce sont les deux moities d'une seule regle, et
-  # les factoriser dans une fonction tierce mettrait la boucle `--ok` a distance de son `rc`.
+  # Le detail est le meme que plus bas, deliberement : les factoriser dans une fonction tierce
+  # mettrait la boucle `--ok` a distance de son `rc`.
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     p_step "$label"
     "$@" || rc=$?
@@ -384,9 +372,7 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
 
 run_quiet() {
   local out rc=0
-  # `--verbose` (PROV_VERBOSE=1) : on ne capture RIEN, tout défile. C'est le mode de celui qui
-  # regarde une étape qui traîne et veut savoir sur quoi — pas le mode nominal, qui doit rester
-  # lisible par un humain. Le verdict, lui, ne change pas : un échec compte pareil.
+  # `--verbose` : on ne capture RIEN, tout défile. Le verdict ne change pas — un échec compte pareil.
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     "$@" || rc=$?
     [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
@@ -395,16 +381,13 @@ run_quiet() {
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    # B1 : l'échec COMPTE — via p_fail, qui incrémente PROV_FAILED. L'ancien printf nu laissait
-    # les compteurs à zéro : `run_quiet x || verdict_apply` sortait 0 (« convergé ») alors que
-    # x avait échoué — le verdict vert menteur, exactement le péché v1 que cette lib jure de tuer.
+    # ⚠ B1 — L'ECHEC DOIT PASSER PAR `p_fail`, QUI INCREMENTE `PROV_FAILED` : avec un `printf` nu,
+    # les compteurs restent a zero et `run_quiet x || verdict_apply` sort « convergé » sur un x qui
+    # a echoue.
     p_fail "commande en échec (rc=$rc) : $*"
-    # ⚠ BORNÉ À L'ÉCRAN, ENTIER SUR LE DISQUE — et l'ancienne forme faisait exactement l'inverse.
-    # Elle déversait TOUT puis supprimait le fichier : mesure du 2026-08-18, l'install native sur
-    # une Ubuntu neuve a craché 3 300 lignes de log de suite ExUnit dans le terminal, et l'unique
-    # copie partait au `rm` de la ligne suivante. Illisible sur le moment, irrécupérable après.
-    # La queue porte le verdict (« gate: the ExUnit suite FAILED ») ; le détail vit dans le fichier,
-    # qu'on NOMME et qu'on garde. Un échec est une pièce à conviction, pas un tas à balayer.
+    # ⚠ BORNÉ À L'ÉCRAN, ENTIER SUR LE DISQUE. Deverser toute la sortie noie le verdict — une suite
+    # ExUnit en echec fait des milliers de lignes — et la supprimer ensuite laisse zero copie. La
+    # queue porte le verdict, le detail vit dans un fichier qu'on NOMME et qu'on garde.
     local n; n="$(wc -l < "$out")"
     {
       printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
@@ -419,27 +402,25 @@ run_quiet() {
 
 # ─── prov_parse_remote <url> — normalise un remote git en `host/owner/repo`, ou REFUSE ───────────
 #
-# CE QUE REMPLACE CETTE FONCTION (6-109), et c'etait une prise root en une ligne :
-#
-#     case "$REMOTE_URL" in *"$PROV_EXPECTED_REPO"*) ;; *) die ;; esac
-#
-# Une SOUS-CHAINE. Avec `PROV_EXPECTED_REPO=fleet/lcars`, l'URL
-# `https://host-de-l-attaquant/attaquant/fleet/lcars-malware.git` la contient — donc l'autorite est
-# satisfaite, `git pull --ff-only` tire, et `exec "$SELF" apply` execute ce code EN ROOT. Ni l'hote,
-# ni le proprietaire, ni la fin du nom du depot n'etaient regardes.
+# ⚠ NE COMPARE JAMAIS UN REMOTE PAR SOUS-CHAINE (6-109) : avec `PROV_EXPECTED_REPO=fleet/lcars`, le
+# `case "$REMOTE_URL" in *"$PROV_EXPECTED_REPO"*)` qu'on ecrit spontanement est satisfait par
+# `https://host-de-l-attaquant/attaquant/fleet/lcars-malware.git`. Ni l'hote, ni le proprietaire, ni
+# la fin du nom du depot ne sont regardes — et derriere, `git pull --ff-only` puis
+# `exec "$SELF" apply` executent ce code EN ROOT.
 #
 # Trois formes admises, ramenees au MEME triplet ; tout le reste est refuse :
 #   * `https://host[:port]/owner/repo[.git]`
 #   * `ssh://[user@]host[:port]/owner/repo[.git]`
 #   * `[user@]host:owner/repo[.git]`  (forme scp, celle que `git@` utilise)
 #
-# ⚠ USERINFO REFUSE sur les formes a schema : un remote qui embarque `user:token@` fait de
-# l'autorite de mise a jour un porteur de secret, et c'est aussi la ou se glisse la confusion
-# `https://fleet/lcars@ailleurs/...`. La forme scp garde son utilisateur NU (`git@host`) : c'est sa
-# syntaxe normale, pas un credential, et refuser la rendrait inutilisable.
+# ⚠ USERINFO AVEC MOT DE PASSE REFUSE, SUR LES DEUX FORMES : un remote qui embarque `user:token@`
+# fait de l'autorite de mise a jour un porteur de secret. L'utilisateur NU passe (`git@host`) —
+# c'est la syntaxe normale de SSH, et le refuser rendrait tout remote SSH inutilisable.
 #
-# Le chemin doit avoir EXACTEMENT deux segments : `owner/repo`. Un segment de plus, c'est le
-# `attaquant/fleet/lcars` de l'attaque ; un de moins, ce n'est pas un depot.
+# Le chemin doit avoir EXACTEMENT deux segments : `owner/repo`. Un de plus, c'est le
+# `attaquant/fleet/lcars` de l'attaque ; un de moins, ce n'est pas un depot. C'est aussi cette regle,
+# et non la garde userinfo, qui neutralise `https://fleet/lcars@ailleurs/…` : le `@` est mange par la
+# normalisation, qui rend `ailleurs/…` — un triplet qui ne correspondra a aucune autorite attendue.
 prov_parse_remote() {
   local url="$1" rest host path owner repo
 
@@ -457,11 +438,6 @@ prov_parse_remote() {
       ;;
   esac
 
-  # UNE SEULE REGLE POUR LES DEUX FORMES, et c'est la bonne : on refuse un userinfo qui porte un
-  # MOT DE PASSE (`user:token@`), on accepte l'utilisateur NU. `git@host` et `ssh://git@host` sont
-  # la syntaxe normale de SSH — les refuser rendrait tout remote SSH inutilisable, ce qui est un
-  # mur, pas une garde. Un remote qui embarque un secret, lui, fait de l'autorite de mise a jour un
-  # porteur de credential.
   case "${rest%%/*}" in
     *:*@*) return 1 ;;
   esac
@@ -485,11 +461,10 @@ prov_parse_remote() {
 # ─── prov_lock_path — LE chemin du verrou apply/update, dans un dossier que personne d'autre ─────
 #     n'ecrit.
 #
-# CE QU'IL ETAIT, et pourquoi c'etait une prise root (6-130) : `${TMPDIR:-/tmp}/lcars-provision.$(id
-# -u).lock`. Sous `sudo`, `id -u` vaut 0, donc le nom est FIXE et devinable :
-# `/tmp/lcars-provision.0.lock`. `/tmp` est inscriptible par tout le monde, et `exec 9>"$LOCK"` SUIT
-# les liens et TRONQUE la cible — avant que `flock` n'ait protege quoi que ce soit. Un utilisateur
-# local pose ce nom en lien vers un fichier root et le prochain `sudo provision apply` le vide.
+# ⚠ JAMAIS DE VERROU SOUS `/tmp` (6-130). Sous `sudo`, un nom derive de `id -u` vaut 0 : il est FIXE
+# et devinable. `/tmp` est inscriptible par tout le monde, et `exec 9>"$LOCK"` SUIT les liens et
+# TRONQUE la cible AVANT que `flock` n'ait protege quoi que ce soit — un utilisateur local pose ce
+# nom en lien vers un fichier root, et le prochain `sudo provision apply` le vide.
 #
 # Deux dossiers, un par identite, et aucun des deux n'est ecrivable par un tiers :
 #   * root      → `/run/lock/lcars`, cree root:root 0700. `/run/lock` est un tmpfs du systeme.
@@ -497,34 +472,21 @@ prov_parse_remote() {
 #                 `/run/user/<uid>/lcars` a defaut. `apply` peut tourner sans root quand aucun
 #                 module selectionne ne mute — ce cas a besoin d'un verrou lui aussi.
 #
-# ⚠ `TMPDIR` N'EST PLUS HONORE, et c'est la moitie de la fiche : une variable d'environnement
-# preservee a travers `sudo` deplacerait le verrou dans un dossier que l'appelant choisit. Un verrou
-# privilegie dont l'emplacement est un parametre de l'appelant n'est pas un verrou.
-#
-# ECHEC = ARRET. Se rabattre sur `/tmp` serait re-ecrire le bug avec un commentaire qui dit qu'on ne
-# le fait pas.
+# ⚠ `TMPDIR` N'EST PAS HONORE : une variable d'environnement preservee a travers `sudo` deplacerait
+# le verrou dans un dossier que l'appelant choisit, et un verrou privilegie dont l'emplacement est un
+# parametre de l'appelant n'est pas un verrou. Un emplacement introuvable ARRETE.
 # ─── LA PORTEE DU VERROU — GLOBALE, OU CELLE D'UN SEUL HUMAIN ───────────────────────────────────
 #
-# ⚠ UN VERROU UNIQUE SERIALISAIT DES GESTES QUI NE SE TOUCHENT PAS, ET CA A COUTE UNE INSTALL.
-# Mesure du 2026-08-25 : le convergeur cree l'humain de fleet PENDANT que l'install tient son propre
-# apply, appelle `provision apply --human lcars --only 40-claude-bin …` pour l'equiper, et se fait
-# refuser — « un autre apply est en cours ». L'humain se retrouve avec un home, un shell, un groupe,
-# et PAS de `claude` : il ne peut lancer aucune fleet, et rien ne le lui dit.
+# ⚠ UN VERROU UNIQUE SERIALISE DES GESTES QUI NE SE TOUCHENT PAS, ET CA COUTE UNE INSTALL : le
+# convergeur equipe un humain PENDANT que l'install tient son propre apply, se fait refuser, et
+# l'humain garde un home, un shell, un groupe, et PAS de `claude` — sans que rien ne le lui dise.
+# La fenetre est celle du chemin nominal, pas un cas de bord.
 #
-# La collision n'est pas de la malchance : `48-forge-host` cree le compte de forge PENDANT l'apply,
-# et le convergeur poll toutes les 30 s — il tombe FORCEMENT dans la fenetre. C'est le chemin
-# nominal d'une premiere install, pas un cas de bord.
+# L'unite de travail EST l'humain : deux humains n'ont aucun objet commun — homes, `~/.lcars`,
+# binaires `claude` disjoints. Les serialiser ne protege rien.
 #
-# ⚖ ARBITRAGE USER 2026-08-25 : « verrou per user, definitivement. On traite chaque user, on fait pas
-# un global : la preuve, si l'user qu'on teste est ok et qu'un autre user est fail, on passe par
-# dessus. » L'unite de travail EST l'humain — `reconcile_humans` le dit deja en `continue`-ant sur
-# l'echec de l'un pour traiter les suivants. Le verrou suit la meme unite.
-#
-# Deux humains n'ont aucun objet commun : leurs homes, leurs `~/.lcars`, leurs binaires `claude` sont
-# disjoints. Les serialiser n'a jamais rien protege.
-#
-# `prov_lock_path [portee]` — sans argument, le verrou GLOBAL (une passe complete, qui touche
-# `/local`, `/etc`, les unites) ; avec, le verrou de cette portee-la.
+# `prov_lock_path [portee]` — sans argument, le verrou GLOBAL d'une passe complete ; avec, le verrou
+# de cette portee-la.
 prov_lock_path() {
   local dir uid scope="${1:-}"
   uid="$(id -u)"
@@ -573,16 +535,13 @@ prov_lock_path() {
 
 # ─── prov_refuse_symlink_path <chemin absolu> — LA garde des mutations privilegiees ──────────────
 #
-# CE QUI ARRIVE SANS ELLE, mesure sur 6-131 : `ensure_dir` tenait un symlink-vers-dossier pour un
-# dossier (`[[ -d ]]` suit les liens), puis `stat`/`chmod`/`chown` suivaient la cible. Le module WSL
-# applique ces helpers, EN ROOT, a `$HOME/.config` de l'humain — donc l'humain vise pose
-# `~/.config -> /etc` et le prochain `sudo provision apply` lui donne `/etc`. Meme forme pour
-# n'importe quel dossier root atteignable par un lien qu'il controle.
+# ⚠ SANS ELLE, UN LIEN POSE PAR L'HUMAIN DONNE `/etc` (6-131) : `[[ -d ]]` SUIT les liens, donc un
+# symlink-vers-dossier passe pour un dossier et `stat`/`chmod`/`chown` operent sur la CIBLE. Ces
+# helpers tournent EN ROOT sur des chemins de l'humain — `~/.config -> /etc`, et le prochain
+# `sudo provision apply` les lui donne.
 #
-# ON REFUSE, ON NE RESOUT PAS. Un `readlink -f` suivi de l'operation serait le meme bug avec une
-# etape de plus : la resolution et la mutation ne sont pas atomiques, et c'est exactement ce que la
-# fiche interdit de faire passer pour un correctif. Refuser n'a pas de fenetre a gagner : il n'y a
-# rien a devancer, le chemin est declare inapte.
+# ON REFUSE, ON NE RESOUT PAS : un `readlink -f` suivi de l'operation est le meme bug avec une etape
+# de plus, la resolution et la mutation n'etant pas atomiques. Refuser n'a aucune fenetre a gagner.
 #
 # ⚠ CE QUE CETTE GARDE NE FAIT PAS, et il faut le savoir en la lisant : elle ne supprime pas le
 # TOCTOU, elle le reduit a une COURSE. Pre-poser un lien et attendre le prochain `apply` ne marche
@@ -591,7 +550,7 @@ prov_lock_path() {
 # endroit, et la remonter voudrait dire sortir le provisioning de bash.
 #
 # Le chemin est parcouru COMPOSANT PAR COMPOSANT : un lien au milieu (`~/.config` -> ailleurs) est
-# aussi dangereux que le dernier, et c'est justement celui-la que l'attaque de la fiche utilise.
+# aussi dangereux que le dernier.
 prov_refuse_symlink_path() {
   local path="$1" cur="" part
   local -a parts
@@ -626,12 +585,8 @@ prov_refuse_symlink_path() {
 # points nu dit à `chown` « le groupe de CONNEXION de cet utilisateur », quel qu'il soit ; répéter
 # le nom suppose un groupe privé homonyme, ce qui n'est vrai que là où `USERGROUPS_ENAB yes` a
 # créé un groupe à l'inscription du compte. Un humain de la fleet créé avec `fleet` pour groupe
-# primaire n'a AUCUN groupe à son nom, et l'appel meurt sur `chown: invalid group`.
-#
-# Mesuré le 2026-08-20 : neuf témoins rouges sur le poste natif — `lcars` y a `fleet` en groupe
-# primaire — pendant que les mêmes passaient sur un poste dont le compte porte un groupe privé.
-# La forme `<humain>:` est correcte dans les DEUX cas, donc il n'y a pas d'arbitrage à faire : la
-# seconde moitié n'apportait rien qu'une hypothèse sur la distribution.
+# primaire n'a AUCUN groupe à son nom, et l'appel meurt sur `chown: invalid group`. La forme
+# `<humain>:` est correcte dans les DEUX cas.
 write_atomic() {
   local dest="$1" mode="$2" owner="${3:-}"
   local dir tmp
@@ -679,11 +634,8 @@ ensure_mode() {
     # deux-points nu dit à `chown` « le groupe de CONNEXION de cet utilisateur » — il ne dit pas
     # LEQUEL, donc `stat` rend ensuite `lordzurp:lordzurp` là où la cible s'écrit `lordzurp:`. La
     # comparaison littérale échoue à jamais : le module re-chowne à chaque passe, compte une
-    # mutation, et le rejeu cesse d'être idempotent.
-    #
-    # Mesuré le 2026-08-21, deuxième passe d'une install déjà convergée : deux POSÉ sur des fichiers
-    # strictement identiques à ceux d'avant. Le mode de nuisance est doux et durable — rien ne casse,
-    # mais « rejouer ne fait rien » devient faux, et c'est la propriété sur laquelle ce rail est bâti.
+    # mutation, et imprime un POSÉ sur un fichier strictement identique. Rien ne casse — mais
+    # « rejouer ne fait rien » devient faux, et c'est la propriété sur laquelle ce rail est bâti.
     #
     # On compare donc ce que la SPÉCIFICATION dit : l'utilisateur seul quand le groupe est laissé au
     # système, les deux quand il est nommé.
