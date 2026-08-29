@@ -83,8 +83,8 @@ store_completeness() {
   # publie telle quelle.
   tabled="$(prov_store_dirs | awk '{print $1}' | sort)"
   declared="$(printf '%s\n' "${LCARS_STORE_TREES[@]}" | sort)"
-  mapfile -t missing < <(comm -13 <(printf '%s\n' "$tabled") <(printf '%s\n' "$declared"))
-  mapfile -t extra   < <(comm -23 <(printf '%s\n' "$tabled") <(printf '%s\n' "$declared"))
+  mapfile -t missing < <(set_diff "$tabled" "$declared")
+  mapfile -t extra   < <(set_diff "$declared" "$tabled")
   (( ${#missing[@]} == 0 )) || { p_fail "volume sans mode declare ici : ${missing[*]}"; return 1; }
   (( ${#extra[@]} == 0 ))   || { p_fail "mode sans volume dans lib/store.sh : ${extra[*]}"; return 1; }
   return 0

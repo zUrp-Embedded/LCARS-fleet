@@ -191,13 +191,7 @@ probe_identity() {
   # personne a-t-elle un credential forge CÂBLÉ et VIVANT ? On la pose donc sur ce qui est
   # réellement lu.
   local tokfile code
-  # ⚠ `|| true` — MEME CLASSE QUE B5, ET IL A COUTE LE MEME PRIX. Sous `set -euo pipefail` (tous les
-  # modules), `sed` sur un fichier absent rend 2, `pipefail` propage ce 2 a travers le `tail`, et
-  # l'assignation echoue : le module MEURT ici, avant d'avoir imprime son verdict. Or `$ENV_FILE`
-  # est absent par construction chaque fois qu'on sonde quelqu'un qui n'a pas encore de fleet —
-  # `root`, par exemple. Mesure du 2026-08-18, banc lcars-l8 : trois lignes DRIFT correctes,
-  # puis rien, et un bilan « échecs: 1 » sans une seule ligne pour dire lequel.
-  tokfile="$(sed -n 's/^FORGE_TOKEN_FILE=//p' "$ENV_FILE" 2>/dev/null | tail -n1 || true)"
+  tokfile="$(env_field "$ENV_FILE" FORGE_TOKEN_FILE)"
   if [[ -z "$tokfile" ]]; then
     p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (50-forge puis re-apply)"
   elif [[ ! -r "$tokfile" ]]; then

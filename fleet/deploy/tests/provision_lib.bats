@@ -1066,3 +1066,27 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   module_sh 'PATH="$STUB_BIN"; [ -z "$(arch_tag node)" ] && [ -z "$(arch_tag raw)" ]'
   [ "$status" -eq 0 ]
 }
+
+# ─── set_diff / env_field — deux lectures qui ne meurent pas ─────────────────────────────────────
+
+@test "set_diff : les lignes de b absentes de a — trie, dedoublonne, ignore le vide" {
+  # `comm` sur des entrees non triees rend un resultat faux sans un mot (GNU) ; set_diff trie.
+  module_sh '
+    out="$(set_diff $'"'"'b\na\n\nc'"'"' $'"'"'c\nd\na\nd\n'"'"')"
+    [ "$out" = d ]
+    [ -z "$(set_diff $'"'"'x\ny'"'"' $'"'"'y\nx'"'"')" ]
+    [ "$(set_diff "" $'"'"'z\nz'"'"')" = z ]
+  '
+  [ "$status" -eq 0 ]
+}
+
+@test "env_field : fichier absent = vide et 0 ; cle repetee = la DERNIERE, comme un source" {
+  printf 'A=1\nB=premier\nB=dernier\n' > "$BATS_TEST_TMPDIR/e.env"
+  module_sh '
+    [ -z "$(env_field /nonexistent/x.env A)" ]
+    [ "$(env_field "$BATS_TEST_TMPDIR/e.env" A)" = 1 ]
+    [ "$(env_field "$BATS_TEST_TMPDIR/e.env" B)" = dernier ]
+    [ -z "$(env_field "$BATS_TEST_TMPDIR/e.env" C)" ]
+  '
+  [ "$status" -eq 0 ]
+}

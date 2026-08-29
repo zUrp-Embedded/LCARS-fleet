@@ -1261,6 +1261,18 @@ prov_seat_record() { # prov_seat_record <login> <uid>
   chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
 }
 
+# env_field <fichier> <CLE> — la valeur de `CLE=…` dans un fichier d'environnement : la DERNIERE si
+# la cle est repetee (ce qu'un `source` retiendrait), vide si le fichier ou la cle manque. Jamais un
+# echec : un fichier absent est une reponse, pas une mort de `sed` sous pipefail dans une affectation.
+env_field() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | tail -n1 || true; }
+
+# set_diff <lignes-a> <lignes-b> — les lignes de b ABSENTES de a, une par ligne, sans ligne vide.
+# Trie et dedoublonne lui-meme : `comm` exige des entrees triees et, sur GNU, ne le verifie pas —
+# deux listes dans le mauvais ordre rendent un resultat faux sans un mot.
+set_diff() {
+  comm -13 <(printf '%s\n' "$1" | sed '/^$/d' | sort -u) <(printf '%s\n' "$2" | sed '/^$/d' | sort -u)
+}
+
 # arch_tag <raw|debian|node> — l'architecture au vocabulaire de la cible. `raw` rend ce que dpkg dit
 # (vide s'il est absent) ; `debian` et `node` rendent le tag d'une release, ou VIDE si l'arch n'est
 # pas epinglee — a l'appelant de refuser en la nommant. Jamais `uname -m` : il repond `x86_64` la

@@ -333,7 +333,7 @@ probe_fleet_humans() {
 # reserve un uid que personne ne porte ne reserve rien, et elle a l'air posee.
 probe_seat_uid() {
   local declared name
-  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1)"
+  declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -z "$declared" ]]; then
     p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — is_fleet_human et uid_floor retomberont sur le litteral 1000, qui n'est le siege que par coincidence (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
     return 0
@@ -370,7 +370,7 @@ probe_seat_file() {
   # sert `uid_floor` (le plancher de creation des humains), ce fichier sert GUARD B (le refus de
   # lancement). Deux valeurs differentes creeraient des humains sur l'uid que la garde reserve.
   local declared
-  declared="$(sed -n 's/^LCARS_SYSADMIN_UID=//p' "$SERVICES_ENV" 2>/dev/null | head -n1 || true)"
+  declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -n "$declared" && "$declared" != "$v" ]]; then
     p_fail "$SEAT_UID_FILE dit $v et $SERVICES_ENV dit $declared — GUARD B et uid_floor ne réservent pas le même uid ; le convergeur créerait des humains sur celui que la garde refuse"
     return 0
@@ -479,16 +479,8 @@ apply() {
     reload=1
   done
 
-  # ⚠ `daemon-reload` AVANT `enable`, TOUJOURS : systemd sert l'unité qu'il a en mémoire, pas celle
-  # qui est sur le disque. Sans ce rechargement, un `enable --now` qui suit une réécriture démarre
-  # l'ANCIENNE — et la mesure d'après lit un service actif qui n'est pas celui qu'on vient d'écrire.
   [[ "$reload" -eq 1 ]] && { "$SYSTEMCTL" daemon-reload || p_warn "daemon-reload en échec"; }
 
-  # ⚠ « DÉMARRÉ » N'EST PAS « DEBOUT ». `enable --now` rend 0 dès que systemd a forké le processus :
-  # un service qui meurt à sa première ligne — port déjà pris, fichier absent — passe pour démarré,
-  # et `Restart=` le relève ensuite en boucle, si bien qu'une mesure prise au bon instant le lit même
-  # ACTIF. Ce qui ne ment pas est le COMPTEUR DE REDÉMARRAGES : lu avant, relu après une fenêtre plus
-  # longue que le `RestartSec` le plus long du lot. S'il a bougé, le service boucle sur son échec.
   local -a was=()
   local i n n2
   for u in "${UNITS[@]}"; do
@@ -500,18 +492,6 @@ apply() {
   if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep "$SETTLE_SECS"; fi
   for i in "${!UNITS[@]}"; do
     u="${UNITS[$i]}"
-    # ⚠ CE QUI DISTINGUE UN REBOND D'UNE BOUCLE EST QU'ELLE GRIMPE ENCORE — pas l'etat a un instant.
-    #
-    # Le delta de `NRestarts` etait teste EN PREMIER, et un service qui a rebondi pendant la fenetre
-    # d'attente puis s'est stabilise etait declare « en boucle » alors qu'il TOURNE. MESURE SUR BANC
-    # le 2026-08-28 : `lcars-catalogue` et `lcars-privileged` rendus FAIL avec `NRestarts=33`, tous
-    # deux `active` — ils rebondissaient en attendant la forge, montee pendant la passe.
-    #
-    # ⚠ ET `is-active` SEUL NE SUFFIT PAS : un service qui boucle vraiment est `active` par
-    # intermittence, donc une sonde instantanee le declarerait sain une fois sur deux. Le seul
-    # discriminant est un SECOND echantillon : s'il grimpe encore, ca boucle ; s'il s'est fige et
-    # que le service repond, il a rebondi puis tenu — et le rebond se DIT, parce qu'un service qui
-    # a attendu quelque chose a quelque chose a raconter.
     n="$(restarts_of "$u")"
     if [[ "$SETTLE_SECS" -gt 0 ]]; then sleep 2; fi
     n2="$(restarts_of "$u")"
@@ -613,9 +593,7 @@ converge_humans_now() {
   # LA POPULATION APRÈS. `fleet_humans` applique la règle de GUARD B (`bin/fleet_v2`) : uid dans la
   # plage humaine, et pas le siège. Ce qu'on lit ici est donc exactement « qui peut lancer une fleet ».
   apres="$(fleet_humans | sort -u)"
-  # `comm -13` : les lignes du SECOND seul — ceux qui n'étaient pas là avant. Les deux listes sont
-  # triées et dédoublonnées juste au-dessus, ce que `comm` exige et ne vérifie pas.
-  nouveaux="$(comm -13 <(printf '%s\n' "$avant") <(printf '%s\n' "$apres") | sed '/^$/d')"
+  nouveaux="$(set_diff "$avant" "$apres")"
 
   local liste_new liste_all
   liste_new="$(printf '%s' "$nouveaux" | paste -sd' ' -)"

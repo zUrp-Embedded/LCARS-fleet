@@ -764,3 +764,14 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [ "$status" -eq 0 ]
   [ "$output" = "http://forge.test:3000" ]
 }
+
+@test "probe_seat_uid : services.env ABSENT est une derive DITE, pas une mort de sed sous pipefail" {
+  # `declared="$(sed -n … "$SERVICES_ENV" | head -n1)"` : sed rend 2 sur un fichier absent, pipefail
+  # le propage, l affectation echoue et set -e tuait check() AVANT le p_drift qui savait le dire.
+  # Le site voisin (probe_seat_file) avait son `|| true` ; celui-ci non. env_field ne meurt jamais.
+  run bash -c 'set -euo pipefail; export PROVISION_MODULE=64-services; source "$PROVISION_LIB"
+    SERVICES_ENV="$1"; SEAT_UID_FILE=/nonexistent/seat.uid
+    eval "$(sed -n "/^probe_seat_uid()/,/^}/p" "$2")"; probe_seat_uid' _ "$BATS_TEST_TMPDIR/absent/services.env" "$MOD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DRIFT"*"LCARS_SYSADMIN_UID"* ]]
+}

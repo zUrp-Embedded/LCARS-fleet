@@ -115,3 +115,27 @@ I3_AWK='
   [ "$hits" -eq 0 ]
   code "$DEPLOY/lib/provision-lib.sh" | grep -q 'dpkg --print-architecture'
 }
+
+@test "MUR I6: comm ne se lit dans aucun module — set_diff trie lui-meme" {
+  # `comm` exige des entrees triees et, sur GNU, ne le verifie pas : deux listes dans le mauvais
+  # ordre rendent un resultat faux sans un mot. Sur uutils il le verifie — l instrument de la machine
+  # de dev ne dit pas ce que fait la cible. Une seule table de difference, dans la lib.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -qE '\bcomm -'; then echo "MUR I6 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  code "$DEPLOY/lib/provision-lib.sh" | grep -qE '^set_diff\(\)'
+}
+
+@test "MUR I7: une valeur d un fichier d environnement se lit par env_field, jamais par un sed nu" {
+  # `x="$(sed -n 's/^CLE=//p' "$f" | tail -n1)"` : sur un fichier absent sed rend 2, pipefail le
+  # propage, l affectation echoue et set -e tue la fonction AVANT le if qui savait dire l absence.
+  # Trois sites portaient la forme ; un seul avait son `|| true`.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"; then echo "MUR I7 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  echo '  x="$(sed -n '"'"'s/^LCARS_X=//p'"'"' "$f" | tail -n1)"' | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"
+}
