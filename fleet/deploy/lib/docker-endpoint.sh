@@ -17,8 +17,9 @@
 # les traine ment sur ce qu'il est.
 #
 # Ce fichier n'a donc AUCUN effet de bord : des fonctions, et les globales qu'elles remplissent. Il
-# est sourcable depuis n'importe ou, y compris avant qu'un depot soit clone. `provision-lib.sh` le
-# source et n'en garde pas de copie — deux sondes, ce serait deux verdicts selon la porte empruntee.
+# est sourcable depuis n'importe ou, y compris avant qu'un depot soit clone. TROIS appelants le
+# sourcent — `install.sh`, `box`, `provision-lib.sh` — et aucun n'en garde de copie : deux sondes,
+# ce serait deux verdicts sur la meme machine selon la porte empruntee.
 
 [[ -n "${LCARS_DOCKER_ENDPOINT_LOADED:-}" ]] && return 0
 LCARS_DOCKER_ENDPOINT_LOADED=1
