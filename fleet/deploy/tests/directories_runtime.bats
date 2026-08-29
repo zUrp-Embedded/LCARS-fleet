@@ -272,3 +272,12 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [ -d "$a" ]
   [ -d "$b" ]
 }
+
+@test "le compteur de changement VOIT l'ecriture du tmpfiles — write_atomic ne tourne plus dans un pipe" {
+  # `printf … | write_atomic` : le dernier element d'un pipeline est un sous-shell, `PROV_CHANGED`
+  # y etait incremente puis perdu. Le fichier etait ecrit, l'apply disait « rien change ». Le mur
+  # I1bis (idiom_walls.bats) interdit la forme ; ce temoin pinne le compteur.
+  PROV_SUBSTRATE=linux mod 'PROV_CHANGED=0; apply_tmpfiles; echo "changed=$PROV_CHANGED"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"changed=1"* ]]
+}

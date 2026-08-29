@@ -323,7 +323,7 @@ apply_tmpfiles() {
   # « chown: Operation not permitted » pour une convergence qui n'avait rien a converger. Un
   # /etc/tmpfiles.d/*.conf qui n'appartiendrait pas a root n'est pas une derive a rattraper ici,
   # c'est une machine compromise.
-  printf '%s\n' "$body" | write_atomic "$conf" 0644 || { p_fail "tmpfiles: $conf"; return 1; }
+  write_atomic "$conf" 0644 <<<"$body" || { p_fail "tmpfiles: $conf"; return 1; }
 
   # ⚠ ON NE JOUE PAS `--create` ICI : `apply()` vient de creer les memes dossiers, donc il n'y a rien
   # a rattraper, et `systemd-tmpfiles` rendrait non-nul pour des lignes SANS RAPPORT avec les notres

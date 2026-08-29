@@ -447,12 +447,6 @@ apply() {
     verdict_apply
   fi
 
-  # ⚠ LE REFUS EST ICI, ET IL Y A ÉTÉ DÉPLACÉ APRÈS MESURE. Écrit dans `services_env_body` sous la
-  # forme `${LCARS_SYSADMIN_UID:?…}`, il ne refusait RIEN : cette fonction est lue par une
-  # substitution de processus (`< <(…)`, plus bas), donc elle tourne dans un SOUS-SHELL dont le
-  # parent ne voit jamais le code de sortie. Mesuré : le fichier sortait TRONQUÉ à cette ligne —
-  # `LCARS_LANDING_PORT` et `LCARS_PROVISION` disparus, et l'apply rendait 0. Un refus qui produit un
-  # succès amputé est pire que le littéral qu'il remplaçait.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
     p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et uid_floor, qui retomberaient sur le littéral 1000"
     verdict_apply
@@ -462,11 +456,6 @@ apply() {
   # 0640 root:$PROV_FLEET_GROUP : ce n'est pas un secret (une URL, des noms de groupes), mais il n'a
   # aucune raison d'être lisible par tout le monde, et le groupe fleet doit pouvoir le lire pour
   # diagnostiquer sans sudo.
-  # ⚠ `$( )` ET PAS `< <( )`, ET C'EST LA CLASSE ENTIÈRE QUI SE FERME. Une substitution de processus
-  # jette le code de sortie du corps : n'importe quelle panne à l'intérieur (une variable absente
-  # sous `set -u`, `forge_url` qui meurt) produisait un fichier COUPÉ à cette ligne-là et un apply
-  # VERT. Le témoin qui l'a montré est celui du port du deck — il lit une ligne écrite après.
-  # Une substitution de commande, elle, porte le rc, donc l'échec se dit au lieu de s'écrire à moitié.
   local env_body
   env_body="$(services_env_body)" \
     || { p_fail "environnement des services non calculable — l'écriture est ABANDONNÉE, pas tronquée"; verdict_apply; }
@@ -482,10 +471,12 @@ apply() {
   # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
   # lire deux écritures là où il n'y en a qu'une.)
 
-  local reload=0
+  local reload=0 body
   for u in "${UNITS[@]}"; do
     unit_current "$u" && continue
-    write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" < <(unit_body "$u") \
+    body="$(unit_body "$u")" \
+      || { p_fail "unite inconnue: $u — aucun fichier ecrit"; verdict_apply; }
+    write_atomic "$(unit_path "$u")" 0644 "$SERVICES_OWNER" <<<"$body" \
       || { p_fail "unité non posée: $(unit_path "$u")"; verdict_apply; }
     reload=1
   done

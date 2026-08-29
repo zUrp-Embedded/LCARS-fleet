@@ -738,3 +738,15 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL"* ]]
 }
+
+@test "unit_body sur une unite INCONNUE rend 1 sans rien ecrire — et l'apply capture ce rc" {
+  # `write_atomic … < <(unit_body "$u")` laissait `cat` lire un flux vide sur un rc 1 : le fichier
+  # d'unite etait ecrit VIDE et l'apply rendait 0. La forme sure capture d'abord, puis ecrit par
+  # here-string. Le mur I1 (idiom_walls.bats) interdit l'ancienne forme dans tout deploy/.
+  eval "$(sed -n '/^unit_body()/,/^}/p' "$MOD")"
+  run unit_body lcars-nexistepas
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'body="\$\(unit_body "\$u"\)"'
+  grep -vE '^[[:space:]]*#' "$MOD" | grep -qE 'write_atomic "\$\(unit_path "\$u"\)" [^<]*<<<"\$body"'
+}

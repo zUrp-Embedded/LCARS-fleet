@@ -87,9 +87,11 @@ apply() {
     p_warn "rien à enregistrer : le consentement n'a pas été accordé (LCARS_ALLOW_ANY_HOST)"
     verdict_apply
   fi
-  local owner; owner="$(prov_consent_owner)"
+  local owner body; owner="$(prov_consent_owner)"
   ensure_dir "$(dirname "$f")" 0755 "$owner" || verdict_apply
-  write_atomic "$f" 0644 "$owner" < <(consent_body) \
+  body="$(consent_body)" \
+    || { p_fail "consentement non calculable — rien n'est ecrit"; verdict_apply; }
+  write_atomic "$f" 0644 "$owner" <<<"$body" \
     || { p_fail "consentement NON enregistré ($f)"; verdict_apply; }
   p_chg "consentement machine enregistré ($f) — les provisionnements suivants n'auront plus besoin de l'environnement"
   verdict_apply
