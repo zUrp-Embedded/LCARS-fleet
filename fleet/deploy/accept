@@ -4,29 +4,19 @@
 # STARDATE: 2026-08-22
 # STATUS: PROTO-V2 — la recette d'acceptation du rail poste : ce qu'un operateur peut FAIRE
 #
-# POURQUOI CE FICHIER EXISTE, ET CE QU'IL CORRIGE.
+# POURQUOI CE FICHIER EXISTE. Le provisionnement rend un bilan de MODULES : « chaque module est
+# d'accord avec lui-meme ». Ca ne dit rien de ce qu'un operateur peut FAIRE ensuite, et les deux
+# ont deja diverge.
 #
-# Le provisionnement rend un bilan de MODULES : « 26 modules · 25 converges · 0 echec ». Cette
-# phrase veut dire « chaque module est d'accord avec lui-meme ». Elle ne dit rien de ce qu'un
-# operateur peut faire ensuite, et les deux ont diverge : une forge debout que rien ne pouvait
-# servir (aucun runner), des identifiants jamais affiches, un humain de fleet qu'il fallait deviner.
-# Les trois passaient au vert parce qu'aucun module ne les mesure.
+# CE SCRIPT NE LIT AUCUN VERDICT : il mesure sur la machine, et ce qui vaut reponse est etroit —
+# les identifiants annonces AUTHENTIFIENT · le runner est enregistre ET sert les labels · la fleet
+# demarre, repond, ET s'arrete.
 #
-# CE SCRIPT NE LIT AUCUN VERDICT. Il pose les trois questions qui font qu'une installation vaut
-# quelque chose, et il y repond par un fait mesure sur la machine :
+# ⚠ S'IL A BESOIN D'UN GESTE A LA MAIN, IL ECHOUE. Un `docker exec` ajoute pour le debloquer devient
+# une etape MANQUANTE du rail, pas un succes.
 #
-#   1. je peux me connecter a la forge          -> les identifiants annonces AUTHENTIFIENT
-#   2. une PR peut fusionner                    -> un runner est enregistre ET sert les labels
-#   3. la fleet peut demarrer                   -> elle demarre, repond, et s'arrete
-#
-# ⚠ SA PROPRIETE PRINCIPALE : S'IL A BESOIN D'UN GESTE A LA MAIN, IL ECHOUE. Un `docker exec`
-# ajoute pour le debloquer devient une etape MANQUANTE du rail, pas un succes. C'est ce qui rend son
-# verdict independant de qui le lance — et c'est tout l'objet : « j'ai teste » n'est une preuve que
-# si le test ne depend pas de celui qui le dit.
-#
-# ⚠ IL SE JOUE DANS L'INSTALL, PAS APRES. Le mot de passe de la forge n'existe que pendant : le
-# canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash. Une recette jouee plus
-# tard ne pourrait pas verifier « je peux me connecter » — elle verifierait autre chose.
+# ⚠ IL SE JOUE DANS L'INSTALL, PAS APRES : le mot de passe de la forge n'existe que pendant — le
+# canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash.
 #
 # USAGE : accept --announce-file <chemin> [--forge-url URL]
 # EXIT  : 0 les trois tiennent · 1 au moins une echoue · 2 argument manquant
@@ -42,15 +32,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PLUS ────────────────────────────────
-#
-# ⚠ IL ARRIVAIT PAR `--fleet-human`, ET LA PORTE POUVAIT NE PAS LE PASSER. Sans le drapeau, cette
-# recette SAUTAIT la troisieme question — « est-ce que la fleet demarre ? » — sur une machine ou le
-# rail venait pourtant de pre-semer un humain : la capacite la plus chere a verifier etait celle
-# qu'on ne verifiait jamais dans le cas nominal.
-#
-# Ce fichier vit dans le MEME arbre que l'autorite du nom. Le recevoir d'un appelant qui l'a lu au
-# meme endroit en ferait une copie de plus a tenir d'accord — on le demande.
+# ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PAS ────────────────────────────────
+# Ce fichier vit dans le MEME arbre que l'autorite du nom : le recevoir d'un appelant qui l'a lu au
+# meme endroit en ferait une copie de plus a tenir d'accord.
 FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
@@ -61,22 +45,16 @@ _G=$'\033[32m' ; _R=$'\033[31m' ; _A=$'\033[33m' ; _N=$'\033[0m'
 FAILED=0 ; HELD=0 ; SKIPPED=0 ; SKIPPED_NAMES=""
 ok()   { printf '  %sOUI%s   %s\n' "$_G" "$_N" "$*"; HELD=$((HELD + 1)); }
 no()   { printf '  %sNON%s   %s\n' "$_R" "$_N" "$*"; FAILED=$((FAILED + 1)); }
-# ⚠ UNE CAPACITE SAUTEE N'EST PAS UNE CAPACITE TENUE, et ce fichier l'a pretendu. Mesure du
-# 2026-08-23 sur un poste natif : deux des trois questions n'avaient rien a mesurer — aucun
-# identifiant annonce par cette passe, aucun humain de fleet nomme — et la derniere ligne annoncait
-# quand meme « Les trois tiennent ». Une seule avait ete verifiee.
-#
-# C'est EXACTEMENT le defaut que ce fichier existe pour tuer, commis par lui : compter les echecs et
-# conclure au succes revient a lire l'absence de mauvaise nouvelle comme une bonne. Un compteur de
-# ce qui est ETABLI est le seul qui puisse porter la phrase finale ; celui des echecs ne le peut pas.
+# ⚠ TROIS COMPTEURS, PAS DEUX : une capacite SAUTEE n'est pas une capacite tenue. Conclure par
+# `3 - FAILED` revient a lire l'absence de mauvaise nouvelle comme une bonne — seul un compteur de
+# ce qui est ETABLI peut porter la phrase finale.
 skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
          SKIPPED_NAMES="${SKIPPED_NAMES}${SKIPPED_NAMES:+, }${1%% :*}"; }
 
 # ─── 1. JE PEUX ME CONNECTER A LA FORGE ─────────────────────────────────────────────────────────
 #
-# ⚠ ON S'AUTHENTIFIE VRAIMENT, on ne verifie pas que le compte existe. « le compte est la » et « le
-# mot de passe annonce ouvre ce compte » sont deux faits, et c'est le second que l'operateur va
-# exercer. Un mot de passe pose puis ecrase par une passe suivante laisse le premier fait vrai.
+# ⚠ ON S'AUTHENTIFIE VRAIMENT, on ne verifie pas que le compte EXISTE : c'est le second fait que
+# l'operateur va exercer, et un mot de passe pose puis ecrase laisse le premier vrai.
 #
 # `-K -` : ni le login ni le mot de passe dans argv (cicatrice 6-141).
 check_forge_login() {
@@ -110,11 +88,8 @@ check_ci() {
   local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
   # ⚠ DEUX CAUSES, ET LES CONFONDRE ACCUSE LA BOITE D'UN MANQUE QUI EST CELUI DE L'APPELANT.
-  # `/api/v1/admin/actions/runners` est site-admin PAR SON CHEMIN : cette mesure exige le jeton
-  # master, qui appartient a `lcars-authority` : root est le seul compte qui le lise de l'exterieur.
-  # Lance par `install.sh` — qui se re-execute sous sudo — ce script
-  # tourne en root et le lit. Lance A LA MAIN par un humain, il ne le lira jamais, et « jeton
-  # illisible » se lit alors comme une boite mal provisionnee au lieu d'un manque de privilege.
+  # `/api/v1/admin/actions/runners` est site-admin PAR SON CHEMIN : la mesure exige le jeton master,
+  # qui appartient a `lcars-authority` — root est le seul a le lire de l'exterieur.
   if [[ ! -r "$tokfile" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
       no "CI : cette mesure demande root (l'API des runners est site-admin, et son jeton appartient au detenteur des secrets) — rejoue sous « sudo »"
@@ -149,16 +124,13 @@ check_ci() {
 
 # ─── 3. LA FLEET PEUT DEMARRER ──────────────────────────────────────────────────────────────────
 #
-# ⚠ ON LA DEMARRE POUR DE VRAI, puis on l'arrete. « les morceaux sont la » et « ca tourne » sont
+# ⚠ ON LA DEMARRE POUR DE VRAI, puis on l'arrete : « les morceaux sont la » et « ca tourne » sont
 # deux affirmations, et c'est la seconde que l'installation promet. Verifier des preconditions
-# reviendrait a refaire ce que les modules font deja — c'est-a-dire a mesurer la meme chose qu'eux,
-# ce que ce fichier existe pour ne pas faire.
+# reviendrait a mesurer ce que les modules mesurent deja.
 #
 # On la laisse dans l'etat ou on l'a trouvee : arretee si elle l'etait.
 check_fleet_start() {
   local login="$FLEET_HUMAN" home
-  # Le nom est indeterminable : l'arbre est incomplet ou l'autorite ne repond pas. On saute en le
-  # DISANT — un « rien a demarrer » ferait croire que la machine n'attend personne.
   [[ -n "$login" ]] || { skip "fleet : le nom de l'humain de fleet est indeterminable (forge-gestures.sh builtin-human) — rien a demarrer"; return; }
   home="$(getent passwd "$login" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { no "fleet : « $login » inconnu du systeme"; return; }
@@ -166,51 +138,19 @@ check_fleet_start() {
 
   local as=(runuser -u "$login" -- env "HOME=$home" "USER=$login" "LOGNAME=$login")
 
-  # ⚠ `command` EST UN BUILTIN DE SHELL, ET CETTE LIGNE LE PASSAIT A `env`. Il n'existe aucun
-  # `/usr/bin/command` : `env … command -v fleet_v2` rend `env: 'command': No such file or
-  # directory` et rc=127 SUR TOUTE MACHINE, quel que soit l'etat mesure. L'assertion ne pouvait donc
-  # pas reussir, et son NON accusait le PATH d'un compte parfaitement equipe.
-  #
-  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE. Cette fonction sortait plus haut, sur
-  # « aucun humain de fleet nomme », des que `--fleet-human` n'etait pas passe — c'est-a-dire dans le
-  # cas NOMINAL. Le seul chemin qui atteignait cette ligne demandait un drapeau que personne ne
-  # tapait. Elle a rougi au premier passage reel, le jour ou le nom a cesse de venir d'un drapeau.
-  # Mesure du 2026-08-28, banc poste : `runuser -u lcars -- bash -lc 'command -v fleet_v2'` rend
-  # `/usr/local/bin/fleet_v2` rc=0, pendant que la forme ci-dessus rendait 127.
-  #
-  # LE SHELL EST AUSSI LA BONNE QUESTION, pas seulement le bon outil : ce qui compte est que
-  # l'humain, dans SA session, atteigne le lanceur. `-l` charge son profil, donc on mesure le PATH
-  # qu'il aura vraiment, pas celui que le provisionnement traine.
+  # ⚠ `bash -lc`, ET AUCUNE DES DEUX MOITIES N'EST NEGOCIABLE. `command` est un BUILTIN : il
+  # n'existe pas de `/usr/bin/command`, donc un `env … command -v` rend 127 sur toute machine. Et
+  # `-l` charge le profil de l'humain — c'est le PATH qu'il aura vraiment qu'on mesure, pas celui
+  # que le provisionnement traine.
   "${as[@]}" bash -lc 'command -v fleet_v2' >/dev/null 2>&1 \
     || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
 
-  # ─── LE SONDAGE NE PASSE PLUS PAR UN TUYAU, ET C'EST UN CORRECTIF ─────────────────────────────
+  # ⚠ PAS DE TUYAU ICI : `… | grep -q` SOUS `pipefail` REND FAUX QUAND GREP TROUVE. `grep -q` sort
+  # au premier match et ferme le tuyau ; le producteur meurt sur SIGPIPE (141), et `pipefail` retient
+  # ce 141 — le `if` est faux alors que la chaine A ete trouvee. On CAPTURE, puis on compare.
   #
-  # ⚠ `… | grep -q` SOUS `set -o pipefail` REND FAUX QUAND GREP TROUVE. `grep -q` sort au PREMIER
-  # match et ferme le tuyau ; le producteur, qui a encore des lignes a ecrire, meurt sur SIGPIPE.
-  # `pipefail` prend alors le dernier code non nul du pipeline — celui du producteur — et le `if`
-  # est faux alors que la chaine cherchee a bien ete trouvee.
-  #
-  # MESURE DU 2026-08-28, banc poste, fleet PROUVEE vivante avant et apres la mesure :
-  #
-  #     sans pipefail    rc=0    PIPESTATUS=141 0
-  #     avec pipefail    rc=141  PIPESTATUS=141 0     <- le shell de ce fichier (ligne 34)
-  #
-  # 141 = 128+13 = SIGPIPE cote producteur ; 0 = grep A TROUVE. Les deux moities du pipeline
-  # disaient la verite, et c'est `pipefail` qui lisait la mauvaise.
-  #
-  # CE QUE CA COUTAIT : les DEUX sondages ci-dessous rendaient faux en permanence, donc la branche
-  # « deja demarree » ne pouvait jamais s'armer et la boucle ne pouvait jamais reussir. La troisieme
-  # capacite de ce fichier ne pouvait rendre que `NON` — sur toute machine, dans tout etat.
-  #
-  # ⚠ ET ELLE A SURVECU PARCE QU'ELLE ETAIT INJOIGNABLE, comme l'assertion de PATH juste au-dessus :
-  # `check_fleet_start` sortait sur « aucun humain de fleet nomme » des que `--fleet-human` n'etait
-  # pas passe, c'est-a-dire dans le cas nominal. Deux instruments casses dans la meme fonction,
-  # decouverts le meme jour, par le meme retrait de drapeau.
-  #
-  # LA FORME QUI TIENT : on CAPTURE, puis on compare. Pas de tuyau, donc pas de SIGPIPE, donc pas
-  # d'interaction avec `pipefail` — et le `|| true` sur la capture dit que « status » qui echoue est
-  # une REPONSE (la fleet n'est pas la), jamais une panne de ce script.
+  # Le `|| true` dit qu'un « status » en echec est une REPONSE (la fleet n'est pas la), pas une
+  # panne de ce script.
   fleet_up() { # fleet_up -> 0 si le BEAM de $login est vivant
     local out; out="$("${as[@]}" fleet_v2 status 2>/dev/null || true)"
     [[ "$out" == *"BEAM vivant"* ]]
@@ -250,8 +190,6 @@ if [[ "$FAILED" -gt 0 ]]; then
   exit 1
 fi
 
-# Aucune capacite en echec. Reste a dire COMBIEN ont ete etablies — et une passe qui n'a rien pu
-# mesurer sort en 0 sans rien promettre, parce qu'elle n'a rien constate de faux.
 if [[ "$SKIPPED" -eq 0 ]]; then
   printf '  %sLes trois tiennent.%s\n\n' "$_G" "$_N"
 else
