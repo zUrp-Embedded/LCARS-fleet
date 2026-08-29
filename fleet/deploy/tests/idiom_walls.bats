@@ -45,3 +45,19 @@ code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est 
   # et un `||` (repli) n'est pas un pipe : le mur ne le prend pas pour tel
   refute grep -qE '(^|[^|])\|[[:space:]]*write_atomic' <<<'  x || write_atomic "$f" 0644'
 }
+
+@test "MUR I2: aucun jeton de forge ne passe par argv — forge_curl le porte sur stdin" {
+  # `-H "Authorization: token $tok"` met le jeton dans la ligne de commande, lisible dans /proc de
+  # tout l'hote pendant l'appel (cicatrice 6-141). La lib porte `forge_curl`, qui le passe par
+  # `-K -`. Un module qui a besoin d'un en-tete d'autorisation l'appelle, il ne refait pas curl.
+  local f hits=0
+  for f in "${SOURCES[@]}"; do
+    if code "$f" | grep -qE -- '-H ["'"'"']?Authorization: token'; then
+      echo "MUR I2 rompu — $f : jeton en argv" >&2; hits=$((hits+1))
+    fi
+  done
+  [ "$hits" -eq 0 ]
+  echo '  curl -s -H "Authorization: token $tok" "$url"' | grep -qE -- '-H ["'"'"']?Authorization: token'
+  # la forme sure — un en-tete ecrit dans une config lue sur stdin — n'est pas prise pour la fragile
+  refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
+}

@@ -65,20 +65,12 @@ readonly OPS_BRANCH="tool_request"
 # `GET /repos/<repo>/branches/<branch>` : 200 la branche est la, 404 elle manque. Le jeton systeme
 # suffit (lecture d'un depot d'org dont `system` est membre) — pas besoin de l'autorite master.
 forge_repo_code() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
-  local -a auth=()
-  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
-  curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
+  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
        "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO" 2>/dev/null || true
 }
 
 forge_branch_code() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
-  local -a auth=()
-  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  [[ -n "$tok" ]] && auth=(-H "Authorization: token $tok")
-  curl -s -o /dev/null -w '%{http_code}' -m 10 "${auth[@]}" \
+  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
        "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branches/$OPS_BRANCH" \
        2>/dev/null || true
 }

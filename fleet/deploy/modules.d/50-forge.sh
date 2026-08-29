@@ -273,15 +273,8 @@ ensure_passwords_entries() {
 # (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
 # COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
 # Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
-# ⚠ LE JETON NE PASSE JAMAIS PAR `argv` (6-141) : `-H "Authorization: token $tok"` le rend lisible
-# dans `/proc` de tout l'hôte pendant l'appel. `-K -` fait lire l'en-tête à curl sur stdin ; un
-# stdin VIDE est une requête anonyme parfaitement valide, donc la branche « pas de jeton » n'a
-# besoin d'aucune forme à part.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
-  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  { [[ -n "$tok" ]] && printf 'header = "Authorization: token %s"\n' "$tok" || true; } \
-    | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 \
+  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
         "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
 }
 

@@ -117,11 +117,9 @@ GITCONFIG_EMAIL() { git config --global --get user.email 2>/dev/null || true; }
 # Le compte forge de PROV_HUMAN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
 # jeton système n'est pas là, ou si ce login n'a pas de compte — trois absences qu'on ne comble pas.
 forge_account() {
-  local tok
   [[ -n "$PROV_FORGE_URL" ]] || return 0
   [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || return 0
-  tok="$(tr -d '[:space:]' < "$PROV_SYSTEM_TOKEN_FILE")"
-  curl -s -m 10 -H "Authorization: token $tok" \
+  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -m 10 \
        "$PROV_FORGE_URL/api/v1/users/$PROV_HUMAN" 2>/dev/null \
     | jq -r 'if type=="object" and ((.email // "") != "") then "\(.full_name // "")\t\(.email)" else empty end' \
        2>/dev/null || true
@@ -192,7 +190,7 @@ probe_identity() {
   # La question qui compte, et qui n'était posée nulle part, est celle-ci : la fleet de cette
   # personne a-t-elle un credential forge CÂBLÉ et VIVANT ? On la pose donc sur ce qui est
   # réellement lu.
-  local tokfile tok code
+  local tokfile code
   # ⚠ `|| true` — MEME CLASSE QUE B5, ET IL A COUTE LE MEME PRIX. Sous `set -euo pipefail` (tous les
   # modules), `sed` sur un fichier absent rend 2, `pipefail` propage ce 2 a travers le `tail`, et
   # l'assignation echoue : le module MEURT ici, avant d'avoir imprime son verdict. Or `$ENV_FILE`
@@ -207,8 +205,7 @@ probe_identity() {
   elif [[ -z "$PROV_FORGE_URL" ]]; then
     p_ok "credential forge de la fleet câblé et lisible ($tokfile ; forge non sondable : URL absente)"
   else
-    tok="$(tr -d '[:space:]' < "$tokfile")"
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" "$PROV_FORGE_URL/api/v1/user" 2>/dev/null || echo 000)"
+    code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/user" 2>/dev/null || echo 000)"
     if [[ "$code" == "200" ]]; then
       p_ok "credential forge de la fleet valide ($tokfile)"
     else

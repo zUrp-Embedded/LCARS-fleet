@@ -17,6 +17,8 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+load refute
+
 setup() {
   # ⚠ LE DECOR POSSEDE SON ENVIRONNEMENT, ET CE FICHIER ETAIT LE SEUL DU CORPUS A NE PAS LE FAIRE.
   # Mesure du 2026-08-26 : `PROV_VERBOSE=1 bats provision_lib.bats` rend DEUX temoins rouges — ceux
@@ -995,4 +997,46 @@ module_sh() {
     [ "$PROV_SEAT_BINDING" = agree ]
   '
   [ "$status" -eq 0 ]
+}
+
+# ─── forge_curl — le jeton voyage par stdin ───────────────────────────────────────────────────────
+stub_curl() { # enregistre argv et stdin de l appel, repond 200
+  export STUB_BIN="$BATS_TEST_TMPDIR/bin" STUB_ARGV="$BATS_TEST_TMPDIR/argv" STUB_STDIN="$BATS_TEST_TMPDIR/stdin"
+  mkdir -p "$STUB_BIN"
+  cat > "$STUB_BIN/curl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$STUB_ARGV"
+cat > "$STUB_STDIN"
+echo 200
+STUB
+  chmod +x "$STUB_BIN/curl"
+}
+
+@test "forge_curl : le jeton part sur STDIN (-K -), jamais dans argv" {
+  # `-H "Authorization: token $tok"` rend le jeton lisible dans /proc de tout l hote pendant
+  # l appel (6-141). Le mur I2 (idiom_walls.bats) interdit la forme ; ce temoin pinne l autre.
+  stub_curl
+  printf 'SECRET-TOKEN\n' > "$BATS_TEST_TMPDIR/tok"
+  module_sh '
+    PATH="$STUB_BIN:$PATH"
+    out="$(forge_curl "$BATS_TEST_TMPDIR/tok" -s -m 10 http://forge.test/api/v1/x)"
+    [ "$out" = 200 ]
+  '
+  [ "$status" -eq 0 ]
+  refute grep -q 'SECRET-TOKEN' "$STUB_ARGV"
+  grep -qx -- '-K' "$STUB_ARGV"
+  grep -qx 'http://forge.test/api/v1/x' "$STUB_ARGV"
+  grep -qx 'header = "Authorization: token SECRET-TOKEN"' "$STUB_STDIN"
+}
+
+@test "forge_curl sans jeton : requete ANONYME — stdin vide, aucun Authorization nulle part" {
+  stub_curl
+  module_sh '
+    PATH="$STUB_BIN:$PATH"
+    forge_curl "$BATS_TEST_TMPDIR/absent" -s http://forge.test/api/v1/x >/dev/null
+    forge_curl "" -s http://forge.test/api/v1/y >/dev/null
+  '
+  [ "$status" -eq 0 ]
+  [ ! -s "$STUB_STDIN" ]
+  refute grep -qi 'authorization' "$STUB_ARGV" "$STUB_STDIN"
 }

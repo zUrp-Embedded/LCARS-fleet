@@ -49,11 +49,9 @@ LOCAL_URL="$PROV_FORGE_URL"
 : "${PROV_RUNNER_LABELS:=shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
 
 ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond pas
-  local tok body
-  tok="$( { tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
-  [[ -n "$tok" ]] || return 1
-  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-          | curl -K - -s -m 10 "$LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  local body
+  [[ -s "$PROV_MASTER_TOKEN_FILE" ]] || return 1
+  body="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -s -m 10 "$LOCAL_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
   [[ -n "$body" ]] || return 1
   printf '%s' "$body" | jq -r '.total_count // empty' 2>/dev/null
 }

@@ -111,8 +111,6 @@ browser_unreachable() {   # 0 si l'hôte de $1 ne peut pas être résolu par un 
   return 1
 }
 
-forge_tok() { tr -d '[:space:]' < "$TOKEN_FILE" 2>/dev/null || true; }
-
 # LES DEUX ADRESSES DU FICHIER, COMPARÉES À CE QU'ON POSERAIT — une seule fonction pour le check et
 # pour l'apply, sinon les deux se répondraient différemment le jour où l'une dérive.
 addrs_converged() { # 0 si le fichier porte déjà les deux adresses voulues
@@ -122,11 +120,8 @@ addrs_converged() { # 0 si le fichier porte déjà les deux adresses voulues
   [[ "$cur_pub" == "${PROV_FORGE_PUBLIC_URL%/}" && "$cur_int" == "${PROV_FORGE_URL%/}" ]]
 }
 
-# Every call goes through here so the token is read once per call and never lands in a variable
-# that could be echoed by `set -x`.
 forge_api() { # forge_api <METHOD> <path> [json-body]
-  local tok; tok="$(forge_tok)"
-  curl -s -m 15 -H "Authorization: token $tok" \
+  forge_curl "$TOKEN_FILE" -s -m 15 \
        ${3:+-H "Content-Type: application/json" -d "$3"} \
        -X "$1" "$PROV_FORGE_URL/api/v1$2" 2>/dev/null || true
 }

@@ -1261,16 +1261,22 @@ prov_seat_record() { # prov_seat_record <login> <uid>
   chmod 0640 "$PROV_UID_MAP_FILE" 2>/dev/null || true
 }
 
+# forge_curl <fichier-jeton> <args curl…> — le jeton part par `-K -` (config sur stdin), jamais par
+# argv, ou il serait lisible dans /proc de tout l'hote pendant l'appel. Un fichier absent, vide ou
+# illisible fait une requete ANONYME : une config vide est valide pour curl. Rend le rc de curl.
+forge_curl() {
+  local tokfile="$1" tok=""; shift
+  [[ -n "$tokfile" && -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
+  { [[ -n "$tok" ]] && printf 'header = "Authorization: token %s"\n' "$tok" || true; } \
+    | curl -K - "$@"
+}
+
 # Le #1 de la forge, resolu par son ID et jamais par son nom : Gitea conserve l'`id` au renommage,
 # le login est une etiquette. Vide quand la forge est muette ou le jeton illisible — un appelant qui
 # lit du vide ne doit pas conclure « personne », seulement « pas su ».
 prov_forge_seat_login() {
-  local tok
-  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" && -n "${PROV_FORGE_URL:-}" ]] || return 0
-  # `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hote.
-  printf 'header = "Authorization: token %s"\n' "$tok" \
-    | curl -sS -K - -m 15 "${PROV_FORGE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
+  [[ -s "$PROV_MASTER_TOKEN_FILE" && -n "${PROV_FORGE_URL:-}" ]] || return 0
+  forge_curl "$PROV_MASTER_TOKEN_FILE" -sS -m 15 "${PROV_FORGE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
     | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true
 }
 
