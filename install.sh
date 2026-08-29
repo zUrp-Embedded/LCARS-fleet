@@ -569,46 +569,11 @@ if [[ ! -x "$PROVISION" ]]; then
   [[ -x "$PROVISION" ]] || { echo "[install] provision introuvable après clone : $PROVISION" >&2; exit 1; }
 fi
 
-# ─── CE QUE LE RAIL POSTE A COÛTÉ QUAND IL DÉPENDAIT DE L'IMAGE (cicatrice, 2026-08-21) ─────────
-# Ce bloc bâtissait `lcars-fleet:2` pour le rail poste, et le motif était juste à l'époque :
-# `48-forge-host` montait SA forge et posait sa structure par un conteneur transitoire de cette
-# image, qui portait tofu, la recette et les gestes.
-#
-# ⚠ LE TROU AVAIT ÉTÉ INVISIBLE SUR LE SUBSTRAT OÙ CE RAIL EST ÉCRIT — sous WSL le daemon est
-# partagé par toute la VM, donc une distro vierge n'est PAS un docker vierge : l'image était
-# toujours déjà là. Le même masque a couvert le rail poste deux jours de plus.
-#
-# MESURÉ le 2026-08-21, install à froid sur une machine dédiée nue :
-#   DRIFT 48-forge-host: image lcars-fleet:2 absente
-#   DRIFT 50-forge: FORGE_BASE_URL non posé
-#   FAIL  52-ops-branch: forge injoignable
-#   DRIFT 55-deck-oidc: FORGE_BASE_URL non posé
-# Quatre modules en cascade, une seule cause.
-#
-# ⚖ LA DÉPENDANCE EST MORTE LE 2026-08-22 (user : « tu build une image complète de 1,2 Go juste pour
-# exécuter 100 ko de recette tofu ? »). `46-tofu` pose tofu et son miroir SUR la machine, et
-# `48-forge-host` appelle le geste directement. LA CASCADE, ELLE, RESTE VRAIE : ces quatre modules
-# tombent toujours ensemble, seule leur cause commune a changé de nom.
-#
-# Ce qui reste de ce bloc est la leçon, pas le geste : sur ce rail, ne rebâtis rien ici — regarde
-# d'abord si la dépendance existe encore.
-# ─── LES PAQUETS AVANT LE BUILD, QUAND C'EST LE RAIL QUI POSE DOCKER ────────
-#
-# ⚠ ORDRE, PAS CONTENU — ET C'EST LA PASSE À FROID QUI L'A RENDU VISIBLE. Depuis que la porte laisse
-# passer un Linux natif déclaré sans docker (le rail l'installe), elle atteint ce build AVANT que le
-# provisionnement n'ait tourné. Elle cherche donc un binaire que personne n'a encore posé.
-#
-# MESURÉ LE 2026-08-21, Ubuntu 26.04 fraîche :
-#     ligne  5  [à voir] docker absent — le rail le posera
-#     ligne 42  box: aucune CLI docker …                 ← le build échoue
-#     ligne 61  POSÉ 10-packages: apt: install … docker.io  ← vingt secondes trop tard
-#
-# La dépendance est réelle et circulaire d'apparence : l'image a besoin de docker, `48-forge-host` a
-# besoin de l'image, docker vient de `10-packages`. Elle se dénoue par l'ORDRE, pas par un artifice :
-# on joue d'abord la tranche qui pose les paquets — le provisionnement est rejouable, donc ces trois
-# modules seront simplement conformes au passage suivant — puis on bâtit, puis on converge tout.
-#
-# `--only` NE CHANGE PAS le verdict final : c'est l'apply complet, plus bas, qui fait autorité.
+# ─── LES PAQUETS D'ABORD, SI C'EST LE RAIL QUI POSE DOCKER ──────────────────
+# ⚠ MORT (2026-08-22) : la circularité que cette tranche dénouait — docker → image → rang 48 —
+# n'existe plus, ce rail ne bâtit aucune image. Ce qui reste vrai : `48-forge-host` a besoin du
+# DAEMON, posé par `10-packages` au rang 10. Le message d'échec ci-dessous nomme encore « le
+# build » : il ment.
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
    && ! command -v "${PROV_DOCKER_BIN:-docker}" >/dev/null 2>&1 \
    && docker_installable_here; then

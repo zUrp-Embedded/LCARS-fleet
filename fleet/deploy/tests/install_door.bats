@@ -558,15 +558,15 @@ SPY
 }
 
 @test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {
-  # Sur une machine qui a deja docker, rejouer trois modules avant le build serait du bruit ; sur
-  # une machine non declaree, ce serait une promesse que 00-preflight refusera.
-  run bash -c "sed -n '/LES PAQUETS AVANT LE BUILD/,/^fi$/p' '$SRC'"
+  # Sur une machine qui a deja docker, rejouer trois modules serait du bruit ; sur une machine non
+  # declaree, ce serait une promesse que 00-preflight refusera.
+  run bash -c "sed -n '/docker_installable_here; then/,/^fi$/p' '$SRC'"
   [[ "$output" == *"command -v"* ]]
   [[ "$output" == *"docker_installable_here"* ]]
 }
 
-@test "la sonde docker est REJOUEE apres l'installation — sinon le build lit une reponse perimee" {
-  run bash -c "sed -n '/LES PAQUETS AVANT LE BUILD/,/^fi$/p' '$SRC'"
+@test "la sonde docker est REJOUEE apres la tranche paquets" {
+  run bash -c "sed -n '/docker_installable_here; then/,/^fi$/p' '$SRC'"
   [[ "$output" == *"docker_endpoint"* ]]
 }
 
