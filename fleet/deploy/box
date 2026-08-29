@@ -7,33 +7,11 @@
 #     fleet/deploy/box build | up | doctor | shell | logs | down | reset
 #                      source-push | config | forge-check | forge-apply | runner-token
 #
-# POURQUOI CE FICHIER EXISTE. Le rail boîte a douze verbes, et ils vivent avec leur porteur —
-# jamais dans un fichier qui ne fait que les relayer. La racine du dépôt ne porte QUE
-# l'installeur (⚖ user 2026-08-24) : ce qui décide OÙ ON EST y reste, ce qui porte le métier
-# vit ici, en jumeau de `provision`. Un script d'entrée qui ne se lit pas en trente secondes ne
-# dit pas ce qu'il va faire — il le fait.
+# Jumeau de `fleet/deploy/provision` : celui-là provisionne un HÔTE, celui-ci pilote une BOÎTE.
+# Mêmes verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre.
 #
-# ⚠ LES DOUZE VERBES N'ONT PAS CHANGÉ DE NOM, et c'est délibéré. Ce déplacement ne doit rien
-# coûter à qui a des habitudes ou des scripts : `fleet/deploy/box up` marche exactement comme avant, il
-# passe juste par une porte plus courte. Ce qui bouge est le NOM DU FICHIER dans les README, rien
-# d'autre.
-#
-# LA PAIRE : `fleet/deploy/provision` provisionne un HÔTE (paquets, groupes, /local, wsl.conf) ;
-# `fleet/deploy/box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes
-# verbes documentés en tête, mêmes codes retour, même place dans l'arbre — un lecteur qui connaît
-# l'un sait lire l'autre.
-#
-# ─── L'AIDE DES DOUZE VERBES VIT ICI, PARCE QUE LES VERBES VIVENT ICI ───────────────────────────
-#
-# ⚠ UNE AIDE APPARTIENT A QUI PORTE LES VERBES, et jamais a un relais. Un `usage()` qui `exec`
-# ailleurs fait emprunter au porteur du contrat son propre contrat ; il ne voit alors plus le
-# texte bouger dans le meme diff que les verbes qu'il change.
-# Et la cicatrice d'a cote le dit deja : une SECONDE definition d'`usage()` a vecu ici, et c'etait
-# ELLE qui servait.
-#
-# ⚠ ELLE SE DELIMITE PAR SON CONTENU, JAMAIS PAR DES NUMEROS DE LIGNE. La forme `sed -n '6,35p'`
-# tronque en silence des qu'on insere une ligne dans l'en-tete, et une aide amputee ne se signale
-# jamais. Ancrage sur la premiere et la derniere ligne du bloc.
+# ⚠ L'AIDE SE DÉLIMITE PAR SON CONTENU, JAMAIS PAR DES NUMÉROS DE LIGNE : `sed -n '6,35p'` tronque
+# en silence dès qu'on insère une ligne en tête, et une aide amputée ne se signale pas.
 # LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
 # comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
 # Le fichier compose vit dans fleet/deploy/docker/ — l'humain ne le touche pas.
@@ -115,22 +93,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── L'AIDE PASSE AVANT LE PREFLIGHT, DELIBEREMENT ──────────────────────────────────────────────
-# Quelqu'un qui n'a pas encore docker doit pouvoir lire ce que ce depot propose. Un `--help` qui
-# exige l'outil qu'il documente est une porte fermee. Le `-p` est deja consomme au-dessus, donc
-# `box -p <projet> help` marche aussi.
+# ─── L'aide passe AVANT le préflight : elle doit marcher sans docker ────────────────────────────
 case "${1:-help}" in
   help|-h|--help) usage; exit 0 ;;
 esac
 
-# ─── LE PREFLIGHT, NOMME — IL VIT ICI DEPUIS QUE CE FICHIER EST LA PORTE ────────────────────────
-#
-# ⚠ ON SONDE UN ENDPOINT QUI REPOND, PAS UN BINAIRE, et la nuance a coute une mesure pour etre vue.
-# `command -v docker` se trompe DANS LES DEUX SENS : sa presence ne prouve pas que le daemon tourne
-# (Docker Desktop eteint apres un reboot Windows), et son ABSENCE ne prouve pas qu'il manque — sur
-# WSL la CLI et les sockets vivent dans le montage `/mnt/wsl/docker-desktop`, present pour toute
-# distro meme sans integration activee. La sonde est partagee avec le rail de provisionnement, un
-# seul exemplaire.
+# ─── Préflight ──────────────────────────────────────────────────────────────────────────────────
 # shellcheck source=lib/docker-endpoint.sh
 . "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh"
 
@@ -139,10 +107,9 @@ fail() { printf 'box: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s\n' "$2"
 docker_endpoint || fail "$PROV_DOCKER_WHY" \
   "Rien n'a ete construit, rien n'a ete demarre. « box help » marche sans docker."
 
-# ⚠ LE BINAIRE VIENT DE LA SONDE, PAS DU PATH — et surtout pas d'un defaut. Sur une socket
-# appartenant a root, `PROV_DOCKER_BIN` est un SHIM qui escalade ; un `docker` nu le contournerait
-# EN SILENCE pour echouer plus loin sur une permission. Ce defaut a existe (`${LCARS_DOCKER_BIN:-docker}`)
-# tant que ce fichier lisait ce qu'une porte lui posait ; il n'a plus d'objet maintenant qu'il sonde.
+# ⚠ LE BINAIRE VIENT DE LA SONDE, PAS DU PATH. Sur une socket appartenant a root,
+# `PROV_DOCKER_BIN` est un SHIM qui escalade ; un `docker` nu le contournerait EN SILENCE pour
+# echouer plus loin sur une permission.
 DOCKER="$PROV_DOCKER_BIN"
 
 # shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
@@ -155,36 +122,17 @@ COMPOSE=($PROV_COMPOSE_CMD)
 
 compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -p "$PROJECT" "$@"; }
 
-# ⚠ POSE APRES LE PARSING DE `-p`, ET EXPORTE. Le magasin est NOMME PAR L'INSTALLATION : le compose
-# derive `${LCARS_STORE_PREFIX}-cache` et refuse le up sans lui, `lib/store.sh` derive les memes noms
-# pour les creer et les detruire. Le poser avant le parsing donnerait le magasin du projet par defaut
-# a une boite lancee avec `-p autre` — c'est-a-dire exactement le partage que le prefixe tue.
-# Exporte parce que le lecteur est compose, un PROCESSUS FILS : une variable de shell ne l'atteint pas.
+# ⚠ APRES LE PARSING DE `-p` : pose avant, une boite lancee avec `-p autre` recevrait le magasin du
+# projet par defaut. Exporte parce que le lecteur est compose, un PROCESSUS FILS — une variable de
+# shell ne l'atteint pas.
 export LCARS_STORE_PREFIX="$PROJECT"
 
 # ─── LE PROJET VISÉ EXISTE-T-IL, ET EST-CE LE NÔTRE ? ─────────────────────────────────────────────
-# Un nom de projet compose N'EST PAS une adresse sûre. Compose applique volontiers un fichier à un
-# projet qu'il n'a pas créé : il calcule l'état désiré depuis CE fichier et recrée, republie les
-# ports, supprime ce qui n'y figure pas — sans une seule erreur, parce que de son point de vue rien
-# n'est anormal. Le nom suffit à le désigner, il ne suffit pas à prouver qu'on parle du même objet.
+# Un nom de projet compose N'EST PAS une adresse sûre : compose applique volontiers un fichier à un
+# projet qu'il n'a pas créé — il recrée, republie les ports, supprime ce qui n'y figure pas, sans
+# une seule erreur, parce que de son point de vue rien n'est anormal.
 #
-# Mesuré ici le 2026-08-07 : ce script visait « lcars » en dur, et sur ce poste « lcars » était une
-# boîte de travail vivante depuis 47 h, créée depuis `fleet/provisioning_v2/docker/…` — un chemin
-# SUPPRIMÉ par le déménagement du 2026-08-04. `down` l'arrêtait, `reset` emportait son volume /home.
-#
-# La preuve est dans le conteneur, pas dans une convention : compose y stampe le label
-# `com.docker.compose.project.config_files`, la liste des fichiers qui l'ont réellement créé. On la
-# lit. Un projet SANS conteneur ne se garde pas — il n'y a rien à confondre, et `up` a le droit de
-# le créer.
-# LES VOLUMES DU PROJET, DERIVES — JAMAIS RECOPIES. Meme filtre que `project_config_files` juste
-# en dessous : c'est docker qui sait ce qu'il a cree.
-#
-# ⚠ CE FICHIER NOMMAIT `${PROJECT}_lcars-home`, ET CE VOLUME N'EXISTE PAS. Le compose que `box`
-# emploie (`docker-compose.yml`) declare `home:`, donc docker cree `${PROJECT}_home` ;
-# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `box` n'ouvre
-# jamais. Le `reset` annoncait donc la destruction du /home de la boite, supprimait un fantome, et
-# le laissait intact — a chaque fois, depuis toujours. `compose down` sans `-v` n'y touche pas non
-# plus : cette ligne etait le SEUL retrait.
+# Un projet SANS conteneur ne se garde pas : rien à confondre, et `up` a le droit de le créer.
 project_volumes() {
   "$DOCKER" volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | sort || true
 }
@@ -229,27 +177,16 @@ build_env() {
   export LCARS_GIT_SHA LCARS_BUILD_DATE
 }
 
-# ⚠ DEUX IMAGES SORTENT D'ICI, ET LA SECONDE NE SORTAIT DE NULLE PART. Le runner du banc sert le
-# label `elixir` avec `lcars-build:<tag>` — le stage `build` du MÊME Dockerfile, celui qui porte le
-# toolchain. Aucun script du dépôt ne le construisait : chaque mention était une consigne
-# « docker build --target build … » adressée à l'opérateur. Sur cette machine les jumeaux
-# existaient parce qu'un jour on avait joué la consigne à la main ; sur une machine neuve, jamais.
-#
-# Mesure du 2026-08-18, install sur une Debian vierge, chemin exact du README : forge, boîte,
-# tokens, creds, admin — tout vert, puis `bench-up` **exit 6**, « pas d'image lcars-build:2 pour le
-# label elixir ». Et ce n'est pas une dégradation : la carte canon déclare `ci: required`, donc
-# rien ne se livre sur ce banc sans runner. Les deux commandes du README rendaient donc un banc
-# qui refuse de monter, sur toute machine qui n'avait pas joué la consigne cachée.
-#
-# Le stage est DÉJÀ construit quand le runtime l'est — c'est sa dépendance. Le second appel ne fait
-# donc que l'étiqueter, sur le cache que le premier vient de remplir : le coût est le tag.
+# ⚠ DEUX IMAGES SORTENT D'ICI : le runtime, et le jumeau `lcars-build:<tag>` que le runner du banc
+# sert au label `elixir`. Le stage est DÉJÀ construit quand le runtime l'est — c'est sa dépendance ;
+# le second appel ne fait que l'étiqueter sur le cache que le premier vient de remplir.
 cmd_build() {
   build_env
   compose build "$@"
 
   # `docker build` et non `compose build` : compose ne construit que les services declares, et le
-  # stage `build` n'en est pas un. Le TAG derive de celui du runtime — c'est la regle que
-  # `bench-up.sh` applique pour trouver son jumeau (`lcars-fleet:v4` -> `lcars-build:v4`).
+  # stage `build` n'en est pas un. Le TAG derive de celui du runtime — meme regle que `bench-up.sh`
+  # pour trouver son jumeau (`lcars-fleet:v4` -> `lcars-build:v4`).
   local tag="${LCARS_IMAGE:-lcars-fleet:2}"
   tag="lcars-build:${tag##*:}"
   echo "box: étiquetage du jumeau de build ($tag — le toolchain que le runner CI sert)"
@@ -262,15 +199,12 @@ cmd_build() {
 cmd_up() {
   assert_project_ours up
   build_env
-  # ⚠ AVANT LE `up`, ET C'EST UN ORDRE, PAS UNE PRECAUTION. Les volumes du magasin sont declares
-  # `external: true` : compose ne les cree pas, il REFUSE de demarrer s'ils manquent. Ce script est
-  # le seul endroit qui s'execute avant le up, donc le seul qui puisse les poser. C'est le prix de
-  # l'externalite — et c'est aussi ce qu'elle achete : `down -v` ne peut pas emporter trois heures
-  # de toolchain, parce que docker ne le PEUT pas, pas parce qu'on aurait pense a le lui interdire.
+  # ⚠ AVANT LE `up`, ET C'EST UN ORDRE. Les volumes du magasin sont `external: true` : compose ne
+  # les cree pas, il REFUSE de demarrer s'ils manquent, et ce script est le seul a s'executer avant.
+  # C'est ce que l'externalite achete : `down -v` ne PEUT pas emporter trois heures de toolchain.
   store_ensure_volumes "$DOCKER" || { echo "box: magasin non pose — up annule" >&2; exit 1; }
-  # --no-build : up ne builde JAMAIS implicitement — le run de validation a montré un `up`
-  # qui masquait un build --no-cache raté en repartant du cache de layers. Un build, c'est
-  # « fleet/deploy/box build », et son verdict est le sien ; image absente → up échoue en le disant.
+  # --no-build : un `up` qui builde implicitement masque un build rate en repartant du cache de
+  # layers. Un build rend SON verdict ; image absente → up echoue en le disant.
   compose up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up (projet $PROJECT). Accès :"
@@ -281,20 +215,18 @@ cmd_up() {
 
 # ─── LE VERDICT DE PROVISIONNEMENT, RENDU PAR `up` ──────────────────────────────────────────────
 #
-# ⚠ `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort dès que le conteneur démarre ; le
-# provisionnement, lui, tourne DANS l'entrypoint et dure (le premier boot télécharge ~310 Mo de
-# binaire claude). Une boîte qui n'a rien pu provisionner annonçait donc « fleet up », se déclarait
-# *healthy* — son healthcheck ne sonde que des ports : ssh + le deck — et ne pouvait démarrer aucun pod. Le seul endroit
-# où ça se lisait était les logs du conteneur, qu'on ne va pas lire après une commande qui a dit oui.
+# `compose up -d` sort dès que le conteneur démarre ; le provisionnement, lui, tourne dans
+# l'entrypoint et dure.
 #
-# ⚖ ON NE REFUSE PAS LE DÉMARRAGE POUR AUTANT, et ce n'est pas un demi-geste : l'entrypoint porte
-# l'arbitrage inverse, écrit — « rc capturé, jamais fatal : le doctor dira la vérité, sshd doit
-# démarrer pour permettre la réparation ». Une boîte qui refuse de démarrer ferme la porte par
-# laquelle on la répare. Elle démarre, et `up` DIT ce qu'elle vaut en sortant non nul.
+# ⚠ ET LE HEALTHCHECK NE RATTRAPE PAS : il ouvre deux sockets (ssh, deck) et ne lit pas le verdict.
+# Une boîte qui n'a rien pu provisionner est donc *healthy* pour docker. Ce que fait cette fonction
+# est un contournement CÔTÉ CLIENT — il ne protège que ce qui passe par `box up`.
 #
-# ⚠ ET L'EXPIRATION N'EST PAS UN ÉCHEC. Ne pas avoir lu le verdict n'est pas l'avoir lu mauvais :
-# on le dit, et on sort 0 — `up` a fait son travail, la mesure manque. Sortir non nul sur une
-# non-mesure apprendrait à ignorer le code de sortie, ce qui coûte exactement le jour où il est vrai.
+# On ne REFUSE pas le démarrage pour autant : une boîte qui refuse de démarrer ferme la porte par
+# laquelle on la répare. Elle démarre, et `up` dit ce qu'elle vaut en sortant non nul.
+#
+# ⚠ L'EXPIRATION N'EST PAS UN ÉCHEC : ne pas avoir lu le verdict n'est pas l'avoir lu mauvais. On
+# sort 0 — sortir non nul sur une non-mesure apprend à ignorer le code de sortie.
 await_provision_verdict() {
   local deadline=$((SECONDS + ${LCARS_UP_VERDICT_TIMEOUT:-900})) rc=""
   echo ""
@@ -312,8 +244,6 @@ await_provision_verdict() {
     0)
       echo "box up: provisionnement CONVERGÉ." ;;
     2)
-      # 2 = appliqué, état-cible non tenu. Ce n'est pas un échec — un geste manque (forge,
-      # credentials, réseau) — donc pas de sortie non nulle, mais il se dit.
       echo "box up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
       echo "              « fleet/deploy/box doctor » nomme lequel." ;;
     *)
@@ -323,16 +253,9 @@ await_provision_verdict() {
   esac
 
   # ─── ET QUI PEUT LANCER UNE FLEET ? ───────────────────────────────────────────────────────────
-  #
-  # ⚠ « PROVISIONNEMENT CONVERGÉ » NE VEUT PAS DIRE « QUELQU'UN PEUT S'EN SERVIR ». Le rc ci-dessus
-  # mesure les modules ; il ne mesure PAS la population d'humains, parce que le convergeur tournait
-  # en boucle détachée et que sa première passe arrivait après. Une boîte pouvait donc annoncer
-  # CONVERGÉ, se déclarer *healthy* (le healthcheck ne sonde que des ports : ssh + le deck) et refuser tout
-  # « fleet_v2 start » — le rail poste avait fermé exactement ça le 2026-08-25, celui-ci non.
-  #
-  # L'entrypoint publie désormais le verdict de la sonde — la MÊME que le rail poste, celle de
-  # `64-services` — dans un second fichier. Absent = boîte d'avant ce chantier, ou convergence
-  # désactivée : on ne l'invente pas, on dit qu'on ne sait pas.
+  # ⚠ « CONVERGÉ » NE VEUT PAS DIRE « QUELQU'UN PEUT S'EN SERVIR » : le rc ci-dessus mesure les
+  # modules, pas la population d'humains. L'entrypoint publie celle-ci à part, par la sonde de
+  # `64-services`. Fichier absent = on ne sait pas, et on le dit plutôt que de l'inventer.
   local hrc
   hrc="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hrc=""
   case "$hrc" in
@@ -354,49 +277,19 @@ cmd_doctor() {
 cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 
 # ─── CE QUE L'OPÉRATEUR FOURNIT, ET QUI RESTE ───────────────────────────────────────────────────
-# ⚖ ARBITRAGE (user, 2026-08-16) : « on pose le token, IL RESTE ». Le motif est structurel et pas
-# une commodité — l'autorité de création n'est PAS un besoin de bootstrap. La structure d'une forge
-# change pendant toute la vie du système : installer un catalogue crée son org et un compte par rôle.
-# Au jour 400, `lcars catalogue install` a exactement le même besoin qu'au premier jour, et un
-# credential qu'il faudrait re-fournir rendrait chacun de ces gestes manuel — ce que ce chantier
-# existe pour tuer.
-#
-# CE QUE ÇA POSE, ÉCRIT POUR QUE CE SOIT SU ET NON DÉCOUVERT : la boîte détient durablement un
-# credential qui peut tout créer et tout détruire sur la forge. C'est le prix de gestes structurels
-# autonomes, et il est assumé. La contrepartie est tenue par la recette : le boot nominal n'en a PAS
-# besoin — l'apply converge en lisant la forge — donc l'usage de ce pouvoir reste borné aux gestes
-# qui changent la structure.
-#
-# L'URL N'EST PAS DOUBLÉE ICI. Elle arrive déjà par `FORGE_BASE_URL` (compose → env de la boîte →
-# PROV_FORGE_URL) : la réécrire dans un fichier ferait deux vérités pour un fait, et c'est toujours
-# la mauvaise qu'on lit. Cette commande la LIT dans la boîte et refuse d'écrire si elle manque.
-#
-# LE NOM DU FICHIER NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des
-# jetons de RÔLE (`<login>.gitea_token`, contrat FORGE_ROLE_TOKENS_DIR). Aucun lecteur ne globbe ce
-# répertoire aujourd'hui — le premier qui le fera ne doit pas ramasser un site-admin.
-# Les deux chemins vivent DANS la boîte, et c'est `forge-gestures.sh` qui les connaît
-# (`LCARS_MASTER_TOKEN_FILE`, `LCARS_FORGE_SEED_FILE`). Ce script est côté hôte : il ne lit pas le
-# système de fichiers du conteneur, donc il n'a rien à en nommer. Deux variables les redisaient
-# ici, sans un seul lecteur — un second exemplaire d'un chemin, qui ne sert qu'à diverger.
+# La boîte détient DURABLEMENT un credential qui peut tout créer et tout détruire sur la forge. Le
+# boot nominal n'en a PAS besoin — l'apply converge en lisant la forge — donc l'usage de ce pouvoir
+# reste borné aux gestes qui changent la structure.
 
 # Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans la boîte.
-# LE GESTE LUI-MÊME VIT DANS L'IMAGE (`/opt/lcars/forge-gestures.sh`), et pas ici : le banc ne peut
-# pas appeler ce script — sa boîte vient d'un autre couple de fichiers compose, et la garde
-# `assert_project_ours` refuse, à raison, d'agir sur un projet que ce compose n'a pas créé. Porter
-# les gestes ici aurait donc obligé le banc à en tenir une seconde copie, et deux copies d'un même
-# contrat dérivent. Ce fichier est une PORTE ; la recette est dans la boîte, avec ce qu'elle joue.
-# ⚠ LE GESTE VIT DANS LE MEME SCRIPT DES DEUX COTES, ET CETTE FONCTION N'EN CONNAISSAIT QU'UN.
-# `compose exec … lcars` entre dans le conteneur de la boite ; sur un POSTE ce conteneur n'existe
-# pas — le rail y monte la forge et la fleet tourne nativement. Le verbe mourait donc sur « no such
-# service », c'est-a-dire sur l'absence d'un objet qui n'a rien a voir avec ce qu'on demande.
 #
-# `62-runtime-helpers` pose le MEME `/opt/lcars/forge-gestures.sh` sur la machine. On l'appelle donc
-# la ou il se trouve : dans le conteneur s'il tourne, sur l'hote sinon.
+# LE GESTE VIT DANS L'IMAGE (`/opt/lcars/forge-gestures.sh`), pas ici : le banc ne peut pas appeler
+# ce script — sa boîte vient d'un autre couple de fichiers compose, et `assert_project_ours` refuse
+# d'agir sur un projet que ce compose n'a pas créé. `62-runtime-helpers` pose le MÊME script sur la
+# machine ; on l'appelle là où il se trouve — dans le conteneur s'il tourne, sur l'hôte sinon.
 #
-# ⚠ ET ON N'ESCALADE PAS. Ce rail joue des gestes de STRUCTURE, pas le geste d'un humain : le
-# `catalogue install` d'un operateur passe par `lcars`, qui demande a un service root, lequel
-# interroge la forge sur son adminite. Ici on est deja root (boot, ou `compose exec -u root`) — il
-# n'y a donc rien a escalader, dans un rail dont la promesse auditee est de ne jamais en demander.
+# ⚠ ET ON N'ESCALADE PAS : ici on est déjà root (boot, ou `compose exec -u root`). Ce rail joue des
+# gestes de STRUCTURE, et sa promesse auditée est de ne jamais demander de privilège.
 gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
     compose exec -T -u root lcars /opt/lcars/forge-gestures.sh "$1"
@@ -436,30 +329,17 @@ cmd_config() {
 }
 
 # ─── L'APPLY DE LA STRUCTURE, DANS LA BOÎTE ─────────────────────────────────────────────────────
-# CE QUE CETTE COMMANDE FERME. `forge-check` imprimait `cd fleet/deploy/deps && tofu init && …`,
-# une commande que l'opérateur ne pouvait PAS exécuter : tofu n'était installé nulle part — ni chez
-# lui, ni dans l'image, ni par un module de provision, ni par install.sh. Il vit désormais dans
-# l'image avec ses providers vendorés, donc l'apply se joue ICI, et rien ne s'installe sur la
-# machine de l'opérateur.
+# Tofu vit dans l'image avec ses providers vendorés : l'apply se joue ICI, et rien ne s'installe
+# sur la machine de l'opérateur.
 #
 # EN ROOT, et ce n'est pas un confort : `/opt/lcars/fleet/deploy/deps` est root:root, donc l'humain
-# de la boîte ne peut pas y écrire le tfstate. Cet état est jetable (la recette importe ce que la
-# forge porte déjà), il n'a donc rien à faire ailleurs — il meurt avec le conteneur, comme il doit.
+# de la boîte ne peut pas y écrire le tfstate — jetable, il meurt avec le conteneur.
 #
-# LE JETON N'EST NI DANS argv NI DANS L'ENVIRONNEMENT DE `docker` : il passe par STDIN. `-e
-# TF_VAR_gitea_token=…` l'aurait mis dans la ligne de commande du client docker, lisible dans
-# `/proc` de tout l'hôte pendant l'appel — la leçon payée deux fois par 6-141 et 6-141bis, sur des
-# credentials moins puissants que celui-ci.
+# ⚠ LE JETON N'EST NI DANS argv NI DANS L'ENVIRONNEMENT DE `docker` : il passe par STDIN. Un
+# `-e TF_VAR_gitea_token=…` serait lisible dans `/proc` de tout l'hôte pendant l'appel (6-141).
 #
-# ⚠ CE DÉCLENCHEMENT RESTE À LA MAIN, et la raison a changé — celle écrite ici disait « il manque
-# l'endroit où le jeton vit durablement », ce que `box config` a posé depuis. Ce qui manque
-# désormais est une DÉCISION, pas une pièce : à quel moment de la séquence de boot l'apply
-# s'accroche, et ce que ça veut dire qu'un démarrage mute la forge de l'opérateur tout seul.
-#
-# IL NE PREND PLUS RIEN EN ENTRÉE, et c'est tout l'intérêt : la boîte DÉTIENT son autorité et son
-# seed (`fleet/deploy/box config`), et l'URL vient de son environnement. Un `FORGE_ADMIN_TOKEN` ou un
-# `FORGE_SEED_PASSWORD` dans l'environnement l'emporte quand même — c'est le chemin d'un opérateur
-# qui veut jouer un apply avec une autre autorité sans toucher à ce que la boîte garde.
+# Rien n'est pris en entrée : la boîte détient son autorité et son seed. Un `FORGE_ADMIN_TOKEN`
+# dans l'environnement l'emporte quand même — jouer un apply avec une autre autorité, sans y toucher.
 cmd_forge_apply() {
   printf '%s' "${FORGE_ADMIN_TOKEN:-}" | compose exec -T -u root \
     -e LCARS_FORGE_HUMAN="${LCARS_HUMAN:-lcars}" \
@@ -481,27 +361,20 @@ cmd_runner_token() {
 cmd_logs()  { compose logs -f "$@"; }
 cmd_down() {
   assert_project_ours down
-  # LCARS seul, et il n'y a plus rien d'autre à descendre : la forge est à l'opérateur, dans
-  # son propre déploiement. Aucune commande d'ici ne peut l'atteindre — c'est la frontière.
   compose down "$@"
 }
 
 cmd_reset() {
-  # Destructif pour LCARS, et LCARS SEULEMENT. La forge — les repos, les issues, les PR, la
-  # seule copie durable du travail — n'est pas dans ce projet compose et ne peut donc PAS être
-  # emportée par un reset. La frontière est structurelle (projet compose séparé) : un drapeau de
-  # sécurité dans un projet commun ne l'est pas, il se contourne d'une commande.
+  # Destructif pour LCARS, et LCARS SEULEMENT : la forge n'est pas dans ce projet compose et ne
+  # PEUT donc pas être emportée. La frontière est structurelle — un drapeau de sécurité dans un
+  # projet commun se contournerait d'une commande.
   assert_project_ours reset
-  # Le projet est NOMMÉ dans la question. Un poste de dev en porte plusieurs, et « conteneur lcars »
-  # ne dit pas LEQUEL : on ne fait pas confirmer une destruction sans dire ce qu'elle vise.
   local _vols; _vols="$(project_volumes | tr '\n' ' ' | sed 's/ $//')"
   echo "box: RESET du projet « $PROJECT » — conteneur + image + volume(s) ${_vols:-<aucun>}."
   echo "           La forge n'est pas concernée (elle est à toi, dans son propre déploiement)."
   echo "           Ton travail poussé y survit."
-  # ⚠ UN GESTE DE DESTRUCTION DOIT NOMMER CE QU'IL EPARGNE. Sans cette ligne, « reset » se lit
-  # comme « la machine est propre » alors que quatre volumes restent — dont des heures de
-  # toolchain. La croyance se decouvre le jour ou quelqu'un purge un cache et se demande ce qu'il
-  # vient de perdre : un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission.
+  # ⚠ UN GESTE DE DESTRUCTION DOIT NOMMER CE QU'IL EPARGNE : sans cette ligne, « reset » se lit
+  # comme « la machine est propre » alors que le magasin reste — dont des heures de toolchain.
   echo ""
   store_spared_line | sed 's/^/           /'
   read -r -p "Confirmer (yes/N) ? " a < /dev/tty || a=""
@@ -518,11 +391,9 @@ cmd_reset() {
 }
 
 cmd_source_push() {
-  # LA jambe source du triangle, posée dans la boîte : sans checkout, `provision update` n'a rien
-  # à puller et aucun agent ne peut travailler sur LCARS lui-même (auto-maintenance). Le projet
-  # BOUGE : on ne fige rien dans l'image, on copie LE clone que l'humain maintient — le sien,
-  # celui-là même qui a bâti l'image. Copie (pas bind) parce que le daemon ne voit pas forcément
-  # notre FS ; `docker cp` traverse toutes les topologies.
+  # LA jambe source du triangle : sans checkout, `provision update` n'a rien à puller et aucun
+  # agent ne peut travailler sur LCARS lui-même. Copie et pas bind — le daemon ne voit pas
+  # forcément notre FS, `docker cp` traverse toutes les topologies.
   local src="${1:-$SCRIPT_DIR}" ctr
   src="$(cd "$src" && pwd)"
   [[ -d "$src/.git" ]] || { echo "box: $src n'est pas un clone git (pas de .git)" >&2; exit 1; }
@@ -624,12 +495,6 @@ BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
       Puis : FORGE_BASE_URL=http://host.docker.internal:${port:-3300} fleet/deploy/box up
 EOF
 }
-
-# ⚠ UNE SECONDE DEFINITION DE `usage()` VIVAIT ICI, ET C'ETAIT ELLE QUI SERVAIT — la derniere
-# definition gagne en bash. Elle decoupait l'aide par NUMEROS DE LIGNE (`sed -n '6,35p'`), la forme
-# que le commentaire de la premiere declare cassee : elle tronque en silence des qu'on insere une
-# ligne dans l'en-tete, et une aide amputee ne se signale jamais. L'ancrage sur le texte, plus haut,
-# est le seul survivant.
 
 # Défauts visibles dans les messages (accès SSH, consigne bootstrap).
 : "${LCARS_SSH_PORT:=127.0.0.1:2222}"
