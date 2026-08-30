@@ -79,25 +79,10 @@ consequence_of() {
 # superviseur qui le porte dans son argv. La promesse verifiee est donc « ce service est TENU »,
 # pas « il repond a cette seconde » — c'est le pendant exact de `is-active` sur une unite
 # `Restart=`, qui rend vrai pendant un RestartSec.
-# ⚠ UN HUMAIN DE FLEET N'EXISTE PAS ENCORE AU BOOT, ET CE N'EST PAS UN DEFAUT. Il ne vient pas de
-# l'image : le convergeur le materialise DEPUIS LA FORGE, apres cette convergence. Exiger sa
-# presence ici, c'est refuser une boite neuve pour n'avoir pas fait ce qu'elle fera ensuite.
-# Le convergeur vivant est le discriminant, comme pour les services : s'il tourne et qu'il n'a
-# toujours materialise personne, c'est un vrai drift.
-check_box_humans() {
-  local found; found="$(fleet_humans | paste -sd' ' -)"
-  if [[ -n "$found" ]]; then
-    p_ok "humain(s) de fleet sur cette machine : $found"
-  elif pgrep -f human-converger.sh >/dev/null 2>&1; then
-    p_drift "aucun humain de fleet alors que le convergeur TOURNE — la team « $PROV_HUMANS_TEAM » de la forge est vide, ou il n'arrive pas à la lire"
-  else
-    p_ok "aucun humain de fleet — le convergeur les matérialise depuis la forge, après cette convergence"
-  fi
-}
-
 check_box_services() {
-  local sup="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}" dir="${LCARS_HELPERS_DIR:-/opt/lcars}"
+  local dir="${LCARS_HELPERS_DIR:-$PROV_ROOT}" sup
   local e prog rel unit sup_vivant=0
+  sup="${LCARS_SUPERVISE_BIN:-$dir/supervise.sh}"
   if [[ -x "$sup" ]]; then
     p_ok "superviseur posé ($sup) — ce que « Restart= » fait sur le rail poste"
   else
@@ -327,13 +312,18 @@ probe_seat_file() {
 check() {
   local u
 
+  # ⚠ LA SONDE D'HUMAINS PASSE AVANT LA PORTE DE SORTIE, ET C'EST UN ACQUIS : `22-fleet-human` et
+  # `48-forge-host` sont `CHECK-ON: wsl linux`, donc en docker ils ne sont meme pas SELECTIONNES.
+  # Ce module est le seul a y tourner. Sortir avant de sonder faisait annoncer « 0 faute » a un
+  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet_v2 start`, faute de compte.
+  # Trois temoins de `services_units.bats` tiennent ce contrat — ne pas le deplacer sous pretexte
+  # qu'un humain manque forcement au premier boot : c'est un DRIFT, et un drift se dit.
+  probe_fleet_humans
+
   if ! have_systemd; then
-    check_box_humans
     check_box_services
     verdict_check
   fi
-
-  probe_fleet_humans
 
   if [[ -s "$SERVICES_ENV" ]]; then
     p_ok "environnement des services posé ($SERVICES_ENV)"

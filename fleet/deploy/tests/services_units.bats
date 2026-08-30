@@ -709,11 +709,25 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   printf '%s\n' "$output" | grep -qE '^DRIFT .*aucun humain de fleet sur cette machine'
 }
 
+# LE DECOR DE LA MECANIQUE DE BOITE — sans systemd, le module ne verifie plus des unites mais
+# `supervise.sh` et les programmes que nomme STARTERS. Un temoin qui mesure AUTRE CHOSE doit les
+# poser, sinon il derive sur une cause etrangere a son sujet et son echec accuse la mauvaise ligne.
+box_services_present() {
+  local d="$BATS_TEST_TMPDIR/helpers" p
+  mkdir -p "$d"
+  for p in supervise.sh console-landing.sh human-converger.sh catalogue-executor.py privileged-executor.py; do
+    printf '#!/bin/sh\n' > "$d/$p"
+    chmod 0755 "$d/$p"
+  done
+  export LCARS_HELPERS_DIR="$d" LCARS_SUPERVISE_BIN="$d/supervise.sh"
+}
+
 @test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {
   # ⚠ LE PENDANT, ET SANS LUI LA SONDE POURRAIT DERIVER TOUJOURS. Elle sort avant la branche
   # systemd : si elle rougissait sur une machine saine, tout doctor de boite deviendrait rouge.
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  box_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars'
