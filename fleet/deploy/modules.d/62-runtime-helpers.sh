@@ -112,9 +112,16 @@ check() {
     p_drift "ttyd absent — la console web n'a AUCUN serveur derrière sa socket (page noire)"
   fi
 
+  # ⚠ « PAS EXECUTABLE » N'EST PAS « ABSENT », et confondre les deux envoie chercher un fichier qui
+  # est la. L'apply pose tout en `install -m 0755` ; une IMAGE, elle, copie le mode de la source —
+  # `lcars_socket.py` est 100644 dans git et arrivait donc non executable. Le module rendait
+  # « absent », mesure du 2026-08-30, sur un fichier de 5130 octets parfaitement present.
   for n in "${HELPERS[@]}"; do
-    if [[ ! -x "$HELPERS_DIR/$n" ]]; then
+    if [[ ! -e "$HELPERS_DIR/$n" ]]; then
       p_drift "$HELPERS_DIR/$n absent"
+      stale=1
+    elif [[ ! -x "$HELPERS_DIR/$n" ]]; then
+      p_drift "$HELPERS_DIR/$n présent mais PAS exécutable (mode $(stat -c '%a' "$HELPERS_DIR/$n" 2>/dev/null || echo '?')) — l'apply pose 0755"
       stale=1
     elif ! helper_current "$n"; then
       p_drift "$HELPERS_DIR/$n diverge de la source ($SRC_DIR/$n)"

@@ -162,6 +162,14 @@ FROM ${RUNTIME_IMAGE} AS runtime
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 ARG VERSION=2.0
+# ⚠ LA REVISION EST DEJA CONNUE ICI, ET ELLE DOIT L'ETRE DES DEUX COTES. `62-runtime-helpers`
+# compare l'estampille posee (`/opt/lcars/.source-revision`) a la revision de la SOURCE — sur un
+# poste, le git du clone. Une image n'a ni `.git` ni clone : la source rendait « inconnue »,
+# l'estampille etait absente, et le drift devenait un ECHEC PERMANENT (APPLY-ON=wsl linux, donc
+# rien a reparer sur ce substrat). L'ARG qui remplit le LABEL OCI est la MEME verite : on la donne
+# au module par `PROV_SOURCE_REV`, et le fichier est ecrit plus bas depuis le meme ARG. Une seule
+# origine pour les deux, sinon elles divergent — c'est exactement ce que ce module mesure.
+ENV PROV_SOURCE_REV=${GIT_SHA}
 LABEL org.opencontainers.image.title="LCARS fleet v2" \
       org.opencontainers.image.description="Control plane pour workloads agentiques faillibles — runtime Elixir/OTP, pods bwrap, forge-state-machine. L'humain SSH dans le conteneur et lance sa fleet (bin/fleet_v2 start)." \
       org.opencontainers.image.source="https://github.com/lordzurp/LCARS-fleet" \
@@ -390,6 +398,14 @@ COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
 # n'est LU par personne tant qu'aucun LCARS_CATALOGUE_ROOT ne le designe : le poser dans l'image ne
 # change pas quel metier tourne, ca rend seulement le choix possible sans remonter une image.
 COPY catalogues /opt/lcars/catalogues
+# ⚠ LA SOURCE DES AUXILIAIRES, ET PAS SEULEMENT LEUR COPIE POSEE. `62-runtime-helpers` compare
+# `/opt/lcars/<helper>` a `$(repo_root)/fleet/services/<helper>` — soit `/opt/lcars/fleet/services/`
+# ici. Sans ce repertoire, `cmp` echoue sur une source ABSENTE et le module rend « diverge de la
+# source » pour chaque auxiliaire : sur docker il ne peut pas s'appliquer (APPLY-ON=wsl linux),
+# donc ce drift devenait un ECHEC PERMANENT et la boite ne convergeait jamais.
+# Les COPY unitaires plus bas restent : ce sont les auxiliaires POSES, que l'apply du rail poste
+# installerait lui-meme et que l'image doit fournir deja en place.
+COPY fleet/services /opt/lcars/fleet/services
 COPY fleet/deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/services/console.sh         /opt/lcars/console.sh
 COPY fleet/services/console-humans.sh  /opt/lcars/console-humans.sh
@@ -462,11 +478,22 @@ RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console
                /opt/lcars/human-converger.sh \
                /opt/lcars/catalogue-executor.py \
                /opt/lcars/privileged-executor.py \
+               `# ⚠ CETTE LISTE DOUBLE CELLE DE 62-runtime-helpers, ET ELLES ONT DIVERGE :` \
+               `# lcars_socket.py est 100644 dans git, personne ne le chmod ici, et le module` \
+               `# le teste par -x. Il rendait donc « absent » sur un fichier PRESENT, et le` \
+               `# drift devenait un echec permanent (APPLY-ON=wsl linux, rien a reparer ici).` \
+               /opt/lcars/lcars_socket.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/fleet/deploy/provision \
                /opt/lcars/fleet/deploy/modules.d/*.sh \
                /opt/lcars/fleet/etc/provision-role-tokens.sh
+
+# L'ESTAMPILLE DES AUXILIAIRES POSES — le pendant de ce que `62-runtime-helpers` ecrit sur un poste
+# apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que
+# `PROV_SOURCE_REV` (declare plus haut) : les trois ne peuvent donc pas diverger, et le module
+# compare deux valeurs qui ont une seule origine.
+RUN printf '%s\n' "${GIT_SHA}" > /opt/lcars/.source-revision
 
 # DEUX volumes d'état, et ils portent deux choses différentes.
 #
