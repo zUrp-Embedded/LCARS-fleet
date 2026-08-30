@@ -2,13 +2,14 @@
 # SOURCE: fleet/services/console-pod.sh
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
-# STATUS: PROTO-V2 — la console D'UN pod, cible d'un ttyd `--url-arg` (UN port pour tous les pods)
+# STATUS: PROTO-V2 — la console D'UN pod, cible d'un ttyd `--url-arg` (UN serveur pour tous les pods)
 #
 # ttyd passe l'argument d'URL (`?arg=<pod_id>`) en argv. Ce script est la GARDE entre le monde
 # et `lcars attach` : sans lui, un client choisit les arguments d'une commande locale.
 #
-# ⚠ POURQUOI `--url-arg` ET PAS UN TTYD PAR POD : le bloc de ports d'un humain est FINI et deja
-# largement pris. Un port par pod l'epuiserait en une poignee de missions.
+# ⚠ POURQUOI `--url-arg` ET PAS UN TTYD PAR POD : UN SEUL serveur sert tous les pods, et c'est
+# l'argument d'URL qui les discrimine. Un ttyd par pod voudrait dire un processus, une socket et
+# une unite de plus a chaque mission.
 
 set -uo pipefail
 
