@@ -33,8 +33,11 @@ SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
-# shellcheck disable=SC2034 # STARTERS n'est lue que par un temoin (`process_iso.bats`, au sed sur la source),
-# jamais par ce script — UNITS, elle, est bouclee quatre fois plus bas.
+# LA CORRESPONDANCE PROGRAMME -> UNITE, ET ELLE SERT AUX DEUX SUBSTRATS : `UNITS` nomme ce que
+# systemd pose sur un poste, `STARTERS` nomme le PROGRAMME derriere chaque unite — c'est par lui
+# que la boite verifie, puisqu'elle n'a pas d'unites. `driven-by` marque ce qui est lance par un
+# autre service et n'a donc pas d'existence propre a sonder.
+# (Elle a porte un `shellcheck disable=SC2034` tant qu'elle n'etait lue que par `process_iso.bats`.)
 STARTERS=(
   "human-converger.sh:unit:lcars-converger"
   "console-landing.sh:unit:lcars-landing"
@@ -43,7 +46,85 @@ STARTERS=(
   "privileged-executor.py:unit:lcars-privileged"
 )
 
-have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR" ]]; }
+# ⚠ LA PRESENCE DES FICHIERS N'EST PAS LA PRESENCE DU GESTIONNAIRE. `systemctl` s'installe comme
+# dependance de paquet et `/etc/systemd/system` est cree par le paquet : les deux existent dans une
+# image ou PID 1 est `tini` et ou systemd ne pilote rien. Cette sonde repondait donc OUI dans la
+# boite, le check depassait sa propre porte de sortie, ne trouvait aucune unite, rendait un drift —
+# et `apply:check:*` le convertissait en ECHEC que nul `apply` ne pouvait reparer.
+# `/run/systemd/system` est le test canonique (sd_booted(3)) : il n'existe QUE si systemd est
+# l'init. Mesure du 2026-08-30 dans lcars3-lcars-1 : systemctl PRESENT, /etc/systemd/system PRESENT,
+# /run/systemd/system absent, PID 1 = tini.
+have_systemd() { [[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
+
+# consequence_of <unite> — ce que coute son absence, dit une seule fois pour les deux substrats.
+consequence_of() {
+  case "$1" in
+    lcars-landing)    echo "personne ne peut entrer" ;;
+    lcars-converger)  echo "personne ne sera enrole" ;;
+    lcars-catalogue)  echo "« lcars catalogue install » refusera, en nommant ce service" ;;
+    lcars-privileged) echo "les gestes privilegies de la boite n'ont plus d'executant" ;;
+    *)                echo "consequence NON DECLAREE pour cette unite — ajoute-la ici" ;;
+  esac
+}
+
+# ─── LA BOITE TIENT SES SERVICES AUTREMENT, ET C'EST UN ETAT-CIBLE, PAS UNE ABSENCE ──────────────
+# Le rail poste pose des unites `Restart=always` ; la boite lance `supervise.sh` depuis l'entrypoint.
+# Meme promesse — un service qui tombe revient — deux mecaniques. Verifier CELLE DU POSTE sur les
+# deux substrats ne mesurait rien ici et refusait le banc ; verifier celle de la boite mesure
+# exactement la meme chose.
+#
+# La table STARTERS porte deja la correspondance programme -> unite : elle cesse d'etre decorative.
+#
+# ⚠ CE QUE `pgrep -f` PROUVE, ET CE QU'IL NE PROUVE PAS : le motif matche le service OU le
+# superviseur qui le porte dans son argv. La promesse verifiee est donc « ce service est TENU »,
+# pas « il repond a cette seconde » — c'est le pendant exact de `is-active` sur une unite
+# `Restart=`, qui rend vrai pendant un RestartSec.
+# ⚠ UN HUMAIN DE FLEET N'EXISTE PAS ENCORE AU BOOT, ET CE N'EST PAS UN DEFAUT. Il ne vient pas de
+# l'image : le convergeur le materialise DEPUIS LA FORGE, apres cette convergence. Exiger sa
+# presence ici, c'est refuser une boite neuve pour n'avoir pas fait ce qu'elle fera ensuite.
+# Le convergeur vivant est le discriminant, comme pour les services : s'il tourne et qu'il n'a
+# toujours materialise personne, c'est un vrai drift.
+check_box_humans() {
+  local found; found="$(fleet_humans | paste -sd' ' -)"
+  if [[ -n "$found" ]]; then
+    p_ok "humain(s) de fleet sur cette machine : $found"
+  elif pgrep -f human-converger.sh >/dev/null 2>&1; then
+    p_drift "aucun humain de fleet alors que le convergeur TOURNE — la team « $PROV_HUMANS_TEAM » de la forge est vide, ou il n'arrive pas à la lire"
+  else
+    p_ok "aucun humain de fleet — le convergeur les matérialise depuis la forge, après cette convergence"
+  fi
+}
+
+check_box_services() {
+  local sup="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}" dir="${LCARS_HELPERS_DIR:-/opt/lcars}"
+  local e prog rel unit sup_vivant=0
+  if [[ -x "$sup" ]]; then
+    p_ok "superviseur posé ($sup) — ce que « Restart= » fait sur le rail poste"
+  else
+    p_drift "superviseur absent ($sup) — un service qui tombe ne reviendrait pas"
+  fi
+
+  # ⚠ LA CONVERGENCE TOURNE AVANT LES SERVICES, ET C'EST L'ORDRE VOULU PAR L'ENTRYPOINT : il
+  # converge, publie son verdict, PUIS lance les daemons. Exiger ici qu'ils tournent, c'est exiger
+  # un etat que ce moment precis ne peut pas avoir — le check se serait refuse lui-meme a chaque
+  # boot. Le superviseur vivant est donc le discriminant : absent, on est DANS le boot et l'etat
+  # verifiable est « en place » ; present, on est apres, et un programme muet est un vrai drift.
+  pgrep -f "$sup" >/dev/null 2>&1 && sup_vivant=1
+
+  for e in "${STARTERS[@]}"; do
+    IFS=: read -r prog rel unit <<<"$e"
+    [[ "$rel" == "unit" ]] || continue
+    if [[ ! -x "$dir/$prog" ]]; then
+      p_drift "$unit : « $prog » absent ou pas exécutable ($dir/$prog) — $(consequence_of "$unit")"
+    elif pgrep -f "$prog" >/dev/null 2>&1; then
+      p_ok "$unit : « $prog » tenu par le superviseur"
+    elif [[ "$sup_vivant" -eq 1 ]]; then
+      p_drift "$unit : « $prog » en place mais MUET alors que le superviseur tourne — $(consequence_of "$unit")"
+    else
+      p_ok "$unit : « $prog » en place — l'entrypoint le démarre après cette convergence"
+    fi
+  done
+}
 
 # Le compteur de redemarrages automatiques du service — la seule mesure qu'un fork reussi ne fausse pas.
 restarts_of() { "$SYSTEMCTL" show -p NRestarts --value "$1.service" 2>/dev/null; }
@@ -246,12 +327,13 @@ probe_seat_file() {
 check() {
   local u
 
-  probe_fleet_humans
-
   if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent ou $SYSTEMD_DIR introuvable) — aucune unite posee ; la landing et le convergeur doivent etre tenus autrement"
+    check_box_humans
+    check_box_services
     verdict_check
   fi
+
+  probe_fleet_humans
 
   if [[ -s "$SERVICES_ENV" ]]; then
     p_ok "environnement des services posé ($SERVICES_ENV)"
@@ -270,14 +352,7 @@ check() {
     if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
       p_ok "$u.service actif"
     else
-      local quoi
-      case "$u" in
-        lcars-landing)   quoi="personne ne peut entrer" ;;
-        lcars-converger) quoi="personne ne sera enrole" ;;
-        lcars-catalogue) quoi="« lcars catalogue install » refusera, en nommant ce service" ;;
-        *)               quoi="consequence NON DECLAREE pour cette unite — ajoute-la ici" ;;
-      esac
-      p_drift "$u.service posé mais PAS actif — $quoi"
+      p_drift "$u.service posé mais PAS actif — $(consequence_of "$u")"
     fi
   done
 
