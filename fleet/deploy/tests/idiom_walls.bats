@@ -182,3 +182,63 @@ I3_AWK='
   done
   [ "$bad" -eq 0 ]
 }
+
+@test "MUR I11: un fichier designe par \$HERE ou \$DOCKER_DIR EXISTE — bench/ ne porte que des scripts de banc" {
+  # `bench/` ne contient QUE ses propres scripts : les compose ET les gestes partages vivent dans
+  # `docker/`. Un `"$HERE/<x>"` ecrit depuis `bench/` designe donc un fichier absent, et rien ne le
+  # dit avant l'execution — apres avoir construit l'image entiere.
+  # ⚠ LA PORTEE EST LE FICHIER, PAS L'EXTENSION : ce mur n'a d'abord regarde que les `.yml`, et il a
+  # laisse passer `"$HERE/forge-runner.sh"` a la ligne 507 de `bench-up.sh` — le TROISIEME site du
+  # meme defaut, apres trois lignes de `bench-down.sh` et une de `bench-up.sh`. Une garde taillee
+  # sur les cas deja trouves ne trouve rien de neuf.
+  local f here dockerdir ref path bad=0
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../docker/bench/*.sh; do
+    [[ -f "$f" ]] || continue
+    here="$(cd "$(dirname "$f")" && pwd)"
+    dockerdir="$(cd "$here/.." && pwd)"
+    while read -r ref; do
+      path="${ref/\$HERE/$here}"
+      path="${path/\$DOCKER_DIR/$dockerdir}"
+      # un chemin construit depuis une AUTRE variable (repertoire genere) sort de la portee du mur
+      [[ "$path" == *'$'* ]] && continue
+      [[ -f "$path" ]] || { echo "${f##*/} : $ref -> $path INTROUVABLE"; bad=1; }
+    done < <(code "$f" | grep -oE '\$(HERE|DOCKER_DIR)/[A-Za-z0-9._-]+\.[a-z]+' | sort -u)
+  done
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I12: un script de bench/ est EXECUTABLE DANS L INDEX — son appelant ne le prefixe pas de bash" {
+  # `bench-up.sh` lance ses sous-scripts PAR LEUR CHEMIN (`"$HERE/bench-forge-bootstrap.sh" …`), pas
+  # par `bash <chemin>` : un mode 100644 dans l'index rend 126 sur TOUT clone frais, et le message
+  # (« Permission non accordee ») nomme le sous-script sans dire que le fautif est son mode.
+  # Le bit se perd en REECRIVANT un fichier — un geste qu'aucune relecture de diff ne montre, et que
+  # le disque de celui qui l'a fait ne trahit pas : `git ls-files -s` est le seul temoin. Mesure du
+  # 2026-08-30 : perdu sur `bench-forge-bootstrap.sh` par un commit qui ne touchait qu'a sa prose.
+  local root bad=0 mode path
+  root="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || skip "hors arbre git"
+  while read -r mode _ _ path; do
+    [[ "$mode" == 100755 ]] || { echo "${path##*/} : mode $mode dans l index — attendu 100755"; bad=1; }
+  done < <(git -C "$root" ls-files -s 'fleet/deploy/docker/bench/*.sh')
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I13: tout module Elixir nomme par un script de deploiement EXISTE — un renommage cote lib ne se voit pas ici" {
+  # `entrypoint.sh` appelle la release par `eval "<Module>.<fonction>(<arg>)"` : le nom du module est
+  # une CHAINE, que ni le compilateur ni boundary ne voient. Un module extrait ou renomme laisse
+  # l'appelant intact, et le defaut ne parait qu'au runtime, DANS l'image, sous un `2>/dev/null` qui
+  # le reduit a « l'image ne rend pas le roster ». Mesure du 2026-08-30 : `CatalogueRoles` etait
+  # devenu `Fleet.Roster` et le rail boite mourait a l'amorcage de la forge, sans nommer la cause.
+  local lib f ref mod bad=0
+  lib="$(cd "$BATS_TEST_DIRNAME/../../lib" && pwd)"
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../../etc/*.sh; do
+    [[ -f "$f" ]] || continue
+    while read -r ref; do
+      mod="${ref%.*}"                       # le dernier segment est la fonction (snake_case)
+      [[ "$mod" == *.* ]] || continue       # `Fleet.chose` : pas un appel de module qualifie
+      grep -rqE "^defmodule[[:space:]]+$mod[[:space:]]+do" "$lib" \
+        || { echo "${f##*/} nomme « $mod » — aucun defmodule dans lib/"; bad=1; }
+    done < <(code "$f" | grep -oE 'Fleet(\.[A-Z][A-Za-z0-9]*)+\.[a-z_][a-z0-9_]*' | sort -u)
+  done
+  [ "$bad" -eq 0 ]
+}
