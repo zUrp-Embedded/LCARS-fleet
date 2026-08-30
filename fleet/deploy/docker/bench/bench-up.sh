@@ -440,11 +440,15 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api
 BOX_PROV_RC="$("$DOCKER_BIN" exec "$BOX" cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$BOX_PROV_RC" =~ ^[0-9]+$ ]] || BOX_PROV_RC=""
 BOX_PROV_OK=1
+# ⚠ LE CHEMIN PUBLIE EST CELUI QUI MARCHE, PAS CELUI QUI SE DEVINE. `provision` vit sous
+# `/opt/lcars/fleet/deploy/`, pas a la racine de `/opt/lcars` : la commande offerte ici est la
+# PREMIERE chose que jouera celui qui lit le refus, et elle rendait 127. Un diagnostic faux coute
+# plus qu'un diagnostic absent — il envoie chercher la panne la ou elle n'est pas.
 case "$BOX_PROV_RC" in
   0)  BOX_PROV_STATE="convergee" ;;
-  2)  BOX_PROV_STATE="APPLIQUEE avec DRIFT RESIDUEL — un geste manque, rien n'est casse (\"$DOCKER_BIN exec $BOX /opt/lcars/provision doctor\" nomme lequel)" ;;
+  2)  BOX_PROV_STATE="APPLIQUEE avec DRIFT RESIDUEL — un geste manque, rien n'est casse (\"$DOCKER_BIN exec $BOX /opt/lcars/fleet/deploy/provision doctor\" nomme lequel)" ;;
   "") BOX_PROV_STATE="NON MESUREE — /run/lcars-provision.rc illisible dans la boite (elle n'a peut-etre pas fini de converger)" ;;
-  *)  BOX_PROV_STATE="EN ECHEC (rc=$BOX_PROV_RC) — la boite tourne et ne produira RIEN (\"$DOCKER_BIN exec $BOX /opt/lcars/provision doctor\")"
+  *)  BOX_PROV_STATE="EN ECHEC (rc=$BOX_PROV_RC) — la boite tourne et ne produira RIEN (\"$DOCKER_BIN exec $BOX /opt/lcars/fleet/deploy/provision doctor\")"
       BOX_PROV_OK=0 ;;
 esac
 
