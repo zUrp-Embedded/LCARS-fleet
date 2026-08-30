@@ -4,8 +4,9 @@
 # STARDATE: 2026-07-31
 # STATUS: lance le DECK de la boite (page unique, onglets verticaux, etat sonde) — identifie par la forge
 #
-# USAGE : console-landing.sh [--foreground]
-# EXIT  : 0 lance · 1 dependance absente
+# ⚠ SURTOUT PAS `ttyd -I` POUR SERVIR CETTE PAGE : `-I` REMPLACE l'index.html de ttyd, or cet index
+# EST le client xterm.js. La page ne s'ajouterait pas a la console, elle la DETRUIRAIT. Le deck a
+# donc son propre serveur sur son propre port, et la console n'est pas touchee.
 
 set -euo pipefail
 
@@ -20,15 +21,14 @@ say() { echo "[lcars-landing] $*"; }
 command -v python3 >/dev/null || { echo "console-landing.sh: python3 absent de l'image" >&2; exit 1; }
 [[ -r "$DECK_PY" ]] || { echo "console-landing.sh: $DECK_PY introuvable" >&2; exit 1; }
 
+# ⚠ ET SURTOUT PAS le groupe `fleet` : il porte deja la lecture de `/opt/lcars/runtime` et d'ailleurs.
+# Le reutiliser aurait ete plus rapide, et aurait accorde tout le reste par la meme occasion.
 CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
 getent group "$CONSOLE_GROUP" >/dev/null 2>&1 || {
   echo "console-landing.sh: groupe $CONSOLE_GROUP absent — le deck ne pourrait joindre aucune console" >&2
   exit 1
 }
 
-# ⚠ LE COMPTE SE SONDE ICI, PARCE QUE `setpriv` ECHOUE SUR UN NOM INCONNU AVEC UN MESSAGE QUI PARLE
-# DE `setpriv`, PAS DE LCARS. Le refus doit nommer le geste qui pose le compte, sinon le diagnostic
-# coute deux sauts — meme regle que la garde du groupe juste au-dessus.
 DECK_USER="${LCARS_DECK_USER:-lcars-system}"
 DECK_GROUP="${LCARS_DECK_GROUP:-$DECK_USER}"
 getent passwd "$DECK_USER" >/dev/null 2>&1 || {
