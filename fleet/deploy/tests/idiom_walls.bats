@@ -150,3 +150,18 @@ I3_AWK='
   done
   [ "$hits" -eq 0 ]
 }
+
+@test "MUR I9: un temoin dont le code nomme une fonction du siege pose LCARS_SEAT_UID_FILE — il ne lit jamais celui de la machine" {
+  # `prov_seat_uid` lit `/etc/lcars/seat.uid` AVANT `LCARS_SYSADMIN_UID`, et ce fichier existe sur
+  # toute machine provisionnee. Un temoin sans decor y lit le siege reel — celui qui joue le gate —
+  # et tout ce qu'il attend d'un humain « qui passe GUARD B » rougit au second run (banc .63,
+  # 2026-08-30 : vert a l'install, rouge au re-run). Le scrub du shell_gate ne peut rien : c'est un
+  # DEFAUT de chemin, pas une variable. Perimetre : le CODE des temoins (une ligne `#` ne lit rien).
+  local f bad=0
+  for f in "$BATS_TEST_DIRNAME"/*.bats; do
+    [[ "$f" == */idiom_walls.bats ]] && continue
+    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'is_fleet_human|prov_seat_uid|fleet_humans|uid_floor' || continue
+    grep -qE '^[[:space:]]*export LCARS_SEAT_UID_FILE=' "$f" || { echo "${f##*/} nomme une fonction du siege sans poser LCARS_SEAT_UID_FILE"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
