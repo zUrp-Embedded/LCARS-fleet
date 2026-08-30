@@ -25,7 +25,20 @@ NODE_LINK_DIR="${LCARS_NODE_LINK_DIR:-/usr/local/bin}"
 
 node_arch() { arch_tag node; }
 
-node_version_posee() { "$NODE_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'; }
+# ⚠ ON N'EXECUTE PAS UN BINAIRE ABSENT, ON CONSTATE SON ABSENCE. Sous `set -euo pipefail`, un
+# binaire introuvable fait rendre 127 au PIPELINE — que `2>/dev/null` n'attenue pas, il ne cache
+# que le message — et `v="$(node_version_posee)"` propage ce 127 : le module MEURT avant son
+# `p_drift`, sans une ligne pour le dire. Le rendu vide est un ETAT, pas une erreur : c'est
+# precisement ce que `check` sait traiter (« node absent »).
+#
+# ⚠ ET CE MODULE EST « APPLY-ON: wsl linux · CHECK-ON: any » : il VERIFIE sur un substrat ou il ne
+# POSE jamais. Dans la boite, node n'est donc jamais la — l'etat nominal du check y est l'absence.
+# Mesure du 2026-08-30 : « ERREUR 16-node: MORT avant de rendre son verdict (rc=127) », seul echec
+# des 20 modules, et il suffisait a rendre la boite non convergee.
+node_version_posee() {
+  [[ -x "$NODE_LINK_DIR/node" ]] || return 0
+  "$NODE_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'
+}
 
 check() {
   local v; v="$(node_version_posee)"
