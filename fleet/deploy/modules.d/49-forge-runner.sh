@@ -38,6 +38,15 @@ converge_ci_runner() {
   [[ -s "$PROV_MASTER_TOKEN_FILE" && -r "$PROV_MASTER_TOKEN_FILE" ]] \
     || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"; return 0; }
 
+  # ⚠ LA SONDE SE JOUE ICI, ET SON ABSENCE PASSAIT UNE CLI VIDE. `PROV_DOCKER_BIN` naît vide et
+  # chaque module est un processus a lui : celle de `48-forge-host` ne traverse pas. Sans cette
+  # ligne, le delegue retombait sur un `docker` nu — introuvable dans une VM WSL — et refusait
+  # trois images PRESENTES sur le daemon (banc WSL, 2026-08-30). Sur un Linux natif le PATH le
+  # portait : le defaut n'y etait pas visible.
+  if ! docker_endpoint; then
+    p_warn "runner CI non enrolable : $PROV_DOCKER_WHY"
+    return 0
+  fi
   p_step "forge du poste : enrôlement du runner CI (projet $PROV_RUNNER_PROJECT, réseau $PROV_FORGE_NET)"
 
   # ⚠ PAS `run_quiet` ICI, ET POUR DEUX RAISONS QUI SE CUMULENT. (1) Il imprime la COMMANDE quand

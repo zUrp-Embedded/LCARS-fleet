@@ -165,3 +165,20 @@ I3_AWK='
   done
   [ "$bad" -eq 0 ]
 }
+
+@test "MUR I10: qui LIT PROV_DOCKER_BIN joue la sonde — sinon il passe une CLI VIDE a son delegue" {
+  # `PROV_DOCKER_BIN` vaut la CHAINE VIDE tant que `docker_endpoint` n'a pas tourne
+  # (`docker-endpoint.sh` la declare ainsi). Un module qui la lit sans sonder passe `DOCKER_BIN=""`,
+  # son delegue retombe sur `${DOCKER_BIN:-docker}` — un `docker` nu, introuvable dans une VM WSL ou
+  # rien n'installe de CLI. Banc WSL, 2026-08-30 : `49-forge-runner` refusait trois images
+  # PRESENTES sur le daemon, et son propre commentaire promettait « la CLI RESOLUE ». Sur un Linux
+  # natif le PATH porte `docker` (pose par le rail) : le defaut y est invisible.
+  local f bad=0
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh "$BATS_TEST_DIRNAME"/../box "$BATS_TEST_DIRNAME"/../accept; do
+    [[ -f "$f" ]] || continue
+    code "$f" | grep -q 'PROV_DOCKER_BIN' || continue
+    code "$f" | grep -qE 'docker_endpoint' \
+      || { echo "${f##*/} lit PROV_DOCKER_BIN sans jouer docker_endpoint"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
