@@ -112,8 +112,6 @@ services:
       # publié en trop est une porte ouverte sur un service qui n'existe pas encore, dans un
       # conteneur qui porte SYS_ADMIN.
       #
-      # `base+3` (webhook) : mort — voir `bin/fleet_v2`, le slot est sorti de la formule.
-      #
       # ⚠ PRÉ-REQUIS DE L'UID TIRÉ DE LA FORGE : tant qu'une plage était pré-publiée par bloc, un
       # UID non contigu la manquait en silence. `lcars` = id forge 3 → uid 1003 → bloc 21030, hors
       # de toute plage devinée ici. Ne PAS re-publier par bloc : ce fichier ne peut pas savoir.

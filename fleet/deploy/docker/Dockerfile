@@ -123,9 +123,6 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 # les verbes de la console, les arbres d'un catalogue. Sur GitHub elle est publiee par Pages ; ici
 # elle part dans l'image pour que la boite serve sa PROPRE doc — celle de la version qu'elle fait
 # tourner, pas la derniere en ligne, pas une copie a resynchroniser.
-# UN STAGE A ELLE, ET NODE N'ENTRE JAMAIS DANS LE RUNTIME. Meme patron que le stage `build` : on ne
-# copie que le resultat, ~300 Ko de HTML statique. Le runtime reste Elixir/Ubuntu, sans node, sans
-# npm, sans node_modules.
 # ⚠ L'ARBORESCENCE EST LE CONTRAT. Les lecteurs du site remontent quatre crans depuis
 # `src/lib/` pour trouver la racine du depot (`fleet/`, `assets/`), et `collect-assets.mjs` remonte
 # deux crans pour trouver `assets/`. Le stage reproduit donc la MEME forme : `/src/assets/github.io`
@@ -222,10 +219,6 @@ RUN apt-get update -qq \
        `# qui n'en a pas envoie CHAQUE build natif par la garde humaine.` \
        build-essential pkg-config python3-dev libssl-dev \
        `# ─── LA CONSOLE WEB, ET ELLE ARRIVE ENFIN PAR LE MEME CHEMIN QUE SUR UN POSTE ──────────` \
-       `# ttyd etait recupere en binaire STATIQUE, deux sha256 epingles, un layer et un fetch pour` \
-       `# lui seul — parce qu'il n'est pas empaquete par Debian (« no installation candidate »).` \
-       `# Ubuntu 26.04 sert ttyd 1.7.7-4build1 dans universe : EXACTEMENT la version qui etait` \
-       `# epinglee. Le pin, les deux ARG de sha, le case sur TARGETARCH et le curl partent ensemble.` \
        `# Il est desormais dans PACKAGES (10-packages.sh), donc sur le rail natif : c'est ce qui` \
        `# autorise sa presence ici sans exemption dans deploy_manifest.bats.` \
        ttyd \
@@ -424,15 +417,6 @@ COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 COPY fleet/services/skel.bashrc      /etc/skel/.bashrc
-
-# Ce qui manque est l'EXECUTANT : la brique est cablee cote hooks, et un pod n'a pas de hooks — le
-# sanctuaire ne monte pas `hooks/` et ne pose pas de cle `hooks` dans ses settings, deliberement
-# (`bwrap_launch.sh` : charger le `.claude` de l'humain lui ferait heriter SES hooks et bloquerait
-# le boot). Le shim n'est donc jamais appele. Rien ne casse, rien ne compresse, AUCUN SYMPTOME
-# VISIBLE — c'est pour ca que la note vit dans ce fichier.
-# Ce qu'il reste a decider, et ce n'est pas un COPY : par quel chemin un pod compresserait sa
-# sortie, puisque les hooks lui sont fermes par construction. `LCARS_TOKEN_SAVER=off` reste le
-# switch, python3 est deja la (la brique est stdlib pure).
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
 # `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la

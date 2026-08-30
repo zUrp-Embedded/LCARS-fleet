@@ -189,14 +189,6 @@ fi
 # prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Mesure
 # le 2026-08-02 : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
 # que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
-# ON GARDE CE QUE LA FORGE A DIT, ET ON MEURT AVEC. La version d'avant jetait la reponse
-# (`2>/dev/null || true`) puis affichait une cause DEVINEE — « un token du meme nom existe deja ? » —
-# en `say`, pas en `die`. Mesure du 2026-08-07 : ce message est sorti sur une forge NEUVE, ou cette
-# cause est impossible, et le banc a continue en s'annoncant pret. Deux defauts qui se composent :
-# une hypothese presentee comme un diagnostic, et un maillon LOAD-BEARING dont l'absence ne stoppe
-# rien. L'en-tete de ce bloc dit pourquoi il est load-bearing : sans `read:organization`, la sonde
-# d'appartenance humaine echoue en « NON VERIFIABLE » et un create_project meurt UNE MARCHE plus
-# loin, avec un message qui accuse la forge.
 # Un nom horodate, comme le master token, pour la meme raison : un token survivant d'une passe
 # precedente n'est plus une hypothese a formuler, c'est un cas qu'on ne peut plus rencontrer.
 if [[ "$WITH_BOX" -eq 1 ]]; then
@@ -232,10 +224,6 @@ except Exception: print("")' 2>/dev/null || true)"
 
 fi
 
-# ⚠ CE QUI A DU BOUGER AVEC, et c'est la cicatrice de ce bloc — sa sortie etait CAPTUREE justement
-# parce qu'elle avait ete jetee une fois : « la seule ligne qui dit CE QUI a ete pose, et combien
-# d'entrees de charte n'avaient pas de compte sur cette forge, disparaissait ». Le retirer sans rien
-# mettre a la place aurait recree ce defaut a l'identique.
 # ET LA REMONTER DEPUIS L'APPLY EST IMPOSSIBLE : le provisioner recoit une variable `sensitive`, donc
 # OpenTofu supprime toutes ses lignes (cf. le bloc de l'etape 4). Le verdict de POSE n'est lisible
 # nulle part par un appelant.

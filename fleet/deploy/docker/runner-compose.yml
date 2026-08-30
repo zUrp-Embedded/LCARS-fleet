@@ -27,7 +27,6 @@ name: lcars-runner
 
 services:
   act:
-    #
     # ⚠ VARIANTE `dind-rootless`, ET LE SOCKET DE L'HOTE N'EST PLUS MONTE NULLE PART.
     #
     # CE QU'ON ENLEVE : `- /var/run/docker.sock:/var/run/docker.sock`. Avec lui, n'importe quel job
@@ -51,7 +50,6 @@ services:
       GITEA_INSTANCE_URL: "${LCARS_FORGE_URL:?LCARS_FORGE_URL requis — l'URL de TA forge (ex http://10.42.0.118)}"
       GITEA_RUNNER_REGISTRATION_TOKEN: "${LCARS_RUNNER_TOKEN:-}"
       GITEA_RUNNER_NAME: "${LCARS_RUNNER_NAME:-lcars-runner}"
-      #
       # ⚠ LE TAG SUIT LA BASE DU `Dockerfile`, ET RIEN NE LE VERIFIE. Un runner qui sert une
       # toolchain autre que celle du deploiement fait juger sur un OTP ce qui tourne sur un autre —
       # un mensonge operationnel, pas un ecart de confort.
@@ -72,7 +70,6 @@ services:
     # docker` et `/var/lib/docker`. Les deux premiers sont nommes ci-dessus parce qu'ils PORTENT
     # quelque chose. Le troisieme est le magasin du dind ROOTFUL — or ce runner est rootless, son
     # daemon ecrit dans le second, et celui-ci reste vide.
-    #
     tmpfs:
       - /var/lib/docker
     restart: unless-stopped

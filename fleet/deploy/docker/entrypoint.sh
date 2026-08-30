@@ -28,9 +28,6 @@ set -euo pipefail
 #
 # Les trois portes de LECTURE ci-dessous tournent en `nobody:fleet` : le runtime REFUSE root
 # (R-no-root-runtime), et une lecture n'a besoin que du gid `fleet` (l'install RO est root:fleet).
-#
-# Un appelant deja non-root n'a RIEN a abaisser : il est deja depourvu. On ne simule donc pas
-# `nobody` — on constate qu'il n'y a plus rien a retirer, et on execute en place.
 RELEASE_BIN="${LCARS_RELEASE_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"
 
 drop_priv() { # drop_priv <cmd...>
@@ -49,9 +46,6 @@ drop_priv() { # drop_priv <cmd...>
 # ~/.lcars), des hypothèses qu'un mode outil n'a pas le droit d'avoir.
 if [[ "${1:-}" == "verify" ]]; then
   root="${2:?verify: chemin de racine catalogue requis — usage : docker run --rm -v \$PWD:/cat IMAGE verify /cat}"
-  # Le runtime REFUSE root (R-no-root-runtime, runtime.exs) et le mode outil respecte
-  # l'invariant au lieu de le contourner : l'eval tombe sur nobody:fleet — le gid fleet
-  # donne la lecture de l'install RO (/local, root:fleet), nobody ne possède rien d'autre.
   # LCARS_TOOL_EVAL=1 : `release eval` execute les config providers (runtime.exs ENTIER) avant
   # l'expression — ce drapeau saute le corps de config deploiement (ports, forge, credentials),
   # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
@@ -85,7 +79,6 @@ fi
 # porte la VERSION (`lib/lcars_fleet-<vsn>/priv/catalogue`) : un appelant shell qui le globberait
 # marcherait jusqu'au jour ou la disposition du release change, et casserait alors en silence sur
 # un glob vide. Le release est l'autorite de sa propre disposition, et c'est lui qu'on interroge.
-# Meme porte outil que `verify` et `roles` — meme eval, meme `nobody`, meme `LCARS_TOOL_EVAL`.
 # ⚠ CE DRAPEAU SAUTE LE CORPS DE CONFIG DE DEPLOIEMENT, donc un `LCARS_CATALOGUE_ROOT` pose par
 # l'operateur n'est PAS lu ici — et c'est ce qu'on veut. Cette porte repond « le catalogue que CE
 # RELEASE porte », pas « celui que cette boite sert ». C'est le premier qu'on publie sur la forge :
@@ -102,11 +95,6 @@ fi
 # Meme geste que `fleet/deploy/box forge-apply`, mais SANS boite vivante : `docker run --rm <image>
 # forge-apply`. C'est ce qui permet a un POSTE DE TRAVAIL (rail WSL) d'avoir une forge utilisable
 # sans reconstruire et relancer un LCARS en conteneur alors qu'il vient de l'installer nativement.
-#
-# ⚠ CETTE PORTE N'EST PAS `nobody`, CONTRAIREMENT AUX AUTRES. `roles`, `catalogue-source` et
-# consorts sont des LECTURES ; celle-ci ecrit sur une forge et lit le jeton master et le seed dans
-# `/opt/lcars/var/tokens` (0710 lcars-authority:fleet — le groupe TRAVERSE, il ne lit pas ; les secrets eux-
-# memes sont 0600). Elle tourne donc en root, et l'appelant DOIT monter ce dossier.
 #
 # ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
 # reconstruit ce qui existe par ses blocs `import`, donc partir d'un tfstate VIDE est le cas normal.
@@ -207,11 +195,6 @@ say() { echo "[lcars-entrypoint] $*"; }
 # (sa garde de sortie n'est armee que sous `PROVISION_RUN`) et n'ecrase aucune fonction de ce
 # fichier — zero collision sur les 57 qu'elle definit. Ce qu'on y gagne : UNE derivation du siege
 # pour les deux rails, au lieu de deux copies qui divergent le jour ou l'une est corrigee.
-#
-# ⚠ ELLE EST REQUISE, ET LE DIRE VAUT MIEUX QUE DE FAIRE SEMBLANT. `resolve_admiral` ne sait plus
-# deriver sans elle ; un repli qui garderait une seconde derivation ici annulerait tout le gain.
-# Dans l'image elle est toujours la — c'est le meme arbre que le `provision` que ce fichier lance a
-# l'etape 3. Absente, le boot ne converge de toute facon pas : on refuse en le nommant.
 PROVISION_LIB_FILE="${LCARS_PROVISION_LIB:-/opt/lcars/fleet/deploy/lib/provision-lib.sh}"
 if [[ ! -r "$PROVISION_LIB_FILE" ]]; then
   echo "[lcars-entrypoint] provision-lib introuvable ($PROVISION_LIB_FILE) — le siege ne peut pas se deriver, et le provisionnement de l'etape 3 vient du meme arbre. Image incomplete." >&2
@@ -240,10 +223,6 @@ resolve_admiral() {
       say "siege : « $PROV_SEAT_LOGIN » — la semence et $PROV_SEAT_SOURCE nomment le meme acteur"
       ;;
     diverge)
-      # ⚠ LA BRANCHE QUE PERSONNE N'AVAIT. La semence disait un nom, le cote durable en dit un
-      # autre : le home du siege vit sous le PREMIER, et booter sous le second creerait un compte
-      # de plus en laissant l'ancien orphelin. On refuse, pour la meme raison qu'on refuse
-      # d'inventer — sauf qu'ici on ne devine meme pas, on CONSTATE le desaccord.
       say "siege : DIVERGENCE — la semence dit « ${LCARS_ADMIRAL:-} », $PROV_SEAT_SOURCE dit « $PROV_SEAT_LOGIN ». Le home du siege vit sous UN de ces noms : retire la semence pour suivre $PROV_SEAT_SOURCE, ou corrige la table ($UID_MAP_FILE)."
       return 1
       ;;
@@ -281,7 +260,6 @@ if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then
   useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_ADMIRAL"
   say "sysadmin $LCARS_ADMIRAL cree (uid $LCARS_UID)"
 fi
-# root du sysadmin : membre du groupe sudo (le paquet sudo pose la regle %sudo par defaut). Idempotent.
 # Le mot de passe est POSE HORS d'ici (bench: fixe, pour tester ; prod: l'installeur) — l'entrypoint
 # cree le siege, il ne choisit pas le secret.
 if getent group sudo >/dev/null 2>&1; then
@@ -387,11 +365,6 @@ if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
   src_rev="$(git -C "$LCARS_SOURCE_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo '?')"
   say "source LCARS : $LCARS_SOURCE_DIR ($src_rev) — auto-maintenance possible"
 
-  # LE CONTRÔLE QUI FERME LA BOUCLE. Le binaire qui tourne vient de l'IMAGE ; la source vient du
-  # clone. Rien ne garantit que ce sont les mêmes commits — et une source en avance est le cas
-  # NORMAL (c'est le but de l'auto-maintenance), pas une panne. Ce qui n'est pas normal, c'est de
-  # ne pas le savoir : on lit du code qui n'est pas celui qui s'exécute. On déclare l'écart, on ne
-  # le corrige pas et on ne bloque rien.
   img_rev="${LCARS_IMAGE_REVISION:-unknown}"
   if [[ "$img_rev" == "unknown" ]]; then
     say "  révision de l'image INCONNUE — écart image/source invérifiable (image bâtie sans GIT_SHA)"
@@ -423,8 +396,6 @@ else
 fi
 
 # ─── 3. Convergence de l'état — LE MÊME provision que le chemin WSL, substrat docker ─────────────
-# rc capturé, jamais fatal : le doctor dira la vérité, sshd doit démarrer pour permettre la
-# réparation. (Le détail des verdicts est dans les logs du conteneur.)
 #
 # ⚠ ET LE VERDICT SE PUBLIE, parce que « jamais fatal » n'a jamais voulu dire « jamais dit ». Il ne
 # vivait que dans les logs du conteneur, donc `fleet/deploy/box up` rendait la main sur une boîte qui
@@ -465,11 +436,6 @@ publier_verdicts() {
 # ⚠ ET LE SUPERVISEUR NE PEUT PAS VIVRE ICI. Ce script finit sur `exec /usr/sbin/sshd -D -e` : le
 # shell est REMPLACÉ, donc toute boucle qu'il porterait disparaîtrait à cet instant. D'où un
 # processus à part, lancé en `setsid` exactement comme les services l'étaient.
-#
-# ⚠ SON ABSENCE N'EST PAS FATALE, ET C'EST LA RÈGLE DE TOUT CE FICHIER. Une image d'avant ce
-# chantier n'a pas `supervise.sh` : on retombe alors sur le lancement nu — sans relance, comme
-# avant, mais la boîte démarre. Une boîte qui refuse de booter parce qu'il lui manque un
-# superviseur est une boîte qu'on ne peut plus réparer.
 SUPERVISE="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}"
 launch() { # launch <nom> <log> -- <cmd...>
   local name="$1" log="$2"; shift 2
@@ -577,10 +543,6 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
     # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$PROV_DECK_PORT` dans `services.env`,
     # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
     # que parce que leurs deux défauts indépendants valent tous les deux 20999.
-    #
-    # L'idiome est celui de `forge-gestures.sh` : la molette du rail d'abord, celle du
-    # provisionnement ensuite, le littéral en dernier recours — et ce littéral est tenu égal à
-    # celui de `provision-lib.sh` par `MUR 4` de `variable_walls.bats`.
     export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-${PROV_DECK_PORT:-20999}}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
@@ -595,11 +557,6 @@ fi
 # lit l'uid du pair que le noyau pose sur la socket, demande à la forge si ce login y porte
 # `is_admin`, et joue le geste. Séparer « prouver qui tu es » de « exécuter » est ce qui supprime le
 # groupe unix, sa projection, son cache et son rattrapage de dérive.
-#
-# ⚠ SON ABSENCE N'EST PAS FATALE, ET ELLE N'EST PAS MUETTE NON PLUS. Sans lui, installer un
-# catalogue devient injouable — mais la boîte doit rester joignable pour être réparée, même règle
-# que la convergence et la console. Le refus côté `bin/lcars` nomme alors le service, pas l'adminité
-# de l'opérateur : une porte fermée n'est pas une porte gardée.
 LCARS_AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executor.py ]] \
    && id -u "$LCARS_AUTHORITY_USER" >/dev/null 2>&1; then
@@ -626,10 +583,6 @@ fi
 # ⚠ PAS DE `setpriv` ICI, ET C'EST LE SEUL BLOC DE CE FICHIER OÙ SON ABSENCE EST LE CONTRAT. Le
 # voisin au-dessus DOIT descendre (il détient les secrets) ; celui-ci DOIT rester root (il porte le
 # geste privilégié) et ne détient rien. Les deux règles sont la même règle, lue des deux côtés.
-#
-# Son absence n'est pas fatale — même règle que le voisin : la boîte doit rester joignable pour être
-# réparée. Ce qui devient injouable est la convergence d'outillage, et le reconciliateur le dira en
-# nommant la socket : une porte fermée n'est pas une porte gardée.
 if [[ "${LCARS_PRIVILEGED_EXECUTOR:-1}" == "1" && -r /opt/lcars/privileged-executor.py ]]; then
   launch "service privilégié" /var/log/lcars-privileged.log -- \
     python3 /opt/lcars/privileged-executor.py

@@ -165,7 +165,6 @@ FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
 # machine. Sur linux natif, c'est l'adresse de sortie — le daemon tourne sur l'hote, ses conteneurs
 # voient son IP (mesure du 2026-08-18 sur .63). Sous Docker Desktop, le daemon vit dans une AUTRE VM :
 # l'IP de la distro WSL ne lui est pas routee, et c'est `host.docker.internal` qui designe l'hote.
-#
 if [[ "$(detect_substrate)" == "wsl" ]]; then
   JOB_HOST="host.docker.internal"
 else
@@ -332,15 +331,6 @@ env LCARS_IMAGE="$IMAGE" \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
 
 # ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS (2026-08-17). NE PAS LE REMETTRE.
-#
-# La fenetre `create` -> `start` reste, elle, pour la raison qui la justifiait deja seule : la boite
-# doit etre sur le reseau de la forge AVANT de demarrer (piege 1), sinon `forge` ne resout pas et
-# tout le provisioning forge part en drift au premier boot.
-
-# PAS DE `network connect` : la surcouche a declare le reseau de la forge en `external`, donc le
-# `create` ci-dessus a DEJA branche la boite. `forge` resout avant le premier boot, ce qui etait
-# toute la raison d'etre de la fenetre. Le `create` reste, lui, pour une AUTRE raison intacte : la
-# graine du binaire vendor doit se poser sur un conteneur qui existe et n'a pas demarre (piege 3bis).
 "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" start lcars || die "la boite ne demarre pas" 3
 
 for _ in $(seq 1 90); do
@@ -364,22 +354,9 @@ else
 fi
 
 # ─── 3. les creds anthropic : DEPLACEES APRES LA RELANCE (piege 3) ───────────────────────────────
-# Elles vivaient ICI, et depuis identite-v2 c'etait trop tot. L'entrypoint ne fabrique plus le
-# worker : il materialise `admiral` (uid 1000, sysadmin) et RIEN d'autre. `$HUMAN` (lcars) vient de
-# la FORGE — seme par l'amorcage en 4, materialise par le convergeur au boot de la relance en 5.
-# A cet endroit-ci il n'existe donc pas encore, et `docker exec -u lcars` meurt sur
-# « unable to find user lcars: no matching entries in passwd file ».
-# Mesure du 2026-08-15, premiere execution du chemin admiral : `/etc/passwd` de la boite healthy ne
-# porte QUE `admiral`. Le geste est en 5bis, la ou l'utilisateur existe — meme instant que le bloc de
-# verdict, qui lit deja les creds avec `-u "$HUMAN"` sans jamais avoir eu de probleme.
 [[ "$WITH_CREDS" -eq 1 ]] || say "creds NON posees (--no-creds) — aucun pod ne pourra demarrer, par choix"
 
 # ─── 4. amorcage de la forge, passe 1 : structure ────────────────────────────────────────────────
-# ⚠ CE BLOC ORGANISAIT LA SURVIE D'UN TFSTATE ENTRE LES DEUX PASSES, et il n'existait que parce que
-# la recette n'etait pas rejouable : etat vide sur forge peuplee -> 409, mesure du 2026-08-03. La
-# recette IMPORTE desormais ce que la forge porte deja (2026-08-16), donc l'etat est jetable et il
-# n'y a plus rien a faire survivre. Le dossier partage, la copie de la recette et le `--tofu-dir`
-# sont partis avec le defaut qui les avait fait naitre.
 say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
 # ⚠ LE CODE DU SOUS-SCRIPT EST RENDU, PAS REMPLACE PAR 4. `bench-forge-bootstrap.sh` distingue
 # SEPT sorties (2 la forge muette · 3 admiral/token · 4 la structure · 5 le seed · 6 le verdict ·
@@ -479,13 +456,11 @@ RUNNER_STATE="non demarre"
 # c'est l'arbitrage du 2026-08-16. Le banc n'a donc plus de credential a lui a faire survivre.
 MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /opt/lcars/var/tokens/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
 
-#
 # `RUNNER_SERT` porte la seule question qui compte : un runner sert-il le label demande, VU PAR LA
 # FORGE ? Elle ne se deduit pas de `RUNNER_STATE`, qui est une PHRASE — la deriver d'un texte serait
 # remettre le verdict a la merci d'une reformulation.
 RUNNER_SERT=0
 
-#
 # ⚠ `ubuntu-latest` EST LA POUR LES WORKFLOWS QU'ON N'ECRIT PAS. C'est le `runs-on` par defaut de
 # l'ecosysteme — tout workflow importe, tout exemple copie d'ailleurs, toute action tierce le nomme.
 # Sans lui, un banc refuse silencieusement ces jobs : la forge les garde en attente d'un runner qui
@@ -521,7 +496,6 @@ elif [[ -z "$RUNNER_LABELS" ]]; then
 elif [[ -z "$MASTER_TOKEN" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
-  #
   # Le silence reste la regle au SUCCES — un banc qui marche n'a pas a deverser le journal de ses
   # sous-scripts. C'est l'echec qui parle, et il parle avec les mots du sous-script, pas les notres.
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
@@ -564,7 +538,6 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
       # Deux faits decident, et aucun ne se devine : le suffixe de variante (`dind` veut dire qu'un
       # job a un daemon, donc que `container:` est jouable) et le BACKEND des labels — un label
       # nomme `shell` peut etre servi par une image, auquel cas `runs-on: shell` tourne en conteneur.
-      #
       RUNNER_VER="$("$DOCKER_BIN" exec "${PROJECT}-runner-act-1" gitea-runner --version 2>/dev/null | head -1 || true)"
       RUNNER_IMG="$("$DOCKER_BIN" inspect "${PROJECT}-runner-act-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
       RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)
@@ -580,7 +553,6 @@ $(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
               sortie COMPLETE conservee : $RUNNER_LOG"
   fi
 
-  #
   # La regle est celle de `run_step` : on efface ce que personne ne lira, on GARDE ce qui explique un
   # echec — et on le NOMME, sinon c'est un dechet anonyme de plus au lieu d'un fichier auquel le
   # verdict renvoie. Le verdict ne cite que les 12 dernieres lignes : pour un refus plus long, ce
@@ -628,7 +600,6 @@ if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
   # ⚠ CE QUE CETTE LIGNE NE FAIT PLUS, DELIBEREMENT : elle imprimait deux commandes `netsh
   # portproxy` pretes a coller. Une recette est une invitation ; celle-ci invitait a reconfigurer la
   # pile reseau de la machine pour un banc de dev. On dit le FAIT et on s'arrete la.
-  #
   if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
     say "  portee    : WSL en mode NAT (le defaut) — ce banc n'est joignable que depuis CETTE machine."
     say "              Un deploiement ouvert sur le LAN, c'est un Linux natif ; ici c'est test/dev."
