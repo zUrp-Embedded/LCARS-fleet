@@ -727,10 +727,21 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
 }
 
 # ─── apt_ensure <pkg…> — install par liste des MANQUANTS, verdict réel paquet par paquet ─────────
+# ⚠ `dpkg -s` REUSSIT SUR UN PAQUET RETIRE. Un `apt-get remove` laisse le paquet en etat `rc`
+# (removed, config-files) : sa base de donnees existe toujours, donc `dpkg -s` sort 0 et une sonde
+# batie dessus le croit pose. Mesure du 2026-08-30, banc .63 : apres `provision uninstall --yes`,
+# l'`apply` suivant n'a REINSTALLE ni `docker-ce` ni `ttyd` — les deux etaient en `rc` — et trois
+# modules sont tombes en cascade (la forge non montee, la console sans serveur, quatre unites
+# mortes). Le rail ne savait pas reinstaller ce qu'il venait de desinstaller.
+# `db:Status-Status` rend l'etat REEL : `installed`, `config-files`, `not-installed`.
+pkg_installed() { # pkg_installed <paquet> — 0 seulement s'il est REELLEMENT installe
+  [[ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" == "installed" ]]
+}
+
 apt_ensure() {
   local missing=() already=() pkg
   for pkg in "$@"; do
-    if dpkg -s "$pkg" >/dev/null 2>&1; then already+=("$pkg"); else missing+=("$pkg"); fi
+    if pkg_installed "$pkg"; then already+=("$pkg"); else missing+=("$pkg"); fi
   done
   # ⚠ LA SÉPARATION SE MESURE AVANT L'INSTALL, ET C'EST LE SEUL MOMENT OÙ ELLE EST CONNAISSABLE.
   # Une seconde plus tard, `dpkg -s` répond « présent » pour les deux listes et plus rien ne
@@ -752,7 +763,7 @@ apt_ensure() {
   # revendique donc que des paquets vérifiés présents.
   local rc=0 posed=()
   for pkg in "${missing[@]}"; do
-    if dpkg -s "$pkg" >/dev/null 2>&1; then
+    if pkg_installed "$pkg"; then
       posed+=("$pkg")
     else
       p_fail "apt: $pkg toujours absent après install"; rc=1

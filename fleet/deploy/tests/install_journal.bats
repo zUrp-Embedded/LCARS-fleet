@@ -98,16 +98,32 @@ apt_decor() { # -> pose bin/dpkg + bin/apt-get, exporte APT_TRACE, APT_POSED_DIR
   # pouvait valider etait celui qui note une INTENTION. Depuis que `apt_ensure` ne journalise que ce
   # que `dpkg` confirme, un decor fige mesure l'ancien contrat et rougit sur le nouveau — c'est ce
   # qu'il a fait, et c'est le decor qui avait tort. Un marqueur par paquet pose porte l'etat.
+  # ⚠ LA DOUBLURE REPRODUIT LE PIEGE : `dpkg -s` REUSSIT sur un paquet en etat `rc` (retire, config
+  # conservee) — c'est le comportement du vrai dpkg, et c'est ce qui a fait croire au rail que
+  # `docker-ce` et `ttyd` etaient poses apres son propre uninstall (banc .63, 2026-08-30). Un
+  # marqueur `<pkg>.rc` dans APT_POSED_DIR pose cet etat-la.
   cat > "$bin/dpkg" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
   --print-architecture) echo amd64; exit 0 ;;
   -s) case "$2" in
         git|curl) exit 0 ;;
-        *) [[ -f "${APT_POSED_DIR:-/nonexistent}/$2" ]] && exit 0 || exit 1 ;;
+        *) [[ -f "${APT_POSED_DIR:-/nonexistent}/$2" || -f "${APT_POSED_DIR:-/nonexistent}/$2.rc" ]] && exit 0 || exit 1 ;;
       esac ;;
   *) exit 0 ;;
 esac
+SH
+  # `dpkg-query -W -f='${db:Status-Status}'` : l'etat REEL, celui que `pkg_installed` lit.
+  cat > "$bin/dpkg-query" <<'SH'
+#!/usr/bin/env bash
+pkg="${!#}"
+case "$pkg" in
+  git|curl) echo installed; exit 0 ;;
+esac
+if [[ -f "${APT_POSED_DIR:-/nonexistent}/$pkg" ]]; then echo installed
+elif [[ -f "${APT_POSED_DIR:-/nonexistent}/$pkg.rc" ]]; then echo config-files
+else echo not-installed; exit 1
+fi
 SH
   # `apt-get` ne doit jamais tourner pour de vrai : s'il est appele, il TRACE, pose ses marqueurs et
   # ment sur le succes. `APT_FAIL=1` le fait echouer SANS rien poser — le depot injoignable.
@@ -125,7 +141,7 @@ if [[ "${1:-}" == "install" ]]; then
 fi
 exit 0
 SH
-  chmod +x "$bin/dpkg" "$bin/apt-get"
+  chmod +x "$bin/dpkg" "$bin/dpkg-query" "$bin/apt-get"
   export APT_TRACE="$BATS_TEST_TMPDIR/apt.trace"; : > "$APT_TRACE"
   export APT_POSED_DIR="$BATS_TEST_TMPDIR/posed"; mkdir -p "$APT_POSED_DIR"
   APT_BIN="$bin"
@@ -339,4 +355,18 @@ SH
   # declare « mesure » et date d'avant est pire qu'absent : il repond avec assurance.
   local body; body="$(code "$RUNNER")"
   refute grep -qE '\$CMD" == "apply" && -n "\$\{PROV_JOURNAL_ACC:-\}" && -s' <<<"$body"
+}
+
+@test "un paquet RETIRE (etat rc) est REINSTALLE — dpkg -s le croit la, et le rail se coupait la scie" {
+  # Banc .63, 2026-08-30 : apres `provision uninstall --yes`, l'`apply` suivant n'a reinstalle ni
+  # docker-ce ni ttyd. `apt-get remove` laisse le paquet en `rc` (removed, config-files) ; `dpkg -s`
+  # y sort 0, donc apt_ensure les comptait « deja la » et ne les nommait jamais a apt-get. Trois
+  # modules sont tombes derriere : forge non montee, console sans serveur, quatre unites mortes.
+  apt_decor
+  : > "$APT_POSED_DIR/docker-ce.rc"          # retire, config conservee
+  : > "$APT_POSED_DIR/tmux"                  # celui-la est VRAIMENT pose
+  run env PATH="$APT_BIN:$PATH" bash -c ". '$LIB'; apt_ensure docker-ce tmux"
+  [ "$status" -eq 0 ]
+  grep -q 'apt-get install.*docker-ce' "$APT_TRACE"
+  refute grep -qE 'apt-get install.*\btmux\b' "$APT_TRACE"
 }
