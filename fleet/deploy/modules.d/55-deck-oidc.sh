@@ -6,7 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 50-forge
+# AFTER: 21-service-accounts 50-forge
 #
 # THE BOX'S FRONT DOOR NEEDS A CLIENT, AND NOTHING WAS CREATING ONE. The deck (port 20999) now
 # refuses to serve anything until it can ask the forge "who are you" — deliberately, because a deck
