@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
+# AFTER: 20-groups
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

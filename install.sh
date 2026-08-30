@@ -541,7 +541,7 @@ if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
   echo ""
   echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
   "$PROVISION" apply "${PASSTHRU[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
-    || echo "  ${W}la tranche paquets n'a pas tout convergé — le build dira ce qui manque.${N}"
+    || echo "  ${W}la tranche paquets n'a pas tout convergé — 48-forge-host dira ce qui manque.${N}"
   # LA SONDE SE REJOUE : `docker_endpoint` a répondu « absent » il y a trente secondes, et
   # `PROV_DOCKER_BIN` porte encore cette réponse-là. Sans ce second passage, le build interrogerait
   # un chemin périmé sur une machine qui a désormais docker.

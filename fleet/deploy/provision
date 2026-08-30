@@ -336,10 +336,10 @@ MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 uninstall_run() {
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
 
-  local rows preserve_roots=() journal_pkgs=() cls obj mode owner sub
+  local rows preserve_roots=() journal_pkgs=() cls obj _mode _owner sub
   rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
 
-  while read -r cls obj mode owner sub; do
+  while read -r cls obj _mode _owner sub; do
     [[ "$cls" == "preserve" ]] && preserve_roots+=("$obj")
   done <<<"$rows"
 
@@ -402,7 +402,7 @@ uninstall_run() {
 
   local resolved
   local -a jokers=()
-  while read -r cls obj mode owner sub; do
+  while read -r cls obj _mode _owner sub; do
     applies_here "$sub" || continue
     preserved "$obj" && continue
     while read -r resolved; do
@@ -638,8 +638,8 @@ audit_run() {
 
   local rows; rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
   local -a declares=()
-  local cls obj mode owner sub
-  while read -r cls obj mode owner sub; do declares+=("$obj"); done <<<"$rows"
+  local cls obj _mode _owner sub
+  while read -r cls obj _mode _owner sub; do declares+=("$obj"); done <<<"$rows"
 
   couvert() {
     local p="$1" d

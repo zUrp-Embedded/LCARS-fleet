@@ -6,6 +6,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
+# AFTER: 20-groups
 # ⚠ TOUTE MACHINERIE AJOUTÉE ICI DOUBLE LA SIENNE ET NE PEUT QUE DIVERGER D'ELLE. L'installeur
 # vérifie son sha256 contre un manifeste signé, nettoie derrière lui sur CHAQUE branche d'échec,
 # installe pour l'utilisateur courant et nomme ses morts (dont l'OOM killer). Un staging, un

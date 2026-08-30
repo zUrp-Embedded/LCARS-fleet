@@ -581,11 +581,6 @@ ensure_group() {
     || p_drift "groupe $grp : gid $cur, la table declare $gid — une machine ne se renumerote pas, elle se rebuilde"
 }
 
-members_of() {
-  local grp="$1" sec
-  sec="$(getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' ' ')"
-  printf '%s' "${sec:-aucun}"
-}
 
 ensure_member() {
   local user="$1" grp="$2"
