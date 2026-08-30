@@ -4,53 +4,27 @@
 # STARDATE: 2026-08-14
 # STATUS: PROTO-V2 — phase-2 publish rail: certified forge clone -> external rolling PR/MR, auth by gh/glab
 #
-# WHAT: takes a certified-clean clone produced by publish-transform.sh, force-pushes it to a FIXED
-# rolling branch (`lcars/publish`) on the EXTERNAL destination, and opens (or leaves updated) exactly
-# ONE change request (GitHub PR / GitLab MR) against the base. Prints its URL. It NEVER pushes the
-# destination base branch directly — that is phase 1 (`lcars approve`, host-side, human gate).
+# AUTH IS NOT OURS, and it is the whole point of V2: this rail NEVER reads, stores or passes an
+# external token, under ANY tier — no token file, no `extraheader`, no curl, nothing token-shaped in
+# an argv or in a config we write. The push takes its credential from whatever helper the operator
+# wired; when the CLI cannot open the request for him we print a ready-to-open URL instead.
 #
-# AUTH IS NOT OURS, and that is the whole point of V2. This rail NEVER reads, stores, or passes an
-# external token — under ANY tier. Two tiers, one invariant:
-#   TIER 1 (gh/glab, the 90% path, zero recurring friction) — `gh` (GitHub) / `glab` (GitLab), the
-#     forges' OFFICIAL CLIs, are the wired git credential helpers AND open the change request
-#     (`gh pr create` / `glab mr create`) under their own auth. The operator did `gh auth login` once.
-#   TIER 2 (any wired helper — git-credential-oauth, GCM, .netrc, SSH) — the CLI is ABSENT or not
-#     logged in. The push still works: `git push` takes its credential from whatever helper the
-#     operator wired (his own creds, his call — the homelab-GitLab case). We just cannot open the PR
-#     for him, so we PRINT a ready-to-open compare/new-MR URL: "one more click", never "unsupported".
-# gh/glab are therefore OPTIONAL, not required. In BOTH tiers no token file, no `extraheader`, no curl,
-# nothing token-shaped in an argv or a config we write. (V1 hand-rolled a token layer — extraheader +
-# curl — and a security review had to close its leaks; V2 deletes the layer instead of guarding it.)
-#
-# GIT_TERMINAL_PROMPT=0 so a MISSING/expired credential fails LOUD instead of hanging on a prompt
-# (a headless BEAM has nobody to answer). `gh auth status` / `glab auth status` diagnose it.
+# GIT_TERMINAL_PROMPT=0 so a MISSING/expired credential fails LOUD instead of hanging on a prompt —
+# a headless BEAM has nobody to answer. `gh auth status` / `glab auth status` diagnose it.
 #
 # WHY A ROLLING BRANCH + ONE PR/MR: the diff base is the destination base's real head, so the request
-# always carries "internal main - external main" = everything pending. A new publish force-updates the
-# same branch; the single open request stays current; merging it empties it.
+# always carries everything pending. A new publish force-updates the same branch, and merging empties it.
 #
-# THE DETERMINISM INVARIANT, load-bearing: publish-transform.sh rewrites EVERY SHA (one-way filter-repo
-# pass). This rail is only coherent if that rewrite is DETERMINISTIC — same source commit => same
-# rewritten SHA each pass. Then commits already on the destination base reappear with the SAME SHAs in
-# the fresh clone, so the base IS an ancestor of it and the diff is only the new commits. The rail does
-# NOT trust that: it VERIFIES the base is an ancestor of the fresh clone and REFUSES (exit 6) otherwise,
-# rather than force-pushing an unrelated history into a baseless request. If exit 6 fires, the rewrite
-# is not deterministic; do not "fix" it by dropping the check.
-#
-# DEPENDENCY: git (REQUIRED, universal) + publish-transform.sh (co-located, needs git-filter-repo).
-# The destination's CLI (`gh`/`glab`) is OPTIONAL — present+authed enables Tier 1 auto-PR/MR; absent
-# degrades to Tier 2 (push via the wired helper + a printed compare/new-MR URL). All host-side.
+# ⚠ THE DETERMINISM INVARIANT: this rail is only coherent if the filter-repo rewrite is
+# DETERMINISTIC, so that commits already on the destination base reappear with the SAME SHAs. It
+# does not trust that, it verifies it — and an exit 6 does NOT get "fixed" by dropping the check.
 #
 # USAGE:
 #   publish-rail.sh --project fleet/lcars-fleet --forge http://localhost:3000 \
 #       --forge-token-file /opt/lcars/var/tokens/system.gitea_token \
 #       --host github --dest-repo lordzurp/LCARS-fleet --work /tmp/pub-lcars-fleet
-#   Optional: --host gitlab (default github) · --dest-host HOST (default github.com / gitlab.com;
-#             set it for Enterprise / self-hosted) · --branch lcars/publish · --base main ·
-#             publish-transform passthroughs (--vendor-identity, --filter-repo-bin,
-#             --system-email, --linearize BRANCH)
 #
-# EXIT CODES:
+# EXIT CODES — 2 and 3 are RAISED BY publish-transform.sh and travel through:
 #   0   PR/MR open/updated (Tier 1) OR branch pushed + a ready-to-open URL printed (Tier 2)
 #         OR nothing to publish (fresh head == destination base head)
 #   1   usage / missing dependency (git / publish-transform.sh) / unknown --host
@@ -99,8 +73,6 @@ done
 
 [[ -n "$PROJECT" && -n "$FORGE" && -n "$FORGE_TOKEN_FILE" && -n "$DEST_REPO" && -n "$WORK" ]] || usage
 
-# Per-host CLI: the ONLY host-specific surface. It is BOTH the git credential helper (for push/fetch)
-# and the change-request opener. gh<->glab are 1:1: `pr`/`mr`, `--base`/`--target-branch`.
 case "$HOST" in
   github) CLI="gh";   [[ -n "$DEST_HOST" ]] || DEST_HOST="github.com" ;;
   gitlab) CLI="glab"; [[ -n "$DEST_HOST" ]] || DEST_HOST="gitlab.com" ;;
@@ -108,11 +80,9 @@ case "$HOST" in
 esac
 [[ -x "$PUBLISH_TRANSFORM" ]] || { echo "publish-rail: publish-transform.sh introuvable a cote: $PUBLISH_TRANSFORM" >&2; exit 1; }
 [[ -x "$FORGE_CLI" ]] || { echo "publish-rail: forge-cli.sh introuvable a cote: $FORGE_CLI" >&2; exit 1; }
-# git is the ONLY hard dependency: the push is universal (any wired helper). The CLI is optional.
 command -v git >/dev/null 2>&1 || { echo "publish-rail: dependance absente: git" >&2; exit 1; }
 
-# Tier detection (NOT a gate): the CLI enables auto-PR/MR only if it is present AND logged in. Absent
-# or logged-out => Tier 2: we push via the wired helper and print a ready-to-open URL instead.
+# Tier detection, NOT a gate.
 HAS_CLI=0
 if "$FORGE_CLI" auth-ok --host "$HOST" --dest-host "$DEST_HOST" --repo "$DEST_REPO"; then
   HAS_CLI=1
@@ -124,29 +94,25 @@ fi
 
 DEST_URL="https://${DEST_HOST}/${DEST_REPO}.git"
 
-# --- Change-request adapter: ONE call surface, host-qualified ------------------------------------
-# THIS BLOCK CARRIED FOUR `gh`/`glab` INVOCATIONS OF ITS OWN, and not one of them passed
-# `$DEST_HOST` — the rail pushed to the requested host and searched/opened the PR on github.com.
+# ⚠ Chaque appel passe $DEST_HOST : sans lui le rail pousse sur l'hote demande et cherche la PR
+# sur github.com.
 fc() { "$FORGE_CLI" "$1" --host "$HOST" --dest-host "$DEST_HOST" --repo "$DEST_REPO" "${@:2}"; }
 request_find()       { fc request-find --head "$BRANCH" --base "$BASE"; }
 request_open()       { fc request-open --head "$BRANCH" --base "$BASE" --title "$1" --body "$2"; }
 request_manual_url() { fc request-url  --head "$BRANCH" --base "$BASE"; }
 
-# --- Phase-2 precondition: the destination base must already exist (phase 1 populated it) ----------
 if ! git ls-remote --exit-code "$DEST_URL" "refs/heads/$BASE" >/dev/null 2>&1; then
   echo "publish-rail: $DEST_HOST/$DEST_REPO n'a pas de branche '$BASE' — fais la phase 1 (lcars approve) d'abord." >&2
   echo "  Ce rail ne fait QUE des PR/MR ; il ne peuple jamais la base lui-meme." >&2
   exit 4
 fi
 
-# --- Produce the certified-clean clone (author rewrite + internal-attribution scan) ---------------
 "$PUBLISH_TRANSFORM" \
   --repo "$PROJECT" --forge "$FORGE" --token-file "$FORGE_TOKEN_FILE" --out "$WORK" \
   "${PASSTHROUGH[@]}"
 
 cd "$WORK"
 
-# --- Determinism gate: the destination base must be an ancestor of the fresh clone's head ----------
 git remote add dest "$DEST_URL"
 git fetch -q dest "$BASE"
 FRESH_HEAD="$(git rev-parse HEAD)"
@@ -165,22 +131,20 @@ if ! git merge-base --is-ancestor "dest/$BASE" HEAD; then
   exit 6
 fi
 
-# --- Force-push the rolling branch (credential from the wired helper — Tier 1 CLI or Tier 2 own) ----
+# Le credential vient du helper git cable, jamais d'ici.
 if ! git push -q -f dest "HEAD:refs/heads/$BRANCH"; then
   echo "publish-rail: echec du push de $BRANCH vers $DEST_HOST/$DEST_REPO" >&2
   exit 5
 fi
 
-# --- Tier 2: no CLI to open the request — the push is done, hand back a ready-to-open URL ------------
 if [[ "$HAS_CLI" == 0 ]]; then
   echo "publish-rail: branche $BRANCH poussee — ouvre la PR/MR ici -> $(request_manual_url)"
   exit 0
 fi
 
-# --- Tier 1: open (or leave-updated) exactly one PR/MR under the CLI's own auth ---------------------
-# THE TWO STATES, KEPT APART. `|| true` swallowed a failing `list`: an auth expiring mid-run
-# answered empty, we moved on to the creation, that failed, and the message blamed `create` while
-# `list` was what gave way. Exit 3 = the helper could not answer; we stop, and we SAY so.
+# ⚠ LES DEUX ETATS RESTENT SEPARES, et surtout PAS derriere un `|| true` : « aucune PR ouverte » et
+# « le helper n'a pas pu repondre » rendent tous deux du vide. Confondus, une auth qui expire en
+# cours de route fait tenter la creation, qui echoue, et le message accuse la mauvaise etape.
 if ! EXISTING="$(request_find)"; then
   echo "publish-rail: impossible de savoir si une PR/MR est deja ouverte sur $DEST_HOST/$DEST_REPO" >&2
   echo "  La branche $BRANCH EST poussee. Rien n'a ete cree — relance quand la forge repond." >&2
