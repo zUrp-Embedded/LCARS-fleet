@@ -64,26 +64,8 @@ scan_forbidden_markers() {
 
 oldest_internal_commit() { # <dir> <system_email> -> sha, or empty
   (cd "$1" && git log --topo-order --reverse --format='%H%x1f%ae%x1f%ce%x1f%B%x1e' HEAD) \
-    | LCARS_IDENT_RE="$(internal_ident_re "$2")" LCARS_MSG_RE="$(internal_msg_re)" python3 -c '
-import os, re, sys
-ident = re.compile(os.environb[b"LCARS_IDENT_RE"], re.I)
-msg = re.compile(os.environb[b"LCARS_MSG_RE"], re.I)
-# ⚠ `maxsplit=3` ET PAS UN SPLIT NU : un message de commit peut contenir nimporte quel octet, `\x1f`
-# compris, et un split nu laisserait `f[3]` ne porter que la premiere tranche du body.
-#
-# ANGLE MORT DECLARE : un `\x1e` dans un body coupe le RECORD, pas le champ, et la borne rate ce
-# commit. Aucun format de `git log` ne prefixe ses longueurs, donc aucun separateur ne peut etre sur.
-# La direction reste SURE : la certification rescanne toute lhistoire et REFUSE. On perd une
-# publication, on ne laisse jamais fuir une attribution interne.
-for rec in sys.stdin.buffer.read().split(b"\x1e"):
-    f = rec.strip(b"\n").split(b"\x1f", 3)
-    if len(f) < 4:
-        continue
-    sha, ae, ce, body = f[0], f[1], f[2], f[3]
-    if ident.search(ae) or ident.search(ce) or msg.search(body):
-        sys.stdout.write(sha.decode())
-        break
-'
+    | LCARS_IDENT_RE="$(internal_ident_re "$2")" LCARS_MSG_RE="$(internal_msg_re)" \
+      python3 "$SCRIPT_DIR/publish-transform-boundary.py"
 }
 
 linearize_first_parent() { # <dir> <branch>
@@ -188,61 +170,13 @@ fi
 
 if [[ -n "$FIRST_OURS" ]]; then
 echo "publish-transform: passe filter-repo — toute identite interne (@lcars.local) devient $HUMAN_NAME, co-author interne devient $VENDOR_NAME"
-# ⚠ The 5 values cross through the ENVIRONMENT, NEVER through bash interpolation into the Python
-# source: an author name is UNCONTROLLED data (git log %cn), and `${VAR@Q}` on an apostrophe
-# (O'Brien) yields a bash literal `$'...'` that is INVALID Python — filter-repo SyntaxError, opaque
-# exit 2. `os.environb` also yields the exact bytes, so non-UTF-8 names survive.
 (cd "$OUT_DIR" && \
   LCARS_PUB_VENDOR_NAME="$VENDOR_NAME" \
   LCARS_PUB_VENDOR_EMAIL="$VENDOR_EMAIL" \
   LCARS_PUB_HUMAN_NAME="$HUMAN_NAME" \
   LCARS_PUB_HUMAN_EMAIL="$HUMAN_EMAIL" \
-  "$FILTER_REPO_BIN" --commit-callback '
-import re, os
-VENDOR_NAME = os.environb[b"LCARS_PUB_VENDOR_NAME"]
-VENDOR_EMAIL = os.environb[b"LCARS_PUB_VENDOR_EMAIL"]
-HUMAN_NAME = os.environb[b"LCARS_PUB_HUMAN_NAME"]
-HUMAN_EMAIL = os.environb[b"LCARS_PUB_HUMAN_EMAIL"]
-
-# INTERNAL IS THE DOMAIN, not one address, and CASE-FOLDED: this must ask the SAME question the
-# certification asks. A narrower test here sends survivors straight into the refusal - blocked,
-# never leaked, but with a clone the script itself is unable to clean.
-def internal(email):
-    return email.lower().endswith(b"@lcars.local")
-
-# ⚠ BOTH SIDES ARE READ BEFORE EITHER IS WRITTEN. Testing the LIVE `commit.author_email` below would
-# read a side the first block may already have rewritten, and take the branch meaning "external
-# author" on a commit where that is false.
-# NB: this whole callback is a single-quoted bash string -> NO ASCII apostrophe anywhere inside it.
-author_was_internal = internal(commit.author_email)
-committer_was_internal = internal(commit.committer_email)
-
-if author_was_internal:
-    if not committer_was_internal:
-        commit.author_name = commit.committer_name
-        commit.author_email = commit.committer_email
-    else:
-        commit.author_name = HUMAN_NAME
-        commit.author_email = HUMAN_EMAIL
-
-if committer_was_internal:
-    if not author_was_internal:
-        # Falling back to the repo-wide human here would attribute the commit to somebody else.
-        commit.committer_name = commit.author_name
-        commit.committer_email = commit.author_email
-    else:
-        commit.committer_name = HUMAN_NAME
-        commit.committer_email = HUMAN_EMAIL
-
-# THE DOMAIN HERE TOO: the address inside the angle brackets is the fact, the name is not. Anchoring
-# on a `LCARS-` prefix would bet on the commit gate always shaping the trailer that way.
-commit.message = re.sub(
-    rb"Co-authored-by:\s*[^<\n]*<[^>]+@lcars\.local>",
-    b"Co-Authored-By: " + VENDOR_NAME + b" <" + VENDOR_EMAIL + b">",
-    commit.message,
-    flags=re.IGNORECASE,
-)
-' ${REFS_ARGS[@]+"${REFS_ARGS[@]}"})
+  "$FILTER_REPO_BIN" --commit-callback "$SCRIPT_DIR/publish-transform-attribution.py" \
+  ${REFS_ARGS[@]+"${REFS_ARGS[@]}"})
 fi
 
 # ⚠ PAS COSMETIQUE : `--partial` laisse `refs/remotes/origin/*` sur l'histoire d'avant, et la
