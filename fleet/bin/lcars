@@ -181,15 +181,12 @@ cmd_spawn() {
     payload="$(printf '{"cap_profile_name":"%s"}' "$role")"
   fi
 
-  # Contract: `/api/admin/spawn` accepts only a FLAT allowlisted DTO (`cap_profile_name` + `issue_id` +
-  # `brief`) — NO raw `opts`: any key outside the allowlist (including an `opts` supplied by the client)
-  # fails the spawn with a 422. The API rebuilds the spawner's internal `opts` itself from `brief`
-  # (cf. SpawnAdmission).
+  # Le DTO est PLAT et allowliste : toute clef hors liste (un `opts` fourni par le client compris)
+  # fait echouer le spawn en 422.
   local body http
-  # `--unix-socket`: the write door lives on the per-human AF_UNIX socket (ControlRouter), NOT on
-  # the TCP loopback - the pod (shared host netns) cannot reach it. The host in the URL is ignored
-  # with --unix-socket; we keep a dummy host. curl WITHOUT -f: a 4xx/5xx does not make curl fail
-  # (we read the code via -w); only a transport failure (exit != 0) -> `|| die`.
+  # La porte d'ecriture est sur la socket AF_UNIX per-humain, que le pod ne peut pas joindre. L'hote
+  # de l'URL est ignore avec `--unix-socket`. curl SANS `-f` : un 4xx/5xx ne le fait pas echouer,
+  # d'ou la lecture du code par `-w` — seul un echec de transport atteint le `|| die`.
   body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \
@@ -238,20 +235,14 @@ cmd_attach() {
   [[ -S "$sock" ]] || die "attach: pas de sock pour '$pod_id' ($sock) — pod vivant ? (cf. « $PROG list »)"
   command -v "$TMUX_BIN" >/dev/null 2>&1 || die "attach: tmux introuvable ($TMUX_BIN)"
   echo "attach $pod_id (Ctrl-b d rend la main sans tuer le pod)…" >&2
-  # UI: the wheel scrolls the tmux scrollback (not the shell history). `set -g mouse on` on the pod's
-  # own server, right before attaching → covers EVERY pod through RUNTIME tmux config, with no launcher
-  # edit. Mouse ON does change selection: hold Shift to copy to the OS clipboard.
+  # Souris ON change la selection : maintenir Shift pour copier vers le presse-papier de l'OS.
   "$TMUX_BIN" -S "$sock" set -g mouse on 2>/dev/null || true
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
 
-#
-# LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout` : catalogues_installed_dir/0,
-# catalogues_shipped_dir/0). C'est un fait ecrit deux fois, dans deux langages qui ne peuvent pas
-# s'appeler — la meme forme que les listes de roles verrouillees par `mix lcars.contracts.check`.
-# Un changement ici sans l'autre cote donne une CLI qui lit un cache sur lequel rien ne tourne, et
-# c'est en mode degrade (release injoignable) qu'elle l'affiche — le seul moment ou l'operateur n'a
-# aucune seconde source pour le recouper.
+# LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout`) : un fait ecrit deux fois, dans deux
+# langages qui ne peuvent pas s'appeler. Changer ici sans l'autre cote donne une CLI qui lit un cache
+# sur lequel rien ne tourne — et elle l'affiche en mode DEGRADE, quand rien ne permet de la recouper.
 CAT_DIR="${LCARS_CATALOGUES_DIR:-/home/catalogues}"
 CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
@@ -265,10 +256,8 @@ cat_dir_of() {
   else return 1; fi
 }
 
-#
-# CHARGER CE FICHIER NE DONNE AUCUN ACCES FORGE A CE CLI. Il ne fait toujours aucun appel : il
-# TRANSMET sa configuration au release, qui agit. Le fichier porte AUSSI des ports d'ecoute ;
-# `LCARS_TOOL_EVAL=1`, pose par chaque appelant, neutralise le bloc qui les ouvrirait.
+# Le fichier porte AUSSI des ports d'ecoute : `LCARS_TOOL_EVAL=1`, pose par chaque appelant,
+# neutralise le bloc qui les ouvrirait. Ce CLI ne fait aucun appel forge, il transmet la config.
 _load_box_env() {
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
   [[ -f "$env_file" ]] || return 0
@@ -278,27 +267,22 @@ _load_box_env() {
   set +a
 }
 
-# Le binaire de release — un seul defaut, pose ici. L'appelant decide ce qu'il fait de son absence :
-# `catalogue list` la rend en 127 pour la dire, les autres portes meurent dessus.
+# Un seul defaut, pose ici. L'appelant decide de son absence : `catalogue list` la rend en 127 pour
+# la dire, les autres portes meurent dessus.
 _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"; }
 
-#
-# ⚠ LE JETON ATTERRIT QUAND MEME DANS UN FICHIER, ET C'EST DELIBERE. `publish-rail.sh` et
-# `publish-transform.sh` prennent un CHEMIN ; leur passer le jeton en argument le mettrait dans
-# `/proc/<pid>/cmdline`, que tout le monde lit. La difference avec l'etat d'avant n'est pas
-# cosmetique : ce fichier-ci appartient a UNE personne, vit le temps d'UN geste, et n'existe que
-# parce que la forge vient de dire oui.
+# ⚠ LE JETON ATTERRIT DANS UN FICHIER, ET C'EST DELIBERE : les rails prennent un CHEMIN, et leur
+# passer le jeton en argument le mettrait dans `/proc/<pid>/cmdline`, que tout le monde lit.
 _authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"; }
 
 _forge_account() {
   printf '%s\n' "${FORGE_PUSH_ACCOUNT:-${FORGE_BOT_LOGIN:-system_starfleet}}"
 }
 
-# Materialise le jeton dans <dir>, rend son chemin. Meurt en nommant la cause — le client la porte
-# deja en francais sur stderr, on ne la reformule pas par-dessus.
-#
-# ⚠ `umask 077` DANS UN SOUS-SHELL. Le pose dans le shell courant le laisserait actif pour tout ce
-# que la porte ecrit ensuite ; les parentheses bornent sa duree de vie a la seule redirection.
+# Materialise le jeton dans <dir>, rend son chemin. Le client porte deja la cause sur stderr : on ne
+# la reformule pas par-dessus.
+# ⚠ `umask 077` DANS UN SOUS-SHELL : pose dans le shell courant, il resterait actif pour tout ce que
+# la porte ecrit ensuite.
 _authority_token_file() { # <compte> <dir>
   local compte=$1 dir=$2 ask f
   ask="$(_authority_ask_bin)"
@@ -359,8 +343,6 @@ cmd_catalogue_list() {
   esac
 }
 
-# Le binaire de release joue les memes controles que le boot. Dans la boite il est a l'install ;
-# hors boite il n'existe pas, et on le DIT au lieu de deviner une commande de repli.
 cat_verify_root() {
   local root="$1"
   local bin; bin="$(_release_bin)"
@@ -376,10 +358,8 @@ cmd_catalogue_verify() {
   cat_verify_root "$root"
 }
 
-# Le nom DECLARE par un catalogue, lu a la racine de son manifeste. Cle de premier niveau, donc
-# ancree en colonne 0 : un `name:` indente appartient a autre chose. La charte est la meme que cote
-# runtime (kebab, pas de `_`), et un nom qui ne la respecte pas ne sort pas d'ici — le refus detaille
-# vient de `catalogue verify`, dont c'est le metier.
+# Le nom DECLARE par le catalogue, lu a la racine de son manifeste. Cle de premier niveau, donc
+# ancree en COLONNE 0 : un `name:` indente appartient a autre chose.
 cat_declared_name() { # $1=racine -> le nom, ou 1
   local m="$1/catalogue.yaml" n
   [[ -r "$m" ]] || return 1
@@ -388,13 +368,9 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
   printf '%s' "$n"
 }
 
-# CETTE COMMANDE NE DETIENT PLUS RIEN, ET C'EST TOUT LE DESIGN. Elle ne lit aucun secret, n'execute
-# aucun geste, ne teste aucun groupe : elle DEMANDE a un service root par une socket unix, qui pose
-# la question a la forge et agit. Detenir le pouvoir n'est plus la preuve du droit.
-#
-# Le service n'est pas root : il pose sa socket sous `/run/lcars/authority/`, dont `system.manifest`
-# porte le mode. Ce defaut est une COPIE de cette adresse — les deux bougent ensemble ou le geste
-# frappe une porte qui n'existe pas, et accuse le service d'etre eteint.
+# Cette commande ne detient rien : elle DEMANDE a un service par une socket unix, qui pose la
+# question a la forge et agit. Ce defaut est une COPIE de l'adresse que porte `system.manifest` —
+# les deux bougent ensemble, ou le geste frappe une porte absente et accuse le service d'etre eteint.
 _CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-/run/lcars/authority/catalogue.sock}"
 
 # LE TRANSPORT, ET BASH N'EN A PAS. `/dev/tcp` est TCP seul : ce shell ne peut pas ouvrir une socket
@@ -409,20 +385,15 @@ _catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le ver
   local name=$1 t; t="$(_catalogue_transport)" || return 127
   case "$t" in
     socat) printf 'install %s\n' "$name" | socat -t 86400 - UNIX-CONNECT:"$_CATALOGUE_SOCKET" ;;
-    # ⚠ `-q -1` EST LE JUMEAU DE `-t` CI-DESSUS, ET SON ABSENCE ETAIT UNE INCOHERENCE. On a mesure
-    #   que `socat` ferme apres l'EOF de stdin et on l'a corrige ; `nc` a le meme comportement selon
-    #   son implementation. Le `nc` d'OpenBSD attend par defaut (mesure), `ncat` non — et sans ce
-    #   drapeau le verdict d'un geste de plusieurs minutes est perdu. `-q -1` dit « n'abandonne
-    #   jamais l'autre sens » ; une implementation qui ne le connait pas ECHOUE ici, franchement,
-    #   au lieu de rendre un silence que le garde plus bas doit rattraper.
+    # ⚠ `-q -1` = « n'abandonne jamais l'autre sens ». Le `nc` d'OpenBSD attend par defaut, `ncat`
+    #   non : sans ce drapeau, le verdict d'un geste de plusieurs minutes est perdu. Une
+    #   implementation qui ne le connait pas ECHOUE ici, franchement, au lieu de rendre un silence.
     nc)    printf 'install %s\n' "$name" | nc -q -1 -U "$_CATALOGUE_SOCKET" ;;
   esac
 }
 
-#
-# L'executeur rend un JETON stable (`FAIL:not_admin`), pas une phrase. Le vocabulaire de l'operateur
-# vit ICI, parce que c'est a ce programme qu'il parle — et un service qui redigerait pour la CLI
-# serait une seconde autorite sur ce que la CLI dit.
+# L'executeur rend un JETON stable (`FAIL:not_admin`), pas une phrase : le vocabulaire de l'operateur
+# vit ICI. Un service qui redigerait pour la CLI serait une seconde autorite sur ce qu'elle dit.
 _die_catalogue_refus() { # <jeton de cause> [detail]
   case "$1" in
     not_admin)
@@ -505,15 +476,13 @@ cmd_catalogue_install() {
   « journalctl -u lcars-catalogue » dit ce que le service a vu."
 
   if [[ -n "$cause" ]]; then
-    # `gesture_failed:<rc>` porte le code du geste : on relaie SON echec, dont les lignes viennent
-    # d'etre imprimees au-dessus, plutot que de le retraduire en refus d'autorite.
+    # On relaie l'echec DU GESTE, dont les lignes viennent d'etre imprimees, plutot que de le
+    # retraduire en refus d'autorite.
     case "$cause" in
       gesture_failed:*) exit "${cause#gesture_failed:}" ;;
-      # ⚠ UN GESTE TUE PAR UN SIGNAL N'A PAS DE CODE DE SORTIE A RELAYER. Le service le nomme a part
-      # justement pour qu'on ne fasse pas `exit -15` ici : bash rend alors 241 (mesure), un nombre
-      # qui ne designe rien. On passe donc par un refus ordinaire — meme sortie que les autres
-      # causes, et une PHRASE qui distingue « interrompu » de « echoue », parce que les deux
-      # appellent des gestes differents.
+      # ⚠ UN GESTE TUE PAR UN SIGNAL N'A PAS DE CODE A RELAYER : `exit -15` fait rendre 241 a bash,
+      # un nombre qui ne designe rien. D'ou un refus ordinaire, et une PHRASE qui distingue
+      # « interrompu » de « echoue » — les deux appellent des gestes differents.
       gesture_signalled:*) _die_catalogue_refus gesture_signalled "${cause#gesture_signalled:}" ;;
       *) _die_catalogue_refus "${cause%%:*}" "$name" ;;
     esac
@@ -564,10 +533,9 @@ cmd_catalogue() {
   esac
 }
 
-# PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /opt/lcars/var/tokens —
-# that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
-# its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
-# (mode 600), read host-side by this CLI (it runs as the human), and NEVER enter a pod.
+# PER-HUMAN, sous ~/.lcars — PAS /opt/lcars/var/tokens, qui est le store PARTAGE des jetons worker
+# (root:fleet, indexe par role). Ces jetons-ci sont les fichiers de l'humain, et n'entrent JAMAIS
+# dans un pod.
 FORGES_DIR="$HOME/.lcars/forges"
 PUBLISH_DIR="$HOME/.lcars/publish"
 
@@ -648,16 +616,12 @@ cmd_forge_status() {
       owner="$(_json_field "$f" owner)"
       dest_host="$(_json_field "$f" dest_host)"
       cli="$(_dest_cli "$host")"
-      # ON THIS FORGE'S HOST, not on a global state: bare, `auth status` exits 1 as soon as ANY
-      # host has an issue, and exits 0 as soon as ONE host is fine. A dashboard that shows
-      # `[ok] authentifie` to an operator who is not authenticated ON THIS FORGE is worse than no
-      # dashboard at all: it lies at the exact spot where one goes looking for the failure.
+      # SUR L'HOTE DE CETTE FORGE, jamais sur un etat global : un tableau de bord qui affiche [ok]
+      # a qui n'est pas authentifie ICI ment a l'endroit exact ou on cherche la panne.
       local arc=0
       _fc auth-ok "$host" "$dest_host" "$owner/-" || arc=$?
       case "$arc" in
         0) echo "  [ok] $name  ($host $owner @ $dest_host) — $cli authentifie" ;;
-        # Absent et deconnecte demandent DEUX gestes differents, et la boite n'installe ni l'un ni
-        # l'autre : « auth login » est un conseil inexecutable quand le binaire n'est pas la.
         4) echo "  [!!] $name  ($host $owner @ $dest_host) — $cli PAS INSTALLE. Tier 2 : cable un helper git (PR/MR a ouvrir a la main). Tier 1 : installe $cli puis « $cli auth login »." ;;
         *) echo "  [!!] $name  ($host $owner @ $dest_host) — $cli non authentifie : « $cli auth login »" ;;
       esac
@@ -675,11 +639,9 @@ cmd_publish() {
   esac
 }
 
-#
-# THIS DOES NOT OPEN ANYTHING TO AN AGENT. A CLI verb is a HUMAN door — pods have no shell on the
-# host — and the human is already the one who arbitrates a publication: they sign the pull request.
-# It reads the same binding and calls the same rail with the same arguments as the runtime does; a
-# second implementation of the argument list would drift from the first.
+# Porte HUMAINE, et elle n'ouvre rien a un agent : les pods n'ont pas de shell sur l'hote. Elle
+# appelle le MEME rail avec les MEMES arguments que le runtime — une seconde implementation de la
+# liste d'arguments deriverait de la premiere.
 cmd_publish_run() {
   local repo="" linearize=""
   while [[ $# -gt 0 ]]; do
@@ -701,8 +663,8 @@ cmd_publish_run() {
   dest_host="$(_json_field "$binding" dest_host)"
   dest_repo="$(_json_field "$binding" dest_repo)"
   base="$(_json_field "$binding" base)"
-  # Same refusal as the runtime: a binding that does not say WHERE it publishes is not a binding.
-  # The runtime counts `base` among its required keys; guessing here would re-open what that closed.
+  # Une liaison qui ne dit pas OU elle publie n'est pas une liaison : deviner ici rouvrirait ce que
+  # le refus du runtime a ferme.
   for k in host dest_host dest_repo base; do
     [[ -n "${!k}" ]] || die "publish run: la liaison $binding ne declare pas « $k » — relie a nouveau"
   done
@@ -713,14 +675,11 @@ cmd_publish_run() {
   local rail; rail="$(dirname "$(readlink -f "$0")")/publish-rail.sh"
   [[ -x "$rail" ]] || die "publish run: rail introuvable a cote: $rail"
 
-  # A FRESH path per run, because the rail refuses an existing --work (the transform needs a clean
-  # clone). Swept below on every outcome BUT exit 6, which the rail leaves for inspection when the
-  # rewrite lost its determinism — the one failure that cannot be reproduced from a message.
+  # Un chemin NEUF a chaque passage : le rail refuse un `--work` existant (la transformation exige
+  # un clone propre).
   local base_dir; base_dir="$(mktemp -d)"
   local work="$base_dir/clone"
 
-  # LE JETON EST DEMANDE ICI, APRES le repertoire qui le portera et AVANT le rail. Sa cause est
-  # imprimee par le client ; on ne la reformule pas, on constate seulement l'echec.
   local tokfile
   tokfile="$(_authority_token_file "$(_forge_account)" "$base_dir")" \
     || { rm -rf "$base_dir"; die "publish run: pas de jeton de forge (cause ci-dessus)"; }
@@ -733,9 +692,8 @@ cmd_publish_run() {
     --host "$host" --dest-repo "$dest_repo" --dest-host "$dest_host" --base "$base" \
     --work "$work" "${extra[@]}" || rc=$?
 
-  # ⚠ RETIRE AVANT LE BRANCHEMENT, ET C'EST LA RAISON D'ETRE DE CETTE LIGNE. La sortie 6 CONSERVE
-  # le repertoire pour inspection ; le jeton y aurait survecu indefiniment, sur une machine, dans un
-  # chemin que personne ne surveille — un secret laisse en place par le chemin d'erreur.
+  # ⚠ RETIRE AVANT LE BRANCHEMENT : la sortie 6 CONSERVE le repertoire pour inspection, et le jeton
+  # y survivrait indefiniment dans un chemin que personne ne surveille.
   rm -f "$tokfile"
 
   if [[ "$rc" == 6 ]]; then
@@ -824,11 +782,9 @@ cmd_approve() {
   fi
 
   local cli; cli="$(_dest_cli "$host")"
-  # ⚠ THE PROBE IS DELIBERATELY *NOT* TAKEN HERE. It used to be, some hundred lines above its use —
-  # and between the two sit a clone and a full history rewrite, 2 to 10 minutes on a real repository.
-  # A `gh` token expiring inside that window made the creation fail on the API's raw 401 instead of
-  # on "your auth expired between the check and the call". `have_cli` is now read at the moment it
-  # decides something, so the answer it gives is the answer that holds.
+  # ⚠ LA SONDE N'EST DELIBEREMENT PAS PRISE ICI : entre ce point et son usage il y a un clone et une
+  # reecriture d'historique complete, 2 a 10 minutes. Un jeton qui expire dans cette fenetre faisait
+  # echouer la creation sur un 401 brut. `have_cli` est lu au moment ou il decide quelque chose.
   local have_cli
   export GIT_TERMINAL_PROMPT=0
 
@@ -839,26 +795,20 @@ cmd_approve() {
   local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
 
-  # Scratch clone, removed on ANY exit (die exits → EXIT trap fires; the CLI runs one verb then ends,
-  # so a single EXIT trap is safe). mktemp -d is 0700; no external secret ever lands in it.
-  # ⚠ NOT `local`, AND THE TRAP IS WHY. An EXIT trap fires when the SCRIPT ends, which is after this
-  # function has returned — a `local` is gone by then. Under `set -u` the trap then died on
-  # "work_base: unbound variable", which cost twice: `approve` exited 1 ON SUCCESS (every caller
-  # reading a failure that did not happen), and the scratch clone was NEVER removed — the very leak
-  # this trap was written to prevent. Measured 2026-08-20 by running the verb end to end against a
-  # real destination; reading the code had shown a sweep that does not happen.
+  # ⚠ PAS `local`, ET LE TRAP EST LA RAISON. Un trap EXIT se declenche a la fin du SCRIPT, donc apres
+  # le retour de cette fonction : un `local` a disparu a ce moment-la. Sous `set -u` le trap mourait
+  # alors sur « work_base: unbound variable », ce qui coutait deux fois — `approve` sortait 1 EN CAS
+  # DE SUCCES, et le clone n'etait JAMAIS retire, la fuite meme que ce trap doit empecher.
   work_base="$(mktemp -d)"
   trap 'rm -rf "$work_base"' EXIT
   local work="$work_base/clone"
 
-  # LE JETON EST DEMANDE APRES LE TRAP, ET L'ORDRE EST LE CONTRAT. Pose dedans, il tombe avec le
-  # repertoire sur TOUTE sortie — y compris un `die`. Demande avant, il faudrait un second balayage,
-  # et c'est exactement la ligne qu'on oublie. Le refus se lit sur le stderr du client.
+  # APRES LE TRAP, ET L'ORDRE EST LE CONTRAT : pose dans le repertoire, le jeton tombe avec lui sur
+  # TOUTE sortie, `die` compris. Demande avant, il faudrait un second balayage — la ligne qu'on oublie.
   local tokfile
   tokfile="$(_authority_token_file "$(_forge_account)" "$work_base")" \
     || die "approve: pas de jeton de forge (cause ci-dessus)"
 
-  # Certified-clean clone (author rewrite + internal-attribution scan). Its exit propagates.
   "$(dirname "$(readlink -f "$0")")/publish-transform.sh" \
     --repo "$repo" --forge "$FORGE_BASE_URL" --token-file "$tokfile" --out "$work" \
     || die "approve: production du clone certifie echouee (voir ci-dessus)"
@@ -888,12 +838,8 @@ cmd_approve() {
         || die "approve: creation de $dest_host/$dest_repo echouee ($cli repo create)"
       echo "approve: $dest_host/$dest_repo cree ($visibility) sous ton login $cli."
     fi
-    # THE BASE IS DERIVED FROM THE DESTINATION, IT IS NOT ASSUMED. Three states, three answers:
-    #   · repository we have just created -> it is empty, we choose its base;
-    #   · repository present and populated -> we READ its default branch (that is the one the forge
-    #     displays, hence the only one a PR against makes any sense);
-    #   · repository present but EMPTY -> no ref to read, this is the supported Tier 2 case
-    #     ("create the empty repo in the web UI, then re-run"): we choose.
+    # LA BASE SE DERIVE DE LA DESTINATION, elle ne se suppose pas. Le cas non evident : un depot
+    # PRESENT mais VIDE n'a aucune ref a lire — c'est le Tier 2 supporte, et la on choisit.
     if [[ -z "$base" ]]; then
       if [[ "$repo_exists" == 1 ]]; then
         base="$(_fc default-branch "$host" "$dest_host" "$dest_repo" 2>/dev/null || true)"
@@ -911,7 +857,6 @@ cmd_approve() {
         base="main"
       fi
     fi
-    # LINK: never clobber a base the human populated by hand (a repo pre-created WITH content, Tier 2).
     if git ls-remote --exit-code "$dest_url" "refs/heads/$base" >/dev/null 2>&1; then
       die "approve: $dest_host/$dest_repo a deja « $base » — refuse d'ecraser. Vide-la ou choisis un autre repo."
     fi
@@ -922,7 +867,6 @@ cmd_approve() {
     chmod 600 "$binding"
     echo "approve: « $slug » lie a $dest_host/$dest_repo et peuple ($base)."
   else
-    # DIRECT push to an existing base: determinism gate (base must be an ancestor of the fresh clone).
     git fetch -q "$dest_url" "$base" \
       || die "approve: lecture de $base sur $dest_host/$dest_repo impossible"
     if [[ "$(git rev-parse HEAD)" == "$(git rev-parse FETCH_HEAD)" ]]; then
