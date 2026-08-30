@@ -230,6 +230,21 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [[ "$output" == *"retiree"* ]]
 }
 
+@test "substrat docker: une declaration qui NE PEUT PAS etre retiree est un ECHEC, jamais un rc 0 muet" {
+  # `[[ -e ]] && { rm -f && p_ok; }` : quand `rm` echoue, ni p_ok ni p_fail — le module rend 0
+  # avec la declaration perimee toujours en place, et le boot suivant obeit a un ordre que ce
+  # module a desavoue. Un retrait qui echoue se compte comme un echec.
+  [ "$(id -u)" -ne 0 ] || skip "root retire tout, la faute n'est pas observable"
+  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
+  chmod 0555 "$(dirname "$LCARS_TMPFILES_CONF")"
+  PROV_SUBSTRATE=docker mod 'PROV_FAILED=0; apply_tmpfiles; echo "failed=$PROV_FAILED"'
+  chmod 0755 "$(dirname "$LCARS_TMPFILES_CONF")"
+  [ "$status" -eq 0 ]
+  [ -e "$LCARS_TMPFILES_CONF" ]
+  [[ "$output" == *"failed=1"* ]]
+  [[ "$output" != *"retiree"* ]]
+}
+
 # ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
 #
 # ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,

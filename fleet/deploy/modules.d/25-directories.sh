@@ -308,7 +308,11 @@ apply_tmpfiles() {
   # laisser vivre. Un fichier tmpfiles qui decrit des dossiers dont ce module ne repond plus est un
   # ordre donne au boot par un composant qui a change d'avis.
   if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! prov_runtime_dirs | grep -q .; then
-    [[ -e "$conf" ]] && { rm -f "$conf" && p_ok "tmpfiles: declaration retiree ($conf) — ce substrat ne la porte pas"; }
+    if [[ -e "$conf" ]]; then
+      if rm -f "$conf"; then p_ok "tmpfiles: declaration retiree ($conf) — ce substrat ne la porte pas"
+      else p_fail "tmpfiles: declaration perimee ($conf) impossible a retirer — le boot suivant obeira encore a un ordre que ce module a desavoue"
+      fi
+    fi
     return 0
   fi
 
