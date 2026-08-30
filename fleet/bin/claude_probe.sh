@@ -4,28 +4,14 @@
 # STARDATE: 2026-08-03
 # STATUS: sonde du CONTRAT VENDOR — les drapeaux dont le launcher depend existent-ils encore ?
 #
-# ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-# `claude_launch.sh` construit sa ligne de commande avec une vingtaine de drapeaux mesures a des
-# versions PRECISES du binaire vendor (2.1.88/177/183). Le binaire, lui, se met a jour tout seul.
-# Le jour ou l'un de ces drapeaux est renomme ou retire, on l'apprend au PREMIER POD CASSE — un
-# spawn qui echoue avec un message du vendor, plusieurs couches sous l'endroit ou la cause vit.
+# `claude_launch.sh` depend d'une vingtaine de drapeaux mesures a des versions PRECISES du binaire
+# vendor, et le binaire se met a jour tout seul. Sans cette sonde, un drapeau renomme s'apprend au
+# PREMIER POD CASSE, plusieurs couches sous l'endroit ou la cause vit.
 #
-# Cette sonde pose la question a l'avance : `claude --help` nomme-t-il encore ce dont on depend ?
-#
-# ─── LA FRONTIERE, ET POURQUOI LA SONDE EST EN BASH ─────────────────────────────────────────────
-# La frontiere vendor N1 EST le script `bin/` (CLAUDE.md). Une sonde ecrite en Elixir devrait
-# CONNAITRE les drapeaux du vendor pour les verifier — elle importerait le savoir N1 dans du code
-# N0, exactement ce que la frontiere existe pour empecher. La liste vit donc ici, a cote du seul
-# fichier qui la consomme, et l'appelant n'apprend qu'un code de sortie.
-#
-# ─── CE QU'ELLE NE COUVRE PAS, ET C'EST LA MOITIE QUI FAIT LE PLUS MAL ──────────────────────────
-# Le second contrat vendor est l'algo de SLUGIFICATION (`SeedStore.slugify`, gele bit-pour-bit
-# contre la v2.1.183) : c'est lui qui permet de retrouver `~/.claude/projects/<slug>/<uuid>.jsonl`
-# au resume. Un changement la-bas ne casse rien VISIBLEMENT — il fait pointer le resume vers un
-# repertoire vide, donc un pod repart sans sa memoire au lieu d'echouer. Le sonder demanderait de
-# LANCER une session et de regarder ou elle ecrit : trop cher pour un boot, et non fait ici.
-# Nomme plutot que tu, parce qu'une sonde qui couvre la moitie visible d'un contrat laisse croire
-# que l'autre moitie est couverte.
+# CE QU'ELLE NE COUVRE PAS : l'algo de SLUGIFICATION (`SeedStore.slugify`), l'autre contrat vendor.
+# Un changement la-bas ne casse rien VISIBLEMENT — il fait pointer le resume vers un repertoire
+# vide, donc un pod repart sans sa memoire au lieu d'echouer. Le sonder demanderait de LANCER une
+# session : non fait ici, et nomme pour qu'on ne croie pas le contrat entierement couvert.
 #
 # USAGE : claude_probe.sh [--bin claude]
 # EXIT  : 0 tous les drapeaux presents · 1 des drapeaux MANQUENT (nommes sur stderr)
@@ -43,12 +29,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Les drapeaux LOAD-BEARING : ceux dont l'absence casse un spawn ou un contrat de pod. Pas la
-# liste exhaustive de ce que le launcher passe — un drapeau cosmetique qui disparait degrade,
-# il ne ment pas. Chaque ligne ici doit avoir un consommateur dans claude_launch.sh.
-# La liste est VERROUILLEE sur les drapeaux que `claude_launch.sh` passe reellement en argv (un
-# bats l'epingle : ajouter un drapeau au launcher sans l'ajouter ici rend la sonde menteuse par
-# omission — elle attesterait un contrat plus petit que celui dont on depend).
+# Les drapeaux LOAD-BEARING : ceux dont l'absence casse un spawn ou un contrat de pod, pas la liste
+# exhaustive de ce que le launcher passe — un drapeau cosmetique qui disparait degrade, il ne ment pas.
 REQUIRED=(
   --system-prompt-file      # le SP du role ; sans lui le pod demarre SANS son mandat
   --append-system-prompt-file
@@ -64,7 +46,7 @@ REQUIRED=(
   --session-id              # l'identite de session, base du resume
   --resume
   --remote-control          # visibilite Desktop
-  --disable-slash-commands  # coupe la surface vendor (`/init` et les skills) pour un pod qui a un
+  --disable-slash-commands  # coupe la surface vendor (`/init`, skills) d'un pod qui a un depot au cwd
 )
 
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 \
@@ -75,12 +57,8 @@ HELP="$("$CLAUDE_BIN" --help 2>&1)" \
 
 [[ -n "$HELP" ]] || { echo "claude_probe: '$CLAUDE_BIN --help' n'a rien rendu" >&2; exit 2; }
 
-# `--help` de la 2.1.220 ecrit `--system-prompt[-file]` — une notation qui factorise deux drapeaux
-# en une ligne. Une recherche du token exact ne le trouve pas et declare le contrat rompu sur un
-# drapeau parfaitement present : un FAUX POSITIF sur le drapeau le plus load-bearing de la liste,
-# qui aurait envoye reparer un launcher intact. On normalise donc le help en retirant `[` et `]`
-# AVANT de chercher — `--system-prompt[-file]` redevient `--system-prompt-file`, et la question
-# posee est celle qu'on voulait poser.
+# Le vendor factorise deux drapeaux en `--system-prompt[-file]` : on retire `[` et `]` AVANT de
+# chercher, sinon le token exact est introuvable et le contrat declare rompu sur un drapeau present.
 HELP_FLAT="${HELP//[/}"
 HELP_FLAT="${HELP_FLAT//]/}"
 
