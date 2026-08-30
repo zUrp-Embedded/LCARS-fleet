@@ -49,6 +49,14 @@ setup() {
   # Un docker qui repond a tout par 0 : la sonde d'endpoint n'a besoin que de ca.
   printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/docker"
   chmod 0755 "$BINDIR/docker"
+  # ⚠ LA SONDE WSL1 MESURE LE NOYAU DE LA MACHINE QUI JOUE LE TEST. `install.sh` refuse un
+  # `--substrate wsl` sans user-namespaces (`unshare -Ur true`), et Ubuntu >= 24.04 les refuse aux
+  # binaires sans profil AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`) : bwrap passe,
+  # `unshare` non. Le temoin du bandeau force `--substrate wsl` — sur un desktop Ubuntu il
+  # rougissait sur la sonde, jamais sur le bandeau (mesure du 2026-08-30, gate de 60-deploy sur un
+  # poste neuf). Le decor declare la premisse : des namespaces disponibles.
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/unshare"
+  chmod 0755 "$BINDIR/unshare"
   export PATH="$BINDIR:$PATH"
   # La sonde prend la branche « DOCKER_HOST est pose » et interroge la doublure — sinon ces temoins
   # dependraient d'une socket sur la machine qui les joue.

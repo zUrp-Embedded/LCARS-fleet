@@ -62,6 +62,16 @@ setup() {
   export PROV_FLEET_GROUP
   PROV_FLEET_GROUP="$(id -gn)"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
+  # ⚠ LA POPULATION EST UNE DONNEE DU DECOR, POUR TOUS LES TEMOINS — pas seulement ceux du
+  # convergeur (`humans_are`, plus bas). `probe_fleet_humans` tourne a chaque `check` : sans decor,
+  # il lit le /etc/passwd de la machine qui joue le test, et un « check CONFORME » ne l'est que si
+  # elle heberge deja un humain hors siege. Mesure du 2026-08-30, gate de 60-deploy sur un poste
+  # neuf (un seul compte, uid 1000, le siege) : deux temoins nominaux rouges, verts partout
+  # ailleurs par coincidence. Le siege reste celui qui joue le test — `getent` le resout pour de
+  # vrai — et un humain de decor l'accompagne.
+  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  printf 'root:x:0:0:root:/root:/bin/bash\n%s:x:%s:%s::%s:/bin/bash\nzoe:x:4242:4242::/home/zoe:/bin/bash\n' \
+    "$(id -un)" "$(id -u)" "$(id -g)" "$HOME" > "$PASSWD_FILE"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   mkdir -p "$LCARS_SYSTEMD_DIR" "$PROV_TOKENS_DIR"

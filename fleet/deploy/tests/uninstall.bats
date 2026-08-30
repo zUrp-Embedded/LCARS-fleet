@@ -507,15 +507,17 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
 @test "PERSON : les comptes se lisent dans la carte, et le SIEGE en est ecarte" {
   # `forge_id = 1` est l'operateur qui a lance l'install. Ce n'est PAS un compte que LCARS a cree :
   # le retirer supprimerait la personne qui desinstalle.
-  carte "1	1000	lordzurp" "2	1001	lcars" "3	1002	zoe"
+  # ⚠ `capitaine`, ET PAS UN LOGIN REEL : le plan imprime le chemin du depot, donc un siege de decor
+  # nomme comme l'operateur qui joue le test rougit sur son propre $HOME (banc du 2026-08-30).
+  carte "1	1000	capitaine" "2	1001	lcars" "3	1002	zoe"
   plan
   [[ "$output" == *"lcars"* ]]
   [[ "$output" == *"zoe"* ]]
-  refute_out 'lordzurp' <<<"$output"
+  refute_out 'capitaine' <<<"$output"
 }
 
 @test "PERSON : LAISSES par defaut, et le plan dit ce que --humans ferait" {
-  carte "1	1000	lordzurp" "2	1001	lcars"
+  carte "1	1000	capitaine" "2	1001	lcars"
   plan
   [[ "$output" == *"LAISSÉS"* ]]
   [[ "$output" == *"EUX ET LEUR HOME"* ]]
