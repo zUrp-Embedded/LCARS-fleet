@@ -84,7 +84,7 @@ done
 [[ -n "$REPO" || -n "$IMAGE" ]] || REPO="$(cd "$HERE/.." && pwd)"
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
-# Une seule autorite de lecture des deux cotes : `Fleet.Application.CatalogueRoles.tfvars/1`. Le
+# Une seule autorite de lecture des deux cotes : `Fleet.Roster.tfvars/1`. Le
 # mix et l'eval de release appellent LA MEME fonction — la regle de placement (siege / juge /
 # ecrivain) est en Elixir, testee, pas reecrite ici en jq.
 if [[ -n "$IMAGE" ]]; then

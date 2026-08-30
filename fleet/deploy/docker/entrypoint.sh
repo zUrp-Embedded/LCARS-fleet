@@ -64,8 +64,8 @@ fi
 #                                             ET la derivation de PROV_ROLES (`prov_roles`)
 if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
   root="${2:-}"
-  fun="Fleet.Application.CatalogueRoles.eval_main"
-  [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Application.CatalogueRoles.eval_tfvars"
+  fun="Fleet.Roster.eval_main"
+  [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Roster.eval_tfvars"
   if [[ -n "$root" ]]; then arg="\"${root}\""; else arg="Fleet.Catalogue.root()"; fi
   drop_priv \
     env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
