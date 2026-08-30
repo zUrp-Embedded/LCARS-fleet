@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/forge_publicize.bats
+# SOURCE: fleet/test/services/forge-gestures_publicize.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
 # STATUS: bats tests for `publicize_org_members` — le geste qui rend les workers VISIBLES
@@ -32,7 +32,7 @@
 #   SC1090 — sources dynamiques : le chemin de la lib se calcule, c'est le contrat de ces temoins
 # shellcheck disable=SC1090
 
-load refute
+load ../support/refute
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"

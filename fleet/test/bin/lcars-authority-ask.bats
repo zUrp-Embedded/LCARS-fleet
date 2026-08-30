@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/authority_ask.bats
+# SOURCE: fleet/test/bin/lcars-authority-ask.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-25
 # SUT: fleet/bin/lcars-authority-ask

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/forge_demote_owner.bats
+# SOURCE: fleet/test/services/forge-gestures_demote_owner.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
 # STATUS: bats tests for `demote_creator_from_owners` — la liste des proprietaires cesse de mentir

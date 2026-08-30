@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/console_creds_drift.bats
+# SOURCE: fleet/test/services/console_creds_drift.bats
 # AUTHOR: consultant
 # STARDATE: 2026-08-21
 # STATUS: bats tests for console.sh — a live console whose credentials the DB has outgrown
@@ -25,7 +25,7 @@
 #   SC2015 — le `|| C` est le contrat de tolerance, pas une branche d'echec
 # shellcheck disable=SC2015
 
-load refute
+load ../support/refute
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../services/console.sh"

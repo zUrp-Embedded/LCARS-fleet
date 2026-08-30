@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/supervise.bats
+# SOURCE: fleet/test/services/supervise.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for services/supervise.sh — la relance, et surtout SA BORNE
@@ -29,7 +29,7 @@
 #   SC2086 — eclatement VOULU d'une liste separee par des espaces
 # shellcheck disable=SC2034,SC2086
 
-load refute
+load ../support/refute
 
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../services/supervise.sh"

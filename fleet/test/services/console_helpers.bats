@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/console_helpers.bats
+# SOURCE: fleet/test/services/console_helpers.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for services/console-status.sh and services/console-pod.sh

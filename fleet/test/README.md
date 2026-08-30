@@ -54,6 +54,22 @@ Les bats et python suivent la même règle de préfixe que l'ExUnit : `bin/publi
 `test/bin/publish-transform.bats` + `publish-transform_boundary.bats`, `_history`, `_identity`.
 Le nom du script, tirets compris, est le préfixe — ce qui se cherche est ce qui se lit dans `bin/`.
 
+## La frontière avec `deploy/tests/`
+
+`fleet/deploy/tests/` est un corpus à part, et son critère n'est pas le nôtre : il répond à « le
+déploiement pose-t-il correctement », pas à « ce fichier se comporte-t-il correctement ». **La cible
+d'un témoin n'y indique donc pas son domaine** — `console_socket_topology.bats` mesure
+`services/console.sh` et reste là-bas, parce qu'il le confronte au `Dockerfile` de la boîte.
+
+Un témoin traverse la frontière quand il n'exerce QUE du code du projet et ne touche AUCUN artefact
+de l'installeur : six l'ont fait le 2026-08-30 (`supervise`, `console_creds_drift`,
+`console_helpers`, `forge-gestures_demote_owner`, `forge-gestures_publicize`,
+`lcars-authority-ask`). Quatre autres, mesurés comme eux, sont restés : les déplacer aurait fait
+dépendre `fleet/test/` de `deploy/`, la dépendance inverse de celle qu'on venait de retirer.
+
+Les deux corpus n'échangent rien — `refute.bash` existe des deux côtés, et `tests.refute_copies_agree`
+refuse qu'ils divergent. Voir `fleet/deploy/tests/README.md`.
+
 ## Deux faux-verts que le gate ferme
 
 - `tests.exs_are_discoverable` — `mix test` ne ramasse que `*_test.exs` (`test_pattern`) et ne dit
