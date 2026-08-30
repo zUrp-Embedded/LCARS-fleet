@@ -149,6 +149,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_doctest_declarations_have_examples(root),
         check_test_paths_mirror_lib(root),
         check_test_exs_are_discoverable(root),
+        check_refute_copies_agree(root),
         check_public_functions_documented(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
@@ -6238,6 +6239,69 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         end,
       note:
         "#{length(all)} .exs sous test/, #{length(all) - length(unreachable)} joignables par `mix test`"
+    }
+  end
+
+  @doc false
+  # UNE COPIE EST UN PARI TANT QUE RIEN NE LA COMPARE. `refute.bash` existe en deux exemplaires —
+  # `deploy/tests/` et `test/support/` — et c'est un CHOIX : l'installeur ne doit dependre d'aucun
+  # dossier du projet, ni le projet d'un dossier de l'installeur, et un lieu neutre aurait coute la
+  # reecriture des 39 `load refute` de `deploy/tests` pour une raison etrangere a ces temoins.
+  #
+  # Le prix de ce choix est ici. Une correction posee d'un seul cote donnerait deux assertions qui ne
+  # disent pas la meme chose, dans deux corpus qui croient utiliser le meme outil — et rien ne le
+  # dirait : la divergence d'un helper ne casse aucun test, elle en rend un plus PERMISSIF.
+  #
+  # ⚠ CE QUI EST COMPARE EST LE CODE, PAS LE FICHIER, et la distinction n'est pas un confort. Les
+  # deux copies NE PEUVENT PAS etre identiques : `# SOURCE:` porte le chemin du fichier par
+  # convention du depot, et le man montre le `load` de son cote (`load refute` ici, `load
+  # ../support/refute` la-bas). Un `cmp` serait donc rouge pour toujours — un mur toujours rouge
+  # apprend a lire « rouge » comme « normal ». Ce qui doit etre identique est le COMPORTEMENT : les
+  # lignes non-commentaires, et elles seules.
+  @spec check_refute_copies_agree(String.t()) :: result()
+  def check_refute_copies_agree(root) do
+    copies =
+      Path.join(root, "**/refute.bash")
+      |> Path.wildcard()
+      |> Enum.reject(&(String.contains?(&1, "/deps/") or String.contains?(&1, "/_build/")))
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.sort()
+
+    bodies =
+      Enum.map(copies, fn f ->
+        code =
+          Path.join(root, f)
+          |> File.read!()
+          |> String.split("\n")
+          |> Enum.map(&String.trim_trailing/1)
+          |> Enum.reject(&(&1 == "" or String.starts_with?(String.trim_leading(&1), "#")))
+          |> Enum.join("\n")
+
+        {f, :sha256 |> :crypto.hash(code) |> Base.encode16(case: :lower) |> binary_part(0, 12)}
+      end)
+
+    distinct = bodies |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+
+    %{
+      id: "tests.refute_copies_agree",
+      remediation:
+        "reporter la correction sur TOUTES les copies de refute.bash — une seule mise a jour rend " <>
+          "un corpus plus permissif que l'autre sans casser le moindre test",
+      status: if(copies != [] and length(distinct) <= 1, do: :pass, else: :fail),
+      evidence:
+        cond do
+          copies == [] ->
+            [
+              "INSTRUMENT CASSE — aucun refute.bash trouve, alors que des temoins font `load refute`"
+            ]
+
+          length(distinct) > 1 ->
+            Enum.map(bodies, fn {f, h} -> "#{f}: corps #{h}" end)
+
+          true ->
+            []
+        end,
+      note: "#{length(copies)} copie(s) de refute.bash, #{length(distinct)} corps distinct(s)"
     }
   end
 
