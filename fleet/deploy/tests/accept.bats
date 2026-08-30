@@ -28,6 +28,8 @@
 # `check_fleet_start` pour de vrai contre des doublures, et le producteur de la doublure CONTINUE
 # D'ECRIRE apres le match — c'est cette seule propriete qui fait rougir la forme en tuyau.
 
+load refute
+
 setup() {
   # Le decor possede l'environnement : ces temoins jugent ce que le script fait d'un environnement
   # DONNE. L'heriter reviendrait a juger la machine qui les joue.
@@ -206,7 +208,7 @@ joue() { run env PATH="$BINDIR:$PATH" HOME="$HOME_DIR" \
   [[ "$output" != *"« lcars »"* ]]
   # Et le fichier ne grave aucun nom de compte.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  refute grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
 }
 
 @test "autorite MUETTE : on saute en le DISANT, on n'invente pas de nom" {

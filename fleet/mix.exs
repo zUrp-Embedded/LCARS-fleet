@@ -172,7 +172,7 @@ defmodule LcarsFleet.MixProject do
 
   # `mix gate` step: the net for OUT-of-mix tests (python of the MCP stdio bridge + bats
   # of the launchers) that `mix test` (ExUnit) does not see. Without this wiring,
-  # test/test_fleet_mcp_stdio_bridge.py could turn RED silently — nobody replays it
+  # test/bin/fleet_mcp_stdio_bridge_test.py could turn RED silently — nobody replays it
   # (a renamed bridge with a never-replayed test is exactly the bug class this net closes).
   # (The function-step form carries BATS_MISSING_FATAL and a rich failure message
   # that a bare `mix cmd` would not give.)

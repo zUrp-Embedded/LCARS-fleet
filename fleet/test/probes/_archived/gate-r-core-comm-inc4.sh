@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# SOURCE: fleet/test/probes/_archived/gate-r-core-comm-inc4.sh
+# AUTHOR: starfleet (consolidation salvage cow-boy)
+# STARDATE: 2026.146
+# STATUS: RETIRE / ARCHIVE (DR-032) — court-circuite (exit non-zero) ; NON execute par mix gate. Le « exit 0 ssi… » ci-dessous est HISTORIQUE (cf. « GATE RETIRE » plus bas).
+# gate-r-core-comm-inc4.sh — R-CORE.comm increment 4 (canal IN). exit 0 ssi un pod PULL sa tache
+# aupres du fleet via le tool MCP `get_task` (canal IN), l'execute, et soumet via `submit_result` (OUT)
+# — comm fleet↔pod 100% MCP, zero scraping/injection. PREUVE forte : la tache (et son nonce) n'existe
+# QUE dans la file fleet ($LCARS_TASK_QUEUE), JAMAIS dans le brief → si la reponse contient le nonce,
+# le pod l'a forcement recuperee via get_task. Via le VRAI claude_launch (.mcp-fleet.json + --strict).
+# Serveur = fixture bidirectionnelle test/fixtures/mcp_submit_server.py. Bin+fixture hors /home,/tmp.
+set -uo pipefail
+
+# ── GATE SUPERSEDED (audit lot 6, 2026-07-12) — harness e2e pre-ADR-F/ADR-G ──
+# Le harness est integralement perime : il invoque claude_launch.sh avec 5 args (contrat courant =
+# 3 STRICT → exit usage immediat ; fail-fast `${CLAUDE_DIR:?}` en amont → aucun timeout brule),
+# attend le SP en $POD/.claude/system-prompt.md (courant : .lcars/system-prompt.md via
+# --system-prompt-file), parle le tool "get_task" (vocab courant : get_work_item) et provisionne le
+# coffre LCARS_CREDS_ROOT (fossile pre-ADR-F — l'auth courante = bind RW du .credentials.json du
+# claudeDir humain). Son ROUGE est TROMPEUR : il suggere « canal MCP casse » alors que seul le
+# harness est mort. Reecriture fidele = un vrai claude+bwrap (chantier deploy-env), et le canal
+# IN/OUT MCP per-pod a deja sa preuve vivante.
+# PREUVE VIVANTE : test/pod_socket_test.exs (mix test test/pod_socket_test.exs).
+# Corps historique conserve ci-dessous (archive) ; exit 2 EXPLICITE — jamais un rouge trompeur.
+echo "SUPERSEDED — harness pre-ADR-F/ADR-G (5 args, get_task, coffre creds). Preuve vivante : test/pod_socket_test.exs (mix test). exit 2." >&2
+exit 2
+
+HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/.." && pwd)"; BIN="$RT/bin"
+WORK="$(mktemp -d)"; POD="$WORK/pod"; FAIL=0
+BINV="$(mktemp -d -p /var/tmp lcars-gate-inc4.XXXXXX)"; SRVV="$BINV/mcp_submit_server.py"
+cp "$BIN/bwrap_launch.sh" "$BIN/claude_launch.sh" "$BINV/"
+cp "$HERE/fixtures/mcp_submit_server.py" "$SRVV"
+trap 'pkill -f "$WORK" 2>/dev/null; [ "${KEEP:-0}" = 1 ] && echo "KEEP $WORK $BINV" || rm -rf "$WORK" "$BINV"' EXIT
+mkdir -p "$POD/.claude" "$POD/context" "$POD/output" "$WORK/creds/testrole" "$WORK/mirror"
+cp "$HOME/.claude/.credentials.json" "$POD/.claude/.credentials.json"; chmod 600 "$POD/.claude/.credentials.json"
+printf 'Tu es un pod worker LCARS. Suis le brief exactement, rien de plus.\n' > "$POD/.claude/system-prompt.md"
+printf '{"spec":{"scope":{"allowedTools":["mcp__fleet__get_task","mcp__fleet__submit_result"],"disallowedTools":["WebSearch","Bash","Write","Edit"]}}}\n' > "$POD/.cap-profile.json"
+NONCE="pong-$(date +%s)-$RANDOM"
+# La tache (avec le nonce) est UNIQUEMENT dans la file fleet — JAMAIS dans le brief.
+# La file DOIT vivre DANS $POD : bwrap masque /tmp (--tmpfs /tmp) et ne bind QUE $POD_DIR. Une file
+# sous $WORK (=/tmp/...) est invisible au serveur MCP DANS le sandbox → get_task renverrait
+# {"done":true} d'emblee (bug masked-path diagnostique 2026-05-24). Dotfile racine pod : hors
+# context/ et hors allowedTools (2 tools MCP only) → le pod ne peut PAS la lire en direct (preuve nonce intacte).
+TASKQ="$POD/.fleet-taskq.json"
+printf '[{"id":1,"ask":"Reponds EXACTEMENT et UNIQUEMENT le mot suivant : %s"}]\n' "$NONCE" > "$TASKQ"
+cat > "$POD/.mcp-fleet.json" <<EOF
+{"mcpServers":{"fleet":{"command":"python3","args":["$SRVV"],"env":{"LCARS_SUBMIT_PATH":"$POD/output/submit.json","LCARS_TASK_QUEUE":"$TASKQ"}}}}
+EOF
+cat > "$POD/context/brief.md" <<'EOF'
+Boucle de travail (canal MCP fleet) :
+1. Appelle le tool get_task.
+2. Si la reponse contient {"done": true} -> tu as fini, arrete-toi.
+3. Sinon, execute task.ask, puis appelle submit_result avec payload = {"id": <task.id>, "answer": "<ta reponse exacte>"}.
+4. Recommence a l'etape 1.
+N'ecris aucun fichier toi-meme. Le brief ne contient PAS les taches — recupere-les via get_task.
+EOF
+export LCARS_CREDS_ROOT="$WORK/creds" LCARS_GIT_MIRROR="$WORK/mirror" LCARS_BWRAP_NO_CLEANUP=1
+echo "== Gate R-CORE.comm inc4 — canal IN : pod PULL sa tache via get_task (MCP) =="
+echo "   nonce (UNIQUEMENT dans la file fleet, absent du brief) : $NONCE"
+timeout 160 "$BINV/bwrap_launch.sh" testrole rcore4 "$POD" "$BINV/claude_launch.sh" testrole rcore4 "$POD" 140 1.0 > "$WORK/launch.log" 2>&1 || true
+RES="$POD/output/submit.json"
+if [ -f "$RES" ] && grep -Fq "$NONCE" "$RES"; then
+  echo "PASS IN   pod → get_task (pull tache) → submit_result : $(cat "$RES")"
+  echo "          nonce present ⇒ tache forcement recuperee via get_task = canal IN MCP prouve"
+else
+  echo "FAIL IN   pas de preuve du pull ($( [ -f "$RES" ] && cat "$RES" 2>/dev/null || echo ABSENT))"
+  echo "  --- dbg (tail) ---"; tail -8 "$POD/claude_launch.dbg" 2>/dev/null
+  FAIL=1
+fi
+echo "---"
+[ "$FAIL" -eq 0 ] && echo "GATE R-CORE.comm inc4 : exit 0 — canal IN MCP (pod pull task)" || echo "GATE R-CORE.comm inc4 : exit 1"
+exit "$FAIL"

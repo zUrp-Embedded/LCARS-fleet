@@ -94,10 +94,10 @@ Ces scripts se déclarent `SONDE MANUELLE` dans leur en-tête : ils ne sont invo
 cette liste, une sonde vivante que personne ne sait lancer pourrit sans bruit.
 
 ```bash
-bash test/gate-r0.1-bwrap.sh          # isolation e2e RÉELLE (bwrap+tmux+vendor). 0 = prouvé, 3 = SKIP
+bash test/probes/gate-r0.1-bwrap.sh          # isolation e2e RÉELLE (bwrap+tmux+vendor). 0 = prouvé, 3 = SKIP
                                       # explicite (bwrap/userns indispo) — jamais un PASS déguisé.
-bash test/gate-r0.2-otp.sh            # lifecycle BEAM / superviseur OTP.
-bash test/gate-r0.6-tooling.sh        # outillage statique (Credo/Sobelow/Dialyzer).
+bash test/probes/gate-r0.2-otp.sh            # lifecycle BEAM / superviseur OTP.
+bash test/probes/gate-r0.6-tooling.sh        # outillage statique (Credo/Sobelow/Dialyzer).
 bash test/gate-r-core-comm-inc3b1.sh  # couche tool MCP, pur Elixir.
 ```
 
@@ -137,4 +137,4 @@ rien, donc une table `--extra-token` pour lui seul. Le drapeau existe toujours p
 décalage compte↔fichier ; il n'a plus d'usager dans la recette.) Gitea n'accepte QUE la basic auth pour créer un token (même un token site-admin ne peut
 pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge, idempotente. Sans ces
 tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu 2026-07-05).
-Tests : `test/provision_role_tokens/` (bats, couvert par `mix gate`).
+Tests : `test/etc/` (bats, couvert par `mix gate`).

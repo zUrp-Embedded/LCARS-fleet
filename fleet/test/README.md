@@ -1,44 +1,88 @@
 # test/ — map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-07-18
+**Last revised**: 2026-08-30
 **Status**: active — index of the test tree (a map, not a contract)
 **Referenced by**: —
 
 **This file is a map, not the contract.** Each test file owns its intent in its own
 `@moduledoc`/describes. Nothing here is restated, only pointed at.
 
+## Où est le témoin d'un fichier
+
+**Le chemin le dit.** `lib/<x>/<y>.ex` → ses témoins vivent dans `test/<x>/`, et ils commencent
+tous par `<y>` :
+
+    lib/fleet/event_router/bus.ex
+    ├── test/fleet/event_router/bus_test.exs                 ← canonique
+    ├── test/fleet/event_router/bus_registry_empty_test.exs  ← satellite : préfixe + sujet
+    └── test/fleet/event_router/bus_safe_emit_test.exs       ← satellite
+
+`ls test/fleet/api/` répond à la question ; il n'y a rien à deviner et rien à grepper. Un témoin
+nommé d'après le CONTRAT qu'il épingle (`bus_safe_emit`, `application_boot_knob`) porte plus
+d'information qu'un `<module>_test.exs` muet — le préfixe le rend trouvable sans lui coûter ce nom.
+
+Cette forme est **vérifiée à l'échelle du dossier** par `tests.paths_mirror_lib`
+(`mix lcars.contracts.check`) : un témoin sous un dossier qui n'existe pas sous `lib/` fait rougir
+le gate. Neuf témoins vivaient sous `test/fleet/pilot/project_onboard/`, un dossier qui n'existait
+nulle part, alors que leurs modules disaient `Fleet.Project.Onboard.*` depuis toujours (2026-08-30).
+
+⚠ **Le gate ne réclame PAS un témoin par source.** Cette moitié-là n'est pas décidable sans un
+plancher enregistré. Mesure du 2026-08-30 : 130 sources sur 247 n'ont pas de témoin canonique — 26
+ont au moins un satellite qui porte leur nom, et pour les 104 autres le nom de fichier ne permet pas
+de trancher, parce qu'un témoin nommé d'après le contrat qu'il épingle ne nomme pas sa cible.
+Réclamer le canonique ici fabriquerait 104 coquilles « pas de test » dont personne n'aurait vérifié
+la vérité. Le préfixe est la convention, le dossier est le mur, le reste est un chantier.
+
 ## Layout
 
-- `test/fleet/<domain>/` — one directory per lib domain (`foundation` modules test at
-  `test/fleet/*_test.exs` top level, e.g. `slug_test.exs`). A domain's tests live WITH
-  the domain — if you cannot find a test, grep the FUNCTION name, not a guessed filename.
-- `test/*.exs` (root) — cross-domain/integration surfaces: `pod_tools_test.exs` +
-  `pod_socket_test.exs` (MCP pod-facing wire), `cap_profile_v25_conformance_test.exs` +
-  `monks_v25_conformance_test.exs` (canon conformance), `events_schema_test.exs` /
-  `coord_policies_schema_test.exs` / `declaration_schema_test.exs` (priv schemas),
-  `mcp_server_test.exs` / `mcp_supervisor_test.exs` / `poc_exmcp_native_test.exs` (MCP SDK
-  boundary), `clone_test.exs` (project_bootstrap), `result_event_test.exs`.
-- `test/support/<domain>/` — stubs/TestEnv, compiled via `elixirc_paths(:test)`.
-- OUT-of-mix (run by `shell_gate` inside `mix gate`, invisible to `mix test`):
-  `test/test_fleet_mcp_stdio_bridge.py` (MCP stdio bridge) and the launcher bats suites
-  under `test/bwrap_launch/` + `test/claude_launch/`.
+Sous `test/`, un dossier est soit le miroir d'un dossier de `lib/`, soit l'une des zones nommées
+ci-dessous. Il n'y a pas de troisième cas — et la racine de `test/` ne porte aucun témoin.
 
-## Conventions that trip greppers
+| chemin | contenu | joué par |
+|---|---|---|
+| `test/fleet/**`, `test/mix/**` | ExUnit, miroir de `lib/` | `mix test` |
+| `test/bin/`, `test/etc/`, `test/services/` | bats et python des scripts de `fleet/bin`, `fleet/etc`, `fleet/services` | `shell_gate` |
+| `test/crosscutting/` | témoins sans cible unique (scan du dépôt entier) | `shell_gate` |
+| `test/integration/` | multi-cible, hors-mix | manuel |
+| `test/probes/` | sondes manuelles (`gate-r*.sh`), hors `mix gate` — leurs en-têtes le disent | manuel |
+| `test/probes/_archived/` | sondes retirées : `exit 2/3` immédiat, conservées comme archive d'incrément | rien, délibérément |
+| `test/support/` | stubs, doubles, TestEnv — compilés par `elixirc_paths(:test)` | — |
+| `test/fixtures/` | données | — |
 
-- **Admission pipelines are tested THROUGH their routers**, not in standalone files:
-  `Fleet.API.SpawnAdmission` is covered by `test/fleet/api/control_router_test.exs`
-  (socket bind + DTO + verdict→HTTP mapping). There is no `spawn_admission_test.exs` —
-  do not create a twin; extend the router test.
-- **The transverse reading entry point** is `test/fleet/pilot/chain_integration_test.exs`
-  (real modules against a simulated forge, synchronous) — the executable specimen of the
-  5-phase narrative in `Fleet.Pilot`'s @moduledoc.
-- **Hermeticity is the baseline** (`config/test.exs`): no real socket (REST via
-  `Plug.Test`, WS via direct callbacks), no real spawn (StubBackend), consumers off,
-  `load_event_registry: false`. A test needing a real backend starts it itself
-  (`start_supervised` with explicit opts) — never flips global config.
-- **Regression anchors** (`F-…`, `DR-…`, `G…`, `WS…`, `MA-…`) in test/describe names are
-  the LIVING side of the lib anchors — they correlate a test to the mechanism it locks.
-  Keep them when touching a test; the prose around them stays present-tense.
-- **Expected values pinning FR runtime output** (forge bodies, briefs, dashboard strings)
-  stay FR — they test user-facing content that is FR by design. Test prose itself is EN.
+Les bats et python suivent la même règle de préfixe que l'ExUnit : `bin/publish-transform.sh` →
+`test/bin/publish-transform.bats` + `publish-transform_boundary.bats`, `_history`, `_identity`.
+Le nom du script, tirets compris, est le préfixe — ce qui se cherche est ce qui se lit dans `bin/`.
+
+## La frontière avec `deploy/tests/`
+
+`fleet/deploy/tests/` est un corpus à part, et son critère n'est pas le nôtre : il répond à « le
+déploiement pose-t-il correctement », pas à « ce fichier se comporte-t-il correctement ». **La cible
+d'un témoin n'y indique donc pas son domaine** — `console_socket_topology.bats` mesure
+`services/console.sh` et reste là-bas, parce qu'il le confronte au `Dockerfile` de la boîte.
+
+Un témoin traverse la frontière quand il n'exerce QUE du code du projet et ne touche AUCUN artefact
+de l'installeur : six l'ont fait le 2026-08-30 (`supervise`, `console_creds_drift`,
+`console_helpers`, `forge-gestures_demote_owner`, `forge-gestures_publicize`,
+`lcars-authority-ask`). Quatre autres, mesurés comme eux, sont restés : les déplacer aurait fait
+dépendre `fleet/test/` de `deploy/`, la dépendance inverse de celle qu'on venait de retirer.
+
+Les deux corpus n'échangent rien — `refute.bash` existe des deux côtés, et `tests.refute_copies_agree`
+refuse qu'ils divergent. Voir `fleet/deploy/tests/README.md`.
+
+## Deux faux-verts que le gate ferme
+
+- `tests.exs_are_discoverable` — `mix test` ne ramasse que `*_test.exs` (`test_pattern`) et ne dit
+  RIEN de ce qu'il laisse. Un `foo_spec.exs` ou un `foo_tests.exs` est une suite entière qui compte
+  pour zéro en silence. La faute est une lettre, la conséquence est un corpus fantôme.
+- `tests.corpora_on_record` — tout corpus bats/python du dépôt est déclaré `:gated` ou
+  `{:out, motif}`. Un corpus que personne ne joue ne pourrit pas bruyamment : il rapporte une
+  couverture qu'il ne fournit pas.
+
+## Hors-mix
+
+`shell_gate.sh` (câblé dans `mix gate`) est le point d'entrée des tests que `mix test` ne voit pas :
+les quatre suites python, nommées une par une dans son registre `PYTESTS`, et tous les `.bats`
+trouvés récursivement sous `test/`, `.claude/skills/`, `fleet/deploy/tests/` et
+`fleet/git-hooks/tests/`. `bats` absent n'échoue pas — le compte des suites manquées est ANNONCÉ,
+et `BATS_MISSING_FATAL=1` durcit le jour où `bats-core` est un prérequis posé partout.

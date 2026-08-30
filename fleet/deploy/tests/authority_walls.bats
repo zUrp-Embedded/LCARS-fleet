@@ -367,7 +367,7 @@ secret_writers() {
 # que parce que ce process ne garde rien — entre deux installs il n'y a RIEN a voler en memoire.
 #
 # ⚖ CE MUR EST LA MOITIE FAIBLE, ET C'EST DIT. La memoisation s'ecrit de dix facons qu'un texte ne
-# voit pas. La propriete est tenue FONCTIONNELLEMENT par `test/test_catalogue_executor.py`, qui
+# voit pas. La propriete est tenue FONCTIONNELLEMENT par `test/services/catalogue-executor_test.py`, qui
 # CHANGE le fichier entre deux appels et regarde ce qui sort — mesure du 2026-08-25 : une
 # memoisation ajoutee fait rougir ses trois temoins. Ce mur-ci attrape les formes EXPLICITES, celles
 # qu'on ecrit en croyant optimiser.
@@ -394,7 +394,7 @@ secret_writers() {
   # chargement ; il ne voit PAS une valeur gardee dans un attribut ou une fermeture. Ce qui tient
   # vraiment la propriete est le banc python. Le supprimer laisserait le mur au vert et l'arbitrage
   # sans preuve — exactement la situation que ce fichier existe pour rendre impossible.
-  local banc="$REPO/test/test_catalogue_executor.py"
+  local banc="$REPO/test/services/catalogue-executor_test.py"
   [ -f "$banc" ] || { echo "banc de l'executeur introuvable : $banc" >&2; return 1; }
   grep -q 'jeton-rotatif' "$banc"
   grep -q '6d: RELU a chaque appel' "$banc"
@@ -418,7 +418,7 @@ secret_writers() {
 # contredit : `/run/lcars/privileged` declare `0750 root:fleet`, pose `root:root`. Deux faits sur le
 # meme objet, dont un seul est du texte.
 #
-# ⚖ CETTE MOITIE-LA EST DONC TENUE FONCTIONNELLEMENT, dans `test/test_catalogue_executor.py` :
+# ⚖ CETTE MOITIE-LA EST DONC TENUE FONCTIONNELLEMENT, dans `test/services/catalogue-executor_test.py` :
 # `bind()` est APPELE dans un tmp, et on regarde le groupe que porte le repertoire. C'est la
 # troisieme fois de ce chantier qu'un mur textuel ne suffit pas — apres le mode d'une ecriture
 # atomique, et apres la memoisation d'un jeton.

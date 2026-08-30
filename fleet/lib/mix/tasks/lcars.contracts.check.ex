@@ -147,6 +147,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_declaration_max_fan_ceiling(root),
         check_test_corpora_on_record(root),
         check_doctest_declarations_have_examples(root),
+        check_test_paths_mirror_lib(root),
+        check_test_exs_are_discoverable(root),
+        check_refute_copies_agree(root),
         check_public_functions_documented(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
         # forge rail (`max_rework_rounds`, StepRunConsumer), not an in-memory retry loop —
@@ -5091,7 +5094,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @spec check_mcp_wire_inputschema(String.t()) :: result()
   def check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
-    test = "test/pod_socket_test.exs"
+    test = "test/fleet/mcp/pod_socket_test.exs"
 
     # Projection code-side: the camelCase wire key on an EXECUTABLE line (`code_match?` excludes
     # @doc/@moduledoc heredocs + `#` comments — BND-111: a prose mention of "inputSchema" is not a proof).
@@ -6111,6 +6114,194 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             do: "",
             else: " (#{length(unresolved)} module(s) unresolved, not judged)"
           )
+    }
+  end
+
+  # Les zones de `test/` qui ne sont PAS des miroirs de `lib/`, NOMMEES plutot que devinees : deux
+  # rangent des non-temoins (`support/` compile par `elixirc_paths(:test)`, `fixtures/`), les autres
+  # rangent des temoins qui n'ont pas de source Elixir en face (bats des scripts de `bin/`, `etc/`,
+  # `services/`, sondes manuelles, integration, et le transverse qui scanne le depot entier). Un
+  # dossier hors de cette liste et sans jumeau sous `lib/` est un chemin faux, pas une exception
+  # tacite : c'est ce que le mur ci-dessous refuse.
+  @test_nonmirror_zones ~w(support fixtures integration crosscutting probes bin etc services)
+
+  @doc false
+  # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
+  # chemin faux se LIT COMME UNE REPONSE. Mesure du 2026-08-30 : neuf temoins vivaient sous
+  # `test/fleet/pilot/project_onboard/` et `test/fleet/pilot/forge_client/`, deux dossiers qui
+  # n'existent nulle part sous `lib/`. Leurs modules disaient `Fleet.Project.Onboard.*` et
+  # `Fleet.Forge.Client.*` depuis toujours — qui cherchait les temoins d'`onboard.ex` sous
+  # `test/fleet/project/` ne trouvait rien et en concluait une absence de couverture qui etait fausse.
+  #
+  # LA QUESTION EST DECIDABLE ET SANS ETAT, et c'est ce qui la met ici plutot que sous la forme d'un
+  # plancher enregistre : « le dossier de ce temoin existe-t-il sous `lib/` ? » se repond avec le
+  # disque, jamais avec un compte d'hier.
+  #
+  # ⚠ CE MUR NE DIT PAS QUE CHAQUE SOURCE A UN TEMOIN, et le silence est delibere. Cette moitie-la
+  # n'est pas decidable sans plancher. Mesure du 2026-08-30 : 130 sources sur 247 n'ont pas de
+  # temoin canonique — 26 ont au moins un satellite qui porte leur nom, et pour les 104 autres le
+  # NOM DE FICHIER NE TRANCHE PAS, parce qu'un temoin nomme d'apres le contrat qu'il epingle ne
+  # nomme pas sa cible. Reclamer le canonique ici fabriquerait 104 coquilles « pas de test » dont
+  # personne n'aurait verifie la verite — un mur satisfait par une phrase fausse. Ce qui se decide
+  # sans etat se decide ici ; le reste est un chantier, pas une ligne de gate.
+  @spec check_test_paths_mirror_lib(String.t()) :: result()
+  def check_test_paths_mirror_lib(root) do
+    files =
+      Path.join(root, "test/**/*_test.exs")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.sort()
+
+    strays =
+      Enum.filter(files, fn f ->
+        case Path.split(Path.dirname(f)) do
+          # La racine de `test/` n'est le miroir de rien : `lib/` n'est pas un domaine. Un temoin
+          # pose la ne se cherche par aucun chemin — il se trouve en listant tout le dossier.
+          ["test"] -> true
+          ["test", zone | _] when zone in @test_nonmirror_zones -> false
+          ["test" | rest] -> not File.dir?(Path.join([root, "lib" | rest]))
+          _ -> true
+        end
+      end)
+
+    %{
+      id: "tests.paths_mirror_lib",
+      remediation:
+        "deplacer le temoin sous le dossier qui reflete sa cible (`lib/<x>/` -> `test/<x>/`), " <>
+          "ou nommer sa zone dans @test_nonmirror_zones si elle n'a legitimement pas de source " <>
+          "Elixir en face — un chemin de test qui ne reflete rien se lit comme une absence de couverture",
+      status: if(files != [] and strays == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          files == [] ->
+            ["INSTRUMENT CASSE — aucun *_test.exs trouve sous test/ ; ce mur n'a rien mesure"]
+
+          strays != [] ->
+            Enum.map(strays, fn f ->
+              "#{f}: aucun dossier `lib/#{Enum.join(tl(Path.split(Path.dirname(f))), "/")}/` en face"
+            end)
+
+          true ->
+            []
+        end,
+      note:
+        "#{length(files)} temoins ExUnit, #{length(files) - length(strays)} sous un dossier qui reflete lib/"
+    }
+  end
+
+  @doc false
+  # `mix test` NE RAMASSE QUE CE QUI FINIT PAR `_test.exs` (`test_pattern`, defaut `*_test.exs`), et
+  # il ne dit RIEN de ce qu'il laisse. Un fichier baptise `foo_tests.exs`, `foo_spec.exs` ou
+  # simplement `foo.exs` est donc un corpus qui compte pour zero en silence — le meme faux-vert que
+  # `@test_corpora` attrape a l'echelle du depot, ici a l'echelle du fichier. Le cout est asymetrique
+  # et c'est ce qui justifie un mur : la faute est une lettre, la consequence est une suite entiere
+  # qui n'a jamais tourne tout en figurant dans l'arbre des tests.
+  #
+  # Exempts : `test_helper.exs` (que `mix test` charge par un autre chemin) et les deux zones qui ne
+  # portent pas de temoin — `support/` (compile par `elixirc_paths(:test)`) et `fixtures/`.
+  @spec check_test_exs_are_discoverable(String.t()) :: result()
+  def check_test_exs_are_discoverable(root) do
+    all =
+      Path.join(root, "test/**/*.exs")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.sort()
+
+    unreachable =
+      Enum.filter(all, fn f ->
+        case Path.split(f) do
+          ["test", "test_helper.exs"] -> false
+          ["test", zone | _] when zone in ["support", "fixtures"] -> false
+          _ -> not String.ends_with?(f, "_test.exs")
+        end
+      end)
+
+    %{
+      id: "tests.exs_are_discoverable",
+      remediation:
+        "renommer le fichier en `<sujet>_test.exs`, ou le sortir de `test/` — `mix test` ignore " <>
+          "tout le reste SANS le dire, et un corpus qu'aucun lanceur ne ramasse rapporte une " <>
+          "couverture qu'il ne fournit pas",
+      status: if(all != [] and unreachable == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          all == [] ->
+            ["INSTRUMENT CASSE — aucun .exs trouve sous test/ ; ce mur n'a rien mesure"]
+
+          unreachable != [] ->
+            Enum.map(
+              unreachable,
+              &"#{&1}: ne finit pas par `_test.exs` — jamais ramasse par `mix test`"
+            )
+
+          true ->
+            []
+        end,
+      note:
+        "#{length(all)} .exs sous test/, #{length(all) - length(unreachable)} joignables par `mix test`"
+    }
+  end
+
+  @doc false
+  # UNE COPIE EST UN PARI TANT QUE RIEN NE LA COMPARE. `refute.bash` existe en deux exemplaires —
+  # `deploy/tests/` et `test/support/` — et c'est un CHOIX : l'installeur ne doit dependre d'aucun
+  # dossier du projet, ni le projet d'un dossier de l'installeur, et un lieu neutre aurait coute la
+  # reecriture des 39 `load refute` de `deploy/tests` pour une raison etrangere a ces temoins.
+  #
+  # Le prix de ce choix est ici. Une correction posee d'un seul cote donnerait deux assertions qui ne
+  # disent pas la meme chose, dans deux corpus qui croient utiliser le meme outil — et rien ne le
+  # dirait : la divergence d'un helper ne casse aucun test, elle en rend un plus PERMISSIF.
+  #
+  # ⚠ CE QUI EST COMPARE EST LE CODE, PAS LE FICHIER, et la distinction n'est pas un confort. Les
+  # deux copies NE PEUVENT PAS etre identiques : `# SOURCE:` porte le chemin du fichier par
+  # convention du depot, et le man montre le `load` de son cote (`load refute` ici, `load
+  # ../support/refute` la-bas). Un `cmp` serait donc rouge pour toujours — un mur toujours rouge
+  # apprend a lire « rouge » comme « normal ». Ce qui doit etre identique est le COMPORTEMENT : les
+  # lignes non-commentaires, et elles seules.
+  @spec check_refute_copies_agree(String.t()) :: result()
+  def check_refute_copies_agree(root) do
+    copies =
+      Path.join(root, "**/refute.bash")
+      |> Path.wildcard()
+      |> Enum.reject(&(String.contains?(&1, "/deps/") or String.contains?(&1, "/_build/")))
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.sort()
+
+    bodies =
+      Enum.map(copies, fn f ->
+        code =
+          Path.join(root, f)
+          |> File.read!()
+          |> String.split("\n")
+          |> Enum.map(&String.trim_trailing/1)
+          |> Enum.reject(&(&1 == "" or String.starts_with?(String.trim_leading(&1), "#")))
+          |> Enum.join("\n")
+
+        {f, :sha256 |> :crypto.hash(code) |> Base.encode16(case: :lower) |> binary_part(0, 12)}
+      end)
+
+    distinct = bodies |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+
+    %{
+      id: "tests.refute_copies_agree",
+      remediation:
+        "reporter la correction sur TOUTES les copies de refute.bash — une seule mise a jour rend " <>
+          "un corpus plus permissif que l'autre sans casser le moindre test",
+      status: if(copies != [] and length(distinct) <= 1, do: :pass, else: :fail),
+      evidence:
+        cond do
+          copies == [] ->
+            [
+              "INSTRUMENT CASSE — aucun refute.bash trouve, alors que des temoins font `load refute`"
+            ]
+
+          length(distinct) > 1 ->
+            Enum.map(bodies, fn {f, h} -> "#{f}: corps #{h}" end)
+
+          true ->
+            []
+        end,
+      note: "#{length(copies)} copie(s) de refute.bash, #{length(distinct)} corps distinct(s)"
     }
   end
 

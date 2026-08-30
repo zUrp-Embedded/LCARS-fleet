@@ -1,4 +1,4 @@
-# SOURCE: fleet/deploy/tests/refute.bash
+# SOURCE: fleet/test/support/refute.bash
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: helper bats — une assertion NEGATIVE qui echoue vraiment
@@ -8,7 +8,7 @@
 # de son bloc `@test`. Partout ailleurs elle est verte au moment precis ou ce qu'elle interdit
 # arrive. Un appel de fonction, lui, est soumis a `errexit` : il tue le test ou qu'il soit.
 #
-#   load refute
+#   load ../support/refute
 #   refute grep -q 'motif' "$f"      # echoue si la commande REUSSIT
 #   cmd | refute_out [-i] 'motif ERE'   # echoue si le motif est TROUVE sur stdin
 #

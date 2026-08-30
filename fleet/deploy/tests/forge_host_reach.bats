@@ -266,7 +266,7 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne grave aucun nom de compte humain, sous aucune forme
-  ! grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
+  refute grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
 }
 
 # ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
@@ -757,8 +757,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
   grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  ! grep -q '"lcars"' <<<"$body"
+  refute grep -q 'PROV_FLEET_HUMAN' <<<"$body"
+  refute grep -q '"lcars"' <<<"$body"
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {
@@ -787,8 +787,8 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   # c'est-a-dire presque jamais, pendant que la perte qu'elle repare, elle, arrivait a l'identique.
   # Une porte qui ne rouvre que la moitie de ce qu'on a perdu n'est pas une porte, et une porte
   # conditionnee a un geste que personne ne fait n'en est pas une non plus.
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  ! grep -q 'fleet-human' <<<"$body"
+  refute grep -q 'PROV_FLEET_HUMAN' <<<"$body"
+  refute grep -q 'fleet-human' <<<"$body"
 }
 
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
