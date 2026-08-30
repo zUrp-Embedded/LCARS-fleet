@@ -254,8 +254,26 @@ resolve_admiral() {
 # comme un `LCARS_ADMIRAL` imposé par l'opérateur.
 # ⚠ LE REFUS EST EXPLICITE, PAS UN EFFET DE `set -e`. Un `resolve_admiral` nu mourrait aussi, mais
 # sur le code de retour d'une fonction — et le lecteur suivant ne saurait pas si c'est voulu. Ici le
-# boot s'arrete parce qu'on a decide qu'un siege inventable ne s'invente pas.
-resolve_admiral || exit 1
+# boot S'IMMOBILISE parce qu'on a decide qu'un siege inventable ne s'invente pas. Il s'ARRETAIT ;
+# le refus n'a pas change, sa forme si — cf. le bloc ci-dessous.
+if ! resolve_admiral; then
+  # ⚠ ON REFUSE SANS SORTIR, ET C'EST LA DIFFERENCE ENTRE UN DIAGNOSTIC ET UN DIAGNOSTIC UTILE.
+  # `exit 1` sous `restart: unless-stopped` faisait BOUCLER la boite — 25 redemarrages mesures sur
+  # la 4e forme (boite + forge FOURNIE, .63, 2026-08-30). Or le geste que le message ci-dessus
+  # propose, « box config », passe par un `docker exec`, et docker le REFUSE sur un conteneur qui
+  # redemarre : « Container … is restarting, wait until the container is running ». Le diagnostic
+  # etait juste, le remede nomme, et l'etat de la boite le rendait injouable.
+  #
+  # Elle reste donc debout, EN ATTENTE DE CONFIGURATION — le meme arbitrage que pour un echec de
+  # convergence, plus bas : « elle tourne et reste joignable POUR ETRE REPAREE ». Un siege
+  # indeterminable est un etat incomplet qu'un geste repare, pas une image cassee.
+  #
+  # ⚠ ET ELLE NE MENT PAS EN RESTANT DEBOUT : aucun service n'est demarre, donc le healthcheck (qui
+  # sonde ssh et le deck) la declare `unhealthy`. « Up » sans « healthy » est exactement son etat.
+  # `tini` est PID 1 et relaie SIGTERM : un `docker stop` la couche proprement.
+  say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « box config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+  exec sleep infinity
+fi
 if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then
   useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_ADMIRAL"
   say "sysadmin $LCARS_ADMIRAL cree (uid $LCARS_UID)"

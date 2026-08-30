@@ -219,3 +219,27 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
     [ "$output" = "0" ]
   done
 }
+
+# ─── LE REFUS N'EMPORTE PLUS LE CONTENEUR ───────────────────────────────────────────────────────
+
+@test "siege indeterminable : la boite RESTE DEBOUT — le remede qu'elle nomme exige un docker exec" {
+  # ⚠ MESURE DE LA 4e FORME — boite + forge FOURNIE, sans `--bench` (.63, 2026-08-30). Le refus
+  # etait `resolve_admiral || exit 1`, et sous `restart: unless-stopped` la boite BOUCLAIT :
+  #     politique : unless-stopped (max 0) · redemarrages: 25
+  # Or le geste que ce refus NOMME lui-meme — « box config » — passe par un `docker exec`, et
+  # docker le refuse sur un conteneur qui redemarre :
+  #     Container … is restarting, wait until the container is running
+  # Le diagnostic etait juste, le remede nomme, et l'etat de la boite le rendait INJOUABLE.
+  #
+  # Le refus n'a pas bouge — un siege inventable ne s'invente toujours pas. Ce qui change, c'est
+  # qu'il n'emporte plus le conteneur avec lui : meme arbitrage que pour l'echec de convergence,
+  # « elle tourne et reste joignable POUR ETRE REPAREE ».
+  local src="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
+  local code; code="$(grep -vE '^\s*#' "$src")"
+  grep -q 'if ! resolve_admiral; then' <<<"$code"
+  grep -q 'exec sleep infinity' <<<"$code"
+  # `refute` n'est pas charge dans ce fichier : la negation s'ecrit `!`, terminale sous `set -e`.
+  ! grep -q 'resolve_admiral || exit 1' <<<"$code"
+  # ET ELLE DIT POURQUOI ELLE ATTEND : une boite muette debout serait pire qu'une boite qui boucle.
+  grep -q 'EN ATTENTE DE CONFIGURATION' <<<"$code"
+}
