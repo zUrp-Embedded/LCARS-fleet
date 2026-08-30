@@ -7,15 +7,12 @@
 # CHECK-ON: wsl
 # NEEDS: root
 #
-# Ce module encaisse la dette de guerre WSL payée par les générations v0→v1 (commentaires de
-# terrain retrouvés dans _archived/) pour ne JAMAIS la repayer :
 #   - snapd casse l'init des sessions `systemd --user` sous WSL (socket résiduel) → purge.
 #   - gpg-agent-ssh.socket race au shutdown WSL2 (« Failed to start systemd user session » au
 #     login suivant) → masqué par symlink /dev/null dans le home de l'humain.
 #   - /etc/wsl.conf ne prend effet qu'après `wsl --shutdown` + NOUVEL onglet Windows Terminal ;
 #     il s'écrit EN DERNIER dans ce module (un crash avant = rien d'armé à moitié).
 #   - le lockdown C: se SONDE en réel (touch/rm sur /mnt/c), jamais en lisant la config —
-#     la v1 avait DEUX sondes divergentes ; celle-ci est LA seule.
 #
 # /etc/wsl.conf est possédé EN ENTIER par ce module (write_atomic du fichier complet) : c'est la
 # frontière de sécurité de la boîte (octogone — C: fermé, interop coupé), pas un fichier de
@@ -66,14 +63,12 @@ gpg_socket_mask_path() { # vide quand l'humain n'a pas de home — a l'appelant 
 }
 
 check() {
-  # snapd
   if dpkg -s snapd >/dev/null 2>&1; then
     p_drift "snapd présent (casse systemd --user sous WSL) — l'apply le purge"
   else
     p_ok "snapd absent"
   fi
 
-  # masque gpg-agent-ssh.socket
   local mask; mask="$(gpg_socket_mask_path)"
   if [[ -n "$mask" && "$(readlink "$mask" 2>/dev/null)" == "/dev/null" ]]; then
     p_ok "gpg-agent-ssh.socket masqué ($PROV_HUMAN)"
@@ -81,14 +76,12 @@ check() {
     p_drift "gpg-agent-ssh.socket non masqué pour $PROV_HUMAN (race shutdown WSL2 → sessions user cassées)"
   fi
 
-  # wsl.conf : contenu exact.
   if [[ -f "$WSL_CONF" ]] && desired_wsl_conf | cmp -s - "$WSL_CONF"; then
     p_ok "$WSL_CONF conforme"
   else
     p_drift "$WSL_CONF absent ou divergent de l'état-cible"
   fi
 
-  # État RÉEL du lockdown.
   if c_drive_open; then
     if desired_wsl_conf | cmp -s - "$WSL_CONF" 2>/dev/null; then
       p_warn "C: encore OUVERT alors que wsl.conf est posé → REBOOT REQUIS : « wsl --shutdown » (PowerShell), rouvre un NOUVEL onglet, relance le doctor"
@@ -113,7 +106,6 @@ apply() {
     fi
   fi
 
-  # 2. Masque gpg-agent-ssh.socket pour l'humain.
   local home mask
   home="$(human_home)"
   if [[ -n "$home" && -d "$home" ]]; then

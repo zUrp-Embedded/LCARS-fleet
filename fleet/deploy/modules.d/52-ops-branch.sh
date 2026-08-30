@@ -53,12 +53,6 @@ set -euo pipefail
 # LE NOM DE LA BRANCHE N'EST PAS REGLABLE, ET IL N'EST PAS DECIDE ICI. Son autorite est
 # `Fleet.Toolchain.branch/0` ; cette ligne en est une RECOPIE, tenue par le contrat
 # `toolchain.branch_single_source` de `mix lcars.contracts.check`, qui rougit si les deux divergent.
-#
-# ⚠ IL A ETE REGLABLE A MOITIE, et c'est exactement la panne que le gel ferme : une clef d'app-env
-# cote BEAM, une variable d'environnement cote shell, aucun pont. Les defauts coincidaient donc rien
-# ne cassait — jusqu'a ce que quelqu'un tourne celle du shell : la branche se cree sous le nouveau
-# nom, la protection le suit, et le reconciliateur continue d'interroger l'ancien pendant que les
-# manifestes atterrissent la ou personne ne regarde. Le rail a l'air calme.
 readonly OPS_BRANCH="tool_request"
 : "${LCARS_OPS_REPO:=fleet/lcars}"
 
@@ -99,10 +93,6 @@ create_branch() {
   # encore semee, donc `50-forge` n'a rien pu frapper et le fichier n'existe pas. Rendre FAIL la
   # faisait publier `rc=1` a une boite dont le seul tort etait d'etre neuve, et le vrai etat — « la
   # branche se posera a la convergence suivante » — n'etait dit nulle part.
-  #
-  # Un DRIFT dit exactement ca : non converge, converge-moi. Le doctor le montre, la passe d'apres
-  # le ferme, et un jeton qui ne viendrait JAMAIS reste visible a chaque passage au lieu de
-  # disparaitre dans un echec de boot que personne ne relit.
   [[ -n "$tok" ]] || {
     p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
     return 0; }
@@ -121,14 +111,6 @@ create_branch() {
   # branche exactement comme sur une branche absente d'un depot present. Il faut demander le depot.
   case "$(forge_repo_code)" in
     200) : ;;
-    # ⚠ CE MESSAGE AFFIRMAIT UNE PROPRIETE D'UN AUTRE ARTEFACT, ET ELLE ETAIT FAUSSE. Il disait
-    # « l'amorcage de la forge le cree » ; personne ne le creait. `Fleet.Toolchain.ops_repo/0`,
-    # `IncidentRegistry.Escalation` et `pod_tools/delegation.ex` le LISENT tous les trois, le seul
-    # `create_repo` du runtime sert aux depots de PROJET, et la recette tofu ne cree aucun depot.
-    # Resultat : derive a chaque passage sur les deux substrats, et un 404 lu comme une panne de
-    # l'IncidentRegistry — diagnostique deux fois de travers le 2026-08-22 avant qu'on regarde le
-    # depot lui-meme.
-    #
     # `forge-gestures.sh apply` le cree depuis le 2026-08-22 (`ensure_ops_repo`). Ce garde reste :
     # il couvre le cas ou l'amorcage n'a pas encore tourne, et il ne suppose plus qui le fait.
     404) p_drift "depot $LCARS_OPS_REPO absent — l'amorcage de la forge le cree (forge-gestures apply) ; la branche se posera a la convergence suivante"
@@ -138,7 +120,6 @@ create_branch() {
   esac
 
   local tmp; tmp="$(mktemp -d)"
-  # Le jetable meurt quoi qu'il arrive : il contient un depot git avec un remote authentifie.
   trap 'rm -rf "$tmp"' RETURN
 
   # LE SEMIS. Git ne sait pas representer un dossier vide et le convergeur globe
@@ -170,9 +151,6 @@ SEED
 
   # `git init` + premier commit = un commit SANS PARENT, donc une branche orpheline par
   # construction. Aucun `--orphan`, donc aucun plancher de version git.
-  # Sans repli : `provision-lib.sh` pose ce nom avant tout module. Le `:-system_starfleet` qui
-  # vivait ici etait une copie morte d'un litteral qui en a deja trop (cf. le chantier du compte
-  # systeme) — et une copie sur une branche injoignable ne peut meme pas etre corrigee par l'usage.
   local ident_n="$PROV_SYSTEM_ACCOUNT"
   (
     cd "$tmp"
@@ -194,7 +172,6 @@ SEED
   # chercher au mauvais endroit. `probe` rend 1 sur « branche absente » et 2 sur « forge
   # injoignable » : un seul message pour les deux annonçait un push raté là où la forge avait
   # simplement cessé de répondre entre le push et la relecture. Fenêtre étroite, diagnostic faux.
-  # (Revue 2026-08-20.)
   local rc; probe && rc=0 || rc=$?
   case "$rc" in
     0) : ;;
@@ -222,19 +199,11 @@ apply() {
        p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
-    # ⚠ DRIFT ET PAS FAIL, ET C'EST `check` QUI AVAIT RAISON. Sur la MÊME mesure (`probe` rend 2 :
-    # la forge ne répond pas), `check` disait drift et `apply` disait échec. Le modèle du rail est
-    # que le doctor n'est pas un autre code — c'est le même check — donc deux verdicts opposés sur
-    # une mesure unique est une contradiction interne, pas une nuance.
-    #
     # ET LA BONNE RÉPONSE EST DRIFT, parce que « pas de forge » est l'état NORMAL d'une première
     # passe : `48-forge-host` la monte, et s'il dérive (image absente, docker muet) tout l'aval le
     # constate. Ses deux voisins immédiats — `50-forge` et `55-deck-oidc` — dérivent sur cette
     # cause exacte. Ce module seul rendait 1, donc l'apply entier rendait 1, donc `install.sh`
     # déclarait l'installation EN ÉCHEC là où il manquait un geste.
-    #
-    # Mesuré le 2026-08-21, install à froid sur machine dédiée : DRIFT 48 · DRIFT 50 · **FAIL 52** ·
-    # DRIFT 55. Un seul module transformait une convergence partielle en échec.
     *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par la boîte) ; la branche se posera a la convergence suivante" ;;
   esac
   verdict_apply

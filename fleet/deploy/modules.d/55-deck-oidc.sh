@@ -7,19 +7,6 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 21-service-accounts 50-forge
-#
-# THE BOX'S FRONT DOOR NEEDS A CLIENT, AND NOTHING WAS CREATING ONE. The deck (port 20999) now
-# refuses to serve anything until it can ask the forge "who are you" — deliberately, because a deck
-# that fell back to listing every human would make a missing configuration invisible, and nobody
-# would ever fix it. This module is what makes that refusal go away.
-#
-# WHY THIS IS PROVISIONING AND NOT A HUMAN CLICKING A FORM: measured 2026-08-12,
-# `POST /api/v1/user/applications/oauth2` refuses on SCOPE (`required=[write:user]`) and not on
-# auth METHOD — unlike minting a token, which Gitea only accepts over basic auth. So a token is
-# enough, and the system account has carried `write:user` since that measurement.
-#
-# Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_PUBLIC_URL (adresse NAVIGATEUR) ·
-#           PROV_DECK_ORIGINS · PROV_DECK_PORT · PROV_DECK_OIDC_FILE · PROV_TOKENS_DIR
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -27,32 +14,8 @@ set -euo pipefail
 
 APP_NAME="lcars-deck"
 TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
-# ⚠ CE FICHIER PORTE LE `client_secret` OAUTH2 DE CETTE BOITE, ET SON GROUPE A ETE FAUX DEUX FOIS.
-#
-# Il s'ecrivait `0640 root:nogroup`, avec pour motif : « le mode le plus etroit qui marche — le
-# secret reste illisible par tout HUMAIN de la boite. » Les deux moities sont vraies et la
-# conclusion ne l'etait pas : `nogroup` n'est pas le groupe du deck, c'est le groupe de ceux qui
-# n'en ont pas choisi. Releve sur une Debian/Ubuntu ordinaire le 2026-08-27, gid 65534 est le
-# groupe PRIMAIRE de `sync`, `_apt`, `nobody` et `dhcpcd` — un demon reseau lisait le secret.
-#
-# ⚠ ET `system.manifest` EN DECLARAIT UN TROISIEME : `root:fleet`, ce qui l'aurait ouvert a tout
-# HUMAIN de la fleet — l'exact contraire de ce que la phrase ci-dessus annoncait. Deux documents,
-# deux valeurs, et aucun temoin qui les compare : c'est le temoin qui manquait, autant que la valeur.
-#
-# Le deck tourne desormais sous `lcars-system`, un compte a lui (`21-service-accounts`), de groupe
-# primaire homonyme. `0640 root:lcars-system` nomme donc EXACTEMENT un lecteur, et c'est celui qui
-# lit le fichier. Le mode n'a pas change ; ce qui a change, c'est que le groupe designe quelqu'un.
-# ⚠ LE REPLI DERIVE, IL NE GRAVE PLUS. Cette ligne portait `${PROV_SYSTEM_GROUP:-lcars-system}`
-# pendant que `21-service-accounts:89` — le module qui CREE le compte — ecrit
-# `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}`. Deux replis pour une variable, et ils ne disent pas la meme
-# chose : regler `PROV_SYSTEM_USER` sans `PROV_SYSTEM_GROUP` faisait creer le groupe `<autre>` d'un
-# cote et donner le fichier d'identification du deck au groupe `lcars-system` de l'autre — un
-# groupe qui n'existe alors nulle part. Le deck sert 503 en nommant un fichier qu'il ne peut pas
-# lire, et la cause est deux lignes plus loin dans un autre module.
 OIDC_GROUP="${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-lcars-system}}"
 
-# The entrances, as full callback URIs. Loopback always: it is how the box's own operator reaches
-# the deck, and it is the one address that is true everywhere.
 # ⚠ DEDUPLIQUE. La loopback est posee ici d'office ET nommee par l'appelant depuis que le banc
 # annonce deux entrees : sans ce filtre, elle est enregistree DEUX FOIS chez la forge (mesure du
 # 2026-08-18). Gitea l'accepte, donc rien ne casse — mais une liste qui se repete est une liste dont
@@ -66,23 +29,6 @@ callback_uris() {
   # entre par l'autre, APRES son identification (mesure du 2026-08-18).
   local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback http://localhost:$PROV_DECK_PORT/auth/callback" o u
 
-  # ─── ET L'ADRESSE QU'UN TIERS COMPOSE, PARCE QUE LE DECK N'ÉCOUTE PAS QUE SUR LA LOOPBACK ──────
-  #
-  # MÊME LEÇON QUE LA FORGE, UN CRAN PLUS LOIN. `48-forge-host` l'a apprise avec `PROV_FORGE_ADVERTISE`
-  # et `bench-up.sh` l'avait écrite avant lui : « LE RECAP DIT L'ADRESSE QU'ON COMPOSE, PAS CELLE SUR
-  # LAQUELLE ON ECOUTE. » Ici c'est pire qu'un lien faux : OAuth2 compare le `redirect_uri` en CHAÎNE
-  # EXACTE, donc une entrée non déclarée n'est pas une dégradation, c'est un refus.
-  #
-  # MESURÉ LE 2026-08-21, poste natif installé à froid, opérateur venant d'une autre machine :
-  #   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://10.42.0.63:20999/auth/callback.
-  #     Entrees declarees : http://127.0.0.1:20999/…, http://localhost:20999/… »
-  # Le deck s'arrête proprement et nomme le levier — c'est le comportement voulu, et il ne devrait
-  # pas avoir à servir. Le levier existait (`PROV_DECK_ORIGINS`) ; c'est le DÉFAUT qui était faux.
-  #
-  # ⚠ ON N'ANNONCE QUE CE QUI VAUT QUELQUE CHOSE. `advertise_addr` rend l'adresse ET ce qu'elle vaut :
-  # sous WSL en NAT, elle rend `localhost` avec un motif, parce que la VM n'est routée depuis aucune
-  # autre machine. Déclarer une entrée dans ce cas ajouterait une chaîne que personne ne peut taper.
-  # Un appelant qui ignore `PROV_ADVERTISE_WHY` annonce sans savoir ce qu'il annonce — la lib le dit.
   advertise_addr "${PROV_DECK_BIND:-0.0.0.0}"
   if [[ -z "$PROV_ADVERTISE_WHY" && -n "$PROV_ADVERTISE" ]]; then
     u="http://$PROV_ADVERTISE:$PROV_DECK_PORT/auth/callback"
@@ -127,7 +73,6 @@ forge_api() { # forge_api <METHOD> <path> [json-body]
 
 forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
 
-# The app id currently registered under our name, or empty.
 # L'app QUI EST LA NOTRE — et le nom ne suffit pas a le prouver. Mesure du 2026-08-12 : Gitea
 # accepte DEUX applications du meme nom sous le meme compte (201). Or le compte systeme est partage
 # par toutes les boites qui parlent a une meme forge : chercher « lcars-deck » y rend une app
@@ -179,7 +124,6 @@ config_live() {
 # qu'on veut pouvoir CHANGER (donc ils ne peuvent pas servir a s'identifier soi-meme).
 our_client_id() { jq -r '.client_id // empty' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true; }
 
-# Les retours REELLEMENT enregistres chez la forge pour notre client, tries et joints par espace.
 registered_uris() {
   local cid; cid="$(our_client_id)"
   [[ -n "$cid" ]] || return 0
@@ -189,12 +133,6 @@ registered_uris() {
          else empty end' 2>/dev/null | head -n1
 }
 
-# ⚠ LA LISTE DES ENTREES DOIT CONVERGER, ET ELLE NE CONVERGEAIT PAS. `apply` sortait des que le
-# fichier nommait un client encore connu de la forge — sans jamais comparer les retours enregistres
-# a ceux qu'on veut. Consequence mesuree le 2026-08-18 : ajouter une origine a `LCARS_DECK_ORIGINS`
-# et rejouer le provisionnement ne changeait RIEN, en silence. Et c'est exactement le geste que la
-# page de refus du deck prescrit — le runtime imprimait une instruction que le runtime n'honorait
-# pas. Un mensonge operationnel, pas une lacune de confort.
 uris_converged() { # uris_converged <uris-voulues, separees par espace>
   local want got
   # shellcheck disable=SC2086 # $1 est une LISTE separee par des espaces, a eclater
@@ -217,8 +155,6 @@ check() {
     if uris_converged "$_want"; then
       p_ok "client OAuth2 du deck posé et connu de la forge ($PROV_DECK_OIDC_FILE)"
     else
-      # NOMMER LES DEUX LISTES. Le symptome de cette derive est une page de refus dans un navigateur,
-      # a l'autre bout du rail : sans les deux listes cote a cote, personne ne fait le lien.
       p_drift "entrées du deck non convergées — enregistrées : « $(registered_uris) » / voulues : « $_want » (apply les repose)"
     fi
   else
@@ -229,22 +165,7 @@ check() {
   if [[ -n "$PROV_FORGE_PUBLIC_URL" ]] && browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
     p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom local au daemon docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
   fi
-  # ⚠ ET LE FICHIER QU'ON ÉCRIT SE SONDE AUSSI, PAS SEULEMENT CE QUE LA FORGE ENREGISTRE. Cette
-  # sonde ne comparait que la liste des retours ; `public_url` et `internal_url`, qu'elle POSE dans
-  # le même fichier, n'étaient regardés par personne. Une adresse publique qui change ne convergeait
-  # donc jamais — le module répondait « déjà posé et vivant », en toute bonne foi, sur un fichier
-  # devenu faux.
-  #
-  # MESURE DU 2026-08-21 : `forge.public.url` arrive, `PROV_FORGE_PUBLIC_URL` devient
-  # `http://10.42.0.63:3000`, apply rejoué → « client OAuth2 du deck déjà posé et vivant », et
-  # `deck-oidc.json` porte toujours `public_url: http://127.0.0.1:3000`. Le bouton d'identification
-  # continuait d'envoyer le visiteur sur SA propre loopback.
-  #
-  # C'est la faute que ce dépôt nomme « la sonde répond à une question voisine » : elle mesurait
-  # l'enregistrement chez Gitea — vrai — au lieu de l'état-cible complet, dont le fichier fait partie.
   if [[ -r "$PROV_DECK_OIDC_FILE" ]] && ! addrs_converged; then
-    # NOMMER LES DEUX ÉTATS, comme pour les listes de retours juste au-dessus : le symptôme vit dans
-    # un navigateur, à l'autre bout du rail, et sans les valeurs côte à côte personne ne fait le lien.
     p_drift "adresses du deck non convergées — fichier : navigateur « $(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null)  » / serveur « $(jq -r '.internal_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null) » ; voulues : « ${PROV_FORGE_PUBLIC_URL%/} » / « ${PROV_FORGE_URL%/} » (apply les repose)"
   fi
   verdict_check
@@ -267,11 +188,6 @@ apply() {
   local uris body resp cid csec
   uris="$(callback_uris)"
 
-  # ⚠ « DÉJÀ POSÉ » DOIT COUVRIR TOUT L'ÉTAT-CIBLE, PAS SEULEMENT LA MOITIÉ ENREGISTRÉE CHEZ GITEA.
-  # Ce raccourci ne regardait que le client et ses retours ; les deux adresses que ce module ÉCRIT
-  # dans le même fichier n'entraient pas dans la comparaison, donc une adresse publique qui change
-  # ne convergeait jamais — l'apply répondait « déjà posé et vivant » sur un fichier devenu faux
-  # (mesuré le 2026-08-21 : `public_url` resté sur la loopback après l'arrivée de `forge.public.url`).
   if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris" && addrs_converged; then
     p_ok "client OAuth2 du deck déjà posé et vivant"
     verdict_apply
@@ -317,27 +233,13 @@ apply() {
   cid="$(echo "$resp"  | jq -r '.client_id // empty' 2>/dev/null || true)"
   csec="$(echo "$resp" | jq -r '.client_secret // empty' 2>/dev/null || true)"
   if [[ -z "$cid" || -z "$csec" ]]; then
-    # `write:user` is the one scope this needs and the one the system token lacked before
-    # 2026-08-12 — name it, because the API message alone sends the reader to the swagger page.
     p_fail "création du client OAuth2 refusée par la forge : $(echo "$resp" | head -c 200) (le token système a-t-il le scope write:user ?)"
     verdict_apply
   fi
 
-  # ⚠ `ensure_dir`, PAS `install -d` : ce dernier ne passe pas par `prov_refuse_symlink_path`, donc
-  # un lien pose dans un composant du chemin faisait chmoder sa CIBLE en root (vecteur 6-131). Le
-  # repertoire — `/etc/lcars` — appartient a `25-directories`, qui le declare `0755 root:root`. Ce
-  # site ne PASSE DONC PAS d'owner : il garantit l'existence et le mode avant d'ecrire, rien de plus.
-  # Le lui faire revendiquer `root:root` en ferait une seconde autorite sur le meme objet — et ca se
-  # voit tout de suite hors production, ou le proprietaire n'est pas root et ou le chown est refuse.
   ensure_dir "$(dirname "$PROV_DECK_OIDC_FILE")" 0755 \
     || { p_fail "répertoire de la config OIDC non convergé ($(dirname "$PROV_DECK_OIDC_FILE"))"; verdict_apply; }
   local tmp; tmp="$(mktemp "${PROV_DECK_OIDC_FILE}.XXXXXX")"
-  # LES URI ENREGISTREES VOYAGENT AVEC LA CONFIG, et ce n'est pas de la redondance. Le deck derive
-  # son `redirect_uri` du `Host` de la requete ; si la personne arrive par une entree qui n'est PAS
-  # dans cette liste, OAuth2 refuse — et ce refus est une page 400 de Gitea au titre generique, qui
-  # ne mentionne meme pas `redirect_uri` (mesure du 2026-08-12). Cul-de-sac parfait : apres
-  # l'identification, sur une page qui n'est pas la notre. En les lui donnant, le deck compare AVANT
-  # d'envoyer quelqu'un et sert son propre refus, qui nomme l'entree manquante.
   jq -n --arg ci "$cid" --arg cs "$csec" \
         --arg pub "${PROV_FORGE_PUBLIC_URL%/}" --arg int "${PROV_FORGE_URL%/}" --arg uris "$uris" \
         '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,

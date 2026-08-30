@@ -13,7 +13,6 @@
 # la v1 est le VIEUX modèle (users-par-rôle partageant un binaire root) : ici, per-humain, sous
 # SON UID, dans SON home (le pod bwrap bind le home ⇒ le binaire suit l'humain).
 #
-# Méthode : DEUX GESTES. On télécharge l'installeur officiel, on l'exécute. Rien d'autre.
 #
 # ⚠ TOUTE MACHINERIE AJOUTÉE ICI DOUBLE LA SIENNE ET NE PEUT QUE DIVERGER D'ELLE. L'installeur
 # vérifie son sha256 contre un manifeste signé, nettoie derrière lui sur CHAQUE branche d'échec,
@@ -25,11 +24,6 @@
 # ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$PROV_CLAUDE_SEED`, un binaire
 # déjà posé sur la machine par un geste extérieur — un semis de banc — que ce module préférait au
 # réseau. NE PAS LA RÉINTRODUIRE.
-#
-# ⚖ ARBITRAGE USER : « on ne cache pas un binaire anthropic, on fait UNIQUEMENT l'install
-# officielle », et pour le banc : « il ne devrait PAS copier le binaire local, il DOIT dérouler le
-# compose entièrement et re-dl à chaque tour. C'est moi qui paye la BP, j'ai jamais demandé à
-# l'économiser pour 300 Mo. »
 #
 # LE MOTIF EST UNE QUESTION DE MESURE, pas d'économie. Un banc semé n'exerce pas le chemin de
 # déploiement qu'il existe pour mesurer : il rend vert un chemin qu'il n'a pas parcouru, et c'est

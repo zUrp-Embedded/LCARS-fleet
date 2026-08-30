@@ -8,66 +8,12 @@
 # NEEDS: root
 # AFTER: 48-forge-host
 #
-# ─── DEUX PROCESSUS QUE PERSONNE NE LANÇAIT ─────────────────────────────────────────────────────
-#
-# ⚖ USER 2026-08-21 : « l'installeur doit livrer un système qui fonctionne. » Et D2, posé la veille :
-# ce que l'humain voit et utilise, c'est la LANDING — c'est elle qui doit être up 100 % du temps,
-# tenue par systemd ou par docker.
-#
-# Dans la boîte, l'entrypoint lance les deux et `tini` les tient. Sur un poste natif il n'y a pas
-# d'entrypoint : les deux scripts existaient sur le disque (depuis `62-runtime-helpers`) et RIEN ne
-# les démarrait. Mesuré le 2026-08-21 : la landing tournait parce que je l'avais lancée à la main en
-# `nohup setsid` — un processus orphelin, sans superviseur, qui ne survit pas au reboot et dont
-# personne ne peut dire l'état.
-#
-# ⚠ LA DIFFÉRENCE ENTRE CES DEUX-LÀ ET LA FLEET EST UNE DÉCISION, PAS UN OUBLI (D11). La fleet
-# d'un humain démarre quand SON humain le décide — une unité par personne, activée par elle. Ces
-# deux services-ci sont l'INFRASTRUCTURE de la machine : sans landing personne n'entre, sans
-# convergeur personne n'est enrôlé. Ils s'activent à l'install.
-#
-# ─── LES DEUX TOURNENT EN root, ET CHACUN LAISSE TOMBER CE QU'IL PEUT ───────────────────────────
-#
 # Le convergeur a besoin de `useradd` : il n'y a pas de version non privilégiée de créer un humain.
 # La landing démarre en root et se DÉPOSE elle-même — `console-landing.sh` fait
 # `setpriv --reuid lcars-system --regid lcars-system --groups lcars-console`, exactement comme dans
 # l'image. Ne PAS mettre `User=` dans l'unité : ça retirerait au script le droit de faire ce drop,
 # et surtout ça lui retirerait le groupe `lcars-console`, sans lequel il ne traverse aucune socket
 # de console — la page s'ouvrirait sur une liste vide en annonçant que tout va bien.
-#
-# ⚠ `lcars-system` EXISTE DEPUIS LE 2026-08-27, ET CE PARAGRAPHE ANNONÇAIT LE CONTRAIRE. Il disait
-# « un durcissement à venir ; tant qu'il n'existe pas, on fait ce que fait l'image ». Ce qui l'a fait
-# poser n'est pas le principe mais une mesure : `nobody` n'est pas une identité, et son groupe
-# `nogroup` (gid 65534) est le groupe PRIMAIRE de `sync`, `_apt`, `nobody` et `dhcpcd` sur une
-# Debian/Ubuntu ordinaire. Le fichier d'identification du deck — qui porte le `client_secret`
-# OAuth2 — s'y posait `0640 root:nogroup` : un démon réseau le lisait. Il est désormais
-# `0640 root:lcars-system`, et le groupe nomme exactement un lecteur.
-#
-# ⚠ CE QUE CE COMPTE NE FERME PAS : le deck reçoit toujours `lcars-console` à l'exec, et ce groupe
-# est à un `connect()` d'un shell sous n'importe quel humain. On a rangé QUI partage son identité,
-# pas ce qu'il peut faire.
-#
-# ─── POURQUOI `wsl` AUSSI, ET CE MODULE A PORTÉ `linux` SEUL PENDANT UNE JOURNÉE ────────────────
-#
-# ⚠ `APPLY-ON: linux` + `CHECK-ON: any` FAISAIT UN ÉCHEC STRUCTUREL SUR LE RAIL WSL. Le module y
-# était SÉLECTIONNÉ (check) mais NON APPLICABLE — et le runner traduit cet état, à raison, par un
-# FAIL : « état-cible non tenu sur wsl et inapplicable ici — rebuild l'image qui le fournit ». Sur
-# un poste WSL il n'y a aucune image à rebuilder, donc le verdict était juste dans sa forme et
-# ininterprétable dans son geste, et il faisait sortir `install.sh` en erreur.
-#
-# Le garde `p_warn` qui protège la boîte ne rattrapait rien : `30-wsl` écrit lui-même
-# `[boot] systemd=true`, donc `have_systemd()` répond OUI sous WSL2.
-#
-# Et le fond suit la forme : sur WSL, tout le reste du runtime natif est déjà posé — les scripts de
-# console et `ttyd` par `62-runtime-helpers` (`wsl linux`), les dossiers de socket par
-# `25-directories`, la release par `60-deploy`, l'humain de fleet par le convergeur que CE module
-# tire lui-même (`48` le sème sur la forge, `64` le matérialise). Tout existe SAUF ce qui démarre.
-# Un poste WSL avait donc une fleet et pas de porte.
-#
-# L'INVARIANT QUE CE MODULE VIOLAIT, ET QU'UN TÉMOIN TIENT DÉSORMAIS : un module n'est légitimement
-# en check-seul que sur `docker`, où l'IMAGE fournit l'état. Sur `wsl` ou `linux`, « check-seul »
-# signifie « personne ici ne peut jamais converger ça » — ce qui n'est pas un état-cible, c'est une
-# impasse. (Trouvé par le reverse d'alice, 2026-08-21 : « une case déclarée `any` sur un axe et
-# `linux` sur l'autre, sans que personne ait joué la combinaison `wsl` ».)
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -78,9 +24,6 @@ SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
 # ⚠ LE FICHIER QUE LIT GUARD B, ET IL N'EST PAS DANS `services.env`. Celui-ci sert les DAEMONS par
 # `EnvironmentFile=` ; la garde, elle, tourne dans le shell d'un HUMAIN, qui n'herite d'aucun des
 # deux. Et surtout : une garde ne peut pas prendre sa clef dans l'environnement de ce qu'elle garde
-# — `LCARS_SYSADMIN_UID=99999 fleet_v2 start` la desarmait (mesure du 2026-08-27). D'ou un fichier
-# `root:root` que le garde ne peut pas reecrire, et qui GAGNE sur la variable chez ses deux lecteurs
-# (`bin/fleet_v2` et son miroir `config/runtime.exs`).
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
 # La racine vient de la lib — un second defaut ici serait un second decideur.
@@ -98,21 +41,6 @@ SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
-# ─── QUI DÉMARRE QUOI — LA TABLE, PARCE QU'UNE PROSE NE SE VÉRIFIE PAS ──────────────────────────
-#
-# ⚠ LE RAIL NATIF RE-DÉRIVE LE CONTRAT DE DÉMARRAGE DE LA BOÎTE, ET IL EN AVAIT PERDU UN TIERS.
-# `deploy/docker/entrypoint.sh` lance TROIS composants persistants au boot ; ce module posait DEUX
-# unités. Le troisième — `console.sh --all` — n'avait aucun démarreur, et le deck offrait donc des
-# consoles que personne n'ouvrait (`[Errno 2]` sur la socket, mesuré le 2026-08-22).
-#
-# ⚖ USER 2026-08-22 : « 2 on aligne ». Pas de troisième unité — le convergeur appelle `--all` une
-# fois par tour (`ensure_all_consoles`). Une unité de plus AJOUTERAIT un démarreur là où le défaut
-# était d'en avoir deux qui ne s'accordent pas.
-#
-# ⚠ D'OÙ CETTE TABLE. Sans elle, le témoin ISO des processus devrait accepter une exemption en
-# prose — « celui-là est démarré ailleurs, crois-moi » — c'est-à-dire devenir décoratif. La règle
-# qu'elle rend vérifiable est : **chaque composant persistant de l'entrypoint a un démarreur DÉCLARÉ
-# sur ce rail**, unité ou pilote, et la correspondance est lisible par une machine.
 #
 # Format : <composant de l'entrypoint>:<unit|driven-by>:<nom>
 # shellcheck disable=SC2034 # table DERIVEE par un temoin (`process_iso.bats` la lit au sed sur la
@@ -146,7 +74,6 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
   echo "« journalctl -u $1.service » dit pourquoi"
 }
 
-# ─── L'ENVIRONNEMENT DES DEUX SERVICES, DÉRIVÉ ─────────────────────────────────────────────────
 # Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
 # le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
 # provisionnement vient d'établir — et jamais recopié à la main dans deux unités.
@@ -167,11 +94,6 @@ services_env_body() {
   echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
   echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
   echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
-  # ⚠ MÊME RÈGLE QUE LES DEUX LIGNES AU-DESSUS, ET ELLE N'ÉTAIT PAS APPLIQUÉE ICI. Le `:-1000` qui
-  # vivait là était le SEUL écrivain d'une variable que six lecteurs attendent — et il recopiait leur
-  # défaut au lieu de le remplacer. Un poseur qui repose le défaut ne pose rien : il rend seulement
-  # impossible de voir que personne n'a décidé. `deploy/provision` dérive la valeur du siège avant
-  # tout module ; son absence est refusée en tête d'`apply`, pas ici (cf. la cicatrice là-bas).
   echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
@@ -227,8 +149,6 @@ EOF
       ;;
     lcars-catalogue)
       # ⚠ CE SERVICE TIENT L'AUTORITÉ TOTALE DE LA FORGE, et c'est le seul de la machine dans ce cas.
-      # Il ne fait pas d'escalade pour un appelant : il RÉPOND à une demande, après avoir demandé à
-      # la forge si le pair — dont le noyau lui donne l'uid — y porte `is_admin`.
       #
       # ⚠ `User=` ET PAS root, ET C'ETAIT L'INVERSE PENDANT DEUX JOURS. Ce service ne demandait root
       # que pour POSSEDER quatre chemins — le jeton, le seed, l'etat tofu, son repertoire de socket.
@@ -258,10 +178,6 @@ WantedBy=multi-user.target
 EOF
       ;;
     lcars-privileged)
-      # ⚠ L'UNIQUE SERVICE ROOT DE CETTE MACHINE, ET IL NE DETIENT RIEN. C'est l'inverse exact de
-      # `lcars-catalogue` juste au-dessus : celui-la detient les secrets de la forge et n'a AUCUN
-      # privilege noyau ; celui-ci porte le seul geste privilege et n'ouvre AUCUN secret. Celui qui
-      # detient ne peut pas escalader, celui qui escalade n'a rien a voler.
       #
       # ⚠ PAS DE `User=` — ET C'EST LA SEULE UNITE DE CE FICHIER OU L'ABSENCE EST LE CONTRAT. Il
       # remplace `%fleet ALL=(root) NOPASSWD:` : le privilege ne disparait pas, il cesse d'etre
@@ -301,13 +217,6 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
   diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
 }
 
-# ─── QUI PEUT LANCER UNE FLEET ICI — LA SONDE QUE PERSONNE NE PORTAIT SUR UNE BOÎTE ─────────────
-#
-# ⚠ SUR UNE BOÎTE DE PRODUCTION, AUCUN MODULE NE VÉRIFIAIT QU'IL EXISTE UN HUMAIN. `22-fleet-human`
-# et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont même pas SÉLECTIONNÉS.
-# Ce module-ci est `CHECK-ON: any` — donc le seul à tourner là-bas — et il sortait en `p_warn` dès
-# l'absence de systemd, avant toute sonde. Un `provision doctor` sur une boîte annonçait donc 0
-# faute pendant que GUARD B (`bin/fleet_v2`) aurait refusé tout `fleet_v2 start`, faute de compte.
 #
 # La sonde passe donc AVANT la branche systemd : c'est précisément le chemin où il n'y en a pas.
 # Elle ne mesure pas les services — elle mesure la seule chose dont dépend leur utilité.
@@ -320,7 +229,6 @@ probe_fleet_humans() {
   fi
 }
 
-# ─── LE SIEGE EST-IL CELUI QUE LES GARDES RESERVENT ? ──────────────────────────────────────────
 #
 # ⚠ CE QUI EST SONDE ICI EST LA VALEUR QUE LES DAEMONS LIRONT, pas celle que ce module vient de
 # calculer. Les deux peuvent diverger — un `apply` joue sous un operateur, la machine en change, ou
@@ -351,7 +259,6 @@ probe_seat_uid() {
   fi
 }
 
-# ─── LE FICHIER QUE LISENT LES DEUX MOITIES DE GUARD B ─────────────────────────────────────────
 #
 # Absent, les deux gardes REFUSENT : le siege ne se devine pas, et une machine sans ce fichier n'est
 # pas provisionnee. Ce module est le seul a le poser sur ce rail.
@@ -512,17 +419,9 @@ apply() {
   verdict_apply
 }
 
-# ─── LA CONVERGENCE DES HUMAINS, TIRÉE UNE FOIS ET VÉRIFIÉE ─────────────────────────────────────
 #
 # ⚠ L'INSTALL RENDAIT LA MAIN SANS SAVOIR SI UN HUMAIN AVAIT ÉTÉ MATÉRIALISÉ. Le convergeur poll
 # toutes les 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer une install.
-# Entre la fin de l'apply et son premier tour, la boîte n'a personne qui puisse lancer une fleet, et
-# rien ne le dit.
-#
-# Pire, mesuré le 2026-08-25 : son premier tour est TOMBÉ (verrou de provision tenu par cette
-# passe-là), il a compté « 1 humain(s) convergé(s) » quand même, et `lcars` est resté sans `claude`
-# pendant que l'install annonçait 0 échec. Le verrou est réparé — mais rien ne VÉRIFIAIT, et c'est
-# ça qui a rendu la panne muette.
 #
 # ⚠ ON NE FAIT PAS CONFIANCE AU CODE DE RETOUR SEUL. Le convergeur peut rendre 0 en n'ayant converti
 # personne (une team vide EST un résultat valide). Ce qui se vérifie est le FAIT : un compte unix
@@ -545,24 +444,12 @@ converge_humans_now() {
   # Si un jour ce bloc est appelé depuis un autre site, la garde redevient nécessaire : c'est la
   # condition, pas le code, qu'il faut relire.
 
-  # ─── LA POPULATION AVANT, ET C'EST ELLE QUI REND LA PHRASE D'APRÈS VRAIE ───────────────────────
-  #
-  # ⚠ CE BLOC PROUVAIT LA PRÉSENCE ET ANNONÇAIT LA CRÉATION. Il lisait `fleet_humans` UNE fois,
-  # après la passe, et imprimait « matérialisé(s) ». Or `fleet_humans` balaie `/etc/passwd` : il
-  # répond « qui peut lancer une fleet », une question VOISINE, et vraie indépendamment de cette
-  # passe. Sur un RE-ROLL — le cas normal, pas l'exotique — `lcars` survit d'une install précédente :
-  # le convergeur pouvait ne rien faire du tout, la ligne disait quand même « matérialisé ».
-  #
-  # ⚖ USER 2026-08-25, la question exacte : « qu'est-ce qui t'empêche de vérifier que l'user est
-  # CRÉÉ côté unix avant de rendre la main ? » — créé, pas présent. La première version répondait à
-  # côté, et son témoin consacrait la confusion en semant l'humain DÉJÀ dans le passwd du décor.
   #
   # Une différence de population est la seule mesure qui distingue les deux. Trois états, trois
   # phrases : ce que CETTE passe a posé, ce qui était déjà là, et le vide.
   local avant apres nouveaux
   avant="$(fleet_humans | sort -u)"
 
-  # ⚠ `run_step --ok`, PAS `run_quiet` — ET LA PREMIÈRE VERSION DE CE BLOC ÉTAIT DÉCORATIVE.
   # `run_quiet` fait `p_fail` sur TOUT rc non nul, et `p_fail` incrémente `PROV_FAILED` : le `case`
   # qui suivait lisait un code dont le verdict était déjà tombé en ÉCHEC deux lignes plus haut. Trois
   # branches écrites, commentées, et sans effet — la classe exacte de `391638668`. `run_step --ok N`
@@ -600,10 +487,6 @@ converge_humans_now() {
   liste_all="$(printf '%s' "$apres" | paste -sd' ' -)"
 
   if [[ -n "$liste_new" ]]; then
-    # `p_chg`, PAS `p_ok` : un compte qui n'existait pas il y a trois secondes est une MUTATION de
-    # cette machine, et `PROV_CHANGED` est le compteur qui la porte. La distinction « posé
-    # maintenant » / « constaté présent » n'était pas mesurée — une mutation `p_ok`→`p_chg` laissait
-    # les trente témoins verts, parce qu'aucun ne regardait autre chose que le texte.
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "humain(s) de fleet matérialisé(s) PAR CETTE PASSE : $liste_new"
   elif [[ -n "$liste_all" ]]; then
@@ -617,22 +500,6 @@ converge_humans_now() {
     p_ok "aucun humain à matérialiser — la team « $PROV_HUMANS_TEAM » de la forge est vide. Ce n'est pas une faute : les gens s'enrôlent sur la forge, un propriétaire les ajoute à la team, et le convergeur les matérialise au tour suivant"
   fi
 
-  # ⚠ L'HUMAIN QUE CE RAIL PRÉ-SÈME ET QUE RIEN N'A MATÉRIALISÉ EST UNE DÉRIVE.
-  # « la team est vide, ce n'est pas une faute » est vrai dans la boîte, où personne n'a rien promis.
-  # Sur le poste, c'en est une : ce rail EXISTE pour livrer une machine sur laquelle quelqu'un peut
-  # lancer une fleet sans geste (⚖ USER 2026-08-25), la recette a semé le compte intégré vingt rangs
-  # plus haut, et repartir sans lui est un manquement, pas un état légitime.
-  #
-  # LE CAS QUI MORD N'EST PAS EXOTIQUE : `48-forge-host` dérive si `tofu` est absent, mais la forge
-  # elle-même est DEBOUT (le compose a réussi). Le convergeur l'interroge, obtient une team vide,
-  # rend 0 — et sans cette garde le module concluait « ce n'est pas une faute » alors que la vraie
-  # cause est vingt rangs plus haut. Une cause fausse donnée à quelqu'un qui debugge coûte plus cher
-  # que pas de cause du tout.
-  #
-  # ⚠ ET ELLE ÉTAIT ARMÉE PAR UN DRAPEAU, DONC MUETTE DANS LE CAS NOMINAL. Elle ne se déclenchait que
-  # si l'opérateur avait tapé `--fleet-human <nom>` — c'est-à-dire jamais, presque toujours, pendant
-  # que la panne qu'elle décrit, elle, se produisait à l'identique. Le nom se demande désormais à son
-  # autorité, donc la garde est TOUJOURS armée sur le rail qui pré-sème.
   #
   # ⚠ ET IL N'Y A PAS DE GARDE DE SUBSTRAT ICI, PARCE QU'ELLE SERAIT INATTEIGNABLE. Dans la boîte il
   # n'y a pas de pré-semis — `48-forge-host` n'y tourne pas, les gens s'enrôlent seuls, une team vide

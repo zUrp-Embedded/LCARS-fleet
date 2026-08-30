@@ -8,18 +8,6 @@
 # NEEDS: human
 # AFTER: 45-catalogues 50-forge 70-human
 #
-# LA FORGE SAIT QUELS PROJETS EXISTENT, LE DISQUE NE LE SAIT PLUS.
-#
-# Un projet vit en deux moities : le depot sur la forge (l'autorite : issues, PR, branches,
-# historique) et ses trois faces locales sous /home/projects{,.ops,.workshop} (le plan de travail
-# des pods). La seconde moitie est reconstructible depuis la premiere — c'est exactement ce que
-# `import/2` fait, et il est idempotent. Ce module est ce qui la reconstruit sans qu'on le demande.
-#
-# ⚠ L'INVENTAIRE N'EXISTAIT NULLE PART. Le runtime enumere ses projets depuis le DISQUE
-# (`Onboard.list_projects/1` lit `code_root`) : sur une boite neuve, apres un nuke, ou pour un
-# second humain qui arrive sur une fleet deja peuplee, il n'y a rien a enumerer — alors que les
-# projets, eux, sont intacts sur la forge. La liste ne pouvait donc pas venir d'ici.
-#
 # CE MODULE N'A AUCUNE LOGIQUE DE PROJET, ET C'EST VOULU. Il relaie une porte du release
 # (`Fleet.Project.Onboard.eval_reconcile/1`, via `lcars project reconcile`), qui parle en MOTS —
 # DEJA / MANQUE / IMPORTE / ECHEC, un par ligne. Reimplementer ici le filtre « qu'est-ce qui est un
@@ -41,7 +29,6 @@ set -euo pipefail
 
 LCARS_CLI="$PROV_LINK_DIR/lcars"
 
-# ─── la porte, et rien d'autre ────────────────────────────────────────────────────────────────────
 #
 # Sortie : les lignes de verdict sur stdout, la sortie brute du release sur stderr. Les deux sont
 # separees DELIBEREMENT — un `2>&1` melangerait les avertissements du BEAM aux verdicts et les
@@ -58,11 +45,6 @@ door() { # <check|apply>  → verdicts sur stdout
   out="$("$LCARS_CLI" project reconcile "$mode" 2>"$err")" || rc=$?
   printf '%s\n' "$out"
 
-  # LE CRI DE LA PORTE EST REPRIS DES QU'ON NE PEUT PAS LIRE SON VERDICT, et la condition est
-  # « aucune ligne rendue », PAS un code de sortie particulier. Mesure du 2026-08-17 : la porte est
-  # morte en plein import sur `no process` (une VM `eval` n'a pas de superviseur de spawn), avec un
-  # rc de 1 — dans la fourchette normale — et ZERO ligne sur stdout. Le module a rendu « la porte
-  # n'a rien rendu (code 1) » et a jete la seule chose qui disait pourquoi.
   if [[ -z "$out" || "$rc" -gt 2 ]] && [[ -s "$err" ]]; then
     while IFS= read -r line; do
       [[ -n "$line" ]] && p_warn "porte reconcile : $line"
@@ -92,7 +74,6 @@ render() { # <mode> ; lit les verdicts sur stdin
   [[ "$seen" -eq 1 ]]
 }
 
-# ─── la garde commune ─────────────────────────────────────────────────────────────────────────────
 #
 # Deux absences, deux traitements. Sans forge il n'y a pas d'autorite a comparer : on le DIT et on
 # sort conforme — une boite hors ligne n'est pas une boite en derive. Sans release il n'y a pas de

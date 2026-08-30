@@ -8,20 +8,6 @@
 # NEEDS: root
 # AFTER: 48-forge-host
 #
-# ─── POURQUOI CE MODULE EXISTE SÉPARÉMENT ───────────────────────────────────────────────────────
-#
-# Il vivait dans `48-forge-host`, qui portait six métiers en 1029 lignes : le port, l'adminité, les
-# deux adresses, le runner, les mots de passe, le siège. Le runner n'en partageait que deux valeurs
-# — le réseau de la forge et son adresse — et les deux sont désormais DÉRIVÉES dans `provision-lib`
-# (`PROV_FORGE_NET`) ou POSÉES sur disque par 48 (`forge.url` → `PROV_FORGE_URL`). Aucune recopie.
-#
-# Le sortir rend son état OBSERVABLE SEUL : son `check` était noyé dans celui de la forge, et un
-# opérateur qui voulait savoir « ma CI a-t-elle une machine ? » lisait un verdict qui parlait d'autre
-# chose. Le numéro `49` porte l'ordre : après la forge, dont il consomme le réseau et l'adresse.
-#
-# ⚠ LE RUNNER EST UN ÉTAT-CIBLE DE CE RAIL, PAS UN SUPPLÉMENT. Une forge sans lui accepte un ticket,
-# dépense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas.
-#
 # ⚠ UN SEUL MÉCANISME D'ENRÔLEMENT. `docker/forge-runner.sh` le porte en entier — jeton
 # d'enregistrement par l'API admin, config des jobs, montage du compose — avec ses cicatrices
 # (portée du jeton, réseau des jobs, `docker cp` plutôt que bind). Il est entièrement paramétré : on
@@ -45,8 +31,6 @@ LOCAL_URL="$PROV_FORGE_URL"
 # ⚠ PAS DE LABEL `elixir`, ET C'EST DÉLIBÉRÉ. Le servir honnêtement exigerait `lcars-build`, une
 # image LOCALE que ce rail ne construit pas ; le servir avec l'image Elixir de base donnerait un
 # runner qui prend le job du gate et meurt sur `git` introuvable — vert à l'écran, faux au fond.
-# Le gate n'en a plus besoin : il s'installe son BEAM dans le job (`erlef/setup-beam`).
-# Annoncer un label qu'on ne sait pas servir est pire que ne pas l'annoncer.
 : "${PROV_RUNNER_LABELS:=shell:docker://alpine:3.20,dood:docker://docker:cli,ubuntu-latest:docker://catthehacker/ubuntu:act-latest}"
 
 ci_runner_count() { # rend le nombre de runners, ou vide si la forge ne repond pas
@@ -95,7 +79,6 @@ converge_ci_runner() {
     rm -f "$out"
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "runner CI enrôlé — la forge du poste peut faire tourner sa CI"
-    # Meme raison qu'en 48 : le nom du projet se derive, l'uninstall le lit dans le journal.
     prov_journal_note posed_docker "$PROV_RUNNER_PROJECT"
     return 0
   fi
@@ -108,9 +91,6 @@ converge_ci_runner() {
   p_drift "runner CI NON enrôlé (rc=$rc — le refus du délégué est au-dessus) — la CI restera en attente"
 }
 
-# LE VERDICT DIT SUR QUOI ELLE ÉCOUTE, parce que c'est la seule chose qu'un opérateur ne peut pas
-# deviner en la voyant répondre en local. Une forge ouverte au réseau et une forme fermée rendent
-# le même `200` sur la loopback.
 
 check() {
   # ⚠ LA FORGE D'ABORD : sans elle, l'absence de runner n'est pas une dérive de CE module. Un

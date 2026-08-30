@@ -8,35 +8,11 @@
 # CHECK-ON: any
 # NEEDS: root
 #
-# RANG 45. Il etait PORTEUR tant que ce module accordait un droit a `%$PROV_FLEET_GROUP` : les
-# modules se decouvrent par glob ordonne `NN-*.sh` (`deploy/provision`), et un rang < 20 aurait
-# ouvert root a un groupe que `20-groups.sh` n'avait pas encore cree.
-# Ce module n'accorde plus rien — il RETIRE. Le rang ne porte donc plus de contrainte : il est garde
-# tel quel parce que le renumeroter deplacerait quatre gestes sans rien gagner.
-#
-# QUATRE GESTES, UN MOTIF : le rail toolchain (chantier admiral) est du code livre qui n'etait
-# CABLE nulle part — trouve par la validation adversariale du PLAN, 2026-08-19. Ce module est le
-# cablage cote provisioning ; le binaire est pose par l'image (Dockerfile), la supervision par le
-# domaine (BEAM).
-#
-#   1. le SUDOERS ETROIT — ⚠ RETIRE LE 2026-08-25, ET CE POINT EST DEVENU SON CONTRAIRE : ce module
-#      GARDE DESORMAIS SON ABSENCE. La regle etait `%fleet ALL=(root) NOPASSWD:` sur un binaire
-#      nomme. Elle etait defendue ici comme « sure par construction : l'entree du binaire est un
-#      manifeste deja merge sur une branche protegee » — c'etait FAUX au moment ou c'etait ecrit.
-#      L'appelant passait un SHA dont seule la FORME hexadecimale etait controlee, et le depot d'ops
-#      porte des commits NON REVUS par conception (c'est ce que le rail EST : des pods y ouvrent des
-#      PR). N'importe quel membre de `fleet` — groupe que le convergeur peuple depuis la forge
-#      toutes les 30 s — faisait donc appliquer en root le manifeste de n'importe quel commit.
-#      Le geste passe par `toolchain.sock` (`lcars-privileged`), et l'appelant n'y ecrit RIEN : le
-#      service resout la tete de la branche protegee lui-meme.
-#
 #   2. l'ETAT CONTENEUR du reconciliateur (`/run/lcars/toolchain` — un TMPFS : il meurt avec le
 #      conteneur PAR CONSTRUCTION, et aucun volume ne peut le recouvrir ; 2775 root:fleet) : le
 #      marqueur `toolchain.applied` decrit L'ETAT DE /usr, qui meurt avec le conteneur. Le poser
 #      sur le magasin (volume externe, survit au rebuild) faisait dire « a jour » a une boite
 #      reconstruite dont /usr etait revenu a la baseline — l'exact mensonge que `01` §4.5 refuse.
-#      La duree de vie du marqueur SUIT celle de l'objet qu'il decrit (`01` §4.8, la doctrine des
-#      volumes, appliquee a un fichier). Ecrit par le BEAM (uid worker, groupe fleet) => 2775.
 #
 #   3. la PROJECTION DU LOGIN DU SIEGE (`<store>/state/pilot.assignee`) : l'assignee des issues
 #      `error_system` est le login REEL du siege — VARIABLE (celui de l'installeur en prod,
@@ -70,23 +46,8 @@ SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
 # ferait une seconde autorite sur un chemin, et c'est celle qu'on ne relit pas qui ment.
 RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/run/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
-# ─── LA SOURCE DU SKILL VIT AUX DEUX ENDROITS, ET LE DÉFAUT N'EN CONNAISSAIT QU'UN ──────────────
-# `/opt/lcars/admiral-skills` est un chemin d'IMAGE (`Dockerfile:534`, `COPY fleet/deploy/admiral/
-# skills`). Sur le rail poste il n'existe pas : le module dérivait donc en accusant l'image —
-# « image sans les sources admiral ? » — sur une machine qui n'est pas une image, et le siège n'y
-# recevait jamais son skill.
-#
-# Mesuré le 2026-08-21, install à froid sur machine dédiée :
-#   DRIFT 45-sudoers-toolchain: skill system-issues: source absente (/opt/lcars/admiral-skills)
-#
-# Les deux chemins sont sondés, l'image d'abord (c'est là que le fichier est FIGÉ, donc autoritaire
-# quand elle existe), le dépôt ensuite. `repo_root` est déjà ce que la lib rend au module — on ne
-# recopie pas un chemin, on demande. La couture de test garde la priorité sur les deux.
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-}"
 if [[ -z "$SKILL_SRC" ]]; then
-  # ⚠ CE CHEMIN EST CELUI DE L'IMAGE, ET IL SE DERIVE. `LCARS_HELPERS_DIR` porte la racine que le
-  # Dockerfile emploie ; l'ecrire en dur ici ferait un second endroit a corriger le jour ou elle
-  # bouge — et la phase B la fait precisement bouger.
   _skills_image="${LCARS_HELPERS_DIR:-/opt/lcars}/admiral-skills"
   if [[ -d "$_skills_image" ]]; then
     SKILL_SRC="$_skills_image"
@@ -96,17 +57,6 @@ if [[ -z "$SKILL_SRC" ]]; then
 fi
 
 # ─── LE SUDOERS EST RETIRE, ET SON ABSENCE EST DESORMAIS CE QUI SE CONVERGE ─────────────────────
-#
-# La regle etait `%fleet ALL=(root) NOPASSWD: /usr/local/bin/lcars-toolchain-converge` — le lien le
-# plus fin du systeme, un chemin `groupe -> root` DIRECT. Et `fleet` n'etait pas une liste d'ayants
-# droit : `human-converger` le peuplait depuis l'equipe `humans` de la forge, TOUTES LES 30 s. Le
-# droit d'executer du code en root avait donc la peremption d'un cache, et se retirer demandait un
-# `pkill`.
-#
-# Le geste vit maintenant derriere `toolchain.sock`, servie par `lcars-privileged` — et l'appelant
-# n'y passe AUCUN argument : le service resout lui-meme la tete de la branche protegee. L'ancien
-# rail laissait passer un SHA dont seule la FORME hexadecimale etait controlee, sur un depot ou des
-# commits non revus vivent PAR CONCEPTION (c'est ce que le rail EST : des pods y ouvrent des PR).
 #
 # ⚠ CESSER DE POSER NE SUFFIT PAS, ET C'EST TOUT L'OBJET DE CE BLOC. Retirer l'ecrivain laisse le
 # fichier en place sur CHAQUE boite deja provisionnee : le NOPASSWD survivrait au chantier qui le
@@ -135,7 +85,6 @@ check() {
     fi
   fi
 
-  # La projection ne se check que si elle est POSSIBLE (magasin monte) et DUE (siege connu).
   if [[ -n "${LCARS_STORE_ROOT:-}" && -d "${LCARS_STORE_ROOT:-/nonexistent}" ]]; then
     if [[ -s "$LCARS_STORE_ROOT/state/pilot.assignee" ]]; then
       p_ok "projection du siege ($(cat "$LCARS_STORE_ROOT/state/pilot.assignee"))"
@@ -149,9 +98,6 @@ check() {
 }
 
 apply() {
-  # 1. Le sudoers — RETIRE. Voir le bloc au-dessus de `check` : cesser de poser laisserait le
-  #    NOPASSWD sur toute boite deja provisionnee, et un droit qu'on a cesse d'accorder mais jamais
-  #    retire est un droit qui reste.
   if [[ -e "$SUDOERS_FILE" ]]; then
     if rm -f "$SUDOERS_FILE"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
@@ -162,8 +108,6 @@ apply() {
     fi
   fi
 
-  # 2. L'etat conteneur — 2775 : le BEAM (groupe fleet) ecrit le marqueur, root le possede.
-  #
   # ⚠ `ensure_dir`, PAS `install -d` + `chgrp`. Trois raisons, et la premiere est une garde :
   #   · `install -d` ne passe pas par `prov_refuse_symlink_path`. C'est le vecteur 6-131 exact —
   #     un lien pose dans un composant du chemin, et le prochain apply en root chmode/chowne la
@@ -185,11 +129,9 @@ apply() {
   chgrp "$PROV_FLEET_GROUP" "$RUN_STATE" 2>/dev/null \
     || p_drift "etat conteneur: chgrp $PROV_FLEET_GROUP a echoue — le reconciliateur ne pourra pas noter"
 
-  # 3+4. La projection du siege ET son skill — uid-keyes, inconditionnels.
   local uid
   uid="$(id -u -- "$PROV_HUMAN" 2>/dev/null || true)"
   if [[ "$uid" == "$SYSADMIN_UID" ]]; then
-    # 4. Le skill system-issues — chez le SIEGE et personne d'autre.
     if [[ -d "$SKILL_SRC/system-issues" ]]; then
       local home skdst
       # Couture de test (LCARS_SIEGE_HOME) : les bats ne doivent JAMAIS ecrire dans le vrai home
@@ -233,8 +175,6 @@ apply() {
       # contrat : ce pas est tolere. Un if/then/else le ferait tuer le module sous `set -e`.
       prov_refuse_symlink_path "$LCARS_STORE_ROOT/state" \
         && install -d -m 2775 "$LCARS_STORE_ROOT/state" 2>/dev/null || true
-      # Redirection, JAMAIS un pipe vers write_atomic : ses compteurs de verdict vivraient dans le
-      # subshell du pipe et seraient perdus (la regle B3 de `30-wsl.sh:152`).
       if write_atomic "$LCARS_STORE_ROOT/state/pilot.assignee" 0644 <<<"$PROV_HUMAN"; then
         p_ok "projection du siege : $PROV_HUMAN -> pilot.assignee"
       else

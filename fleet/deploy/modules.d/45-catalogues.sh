@@ -13,11 +13,6 @@
 # la SOURCE du catalogue dans `<nom>/_catalogue`. Ce depot-la est la signature de l'installation. Ce
 # module lit cette signature et fait suivre le materiel local — un clone, rien de plus.
 #
-# LE MATERIEL LOCAL EST UN CACHE, PAS UN ETAT. C'est ce qui autorise ce module a supprimer : ce
-# qu'il efface est re-clonable depuis l'autorite, donc effacer ne perd rien. Un repertoire que la
-# forge ne signe plus est un catalogue qu'on aurait continue a servir — des roles, des cartes et des
-# projets qui tournent sur un metier que plus personne ne declare.
-#
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
 # la lecture et le clone se font en anonyme. Une boite qui n'a jamais recu `box config`
@@ -27,11 +22,6 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# Le nom du depot ou la source d'un catalogue installe est POUSSEE. C'est une ADRESSE — l'endroit ou
-# `push_store` ecrit et ou l'on va donc chercher — jamais un predicat : rien ne se decide en la
-# lisant, cf. l'identite ci-dessous. Le `_` initial est de l'UX (⚖ user, 2026-08-21) : il separe a
-# l'oeil, dans une liste de depots, ce que la fleet a pose de ce qu'un humain a depose. Il ne
-# protege rien et ne doit jamais recommencer a proteger quoi que ce soit.
 STORE_REPO="_catalogue"
 MANIFEST="catalogue.yaml"
 
@@ -43,8 +33,6 @@ MANIFEST="catalogue.yaml"
 # plus dans la reponse et ne parie jamais le materiel de la boite sur une supposition.
 STORE_QUERY="catalogue"
 
-# ─── ce que la FORGE signe ────────────────────────────────────────────────────────────────────────
-#
 # UN DEPOT QUI SE DECLARE AU NOM DE SON ORG = CE CATALOGUE EST INSTALLE. Quatre filtres, chacun paye :
 #
 #   * l'ADRESSE, exacte — `q=catalogue` est un match de SOUS-CHAINE cote Gitea,
@@ -142,11 +130,6 @@ forge_installed() {
 # liste `||` chez l'appelant, donc bash y desactive `errexit` jusque dans la substitution : un `curl`
 # qui echoue laisse simplement `raw` VIDE. `code` vaut alors `""`, qui tombe sur `*` du `case`,
 # c'est-a-dire rc=2, c'est-a-dire HOLD — la meme reponse que le rescue. Les deux chemins convergent.
-#
-# Il est garde parce qu'il ENONCE l'intention, et retire il ne changerait rien : la mutation qui le
-# supprime ne fait rougir aucun temoin (verifie le 2026-08-21). Ce qui est tenu par les temoins est
-# la PROPRIETE — « pas de reponse -> HOLD » — et elle tient avec ou sans lui. Ne pas le lire comme
-# un garde : le garde est le `*` du `case`.
 declared_name() {
   local raw code body
   raw="$(curl -sS -m 10 -w '\n%{http_code}' "$PROV_FORGE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
@@ -163,8 +146,6 @@ declared_name() {
   esac
 }
 
-# ─── ce que la BOITE porte ────────────────────────────────────────────────────────────────────────
-#
 # Un repertoire compte quand il porte un MANIFESTE, la meme regle que `Fleet.Catalogue` : un clone
 # interrompu ou un `lost+found` n'est pas un catalogue, et le compter en ferait un que le boot
 # refuserait de verifier.

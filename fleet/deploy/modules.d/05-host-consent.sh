@@ -7,38 +7,12 @@
 # CHECK-ON: linux
 # NEEDS: root
 #
-# ─── UN CONSENTEMENT QUI NE SURVIT PAS À SON INSTALL N'EN EST PAS UN ────────────────────────────
-#
-# `00-preflight` refuse le Linux natif : ce provisionnement possède /etc, crée un groupe système,
-# pose /opt/lcars, et n'a AUCUN désinstalleur. Le refus est délibérément levable —
-# `LCARS_ALLOW_ANY_HOST=1` —, et c'est la forme voulue : sur une machine dédiée, on lève le drapeau
-# et ça DOIT marcher (⚖ user, 2026-08-20).
-#
-# Or ce drapeau ne vivait QUE dans l'environnement de l'humain qui a tapé la commande. Tout ce qui
-# rejoue le provisionnement PLUS TARD tourne sans cet environnement — et se fait refuser par un
-# préflight qui redemande un consentement DÉJÀ donné :
-#
-#   MESURE DU 2026-08-21, poste natif, humain converge par `human-converger.sh` :
-#     FAIL  00-preflight: HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux)
-#     [lcars-converger] mintos : user cree mais le provisioning per-humain a echoue
-#
-#   Le compte Unix existe, son `~/.lcars` n'est pas posé, et le motif affiché parle d'un choix de
-#   plateforme — alors que la plateforme avait été acceptée à l'install, une fois, par la personne
-#   qui possède la machine. Le convergeur, lui, n'a aucun humain à qui redemander : c'est un daemon.
-#
 # ─── CE QUE CE MODULE FAIT, ET RIEN D'AUTRE ─────────────────────────────────────────────────────
 #
 # Il ÉCRIT le consentement là où le prochain lecteur le trouvera sans environnement. Il ne décide
 # rien : sans le drapeau dans l'env ET sans marqueur, il ne pose rien et le dit. `00-preflight`
 # reste le seul à REFUSER — ici on ne fait que rendre durable ce que l'opérateur a déjà accordé.
 #
-# ⚠ POURQUOI PAS DANS `00-preflight` : ce module-là est READ-ONLY par construction (son `apply`
-# appelle son `check` — « converger = constater »). Un préflight qui écrit pour se donner à lui-même
-# la permission de passer au tour suivant est un préflight qui ne refuse plus rien.
-#
-# ⚠ POURQUOI PAS DANS `install.sh` : la porte n'est pas le seul chemin. `provision apply` se lance
-# aussi directement, et le convergeur appelle `provision`, jamais `install.sh`. Un consentement
-# enregistré par une seule des deux portes laisse l'autre produire exactement la panne ci-dessus.
 #
 # LE MARQUEUR EST UNE TRACE, PAS UN SECRET : 0644, dans `/etc`, avec la date et le substrat mesuré.
 # Quelqu'un qui reprend la machine dans six mois doit pouvoir lire ce qui a été accepté et quand.

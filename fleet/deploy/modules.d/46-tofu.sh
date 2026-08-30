@@ -7,38 +7,11 @@
 # CHECK-ON: any
 # NEEDS: root
 #
-# ─── 124 Mo D'OUTIL TRANSPORTÉS DANS 1,18 Go D'IMAGE ────────────────────────────────────────────
-#
-# ⚖ USER 2026-08-22 : « tu build une image complète de 1,2 Go juste pour exécuter 100 ko de recette
-# tofu ? » — et : « pourquoi tofu ne peut pas tourner directement ? »
-#
-# Mesuré dans l'image : `tofu` pèse 110 Mo, son miroir de providers 14 Mo. Le rail poste bâtissait
-# donc une image de 1,18 Go — dix minutes — qu'il ne DÉMARRE jamais, uniquement pour exécuter ces
-# 124 Mo dans un conteneur jetable.
-#
-# LA CAUSE ÉTAIT HISTORIQUE, PAS ARCHITECTURALE. Le Dockerfile le dit lui-même : « tofu n'était
-# installé NULLE PART : ni dans cette image, ni par un module de provision, ni par install.sh ». Il a
-# été mis là parce que c'était le seul endroit qui existait alors.
-#
-# ⚠ ET LE CONTOURNEMENT ÉTAIT DEVENU SA PROPRE JUSTIFICATION. Le conteneur transitoire recevait ses
-# fichiers d'autorité par un volume nommé et trois `docker cp`, sous un commentaire qui explique
-# — justement — qu'un bind de chemin d'hôte serait INVISIBLE si le daemon vit dans une autre VM.
-# C'est vrai, et ce problème n'existe QUE parce qu'on avait choisi de tourner dans un conteneur.
-# Sur la machine, les fichiers sont déjà là.
-#
-# ─── POURQUOI 46, ET PAS AVEC LES AUTRES AUXILIAIRES ────────────────────────────────────────────
-#
 # `48-forge-host` pose la structure de la forge et a besoin de tofu POUR ÇA. `62-runtime-helpers`,
 # qui pose le reste des auxiliaires, tourne quatorze crans plus tard : y mettre tofu l'aurait rendu
 # indisponible au moment exact où la forge en a besoin. L'ordre est le préfixe, et le préfixe porte
 # le sens — même leçon que `22-fleet-human`, renommé de 65 à 22 pour la même raison.
 #
-# ─── CE QUI EST GARDÉ : L'HERMÉTISME ────────────────────────────────────────────────────────────
-#
-# Le conteneur n'apportait qu'une chose de valeur — une version figée et des providers qui ne
-# dépendent pas du réseau. Les deux sont rendues par le pin sha256 et le miroir local, exactement le
-# mécanisme que ce dépôt utilise déjà pour `ttyd` et le précompilé Elixir. Les pins sont ceux du
-# Dockerfile, et un témoin épingle leur égalité : deux rails, deux mécanismes, UNE version.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -132,9 +105,6 @@ EOF
   # ATTENDU ici — au premier passage le miroir n'existe pas encore, c'est tout ce que cet init
   # mesure. Mesuré à froid le 2026-08-22 : deux FAIL et un verdict rouge sur un module dont le
   # miroir venait d'être posé correctement.
-  #
-  # La règle : on ne sonde pas avec un outil qui juge. `run_quiet` sert aux gestes qui doivent
-  # réussir ; une question dont « non » est une réponse valide s'écrit nue.
   # ⚠ ET L'INIT NE SE JOUE PAS DANS L'ARBRE DE L'OPÉRATEUR. `tofu init` ÉCRIT — il pose un
   # `.terraform/` à côté de la recette — et ce module tourne en root. Mesuré au nettoyage de .63 le
   # 2026-08-22 : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur

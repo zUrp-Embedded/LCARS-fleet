@@ -8,55 +8,14 @@
 # CHECK-ON: any
 # NEEDS: root
 #
-# DEUX dossiers systeme, et les zones de face. (La v1 en posait une dizaine — commons, handoffs,
-# fleet-state, spool, projects, tmp — pour l'IPC de sa fleet bash ; le runtime v2 n'a besoin
-# d'AUCUN d'eux : son etat vit sous ~/.lcars per-humain, pose par `fleet_v2 start` lui-meme.)
-#
 #   /opt/lcars      0755 root:root — LA RACINE UNIQUE. Le prefixe d'install (`PROV_PREFIX`) y est
 #                   cree par 60-deploy ; root-only en ecriture = personne ne remplace un runtime
-#                   deploye par surprise. Elle s'appelait `/local`, une racine de premier niveau
-#                   qui n'existait que pour porter ce prefixe — et que la table ne declarait pas.
 #   /opt/lcars/var/tokens   0710 lcars-authority:fleet — les secrets de forge de la boite (jetons de role,
 #                   jeton master, seed). UN SEUL process les OUVRE : le service d'autorite.
-#                   ⚠ `0710` ET PAS `0700` : le groupe TRAVERSE, il ne LISTE pas. Ce repertoire ne
-#                   contient pas que des secrets — `forge.url` et `forge.public.url` y sont en 0644,
-#                   et trois modules `NEEDS: human` les lisent SOUS L'HUMAIN via `as_human`. En 0700
-#                   ils prenaient « Permission denied », `PROV_FORGE_URL` restait vide, et
-#                   `fleet_v2.env` n'obtenait jamais son `FORGE_BASE_URL` (mesure du 2026-08-25).
-#                   ⚠ IL ETAIT `0750 root:fleet`, ET LE GROUPE ETAIT UNE PROJECTION. Le convergeur
-#                   remplissait `fleet` depuis l'equipe `humans` de la forge toutes les 30 s : le
-#                   droit de lire un credential avait donc la peremption d'un cache, et se retirer
-#                   demandait un `pkill`. Le BEAM ne lit plus rien ici — il DEMANDE au service, qui
-#                   pose la question a la forge a l'instant du geste.
 #                   ⚠ ROOT TRAVERSE ENCORE, et c'est ce qui fait tenir le provisionnement : les
 #                   modules qui ecrivent ici tournent en root et ignorent le mode. Ce qui est
 #                   ferme, c'est l'uid HUMAIN.
 #
-# ─── LES ZONES DE FACE, ET POURQUOI ELLES SONT ICI ────────────────────────────────────────────
-# Une racine par face — le miroir shell de `Fleet.Layout.face_root/1`, tenu en phase avec lui par
-# le contrat `layout.face_roots_provisioned` de `mix lcars.contracts.check`.
-#
-# ELLES N'ETAIENT CREEES QUE PAR L'ENTRYPOINT DOCKER, et le rail reconnait TROIS substrats. Sur
-# `wsl` elles existaient « par histoire du substrat » — c'est-a-dire a la main, un jour, sur la
-# machine de l'auteur — et sur un `linux` natif, pas du tout. Le runtime tourne sous l'humain et
-# `/home` appartient a root : creer la zone n'est donc PAS un geste qu'il peut rattraper. La boite
-# demarrait saine et le premier onboarding mourait sur un `permission denied`, exactement comme la
-# face `doc` absente de l'entrypoint l'avait fait le 2026-08-09 — meme panne, sur le chemin que le
-# contrat ne couvrait pas.
-#
-# setgid + groupe fleet : chaque humain du groupe cree ses projets et ses worktrees dans la zone,
-# et ce qu'il y pose reste lisible par les autres. Un `mkdir` de rattrapage cote runtime herite de
-# l'umask, donc sans setgid ni groupe — le partage se casse en silence, ce qui est pire que
-# l'echec franc.
-#
-# ⚠ L'entrypoint docker garde SA propre creation de ces memes zones, et ce n'est pas un doublon
-# oublie : il clone la source dans `/home/projects/LCARS` bien AVANT d'appeler `provision apply`,
-# donc les zones doivent exister plus tot que ce module ne tourne. Les deux miroirs sont tenus par
-# le meme contrat, qui les compare tous les deux a `Fleet.Layout` — l'ordre de boot est la raison
-# d'etre du second, pas une negligence.
-#
-# CHAQUE dossier est pose creation+mode+owner en un geste convergent (la v1 separait mkdir des
-# perms → un crash entre les deux laissait des dossiers ownes root par defaut, silencieusement).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -66,79 +25,11 @@ set -euo pipefail
 # entrée ajoutée ici est vérifiée ET posée, sans qu'on puisse en oublier la moitié.
 # Les zones de face sont le MIROIR SHELL de `Fleet.Layout.face_root/1` — en ajouter une sans
 # l'ajouter là-bas (ou l'inverse) fait rougir `layout.face_roots_provisioned`, en la NOMMANT.
-# ⚠ LES DEUX ZONES CATALOGUE N'ONT PAS LE MEME MODE, ET LA DIFFERENCE EST LEUR CONTENU.
-# `$PROV_CATALOGUES_DIR` (le materiel installe) est du METIER : les cap-profiles, les cartes, les
-# prompts. Il se LIT — chaque fleet humaine, et les pods par leurs mounts — donc `0750 root:fleet`.
-# `$PROV_CATALOGUES_WORK` (les recettes tofu par catalogue) porte l'ETAT terraform, qui contient
-# les valeurs des variables : le mot de passe de seed y figure. Donc `0700 root:root`.
 #
-# ⚠ PLUS AUCUN GROUPE N'Y ECRIT, ET C'EST LE CHANGEMENT. Les deux zones etaient `2775`/`2770` sur un
-# groupe d'admins, avec le setgid pour qu'un second admin puisse reprendre le travail du premier :
-# il fallait que des HUMAINS ecrivent ici, parce que le geste d'install tournait sous leur uid.
-# Il tourne maintenant dans un service root (`catalogue-executor.py`), donc un seul ecrivain, donc
-# ni groupe d'ecriture ni setgid a tenir. Ce qui reste est une question de LECTURE, et elle se
-# repond par `fleet` pour le materiel et par personne pour l'etat.
-# ─── LA RACINE DES SOCKETS DE CONSOLE — SANS ELLE LA FLEET NE BOOTE PAS ─────────────────────────
-# MEME CICATRICE QUE LES ZONES DE FACE, UN SITE PLUS LOIN. `Fleet.Observation` fait ecouter le deck
-# sur `/run/lcars/console/<humain>/deck.sock`, et ce dossier n'etait cree QUE par `console.sh`,
-# artefact de CONTENEUR (`/opt/lcars/console.sh`, appele par l'entrypoint). Une install native ne le
-# joue jamais, donc le dossier n'existait pas, donc Ranch echouait a binder et — `max_restarts: 0`
-# au sommet — le node MOURAIT au boot :
-#
-#   [error] Failed to start Ranch listener {Fleet.EventRouter.UnixListener, 3205} … ip: {:local,
-#   "/run/lcars/console/lcars/deck.sock"} … for reason :enoent (no such file or directory)
-#
-# Mesure du 2026-08-20 sur le poste natif : `provision apply` vert sur ses 14 modules, release
-# posee, `fleet_v2 start` annoncant « fleet up » — et zero `beam.smp` une seconde plus tard. Le
-# lanceur ne ment pas, il rend la main avant que le BEAM ne meure.
-#
-# ⚠ SUR `docker` ON NE TOUCHE A RIEN : `console.sh` y possede ces dossiers. Deux createurs pour un
-# meme dossier donneraient un mode qui depend de qui a couru le premier — et `install -d` ne repose
-# PAS le mode d'un dossier existant, donc le desaccord serait SILENCIEUX.
-#
-# ⚠ LE GROUPE EST CELUI DE LA CONSOLE, PAS CELUI DE LA FLEET, ET CETTE LIGNE A PORTE `fleet` JUSQU'AU
-# 2026-08-21. Le motif ecrit ici disait « un groupe que seule l'image cree » — c'etait vrai, et c'est
-# devenu une raison de se tromper : le rail poste a cable `$PROV_FLEET_GROUP` faute de mieux, au lieu
-# de creer le groupe manquant. `20-groups` le pose desormais.
-#
-# Ce que ca coutait, mesure sur un poste natif : `/run/lcars/console/lcars` en `lcars:fleet`, le deck
-# sous `nobody:lcars-console`, traversee REFUSEE par le noyau. Une console vivante, une socket bien
-# posee, et une page noire — sans une ligne d'erreur nulle part, parce que du point de vue de chaque
-# composant tout etait conforme.
-#
-# Et `fleet` etait le mauvais groupe pour une raison de fond, pas seulement d'accord : il porte deja
-# la lecture de `/opt/lcars/runtime`, des role-tokens et de `/opt/lcars/var/tokens`. Le donner au deck pour qu'il
-# traverse un repertoire lui aurait accorde tout le reste au passage.
 # ⚠ LE DOSSIER DE CONSOLE APPARTIENT A QUI LANCE LA FLEET, PAS A `--human`. Ce sont deux personnes
 # differentes sur le rail poste : `--human` est l'OPERATEUR (SUDO_USER), presque toujours l'uid 1000
 # que GUARD B reserve au siege, et la fleet tourne sous l'HUMAIN DE FLEET, seme sur la forge par
 # `48-forge-host` et materialise par le convergeur que `64-services` tire.
-# Le deck derive son chemin du `USER` du BEAM (`Fleet.Observation.deck_socket/0`), donc c'est cet
-# humain-la qui doit posseder le dossier.
-#
-# Mesure du 2026-08-21, install a froid : `/run/lcars/console/lordzurp` cree, fleet lancee sous
-# `lcars`, et le node MORT au boot sur `:enoent` — le meme echec que la veille, deplace d'un compte.
-# Ce module est `NEEDS: root`, donc il n'est PAS rejoue par le second passage per-humain : il ne
-# peut pas compter dessus pour rattraper, il doit viser juste du premier coup.
-#
-# ⚠ ET C'EST POURQUOI `22-fleet-human` PORTE LE NUMERO 22. Il s'appelait 65 : le compte etait donc
-# cree APRES ce module, qui ne pouvait pas lui donner son dossier. Une identite precede les
-# repertoires qu'elle possede — l'ordre est le prefixe, et le prefixe porte le sens.
-#
-# ⚠ MAIS L'ORDRE NE SUFFIT PLUS, ET IL FAUT LE DIRE : DEPUIS LE 2026-08-25, `22` NE CREE PLUS. Le
-# compte est seme sur la forge au rang 48 et materialise par le convergeur au rang 64 — donc au rang
-# 25 d'une install NEUVE, l'humain de fleet n'existe dans aucun cas, et cette fonction retombe sur
-# l'operateur. Ce n'est pas un accident a reparer ici : c'est le prix de l'ordre reel, et la table
-# est CORRIGEE au passage suivant, quand le compte est la. Entre les deux, le boot ne casse pas —
-# `console.sh` cree lui-meme `/run/lcars/console/<login>` au lancement de la console (mode 2710,
-# proprietaire relu). Ce qui reste faux jusqu'au second apply est la declaration tmpfiles, celle qui
-# survit au reboot.
-#
-# ⚠ ET CE RATTRAPAGE ETAIT MORT, PARCE QUE LE NOM ARRIVAIT D'UN DRAPEAU. La fonction lisait
-# `PROV_FLEET_HUMAN`, pose par `--fleet-human` : sans le drapeau — le cas nominal — elle rendait
-# l'operateur IMMEDIATEMENT, y compris sur un re-roll ou le compte existe depuis l'install
-# precedente. La promesse « le prochain apply corrigera » ne pouvait donc jamais s'exercer. Le nom
-# vient desormais de son autorite, qui repond toujours, et le rattrapage marche.
 #
 # ⚠ RESOLU UNE FOIS, ET SOUS LA GARDE DOCKER. `prov_runtime_dirs` est appelee quatre fois par passe ;
 # sans memo, chacune forkerait le script d'autorite. Et l'appel vit DANS cette fonction, jamais au
@@ -266,21 +157,6 @@ check_tmpfiles() {
   fi
 }
 
-# ⚠ LE PREMIER ÉCHEC TERMINAIT LA TABLE, ET UNE SEULE LIGNE COÛTAIT LES SEIZE AUTRES.
-#
-# `verdict_apply` fait `exit` (provision-lib:282). Écrit dans la BOUCLE, il transformait un chown
-# raté en abandon du module : tout ce qui suivait dans la table n'était jamais posé, et
-# `apply_tmpfiles` non plus.
-#
-# MESURE DU 2026-08-25, install réelle sur WSL. Un groupe manquant sur `/opt/lcars/var/tokens` a coûté SEPT
-# objets sans aucun rapport avec lui :
-#   /home/projects · /home/projects.ops · /home/projects.workshop   les racines de face
-#   /run/lcars/console · /run/lcars/console/<humain>                la racine des consoles
-#   /var/lib/lcars/tofu                                             l'état terraform
-#   /etc/tmpfiles.d/lcars-console.conf                              la persistance au reboot
-# Le dernier porte son propre verdict : « /run/lcars/console ne se refera pas au reboot, et la fleet
-# ne démarrera pas ». La machine s'est retrouvée avec `lcars-landing` « debout » et aucune racine de
-# console — un demi-état qu'aucune ligne ne nommait.
 #
 # ⚠ `|| true` N'EST PAS UNE NÉGLIGENCE ICI, ET C'EST LA SEULE CHOSE À VÉRIFIER AVANT DE LE LIRE
 # COMME TELLE. Le comptage a DÉJÀ eu lieu en amont : `ensure_dir`, `ensure_mode` et

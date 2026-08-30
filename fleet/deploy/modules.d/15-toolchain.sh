@@ -10,34 +10,11 @@
 # mot : la toolchain vit dans le STAGE BUILD de l'image, pas dans le conteneur runtime. L'état-cible
 # « toolchain posée » n'a pas à être vrai là où on ne buildera jamais ; la vérité docker de ce
 # module, c'est la release présente — sondée par 60-deploy check.)
-#
-# La release lcars_fleet est self-contained (ERTS bundlé) : la toolchain ne sert qu'à BÂTIR
-# (etc/install.sh → mix release), jamais au run. En Docker, elle vit dans le stage builder de
-# l'image — même base, donc mêmes paquets — absente du stage runtime, d'où SUBSTRATE: wsl linux.
-#
-# ⚠ CE MODULE POSAIT UN ZIP PINNÉ, ET LA CIBLE L'A RENDU INUTILE. Le pin Elixir existait pour une
-# raison que ce fichier écrivait lui-même : « l'apt distro est PRÉHISTORIQUE (1.14 sur noble) ».
-# Sur Ubuntu 26.04 — la cible du rail poste, et la base de l'image — l'apt sert `elixir 1.18.3` et
-# `erlang 1:27.3.4.6` (OTP 27), au-dessus des deux planchers. Ce que le pin coûtait part avec lui :
-# un téléchargement, un sha256 à rebumper, `/opt/elixir-<version>` hors table, quatre symlinks à
-# poser puis à retirer, et une VARIANTE d'OTP qui pouvait diverger de la VM sous elle.
-#
-# ⚠ 1.18.3 CONTRE 1.18.4, ET LA DIFFÉRENCE A ÉTÉ LUE, PAS SUPPOSÉE (⚖ user 2026-08-28 : « sur une
-# minor c'est de l'entretien, pas du changement de spec »). 1.18.4 apporte le support initial d'OTP
-# 28, `IEx.Helpers.process_info/1`, `--no-listeners` sur `mix compile`/`mix run`, et des corrections
-# de trace events. Aucun de ces trois n'est appelé dans ce dépôt, et `mix.exs` exige `~> 1.18`.
-#
 # DEUX PLANCHERS, DEUX HORLOGES, UN SEUL MÉCANISME :
 #   - Erlang/OTP : `>= PROV_ELIXIR_OTP_MAJOR`. On ne fige pas ce qu'on ne contrôle pas — le gate CI
 #     verrouille la compatibilité réelle.
 #   - Elixir     : `>= PROV_ELIXIR_MIN` (majeure.mineure). Le patch ne se compare pas : la distro
 #     le bouge sous nous, et c'est exactement le service qu'on lui demande.
-#
-# ⚠ UN PLANCHER NE DIT RIEN DE L'ÉCART AU-DESSUS DE LUI. C'était vrai avant et ça le reste ; ce qui
-# a changé, c'est qu'aucun second objet ne se choisit d'après ce cran. Le 2026-08-22, un hôte 26.04
-# a servi OTP 27 sous un plancher 25 : vert, et Elixir posé en variante OTP 25 par-dessus. Un
-# paquet apt d'Elixir est compilé CONTRE l'Erlang de sa propre distro — la divergence n'a plus de
-# lieu où naître.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -46,31 +23,11 @@ set -euo pipefail
 otp_release() { erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0; }
 elixir_version() { elixir --short-version 2>/dev/null || echo absent; }
 
-# ─── L'ANCIEN PRECOMPILE, ET POURQUOI IL SE RETIRE AU LIEU DE SE DECLARER ───────────────────────
-#
 # ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE. `/opt/elixir-<version>`
 # et ses quatre symlinks ont quitte `system.manifest` en meme temps que ce module a cesse de les
 # poser — sur une machine NEUVE, c'est exact et complet. La ou l'ancien mecanisme a tourne, ils sont
 # toujours la, et plus rien ne les nomme : `provision uninstall` ne les emporterait pas, et personne
 # ne saurait dire d'ou ils viennent.
-#
-# ⚠ ET « LA OU IL A TOURNE » N'EST PAS UN PARC — C'EST ICI. Aucun systeme LCARS n'est deploye a ce
-# jour (⚖ user 2026-08-28 : « ya PAS de systeme deja deploye ; pour ca il faut d'abord avoir un
-# systeme qui fonctionne »). Les machines concernees sont les POSTES DE TRAVAIL ou le rail a ete
-# joue en partie — celui qui ecrit ces lignes en est un : `/opt/elixir-1.18.4` y est pose, et ses
-# quatre symlinks pointent dessus (mesure du 2026-08-28). Ce geste n'entretient pas une flotte, il
-# rattrape des postes de dev ; c'est plus petit que ce que la premiere version de ce commentaire
-# laissait croire, et ca ne le rend pas facultatif — un seul poste qui compile avec le mauvais
-# binaire suffit a produire une release que personne n'a decidee.
-#
-# ⚠ ET LE SYMLINK EST PIRE QUE L'ARBRE, PARCE QU'IL GAGNE. `/usr/local/bin` passe AVANT `/usr/bin`
-# dans le PATH par defaut : tant que `/usr/local/bin/elixir` pointe vers l'ancien precompile, la
-# machine continue de compiler avec lui — variante OTP comprise — pendant que le paquet apt est
-# pose, sonde vert, et jamais appele. Un poste qui a l'air converge et qui ne l'est pas.
-#
-# LE MANIFESTE DECLARE CE QU'ON POSE ; L'ABSENCE SE CONVERGE. C'est le patron de
-# `45-sudoers-toolchain`, qui `rm -f` un fichier qu'il ne declare plus — et le contrat d'absence y
-# est tenu par un temoin, pas par une ligne de table.
 LEGACY_ELIXIR_BINS=(elixir elixirc mix iex)
 # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CE GESTE SERAIT INTESTABLE. Un temoin ne
 # peut pas monter un faux `/opt/elixir-1.18.4` sur la machine qui le joue ; sans surcharge il
@@ -92,9 +49,6 @@ legacy_elixir_links() { # -> les symlinks <link_dir>/* qui pointent vers NOTRE a
     t="$(readlink -m "$PROV_LINK_DIR/$b" 2>/dev/null || true)"
     [[ "$t" == "$LCARS_LEGACY_ELIXIR_PREFIX"*/* ]] && printf '%s\n' "$PROV_LINK_DIR/$b"
   done
-  # ⚠ « RIEN A RETIRER » N'EST PAS UNE ERREUR, ET SANS CE `return` C'EN ETAIT UNE. Le dernier tour
-  # de boucle rend le code du `[[ ]]`, donc 1 des que le dernier binaire n'est pas des notres — sur
-  # une machine NEUVE, c'est-a-dire le cas nominal. Sous `set -e`, l'appelant mourait.
   return 0
 }
 
@@ -131,7 +85,6 @@ elixir_meets_floor() { # elixir_meets_floor <version lue> <plancher M.m>
 }
 
 check() {
-  # Erlang plancher.
   if command -v erl >/dev/null; then
     local otp; otp="$(otp_release)"
     if [[ "$otp" -ge "$PROV_ELIXIR_OTP_MAJOR" ]]; then
@@ -143,7 +96,6 @@ check() {
     p_drift "erl absent (paquet apt erlang)"
   fi
 
-  # Elixir plancher, ET la variante — la seconde est celle qui a derive.
   local ev; ev="$(elixir_version)"
   if [[ "$ev" == absent ]]; then
     p_drift "elixir absent (paquet apt elixir)"
@@ -160,7 +112,6 @@ check() {
     fi
   fi
 
-  # L'ancien precompile : ce qui reste d'un poste provisionne par le mecanisme d'avant.
   local -a old_links old_trees
   mapfile -t old_links < <(legacy_elixir_links)
   mapfile -t old_trees < <(legacy_elixir_trees)

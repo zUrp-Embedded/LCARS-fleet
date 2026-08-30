@@ -7,44 +7,13 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 20-groups
-#
-# ─── POURQUOI UN MODULE, ET PAS UNE LIGNE DANS `20-groups` ──────────────────────────────────────
-#
-# Ce module a failli ne pas exister. La question etait : elargir `20-groups` en « comptes ET groupes
-# du systeme », ou en poser un dedie ? Le premier coute une ligne — et rend son nom FAUX.
-#
-# Un nom designe le rail ou le metier, jamais le transport ni l'outil. Elargir un module en gardant
-# son nom est ce meme defaut en miniature : un lecteur qui cherche ou naissent les comptes de
-# service ne regarde pas dans un module appele « groups ».
-#
-# ─── DEUX COMPTES, ET LEUR DIFFERENCE EST LE SUJET ──────────────────────────────────────────────
-#
-# `lcars-authority` DETIENT (les secrets de la forge) et n'escalade rien.
-# `lcars-system`    N'EST QUE quelqu'un : il fait tourner la landing, qui ne detient rien de durable
-#                   et n'a aucun privilege — elle a seulement besoin de ne PAS etre `nobody`.
-#
-# ⚠ POURQUOI `nobody` NE SUFFIT PAS, ET C'EST UNE MESURE, PAS UN PRINCIPE. `nobody` n'est pas une
-# identite, c'est la convention de ceux qui n'en ont pas choisi. Le prix se lit sur son GROUPE :
-# `deck-oidc.json` porte le `client_secret` OAuth2 de la boite et se posait `0640 root:nogroup` —
-# « le mode le plus etroit qui marche », vrai si `nogroup` nommait une identite. Releve sur une
-# Debian/Ubuntu ordinaire le 2026-08-27, `nogroup` (gid 65534) est le groupe PRIMAIRE de quatre
-# comptes : `sync`, `_apt`, `nobody`, `dhcpcd`. Un demon reseau lisait donc le secret.
-#
 # ⚠ ET IL NE PREND PAS `fleet`, LUI. `lcars-authority` en est membre pour traverser
 # `/opt/lcars/runtime` ; la landing n'y lit RIEN — sa doc a ete deplacee hors du prefixe de release
 # (`/opt/lcars/share/doc`) precisement parce que ce process ne pouvait pas l'y lire. Lui donner
 # `fleet` « au cas ou » rendrait faux le motif qui a coute ce deplacement.
-#
-# ─── CE QUE CE COMPTE EST, ET CE QU'IL N'EST PAS ────────────────────────────────────────────────
-#
-# `lcars-authority` DETIENT des secrets de forge et n'a AUCUN privilege noyau. C'est l'inverse exact
-# du convergeur d'humains, qui a le privilege (`useradd`) et ne detient rien. Les deux metiers ne se
-# melangent pas : celui qui detient ne peut pas escalader, celui qui escalade n'a rien a voler.
-#
 # ⚠ SANS SHELL ET SANS HOME. Un compte de service n'a personne a connecter : `nologin` ferme la
 # porte, et l'absence de home evite un `/home/lcars-authority` que le convergeur d'humains devrait
 # ensuite apprendre a ignorer.
-#
 # ⚠ MEMBRE DU GROUPE `fleet`, ET CE N'EST PAS UNE AUTORITE — C'EST UNE TRAVERSEE. `/opt/lcars/runtime`
 # est `0750 root:fleet` (system.manifest), et `catalogue install` y execute le binaire de release par
 # `entrypoint catalogue-source`. Sans le groupe, le geste echoue sur un repertoire qu'il ne peut pas
@@ -55,38 +24,8 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# ⚠ LE NOM NE VIT PLUS ICI, ET C'EST LE POINT. Ce commentaire disait « le nom vit ICI, une fois » —
-# alors que `provision-lib.sh` le posait deja, inconditionnellement, avant ce module. Le `:-` etait
-# une SECONDE copie du defaut, sur une branche morte : la lib est sourcee quatre lignes plus haut,
-# et sans elle ce fichier meurt sur `PROVISION_LIB non pose`. Le repli affirmait qu'on peut tourner
-# sans la lib, ce qui est faux, et il faisait un litteral de plus a faire suivre au renommage.
-#
-# Sans repli, l'absence devient un `unbound variable` bruyant — garanti, pas espere : le contrat
-# `shell.sourcers_set_strict` exige `set -u` de tout sourcer de la lib.
 AUTHORITY_USER="$PROV_AUTHORITY_USER"
-# ─── LE GROUPE DU SERVICE, ET POURQUOI IL DOIT EXISTER ──────────────────────────────────────────
-#
-# ⚠ CE MODULE FAISAIT `useradd -g "$PROV_FLEET_GROUP"`, ET C'ETAIT LA MOITIE D'UN PATRON. Donner un
-# groupe primaire EXISTANT est legitime — `human-converger.sh` le fait deliberement pour l'humain de
-# fleet (`useradd` puis `usermod -aG`), dont la possession s'ecrit alors `user:fleet`. Ce qui est
-# faux, c'est de le faire PUIS d'ecrire `chown user:user` : `useradd -g <groupe existant>` ne cree
-# AUCUN groupe du nom du compte.
-#
-# MESURE DU 2026-08-25, install reelle sur WSL : `uid=999(lcars-authority) gid=1001(fleet)`, et
-# `getent group lcars-authority` ne rend RIEN. Six `chown user:user` et deux lignes de manifeste
-# nommaient donc un groupe inexistant — `chown: invalid group` — et trois modules sont tombes.
-#
-# ⚠ ET LA CICATRICE ETAIT DEJA ECRITE, A DEUX PORTES D'ICI. `services/console.sh:328` porte, mesure
-# et datee du 2026-08-21 : « `useradd -g fleet lcars` ne cree aucun groupe `lcars` » — avec son
-# symptome, une console MORTE au demarrage. J'ai ecrit `-g` dans le fichier d'a cote deux jours
-# apres, sans lire le voisin.
-#
-# ⚖ POURQUOI UN GROUPE A LUI, ET PAS `user:fleet` : ecrire `chown user:fleet` sur les secrets
-# remettrait `fleet` en position d'AUTORITE sur eux — le nom du groupe redeviendrait une reponse a
-# « qui a le droit de lire », l'inverse exact de ce que ce chantier retire. A 0600 le groupe ne donne
-# rien AUJOURD'HUI ; il donnerait tout le jour ou quelqu'un relache un jeton en 0640.
 AUTHORITY_GROUP="${PROV_AUTHORITY_GROUP:-$AUTHORITY_USER}"
-# Le compte de la landing. Meme forme, meme regle de groupe a lui — et AUCUNE adhesion a `fleet`.
 SYSTEM_USER="${PROV_SYSTEM_USER:-lcars-system}"
 SYSTEM_GROUP="${PROV_SYSTEM_GROUP:-$SYSTEM_USER}"
 NOLOGIN="${LCARS_NOLOGIN:-/usr/sbin/nologin}"
@@ -121,9 +60,6 @@ check() {
     p_drift "compte de service $AUTHORITY_USER absent — le service d'autorité n'a pas d'identité, et personne ne peut détenir les secrets de forge à sa place"
   fi
 
-  # ⚠ L'ADHESION EST UNE PRECONDITION DU GESTE, PAS UN CONFORT. Sans elle, `catalogue install`
-  # meurt sur `/opt/lcars/runtime` (0750 root:fleet) — un refus de catalogue pour un probleme de
-  # traversee, exactement la classe de diagnostic faux que ce rail a deja payee deux fois.
   if account_exists "$AUTHORITY_USER" \
      && id -nG "$AUTHORITY_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
     p_ok "$AUTHORITY_USER ∈ $PROV_FLEET_GROUP (traversée de l'install RO)"
@@ -184,11 +120,9 @@ apply() {
 
   ensure_member "$AUTHORITY_USER" "$PROV_FLEET_GROUP" || verdict_apply
 
-  # ─── LE COMPTE DE LA LANDING ────────────────────────────────────────────────────────────────
   # Meme forme que ci-dessus, et une difference DELIBEREE : pas de `ensure_member` vers
   # `$PROV_FLEET_GROUP`. Ce qu'il traverse — les repertoires de socket des consoles — lui est
   # accorde PAR PROCESSUS a l'exec (`setpriv --groups`), jamais par une adhesion persistante.
-  # Le groupe `lcars-console` n'a ainsi toujours aucun membre, et c'est ce qui le garde etroit.
   ensure_group "$SYSTEM_GROUP" || { p_fail "groupe $SYSTEM_GROUP non posé — la landing n'aura pas de groupe à elle, et le secret OAuth2 du deck resterait sur un groupe partagé"; verdict_apply; }
 
   if ! account_exists "$SYSTEM_USER"; then

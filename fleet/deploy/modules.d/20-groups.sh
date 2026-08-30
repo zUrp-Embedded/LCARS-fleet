@@ -7,21 +7,6 @@
 # CHECK-ON: any
 # NEEDS: root
 #
-# Toute la strate « users » de la v1 meurt ici par soustraction : les rôles v2 ne sont PAS des
-# users Linux (un pod = un process bwrap sous l'UID de l'humain qui lance sa fleet ; les rôles
-# sont des cap-profiles DANS le runtime + des comptes sur la FORGE, cf. 50-forge). Il ne reste
-# que : le groupe `fleet` (lecture de l'install RO + des role-tokens 0640) et l'appartenance de
-# l'humain-lanceur à ce groupe.
-#
-# ⚠ IL Y A EU UN SECOND GROUPE ICI, ET SA DISPARITION EST LE SUJET. `lcars-admin` PROJETAIT le
-# `is_admin` de la forge en adhesion unix, pour qu'un mode de fichier serve de gate. Une projection
-# est un cache : elle se pose au login, ne suit aucun process vivant, et demande donc un convergeur
-# pour la tenir, un poll pour la rafraichir, un rattrapage pour les shells nes avant elle.
-#
-# L'adminite se DEMANDE maintenant a la forge a l'instant du geste, par un service root
-# (`catalogue-executor.py`) — donc il n'y a plus rien a projeter, donc plus de groupe a creer, ni de
-# membre a y mettre. Ce module ne connait plus que deux groupes, et aucun des deux ne dit qui
-# administre quoi.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -54,11 +39,6 @@ check() {
 apply() {
   ensure_group "$PROV_FLEET_GROUP" || verdict_apply
   ensure_member "$PROV_HUMAN" "$PROV_FLEET_GROUP" || verdict_apply
-  # ⚠ SANS LUI, LA LANDING NE DEMARRE MEME PAS. `console-landing.sh` se depose par
-  # `setpriv --reuid nobody --regid nogroup --groups lcars-console` : un groupe absent n'est pas une
-  # degradation, c'est un `setpriv: unknown group` et un service qui meurt au demarrage. L'image le
-  # cree dans son Dockerfile (gid 2001) ; le rail poste ne le creait nulle part, et je l'avais posé
-  # a la main sur la premiere machine — donc le rail ne l'avait jamais fait une seule fois.
   ensure_group "$PROV_CONSOLE_GROUP" || verdict_apply
   verdict_apply
 }

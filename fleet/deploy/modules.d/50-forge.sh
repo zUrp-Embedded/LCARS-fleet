@@ -14,28 +14,12 @@
 # « TF fait toute la STRUCTURE, bash SEULEMENT les tokens »). Ce module :
 #   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il NOMME
 #      la commande qui la pose : « fleet/deploy/box forge-apply ».
-#      ⚠ LE MOTIF ÉCRIT ICI ÉTAIT « même famille de gestes d'identité que claude /login, sondés et
-#      instruits, jamais faits ». C'ÉTAIT UN COMMENTAIRE, PAS UNE DOCTRINE — écrit ici le
-#      2026-07-05 avec le code qu'il décrivait, sans arbitrage derrière. Et il est devenu faux : le
-#      geste EST exécutable depuis le 2026-08-16 (tofu vit dans l'image, l'apply est rejouable).
-#      Ce module ne le joue pas ENCORE, et ce « pas encore » n'a rien d'une propriété : où l'apply
-#      se déclenche dans le boot est une question ouverte du chantier « deploy avec tofu dedans ».
-#      Ce qui reste vrai sans discussion : l'apply a besoin d'une AUTORITÉ que l'opérateur fournit
-#      (`fleet/deploy/box config`), et ce module ne l'invente pas ;
 #   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
 #      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
 #      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
 #      bootstrap est posé (PROV_FORGE_SEED_FILE = le TF_VAR_seed_password de tofu), le module
 #      le DÉRIVE : {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge
 #      donc les tokens dans le MÊME cycle — plus aucun geste.
-#      ⚠ LE SEED N'EST PLUS LE MOT DE PASSE DE PERSONNE, et cette ligne a dit le contraire :
-#      « les bots le GARDENT ». Le mint POSE un mot de passe neuf par le jeton master
-#      (`force_password_for`), s'en sert et l'oublie ; l'humain intégré reçoit le sien de
-#      `48-forge-host`. Le seed n'est plus qu'une valeur de CRÉATION — celle que tofu exige à la
-#      naissance d'un compte — et un REPLI si le PATCH du mint échoue. Il ne se supprime pas pour
-#      autant : le provider ne pose le password qu'à la création, donc un seed régénéré rendrait
-#      « changed » tous les plans à venir sans rien changer côté forge (piège documenté dans
-#      `deps/instance/accounts.tf`).
 #   3. SONDE (et ne converge plus) la VISIBILITÉ des adhésions d'org des comptes machine de l'org
 #      SYSTÈME. Une adhésion créée par API est PRIVÉE par défaut, donc invisible aux non-membres :
 #      un humain qui ouvre l'org ne voit pas quels workers y travaillent. C'est de l'UX, pas de la
@@ -45,12 +29,6 @@
 #      jamais convergé : son mot de passe n'est dans aucun fichier de la recette (le passwords-file
 #      ne porte que les comptes machine), donc il n'y a rien avec quoi converger. Le motif ecrit ici
 #      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
-#
-# Données : PROV_FORGE_URL (vide = instruct-only) · PROV_FORGE_SEED_FILE (défaut
-# <tokens-dir>/forge-seed.pass, 0600 root, posé par « fleet/deploy/box config ») · PROV_MASTER_TOKEN_FILE
-# (défaut <tokens-dir>/forge-master.token, 0600 root, même geste — l'autorité de création, elle
-# RESTE) · PROV_PASSWORDS_FILE (défaut <tokens-dir>/forge-role-passwords.json — l'A4 durable,
-# rejouable sur forge nuke).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -75,14 +53,6 @@ forge_reachable() {   # 0 joignable · 1 forme invalide · 2 injoignable
 
 # L'INSCRIPTION LIBRE EST UNE PRÉCONDITION DU MODÈLE D'ENROLLMENT, ET RIEN NE LA VÉRIFIAIT.
 # Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`.
-#
-# ⚠ CETTE PHRASE DISAIT « sur une forge PRÉEXISTANTE — LE CAS DE LA PRODUCTION — l'opérateur a pu
-# fermer l'inscription dans SON app.ini », et le glissement était dans « son » : la forge n'est pas
-# celle d'un tiers, c'est un COMPOSANT de LCARS (⚖ user 2026-08-17). L'autre objet, celui qui
-# appartient à la team, c'est la SORTIE PUBLIQUE — GitHub, un GitLab interne — atteinte par
-# `lcars forge add --host github` et le rail `publish`. Deux choses, un seul mot, et les confondre
-# fait dériver tout le raisonnement d'autorité qui suit.
-#
 # CE QUI NE CHANGE PAS, ET QUI EST LE BON GESTE : on livre un DÉFAUT (inscription ouverte, comptes
 # non restreints — cf. `forge-compose.yml`), et un admin peut le changer chez lui. Alors le rail
 # entier ne marche plus, sans qu'aucun message ne dise pourquoi — donc on SONDE et on ANNONCE,
@@ -109,14 +79,12 @@ probe_registration() {
 
 # JUMELLE DE LA SONDE CI-DESSUS, ET LE MÊME CONTRAT : un défaut qu'on livre, un admin qui peut le
 # changer, une conséquence qu'il doit connaître.
-#
 # UN COMPTE `restricted` NE VOIT QUE CE QUI LUI EST EXPLICITEMENT ACCORDÉ, et une ORG n'est pas un
 # dépôt — c'est ce que la mesure de 2026-08-12 avait manqué en ne regardant que l'accès aux dépôts.
 # Mesuré le 2026-08-17 : un humain restreint, membre de `fleet` mais d'aucune org de catalogue, reçoit
 # 404 sur l'org d'un catalogue quand il est CONNECTÉ, et 200 quand il ne l'est pas. Connecté, il voit
 # moins qu'un inconnu, et tous les catalogues installés lui sont invisibles — contre l'arbitrage
 # « une fois installé, le catalogue est dispo system-wide ».
-#
 # La sonde n'a besoin d'AUCUN jeton : `GET /users/<login>` expose `restricted` en anonyme (mesuré).
 # C'est ce qui la rend jouable au même rang que `probe_registration`, avant tout mint.
 probe_restricted() { # $1=login à sonder
@@ -166,26 +134,11 @@ check_master_authority() {
 # et cette fonction à chaque apply — et seule celle-ci s'applique à un fichier DÉJÀ LÀ. Sans elle,
 # un jeton posé sous un mode antérieur le garde pour toujours. MESURÉ SUR BANC le 2026-08-17, sur
 # une boîte dont les jetons dataient de la veille.
-#
-# C'est la loi #1 du provisionnement (« l'état, c'est le système ») appliquée à un mode : ce qui
-# n'est reposé qu'au geste initial dérive dès que le geste change d'avis.
-#
 # Le CONTENU n'est jamais touché ici — seulement `chmod`/`chgrp`. Un module qui réécrirait un
 # secret pour en corriger le mode pourrait le perdre.
 converge_authority_modes() {
   local f cur want="$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER"
 
-  # ⚠ CE MODE N'EST PLUS UN GATE, ET C'EST LE FOND DU CHANGEMENT. Il l'a été : le jeton était
-  # `0640 root:<groupe admin>` parce que le geste tournait sous l'uid de l'humain, donc DÉTENIR le
-  # jeton était la preuve du droit. Le geste vit maintenant dans un service root
-  # (`catalogue-executor.py`), qui demande à la forge à l'instant du geste. Plus personne n'a besoin
-  # de LIRE ce fichier, donc plus personne ne doit pouvoir le lire.
-  #
-  # ⚠ ET IL N'Y A PLUS DE RETOUR ANTICIPÉ SUR UN GROUPE ABSENT. L'ancienne écriture rendait la main
-  # en `p_drift` quand le groupe manquait — donc sur ce chemin le jeton restait tel que
-  # `48-forge-host` l'avait posé au mint, `0640 root:$PROV_FLEET_GROUP`, LISIBLE PAR TOUT HUMAIN de
-  # la boîte, sans qu'un apply échoue. Un fail-open sur une ACL est pire qu'une ACL absente : il a
-  # l'air converge.
   for f in "$PROV_MASTER_TOKEN_FILE" "$PROV_FORGE_SEED_FILE"; do
     [[ -f "$f" ]] || continue
     cur="$(stat -c '%a %U:%G' "$f")"
@@ -207,13 +160,6 @@ converge_authority_modes() {
   # ⚠ `return 0` OBLIGATOIRE, ET SON ABSENCE A TUE UN BANC ENTIER (2026-08-17). Le dernier geste de
   # la boucle est `[[ "$PROV_MODE" == "check" ]] && p_ok …` : en mode APPLY il est FAUX, donc la
   # fonction rendait 1, donc `set -e` tuait le module juste apres cette ligne — sans un mot.
-  #
-  # ET IL NE MORD QUE SUR UNE BOITE DEJA CONVERGEE : au premier apply les modes sont a corriger, la
-  # branche `chgrp && chmod && p_chg` rend 0, tout va bien. Des que `put_secret` a pose les fichiers
-  # au bon mode (ce qu'il fait), le SECOND apply passe par ce `else` et meurt. Consequence mesuree :
-  # aucun jeton de role minte, `55-deck-oidc` en drift, le convergeur aveugle, AUCUN humain
-  # materialise — et le module annonce « echecs: 1 » sans nommer ce qui a echoue.
-  #
   # La forme `[[ test ]] && cmd` en DERNIERE instruction d'une fonction est un piege general sous
   # `set -e` : elle transforme « ce cas ne s'applique pas » en « cette fonction a echoue ».
   return 0
@@ -257,14 +203,6 @@ ensure_passwords_entries() {
 }
 
 # La visibilité des adhésions, SONDÉE ICI et posée ailleurs (`forge-gestures.sh`).
-#
-# ⚠ SON MOTIF ÉTAIT EMPRUNTÉ : « savoir QUI existe est un prérequis de sûreté » (BL-6-46). Mesuré le
-# 2026-08-17 — `public_members` n'a AUCUNE autre occurrence dans le dépôt, et cette fiche n'apparaît
-# que dans les commentaires de ce fichier. Rien ne LIT cette visibilité. Le besoin est réel et il est
-# d'UX (⚖ user) : une adhésion privée est invisible aux non-membres, donc un humain qui ouvre l'org
-# ne voit pas quels workers y travaillent. Nommer une commodité « sûreté » lui donne une priorité
-# qu'elle n'a pas et rend son coût indiscutable.
-#
 # Sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui : 403,
 # même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal A4
 # (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
@@ -281,14 +219,10 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
 # team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
 # membre / 404 non-membre) et c'est la sonde qui manquait.
-#
 # ⚠ QUATRE ETATS, PAS TROIS — et le quatrieme est « je ne sais pas ». `forge_code` appelle SANS
 # AUCUN JETON quand le token systeme n'existe pas encore, et Gitea rend alors 404 sur l'adhesion
 # d'une org privee : indiscernable d'une absence reelle. Le module accusait donc la recette
 # (« la recette ne les place dans aucune team ») pour un fait qu'il n'avait pas l'autorite de lire.
-# Mesure du 2026-08-16 sur une forge fraichement posee par `fleet/deploy/box forge-apply` : les cinq teams
-# etaient peuplees et les dix comptes membres de l'org — le module annoncait le contraire, et
-# renvoyait le lecteur vers les listes writers/judges/externals, qui n'y etaient pour rien.
 # C'est l'etat NOMINAL d'une installation neuve : structure posee, jeton systeme pas encore minte.
 member_state() { # $1=compte → visible | hidden | absent | unknown
   [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
@@ -308,13 +242,6 @@ members_in_state() { # $1=état recherché, $2=liste → sous-liste
 
 members_hidden() { members_in_state hidden "$1"; }
 
-# ⚠ CETTE SONDE INTERROGEAIT `$ACCOUNTS`, ET ELLE ACCUSAIT. `$ACCOUNTS` contient les comptes de TOUS
-# les catalogues installés (`prov_roles` boucle sur `/home/catalogues/*/`), or `member_state` ne
-# regarde que `$PROV_FORGE_ORG`. Un `web-demo_dev`, parfaitement membre de `web-demo`, y était donc
-# rendu « absent », et le module imprimait « la recette ne les place dans aucune team » — un
-# diagnostic faux, qui envoyait l'opérateur vérifier des listes writers/judges/externals sans
-# rapport. Mesuré le 2026-08-17.
-#
 # Elle sonde donc le ROSTER SYSTÈME seul : `$PROV_ROLES` est le plancher (avant que `prov_roles` n'y
 # ajoute les catalogues), et c'est exactement la population de l'org système. La visibilité d'une org
 # de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
@@ -355,21 +282,6 @@ check_members_visible() {
 }
 
 
-# ─── LE RUNNER CI : MESURE, JAMAIS POSE ──────────────────────────────────────────────────────────
-#
-# ⚖ ARBITRAGE 2026-07-30 : le runner est un sidecar compose, PAS un module — l'admin le provisionne
-# avec ses choix. Cet arbitrage tient, et cette fonction ne le rouvre pas : elle ne pose rien.
-#
-# CE QU'IL NE DISAIT PAS, C'EST LE SILENCE. Une boite peut sortir sans aucun runner : la fleet
-# accepte alors un ticket, depense un producteur, ouvre une PR, et la CI attend une machine qui
-# n'existe pas. MESURE DU 2026-08-22 sur une forge de deux heures : sept courses `queued`, aucune
-# demarree, zero runner aux trois portees (depot, org, instance) — et pas une ligne pour le dire.
-# L'operateur l'a appris par un ticket bloque, pas par la boite.
-#
-# Ce fichier MESURE deja des preconditions d'INSTANCE qu'il ne pose pas — inscription ouverte,
-# comptes restreints, adhesions d'org — et nomme a chaque fois le geste de l'operateur. Celle-ci est
-# de la meme nature, au meme endroit, avec la meme sortie.
-#
 # ⚠ ON NE COMPARE PAS LES LABELS ICI, ET C'EST DELIBERE. « Un runner existe mais ne sert pas le label
 # demande » est l'autre moitie du probleme (mesure du 2026-08-21 : un job `ubuntu-latest` sur une
 # forge dont le seul runner servait `shell,elixir,dood`). Elle se mesure au TICKET et pas au boot :
@@ -490,8 +402,6 @@ apply() {
        verdict_apply ;;
   esac
 
-  # ⚠ TOT, ET DANS L'APPLY AUSSI — les deux points comptent.
-  #
   # DANS L'APPLY : le boot joue `provision apply` (entrypoint.sh), jamais `check`. Une sonde qui ne
   # vivrait que dans le check ne parlerait a personne au demarrage, c'est-a-dire au seul moment ou
   # l'operateur peut encore enroler un runner AVANT que la fleet ne depense un producteur.
@@ -514,10 +424,6 @@ apply() {
     verdict_apply
   fi
 
-  # ⚠ `converge_members_visible` VIVAIT ICI ET N'Y EST PLUS (2026-08-17). Elle rendait publiques les
-  # adhésions d'org des comptes machine — à CHAQUE apply, donc à chaque démarrage, pour un fait qui
-  # ne peut changer qu'au moment où des comptes sont créés. ⚖ Règle du re-roll : on repose le
-  # squelette sans lequel la fleet ne produit rien, on ne remute pas la config.
   # Le geste vit désormais dans `forge-gestures.sh`, joué par `forge-apply` pour l'org système et par
   # `catalogue install` pour l'org du catalogue — chacun sur l'org qu'il vient de créer, ce qui
   # supprime au passage le défaut mono-org que ce module portait.
@@ -529,12 +435,6 @@ apply() {
   # PAR ENTRÉE depuis le seed — fichier absent OU rôle ajouté après bootstrap, même chemin.
   ensure_passwords_entries || verdict_apply
   # ⚠ LE JETON MASTER EST DONNE AU MINTEUR, ET C'EST CE QUI REND LE MINT INDEPENDANT DE TOFU.
-  # Le passwords-file reste, en repli : il derive du seed, or le provider ne pose reellement ce
-  # password qu'a la CREATION du compte (`deps/instance/accounts.tf`). Des que les deux divergent,
-  # le mint partait en 401 sur des comptes sains, definitivement. Avec le master token, le minteur
-  # POSE un password neuf juste avant de s'en servir puis l'oublie — il n'a plus a croire ce qu'un
-  # autre outil a bien voulu ecrire. Mesure sur instance vierge, 2026-08-19 : dix comptes en 401
-  # avec le fichier, et PATCH 200 / basic-auth 200 / token minte par cette voie.
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --owner "$PROV_AUTHORITY_USER" \
       ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
