@@ -563,6 +563,22 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # Le `setpriv` est DANS la commande supervisée, pas autour du superviseur : celui-ci doit rester
   # root pour pouvoir relancer, et c'est l'ENFANT qui descend — exactement ce que `User=` fait dans
   # l'unité systemd du rail poste, où systemd reste root et le service non.
+  # ⚠ ET SON REPERTOIRE RUNTIME AVEC, POUR EXACTEMENT LA MEME RAISON — c'est l'autre moitie de
+  # `User=`, et elle manquait. `lcars_socket.py` cree le dossier de socket AVEC L'UID DU SERVICE :
+  # un service qui vient de DROPPER ne peut rien creer sous `/run/lcars` (root:root 0755). Sur le
+  # poste, `25-directories` pose ce dossier et l'unite porte `User=` — deux moities d'un seul geste,
+  # tenues par deux acteurs. Ici l'entrypoint est le seul acteur, et il n'en tenait qu'une.
+  #
+  # Les services qui restent root creent le leur tout seuls : ils masquaient le trou. Celui-ci, non.
+  # Mesure .63 du 2026-08-30 : « PermissionError: [Errno 13] … '/run/lcars/authority' », cinq
+  # relances en moins d'une minute, puis ABANDON du superviseur (sa borne, et elle a bien joue) —
+  # un service MORT sur un banc que tout le reste declarait PRET.
+  #
+  # ⚠ ICI ET NULLE PART AILLEURS : sur docker, `prov_runtime_dirs` ne declare AUCUN dossier de
+  # `/run/lcars`, precisement pour qu'il n'y ait jamais deux createurs. `install -d` ne repose pas
+  # le mode d'un dossier existant, donc un desaccord entre deux poseurs serait SILENCIEUX.
+  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "${PROV_FLEET_GROUP:-fleet}" /run/lcars/authority \
+    || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \
     python3 /opt/lcars/catalogue-executor.py
