@@ -73,30 +73,14 @@ FORGE="${FORGE_BASE_URL:-}"
 # et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
 # operateur lance a la main hors du rail.
 TOKENS_DIR="${PROV_TOKENS_DIR:-/opt/lcars/var/tokens}"
-# vulcan: a RESERVED seat (kind: ReservedSeat in the canon, BL-6-45) — account + token minted,
-# both inert until the box opens. A seat = a full identity, no branch here. (The older note
-# claiming vulcan "absent rightly, external Codex agent" described the pre-seat world and is
-# gone with it.) starfleet: real fleet role, `forge_identity: false` in its canon — every forge
-# write goes through the system account, hence no token here either.
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
-# ⚠ UN PROPRIETAIRE, PLUS UN GROUPE — ET CE N'EST PAS UN RESSERREMENT DE MODE, C'EST UN CHANGEMENT
-# DE NATURE. Ces fichiers naissaient `0640 root:fleet`, et le groupe `fleet` etait une PROJECTION de
-# l'equipe `humans` de la forge, refaite toutes les trente secondes par le convergeur. Le droit de
-# porter une identite de travail avait donc la peremption d'un cache : quelqu'un que la forge avait
-# retire lisait encore jusqu'au tour suivant, et jusqu'a la mort de chacun de ses process vivants —
-# d'ou le `pkill` de la procedure de revocation.
 #
-# Un seul process les ouvre desormais : le service d'autorite. Ce qu'il rend, il le rend apres avoir
-# demande a la forge, A L'INSTANT du geste. Le fichier n'a donc plus aucune raison d'etre lisible par
-# un groupe, et la question « qui a le droit » n'est plus une question de mode.
 OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
-# Le groupe qui TRAVERSE le repertoire des jetons — jamais celui qui les lit. Il n'apparait QUE sur
-# le repertoire ; les jetons eux-memes sont `0600 $OWNER:$OWNER`, et aucun groupe ne les ouvre.
 DIR_GROUP="${PROV_FLEET_GROUP:-fleet}"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
@@ -124,11 +108,6 @@ PASSWORDS_FILE=""
 MASTER_TOKEN_FILE=""
 CHECK_ONLY=0
 # Non-role tokens whose account is not the filename (the mapping is DATA, not a special case).
-# ⚠ THE SYSTEM TOKEN NO LONGER NEEDS IT. It did while the account was `lcars-system` and the file
-# `system.gitea_token` — a name that derived from nothing, so a table had to carry the pair. The
-# account is `system_starfleet` now and its file follows the role contract `<login>.gitea_token`,
-# so it mints through the SAME path as the other nine. The flag stays for genuine mismatches;
-# it simply has no user in the recipe any more.
 # Filled by `--extra-token <account>:<file>` (repeatable).
 declare -a EXTRA_ENTRIES
 
@@ -179,15 +158,11 @@ fi
 # revoked token → 401. So the correct probe is: {200,403} = alive; 401 — or anything else, 5xx /
 # timeout / connection failure — = invalid or undetermined → re-provision (fail-safe: never assume
 # valid on a doubt).
-# ─── curl auth OUT OF ARGV (6-141) ───────────────────────────────────────────────────────────────
 # `-u "$role:$pwd"` and `-H "Authorization: token $tok"` put the secret in the process COMMAND LINE,
 # which is world-readable through /proc/<pid>/cmdline for the whole duration of the request. A local
 # observer harvests every role password, every existing token, and every freshly minted one — and a
 # password re-mints tokens forever, so rotating the captured token repairs nothing.
 #
-# `curl -K -` reads its options from STDIN. Chosen over `--config <file>` deliberately: a file has to
-# be created, chmod'd, and deleted on every exit path including the ones we do not think of. Here the
-# secret touches neither argv nor the filesystem.
 #
 # curl's config parser takes `name = "value"` with backslash escapes, so the value is ESCAPED rather
 # than hoped to be free of quotes — a password is exactly the kind of string that carries them.
@@ -212,22 +187,13 @@ token_valid() { # $1=token
 # with the underlying system rather than imposing a stricter constraint than it does. The value is
 # either a bare string OR an object `{password: ...}`. Basic auth is the only mint Gitea accepts.
 CURL_AUTH_CFG=""
-# ─── FORCER PUIS OUBLIER — le mot de passe n'est plus un etat, c'est un jeton de passage ─────────
 #
-# ⚠ POURQUOI CETTE VOIE EXISTE. Le password d'un compte de role n'etait connu que par un FICHIER
-# (`--passwords-file`, derive du seed), et le provider tofu ne pose reellement ce password qu'a la
-# CREATION du compte (piege documente dans `deps/instance/accounts.tf`) : des que les deux divergent
-# — seed regenere, compte cree lors d'une passe anterieure, roster elargi apres coup — le mint part
-# en 401 POUR TOUJOURS, sur des comptes parfaitement sains. Mesure sur une instance vierge le
-# 2026-08-19 : les dix comptes en 401, le fichier de passwords contenant exactement le seed.
 #
 # LA SORTIE NE DEMANDE AUCUN SECRET DE PLUS. Avec le jeton MASTER — que le rail detient deja, et qui
 # est le seul credential qu'il garde — on POSE un password neuf sur le compte, on minte avec, et on
 # l'oublie. Il ne survit a rien : ni fichier, ni variable exportee, ni second appel. Mesure du meme
 # jour, bout en bout : PATCH 200 · basic-auth 200 · token minte.
 #
-# CE QUE CA SUPPRIME : la dependance a l'etat d'un AUTRE artefact (ce que tofu a bien voulu poser),
-# remplacee par un fait qu'on etablit soi-meme juste avant de s'en servir.
 #
 # ⚠ RIEN NE PASSE PAR ARGV, NI LE JETON NI LE PASSWORD. `-d` mettrait le password dans la ligne de
 # commande, lisible dans /proc de tout l'hote pendant l'appel — cicatrice 6-141, payee deux fois sur
@@ -276,15 +242,6 @@ set_auth_for() { # $1=role
 # `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file. The system
 # account WAS that pair and is not any more — it derives like the rest. One mint mechanism for all.
 declare -a ENTRIES
-# Le compte est le LOGIN (`<catalogue>_<role>`, unique a l'instance Gitea) et le FICHIER reste le
-# ROLE : c'est la cle que le runtime connait — `as_role/2` indexe `<role>.gitea_token`, jamais le
-# login. La projection est inversible PAR CONSTRUCTION, `_` etant interdit dans les deux moities.
-# LE FICHIER PORTE LE LOGIN, PAS LE ROLE. Il portait `${login#*_}` — le login ampute de son tier —
-# donc `fleet_writer` et `web_writer` ecrivaient le MEME `writer.gitea_token` : le catalogue
-# provisionne en second prenait en silence l'identite du premier, et rien ne pouvait le signaler,
-# puisque le fichier existe et que son contenu est un jeton valide. Le COMPTE etait deja prefixe
-# pour cette raison exacte ; le fichier ne l'etait pas. Un jeton appartient a un COMPTE, et un nom
-# de role n'est unique que dans son propre catalogue.
 #
 # Le runtime lit par la MEME projection (`Fleet.Credentials.RoleIdentity.token_path/1`) : les deux
 # moities de ce contrat se rencontrent sur ce nom de fichier, et il n'existe plus qu'un endroit ou
@@ -359,22 +316,12 @@ for entry in "${ENTRIES[@]}"; do
   # (the mint cost was real, --check will confirm it), but it is not counted as posed and the run
   # exits non-zero.
   #
-  # ⚠ LE REPERTOIRE EST POSE ICI AUSSI, ET L'OUBLIER NE FERMAIT RIEN. Il naissait `0750` : le premier
-  # `provision apply` suivant reposait le mode et le groupe rentrait, quelle que soit la finesse des
-  # modes de fichiers. Un axe entier — la CLASSE REPERTOIRE — avait ete inventorie a moitie.
   #
   # ⚠ `-o`/`-g` NE SONT TENTES QUE SI ON EST ROOT, et le repli n'est PAS un `|| true` silencieux :
   # sans le droit de donner le fichier, le controle `stat` plus bas fait echouer le compte. Un secret
   # trop ferme se diagnostique ; mal attribue, non.
   #
-  # ⚠ `0710 $OWNER:$DIR_GROUP` — LE GROUPE TRAVERSE, IL NE LIT PAS, et c'est le QUATRIEME poseur de
-  # ce repertoire. Les trois autres sont `system.manifest`, `25-directories` et
-  # `services/forge-gestures.sh` : quatre ecrivains pour un objet, et il suffit qu'UN d'eux pose un
-  # autre mode pour que le premier passage suivant defasse les trois autres, en silence.
   #
-  # Le mode n'est pas `0700` parce que ce repertoire ne contient pas que des secrets : `forge.url` et
-  # `forge.public.url` y vivent en 0644 et trois modules `NEEDS: human` les lisent SOUS L'HUMAIN.
-  # Les jetons, eux, restent `0600` — c'est le mode du FICHIER qui les ferme.
   if [[ "$(id -u)" -eq 0 ]]; then
     install -d -m 0710 -o "$OWNER" -g "$DIR_GROUP" "$TOKENS_DIR" 2>/dev/null || true
   else

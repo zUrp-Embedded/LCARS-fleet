@@ -4,12 +4,6 @@
 # STARDATE: 2026-07-31
 # STATUS: sonde une-ligne de l'etat fleet, pour la barre de statut tmux de la console
 #
-# POURQUOI PAS `fleet_v2 status` DIRECTEMENT : il commence par `cmd_version`, qui retombe sur
-# `git -C "$RUNTIME_DIR" status --porcelain` quand build_info.txt manque (fleet_v2:344). Un
-# `git status` toutes les 15 s sur le runtime, pour afficher deux mots, c'est non. On reprend donc
-# la MEME detection que `cmd_status` (fleet_v2:305) — has-session sur le socket du daemon, puis
-# comptage des pods par leurs socks — sans le bloc version. Meme verite, sans le cout.
-#
 # CONTRAT : sort TOUJOURS 0 et TOUJOURS une ligne. Une barre de statut qui echoue n'affiche pas
 # une erreur, elle affiche du bruit ; l'humain croit alors que la fleet est dans un etat qu'elle
 # n'est pas. En cas de doute, la sonde dit ce qu'elle SAIT, pas ce qu'elle suppose.

@@ -28,17 +28,6 @@
 #     --image <img>    une image livree   -> docker run --rm IMG roles-tfvars [<root>]
 #     --repo <dir>     un arbre avec mix  -> mix lcars.catalogue.roles <root>  (exige Elixir SUR L'HOTE)
 #   Sans l'un ni l'autre : le depot de ce script, s'il porte un mix.exs.
-#
-#   ⚠ PREFERER `--image`, ET CE N'EST PAS UN GOUT. `--repo` compile l'arbre source : il exige un
-#   toolchain Elixir sur la machine qui appelle. Le chemin de livraison n'en a pas — c'est la
-#   promesse ecrite du README de la beta — et le banc est mort dessus sur la premiere machine
-#   neuve (2026-08-18, `mix: ABSENT`). `--image` lit par la MEME autorite (`CatalogueRoles`),
-#   simplement la ou le runtime existe deja.
-#
-#   `--catalogue` est alors FACULTATIF : une image porte le sien. Le nommer ne sert qu'a en enroler
-#   un que l'operateur apporte — il est monte en lecture seule a la meme place dans le conteneur,
-#   et doit donc etre lisible par `nobody` (la porte de l'image tourne sous ce compte).
-#
 # SORTIES : 0 ok · 1 usage/arguments · 2 lecture du catalogue impossible · 3 ecriture impossible
 set -euo pipefail
 
@@ -83,23 +72,10 @@ done
 # Le depot par defaut : ce script vit dans fleet/etc/, donc fleet/ est un cran au-dessus.
 [[ -n "$REPO" || -n "$IMAGE" ]] || REPO="$(cd "$HERE/.." && pwd)"
 
-# ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
-# Une seule autorite de lecture des deux cotes : `Fleet.Application.CatalogueRoles.tfvars/1`. Le
-# mix et l'eval de release appellent LA MEME fonction — la regle de placement (siege / juge /
-# ecrivain) est en Elixir, testee, pas reecrite ici en jq.
 if [[ -n "$IMAGE" ]]; then
   SRC="image $IMAGE"
-  # LE CATALOGUE EST UN CHEMIN DE L'HOTE, ET IL DOIT ENTRER DANS LE CONTENEUR. Sans ce montage,
-  # cette branche ne savait lire que le catalogue LIVRE dans l'image : `--catalogue` designait un
-  # chemin que le conteneur n'avait pas, et le message ne pouvait que dire « l'image ne rend pas le
-  # roster » — vrai, et muet sur la seule cause. Le montage est en lecture seule, a la MEME place :
-  # ce qui est enrole est l'arbre qu'on a sous la main, y compris celui qu'un operateur apporte.
-  #
-  # La porte de l'image tourne en `nobody` (drop_priv) : un catalogue que ce compte ne peut pas
-  # lire echoue ici, avec le chemin dans le message.
   MOUNT=()
   [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && MOUNT=(-v "$CATALOGUE:$CATALOGUE:ro")
-  # Sans `--catalogue`, la porte de l'image lit le SIEN : ni chemin, ni montage, ni droits.
   TFVARS="$("$DOCKER_BIN" run --rm ${MOUNT[@]+"${MOUNT[@]}"} "$IMAGE" roles-tfvars ${CATALOGUE:+"$CATALOGUE"} 2>/dev/null)" \
     || die "l'image ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
 else
@@ -107,8 +83,6 @@ else
   [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
   # COMPILER D'ABORD, et le silence n'est pas de la coquetterie : sur un arbre froid, mix ecrit
   # « Compiling N files » sur STDOUT — pas stderr — et ces lignes se melent au JSON de la tache.
-  # Constate au premier run. Le controle de validite plus bas l'a attrape, mais compter dessus
-  # reviendrait a laisser la premiere execution de la journee echouer par principe.
   ( cd "$REPO" && mix compile ) >/dev/null 2>&1 || die "le depot $REPO ne compile pas" 2
   TFVARS="$(cd "$REPO" && mix lcars.catalogue.roles "$CATALOGUE" --tfvars 2>/dev/null)" \
     || die "mix ne rend pas le roster de $CATALOGUE" 2
@@ -120,25 +94,11 @@ fi
 printf '%s' "$TFVARS" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("roles")' 2>/dev/null \
   || die "roster illisible ou sans role pour $CATALOGUE" 2
 
-# ─── 2. ecrire les entrees de la recette ─────────────────────────────────────────────────────────
 DEST="$TOFU_DIR/roles.auto.tfvars.json"
 TMP="$DEST.tmp.$$"
 printf '%s\n' "$TFVARS" > "$TMP" || die "ecriture impossible dans $TOFU_DIR" 3
 mv -f "$TMP" "$DEST" || die "ecriture impossible dans $TOFU_DIR" 3
 
-# ─── 3. la ligne pour le mint des tokens ─────────────────────────────────────────────────────────
-# PROV_ROLES est la liste qui GAGNE au mint (50-forge la passe en --roles). Elle doit etre le meme
-# roster que les comptes, sinon un role a un compte sans token — l'exact symetrique du defaut
-# d'origine.
-#
-# ⚠ CETTE LIGNE ETAIT UN FRAGMENT PRESENTE COMME UN EXPORT COMPLET, et ca casse en silence dans les
-# deux sens. Elle ne portait que les roles METIER du catalogue lu : la prendre verbatim retire du
-# mint (1) les comptes `system_*`, qui sont une autorite d'INSTANCE presente dans toutes les orgs,
-# et (2) les roles des autres catalogues deja servis par cette boite. Vecu le 2026-08-12 en enrolant
-# `web` sur un banc qui servait deja `fleet` : le mint ne voyait plus que quatre comptes.
-# Les `system_*` sont dans le tfvars, on les remet. Les autres catalogues, ce script ne les connait
-# pas — d'ou `--served`, et l'avertissement quand il est absent : mieux vaut dire qu'on ne sait pas
-# que rendre une ligne qui a l'air de tout savoir.
 ROLES_LINE="$(printf '%s' "$TFVARS" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
@@ -163,19 +123,12 @@ fi
 # adhesions et publicise sur `$PROV_FORGE_ORG`, et pointer la mauvaise org rend des 404 muets.
 ORG_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("org",""))')"
 
-# L'AVERTISSEMENT QUAND ON NE SAIT PAS. Sans `--served`, la ligne rendue est complete pour CE
-# catalogue et muette sur les autres — et c'est exactement la forme d'erreur qui ne se voit qu'au
-# premier dispatch d'un role dont le token n'a pas ete minte.
 if [[ -z "$SERVED" ]]; then
   say "⚠ --served absent : PROV_ROLES ci-dessous couvre CE catalogue et les comptes systeme, PAS"
   say "  les roles des autres catalogues deja servis par la boite. Si elle en sert d'autres, unir"
   say "  les listes avant le mint (un role sans token bloque au premier dispatch, pas a l'enrolement)."
 fi
 
-# ─── LES TROIS PIEGES, ET ILS NE VIVENT PLUS DANS UN TRANSCRIPT ─────────────────────────────────
-# Enroler `web` sur un banc qui servait deja `fleet` (2026-08-12) a coute trois passes, et aucune
-# des trois causes n'etait ecrite nulle part. Elles le sont ici, au moment ou l'operateur en a
-# besoin, et pas dans un README qu'il lira apres.
 if [[ -d "$TOFU_DIR/instance" ]]; then
   say "⚠ PIEGE 1 — le module instance/ est present dans $TOFU_DIR. Il cree les comptes system_* et il se"
   say "  joue UNE FOIS PAR FORGE. Sur une forge deja provisionnee (un banc bootstrappe, une"

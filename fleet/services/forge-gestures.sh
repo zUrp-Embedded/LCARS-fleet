@@ -3,19 +3,6 @@
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
 # STATUS: les gestes forge de la boite — poses UNE fois, joues par tout appelant
-#
-# ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-# Ces trois gestes vivaient dans la porte racine, sous forme de scripts distants passes a
-# `compose exec bash -c`. Le banc ne peut PAS appeler `fleet/deploy/box` : sa boite est creee par un autre
-# couple de fichiers compose (`docker-compose.install.yml` + `.bench.yml`), et `box` refuse
-# — a raison — d'agir sur un projet qu'il n'a pas cree. Le banc aurait donc recopie les memes
-# gestes, et deux copies d'un meme contrat derivent.
-#
-# Ils vivent donc DANS L'IMAGE, versionnes avec la recette qu'ils jouent. `box` et le banc
-# sont alors deux facons d'entrer par la meme porte :
-#     box                -> compose exec -T -u root lcars /opt/lcars/forge-gestures.sh <geste>
-#     bench              -> docker exec -i -u root <box>  /opt/lcars/forge-gestures.sh <geste>
-#
 # ─── LES SECRETS ENTRENT PAR STDIN, JAMAIS PAR argv ─────────────────────────────────────────────
 # `/proc/<pid>/cmdline` est lisible par tout le monde pendant l'appel — la lecon payee deux fois
 # par 6-141 et 6-141bis, sur des credentials moins puissants que le master token. Un `--token X`
@@ -53,11 +40,6 @@ set -euo pipefail
 # temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /opt/lcars/var/tokens. Les defauts
 # sont les chemins reels ; aucun appelant de production ne les passe.
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
-# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER. Son nom etait ecrit en dur dans les deux
-# projections de catalogue (`git -c user.name=...`), donc le renommer demandait de les retrouver.
-# Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
-# chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
-# une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
 # Le compte integre, resolu UNE fois : les deux `TF_VAR_builtin_human` plus bas et le verbe
 # `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-lcars}` dans le meme fichier
 # seraient trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
@@ -86,21 +68,6 @@ CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
 # de l'UX (⚖ user, 2026-08-21) : il separe a l'oeil ce que la fleet pose de ce qu'un humain depose.
 STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 # L'ENTRYPOINT porte les portes outil du release (`verify`, `roles-tfvars`, `catalogue-source`).
-# Il s'appelait `TEMPLATE_SYNC` quand il n'en servait qu'une : un nom qui decrit un seul usage
-# devient faux au deuxieme — et celui-la est mort deux fois, la porte `template-sync` ayant ete
-# retiree avec le depot modele le 2026-08-21. Le repli sur l'ancien nom part avec elle : personne ne
-# le posait (verifie sur tout le depot), donc le garder ne compatibilisait rien et faisait croire a
-# un cablage.
-#
-# ⚠ SON DEFAUT ETAIT `/opt/lcars/entrypoint.sh`, UN CHEMIN D'IMAGE, DANS LE SCRIPT DONT LE MIROIR DES
-# AUXILIAIRES AFFIRME QU'IL « n'a jamais eu la moindre hypothese de conteneur ». Il en avait une,
-# gelee dans ce defaut. `62-runtime-helpers` pose ce fichier-ci a plat dans `/opt/lcars/` et EXCLUT
-# `entrypoint.sh` au motif qu'« il n'a pas de sens hors conteneur » : vrai de son metier de BOOT,
-# faux de son metier de PORTES OUTIL. Mesure du 2026-08-22 sur un poste :
-# `lcars catalogue install web-demo` mourait en « /opt/lcars/entrypoint.sh: No such file or
-# directory », rendu a l'operateur comme « pas de source installable » — un fichier absent presente
-# comme un catalogue introuvable.
-#
 # IL N'Y A RIEN A COPIER, ET C'EST LE POINT. L'arbre `deploy/` est DEJA pose (`EMBEDDED=(deploy etc)`
 # du meme module), donc le fichier est la, sous un autre chemin. On le cherche depuis ICI, dans les
 # deux dispositions ou ce script peut vivre : a cote de lui (image, ou arbre embarque) puis sous
@@ -123,9 +90,6 @@ _entrypoint_path() {
 }
 ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"
 
-# LE GARDE, A LA PORTE ET PAS AU MILIEU DU PIPELINE. Sans lui, l'absence se manifestait quatre
-# etapes plus loin, traduite en « pas de source installable » : le refus accusait la forge d'un
-# manque qui etait celui de la boite.
 need_entrypoint() {
   [[ -r "$ENTRYPOINT" ]] && return 0
   die "portes outil du release introuvables ($ENTRYPOINT).
@@ -155,17 +119,6 @@ put_secret() { # $1=chemin  $2=valeur
   # -u root`), et un temoin ne l'est pas : conditionner ici evite une garde `|| true` qui
   # avalerait un vrai echec de propriete sur une boite.
   #
-  # ⚠ LE REPERTOIRE COMPTE AUTANT QUE LES FICHIERS. Il naissait ici `0750 root:fleet` : fermer les
-  # secrets sans fermer leur repertoire ne fermait rien, parce que CE geste-ci le rouvrait au premier
-  # passage. Le groupe `fleet` etait une projection de l'equipe `humans` de la forge, refaite toutes
-  # les 30 s — donc une ACL a peremption de cache sur les deux secrets les plus puissants de la boite.
-  #
-  # ⚠ ET CE MEME GESTE A FAILLI REFERMER CE QUE LA TABLE OUVRE, DANS L'AUTRE SENS. Une premiere
-  # ecriture posait `0700 $AUTHORITY_USER:$AUTHORITY_USER` ici pendant que `system.manifest` et
-  # `25-directories` disaient `0710 …:fleet`. Le premier `put_secret` aurait REFERME le repertoire,
-  # en silence, et les trois modules `NEEDS: human` — qui lisent `forge.url` sous l'uid de l'humain —
-  # auraient recasse. Le gate ne peut pas voir ca : il n'execute pas ce geste contre une vraie table.
-  #
   # LA REGLE, LA MEME DANS LES QUATRE POSEURS DE CE REPERTOIRE : le groupe TRAVERSE (`x`), il ne LIT
   # jamais (`r`). Ce repertoire ne contient pas que des secrets — `forge.url` et `forge.public.url`
   # y sont en 0644, et ce sont des adresses. Les secrets, eux, restent `0600` : c'est le MODE DU
@@ -180,11 +133,6 @@ put_secret() { # $1=chemin  $2=valeur
   umask 077
   printf '%s\n' "$2" > "$tmp"
 
-  # ⚠ `0600`, SANS BRANCHE SUR LE MODE. Ce mode a ete un GATE : quand le geste tournait sous l'uid
-  # de l'humain, DETENIR le jeton etait la preuve du droit, donc il fallait l'ouvrir a un groupe qui
-  # portait `is_admin`. Le geste vit maintenant dans un service qui pose la question a la forge a
-  # l'instant ou elle compte — plus personne n'a besoin de lire ce fichier.
-  #
   # Une branche de moins, et c'est le point : un mode qui depend de l'identite de l'ecrivain donne
   # deux etats possibles au meme secret, et c'est celui qu'on n'a pas relu qui gagne.
   #
@@ -245,19 +193,6 @@ cmd_config_seed() {
 # `flock -n` : on REFUSE, on n'attend pas. Un appelant qui attendrait aurait deja recu son verdict
 # quand l'autre finit, et il repartirait sur une forge qui a bouge sous lui. Meme choix que
 # `provision`, qui refuse aussi (`un autre apply est en cours`).
-#
-# ⚠ IL N'Y A PLUS QU'UNE SEULE IDENTITE DE CHAQUE COTE DE CE VERROU, ET C'EST CE QUI LE SIMPLIFIE.
-# Il a fallu le partager entre DEUX : root au boot et l'humain admin ensuite. Il vivait dans
-# `/run/lock` (1777), donc root le creait en `0644 root:root` et l'humain qui jouait
-# `lcars catalogue install` ouvrait en ecriture un fichier qui ne lui appartenait pas — mesure du
-# 2026-08-18, sur deux bancs : « Permission denied », puis « verrou d'apply inouvrable », un refus
-# qui accuse le verrou pour un probleme de proprietaire. Le geste etait injouable par un humain sur
-# toute boite ayant demarre une fois. Le partage par setgid + `umask 007` a ferme ce defaut.
-#
-# Les deux appelants sont ROOT desormais : le boot, et `catalogue-executor.py`. Le partage entre
-# deux identites n'a plus d'objet — mais on ne DURCIT pas le verrou pour autant, parce qu'un verrou
-# est un rendez-vous, pas un secret : le resserrer n'ajoute aucune garde et casserait toute boite
-# migree dont le fichier existe deja.
 with_apply_lock() {
   local lock="${LCARS_APPLY_LOCK:-$CATALOGUE_WORK/.apply.lock}"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || true
@@ -268,22 +203,6 @@ with_apply_lock() {
 }
 
 # ─── LA VISIBILITE DES ADHESIONS MACHINE ────────────────────────────────────────────────────────
-# CE GESTE VIVAIT DANS LA BOUCLE DE BOOT, ET IL N'AVAIT RIEN A Y FAIRE. `50-forge.sh` le rejouait a
-# chaque `provision apply` : une convergence, a chaque demarrage, pour un fait qui ne peut changer
-# qu'au moment ou des comptes sont crees. C'est la regle du re-roll (⚖ user 2026-08-17) — on repose
-# le squelette, on ne remute pas la config.
-#
-# ET IL ETAIT MONO-ORG, ce que le deplacement corrige tout seul. La sonde interrogeait
-# `/orgs/$PROV_FORGE_ORG/...` en dur, donc elle ne voyait jamais l'org d'un catalogue : mesure du
-# 2026-08-17, `fleet` portait ses dix comptes machine en public et `web-demo` AUCUN. Pire, elle
-# accusait — les comptes `web-demo_*` etaient dans sa liste, cherches dans `fleet`, donc rendus
-# « absents », et le module imprimait « la recette ne les place dans aucune team » pour des comptes
-# parfaitement places dans la leur. Ici chaque geste traite SON org, et la question ne se pose plus.
-#
-# A QUOI CA SERT, ET CE N'EST PAS DE LA SURETE (⚖ user 2026-08-17) : c'est de l'UX. Une adhesion
-# privee est invisible aux non-membres, donc un humain qui ouvre l'org ne voit pas quels workers y
-# travaillent. Le motif « savoir QUI existe est un prerequis de surete » etait emprunte : rien dans
-# le depot ne LIT cette visibilite.
 #
 # ⚠ `publicize` EST SELF-ONLY, mesure sur Gitea 1.26.4 : le jeton master sur un autre compte rend
 # 403, meme avec `write:organization` ; un jeton de role au scope A4 rend 403 meme sur lui-meme. La
@@ -297,16 +216,6 @@ with_apply_lock() {
 # `create_repo` du runtime sert aux depots de PROJET. La recette tofu, elle, ne cree aucun depot —
 # elle fait les orgs, les comptes, les teams.
 #
-# CE QUE LE TROU COUTAIT. `52-ops-branch` derive a chaque passage, sur les deux substrats, avec un
-# message qui accuse « l'amorcage de la forge » — une affirmation sur un AUTRE artefact, et elle
-# etait fausse. Et le 2026-08-22 il a fait pire : un 404 sur ce depot a ete lu comme une panne de
-# l'IncidentRegistry, et diagnostique deux fois de travers avant qu'on regarde le depot lui-meme.
-#
-# ⚠ POURQUOI ICI ET PAS DANS LA RECETTE. La structure de forge est le territoire de tofu, mais tofu
-# ne cree AUCUN depot dans ce depot-ci : les depots de catalogue sont pousses par ce fichier, en
-# POST + git (`push_store`). Ce geste reprend exactement ce mecanisme, au meme endroit, dans la
-# meme passe. Le jour ou la recette gagnera une ressource `gitea_repository`, ce geste devra
-# demenager avec les autres — pas avant.
 #
 # `auto_init` VRAI : un depot vide n'a pas de branche, et `52-ops-branch` pousse SUR une branche.
 # Sans branche par defaut, la forge repond « Push to create is not enabled for organizations » —
@@ -384,12 +293,6 @@ publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
 # bord — parce que c'est SON jeton que tofu porte — et une liste de proprietaires qui nomme
 # quelqu'un qui n'a fait que creer ment sur qui tient l'org.
 #
-# ⚠ CE N'EST PAS UNE QUESTION DE POUVOIR, C'EST UNE QUESTION DE CE QUE LA LISTE DIT. Le master est
-# site-admin : il passe outre toutes les permissions de team, avant comme apres. Mesure du
-# 2026-08-20 sur banc neuf : apres le retrait, le compte systeme lit toujours les membres d'une team
-# (200 — la capacite qui exigeait la propriete, il l'a parce que c'est LUI l'owner), et le master
-# atteint toujours l'org avec un jeton sans droit d'org. Rien ne se degrade, la liste cesse de mentir.
-#
 # L'ORDRE EST LE GESTE : on RELIT la liste et on confirme que le compte systeme y est AVANT de
 # retirer le master. Jamais l'inverse, jamais sans la relecture — sinon une passe ou tofu n'a pas
 # encore pose l'adhesion laisserait une org sans proprietaire. C'est la meme discipline que
@@ -447,12 +350,6 @@ cmd_apply() {
   export TF_VAR_gitea_url="$FORGE_BASE_URL"
   export TF_VAR_gitea_token="$tok"
   export TF_VAR_seed_password="$seed"
-  # ⚠ LE DEFAUT ETAIT UN RESIDU, PAS UN CHOIX : cette ligne lisait
-  # `${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`, et `LCARS_HUMAN` n'existe plus depuis identity-v2
-  # (cf. `console.sh` : « Pas de defaut : identite-v2 a retire l'humain unique »). Le nom `lcars`
-  # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
-  # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
-  # delibere et la variable dit ce qu'elle nomme.
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
   export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
 
@@ -465,7 +362,6 @@ cmd_apply() {
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
 
-  # La visibilite des comptes machine de l'org systeme, DANS LE GESTE QUI VIENT DE LES CREER.
   ensure_ops_repo "${PROV_FORGE_ORG:-fleet}" "$tok"
 
   publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
@@ -496,9 +392,6 @@ cmd_apply() {
 DEMO_CATALOGUE="${LCARS_DEMO_CATALOGUE:-/opt/lcars/catalogues/web-demo}"
 
 # ─── LA REFERENCE, DEPOSEE AU MEME ENDROIT ──────────────────────────────────────────────────────
-# ⚖ user, 2026-08-21 : « il FAUT garder le catalogue dispo et visible sur la forge », « il faut
-# republier le catalogue de base `fleet` ».
-#
 # Le catalogue metier de reference vit DANS LE RELEASE, pas dans `catalogues/` : il est installe par
 # construction et n'a jamais eu besoin d'etre sur la forge pour tourner. Ce qu'il gagne a y etre est
 # la LISIBILITE — on ne forke pas ce qu'on ne peut pas ouvrir, et faire son propre catalogue commence
@@ -529,11 +422,6 @@ reference_catalogue_root() {
 }
 
 # ─── LE GESTE, POUR LES DEUX ────────────────────────────────────────────────────────────────────
-# Il etait ecrit pour la demo seule, et la reference l'a rejoint le 2026-08-21. Le PARAMETRER plutot
-# que le recopier n'est pas un gout : les deux depots ont exactement la meme semantique — projection
-# force-poussee chez `id = 1`, non fatale — et deux copies d'un meme geste divergent par la ligne
-# qu'on corrige d'un cote.
-#
 # LE NOM VIENT DU MANIFESTE, jamais du repertoire. Un arbre range sous `catalogues/web-demo` qui
 # declarerait `name: autre` serait pousse sous `web-demo` et n'apparaitrait JAMAIS dans
 # `catalogue list`, qui indexe par identite declaree. Meme regle qu'a l'install, meme colonne zero.
@@ -555,8 +443,6 @@ seed_catalogue_deposit() { # $1=jeton master  $2=arbre  $3=quoi (pour le message
             | curl -sS -K - -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
             | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true)"
   if [[ -z "$master" ]]; then
-    # Un refus qui ne nomme pas SON objet est un demi-message : celui qui le lit ne sait pas ce
-    # qui manque a sa forge.
     echo "forge-gestures: master (id=1) non resolu — $name NON depose, il n'apparaitra pas dans « catalogue list »" >&2
     return 0
   fi
@@ -619,10 +505,6 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="tool_request"
   local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
 
-  # POST best-effort (idempotence par RELECTURE, pas par code devine — une v1 concluait
-  # « deja presente » sur un 409/422 alors que Gitea rend d'autres codes selon la version, et un
-  # 422 de validation aurait passe pour un succes suivi de l'activation de l'auto-merge : merge
-  # sans signature, l'exact bloquant n5 du PLAN).
   curl -sS -m 15 -o /dev/null     -H "Authorization: token $tok" -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
 
   # LA RELECTURE FAIT FOI : la protection existe ET porte les champs qui comptent, sinon rien
@@ -661,11 +543,6 @@ cmd_runner_token() {
 }
 
 # ─── INSTALLER UN CATALOGUE ─────────────────────────────────────────────────────────────────────
-# Un seul verbe, et il MET A JOUR quand le catalogue est deja la (⚖ user 2026-08-16). Rien n'existe
-# -> il cree ; la source a bouge -> il reconverge ; rien n'a bouge -> il ne touche rien. Jamais
-# declenche par le boot : une mise a jour automatique changerait le metier sous les pieds d'une
-# flotte qui tourne.
-#
 # ⚠ CE FICHIER NE GATE PLUS RIEN, ET IL NE DOIT PAS ESSAYER. L'autorisation est prise EN AMONT, par
 # `catalogue-executor.py` : il lit l'uid du pair que le noyau pose sur sa socket, demande a la forge
 # si ce login y porte `is_admin`, et n'appelle ce geste que si la reponse est oui. Ce script est donc
@@ -677,9 +554,6 @@ cmd_runner_token() {
 # d'autre. La consequence pratique est plus bas, dans `cmd_install` : les portes qui tombent en
 # `nobody` ne peuvent plus lire les fichiers de `/opt/lcars/var/tokens`, donc ce qu'on leur passe est une
 # VALEUR, plus un chemin.
-#
-# Le mode du jeton a ete le gate — « la capacite EST la permission » — et c'est precisement ce qui
-# imposait un groupe unix, sa projection depuis `is_admin`, son cache et son rattrapage de derive.
 # Un second gate ici serait une seconde verite sur la meme question.
 #
 # ⚠ UN DOSSIER DE RECETTE PAR CATALOGUE. La recette lit `roles.auto.tfvars.json` dans son propre
@@ -706,18 +580,10 @@ cmd_install() {
   #    ferme au monde, donc illisible pour elle. Mesure sur banc du 2026-08-16 : l'install mourait sur
   #    `UNREACHABLE {:config, {:token_file, …, :eacces}}` — un refus de permission presente comme
   #    « pas de source installable », c'est-a-dire le mauvais diagnostic pour le mauvais probleme.
-  #
   #    `$SYSTEM_ACCOUNT` (defaut `system_starfleet`) est l'identite juste : c'est le compte avec
   #    lequel la boite LIT sa forge. Un depot de catalogue est public par construction, donc ce jeton
   #    suffit — donner le site-admin a une lecture serait lui accorder un pouvoir dont elle n'a aucun
   #    usage.
-  #
-  # ⚠ ON PASSE LA VALEUR, PLUS LE CHEMIN, ET C'EST UNE CASSE EVITEE DE JUSTESSE. Ce geste donnait
-  # `FORGE_TOKEN_FILE=<chemin>` a une porte qui tombe en `nobody:fleet` : ca ne marchait QUE parce
-  # que le fichier etait `0640 root:fleet`. En `0600 lcars-authority` — l'etat que ce chantier pose —
-  # la porte ne peut plus l'ouvrir, et `catalogue install` mourrait sur un `:eacces` presente comme
-  # « pas de source installable ». Exactement le mauvais diagnostic que les six lignes au-dessus
-  # racontent avoir deja paye une fois, sur ce meme fichier, pour le jeton master.
   #
   # CE PROCESS, LUI, PEUT LIRE : il EST le service d'autorite. Il lit et transmet la VALEUR par
   # l'environnement — `/proc/<pid>/environ` n'est lisible que par le proprietaire du process et par
@@ -773,7 +639,6 @@ cmd_install() {
   # traverser un repertoire que seul root ouvre. Mesure sur banc du 2026-08-16 : le verify rendait
   # « root "/tmp/tmp.XXXX/src" is not a readable directory », c'est-a-dire un refus de catalogue
   # pour un probleme de permission, sur un catalogue parfaitement valide.
-  #
   # Rien de secret n'atterrit ici : le materiel d'un catalogue est public par construction, et le
   # jeton voyage par l'ENVIRON de git, jamais dans le `.git/config` du clone.
   chmod 0755 "$work"
@@ -814,7 +679,6 @@ cmd_install() {
   # 2026-08-16, 26 Ko d'etat de `fleet` recopies a l'identique dans la recette de `web-demo`, et
   # l'apply partait en `Error: user not found with id 12` sur `gitea_user.role["fleet_engineer"]` —
   # un compte qui n'est dans NI le roster ni le catalogue qu'on installe.
-  #
   # LE DANGER N'EST PAS L'ERREUR, C'EST CE QUI SERAIT ARRIVE SANS ELLE : un etat portant les
   # comptes de `fleet`, applique avec les variables de `web-demo`, decrit ces comptes comme « plus
   # dans la configuration ». Le plan suivant les DETRUIT. Installer un catalogue aurait desinstalle
@@ -843,20 +707,11 @@ cmd_install() {
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une
   #    reecriture — `var.org` porte le nom du catalogue depuis le premier jour.
   export TF_VAR_gitea_url="$FORGE_BASE_URL" TF_VAR_gitea_token="$tok" TF_VAR_seed_password="$seed"
-  # ⚠ LE DEFAUT ETAIT UN RESIDU, PAS UN CHOIX : cette ligne lisait
-  # `${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`, et `LCARS_HUMAN` n'existe plus depuis identity-v2
-  # (cf. `console.sh` : « Pas de defaut : identite-v2 a retire l'humain unique »). Le nom `lcars`
-  # tombait donc d'une variable morte, pour un compte qui, lui, a une raison d'etre : le siege
-  # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
-  # delibere et la variable dit ce qu'elle nomme.
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
   export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 
-  # 5bis. La visibilite des comptes machine de CETTE org, dans le geste qui vient de les creer.
-  #       Elle ne se faisait NULLE PART pour un catalogue : le convergeur de boot ne regardait que
-  #       l'org systeme, donc `web-demo` n'avait aucun membre public (mesure du 2026-08-17).
   publicize_org_members "$name" "$tok" "$seed"
 
   # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
@@ -897,13 +752,6 @@ cmd_install() {
 # ⚠ DEUX `local`, ET LE PREMIER JET N'EN AVAIT QU'UN. `local name="$1" dir=".../$name"` : bash
 # expanse TOUS les arguments du builtin AVANT de l'executer, donc ce `$name` n'est pas celui qu'on
 # vient d'ecrire. Mesure : `f(){ local a="$1" b="/base/$a"; }` rend `b=/base/`.
-#
-# Ca marchait — par PORTEE DYNAMIQUE : l'appelant `cmd_install` a un `local name` qui porte deja la
-# meme valeur, et c'est lui que l'expansion trouvait. La ligne etait donc correcte tant que son
-# appelant gardait ce nom de variable. Renommer un local dans `cmd_install` — un refactor sans
-# aucune intention de changer quoi que ce soit — rendait `$name` VIDE, donc `dir` egal a la racine
-# des catalogues, et le `rm -rf "$dir"` de trois lignes plus bas emportait TOUS les catalogues.
-#
 # Le defaut etait invisible : une directive `disable=SC2064 -- raison` malformee (le `--` n'est pas
 # une syntaxe shellcheck) faisait ABANDONNER l'analyse du fichier entier.
 install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
@@ -960,7 +808,6 @@ push_store() { # $1=catalogue  $2=arbre  $3=jeton  $4=sha source
 #
 # ⚠ ET LE PIEGE EST DE POSER UNE FONCTION SOUS CETTE LIGNE : elle devient invisible aux temoins,
 # qui echouent alors sur « command not found » — une erreur qui accuse le test, pas le rangement.
-# C'est arrive une fois sur `forge_is_admin`.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 case "${1:-}" in

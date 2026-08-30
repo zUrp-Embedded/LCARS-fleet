@@ -21,11 +21,6 @@ set -uo pipefail
 VERBOSE=0
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=1
 
-# LES BORNES SE LISENT, ELLES NE SE DEVINENT PAS. `/etc/login.defs` les DECLARE, `useradd` les lit,
-# et trois autres lecteurs de ce depot les lisent la aussi (`fleet_v2`, `human-converger`,
-# `provision-lib`). Un litteral ici en ferait une quatrieme copie, fausse sur toute machine dont
-# l'administrateur a bouge la frontiere.
-#
 # ⚠ ET LE DEFAUT SERAIT FAIL-OPEN, contrairement a celui de `fleet_v2`. La-bas, retomber sur 1000
 # REFUSE davantage : c'est conservateur. Ici, la borne decide qui RECOIT une console — un UID_MIN
 # reel a 2000 devine a 1000 ouvre un shell web a tout ce qui vit entre les deux. Bornes illisibles :

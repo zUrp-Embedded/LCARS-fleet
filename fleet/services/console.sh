@@ -32,9 +32,6 @@
 # USAGE : console.sh [--human USER | --all] [--foreground]
 # EXIT  : 0 lance · 1 erreur d'usage/identite
 #
-# ⚠ `--port N` A ETE RETIRE, pas deprecie : il n'existe plus de port a choisir. Une option qui
-# accepte encore une valeur qu'elle jette est pire qu'une option absente — l'appelant croit avoir
-# regle quelque chose. Le chemin de socket, lui, se deplace par LCARS_CONSOLE_SOCK_ROOT.
 
 set -euo pipefail
 
@@ -91,17 +88,6 @@ CONSOLE_GROUP="${LCARS_CONSOLE_GROUP:-lcars-console}"
 
 # ─── UNE CONSOLE VIVANTE SE MESURE EN S'Y CONNECTANT ────────────────────────────────────────────
 #
-# ⚠ CE SCRIPT ETAIT DECLARE IDEMPOTENT AILLEURS, ET IL NE L'ETAIT PAS. `human-converger.sh` porte
-# depuis le 2026-08-17 un `ensure_console` PAR HUMAIN ET PAR TOUR (30 s), sous un commentaire qui
-# affirmait « console.sh --human est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce
-# soit ». Il ne sondait rien : il faisait `rm -f` sur la socket puis relancait un ttyd.
-#
-# Mesure du 2026-08-18 sur un banc de 30 minutes : **64 ttyd par humain**, empiles sur la meme
-# socket, celle-ci effacee et re-posee sous le navigateur a chaque tour. C'est le defaut que
-# l'operateur voyait comme « la console du nouvel humain ne demarre pas » — elle demarrait, et la
-# suivante la remplacait. Un redemarrage du conteneur « reparait » en vidant la pile, jusqu'au tour
-# suivant.
-#
 # La sonde MESURE ce que le deck fera : elle ouvre la socket. Un fichier residuel sans serveur
 # derriere refuse la connexion — c'est exactement la difference entre « injoignable » et
 # « vivante », et `[[ -S ]]` ne la voit pas.
@@ -132,17 +118,11 @@ PROBE
 # l'instant du geste. Il mesure une derive GENERIQUE : le premier gid que la base accorde et que ce
 # ttyd ne porte pas, quel qu'il soit. `fleet` en fait partie, donc il garde un objet.
 #
-# Jusqu'ici la sonde d'idempotence ci-dessus etait le SEUL predicat : socket qui repond -> on ne
-# touche a rien. Pour la console du deck, la consequence n'etait pas « effectif a sa prochaine
-# session », c'etait JAMAIS : l'onglet ne redemarre pas, `ensure_console` retourne tot a chaque
-# tour, et ce ttyd garde les groupes de sa naissance pour la duree du conteneur. Or c'est la SEULE
-# surface ou l'humain tape des commandes — donc la seule ou son adminite se depense.
 #
 # ⚠ `tmux kill-server` NE REPARE RIEN, et je l'ai prescrit pendant un jour dans le refus de
 # `lcars catalogue install`. Le serveur tmux n'est pas le porteur du cache, il en est l'HERITIER :
 # le suivant naitra sous le meme ttyd perime, avec exactement les memes groupes.
 #
-# ⚖ ARBITRAGE USER (2026-08-21) : ON NE TUE RIEN, ON TAPE `newgrp`.
 # Premiere ecriture : tuer ttyd et le serveur tmux, laisser `ensure_console` relancer. Ca marche et
 # c'est disproportionne — on detruit un porteur pour rafraichir un shell. `newgrp` fait exactement
 # le meme travail (il est setuid-root, relit /etc/group, et demarre un shell avec le set a jour)
@@ -326,11 +306,6 @@ launch_one() {
   # `setpriv --regid "$human"` supposait qu'un groupe porte le nom de l'humain — vrai sous
   # `USERGROUPS_ENAB yes` (le defaut Debian, donc l'image), FAUX des qu'un compte est cree avec un
   # groupe primaire nomme : `useradd -g fleet lcars` ne cree aucun groupe `lcars`.
-  #
-  # MESURE DU 2026-08-21, poste natif : « setpriv: failed to parse regid: 'lcars' », console MORTE
-  # au demarrage, et le message pointait la socket — le motif reel etait deux lignes plus haut. Le
-  # gid est le champ 4 de la MEME ligne de passwd d'ou sortent deja le home (6) et le shell (7) :
-  # il n'y avait qu'a ne pas le deviner.
   primary_gid="$(getent passwd "$human" | cut -d: -f4 || true)"
   [[ "$primary_gid" =~ ^[0-9]+$ ]] || { echo "console.sh: gid primaire illisible pour $human" >&2; return 1; }
 
@@ -425,13 +400,6 @@ launch_one() {
 }
 
 # ─── LA CONSOLE D'UN POD : UN SEUL TTYD POUR TOUS LES AGENTS ────────────────────────────────────
-# `--url-arg` laisse le client nommer le pod dans l'URL (`?arg=<pod_id>`), donc UNE instance sert
-# N agents. Un ttyd par pod epuiserait le bloc de 10 ports de l'humain a la sixieme mission —
-# c'est la seule forme qui tienne dans le bloc, et elle garde le deck (base+5) a un port fixe.
-#
-# L'ARGUMENT EST UNE ENTREE DU MONDE : il ne va JAMAIS directement a `lcars attach`. `console-pod.sh`
-# le valide (forme, unicite, socket existant) et refuse a l'ecran. Sans cette garde, le client
-# choisirait les arguments d'une commande locale.
 #
 # ⚠ `--url-arg` RESTE, ET SON DANGER CHANGE DE NATURE. Tant que ce ttyd avait un port, `?arg=<pod_id>`
 # laissait quiconque atteignait la loopback piloter le terminal de N'IMPORTE QUEL pod vivant — la

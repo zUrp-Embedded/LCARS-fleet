@@ -3,33 +3,6 @@
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — boucle root : la team `humans` de la forge -> les users Linux de la boite
-#
-# ─── CE QUE CE FICHIER REMPLACE ─────────────────────────────────────────────────────────────────
-# Enroler quelqu'un demandait de REDEMARRER la boite : l'entrypoint creait les users au boot, donc
-# ajouter une personne coutait un arret. Deux mesures suffisent a enterrer ca. Un contexte root
-# tourne EN PERMANENCE (tini est PID 1, l'entrypoint finit sur `exec sshd -D -e`), donc le boot
-# n'etait jamais la contrainte ; et `sudo` n'est pas installe, donc deleguer le `useradd` a un
-# humain aurait coute une surface pour accorder ce que personne n'a besoin d'accorder.
-#
-# ─── LE MODELE : GITEA EST MAITRE DES HUMAINS ───────────────────────────────────────────────────
-# On ne DECIDE rien ici. L'inscription est libre et un compte seul est inerte ; l'unique acte
-# d'enrollment est l'ajout a la team `humans`, cote forge, par un proprietaire de l'org. Cette
-# boucle ne fait que CONVERGER cette decision vers la boite. Elle n'ajoute personne a la team, elle
-# n'en retire personne, et elle ne supprime JAMAIS un user Linux.
-#
-# ─── LA REVOCATION, ET POURQUOI ELLE TUE DES PROCESS ────────────────────────────────────────────
-# Sortir de la team retire l'identite PROPRE de la personne. Ca ne suffisait pas : mesure du
-# 2026-08-12, compte forge PURGE (204, re-lu 404), user Linux intact, elle gardait le groupe
-# `fleet` — donc le jeton du compte systeme, donc un jeton qui REPOND ce compte sur
-# /api/v1/user, c'est-a-dire PROPRIETAIRE D'ORG — plus une console ttyd ECRIVABLE que
-# `console.sh --all` lui relance (elle ne lit que /etc/passwd, jamais la forge) et qui repond 200
-# sans aucune authentification.
-#
-# ⚠ RETIRER DU GROUPE NE MORD PAS SUR CE QUI TOURNE DEJA. Un process porte ses groupes
-# supplementaires depuis son login ; `/etc/group` ne le rattrape jamais. Mesure du 2026-08-12 :
-#   gpasswd -d theo fleet      -> `id theo` : groups=theo          (retire, cote base)
-#   shell ouvert AVANT         -> groups=theo,fleet + jeton LU     (apres la revocation)
-#   serveur tmux ne AVANT, nouvelle fenetre APRES -> groups=theo,fleet + jeton LU
 # Un serveur tmux distribue son jeu de groupes a TOUS les shells qu'il fork ensuite, et il ne meurt
 # jamais tout seul : il survit a ttyd, au navigateur ferme, a tout sauf un kill. Retirer du groupe
 # sans tuer, c'est fermer la porte d'entree en laissant la maison allumee a l'interieur.
@@ -42,26 +15,6 @@
 #      `console.sh --all` relance la console : elle ne lit que /etc/passwd, et `console-humans.sh`
 #      (source UNIQUE de l'eligibilite, lue aussi par la landing) ecarte deja `shell nologin`.
 # `usermod` APRES le kill : il refuse de toucher un compte dont des process tournent encore.
-#
-# ─── ⚠ LE MOTIF DU DEUXIEME GESTE A CHANGE, ET LE GESTE RESTE ───────────────────────────────────
-#
-# Il etait CRITIQUE : le groupe `fleet` ouvrait les jetons de forge (`0640 root:fleet`), donc un
-# process ne AVANT la revocation gardait un credential DEJA LU et pouvait continuer d'ecrire sur la
-# forge sous une identite de travail. Tuer etait le seul moyen de reprendre ce qui avait ete lu.
-#
-# Ce chemin n'existe plus. Les jetons sont `0600 lcars-authority` et le BEAM ne les lit pas — il les
-# DEMANDE, a chaque geste, a un service qui pose la question a la forge. Un process survivant n'a
-# donc plus RIEN a lire : sa demande suivante rend `not_a_worker`. Meme chose pour root, dont le
-# chemin `groupe -> root` (le sudoers d'outillage) a disparu avec la phase 4.
-#
-# Ce que `pkill` fait aujourd'hui est une FIN DE SESSION : fermer les terminaux et arreter le travail
-# en cours de quelqu'un qui n'est plus de l'equipe. La criticite est passee de « cette personne
-# detient encore une identite de forge » a « elle voit encore son terminal quelques secondes ».
-#
-# ⚠ ET IL NE SE RETIRE PAS POUR AUTANT. `gpasswd -d` n'enleve aucun groupe a un process VIVANT, et
-# le groupe ouvre encore des fichiers PARTAGES — l'arbre d'install en lecture, les zones de projet.
-# Le geste garde donc un objet ; il a seulement cesse d'etre le dernier rempart d'un credential.
-#
 # RIEN N'EST SUPPRIME : ni compte, ni home, ni donnees, ni uid. La revocation ferme des acces, elle
 # n'efface pas une personne — et re-entrer dans la team RESTAURE l'entree (cf. `restore_human`),
 # sans quoi la revocation serait un piege a sens unique.
@@ -69,9 +22,6 @@
 # LE GARDE QUI COMPTE : on ne revoque JAMAIS sur une liste non prouvee. Forge injoignable, team
 # introuvable ou liste vide -> `converge_once` sort AVANT la passe de revocation. Un hoquet reseau
 # lu comme « plus personne dans la team » revoquerait toute la boite d'un coup.
-#
-# ─── FAIL-CLOSED SUR LE LOGIN, ET CE N'EST PAS DE LA PRUDENCE ───────────────────────────────────
-# Les deux alphabets ne coincident pas, MESURE le 2026-08-12 sur cette image et cette forge :
 #   · `useradd` accepte bien plus large qu'on ne croit — `Bob`, `1bob`, `bob@x`, `bob.`, `bob$`
 #     passent. Il ne refuse que : plus de 32 caracteres, un espace, et un `-` initial (qui part en
 #     PARSING D'OPTION, pas en refus de nom : c'est une injection d'argument, pas une coquille).
@@ -97,37 +47,15 @@ ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
 
 FORGE="${FORGE_BASE_URL:-}"
-# ⚠ CES NOMS SONT CEUX DU PROVISIONNEMENT, ET C'ETAIT UN SECOND JEU. Ce script lisait
-# `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_FLEET_GROUP` pendant que `provision-lib.sh`
-# declare `PROV_FORGE_ORG` / `PROV_FLEET_GROUP` — mesure du
-# 2026-08-17 : 59 occurrences `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Deux
-# jeux de noms pour UN fait, que personne ne pose, et dont les DEFAUTS portaient seuls l'accord :
-# un operateur qui pose `PROV_FORGE_ORG=starfleet` provisionne une org que ce convergeur
-# n'interroge jamais, en silence et dans un seul sens.
-#
 # Le defaut litteral, lui, reste ecrit deux fois — ce script ne source pas `provision-lib.sh` (il
 # tourne en boucle, pas dans un cycle de provisionnement). C'est l'egalite de ces deux litteraux
 # qu'un temoin bats epingle, faute de pouvoir la deriver.
 ORG="${PROV_FORGE_ORG:-fleet}"
 TEAM="${PROV_HUMANS_TEAM:-humans}"
-# ⚠ LE COMPTE SE DÉCLARE AVANT LE CHEMIN QUI EN DÉRIVE. Le jeton système s'appelle désormais
-# `<compte>.gitea_token` comme les neuf autres, donc ce défaut LIT `SYSTEM_ACCOUNT` — qui vivait
-# vingt lignes plus bas. Sous `set -u`, une variable lue avant d'être posée tue le convergeur au
-# démarrage, et un convergeur mort ne crée aucun humain : la panne se lit comme « la forge ne
-# répond pas ».
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
-# CADENCE DE RECONCILIATION DE L'ETAT DES HUMAINS DEJA LA. La boucle rapide ci-dessus ne cree que
-# les MANQUANTS ; sans cette seconde passe, tout ce qui est pose « a la creation » n'atteint jamais
-# quelqu'un qui existe deja — c'est le piege que le Dockerfile nomme pour `/etc/skel` (« le squelette
-# n'est copie qu'a la CREATION de l'humain, jamais ensuite : une boite deja installee ne le verrait
-# jamais »), et le convergeur y etait tombe : un module per-humain ajoute apres coup, ou une graine
-# `claude` mise a jour, n'auraient atteint personne.
-# Meme forme que la passe desired-state du poller (`@protection_recheck_ms`) : cadence LENTE, et la
-# PREMIERE passe apres le boot verifie tout le monde — la reconciliation au demarrage est la
-# fonctionnalite, pas une rafale a raboter.
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
 PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
@@ -141,15 +69,6 @@ HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
 # Le revoquer poserait `nologin` sur le sysadmin et fermerait la machine sur lui — l'enfermement
 # dehors.
-#
-# ⚠ L'UID N'EST PAS `1000`, ET CE DEFAUT ETAIT UNE COLLISION EN ATTENTE. Le siege est l'uid de qui a
-# installe LCARS (`deploy/provision`), grave en `/etc/lcars/seat.uid`. Avec un plancher fige a 1000
-# pendant que le siege est a 1237, ce convergeur cree des humains AU-DESSUS DE 1000 — donc sur 1237,
-# l'uid de l'admin — et GUARD A ne reconnait plus le compte qu'il doit epargner. Ce process tourne en
-# root et fait `useradd` : sans siege etabli, il ne demarre pas.
-#
-# ⚠ AUCUN EFFET DE BORD AU SOURCING : ce fichier est source par ses temoins (garde ligne 497). Le
-# refus vit dans le preflight, la ou le process VA creer des comptes — pas dans une assignation.
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSADMIN_UID="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
 [[ "$SYSADMIN_UID" =~ ^[0-9]+$ ]] || SYSADMIN_UID="${LCARS_SYSADMIN_UID:-}"
@@ -190,23 +109,11 @@ reserved() { # reserved <login> -> 0 si le nom est interdit
 valid_login() { # valid_login <login> -> 0 si utilisable tel quel comme user Linux
   local login=$1
   [[ ${#login} -ge 1 && ${#login} -le 32 ]] || return 1
-  # L'alphabet de Gitea, pas un plus large. Les DEUX bouts sont alphanumeriques : en tete parce
-  # qu'un `-` initial serait lu comme une OPTION par useradd, en queue parce que Gitea refuse toute
-  # ponctuation finale — mesure du 2026-08-12, `trail-`, `trail_` et `trail.` sont refuses tous les
-  # trois a l'inscription. Exiger la meme chose ici ne rejette donc AUCUN login legitime.
   [[ "$login" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]] || return 1
   [[ "$login" != *".."* ]] || return 1
   return 0
 }
 
-# L'UID EST UNE PROPRIETE DURABLE, ET RIEN NE LE GARANTISSAIT. Mesure du 2026-08-12, au premier
-# boot a froid : `/etc/passwd` meurt avec le conteneur, `/home` survit dans un volume. Le convergeur
-# recreait donc les users dans l'ordre ou la team les rend — qui n'est PAS l'ordre de creation
-# initial — et `useradd` distribuait les uid libres dans ce nouvel ordre. Resultat mesure : zoe est
-# passee de 1001 a 1002, guest1 de 1002 a 1001, et chacune s'est retrouvee proprietaire du home de
-# l'AUTRE : `mkdir /home/zoe/.lcars` en Permission denied, et surtout un `.claude/.credentials.json`
-# et un `~/.lcars` 0700 lisibles par la mauvaise personne.
-#
 # Le home PORTE deja l'uid d'origine : c'est son proprietaire. On le relit au lieu de laisser l'OS
 # redistribuer. Le chemin fait foi — `/home/<login>` est le home de <login>, quel que soit le nom
 # auquel son uid numerique resout aujourd'hui.
@@ -216,43 +123,6 @@ uid_of_home() { # uid_of_home <login> -> uid proprietaire du home existant, ou v
   stat -c %u "$h" 2>/dev/null || true
 }
 
-# ─── L'UID VIENT DE LA FORGE, PARCE QU'ELLE EST L'AUTORITE SUR LES PERSONNES ────────────────────
-#
-# `uid_of_home` ci-dessus repare un desordre APRES COUP : il relit l'uid sur le home qui a survecu.
-# C'est une bonne parade et elle reste — mais elle ne peut rien sur une boite NEUVE, ou aucun home
-# n'existe encore. La, `useradd` distribuait les uid libres dans l'ordre ou la team les rendait,
-# c'est-a-dire dans un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre.
-#
-# L'identifiant de la forge n'a pas ce defaut : il est attribue par un auto-increment SQL, donc
-# LINEAIRE, DENSE, et JAMAIS reutilise apres suppression. Deux boites reconstruites donnent le meme
-# siege a la meme personne, et l'uid d'un humain supprime ne retombe jamais sur quelqu'un d'autre —
-# le cas vicieux pour la propriete des fichiers.
-#
-# ⚠ L'ESPACE D'ID EST PARTAGE avec les comptes de role et les ORGANISATIONS (meme table Gitea).
-# Mesure du 2026-08-14 : sur une forge de banc avec UN humain, 14 identifiants sont deja consommes,
-# et l'org `fleet` porte l'id 8. Les uid sont donc CLAIRSEMES, pas contigus — ce qui est sans
-# consequence depuis qu'aucun port n'est derive d'un uid. Ca ne l'etait pas la veille.
-#
-# ⚠ ET C'EST CE RAISONNEMENT QUI EST TOMBE (⚖ user 2026-08-21, D8). Il tient sur UNE hypothese —
-# que l'espace d'uid soit LIBRE — et cette hypothese n'est vraie que dans une boite fabriquee pour
-# LCARS. Sur une machine qui a deja des utilisateurs, l'auto-increment de la forge et l'espace
-# d'uid de l'OS sont deux suites independantes : les faire coincider par une addition, c'est
-# esperer une collision de moins que le hasard n'en donne.
-#
-# MESURE DU 2026-08-21, poste natif : `admiral` (id de forge 1) veut l'uid 1001, deja porte par
-# `lcars`, l'humain de fleet — qui vient de CE convergeur depuis le 2026-08-25, seme sur la forge
-# par `48-forge-host`. REFUS, sans recours, sur une machine ou rien n'etait casse — c'est la formule
-# qui l'etait.
-#
-# LA DERIVATION EST DONC MORTE, ET SON BENEFICE EST REMPLACE, PAS PERDU. Ce qu'elle achetait —
-# « deux boites reconstruites donnent le meme uid a la meme personne » — n'a jamais eu besoin
-# d'etre une FORMULE : c'est une TABLE, et une table se persiste. `useradd` prend le premier uid
-# libre (il sait le faire, et lui seul connait l'espace reel), on ENREGISTRE le couple, et la
-# reconstruction le relit au lieu de le recalculer.
-#
-# L'ANCRE N'EST PAS LE NOM, C'EST L'ID DE FORGE. Gitea conserve l'`id` au renommage : le login est
-# une etiquette que chaque convergence reecrit, l'`id` ne bouge jamais. Une table keyee sur le nom
-# perdrait la personne au premier renommage — exactement ce que le home, lui, n'a jamais perdu.
 UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
 
 uid_from_map() { # uid_from_map <forge_id> -> l'uid enregistre pour cet id, ou vide
@@ -281,30 +151,6 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
 
 # L'uid a demander pour <login>, et la REGLE DE PRIORITE tient en une phrase : un home existant
 # gagne toujours.
-#
-# ⚠ POURQUOI LE HOME GAGNE, ET CE N'EST PAS UN DETAIL : c'est un FAIT SUR LE DISQUE. Si la forge
-# dit 1003 et que le home appartient a 1001, prendre 1003 rend la personne incapable d'ecrire chez
-# elle — exactement le defaut du 2026-08-12, ou zoe et guest1 se sont retrouvees proprietaires du
-# home l'une de l'autre. La forge fait autorite sur QUI EST LA ; le disque fait autorite sur ce qui
-# est deja ecrit.
-#
-# TROIS SOURCES, DANS CET ORDRE, ET LA TROISIEME EST UN SILENCE :
-#   1. le HOME existant — un fait sur le disque, il gagne toujours ;
-#   2. la TABLE — ce que cette machine a deja donne a cet id de forge ;
-#   3. rien — et c'est `useradd` qui choisit le premier uid libre.
-# Rendre vide n'est donc pas un echec : c'est la reponse « personne n'a d'avis, prends ce qui est
-# libre ». La formule d'avant n'avait pas ce troisieme etat, et c'est pour ca qu'elle collisionnait.
-# Le premier uid LIBRE au-dessus du plancher — et le plancher est l'uid RESERVE du siege, pas
-# `UID_MIN`. On ne laisse pas `useradd` choisir : son propre choix part de `UID_MIN`, donc il
-# rendrait l'uid du siege si celui-ci etait libre — exactement le compte qu'on ne doit jamais creer,
-# puisque GUARD A et GUARD B le reservent.
-#
-# ⚠ CE GARDE VIVAIT DANS `22-fleet-human`, ET IL Y ETAIT SEUL. Ce module a cesse de creer des
-# comptes le 2026-08-25 (un seul createur, un seul sens : la forge nomme, le convergeur materialise).
-# Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer : le
-# garde demenage avec le geste. Sa raison est recopiee ici mot pour mot parce qu'elle explique un
-# choix qui a l'air arbitraire.
-#
 # Le cas est etroit — sur une boite le siege existe deja quand ce service demarre, donc `useradd`
 # passerait a l'uid suivant — mais `LCARS_SYSADMIN_UID` est REGLABLE : un siege a 1005 sur une
 # machine ou 1005 est libre rentre exactement dans ce chemin.
@@ -353,8 +199,6 @@ uid_wanted() { # uid_wanted <login> <forge_id> -> uid a poser, ou vide
     local from_map; from_map="$(uid_from_map "$2")"
     [[ -n "$from_map" ]] && { printf '%s\n' "$from_map"; return 0; }
   fi
-  # AUCUNE MEMOIRE DE CET HUMAIN : c'est le cas NOMINAL d'une premiere materialisation, et c'est
-  # celui ou `useradd` choisissait seul. On choisit au-dessus du siege.
   first_free_uid
 }
 
@@ -390,7 +234,6 @@ group_members() { # group_members -> un login par ligne
 
 in_group() { group_members | grep -qxF -- "$1"; }
 
-# uid_of <login> -> son uid dans PASSWD_FILE (vide si absent). Sert au garde sysadmin (uid 1000).
 uid_of() { awk -F: -v n="$1" '$1==n {print $3; exit}' "${PASSWD_FILE:-/etc/passwd}"; }
 
 login_shell_of() { # login_shell_of <login>
@@ -420,10 +263,6 @@ converged_humans() {
 # forge muette — se ressemblent trop pour ne compter que sur un seul garde.
 # LA CHARGE DE LA FORGE PORTE DEUX CHAMPS, LES DEUX CONSOMMATEURS EN VEULENT UN SEUL. `/teams/<id>/
 # members` est lu une fois en `id<TAB>login` — l'id sert a poser l'UID a la creation, et lui seul.
-# `absent_humans` (qui coupe des acces) et `reconcile_humans` (qui appelle `id <login>`) attendent
-# des logins NUS ; leur donner la charge brute a fait osciller un humain entre `nologin` et `bash`
-# toutes les 30 s, process tues a chaque tour, pendant que la passe lente echouait sans un mot.
-#
 # Cette fonction existe pour que la conversion soit EPINGLABLE. Recopier `cut -f2` dans un test
 # aurait valide une copie : ce qui doit rester vrai, c'est ce que l'appelant reel calcule.
 roster_of() { # roster_of <charge id<TAB>login, une par ligne> -> les logins, un par ligne
@@ -440,45 +279,6 @@ absent_humans() { # absent_humans <membres…> -> les logins a revoquer, un par 
   return 0
 }
 
-# ─── L'ADMINITE N'EST PLUS PROJETEE, ET CE MODULE N'EN SAIT PLUS RIEN ───────────────────────────
-#
-# IL Y A EU ICI UNE CINQUIEME PASSE, `converge_admins`, qui lisait `is_admin` sur la forge avec le
-# JETON MASTER et le recopiait en adhesion a un groupe unix. Elle est retiree, avec `forge_is_admin`
-# et la seule raison qu'avait ce fichier de lire l'autorite de la boite.
-#
-# ⚠ CE N'EST PAS UNE SIMPLIFICATION, C'EST UN CHANGEMENT DE NATURE. Les quatre autres blocs font du
-# PROVISIONNEMENT : un compte unix ne se cree pas au moment ou quelqu'un tape, donc il faut le
-# poser d'avance. Une AUTORISATION, elle, se demande a l'instant ou elle compte. Recopier un booleen
-# d'autorisation en fait un CACHE — pose au login, jamais rattrape dans un process vivant — et un
-# cache demande un poll pour le rafraichir, puis un rattrapage pour les shells nes avant lui.
-#
-# `catalogue-executor.py` pose la question a la forge quand le geste arrive. Il n'y a donc plus rien
-# a projeter, plus rien a rafraichir, et plus rien a rattraper.
-
-# UNE CONSOLE SE GARANTIT, ELLE NE SE LANCE PAS « UNE FOIS ». Ce geste etait ecrit DEUX fois — a la
-# creation d'un user, et a sa reintegration — et il manquait au TROISIEME chemin : l'humain dont le
-# compte Unix existe deja et se porte bien. Il ne passe ni par `useradd` ni par `restore_human`, donc
-# il ne recevait rien. Mesure du 2026-08-17 sur banc : un compte cree A LA MAIN (groupe `fleet`,
-# shell valide) ajoute a `fleet:humans` traverse un tour de convergeur en SILENCE et sans console —
-# le deck lui affiche alors l'adresse d'un terminal qui n'existe pas, et le navigateur rend
-# « [connexion impossible] ».
-#
-# ⚠ ET UN REDEMARRAGE LE MASQUE, ce qui est le pire des deux : `console.sh --all` tourne a
-# l'entrypoint, donc au boot suivant tout le monde a sa console et le defaut disparait. Il ne se voit
-# que sur une boite VIVANTE, entre deux boots — c'est-a-dire exactement quand un admin enrole
-# quelqu'un.
-#
-# ⚠ CETTE LIGNE AFFIRMAIT UNE PROPRIETE D'UN AUTRE FICHIER, ET ELLE ETAIT FAUSSE. Elle disait
-# « console.sh --human est IDEMPOTENT : il sonde la socket avant de lancer quoi que ce soit ». Il ne
-# sondait rien : il faisait `rm -f` sur la socket et relancait un ttyd. Appele par humain et par
-# tour (30 s) depuis cette fonction, ca empile — mesure du 2026-08-18, **64 ttyd par humain** sur un
-# banc de trente minutes, la socket effacee et re-posee sous le navigateur a chaque tour. Ce que
-# l'operateur voyait : « la console du nouvel humain ne demarre pas ».
-#
-# L'idempotence EXISTE maintenant, et elle est mesuree la ou elle vit (`console_alive`, dans
-# `console.sh`) : une connexion reelle sur la socket, ce que le deck fera. Cette ligne n'affirme
-# donc plus rien sur le voisin — elle dit ce que CE fichier fait : appeler a chaque tour, et
-# accepter que le geste soit sans effet quand il n'y a rien a faire.
 ensure_console() { # ensure_console <login>
   [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]] || return 0
   "$CONSOLE" --human "$1" >/dev/null 2>&1 \
@@ -491,10 +291,6 @@ ensure_console() { # ensure_console <login>
 # decisions qui, en se trompant, creent un compte que personne ne voulait, coupent quelqu'un qui
 # travaille, ou accordent l'administration du runtime a qui ne l'a pas — elles sont donc lisibles et
 # testables sans lancer la boucle.
-#
-# ⚠ CETTE FRONTIERE A DEJA ETE ENJAMBEE UNE FOIS, par une sonde ecrite plus bas : elle devenait
-# inatteignable a tout temoin, et ses six temoins echouaient en `command not found` — un refus
-# franc, mais qui aurait pu passer pour « la sonde refuse » si je les avais ecrits moins serres.
 # Ce qui doit etre epingle vit AVANT cette ligne ; ce qui AGIT vit apres.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
@@ -539,30 +335,10 @@ converge_human() { # converge_human <login>
   # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot que
   # de ne rien converger en silence.
   [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
-  # ⚠ LE SUBSTRAT NE SE DECLARE PAS ICI, IL SE DETECTE LA-BAS. Cette ligne portait
-  # `--substrate docker` en dur : vrai tant que ce convergeur ne tournait QUE dans la boite, faux
-  # des qu'il tourne sur un poste — et faux en SILENCE, parce que les modules `NEEDS: human` ne
-  # refusent pas un substrat qu'ils n'attendaient pas, ils prennent leurs branches docker.
   # `provision` resout `--substrate auto` par `detect_substrate` (/.dockerenv, /proc/version), donc
   # il repond deja juste DANS le conteneur : le litteral n'achetait rien et coutait le rail poste.
   # ⚠ LES CODES DE `apply` NE SONT PAS CEUX DE `check`, ET LE 2 EST UN SUCCES ICI :
   #   0 convergé · 1 ÉCHEC · 2 APPLIQUÉ, drift résiduel.
-  # Un `|| return 1` nu traitait donc le 2 comme une panne — et le drift résiduel est le cas
-  # NOMINAL sur un humain frais : il lui manque ses credentials `claude`, qu'aucun programme ne
-  # peut poser (geste d'identité, jamais automatisé). L'appelant annonçait « le provisionnement
-  # per-humain a echoue » sur un humain correctement provisionné, et renvoyait vers un doctor qui
-  # dit la même chose sans la nommer comme un échec.
-  # ⚠ UN ECHEC DE DAEMON QUI JETTE SA SORTIE EST UN ECHEC QU'ON NE DIAGNOSTIQUE JAMAIS. Cette ligne
-  # portait `>/dev/null 2>&1` : l'appelant disait « le provisioning per-humain a echoue — diagnose :
-  # provision doctor --human X », et le doctor, joue PLUS TARD, mesure un etat qui a change depuis.
-  #
-  # MESURE DU 2026-08-21, poste natif : `mintos` cree a 19:35, provisioning per-humain en echec, et
-  # au moment ou j'ai voulu le rejouer il passait — 4 modules, 0 drift, 0 echec. L'etat avait bouge
-  # sous la mesure, et il ne restait RIEN de la panne. Un convergeur tourne toutes les 30 s sans
-  # personne devant : c'est le seul endroit du depot ou la trace doit survivre a l'evenement.
-  #
-  # On garde donc les dernieres lignes, et seulement en cas d'echec — un tour nominal reste muet,
-  # sinon le journal devient illisible a raison de deux passes par minute.
   local rc=0 out
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
   if [[ -n "$out" ]]; then
@@ -639,10 +415,6 @@ converge_once() {
     err "team $ORG/$TEAM introuvable (ou forge injoignable) — rien converge ce tour"
     return 0
   fi
-  # ⚠ ON GARDE L'`id` DE LA FORGE, ET IL ETAIT DEJA DANS LA CHARGE. Cette ligne n'extrayait que
-  # `.login` et jetait le reste — dont l'identifiant que Gitea attribue a chaque compte. C'est lui
-  # qui donne un UID DURABLE (cf. `uid_wanted` plus bas) : linéaire, dense, JAMAIS reutilise apres
-  # suppression. On ne fait donc pas un appel de plus, on cesse d'en jeter la moitie.
   members="$(api "/teams/$tid/members" \
     | jq -r 'if type=="array" then .[] | "\(.id)\t\(.login)" else empty end' 2>/dev/null || true)"
   [[ -n "$members" ]] || return 0
@@ -650,16 +422,11 @@ converge_once() {
   while IFS=$'\t' read -r forge_id login; do
     [[ -n "$login" ]] || continue
     if id "$login" >/dev/null 2>&1; then
-      # « EXISTE » NE DIT PAS « A SES ACCES ». Quelqu'un revoque puis re-ajoute a la team arrive
-      # exactement ici : `id` repond, et la boucle passait son tour en le laissant hors du groupe,
-      # en nologin, sans console. C'est le seul endroit ou le chemin de retour peut etre pris.
       # GUARD A : jamais restaurer (ni toucher) l'uid reserve du sysadmin (admiral).
       if [[ "$(uid_of "$login")" != "$SYSADMIN_UID" ]] &&
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
         restore_human "$login"
       fi
-      # LE TROISIEME CHEMIN, ET IL N'AVAIT RIEN. Un humain dont le compte existe et se porte bien
-      # sort d'ici sans passer par `restore_human` : sa console n'etait donc jamais garantie.
       ensure_console "$login"
       continue
     fi
@@ -675,21 +442,12 @@ converge_once() {
         mark_refused "$login" "ce login ne peut pas devenir un compte Unix : il faut 1 a 32 caracteres, commencant ET finissant par une lettre ou un chiffre, sans '..'"; }
       continue
     fi
-    # L'uid vient de la FORGE (id + offset) sur une boite neuve, et du HOME des qu'il en existe un —
-    # un home deja la impose SON uid, sinon la personne ne peut pas ecrire chez elle, et pire, elle
-    # ecrit chez quelqu'un d'autre.
     local want_uid holder uid_args=() uid_src=""
     # ⚠ LA SOURCE SE CAPTURE ICI, PAS APRES : `useradd -m` cree le home, donc tester son existence
     # plus bas repondrait « il a un home » pour TOUT LE MONDE. Premiere version de cette trace, et
     # elle aurait dit « repris de son home » sur un uid pose par la forge — un mensonge qui n'aurait
     # coute que le jour ou un uid surprend quelqu'un.
     # TROIS SOURCES, TROIS PHRASES. La derniere est le cas NOMINAL sur une machine neuve.
-    #
-    # ⚠ ELLE DISAIT « choisi par le systeme », ET CE N'EST PLUS VRAI. `useradd` ne choisit plus : il
-    # partait de `UID_MIN` et pouvait donc rendre l'uid RESERVE du siege s'il etait libre. Le
-    # plancher est desormais pose ici (`first_free_uid`, au-dessus de `SYSADMIN_UID`) — le garde a
-    # demenage depuis `22-fleet-human` en meme temps que le geste de creation. Une trace qui nomme
-    # le mauvais decideur est ce qui fait chercher un bug dans `useradd`.
     if [[ -d "$HOME_ROOT/$login" ]]; then
       uid_src="repris de son home"
     elif [[ -n "$(uid_from_map "$forge_id")" ]]; then
@@ -703,12 +461,6 @@ converge_once() {
       if [[ -n "$holder" ]]; then
         # Deux logins revendiquent le meme uid : c'est un croisement deja installe, et le reparer
         # a l'aveugle deplacerait des fichiers d'humain. On refuse, en nommant les deux cotes.
-        # ⚠ LE MOTIF SE DIT AVEC SA SOURCE, ET IL DISAIT TOUJOURS L'AUTRE. Ce message affirmait
-        # « son home appartient a l'uid N » dans les DEUX cas, alors que `uid_src` distingue deja
-        # « repris de son home » de « pose par la forge ». Mesure du 2026-08-21, poste natif :
-        # `admiral` (id de forge 1 -> uid 1001) refuse contre `lcars`, avec un message envoyant
-        # l'operateur inspecter `/home/admiral` — un repertoire qui N'EXISTE PAS. Un refus qui
-        # nomme la mauvaise cause coute plus qu'un refus muet : il fait chercher au mauvais endroit.
         already_refused "$login" || {
           err "REFUS $login — uid $want_uid ($uid_src), deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
           mark_refused "$login" "l'uid $want_uid ($uid_src) est deja porte par un autre compte ($holder) — un humain doit demeler"; }
@@ -720,21 +472,11 @@ converge_once() {
     # ici comme un NOM et pas comme un drapeau. La validation l'interdit deja ; ceci est la
     # ceinture qui ne coute rien.
     if useradd "${uid_args[@]}" -m -s "$SHELL_" -- "$login" 2>/dev/null; then
-      # Meme correctif que l'entrypoint : le `|| true` couvrait le groupe absent (voulu) ET le
-      # `usermod` en echec (pas voulu) — un humain hors de son groupe, en silence, est precisement
-      # ce qui a coute sept passes sur la racine des jetons.
       if getent group "$GROUP" >/dev/null 2>&1; then
         usermod -aG "$GROUP" -- "$login" 2>/dev/null \
           || say "ATTENTION: « $login » n'a PAS ete ajoute au groupe $GROUP — il ne lira pas ce que ce groupe ouvre"
       fi
       # L'UID EFFECTIF SE RELIT, IL NE SE SUPPOSE PAS.
-      #
-      # ⚠ CE COMMENTAIRE DISAIT « `want_uid` est vide dans le cas nominal (c'est `useradd` qui a
-      # choisi) », ET CE N'EST PLUS VRAI depuis que `uid_wanted` retombe sur `first_free_uid` :
-      # `uid_args` porte TOUJOURS `-u`, et `useradd` ne choisit plus rien. La raison de relire reste
-      # entiere — c'est ce que le SYSTEME a pose qu'on enregistre, pas ce qu'on lui a demande — mais
-      # une phrase qui nomme le mauvais decideur envoie chercher un defaut dans `useradd` le jour ou
-      # un uid surprend quelqu'un.
       local got_uid; got_uid="$(id -u -- "$login" 2>/dev/null || true)"
       uid_map_record "$forge_id" "$got_uid" "$login"
       # La TRACE DIT D'OU VIENT L'UID : « repris de son home », « relu dans la table » et « premier
@@ -744,26 +486,11 @@ converge_once() {
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.
       if [[ -x "$PROVISION" ]]; then
-        # TOUS les modules per-humain, et la liste se CALCULE. Elle etait `--only 70-human`, en dur —
-        # et c'est ce littéral qui a produit le defaut : `40-claude-bin` (qui pose ~/.local/bin/claude)
-        # ne tournait jamais pour un humain converge, donc la personne recevait un home, un substrat,
-        # et AUCUN binaire `claude`. Or `claude /login` est le seul geste qui lui reste a faire : sans
-        # le binaire, le rail d'enrollment s'arrete a son dernier pas, et le message d'accueil lui
-        # demande de lancer une commande qui n'existe pas.
-        # Une liste en dur redevient fausse au prochain module per-humain ajoute. Le provisioning
-        # DECLARE deja lesquels le sont (`# NEEDS: human`) : on lit cette declaration au lieu de la
-        # recopier. Meme discipline que la denylist des noms reserves, qui se calcule depuis
-        # /etc/passwd plutot que d'etre inscrite quelque part.
         converge_human "$login" \
           || err "$login : user cree mais le provisioning per-humain a echoue — diagnose : $PROVISION doctor --human $login"
       else
         err "$login : user cree mais $PROVISION introuvable — son ~/.lcars n'est PAS pose"
       fi
-      # SA CONSOLE, MAINTENANT — parce que personne d'autre ne la lancera. `console.sh --all` n'est
-      # appele QUE par l'entrypoint, au boot. Un humain converge APRES le boot recevait donc un user,
-      # un home et un substrat, et le deck lui affichait fierement l'adresse d'une console que rien
-      # n'avait demarree : « cette page ne fonctionne pas ». Le convergeur est le seul a savoir qu'un
-      # humain vient d'apparaitre ; c'est donc a lui de completer le geste.
       # Meme interrupteur que l'entrypoint : qui coupe les consoles les coupe pour tout le monde.
       ensure_console "$login"
     else
@@ -779,14 +506,8 @@ converge_once() {
   # LES LOGINS SEULS — le pourquoi est sur `roster_of`, qui est aussi ce que les tests epinglent.
   local -a roster; mapfile -t roster < <(roster_of <<< "$members")
 
-  # LA REVOCATION, a chaque tour. On n'arrive ici qu'avec une liste de membres PROUVEE (team
-  # trouvee, reponse non vide) : les deux sorties precedentes de cette fonction sont ce qui empeche
-  # un hoquet reseau de revoquer toute la boite.
   revoke_absent "${roster[@]}"
 
-  # LA PASSE LENTE, sur les membres DEJA presents. `id <login>` plus haut dit que l'user EXISTE —
-  # pas que son etat est converge, et le commentaire disait « deja converge : rien a dire ».
-  # C'etait faux : tout ce qui est pose a la creation n'atteignait jamais un humain deja la.
   local now; now="$(date +%s)"
   if [[ $((now - LAST_RECONCILE)) -ge "$RECONCILE_EVERY" ]]; then
     LAST_RECONCILE="$now"
@@ -797,33 +518,6 @@ converge_once() {
   return 0
 }
 
-# ─── ensure_all_consoles — LE DEMARREUR SUIT LE LECTEUR, PAS L'EQUIPE ───────────────────────────
-#
-# ⚖ USER 2026-08-22 : « 2 on aligne » — contre la troisieme unite systemd qui etait l'autre option.
-#
-# ⚠ DEUX POPULATIONS VIVAIENT COTE A COTE, ET ELLES NE COINCIDAIENT PAS. Le deck OFFRE une console a
-# tout humain que `console-humans.sh` liste — le groupe unix `fleet`. Ce convergeur n'en DEMARRAIT
-# que pour les membres de l'equipe forge `fleet:humans`. L'operateur de la machine, qui est dans
-# `fleet` et pas dans `fleet:humans`, recevait donc un onglet et une erreur :
-#
-#   [lcars-deck] relais console -> /run/lcars/console/<operateur>/console.sock : [Errno 2]
-#
-# Ce n'etait pas une exclusion voulue — `console-deck.py` dit l'inverse en toutes lettres :
-# « admiral est site-admin mais PAS dans fleet:humans […] sa console tourne sous lui (uid 1000) ».
-#
-# ⚠ ET LA BOITE N'AVAIT PAS CE DEFAUT, parce qu'elle demarre `console.sh --all` a son entrypoint —
-# et `--all` lit `console-humans.sh`, c'est-a-dire le lecteur du deck. Offre et demarrage y
-# coincident PAR CONSTRUCTION. Le rail natif re-derivait ce contrat en unites systemd et n'en avait
-# re-derive que deux sur trois.
-#
-# ⚠ POURQUOI ICI ET PAS DANS UNE UNITE. Une troisieme unite AJOUTERAIT un demarreur la ou le defaut
-# est d'en avoir deux qui ne s'accordent pas. Appeler `--all` une fois par tour SUPPRIME le second :
-# les appels par humain plus haut restent, parce qu'ils demarrent la console AU MOMENT de
-# l'enrolement — celui-ci rattrape tous les autres, et le tour d'apres ne coute rien.
-#
-# L'idempotence est reelle et elle vit dans `console.sh` (`console_alive`, une connexion reelle sur
-# la socket). Elle ne l'a pas toujours ete : mesure du 2026-08-18, **64 ttyd par humain** sur un banc
-# de trente minutes, quand cette fonction faisait `rm -f` sur la socket a chaque tour.
 ensure_all_consoles() {
   [[ "${LCARS_CONSOLE:-1}" == "1" && -x "$CONSOLE" ]] || return 0
   "$CONSOLE" --all >/dev/null 2>&1 \
