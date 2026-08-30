@@ -146,7 +146,7 @@ I3_AWK='
   # stderr. `{ …; } 2>/dev/null` le tait, mais cette forme ne tient que par un commentaire.
   local hits=0 f
   for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
-    if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE'; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
+    if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE' || code "$f" | grep -qF "tr -d '[:space:]' <"; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
   done
   [ "$hits" -eq 0 ]
 }

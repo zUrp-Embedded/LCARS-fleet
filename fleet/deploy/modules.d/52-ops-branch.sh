@@ -59,8 +59,8 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
 # le rail — et JAMAIS dans l'URL du remote, qui finirait dans `.git/config` du jetable puis dans
 # n'importe quelle sortie de debug.
 create_branch() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
-  [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok
+  tok="$(read_token "$tokfile")"
   [[ -n "$tok" ]] || {
     p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
     return 0; }

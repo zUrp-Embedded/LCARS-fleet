@@ -130,7 +130,7 @@ ensure_passwords_entries() {
     return 1
   fi
   local seed tmp rc=0
-  seed="$(tr -d '[:space:]' < "$PROV_FORGE_SEED_FILE")"
+  seed="$(read_token "$PROV_FORGE_SEED_FILE")"
   [[ -n "$seed" ]] || { p_fail "seed vide : $PROV_FORGE_SEED_FILE"; return 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/prov-pwd.XXXXXX")" || { p_fail "tmp passwords-file"; return 1; }
   if ! { if [[ -r "$PROV_PASSWORDS_FILE" ]]; then cat "$PROV_PASSWORDS_FILE"; else printf '{}'; fi; } \
@@ -288,17 +288,14 @@ check() {
 # /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
 # et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
 check_human_onboardable() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok code
+  local tokfile="$PROV_SYSTEM_TOKEN_FILE" code
   if ! account_exists "$PROV_HUMAN"; then
     p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « fleet/deploy/box forge-apply »"
     return 0
   fi
   p_ok "compte forge de l'humain ($PROV_HUMAN)"
   [[ -r "$tokfile" ]] || { p_drift "token système illisible ($tokfile) — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0; }
-  tok="$(tr -d '[:space:]' < "$tokfile")"
-  code="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-          | curl -K - -s -o /dev/null -w '%{http_code}' -m 10 \
-              "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
+  code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
   case "$code" in
     204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
     404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « fleet/deploy/box forge-apply »" ;;
