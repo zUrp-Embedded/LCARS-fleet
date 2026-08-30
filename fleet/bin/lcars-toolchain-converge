@@ -4,18 +4,13 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO — l'UNIQUE geste privilegie du rail d'outillage : appliquer un manifeste deja signe
 #
-# ─── CE QU'IL EST, ET SURTOUT CE QU'IL N'EST PAS ────────────────────────────────────────────────
-# Il n'interprete RIEN. Son entree est un manifeste YAML qu'un humain a approuve sur une branche
-# protegee, a un SHA que le reconciliateur lui passe. Il en lit des champs TYPES et joue des
-# gabarits de commande fixes. Aucun champ libre n'est lu : `evidence` existe pour l'humain qui
-# signe, et ce script ne le regarde pas.
+# Il n'interprete RIEN : il lit des champs TYPES d'un manifeste deja signe et joue des gabarits de
+# commande fixes. Aucun champ libre — `evidence` existe pour l'humain qui signe, pas pour ce script.
 #
-#
-# ─── LA FERMETURE, PAS LE PAQUET NOMME ──────────────────────────────────────────────────────────
-# `apt-get download <pkg>` reussit, extrait proprement, et rend un sysroot MORT : `libssl.so ->
-# libssl.so.3` pend, parce que la cible vit dans `libssl3`, un AUTRE paquet. Vert a l'extraction,
-# casse a l'edition de liens. `install --print-uris` est ce qui l'evite, et ce n'est pas une astuce
-# d'optimisation : c'est la condition pour que le sysroot linke.
+# ⚠ LA FERMETURE, PAS LE PAQUET NOMME. `apt-get download <pkg>` reussit, extrait proprement, et rend
+# un sysroot MORT : `libssl.so -> libssl.so.3` pend, parce que la cible vit dans `libssl3`, un AUTRE
+# paquet. Vert a l'extraction, casse a l'edition de liens. `install --print-uris` est la condition
+# pour que le sysroot linke, pas une optimisation.
 #
 # USAGE : lcars-toolchain-converge <sha>
 #   Lit `ops/toolchains.d/*.yaml` du depot ops AU SHA donne, et applique chaque manifeste.
@@ -29,29 +24,17 @@ set -euo pipefail
 STORE="${LCARS_STORE_ROOT:-/var/lib/lcars}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
-# ⚠ CE SCRIPT N'OUVRE PLUS AUCUN SECRET, ET C'EST UNE PROPRIETE DU RAIL, PAS UNE ECONOMIE.
-#
-#
-# `FORGE_TOKEN` reste accepte pour une boite dont la forge exige une session en lecture. C'est une
-# entree EXPLICITE, posee sur l'unite, jamais un chemin que ce script irait ouvrir : savoir OU
-# trouver un secret, c'est deja avoir le droit de le lire.
+# `FORGE_TOKEN` est une entree EXPLICITE posee sur l'unite, jamais un chemin que ce script irait
+# ouvrir : savoir OU trouver un secret, c'est deja avoir le droit de le lire.
 TOKEN="${FORGE_TOKEN:-}"
-# LE REPERTOIRE DE TRAVAIL EST JETABLE, ET IL NE S'OUVRE NI DANS L'ETAT TOFU NI DANS LE MAGASIN.
-# `/var/lib/lcars/tofu` porte l'etat terraform des catalogues : il contient les valeurs des
-# variables, mot de passe de seed compris, et il est ferme en consequence.
-#
-# ⚠ SON MODE ET SON PROPRIETAIRE NE SE RECOPIENT PAS ICI. `deploy/system.manifest` en est la source
-# unique ; un chiffre recopie dans un commentaire ment le jour ou la table bouge, et rien ne rougit.
-# Ce qui se dit ici est la REGLE : un aptroot jetable, `rm -rf` a chaque passe, n'a rien a faire
-# imbrique dans l'etat sensible d'un autre proprietaire. Les deux arbres ont des cycles de vie
-# differents, et le jour ou l'un se nettoie il emporte l'autre.
+# ⚠ AUCUN MODE NI PROPRIETAIRE RECOPIE ICI : `deploy/system.manifest` en est la source unique, et un
+# chiffre recopie dans un commentaire ment le jour ou la table bouge, sans que rien ne rougisse. La
+# regle, elle : un aptroot jetable n'a rien a faire imbrique dans l'etat sensible d'un autre
+# proprietaire — le jour ou l'un se nettoie, il emporte l'autre.
 WORK="${LCARS_TOOLCHAIN_WORK:-/var/tmp/lcars/toolchain-work}"
 
-# LE VERROU EST PRIS AVANT TOUT LE RESTE, et il n'est pas defensif. Deux invocations peuvent se
-# croiser — un tick pendant le boot, deux ticks qui se chevauchent sur un `apt` long — et `apt-get`
-# n'est PAS reentrant : deux processus root en parallele se battent sur /var/lib/dpkg/lock et l'un
-# des deux meurt en laissant dpkg a moitie configure. Meme geste que le verrou d'apply de
-# `forge-gestures.sh`.
+# PRIS AVANT TOUT LE RESTE : `apt-get` n'est PAS reentrant — deux processus root en parallele se
+# battent sur /var/lib/dpkg/lock et l'un des deux meurt en laissant dpkg a moitie configure.
 LOCK="${LCARS_TOOLCHAIN_LOCK:-/var/lock/lcars-toolchain.lock}"
 
 die() { echo "toolchain-converger: $2" >&2; exit "$1"; }
@@ -70,10 +53,8 @@ flock -n 9 || die 0 "une convergence tourne deja — celle-ci n'a rien a faire (
 
 [[ -n "$FORGE" ]] || die 1 "FORGE_BASE_URL absent — impossible de lire le manifeste"
 
-# ⚠ `-K -` ET PAS `-H`, ET C'EST UNE FUITE FERMEE AU PASSAGE. L'en-tete etait construit en ARGV :
-# quand un jeton EST fourni, il se lisait dans `/proc/<pid>/cmdline` — par tout le monde, pendant
-# toute la duree de l'appel, dans le process le plus privilegie de la machine. `-K -` le fait passer
-# par un tube. Sans jeton, aucune configuration n'est produite et l'appel part en anonyme.
+# ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV se lit dans `/proc/<pid>/cmdline`. Le tube
+# ferme la fuite.
 api() {
   if [[ -n "$TOKEN" ]]; then
     printf 'header = "Authorization: token %s"\n' "$TOKEN" \
@@ -83,16 +64,9 @@ api() {
   fi
 }
 
-# ─── LE SHA DOIT ETRE LA TETE DE LA BRANCHE PROTEGEE ────────────────────────────────────────────
-#
-#
-# ⚠ ET SI LA FORGE NE REND PAS LA TETE, ON REFUSE. Un garde qui s'efface quand sa sonde est muette
-# ne garde rien : c'est le mode de defaillance que le rail entier est cense interdire.
-# ⚠ UN LITTERAL, JAMAIS UNE VARIABLE — ET C EST UNE BORNE DE SECURITE, PAS UN NOM DE CONFORT.
-# `Fleet.Toolchain.branch/0` gele ce nom ; le contrat `toolchain.branch_single_source` exige
-# que chaque lecteur shell en porte la COPIE et refuse tout reglage : « a name half of the
-# rail can retune is a rail that splits in silence ». Rendre celui-ci reglable ouvrirait la
-# borne qui empeche d'installer en root un manifeste que personne n'a signe.
+# ⚠ UN LITTERAL, JAMAIS UNE VARIABLE : `toolchain.branch_single_source` exige que chaque lecteur
+# shell en porte la COPIE et refuse tout reglage. Reglable, il ouvrirait la borne qui empeche
+# d'installer en root un manifeste que personne n'a signe.
 BRANCH="tool_request"
 head_of_branch() {
   api "/repos/$OPS_REPO/branches/$BRANCH" | jq -r '.commit.id // empty'
@@ -100,15 +74,12 @@ head_of_branch() {
 HEAD_SHA="$(head_of_branch || true)"
 [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
   || die 1 "tete de « $BRANCH » introuvable sur $OPS_REPO — rien n'est applique (la forge repond-elle ?)"
-# Le SHA passe peut etre abrege (7-40) : on compare sur sa longueur, jamais l'inverse.
 [[ "${HEAD_SHA:0:${#SHA}}" == "$SHA" ]] \
   || die 1 "sha '$SHA' n'est PAS la tete de la branche protegee « $BRANCH » ($HEAD_SHA) — refuse. Un manifeste ne s'applique qu'a la revision qu'un humain a signee sur cette branche."
 
-# ─── LE MANIFESTE EST LU AU SHA, JAMAIS SUR LA BRANCHE ──────────────────────────────────────────
-# Lire « la derniere version de la branche » ouvrirait une fenetre entre le moment ou le
-# reconciliateur a constate l'ecart et celui ou ce script lit : un merge qui atterrit entre les deux
-# serait applique SANS que le SHA note lui corresponde. Le SHA est le pin, et c'est lui qu'un humain
-# a signe.
+# ⚠ LU AU SHA, JAMAIS SUR LA BRANCHE. Lire « la derniere version » ouvrirait une fenetre entre le
+# constat d'ecart du reconciliateur et cette lecture : un merge qui atterrit entre les deux serait
+# applique SANS que le SHA note lui corresponde.
 list_manifests() {
   api "/repos/$OPS_REPO/contents/ops/toolchains.d?ref=$SHA" \
     | jq -r 'if type=="array" then .[] | select(.name|endswith(".yaml")) | .path else empty end'
@@ -118,24 +89,14 @@ fetch_manifest() {
   api "/repos/$OPS_REPO/contents/$1?ref=$SHA" | jq -r '.content' | base64 -d
 }
 
-# ─── LECTURE DES CHAMPS : TYPEE, ET AUCUN CHAMP LIBRE ───────────────────────────────────────────
-# `yq` n'est pas garanti present ; le manifeste est genere par `Fleet.Toolchain` et sa forme est
-# donc connue et stable. On lit ce dont on a besoin avec des motifs ancres, et TOUT ce qui ne matche
-# pas un motif est ignore — un champ inconnu n'est pas une erreur, c'est un champ qu'on ne joue pas.
-# ⚠ TOLERANT A L'INDENTATION, et c'est l'exclusivite des formes qui le rend sur. Les champs d'une
-# forme sont indentes de deux espaces (`installer:` puis `  name:`), donc un motif ancre en colonne 0
-# lisait du VIDE et refusait sur le premier champ au lieu du bon — trouve par les temoins.
-# Une lecture a plat serait ambigue si deux blocs portaient la meme clef ; ils ne le peuvent pas :
-# `apt`, `installer` et `sysroot` sont EXCLUSIFS (`Fleet.Toolchain.validate_form/1`), donc chacune
-# de ces clefs apparait au plus une fois dans un manifeste.
+# `yq` n'est pas garanti present. Un champ inconnu n'est pas une erreur : c'est un champ qu'on ne
+# joue pas. La lecture a plat n'est PAS ambigue parce que `apt`, `installer` et `sysroot` sont
+# EXCLUSIFS (`validate_form/1`) — chacune de ces clefs apparait au plus une fois par manifeste.
 field() { sed -n "s/^ *$1: *//p" <<< "$2" | head -1 | tr -d '"'; }
 
-# Le BLOC top-level (lignes indentees sous la cle) — le scope qui empeche `  packages` d'un bloc
-# d'aspirer celui d'un autre : apt.packages (paquets HOTE) vs sysroot.packages (paquets CIBLE),
-# les confondre installerait la cible sur l'hote. ⚠ Un tel manifeste COMBINE ne peut PAS venir du
-# rail (`validate_form/1` exige exactement UNE forme) — mais ce script lit un FICHIER : un
-# manifeste pose a la main sur la branche n'est pas passe par le schema, et la ceinture est ici,
-# la derniere (meme motif que safe_pkg). Mesure en reparant la grammaire d'indentation (B3).
+# Le scope qui empeche `  packages` d'un bloc d'aspirer celui d'un autre : apt.packages (HOTE) vs
+# sysroot.packages (CIBLE). ⚠ Un manifeste COMBINE ne peut pas venir du rail, mais ce script lit un
+# FICHIER — pose a la main, il n'est pas passe par le schema, et la ceinture est ici.
 block_under() { # block_under <yaml> <cle top-level> -> les lignes du bloc
   awk -v key="$2:" '
     $0 == key { inb=1; next }
@@ -180,10 +141,8 @@ apply_apt() { # apply_apt <yaml>
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -- "${pkgs[@]}"
 }
 
-# ─── LE SYSROOT S'ASSEMBLE, IL NE SE PRELEVE PAS ────────────────────────────────────────────────
-# Racine apt PRIVEE : l'hote garde son `dpkg --print-foreign-architectures` vide, son apt intact, et
-# ce repertoire se jette avec un `rm -rf`. La fermeture est resolue par `--print-uris`, jamais un
-# paquet nomme seul (cf. l'en-tete).
+# Racine apt PRIVEE : l'hote garde son `dpkg --print-foreign-architectures` vide et son apt intact,
+# et ce repertoire se jette avec un `rm -rf`.
 apply_sysroot() { # apply_sysroot <yaml> <eco>
   local arch; arch="$(field arch "$1")"   # motif deja verifie par validate_manifest
 
@@ -194,9 +153,8 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
   : > "$root/var/lib/dpkg/status"
   list_under "$(block_under "$1" sysroot)" "  sources" > "$root/etc/apt/sources.list"
 
-  # ⚠ LE KEYRING N'EST PAS OPTIONNEL. Un convergeur qui telecharge des paquets non signes est le
-  # trou supply-chain qu'on refuse d'ouvrir par commodite — et la commodite serait grande, puisque
-  # `AllowInsecureRepositories` fait marcher le reste tout de suite.
+  # ⚠ LE KEYRING N'EST PAS OPTIONNEL, et la commodite serait grande : `AllowInsecureRepositories`
+  # fait marcher le reste tout de suite, au prix d'un convergeur qui installe des paquets non signes.
   local keyring; keyring="$(field keyring "$1")"   # lisibilite deja verifiee
   cp "$keyring" "$root/etc/apt/trusted.gpg.d/target.gpg"
 
@@ -221,17 +179,12 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
   echo "toolchain-converger: sysroot $2 assemble dans $target"
 }
 
-# ─── LES HOTES D'EGRESS : LE VERBE QUI REND L'OUVERTURE PERSISTANTE ─────────────────────────────
-# Sans lui, tout le prealable A ouvre un registry que rien ne pose. Les deux sources d'aujourd'hui
-# vivent DANS L'IMAGE (la declaration vendor a cote du launcher, le cap-profile du catalogue) : un
-# rebuild les restaure telles qu'elles etaient au build, donc une ouverture qu'un humain a signee
-# serait EFFACEE — silencieusement, puisqu'un pod qui ne joint rien ressemble a un pod que personne
-# n'a ouvert.
+# CE VERBE REND L'OUVERTURE PERSISTANTE. Les deux sources d'aujourd'hui vivent DANS L'IMAGE : un
+# rebuild les restaure telles qu'au build, donc une ouverture qu'un humain a signee serait EFFACEE —
+# silencieusement, puisqu'un pod qui ne joint rien ressemble a un pod que personne n'a ouvert.
 #
-#
-# ⚠ ET DEUX CLEFS, PAS UNE. Ce fichier ne fait rien si le role n'est pas en `network: egress` dans
-# le catalogue. On l'ecrit quand meme — c'est le RESULTAT du merge — mais le convergeur ne peut pas
-# poser la premiere clef : elle est du code, jugee par le jury normal.
+# ⚠ ET DEUX CLEFS, PAS UNE : ce fichier ne fait rien si le role n'est pas en `network: egress` dans
+# le catalogue, et le convergeur ne peut pas poser cette premiere clef — elle est du code.
 apply_egress() { # apply_egress <yaml> <eco>
   local hosts=() h
   while IFS= read -r h; do
@@ -256,15 +209,12 @@ apply_egress() { # apply_egress <yaml> <eco>
 
 }
 
+# ⚠ JAMAIS `curl | sh` : un telechargement coupe produit un script TRONQUE que `sh` execute quand
+# meme, et l'etat partiel passe ensuite pour « deja fait ». Telecharger, VERIFIER le sha256, executer.
 #
-# ⚠ JAMAIS `curl | sh`. Un telechargement coupe produit un script TRONQUE que `sh` execute quand
-# meme, et l'etat partiel qui en resulte passe ensuite pour « deja fait ». On telecharge, on VERIFIE
-# le sha256, on execute — dans cet ordre.
-#
-# ⚠ L'INSTALLEUR POSE SOUS LE MAGASIN, PAS SOUS LE $HOME DU CONVERGEUR. Ce script tourne en root :
-# un `export.sh` de SDK calcule ses chemins depuis `$HOME` et rendrait `IDF_PATH=/root/.espressif/…`,
-# un chemin qui N'EXISTE PAS dans le pod (dont le HOME est un tmpfs monte pour lui seul). L'install
-# sortirait verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
+# ⚠ SOUS LE MAGASIN, PAS SOUS LE $HOME DU CONVERGEUR : ce script tourne en root, et un `export.sh`
+# de SDK qui calcule ses chemins depuis `$HOME` rendrait `IDF_PATH=/root/.espressif/…`, absent du pod.
+# L'install sortirait verte, le pod ne verrait rien, et rien ne relierait les deux symptomes.
 apply_installer() { # apply_installer <yaml> <eco>
   local name url version sha256 env_script tree
   name="$(field name "$1")"; url="$(field url "$1")"
@@ -278,11 +228,8 @@ apply_installer() { # apply_installer <yaml> <eco>
 
   local script="$WORK/$name-$version.sh"
   curl -sSfL -o "$script" "$url" || die 3 "telechargement de l'installeur $name echoue"
-  # EXIT 3 ET PAS 2 : le manifeste est BIEN FORME, c'est l'artefact qui ne correspond pas. Un pin
-  # perime et un telechargement corrompu se ressemblent ici, et l'un des deux se repare seul au tick
-  # suivant. Un `2` dirait « ce document ne marchera jamais » et ferait attendre une correction
-  # humaine sans objet. (`die` dans le sous-shell d'application ressort en 3, ce qui est ici le bon
-  # code — cf. `validate_manifest` pour les refus qui, eux, doivent sortir AVANT.)
+  # EXIT 3 ET PAS 2 : le manifeste est BIEN FORME, c'est l'artefact qui ne correspond pas — et un
+  # pin perime se repare seul au tick suivant, la ou un `2` ferait attendre un humain sans objet.
   echo "$sha256  $script" | sha256sum -c - >/dev/null 2>&1 \
     || die 3 "sha256 de l'installeur $name NE CORRESPOND PAS — rien n'est execute"
 
@@ -294,14 +241,8 @@ apply_installer() { # apply_installer <yaml> <eco>
   echo "toolchain-converger: installeur $name $version pose dans $tree"
 }
 
-# ─── FIGER LE DELTA D'ENVIRONNEMENT ─────────────────────────────────────────────────────────────
-# Le pod ne source JAMAIS de script : sourcer du shell venu d'un artefact telecharge, dans le
-# processus qui construit le bac a sable, rouvrirait dans le launcher le trou que ce fichier
-# referme. On joue l'`env_script` UNE fois, ICI, et on fige le resultat a plat.
-#
-# ⚠ TOUTE VALEUR QUI EST UN CHEMIN ABSOLU DOIT ETRE SOUS LE MAGASIN. Un chemin hors magasin est un
-# delta FAUX, et un delta faux est indetectable cote pod. On refuse la convergence plutot que de
-# poser un environnement valide pour une machine que personne n'habite.
+# L'`env_script` est joue UNE fois, ICI, et son resultat fige a plat : le pod ne source jamais de
+# script. Un chemin absolu HORS magasin est un delta FAUX, et un delta faux est indetectable cote pod.
 #
 # ⚠ LES VARIABLES DE BUILD UNIVERSELLES SONT REFUSEES, liste close. `CARGO_HOME` n'est lu que par
 # cargo ; `CC` est lu par TOUT systeme de build : pose globalement, le premier pod Python qui
@@ -316,9 +257,8 @@ freeze_env() { # freeze_env <tree> <env_script> <eco>
 
   tmp="$(mktemp "$(dirname "$out")/.$3.XXXXXX")"
   printf '# genere par le rail toolchain — delta fige, NE PAS EDITER\n' > "$tmp"
-  # `< <(comm ...)` et PAS un pipe : dans `comm | while`, le `die 2` du refus hors-magasin ne
-  # tuait que le sous-shell du pipe — freeze_env CONTINUAIT et posait l'env.d tronque comme un
-  # succes (mesure par le temoin RC2, qui a aussi attrape la perte de ce correctif lui-meme).
+  # ⚠ `< <(comm …)` et PAS un pipe : dans `comm | while`, le `die 2` du refus hors-magasin ne tuait
+  # que le sous-shell — freeze_env CONTINUAIT et posait l'env.d tronque comme un succes.
   while IFS= read -r pair; do
     local k="${pair%%=*}" v="${pair#*=}"
     [[ "$k" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
@@ -337,15 +277,9 @@ freeze_env() { # freeze_env <tree> <env_script> <eco>
   echo "toolchain-converger: environnement de $3 fige dans $out"
 }
 
-# ─── LA VALIDATION PRECEDE L'APPLICATION, ET ELLE EST HORS DU SOUS-SHELL ────────────────────────
-# ⚠ TROUVE PAR LES TEMOINS, ET C'EST UN VRAI DEFAUT : un `die 2` place dans le `( set -e ... )` qui
-# applique termine LE SOUS-SHELL, pas le script. Le code de sortie devenait 3 — « application
-# echouee, on reessaiera » — pour un manifeste qui ne marchera JAMAIS. Le reconciliateur ne traite
-# pas les deux pareil : l'un se rejoue au tick suivant, l'autre attend qu'un humain corrige le
-# document. Confondre les deux fait boucler le rail sur une faute qu'aucun rejeu ne repare.
-#
-# Et le bon ordre tombe avec le correctif : on REFUSE UN MANIFESTE ENTIER avant d'avoir touche quoi
-# que ce soit, plutot que de mourir a mi-chemin d'une application.
+# ⚠ HORS DU SOUS-SHELL D'APPLICATION : un `die 2` place dans le `( set -e … )` termine LE SOUS-SHELL,
+# pas le script, et le code devenait 3 — « on reessaiera » — pour un manifeste qui ne marchera
+# JAMAIS. D'ou l'ordre : on REFUSE un manifeste entier avant d'avoir touche quoi que ce soit.
 validate_manifest() { # validate_manifest <yaml> <eco>
   local v
   grep -q '^kind: ecosystem_enable' <<< "$1" || die 2 "kind inattendu"
@@ -380,14 +314,9 @@ for path in $(list_manifests); do
   eco="$(basename "$path" .yaml)"
   safe_eco "$eco" || die 2 "nom d'ecosysteme refuse: '$eco'"
 
-  # IDEMPOTENCE PAR LE SHA, PAS PAR LA PRESENCE D'UN REPERTOIRE — mais le marqueur ne gate QUE LES
-  # VERBES MAGASIN (installer, sysroot), et cette restriction est LE CAS DU REBUILD :
-  #
-  #   Le marqueur vit sur le MAGASIN (volume externe) et SURVIT a un rebuild, pendant que /usr —
-  #   la cible du verbe apt — MEURT avec le conteneur. Une v1 gatait le manifeste ENTIER : apres
-  #   un rebuild, « deja a <sha> » sautait apt, et la boite annoncait convergee avec un /usr nu —
-  #   l'exact « etat approuve mais non applique » que ce rail refuse partout.
-  #
+  # Le marqueur ne gate QUE LES VERBES MAGASIN, et c'est le cas du REBUILD : il vit sur le magasin
+  # (volume externe) et lui SURVIT, pendant que /usr — la cible d'apt — meurt avec le conteneur.
+  # Gater le manifeste entier ferait annoncer « deja a <sha> » sur un /usr nu.
   marker="$(applied_marker "$eco")"
   store_current=0
   [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
