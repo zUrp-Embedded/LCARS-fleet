@@ -256,8 +256,20 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
     LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
-    git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
-      || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code" 7
+    # ⚠ `--force`, ET C'EST L'INTENTION, PAS UNE COMMODITE : la BOITE a deja pose ce depot a son
+    # boot — un « Initial commit » et une branche `tool_request` — et cet historique n'a AUCUN
+    # ancetre commun avec celui qu'on seme. Un push ordinaire est donc rejete « fetch first » sur
+    # une forge PARFAITEMENT NEUVE, ce qui se lit comme un accident et n'en est pas un : deux gestes
+    # du meme rail ecrivent le meme ref. Ce script amorce une forge DE BANC, jetable par
+    # construction, et n'ecrase que `main` — `tool_request` n'est pas touchee.
+    #
+    # ⚠ ET STDERR SE CAPTURE AU LIEU DE DISPARAITRE. La cause du rejet est dans le message de git,
+    # jamais dans le notre : un `2>/dev/null` ici a coute trois rejeux pour relire une ligne que git
+    # disait des la premiere. Il se REDACTE avant d'etre rendu — l'URL porte le jeton, et un
+    # diagnostic n'a pas le droit de le publier.
+    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" main:main 2>&1)" \
+      || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code
+  git a dit : ${PUSH_ERR//"$SYS_TOKEN"/<JETON>}" 7
     say "fleet/lcars : main pousse"
 
     WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
