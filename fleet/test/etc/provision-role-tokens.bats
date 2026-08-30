@@ -8,6 +8,8 @@
 # $MOCK/probe_code; the mint POST returns $MOCK/post_response and is COUNTED in $MOCK/calls.log — so
 # idempotence is asserted on "zero POST on the second run", not on a printed line. jq is the real one.
 
+load ../support/refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../etc/provision-role-tokens.sh"
   TMP="$(mktemp -d)"
@@ -299,7 +301,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
-  ! grep -q 'pw-eng' "$MOCK/calls.log"
+  refute grep -q 'pw-eng' "$MOCK/calls.log"
   grep -q 'pw-eng' "$MOCK/stdin.log"
 }
 
@@ -308,7 +310,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --roles engineer
   [ "$status" -eq 0 ]
-  ! grep -q 'TOKEN-MINTE' "$MOCK/calls.log"
+  refute grep -q 'TOKEN-MINTE' "$MOCK/calls.log"
   grep -q 'TOKEN-MINTE' "$MOCK/stdin.log"
   # Et la chaine fonctionne encore : le fichier est ecrit avec ce que la forge a rendu.
   grep -q 'TOKEN-MINTE' "$TOKDIR/engineer.gitea_token"
@@ -341,7 +343,7 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   [ "$status" -eq 0 ]
   grep -q 'request = "PATCH"' "$MOCK/stdin.log"
   grep -q 'admin/users/engineer' "$MOCK/calls.log"
-  ! grep -q 'pw-eng' "$MOCK/stdin.log"
+  refute grep -q 'pw-eng' "$MOCK/stdin.log"
 }
 
 @test "6-141 sur la voie FORCE : ni le jeton master ni le password force ne passent par argv" {
@@ -349,9 +351,9 @@ mint_ok() {   # etat nominal du shim pour un mint qui aboutit
   run "$SCRIPT" --forge http://f --owner "$(id -un)" --tokens-dir "$TOKDIR" \
     --passwords-file "$PWDFILE" --master-token-file <(printf 'JETON-MASTER\n') --roles engineer
   [ "$status" -eq 0 ]
-  ! grep -q 'JETON-MASTER' "$MOCK/calls.log"
+  refute grep -q 'JETON-MASTER' "$MOCK/calls.log"
   grep -q 'JETON-MASTER' "$MOCK/stdin.log"
-  ! grep -qE '"password":' "$MOCK/calls.log"
+  refute grep -qE '"password":' "$MOCK/calls.log"
   grep -q 'password' "$MOCK/stdin.log"
 }
 

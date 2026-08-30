@@ -14,6 +14,8 @@
 # adversarial code review found this, and it found it because NO witness covered the path. This is
 # that witness.
 
+load ../support/refute
+
 setup() {
   HOMEDIR="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOMEDIR/.lcars/forges"
@@ -80,7 +82,7 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"INDECIDABLE"* ]]
   [[ "$output" == *"Rien n'a ete cree"* ]]
-  ! grep -q "^repo-create" "$FCLOG"
+  refute grep -q "^repo-create" "$FCLOG"
 }
 
 @test "existence ABSENT (1) -> la creation est tentee" {
@@ -92,7 +94,7 @@ EOF
 @test "existence PRESENT (0) -> aucune creation, la base est derivee de la destination" {
   _forge_cli_stub 0
   run "$SUT" approve fleet/demo --forge gh --as widget
-  ! grep -q "^repo-create" "$FCLOG"
+  refute grep -q "^repo-create" "$FCLOG"
   # And it ASKS the destination for its default branch instead of assuming `main`.
   grep -q "^default-branch" "$FCLOG"
 }

@@ -11,6 +11,8 @@
 # the bwrap syscalls). What IS covered here: args, the `:?` session guards, setup checks, assembly
 # (clearenv/die-with-parent/binds/setenv/sock-dir/tmux), the pre-exec trap, and the N0/N1 frontier.
 
+load ../support/refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/bwrap_launch.sh"
   TMP_BASE="$(mktemp -d)"
@@ -460,7 +462,7 @@ teardown() { rm -rf "$TMP_BASE"; }
   # `mkdir -p` is excluded: that is a shell builtin (defensive creation of .claude/), NOT claude's print
   # flag. bwrap_launch passes claude flags ONLY through the opaque ${COMMAND[@]}, never as a literal in
   # the source → any remaining literal `-p ` would be suspect, except this mkdir.
-  ! grep -vE "^\s*#" "$SCRIPT" | grep -vE "mkdir -p" | grep -E "\-\-remote-control|\-\-system-prompt|\-\-mcp-config|\-\-allowedTools|\-\-permission-mode|\-p |\-\-print"
+  grep -vE "^\s*#" "$SCRIPT" | grep -vE "mkdir -p" | refute_out "\-\-remote-control|\-\-system-prompt|\-\-mcp-config|\-\-allowedTools|\-\-permission-mode|\-p |\-\-print"
 }
 @test "frontier: invocable with any command (vendor-agnostic)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /usr/bin/env FOO=bar

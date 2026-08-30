@@ -19,6 +19,8 @@
 # internal attribution and each one is repaired differently; the fourth must come out BYTE-IDENTICAL,
 # because rewriting a foreign commit is what makes contributing back impossible.
 
+load ../support/refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-transform.sh"
   TMP="$(mktemp -d)"
@@ -120,7 +122,7 @@ emails_after() { git -C "$OUT" log --all --format='%ae %ce' | tr ' ' '\n' | sort
 }
 
 refute_internal() {
-  ! git -C "$OUT" log --all --format='%ae|%ce|%B' | grep -qi 'lcars\.local'
+  git -C "$OUT" log --all --format='%ae|%ce|%B' | refute_out -i 'lcars\.local'
 }
 
 @test "author internal + committer internal falls back to the DECLARED identity" {
@@ -163,7 +165,7 @@ refute_internal() {
   [ "$status" -eq 0 ]
 
   git -C "$OUT" log --all --format='%B' | grep -qi 'Co-Authored-By: Claude'
-  ! git -C "$OUT" log --all --format='%B' | grep -qi 'LCARS-engineer'
+  git -C "$OUT" log --all --format='%B' | refute_out -i 'LCARS-engineer'
 }
 
 # ─── What must NOT move ─────────────────────────────────────────────────────────────────────────

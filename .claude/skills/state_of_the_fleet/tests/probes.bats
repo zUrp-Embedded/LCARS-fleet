@@ -325,7 +325,10 @@ JSONL
 
 @test "render terminal : la limite est cachee sur un OK, montree des que ce n'est plus vert" {
   run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh"
-  ! echo "$output" | grep -q "limite-A"
+  # `[[ ]]` plutot que `! … | grep` : un test avec operateur `!=` n'est pas une commande niee,
+  # donc errexit y mord (cf. fleet/deploy/tests/refute.bash). La skill n'importe aucun helper —
+  # c'est le seul objet d'ici concu pour voyager sans le depot.
+  [[ "$output" != *"limite-A"* ]] || { printf 'INTERDIT : « limite-A » dans la sortie :\n%s\n' "$output" >&2; false; }
   echo "$output" | grep -q "limite-B"
   echo "$output" | grep -q "limite-C"
 }
@@ -788,7 +791,7 @@ sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOM
   mkdir -p "$TMP/p" "$TMP/w"; mk_decl "$TMP/p" src main work/ops
   mk_repo "$TMP/p/alpha" main "http://bob:s3cr3t@127.0.0.1:1/fleet/alpha.git"
   run sotf50
-  ! echo "$output" | grep -q "s3cr3t"
+  [[ "$output" != *"s3cr3t"* ]] || { printf 'FUITE : « s3cr3t » dans la sortie de la sonde :\n%s\n' "$output" >&2; false; }
   assert_field_contains projects.alpha.identity evidence '***@'
 }
 

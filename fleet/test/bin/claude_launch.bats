@@ -14,6 +14,8 @@
 # `claude --remote-control` interactively (NOT -p/stream-json/budget). Since the launcher execs
 # directly, the claude stub echoes its args and we assert on the STUB_ARGS line.
 
+load ../support/refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/claude_launch.sh"
   TMP_BASE="$(mktemp -d)"
@@ -172,11 +174,29 @@ teardown() {
   [[ "$(comm -13 <(echo "$before") <(echo "$after") | grep -v '/\.claude\.json$' || true)" == "" ]]
 }
 
-@test "no trace: the launcher source carries no writer into POD_DIR" {
+@test "no trace: the launcher source writes ONE declared file into POD_DIR, and nothing else" {
   # Belt to the braces above: the run-time witness only sees what a stubbed run produces, and the
   # exposing lines sat on paths a stub never reaches (jq failures, MCP absent, version fallback).
-  ! grep -qE '>>?[[:space:]]*"?\$\{?POD_DIR' "$SCRIPT"
-  ! grep -q 'claude_launch\.dbg' "$SCRIPT"
+  # TOUTE ecriture dans $POD_DIR est lisible par l'agent confine — `claude_launch.sh` s'exec DANS
+  # bwrap (ADR-G), donc tout chemin qu'il peut ecrire est un chemin que le pod peut lire. Une seule
+  # cible est toleree, et elle est NOMMEE plutot que devinee : `.claude.json`, l'onboarding vendor du
+  # pod. Verifie a la main le 2026-08-30 — onboarding, remote-control, et un `allowedTools: []` VIDE
+  # qui est un reglage de projet ; la liste de bridage reelle est calculee depuis le cap-profile et
+  # part en argument de ligne de commande, jamais dans ce fichier.
+  #
+  # ⚠ CE TEMOIN EST NE FAUX ET A MENTI DEUX SEMAINES. Ecrit le 2026-08-15 (B4), il assertait
+  # « AUCUNE redirection vers POD_DIR » alors que le `cat > "$POD_DIR/.claude.json"` etait la depuis
+  # le 2026-08-07 au plus tard. Il n'a jamais pu etre vert de bonne foi : il passait parce que `!`
+  # est INERTE sous bats (cf. refute.bash). Le motif n'avait donc jamais ete confronte a la source.
+  #
+  # La forme est une LISTE BLANCHE et pas un motif d'exclusion : un second fichier ajoute demain
+  # dans POD_DIR fait rougir ici, ce qu'un motif « tout sauf .claude.json » aurait aussi fait — mais
+  # la liste, elle, se lit comme l'inventaire de ce que le pod peut voir.
+  grep -oE '>>?[[:space:]]*"?\$\{?POD_DIR\}?/[^"[:space:]]*' "$SCRIPT" \
+    | sed -E 's|.*POD_DIR\}?/||' | sort -u \
+    | grep -vFx '.claude.json' \
+    | refute_out '.'
+  refute grep -q 'claude_launch\.dbg' "$SCRIPT"
 }
 
 # =============================================================
@@ -557,11 +577,11 @@ EOF
   # MENTIONS in doc or strings ("LCARS_CLAUDE_BIN set by bwrap", "the PTY is tmux") are legitimate —
   # the N0/N1 frontier is documented. What is forbidden is the FUNCTIONAL use: bwrap flags
   # (--ro-bind/--unshare/--clearenv/--tmpfs) or bwrap/tmux executed (line start, or after exec).
-  ! grep -vE "^\s*#" "$SCRIPT" | grep -E "(^|exec +)(bwrap|tmux)\b|--ro-bind|--unshare|--clearenv|--tmpfs"
+  grep -vE "^\s*#" "$SCRIPT" | refute_out "(^|exec +)(bwrap|tmux)\b|--ro-bind|--unshare|--clearenv|--tmpfs"
 }
 
 @test "vendor frontier: no functional --bare or anthropic_api_key (comments excluded)" {
-  ! grep -vE "^\s*#" "$SCRIPT" | grep -iE "openai|anthropic_api_key|--bare"
+  grep -vE "^\s*#" "$SCRIPT" | refute_out -i "openai|anthropic_api_key|--bare"
 }
 
 @test "vendor frontier: the script knows only claude (N1 vendor)" {

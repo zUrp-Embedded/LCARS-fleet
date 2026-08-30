@@ -15,6 +15,8 @@
 # file. What is checked is therefore not "it works" but "the command was called with the host",
 # which is the property at stake.
 
+load ../support/refute
+
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../bin/forge-cli.sh"
   [ -x "$SUT" ]
@@ -44,7 +46,7 @@ EOF
   # `repo view` takes its repository POSITIONALLY, `pr list` via `--repo`: what is pinned is the
   # qualified string, not the flag shape — the host must travel, the syntax may vary.
   grep -q "ghe.example.com/acme/widget" "$ARGLOG"
-  ! grep -qE "(^| )acme/widget( |$)" "$ARGLOG"
+  refute grep -qE "(^| )acme/widget( |$)" "$ARGLOG"
 }
 
 @test "gh: the host is qualified EVEN for github.com (no conditional branch)" {

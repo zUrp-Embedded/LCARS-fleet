@@ -170,12 +170,12 @@ nu() { # nu <check|apply>
   # est legitime dans ce module. Un grep nu sur « lcars » rougit dessus et fait croire a une regle
   # enfreinte la ou il n'y a qu'un chemin.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  refute grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
   # ET IL LA DEMANDE : ne pas recopier ne suffit pas, encore faut-il aller chercher.
   grep -q 'forge-gestures.sh" builtin-human' <<<"$code"
   # ⚠ ET PLUS AUCUNE SECONDE ORIGINE. `PROV_FLEET_HUMAN` etait posee par `--fleet-human`, retire :
   # la rouvrir redonnerait deux sources a un fait qui n'en a qu'une, et la seconde serait vide.
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$code"
+  refute grep -q 'PROV_FLEET_HUMAN' <<<"$code"
 }
 
 @test "AUTORITE MUETTE : « je ne peux pas mesurer » n'est pas « il n'y a personne »" {

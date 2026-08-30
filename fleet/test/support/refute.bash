@@ -10,7 +10,7 @@
 #
 #   load ../support/refute
 #   refute grep -q 'motif' "$f"      # echoue si la commande REUSSIT
-#   cmd | refute_out 'motif ERE'     # echoue si le motif est TROUVE sur stdin
+#   cmd | refute_out [-i] 'motif ERE'   # echoue si le motif est TROUVE sur stdin
 #
 # ⚠ Pour un tube, c'est `refute_out`, et il doit en etre le DERNIER maillon : `refute cmd | grep -q X`
 # se lit « refute cmd », tube vers grep — la negation porterait sur le mauvais bout. Les deux
@@ -25,8 +25,13 @@ refute() {
 }
 
 refute_out() {
+  # `if`, pas `[[ … ]] && …` : sous `errexit` une liste `&&` dont le test est faux rend 1 et tue
+  # l'appelant. Le drapeau est colle au `-E` (`grep -E` ou `grep -Ei`) pour n'avoir aucun tableau
+  # a developper sous `set -u`.
+  local ci=""
+  if [[ "${1:-}" == "-i" ]]; then ci="i"; shift; fi
   local motif="${1:?refute_out attend un motif}" trouve
-  trouve="$(grep -E -- "$motif" || true)"
+  trouve="$(grep -E"$ci" -- "$motif" || true)"
   [[ -z "$trouve" ]] && return 0
   {
     echo "REFUTE : « $motif » TROUVE, alors que ce temoin l'interdit :"

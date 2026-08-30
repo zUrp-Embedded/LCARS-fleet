@@ -9,6 +9,8 @@
 # extracted atomic_swap_dir / atomic_swap_file directly (source guard = no mix build) and prove the
 # live target is never destroyed before the new one is verified, and the previous is kept.
 
+load ../support/refute
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../etc/install.sh"
   source "$SCRIPT"
@@ -87,7 +89,7 @@ MIX
   LCARS_INSTALL_SKIP_GATE=1 PATH="$TMP/binstub:$PATH" run build_release "$TMP"
   [ "$status" -eq 0 ]
   [[ "$output" == *"gate saute"* ]]
-  ! grep -q ' gate$' "$MIX_CALL_LOG"
+  refute grep -q ' gate$' "$MIX_CALL_LOG"
   grep -q release "$MIX_CALL_LOG"
 }
 
@@ -107,7 +109,7 @@ MIX
   export MIX_CALL_LOG="$TMP/mix-calls.log"
   PATH="$TMP/binstub:$PATH" run build_release "$TMP"
   [ "$status" -ne 0 ]
-  ! grep -q RELEASE-RAN "$MIX_CALL_LOG"
+  refute grep -q RELEASE-RAN "$MIX_CALL_LOG"
 }
 
 @test "sourcing install.sh never runs the deploy (source guard)" {

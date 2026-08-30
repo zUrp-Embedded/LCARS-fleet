@@ -15,6 +15,8 @@
 # code that must leave its clone behind. The rail is a stub here — what is under test is the door,
 # not the rail (`test/bin/publish-rail.bats` covers that one).
 
+load ../support/refute
+
 setup() {
   HOMEDIR="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOMEDIR/.lcars/publish"
@@ -178,7 +180,7 @@ EOF
   [ "$(cat "$BATS_TEST_TMPDIR/tokvalue")" = "t" ]
   [ "$(cat "$BATS_TEST_TMPDIR/tokmode")" = "600" ]
   # Et il n'est PAS sur la ligne de commande.
-  ! grep -q '\bt\b' <<< "$(sed 's/--forge-token-file [^ ]*//' "$RAILLOG")"
+  refute grep -q '\bt\b' <<< "$(sed 's/--forge-token-file [^ ]*//' "$RAILLOG")"
 }
 
 # ⚠ LE TEMOIN QUI GARDE LE CHEMIN D'ERREUR, ET C'EST CELUI QU'ON OUBLIE. La sortie 6 CONSERVE le
@@ -224,7 +226,7 @@ EOF
   _bind "$_full_binding"
   run "$SUT" publish run fleet/demo
   [ "$status" -eq 0 ]
-  ! grep -q -- "--linearize" "$RAILLOG"
+  refute grep -q -- "--linearize" "$RAILLOG"
 }
 
 @test "an unknown option on publish run is refused" {
