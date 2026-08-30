@@ -5091,7 +5091,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @spec check_mcp_wire_inputschema(String.t()) :: result()
   def check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
-    test = "test/pod_socket_test.exs"
+    test = "test/fleet/mcp/pod_socket_test.exs"
 
     # Projection code-side: the camelCase wire key on an EXECUTABLE line (`code_match?` excludes
     # @doc/@moduledoc heredocs + `#` comments — BND-111: a prose mention of "inputSchema" is not a proof).

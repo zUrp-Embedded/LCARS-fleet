@@ -159,7 +159,7 @@ build_release() {
 # elle se dit ici plutot que de laisser le signalement se faire ignorer chaque semaine.
 # shellcheck disable=SC2120
 refuse_root() {
-  # `$1` is the WITNESS SEAM (both branches are exercised in test/install/install.bats); the default
+  # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
   # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
   # this file runs. The line read `${1:-${EUID:-$(id -u)}}` until 2026-08-27: the `$(id -u)` was
   # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED

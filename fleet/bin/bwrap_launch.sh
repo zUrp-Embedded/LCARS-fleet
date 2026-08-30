@@ -465,7 +465,7 @@ fi
 # scrubs the CHILD's env, never bwrap's, and the pod reads that env back through /proc/1/environ.
 # So the spawner's whole ambient env (RELEASE_COOKIE, SSH keys, central topology) is pod-readable
 # unless bwrap itself starts empty. Everything the pod legitimately needs crosses explicitly
-# through --setenv below. Locked by `test/bwrap_launch/bwrap_launch.bats` (assembly + a secret
+# through --setenv below. Locked by `test/bin/bwrap_launch.bats` (assembly + a secret
 # exported around the spawner must not reach the sandbox).
 # THE NETWORK DECISION, and it is the cap-profile's (`metadata.network`, threaded as
 # LCARS_POD_NETWORK). Absent = sealed, because the fail-closed default belongs at every layer that

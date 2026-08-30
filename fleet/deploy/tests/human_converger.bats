@@ -513,7 +513,7 @@ EOF
 #
 # ⚠ CETTE MESURE N'EST PAS PERDUE, ELLE A CHANGE DE MAISON. C'est elle qui oblige le credential a
 # vivre dans un process qui n'est pas celui de l'humain, et elle est desormais epinglee la ou la
-# question se pose : `fleet/test/test_catalogue_executor.py`, temoin « interrogee avec le jeton
+# question se pose : `fleet/test/services/catalogue-executor_test.py`, temoin « interrogee avec le jeton
 # master ». Un temoin qui perd son sujet se retire ; une mesure qui garde sa valeur se deplace.
 #
 # CE QUI RESTE VERIFIE ICI, et c'est le contrat de ce fichier : ce convergeur ne connait plus
