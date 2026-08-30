@@ -762,6 +762,20 @@ for i in "${!SELECTED[@]}"; do
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
       echo "${_PR}ERREUR $name:${_PN} apply en echec (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:check:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
+    # ⚠ UN DRIFT EST UN DRIFT DANS LES DEUX MODES, ET L'ASYMETRIE COUTAIT UNE BOITE ENTIERE.
+    # `verdict_check` rend 1 sur drift et 2 sur echec ; ce site les confondait sous un seul
+    # fourre-tout, alors que `apply:apply` distingue les siens deux clauses plus haut. Un module
+    # hors-substrat qui DERIVE etait donc traite plus severement qu'un module qui s'applique.
+    #
+    # Le motif d'origine — « ce que personne ne peut reparer ici n'est pas un drift » — tient pour
+    # un ECHEC, pas pour un drift : tout ce qui manque sur ce substrat ne s'y repare pas forcement
+    # par un `apply`. L'humain de fleet d'une boite neuve en est la preuve : il ne vient pas de
+    # l'image, le convergeur le materialise depuis la forge APRES ce verdict. Le compter comme un
+    # echec rendait toute boite non convergee a son premier boot, definitivement — mesure du
+    # 2026-08-30, ou c'etait le dernier verrou entre le rail boite et « banc PRET ».
+    apply:check:1)
+      drift=$((drift + 1)); REPORT+=("$name=DRIFT")
+      echo "DRIFT $name: derive sur un substrat ou ce module ne peut pas s'appliquer (APPLY-ON=$(module_field "$mod" APPLY-ON)) — les lignes DRIFT ci-dessus nomment quoi ; l'image le fournira, ou un autre mecanisme (convergeur) au tour suivant" >&2 ;;
     apply:check:*)
       failed=$((failed + 1)); REPORT+=("$name=FAIL")
       echo "FAIL  $name: etat-cible non tenu sur $SUBSTRATE et inapplicable ici (APPLY-ON=$(module_field "$mod" APPLY-ON)) — rebuild l'image/le build qui le fournit" >&2 ;;
