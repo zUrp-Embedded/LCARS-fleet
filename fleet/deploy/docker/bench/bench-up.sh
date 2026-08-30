@@ -278,7 +278,7 @@ fi
 
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
 LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="${FORGE_URL}/" \
-  "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
+  "$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
   || die "la forge ne monte pas" 2
 
 for _ in $(seq 1 60); do
@@ -504,7 +504,7 @@ else
   # `fleet/deploy/box runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
   # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
   REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
-  if DOCKER_BIN="$DOCKER_BIN" "$HERE/forge-runner.sh" \
+  if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \
        --forge-api "$FORGE_LOCAL_URL/api/v1" \
        --admin-token "$MASTER_TOKEN" \
        ${REG_TOKEN:+--reg-token "$REG_TOKEN"} \
