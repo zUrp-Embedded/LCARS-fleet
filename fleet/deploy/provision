@@ -716,6 +716,10 @@ run_module() {
   name="$(basename "$mod" .sh)"
   # ⚠ LE SOUS-SHELL EST LE MECANISME, PAS UN EFFET DE BORD : sans lui l'`export PROV_HUMAN` survit
   # au retour, et le tour suivant de la boucle joue sous l'humain du precedent.
+  # ⚠ ET SANS LE FD DU VERROU (`9>&-`) : un enfant detache par un module — la premiere passe du
+  # convergeur lance les consoles ttyd, reparentees a 1 — herite de TOUS les fds, dont le flock. Sans
+  # cette fermeture, chaque apply APRES une install reussie repondait « un autre apply est en cours »
+  # tant qu une console tournait (banc WSL, 2026-08-30). Le runner tient son verrou seul.
   # shellcheck disable=SC2030,SC2031 # portee voulue : un tour de boucle = un shell
   (
     export PROVISION_RUN=1 PROVISION_MODULE="$name" PROV_HUMAN="$human"
@@ -724,7 +728,7 @@ run_module() {
     else
       as_human bash "$mod" "$eff"
     fi
-  )
+  ) 9>&-
 }
 
 # ─── Exécution ────────────────────────────────────────────────────────────────────────────────────

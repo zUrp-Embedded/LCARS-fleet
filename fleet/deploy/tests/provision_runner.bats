@@ -979,3 +979,35 @@ MOD
   done
   [ "$n" -ge 10 ]
 }
+
+@test "un module ne peut PAS leguer le verrou : le fd du flock est ferme avant de le jouer" {
+  # ⚠ BANC WSL, 2026-08-30 : apres une install REUSSIE, tout `apply` suivant repondait « un autre
+  # apply est en cours ». Les detenteurs du verrou : quatre ttyd (les consoles de « lcars » et du
+  # siege), reparentes a 1, lances pendant l'apply par la premiere passe du convergeur que
+  # `64-services` tire en synchrone — un enfant detache herite de TOUS les fds de son parent, dont
+  # le fd 9 du `flock`. Le runner doit tenir son verrou SEUL : un module le joue sans ce fd, et rien
+  # de ce qu'il laisse derriere lui ne peut le tenir.
+  local fdlog="$BATS_TEST_TMPDIR/fds-du-module"
+  cat > "$SANDBOX/modules.d/61-legue.sh" <<MODEOF
+#!/usr/bin/env bash
+# SOURCE: fleet/deploy/modules.d/61-legue.sh
+# AUTHOR: decor
+# STARDATE: 2026-08-30
+# STATUS: decor — liste les fds ouverts du module, comme les verrait un daemon qu'il detacherait
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+set -euo pipefail
+. "\${PROVISION_LIB:?PROVISION_LIB non pose}"
+ls -l /proc/\$\$/fd > "$fdlog"
+case "\${1:?}" in
+  check) p_ok "decor"; verdict_check ;;
+  apply) p_ok "decor"; verdict_apply ;;
+esac
+MODEOF
+  chmod 0755 "$SANDBOX/modules.d/61-legue.sh"
+  run "$SANDBOX/provision" apply --substrate wsl
+  [ "$status" -eq 0 ]
+  [ -s "$fdlog" ]
+  refute grep -qE 'lcars/provision[^/]*\.lock' "$fdlog"
+}
