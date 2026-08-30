@@ -21,6 +21,12 @@ load refute
 setup() {
   ROOT="$BATS_TEST_TMPDIR/fake"
   BENCH="$ROOT/fleet/deploy/docker/bench"
+  # ⚠ LE DECOR RANGE UNE DOUBLURE LA OU LE CODE LA CHERCHE, jamais la ou il est commode de la poser.
+  # `forge-runner.sh` vit dans `docker/`, pas dans `bench/` — et ce decor le posait dans `bench/`,
+  # donc il VALIDAIT le chemin faux : les temoins etaient verts pendant que le rail boite mourait
+  # sur « Aucun fichier ou dossier de ce nom » (mesure .63, 2026-08-30). Un decor qui recopie le
+  # defaut le rend indetectable, et c'est la seule espece de test qui coute plus qu'elle ne rapporte.
+  DOCKER_D="$ROOT/fleet/deploy/docker"
   mkdir -p "$BENCH" "$ROOT/fleet/deploy/deps" "$ROOT/fleet/deploy/lib"
   cp "$BATS_TEST_DIRNAME/../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   SRC="$BENCH/bench-up.sh"
@@ -74,14 +80,14 @@ FAKE
   # label manquant jusqu'a l'escalade, 45 min plus tard, sans qu'une ligne le dise.
   RUNNER_ARGV="$BATS_TEST_TMPDIR/runner.argv"
   export RUNNER_ARGV
-  cat > "$BENCH/forge-runner.sh" <<FAKE
+  cat > "$DOCKER_D/forge-runner.sh" <<FAKE
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$RUNNER_ARGV"
 rc="\$(cat "$RUNNER_RC")"
 [[ "\$rc" -eq 0 ]] || echo "REFUS-TEMOIN: image(s) introuvable(s) sur ce daemon: alpine:3.20" >&2
 exit "\$rc"
 FAKE
-  chmod 0755 "$BENCH/forge-runner.sh"
+  chmod 0755 "$DOCKER_D/forge-runner.sh"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BINDIR"
