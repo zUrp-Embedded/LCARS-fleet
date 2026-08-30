@@ -4,11 +4,8 @@
 # STARDATE: 2026-06-14
 # STATUS: PROTO-V2 — N0 host launcher (containment: none): persistent tmux PTY + per-pod socket-dir + holder, NO bwrap
 #
-# This launcher REPLICATES bwrap_launch's PROVEN mechanism — a `tmux new-session -d` on a per-pod
-# socket-DIR plus a HOLDER keeping this process alive (the life handle IS the spawner's Port) — MINUS the
-# bwrap sandbox (no `--unshare`, no `--tmpfs /home`, no RO/RW bind, no `--clearenv`). It does NOT bring
-# back the old `TmuxBackend` (`claude --remote-control` outside bwrap, BROKEN control-path, removed
-# R20/F103): the mechanism here is bwrap_launch's tmux-holder, not bare remote-control.
+# REPLIQUE le mecanisme de bwrap_launch — `tmux new-session -d` sur un socket-DIR par-pod, plus un
+# HOLDER qui tient ce process en vie (le handle de vie EST le Port du spawner) — MINUS la sandbox.
 #
 # Identity/session env (set by the spawner, INHERITED through the Port — no --setenv, no namespace to
 # repopulate; the pod runs in the daemon's real env, and the daemon runs as `User=<human>`):
@@ -38,11 +35,7 @@ set -euo pipefail
 
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
 
-# Per-pod socket-dir — the SAME convention as bwrap_launch.sh. The parent is normally provided by
-# `bin/fleet_v2`, which exports `LCARS_TMUX_SOCK_BASE` under `~/.lcars/run/tmux-sock` (the fleet is
-# launched by a human) and creates the dir at start. SAME path on the Elixir side (PodTmux.sock_path =
-# <base>/<pod_id>/pod.sock). The literal `/run/lcars/tmux-sock` default below is a legacy direct-invocation
-# fallback only.
+# MEME chemin que du cote Elixir (`PodTmux.sock_path`) — les deux doivent s'accorder.
 SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
 
 if [[ $# -lt 4 ]]; then
@@ -57,7 +50,6 @@ COMMAND=("$@")
 : "${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
 : "${LCARS_POD_SESSION_NAME_PREFIX:?pod label required (Fleet.Layout.pod_label)}"
 
-# cwd = the branch root (the invoked world). Defaults to $POD_DIR; the spawner/bootstrap lays down the clone.
 WORKDIR="${LCARS_POD_CWD:-$POD_DIR}"
 
 # tmux session (an INTERNAL name, distinct from claude's RC name prefix) — SAME conventions as bwrap_launch.
@@ -80,8 +72,6 @@ fi
 [[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (fleet started via fleet_v2? LCARS_TMUX_SOCK_BASE correct?)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 
-# Self-contained teardown (no namespace cascade on the host)
-# =============================================================
 cleanup() {
   "$TMUX_BIN" -S "$TMUX_SOCK" kill-server 2>/dev/null || true
   rm -rf "$POD_SOCK_DIR" 2>/dev/null || true
