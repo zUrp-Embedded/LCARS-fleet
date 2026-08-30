@@ -28,6 +28,12 @@ host_launch.sh             exec
 claude_launch.sh           exec
 publish-transform.sh       exec
 publish-rail.sh            exec
+# Les deux moities Python de publish-transform, noexec pour la meme raison que le pont MCP : l'une
+# est lancee `python3 <path>`, l'autre est LUE par git-filter-repo (`--commit-callback FILE`).
+# Absentes de $PREFIX/bin, le script echoue a la borne ou a la reecriture — elles s'installent avec
+# lui ou pas du tout.
+publish-transform-boundary.py     noexec
+publish-transform-attribution.py  noexec
 forge-cli.sh               exec
 claude_launch.identity     noexec
 # La declaration d'endpoints du vendor, LUE A COTE de son launcher (Egress.Vendor derive le chemin
