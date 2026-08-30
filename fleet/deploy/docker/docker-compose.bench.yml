@@ -3,39 +3,6 @@
 # STARDATE: 2026-08-07
 # STATUS: SURCOUCHE de banc — la boite parle a une forge JETABLE, qui vit sa vie a cote
 #
-# ─── CE QUE CE FICHIER EST ─────────────────────────────────────────────────────────────────────
-# Un SELECTEUR DE TOPOLOGIE, et rien d'autre : « cette boite s'adresse a une forge de banc ».
-#
-#   prod / install   docker compose -f docker-compose.install.yml -p <projet> up -d
-#   banc             docker compose -f docker-compose.install.yml -f docker-compose.bench.yml \
-#                                   -p <projet> up -d
-#
-# Il ne DECLARE pas la forge, et c'est le sujet de ce fichier.
-#
-# ─── POURQUOI LA FORGE RESTE DEHORS — CORRECTION DU 2026-08-07 ─────────────────────────────────
-# Une premiere version mettait `forge` et `runner` ICI, en `profiles: [bench]`, dans le projet de la
-# boite. Un objet, un flag, un reseau : le piege du `network connect` disparaissait. Le design note
-# affirmait meme que le couplage des cycles de vie etait « exactement ce qu'on veut sur un banc ».
-# C'ETAIT FAUX, ET MESURE : `docker compose -p <projet> down -v` emportait `forge-data` et
-# `forge-config` avec la boite.
-#
-# Or `bench-swap-image.sh` existe depuis le 2026-08-03 pour UNE raison, ecrite dans son en-tete :
-# « un banc coute deux choses tres inegales — une IMAGE (un build) et une FORGE SEMEE (deux passes
-# d'amorcage) ». Coupler leurs cycles detruit exactement l'asymetrie qui rend l'iteration viable :
-# on repaierait l'amorcage a chaque changement de code. Et en PRODUCTION la forge est dehors, chez
-# l'operateur — un banc qui imite la prod la garde dehors.
-#
-# ─── ET LE PIEGE RESEAU ALORS ? IL SE PAIE AUTREMENT, ET LA RECETTE EXISTAIT ───────────────────
-# Le piege etait : la boite doit resoudre `forge` AVANT son premier boot, sinon tout le provisioning
-# forge part en drift. La fusion le reglait en supprimant la frontiere ; ce fichier le regle en la
-# TRAVERSANT — le reseau de la forge est declare `external`, et compose branche la boite dessus a la
-# creation. Pas de `docker network connect` a la main, donc rien que le prochain nuke puisse oublier.
-#
-# CE N'EST PAS UNE INVENTION : `forge-runner.sh` fait exactement ca depuis le 2026-08-02, et son
-# en-tete le dit — « l'override branche donc le projet runner sur CE reseau (network externe), au
-# lieu d'un `docker network connect` a la main que le prochain nuke oublierait ». Trois cycles de
-# vie independants, une seule facon de les joindre.
-#
 # ─── CE QUE CE FICHIER NE FAIT PAS ─────────────────────────────────────────────────────────────
 # AMORCER. Creer un admin, minter un token, promouvoir un site-admin, semer deux depots sont des
 # gestes contre un service QUI TOURNE — aucun compose ne les exprime, dans aucun mode. Ils vivent

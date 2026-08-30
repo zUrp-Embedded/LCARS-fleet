@@ -9,11 +9,6 @@
 # FORGE SEMEE (org, comptes, role-tokens, depots — deux passes d'amorcage et une relance de boite).
 # Quand seul le code a bouge, `bench-down.sh` + `bench-up.sh` rejoue la partie chere pour rien.
 #
-# Le 2026-08-03, un banc rendait `poller_telemetry: true` sans le detail `tick` : son image etait
-# anterieure au commit qui expose ce detail. Le code l'avait, ce qui TOURNAIT ne l'avait pas. Le
-# geste manquant n'etait pas « refaire un banc », c'etait « remettre la boite a jour » — et il
-# vivait dans la memoire de la session, ce que ce depot traite comme une absence.
-#
 # ─── CE QUE CE SCRIPT PRESERVE, ET CE QU'IL DETRUIT ─────────────────────────────────────────────
 # PRESERVE : le projet compose de la forge, son volume, son semis, ses tokens ; le runner.
 # DETRUIT  : le conteneur de la boite, et LUI SEUL. Tout ce qui vivait dans son systeme de fichiers
@@ -49,15 +44,7 @@ PROJECT="lcars-nuit"
 # MEMES DEFAUTS QUE `bench-up.sh`, et ils doivent le rester : ce script RECREE la boite d'un banc
 # existant. Des ports differents ici republieraient la boite ailleurs que sa forge ne l'annonce.
 FORGE_PORT="21000"
-# ⚠ LE PORT DU DECK ETAIT EN DUR (20999) ALORS QUE `bench-up.sh` LE PREND EN OPTION. Un banc monte
-# sur un autre port et passe ici ressortait republie sur 20999 — la boite ecoutait ailleurs que la
-# ou sa forge l'annonce, sans un mot. Meme defaut, meme option.
 DECK_PORT="20999"
-# ⚠ MEME MALADIE, QUATRIEME SITE (mesure 2026-08-18) : le port SSH etait en dur a 2222 dans le
-# `create` ci-dessous. Un swap d'un banc monte ailleurs (vanille : 2223) aurait republie sa boite
-# sur le port ssh d'un AUTRE banc (l8 : 2222) — au mieux un create qui meurt sur le port pris, au
-# pire une boite qui repond a la place d'une autre. Le paragraphe au-dessus decrivait deja le
-# defaut ; il ne manquait que l'instance.
 SSH_PORT="2222"
 BIND="0.0.0.0"
 ADVERTISE=""
@@ -88,16 +75,6 @@ FORGE_PROJECT="${PROJECT}forge"
 FORGE_NET="${FORGE_PROJECT}_default"
 BOX="${PROJECT}-lcars-1"
 
-# ⚠ MEME OMISSION QUE `bench-down.sh` A DEJA PAYEE, TROISIEME SITE. Le compose de la boite nomme ses
-# volumes de magasin `${LCARS_STORE_PREFIX}-<nature>` avec un `:?` : sans la variable, il REFUSE de
-# PARSER le fichier — donc pas « un volume manque », mais « rien ne se cree », sur un banc
-# parfaitement sain. `bench-up.sh` et `bench-down.sh` l'exportent chacun ; ce script utilisait le
-# meme compose et ne l'exportait pas.
-#
-# Mesure du 2026-08-21, swap du banc #2 : « error while interpolating volumes.lcars-cache.name:
-# required variable LCARS_STORE_PREFIX is missing a value », puis « la boite ne se cree pas ». Le
-# message dit la variable, il ne dit pas que trois scripts partagent ce compose et qu'un seul
-# l'oubliait.
 export LCARS_STORE_PREFIX="$PROJECT"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
 # ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
@@ -149,10 +126,6 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # Ce fichier-ci ne porte que de la CONFIGURATION (image, ports, URLs — le mot de passe admiral part
 # par un tube vers `chpasswd`, jamais par ici), mais le piege de propriete est le meme.
 #
-# ⚠⚠ ET LE TEMOIN GREPE LE FICHIER ENTIER, COMMENTAIRES COMPRIS : ecrire le nom de la commande
-# interdite, meme pour expliquer qu'on ne l'utilise pas, suffit a le faire rougir. C'est pour ca
-# qu'elle n'est nommee nulle part ici.
-#
 # Donc : un chemin DETERMINISTE dans le repertoire d'execution de l'appelant, cree par lui, en 0600,
 # efface par le trap. `compose` le lit du DISQUE apres l'escalade — root lit un 0600 qui ne lui
 # appartient pas, c'est tout ce dont on a besoin.
@@ -191,8 +164,6 @@ wait_healthy() {
 wait_healthy || die "la boite ne devient pas healthy (docker logs $BOX)" 3
 say "boite healthy"
 
-# Mot de passe de banc d'admiral (ssh + sudo) — miroir de bench-up.sh "2ter". L'entrypoint cree le
-# siege (uid 1000) sans secret ; on le pose ici pour pouvoir ssh/sudo apres un swap. Jamais lu par la prod.
 # ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
 # ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
 if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null; then
@@ -226,14 +197,6 @@ wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
 
-# ⚠ LE SECRET NE DESCEND PLUS SUR L'HOTE, ET IL Y RESTAIT. Cette mesure copiait
-# `.credentials.json` dans un `mktemp` pour tester sa taille, puis faisait `rm -f`. Deux defauts
-# empiles : le fichier extrait porte des jetons OAuth Anthropic VIVANTS, et le `rm` echouait sans
-# que personne ne regarde — sur une machine ou `DOCKER_BIN` passe par sudo (socket rootful, cas
-# ordinaire), `docker cp` ecrit le fichier en root, et `/tmp` est sticky : son proprietaire n'est
-# plus celui qui l'a cree, donc il ne peut pas le supprimer. Mesure du 2026-08-18 : deux copies des
-# credentials, une par swap, encore la, pendant que le script se croyait propre.
-#
 # Or on ne veut pas le CONTENU, on veut « present et non vide ». Le flux tar de `docker cp … -` le
 # dit dans son en-tete : rien ne touche le disque. (Et on ne repasse pas par `exec`, mute a travers
 # ce relais — c'est la raison qui avait fait choisir `cp` au depart, elle tient toujours.)

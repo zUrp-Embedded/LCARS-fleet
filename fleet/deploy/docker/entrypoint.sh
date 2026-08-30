@@ -17,11 +17,6 @@
 #                   ⚠ DOIT etre EXACTEMENT le login forge du master (le `preferred_username` OIDC) : le
 #                   deck admet admiral par is_admin, puis mappe sa console sur `sess.login`. Si les deux
 #                   different, admiral entre mais ne trouve pas sa console (page « pas de bloc »).
-#                   ⚠ CETTE VARIABLE EST DESORMAIS FACULTATIVE, et la laisser vide est le cas NOMINAL :
-#                   le siege se DERIVE du #1 de la forge (`resolve_admiral`, plus bas). La poser garde
-#                   la priorite — c'est le geste de l'operateur qui sait ce qu'il fait — mais ce n'est
-#                   plus a lui de tenir une egalite que la boite peut mesurer. « Pas de check runtime
-#                   possible » etait ecrit ici : c'etait vrai de la CONVERGENCE, pas du jeton master.
 #   LCARS_UID       uid du sysadmin (défaut : 1000, réservé) — stable = ownership du volume stable
 #   LCARS_SSH_AUTHORIZED_KEYS  contenu authorized_keys (sinon : accès par `docker exec` seulement)
 #   FORGE_BASE_URL  forge cible (avec le profil compose `gitea` : http://gitea:3000)
@@ -34,18 +29,8 @@ set -euo pipefail
 # Les trois portes de LECTURE ci-dessous tournent en `nobody:fleet` : le runtime REFUSE root
 # (R-no-root-runtime), et une lecture n'a besoin que du gid `fleet` (l'install RO est root:fleet).
 #
-# ⚠ `setpriv --reuid` EST UN ABAISSEMENT, DONC IL EXIGE D'ETRE ROOT — et ces portes ont ete ecrites
-# quand leur seul appelant l'etait. Depuis que « admin » est un fait de FORGE et non `uid 0`
-# (⚖ user 2026-08-17), l'appelant est un humain ordinaire : `setpriv` rendait alors
-# `setresuid failed: Operation not permitted`, et l'install mourait sur « pas de source
-# installable » — un refus de catalogue pour un probleme de privilege. MESURE SUR BANC le
-# 2026-08-17, sur la premiere install jouee par un non-root.
-#
 # Un appelant deja non-root n'a RIEN a abaisser : il est deja depourvu. On ne simule donc pas
 # `nobody` — on constate qu'il n'y a plus rien a retirer, et on execute en place.
-# Le binaire de release — un seul defaut pour les quatre portes `catalogue-*` ci-dessous, qui le
-# lancaient chacune en litteral. Le prefixe d'install est declare par `etc/install.sh` ; ce defaut
-# doit s'accorder avec lui, et `deploy/tests/racine_prefixe.bats` l'exige.
 RELEASE_BIN="${LCARS_RELEASE_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"
 
 drop_priv() { # drop_priv <cmd...>
@@ -83,22 +68,6 @@ fi
 #   roles        un nom de ROLE par ligne  -> lecture humaine, inventaire d'un catalogue
 #   roles-tfvars le JSON des quatre listes -> roles.auto.tfvars.json (les comptes, cote tofu)
 #                                             ET la derivation de PROV_ROLES (`prov_roles`)
-#
-# ⚠ LES DEUX NE RENDENT PAS LA MEME CHOSE, et cette ligne a affirme le contraire jusqu'au
-# 2026-08-16 : elle donnait `roles` comme la source de `PROV_ROLES`. `roles` rend des noms de ROLE
-# (`dev`, `writer`) ; `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`). Branchee dessus, la
-# derivation faisait entrer `dev` et `writer` dans le roster a minter — des comptes forge portant le
-# nom nu d'un role, a cote des vrais. Le compte est `<org>_<role>`, et seul `roles-tfvars` le sait.
-# Le motif va sur stderr : capturer stdout sur un echec doit rendre la chaine VIDE, jamais un
-# message d'erreur qu'on creerait ensuite comme compte forge.
-#
-# ⚠ LA RACINE EST FACULTATIVE, ET SON ABSENCE VEUT DIRE « LE TIEN ». Elle etait obligatoire, donc
-# l'appelant devait NOMMER un chemin — et sur un banc il nommait celui de l'HOTE, que ce conteneur
-# n'a pas. Mesure du 2026-08-18 : monter l'arbre de l'hote ne suffit pas non plus, cette porte
-# tourne en `nobody` et un `/home/<user>` en 0700 lui reste ferme. Une image PORTE son catalogue :
-# lui demander le roster du sien ne demande ni chemin, ni montage, ni droits — et c'est plus juste,
-# parce que les comptes doivent correspondre au catalogue que la boite SERVIRA, pas a un arbre de
-# l'hote qui peut avoir bouge depuis le build.
 if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
   root="${2:-}"
   fun="Fleet.Application.CatalogueRoles.eval_main"
@@ -116,9 +85,7 @@ fi
 # porte la VERSION (`lib/lcars_fleet-<vsn>/priv/catalogue`) : un appelant shell qui le globberait
 # marcherait jusqu'au jour ou la disposition du release change, et casserait alors en silence sur
 # un glob vide. Le release est l'autorite de sa propre disposition, et c'est lui qu'on interroge.
-#
 # Meme porte outil que `verify` et `roles` — meme eval, meme `nobody`, meme `LCARS_TOOL_EVAL`.
-#
 # ⚠ CE DRAPEAU SAUTE LE CORPS DE CONFIG DE DEPLOIEMENT, donc un `LCARS_CATALOGUE_ROOT` pose par
 # l'operateur n'est PAS lu ici — et c'est ce qu'on veut. Cette porte repond « le catalogue que CE
 # RELEASE porte », pas « celui que cette boite sert ». C'est le premier qu'on publie sur la forge :
@@ -164,8 +131,6 @@ if [[ "${1:-}" == "catalogue-source" ]]; then
   name="${2:?catalogue-source: nom de catalogue requis}"
   # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
   # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/opt/lcars/var/tokens`.
-  # ⚠ ET LA RAISON ECRITE ICI A ETE FAUSSE UN TEMPS : elle disait « qui est 0700 lcars-authority »,
-  # donc « elle ne traverse meme pas ». Le repertoire est `0710 …:fleet` — cette porte TRAVERSE.
   # Ce qui la tient est le mode des FICHIERS (0600), pas celui du dossier. La conclusion n'a pas
   # bouge, sa raison si — et une raison fausse est ce qui fait relacher le vrai garde un jour. Son
   # appelant — `forge-gestures.sh cmd_install`, qui EST le service d'autorite — lit donc le jeton
@@ -188,17 +153,6 @@ fi
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
 LCARS_UID="${LCARS_UID:-1000}"
 
-# ⚠ UN SEUL FAIT, ET IL AVAIT DEUX NOMS DONT UN SEUL ETAIT POSE. `LCARS_UID` est l'uid AUQUEL ce
-# fichier cree le siege (`useradd -u`, plus bas) ; `LCARS_SYSADMIN_UID` est celui que les gardes
-# RESERVENT — GUARD B dans `bin/fleet_v2`, son miroir dans `config/runtime.exs`, `is_fleet_human`,
-# et le plancher `uid_floor` du convergeur. Rien ne posait le second dans cette boite : ni le
-# compose (son bloc `environment:` ne le nomme pas), ni ce fichier. Les six lecteurs retombaient
-# donc sur leur litteral `1000` pendant que le siege etait, lui, a `LCARS_UID`.
-#
-# LES DEUX DEFAUTS VALANT 1000, ILS S'ACCORDAIENT PAR COINCIDENCE. `LCARS_UID=1005` — une molette
-# documentee (`deploy/box`) — suffisait a les separer : le siege naissait a 1005, GUARD B reservait
-# 1000, et admiral pouvait lancer une fleet dont les pods heritent de son uid sudo-capable.
-#
 # Un fait, un nom : `LCARS_UID` reste l'ENTREE de ce rail (c'est par elle qu'un operateur choisit),
 # `LCARS_SYSADMIN_UID` est le NOM DU FAIT que tout le reste lit. Le second derive du premier ici,
 # une fois, avant que quoi que ce soit ne le lise.
@@ -207,7 +161,6 @@ export LCARS_SYSADMIN_UID="$LCARS_UID"
 # ⚠ ET L'EXPORT NE SUFFIT PAS, PARCE QU'IL NE TRAVERSE PAS `exec sshd`. Une session ssh part d'un
 # environnement NEUF — l'image ne pose ni `AcceptEnv` ni `PermitUserEnvironment` — donc l'humain qui
 # tape `fleet_v2 start` n'a jamais vu cette variable, et GUARD B y retombait sur son litteral `1000`.
-# La garde etait donc juste par COINCIDENCE tant que `LCARS_UID` valait son defaut.
 #
 # ⚠ ET MEME ACHEMINEE, UNE VARIABLE NE PEUT PAS PORTER CETTE CLEF : mesure du 2026-08-27,
 # `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait la garde. L'environnement d'un processus
@@ -222,8 +175,6 @@ if mkdir -p "$(dirname "$SEAT_UID_FILE")" 2>/dev/null \
   chmod 0644 "$SEAT_UID_FILE" 2>/dev/null || true
   chown root:root "$SEAT_UID_FILE" 2>/dev/null || true
 else
-  # Non fatal, et NOMME : la boite doit rester joignable pour etre reparee — meme regle que la
-  # convergence et la console. Ce qui se degrade est la garde, et le message le dit.
   echo "[lcars-entrypoint] $SEAT_UID_FILE NON pose — GUARD B refusera tout « fleet_v2 start » : sans ce fichier il ne peut pas etablir le siege (uid $LCARS_UID)" >&2
 fi
 PROVISION=/opt/lcars/fleet/deploy/provision
@@ -252,15 +203,6 @@ say() { echo "[lcars-entrypoint] $*"; }
 # derivation parce que dans ce cas-la il n'y a rien a deriver. Ce n'est pas une surcharge qui
 # contredirait la forge — il n'y a pas de forge a contredire quand le bench la cree.
 #
-# ⚠ ET ELLE NE DOIT PAS AVOIR DE DEFAUT PLUS HAUT. Les composes posaient
-# `LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"` : la variable etait alors TOUJOURS definie dans le
-# conteneur, la premiere branche court-circuitait tout, et la derivation ne s'executait JAMAIS. Une
-# semence qui a un defaut est un defaut, et c'est la coincidence a sa source.
-#
-# ⚠ LE VERROU N'EST PAS L'ORDRE, C'EST LE JETON. L'en-tete de ce fichier disait « pas de check
-# runtime possible (la forge n'est pas jointe au moment du useradd) » : vrai de la CONVERGENCE, qui
-# vient a l'etape 3. Resoudre le #1 ne demande que le jeton master, et il vit dans le VOLUME — donc
-# il precede l'entrypoint des que l'operateur a configure sa boite.
 # ⚠ LA LIB EST SOURCEE ICI, ET C'EST MESURE. Hors du runner elle n'imprime rien, ne pose aucun trap
 # (sa garde de sortie n'est armee que sous `PROVISION_RUN`) et n'ecrase aucune fonction de ce
 # fichier — zero collision sur les 57 qu'elle definit. Ce qu'on y gagne : UNE derivation du siege
@@ -342,9 +284,6 @@ fi
 # root du sysadmin : membre du groupe sudo (le paquet sudo pose la regle %sudo par defaut). Idempotent.
 # Le mot de passe est POSE HORS d'ici (bench: fixe, pour tester ; prod: l'installeur) — l'entrypoint
 # cree le siege, il ne choisit pas le secret.
-# ⚠ LE `|| true` COUVRAIT DEUX CHOSES, ET UNE SEULE ETAIT VOULUE. Il etait la pour qu'un groupe
-# `sudo` absent ne tue pas le boot — mais il avalait AUSSI un `usermod` en echec, et le siege
-# repartait alors sans sudo, sans un mot. Le groupe absent reste non fatal ; l'echec se dit.
 if getent group sudo >/dev/null 2>&1; then
   usermod -aG sudo "$LCARS_ADMIRAL" || say "ATTENTION: « $LCARS_ADMIRAL » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
 fi
@@ -370,11 +309,6 @@ fi
 # groupe y crée ses projets/worktrees.
 #
 # CETTE LIGNE EST LE MIROIR DE `Fleet.Layout.face_root/1`, ET UNE FACE MANQUANTE NE SE VOIT PAS.
-# Mesure du 2026-08-09, sur un banc neuf : la face `doc` etait posee dans le code et dans l'etage
-# `build` de l'image (pour le gate), et PAS ici. La boite avait l'air saine, la fleet demarrait,
-# et le premier `create_project` mourait sur « could not make directory (with -p)
-# "/home/projects.workshop": permission denied » — le runtime tourne sous l'humain, `/home` est a root,
-# donc creer la zone n'est PAS un geste qu'il peut rattraper. La divergence est tenue par le check
 # `layout.face_roots_provisioned` de `mix lcars.contracts.check` : ajouter une face sans l'ajouter
 # ici fait rougir le gate, en la NOMMANT.
 install -d -m 2775 -g fleet /home/projects /home/projects.ops /home/projects.workshop
@@ -443,12 +377,6 @@ if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
 fi
 
 # ⚠ L'IDENTITÉ GIT NE SE POSE PLUS ICI, ET LA VARIABLE `LCARS_ADMIRAL_EMAIL` N'EXISTE PLUS.
-# Ce bloc posait `user.name`/`user.email` de `LCARS_HUMAN` — l'unique humain de la boîte à l'époque.
-# `identity-v2` a fait de l'entrée du conteneur le SYSADMIN et confié les humains à la team
-# `humans` : la substitution `LCARS_HUMAN` → `LCARS_ADMIRAL` a suivi mécaniquement, et l'identité a
-# atterri sur le seul compte qui ne commite jamais, pendant que le boot annonçait « identité git
-# seedée » à chaque démarrage. Un humain enrôlé après le boot n'était de toute façon pas atteignable
-# d'ici.
 # C'est `70-human` qui la porte désormais, per-humain, DÉRIVÉE DU COMPTE FORGE — la seule adresse
 # qui mappe un commit sur un compte (avatar compris). Une variable d'install n'en était qu'une copie.
 
@@ -506,27 +434,16 @@ fi
 # `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
 # TOUJOURS ce boot-ci. Même emplacement et même motif que `/run/lcars-converger.refused` — un
 # composant sait pourquoi, il l'écrit là où un autre peut le lire.
-# Surchargeable comme ses trois voisins, et pour la même raison : un chemin absolu en dur rend le
-# bloc qui l'écrit impossible à mesurer ailleurs que sur un vrai boot.
 PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
 "$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
 case "$prov_rc" in
   0) say "provision apply : convergé" ;;
-  # 2 = appliqué, état-cible non tenu. Confondu avec « AU MOINS UN ÉCHEC » jusqu'ici — et avant
-  # 6-101 il ne remontait pas du tout : le module rendait 0 et la boîte annonçait « convergé ».
   2) say "provision apply : APPLIQUÉ, DRIFT RÉSIDUEL — rien n'est cassé, un geste manque (forge,
 credentials, réseau). Détail : $PROVISION doctor" ;;
   *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
 esac
 
-# ⚠ LE VERDICT NE SE PUBLIE PLUS ICI, ET LA RAISON EST UNE COURSE MESUREE. Il s'écrivait à cet
-# endroit, AVANT la convergence synchrone des humains ; `box up` poll `lcars-provision.rc` toutes
-# les cinq secondes, le trouvait aussitôt, puis lisait `lcars-humans.rc` UNE SEULE FOIS — un fichier
-# écrit jusqu'à 240 s plus tard. `box up` affichait donc « population NON MESURÉE » à tous les coups,
-# quelle que soit la population réelle : la vérification ajoutée au lot précédent était inerte de
-# l'autre côté du tuyau.
-#
 # La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
 # sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
 # n'a plus à connaître l'ordre — c'est le producteur qui le tient.
@@ -544,13 +461,6 @@ publier_verdicts() {
 }
 
 # ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────
-#
-# ⚠ RIEN NE RELANÇAIT UN SERVICE MORT ICI. `64-services` pose des unités systemd avec
-# `Restart=always`, `RestartSec=10` et `StartLimitBurst=5` ; ce fichier lançait `setsid <cmd> &` et
-# passait à la suite. tini est PID 1 et RÉCOLTE les orphelins — il n'en relance aucun. Un convergeur
-# qui meurt restait mort jusqu'au prochain `box restart`, sur une boîte qui reste *healthy* (son
-# healthcheck ne sonde que des ports : ssh + le deck). Le rail poste testait donc des politiques de redémarrage que la
-# production n'avait pas, et la production avait un mode de panne que rien ne testait.
 #
 # ⚠ ET LE SUPERVISEUR NE PEUT PAS VIVRE ICI. Ce script finit sur `exec /usr/sbin/sshd -D -e` : le
 # shell est REMPLACÉ, donc toute boucle qu'il porterait disparaîtrait à cet instant. D'où un
@@ -585,21 +495,10 @@ launch() { # launch <nom> <log> -- <cmd...>
 # installer, pas de droit à accorder à quiconque.
 # Elle ne SUPPRIME jamais : la révocation est un retrait côté forge, et ce qui reste sur la machine
 # est de la donnée, pas un accès (sans compte forge, ni console ni fleet ne s'ouvrent).
-# ⚠ LE CHEMIN EST UNE VARIABLE, ET PAS SEULEMENT POUR LE RENDRE TESTABLE. `64-services` lit déjà
-# `LCARS_HUMAN_CONVERGER` sur le rail poste : le même nom des deux côtés, c'est un réglage de moins
-# à retrouver, et surtout une couture qui permet de MESURER ce bloc au lieu de le relire. Trois
-# chemins absolus en dur, c'était trois endroits où seul un vrai boot pouvait dire si ça marchait.
 CONVERGER_BIN="${LCARS_HUMAN_CONVERGER:-/opt/lcars/human-converger.sh}"
 CONVERGER_LOG="${LCARS_CONVERGER_LOG:-/var/log/lcars-converger.log}"
 if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # ─── UN PREMIER TOUR SYNCHRONE, PUIS LA BOUCLE ────────────────────────────────────────────────
-  #
-  # ⚠ CETTE BOÎTE RENDAIT LA MAIN SANS SAVOIR SI QUELQU'UN POUVAIT LANCER UNE FLEET. La boucle poll
-  # à 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer un boot. Entre le
-  # `exec sshd` et son premier tour, la boîte se déclare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck)
-  # et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 : il n'a aucune raison de
-  # douter. C'est exactement la panne que le rail poste a fermée le 2026-08-25, restée ouverte ici —
-  # et le rail qui compte le moins était donc le mieux vérifié des deux.
   #
   # ⚠ ET LA VÉRIFICATION N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. `64-services` porte déjà la
   # sonde (`probe_fleet_humans`), et ce module est `CHECK-ON: any` : il tourne donc en docker. Un
@@ -622,18 +521,12 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   if [[ "$first_rc" -eq 0 ]]; then
     say "convergence des humains : premier tour fait"
   else
-    # ⚠ LE CHEMIN VIENT DE LA VARIABLE, ET CETTE LIGNE LE CODAIT EN DUR. J'ai rendu la REDIRECTION
-    # surchargeable et laissé le MESSAGE littéral : là où `LCARS_CONVERGER_LOG` pointe ailleurs, il
-    # envoyait l'opérateur lire un fichier qui n'existe pas. On corrige la moitié qui CASSE, et
-    # celle qui ment survit — parce qu'elle ne casse rien.
     say "convergence des humains : premier tour NON CONCLUANT (rc=$first_rc) — la boucle reprendra ; détail dans $CONVERGER_LOG"
   fi
 
   # LE FAIT, PAS LE CODE DE RETOUR. Le convergeur peut rendre 0 sans avoir converti personne (une
   # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
-  # Surchargeable pour la même raison que `CONVERGER_BIN` : sans couture, ce bloc ne se mesure que
-  # par un vrai boot — c'est-à-dire nulle part avant la production.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
   humans_rc=0
   "$PROVISION" doctor --substrate docker --only 64-services >/dev/null 2>&1 || humans_rc=$?
@@ -642,10 +535,6 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   else
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet_v2 start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
-  # ⚠ L'ÉCRITURE EST DESCENDUE DANS `publier_verdicts`, ET CE N'EST PAS DU RANGEMENT. Publiée ici,
-  # elle arrivait APRÈS `lcars-provision.rc` — que `box up` attend et trouve en cinq secondes, avant
-  # de lire celui-ci UNE FOIS. Il lisait donc un fichier pas encore écrit, à tous les coups.
-  # Les deux verdicts se publient ensemble, `provision.rc` en dernier.
 
   # Détaché du shell de l'entrypoint : celui-ci finit sur `exec sshd`, ce qui remplace le process.
   # Un enfant simplement mis en arrière-plan survit à l'exec (même PID 1 tini le récolte), mais
@@ -675,18 +564,8 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # La home de la boîte, sur un port HORS de l'espace des blocs humains. Elle n'appartient à aucun
   # humain — c'est la porte de la boîte. Échec non fatal comme le reste.
   #
-  # ⚠ ET SON ÉCHEC N'EST PLUS DÉGRADÉ, IL EST TOTAL. Ce message disait « les consoles restent
-  # joignables par leur port » : c'était vrai quand chaque terminal publiait le sien, et c'est
-  # devenu faux le jour où ils sont passés sur des sockets (6-072/6-098). Le landing est désormais
-  # le SEUL chemin vers eux — c'était le but — donc s'il ne démarre pas, aucune console n'est
-  # atteignable, et seul ssh reste. Un message de repli qui annonce un repli disparu ment à
-  # l'opérateur au pire moment : celui où quelque chose vient déjà d'échouer.
-  #
   # ⚠ PAR `launch`, ET AVEC `--foreground` : LES DEUX MOITIÉS COMPTENT. Ce bloc appelait le script
   # nu, qui se met lui-même en arrière-plan (`console-landing.sh`, dernière ligne) et rend la main.
-  # tini récolte l'orphelin, il n'en relance aucun : un deck mort restait mort jusqu'au prochain
-  # « box restart », et la boîte continuait de se déclarer saine. Le superviseur existait déjà et
-  # tenait le convergeur et les deux exécuteurs — la landing était le seul persistant hors de lui.
   #
   # `--foreground` fait `exec` sur `console-deck.py` : l'enfant de `supervise.sh` EST le deck, donc
   # son `wait` mesure le bon processus et son relais de TERM l'atteint. SANS lui, on superviserait
@@ -694,16 +573,10 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
   # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
-    # ⚠ LE PORT DU DECK TRAVERSE, ET SUR CE RAIL IL NE TRAVERSAIT PAS. `55-deck-oidc` bâtit les
     # `redirect_uris` OAuth2 avec `PROV_DECK_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
     # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$PROV_DECK_PORT` dans `services.env`,
     # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
     # que parce que leurs deux défauts indépendants valent tous les deux 20999.
-    #
-    # C'est la panne que la cicatrice du rail poste décrit mot pour mot, restée vivante ici :
-    # « `--port-deck 20997` déplaçait l'identification vers un port où personne n'écoutait pendant
-    # que le deck restait sur 20999 — et la panne tombait au RETOUR du login, là où elle se lit
-    # comme un problème d'identité. »
     #
     # L'idiome est celui de `forge-gestures.sh` : la molette du rail d'abord, celle du
     # provisionnement ensuite, le littéral en dernier recours — et ce littéral est tenu égal à

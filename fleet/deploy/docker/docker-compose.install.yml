@@ -33,13 +33,6 @@
 # AVEC le port. Meme regle de clef exacte pour les credentials : un `docker login` sur la forme
 # sans port ne vaut pas pour la forme avec port.
 #
-# La vraie sortie de tout ce contournement est du TLS sur la forge — a instruire separement.
-#
-# ─── LE NOM DE PROJET, ET LE VOLUME QU'IL COMMANDE ─────────────────────────────────────────────
-# `name: lcars` est le nom correct d'une VRAIE installation. Consequence a connaitre sur une
-# machine qui fait AUSSI tourner le compose de dev : meme nom de projet = MEME volume d'etat
-# (`lcars_lcars-home`), donc l'install ADOPTE le home de dev, ses credentials et sa fleet. Ce
-# n'est pas un bug, c'est ce que « meme projet » veut dire — mais ca ne se decouvre pas apres coup.
 # Pour installer A COTE du dev, forcer un autre projet a la ligne de commande :
 #   docker compose -f docker-compose.install.yml -p lcars-install up -d
 #
@@ -70,8 +63,6 @@ services:
       # Le magasin. MEME VALEUR QUE `docker-compose.yml`, et ces deux fichiers sont les SEULS a
       # l'ecrire : tout ce qui vit dans la boite la lit ici, aucun script ne la redefault.
       LCARS_STORE_ROOT: /var/lib/lcars
-      # L'email du compte FORGE de l'humain — c'est lui qui mappe ses commits sur son compte
-      # (avatar, attribution). Vide = les commits signent <user>@<hostname>, non mappables.
       # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
       # ses listeners (API, deck d'observation) en loopback par defaut : dans une boite, cette
       # loopback est celle du CONTENEUR — le deck repond a l'interieur et reste injoignable depuis
@@ -102,27 +93,16 @@ services:
       # retombe sur l'interne, et `55-deck-oidc` le DIT en drift plutot que de poser une porte qui
       # ne s'ouvre pas.
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
-      # Les adresses par lesquelles on entre VRAIMENT sur le deck (separees par des virgules).
-      # OAuth2 compare le `redirect_uri` EXACTEMENT : une entree non declaree echoue au RETOUR,
-      # apres l'identification, la ou c'est le plus deroutant. La loopback est toujours incluse par
-      # le module ; ce qui se declare ici, c'est le reste (l'adresse de bind, le nom d'hote).
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
       # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
       # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.
-      # L'entrypoint ne clone QUE si le dossier est absent : une source deja la n'est jamais
-      # ecrasee, sinon un redemarrage detruirait le travail en cours d'un agent.
       LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-http://10.42.0.118/fleet/lcars.git}"
-      # Vide = branche par defaut du depot. Mettre ici la MEME ref que celle de l'image donne une
-      # boite coherente ; l'entrypoint declare l'ecart au boot dans tous les cas.
       LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
     ports:
       - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
-      # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER (6-072/6-098). Elle a publie
-      # une plage de 30, puis six ports enumeres, puis PLUS AUCUN port de bloc : mesure du
-      # 2026-08-14 dans la boite, trois ecoutants seulement et RIEN entre 21001 et 21030.
       # Le POURQUOI complet vit dans `docker-compose.yml`, a cote de la meme liste — il ne se
       # recopie pas ici : deux copies d'une explication derivent, et celle qu'on lit n'est jamais
       # celle qu'on a corrigee.
@@ -166,10 +146,6 @@ services:
 volumes:
   # Au PROJET : ses humains et son etat sont ceux de cette boite, ils meurent avec elle.
   lcars-home:
-  # `lcars-var`, sur le chemin qu'il porte — et SURTOUT pas `lcars-state` : ce dernier est un volume
-  # EXTERNE du magasin, monte quatre lignes plus haut sur `/var/lib/lcars/state`. Reutiliser son nom
-  # ici collerait de l'etat de projet dans un volume qui survit au `down -v`, partage par deux
-  # installations. Un prefixe d'ecart entre deux durees de vie se paie en donnees.
   lcars-var:
   # Hors projet : compose ne les cree pas et ne les detruit pas — mais il ne les prefixe pas non
   # plus, d'ou le `name:` derive du projet. Cf. `docker-compose.yml`, source unique.

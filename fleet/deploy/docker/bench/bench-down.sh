@@ -56,21 +56,6 @@ BOX="${PROJECT}-lcars-1"
 RUNNER="${RUNNER_PROJECT}-act-1"
 FORGE="${FORGE_PROJECT}-gitea-1"
 
-# UN BANC A TROIS PROJETS COMPOSE, ET CELUI-CI N'EN VOYAIT QUE DEUX. `bench-up.sh` lance aussi un
-# runner (`forge-runner.sh --project "${PROJECT}-runner"`) ; il n'etait jamais detruit. Mesure du
-# 2026-08-09 : apres un `bench-down` complet, `lcars-faces-act-runner-runner-1` tournait toujours, et
-# le `down` de la forge finissait sur « Network ... Resource is still in use » — le runner est
-# branche sur le reseau de la forge, donc tant qu'il vit ce reseau ne part pas. Il reste enregistre
-# contre une forge qui n'existe plus : le zombie que forge-runner decrit dans son propre en-tete,
-# sauf que la, personne ne le nettoie avant le banc SUIVANT.
-#
-# ⚠ LE DISCRIMINANT PORTE SUR LE RESIDU, PLUS SUR UNE LISTE DE CONTENEURS ATTENDUS. Il a d'abord
-# regarde la boite seule, puis la boite OU le runner — a chaque fois un membre de plus, jamais la
-# classe. Le membre manquant s'est presente : `bench-up` meurt AVANT de creer la boite (forge qui
-# ne repond pas), il ne reste que `<projet>-forge-gitea-1` et ses deux volumes, et ce script
-# repondait « rien a detruire » sur un banc qui occupait le bind, le port et le nom du projet. Le
-# banc suivant se montait alors sur les restes du precedent.
-#
 # La question juste n'est pas « la boite est-elle la ? » mais « reste-t-il QUOI QUE CE SOIT de ce
 # banc ? » — donc les trois conteneurs ET les volumes des trois projets. Les volumes comptent
 # seuls : ce sont eux qui portent l'etat (la forge semee, le /home de la boite), et `down -v` les
@@ -105,13 +90,6 @@ echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
-# ⚠ LE MAGASIN EST DETRUIT AVEC LE BANC, ET C'EST LE SENS DU MOT « JETABLE ». Ce script a epargne
-# les quatre volumes du magasin — ils etaient partages entre les bancs de la machine, donc les
-# emporter aurait vide le voisin. Il le DISAIT (c'etait la contrepartie honnete d'un partage qu'il ne
-# pouvait pas defaire) en dictant `docker volume rm lcars-cache …` pour finir le menage : une ligne
-# qui, tapee, vidait le magasin de l'autre banc EN MARCHE. Un banc n'est pas jetable si le detruire
-# demande une seconde commande dangereuse pour les autres.
-#
 # Depuis que les noms portent le projet (`lib/store.sh`), il n'y a plus rien a arbitrer : ce magasin
 # n'appartient qu'a ce banc, et il part avec lui. Une toolchain compilee sur un banc l'a ete pour
 # verifier que la mecanique marche, pas pour etre gardee.

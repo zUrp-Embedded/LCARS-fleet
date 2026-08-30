@@ -12,18 +12,6 @@
 # l'operateur — `runner-compose.yml`, INCHANGE. La recette qui marche reste celle de l'operateur ;
 # ce fichier n'ajoute que ce que le banc exige.
 #
-# ─── LES DEUX PIEGES RESEAU, ET POURQUOI UN OVERRIDE ────────────────────────────────────────────
-# 1. Le RUNNER doit joindre la forge pour s'enregistrer : sur le banc elle n'existe que dans le
-#    reseau compose de la forge jetable (`http://gitea:3000`). L'override branche donc le projet
-#    runner sur CE reseau (network externe), au lieu d'un `docker network connect` a la main que
-#    le prochain nuke oublierait.
-# 2. Les JOBS ne heritent PAS du reseau du runner : act_runner cree les conteneurs de job sur son
-#    propre reseau par defaut, d'ou un clone qui echoue sur `gitea:3000` introuvable — un runner
-#    vert qui rate tous ses jobs, le pire des etats. La config `container.network` force les jobs
-#    sur le meme reseau que la forge. C'est la troisieme incarnation du meme piege : une URL n'est
-#    jamais absolue, elle est relative au reseau d'ou on la joint — `http://gitea:3000` resout
-#    depuis un conteneur du reseau de la forge, jamais depuis un navigateur de l'hote.
-#
 # IDEMPOTENT : re-jouable apres chaque nuke. L'identite du runner vit dans le volume du projet
 # compose ; un runner deja enregistre sur une forge MORTE est un zombie — d'ou le `down -v`
 # d'office avant chaque pose : sur un banc, l'histoire du runner ne vaut rien, l'appairage si.
@@ -79,8 +67,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$FORGE_API" && -n "$TOKEN" ]] || { echo "forge-runner: --forge-api et --admin-token(-file) requis" >&2; exit 1; }
-# Un refus NET vaut mieux qu'un runner enrole a cote de sa forge : sans reseau nomme il demarre,
-# ne joint rien, et l'absence de CI ne se rattache a aucune ligne.
 [[ -n "$NETWORK" && -n "$PROJECT" ]] || { echo "forge-runner: --network et --project requis (le reseau compose de LA forge visee)" >&2; exit 1; }
 
 # ─── L'AUTH DE LA FORGE PASSE PAR STDIN, JAMAIS PAR ARGV ────────────────────────────────────────
@@ -89,36 +75,11 @@ done
 # `/proc/<pid>/cmdline` expose a tout l'hote pendant la requete — cicatrice 6-141, deja payee deux
 # fois sur des credentials MOINS puissants que celui-ci. Trois appels de ce fichier le faisaient.
 #
-# Releve par une revue adverse le 2026-08-19, et le constat porte plus loin que les trois lignes :
-# le commit qui a sorti `LCARS_RUNNER_TOKEN` de l'environnement affirmait « le jeton ne passe pas en
-# argv pour autant » — vrai du jeton d'ENREGISTREMENT, faux du jeton MASTER, qui voyageait juste a
-# cote. Une correction qui deplace une fuite sans le dire en fabrique une seconde, plus discrete.
-#
 # `-K -` : curl lit sa config sur stdin. Le jeton n'apparait ni dans argv ni dans l'environnement.
 forge_curl() { printf 'header = "Authorization: token %s"\n' "$TOKEN" | curl -K - "$@"; }
 
 say() { echo "[forge-runner] $*"; }
 
-# ─── 0. LES LABELS SONT UNE PROMESSE, ET ELLE SE VERIFIE AVANT DE LA FAIRE ──────────────────────
-# Un label est une CLE que le runner annonce a la forge : « envoie-moi les jobs qui demandent ca ».
-# Le runner s'enregistre VERT quelle que soit l'image derriere, puis rate chaque job qu'on lui
-# confie. C'est mot pour mot le piege n2 de l'en-tete a une autre couche — « un runner vert qui
-# rate tous ses jobs, le pire des etats » — et ce fichier le decrivait en note depuis le 2026-08-02
-# sans rien en faire. Une note qui decrit un silence reste un silence.
-#
-# Deux refus, tous deux avant le moindre appel a la forge :
-#
-#   a) LABELS vide → le defaut de runner-compose sert `elixir` avec l'image de BASE du stage build,
-#      qui porte Elixir et RIEN d'autre (ni git, ni bats, ni bwrap, ni python3). Le gate y meurt.
-#      Ce defaut est correct pour un operateur quelconque, qui ne peut pas resoudre une image
-#      locale de LCARS ; il ne l'est pas pour un BANC, qui sait qu'il est LCARS. On le refuse donc
-#      ici, en donnant la sortie, plutot que de poser un runner dont on a ecrit qu'il ne sait pas
-#      travailler. `--accept-generic` reste la porte : un banc qui ne veut QUE le rail template n'a
-#      rien a faire du gate, et le dire est une decision, pas un oubli.
-#
-#   b) une image nommee qui n'existe pas sur CE daemon. `docker image inspect` est une commande a
-#      flux NON attache : elle traverse le relais systemd du groupe fleet, contrairement a `exec`,
-#      `run` et `cp` qui y rendent zero octet et exit 0. Cette sonde-la marche donc partout.
 check_labels() {
   if [[ -z "$LABELS" ]]; then
     [[ "$ACCEPT_GENERIC" -eq 1 ]] && { say "labels: defaut generique ACCEPTE (--accept-generic) — ce runner ne sait pas jouer mix gate"; return 0; }
@@ -138,11 +99,6 @@ EOM
   # AUSSI les images publiques que personne n'avait jamais demande a personne de tirer. Mesure du
   # 2026-08-18, machine Debian neuve, chemin de livraison : `REFUS : docker:cli`, banc exit 6. Sur
   # la machine de dev les memes images etaient la depuis des mois, donc invisible.
-  #
-  # ⚖ La bande passante est arbitree (user) : « le bench DOIT derouler le compose entierement, et
-  # re-dl a chaque tour ». On tire donc, et le refus ne tombe que si le tir echoue ET que l'image
-  # reste absente — ce qui garde le refus intact pour une image LOCALE (`lcars-build:<tag>`), qui
-  # n'est sur aucun registre et dont le message nomme la commande de build.
   local missing=()
   local entry image
   local IFS=,
@@ -196,19 +152,6 @@ say "token d'enregistrement minte (${#REG} car)"
 GEN="$(mktemp -d)"
 # ⚠ HEREDOC QUOTE (`<<'EOF'`), ET IL NE L'ETAIT PAS. Ce bloc n'a AUCUNE expansion a faire — il
 # n'y a pas un seul `$` dedans — mais il etait ouvert en `<<EOF`, donc le shell y evaluait tout.
-# Sa prose cite du code entre accents graves ; les accents graves sont des SUBSTITUTIONS DE
-# COMMANDE. Mesure du 2026-08-28, install reelle sur banc : `bridge`, `host` et `none` (les trois
-# drivers reseau, cites dans la phrase juste en dessous) ont ete EXECUTES — `bridge` a vide son
-# usage dans le log de l'install, les deux autres ont rendu « command not found » — et
-# `getent hosts gitea`, `wget http://gitea:3000/…` et `git ls-remote …` avec eux, ce qui a rempli
-# la sortie de « Temporary failure in name resolution » sur une machine dont le reseau va tres
-# bien. L'operateur lisait une panne reseau ; il n'y en avait aucune.
-#
-# ET LE FICHIER PRODUIT MENTAIT AUSSI : les mots cites sont remplaces par la sortie (vide) de leur
-# execution. Le config.yaml pose sur le banc porte « le daemon embarque du runner n'a que , , . »
-#
-# C'est le defaut que `bats.descriptions_inert` garde pour les descriptions de test — « un accent
-# grave nu y EXECUTE une commande » — a un autre endroit, qu'aucun mur ne regardait.
 cat > "$GEN/config.yaml" <<'EOF'
 # Genere par forge-runner.sh.
 #
@@ -237,11 +180,6 @@ EOF
 # bas, deux sondes ici, `bench-up`, `bench-down`, un bats. Le septieme a ete manque parce qu'il vit
 # DANS UN HEREDOC : c'est une chaine, invisible a tout grep sur le nom du service.
 #
-# CE QUE CA COUTAIT : compose fusionne les deux fichiers, ne trouve pas `runner` dans la base, et
-# CREE un service neuf qui n'a qu'un `environment:` — « service "runner" has neither an image nor a
-# build context specified: invalid compose project ». L'enrolement du runner echouait donc a CHAQUE
-# install fraiche, et avec lui toute la CI : « aucune PR ne fusionne, le rail de livraison est mort
-# avant son premier ticket ». Trouve au banc du 2026-08-28, pas par relecture.
 # ⚠ BORNE AU BLOC `services:`, ET MA PREMIERE ECRITURE NE L'ETAIT PAS. `runner-compose.yml` porte
 # aussi un bloc `volumes:` dont les entrees (`data:`, `dind:`) sont au MEME indent : un balayage du
 # fichier entier ne rendait le bon nom que parce que `services:` vient en premier. Vert par ordre
@@ -285,10 +223,6 @@ RUNNER_ENV="$GEN/runner.env"
 umask 077
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\nLCARS_RUNNER_NAME=%s\nLCARS_RUNNER_LABELS=%s\n' \
   "$INSTANCE_URL" "$REG" "${LCARS_RUNNER_NAME:-lcars-runner}" "$LABELS" > "$RUNNER_ENV"
-# Le `down` d'office porte un token factice : `runner-compose.yml` exige LCARS_FORGE_URL (`:?`) et
-# l'interpolation refuse MEME un down. Sans lui, ce nettoyage echoue en silence sous le `|| true`,
-# l'identite zombie survit dans le volume, et act_runner IGNORE le nouveau token (il ne s'enregistre
-# pas si `.runner` existe) — un runner appaire a une forge morte.
 RUNNER_ENV_DOWN="$GEN/runner-down.env"
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "$INSTANCE_URL" " " > "$RUNNER_ENV_DOWN"
 
@@ -307,13 +241,6 @@ say "runner lance (projet $PROJECT, reseau $NETWORK, config copiee dans le volum
 # le demande echoue sur une image introuvable : le « runner vert qui rate tous ses jobs » que
 # l'etape 0 refuse deja, une couche plus bas.
 #
-# On ne parametre rien : LES LABELS NOMMENT DEJA CES IMAGES, et l'etape 0 a deja verifie qu'elles
-# existent cote hote. On relit la meme liste.
-#
-# ⚠ `docker exec` PEUT RENDRE ZERO OCTET ET `exit 0` a travers un relais (c'est ecrit noir sur blanc
-# a l'etape 0 de ce fichier, a propos du relais systemd du groupe fleet). Une sonde qui se
-# contenterait du code de retour semerait donc dans le vide en se croyant verte. On EXIGE une sortie
-# NON VIDE : si le relais avale, on refuse en le disant, on ne continue pas en silence.
 seed_dind_images() {
   local c="$PROJECT-act-1" out entry image
   for _ in $(seq 1 30); do
@@ -335,12 +262,10 @@ seed_dind_images() {
     image="${entry#*docker://}"
     [[ "$image" == "$entry" ]] && continue
     [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] && continue
-    # Publique : qu'il la tire lui-meme — c'est plus court qu'un transfert et ca suit l'amont.
     if "$DOCKER_BIN" exec "$c" docker pull -q "$image" >/dev/null 2>&1 &&
        [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]]; then
       continue
     fi
-    # Locale : elle n'est sur aucun registre. On la lui donne, depuis le daemon de la machine.
     say "image locale semee dans le daemon du runner : $image"
     "$DOCKER_BIN" save "$image" 2>/dev/null | "$DOCKER_BIN" exec -i "$c" docker load >/dev/null 2>&1 || true
     [[ -n "$("$DOCKER_BIN" exec "$c" docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] || {
@@ -353,14 +278,6 @@ seed_dind_images() {
 seed_dind_images
 
 # ─── 4. Preuve d'enregistrement : la forge le LISTE — pas le log du runner ──────────────────────
-# LA SONDE DISTINGUE « pas enregistre » DE « je n'ai pas pu regarder », parce qu'elle a menti sur
-# cette difference. Mesure du 2026-08-09 : le runner s'etait enregistre (« Runner registered
-# successfully », et il tirait deja une tache) pendant que ce bloc annoncait ECHEC — le token du
-# banc n'a pas la portee du endpoint admin, `curl` rendait un 403, le `|| echo 0` l'ecrasait en
-# « zero runner ». Un banc sain declare en panne, et le geste suivant part reparer ce qui marche.
-#
-# Donc : le code HTTP est lu AVANT le corps. 403/401 → on ne SAIT pas, on le dit, et on ne prononce
-# pas d'echec sur une mesure qu'on n'a pas pu prendre.
 SEEN=0
 PROBE_HTTP=""
 for _ in $(seq 1 20); do

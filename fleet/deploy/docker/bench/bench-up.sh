@@ -14,10 +14,6 @@
 # cran plus haut. Ici, la sequence complete.
 #
 # ─── LES QUATRE PIEGES QUE CE SCRIPT DESAMORCE, ET QU'UN LECTEUR NE DEVINE PAS ──────────────────
-# 1. LA BOITE DOIT ETRE SUR LE RESEAU DE LA FORGE AVANT DE DEMARRER. `FORGE_BASE_URL=http://gitea:3000`
-#    ne resout que depuis le reseau du projet forge, et le compose de la boite ne connait pas ce
-#    reseau. D'ou `create` → `network connect` → `start` plutot qu'un `up` : un `up` demarre la
-#    boite sur un nom qui ne resout pas, et tout le provisioning forge part en drift au premier boot.
 # 2. LE SEMIS EXIGE UN SECOND PASSAGE. `50-forge` minte les role-tokens au boot, a partir du seed
 #    que bootstrap vient de poser — donc APRES ce boot-la. Le premier passage pose la structure et
 #    saute le semis en le DISANT ; on relance la boite ; le second passage seme. Deux passages, pas
@@ -79,12 +75,6 @@ BIND="0.0.0.0"
 # quand la derivation se trompe (plusieurs interfaces, un nom DNS, un reverse-proxy).
 ADVERTISE=""
 IMAGE="lcars-fleet:2"
-# Le runner du banc sert TROIS labels, et celui qui compte est `elixir` : il doit porter l'image du
-# stage `build`, pas celle de BASE — sinon `mix gate` y meurt sur `git` introuvable et le runner a
-# l'air vert. `forge-runner.sh` REFUSE de deviner et il a raison. On ne devine pas non plus : le
-# defaut se DERIVE du tag de l'image de banc (`lcars-fleet:v4` -> `lcars-build:v4`, jumeaux du meme
-# build) et n'est retenu QUE si cette image existe. Sinon on le dit et on saute — jamais un runner
-# qui tourne sans pouvoir servir.
 RUNNER_LABELS=""
 WITH_RUNNER=1
 CREDS_FROM="$HOME/.claude/.credentials.json"
@@ -131,9 +121,6 @@ done
 # d'amorcage quand la boite ne coute qu'un build, et `bench-swap-image.sh` existe pour exploiter
 # cette asymetrie. Une fusion des projets rendait un `down -v` capable d'emporter la forge semee
 # avec la boite — mesure et corrigee le 2026-08-07.
-# Le piege 1 (resoudre `forge` AVANT le premier boot) ne se paie plus par un `network connect`
-# manuel : la surcouche declare le reseau de la forge en `external` et compose branche la boite a la
-# CREATION. Meme recette que `forge-runner.sh` pour le runner depuis le 2026-08-02.
 FORGE_PROJECT="${PROJECT}forge"
 FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
 FORGE_NET="${FORGE_PROJECT}_default"
@@ -149,11 +136,6 @@ COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker
 #                    boite, la ligne du recap. C'est celle qu'un ami compose depuis sa machine.
 #
 # Un bind precis (`--bind 127.0.0.5`) rend les deux egales et l'ancien comportement revient.
-# LA DERIVATION DE L'ADRESSE ANNONCEE VIT DANS `provision-lib.sh`, PAS ICI — et elle depend du
-# SUBSTRAT. `ip route get`, qui tenait ce role, repond « par ou je pars » ; on le lisait « par ou on
-# m'atteint ». Sous WSL2 en mode NAT les deux different, et la reponse etait fausse : cf. le pave
-# `advertise_addr` dans la lib, qui porte la mesure. Ce script ne re-implemente rien — deux copies
-# d'une meme derivation divergent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
 # shellcheck source=../../lib/provision-lib.sh
 source "$DOCKER_DIR/../lib/provision-lib.sh"
 # Les noms des volumes du magasin. Le banc monte LA MEME boite que l'install nominale
@@ -184,13 +166,6 @@ FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
 # voient son IP (mesure du 2026-08-18 sur .63). Sous Docker Desktop, le daemon vit dans une AUTRE VM :
 # l'IP de la distro WSL ne lui est pas routee, et c'est `host.docker.internal` qui designe l'hote.
 #
-# Mesure du 2026-08-19 sur une WSL vierge, depuis un conteneur de JOB (reseau isole DANS le dind) :
-#   http://<lan_addr>:21199          -> download timed out
-#   http://host.docker.internal:21199 -> {"version":"1.26.1"}
-#
-# Se tromper ici ne casse pas le banc, ce qui est pire : le runner demarre, seme son magasin
-# d'images, et ne s'enregistre JAMAIS — « la forge ne liste aucun runner apres 60 s », un diagnostic
-# qui accuse la forge alors qu'elle repondait a trois adresses sur quatre.
 if [[ "$(detect_substrate)" == "wsl" ]]; then
   JOB_HOST="host.docker.internal"
 else
@@ -201,9 +176,6 @@ FORGE_URL="http://${ADVERTISE}:${FORGE_PORT}"
 say() { printf '[bench-up] %s\n' "$*"; }
 die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
 
-# ⚠ UN NOM NU ET UN CHEMIN NE SE TESTENT PAS PAREIL. `command -v` ne trouve un chemin absolu que
-# s'il est executable, mais il rend VRAI pour un repertoire portant ce nom — et surtout, la porte
-# peut nous passer un SHIM d'escalade (socket appartenant a root), qui est un chemin, pas un nom.
 [[ "$DOCKER_BIN" == */* ]] && { [[ -f "$DOCKER_BIN" && -x "$DOCKER_BIN" ]] || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"; } \
   || command -v "$DOCKER_BIN" >/dev/null || die "docker introuvable (DOCKER_BIN=$DOCKER_BIN)"
 
@@ -240,17 +212,6 @@ fi
 "$DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1 \
   || die "aucun daemon docker joignable (DOCKER_HOST=${DOCKER_HOST:-<vide>}) — Docker Desktop lance ?" 1
 
-# La sonde : un aller-retour attache sur l'image qu'on s'apprete a deployer (locale, aucun pull).
-#
-# ⚠ CE MESSAGE A TENDU UNE INCANTATION MANUELLE PENDANT TROIS JOURS, AU MOTIF QUE `fleet/deploy/box
-# build` « n'existait pas dans ce depot ». Il existe, a la racine, et son `build_env()` exporte
-# exactement les DEUX estampilles que ce refus declare obligatoires (`LCARS_GIT_SHA`,
-# `LCARS_BUILD_DATE`). Le geste juste etait donc a une ligne, et le message envoyait recopier
-# quatre lignes ou l'une des deux s'oublie en silence — ce qui produit precisement l'image muette
-# sur son origine que le bloc « revision » ci-dessous existe pour attraper.
-#
-# LA LECON N'EST PAS « verifier ses chemins » : un refus qui DICTE une commande a la place de
-# l'outil du depot double le rail. Quand l'outil bouge, la dictee reste, et c'est elle qu'on suit.
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement: $IMAGE
    Construire (depuis la racine du depot) :
@@ -258,10 +219,6 @@ fi
    Il pose le sha et la date de build, tous deux OBLIGATOIRES (cf. le bloc revision plus bas)." 1
 
 # LA BOITE DOIT POUVOIR DIRE QUEL CODE ELLE PORTE, ET LE BANC DOIT LE LIRE AVANT DE L'ANNONCER.
-# Mesure du 2026-08-14 : une image batie a la main (docker build nu, sans --build-arg) deployait un
-# banc entierement vert dont `/api/version` rendait `sha: "unknown"`. Rien ne l'avait remarque —
-# donc aucun verdict rendu par ce banc n'etait attribuable a un commit, ce qui est la seule chose
-# qu'on lui demande. Le tag de l'image ne prouve rien : c'est un nom, il s'ecrit a la main.
 #
 # Ce n'est PAS un refus : la boite fonctionne, elle est seulement muette sur son origine. On le dit
 # dans le bloc de verdict, a cote de `creds` et `admin`, la ou l'operateur lit l'etat du banc.
@@ -320,7 +277,6 @@ if [[ ${#BUSY[@]} -gt 0 ]]; then
   exit 1
 fi
 
-# ─── 1. la forge jetable ─────────────────────────────────────────────────────────────────────────
 say "forge jetable : projet $FORGE_PROJECT sur $FORGE_URL"
 LCARS_DEVFORGE_PORT="$FORGE_PORT" LCARS_DEVFORGE_BIND="$BIND" LCARS_DEVFORGE_ROOT_URL="${FORGE_URL}/" \
   "$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" up -d \
@@ -376,15 +332,6 @@ env LCARS_IMAGE="$IMAGE" \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
 
 # ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS (2026-08-17). NE PAS LE REMETTRE.
-#
-# ⚖ ARBITRAGE USER : « le bench ne devrait PAS copier le binaire local, il DOIT derouler le compose
-# entierement, et re-dl a chaque tour. C'est moi qui paye la BP, j'ai jamais demande a l'economiser
-# pour 300 Mo — et en faisant ca on a un banc qui ne reflete pas la realite du deploy de prod, donc
-# il est inutile. »
-#
-# C'est la meme faute que ce depot traque partout : un banc seme rend VERT un chemin qu'il n'a pas
-# parcouru. Le telechargement du binaire EST une etape du deploiement reel ; la sauter fait mesurer
-# autre chose que ce qu'on croit mesurer.
 #
 # La fenetre `create` -> `start` reste, elle, pour la raison qui la justifiait deja seule : la boite
 # doit etre sur le reseau de la forge AVANT de demarrer (piege 1), sinon `forge` ne resout pas et
@@ -445,7 +392,6 @@ DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
 [[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 1 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
-# ─── 5. relance de la boite : 50-forge minte les role-tokens sur le seed (piege 2) ───────────────
 say "relance de la boite pour que 50-forge minte les role-tokens"
 "$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
 for _ in $(seq 1 90); do
@@ -472,7 +418,6 @@ if [[ "$WITH_CREDS" -eq 1 ]]; then
   say "creds anthropic posees chez $HUMAN (le spawn-boundary passera)"
 fi
 
-# ─── 6. amorcage passe 2 : le semis ──────────────────────────────────────────────────────────────
 say "amorcage passe 2 (semis des depots — le token systeme existe maintenant)"
 BOOT_RC=0
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
@@ -480,7 +425,6 @@ DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
 [[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 2 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
-# ─── 7. verdict MESURE ───────────────────────────────────────────────────────────────────────────
 SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 [[ -n "$SYS_TOKEN" ]] || die "token systeme absent apres deux passes — le banc n'est PAS pret" 6
 
@@ -507,10 +451,6 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api
 # et se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck). Sans cette lecture, un banc dont la
 # boite ne peut demarrer AUCUN pod sortait `banc PRET` et rendait 0.
 #
-# C'est la faute de 6-133 au site d'a cote : le detail existait — dans les logs du conteneur, cette
-# fois, qu'on ne va pas lire apres une commande qui a dit oui — et le verdict principal affirmait
-# l'inverse. C'est le verdict qu'on lit.
-#
 # ⚠ LA SEMANTIQUE EST CELLE DU GESTE OPERATEUR (`deploy/box`, `await_provision_verdict`), reprise a
 # dessein plutot que reinventee : deux chemins qui lisent le meme fichier et en tirent deux verdicts
 # differents, c'est un fichier qui ne veut plus rien dire.
@@ -532,13 +472,6 @@ case "$BOX_PROV_RC" in
 esac
 
 # ─── 7. LE RUNNER — on APPELLE la recette, on ne la refait pas ───────────────────────────────────
-# `forge-runner.sh` (2026-08-02) EST le geste, et il porte deux pieges reseau qu'un appel naif
-# reprendrait de plein fouet. Le projet unique en desamorce UN : le runner joint la forge parce
-# qu'ils partagent le reseau. Le SECOND reste entier et n'a rien a voir avec le notre — les
-# conteneurs de JOB n'heritent pas du reseau du runner, act_runner les cree sur son reseau par
-# defaut, et le clone echoue sur `gitea:3000` introuvable. Son en-tete le nomme : « un runner vert
-# qui rate tous ses jobs, le pire des etats ». Il pose la config `container.network` pour ca, et il
-# la copie par `docker cp` parce qu'un bind depuis cette distro WSL est invisible au daemon.
 # Reecrire tout ca ici aurait produit un runner qui s'enregistre et ne sert rien.
 RUNNER_STATE="non demarre"
 # L'AUTORITE SE LIT DANS LA BOITE, plus dans un fichier que ce banc aurait persiste. Elle y est
@@ -546,19 +479,12 @@ RUNNER_STATE="non demarre"
 # c'est l'arbitrage du 2026-08-16. Le banc n'a donc plus de credential a lui a faire survivre.
 MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /opt/lcars/var/tokens/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
 
-# ⚠ LE DIAGNOSTIC ETAIT DEJA JUSTE, ET LE VERDICT DISAIT LE CONTRAIRE (6-133). Les branches
-# ci-dessous ecrivent « ABSENT », « BLOCAGE, pas degradation », « enregistrement rate » — puis le
-# script imprimait `banc PRET` et rendait 0. Un appelant automatique acceptait donc un banc qui ne
-# peut jouer aucun workflow CI, et un test d'integration restait `pending` au lieu de reveler que
-# son harnais etait incomplet. Le detail textuel signalait l'absence ; le code de retour et le
-# verdict principal affirmaient l'inverse, et c'est le verdict qu'on lit.
 #
 # `RUNNER_SERT` porte la seule question qui compte : un runner sert-il le label demande, VU PAR LA
 # FORGE ? Elle ne se deduit pas de `RUNNER_STATE`, qui est une PHRASE — la deriver d'un texte serait
 # remettre le verdict a la merci d'une reformulation.
 RUNNER_SERT=0
 
-# Derivation MESUREE du label `elixir` : le stage `build` du meme tag, s'il existe sur ce daemon.
 #
 # ⚠ `ubuntu-latest` EST LA POUR LES WORKFLOWS QU'ON N'ECRIT PAS. C'est le `runs-on` par defaut de
 # l'ecosysteme — tout workflow importe, tout exemple copie d'ailleurs, toute action tierce le nomme.
@@ -595,13 +521,6 @@ elif [[ -z "$RUNNER_LABELS" ]]; then
 elif [[ -z "$MASTER_TOKEN" ]]; then
   RUNNER_STATE="ABSENT — pas de master token persiste. ⚠ BLOCAGE, pas degradation : \`ci: required\` sur la carte canon, donc chaque PR attend 45 min puis escalade, sans jury"
 else
-  # ⚠ LA SORTIE DU SOUS-SCRIPT EST CAPTUREE, PLUS JETEE. Elle partait en `>/dev/null 2>&1`, donc le
-  # SEUL mode d'echec que ce script ne savait pas expliquer etait celui qu'il faisait taire
-  # lui-meme : le verdict se reduisait a « en echec (rejouable : forge-runner.sh --help) », et il
-  # fallait rejouer le sous-script a la main — en reconstruisant ses six arguments, dont un token
-  # qui vit dans un `mktemp` — pour lire une phrase que le banc avait deja eue sous les yeux.
-  # Mesure du 2026-08-14 : le refus etait « image(s) introuvable(s) sur ce daemon : alpine:3.20,
-  # docker:cli », diagnostic complet et actionnable, perdu par la redirection.
   #
   # Le silence reste la regle au SUCCES — un banc qui marche n'a pas a deverser le journal de ses
   # sous-scripts. C'est l'echec qui parle, et il parle avec les mots du sous-script, pas les notres.
@@ -646,8 +565,6 @@ except Exception: print(0)' 2>/dev/null || echo 0)"
       # job a un daemon, donc que `container:` est jouable) et le BACKEND des labels — un label
       # nomme `shell` peut etre servi par une image, auquel cas `runs-on: shell` tourne en conteneur.
       #
-      # Ce n'est PAS une mesure d'attribuabilite : le tag est mouvant par choix (cf. l'en-tete de
-      # `runner-compose.yml`), et discriminer une regression amont se fait avec un `docker run` date.
       RUNNER_VER="$("$DOCKER_BIN" exec "${PROJECT}-runner-act-1" gitea-runner --version 2>/dev/null | head -1 || true)"
       RUNNER_IMG="$("$DOCKER_BIN" inspect "${PROJECT}-runner-act-1" --format '{{.Config.Image}}' 2>/dev/null || true)"
       RUNNER_STATE="ENREGISTRE ($RUNNERS vu(s) par la forge)
@@ -663,11 +580,6 @@ $(sed 's/^/              /' "$RUNNER_LOG" 2>/dev/null | tail -12)
               sortie COMPLETE conservee : $RUNNER_LOG"
   fi
 
-  # ⚠ CE FICHIER FUYAIT, ET SURTOUT QUAND TOUT ALLAIT BIEN. `mktemp` le cree a chaque passage ; le
-  # chemin de SUCCES ne le lit jamais — la sortie du sous-script est muette au succes, par contrat —
-  # et rien ne l'effacait. Mesure du 2026-08-20 : 1561 fichiers `forge-runner-bt.*` dans /tmp, dont
-  # 1189 de ZERO octet (des succes) et 372 portant un refus de 65 octets que le verdict cite deja EN
-  # ENTIER. Une boucle de nuit sur un banc en a pose 1561, pour zero lecteur.
   #
   # La regle est celle de `run_step` : on efface ce que personne ne lira, on GARDE ce qui explique un
   # echec — et on le NOMME, sinon c'est un dechet anonyme de plus au lieu d'un fichier auquel le
@@ -717,9 +629,6 @@ if [[ "$BIND" == "0.0.0.0" || "$BIND" == "::" ]]; then
   # portproxy` pretes a coller. Une recette est une invitation ; celle-ci invitait a reconfigurer la
   # pile reseau de la machine pour un banc de dev. On dit le FAIT et on s'arrete la.
   #
-  # La cible LAN — un NAS, un rpi, un homelab dispo 24/7 — c'est le Linux natif, ou la derivation
-  # nominale donne la vraie adresse et ou il n'y a rien a regler. Depuis l'exterieur, c'est un
-  # tunnel monte par la personne : hors perimetre.
   if [[ "$(detect_substrate)" == "wsl" && "$(wsl_networking_mode)" == "nat" ]]; then
     say "  portee    : WSL en mode NAT (le defaut) — ce banc n'est joignable que depuis CETTE machine."
     say "              Un deploiement ouvert sur le LAN, c'est un Linux natif ; ici c'est test/dev."

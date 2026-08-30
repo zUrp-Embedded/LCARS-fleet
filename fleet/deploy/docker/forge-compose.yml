@@ -10,19 +10,12 @@
 # │ LCARS ne fabrique pas la forge, il vérifie qu'elle tient le contrat.                     │
 # └──────────────────────────────────────────────────────────────────────────────────────────┘
 #
-# POURQUOI CE FICHIER EXISTE QUAND MÊME : LCARS a besoin d'une forge en face, et il y a deux
-# lecteurs pour ça — celui qui DÉVELOPPE sur LCARS, et celui à qui on TEND la beta pour l'essayer.
-# La beta livre le banc entier, forge comprise : personne n'a à provisionner un Gitea pour voir
-# tourner une fleet. Le fichier vivait sous `dev/`, un nom qui ne parlait qu'au premier des deux et
-# disait au second « ceci n'est pas pour toi » sur le chemin qu'on lui donne.
-#
 # Elle se monte en une commande et se jette sans regret. Elle vit dans son PROPRE projet compose
 # (`-p lcars-devforge` en autonome, `-p <projet>forge` sous `bench-up.sh`), donc ses volumes lui
 # appartiennent et AUCUNE commande de `box` ne peut les atteindre — c'est tout l'intérêt.
 #
 # LANCER :   docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge up -d
 # DÉTRUIRE : docker compose -f fleet/deploy/docker/forge-compose.yml -p lcars-devforge down -v
-#            (le `-v` est ici, dans TON geste délibéré, jamais dans une commande LCARS)
 #
 # BRANCHER LCARS DESSUS : attacher le conteneur LCARS au réseau de CE projet, puis pointer
 #   l'URL sur le nom de service :
@@ -44,16 +37,6 @@ services:
     image: gitea/gitea:1.26.1-rootless@sha256:4c4256497e2e237ddebdd30986c7ce52cb6f936b3e90c34bb9f4665714599f62
     hostname: devforge
     environment:
-      # ROOT_URL sert aux liens que Gitea FABRIQUE (clone_url, redirections). Le défaut visait
-      # l'INTÉRIEUR, au motif que « le consommateur principal d'une forge de dév est la fleet, pas
-      # l'humain depuis son navigateur ». CE MOTIF EST TOMBÉ : le deck de la boîte s'identifie
-      # désormais par OpenID sur cette forge, donc un navigateur DOIT l'atteindre, et un lien en
-      # `gitea:3000` ne résout sur aucune machine. Le défaut vise l'extérieur ; `bench-up.sh` passe
-      # l'adresse publiée.
-      # Ce que ça NE casse pas, et c'est vérifié plutôt que supposé : aucune ligne du runtime ne lit
-      # une URL fabriquée par la forge — `lcars.contracts.check` porte déjà le mur, où `html_url`
-      # est inscrit « no reader today » avec ce motif exact (le conteneur joint `gitea:3000` là où
-      # un navigateur joint un port publié). La fleet, elle, adresse `FORGE_BASE_URL`, jamais ceci.
       GITEA__server__ROOT_URL: "${LCARS_DEVFORGE_ROOT_URL:-http://gitea:3000/}"
       GITEA__server__HTTP_PORT: "3000"
       # Démarrage headless (recette officielle) : sans ce verrou, une forge vierge sert le
@@ -67,25 +50,6 @@ services:
       # et l'unique acte d'enrollment est l'ajout à l'équipe `humans` par un propriétaire d'org.
       # Ajouter une validation admin à l'inscription ajouterait un geste qui ne trie rien.
       GITEA__service__DISABLE_REGISTRATION: "false"
-      # ⚠ `DEFAULT_USER_IS_RESTRICTED` A ÉTÉ POSÉ ICI PUIS RETIRÉ (2026-08-17), et le motif du
-      # retrait était déjà écrit dans le motif de la pose : « ceinture, elle ne protège RIEN
-      # aujourd'hui ». Une décision qui porte sa propre condition se rouvre le jour où la condition
-      # tombe — c'est ce jour-là.
-      #
-      # CE QUE LA MESURE DE POSE N'AVAIT PAS REGARDÉ. Le 2026-08-12 on avait mesuré l'accès aux
-      # DÉPÔTS : sur un dépôt public, restricted / ordinaire / anonyme reçoivent le même 200, donc
-      # « restricted ne masque que du privé ». Vrai, et hors sujet — un utilisateur restreint ne
-      # voit que ce qui lui est explicitement accordé, et une ORG n'est pas un dépôt.
-      #
-      # Mesuré le 2026-08-17 : `lordzurp`, auto-inscrit donc `restricted=true`, membre de `fleet`
-      # via `fleet:humans` mais membre d'AUCUNE org de catalogue → `web-demo` répond 404 quand il
-      # est connecté, et 200 quand il ne l'est pas. Connecté, il voit MOINS qu'un inconnu, et tous
-      # les catalogues installés lui sont invisibles.
-      #
-      # Ça contredit frontalement l'arbitrage A1.4 : « une fois installé, le catalogue est dispo
-      # system-wide, on filtre pas par confort ». Avec ce drapeau, tout humain est filtré par
-      # défaut — pas par confort, par Gitea.
-      #
       # LCARS livre donc une forge dont les comptes ne sont PAS restreints (le défaut Gitea est
       # `false`, l'absence de ligne suffit). Un admin qui veut la ceinture la remet chez lui : on ne
       # la lui reprend pas, et `50-forge.sh` la sonde et lui dit ce qu'elle coûte à ses humains.
@@ -99,20 +63,10 @@ services:
       # poser. Sur une forge PREEXISTANTE (le cas de la production), c'est un geste d'operateur dans
       # son app.ini — ici, la forge est jetable et nous appartient, donc il est cable.
       GITEA__ui__DEFAULT_SHOW_FULL_NAME: "true"
-      # ⚠ PAS de `DEFAULT_PRIVATE` ici, et c'est une mesure, pas un oubli : la clé n'existe PAS
-      # dans l'image qu'on fait tourner. Vérifié sur le binaire de `gitea/gitea:1.26.1-rootless`,
-      # avec un témoin — `DEFAULT_SHOW_FULL_NAME` (réglage voisin, câblé juste au-dessus) est
-      # présent, `DEFAULT_PRIVATE` est absent. La poser aurait produit une ligne de config qui ne
-      # vise rien, en silence, et un lecteur qui l'aurait crue.
-      # Conséquence, et elle rejoint l'arbitrage user : il n'y a pas de levier de config pour
-      # forcer le public, donc un dépôt privé n'est pas un mode qu'on supporte — c'est une erreur
-      # d'utilisation, refusée à la porte d'adoption avec son nom.
       #
       # L'UPLOAD WEB EST DISQUALIFIÉ, PAS LIMITÉ — et c'est une garde de SÉCURITÉ, pas d'hygiène.
       # Le gate d'adoption cherche un ARBRE `.claude/` ; l'UI de la forge aplatit une arborescence
       # déposée par drag&drop, donc `.claude/settings.json` arrive en `settings.json` à la racine.
-      # Plus de dossier, plus de détection : le transport contourne le gate tout seul, sans malice.
-      # Le canal d'un dépôt est `git push`, qui préserve l'arborescence et fait mordre le gate.
       #
       # ⚠ `_0x2E_` n'est pas une coquette : une section INI qui porte un point s'écrit comme ça en
       # variable d'env, parce qu'une clé d'env ne peut contenir que `0-9A-Z_`. Mesuré dans le

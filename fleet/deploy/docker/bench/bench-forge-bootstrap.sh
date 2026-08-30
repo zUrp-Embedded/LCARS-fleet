@@ -3,68 +3,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — amene une forge jetable NEUVE a l'etat "la fleet peut travailler dessus"
-#
-# ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
-# Le concept du banc est « on nuke et on recommence ». Chaque nuke detruit la forge, ses comptes,
-# ses tokens et le mot de passe de l'humain — et jusqu'ici la sequence qui remonte tout ca vivait
-# dans la MEMOIRE de la session qui l'avait faite. Mesure du 2026-08-02 : apres un redeploy propre,
-# l'humain ne pouvait plus se loguer, parce que le mot de passe de banc n'etait ecrit nulle part.
-# Une recette qu'on retient de tete est une recette qu'on perd au prochain nuke. Celle-ci est ici.
-#
-# ⚠ CE FICHIER A PORTE UNE CONDITION D'IDEMPOTENCE PENDANT DEUX SEMAINES, ET ELLE A DISPARU.
-# Elle disait : sans `--tofu-dir` stable, chaque passe repart d'un tfstate VIDE, tofu croit devoir
-# creer une org et dix comptes qui existent deja, et l'apply meurt en 409 (mesure du 2026-08-03).
-# C'etait vrai, et c'etait le symptome d'un defaut de la RECETTE, pas de ce script : l'apply n'etait
-# rejouable qu'a condition de garder son etat. Depuis le 2026-08-16 la recette IMPORTE ce que la
-# forge porte deja — l'etat est jetable, et l'enchainement est idempotent sans qu'on l'organise.
-#
-# Ce que le script fait, dans l'ordre :
-#   1. attend que la forge reponde ;
-#   2. cree le compte admiral (master forge + sysadmin) s'il manque (mot de passe de bench fixe) ;
-#   3. minte le master token d'admiral et le CONFIE A LA BOITE (`forge-gestures.sh config-token`),
-#      ou il RESTE — cf. l'arbitrage du 2026-08-16 : tout geste structurel (un catalogue de plus,
-#      un role de plus) a besoin de cette meme autorite, au jour 400 comme au premier ;
-#   4-5. DEPOSE le roster derive dans la recette de la boite, puis passe la main aux GESTES DE
-#      L'IMAGE (`/opt/lcars/forge-gestures.sh`) : les deux secrets par stdin, puis l'apply — module
-#      `instance/`, module catalogue, et le depot modele. Ce script ne joue plus tofu lui-meme, et
-#      n'exige plus de binaire tofu sur l'hote : il entre par la MEME porte que `box`, donc
-#      ce qu'il exerce est ce que l'admin jouera ;
-#   6. pose le mot de passe de BANC de l'humain, le promeut SITE-ADMIN (banc seulement, etape
-#      6-bis, OPT-IN via --human-admin), pose son TOKEN operateur, et cable le token
-#      systeme dans son fleet_v2.env (cf. les deux blocs ci-dessous) ;
-#   7. pose la CHARTE : avatars des comptes, et le nom du siege master en full_name ;
-#   8. SEME `fleet/lcars` — la source que la boite clone, poussee depuis CE clone. C'est un geste
-#      de banc par nature : le contenu vient d'un arbre local, pas d'une recette. (Le depot modele,
-#      lui, a quitte cette etape : l'apply le pose desormais.) ⚠ La recette ne CREE PAS un
-#      `fleet/lcars` vide : `git clone` d'un depot vide rend 0 et laisse un arbre sans contenu, que
-#      la regle de non-ecrasement de l'entrypoint protegerait ensuite a chaque boot ;
-#   9. rend un verdict MESURE : login humain, comptes de l'org, repos semes.
-#
-# ─── LE MOT DE PASSE DE BANC DU COMPTE OPERATEUR ────────────────────────────────────────────────
-# Ce bloc disait que la recette pose `must_change_password = true` et que « c'est correct ». Ca ne
-# l'etait pas : ce compte n'est pas une personne. Il tient ICI la place du compte admin que Gitea
-# fait creer a son INSTALLATION — celui que l'operateur pose quand il prepare la forge. Le reglage
-# attendait donc un premier login que personne ne fait, et il fermait le compte en attendant. La
-# recette pose desormais `false` (arbitrage user 2026-08-11), donc ce script ne se bat plus contre
-# elle.
-# Ce qui reste, et qui EST une propriete du banc : un mot de passe CONNU, pour qu'on puisse ouvrir
-# l'UI d'une forge jetable sans aller le chercher. Rien dans `provisioning/` ni dans le runtime ne
-# lit cette valeur.
-#
-# ─── LE TOKEN OPERATEUR ET LE CABLAGE ENV — MEME NATURE, MEME RAISON ────────────────────────────
-# Corollaire du mot de passe : en PRODUCTION la forge preexiste et Gitea regle l'identite de
-# l'humain a son propre onboarding ; le token operateur est un geste d'identite que la recette
-# n'automatise pas (70-human le SONDE et l'INSTRUIT, il ne le pose jamais). Sur un banc, cette
-# identite nait et meurt avec la forge, plusieurs fois par jour — le geste est donc ici.
-#
-# Le cablage env vient du meme ordre de cold boot, et la boite le NOMME deja (70-human, cas D4) :
-# le premier boot seed `fleet_v2.env` AVANT que la forge soit bootstrappee, donc sans
-# `FORGE_TOKEN_FILE` ; ensuite le fichier appartient a l'humain et n'est PLUS jamais reecrit. Sans
-# ces deux lignes le runtime retombe sur `~/.gitea_token` (le token de l'HUMAIN), et la creation de
-# projet echoue — soit en enoent, soit, pire, en 403 : la team `humans` a `can_create_repos =
-# false`, seul le compte SYSTEME cree des repos d'org (forge.tf). Un banc qui pose le token humain
-# sans cabler le systeme troque une panne claire contre une panne qui ressemble a un droit manquant.
-#
 # USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
 #                                  [--box lcars-ticket-fleet-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <ignore>] [--no-seed-repos]
@@ -83,17 +21,13 @@ CONTAINER="lcars-ticketforge-gitea-1"
 # `--admin-token` DIT UNE SEULE CHOSE, et elle commande tout le reste : « la forge preexiste et je
 # n'en suis pas l'administrateur, je suis un client qui detient un jeton » — le cas de la PRODUCTION.
 # Sans lui, la forge est a moi et je la fabrique : le cas du BANC.
-# Ce n'est PAS un `--mode prod|test`. Une etiquette de mode peut etre FAUSSE (un `--mode prod` sur
-# une forge vierge echoue tard, et accuse la forge) ; un jeton existe ou n'existe pas. On mesure.
 ADMIN_TOKEN=""
 BOX="lcars-ticket-lcars-1"
 HUMAN="lcars"
 HUMAN_EMAIL="lcars@lcars.local"
-# Convention de banc — cf. le bloc d'en-tete. Jamais lue par la prod.
 HUMAN_PASSWORD="toto32toto32"
 WITH_BOX=1
 SEED_REPOS=1
-# Propriete de BANC, jamais de prod — la raison, son cout et sa sortie sont a l'etape 6-bis.
 HUMAN_ADMIN=0
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 ADMIN="admiral"
@@ -107,14 +41,10 @@ while [[ $# -gt 0 ]]; do
     --human)          HUMAN="${2:?}"; shift 2 ;;
     --human-email)    HUMAN_EMAIL="${2:?}"; shift 2 ;;
     --human-password) HUMAN_PASSWORD="${2:?}"; shift 2 ;;
-    # Accepte et SANS EFFET depuis que l'apply vit dans la boite : la recette et son etat sont dans
-    # l'image. Le refuser ferait echouer un appelant qui passe une option devenue inutile.
     --tofu-dir)       shift 2 ;;
     --no-box)         WITH_BOX=0; shift ;;
     --no-seed-repos)  SEED_REPOS=0; shift ;;
     --human-admin)    HUMAN_ADMIN=1; shift ;;
-    # Accepte et SANS EFFET : c'etait le defaut avant l'inversion du 2026-08-07. Le refuser ferait
-    # echouer un appelant qui demande deja le comportement devenu defaut.
     --no-human-admin) HUMAN_ADMIN=0; shift ;;
     -h|--help)        sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-forge-bootstrap: option inconnue: $1" >&2; exit 1 ;;
@@ -130,7 +60,6 @@ command -v curl >/dev/null || die "curl requis"
 # C'etait la premiere bidouille de ce banc — exiger d'un poste ce que le produit n'installe nulle part.
 command -v python3 >/dev/null || die "python3 requis (lecture des reponses JSON)"
 
-# ─── 1. la forge repond ──────────────────────────────────────────────────────────────────────────
 say "attente de la forge : $FORGE_URL"
 for _ in $(seq 1 60); do
   curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 && break
@@ -138,20 +67,8 @@ for _ in $(seq 1 60); do
 done
 curl -sf -m 3 "$(api)/version" >/dev/null 2>&1 || die "la forge ne repond pas: $FORGE_URL" 2
 
-# ─── 2-3. admiral (master forge + sysadmin) + son master token ───────────────────────────────────
-# ⚠ CE COMMENTAIRE DISAIT L'INVERSE, ET SA PREMISSE A CHANGE (identite-v2). Le mot de passe etait
-# GENERE parce que ce compte etait « un outil de provisioning, pas un siege d'operateur ». Or admiral
-# EST desormais un siege d'operateur : le master se logue au deck/forge, et il est materialise en
-# sysadmin root cote box (uid 1000). Il lui faut donc un mot de passe CONNU — exactement comme
-# l'humain worker (HUMAN_PASSWORD, deja fixe dans ce script). Bench : fixe (`toto1234`), pour tester,
-# dans un banc JETABLE sur LAN sur ; prod : l'installeur choisit. Ce qui ne doit jamais persister
-# dans un fichier SUIVI, c'est le MASTER TOKEN qu'admiral minte. Il ne disparait pas pour autant :
-# il est confie a la boite plus bas, en 0600 root dans /opt/lcars/var/tokens, et il y RESTE.
 ADMIN_PW="${LCARS_BENCH_ADMIRAL_PW:-toto1234}"
 
-# LE JETON FOURNI COURT-CIRCUITE 2 ET 3, et ce n'est pas une optimisation : ce sont les SEULES
-# etapes qui exigent un `docker exec` DANS la forge. Contre une forge de production — ailleurs, pas
-# a nous, peut-etre meme pas en conteneur — elles ne sont pas inutiles, elles sont IMPOSSIBLES.
 if [[ -n "$ADMIN_TOKEN" ]]; then
   MASTER_TOKEN="$ADMIN_TOKEN"
   curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/user" >/dev/null \
@@ -182,12 +99,6 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
   say "master token minte ($TOKEN_NAME)"
 fi
 
-# ─── 4-5. LA STRUCTURE ET LES SECRETS : joues PAR LA BOITE, plus par ce script ───────────────────
-# CE BLOC FAISAIT TOURNER TOFU SUR L'HOTE, et c'etait la plus grosse bidouille de ce banc : il
-# copiait la recette dans un mktemp, gerait deux dossiers d'etat, exigeait un binaire `tofu` que
-# RIEN n'installe, et posait le seed par un `docker exec` a la main. L'admin, lui, n'avait aucune
-# de ces choses — donc tout ce qui se verifiait ici ne se verifiait que sur un banc.
-#
 # La boite porte desormais tofu, ses providers, la recette et les gestes (`/opt/lcars/
 # forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `box`, et
 # ce qu'il exerce est ce que l'admin jouera.
@@ -205,18 +116,6 @@ else
   say "seed relu depuis $BOX (celui des comptes existants)"
 fi
 
-# Le ROSTER est DERIVE ici et DEPOSE dans la recette de la boite — un fichier, pas un geste de plus.
-#
-# ⚠ IL PASSAIT PAR `mix`, ET CA A CASSE SUR LA PREMIERE MACHINE QUI N'EN AVAIT PAS. Mesure du
-# 2026-08-18, boite Debian neuve : `enroll-catalogue.sh --repo` compile l'arbre source, donc exige
-# Elixir SUR L'HOTE — `mix: ABSENT`, rc 2, amorcage mort en passe 1. Le README de la beta promet
-# exactement le contraire, en toutes lettres : « No Elixir, no Erlang, no toolchain on your
-# machine ». La promesse etait fausse sur le chemin qu'il donne.
-#
-# La lecture passe donc par l'IMAGE, qui est la seule chose dont ce banc soit sur : `bench-up.sh`
-# refuse de demarrer sans elle. C'est la meme autorite de lecture des deux cotes
-# (`CatalogueRoles`), simplement jouee la ou le runtime existe deja. L'image se demande a la BOITE
-# plutot que de se re-deviner : c'est celle qui tourne, pas celle qu'on croit avoir bati.
 ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
 BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || true)"
 [[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
@@ -239,13 +138,11 @@ say "org du catalogue : $ORG"
   || die "roster non depose dans la recette de $BOX" 4
 rm -rf "$ENROLL_DIR"
 
-# Les deux secrets, par STDIN, exactement comme `box config`.
 printf '%s' "$MASTER_TOKEN" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-token \
   || die "jeton master refuse par la boite" 4
 printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-seed \
   || die "seed non pose dans la boite" 5
 
-# L'apply : les deux modules ET le depot modele, dans la boite.
 "$DOCKER_BIN" exec -i -u root \
     -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN_EMAIL" \
     "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
@@ -253,13 +150,7 @@ printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-g
 say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"
 say "→ relance la boite (docker restart $BOX) pour que 50-forge minte les role-tokens"
 
-# ─── 6. le mot de passe de banc de l'humain ──────────────────────────────────────────────────────
 # APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
-#
-# MEME PRECONDITION QUE 2-3, et pour la meme raison : fabriquer l'identite d'un humain suppose
-# ADMINISTRER la forge. En production Gitea la regle a son propre onboarding, et `70-human` la SONDE
-# sans jamais la poser — c'est ecrit en tete de ce fichier. Avec `--admin-token`, on est client :
-# on ne touche pas au compte, et on le DIT plutot que de le sauter en silence.
 if [[ -n "$ADMIN_TOKEN" ]]; then
   say "humain $HUMAN : identite NON fabriquee (--admin-token) — Gitea la regle a son onboarding"
 else
@@ -269,11 +160,6 @@ else
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
 fi
 
-# ─── 6-bis. SITE-ADMIN — OPT-IN depuis le 2026-08-07, et la polarite EST le sujet ────────────────
-# C'etait un opt-out (`--no-human-admin`) : on obtenait donc un site-admin EN OUBLIANT UN FLAG. Une
-# propriete qu'on obtient par omission n'est pas une propriete, c'est un accident — et celle-ci
-# court-circuite la team `humans`. Le defaut est desormais le modele de PRODUCTION ; le banc demande
-# explicitement (bench-up.sh passe --human-admin). Le pourquoi du banc reste entier, ci-dessous.
 # Meme nature que le mot de passe ci-dessus, et meme frontiere. La recette de PRODUCTION ne rend
 # JAMAIS le quotidien site-admin : `20-DECISION-premier-admin-prerequis-lcars-demo.md` le mesure —
 # un daily-admin rend la team `humans` decorative, donc les droits qu'on croit tester ne sont plus
@@ -344,31 +230,15 @@ except Exception: print("")' 2>/dev/null || true)"
   fi
   say "token operateur pose dans $BOX:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
 
-  # LE CABLAGE ENV N'EST PLUS ICI : `70-human` le CONVERGE (une cle absente n'est pas un choix).
-  # Ce bloc l'ajoutait a la main parce que le module se contentait de l'instruire — donc le banc
-  # avait le cablage et la production ne l'avait pas.
 fi
 
-# ─── 7. la charte : RETIREE D'ICI, elle appartient a la recette generique ────────────────────────
-# Ce bloc rejouait `provision-forge-charte.sh` a la main, avec son propre fichier de jeton et son
-# propre `--admiral`. C'etait un DOUBLON : `charte.tf` porte deja ce geste dans la recette, donc
-# l'`apply` du catalogue (etape 4) l'avait execute quelques secondes plus tot, sur les memes
-# comptes, avec le meme master-token.
-#
-# CE QUE LE BANC DOIT FABRIQUER SE REDUIT A CE QU'IL EST SEUL A AVOIR : une forge jetable et son
-# premier compte. L'HABILLAGE, lui, est le meme pour tout le monde — un banc qui se pose sa charte
-# par un chemin a lui ne prouve rien de celui que la prod empruntera. C'etait deja vrai avant que ce
-# doublon existe ; c'est ce doublon qui le cachait.
-#
 # ⚠ CE QUI A DU BOUGER AVEC, et c'est la cicatrice de ce bloc — sa sortie etait CAPTUREE justement
 # parce qu'elle avait ete jetee une fois : « la seule ligne qui dit CE QUI a ete pose, et combien
 # d'entrees de charte n'avaient pas de compte sur cette forge, disparaissait ». Le retirer sans rien
 # mettre a la place aurait recree ce defaut a l'identique.
-#
 # ET LA REMONTER DEPUIS L'APPLY EST IMPOSSIBLE : le provisioner recoit une variable `sensitive`, donc
 # OpenTofu supprime toutes ses lignes (cf. le bloc de l'etape 4). Le verdict de POSE n'est lisible
 # nulle part par un appelant.
-#
 # D'OU LA SONDE. Le generique POSE, le banc VERIFIE — c'est la bonne repartition, et pas un repli :
 # prouver est le metier du banc, poser est celui de la recette. `--check` ne porte aucune autorite
 # (il lit des champs publics, sans master-token) et ne peut donc rien reposer par megarde ; il rend
@@ -382,12 +252,9 @@ charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
     'cd /opt/lcars/fleet/deploy/deps && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
-# ─── 8. le semis : la source ─────────────────────────────────────────────────────────────────────
 # `fleet/lcars` = la source que la boite clone au boot (LCARS_SOURCE_REMOTE, la jambe runtime du
 # triangle). Une forge vierge sans elle est une forge sur laquelle la fleet ne peut rien faire — et
 # c'est l'etat par defaut apres chaque nuke.
-#
-# ⚠ IL Y AVAIT UN SECOND SEMIS, `fleet/project-template`, retire le 2026-08-21 avec le depot modele.
 # Un projet neuf se peuple depuis le catalogue sur DISQUE, que la boite porte deja : il n'y a plus
 # rien a semer pour qu'un onboard aboutisse.
 if [[ "$SEED_REPOS" -eq 1 ]]; then
@@ -413,7 +280,6 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
   fi
 fi
 
-# ─── 9. verdict MESURE ───────────────────────────────────────────────────────────────────────────
 curl -sf -m 5 -u "$HUMAN:$HUMAN_PASSWORD" "$(api)/user" >/dev/null \
   || die "le login humain ne passe pas — la forge n'est PAS prete" 6
 

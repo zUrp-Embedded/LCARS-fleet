@@ -4,22 +4,10 @@
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — ouvre l'UI de la forge jetable et declare le client OAuth du deck
 #
-# ─── POURQUOI CE SCRIPT EXISTE ──────────────────────────────────────────────────────────────────
-# La recette cree le compte operateur avec le seed et SANS mot de passe connu de qui lance le banc.
-# (Elle posait aussi `must_change_password` au motif que l'humain poserait son secret au premier
-# login : corrige le 2026-08-11 — personne ne s'appelle `lcars`, c'est l'identite de service du
-# produit.) Sur un banc qu'on nuke plusieurs fois par heure, aller chercher ce mot de passe a chaque
-# tour, c'est la garantie de l'oublier une fois et de croire que l'auth est cassee.
-#
 # Ce script fait donc DEUX choses, et rien d'autre :
 #   1. il DEGRADE le compte humain (mot de passe connu, drapeau retire) — la faille est le but ;
 #   2. il declare le client OAuth2 du deck aupres de la forge, avec l'URL de redirection que le
 #      NAVIGATEUR atteint (jamais le nom de service docker : deux mondes reseau distincts).
-#
-# LA RECETTE N'EST PAS TOUCHEE. `forge.tf` continue de poser `must_change_password = true` ;
-# ce script defait ce reglage APRES coup, sur une forge dont on assume qu'elle est jetable.
-# Memo permanent : `fleet/deploy/deps/forge.tf._DEGRADED-FOR-TEST`.
-#
 # IDEMPOTENT : rejouable apres chaque nuke ; le client OAuth existant est reutilise, pas duplique.
 #
 # USAGE : bench-degrade.sh --forge <url-api> --admin-token <tok> [--human lcars]
@@ -54,7 +42,6 @@ command -v python3 >/dev/null || { echo "bench-degrade: python3 absent" >&2; exi
 say() { echo "[bench-degrade] $*"; }
 api() { curl -s -m 10 -H "Authorization: token $TOKEN" -H 'Content-Type: application/json' "$@"; }
 
-# ─── 1. Le compte humain : mot de passe connu, drapeau retire ───────────────────────────────────
 code="$(api -o /tmp/bd.out -w '%{http_code}' -X PATCH \
   -d "{\"login_name\":\"$HUMAN\",\"source_id\":0,\"password\":\"$PASSWORD\",\"must_change_password\":false}" \
   "$FORGE/admin/users/$HUMAN")"
@@ -73,7 +60,6 @@ else
   exit 2
 fi
 
-# ─── 2. Le client OAuth du deck ─────────────────────────────────────────────────────────────────
 # Gitea est fournisseur OpenID Connect (mesure : `/.well-known/openid-configuration` rend ses
 # quatre endpoints, scopes openid/profile/email/groups, PKCE S256). Le deck sera donc un CLIENT
 # PUBLIC : il n'a pas de secret a garder, il vit dans un navigateur derriere une loopback.
