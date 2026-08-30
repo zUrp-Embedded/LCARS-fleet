@@ -7,6 +7,8 @@
 # ttyd passe l'argument d'URL (`?arg=<pod_id>`) en argv. Ce script est la GARDE entre le monde
 # et `lcars attach` : sans lui, un client choisit les arguments d'une commande locale.
 #
+# ⚠ POURQUOI `--url-arg` ET PAS UN TTYD PAR POD : le bloc de ports d'un humain est FINI et deja
+# largement pris. Un port par pod l'epuiserait en une poignee de missions.
 
 set -uo pipefail
 
