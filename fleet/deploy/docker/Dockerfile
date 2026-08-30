@@ -30,11 +30,18 @@ ARG TARGETARCH
 # voir. Un stage build qui ne peut pas jouer le gate entier ne doit pas produire d'image : on
 # outille le stage plutôt que d'affaiblir le gate. (Liste = celle de 10-packages + les 2 du gate.)
 # ⚠ LA TOOLCHAIN ENTRE ICI PAR APT, ET C'EST LE MÊME GESTE QUE `15-toolchain` SUR UN POSTE.
+# ⚠ ET L'UID 1000 EST DÉJÀ PRIS DANS LA BASE : `ubuntu:26.04` y pose un humain « ubuntu ». Cet uid
+# est le contrat déclaré au-dessus, et les caches BuildKit du stage suivant le montent EN DUR
+# (`uid=1000`) — renuméroter `builder` casserait les trois `--mount` et le défaut de `LCARS_UID`
+# côté compose. On LIBÈRE l'uid, on ne renumérote pas. Sans ce geste le stage est INCONSTRUCTIBLE
+# (« useradd: UID 1000 is not unique ») : le défaut ne se voit qu'au premier build sur une machine
+# qui n'a pas déjà l'image, jamais sur celles qui la portent depuis une base antérieure.
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        erlang elixir \
        tmux bubblewrap git curl jq unzip ca-certificates python3 python3-pytest bats procps \
     && rm -rf /var/lib/apt/lists/* \
+    && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
     && install -d -o builder -g fleet /opt/lcars /src /src/fleet /src/fleet \
@@ -225,6 +232,12 @@ RUN apt-get update -qq \
        `# autorise sa presence ici sans exemption dans deploy_manifest.bats.` \
        ttyd \
     && rm -rf /var/lib/apt/lists/* \
+    `# ⚠ L'UID 1000 EST PRIS DANS LA BASE, ET C'EST CELUI QUE L'ENTRYPOINT DONNE AU SIEGE (LCARS_UID) :` \
+    `# ubuntu:26.04 y pose un humain « ubuntu ». Le stage build fait le meme geste pour builder — meme` \
+    `# base, meme piege aux deux etages, et le corriger a un seul ne corrige rien. Sans ca l'entrypoint` \
+    `# BOUCLE sur « useradd: UID 1000 is not unique » et la boite ne devient jamais healthy : elle` \
+    `# demarre, elle repond, elle ne converge pas — le mode de defaillance le plus cher a lire.` \
+    && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \
     `# LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : traverser les repertoires de socket des consoles.` \
     `# Il existe parce que le producteur (ttyd, sous l'humain) et le consommateur (le deck, sous` \
