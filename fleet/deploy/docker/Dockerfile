@@ -472,17 +472,16 @@ RUN printf '%s\n' \
     'esac' \
     >> /etc/bash.bashrc
 
-RUN chmod 0755 /opt/lcars/entrypoint.sh /opt/lcars/console.sh /opt/lcars/console-humans.sh \
-               /opt/lcars/console-status.sh /opt/lcars/console-landing.sh \
-               /opt/lcars/console-deck.py /opt/lcars/console-pod.sh \
-               /opt/lcars/human-converger.sh \
-               /opt/lcars/catalogue-executor.py \
-               /opt/lcars/privileged-executor.py \
-               `# ⚠ CETTE LISTE DOUBLE CELLE DE 62-runtime-helpers, ET ELLES ONT DIVERGE :` \
-               `# lcars_socket.py est 100644 dans git, personne ne le chmod ici, et le module` \
-               `# le teste par -x. Il rendait donc « absent » sur un fichier PRESENT, et le` \
-               `# drift devenait un echec permanent (APPLY-ON=wsl linux, rien a reparer ici).` \
-               /opt/lcars/lcars_socket.py \
+# ⚠ UN MOTIF, PAS UNE LISTE, ET C'EST LA CORRECTION DE FOND. Cette ligne ENUMERAIT les auxiliaires
+# un par un — donc elle doublait la liste `HELPERS` de `62-runtime-helpers`, et deux listes qui
+# disent la meme chose divergent : `lcars_socket.py` est 100644 dans git, personne ne le chmodait
+# ici, et le module le teste par `-x`. Il rendait « absent » sur un fichier PRESENT de 5130 octets,
+# et ce drift devenait un echec permanent (APPLY-ON=wsl linux : rien a reparer sur ce substrat).
+#
+# Le glob supprime la possibilite meme de la divergence : tout auxiliaire depose a la racine de
+# `/opt/lcars` est executable, qu'on ait pense a l'ajouter ou non. Ajouter un helper redevient un
+# seul geste — le `COPY` — au lieu de deux dont le second ne se signale jamais.
+RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/fleet/deploy/provision \
