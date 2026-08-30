@@ -71,7 +71,12 @@ setup() {
 
   # `bash -lc` charge un profil : sans cette ligne, le PATH du decor ne survit pas au shell de login
   # et le temoin mesurerait le PATH de la machine.
-  printf 'export PATH="%s:$PATH"\n' "$BINDIR" > "$HOME_DIR/.bash_profile"
+  # ⚠ ET LE DECOR POSSEDE CE PATH EN ENTIER — `$BINDIR:$PATH` HERITAIT DE LA MACHINE. Sur un poste
+  # DEJA provisionne, `/usr/local/bin/fleet_v2` existe (pose par 60-deploy) : le temoin « lanceur
+  # ABSENT du PATH » retirait sa doublure et trouvait le VRAI lanceur — aucun refus ne sortait.
+  # Banc WSL, 2026-08-30, troisieme run ; vert au premier, ou la release n'etait pas encore posee.
+  # `/usr/bin:/bin` suffit aux outils que ce corpus appelle ; le reste appartient au decor.
+  printf 'export PATH="%s:/usr/bin:/bin"\n' "$BINDIR" > "$HOME_DIR/.bash_profile"
 }
 
 # ─── LA DOUBLURE DE `fleet_v2`, ET SA SEULE PROPRIETE QUI COMPTE ────────────────────────────────
@@ -216,4 +221,15 @@ joue() { run env PATH="$BINDIR:$PATH" HOME="$HOME_DIR" \
   joue
   [[ "$output" == *"indeterminable"* ]] || [[ "$output" == *"indéterminable"* ]]
   [[ "$output" != *"« lcars »"* ]]
+}
+
+@test "TEMOIN DU TEMOIN : le decor POSSEDE le PATH — le lanceur d'une machine provisionnee n'y entre pas" {
+  # Le pendant du temoin « ABSENT du PATH » : si le decor heritait de `$PATH`, ce temoin-la
+  # mesurerait la machine — vert sur un poste ou rien n'est installe, rouge sur un poste installe.
+  # La regle vaut pour le fichier entier, pas pour un seul cas.
+  local ligne
+  ligne="$(grep -F 'export PATH=' "$BATS_TEST_DIRNAME/accept.bats" | grep -v '^ *#' | head -1)"
+  [ -n "$ligne" ]
+  [[ "$ligne" == *'/usr/bin:/bin'* ]]
+  [[ "$ligne" != *':$PATH'* ]]
 }
