@@ -118,7 +118,13 @@ resource "gitea_user" "system_role" {
 # Son BADGE, lui, ne disparait pas : `provision-forge-charte.sh` le pose sur le master (option
 # `--admiral`). Le nom quitte la forge, la charte reste.
 
+# ⚠ `count`, ET C'EST LA CONSEQUENCE DU COMMENTAIRE CI-DESSUS (⚖ user 2026-08-30). Il disait deja
+# « CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
+# creer a son installation […] les vraies personnes ont des comptes a leur nom » — mais la ressource
+# etait inconditionnelle, donc TOUT deploiement le semait. `builtin_human` vide (le defaut) = aucun
+# compte : un deploiement de travail pose les autorites, pas les humains.
 resource "gitea_user" "human" {
+  count                = var.builtin_human == "" ? 0 : 1
   username             = var.builtin_human
   login_name           = var.builtin_human
   email                = var.builtin_email

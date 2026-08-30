@@ -22,8 +22,10 @@
 #                       (/opt/lcars/runtime, RO) → STATE (~/.lcars per-humain).
 #       --box           LCARS tourne dans un conteneur. Rien hors de ton
 #                       clone et de docker.
-#       --bench         fournit les annexes (forge jetable + runner CI) au
-#                       lieu d'exiger que tu les aies déjà.
+#       --bench         fournit les annexes (forge jetable, runner CI, humain de
+#                       démonstration) au lieu d'exiger que tu les aies déjà.
+#                       L'humain EST une annexe : un déploiement de travail n'en
+#                       sème aucun, les personnes s'inscrivent sur la forge.
 #       --check         sonde read-only, rien n'est modifié.
 #       --port-forge N  le port que publie la forge du poste (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
@@ -61,14 +63,10 @@ fi
 # la garde ci-dessus si elle remonte. Le repli `:-$0` et cette position sont la même précaution.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-fleet_human_name() {
-  local g
-  if [[ -n "${PROVISION:-}" ]]; then g="$(dirname "$PROVISION")/../services/forge-gestures.sh"
-  else                               g="$SCRIPT_DIR/fleet/services/forge-gestures.sh"
-  fi
-  [[ -r "$g" ]] || return 0        # standalone : pas d'arbre, donc pas d'autorité — vide, pas une erreur
-  bash "$g" builtin-human 2>/dev/null || true
-}
+# ⚠ `fleet_human_name` A DISPARU D'ICI (⚖ user 2026-08-30). Elle allait demander à
+# `forge-gestures.sh` le nom du compte que la recette sèmerait, pour que le bandeau et l'étape 3 le
+# nomment. Le rail ne sème plus d'humain : il n'y a plus de nom à demander, et en nommer un serait
+# faire taper à l'opérateur une commande qui échoue.
 
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 BRANCH="main"
@@ -341,14 +339,17 @@ if [[ "$RAIL" == "workstation" ]]; then
     _banner_wslconf=""
     _banner_back="  snapshot ou image, et le rail n'en fournit aucun."
   fi
-  _banner_human="$(fleet_human_name)"
+  # ⚠ CE RAIL NE CRÉE PLUS D'UTILISATEUR, ET LE BANDEAU NE PEUT PAS LE PROMETTRE (⚖ user
+  # 2026-08-30). Il annonçait « Ce rail créera l'utilisateur « lcars » » — un compte de
+  # DÉMONSTRATION que la recette semait sur tout déploiement, avec un mot de passe posé et annoncé.
+  # Un déploiement de travail pose les AUTORITÉS ; les personnes s'inscrivent sur la forge, sous
+  # leur nom, et le convergeur les matérialise. Un bandeau qui promet un compte que rien ne créera
+  # est la première chose que l'opérateur lira, et la première qui sera fausse.
   echo ""
-  if [[ -n "$_banner_human" ]]; then
-    echo "  ${AMBER}Ce rail créera l'utilisateur « $_banner_human »${N} (uid libre au-dessus du siège,"
-  else
-    echo "  ${AMBER}Ce rail créera un utilisateur de fleet${N} (uid libre au-dessus du siège,"
-  fi
-  echo "  groupe fleet) : c'est lui qui fera tourner la fleet. Toi, tu restes le siège."
+  echo "  ${AMBER}Ce rail ne crée aucun humain${N} — il pose les autorités : ton siège, l'admin"
+  echo "  de la forge, les comptes de service. Les personnes s'inscrivent sur la forge ;"
+  echo "  un propriétaire les ajoute à la team « humans » et le convergeur les matérialise"
+  echo "  ici (uid libre au-dessus du siège, groupe fleet). Toi, tu restes le siège."
   _banner_body=("  sudo · paquets · groupe fleet · /opt/lcars")
   if [[ -n "$_banner_wslconf" ]]; then _banner_body+=("$_banner_wslconf"); fi
   _banner_body+=(
@@ -375,7 +376,7 @@ else
     )
   fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
-    _banner_body+=("  ${W}--bench : forge jetable + runner CI montés ici.${N}")
+    _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
   else
     _banner_body+=("  Il te faut une forge : FORGE_BASE_URL + un token.")
   fi
@@ -467,7 +468,7 @@ if [[ "$RAIL" == "box" ]]; then
     echo ""
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
     echo "  Deux voies :"
-    echo "    ${W}--bench${N}                     LCARS monte une forge jetable + un runner pour toi"
+    echo "    ${W}--bench${N}                     LCARS monte une forge jetable, un runner et un humain de démo"
     echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« fleet/deploy/box forge-check »)"
     exit 1
   fi
@@ -487,7 +488,7 @@ if [[ "$RAIL" == "box" ]]; then
 
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     echo ""
-    echo "  ${W}--bench${N} : forge jetable + boîte + runner CI, en un geste."
+    echo "  ${W}--bench${N} : forge jetable + boîte + runner CI + humain de démo, en un geste."
     # Le délégué reçoit la résolution, il ne la refait pas : sans cette ligne `bench-up.sh` retombe
     # sur un `docker` nu et meurt là où la porte vient d'annoncer « docker répond ». Le shim voyage avec.
     export DOCKER_BIN="$PROV_DOCKER_BIN"
@@ -601,9 +602,10 @@ else
   _step1b=""
 fi
 if [[ "$RAIL" == "workstation" ]]; then
-  _step3_human="$(fleet_human_name)"
-  _step3="${W}3.${N} ${W}sudo -u $_step3_human fleet_v2 start${N} — la fleet tourne sous"
-  _step3b="     « $_step3_human » ; toi tu l'atteins par le groupe ${W}fleet${N}."
+  # ⚠ AUCUN NOM ICI : ce rail n'en crée plus, et à cette seconde il n'y a peut-être encore personne.
+  # Nommer un compte que l'opérateur n'a pas serait lui faire taper une commande qui échoue.
+  _step3="${W}3.${N} ${W}sudo -u <ton humain> fleet_v2 start${N} — la fleet tourne sous un"
+  _step3b="     humain de fleet ; toi tu l'atteins par le groupe ${W}fleet${N}. Personne encore ? Inscris-toi sur la forge, team « humans »."
 else
   _step3="${W}3.${N} ${W}fleet_v2 start${N} — depuis la console de ton humain de"
   _step3b="     fleet (deck sur 20999) ; ssh entre en admiral, que GUARD B refuse."

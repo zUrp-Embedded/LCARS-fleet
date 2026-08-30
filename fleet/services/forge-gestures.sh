@@ -58,10 +58,19 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
 # chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
 # une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
-# Le compte integre, resolu UNE fois : les deux `TF_VAR_builtin_human` plus bas et le verbe
-# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-lcars}` dans le meme fichier
-# seraient trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
-BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
+# Le compte integre, resolu UNE fois : le `TF_VAR_builtin_human` plus bas et le verbe
+# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-…}` dans le meme fichier seraient
+# trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
+#
+# ⚠ VIDE PAR DEFAUT, ET C'EST LE CANON (⚖ user 2026-08-30). Il valait `lcars` : tout deploiement
+# semait donc un compte humain, avec un mot de passe pose et ANNONCE. Or aucun deploiement de
+# TRAVAIL ne fabrique d'humain — le rail pose les autorites (le siege, l'admin de forge, le master
+# token) et les personnes s'enrolent par la page d'inscription, sous leur nom. Le commentaire
+# ci-dessous le disait deja sans en tirer la consequence : « le siege BUILT-IN de DEMONSTRATION ».
+#
+# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
+# ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
@@ -457,7 +466,8 @@ cmd_apply() {
   # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
   # delibere et la variable dit ce qu'elle nomme.
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
-  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
+  # Sans compte de demonstration, pas d'adresse a lui donner : la deriver rendrait « @lcars.local ».
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human:+${TF_VAR_builtin_human}@lcars.local}}"
 
   # L'ORDRE EST UN INVARIANT, pas une preference : `instance/` porte les comptes partages, et une
   # adhesion peut nommer un compte qu'elle ne cree pas, jamais un compte qui n'existe pas.
@@ -853,7 +863,8 @@ cmd_install() {
   # BUILT-IN de demonstration, cible du tutoriel de promotion admin. Le defaut est desormais
   # delibere et la variable dit ce qu'elle nomme.
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
-  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
+  # Sans compte de demonstration, pas d'adresse a lui donner : la deriver rendrait « @lcars.local ».
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human:+${TF_VAR_builtin_human}@lcars.local}}"
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 

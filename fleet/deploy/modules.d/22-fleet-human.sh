@@ -11,59 +11,59 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-FLEET_HUMAN="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
-
+# ⚠ CE MODULE N'ATTEND PLUS UN COMPTE NOMME, ET C'EST LE CANON QUI A CHANGE (⚖ user 2026-08-30).
+# Il interrogeait `forge-gestures.sh builtin-human` et derivait si CE compte-la manquait. Or aucun
+# deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES (le siege, l'admin de
+# forge, le master token), et les personnes s'enrolent par la page d'inscription de la forge, sous
+# LEUR nom. Attendre « lcars » sur un poste de travail, c'etait attendre quelqu'un que plus rien ne
+# cree — une derive permanente des que le premier inscrit s'appelle autrement.
+#
+# ⚠ ET IL NE POSE PLUS RIEN : le convergeur cree le compte (`useradd -m`) ET l'ajoute au groupe
+# (`usermod -aG`, human-converger.sh:722 et :727). Le `usermod` qui vivait ici doublait ce geste.
+#
+# CE QUI LUI RESTE EN PROPRE, et que personne d'autre ne verifie : L'APPARTENANCE AU GROUPE.
+# `is_fleet_human` ne juge que l'uid (>= UID_MIN, pas le siege) ; un humain hors de `fleet` passe
+# donc cette borne et ne lira pourtant ni les jetons ni les zones de face. `64-services` compte les
+# humains, celui-ci regarde s'ils peuvent travailler.
 observe() {
-  local uid
-  if [[ -z "$FLEET_HUMAN" ]]; then
-    p_drift "le nom de l'humain intégré est indéterminable — « fleet/services/forge-gestures.sh builtin-human » ne répond pas.
-     Ce n'est pas un constat sur cette machine : c'est l'arbre du provisionnement qui est incomplet,
-     et RIEN ici ne peut être mesuré tant qu'il l'est."
-    return 0
-  fi
-  if ! uid="$(id -u -- "$FLEET_HUMAN" 2>/dev/null)"; then
-    p_drift "humain de fleet « $FLEET_HUMAN » absent — la forge pose son compte (48) et le convergeur le matérialise (64) ; « 64-services » vérifie avant de rendre la main.
-     Si le rail n'a pas abouti, le geste à la main : « useradd -m -G $PROV_FLEET_GROUP $FLEET_HUMAN »"
-    return 0
-  fi
-  if is_fleet_human "$FLEET_HUMAN"; then
-    p_ok "humain de fleet « $FLEET_HUMAN » (uid $uid) — il peut lancer la fleet"
-  else
-    # Le cas se produit si quelqu'un a créé le compte à la main sur l'uid du siège. On le DIT plutôt
-    # que de le déplacer : changer l'uid d'un compte existant orphelinerait tout ce qu'il possède.
-    p_drift "« $FLEET_HUMAN » existe en uid $uid, que GUARD B refuse (siège ou compte système) — la fleet ne démarrera pas sous lui"
-  fi
-  if id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
-    p_ok "« $FLEET_HUMAN » ∈ $PROV_FLEET_GROUP"
-  else
-    p_drift "« $FLEET_HUMAN » hors du groupe $PROV_FLEET_GROUP — il ne lira ni /opt/lcars/var/tokens ni les zones de face"
-  fi
+  local h found=0
+  while read -r h; do
+    [[ -n "$h" ]] || continue
+    found=1
+    if id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+      p_ok "« $h » (uid $(id -u -- "$h")) ∈ $PROV_FLEET_GROUP — il peut lancer la fleet"
+    else
+      p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
+    fi
+  done < <(fleet_humans)
+
+  # ⚠ ZERO HUMAIN N'EST PAS UNE DERIVE, c'est l'etat nominal d'une machine neuve — meme raison et
+  # meme forme que dans `64-services`, qui pose la question du COMPTE. Ici il n'y a simplement
+  # personne dont verifier le groupe.
+  #
+  # ⚠ ET LE GESTE RESTE PROPOSE (P-40) : le rail est le chemin, mais celui pour qui il n'a pas
+  # abouti doit avoir quelque chose a taper. La cible a change avec le canon — ce n'est plus « creer
+  # le compte integre », c'est « s'enroler », et `useradd` n'est plus que le dernier recours.
+  [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien a vérifier ici tant que personne ne s'est enrolé.
+     Le chemin : la page d'inscription de la forge, puis la team « $PROV_HUMANS_TEAM » — le convergeur matérialise au tour suivant.
+     Si le rail n'a pas abouti, le geste à la main : « useradd -m -G $PROV_FLEET_GROUP <login> »"
 }
 
 check() { observe; verdict_check; }
 
 apply() {
-  # `p_fail` ferait rendre 1 à l'apply ENTIER au rang 22 — pour un arbre incomplet que `48-forge-host`
-  # rencontrera de toute façon, en appelant le même script, avec un verdict qui porte la conséquence
-  # réelle (structure non posée). Refuser tôt sur une cause qu'un autre module nomme mieux fait
-  # chercher au mauvais rang.
-  if [[ -z "$FLEET_HUMAN" ]]; then
-    observe
-    verdict_apply
-  fi
-  if ! id -u -- "$FLEET_HUMAN" >/dev/null 2>&1; then
-    p_ok "« $FLEET_HUMAN » sera posé par la forge (48) puis matérialisé par le convergeur (64) : le même chemin qu'en production"
-    verdict_apply
-  fi
-
-  if ! id -nG "$FLEET_HUMAN" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
-    if usermod -aG "$PROV_FLEET_GROUP" -- "$FLEET_HUMAN" 2>/dev/null; then
+  # LE RATTRAPAGE, PAS LE GESTE NOMINAL : le convergeur pose le groupe en creant le compte. Ce qui
+  # arrive ici, c'est un compte cree A LA MAIN, ou un groupe perdu — l'apply le repose plutot que de
+  # renvoyer l'operateur a un `usermod` qu'il devra ecrire lui-meme.
+  local h
+  while read -r h; do
+    [[ -n "$h" ]] || continue
+    id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP" && continue
+    if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "« $FLEET_HUMAN » ajouté au groupe $PROV_FLEET_GROUP"
-    else
-      p_drift "« $FLEET_HUMAN » n'a pas pu rejoindre $PROV_FLEET_GROUP"
+      p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"
     fi
-  fi
+  done < <(fleet_humans)
 
   observe
   verdict_apply

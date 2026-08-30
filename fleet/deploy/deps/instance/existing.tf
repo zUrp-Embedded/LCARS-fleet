@@ -19,7 +19,9 @@ data "external" "forge" {
     gitea_url = var.gitea_url
     org       = ""
     teams     = ""
-    users     = join(",", concat([var.system_account, var.builtin_human], var.system_roles))
+    # `compact` : `builtin_human` est VIDE sur un déploiement de travail (aucun compte de démo n'y
+    # est semé). Sans lui, la requête porterait une entrée vide et ferait chercher un user « ».
+    users     = join(",", compact(concat([var.system_account, var.builtin_human], var.system_roles)))
   }
 }
 
@@ -43,7 +45,7 @@ import {
 
 import {
   for_each = local.existing_human
-  to       = gitea_user.human
+  to       = gitea_user.human[0]
   id       = each.value
 }
 

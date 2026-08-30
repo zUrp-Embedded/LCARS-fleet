@@ -76,45 +76,14 @@ new_password() { head -c 200 /dev/urandom | tr -dc 'A-Za-z' | cut -c1-10; }
 announce_password() { # announce_password <login> <mot de passe>
   prov_announce_credential "forge du poste — compte d'administration" "$1" "$2"
 }
-
-# ⚠ POSÉ UNE FOIS, PAS À CHAQUE CONVERGENCE. La recette est idempotente et rend 0 au second tour :
-# son code de sortie ne distingue pas « je viens de créer ce compte » de « il était déjà là ». Sans
-# marqueur, chaque apply reposait donc le mot de passe d'une personne derrière son dos, et invalidait
-# celui qu'elle avait noté au run précédent.
-# Le marqueur porte le LOGIN, pas un booléen : si l'humain intégré change de nom, c'est un autre
-# compte, et il a droit au sien. `PROV_FORGE_ADMIN_RESET` passe outre — c'est la porte par laquelle
-# un opérateur qui a perdu ses identifiants en redemande.
-BUILTIN_PW_MARK="$PROV_TOKENS_DIR/forge-builtin-human.posed"
-
-announce_builtin_human_password() {
-  local login tok pw code
-  login="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
-  [[ -n "$login" ]] || { p_warn "mot de passe forge de l'humain intégré NON posé : son nom est indéterminable"; return 0; }
-
-  if [[ -z "${PROV_FORGE_ADMIN_RESET:-}" ]] \
-     && [[ "$(cat "$BUILTIN_PW_MARK" 2>/dev/null || true)" == "$login" ]]; then
-    p_ok "mot de passe forge de « $login » déjà posé — non rejoué (« PROV_FORGE_ADMIN_RESET=1 » en repose un)"
-    return 0
-  fi
-
-  tok="$(read_token "$PROV_MASTER_TOKEN_FILE")"
-  [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
-
-  pw="$(new_password)"
-  code="$(printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
-            "$tok" "$login" "$pw" \
-          | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$LOCAL_URL/api/v1/admin/users/$login" 2>/dev/null || true)"
-  if [[ "$code" == "200" ]]; then
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    prov_announce_credential "forge du poste — humain de fleet" "$login" "$pw"
-    # Le marqueur s'écrit APRÈS la pose, jamais avant : posé d'avance, il ferait sauter la pose au
-    # run suivant sur la foi d'un geste qui a échoué.
-    write_atomic "$BUILTIN_PW_MARK" 0600 "root:root" <<<"$login" \
-      || p_warn "marqueur non écrit ($BUILTIN_PW_MARK) — le prochain apply reposera ce mot de passe"
-  else
-    p_warn "mot de passe forge de « $login » NON posé (HTTP ${code:-aucune réponse}) — son compte garde celui de la création"
-  fi
-}
+# ⚠ UN BLOC A DISPARU ICI : `announce_builtin_human_password` (⚖ user 2026-08-30). Il posait, puis
+# ANNONCAIT, le mot de passe forge d'un compte humain que la recette pre-semait. Le rail ne fabrique
+# plus d'humain de travail — il pose les AUTORITES (le siege, l'admin de forge, le master token) et
+# les personnes s'enrolent par la page d'inscription, sous leur nom. Un compte de travail aux
+# identifiants imprimes dans une sortie de console etait un geste de BANC, hereditaire de l'epoque
+# ou le poste en etait un ; `bench-forge-bootstrap.sh` le tient toujours, la ou il a un sens.
+# Le marqueur `forge-builtin-human.posed` part avec : il n'avait d'objet que pour ne pas reposer ce
+# mot de passe a chaque convergence.
 
 reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste créé>
   [[ -n "${PROV_FORGE_ADMIN_RESET:-}" ]] || return 0
@@ -128,8 +97,6 @@ reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste 
   else
     p_fail "repose du mot de passe de « $PROV_FORGE_ADMIN » en échec — le compte garde l'ancien"
   fi
-
-  announce_builtin_human_password
 }
 
 # Rend `admin`, `plain`, `absent`, ou `unknown` — quatre états, parce que « pas admin » et « pas de
@@ -422,7 +389,6 @@ apply() {
     p_ok "structure de la forge déjà conforme — rien à poser"
   fi
 
-  announce_builtin_human_password
   seat_binding_report apply
   verdict_apply
 }

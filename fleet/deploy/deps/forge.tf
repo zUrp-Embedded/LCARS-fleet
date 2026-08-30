@@ -370,8 +370,11 @@ resource "gitea_team_membership" "externals" {
 #
 # `count` et pas une ressource inconditionnelle : `humans` n'existe que dans l'org système (cf. la
 # table plus haut), donc l'adhésion la suit. Une org de catalogue n'a ni la team ni ce compte.
+# ⚠ DEUX CONDITIONS, PAS UNE (⚖ user 2026-08-30) : l'org système, ET un compte de démonstration à
+# inscrire. `builtin_human` est vide sur un déploiement de travail — l'adhésion nommerait alors un
+# compte « » que rien ne crée.
 resource "gitea_team_membership" "human" {
-  count    = var.org == var.system_org ? 1 : 0
+  count    = var.org == var.system_org && var.builtin_human != "" ? 1 : 0
   team_id  = gitea_team.this["humans"].id
   username = var.builtin_human
 }

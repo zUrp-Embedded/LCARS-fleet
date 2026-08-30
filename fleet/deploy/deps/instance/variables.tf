@@ -19,10 +19,11 @@ variable "seed_password" {
   description = "Mot de passe initial des comptes. Bots : simple formalité API (ils s'authentifient par token). Humain : change au 1er login."
 }
 
+# ⚠ VIDE = AUCUN COMPTE (⚖ user 2026-08-30) — même défaut et même raison que dans `deps/variables.tf`.
 variable "builtin_human" {
   type        = string
-  default     = "lcars"
-  description = "Login de l'humain daily, miroir de l'user OS de la boîte (`id -un`, sans table de correspondance). Défaut = l'humain DÉMO ; un déploiement réel passe le sien."
+  default     = ""
+  description = "Login de l'humain de DÉMONSTRATION d'un banc. VIDE (défaut) = aucun compte semé : un déploiement de travail ne fabrique pas d'humain, les personnes s'inscrivent sur la forge."
 }
 
 variable "builtin_email" {

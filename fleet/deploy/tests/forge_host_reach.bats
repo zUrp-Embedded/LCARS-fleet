@@ -747,82 +747,35 @@ STUB
   grep -q 'PROV_FORGE_ADMIN_RESET:-' <<<"$body"
   grep -qE '\[\[ "\$\{1:-1\}" -ne 0 \]\] \|\| return 0' <<<"$body"
 }
-
-# ─── LE SEED N'EST PAS UN MOT DE PASSE D'HUMAIN ─────────────────────────────────────────────────
+# ─── LE COMPTE DE DEMONSTRATION A QUITTE CE MODULE ──────────────────────────────────────────────
 #
-# La recette pose `password = var.seed_password` sur TOUT ce qu'elle cree — roles, compte systeme,
-# et l'humain integre. Le credential d'une personne etait donc le meme que celui du compte qui signe
-# les marqueurs systeme : le lui communiquer ouvrait les dix. Les roles s'en affranchissent au mint
-# (`force_password_for`) ; personne ne le faisait pour l'humain.
+# ⚠ QUATRE TEMOINS VIVAIENT ICI, ET LEUR SUJET EST PARTI (⚖ user 2026-08-30). Ils tenaient
+# `announce_builtin_human_password` : le mot de passe forge PROPRE de l'humain integre (pas le
+# seed partage), son login demande a l'autorite, et la repose couvrant les DEUX comptes.
+#
+# Le rail ne seme plus d'humain. Il pose les AUTORITES — le siege, l'admin de forge, le master
+# token — et les personnes s'inscrivent sur la forge sous leur nom. Un compte de TRAVAIL dont le
+# mot de passe est pose puis annonce en console etait un geste de BANC, herite de l'epoque ou le
+# poste en etait un ; `bench-forge-bootstrap.sh` le tient toujours, la ou il a un sens.
+#
+# La repose ne couvre donc plus qu'un compte, et « une porte a moitie » n'a plus de moitie : il n'y
+# a qu'une serrure. Ce que ces temoins protegeaient d'autre — le seed n'est pas un mot de passe
+# d'humain — est desormais vrai par construction : aucun humain n'est cree ici.
+#
+# UNE SEULE CHOSE SURVIT, ET ELLE VAUT PLUS LARGE QU'AVANT : la cicatrice 6-141. Elle etait mesuree
+# sur le corps de la fonction disparue ; elle porte maintenant sur TOUT le module, ce qu'elle aurait
+# du faire des le debut — un secret en ARGV ne devient pas acceptable parce qu'il sort d'une autre
+# fonction.
 
-@test "l'humain integre recoit son PROPRE mot de passe forge, pas le seed" {
+@test "aucun secret ne passe par ARGV — la cicatrice 6-141 porte sur TOUT le module" {
+  # `-d` met la donnee dans la ligne de commande, lisible dans /proc de tout l'hote pendant l'appel.
+  # Le fichier de config de curl accepte `data =`, donc stdin : c'est la forme que ce module emploie.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
-  [ -n "$body" ]
-  # Le geste est celui des roles : PATCH admin avec le jeton master, jamais une lecture du seed.
-  grep -q 'request = .PATCH.' <<<"$body"
-  grep -q 'admin/users/' <<<"$body"
-  # Meme raison qu'en tete de fichier : `!` non terminal = assertion inerte.
-  [ "$(grep -c 'SEED_FILE' <<<"$body")" -eq 0 ]
-  # Et il rejoint le banner par le canal, pas un echo perdu au rang 48.
-  grep -q 'prov_announce_credential' <<<"$body"
-}
-
-@test "aucun secret ne passe par ARGV — ni le jeton master ni le mot de passe pose" {
-  # Cicatrice 6-141 : `-d` met la donnee dans la ligne de commande, lisible dans /proc de tout
-  # l'hote pendant l'appel. Le fichier de config de curl accepte `data =`, donc stdin.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
+  local body; body="$(code)"
+  # Il parle bien a curl par un fichier de config — sinon l'assertion suivante serait vraie a vide.
   grep -q 'curl -K -' <<<"$body"
   refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
-
-@test "le login se DEMANDE, et il n'a plus qu'une origine" {
-  # Le compte integre est cree par la recette sous le defaut de `forge-gestures.sh`. Une fonction qui
-  # sortirait en silence faute de nom ne poserait donc jamais le mot de passe de ce compte,
-  # c'est-a-dire jamais dans le cas ou elle sert.
-  #
-  # ⚠ ELLE A LU `PROV_FLEET_HUMAN` D'ABORD, ET C'ETAIT UNE SECONDE ORIGINE. Elle ne portait un nom
-  # que si un drapeau l'avait dit ; sinon elle retombait sur l'autorite — donc le chemin nominal
-  # etait le REPLI, et le chemin nomme etait celui que personne n'exercait. Le drapeau retire, il ne
-  # reste que la question, et elle est posee sans condition.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
-  grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  ! grep -q '"lcars"' <<<"$body"
-}
-
-@test "le nom du compte integre a UNE autorite, et elle repond" {
-  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
-  [ -f "$g" ]
-  run bash "$g" builtin-human
-  [ "$status" -eq 0 ]
-  [ -n "$output" ]
-  # La surcharge passe par la meme porte — sinon ce serait une seconde autorite deguisee en defaut.
-  run env LCARS_BUILTIN_HUMAN=vanille bash "$g" builtin-human
-  [ "$output" = "vanille" ]
-  # Et le litteral n'existe qu'UNE fois dans le CODE du fichier qui le porte — les commentaires en
-  # parlent, et un compte qui les inclut mesure la prose au lieu de la regle.
-  [ "$(grep -vE '^\s*#' "$g" | grep -c 'LCARS_BUILTIN_HUMAN:-')" -eq 1 ]
-}
-
-@test "la repose couvre les DEUX comptes — une porte a moitie n'est pas une porte" {
-  # L'annonce de l'humain integre est liee a la passe qui POSE la structure : sur une machine deja
-  # provisionnee elle est sautee. Un operateur qui a perdu ses identifiants les a perdus tous les
-  # deux, donc le recours doit rendre les deux.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
-  grep -q 'announce_builtin_human_password' <<<"$body"
-  # ⚠ ET L'APPEL EST INCONDITIONNEL. Il vivait sous un `if [[ -n "$PROV_FLEET_HUMAN" ]]`, donc la
-  # moitie « humain integre » de cette porte ne rouvrait que si l'operateur avait tape un drapeau —
-  # c'est-a-dire presque jamais, pendant que la perte qu'elle repare, elle, arrivait a l'identique.
-  # Une porte qui ne rouvre que la moitie de ce qu'on a perdu n'est pas une porte, et une porte
-  # conditionnee a un geste que personne ne fait n'en est pas une non plus.
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  ! grep -q 'fleet-human' <<<"$body"
-}
-
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
   # `sudo` fait env_reset : un drapeau absent de REEXEC_ENV est mange en silence, et le geste de
   # l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.

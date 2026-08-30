@@ -203,25 +203,33 @@ setup() {
 # raison d'etre de ce rail (⚖ USER 2026-08-25 : « livrer out of the box un user fleet enabled »), et
 # il se dit maintenant sans condition.
 
-@test "le bandeau annonce le compte SANS CONDITION — il n'y a plus de cas « rien ne sera cree »" {
+@test "le bandeau ne PROMET aucun humain — ce rail n'en cree pas, il pose les autorites" {
+  # ⚠ CE TEMOIN A CHANGE DE SENS, ET C'EST LA PREMISSE QUI EST TOMBEE (⚖ user 2026-08-30). Il
+  # exigeait que le bandeau annonce « créera l'utilisateur « lcars » » SANS CONDITION, parce que la
+  # recette semait ce compte sur tout deploiement — l'arbitrage du 26/08 le justifiait par « le
+  # poste/bench c'est pour la DEMO ». Le poste n'est plus un banc : c'est un deploiement de travail,
+  # il pose les AUTORITES et les personnes s'inscrivent sur la forge sous leur nom.
+  #
+  # Ce que le bandeau doit dire reste ce qu'il a toujours du dire : LA VERITE SUR CE QUI VA ARRIVER.
+  # Promettre un compte que rien ne creera est la premiere ligne que lit l'operateur, et la premiere
+  # qui serait fausse.
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
-  [[ "$output" == *"créera l'utilisateur"* ]]
-  [[ "$output" != *"Aucun humain de fleet nommé"* ]]
-  [[ "$output" != *"rien ne sera créé"* ]]
+  [[ "$output" != *"créera l'utilisateur"* ]]
+  [[ "$output" == *"ne crée aucun humain"* ]]
+  # ET IL DIT PAR OU ILS ARRIVENT : un refus sans chemin laisse l'operateur devant une fleet muette.
+  [[ "$output" == *"inscrivent sur la forge"* ]]
 }
 
-@test "le nom annonce est celui de l'AUTORITE, pas un litteral de ce fichier" {
-  # Le bandeau doit nommer le compte que la recette creera vraiment. La seule facon de le savoir est
-  # de le DEMANDER : un litteral ici resterait d'accord avec l'autorite jusqu'au jour ou l'un des
-  # deux bouge, et c'est celui qu'on ne relit pas qui gagne ce jour-la.
-  local attendu
-  attendu="$(bash "$REPO/fleet/services/forge-gestures.sh" builtin-human)"
-  [ -n "$attendu" ]
-  run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
-  [[ "$output" == *"créera l'utilisateur « $attendu »"* ]]
-  # ET LE NOM N'EST PAS GRAVE ICI : la porte interroge le verbe, elle ne recopie pas sa reponse.
-  run grep -c 'builtin-human' "$SRC"
-  [ "$status" -eq 0 ]
+@test "AUCUN nom d'humain n'est ecrit dans la porte — elle n'en connait plus" {
+  # ⚠ CE TEMOIN EXIGEAIT L'INVERSE, ET SON MOTIF SURVIT INTACT (⚖ user 2026-08-30). Il demandait que
+  # le bandeau nomme le compte en INTERROGEANT l'autorite (`builtin-human`) plutot qu'en recopiant un
+  # litteral — « celui qu'on ne relit pas gagne le jour ou l'un des deux bouge ». La porte ne nomme
+  # plus personne du tout : elle ne cree pas d'humain, et a l'instant ou elle parle il n'y en a
+  # peut-etre aucun. Ne rien ecrire satisfait le motif d'origine par le haut.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  ! grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  # ET ELLE N'INTERROGE PLUS L'AUTORITE : il n'y a plus de nom a demander.
+  ! grep -q 'builtin-human' <<<"$code"
 }
 
 @test "VERROU : « --fleet-human » est REFUSE, il ne revient pas en passe-plat muet" {
@@ -245,7 +253,11 @@ setup() {
   # provisionnement complet (paquets, /local, une forge), ce qu'un temoin ne joue pas. Ce qui se
   # garde ici est que les deux formes EXISTENT et sont choisies par le terrain — un bandeau qui
   # redeviendrait inconditionnel le perdrait sans que rien ne rougisse.
-  run grep -c 'sudo -u \$_step3_human fleet_v2 start' "$SRC"
+  # ⚠ LA FORME NE NOMME PLUS PERSONNE (⚖ user 2026-08-30) : ce rail ne crée pas d'humain, et à
+  # l'instant où il parle il n'y en a peut-être aucun. Elle interrogeait `builtin-human` pour écrire
+  # « sudo -u lcars » ; nommer un compte que l'opérateur n'a pas, c'est lui faire taper une commande
+  # qui échoue — la même faute que celle décrite au-dessus, par l'autre bout.
+  run grep -c 'sudo -u <ton humain> fleet_v2 start' "$SRC"
   [ "$output" = "1" ]
   run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
   [ "$output" = "1" ]

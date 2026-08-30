@@ -593,75 +593,50 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   printf '%s\n' "$output" | refute_out '^POSÉ .*(déjà présent|lcars.*matérialis)'
 }
 
-@test "AUCUN humain a materialiser : la team vide est DITE, et l'absence du pre-seme est la DERIVE" {
+@test "AUCUN humain a materialiser : la team vide est DITE, et ce n'est pas une derive" {
   # ⚖ USER 2026-08-25 : « en prod (le mode boite), on peut se passer de pre-seed un user (…) et
-  # l'inscription reste ouverte sur la forge. » Une team `humans` vide est donc un etat legitime —
-  # DANS LA BOITE. Et cette passe n'y tourne jamais : elle vit dans `apply()`, et ce module est
-  # `APPLY-ON: wsl linux`. Sur le poste, le rail pre-seme (⚖ meme arbitrage, meme phrase, autre
-  # moitie), donc repartir sans personne est un manquement.
+  # l'inscription reste ouverte sur la forge. » Une team `humans` vide est un etat legitime.
   #
-  # LES DEUX PHRASES COEXISTENT, ET C'EST LE POINT : la premiere explique POURQUOI la population est
-  # vide (la team l'est), la seconde dit ce que ca COUTE ici. Fusionner les deux ferait perdre la
-  # cause ou la consequence, et c'est toujours celle qui manque qu'on cherche.
+  # ⚠ CE TEMOIN EXIGEAIT EN PLUS UNE DERIVE, ET C'EST SON PERIMETRE QUI A CHANGE (⚖ user
+  # 2026-08-30). La phrase de 2026-08-25 disait « en prod (le mode boite) » parce qu'a cette date le
+  # POSTE etait pense comme une demo — « le poste/bench c'est pour la demo », meme arbitrage. Le
+  # poste est un deploiement de TRAVAIL : la meme doctrine s'y applique, et le rail n'y pre-seme
+  # plus rien. Il ne reste donc aucun compte dont l'absence serait un manquement.
+  #
+  # La premiere phrase — celle qui EXPLIQUE pourquoi la population est vide — survit seule, et elle
+  # se suffit : la cause est dite, et il n'y a plus de consequence a nommer.
   humans_are
   stub_converger 0
   mod apply
-  [ "$status" -eq 2 ]     # applique, drift residuel
-  [[ "$output" == *"aucun humain à matérialiser"* ]]
-  # ⚠ LA SEVERITE SE MESURE AUSSI. Une mutation `p_ok`→`p_warn` sur cette branche laissait les
-  # trente temoins verts : une forge dont la team se remplit encore verrait un WARN a chaque apply —
-  # du bruit permanent sur l'explication d'un etat, pas sur le verdict.
-  [[ "$output" != *"WARN"*"aucun humain"* ]]
-  # Et le verdict, lui, NOMME le compte que ce rail devait livrer.
-  [[ "$output" == *"est l'humain que ce rail pré-sème, et rien ne l'a matérialisé"* ]]
-}
-
-@test "la garde nomme le compte que L'AUTORITE declare, pas un litteral de ce module" {
-  # ⚠ CETTE GARDE ETAIT ARMEE PAR UN DRAPEAU, DONC MUETTE DANS LE CAS NOMINAL. Elle ne se declenchait
-  # que si l'operateur avait tape `--fleet-human <nom>` — c'est-a-dire presque jamais — pendant que
-  # la panne qu'elle decrit, elle, se produisait a l'identique. Le nom se demande desormais a son
-  # autorite, et le temoin le pilote par la MEME porte (`LCARS_BUILTIN_HUMAN`), jamais par une
-  # variable que le code ne lirait plus.
-  #
-  # Le cas qui mord n'est pas exotique : `48-forge-host` derive si `tofu` manque, mais la forge est
-  # DEBOUT (le compose a reussi). Le convergeur l'interroge, obtient une team vide, rend 0 — et sans
-  # cette garde le module concluait « ce n'est pas une faute » alors que la cause est vingt rangs
-  # plus haut. Une cause fausse coute plus cher a celui qui debugge que pas de cause du tout.
-  humans_are
-  stub_converger 0
-  LCARS_BUILTIN_HUMAN=bob mod apply
-  [ "$status" -eq 2 ]     # applique, drift residuel
-  [[ "$output" == *"« bob » est l'humain que ce rail pré-sème, et rien ne l'a matérialisé"* ]]
-  [[ "$output" == *"48-forge-host"* ]]
-}
-
-@test "le compte pre-seme BIEN materialise ne derive pas — le pendant du precedent" {
-  # Sans lui, une garde qui deriverait TOUJOURS passerait le temoin ci-dessus.
-  humans_are
-  stub_converger 0 'bob:x:1001:1001::/home/bob:/bin/bash'
-  LCARS_BUILTIN_HUMAN=bob mod apply
+  # ⚠ 0 ET PLUS 2, ET C'EST TOUTE LA MESURE. Le drift residuel de ce decor, c'etait l'absence
+  # d'humain elle-meme — il n'en reste aucun autre. Un apply qui CONVERGE sur une machine sans
+  # personne est exactement ce que le canon affirme : un deploiement neuf est convergé, il attend
+  # son premier inscrit. C'est cette ligne qui, seule, distingue « il attend » de « il a echoue ».
   [ "$status" -eq 0 ]
-  [[ "$output" != *"rien ne l'a matérialisé"* ]]
+  [[ "$output" == *"aucun humain à matérialiser"* ]]
+  # ⚠ LA SEVERITE SE MESURE AUSSI, DANS L'AUTRE SENS MAINTENANT : cette branche EXPLIQUE un etat,
+  # elle ne le juge pas. Un `p_warn` ici ferait du bruit permanent sur une forge dont la team se
+  # remplit encore, et un `p_drift` re-condamnerait tout deploiement neuf.
+  [[ "$output" != *"WARN"*"aucun humain"* ]]
+  [[ "$output" != *"DRIFT"*"aucun humain à matérialiser"* ]]
+  # ET PLUS AUCUN COMPTE N'EST NOMME : ce rail n'en pre-seme plus, donc il n'en attend plus.
+  [[ "$output" != *"pré-sème"* ]]
 }
 
-@test "AUTORITE MUETTE : on ne devine pas un nom, on dit qu'on ne peut pas mesurer" {
-  # Un nom indeterminable et un compte absent appellent deux gestes opposes : l'un fait chercher un
-  # compte manquant, l'autre fait reparer l'arbre du provisionnement. Les confondre envoie l'operateur
-  # au mauvais endroit — et un repli cable ici ferait pire : il accuserait un compte precis sur la foi
-  # d'un nom que personne n'a declare.
-  humans_are
-  stub_converger 0
-  # L'arbre est deplace dans un bac ou `repo_root` ne trouve PAS `fleet/services/` : le module ne
-  # peut plus interroger l'autorite. La lib emmene son voisin — elle le source par chemin relatif, et
-  # sans lui l'echec viendrait du decor au lieu du sujet.
-  local orph="$BATS_TEST_TMPDIR/vide/fleet/deploy/lib"
-  mkdir -p "$orph"
-  cp "$PROVISION_LIB" "$(dirname "$PROVISION_LIB")/docker-endpoint.sh" "$orph/"
-  PROVISION_LIB="$orph/provision-lib.sh" mod apply
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"indéterminable"* ]]
-}
-
+# ⚠ TROIS TEMOINS ONT DISPARU ICI AVEC LEUR SUJET (⚖ user 2026-08-30) — « la garde nomme le compte
+# que L'AUTORITE declare », « le compte pre-seme BIEN materialise ne derive pas » et « AUTORITE
+# MUETTE : on ne devine pas un nom ». Ils tenaient un bloc de `64-services` qui verifiait, apres la
+# passe du convergeur, que « l'humain que ce rail pre-seme » avait bien ete materialise.
+#
+# Le rail ne pre-seme plus : il pose les AUTORITES, et les personnes s'inscrivent sur la forge sous
+# leur nom. Il n'y a donc plus de compte attendu dont l'absence serait une derive — et le bloc
+# contredisait deja son propre voisin, six lignes plus haut, qui disait « ce n'est pas une faute »
+# du meme fait.
+#
+# CE QUI SURVIT, ET QUI ETAIT LE MOTIF LE PLUS FIN DES TROIS : « un nom indeterminable et un compte
+# absent appellent deux gestes opposes ». Il n'a plus de porteur ici parce qu'aucun nom n'est plus
+# demande — mais la regle vaut toujours partout ou une autorite est interrogee, et `fleet_human.bats`
+# la mesure encore sur son propre terrain.
 @test "un environnement de services NON POSE arrete l'apply AVANT la passe — pas de garde en double" {
   # ⚠ CE TEMOIN A FAILLI GARDER UNE GARDE INATTEIGNABLE. Une relecture demandait un `[[ -r ]]` avant
   # la passe, au motif qu'un fichier absent rend le meme rc=1 qu'une dependance manquante. Vrai en
@@ -681,32 +656,44 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 
 # ─── LA SONDE D'HUMAINS DU CHECK — LE TROU DE LA BOITE ──────────────────────────────────────────
 #
+# ─── LA SONDE D'HUMAINS DU CHECK — ELLE DIT, ELLE NE COMPTE PAS ─────────────────────────────────
+#
 # ⚠ SUR UNE BOITE DE PRODUCTION, AUCUN MODULE NE VERIFIAIT QU'IL EXISTE UN HUMAIN. `22-fleet-human`
 # et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont meme pas SELECTIONNES.
-# Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait en `p_warn` des
-# l'absence de systemd, AVANT toute sonde. Un `provision doctor` sur une boite annoncait donc 0
-# faute pendant que GUARD B aurait refuse tout `fleet_v2 start`, faute de compte.
+# Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait AVANT toute sonde des
+# l'absence de systemd. Un `provision doctor` sur une boite annoncait donc 0 faute pendant que
+# GUARD B aurait refuse tout `fleet_v2 start`, faute de compte. La sonde a ete ajoutee pour ca.
+#
+# ⚠ ELLE A D'ABORD DERIVE, ET C'ETAIT L'ERREUR SYMETRIQUE (⚖ arbitrage user 2026-08-30). Aucun
+# deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES, les personnes s'enrolent
+# par la page d'inscription de la forge. Zero humain est donc l'etat NOMINAL d'une machine neuve,
+# poste comme boite — pas une derive. Compte comme drift, il devenait un ECHEC de convergence sur
+# docker (D6, `apply:check`), donc une boite de production jamais convergee tant que personne ne
+# s'inscrit. Le meme entrypoint publiait `provision.rc=1` a cote de `humans.rc=0`.
+#
+# Les deux temoins ci-dessous tiennent les DEUX moities : la sonde parle, et elle ne compte pas.
 
 @test "check SANS systemd sonde quand meme la population — le cas exact de la boite" {
   # Le decor coupe systemd : c'est le chemin de la boite, et c'est celui ou la sonde manquait.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  box_services_present
   mod check
-  [ "$status" -eq 1 ]     # check : 1 = DRIFT
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
-  [[ "$output" == *"GUARD B"* ]]
+  [[ "$output" == *"fleet_v2 start"* ]]
 }
 
-@test "check SANS systemd et SANS humain : le doctor d'une boite DERIVE, il ne rend pas OK" {
-  # ⚠ LE PENDANT MANQUAIT, ET C'EST LE CAS QUI COMPTE EN PRODUCTION. Le temoin voisin mesure la
-  # branche saine ; sans celui-ci, une regression de `probe_fleet_humans` qui cesserait de deriver
-  # passerait inapercue — et `provision doctor --substrate docker` redirait « tout va bien » sur une
-  # boite ou GUARD B refuse tout `fleet_v2 start`. C'est exactement l'etat d'avant ce lot.
+@test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {
+  # ⚠ LES DEUX ASSERTIONS SONT LOAD-BEARING, ET ELLES DISENT DES CHOSES OPPOSEES. Le `grep` interdit
+  # qu'on rende la sonde muette « puisqu'elle ne derive plus » — ce serait revenir au trou d'avant.
+  # Le `status -eq 0` interdit qu'on la remette en drift — ce serait re-condamner toute boite neuve.
+  # Une regression d'un cote OU de l'autre rougit ici.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  box_services_present
   mod check
-  [ "$status" -eq 1 ]
-  printf '%s\n' "$output" | grep -qE '^DRIFT .*aucun humain de fleet sur cette machine'
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
 }
 
 # LE DECOR DE LA MECANIQUE DE BOITE — sans systemd, le module ne verifie plus des unites mais
@@ -798,4 +785,30 @@ box_services_present() {
     eval "$(sed -n "/^probe_seat_uid()/,/^}/p" "$2")"; probe_seat_uid' _ "$BATS_TEST_TMPDIR/absent/services.env" "$MOD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"DRIFT"*"LCARS_SYSADMIN_UID"* ]]
+}
+
+# ─── LE SUBSTRAT CHOISIT LA MECANIQUE, PAS L'ABSENCE DE SYSTEMD ─────────────────────────────────
+
+@test "WSL sans systemd ACTIF : on ne cherche pas un superviseur de boite" {
+  # ⚠ CE CAS EST LE PREMIER APPLY DE TOUT POSTE WSL, ET AUCUN TEMOIN NE LE COUVRAIT. `30-wsl` pose
+  # `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown` : a cet
+  # instant `/run/systemd/system` n'existe pas encore. Une branche conditionnee a la seule absence
+  # de systemd envoyait donc un POSTE chercher `supervise.sh` — la mecanique de la BOITE, qui n'est
+  # pas la — et deriver sur son absence.
+  #
+  # Regression introduite et attrapee le meme jour (2026-08-30), en changeant `have_systemd` pour le
+  # test canonique. Le correctif etait bon ; c'est la branche qui le suivait qui melangeait deux
+  # questions : « quelle mecanique tient les services ici » (le SUBSTRAT) et « systemd est-il
+  # utilisable » (la sonde).
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  PROV_SUBSTRATE=wsl mod check
+  [[ "$output" == *"pas de systemd"* ]]
+  [[ "$output" != *"superviseur"* ]]
+}
+
+@test "TEMOIN DU TEMOIN : sur DOCKER, c'est bien le superviseur qu'on regarde" {
+  # Sans lui, rendre la branche boite inatteignable passerait le temoin ci-dessus.
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  PROV_SUBSTRATE=docker mod check
+  [[ "$output" == *"superviseur"* ]]
 }

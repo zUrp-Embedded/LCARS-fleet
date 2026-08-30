@@ -29,10 +29,14 @@ variable "seed_password" {
 # installation, et il sert de cible au tutoriel de promotion (l'admiral le passe `is_admin`, l'onglet
 # admin du deck apparaît à sa session suivante). Un déploiement réel ne « passe pas le sien » — les
 # vraies personnes s'inscrivent seules et un admin les ajoute à `humans`.
+# ⚠ VIDE = AUCUN COMPTE, ET C'EST LE DÉFAUT (⚖ user 2026-08-30). Il valait `lcars`, donc tout
+# déploiement semait ce compte — le commentaire ci-dessus disait pourtant déjà qu'un déploiement
+# réel ne passe pas le sien. La conséquence manquait : elle est ici. Un banc le NOMME
+# (`bench-forge-bootstrap.sh`), et c'est du confort assumé sur une machine jetable.
 variable "builtin_human" {
   type        = string
-  default     = "lcars"
-  description = "Login du compte BUILT-IN de démonstration — pas une personne : le siège tutoriel sur lequel un admin exerce la promotion."
+  default     = ""
+  description = "Login du compte BUILT-IN de démonstration — pas une personne : le siège tutoriel sur lequel un admin exerce la promotion. VIDE (défaut) = aucun compte n'est semé, et c'est le cas d'un déploiement de travail."
 }
 
 variable "builtin_email" {

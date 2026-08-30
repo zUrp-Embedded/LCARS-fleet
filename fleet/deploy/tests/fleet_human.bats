@@ -78,13 +78,17 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
 
 # Le module joue POUR DE VRAI, dispatch compris : `mod` source un fichier tronque, donc il ne mesure
 # pas le CODE DE SORTIE — et c'est lui qui porte les deux dialectes.
+# ⚠ `PASSWD_FILE` TRAVERSE, ET IL LE DOIT DEPUIS QUE LE MODULE ENUMERE. Il attendait un compte
+# NOMME (`LCARS_BUILTIN_HUMAN`) ; il lit maintenant la population (`fleet_humans`), donc un temoin
+# qui ne transmet pas le passwd du decor mesure la MACHINE qui le joue — et rend vert ou rouge
+# selon qui lance le gate. Le pendant `LCARS_BUILTIN_HUMAN` a disparu avec le sujet.
 nu() { # nu <check|apply>
   run env PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
     PROVISION_MODULE=22-fleet-human PROV_TOKENS_DIR="$BATS_TEST_TMPDIR" \
     PROV_FLEET_GROUP="$(id -gn)" PROV_HUMAN="$(id -un)" \
     PASSWD_DEFS="$PASSWD_DEFS" \
+    ${PASSWD_FILE:+PASSWD_FILE="$PASSWD_FILE"} \
     ${LCARS_SYSADMIN_UID:+LCARS_SYSADMIN_UID="$LCARS_SYSADMIN_UID"} \
-    ${LCARS_BUILTIN_HUMAN:+LCARS_BUILTIN_HUMAN="$LCARS_BUILTIN_HUMAN"} \
     bash "$SRC" "$1"
 }
 
@@ -161,85 +165,90 @@ nu() { # nu <check|apply>
   # Sans ce pendant, supprimer purement le mot `useradd` du fichier passerait le temoin precedent
   # tout en privant l'operateur du seul geste qu'il puisse taper lui-meme (P-40). Le rail est le
   # chemin ; ce geste est ce qui reste a celui pour qui le rail n'a pas abouti.
-  LCARS_BUILTIN_HUMAN="n-existe-pas-$$" mod 'observe'
+  # ⚠ LA CIBLE A CHANGE AVEC LE CANON (⚖ user 2026-08-30) : le chemin nominal n'est plus « creer le
+  # compte integre » — plus aucun deploiement de travail ne fabrique d'humain — mais « s'enroler sur
+  # la forge ». Les DEUX doivent etre dits : le chemin, et le recours.
+  passwd_with
+  mod 'observe'
   [[ "$output" == *"useradd"* ]]
   [[ "$output" == *"$PROV_FLEET_GROUP"* ]]
+  [[ "$output" == *"inscription"* ]]
 }
 
-# ─── LE NOM VIENT DE SON AUTORITE, ET RIEN D'AUTRE ──────────────────────────────────────────────
+# ─── AUCUN HUMAIN N'EST NOMME ICI ───────────────────────────────────────────────────────────────
 
-@test "le nom du compte integre n'est PAS recopie ici — son auteur est forge-gestures.sh" {
-  # Un second litteral ne reste d'accord avec le premier que jusqu'au jour ou l'un des deux bouge.
-  # ⚠ LE MOTIF EXCLUT UN POINT DEVANT : `~/.lcars` est un REPERTOIRE, pas le nom d'un compte, et il
-  # est legitime dans ce module. Un grep nu sur « lcars » rougit dessus et fait croire a une regle
-  # enfreinte la ou il n'y a qu'un chemin.
+@test "le nom d'un compte n'est JAMAIS ecrit ici — ce module ne connait personne par son nom" {
+  # ⚠ CE TEMOIN A CHANGE DE RAISON, PAS DE FORME (⚖ user 2026-08-30). Il interdisait de RECOPIER le
+  # nom du compte integre, dont `forge-gestures.sh` etait l'autorite, et exigeait qu'on aille le lui
+  # DEMANDER. Le canon a supprime le sujet : le rail pose les autorites, les personnes s'enrolent
+  # sous LEUR nom. Ce module n'attend donc plus personne — il enumere (`fleet_humans`) et regarde le
+  # groupe.
+  #
+  # L'interdiction du litteral survit, avec une raison PLUS FORTE qu'avant : un nom ecrit ici serait
+  # un humain que le rail declare, ce que le canon interdit — pas seulement une seconde copie.
+  # ⚠ LE MOTIF EXCLUT UN POINT DEVANT : `~/.lcars` est un REPERTOIRE, pas le nom d'un compte.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   ! grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
-  # ET IL LA DEMANDE : ne pas recopier ne suffit pas, encore faut-il aller chercher.
-  grep -q 'forge-gestures.sh" builtin-human' <<<"$code"
   # ⚠ ET PLUS AUCUNE SECONDE ORIGINE. `PROV_FLEET_HUMAN` etait posee par `--fleet-human`, retire :
   # la rouvrir redonnerait deux sources a un fait qui n'en a qu'une, et la seconde serait vide.
   ! grep -q 'PROV_FLEET_HUMAN' <<<"$code"
+  # ET IL N'INTERROGE PLUS L'AUTORITE DU NOM : il n'a plus de nom a demander.
+  ! grep -q 'builtin-human' <<<"$code"
 }
 
-@test "AUTORITE MUETTE : « je ne peux pas mesurer » n'est pas « il n'y a personne »" {
-  # Les deux appellent des gestes OPPOSES : l'un fait chercher un compte manquant, l'autre fait
-  # reparer l'arbre du provisionnement. Un repli cable ici ferait pire que les confondre — il
-  # accuserait un compte precis sur la foi d'un nom que personne n'a declare.
-  #
-  # L'arbre est deplace dans un bac ou `repo_root` ne trouve PAS `fleet/services/`. La lib emmene son
-  # voisin `docker-endpoint.sh` : elle le source par chemin relatif, et sans lui l'echec viendrait du
-  # decor au lieu du sujet.
-  local orph="$BATS_TEST_TMPDIR/vide/fleet/deploy/lib"
-  mkdir -p "$orph"
-  cp "$PROVISION_LIB" "$(dirname "$PROVISION_LIB")/docker-endpoint.sh" "$orph/"
-  run env PROVISION_LIB="$orph/provision-lib.sh" PROVISION_MODULE=22-fleet-human \
-    PROV_TOKENS_DIR="$BATS_TEST_TMPDIR" PROV_FLEET_GROUP="$(id -gn)" \
-    PROV_HUMAN="$(id -un)" PASSWD_DEFS="$PASSWD_DEFS" LCARS_SYSADMIN_UID=1000 \
-    bash "$SRC" check
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"indéterminable"* ]]
-  [[ "$output" == *"builtin-human"* ]]
-  # Et surtout : il n'invente aucun nom pour le dire.
-  [[ "$output" != *"« lcars »"* ]]
-}
+# ⚠ DEUX TEMOINS ONT DISPARU ICI, ET LEUR SUJET AVEC (⚖ user 2026-08-30) — pas leur motif, qu'il
+# n'y a simplement plus rien pour porter :
+#
+#   « AUTORITE MUETTE : je ne peux pas mesurer n'est pas il n'y a personne » — il gardait le module
+#   d'accuser un compte precis quand `forge-gestures.sh builtin-human` ne repondait pas. Le module
+#   n'interroge plus aucune autorite de nom : il enumere la population, et une population vide se
+#   mesure sans ambiguite.
+#
+#   « un humain que GUARD B REFUSE est un drift NOMME » — il couvrait le compte cree a la main sur
+#   l'uid du siege. Il exigeait qu'on sache QUI aurait du etre un humain ; sans compte attendu, la
+#   phrase n'a plus de sujet — un compte a l'uid du siege est simplement le siege. La regle qu'il
+#   protegeait (on DIT, on ne deplace pas un uid) vit dans `is_fleet_human`, et `fleet_human.bats`
+#   la mesure par la borne (temoins « nobody » et « la population ne regarde AUCUN groupe »).
 
 # ─── LES ETATS REELS DE LA MACHINE ──────────────────────────────────────────────────────────────
 
-@test "compte ABSENT : la SONDE derive, et elle dit QUI le materialise" {
-  # ⚠ CE TEMOIN EXIGEAIT « CRÉERA » — la promesse de ce module. Elle n'est plus vraie : il ne cree
-  # plus. Ce que la sonde doit dire maintenant, c'est le CHEMIN — 48 seme, 64 materialise et
-  # verifie — sinon un operateur qui lit « absent » n'a aucune idee de ce qui va s'en occuper.
-  LCARS_BUILTIN_HUMAN="n-existe-pas-$$" mod 'check'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DRIFT"* ]]
-  [[ "$output" == *"48"* ]]
-  [[ "$output" == *"64"* ]]
-}
-
-@test "compte ABSENT : l'APPLY, LUI, ne derive PAS — le compte n'est pas encore du" {
-  # ⚠ LES DEUX VERBES DIVERGENT ICI, ET C'EST VOULU. Au rang 22 d'une install neuve le compte est
-  # TOUJOURS absent : le signaler en apply ferait imprimer une derive a chaque install sur un etat
-  # nominal, et une derive qui sort toujours n'est plus lue. La sonde se joue APRES la passe, ou
-  # l'absence est une vraie derive.
-  LCARS_BUILTIN_HUMAN="n-existe-pas-$$" nu apply
+@test "AUCUN humain : la sonde le DIT sans deriver, et elle dit qui s'en occupera" {
+  # ⚠ CE TEMOIN A CHANGE DE VERDICT, ET C'EST LE CANON (⚖ user 2026-08-30). Il exigeait un DRIFT sur
+  # l'absence. Or aucun deploiement de travail ne fabrique d'humain : zero humain est l'etat NOMINAL
+  # d'une machine neuve, jusqu'a la premiere inscription. Une derive qui sort toujours n'est plus
+  # lue — c'est l'argument que le temoin voisin (« l'APPLY ne derive PAS ») portait deja au rang 22,
+  # et qui vaut aussi pour la sonde depuis que plus rien ne cree ce compte.
+  #
+  # Ce que la sonde DOIT continuer de faire : le dire, et dire qui s'en occupera. Muette, elle
+  # laisserait un operateur devant un « fleet_v2 start » qui refuse sans une ligne pour l'expliquer.
+  passwd_with
+  nu check
   [ "$status" -eq 0 ]
-  [[ "$output" == *"sera posé"* ]]
-  [[ "$output" != *"DRIFT"* ]]
+  [[ "$output" == *"WARN"* ]]
+  [[ "$output" == *"convergeur"* ]]
 }
 
-@test "check: un humain que GUARD B REFUSE est un drift NOMMÉ, pas un compte qu'on deplace" {
-  # Cas reel : quelqu'un cree le compte a la main sur l'uid du siege. Changer l'uid d'un compte
-  # existant orphelinerait tout ce qu'il possede — on le DIT, on ne le repare pas dans son dos.
-  LCARS_SYSADMIN_UID="$(id -u)" LCARS_BUILTIN_HUMAN="$(id -un)" mod 'check'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"GUARD B refuse"* ]] || [[ "$output" == *"siège"* ]] || [[ "$output" == *"siege"* ]]
+@test "AUCUN humain : l'APPLY non plus ne derive pas — les deux verbes s'accordent enfin" {
+  # ⚠ LES DEUX VERBES DIVERGEAIENT ICI, ET CE N'EST PLUS LE CAS. L'apply tolerait deja l'absence au
+  # motif qu'« au rang 22 d'une install neuve le compte est TOUJOURS absent » ; la sonde, elle,
+  # derivait. Le canon a tranche dans le sens de l'apply : c'est la sonde qui a rejoint le verbe qui
+  # avait raison, pas l'inverse.
+  passwd_with
+  nu apply
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"DRIFT"* ]]
 }
 
 @test "TEMOIN: un humain qui PASSE GUARD B et porte le groupe est conforme" {
   # Sans ce pendant, un module qui deriverait TOUJOURS passerait les deux temoins ci-dessus (P-40).
-  # Le compte qui joue les tests convient : uid >= UID_MIN, et on ecarte le siege de son uid.
-  LCARS_SYSADMIN_UID=0 LCARS_BUILTIN_HUMAN="$(id -un)" mod 'check'
+  # Le compte qui joue les tests convient : uid >= UID_MIN, et le siege du decor est ailleurs.
+  #
+  # ⚠ LE DECOR POSSEDE LA POPULATION DEPUIS QUE LE MODULE L'ENUMERE. Il jugeait UN nom qu'on lui
+  # donnait ; il lit maintenant `fleet_humans`, donc un passwd non pose ferait juger les humains de
+  # la MACHINE qui joue le gate — verte ou rouge selon qui la possede, et selon leurs groupes.
+  # Le compte doit exister pour de vrai : `id -nG` interroge le systeme, pas le decor.
+  passwd_with "$(id -un):x:$(id -u):$(id -u)::/home/$(id -un):/bin/bash"
+  mod 'check'
   [ "$status" -eq 0 ]
   [[ "$output" == *"il peut lancer la fleet"* ]]
 }
@@ -312,16 +321,22 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
   #
   # ⚠ `run`, PAS UN APPEL NU : bats tourne sous `set -e`, donc un module qui sort en 1 tue le temoin
   # AVANT la ligne qui lit son code. L'instrument tuait la mesure qu'il devait prendre.
-  export LCARS_BUILTIN_HUMAN="n-existe-pas-$$"
+  #
+  # ⚠ LE CAS DE DRIFT A CHANGE, LA CICATRICE NON (⚖ user 2026-08-30). Le drift etait « le compte
+  # attendu est absent » ; l'absence est desormais l'etat nominal, et la sonde n'en derive plus. Le
+  # drift qui reste est celui que ce module mesure SEUL : un humain hors du groupe. Il faut un cas
+  # qui derive VRAIMENT, sinon ce temoin ne mesure plus la difference des deux dialectes — le
+  # defaut qu'il existe pour tenir.
+  passwd_with 'horsgroupe:x:1001:1001::/home/horsgroupe:/bin/bash'
 
   nu check
   [ "$status" -eq 1 ]
-  [[ "$output" == *"absent"* ]]
+  [[ "$output" == *"DRIFT"* ]]
 
-  # Et l'apply, lui, rend 0 : au rang 22 ce compte n'est PAS ENCORE DU. C'est la moitie du contrat
-  # que le partage de verdict avait cassee.
+  # Et l'apply, lui, ne rend PAS 1 : son `1` a lui veut dire ECHEC, et un groupe manquant n'en est
+  # pas un. C'est la moitie du contrat que le partage de verdict avait cassee.
   nu apply
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 1 ]
 }
 
 @test "un apply ne DELEGUE JAMAIS a check — le verdict n'est pas partageable" {

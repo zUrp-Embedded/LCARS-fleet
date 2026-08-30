@@ -251,12 +251,27 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
   diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
 }
 
+# ⚠ ELLE DIT, ELLE NE COMPTE PAS — ET LA DIFFERENCE EST TOUTE LA DOCTRINE. Aucun deploiement de
+# travail ne fabrique d'humain : le rail pose les AUTORITES (le siege, l'admin de forge, le master
+# token), et les personnes s'enrolent par la page d'inscription de la forge. Une machine neuve n'a
+# donc AUCUN humain, et c'est son etat nominal jusqu'a la premiere inscription — pas une derive.
+#
+# Compter cette absence comme un drift la transformait en ECHEC de convergence sur docker (D6 :
+# module hors-substrat, `apply:check`), ce qui rendait toute boite non convergee a son premier boot
+# et, sur une boite de production ou personne ne s'est encore inscrit, DEFINITIVEMENT. Le meme
+# entrypoint publiait alors `provision.rc=1` a cote de `humans.rc=0` — deux verdicts contradictoires
+# sur le meme fait, ecrits au meme instant (mesure .63, 2026-08-30).
+#
+# Ce que la sonde doit continuer de faire, et qui est son unique raison d'exister : le DIRE. En
+# docker, `22-fleet-human` et `48-forge-host` ne sont meme pas selectionnes (`CHECK-ON: wsl linux`) ;
+# sans cette ligne, un `doctor` de boite annonce « 0 faute » pendant que GUARD B refuse tout
+# « fleet_v2 start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
   else
-    p_drift "aucun humain de fleet sur cette machine — GUARD B refusera tout « fleet_v2 start » (le siège en est exclu par construction). Enrôle quelqu'un sur la forge et ajoute-le à la team « $PROV_HUMANS_TEAM » : le convergeur le matérialise au tour suivant"
+    p_warn "aucun humain de fleet sur cette machine — « fleet_v2 start » n'aura personne pour le lancer tant que quelqu'un ne s'est pas enrolé sur la forge (team « $PROV_HUMANS_TEAM », le convergeur le matérialise au tour suivant). Ce n'est pas une dérive : un déploiement neuf attend son premier inscrit"
   fi
 }
 
@@ -320,8 +335,20 @@ check() {
   # qu'un humain manque forcement au premier boot : c'est un DRIFT, et un drift se dit.
   probe_fleet_humans
 
-  if ! have_systemd; then
+  # ⚠ LE SUBSTRAT CHOISIT LA MECANIQUE, `have_systemd` DIT SEULEMENT SI ELLE EST UTILISABLE. Ces
+  # deux questions ont ete confondues le 2026-08-30 et ca visait le rail WSL en plein : `30-wsl`
+  # pose `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown`. Au
+  # PREMIER apply d'un WSL vierge, `/run/systemd/system` n'existe donc pas — et une branche
+  # conditionnee a la seule absence de systemd aurait fait chercher `supervise.sh` sur un poste,
+  # ou il n'y en a pas. La boite tient ses services par un superviseur ; le poste, par systemd,
+  # meme quand systemd n'est pas encore la.
+  if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
     check_box_services
+    verdict_check
+  fi
+
+  if ! have_systemd; then
+    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — aucune unite posee. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
     verdict_check
   fi
 
@@ -353,7 +380,7 @@ apply() {
   local u
 
   if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent ou $SYSTEMD_DIR introuvable) — rien à poser, et c'est dit plutôt que fait à moitié"
+    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — rien à poser, et c'est dit plutôt que fait à moitié. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
     verdict_apply
   fi
 
@@ -473,13 +500,12 @@ converge_humans_now() {
     p_ok "aucun humain à matérialiser — la team « $PROV_HUMANS_TEAM » de la forge est vide. Ce n'est pas une faute : les gens s'enrôlent sur la forge, un propriétaire les ajoute à la team, et le convergeur les matérialise au tour suivant"
   fi
 
-  local builtin_human
-  builtin_human="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
-  if [[ -z "$builtin_human" ]]; then
-    p_drift "le nom de l'humain intégré est indéterminable (« forge-gestures.sh builtin-human ») — impossible de vérifier que ce rail a livré quelqu'un qui puisse lancer une fleet"
-  elif ! grep -qxF -- "$builtin_human" <<<"$apres"; then
-    p_drift "« $builtin_human » est l'humain que ce rail pré-sème, et rien ne l'a matérialisé — regarde le verdict de « 48-forge-host » (la forge a-t-elle reçu le compte ?) avant celui du convergeur"
-  fi
+  # ⚠ UN BLOC A DISPARU ICI, ET IL CONTREDISAIT SON VOISIN DU DESSUS (⚖ user 2026-08-30). Il
+  # verifiait que « l'humain que ce rail pre-seme » avait bien ete materialise. Or le rail ne
+  # pre-seme plus personne : il pose les AUTORITES, et les gens s'enrolent sur la forge sous leur
+  # nom. Le paragraphe ci-dessus le disait deja — « ce n'est pas une faute » — pendant que celui-ci
+  # derivait sur l'absence du meme fait. Deux verdicts opposes sur une seule question, dans la meme
+  # fonction, a six lignes d'ecart.
 }
 
 case "${1:?usage: 64-services.sh <check|apply>}" in
