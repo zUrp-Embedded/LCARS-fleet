@@ -40,7 +40,34 @@ node_version_posee() {
   "$NODE_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'
 }
 
+# ─── DANS LA BOITE, L'ETAT-CIBLE EST LA DOC, PAS L'OUTIL QUI LA PRODUIT ──────────────────────────
+# node n'existe ici que le temps du stage « site » de l'image : il y fait `npm run build` sur la
+# source du runtime (`COPY fleet /src/fleet`), et seul le RESULTAT est copie dans le runtime. La doc
+# est donc bâtie a partir de la revision exacte que la boite servira, et node n'a rien a y faire
+# ensuite. Verifier node ici mesurait un moyen absent PAR CONSTRUCTION, et rendait un echec que nul
+# `apply` ne pouvait reparer (APPLY-ON=wsl linux).
+#
+# Ce que cette sonde NE prouve pas : que la doc corresponde a la revision courante. Rien dans
+# l'image ne le dit tant que `.source-revision` n'y est pas — c'est le sujet de 62-runtime-helpers,
+# pas celui-ci.
+DECK_DOC="${LCARS_DECK_DOC:-/opt/lcars/share/doc}"
+
+check_doc_batie() {
+  local n
+  if [[ ! -s "$DECK_DOC/index.html" ]]; then
+    p_drift "doc du deck absente ($DECK_DOC/index.html) — /doc/ rendra 404 ; elle se bâtit au stage « site » de l'image, jamais ici"
+    return 0
+  fi
+  n="$(find "$DECK_DOC" -type f 2>/dev/null | wc -l)" || n="?"
+  p_ok "doc du deck bâtie et posée ($DECK_DOC, $n fichiers)"
+}
+
 check() {
+  if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
+    check_doc_batie
+    verdict_check
+  fi
+
   local v; v="$(node_version_posee)"
   if [[ -z "$v" ]]; then
     p_drift "node absent ($NODE_LINK_DIR/node) — la doc du deck ne peut pas être bâtie, /doc/ rendra 404"
