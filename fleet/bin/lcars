@@ -4,46 +4,17 @@
 # STARDATE: 2026-06-14
 # STATUS: PROTO-V2 — operator CLI for the fleet: spawn / list / attach (LAUNCH-1/2/2b)
 #
-# Host-side operator tool for driving the LCARS v2 daemon. Three gestures covering the "launch a pod,
-# see it, attach to it" loop:
-#   - `lcars spawn <role>`     POST /api/admin/spawn (established control path, no-auth loopback). The
-#                              spawn is dispatched ASYNC (event admin.spawn.request → spawn_pod), so the
-#                              202 means "queued", NOT "pod alive". Confirm with `lcars list`.
-#   - `lcars list`             LIVE pods read straight off the substrate (the per-pod tmux socks ARE the
-#                              real liveness; fleet_api's /api/pods answers 501 not_implemented, F-C118).
-#                              Dependency-free — works even with the API down.
-#   - `lcars attach <pod_id>`  attaches the terminal to the pod's tmux session (`tmux -S <sock> attach`).
-#                              Ctrl-b d detaches WITHOUT killing the pod.
-#
 # `attach` requires the operator to have the SAME UID as the daemon (the per-pod sock dirs are `0700`).
-# Current model: each human launches THEIR fleet through `bin/fleet_v2` → the BEAM and the pods run under
-# THEIR UID → they attach their own pods directly, with no privilege and no special case. (There is no
-# `User=lcars` system service any more: the systemd model is gone.) Holds for bwrap pods (sock
-# bind-mounted host-side) as well as host pods (LAUNCH-Q).
 #
 # Config (env):
 #   LCARS_API_SOCK        the daemon's control socket (default ~/.lcars/run/api.sock, per-human).
-#                         C'est la SEULE voie vers la fleet : le domaine API n'a plus de surface
-#                         TCP, donc plus d'URL — `LCARS_API_URL` a ete retiree le 2026-08-14.
 #   LCARS_TMUX_SOCK_BASE  base of the per-pod socks (default ~/.lcars/run/tmux-sock; = the Elixir
 #                         default, c368f89d)
 #   LCARS_TMUX_BIN        tmux binary (default: tmux from the PATH)
 
 set -euo pipefail
 
-# ⚠ `$API_URL` A DISPARU AVEC LA SURFACE QU'ELLE DESIGNAIT (2026-08-14). Ce fichier resolvait une
-# URL de lecture depuis `~/.lcars/run/api_url`, et son propre commentaire disait deja que PERSONNE
-# NE LA LIT : `spawn` passe par `$API_SOCK`, `list` et `attach` par les socks tmux, et `$API_URL`
-# n'apparaissait que dans le texte d'aide. Le domaine API n'a plus de listener TCP du tout, donc
-# la resolution ne pointait plus meme sur une possibilite.
-#
-# La cicatrice qui reste vraie et qu'on garde : ce bloc a ete FATAL tant qu'il gardait cette valeur.
-# Il tuait tout le CLI quand la fleet n'avait jamais demarre — y compris `list`, dont l'en-tete
-# promet qu'il « marche meme avec l'API down », et `catalogue install|verify`, precisement
-# les gestes d'une boite NEUVE. Chaque verbe garde ce dont IL a besoin, la ou il s'en sert.
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
-# `spawn` (write) goes through the per-human AF_UNIX socket (ControlRouter), off the network the
-# pod shares. C'est desormais la SEULE voie vers la fleet depuis ce CLI.
 API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
 
@@ -163,14 +134,7 @@ ENV
 EOF
 }
 
-# --- spawn -----------------------------------------------------------------
 
-# ─── admiral — la SEANCE DE FIX ([BL-6-101]) ──────────────────────────────────────────────────
-# Le SEUL chemin vers un pod hors sandbox, et il est un GESTE : le spawn generique refuse tout
-# `containment: none` (422) sauf acquittement explicite — c'est CE flag, pose ICI et nulle part
-# ailleurs. Aucun chemin automatique (dispatcher, boot, cartes) ne passe par cette porte.
-# Le pod tourne sous l'uid du lanceur (un humain de fleet) : le « porteur a lui » de [BL-6-102] —
-# GUARD B interdit au siege (uid 1000) d'etre en amont d'un pod, et ca ne change pas ici.
 cmd_admiral() {
   [[ $# -eq 0 ]] || die "admiral: aucun argument — c'est une seance, pas un dispatch"
 
@@ -206,7 +170,6 @@ cmd_spawn() {
   done
   [[ -z "$issue" || "$issue" =~ ^[A-Za-z0-9._-]+$ ]] || die "spawn: --issue '$issue' invalide"
 
-  # JSON payload. The brief field is free text → jq, for correct escaping; otherwise printf (safe slugs).
   local payload
   if [[ "$have_brief" -eq 1 ]]; then
     command -v jq >/dev/null 2>&1 || die "spawn: --brief exige jq (pour le quoting JSON du texte libre)"
@@ -236,16 +199,12 @@ cmd_spawn() {
   case "$http" in
     202) echo "spawn $role : mis en file (202). Le pod monte en async — « $PROG list » pour le voir." ;;
     503) die "fleet en drain de shutdown (503) — retente quand la fleet sera repartie" ;;
-    # MA-18: the cap-profile is validated BEFORE the ACK. 422 = unknown role (no such cap-profile),
-    # 400 = malformed request. No more lying 202 (it used to ACK, then warn silently daemon-side and
-    # spawn nothing).
     422) die "spawn KO : cap-profile '$role' inconnu (422) — le nom de role est faux. $body" ;;
     400) die "spawn KO : appel invalide (400). $body" ;;
     *)   die "spawn KO (HTTP $http) : $body" ;;
   esac
 }
 
-# --- list ------------------------------------------------------------------
 
 cmd_list() {
   [[ -d "$SOCK_BASE" ]] || { echo "(aucun pod : $SOCK_BASE absent — la fleet tourne ?)"; return 0; }
@@ -268,7 +227,6 @@ cmd_list() {
   [[ "$found" -eq 1 ]] || echo "(aucun pod vivant)"
 }
 
-# --- attach ----------------------------------------------------------------
 
 cmd_attach() {
   local pod_id="${1:-}"
@@ -287,7 +245,6 @@ cmd_attach() {
   exec "$TMUX_BIN" -S "$sock" attach -t "lcars-pod-$pod_id"
 }
 
-# --- catalogue -------------------------------------------------------------
 #
 # LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout` : catalogues_installed_dir/0,
 # catalogues_shipped_dir/0). C'est un fait ecrit deux fois, dans deux langages qui ne peuvent pas
@@ -301,8 +258,6 @@ CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # rien ne l'installe et rien ne le supprime — il est la, toujours.
 CAT_BUNDLED="fleet"
 
-# Ou vit <nom> : l'operateur d'abord, le livre ensuite — MEME ORDRE que `install_dirs` cote runtime,
-# pour qu'un catalogue importe masque un livre du meme nom des deux cotes.
 cat_dir_of() {
   local name="$1"
   if [[ -d "$CAT_DIR/$name" ]]; then echo "$CAT_DIR/$name"
@@ -310,37 +265,10 @@ cat_dir_of() {
   else return 1; fi
 }
 
-# La liste porte le CHEMIN de chaque entree, et dit laquelle MASQUE l'autre.
-#
-# Mesure sur un banc (2026-08-11) : apres `catalogue install` du catalogue `web`, la liste affichait
-# « web actif » DEUX FOIS, sans un mot de plus. Ce n'etait pas un doublon d'affichage — `web` existe
-# reellement des deux cotes, livre dans l'image et installe par l'operateur — et `cat_dir_of` fait
-# gagner l'operateur. Le masquage est une FONCTIONNALITE ; une liste qui montre deux lignes
-# identiques la rend indiscernable d'un bug, et l'operateur ne sait pas lequel des deux tourne.
-# LA LISTE NE PEUT PAS REPONDRE SEULE, ET ELLE NE FAIT PLUS SEMBLANT.
-#
-# Elle imprimait « installe » pour tout ce qui avait un dossier — c'est exactement comme ca qu'un
-# banc a affiche `web` installe pendant que la forge n'avait jamais porte d'org `web`. « Installe »
-# est un fait de FORGE (l'org porte sa source), et `bin/lcars` n'a aucun acces forge, par design :
-# donner a une commande locale un acteur distant est precisement ce que cette regle evite.
-#
-# Elle demande donc au release, par la meme porte `eval` que `catalogue verify`. La porte parle en
-# MOTS (`INSTALLED`, `AVAILABLE`, `UPDATABLE`), pas en tableau formate : une colonne ajoutee un jour
-# ne doit pas avoir a se mettre d'accord entre deux langages.
-# ─── la configuration de la BOITE, chargee une fois pour toutes les portes ────────────────────────
-#
-# ⚠ L'ADRESSE de la forge vit dans `~/.lcars/fleet_v2.env` et NULLE PART AILLEURS. Mesure du
-# 2026-08-11 : l'environ d'un login humain ne porte aucun `FORGE_*`, et rien ne source ce fichier
-# hors `fleet_v2`. Une porte qui ne le charge pas rend `{:config, {:missing, :base_url}}` sur une
-# boite entierement cablee, sous un message qui accuse la forge — c'est D3 de l'audit independant
-# du 2026-08-16, et il avait deja mordu `project migrate` avant `catalogue list`.
 #
 # CHARGER CE FICHIER NE DONNE AUCUN ACCES FORGE A CE CLI. Il ne fait toujours aucun appel : il
 # TRANSMET sa configuration au release, qui agit. Le fichier porte AUSSI des ports d'ecoute ;
 # `LCARS_TOOL_EVAL=1`, pose par chaque appelant, neutralise le bloc qui les ouvrirait.
-#
-# La fonction existe parce que ces lignes etaient recopiees a chaque porte, avec leur commentaire :
-# trois copies d'un contrat qui n'a qu'une source, dont deux avaient deja diverge d'un `2>/dev/null`.
 _load_box_env() {
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
   [[ -f "$env_file" ]] || return 0
@@ -354,14 +282,6 @@ _load_box_env() {
 # `catalogue list` la rend en 127 pour la dire, les autres portes meurent dessus.
 _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"; }
 
-# ─── LE JETON DE FORGE NE SE LIT PLUS, IL SE DEMANDE ────────────────────────────────────────────
-#
-# `publish run` et `approve` ouvraient tous deux `$FORGE_TOKEN_FILE` — `/opt/lcars/var/tokens/<compte>.gitea_token`,
-# `0640 root:fleet`. Ils y arrivaient parce que le groupe `fleet` etait une PROJECTION de l'equipe
-# `humans` de la forge, reconstruite toutes les trente secondes : le droit de porter l'identite du
-# systeme avait donc la peremption d'un cache, et se retirer demandait un `pkill`.
-#
-# Ils demandent maintenant a `roles.sock`, qui pose la question a la forge A L'INSTANT du geste.
 #
 # ⚠ LE JETON ATTERRIT QUAND MEME DANS UN FICHIER, ET C'EST DELIBERE. `publish-rail.sh` et
 # `publish-transform.sh` prennent un CHEMIN ; leur passer le jeton en argument le mettrait dans
@@ -370,9 +290,6 @@ _release_bin() { printf '%s\n' "${LCARS_FLEET_BIN:-/opt/lcars/runtime/rel/lcars_
 # parce que la forge vient de dire oui.
 _authority_ask_bin() { printf '%s\n' "${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"; }
 
-# Le compte forge du SYSTEME. Meme chaine que `config/runtime.exs` — `FORGE_BOT_LOGIN` est la valeur
-# que la boite ECRIT dans son `fleet_v2.env` (`70-human.sh:302`), a cote du `FORGE_TOKEN_FILE` qu'on
-# vient de retirer. Suppose `_load_box_env` deja appele.
 _forge_account() {
   printf '%s\n' "${FORGE_PUSH_ACCOUNT:-${FORGE_BOT_LOGIN:-system_starfleet}}"
 }
@@ -421,17 +338,12 @@ cmd_catalogue_list() {
       done <<< "$out"
       ;;
     3)
-      # Le doublon : on NE CHOISIT PAS. Les deux proprietaires sont nommes, et c'est a eux de
-      # trancher — devenir arbitre ici, ce serait rendre une reponse a celui qui perd sans qu'il
-      # puisse savoir pourquoi.
       echo "catalogue list: DEUX depots declarent le meme catalogue — refus." >&2
       printf '%s\n' "$out" | sed 's/^DUPLICATE /  /' >&2
       echo "  Aucun des deux n'est choisi. Supprimez-en un (ou renommez-le dans son manifeste)." >&2
       return 3
       ;;
     127)
-      # SANS RELEASE ON DIT QU'ON NE SAIT PAS. Deviner rendrait le mensonge qu'on vient de retirer,
-      # a l'endroit qu'un operateur lit en premier.
       echo "catalogue list: pas de release joignable (LCARS_FLEET_BIN) — l'etat des catalogues est" >&2
       echo "  un fait de FORGE, et cette commande n'y a pas acces. Le materiel present ici :" >&2
       [[ -d "$CAT_DIR" ]] && find "$CAT_DIR" -mindepth 1 -maxdepth 1 -type d -printf '    %f  (installe)\n' 2>/dev/null | sort >&2
@@ -451,9 +363,6 @@ cmd_catalogue_list() {
 # hors boite il n'existe pas, et on le DIT au lieu de deviner une commande de repli.
 cat_verify_root() {
   local root="$1"
-  # ⚠ `_release_bin`, PAS UN SECOND DEFAUT. Cette ligne en portait un — alors que le commentaire
-  # de `_release_bin` dit « un seul defaut, pose ici ». Le commentaire mentait, et c'est la forme la
-  # plus chere : il decourageait precisement la verification qui l'aurait dementi.
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "catalogue verify: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN, ou lancer « mix lcars.catalogue.verify $root » depuis le depot"
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
@@ -467,7 +376,6 @@ cmd_catalogue_verify() {
   cat_verify_root "$root"
 }
 
-# Trois sources, zero scp : ce qui manque a une boite headless, c'est un transport qu'on ait deja.
 # Le nom DECLARE par un catalogue, lu a la racine de son manifeste. Cle de premier niveau, donc
 # ancree en colonne 0 : un `name:` indente appartient a autre chose. La charte est la meme que cote
 # runtime (kebab, pas de `_`), et un nom qui ne la respecte pas ne sort pas d'ici — le refus detaille
@@ -480,37 +388,10 @@ cat_declared_name() { # $1=racine -> le nom, ou 1
   printf '%s' "$n"
 }
 
-# Le nom vient du CATALOGUE, plus de l'installateur. Il fallait donc deballer avant de savoir ou
-# ranger : on deballe dans un staging, on lit le nom, puis on renomme. L'argument [name] survit comme
-# une ASSERTION — l'operateur dit ce qu'il croit installer, et on refuse si le catalogue dit autre
-# chose — mais il ne baptise plus rien. Avant, sans argument, le nom valait le basename de la
-# source : deux boites pouvaient donc heberger le meme catalogue sous deux noms, ce qui ne coutait
-# rien tant que le nom etait une poignee locale, et devient faux des qu'il adresse une org de forge.
-# ⚖ UN SEUL VERBE (user, 2026-08-16), et il MET A JOUR quand le catalogue est deja la. Il ne copie
-# plus de materiel localement : la source arrive par la FORGE — un humain pousse son catalogue dans
-# son espace personnel, un admin l'installe. Le materiel local devient un cache derive.
-#
 # CETTE COMMANDE NE DETIENT PLUS RIEN, ET C'EST TOUT LE DESIGN. Elle ne lit aucun secret, n'execute
 # aucun geste, ne teste aucun groupe : elle DEMANDE a un service root par une socket unix, qui pose
 # la question a la forge et agit. Detenir le pouvoir n'est plus la preuve du droit.
 #
-# ⚠ IL N'Y A RIEN A PROUVER DANS CE QU'ON ENVOIE. L'identite de l'appelant est posee par le NOYAU
-# sur la socket (`SO_PEERCRED`, lu cote service) : elle n'est ni envoyee, ni declarable, ni
-# falsifiable ici. Un champ « login » sur le fil serait une seconde autorite, et la mauvaise.
-#
-# ⚠ ET AUCUN SIEGE N'EST PRIVILEGIE. Ni un nom, ni un uid, ni un groupe : la seule autorite est le
-# drapeau `is_admin` de la forge, demande a l'instant du geste. Un chemin qui contournerait « parce
-# que c'est le siege » serait un second gate, donc une seconde verite, donc la derive qu'on retire.
-#
-# ⚠ TOUT UN APPAREIL DE DIAGNOSTIC A VECU ICI, ET IL N'AVAIT PLUS D'OBJET. Il distinguait
-# « pas dans le groupe » de « session anterieure a la promotion », mesurait la traversee du
-# repertoire avant le mode du fichier, et prescrivait `newgrp` — trois raffinements justes, chacun
-# paye par une heure de diagnostic. Tous portaient sur un CACHE : un process fige ses groupes
-# supplementaires a son login, donc une promotion posee apres coup n'atteignait aucun shell vivant.
-#
-# La question posee a l'instant du geste n'a pas de cache, donc pas de peremption, donc rien de tout
-# cela a rattraper. C'est la lecon la plus chere de ce chantier : chaque correctif etait juste, et
-# ensemble ils formaient l'usine a gaz que la separation des deux roles supprime d'un coup.
 # Le service n'est pas root : il pose sa socket sous `/run/lcars/authority/`, dont `system.manifest`
 # porte le mode. Ce defaut est une COPIE de cette adresse — les deux bougent ensemble ou le geste
 # frappe une porte qui n'existe pas, et accuse le service d'etre eteint.
@@ -524,11 +405,6 @@ _catalogue_transport() {
   return 1
 }
 
-# ⚠ `socat -t`, ET SON DEFAUT AURAIT MANGE CHAQUE INSTALL. Apres l'EOF de notre stdin, socat ferme
-# l'autre sens au bout de 0,5 s par defaut — or le geste tourne pendant des MINUTES. Mesure du
-# 2026-08-23 : sortie VIDE et code de retour ZERO, c'est-a-dire un succes silencieux qui a perdu le
-# verdict. C'est pour ca que rien ici ne fait confiance au code de sortie du transport : seule la
-# ligne de verdict compte, et son absence est un echec nomme.
 _catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le verdict sur stdout
   local name=$1 t; t="$(_catalogue_transport)" || return 127
   case "$t" in
@@ -543,11 +419,6 @@ _catalogue_ask() { # <nom> — envoie la demande, imprime le relais, rend le ver
   esac
 }
 
-# ─── LES CAUSES DE REFUS, UNE PHRASE CHACUNE ────────────────────────────────────────────────────
-#
-# HUIT CAUSES, HUIT GESTES DE SORTIE, JAMAIS CONFONDUS. C'est la lecon la plus chere de cette porte :
-# un refus qui nomme la mauvaise cause envoie chercher au bon endroit pour un probleme qui est
-# ailleurs, et il coute plus qu'un refus muet parce qu'il donne la certitude d'avoir compris.
 #
 # L'executeur rend un JETON stable (`FAIL:not_admin`), pas une phrase. Le vocabulaire de l'operateur
 # vit ICI, parce que c'est a ce programme qu'il parle — et un service qui redigerait pour la CLI
@@ -607,11 +478,6 @@ _die_executor_absent() {
 cmd_catalogue_install() {
   local name="${1:?catalogue install: nom requis (cf. « $PROG catalogue list »)}"
 
-  # CETTE COMMANDE N'A PLUS BESOIN DE L'ENV DE LA BOITE, et c'est une consequence directe. Elle
-  # chargeait `_load_box_env` pour que `forge-gestures` trouve `FORGE_BASE_URL` — sous `sudo`, qui
-  # reinitialise l'environnement, il mourait sur « cette boite n'a pas de FORGE_BASE_URL ». Le geste
-  # tourne maintenant dans un SERVICE, qui tient son environnement du disque et n'herite d'aucun
-  # shell. Un daemon n'a pas de shell ambiant a se faire voler.
   [[ "$name" == "$CAT_BUNDLED" ]] \
     && die "catalogue install: « $CAT_BUNDLED » est livre DANS le release — il n'y a pas de depot d'ou l'installer, et rien a mettre a jour"
 
@@ -666,13 +532,6 @@ cmd_project_migrate() {
     "$bin" eval "Fleet.Project.Onboard.eval_migrate(\"$repo\", \"$cat\")"
 }
 
-# LA FORGE SAIT QUELS PROJETS EXISTENT, LE DISQUE NE LE SAIT PLUS. Un `/home` neuf — boite
-# reinstallee, second humain qui arrive sur une fleet deja peuplee — n'a aucune face : l'inventaire
-# n'existe que sur la forge, et rien ne l'y lisait. Cette porte relaie ; l'import lui-meme est le
-# rail qui existe deja (`import/2`, idempotent), aucun verbe n'est ajoute.
-#
-# `check` ne touche rien et dit ce qui manque ; `apply` importe. Un projet en echec n'arrete pas les
-# autres — une boite a laquelle il manque neuf projets sur dix doit en recuperer neuf, pas zero.
 cmd_project_reconcile() {
   local mode="${1:-check}"
   case "$mode" in
@@ -705,7 +564,6 @@ cmd_catalogue() {
   esac
 }
 
-# --- publish forges (pool) + approve (phase-1 gate) -----------------------
 # PER-HUMAN, under ~/.lcars (Layout.state_dir = the human's own runtime state). NOT /opt/lcars/var/tokens —
 # that is the SHARED forge worker-token store (root:fleet, keyed by role). Each human's fleet reads
 # its own ~/.lcars, so "each user their pool" holds by construction. Tokens are the human's own files
@@ -716,26 +574,14 @@ PUBLISH_DIR="$HOME/.lcars/publish"
 # Plain destination URL — no token, ever: auth is the CLI credential helper (gh/glab), not ours.
 _dest_url() { printf 'https://%s/%s.git' "$1" "$2"; }  # dest_host repo
 
-# THE SINGLE CALL SURFACE FOR AN EXTERNAL FORGE. This CLI carried three bare `auth status` probes
-# and two host-less `gh`/`glab` invocations: on an Enterprise instance `forge status` announced
-# `[ok] authentifie` from a GLOBAL state, and `approve` probed and then CREATED the repository on
-# github.com while pushing to the enterprise host. All of it now lives in one place.
 _FORGE_CLI="$(dirname "$(readlink -f "$0")")/forge-cli.sh"
 _fc() { # _fc <verbe> <host> <dest_host> <repo> [args...]
   "$_FORGE_CLI" "$1" --host "$2" --dest-host "$3" --repo "$4" "${@:5}"
 }
 
-# The official CLI of a host — the Tier-1 credential helper AND repo-creator. OPTIONAL: absent, approve
-# falls to Tier 2 (link a pre-created repo, push via the operator's own wired helper). gh<->glab are
-# 1:1. We NEVER read or pass a token: auth is `gh/glab auth login` or the operator's helper, never ours.
 _dest_cli() { case "$1" in github) echo gh ;; gitlab) echo glab ;; *) die "host inconnu: $1 (github|gitlab)" ;; esac; }
 _json_field() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
 
-# Tier-1 repo bootstrap via the CLI's own API — the create right comes WITH `gh/glab auth login`, no
-# expensive scope to grant by hand. _dest_repo_exists probes; _dest_repo_create makes it under the login.
-# THREE STATES, NOT TWO: the helper tells "absent" (1) from "not allowed to see it" (2). Conflated,
-# somebody else's private repository made us proceed to a creation that failed with "name already
-# exists" — a message that teaches nobody anything.
 _dest_repo_exists() { _fc repo-exists "$1" "$2" "$3"; }              # host dest_host repo
 _dest_repo_create() { _fc repo-create "$1" "$2" "$3" --visibility "$4"; }
 
@@ -790,8 +636,6 @@ cmd_forge_list() {
   [[ "$found" == 1 ]] || echo "aucune forge (pool vide) — lcars forge add <name> ..."
 }
 
-# Forge-level doctor: each forge in the pool + whether its official CLI is authenticated (reaches the
-# CLI, not the network). [ok] = ready ; [!!] = the operator's next gesture, named.
 cmd_forge_status() {
   local f found=0
   if [[ -d "$FORGES_DIR" ]]; then
@@ -831,15 +675,6 @@ cmd_publish() {
   esac
 }
 
-# PHASE 2 HAD NO HUMAN DOOR AT ALL, and that was the asymmetry. `publish-rail.sh` is a host-side,
-# self-contained, executable script — and the BEAM was the only thing able to trigger it
-# (`project_publish.ex` was its single caller in the whole repository). Phase 1 IS a verb
-# (`lcars approve`); phase 2, the one that repeats, was not.
-#
-# Three costs, and the second is the one that bites: an operator holding a
-# `project_publish.failed` reason on the bus had NO way to replay the gesture and look; a doctor
-# (`publish status`) diagnosed a publication it was incapable of running; and proving the rail
-# end-to-end without a BEAM meant rebuilding its argument list by hand out of Elixir source.
 #
 # THIS DOES NOT OPEN ANYTHING TO AN AGENT. A CLI verb is a HUMAN door — pods have no shell on the
 # host — and the human is already the one who arbitrates a publication: they sign the pull request.
@@ -890,12 +725,6 @@ cmd_publish_run() {
   tokfile="$(_authority_token_file "$(_forge_account)" "$base_dir")" \
     || { rm -rf "$base_dir"; die "publish run: pas de jeton de forge (cause ci-dessus)"; }
 
-  # `--linearize` STAYS A HUMAN GESTURE, and the boundary is deliberate. The runtime publishes a
-  # ROLLING pull request against a base we control, where merge bubbles are ordinary; the flattened
-  # first-parent form serves the branch of an UPSTREAM merge request, which is a human decision
-  # about a human destination. Carrying it in the runtime would mean a fifth binding key that
-  # `approve`, the rail and `project_publish.ex` all have to keep aligned — the exact shape of
-  # defect this chantier spent its morning closing. It is one key away the day the need is real.
   local -a extra=()
   [[ -n "$linearize" ]] && extra=(--linearize "$linearize")
 
@@ -917,9 +746,6 @@ cmd_publish_run() {
   return "$rc"
 }
 
-# Project-level doctor: is THIS project ready to publish ? A non-linked project is a VALID terminal
-# state (most never publish), so it is reported CALM — never a red hole. Only a linked project runs
-# the readiness chain (CLI auth + base populated). The base check reaches the external forge.
 cmd_publish_status() {
   local repo="${1:-}"
   [[ -n "$repo" ]] || die "publish status: usage — publish status <owner/nom-interne>"
@@ -955,12 +781,6 @@ cmd_publish_status() {
 }
 
 cmd_approve() {
-  # THE BASE NO LONGER HAS A HARDCODED DEFAULT, AND THIS WAS THE RAIL'S COSTLIEST DEFECT. It was
-  # `main` on both sides and NEVER derived from the destination. Measured on lordzurp/QSS: default
-  # `master`, no `main`, repository NOT empty. The guard reading "never clobber a base the human
-  # populated by hand" interrogated the ASSUMED base: it found nothing, let the push through, and
-  # created an ORPHAN `main` branch next to `master`. The repository ended up with two unrelated
-  # histories, and the whole publication landed on a branch nobody ever looks at.
   # Empty = "derive it from the destination", done below, after the existence probe.
   local repo="" forge="" as="" base="" visibility="private"
   while [[ $# -gt 0 ]]; do
@@ -999,18 +819,10 @@ cmd_approve() {
     dest_host="$(_json_field "$binding" dest_host)"
     dest_repo="$(_json_field "$binding" dest_repo)"
     base="$(_json_field "$binding" base)"
-    # A BINDING THAT DOES NOT SAY WHERE IT PUBLISHES IS NOT A BINDING. On the runtime side,
-    # `project_publish.ex` did not even count `base` among its required keys and fell back to
-    # `main`: the defect had TWO independent entry points, the write and the read. This one is
-    # closed by refusing, never by guessing.
     [[ -n "$base" ]] || die "approve: la liaison $binding ne declare pas de « base ».
   Relie a nouveau en la nommant : approve $repo --forge <name> --as <repo-dest> --base <branche>"
   fi
 
-  # The CLI (gh/glab) is OPTIONAL — it is only NEEDED to CREATE a repo that does not exist yet (Tier 1).
-  # Linking an existing repo + pushing only need a wired git credential helper (Tier 2: the operator's
-  # own creds — the homelab-GitLab case). We detect it here; we never hold a token. GIT_TERMINAL_PROMPT=0
-  # so a missing helper fails LOUD at push instead of hanging on a prompt (a headless BEAM can't answer).
   local cli; cli="$(_dest_cli "$host")"
   # ⚠ THE PROBE IS DELIBERATELY *NOT* TAKEN HERE. It used to be, some hundred lines above its use —
   # and between the two sit a clone and a full history rewrite, 2 to 10 minutes on a real repository.
@@ -1020,9 +832,6 @@ cmd_approve() {
   local have_cli
   export GIT_TERMINAL_PROMPT=0
 
-  # Internal forge config — one source, loaded by the one function that knows it (`_load_box_env`).
-  # This door is the only one that CONSUMES the values itself instead of passing them to the release,
-  # so it is also the only one that refuses on their absence.
   local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
   _load_box_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
@@ -1057,17 +866,8 @@ cmd_approve() {
 
   # git push/fetch/ls-remote to the dest carry no token — the wired helper supplies the credential.
   if [[ "$link_mode" == 1 ]]; then
-    # CREATE-OR-LINK. Does the destination repo exist at all? Probe via the CLI when we have it
-    # (accurate), else via a bare ls-remote (Tier 2: the operator pre-created it, so it answers).
-    # Read HERE, right before it decides: the tier is a fact about NOW, not about ten minutes ago.
     have_cli=0
     if _fc auth-ok "$host" "$dest_host" "$dest_repo"; then have_cli=1; fi
-    # ⚠ TROIS ETATS, ET `&&` N'EN LIT QUE DEUX. `repo-exists` rend 0 present / 1 absent /
-    # 2 INDECIDABLE (depot prive d'un tiers, droits insuffisants). Un `&& repo_exists=1` faisait
-    # tomber le 2 dans le meme sac que le 1 : on enchainait sur la creation, qui echouait en
-    # « name already exists » — precisement le defaut que le helper documente comme ferme. Il EST
-    # ferme dans le helper, et il etait rouvert ici. Fermer une classe au bon endroit ne sert a
-    # rien si le site d'appel raplatit le resultat.
     local repo_exists=0 rex=0
     if [[ "$have_cli" == 1 ]]; then
       _dest_repo_exists "$host" "$dest_host" "$dest_repo" || rex=$?
@@ -1082,8 +882,6 @@ cmd_approve() {
       git ls-remote "$dest_url" >/dev/null 2>&1 && repo_exists=1
     fi
     if [[ "$repo_exists" == 0 ]]; then
-      # Tier 1: auto-create under the login (free — no create-scope to grant by hand). Without the CLI
-      # we cannot create: tell the operator his two ways forward rather than push into the void.
       [[ "$have_cli" == 1 ]] || die "approve: $dest_host/$dest_repo n'existe pas et $cli n'est pas authentifie.
   Tier 1 : '$cli auth login' pour l'auto-creation.  Tier 2 : cree le repo vide dans l'UI web puis relance."
       _dest_repo_create "$host" "$dest_host" "$dest_repo" "$visibility" \
@@ -1139,7 +937,6 @@ cmd_approve() {
   fi
 }
 
-# --- dispatch --------------------------------------------------------------
 
 case "${1:-help}" in
   spawn)  shift; cmd_spawn "$@" ;;

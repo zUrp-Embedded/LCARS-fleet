@@ -51,12 +51,6 @@ done
 # omission — elle attesterait un contrat plus petit que celui dont on depend).
 REQUIRED=(
   --system-prompt-file      # le SP du role ; sans lui le pod demarre SANS son mandat
-  # ⚠ EXCEPTION DE DEBUG (2026-08-21) : le bras APPEND de l'A/B du SP de l'architect. Cette ligne
-  # n'est PAS un choix — `claude_probe.bats:106` verrouille « tout drapeau passe en argv est ici ».
-  # Elle part avec l'exception, dont le bloc vit dans `claude_launch.sh` juste avant l'`exec`.
-  # Elle a aussi un metier propre en attendant : le `-file` n'a pas d'entree a lui dans `--help`
-  # (il vit dans la notation a crochets, comme son voisin), donc c'est cette sonde qui attrapera la
-  # version du vendor ou il disparait — plutot qu'un pod qui demarre sans mandat.
   --append-system-prompt-file
   --setting-sources         # d'ou viennent les settings ; sans lui, ceux de l'humain fuient
   --settings                # le settings.json compose du pod
@@ -71,11 +65,6 @@ REQUIRED=(
   --resume
   --remote-control          # visibilite Desktop
   --disable-slash-commands  # coupe la surface vendor (`/init` et les skills) pour un pod qui a un
-                            # depot au cwd. LOAD-BEARING : cette surface est COMPILEE dans le
-                            # binaire (mesure 2026-08-12), donc aucun montage ne la borne — ce
-                            # drapeau est le seul levier. Sa disparition rendrait `/init` a des
-                            # pods dont il ecraserait le CLAUDE.md du depot dans un format que
-                            # l'extracteur de la fleet ne lit pas.
 )
 
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 \
@@ -86,7 +75,6 @@ HELP="$("$CLAUDE_BIN" --help 2>&1)" \
 
 [[ -n "$HELP" ]] || { echo "claude_probe: '$CLAUDE_BIN --help' n'a rien rendu" >&2; exit 2; }
 
-# LES CROCHETS DU VENDOR, ET POURQUOI ILS ONT FAIT MENTIR CETTE SONDE A SON PREMIER TIR.
 # `--help` de la 2.1.220 ecrit `--system-prompt[-file]` — une notation qui factorise deux drapeaux
 # en une ligne. Une recherche du token exact ne le trouve pas et declare le contrat rompu sur un
 # drapeau parfaitement present : un FAUX POSITIF sur le drapeau le plus load-bearing de la liste,
@@ -98,9 +86,6 @@ HELP_FLAT="${HELP_FLAT//]/}"
 
 MISSING=()
 for flag in "${REQUIRED[@]}"; do
-  # Frontiere de token OBLIGATOIRE : chercher `--settings` en sous-chaine matcherait
-  # `--setting-sources` et rendrait un vert menteur sur les deux drapeaux dont la confusion coute
-  # le plus cher (le settings.json du pod contre ceux de l'humain qui fuiraient).
   printf '%s' "$HELP_FLAT" | grep -qE -- "(^|[[:space:]])${flag}([[:space:],=]|$)" || MISSING+=("$flag")
 done
 

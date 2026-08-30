@@ -3,39 +3,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-07
 # STATUS: PROTO-V1 — publish transform: rewrites a forge clone's history for an EXTERNAL mirror
-#
-# WHY THIS SCRIPT (rather than a refinement of onboard): the work forge (Gitea) carries an INTERNAL
-# truth — author=human, co-author=`LCARS-<role>` (Fleet.Credentials.ForgeIdentity, commit gate) — and
-# some system commits (onboard/scaffold) are authored by `system_starfleet`. That is HONEST for the work
-# (the system really did generate the scaffold), but it is NOT what we want to publish: on a PUBLIC
-# mirror the human must own their whole tree (human author everywhere) and the credit goes to the VENDOR
-# that did the work — never an internal role, never a hardcoded "Claude", but derived from the active N1
-# launcher. `Co-authored-by:` is NOT git-native: it is a message trailer, a GitHub convention, so it can
-# be rewritten without lying about anything (a commit has exactly one author; the co-author is a layer
-# on top).
-#
-# MECHANICS: a FRESH clone from the forge (never the work worktree — this is one-way, the SHAs change,
-# it is NOT a bidirectional sync), then `git filter-repo`. THREE things happen, not two:
-#   0. BEFORE the callback, host-side: scan the clone for the first commit whose committer is NOT the
-#      system, and keep that identity (HUMAN_NAME/HUMAN_EMAIL). This pre-scan exists for the root commit
-#      alone — see below — and it is the one thing here that can exit non-zero on its own.
-#   1. In the callback, for a system-authored commit WITH a human committer: author := committer.
-#   2. In the callback, for the Gitea `auto_init` root commit (author AND committer are the system, no
-#      human trace at all): author AND committer are both set to the pre-scanned human. This is NOT
-#      "author := committer" — the committer is precisely what cannot be trusted on that one commit.
-#   3. In the callback, for every commit: rewrite the `Co-authored-by: LCARS-<role> <...@lcars.local>`
-#      trailer into `Co-Authored-By: <vendor>`.
-# This script NEVER PUSHES ANYWHERE (a hard project constraint: pushes go to local forges ONLY) — it
-# prepares the rewritten clone and prints the publish gesture for the HUMAN to run.
-#
-# DEPENDENCY: `git-filter-repo` (a Python script, NOT packaged by default here). Install it in a
-# dedicated venv or with pipx — NEVER `pip install --break-system-packages`, which defeats the PEP 668
-# protection. The runtime error path below prints the exact venv recipe. Override the binary through
-# --filter-repo-bin or $FILTER_REPO_BIN when it is off PATH (e.g. /path/to/venv/bin/git-filter-repo).
-#
-# USAGE:
-#   publish-transform.sh --repo fleet/mon-projet --forge http://localhost:3000 \
-#       --token-file /opt/lcars/var/tokens/test/system.gitea_token --out /tmp/mon-projet-gh
 #   Options: --vendor-identity FILE (default: bin/claude_launch.identity, co-located with the active N1
 #            launcher — NAME=/EMAIL=) · --filter-repo-bin BIN (default: git-filter-repo on PATH, or
 #            $FILTER_REPO_BIN) · --system-email EMAIL (default: system_starfleet@lcars.local — MUST match
@@ -72,13 +39,6 @@ usage() {
   exit 1
 }
 
-# POST-TRANSFORM CERTIFICATION: filter-repo's exit 0 means "the callback ran", NOT "no internal
-# attribution survived". A new identity or trailer format the callback does not match would pass
-# through silently and be announced as a clone ready to publish. So we SCAN the transformed history
-# for any forbidden internal marker (an `@lcars.local` author/committer, a `Co-authored-by: LCARS-<role>`
-# trailer, the system email) and REFUSE if one remains — the certification is a real postcondition, not
-# a trust in the transform's silence. `system_email` is passed so it is checked even when it equals the
-# default. Prints every offending line found; returns non-zero if any.
 # THE VOCABULARY OF INTERNAL ATTRIBUTION, WRITTEN ONCE AND READ FROM BOTH ENDS.
 # The same two patterns decide what gets REWRITTEN (the boundary, below) and what gets REFUSED (the
 # certification, here). One function each, one source of truth: if a new form of internal
@@ -98,7 +58,6 @@ internal_msg_re() { printf 'Co-authored-by:\s*LCARS-|@lcars\.local'; }
 scan_forbidden_markers() {
   local dir="$1" system_email="$2" hits=0
 
-  # Author/committer emails still internal (the transform should have rewritten every one).
   local ident
   ident="$(cd "$dir" && git log --all --format='%ae%n%ce' | grep -iE "$(internal_ident_re "$system_email")" || true)"
   if [[ -n "$ident" ]]; then
@@ -107,7 +66,6 @@ scan_forbidden_markers() {
     hits=1
   fi
 
-  # Internal co-author trailers still in the messages.
   local trailer
   trailer="$(cd "$dir" && git log --all --format='%B' | grep -iE "$(internal_msg_re)" || true)"
   if [[ -n "$trailer" ]]; then
@@ -148,16 +106,6 @@ for rec in sys.stdin.buffer.read().split(b"\x1e"):
 '
 }
 
-# D2 (chantier rails, 2026-08-18) — FIRST-PARENT LINEARIZATION, the seam-side flattening.
-# WHY: the work forge keeps the TRUE history — a resolved conflict is a merge commit (the bubble is
-# the trace, chantier doc 08). The canonical change-request form of BOTH forges wants a LINEAR
-# branch, and reviewers shred back-merges in a PR/MR. The two requirements live on two remotes, so the flattening happens HERE, at
-# publication, on a COPY — never on the internal record.
-# HOW: NOT a rebase (replaying side-branches would resurface the very conflicts the merges
-# resolved). Each first-parent commit is REBUILT with `git commit-tree` on its OWN TREE: identical
-# content at every step, author/committer/dates/message preserved, and a merge point becomes one
-# regular commit carrying its resolution (side-branch content squashed into it — the published FORM;
-# the per-commit truth stays on the work forge). Deterministic, zero conflict by construction.
 # POSTCONDITIONS, both fail-loud: the new tip's tree is BYTE-IDENTICAL to the old one, and no merge
 # commit remains.
 linearize_first_parent() { # <dir> <branch>
@@ -230,21 +178,12 @@ GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_VALUE_0="Authorization: token ${TOKEN}" \
   git clone "$FORGE/$REPO.git" "$OUT_DIR"
 
-# A human committer exists on EVERY commit routed through GitOps (onboard/scaffold/work) — EXCEPT the
-# very first: Gitea's `auto_init` (POST /repos, "Initial commit") is author=committer=SYSTEM, with no
-# human trace in THAT commit at all. So the human cannot be derived from its own committer, and we scan
-# the OTHER commits for the first non-system identity (guaranteed to exist: any onboarded project has at
-# least one scaffold/work commit with a human committer). This is the pre-scan the header describes as
-# step 0, and the only path in this script that exits 2.
 # ⚠ `awk '… {print; exit}'` TUE CE SCRIPT SUR TOUT DEPOT REEL, et aucune fixture ne pouvait le
 # montrer. `exit` ferme le tuyau des la premiere ligne retenue ; si `git log` ecrit encore — ce qui
 # est le cas des que la sortie depasse le tampon de pipe, ~64 Ko — il recoit SIGPIPE, `pipefail`
 # remonte 141, et `set -e` abat le script juste apres le clone. Mesure du 2026-08-20 sur
 # jquery/jquery : 8489 commits -> exit 141 ; les 3 premiers du meme depot -> exit 0. Toutes les
 # fixtures du depot font une poignee de commits, donc toutes passaient.
-# `awk` LIT DONC TOUT et n'imprime qu'une fois. Le cout est une lecture complete du log — quelques
-# secondes sur une histoire de deux millions de commits, contre les minutes que filter-repo prendra
-# juste apres.
 # ⚠ « INTERNE » EST UN DOMAINE, PAS UNE ADRESSE — et ce filtre n'excluait qu'une adresse.
 # `system_starfleet` n'est qu'UN des comptes internes : les neuf roles (`system_chief`,
 # `fleet_engineer`, `fleet_scribe`...) authorent tous en `<login>@lcars.local`. Un depot dont le
@@ -279,24 +218,6 @@ else
 fi
 [[ -n "$HUMAN_NAME" ]] || HUMAN_NAME="$HUMAN_EMAIL"
 
-# ── LA BORNE : ne reecrire QUE ce qui porte de l'attribution interne ────────────────────────────
-# A FULL REWRITE MAKES CONTRIBUTION IMPOSSIBLE, and that is not a detail of taste. Measured
-# 2026-08-20: a full pass keeps 2454 of jquery s 8489 SHAs and 2165 of git/git s 85342 — because
-# every descendant of a rewritten commit is rewritten, and filter-repo touches something early. A
-# branch published that way shares almost nothing with the upstream it came from, so a fork ->
-# upstream pull request shows tens of thousands of commits as new. LCARS could never be used to
-# contribute back.
-#
-# What must be scrubbed lives ONLY on the commits the fleet made, and those sit at the TIP. So the
-# rewrite is bounded to them, and everything below keeps its identity byte for byte (measured on the
-# real history: 8489 of 8489 imported commits survive).
-#
-# THE BOUNDARY IS COMPUTED FROM THE COMMITS, never from a file kept beside them. Each commit says
-# what it is — the role trailer the commit gate makes mandatory, or an internal identity — so there
-# is no state to keep in sync and nothing to drift. Upstream commits merged in MID-WORK are not a
-# problem: they sit inside the rewritten range and keep their SHAs anyway, because git is
-# content-addressed and nothing about them changes (measured).
-#
 # AND THE SAFETY IS FREE: the boundary selects, the certification then rescans the WHOLE history. A
 # boundary computed too high leaves an internal marker below it, and the certification REFUSES. A
 # wrong boundary cannot leak; it can only stop the publish.
@@ -304,16 +225,12 @@ fi
 FIRST_OURS="$(oldest_internal_commit "$OUT_DIR" "$SYSTEM_EMAIL")"
 REFS_ARGS=()
 if [[ -z "$FIRST_OURS" ]]; then
-  # Nothing internal anywhere: nothing to scrub. Skipping the pass keeps EVERY sha, which is the
-  # right answer for a project whose history is entirely foreign (or already published once).
   echo "publish-transform: aucune attribution interne — rien a reecrire, tous les SHA conserves"
 elif BOUND="$(git -C "$OUT_DIR" rev-parse -q --verify "${FIRST_OURS}^" 2>/dev/null)" && [[ -n "$BOUND" ]]; then
   REFS_ARGS=(--refs "${BOUND}..HEAD")
   echo "publish-transform: reecriture BORNEE a ${FIRST_OURS:0:8}..HEAD ($(git -C "$OUT_DIR" rev-list --count "${BOUND}..HEAD") commits) — l histoire importee garde ses SHA"
 else
   # Our oldest commit IS the root: the whole history is ours, so the whole history is rewritten.
-  # This is a project CREATED in the fleet rather than imported, and it is the behaviour that
-  # shipped before the boundary existed.
   echo "publish-transform: tout l historique est interne (projet ne dans la fleet) — reecriture complete"
 fi
 
@@ -398,11 +315,6 @@ fi
 # `git log --all` — donc elle voyait l'attribution interne survivre dans des refs QUI NE SONT PAS
 # PUBLIEES, et refusait une passe pourtant propre. Mesure du 2026-08-20 : HEAD portait 0 marqueur,
 # `--all` en portait 3, tous derriere `origin/*`.
-#
-# On RESTAURE L'INVARIANT au lieu de retrecir le controle : `--all` doit vouloir dire « tout ce que
-# ce clone peut publier ». Retirer le remote le rend vrai a nouveau — et c'est exactement ce que la
-# passe NON bornee faisait deja d'elle-meme, donc les deux chemins finissent identiques. Rien en
-# aval n'en depend : le rail ajoute son propre remote `dest`, et `approve` fetch par URL explicite.
 git -C "$OUT_DIR" remote remove origin 2>/dev/null || true
 
 if [[ -n "$LINEARIZE" ]]; then
@@ -423,11 +335,6 @@ echo ""
 echo "publish-transform: fin de la passe → $OUT_DIR (certifie : zero attribution interne survivante)"
 echo "  Les SHA des commits REECRITS sont neufs (passe one-way : ce n'est PAS un sync avec la forge)."
 echo "  Ceux de l'histoire importee sont CONSERVES — c'est ce qui rend une PR vers l'upstream lisible."
-# ⚠ CE MESSAGE NOMMAIT `git@github.com:` IN THE CLEAR, whatever the destination — so a run aimed at
-# a GitLab project printed instructions that were simply false. This script is forge-AGNOSTIC: it
-# rewrites a history and never learns where the result is going. Its closing words must therefore
-# name no host at all. The name of the file is the other place where "GitLab is a first-class
-# forge" is not held; that one is not a message, it is a rename, and it is not this commit's job.
 echo "  Geste de publish (ce script ne pousse JAMAIS — le push est ton geste) :"
 echo "    cd $OUT_DIR"
 echo "    git remote add <nom> <url-du-depot-de-destination>"

@@ -10,16 +10,6 @@
 # gabarits de commande fixes. Aucun champ libre n'est lu : `evidence` existe pour l'humain qui
 # signe, et ce script ne le regarde pas.
 #
-# C'est la difference entre « un humain a approuve D » et « un humain a approuve D, puis un agent a
-# interprete D, puis root a execute l'interpretation ». La seconde chaine n'est pas gardee : ce que
-# l'humain a lu n'est plus ce que root fait. Ici il n'y a pas d'etape d'interpretation.
-#
-# ─── UN SEUL VERBE EST PRIVILEGIE ───────────────────────────────────────────────────────────────
-# `apt-get install` touche /usr et demande root. Tout le reste — l'installeur d'un SDK, l'assemblage
-# d'un sysroot — ecrit SOUS LE MAGASIN et tourne sans privilege. La mesure du 2026-08-19 a retire du
-# rail le seul verbe non-monotone qui restait (`dpkg --add-architecture`) : une racine apt PRIVEE
-# resout et telecharge sans toucher au dpkg de l'hote, donc un sysroot s'assemble en non-root, et
-# l'hote ne bouge pas d'un octet.
 #
 # ─── LA FERMETURE, PAS LE PAQUET NOMME ──────────────────────────────────────────────────────────
 # `apt-get download <pkg>` reussit, extrait proprement, et rend un sysroot MORT : `libssl.so ->
@@ -41,15 +31,6 @@ OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 FORGE="${FORGE_BASE_URL:-}"
 # ⚠ CE SCRIPT N'OUVRE PLUS AUCUN SECRET, ET C'EST UNE PROPRIETE DU RAIL, PAS UNE ECONOMIE.
 #
-# Il lisait `/opt/lcars/var/tokens/<compte>.gitea_token` — donc il DETENAIT un credential de forge en meme
-# temps qu'il portait le seul geste root de la machine. La regle qui donne sa forme a ce rail est
-# l'inverse exact : celui qui a le PRIVILEGE ne detient AUCUN secret, et celui qui detient n'a aucun
-# privilege. Un process qui a les deux peut escalader ce qu'il vole.
-#
-# ⚠ LA LECTURE PART EN ANONYME, ET C'EST MESURE. Mesure du 2026-08-25 sur forge vivante :
-# `fleet/lcars` est `private=false, internal=false`, et `/branches/tool_request` comme
-# `/contents/ops` repondent 200 SANS aucun en-tete d'autorisation. Le depot d'ops est public par
-# construction — c'est celui que tout le monde doit pouvoir lire pour savoir ce que la boite declare.
 #
 # `FORGE_TOKEN` reste accepte pour une boite dont la forge exige une session en lecture. C'est une
 # entree EXPLICITE, posee sur l'unite, jamais un chemin que ce script irait ouvrir : savoir OU
@@ -64,12 +45,6 @@ TOKEN="${FORGE_TOKEN:-}"
 # Ce qui se dit ici est la REGLE : un aptroot jetable, `rm -rf` a chaque passe, n'a rien a faire
 # imbrique dans l'etat sensible d'un autre proprietaire. Les deux arbres ont des cycles de vie
 # differents, et le jour ou l'un se nettoie il emporte l'autre.
-# Pas davantage sous `$STORE` : les quatre volumes externes y sont montes, et un chemin qui leur
-# ressemble sans etre monte promet une persistance qu'il n'a pas — un aptroot survivrait a un
-# rebuild dans l'esprit du lecteur, jamais sur le disque.
-# `/var/tmp` et pas `/run` : la racine apt telecharge des paquets, donc des centaines de Mo, et
-# `/run` est un tmpfs — c'est de la RAM. Le marqueur d'etat, lui, EST en tmpfs, et pour la raison
-# inverse : sa duree de vie doit etre celle du conteneur.
 WORK="${LCARS_TOOLCHAIN_WORK:-/var/tmp/lcars/toolchain-work}"
 
 # LE VERROU EST PRIS AVANT TOUT LE RESTE, et il n'est pas defensif. Deux invocations peuvent se
@@ -110,24 +85,6 @@ api() {
 
 # ─── LE SHA DOIT ETRE LA TETE DE LA BRANCHE PROTEGEE ────────────────────────────────────────────
 #
-# ⚠ SANS CE GARDE, LE RAIL D'OUTILLAGE EST UN CHEMIN `groupe -> root`. Mesure du 2026-08-24, chaine
-# complete : `45-sudoers-toolchain` accorde `%fleet ALL=(root) NOPASSWD:` sur ce binaire ; le
-# controle de `$1` ne portait que la FORME hexadecimale ; le manifeste est ensuite lu `?ref=$SHA` et
-# ses paquets installes en root. Or le rail existe pour que des pods ouvrent des PR vers
-# `tool_request` : des commits NON SIGNES vivent dans ce depot PAR CONCEPTION. N'importe quel membre
-# du groupe pouvait donc passer le SHA d'une PR en attente et faire installer son contenu en root —
-# exactement le geste que la signature existe pour exiger, contourne par le convergeur de cette
-# meme signature. Et `fleet` n'est pas l'operateur : `human-converger.sh` y verse TOUTE la team
-# `humans` de la forge, toutes les 30 s.
-#
-# ⚠ CE FICHIER AFFIRMAIT LA PROPRIETE QU'IL NE VERIFIAIT PAS — l'en-tete dit « un manifeste YAML
-# qu'un humain a approuve sur une branche protegee ». C'etait une intention, pas un controle.
-#
-# ⚠ LA TETE, PAS UN ANCETRE, ET C'EST PLUS SUR QUE LE PIN D'ORIGINE. Un merge qui atterrit entre la
-# mesure du reconciliateur et cette passe rend le SHA note different de la tete : on REFUSE, le
-# reconciliateur re-mesure et rejoue. L'ancienne forme lisait le manifeste au SHA pour ne pas
-# appliquer plus recent que ce qui etait signe ; refuser tient la meme promesse en fermant, au lieu
-# de l'ouvrir a tout ce qui porte quarante caracteres hexadecimaux.
 #
 # ⚠ ET SI LA FORGE NE REND PAS LA TETE, ON REFUSE. Un garde qui s'efface quand sa sonde est muette
 # ne garde rien : c'est le mode de defaillance que le rail entier est cense interdire.
@@ -187,13 +144,6 @@ block_under() { # block_under <yaml> <cle top-level> -> les lignes du bloc
   ' <<< "$1"
 }
 
-# ⚠ LA GRAMMAIRE EST CELLE DU RENDER, PAS UNE CONVENTION LOCALE. Une v1 exigeait `^  - ` (2
-# espaces) pendant que `Fleet.Toolchain.render/2` emet les entrees d'`apt.packages` a 4 (un cran
-# sous leur cle) : sur un manifeste REELLEMENT rendu, apply_apt lisait ZERO paquet, en silence —
-# le verbe fondateur ne faisait rien, et chaque cote etait vert avec ses propres fixtures. Trouve
-# par le temoin du round-trip (B3, 2026-08-19). La regle : les entrees sont les lignes `- `
-# indentees AU MOINS comme leur cle (YAML admet le meme niveau) ; le bloc se ferme a la premiere
-# ligne non-vide, non-tiret, d'indentation <= celle de la cle.
 list_under() { # list_under <yaml> <cle (avec son indentation)> -> une entree par ligne
   awk -v key="$2:" '
     BEGIN { kind=0; while (substr(key, kind+1, 1) == " ") kind++ }
@@ -278,10 +228,6 @@ apply_sysroot() { # apply_sysroot <yaml> <eco>
 # serait EFFACEE — silencieusement, puisqu'un pod qui ne joint rien ressemble a un pod que personne
 # n'a ouvert.
 #
-# ⚠ ECRITURE ATOMIQUE, jamais une redirection. `provision-lib.sh:18` garde la trace d'une v1 qui
-# ecrivait `/etc/sudoers.d` en place et rendait un fichier tronque. Ici un `.hosts` tronque est
-# SYNTAXIQUEMENT VALIDE et silencieusement incomplet : le pod joindrait la moitie de ce qui a ete
-# approuve, et rien ne le dirait.
 #
 # ⚠ ET DEUX CLEFS, PAS UNE. Ce fichier ne fait rien si le role n'est pas en `network: egress` dans
 # le catalogue. On l'ecrit quand meme — c'est le RESULTAT du merge — mais le convergeur ne peut pas
@@ -298,10 +244,6 @@ apply_egress() { # apply_egress <yaml> <eco>
 
   local dir="$STORE/state/egress.d" role
   mkdir -p "$dir"
-  # UN FICHIER PAR ROLE. Le manifeste declare l'ecosysteme ; le rail le pose pour les roles
-  # PRODUCTEURS, qui sont ceux dont le cap-profile porte `network: egress`. Faute d'une liste dans
-  # le manifeste, on pose pour `engineer` — le seul producteur declare a ce jour. La liste des roles
-  # cibles est le premier champ a ajouter quand un second producteur en aura besoin.
   for role in ${LCARS_TOOLCHAIN_EGRESS_ROLES:-engineer}; do
     local f="$dir/$role.hosts" tmp
     tmp="$(mktemp "$dir/.$role.XXXXXX")"
@@ -314,10 +256,6 @@ apply_egress() { # apply_egress <yaml> <eco>
 
 }
 
-# ─── LA FORME `installer` : LA FORME DOMINANTE DE L'EMBARQUE ────────────────────────────────────
-# esp-idf, nRF Connect SDK (west/Zephyr), rustup, PlatformIO : tous ont la meme forme — script
-# d'amorcage, arbre SDK versionne, environnement a sourcer. Ce n'est pas une exception esp-idf,
-# c'est le cas nominal du cas fondateur du chantier.
 #
 # ⚠ JAMAIS `curl | sh`. Un telechargement coupe produit un script TRONQUE que `sh` execute quand
 # meme, et l'etat partiel qui en resulte passe ensuite pour « deja fait ». On telecharge, on VERIFIE
@@ -373,10 +311,6 @@ freeze_env() { # freeze_env <tree> <env_script> <eco>
   local tree="$1" out="$STORE/state/env.d/$3.env" before after tmp
   mkdir -p "$(dirname "$out")"
   before="$(env | sort)"
-  # HOME est modifie PAR LA MESURE (root a HOME=/root, la sonde impose HOME=$tree) : il apparait
-  # donc TOUJOURS dans le delta — filtre plus bas avec les artefacts de shell, jamais fige (un
-  # --setenv HOME ecraserait le contrat du pod ; seule la POSITION du tableau le rattrapait —
-  # audit 2026-08-19). Et `$tree` est un parametre, plus une portee dynamique.
   after="$(cd "$tree" && HOME="$tree" . "$tree/$2" >/dev/null 2>&1 && env | sort || true)"
   [[ -z "$after" ]] && { echo "toolchain-converger: env_script muet pour $3" >&2; return 0; }
 
@@ -454,11 +388,6 @@ for path in $(list_manifests); do
   #   un rebuild, « deja a <sha> » sautait apt, et la boite annoncait convergee avec un /usr nu —
   #   l'exact « etat approuve mais non applique » que ce rail refuse partout.
   #
-  #   La duree de vie du garde suit celle de l'objet garde (la doctrine des volumes, appliquee a
-  #   un marqueur) : les artefacts MAGASIN survivent au rebuild => leur marqueur aussi, on ne
-  #   retelecharge pas des Go deja la ; /usr meurt => apt REJOUE a chaque convergence (il est
-  #   idempotent nativement, c'est SA cle — `01` §4.5) ; les fichiers d'egress se reposent
-  #   (ecriture idempotente, cout nul).
   marker="$(applied_marker "$eco")"
   store_current=0
   [[ -r "$marker" && "$(cat "$marker")" == "$SHA" ]] && store_current=1
@@ -483,13 +412,6 @@ for path in $(list_manifests); do
     fi
   else
     sub=$?
-    # LE CODE DU SOUS-SHELL EST LA DISTINCTION, et une v1 le jetait (audit) : un `die 2` ne au
-    # milieu de l'APPLICATION (freeze_env : delta hors magasin — invisible a validate_manifest,
-    # c'est un resultat d'EXECUTION) ressortait en 3 « retryable » et le rail rebouclait toutes
-    # les 60 s sur un document qu'aucun rejeu ne repare — en RE-TELECHARGEANT l'installeur a
-    # chaque tour. 2 = le DOCUMENT est faux (un humain corrige, le reconciliateur gele ce SHA) ;
-    # tout le reste = 3, retryable. Mixte (un 2 et un 3 sur deux manifestes) => 3 : le retryable
-    # impose le rejeu, le refuse sera re-saute a ce moment-la.
     if [[ "$sub" -eq 2 ]]; then
       echo "toolchain-converger: $eco REFUSE en application (document faux) — le marqueur n'est PAS pose" >&2
       [[ "$rc" -eq 3 ]] || rc=2
@@ -500,12 +422,6 @@ for path in $(list_manifests); do
   fi
 done
 
-# LE MARQUEUR QUI DISTINGUE LE SILENCE NOMINAL DES QUATRE PANNES — pose ICI, en fin de passe, et
-# JAMAIS dans `apply_egress`. Une v1 l'ecrivait dans le verbe : un manifeste SANS `egress_hosts`
-# (le cas nominal d'une boite qui n'a rien ouvert) ne le posait donc jamais, et « aucun hote »
-# recouvrait a nouveau « le convergeur n'est jamais passe », « volume non monte », « volume
-# purge » — les pannes exactes que ce marqueur existe pour separer. Trouve par la relecture du
-# 2026-08-19. Lu par `Fleet.Spawner.Pod.Egress.warn_unless_applied/1`.
 #
 # Pose SEULEMENT si la passe est ENTIEREMENT verte : un rc=3 laisse l'etat en arriere d'au moins
 # un manifeste, et estampiller dirait « courant au SHA » sur une boite qui ne l'est pas.

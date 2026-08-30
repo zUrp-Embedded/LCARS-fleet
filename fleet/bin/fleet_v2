@@ -6,18 +6,6 @@
 #         starfleet (front-desk) comes up permanent and is reachable through Claude Desktop, NOT a
 #         terminal (reorg 2026-07-19: no arch attach any more — the arch is per-project, spawned
 #         when a project is opened).
-#
-# Model (ADR-E): the BEAM runs *as* the human who launches it → the Port spawns the pods, which
-# INHERIT its UID (no systemd, no UID drop, no /var/lib/lcars). The state paths already default under
-# the home on the Elixir side (state_fs_root / tmux sock / task-queue / audit → ~/.lcars/*, commit
-# c368f89d). So this launcher posts ONLY what cannot be defaulted:
-#   - the per-human PORTS (deterministic offset on the UID → N fleets coexist in ONE container);
-#   - the MCP spec (3 env vars required, or the pod does not launch: :mcp_server_spec_required);
-#   - the on-switches (starfleet permanent front-desk + forge-driven step-mode machine).
-#
-# Human config: ~/.lcars/fleet_v2.env (cf. etc/fleet_v2.env.template) — forge (projects are discovered
-#         by ORG MEMBERSHIP, no fixed watched repo).
-# Gestures: fleet_v2 {start|stop|restart|status|version|forge}.
 
 set -euo pipefail
 
@@ -25,19 +13,8 @@ SELF="$(readlink -f "$0")"
 BIN_DIR="$(dirname "$SELF")"
 RUNTIME_DIR="$(dirname "$BIN_DIR")"
 
-# This script must NEVER depend on the caller's CWD: every path it writes is already absolute (under
-# $HOME), but the PROCESS itself must also start from a directory it is guaranteed to be able to read.
-# `cmd_stop` spins up a TEMPORARY Erlang node (`lcars_fleet rpc`, not embedded) whose code path
-# search includes `.` to load the compiler modules the RPC eval needs — from an unreadable CWD that is
-# a burst of `eacces` from code_server. `cd` BEFORE any relative computation (SELF/BIN_DIR/RUNTIME_DIR
-# are already resolved to absolute above, so they survive this `cd`).
 cd "$HOME" || { echo "fleet_v2: \$HOME ($HOME) inaccessible — impossible d'ancrer un CWD fiable" >&2; exit 1; }
 
-# Erlang distribution (opt-in through LCARS_FLEET_V2_ERL_NODE) — ONE derivation, shared by start
-# (distributed launch) and stop (graceful RPC, F7). The flag and cookie come from the ENV FILE
-# (~/.lcars/fleet_v2.env), so the derivation MUST run after load_env(): computing it at the script's
-# top level reads vars that are not loaded yet, and the release then starts with NO distribution —
-# RPC and graceful stop silently dead.
 ERL_NODE="fleet_$(id -un)@127.0.0.1"
 ERL_COOKIE=""
 DIST_ON=""
@@ -66,22 +43,6 @@ MAX_FAN_CEILING=15
 die() { echo "fleet_v2: $*" >&2; exit 1; }
 dtmux() { "$TMUX_BIN" -S "$DAEMON_SOCK" "$@"; }
 
-# ⚠ IL N'Y A PLUS DE BLOC DE PORTS PAR HUMAIN, ET `compute_ports` A DISPARU AVEC LUI (2026-08-14).
-#
-# Le bloc valait `21000 + (uid%500)*10`, dix ports par humain, et ce lanceur en posait quatre. Ils
-# sont tous partis, chacun pour sa raison, et aucune n'est un durcissement :
-#   base+0  l'API — surface TCP SUPPRIMEE : aucune capacite propre (etats servis par l'observation,
-#           `/ws` debranche, diagnostics avec un jumeau CLI) et aucun appelant, `$API_URL` comprise ;
-#   base+1  le deck d'observation — sur socket AF_UNIX, gardee par le mode de son repertoire ;
-#   base+2  deja vide (l'ancien MCP HTTP, remplace par une socket par pod) ;
-#   base+3  le webhook — le seul qui restait, et il etait sur le MAUVAIS AXE.
-#
-# POURQUOI base+3 EST UNE ERREUR DE MODELE ET PAS D'ALLOCATION : le Poller sonde l'ORG — partagee —
-# et ne filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE. Un
-# port par humain demanderait a la forge de notifier N adresses du meme fait. En le retirant d'ici,
-# le webhook retombe sur son defaut de code (8081) : un port de boite, une seule URL — l'axe juste.
-# Et il reste eteint par decision user : gagner 30 s quand les agents reagissent en minutes.
-#
 # ⚠ NE PAS RECREER CETTE FORMULE. Le prochain qui voudra un port trouvera l'idee seduisante — un
 # numero deterministe par UID, sans coordination. Elle a deux defauts que dix mois n'ont pas montres
 # parce que les slots restaient vides : elle publie sur l'axe humain des faits qui n'y vivent pas,
@@ -128,17 +89,6 @@ setup_env() {
   # names a mechanism the code dropped is read as current — it printed that claim at every start.
   : "${FORGE_BASE_URL:?config manquante : FORGE_BASE_URL=http://forge (dans $env_file) — requis pour le scan des projets + le push}"
 
-  # ⚠ CE LANCEUR NE POSE PLUS AUCUN PORT. Il en posait quatre ; les quatre sont partis (cf. le bloc
-  # `IL N'Y A PLUS DE BLOC DE PORTS PAR HUMAIN` en tete de fichier). `LCARS_FLEET_WEBHOOK_PORT`
-  # n'est plus exportee : si un operateur rallume le webhook, il tombe sur le defaut de code —
-  # 8081, un port de BOITE, ce qui est l'axe juste pour un fait que la forge annonce une fois.
-
-  # ⚠ `~/.lcars/run/api_url` N'EST PLUS ECRIT, et le rail entier etait mort DE BOUT EN BOUT. Il
-  # portait l'« accord de port » (A7) : le lanceur ecrivait l'URL, le CLI la lisait au lieu de
-  # deviner. Mesure du 2026-08-14 : personne ne s'en servait — `bin/lcars` le dit dans son propre
-  # commentaire (`spawn` passe par le socket, `list`/`attach` par les socks tmux, `$API_URL`
-  # n'apparaissait que dans le texte d'aide), et le BEAM ne lit ni l'un ni l'autre.
-  # Ecrire un fichier d'etat que personne ne lit, c'est promettre un contrat a qui le trouvera.
   mkdir -p "$HOME/.lcars/run"
 
   # MCP spec — path of the pod's stdio bridge (co-located with this launcher). The pod↔central
@@ -159,11 +109,6 @@ setup_env() {
   # explicitly so the wait, the attach and the `lcars` CLI all compute the SAME path.
   export LCARS_TMUX_SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
-  # Debug visibility (`fleet_v2 start --debug`), exported so the RUNTIME reads it (runtime.exs →
-  # `:fleet_spawner, :debug_visibility`). This door carries the flag; it does not decide what it
-  # means: the runtime widens once and hands the already-widened answer to the vendor launcher.
-  # Deciding it here would open Desktop for a pod whose slot the Elixir side never captures.
-  #
   # Scope = THIS fleet life: a flag whose lifetime is a process's has no lifecycle of its own —
   # nothing to toggle, nothing to persist, nothing to reconcile mid-run. Absent = off, and nothing
   # in `etc/fleet_v2.env.template` offers it: this is a start-time gesture, not a setting.
@@ -183,14 +128,8 @@ setup_env() {
   # EGRESS: same shape and the same ONE-source reason as the MCP base above. runtime.exs reads it as
   # the base where central creates the per-pod proxy socket, and bwrap_launch.sh reads it to bind
   # that per-pod dir at the same absolute path inside the sandbox.
-  # Measured on a bench the day it was written: both defaults said /run/lcars/egress while the fleet
-  # actually runs home-native, so the dir simply never existed and every pod would have launched
-  # with no way out. The MCP socket had already learnt this exact lesson; this line is it applied.
   export LCARS_FLEET_EGRESS_SOCK_BASE="${LCARS_FLEET_EGRESS_SOCK_BASE:-$HOME/.lcars/run/egress}"
 
-  # CLI `lcars` -> la fleet de CET humain. Il ne reste qu'une voie : le socket AF_UNIX de controle
-  # (ControlRouter), hors du reseau que le pod partage. `LCARS_API_URL` a disparu avec la surface
-  # TCP qu'elle designait — et personne ne la lisait, pas meme le CLI qui la recevait.
   export LCARS_API_SOCK="${LCARS_API_SOCK:-$HOME/.lcars/run/api.sock}"
   # Clear a leftover socket from a previous instance (AF_UNIX is not removed on close; the daemon
   # rebinds it at boot). Rebinding at runtime after a crash is handled on the BEAM side.
@@ -230,21 +169,12 @@ export LCARS_FLEET_EGRESS_SOCK_BASE="$LCARS_FLEET_EGRESS_SOCK_BASE"
 RT
 }
 
-# The fleet starts DETACHED (tmux daemon) and nothing is attached automatically (reorg 2026-07-19: the
-# arch no longer boots at start — starfleet is the front-desk, reachable through Claude Desktop, NOT a
-# terminal; the arch is per-project, spawned when a project is opened). To debug a pod by hand:
-# `lcars attach <pod_id>`; for the BEAM logs, the tmux daemon below.
 fleet_up_notice() {
   echo "fleet_v2: fleet up (daemon tmux). starfleet (front-desk) est dans Claude Desktop." >&2
   echo "fleet_v2: logs BEAM : « $TMUX_BIN -S $DAEMON_SOCK attach -t $SESSION » · un pod : « lcars attach <pod_id> »" >&2
 }
 
 # ─── OPTION PARSING ─────────────────────────────────────────────────────────────────────────────
-# Until now this script dispatched sub-commands and NOTHING read `$@` past that: `cmd_start` took
-# its arguments and ignored them, so every flag was silently swallowed. A door that accepts anything
-# and does nothing with it is worse than one that refuses: the operator types a flag, sees a fleet
-# come up, and believes it is on.
-#
 # So: one parser, and an UNKNOWN flag is a refusal, not a shrug. Flags set shell variables read by
 # `setup_env` (which is what exports the launch env to the BEAM) — the boot is the whole scope of a
 # flag here, deliberately. A start argument has no idempotence to prove and no state to reconcile:
@@ -310,17 +240,6 @@ apply_start_flags() {
 }
 
 # ─── L'UID DU SIEGE : UN FAIT DE MACHINE, PAS UN REGLAGE DU GARDE ───────────────────────────────
-#
-# ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARMAIT GUARD B. La garde
-# lisait sa politique dans l'environnement du processus qu'elle garde — et cet environnement
-# appartient au garde, qui n'a qu'a poser la variable en prefixe de commande. Aucun `unset`, aucun
-# `env -i`, rien ne l'en empechait.
-#
-# ⚠ ET LE FICHIER D'ENVIRONNEMENT NE POUVAIT PAS ETRE LE CANAL NON PLUS, meme si l'ordre s'y
-# pretait : `~/.lcars/fleet_v2.env` appartient a l'humain — le template l'invite a l'editer. Une
-# garde dont la clef vit dans un fichier que le garde possede n'est pas une garde ; y semer la
-# valeur aurait rendu la dispense PERSISTANTE au lieu de tenir le temps d'une commande.
-#
 # Le siege est un fait de la machine : il vit dans un fichier `root:root` que le garde ne peut pas
 # reecrire, pose par le provisionnement (`64-services` au poste, l'entrypoint en boite). Le FICHIER
 # GAGNE sur la variable — sans cette precedence, il suffirait de reposer la variable.
@@ -353,32 +272,6 @@ cmd_start() {
   # GUARD B — une fleet ne se lance QUE sous un humain worker. Le BEAM herite de l'uid du lanceur, et
   # ses pods avec : demarrer en root ou sous le sysadmin donnerait des pods root, l'exact inverse de
   # la sandbox. `fleet_v2 status` reste ouvert a tous ; c'est le LANCEMENT qu'on refuse.
-  #
-  # ⚠ CE GARDE A LAISSE PASSER ROOT PENDANT UNE JOURNEE, et la faute est instructive. Il testait
-  # `id -u == 1000` : une EGALITE, donc vraie pour admiral et fausse pour uid 0. Le commentaire, lui,
-  # disait deja « root/sysadmin ». Mesure du 2026-08-15 sur un banc : `sudo su` puis `fleet_v2 start`
-  # passait le garde — ce qui a arrete root n'etait pas une regle, c'etait l'ABSENCE de
-  # `/root/.lcars/fleet_v2.env`, un accident de provisioning. Et admiral porte `sudo` : le garde
-  # fermait le siege en laissant ouverte l'escalade que ce meme siege accorde.
-  #
-  # DEUX CONDITIONS, PARCE QU'IL Y A DEUX REGLES, ET UNE SEULE EST A NOUS :
-  #  1. `uid < UID_MIN` — la frontiere systeme/humain. Elle n'est pas a inventer : `/etc/login.defs`
-  #     la declare, `useradd` la lit, et ce depot la lit DEJA en deux endroits (human-converger.sh
-  #     `uid_min()`, console-humans.sh). Un `1000` ecrit a la main ici etait le troisieme exemplaire
-  #     d'un nombre dont le systeme est la source.
-  #  2. `uid == SYSADMIN_UID` — la reservation du siege, que `login.defs` ne peut PAS exprimer :
-  #     UID_MIN vaut 1000 et admiral EST 1000, donc le systeme le classe utilisateur regulier. Cette
-  #     regle-la est a LCARS, elle reste ici.
-  # Deplacer UID_MIN a 1001 fusionnerait les deux regles en une — ecarte, et le motif ecrit ici
-  # etait FAUX : « human-converger.sh calcule un OFFSET d'uid a partir de UID_MIN ». Il n'en calcule
-  # rien, `UID_OFFSET="${LCARS_UID_OFFSET:-1000}"` est un defaut litteral, independant. Bouger
-  # UID_MIN ne decalerait aucun uid de worker.
-  #
-  # LE VRAI MOTIF : `UID_MIN` est une declaration du SYSTEME, pas la notre. `useradd` la lit, et
-  # deux autres lecteurs de ce depot aussi. La deplacer pour y loger une reservation propre a LCARS
-  # ferait porter une decision LCARS par un fichier de l'OS, la ou n'importe quel autre outil la
-  # lira comme une frontiere systeme. La reservation du siege est a nous : elle reste ici, en clair.
-  #
   # Et elle ne peut PAS etre produite par une formule : le sysadmin est cree par l'entrypoint avec
   # un uid EXPLICITE (`useradd -u ${LCARS_UID:-1000}`), hors du `forge_id + UID_OFFSET` par lequel
   # le convergeur derive les humains. Aucune arithmetique ne le rend, aucune arithmetique ne
@@ -453,11 +346,6 @@ cmd_start() {
     launch_cmd="exec '$rel_bin' start"
   else
     mode="dev (mix run, MIX_ENV=$mix_env)"
-    # NO cap-profile root pinned here. Mix links `_build/<env>/lib/lcars_fleet/priv` to the source
-    # `priv/`, so the default root ALREADY reads the live tree — the override bought nothing, and
-    # it made this launcher a second authority on the catalogue's layout. It broke the moment the
-    # catalogue moved (2026-08-01) and killed the BEAM at boot: one layout, one authority, and it
-    # is `Fleet.Catalogue`, never a path rebuilt in shell.
     [[ -n "$dist_on" ]] && export ELIXIR_ERL_OPTIONS="-name $erl_node -setcookie $erl_cookie ${ELIXIR_ERL_OPTIONS:-}"
     launch_cmd="cd '$RUNTIME_DIR' && exec mix run --no-halt"
   fi
@@ -473,8 +361,6 @@ cmd_start() {
   # UI: the wheel scrolls the BEAM logs' scrollback (not the shell history). Same gesture in `lcars attach`.
   dtmux set -g mouse on 2>/dev/null || true
 
-  # Nothing to wait for or attach to (the arch no longer boots at start). The BEAM boots detached; the
-  # BootOrchestrator brings starfleet + governance up post-readiness. We hand back immediately.
   fleet_up_notice
 }
 
@@ -506,15 +392,6 @@ cmd_stop() {
   if [[ -n "$beam_pid" ]]; then
     kill -TERM "$beam_pid" 2>/dev/null || true
 
-    # Wait for the BEAM to finish cleanly (the tmux session dies with it). This is the OUTER
-    # bound of the WHOLE clean stop: the drain's own deadline AND the ordered teardown that
-    # follows it (pods' terminate → checkpoint seed) must both fit inside. Set tighter than the
-    # drain deadline, it makes that deadline decorative — the fallback kill-server below then
-    # cuts the checkpoint, the one thing a clean stop exists to save. The asymmetry decides the
-    # value: too generous costs an operator's wait on a BEAM that is already stuck, too tight
-    # costs pod state. Still a literal posed HERE rather than derived from the BEAM's own
-    # deadline — that single source is BL-6-52. Under `set -e`, `((i++))` returns 0 (falsy) on
-    # the first round and kills the script silently, hence the explicit form below.
     # DERIVE DE LA DEADLINE DU BEAM, plus un litteral pose ici (BL-6-52 ferme). `Shutdown.grace_ms/0`
     # lit `LCARS_SHUTDOWN_GRACE_MS` (defaut 45000) : on lit la MEME variable, on la passe en
     # secondes, et on ajoute la marge que le 90 encodait en dur (le drain, puis le temps que le
@@ -543,10 +420,6 @@ cmd_stop() {
 # file nor from this shell: `--debug` is a property of ONE LIFE of the fleet (it is not hot-switchable
 # and it is not persisted), so the only place where its truth lives is the process that carries it.
 # An env file edited after the start would answer for a fleet that does not exist.
-#
-# It is printed because a mode nobody can read is a mode that lies: the operator whose pods do not
-# show up in Claude Desktop has no way, from the outside, to tell "not in debug" from "debug is
-# broken" — asked live 2026-08-04 on a bench, and the status had no answer.
 status_debug_visibility() {
   local pane_pid beam_pid env_file
   pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"

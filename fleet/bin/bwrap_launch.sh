@@ -4,26 +4,6 @@
 # STARDATE: 2026-06-01
 # STATUS: PROD-V2 — N0 containment + persistent tmux PTY + per-pod socket dir + bwrap-PID1 holder + die-with-parent
 #
-# Projects the POD SANCTUARY (N0 pod primitive, vendor-agnostic).
-# The sandbox is INVERTED: bwrap does not CAGE the agent to protect the world from it — it protects the
-# AGENT from the world. The sanctuary is the closed world it PROJECTS for the agent ("what do we
-# provide", empty-unless-provisioned by default): the agent has EXACTLY what it needs and can break
-# nothing, so "the walls carry the security, not the SP" (I-CBC: what is not projected does not exist →
-# no rule to put in the agent's head). THIS FILE is NOT the sanctuary: it is the CODE that projects it —
-# edited and tested (bats) like everything else. NO CODE IS SACRED. A different containment means one
-# more co-located launcher (one launcher per mode), not that this file is untouchable.
-#
-# ADR-G model: the command (`claude_launch.sh`, opaque) runs in a **persistent tmux PTY** INSIDE bwrap,
-# through a **per-pod socket DIR**. `tmux new-session -d` detaches the session; a **HOLDER**
-# (`exec sleep infinity` after creation) keeps bwrap-PID1 alive → the namespace and the tmux server
-# survive. The holder is REQUIRED: without it bwrap exits the moment `new-session -d` returns and KILLS
-# the namespace, hence the pod. So bwrap does NOT return: this process IS the pod (the spawner's Port
-# handle). Boot validation is ASYNC, spawner-side (`tmux list-sessions`); teardown = close Port /
-# SIGTERM. `--die-with-parent` is orphan-safe.
-#
-# N0/N1 frontier (IX.2/IX.3): tmux is N0 (it holds any REPL). bwrap_launch does NOT know the `claude`
-# flags — that is `claude_launch.sh`, an opaque command in ${COMMAND[@]}.
-#
 # Usage: bwrap_launch.sh <role> <pod_id> <pod_dir> <command...>
 # Identity/session env (set by the spawner before Port.open; propagated through --setenv):
 #   LCARS_POD_SESSION_ID          pre-allocated UUID — required (strict :?, consumed by claude_launch)
@@ -36,9 +16,6 @@
 #                                           in place + mtime sync, no ~8h cliff). NOT the human's whole
 #                                           .claude — that leaks their hooks and jams the boot;
 #                                           .claude/ stays pod-owned.
-#   LCARS_POD_CWD                 the pod's cwd = the branch/repo root (invoked-world, matching native
-#                                 Claude Code /init) — defaults to $POD_DIR (the bootstrap/spawner sets
-#                                 it to $POD_DIR/<repo> for a project pod).
 #
 # Git identity (Z4 forge-identity B'): GIT_AUTHOR_*/GIT_COMMITTER_* are the brief's HUMAN, FORWARDED
 # from the env (set by the spawner `pod.ex` through `Fleet.Credentials.ForgeIdentity`, which DERIVES
@@ -53,28 +30,12 @@
 #
 # Exit codes: 0 success (the pod is launched detached) | 1 setup error | 2 bwrap/vendor missing
 #
-# Three corrections over the containment-bwrap draft:
-#   + --clearenv            (CLOSED env: everything through explicit --setenv, or the spawner's ambient leaks)
-#   + DISABLE_AUTO_MEMORY   (stateless pod: no hidden auto-memory that drifts and dies at nuke time)
-#   + LCARS_POD_CWD         (cwd = branch root, not $POD_DIR — matching native Claude Code)
 
 set -euo pipefail
 
-# =============================================================
-# Config (overridable via env)
-# =============================================================
 
 CLAUDE_DIR="${CLAUDE_DIR:?CLAUDE_DIR required (claudeDir of the human account, resolved by Fleet.Spawner — adr-f)}"
-# DORMANT — WIRED BUT NEVER ACTIVATED. Pod side of a clone accelerator (local git mirror → `--reference`
-# clone = local objects, incremental fetch, less network). The clone-side hook
-# (`project["reference_repo_path"]`, fleet_project_bootstrap/phase.ex) is READ but never SET, so no
-# workspace has `alternates` and this bind resolves NOTHING today. Kept deliberately (the value is real:
-# the same project is re-cloned at every spawn), not purged.
 # DR-023: the mirror is INERT by default. `LCARS_GIT_MIRROR` unset → empty → NO guard, NO bind.
-# A disabled feature must not be a precondition of the normal path — the old default pointed at the
-# systemd fossil `/var/lib/lcars/git-mirror`, so a fresh home install carried no mirror and the first
-# spawn died on a missing relic. TO REACTIVATE: set `LCARS_GIT_MIRROR=<dir>` (home-native, e.g.
-# `~/.lcars/git-mirror`), provision the mirror, and set `reference_repo_path` clone-side.
 GIT_MIRROR="${LCARS_GIT_MIRROR:-}"
 BWRAP_BIN="${LCARS_BWRAP_BIN:-/usr/bin/bwrap}"
 TMUX_BIN="${LCARS_TMUX_BIN:-/usr/bin/tmux}"
@@ -91,9 +52,6 @@ VENDOR_SHARE="${LCARS_VENDOR_SHARE:-$([ -n "$VENDOR_BIN" ] && dirname "$(dirname
 # (The literal `/run/lcars/tmux-sock` default below is a direct-invocation fallback only.)
 SOCK_PARENT="${LCARS_TMUX_SOCK_BASE:-/run/lcars/tmux-sock}"
 
-# =============================================================
-# Args
-# =============================================================
 
 if [[ $# -lt 4 ]]; then
   echo "ERR: usage: $0 <role> <pod_id> <pod_dir> <command...>" >&2
@@ -127,10 +85,6 @@ CWD_BIND_ARGS=()
 [[ -n "${LCARS_POD_CWD_SRC:-}" && "$LCARS_POD_CWD_SRC" != "$WORKDIR" ]] &&
   CWD_BIND_ARGS=(--bind "$LCARS_POD_CWD_SRC" "$WORKDIR")
 
-# Auth mode — bind ONLY. The rejected token_arg mode injected the OAuth access_token as
-#   `--setenv CLAUDE_CODE_OAUTH_TOKEN <token>` → LEAKED into the argv (ps), AND no refresh
-#   (expiresAt:null) → a long pod (an engineer past 8h) lost its auth mid-work. bind (ADR-F): RW bind of
-#   .credentials.json, native OAuth refresh (proactive + reactive on 401 + lockfile), full scope, no cliff.
 AUTH_MODE="${LCARS_AUTH_MODE:-bind}"
 case "$AUTH_MODE" in
   bind) ;;
@@ -140,10 +94,6 @@ esac
 # tmux session (INTERNAL name, distinct from claude's RC name prefix — P3 #13).
 POD_SOCK_DIR="$SOCK_PARENT/$POD_ID"
 TMUX_SESSION_NAME="lcars-pod-$POD_ID"
-# CONSTANT filename (not ${TMUX_SESSION_NAME}.sock): the $POD_ID/ dir already
-# carries the uniqueness. Doubling the pod_id (dir + filename) blew past the
-# 108-byte sun_path for a UUID pod_id (pipeline path) → "File name too long".
-# SAME path on the Elixir side (Fleet.Spawner.PodTmux.sock_path).
 TMUX_SOCK="$POD_SOCK_DIR/pod.sock"
 
 # Per-pod MCP socket (the AF_UNIX channel between the pod's bridge and central). SAME shape as the tmux
@@ -180,36 +130,19 @@ EGRESS_PORT="${LCARS_POD_EGRESS_PORT:-8118}"
 SOCAT_BIN="${LCARS_SOCAT_BIN:-/usr/bin/socat}"
 POD_VENDOR_BIN="$SANDBOX_HOME/.local/bin/$VENDOR_NAME"
 
-# =============================================================
 # Cleanup trap (P2 #7) — useful PRE-exec only: `exec` replaces the shell, so the EXIT trap fires ONLY if
 # we leave before `exec` (a failed assertion/setup). On success the pod is launched detached and
 # survives. state.json lives OUTSIDE $POD_DIR -> never affected. Caller opt-out (spawner lifecycle).
-#
-# 6-069 — IL EMPORTAIT $POD_DIR, ET CE REPERTOIRE N'EST PAS A NOUS. Sous `set -euo pipefail` le
-# moindre echec declenche ERR, donc le `rm -rf`, et TOUTES les verifications de setup sont posees
-# APRES ce trap : bwrap/tmux absents, binaire vendor introuvable, claudeDir manquant, miroir git
-# demande mais absent, parent de socket absent. Or a cet instant $POD_DIR a deja ete entierement
-# projete par la fleet — espace de travail clone AVEC SON HISTORIQUE GIT, CLAUDE.md compose, prompt
-# systeme, protocole, brief, settings.json, watch.sh, hook de trailer. Un socat manquant faisait
-# donc recloner le depot au prochain essai.
 #
 # ⚠ LE SCRIPT DECLARE LUI-MEME LA PROPRIETE, QUATRE LIGNES PLUS BAS :
 # `ERR: pod_dir $POD_DIR missing (caller responsibility)`. Le proprietaire a un teardown a lui
 # (`Fleet.Spawner.Pod.StateFs.rm_terminal_artifacts/3`), avec une garde d'echappement de chemin, et
 # il ne l'exerce que sur un pod TERMINAL. « On n'a pas pu demarrer » n'est pas « ce pod est fini » :
 # le pod_dir est justement ce que la tentative suivante REUTILISE.
-#
-# Ce qui reste dans le trap est ce que ce script cree et possede : le repertoire de socket par pod.
-# `$POD_DIR/.local/bin` et `$POD_DIR/.claude`, crees plus bas, restent — inertes, idempotents, et
-# emportes par le teardown du proprietaire quand le pod meurt pour de bon.
-# =============================================================
 if [[ "${LCARS_BWRAP_NO_CLEANUP:-0}" != "1" ]]; then
   trap 'rm -rf "$POD_SOCK_DIR" 2>/dev/null || true' EXIT ERR
 fi
 
-# =============================================================
-# Setup checks
-# =============================================================
 [[ -x "$BWRAP_BIN" ]] || { echo "ERR: bwrap missing/not-x: $BWRAP_BIN" >&2; exit 2; }
 [[ -x "$TMUX_BIN"  ]] || { echo "ERR: tmux missing/not-x: $TMUX_BIN (N0 PTY host)" >&2; exit 2; }
 if [[ -z "$VENDOR_BIN" || ! -x "$VENDOR_BIN" || ! -d "$VENDOR_SHARE" ]]; then
@@ -232,24 +165,6 @@ MIRROR_BIND_ARGS=()
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
 
-# ─── LE JOURNAL DU POD EST EN LECTURE SEULE POUR LUI ────────────────────────────────────────────
-# `fleet.feed` est le recit que le RUNTIME fait au pod de ce qui s'est passe (ArchFeed, FleetFeed).
-# Le pod_dir est monte en ecriture, donc le pod pouvait l'editer — et ce n'est pas « salir son
-# journal » : `PodFeed.append/2` RELIT le fichier avant de le reecrire, donc une ligne posee par
-# l'agent est reprise et re-emise sous la signature du runtime. Un agent pouvait blanchir des lignes
-# dans le registre de la fleet, sur l'objet meme dont la fonction est de lui dire ce qui s'est
-# REELLEMENT passe.
-#
-# DEUX CONTRAINTES, ET ELLES SONT LA RAISON DE CES DEUX LIGNES-CI :
-#   1. bwrap bind STRICTEMENT — une source absente n'est pas un montage vide, c'est un launcher qui
-#      meurt. Or le feed n'existe qu'au PREMIER jalon (`PodFeed` le cree a l'append), donc il est
-#      absent au spawn : mesure du 2026-08-12, un arch qui se reveille ne le trouve pas alors que son
-#      SP lui promet qu'il est la. On le cree ICI, vide, a cote du bind qui en depend — un `touch`
-#      pose ailleurs deriverait du bind un jour ou l'autre. Un fichier vide se lit ; une absence, elle,
-#      fabrique une croyance.
-#   2. le writer doit garder le MEME inode. `File.write` tronque en place, donc le montage suit. Le
-#      jour ou quelqu'un « ameliore » ca en ecriture-temporaire-puis-`rename`, la vue du pod se fige
-#      sur l'ancien inode SANS RIEN DIRE : le pod lirait un journal mort en le croyant vivant.
 # `touch`, JAMAIS `: >` : le pod_dir survit au respawn (l'arch est `forever`), donc une troncature
 # ici effacerait le journal a chaque relance — l'inverse exact de ce qu'on protege.
 touch "$POD_DIR/fleet.feed" 2>/dev/null || true
@@ -284,10 +199,8 @@ fi
 # ghost path and having bwrap fail further along with an opaque message.
 [[ -d "$MCP_SOCK_DIR" ]] || { echo "ERR: dir socket MCP $MCP_SOCK_DIR missing (central must provision it before the launch)" >&2; exit 1; }
 
-# =============================================================
 # Native Claude Code plugins (RO bind host→pod, allowlisted by LCARS_SKILLS_PLUGINS).
 # (arch→worker cascade vector: a bare worker has no plugin by default = empty list.)
-# =============================================================
 PLUGIN_BINDS=()
 set -f
 for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
@@ -300,23 +213,18 @@ for plugin in ${LCARS_SKILLS_PLUGINS:-}; do
   [[ "$plugin" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "ERR: invalid plugin name '$plugin' (allowlist [A-Za-z0-9._-])" >&2; exit 1; }
   # F152: resolve from CLAUDE_DIR (the human's REAL ~/.claude), NOT $HOME — the spawner opens the Port
   # with HOME=POD_DIR (the pod's env), so host-side `$HOME` is the fresh pod_dir with no plugins in it.
-  # `$HOME/.claude/plugins` therefore always failed → exit 1 → the EXIT trap's `rm -rf "$POD_DIR"`
-  # destroyed the provisioned pod, for EVERY cap-profile with a plugin-qualified skill. CLAUDE_DIR
-  # (required at the top) points at the human claudeDir, so their plugins are under CLAUDE_DIR/plugins.
   HOST_PLUGIN_PATH="$CLAUDE_DIR/plugins/$plugin"
   [[ -d "$HOST_PLUGIN_PATH" ]] || { echo "ERR: plugin '$plugin' not installed host-side at $HOST_PLUGIN_PATH" >&2; exit 1; }
   PLUGIN_BINDS+=(--ro-bind "$HOST_PLUGIN_PATH" "$SANDBOX_HOME/.claude/plugins/$plugin")
 done
 set +f
 
-# =============================================================
 # Fleet skills (RO bind host->pod, filtered by the cap-profile whitelist — BL-6-22).
 # LCARS_SKILLS_PATHS is NEWLINE-delimited, one `name:abs_path` per line (the LCARS_POD_MOUNTS
 # pattern — paths may carry spaces, a word-split loop would shatter them). The first `:`
 # separates: the name is a fleet slug (no `:` in its alphabet), the path keeps any `:` it has.
 # bwrap CREATES the bind target inside the namespace when absent (same invariant the plugin
 # loop above relies on; pinned by the bats). Empty/absent var -> zero bind, zero loop.
-# =============================================================
 SKILL_BINDS=()
 while IFS= read -r skill_line; do
   [[ -z "$skill_line" ]] && continue
@@ -331,7 +239,6 @@ while IFS= read -r skill_line; do
   SKILL_BINDS+=(--ro-bind "$skill_path" "$SANDBOX_HOME/.claude/skills/$skill_name")
 done <<< "${LCARS_SKILLS_PATHS:-}"
 
-# =============================================================
 # exec bwrap → HOLDER sh → (detached `tmux new-session -d` + exec sleep infinity) → command.
 #   HOLDER: `new-session -d` returns immediately; were it bwrap's foreground process, bwrap would exit
 #   and KILL the namespace and the tmux server (hence the pod). The `exec sleep infinity` after creation
@@ -341,25 +248,7 @@ done <<< "${LCARS_SKILLS_PATHS:-}"
 #   re-parsing.
 #   --clearenv: CLOSED env — nothing from the spawner's ambient leaks; everything is explicit --setenv.
 #   The discipline lives in the WALLS (binds = what exists) and the ENV (what is set), not in the SP.
-# =============================================================
 # Bind ONLY CLAUDE_DIR's `.credentials.json` (ADR-F).
-#
-# P1/C9 — the human's whole .claude is NOT bound. Reason: cwd=HOME=POD_DIR, so the `project`/`local`
-# settings tiers (rooted at cwd, enabled by --setting-sources project,local) resolved inside the bound
-# human .claude → the human's settings.json was loaded as *project* settings → their hooks
-# (session-startup.sh…) ran → crashed → retried 10× → JAM at boot. The flag could not help (it is what
-# authorizes project/local). Fix: only `.credentials.json` is bound (native OAuth refresh writes IN
-# PLACE, which survives a single-file bind and rewrites the human's file); `.claude/` stays pod-owned
-# (created by do_project) → no human settings.json → no hook.
-# ###################### /!\ NEVER DELETE /!\ ###################### ADR-F
-# THIS BIND IS NOT A SECURITY HOLE. IT IS THE PLATE. Read it before proposing to close it.
-# The Anthropic credential BUYS THE TOKENS the model eats — it is a meter, it signs nothing.
-# What signs is the ROLE token (`/opt/lcars/var/tokens/<role>.gitea_token`): per role, on every forge act.
-# Two rails, two jobs. Do NOT conflate them into "the pod authenticates as the human", and do NOT
-# turn this into a per-pod identity: a single credential RW-bound and refreshed IN PLACE is the
-# pattern Anthropic recommends for multi-agent refresh, and it is the only shape without the ~8h
-# cliff (the mechanism is at the top of this file, LCARS_AUTH_MODE).
-# ################################################################## ADR-F
 AUTH_BIND_ARGS=()
 HUMAN_CREDS="$CLAUDE_DIR/.credentials.json"
 [[ -f "$HUMAN_CREDS" ]] || { echo "ERR: creds $HUMAN_CREDS missing (human registration — adr-f)" >&2; exit 1; }
@@ -382,7 +271,6 @@ if [[ "${LCARS_POD_DISABLE_TELEMETRY:-0}" == "1" ]]; then
   TELEMETRY_ENV=(--setenv DISABLE_TELEMETRY "1" --setenv CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC "1")
 fi
 
-# SELECTIVE /etc (sanctuary: project ONLY what the pod needs — bwrap arch audit #5.2).
 # A pod has NO business in /etc wholesale: `--ro-bind /etc /etc` exposed 166 entries, useless AND
 # dangerous (the /etc/fleet SECRETS — api-secret/webhook-secret/FORGE_PUSH_TOKEN —, /etc/shadow,
 # /etc/sudoers…), which undid the forge delegation: a pod could read the token and talk to Gitea
@@ -393,14 +281,11 @@ fi
 RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 [[ -n "$RESOLV_REAL" && -e "$RESOLV_REAL" ]] || RESOLV_REAL=/etc/resolv.conf
 
-# =============================================================
 # CATALOGUE mounts (cap-profile-driven, LCARS_POD_MOUNTS = "mode:path" lines). The projected world is
 # DECLARED by the cap-profile (sanctuary philosophy: "what do we provide"), no longer hardcoded here.
 # Bound AFTER the `--tmpfs /home` below ⇒ they restore the masked paths (e.g. /home/projects). Belt:
 # absolute + existing path; RW forbidden on the system roots (already mounted RO by the base sandbox).
 # The cap-profile source is trusted-operator — the belt is anti-footgun, not anti-adversary.
-# =============================================================
-# =============================================================
 # ENVIRONNEMENT D'OUTILLAGE (LCARS_POD_TOOLCHAIN_ENV = lignes `KEY=VALUE`, composees et VALIDEES
 # cote Elixir par `LaunchSpec.toolchain_env/0` — ici on DEPLIE, on ne valide pas).
 #
@@ -416,7 +301,6 @@ RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 #
 # Vide (pas de magasin, pas d'env.d) => tableau vide, ZERO `--setenv` de plus, ligne de commande
 # identique a aujourd'hui.
-# =============================================================
 TOOLCHAIN_ENV=()
 POD_PATH="$SANDBOX_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 if [[ -n "${LCARS_POD_TOOLCHAIN_ENV:-}" ]]; then
@@ -467,11 +351,6 @@ fi
 # unless bwrap itself starts empty. Everything the pod legitimately needs crosses explicitly
 # through --setenv below. Locked by `test/bwrap_launch/bwrap_launch.bats` (assembly + a secret
 # exported around the spawner must not reach the sandbox).
-# THE NETWORK DECISION, and it is the cap-profile's (`metadata.network`, threaded as
-# LCARS_POD_NETWORK). Absent = sealed, because the fail-closed default belongs at every layer that
-# can read the value: a launcher that opened when it was not told to would undo the profile's own
-# default. `egress` does not mean "shares the host stack" — it means the pod's proxy serves a wider
-# allowlist. NOBODY gets `--share-net` any more; the flag is gone from this file entirely.
 NET_ARGS=(--unshare-all)
 if [[ -n "${LCARS_POD_EGRESS_SOCK:-}" ]]; then
   [[ -d "$EGRESS_SOCK_DIR" ]] || { echo "ERR: dir socket egress $EGRESS_SOCK_DIR missing (central must provision it before the launch)" >&2; exit 1; }

@@ -4,31 +4,12 @@
 # STARDATE: 2026-08-20
 # STATUS: PROTO-V1 — the SINGLE call surface for talking to an external forge (GitHub / GitLab)
 #
-# WHY THIS FILE EXISTS. The dialogue with the external forge lived in ELEVEN places — seven
-# `gh`/`glab` invocations across `publish-rail.sh` and `bin/lcars`, four `auth status` probes — and
-# every one of them carried the same defect: the destination host was never passed. `--dest-host`
-# was accepted, was used to build the push URL, and reached NO CLI call. On an Enterprise instance
-# the rail pushed to one place and talked to another; `approve` probed and CREATED the repository on
-# github.com while pushing to the enterprise host.
-#
-# Eleven sites, one defect, eleven fixes to keep aligned: that is the definition of a CLASS to close
-# rather than an instance to repair. Everything forge-specific lives HERE, one `case` per verb with
-# both hosts side by side — so that adding a GitHub verb without its GitLab twin is VISIBLE, instead
-# of being discovered six months later on somebody's homelab.
-#
 # ── THE AUTH IS NOT OURS, AND THIS FILE NEVER TOUCHES IT ─────────────────────────────────────────
 # No token is read, stored, passed as an argument, or written to a config. The auth is the official
 # CLI's own (`gh auth login` / `glab auth login`), in ITS store, outside our process. V1 of the rail
 # hand-rolled a token layer — extraheader + curl — and a security review had to close its leaks; V2
 # deleted the layer instead of guarding it. This file inherits that rule: if something ever needs a
 # token to work, that something does not happen here.
-#
-# ── THE HOST IS ALWAYS QUALIFIED, EVEN WHEN IT IS THE DEFAULT ────────────────────────────────────
-# `gh` documents `--repo [HOST/]OWNER/REPO`, and accepts `github.com/owner/repo` as readily as
-# `owner/repo` (measured 2026-08-20). So we qualify ALWAYS, with no conditional: an
-# `if [[ $host != github.com ]]` would be one more path that is never taken, therefore one more path
-# that is never tested. On the GitLab side the same uniformity comes from `GITLAB_HOST` — one
-# variable, every verb.
 #
 # ── WHAT IT DOES NOT DO ──────────────────────────────────────────────────────────────────────────
 # No `git push`, no clone, no rewrite. This file TALKS to the forge; the rails MOVE git objects. The
@@ -113,11 +94,6 @@ need_cli() {
 #     while github.com was answering perfectly;
 #   · authenticated on github.com only, destination Enterprise -> exit 0 -> we announced Tier 1,
 #     then the call went to the wrong host.
-# TWO REASONS TO ANSWER NO, AND THEY NEED DIFFERENT GESTURES. Absent (4) is "install it"; present
-# and logged out (1) is "log in". The box installs neither CLI, so the first is what an operator
-# meets on a fresh machine — and being told to run `gh auth login` when there is no `gh` sends them
-# looking in the wrong place. Callers that only care about the tier (the rail) still read any
-# non-zero as Tier 2; callers that ADVISE (the two doctors) read the difference.
 cmd_auth_ok() {
   command -v "$CLI" >/dev/null 2>&1 || return 4
   "$CLI" auth status --hostname "$DEST_HOST" >/dev/null 2>&1
@@ -158,12 +134,6 @@ cmd_repo_create() {
   esac
 }
 
-# THE ANSWER TO THE COSTLIEST DEFECT OF THE RAIL, and it deserves a verb of its own. The publish
-# base was assumed to be `main` on both sides and never derived from the destination. Measured on
-# lordzurp/QSS: default `master`, no `main`, repository NOT empty — the guard that reads "never
-# clobber a base the human populated by hand" interrogated the ASSUMED base, found nothing, let the
-# push through, and created an ORPHAN `main` alongside `master`. A guard that measures the wrong
-# object is green in exactly the case it was written to catch.
 cmd_default_branch() {
   need_cli
   case "$HOST" in
@@ -173,9 +143,6 @@ cmd_default_branch() {
   esac
 }
 
-# "ANSWERED EMPTY" AND "FAILED" ARE TWO STATES, and the rail flattened them into one
-# (`EXISTING="$(request_find || true)"`). An auth expiring mid-run answered empty, the rail moved on
-# to the creation, that failed, and the message blamed `create` while `list` was what gave way.
 # Here: exit 0 = I could answer (the output may be empty) · exit 3 = I could not.
 cmd_request_find() {
   need_cli
@@ -200,13 +167,6 @@ print(a[0]["web_url"] if isinstance(a, list) and a else "")' <<<"$out")" || exit
   printf '%s' "$out"
 }
 
-# CREATE, THEN RE-READ THROUGH THE CONTRACT — and this is where GitLab stops being the poor
-# relation. `glab mr create` has NO JSON output at all (verified: the doc documents none), so V1
-# read the url with `2>&1 | grep -oE 'https?://\S+' | tail -1`. The regex is FORCED on that command,
-# it is not sloppiness — but the `2>&1` is not: it lets any url-bearing warning (deprecation,
-# redirect, doc link) into the pipe, and `tail -1` hands back the LAST one, so the warning wins over
-# the result. So we no longer read `create`'s output at all: we create, then RE-READ through
-# `request-find`, which has a JSON contract. The regex disappears from both sides.
 # BY THE TIME WE GET HERE THE REQUEST IS CREATED; only its URL is uncertain. Two forges, two
 # reasons it can come back empty, and one answer for both:
 #   · GitHub prints the url on stdout, so a grep normally finds it — but a bare `grep | tail` under

@@ -28,7 +28,6 @@
 # WHY A ROLLING BRANCH + ONE PR/MR: the diff base is the destination base's real head, so the request
 # always carries "internal main - external main" = everything pending. A new publish force-updates the
 # same branch; the single open request stays current; merging it empties it.
-# Ref: work/beyond_#6/chantier-publication-github-2026-08-14.
 #
 # THE DETERMINISM INVARIANT, load-bearing: publish-transform.sh rewrites EVERY SHA (one-way filter-repo
 # pass). This rail is only coherent if that rewrite is DETERMINISTIC — same source commit => same
@@ -66,9 +65,6 @@ export GIT_TERMINAL_PROMPT=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PUBLISH_TRANSFORM="$SCRIPT_DIR/publish-transform.sh"
-# EVERY WORD SPOKEN TO THE EXTERNAL FORGE GOES THROUGH HERE, AND NOWHERE ELSE. This rail carried
-# four `gh`/`glab` invocations of its own, none of which qualified the destination host: it pushed
-# to the Enterprise instance and talked to github.com.
 FORGE_CLI="$SCRIPT_DIR/forge-cli.sh"
 
 HOST="github"
@@ -96,10 +92,6 @@ while [[ $# -gt 0 ]]; do
     --work) WORK="$2"; shift 2 ;;
     --branch) BRANCH="$2"; shift 2 ;;
     --base) BASE="$2"; shift 2 ;;
-    # `--linearize` WAS MISSING FROM THIS LIST, and that made a documented, tested function
-    # (`linearize_first_parent`, publish-transform.sh:118) reachable by NOBODY: the transform is
-    # only ever invoked from here, and this rail dropped the flag on the floor. A capability the
-    # script advertises and no path can exercise is a promise the code does not keep.
     --vendor-identity|--filter-repo-bin|--system-email|--linearize) PASSTHROUGH+=("$1" "$2"); shift 2 ;;
     *) echo "publish-rail: option inconnue: $1" >&2; usage ;;
   esac
@@ -135,9 +127,6 @@ DEST_URL="https://${DEST_HOST}/${DEST_REPO}.git"
 # --- Change-request adapter: ONE call surface, host-qualified ------------------------------------
 # THIS BLOCK CARRIED FOUR `gh`/`glab` INVOCATIONS OF ITS OWN, and not one of them passed
 # `$DEST_HOST` — the rail pushed to the requested host and searched/opened the PR on github.com.
-# The qualification now lives in `forge-cli.sh`, the ONLY place in the repository where a forge CLI
-# is invoked. What the rail gains on top: `request_find` distinguishes "answered empty" (0) from
-# "failed" (3), two states the `|| true` here used to flatten into one.
 fc() { "$FORGE_CLI" "$1" --host "$HOST" --dest-host "$DEST_HOST" --repo "$DEST_REPO" "${@:2}"; }
 request_find()       { fc request-find --head "$BRANCH" --base "$BASE"; }
 request_open()       { fc request-open --head "$BRANCH" --base "$BASE" --title "$1" --body "$2"; }

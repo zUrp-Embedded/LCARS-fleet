@@ -3,35 +3,11 @@
 # AUTHOR: engineer
 # STARDATE: 2026-06-01
 # STATUS: PROD-V2 — INTERACTIVE claude vendor launcher, PTY-puppet (N1 vendor frontier, subscription)
-#
-# Vendor-specific launcher for the interactive `claude` REPL of LCARS v2 under ADR-G
-# (pod primitive, N1 vendor frontier, `claude_*` prefix).
-# RC-at-startup goes through the `--remote-control` flag, PROVEN under a PTY. The one-shot
-# `script(1)`-PTY model (brief = CLI prompt) is FORBIDDEN by ADR-G IV.1/IV.2.
-#
-# Invoked as the COMMAND by an N0 launcher — `bin/bwrap_launch.sh` (containment: bwrap) OR
-# `bin/host_launch.sh` (containment: none, host without sandbox — LAUNCH-Q). The PTY is tmux's,
-# provided by the N0 launcher: this launcher does NOT hold the PTY (no more `script -q`/inner-script)
-# and does NOT carry the brief (that arrives over MCP get_work_item). Containment + tmux + per-pod
-# socket = N0. Auth = Anthropic's native claudeDir (RW bind under bwrap; HOME = the human's real home
-# on the host), zero OAuth env in :bind mode.
-#
-# Strict N1 vendor frontier (IX.3): `claude` flags only, never `bwrap`/`tmux`/`unshare`.
-# A second vendor means a co-located `bin/openai_launch.sh`.
-#
-# Usage : claude_launch.sh <role> <pod_id> <pod_dir>
-#   The SP is NOT in the argv: it is read from $POD_DIR/.lcars/system-prompt.md (written by the spawner
-#   in do_project) via --system-prompt-file. Reason: an SP in the argv leaked into /proc/<pid>/cmdline and
-#   brushed ARG_MAX. Measured on 2.1.177: --system-prompt-file is replace + TRUSTED (unlike inline, which
-#   goes through the anti-injection filter). `.lcars/` is readable in-sandbox (pod_dir bind). The
-#   "never a file" onboarding rule targeted `.claude/system-prompt.md`, masked by the creds bind — it does
-#   NOT apply to `.lcars/`.
 # Identity env (supplied by the spawner; not subject to masking, so env is fine here, unlike the SP):
 #   LCARS_POD_SESSION_ID          PRE-ALLOCATED session UUID (uuidgen, state.json at spawn) — required
 #   LCARS_POD_RESUME              0 = first creation (--session-id); 1 = recovery (--resume)
 #   LCARS_POD_SESSION_NAME_PREFIX Desktop-readable pod label (<project>#<ticket>_<role>, or
 #                                 <project>_<role> when not ticket-bound) — required, verbatim
-#
 # Exit codes:
 #   0   : success (propagated through exec)
 #   1   : setup error (cap-profile/jq/claude binary missing, empty args/SP, missing session env)
@@ -39,9 +15,6 @@
 
 set -euo pipefail
 
-# =============================================================
-# Config (overridable via env, for testability)
-# =============================================================
 
 # Vendor binary: LCARS_CLAUDE_BIN is set by bwrap (--setenv = POD_VENDOR_BIN = the OWNING HUMAN's
 # per-user claude, relocated into the pod; Anthropic's native auto-update). Fallback = the pod's PATH
@@ -52,9 +25,6 @@ CLAUDE_BIN="${LCARS_CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}"
 : "${CLAUDE_BIN:?claude binary not found (LCARS_CLAUDE_BIN set by bwrap, or the per-user ~/.local PATH)}"
 JQ_BIN="${LCARS_JQ_BIN:-/usr/bin/jq}"
 
-# =============================================================
-# POSITIONAL args: <role> <pod_id> <pod_dir>
-# =============================================================
 
 if [[ $# -ne 3 ]]; then
   echo "ERR: usage: $0 <role> <pod_id> <pod_dir>" >&2
@@ -73,10 +43,6 @@ POD_DIR="${LCARS_POD_HOME:-$3}"
 # --system-prompt-file (verified on claude 2.1.177: -file is replace + trusted).
 SP_FILE="$POD_DIR/.lcars/system-prompt.md"
 
-# =============================================================
-# Session: UUID PRE-ALLOCATED by the spawner (uuidgen, persisted in state.json at spawn).
-# Identity supplied by the orchestrator (VII.1) ⇒ env is fine here, unlike an SP travelling in the argv.
-# =============================================================
 
 SESSION_ID="${LCARS_POD_SESSION_ID:?session UUID required (pre-allocated by the spawner)}"
 POD_RESUME="${LCARS_POD_RESUME:-0}"                          # 0 = first creation; 1 = recovery
@@ -106,27 +72,19 @@ case ",${SETTING_SOURCES}," in
     ;;
 esac
 
-# =============================================================
 # NO LAUNCH TRACE IN THE POD — deliberate, and it is not a gap to fill.
-#
 # This script runs INSIDE bwrap (cf. bwrap_launch.sh, ADR-G): everything it can write, the confined
 # agent can read. A boot trace therefore handed the agent the recipe of its own box — permission
 # mode and flags, model, effort, setting-sources, the vendor surface that was cut, whether its
 # credentials are present. Redacting it field by field was tried (the tool lists became counts) and
 # it is the wrong shape: the file stays a channel that must be curated forever, and one forgotten
 # field re-opens the whole thing silently.
-#
-# There is no "write it host-side instead" either: no path outside the sandbox is reachable from in
-# here without a bind, and a bind is exactly what the agent reads.
-#
 # Diagnosing a launch failure means touching this source and rebuilding anyway — it was never a flag
 # to flip — so a permanent always-on trace bought a standing exposure against a debugging convenience
 # that does not survive its own use case. Failures speak on **stderr**, which the operator collects
 # outside and the agent does not read back.
-#
 # If you are here to re-add a trace: the answer is stderr, or a rebuild with a temporary local patch.
 # Not a file under $POD_DIR.
-# =============================================================
 
 if [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]]; then
   echo "ERR: role, pod_id and pod_dir must be non-empty" >&2
@@ -137,9 +95,6 @@ if [[ ! -s "$SP_FILE" ]]; then
   exit 1
 fi
 
-# =============================================================
-# Setup checks
-# =============================================================
 
 if [[ ! -x "$CLAUDE_BIN" ]]; then
   echo "ERR: claude binary missing or not executable: $CLAUDE_BIN" >&2
@@ -157,15 +112,10 @@ if [[ ! -f "$CAP_PROFILE_JSON" ]]; then
   exit 1
 fi
 
-# =============================================================
 # Onboarding/trust skip (interactive): without it claude blocks on the first-run dialog. A minimal
 # .claude.json at the root of the pod HOME ($POD_DIR, outside .claude/). The `projects` key is the agent's
 # REAL cwd (`LCARS_POD_CWD` = the workspace when a project is cloned, else $POD_DIR) — otherwise /init
 # would run in a non-onboarded dir (P2 mundo invocado: the agent pops into an already-onboarded project).
-# (.claude/ is pod-owned: bwrap binds ONLY .credentials.json there — P1/C9.)
-# (The bypass acceptance is NOT here any more: `bypassPermissionsModeAccepted` of the global config moved
-#  to settings.json/`skipDangerousModePermissionPrompt` — cf. the "bypass dialog" block below.)
-# =============================================================
 
 # `|| true` is MANDATORY: under `set -euo pipefail`, a `--version` in an unexpected format (grep with no
 # match, rc=1) killed the launcher HERE with an opaque exit 1, BEFORE the ${VER:-2.1.150} fallback below
@@ -177,7 +127,6 @@ if [[ -z "$VER" ]]; then
 fi
 POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
 
-# =============================================================
 # LA SURFACE VENDOR — elle n'est pas montee, elle est DANS LE BINAIRE
 # =============================================================
 # Mesure du 2026-08-12 : `~/.local` ne contient que `bin/claude` (308 Mo), et le prompt de `/init`
@@ -185,33 +134,9 @@ POD_CWD="${LCARS_POD_CWD:-$POD_DIR}"
 # compilee — le mecanisme qui borne tout le reste ici (« les droits vivent dans le montage ») ne peut
 # structurellement pas atteindre ca. Le seul levier est un flag du vendor, et il existe :
 #   claude --help  ->  --disable-slash-commands   Disable all skills
-#
-# CE QUE `/init` FERAIT DANS UN POD PRODUCTEUR, ET POURQUOI CE N'EST PAS THEORIQUE. Son prompt dit
-# « analyze this codebase » (le cwd EST le depot : vrai chez un producteur), « if there's already a
-# CLAUDE.md, suggest improvements to it » (c'est le fichier d'entree de tous les producteurs) et
-# « be sure to prefix the file with `# CLAUDE.md / This file provides guidance…` » — un titre et une
-# forme que l'extracteur de la fleet ne reconnait pas. L'etalon vendor et l'etalon LCARS ecrivent
-# deux fichiers incompatibles sous le meme nom.
-#
-# LE PREDICAT EST « CE POD A UN DEPOT SOUS LA MAIN », PAS « IL NE DECLARE AUCUNE SKILL ». Les deux
-# coincident aujourd'hui — 9 roles canon sur 10 declarent `skills: []`, et le seul qui en declare une
-# (starfleet, `card-revision`) est justement celui qui n'entre dans aucun projet. Ce n'est pas une
-# coincidence, c'est le meme axe vu deux fois : une skill equipe un role pour ce qu'il fait, et le
-# role qui a besoin d'une skill n'a rien de monte a abimer. Mais coincider n'est pas causer :
-# equiper l'engineer d'une skill de catalogue est un geste legitime, et il rouvrirait `/init` sur le
-# role qui peut faire le plus de degats — en silence, sans que personne ne fasse le lien.
 # On teste donc la propriete elle-meme : un `.git` au cwd = un depot que ce pod peut casser.
 SKILL_FLAGS=()
 if [[ -d "$POD_CWD/.git" ]]; then
-  # LA COMBINAISON QUE LE FLAG NE PEUT PAS SERVIR — il coupe TOUT, catalogue compris. Un pod qui
-  # cumule un depot et une skill montee est un cas que ni « couper » ni « laisser » ne sert
-  # correctement, et le resoudre en silence reviendrait a sacrifier un des deux cotes sans le dire.
-  # L'ensemble est VIDE aujourd'hui : on le nomme avant qu'il n'arrive, comme W-11 refuse un
-  # catalogue qui declare un role qu'il ne peut pas equiper.
-  # `|| true` OBLIGATOIRE, meme raison que le `--version` plus haut : sous `set -euo pipefail`, un
-  # `ls` sur un repertoire absent — le cas NOMINAL, 9 roles sur 10 n'ont aucune skill — rend 2, et
-  # `pipefail` propage ce 2 a toute la substitution. Sans lui, le launcher mourait ICI, exit 2 opaque,
-  # sur le chemin le plus frequent.
   MOUNTED_SKILLS="$(ls -1 "$POD_DIR/.claude/skills" 2>/dev/null | tr '\n' ' ' || true)"
   if [[ -n "${MOUNTED_SKILLS// /}" ]]; then
     echo "ERR: ce pod a un depot au cwd ($POD_CWD) ET des skills montees ($MOUNTED_SKILLS)." >&2
@@ -227,13 +152,6 @@ fi
 # (RC_FLAGS, further down) AND (2) remoteControlAtStartup in .claude.json. If remoteControlAtStartup stays
 # hardcoded true, claude ENABLES RC at boot EVEN without the flag → the judge leaks into Desktop. Both are
 # therefore driven by the same value, read once here.
-#
-# THE RUNTIME DECIDES, THIS SCRIPT OBEYS. `LCARS_POD_REMOTE_CONTROL` carries the answer of
-# `LaunchSpec.remote_control?/1`, the single authority. Re-deriving it here from the profile — as
-# this script did — made TWO derivations of one fact, which agree exactly until something tries to
-# change it: the half not reached then yields a pod VISIBLE in Desktop whose slot is never captured
-# nor resumed (visible now, a fresh slot every boot — the "12 archs" bug wearing a new hat).
-#
 # The jq read survives as the STANDALONE fallback: this script is the N1 vendor frontier and is
 # invoked by hand (bats, a debug run) with no runtime around it. It can only ever be the narrower
 # answer — the declaration is the floor, and any widening lives upstream — so an absent env is a
@@ -252,7 +170,6 @@ RC_STARTUP=$([[ "$REMOTE_CONTROL" != "false" ]] && echo true || echo false)
 # clobber it). remoteControlAtStartup is conditional (see above); hasUsedRemoteControl/remoteDialogSeen stay
 # true: they PRE-ACCEPT the RC dialog (which would otherwise block the interactive boot again) WITHOUT
 # forcing RC on. `projects` is the agent's real cwd ($POD_CWD), not $POD_DIR.
-#
 # THE MARKETPLACE GATE IS HERE, AND NOT WHERE IT WAS DECLARED. Every spawn cloned Anthropic's plugin
 # marketplace from GitHub to install zero plugin — 7.2 MB and a network fetch at boot, inside a
 # sandbox whose whole point is a projected world. The settings file carries
@@ -262,7 +179,6 @@ RC_STARTUP=$([[ "$REMOTE_CONTROL" != "false" ]] && echo true || echo false)
 #   - one pod with the settings key AND these two          -> .claude = 604 KB, plugins/ ABSENT.
 # So the vendor gates this on its own config keys, and the settings key does nothing on this
 # version. `--settings` is documented as ADDITIONAL settings, not a tier that overrides.
-#
 # These are vendor-INTERNAL keys, so they are an anchor to re-measure, not a contract: the day the
 # CLI stops reading them the plugins come back and nothing here will say so. The measurement above
 # is what a future reader re-runs — `du -sh <pod_dir>/.claude/plugins` on a fresh pod.
@@ -273,9 +189,6 @@ cat > "$POD_DIR/.claude.json" <<JSONEOF
   "projects": { "$POD_CWD": { "allowedTools": [], "hasTrustDialogAccepted": true, "projectOnboardingSeenCount": 10 } } }
 JSONEOF
 
-# =============================================================
-# Tools from the resolved cap-profile JSON (string-keyed, consistent with fleet_cap_profile L100).
-# =============================================================
 
 ALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.allowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { echo "ERR: jq allowedTools failed on $CAP_PROFILE_JSON: $ALLOWED_TOOLS" >&2; exit 1; }
 DISALLOWED_TOOLS=$("$JQ_BIN" -r '.spec.scope.disallowedTools | join(",")' "$CAP_PROFILE_JSON" 2>&1) || { echo "ERR: jq disallowedTools failed on $CAP_PROFILE_JSON: $DISALLOWED_TOOLS" >&2; exit 1; }
@@ -317,7 +230,6 @@ RC_FLAGS=()
 [[ "$REMOTE_CONTROL" != "false" ]] &&
   RC_FLAGS=(--remote-control "$SESSION_NAME_PREFIX")
 
-# =============================================================
 # Pod settings: CONSUMED, never composed (BL-6-07). $POD_DIR/.lcars/settings.json is written
 # COMPLETE by the projection tier (Fleet.Spawner.Pod.Assets.pod_settings_json/1 — the tier that
 # holds the cap-profile and the permission policy): autoMemoryEnabled:false (F-POD-AUTOMEM) for
@@ -327,7 +239,6 @@ RC_FLAGS=()
 # a second composer with a second policy over one file, and the two disagreed on the
 # skip-dialog: the decision belongs to Elixir, the launcher executes. No file → no --settings
 # flag, and the launcher writes NOTHING (a settings-less run is the projection tier's business).
-# =============================================================
 
 POD_SETTINGS_FILE="$POD_DIR/.lcars/settings.json"
 
@@ -341,13 +252,11 @@ if [[ -f "$POD_SETTINGS_FILE" ]]; then
   SETTINGS_FLAGS+=(--settings "$POD_SETTINGS_FILE")
 fi
 
-# =============================================================
 # R-CORE.comm — the fleet↔pod MCP channel (the clean, structured drive; never terminal scraping).
 # .mcp-fleet.json is NAMED that way, NOT `.mcp.json`, to avoid auto-discovery and its trust dialog.
 # `alwaysLoad:true` at server level is carried by the emitter (pod.ex/spawner) — without it the MCP tools
 # are DEFERRED behind ToolSearch and absent from the turn-1 prompt. The launcher stays content-agnostic: it
 # forwards the config as-is via --strict-mcp-config (which uses ONLY that config).
-# =============================================================
 
 MCP_CONFIG="$POD_DIR/.mcp-fleet.json"
 MCP_FLAGS=()
@@ -360,12 +269,10 @@ else
   echo "WARN: no MCP config ($MCP_CONFIG absent) — ABNORMAL for a real pod (upstream provisioning missing)" >&2
 fi
 
-# =============================================================
 # Session: pre-allocated UUID (--session-id requires a UUID — the binary checks it; NEVER a readable name).
 #   first creation : --session-id <UUID>   (PROVEN: creates the session with that UUID).
 #   recovery       : --resume <UUID>       (PROVEN: resumes, context preserved on Anthropic's server).
 #   The Desktop-visible readable name is a SEPARATE axis: --remote-control-session-name-prefix (auto suffix).
-# =============================================================
 
 # A session that holds NO conversation turn is not resumable, and asking anyway is FATAL AND
 # SELF-SUSTAINING. Measured 2026-08-11: a pod died at its first start, leaving a 334-byte transcript
@@ -375,7 +282,6 @@ fi
 # trap it had set. So the predicate is positive: at least one `user` or `assistant` record. Those two
 # types are what a transcript is made of; the preamble records are not, and enumerating the preamble
 # instead would re-open the trap the day the vendor adds one.
-#
 # Not resumable -> the stub is REMOVED and we start fresh. It carries nothing by construction, and
 # deleting it is what makes the fallback unconditional: whether --session-id tolerates a pre-existing
 # transcript for the same UUID is a vendor behaviour we would be guessing at, and a wrong guess here
@@ -399,7 +305,6 @@ else
   SESSION_FLAGS=(--session-id "$SESSION_ID")
 fi
 
-# =============================================================
 # exec INTERACTIVE claude, PTY-puppet (ADR-G). NO -p, NO stream-json, NO budget, NO positional prompt —
 # the brief arrives over MCP get_work_item (IV.4). NO script(1)/inner-script: the PTY is tmux's
 # (bwrap_launch, N0), so a direct exec keeps the argv clean end to end (lifts F-1b-04). RC-at-startup is the
@@ -407,50 +312,15 @@ fi
 # binary falls back to --print-like — the tmux PTY is what guarantees interactive RC mode).
 # The SP travels via --system-prompt-file (OUT of the argv): read from $SP_FILE (.lcars/system-prompt.md),
 # trusted+replace.
-# =============================================================
 
-# ╔════════════════════════════════════════════════════════════════════════════════════════════╗
-# ║  DEBUG EXCEPTION — A/B ON THE ARCHITECT'S SP — POSTED 2026-08-21 — TO BE REMOVED            ║
-# ╚════════════════════════════════════════════════════════════════════════════════════════════╝
-#
-# THIS IS NOT A MECHANISM AND MUST NOT BE READ AS ONE. A hard-coded role test, in a launcher whose
-# every other knob derives from the cap-profile. It exists to answer ONE question and then go:
-# "is the architect less useless when the vendor SP stays upstream of ours?". The answer is
-# measured on a pod; it cannot be reasoned out here.
-#
-# WHAT IS UNDER TEST. The workers are framed by three things — their pod, their SP, their mission —
-# and they do their job. The architect is FREE, and the SP written for it does not frame it. Under
 # `--system-prompt-file` that SP REPLACES the vendor's, so whatever discipline the vendor carries
 # goes with it. Under `--append-system-prompt-file` the vendor's stays upstream and ours is added.
-#
-# ⚠ WHAT THIS ARM CHANGES, AND WHAT TO WATCH: the architect's SP was written to BE the whole system
-# prompt. Appended, the two coexist and the vendor is UPSTREAM — it therefore wins conflicts of
-# tone, of format and of tooling discipline. An arm that behaves better does not prove our SP is
-# good, only that the mixture beats our half alone.
-#
-# THE TEST READS `metadata.name`, NOT `$ROLE`. That positional is consumed NOWHERE else in this
-# file (one presence guard, l.131) and its value was never verified; the cap-profile is already
-# read, already validated, and the launcher dies loud when it is not.
-#
-# ⚠ `claude_probe.sh` NOW CARRIES `--append-system-prompt-file`, and that was not a choice:
-# `claude_probe.bats:106` locks "every flag the launcher passes in argv is in REQUIRED". Removing
-# this exception means removing that line too.
-#
-# THE ORIGINAL LINE, as it stood in the `exec` below — putting it back IS the removal:
-#     --system-prompt-file "$SP_FILE" \
 SP_FLAGS=(--system-prompt-file "$SP_FILE")
 if [[ "$("$JQ_BIN" -r '.metadata.name // empty' "$CAP_PROFILE_JSON" 2>/dev/null)" == "architect" ]]; then
   SP_FLAGS=(--append-system-prompt-file "$SP_FILE")
-  # THE ARM ANNOUNCES ITSELF, OR THE A/B MEASURES NOTHING. A trial whose side you cannot tell
-  # produces an impression, not a measurement.
   echo "claude_launch: DEBUG EXCEPTION — architect SP in APPEND mode (the vendor SP stays upstream)" >&2
 fi
 
-# Tool search stays at the VENDOR DEFAULT (on): disabling it (ENABLE_TOOL_SEARCH=false) was
-# weighed 2026-07-18 and REJECTED — it would load every deferred schema into EVERY pod's
-# context (judges included, who arm nothing) to save a single ToolSearch call per
-# long-lived pod life, and it diverges from the vendor default on a compat knob. The
-# arming discipline lives in the SPs (imperative STEP 0), not in a launcher env.
 
 exec "$CLAUDE_BIN" \
     "${RC_FLAGS[@]}" \
