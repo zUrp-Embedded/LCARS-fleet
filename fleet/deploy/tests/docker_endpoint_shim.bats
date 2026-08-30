@@ -121,3 +121,51 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   # Et personne ne redecouvre : une seconde detection dans l'arbre rendrait deux verdicts possibles.
   [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../.." --include='*.sh' --include=box --include=provision 2>/dev/null | wc -l)" -le 1 ]
 }
+
+# ─── LE REFUS ACCUSE LA PREMIERE SOCKET, PAS LA DERNIERE ────────────────────────────────────────
+#
+# ⚠ MESURE D'UN BANC WSL A INTEGRATION ACTIVEE (2026-08-30) : le message de refus nommait
+# `docker.proxy.sock` en `root:root 755`, alors que la socket qui compte est `/var/run/docker.sock`
+# en `root:docker 660` — refusee faute d'appartenance au groupe, ce qui est une cause TOUTE AUTRE et
+# un geste tout autre. Le balayage voit la seconde d'abord, la premiere ensuite, et l'affectation
+# ecrasait : c'est donc le dernier repli qui parlait, jamais la cause.
+#
+# Un diagnostic qui accuse le mauvais objet coute plus qu'un diagnostic absent — il envoie chercher
+# la panne la ou elle n'est pas.
+
+@test "le premier refus est celui qu'on garde — l'affectation ne s'ecrase pas" {
+  # La FORME, comme tout ce fichier : jouer la boucle demanderait deux sockets refusees et un daemon
+  # qui repond, c'est-a-dire une machine precise. `:=` n'affecte que si la variable est vide.
+  local code; code="$(grep -vE '^\s*#' "$LIB")"
+  grep -q ': "${PROV_DOCKER_SOCK:=$sock}"' <<<"$code"
+  refute grep -q 'PROV_DOCKER_SOCK="$sock"' <<<"$code"
+}
+
+@test "TEMOIN DU TEMOIN : l'affectation conditionnelle garde la premiere, l'affectation nue la derniere" {
+  # Sans lui, le temoin ci-dessus epingle une syntaxe sans prouver qu'elle fait ce qu'on lui prete —
+  # et le jour ou quelqu'un la « simplifie », rien ne dira ce qui a ete perdu.
+  run bash -c 'p=""; for s in premiere derniere; do : "${p:=$s}"; done; echo "$p"'
+  [ "$output" = "premiere" ]
+  run bash -c 'p=""; for s in premiere derniere; do p="$s"; done; echo "$p"'
+  [ "$output" = "derniere" ]
+}
+
+# ─── LE `DOCKER_CONFIG` SE POSE SUR UNE MESURE, PAS SUR UN SUBSTRAT ─────────────────────────────
+
+@test "le DOCKER_CONFIG n'est fabrique que si compose ne repond PAS — jamais par deduction" {
+  # ⚠ CE QUE CETTE CONDITION COUTAIT, MESURE SUR UN BANC WSL A INTEGRATION ACTIVEE (2026-08-30).
+  # Elle portait sur « substrat WSL ET la CLI du montage » — vrai sur toute distro integree, ou
+  # `docker compose version` repond pourtant NU. Le config fabrique remplacait alors celui de
+  # l'humain, donc ses CONTEXTS :
+  #     contexts AVANT : default desktop-linux
+  #     contexts APRES : default
+  # Le rail ne s'en apercevait pas (il porte `DOCKER_HOST`) ; l'humain qui herite de cet
+  # environnement, si. Un contournement ecrit contre le montage NU s'appliquait la ou il n'a plus
+  # d'objet — et il n'etait pas neutre.
+  local code; code="$(grep -vE '^\s*#' "$LIB")"
+  local cond; cond="$(grep -n 'DOCKER_CONFIG:-' <<<"$code" | head -1)"
+  [ -n "$cond" ]
+  # La mesure, et pas la deduction : `compose version` decide, `detect_substrate` n'a rien a y faire.
+  grep -qE 'DOCKER_CONFIG:-.*\]\] && ! "\$PROV_DOCKER_BIN" compose version' <<<"$code"
+  refute grep -qE 'detect_substrate.*==.*wsl.*&&.*_docker_mount_cli.*&&.*DOCKER_CONFIG' <<<"$code"
+}

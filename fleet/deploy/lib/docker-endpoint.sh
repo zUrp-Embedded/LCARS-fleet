@@ -29,11 +29,14 @@ detect_substrate() {
 #   PROV_DOCKER_WHY     vide si docker répond ; sinon la phrase qui dit ce qui manque
 #   PROV_DOCKER_DENIED  1 quand le daemon répond mais REFUSE cet utilisateur
 #   PROV_DOCKER_SUDO    le préfixe d'escalade retenu, vide s'il n'en a pas fallu
-#   PROV_DOCKER_SOCK    la socket qui a refusé — interne au diagnostic
+#   PROV_DOCKER_SOCK    la PREMIÈRE socket qui a refusé — interne au diagnostic
 # Rend 0 si un daemon a répondu, 1 sinon.
 # ⚠ ELLE MUTE AUSSI L'ENVIRONNEMENT DE L'APPELANT, ce qu'aucune globale ci-dessus ne dit : `unset
 # DOCKER_HOST` quand celui qui arrivait ne répond pas, puis `export DOCKER_HOST` sur l'endpoint
-# retenu, et `export DOCKER_CONFIG` sur WSL quand la CLI du montage est prise.
+# retenu, et `export DOCKER_CONFIG` UNIQUEMENT si `docker compose` ne répond pas tel quel.
+# Cette dernière condition portait sur le substrat (« WSL et la CLI du montage ») : elle était donc
+# vraie sur toute distro intégrée, où compose répond pourtant nu — et le config fabriqué remplaçait
+# celui de l'humain, contexts compris. Elle porte désormais sur la mesure qui la justifie.
 #
 # ⚠ `command -v docker` SE TROMPE DANS LES DEUX SENS : sa présence n'exclut pas un daemon éteint, et
 # son ABSENCE ne prouve rien du tout — sur WSL le daemon vit dans la VM Docker Desktop et s'expose
@@ -149,8 +152,22 @@ docker_endpoint() {
   # Accroche au shim d'escalade plus bas, il ne couvrirait que les appelants NON-ROOT : le module
   # qui a besoin de `compose` tourne en root, ou l'escalade n'a pas lieu, et recevrait la CLI du
   # montage toute nue.
-  if [[ "$(detect_substrate)" == "wsl" && "$PROV_DOCKER_BIN" == "$(_docker_mount_cli)" \
-        && -z "${DOCKER_CONFIG:-}" ]]; then
+  #
+  # ⚠ ON MESURE SI COMPOSE REPOND, ON NE DEDUIT PLUS DU SUBSTRAT. La condition portait sur « WSL ET
+  # la CLI du montage » — vraie sur toute distro a integration Docker Desktop, ou compose repond
+  # pourtant PARFAITEMENT NU. On fabriquait donc un `DOCKER_CONFIG` inutile, et il n'est pas neutre :
+  # il remplace le config de l'humain, donc ses CONTEXTS.
+  #
+  # Mesure du 2026-08-30, banc WSL a integration activee, avant/apres un simple appel a cette
+  # fonction :
+  #     contexts AVANT : default desktop-linux
+  #     contexts APRES : default          ← `desktop-linux` disparu
+  # Le rail n'a rien casse de visible parce qu'il porte `DOCKER_HOST` ; l'humain qui herite de cet
+  # environnement, lui, perd le contexte que Docker Desktop lui a pose.
+  #
+  # La mesure est aussi la seule condition qui reste VRAIE quand le montage n'est pas la : un
+  # compose absent est un compose absent, quel que soit le substrat qui l'explique.
+  if [[ -z "${DOCKER_CONFIG:-}" ]] && ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
     local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
   fi
 
@@ -183,7 +200,16 @@ docker_endpoint() {
       export DOCKER_HOST="$PROV_DOCKER_HOST"
       return 0
     fi
-    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; PROV_DOCKER_SOCK="$sock"; }
+    # ⚠ LA PREMIERE SOCKET REFUSEE, PAS LA DERNIERE, ET C'EST TOUT LE DIAGNOSTIC. Cette affectation
+    # ECRASAIT a chaque tour : sur WSL le balayage voit `/var/run/docker.sock` (root:docker 660 —
+    # celle qui compte, refusee faute d'appartenance) PUIS la socket du montage
+    # (`docker.proxy.sock`, root:root 755). Le refus final accusait donc la seconde, et envoyait
+    # l'operateur regarder des droits qui ne sont pas ceux qui le bloquent. Le premier refus est
+    # celui qui porte la cause ; les suivants sont des replis.
+    #
+    # Un diagnostic qui accuse le mauvais objet coute plus cher qu'un diagnostic absent : il fait
+    # chercher la panne la ou elle n'est pas. Mesure d'un banc WSL a integration activee, 2026-08-30.
+    [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }
   done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
