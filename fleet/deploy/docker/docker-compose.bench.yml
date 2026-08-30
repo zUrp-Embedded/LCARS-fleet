@@ -13,7 +13,7 @@
 
 services:
   lcars:
-    # La boite garde son reseau de projet ET rejoint celui de la forge. Le nom de service `forge`
+    # La boite garde son reseau de projet ET rejoint celui de la forge. Le nom de service `gitea`
     # resout des la creation, donc AVANT le premier boot — ce qui etait toute la contrainte.
     networks:
       - lcars

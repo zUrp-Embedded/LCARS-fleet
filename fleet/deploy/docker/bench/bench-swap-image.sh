@@ -16,7 +16,7 @@
 #
 # ─── LES TROIS PIEGES REPRIS DE bench-up.sh — ILS NE DISPARAISSENT PAS AVEC LE SWAP ─────────────
 # 1. LA BOITE DOIT JOINDRE LE RESEAU DE LA FORGE AVANT SON PREMIER BOOT. `create` → `network
-#    connect` → `start`, jamais un `up` : sinon `forge` ne resout pas au boot et le provisioning
+#    connect` → `start`, jamais un `up` : sinon `gitea` ne resout pas au boot et le provisioning
 #    part en drift. Le swap recree une boite NEUVE — le piege est donc entier, pas amorti.
 # 2. LES CREDS ANTHROPIC PARTENT AVEC L'ANCIEN CONTENEUR. Sans `~/.claude/.credentials.json`,
 #    `Credentials.Gate.validate` refuse au spawn-boundary : la fleet a l'air saine et ne produit
@@ -150,7 +150,7 @@ trap 'rm -f "$SWAP_ENV"' EXIT
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
   || die "la boite ne se branche pas sur $FORGE_NET" 3
-say "boite branchee sur $FORGE_NET — 'forge' resout AVANT le premier boot"
+say "boite branchee sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
 
 "$DOCKER_BIN" compose -p "$PROJECT" start || die "la boite ne demarre pas" 3
 

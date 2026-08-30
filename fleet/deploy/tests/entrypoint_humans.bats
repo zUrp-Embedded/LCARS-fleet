@@ -90,11 +90,11 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
 }
 
 @test "le premier tour est SYNCHRONE — la boucle ne part qu'apres" {
-  # C'est toute la correction : `--once` d'abord, `setsid` ensuite. Un `setsid` seul rendait la main
+  # C'est toute la correction : `--once` d'abord, `launch` (setsid) ensuite. Un lancement seul rendait la main
   # avant que quiconque existe.
   local once_at loop_at
   once_at="$(grep -n -- '--once' "$BLOC" | head -1 | cut -d: -f1)"
-  loop_at="$(grep -n 'setsid' "$BLOC" | head -1 | cut -d: -f1)"
+  loop_at="$(grep -n 'launch "convergence des humains"' "$BLOC" | head -1 | cut -d: -f1)"
   [ -n "$once_at" ]
   [ -n "$loop_at" ]
   [ "$once_at" -lt "$loop_at" ]

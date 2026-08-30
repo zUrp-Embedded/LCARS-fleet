@@ -221,10 +221,6 @@ apply() {
     verdict_apply
   fi
   forge_service_known || verdict_apply
-  # ⚠ CE MODULE NE DÉPEND PLUS D'UNE IMAGE, IL DÉPEND DE `46-tofu`. Il exigeait ici la présence de
-  # `lcars-fleet:2` — 1,18 Go bâtis pour exécuter 100 ko de recette dans un conteneur jetable, sur un
-  # rail qui ne démarre jamais cette image. Ce qu'elle apportait de réel (une version figée, des
-  # providers hors-ligne) est posé SUR la machine, deux crans plus tôt.
   if [[ ! -x "${LCARS_TOFU_BIN:-/usr/local/bin/tofu}" ]]; then
     p_drift "tofu absent — la structure de la forge est son territoire : joue « 46-tofu » d'abord, puis relance"
     verdict_apply

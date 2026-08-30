@@ -69,8 +69,6 @@ create_branch() {
   # branche exactement comme sur une branche absente d'un depot present. Il faut demander le depot.
   case "$(forge_repo_code)" in
     200) : ;;
-    # `forge-gestures.sh apply` le cree depuis le 2026-08-22 (`ensure_ops_repo`). Ce garde reste :
-    # il couvre le cas ou l'amorcage n'a pas encore tourne, et il ne suppose plus qui le fait.
     404) p_drift "depot $LCARS_OPS_REPO absent — l'amorcage de la forge le cree (forge-gestures apply) ; la branche se posera a la convergence suivante"
          return 0 ;;
     *)   p_fail "$LCARS_OPS_REPO : la forge ne dit pas s'il existe — on ne pousse pas a l'aveugle"

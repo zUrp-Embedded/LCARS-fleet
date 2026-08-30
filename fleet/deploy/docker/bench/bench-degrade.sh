@@ -11,7 +11,7 @@
 # IDEMPOTENT : rejouable apres chaque nuke ; le client OAuth existant est reutilise, pas duplique.
 #
 # USAGE : bench-degrade.sh --forge <url-api> --admin-token <tok> [--human lcars]
-#                          [--password <mdp>] [--redirect <url-navigateur>]
+#                          [--password <mdp>] [--redirect <url-navigateur>] [--client-name lcars-deck]
 # EXIT  : 0 degrade · 1 argument/dependance manquants · 2 la forge refuse
 
 set -euo pipefail
@@ -26,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --password)     PASSWORD="${2:?--password attend une valeur}"; shift 2 ;;
     --redirect)     REDIRECT="${2:?--redirect attend une URL}"; shift 2 ;;
     --client-name)  CLIENT_NAME="${2:?--client-name attend un nom}"; shift 2 ;;
+    -h|--help)      sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "bench-degrade: option inconnue: $1" >&2; exit 1 ;;
   esac
 done

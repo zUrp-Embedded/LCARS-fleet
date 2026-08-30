@@ -3,8 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — amene une forge jetable NEUVE a l'etat "la fleet peut travailler dessus"
-# USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-forge-1]
-#                                  [--box lcars-ticket-fleet-lcars-1] [--human lcars] [--human-password toto32toto32]
+# USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-gitea-1]
+#                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <ignore>] [--no-seed-repos]
 #                                  [--human-admin] [--admin-token TOK]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 admiral admin/token
@@ -257,8 +257,8 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
 
     LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
     git -C "$REPO_ROOT" push -q "$LCARS_REMOTE" main:main 2>/dev/null \
-      && _main_ok=1 || _main_ok=0
-    if [[ "$_main_ok" -eq 1 ]]; then say "fleet/lcars : main pousse"; else say "fleet/lcars : main NON pousse"; fi
+      || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code" 7
+    say "fleet/lcars : main pousse"
 
     WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
     [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \

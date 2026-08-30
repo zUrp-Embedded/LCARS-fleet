@@ -129,3 +129,17 @@ idx_of() {
   [ "$status" -eq 1 ]
   refute grep -q -- "down -v" "$CALLS"
 }
+
+@test "every compose file bench-down names EXISTS next to it — a phantom path fails silently under || true" {
+  # `$HERE` is bench/, the compose files live one level up (`$DOCKER_DIR`). Both `-f` paths pointed
+  # at `$HERE/…` for weeks: `compose down -v` failed on a missing file, `|| true` swallowed it, and
+  # the runner and the forge survived every "destruction" (read while purging, 2026-08-30).
+  local here docker_dir f n=0
+  here="$(cd "$(dirname "$SRC")" && pwd)"; docker_dir="$(cd "$here/.." && pwd)"
+  while read -r f; do
+    n=$((n + 1))
+    f="${f//\$HERE/$here}"; f="${f//\$DOCKER_DIR/$docker_dir}"
+    [ -f "$f" ] || { echo "compose file named but absent: $f"; return 1; }
+  done < <(grep -oE -- '-f "\$(HERE|DOCKER_DIR)/[^"]+"' "$SRC" | sed -E 's/^-f "//; s/"$//')
+  [ "$n" -eq 3 ]
+}

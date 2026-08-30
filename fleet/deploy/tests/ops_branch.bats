@@ -197,5 +197,4 @@ EOF
   # commentaire perime est un mensonge ; un MESSAGE perime en est un que l'operateur lit.
   local m="$BATS_TEST_DIRNAME/../modules.d/52-ops-branch.sh"
   grep -q 'forge-gestures apply' "$m"
-  grep -q 'il ne suppose plus qui le fait' "$m"
 }

@@ -107,6 +107,8 @@ ENV LCARS_GIT_SHA=${GIT_SHA} LCARS_BUILD_DATE=${BUILD_DATE}
 LABEL org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
+# Le `|| [ "$?" -eq 3 ]` de ce RUN : 3 = release posee mais symlinks PATH refuses (pas de droit sur
+# /usr/local/bin dans ce stage) — sans gravite, le stage runtime les pose lui-meme.
 RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-mix-$TARGETARCH,target=/home/builder/.mix,uid=1000,gid=2000 \
     --mount=type=cache,id=lcars-cache-$TARGETARCH,target=/home/builder/.cache,uid=1000,gid=2000 \

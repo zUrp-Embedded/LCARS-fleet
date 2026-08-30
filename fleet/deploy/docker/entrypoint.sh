@@ -502,9 +502,6 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet_v2 start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
 
-  # Détaché du shell de l'entrypoint : celui-ci finit sur `exec sshd`, ce qui remplace le process.
-  # Un enfant simplement mis en arrière-plan survit à l'exec (même PID 1 tini le récolte), mais
-  # setsid le détache aussi du terminal, donc un signal de session ne l'emporte pas avec elle.
   launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN"
   say "un ajout à la team « humans » suffit désormais, sans redémarrage"
 else

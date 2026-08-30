@@ -252,7 +252,7 @@ if [[ "$RAIL" == "workstation" ]]; then
     if [[ "$SUBSTRATE" == "linux" && -n "${LCARS_ALLOW_ANY_HOST:-}" ]]; then
       echo ""
       echo "  ${AMBER}Linux natif, et tu l'as déclaré DÉDIÉ (LCARS_ALLOW_ANY_HOST).${N}"
-      echo "  Ce rail va posséder cette machine : paquets, groupe système, /local, /opt/lcars."
+      echo "  Ce rail va posséder cette machine : paquets, groupe système, /opt/lcars."
       echo "  « provision uninstall » retire ce que le journal a noté ; le reste, la convergence"
       echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
     else

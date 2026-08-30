@@ -80,7 +80,7 @@ echo "[bench-down] destruction du runner ($RUNNER_PROJECT)"
 RUNNER_ENV_DOWN="$(mktemp "${TMPDIR:-/tmp}/bench-down-runner.XXXXXX")"
 chmod 0600 "$RUNNER_ENV_DOWN"
 printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "$RUNNER_ENV_DOWN"
-"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$HERE/runner-compose.yml" -p "$RUNNER_PROJECT" \
+"$DOCKER_BIN" compose --env-file "$RUNNER_ENV_DOWN" -f "$DOCKER_DIR/runner-compose.yml" -p "$RUNNER_PROJECT" \
   down -v --remove-orphans || true
 rm -f "$RUNNER_ENV_DOWN"
 
@@ -88,7 +88,7 @@ echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$HERE/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
+"$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true
 
 # Depuis que les noms portent le projet (`lib/store.sh`), il n'y a plus rien a arbitrer : ce magasin
 # n'appartient qu'a ce banc, et il part avec lui. Une toolchain compilee sur un banc l'a ete pour

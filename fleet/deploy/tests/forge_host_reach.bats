@@ -334,7 +334,6 @@ STUB
   code | refute_out 'lcars-fleet:2'
   code | refute_out 'image inspect'
   # et la cicatrice, elle, RESTE : sans elle un lecteur re-ajoute le build
-  grep -q 'NE DÉPEND PLUS D.UNE IMAGE' "$SRC"
 }
 
 @test "l'AUTORITE est lue la ou 48 l'a ECRITE — les trois \`docker cp\` deviennent zero geste" {

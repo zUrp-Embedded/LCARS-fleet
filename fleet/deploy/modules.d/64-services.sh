@@ -33,8 +33,8 @@ SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
-# shellcheck disable=SC2034 # table DERIVEE par un temoin (`process_iso.bats` la lit au sed sur la
-# source), jamais lue par ce script — comme HELPERS et UNITS.
+# shellcheck disable=SC2034 # STARTERS n'est lue que par un temoin (`process_iso.bats`, au sed sur la source),
+# jamais par ce script — UNITS, elle, est bouclee quatre fois plus bas.
 STARTERS=(
   "human-converger.sh:unit:lcars-converger"
   "console-landing.sh:unit:lcars-landing"

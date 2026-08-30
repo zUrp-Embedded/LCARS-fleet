@@ -40,7 +40,7 @@
 # USAGE : bench-up.sh [--project lcars-nuit] [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
 #                     [--bind 0.0.0.0] [--advertise <ip-ou-nom>]
 #                     [--image lcars-fleet:2] [--creds-from ~/.claude/.credentials.json] [--no-creds]
-#                     [--no-human-admin]
+#                     [--no-human-admin] [--runner-labels <liste>] [--no-runner] [--human lcars]
 # EXIT  : 0 banc pret (verdict `banc PRET`, ou `banc PRET_SANS_CI` sous --no-runner) · 1
 #         arguments/dependance · 2 la forge ne monte pas · 3 la boite ne monte pas · 4 amorcage
 #         forge · 5 creds · 6 le verdict final ne passe pas — Y COMPRIS un runner DEMANDE qui ne

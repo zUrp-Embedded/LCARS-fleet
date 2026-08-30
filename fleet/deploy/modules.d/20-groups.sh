@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/20-groups.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — groupe fleet + membership de l'humain (AUCUN user créé : le modèle v2 est per-humain)
+# STATUS: PROTO-V2 — groupes fleet et console + membership de l'humain dans fleet (AUCUN user créé : le modèle v2 est per-humain)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
