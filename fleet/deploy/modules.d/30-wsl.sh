@@ -6,17 +6,6 @@
 # APPLY-ON: wsl
 # CHECK-ON: wsl
 # NEEDS: root
-#
-#   - snapd casse l'init des sessions `systemd --user` sous WSL (socket résiduel) → purge.
-#   - gpg-agent-ssh.socket race au shutdown WSL2 (« Failed to start systemd user session » au
-#     login suivant) → masqué par symlink /dev/null dans le home de l'humain.
-#   - /etc/wsl.conf ne prend effet qu'après `wsl --shutdown` + NOUVEL onglet Windows Terminal ;
-#     il s'écrit EN DERNIER dans ce module (un crash avant = rien d'armé à moitié).
-#   - le lockdown C: se SONDE en réel (touch/rm sur /mnt/c), jamais en lisant la config —
-#
-# /etc/wsl.conf est possédé EN ENTIER par ce module (write_atomic du fichier complet) : c'est la
-# frontière de sécurité de la boîte (octogone — C: fermé, interop coupé), pas un fichier de
-# préférences. Un edit manuel = un drift au doctor, réécrit à l'apply. Assumé et dit ici.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -95,7 +84,6 @@ check() {
 }
 
 apply() {
-  # 1. Purge snap (AVANT wsl.conf — l'ordre d'écriture de wsl.conf en dernier est le contrat).
   if dpkg -s snapd >/dev/null 2>&1; then
     run_quiet env DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd || verdict_apply
     rm -rf /snap /var/snap /var/lib/snapd
@@ -127,8 +115,6 @@ apply() {
   write_atomic "$WSL_CONF" 0644 root:root < "$wsl_tmp" || { rm -f "$wsl_tmp"; verdict_apply; }
   rm -f "$wsl_tmp"
 
-  # 4. État réel + consigne de reprise (pas de sentinelle, pas de trigger bashrc : l'humain
-  #    relance le MÊME apply après le reboot, l'idempotence fait le reste).
   if c_drive_open; then
     p_warn "wsl.conf posé mais C: encore OUVERT → « wsl --shutdown » (PowerShell), rouvre un NOUVEL onglet (pas l'ancien), relance « provision apply »"
   else

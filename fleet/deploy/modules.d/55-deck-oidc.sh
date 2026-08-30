@@ -16,11 +16,6 @@ APP_NAME="lcars-deck"
 TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
 OIDC_GROUP="${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-lcars-system}}"
 
-# ⚠ DEDUPLIQUE. La loopback est posee ici d'office ET nommee par l'appelant depuis que le banc
-# annonce deux entrees : sans ce filtre, elle est enregistree DEUX FOIS chez la forge (mesure du
-# 2026-08-18). Gitea l'accepte, donc rien ne casse — mais une liste qui se repete est une liste dont
-# personne ne tient l'inventaire, et c'est la sonde de derive juste en dessous qui compare des
-# listes triees qui en paierait le prix.
 callback_uris() {
   # DEUX ECRITURES DE LA LOOPBACK, PARCE QU'OAUTH2 COMPARE DES CHAINES. `localhost` et `127.0.0.1`
   # designent le meme point d'ecoute et sont deux ORIGINES DIFFERENTES pour la comparaison exacte du
@@ -45,9 +40,6 @@ callback_uris() {
   echo "$out"
 }
 
-# Le resolveur du visiteur n'est pas mesurable d'ici : on nomme ce qui est local au daemon docker —
-# le domaine `.internal`, et les noms de service (sans point). `localhost` n'a pas de point non plus
-# et se resout : c'est l'adresse juste d'un operateur sur sa machine, donc jamais un drift.
 browser_unreachable() {   # 0 si l'hôte de $1 ne peut pas être résolu par un navigateur
   local host="${1#*://}"; host="${host%%/*}"; host="${host%%:*}"
   [[ -z "$host" || "$host" == localhost ]] && return 1
@@ -56,8 +48,6 @@ browser_unreachable() {   # 0 si l'hôte de $1 ne peut pas être résolu par un 
   return 1
 }
 
-# LES DEUX ADRESSES DU FICHIER, COMPARÉES À CE QU'ON POSERAIT — une seule fonction pour le check et
-# pour l'apply, sinon les deux se répondraient différemment le jour où l'une dérive.
 addrs_converged() { # 0 si le fichier porte déjà les deux adresses voulues
   local cur_pub cur_int
   cur_pub="$(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
@@ -76,9 +66,6 @@ forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/de
 # L'app QUI EST LA NOTRE — et le nom ne suffit pas a le prouver. Mesure du 2026-08-12 : Gitea
 # accepte DEUX applications du meme nom sous le meme compte (201). Or le compte systeme est partage
 # par toutes les boites qui parlent a une meme forge : chercher « lcars-deck » y rend une app
-# arbitraire. Un `head -n1` sur ce nom, suivi du DELETE ci-dessous, ferait detruire a chaque boite la
-# porte d'une autre — et comme chacune re-creerait la sienne au passage suivant, les deux se
-# demoliraient en boucle sans qu'aucune ne le dise.
 # Le discriminant est donc le RETOUR : nos `redirect_uris` sont, par construction, l'adresse de
 # CETTE boite. On ne reconnait comme notre qu'une app qui porte exactement les notres.
 app_id() { # app_id <uris-attendues, separees par espace>
@@ -107,9 +94,6 @@ foreign_apps() { # foreign_apps <uris-attendues>
            | "\(.id):\(.redirect_uris|join(","))") else empty end' 2>/dev/null
 }
 
-# The config file is USABLE when it names a client the forge still knows. Checking only that the
-# file exists would keep a box happily pointing at an application someone deleted, and the failure
-# would surface as an opaque OAuth2 error in a browser, half a rail away from its cause.
 config_live() {
   local cid
   cid="$(our_client_id)"
@@ -160,8 +144,6 @@ check() {
   else
     p_drift "$PROV_DECK_OIDC_FILE nomme un client que la forge ne connaît plus — à re-poser"
   fi
-  # The browser-facing address is its own failure mode: it is only wrong once somebody tries from
-  # another machine, and by then the error looks like a broken login rather than a config value.
   if [[ -n "$PROV_FORGE_PUBLIC_URL" ]] && browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
     p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom local au daemon docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
   fi
@@ -193,10 +175,6 @@ apply() {
     verdict_apply
   fi
 
-  # NOTRE client existe mais ne vise plus les bonnes entrées : c'est LUI qu'on retire, designe par
-  # le client_id de notre fichier — pas par son nom (partagé sur une forge commune) ni par ses
-  # retours (c'est justement ce qui a changé). Le secret n'étant rendu qu'à la création, remplacer
-  # est le seul geste possible : on ne peut pas ré-écrire le fichier autour d'un secret perdu.
   if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live; then
     local ours; ours="$(our_client_id)"
     local oid
@@ -219,9 +197,6 @@ apply() {
     p_chg "ancien client OAuth2 « $APP_NAME » (id $id) retiré — son secret n'était plus récupérable"
     PROV_CHANGED=$((PROV_CHANGED + 1))
   fi
-  # Une app homonyme qui vise d'AUTRES retours appartient a une autre boite sur la meme forge. On la
-  # NOMME et on n'y touche pas : la supprimer casserait sa porte, et elle re-creerait la sienne au
-  # passage suivant — deux boites a se demolir en boucle, en silence.
   local foreign
   foreign="$(foreign_apps "$uris")"
   if [[ -n "$foreign" ]]; then

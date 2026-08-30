@@ -26,23 +26,13 @@ SERVICES_ENV="${LCARS_SERVICES_ENV:-/etc/lcars/services.env}"
 # deux. Et surtout : une garde ne peut pas prendre sa clef dans l'environnement de ce qu'elle garde
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
-# La racine vient de la lib — un second defaut ici serait un second decideur.
 HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
-# Seam de test, même idiome que 05-host-consent et 62-runtime-helpers : un témoin ne peut pas
-# `chown root`, et ce qui doit être épinglé ici est justement ce qui s'écrit.
 SERVICES_OWNER="${LCARS_SERVICES_OWNER:-root:root}"
-# Le compte du service d'autorite. Il se LIT dans `provision-lib.sh`, il ne s'y recopie plus : le
-# `:-lcars-authority` qui vivait ici etait une branche morte (la lib est sourcee au-dessus) et un
-# litteral de plus a faire suivre. Meme geste dans `21-service-accounts`, le meme jour.
 AUTHORITY_USER="$PROV_AUTHORITY_USER"
-# La fenetre d'observation qui separe « forke » de « debout ». Seam de temoin : un bats mesure la
-# DECISION (le compteur a-t-il bouge), jamais l'ecoulement du temps.
 SETTLE_SECS="${LCARS_SERVICES_SETTLE:-12}"
 
 UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
-#
-# Format : <composant de l'entrypoint>:<unit|driven-by>:<nom>
 # shellcheck disable=SC2034 # table DERIVEE par un temoin (`process_iso.bats` la lit au sed sur la
 # source), jamais lue par ce script — comme HELPERS et UNITS.
 STARTERS=(
@@ -58,10 +48,6 @@ have_systemd() { command -v "$SYSTEMCTL" >/dev/null 2>&1 && [[ -d "$SYSTEMD_DIR"
 # Le compteur de redemarrages automatiques du service — la seule mesure qu'un fork reussi ne fausse pas.
 restarts_of() { "$SYSTEMCTL" show -p NRestarts --value "$1.service" 2>/dev/null; }
 
-# ⚠ LA CAUSE LA PLUS FREQUENTE SE NOMME, SINON LE DIAGNOSTIC COUTE DEUX SAUTS. « redemarre en
-# boucle » puis `journalctl` puis un traceback Python : trois lectures pour apprendre qu'un port est
-# pris. La sonde ne tourne QU'APRES l'echec — sur le chemin nominal il n'y a rien a payer, et elle
-# n'a aucun faux positif : notre propre service, lui, n'arrive justement pas a se lier.
 
 loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l'operateur
   case "$1" in
@@ -74,9 +60,6 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
   echo "« journalctl -u $1.service » dit pourquoi"
 }
 
-# Un daemon n'hérite de RIEN : ni du shell de l'opérateur, ni des `PROV_*` que `provision` exporte
-# le temps d'un apply. Ce qu'il lui faut se pose donc sur le disque, une fois, dérivé de ce que le
-# provisionnement vient d'établir — et jamais recopié à la main dans deux unités.
 forge_url() { # vide tant que 48-forge-host n'a pas annonce d'adresse — ce n'est pas un echec
   local f="$PROV_TOKENS_DIR/forge.url"
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]'; fi
@@ -148,16 +131,6 @@ WantedBy=multi-user.target
 EOF
       ;;
     lcars-catalogue)
-      # ⚠ CE SERVICE TIENT L'AUTORITÉ TOTALE DE LA FORGE, et c'est le seul de la machine dans ce cas.
-      #
-      # ⚠ `User=` ET PAS root, ET C'ETAIT L'INVERSE PENDANT DEUX JOURS. Ce service ne demandait root
-      # que pour POSSEDER quatre chemins — le jeton, le seed, l'etat tofu, son repertoire de socket.
-      # Aucun appel privilegie dans sa chaine : `forge-gestures.sh` n'exige root nulle part, et
-      # `tofu` parle HTTP. Un compte dedie possede les quatre et fait le meme travail.
-      #
-      # Ce qu'on gagne n'est pas cosmetique : le detenteur des secrets de la forge n'a plus AUCUN
-      # privilege noyau, et le seul service qui en garde un (`lcars-converger`, pour `useradd`) ne
-      # detient rien. Celui qui detient ne peut pas escalader ; celui qui escalade n'a rien a voler.
       cat <<EOF
 [Unit]
 Description=LCARS — installe un catalogue pour un admin de la forge, sans jamais lui donner le jeton
@@ -178,11 +151,6 @@ WantedBy=multi-user.target
 EOF
       ;;
     lcars-privileged)
-      #
-      # ⚠ PAS DE `User=` — ET C'EST LA SEULE UNITE DE CE FICHIER OU L'ABSENCE EST LE CONTRAT. Il
-      # remplace `%fleet ALL=(root) NOPASSWD:` : le privilege ne disparait pas, il cesse d'etre
-      # accessible par un GROUPE que la forge repeuple toutes les 30 s.
-      #
       # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (mesure du
       # 2026-08-25 : `/branches/tool_request` et `/contents/ops` repondent 200 en anonyme), et un
       # service qui saurait ou trouver un secret aurait le droit de le lire. Une boite dont la forge
@@ -217,9 +185,6 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
   diff -q <(unit_body "$u") "$(unit_path "$u")" >/dev/null 2>&1
 }
 
-#
-# La sonde passe donc AVANT la branche systemd : c'est précisément le chemin où il n'y en a pas.
-# Elle ne mesure pas les services — elle mesure la seule chose dont dépend leur utilité.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
   if [[ -n "$found" ]]; then
@@ -229,12 +194,6 @@ probe_fleet_humans() {
   fi
 }
 
-#
-# ⚠ CE QUI EST SONDE ICI EST LA VALEUR QUE LES DAEMONS LIRONT, pas celle que ce module vient de
-# calculer. Les deux peuvent diverger — un `apply` joue sous un operateur, la machine en change, ou
-# quelqu'un reinstalle depuis un autre compte — et c'est precisement l'ecart qu'aucun verdict ne
-# voyait quand la variable n'avait aucun poseur.
-#
 # ⚠ ON NE COMPARE PAS AU RE-DERIVE. Rejouer `${SUDO_USER:-$(id -un)}` ici rendrait la meme valeur
 # qu'a l'apply dans le cas nominal et une DERIVE FAUSSE des qu'un second sudoer passe le doctor.
 # Ce qui se verifie sans ambiguite, c'est que l'uid declare designe quelqu'un : une garde qui
@@ -259,9 +218,6 @@ probe_seat_uid() {
   fi
 }
 
-#
-# Absent, les deux gardes REFUSENT : le siege ne se devine pas, et une machine sans ce fichier n'est
-# pas provisionnee. Ce module est le seul a le poser sur ce rail.
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
@@ -273,9 +229,6 @@ probe_seat_file() {
     p_drift "$SEAT_UID_FILE ne porte pas un uid (« $v ») — les deux gardes refuseront un lancement qu'ils ne peuvent pas vérifier"
     return 0
   fi
-  # ⚠ LES DEUX ARTEFACTS DOIVENT S'ACCORDER, ET ILS VIENNENT DE LA MEME DERIVATION. `services.env`
-  # sert `uid_floor` (le plancher de creation des humains), ce fichier sert GUARD B (le refus de
-  # lancement). Deux valeurs differentes creeraient des humains sur l'uid que la garde reserve.
   local declared
   declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -n "$declared" && "$declared" != "$v" ]]; then
@@ -296,8 +249,6 @@ check() {
   probe_fleet_humans
 
   if ! have_systemd; then
-    # Un fichier d'unite pour un init qui n'existe pas n'est pas une garde, c'est un decor — meme
-    # regle que le `tmpfiles.d` de 25-directories.
     p_warn "pas de systemd ici ($SYSTEMCTL absent ou $SYSTEMD_DIR introuvable) — aucune unite posee ; la landing et le convergeur doivent etre tenus autrement"
     verdict_check
   fi
@@ -308,10 +259,6 @@ check() {
     p_drift "environnement des services absent ($SERVICES_ENV) — les deux daemons démarreraient sans savoir où est la forge"
   fi
 
-  # ⚠ ICI ET PAS AVANT LA BRANCHE SYSTEMD, et le témoin voisin porte la raison : `probe_fleet_humans`
-  # sort AVANT elle parce que la population est un fait de la machine, vrai sur les deux rails.
-  # Celle-ci lit `$SERVICES_ENV`, qui est un artefact du rail POSTE — la boîte n'en a pas, son
-  # environnement vient du conteneur. Sondée trop tôt, elle rendait ROUGE tout doctor de boîte.
   probe_seat_uid
   probe_seat_file
 
@@ -320,16 +267,9 @@ check() {
       p_drift "$(unit_path "$u") absente ou divergente"
       continue
     fi
-    # « POSÉE » N'EST PAS « DEBOUT », et c'est toute la raison de ce module. Une unité présente et
-    # désactivée décrit un service que personne ne lance — exactement l'état d'avant.
     if "$SYSTEMCTL" is-active --quiet "$u.service" 2>/dev/null; then
       p_ok "$u.service actif"
     else
-      # ⚠ UNE CONSEQUENCE PAR UNITE, ET LA TABLE EST LA POUR QU'ON NE PUISSE PAS EN OUBLIER UNE.
-      # Ce message a ete un ternaire sur `lcars-landing`, donc TOUTE autre unite heritait de
-      # « personne ne sera enrole ». L'ajout de `lcars-catalogue` a fait dire a un service de
-      # catalogue qu'il empechait l'enrolement des humains : la mauvaise porte, au moment ou
-      # l'operateur en cherche une.
       local quoi
       case "$u" in
         lcars-landing)   quoi="personne ne peut entrer" ;;
@@ -358,9 +298,6 @@ apply() {
   }
 
   ensure_dir "$(dirname "$SERVICES_ENV")" 0755 "$SERVICES_OWNER" || verdict_apply
-  # 0640 root:$PROV_FLEET_GROUP : ce n'est pas un secret (une URL, des noms de groupes), mais il n'a
-  # aucune raison d'être lisible par tout le monde, et le groupe fleet doit pouvoir le lire pour
-  # diagnostiquer sans sudo.
   local env_body
   env_body="$(services_env_body)" \
     || { p_fail "environnement des services non calculable — l'écriture est ABANDONNÉE, pas tronquée"; verdict_apply; }
@@ -373,8 +310,6 @@ apply() {
   # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
     || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B refusera tout lancement sur cette machine"; verdict_apply; }
-  # (pas de `p_chg` ici : `write_atomic` émet déjà sa ligne POSÉ avec le chemin — la répéter fait
-  # lire deux écritures là où il n'y en a qu'une.)
 
   local reload=0 body
   for u in "${UNITS[@]}"; do
@@ -419,34 +354,14 @@ apply() {
   verdict_apply
 }
 
-#
-# ⚠ L'INSTALL RENDAIT LA MAIN SANS SAVOIR SI UN HUMAIN AVAIT ÉTÉ MATÉRIALISÉ. Le convergeur poll
-# toutes les 30 s — cadence choisie pour ne pas marteler la forge, pas pour cadencer une install.
-#
 # ⚠ ON NE FAIT PAS CONFIANCE AU CODE DE RETOUR SEUL. Le convergeur peut rendre 0 en n'ayant converti
 # personne (une team vide EST un résultat valide). Ce qui se vérifie est le FAIT : un compte unix
 # existe pour un humain de la team. `--once` est documenté en tête de ce script — « une passe, pour
 # sonder ou tester » — et rend 1 sur dépendance absente, 2 sur configuration absente.
-#
-# ⚖ CE N'EST PAS UN ÉCHEC S'IL N'Y A PERSONNE À CONVERGER. Une forge sans membre dans `humans` est
-# un état légitime (l'admin n'a pré-semé personne, les gens s'enrôlent eux-mêmes). On le DIT, on ne
-# le compte pas comme une faute — la distinction est celle que ce rail applique partout.
 converge_humans_now() {
   local conv="${LCARS_HUMAN_CONVERGER:-$HELPERS_DIR/human-converger.sh}"
   [[ -x "$conv" ]] || { p_warn "convergeur d'humains absent ($conv) — aucun humain ne sera matérialisé par cette passe"; return 0; }
 
-  # ⚠ PAS DE GARDE `[[ -r "$SERVICES_ENV" ]]` ICI, ET C'EST DÉLIBÉRÉ. Une relecture a signalé que le
-  # `.` du sous-shell échoue en rc=1 si le fichier manque — le MÊME code qu'une dépendance absente du
-  # convergeur, donc le même diagnostic pour deux causes. Vrai en soi. Mais l'état est INATTEIGNABLE
-  # ici : `apply()` écrit ce fichier trente lignes plus haut et sort en `p_fail`+`verdict_apply` si
-  # l'écriture rate. Poser la garde quand même aurait ajouté trois lignes commentées que rien ne peut
-  # exécuter — exactement la faute que ce lot corrige ailleurs (`391638668`), écrite en la corrigeant.
-  # Si un jour ce bloc est appelé depuis un autre site, la garde redevient nécessaire : c'est la
-  # condition, pas le code, qu'il faut relire.
-
-  #
-  # Une différence de population est la seule mesure qui distingue les deux. Trois états, trois
-  # phrases : ce que CETTE passe a posé, ce qui était déjà là, et le vide.
   local avant apres nouveaux
   avant="$(fleet_humans | sort -u)"
 
@@ -477,8 +392,6 @@ converge_humans_now() {
        return 0 ;;
   esac
 
-  # LA POPULATION APRÈS. `fleet_humans` applique la règle de GUARD B (`bin/fleet_v2`) : uid dans la
-  # plage humaine, et pas le siège. Ce qu'on lit ici est donc exactement « qui peut lancer une fleet ».
   apres="$(fleet_humans | sort -u)"
   nouveaux="$(set_diff "$avant" "$apres")"
 
@@ -490,23 +403,11 @@ converge_humans_now() {
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "humain(s) de fleet matérialisé(s) PAR CETTE PASSE : $liste_new"
   elif [[ -n "$liste_all" ]]; then
-    # LE RE-ROLL. Rien de neuf, mais quelqu'un peut lancer une fleet — l'exigence est tenue, et la
-    # phrase ne s'attribue pas un geste qui n'a pas eu lieu.
     p_ok "humain(s) de fleet déjà présent(s) : $liste_all — cette passe n'en a matérialisé aucun de plus"
   else
-    # ⚠ PAS DE `:-` SUR CE NOM — même règle que `services_env_body` trente lignes plus haut, et je
-    # venais de l'enfreindre. `provision-lib.sh` pose `PROV_HUMANS_TEAM` avant tout module, donc un
-    # défaut écrit ici ne peut PAS s'exécuter : il se lit comme une décision et n'en est pas une.
     p_ok "aucun humain à matérialiser — la team « $PROV_HUMANS_TEAM » de la forge est vide. Ce n'est pas une faute : les gens s'enrôlent sur la forge, un propriétaire les ajoute à la team, et le convergeur les matérialise au tour suivant"
   fi
 
-  #
-  # ⚠ ET IL N'Y A PAS DE GARDE DE SUBSTRAT ICI, PARCE QU'ELLE SERAIT INATTEIGNABLE. Dans la boîte il
-  # n'y a pas de pré-semis — `48-forge-host` n'y tourne pas, les gens s'enrôlent seuls, une team vide
-  # y est un état d'attente — et accuser là-bas ferait dériver toute boîte neuve. Ce qui l'empêche est
-  # déjà écrit deux étages plus haut : cette fonction n'est appelée que par `apply()`, et ce module
-  # est `APPLY-ON: wsl linux`. Un `!= docker` de plus se lirait comme une décision, et serait un
-  # repli contre un état que le sélecteur du runner rend impossible.
   local builtin_human
   builtin_human="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   if [[ -z "$builtin_human" ]]; then

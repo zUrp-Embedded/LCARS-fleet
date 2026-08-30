@@ -7,18 +7,9 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 20-groups
-# ⚠ ET IL NE PREND PAS `fleet`, LUI. `lcars-authority` en est membre pour traverser
-# `/opt/lcars/runtime` ; la landing n'y lit RIEN — sa doc a ete deplacee hors du prefixe de release
-# (`/opt/lcars/share/doc`) precisement parce que ce process ne pouvait pas l'y lire. Lui donner
-# `fleet` « au cas ou » rendrait faux le motif qui a coute ce deplacement.
 # ⚠ SANS SHELL ET SANS HOME. Un compte de service n'a personne a connecter : `nologin` ferme la
 # porte, et l'absence de home evite un `/home/lcars-authority` que le convergeur d'humains devrait
 # ensuite apprendre a ignorer.
-# ⚠ MEMBRE DU GROUPE `fleet`, ET CE N'EST PAS UNE AUTORITE — C'EST UNE TRAVERSEE. `/opt/lcars/runtime`
-# est `0750 root:fleet` (system.manifest), et `catalogue install` y execute le binaire de release par
-# `entrypoint catalogue-source`. Sans le groupe, le geste echoue sur un repertoire qu'il ne peut pas
-# ouvrir. Le groupe donne la LECTURE d'un arbre installe ; l'adminite, elle, se demande a la forge a
-# l'instant du geste et ne se lit nulle part sur ce systeme.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -30,8 +21,6 @@ SYSTEM_USER="${PROV_SYSTEM_USER:-lcars-system}"
 SYSTEM_GROUP="${PROV_SYSTEM_GROUP:-$SYSTEM_USER}"
 NOLOGIN="${LCARS_NOLOGIN:-/usr/sbin/nologin}"
 
-# ⚠ SEAM DE TEMOIN, MEME IDIOME QUE `05-host-consent` ET `62-runtime-helpers` : un temoin ne peut pas
-# creer un compte systeme. Ce qui doit etre epingle est ce qui S'ECRIT, pas le pouvoir de l'ecrire.
 USERADD="${LCARS_USERADD:-useradd}"
 USERMOD="${LCARS_USERMOD:-usermod}"
 PASSWD_FILE="${LCARS_PASSWD_FILE:-/etc/passwd}"
@@ -40,10 +29,6 @@ account_exists() { awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$PASSW
 shell_of()       { awk -F: -v n="$1" '$1==n {print $7; exit}' "$PASSWD_FILE"; }
 
 check() {
-  # ⚠ LE GROUPE EST SONDE AVANT LE COMPTE, ET SON ABSENCE ETAIT LE TROU DE CE `check`. Il verifiait
-  # le compte et l'adhesion, jamais le groupe — donc il rendait CONFORME sur la machine exacte ou
-  # `chown lcars-authority:lcars-authority` allait echouer trois modules plus loin. Un check qui ne
-  # sonde pas ce que l'apply pose est un check qui certifie l'etat qu'il ne regarde pas.
   if getent group "$AUTHORITY_GROUP" >/dev/null 2>&1; then
     p_ok "groupe de service $AUTHORITY_GROUP"
   else
@@ -67,9 +52,6 @@ check() {
     p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser /opt/lcars/runtime, et « catalogue install » échouera sur un refus qui accuse le catalogue"
   fi
 
-  # ⚠ SA CONSEQUENCE EST A LUI, ET C'EST LA LECON DE `64-services`. Un message generique ferait dire
-  # au compte de la landing ce qui arrive au service d'autorite — la mauvaise porte, au moment ou
-  # l'operateur en cherche une.
   if getent group "$SYSTEM_GROUP" >/dev/null 2>&1; then
     p_ok "groupe de service $SYSTEM_GROUP"
   else
@@ -90,9 +72,6 @@ check() {
 }
 
 apply() {
-  # ⚠ LE GROUPE AVANT LE COMPTE, ET L'ORDRE EST UN CONTRAT : `useradd -g "$AUTHORITY_GROUP"` refuse
-  # net si le groupe n'existe pas. `ensure_group` est idempotent et verifie son propre `groupadd`
-  # (provision-lib) — un groupe qu'on croit pose et qui ne l'est pas est le defaut qu'on repare ici.
   ensure_group "$AUTHORITY_GROUP" || { p_fail "groupe $AUTHORITY_GROUP non posé — le compte de service n'aura pas de groupe à lui, et tout chown sur les secrets échouera"; verdict_apply; }
 
   if ! account_exists "$AUTHORITY_USER"; then
@@ -107,8 +86,6 @@ apply() {
     fi
   fi
 
-  # CONVERGE, ne se contente pas de creer : un compte pose a la main avec un shell valide est une
-  # porte ouverte que ce module doit refermer, pas constater.
   if [[ "$(shell_of "$AUTHORITY_USER")" != "$NOLOGIN" ]]; then
     if run_quiet "$USERMOD" -s "$NOLOGIN" -- "$AUTHORITY_USER"; then
       PROV_CHANGED=$((PROV_CHANGED + 1))

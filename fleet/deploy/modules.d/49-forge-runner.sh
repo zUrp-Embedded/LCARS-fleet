@@ -7,27 +7,14 @@
 # CHECK-ON: wsl linux
 # NEEDS: root
 # AFTER: 48-forge-host
-#
-# ⚠ UN SEUL MÉCANISME D'ENRÔLEMENT. `docker/forge-runner.sh` le porte en entier — jeton
-# d'enregistrement par l'API admin, config des jobs, montage du compose — avec ses cicatrices
-# (portée du jeton, réseau des jobs, `docker cp` plutôt que bind). Il est entièrement paramétré : on
-# l'APPELLE. Un second exemplaire divergerait du premier sur la première cicatrice qu'on ne
-# recopierait pas.
 
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/provision-lib.sh
 source "$HERE/../lib/provision-lib.sh"
 
-# L'adresse LOCALE de la forge, posée par 48 dans `forge.url` et relue par la lib. On ne la
-# recompose pas : deux dérivations du même fait divergent le jour où le port bouge.
 LOCAL_URL="$PROV_FORGE_URL"
 
-# ⚠ TROIS LABELS, TOUS PUBLICS, ET C'EST CE QUI REND CE RAIL AUTONOME. Ils couvrent les `runs-on`
-# des workflows livrés — `shell` (deps-upstream, template projet), `dood` (publish, qui fait du
-# docker), `ubuntu-latest` (le gate, et le `runs-on` que tout workflow importé écrit). Le runner
-# tire chaque image lui-même : rien à bâtir, rien à semer.
-#
 # ⚠ PAS DE LABEL `elixir`, ET C'EST DÉLIBÉRÉ. Le servir honnêtement exigerait `lcars-build`, une
 # image LOCALE que ce rail ne construit pas ; le servir avec l'image Elixir de base donnerait un
 # runner qui prend le job du gate et meurt sur `git` introuvable — vert à l'écran, faux au fond.
@@ -48,8 +35,6 @@ converge_ci_runner() {
     p_ok "$n runner(s) CI déjà enregistré(s) — la CI de cette forge a une machine"
     return 0
   fi
-  # On teste la LISIBILITÉ du fichier, on n'en lit pas le contenu : le délégué le lira lui-même.
-  # Un secret qu'on ne met pas dans une variable ne peut être recopié nulle part par accident.
   [[ -s "$PROV_MASTER_TOKEN_FILE" && -r "$PROV_MASTER_TOKEN_FILE" ]] \
     || { p_warn "runner CI non enrôlable : aucun jeton master lisible ($PROV_MASTER_TOKEN_FILE)"; return 0; }
 
@@ -59,9 +44,6 @@ converge_ci_runner() {
   # elle échoue — donc tout secret passé en argument ressort dans la trace et dans le fichier de
   # capture qu'il conserve. (2) Il émet déjà `p_fail`, ce qui ferait DEUX verdicts pour un seul
   # fait et rendrait l'apply en `1` (échec) là où le contrat veut `2` (appliqué, drift résiduel).
-  #
-  # Le jeton part par CHEMIN (`--admin-token-file`) : `/proc` de l'hôte ne le voit pas pendant
-  # l'appel, et rien ne peut le recopier dans une trace.
   local out rc=0
   out="$(mktemp "${TMPDIR:-/tmp}/forge-runner.XXXXXX")"
   # `DOCKER_BIN` porte la CLI RÉSOLUE — sur ce substrat elle vit dans le montage Docker Desktop et
@@ -83,7 +65,6 @@ converge_ci_runner() {
     return 0
   fi
 
-  # La sortie du délégué SANS la ligne de commande : c'est elle qui dit pourquoi, et elle seule.
   sed 's/^/     /' "$out" >&2
   rm -f "$out"
   # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
@@ -93,8 +74,6 @@ converge_ci_runner() {
 
 
 check() {
-  # ⚠ LA FORGE D'ABORD : sans elle, l'absence de runner n'est pas une dérive de CE module. Un
-  # verdict qui accuse le runner quand la forge est éteinte envoie chercher au mauvais endroit.
   if ! curl -fsS -m 5 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; then
     p_ok "forge du poste éteinte — le runner n'est pas mesurable, et son absence n'est pas une dérive"
     verdict_check

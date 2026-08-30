@@ -6,7 +6,6 @@
 # APPLY-ON: docker
 # CHECK-ON: docker
 # NEEDS: root
-#
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -14,13 +13,8 @@ set -euo pipefail
 # shellcheck source=../lib/store.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/store.sh"
 
-# LA RACINE VIENT DU COMPOSE, ELLE NE SE REDERIVE PAS ICI. Le compose possede le chemin
-# (`LCARS_STORE_ROOT`), `lib/store.sh` possede les noms de volumes, ce module possede les MODES.
-# Trois proprietaires, aucun recouvrement. Absente, c'est une panne de cablage et pas un magasin
-# desactive : le module ne tourne que sur substrat docker, ou le compose est le seul poseur.
 store_root() { printf '%s' "${LCARS_STORE_ROOT:-}"; }
 
-# LA TABLE — une entree par volume, `sous-repertoire mode owner:groupe`.
 prov_store_dirs() {
   printf '%s\n' \
     "cache      2775 root:$PROV_FLEET_GROUP" \
@@ -29,11 +23,6 @@ prov_store_dirs() {
     "state      DELEGUE 45-sudoers-toolchain"
 }
 
-# ─── LA GARDE DE COMPLETUDE ─────────────────────────────────────────────────────────────────────
-# Un cinquieme volume ajoute a `lib/store.sh` sans entree ici ne doit PAS heriter d'un mode par
-# defaut : personne ne se demanderait alors si un pod l'ecrit. La table et la liste des volumes
-# doivent se recouvrir exactement, dans les deux sens — un volume sans mode est une question non
-# posee, un mode sans volume est un chemin qui n'existera jamais et que `check` reclamera a vie.
 store_completeness() {
   local tabled declared missing=() extra=()
   tabled="$(prov_store_dirs | awk '{print $1}' | sort)"
@@ -59,8 +48,6 @@ check() {
     fi
     cur="$(stat -c '%a %U:%G' "$path")"
     if [[ "$mode" == "DELEGUE" ]]; then
-      # On SONDE sans juger : le mode appartient a `$owner`, pas a nous. Ce qui se verifie ici est
-      # la seule chose dont ce module reponde — le point de montage existe.
       p_ok "$path ($cur) — mode delegue a $owner"
     elif [[ "$cur" == "${mode#0} $owner" ]]; then
       p_ok "$path ($cur)"
@@ -79,7 +66,6 @@ apply() {
   while read -r spec; do
     read -r sub mode owner <<< "$spec"
     if [[ "$mode" == "DELEGUE" ]]; then
-      # Le repertoire est cree par son proprietaire ; on ne le devance pas et on ne le corrige pas.
       [[ -d "$root/$sub" ]] || p_drift "$root/$sub absent — $owner le pose, volume non monte ?"
       continue
     fi

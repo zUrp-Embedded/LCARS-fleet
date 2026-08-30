@@ -6,15 +6,12 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AUCUNE mutation — ce module ne fait que sonder (apply = check). Chaque échec dit : le problème
-# précis, l'état DÉTECTÉ, et le geste pour réparer — jamais un « failed » nu.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 check() {
-  # ── Famille OS : il nous faut dpkg/apt (les modules paquets sont apt-only, assumé) ──────────────
   if command -v dpkg >/dev/null && command -v apt-get >/dev/null; then
     p_ok "OS famille Debian/Ubuntu (dpkg + apt présents)"
   else
@@ -77,7 +74,6 @@ check() {
     fi
   fi
 
-  # ── WSL : version 2 obligatoire (WSL1 = pas de vrai kernel → pas de namespaces → pas de bwrap) ──
   if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
     if grep -qi 'WSL2\|microsoft-standard' /proc/version 2>/dev/null; then
       p_ok "WSL2 (kernel $(uname -r))"

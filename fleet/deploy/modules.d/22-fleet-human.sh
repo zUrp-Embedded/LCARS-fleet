@@ -6,12 +6,6 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-#
-# ⚠ IL DÉRIVE, IL N'ÉCHOUE PAS. Un compte absent n'est pas une machine cassée : c'est un geste qui
-# manque, et tout le reste du provisionnement est déjà posé quand on arrive ici. Un échec ferait
-# rendre 1 à l'apply entier — la faute exacte que `52-ops-branch` portait le même jour.
-#
-# Données : PROV_FLEET_GROUP · le nom de l'humain intégré, LU chez son autorité
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -19,9 +13,6 @@ set -euo pipefail
 
 FLEET_HUMAN="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
-# ─── OBSERVER N'EST PAS JUGER ───────────────────────────────────────────────────────────────────
-#
-# Ce qui suit n'a donc pas de verdict : il DÉCRIT, chaque verbe conclut.
 observe() {
   local uid
   if [[ -z "$FLEET_HUMAN" ]]; then

@@ -7,12 +7,6 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 25-directories
-#
-# INSTALLE EST UN FAIT DE FORGE, ET CE MODULE EST CE QUI LE REND VRAI SUR LE DISQUE.
-# `lcars catalogue install <nom>` pose deux choses sur la forge : l'org avec ses comptes de role, et
-# la SOURCE du catalogue dans `<nom>/_catalogue`. Ce depot-la est la signature de l'installation. Ce
-# module lit cette signature et fait suivre le materiel local — un clone, rien de plus.
-#
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
 # la lecture et le clone se font en anonyme. Une boite qui n'a jamais recu `box config`
@@ -33,11 +27,6 @@ MANIFEST="catalogue.yaml"
 # plus dans la reponse et ne parie jamais le materiel de la boite sur une supposition.
 STORE_QUERY="catalogue"
 
-# UN DEPOT QUI SE DECLARE AU NOM DE SON ORG = CE CATALOGUE EST INSTALLE. Quatre filtres, chacun paye :
-#
-#   * l'ADRESSE, exacte — `q=catalogue` est un match de SOUS-CHAINE cote Gitea,
-#     `mon-catalogue-perso` remonte aussi ; le filtre exact (`_catalogue`) est fait ici, sur
-#     `.name`, jamais laisse au serveur. Il ne CONCLUT rien : il dit seulement ou regarder ;
 #   * l'IDENTITE — `manifest.name == owner`. C'est ce qui decide. Un depot pose a l'adresse d'un
 #     magasin, dans une org, mais qui ne se declare pas au nom de cette org, n'est pas le magasin de
 #     ce catalogue : le cloner le servirait sous un nom qu'il ne revendique pas, et le roster du
@@ -76,22 +65,12 @@ forge_installed() {
   while read -r name full url; do
     [[ -n "$name" ]] || continue
 
-    # ⚠ DEUX LIGNES ET PAS UNE : `local d="$(f)"` rendrait TOUJOURS 0 — `local` est une commande, et
-    # c'est SON code de sortie qui est vu, pas celui de la substitution. Le muet passerait alors pour
-    # un manifeste absent, donc pour un refus, et le materiel serait supprime sur une non-reponse.
     drc=0
     declared="$(declared_name "$full")" || drc=$?
     [[ "$drc" -eq 2 ]] && { printf 'HOLD %s manifeste\n' "$name"; continue; }
 
-    # ⚠ NE PAS SIGNER SE DIT, PARCE QUE CE MODULE SUPPRIME. Un depot pose ICI — a l'adresse exacte
-    # d'un magasin — et que la forge nous a DECRIT sans qu'on le signe fait disparaitre `$name` de
-    # `$signed`, donc de `$seen`, donc son materiel local part au balayage. C'etait muet : la seule
-    # sortie etait « materiel de X retire », sans jamais dire quelle couche avait dit non.
-    #
     # Sur STDERR et pas stdout : l'appelant CAPTURE stdout (`signed="$(forge_installed)"`) et le lit
     # champ par champ. Une ligne de diagnostic y deviendrait une entree de la liste signee.
-    #
-    # Le volume est borne : seuls les depots portant exactement le nom de l'adresse arrivent ici.
     if [[ "$declared" != "$name" ]]; then
       if [[ -z "$declared" ]]; then
         echo "45-catalogues: $full repond, mais son $MANIFEST ne declare aucun \`name:\` en" \
@@ -126,10 +105,6 @@ forge_installed() {
 #
 # `-sS` sans `-f` : le corps ET le code sont necessaires, et `-f` avalerait le corps sur un 404.
 #
-# ⚠ LE `|| raw=$'\n000'` EST REDONDANT, ET IL RESTE — MESURE, pas suppose. L'assignation est dans une
-# liste `||` chez l'appelant, donc bash y desactive `errexit` jusque dans la substitution : un `curl`
-# qui echoue laisse simplement `raw` VIDE. `code` vaut alors `""`, qui tombe sur `*` du `case`,
-# c'est-a-dire rc=2, c'est-a-dire HOLD — la meme reponse que le rescue. Les deux chemins convergent.
 declared_name() {
   local raw code body
   raw="$(curl -sS -m 10 -w '\n%{http_code}' "$PROV_FORGE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
@@ -146,9 +121,6 @@ declared_name() {
   esac
 }
 
-# Un repertoire compte quand il porte un MANIFESTE, la meme regle que `Fleet.Catalogue` : un clone
-# interrompu ou un `lost+found` n'est pas un catalogue, et le compter en ferait un que le boot
-# refuserait de verifier.
 local_installed() {
   local d
   [[ -d "$PROV_CATALOGUES_DIR" ]] || return 0
@@ -176,8 +148,6 @@ check() {
     p_drift "liste des catalogues TRONQUEE par la forge — rien n'est conclu sur une liste partielle"
     verdict_check
   elif [[ "$rc" -ne 0 ]]; then
-    # ON NE CONCLUT PAS QUE RIEN N'EST INSTALLE. Une forge injoignable rendrait la liste vide, et
-    # l'apply supprimerait alors TOUT le materiel local en croyant converger.
     p_drift "forge injoignable ($PROV_FORGE_URL) — l'etat installe des catalogues n'a pas pu etre lu"
     verdict_check
   fi
@@ -190,7 +160,6 @@ check() {
       p_drift "catalogue $name : $arg illisible sur la forge — rien n'est conclu"
       continue
     fi
-    # Passe HOLD, le troisieme champ est l'url de clone — le protocole le dit, cf. `forge_installed`.
     url="$arg"
 
     local dir="$PROV_CATALOGUES_DIR/$name"
@@ -271,9 +240,6 @@ apply() {
     fi
   done <<< "$signed"
 
-  # LA SUPPRESSION, et elle n'arrive qu'ici — apres une lecture REUSSIE de la forge. Le materiel est
-  # un cache : ce qu'on efface se re-clone. Ce qu'on garderait, en revanche, continuerait a etre
-  # servi comme un catalogue vivant.
   local have
   while read -r have; do
     [[ -n "$have" ]] || continue

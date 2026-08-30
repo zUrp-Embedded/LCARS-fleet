@@ -6,7 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-#
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

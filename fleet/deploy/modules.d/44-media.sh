@@ -7,33 +7,6 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 16-node
-#
-# ─── UN TROU QUE LE CONTENEUR CACHAIT ───────────────────────────────────────────────────────────
-#
-# `assets/` est la SOURCE ; le Dockerfile la pose en `/opt/lcars/share/{avatars,favicon}` (lignes
-# `COPY assets/avatars` et `COPY assets/favicon`). Aucun module de provision ne le faisait : le rail
-# natif n'a jamais eu ce répertoire.
-#
-# ─── TROIS CONSOMMATEURS, PAS UN ────────────────────────────────────────────────────────────────
-#
-# Ce n'est pas un correctif pour la recette : le préfixe est LU par trois choses distinctes —
-# `Fleet.Observation.Deck` (`media_root`, défaut `/opt/lcars/share`), `console-deck.py`
-# (`DECK_FAVICON`) et la recette de charte. Le rail natif les servait tous les trois en générique.
-#
-# ─── ET `doc/`, QUI SE BÂTIT ICI ────────────────────────────────────────────────────────────────
-#
-# Elle se bâtit à partir du MÊME arbre : le site lit `fleet/priv/catalogue` (les cartes, les sièges)
-# et `fleet/lib/fleet/mcp/pod_tools.ex` (les outils). Même commit, donc rien à épingler et rien à
-# rafraîchir — et un déplacement de catalogue CASSE ce build, ce qui est le comportement voulu.
-#
-# ⚠ `LCARS_SITE_BASE=/doc/` EST LOAD-BEARING. `astro.config.mjs` fait `base = LCARS_SITE_BASE || '/'`.
-# GitHub Pages bâtit pour la racine ; le deck sert sous `/doc/`. Recopier l'artefact Pages ici
-# donnerait un site dont chaque URL d'asset est fausse — d'où un build local, avec la base du deck.
-# Le Dockerfile pose la même variable, pour la même raison.
-#
-# ⚠ ET LE BUILD TOURNE `as_human`, DANS LE CHECKOUT. `npm ci` écrit `node_modules/` (173 Mo) et
-# `dist/` — les deux sont gitignorés, comme `_build` et `deps` pour mix. En root, il laisserait à
-# l'opérateur un arbre qu'il ne peut plus effacer : c'est la leçon du `.terraform` de `46-tofu`,
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -44,19 +17,12 @@ set -euo pipefail
 MEDIA_ROOT="${LCARS_MEDIA_ROOT:-$PROV_ROOT/share}"
 MEDIA_OWNER="${LCARS_MEDIA_OWNER:-root:root}"
 
-# Les arbres livrés, et leur source unique. `doc` n'y est pas (cf. en-tête).
 MEDIA_TREES=(avatars favicon)
 
-# Seam de test sur la SOURCE. Sans lui, la branche « la source a disparu » n'est jouable par aucun
-# témoin : `repo_root` vient de la lib, qui la redéfinit au source — la surcharger depuis le décor ne
-# tient pas. Un chemin qu'aucun témoin ne peut atteindre est un chemin non écrit.
 MEDIA_SRC_ROOT="${LCARS_MEDIA_SRC_ROOT:-$(repo_root)/assets}"
 
 media_src() { echo "$MEDIA_SRC_ROOT/$1"; }
 
-# Le projet du site, et la base sous laquelle le deck le sert. Les deux sont des coutures : le
-# premier pour qu'un témoin puisse jouer la branche « sources absentes », la seconde parce que c'est
-# le contrat entre ce build et la route `/doc/` de `console-deck.py`.
 SITE_SRC="${LCARS_SITE_SRC:-$(repo_root)/assets/github.io}"
 SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
 NPM_BIN="${LCARS_NPM_BIN:-npm}"
@@ -93,10 +59,6 @@ check() {
   verdict_check
 }
 
-# ─── build_doc — LA DOC, BÂTIE DU MÊME ARBRE ────────────────────────────────────────────────────
-#
-# Elle échoue FORT : une doc absente est une doc absente, pas un lien mort qu'on découvre en
-# cliquant. Le module qui la pose est le seul endroit où l'échec a encore un contexte.
 build_doc() {
   [[ -d "$SITE_SRC" ]] \
     || { p_fail "sources du site absentes ($SITE_SRC) — l'arbre livre-t-il encore sa doc ?"; verdict_apply; }
@@ -104,7 +66,6 @@ build_doc() {
     || { p_fail "npm absent — 16-node pose le précompilé épinglé ; joue-le d'abord"; verdict_apply; }
 
   # ⚠ `as_human` : `npm ci` ÉCRIT dans le checkout (`node_modules/`, `dist/`, tous deux gitignorés).
-  # En root il laisserait à l'opérateur un arbre qu'il ne peut plus effacer — la leçon du
   run_step "doc du deck · dépendances" -- as_human env -C "$SITE_SRC" "$NPM_BIN" ci --no-audit --no-fund \
     || { p_fail "npm ci en échec ($SITE_SRC) — la doc ne peut pas être bâtie"; verdict_apply; }
 
@@ -141,19 +102,11 @@ apply() {
   done
   build_doc
 
-  # L'ARBRE DÉPLOYÉ APPARTIENT AU MODULE, PAS À LA SOURCE. `cp -a` a recopié les attributs du
-  # checkout — un checkout fleet est setgid + ACL par défaut `group:fleet` — et l'arbre en héritait.
-  # Deux gestes pour le posséder, et le second est load-bearing :
-  #  1) retirer les ACL héritées : le rail Docker (`COPY assets/…`) pose SANS ACL, les deux rails
-  #     doivent livrer le même état (ce module se targue d'être le jumeau du Dockerfile) ;
-  #  2) forcer 0755 sur les dossiers + lisible partout : le deck tourne sous l'humain, la recette
-  #     sous root, un pod sous un troisième.
   # ⚠ LE SYMBOLIQUE EST OBLIGATOIRE. `chmod` NUMÉRIQUE ne retire pas le setgid d'un dossier (mesuré :
   # `chmod 0755` sur un dossier setgid laisse `2755`, avec ou sans ACL) — seul `a-s`/`g-s` l'adresse.
   # Sans lui, un checkout fleet (setgid) fait hériter la cible du setgid, et `ensure_dir … 0755`
   # échoue au 2e apply (`2755 ≠ 755`, `ensure_mode` ne converge jamais) : le rail cesse d'être
   # idempotent. Le `go=rx` ramène en plus le mask ACL à `r-x`, donc `stat %a` lit bien `755`.
-  # Pas de `2>/dev/null` muet ici (cf. l'en-tête de ce module, grief v1) : un refus se DIT.
   if command -v setfacl >/dev/null 2>&1; then
     setfacl -bR "$MEDIA_ROOT" || p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"
   fi

@@ -7,21 +7,9 @@
 # CHECK-ON: any
 # NEEDS: human
 # AFTER: 45-catalogues 50-forge 70-human
-#
-# CE MODULE N'A AUCUNE LOGIQUE DE PROJET, ET C'EST VOULU. Il relaie une porte du release
-# (`Fleet.Project.Onboard.eval_reconcile/1`, via `lcars project reconcile`), qui parle en MOTS —
-# DEJA / MANQUE / IMPORTE / ECHEC, un par ligne. Reimplementer ici le filtre « qu'est-ce qui est un
-# projet » mettrait une seconde autorite a cote de celle qui cree les projets, dans un autre
-# langage : c'est le tour exact que `45-catalogues` a paye en lisant l'etat installe deux fois.
-#
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$PROV_HUMAN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet_v2.env` qui porte l'adresse de la forge et le jeton.
-#
-# `APPLY-ON: any` et pas l'enumeration des trois substrats, qui vaudrait pourtant la meme chose
-# aujourd'hui : les faces ne sont bâties NULLE PART ailleurs — ni au stage image, ni au build —
-# donc ce module doit muter partout. Une liste exhaustive ferait taire son apply le jour ou un
-# quatrieme substrat apparait, sans un mot.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -55,8 +43,6 @@ door() { # <check|apply>  → verdicts sur stdout
   return "$rc"
 }
 
-# Les mots de la porte deviennent les verdicts du provisioning. UNE ligne inconnue est un echec, pas
-# un silence : un format qui derive doit se voir au premier run, pas se lire comme « rien a faire ».
 render() { # <mode> ; lit les verdicts sur stdin
   local mode="$1" word repo rest seen=0
   while read -r word repo rest; do
@@ -80,12 +66,6 @@ render() { # <mode> ; lit les verdicts sur stdin
 # porte du tout, et `60-deploy` a deja drifte dessus : le redire en echec ici ferait deux alarmes
 # pour une panne.
 usable() {
-  # ⚠ LE CYCLE DE BOOT NE PARLE PAS D'UN HUMAIN DE FLEET. L'entrypoint conteneur joue tous les
-  # modules `# NEEDS: human` avec `--human <sysadmin>` — juste pour ce qui appartient au sysadmin,
-  # faux pour des faces de projet : elles seraient posees sous le seul compte qui ne peut pas
-  # lancer de fleet, et le git de l'humain qui les utilise ensuite les refuserait (proprietaire
-  # different). Les vrais humains passent par `human-converger.sh`, qui calcule sa liste de modules
-  # depuis ce meme en-tete `# NEEDS: human` : ce module les atteint sans etre nomme nulle part.
   # shellcheck disable=SC2119 # argument OPTIONNEL : sans lui la fonction sonde l'uid COURANT,
   # ce qui est exactement la question posee ici.
   if ! is_fleet_human; then

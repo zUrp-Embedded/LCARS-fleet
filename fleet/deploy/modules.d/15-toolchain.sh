@@ -10,11 +10,6 @@
 # mot : la toolchain vit dans le STAGE BUILD de l'image, pas dans le conteneur runtime. L'état-cible
 # « toolchain posée » n'a pas à être vrai là où on ne buildera jamais ; la vérité docker de ce
 # module, c'est la release présente — sondée par 60-deploy check.)
-# DEUX PLANCHERS, DEUX HORLOGES, UN SEUL MÉCANISME :
-#   - Erlang/OTP : `>= PROV_ELIXIR_OTP_MAJOR`. On ne fige pas ce qu'on ne contrôle pas — le gate CI
-#     verrouille la compatibilité réelle.
-#   - Elixir     : `>= PROV_ELIXIR_MIN` (majeure.mineure). Le patch ne se compare pas : la distro
-#     le bouge sous nous, et c'est exactement le service qu'on lui demande.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -23,29 +18,13 @@ set -euo pipefail
 otp_release() { erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null || echo 0; }
 elixir_version() { elixir --short-version 2>/dev/null || echo absent; }
 
-# ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE. `/opt/elixir-<version>`
-# et ses quatre symlinks ont quitte `system.manifest` en meme temps que ce module a cesse de les
-# poser — sur une machine NEUVE, c'est exact et complet. La ou l'ancien mecanisme a tourne, ils sont
-# toujours la, et plus rien ne les nomme : `provision uninstall` ne les emporterait pas, et personne
-# ne saurait dire d'ou ils viennent.
 LEGACY_ELIXIR_BINS=(elixir elixirc mix iex)
-# ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CE GESTE SERAIT INTESTABLE. Un temoin ne
-# peut pas monter un faux `/opt/elixir-1.18.4` sur la machine qui le joue ; sans surcharge il
-# mesurerait le poste, et le seul geste DESTRUCTIF de ce module resterait sans mur. `PROV_LINK_DIR`
-# existe deja dans la lib (c'est la meme SSoT que les symlinks PATH d'`install.sh`) ; le prefixe des
-# arbres, lui, n'etait nomme nulle part — il l'est ici, et une seule fois.
 : "${LCARS_LEGACY_ELIXIR_PREFIX:=/opt/elixir-}"
 
-# ⚠ ON NE DETRUIT QUE CE QU'ON A POSE. Un `rm` sur `<link_dir>/elixir` sans regarder OU il pointe
-# emporterait l'elixir qu'un operateur y a mis lui-meme — le geste exact que le rang 4 du chantier
-# empreinte interdit. La CIBLE fait foi, pas le nom du lien : sous le prefixe, c'est le notre.
 legacy_elixir_links() { # -> les symlinks <link_dir>/* qui pointent vers NOTRE ancien arbre
   local b t
   for b in "${LEGACY_ELIXIR_BINS[@]}"; do
     [[ -L "$PROV_LINK_DIR/$b" ]] || continue
-    # ⚠ `readlink -f` RESOUT, donc il rend la chaine VIDE sur un lien casse — et un lien casse vers
-    # notre arbre est precisement ce qu'un `rm -rf` interrompu laisse derriere. On lit d'abord la
-    # cible BRUTE (`-m` ne touche pas au disque), et le lien mort reste reconnaissable.
     t="$(readlink -m "$PROV_LINK_DIR/$b" 2>/dev/null || true)"
     [[ "$t" == "$LCARS_LEGACY_ELIXIR_PREFIX"*/* ]] && printf '%s\n' "$PROV_LINK_DIR/$b"
   done
@@ -62,11 +41,6 @@ legacy_elixir_trees() { # -> les arbres <prefixe>* poses par l'ancien mecanisme
   return 0
 }
 
-# La VARIANTE de build, pas la version : `elixir --version` dit « Elixir 1.18.3 (compiled with
-# Erlang/OTP 27) ». `--short-version` jette cette moitie-la, et c'est la moitie qui a manque le
-# 2026-08-22 — un poste en OTP 27 portant la variante OTP 25, sonde au VERT parce que « 1.18.4 »
-# == « 1.18.4 ». Le zip est parti ; la sonde reste, parce qu'un elixir d'AILLEURS devant `/usr/bin`
-# dans le PATH rouvre exactement le meme ecart, et lui ne se retire pas par apt.
 elixir_built_for() {
   elixir --version 2>/dev/null \
     | sed -n 's/.*compiled with Erlang\/OTP \([0-9]\+\).*/\1/p' | head -1
@@ -139,9 +113,6 @@ apply() {
     fi
   done
 
-  # UN SEUL GESTE POUR LES DEUX. Le meta-paquet `erlang` tire toutes les applications OTP dont
-  # `mix release` a besoin ; `elixir` depend de lui et se compile contre le meme. Les demander
-  # ensemble laisse apt resoudre la paire, au lieu de la composer nous-memes en deux passes.
   if [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]] \
      || ! elixir_meets_floor "$(elixir_version)" "$PROV_ELIXIR_MIN"; then
     apt_ensure erlang elixir || verdict_apply
@@ -161,8 +132,6 @@ apply() {
     done
   fi
 
-  # LE VERDICT EST CE QUI REPOND, PAS CE QU'APT ANNONCE. Un plancher tenu par un paquet qu'un
-  # binaire du PATH masque n'est pas tenu ; c'est la sonde qui tranche, apres la pose.
   local otp ev built; otp="$(otp_release)"; ev="$(elixir_version)"
   if [[ "$otp" -lt "$PROV_ELIXIR_OTP_MAJOR" ]]; then
     p_fail "Erlang/OTP « $otp » toujours sous le plancher $PROV_ELIXIR_OTP_MAJOR apres apt (distro trop vieille ?)"

@@ -6,25 +6,11 @@
 # APPLY-ON: linux
 # CHECK-ON: linux
 # NEEDS: root
-#
-# ─── CE QUE CE MODULE FAIT, ET RIEN D'AUTRE ─────────────────────────────────────────────────────
-#
-# Il ÉCRIT le consentement là où le prochain lecteur le trouvera sans environnement. Il ne décide
-# rien : sans le drapeau dans l'env ET sans marqueur, il ne pose rien et le dit. `00-preflight`
-# reste le seul à REFUSER — ici on ne fait que rendre durable ce que l'opérateur a déjà accordé.
-#
-#
-# LE MARQUEUR EST UNE TRACE, PAS UN SECRET : 0644, dans `/etc`, avec la date et le substrat mesuré.
-# Quelqu'un qui reprend la machine dans six mois doit pouvoir lire ce qui a été accepté et quand.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# Seams de test, même idiome que `LCARS_TMPFILES_CONF` de 25-directories et `PASSWD_FILE` du
-# convergeur : l'emplacement, et le propriétaire à poser. Le second existe parce qu'un témoin ne
-# peut pas `chown root` — sans lui, l'écriture ne serait épinglée par personne, et c'est justement
-# l'écriture qui est le sujet de ce module.
 prov_consent_file()  { echo "${LCARS_HOST_CONSENT_FILE:-/etc/lcars/host-consent}"; }
 prov_consent_owner() { echo "${LCARS_HOST_CONSENT_OWNER:-root:root}"; }
 

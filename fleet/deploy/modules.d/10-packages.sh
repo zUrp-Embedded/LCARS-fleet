@@ -9,17 +9,6 @@
 # AFTER: 00-preflight
 # (CHECK-ON any, APPLY-ON sans docker : les paquets sont des layers de l'image — mais bwrap
 # opérationnel et l'outillage présent doivent être VRAIS en conteneur, et le doctor les y sonde.)
-#
-# Le strict nécessaire au RUNTIME v2 (le contrat vit dans fleet/etc/README.md) :
-#   tmux        — sessions pod (host_launch/bwrap_launch) + le daemon fleet_v2
-#   bubblewrap  — containment des pods (bwrap_launch.sh, sanctuaire)
-#   git         — push per-step-run vers la forge
-#   curl, jq    — clients HTTP forge + parse JSON (deps dures des scripts bin/ et etc/)
-#   ca-certificates — TLS sortant (installer claude, forge https éventuelle)
-#   git-filter-repo — la réécriture d'historique de `bin/publish-transform.sh` : le script la
-#                     REFUSE si elle est absente (exit 1) et imprime une recette de venv à taper.
-# En Docker ces paquets sont des LAYERS de l'image (docker/Dockerfile) — même liste, autre
-# mécanisme, ISO vérifiée par le même doctor sur place (d'où APPLY-ON sans docker, CHECK-ON any).
 # ⚠ LES DEUX SONT DANS `universe`, PAS DANS `main` (mesuré sur Launchpad, resolute : `gh` 2.46.0-4,
 # `git-filter-repo` 2.47.0-3). Une image ou un cloud-init qui n'active que `main` ne les trouvera
 # pas — et `apt_ensure` dira « paquet absent », pas « dépôt absent ». C'est le seul piège de cette
@@ -41,47 +30,21 @@ PACKAGES=(
   # compilent des extensions C, les modules npm natifs veulent node-gyp, et les crates rust en
   # `-sys` veulent cc + pkg-config + le `-dev` de la lib C visée.
   build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip
-  # ─── ET CE QUI EST PRÉSENT PAR CHANCE N'EST PAS PRÉSENT PAR LE RAIL ──────────────────────────
-  #   · `util-linux-extra` fournit `setpriv` — TOUTE la console en dépend (`console.sh`,
-  #     `console-landing.sh`), et une image minimale ne l'a pas ;
-  #   · `sudo` est ce que la règle étroite de `45-sudoers-toolchain` désigne — sans lui, ce module
-  #     écrit une permission que personne ne peut exercer.
-  # `less` et `bash-completion` sont du confort de shell, et ils sont dans l'image : les garder
-  # alignés coûte deux mots et évite deux consoles qui ne se comportent pas pareil.
   util-linux-extra sudo less bash-completion
   # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
   # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.
   ttyd
 )
 
-# ─── CE QUE SEUL LE LINUX NATIF DOIT SE FAIRE POSER ─────────────────────────────────────────────
 # ⚠ `linux` SEULEMENT, ET LES DEUX AUTRES SUBSTRATS SONT DES REFUS RAISONNÉS :
 #   · `wsl`    — le daemon vient de Docker Desktop côté Windows, monté dans `/mnt/wsl/docker-desktop`.
 #                `docker-endpoint.sh` le trouve sans qu'aucun paquet ne soit installé ici ; poser
 #                un paquet docker dans la distro y fabriquerait un SECOND daemon, concurrent du premier.
 #   · `docker` — on est DANS le conteneur ; il n'y a rien à installer et rien à monter.
-# CE QUE L'UPSTREAM ACHÈTE, ET CE N'EST PAS LE NUMÉRO DE VERSION. `docker.io` n'existe que chez
-# Canonical : sur une Debian, sur une dérivée, le paquet n'a ni le même nom ni le même contenu.
-# `docker-ce` est le MÊME empaquetage partout, donc une machine LCARS a le même docker quelle que
-# soit sa distro — et surtout le même que celui que la majorité des postes portent déjà, ce qui
-# supprime la classe entière des conflits `docker.io` / `docker-ce`.
-# ⚠ IL N'Y A PAS DE REPLI VERS `docker.io`, ET C'EST DÉLIBÉRÉ. Retomber sur un autre empaquetage
-# quand l'upstream manque poserait un docker que l'opérateur n'a pas demandé, sous un nom qui
-# entrera en conflit avec celui qu'il installera ensuite. Ce qu'on doit, c'est un refus qui NOMME la
-# cause — « la suite <codename> n'existe pas chez Docker » — au lieu d'un `apt-get update` qui
-# échoue trois lignes plus loin sur une erreur de dépôt que personne ne rattachera à ce choix.
 LINUX_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
-# La clé et la source, dérivées — jamais câblées. `$ID` vaut `ubuntu` ou `debian` et désigne le
-# chemin du dépôt ; `$VERSION_CODENAME` désigne la suite. Écrire l'un des deux en dur ferait un
-# fichier qui ment sur toute autre machine que celle où il a été écrit.
 DOCKER_KEYRING="${LCARS_DOCKER_KEYRING:-/etc/apt/keyrings/docker.asc}"
 DOCKER_LIST="${LCARS_DOCKER_LIST:-/etc/apt/sources.list.d/docker.list}"
-# ⚠ LA CLÉ EST ÉPINGLÉE PAR SHA256, ET CE N'EST PAS UN PIN DE VERSION. Le paragraphe d'en-tête dit
-# qu'on ne pin rien de ce que la distro livre — vrai, et sans rapport : ici on ne fige pas une
-# version, on fige une ANCRE DE CONFIANCE. Un `curl | trust` accorderait à jamais la signature de ce
-# que le réseau a rendu ce jour-là ; le sha dit laquelle on a acceptée, et le jour où Docker la
-# tourne, `fetch_verify` s'arrête au lieu de faire confiance à autre chose sans le dire.
 # La MÊME clé sert les deux dépôts (ubuntu et debian) — vérifié : même sha256 aux deux URL. Un pin
 # par distro serait deux vérités pour un fait.
 DOCKER_GPG_SHA256="${LCARS_DOCKER_GPG_SHA256:-1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570}"
@@ -91,7 +54,6 @@ os_field() { # os_field <clef de /etc/os-release>
   ( . /etc/os-release 2>/dev/null; printf '%s' "${!1:-}" )
 }
 
-# Pose le dépôt upstream — et REFUSE en nommant la cause plutôt que de poser une source cassée.
 ensure_docker_repo() {
   local id codename arch url
   id="$(os_field ID || true)"; codename="$(os_field VERSION_CODENAME || true)"
@@ -105,11 +67,6 @@ ensure_docker_repo() {
   # c'est `apt-get update` qui échoue — sur un message de dépôt introuvable que personne ne
   # rattachera à ce choix, deux modules plus loin.
   url="https://download.docker.com/linux/$id"
-  # ⚠ « LA SUITE N'EXISTE PAS » ET « JE N'ATTEINS PAS LE RÉSEAU » NE SONT PAS LE MÊME FAIT, et les
-  # confondre envoie l'opérateur vérifier chez Docker une suite qui y est. `curl` distingue les deux
-  # par son code : 22 = HTTP >= 400 (la suite manque), tout le reste = DNS, proxy, timeout, TLS.
-  # D'où l'absence de `2>/dev/null` — le diagnostic de curl est la seule chose qui sépare les deux
-  # causes, et l'étouffer les rend identiques à l'écran.
   local rc=0 cerr; cerr="$(mktemp)"
   curl -fsIL --max-redirs 3 -m 20 -o /dev/null "$url/dists/$codename/Release" 2>"$cerr" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
@@ -146,20 +103,11 @@ EOF
   return 0
 }
 
-# La liste EFFECTIVE de ce passage — une seule fonction, lue par `check` ET par `apply`, pour que
-# les deux ne puissent pas répondre différemment sur le même substrat.
-# ⚠ ET LA SONDE N'EST JAMAIS UN NOM DE PAQUET, MÊME MAINTENANT QUE LE RAIL POSE `docker-ce`.
-# `docker_endpoint` rend 0 quand un daemon a répondu ; c'est la seule question qui compte.
-#
 # ⚠ LA CONVERGENCE PORTE SUR CE QU'IL FAUT AJOUTER, JAMAIS SUR CE QU'IL FAUT ENLEVER. Si
 # `LINUX_PACKAGES` a été posé à une passe précédente et que docker répond maintenant, la liste ne
 # les contient plus — le `check` ne les réclame donc pas, et l'`apply` ne les retire pas. Retirer un
 # paquet que l'opérateur pouvait vouloir est exactement la faute que le journal existe pour
 # empêcher, et ce n'est pas à cette fonction de la commettre.
-#
-# ⚠ ET LE POINT D'INJECTION EST ICI, PAS DANS UN DES DEUX VERBES. `deploy_manifest.bats` porte déjà
-# « check et apply lisent la MÊME liste » : une condition posée dans `check()` seul les ferait
-# diverger, et le doctor réclamerait à vie un paquet que l'apply n'installe pas.
 effective_packages() {
   printf '%s\n' "${PACKAGES[@]}"
   if [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && ! docker_endpoint >/dev/null 2>&1; then
@@ -168,10 +116,6 @@ effective_packages() {
   return 0
 }
 
-# Sonde RÉELLE du containment : un bwrap minimal DOIT tourner sous un user NON-root (les pods
-# tournent comme l'humain). Lire une config ou un dpkg -s ne prouve rien — Ubuntu ≥23.10 peut
-# avoir bwrap installé ET bloqué par AppArmor (userns restreints). On sonde en tant que
-# PROV_HUMAN : c'est LUI qui spawnera des pods.
 probe_bwrap() {
   # stderr NON étouffé : l'échec réel de bwrap doit être verbeux (doctrine), et surtout un
   # as_human impossible (doctor lancé par un user tiers) doit dire SA cause — le 2>/dev/null
@@ -207,10 +151,6 @@ check() {
 
 apply() {
   local -a pkgs; mapfile -t pkgs < <(effective_packages)
-  # ⚠ LE DÉPÔT SE POSE SEULEMENT S'IL SERT, ET LA CONDITION EST LA LISTE ELLE-MÊME. `effective_packages`
-  # ne contient les paquets docker que lorsque AUCUN daemon n'a répondu ; poser la source en dehors de
-  # ce cas ajouterait un dépôt tiers sur une machine qui a déjà docker — précisément ce que ce module
-  # refuse de faire depuis qu'il sonde un endpoint au lieu d'un nom de paquet.
   if printf '%s\n' "${pkgs[@]}" | grep -qx 'docker-ce'; then
     ensure_docker_repo || verdict_apply
   fi
@@ -218,8 +158,6 @@ apply() {
   if probe_bwrap; then
     p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
   else
-    # On n'auto-flippe PAS un sysctl de sécurité système : c'est un arbitrage humain
-    # (assouplir AppArmor vs poser un profil dédié). On échoue en le disant précisément.
     p_fail "bwrap installé mais le sandbox minimal ÉCHOUE (user $PROV_HUMAN) — arbitrage requis : sysctl kernel.apparmor_restrict_unprivileged_userns=0 OU profil AppArmor pour bwrap ; re-lance ensuite"
   fi
   verdict_apply

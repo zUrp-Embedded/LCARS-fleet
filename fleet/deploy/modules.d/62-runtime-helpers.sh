@@ -10,30 +10,12 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# Seams de test — l'emplacement des deux dépôts, la racine des sources, et le propriétaire à poser.
-# Le dernier existe parce qu'un témoin ne peut pas `chown root` : sans lui, la POSE — le sujet même
-# de ce module — ne serait épinglée par personne.
-# La racine vient de la lib — un second defaut ici serait un second decideur.
 HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
-# Le client shell du service d'autorité, sur le PATH — et il y est pour la même raison que le
-# convergeur de toolchain juste au-dessus : ses appelants vivent dans trois arbres qui ne se voient
-# pas (la CLI `fleet/bin`, le skill du siège `deploy/admiral/skills`, et le release). Un nom sur le
-# PATH est le seul point de rendez-vous qu'aucun des trois n'a à deviner.
 AUTHORITY_ASK_BIN="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
-# ⚠ LA SOURCE EST `fleet/services/`, PAS `deploy/docker/`. Ces fichiers sont du RUNTIME — ils
-# sont poses hors du checkout et tournent apres l'install, la plupart en root. Les ranger sous
-# le nom de l'outil qui les transporte faisait chercher le code privilegie de cette machine
-# dans un dossier appele `docker`, ou il n'y a pas de docker sur ce rail.
 SRC_DIR="$(repo_root)/fleet/services"
-# ⚠ LES BINAIRES DE PATH NE SONT PAS DES SERVICES, ET ILS NE VIVENT PLUS AVEC EUX. Ils portent leur
-# nom DEFINITIF dans la source (`fleet/bin/lcars-*`), comme `lcars` et `fleet_v2` : plus aucun
-# renommage a la pose, donc plus rien a lire entre le depot et le PATH.
 BIN_SRC_DIR="$(repo_root)/fleet/bin"
-# ⚠ SEAM SUR LE BINAIRE, ET IL EXISTE PARCE QU'UN TEMOIN NE PEUT PAS DESINSTALLER ttyd. Le temoin
-# « le manque de ttyd se DIT » retirait sa doublure du PATH — ce qui ne prouve rien sur une machine
-# ou le VRAI ttyd est installe, c'est-a-dire sur toute machine que ce module a deja convergee.
 TTYD_BIN="${LCARS_TTYD_BIN:-ttyd}"
 
 owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
@@ -47,33 +29,19 @@ HELPERS=(
   console-deck.py
   console-pod.sh
   human-converger.sh
-  # Les gestes de forge. Dans l'image, l'entrypoint les atteint par son verbe `forge-apply` ; sur un
-  # poste, `48-forge-host` les appelle DIRECTEMENT, sans conteneur — le script n'a jamais eu la
-  # moindre hypothèse de conteneur, son `PRIVATE_DIR` défaute même sur `/opt/lcars/var/tokens`, un chemin
-  # d'hôte. C'est l'appelant qui le forçait dans un `docker create`.
   forge-gestures.sh
-  # L'exécuteur de catalogue : le seul process de la boîte qui tienne l'autorité de la forge. Il est
-  # posé ICI et pas ailleurs parce qu'il APPELLE `forge-gestures.sh` — les deux doivent atterrir
-  # ensemble, sur les deux rails, ou le service démarre et refuse chaque geste sur un fichier absent.
   catalogue-executor.py
   lcars_socket.py
-  # L'unique service ROOT de la machine, et il ne detient rien. Il remplace la regle sudoers
-  # `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait. Pose ici parce
-  # qu'il APPELLE `lcars-toolchain-converge`, comme l'executeur de catalogue appelle
-  # `forge-gestures.sh` : les deux atterrissent ensemble, ou le service demarre et refuse chaque
-  # demande sur un binaire absent.
   privileged-executor.py
   supervise.sh
 )
 
-# Format : <source dans fleet/services/> <destination> <mode>
 SKEL_FILE="${LCARS_SKEL_FILE:-/etc/skel/.bashrc}"
 DATA=(
   "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
   "skel.bashrc $SKEL_FILE 0644"
 )
 
-# ─── LE CLIENT DE TERMINAL : LA SEULE CHOSE ICI QU'AUCUNE DISTRIBUTION NE LIVRE ─────────────────
 XTERM_VERSION="${LCARS_XTERM_VERSION:-5.5.0}"
 XTERM_FIT_VERSION="${LCARS_XTERM_FIT_VERSION:-0.10.0}"
 XTERM_JS_SHA256=1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495
@@ -82,16 +50,9 @@ XTERM_FIT_SHA256=bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c9708
 
 deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
 
-# `/opt/lcars/fleet` est un `cp -a`, pas un checkout : `git rev-parse` n'y répond rien. Un
-# `provision` lancé depuis cette copie — c'est le cas du convergeur, dont l'unité systemd pointe
-# `LCARS_PROVISION=/opt/lcars/fleet/deploy/provision` — n'aurait donc aucun moyen de nommer sa
-# propre origine. Le tampon comble exactement ce trou : celui qui copie ÉCRIT la révision copiée.
-#
 # ⚠ LE TAMPON SE DÉRIVE DE L'EMPLACEMENT DE LA COPIE, PAS DE LA RACINE DES AUXILIAIRES. Les deux
 # coïncident aujourd'hui — `repo_root()` remonte trois crans depuis `<copie>/fleet/deploy/lib`, et la
 # copie est posée en `$HELPERS_DIR/fleet` — mais c'est une COÏNCIDENCE ARITHMÉTIQUE, pas une règle.
-#
-# On dérive donc du même fait que le lecteur : le parent du `fleet/` embarqué.
 EMBEDDED_FLEET="$HELPERS_DIR/fleet"
 helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.source-revision}"; }
 
@@ -100,7 +61,6 @@ posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inc
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]' || echo inconnue; else echo inconnue; fi
 }
 
-# <fichier> <url> <sha256> — la table, lue par le check ET par l'apply : une seule description.
 deck_static_table() {
   printf '%s\t%s\t%s\n' \
     xterm.js "https://cdn.jsdelivr.net/npm/@xterm/xterm@${XTERM_VERSION}/lib/xterm.js" "$XTERM_JS_SHA256" \
@@ -197,10 +157,6 @@ check() {
 apply() {
   local n name url sha f
 
-  # ⚠ LE RETOUR EN ARRIÈRE SE DIT AVANT DE L'ÉCRIRE, PAS APRÈS. C'est le seul instant où l'opérateur
-  # peut encore l'empêcher : trois secondes plus tard, l'ancien code est en place et le service qui
-  # tourne dessus ne dira plus rien. On ne REFUSE pas — un retour en arrière délibéré est un geste
-  # légitime — mais il ne peut plus être silencieux.
   local src posed
   # shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
   src="${PROV_SOURCE_REV:-$(prov_source_rev)}"
@@ -251,8 +207,6 @@ apply() {
   install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-authority-ask" "$AUTHORITY_ASK_BIN" \
     || { p_fail "pose ratée: $AUTHORITY_ASK_BIN"; verdict_apply; }
 
-  # Le provisionnement embarqué. On RECOPIE à chaque apply : c'est la même règle que la release —
-  # ce qui est posé date de l'apply, pas d'un clone qui a pu bouger ou disparaître depuis.
   ensure_dir "$EMBEDDED_FLEET" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(repo_root)/fleet/$n" ]] || { p_fail "source absente: $(repo_root)/fleet/$n"; verdict_apply; }
@@ -275,10 +229,6 @@ apply() {
   # le mettre plus haut ferait qu'une coupure réseau priverait la machine du convergeur et du
   # binaire de toolchain, qui n'ont rien demandé à personne. Ici, une coupure coûte exactement ce
   # qu'elle doit coûter — la console s'ouvre sur un cadre noir, et le check le NOMME.
-  #
-  # `fetch_verify` ne télécharge JAMAIS vers la destination : un curl tronqué laisserait un bundle
-  # cassé en place, et une page blanche est plus difficile à lire qu'une page noire — celle-ci au
-  # moins laisse un motif dans les logs du deck.
   ensure_dir "$(deck_static_dir)" 0755 "$HELPERS_OWNER" || verdict_apply
   while IFS=$'\t' read -r name url sha; do
     f="$(deck_static_dir)/$name"

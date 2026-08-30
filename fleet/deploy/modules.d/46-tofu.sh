@@ -6,12 +6,6 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
-#
-# `48-forge-host` pose la structure de la forge et a besoin de tofu POUR ÇA. `62-runtime-helpers`,
-# qui pose le reste des auxiliaires, tourne quatorze crans plus tard : y mettre tofu l'aurait rendu
-# indisponible au moment exact où la forge en a besoin. L'ordre est le préfixe, et le préfixe porte
-# le sens — même leçon que `22-fleet-human`, renommé de 65 à 22 pour la même raison.
-#
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -20,11 +14,7 @@ set -euo pipefail
 TOFU_VERSION="${LCARS_TOFU_VERSION:-1.12.3}"
 TOFU_SHA256_AMD64=46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08
 TOFU_SHA256_ARM64=b2110d1ce46e366ce861b7f53d293dad99080075629aed7fb50d7328916d91c2
-# Seams de test — le binaire et la racine du miroir. Le premier existe parce qu'un poste de dev peut
-# déjà porter un `tofu` posé à la main (mesuré le 2026-08-22 : un symlink de juillet sur cette
-# machine), et un témoin qui ne le nomme pas mesure la machine au lieu de la règle.
 TOFU_BIN="${LCARS_TOFU_BIN:-/usr/local/bin/tofu}"
-# La racine vient de la lib — un second defaut ici serait un second decideur.
 TOFU_DIR="${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}"
 TOFU_OWNER="${LCARS_TOFU_OWNER:-root:root}"
 
@@ -37,9 +27,6 @@ tofu_installed_version() {
 }
 
 check() {
-  # ⚠ LA VERSION SE SONDE, PAS LA PRÉSENCE. Un tofu du système, posé par quelqu'un d'autre et d'une
-  # autre version, jouerait la recette avec d'autres providers — et la structure de la forge est son
-  # territoire exclusif. Un pin ne vaut que si l'on vérifie ce qu'on a.
   if [[ ! -x "$TOFU_BIN" ]]; then
     p_drift "$TOFU_BIN absent — la structure de la forge est le territoire de tofu, et rien ne peut la poser sans lui"
   else
@@ -110,10 +97,6 @@ EOF
   # 2026-08-22 : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
   # chaque provider. `60-deploy` porte déjà la règle pour l'autre outil (« un build root polluerait
   # le `_build` du checkout ») ; elle vaut pour tout ce qui écrit, pas pour mix seul.
-  #
-  # On travaille donc sur une COPIE jetable. Ce qui sort d'ici est le miroir, pas l'état : le
-  # `.terraform/` de la copie meurt avec elle, et c'est ce qu'on veut — un état tofu décrit un
-  # répertoire à SON chemin, il ne se transporte pas.
   local src work
   src="$(repo_root)/fleet/deploy/deps"
   [[ -d "$src" ]] || { p_fail "recette absente : $src"; verdict_apply; }

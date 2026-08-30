@@ -6,15 +6,6 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
-#
-#   nodejs npm         439 paquets    et le npm servi est le `9.2.0~ds3-1` de la distro
-#   nodejs seul         23 paquets    node 22.22.1 — sans npm, donc `npm ci` n'existe pas
-#   le tarball           0 paquet     node 24.20.0 + npm 11.19.0 + npx + corepack, dans un `bin/`
-#
-# npm 9 contre npm 11 : DEUX MAJEURES d'écart, sur l'outil qui résout le lockfile du site. Prendre
-# nodejs à apt ne divise donc pas le problème en deux, il le déplace — il reste à trouver npm, et
-# la seule réponse apt est celle qui coûte 439 paquets.
-#
 # ⚠ COREPACK N'EST PAS LA TROISIÈME VOIE QU'IL SEMBLE ÊTRE. Il est là (`node-corepack` chez apt, et
 # le tarball en porte un aussi) et il sait servir npm — mais il le TÉLÉCHARGE depuis le registre au
 # premier usage. Ce serait un troisième mécanisme d'approvisionnement, non épinglé, pour obtenir ce

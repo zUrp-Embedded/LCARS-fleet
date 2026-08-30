@@ -7,28 +7,6 @@
 # CHECK-ON: any
 # NEEDS: root
 # AFTER: 45-catalogues 48-forge-host
-#
-# La forge n'est PAS installée ici (sidecar compose en Docker, app TrueNAS, service externe —
-# créée par LE SYSTÈME, jamais par LCARS), et sa STRUCTURE n'est plus créée ici non plus :
-# comptes/org/teams/hardening sont le territoire EXCLUSIF d'OpenTofu (forge.tf, arbitrage WS1 :
-# « TF fait toute la STRUCTURE, bash SEULEMENT les tokens »). Ce module :
-#   1. SONDE la structure (comptes de rôle + compte système, endpoint public) — absente, il NOMME
-#      la commande qui la pose : « fleet/deploy/box forge-apply ».
-#   2. converge les TOKENS — délégués à fleet/etc/provision-role-tokens.sh (A4, une
-#      seule mécanique de mint). Gitea n'accepte QUE la basic-auth pour minter (anti-escalade,
-#      vérifié 2026-07-05) → passwords-file requis. S'il est absent mais que le SEED du
-#      bootstrap est posé (PROV_FORGE_SEED_FILE = le TF_VAR_seed_password de tofu), le module
-#      le DÉRIVE : {compte: seed} pour tous. Après le bootstrap unique, chaque apply converge
-#      donc les tokens dans le MÊME cycle — plus aucun geste.
-#   3. SONDE (et ne converge plus) la VISIBILITÉ des adhésions d'org des comptes machine de l'org
-#      SYSTÈME. Une adhésion créée par API est PRIVÉE par défaut, donc invisible aux non-membres :
-#      un humain qui ouvre l'org ne voit pas quels workers y travaillent. C'est de l'UX, pas de la
-#      sûreté (⚖ user 2026-08-17 — rien dans le dépôt ne LIT cette visibilité). Le geste qui la pose
-#      vit dans `forge-gestures.sh`, joué par `forge-apply` et par `catalogue install`, chacun sur
-#      l'org qu'il vient de créer. Le compte operateur est sondé + instruit,
-#      jamais convergé : son mot de passe n'est dans aucun fichier de la recette (le passwords-file
-#      ne porte que les comptes machine), donc il n'y a rien avec quoi converger. Le motif ecrit ici
-#      etait « son password lui appartient » — faux : personne ne s'appelle `lcars`.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -51,14 +29,6 @@ forge_reachable() {   # 0 joignable · 1 forme invalide · 2 injoignable
   curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null || return 2
 }
 
-# L'INSCRIPTION LIBRE EST UNE PRÉCONDITION DU MODÈLE D'ENROLLMENT, ET RIEN NE LA VÉRIFIAIT.
-# Une personne s'inscrit seule ; l'unique acte admin est ensuite son ajout à la team `humans`.
-# CE QUI NE CHANGE PAS, ET QUI EST LE BON GESTE : on livre un DÉFAUT (inscription ouverte, comptes
-# non restreints — cf. `forge-compose.yml`), et un admin peut le changer chez lui. Alors le rail
-# entier ne marche plus, sans qu'aucun message ne dise pourquoi — donc on SONDE et on ANNONCE,
-# jamais on ne mute. Ce n'est pas parce que le réglage ne serait pas à nous ; c'est parce qu'un
-# admin qui a décidé quelque chose ne doit pas se le faire reprendre en silence.
-#
 # ⚠ LE CODE HTTP NE DISCRIMINE RIEN — mesuré le 2026-08-12 sur Gitea 1.26.1, les deux états rendent
 # `GET /user/sign_up` -> 200. La page, elle, diffère : ouverte, elle porte le FORMULAIRE ; fermée,
 # elle porte « Registration is disabled ». On teste donc la présence du champ `user_name`, et pas le
@@ -77,14 +47,6 @@ probe_registration() {
   fi
 }
 
-# JUMELLE DE LA SONDE CI-DESSUS, ET LE MÊME CONTRAT : un défaut qu'on livre, un admin qui peut le
-# changer, une conséquence qu'il doit connaître.
-# UN COMPTE `restricted` NE VOIT QUE CE QUI LUI EST EXPLICITEMENT ACCORDÉ, et une ORG n'est pas un
-# dépôt — c'est ce que la mesure de 2026-08-12 avait manqué en ne regardant que l'accès aux dépôts.
-# Mesuré le 2026-08-17 : un humain restreint, membre de `fleet` mais d'aucune org de catalogue, reçoit
-# 404 sur l'org d'un catalogue quand il est CONNECTÉ, et 200 quand il ne l'est pas. Connecté, il voit
-# moins qu'un inconnu, et tous les catalogues installés lui sont invisibles — contre l'arbitrage
-# « une fois installé, le catalogue est dispo system-wide ».
 # La sonde n'a besoin d'AUCUN jeton : `GET /users/<login>` expose `restricted` en anonyme (mesuré).
 # C'est ce qui la rend jouable au même rang que `probe_registration`, avant tout mint.
 probe_restricted() { # $1=login à sonder
@@ -106,8 +68,6 @@ account_exists() { # $1=login — endpoint public en lecture (pas besoin d'admin
 }
 
 missing_accounts() { # → la liste des comptes absents (vide = structure complète)
-  # (nommé absents, pas « missing » : la lib a un array `missing` dans apt_ensure et
-  # l'analyse -x confond les deux scopes — SC2178 parasite.)
   local acct absents=""
   for acct in $ACCOUNTS; do
     account_exists "$acct" || absents="$absents $acct"
@@ -115,12 +75,6 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
   printf '%s' "${absents# }"
 }
 
-# ─── L'AUTORITÉ QUE LA BOÎTE DÉTIENT (⚖ user 2026-08-16 : « on pose le token, IL RESTE ») ────────
-# `p_warn` et PAS `p_drift`, et la nuance est le fond du sujet : une boîte sans ce jeton FONCTIONNE
-# — l'apply de structure converge en lisant la forge, le runtime tourne sur les jetons de rôle. Ce
-# qu'elle perd est la capacité d'un geste STRUCTUREL autonome : `lcars catalogue install` crée une
-# org et un compte par rôle, et sans autorité de création il redevient un geste manuel de l'opérateur.
-# Un drift dirait « l'état-cible n'est pas tenu », ce qui serait crier au loup sur une boîte saine.
 check_master_authority() {
   if [[ -r "$PROV_MASTER_TOKEN_FILE" ]]; then
     p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
@@ -129,13 +83,6 @@ check_master_authority() {
   fi
 }
 
-# ⚠ LE MODE DES FICHIERS D'AUTORITÉ SE CONVERGE, IL NE SE POSE PAS UNE FOIS. Trois écrivains posent
-# ces deux fichiers — `48-forge-host` au mint, `put_secret` (côté `forge-gestures.sh`) à l'écriture,
-# et cette fonction à chaque apply — et seule celle-ci s'applique à un fichier DÉJÀ LÀ. Sans elle,
-# un jeton posé sous un mode antérieur le garde pour toujours. MESURÉ SUR BANC le 2026-08-17, sur
-# une boîte dont les jetons dataient de la veille.
-# Le CONTENU n'est jamais touché ici — seulement `chmod`/`chgrp`. Un module qui réécrirait un
-# secret pour en corriger le mode pourrait le perdre.
 converge_authority_modes() {
   local f cur want="$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER"
 
@@ -157,15 +104,9 @@ converge_authority_modes() {
     fi
   done
 
-  # ⚠ `return 0` OBLIGATOIRE, ET SON ABSENCE A TUE UN BANC ENTIER (2026-08-17). Le dernier geste de
-  # la boucle est `[[ "$PROV_MODE" == "check" ]] && p_ok …` : en mode APPLY il est FAUX, donc la
-  # fonction rendait 1, donc `set -e` tuait le module juste apres cette ligne — sans un mot.
-  # La forme `[[ test ]] && cmd` en DERNIERE instruction d'une fonction est un piege general sous
-  # `set -e` : elle transforme « ce cas ne s'applique pas » en « cette fonction a echoue ».
   return 0
 }
 
-# La sonde tokens EST le --check du script A4 (une seule vérité, pas une re-implémentation).
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
     --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")" --check >/dev/null 2>&1
@@ -202,12 +143,10 @@ ensure_passwords_entries() {
   p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
 }
 
-# La visibilité des adhésions, SONDÉE ICI et posée ailleurs (`forge-gestures.sh`).
 # Sémantique MESURÉE sur Gitea 1.26.4 : publicize est SELF-ONLY (le token système sur autrui : 403,
 # même avec write:organization ; sur lui-même : 204) et un token de rôle au scope minimal A4
 # (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
 # COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
-# Sonde : GET public_members/<u> (204 visible / 404 privé), token système si présent.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
   forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
         "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
@@ -219,11 +158,6 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # publique » à qui n'en a pas — et masquait le défaut inverse : un compte avec un jeton et aucune
 # team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
 # membre / 404 non-membre) et c'est la sonde qui manquait.
-# ⚠ QUATRE ETATS, PAS TROIS — et le quatrieme est « je ne sais pas ». `forge_code` appelle SANS
-# AUCUN JETON quand le token systeme n'existe pas encore, et Gitea rend alors 404 sur l'adhesion
-# d'une org privee : indiscernable d'une absence reelle. Le module accusait donc la recette
-# (« la recette ne les place dans aucune team ») pour un fait qu'il n'avait pas l'autorite de lire.
-# C'est l'etat NOMINAL d'une installation neuve : structure posee, jeton systeme pas encore minte.
 member_state() { # $1=compte → visible | hidden | absent | unknown
   [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
   [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
@@ -248,9 +182,6 @@ members_hidden() { members_in_state hidden "$1"; }
 check_members_visible() {
   local hidden absent unknown org_accounts="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
   unknown="$(members_in_state unknown "$org_accounts")"
-  # NE RIEN DIRE D'AUTRE quand on ne peut pas lire. Enchainer sur « absent » ici produirait un
-  # verdict sur des comptes qu'on n'a pas interroges, et il serait FAUX exactement au moment le plus
-  # courant : juste apres la pose de la structure, avant le premier mint.
   if [[ -n "$unknown" ]]; then
     p_drift "adhésions org NON SONDABLES (jeton système absent : $PROV_SYSTEM_TOKEN_FILE) — l'apply le minte dès que le seed est posé ; rien n'est conclu sur les comptes en attendant"
     return 0
@@ -259,8 +190,6 @@ check_members_visible() {
   absent="$(members_in_state absent "$org_accounts")"
   hidden="$(members_hidden "$org_accounts")"
 
-  # Un compte sans adhésion a un jeton et AUCUN droit d'écriture : il échoue au premier geste, et
-  # tard, parce que la recette ne l'a placé dans aucune team. Le publiciser n'y ferait rien.
   # shellcheck disable=SC2086 # liste separee par des espaces, l'eclatement EST le rendu
   [[ -n "$absent" ]] && p_drift \
     "comptes SANS adhésion à l'org :$(printf ' %s' $absent) — jeton valide, zéro droit d'écriture. La recette ne les place dans aucune team (vérifier les listes writers/judges/externals)"
@@ -272,7 +201,6 @@ check_members_visible() {
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « fleet/deploy/box forge-apply » (il les publicise juste après la structure)"
   fi
 
-  # L'humain : sonde seule, geste instruit — jamais convergé ici (cf. en-tête, point 3).
   if account_exists "$PROV_HUMAN"; then
     case "$(member_state "$PROV_HUMAN")" in
       hidden) p_drift "adhésion org de $PROV_HUMAN privée — geste utilisateur : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
@@ -296,8 +224,6 @@ check_ci_runner() {
   }
   body="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -fsS -m 10 "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
-  # Une API muette n'est PAS « zero runner » : la portee du jeton suffit a expliquer le silence, et
-  # conclure a l'absence enverrait enroler un runner qui existe deja.
   [[ -n "$body" ]] || {
     p_warn "runners CI non sondables (l'API admin n'a pas repondu — portee du jeton master ?) — rien n'est conclu"
     return 0
@@ -305,13 +231,6 @@ check_ci_runner() {
 
   n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
   if [[ "${n:-0}" -eq 0 ]]; then
-    # Une forge sans runner accepte un ticket, depense un producteur, ouvre une PR — et la CI attend
-    # une machine qui n'existe pas. C'est un etat-cible, pas un supplement : `48-forge-host` enrole
-    # le runner apres avoir pose la forge, donc le rail PEUT le tenir, donc le mot est DRIFT.
-    #
-    # ⚠ « CE RAIL N'EN MONTE PAS » N'EST JAMAIS UNE RAISON DE BAISSER LE VERDICT. Un drift que rien
-    # ne peut lever signale un module MANQUANT ; le degrader en constat rend le voyant muet et
-    # laisse livrer l'objet incomplet.
     p_drift "AUCUN runner CI enregistre sur cette forge — tout job reste en attente, aucune PR ne fusionne, et le rail de livraison est mort avant son premier ticket. \`49-forge-runner\` l'enrole : rejoue l'apply, sa sortie dira ce qui a bloque"
   else
     labels="$(printf '%s' "$body" \
@@ -388,8 +307,6 @@ check_human_onboardable() {
 }
 
 apply() {
-  # B6 : aligné sur le check — URL vide ou forge injoignable est un DRIFT dit, pas un échec.
-  # L'apply (dont le boot Docker) converge le reste et DIT ce qui manque.
   if [[ -z "$PROV_FORGE_URL" ]]; then
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
     verdict_apply
@@ -418,23 +335,15 @@ apply() {
   local miss
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    # Territoire tofu, et ce module ne le joue pas : il n'a ni l'URL ni le jeton MASTER, qui
-    # arrivent par l'operateur. Le geste, lui, est desormais executable — tofu vit dans l'image.
     p_drift "structure absente (comptes : $miss) — « fleet/deploy/box forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
     verdict_apply
   fi
 
-  # Le geste vit désormais dans `forge-gestures.sh`, joué par `forge-apply` pour l'org système et par
-  # `catalogue install` pour l'org du catalogue — chacun sur l'org qu'il vient de créer, ce qui
-  # supprime au passage le défaut mono-org que ce module portait.
   if a4_check; then
     p_ok "role-tokens déjà valides ($PROV_TOKENS_DIR)"
     verdict_apply
   fi
-  # Des tokens manquent/sont morts → mode pose (mint basic-auth). Le passwords-file converge
-  # PAR ENTRÉE depuis le seed — fichier absent OU rôle ajouté après bootstrap, même chemin.
   ensure_passwords_entries || verdict_apply
-  # ⚠ LE JETON MASTER EST DONNE AU MINTEUR, ET C'EST CE QUI REND LE MINT INDEPENDANT DE TOFU.
   if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
       --passwords-file "$PROV_PASSWORDS_FILE" --owner "$PROV_AUTHORITY_USER" \
       ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \

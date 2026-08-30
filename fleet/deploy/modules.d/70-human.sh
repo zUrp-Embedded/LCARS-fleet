@@ -6,9 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
-#
-#   - ~/pods (0700) : les pod_dirs (isolés par l'ownership OS, jamais sous /tmp que le tmpfs
-#     bwrap orphelinerait) ;
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -18,10 +15,6 @@ HOME_DIR="$(human_home)"
 ENV_FILE="$HOME_DIR/.lcars/fleet_v2.env"
 TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 
-# ⚠ IL EST FUSIONNÉ, JAMAIS ÉCRIT PAR-DESSUS. `settings.json` appartient à son humain — statusline,
-# plugins, modèle, langue, et pour l'opérateur un `soft_deny` et un `environment` bâtis session
-# après session. Un `cp` du fichier canonique effacerait tout ça pour poser une règle. On ne pose
-# donc que les deux clefs, et le reste du fichier n'est pas notre affaire.
 #
 # ⚠ ET IL CONVERGE, il ne se seed PAS une fois. C'est l'inverse de `fleet_v2.env` juste en dessous,
 # et la différence est le SUJET : l'env est la configuration d'un humain, ce bloc est une limite
@@ -49,9 +42,6 @@ apply_automode() {
 
   mkdir -p "$HOME_DIR/.claude" || { p_fail "mkdir ~/.claude"; return 1; }
 
-  # ⚠ UN `settings.json` ILLISIBLE N'EST PAS UN FICHIER ABSENT, et l'écraser serait la pire des
-  # deux réponses : on détruirait une configuration que son humain peut encore réparer, pour poser
-  # une règle. On le DIT et on ne touche à rien.
   local base='{}'
   if [[ -f "$CLAUDE_SETTINGS" ]]; then
     jq -e . "$CLAUDE_SETTINGS" >/dev/null 2>&1 \
@@ -72,11 +62,6 @@ apply_automode() {
   p_chg "garde-fou d'écriture fusionné dans $CLAUDE_SETTINGS (les autres clefs sont intactes)"
 }
 
-# Sans `user.email`, git signe `<login>@<hostname>` — `lcars@bridge` sur cette image. La forge ne
-# mappe cette adresse sur AUCUN compte : le commit s'affiche sans lien, sans avatar, attribué à un
-# fantôme. L'adresse qui mappe est celle du COMPTE FORGE, et c'est la seule ; toute autre source
-# (une variable d'install, une convention `<login>@lcars.local`) en est au mieux une copie, qui a
-# raison jusqu'au jour où quelqu'un change son email sur la forge.
 GITCONFIG_EMAIL() { git config --global --get user.email 2>/dev/null || true; }
 
 # Le compte forge de PROV_HUMAN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
@@ -104,16 +89,12 @@ check_git_identity() {
   p_drift "identité git absente pour $PROV_HUMAN — ses commits signeront <login>@<hostname>, que la forge ne mappe sur aucun compte (ni attribution ni avatar) ; l'apply la pose depuis son compte forge"
 }
 
-# SEED-ONCE, comme `fleet_v2.env` : dès qu'un `user.email` existe, il est à la personne. Un apply
-# qui le réécrirait effacerait le choix de quelqu'un à chaque passage.
 apply_git_identity() {
   local mail; mail="$(GITCONFIG_EMAIL)"
   [[ -z "$mail" ]] || return 0
   local acct name email
   acct="$(forge_account)"
   if [[ -z "$acct" ]]; then
-    # Rien à poser et rien à inventer. Muet si la personne n'a pas de compte (fait de 50-forge) ;
-    # sinon c'est la forge qui n'a pas répondu, et le prochain passage la trouvera.
     return 0
   fi
   name="${acct%%$'\t'*}"
@@ -128,8 +109,6 @@ apply_git_identity() {
 # Sondes d'identité — verdicts + consignes, AUCUNE mutation, TOUJOURS en warn : les credentials
 # sont des gestes de l'humain, un apply ne peut ni les converger ni échouer dessus.
 probe_identity() {
-  # ON NE PARSE PAS LE FICHIER ICI, DÉLIBÉRÉMENT. Sa forme appartient au vendor ; la relire en shell
-  # revient à recopier son format dans notre provisioning et à le patcher à chaque fois qu'il bouge.
   if [[ -f "$HOME_DIR/.claude/.credentials.json" ]]; then
     p_ok "fichier de credentials claude présent — sa VALIDITÉ est tranchée au spawn par le runtime (Credentials.Gate), pas ici"
   else
@@ -219,10 +198,6 @@ apply() {
       if [[ -n "${LCARS_BIND_HOST:-}" ]]; then
         { echo ""; echo "LCARS_BIND_HOST=$LCARS_BIND_HOST"; } >> "$tmp"
       fi
-      # D4 (ADR install/compile/release) : ce que le système fait est signé du SYSTÈME. Si le
-      # token system_starfleet est déjà minté (bootstrap forge fait avant ce seed — l'ordre 50<70
-      # du cycle), on câble sa lecture ICI ; sinon le token minté ne serait jamais lu (le
-      # défaut runtime est ~/.gitea_token) — le travail mort que l'ADR pointait.
       if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]]; then
         {
           echo ""
@@ -255,8 +230,6 @@ apply() {
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$PROV_FORGE_URL)"
   elif [[ -f "$ENV_FILE" ]] && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
-    # Le trou est réel mais l'adresse est inconnue : rien à converger, et ça DOIT peser sur le
-    # verdict — sinon on rend « convergé » sur un état où `fleet_v2 start` refusera.
     p_drift "fleet_v2.env sans FORGE_BASE_URL et aucune forge connue — fleet_v2 start refusera ; monte la forge (48-forge-host) ou édite $ENV_FILE"
   fi
 

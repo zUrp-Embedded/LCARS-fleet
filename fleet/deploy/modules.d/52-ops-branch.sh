@@ -8,12 +8,6 @@
 # NEEDS: root
 # AFTER: 48-forge-host
 #
-# ─── CE QUE CETTE BRANCHE EST ──────────────────────────────────────────────────────────────────
-# Un pod bloque y ouvre une PR qui demande un outil, un humain signe, le convergeur applique. Elle
-# n'existe que sur LE depot ops (`LCARS_OPS_REPO`, defaut `fleet/lcars`) et sur lui seul — jamais
-# sur un depot de projet. Un projet a des FACES (code, workshop, ops : son propre registre) ; la
-# boite aux lettres, elle, est une propriete du depot de la fleet, pas de ce qu'elle produit.
-#
 # ─── ORPHELINE, ET AUCUNE API NE SAIT LA FAIRE ─────────────────────────────────────────────────
 # `POST /repos/<r>/branches` exige `old_ref_name` : il rend une branche FILLE de ce qu'on lui
 # nomme. `PUT /contents/<p>` avec `new_branch` part pareil d'une base existante. Aucun endpoint
@@ -26,20 +20,6 @@
 # (`required_approvals=1`, `dismiss_stale_approvals`) s'appliquerait en prime a une branche qui
 # porte du code : la boite aux lettres deviendrait une branche de code par accident.
 #
-# Donc git, UNE fois, a la creation : un depot jetable, un premier commit — sans parent par
-# construction — pousse sous le nom de la branche. Meme idiome que les faces orphelines de
-# `Fleet.Project.Onboard` (repo standalone, commit, push sous un nom de branche). Rien n'est
-# conserve : ni clone, ni worktree, ni remote.
-#
-# ─── ET RIEN N'EN A BESOIN SUR LE DISQUE ───────────────────────────────────────────────────────
-# Mesure : tout le rail lui parle par l'API. Le depot d'une demande (creation de branche + ecriture
-# du fichier + ouverture de PR), la lecture du head par le reconciliateur, la revue par le diff de
-# la PR, et l'application par le convergeur — qui lit le manifeste `?ref=<sha>`, AU SHA SIGNE.
-# Ce dernier point est une propriete de surete, pas un raccourci : lire « la derniere version de la
-# branche » rouvrirait la fenetre entre le constat d'ecart et la lecture, c'est-a-dire permettrait
-# d'appliquer autre chose que ce qui a ete signe. Un checkout local serait un etat de plus a
-# converger, exactement ce que ce rail existe pour refuser.
-#
 # ⚠ CE MODULE NE POSE PAS LA PROTECTION. Elle est un geste d'operateur (`forge-gestures.sh
 # toolchain-protection <login-du-siege>`) parce qu'elle nomme des approbateurs, et un module de
 # provisioning n'a pas a decider qui signe. L'ordre compte dans l'autre sens : la protection sans
@@ -50,15 +30,9 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-# LE NOM DE LA BRANCHE N'EST PAS REGLABLE, ET IL N'EST PAS DECIDE ICI. Son autorite est
-# `Fleet.Toolchain.branch/0` ; cette ligne en est une RECOPIE, tenue par le contrat
-# `toolchain.branch_single_source` de `mix lcars.contracts.check`, qui rougit si les deux divergent.
 readonly OPS_BRANCH="tool_request"
 : "${LCARS_OPS_REPO:=fleet/lcars}"
 
-# ─── LA SONDE ───────────────────────────────────────────────────────────────────────────────────
-# `GET /repos/<repo>/branches/<branch>` : 200 la branche est la, 404 elle manque. Le jeton systeme
-# suffit (lecture d'un depot d'org dont `system` est membre) — pas besoin de l'autorite master.
 forge_repo_code() {
   forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
        "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO" 2>/dev/null || true
@@ -80,7 +54,6 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
   esac
 }
 
-# ─── LE GESTE ───────────────────────────────────────────────────────────────────────────────────
 # ⚠ LE JETON NE TOUCHE JAMAIS argv (cicatrice 6-141 : `/proc/<pid>/cmdline` est lisible par tout le
 # monde, `environ` non). Il voyage par la config git d'environnement, comme partout ailleurs dans
 # le rail — et JAMAIS dans l'URL du remote, qui finirait dans `.git/config` du jetable puis dans
@@ -88,25 +61,10 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
 create_branch() {
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok=""
   [[ -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
-  # ⚠ PAS ENCORE N'EST PAS EN PANNE, et c'est la difference qui a fait rougir un banc sain. Ce
-  # module tourne en 52, le jeton systeme est minte en 50 — mais au PREMIER boot la forge n'est pas
-  # encore semee, donc `50-forge` n'a rien pu frapper et le fichier n'existe pas. Rendre FAIL la
-  # faisait publier `rc=1` a une boite dont le seul tort etait d'etre neuve, et le vrai etat — « la
-  # branche se posera a la convergence suivante » — n'etait dit nulle part.
   [[ -n "$tok" ]] || {
     p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
     return 0; }
 
-  # ⚠ ET IL Y A UN SECOND « PAS ENCORE », QUE LE PREMIER CACHAIT. Une branche se pousse sur un
-  # depot, et le depot ops est seme par l'amorcage de la forge — pas par ce module. Sur un banc neuf
-  # l'ordre reel est : boot 1 (pas de jeton) · amorcage passe 1 (structure, pas de semis) · boot 2
-  # (jeton frappe, DEPOT PAS ENCORE LA) · amorcage passe 2 (semis). Donc au seul boot qui avait un
-  # jeton, la cible n'existait pas.
-  #
-  # Sans ce garde, git pousse dans le vide et la forge repond « Push to create is not enabled for
-  # organizations » en 403 — un message qui parle d'une fonctionnalite desactivee, alors que le fait
-  # est « le depot n'est pas encore ne ». Un lecteur y cherche un reglage de forge et ne trouve rien.
-  #
   # La distinction ne se lit PAS sur la sonde de branche : sur un depot absent, l'API rend 404 sur la
   # branche exactement comme sur une branche absente d'un depot present. Il faut demander le depot.
   case "$(forge_repo_code)" in
@@ -122,10 +80,6 @@ create_branch() {
   local tmp; tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  # LE SEMIS. Git ne sait pas representer un dossier vide et le convergeur globe
-  # `ops/toolchains.d/*.yaml` — sans fichier, la branche existe et le chemin qu'elle sert n'existe
-  # pas. Le README n'est pas de la politesse : la personne qui signe arrive par une notification de
-  # PR, pas par la note de design, et ce qu'elle approuve entre dans `/usr` de la boite.
   mkdir -p "$tmp/ops/toolchains.d"
   : > "$tmp/ops/toolchains.d/.gitkeep"
   cat > "$tmp/README.md" <<'SEED'
@@ -168,10 +122,6 @@ SEED
 
   # RELECTURE : la branche existe VRAIMENT, sinon on n'annonce rien. Un `push` qui rend 0 sur un
   # remote qui a refusé côté hook est un cas connu, et « poussé » n'est pas « présent ».
-  # ⚠ LES DEUX ECHECS DE LA SONDE NE DISENT PAS LA MEME CHOSE, et les confondre envoie l'operateur
-  # chercher au mauvais endroit. `probe` rend 1 sur « branche absente » et 2 sur « forge
-  # injoignable » : un seul message pour les deux annonçait un push raté là où la forge avait
-  # simplement cessé de répondre entre le push et la relecture. Fenêtre étroite, diagnostic faux.
   local rc; probe && rc=0 || rc=$?
   case "$rc" in
     0) : ;;
@@ -199,11 +149,6 @@ apply() {
        p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
-    # ET LA BONNE RÉPONSE EST DRIFT, parce que « pas de forge » est l'état NORMAL d'une première
-    # passe : `48-forge-host` la monte, et s'il dérive (image absente, docker muet) tout l'aval le
-    # constate. Ses deux voisins immédiats — `50-forge` et `55-deck-oidc` — dérivent sur cette
-    # cause exacte. Ce module seul rendait 1, donc l'apply entier rendait 1, donc `install.sh`
-    # déclarait l'installation EN ÉCHEC là où il manquait un geste.
     *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par la boîte) ; la branche se posera a la convergence suivante" ;;
   esac
   verdict_apply

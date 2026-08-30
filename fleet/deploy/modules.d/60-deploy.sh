@@ -6,21 +6,6 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
-#
-# Ce module N'INVENTE PAS le déploiement : fleet/etc/install.sh est l'autorité (modèle
-# 3 zones SOURCE→INSTALL→STATE, release self-contained, idempotent). Ici, on mécanise la carte de
-# déploiement AUTOUR de lui — les gestes qui étaient à la main :
-#   1. dévérouiller $PREFIX pour l'humain-bâtisseur (install.sh tourne SANS sudo, la carte l'exige :
-#      un build root polluerait le _build du checkout de l'humain) ;
-#   2. hex/rebar locaux de l'humain (mix release en a besoin, le gate CI fait pareil) ;
-#   3. etc/install.sh (build + pose + template env) — LONG (mix release) ;
-#   4. re-VERROUILLER : root:fleet, u=rwX,g=rX,o= (personne ne modifie un runtime déployé) ;
-#   5. câbler /usr/local/bin : les 2 symlinks-pointeurs fleet_v2+lcars, RIEN d'autre (D3 : la
-#      copie des 3 launchers pod était une invention — fleet_v2 pose LCARS_*_LAUNCH_PATH sur
-#      $PREFIX/bin (fleet_v2:137-139), le sandbox les voit par le mount système RO de
-#      $PREFIX/bin ; la copie était une seconde vérité qui faisait mentir le doctor).
-# En Docker, tout ceci est un LAYER du stage runtime (docker/Dockerfile) — même install.sh,
-# même verrouillage, vérifié par le même doctor sur place (CHECK-ON: any).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -42,7 +27,6 @@ build_sha() {
 }
 
 check() {
-  # PAS de garde mix.exs ici : le SOURCE est un besoin de l'apply (build), pas de l'état-cible.
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
 
   if release_present; then
@@ -60,8 +44,6 @@ check() {
     p_drift "prefix non verrouillé : $cur ≠ root:$PROV_FLEET_GROUP 750"
   fi
 
-  # D3 : les fichiers livrés vivent UNIQUEMENT dans $PREFIX/bin (là où install.sh les pose et
-  # où fleet_v2 les lit) ; /usr/local/bin ne porte que les symlinks des entrées « link ».
   local name mode is_link
   while read -r name mode is_link; do
     if [[ "$mode" == "exec" && ! -x "$PROV_PREFIX/bin/$name" ]]; then
@@ -98,7 +80,6 @@ apply() {
   if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
       && git -C "$(repo_root)" diff --quiet HEAD -- fleet 2>/dev/null && release_present; then
     p_ok "build déployé $deployed_sha == HEAD source (fleet propre) — rien à bâtir"
-    # Le câblage /usr/local/bin peut quand même avoir dérivé : on le re-converge, c'est gratuit.
     local name _mode is_link
     while read -r name _mode is_link; do
       [[ "$is_link" -eq 1 ]] || continue
@@ -107,14 +88,10 @@ apply() {
     verdict_apply
   fi
 
-  # Une fleet qui TOURNE depuis ce prefix survit au swap (inodes ouverts) mais ne prendra le
-  # nouveau build qu'à son restart — on le DIT, on ne tue rien (jamais tuer une fleet vivante).
   if pgrep -f "$PREFIX_REL" >/dev/null 2>&1; then
     p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet_v2 stop && fleet_v2 start » pour prendre le nouveau build"
   fi
 
-  # 1. Prefix à l'humain-bâtisseur, le temps de l'install (la carte : « sudo mkdir + chown avant
-  #    etc/install.sh »). Re-verrouillé root:fleet en 4 — la fenêtre est ce module, pas un état durable.
   ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
   chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
 
@@ -141,11 +118,9 @@ apply() {
   fi
   release_present || { p_fail "install.sh vert mais release absente ($PREFIX_REL) — incohérence, inspecte"; verdict_apply; }
 
-  # 4. Verrou RO (owner root = personne ne remplace un runtime déployé ; groupe fleet lit/traverse).
   chown -R "root:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "re-verrouillage chown"; verdict_apply; }
   chmod -R u=rwX,g=rX,o= "$PROV_PREFIX"            || { p_fail "re-verrouillage chmod"; verdict_apply; }
 
-  # 5. Câblage /usr/local/bin — les symlinks-pointeurs des entrées « link », rien d'autre (D3).
   local name _mode is_link
   while read -r name _mode is_link; do
     [[ "$is_link" -eq 1 ]] || continue

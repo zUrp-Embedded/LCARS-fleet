@@ -6,14 +6,6 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: human
-#
-# Frontière vendor N1 : ce module est le SEUL du provisioning à connaître Anthropic. Le contrat
-# aval est bin/claude_launch.sh (runtime) : binaire résolu via LCARS_CLAUDE_BIN sinon PATH du pod
-# (~/.local/bin en tête) — « JAMAIS le /usr/local apt ». Le /usr/local/bin/claude system-wide de
-# la v1 est le VIEUX modèle (users-par-rôle partageant un binaire root) : ici, per-humain, sous
-# SON UID, dans SON home (le pod bwrap bind le home ⇒ le binaire suit l'humain).
-#
-#
 # ⚠ TOUTE MACHINERIE AJOUTÉE ICI DOUBLE LA SIENNE ET NE PEUT QUE DIVERGER D'ELLE. L'installeur
 # vérifie son sha256 contre un manifeste signé, nettoie derrière lui sur CHAQUE branche d'échec,
 # installe pour l'utilisateur courant et nomme ses morts (dont l'OOM killer). Un staging, un
@@ -24,14 +16,6 @@
 # ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$PROV_CLAUDE_SEED`, un binaire
 # déjà posé sur la machine par un geste extérieur — un semis de banc — que ce module préférait au
 # réseau. NE PAS LA RÉINTRODUIRE.
-#
-# LE MOTIF EST UNE QUESTION DE MESURE, pas d'économie. Un banc semé n'exerce pas le chemin de
-# déploiement qu'il existe pour mesurer : il rend vert un chemin qu'il n'a pas parcouru, et c'est
-# exactement la classe de défaut que ce dépôt traque partout ailleurs. Le motif d'origine de la
-# graine — « une boîte NEUVE sans réseau n'obtient aucun binaire, donc aucun pod ne démarre, et la
-# fleet a l'air saine en ne produisant rien » — reste VRAI comme description ; ce qui change est la
-# réponse. Le bon comportement d'une boîte sans réseau n'est pas de se rabattre sur une copie
-# cachée, c'est de REFUSER FORT (cf. le verdict de provisioning publié par l'entrypoint).
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -69,9 +53,6 @@ apply() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/claude-install.XXXXXX")" \
     || { p_fail "tmp d'installeur impossible"; verdict_apply; }
 
-  # DEUX GESTES, DEUX VERDICTS. `curl … | bash` est la forme que le vendor publie ; la séparer est
-  # la seule chose que l'ancien échafaudage achetait vraiment — « le réseau n'a pas répondu » et
-  # « l'installeur a refusé » appellent deux gestes différents, et un pipe les confond.
   if ! run_quiet curl -fsSL --proto '=https' -m 300 -o "$tmp/install.sh" "$INSTALL_URL"; then
     rm -rf "$tmp"
     p_fail "download de l'installeur en échec ($INSTALL_URL)"
