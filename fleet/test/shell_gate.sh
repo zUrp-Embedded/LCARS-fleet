@@ -371,7 +371,13 @@ mapfile -t SHELL_FILES < <(
   done
 )
 SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
-SC_VERSION="$(command -v shellcheck >/dev/null 2>&1 && shellcheck --version | sed -n 's/^version: //p')"
+# ⚠ PAS D UNE SEULE AFFECTATION : `SC_VERSION="$(command -v shellcheck … && …)"` sous `set -e` TUAIT le script
+# quand shellcheck manque — la substitution rend non-zero, l affectation herite du statut, et le gate
+# mourait apres « bats : OK » sans une ligne, avant meme d annoncer « HORS GATE ». Mesure sur un
+# Ubuntu neuf (banc .63, 2026-08-30) : trois runs rouges de 60-deploy, tests tous verts. La premiere
+# commande d une liste `&&` n est pas soumise a errexit ; c est cette forme-la qui survit.
+SC_VERSION=""
+command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | sed -n 's/^version: //p')"
 
 # ─── LE PAS EST HORS GATE PAR DEFAUT ────────────────────────────────────────────────────────────
 #
