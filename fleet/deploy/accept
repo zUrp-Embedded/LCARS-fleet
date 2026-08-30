@@ -3,21 +3,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: PROTO-V2 — la recette d'acceptation du rail poste : ce qu'un operateur peut FAIRE
-#
-# POURQUOI CE FICHIER EXISTE. Le provisionnement rend un bilan de MODULES : « chaque module est
-# d'accord avec lui-meme ». Ca ne dit rien de ce qu'un operateur peut FAIRE ensuite, et les deux
-# ont deja diverge.
-#
-# CE SCRIPT NE LIT AUCUN VERDICT : il mesure sur la machine, et ce qui vaut reponse est etroit —
-# les identifiants annonces AUTHENTIFIENT · le runner est enregistre ET sert les labels · la fleet
-# demarre, repond, ET s'arrete.
-#
-# ⚠ S'IL A BESOIN D'UN GESTE A LA MAIN, IL ECHOUE. Un `docker exec` ajoute pour le debloquer devient
-# une etape MANQUANTE du rail, pas un succes.
-#
-# ⚠ IL SE JOUE DANS L'INSTALL, PAS APRES : le mot de passe de la forge n'existe que pendant — le
-# canal d'annonce le detruit en sortant, et la forge n'en garde qu'un hash.
-#
 # USAGE : accept --announce-file <chemin> [--forge-url URL]
 # EXIT  : 0 les trois tiennent · 1 au moins une echoue · 2 argument manquant
 
@@ -33,8 +18,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PAS ────────────────────────────────
-# Ce fichier vit dans le MEME arbre que l'autorite du nom : le recevoir d'un appelant qui l'a lu au
-# meme endroit en ferait une copie de plus a tenir d'accord.
 FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
@@ -58,7 +41,6 @@ skip() { printf '  %s---%s   %s\n' "$_A" "$_N" "$*"; SKIPPED=$((SKIPPED + 1))
 #
 # `-K -` : ni le login ni le mot de passe dans argv (cicatrice 6-141).
 check_forge_login() {
-  # `_label` : la colonne existe dans le flux et doit etre consommee, personne ne la lit.
   local _label login pw code tested=0
   [[ -n "$FORGE_URL" ]] || { no "forge : aucune adresse connue ($PRIVATE_DIR/forge.url)"; return; }
   [[ -s "$ANNOUNCE" ]] || { skip "forge : aucun identifiant annonce par cette passe — rien a verifier"; return; }
@@ -79,17 +61,9 @@ check_forge_login() {
 }
 
 # ─── 2. UNE PR PEUT FUSIONNER ───────────────────────────────────────────────────────────────────
-#
-# Un runner ENREGISTRE ne suffit pas : un job demande un LABEL, et un runner qui n'en sert aucun de
-# ceux que les workflows livres nomment laisse la course en attente jusqu'a l'escalade — sans qu'une
-# ligne dise que c'est un label qui manque. On lit donc les labels REELLEMENT servis et on les
-# confronte aux `runs-on` du depot, derives et non recopies.
 check_ci() {
   local tokfile="$PRIVATE_DIR/forge-master.token" body n served want missing=""
   [[ -n "$FORGE_URL" ]] || { no "CI : aucune adresse de forge"; return; }
-  # ⚠ DEUX CAUSES, ET LES CONFONDRE ACCUSE LA BOITE D'UN MANQUE QUI EST CELUI DE L'APPELANT.
-  # `/api/v1/admin/actions/runners` est site-admin PAR SON CHEMIN : la mesure exige le jeton master,
-  # qui appartient a `lcars-authority` — root est le seul a le lire de l'exterieur.
   if [[ ! -r "$tokfile" ]]; then
     if [[ "$EUID" -ne 0 ]]; then
       no "CI : cette mesure demande root (l'API des runners est site-admin, et son jeton appartient au detenteur des secrets) — rejoue sous « sudo »"
@@ -123,12 +97,6 @@ check_ci() {
 }
 
 # ─── 3. LA FLEET PEUT DEMARRER ──────────────────────────────────────────────────────────────────
-#
-# ⚠ ON LA DEMARRE POUR DE VRAI, puis on l'arrete : « les morceaux sont la » et « ca tourne » sont
-# deux affirmations, et c'est la seconde que l'installation promet. Verifier des preconditions
-# reviendrait a mesurer ce que les modules mesurent deja.
-#
-# On la laisse dans l'etat ou on l'a trouvee : arretee si elle l'etait.
 check_fleet_start() {
   local login="$FLEET_HUMAN" home
   [[ -n "$login" ]] || { skip "fleet : le nom de l'humain de fleet est indeterminable (forge-gestures.sh builtin-human) — rien a demarrer"; return; }
@@ -165,7 +133,6 @@ check_fleet_start() {
     no "fleet : « fleet_v2 start » a echoue sous « $login » — rejoue-le a la main pour voir sa plainte"
     return
   fi
-  # Le demarrage est asynchrone (tmux + BEAM) : on laisse le temps qu'il faut, borne.
   local alive=0
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     if fleet_up; then alive=1; break; fi

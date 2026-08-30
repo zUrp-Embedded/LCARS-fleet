@@ -39,7 +39,6 @@
 
 set -euo pipefail
 
-# Même règle que `provision-lib.sh`.
 if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
    || { [[ -z "${PROV_COLOR:-}" ]] && [[ ! -t 1 ]]; }; then
   AMBER=''; CYAN=''; W=''; G=''; R=''; N=''; BA=''
@@ -49,7 +48,6 @@ else
   G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
 fi
 
-# ─── Refus curl|bash ───────────────────────────────────────────────────────
 if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
   echo ""
   echo "  ${R}ERREUR : install.sh doit être exécuté depuis un fichier, pas pipé depuis stdin.${N}"
@@ -63,7 +61,6 @@ fi
 # la garde ci-dessus si elle remonte. Le repli `:-$0` et cette position sont la même précaution.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# ─── LE COMPTE QUE LE RAIL VA CRÉER — ni le siège qui lance, ni root ────────
 fleet_human_name() {
   local g
   if [[ -n "${PROVISION:-}" ]]; then g="$(dirname "$PROVISION")/../services/forge-gestures.sh"
@@ -73,7 +70,6 @@ fleet_human_name() {
   bash "$g" builtin-human 2>/dev/null || true
 }
 
-# ─── Options ────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 BRANCH="main"
 DOCTOR_MODE=0
@@ -108,16 +104,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ─── PRÉFLIGHT COMMUN — ce dont les DEUX branches ont besoin ────────────────
-# Docker en fait partie même pour le poste : la forge est un conteneur, il n'en existe pas
-# d'autre forme dans ce dépôt.
 preflight_ok=1
 # `return 0` : sans lui le code de sortie est celui d'`echo`, et un `A && say_ok || say_miss`
 # bascule en MANQUE sur un prérequis présent. Même règle que `p_ok` (provision-lib.sh).
 say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
-# `10-packages` pose `docker-ce`, et lui seul : Linux natif, machine déclarée dédiée. La boîte est
-# exclue par la loi 5 (fleet/deploy/README.md) — elle exige un daemon debout, elle n'en pose aucun.
 docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
   [[ "${RAIL:-}" != "box" ]] || return 1
   [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
@@ -134,9 +126,6 @@ for t in git curl; do
     say_miss "$t — apt install $t"
   fi
 done
-# On sonde un endpoint qui RÉPOND, pas un binaire : sous WSL, une distro sans intégration activée
-# n'a ni `/usr/bin/docker` ni `/var/run/docker.sock`, et le daemon répond quand même — CLI et socket
-# vivent dans le montage partagé par la VM. `command -v docker` y refuserait une machine qui a docker.
 DOCKER_OK=0
 if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
   # shellcheck source=fleet/deploy/lib/docker-endpoint.sh
@@ -148,7 +137,6 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     # peut pas travailler. Même fait, deux conclusions — la branche tranche.
     echo "  ${W}[à voir]${N} $PROV_DOCKER_WHY"
   elif docker_installable_here; then
-    # Ces messages NOMMENT ce que `10-packages` posera : ils suivent le module, sinon ils promettent.
     if [[ -z "$RAIL" ]]; then
       echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com) ;"
       echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
@@ -163,7 +151,6 @@ if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
     say_miss "$PROV_DOCKER_WHY"
   fi
 else
-  # Standalone : pas d'arbre, donc pas de sonde partagée.
   if command -v docker >/dev/null 2>&1; then
     DOCKER_OK=1
     say_ok "docker (sonde complète après le clone)"
@@ -193,8 +180,6 @@ if [[ "$SUBSTRATE" == "wsl" ]] && ! unshare -Ur true 2>/dev/null; then
 fi
 
 # ─── LE CHOIX ───────────────────────────────────────────────────────────────
-# ⚖ USER : « boot linux : on monte une boîte dans docker. Boot WSL : soit on monte une boîte, et
-# c'est juste le kickstart ; soit on monte un poste, et on s'installe dans WSL. »
 if [[ -z "$RAIL" ]]; then
   if [[ "$SUBSTRATE" != "wsl" ]] && [[ -z "${LCARS_ALLOW_ANY_HOST:-}" || "$SUBSTRATE" != "linux" ]]; then
     RAIL=box
@@ -203,7 +188,6 @@ if [[ -z "$RAIL" ]]; then
     echo "  (le rail poste écrit dans /etc, /opt/lcars : il est réservé à WSL,"
     echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
   else
-    # Les deux sont possibles : on demande, et la question porte le coût du terrain où l'on est.
     if [[ "$SUBSTRATE" == "wsl" ]]; then
       _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
       _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
@@ -213,8 +197,6 @@ if [[ -z "$RAIL" ]]; then
       _prend="sudo · un groupe système · /opt/lcars · des paquets ·
      la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
     fi
-    # `DOCKER_OK=0` ici = le préflight a laissé passer parce que le POSTE peut poser docker ; la
-    # boîte, non (loi 5) — son option se barre au lieu de s'offrir.
     if [[ "$DOCKER_OK" -eq 0 ]]; then
       _opt2_etat="${R}INDISPONIBLE ici${N} — docker n'est pas debout, et la boîte ne l'installe pas."
     else
@@ -301,8 +283,6 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   fi
 
-  # Le seul fichier système que ce rail prenne EN ENTIER — le reste (paquets, groupe, /local) est
-  # additif. On montre ce qui va disparaître ; la pause du bandeau, plus bas, est le consentement.
   if [[ "$CONSENTED" -eq 0 ]] && [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
@@ -315,8 +295,6 @@ if [[ "$RAIL" == "workstation" ]]; then
   fi
 fi
 
-# Un cartouche annonce le coût : sa bordure droite se dérive du contenu, séquences ANSI non
-# comptées. Comptée à la main, elle se désaligne dès qu'une ligne change ou qu'un nom s'allonge.
 _box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
 _box_pad() { # <texte> <largeur>
   local p n; p="$(_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
@@ -363,8 +341,6 @@ if [[ "$RAIL" == "workstation" ]]; then
     _banner_wslconf=""
     _banner_back="  snapshot ou image, et le rail n'en fournit aucun."
   fi
-  # ⚖ USER 2026-08-21 : le compte se dit AVANT d'exister — c'est la seule mutation de ce rail qui
-  # crée un utilisateur sur la machine de quelqu'un, et l'annoncer est ce qui la rend consentie.
   _banner_human="$(fleet_human_name)"
   echo ""
   if [[ -n "$_banner_human" ]]; then
@@ -420,9 +396,6 @@ fi
 
 # ─── LA BRANCHE BOÎTE : aucune escalade, on délègue à la porte docker ───────
 if [[ "$RAIL" == "box" ]]; then
-  # ⚖ USER : « si l'installeur promet "jamais sudo" et ne peut pas faire son job parce qu'il faut
-  # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. »
-  #
   # ⚠ NE PAS REMPLACER PAR UN `exec sudo` : ce rail bâtit une image sous l'uid de l'humain ; en root,
   # `git` lirait le clone en « dubious ownership » et l'image sortirait estampée `unknown`.
   # TTY exigé : sans terminal, l'invite pend jusqu'au timeout au lieu de refuser.
@@ -455,16 +428,11 @@ if [[ "$RAIL" == "box" ]]; then
     exec "$SCRIPT_DIR/fleet/deploy/box" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
-  # Les délégués, eux, refusent de bâtir : un build rend SON verdict, jamais en effet de bord.
-  #
-  # Les deux ne se pilotent pas pareil — `bench-up.sh` a des drapeaux, `fleet/deploy/box` n'en a
-  # aucun et se lit dans l'environnement. On traduit ce qui a un sens ici, on refuse le reste.
   _box_reject=()
   _i=0
   while [[ "$_i" -lt "${#PASSTHRU[@]}" ]]; do
     case "${PASSTHRU[$_i]}" in
       --forge-project)
-        # Le seul qui vaut sur LES DEUX chemins : il nomme l'instance, pas une publication.
         if [[ "$WITH_BENCH" -eq 1 ]]; then
           # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
@@ -495,8 +463,6 @@ if [[ "$RAIL" == "box" ]]; then
   for _i in "${!DELEGATE_ARGS[@]}"; do
     [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"
   done
-  # Ce refus passe AVANT le build : après, on aurait dépensé plusieurs minutes pour annoncer qu'on
-  # ne peut rien en faire.
   if [[ "$WITH_BENCH" -ne 1 && -z "${FORGE_BASE_URL:-}" ]]; then
     echo ""
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
@@ -552,7 +518,6 @@ fi
 PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
 
 if [[ ! -x "$PROVISION" ]]; then
-  # Standalone : la source se clone CHEZ L'HUMAIN — c'est son checkout, pas celui de root.
   HUMAN="${SUDO_USER:-root}"
   HUMAN_HOME="$(getent passwd "$HUMAN" | cut -d: -f6)"
   SRC_DIR="${LCARS_SRC:-$HUMAN_HOME/LCARS-fleet}"
@@ -570,10 +535,6 @@ if [[ ! -x "$PROVISION" ]]; then
 fi
 
 # ─── LES PAQUETS D'ABORD, SI C'EST LE RAIL QUI POSE DOCKER ──────────────────
-# ⚠ MORT (2026-08-22) : la circularité que cette tranche dénouait — docker → image → rang 48 —
-# n'existe plus, ce rail ne bâtit aucune image. Ce qui reste vrai : `48-forge-host` a besoin du
-# DAEMON, posé par `10-packages` au rang 10. Le message d'échec ci-dessous nomme encore « le
-# build » : il ment.
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
    && ! command -v "${PROV_DOCKER_BIN:-docker}" >/dev/null 2>&1 \
    && docker_installable_here; then
@@ -595,10 +556,6 @@ fi
 # sous `set -e`, une ligne nue tuerait la porte sur 1 ET 2, sans un mot. Même lecture que
 # `deploy/box` (`await_provision_verdict`) — deux portes qui en tirent deux verdicts, c'est un code
 # de retour qui ne veut plus rien dire.
-#
-# Le canal des identifiants : les modules qui fabriquent un mot de passe tournent au rang 22 ou 48,
-# et afficher sur place, c'est afficher puis faire défiler deux cents lignes. Ils écrivent ici, on
-# imprime à la fin — 0600, détruit ensuite : le secret ne survit pas à l'install qui l'a produit.
 PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
 export PROV_ANNOUNCE_FILE
 
@@ -636,8 +593,6 @@ case "$_apply_rc" in
     ;;
 esac
 
-# GUARD B refuse l'uid du siège — celui qui porte sudo. D'où le `sudo -u <humain de fleet>` des
-# instructions ci-dessous : le siège atteint son deck par le groupe `fleet`, il ne lance pas la fleet.
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
   _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
@@ -655,17 +610,11 @@ else
 fi
 
 # ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
-#
-# Un bilan de modules dit que chacun est d'accord avec lui-même, pas ce qu'on peut FAIRE ensuite.
-#
 # ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette
 # passe — le `trap` détruit le fichier en sortant, et la forge n'en garde qu'un hash. Plus tard, on
 # ne pourrait plus vérifier « je peux me connecter », seulement « le compte existe ».
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/deploy/accept" ]]; then
-  # Le nom de l'humain ne voyage pas : `accept` vit dans le même arbre que l'autorité et l'interroge.
   _accept_args=(--announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}")
-  # Sa propre variable : `_apply_rc` est déjà tranché plus haut, et c'est celle-ci qui décide du
-  # code de sortie tout en bas.
   _accept_rc=0
   bash "$SCRIPT_DIR/fleet/deploy/accept" "${_accept_args[@]}" || _accept_rc=$?
 fi

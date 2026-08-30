@@ -9,24 +9,11 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: PROTO-V2 — la sonde docker, partagee par le rail ET par le script d'entree
-#
-# POURQUOI CE FICHIER EXISTE SEPAREMENT DE `provision-lib.sh` : la sonde est le premier geste du
-# script d'entree a la racine du depot — c'est lui qui doit dire « docker ne repond pas » avant
-# qu'on clone ou qu'on construise quoi que ce soit. `provision-lib.sh`, lui, pose des defauts
-# d'INSTALLATION au source et lit des fichiers de la machine provisionnee : un script d'entree qui
-# les traine ment sur ce qu'il est.
-#
-# Ce fichier n'a donc AUCUN effet de bord : des fonctions, et les globales qu'elles remplissent. Il
-# est sourcable depuis n'importe ou, y compris avant qu'un depot soit clone. TROIS appelants le
-# sourcent — `install.sh`, `box`, `provision-lib.sh` — et aucun n'en garde de copie : deux sondes,
-# ce serait deux verdicts sur la meme machine selon la porte empruntee.
 
 [[ -n "${LCARS_DOCKER_ENDPOINT_LOADED:-}" ]] && return 0
 LCARS_DOCKER_ENDPOINT_LOADED=1
 
 # ─── detect_substrate — ou tourne-t-on ? ─────────────────────────────────────────────────────────
-# Ici parce que la sonde en depend pour choisir le libelle de son refus : sur WSL « demarre Docker
-# Desktop », sur linux « le service tourne-t-il ».
 detect_substrate() {
   if [[ -f /.dockerenv || "${LCARS_DOCKER:-}" == "1" ]]; then echo docker
   elif grep -qi microsoft /proc/version 2>/dev/null; then echo wsl
@@ -52,9 +39,6 @@ detect_substrate() {
 # son ABSENCE ne prouve rien du tout — sur WSL le daemon vit dans la VM Docker Desktop et s'expose
 # par un MONTAGE partagé, CLI comprise, donc une distro sans aucun binaire joint docker. On cherche
 # une PAIRE, CLI et endpoint, et la seule preuve est qu'elle réponde.
-#
-# CE QUE CETTE SONDE NE PROUVE PAS : que les commandes à FLUX ATTACHÉ rendent quelque chose —
-# cf. `docker_stream_ok`.
 # ⚠ LA FORME `${VAR:-}` EST DELIBEREE, ET `=""` CASSERAIT LA COUTURE D'ENTREE : la fonction lit
 # `want="${PROV_DOCKER_BIN:-}"` pour honorer une CLI imposee — un shim, une doublure de test — et
 # cette initialisation-ci s'execute AVANT elle.
@@ -63,14 +47,6 @@ PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
 PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
-# LE PREFIXE D'ESCALADE : vide, ou de quoi joindre un daemon dont la socket appartient a root.
-#
-# POURQUOI IL EXISTE. Sur WSL la socket Docker Desktop est `root:root 755` : le daemon repond, et
-# pas a l'utilisateur qui lance. `chgrp` dessus l'ouvrirait a TOUTES les distros de la VM (elle vit
-# sous `/mnt/wsl`) et serait a re-poser a chaque demarrage de Docker Desktop, qui la recree. `sudo`
-# sur l'APPEL ne modifie RIEN : la promesse auditee du rail boite porte sur ce qu'on MODIFIE, jamais
-# sur l'uid qui appelle.
-#
 # ⚠ L'ESCALADE EST PAR COMMANDE, JAMAIS UN RE-EXEC GLOBAL : celui-ci ferait tourner `git` en root
 # sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
 PROV_DOCKER_SUDO=""
@@ -125,16 +101,6 @@ PYCFG
 }
 
 # ─── LES ADRESSES DU DAEMON, PAR SUBSTRAT — ON NE CHERCHE PAS, ON SAIT ───────────────────────────
-#
-# AUCUN CHEMIN « AU CAS OU » : une sonde qui fouille finit par porter le cablage de la machine de
-# son auteur, et juge toutes les autres a travers lui. L'operateur qui a sa topologie pose
-# `DOCKER_HOST`, honore avant tout le reste.
-# Sur WSL, `/var/run/docker.sock` ne s'ajoute que si l'integration est activee pour la distro.
-#
-# COUTURE DE DECOR, MEME IDIOME QUE `LCARS_HOST_CONSENT_FILE` ET `LCARS_SYSADMIN_UID` : les
-# chemins sont des litteraux, et `DOCKER_HOST` n'est plus un levier — pointer une socket absente
-# fait CONTINUER la resolution. Sans cette couture, « rien ne repond » n'est mesurable que sur une
-# machine sans docker, c'est-a-dire nulle part ou ce contrat compte.
 _docker_sockets() {
   if [[ -n "${LCARS_DOCKER_SOCKETS:-}" ]]; then
     printf '%s\n' "$LCARS_DOCKER_SOCKETS"
@@ -147,9 +113,6 @@ _docker_sockets() {
 }
 
 docker_endpoint() {
-  # `PROV_DOCKER_BIN` est À LA FOIS L'ENTRÉE ET LA SORTIE, et c'est délibéré : un second nom pour
-  # « la CLI que l'appelant veut » ferait deux variables pour un objet, et c'est celle qu'on ne lit
-  # pas qui gagne. On capture donc la valeur entrante d'abord.
   local want="${PROV_DOCKER_BIN:-}"
   PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_SOCK=""
   PROV_DOCKER_SUDO=""
@@ -186,8 +149,6 @@ docker_endpoint() {
   # Accroche au shim d'escalade plus bas, il ne couvrirait que les appelants NON-ROOT : le module
   # qui a besoin de `compose` tourne en root, ou l'escalade n'a pas lieu, et recevrait la CLI du
   # montage toute nue.
-  #
-  # UN `DOCKER_CONFIG` POSE PAR L'OPERATEUR EST UNE DECISION : on ne l'ecrase pas.
   if [[ "$(detect_substrate)" == "wsl" && "$PROV_DOCKER_BIN" == "$(_docker_mount_cli)" \
         && -z "${DOCKER_CONFIG:-}" ]]; then
     local _pcfg; _pcfg="$(_docker_plugin_config)" && [[ -n "$_pcfg" ]] && export DOCKER_CONFIG="$_pcfg"
@@ -202,10 +163,6 @@ docker_endpoint() {
   if [[ -n "${DOCKER_HOST:-}" ]]; then
     if "$PROV_DOCKER_BIN" version --format '{{.Server.Version}}' >/dev/null 2>&1; then return 0; fi
     _dh="${DOCKER_HOST#unix://}"
-    #
-    # Le FAIT rejoint l'enumeration du message final plutot que `PROV_DOCKER_WHY`, qui est
-    # contractuellement VIDE quand docker repond : une phrase posee ici serait perimee sur succes,
-    # et le message final l'ecraserait sur echec.
     if [[ -S "$_dh" ]]; then
       _envhost=" ${DOCKER_HOST}[env,$([[ -w "$_dh" ]] && echo "accessible" || echo "REFUSE $(id -un)")]"
     else
@@ -215,11 +172,6 @@ docker_endpoint() {
     # ecrase l'heritage. Il empeche un endpoint MORT de survivre a la fonction chez l'appelant.
     unset DOCKER_HOST
   fi
-  # ⚠ « REFUSE » ET « INJOIGNABLE » NE SONT PAS LE MEME FAIT, et les confondre refuse des machines
-  # saines : le rail poste escalade en root juste apres et s'en moque, le rail boite tourne sous
-  # l'humain et ne peut pas travailler. Un verdict unique serait faux dans un cas sur deux — la
-  # sonde rend le FAIT, chaque branche en tire sa conclusion.
-  #
   # ⚠ ET ON LIT LE DROIT SUR LA SOCKET, JAMAIS UN MESSAGE. Un libelle d'erreur est une convention de
   # version, et le code de sortie ne discrimine pas : `docker version` rend 1 aussi bien sur une
   # socket qui refuse que sur un daemon absent (mesure du 2026-08-19). `-w` repond a la question
@@ -248,10 +200,6 @@ docker_endpoint() {
       # appelants recoivent un BINAIRE et composent `"$DOCKER_BIN" <verbe>`. Rendre ici une LIGNE DE
       # COMMANDE ferait chercher un executable dont le nom contient des espaces, avec un diagnostic
       # qui accuserait docker. Le shim est un fichier, et tout le rail ne manipule qu'un chemin.
-      #
-      # 0700 dans un repertoire 0700 : ce fichier invoque sudo, il ne doit etre modifiable par
-      # personne d'autre. Il n'est pas nettoye — il ne porte aucun secret, seulement un chemin, et
-      # sa duree de vie est celle de l'arbre de processus qui s'en sert.
       local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
       chmod 0700 "$shim_dir"
 
@@ -284,9 +232,6 @@ SHIM
       chmod 0700 "$shim_dir/docker"
       PROV_DOCKER_BIN="$shim_dir/docker"
 
-      # ON VERIFIE QUE LA PAIRE EST COMPLETE, PAS SEULEMENT QU'ELLE REPOND. Un shim qui rend
-      # `version` et pas `compose` est pire qu'une absence : il passe le preflight et meurt trois
-      # etapes plus loin, sur un message qui accuse un fichier compose.
       if ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
         PROV_DOCKER_WHY="le daemon repond via sudo, mais « docker compose » reste introuvable (plugins cherches dans $(_docker_mount_plugins))"
         return 1
@@ -298,12 +243,6 @@ SHIM
   fi
 
   # 3. Rien ne répond.
-  #
-  # LE MESSAGE NE DIT PAS « INSTALLE DOCKER » : sur WSL le montage prouverait le contraire, et sur
-  # linux natif le paquet n'est pas forcément le geste juste.
-  # ET IL PORTE LE CHEMIN RÉSOLU, PAS LE NOM. « CLI trouvée (docker) » ne se diagnostique pas —
-  # deux environnements différents rendent le même refus, qu'il faut rejouer pour savoir ce qu'il a
-  # vu.
   local resolved tried=""
   resolved="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
   while read -r sock; do
@@ -333,17 +272,6 @@ docker_stream_ok() {
 
 
 # ─── docker_compose_cmd — QUEL COMPOSE, DEMANDÉ UNE FOIS ────────────────────────────────────────
-#
-# Deux formes existent dans la nature — le plugin (`docker compose`) et l'autonome
-# (`docker-compose`) — et une install récente n'a que la première. La question se pose donc
-# vraiment ; ce qui ne doit pas se poser deux fois, c'est la RÉPONSE.
-#
-# ELLE SE NOMME AU DÉLÉGUÉ, ELLE NE SE REDÉCOUVRE PAS : chaque porte joue la sonde une fois, puis
-# TRANSMET son résultat.
-#
-# ⚠ LE BINAIRE VIENT DE L'APPELANT, PAS DU PATH. Sur WSL la CLI vit dans le montage Docker Desktop,
-# et sur une socket appartenant à root c'est un SHIM qui escalade : interroger `docker` nu ici
-# contournerait l'un et l'autre pour échouer plus loin, sur une permission.
 PROV_COMPOSE_CMD=""
 PROV_COMPOSE_WHY=""
 docker_compose_cmd() { # docker_compose_cmd [<binaire docker>] -> 0 et PROV_COMPOSE_CMD, ou 1 et _WHY

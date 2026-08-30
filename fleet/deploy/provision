@@ -105,8 +105,6 @@ AUDIT_AFTER=""
 UNINSTALL_HUMANS=0
 declare -a ONLY=()
 
-# Un port refusé se dit ICI, pas trois modules plus loin sur un `compose up` qui échoue.
-#
 # ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
 # tuait le SOUS-SHELL de la substitution : le script continuait, avec une valeur vide. Le refus
 # s'imprimait et ne refusait pas.
@@ -136,19 +134,12 @@ while [[ $# -gt 0 ]]; do
                   export PROV_FORGE_HOST_PORT="$2"; shift 2 ;;
     --port-deck)  valid_port "${2:?--port-deck attend un port}" --port-deck
                   export PROV_DECK_PORT="$2"; shift 2 ;;
-    # Le NOM d'instance de la forge : conteneur, réseau, volumes et projet du runner en dérivent
-    # TOUS. C'est donc le geste qui monte une SECONDE forge, pas celui qui déplace la première.
     --forge-project) valid_project "${2:?--forge-project attend un nom}" --forge-project
                      # LA BASE, pas le projet : `bob` donne `bob-forge` et `bob-runner` (48-forge-host).
                      export PROV_FORGE_BASE="$2"; shift 2 ;;
     --env)       ENV_FILE="${2:?--env attend un fichier}"; shift 2 ;;
     --porcelain) PORCELAIN=1; shift ;;
-    # ⚠ `uninstall` NE FAIT RIEN SANS `--yes` : il IMPRIME son plan et sort. Le verbe retire ce
-    # qu'une table nomme — une erreur dans la table devient une erreur sur la machine, et c'est la
-    # seule occasion de relire la liste avant qu'elle ne s'exécute.
     --yes)       UNINSTALL_YES=1; shift ;;
-    # Les objets du home d'une personne sont POSÉS par LCARS mais vécus par elle. On les PROPOSE,
-    # on ne les impose pas (§ `human` du manifeste).
     --humans)    UNINSTALL_HUMANS=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS : ce parseur consomme tout `$@` avant que le verbe ne
@@ -178,15 +169,6 @@ case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (
 export PROV_SUBSTRATE="$SUBSTRATE"
 
 # ─── L'UID DU SIÈGE — DÉRIVÉ ICI, UNE FOIS, ET SURTOUT PAS DEPUIS `PROV_HUMAN` ──────────────────
-#
-# `LCARS_SYSADMIN_UID` est la clé de GUARD A et GUARD B : l'uid que personne ne doit porter pour
-# lancer une fleet, et le plancher au-dessus duquel le convergeur crée les humains. Plusieurs
-# lecteurs en dépendent ; un littéral `1000` tient tant que le siège est le premier uid de la
-# machine, et ça ne se dit nulle part. Un opérateur à 1001 suffit : GUARD B réserve 1000, le siège
-# est ailleurs, il lance une fleet — et ses pods héritent de son uid sudo-capable, l'exact inverse
-# de ce que la garde existe pour empêcher. Le siège EST l'appelant de l'installeur ; toute autre
-# valeur est une affirmation fausse sur cette machine.
-#
 # ⚠ ET SURTOUT PAS DEPUIS `PROV_HUMAN`, MÊME S'IL PORTE LA MÊME VALEUR ICI. Le convergeur le
 # REMPLACE par l'humain de fleet quand il rejoue les modules `NEEDS: human` pour un compte qu'il
 # vient de matérialiser. Une dérivation posée dans la lib rendrait donc, dans CETTE passe-là, l'uid
@@ -200,8 +182,6 @@ _seat_uid="$(id -u -- "$_seat_login" 2>/dev/null || true)"
 if [[ "$_seat_uid" =~ ^[0-9]+$ ]]; then
   : "${LCARS_SYSADMIN_UID:=$_seat_uid}"
 else
-  # Inatteignable sur un rail réel (sudo a résolu le compte, ou c'est le nôtre) — mais un défaut
-  # muet ici replacerait le littéral que ce bloc existe pour supprimer.
   echo "[provision] uid du siège ILLISIBLE pour « $_seat_login » — LCARS_SYSADMIN_UID reste ${LCARS_SYSADMIN_UID:-1000}, donc GUARD B garde cet uid-là et pas celui du siège" >&2
   : "${LCARS_SYSADMIN_UID:=1000}"
 fi
@@ -209,9 +189,6 @@ export LCARS_SYSADMIN_UID
 unset _seat_login _seat_uid
 
 # ─── D'OÙ VIENT CE QU'ON S'APPRÊTE À POSER ──────────────────────────────────────────────────────
-# Chaque module converge vers ce que dit SA source, donc « conforme » ne signifie jamais plus que
-# « conforme à l'arbre que j'ai sous la main ». Un checkout en retard réinstalle l'état d'avant en
-# rendant VERT, et aucun verdict ne peut le voir — d'où cette ligne, qui nomme ce qu'on pose.
 # shellcheck disable=SC2119 # `prov_source_rev` prend un argument OPTIONNEL ; les args de fonction
 # masquent ceux du script, donc l'appel nu est sur — c'est le cas nominal, pas un oubli.
 PROV_SOURCE_REV="$(prov_source_rev)"
@@ -223,12 +200,6 @@ if [[ "$CMD" == "update" ]]; then
   ROOT="$(repo_root)"
   git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1 || die "update: $ROOT n'est pas un checkout git"
 
-  # 1. AUTORITÉ AVANT PULL (F-E1) : le remote doit matcher le repo déclaré. Pas de défaut :
-  #    on refuse de deviner à qui on fait confiance.
-  # 6-109 — L'AUTORITÉ INCLUT L'HÔTE, et la comparaison est EXACTE. Elle était une SOUS-CHAÎNE :
-  # avec `fleet/lcars` attendu, `https://hote-attaquant/attaquant/fleet/lcars-malware.git` passait,
-  # et le runner exécutait ce code en root. Ni l'hôte, ni le propriétaire, ni la fin du nom n'étaient
-  # regardés.
   [[ -n "$PROV_EXPECTED_REPO" ]] || die "update: PROV_EXPECTED_REPO non posé — déclare l'autorité COMPLÈTE, hôte compris (ex: PROV_EXPECTED_REPO=forge.example.org/fleet/lcars) via --env ou l'environnement ; SANS elle, aucun pull"
   case "$PROV_EXPECTED_REPO" in
     */*/*) ;;
@@ -272,9 +243,6 @@ if [[ "$CMD" == "update" ]]; then
 fi
 
 # ─── Découverte + filtrage ────────────────────────────────────────────────────────────────────────
-# La sélection se fait sur CHECK-ON, pas sur APPLY-ON : partout où l'état-cible doit être vrai, le
-# module est retenu. Retenu mais hors de son APPLY-ON, il tourne en CHECK — l'état est bâti ailleurs
-# (stage image, build) et un drift y est un ÉCHEC d'apply, parce que rien ici ne peut le converger.
 module_field() { # $1=file $2=FIELD → valeur (vide si absent)
   sed -n "s/^# ${2}: *//p" "$1" | head -1
 }
@@ -294,8 +262,6 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
   [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
   [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
-  # `# AFTER: <module>…` — l'ordre d'execution est le prefixe numerique ; ce champ declare ce que le
-  # rang doit respecter, et une renumerotation qui l'enfreint est refusee ici, avant tout geste.
   after="$(module_field "$mod" AFTER)"
   for dep in $after; do
     [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"
@@ -307,7 +273,6 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
       case " $check_on " in *" $s "*) ;; *) die "$name: APPLY-ON contient « $s » hors de CHECK-ON ($check_on)" ;; esac
     done
   fi
-  # Filtre --only (nom complet `10-packages` ou préfixe `10`).
   if [[ "${#ONLY[@]}" -gt 0 ]]; then
     keep=0
     for o in "${ONLY[@]}"; do [[ "$name" == "$o" || "$name" == "$o"-* ]] && keep=1; done
@@ -346,18 +311,9 @@ fi
 
 # ─── Lock anti-runs-concurrents (apply seulement — doctor est read-only, libre) ──────────────────
 if [[ "$CMD" == "apply" ]]; then
-  # ─── LA PORTÉE SE DÉRIVE DE LA SÉLECTION, ELLE NE SE DÉCLARE PAS ──────────────────────────────
-  #
-  # Une passe dont TOUS les modules sont `NEEDS: human` ne touche qu'un seul home : elle prend le
-  # verrou DE CET HUMAIN. Tout le reste prend le global. Deux humains n'ont aucun objet commun ;
-  # les sérialiser ne protège rien et coûte l'équipement d'un compte.
-  #
   # ⚠ DÉRIVÉE, JAMAIS PASSÉE EN ARGUMENT : rien de ce que l'APPELANT écrit ne décide de ce qui est
   # verrouillé. Un `--per-human` pourrait mentir ; `SELECTED` est ce qui va réellement tourner —
   # d'où le verrou APRÈS la sélection.
-  #
-  # `PROV_HUMAN` vide ⇒ verrou global, et c'est le repli sûr : sérialiser à tort coûte une attente,
-  # ne pas sérialiser assez coûte deux écrivains sur un objet.
   _lock_scope=""
   if [[ -n "${PROV_HUMAN:-}" ]]; then
     _lock_scope="$PROV_HUMAN"
@@ -373,38 +329,10 @@ if [[ "$CMD" == "apply" ]]; then
 fi
 
 # ─── LE JOURNAL DE CETTE MACHINE ─────────────────────────────────────────────────────────────────
-#
-# `system.manifest` dit ce que le provisionnement a le DROIT de poser — statique, versionné, le même
-# partout. Le journal dit ce qui a été posé ICI, et il porte le seul fait qu'aucun fichier statique
-# ne peut connaître : `apt_installed` contre `apt_already`. Sans cette séparation, une
-# désinstallation retire des paquets que l'opérateur avait avant — pire que d'en laisser.
-#
-# ⚠ LE RUNNER EST LE SEUL À POUVOIR L'OUVRIR : les modules sont des PROCESSUS, aucun ne voit ce
-# qu'un autre a noté ni ne sait quand la passe se termine. Le runner le crée avant la boucle, les
-# modules y notent, il le scelle après.
-#
-# ⚠ APPLY SEULEMENT : un `doctor` ne pose rien, et lui faire écrire un journal ferait raconter à la
-# machine une pose qui n'a pas eu lieu.
 JOURNAL_FILE="${LCARS_JOURNAL_FILE:-$PROV_ROOT/var/install.journal}"
 MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 
 # ─── uninstall — IL NE CONTIENT AUCUNE LISTE ────────────────────────────────────────────────────
-#
-# Il lit `system.manifest` (ce qu'on a le DROIT de poser) et `install.journal` (ce qui a été posé
-# ICI). La table est la source : une liste en dur ici serait un second inventaire, et celui qui
-# dérive est toujours celui qu'on ne relit pas.
-#
-#   · `preserve` N'EST JAMAIS TOUCHÉ, ni lui ni ce qu'il contient : c'est le TRAVAIL des gens.
-#   · SANS JOURNAL, AUCUN PAQUET N'EST RETIRÉ. Lui seul distingue ce que LCARS a installé de ce que
-#     l'opérateur avait déjà ; sans lui, retirer est un pari sur le bien d'autrui. On le DIT, et on
-#     laisse les paquets.
-#   · ⚠ UN OBJET PRÉSERVÉ PEUT DÉPENDRE D'UN OBJET D'EMPREINTE, et `groupdel` NE LE VOIT PAS : il
-#     ne refuse qu'un groupe PRIMAIRE d'un compte, jamais un groupe qui possède des fichiers. Les
-#     faces de projet sont en `2775 root:fleet` — retirer `fleet` les laisserait avec un GID
-#     orphelin. C'est à ce fichier de vérifier, pas à `groupdel`.
-#   · L'ORDRE EST L'INVERSE DE LA POSE : fichiers et liens, puis répertoires du plus profond au
-#     moins profond, groupes en dernier. Un `rm` de répertoire avant son contenu ne rate pas — un
-#     `groupdel` avant les fichiers qu'il possède, si.
 uninstall_run() {
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
 
@@ -460,17 +388,12 @@ uninstall_run() {
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
   local -a files=() dirs=() groups=() humans=() accounts=()
-  # ⚠ LA COLONNE SUBSTRAT FILTRE, ET CE N'EST PAS COSMETIQUE : une classe qui AGIT sur le mauvais
-  # substrat detruit sur la mauvaise machine.
   applies_here() { # applies_here <colonne substrat> -> 0 si cet objet concerne CE substrat
     local col="$1"
     [[ "$col" == "any" ]] && return 0
     [[ ",${col//+/,}," == *",$SUBSTRATE,"* ]]
   }
 
-  # ⚠ LE JOKER SE RESOUT SUR LE DISQUE : c'est la seule source qui sache quelle version est posee.
-  # Un motif non resolu ne fait pas ECHOUER — `[[ -d /opt/elixir-<version> ]]` rend faux, et la
-  # toolchain reste sur la machine sans que rien ne le dise.
   expand_version() { # expand_version <chemin pouvant porter <version>> -> 0..n chemins reels
     local pat="$1"
     [[ "$pat" == *"<version>"* ]] || { printf '%s\n' "$pat"; return 0; }
@@ -498,19 +421,9 @@ uninstall_run() {
     done < <(expand_version "$obj")
   done <<<"$rows"
 
-  # Du plus profond au moins profond : `/opt/lcars/tofu/providers` avant `/opt/lcars`.
   # ─── CE QUE LE JOURNAL SAIT ET QUE LA TABLE A OUBLIE ──────────────────────────────────────────
-  #
-  # La table dit ce qu'on a le DROIT de poser : statique, elle a des angles morts PROUVES — un nom
-  # compose a l'execution, un repertoire exempte, un objet pose sous condition. Le journal dit ce que
-  # CETTE passe a reellement pose sur CETTE machine, et il ne peut pas avoir d'angle mort de
-  # declaration puisqu'il est ecrit par le geste qui pose. D'ou les deux sources, pas une.
-  #
   # ⚠ LE JOURNAL NE PRIME JAMAIS SUR `preserve` — d'ou le filtre EN PREMIER. C'est la seule classe
   # dont l'autorite est absolue, et un second inventaire ne doit pas la contourner par derriere.
-  #
-  # ⚠ ET ON NE PLANIFIE PAS DEUX FOIS : un objet deja nomme par la table, ou vivant sous un
-  # repertoire qu'elle emporte, est deja au plan. Le re-lister ferait un compteur qui ment.
   local -a journal_files=() journal_dirs=()
   if [[ -r "$JOURNAL_FILE" ]]; then
     local _o _known
@@ -559,9 +472,6 @@ uninstall_run() {
   if [[ "${#docker_projects[@]}" -gt 0 ]]; then
     printf '  %-10s %s\n' "docker" "${docker_projects[*]}"
   fi
-  # ⚠ TROIS BRANCHES, PAS DEUX. « aucun paquet » et « journal illisible » affichent tous deux
-  # AUCUN, et les fusionner dirait une IGNORANCE la ou on a une CERTITUDE : le troisieme etat est
-  # le seul ou l'uninstall SAIT qu'il n'y a rien a retirer.
   if [[ "${#journal_pkgs[@]}" -gt 0 ]]; then
     printf '  %-10s %d paquet(s) : %s\n' "apt" "${#journal_pkgs[@]}" "${journal_pkgs[*]}"
   elif [[ ! -r "$JOURNAL_FILE" ]]; then
@@ -632,7 +542,6 @@ uninstall_run() {
 
   if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
     for o in "${humans[@]}"; do
-      # Le joker `<human>` se resout sur les homes reels — le manifeste ne peut pas les nommer.
       local h real
       for h in /home/*; do
         real="${o//<human>/$(basename "$h")}"
@@ -649,10 +558,6 @@ uninstall_run() {
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
   done
   # ─── LES OBJETS DOCKER ────────────────────────────────────────────────────────────────────────
-  #
-  # ⚠ LES VOLUMES NE PARTENT PAS, ET C'EST DELIBERE : `<projet>_data` porte LES DEPOTS DE LA FORGE,
-  # du travail et pas de l'etat. On retire ce qui se reconstruit — conteneurs et reseaux — et on
-  # NOMME ce qu'on laisse.
   local proj cid vol
   for proj in ${docker_projects[@]+"${docker_projects[@]}"}; do
     command -v docker >/dev/null 2>&1 || { echo "  ${_PA}docker absent — projet « $proj » laissé entier${_PN}"; break; }
@@ -661,8 +566,6 @@ uninstall_run() {
       docker rm -f "$cid" >/dev/null 2>&1 && removed=$((removed + 1)) \
         || echo "  ${_PA}conteneur non retiré : $cid${_PN}"
     done < <(docker ps -aq --filter "label=com.docker.compose.project=$proj" 2>/dev/null)
-    # Le reseau part avec le projet. Un reseau absent n'est pas une erreur — un `up` qui n'a jamais
-    # eu lieu n'en a pas cree.
     if docker network rm "${proj}_default" >/dev/null 2>&1; then
       removed=$((removed + 1))
     fi
@@ -674,8 +577,6 @@ uninstall_run() {
   done
 
   # ─── LES COMPTES D'HUMAINS — SOUS `--humans`, ET JAMAIS AUTREMENT ─────────────────────────────
-  #
-  # ⚠ CETTE CLASSE EST LA SEULE DU VERBE QUI PUISSE SUPPRIMER UNE PERSONNE.
   if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
     local per home
     for per in ${persons[@]+"${persons[@]}"}; do
@@ -697,9 +598,6 @@ uninstall_run() {
 
   # ⚠ LES COMPTES AVANT LES GROUPES : `groupdel` refuse un groupe PRIMAIRE d'un compte existant, donc
   # l'inverse laisserait les deux en place.
-  #
-  # ⚠ ET SEULEMENT LES COMPTES DE SERVICE : la classe `person` a sa propre boucle, sous `--humans`.
-  # Les fondre ferait un desinstalleur qui supprime des gens.
   for o in "${accounts[@]}"; do
     getent passwd "$o" >/dev/null 2>&1 || continue
     if userdel "$o" >/dev/null 2>&1; then
@@ -732,10 +630,6 @@ uninstall_run() {
 }
 
 # ─── audit — LA TABLE CONTRE LA MACHINE ─────────────────────────────────────────────────────────
-#
-# ⚠ IL NE LIT AUCUN CODE, ET C'EST TOUT SON INTERET. Les deux murs ISO de `system_manifest.bats`
-# extraient des litteraux d'un source ; ils sont donc aveugles a ce qu'un nom compose a l'execution,
-# a ce qu'un tiers pose, et a tout ce qui vit sous un repertoire exempte. Celui-ci lit la MACHINE.
 audit_run() {
   local avant="${1:-}" apres="${2:-}"
   [[ -r "$avant" && -r "$apres" ]] \
@@ -747,9 +641,6 @@ audit_run() {
   local cls obj mode owner sub
   while read -r cls obj mode owner sub; do declares+=("$obj"); done <<<"$rows"
 
-  # ⚠ COUVERT PAR UN ANCETRE, PAS SEULEMENT PAR LUI-MEME. Declarer `dir /opt/lcars` couvre tout ce
-  # qu'il porte : exiger une ligne par fichier ferait une table de dix mille lignes que personne ne
-  # relirait — et une table qu'on ne relit pas ne declare rien.
   couvert() {
     local p="$1" d
     for d in "${declares[@]}"; do
@@ -761,10 +652,6 @@ audit_run() {
     return 1
   }
 
-  # ⚠ CE QU'APT POSSEDE N'EST PAS A NOUS. La table ne declare pas le CONTENU des paquets — ils ont
-  # leur propre inventaire, et le journal sait lesquels ce rail a poses. Sans cette coupe,
-  # l'instrument signale dix mille objets legitimes, et un instrument qui crie apprend a etre ignore.
-  #
   # ⚠ ET IL SE JOUE SUR LA MACHINE DANS L'ETAT QUE DECRIT SON « APRES », PAS PLUS TARD : `dpkg -L`
   # interroge ce qui est installe MAINTENANT. Rejoue apres une desinstallation, il ne rend plus rien
   # et les fichiers des paquets ressortent tous comme non declares.
@@ -805,9 +692,6 @@ if [[ "$CMD" == "audit" ]]; then
   exit $?
 fi
 if [[ "$CMD" == "uninstall" ]]; then
-  # ⚠ ROOT N'EST EXIGÉ QUE POUR RETIRER. Lire un plan est une lecture : le refuser sans root
-  # obligerait l'opérateur à `sudo` pour SAVOIR ce qui va disparaître — c'est-à-dire à escalader
-  # avant de décider. La sonde reste ouverte, le geste reste fermé.
   [[ "$UNINSTALL_YES" -ne 1 || "$EUID" -eq 0 ]] \
     || die "uninstall --yes demande root (il retire des objets systeme) — sans --yes, il imprime son plan"
   uninstall_run
@@ -820,26 +704,13 @@ fi
 
 # ─── run_module <mod> <eff> — L'UID SE DÉCIDE ICI, ET UNE SEULE FOIS ─────────────────────────────
 #
-# Un module `# NEEDS: human` pose l'état d'UN humain dans le home de cet humain, sans une seule
-# opération root.
-#
-# ⚠ UNE DÉS-ESCALADE PAR LIGNE N'EST PAS UNE DÉS-ESCALADE : c'est autant d'occasions d'en oublier
-# une, et la ligne oubliée s'exécute en root sans que rien ne le dise. Le module DÉCLARE l'identité
-# dont il a besoin ; c'est au runner de la lui donner, pas à lui de la reconquérir.
 #
 # ⚠ `runuser` GARDE l'environnement exporté (mesuré) mais REPOSE le PATH depuis `login.defs`. Les
 # modules travaillent en chemins absolus et le runner ne pose aucun PATH, donc le décor est le même
 # des deux côtés de la frontière — mais un module qui prendrait une dépendance sur le PATH du runner
 # la perdrait ICI, silencieusement.
 #
-# ⚠ CE QUE ROOT TRAVERSAIT, L'HUMAIN DOIT Y AVOIR DROIT. L'install RO du prefix est `root:fleet`,
-# groupe seul (poste comme boîte) : un module per-humain qui y lit son template ne le peut que si
-# son humain est DANS le groupe de fleet. `20-groups` l'y met, et son rang est ce qui rend la
-# lecture possible aux rangs 40, 70 et 75 — réordonner casserait ça en silence, sur une lecture.
 #
-# L'humain cible est `PROV_HUMAN`, et il n'a qu'UN poseur : le drapeau `--human`, par lequel le
-# convergeur joue les modules per-humain d'un compte, dans un processus séparé. La variable est donc
-# posée à l'entrée, une fois — le sous-shell ci-dessous n'a pas à arbitrer entre deux origines.
 run_module() {
   local mod="$1" eff="$2" human="${PROV_HUMAN:-}" name
   name="$(basename "$mod" .sh)"
@@ -851,8 +722,6 @@ run_module() {
     if [[ "$(module_field "$mod" NEEDS)" != "human" || "$(id -un)" == "$human" ]]; then
       bash "$mod" "$eff"
     else
-      # Pas de message ici : `as_human` porte deja les deux cas — root impersonne, un tiers est
-      # refuse avec le motif exact. Un second ferait chercher deux causes a un seul fait.
       as_human bash "$mod" "$eff"
     fi
   )
@@ -875,16 +744,11 @@ for i in "${!SELECTED[@]}"; do
   rc=0
   run_module "$mod" "$eff" || rc=$?
   case "$CMD:$eff:$rc" in
-    # 3 = MORT AVANT SON VERDICT. Un code a lui seul parce que `2` est pris des DEUX cotes, et qu'un
-    # module tue par `set -e` rend justement 2 : le bilan disait « rien n'est cassé » d'un module qui
-    # n'avait pas fini de tourner. Seul le module sait s'il a rendu son verdict.
     *:*:3) failed=$((failed + 1)); REPORT+=("$name=ERROR") ;;
     doctor:check:0) ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     doctor:check:1) drift=$((drift + 1)); REPORT+=("$name=DRIFT") ;;
     doctor:check:*)
       failed=$((failed + 1)); REPORT+=("$name=ERROR")
-      # UN COMPTEUR SANS LIGNE EST UN ECHEC MUET : un module mort avant son verdict n'a RIEN
-      # imprime, et le bilan afficherait « échecs: 1 » sans nommer le module ni la raison.
       echo "${_PR}ERREUR $name:${_PN} sonde en erreur (rc=$rc) — si aucune ligne FAIL n'apparaît au-dessus, le module est MORT avant de rendre son verdict" >&2 ;;
     apply:apply:0)  ok=$((ok + 1));       REPORT+=("$name=OK") ;;
     # ⚠ AVANT LE FOURRE-TOUT `apply:apply:*` : `case` prend la PREMIERE clause qui matche, donc
@@ -905,13 +769,6 @@ if [[ "$PORCELAIN" -eq 1 ]]; then
   printf '%s\n' "${REPORT[@]}"
 else
   echo ""
-  # La source est dans le RÉCAP, pas seulement en tête : un verdict sans son origine ne se compare
-  # à rien, et c'est le récap qu'on colle dans un rapport.
-  #
-  # ⚠ LE JOURNAL NE PEUT PAS FAIRE ÉCHOUER UNE PASSE : il RACONTE ce qui vient d'être posé, il ne
-  # décide de rien. Un journal illisible est une perte d'information — elle se DIT, elle ne renverse
-  # pas un verdict que les modules viennent de rendre.
-  #
   # ⚠ ON ECRIT MEME SI L'ACCUMULATEUR EST VIDE — surtout pas de `-s` ici. Une passe qui ne pose RIEN
   # (un `--only`, une machine deja convergee) laisserait sinon l'ANCIEN journal en place avec son
   # `posed_at` d'une autre passe : un fichier qui se declare « mesure » et date d'avant est pire
@@ -944,9 +801,6 @@ else
         # Sans repli : la lib pose `PROV_PREFIX`, et un « inconnu » afficherait un etat qui n'existe pas.
         echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
-        # Une clef par ligne, valeurs fusionnées et dédoublonnées : `apt_ensure` est appelée par
-        # plusieurs modules, et trois lignes `apt_installed` pour un même paquet ne disent rien de
-        # plus qu'une.
         # ⚠ LE JOURNAL FUSIONNE AVEC LE PRECEDENT, IL NE LE REECRIT PAS. Le rail est CONCU pour etre
         # rejoue : a la seconde passe les paquets sont deja presents, donc `apt_installed` serait
         # VIDE et l'uninstall ne retirerait plus rien. Le fichier dirait « ce qui a ete pose sur
@@ -971,12 +825,6 @@ else
   fi
 
   echo "${_PC}=== provision $CMD — substrat $SUBSTRATE · source $PROV_SOURCE_REV ===${_PN}"
-  # UN COMPTEUR N'EST TEINTÉ QUE S'IL PORTE QUELQUE CHOSE : un « échecs: 0 » en rouge apprend à
-  # ignorer le rouge, et le jour où il vaut 3 on ne le voit plus.
-  #
-  # ⚠ LA TEINTE ENGLOBE « libellé: valeur », JAMAIS LA VALEUR SEULE. Une séquence ANSI glissée entre
-  # les deux COUPE le jeton — la sortie devient « drift: <ESC>1<ESC> », et la chaîne littérale
-  # « drift: 1 » que cherchent les témoins n'y est plus.
   _tint() { # _tint <couleur> <libellé> <valeur>
     if [[ "$3" -gt 0 ]]; then printf '%s%s: %s%s' "$1" "$2" "$3" "$_PN"; else printf '%s: %s' "$2" "$3"; fi
   }
@@ -1001,7 +849,5 @@ else
   fi
 fi
 [[ "$failed" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 2 || echo 1)"
-# Le drift résiduel a son propre code dans les DEUX verbes — en apply il valait 0, c'est-à-dire
-# « tout convergé », sur une machine dont un module venait d'imprimer DRIFT.
 [[ "$drift" -gt 0 ]] && exit "$([[ "$CMD" == "doctor" ]] && echo 1 || echo 2)"
 exit 0

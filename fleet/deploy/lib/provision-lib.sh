@@ -9,10 +9,6 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — bibliothèque des modules : primitives convergentes, écriture atomique, verdicts réels
-#
-# Sourcée par CHAQUE module — qui sont des PROCESSUS SÉPARÉS, jamais un namespace partagé : un
-# module qui meurt ne peut pas avorter les autres à mi-durcissement, ni marcher sur leurs compteurs.
-#
 # Contrat des primitives, les trois lois :
 #   1. CONVERGENTES — elles amènent l'état déclaré et ne font RIEN s'il y est déjà. Appliquer N fois
 #      = appliquer 1 fois, et re-converger vers la source COURANTE. Pas « append-once », qui
@@ -23,57 +19,28 @@
 #   3. ATOMIQUES — tout fichier est écrit tmp-même-dossier puis mv. Écrire `/etc/sudoers.d` ou
 #      `/etc/wsl.conf` EN PLACE, c'est un lockout sudo fleet-wide ou une distro qui ne boote plus,
 #      au premier write interrompu.
-#
-# Toute mutation effective incrémente PROV_CHANGED (le module le rapporte en fin d'apply).
-# Les commandes sont passées en ARGV, jamais en strings évaluées : une string interpole des valeurs
-# dans du code — injection dès qu'un chemin porte un métacaractère.
 
-# Garde de double-source (un module qui se ferait sourcer deux fois ne doit pas ré-écraser l'état).
 [[ -n "${PROVISION_LIB_LOADED:-}" ]] && return 0
 PROVISION_LIB_LOADED=1
 
-# La sonde docker vit dans une lib SANS effet de bord, sourcee ici et jamais recopiee : le script
-# d'entree du depot en a besoin AVANT tout clone, et n'a rien a faire des defauts d'INSTALLATION
-# poses plus bas.
 # shellcheck source=docker-endpoint.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker-endpoint.sh"
 
 # ─── Données par défaut — une SEULE définition, consommée par tous les modules ───────────────────
-#
-# LA RACINE UNIQUE : tout objet d'installation descend sous `PROV_ROOT`. Ce qu'on achete n'est pas
-# l'esthetique de `/`, c'est que `rm -rf <racine>` SOIT la desinstallation, et qu'un `.deb` puisse
-# empaqueter une empreinte qu'on sait nommer.
-#
-# `/opt/lcars` est deja le mot du runtime (`Fleet.Layout.@platform_root`), et la seule racine que la
-# norme reserve a un paquet applicatif autonome.
 : "${PROV_ROOT:=/opt/lcars}"
 
-# Deux SSoT nomment ce prefixe — celle-ci le VERIFIE, celle d'`etc/install.sh` le POSE — et
-# `racine_prefixe.bats` exige qu'elles s'accordent.
 : "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/install.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
-# Le compte du service d'autorite : il DETIENT les secrets de forge et n'a AUCUN privilege
-# noyau. L'inverse exact du convergeur, qui a le privilege et ne detient rien. Pose par
-# `21-service-accounts`, membre de `$PROV_FLEET_GROUP` pour TRAVERSER l'install RO — jamais
-# pour decider : l'adminite ne se projette dans AUCUN groupe unix, elle se demande a la forge a
-# l'instant du geste, par un service qui lit l'uid de son pair dans le noyau.
 : "${PROV_AUTHORITY_USER:=lcars-authority}"
 
 # ─── LE GROUPE QUI PORTE EXACTEMENT UN POUVOIR : TRAVERSER ──────────────────────────────────────
-# Le PRODUCTEUR d'une socket de console (ttyd, sous l'humain) et son CONSOMMATEUR (le deck, sous
-# `lcars-system`) doivent se rencontrer sans que ni l'un ni l'autre ne change d'identite. Le
-# repertoire de chaque humain est `2710 <humain>:lcars-console` : le setgid fait heriter ce groupe a
-# la socket, et le `--x` du groupe donne la traversee sans le listage.
-#
 # ⚠ SURTOUT PAS `$PROV_FLEET_GROUP` : celui-la porte deja la lecture de l'install RO et des jetons,
 # le reutiliser ici accorderait tout le reste par la meme occasion. Une console montee sous le
 # mauvais groupe est vivante et injoignable — un pouvoir qu'on ne sait pas dire en une phrase est
 # trop large.
 : "${PROV_CONSOLE_GROUP:=lcars-console}"       # traverser /run/lcars/console/<humain>, RIEN d'autre
 : "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
-# Les jetons sont de l'ETAT, pas du travail : ils se refabriquent contre la forge. Plusieurs defauts
-# nomment ce repertoire dans trois langages, et `racine_jetons.bats` exige qu'ils s'accordent.
 : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
 # L'AUTORITE DE CREATION, posee par `box config`. ⚠ SON SUFFIXE N'EST PAS `.gitea_token`, celui des
@@ -83,14 +50,6 @@ PROVISION_LIB_LOADED=1
 : "${PROV_UID_MAP_FILE:=$PROV_TOKENS_DIR/forge-uid.map}"
 
 # ─── LES TROIS PROJETS COMPOSE DU POSTE, ET LE RESEAU DE LA FORGE ───────────────────────────────
-#
-# ⚠ ILS VIVENT ICI PARCE QUE DEUX MODULES LES LISENT. `48-forge-host` monte la forge, `49-forge-runner`
-# enrole le runner sur SON reseau : les derivations etaient dans 48, donc 49 aurait du les recopier —
-# et une recopie de derivation est le defaut que `toolchain.branch_single_source` existe pour tenir,
-# un etage plus bas. Une seule base, quatre noms derives, un seul endroit.
-#
-# `--forge-project bob` nomme la BASE : la forge devient `bob-forge`, le runner `bob-runner`, la boite
-# `bob-fleet` (celle-la est derivee par `deploy/box`, qui n'est pas un module).
 : "${PROV_FORGE_BASE:=lcars}"
 : "${PROV_FORGE_PROJECT:=${PROV_FORGE_BASE}-forge}"
 : "${PROV_RUNNER_PROJECT:=${PROV_FORGE_BASE}-runner}"
@@ -102,14 +61,8 @@ PROVISION_LIB_LOADED=1
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
-# LE MATERIEL DES CATALOGUES INSTALLES — miroir shell de `Fleet.Layout.catalogues_installed_dir/0`,
-# verrouille par `catalogue.install_paths_locked` de `mix lcars.contracts.check`. Diverger d'avec le
-# runtime ne casse rien : `45-catalogues` converge un repertoire que personne ne lit, et la boite
-# tourne sur le catalogue livre en annonçant qu'elle en sert trois.
 : "${PROV_CATALOGUES_DIR:=/home/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
-# SON JETON SE DÉRIVE DE SON LOGIN, COMME LES AUTRES : le contrat est `<login>.gitea_token`, et un
-# nom qui s'en écarte réclame une table de cas particuliers.
 : "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
 # La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck.
@@ -128,49 +81,29 @@ PROVISION_LIB_LOADED=1
 # bouton « s'identifier » qui n'arrive nulle part depuis une autre machine.
 : "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
 : "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
-# Le deck de la BOÎTE (porte d'entrée, hors de l'espace des blocs humains) et son client OAuth2.
-# Les ORIGINES sont les adresses par lesquelles on entre vraiment : OAuth2 compare le `redirect_uri`
-# EXACTEMENT, donc une entrée non déclarée échoue au RETOUR, après l'identification, là où c'est le
-# plus déroutant. La loopback est toujours incluse ; le reste se déclare.
 : "${PROV_DECK_PORT:=20999}"
 : "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
 : "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
 # Combien de lignes d'une commande en échec atterrissent à l'écran (le reste vit dans le fichier).
 : "${PROV_DUMP_LINES:=40}"
-# Jambe update du triangle (source→forge→runtime) : le remote à puller et le repo ATTENDU derrière.
 # ⚠ `PROV_EXPECTED_REPO` N'A PAS DE DÉFAUT, ET C'EST L'INVARIANT : l'autorité se DÉCLARE, elle ne se
 # devine pas. Vérifier le remote APRÈS le pull inverse la chaîne (F-E1).
 : "${PROV_UPDATE_REMOTE:=origin}"
 : "${PROV_EXPECTED_REPO:=}"
-# Toolchain build : CELLE DE LA DISTRO. Deux PLANCHERS, aucun téléchargement.
-#
-# ⚠ NE PINNE PAS UNE VARIANTE D'OTP À CÔTÉ DE L'APT : un paquet apt d'Elixir est compilé CONTRE
-# l'Erlang de sa propre distro. Un plancher tolère un écart, une variante non — poser un Elixir bâti
-# pour OTP 25 sur une VM 27 passe le plancher en vert et fait tourner du bytecode d'un compilateur
-# sur la machine d'un autre.
-#
 # ⚠ `mix.exs` EXIGE `~> 1.18`, ET C'EST LUI L'AUTORITÉ. Ce plancher-ci n'est pas une seconde
 # exigence : il est ce que le rail vérifie AVANT de bâtir, pour que l'échec dise « distro trop
 # vieille » au lieu de mourir dans `mix deps.get`. Les deux se déplacent ensemble.
 : "${PROV_ELIXIR_OTP_MAJOR:=27}"
 : "${PROV_ELIXIR_MIN:=1.18}"
-# L'humain cible des modules per-humain : celui qui a lancé (à travers sudo s'il y a lieu).
 : "${PROV_HUMAN:=${SUDO_USER:-$(id -un)}}"
 
 # ─── Verdicts / log ───────────────────────────────────────────────────────────────────────────────
-# Préfixe = nom du module (posé par le runner via PROVISION_MODULE, sinon dérivé de $0).
-# Doctrine log LCARS : le nominal est SILENCIEUX en succès de sonde, une ligne par état constaté ;
-# l'échec est VERBEUX (dump complet). Compteurs agrégés par le module.
 PROV_MODULE_TAG="${PROVISION_MODULE:-$(basename "${0:-provision-lib}")}"
 PROV_CHANGED=0
 PROV_DRIFT=0
 PROV_FAILED=0
 
 # ─── LA PALETTE — LA MÊME QUE CELLE DU BANDEAU D'ENTRÉE ─────────────────────────────────────────
-#
-# ⚠ LA COULEUR NE SORT QUE SUR UN TERMINAL : une séquence ANSI dans un fichier de log, c'est du
-# `[1;32m` au milieu du texte, illisible à la relecture et cassé au grep. `PROV_COLOR=1` la force
-# pour un `script`/`unbuffer`.
 if [[ -n "${NO_COLOR:-}" ]]; then PROV_COLOR=0
 elif [[ -n "${PROV_COLOR:-}" ]]; then :
 elif [[ -t 1 ]]; then PROV_COLOR=1
@@ -182,13 +115,6 @@ else
   _PG=''; _PC=''; _PA=''; _PR=''; _PN=''
 fi
 
-# Une action longue et muette n'est pas discernable d'un blocage : `p_step` dit ce qui COMMENCE,
-# pour les etapes ou `run_quiet` reste silencieux plusieurs minutes.
-#
-# ⚠ LA TEINTE ENVELOPPE TOUT LE PREFIXE « ETIQUETTE  module: », REMPLISSAGE COMPRIS. Une sequence
-# ANSI glissee entre l'etiquette et le nom du module COUPE le jeton — la sortie devient
-# « <ESC>ERREUR<ESC> 90-mort », et la chaine litterale « ERREUR 90-mort » que des temoins cherchent
-# n'y est plus.
 p_step() { printf '%s>>    %s:%s %s\n' "$_PC" "$PROV_MODULE_TAG" "$_PN" "$*"; }
 # ⚠ LES DEUX RENDENT 0, EXPLICITEMENT. Sans ce `return`, leur code de sortie est celui de `printf` —
 # donc une ecriture qui echoue (EPIPE sur un pipe ferme, disque plein) fait partir le `|| p_drift`
@@ -207,12 +133,6 @@ p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MO
 #   apply   0 convergé · 1 au moins un échec · 2 appliqué, DRIFT RÉSIDUEL
 #   p_die   1, verdict rendu — fatal immédiat
 #   tout    3 MORT avant d'avoir rendu son verdict, posé par `_prov_exit_guard` ci-dessous
-# ─── UN MODULE QUI MEURT DOIT LE DIRE LUI-MEME ──────────────────────────────────────────────────
-#
-# Le 3 existe parce que `2` est pris DES DEUX COTES, et qu'un module tue par `set -e` rend justement
-# 2 : le runner ne peut pas distinguer « appliqué, drift résiduel » de « mort en route ». Le module,
-# lui, SAIT s'il a rendu son verdict.
-#
 # ⚠ La garde n'est armee que sous le RUNNER (`PROVISION_RUN`). Un extrait qui source cette lib pour
 # appeler une primitive — les temoins bats — n'est pas un module et n'a aucun verdict a rendre.
 PROV_VERDICT_RENDERED=0
@@ -237,9 +157,6 @@ verdict_check() {
   [[ "$PROV_DRIFT" -gt 0 ]] && exit 1
   exit 0
 }
-# ⚠ LE DRIFT D'UN APPLY SORT EN 2, JAMAIS EN 0 : rendre 0 ferait compter « convergé » un module qui
-# vient d'imprimer une ligne DRIFT. Et jamais 1 non plus — ce serait confondre « je n'ai pas pu
-# converger » avec « j'ai cassé », deux mots dont l'opérateur a besoin séparément.
 verdict_apply() {
   PROV_VERDICT_RENDERED=1
   [[ "$PROV_FAILED" -gt 0 ]] && exit 1
@@ -248,18 +165,11 @@ verdict_apply() {
 }
 
 # ─── run_quiet — succès silencieux, échec verbeux (l'école mail-in-a-box `hide_output`) ──────────
-# La commande est un ARGV. En échec : la commande, son code, et TOUTE sa sortie sont dumpés.
-# Rien n'est jamais étouffé en `2>/dev/null` — un silence cache des permissions cassées.
 # ─── run_step <label> -- <cmd…> — UNE ETAPE LONGUE QUI DIT OU ELLE EN EST ───────────────────────
 #
 # Pour les etapes de plusieurs minutes, ou le mutisme de `run_quiet` ne distingue plus « ca
 # travaille » de « c'est fige ». Sur un terminal : UNE ligne reecrite en place. Ailleurs (log, CI) :
 # une ligne par CHANGEMENT de phase.
-#
-# ⚠ AUCUN POURCENTAGE INVENTE : la duree totale est inconnue, et une barre qui la devine ment tout
-# en etant crue. On affiche ce que l'enfant a REELLEMENT annonce — derniere phase reconnue dans sa
-# propre sortie, et temps ecoule. Si les marqueurs changent, la phase se fige et le chrono continue :
-# on perd du detail, jamais la verite.
 _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase reconnue
   local m
   # ⚠ `|| true` LOAD-BEARING, ET LA FONCTION NE SURVIT QUE PAR SA FORME D'APPEL. « Aucune ligne
@@ -299,8 +209,6 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
   local label="$1"; shift
   [[ "${1:-}" == "--" ]] && shift
   local rc=0 c
-  # `--verbose` : pas de suivi, tout defile — c'est le mode de celui qui veut le detail brut.
-  #
   # ⚠ NE DELEGUE PAS CETTE BRANCHE A `run_quiet` : il `p_fail`-e sur TOUT rc non nul, ne connait
   # aucune tolerance et ne pose pas `PROV_LAST_RC` — `--ok` se perdrait, et un mode d'AFFICHAGE
   # changerait un verdict.
@@ -370,7 +278,6 @@ run_step() { # run_step [--ok N]… <label> -- <cmd…>
 
 run_quiet() {
   local out rc=0
-  # `--verbose` : on ne capture RIEN, tout défile. Le verdict ne change pas — un échec compte pareil.
   if [[ "${PROV_VERBOSE:-0}" -eq 1 ]]; then
     "$@" || rc=$?
     [[ "$rc" -eq 0 ]] || p_fail "commande en échec (rc=$rc) : $*"
@@ -379,13 +286,7 @@ run_quiet() {
   out="$(mktemp "${TMPDIR:-/tmp}/prov-out.XXXXXX")"
   "$@" >"$out" 2>&1 || rc=$?
   if [[ "$rc" -ne 0 ]]; then
-    # ⚠ B1 — L'ECHEC DOIT PASSER PAR `p_fail`, QUI INCREMENTE `PROV_FAILED` : avec un `printf` nu,
-    # les compteurs restent a zero et `run_quiet x || verdict_apply` sort « convergé » sur un x qui
-    # a echoue.
     p_fail "commande en échec (rc=$rc) : $*"
-    # ⚠ BORNÉ À L'ÉCRAN, ENTIER SUR LE DISQUE. Deverser toute la sortie noie le verdict — une suite
-    # ExUnit en echec fait des milliers de lignes — et la supprimer ensuite laisse zero copie. La
-    # queue porte le verdict, le detail vit dans un fichier qu'on NOMME et qu'on garde.
     local n; n="$(wc -l < "$out")"
     {
       printf '───── sortie : %s dernières lignes sur %s ─────\n' "$PROV_DUMP_LINES" "$n"
@@ -427,8 +328,6 @@ prov_parse_remote() {
       rest="${url#*://}"
       ;;
     *:*/*)
-      # scp : `[user@]host:owner/repo`. Le `:` separe l'hote du chemin ; on le remplace par `/`
-      # pour rejoindre la forme commune.
       rest="${url%%:*}/${url#*:}"
       ;;
     *)
@@ -463,26 +362,9 @@ prov_parse_remote() {
 # et devinable. `/tmp` est inscriptible par tout le monde, et `exec 9>"$LOCK"` SUIT les liens et
 # TRONQUE la cible AVANT que `flock` n'ait protege quoi que ce soit — un utilisateur local pose ce
 # nom en lien vers un fichier root, et le prochain `sudo provision apply` le vide.
-#
-# Deux dossiers, un par identite, et aucun des deux n'est ecrivable par un tiers :
-#   * root      → `/run/lock/lcars`, cree root:root 0700. `/run/lock` est un tmpfs du systeme.
-#   * non-root  → `$XDG_RUNTIME_DIR/lcars` (0700 par construction, propriete de l'utilisateur), ou
-#                 `/run/user/<uid>/lcars` a defaut. `apply` peut tourner sans root quand aucun
-#                 module selectionne ne mute — ce cas a besoin d'un verrou lui aussi.
-#
 # ⚠ `TMPDIR` N'EST PAS HONORE : une variable d'environnement preservee a travers `sudo` deplacerait
 # le verrou dans un dossier que l'appelant choisit, et un verrou privilegie dont l'emplacement est un
 # parametre de l'appelant n'est pas un verrou. Un emplacement introuvable ARRETE.
-# ─── LA PORTEE DU VERROU — GLOBALE, OU CELLE D'UN SEUL HUMAIN ───────────────────────────────────
-#
-# ⚠ UN VERROU UNIQUE SERIALISE DES GESTES QUI NE SE TOUCHENT PAS, ET CA COUTE UNE INSTALL : le
-# convergeur equipe un humain PENDANT que l'install tient son propre apply, se fait refuser, et
-# l'humain garde un home, un shell, un groupe, et PAS de `claude` — sans que rien ne le lui dise.
-# La fenetre est celle du chemin nominal, pas un cas de bord.
-#
-# L'unite de travail EST l'humain : deux humains n'ont aucun objet commun — homes, `~/.lcars`,
-# binaires `claude` disjoints. Les serialiser ne protege rien.
-#
 # `prov_lock_path [portee]` — sans argument, le verrou GLOBAL d'une passe complete ; avec, le verrou
 # de cette portee-la.
 prov_lock_path() {
@@ -546,9 +428,6 @@ prov_lock_path() {
 # plus ; le glisser entre notre `lstat` et notre `chmod` marche encore, et fermer ca demanderait des
 # descripteurs `openat(O_NOFOLLOW)` que bash n'a pas. C'est la limite honnete de ce langage a cet
 # endroit, et la remonter voudrait dire sortir le provisioning de bash.
-#
-# Le chemin est parcouru COMPOSANT PAR COMPOSANT : un lien au milieu (`~/.config` -> ailleurs) est
-# aussi dangereux que le dernier.
 prov_refuse_symlink_path() {
   local path="$1" cur="" part
   local -a parts
@@ -645,7 +524,6 @@ ensure_mode() {
       changed=1
     fi
   fi
-  # Verdict réel : re-stat.
   cur_mode="$(stat -c '%a' "$path")"
   [[ "$cur_mode" == "$want_mode" ]] || { p_fail "ensure_mode: mode $cur_mode ≠ $want_mode après chmod: $path"; return 1; }
   if [[ "$changed" -eq 1 ]]; then PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
@@ -655,9 +533,6 @@ ensure_mode() {
 # ─── ensure_dir <path> <mode> [owner:group] ──────────────────────────────────────────────────────
 ensure_dir() {
   local path="$1" mode="$2" owner="${3:-}"
-  # `[[ -d ]]` SUIT LES LIENS : sans cette garde, un symlink-vers-dossier passait pour un dossier
-  # convergé et `ensure_mode` chownait sa CIBLE (6-131). Un composant qui n'existe pas encore n'est
-  # pas un lien, donc la creation nominale traverse la garde sans la voir.
   prov_refuse_symlink_path "$path" || return 1
   if [[ ! -d "$path" ]]; then
     mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
@@ -669,12 +544,6 @@ ensure_dir() {
 
 # ─── ensure_group / ensure_member — création idempotente ─────────────────────────────────────────
 # prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
-#
-# ⚠ CE CONTROLE NE PEUT PAS ETRE DELEGUE A `groupdel` : il refuse un groupe PRIMAIRE d'un compte
-# existant, et ne regarde JAMAIS qui possede des fichiers. Un groupe encore porte par un objet
-# preserve se supprime donc sans un mot, et ses fichiers restent sur un GID orphelin que le prochain
-# `groupadd` de la machine reattribuera.
-#
 # `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le
 # balayage s'arrete — une face de travail peut porter des dizaines de milliers de fichiers.
 prov_group_owns_preserved() {
@@ -689,9 +558,6 @@ prov_group_owns_preserved() {
 }
 
 # prov_manifest_gid <groupe> -> le GID que la TABLE declare, ou vide
-#
-# ⚠ CETTE TABLE EST APPLIQUEE, PAS SEULEMENT LUE A LA DESTRUCTION : une table qu'on execute est une
-# table qu'on ne peut plus laisser mentir.
 prov_manifest_gid() {
   local grp="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
   [[ -r "$f" ]] || return 0
@@ -702,9 +568,6 @@ ensure_group() {
   local grp="$1" gid="${2:-}"
   [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
   if ! getent group "$grp" >/dev/null; then
-    # ⚠ LE GID VIENT DE LA TABLE, ET SANS LUI IL FLOTTE : `groupadd` nu prend le premier libre, donc
-    # le meme produit rend des GID differents selon le rail qui l'a pose. Un GID absent de la table
-    # reste flottant — on ne l'invente pas ici.
     local -a args=()
     [[ -n "$gid" ]] && args+=(-g "$gid")
     run_quiet groupadd "${args[@]}" "$grp" || return 1
@@ -713,17 +576,11 @@ ensure_group() {
     prov_journal_note posed_group "$grp"
     return 0
   fi
-  # LE GROUPE EXISTE : on ne le DEPLACE pas — changer un GID sous des fichiers qui le portent les
-  # rendrait orphelins. On le DIT.
   local cur; cur="$(getent group "$grp" | cut -d: -f3)"
   [[ -z "$gid" || "$cur" == "$gid" ]] \
     || p_drift "groupe $grp : gid $cur, la table declare $gid — une machine ne se renumerote pas, elle se rebuilde"
 }
 
-# ⚠ MORTE ET MENTEUSE — aucun appelant dans le depot, et elle ne rend QUE les membres secondaires.
-# Son en-tete promettait « secondaires ET primaires » en expliquant qu'un humain dont le groupe
-# d'admin est primaire disparaitrait du rapport : c'est exactement ce qu'elle fait. Un `getent group`
-# ne liste que le champ 4 ; les primaires se lisent dans `passwd`. A refaire ou a retirer.
 members_of() {
   local grp="$1" sec
   sec="$(getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' ' ')"
@@ -737,7 +594,6 @@ ensure_member() {
     run_quiet usermod -aG "$grp" "$user" || return 1
     id -nG "$user" | tr ' ' '\n' | grep -qx "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    # `usermod -aG` ne prend effet qu'au PROCHAIN login : on le DIT.
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi
 }
@@ -778,9 +634,6 @@ ensure_managed_block() {
       $0 == e            {skip=0; next}
       !skip              {print}
     ' "$file")"
-  # B3 : write_atomic se nourrit par REDIRECTION, jamais par pipe — le membre droit d'un pipe
-  # est un sous-shell : ses compteurs (PROV_FAILED/PROV_CHANGED) mouraient avec lui, et un
-  # fichier non posé se rapportait vert.
   local tmp rc=0
   tmp="$(mktemp "${TMPDIR:-/tmp}/prov-block.XXXXXX")" || { p_fail "ensure_managed_block: tmp impossible"; return 1; }
   {
@@ -793,9 +646,6 @@ ensure_managed_block() {
 }
 
 # ─── fetch_verify <url> <sha256> <dest> <mode> — download pinné obligatoire ──────────────────────
-# ⚠ JAMAIS DE DOWNLOAD DIRECT VERS LA DESTINATION : un curl tronqué y laisserait un binaire cassé,
-# installé. Mismatch = dump attendu-vs-trouvé + rm + échec — le workflow de bump est de changer le
-# pin, lancer, et copier le sha réel depuis le message.
 fetch_verify() {
   local url="$1" sha="$2" dest="$3" mode="$4"
   local dir tmp actual
@@ -819,14 +669,6 @@ fetch_verify() {
 }
 
 # ─── prov_journal_note <clef> <valeur…> — CE QUI A ÉTÉ POSÉ *ICI* ───────────────────────────────
-#
-# `system.manifest` déclare ce que le provisionnement a le DROIT de poser. Il est statique, versionné,
-# le même pour toutes les machines. Le JOURNAL dit ce qui a été posé sur CELLE-CI, et il porte le
-# seul fait qu'aucun fichier statique ne peut connaître : la séparation entre ce que LCARS a
-# installé et ce qui était déjà là.
-#
-# Le canal est un fichier (cf. l'en-tête : les modules sont des processus).
-#
 # ⚠ C'EST UNE NOTE, PAS UN VERDICT. Un journal qui échoue ne fait pas échouer un apply : il raconte,
 # il ne décide pas. Sans accumulateur (`doctor`, module joué nu, témoin), la fonction est muette et
 # rend 0 — un appelant n'a jamais à savoir si le journal existe.
@@ -845,19 +687,8 @@ prov_journal_note() { # prov_journal_note <clef> <valeur…>
 }
 
 # ─── prov_announce_credential <libellé> <login> <secret> — CE QUI NE SE RELIRA PLUS ──────────────
-#
-# ⚠ UN SECRET AFFICHÉ AU MILIEU DE DEUX CENTS LIGNES EST UN SECRET PERDU, et l'afficher au moment
-# où il naît le condamne à ça. Ces credentials sortent de modules joués au rang 22 ou 48 : quarante
-# modules plus tard, l'encadré a défilé. Le seul endroit où un opérateur regarde vraiment, c'est la
-# FIN — donc c'est là qu'ils s'impriment, tous ensemble, une fois.
-#
 # ⚠ LE FICHIER EST EN 0600 ET IL EST DÉTRUIT APRÈS IMPRESSION, par l'appelant racine qui l'a créé :
 # le secret ne survit pas à l'installation qui l'a produit.
-#
-# ⚠ ET SANS ACCUMULATEUR, ON IMPRIME SUR PLACE. Un `provision apply` joué à la main n'a pas de
-# banner final : s'y taire échangerait un secret défilé contre un secret jamais montré, ce qui est
-# strictement pire. Le canal est une amélioration de l'affichage, jamais une condition de son
-# existence.
 prov_announce_credential() { # prov_announce_credential <libellé> <login> <secret>
   [[ "$#" -ge 3 ]] || return 0
   if [[ -n "${PROV_ANNOUNCE_FILE:-}" ]]; then
@@ -867,8 +698,6 @@ prov_announce_credential() { # prov_announce_credential <libellé> <login> <secr
   prov_print_credentials <<< "$(printf '%s\t%s\t%s\n' "$1" "$2" "$3")"
 }
 
-# L'encadré, séparé de la collecte : `install.sh` l'appelle sur le fichier accumulé, un module joué
-# nu l'appelle sur sa seule ligne. Une seule mise en forme, donc une seule à corriger.
 # ⚠ `printf '%-60s'` COMPTE DES OCTETS, PAS DES COLONNES, et tout libellé français casse alors le
 # cadre : « — », « é » et « ' » pèsent deux ou trois octets pour une seule colonne. `${#s}` en bash
 # compte des CARACTÈRES sous une locale UTF-8, donc la marge se calcule et ne se délègue pas.
@@ -943,33 +772,10 @@ apt_ensure() {
 }
 
 # ─── PAR QUELLE ADRESSE CETTE MACHINE EST-ELLE ATTEINTE DU DEHORS ? ─────────────────────────────
-#
-# ⚠ CE N'EST PAS LA MÊME QUESTION QUE « quelle est mon IP », et c'est le substrat qui les sépare.
-#
-# `ip route get 1.1.1.1` rend l'adresse SOURCE utilisée pour sortir — « par où je pars », qu'on lit
-# volontiers comme « par où on m'atteint ». Les deux coïncident sur une machine posée sur son LAN.
-# Sous WSL2 en mode NAT, non :
-#
-#   · l'eth0 de la VM vit sur un commutateur Hyper-V NATé. AUCUNE autre machine ne la route — pas
-#     « pare-feu à ouvrir » : pas de route, par construction ;
-#   · elle est RÉATTRIBUÉE à chaque redémarrage de WSL, donc même juste, elle périme seule ;
-#   · ce qui marche depuis Windows, c'est `localhost` : WSL relaie les ports publiés vers la VM.
-#
-# Le mode miroir (`--networking-mode mirrored`) supprime le NAT : la VM porte alors les interfaces
-# de l'hôte et `ip route get` redevient vrai. Le discriminant est donc le MODE, pas « est-ce WSL ».
-#
-# SOUS WSL ON RESTE HOST-ONLY, et ce n'est pas un pis-aller : le NAT est le défaut de WSL comme de
-# Docker Desktop, et l'ouvrir sur le LAN demanderait de reconfigurer la pile réseau Hyper-V. La cible
-# d'un déploiement joignable 24/7 sur le LAN est le Linux natif, où la dérivation nominale donne la
-# vraie adresse. Qui a déjà tuné son réseau saura le retuner : `--advertise` n'est pas ignoré.
 PROV_ADVERTISE=""
 PROV_ADVERTISE_WHY=""
 PROV_LAST_RC=0
 
-# COUTURE DE DÉCOR, MÊME IDIOME QUE `LCARS_SYSADMIN_UID` ET `LCARS_DOCKER`. Sans elle, tout témoin du
-# mode réseau MESURE LA MACHINE qui le joue : « sous WSL en NAT, on annonce localhost » n'est
-# exerçable que sur un WSL en NAT, donc la règle passe au vert chez son auteur et rougit ailleurs
-# sans avoir bougé. Un témoin qui n'est vrai que sur une machine ne garde rien.
 wsl_networking_mode() {
   [[ -n "${LCARS_WSL_NETWORKING_MODE:-}" ]] && { echo "$LCARS_WSL_NETWORKING_MODE"; return 0; }
   local m
@@ -982,10 +788,6 @@ wsl_networking_mode() {
 
 # L'adresse source de sortie — vide si indéterminable. Vraie SEULEMENT là où on est joignable par
 # elle : `advertise_addr` en est le seul appelant légitime.
-# ⚠ `|| true` LOAD-BEARING (B5) : `ip` n'existe pas partout — une image CI minimale ne l'a pas — et
-# sous `pipefail` une commande introuvable rend 127, que le pipeline propage. La fonction rendrait
-# 127, l'assignation echouerait, `set -e` tuerait l'appelant. « Vide si indeterminable » est le
-# contrat de cette fonction, et ce garde est ce qui le tient.
 lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 
 # advertise_addr <bind> — POSE DEUX GLOBALES, N'IMPRIME RIEN :
@@ -1027,26 +829,12 @@ advertise_addr() {
 }
 
 # ─── LES PORTS — FIXES PAR DÉFAUT, SURCHARGEABLES, ET SONDÉS AVANT D'ÊTRE PRIS ──────────────────
-#
-# ⚠ UN PORT OCCUPÉ N'EST PAS SILENCIEUX, IL EST MAL NOMMÉ — et c'est pire. `compose up -d` échoue
-# sur « port is already allocated » et le module conclut « la forge ne converge pas » ; le deck ne
-# bind pas et l'unité meurt en « posé mais PAS actif ». La cause vit dans une sortie dumpée, jamais
-# dans le verdict, et l'opérateur cherche un défaut de LCARS quand le fait est « autre chose tient
-# ce port ».
-#
 # Le risque n'est pas symétrique : `3000` est le défaut de la moitié de l'écosystème de dev — React,
 # Rails, Vite, Grafana — quand `20999` est choisi pour être improbable.
-#
-# ⚠ « PRIS PAR NOUS » N'EST PAS « PRIS PAR UN AUTRE », et confondre les deux rendrait la sonde
-# nuisible : au second passage, notre propre service tient le port, et refuser là serait casser
-# l'idempotence. L'appelant tranche — il sait, lui, si le service qui répond est le sien.
 port_taken() { # port_taken <port> -> 0 si quelque chose ÉCOUTE sur la loopback
   timeout 2 bash -c "</dev/tcp/127.0.0.1/$1" 2>/dev/null
 }
 
-# QUI le tient, quand on peut le dire. Sans privilège, `ss` ne rend pas le processus : on rend alors
-# une chaîne vide plutôt qu'une phrase creuse — un « occupé par (inconnu) » n'aide personne, et
-# prétendre nommer ce qu'on ne sait pas est la faute que ce dépôt paie le plus cher.
 port_holder() { # port_holder <port> -> description, ou VIDE
   command -v ss >/dev/null 2>&1 || return 0
   ss -ltnp 2>/dev/null \
@@ -1059,8 +847,6 @@ port_holder() { # port_holder <port> -> description, ou VIDE
 # utilisateur : exécution directe. Autre user non-root : impossible proprement, l'échec est dit.
 as_human() {
   local home
-  # `|| true` : même classe que B5 — sous pipefail, getent sur un user inconnu ferait échouer
-  # l'assignation avant la garde p_fail juste en dessous.
   home="$(getent passwd "$PROV_HUMAN" | cut -d: -f6 || true)"
   [[ -n "$home" ]] || { p_fail "as_human: user inconnu: $PROV_HUMAN"; return 1; }
   if [[ "$(id -un)" == "$PROV_HUMAN" ]]; then
@@ -1085,13 +871,6 @@ as_human() {
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
-#
-# ⚠ TOUS LES `# NEEDS: human` NE PARLENT PAS DU MÊME HUMAIN. L'entrypoint conteneur joue le cycle de
-# boot avec `--human $LCARS_ADMIRAL` : le sysadmin. C'est juste pour ce qui lui appartient (son
-# `~/.lcars`, son binaire `claude`), et FAUX pour ce qui appartient à une fleet — un module qui
-# poserait du travail de fleet sous cet uid le poserait sous le seul compte qui ne peut pas en
-# lancer une.
-#
 # DEUX CONDITIONS, PARCE QU'IL Y A DEUX RÈGLES, et c'est le même couple que le GUARD B de
 # `bin/fleet_v2` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
 #   1. `uid >= UID_MIN` — la frontière système/humain. Elle n'est pas à inventer : `/etc/login.defs`
@@ -1150,14 +929,8 @@ is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
 # login-là peut-il lancer une fleet » : on le lui a nommé, donc la borne HAUTE ne sert à rien.
 # Balayer `passwd` pose l'autre question, et `nobody` — uid 65534, présent sur toute machine —
 # répond OUI à la règle basse seule.
-#
-# `UID_MAX` est la borne que login.defs déclare pour exactement ça. Et la lecture passe par le
-# FICHIER, jamais par `id` : c'est ce qui rend la population mesurable par un témoin (`PASSWD_FILE`,
-# même couture que le convergeur d'humains).
 fleet_humans() {
   local seat
-  # Siège inconnu : on ne rend PAS une liste. Un `:-1000` ferait entrer le siège dans la population
-  # dès qu'il est ailleurs, et une liste fausse ici se lit comme une population.
   seat="$(prov_seat_uid)" || {
     echo "fleet_humans: siège non établi (ni ${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
     return 1
@@ -1167,21 +940,9 @@ fleet_humans() {
       '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
-# Racine du repo (le checkout depuis lequel on provisionne) — dérivée UNE fois de la position de
-# la lib (fleet/deploy/lib/ → ../../..), jamais re-devinée par heuristique dans un module.
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
 
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
-#
-# ⚠ UN PROVISIONNEMENT QUI NE DIT PAS D'OÙ IL VIENT EST LA PANNE QU'ON NE VOIT JAMAIS. Chaque module
-# converge son état-cible vers ce que dit SA source, donc « conforme » ne veut dire que « conforme à
-# l'arbre que j'ai sous la main » : un checkout en retard REMET EN PLACE l'état d'avant en rendant
-# vert, un correctif deja pose est defait, et rien ne relie le symptome suivant a l'arbre en retard.
-#
-# ⚠ ET LA COPIE, ELLE, N'EST PAS UN CHECKOUT. `/opt/lcars/fleet` est un `cp -a` : `git rev-parse`
-# n'y répond rien, donc un `provision` lancé depuis cette copie — c'est le cas du convergeur —
-# n'aurait AUCUN moyen de nommer sa propre origine. D'où le fichier : celui qui copie ÉCRIT la
-# révision qu'il a copiée, et celui qui lit la trouve. La révision voyage avec le code.
 PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 
 prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou « inconnue »
@@ -1215,29 +976,14 @@ prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
 }
 
 # ─── prov_roles — LE ROSTER FORGE, DERIVE DU MATERIEL ─────────────────────────────────────────────
-#
-# LE ROSTER SE DERIVE DE CE QUE LES CATALOGUES DECLARENT : le release lit leurs cap-profiles
-# (`entrypoint roles <racine>`), la meme porte que la recette tofu emprunte pour son roster. Un
-# catalogue installe apporte donc ses comptes sans qu'aucun fichier de deploiement ne le sache — une
-# liste ecrite a la main pour un ensemble qui grandit a chaque catalogue reste en retard.
-#
 # `PROV_ROLES` SURVIT COMME PLANCHER, et pas par prudence : les comptes `system_*` vivent dans le
 # catalogue SYSTEME, qui n'est pas installe — il est le substrat. Et une boite dont le release n'est
 # pas encore pose doit quand meme minter de quoi demarrer.
-#
-# ⚠ LE MINT NE PERD JAMAIS UN COMPTE QU'IL A DEJA CREE : l'union est cumulative, jamais un
-# remplacement. Un catalogue desinstalle laisse ses comptes derriere lui — c'est deliberé, ses
-# projets existent encore et leurs commits portent ces signatures.
 # ─── LE SIEGE : le #1 de la forge et le compte unix sont le MEME acteur ─────────────────────────
 #
 # La regle : celui des deux qui existe nomme l'autre, et le lien est enregistre — ligne `forge_id=1`
 # de `forge-uid.map`, la meme table que les humains de fleet. Une seconde table pour tenir une ligne
 # de la premiere ferait deux verites d'un meme fait.
-#
-# ⚠ CES PRIMITIVES VIVENT ICI PARCE QUE LES DEUX RAILS EN ONT BESOIN AVANT L'EXECUTEUR : la boite
-# lance `provision apply` avant lui, le poste nomme son admin forge au rang 48 et ne demarre l'unite
-# qu'au rang 64. Un verbe de l'executeur ne peut donc servir ni l'un ni l'autre.
-#
 # ⚠ ELLES LISENT ET ELLES ENREGISTRENT ; elles ne CREENT aucun compte. Chaque rail a deja son geste
 # de creation (`useradd` a l'entrypoint, le compte forge dans `48-forge-host`) et il le garde : une
 # lib sourcee qui creerait des comptes unix ET forge porterait une autorite que personne ne lui a
@@ -1251,8 +997,6 @@ prov_seat_from_map() { # le login du siege enregistre, ou vide
 # ⚠ ECRIT UNE FOIS, JAMAIS RE-ECRIT. Le home du siege vit sous son nom ; changer ce nom plus tard
 # laisserait un home orphelin et un compte qui ne le retrouve pas. La premiere resolution fait foi —
 # c'est elle qui correspond a ce qui est sur le disque.
-# Les deux arguments sont REQUIS et sans defaut : l'uid est celui que le systeme a donne, jamais un
-# nombre qu'on espere.
 prov_seat_record() { # prov_seat_record <login> <uid>
   local login="${1:?prov_seat_record: login requis}" uid="${2:?prov_seat_record: uid requis}"
   [[ -n "$(prov_seat_from_map)" ]] && return 0
@@ -1317,15 +1061,6 @@ prov_forge_seat_login() {
 #   PROV_SEAT_BINDING   le verdict d'ACCORD, un mot
 #   PROV_SEAT_LOGIN     le login du siege, vide seulement sur `unknown`
 #   PROV_SEAT_SOURCE    d'ou il vient — `table` | `forge` | `candidat`, vide sur `unknown`
-#
-# ⚠ TROIS GLOBALES ET PAS UN `echo`, POUR LA MEME RAISON QUE `advertise_addr` : un appelant ecrit
-# naturellement `v="$(prov_seat_binding x)"`, or `$( )` ouvre un SOUS-SHELL — la valeur revient par
-# stdout et les globales meurent avec lui.
-#
-# ⚠ LE VERDICT ET LA SOURCE SONT DEUX FAITS. Un verdict qui s'appellerait `forge_only` alors que le
-# login vient de la TABLE nommerait la mauvaise autorite dans le message d'un operateur qui
-# diagnostique — et c'est precisement quand la forge est en carafe qu'il lira cette ligne.
-#
 # Les cinq verdicts :
 #
 #   agree     le cote durable et le candidat unix nomment le meme acteur
