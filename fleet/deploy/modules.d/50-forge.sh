@@ -377,15 +377,12 @@ check_members_visible() {
 # labels attendus en ferait une TROISIEME copie — le gabarit livre la porte deja, les defauts de
 # `forge-runner.sh` aussi — et c'est exactement la forme qui derive.
 check_ci_runner() {
-  local tok body n labels
+  local body n labels
   [[ -r "$PROV_MASTER_TOKEN_FILE" ]] || {
     p_warn "runners CI non sondables (jeton master absent : $PROV_MASTER_TOKEN_FILE) — rien n'est conclu"
     return 0
   }
-  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE")"
-  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-          | curl -K - -fsS -m 10 \
-              "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  body="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -fsS -m 10 "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
   # Une API muette n'est PAS « zero runner » : la portee du jeton suffit a expliquer le silence, et
   # conclure a l'absence enverrait enroler un runner qui existe deja.

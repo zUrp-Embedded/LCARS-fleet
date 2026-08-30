@@ -344,7 +344,7 @@ announce_builtin_human_password() {
     return 0
   fi
 
-  tok="$(tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" 2>/dev/null || true)"
+  tok="$(read_token "$PROV_MASTER_TOKEN_FILE")"
   [[ -n "$tok" ]] || { p_warn "mot de passe forge de « $login » NON posé : aucun jeton master lisible"; return 0; }
 
   pw="$(new_password)"
@@ -406,33 +406,21 @@ reset_admin_password_if_asked() { # <rc de la création : 0 = compte tout juste 
 # Rend `admin`, `plain`, `absent`, ou `unknown` — quatre états, parce que « pas admin » et « pas de
 # compte » appellent deux gestes différents, et « je n'ai pas pu demander » n'en appelle aucun.
 forge_admin_state() { # forge_admin_state <login>
-  local tok body
-  # ⚠ `|| true` OBLIGATOIRE : sous `set -e` + `pipefail`, un fichier absent fait échouer la
-  # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
-  # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
-  #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
-  tok="$( { tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
-  [[ -n "$tok" ]] || { echo unknown; return 0; }
-  body="$(printf 'header = "Authorization: token %s"\n' "$tok" \
-          | curl -K - -fsS -m 10 "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" || {
-    # 404 = pas de compte ; tout le reste (forge muette, jeton périmé) n'est pas une réponse sur
-    # l'adminité, et se dire « absent » là-dessus ferait créer un compte qui existe peut-être.
-    if curl -fsS -m 10 -o /dev/null "$LOCAL_URL/api/v1/version" 2>/dev/null; then echo absent; else echo unknown; fi
-    return 0
-  }
-  case "$body" in
-    *'"is_admin":true'*|*'"is_admin": true'*) echo admin ;;
-    *) echo plain ;;
+  local out body code
+  [[ -n "$(read_token "$PROV_MASTER_TOKEN_FILE")" ]] || { echo unknown; return 0; }
+  out="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -sS -m 10 -w '\n%{http_code}' "$LOCAL_URL/api/v1/users/$1" 2>/dev/null)" \
+    || { echo unknown; return 0; }
+  code="${out##*$'\n'}"; body="${out%$'\n'*}"
+  case "$code" in
+    200) case "$body" in *'"is_admin":true'*|*'"is_admin": true'*) echo admin ;; *) echo plain ;; esac ;;
+    404) echo absent ;;
+    *)   echo unknown ;;
   esac
 }
 
 forge_promote_admin() { # forge_promote_admin <login>
   local tok
-  # ⚠ `|| true` OBLIGATOIRE : sous `set -e` + `pipefail`, un fichier absent fait échouer la
-  # substitution ET le script qui la contient. Un jeton manquant est une RÉPONSE ici, pas une panne.
-  # (la redirection englobe le GROUPE : `< fichier 2>/dev/null` laisse le shell crier lui-même
-  #  l'absence du fichier, sur un stderr qui n'a pas encore été détourné.)
-  tok="$( { tr -d '[:space:]' < "$PROV_MASTER_TOKEN_FILE" || true; } 2>/dev/null )"
+  tok="$(read_token "$PROV_MASTER_TOKEN_FILE")"
   [[ -n "$tok" ]] || return 1
   # `login_name` et `source_id` sont EXIGÉS par l'endpoint (Gitea les relit pour la source
   # d'authentification) : les omettre rend 422 sur un corps qui a l'air complet.

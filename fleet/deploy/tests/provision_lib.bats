@@ -1090,3 +1090,15 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   '
   [ "$status" -eq 0 ]
 }
+
+@test "read_token : absent = vide, rc 0 et AUCUN message — le shell ne crie pas l absence du fichier" {
+  # `tr < fichier 2>/dev/null` echoue sur la redirection d'entree avant que stderr soit detourne :
+  # bash imprime lui-meme « No such file » sur le vrai stderr. Un jeton absent est une REPONSE.
+  printf '  jeton \n' > "$BATS_TEST_TMPDIR/t"
+  module_sh '
+    out="$(read_token /nonexistent/jeton 2>&1)"; [ -z "$out" ]
+    out="$(read_token "" 2>&1)"; [ -z "$out" ]
+    [ "$(read_token "$BATS_TEST_TMPDIR/t")" = jeton ]
+  '
+  [ "$status" -eq 0 ]
+}

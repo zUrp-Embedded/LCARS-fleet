@@ -187,6 +187,35 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [ "$output" = "refuse" ]
 }
 
+@test "D7: un 401 sur /users n'est pas « pas de compte » — seul un 404 dit absent" {
+  # Un jeton perime rend 401 ; la forge repond sur /version ; le verdict disait « absent », et
+  # l'apply annoncait une inscription libre pour un compte qui existe. Le code HTTP se lit :
+  # 404 seul vaut absent, un 200 se parse, tout le reste est « unknown ».
+  mkdir -p "$PROV_TOKENS_DIR"; printf 'jeton\n' > "$PROV_TOKENS_DIR/forge-master.token"
+  local stub="$BATS_TEST_TMPDIR/stub"; mkdir -p "$stub"
+  cat > "$stub/curl" <<'STUB'
+#!/usr/bin/env bash
+# curl rejoue : CURL_CODE/CURL_BODY pour /users/*, 200 pour /version ; `-f` coupe a >= 400
+fail=0; url=""
+for a in "$@"; do case "$a" in -f|-fsS|-fs|-sf) fail=1 ;; http*) url="$a" ;; esac; done
+[[ " $* " == *" -K - "* ]] && cat > /dev/null
+case "$url" in */version) code=200; body='{"version":"1"}' ;; *) code="${CURL_CODE:-200}"; body="${CURL_BODY:-{}}" ;; esac
+if (( fail && code >= 400 )); then exit 22; fi
+printf '%s' "$body"; [[ " $* " == *" -w "* ]] && printf '\n%s' "$code"
+exit 0
+STUB
+  chmod +x "$stub/curl"
+  CURL_CODE=401 head_sh "PATH=$stub:\$PATH; forge_admin_state quiconque"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unknown" ]
+  CURL_CODE=404 head_sh "PATH=$stub:\$PATH; forge_admin_state quiconque"
+  [ "$output" = "absent" ]
+  CURL_CODE=200 CURL_BODY='{"is_admin":true}' head_sh "PATH=$stub:\$PATH; forge_admin_state quiconque"
+  [ "$output" = "admin" ]
+  CURL_CODE=200 CURL_BODY='{"is_admin":false}' head_sh "PATH=$stub:\$PATH; forge_admin_state quiconque"
+  [ "$output" = "plain" ]
+}
+
 @test "le verdict DIT sur quoi elle ecoute — un 200 local ne distingue pas les deux postures" {
   # Une forge ouverte au reseau et une forge fermee rendent le MEME `200` sur la loopback. C'est la
   # seule chose qu'un operateur ne peut pas deviner en la voyant repondre.

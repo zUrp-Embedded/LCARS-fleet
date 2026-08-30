@@ -1293,9 +1293,14 @@ arch_tag() {
 # illisible fait une requete ANONYME : une config vide est valide pour curl. Rend le rc de curl.
 forge_curl() {
   local tokfile="$1" tok=""; shift
-  [[ -n "$tokfile" && -r "$tokfile" ]] && tok="$(tr -d '[:space:]' < "$tokfile")"
+  tok="$(read_token "$tokfile")"
   { [[ -n "$tok" ]] && printf 'header = "Authorization: token %s"\n' "$tok" || true; } \
     | curl -K - "$@"
+}
+
+read_token() { # read_token <fichier> — le jeton sans blancs, ou rien : jamais un message, jamais un echec
+  [[ -n "${1:-}" && -r "$1" ]] && tr -d '[:space:]' < "$1"
+  return 0
 }
 
 # Le #1 de la forge, resolu par son ID et jamais par son nom : Gitea conserve l'`id` au renommage,

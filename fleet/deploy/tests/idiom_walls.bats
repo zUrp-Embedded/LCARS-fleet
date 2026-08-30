@@ -139,3 +139,14 @@ I3_AWK='
   [ "$hits" -eq 0 ]
   echo '  x="$(sed -n '"'"'s/^LCARS_X=//p'"'"' "$f" | tail -n1)"' | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"
 }
+
+@test "MUR I8: un fichier de jeton se lit par read_token ou forge_curl — jamais par une redirection nue" {
+  # `tr < "$X_TOKEN_FILE" 2>/dev/null` : la redirection d'entree est appliquee AVANT le detournement
+  # de stderr, et quand le fichier manque c'est le shell qui crie « No such file » sur le vrai
+  # stderr. `{ …; } 2>/dev/null` le tait, mais cette forme ne tient que par un commentaire.
+  local hits=0 f
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
+    if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE'; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+}
