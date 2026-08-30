@@ -50,7 +50,9 @@ node_version_posee() {
 # Ce que cette sonde NE prouve pas : que la doc corresponde a la revision courante. Rien dans
 # l'image ne le dit tant que `.source-revision` n'y est pas — c'est le sujet de 62-runtime-helpers,
 # pas celui-ci.
-DECK_DOC="${LCARS_DECK_DOC:-/opt/lcars/share/doc}"
+# La racine du produit DERIVE (`$PROV_ROOT`) : trois modules la redefinissaient en dur, ce qui fait
+# trois endroits a corriger le jour ou elle bouge — et deux qu'on oublie. Un mur le tient.
+DECK_DOC="${LCARS_DECK_DOC:-$PROV_ROOT/share/doc}"
 
 check_doc_batie() {
   local n
