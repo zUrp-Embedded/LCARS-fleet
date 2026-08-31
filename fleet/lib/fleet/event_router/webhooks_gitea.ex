@@ -61,8 +61,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   post "/webhook/gitea" do
     # PLUS DE SECONDE VERIFICATION ICI, et pas de clause defensive non plus. `:authenticate_webhook`
     # est le seul chemin vers cette route et il a deja calcule le HMAC sur le corps brut ; le
-    # recalculer serait payer deux fois, et une branche 401 inatteignable serait du code mort — la
-    # classe que ce chantier retire ailleurs.
+    # recalculer serait payer deux fois, et une branche 401 inatteignable serait du code mort.
     #
     # Ce qui remplace la branche : un MATCH. Si le plug etait retire ou deplace apres `Plug.Parsers`,
     # `conn.assigns` ne porterait pas la marque et cette ligne leve un MatchError — 500 bruyant au
@@ -252,14 +251,10 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   # Extract the issue from issues AND pull requests, keyed on the REPO-SCOPED `number`.
   #
-  # It used to key on the internal `id`, and the comment below said so while naming the divergence
-  # as latent: "if a webhook->pod correlation is ever wired, key it on `number`". A divergence that
-  # waits for its first consumer is a trap set for whoever wires it -- they inherit a ref that looks
-  # like an issue reference (`fleet/lcars#4711`) and is not one. Closed BEFORE that consumer exists,
-  # which is the only moment it costs nothing (BL-6-43.3).
-  #
-  # The display consumers gain from it too: the deck now shows the number a human can click, where
-  # the internal id matched nothing they could look up.
+  # NOT the internal `id`, and the difference is invisible at the output: a ref built from the id
+  # reads exactly like an issue reference (`fleet/lcars#4711`) and is not one. Whoever wires a
+  # webhook->pod correlation inherits that ref, and the deck shows a number a human can click
+  # rather than an id that matches nothing they can look up.
   #
   # No `id` fallback ON PURPOSE. A fallback would restore exactly the ambiguity being removed --
   # sometimes a number, sometimes an id, with no way to tell which -- and silently. A Gitea webhook
