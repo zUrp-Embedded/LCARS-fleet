@@ -18,11 +18,10 @@ defmodule Fleet.MCP.PodTools do
     * forge delegation (architect only, server-side gate) — creating and steering projects,
       tickets, dependencies, escalations, and the external publish surface.
 
-  ⚠ N'ENUMERE PAS LES OUTILS ICI. La liste qui vivait dans ce paragraphe a derive DEUX fois, et
-  elle etait fausse de six entrees quand ce commentaire a ete ecrit. L'AUTORITE est l'ensemble des
-  `deftool`, juste en dessous, et un mur la lit PAR L'AST : il refuse tout outil qui n'est ni
-  pod-scope ni role-gated, et toute clause de dispatch sans schema. Un outil absent d'une prose est
-  un commentaire perime ; un outil absent de ce mur n'existe pas.
+  ⚠ N'ENUMERE PAS LES OUTILS ICI — une liste posee dans ce paragraphe a deja derive DEUX fois.
+  L'AUTORITE est l'ensemble des `deftool`, juste en dessous, et un mur la lit PAR L'AST : il refuse
+  tout outil qui n'est ni pod-scope ni role-gated, et toute clause de dispatch sans schema. Un outil
+  absent d'une prose est un commentaire perime ; un outil absent de ce mur n'existe pas.
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly
   (the queue, its schema, its storage stay invisible to the pod); everything goes through
@@ -50,13 +49,13 @@ defmodule Fleet.MCP.PodTools do
 
   # L'EFFET DE CHAQUE OUTIL SUR LE MONDE, DECLARE ICI ET NULLE PART AILLEURS (6-106).
   #
-  # ⚠ Ce que ca remplace : une liste de CINQ mots nus dans un sigil, chez l'acceptor. Elle ne
-  # ressemblait a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
-  # `mcp__fleet__`, ni prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE
-  # et le dedup single-flight a cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas
-  # comme les autres est une liste qu'un renommage rate.
+  # ⚠ PAS UNE LISTE AILLEURS. Des noms d'outils poses en mots nus dans un sigil, chez l'acceptor,
+  # ne ressemblent a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
+  # `mcp__fleet__`, ni prose) : un renommage objet-d'abord les manque EN SILENCE, et le dedup
+  # single-flight cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas comme les autres
+  # est une liste qu'un renommage rate.
   #
-  # Elle vit desormais A COTE des definitions — donc un renommage la traverse — et son exhaustivite
+  # Ici, elle vit A COTE des definitions — donc un renommage la traverse — et son exhaustivite
   # est MECANIQUE : `mix lcars.contracts.check` lit les `deftool` par l'AST et refuse un outil sans
   # effet declare, ou un effet declare pour un outil qui n'existe pas. C'est la seule forme qui
   # empeche d'ajouter un mutateur et de l'oublier ; une liste, meme bien rangee, ne le peut pas.
@@ -160,12 +159,11 @@ defmodule Fleet.MCP.PodTools do
       )
     end
 
-    # ⚠ `payload` ÉTAIT UN `object` NU, ET C'EST LÀ QUE LA CHARGE MACHINE DES JUGES SE PERDAIT.
-    # MESURÉ le 2026-08-19 au banc, sur deux juges indépendants (probe-rails PR#34 puis PR#37) :
-    # trois verdicts rendus, trois gravures en prose, ZÉRO `details.findings_v1`. La consigne
-    # existe pourtant — `core/judge-verdict` la compose dans le SP de chaque juge — mais elle vit
-    # dans un bloc de prose lu au démarrage, à des centaines de lignes du moment où l'agent
-    # remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
+    # ⚠ UN `object` NU ICI, ET LA CHARGE MACHINE DES JUGES SE PERD. Mesuré au banc sur deux juges
+    # indépendants (probe-rails PR#34 puis PR#37) : trois verdicts rendus, trois gravures en prose,
+    # ZÉRO `details.findings_v1`. La consigne existe pourtant — `core/judge-verdict` la compose
+    # dans le SP de chaque juge — mais elle vit dans un bloc de prose lu au démarrage, à des
+    # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
     # disait « un objet ». Un objet, c'est tout ce qu'il rendait.
     #
     # Le schéma reste PERMISSIF (aucun `required` ajouté, aucun `additionalProperties: false`) :
@@ -1270,9 +1268,9 @@ defmodule Fleet.MCP.PodTools do
   # ============================================================
 
   # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
-  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. Since the
-  # 2026-07-19 reorg there is NO `project` wire param on the delegation tools: the arch has "the
-  # project", the system knows which — a param to refuse would itself leak that other repos exist.
+  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. There is
+  # NO `project` wire param on the delegation tools: the arch has "the project", the system knows
+  # which — a param to refuse would itself leak that other repos exist.
 
   def handle_tool_call("issue_create", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do
