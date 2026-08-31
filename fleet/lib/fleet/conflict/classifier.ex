@@ -97,10 +97,10 @@ defmodule Fleet.Conflict.Classifier do
   end
 
   # ONE pattern answers with a PAYLOAD and the behaviour has no room for it: `NonOverlapping`
-  # detects by performing the merge, so the boolean `detect?/1` threw away exactly what the
-  # assembler asked for next. It is special-cased HERE, visibly, rather than by widening the
-  # behaviour for nine patterns that have nothing to carry -- and the walk stays lazy, so a hunk
-  # settled by a higher-priority pattern still never pays for the merge.
+  # detects BY PERFORMING THE MERGE, so a boolean `detect?/1` throws away exactly what the assembler
+  # asks for next. It is special-cased HERE, visibly, rather than by widening the behaviour for every
+  # other pattern that has nothing to carry -- and the walk stays lazy, so a hunk settled by a
+  # higher-priority pattern still never pays for the merge.
   defp detect(NonOverlapping, raw) do
     case NonOverlapping.merge(raw) do
       {:ok, lines} -> {NonOverlapping, lines}

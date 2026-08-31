@@ -12,9 +12,9 @@ defmodule Fleet.Conflict.Diff do
           source: :ours | :theirs
         }
 
-  # THE TABLE IS THE COST, AND NOTHING BOUNDED IT. `lcs/2` fills one persistent-map entry per
-  # `{i, j}` couple -- `n * m` entries in time AND in memory, for a hunk whose size no caller
-  # limited. MEASURED on this build (two sequences of n lines each, strings of ~50 chars):
+  # THE TABLE IS THE COST, AND NOTHING BOUNDS IT ON ITS OWN. `lcs/2` fills one persistent-map entry
+  # per `{i, j}` couple -- `n * m` entries in time AND in memory, for a hunk whose size no caller
+  # limits. MEASURED on this build (two sequences of n lines each, strings of ~50 chars):
   #
   #     n=100    10 000 cells     3.4 ms      ~1 MiB
   #     n=200    40 000 cells    17.4 ms      ~7 MiB
