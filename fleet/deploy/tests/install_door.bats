@@ -278,18 +278,6 @@ setup() {
   refute_out 'FORGE_BASE_URL' <<<"$output"
 }
 
-@test "le preflight de branche vient APRES la question, jamais avant" {
-  # ⚠ PROPRIETE D'ORDRE, ET ELLE EST STRUCTURELLE. Sur la branche boite la distro n'est PAS la
-  # cible : on n'y pose ni /local, ni groupe, ni wsl.conf. Exiger une distro vierge dans le
-  # preflight COMMUN refuserait la machine de travail de quelqu'un qui voulait juste lancer une
-  # boite depuis elle — c'est le cas de la machine ou ce rail a ete ecrit.
-  local q pf
-  q="$(grep -n 'PRÉFLIGHT — UNE SEULE MESURE' "$SRC" | head -1 | cut -d: -f1)"
-  pf="$(grep -n 'PRÉFLIGHT DE LA BRANCHE' "$SRC" | head -1 | cut -d: -f1)"
-  local choice; choice="$(grep -n '─── LE CHOIX' "$SRC" | head -1 | cut -d: -f1)"
-  [ "$q" -lt "$choice" ]
-  [ "$choice" -lt "$pf" ]
-}
 
 @test "la branche BOITE ne POSE rien sur le systeme — c'est ca, la promesse auditee" {
   # ⚠ CE TEMOIN EPINGLAIT « n'escalade JAMAIS en root », ET C'ETAIT LE MAUVAIS INVARIANT. L'audit de
@@ -851,4 +839,84 @@ SPY
       /^\{ main / { next }
       { print \$0 }"' _ "$SRC" "$(( l_appel - 20 ))" "$l_appel"
   [ -z "$output" ] || { echo "code executable ENTRE main et son appel :" >&2; echo "$output" >&2; return 1; }
+}
+
+# ─── E3b : L'ORDRE DU CANON, ET LE BILAN QUI EXPOSE ─────────────────────────────────────────────
+
+@test "L ORDRE : accueil -> source -> prefligt -> bilan -> sortie" {
+  # ⚠ L'ACCUEIL EST GRATUIT, LE PREFLIGHT NE L'EST PAS. Celui qui a tape la commande doit savoir
+  # tout de suite ce qui va se passer, pas regarder un curseur en se demandant s'il a lance une
+  # installation. Et la SOURCE precede la mesure parce que le prefligt est un module du depot :
+  # pipee, cette porte n'a pas de clone, donc elle en fait un avant de pouvoir mesurer.
+  local l_accueil l_source l_pf l_bilan l_sortie
+  l_accueil="$(grep -n "1. L'ACCUEIL" "$SRC" | head -1 | cut -d: -f1)"
+  l_source="$( grep -n "1b. LA SOURCE" "$SRC" | head -1 | cut -d: -f1)"
+  l_pf="$(     grep -n '2. PRÉFLIGHT — UNE SEULE MESURE' "$SRC" | head -1 | cut -d: -f1)"
+  l_bilan="$(  grep -n 'LE BILAN — CE QUE LA MACHINE PERMET' "$SRC" | head -1 | cut -d: -f1)"
+  l_sortie="$( grep -n 'LA BRANCHE BOÎTE' "$SRC" | head -1 | cut -d: -f1)"
+  [ -n "$l_accueil" ] && [ -n "$l_source" ] && [ -n "$l_pf" ] && [ -n "$l_bilan" ] && [ -n "$l_sortie" ]
+  [ "$l_accueil" -lt "$l_source" ]
+  [ "$l_source"  -lt "$l_pf" ]
+  [ "$l_pf"      -lt "$l_bilan" ]
+  [ "$l_bilan"   -lt "$l_sortie" ]
+}
+
+@test "l accueil sort AVANT la premiere mesure — il ne coute rien, il ne se fait pas attendre" {
+  run bash "$SRC" --substrate docker < /dev/null
+  local l_accueil l_pf
+  l_accueil="$(grep -n 'porte d.entrée' <<<"$output" | head -1 | cut -d: -f1)"
+  l_pf="$(grep -n 'Préflight' <<<"$output" | head -1 | cut -d: -f1)"
+  [ -n "$l_accueil" ] && [ -n "$l_pf" ]
+  [ "$l_accueil" -lt "$l_pf" ]
+  # Et il dit les DEUX choses que le canon lui demande : le deroule, et les grands prerequis.
+  [[ "$output" == *"Le déroulé"* ]]
+  [[ "$output" == *"prérequis"* ]]
+}
+
+@test "LE BILAN EXPOSE l option impossible, il ne la CACHE pas" {
+  # ⚠ LA VERSION D'AVANT CHOISISSAIT EN SILENCE. Sur un linux natif elle posait `RAIL=box` sans rien
+  # demander, et elle masquait l'option 2 quand docker manquait : l'ecran ne portait plus la trace de
+  # ce qui n'etait pas offert, ni pourquoi. Un menu qui cache une option fait croire qu'elle n'existe
+  # pas ; un menu qui la barre EN NOMMANT SON FAIT apprend la machine a celui qui la lit.
+  run bash "$SRC" --substrate docker < /dev/null
+  [[ "$output" == *"Bilan"* ]]
+  # LES DEUX options sont la, numerotees, meme celle qui est impossible.
+  [[ "$output" == *"1)"* ]]
+  [[ "$output" == *"2)"* ]]
+  [[ "$output" == *"IMPOSSIBLE"* ]]
+  # Et le bilan porte l'etat mesure, pas une devinette.
+  [[ "$output" == *"substrat"* ]]
+  [[ "$output" == *"docker"* ]]
+}
+
+@test "le REFUS donne la voie qui marche — les deux rails sont des sorties l un pour l autre" {
+  # Un refus qui ne dit pas par ou passer laisse quelqu'un devant un mur.
+  run bash "$SRC" --substrate docker --workstation < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas possible ici"* ]]
+  [[ "$output" == *"wsl --install"* ]]
+}
+
+@test "--check s ARRETE au bilan : une sonde ne choisit pas de rail" {
+  # Aller plus loin demanderait un rail, donc un choix, donc une mutation.
+  run bash "$SRC" --check < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bilan"* ]]
+  [[ "$output" == *"workstation doctor"* ]]
+  [[ "$output" == *"box doctor"* ]]
+}
+
+@test "PIPEE : la porte fait sa SOURCE elle-meme, sous l humain, sans sudo" {
+  # ⚠ C'EST LE GESTE VOULU (`curl … | bash`), ET IL VA JUSQU'AU BOUT. L'ancienne porte clonait EN
+  # ROOT (`runuser`) apres son escalade : le clone appartenait a root, et `git` le lisait ensuite en
+  # « dubious ownership ». Ici il n'y a pas d'escalade du tout.
+  #
+  # ⚠ PAS DE `< /dev/null` : il ecraserait le pipe, et bash lirait /dev/null comme script. Le `read`
+  # de la pause va chercher /dev/tty tout seul, et retombe sur le refus sans TTY.
+  local dest="$BATS_TEST_TMPDIR/clone-pipe"
+  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --box --repo '$REPO' --branch \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
+  [[ "$output" == *"source"* ]]
+  [ -x "$dest/fleet/deploy/provision" ]
+  # Le clone appartient a CELUI QUI A LANCE, jamais a root.
+  [ -O "$dest" ]
 }

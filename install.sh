@@ -143,19 +143,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── PRÉFLIGHT — UNE SEULE MESURE, ET C'EST CELLE DU PROVISIONNEMENT ────────
+# ─── LES OUTILS DE LA PORTE — des définitions, aucune exécution ─────────────
 #
-# ⚠ CETTE PORTE MESURAIT ELLE-MÊME, et c'est la duplication que le canon proscrit nommément (« le
-# préflight dupliqué entre la porte et ce qui vit dans deploy/ : une seule mesure »). Deux sondes du
-# même fait dérivent — et celle qu'on ne relit pas est celle qui ment le jour où l'autre change.
-#
-# Le module `00-preflight` porte désormais les deux rails. Il parle deux fois : en lignes pour un
-# humain, et en faits `nom=valeur` (`p_fact`) dans `PROV_FACTS_FILE` pour qui doit DÉCIDER. La porte
-# est ce « qui » : elle ne mesure plus rien, elle lit.
-#
-# ⚠ `doctor`, PAS `apply`, ET SANS SUDO : `doctor` est read-only, `NEEDS: root` n'est contrôlé qu'à
-# l'apply (`provision`, `run_module`). La porte n'a pas de sudo et n'en aura pas — c'est le rail qui
-# escalade, à son début.
+# ⚠ CE BLOC N'EST PAS LE PRÉFLIGHT, ET LE TITRE QU'IL PORTAIT LE FAISAIT CROIRE. Un témoin d'ordre a
+# lu ce titre comme la mesure et a place le préflight AVANT l'accueil, sur un fichier où l'ordre
+# d'exécution était pourtant juste. Un intertitre est lu comme un repère : il doit désigner ce qui
+# s'exécute là, pas ce qui se déclare.
 preflight_ok=1
 say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
@@ -175,18 +168,73 @@ case "${FORCED_SUBSTRATE:-wsl}" in
   *) echo ""; echo "  ${R}--substrate $FORCED_SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
 esac
 
-echo ""
-echo "  ${W}Préflight${N}"
+# ─── 1. L'ACCUEIL — IMMÉDIAT, AVANT TOUTE MESURE ────────────────────────────
+#
+# ⚠ IL VIENT EN PREMIER PARCE QU'IL EST GRATUIT. Le préflight prend quelques secondes ; celui qui a
+# tapé la commande doit savoir tout de suite ce qui va se passer et ce que ça demande, pas regarder
+# un curseur en se demandant s'il a lancé une installation.
+cat <<EOF
 
-if [[ ! -x "$PROVISION" ]]; then
-  # La porte seule (`wget install.sh` sans le dépôt) : le préflight vit dans le clone, donc la
-  # source doit venir avant lui. Ce chemin est le flux « standalone » — il se traite à sa place,
-  # dans l'accueil, pas ici en devinant ce que la machine vaut.
-  echo "  ${R}Ce script est seul : le préflight vit dans le dépôt, et il n'est pas là.${N}"
-  echo "  Clone d'abord, puis relance depuis le clone :"
-  echo "    git clone $REPO_URL && bash LCARS-fleet/install.sh"
-  exit 1
+  ${W}LCARS-FLEET v2${N} — porte d'entrée ${W}$LCARS_DOOR_VERSION${N}
+
+  Le déroulé : ${W}source${N} → ${W}préflight${N} → ${W}bilan${N} → ${W}ton choix${N} → le rail.
+  Rien n'est modifié avant ton choix, et cette porte ne demande jamais sudo.
+
+  Les grands prérequis : ${W}git${N} pour la source · ${W}docker${N} pour la boîte ·
+  ${W}sudo${N} pour le poste (demandé par le rail lui-même, une fois, après ton choix).
+
+EOF
+
+# ─── 1b. LA SOURCE — ELLE VIENT AVANT LE PRÉFLIGHT, QUI VIT DEDANS ──────────
+#
+# ⚠ PIPÉE, CETTE PORTE N'A PAS DE CLONE, et le préflight est un module du dépôt. La source doit donc
+# précéder la mesure — c'est l'ordre du canon, et c'est aussi ce qui rend `curl … | bash` jouable.
+#
+# ⚠ SOUS L'HUMAIN, SANS SUDO. L'ancienne porte clonait EN ROOT (`runuser`) après son escalade : le
+# clone appartenait à root, et `git` le lisait ensuite en « dubious ownership ». Ici il n'y a pas
+# d'escalade du tout — git est le seul prérequis de cette étape.
+if [[ -z "$SCRIPT_DIR" || ! -x "$SCRIPT_DIR/fleet/deploy/provision" ]]; then
+  command -v git >/dev/null 2>&1 || {
+    echo "  ${R}git est absent, et c'est le seul prérequis de cette étape.${N}"
+    echo "    apt install git   (ou l'équivalent de ta distro)"
+    exit 1
+  }
+  SRC_DIR="${LCARS_SRC:-$HOME/LCARS-fleet}"
+  if [[ -d "$SRC_DIR/.git" ]]; then
+    echo "  ${W}source${N} : $SRC_DIR existe — synchronisation sur ${W}$BRANCH${N}"
+    git -C "$SRC_DIR" fetch --quiet origin \
+      && git -C "$SRC_DIR" checkout --quiet "$BRANCH" \
+      && git -C "$SRC_DIR" pull --quiet --ff-only origin "$BRANCH" \
+      || { echo "  ${R}la synchronisation a échoué — règle-la, puis relance.${N}"; exit 1; }
+  else
+    echo "  ${W}source${N} : clone de $REPO_URL (${W}$BRANCH${N}) → $SRC_DIR"
+    git clone --quiet --branch "$BRANCH" "$REPO_URL" "$SRC_DIR" \
+      || { echo "  ${R}le clone a échoué — règle-le, puis relance.${N}"; exit 1; }
+  fi
+  SCRIPT_DIR="$SRC_DIR"
+  PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
+  [[ -x "$PROVISION" ]] || {
+    echo "  ${R}provision introuvable après la source : $PROVISION${N}"
+    echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est le checkout."
+    exit 1
+  }
 fi
+
+echo ""
+# ─── 2. PRÉFLIGHT — UNE SEULE MESURE, ET C'EST CELLE DU PROVISIONNEMENT ─────
+#
+# ⚠ CETTE PORTE MESURAIT ELLE-MÊME, et c'est la duplication que le canon proscrit nommément (« le
+# préflight dupliqué entre la porte et ce qui vit dans deploy/ : une seule mesure »). Deux sondes du
+# même fait dérivent — et celle qu'on ne relit pas est celle qui ment le jour où l'autre change.
+#
+# Le module `00-preflight` porte les deux rails. Il parle deux fois : en lignes pour un humain, et en
+# faits `nom=valeur` (`p_fact`) dans `PROV_FACTS_FILE` pour qui doit DÉCIDER. La porte est ce
+# « qui » : elle ne mesure plus rien, elle lit.
+#
+# ⚠ `doctor`, PAS `apply`, ET SANS SUDO : `doctor` est read-only, `NEEDS: root` n'est contrôlé qu'à
+# l'apply (`provision`, `run_module`). La porte n'a pas de sudo et n'en aura pas — c'est le rail qui
+# escalade, à son début.
+echo "  ${W}Préflight${N}"
 
 FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
 trap '[[ -n "${FACTS_FILE:-}" ]] && rm -f "$FACTS_FILE"' EXIT
@@ -263,66 +311,107 @@ if [[ "$SUBSTRATE" == "wsl" ]] && ! unshare -Ur true 2>/dev/null; then
   exit 1
 fi
 
-# ─── LE CHOIX ───────────────────────────────────────────────────────────────
-if [[ -z "$RAIL" ]]; then
-  if [[ "$SUBSTRATE" != "wsl" ]] && [[ -z "${LCARS_ALLOW_ANY_HOST:-}" || "$SUBSTRATE" != "linux" ]]; then
-    RAIL=box
-    echo ""
-    echo "  ${W}Linux natif${N} — une seule option est permise ici : la boîte."
-    echo "  (le rail poste écrit dans /etc, /opt/lcars : il est réservé à WSL,"
-    echo "   sauf machine DÉDIÉE déclarée telle : LCARS_ALLOW_ANY_HOST=1)"
+# ─── LE BILAN — CE QUE LA MACHINE PERMET, DIT AVANT TOUTE QUESTION ──────────
+#
+# ⚠ UNE OPTION IMPOSSIBLE S'AFFICHE, ELLE NE SE SUPPRIME PAS. La version d'avant choisissait
+# `RAIL=box` en silence sur un linux natif, et masquait l'option 2 quand docker manquait : l'écran
+# ne portait plus la trace de ce qui n'était pas offert, ni pourquoi. Un menu qui cache une option
+# fait croire qu'elle n'existe pas ; un menu qui la barre EN NOMMANT SON FAIT apprend la machine à
+# celui qui la lit — et c'est exactement ce que le canon demande (« l'option IMPOSSIBLE affichée,
+# barrée, avec son fait »).
+#
+# Les faits viennent tous du même endroit : `00-preflight`, mesuré une fois plus haut.
+POSTE_POURQUOI=""
+BOITE_POURQUOI=""
+if [[ "$SUBSTRATE" == "wsl" ]]; then
+  :
+elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
+  :
+elif [[ "$SUBSTRATE" == "linux" ]]; then
+  POSTE_POURQUOI="linux natif non déclaré. Ce rail est réservé à WSL2, ou à une machine DÉDIÉE qui l'assume : il possède /etc et /opt/lcars, et n'a pas de désinstalleur. Pour l'assumer : LCARS_ALLOW_ANY_HOST=1"
+else
+  POSTE_POURQUOI="substrat « $SUBSTRATE ». Ce rail est réservé à WSL2, ou à une machine DÉDIÉE déclarée telle par LCARS_ALLOW_ANY_HOST=1"
+fi
+[[ "$DOCKER_OK" -eq 1 ]] || BOITE_POURQUOI="$(fait docker_why)"
+
+bilan_menu() {
+  local etat1 etat2
+  if [[ -n "$POSTE_POURQUOI" ]]; then
+    etat1="${R}IMPOSSIBLE${N} — $POSTE_POURQUOI"
   else
-    if [[ "$SUBSTRATE" == "wsl" ]]; then
-      _ici="${W}Tu es dans WSL2 avec docker — d'ici, les deux sont possibles.${N}"
-      _prend="sudo · /etc/wsl.conf possédé entier · un groupe système ·
-     /opt/lcars · la convergence ajoute et ne retire pas."
-    else
-      _ici="${W}Linux natif, machine déclarée DÉDIÉE (LCARS_ALLOW_ANY_HOST) — les deux sont possibles.${N}"
-      _prend="sudo · un groupe système · /opt/lcars · des paquets ·
-     la convergence ajoute et ne retire pas, et ici il n'y a pas de distro à jeter."
-    fi
-    if [[ "$DOCKER_OK" -eq 0 ]]; then
-      _opt2_etat="${R}INDISPONIBLE ici${N} — docker n'est pas debout, et la boîte ne l'installe pas."
-    else
-      _opt2_etat="     Pour tout défaire : reset, 30 s."
-    fi
-    cat <<EOF
+    etat1="${R}Ça prend${N} : sudo · un groupe système · /opt/lcars · des paquets"
+    [[ "$SUBSTRATE" == "wsl" ]] && etat1="${R}Ça prend${N} : sudo · /etc/wsl.conf possédé entier · un groupe système · /opt/lcars"
+  fi
+  if [[ -n "$BOITE_POURQUOI" ]]; then
+    etat2="${R}IMPOSSIBLE${N} — $BOITE_POURQUOI"
+  else
+    etat2="${R}Ça prend${N} : ~3 Go · ~15 min de build · deux ports · un volume qui survit. Pour tout défaire : reset, 30 s."
+  fi
+  cat <<EOF
 
-  $_ici
+  ${W}Bilan${N} — substrat ${W}$SUBSTRATE${N}, docker ${W}$(fait docker)${N}$(
+    [[ -n "$(fait forge_fournie)" ]] && printf ', forge fournie %s' "$(fait forge_joignable)")
 
-  ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque,
-     la fleet tourne sous l'humain de fleet, le gate en 40 s.
-     ${R}Ça prend${N} : $_prend
+  ${BA}1)${N} ${W}TRAVAILLER SUR LCARS${N} — le code sur ce disque, la fleet tourne sous
+     l'humain de fleet, le gate en 40 s. la convergence ajoute et ne retire pas.
+     $etat1
 
   ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
      pas de paquet, pas d'utilisateur, pas de groupe, rien dans /etc ni /usr.
-     ${R}Ça prend${N} : ~3 Go · ~15 min de build · deux ports · un volume qui survit.
-$_opt2_etat
+     $etat2
 
 EOF
-    ans=""
-    { read -r -p "  ${G}1 ou 2 ?${N} " ans < /dev/tty; } 2>/dev/null || ans="__NO_TTY__"
-    case "$ans" in
-      1) RAIL=workstation ;;
-      2) if [[ "$DOCKER_OK" -eq 0 ]]; then
-           echo ""
-           echo "  ${R}La boîte exige un daemon docker debout, et elle n'en pose pas (loi 5).${N}"
-           echo "  $PROV_DOCKER_WHY"
-           echo "  Deux sorties : pose docker comme tu l'entends, puis relance ;"
-           echo "  ou donne cette machine au rail poste — réponds « 1 »."
-           exit 1
-         fi
-         RAIL=box ;;
-      __NO_TTY__)
-        echo ""
-        echo "  ${R}Pas de TTY : impossible de demander, et il n'y a pas de défaut sûr.${N}"
-        echo "  Redis-le dans la ligne :"
-        echo "    sudo bash $0 --workstation    # LCARS s'installe dans ce système"
-        echo "    bash $0 --box                 # LCARS tourne dans un conteneur"
-        exit 1 ;;
-      *) echo "  ${R}Réponse « $ans » non comprise — rien n'a été fait.${N}"; exit 1 ;;
-    esac
+}
+
+# ⚠ LE REFUS SE JOUE AU CHOIX, PAS AU PARSING. C'est le renversement du canon : on MESURE tout, on
+# EXPOSE tout, et on ne refuse qu'au moment où quelqu'un demande ce qui n'est pas possible. Refuser
+# plus tôt, c'est refuser une machine qui voulait peut-être l'AUTRE rail.
+# ⚠ UN REFUS DONNE LA VOIE QUI MARCHE, sinon il laisse quelqu'un devant un mur. Les deux rails sont
+# des sorties l'un pour l'autre : ce qui bloque le poste ne bloque pas la boîte, et réciproquement.
+refuser_rail() { # refuser_rail <1|2> <raison>
+  echo ""
+  echo "  ${R}Ce rail n'est pas possible ici.${N}"
+  echo "  $2"
+  if [[ "$1" == "1" ]]; then
+    echo "  Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici."
+    [[ -z "$BOITE_POURQUOI" ]] \
+      && echo "  Ou prends l'autre rail, qui est possible ici :  bash $0 --box"
+  else
+    echo "  La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends, puis relance."
+    [[ -z "$POSTE_POURQUOI" ]] \
+      && echo "  Ou donne cette machine au rail poste :  bash $0 --workstation"
   fi
+  exit 1
+}
+
+if [[ -n "$RAIL" ]]; then
+  # Un drapeau de rail est une PRÉ-VALIDATION : l'opérateur a déjà dit ce qu'il veut, on ne le lui
+  # redemande pas. Mais il ne dispense pas du refus — ce qui est impossible l'est aussi par drapeau.
+  [[ "$RAIL" == "workstation" && -n "$POSTE_POURQUOI" ]] && refuser_rail 1 "$POSTE_POURQUOI"
+  [[ "$RAIL" == "box"         && -n "$BOITE_POURQUOI" ]] && refuser_rail 2 "$BOITE_POURQUOI"
+else
+  bilan_menu
+  # `--check` s'arrête ici : il a mesuré et il a dit. Aller plus loin demanderait un rail, donc un
+  # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
+  if [[ "$DOCTOR_MODE" -eq 1 ]]; then
+    echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
+    echo "  Pour sonder un déploiement existant : fleet/deploy/workstation doctor · fleet/deploy/box doctor"
+    exit 0
+  fi
+  ans=""
+  { read -r -p "  ${G}1 ou 2 ?${N} " ans < /dev/tty; } 2>/dev/null || ans="__NO_TTY__"
+  case "$ans" in
+    1) [[ -n "$POSTE_POURQUOI" ]] && refuser_rail 1 "$POSTE_POURQUOI"; RAIL=workstation ;;
+    2) [[ -n "$BOITE_POURQUOI" ]] && refuser_rail 2 "$BOITE_POURQUOI"; RAIL=box ;;
+    __NO_TTY__)
+      echo ""
+      echo "  ${R}Pas de TTY : impossible de demander, et il n'y a pas de défaut sûr.${N}"
+      echo "  Redis-le dans la ligne :"
+      echo "    bash $0 --workstation    # LCARS s'installe dans ce système"
+      echo "    bash $0 --box            # LCARS tourne dans un conteneur"
+      exit 1 ;;
+    *) echo "  ${R}Réponse « $ans » non comprise — rien n'a été fait.${N}"; exit 1 ;;
+  esac
 fi
 
 # ─── PRÉFLIGHT DE LA BRANCHE ────────────────────────────────────────────────
