@@ -2,12 +2,12 @@ defmodule Fleet.Pilot.ArchFeed do
   @moduledoc """
   The architects' LOCAL activity feed — Bus consumer appending ONE short FR line per fleet
   milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`, next to `turn.flag`,
-  in-pod visibility `~/fleet.feed`). PER-PROJECT since the 2026-07-19 reorg: each event routes
+  in-pod visibility `~/fleet.feed`). PER-PROJECT: each event routes
   to the architect of ITS repo (`payload["repo"]` → `ProjectArchitect.pod_id_for/1`); an event
   with no repo, or a project whose arch is not up, drops the line — LOSSY by doctrine (the Bus
   is the lossy fast-path): the feed is a courtesy mirror, the truth is the forge.
 
-  Lives in the PILOT domain (moved from spawner, reorg 2026-07-19): the lines are pilot
+  Lives in the PILOT domain and not in spawner: the lines are pilot
   vocabulary (bricks, verdicts, reworks) and the pod-id derivation is `ProjectArchitect`'s
   authority — spawner cannot depend upward on it. Started by the step rail
   (`Fleet.Pilot.Application.step_children!`): the feed renders step milestones, same lifecycle.
@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.ArchFeed do
   alias Fleet.Pilot.PodFeed
   alias Fleet.Project.Architect, as: ProjectArchitect
 
-  # `step.unlocked` = the PROGRESS rail (user design 2026-07-18): every lock release IS a
+  # `step.unlocked` = the PROGRESS rail (⚖ user): every lock release IS a
   # step crossed, emitted at the gesture itself (after the forge reflects it — no announce
   # can run ahead of reality). The rest are the HYBRID ⚠/context events the lock mechanic
   # does not carry (failures, deliverable push, run ends).
