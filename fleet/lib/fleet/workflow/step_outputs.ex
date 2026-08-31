@@ -17,9 +17,9 @@ defmodule Fleet.Workflow.StepOutputs do
 
   ## The convention that had to be decided, and why it is a GLOB
 
-  Closing this needed a resolution convention for the `{date}` family, not a repair — and the naming
-  is the trap: a derivation that resolves `{date}` to `2026-08-13` and demands an exact match
-  answers `false` for a pod that wrote `20260813`, which BLOCKS every audit. Worse than the
+  Closing this needs a resolution CONVENTION for the `{date}` family, not a repair — and the naming
+  is the trap: a derivation that resolves `{date}` to a formatted date and demands an EXACT match
+  answers `false` for a pod that spelled it otherwise, which BLOCKS every audit. Worse than the
   self-declaration it replaces.
 
   So a declared path is read as a **pattern**: every `{...}` segment becomes `*`, and the result is

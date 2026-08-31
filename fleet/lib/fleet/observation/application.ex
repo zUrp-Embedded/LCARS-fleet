@@ -39,11 +39,10 @@ defmodule Fleet.Observation.Application do
 
   ## The deck has no port, and that is the contract
 
-  6-072/6-098. The observation deck used to bind a TCP port (`base+1`) published on the host's
-  loopback. Every port published beside the landing is a SECOND ORIGIN, and a second origin is one
-  nobody asks anything of: the landing verified a Gitea session, the deck behind it verified
-  nothing. Removing the port removes the question — there is no other way in, so there is nothing
-  else to discipline.
+  6-072/6-098. Binding a TCP port (`base+1`) on the host's loopback publishes a SECOND ORIGIN beside
+  the landing — and a second origin is one nobody asks anything of: the landing verifies a Gitea
+  session, the deck behind it verifies NOTHING. No port, no question: there is no other way in, so
+  there is nothing else to discipline.
 
   The socket lives in the human's console directory (`2710 <human>:lcars-console`, setgid), beside
   `console.sock` and `pod.sock`. `connect(2)` requires traversing that directory, which only the

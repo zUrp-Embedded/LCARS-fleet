@@ -4,11 +4,11 @@ defmodule Fleet.Credentials.Authority do
 
   ## Why this exists
 
-  A forge account's token used to live at `<dir>/<account>.gitea_token`, mode `0640 root:fleet` —
-  and that group was filled by the converger from the org's `humans` team every thirty seconds.
-  So the right to hold a working identity was a PROJECTION of a forge fact, with a projection's
-  staleness: someone the forge had removed kept reading until the next tick, and until every live
-  process of theirs died. That is why revocation needs `pkill`.
+  A forge account's token READ FROM A FILE — `<dir>/<account>.gitea_token`, mode `0640 root:fleet`,
+  the group filled by the converger from the org's `humans` team — makes the right to hold a working
+  identity a PROJECTION of a forge fact, with a projection's staleness: someone the forge has
+  REMOVED keeps reading until the next tick, and until every live process of theirs dies. That is
+  what makes revocation need `pkill`.
 
   Asked here, over a unix socket, the question carries no staleness. A removal bites on the next
   request, and the service on the other end knows WHO asked — the kernel says so (`SO_PEERCRED`),

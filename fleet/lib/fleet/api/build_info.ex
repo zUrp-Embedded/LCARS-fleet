@@ -97,8 +97,8 @@ defmodule Fleet.API.BuildInfo do
   # GIT FIRST, ENV SECOND — and the order is the point. A working tree has the truth and can also
   # tell whether it is dirty; an env var carries only what someone chose to pass. But a container
   # build stage has NO `.git` (deliberately: a worktree pointer is dead once the context is copied),
-  # so git alone made every image report `sha: "unknown"` — measured 2026-08-07 from inside a bench
-  # box, where `fleet_v2 status` said "build unknown ref= (source=release)".
+  # so git ALONE makes every image report `sha: "unknown"` — `fleet_v2 status` then says
+  # "build unknown ref= (source=release)" on a box where the build is perfectly identified.
   #
   # The env fallback is NOT a second source of truth competing with the first: it is what the build
   # passes when the first is unavailable BY CONSTRUCTION. `dirty` stays false there, because a build
