@@ -4,7 +4,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## Two states, and a qualifier on one of them
 
-  ⚖ user, 2026-08-16. A catalogue is INSTALLED (the forge carries its source, everyone is served
+  ⚖ user. A catalogue is INSTALLED (the forge carries its source, everyone is served
   by it) or AVAILABLE (somebody deposited it, nobody installed it). There is no third state and no
   per-human declaration: activation was a display filter that decided what the fleet worked on, and
   it is gone.
@@ -93,7 +93,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## The third field is the DEPOSIT, and it is deliberately empty for an installed catalogue
 
-  ⚖ user, 2026-08-16: *"can `catalogue list` show which user an available catalogue comes from?
+  ⚖ user : *"can `catalogue list` show which user an available catalogue comes from?
   Once installed, its origin does not matter — at install time it is useful."*
 
   It is the `<owner>/<repo>` of the deposit, so the owner is its first segment — the forge's own

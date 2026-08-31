@@ -335,7 +335,7 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
   #
-  # ⚖ RENOMMEE LE 2026-08-21 : `:forge_client` -> `:mcp_probe_forge_client`. `:forge_actions` reste
+  # ⚖ RENOMMEE : `:forge_client` -> `:mcp_probe_forge_client`. `:forge_actions` reste
   # nue, et le motif est juste en dessous — ce n'est pas un oubli.
   #
   # LA REGLE N'EST PAS UN GOUT, ELLE ETAIT DEJA EN VIGUEUR. Les ~110 clefs d'app env de ce projet

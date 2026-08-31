@@ -38,7 +38,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   ## Two deposits of the same name: we REFUSE, and we name both
 
-  ⚖ user, 2026-08-16. We do not guess which one is the real one — not the first, not the newest,
+  ⚖ user. We do not guess which one is the real one — not the first, not the newest,
   not the biggest. Each of those is a choice we could not justify to whoever loses. The list refuses
   and names both owners; the humans sort it out by deleting one.
 

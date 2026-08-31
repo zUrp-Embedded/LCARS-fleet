@@ -3082,7 +3082,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc """
   A catalogue may not ENUMERATE tools. It may name the tool of a step.
 
-  ⚖ user, 2026-08-22: *"les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
+  ⚖ user : *"les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
   pour voir ce qui existe, on n'a pas besoin de refaire une liste qui mentira."*
 
   ## The defect is the LIST, not the name
@@ -4056,7 +4056,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `externals`; this name is in none of those lists, so the account that owns the org was created
   from a literal outside every lock.
 
-  ⚖ user, 2026-08-27: the BEAM declaration prevails. The reason is structural, not a preference —
+  ⚖ user : the BEAM declaration prevails. The reason is structural, not a preference —
   the account's IDENTITY derives from this literal (`@system_email`, `allowed_emails/2`,
   `system_identity/0`) and cannot be moved without moving what the fleet signs as.
 

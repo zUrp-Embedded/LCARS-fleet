@@ -465,7 +465,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         @default_interval_ms
       )
 
-  # ⚖ RENOMMEE LE 2026-08-21 : `:forge_client` -> `:admiral_forge_client`. Sa voisine juste
+  # ⚖ RENOMMEE : `:forge_client` -> `:admiral_forge_client`. Sa voisine juste
   # au-dessus porte deja le prefixe (`:admiral_toolchain_reconcile_interval_ms`) ; celle-ci etait
   # l'une des deux SEULES clefs de module du projet sans proprietaire, et le meme nom designait
   # ailleurs un mecanisme de portee differente (22 `Keyword.get(opts, :forge_client, …)` dans

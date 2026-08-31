@@ -2784,7 +2784,7 @@ defmodule Fleet.Project.Onboard do
 
   # ─── UNE SEULE SOURCE : LE CATALOGUE SUR DISQUE ─────────────────────────────────────────────────
   #
-  # ⚖ user, 2026-08-21. Ce chemin passait par `generate_repo` — la fonction « template » de Gitea,
+  # ⚖ user. Ce chemin passait par `generate_repo` — la fonction « template » de Gitea,
   # qui recopie un depot `<catalogue>/project-template` que la boite avait pousse. Ce depot etait une
   # COPIE du catalogue, et une copie derive : mesure du 2026-08-21, un banc portait un workflow sur
   # les deux, sans que rien ne le dise, parce que le `sync` n'est joue qu'a la naissance de la boite.

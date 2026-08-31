@@ -114,7 +114,7 @@ defmodule Fleet.Catalogue do
   # LES AVATARS, nommes par le ROLE et non par le compte. La recette porte une table
   # `<compte>:<image>` tenue a la main, donc elle doit connaitre les roles d'un catalogue tiers —
   # un fichier nomme par le role, dans le catalogue qui le declare, n'a besoin d'aucun index.
-  # FACULTATIF par nature (⚖ user 2026-08-16) : un catalogue sans avatar s'installe, ses comptes
+  # FACULTATIF par nature (⚖ user) : un catalogue sans avatar s'installe, ses comptes
   # portent l'identicon de Gitea. Un role que personne n'a dessine n'a pas d'avatar, et c'est normal.
   @rel_avatars "avatars"
 
@@ -574,7 +574,7 @@ defmodule Fleet.Catalogue do
   force-pushes?"* — `Onboard.adopt_project/2`. That does not decide what an existing repo IS; it
   decides where a new one may be put. Any other reader is the old defect coming back.
 
-  The `_` prefix is UX (⚖ user, 2026-08-21): in a list of repos it separates at a glance what the
+  The `_` prefix is UX (⚖ user): in a list of repos it separates at a glance what the
   fleet put there from what a human deposited. It protects nothing.
 
   The shell writers hold their own copy (`STORE_REPO` in `forge-gestures.sh`, which pushes it, and

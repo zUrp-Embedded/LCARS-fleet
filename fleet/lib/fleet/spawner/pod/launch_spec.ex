@@ -518,7 +518,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # nowhere else, which is why the mount protocol carries both.
   #
   # Missing something mid-run is not patched in place — the pod is nuked and relaunched on a
-  # completed face (⚖ arbitrage user 2026-08-11). A frozen world you replace beats a live one you
+  # completed face (⚖ arbitrage user). A frozen world you replace beats a live one you
   # cannot cite.
   defp other_face_reference_mount(opts, cap_profile, pod_dir) do
     with path when is_binary(path) <- other_face_reference_path(opts, cap_profile),
