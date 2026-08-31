@@ -306,42 +306,21 @@ defmodule Fleet.Spawner.Pod do
     {:next_state, :projecting, data, [{:next_event, :internal, :proceed}]}
   end
 
-  # PROJECT — all the I/O in the `with` chain (non-bang) → error propagated → clean
-  # transition_failed (state.json phase=failed written). Issue-driven model: the pod PULLS its order
-  # from the TaskQueue (MCP `get_work_item`, triggered by `engage`); `issues/<issue_id>.md` is a
-  # scaffold file written BESIDE it.
+  # PROJECT — toute l'E/S est dans la chaine `with`, non-bang, donc une erreur se propage en
+  # `transition_failed` propre. Le pod TIRE son ordre de la TaskQueue ; `issues/<issue_id>.md` est
+  # un fichier d'echafaudage ecrit A COTE.
   #
-  # What that file actually holds — it is not one thing:
-  #   * PRODUCERS, nominal rail: the dispatcher DOES put the order text under `:brief`, and
-  #     `Spawn` DROPS that copy as soon as the order has been materialized into a committed doc —
-  #     an address replaces it. So the file names the pinned doc (`brief_ref` @ `brief_sha`) and
-  #     holds no text. That covers the rework rounds too: `RoleDispatch` re-briefs the producer on
-  #     ITS OWN pod identity (`pod_id_for_scope`, the same one `dispatch_issue` uses), and that pod
-  #     was spawned from the step rail.
-  #   * PRODUCERS, degraded rail (no work dir, so no committed doc): the copy STAYS, because there
-  #     is no address to name in its place — and nothing moves beside the file there, so it cannot
-  #     go stale.
+  # Ce qu'il contient n'est PAS une seule chose :
+  #   * PRODUCTEUR, rail nominal — le fichier nomme l'ADRESSE du doc epingle et ne porte aucun
+  #     texte, la copie etant abandonnee des que l'ordre est materialise en document committe ;
+  #   * PRODUCTEUR, rail degrade — pas de doc committe, donc pas d'adresse a nommer : la copie
+  #     RESTE, et rien ne bouge a cote d'elle, donc elle ne peut pas se perimer ;
+  #   * JUGE — le brief est OBLIGATOIRE au spawn (un juge est one-shot, et `brief_guard` refuse un
+  #     one-shot sans brief), donc le fichier porte le gate brief. Son pod est keye sur la PR et
+  #     meurt avec son verdict : chaque revue l'ecrit FRAIS.
   #
-  #   ⚠ Two claims of an earlier revision of this comment were false and cost a chantier: it said
-  #   the dispatcher put no `:brief` at all (it did, and the copy survived into `issues/<id>.md`,
-  #   never rewritten while the pointer advanced), and it said the file held a
-  #   "(No brief provided)" placeholder (`Pod.Brief` stopped writing that: with no `:brief` it
-  #   names the order's ADDRESS, precisely so an agent never reads that it was asked nothing).
-  #   * JUDGES: `RoleDispatch` MUST pass `brief:` in the spawn opts — a judge is `one-shot` and
-  #     `brief_guard` refuses a one-shot spawn without one — so the file holds the gate brief. Its
-  #     pod is keyed on the PR (`PodId.for_pr`) and dies with its verdict, so each review writes it
-  #     FRESH, and a re-dispatch while the previous one is alive is refused upstream by the
-  #     `lcars-in-flight` lock (`dispatch_review`).
-  #
-  # So it is a SECOND COPY of the gate brief on a judge's disk, not a stale one: no reachable path
-  # leaves an order here describing a round that has passed. (An earlier revision of this comment
-  # claimed it did — deduced from "written at spawn only" without measuring which pod identity a
-  # rework lands on.)
-  #
-  # No SP block or draft reads it either (measured across `priv/sp_builder` and the committed
-  # drafts), but an agent exploring its own workspace does not need a wire to read a file named
-  # after its issue. Whether the copy should exist at all is open (chantier monde-du-pod,
-  # `## À trancher`): the answer depends on a DEPLOYED catalogue this repo does not carry.
+  # ⚠ C'est donc une SECONDE COPIE, jamais une copie PERIMEE : aucun chemin atteignable ne laisse
+  # ici un ordre decrivant un tour deja passe.
   def handle_event(:internal, :proceed, :projecting, data) do
     # Skills root — THREE-way resolution (BL-6-22), and the `:catalogue` sentinel is deliberate
     # (get_env/3 returns the default ONLY when the key is ABSENT, never when it is present-nil):
@@ -1194,41 +1173,20 @@ defmodule Fleet.Spawner.Pod do
             if Map.get(snap, "boot_id") == Fleet.Spawner.BootEpoch.id() do
               phase = Recovery.phase_from_string(phase_str) || :launching
 
-              # 6-108 — CE REROLL A UNE RAISON, ET ELLE N'ETAIT ECRITE NULLE PART.
+              # ⚠ 6-108 — LE REROLL EST LA BONNE REPONSE, ET NE PAS LE « CORRIGER » EN REPRISE.
               #
-              # Ce qu'on voit d'abord ressemble a une incoherence : un pod mort dans l'epoque
-              # courante laisse son `<session_id>.jsonl` dans un pod_dir qui SURVIT
-              # (`safe_mkdir_p` le preserve en `:allocate`). Si son `state.json` a survecu aussi, on
-              # arrive ici et on reroll une session fraiche. S'il n'avait PAS survecu, le meme pod,
-              # avec le meme jsonl, tombait sur la branche `:enoent` et REPRENAIT — la survie d'un
-              # fichier de recuperation semblant decider du sort du travail accumule.
-              #
-              # ⚠ ET POURTANT LE REROLL EST LA BONNE REPONSE — j'ai commence par « corriger » cette
-              # branche vers `maybe_slot_resume`, et un test a refuse, titre compris. Il avait
-              # raison, et la raison n'etait ecrite NULLE PART :
-              #
-              # ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT. Ce qui l'a tue est, jusqu'a preuve
-              # du contraire, dans la session qu'on s'appreterait a reprendre — un tour qui fait
+              # Ce pod est mort PENDANT QUE LA FLOTTE REGARDAIT : ce qui l'a tue est, jusqu'a preuve
+              # du contraire, DANS la session qu'on s'appreterait a reprendre — un tour qui fait
               # exploser le backend, un transcript tronque, un etat que le vendor refuse. Reprendre,
               # c'est RE-ENTRER DANS LE POISON, et la reprise etant automatique, ca boucle. Le
-              # `PermanentWarden` borne les degats (HALT a 5 echecs consecutifs) ; il ne les evite
-              # pas. On echange donc une perte BORNEE — le contexte d'une session — contre une perte
-              # NON BORNEE : un pod qui ne redemarre plus.
+              # `PermanentWarden` borne les degats, il ne les evite pas.
               #
-              # Les deux autres branches ne sont donc pas incoherentes, elles repondent a une AUTRE
-              # question : « qu'est-ce qui accuse cette session ? ». Epoque precedente — rien, un
-              # `fleet_v2 stop` propre laisse le meme snapshot non terminal (cicatrice du
-              # 2026-07-19 : sans le discriminant d'epoque, tout redemarrage tombait en `:recreate`
-              # et le slot ne revenait jamais). `state.json` absent — rien non plus, aucun indice ne
-              # designe la session. Ici, et ici seulement, quelque chose l'accuse.
+              # On echange donc une perte BORNEE — le contexte d'une session — contre une perte NON
+              # BORNEE : un pod qui ne redemarre plus.
               #
-              # `sid` est matche ci-dessus pour valider la FORME du snapshot et ne va pas plus loin ;
-              # un `session_id` non-binaire tombe dans la clause `_` (« PRESENT mais CORROMPU »).
-              #
-              # Le transcript n'est pas perdu par ce chemin : `teardown_backend/1` ne touche qu'au
-              # holder et au sock-dir, et le pod_dir est un bind HOTE (mesure du 2026-08-08, cf. la
-              # clause `:releasing`). Ce qui l'efface est le GC de `:cleaning`, delibere et motive —
-              # sans lui `--session-id` buterait sur « Session ID already in use ».
+              # Les autres branches repondent a une AUTRE question, « qu'est-ce qui ACCUSE cette
+              # session ? » : un arret propre laisse le meme snapshot non terminal, et un `state.json`
+              # absent ne designe rien. Ici, et ici seulement, quelque chose l'accuse.
               Recovery.apply_recovery(base, Recovery.recovery_action(phase), phase)
             else
               # Previous-epoch snapshots use the normal live/seed/fresh decision.
@@ -1466,24 +1424,17 @@ defmodule Fleet.Spawner.Pod do
     e -> {:error, {:baseline_corrupt, Exception.message(e)}}
   end
 
-  # Runtime containment validation covers rules beyond the JSON schema.
+  # ⚠ LA COUCHE INCONDITIONNELLE, et le dire est le point. Le schema JSON type `disallowedTools`
+  # comme un tableau de chaines et ne dit RIEN de son contenu : un profil valide au schema peut
+  # donc violer les invariants de confinement, typiquement quand une surcouche REMPLACE la liste au
+  # lieu de la fusionner.
   #
-  # THIS IS THE UNCONDITIONAL LAYER, and saying so is the point. The `g24_*` invariants — no role
-  # gets `web_search`, `web_fetch`, `code_execution`, `bash_code_execution`, `text_editor` — live in
-  # `CapProfile.validate/1`, which the JSON schema does NOT enforce: it types `disallowedTools` as
-  # an array of strings and says nothing about its contents. So a schema-valid profile can violate
-  # g24, e.g. when a modop overlay REPLACES the list instead of merging it.
+  # La preuve au boot est un avertissement precoce, et elle a un knob. CE garde n'en a pas : il est
+  # dans la PREMIERE phase de tout pod qui se lance, avant la creation du pod dir et avant que le
+  # profil resolu touche le disque. Aucun chemin ne le contourne.
   #
-  # Two layers answer that, and only one of them is always on:
-  #   * `CanonProof.prove_all!/0` at boot — early warning, knob `:spawner_prove_canon_at_boot`
-  #     (default TRUE, set false only in the hermetic test baseline, where CanonProof has its own
-  #     direct tests). It tells the operator BEFORE readiness.
-  #   * this gate — in `:allocating`, the FIRST phase every launching pod goes through
-  #     (`:allocating → :cleaning → :projecting → :launching`), before the pod dir is created and
-  #     before the resolved profile is written to disk. No knob, no path around it.
-  #
-  # An over-provisioned profile can therefore be PUBLISHED and can survive a boot with the proof
-  # switched off; it cannot reach a pod. The failure is late rather than early, never silent.
+  # Un profil sur-provisionne peut donc etre PUBLIE et survivre a un boot dont la preuve est
+  # coupee ; il ne peut pas atteindre un pod. L'echec est tardif plutot que precoce, jamais muet.
   defp gate_cap_profile(resolved) do
     case Fleet.CapProfile.validate(resolved) do
       :ok -> :ok
@@ -1493,17 +1444,11 @@ defmodule Fleet.Spawner.Pod do
 
   # Pods keep using the proven image; disk divergence remains operator-visible.
   #
-  # COST, MEASURED AND ACCEPTED WITH ITS BOUND — the check re-reads and re-hashes every published
-  # prompt source on EVERY spawn, and the answer it seeks ("has the disk moved since publication?")
-  # does not depend on the pod being built. That is a real objection; the numbers are what settle
-  # it. On a running fleet, 26 sources / 195 KiB: **2.8 ms cold, 0.3 ms warm** per spawn.
-  #
-  # The bound is what makes this acceptable rather than merely small: the cost is LINEAR in the
-  # catalogue, and it sits on a path whose very next steps are a bwrap cold start of 20-40 s
-  # (`kick` handler, same file). A catalogue a hundred times larger — 2600 sources, 19 MiB — would
-  # cost ~30 ms here, still four orders of magnitude under the thing it precedes. Memoising would
-  # buy that 0.3 ms and owe a cache-invalidation question about the exact event the check exists to
-  # notice.
+  # ⚠ COUT ACCEPTE AVEC SA BORNE : le controle relit et re-hache chaque source publiee a CHAQUE
+  # spawn. Ce qui le rend acceptable n'est pas qu'il soit petit, c'est qu'il soit LINEAIRE dans le
+  # catalogue et pose sur un chemin dont l'etape suivante est un demarrage a froid de dizaines de
+  # secondes. Memoiser acheterait une fraction de milliseconde et devrait en echange une question
+  # d'invalidation de cache portant sur l'evenement EXACT que ce controle existe pour remarquer.
   #
   # Re-measure if the SP catalogue ever reaches the THOUSANDS of sources; below that, this is noise.
   defp warn_on_image_drift do
