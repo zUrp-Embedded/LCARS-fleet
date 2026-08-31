@@ -101,11 +101,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # LA SOCKET EST UNE PORTE, SES PERMISSIONS EN SONT LA SERRURE.
   #
   # `:gen_tcp.listen` cree le noeud AF_UNIX au UMASK du processus : rien ne garantit qu'il soit
-  # ferme. C'etait la seule porte de la famille sans serrure posee ici — le socket de controle fait
-  # du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est en 0700, celle-ci s'en
-  # remettait aux permissions du home. Un home lisible par le groupe suffit alors a rendre la
-  # socket MCP d'un pod joignable par un autre humain de la boite, et cette socket EST le canal
-  # d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le fil).
+  # ferme. Sans ce chmod, c'est la seule porte de la famille sans serrure posee ici — le socket de
+  # controle fait du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est cree
+  # `install -d -m 0700` — et celle-ci s'en remet aux permissions du home. Un home lisible par le
+  # groupe suffit alors a rendre la socket MCP d'un pod joignable par un autre humain de la boite,
+  # et cette socket EST le canal d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le
+  # fil).
   #
   # Fail-closed, comme son jumeau : une socket ouverte dont on n'a pas pu poser la serrure ne
   # demarre pas, et on la referme au lieu de laisser une porte sans verrou derriere soi.
@@ -258,8 +259,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     # this socket means the pod's MCP client is connected — which happens at TUI init, before the
     # agent takes any turn, so LONG before the work-item poll that everything else waits on. The
     # kick loop consumes it: keys typed into a REPL that is not up yet are not lost, tmux buffers
-    # them and the TUI replays each as its own submission (measured 2026-08-04: a scribe took 7
-    # `engage` in its REPL, one per kick fired during the cold start).
+    # them and the TUI replays each as its own submission — measured: a scribe took 7 `engage` in
+    # its REPL, one per kick fired during the cold start.
     # Marked on EVERY line, not only the first: it is a cast into a `Map.put_new`, and marking on
     # `tools/list` alone would miss a pod that reconnects mid-life (fleet restart) without
     # re-listing.
