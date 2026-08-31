@@ -3,18 +3,12 @@ defmodule Fleet.Workflow.OpsObjectSync do
   Per-node SERIALIZER in front of `Fleet.Workflow.OpsObject` — the ops worktree gate.
 
   `OpsObject.commit_object/4` is the single parametric engine (write → `git add`/commit → best-effort
-  push) but it runs DIRECTLY on the shared ops worktree. Its writers are concurrent and span
-  domains:
-
-    * BRIEFS — materialized from several MCP connections (`Delegation.physicalize`, a pod creating an
-      issue) AND from the poller dispatch (`StepDispatcher.Spawn`);
-    * PROVENANCE — from up to 16 concurrent completion `Task`s (`StepRunConsumer` offload pool).
-
-  Two operations on the SAME project's work_dir can collide on `.git/index.lock`, or observe a HEAD
-  that moved between OpsObject's idempotency probe (`File.read == content` / `last_commit_sha`) and
-  the commit. `OpsObject`'s own comment only covers the "identical content → nothing_to_commit" race,
-  not concurrent git. This GenServer closes it by construction — same move as `Fleet.Project.WorktreeSync`
-  for the post-merge `reset --hard`: it handles one message at a time → ONE git transaction at a time,
+  push) but it runs DIRECTLY on the shared ops worktree, and its writers are concurrent across
+  domains: briefs materialize both from MCP connections and from the poller dispatch, provenance from
+  a pool of completion `Task`s. Two operations on the SAME project's work_dir can collide on
+  `.git/index.lock`, or observe a HEAD that moved between OpsObject's idempotency probe and the
+  commit. This GenServer closes that by construction — same move as `Fleet.Project.WorktreeSync` for
+  the post-merge `reset --hard`: it handles one message at a time → ONE git transaction at a time,
   whatever the number of triggers. `OpsObject` stays the untouched engine; this is only the gate.
 
   The gate is deliberately WIDER than the hazard it closes, and that widening is the thing to know
@@ -27,37 +21,32 @@ defmodule Fleet.Workflow.OpsObjectSync do
   result: on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`,
   no lock) and returns the sha if the transaction landed — a false-negative timeout can no longer make
   a landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
-  head-of-line blocking ever bites. The node-wide scope IS pinned since 2026-08-03 (BL-6-43.4,
-  `ops_object_sync_test.exs`): two different `work_dir`s committed through one explicitly-named
-  instance, both landing, neither cross-writing. What that test holds is the ROUTING KEY — the
-  server is the only address, `work_dir` is payload — which is the first thing a sharding refactor
-  changes. It deliberately does NOT pin mutual exclusion across `work_dir`s by timing: proving
-  "these two never overlapped" takes a clock, and a clock in a test buys flakiness rather than
-  truth.
+  head-of-line blocking ever bites. What the suite pins (BL-6-43.4) is the ROUTING KEY — the server is
+  the only address, `work_dir` is payload — which is the first thing a sharding refactor changes. It
+  deliberately does NOT pin mutual exclusion across `work_dir`s by timing: proving "these two never
+  overlapped" takes a clock, and a clock in a test buys flakiness rather than truth.
 
   ## SYNCHRONOUS (unlike WorktreeSync)
 
   WorktreeSync is a cast (the merge does not wait, the clone is a mirror). Here the return — the
   introducing COMMIT sha — IS the committed object's IDENTITY, consumed by `BriefArtifact`/`Provenance`.
   So `commit_object/4` is a `call`: it serializes AND returns the sha. The best-effort push stays inside
-  the transaction (as WorktreeSync's `fetch` is inside its handler); if ops push throughput ever
-  proves a bottleneck, moving the push out of the critical section is safe (it touches refs, not
-  `.git/index.lock`, and is already race-tolerant) — noted, not needed.
+  the transaction; moving it out of the critical section stays safe if throughput ever demands it (it
+  touches refs, not `.git/index.lock`, and is already race-tolerant).
 
   ## Always-on in prod + `Process.whereis` fallback (hermetic in test)
 
-  Supervised by `Fleet.Pilot.Application` (next to the ForgeFinch pool, for the SAME reason: MCP
-  `issue_create` materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node
-  boots, not only in `:step_dispatch?` mode). When the process is up, every writer funnels through it.
-  When it is NOT registered, `commit_object/4` falls back to a DIRECT `OpsObject` call: the LOCAL
-  transaction is identical, only the cross-writer serialization is skipped. Not a masked failure — an
-  optional serialization layer, exactly like WorktreeSync's cast being dropped when it is not started.
+  Supervised by `Fleet.Pilot.Application`, NOT gated on `:step_dispatch?`: MCP `issue_create`
+  materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node boots. When
+  the process is up, every writer funnels through it. When it is NOT registered, `commit_object/4`
+  falls back to a DIRECT `OpsObject` call: the LOCAL transaction is identical, only the cross-writer
+  serialization is skipped. Not a masked failure — an optional serialization layer, exactly like
+  WorktreeSync's cast being dropped when it is not started.
 
   **In `:test` the singleton is NOT started** (`start_ops_object_sync: false`): the whole suite takes
   the direct fallback, so `OpsObject`'s logs stay in the CALLER's process (pre-CI-11 behavior) — routing
   every async test's write through one shared process would serialize + relocate those logs and worsen
-  `capture_log` bleed. The serialization itself is proven in isolation by `OpsObjectSyncTest`, which
-  starts its OWN instance (custom name) and drives the explicit-server `commit_object/5`.
+  `capture_log` bleed.
   """
 
   use GenServer
