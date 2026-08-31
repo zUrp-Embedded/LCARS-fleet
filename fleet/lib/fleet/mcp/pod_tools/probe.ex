@@ -4,7 +4,7 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   ## Ce que ce module refuse de faire, et pourquoi c'est l'essentiel
 
-  Trois formes étaient possibles pour cet outil. Deux sont écartées, et la raison ne se rattrape pas
+  Trois formes sont possibles pour cet outil. Deux sont écartées, et la raison ne se rattrape pas
   plus tard :
 
     * `check_test_relevance(fichier)` — l'outil EST la sonde. Plus court aujourd'hui, condamné
@@ -112,7 +112,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # `identity.repo` est `nil` pour un juge, et ne l'est PAS pour un architecte.
   #
   # On lit donc les deux, dans cet ordre — la chaîne quand elle est là, sinon la traduction de l'ID
-  # par la forge. Refuser sur l'absence de `:repo` aurait rendu cet outil inutilisable par
+  # par la forge. Refuser sur l'absence de `:repo` rendrait cet outil inutilisable par
   # exactement les rôles pour lesquels il est écrit.
   defp identity(pod_id, opts) do
     resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver, &default_resolver/1)
@@ -335,37 +335,31 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
   #
-  # ⚖ RENOMMEE : `:forge_client` -> `:mcp_probe_forge_client`. `:forge_actions` reste
-  # nue, et le motif est juste en dessous — ce n'est pas un oubli.
+  # ⚖ `:mcp_probe_forge_client` porte son proprietaire ; `:forge_actions` reste nue, et le motif
+  # est juste en dessous — ce n'est pas un oubli.
   #
-  # LA REGLE N'EST PAS UN GOUT, ELLE ETAIT DEJA EN VIGUEUR. Les ~110 clefs d'app env de ce projet
-  # sont toutes `<proprietaire>_<chose>` — `admiral_`, `mcp_`, `pilot_`, `spawner_`, `workflow_`,
-  # `credentials_`… `:forge_client` et `:forge_actions` etaient les deux SEULES clefs de MODULE sans
-  # proprietaire. Deux exceptions a une convention, pas deux noms discutables.
-  #
-  # CE QUE L'ANCIEN NOM COUTAIT, ET IL NE COUTAIT RIEN A LA MACHINE : `:forge_client` designait
-  # DEUX mecanismes de portees differentes — 22 `Keyword.get(opts, :forge_client, …)` dans `Pilot`
-  # (injection par appel) et 2 `Application.get_env` (globale au noeud, dont celle-ci). Et
-  # `:forge_actions` etait partage par deux PROPRIETAIRES, ici et `Fleet.Pilot.MergeAndPromote`.
-  # Rien ne se branchait de travers — les trois suites concernees sont `async: false`, verifie — mais
-  # il fallait tenir tout ca en tete pour lire trois lignes.
+  # LA REGLE : les clefs d'app env de ce projet sont `<proprietaire>_<chose>` — `admiral_`, `mcp_`,
+  # `pilot_`, `spawner_`, `workflow_`, `credentials_`… Un prefixe DIT QUI POSE ; sans lui, un meme
+  # nom nu peut couvrir deux mecanismes de portees differentes (une injection par appel et une
+  # valeur globale au noeud), et il faut tenir la difference en tete pour lire trois lignes.
   #
   # POURQUOI PAS `:mcp_forge_client`, QUI EXISTE : ce serait unifier avec le seam de `Delegation`,
   # et sa propre doctrine le prescrirait (« le seam est le MEME objet »). Elle ne mord pas ici : sa
   # raison est qu'un test qui remplace une moitie du client et pas l'autre verrait ses ecritures
   # partir sur la vraie forge — or la sonde et la delegation sont deux chaines independantes,
-  # qu'aucun appel ne traverse ensemble. Unifier n'achetait donc rien et couplait deux suites.
+  # qu'aucun appel ne traverse ensemble. Unifier n'achete rien et couple deux suites.
   defp forge, do: Application.get_env(:lcars_fleet, :mcp_probe_forge_client, Fleet.Forge.Client)
 
-  # ⚠ `:forge_actions` NE SUIT PAS LA REGLE, ET C'EST VOULU — JE L'AI RENOMMEE PUIS ANNULEE.
-  # Elle est PARTAGEE A DESSEIN avec `Fleet.Pilot.MergeAndPromote`, qui porte le motif : « la sonde
-  # et sa verification interrogent le MEME sous-domaine, et deux clefs en donneraient deux avis en
-  # test ». Un prefixe de proprietaire est donc faux ici : la clef n'a pas UN proprietaire, elle a
-  # un sous-domaine, et c'est precisement ce que le partage exprime.
+  # ⚠ `:forge_actions` NE SUIT PAS LA REGLE, ET C'EST VOULU. Elle est PARTAGEE A DESSEIN par TROIS
+  # modules — cette sonde, `Fleet.Pilot.MergeAndPromote` et
+  # `Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate` — qui interrogent le MEME sous-domaine :
+  # deux clefs en donneraient deux avis en test. Un prefixe de proprietaire est donc faux ici : la
+  # clef n'a pas UN proprietaire, elle a un sous-domaine, et c'est precisement ce que le partage
+  # exprime.
   #
-  # La convention veut un prefixe parce qu'un prefixe DIT QUI POSE. Quand la reponse est « deux
-  # modules, exprès », le nom nu est la forme juste — et cette exception se lit ici et chez son
-  # jumeau, jamais deduite du silence.
+  # La convention veut un prefixe parce qu'un prefixe DIT QUI POSE. Quand la reponse est « trois
+  # modules, exprès », le nom nu est la forme juste — et cette exception se lit AUX TROIS SITES,
+  # jamais deduite du silence.
   defp forge_actions,
     do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
 
