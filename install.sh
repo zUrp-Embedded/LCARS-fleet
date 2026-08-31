@@ -273,7 +273,7 @@ case "$(fait docker)" in
           elif [[ "$RAIL" == "box" ]]; then
             say_miss "$(fait docker_why)"
             echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
-            echo "           ou donne cette machine au rail poste — sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
+            echo "           ou donne cette machine au rail poste — LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
           else
             say_miss "$(fait docker_why)"
           fi ;;
@@ -435,7 +435,7 @@ if [[ "$RAIL" == "workstation" ]]; then
       [[ "$SUBSTRATE" == "linux" ]] && {
         echo ""
         echo "  Si cette machine est DÉDIÉE à LCARS et que tu acceptes qu'il la possède :"
-        echo "    sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
+        echo "    LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
       }
       exit 1
     fi
@@ -574,36 +574,12 @@ fi
 
 # ─── LA BRANCHE BOÎTE : aucune escalade, on délègue à la porte docker ───────
 if [[ "$RAIL" == "box" ]]; then
-  # ⚠ NE PAS REMPLACER PAR UN `exec sudo` : ce rail bâtit une image sous l'uid de l'humain ; en root,
-  # `git` lirait le clone en « dubious ownership » et l'image sortirait estampée `unknown`.
-  # TTY exigé : sans terminal, l'invite pend jusqu'au timeout au lieu de refuser.
-  # ⚠ CES TROIS BRANCHES LISAIENT `PROV_DOCKER_DENIED`, `PROV_DOCKER_WHY` ET APPELAIENT
-  # `docker_endpoint` — trois choses que cette porte n'a plus, depuis qu'elle ne source plus la lib
-  # de sonde. Elles étaient MORTES et aucun témoin ne l'a vu : elles exigent un TTY et un daemon qui
-  # refuse, deux conditions qu'une suite ne reproduit pas. Le fait les remplace, et il vient du même
-  # module que tout le reste.
-  if [[ "$DOCKER_OK" -eq 0 && "$(fait docker)" == "refuse" ]] \
-     && [[ "$(fait sudo)" != "absent" ]] && [[ -t 0 && -t 1 ]]; then
-    echo ""
-    echo "  ${W}[sudo]${N} La socket du daemon appartient à root — une invite, une fois."
-    echo "         Elle amorce le cache que la sonde consomme commande par commande ;"
-    echo "         ce rail ne monte JAMAIS en root, ton image reste bâtie sous ton compte."
-    if sudo -v; then
-      remesurer
-      [[ "$(fait docker)" == "oui" ]] \
-        && { DOCKER_OK=1; echo "  ${G}[ok]${N} docker répond ($(fait docker_bin))"; }
-    fi
-  fi
-  if [[ "$DOCKER_OK" -eq 0 ]]; then
-    echo ""
-    echo "  ${R}$(fait docker_why)${N}"
-    if [[ "$(fait docker)" == "refuse" ]]; then
-      echo "  L'escalade a été tentée et refusée : « sudo -n » n'a pas abouti (mot de passe requis ?)."
-      [[ -t 0 && -t 1 ]] \
-        || echo "  Pas de terminal ici, donc pas d'invite possible : joue « sudo -v » d'abord, ou donne un NOPASSWD sur la CLI docker."
-    fi
-    exit 1
-  fi
+  # ⚠ L'AMORÇAGE `sudo -v` A QUITTÉ CETTE PORTE (D5). Il vivait ici pour amorcer le cache que le shim
+  # de `box` consomme commande par commande — mais la porte n'a pas de sudo, par canon. Le fait est
+  # EXPOSÉ dans le bilan ; c'est `box` qui demande l'invite, à SON début, s'il en a besoin.
+  #
+  # Ce que ce bloc lisait était de toute façon MORT depuis E1 : `PROV_DOCKER_DENIED`,
+  # `PROV_DOCKER_WHY`, `docker_endpoint`. Trois variables d'une lib que cette porte ne source plus.
   [[ -x "$SCRIPT_DIR/fleet/deploy/box" ]] || {
     echo "  ${R}fleet/deploy/box introuvable — ce rail exige le checkout complet.${N}"
     echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"
@@ -644,10 +620,6 @@ if [[ "$RAIL" == "box" ]]; then
     exit 1
   fi
 
-  BOX_IMAGE="${LCARS_IMAGE:-lcars-fleet:2}"
-  for _i in "${!DELEGATE_ARGS[@]}"; do
-    [[ "${DELEGATE_ARGS[$_i]}" == "--image" ]] && BOX_IMAGE="${DELEGATE_ARGS[$((_i + 1))]:-$BOX_IMAGE}"
-  done
   if [[ "$WITH_BENCH" -ne 1 && -z "${FORGE_BASE_URL:-}" ]]; then
     echo ""
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
@@ -657,25 +629,24 @@ if [[ "$RAIL" == "box" ]]; then
     exit 1
   fi
 
-  if ! "$PROV_DOCKER_BIN" image inspect "$BOX_IMAGE" >/dev/null 2>&1; then
-    echo ""
-    echo "  ${W}$BOX_IMAGE${N} n'est pas là — je la construis (plusieurs minutes, une seule fois)."
-    # ⚠ PAS DE `DOCKER_BIN=` ICI, ET C'EST DÉLIBÉRÉ : `box` sonde lui-même. Ne pas l'ajouter par
-    # symétrie avec le `--bench` plus bas — celui-là est réel, `bench-up.sh` le lit.
-    LCARS_IMAGE="$BOX_IMAGE" "$SCRIPT_DIR/fleet/deploy/box" build || {
-      echo "  ${R}Le build a échoué — son verdict est le sien, rien n'a été déployé.${N}"
-      exit 1
-    }
-  else
-    say_ok "image $BOX_IMAGE présente — je la garde (elle ne se rebâtit pas toute seule)"
-  fi
+  # ⚠ LE BUILD D'IMAGE A QUITTÉ CETTE PORTE (D4, `40-RAILS.md` §§ 3 et 6), ET IL N'A PAS DÉMÉNAGÉ :
+  # il est MORT ici. Une boîte de production TIRE son image — épinglée par digest, avec le gate joué
+  # UNE FOIS par le rail qui la construit. Un client ne compile pas chez son hôte : il hériterait
+  # d'un binaire que personne d'autre n'a vu, sur une machine dont ce n'est pas le métier.
+  #
+  # `box build` reste, comme geste de DEV, et c'est `box` qui décide s'il en a besoin — il connaît
+  # son image, ses tags et son compose. La porte, elle, n'a jamais eu de raison de le savoir : elle
+  # sondait `image inspect` avec `PROV_DOCKER_BIN`, une variable morte depuis que le préflight a
+  # quitté ce fichier.
+  #
+  # Les trois témoins qui gardaient ce chemin (image absente / présente / build en échec) suivent
+  # dans `box_project.bats` — ce sont des déplacements, pas des suppressions.
 
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     echo ""
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI + humain de démo, en un geste."
-    # Le délégué reçoit la résolution, il ne la refait pas : sans cette ligne `bench-up.sh` retombe
-    # sur un `docker` nu et meurt là où la porte vient d'annoncer « docker répond ». Le shim voyage avec.
-    export DOCKER_BIN="$PROV_DOCKER_BIN"
+    # Le délégué reçoit la résolution du daemon, il ne la refait pas — le fait vient du module.
+    export DOCKER_BIN="$(fait docker_bin)"
     exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""

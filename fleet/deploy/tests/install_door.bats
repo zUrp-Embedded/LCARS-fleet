@@ -410,32 +410,8 @@ SPY
   printf '%s' "$fake"
 }
 
-@test "image ABSENTE : la porte la construit AVANT de deleguer — la promesse « en un geste » tient" {
-  local fake; fake="$(_fake_tree 1 0)"
-  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"DOCKERSH:build"* ]]
-  [[ "$output" == *"BENCHUP:--project bt"* ]]
-  # L'ORDRE PORTE LE SENS : deleguer avant de batir, c'est le defaut qu'on ferme.
-  [[ "${output%%BENCHUP*}" == *"DOCKERSH:build"* ]]
-}
 
-@test "image PRESENTE : aucun build — un re-run reste court, sinon --check coute un quart d'heure" {
-  local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"DOCKERSH:build"* ]]
-  [[ "$output" == *"BENCHUP:--project bt"* ]]
-}
 
-@test "build EN ECHEC : la porte s'arrete, et le delegue n'est JAMAIS atteint" {
-  local fake; fake="$(_fake_tree 1 1)"
-  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"DOCKERSH:build"* ]]
-  # Un banc monte sur une image qu'on n'a pas pu batir serait un vert sur du vide.
-  [[ "$output" != *"BENCHUP:"* ]]
-}
 
 @test "sans « -- », une option inconnue est REFUSEE — jamais avalee en silence" {
   # Le pendant du temoin precedent : la porte ne doit pas gober une option qu'elle ne comprend pas
@@ -540,30 +516,6 @@ SPY
   [ "$output" = "non" ]
 }
 
-@test "le rail POSTE ne batit AUCUNE image — le seul build de la porte est celui de la BOITE" {
-  # ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de
-  # recette tofu ? ». La porte bâtissait `lcars-fleet:2` sur le rail poste sous le motif « la forge
-  # du poste en a besoin (tofu, recette, gestes) » — dix minutes pour en extraire 124 Mo d'outil
-  # dans un conteneur jetable, sur un rail qui ne DEMARRE jamais cette image.
-  #
-  # ⚠ CE TEMOIN A GRAVE LA VALEUR CONTRAIRE, et c'est pour ca qu'il est reecrit et pas supprime. Il
-  # verifiait « les paquets sont joues AVANT le build quand c'est le rail qui pose docker » — une
-  # regle d'ordre reelle, mais adossee a un build qui n'existe plus. La dependance qu'elle denouait
-  # (docker avant ce qui en a besoin) est desormais portee par la NUMEROTATION des modules :
-  # `10-packages` pose docker, `48-forge-host` monte la Gitea, et 10 < 48 par construction.
-  #
-  # Ce qui reste a verrouiller est donc l'inverse : qu'aucun build ne reapparaisse sur ce rail.
-  local box ws
-  # le build de la BOITE survit — la, l'image EST le produit livre
-  box="$(grep -c 'SCRIPT_DIR/fleet/deploy/box" build' "$SRC")"
-  [ "$box" -ge 1 ]
-  # celui du rail poste, non : ni son invocation, ni la racine qu'il derivait
-  ws="$(grep -c '_wroot/fleet/deploy/box" build' "$SRC" || true)"
-  [ "$ws" -eq 0 ]
-  refute grep -q '_wimg' "$SRC"
-  # et le motif mort n'est pas reste en prose : un lecteur le lirait comme vrai au present
-  refute grep -q 'la forge du poste en a besoin' "$SRC"
-}
 
 
 
@@ -919,4 +871,68 @@ SPY
   [ -x "$dest/fleet/deploy/provision" ]
   # Le clone appartient a CELUI QUI A LANCE, jamais a root.
   [ -O "$dest" ]
+}
+
+# ─── E5 : LES MURS — LE SEDIMENT NE PEUT PLUS REVENIR ───────────────────────────────────────────
+#
+# ⚠ CES MURS SE POSENT SUR UN ETAT DEJA ATTEINT, et c'est la seule facon honnete de poser un mur.
+# Un mur ecrit AVANT le travail qu'il garde est un voeu : il rougit des le premier jour, on le
+# desarme « en attendant », et il ne garde plus rien. Chacune de ces proprietes a ete gagnee par E1,
+# E2 ou E3 ; ce qui suit les rend irreversibles.
+
+@test "MUR : la porte n ESCALADE pas, ne PROVISIONNE pas, ne se REJOUE pas" {
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -q 'exec sudo' <<<"$code"
+  refute grep -q 'runuser' <<<"$code"
+  refute grep -qE '"\$PROVISION" apply' <<<"$code"
+  refute grep -q 'useradd' <<<"$code"
+  # Et elle ne se relance pas elle-meme : c'etait la source de `--consented`.
+  refute grep -qE 'exec .*(BASH_SOURCE|\$0)' <<<"$code"
+}
+
+@test "MUR : sa SEULE mesure est l appel au module" {
+  # ⚠ UNE SONDE « JUSTE POUR CE CAS-LA » EST EXACTEMENT LA DUPLICATION QU'ON RETIRE. Deux sondes du
+  # meme fait derivent, et celle qu'on ne relit pas est celle qui ment le jour ou l'autre change.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -q 'docker_endpoint' <<<"$code"
+  refute grep -q 'detect_substrate' <<<"$code"
+  # `command -v` survit pour UNE chose : verifier que `git` existe avant de cloner. Ce n'est pas une
+  # sonde de l'etat de la machine, c'est la garde d'un appel — et la source precede le preflight,
+  # donc aucun fait n'est encore disponible a cet instant.
+  [ "$(grep -c 'command -v' <<<"$code")" -eq 1 ]
+  grep -q 'command -v git' <<<"$code"
+  # Et l'appel au module existe bien, sinon ce mur serait vert a vide.
+  grep -q 'doctor --only 00-preflight' <<<"$code"
+}
+
+@test "MUR : la porte ne CONTREDIT pas son propre refus de root" {
+  # Elle refuse `EUID 0`. Un message qui conseillerait « sudo bash install.sh » enverrait droit dans
+  # ce refus — et c'est ce que deux d'entre eux faisaient, herites d'avant la garde.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -qE 'sudo[^"]*bash \$0' <<<"$code"
+  refute grep -q 'sudo bash install' <<<"$code"
+}
+
+@test "MUR : aucun NOM d humain, nulle part" {
+  # ⚠ LE MOTIF EXCLUT UN POINT DEVANT : `~/.lcars` est un REPERTOIRE, pas le nom d'un compte. Ce rail
+  # ne cree aucun humain (canon du 2026-08-30) ; en nommer un serait faire taper a l'operateur une
+  # commande qui echoue.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  refute grep -q 'builtin-human' <<<"$code"
+}
+
+@test "MUR : la porte reste une PORTE — plafond de code, pas de lignes" {
+  # ⚠ LE PLAFOND PORTE SUR LE CODE, PAS SUR LE FICHIER. La doctrine de ce depot VEUT la prose : la
+  # cicatrice vit inline, autonome, et un plafond de lignes brutes ferait choisir entre expliquer et
+  # tenir sous la barre. C'est le code qui mesure ce que la porte FAIT.
+  #
+  # 460 : la mesure du jour est 441 (E4 vient d'en retirer 29 avec le build d'image). La marge est
+  # etroite DELIBEREMENT — ce fichier a grossi jusqu'a porter deux rails entiers, et chaque etape du
+  # chantier lui en retire. Un plafond large ne garderait rien.
+  local n; n="$(grep -vcE '^\s*#|^\s*$' "$SRC")"
+  [ "$n" -le 460 ] || {
+    echo "la porte a $n lignes de code (plafond 460) — qu'est-ce qui est revenu dedans ?" >&2
+    return 1
+  }
 }

@@ -431,3 +431,41 @@ FAKE
   run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
   [ "$status" -eq 0 ]
 }
+
+# ─── E4 : L'IMAGE EST UNE PRECONDITION, ET C'EST ICI QU'ELLE SE VERIFIE ─────────────────────────
+#
+# ⚠ CES TROIS TEMOINS VIENNENT D'`install_door.bats`, ET LEUR SUJET A CHANGE DE MAISON AVEC LEUR
+# CODE (E4 du chantier porte, D4). La PORTE batissait l'image : elle sondait `image inspect` et
+# lancait `box build` avant de deleguer. Une boite de production TIRE son image — epinglee par
+# digest, avec le gate joue UNE FOIS par le rail qui la construit ; un client ne compile pas chez son
+# hote. Le build reste un geste de DEV, et c'est CE script qui sait s'il a une image.
+
+@test "MIGRE : image ABSENTE — un up ne la fabrique pas, et il le DIT" {
+  # ⚠ LE REFUS DOIT NOMMER LES DEUX VOIES. `compose up --no-build` echoue deja sur une image absente,
+  # mais avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
+  # `box build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat —
+  # il a coute la 4e forme du rail boite le 2026-08-30 (chemin publie inexistant, rc 127).
+  local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
+  grep -q 'image inspect' <<<"$bloc"
+  grep -q 'box build' <<<"$bloc"
+  grep -qE 'pull' <<<"$bloc"
+  # Et il SORT : un up qui continue sans image laisserait compose parler a sa place.
+  grep -q 'exit 1' <<<"$bloc"
+}
+
+@test "MIGRE : un up ne BUILDE JAMAIS implicitement" {
+  # Un `up` qui builde masque un build rate en repartant du cache de layers. Un build rend SON
+  # verdict, et c'est un geste separe.
+  local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
+  grep -q -- '--no-build' <<<"$bloc"
+}
+
+@test "MIGRE : la PORTE ne batit plus AUCUNE image — ni pour un rail, ni pour l autre" {
+  # Le pendant du precedent, mesure de l'autre cote : ce qui a quitte la porte n'y revient pas.
+  local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
+  [ -f "$door" ]
+  local code; code="$(grep -vE '^\s*#' "$door")"
+  refute grep -q 'image inspect' <<<"$code"
+  refute grep -qE 'box" build|box build' <<<"$code"
+  refute grep -q 'PROV_DOCKER_BIN' <<<"$code"
+}

@@ -186,6 +186,22 @@ cmd_up() {
   # les cree pas, il REFUSE de demarrer s'ils manquent, et ce script est le seul a s'executer avant.
   # C'est ce que l'externalite achete : `down -v` ne PEUT pas emporter trois heures de toolchain.
   store_ensure_volumes "$DOCKER" || { echo "box: magasin non pose — up annule" >&2; exit 1; }
+  # ⚠ L'IMAGE EST UNE PRECONDITION, ET C'EST ICI QU'ELLE SE VERIFIE DEPUIS E4 (D4). La PORTE la
+  # batissait : elle sondait `image inspect` et lancait `box build` avant de deleguer. Une boite de
+  # production TIRE son image — epinglee par digest, avec le gate joue UNE FOIS par le rail qui la
+  # construit ; un client ne compile pas chez son hote. Le build reste un geste de DEV, et c'est ce
+  # script qui sait s'il a une image, pas la porte.
+  #
+  # ⚠ ET LE REFUS NOMME LES DEUX VOIES. `compose up --no-build` echoue sur une image absente, mais
+  # avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
+  # `box build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat.
+  local img="${LCARS_IMAGE:-lcars-fleet:2}"
+  if ! $DOCKER image inspect "$img" >/dev/null 2>&1; then
+    echo "box: image « $img » absente — un up ne la fabrique pas." >&2
+    echo "   en DEV   : fleet/deploy/box build      (plusieurs minutes, une fois)" >&2
+    echo "   en PROD  : tire-la  ($DOCKER pull $img), le gate a deja ete joue par le rail qui l'a batie" >&2
+    exit 1
+  fi
   # --no-build : un `up` qui builde implicitement masque un build rate en repartant du cache de
   # layers. Un build rend SON verdict ; image absente → up echoue en le disant.
   compose up -d --no-build "$@"
