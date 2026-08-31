@@ -31,13 +31,13 @@ defmodule Fleet.CapProfile.Image do
   @spec publish!() :: :ok
   def publish! do
     # UNE image PAR CATALOGUE INSTALLE, chacune batie sur SON scope — le catalogue par-dessus le
-    # systeme, jamais par-dessus ses voisins. La cle etait scalaire, donc les catalogues fusionnaient
-    # en une seule image : un projet ne pouvait pas avoir « ses » roles, il avait ceux de tout le
-    # monde. Les cartes ne se superposent pas et les cap-profiles si — c'est la difference que
-    # `scopes/1` porte et que `search/1` aplatit.
+    # systeme, jamais par-dessus ses voisins. Une cle scalaire fusionnerait les catalogues en une
+    # seule image : un projet n'aurait pas « ses » roles, il aurait ceux de tout le monde. Les
+    # cartes ne se superposent pas et les cap-profiles si — c'est la difference que `scopes/1`
+    # porte et que `search/1` aplatit.
     # Clee par la RACINE du catalogue, pas par le repertoire d'arbre : `SPBuilder.Image` clee ainsi,
     # et un profil ne peut porter qu'UNE identite de catalogue. Deux espaces de cles pour un meme
-    # fait, c'est la duplication que ce chantier poursuit — introduite ici le temps d'un soir.
+    # fait, c'est une duplication.
     for root <- Fleet.Catalogue.installed_roots(),
         scope = Fleet.Catalogue.tree_scope(root, :cap_profiles),
         scope != [],
