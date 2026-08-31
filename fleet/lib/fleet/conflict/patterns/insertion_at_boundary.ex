@@ -20,9 +20,9 @@ defmodule Fleet.Conflict.Patterns.InsertionAtBoundary do
   def detect?(%{base_lines: []} = h), do: detect_without_base(h)
 
   def detect?(h) do
-    # This pattern reaches `Diff.lcs/2` DIRECTLY, so it carries the budget refusal itself -- the
-    # ceiling had to live in `lcs/2` rather than in the three-way merge, or this path would have
-    # stayed unbounded next to a neighbour that was fixed.
+    # This pattern reaches `Diff.lcs/2` DIRECTLY, so it carries the budget refusal itself -- a
+    # ceiling placed in the three-way merge alone would leave THIS path unbounded beside a bounded
+    # neighbour.
     with {:ok, ours_removals} <- lcs_removals(h.base_lines, h.ours_lines),
          {:ok, theirs_removals} <- lcs_removals(h.base_lines, h.theirs_lines),
          {:ok, ours_added} <- lcs_additions(h.base_lines, h.ours_lines),
