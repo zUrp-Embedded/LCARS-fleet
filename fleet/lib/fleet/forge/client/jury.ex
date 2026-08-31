@@ -47,8 +47,8 @@ defmodule Fleet.Forge.Client.Jury do
   ## The one rule that keeps this safe
 
   **A card can only be STRICTER. It never repeals a judge's explicit refusal.** `:changes_requested`
-  in, `:changes_requested` out, whatever the curve says. This is the same line the CI path was
-  corrected onto (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
+  in, `:changes_requested` out, whatever the curve says. It is the same line the CI path holds
+  (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
   floor, a card's tolerance is a ceiling, and a machine that promotes over an explicit human-shaped
   refusal is not a policy — it is an override.
 
@@ -334,10 +334,6 @@ defmodule Fleet.Forge.Client.Jury do
   # is STALE — the judged code no longer exists, the judge must re-judge. Indispensable because Gitea does
   # NOT dismiss a REQUEST_CHANGES on push (only stale approvals via branch-protection are): without this
   # filter, a stale REQUEST_CHANGES that is never re-dispatched blocks the PR FOREVER.
-  # The IN-FORCE review per reviewer, as the raw forge record. ONE definition of "in force", from
-  # which both the routing verdict and the human-facing record derive: two implementations of the
-  # same question drift, and the gate would then route on one answer while the architect reads the
-  # other.
   defp decisive_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -417,7 +413,11 @@ defmodule Fleet.Forge.Client.Jury do
   @doc """
   Returns downcased judges with an unanswered re-request after a prior review.
 
-  review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
+  A re-request is the human gesture "judge this again" (the forge's UI button), and neither source
+  the runtime already reads reveals it: the review-records are NOT dismissed on re-request (Gitea,
+  verified live), and `requested_reviewers` is volatile. Left unread, a re-request is invisible —
+  the judge is never re-dispatched and the merge loops on `not enough approvals`.
+
   The paginated timeline is counted rather than timestamp-ordered because forge timestamps have
   second granularity. Removals cancel requests; truncated or malformed timelines fail.
   """
