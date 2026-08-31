@@ -29,9 +29,9 @@ defmodule Fleet.Observation.ReadModel do
     {"oauth.", :diagnostics},
     {"mcp.server_crashed", :diagnostics}
     # ⚠ AUCUNE ENTREE POUR UN TYPE QUE PERSONNE N'EMET : elle trierait un FLUX VIDE tout en se
-    # lisant comme une categorie alimentee. Les deux cas rencontres ici avaient le meme motif — un
-    # consommateur reste apres le depart de son producteur (6-016, BL-6-113) — et c'est pourquoi la
-    # regle est ecrite UNE fois plutot que deux.
+    # lisant comme une categorie alimentee. Le motif est toujours le meme — un consommateur reste
+    # apres le depart de son producteur (6-016, BL-6-113) — et c'est pourquoi la regle est ecrite
+    # UNE fois plutot qu'a chaque entree.
   ]
 
   # ── Client ────────────────────────────────────────────────────────────────

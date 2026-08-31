@@ -32,8 +32,8 @@ defmodule Fleet.Observation.Deck do
   # ─── LES MEDIAS DE MARQUE ───────────────────────────────────────────────────────────────────────
   # Servis A LA MAIN plutot que par `Plug.Static`, et ce n'est pas un gout : `Plug.Static` resout son
   # `from:` a la COMPILATION (Plug.Builder appelle `init/1` la), donc il ne peut pas viser un chemin
-  # que la config pose au boot. Une racine de medias figee dans le BEAM serait exactement le contraire
-  # de ce que ce chantier retire.
+  # que la config pose au boot. Une racine de medias figee dans le BEAM ne peut plus etre deplacee
+  # par l'installation, qui est justement celle qui la pose.
   #
   # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE. `..` dans une URL est la faute la plus
   # vieille du web ; `Path.expand` + prefixe, sinon 404 — jamais un filtrage de la CHAINE, qui se
@@ -86,9 +86,9 @@ defmodule Fleet.Observation.Deck do
     end
   end
 
-  # `socket`, not `port` (6-072/6-098): this deck has no address. Reporting a port here would have
-  # been the most convincing lie of the lot — a health endpoint answering `200` while naming a number
-  # nothing binds. Whoever probes health is looking for where to reach this thing; the answer is a
+  # `socket`, not `port` (6-072/6-098): this deck has no address. Reporting a port here would be the
+  # most convincing lie of the lot — a health endpoint answering `200` while naming a number nothing
+  # binds. Whoever probes health is looking for where to reach this thing; the answer is a
   # path, and the caller reaching it over that very socket is what makes the field honest.
   get "/health" do
     conn
@@ -186,8 +186,8 @@ defmodule Fleet.Observation.Deck do
       # stops short of here exists everywhere except where its only consumer can see it.
       #
       # `nil` is a real answer, not a gap: a fleet-level pod belongs to no project. It reads as
-      # "no project" ONLY because the runtime now states it — the same nil inferred from an absent
-      # mount meant "I could not tell", and the two were indistinguishable to the page.
+      # "no project" ONLY because the runtime STATES it — a nil inferred from an absent mount would
+      # mean "I could not tell", and the two are indistinguishable to the page.
       project_slug: Map.get(info, :project_slug),
       phase: info.phase,
       conditions: Map.get(info, :conditions, []),

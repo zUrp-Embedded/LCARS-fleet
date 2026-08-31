@@ -1,7 +1,8 @@
 defmodule Fleet.Observation.Application do
   @moduledoc """
   Supervisor for the read-only observation frontier: event projection plus the
-  deck, served on a unix socket (the TCP port is gone — cf. `## The deck has no port`). Live pods come from the spawner; event-derived
+  deck, served on a unix socket and never on a TCP port (cf. `## The deck has no port`). Live pods
+  come from the spawner; event-derived
   views come from `ReadModel`.
   """
 
@@ -48,15 +49,15 @@ defmodule Fleet.Observation.Application do
   `console.sock` and `pod.sock`. `connect(2)` requires traversing that directory, which only the
   human and the console group can do — the landing holds exactly that one supplementary group.
 
-  `:ip` is no longer a contract to test: an AF_UNIX socket has no address to get wrong. What
-  replaces it is the SOCKET'S mode, asserted below.
+  There is no `:ip` contract to test: an AF_UNIX socket has no address to get wrong. What stands in
+  its place is the SOCKET'S mode, asserted below.
   """
   @spec listener_children() :: [Supervisor.child_spec() | module() | {module(), term()}]
   def listener_children do
     if Application.get_env(:lcars_fleet, :observation_start_listener, true) do
       # The binding gesture belongs to EventRouter — the only domain that declares `Plug.Cowboy`.
-      # Writing it here compiled to `forbidden reference`, and that refusal was right: one place
-      # knows how to bind Cowboy, so a second gesture cannot drift from the first.
+      # Writing it here is a `forbidden reference`, and that refusal is right: one place knows how
+      # to bind Cowboy, so a second gesture cannot drift from the first.
       [{Fleet.EventRouter.UnixListener, plug: Fleet.Observation.Deck, socket: deck_socket()}]
     else
       []
