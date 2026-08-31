@@ -214,12 +214,12 @@ defmodule Fleet.Spawner.PermanentBoot do
     # relaunch if dead, `{:already_started}` no-op if alive; no more holder-leak/accumulation).
     pod_id = pod_id_for(name)
 
-    # No boot-from-base anymore (reorg 2026-07-19): the pod itself runs the UNIFIED seed decision
-    # at first boot (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured seed →
-    # resume from it; else fresh). PermanentBoot only names the pod — one seed authority, in the pod.
-    # `rc_name` is what a HUMAN reads in Desktop, and this was the one spawn site that passed none
-    # — the default falls back to a technical string, so the fleet's most visible pod was the only
-    # one showing an internal key. The pod_id addresses, the session_id identifies to the vendor,
+    # NO boot-from-base here: the pod itself runs the UNIFIED seed decision at first boot
+    # (`Pod.maybe_slot_resume` — live jsonl → resume in place; captured seed → resume from it; else
+    # fresh). PermanentBoot only NAMES the pod — one seed authority, and it is in the pod.
+    # `rc_name` is what a HUMAN reads in Desktop, and a spawn site that passes none falls back to a
+    # technical string: the fleet's most visible pod would be the only one showing an internal key.
+    # The pod_id addresses, the session_id identifies to the vendor,
     # the rc_name is read: three strings, three jobs, and only this one faces a person.
     case spawner.(cp, pod_id, pod_id: pod_id, rc_name: Fleet.Layout.pod_label(nil, name, nil)) do
       {:ok, _pid} ->

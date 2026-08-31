@@ -21,8 +21,8 @@ defmodule Fleet.Workflow.BriefArtifact do
   the content's sha256 (hintless legacy/test path).
 
   **This module MATERIALIZES; what a failure costs is the CALLER's contract, and the two callers
-  differ on purpose** (revised 2026-08-03 — DR-010's "best-effort, never breaks the dispatch" held
-  for both and was wrong for one of them):
+  differ on purpose** — a single "best-effort, never breaks the dispatch" rule (DR-010) holds for
+  one of them and is wrong for the other:
 
     * TICKET CREATION (`physicalize_attrs/3`, the arch writing an issue) — degrades on every
       cause. Refusing to create a ticket because ops is not ready would block the very

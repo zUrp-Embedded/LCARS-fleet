@@ -168,10 +168,10 @@ defmodule Fleet.FindingsWire do
   #     snippets live INSIDE the JSON as a matter of course; cutting at the first fence truncated
   #     the substantial findings mid-object and reported them as garbage.
   #   * the LAST fence is wrong because THE BODY IS EDITABLE. It is ours only until a human replies
-  #     inside that same body with a code block of their own -- measured 2026-08-19: one appended
-  #     ```bash snippet turned a readable payload into `{:error, :undecodable}`, and one layer up
-  #     that erased a card's block instead of raising it. A parser whose correctness depends on
-  #     nobody touching the text is not a parser, it is a convention.
+  #     inside that same body with a code block of their own: ONE appended ```bash snippet turns a
+  #     readable payload into `{:error, :undecodable}`, and one layer up that ERASES a card's block
+  #     instead of raising it. A parser whose correctness depends on nobody touching the text is not
+  #     a parser, it is a convention.
   #
   # So: DECIDE BY DECODING. Take every candidate ending, longest first, and keep the first one that
   # is valid JSON. The longest-first order is what makes it right rather than merely lucky -- inner
