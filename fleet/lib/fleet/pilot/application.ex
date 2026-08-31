@@ -107,32 +107,21 @@ defmodule Fleet.Pilot.Application do
           {key, is_pid(Process.whereis(name))}
         end)
 
-      # The rail is operational ONLY if EVERY essential process is up. Probing two names (Poller +
-      # StepRunConsumer) while IncidentRegistry / the two Task.Supervisors / IncidentConsumer /
-      # WorktreeSync / ArchFeed were dead read hollow-green: the rail NAMED in readiness was not the rail
-      # MEASURED. `step_rail_processes/0` IS that rail (locked to `step_children!` by a drift test).
-      # The HEALTH of the polls, beside the list of the living (BL-6-40). A rail whose processes are
-      # all up but whose polls take 40 s is "operational" and is not fine — readiness stated the
-      # first and kept quiet about the second.
+      # ⚠ LE RAIL NOMME DANS LA READINESS DOIT ETRE LE RAIL MESURE. Sonder deux noms pendant que
+      # d'autres processus essentiels sont morts rend un vert CREUX — d'ou une liste unique,
+      # verrouillee sur les enfants reellement demarres par un test de derive.
       #
-      # ⚠ The key is called `repo_poll` and NOT `tick`, because the telemetry measures ONE REPO, not
-      # a cycle. `[:lcars_fleet, :pilot_poller, :poll]` is emitted once PER REPO (every emission carries
-      # `repo:`), so a distribution over this key describes what one repo costs, never what a full
-      # pass costs. Measured 2026-08-03: 12 repos, 30 s interval, and the counter advanced by 12 per
-      # cycle. The key was first called `tick` — a name asserting a scope the mechanism does not
-      # have, and on which a measurement was read wrong before the name was fixed. The cost of a
-      # CYCLE is not measured here, and no name may suggest otherwise.
+      # Et la SANTE des passes a cote de la liste des vivants : un rail dont tous les processus sont
+      # debout mais dont les passes prennent quarante secondes est « operationnel » et ne va pas bien.
       #
-      # ⚠ And this is where the telemetry becomes READABLE. `PollerTelemetry.stats/0` existed with
-      # no production caller: `RELEASE_DISTRIBUTION=none` is the default (a deliberate choice of
-      # `bin/fleet_v2`: no epmd, no multi-human collision), so NO `rpc` reaches the node. An
-      # instrument nobody can query measures for nobody — the very hollow 6-06 documents, rebuilt by
-      # the instrument meant to fight it.
-      # Two scales, two keys, never an average of the two: `repo_poll` says what ONE REPO costs,
-      # `poll_cycle` what ONE PASS costs (discovery + pod snapshot + serial fold of the R repos +
-      # the two fleet-global passes). `poll_cycle` is the one to read when asking whether a value
-      # frozen at the start of a pass can go stale before it ends; `repo_poll` cannot answer that,
-      # it does not know how many repos exist.
+      # ⚠ LA CLE S'APPELLE `repo_poll` ET PAS `tick`, parce que la mesure porte sur UN DEPOT et pas
+      # sur un cycle : l'evenement est emis une fois PAR DEPOT. Le nom precedent affirmait une portee
+      # que le mecanisme n'a pas, et une mesure a ete lue de travers dessus. Le cout d'un CYCLE n'est
+      # pas mesure ici, et aucun nom ne doit le suggerer.
+      #
+      # Deux echelles, deux cles, JAMAIS une moyenne des deux : `poll_cycle` est celle a lire pour
+      # savoir si une valeur figee en debut de passe peut se perimer avant la fin — `repo_poll` ne
+      # peut pas y repondre, il ignore combien de depots existent.
       detail =
         detail
         |> Map.put(:repo_poll, repo_poll_health())
@@ -391,20 +380,15 @@ defmodule Fleet.Pilot.Application do
     :ok
   end
 
-  # A2 — the seal is fail-closed on its signer's role token, and since the signer follows the
-  # FUNCTION (gatekeeper on a clean PR, chief on a resolved conflict), a missing CHIEF token would
-  # surface at the most terminal act of the rarest path — the exact shape of the `chief`-not-in-
-  # `writers` scar (forge.tf): "le défaut attendait le pire moment pour se manifester". Same
-  # doctrine as the structural roles one line up: a box that cannot SIGN as its signers refuses
-  # readiness, it does not boot green and die months later.
+  # ⚠ UNE BOITE QUI NE PEUT PAS SIGNER COMME SES SIGNATAIRES REFUSE LA READINESS — elle ne demarre
+  # pas verte pour mourir des mois plus tard. Le signataire suivant la FONCTION, un jeton manquant
+  # se manifesterait sinon a l'acte le plus terminal du chemin le plus rare : le defaut qui attend
+  # le pire moment.
   #
-  # `require_`, NOT `validate_` — and the name is the declaration. The `validate_*!` family is the
-  # CATALOGUE-guard sequence, mirrored by the standalone verifier under the
-  # `boot.verifier_covers_rail` contract. This guard's subject is the BOX (credentials on disk),
-  # and the verifier is tokenless BY DESIGN (the container `verify` door drops to nobody:fleet and
-  # judges a catalogue that may not even be installed here) — playing it there would refuse valid
-  # catalogues for a credential question. A box guard therefore does not wear the family name:
-  # boot-only, by nature, and declared as such instead of hidden in an AST blind spot.
+  # `require_`, ET PAS `validate_` : le nom EST la declaration. La famille `validate_*!` est la
+  # sequence de garde d'un CATALOGUE, rejouee par un verificateur autonome qui est SANS JETON par
+  # design — y jouer ce garde-ci refuserait des catalogues valides pour une question de credential.
+  # Un garde de BOITE ne porte donc pas le nom de la famille.
   # ⚠ CE GARDE A CHANGE DE NATURE SANS CHANGER DE LIGNE, ET IL FALLAIT LE RATTRAPER.
   #
   # « pas de jeton » voulait dire UNE chose : le provisionnement n'a pas tourne, la boite est mal

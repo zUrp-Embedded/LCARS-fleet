@@ -21,22 +21,19 @@ defmodule Fleet.Credentials.Shell do
 
   A network `git` does not run alone: it forks transport helpers (`git-remote-https`), credential
   helpers, filters. Killing ONLY the top-level process (`kill -KILL <os_pid>`) leaves these
-  descendants alive after the deadline — they keep consuming resources/credentials and the forge auth
-  extraheader stays in their environment. So we run the command in its **own session/process-group**
-  (`setsid`) and, at the deadline, we kill the **whole GROUP** (`kill -KILL -<pgid>`): the top-level
-  AND its entire descent die together. Verified: a `bash -lc "sleep 30 & wait"`
-  that detaches a descendant — `kill -KILL <top>` alone leaves the `sleep` a ZOMBIE, whereas
-  `kill -KILL -<pgid>` takes it with it.
+  descendants alive after the deadline — they keep consuming resources and **the forge auth
+  extraheader stays in their environment**. So the command runs in its **own session/process-group**
+  and the deadline kills the **whole GROUP**: the top-level and its entire descent die together.
+  Killing the top-level alone leaves a detached descendant running.
 
   ### 2. The deadline is a WALL (absolute wall-clock), not a re-armable idle-gap
 
   A hung-network git does not necessarily hang in silence: it can DRIP output (one byte every
   `timeout-1` ms — keepalive, a progress line dragging on). A `receive … after timeout_ms` loop that
   RE-ARMS on each `{:data}` would NEVER kill this git: each byte pushes the deadline back. Yet that is
-  its target scenario. So we compute an **absolute deadline** (`monotonic_now + timeout_ms`) ONCE at
-  startup; the `receive` loop waits only for the REMAINING time (`deadline - now`), never a re-armed
-  `after timeout_ms`. The total wall-clock is bounded whatever the cadence of the output.
-  Verified: a process that emits continuously (drip) is killed at the wall deadline.
+  its target scenario. The deadline is therefore computed ONCE at startup and the loop waits only
+  for the REMAINING time, never a re-armed `after timeout_ms`. The total wall-clock is bounded
+  whatever the cadence of the output.
 
   ## The process-group mechanism — `setsid`, and TWO states to cover (6-031)
 
@@ -50,25 +47,22 @@ defmodule Fleet.Credentials.Shell do
 
   ### Which pid is the leader depends on the environment, and BOTH cases are live here
 
-  `setsid` forks only if it is ALREADY a process-group leader. Measured on this fleet, 2026-08-14:
+  `setsid` forks only if it is ALREADY a process-group leader, so:
 
-    * **dev box (WSL)** — the port driver hands its child a fresh session, so `setsid` sees itself
-      as a group leader and FORKS. The real process is its only child, in yet another session:
-      `os_pid` is the wrapper, NOT the pgid to kill.
-    * **CI container** — the port child inherits the BEAM's group (`pgrp != pid`), so `setsid` does
-      NOT fork: it execs in place and `os_pid` IS the pgid.
+    * when the port driver hands its child a fresh session, `setsid` FORKS — the real process is its
+      only child, and `os_pid` is the WRAPPER, not the pgid to kill;
+    * when the port child inherits the BEAM's group, `setsid` does NOT fork — it execs in place and
+      `os_pid` IS the pgid.
 
-  `terminate/2` covers both without having to tell them apart: it kills the discovered child's group
-  when there is a child, and ALWAYS also kills `-os_pid`. In the fork case the second shot is a
-  no-op (ESRCH); in the non-fork case it IS the whole group. This is what closes the defect 6-031
-  named — the old code, finding no child, killed only `os_pid` and left the descendants orphaned
-  while the caller was told the operation had timed out and was over.
+  The teardown covers both without telling them apart: it kills the discovered child's group when
+  there is a child, and ALWAYS also kills `-os_pid`. One of the two shots is a no-op; the other is
+  the whole group. Killing only `os_pid` leaves the descendants ORPHANED while the caller is told
+  the operation timed out and is over.
 
-  ⚠ **A previous fix dropped `setsid` entirely**, on the strength of the dev-box measurement alone
-  ("the port driver already opens a session, so `os_pid` is the pgid"). It was green locally and
-  RED in the container, where that premise is false and `-os_pid` would have named no group at all.
-  The lesson is in the shape of the measurement, not in the mechanism: a runtime behaviour measured
-  on ONE machine is a property of that machine until a second one agrees.
+  ⚠ **Dropping `setsid` "because the port driver already opens a session" is green on the machine
+  where that is true and RED where it is not** — there, `-os_pid` names no group at all. The lesson
+  is in the shape of the measurement, not in the mechanism: **a runtime behaviour measured on ONE
+  machine is a property of that machine until a second one agrees.**
 
   ## Placement (compile cycle)
 
@@ -83,15 +77,12 @@ defmodule Fleet.Credentials.Shell do
   Without `:env`, the system-side git env is injected (`ForgeAuth.git_env/0` → `GIT_TERMINAL_PROMPT=0`
   + auth extraheader if configured). A non-git caller passes `env: [...]` (or `env: []`).
 
-  ## Deliberately NOT split — `git_safe_config_args/0` stays in this module
+  ## Deliberately NOT split
 
-  The config-hardening vocabulary (`@git_safe_config_args`) shares no helper with the execution
-  machinery, yet the two are the two faces of THE SAME boundary "invoke git
-  system-side without executing the pod's code" — the bound (deadline + kill-group
-  + anti-prompt) closes the TIME/interaction vector, the `-c …` closes the CONFIG vector, and the
-  consumers (`Fleet.Workflow.Git`/`DeliverableGate`) ALWAYS compose the two together on `git/2`. A
-  one-function module would split the authority of this boundary across two files without decoupling
-  anything (the API would remain here as a defdelegate). Co-location is the intended status quo.
+  The config-hardening vocabulary shares no helper with the execution machinery, yet both are faces
+  of THE SAME boundary — "invoke git system-side without executing the pod's code". The bound closes
+  the TIME vector, the config args close the CONFIG vector, and every consumer composes the two.
+  Splitting would scatter the authority of one boundary across two files without decoupling anything.
 
   ## TYPED result (non-ignorable)
 
@@ -216,23 +207,11 @@ defmodule Fleet.Credentials.Shell do
             {:error, {:exit, {:enoent, "setsid"}}}
 
           {exe, setsid} ->
-            # 6-031 — L'ENVELOPPE `setsid` RESTE, ET LA MESURE QUI VOULAIT LA RETIRER ETAIT LOCALE.
+            # ⚠ L'ENVELOPPE RESTE — les deux etats de `setsid` et pourquoi la retirer casse hors du
+            # poste ou on l'a mesuree sont dans le `@moduledoc`.
             #
-            # `setsid` ne fork QUE s'il est deja chef de groupe. Il se trouve donc dans un des deux
-            # etats, et LES DEUX EXISTENT SUR CETTE FLOTTE — mesure du 2026-08-14 :
-            #
-            #   * poste de dev (WSL) : le port place son enfant dans une session neuve, `setsid` se
-            #     voit chef de groupe, FORKE — le vrai processus est son unique enfant, dans une
-            #     session encore autre. `os_pid` n'est PAS le PGID a tuer.
-            #   * conteneur de CI : l'enfant du port herite du groupe du BEAM (`pgrp` != `pid`),
-            #     `setsid` NE FORKE PAS, s'execute en place — `os_pid` EST le PGID.
-            #
-            # Retirer l'enveloppe marchait donc sur le poste et cassait dans la boite, ou tuer
-            # `-os_pid` n'aurait designe aucun groupe (ou pire, celui du BEAM si l'enfant n'avait pas
-            # ete isole). `terminate/2` couvre les deux etats sans avoir a les distinguer.
-            #
-            # `-w` garde l'enveloppe VIVANTE comme parent du vrai processus : sans lui elle
-            # fork-and-die et l'`os_pid` du port ne pointe plus sur rien d'utile.
+            # `-w` GARDE L'ENVELOPPE VIVANTE comme parent du vrai processus : sans lui elle
+            # fork-and-die, et l'`os_pid` du port ne pointe plus sur rien d'utile.
             port_opts =
               [
                 :binary,
