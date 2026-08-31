@@ -67,21 +67,21 @@ defmodule Fleet.Forge.Client do
   # voudrait grossir : une fonction sortie dans un sous-module sans etre reexposee ici fait mourir
   # tout appel qui passe par ce seam.
   #
-  # Le trou etait EN AMONT : rien ne verifiait qu'une implementation PAR DEFAUT tient le contrat qui
-  # la designe. C'est ce qu'un temoin de conformite ferme desormais, pour tous les seams a la fois.
+  # Le trou est EN AMONT : rien ne verifie qu'une implementation PAR DEFAUT tient le contrat qui la
+  # designe. C'est le temoin de conformite (`Delegation.conforming/2`) qui le ferme, pour tous les
+  # seams a la fois.
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, term()} | {:error, term()}
   defdelegate put_file(repo, path, content, opts), to: Fleet.Forge.Client.Files
 
-  # SON JUMEAU, ET IL TOMBAIT PLUS DUREMENT. `Client.Files` porte `get_file` ET `put_file` ; la
-  # facade ne reexposait NI l'un NI l'autre, et deux appelants distincts tapaient dedans. Celui-ci
-  # est `probe.ex:173` — `forge().get_file(repo, "CLAUDE.md", …)`, sur le chemin de `run_probe`,
-  # l'outil des juges. Arites exportees par la facade avant ce jour : AUCUNE.
+  # SON JUMEAU, ET IL TOMBE PLUS DUREMENT. `Client.Files` porte `get_file` ET `put_file`, et deux
+  # appelants distincts passent par cette facade. Celui-ci est `probe.ex` —
+  # `forge().get_file(repo, "CLAUDE.md", …)`, sur le chemin de `run_probe`, l'outil des juges.
   #
   # ⚠ LA DIFFERENCE DE MANIFESTATION EST TOUTE LA LECON. `put_file` passe par un behaviour, donc
-  # `conforming/2` rendait `{:seam_misconfigured, …, [put_file: 4]}` : un refus qui NOMME quoi
-  # reparer. Le seam de `probe.ex` (`get_env(:lcars_fleet, :mcp_probe_forge_client, …)`) ne declare aucun
-  # `@callback` — aucun garde n'avait rien a verifier, et le juge recevait un
+  # `conforming/2` rend `{:seam_misconfigured, …, [put_file: 4]}` : un refus qui NOMME quoi
+  # reparer. Le seam de `probe.ex` (`get_env(:lcars_fleet, :mcp_probe_forge_client, …)`) ne declare
+  # aucun `@callback` — aucun garde n'a rien a verifier, et le juge recoit un
   # `UndefinedFunctionError` brut. Meme defaut, meme module, meme decoupage : seule la presence d'un
   # contrat change ce qu'en voit celui qui le subit.
   @spec get_file(String.t(), String.t(), Keyword.t()) ::
@@ -276,11 +276,11 @@ defmodule Fleet.Forge.Client do
       Stamps `stage/retired`.
     * `:marker` — not a ticket at all (parking markers of `ProjectOnboard`). Stamps nothing.
 
-  WHY THE ARGUMENT IS REQUIRED, AND NOT DERIVED. Until now "a closed ticket is a delivered ticket"
-  was EMERGENT: it held because no actor owns a close gesture — the human's team is `read`, the
-  architect has no close tool, and every closing path is runtime. An invariant resting on the
-  absence of a tool is one new caller away from lying, and everything downstream reads the CLOSURE,
-  never the intent: a dependency releases on a closed blocker whatever killed it.
+  WHY THE ARGUMENT IS REQUIRED, AND NOT DERIVED. Left unstated, "a closed ticket is a delivered
+  ticket" is EMERGENT: it holds only because no actor owns a close gesture — the human's team is
+  `read`, the architect has no close tool, and every closing path is runtime. An invariant resting
+  on the absence of a tool is one new caller away from lying, and everything downstream reads the
+  CLOSURE, never the intent: a dependency releases on a closed blocker whatever killed it.
 
   Deriving the kind from "does it carry `stage/merged`?" would rebuild the same weakness one level
   up — an ABSENCE is not a fact, and the reader would have to guess what silence means. Here the
@@ -320,11 +320,12 @@ defmodule Fleet.Forge.Client do
   # is a SCOPED label (`stage/retired`) and the lock is FLAT — disjoint families, so Gitea's per-scope
   # mutex evicts nothing. Every lifecycle path reaches `close_issue` with the lock already lifted
   # (`StepRunCompleter.unlock/6` removes it before a `:delivered` seal), so this is scoped to the ONE
-  # closure that had no other place to lift it: the supersede/retire gesture (`Delegation.do_retire*`)
-  # closes a ticket that may still be IN FLIGHT — a live pod is reaped in the same act — and left the
-  # lock behind on the now-closed ticket. Best-effort like the stamp: the close is authoritative, and a
-  # stale lock on a CLOSED ticket is a warning, never a rollback. Idempotent (`remove_label` no-ops when
-  # the label is absent), so it is safe on a retire target that never carried it.
+  # closure with no other place to lift it: the supersede/retire gesture (`Delegation.do_retire*`)
+  # closes a ticket that may still be IN FLIGHT — a live pod is reaped in the same act — and would
+  # leave the lock behind on the now-closed ticket. Best-effort like the stamp: the close is
+  # authoritative, and a stale lock on a CLOSED ticket is a warning, never a rollback. Idempotent
+  # (`remove_label` no-ops when the label is absent), so it is safe on a retire target that never
+  # carried it.
   defp lift_in_flight_on_retire(repo, n, :retired, opts) do
     case remove_label(repo, n, Fleet.Labels.in_flight(), opts) do
       {:ok, _} ->
@@ -623,11 +624,11 @@ defmodule Fleet.Forge.Client do
   Requests native PR reviews from the supplied ROLES.
 
   ROLES, not logins, and the distinction is the whole point. The fleet reasons in roles everywhere;
-  the account a role writes under is `<tier>_<role>` and only the forge side needs to know it. This
-  function used to forward whatever it was handed straight into the Gitea payload, so a jury of
-  `["qualifier", "reviewer"]` reached a forge whose accounts are `fleet_qualifier` /
-  `fleet_reviewer` and came back `404 User 'qualifier' not exist` — the deliverable PR then sat
-  open with no judge, forever, since a merge waits on approvals that nobody was ever asked for.
+  the account a role writes under is `<tier>_<role>` and only the forge side needs to know it.
+  Forwarding what it is handed straight into the Gitea payload sends a jury of
+  `["qualifier", "reviewer"]` to a forge whose accounts are `fleet_qualifier` / `fleet_reviewer`,
+  which answers `404 User 'qualifier' not exist` — and the deliverable PR then sits open with no
+  judge, forever, since a merge waits on approvals that nobody was ever asked for.
 
   Same shape as `as_role/2`: the caller names a ROLE, the client resolves what the forge needs.
 
@@ -695,16 +696,13 @@ defmodule Fleet.Forge.Client do
   @doc """
   Closes a pull request WITHOUT merging it — PATCH `state: closed`.
 
-  It exists because retiring a ticket did not retire its work. The two rails are independent by
-  design: `dispatch_review` polls PULLS, not issues, and it is not lease-guarded. So a supersede
-  that closed the ticket while its PR stayed open left that PR being judged, then merged, into a
-  retired ticket — measured on the bench 2026-08-04.
+  It exists because retiring a ticket does not, on its own, retire its work. The two rails are
+  independent by design: `dispatch_review` polls PULLS, not issues, and it is not lease-guarded. So
+  a supersede that closes the ticket while its PR stays open leaves that PR being judged, then
+  merged, into a retired ticket.
 
-  The supersede used to REFUSE the gesture instead (`supersedes_target_in_flight`), which read like
-  a policy ("let it land") and was in fact a workaround for this missing capability: nothing in the
-  whole forge client could close a pull. A retirement that cannot retire the work is not a
-  retirement, and the operator's intent — stop the machine, bound the cost — does not care whether
-  a PR exists.
+  A retirement that cannot retire the work is not a retirement, and the operator's intent — stop the
+  machine, bound the cost — does not care whether a PR exists.
 
   Idempotent on the Gitea side, like every close.
   """
@@ -772,7 +770,7 @@ defmodule Fleet.Forge.Client do
   end
 
   defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` marchait par tolerance du
+    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` ne passe que par tolerance du
     # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
            "do" => method
@@ -786,10 +784,10 @@ defmodule Fleet.Forge.Client do
         #
         # `fleet/probe-rails#24`, 2026-08-18 : conflit git REEL et DEFINITIF
         # (`git merge-tree` -> `CONFLICT (content): journal.txt`), et Gitea rend
-        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours. Le
-        # commentaire ci-dessous supposait que l'anglais discriminait ; sa propre premisse etait le
-        # contre-exemple. Cout mesure : 1447 tentatives en 21 h, ~2880 requetes/jour pour un
-        # resultat connu d'avance, et 1,6 s de `sleep` a chaque tick du pilote.
+        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours.
+        # S'en remettre au libelle seul fait donc retenter un resultat connu d'avance : mesure sur
+        # ce cas, 1447 tentatives en 21 h, ~2880 requetes/jour, et 1,6 s de `sleep` a chaque tick
+        # du pilote.
         #
         # L'ETAT, LUI, EST FIABLE. On relit la PR : `mergeable: false` tranche le definitif sans
         # dependre d'une chaine. C'est un GET sur un chemin deja en echec — le cas nominal (200) ne
@@ -962,8 +960,8 @@ defmodule Fleet.Forge.Client do
 
   Le endpoint `/pulls` (pas `/issues?type=pulls`) rend directement les objets complets
   (`head`/`base`/`merged`) ET filtre `base=` cote serveur. Ecrit pour la passe de drain du
-  reconciliateur : `list_pulls/2` sur le depot ops paginait TOUTES les PR de la boite puis
-  faisait un GET par PR, toutes les 60 s — mesure par l'audit du chantier admiral.
+  reconciliateur, qui tourne toutes les 60 s : `list_pulls/2` sur le depot ops y paginerait TOUTES
+  les PR de la boite, puis ferait un GET par PR.
   """
   @spec list_pulls_for_base(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}
@@ -1013,9 +1011,13 @@ defmodule Fleet.Forge.Client do
   @doc """
   Resolves the merged PR from the latest `[merge:pr-N]` issue marker, not from rewritten branch refs.
 
-  names: Gitea (1.26.4, verified live 2026-07-19) REWRITES a merged PR's `head.ref` to
-  Returns `:none` only after a successful complete comment read. The marker is author-agnostic because
-  it is observability-only and the gatekeeper role, not necessarily the system bot, writes it.
+  NEVER by branch name: Gitea (1.26.4, verified live 2026-07-19) rewrites a merged PR's `head.ref`
+  to `refs/pull/N/head` once the head branch is deleted, so a branch scan cannot find a delivered
+  brick's PR.
+
+  Returns `:none` only after a successful complete comment read. The marker is author-agnostic
+  because it is observability-only and the gatekeeper role, not necessarily the system bot, writes
+  it.
   """
   @spec merged_pr_of_issue(String.t(), integer(), Keyword.t()) ::
           {:ok, map()} | :none | {:error, term()}
@@ -1104,8 +1106,8 @@ defmodule Fleet.Forge.Client do
   @doc """
   The same verdict, plus the CONTEXTS that produced it (sorted, deduplicated).
 
-  The paragraph above is right that the merge question is answered by the worst-of alone — and it
-  is the WHOLE answer only for a caller that decides. A caller that must TELL A HUMAN (or a judge)
+  The worst-of alone answers the merge question, and it is the WHOLE answer only for a caller that
+  decides. A caller that must TELL A HUMAN (or a judge)
   what the machine did needs to say WHICH rail ran, because `:success` is silent about that and a
   green from a placeholder rail is indistinguishable from a green from a real harness (6-140).
 
@@ -1223,12 +1225,11 @@ defmodule Fleet.Forge.Client do
   # LES SIX ETATS QUE LE CONTRAT DECLARE, ET CE QU'ILS VALENT POUR UNE PORTE DE MERGE.
   #
   # `CommitStatus.status` : `pending | success | error | failure | warning | skipped` (enum du
-  # swagger de l'instance). Trois d'entre eux etaient traites par la clause fourre-tout « etat
-  # inconnu -> :pending », ce qui est juste pour un etat VRAIMENT inconnu et faux pour deux qui sont
-  # au contrat :
+  # swagger de l'instance). La clause fourre-tout « etat inconnu -> :pending » est juste pour un
+  # etat VRAIMENT inconnu et fausse pour deux qui sont AU CONTRAT :
   #
   #   * `skipped` — l'etape ne s'est PAS executee et ne devait pas : sa condition `if:` etait
-  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » faisait attendre la porte
+  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » fait attendre la porte
   #     45 min puis ESCALADER vers un humain — une fausse alarme sur un saut delibere, et une
   #     fausse alarme est ce qui apprend a un humain a ignorer le canal. Un contexte sans verdict ne
   #     VOTE PAS ; si tous sont sautes, il ne reste rien et `:none` (aucun statut) est la reponse
@@ -1237,8 +1238,8 @@ defmodule Fleet.Forge.Client do
   #     etat dont aucun humain ne peut sortir autrement qu'en relancant ; elle ouvre donc la porte,
   #     comme un succes, parce que c'est ce qu'elle est : un succes qui commente.
   #
-  # Le fourre-tout reste, et il reste `:pending` : un etat que ce code ne connait pas ne doit pas
-  # elargir la porte. La difference est qu'il ne couvre plus que l'inconnu REEL.
+  # Le fourre-tout couvre l'inconnu REEL, et il rend `:pending` : un etat que ce code ne connait pas
+  # ne doit pas elargir la porte.
   defp worst_ci_state(states) do
     voting = Enum.reject(states, &(&1 == "skipped"))
 
@@ -1276,8 +1277,8 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # ⚠ `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menaient a
-  # poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
+  # ⚠ UN `false` NU DIRAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menent
+  # a poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
   # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
   # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
   # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
@@ -1296,16 +1297,15 @@ defmodule Fleet.Forge.Client do
               # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
               # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
               # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-              # premier ; se limiter au systeme rendait la dedup aveugle a tout ce qui est signe par
-              # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
+              # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
+              # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
               case trusted_logins(config, opts) do
                 {:ok, logins} ->
                   {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-                # LA LECTURE A REUSSI, LES IDENTITES NON. `[]` disait « aucun commentaire de
-                # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a
-                # ecrit quoi. Second pliage du meme genre que celui d'en dessous, une branche plus
-                # loin.
+                # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
+                # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
+                # sait pas QUI a ecrit quoi.
                 {:error, why} ->
                   {:unverified, {:trusted_logins, why}}
               end
@@ -1431,11 +1431,11 @@ defmodule Fleet.Forge.Client do
   @doc """
   Le login de forge sous lequel `role` ecrit, ou `{:error, _}`.
 
-  LE RUNTIME NE SAVAIT SOUS QUEL COMPTE UN ROLE ECRIT. `as_role/2` echange un JETON
-  (`RoleIdentity` porte `{role, token}`) ; le compte qui apparait comme auteur est celui qui detient
-  ce jeton SUR LA FORGE. Deux defauts vivaient de ce trou : le compteur anti-emballement filtrait
-  sur le login SYSTEME et comptait donc ZERO marqueur (tous poses sous un role, cf. F-E6 qui l'exige),
-  et la dedup du meme marqueur ne le voyait jamais et le reposait a chaque rejeu.
+  RIEN D'AUTRE NE DIT SOUS QUEL COMPTE UN ROLE ECRIT. `as_role/2` echange un JETON (`RoleIdentity`
+  porte `{role, token}`) ; le compte qui apparait comme auteur est celui qui detient ce jeton SUR LA
+  FORGE. Sans cette traduction, tout ce qui filtre sur le login SYSTEME compte ZERO marqueur — ils
+  sont tous poses sous un role, cf. F-E6 qui l'exige — et la dedup ne voit jamais le sien, donc le
+  repose a chaque rejeu.
 
   La resolution est le meme geste que pour le bot — `GET /user` avec CE jeton — et son cache est
   deja keye par empreinte de jeton, donc un role resolu une fois ne coute plus rien.
@@ -1451,15 +1451,14 @@ defmodule Fleet.Forge.Client do
   @doc """
   Counts the FLEET's step-run markers across all comment pages for the anti-runaway budget.
 
-  UN MARQUEUR DIT QUI IL PRETEND ETRE, ET ON LE VERIFIE. Le filtre etait `auteur == login systeme`
-  et comptait donc ZERO : F-E6 exige que ce commentaire soit signe par le ROLE qui finit, jamais par
-  le systeme, et le `@doc` promettait deux lignes plus haut de ne jamais sous-compter. Un marqueur
-  compte desormais si son auteur est le login du role QU'IL NOMME (ou le bot, pour les marqueurs que
-  le systeme pose lui-meme, cf. `pr-open-fail`).
+  UN MARQUEUR DIT QUI IL PRETEND ETRE, ET ON LE VERIFIE. Il compte si son auteur est le login du
+  role QU'IL NOMME (ou le bot, pour les marqueurs que le systeme pose lui-meme, cf. `pr-open-fail`).
+  Filtrer sur `auteur == login systeme` compterait ZERO : F-E6 exige que ce commentaire soit signe
+  par le ROLE qui finit, jamais par le systeme.
 
-  La frontiere de F059 est intacte, et c'etait tout l'enjeu : un `[step_run:fake:ccc]` pose par un
-  tiers ne compte pas, puisque son auteur n'est pas le compte du role `fake` — et un compte de role
-  n'est detenu que par le daemon, dans `/opt/lcars/var/tokens`.
+  La frontiere de F059 tient, et c'est tout l'enjeu : un `[step_run:fake:ccc]` pose par un tiers ne
+  compte pas, puisque son auteur n'est pas le compte du role `fake` — et un compte de role n'est
+  detenu que par le daemon, dans `/opt/lcars/var/tokens`.
 
   Un role dont le login est irresolvable est une ERREUR, jamais un sous-compte permissif.
   """
@@ -1516,8 +1515,8 @@ defmodule Fleet.Forge.Client do
 
   `nil` is a RESULT, not a failure: the recurrence brake (`IncidentConsumer.default_brake/3`) poses
   `lcars-awaits-arch` with NO comment at all, so there is no verdict to hand back. Saying so beats
-  handing over the thread's last comment, which is what this replaced — and which gave the arch its
-  own previous answer as the question to arbitrate.
+  handing over the thread's last comment, which would give the arch its own previous answer as the
+  question to arbitrate.
   """
   @spec escalation_verdict(String.t(), integer(), Keyword.t()) ::
           {:ok, String.t() | nil} | {:error, term()}
@@ -1598,10 +1597,10 @@ defmodule Fleet.Forge.Client do
   """
   # LES CONSTANTES DE PROTOCOLE VIENNENT DE `Fleet.Labels`, ET C'EST SON CONTRAT, PAS UN STYLE.
   # Son `@moduledoc` l'écrit : « Re-declaring one as a local `@attr` or literal = silent drift on a
-  # rename. Centralized here, consumed everywhere. » Ce fichier les épelait toutes en littéral —
-  # dans la liste de seeding ET dans les clauses de `label_color/1` / `label_description/1` — donc
-  # un renommage côté Labels laissait ici sept chaînes orphelines, sans un mot. Attributs évalués à
-  # la compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
+  # rename. Centralized here, consumed everywhere. » Les épeler en littéral — dans la liste de
+  # seeding comme dans les clauses de `label_color/1` / `label_description/1` — laisse ici autant de
+  # chaînes orphelines au premier renommage côté Labels, sans un mot. Attributs évalués à la
+  # compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
   @lbl_in_flight Fleet.Labels.in_flight()
   @lbl_awaits_arch Fleet.Labels.awaits_arch()
   @lbl_destination_workshop Fleet.Labels.destination_workshop()
@@ -1627,10 +1626,10 @@ defmodule Fleet.Forge.Client do
           "stage/build",
           @lbl_stage_review,
           @lbl_stage_merged,
-          # RETIRED was missing, and its absence was not a routing hole — `add_issue_label/4`
-          # creates a label on demand when the POST does not take. What it cost is the palette: a
-          # lazily-created label is born with the default grey and no description, so the ONE stage
-          # that says "closed without delivering" looked like noise next to five coloured ones.
+          # RETIRED is seeded for the PALETTE, not for routing — `add_issue_label/4` creates a
+          # label on demand when the POST does not take. A lazily-created label is born with the
+          # default grey and no description, so the ONE stage that says "closed without delivering"
+          # would read as noise next to five coloured ones.
           @lbl_stage_retired
         ] ++ Fleet.Labels.visual_types()
 
