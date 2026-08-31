@@ -251,8 +251,19 @@ nu() { # nu <check|apply>
   # ⚠ LE DECOR POSSEDE LA POPULATION DEPUIS QUE LE MODULE L'ENUMERE. Il jugeait UN nom qu'on lui
   # donnait ; il lit maintenant `fleet_humans`, donc un passwd non pose ferait juger les humains de
   # la MACHINE qui joue le gate — verte ou rouge selon qui la possede, et selon leurs groupes.
-  # Le compte doit exister pour de vrai : `id -nG` interroge le systeme, pas le decor.
-  passwd_with "$(id -un):x:$(id -u):$(id -u)::/home/$(id -un):/bin/bash"
+  # Le NOM doit exister pour de vrai : `id -nG` interroge le systeme, pas le decor. L'UID, lui, est
+  # une donnee du decor comme le reste.
+  #
+  # ⚠ ET IL NE DOIT PAS ETRE `id -u`, PARCE QUE `passwd_with` POSE DEJA UN SIEGE A 1000. Cette ligne
+  # s'ecrivait `…:x:$(id -u):$(id -u):…` : sur toute machine ou le lanceur porte l'uid 1000 — le
+  # premier compte d'une Ubuntu ou d'une WSL standard, c'est-a-dire le CAS NOMINAL — le compte du
+  # decor tombait sur l'uid du siege, GUARD B le refusait a bon droit, et le temoin rougissait sur
+  # du code sain. Il passait sur cette machine-ci pour une raison ETRANGERE a ce qu'il epingle : le
+  # compte y porte 1002. Le banc 2004 l'a mis par terre au premier rejeu.
+  #
+  # 1234 : superieur au plancher, inferieur au plafond, et different du siege du decor — les trois
+  # proprietes que ce temoin exige, aucune heritee de la machine.
+  passwd_with "$(id -un):x:1234:1234::/home/$(id -un):/bin/bash"
   mod 'check'
   [ "$status" -eq 0 ]
   [[ "$output" == *"il peut lancer la fleet"* ]]

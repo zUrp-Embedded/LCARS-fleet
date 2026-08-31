@@ -532,9 +532,20 @@ EOF
   # rend « aucune CLI docker » — un refus JUSTE, mais un autre que celui qu'on epingle ici. Mesure :
   # ce temoin passait sur trois machines et tombait dans le conteneur de CI, qui n'a pas de docker.
   # Un test qui herite de son environnement mesure l'environnement.
+  #
+  # ⚠ ET ELLE SE DECLARE PAR `PROV_DOCKER_BIN`, PAS PAR LE PATH — le decor la posait dans le PATH,
+  # ce qui ne suffit pas ici : ce temoin force `PROV_SUBSTRATE=wsl`, et sous wsl la sonde essaie
+  # DELIBEREMENT la CLI du montage Docker Desktop AVANT le PATH (« ce qu'un PATH offre dans la
+  # distro est une copie ou un wrapper, jamais le docker »). La doublure n'etait donc jamais prise
+  # sur une machine WSL qui a Docker Desktop : le vrai daemon repondait, et le refus attendu
+  # n'arrivait pas. Le temoin passait ici pour une raison ETRANGERE a ce qu'il epingle — la socket
+  # est refusee a ce compte — et il est tombe sur le banc 2004, ou elle ne l'est pas.
+  # `PROV_DOCKER_BIN` est le choix de l'appelant et il l'emporte sur tout : c'est la couture prevue,
+  # celle qu'`install_door.bats` emploie deja pour la meme raison.
   local cli="$BATS_TEST_TMPDIR/bin"; mkdir -p "$cli"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$cli/docker"; chmod 0755 "$cli/docker"
   run env PATH="$cli:/usr/bin:/bin" LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock" \
+      PROV_DOCKER_BIN="$cli/docker" \
       PROV_SUBSTRATE=wsl PROVISION_MODULE=00-preflight \
       PROVISION_LIB="$SANDBOX/lib/provision-lib.sh" \
       bash "$BATS_TEST_DIRNAME/../modules.d/00-preflight.sh" check
