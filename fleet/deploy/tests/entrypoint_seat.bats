@@ -30,6 +30,8 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
   [ -f "$SRC" ]
@@ -238,8 +240,11 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   local code; code="$(grep -vE '^\s*#' "$src")"
   grep -q 'if ! resolve_admiral; then' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"
-  # `refute` n'est pas charge dans ce fichier : la negation s'ecrit `!`, terminale sous `set -e`.
-  ! grep -q 'resolve_admiral || exit 1' <<<"$code"
+  # ⚠ CE COMMENTAIRE DISAIT « la negation s'ecrit `!`, terminale sous `set -e` », ET IL ETAIT FAUX
+  # DEUX FOIS : cette ligne n'est pas terminale (une assertion la suit), et `!` est de toute facon
+  # exempte d'`errexit` par POSIX. L'assertion s'executait, rendait 1, et bats passait a la suite —
+  # verte au moment precis ou le `|| exit 1` qu'elle interdit serait revenu.
+  refute grep -q 'resolve_admiral || exit 1' <<<"$code"
   # ET ELLE DIT POURQUOI ELLE ATTEND : une boite muette debout serait pire qu'une boite qui boucle.
   grep -q 'EN ATTENTE DE CONFIGURATION' <<<"$code"
 }

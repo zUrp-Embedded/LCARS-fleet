@@ -227,9 +227,12 @@ setup() {
   # plus personne du tout : elle ne cree pas d'humain, et a l'instant ou elle parle il n'y en a
   # peut-etre aucun. Ne rien ecrire satisfait le motif d'origine par le haut.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  # ⚠ `refute`, PAS `!` : la premiere de ces deux assertions n'est pas la derniere ligne du bloc,
+  # et POSIX exempte d'`errexit` toute commande niee par `!` — elle etait donc verte au moment
+  # precis ou le litteral qu'elle interdit serait revenu.
+  refute grep -qE '(^|[^.[:alnum:]_/-])lcars([^[:alnum:]_.-]|$)' <<<"$code"
   # ET ELLE N'INTERROGE PLUS L'AUTORITE : il n'y a plus de nom a demander.
-  ! grep -q 'builtin-human' <<<"$code"
+  refute grep -q 'builtin-human' <<<"$code"
 }
 
 @test "VERROU : « --fleet-human » est REFUSE, il ne revient pas en passe-plat muet" {
