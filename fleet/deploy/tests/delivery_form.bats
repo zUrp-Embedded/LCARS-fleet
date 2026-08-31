@@ -138,3 +138,19 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -hvE '^[[:space:]]*#' "$DEPLOY/modules.d/16-node.sh" "$DEPLOY/modules.d/15-toolchain.sh" \
     | refute_out 'source-revision'
 }
+
+@test "TOOLCHAIN : seuil DEJA atteint — le journal porte quand meme les deux paquets" {
+  # ⚠ LA BRANCHE QUI NE FAIT RIEN LAISSE UNE TRACE, et c'est le trou que le geste sur `10-packages`
+  # ne couvrait PAS : celui-la porte sur les depots apt, celui-ci sur `apt_ensure erlang elixir`, qui
+  # n'est appelee QUE si le seuil n'est pas atteint. Machine deja au niveau : ni `apt_installed` ni
+  # `apt_already` n'entraient au journal, et plus rien ne distinguait « LCARS les a poses » de « ils
+  # etaient la avant nous » — la question meme a laquelle le journal existe pour repondre.
+  checkout                                   # livraison source : le module travaille
+  export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal"
+  run env PROVISION_LIB="$PROVISION_LIB" PROV_JOURNAL_ACC="$PROV_JOURNAL_ACC" \
+          PROV_LINK_DIR="$PROV_LINK_DIR" LCARS_LEGACY_ELIXIR_PREFIX="$LCARS_LEGACY_ELIXIR_PREFIX" \
+          PROV_ELIXIR_OTP_MAJOR=1 PROV_ELIXIR_MIN=0.0.1 \
+      bash "$DEPLOY/modules.d/15-toolchain.sh" apply
+  grep -q '^apt_already .*erlang' "$PROV_JOURNAL_ACC"
+  grep -q '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
+}

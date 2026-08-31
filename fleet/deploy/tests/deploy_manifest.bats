@@ -458,3 +458,73 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
   [ "$status" -eq 0 ]
   [ "$(grep -c '^FETCH$' <<< "$output")" -eq 1 ]
 }
+
+# ─── LE DEPOT D'UN OPERATEUR N'EST PAS LE NOTRE ─────────────────────────────────────────────────
+#
+# MESURE : `10-packages` journalisait `posed_apt_repo` INCONDITIONNELLEMENT et, sur echec
+# d'`apt-get update`, faisait `rm -f` sur les deux fichiers en annoncant « la machine repart comme
+# avant ». Sur une machine qui portait deja le depot docker — le cas le plus banal — les deux
+# gestes disaient le contraire de ce qu'ils faisaient : le premier faisait revendiquer a LCARS un
+# objet qu'il n'avait pas pose (donc `uninstall` le retirerait), le second le detruisait.
+#
+# Le journal EXISTAIT et son commentaire enoncait deja la bonne regle — « uninstall ne retire que ce
+# que le journal revendique, jamais le depot d'un operateur qui l'avait avant nous ». La regle
+# etait juste ; l'ecriture qui l'alimente ne la respectait pas. Un mecanisme correct nourri d'un
+# fait faux se trompe avec methode.
+
+repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
+  local head="$BATS_TEST_TMPDIR/repo-head.sh"
+  sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
+  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+          LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
+          LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
+          PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal" \
+      bash -c 'source "$1" >/dev/null 2>&1
+        os_field() { case "$1" in ID) echo debian ;; VERSION_CODENAME) echo trixie ;; esac; }
+        curl() { return 0; }
+        ensure_dir() { mkdir -p "$1"; }
+        write_atomic() { mkdir -p "$(dirname "$1")"; cat > "$1"; }
+        fetch_verify() { mkdir -p "$(dirname "$3")"; echo "CLE-LCARS" > "$3"; }
+        dpkg() { echo amd64; }
+        run_quiet() { return 1; }        # « apt-get update » refuse
+        ensure_docker_repo' _ "$head"
+}
+
+@test "depot docker : un depot QUI EXISTAIT DEJA est RESTAURE sur echec, jamais efface" {
+  mkdir -p "$BATS_TEST_TMPDIR/keyrings"
+  echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$BATS_TEST_TMPDIR/docker.list"
+  echo "CLE-DE-L-OPERATEUR"          > "$BATS_TEST_TMPDIR/keyrings/docker.asc"
+
+  repo_echec
+  [ "$status" -ne 0 ]
+  # ⚠ LE CONTENU, PAS L'EXISTENCE. Un temoin qui ne verifierait que `-f` passerait sur un rollback
+  # qui laisse en place le fichier que LCARS vient d'ecrire — c'est-a-dire sur le cas ou la machine
+  # ne repart PAS comme avant, avec un fichier present pour le prouver.
+  [ "$(cat "$BATS_TEST_TMPDIR/docker.list")" = "deb LE-DEPOT-DE-L-OPERATEUR" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/keyrings/docker.asc")" = "CLE-DE-L-OPERATEUR" ]
+  [[ "$output" == *"RESTAURÉ"* ]]
+}
+
+@test "depot docker : ce qui EXISTAIT DEJA n'entre jamais au journal comme POSE par nous" {
+  mkdir -p "$BATS_TEST_TMPDIR/keyrings"
+  echo "deb LE-DEPOT-DE-L-OPERATEUR" > "$BATS_TEST_TMPDIR/docker.list"
+  echo "CLE-DE-L-OPERATEUR"          > "$BATS_TEST_TMPDIR/keyrings/docker.asc"
+
+  repo_echec
+  # `posed_apt_repo` autorise `uninstall` a retirer. L'y inscrire ferait detruire, des mois plus
+  # tard et par un autre geste, le depot docker d'un operateur.
+  refute grep -q 'posed_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
+  grep -q 'found_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
+}
+
+@test "depot docker : ce que NOUS avons posé est bien retiré sur echec, et le journal le dit" {
+  # Le sens qui manquait : sans lui, un module qui ne toucherait plus JAMAIS a rien passerait les
+  # deux temoins ci-dessus en ayant cesse de nettoyer derriere lui.
+  rm -f "$BATS_TEST_TMPDIR/docker.list" "$BATS_TEST_TMPDIR/keyrings/docker.asc"
+  repo_echec
+  [ "$status" -ne 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/docker.list" ]
+  [ ! -e "$BATS_TEST_TMPDIR/keyrings/docker.asc" ]
+  grep -q 'posed_apt_repo' "$BATS_TEST_TMPDIR/install.journal"
+  [[ "$output" == *"n'était là avant cette passe"* ]]
+}

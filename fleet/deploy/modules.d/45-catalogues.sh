@@ -141,7 +141,7 @@ local_head()  { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
 # perimetre entier, donc aucun geste du rail n'y touchera plus. Se taire laisserait un arbre orphelin
 # de plusieurs centaines de mega sur une machine dont l'operateur croit que le produit gere ses
 # chemins. Ce n'est PAS un drift : un drift promet qu'`apply` converge, et `apply` ne le fera jamais.
-LEGACY_CATALOGUES_DIR="${LCARS_LEGACY_CATALOGUES_DIR:-/home/catalogues}"
+LEGACY_CATALOGUES_DIR="$PROV_LEGACY_CATALOGUES_DIR"
 
 say_leftover() {
   [[ -d "$LEGACY_CATALOGUES_DIR" ]] || return 0

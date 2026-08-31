@@ -143,6 +143,14 @@ apply() {
   elif [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]] \
      || ! elixir_meets_floor "$(elixir_version)" "$PROV_ELIXIR_MIN"; then
     apt_ensure erlang elixir || verdict_apply
+  else
+    # ⚠ LE CAS OU L'ON NE FAIT RIEN LAISSE QUAND MEME UNE TRACE. Machine deja au seuil : `apt_ensure`
+    # n'est pas appelee, donc NI `apt_installed` NI `apt_already` n'entrent au journal — et rien ne
+    # distingue plus « LCARS les a poses » de « ils etaient la avant nous ». C'est exactement la
+    # question a laquelle le journal existe pour repondre, laissee sans reponse par la branche qui
+    # n'agit pas. `apt_already` est le bon mot : trouves, donc jamais repris.
+    prov_journal_note apt_already erlang elixir
+    p_ok "Erlang/OTP et Elixir déjà au plancher — trouvés, donc jamais repris par « uninstall »"
   fi
 
   # ⚠ L'ARBRE APRES LE PAQUET, ET POUR LA RAISON INVERSE. Retirer 6 148 fichiers avant de savoir si

@@ -46,6 +46,16 @@
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
+#   provision uninstall [--substrate S] [--humans] [--yes]
+#
+# ⚠ `uninstall` MANQUAIT A CETTE LISTE, et c'est le seul verbe qui detruit. Un operateur qui lit
+# l'en-tete ne pouvait pas savoir qu'il existe, ni — surtout — que SANS `--yes` il n'execute RIEN :
+# il imprime le plan complet de ce qu'il retirerait, et sort. Le mode « lister sans detruire » n'est
+# donc pas un drapeau a trouver, c'est le DEFAUT ; lui donner en plus un nom (`--dry-run`) ajouterait
+# une piece mobile pour renommer ce qui se passe deja quand on ne demande rien.
+#   `--yes`     execute. Demande root, parce qu'il retire des objets systeme.
+#   `--humans`  retire aussi les COMPTES unix des personnes. ⚠ JAMAIS leur home : `/home` est hors
+#               du perimetre entier, par tous les binaires — ni un `rm`, ni un `userdel -r`.
 #
 # `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
 # Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
@@ -407,7 +417,7 @@ uninstall_run() {
   fi
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
-  local -a files=() dirs=() groups=() humans=() accounts=()
+  local -a files=() dirs=() groups=() humans=() accounts=() refuses_home=()
   applies_here() { # applies_here <colonne substrat> -> 0 si cet objet concerne CE substrat
     local col="$1"
     [[ "$col" == "any" ]] && return 0
@@ -435,6 +445,17 @@ uninstall_run() {
       # precisement celui que l'operateur n'a pas ecrit et ne peut pas deviner. « 4 repertoire(s) »
       # ne se relit pas.
       [[ "$obj" == "$resolved" ]] || jokers+=("$resolved")
+      # ⚠ LA GARDE EST DANS LE CODE, PAS DANS LA TABLE, ET C'EST LA DIFFERENCE QUI COMPTE. `preserve`
+      # protege ce qu'on a pense a y ecrire ; celle-ci protege `/home` meme quand personne n'y a
+      # pense. Une ligne `dir /home/<n'importe quoi>` ajoutee demain — par distraction, ou parce
+      # qu'un objet operator-facing semblait y avoir sa place — retomberait sinon dans un `rm -rf`
+      # sans qu'aucun relecteur ait a s'en apercevoir. Un perimetre qui depend de la vigilance de
+      # celui qui edite la table n'est pas un perimetre.
+      if [[ "$resolved" == /home || "$resolved" == /home/* ]]; then
+        [[ "$cls" == "human" ]] && humans+=("$resolved")   # inventaire seul : on le DIT, on n'y touche pas
+        [[ "$cls" == "human" ]] || refuses_home+=("$cls $resolved")
+        continue
+      fi
       case "$cls" in
         anchor|link|runtime) files+=("$resolved") ;;
         dir|prefix)          dirs+=("$resolved") ;;
@@ -505,15 +526,22 @@ uninstall_run() {
   fi
   if [[ "${#persons[@]}" -gt 0 ]]; then
     if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
-      printf '  %-10s %s\n' "comptes h." "${persons[*]} — RETIRÉS avec leur home (--humans)"
+      printf '  %-10s %s\n' "comptes h." "${persons[*]} — comptes RETIRÉS, leurs homes RESTENT"
     else
-      printf '  %-10s %s\n' "comptes h." "${persons[*]} — LAISSÉS. « --humans » les retire, EUX ET LEUR HOME"
+      printf '  %-10s %s\n' "comptes h." "${persons[*]} — LAISSÉS. « --humans » retire les COMPTES ; les homes restent dans tous les cas"
     fi
   fi
-  if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
-    printf '  %-10s %d objet(s) dans les homes (--humans)\n' "humains" "${#humans[@]}"
-  else
-    printf '  %-10s %s\n' "humains" "${#humans[@]} objet(s) LAISSÉS — « --humans » pour les retirer aussi"
+  # ⚠ CE COMPTEUR NE PROMET PLUS RIEN, ET C'EST TOUT SON OBJET. Il disait « N objet(s) dans les homes
+  # (--humans) », donc « ce drapeau les emporte » — ce qui etait vrai et ne l'est plus. Le dire au
+  # passe serait pire que se taire : un operateur qui lit un inventaire le lit comme une liste de ce
+  # qui va disparaitre.
+  printf '  %-10s %s\n' "homes" "${#humans[@]} objet(s) posés sous /home — JAMAIS retirés, par aucun drapeau"
+  # Une ligne de la table qui vise `/home` sans etre de classe `human` est une ligne qui s'est
+  # trompee de perimetre. La garde l'ecarte ; se taire ferait croire que la table est appliquee
+  # telle qu'elle est ecrite.
+  if [[ "${#refuses_home[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "écartés" "${_PA}${#refuses_home[@]} ligne(s) de la table visent /home et sont IGNORÉES :${_PN}"
+    printf '             %s\n' "${refuses_home[@]}"
   fi
   [[ "${#jokers[@]}" -eq 0 ]] \
     || printf '  %-10s %s\n' "résolus" "${jokers[*]}"
@@ -564,19 +592,20 @@ uninstall_run() {
     fi
   done
 
-  if [[ "$UNINSTALL_HUMANS" -eq 1 ]]; then
-    for o in "${humans[@]}"; do
-      local h real
-      for h in /home/*; do
-        real="${o//<human>/$(basename "$h")}"
-        # ⚠ `preserved` SUR LE CHEMIN RESOLU, JAMAIS SUR LE MOTIF : `/home/*` itere TOUT ce qui vit
-        # sous `/home`, et rien ne garantit que ce soit un home d'humain — une racine de travail
-        # partagee y vit aussi, et `basename` la traite comme un login. Sur une boucle qui `rm -rf`.
-        preserved "$real" && continue
-        [[ -e "$real" ]] && { rm -rf "$real" && removed=$((removed + 1)); }
-      done
-    done
-  fi
+  # ─── /home NE SE TOUCHE PAS. IL N'Y A PAS DE BLOC ICI, ET IL N'EN REVIENDRA PAS ────────────────
+  #
+  # Un `for h in /home/*` + `rm -rf` vivait a cet endroit, sous `--humans`. Il portait sa propre
+  # mise en garde — « rien ne garantit que ce soit un home d'humain, une racine de travail partagee
+  # y vit aussi » — et il gardait le geste quand meme, avec `preserved` pour filet. Un commentaire
+  # qui decrit un danger sans le fermer ne ferme rien : mesure du 2026-08-31, ce bloc detruisait les
+  # `.lcars` et les `pods` de cinq personnes, plus tout ce que la table ne pensait pas a preserver.
+  #
+  # LA REGLE EST MAINTENANT LA MEME POUR TOUS LES BINAIRES : ni `rm`, ni `userdel -r`. Elle ne se
+  # negocie pas objet par objet, parce que c'est exactement ainsi qu'elle s'etait perdue — un
+  # perimetre qui accepte une exception argumentee en accepte une deuxieme.
+  #
+  # La classe `human` reste LUE, et seulement pour DIRE ce qui reste (voir le bilan) : declarer ce
+  # qu'on POSE garde tout son sens, c'est le droit de le RETIRER qui n'existe plus.
   for o in "${dirs[@]}"; do
     [[ -d "$o" ]] || continue
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
@@ -610,12 +639,16 @@ uninstall_run() {
         echo "  ${_PA}compte $per gardé — son home est du travail préservé ($home)${_PN}"
         continue
       fi
-      if userdel -r "$per" >/dev/null 2>&1; then
+      # ⚠ `userdel`, JAMAIS `userdel -r`. Le `-r` emporte le home : c'est un `rm -rf` sous `/home`
+      # par un autre binaire, et la regle ne porte pas sur le nom de l'outil. La garde `preserved`
+      # ci-dessus ne couvrait que la classe `preserve` — jamais un home ordinaire, c'est-a-dire
+      # exactement celui d'une personne.
+      if userdel "$per" >/dev/null 2>&1; then
         removed=$((removed + 1))
-        echo "  compte $per retiré, avec son home"
+        echo "  compte $per retiré — ${_PC}son home reste${_PN} ($home)"
       else
         kept=$((kept + 1))
-        echo "  ${_PA}compte $per non retiré — « userdel -r $per » refuse (session ouverte ?)${_PN}"
+        echo "  ${_PA}compte $per non retiré — « userdel $per » refuse (session ouverte ?)${_PN}"
       fi
     done
   fi
@@ -649,7 +682,33 @@ uninstall_run() {
 
   echo ""
   printf '  %d objet(s) retiré(s), %d gardé(s) délibérément.\n' "$removed" "$kept"
-  echo "  ${_PC}Le travail est intact :${_PN} ${preserve_roots[*]}"
+
+  # ─── CE QUI RESTE — LE BILAN DE SORTIE, ET IL EST AUSSI IMPORTANT QUE LE PLAN D'ENTREE ────────
+  #
+  # Le plan d'entree dit ce qui VA partir ; celui-ci dit ce qui EST reste. Les deux ne se deduisent
+  # pas l'un de l'autre : entre les deux il y a les refus (« session ouverte »), les gardes, et tout
+  # ce que le perimetre ne couvre pas. Sans cette section, un operateur qui vient de desinstaller ne
+  # peut connaitre l'etat de sa machine qu'en la fouillant — c'est-a-dire en refaisant a la main le
+  # travail que ce script vient de faire, avec moins d'information que lui.
+  #
+  # ⚠ ELLE NOMME, ELLE NE COMPTE PAS. « 12 objets gardes » n'est pas quelque chose sur quoi on peut
+  # agir ; un chemin l'est. C'est la meme raison qui fait nommer les chemins resolus depuis un joker.
+  echo ""
+  echo "  ${_PC}── CE QUI RESTE SUR CETTE MACHINE ─────────────────────────────${_PN}"
+  echo "  ${_PC}travail préservé${_PN}      ${preserve_roots[*]}"
+  echo "  ${_PC}sous /home${_PN}           tout — ni un « rm », ni un « userdel -r ». Les homes, leur contenu,"
+  echo "                       et les ${#humans[@]} objet(s) que LCARS y a posés."
+  if [[ "${#journal_pkgs[@]}" -eq 0 && -r "$JOURNAL_FILE" ]]; then
+    echo "  ${_PC}paquets apt${_PN}          aucun retiré — le journal dit qu'aucun n'a été posé par ce rail"
+  else
+    echo "  ${_PC}paquets apt${_PN}          ceux que la machine portait DÉJÀ (« apt_already » au journal) restent"
+  fi
+  # Le cache des catalogues a demenage sous le prefixe le 2026-09-01 ; ce qui reste a l'ancienne
+  # adresse est sous /home, donc hors de portee de ce script — et invisible si personne ne le dit.
+  [[ -d "$PROV_LEGACY_CATALOGUES_DIR" ]] \
+    && echo "  ${_PA}reliquat${_PN}             $PROV_LEGACY_CATALOGUES_DIR (cache d'avant le 2026-09-01) — « rm -rf $PROV_LEGACY_CATALOGUES_DIR » si tu n'en veux plus"
+  [[ "$kept" -gt 0 ]] \
+    && echo "  ${_PA}refus${_PN}                $kept objet(s) que ce script n'a PAS pu retirer — voir les lignes ci-dessus"
   return 0
 }
 

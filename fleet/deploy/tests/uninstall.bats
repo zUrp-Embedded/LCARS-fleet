@@ -139,11 +139,13 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [[ "$output" == *"3 répertoire(s)"* ]]
 }
 
-@test "les objets du HOME sont laisses par defaut, et il le DIT" {
-  # « L'uninstall peut les PROPOSER, jamais les imposer » — ce sont des objets de travail.
+@test "les objets du HOME sont laisses TOUJOURS, et le plan ne promet plus l'inverse" {
+  # ⚠ CE TEMOIN EXIGEAIT « LAISSÉS … --humans » — c'est-a-dire un DEFAUT plus un drapeau qui le
+  # leve. Il n'y a plus de drapeau qui le leve : `/home` est hors du perimetre entier. Le mot que
+  # ce temoin cherche a donc change, et c'est le geste A1 qui l'a change.
   plan
-  [[ "$output" == *"LAISSÉS"* ]]
-  [[ "$output" == *"--humans"* ]]
+  [[ "$output" == *"JAMAIS retirés"* ]]
+  [[ "$output" == *"par aucun drapeau"* ]]
 }
 
 @test "l'ORDRE est l'inverse de la pose : le plus profond d'abord" {
@@ -283,14 +285,31 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   [ "$n_apt" -lt "$n_dirs" ]
 }
 
-@test "HUMAINS : la garde preserve s'evalue sur le chemin RESOLU, pas sur le motif" {
-  # `preserved()` etait teste sur `/home/<human>/.lcars` — un motif qui ne ressemble a aucune racine
-  # preservee. La boucle, elle, itere `/home/*` : donc `/home/projects`, `/home/private`. Un
-  # `--humans` sur une machine qui porte les faces planifiait dedans.
+@test "HUMAINS : la boucle sur \`/home/*\` N'EXISTE PLUS — pas « mieux gardee », absente" {
+  # ⚠ CE TEMOIN GARDAIT UN GESTE, IL INTERDIT MAINTENANT SON RETOUR. Il exigeait que la boucle
+  # `for h in /home/*` filtre par `preserved` avant son `rm -rf`. C'etait un filet sur un geste qui
+  # n'aurait pas du exister : `preserved` ne connait que les racines qu'on a pense a ecrire, et un
+  # home ordinaire n'en est pas une. Le geste est parti ; ce qui reste a tenir est son ABSENCE.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
-  local bloc; bloc="$(sed -n '/for h in \/home\/\*/,/done/p' <<<"$body")"
-  [ -n "$bloc" ]
-  grep -q 'preserved "$real"' <<<"$bloc"
+  refute grep -q 'for h in /home/\*' <<<"$body"
+}
+
+@test "GARDE /home : aucune ligne de la table, quelle que soit sa classe, n'entre dans ce qui part" {
+  # La garde est DANS LE CODE et pas dans la table, parce qu'une garde qui vit dans la table depend
+  # de la vigilance de celui qui l'edite. Ici : une ligne `dir` sous /home — la faute la plus
+  # naturelle, un objet operator-facing qui semble y avoir sa place — et elle est ECARTEE, pas
+  # retiree, pas silencieuse.
+  nrep() { sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output"; }
+  local n_avant n_apres
+  plan; n_avant="$(nrep)"
+
+  mkdir -p "$FAKE/faux-home/quelquechose"
+  printf 'dir       /home/quelquechose-de-nouveau  0755 root:root any\n' >> "$LCARS_SYSTEM_MANIFEST"
+
+  plan; n_apres="$(nrep)"
+  [ "$n_apres" -eq "$n_avant" ]                     # rien de plus a detruire
+  [[ "$output" == *"visent /home et sont IGNORÉES"* ]]   # et le plan le DIT
+  [[ "$output" == *"/home/quelquechose-de-nouveau"* ]]
 }
 
 # ─── LA CLASSE `account`, ET LES DEUX COMPTES QUE LE BANC A VUS SURVIVRE ────────────────────────
@@ -516,11 +535,14 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   refute_out 'capitaine' <<<"$output"
 }
 
-@test "PERSON : LAISSES par defaut, et le plan dit ce que --humans ferait" {
+@test "PERSON : LAISSES par defaut, et le plan dit que le HOME reste dans les deux cas" {
   carte "1	1000	capitaine" "2	1001	lcars"
   plan
   [[ "$output" == *"LAISSÉS"* ]]
-  [[ "$output" == *"EUX ET LEUR HOME"* ]]
+  # ⚠ IL EXIGEAIT « EUX ET LEUR HOME ». C'est la phrase qu'A1 rend fausse : `--humans` retire le
+  # COMPTE, le home ne part dans aucun cas. Un plan qui annonce une destruction qu'il ne fera pas
+  # est aussi trompeur qu'un plan qui en tait une.
+  [[ "$output" == *"les homes restent dans tous les cas"* ]]
 }
 
 @test "PERSON : sans carte, aucun compte n'est planifie — on n'invente personne" {
@@ -533,7 +555,11 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   local bloc; bloc="$(sed -n '/for per in /,/^    done/p' <<<"$body")"
   [ -n "$bloc" ]
-  grep -q 'userdel -r'      <<<"$bloc"
+  # ⚠ `userdel` NU, ET L'INTERDICTION DE `-r` EST LE POINT. Ce temoin EXIGEAIT `userdel -r` : il
+  # verrouillait donc, avec le serieux d'un mur, le seul geste de ce bloc qui detruit un home. `-r`
+  # est un `rm -rf` sous /home par un autre binaire, et la regle ne porte pas sur le nom de l'outil.
+  grep -qE 'userdel "\$per"' <<<"$bloc"
+  refute grep -q 'userdel -r' <<<"$bloc"
   grep -q 'preserved "$home"' <<<"$bloc"
   # ⚠ ET LE GARDE EST CELUI DE CE BLOC, PAS « un garde quelque part avant ». Premiere version :
   # `tail -1` sur toutes les occurrences de `UNINSTALL_HUMANS` puis comparaison de rangs — elle
@@ -611,6 +637,74 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
 
   plan; n_apres="$(nfic)"
   [ "$n_apres" -eq "$n_avant" ]
+}
+
+@test "RUNTIME : la classe range des REPERTOIRES, et la boucle des fichiers le sait" {
+  # ⚠ LA TABLE A UNE CLASSE QUE L'EXECUTEUR DOIT SAVOIR EXECUTER. `anchor|link|runtime` tombent tous
+  # les trois dans `files`, dont le nom promet des fichiers — mais cinq objets `runtime` sont des
+  # REPERTOIRES (`/run/lcars`, `/run/lcars/console`, `/run/lcars/toolchain`, `.../authority`,
+  # `.../privileged`), et ils en portent d'autres. Un `rm -f` nu sur eux imprimait « non retiré » a
+  # chaque passage : un uninstall qui echoue en boucle sur les memes cinq lignes, sans jamais le
+  # dire autrement que par une ligne d'erreur qu'on finit par lire comme du decor.
+  #
+  # ⚠ ET `! -L` PORTE : un LIEN vers un repertoire satisfait `-d`. Sans ce garde, un `rm -rf` sur le
+  # lien suivrait la cible — c'est-a-dire detruirait ce que le lien designe, qui n'est pas a nous.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local bloc; bloc="$(sed -n '/for o in .*apt_repo_files/,/^  done$/p' <<<"$body")"
+  [ -n "$bloc" ]
+  grep -q '\-d "$o" && ! -L "$o"' <<<"$bloc"
+  grep -q 'rm -rf "$o"'           <<<"$bloc"
+  grep -q 'rm -f "$o"'            <<<"$bloc"
+}
+
+@test "RUNTIME : un repertoire declare \`runtime\` entre au plan comme les autres" {
+  # Le pendant vivant du temoin ci-dessus : la classe n'est pas seulement executable, elle est
+  # EXECUTEE — un `runtime` qui est un repertoire compte parmi les objets du plan.
+  nfic() { sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output"; }
+  local n_avant n_apres
+  plan; n_avant="$(nfic)"
+
+  mkdir -p "$FAKE/run/lcars-decor/dedans"
+  printf 'runtime   %s/run/lcars-decor  0755 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+
+  plan; n_apres="$(nfic)"
+  [ "$n_apres" -eq "$((n_avant + 1))" ]
+}
+
+@test "BILAN DE SORTIE : il NOMME ce qui reste, et il ne se deduit pas du plan d'entree" {
+  # Le plan d'entree dit ce qui VA partir ; le bilan dit ce qui EST reste. Entre les deux il y a les
+  # refus (« session ouverte »), les gardes, et ce que le perimetre ne couvre pas — donc l'un ne se
+  # calcule pas depuis l'autre. Ce temoin lit le CODE : `--yes` exige root, et une suite qui
+  # desinstallerait pour de vrai desinstallerait la machine qui la joue.
+  local corps; corps="$(code | sed -n '/CE QUI RESTE SUR CETTE MACHINE/,/^  return 0$/p')"
+  [ -n "$corps" ]
+  grep -q 'travail préservé' <<<"$corps"
+  grep -q 'sous /home'       <<<"$corps"
+  grep -q 'paquets apt'      <<<"$corps"
+  grep -q 'reliquat'         <<<"$corps"
+  grep -q 'refus'            <<<"$corps"
+  # ⚠ IL NOMME, IL NE COMPTE PAS. « 12 objets gardes » n'est pas quelque chose sur quoi un operateur
+  # peut agir ; un chemin l'est. Le bilan porte donc `preserve_roots`, pas seulement sa taille.
+  grep -q 'preserve_roots\[\*\]' <<<"$corps"
+}
+
+@test "BILAN DE SORTIE : il est APRES le point de non-retour, jamais dans le plan" {
+  # S'il s'imprimait avant `--yes`, il annoncerait « ce qui reste » d'une machine ou rien n'a bouge.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local n_yes n_bilan
+  n_yes="$(grep -n 'RIEN N.A ÉTÉ RETIRÉ' <<<"$body" | head -1 | cut -d: -f1)"
+  n_bilan="$(grep -n 'CE QUI RESTE SUR CETTE MACHINE' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_yes" ] && [ -n "$n_bilan" ]
+  [ "$n_yes" -lt "$n_bilan" ]
+}
+
+@test "USAGE : \`uninstall\` est documente, et le mode « lister sans detruire » y est nomme" {
+  # Il manquait a la liste des verbes — le SEUL qui detruit. Un operateur qui lit l'en-tete ne
+  # pouvait ni savoir qu'il existe, ni savoir que sans `--yes` il n'execute rien.
+  local entete; entete="$(sed -n '/^# USAGE :/,/^$/p' "$RUNNER")"
+  grep -q 'provision uninstall' <<<"$entete"
+  grep -q -- '--yes'            <<<"$entete"
+  grep -q -- '--humans'         <<<"$entete"
 }
 
 @test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {

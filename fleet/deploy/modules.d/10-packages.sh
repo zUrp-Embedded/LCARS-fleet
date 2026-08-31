@@ -79,6 +79,25 @@ ensure_docker_repo() {
   fi
   rm -f "$cerr"
 
+  # ⚠ CE QUI EXISTAIT AVANT NOUS SE CONSTATE AVANT D'ECRIRE, JAMAIS APRES. Deux gestes en dependent
+  # et ils tirent en sens opposes : le journal (qui revendique la pose, donc autorise le retrait) et
+  # le rollback ci-dessous (qui efface). Les deux etaient inconditionnels — sur une machine qui
+  # portait deja le depot docker, le premier faisait revendiquer a LCARS le depot d'un operateur, et
+  # le second l'effacait en annoncant « la machine repart comme avant ». C'etait l'inverse exact.
+  local list_avant=0 key_avant=0 sauve=""
+  [[ -f "$DOCKER_LIST" ]]    && list_avant=1
+  [[ -f "$DOCKER_KEYRING" ]] && key_avant=1
+  if [[ "$list_avant" -eq 1 || "$key_avant" -eq 1 ]]; then
+    # Un rollback qui EFFACE ce qu'il n'a pas cree n'est pas un rollback. On garde de quoi remettre
+    # la machine dans l'etat qu'elle avait — la seule lecture honnete de « repart comme avant ».
+    sauve="$(mktemp -d)"
+    [[ "$list_avant" -eq 1 ]] && cp -p "$DOCKER_LIST"    "$sauve/list" 2>/dev/null
+    [[ "$key_avant"  -eq 1 ]] && cp -p "$DOCKER_KEYRING" "$sauve/key"  2>/dev/null
+    prov_journal_note found_apt_repo \
+      "$([[ "$list_avant" -eq 1 ]] && echo "$DOCKER_LIST")" \
+      "$([[ "$key_avant"  -eq 1 ]] && echo "$DOCKER_KEYRING")"
+  fi
+
   ensure_dir "$(dirname "$DOCKER_KEYRING")" 0755 root:root || return 1
   if [[ "$(sha256sum "$DOCKER_KEYRING" 2>/dev/null | awk '{print $1}')" != "$DOCKER_GPG_SHA256" ]]; then
     fetch_verify "$url/gpg" "$DOCKER_GPG_SHA256" "$DOCKER_KEYRING" 0644 || return 1
@@ -94,12 +113,39 @@ EOF
   # decrit pas ce qu'on a le DROIT de poser (c'est le metier de la table) mais ce que CETTE passe A
   # pose sur CETTE machine. `uninstall` ne retire donc que ce que le journal revendique — jamais le
   # depot d'un operateur qui l'avait avant nous.
-  prov_journal_note posed_apt_repo "$DOCKER_LIST" "$DOCKER_KEYRING"
+  # ⚠ SEULEMENT CE QU'ON A CREE. Le journal autorise le retrait ; y inscrire un fichier qui etait
+  # deja la ferait retirer par `uninstall` le depot docker d'un operateur — un objet que LCARS n'a
+  # jamais pose et dont d'autres choses sur sa machine dependent.
+  local -a poses=()
+  [[ "$list_avant" -eq 0 ]] && poses+=("$DOCKER_LIST")
+  [[ "$key_avant"  -eq 0 ]] && poses+=("$DOCKER_KEYRING")
+  [[ "${#poses[@]}" -gt 0 ]] && prov_journal_note posed_apt_repo "${poses[@]}"
+
   if ! run_quiet apt-get update -o Dir::Etc::sourcelist="$DOCKER_LIST" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"; then
-    rm -f "$DOCKER_LIST" "$DOCKER_KEYRING"
-    p_fail "dépôt docker : « apt-get update » refuse la source — RETIRÉE, ainsi que sa clé ($DOCKER_LIST, $DOCKER_KEYRING) ; la machine repart comme avant, voir la sortie ci-dessus pour la cause"
+    # Le rollback rend la machine a son etat d'AVANT — ce qui veut dire restaurer ce qui existait et
+    # n'effacer que ce qu'on a cree. La version precedente effacait les deux fichiers dans tous les
+    # cas, en annoncant « la machine repart comme avant » : sur une machine qui les portait deja,
+    # c'etait la phrase qui decrivait le moins bien ce qui venait de se passer.
+    local restaure=""
+    if [[ "$list_avant" -eq 1 && -f "$sauve/list" ]]; then
+      cp -p "$sauve/list" "$DOCKER_LIST" && restaure="$DOCKER_LIST"
+    else
+      rm -f "$DOCKER_LIST"
+    fi
+    if [[ "$key_avant" -eq 1 && -f "$sauve/key" ]]; then
+      cp -p "$sauve/key" "$DOCKER_KEYRING" && restaure="${restaure:+$restaure }$DOCKER_KEYRING"
+    else
+      rm -f "$DOCKER_KEYRING"
+    fi
+    [[ -n "$sauve" ]] && rm -rf "$sauve"
+    if [[ -n "$restaure" ]]; then
+      p_fail "dépôt docker : « apt-get update » refuse la source — ce que CETTE passe a écrit est annulé, et ce que la machine portait déjà est RESTAURÉ ($restaure). Voir la sortie ci-dessus pour la cause"
+    else
+      p_fail "dépôt docker : « apt-get update » refuse la source — RETIRÉE, ainsi que sa clé ($DOCKER_LIST, $DOCKER_KEYRING) ; ni l'une ni l'autre n'était là avant cette passe. Voir la sortie ci-dessus pour la cause"
+    fi
     return 1
   fi
+  [[ -n "$sauve" ]] && rm -rf "$sauve"
   return 0
 }
 

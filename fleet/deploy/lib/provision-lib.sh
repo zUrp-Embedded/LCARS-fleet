@@ -62,6 +62,12 @@ PROVISION_LIB_LOADED=1
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 : "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
+# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache vivait
+# sous `/home` jusqu'au 2026-09-01 ; deux gestes la nomment encore — `45-catalogues` pour DIRE que le
+# reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
+# (`${VAR:-/home/catalogues}`) auraient fait deux sources d'un meme fait, ce que le mur des racines
+# refuse a juste titre : celle qu'on lit n'est jamais celle qu'on a corrigee.
+: "${PROV_LEGACY_CATALOGUES_DIR:=/home/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
