@@ -116,8 +116,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
       end
     else
       # ⚠ ECHEC AVANT LE RAIL : `materialise_token/1` a pu creer `base` et y ecrire un SECRET. Le
-      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie. Ce
-      # n'etait pas necessaire avant ce chantier — aucun des maillons precedents n'ecrivait rien.
+      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie — un
+      # maillon qui ECRIT quelque chose doit nettoyer son propre chemin d'erreur.
       #
       # La clause est TOTALE (`other`), pas `{:error, _}`. Un `else` partiel leve un
       # `WithClauseError` sur toute forme non prevue : le maillon suivant deciderait ce que fait le
@@ -130,9 +130,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   # ─── LE JETON SE DEMANDE, ET IL FINIT QUAND MEME DANS UN FICHIER ──────────────────────────────
   #
-  # `env("FORGE_TOKEN_FILE")` rendait ici le chemin de `/opt/lcars/var/tokens/<compte>.gitea_token`, ouvert
-  # par le rail SOUS L'UID DU POD — donc sous celui de l'humain, a travers le groupe `fleet`, qui
-  # etait une projection de l'equipe `humans` refaite toutes les trente secondes.
+  # Lire `FORGE_TOKEN_FILE` rendrait ici le chemin d'un jeton du magasin, ouvert par le rail SOUS
+  # L'UID DU POD — donc sous celui de l'humain, a travers un groupe dont l'appartenance est une
+  # projection refaite periodiquement.
   #
   # ⚠ CE LECTEUR-CI N'EST PAS DE LA MEME CLASSE QUE LES DEUX AUTRES. `lcars publish run` est tape
   # par un humain qui voit le refus ; ici c'est un AGENT en vol, au milieu d'un workflow. Son echec
@@ -175,12 +175,11 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     end
   end
 
-  # NOBODY SWEPT, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail refuses
-  # a path that already exists. Phase 1 (`lcars approve`) has swept since day one — `trap 'rm -rf' EXIT`
-  # — and phase 2 never did. Every publish therefore left a COMPLETE rewritten clone of the project
-  # in the system temp dir, forever: the size of the repository, once per publication. The unique
-  # path per run was written to satisfy the rail's refusal, and the question "what becomes of the
-  # previous one?" was never asked.
+  # NOBODY ELSE SWEEPS, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail
+  # refuses a path that already exists (phase 1, `lcars approve`, sweeps its own with
+  # `trap 'rm -rf' EXIT`). Without this, every publish leaves a COMPLETE rewritten clone of the
+  # project in the system temp dir, forever: the size of the repository, once per publication. A
+  # unique path per run satisfies the rail's refusal and answers nothing about the previous one.
   #
   # A COMPOUND EFFECT WORTH NAMING: `System.unique_integer/1` is unique WITHIN a runtime instance and
   # restarts low after a reboot. With nothing ever swept, a path left by a pre-restart run can be
