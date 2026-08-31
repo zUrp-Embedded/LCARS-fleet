@@ -66,10 +66,10 @@ defmodule Fleet.Pilot.ConflictProbe do
   @doc """
   Fetches `feature_ref` into a throwaway ref, then diagnoses the merge against `:base_branch`.
 
-  `:base_branch` AND `:dir` are REQUIRED (chantier face-projet): this used to default to
-  `"origin/main"` probed in the CODE-face worktree — on an ops PR both halves were silently wrong
-  (wrong merge target, wrong repository). The caller (Remediation) reads the PR's own base and
-  derives the face worktree; a caller that cannot say either has skipped the face decision.
+  `:base_branch` AND `:dir` are REQUIRED, with no default: defaulting to `"origin/main"` in the
+  CODE-face worktree makes BOTH halves silently wrong on an ops PR — wrong merge target, wrong
+  repository. The caller reads the PR's own base and derives the face worktree; a caller that cannot
+  say either has skipped the face decision.
   Returns `{:ok, diagnosis}` or `{:error, reason}` (fail-safe).
   """
   @spec probe(String.t(), String.t(), keyword()) :: {:ok, diagnosis()} | {:error, term()}
@@ -80,11 +80,11 @@ defmodule Fleet.Pilot.ConflictProbe do
     probe_ref = "refs/lcars/conflict-probe/" <> sanitize(feature_ref)
 
     if File.dir?(Path.join(dir, ".git")) do
-      # TWO fetches, and the FIRST one is the fix for a measured lie. The probe used to fetch ONLY
-      # the feature ref and judge the merge against whatever `origin/<base>` this clone last saw.
-      # On the bench (probe-rails PR#30): a sister brick landed on main AFTER the clone's last
-      # fetch — the forge said CONFLICT, the probe merged clean against yesterday's base (0 hunks),
-      # and tier 0 silently degraded to a producer round. Same input-skew disease ConflictApply's
+      # TWO fetches, and the FIRST one is what keeps the diagnosis honest. Fetching ONLY the feature
+      # ref judges the merge against whatever `origin/<base>` this clone last saw: let a sister
+      # brick land on the base AFTER that fetch, and the forge says CONFLICT while the probe merges
+      # clean against yesterday's base (0 hunks) — tier 0 then degrades silently to a producer
+      # round. Same input-skew disease ConflictApply's
       # diff3 note documents: the diagnosis and the write must read the SAME inputs — and apply
       # already runs a full `fetch origin` before writing. Two commands, not one refspec list: an
       # explicit refspec on `git fetch` REPLACES the default refspec, so a single call would update
@@ -176,8 +176,8 @@ defmodule Fleet.Pilot.ConflictProbe do
   # La soeur `show/3`, douze lignes plus haut, filtre pourtant `{:ok, {out, 0}}` — le meme fichier
   # portait deja la bonne posture sur l'autre lecture.
   #
-  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant
-  # sait deja quoi en faire, seule la clause qui y menait etait inatteignable.
+  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant sait
+  # quoi en faire, encore faut-il que la clause qui y mene soit atteignable.
   defp merge_file(base, ours, theirs) do
     tmp = Path.join(System.tmp_dir!(), "lcars-cprobe-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
