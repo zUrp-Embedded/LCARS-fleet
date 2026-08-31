@@ -273,7 +273,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  ENQUEUES a phase-2 publish of `repo` to its linked external forge (chantier-publication-github).
+  ENQUEUES a publish of `repo` to its linked external forge.
 
   Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
   PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on

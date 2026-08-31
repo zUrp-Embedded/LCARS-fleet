@@ -1,6 +1,6 @@
 defmodule Fleet.MCP.PodTools.ProjectPublish do
   @moduledoc """
-  ASYNC worker behind the `project_publish` tool (phase 2 of chantier-publication-github).
+  ASYNC worker behind the `project_publish` tool.
 
   The tool call itself only ENQUEUES (a Task under `Fleet.MCP.PublishTaskSupervisor`) and returns
   `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
@@ -197,15 +197,15 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   def sweep_work(_work, @keep_work_on_exit), do: :kept_for_inspection
   def sweep_work(work, _code), do: File.rm_rf(work)
 
-  # The per-human binding is the source of truth for WHERE this project publishes (chantier §5bis).
+  # The per-human binding is the source of truth for WHERE this project publishes.
   #
-  # ⚠ `base` EST UNE CLE REQUISE, et elle ne l'etait pas. `rail_args/5` faisait
-  # `Map.get(b, "base") || "main"` : une liaison ecrite par une version anterieure d'`approve`,
-  # editee a la main ou tronquee publiait donc silencieusement contre `main`, quelle que soit la
-  # branche par defaut de la destination. Le defaut avait DEUX entrees independantes — l'ecriture
-  # (`approve` supposait `main`) et la lecture (ici). Fermer une seule des deux laissait le rail
-  # casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une liaison : elle est
-  # refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une supposition.
+  # ⚠ `base` EST UNE CLE REQUISE. Un `Map.get(b, "base") || "main"` ici ferait publier
+  # silencieusement contre `main` toute liaison ecrite par une version anterieure d'`approve`,
+  # editee a la main ou tronquee — quelle que soit la branche par defaut de la destination. Et le
+  # defaut a DEUX entrees independantes, l'ecriture (`approve`) et la lecture (ici) : en fermer une
+  # seule laisse le rail casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une
+  # liaison : elle est refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une
+  # supposition.
   defp read_binding(slug) do
     path = Path.join([System.user_home!(), ".lcars", "publish", "#{slug}.json"])
 
@@ -322,9 +322,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   end
 
   # ⚠ REND `:ok` EXPLICITEMENT, ET C'EST CE QUI REND LE `@spec` DE `run/2` VRAI. `Bus.safe_emit/4`
-  # rend `:ok | {:error, _}` ; les branches de `run/2` se terminaient dessus, donc la fonction
-  # rendait ce type-la alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec
-  # absent : dialyzer l'a dit en `unmatched_return`, et le lecteur, lui, l'aurait cru.
+  # rend `:ok | {:error, _}` : une branche de `run/2` qui se termine dessus fait rendre CE type-la a
+  # la fonction, alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec absent —
+  # dialyzer le dit en `unmatched_return`, le lecteur, lui, le croit.
   #
   # Le rejet est DELIBERE : le Bus est le rail lossy (doctrine D1), `run/2` rapporte son issue par
   # evenement et ne doit JAMAIS crasher — un raise ici ferait redemarrer la Task, donc re-publier.
