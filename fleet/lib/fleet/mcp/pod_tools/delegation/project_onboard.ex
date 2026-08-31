@@ -27,9 +27,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   Onboards the project `name` (kebab-case slug). `opts` consumed by the real default:
   `:org`, `:description`, `:pitch` (cf. `Fleet.Project.Onboard.onboard/2`).
   The result MUST carry the 4 keys — `Delegation.do_create_project/2` pattern-matches
-  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE, and the fourth
-  was missing while the runtime already produced it: the wire announced two of the three trees it
-  had just created, so a caller could not name the doc face at all.
+  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE plus the repo:
+  omit one and the caller cannot name that face at all, however faithfully the runtime created it.
   """
   @callback onboard(name :: String.t(), opts :: keyword()) ::
               {:ok,
@@ -86,7 +85,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:
   publishes the existing local pair (empty org repo, labels seeded, origin set, main + ops
   pushed, protection, architect). `name` = the dirs' basename; `opts` may relay the criticality
-  declaration (same keys as `onboard/2`). The local content is never scaffolded over. Same 3
+  declaration (same keys as `onboard/2`). The local content is never scaffolded over. Same 4
   return keys as `onboard/2` (+ `architect`).
   """
   @callback adopt_project(name :: String.t(), opts :: keyword()) ::
@@ -104,7 +103,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   history into a system scratch, runs the ADOPTION GATE (foreign `.claude/` refused en bloc,
   every `CLAUDE.md` through the reception filter), normalizes the default branch to `main`
   (half-migrated master+main → named refusal), creates the org repo and hands over to the
-  standard import leg. One-way — the external origin is left behind. Same 3 return keys as
+  standard import leg. One-way — the external origin is left behind. Same 4 return keys as
   `onboard/2` (+ `architect`).
   """
   @callback import_external(url :: String.t(), name :: String.t(), opts :: keyword()) ::

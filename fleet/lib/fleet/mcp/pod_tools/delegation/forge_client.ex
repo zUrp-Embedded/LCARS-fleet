@@ -9,8 +9,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   post_comment, close_issue, merged_pr_of_issue, get_route) — not the full surface of the
   pilot's forge client.
 
-  `get_route/3` a rejoint la liste avec C2, et l'ajouter au CONTRAT plutôt que l'appeler en
-  douce est le fond de l'affaire : la surface arch doit résoudre la politique de verdict d'une PR
+  `get_route/3` y figure au CONTRAT plutôt que d'être appelée en douce, et c'est le fond de
+  l'affaire : la surface arch doit résoudre la politique de verdict d'une PR
   par la MÊME fonction que le gate (`Roles.verdict_policy_for/4`), sinon elle affiche « approuvé »
   pendant que le rail renvoie en rework. Cette résolution lit la carte gravée sur l'issue, donc
   elle a besoin de la route — et une dépendance qu'un implémenteur découvre par un
@@ -108,7 +108,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   test stub) re-implements the rule — and `records`.
 
   `records` is what `verdicts` structurally cannot say: the in-force review of each judge with its
-  `body` and `submitted_at`. Two approvals are the same value in `verdicts` and were never the same
+  `body` and `submitted_at`. Two approvals are the same value in `verdicts` and are never the same
   thing on the forge — one cites its gate-brief, the other lands a second after being asked. A seam
   that omits the key is rendered as such (verdicts without substance), NEVER as an unreachable
   forge: a stub behind an outage message is how a missing implementation stays invisible.
