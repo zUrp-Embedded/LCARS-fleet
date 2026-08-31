@@ -38,24 +38,23 @@ defmodule Fleet.Labels do
 
   The first three MEAN something to the machine; the fourth means something only to a human. That
   asymmetry is a trap, not a detail: a wrong routing label breaks something and gets found, a wrong
-  visual label breaks nothing and simply misinforms every reader (measured 2026-08-03 — a doc
-  ticket wearing `type:feature`). Hence `type_for_destination/1`: the decoration is DERIVED from the
-  routing decision, never posted as its own constant.
+  visual label breaks nothing and simply MISINFORMS every reader — a doc ticket wearing
+  `type:feature`. Hence `type_for_destination/1`: the decoration is DERIVED from the routing
+  decision, never posted as its own constant.
 
-  This list said "two families" until 2026-08-03, and closed with "outside these two families, a
-  label does not exist" — while `genre/doc` (as it was then called) had been shipping for a chantier and `type:feature` was
-  posted on every issue ever created. Keep it counted right: the sentence that bounds a vocabulary
-  is the first thing a reader trusts and the last thing anyone updates.
+  ⚠ COUNT THIS LIST RIGHT, and re-count it before adding a family: **the sentence that bounds a
+  vocabulary is the first thing a reader trusts and the last thing anyone updates.** A closing
+  "outside these families a label does not exist" is exactly the shape that keeps being believed
+  while a fifth one ships.
   """
 
   @in_flight "lcars-in-flight"
   @awaits_arch "lcars-awaits-arch"
   @awaits_toolchain "lcars-awaits-toolchain"
-  # ONE LITERAL FOR THE FACE, and the label is derived from it. Three places used to spell it
-  # independently — the wire enum offered to the arch, the clause that routes the wire value, and
-  # the label posted on the forge — so the wire could ANNOUNCE a token the code did not accept and
-  # nothing would be red (measured: renaming the enum alone survived the whole suite). It shipped
-  # exactly that way: the wire said `"ops"` long after the deliverable moved to `workshop`.
+  # ONE LITERAL FOR THE FACE, and the label is derived from it. Spelled independently in the three
+  # places that need it — the wire enum offered to the arch, the clause that routes the wire value,
+  # and the label posted on the forge — the wire can ANNOUNCE a token the code does not accept with
+  # nothing going red: renaming the enum alone survives the whole suite.
   @destination_workshop_token "workshop"
   @destination_workshop "destination/" <> @destination_workshop_token
 
@@ -113,9 +112,9 @@ defmodule Fleet.Labels do
   a list of issues and wants to know what kind of thing each one is.
 
   DERIVED, never posted as a constant: the destination is resolved at create time, and a visual type
-  contradicting it is a lie told by the interface — a doc ticket wearing `type:feature` (measured
-  2026-08-03) says "feature" to every human who reads the list, while the burn routes it to the
-  doc card. One decision, one source; the label follows.
+  contradicting it is a lie told by the interface — a doc ticket wearing `type:feature` says
+  "feature" to every human who reads the list, while the burn routes it to the doc card. One
+  decision, one source; the label follows.
   """
   @spec type_for_destination(String.t() | nil) :: String.t()
   def type_for_destination(@destination_workshop_token), do: "type:workshop"
@@ -129,16 +128,11 @@ defmodule Fleet.Labels do
   @doc """
   The visual types, for the seeding that must create them before anyone can wear them.
 
-  DERIVEE de `type_for_destination/1`, jamais recopiee — et c'est la reparation d'un defaut mesure.
-  Cette fonction rendait `["type:feature", "type:doc"]` en dur pendant que sa jumelle produisait
-  `type:workshop` depuis le renommage `genre/doc` -> `destination/workshop` (`280e3fb62`,
-  2026-08-09) : `type:doc` etait seme et porte par personne, `type:workshop` porte et jamais seme —
-  donc cree paresseusement par `add_issue_label/4`, gris par defaut et sans description. Six jours
-  de demi-vie entre le correctif qui a rendu la jumelle derivee et le commit qui l'a re-cassee, et
-  seize jours ouverts ensuite. L'avertissement qui l'annonce est dans le `@moduledoc` de ce fichier :
-  « la phrase qui borne un vocabulaire est la premiere chose qu'un lecteur croit et la derniere que
-  quiconque met a jour ». Une liste derivee ne peut plus mentir ; ce qui reste a garder, c'est que
-  `@destinations` couvre toutes les clauses — mur `labels.visual_types_derived`.
+  DERIVEE de `type_for_destination/1`, JAMAIS RECOPIEE. Une liste ecrite en dur ici derive de sa
+  jumelle des le premier renommage : elle seme un label que personne ne porte, pendant que le label
+  reellement porte n'est seme par personne — donc cree paresseusement par `add_issue_label/4`, gris
+  par defaut et sans description. Une liste derivee ne peut pas mentir ; ce qui reste a surveiller,
+  c'est que `@destinations` couvre toutes les clauses — mur `labels.visual_types_derived`.
   """
   @spec visual_types() :: [String.t()]
   def visual_types, do: @destinations |> Enum.map(&type_for_destination/1) |> Enum.uniq()
@@ -152,8 +146,8 @@ defmodule Fleet.Labels do
   @wfmap_prefix "wfmap/"
   @stage_review "review"
   @stage_merged "merged"
-  # Fermeture SANS livraison (supersede, abandon) — le pendant positif de `merged`. Cf. `stage_retired/0` :
-  # sans lui, « pas livré » ne s'exprimait que par l'ABSENCE de `merged`, et une absence n'est pas un fait.
+  # Fermeture SANS livraison (supersede, abandon) — le pendant positif de `merged`. Sans lui,
+  # « pas livre » ne s'exprime que par l'ABSENCE de `merged`, et une absence n'est pas un fait.
   @stage_retired "retired"
 
   @doc "Scoped prefix of the current step (`stage/`). Scoped → exclusive (mutex)."
