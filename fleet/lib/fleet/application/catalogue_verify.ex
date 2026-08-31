@@ -73,7 +73,7 @@ defmodule Fleet.Application.CatalogueVerify do
   fixes a catalogue in one pass, not one boot-crash at a time — but keeps the boot's tiers: the
   manifest is a precondition (nothing downstream is meaningful without it), and the images are a
   precondition for the spawn proof and the card guards (both read the frozen image, so a failed
-  image would cascade into noise). (La sonde « escalation policies » est partie avec)
+  image would cascade into noise).
   """
   @spec verify(Path.t()) :: result()
   def verify(root) when is_binary(root) do
@@ -128,9 +128,8 @@ defmodule Fleet.Application.CatalogueVerify do
            fn -> Fleet.Pilot.Application.verify_cards_and_roles!() end},
           # L'ARETE ENTRE LES DEUX IMAGES : chaque carte nomme-t-elle des roles qui existent ?
           # Elle est jouee au boot, et elle DOIT l'etre ici — `catalogue install` appelle cette
-          # porte avant de toucher la forge, et une porte qui ne couvre pas le boot rendrait un vert
-          # suivi d'un boot rouge. C'est le defaut que ce fichier a deja paye une fois (6-008,
-          # « cinq gardes au boot, quatre ici »).
+          # porte avant de toucher la forge, et une porte qui ne couvre pas le boot rend un vert
+          # suivi d'un boot rouge (6-008).
           {"cards -> roles", fn -> Fleet.Workflow.CardRoles.verify!(root) end},
           {"business catalogue advice", fn -> advise_business!(root) end}
         ]
