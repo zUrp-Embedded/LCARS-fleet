@@ -310,10 +310,10 @@ defmodule Fleet.Forge.Protocol do
   # LES DEUX SIGNATURES D'ESCALADE, memes literaux uniques que ci-dessus.
   #
   # POURQUOI ELLES SONT ICI. Un commentaire d'escalade est la seule chose que l'inbox de l'arch doit
-  # savoir RETROUVER. Sans marqueur a chercher, `escalation_list` rendait le dernier commentaire du
-  # fil, quel qu'il soit : des que l'arch avait repondu, l'inbox lui renvoyait SA PROPRE REPONSE sous
-  # une description promettant « the worker's escalation comment — the reasoning ». Les deux formats
-  # existaient, construits en dur chez leurs deux ecrivains, donc introuvables par un lecteur.
+  # savoir RETROUVER. Sans marqueur a chercher, `escalation_list` rend le dernier commentaire du fil,
+  # quel qu'il soit : des que l'arch a repondu, l'inbox lui renvoie SA PROPRE REPONSE sous une
+  # description qui promet « the worker's escalation comment — the reasoning ». Un format construit
+  # en dur chez chacun de ses ecrivains est introuvable par un lecteur.
   #
   # Le troisieme poseur d'escalade (`IncidentConsumer.default_brake/3`, le frein sur recurrence) ne
   # poste AUCUN commentaire : il n'y a donc pas de verdict a rendre pour lui, et `nil` est la reponse
