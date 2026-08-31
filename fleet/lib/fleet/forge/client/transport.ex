@@ -21,19 +21,16 @@ defmodule Fleet.Forge.Client.Transport do
     * `:account` — a forge ACCOUNT name. The token is ASKED of the authority service, at call time.
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
-  ## `~/.gitea_token` a disparu de cette resolution, et c'etait un REPLI SILENCIEUX VERS LA MAUVAISE
-  ## IDENTITE
+  ## ⚠ AUCUN REPLI SUR `~/.gitea_token`, NI SUR AUCUN CHEMIN DU HOME
 
-  Sans `:token` ni `:token_file`, ce module lisait `~/.gitea_token`. Le BEAM tourne sous l'uid de
-  l'humain de fleet : ce chemin resout donc vers le jeton PERSONNEL de cette personne. Une boite dont
-  le cablage systeme manquait ne tombait pas en panne — elle agissait sur la forge sous l'identite
-  d'un humain, avec ses droits, et sans qu'une ligne le dise. La forge voyait cette personne faire ce
-  que le systeme faisait.
+  Le BEAM tourne sous l'uid de l'humain de fleet : un tel chemin resout vers le jeton PERSONNEL de
+  cette personne. Une boite dont le cablage systeme manque ne tomberait alors pas en panne — elle
+  agirait sur la forge sous l'identite d'un humain, avec ses droits, sans qu'une ligne le dise, et
+  la forge verrait cette personne faire ce que le systeme fait. Un repli pareil tient une vraie
+  situation (un deploiement qui n'a pose que le fichier) en substituant une identite.
 
-  Ce repli tenait une vraie situation (un deploiement qui n'avait pose que le fichier), et il la
-  tenait en substituant une identite. Il n'a plus d'objet : le nom du compte suffit, et le jeton se
-  demande. En son absence, la resolution rend `{:config, :no_token_source}` — un refus nomme, la ou
-  il y avait un succes faux.
+  Le nom du compte suffit, et le jeton se demande. En son absence, la resolution rend
+  `{:config, :no_token_source}` — un refus nomme plutot qu'un succes faux.
   """
 
   require Logger
@@ -144,7 +141,7 @@ defmodule Fleet.Forge.Client.Transport do
   #
   # Le login est une propriete du JETON sur SA forge, jamais du module. Keye sur
   # `{__MODULE__, :bot_login}` seul, un second jeton — rotation, ou deux forges dans la meme VM —
-  # heritait du login du premier pour toute la vie du noeud. Et ce login est l'argument du primitif
+  # heriterait du login du premier pour toute la vie du noeud. Et ce login est l'argument du primitif
   # de confiance `ForgeProtocol.system_authored?/2` : s'en tromper, ce n'est pas afficher un mauvais
   # nom, c'est comparer l'auteur d'un commentaire au mauvais compte.
   #
@@ -153,8 +150,8 @@ defmodule Fleet.Forge.Client.Transport do
   @doc false
   # Le login DE CE JETON, sans passer par les surcharges de `forge_bot_login/2`.
   #
-  # `derive_bot_login/1` n'a jamais rien eu de specifique au bot : c'est « qui suis-je avec ce
-  # jeton », et depuis que sa cle porte l'empreinte du jeton, il repond juste pour n'importe lequel.
+  # `derive_bot_login/1` n'a rien de specifique au bot : c'est « qui suis-je avec ce jeton », et sa
+  # cle portant l'empreinte du jeton, il repond juste pour n'importe lequel.
   # `forge_bot_login/2`, lui, consulte d'abord `opts[:forge_bot_login]` puis l'env applicative —
   # deux surcharges qui rendraient le login du SYSTEME pour un jeton de ROLE, ce qui est exactement
   # le genre de reponse plausible et fausse qu'on cherche a supprimer.
@@ -164,16 +161,16 @@ defmodule Fleet.Forge.Client.Transport do
              :bot_login_unresolved | {:transport, term()} | {:http, pos_integer(), term()}}
   def login_of(config), do: derive_bot_login(config)
 
-  # L'EMPREINTE DU JETON EST UNE VALEUR, PLUS UNE CLE — et c'est tout le correctif. Elle etait DANS
-  # la cle, donc chaque rotation creait une entree de plus et l'ancienne n'etait jamais rendue : sur
-  # un noeud de longue duree, le nombre d'entrees `:persistent_term` croissait lineairement avec le
-  # nombre de jetons successifs, et chaque `put` declenche un GC global.
+  # L'EMPREINTE DU JETON EST UNE VALEUR, PAS UNE CLE. Dans la CLE, chaque rotation creerait une
+  # entree de plus sans jamais rendre l'ancienne : sur un noeud de longue duree le nombre d'entrees
+  # `:persistent_term` croitrait lineairement avec le nombre de jetons successifs, et chaque `put`
+  # declenche un GC global.
   #
   # UNE entree par `base_url`, dont la valeur porte l'empreinte : une rotation ECRASE la precedente
-  # au lieu de s'y ajouter. La propriete de correction est inchangee et c'est elle qui exigeait
-  # l'empreinte quelque part — un login memorise pour un jeton ne doit jamais etre servi pour un
-  # autre (le jeton du SYSTEME et celui d'un ROLE ne repondent pas le meme `/user`) : la comparaison
-  # se fait maintenant sur la valeur lue, ce qui est le meme test, au meme moment, sans accumuler.
+  # au lieu de s'y ajouter. C'est la propriete de correction qui exige l'empreinte quelque part — un
+  # login memorise pour un jeton ne doit JAMAIS etre servi pour un autre (le jeton du SYSTEME et
+  # celui d'un ROLE ne repondent pas le meme `/user`) — et la comparer sur la valeur lue est le meme
+  # test, au meme moment, sans accumuler.
   defp derive_bot_login(config) do
     key = {__MODULE__, :bot_login, config.base_url}
     fingerprint = :crypto.hash(:sha256, config.token)
@@ -212,10 +209,8 @@ defmodule Fleet.Forge.Client.Transport do
   #                 ne sert ne nous fait pas marcher) ; sans en-tete, l'heuristique `< @page_limit`
   #                 reprend la main.
   #
-  # `@max_pages` n'est donc plus la borne effective : c'est le filet du cas ou tout le reste ment
-  # simultanement — et c'est exactement l'etat qu'il a attrape avant que le total soit lu (une forge
-  # qui ignore `page` rendait tout, a chaque tour, 200 fois). Les quatre tests de
-  # `forge_client_pagination_test.exs` tiennent les deux gardes.
+  # `@max_pages` n'est donc pas la borne effective : c'est le filet du cas ou tout le reste ment
+  # simultanement — une forge qui ignore `page` rend tout, a chaque tour, jusqu'au plafond.
   #
   # PAS de deadline murale sur la boucle, et c'est un choix : elle transformerait une lecture LENTE
   # mais correcte en echec, alors que le mal a corriger etait une lecture qui ne finissait pas.
@@ -250,7 +245,7 @@ defmodule Fleet.Forge.Client.Transport do
   #
   # `X-Total-Count` est annonce sur les endpoints de liste, y compris sur celui dont `page` et
   # `limit` sont IGNORES (mesure 1.26.1 : 7 commentaires -> `X-Total-Count: 7`). Sans lui, le seul
-  # signal disponible etait `length(items) < @page_limit`, et cette heuristique ment de deux facons :
+  # signal disponible est `length(items) < @page_limit`, et cette heuristique ment de deux facons :
   #
   #   * un endpoint qui ignore `page` rend TOUT a chaque tour — sous le plafond elle conclut juste
   #     par accident, au-dessus elle boucle jusqu'au budget sur des pages identiques ;
@@ -380,11 +375,10 @@ defmodule Fleet.Forge.Client.Transport do
 
   # DEUX ECHECS QUI NE REVIENDRONT PAS, ET QUI PORTAIENT LE VISAGE D'UN ECHEC PASSAGER.
   #
-  # `423` est declare par 31 operations du contrat, `412` par 3, et rien dans ce depot ne les
-  # distinguait d'un `500` : tous ressortaient en `{:http, status, body}`. Or un depot ARCHIVE ou une
-  # conversation VERROUILLEE rend 423 a chaque tentative, pour toujours — un poller qui re-dispatche
-  # a chaque tour produit alors la meme panne indefiniment, sans que rien ne dise qu'aucun tour ne la
-  # resoudra.
+  # `423` et `412` sont declares par de nombreuses operations du contrat, et rien ne les distingue
+  # d'un `500` : tous ressortent en `{:http, status, body}`. Or un depot ARCHIVE ou une conversation
+  # VERROUILLEE rend 423 a chaque tentative, pour toujours — un poller qui re-dispatche a chaque tour
+  # produit alors la meme panne indefiniment, sans que rien ne dise qu'aucun tour ne la resoudra.
   #
   # La FORME du retour ne change pas, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
   # un tuple different ferait tomber ces deux codes dans leurs catch-all — en silence, c'est-a-dire
@@ -397,11 +391,10 @@ defmodule Fleet.Forge.Client.Transport do
     )
   end
 
-  # LE SYMETRIQUE, ET IL MANQUAIT. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai
-  # ne les levera. Le `429` est l'inverse exact — il dit « reessaie plus tard » — et le depot ne le
-  # connaissait pas : zero occurrence de `429`, `Retry-After` ou `too many` dans `lib/`, verifie par
-  # deux moyens independants. Il ressortait donc en `{:http, 429, body}` indistinct d'un `500`, et un
-  # appelant qui abandonne sur erreur abandonnait une condition qui se serait levee seule.
+  # LE SYMETRIQUE. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai ne les levera ;
+  # le `429` est l'inverse exact — il dit « reessaie plus tard ». Non nomme, il ressort en
+  # `{:http, 429, body}` indistinct d'un `500`, et un appelant qui abandonne sur erreur abandonne une
+  # condition qui se serait levee seule.
   #
   # La FORME du retour ne change pas, pour la meme raison que ci-dessus : vingt sites filtrent sur
   # `{:http, ...}`. Ce qui manquait n'etait pas un type, c'etait de le DIRE — et de dire COMBIEN de
