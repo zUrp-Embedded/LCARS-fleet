@@ -41,15 +41,14 @@ defmodule Fleet.Spawner.Pod.Assets do
   `autoMemoryEnabled: false` (F-POD-AUTOMEM, moved from the launcher): the pod's claude
   auto-memory is siloed, useless to the fleet, and doctrine pollution (BUG-3) — off for every
   permission mode.
-  ⚠ `extensions.marketplace.autoInstall: false` USED TO BE HERE, AND IT DID NOTHING. The problem is
-  real — left on, every spawn clones Anthropic's plugin marketplace from GitHub to install zero
-  plugin, and a pod running inside a projected world must not fetch code from the internet at boot
-  — but this was not the lever. Measured on a bench 2026-08-09, CLI 2.1.221, both directions: two
-  pods carrying this key installed 7.2 MB of plugins anyway; a pod whose `.claude.json` carried
-  `officialMarketplaceAutoInstalled` had no `plugins/` at all. The vendor gates this on its own
-  config keys, and `--settings` is documented as ADDITIONAL settings, not an overriding tier.
-  The effective lever now lives where it works, in `claude_launch.sh`'s `.claude.json`, with the
-  measurement written next to it. A setting that declares an intention it cannot enforce is worse
+  ⚠ PAS DE `extensions.marketplace.autoInstall: false` ICI : IL N'Y FAIT RIEN. The problem is real
+  — left on, every spawn clones the vendor's plugin marketplace to install zero plugin, and a pod
+  running inside a projected world must not fetch code from the internet at boot — but this is not
+  the lever. Measured on CLI 2.1.221, both directions: two pods carrying this key installed 7.2 MB
+  of plugins anyway; a pod whose `.claude.json` carried `officialMarketplaceAutoInstalled` had no
+  `plugins/` at all. The vendor gates this on ITS OWN config keys, and `--settings` is documented
+  as ADDITIONAL settings, not an overriding tier. The effective lever lives where it works, in
+  `claude_launch.sh`'s `.claude.json`, with the measurement written next to it. A setting that declares an intention it cannot enforce is worse
   than no setting: it tells every reader the matter is handled.
   """
   @spec pod_settings_json(Fleet.CapProfile.t()) :: String.t()
@@ -195,9 +194,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   # what the image regime answers for the same caller. The not-found error names a path in the
   # scope's OWN tree, never a foreign one — send the author to the tree they own.
   #
-  # ⚠ This said "the same rule `Catalogue.find/2` states for its fallback", and `find/2` no longer
-  # exists: it was one of the flattened per-tree doors killed with the `search/1` debt (2026-08-16).
-  # The rule survives its function, so it is stated here rather than delegated to a dead name.
+  # The rule is stated here rather than delegated to another function's name: a rule that outlives
+  # the function it was attached to should not go looking for it.
   defp protocol_from_disk(root, name, error_tag) do
     scope_root = root || Fleet.Catalogue.root()
     scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
