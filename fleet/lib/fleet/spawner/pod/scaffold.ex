@@ -43,7 +43,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     state.pod_dir
     |> SessionFiles.jsonl_paths(state.session_id)
     |> Enum.each(fn f ->
-      # RENAME, not rm (debug scribe 2026-08-02): the stale jsonl is the DEAD predecessor's
+      # RENAME, not rm: the stale jsonl is the DEAD predecessor's
       # transcript — the only forensic trail of what it was doing when killed. `.dead` frees the
       # UUID exactly like removal (the glob matches *.jsonl only) and keeps ONE generation of
       # evidence; the next death replaces it.
@@ -127,15 +127,15 @@ defmodule Fleet.Spawner.Pod.Scaffold do
           # ⚠ ON N'ECRASE PLUS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
           # tout producteur (ses sept sections voyagent dans le prompt compose) et il doit rester
           # LIVRABLE : c'est par la que ses conventions se mettent a jour quand la pile change.
-          # L'ecraser obligeait a le masquer (`skip-worktree`), donc a rendre `git status` propre et
-          # `git diff` vide EN AYANT TORT — un producteur qui applique la discipline de preuve
-          # obtenait un faux negatif et declarait le critere tenu de bonne foi. Mesure 2026-08-12.
+          # L'ecraser obligerait a le masquer (`skip-worktree`), donc a rendre `git status` propre
+          # et `git diff` vide EN AYANT TORT — un producteur qui applique la discipline de preuve
+          # obtient alors un FAUX NEGATIF et declare le critere tenu de bonne foi.
           #
-          # Ce que la copie apportait est parti la ou ca vit : l'identite arrive par
+          # Ce que la copie apporterait vit ailleurs : l'identite arrive par
           # `--system-prompt-file` (remplacante et fiable, claude_launch.sh), et la doctrine de
           # sortie/preuve/path est dans les blocs SP (le bloc du monde projete, `evidence`,
-          # `producer-output`). Il ne restait dans le fichier compose que l'identite dupliquee et
-          # les sections du depot — que l'agent lit desormais a leur source.
+          # `producer-output`). Un fichier compose ne porterait que l'identite dupliquee et les
+          # sections du depot — que l'agent lit a leur source.
           if repo_doc == :tracked do
             Logger.info(
               "pod #{state.pod_id} workspace CLAUDE.md: celui du DEPOT, intact et livrable " <>
