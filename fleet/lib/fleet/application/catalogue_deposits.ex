@@ -21,13 +21,12 @@ defmodule Fleet.Application.CatalogueDeposits do
   The store is the copy WE pushed into an installed catalogue's own org. Listing it as a deposit
   would report every installed catalogue as also available from itself.
 
-  It used to be recognised by NAME — any repo called `catalogue`, whoever owned it. That reserved
-  the most natural repo name in every user's namespace, and did it in SILENCE: a user who called
-  their deposit `catalogue` was dropped with no log, no line, no refusal.
+  Recognising it by NAME — any repo called `catalogue`, whoever owns it — would reserve the most
+  natural repo name in every user's namespace, and would do it in SILENCE: a user calling their
+  deposit `catalogue` gets dropped with no log, no line, no refusal.
 
   The discriminant is `owner == manifest.name`, and it is true BY CONSTRUCTION: the org is created
-  from the manifest (`/orgs/${name}/repos`), and *"the NAME comes from the repo's manifest, never
-  from the repo name nor from you"*.
+  from the manifest (`/orgs/${name}/repos`).
 
   What makes it not a rarity bet — the part a prefix could never buy — is that Gitea gives users and
   organisations ONE namespace. A catalogue named `X` requires the org `X`, so no user account can be
