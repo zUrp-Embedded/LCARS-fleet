@@ -282,21 +282,17 @@ defmodule Fleet.Project.Onboard do
   @spec installed_orgs() :: [String.t()]
   def installed_orgs, do: Fleet.Catalogue.installed_names()
 
-  # Le defaut des quatre portes, quand l'appelant ne nomme pas d'org. C'etait le litteral `"fleet"`
-  # a cinq endroits — le nom d'UN catalogue, ecrit cinq fois. Il vaut desormais le premier catalogue
-  # installe, et ce premier-la est TOUJOURS `fleet` : il vit dans le release, donc il est installe
-  # par construction et il est en tete. Un deploiement qui apporte le sien nomme son org au guichet,
-  # ce qui est le geste qu'on veut — un defaut ne devine pas quel metier l'appelant visait.
-  # `project_create` passe `:org` explicitement ; ce defaut sert les appels directs et les tests.
-  # ⚠ CE DEFAUT NE SERT PLUS QU'AU LISTING, ET IL Y EST FAUX — mesure du 2026-08-17.
-  # ⚖ user : l'org d'un projet est fixee POUR SA VIE, donc elle s'enonce, elle ne se devine pas. Les
-  # cinq verbes d'ENTREE l'exigent desormais, comme `import/2` le faisait deja depuis son depot.
+  # Le defaut vaut le PREMIER catalogue installe, toujours celui du release : il vit dedans, donc il
+  # est installe par construction et en tete. Un deploiement qui apporte le sien nomme son org au
+  # guichet, ce qui est le geste voulu — un defaut ne devine pas quel metier l'appelant visait.
   #
-  # Reste `describe_project/3` : ses DEUX appelants passent `[]`, donc tout projet est etiquette
-  # `fleet/<nom>` — y compris ceux de `web-demo` — et `parked_state/2` interroge ensuite avec cette
-  # mauvaise cle. Ce n'est pas cosmetique, et ce n'est pas corrige ici : la bonne source est l'ORIGINE
-  # git du projet lui-meme, qu'aucun lecteur de ce depot ne lit encore. Le defaut est MESURE, pas
-  # soupconne, et melanger les deux gestes rendrait les deux illisibles.
+  # ⚖ L'org d'un projet est fixee POUR SA VIE : elle s'ENONCE, elle ne se devine pas. Les verbes
+  # d'entree l'exigent donc tous.
+  #
+  # ⚠ DEFAUT CONNU, MESURE, NON CORRIGE ICI : `describe_project/3` recoit `[]` de ses deux
+  # appelants, donc tout projet est etiquette sous l'org du catalogue racine — y compris ceux d'un
+  # AUTRE catalogue — et l'etat de parking est ensuite interroge avec cette mauvaise cle. La bonne
+  # source est l'ORIGINE git du projet, qu'aucun lecteur de ce depot ne lit encore.
   defp listing_org_placeholder do
     case installed_orgs() do
       [org | _] -> org
@@ -307,46 +303,24 @@ defmodule Fleet.Project.Onboard do
   @doc false
   # ─── L'ADMISSION, UNE FOIS, POUR LES CINQ VERBES QUI FONT ENTRER UN PROJET ─────────────────────
   #
-  # ⚖ user, 2026-08-17 : « on a des rails paralleles qui font la meme chose, alors qu'on devrait
-  # avoir une seule fonction parametrique, je me trompe ? » — non. Mis cote a cote, les cinq
-  # preambules posaient les MEMES questions, chacun a sa facon :
+  # ⚠ DES RAILS PARALLELES NE DIVERGENT PAS D'UN COUP, ILS DIVERGENT D'UNE LIGNE — et la ligne
+  # manquante ne ressemble a rien. Les cinq preambules posaient les memes questions chacun a sa
+  # facon, et UN SEUL ne verifiait pas que la carte est declarable : un depot importe avec une carte
+  # d'atelier ou une faute de frappe y passait, la ou les quatre autres refusaient.
   #
-  #   verbe             org           nom   catalogue installe   carte declarable   humain
-  #   onboard           declaree      ✓     via l'org            ✓                  ✓
-  #   adopt_project     declaree      ✓     via l'org            ✓                  ✓
-  #   import_external   declaree      ✓     via l'org            ✓                  ✓
-  #   import_deposit    du catalogue  ✓     via l'org            ✓                  ✓
-  #   import            du DEPOT      ✓     require_catalogue…   ✗  ← LE TROU       ✓
+  # L'ORG N'EST PAS DANS LE FILTRE, seule chose qui differe legitimement : certains verbes la
+  # RECOIVENT declaree — creer une chose neuve n'a pas de source d'ou la tirer — et d'autres la
+  # LISENT de leur source. Chaque verbe resout donc la sienne, puis passe par ici.
   #
-  # ET LE TABLEAU EST CE QUI L'A MONTRE : `import/2` etait le seul des cinq a ne pas verifier que la
-  # carte est declarable. Un depot importe avec une carte d'ATELIER (`scope: ticket`) ou une faute de
-  # frappe passait, la ou les quatre autres refusent. Personne ne l'avait vu parce que personne ne
-  # les avait alignes — c'est le cout exact des rails paralleles : ils ne divergent pas d'un coup,
-  # ils divergent d'UNE ligne, et la ligne manquante ne ressemble a rien.
+  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME : y glisser un controle qui APPELLE LA
+  # FORGE ferait payer un aller-retour a une entree refusee jusque-la sans toucher au monde. La loi
+  # est donc en trois temps — cette admission locale, les gardes PURES du verbe, puis le monde.
   #
-  # L'ORG N'EST PAS DANS LE FILTRE, et c'est la seule chose qui differe legitimement : trois verbes
-  # la recoivent declaree (creer une chose neuve n'a pas de source d'ou la tirer), deux la LISENT de
-  # leur source (le proprietaire du depot, le catalogue nomme). Chaque verbe resout donc SON org,
-  # puis passe par ici.
-  #
-  # ⚠ PUREMENT LOCAL, ET LA FRONTIERE EST L'ORDRE LUI-MEME. La premiere version incluait un controle
-  # qui APPELLE LA FORGE, et un temoin l'a montre dans la minute : une URL externe invalide, refusee
-  # jusque-la sans toucher le monde, coutait desormais un aller-retour forge. « Les deux controles
-  # sont purs » etait faux, et je l'avais ecrit dans le commentaire du meme geste. La loi d'ordre est
-  # donc en TROIS temps, pour les cinq verbes :
-  #   1. cette admission — locale, commune ;
-  #   2. les gardes PURES du verbe (URL externe, `main` local, faces en place) ;
-  #   3. le monde — `ensure_catalogue_org_on_forge/2` puis les sondes forge du verbe.
-  #
-  # ⚠ LA CLE DE VOUTE, ET C'EST ICI QU'ON LA CHERCHE AVANT D'AJOUTER UNE GARDE. Aucun de ces cinq
-  # verbes ne verifie que l'humain qui les joue est un humain legitime, et ce n'est pas un trou :
-  # ce flag est tenu UNE FOIS, au lancement, par Guard B (`bin/fleet_v2`). Le BEAM refuse de demarrer
-  # sous un uid systeme ou sous l'admiral, et il herite de cet uid pour lui et pour ses pods — donc
-  # quiconque atteint ce code EST un humain de la fleet, par construction. Une garde par verbe ne
-  # mesurerait que le uid qui l'execute, c'est-a-dire l'instrument.
-  #
-  # Le controle d'org, lui, reste appele par chaque verbe : c'est UNE fonction, invoquee la ou
-  # l'ordre de ce verbe-la l'exige, et non un preambule recopie.
+  # ⚠ LA CLE DE VOUTE, A CHERCHER ICI AVANT D'AJOUTER UNE GARDE : aucun de ces verbes ne verifie que
+  # l'humain qui les joue est legitime, et ce n'est PAS un trou. Le BEAM refuse de demarrer sous un
+  # uid systeme et herite de cet uid pour lui comme pour ses pods, donc quiconque atteint ce code
+  # EST un humain de la fleet, par construction. Une garde par verbe ne mesurerait que le uid qui
+  # l'execute, c'est-a-dire l'INSTRUMENT.
   @spec admit(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def admit(org, name, opts) when is_binary(org) and is_binary(name) do
     with :ok <- require_installed(org),
@@ -1731,27 +1705,16 @@ defmodule Fleet.Project.Onboard do
 
   # ─── LE DEPOT SE NOMME, IL NE SE DEDUIT PAS ─────────────────────────────────────────────────────
   #
-  # L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. `Declaration.write/2` resout la carte
-  # declaree dans le catalogue DU PROJET, et il apprend lequel par `opts[:repo]`. Les quatre portes
-  # d'ecriture de ce module tenaient toutes `full_name` et aucune ne le passait : la carte se
-  # resolvait donc dans le catalogue RACINE, quel que soit celui du projet.
+  # ⚠ L'ENTONNOIR, ET SON ARGUMENT EST POSITIONNEL EXPRES. L'ecriture d'une declaration resout la
+  # carte dans le catalogue DU PROJET, qu'elle apprend par les opts. Sans lui, elle la cherche dans
+  # le catalogue RACINE : le guichet presente les cartes d'un catalogue, l'agent en choisit une, et
+  # le refus enumere celles d'un AUTRE. Une porte qui valide puis ecrit ne peut pas poser la
+  # question a deux catalogues.
   #
-  # MESURE DU 2026-08-20, transcript d'architecte : le guichet presente les cartes de `web-demo`,
-  # l'agent en choisit une, `project_create` refuse en enumerant les cartes de `fleet`. Deux lignes
-  # de journal, deux listes `available:` differentes pour un seul appel — le prefiltre `admit()`
-  # resolvait juste, l'ecriture resolvait ailleurs.
-  #
-  # ⚠ LE CAS LE PLUS NET EST `revise`, ET IL SE CONTREDISAIT DANS SA PROPRE CLAUSE `with` :
-  # `require_loadable_card(card, full_name, opts)` accepte la carte contre le catalogue du projet,
-  # puis `Declaration.write` la refuse en la cherchant dans un autre. Une porte qui valide et ecrit ne
-  # peut pas poser la question a deux catalogues.
-  #
-  # POURQUOI UN POSITIONNEL ET PAS UNE CLE : une cle optionnelle s'oublie, et son oubli est SILENCIEUX
-  # — c'est litteralement le defaut qu'on ferme ici, quatre fois de suite. `Declaration.write/2` ne
-  # peut pas l'exiger de son cote (38 appels legitimes la declarent sans, et prennent le catalogue
-  # racine a bon droit) ; ce module, lui, le peut, parce qu'ici l'ignorer est TOUJOURS un defaut.
-  # Le compilateur devient le garde : on ne peut plus ecrire une declaration depuis Onboard sans
-  # nommer le depot.
+  # POURQUOI UN POSITIONNEL ET PAS UNE CLE : une cle optionnelle s'oublie, et son oubli est
+  # SILENCIEUX — litteralement le defaut qu'on ferme ici. L'appele ne peut pas l'exiger de son cote,
+  # ayant des appelants legitimes qui prennent le catalogue racine a bon droit ; ce module, lui, le
+  # peut, parce qu'ICI l'ignorer est toujours un defaut. Le compilateur devient le garde.
   #
   # ⚠ LA FUSION SE FAIT ICI ET APRES, jamais dans l'appelant : `revision_write_opts/2` reconstruit
   # une liste NEUVE et jetterait un `repo:` pose en amont. Fusionne au dernier moment, il survit a
@@ -2570,14 +2533,12 @@ defmodule Fleet.Project.Onboard do
   # posees EN SEQUENCE : `ops` peut etre publiee avant que `workshop` echoue, et c'est le cas exact
   # que la fiche 6-124 decrit.
   #
-  # LE MODE EST UN FAIT DE LAYOUT, il se declare ou la branche et le sous-arbre se declarent. Les
-  # trois faces vivent sous des racines PARTAGEES (`2775 root:fleet`), donc un projet ouvert par un
-  # humain est vu par les autres. `workshop` est la seule face qu'un architecte monte en **rw**
-  # (`Fleet.Project.Architect`), et elle heritait `2755` de l'umask : le second humain qui ouvre le
-  # projet d'un premier a le groupe `fleet` et pas le bit d'ecriture — ses pods meurent a la
-  # premiere ecriture, avec une erreur qui accuse bwrap. `ops` reste `2755` : elle est montee `ro`,
-  # et le declarer ici est ce qui rend la difference LISIBLE au lieu de la laisser a l'umask.
-  # Le setgid est conserve dans les deux (le groupe `fleet` est herite de la racine, pas repose).
+  # ⚠ LE MODE EST UN FAIT DE LAYOUT, ET IL SE DECLARE PLUTOT QUE DE SE LAISSER A L'UMASK. Les faces
+  # vivent sous des racines PARTAGEES, donc un projet ouvert par un humain est vu par les autres.
+  # `workshop` est la seule montee en **rw** : heritant son mode de l'umask, le second humain a le
+  # groupe mais PAS le bit d'ecriture, et ses pods meurent a la premiere ecriture avec une erreur
+  # qui accuse bwrap. `ops` est montee `ro` et garde le mode plus etroit — le declarer ici est ce
+  # qui rend la difference LISIBLE.
   defp ensure_writer_faces(full_name, url, dirs, name, opts) do
     faces = [
       %{dir: dirs.ops, branch: Fleet.Layout.ops_branch(), template: "ops", mode: 0o2755},
@@ -2706,22 +2667,14 @@ defmodule Fleet.Project.Onboard do
   # L'ORG DU CATALOGUE EXISTE-T-ELLE SUR CETTE FORGE ? C'est la SEULE question que cette porte pose,
   # et elle la pose DIRECTEMENT.
   #
-  # ⚠ ELLE EN POSAIT DEUX AUTRES, ET ELLES SONT MORTES LE 2026-08-17 : le compte forge de l'humain
-  # existe-t-il (`user_exists?`), et est-il membre de `<org>:humans` (`team_member?`). Les deux
-  # exigeaient de l'humain un droit qu'il a deja et qu'il n'utilise pas — l'org est publique et les
-  # depots aussi, donc il lit ; et ce n'est pas lui qui ecrit, c'est le JETON SYSTEME. Mesure du
-  # 2026-08-17 : un compte non-membre de l'org cree une issue sur un depot public (201). Le mode
-  # degrade invoquait « downstream create_issue remains the net » — un filet qui n'existe pas.
+  # ⚠ ELLE NE VERIFIE PAS L'HUMAIN, et ce n'est pas un trou : l'admission est tenue UNE FOIS au
+  # lancement — le BEAM refuse de demarrer sous un uid systeme et herite de cet uid pour ses pods.
+  # Le verifier ici exigerait de l'humain un droit qu'il a deja et n'utilise pas : l'org est
+  # publique donc il LIT, et ce n'est pas lui qui ecrit mais le JETON SYSTEME.
   #
-  # L'ADMISSION D'UN HUMAIN NE SE VERIFIE PLUS PAR VERBE, et ce n'est pas un trou : elle est tenue
-  # UNE FOIS, au lancement, par Guard B (`bin/fleet_v2`) — le BEAM refuse de demarrer sous un uid
-  # systeme ou sous l'admiral, et il herite de cet uid pour lui et ses pods. Cinq verbes sans garde
-  # d'humain sont la consequence de ce garde-la.
-  #
-  # ⚠ LE 404 NE SE DEDUIT PLUS D'UNE AUTRE QUESTION. Cette detection vivait dans la branche d'erreur
-  # du test d'equipe : elle ne tombait que si CE test-la rendait 404, donc jamais quand la reponse
-  # arrivait par un autre chemin. Elle demande maintenant `org_exists?` en direct — un appel au lieu
-  # de deux sur le chemin nominal, et une reponse qui ne depend plus du hasard d'un code d'erreur.
+  # ⚠ ET LE 404 NE SE DEDUIT PAS D'UNE AUTRE QUESTION : porte par la branche d'erreur d'un test
+  # voisin, il ne tombe que si CE test-la rend 404 — donc jamais quand la reponse arrive autrement.
+  # La question se pose EN DIRECT.
   #
   # ⚠ `org_exists?/2` ET PAS UNE SONDE SUR LES COMPTES : dans Gitea une org est une ligne de la MEME
   # table `user`, donc un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
