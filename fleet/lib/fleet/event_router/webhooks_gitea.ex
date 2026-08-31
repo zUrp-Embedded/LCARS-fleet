@@ -33,16 +33,15 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   plug(:match)
 
-  # AUTHENTICATE BEFORE PARSING, and that means reading the body here rather than merely moving the
-  # check. The HMAC covers the RAW body, and that raw body used to be captured BY `Plug.Parsers`
-  # (its `body_reader:`) — so `verify_hmac/1` could not run any earlier than the handler without
-  # `raw_body` being nil, which would have made `secure_compare` false on every request, legitimate
-  # ones included. The fix is not to move the check up; it is to move the READ up and let the parser
-  # consume what this plug already holds.
+  # AUTHENTICATE BEFORE PARSING, and that means READING the body here rather than merely moving the
+  # check up. The HMAC covers the RAW body: capture that raw body in `Plug.Parsers` (its
+  # `body_reader:`) and `verify_hmac/1` cannot run any earlier than the handler without `raw_body`
+  # being nil — which makes `secure_compare` false on EVERY request, legitimate ones included. The
+  # parser must consume what this plug already holds.
   #
   # What it buys: a request with a bad signature is refused after a bounded read and BEFORE any JSON
-  # deserialization. Before, an anonymous caller obtained up to 1 MiB read AND a full
-  # `Jason.decode!` per request, with no identity check anywhere on that path — CPU and memory per
+  # deserialization. Otherwise an anonymous caller obtains up to 1 MiB of read AND a full
+  # `Jason.decode!` per request with no identity check anywhere on that path — CPU and memory per
   # connection, and the parser's own surface exposed to unauthenticated input.
   plug(:authenticate_webhook)
 
