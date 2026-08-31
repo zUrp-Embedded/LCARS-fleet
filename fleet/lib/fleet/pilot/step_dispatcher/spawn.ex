@@ -400,9 +400,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           #
           # ⚠ ET LA REPRISE NE VIENT PAS D'UN RE-WAKE : le dispatcher ne repasse pas tant que
           # `lcars-in-flight` est pose, et aucun site de wake n'est periodique. Elle vient de la
-          # RECLAMATION D'ORPHELIN du poller — un brief enfile mais jamais TIRE ne possede pas son
-          # verrou, le pull etant l'ACK durable que le reveil a atterri, donc le verrou devient
-          # suspect, la grace court, il est reclame, et le dispatch peut reprendre.
+          # RECLAMATION D'ORPHELIN du poller, dont la regle de propriete est `@pulled_states` : un
+          # brief enfile mais jamais TIRE ne possede pas son verrou, le pull etant l'ACK durable que
+          # le reveil a atterri. Le verrou devient donc suspect, la grace court, il est reclame, et
+          # le dispatch peut reprendre.
           #
           # La nuance explique le DELAI — une grace, pas un tick — et dit ou regarder quand ca ne
           # repart pas.

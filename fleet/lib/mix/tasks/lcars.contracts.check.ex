@@ -282,29 +282,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # workflow side. `Workflow.Gates` is SYSTEM machinery and stays PURE — it must not acquire a
   # runtime seam that re-installs a judgement inside it.
   #
-  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM. La version precedente cherchait
-  # `coord_backend|CoordBackend` : deux chaines qu'aucun commit ne pouvait produire depuis que
-  # `Fleet.Coord` est parti entier (brouette 2026-08-19). Un mur contre une resurrection que
-  # personne ne peut accomplir se lit comme une garantie et n'en tient aucune — et il verdissait
-  # sur n'importe quelle delegation vers un AUTRE destinataire.
+  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM : un mur qui cherche des chaines qu'aucun commit
+  # ne peut plus produire se lit comme une garantie et n'en tient AUCUNE — tout en verdissant sur la
+  # vraie faute.
   #
   # `boundary` attrape deja toute delegation EN DUR vers un autre domaine, a la compilation. Ce
-  # qu'il ne voit pas, c'est le seam passe EN VALEUR (`Application.get_env` puis `apply/3`) — le
-  # mecanisme exact de feu `:coord_backend`. C'est donc lui qu'on refuse ici, et les deux couches
-  # se composent sans se recouvrir.
+  # qu'il ne voit PAS est le seam passe EN VALEUR — lecture d'app-env puis `apply/3` — et c'est donc
+  # lui qu'on refuse ici. Les deux couches se composent sans se recouvrir.
   #
-  # Ne pond aucun faux positif aujourd'hui : `gates.ex` n'a ni lecture d'app-env ni `apply/3`
-  # (mesure a la pose, 2026-08-20) — le mur nait VERT, seul etat dans lequel un mur puisse naitre.
+  # Le mur nait VERT, seul etat dans lequel un mur puisse naitre.
   #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
-  # Insere `defp _mutation_seam, do: Application.get_env(:lcars_fleet, :gate_backend)` dans
-  # `gates.ex` : ce check ECHOUE et nomme `lib/fleet/workflow/gates.ex:43`. Mutation retiree.
-  # Quatre contournements de la version grep, rejoues et ROUGES depuis la lecture AST :
-  # `Application.get_all_env(…)`, `@x Application.compile_env(…)` en corps de module,
-  # `seam.eval?(1, 2)` (dispatch sur une cible non statique) et `inj.(1)` (fonction injectee).
-  # Son angle mort, declare : la granularite est le FICHIER `gates.ex`. Un seam installe dans
-  # `gates/predicate.ex` passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste
-  # dans `Fleet.Workflow`. Les deux couches se composent et aucune ne couvre l'autre.
+  # ## Preuve, mutation jouee a la pose
+  # Un seam insere dans `gates.ex` fait ECHOUER ce check, qui NOMME le site. Quatre contournements
+  # de la version grep sont rejoues et ROUGES depuis la lecture AST : `get_all_env`, un
+  # `compile_env` en attribut de module, un dispatch sur cible non statique, une fonction injectee.
+  #
+  # ANGLE MORT DECLARE : la granularite est le FICHIER. Un seam installe dans un module voisin
+  # passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste dans le meme.
   @doc false
   @spec check_gates_no_runtime_seam(String.t()) :: result()
   def check_gates_no_runtime_seam(root) do
@@ -365,22 +359,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   defp runtime_seam(_), do: nil
 
-  # LE JUMEAU DE `docs.public_functions_documented`, sur l'autre contrat.
+  # ⚠ UNE FONCTION SANS `@spec` FAIT VERDIR DIALYZER SANS ETRE ANALYSEE PAR LUI. Ses drapeaux les
+  # plus stricts comparent le DECLARE a l'INFERE : sans declaration, ils sont INERTES et la fonction
+  # est hors de portee de l'instrument le plus severe du gate — tout en le faisant passer.
   #
-  # Dialyzer tourne au dernier maillon du gate avec `:extra_return` et `:missing_return` — deux
-  # drapeaux dont tout le metier est de comparer le DECLARE a l'INFERE. Ils sont INERTES sur une
-  # fonction sans `@spec` : le fichier est analyse, mais avec le contrat le plus permissif que
-  # l'inference veuille bien lui accorder. Une fonction sans spec n'est donc pas « moins finie »,
-  # elle est HORS DE PORTEE de l'instrument le plus strict du gate, tout en le faisant verdir.
+  # ⚖ Arbitrage user : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est le dernier
+  # kilometre ». La fuite s'ELARGISSAIT toute seule : chaque check ajoute ici ajoutait une fonction
+  # publique sans spec.
   #
-  # ⚖ Arbitrage user, 2026-08-20 : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est
-  # le dernier kilometre ». La couverture etait a 89,0 % (64 fonctions sur 16 fichiers) et la fuite
-  # S'ELARGISSAIT — chaque check ajoute a ce fichier ajoutait une fonction publique sans spec.
-  #
-  # `@impl` EXCLU, meme motif que le jumeau : le contrat d'un callback vit dans son behaviour, et le
-  # restater par implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP
-  # NOMMES ne sont PAS exclus, eux : `start_link/1` et `child_spec/1` portent un contrat propre a
-  # chaque module, et les exclure retirerait du mur ce qu'on vient de fermer.
+  # `@impl` EXCLU : le contrat d'un callback vit dans son behaviour, et le restater par
+  # implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP NOMMES ne sont
+  # PAS exclus — ils portent un contrat propre a chaque module.
   #
   # ## Preuve (mesure et mutation, 2026-08-20)
   # Pose a 540/540. Retirer un `@spec` -> ECHEC, fonction et fichier nommes. Et l'exercice s'est
@@ -534,25 +523,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # LA DEPENDANCE INVISIBLE DU FOURNISSEUR — nature de couture SANS PRECEDENT dans ce depot.
   #
-  # `Reconciliation.@pulled_states [:assigned]` dit qu'un work-item `:pending` (enfile, jamais tire)
-  # ne possede AUCUN verrou. Trois modules raisonnent sur cette regle sans jamais l'appeler : ils la
-  # citent en commentaire. Le fournisseur, lui, ignorait qu'il portait une garantie pour eux — la
-  # changer casse leur raisonnement en silence, et rien ne relie les quatre fichiers.
+  # `@pulled_states` dit qu'un work-item enfile mais jamais TIRE ne possede AUCUN verrou. Des
+  # modules raisonnent sur cette regle sans jamais l'appeler : ils la CITENT. Le fournisseur ignore
+  # donc qu'il porte une garantie pour eux, et la changer casse leur raisonnement en silence.
   #
-  # Les cinq autres natures de couture se verifient entre deux ENSEMBLES qui s'ecrivent. Celle-ci
-  # n'a rien a comparer : la dependance ne laisse aucune trace executable. La seule forme qui la
-  # rende verifiable est que le fournisseur la DECLARE — d'ou `pulled_states_dependents/0`, une
-  # valeur dont le seul lecteur est ce mur.
+  # ⚠ RIEN A COMPARER : cette dependance ne laisse aucune trace executable, contrairement aux autres
+  # natures de couture qui s'observent entre deux ensembles ecrits. La seule forme qui la rende
+  # verifiable est que le fournisseur la DECLARE — d'ou une valeur dont le seul lecteur est ce mur.
   #
-  # DEUX SENS, et le second est celui qui coute : un dependant qui apparait sans etre declare
+  # DEUX SENS, et le second est celui qui coute : un dependant qui apparait SANS etre declare
   # reintroduit exactement l'angle mort qu'on ferme.
   #
-  # ## Preuve (mutations jouees a la pose, 2026-08-20)
-  # (a) un dependant retire de la declaration -> ECHEC, fichier nomme cote « cite, non declare » ;
-  # (b) un fichier declare qui ne cite plus rien -> ECHEC, nomme cote « declare, ne cite plus ».
-  # Angle mort declare : la citation est un GREP sur `@pulled_states`. Un module qui raisonnerait
-  # sur la regle sans la nommer resterait invisible — c'est le prix d'une dependance qui ne
-  # s'execute pas, et le nommage est deja la discipline du depot.
+  # ## Preuve, mutations jouees a la pose
+  # (a) dependant retire de la declaration -> ECHEC, « cite, non declare » ;
+  # (b) fichier declare qui ne cite plus rien -> ECHEC, « declare, ne cite plus ».
+  #
+  # ANGLE MORT DECLARE : la citation est un GREP. Un module qui raisonnerait sur la regle sans la
+  # NOMMER resterait invisible — c'est le prix d'une dependance qui ne s'execute pas.
   @doc false
   @spec check_pulled_states_declared(String.t()) :: result()
   def check_pulled_states_declared(root) do
@@ -608,20 +595,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # L'ECHELLE DE SEVERITE, ECRITE DEUX FOIS.
+  # ⚠ L'ECHELLE DE SEVERITE EST ECRITE DEUX FOIS, EN DEUX FORMES : l'Elixir porte l'ORDRE — ce a
+  # quoi un seuil de blocage se compare — et le schema porte l'APPARTENANCE, ce qu'un juge a le
+  # droit d'ecrire. Un `@doc` qui se dit « le SEUL endroit » est donc vrai de l'ordre et faux de
+  # l'ensemble.
   #
-  # `FindingsWire.severities/0` porte l'ORDRE (du plus faible au plus fort) : le `block_at` d'une
-  # carte s'y compare. `findings-v1.json` porte l'APPARTENANCE : ce qu'un juge a le droit d'ecrire.
-  # Deux formes, un seul vocabulaire — et le `@doc` de la fonction affirme etre « the ONLY place
-  # this order is written », ce qui est vrai de l'ORDRE et faux de l'ENSEMBLE.
+  # Le cout du desaccord est mesure : un juge ayant ecrit une severite que l'enum ne portait pas a
+  # vu TOUTE sa charge mourir pour un mot.
   #
-  # La paire est nee DANS le lot qui a paye le cas `"none"` : un juge avait ecrit `"none"` pour dire
-  # « rien trouve », l'enum ne le portait pas, et toute sa charge est morte pour un mot. La lecon du
-  # lot etait « tout ce qu'un juge peut ecrire doit etre accepte ou refuse lisiblement » ; le meme
-  # lot a cree une seconde copie du meme vocabulaire, sans mur.
-  #
-  # Ce check compare les ENSEMBLES, jamais l'ordre : l'ordre n'existe que cote Elixir, et un enum
-  # JSON n'en porte aucun. Une severite ajoutee d'un cote et pas de l'autre est refusee ici.
+  # Ce check compare les ENSEMBLES, jamais l'ordre — un enum JSON n'en porte aucun.
   #
   # ## Preuve (mutation jouee a la pose, 2026-08-20)
   # (a) Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est
@@ -725,32 +707,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # LA TABLE DES KINDS D'ESCALADE, FERMEE DANS LES DEUX SENS.
   #
-  # `Escalation.kind_describe/1` est une table CLOSE : un kind sans clause n'ouvre pas d'issue, il
-  # leve un `FunctionClauseError`. C'est ce qui est arrive a `:awaits_arch_stuck` — emis par
-  # `StepRunConsumer.drain_failed/4`, sans clause — et il a crashe exactement sur le chemin
-  # « un ticket sort du pipeline en silence ». Le temoin du drain stubbait `escalate_fun`, donc il
-  # ne pouvait pas le voir : une couverture de test ne dit rien d'une couture.
+  # La table des kinds est CLOSE : un kind sans clause n'ouvre pas d'issue, il LEVE — et il le fait
+  # exactement sur le chemin « un ticket sort du pipeline en silence ». Un temoin qui stubbe
+  # l'escalade ne peut pas le voir : une couverture de test ne dit rien d'une COUTURE.
   #
-  # L'autre sens coute moins cher mais ment autant : une clause sans producteur (`:pod_failed`,
-  # 2026-08-20) se lit comme une garantie que quelque chose sait remonter ce cas. C'est le motif
-  # « mensonge du registre » que `events.yaml` nomme deja pour ses propres cles.
+  # L'autre sens coute moins cher et ment autant : une clause SANS producteur se lit comme une
+  # garantie que quelque chose sait remonter ce cas.
   #
-  # DEUX SOURCES DE PRODUCTION, et il faut les deux : les routes declaratives d'`events.yaml`
-  # (`escalate_kind:`) et les sites de code, ou le kind est le PREMIER argument d'un appel a cinq
-  # arguments dont l'appele nomme une escalade (`escalate`, `escalate_gated`, `escalate_or_signal`,
-  # ou la couture homonyme). Le Catalog garde deja au boot qu'une route `immediate` PORTE un
-  # `escalate_kind` ; il ne verifie pas que ce kind ait une clause.
+  # DEUX SOURCES DE PRODUCTION, et il faut les deux : les routes declaratives, et les sites de code
+  # ou le kind est argument d'un appel d'escalade. Le catalogue garde deja au boot qu'une route
+  # immediate PORTE un kind ; il ne verifie pas que ce kind ait une clause.
   #
-  # ## Preuve (mutations jouees a la pose, 2026-08-20)
-  # (a) clause retiree pour un kind produit -> ECHEC, kind nomme cote « sans clause » ;
-  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme cote « morte » ;
-  # (c) `escalate_kind: :disk_full` pose chez un appelant de `record_or_escalate/4` -> ECHEC, kind
-  #     nomme « emis SANS clause ». C'est la voie CANONIQUE, et la version precedente la manquait
-  #     entierement : le kind ne passe pas en argument, il voyage dans les opts ;
-  # (d) une clause morte gardee vivante par un COMMENTAIRE de `events.yaml` -> ECHEC. Le regex
-  #     lisait le texte brut, donc une ligne d'historique suffisait a nier la mort d'une clause.
-  # Angle mort declare : un kind construit dynamiquement (variable, interpolation) est invisible —
-  # aucun n'existe aujourd'hui, et un mur precis vaut mieux qu'un mur qui devine.
+  # ## Preuve, mutations jouees a la pose
+  # (a) clause retiree pour un kind produit -> ECHEC, kind nomme « sans clause » ;
+  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme « morte » ;
+  # (c) kind pose dans les OPTS d'un appelant -> ECHEC. C'est la voie CANONIQUE, et une version
+  #     lisant les seuls arguments la manquait entierement ;
+  # (d) clause morte maintenue vivante par un COMMENTAIRE de la source declarative -> ECHEC : lire
+  #     le texte brut laissait une ligne d'historique nier la mort d'une clause.
+  #
+  # ANGLE MORT DECLARE : un kind construit dynamiquement est invisible. Aucun n'existe, et un mur
+  # precis vaut mieux qu'un mur qui devine.
   @doc false
   @spec check_escalation_kinds_closed(String.t()) :: result()
   def check_escalation_kinds_closed(root) do
@@ -852,15 +829,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   defp callee_name(n) when is_atom(n), do: n
   defp callee_name(_), do: nil
 
-  # LE COUPLE `type_for_destination/1` <-> `visual_types/0` : l'un PRODUIT les types visuels, l'autre
-  # les SEME sur chaque depot. Deux ensembles qui doivent rester egaux, et qui ont divergé pendant
-  # SEIZE JOURS — `type:doc` seme et porte par personne, `type:workshop` porte et jamais seme, donc
-  # cree paresseusement, gris et sans description.
+  # ⚠ UN TYPE PRODUIT ET JAMAIS SEME NAIT PARESSEUSEMENT, GRIS ET SANS DESCRIPTION. Les deux
+  # ensembles — ce qui produit les types, ce qui les seme — doivent rester egaux, et leur divergence
+  # est passee inapercue pendant plus de deux semaines.
   #
-  # `visual_types/0` est desormais DERIVEE : elle mappe `type_for_destination/1` sur `@destinations`.
-  # La derivation ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee a
-  # `type_for_destination/1` ait sa destination dans `@destinations`. Sans lui, un troisieme type
-  # naitrait produit et jamais seme, exactement comme le deuxieme.
+  # La DERIVATION ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee
+  # cote production ait bien sa destination declaree.
   #
   # ## Preuve (mutation jouee a la pose, 2026-08-20)
   # (a) Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
@@ -1914,59 +1888,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
-  # DEUX MECANISMES D'EXPANSION POUR LE MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN.
-  # La face `main` d'un projet est generee par GITEA depuis le repo-modele : l'expansion des
-  # `${VAR}` y est pilotee par le fichier de controle `.gitea/template`, une LISTE de chemins. Les
-  # faces `ops`/`workshop`, elles, sont ecrites par `Onboard.Scaffold`, qui expanse TOUT ce qu'il
-  # copie. Ajouter un placeholder a un fichier de `main` sans l'ajouter a cette liste ne casse rien
-  # ici : ca casse dans le projet livre, des mois plus tard.
+  # ⚠ A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER. From bats-core
+  # 1.11, a description goes through `eval`: everything a double-quoted string expands, a test NAME
+  # expands — a backtick pair RUNS a command, `$(…)` runs a command, `$VAR` interpolates.
   #
-  # Mesure du 2026-08-12 sur `fleet/chifoumi` : `README.md` (liste) portait « # chifoumi », et
-  # `CLAUDE.md` (hors liste) portait « # ${REPO_NAME} » — dans le fichier meme que la fleet relit a
-  # chaque spawn de producteur, avec une date qui n'est pas une date et un en-tete LCARS malforme.
-  # Tous les projets crees par la fleet le portaient.
+  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose, nobody reviews it
+  # as code, and the danger scales with how ORDINARY the quoted words look. Nothing ran on bats
+  # 1.10, so an estate can carry this for months and discover it the day one machine upgrades —
+  # with reported failures naming assertions that were fine, the eval's stderr having leaked into
+  # `$output`.
   #
-  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN ${...} ». `ci.yml` contient
-  # `${GITHUB_REF}`, `${GITHUB_REPOSITORY}`, `${GITHUB_SHA}` — des variables du JOB CI, pas les
-  # notres. Les inscrire ici confierait a Gitea des noms qu'il ne connait pas, et le jour ou il
-  # expanserait l'inconnu en vide, le script CI partirait en morceaux. La liste des cinq variables
-  # est celle de `Onboard.Scaffold` : une seule autorite, des deux cotes.
-  # ── site.build_inputs ──────────────────────────────────────────────────────────────────────────
-  # LE SITE VITRINE LIT LE RUNTIME POUR L'ENUMERER : chaque fichier que son build ouvre est une
-  # ENTREE, et le workflow qui le publie filtre sur `paths:`. Une entree absente de ce filtre est un
-  # changement qui ne redeclenche RIEN — le site reste en ligne et decrit la version d'avant.
-  #
-  # ⚠ LE MODE DE PANNE EST MUET DANS LA MAUVAISE DIRECTION, et c'est ce qui justifie un contrat
-  # plutot qu'une relecture. L'en-tete du workflow dit vouloir l'inverse — « une plaquette qui ne
-  # trouve plus ce qu'elle decrit doit ECHOUER, pas servir la version d'avant » — et les vingt
-  # `throw` des sources du site sont ecrits pour ca. Ils ne servent a rien quand le build NE TOURNE
-  # PAS : le filtre decide s'il tourne, donc le filtre decide si les gardes existent. Mesure du
-  # 2026-08-20 : huit entrees sur dix hors filtre (les cap-profiles systeme, les deux sources Elixir
-  # du catalogue, les launchers, les deux fichiers MCP).
-  #
-  # CE QUI EST DERIVE, ET LA LIMITE ASSUMEE. On resout les `join()` des sources du site : `const X =
-  # join(here, '..'x4, …)` puis `join(X, …)`, style uniforme dans ces quatre fichiers. Un segment
-  # NON litteral (`join(BIN, name)`) ne se resout pas — on rend alors le prefixe connu comme un
-  # repertoire, qui exige une couverture en `**`. C'est volontairement conservateur : mieux vaut
-  # exiger trop large sur le seul cas dynamique que de certifier une liste close qui ne l'est pas.
-  # A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER.
-  #
-  # From bats-core 1.11, `bats_test_function` resolves variable references in a description with
-  # `eval "printf -v d '%s' \"$2\""`. Everything a double-quoted string expands, a test NAME expands:
-  # a backtick pair runs a command, `$(…)` runs a command, `$VAR` interpolates. Measured 2026-08-20
-  # on bats 1.11.1: the description « ce que `box reset` epargne » RAN `box reset` at file load —
-  # twice — and the name printed in the report came back MUTILATED, with the quoted text gone.
-  #
-  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose: nobody reviews it
-  # as code, and the danger scales with how ordinary the quoted words look. `box reset`, `ip`, `..`,
-  # `/`, `-`, `:=` were all in this repository, in files that also drive a real provisioning rail.
-  # Nothing ran on bats 1.10, so a whole estate can carry this for months and see it the day one
-  # machine upgrades — six suites went red at once on the native workbench, and the reported failures
-  # named assertions that were fine: the eval's stderr had leaked into `$output`.
-  #
-  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT (measured, both forms, in isolation): `\`` survives
-  # the eval and renders as a plain backtick. So this wall does not ban the repository's habit of
-  # quoting code in a test name — it requires the one backslash that makes the name inert.
+  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT: an escaped backtick survives the eval and renders
+  # as a plain one. This wall does not ban quoting code in a test name, it requires the one
+  # backslash that makes the name inert.
   @doc false
   @spec check_bats_descriptions_inert(String.t()) :: result()
   def check_bats_descriptions_inert(root) do
@@ -2050,6 +1984,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
+  # ⚠ LE FILTRE `paths:` DU WORKFLOW DECIDE SI LES GARDES EXISTENT. Le site vitrine lit le runtime
+  # pour l'enumerer, donc chaque fichier que son build ouvre est une ENTREE ; une entree hors du
+  # filtre est un changement qui ne redeclenche RIEN, et le site reste en ligne en decrivant la
+  # version d'avant.
+  #
+  # Le mode de panne est MUET DANS LA MAUVAISE DIRECTION : les `throw` des sources du site sont
+  # ecrits pour echouer plutot que servir du perime, et ils ne servent a rien quand le build NE
+  # TOURNE PAS. D'ou un contrat plutot qu'une relecture.
+  #
+  # LIMITE ASSUMEE : on resout les `join()` litteraux des sources. Un segment NON litteral ne se
+  # resout pas — on rend alors le prefixe connu comme un REPERTOIRE, qui exige une couverture large.
+  # Volontairement conservateur : mieux vaut exiger trop que certifier close une liste qui ne l'est pas.
   @doc false
   @spec check_site_build_inputs(String.t()) :: result()
   def check_site_build_inputs(root) do
@@ -2294,6 +2240,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end
   end
 
+  # ⚠ DEUX MECANISMES D'EXPANSION POUR UN MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN. La face
+  # `main` est generee par la forge depuis le repo-modele, ou l'expansion est pilotee par une LISTE
+  # de chemins ; les autres faces sont ecrites par le scaffold, qui expanse tout ce qu'il copie.
+  # Ajouter un placeholder a un fichier de `main` sans l'inscrire dans cette liste ne casse rien
+  # ICI : ca casse dans le projet livre, des mois plus tard, dans un fichier que la fleet relit a
+  # chaque spawn.
+  #
+  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN `${...}` » : un workflow CI
+  # porte les siennes, et les inscrire ici confierait a la forge des noms qu'elle ne connait pas —
+  # le jour ou elle expanserait l'inconnu en vide, le script partirait en morceaux.
   @doc false
   @spec check_gitea_template_expansion(String.t()) :: result()
   def check_gitea_template_expansion(root) do
@@ -2767,31 +2723,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
   # ── sp.adresser_un_agent ───────────────────────────────────────────────────────────────────────
-  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR — et c'est le mur qui rend les deux premiers tenables.
+  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR. La regle doit atteindre TOUS les roles, et elle ne peut
+  # pas passer par un bloc partage : l'audit impose UNE source par role, et les roles a draft sont
+  # justement les premiers concernes. Recopier le paragraphe en ferait deux exemplaires de prose —
+  # et deux proses divergent en restant plausibles. Elle passe donc par l'ENVELOPPE, que chaque
+  # carte NOMME.
   #
-  # La regle « le destinataire de ce que tu ecris est le meme agent que toi » doit atteindre TOUS les
-  # roles. Elle ne peut pas passer par un bloc `core/*` : `Blocks.audit!` impose UNE source par role
-  # — une entree dans `sp-map.yaml` OU un draft ecrit a la main, jamais les deux — et `architect` et
-  # `starfleet`, qui ont un draft, sont precisement les deux premiers concernes. Y recopier le
-  # paragraphe en ferait deux exemplaires de prose, et deux prose divergent en restant plausibles.
+  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX : un role dont la carte oublie la
+  # ligne ne recoit rien, et rien ne le dit. Un drapeau peut manquer, une prose peut mentir — l'un
+  # se detecte, l'autre non, et c'est tout ce que ce mur achete.
   #
-  # Elle passe donc par l'ENVELOPPE : `sp_template.eex` rend `@modop_fragments` pour tout pod, quelle
-  # que soit l'origine de son SP. Le bundle est la source unique ; chaque carte le NOMME.
+  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE : aucun appelant de production n'active un
+  # bundle `optional`, donc un role qui declarerait celui-ci ainsi passerait un controle naif en ne
+  # recevant RIEN. Le second volet lit `incompatible:` pour la meme raison — l'y nommer retirerait
+  # legalement le bundle, et ce n'est pas un mode commutable.
   #
-  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX. Un role dont la carte oublie la ligne
-  # ne recoit rien, et rien ne le dit — meme classe de panne que la prose qui derive, en plus discret.
-  # Un drapeau peut manquer, une prose peut mentir : l'un se detecte, l'autre non. C'est tout ce que
-  # ce mur achete, et ca suffit a rendre la voie bundle superieure a la voie bloc.
-  #
-  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE. Le piege est deja mesure dans ce depot :
-  # `architect.yaml` ecrit que « aucun appelant de production n'active un bundle `optional` »
-  # (`CapProfile.resolve/4` est toujours appele a deux arguments), donc les bundles ranges la sont
-  # livres et jamais composes. Un role qui declarerait celui-ci en `optional` passerait un controle
-  # naif en ne recevant rien. Le second volet lit `incompatible:` pour la meme raison : l'y nommer
-  # retirerait legalement le bundle a un role, et ce n'est pas un mode commutable — il n'existe
-  # aucune conduite ou ecrire a un agent en le prenant pour un executant serait juste.
-  #
-  # Les `ReservedSeat` sont hors perimetre : un siege n'a pas de `spec`, donc pas de SP a garnir.
+  # Les sieges reserves sont hors perimetre : sans `spec`, pas de SP a garnir.
   @adresser_bundle "adresser-un-agent"
   @doc false
   @spec check_sp_adresser_un_agent(String.t()) :: result()
@@ -5137,33 +5084,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # ── Tool authorization (A1) ──────────────────────────────────────────
-  # `tools/list` is DISCOVERY, not authorization: `tools/call` re-verifies nothing against it.
-  # Every pod's MCP session is handed the same tool catalogue, so what stops a producer from
-  # calling a destructive project op is never the catalogue — it is the gate on that tool's own
-  # dispatch path. The invariant held by discipline alone: nothing refused a new `deftool` wired
-  # to an ungated body, and such a tool is callable by ANY pod with nothing said about it.
+  # ⚠ `tools/list` IS DISCOVERY, NOT AUTHORIZATION: `tools/call` re-verifies nothing against it, and
+  # every pod is handed the SAME catalogue. What stops a producer from calling a destructive op is
+  # never the catalogue — it is the gate on that tool's own dispatch path, and nothing refused a new
+  # tool wired to an ungated body.
   #
   # Two admissible forms, and no third:
-  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the tool's
-  #     subject comes from the socket (one pod, one socket) and never from the wire. Receiving
-  #     `%{pod_id: _}` is not the property: the acceptor hands that map to every tool alike.
-  #   * ROLE-GATED — the body calls a `Delegation` function whose own body calls
-  #     `require_architect`/`require_onboarder`, which resolve role AND repo from the spawn binding.
-  # A clause whose body is a bare `{:error, _, state}` (bad arguments) is inert: it neither needs
-  # nor supplies a gate, and a tool made only of those is not gated.
+  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the subject
+  #     comes from the SOCKET and never from the wire. Merely receiving the identity is not the
+  #     property: the acceptor hands it to every tool alike.
+  #   * ROLE-GATED — the body reaches a function that resolves role AND repo from the spawn binding.
+  # A clause whose body is a bare argument error is inert: it neither needs nor supplies a gate.
   #
-  # INVERSE TWIN, and it is the sharper half: a `handle_tool_call` clause with NO `deftool` schema
-  # is not dead code. It is absent from `tools/list` and still dispatched by `tools/call` — a tool
-  # that works and that no catalogue admits.
+  # ⚠ INVERSE TWIN, AND IT IS THE SHARPER HALF: a dispatch clause with NO schema is not dead code —
+  # it is absent from `tools/list` and still dispatched by `tools/call`. A tool that works and that
+  # no catalogue admits.
   #
-  # Read from the AST, never from a grep: a comment mentioning `require_architect` must not be able
-  # to green this check (BND-111, applied to the thing rather than to a stripped line).
+  # Read from the AST, never from a grep: a COMMENT naming a gate must not be able to green this.
   #
-  # PUBLIC (@doc false) for the same reason as `code_match?/4`: this check reports ABSENCES, and a
-  # broken parser reports the same absences as a clean tree. Its refusals must be provable against
-  # CRAFTED fixture trees, not only observed green on the real one — the whole-repo smoke test can
-  # never distinguish "nothing wrong" from "nothing measured". It takes its root as an argument
-  # precisely so a test can hand it one.
+  # ⚠ PUBLIC ON PURPOSE: this check reports ABSENCES, and a broken parser reports the same absences
+  # as a clean tree. Its refusals must be provable against CRAFTED fixtures, not merely observed
+  # green on the real tree — a whole-repo smoke test can never distinguish "nothing wrong" from
+  # "nothing measured". It takes its root as an argument precisely so a test can hand it one.
   @doc false
   @spec check_mcp_tools_gated(String.t()) :: result()
   def check_mcp_tools_gated(root) do
