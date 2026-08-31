@@ -149,9 +149,9 @@ defmodule Fleet.SPBuilder.Blocks do
   # A role with no draft yet is new business material and lands in `drafts_dir`; adding a mechanism
   # role is a deliberate act that starts by creating its file where it belongs.
   #
-  # ⚠ CONFINED (`--catalogue <root>`) TURNS THIS OFF, and it must. Measured 2026-08-10 by running
-  # the documented gesture: an operator composing THEIR catalogue with a `gatekeeper` entry in their
-  # map OVERWROTE the shipped system draft — the one file the target state calls never modifiable.
+  # ⚠ CONFINED (`--catalogue <root>`) TURNS THIS OFF, and it must. Without that, the documented
+  # gesture — an operator composing THEIR catalogue with a `gatekeeper` entry in their map —
+  # OVERWRITES the shipped system draft, the one file the target state calls never modifiable.
   # Their `gatekeeper` is their OVERRIDE of it, and an override belongs in their own tree, where the
   # search path makes it win. The rule read correctly is the same one: a draft goes where its MAP
   # is, and an explicit root says which map is being composed.

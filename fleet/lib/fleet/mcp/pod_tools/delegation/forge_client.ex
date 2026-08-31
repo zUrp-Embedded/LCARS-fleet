@@ -63,11 +63,10 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   CREATE call as an id, and the destination label MUST ride it (a post-create add leaves a window where
   a poller tick burns the project card on a documentary ticket).
 
-  Declared here after the fact, and the omission is the reason the destination path had no test
-  (2026-08-03): the seam is duck-typed, so an undeclared call compiles fine against the real
-  module and raises `UndefinedFunctionError` against every stub — which made the ops branch of
-  `do_create_issue` the one branch that could not be exercised. A contract with a hole does not
-  merely fail to check that branch, it FORBIDS testing it.
+  ⚠ DECLARE ICI, ET UNE OMISSION SE PAIE EN COUVERTURE : la couture est duck-typed, donc un appel
+  NON DECLARE compile parfaitement contre le vrai module et leve `UndefinedFunctionError` contre
+  CHAQUE doublure — la branche concernee devient alors la seule qu'aucun temoin ne peut exercer. UN
+  CONTRAT TROUE NE SE CONTENTE PAS DE NE PAS VERIFIER CETTE BRANCHE, IL EN INTERDIT LE TEST.
   """
   @callback repo_label_id(repo :: String.t(), name :: String.t(), opts :: keyword()) ::
               {:ok, integer()} | {:error, term()}

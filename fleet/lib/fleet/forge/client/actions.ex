@@ -270,8 +270,8 @@ defmodule Fleet.Forge.Client.Actions do
 
   Each job carries `status` (`waiting` while nothing has claimed it), `labels` — the `runs-on:` it
   asks for — and `runner_id`/`runner_name`, zero and empty while unassigned. Those three answer, in
-  ONE read, the question the CI gate used to take forty-five minutes to ask: has anything picked
-  this job up, and what did it ask for?
+  ONE read, the question the CI gate would otherwise spend its whole bounded wait to ask: has
+  anything picked this job up, and what did it ask for?
   """
   @spec jobs(String.t(), pos_integer(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def jobs(repo, run_id, opts \\ []) when is_binary(repo) and is_integer(run_id) do
