@@ -150,9 +150,8 @@ defmodule Fleet.FindingsWire do
   #
   # THREE OUTCOMES, NOT TWO, and collapsing any pair of them costs something real: `:absent` (no
   # block -- a judge that wrote prose only), `{:ok, map}`, and `:undecodable` (a block is there and
-  # nothing in it reads). The first version of the hardened parser returned `:absent` when no
-  # candidate decoded, which erased the very distinction this module exists to keep -- caught by
-  # its own tests, one commit after the distinction had been argued for.
+  # nothing in it reads). Answering `:absent` when no candidate decodes is the easy collapse, and it
+  # erases the very distinction this module exists to keep.
   defp block(body) do
     case String.split(body, @marker) do
       [_only] -> :absent
@@ -165,8 +164,8 @@ defmodule Fleet.FindingsWire do
   #
   #   * the FIRST fence is wrong because a finding QUOTES CODE. "assertion creuse --
   #     `parse_duration \"90s\" >/dev/null`" is the normal shape of a payload, so ```-fenced
-  #     snippets live INSIDE the JSON as a matter of course; cutting at the first fence truncated
-  #     the substantial findings mid-object and reported them as garbage.
+  #     snippets live INSIDE the JSON as a matter of course; cutting at the first fence truncates
+  #     the substantial findings mid-object and reports them as garbage.
   #   * the LAST fence is wrong because THE BODY IS EDITABLE. It is ours only until a human replies
   #     inside that same body with a code block of their own: ONE appended ```bash snippet turns a
   #     readable payload into `{:error, :undecodable}`, and one layer up that ERASES a card's block

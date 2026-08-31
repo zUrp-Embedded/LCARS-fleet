@@ -2,21 +2,12 @@ defmodule Fleet.Forge do
   @moduledoc """
   Forge domain facade — the SINGLE HTTP exit of the fleet toward its git forge.
 
-  Boundary anchor; the contract lives in each module's `@moduledoc`: `Fleet.Forge.Client` (the
-  surface: issues, labels, comments, pulls, reviews, merges), `Fleet.Forge.Client.Transport` (the
-  only module that speaks HTTP), `Fleet.Forge.Client.Repo`, `.Files`, `.Jury`, `.UrlSafe`, and
-  `Fleet.Forge.Protocol` (the wire vocabulary: branch naming, PR titles, parsing).
+  Boundary anchor. The contract lives in each module's `@moduledoc`, and the domain's map in
+  `lib/fleet/forge/README.md` — neither is restated here.
 
-  ## Why it is a domain and not a corner of `Fleet.Pilot`
-
-  It was a corner of Pilot, and the cost showed in the boundary declaration: `Req` and
-  `Req.Response` were deps of the BUSINESS domain, so "one HTTP exit" was a convention anyone could
-  break by adding a call anywhere in the pilot. Here the same rule is COMPILED — the HTTP library
-  is declared by this boundary and nothing else can reference it.
-
-  It never belonged to Pilot in the first place: outside its own modules it touched the pilot three
-  times, while what it actually depends on is `Fleet.Labels`, `Fleet.Workflow` and
-  `Fleet.Credentials`. It was placed there, not derived from there.
+  "One HTTP exit" is COMPILED rather than agreed: `Req` and `Req.Response` are declared by this
+  boundary and nothing outside it can reference them. Declared by a business domain instead, the
+  same rule would be a convention anyone breaks by adding a call anywhere in that domain.
 
   ## The Finch pool name has one authority
 
@@ -48,9 +39,9 @@ defmodule Fleet.Forge do
       # — external wire surface (lib fencing: every reference is declared) —
       Req,
       Req.Response,
-      # The pool this domain sends through: its NAME lived here and its SHAPE in Pilot.Application,
-      # which split one fact across two domains and put the pool out of reach of a tool door that
-      # legitimately needs it. Name and shape now sit together, and this declaration is the cost.
+      # The pool this domain sends through. Its NAME and its SHAPE are one fact and sit together
+      # here; split across two domains, the pool is out of reach of any tool door that legitimately
+      # needs it. This declaration is the cost of keeping them together.
       Finch
     ],
     exports: [
@@ -83,13 +74,12 @@ defmodule Fleet.Forge do
   server-side (Finch's `:infinity` default would keep it until it goes stale, and the next call then
   hangs until `receive_timeout` — the suspected source of the ~30s cumulated on create_issue).
 
-  It lives beside the NAME because the two are one fact. While the shape lived in the pilot's
-  application module, anything that was not the pilot could name the pool but not START it: an
-  `eval` door acting on the forge died on `unknown registry: Fleet.Forge.Finch`, and its only ways
-  out were to depend on the pilot or to write the shape a second time. Out-of-app callers start it
-  standalone under their own supervisor (the `eval` doors: `Onboard.eval_migrate/2`,
-  `Onboard.eval_reconcile/1`, `CatalogueLifecycle`) — never `app.start`, because a second fleet must
-  not boot from a tool.
+  It lives beside the NAME because the two are one fact. Held in the pilot's application module
+  instead, anything that is not the pilot can name the pool but not START it: a forge call from an
+  `eval` door dies on `unknown registry: Fleet.Forge.Finch`, and the only ways out are to depend on
+  the pilot or to write the shape a second time. Out-of-app callers start it standalone under their
+  own supervisor (the `eval` doors: `Onboard.eval_migrate/2`, `Onboard.eval_reconcile/1`,
+  `CatalogueLifecycle`) — never `app.start`, because a second fleet must not boot from a tool.
   """
   @spec finch_spec() :: {module(), keyword()}
   def finch_spec, do: {Finch, name: @finch_name, pools: %{default: [conn_max_idle_time: 30_000]}}
