@@ -150,8 +150,8 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
-  # CE 202 EST ADOSSE A DEUX MECANISMES, ET NI L'UN NI L'AUTRE N'ETAIT NOMME ICI — un lecteur y
-  # voyait un « accepte » nu, sans moyen de savoir ce qui le rattrape.
+  # CE 202 EST ADOSSE A DEUX MECANISMES, ET LES NOMMER ICI EST CE QUI L'EMPECHE DE SE LIRE COMME UN
+  # « accepte » NU, sans moyen de savoir ce qui le rattrape.
   #
   #   1. AVANT la diffusion : `spawn_dispatch_status/0` refuse en 503 si le consommateur unique est
   #      mort OU vivant-mais-non-abonne. C'est le cas « 202 dans le vide » (zero pod, zero alarme),

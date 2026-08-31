@@ -4,8 +4,8 @@ defmodule Fleet.API.Application do
 
   ## Pas de surface TCP ici, et ce n'est pas un durcissement
 
-  Un listener TCP (`Fleet.API.Rest` + `/ws`) n'aurait **aucune capacite propre**, et l'inventaire
-  porte son lieu :
+  Un listener TCP (REST + `/ws`) n'aurait **aucune capacite propre**, et l'inventaire porte son
+  lieu :
 
     * les lectures d'etat (`pods`, `issues`, `workflow_runs`) ne sont pas l'autorite de ce domaine —
       elles rendraient **501** en renvoyant vers `Fleet.Observation`, qui vit sur socket ;
