@@ -64,9 +64,9 @@ defmodule Fleet.Spawner.Pod.Kick do
   Delay (ms) of the 1st kick tick after a WAKE (`:arm_kick`, armed by `wake_pod`). Config
   `:wake_first_delay_ms`, default 15000. MUST outwait the carrier's honest delivery window
   (flag poll 1s + Monitor batching + agent turn start + `get_work_item` round-trip = several
-  seconds): armed at 2s it fired DURING nominal delivery on a WORKING Monitor rail — the
-  fallback typed `wake` into the arch session while `get_work_item` was in flight (live
-  2026-07-19). A fallback that outruns its primary is not a net, it is a second gun.
+  seconds): armed at 2s it fires DURING nominal delivery on a WORKING Monitor rail — the fallback
+  types `wake` into the session while `get_work_item` is in flight. A fallback that outruns its
+  primary is not a net, it is a second gun.
   """
   @spec wake_first_delay_ms() :: non_neg_integer()
   def wake_first_delay_ms,
@@ -77,11 +77,11 @@ defmodule Fleet.Spawner.Pod.Kick do
   `engage` until the pull). Config `:kick_retry_ms`, default 2500.
 
   The frequency is for the window AFTER the REPL is up, where a kick can actually be consumed.
-  It used to run through the cold start too, and there it bought nothing and cost one spurious
-  turn per tick: no ACK is reachable before the first turn, and tmux buffers every keystroke sent
-  to a TUI that has not started (7 `engage` in a scribe's REPL, measured 2026-08-04). The gate is
-  `TaskProbe.repl_up?/1` in the kick tick, not a wider delay here — spacing the retries would only
-  have made the same duplicates rarer.
+  Running it through the cold start too buys nothing and costs one spurious turn per tick: no ACK
+  is reachable before the first turn, and tmux BUFFERS every keystroke sent to a TUI that has not
+  started — they all land at once, seven `engage` in one REPL. The gate is `TaskProbe.repl_up?/1`
+  in the kick tick, not a wider delay here: spacing the retries would only make the same duplicates
+  rarer.
   """
   @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:lcars_fleet, :spawner_kick_retry_ms, 2_500)
@@ -172,10 +172,10 @@ defmodule Fleet.Spawner.Pod.Kick do
   # pod's STALE `.seen` cannot false-signal armed before its new Monitor"). A resumed pod is
   # therefore UNARMED by construction, and something has to arm it.
   #
-  # Measured on a bench (2026-08-19): `turn.flag` present, `.seen` absent, `LCARS_POD_RESUME 1` on
-  # every pod process, `kick (wake) abandoned after 12 attempts`, and a hand-typed `engage` starting
-  # the agent INSTANTLY. The pod then holds a `max_fan` seat forever and unrelated tickets queue in
-  # silent `wait/capacity`; `kill_pod` respawns it into the same state.
+  # The shape on a bench: `turn.flag` present, `.seen` absent, `LCARS_POD_RESUME 1` on every pod
+  # process, `kick (wake) abandoned after 12 attempts`, and a hand-typed `engage` starting the agent
+  # INSTANTLY. The pod then holds a `max_fan` seat forever while unrelated tickets queue in silent
+  # `wait/capacity`; `kill_pod` respawns it into the same state.
   #
   # The gate could only ever fire on an UNARMED pod — i.e. exactly where engage is required — because
   # the handler's `not polled and monitor_armed?` clause cancels the loop BEFORE `kick_send` runs.
