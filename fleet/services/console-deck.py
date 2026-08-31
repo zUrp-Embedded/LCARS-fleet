@@ -4,21 +4,16 @@
 # STARDATE: 2026-08-02
 # STATUS: PROTO-V2 — le deck de la boite : UNE page, des onglets verticaux, l'etat sonde en continu
 #
-# CE QUE CETTE PAGE REMPLACE, ET POURQUOI : la landing precedente etait generee UNE FOIS au
-# demarrage et chaque lien QUITTAIT la page. Un operateur qui ouvre une console perdait la vue
-# d'ensemble, et l'etat affiche datait du boot. Ici la coquille reste, le contenu change dans un
-# cadre, et la liste des agents est relue a intervalle : ce qui est affiche est ce qui est vrai.
+# La coquille RESTE et le contenu change dans un cadre : une page generee une fois au demarrage
+# affiche l'etat du boot, et chaque lien qui quitte la page fait perdre la vue d'ensemble.
 #
-# STDLIB SEULE (http.server) : l'image n'embarque pas de framework web et n'a pas a en embarquer
-# un pour une page. Mono-thread suffisant — un operateur, quelques onglets.
+# STDLIB SEULE (http.server) : l'image n'embarque pas de framework web et n'a pas a en embarquer un
+# pour une page.
 #
-# CE QUE LE SERVEUR NE FAIT PAS : il ne PILOTE rien (aucun POST, aucune action). Il lit et il
-# montre. Toute la conduite passe par les consoles (ttyd) ou l'API de la fleet.
+# CE QUE LE SERVEUR NE FAIT PAS : il ne PILOTE rien — aucun POST, aucune action. Il lit et il
+# montre ; toute la conduite passe par les consoles ou par l'API de la fleet.
 #
-# ⚠ LA VUE AGENTS EST ICI, ET NULLE PART AILLEURS. Une page d'exploration a porte un onglet
-# AGENTS (pods vivants x roles declares) tant que cette liste n'existait pas ; elle existe
-# depuis, relue toutes les 10 s et groupee par projet. La page d'exploration est morte avec
-# cette phrase. Ne la reimplemente pas : ce qu'elle montrait est au-dessus.
+# ⚠ LA VUE AGENTS EST ICI, ET NULLE PART AILLEURS : ne la reimplemente pas dans une page a cote.
 
 import html
 import http.client
@@ -38,85 +33,63 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("LCARS_LANDING_PORT", "20999"))
-# `console-humans.sh` EST la regle, ce fichier la LIT. Ce pointeur a passe des semaines sans un seul
-# appelant pendant que `humans()` refaisait le filtre a cote, avec des bornes differentes — un
-# cablage commence et jamais fini, qui donnait a lire « la liste vient de la source unique » en
-# tenant une seconde source. Il est maintenant appele.
+# ⚠ `console-humans.sh` EST la regle, ce fichier la LIT — il ne refait pas le filtre a cote, avec des
+# bornes qui divergeraient.
 HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh")
 
 # ── THE DOOR ────────────────────────────────────────────────────────────────────────────────────
-# WHAT THE AUTH IS FOR, AND IT IS NOT MAINLY SECURITY: this page is the box's front door and it
-# used to hand EVERY human's port block to whoever opened it. The fleet was already per-human --
-# one port block per uid, one observation deck each -- so authenticating does not create the
-# partition, it makes the INDEX personal: you arrive, you are recognised, you land on yours.
+# WHAT THE AUTH IS FOR, AND IT IS NOT MAINLY SECURITY: the fleet is already partitioned per-human,
+# so authenticating does not create the partition — it makes the INDEX personal. And since the forge
+# is the master of humans, `preferred_username` falls straight onto /etc/passwd (same login on both
+# sides by contract): routing and authorisation come out of ONE round trip.
 #
-# GITEA IS THE MASTER OF HUMANS, so it answers "who are you" too. `preferred_username` falls
-# straight onto /etc/passwd (the login is the SAME on both sides by contract), which yields the uid
-# and therefore the port block. Routing and authorisation come out of one round trip.
-#
-# WE READ THE CLAIMS FROM `userinfo`, NOT FROM THE id_token. Both carry the same `groups` (measured
-# 2026-08-12), but validating an RS256 signature needs a crypto library this image does not carry,
-# and an UNVERIFIED id_token is an attacker-supplied blob. The userinfo endpoint is a direct
-# server-to-forge call authenticated by the access token we just obtained: nothing to verify,
-# because nothing untrusted carried it.
+# ⚠ WE READ THE CLAIMS FROM `userinfo`, NOT FROM THE id_token. Both carry the same `groups`, but
+# validating an RS256 signature needs a crypto library this image does not carry, and an UNVERIFIED
+# id_token is an attacker-supplied blob. `userinfo` is a direct server-to-forge call authenticated
+# by the access token we just obtained: nothing to verify, because nothing untrusted carried it.
 OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC", "/etc/lcars/deck-oidc.json")
 # Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
-# registration is deliberate (an account is inert on its own); the single admin gesture that
-# enrolls somebody is adding them here. Measured: a member gets `["fleet", "fleet:humans"]`, a
-# self-registered guest gets NO `groups` claim at all.
+# registration is deliberate — an account is inert on its own, and the single admin gesture that
+# enrolls somebody is adding them here. A member gets `["<org>", "<org>:humans"]`; a self-registered
+# guest gets NO `groups` claim at all.
 #
-# ⚠ ONE PAIR OF VARIABLES NAMES THIS TEAM, AND THERE USED TO BE TWO. This line read
-# `LCARS_DECK_TEAM` (default `fleet:humans`) while `human-converger.sh` read its own pair — two
-# knob sets for ONE fact, in two formats, and
-# nobody sets either: the defaults carried the agreement. Renaming the org broke it silently and in
-# one direction only. The forge then emits `<org>:humans` in the `groups` claim, this page compares
-# against a literal `fleet:humans` and REFUSES every non-admin human, while the converger keeps
-# creating their accounts — a box that provisions people it will not let in. The deck derives from
-# the same pair now, so the two doors cannot answer differently.
+# ⚠ UNE SEULE PAIRE DE VARIABLES NOMME CETTE EQUIPE, ET LES DEUX PORTES EN DERIVENT. Un literal ici
+# et une paire chez le convergeur, c'est un renommage d'org qui casse en SILENCE et dans UN SEUL
+# sens : la forge emet `<org>:humans`, cette page compare a `fleet:humans` et REFUSE tout humain non
+# admin, pendant que le convergeur continue de creer leurs comptes.
 FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
 HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("PROV_HUMANS_TEAM", "humans"))
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
 PENDING_TTL = 600
-# WHERE THE CONVERGER PUBLISHES ITS REFUSALS, and reading it is what stops this page from lying.
-# Gitea accepts logins that can never become a Unix account (a 33-character name, for one), so a
-# person CAN be enrolled into the team and never converge. This page used to tell them "it
-# converges on its own, nothing to do on your side" -- for a convergence that will never happen.
-# The converger is the only component that knows why; it writes the reason here, we read it.
+# ⚠ LE LIRE EST CE QUI EMPECHE CETTE PAGE DE MENTIR : la forge accepte des logins qui ne peuvent PAS
+# devenir un compte Unix, donc une personne peut etre enrolee dans l'equipe et ne jamais converger.
+# Sans ce fichier, la page lui dirait « ca converge tout seul » pour une convergence qui n'arrivera
+# jamais.
 REFUSED_FILE = os.environ.get("LCARS_CONVERGER_REFUSED", "/run/lcars-converger.refused")
 
 # ─── LA TABLE DE MONTAGE ────────────────────────────────────────────────────────────────────────
-# LE RELAIS EST GENERIQUE, ET C'EST CE QUI REND LA SUITE TRIVIALE. Il n'y a pas de route « console »
-# ni de route « pod » : il y a des CIBLES, de deux natures.
+# LE RELAIS EST GENERIQUE : pas de route « console » ni de route « pod », des CIBLES de deux natures.
 #
 #   par-humain : /console/<login>/…  /pod/<login>/…   -> la socket de CET humain
 #   systeme    : /admin/…                             -> un backend unique, sans <login>
 #
-# La page de configuration des cartes sera UNE LIGNE ici, pas un chantier. C'est la meme raison qui
-# fait que ce relais ne parle jamais de terminal : apres le `101`, il ne comprend plus rien de ce
-# qu'il transporte, et c'est deliberé.
+# ⚠ Ce relais ne parle JAMAIS de terminal : apres le `101` il ne comprend plus rien de ce qu'il
+# transporte, et c'est delibere.
 CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/console")
-# Le client de terminal, pose par le Dockerfile et epingle par sha256 au meme rang que le binaire
-# ttyd. LA LISTE EST BLANCHE ET FERMEE : ce repertoire n'est pas « servi », ce sont TROIS fichiers
-# nommes qui le sont. Un serveur de statique generique dans un processus qui relaie des shells est
-# une surface qu'on n'a aucune raison d'ouvrir — et un `..` dans un nom de fichier n'est meme pas
-# une question qui se pose.
+# ⚠ LA LISTE EST BLANCHE ET FERMEE : ce repertoire n'est pas « servi », ce sont des fichiers NOMMES
+# qui le sont. Un serveur de statique generique dans un processus qui relaie des shells est une
+# surface sans raison d'etre ouverte — et un `..` dans un nom n'est meme pas une question qui se pose.
 DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
-# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT. Elle part dans l'image (`Dockerfile`, stage
-# `site`), donc la boite sert SA propre doc — pas la derniere en ligne, pas une copie a
-# resynchroniser. Le Dockerfile la pose au meme titre que le runtime : si elle manque, l'image est
-# ratee, et ca doit se voir.
+# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT : la boite sert SA propre doc, pas la derniere
+# en ligne ni une copie a resynchroniser.
 #
-# ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON. Elle a vecu en `/opt/lcars/runtime/doc`,
-# sous le verrou RO du prefixe (`750 root:fleet`, fichiers `640`). Ce serveur largue ses privileges
-# vers son compte de service (`nobody` a l'epoque, `lcars-system` depuis) : il ne pouvait ni
-# traverser ni ouvrir. Chaque `open()` levait et la route
-# `/doc/` rendait 404 sur des fichiers parfaitement presents — mesure du 2026-08-20, session
-# authentifiee, les 9 pages dans l'image et les trois routes en 404.
+# ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON : il largue ses privileges vers son
+# compte de service, qui ne peut ni traverser ni ouvrir le prefixe RO. Chaque `open()` levait, et
+# `/doc/` rendait 404 sur des fichiers parfaitement presents.
 DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/opt/lcars/share/doc")
-# Le favicon vit a cote de la doc, MEME source unique dans l'image (`assets/favicon` -> Dockerfile).
-# Le deck n'en declarait aucun : l'onglet du navigateur prend l'icone du document du HAUT, jamais de
-# l'iframe /doc/ — donc sans ca, onglet muet meme quand la doc, elle, en a un.
+# ⚠ L'onglet du navigateur prend l'icone du document du HAUT, jamais celle de l'iframe : sans cette
+# declaration, onglet muet meme quand la doc, elle, en a un.
 DECK_FAVICON = os.environ.get("LCARS_DECK_FAVICON", "/opt/lcars/share/favicon")
 # Les types servis, ENUMERES. Un dossier statique servi par extension inconnue rend `text/plain` ou
 # pire ; et surtout, la liste EST la surface : ce qui n'est pas ici ne sort pas.
@@ -361,20 +334,9 @@ def session_of(cookie_header):
         s = _sessions.get(sid)
         return dict(s, sid=sid) if s else None
 
-# ⚠ LA FORMULE DU BLOC A ETE RETIREE D'ICI, PAS COMMENTEE. Ce fichier recopiait
-# `21000 + (uid%500)*10` de `bin/fleet_v2` pour deriver les ports d'un humain. Il n'en derive plus
-# aucun : `base+1` (deck d'observation), `base+4` (console) et `base+5` (console de pod) sont passes
-# sur des sockets AF_UNIX le 2026-08-14, et `base+0` (API) a suivi le meme jour — sa surface TCP a
-# ete supprimee faute de capacite propre et d'appelant.
-#
-# Une constante qu'on garde « au cas ou » est une invitation a la reutiliser : le prochain qui
-# voudra un port trouvera la formule toute faite et republiera une origine.
-#
-# ⚠ ET CE COMMENTAIRE RENVOYAIT A DEUX ENDROITS OU LA LIRE — `bin/fleet_v2` et `console-humans.sh`.
-# Les deux l'ont perdue dans les jours qui ont suivi, et le pointeur a menti en silence. C'est la
-# faute que la doctrine nomme : decrire l'ETAT D'UN AUTRE FICHIER se perime tout seul, souvent dans
-# le meme lot. La formule n'existe plus nulle part dans la boite, et c'est tout ce qu'il y a a
-# savoir ici.
+# ⚠ LA FORMULE DU BLOC DE PORTS A ETE RETIREE D'ICI, PAS COMMENTEE : une constante gardee « au cas
+# ou » est une invitation a la reutiliser, et le prochain qui voudra un port republierait une
+# origine. Elle n'existe plus nulle part dans la boite.
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -1294,29 +1256,24 @@ tick(); setInterval(tick, 10000);
 class Deck(BaseHTTPRequestHandler):
     server_version = "lcars-deck"
 
-    # HTTP/1.1 IS A PREREQUISITE, NOT A MODERNISATION. `BaseHTTPRequestHandler` defaults to
-    # HTTP/1.0, and a 1.0 responder CANNOT perform `101 Switching Protocols` -- so the deck could
-    # never terminate a WebSocket, and every terminal had to live on its own origin behind its own
-    # port. That second origin is what asks nobody for anything, and the iframe exists only to sew
-    # the two back together: one line here is what makes a single origin possible at all.
+    # ⚠ HTTP/1.1 IS A PREREQUISITE, NOT A MODERNISATION: `BaseHTTPRequestHandler` defaults to 1.0,
+    # and a 1.0 responder CANNOT perform `101 Switching Protocols` — so the deck could not terminate
+    # a WebSocket at all, and every terminal would need its own origin behind its own port.
     #
-    # SAFE BECAUSE EVERY RESPONSE PATH IS LENGTH-DELIMITED, and that was checked rather than
-    # assumed: 1.1 keeps the connection alive by default, so a reply with neither `Content-Length`
-    # nor chunked encoding leaves the client waiting for an end that never comes. This handler has
-    # exactly two response paths -- `_send` and `_redirect` -- and both set `Content-Length`; there
-    # is no `send_error` call. A third path added later MUST set it too.
+    # ⚠ SAFE ONLY BECAUSE EVERY RESPONSE PATH IS LENGTH-DELIMITED: 1.1 keeps the connection alive, so
+    # a reply with neither `Content-Length` nor chunked encoding leaves the client waiting for an end
+    # that never comes. Both paths here set it, and there is no `send_error` call. A THIRD PATH ADDED
+    # LATER MUST SET IT TOO.
     protocol_version = "HTTP/1.1"
 
-    # ⚠ `rbufsize = 0` EST UNE CONDITION DU RELAIS, PAS UN REGLAGE DE PERFORMANCE. Par defaut
-    # `StreamRequestHandler` enveloppe la connexion dans un `BufferedReader` : la lecture des
-    # en-tetes peut alors tirer PLUS d'octets que la requete, et ces octets restent dans un tampon
-    # que `_pump` — qui lit la socket brute — ne verra jamais. Ils seraient perdus, silencieusement,
-    # et seulement quand le client parle en premier : la panne la plus difficile a attribuer qui
-    # soit. Sans tampon, tout ce qui est arrive est encore dans la socket.
+    # ⚠ `rbufsize = 0` EST UNE CONDITION DU RELAIS, PAS UN REGLAGE DE PERFORMANCE : le
+    # `BufferedReader` par defaut peut tirer PLUS d'octets que la requete en lisant les en-tetes, et
+    # ces octets resteraient dans un tampon que `_pump` — qui lit la socket brute — ne verra jamais.
+    # Perdus silencieusement, et seulement quand le client parle en premier : la panne la plus
+    # difficile a attribuer qui soit.
     #
-    # LE PRIX EST REEL ET ASSUME : `readline()` sur un flux non tamponne lit octet par octet, donc un
-    # appel systeme par caractere d'en-tete. Ce deck sert une poignee de requetes par session humaine
-    # — une page, un JSON d'etat, un upgrade — et jamais du trafic de masse.
+    # LE PRIX EST ASSUME : un appel systeme par caractere d'en-tete, sur une poignee de requetes par
+    # session humaine.
     rbufsize = 0
 
     def _send(self, code, body, ctype, cookie=None):
@@ -1532,10 +1489,9 @@ class Deck(BaseHTTPRequestHandler):
                 ), "text/html; charset=utf-8")
             return
 
-        # `and not admin` : meme terme qu'a la porte d'entree. Un site-admin peut n'avoir aucun
-        # compte local — GUARD A ne converge jamais le siege — et son absence de `people` est alors
-        # un etat normal, pas un enrollment en retard. Les deux pages ci-dessous accusent le
-        # convergeur : elles ne sont justes que pour qui l'attend vraiment.
+        # ⚠ `and not admin`, MEME TERME QU'A LA PORTE D'ENTREE : un site-admin peut n'avoir aucun
+        # compte local — GUARD A ne converge jamais le siege — et son absence est alors NORMALE. Les
+        # deux pages ci-dessous accusent le convergeur, elles ne sont justes que pour qui l'attend.
         if not any(h["human"] == sess["login"] for h in people) and not sess.get("admin"):
             refused = refusal_for(sess["login"])
             if refused is not None:
@@ -1560,13 +1516,8 @@ class Deck(BaseHTTPRequestHandler):
         # Le statique vit DERRIERE la porte, comme la page qui le charge : il n'a aucun usage pour
         # qui n'est pas identifie, et le navigateur porte deja le cookie en le demandant.
         # LA DOC — derriere la porte, meme origine, chemin relatif. Le site est bati avec
-        # `LCARS_SITE_BASE=/doc/`, donc ses liens internes pointent deja ici ; le servir ailleurs
-        # n'aurait aucun sens et le servir depuis une autre origine rouvrirait celle que ce deck a
-        # fermee.
-        #
-        # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE, et ce n'est pas une precaution de
-        # principe : `..` dans une URL est la faute la plus vieille du web, et elle sortirait ici du
-        # cote d'un prefixe qui porte les jetons de la boite. `realpath` + prefixe, sinon 404.
+        # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE : un `..` sortirait ici du cote d'un
+        # prefixe qui porte les jetons de la boite. `realpath` + prefixe, sinon 404.
         if path == "/doc" or path.startswith("/doc/"):
             rel = path[len("/doc"):].lstrip("/") or "index.html"
             if rel.endswith("/"):

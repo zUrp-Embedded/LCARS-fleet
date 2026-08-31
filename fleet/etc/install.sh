@@ -7,35 +7,28 @@
 #         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
 # Three-zone model: SOURCE (this repo, build only) → INSTALL ($PREFIX, RO, system-owned) → STATE
-# (~/.lcars, per-human, RW). PREFIX defaults to /opt/lcars/runtime.
-# ⚠ THIS PARAGRAPH DESCRIBED A MOVE THAT HAS SINCE HAPPENED, IN THE FUTURE TENSE. It read: "`v2`
-# means cohabiting with the v1 runtime (/local/LCARS); eventually PREFIX=/local/lcars, which is one
-# `mv` plus a symlink repoint". The move landed elsewhere — under /opt/lcars, the vendor directory
-# the norm reserves — and /local disappeared with it. A plan kept in the present tense after it was
-# carried out reads as a plan still to come.
+# (~/.lcars, per-human, RW).
 #
-# TWO env knobs, not one — the header used to claim PREFIX was the only parameter, and it is not:
+# TWO env knobs, not one:
 #   LCARS_INSTALL_PREFIX    where everything is installed (default /opt/lcars/runtime)
 #   LCARS_INSTALL_LINK_DIR  where the PATH symlinks go (default /usr/local/bin)
 #
 # EXIT CODES — 0 install complete · 1 hard failure (nothing usable posted) · 3 RELEASE POSTED, PATH
-# LINKS INCOMPLETE. The third exists because `link_fail` was set and never read: the script said
-# `OK` and returned 0 while its PATH commands were absent, or still pointed at a PREVIOUS version
-# (`ln -sf` failed, the old link survived, and the operator ran a release he believed was new).
-# It is a FACT, not a verdict — a caller that wires the links itself is right to accept it, and
-# `deploy/modules.d/60-deploy.sh` does exactly that: it runs this script AS THE HUMAN (who cannot
-# write /usr/local/bin) and re-posts the symlinks as root right after. Standalone, 3 is a refusal.
-# Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
-# app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
-# etc/install.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
-# content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
-# etc/README.md — and the copies had started to drift.)
+# LINKS INCOMPLETE.
 #
-# ATOMICITY: the old flow did `rm -rf $PREFIX/rel` then a multi-second `cp -a`, and overwrote each
-# launcher in place. An error mid-copy lost the last good build; a reader mid-copy saw a mixed
-# assembly. Now every replacement stages a sibling on the SAME filesystem, verifies it, then `mv`s it
-# into place (an atomic rename at the directory-entry level) — keeping the previous generation as
-# `<name>.prev` for rollback. The live target is never a half-copied tree.
+# ⚠ THE 3 IS A FACT, NOT A VERDICT. Without it the script answered `OK` and returned 0 while its
+# PATH commands were absent or still pointed at a PREVIOUS version — `ln -sf` had failed, the old
+# link survived, and the operator ran a release he believed was new. A caller that wires the links
+# itself is right to accept a 3; standalone, it is a refusal.
+#
+# WHAT ships into bin/ is NOT code: the list lives in etc/install.manifest (file, exec/noexec,
+# optional `link`), and the installer is blind to its content. Deliberately hardcoded, in contrast:
+# the `fleet` group and the `lcars_fleet` release name.
+#
+# ATOMICITY: every replacement stages a sibling on the SAME filesystem, verifies it, then `mv`s it
+# into place — an atomic rename at the directory-entry level, keeping the previous generation as
+# `<name>.prev`. A `rm -rf` followed by a multi-second `cp -a` loses the last good build on an error
+# mid-copy, and shows a mixed assembly to anyone reading meanwhile.
 #
 # Usage: etc/install.sh                        # → /opt/lcars/runtime
 #        LCARS_INSTALL_PREFIX=/x etc/install.sh
@@ -86,22 +79,10 @@ atomic_swap_file() {
 build_release() {
   local runtime_dir="$1"
 
-  # ⚠ CETTE CONDITION ETAIT « UN BINAIRE EXISTE », ET RIEN D'AUTRE. Elle disait : « c'est un paquet,
-  # pas un checkout ». C'est une DEDUCTION, et elle est fausse des que ce script tourne depuis un
-  # clone — ce qui est le chemin nominal du rail poste, ou `60-deploy` l'appelle. Un `_build/prod/rel`
-  # laisse par un `mix release` d'il y a trois semaines suffisait a sauter LE GATE ET LA
-  # COMPILATION, et a poser cette release-la.
-  #
-  # ET LE GARDE D'EN FACE ETAIT DEFAIT EXACTEMENT QUAND IL SERVAIT. `60-deploy` verifie trois choses
-  # avant de ne rien faire — sha deploye == HEAD, arbre `fleet` propre, release presente. Quand
-  # l'une manque, il conclut « il faut batir » et delegue ICI... qui reutilisait le vieux build. Le
-  # rail annonçait alors un deploiement du HEAD en ayant pose autre chose.
-  #
-  # LE DISCRIMINANT EST EXPLICITE, PAS DEDUIT. `pack.sh` ecrit `.source-revision` a la racine du
-  # paquet (convention dont la SSoT est `PROV_SOURCE_STAMP`, dans `deploy/lib/provision-lib.sh` —
-  # que ce script ne peut pas lire : il est autonome et ne source pas la lib du rail). Sa presence
-  # DIT « paquet », au lieu de le deviner de l'absence d'un `.git` — un paquet detare dans un depot
-  # aurait trompe la deduction.
+  # ⚠ LE DISCRIMINANT EST EXPLICITE, PAS DEDUIT : `.source-revision` DIT « paquet ». Le deviner de
+  # la seule presence d'un binaire batissait sur une deduction fausse des qu'on tourne depuis un
+  # clone — un `_build/prod/rel` vieux de trois semaines suffisait a sauter LE GATE ET LA
+  # COMPILATION — et un paquet detare dans un depot tromperait n'importe quelle autre.
   local rel="$runtime_dir/_build/prod/rel/lcars_fleet"
   if [[ -x "$rel/bin/lcars_fleet" ]]; then
     if [[ -f "$runtime_dir/../.source-revision" ]]; then
@@ -142,21 +123,14 @@ build_release() {
   )
 }
 
-# ROOT IS REFUSED, and the reason is not caution -- it is that this script RUNS THE GATE, and the
-# gate is not valid under root. Measured on a real run: `rm_terminal_artifacts` asserts `:eacces` on
-# a chmod-000 directory, root bypasses permissions, `rm_rf` succeeds and the test reports a FAILURE
-# that is an artifact of the runner, not of the code. A gate whose verdict depends on who invoked it
-# attests nothing. Sudo also leaves the build tree littered with root-owned ExUnit artifacts (13167
-# files under tmp/ on that run) which then break the next ordinary `mix compile` on File.touch!.
+# ⚠ ROOT IS REFUSED BECAUSE THIS SCRIPT RUNS THE GATE, and a gate whose verdict depends on who
+# invoked it attests nothing: tests asserting `:eacces` pass under root, which bypasses permissions,
+# and report a failure that belongs to the runner rather than to the code. Sudo also litters the
+# build tree with root-owned ExUnit artifacts that break the next ordinary `mix compile`.
 #
-# The privileged half is the FILE PLACEMENT, not the build. Run this as the account that owns the
-# install (or grant it write on the prefix); elevate only the copy, as etc/README.md's manual
-# procedure does. Elevating the whole script is what conflates the two.
-# ⚠ `$1` EST UN JOINT DE TEST, ET C'EST POURQUOI SC2120 EST DECLARE. `install.bats` appelle
-# `refuse_root 0` et `refuse_root 1000` pour exercer les deux cotes sans etre root ni changer d'uid.
-# La production n'en passe jamais : le defaut `${EUID}` est le cas reel. Un parametre qu'aucun
-# appelant de production ne fournit est exactement ce que SC2120 signale — la decision est prise,
-# elle se dit ici plutot que de laisser le signalement se faire ignorer chaque semaine.
+# The privileged half is the FILE PLACEMENT, not the build: elevate only the copy.
+#
+# SC2120 is declared because `$1` below is a witness seam that no production caller ever passes.
 # shellcheck disable=SC2120
 refuse_root() {
   # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
@@ -273,19 +247,13 @@ mkdir -p "$PREFIX/bin" "$PREFIX/etc" "$PREFIX/rel"
 # tree is never destroyed before the new one is proven good, and the previous stays as `.prev`.
 atomic_swap_dir "$REL_SRC" "$PREFIX/rel/lcars_fleet" "bin/lcars_fleet"
 
-# NON-BEAM files (outside the release): the manifest says WHAT ships and with which mode — this
-# loop is blind to content. Per-file chmod, hard failure (the old blanket `chmod ... || true`
-# could silently ship a non-executable launcher).
+# ⚠ ATOMIC SWAP, NEVER A BARE `cp`: `$PREFIX/bin` is read by a LIVE fleet — the human's BEAM
+# resolves the pod launchers from there at every spawn — so a direct copy over a live file reopens
+# a window this script had already closed. The chmod comes AFTER the swap, so the mode is asserted
+# on the file that is actually in place.
 #
-# The placement stays the ATOMIC SWAP, not a bare `cp`: a reader must never catch a half-written
-# launcher, and `$PREFIX/bin` is read by a LIVE fleet (the human's BEAM resolves the pod launchers
-# from there at every spawn). The manifest changed WHAT ships, not HOW it lands; a direct copy over
-# a live file reopens a window this script had already closed. The chmod comes AFTER the swap, so
-# the mode is asserted on the file that is actually in place.
-#
-# `fleet_mcp_stdio_bridge.py` is `noexec` by design and needs no execute bit: it is invoked as
-# `python3 <path>` (config/runtime.exs mcp_server_spec) after pod.ex copies it per-pod. It DOES need
-# to be readable by the human's BEAM — the group-read of step 3 provides that.
+# A `noexec` entry needs no execute bit because it is invoked as `python3 <path>`; it DOES need to
+# be readable by the human's BEAM, which the group-read of step 3 provides.
 for i in "${!MF_FILES[@]}"; do
   f="${MF_FILES[$i]}"
   [[ -e "$SRC_BIN/$f" ]] || die "entree du manifest absente du source bin/ : $f"
@@ -301,15 +269,10 @@ atomic_swap_file "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/fleet_v2.
 # --- 3. Perms: RO for humans (group fleet r-x), owner = the installer (system) ----------------------
 # The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet_v2), so the install stays RO.
 #
-# The mode is ADDITIVE + subtractive, and the additive half matters: `g-w,o-rwx` alone only REMOVES
-# group-write and other-access. It never GRANTS group read or traverse — those were inherited from
-# whatever the source tree happened to carry, so the announced "group fleet r-x" was true by accident of
-# the repo's umask rather than by anything this script did. `g+rX` establishes it (capital X = execute
-# on directories and on files that already carry an execute bit, so it does not make data executable).
-# This is the same policy the manual procedure in etc/README.md applies with `chmod g+rx`.
-#
-# The message is only printed when the chmod ACTUALLY applied: a `|| true` used to hide a failed chmod
-# behind a success line — an access policy announced but not applied.
+# ⚠ L'ADDITIF COMPTE AUTANT QUE LE SOUSTRACTIF : `g-w,o-rwx` seul RETIRE, il n'ACCORDE jamais le
+# read ni la traversee au groupe — le « group fleet r-x » annonce serait alors vrai par accident de
+# l'umask du depot. C'est `g+rX` qui l'etablit, le X MAJUSCULE ne posant l'execution que sur les
+# repertoires et sur ce qui la porte deja, donc sans rendre une donnee executable.
 if chgrp -R fleet "$PREFIX" 2>/dev/null; then
   if chmod -R g+rX,g-w,o-rwx "$PREFIX" 2>/dev/null; then
     say "perms : group fleet r-x, others none (RO humains)"
@@ -324,15 +287,8 @@ fi
 LINK_DIR="${LCARS_INSTALL_LINK_DIR:-/usr/local/bin}"
 wire_path_links || true
 
-# LE COMPTEUR ETAIT POSE ET JAMAIS LU. `link_fail=1` etait ecrit dans la boucle, puis le script
-# annoncait `OK` inconditionnellement et rendait 0. Une install lancee sans droit sur `$LINK_DIR`
-# se declarait donc en place alors que ses commandes PATH sont absentes — ou pire, pointent encore
-# sur une version precedente : le `ln -sf` echoue, l'ancien lien survit, et l'operateur lance une
-# release qu'il croit neuve.
-#
 # La release POSEE reste posee : elle est valide, c'est le cablage qui manque, et la detruire
-# punirait un build de trois minutes pour un probleme de droits. Ce qui change est le VERDICT —
-# code 3, distinct du 1 des echecs durs, et aucun message final « OK ».
+# punirait un build de trois minutes pour un probleme de droits. Ce qui change est le VERDICT.
 if [[ "$link_fail" -ne 0 ]]; then
   say "INSTALL INCOMPLETE — la release est en place sous $PREFIX, mais au moins un symlink de"
   say "  $LINK_DIR n'a pas pu etre pose (voir les lignes « symlink … KO » ci-dessus)."

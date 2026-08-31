@@ -6,27 +6,18 @@
 #
 # ─── WHY THIS PROCESS EXISTS ────────────────────────────────────────────────────────────────────
 #
-# TWO RESPONSIBILITIES USED TO RIDE IN ONE PROCESS, and every mechanism this file replaces grew out
-# of that. Proving who you are held no power; executing held the token. When the caller's shell held
-# the token, HOLDING IT WAS THE PROOF -- so the token's mode became the gate, so a unix group had to
-# carry `is_admin`, so a converger had to project it, so a poll had to refresh it, so a drift repair
-# had to fix consoles born before the projection.
+# WHEN THE CALLER'S SHELL HELD THE TOKEN, HOLDING IT WAS THE PROOF -- so the token's mode became the
+# gate, so a unix group had to carry `is_admin`, so a converger had to project it, so a poll had to
+# refresh it, so a drift repair had to fix consoles born before the projection. Split proving from
+# executing and the whole chain is unnecessary: the caller holds nothing and proves nothing.
 #
-# Split the two and the whole chain is unnecessary. The caller proves nothing and holds nothing: it
-# opens a socket. The kernel states who it is. This process asks the forge, and this process acts.
+# NO SEAT IS PRIVILEGED -- not a name, not a uid, not a group. A path that skipped the question
+# "because it is the seat" would be a second gate, therefore a second truth, therefore the drift
+# again.
 #
-# THE IDENTITY IS THE CHANNEL. `SO_PEERCRED` is set by the kernel on the connected socket -- the uid
-# is not sent, not declared, and not forgeable by the caller. Same doctrine this repo already applies
-# to pods: the identity is the acceptor's own state, NEVER read from the wire.
-#
-# NO SEAT IS PRIVILEGED. Not a name, not a uid, not a group. The only authority is the forge's
-# `is_admin` flag, asked at the moment of the gesture. A path that skipped the question "because it
-# is the seat" would be a second gate, therefore a second truth, therefore the drift again.
-#
-# WHY PYTHON, AND IT IS A DECISION. Bash can neither listen on a unix socket nor call
-# `getsockopt(SO_PEERCRED)`; `socat` does not propagate the peer's credentials. Python can, and it is
-# already a runtime of this product (`console-deck.py`) -- so this costs no new
-# dependency. Stdlib only, for the same reason the deck is stdlib only.
+# WHY PYTHON, AND IT IS A DECISION: bash can neither listen on a unix socket nor call
+# `getsockopt(SO_PEERCRED)`, and `socat` does not propagate the peer's credentials. Stdlib only, so
+# this costs no new dependency.
 
 import json
 import os
@@ -41,35 +32,27 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# ⚠ LE MODULE VOISIN, PAS UN PAQUET. `lcars_socket.py` est POSE a cote de ce fichier par
-# `62-runtime-helpers` (rail poste) et par un `COPY` du Dockerfile (rail conteneur) : les deux
-# atterrissent dans le meme repertoire, et c'est ce qui rend l'import valide sans installation.
+# ⚠ LE MODULE VOISIN, PAS UN PAQUET : `lcars_socket.py` est POSE a cote de ce fichier par les deux
+# rails, et c'est ce qui rend l'import valide sans installation.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'import
 
-# ⚠ SOUS `/run/lcars/authority/`, PAS `/run/lcars/`. Ce service n'est plus root : il ne peut pas
-# creer un fichier dans un repertoire `0755 root:root`. Le repertoire lui appartient, et il est
-# declare au manifeste ET au `tmpfiles.d` — `/run` est un tmpfs, ce qui n'y est pas declare ne se
-# refait pas au reboot.
+# ⚠ SOUS `/run/lcars/authority/`, PAS `/run/lcars/` : ce service n'est pas root et ne peut rien
+# creer dans un `0755 root:root`. Le repertoire est declare au manifeste ET au `tmpfiles.d` — `/run`
+# est un tmpfs, ce qui n'y est pas declare ne se refait pas au reboot.
 SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
-# THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- `SO_PEERCRED` does that. It only bounds who may
-# KNOCK: a member of the fleet group. Opening it to the world would not grant anyone anything, but
-# it would offer this root process to every account on the box for no gain.
+# THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- it only bounds who may KNOCK. Opening it to the world
+# would grant nobody anything, but it would offer this process to every account on the box for no gain.
 SOCKET_GROUP = os.environ.get("PROV_FLEET_GROUP", "fleet")
 SOCKET_MODE = 0o660
-# ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL. Le service ne lit aucun mot sur le fil pour
-# savoir quel code lancer : il le sait par la socket d'arrivee. Meme doctrine que `SO_PEERCRED` pour
-# l'identite — rien de ce que l'appelant ECRIT ne decide de ce qui s'execute.
+# ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL : le service sait quel code lancer par la socket
+# d'ARRIVEE, jamais par un mot lu sur le fil.
 ROLES_SOCKET_PATH = os.environ.get(
     "LCARS_ROLES_SOCKET", os.path.join(os.path.dirname(SOCKET_PATH), "roles.sock"))
-# ⚠ `FORGE_ROLE_TOKENS_DIR`, ET PAS UN NOM A NOUS. Ce service lisait `LCARS_ROLE_TOKENS_DIR` — un
-# troisieme nom pour un repertoire qui en avait deja deux : `PROV_TOKENS_DIR` cote rail (celui qui
-# POSE) et `FORGE_ROLE_TOKENS_DIR` cote contrat (celui que les consommateurs LISENT, et le seul que
-# `etc/fleet_v2.env.template` documente). Le notre n'etait documente nulle part.
-# CE QUE CA COUTAIT, ET CE N'EST PAS COSMETIQUE : en multi-forge — le cas d'usage que le template
-# decrit — un operateur qui pose `FORGE_ROLE_TOKENS_DIR` pour un profil secondaire alignait le
-# runtime Elixir et laissait CE service lire le repertoire de la forge primaire. Les gestes de
-# catalogue vises sur la seconde forge auraient presente les jetons de la premiere.
+# ⚠ `FORGE_ROLE_TOKENS_DIR`, LE NOM DU CONTRAT COTE CONSOMMATEURS, ET PAS UN NOM A NOUS : en
+# multi-forge, un operateur qui le pose pour un profil secondaire alignerait le runtime tout en
+# laissant CE service lire le repertoire de la forge primaire — des gestes vises sur la seconde
+# forge presentant les jetons de la premiere.
 ROLE_TOKENS_DIR = os.environ.get("FORGE_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
 FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
 HUMANS_TEAM = os.environ.get("PROV_HUMANS_TEAM", "humans")
@@ -83,20 +66,17 @@ HTTP_TIMEOUT = int(os.environ.get("LCARS_CATALOGUE_HTTP_TIMEOUT", "15"))
 # Le temps accorde a un pair pour FORMULER sa demande, pas pour que le geste s'accomplisse.
 REQUEST_TIMEOUT = int(os.environ.get("LCARS_CATALOGUE_REQUEST_TIMEOUT", "30"))
 
-# THE FORM OF A CATALOGUE NAME IS AUTHORITATIVE IN ELIXIR -- `@name_rx` in `lib/fleet/catalogue.ex`.
-# This is a CITED COPY, not a second authority: the executor is Python and cannot share the literal.
+# A CITED COPY of the Elixir authority, not a second one: this executor cannot share the literal.
 #
 # ⚠ AND THE TRANSCRIPTION IS NOT MECHANICAL. In Python `^...$` is NOT `\A...\z`: `$` also matches
 # before a trailing newline, so `web-demo\n` -- exactly what arrives from a line-oriented socket --
 # would pass. `fullmatch` on an already-stripped value is the form that means what it says.
 NAME_RX = re.compile(r"[a-z0-9][a-z0-9-]*")
 
-# ⚠ THE VALIDATION IS THIS PROCESS'S OWN RESPONSIBILITY, and it is not defence in depth.
-# `cmd_install` turns the name into a PATH (`$CATALOGUE_WORK/$name`), then runs `mkdir -p`, `cp -r`
-# and `tofu apply` under it -- as root. Today the form is also refused upstream by `entrypoint
-# verify`, but that defence is INCIDENTAL: verify's job is a catalogue's coherence, not a path's
-# safety, and it may legitimately change without anyone thinking about this process. A root process
-# does not lean on a neighbour's check for a privilege boundary.
+# ⚠ THE VALIDATION IS THIS PROCESS'S OWN RESPONSIBILITY, and it is not defence in depth: the name
+# becomes a PATH under which this process runs `mkdir -p`, `cp -r` and `tofu apply`. The upstream
+# check that also refuses the form is INCIDENTAL -- its job is a catalogue's coherence, not a path's
+# safety, and it may legitimately change without anyone thinking about this process.
 
 # ONE GESTURE AT A TIME, AND WE REFUSE RATHER THAN QUEUE. Same choice as `with_apply_lock`'s
 # `flock -n` below us: a caller made to wait would get its verdict when the other one finished, on a
@@ -348,15 +328,9 @@ def serve_one(conn):
     wire = conn.makefile("rw", encoding="utf-8", newline="\n")
     gone = []
 
-    # ⚠ UN CLIENT PARTI N'INTERROMPT PAS UN GESTE EN COURS. `tofu apply` dure des minutes ; si
-    # l'operateur coupe, `emit` levait EPIPE, l'exception traversait `run_gesture`, le `finally`
-    # relachait le verrou -- et `forge-gestures.sh` continuait EN ORPHELIN, hors de tout verrou de ce
-    # process. Un second appelant prenait alors le verrou, tombait sur le `flock -n` en dessous, et
-    # recevait « le geste a echoue » au lieu de « un autre geste est en cours » : un diagnostic faux
-    # sur une machine parfaitement saine.
-    #
-    # On absorbe la coupure et on CONTINUE A DRAINER. Le geste va jusqu'au bout, le verrou n'est
-    # rendu que lorsqu'il l'est vraiment, et le journal recueille ce que l'operateur ne lit plus.
+    # ⚠ ON ABSORBE LA COUPURE ET ON CONTINUE A DRAINER : laisser l'EPIPE remonter relacherait le
+    # verrou pendant que le geste continue EN ORPHELIN, et le prochain appelant lirait « le geste a
+    # echoue » la ou il fallait lire « un autre geste est en cours ».
     def emit(line):
         if not gone:
             try:
@@ -384,10 +358,9 @@ def serve_one(conn):
         log(f"refus: uid {uid} (pid {pid}) n'a pas de compte unix")
         return done("FAIL:unknown_peer")
 
-    # ⚠ ONLY THE LINE TERMINATOR IS STRIPPED, and the difference is not pedantry. A `.strip()` here
-    # NORMALISES: `install web-demo\t` silently became `web-demo` and was accepted, so the wire
-    # format quietly disagreed with the form it claims to enforce. At a privilege boundary the
-    # tolerant reading is the wrong one -- what is accepted must be exactly what is specified.
+    # ⚠ ONLY THE LINE TERMINATOR IS STRIPPED: a `.strip()` here NORMALISES, so `install web-demo\t`
+    # would be accepted and the wire format would quietly disagree with the form it claims to
+    # enforce. At a privilege boundary, the tolerant reading is the wrong one.
     request = wire.readline().rstrip("\r\n")
     # Le delai de LECTURE a fait son travail : le geste qui suit dure des minutes, et une socket qui
     # expirerait pendant lui laisserait l'appelant sans verdict sur un travail REELLEMENT fait.
@@ -401,8 +374,8 @@ def serve_one(conn):
     try:
         admin = forge_is_admin(login)
     except NoAuthority as exc:
-        # AVANT le filet large ci-dessous : `NoAuthority` est une classe a part, mais l'ordre des
-        # `except` reste ce qui rend la distinction reelle plutot que documentaire.
+        # ⚠ AVANT le filet large ci-dessous : c'est l'ORDRE des `except` qui rend la distinction
+        # reelle, pas l'existence d'une classe a part.
         log(f"refus: cette boite n'a pas d'autorite utilisable — {exc}")
         return done("FAIL:no_authority")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
@@ -424,12 +397,10 @@ def serve_one(conn):
     finally:
         _gesture_lock.release()
 
-    # ⚠ UN CODE NEGATIF N'EST PAS UN CODE DE SORTIE. `Popen.wait()` rend `-N` quand l'enfant a ete
-    # TUE par le signal N — et le relayer tel quel donnait `exit -15` cote bash, qui rend 241
-    # (mesure). L'operateur lisait un nombre qui ne designe rien, pour la cause la plus banale qui
-    # soit : `systemctl stop lcars-catalogue` pendant une install. Les deux natures sont donc
-    # nommees separement, parce que les gestes different — un geste qui ECHOUE se diagnostique, un
-    # geste INTERROMPU se rejoue.
+    # ⚠ UN CODE NEGATIF N'EST PAS UN CODE DE SORTIE : `wait()` rend `-N` quand l'enfant a ete TUE par
+    # le signal N, et le relayer tel quel donne un `exit -15` que bash rend en 241 — un nombre qui ne
+    # designe rien. Les deux natures se nomment separement parce que les gestes different : un geste
+    # qui ECHOUE se diagnostique, un geste INTERROMPU se rejoue.
     if rc < 0:
         log(f"interrompu: « {name} » pour {login} — signal {-rc}")
         return done(f"FAIL:gesture_signalled:{-rc}")
@@ -463,13 +434,10 @@ def serve_forever(srv, handler=None):
 
 
 def main():
-    # ⚠ LE GARDE NOMME CE QU'IL VERIFIE, ET IL A NOMME AUTRE CHOSE PENDANT DEUX JOURS. Il exigeait
-    # `geteuid() == 0` au motif que « ce service tient le jeton master » — le MECANISME par lequel on
-    # obtenait le droit de lire, pas le droit lui-meme. Root etait le moyen le moins cher de posseder
-    # quatre chemins ; il n'a jamais ete l'exigence.
-    #
-    # L'exigence est : je peux OUVRIR le jeton. Un garde qui l'enonce refuse tot et juste, sous
-    # n'importe quel uid — et il ne devient pas faux le jour ou le service descend de root.
+    # ⚠ LE GARDE NOMME L'EXIGENCE, PAS LE MECANISME : elle est « je peux OUVRIR le jeton », jamais
+    # « je suis root » — root n'etait que le moyen le moins cher d'y arriver. Enonce ainsi, le garde
+    # refuse tot et juste sous n'importe quel uid, et ne devient pas faux le jour ou le service
+    # descend de root.
     try:
         with open(MASTER_TOKEN_FILE, "r", encoding="utf-8"):
             pass
