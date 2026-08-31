@@ -23,7 +23,7 @@ defmodule Fleet.Pilot.PodReaper do
   encodes no instance → `parse_ref` rejects it → it is never touched, which is the whole point:
   it outlives the tickets by design.
 
-  **Why a superseded ticket loses its pods** (user arbitrage 2026-08-03): handing the live
+  **Why a superseded ticket loses its pods** (⚖ user): handing the live
   producer over to the replacement ticket was rejected on three counts — it would re-create the
   resident-that-changes-subject the ticket-live lot just removed, breaking "one pod, one ticket"
   at its first exception; a supersede happens BECAUSE the brief was wrong, so the producer
@@ -51,13 +51,12 @@ defmodule Fleet.Pilot.PodReaper do
     end
   end
 
-  # `Fleet.Spawner.list_pods/0` enumerates the pods' `:info` MAPS, not their ids — and this module
-  # read them as ids for its whole life. `PodId.parse_ref/2` guards on `is_binary`, so every map
-  # fell into its catch-all `:error` clause: the comprehension filtered EVERYTHING, `reap_issue/2`
-  # returned `[]` on every call, and both callers (the seal and the supersede) are best-effort by
-  # design — so nothing ever complained. A reaper that reaps nothing, silently, for both ends of
-  # every ticket (measured 2026-08-04: a superseded ticket's scribe kept working for 3 minutes and
-  # merged its PR into a retired ticket).
+  # ⚠ `Fleet.Spawner.list_pods/0` ENUMERE LES MAPS `:info` DES PODS, PAS LEURS IDS. Les lire comme
+  # des ids fait tomber chaque map dans la clause fourre-tout `:error` de `PodId.parse_ref/2`, qui
+  # garde sur `is_binary` : la comprehension filtre alors TOUT, `reap_issue/2` rend `[]` a chaque
+  # appel, et comme ses deux appelants (le sceau et le supersede) sont best-effort par conception,
+  # RIEN NE SE PLAINT. Un faucheur qui ne fauche rien, en silence, aux deux bouts de chaque ticket —
+  # le producteur d'un ticket retire continue de travailler et merge sa PR dedans.
   #
   # The extraction is EXPLICIT rather than a pattern-match in the comprehension head: a seam whose
   # shape drifts again must fail loudly here, not filter silently one caller further down.
@@ -77,8 +76,8 @@ defmodule Fleet.Pilot.PodReaper do
 
         []
 
-      # NOT a map = the seam's shape drifted (this is exactly the pre-2026-08-04 state, where bare
-      # ids were expected). Loud: a module that KILLS pods must never guess what it is looking at.
+      # NOT a map = the seam's shape drifted (bare ids where maps are expected, the shape above
+      # guards against). Loud: a module that KILLS pods must never guess what it is looking at.
       other ->
         raise ArgumentError,
               "PodReaper: the pod enumeration seam returned #{inspect(other)} — expected a map " <>
