@@ -96,7 +96,8 @@ BRANCH="main"
 DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
-WITH_BENCH=0
+WITH_BENCH=0           # axe FORGE      : monte-la-moi
+DISPOSABLE=0           # axe DESTINATION : ce deploiement est jetable, il peut porter des annexes de demo
 # ⚠ `CONSENTED` A DISPARU D'ICI, ET SON DRAPEAU EST REFUSÉ PLUS BAS. Il valait « la 2ᵉ instance
 # saute l'accueil et la pause » — une notion qui n'existe QUE si la porte se rejoue elle-même sous
 # sudo. Elle ne le fait plus : le rail poste a son propre script, et l'escalade de celui-là n'a rien
@@ -109,7 +110,17 @@ while [[ $# -gt 0 ]]; do
     --check|--doctor) DOCTOR_MODE=1; shift ;;
     --workstation)    RAIL=workstation; shift ;;
     --box)            RAIL=box; shift ;;
+    # ─── LES DEUX AXES, ET ILS SONT SÉPARÉS (§ 13) ──────────────────────────
+    #
+    # `--bench`      axe FORGE       : montée par nous, ou fournie (FORGE_BASE_URL)
+    # `--disposable` axe DESTINATION : travail, ou jetable
+    #
+    # ⚠ ILS ÉTAIENT UN SEUL DRAPEAU, ET LE RACCOURCI TENAIT PAR ACCIDENT. `--bench` portait les deux
+    # — monter la forge ET poser les annexes de démonstration — parce que sur la boîte ils
+    # coïncidaient : « bench » y valait « jetable ». Ils ne coïncident pas en général, et le
+    # contre-exemple est le rail poste lui-même : **forge montée + destination travail**.
     --bench)          WITH_BENCH=1; shift ;;
+    --disposable)     DISPOSABLE=1; PASSTHRU+=("$1"); shift ;;
     # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
     # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
     --consented) echo "  --consented est retire : la porte ne se rejoue plus sous sudo." >&2
@@ -440,14 +451,17 @@ if [[ "$RAIL" == "workstation" ]]; then
       exit 1
     fi
   fi
-  if [[ "$WITH_BENCH" -eq 1 ]]; then
-    echo ""
-    echo "  ${R}--bench n'a pas d'objet sur le rail poste.${N}"
-    echo "  Il fournit les annexes à une BOÎTE ; ici la forge est montée par le provisionnement"
-    echo "  lui-même (module 48-forge-host), dans le même cycle et sans drapeau."
-    echo "  Tu voulais sans doute :  bash $0 --box --bench"
-    exit 1
-  fi
+  # ⚠ LE REFUS DE `--bench` SUR CE RAIL A DISPARU (§ 13 de `40-RAILS.md`). Il disait « il fournit les
+  # annexes à une BOÎTE ; ici la forge est montée par le provisionnement lui-même, sans drapeau » —
+  # et il constatait une CAPACITÉ ABSENTE, pas un choix : `48-forge-host` montait en dur. Il consomme
+  # désormais une forge fournie (`FORGE_BASE_URL`), donc les deux rails ont les deux états de l'axe
+  # forge, et le drapeau a le même sens des deux côtés : « monte-la-moi ».
+  #
+  # ⚠ ET IL NE SÈME PLUS D'HUMAIN. C'était le raccourci que le § 13 nomme : `--bench` portait DEUX
+  # choses — monter la forge (axe forge) et poser les annexes de démonstration (axe destination) —
+  # parce que sur la boîte les deux coïncidaient. Ouvrir `--bench` au poste sans séparer les deux
+  # aurait rendu tous les postes semeurs, ce qui annulerait le canon du 30/08. La destination a son
+  # porteur : `--disposable`.
 
   # `fait sudo` vaut `root` quand on y est déjà, `oui` quand la commande est là, `absent` sinon —
   # trois états mesurés par le module, pas re-sondés ici.

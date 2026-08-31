@@ -70,7 +70,16 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 #
 # Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
 # ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
-BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
+#
+# ⚠ ET `LCARS_DISPOSABLE` LE DEMANDE SANS LE NOMMER (40-RAILS.md § 13). C'est l'axe DESTINATION :
+# un appelant qui sait que son deploiement est jetable — `--disposable` sur la porte, le drapeau
+# traverse jusqu'a `48-forge-host` — demande les annexes de demonstration sans avoir a decider QUI
+# elles sont. Ce fichier reste le seul declarant du nom ; deux temoins de `forge_host_reach.bats` le
+# gardent, et ils ont attrape une premiere version qui ecrivait ce defaut dans le module appelant.
+#
+# L'ORDRE EST LOAD-BEARING : un nom EXPLICITE l'emporte toujours sur le defaut de la destination.
+# L'inverse ferait ignorer en silence ce que l'operateur a tape.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${LCARS_DISPOSABLE:+lcars}}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le

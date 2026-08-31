@@ -77,13 +77,6 @@ head_sh() { run bash -c "set -euo pipefail; source '$HEAD' >/dev/null 2>&1; $1";
   [ "$output" != "localhost" ]
 }
 
-@test "LOCAL_URL reste la loopback — le module et ses voisins parlent en local" {
-  # `forge.url`, lue par 50-forge et 55-deck-oidc, et la sonde `forge_up` : elles tournent SUR la
-  # machine. Ouvrir la publication ne doit pas les envoyer faire un tour par le reseau.
-  head_sh 'echo "$LOCAL_URL"'
-  [ "$status" -eq 0 ]
-  [[ "$output" == "http://127.0.0.1:"* ]]
-}
 
 @test "PUBLIC_URL est ce qu'un TIERS compose — jamais la loopback quand on publie" {
   head_sh 'echo "$PUBLIC_URL"'
@@ -248,10 +241,16 @@ STUB
   # ⚠ COMPTE, N'INVERSE PAS : bash exempte de `set -e` toute commande dont le statut est inverse par
   # `!`, donc un `! grep -q` qui n'est pas la DERNIERE instruction du test ne rougit jamais. Mesure
   # du 2026-08-23 : 35 assertions du corpus bats sont dans ce cas.
-  [ "$(grep -cE 'if ! forge_up; then[[:space:]]*$' "$SRC")" -eq 0 ]
+  # ⚠ L'ANCRAGE A DU DEVENIR PRECIS (§ 13, 2026-08-31). Il interdisait `if ! forge_up; then` PARTOUT,
+  # et il a attrape une garde qui n'a rien a voir avec le montage : celle qui refuse une forge
+  # FOURNIE muette. Ce qu'il garde est que le montage n'est pas conditionne par la liveness — pas
+  # qu'aucune ligne du fichier ne teste `forge_up`.
+  local bloc; bloc="$(sed -n '/^  # ─── LE MONTAGE/,/^  fi$/p' "$SRC")"
+  [ -n "$bloc" ]
+  [ "$(grep -cE 'if ! forge_up; then[[:space:]]*$' <<<"$bloc")" -eq 0 ]
   grep -q 'local was_up=0; forge_up && was_up=1' "$SRC"
-  # et le compose reste bien dans le chemin nominal, pas dans une branche
-  grep -qE '^\s+run_quiet d compose -f "\$COMPOSE_FILE" -p "\$PROV_FORGE_PROJECT" up -d' "$SRC"
+  # et le compose reste bien dans le chemin nominal du montage, pas dans une branche de liveness
+  grep -qE '^\s+run_quiet d compose -f "\$COMPOSE_FILE" -p "\$PROV_FORGE_PROJECT" up -d' <<<"$bloc"
 }
 
 @test "le verdict distingue MONTEE de RECONVERGEE — deux faits differents, deux phrases" {
@@ -358,7 +357,7 @@ STUB
   # Le conteneur parlait a `http://forge:3000`, resolu par le reseau `${projet}_default`. Depuis la
   # machine, ce nom ne resout pas : c'est le port PUBLIE qu'on compose.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'FORGE_BASE_URL="\$LOCAL_URL"'
+  code | grep -q 'FORGE_BASE_URL="\$FORGE_URL"'
   code | refute_out 'FORGE_BASE_URL="http://forge:3000"'
 }
 
@@ -1023,4 +1022,104 @@ STUB
     echo \"ADMIN=\$PROV_FORGE_ADMIN\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"ADMIN=loperateur"* ]]
+}
+
+# ─── § 13 : MONTER, OU CONSOMMER — L'AXE FORGE ──────────────────────────────────────────────────
+#
+# ⚠ UN TEMOIN EST MORT ICI : « LOCAL_URL reste la loopback ». Il gardait que le module et ses voisins
+# parlent EN LOCAL — vrai tant que ce rail montait sa forge, et seulement pour cette raison-la. Le
+# § 13 separe l'axe FORGE (montee / fournie) de l'axe SUBSTRAT : une forge fournie vit ailleurs, par
+# construction, et exiger la loopback reviendrait a interdire l'etat qu'on vient d'ouvrir.
+#
+# Ce qui le remplace garde la propriete REELLE : le defaut, lui, reste la loopback.
+
+@test "SANS FORGE_BASE_URL : le defaut reste la loopback, et le module MONTE" {
+  head_sh 'echo "$FORGE_URL $FORGE_MONTEE"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "http://127.0.0.1:"*" 1" ]]
+}
+
+@test "AVEC FORGE_BASE_URL : le module CONSOMME, et il ne monte rien" {
+  FORGE_BASE_URL="http://forge.example:3000" head_sh 'echo "$FORGE_URL $FORGE_MONTEE"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "http://forge.example:3000 0" ]
+}
+
+@test "l URL fournie perd son slash final — deux formes d une adresse en font deux adresses" {
+  # `$FORGE_URL/api/v1/version` sur une base qui finit par `/` donne `//api`, que certains reverse
+  # proxies traitent autrement. La normalisation se fait UNE fois, a la source.
+  FORGE_BASE_URL="http://forge.example:3000/" head_sh 'echo "$FORGE_URL"'
+  [ "$output" = "http://forge.example:3000" ]
+}
+
+@test "UNE FORGE FOURNIE NE DEMANDE PAS DOCKER — c est la premiere consequence de l axe" {
+  # ⚠ LE REFUS « la forge du poste est un CONTENEUR » VAUT POUR CELLE QU'ON MONTE, pas pour celle de
+  # quelqu'un d'autre. Exiger un daemon pour parler a une URL refuserait une machine parfaitement
+  # capable de travailler. Les quatre gardes du conteneur — docker, le compose, le nom de service,
+  # « est-ce la notre » — vivent donc sous la condition.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  local c_check; c_check="$(sed -n '/^check() {/,/^}/p' <<<"$code")"
+  local c_apply; c_apply="$(sed -n '/^apply() {/,/^}/p' <<<"$code")"
+  grep -q 'FORGE_MONTEE" -eq 1' <<<"$c_check"
+  grep -q 'FORGE_MONTEE" -eq 1' <<<"$c_apply"
+  # Aucun `docker_endpoint` hors de la condition : on remonte du haut de la fonction jusqu'au `if`.
+  local avant; avant="$(sed -n '/^check() {/,/FORGE_MONTEE" -eq 1/p' <<<"$c_check")"
+  refute grep -q 'docker_endpoint' <<<"$avant"
+}
+
+@test "muette : DRIFT au check, ECHEC a l apply — les deux verbes ne disent pas la meme chose" {
+  # Constater qu'une adresse est muette n'est pas une panne ; s'engager a structurer une forge qu'on
+  # ne joint pas en est une, et tout ce qui suit echouerait un geste plus loin.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  local c_check; c_check="$(sed -n '/^check() {/,/^}/p' <<<"$code")"
+  local c_apply; c_apply="$(sed -n '/^apply() {/,/^}/p' <<<"$code")"
+  grep -qE 'p_drift "forge FOURNIE muette' <<<"$c_check"
+  grep -qE 'p_fail "forge FOURNIE muette' <<<"$c_apply"
+}
+
+@test "LA STRUCTURE EST COMMUNE AUX DEUX ETATS — une seule recette, pas deux qui derivent" {
+  # ⚠ C'EST LE POINT DU § 13. Amorcer, minter l'autorite, promouvoir l'admin, poser la structure : le
+  # travail est le MEME sur une forge fournie. Ce qui change est de savoir qui possede le conteneur.
+  # Un module qui aurait duplique sa seconde moitie aurait deux recettes a tenir d'accord.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  # Le compose n'apparait qu'UNE fois, et la pose de structure aussi.
+  [ "$(grep -c 'run_quiet d compose' <<<"$code")" -eq 1 ]
+  [ "$(grep -c 'FORGE_BASE_URL="\$FORGE_URL"' <<<"$code")" -eq 1 ]
+}
+
+@test "§ 13 : la DESTINATION a son porteur, et l humain de demo le suit" {
+  # ⚠ TROIS AXES, PAS DEUX : substrat, forge (montee / fournie), DESTINATION (travail / jetable). Le
+  # troisieme n'avait aucun porteur, et `--bench` en faisait DEUX — monter la forge ET poser les
+  # annexes de demonstration — parce que sur la BOITE les deux coincidaient. Ouvrir `--bench` au
+  # poste sans les separer aurait rendu tous les postes semeurs, ce qui annule le canon du 30/08
+  # (« le rail pose les autorites, il ne fabrique pas d'humains »).
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  # Le semis est CONDITIONNE par la destination, jamais par la forge.
+  grep -q 'PROV_DISPOSABLE:+LCARS_DISPOSABLE=1' <<<"$code"
+  refute grep -qE 'WITH_BENCH|BENCH.*BUILTIN_HUMAN' <<<"$code"
+  # ⚠ ET CE MODULE NE NOMME PERSONNE : il dit « ce deploiement est jetable », pas « appelle-le
+  # lcars ». Deux temoins de ce fichier gardent l'autorite unique du nom, et ils ont attrape la
+  # premiere version de cette ligne — elle ecrivait un defaut ici, donc une seconde autorite.
+  refute grep -q 'LCARS_BUILTIN_HUMAN' <<<"$code"
+  # Le drapeau traverse le runner.
+  local runner; runner="$BATS_TEST_DIRNAME/../provision"
+  grep -q -- '--disposable) export PROV_DISPOSABLE=1' "$runner"
+  # Et l'AUTORITE du nom en tire les trois etats : rien, le defaut de la destination, l'explicite.
+  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
+  [ -z "$(bash "$g" builtin-human)" ]
+  [ "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" = "lcars" ]
+  # ⚠ L'ORDRE EST LOAD-BEARING : un nom explicite l'emporte sur le defaut de la destination.
+  # L'inverse ferait ignorer en silence ce que l'operateur a tape.
+  [ "$(LCARS_DISPOSABLE=1 LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]
+}
+
+@test "§ 13 : la porte OUVRE --bench au poste, et le refus a disparu" {
+  # Il constatait une CAPACITE ABSENTE, pas un choix : `48-forge-host` montait en dur, donc « monte
+  # la forge » n'avait aucun sens sur ce rail. Il la consomme desormais aussi.
+  local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
+  local code; code="$(grep -vE '^\s*#' "$door")"
+  refute grep -q "bench n'a pas d'objet sur le rail poste" <<<"$code"
+  # Et le nouveau porteur traverse la porte jusqu'au runner.
+  grep -q -- '--disposable) *DISPOSABLE=1' <<<"$code"
+  grep -q 'PASSTHRU+=("$1")' <<<"$code"
 }
