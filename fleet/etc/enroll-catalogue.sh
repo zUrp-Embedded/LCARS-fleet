@@ -5,20 +5,17 @@
 # STATUS: actif — derive les entrees de la recette forge depuis un catalogue
 #
 # ENROLLER UN CATALOGUE : lit les roles qu'un catalogue declare, et ecrit ce que la recette forge
-# attend en entree. C'est la derivation que `provision-lib.sh` annonce depuis le debut —
-# « d'ici sa derivation, cette ligne se tient a la main ».
+# attend en entree.
 #
 # CE QU'IL PRODUIT
 #   1. <tofu-dir>/roles.auto.tfvars.json   les quatre listes (roles, writers, judges, externals).
 #                                          tofu lit les *.auto.tfvars.json nativement.
 #   2. sur stdout                          la ligne PROV_ROLES a exporter avant le mint des tokens.
 #
-# CE QU'IL NE PRODUIT PAS, ET C'EST LA LIGNE QUI COMPTE
-#   Il n'ecrit AUCUNE recette. `forge.tf` declare ce qu'un compte a le DROIT d'etre — pas de
-#   creation d'org, pas de git-hook serveur, pas d'import local, l'org et les teams. Ce sont des
-#   contraintes, et un catalogue est precisement la piece qu'un operateur remplace. Generer la
-#   recette DEPUIS un catalogue donnerait a un fichier remplacable l'autorite d'elargir ses propres
-#   droits. Un catalogue nomme ses gens ; la recette dit ce qu'etre l'un d'eux permet.
+# ⚠ CE QU'IL NE PRODUIT PAS, ET C'EST LA LIGNE QUI COMPTE
+#   Il n'ecrit AUCUNE recette. Un catalogue est precisement la piece qu'un operateur remplace, et
+#   generer la recette DEPUIS lui donnerait a un fichier remplacable l'autorite d'elargir ses
+#   propres droits. Un catalogue nomme ses gens ; la recette dit ce qu'etre l'un d'eux permet.
 #
 # USAGE
 #   enroll-catalogue.sh --tofu-dir <dir> [--catalogue <root>] [--image <img>] [--repo <fleet-dir>]
@@ -52,24 +49,24 @@ while [[ $# -gt 0 ]]; do
     # provision-lib). Sans eux, le PROV_ROLES rendu ici est complet pour CE catalogue et faux pour
     # la boite : le mint ne verrait plus les autres.
     --served)    SERVED="${2:?}";    shift 2 ;;
-    -h|--help)   sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    # Borne RELATIVE, ligne terminale EXCLUE : une plage a numeros absolus fait glisser la fenetre
+    # sur le code des qu'une ligne de l'en-tete bouge. `^[^#]` ne matche pas une ligne vide, donc la
+    # plage court jusqu'au premier VRAI code, qu'on n'imprime pas.
+    -h|--help)   sed -n '2,/^[^#]/{/^[^#]/!p;}' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)           die "argument inconnu: $1" ;;
   esac
 done
 
-# ⚠ `--catalogue` EST FACULTATIF AVEC `--image`, ET SON ABSENCE VEUT DIRE « CELUI DE L'IMAGE ».
-# Une image porte son catalogue ; lui en nommer un autre n'a de sens que pour en enroler un que
-# l'operateur apporte. Avec `--repo` il reste obligatoire : un arbre source en porte plusieurs.
+# Facultatif avec `--image`, qui porte le sien ; obligatoire avec `--repo`, un arbre source en
+# portant plusieurs.
 [[ -n "$CATALOGUE" || -n "$IMAGE" ]] || die "--catalogue <root> requis (ou --image, qui porte le sien)"
 [[ -n "$TOFU_DIR"  ]] || die "--tofu-dir <dir> requis"
 [[ -d "$TOFU_DIR"  ]] || die "tofu-dir introuvable: $TOFU_DIR" 3
 
-# ABSOLU DES QU'IL EXISTE : la lecture par image le monte a la MEME place dans le conteneur, et un
-# chemin relatif y designerait le cwd du conteneur. Un catalogue livre dans l'image n'existe pas
-# sur l'hote — il reste tel quel, et c'est le seul cas ou ce chemin n'est pas de l'hote.
+# ⚠ ABSOLU DES QU'IL EXISTE, et le `-d` est la garde : un catalogue livre DANS l'image n'existe pas
+# sur l'hote, c'est le seul cas ou ce chemin n'est pas un chemin d'hote.
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
-# Le depot par defaut : ce script vit dans fleet/etc/, donc fleet/ est un cran au-dessus.
 [[ -n "$REPO" || -n "$IMAGE" ]] || REPO="$(cd "$HERE/.." && pwd)"
 
 if [[ -n "$IMAGE" ]]; then
@@ -81,15 +78,15 @@ if [[ -n "$IMAGE" ]]; then
 else
   SRC="depot $REPO"
   [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
-  # COMPILER D'ABORD, et le silence n'est pas de la coquetterie : sur un arbre froid, mix ecrit
-  # « Compiling N files » sur STDOUT — pas stderr — et ces lignes se melent au JSON de la tache.
+  # ⚠ COMPILER D'ABORD, ET EN SILENCE : sur un arbre froid, mix ecrit « Compiling N files » sur
+  # STDOUT — pas stderr — et ces lignes se meleraient au JSON de la tache.
   ( cd "$REPO" && mix compile ) >/dev/null 2>&1 || die "le depot $REPO ne compile pas" 2
   TFVARS="$(cd "$REPO" && mix lcars.catalogue.roles "$CATALOGUE" --tfvars 2>/dev/null)" \
     || die "mix ne rend pas le roster de $CATALOGUE" 2
 fi
 
-# Vide ou non-JSON = lecture ratee. Le controle est ici parce que la suite ECRIT : un tfvars
-# tronque ferait creer des comptes portant des morceaux de message d'erreur.
+# ⚠ LE CONTROLE EST ICI PARCE QUE LA SUITE ECRIT : un tfvars tronque ferait creer des comptes
+# portant des morceaux de message d'erreur.
 [[ -n "$TFVARS" ]] || die "roster vide pour $CATALOGUE" 2
 printf '%s' "$TFVARS" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("roles")' 2>/dev/null \
   || die "roster illisible ou sans role pour $CATALOGUE" 2
@@ -118,9 +115,8 @@ for r in (os.environ["SERVED"] + " " + os.environ["ROLES_LINE"]).split():
 print(" ".join(out))')"
 fi
 
-# L'ORG que ce catalogue porte — son nom. tofu la lit seul depuis roles.auto.tfvars.json (`var.org`) ;
-# cette ligne-ci est pour le SHELL, qui n'a pas de mecanisme equivalent : `50-forge.sh` sonde les
-# adhesions et publicise sur `$PROV_FORGE_ORG`, et pointer la mauvaise org rend des 404 muets.
+# tofu lit l'org SEUL depuis roles.auto.tfvars.json ; cette ligne-ci est pour le SHELL, qui n'a pas
+# de mecanisme equivalent et rendrait des 404 muets en pointant la mauvaise org.
 ORG_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("org",""))')"
 
 if [[ -z "$SERVED" ]]; then
