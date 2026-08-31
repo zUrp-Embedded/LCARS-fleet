@@ -215,11 +215,9 @@ defmodule Fleet.Admiral.Shutdown do
   # so the item leaves `list_active` before this consumer has even decided, let alone offloaded.
   # Raising the count would buy the same instrument, slower, at the price of every clean shutdown.
   #
-  # THE LEASE EXISTS, AND THIS COMMENT DECLARED IT MISSING (corrige 2026-08-03, BL-6-43.1). The
-  # paragraph above described the right fix — "a LEASE taken BEFORE the work-item flips" — and
-  # closed on "Open." while `in_flight_count/0`, 130 lines up, already adds
-  # `Quiesce.busy_count()`, and `StepRunConsumer` already wraps its whole `pod.completed` handoff
-  # in `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
+  # THE LEASE IS WHAT CLOSES IT (BL-6-43.1), and it is already taken: `in_flight_count/0` adds
+  # `Quiesce.busy_count()`, and `StepRunConsumer` wraps its whole `pod.completed` handoff in
+  # `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
   # counted: the drain cannot conclude while it runs.
   #
   # WHAT REMAINS UNCOVERED, precisely, because "closed" said flatly would be the next lie: the Bus
