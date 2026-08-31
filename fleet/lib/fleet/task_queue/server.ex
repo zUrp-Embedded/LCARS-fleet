@@ -8,14 +8,10 @@ defmodule Fleet.TaskQueue.Server do
   hence no stale tasks surviving a reboot. On restart, the queue re-derives itself from the forge
   polls (canonical reconciliation rail).
 
-  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** Jusqu'au 2026-08-20 l'axiome ci-dessus cohabitait
-  avec un rail de persistance `state.json` opt-in (`Fleet.TaskQueue.Store`, `persist: true`), garde
-  « pour un etat durable cote broker — AUCUN n'existe a ce jour ». Retire (BL-6-113) : 92 lignes de
-  rail, 135 de test et son orchestration ici, pour un mode dont zero appelant demandait
-  l'activation. Le garder coutait plus que sa dette — l'axiome est devenu une POUTRE du cycle de vie
-  du worker, donc rallumer `persist: true` ne serait plus inutile, ce serait FAUX : on
-  ressusciterait au demarrage des mandats que la forge a deja depasses. Un mecanisme dormant qui
-  s'allume detruit du travail ; un mecanisme retire de trop se reecrit.
+  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** L'axiome ci-dessus est une POUTRE du cycle de vie du
+  worker, pas une option : reintroduire une persistance cote broker ne serait pas inutile, ce serait
+  FAUX — on ressusciterait au demarrage des mandats que la forge a deja depasses.
+  **Un mecanisme dormant qui s'allume detruit du travail ; un mecanisme retire de trop se reecrit.**
 
   Broadcasts `%Fleet.Event{source: :task_queue, ...}` on `Phoenix.PubSub`
   topic `fleet.events`, `correlation_id = work_item.id`. Reconciliation across a restart goes
@@ -46,18 +42,7 @@ defmodule Fleet.TaskQueue.Server do
   domain's source, not its dependency. `Fleet.TaskQueue.Broadcast` states the full reasoning; the
   durable half of completion is the forge reconciliation (F-C050), never this ephemeral broker.
 
-  ## Split — what was extracted, what stays (and why)
-
-  One concern extracted into a stateless module (the GenServer state no longer traverses it):
-
-    * `Fleet.TaskQueue.Broadcast` — load-bearing vs lossy-observability policy + the
-      `event/3` envelope. The Server keeps one-line adapters that unpack
-      `state.bus`/`state.topic` (the per-instance seams).
-
-  A second one, `Fleet.TaskQueue.Store`, was extracted the same day and REMOVED the day the axiom
-  above became load-bearing (BL-6-113) — cf. the warning at the top.
-
-  Two concerns REFUSED for extraction (2 clean cuts > 4 forced ones):
+  ## Deux extractions REFUSEES, et leurs raisons
 
     * **Deadline-watchdog** (`maybe_schedule_deadline/1` + `handle_info {:check_deadline}`):
       the arm/check pair is coupled to the PROCESS (`Process.send_after(self(), ...)` →
