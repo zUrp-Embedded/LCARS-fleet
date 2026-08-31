@@ -56,19 +56,17 @@ Le nom du script, tirets compris, est le préfixe — ce qui se cherche est ce q
 
 ## La frontière avec `deploy/tests/`
 
-`fleet/deploy/tests/` est un corpus à part, et son critère n'est pas le nôtre : il répond à « le
-déploiement pose-t-il correctement », pas à « ce fichier se comporte-t-il correctement ». **La cible
-d'un témoin n'y indique donc pas son domaine** — `console_socket_topology.bats` mesure
-`services/console.sh` et reste là-bas, parce qu'il le confronte au `Dockerfile` de la boîte.
+`fleet/deploy` est un autre programme — l'installeur — et il a son propre arbre de témoins, en
+miroir de `deploy/` : voir `fleet/deploy/tests/README.md`. Les deux arbres n'échangent rien, pas
+même leur helper : `refute.bash` existe de chaque côté et `tests.refute_copies_agree` refuse qu'ils
+divergent.
 
-Un témoin traverse la frontière quand il n'exerce QUE du code du projet et ne touche AUCUN artefact
-de l'installeur : six l'ont fait le 2026-08-30 (`supervise`, `console_creds_drift`,
-`console_helpers`, `forge-gestures_demote_owner`, `forge-gestures_publicize`,
-`lcars-authority-ask`). Quatre autres, mesurés comme eux, sont restés : les déplacer aurait fait
-dépendre `fleet/test/` de `deploy/`, la dépendance inverse de celle qu'on venait de retirer.
+⚠ **`lib` est élidé ici et pas là-bas**, et c'est la seule chose de tout le dispositif qui ne se lit
+pas dans l'arbre. `fleet/lib/` contient TOUT le code Elixir : préfixe qui ne discrimine rien, élidé
+comme dans tout projet Elixir. `deploy/lib/` est trois fichiers à côté de `modules.d/` et `docker/` :
+il discrimine, il reste. Le motif est dans `tests.dirs_mirror_source`, qui porte les deux racines —
+pas dans cette phrase, qui ne fait que la répéter.
 
-Les deux corpus n'échangent rien — `refute.bash` existe des deux côtés, et `tests.refute_copies_agree`
-refuse qu'ils divergent. Voir `fleet/deploy/tests/README.md`.
 
 ## Deux faux-verts que le gate ferme
 
