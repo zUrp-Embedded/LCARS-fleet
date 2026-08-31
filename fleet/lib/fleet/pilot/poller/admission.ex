@@ -76,14 +76,14 @@ defmodule Fleet.Pilot.Poller.Admission do
   ou la valeur est DECLAREE ne dit rien de QUI elle borne.
 
   ⚠ Ecrit ici parce que l'intuition inverse — « c'est declare dans le fichier du projet, donc ca
-  borne le projet » — a ete tiree deux fois, dont une le 2026-08-13 au point d'ouvrir un chantier
-  pour un defaut qui n'existe pas. Ce qui borne le DEPOT est ailleurs et se nomme : les sieges de
+  borne le projet » — se tire toute seule, et une fois au point d'ouvrir un chantier pour un defaut
+  qui n'existe pas. Ce qui borne le DEPOT est ailleurs et se nomme : les sieges de
   pool par `(role, repo)`, et le fusible `Spawner.max_pods` (128) en dernier ressort.
 
   **Serial is this ceiling at 1**, not another mechanism. The boolean it replaces
-  (`:repo_serialized_lease`) and this counter were the same parameter at two resolutions, which is
-  why the boolean could only ever say "one" or "as many as there are" — and "as many as there are"
-  was genuinely unbounded, a repo with forty queued tickets starting forty runs.
+  (`:repo_serialized_lease`) and this counter are the same parameter at two resolutions, which is
+  why such a boolean can only ever say "one" or "as many as there are" — and "as many as there are"
+  is genuinely UNBOUNDED: a repo with forty queued tickets starts forty runs.
 
   Clamped rather than refused HERE because this is read on every dispatch decision (a tick, then a
   ticket): a value that fails must fail at a DOOR, once — `runtime.exs` for the env, the flag parser

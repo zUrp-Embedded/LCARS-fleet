@@ -59,8 +59,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               | {:error, term()}
 
   @doc """
-  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
-  2026-07-19): no forge/disk write, ensures the project's per-project architect. Same 4 return
+  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb: no forge/disk
+  write, ensures the project's per-project architect. Same 4 return
   keys as `onboard/2` (+ `architect`, the ensure outcome). Dirs absent →
   `{:error, {:not_on_machine, _}}` (open never creates — that is `create`/`import`'s job).
   """
