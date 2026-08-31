@@ -24,17 +24,15 @@ defmodule Fleet.Pilot.BriefBuilder do
   @brief_mount "brief.md"
   @criteria_mount "criteria.md"
 
-  # Rework brief: the PRODUCER (engineer) resumes on a REQUEST_CHANGES PR.
-  # CARRIES THE SAME git-native instruction as `build_worker_brief` (otherwise `:no_deliverable_commit`: the
-  # rework "re-pushes" but the pod is FORGE-BLIND and without the order to COMMIT it delivers nothing —
-  # twin of the producer brief). The pod fixes + commits LOCALLY; the SYSTEM pushes (forge
-  # boundary). Trailer mandatory (push gate).
+  # Brief de reprise : le PRODUCTEUR repart sur une PR en REQUEST_CHANGES.
   #
-  # INFO STARVATION, rework half: without the BODY of the REQUEST_CHANGES reviews,
-  # "fix according to the review" is hollow — the forge-blind pod does NOT see the review → it guesses
-  # blind (a cautious eng refuses to guess → `blocked_dep` → wedge). We read the feedback on the forge
-  # (the runtime, not the pod: forge boundary preserved) and inject it. If the read fails / no body,
-  # we fall back to the generic instruction (the pod still has the cloned PR + its code).
+  # ⚠ IL PORTE LA MEME INSTRUCTION git-native que le brief de production : le pod est FORGE-AVEUGLE,
+  # donc sans l'ordre de COMMITTER il « repousse » sans rien livrer. Il corrige et committe en
+  # LOCAL ; c'est le systeme qui pousse.
+  #
+  # ⚠ ET SANS LE CORPS DES REVUES, « corrige selon la revue » est CREUX : le pod ne voit pas la
+  # revue, donc il devine — et un ingenieur prudent qui refuse de deviner bloque le rail. Le runtime
+  # lit le retour sur la forge et l'injecte ; la frontiere forge tient, c'est lui qui lit, pas le pod.
   @doc """
   Brief of a PRODUCER resuming on a PR that carries REQUEST_CHANGES, conflict sections included.
 
@@ -56,19 +54,15 @@ defmodule Fleet.Pilot.BriefBuilder do
     })
   end
 
-  # Conflict-rework lead section (`conflict: true` — Remediation tier 1): the jury APPROVED,
-  # main simply moved under the branch (sibling bricks landed). FR: agent-facing work-order
-  # prose, same stance as the feedback sections. HONEST about the refs: the pod cannot fetch
-  # (forge-blind) — if its workspace's `origin/main` is stale and un-refreshable, the doctrine
-  # answer is `blocked`, never a guessed resolution.
-  # Two voices for ONE mechanic. The steps are identical (merge, resolve, commit, the system pushes,
-  # the jury re-judges); what differs is WHO is being addressed. The producer resumes work it wrote
-  # and that the judges approved. The exception pass arrives on someone else's branch after that
-  # budget ran out — telling it "ton brief est INCHANGÉ" names a brief it never had, and invites it
-  # to guess at an intention it does not hold.
+  # DEUX VOIX POUR UNE SEULE MECANIQUE : les etapes sont identiques, ce qui differe est A QUI l'on
+  # parle. Le producteur reprend un travail qu'il a ecrit et que les juges ont approuve ; la passe
+  # d'exception arrive sur la branche d'un AUTRE — lui dire « ton brief est INCHANGÉ » nomme un brief
+  # qu'il n'a jamais eu, et l'invite a deviner une intention qu'il ne porte pas.
   #
-  # The axis is OWNER vs OUTSIDER, never a role name: it held when the outsider was the gatekeeper
-  # and it holds now that it is `chief`.
+  # ⚠ L'AXE EST PROPRIETAIRE vs ETRANGER, JAMAIS UN NOM DE ROLE.
+  #
+  # Honnete sur les refs : le pod ne peut pas fetcher, et si sa base locale est perimee sans pouvoir
+  # etre rafraichie, la reponse de doctrine est `blocked`, jamais une resolution devinee.
   defp conflict_section(opts) do
     case Keyword.get(opts, :conflict, false) do
       false -> ""
@@ -77,24 +71,18 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # ⚠ `main` ETAIT ECRIT EN DUR DANS UNE PROCEDURE DONNEE A UN AGENT. La plomberie, elle, connaît la
-  # vraie base depuis toujours (`:pr_base_branch`, pose par `dispatch_review` depuis `pr.base.ref`, et
-  # c'est deja elle qui choisit le worktree de resolution). Sur une PR qui ne vise pas la face code,
-  # le producteur recevait donc une commande INEXECUTABLE — et s'il improvisait un `fetch main`, il
-  # composait son livrable contre la mauvaise face.
+  # ⚠ UNE PROCEDURE DONNEE A UN AGENT NE PEUT PAS NOMMER UNE BRANCHE EN DUR : sur une PR qui ne vise
+  # pas la face code, la commande serait INEXECUTABLE, et un agent qui improvise composerait son
+  # livrable contre la mauvaise face.
+  #
+  # ⚠ ET LA BONNE BASE NE SUFFIT PAS : le clone d'un pod de review est `--single-branch` sur la HEAD,
+  # donc `origin/<base>` n'y existe PAS. La procedure vise `lcars/base`, le ref que le bootstrap
+  # rapatrie sur la base REELLE — et son garde-fou dit l'ABSENCE, l'etat possible, pas la peremption.
   #
   # `fetch!` et non `get` : ce chemin n'existe que sous `dispatch_review`, qui pose toujours la base.
-  # Une absence serait un bypass, et un brief qui invente une branche coute plus cher qu'un refus.
+  # Un brief qui invente une branche coute plus cher qu'un refus.
   #
-  # ⚠ ET LE NOM CORRIGE NE SUFFISAIT PAS (6-135). La procedure disait `git merge origin/<base>`, avec
-  # la BONNE base — mais `RoleDispatch` pose `base_branch: head` pour tout pod de review, donc son
-  # clone est `--branch <head> --single-branch` et `origin/<base>` n'y est PAS. La commande restait
-  # inexecutable ; seule la raison avait change. Elle vise desormais `lcars/base`, le ref que le
-  # bootstrap rapatrie sur la base REELLE de la PR — et son garde-fou dit maintenant l'ABSENCE
-  # (l'etat possible) et non la peremption (celui qu'on avait suppose).
-  #
-  # La prose garde le NOM de la face : c'est ce qui dit au producteur contre quoi il compose, et
-  # c'est aussi ce qui distingue une base qui suit la PR d'un ref renomme.
+  # La prose garde le NOM de la face : c'est ce qui dit au producteur contre quoi il compose.
   defp producer_conflict_section(base) do
     """
     ## Conflit de merge à résoudre (prioritaire)
@@ -146,18 +134,14 @@ defmodule Fleet.Pilot.BriefBuilder do
   # Renders the feedback of the REQUEST_CHANGES reviews (verdict body of each judge) as an actionable
   # block.
   #
-  # F-C083 again, in its OTHER shape. The seam is three-valued (`{:ok, [_|_]} | {:ok, []} |
-  # {:error, _}`) and a single `_ -> ""` clause used to collapse the last two: a transient read
-  # failure produced the SAME brief as "this PR carries no actionable feedback". The producer then
-  # reworks blind while the PR holds detailed REQUEST_CHANGES it never sees — and, believing there
-  # was nothing to address, it plausibly ships the same defect and burns another review cycle.
+  # ⚠ F-C083, AUTRE FORME : le seam est a TROIS valeurs et une clause fourre-tout en confondrait
+  # deux — un echec de lecture transitoire rendrait le MEME brief que « cette PR ne porte aucun
+  # retour actionnable », et le producteur reprendrait a l'aveugle en croyant n'avoir rien a traiter.
   #
-  # The remedy is NOT fail-closed here, and the asymmetry with `judge_outputs/4` is the point: a
-  # judge given the wrong matter renders a WRONG VERDICT, so it must never run; a producer without
-  # its feedback merely works WORSE. Deferring every rework on a transient forge hiccup would wedge
-  # the rail to avoid a degradation. So we proceed — and we make the gap VISIBLE on both sides: a
-  # warning on the operator rail, and a line in the brief itself, because the pod cannot read our
-  # logs and an unexplained absence is exactly what made this defect silent.
+  # ⚠ ET LE REMEDE N'EST PAS LE FAIL-CLOSED, l'asymetrie avec le juge etant le point : un juge a qui
+  # l'on donne la mauvaise matiere rend un VERDICT FAUX, donc il ne doit pas tourner ; un producteur
+  # prive de son retour travaille seulement MOINS BIEN. On avance, et on rend le trou VISIBLE des
+  # deux cotes — le pod ne lit pas nos logs, et c'est l'absence inexpliquee qui rendait ce defaut muet.
   defp render_rework_feedback(forge, repo, pr, forge_opts) do
     case forge.change_request_feedback(repo, pr, forge_opts) do
       {:ok, [_ | _] = feedbacks} ->
@@ -510,10 +494,9 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # THE JUDGE'S CRITERION IS THE CRITERIA DOC, NOT THE BRIEF — and that is the whole fix. A single
-  # authored brief used to serve both the producer and the judge, so the judge received the
-  # producer's PROCEDURAL order, which may reference the workshop the judge does not mount. The arch
-  # now authors a separate `criteria` (declarative, self-contained), pointed to by `Criteria:`.
+  # ⚠ LE CRITERE DU JUGE EST LE DOC `criteria`, PAS LE BRIEF. Un brief unique servant les deux
+  # donnerait au juge l'ordre PROCEDURAL du producteur, qui reference un atelier que le juge ne
+  # monte pas. Le `criteria` est declaratif et autonome, precisement pour ca.
   #
   # When that pointer is present, the judge's criterion is the criteria doc, resolved and pinned —
   # written into `_brief_source` so `judge_criterion/1` renders it and cites ITS sha, unchanged.
@@ -561,35 +544,19 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # THE MACHINE FACT, HANDED TO THE JUDGE — the other half of `CiGate`. The gate refuses to summon
-  # a jury on red; when it summons, it says on WHAT the rail already ruled. Without this line the
-  # judge re-derives "does it run?" from a diff it cannot execute, i.e. it guesses — and the whole
-  # point of a runner is that guessing stops.
+  # LE FAIT MACHINE, TENDU AU JUGE. Sans lui, le juge re-derive « est-ce que ca tourne ? » d'un diff
+  # qu'il ne peut pas executer — c'est-a-dire qu'il devine, et un runner existe pour que la devinette
+  # s'arrete.
   #
-  # It is NOT the judge's verdict. `success` answers "it executes"; the judge answers "it proves"
-  # — coverage of the brief, hollow assertions, oracles that assert nothing. Naming the boundary in
-  # the brief itself is what keeps a green CI from being read as a green review.
+  # ⚠ CE N'EST PAS LE VERDICT DU JUGE : `success` repond « ca s'execute », le juge repond « ca
+  # prouve ». Nommer la frontiere DANS le brief est ce qui empeche de lire une CI verte comme une
+  # revue verte — un rail qui n'execute que deux `echo` repond vert lui aussi.
   #
-  # ⚠ ET LA PHRASE ELLE-MEME FRANCHISSAIT LA FRONTIERE QUE CE PARAGRAPHE POSE : elle disait « le
-  # rail machine a EXECUTE **la preuve** ». Le rail livre avec le template de projet execute deux
-  # `echo` — ni build, ni test, ni assertion, et il le dit dans son propre en-tete. Sur tout projet
-  # fraichement onboarde, le juge recevait donc « une preuve a ete executee » alors qu'aucune ne
-  # l'avait ete, et la seule chose que `success` etablit est qu'un runner a repondu vert (6-140).
+  # LES CONTEXTES SONT LA REPONSE HONNETE : on ne peut pas verifier qu'un harnais ATTENDU a tourne,
+  # seulement nommer ce qui A tourne et laisser le juge conclure.
   #
-  # LES CONTEXTES SONT LA REPONSE HONNETE. On ne peut pas verifier qu'un harnais attendu a tourne ;
-  # on peut nommer ce qui A tourne, et laisser le juge conclure : un `CI / no-harness-yet` n'est
-  # plus indistinguable d'une suite.
-  #
-  # ⚠ CE PARAGRAPHE DISAIT « RIEN NE DECLARE LE HARNAIS ATTENDU D'UN PROJET ». PLUS VRAI DEPUIS LE
-  # 2026-08-20 : le template porte une section `## Harness` — les chemins qui sont de la PREUVE — et
-  # la sonde `probe-test-relevance` s'en sert. Elle ne repond PAS a la meme question que ce fait-ci :
-  # `success` dit « ca s'execute », la sonde dit « la suite s'apercoit-elle de l'absence du code
-  # livre ». Les deux restent distincts, et leurs rails aussi — le fait CI voyage POUSSE dans ce
-  # brief, la sonde est TIREE par le juge (arbitrage Q1). L'un ne peut pas charger le tick, l'autre
-  # ne peut pas bloquer le pipeline.
-  #
-  # Absent key = the card does not require the CI (`spec.ci: ignore`): we add NOTHING rather than
-  # writing "CI: unknown", which a judge would rightly read as a fact about the code.
+  # Clef absente = la carte n'exige pas la CI : on n'ajoute RIEN plutot que d'ecrire « CI: unknown »,
+  # qu'un juge lirait a raison comme un fait sur le code.
   defp with_ci(outputs, opts) do
     case Keyword.get(opts, :ci_fact) do
       %{state: :success, sha: sha} = fact when is_binary(sha) ->
@@ -788,31 +755,19 @@ defmodule Fleet.Pilot.BriefBuilder do
     end
   end
 
-  # THE CRITERION TRAVELS AS TEXT, and the address travels beside it. The dedup this used to do —
-  # cite the doc, let the judge `git show` it through a mounted ops — bought one copy and cost
-  # the mount: every project pod had to carry the runtime's own record so that ONE role could read
-  # ONE file out of it. The record is where what was asked and what was judged is kept; handing it
-  # to every producer to save a paragraph is the wrong side of that trade.
+  # ⚠ LE CRITERE EST UN FICHIER MONTE, QU'ON LIT — pas du texte inline, qu'on croit. Le pod lit un
+  # objet adresse par son contenu, materialise au sha epingle : ce sur quoi il statue est exactement
+  # ce qui a ete ecrit, sans rien a hacher ni a faire confiance. Un pointeur resolu est TOUJOURS
+  # accompagne de son montage — la resolution fail-close le dispatch, donc il n'y a pas de spawn a
+  # mal monter.
   #
-  # WHAT IS LOST, stated: the judge can no longer VERIFY that the text matches the sha. What
-  # replaces it is that the runtime resolved the pin itself, at dispatch, and the sha stays in the
-  # work item and on the forge — so a third party still audits the pairing. The pod stops being
-  # able to check an address it could only ever check against a tree the architect writes into.
+  # ⚠ CE QUI EST PERDU, dit : le juge ne peut plus VERIFIER lui-meme que le texte correspond au sha.
+  # Ce qui remplace, c'est que le runtime a resolu l'epingle au dispatch et que le sha reste dans le
+  # work item et sur la forge — un tiers audite donc toujours l'appariement.
   #
-  # DRIFT is not the risk it was either: the copy is made AT dispatch from the pinned object, not
-  # frozen at authoring time, so it cannot lag the pointer the way a committed gate-brief could.
-  #
-  # This value lands in the `request` section, rendered under "CONTEXT — already handled, DO NOT
-  # execute" — a defusing that is CORRECT (the doc is a brief; a judge that executes it produces
-  # instead of judging), so the sentence says read-and-evaluate explicitly. A judge without a
-  # criterion approves: that is the false GREEN this rail fail-closes against everywhere else.
-  # THE CRITERION IS A MOUNTED FILE, READ — not inline text, trusted. When a pointer resolved
-  # (`_brief_source` present), the spawner materialized the pinned doc at `~/issues/criteria.md` via
-  # `git archive` at that sha: the judge READS its criterion from a content-addressed file, so what
-  # it acts on is exactly what was authored — nothing to hash, nothing to trust. The inline text is
-  # gone from the order; a pointer that resolved is always accompanied by its materialized mount
-  # (both read the same ops worktree — resolve fail-closes the dispatch if it is unreachable, and
-  # then there is no spawn to mis-mount). Shares `mounted_mandate/3` with the producer's order.
+  # La valeur atterrit sous « CONTEXTE — deja traite, NE PAS executer », d'ou la phrase qui dit
+  # explicitement lire-et-evaluer : un juge qui executerait son critere produirait au lieu de juger,
+  # et un juge SANS critere approuve — le faux VERT contre lequel tout ce rail fail-close.
   defp judge_criterion(%{"_brief_source" => _source}) do
     mounted_mandate(
       "Ton critère de succès est",
