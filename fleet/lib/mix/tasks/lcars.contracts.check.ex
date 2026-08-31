@@ -147,7 +147,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_declaration_max_fan_ceiling(root),
         check_test_corpora_on_record(root),
         check_doctest_declarations_have_examples(root),
-        check_test_paths_mirror_lib(root),
+        check_test_dirs_mirror_source(root),
         check_test_exs_are_discoverable(root),
         check_refute_copies_agree(root),
         check_public_functions_documented(root)
@@ -6117,75 +6117,89 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Les zones de `test/` qui ne sont PAS des miroirs de `lib/`, NOMMEES plutot que devinees : deux
-  # rangent des non-temoins (`support/` compile par `elixirc_paths(:test)`, `fixtures/`), les autres
-  # rangent des temoins qui n'ont pas de source Elixir en face (bats des scripts de `bin/`, `etc/`,
-  # `services/`, sondes manuelles, integration, et le transverse qui scanne le depot entier). Un
-  # dossier hors de cette liste et sans jumeau sous `lib/` est un chemin faux, pas une exception
-  # tacite : c'est ce que le mur ci-dessous refuse.
-  @test_nonmirror_zones ~w(support fixtures integration crosscutting probes bin etc services)
+  # LES DEUX ARBRES DE TEMOINS, ET LEURS RACINES. Le depot porte DEUX programmes : le runtime
+  # (`fleet/`) et son installeur (`fleet/deploy/`), qui doit pouvoir vivre sans lui. Chacun a son
+  # arbre de temoins, et dans chacun le chemin d'un temoin est celui de sa cible.
+  #
+  # ⚠ `lib` EST ELIDE D'UN COTE ET PAS DE L'AUTRE, et ce n'est pas une incoherence — c'est la seule
+  # chose de tout ce dispositif qui ne se lit PAS dans l'arbre, donc elle est ici plutot que dans une
+  # prose que personne ne peut verifier. `fleet/lib/` contient TOUT le code Elixir : c'est un prefixe
+  # qui ne discrimine rien, et l'elider est la convention de l'ecosysteme (`mix new` genere
+  # `lib/foo/bar.ex` ↔ `test/foo/bar_test.exs`). `deploy/lib/` est trois fichiers a cote de
+  # `modules.d/`, `docker/`, `deps/` : il discrimine, donc il reste. Meme nom, roles opposes.
+  #
+  # Un dossier de temoins se qualifie donc SEUL, par l'existence de son jumeau — aucune convention de
+  # nommage a retenir, aucun prefixe a decoder. Les zones qui n'ont legitimement pas de source en face
+  # sont NOMMEES ci-dessous : une liste se relit, une regle typographique s'imite de travers.
+  @test_zones %{
+    "test" => ~w(support fixtures integration crosscutting probes),
+    "deploy/tests" => ~w(transverse)
+  }
+
+  # Les racines sources de chaque arbre, dans l'ordre d'essai.
+  @test_source_roots %{"test" => ["lib", "."], "deploy/tests" => ["deploy"]}
 
   @doc false
   # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
-  # chemin faux se LIT COMME UNE REPONSE. Mesure du 2026-08-30 : neuf temoins vivaient sous
-  # `test/fleet/pilot/project_onboard/` et `test/fleet/pilot/forge_client/`, deux dossiers qui
-  # n'existent nulle part sous `lib/`. Leurs modules disaient `Fleet.Project.Onboard.*` et
-  # `Fleet.Forge.Client.*` depuis toujours — qui cherchait les temoins d'`onboard.ex` sous
-  # `test/fleet/project/` ne trouvait rien et en concluait une absence de couverture qui etait fausse.
+  # chemin faux SE LIT COMME UNE REPONSE. Mesure du 2026-08-30 : neuf temoins vivaient sous
+  # `test/fleet/pilot/project_onboard/`, un dossier qui n'existait nulle part sous `lib/`, quand
+  # leurs modules disaient `Fleet.Project.Onboard.*` depuis toujours. Qui cherchait les temoins
+  # d'`onboard.ex` sous `test/fleet/project/` ne trouvait rien et en concluait une absence de
+  # couverture qui etait FAUSSE.
   #
-  # LA QUESTION EST DECIDABLE ET SANS ETAT, et c'est ce qui la met ici plutot que sous la forme d'un
-  # plancher enregistre : « le dossier de ce temoin existe-t-il sous `lib/` ? » se repond avec le
-  # disque, jamais avec un compte d'hier.
+  # La question se repond avec le disque, jamais avec un compte d'hier : elle est decidable et sans
+  # etat, comme l'exige ce fichier a propos de son mur sur les doctests.
   #
-  # ⚠ CE MUR NE DIT PAS QUE CHAQUE SOURCE A UN TEMOIN, et le silence est delibere. Cette moitie-la
-  # n'est pas decidable sans plancher. Mesure du 2026-08-30 : 130 sources sur 247 n'ont pas de
-  # temoin canonique — 26 ont au moins un satellite qui porte leur nom, et pour les 104 autres le
-  # NOM DE FICHIER NE TRANCHE PAS, parce qu'un temoin nomme d'apres le contrat qu'il epingle ne
-  # nomme pas sa cible. Reclamer le canonique ici fabriquerait 104 coquilles « pas de test » dont
-  # personne n'aurait verifie la verite — un mur satisfait par une phrase fausse. Ce qui se decide
-  # sans etat se decide ici ; le reste est un chantier, pas une ligne de gate.
-  @spec check_test_paths_mirror_lib(String.t()) :: result()
-  def check_test_paths_mirror_lib(root) do
-    files =
-      Path.join(root, "test/**/*_test.exs")
-      |> Path.wildcard()
-      |> Enum.map(&Path.relative_to(&1, root))
-      |> Enum.sort()
+  # ⚠ CE MUR NE RECLAME PAS UN TEMOIN PAR SOURCE. Cette moitie-la n'est pas decidable sans plancher
+  # (130 sources sur 247 sans temoin canonique au 2026-08-30, dont 26 avec un satellite qui les
+  # nomme) et la reclamer fabriquerait des coquilles « pas de test » que personne n'aurait verifiees.
+  @spec check_test_dirs_mirror_source(String.t()) :: result()
+  def check_test_dirs_mirror_source(root) do
+    {checked, strays} =
+      Enum.reduce(@test_source_roots, {0, []}, fn {troot, sroots}, {n, acc} ->
+        dirs =
+          Path.join([root, troot, "**", "*.{exs,bats,py}"])
+          |> Path.wildcard()
+          |> Enum.filter(
+            &(Path.extname(&1) == ".bats" or String.contains?(Path.basename(&1), "test"))
+          )
+          |> Enum.map(&(&1 |> Path.dirname() |> Path.relative_to(Path.join(root, troot))))
+          |> Enum.reject(&(&1 in [".", ""]))
+          |> Enum.uniq()
+          |> Enum.sort()
 
-    strays =
-      Enum.filter(files, fn f ->
-        case Path.split(Path.dirname(f)) do
-          # La racine de `test/` n'est le miroir de rien : `lib/` n'est pas un domaine. Un temoin
-          # pose la ne se cherche par aucun chemin — il se trouve en listant tout le dossier.
-          ["test"] -> true
-          ["test", zone | _] when zone in @test_nonmirror_zones -> false
-          ["test" | rest] -> not File.dir?(Path.join([root, "lib" | rest]))
-          _ -> true
-        end
+        zones = Map.fetch!(@test_zones, troot)
+
+        bad =
+          Enum.reject(dirs, fn d ->
+            [head | _] = Path.split(d)
+
+            head in zones or
+              Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, d])) end)
+          end)
+
+        {n + length(dirs), acc ++ Enum.map(bad, &"#{troot}/#{&1}")}
       end)
 
     %{
-      id: "tests.paths_mirror_lib",
+      id: "tests.dirs_mirror_source",
       remediation:
-        "deplacer le temoin sous le dossier qui reflete sa cible (`lib/<x>/` -> `test/<x>/`), " <>
-          "ou nommer sa zone dans @test_nonmirror_zones si elle n'a legitimement pas de source " <>
-          "Elixir en face — un chemin de test qui ne reflete rien se lit comme une absence de couverture",
-      status: if(files != [] and strays == [], do: :pass, else: :fail),
+        "deplacer le temoin sous le dossier qui reflete sa cible, ou nommer sa zone dans " <>
+          "@test_zones si elle n'a legitimement pas de source en face — un chemin de test qui ne " <>
+          "reflete rien se lit comme une absence de couverture",
+      status: if(checked > 0 and strays == [], do: :pass, else: :fail),
       evidence:
         cond do
-          files == [] ->
-            ["INSTRUMENT CASSE — aucun *_test.exs trouve sous test/ ; ce mur n'a rien mesure"]
+          checked == 0 ->
+            ["INSTRUMENT CASSE — aucun dossier de temoins trouve ; ce mur n'a rien mesure"]
 
           strays != [] ->
-            Enum.map(strays, fn f ->
-              "#{f}: aucun dossier `lib/#{Enum.join(tl(Path.split(Path.dirname(f))), "/")}/` en face"
-            end)
+            Enum.map(strays, &"#{&1}/ : aucune source en face")
 
           true ->
             []
         end,
-      note:
-        "#{length(files)} temoins ExUnit, #{length(files) - length(strays)} sous un dossier qui reflete lib/"
+      note: "#{checked} dossier(s) de temoins, #{checked - length(strays)} adosse(s) a une source"
     }
   end
 
