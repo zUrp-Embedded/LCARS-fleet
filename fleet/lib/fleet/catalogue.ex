@@ -5,8 +5,7 @@ defmodule Fleet.Catalogue do
   The single authority for WHERE the catalogue lives — an ORDERED SEARCH PATH, one sub-path per
   tree.
 
-  It said "one root" until 2026-08-10 and that was the whole design at the time. There are now
-  several: the INSTALLED catalogues, then the system default last, and a reader
+  There are several roots: the INSTALLED catalogues, then the system default last, and a reader
   asks for a TREE (`search(:modops)`) rather than naming a root. `search/2` and its siblings remain
   for the two callers that legitimately name their own — the composer under `--catalogue`, and the
   spawn path whose skills root is its own three-state knob.
@@ -27,11 +26,11 @@ defmodule Fleet.Catalogue do
 
   ## Why ONE root and not one variable per tree
 
-  Nine trees, each with its own `LCARS_*` variable, would mean nine variables to set in order to
-  bring ONE catalogue. That is `Fleet.Layout`'s warning turned inside out: over-exposing the
-  structural forces the operator to re-declare a single intent nine times, and the ninth is the one
-  they forget — which yields a fleet running THEIR cap-profiles over the BUNDLED SP fragments, a
-  coherent-looking skew that no error message reports.
+  One `LCARS_*` variable per tree would mean as many variables to set in order to bring ONE
+  catalogue. That is `Fleet.Layout`'s warning turned inside out: over-exposing the structural forces
+  the operator to re-declare a single intent N times, and the last one is the one they forget —
+  which yields a fleet running THEIR cap-profiles over the BUNDLED SP fragments, a coherent-looking
+  skew that no error message reports.
 
   A catalogue is ONE object. Pointing at it nine times denies it.
 
@@ -44,31 +43,28 @@ defmodule Fleet.Catalogue do
 
   `root/0` defaults to the BUNDLED `priv/catalogue` — a directory that holds the catalogue trees
   and nothing else. (How MANY is deliberately not written here: an inventory in prose is false the
-  day a tree is added, and `rel/1` is the place that has to be right.) The physical move that made it so (2026-08-01) changed exactly one line of this
-  module: the `@rel_*` sub-paths were already root-relative, so they did not move. That was the
-  point of expressing the layout once.
+  day a tree is added, and `rel/1` is the place that has to be right.)
 
   What the directory buys beyond tidiness: **exporting a catalogue is copying one directory**. The
   runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/canon/` (frozen legacy) —
   sits OUTSIDE it, so no export can carry a contract an author would edit to no effect.
 
-  ⚠ `sp_builder/sp_blocks/` used to be named on that list as build-time material living outside. It
-  moved INSIDE both catalogues on 2026-08-10: `core/` is a shipped default an author supersedes by
-  name, the rest is their own material. It is build-time all the same — a running fleet never reads
-  it — and that is a property of WHEN it is read, not of where it lives.
+  ⚠ `sp_builder/sp_blocks/` lives INSIDE both catalogues (`core/` is a shipped default an author
+  supersedes by name, the rest is their own material) and is build-time all the same — a running
+  fleet never reads it. Build-time is a property of WHEN a tree is read, not of where it lives, so
+  it does not decide which side of this line a tree sits on.
 
   ## The manifest
 
   `<root>/catalogue.yaml` declares the contract version the catalogue targets, and its NAME.
   `verify!/0` reads it at boot, BEFORE the images freeze anything from the disk.
 
-  The name is a property OF THE CATALOGUE, not of its installation. It used to be neither: the CLI
-  assigned it at `catalogue install` time (`[name]`, defaulting to the source basename), so the same
-  catalogue installed on two boxes could carry two names. That was harmless while the name was a
-  local handle for the declaration file and the verbs. It stops being harmless the moment the name
-  addresses something OUTSIDE the box — and it is about to: the forge org that carries a catalogue's
-  projects. A project created in org `web` is unopenable where the same catalogue answers to
-  `frontend`.
+  The name is a property OF THE CATALOGUE, not of its installation. Assigned at install time — by a
+  CLI argument, or defaulting to the source basename — the same catalogue on two boxes carries two
+  names. That is harmless only while the name is a local handle for the declaration file and the
+  verbs; it stops being harmless because the name addresses something OUTSIDE the box, the forge org
+  that carries a catalogue's projects. A project created in org `web` is unopenable where the same
+  catalogue answers to `frontend`.
 
   Kebab-case, and `_` is refused where `Fleet.Slug` allows it: the underscore is the separator of the
   `<catalogue>_<role>` account login, so admitting it in either half would make the split ambiguous.
@@ -80,10 +76,10 @@ defmodule Fleet.Catalogue do
   elsewhere and published on its own cadence, be consumed by this runtime at all". One file, at the
   root, about the whole; not a field on every file.
 
-  Required, not optional, and introduced NOW for a reason that expires: a required manifest can be
-  added while exactly one catalogue exists. Once a second one is in someone else's hands, making it
-  required is a breaking change to a distributed artifact, and making it optional means a catalogue
-  from a foreign generation fails at its first load without ever saying why.
+  Required, not optional, for a reason with a shelf life: a manifest can be made required only while
+  every catalogue in existence is in this repository. Once a second one is in someone else's hands,
+  requiring it is a breaking change to a distributed artifact — and leaving it optional means a
+  catalogue from a foreign generation fails at its first load without ever saying why.
 
   Foundation (`deps: []`, next to `Fleet.Layout` and `Fleet.Slug`): anything may depend down onto it.
   """
@@ -102,8 +98,7 @@ defmodule Fleet.Catalogue do
   @name_rx ~r/\A[a-z0-9][a-z0-9-]*\z/
 
   # ── the trees ─────────────────────────────────────────────────────────────
-  # Root-relative, ONE literal each. These are the priv-relative paths in use today: the seam is
-  # introduced without moving a single file, which is what keeps this lot revertible.
+  # Root-relative, ONE literal each.
   @rel_cap_profiles "cap_profile/canon/cap-profiles"
   @rel_modops "cap_profile/canon/modop-bundles"
   @rel_subagent_templates "cap_profile/canon/subagent-templates"
@@ -133,28 +128,22 @@ defmodule Fleet.Catalogue do
   ## It is THE default, and that is why it has a name
 
   It is also the head of `installed_roots/0`, by construction rather than by coincidence — the list
-  is built from this function. Six callers used to spell the same default `hd(installed_roots())`,
-  which READS as "whichever catalogue happens to be first" while the mechanism guarantees a
-  constant: a caller with no catalogue in hand resolves in the one that always ships. The
-  expression invited a reordering of `installed_roots/0` to silently change six resolutions, and it
-  named a position where the thing has a name.
+  is built from this function. Spelling that default `hd(installed_roots())` READS as "whichever
+  catalogue happens to be first" while the mechanism guarantees a constant, so it invites a
+  reordering of `installed_roots/0` to silently change every such resolution — and it names a
+  POSITION where the thing has a NAME.
   """
   @spec root() :: Path.t()
   def root, do: to_string(bundled_root())
 
-  # THE BUNDLED ROOT IS THE BUSINESS ROOT OF A CALLER WITHOUT A CATALOGUE, and it took a bench to
-  # see why that matters.
+  # THE BUNDLED ROOT IS THE BUSINESS ROOT OF A CALLER WITHOUT A CATALOGUE.
   #
   # `search/1` covers the trees BOTH halves of a deployment share — cap-profiles, modops, drafts,
   # blocks… The purely business trees (workflow maps, brief templates, project_template) have no
-  # system default, so they read this root DIRECTLY. A caller that resolves its
-  # ROLES in one catalogue and its CARDS here gets a coherent-looking half-wiring.
-  #
-  # Measured on the lcars-d1 bench: cap-profiles resolved to `web-arch` (8 profiles) and the
-  # delegation card still came from the shipped reference, whose jury names `qualifier` — a role the
-  # other catalogue does not carry. The boot REFUSED, loudly, which is the guard working; the
-  # half-wiring was mine. It is exactly the "coherent-looking skew" this module's own header warns
-  # about, one level up.
+  # system default, so they read this root DIRECTLY. A caller that resolves its ROLES in one
+  # catalogue and its CARDS here gets a coherent-looking half-wiring: a card whose jury names a role
+  # the other catalogue does not carry. The boot refuses that one LOUDLY — it is the same
+  # "coherent-looking skew" this module's header warns about, one level up.
   defp bundled_root do
     # An explicit nil (a cross-test config leak) must never reach Path.join — coalesced here, at the
     # boundary, the same guard `CapProfile.Catalog.root_dir/0` carries for its own key.
@@ -165,11 +154,9 @@ defmodule Fleet.Catalogue do
   @doc """
   Root of the SYSTEM catalogue — the mechanism, never the business.
 
-  Four roles live there and no card names any of them: the fleet-level front desk (`role_index: 0`,
-  which has to exist before any repository does), the project delegate, the seal's signatory and
-  the tier-2 conflict resolver. The runtime resolves each of them BY CAPABILITY, alone, to hold its
-  own machinery — which is exactly the test: a role a card names is business, a role only the
-  runtime looks for is mechanism.
+  The roles living there are the ones no card names — the runtime resolves each BY CAPABILITY,
+  alone, to hold its own machinery. That IS the test: a role a card names is business, a role only
+  the runtime looks for is mechanism.
 
   ## Why this is not a second knob
 
@@ -302,18 +289,18 @@ defmodule Fleet.Catalogue do
 
   ## Installed is a PRESENCE, not a declaration
 
-  There used to be a second fact next to this one: an ACTIVITY declaration, one name per line in a
-  file the operator edited, which decided WHICH of the installed catalogues actually ran. It is
-  gone, and its absence is the point of this function's current shape.
+  NO SECOND FACT beside this one — in particular no ACTIVITY declaration, one name per line in a
+  file the operator edits, deciding WHICH of the installed catalogues actually runs. Its absence is
+  the point of this function's shape.
 
-  Two facts that can disagree about the same question will disagree, and the failure has a
-  measured cost: a catalogue can be declared active while the forge carries neither its org nor its
-  role accounts, and the fleet then boots on a roster nobody assembled and loops at the first
-  dispatch on tokens that were never minted — far from the line that asked for it. The reverse
-  skew is quieter still: a catalogue installed on the forge and absent from the declaration is
-  polled by nobody, so its projects simply never move, and no message says why.
+  Two facts that can disagree about the same question will disagree, and both skews are expensive:
+  a catalogue declared active while the forge carries neither its org nor its role accounts boots
+  the fleet on a roster nobody assembled, which then loops at the first dispatch on tokens that were
+  never minted — far from the line that asked for it. The reverse is quieter still: a catalogue
+  installed on the forge and absent from the declaration is polled by nobody, so its projects simply
+  never move, and no message says why.
 
-  One fact answers it now. The material is HERE, or it is not.
+  One fact answers it. The material is HERE, or it is not.
 
   ## What makes the material appear
 
@@ -436,18 +423,17 @@ defmodule Fleet.Catalogue do
   def rel(:sp_blocks), do: @rel_sp_blocks
   def rel(:sp_templates), do: @rel_sp_templates
   def rel(:skills), do: @rel_skills
-  # The cards had no clause here while their constant existed, and the absence was the mechanism:
-  # `rel/1` is what a caller uses to address a tree under an ARBITRARY root, so a tree missing from
-  # it can only be addressed under `root/0` — the bundled catalogue. Cards are still NOT a
-  # search path (they do not supersede), but they are now addressable per root, which is what
-  # publishing one image per catalogue requires.
+
+  # ⚠ UNE ABSENCE ICI EST UN MECANISME, PAS UN OUBLI : `rel/1` est ce qu'un appelant utilise pour
+  # adresser un arbre sous une racine ARBITRAIRE, donc un arbre qui manque a cette table ne peut
+  # etre adresse que sous `root/0` — le catalogue livre. Les cartes ne sont PAS un chemin de
+  # recherche (elles ne se superposent pas), mais elles sont adressables par racine, ce qu'exige la
+  # publication d'une image par catalogue.
   def rel(:workflow_maps), do: @rel_workflow_maps
-  # Same mechanism, same consequence, found the same way (2026-08-16): with no clause here, the
-  # project template could only be addressed under `root/0`, so EVERY project on the box was
-  # scaffolded from the reference catalogue while `web-demo` shipped thirteen files of its own that
-  # nothing read. It is not a search path either — a template does not supersede another, it is the
-  # tree a new project starts from — but it is now addressable per root, which is what per-catalogue
-  # resolution requires.
+  # Meme mecanisme, meme consequence : sans clause ici, le template de projet ne s'adresserait que
+  # sous `root/0`, donc TOUT projet de la boite serait echafaude depuis le catalogue de reference
+  # pendant que le sien livre les fichiers que rien ne lit. Pas un chemin de recherche non plus — un
+  # template ne se superpose pas, c'est l'arbre dont un nouveau projet part.
   #
   # ⚠ ONE TREE IS STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
   # (read by `Workflow.BriefTemplate`). Same latent skew — a catalogue's own would never be read —
@@ -579,11 +565,10 @@ defmodule Fleet.Catalogue do
 
   ## This is an ADDRESS. It must never become a predicate again.
 
-  Until 2026-08-21 the question "is this repo a store?" was answered by comparing this name. It
-  reserved the most natural repo name in every user's namespace, and reserved it in SILENCE — a
-  deposit called `catalogue` was dropped with no log, no line, no refusal. The question is now
-  answered by IDENTITY (`owner == manifest.name`, `CatalogueDeposits.split/2`), which holds whatever
-  the repo is called.
+  Answering "is this repo a store?" by comparing this name reserves the most natural repo name in
+  every user's namespace, and reserves it in SILENCE — a deposit called `catalogue` gets dropped
+  with no log, no line, no refusal. The question is answered by IDENTITY instead
+  (`owner == manifest.name`, `CatalogueDeposits.split/2`), which holds whatever the repo is called.
 
   The one legitimate read is a WRITE COLLISION: *"am I about to create a repo where `push_store`
   force-pushes?"* — `Onboard.adopt_project/2`. That does not decide what an existing repo IS; it
@@ -625,11 +610,11 @@ defmodule Fleet.Catalogue do
   to the key above it: `roles:\n  name: dev` declares a role, not the catalogue. Accepting leading
   whitespace would let the first nested `name:` in the file steal the catalogue's identity — and it
   would work by accident on OUR manifests, where the root key happens to come first, then be wrong
-  on somebody else's. Both catalogues shipped today carry `name:` at column 0.
+  on somebody else's.
 
   ⚠ `[_, name | _]` and not `[_, name]`: the trailing comment group makes `Regex.run/2` return
-  THREE elements when a comment is present, and the two-element pattern silently fell through to
-  "no name" — measured by the witness on `name: web   # le metier`.
+  THREE elements when a comment is present, so a two-element pattern falls through to "no name" —
+  silently, on a line as ordinary as `name: web   # le metier`.
   """
   @spec manifest_name(String.t()) :: {:ok, String.t()} | {:error, :no_name_in_manifest}
   def manifest_name(yaml) when is_binary(yaml) do
@@ -704,10 +689,10 @@ defmodule Fleet.Catalogue do
     end
   end
 
-  # The name is REQUIRED for the same reason the manifest itself was: it can be made required while
-  # the catalogues in existence are all in this repository. Optional would mean falling back to the
-  # directory name, which is precisely the defect — a name assigned by whoever installed, differing
-  # between two boxes holding the same catalogue.
+  # The name is REQUIRED for the same reason the manifest itself is: it can only be made required
+  # while every catalogue in existence is in this repository. Optional would mean falling back to
+  # the directory name, which is precisely the defect — a name assigned by whoever installed,
+  # differing between two boxes holding the same catalogue.
   defp validate_name!(manifest, path) do
     case Map.get(manifest, "name") do
       name when is_binary(name) ->
