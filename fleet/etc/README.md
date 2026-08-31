@@ -52,8 +52,8 @@ Le PATH de l'humain et les deploys de l'agent visent donc LE MÊME endroit — c
 ```bash
 MIX_ENV=prod mix release --overwrite
 sudo rsync -a --delete _build/prod/rel/lcars_fleet/ /opt/lcars/runtime/rel/lcars_fleet/
-# la liste des fichiers bin/ vit dans etc/install.manifest (données) — plus jamais recopiée ici :
-sudo cp $(awk 'NF && $1 !~ /^#/ { print "bin/" $1 }' etc/install.manifest) /opt/lcars/runtime/bin/
+# la liste des fichiers bin/ vit dans etc/release.manifest (données) — plus jamais recopiée ici :
+sudo cp $(awk 'NF && $1 !~ /^#/ { print "bin/" $1 }' etc/release.manifest) /opt/lcars/runtime/bin/
 sudo chgrp -R fleet /opt/lcars/runtime && sudo chmod g+rx /opt/lcars/runtime/bin/*
 # CHAQUE humain relance SA fleet pour recharger le BEAM : fleet_v2 stop && fleet_v2 start
 ```
@@ -61,8 +61,8 @@ sudo chgrp -R fleet /opt/lcars/runtime && sudo chmod g+rx /opt/lcars/runtime/bin
 ⚠ `rel/` seul ne suffit PAS : `bin/` porte les launchers N0/N1 (le monde des pods) — un deploy qui
 oublie `bin/` fait tourner le nouveau BEAM avec les vieux sandboxes.
 
-**La liste des fichiers livrés vit dans `etc/install.manifest`** (données : fichier, exec/noexec,
-flag `link`) — consommée par `etc/install.sh` (qui automatise cette procédure) ET par le doctor
+**La liste des fichiers livrés vit dans `etc/release.manifest`** (données : fichier, exec/noexec,
+flag `link`) — consommée par `etc/deploy-release.sh` (qui automatise cette procédure) ET par le doctor
 du provisioning (`60-deploy check`). Avant le manifest, la liste existait ici ET dans install.sh,
 et les deux copies avaient commencé à dériver.
 

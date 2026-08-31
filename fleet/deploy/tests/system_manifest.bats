@@ -87,7 +87,7 @@ code() {
   grep -hvE '^\s*#' \
     "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
     "$ROOT"/install.sh \
-    "$BATS_TEST_DIRNAME"/../../etc/install.sh \
+    "$BATS_TEST_DIRNAME"/../../etc/deploy-release.sh \
     "$BATS_TEST_DIRNAME"/../docker/*.sh \
     "$BATS_TEST_DIRNAME"/../../services/*.sh \
     "$BATS_TEST_DIRNAME"/../../services/*.py \

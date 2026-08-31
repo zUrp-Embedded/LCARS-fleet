@@ -65,7 +65,7 @@ plan()    { run bash "$RUNNER" uninstall; }
 code()    { grep -vE '^\s*#' "$RUNNER"; }
 
 @test "AUCUNE LISTE dans le code — il lit les tables, il ne les recopie pas" {
-  # La regle de `etc/install.manifest`, etendue a la machine. Une liste en dur ici serait un SECOND
+  # La regle de `etc/release.manifest`, etendue a la machine. Une liste en dur ici serait un SECOND
   # inventaire, et celui qui derive est toujours celui qu'on ne relit pas.
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   [ -n "$body" ]
@@ -78,7 +78,7 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
 
 @test "SANS MANIFESTE : refus net, jamais un repli" {
   # « Un desinstalleur qui devine est plus dangereux qu'un qui s'arrete. » Meme contrat que le temoin
-  # de `install.manifest` : manifest absent = erreur, PAS un pass silencieux.
+  # de `release.manifest` : manifest absent = erreur, PAS un pass silencieux.
   LCARS_SYSTEM_MANIFEST="/nonexistent/system.manifest" plan
   [ "$status" -ne 0 ]
   [[ "$output" == *"manifeste introuvable"* ]]

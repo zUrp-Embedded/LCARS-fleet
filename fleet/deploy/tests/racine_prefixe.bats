@@ -9,7 +9,7 @@
 # moment du geste. Celui de `/home/private` n'avait rien — le mur a ete ecrit d'abord, et il a
 # attrape une perte de volume qu'aucune relecture n'aurait vue. Ici non plus il n'y a rien.
 #
-# ⚠ DEUX SSoT, ET RIEN NE LES CONFRONTE. `etc/install.sh` (`LCARS_INSTALL_PREFIX`) pose le runtime ;
+# ⚠ DEUX SSoT, ET RIEN NE LES CONFRONTE. `etc/deploy-release.sh` (`LCARS_INSTALL_PREFIX`) pose le runtime ;
 # `deploy/lib/provision-lib.sh` (`PROV_PREFIX`) le VERIFIE et le reverrouille. Deux defauts
 # separes, dans deux fichiers, jamais compares. Le jour ou l'un bouge, le rail pose a un endroit
 # et verifie a un autre : `60-deploy` annonce « release absente » sur une release parfaitement
@@ -42,7 +42,7 @@ setup() {
 bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {
-  # `etc/install.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
+  # `etc/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
   # systeme). Un mur qui accepterait moins que ce que le produit exige mesurerait autre chose.
   [[ "$ATTENDU" == /*/* ]] || { echo "prefixe inexploitable : « $ATTENDU »" >&2; return 1; }
   [ -n "$BIN_REL" ]

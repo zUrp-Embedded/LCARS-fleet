@@ -29,7 +29,7 @@ fleet/apps/*/tmp
 fleet/.elixir_ls
 
 # ─── LE KIT DE `pack.sh`, ET C'EST CE FICHIER QUI EMPÊCHAIT L'IMAGE DE S'EN SERVIR ──────────────
-# `etc/install.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
+# `etc/deploy-release.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
 # plus une release dans `_build/prod/rel` disent « paquet », et il rend 0 sans gate ni compilation.
 # `pack.sh` produit exactement cette forme. Le rail poste en profite, l'install y roule en trente
 # secondes — et l'image, elle, rebâtissait, parce que les deux lignes qui le lui permettent

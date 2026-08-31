@@ -70,7 +70,7 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "${#BASH_CODE[@]}" -ge 85 ]
   # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
   # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/etc/install.sh$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/etc/deploy-release.sh$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet_v2$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/provision-lib.sh$'
 }
@@ -556,7 +556,7 @@ PYX
 }
 
 @test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
-  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `etc/install.sh` et `provision-lib.sh`
+  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `etc/deploy-release.sh` et `provision-lib.sh`
   # declarent le prefixe chacun de leur cote ; `.claude/hooks/runtime-guard.sh` REFUSE les ecritures
   # dans l'arbre d'install, en le nommant. Si le prefixe bougeait sans que le hook suive, la garde
   # cesserait de proteger l'install reelle — sans un mot, et c'est le pire mode : elle continuerait
@@ -566,7 +566,7 @@ PYX
   # `install.sh`, donc `provision-lib` est en amont — mais `install.sh` joue aussi SEUL, avec son
   # propre repli. Ce qui se verifie est donc l'ACCORD, comme pour `/home/private`. Une designation
   # pourra s'ajouter ; l'inventer ici serait une decision que personne n'a prise.
-  local inst="$REPO/etc/install.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  local inst="$REPO/etc/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
   local guard="$REPO/../.claude/hooks/runtime-guard.sh"
   [ -r "$inst" ] && [ -r "$lib" ] || { echo "MUR 10 — install.sh ou provision-lib.sh illisible" >&2; return 1; }
 

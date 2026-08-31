@@ -5,7 +5,7 @@
 # STATUS: bats tests for 60-deploy check — manifest-driven, source-independent
 #
 # Contract under test: the doctor side of 60-deploy is as BLIND to content as the installer —
-# what it probes under $PREFIX/bin comes from etc/install.manifest, and it needs NO source
+# what it probes under $PREFIX/bin comes from etc/release.manifest, and it needs NO source
 # checkout beyond etc/ (first real container boot proved the old mix.exs guard broke the probe
 # exactly where it matters most). The RO-lock probe (root:fleet) inevitably drifts in an
 # unprivileged sandbox — assertions therefore target the bin/link lines, not the exit code,
@@ -33,7 +33,7 @@ setup() {
   cp "$SRC/lib/docker-endpoint.sh" "$ROOT/fleet/deploy/lib/"
   cp "$SRC/modules.d/60-deploy.sh" "$BATS_TEST_TMPDIR/60-deploy.sh"
 
-  cat > "$ROOT/fleet/etc/install.manifest" <<'EOF'
+  cat > "$ROOT/fleet/etc/release.manifest" <<'EOF'
 # test manifest
 fleet_v2         exec   link
 bwrap_launch.sh  exec
@@ -98,7 +98,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 @test "missing manifest is a probe ERROR (rc 2), not a silent pass" {
-  rm "$BATS_TEST_TMPDIR/repo/fleet/etc/install.manifest"
+  rm "$BATS_TEST_TMPDIR/repo/fleet/etc/release.manifest"
   run_check
   [ "$status" -eq 2 ]
   [[ "$output" == *"manifest introuvable"* ]]
@@ -311,12 +311,12 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
 
 @test "UN FAIT, DEUX RENDUS : le prefixe de la lib EGALE celui de l'installeur de release" {
   # ⚠ CE COUPLAGE ETAIT ECRIT ET NON TENU. `provision-lib.sh` le dit en toutes lettres — « DOIT
-  # egaler le defaut d'etc/install.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
+  # egaler le defaut d'etc/deploy-release.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
   # et RIEN ne le verifiait. Une prose qui demande une synchronisation manuelle est une derive
   # programmee : celui qui deplace l'un des deux ne lit pas forcement le commentaire de l'autre.
   #
   # Ce temoin existe pour le chantier EMPREINTE, qui va precisement deplacer ce prefixe. Sans lui,
-  # la phase B pouvait bouger la lib, laisser `etc/install.sh` derriere, et produire une machine ou
+  # la phase B pouvait bouger la lib, laisser `etc/deploy-release.sh` derriere, et produire une machine ou
   # le provisionnement cherche la release a un endroit ou l'installeur ne l'a pas posee.
   # ⚠ ON SOURCE LA LIB, ON N'EXTRAIT PLUS SON TEXTE — ET C'EST CE TEMOIN QUI A EXIGE LE CHANGEMENT.
   # Il a rougi au deplacement du prefixe, comme prevu, mais pour la MAUVAISE raison : la lib s'etait
@@ -324,7 +324,7 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
   # instrument qui lit une valeur doit la faire calculer par celui qui la definit, sinon il mesure
   # une syntaxe. Troisieme occurrence de cette lecon dans ce chantier ; celle-ci est la derniere.
   local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  local inst="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
   local from_lib from_inst
   # ⚠ `env -i`, ET C'EST ICI QUE CA S'EST DECOUVERT. Le `setup()` de ce fichier EXPORTE
   # `PROV_PREFIX` et `PROV_LINK_DIR` vers des tmpdirs, pour les tests de `60-deploy`. Sourcer la lib
@@ -345,7 +345,7 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../modules.d/10-packages.sh"; }
 @test "UN FAIT, DEUX RENDUS : le repertoire de liens aussi" {
   # Meme classe, meme piege : `PROV_LINK_DIR` se dit « miroir de LCARS_INSTALL_LINK_DIR ».
   local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  local inst="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
   local from_lib from_inst
   from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_LINK_DIR\"")"
   from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"

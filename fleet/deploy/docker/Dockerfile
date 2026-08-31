@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — image LCARS fleet v2 : build multi-stage (mix release) + runtime slim (sshd login-manager)
-# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/install.sh (l'autorité
+# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/deploy-release.sh (l'autorité
 # build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/opt/lcars/runtime RO
 # root:fleet, /usr/local/bin câblé) que le module 60-deploy pose sur WSL. Ce qui converge au
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
@@ -22,7 +22,7 @@ ARG TARGETARCH
 # install.sh fait un chgrp fleet best-effort sur le prefix : le groupe doit exister au build
 # (le runtime stage le recrée avec le MÊME gid — contrat entre stages).
 # (Contrat entre stages : uid 1000 = l'uid par défaut de l'humain du conteneur ; gid 2000 = fleet.)
-# Outillage du GATE : etc/install.sh lance `mix gate`, dont shell_gate exige python3 (test du
+# Outillage du GATE : etc/deploy-release.sh lance `mix gate`, dont shell_gate exige python3 (test du
 # bridge MCP), bats + git (tests hors-mix) — et REFUSE de les sauter en silence
 # (BATS_MISSING_FATAL=1 posé par mix.exs). S'y ajoute LE MONDE QUE CES TESTS EXERCENT : les bats
 # des launchers vérifient les refus de bwrap_launch dans l'ordre (bwrap → tmux → vendor → …), donc
@@ -125,7 +125,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
       echo "image: CHECKOUT NU — aucun .source-revision : la release est COMPILEE dans ce stage, et le gate n'est PAS rejoue (l'attestation vient du paquet, ce build n'en a pas)"; \
     fi \
     && mix local.hex --force && mix local.rebar --force \
-    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/install.sh \
+    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/deploy-release.sh \
          || [ "$?" -eq 3 ]; }
 
 # La plaquette (`assets/github.io`) se genere DEPUIS le code du produit : les cartes, les sieges,

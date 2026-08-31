@@ -2,7 +2,7 @@
 # SOURCE: fleet/deploy/modules.d/60-deploy.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — deploy du runtime : orchestre etc/install.sh (l'autorité build+pose) puis verrouille RO
+# STATUS: PROTO-V2 — deploy du runtime : orchestre etc/deploy-release.sh (l'autorité build+pose) puis verrouille RO
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
@@ -12,7 +12,7 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 RUNTIME_DIR="$(repo_root)/fleet"
-MANIFEST="$RUNTIME_DIR/etc/install.manifest"
+MANIFEST="$RUNTIME_DIR/etc/release.manifest"
 mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/vides sautés
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
 }
@@ -97,7 +97,7 @@ apply() {
 
   # 1-bis. L'OUTILLAGE DU GATE, ET C'EST CE MODULE QUI LE DOIT — pas 10-packages.
   #
-  # `etc/install.sh` joue `mix gate`, et le gate REFUSE de sauter ses moitiés hors-mix en silence :
+  # `etc/deploy-release.sh` joue `mix gate`, et le gate REFUSE de sauter ses moitiés hors-mix en silence :
   # `shell_gate` exige `pytest` (les lcars_tests de token-saver) et `bats` (BATS_MISSING_FATAL=1
   # posé par mix.exs), et plusieurs sondes lisent `pgrep` (procps). Aucun de ces trois n'est un
   # paquet de RUNTIME : les mettre dans 10-packages alourdirait toute installation pour un besoin
@@ -110,10 +110,10 @@ apply() {
   run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
 
   run_step --ok 3 "build de la release" -- \
-    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/install.sh"
+    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/deploy-release.sh"
   local install_rc="$PROV_LAST_RC"
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
-    p_fail "etc/install.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
+    p_fail "etc/deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply
   fi
   release_present || { p_fail "install.sh vert mais release absente ($PREFIX_REL) — incohérence, inspecte"; verdict_apply; }

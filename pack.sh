@@ -7,7 +7,7 @@
 # ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
 #
 # Le gate tournait DEUX FOIS sur le même commit : une fois ici (ou en CI), une fois chez celui qui
-# installe — `etc/install.sh` le rejoue avant `mix release`. Sept minutes payées deux fois, et la
+# installe — `etc/deploy-release.sh` le rejoue avant `mix release`. Sept minutes payées deux fois, et la
 # première ne produisait rien : `gate.yml` n'a aucun `upload`, ses produits de build sont jetés.
 #
 # ⚖ USER 2026-08-23 : « on fait le minimum pour pas jeter le boulot fait ici à chaque fois. »

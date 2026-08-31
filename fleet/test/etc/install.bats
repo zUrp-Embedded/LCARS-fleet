@@ -2,7 +2,7 @@
 # SOURCE: fleet/test/etc/install.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
-# STATUS: bats tests for etc/install.sh atomic-swap helpers (crash-safe deploy)
+# STATUS: bats tests for etc/deploy-release.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
 # a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the
@@ -12,7 +12,7 @@
 load ../support/refute
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
   source "$SCRIPT"
   TMP="$(mktemp -d)"
 }

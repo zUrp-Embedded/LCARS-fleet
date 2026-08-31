@@ -29,7 +29,7 @@ PROVISION_LIB_LOADED=1
 # ─── Données par défaut — une SEULE définition, consommée par tous les modules ───────────────────
 : "${PROV_ROOT:=/opt/lcars}"
 
-: "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/install.sh)
+: "${PROV_PREFIX:=$PROV_ROOT/runtime}"          # install RO du runtime (modèle 3 zones d'etc/deploy-release.sh)
 : "${PROV_LINK_DIR:=/usr/local/bin}"           # symlinks PATH (miroir de LCARS_INSTALL_LINK_DIR d'install.sh)
 : "${PROV_FLEET_GROUP:=fleet}"                 # groupe de lecture des tokens + de l'install RO
 : "${PROV_AUTHORITY_USER:=lcars-authority}"
@@ -222,7 +222,7 @@ _prov_phase_of() { # _prov_phase_of <fichier> -> le libelle de la derniere phase
 }
 
 # `--ok N` : UN CODE QUI N'EST PAS UN ECHEC, DIT AU POINT D'APPEL. Sans lui, un rc qui est un FAIT et
-# non un verdict — `etc/install.sh` rend 3 pour « release posee, cablage PATH incomplet », le cas
+# non un verdict — `etc/deploy-release.sh` rend 3 pour « release posee, cablage PATH incomplet », le cas
 # nominal sous un humain — ferait monter `PROV_FAILED` et le module rendrait un echec sur un succes.
 #
 # ⚠ LA FONCTION REND 0 POUR UN CODE TOLERE, et le code reel reste lisible dans `PROV_LAST_RC` : sous

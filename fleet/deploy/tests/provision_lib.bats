@@ -50,7 +50,7 @@ setup() {
   chmod 0700 "$XDG_RUNTIME_DIR"
 
   # ⚠ MEME LECON, DEUXIEME VARIABLE, ET CELLE-CI EST ARRIVEE PAR LE HAUT. Ces temoins tournent
-  # AUSSI depuis `provision` — `60-deploy` appelle `etc/install.sh`, qui joue le gate — et le runner
+  # AUSSI depuis `provision` — `60-deploy` appelle `etc/deploy-release.sh`, qui joue le gate — et le runner
   # exporte `PROV_SUBSTRATE` (`provision:128`). Un temoin qui declare son substrat sans effacer
   # celui-la mesure donc la machine qui le lance : vert sur un poste WSL, rouge le 2026-08-23 sur
   # `.63` (Linux natif) sur du code identique. Le decor POSSEDE ces deux valeurs ; un test qui en
@@ -727,7 +727,7 @@ module_sh() {
 }
 
 @test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
-  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `etc/install.sh` rend 3
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `etc/deploy-release.sh` rend 3
   # quand la release est posee mais le cablage PATH incomplet — le cas NOMINAL des qu'il tourne en
   # tant qu'humain. 60-deploy portait la tolerance juste sous l'appel... et sous `set -euo pipefail`
   # une commande nue qui rend 3 tue le module AVANT la ligne qui lit `$?`. Le commentaire decrivait
@@ -758,7 +758,7 @@ module_sh() {
 @test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
   # ⚠ LE DEFAUT PRECEDENT AVAIT UNE SECONDE MOITIE, ET ELLE A SURVECU AU CORRECTIF. La branche
   # `PROV_VERBOSE=1` de `run_step` deleguait a `run_quiet`, qui ne connait AUCUNE tolerance et
-  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/install.sh` redevenait un echec des que
+  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/deploy-release.sh` redevenait un echec des que
   # quelqu'un lancait `provision --verbose` — c'est-a-dire exactement quand ca va mal et qu'on
   # regarde. Et `PROV_LAST_RC` n'etait pas pose du tout : l'appelant qui le relit lisait le code d'un
   # appel PRECEDENT, donc prenait une decision sur la mesure d'autre chose.

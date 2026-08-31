@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: etc/install.sh
+# SOURCE: etc/deploy-release.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
 # STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
@@ -27,7 +27,7 @@
 # write /usr/local/bin) and re-posts the symlinks as root right after. Standalone, 3 is a refusal.
 # Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
 # app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
-# etc/install.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
+# etc/release.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
 # content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
 # etc/README.md — and the copies had started to drift.)
 #
@@ -37,9 +37,9 @@
 # into place (an atomic rename at the directory-entry level) — keeping the previous generation as
 # `<name>.prev` for rollback. The live target is never a half-copied tree.
 #
-# Usage: etc/install.sh                        # → /opt/lcars/runtime
-#        LCARS_INSTALL_PREFIX=/x etc/install.sh
-#        LCARS_INSTALL_LINK_DIR=~/bin etc/install.sh
+# Usage: etc/deploy-release.sh                        # → /opt/lcars/runtime
+#        LCARS_INSTALL_PREFIX=/x etc/deploy-release.sh
+#        LCARS_INSTALL_LINK_DIR=~/bin etc/deploy-release.sh
 set -euo pipefail
 
 say() { echo "install: $*" >&2; }
@@ -231,7 +231,7 @@ esac
 
 # The manifest is parsed and validated BEFORE the (long) build: a typo dies in milliseconds,
 # not after three minutes of mix release. Unknown tokens are a build error, never a skip.
-MANIFEST="$ETC_DIR/install.manifest"
+MANIFEST="$ETC_DIR/release.manifest"
 [[ -f "$MANIFEST" ]] || die "manifest absent : $MANIFEST (checkout incomplet ?)"
 declare -a MF_FILES=() MF_MODES=() MF_LINKS=()
 while read -r mf_name mf_mode mf_flag mf_extra; do
