@@ -18,7 +18,7 @@ defmodule Fleet.Labels do
 
   or runtime direct (`Fleet.Labels.awaits_arch()`).
 
-  FOUR families, and the split that matters is scoped-vs-flat. The MUTEX is Gitea's — a label
+  FIVE families, and the split that matters is scoped-vs-flat. The MUTEX is Gitea's — a label
   carrying `exclusive: true` removes the others of its scope when set — but the RULE that a `/` in
   the name means exclusive is OURS: `ForgeClient` derives the field from the name at creation
   (`exclusive: String.contains?(name, "/")`). Gitea reads the FIELD, never the name.
@@ -29,14 +29,17 @@ defmodule Fleet.Labels do
   mutex at all, and nothing reconciles it afterwards (`EditLabelOption` exposes the field; we never
   re-read it).
 
-    * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` — concurrency / escalation.
+    * FLAT LOCKS `lcars-in-flight` / `lcars-awaits-arch` / `lcars-awaits-toolchain` — concurrency,
+      escalation to the arch, escalation to an admin. Three, and the last two are not one lock:
+      `awaits_toolchain/0` says why.
     * SCOPED POSITION `wfmap/<map>` + `stage/<step>` — the workflow_map position; the state lives
       in the label and the mutex is native.
     * SCOPED DESTINATION `destination/workshop` — an INPUT to the burn (which card gets engraved).
+    * SCOPED WAIT `wait/<reason>` — what a ticket alive with no active pod is waiting FOR.
     * FLAT VISUAL `type:*` — decoration, `:` and not `/` so the namespace cannot be mistaken for a
       routing scope. Nothing mechanical reads it back.
 
-  The first three MEAN something to the machine; the fourth means something only to a human. That
+  The first four MEAN something to the machine; the fifth means something only to a human. That
   asymmetry is a trap, not a detail: a wrong routing label breaks something and gets found, a wrong
   visual label breaks nothing and simply MISINFORMS every reader — a doc ticket wearing
   `type:feature`. Hence `type_for_destination/1`: the decoration is DERIVED from the routing
@@ -45,7 +48,7 @@ defmodule Fleet.Labels do
   ⚠ COUNT THIS LIST RIGHT, and re-count it before adding a family: **the sentence that bounds a
   vocabulary is the first thing a reader trusts and the last thing anyone updates.** A closing
   "outside these families a label does not exist" is exactly the shape that keeps being believed
-  while a fifth one ships.
+  while the next family ships.
   """
 
   @in_flight "lcars-in-flight"
@@ -170,16 +173,11 @@ defmodule Fleet.Labels do
   Stage of a ticket closed WITHOUT delivering — its work moved elsewhere (supersede) or was
   dropped.
 
-  It exists because the opposite fact was EMERGENT. Nothing in the tree said "a closed ticket is a
-  delivered ticket": it held only because no actor owns a close gesture (the human's team is
-  `read`, the architect has no close tool, and the four closing paths are all runtime). An
-  invariant that rests on the absence of a tool is one `add a close button` away from lying — and
-  everything downstream reads the closure, not the intent behind it: a dependency releases on a
-  CLOSED blocker whatever killed it.
-
-  So the closure states its own nature, and this label is the half that says "not delivered". Its
-  twin is `stage/merged`. Being in the SCOPED `stage/` family is what makes them mutually
-  exclusive: a ticket cannot carry both, and the forge itself enforces it.
+  It is the half of the closure that says "not delivered". The other half — why a closure must NAME
+  its kind instead of leaving "closed = delivered" to be inferred — is argued where it is enforced,
+  in `Fleet.Forge.Client.close_issue/3`. Its twin is `stage/merged`, and being in the SCOPED
+  `stage/` family is what makes them mutually exclusive: a ticket cannot carry both, and the forge
+  itself enforces it.
   """
   @spec stage_retired() :: String.t()
   def stage_retired, do: @stage_retired
