@@ -27,17 +27,14 @@ defmodule Fleet.CapProfile do
 
     * the `Fleet.CapProfile.Loader` behaviour (`load/1`, `compose/2`,
       `validate/1`) plus the in-memory validated constructor `from_map/1`; and
-    * the single-authority accessor surface for a composed profile's
-      properties (`name/1`, `role_index/1`, `containment/1`, `slot_scope/1`,
-      `lifetime_scope/2`, `deliverable_mode/2`, `brief_kind/2`, …) — each the
-      sole reader of its field, so cross-app callers never re-derive it.
+    * the single-authority accessor surface for a composed profile's properties — each accessor is
+      the SOLE reader of its field, so a cross-domain caller never re-derives one.
 
-  The schema version (LCARS v2.5) is pinned by the code / the bundled schema file path —
-  never by a field embedded in the YAML. Every profile is matched against
-  `priv/schema/cap-profile-v2.5.json` at load time. Modops are
-  matched against `priv/schema/modop-profile.json` (strict — reserved
-  keys forbidden, so a modop cannot override the base profile's
-  containment/name/kind).
+  The schema version (LCARS v2.5) is pinned by the code and by the bundled schema file's path —
+  never by a field embedded in the YAML. Every profile is matched at load time against
+  `priv/cap_profile/schema/cap-profile-v2.5.json`; modops against
+  `priv/cap_profile/schema/modop-profile.json`, which is STRICT — reserved keys are forbidden, so a
+  modop cannot override the base profile's containment/name/kind.
 
   Composition is deterministic: deep-merge last-wins in declared order;
   the canonical JSON encoding (recursive key sort) and the `:crypto` sha256
@@ -58,8 +55,9 @@ defmodule Fleet.CapProfile do
   alias Fleet.CapProfile.DisallowedTools
   alias Fleet.CapProfile.CanonicalJson
 
-  # No `api_version` field: the schema versioning is carried by the code
-  # (release v2), not by a field embedded in the YAML.
+  # No `api_version` field: the schema versioning is carried by the CODE, not by a field embedded
+  # in the YAML — a file that declares its own version can disagree with the validator that reads
+  # it.
   # @enforce_keys: a cap-profile does not exist without its three faces (kind/metadata/spec).
   # The single construction boundary `to_struct/1` always populates them → additive, does not
   # break normal construction; what it forbids = a partial `%CapProfile{}` hand-built outside load.
