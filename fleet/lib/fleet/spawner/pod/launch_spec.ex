@@ -65,16 +65,15 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     # slug parked under `:project` is silently swallowed by the map (last writer wins) and lands
     # here as a non-binary → `nil` → a pod with no remap, which is the exact silence below.
     #
-    # READ, never re-parsed (2026-08-03). The slug is an EXPLICIT input now: every caller that
-    # names a pod already holds it — it is what `rc_name` was BUILT from. Deriving it back out of
-    # the label made the label a load-bearing structure: its format was frozen by this parse, so
-    # adding the ticket number to the Desktop name (`tetris#42_engineer`) would have made
-    # `Slug.valid?` fail → `nil` → a pod with NO cwd remap and NO seed, silently. One string was
-    # doing two jobs; now the label is a label.
+    # READ, never re-parsed. The slug is an EXPLICIT input: every caller that names a pod already
+    # holds it — it is what `rc_name` is BUILT from. Deriving it back out of the label would make
+    # the label a load-bearing structure, its format frozen by that parse: adding the ticket number
+    # to the Desktop name (`tetris#42_engineer`) then makes `Slug.valid?` fail → `nil` → a pod with
+    # NO cwd remap and NO seed, silently. One string doing two jobs.
     #
-    # No fallback to the old parse ON PURPOSE: it would not have saved a missed call site (the
-    # parse fails on the new format anyway), it would only have hidden WHICH site was missed. The
-    # refusal lives at the spawn choke point instead, where the other structural guards are.
+    # And no fallback to such a parse: it would not save a missed call site (the parse fails on the
+    # newer format anyway), it would only hide WHICH site was missed. The refusal lives at the spawn
+    # choke point instead, where the other structural guards are.
     case Keyword.get(opts, :project_slug) do
       p when is_binary(p) ->
         if Fleet.Slug.valid?(p), do: p, else: nil
@@ -174,14 +173,14 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @doc """
   EFFECTIVE Desktop visibility of a pod — the ONE authority, obeyed by all three consumers.
 
-  Visibility used to be derived twice, independently: `Fleet.CapProfile.remote_control?/1` on the
-  Elixir side (the Desktop-slot capture and the slot resume) and a `jq` read of the same field in
-  `claude_launch.sh` (the `--remote-control` flag and `remoteControlAtStartup`). Two derivations of
-  one fact agree only as long as nothing tries to change it — and the moment something does, the
-  half that is not reached produces a pod VISIBLE in Desktop whose slot is never captured nor
-  resumed: visible now, a new slot every boot, which is the "12 archs" bug wearing a new hat.
+  Deriving visibility TWICE — here on the Elixir side (the Desktop-slot capture and the slot
+  resume) and by a `jq` read of the same field in `claude_launch.sh` (the `--remote-control` flag
+  and `remoteControlAtStartup`) — gives two derivations that agree only as long as nothing tries to
+  change it. The moment something does, the half that is not reached produces a pod VISIBLE in
+  Desktop whose slot is never captured nor resumed: visible now, a new slot every boot, which is the
+  "12 archs" bug wearing a new hat.
 
-  So this is the single site, and the launcher stops deriving: `LaunchEnv.build/4` exports the
+  So this is the single site and the launcher does NOT derive: `LaunchEnv.build/4` exports the
   answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it.
 
   The declaration is the FLOOR; the fleet's debug mode (`fleet_v2 start --debug` →
@@ -215,10 +214,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   Read at LAUNCH, like its neighbour: a pod's compression is a property of its own launch, not a
   fleet-wide state that shifts under a pod already running.
 
-  ⚠ **AUCUN APPELANT EN PRODUCTION AUJOURD'HUI, ET LE VERDICT DE CETTE FONCTION N'ATTEINT AUCUN
-  LANCEMENT.** Vérifié par un walker indépendant : hors sa définition et son test, `output_compression?/1`
-  n'est appelée nulle part dans `lib/`, `bin/`, `etc/`, `deploy/` ni `config/`. La composition
-  ci-dessus est donc exacte et inerte.
+  ⚠ **AUCUN APPELANT EN PRODUCTION, ET LE VERDICT DE CETTE FONCTION N'ATTEINT AUCUN LANCEMENT.**
+  Hors sa définition et son test, `output_compression?/1` n'est appelée nulle part dans `lib/`,
+  `bin/`, `etc/`, `deploy/` ni `config/`. La composition ci-dessus est donc exacte et inerte.
 
   **Ce qui manque n'est ni la brique ni le knob** — la brique `vendor/token_saver/` est dans l'image
   (`COPY` présent au Dockerfile), testée par `shell_gate.sh`, et le champ est déclaré au schéma
@@ -226,14 +224,13 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
   monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
   `.claude` humain est exclu À CAUSE de ses hooks. Le porteur v1 visait le tier `user`, que
-  `--setting-sources` exclut sans condition : il n'aurait jamais tiré non plus (mesuré 2026-08-07,
-  cf. `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
+  `--setting-sources` exclut sans condition : il ne tirerait pas davantage (cf.
+  `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
 
   Conséquence pour un auteur de cap-profile : **déclarer `output_compression` ne change rien
   aujourd'hui**, dans les deux sens. Le « brancher » ne serait pas restaurer un porteur perdu mais
   **en inventer un** dans un monde projeté pour n'en monter aucun — une fonctionnalité avec une
-  décision de conception derrière, pas une correction. Ce paragraphe est ce qui empêche de lire
-  l'inertie comme un bug à réparer ici.
+  décision de conception derrière, pas une correction — l'inertie n'est pas un bug à réparer ici.
   """
   @spec output_compression?(term()) :: boolean()
   def output_compression?(cap_profile) do
@@ -325,12 +322,11 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   Earlier entries win on duplicate paths. Modes must be `ro` or `rw`; newline-bearing fields raise.
 
-  THE PROJECT'S OPS TREE IS NOT HERE, and its absence is the point. Every project pod used to carry
-  a read-only bind of `<ops_root>/<project>` — the runtime's own record: what was asked, what was
-  judged, what was proven. It was there so that ONE role could read ONE file out of it, and the
-  brief and the judging criterion now travel as text instead. A producer holding the ledger its own
-  work is scored in is a hazard that buys nothing once the text is in its hands. The architect keeps
-  the tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
+  THE PROJECT'S OPS TREE IS NOT HERE, and its absence is the point. A read-only bind of
+  `<ops_root>/<project>` hands a project pod the runtime's own record — what was asked, what was
+  judged, what was proven — and A PRODUCER HOLDING THE LEDGER ITS OWN WORK IS SCORED IN is a hazard
+  that buys nothing: the brief and the judging criterion travel as TEXT. The architect keeps the
+  tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
   """
   @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path, pod_dir \\ nil) do
@@ -506,16 +502,16 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   defp opts_mounts(opts), do: Keyword.get(opts || [], :mounts, [])
 
-  # THE REFERENCE FACE IS PINNED, and this is the only place in the pod's world where that was not
-  # already true. Its workspace is pinned (`pin_base_sha`), its order is pinned (`brief_sha`), its
-  # matter is pinned (the lot's commit), its deliverable is pinned (`livrable_sha`) — the reference
-  # was a LIVE `--ro-bind` of the host worktree, so it moved under a running pod every time the
-  # human wrote in it or `WorktreeSync` rebased it. A producer could then compose against a state
-  # that never existed as a whole, and had no way to say which one it read.
+  # THE REFERENCE FACE IS PINNED, like everything else in the pod's world: its workspace
+  # (`pin_base_sha`), its order (`brief_sha`), its matter (the lot's commit), its deliverable
+  # (`livrable_sha`). A LIVE `--ro-bind` of the host worktree would move under a running pod every
+  # time the human writes in it or `WorktreeSync` rebases it, so a producer could compose against a
+  # state that never existed as a whole, with no way to say which one it read.
   #
   # Pinned by COPY at the face's head, into the pod's own directory, so the reference also survives
-  # its source: a face removed under a running pod (`project_delete`) used to leave a dangling bind
-  # the pod read as an empty tree, silently. Nothing outside the pod is depended on after spawn.
+  # its source: a face removed under a running pod (`project_delete`) otherwise leaves a dangling
+  # bind the pod reads as an empty tree, silently. Nothing outside the pod is depended on after
+  # spawn.
   #
   # The MOUNT POINT does not move: the copy is bound at the canonical `<face_root>/<project>`, so a
   # pointer written in a brief resolves exactly as before. Source and destination differ here and
