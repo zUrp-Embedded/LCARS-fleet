@@ -130,15 +130,13 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # SLSA triplet at the EXTRACT: `(brief_sha, base_sha=input_sha, livrable_sha)`.
-  # Called from `open_deliverable_pr` — the publication point of the producer deliverable (PR-native
-  # path), NOT `complete/2` (which only carries verdicts without a deliverable). `brief_sha`/`base_sha`
-  # traveled via pod.completed → step_run; `livrable_sha` = the published commit. Emits ONLY for a real
-  # git deliverable (`:deliverable_opts` present = producer) with a ops. brief_sha absent
-  # (degraded) → 2/3 provenance (input→output), never an invented digest (cf. Provenance).
-  # `:ops_root` (opt, default `Fleet.Layout.ops_root()`) = SEAM of the ops root — test
-  # hermeticity (the real root is a hardcoded global path; injecting it makes the
-  # producer→provenance wiring exercisable — otherwise the green never walks the real path).
+  # Triplet de provenance a l'EXTRACTION : le brief, l'entree, le livrable. Emis UNIQUEMENT pour un
+  # vrai livrable git.
+  #
+  # ⚠ UN BRIEF ABSENT DONNE UNE PROVENANCE PARTIELLE — entree vers sortie — JAMAIS UN DIGEST INVENTE.
+  #
+  # La racine d'ops est une COUTURE parce que la vraie est un chemin global en dur : sans
+  # l'injecter, le vert ne marche jamais sur le chemin reel.
   # The project's ops worktree, or `nil` when there is none — a project that was never onboarded
   # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:ops_root` seam as
   # the provenance emission below, for the same reason: the real root is a hardcoded global path.
@@ -152,20 +150,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
     if File.dir?(dir), do: dir
   end
 
-  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE, et elle l'etait (BL-6-43). Ce garde rendait `:ok` sur un
-  # `else` fourre-tout : une brique pouvait etre publiee, mergee et scellee sans qu'une seule ligne
-  # n'ait jamais dit que sa preuve n'avait pas ete ECRITE. Vu du sceau, ce silence est indiscernable
-  # d'une gravure ratee (qui, elle, loggue) — donc la seule question qu'on pouvait poser en aval
-  # etait « faut-il bloquer une brique sans preuve ? », alors que la vraie etait « pourquoi n'y en
-  # a-t-il pas ? » et que personne ne pouvait y repondre.
+  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE. Un `else` fourre-tout rendant `:ok` laisse une brique
+  # etre publiee, mergee et scellee sans qu'une ligne n'ait dit que sa preuve n'avait pas ete
+  # ECRITE — et vu du sceau, ce silence est indiscernable d'une gravure RATEE, qui elle loggue. La
+  # seule question posable en aval devient alors « faut-il bloquer une brique sans preuve ? » quand
+  # la vraie est « pourquoi n'y en a-t-il pas ? », a laquelle plus personne ne peut repondre.
   #
-  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se nomment :
-  #   - pas de `deliverable_opts` ICI est une ANOMALIE, pas le cas nominal : cette fonction n'est
-  #     appelee que depuis `open_deliverable_pr`, le point de publication d'un livrable producteur.
-  #     Le chemin verdict-seul (`complete/2`) ne passe pas par la.
-  #   - pas d'ops = le projet n'a pas de face atelier. Meme fait que le `{:work_dir_missing, _}` de
-  #     `BriefArtifact`, qui le dit LOUD et le declare PERMANENT jusqu'a l'onboard — ici il ne
-  #     disait rien.
+  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se NOMMENT :
+  #   - l'absence d'options de livrable ICI est une ANOMALIE, pas le cas nominal — le chemin
+  #     verdict-seul ne passe pas par cette fonction ;
+  #   - l'absence d'ops dit que le projet n'a pas de face atelier : un fait PERMANENT jusqu'a
+  #     l'onboard, qui doit se dire aussi fort ici qu'ailleurs.
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
     repo = Map.get(step_run, :repo)
@@ -441,17 +436,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
         repo: repo
       )
 
-    # C2 — THE MACHINE VERDICT RIDES THE REVIEW ITSELF. C1 engraved it as an ops object, which is
-    # the right ARCHIVE and the wrong transport: the gate that has to consume it (`Jury`) already
-    # fetches every review body in one call, while the ops store is write-only. Appended here,
-    # `findings_v1` reaches the gate with no extra request and no new read path, scoped to the very
-    # review that carried it -- a superseded review takes its findings out of play WITH it.
+    # ⚠ LE VERDICT MACHINE VOYAGE SUR LA REVUE ELLE-MEME. Le graver comme objet d'archive est le bon
+    # ARCHIVAGE et le mauvais TRANSPORT : la porte qui doit le consommer lit deja tous les corps de
+    # revue en un appel, la ou l'archive est en ecriture seule. Ajoute ici, il l'atteint sans requete
+    # ni chemin de lecture supplementaires — et une revue supersedee emporte ses conclusions AVEC elle.
     #
-    # OUTSIDE `Pinning.render`, deliberately, and this is the same lesson the conflict rail already
-    # paid for its `[conflict-engine:...]` marker: a pinned body is SUMMARIZED, so anything folded
-    # into the prose is dropped exactly on the long verdicts -- the ones that carry the findings
-    # worth reading. Rendered inside, the wire would work on short reviews only, which is where
-    # nobody would notice it missing.
+    # ⚠ HORS DU RENDU EPINGLE, DELIBEREMENT : un corps epingle est RESUME, donc ce qu'on y fond
+    # disparait exactement sur les verdicts LONGS — ceux dont les conclusions valent d'etre lues.
+    # Rendu dedans, le fil marcherait sur les revues courtes, c'est-a-dire la ou personne ne
+    # remarquerait son absence.
     body = body <> Fleet.FindingsWire.render(Map.get(step_run, :review_findings))
 
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
