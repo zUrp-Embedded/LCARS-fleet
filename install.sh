@@ -41,6 +41,13 @@
 
 set -euo pipefail
 
+# La version de CETTE porte. Elle s'affiche (`--version`) parce qu'une ligne de README doit pointer
+# une URL PAR VERSION : servir depuis `HEAD` est le grief que `curl_bash_2026.md` nomme « gratuit à
+# corriger », et une porte qui ne sait pas dire laquelle elle est ne peut pas être rapportée.
+LCARS_DOOR_VERSION="2026-08-31"
+
+main() {
+
 if [[ -n "${NO_COLOR:-}" ]] || [[ "${PROV_COLOR:-}" == "0" ]] \
    || { [[ -z "${PROV_COLOR:-}" ]] && [[ ! -t 1 ]]; }; then
   AMBER=''; CYAN=''; W=''; G=''; R=''; N=''; BA=''
@@ -50,18 +57,34 @@ else
   G=$'\033[1;32m'; R=$'\033[1;31m'; N=$'\033[0m'; BA=$'\033[1;38;5;214m'
 fi
 
-if [[ ! -f "${BASH_SOURCE[0]:-}" ]]; then
+# ─── LA PORTE REFUSE ROOT ───────────────────────────────────────────────────
+#
+# ⚠ `curl | sudo bash` EST LE PIRE MOTIF QUI SOIT, et le refuser par construction vaut mieux que le
+# déconseiller. Le sudo est demandé par le délégué du rail poste, à SON début, après la validation —
+# jamais ici, où personne n'a encore rien choisi.
+if [[ "$EUID" -eq 0 ]]; then
   echo ""
-  echo "  ${R}ERREUR : install.sh doit être exécuté depuis un fichier, pas pipé depuis stdin.${N}"
-  echo "  Télécharge d'abord :"
-  echo "    wget -O /tmp/install.sh https://raw.githubusercontent.com/lordzurp/LCARS-fleet/main/install.sh"
-  echo "    sudo bash /tmp/install.sh --workstation   # ou --box"
+  echo "  ${R}Cette porte ne se lance pas en root.${N}"
+  echo "  Elle mesure, elle propose, elle délègue — rien de tout cela n'a besoin de privilèges."
+  echo "  Le rail poste demandera sudo lui-même, une fois, quand tu auras choisi :"
+  echo "    bash $0 --workstation"
   exit 1
 fi
 
-# `${BASH_SOURCE[0]}` est NON LIÉ quand bash lit sur stdin : sous `set -u`, cette ligne meurt avant
-# la garde ci-dessus si elle remonte. Le repli `:-$0` et cette position sont la même précaution.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# ⚠ `${BASH_SOURCE[0]}` EST NON LIÉ QUAND BASH LIT SUR STDIN, et c'est le cas NOMINAL du geste voulu
+# (`curl … | bash`). Le repli `:-$0` tient sous `set -u` ; ce qui suit distingue les deux mondes :
+#   · lancée depuis un fichier  → `SCRIPT_DIR` est le clone, le préflight y vit
+#   · lancée depuis un flux     → il n'y a pas de clone, donc on en fait un (branche standalone)
+#
+# ⚠ ET LE REFUS DE STDIN A DISPARU (⚖ user 2026-08-31 : « c'est une question technique, pas un choix
+# dogmatique »). Il n'achetait que deux des cinq griefs du pipe, et les deux ont un meilleur remède :
+# la troncature par `{ main "$@"; }` en dernière ligne — mesuré, 0 fuite sur 162 troncatures contre
+# 67 pour la forme sans `main` — et la localisation par cette branche-ci.
+if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SCRIPT_DIR=""
+fi
 
 # ⚠ `fleet_human_name` A DISPARU D'ICI (⚖ user 2026-08-30). Elle allait demander à
 # `forge-gestures.sh` le nom du compte que la recette sèmerait, pour que le bandeau et l'étape 3 le
@@ -101,8 +124,20 @@ while [[ $# -gt 0 ]]; do
     --forge-project)          PASSTHRU+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     --) shift; DELEGATE_ARGS=("$@"); break ;;
+    --version)
+      # ⚠ ELLE DOIT MARCHER PIPÉE, DONC SANS LIRE SON PROPRE FICHIER. C'est tout l'intérêt : celui
+      # qui rapporte un problème sur une porte qu'il a pipée doit pouvoir dire LAQUELLE.
+      echo "$LCARS_DOOR_VERSION"; exit 0 ;;
     --help|-h)
-      sed -n '/^#     install.sh — LA porte/,/^#     système/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
+      # Pipée, `${BASH_SOURCE[0]}` est non lié : l'aide se lit dans le fichier quand il y en a un,
+      # et se réduit à l'essentiel sinon. Une aide qui exige un fichier est une porte fermée.
+      if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+        sed -n '/^#     install.sh — LA porte/,/^#     système/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
+      else
+        echo "install.sh $LCARS_DOOR_VERSION — LA porte d'entrée."
+        echo "  --workstation | --box   le rail · --bench  les annexes · --check  sonde read-only"
+        echo "  --port-forge N | --port-deck N | --forge-project N | --substrate S"
+      fi
       exit 0 ;;
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
   esac
@@ -585,3 +620,25 @@ fi
 echo ""
 echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/workstation"
 exec "$WORKSTATION" up "${PASSTHRU[@]}"
+
+}
+
+# ⚠ `{ main "$@"; }` ET PAS `main "$@"` — LA DIFFERENCE EST MESUREE, PAS ESTHETIQUE.
+#
+# `curl | bash` fait lire le script AU FIL DE L'EAU : un flux coupe laisse bash executer ce qu'il a
+# deja lu. Tout mettre dans des fonctions et n'appeler qu'a la fin ferme presque le trou — presque :
+# une troncature qui tombe exactement sur `main` ou `main ` donne a bash une commande VALIDE sans
+# arguments, et il APPELLE la fonction. Deux octets, et tout s'execute.
+#
+# L'accolade ferme ce reste : `{ main` non fermee est une erreur de syntaxe, jamais une commande.
+# Banc a toutes les troncatures possibles (`work/…/chantier-porte-install-2026-08-30/bancs/`) :
+#
+#     sans main()      41 fuites / 97
+#     main "$@"         2 vraies / 118
+#     { main "$@"; }    0 vraies / 123
+#
+# `curl_bash_2026.md` ecrit « Resolu : la troncature (main(){…} en derniere ligne) ». C'est vrai a
+# deux octets pres, et ces deux octets executent le script entier.
+#
+# RIEN NE DOIT SUIVRE CETTE LIGNE.
+{ main "$@"; }

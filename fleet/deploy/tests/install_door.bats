@@ -75,11 +75,6 @@ setup() {
 }
 
 
-@test "la porte refuse d'etre pipee, et c'est un REFUS, pas un crash" {
-  run --separate-stderr bash -c "cat '$SRC' | bash -s -- --box"
-  [ "$status" -ne 0 ]
-  [ -z "$stderr" ]
-}
 
 @test "l'aide marche SANS docker — un --help qui exige l'outil qu'il documente est une porte fermee" {
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help
@@ -334,14 +329,6 @@ setup() {
   [ "$annonce" -lt "$pause" ]
 }
 
-@test "stdin reste REFUSE — l'arbitrage de l'user, pas une commodite" {
-  # ⚖ « si on refuse stdin c'est que ça nous a emmerdé, je paye pas une 2e fois. » Le drapeau sert
-  # le cas sans TTY sur un fichier POSE, jamais un pipe.
-  run bash -c "cat '$SRC' | bash -s -- --box"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"pas pipé depuis stdin"* ]]
-  [[ "$output" == *"wget -O"* ]]
-}
 
 @test "REGRESSION — tout ce qui suit « -- » atteint le delegue, VERBATIM" {
   # ⚠ SANS CA, `--bench` ETAIT UNE IMPASSE. Il delegue a `bench-up.sh`, qui a ses propres options
@@ -764,4 +751,104 @@ SPY
   [ "$status" -eq 1 ]
   [[ "$output" == *"workstation introuvable"* ]]
   [[ "$output" == *"checkout"* ]]
+}
+
+# ─── E3 : LA PORTE EST PIPEABLE, ET C'EST MESURE ────────────────────────────────────────────────
+#
+# ⚠ DEUX TEMOINS SONT MORTS ICI, ET ILS DISAIENT L'INVERSE DE CEUX-CI. « la porte refuse d'etre
+# pipee » et « stdin reste REFUSE » gardaient un arbitrage devenu faux (⚖ user 2026-08-31 : « c'est
+# une question technique, pas un choix dogmatique »). Le refus n'achetait que DEUX des cinq griefs du
+# pipe — la troncature et la localisation — et les deux ont un meilleur remede. Ce qui suit les
+# mesure au lieu de les eviter.
+
+@test "TRONCATURE : une porte pipee et COUPEE ne fait RIEN" {
+  # `curl | bash` fait lire le script AU FIL DE L'EAU : un flux coupe laisse bash executer ce qu'il
+  # a deja lu. C'etait le grief REEL du pipe, et le seul que le refus achetait vraiment.
+  local n; n="$(wc -c < "$SRC")"
+  local p c out
+  for p in 10 25 50 75 90 95 98 99; do
+    c=$(( n * p / 100 ))
+    out="$(head -c "$c" "$SRC" | bash -s -- --box 2>&1 | grep -c 'Préflight\|RAIL BOÎTE\|Provisionnement' || true)"
+    [ "$out" -eq 0 ] || { echo "FUITE a $p% : $out ligne(s) executee(s)" >&2; return 1; }
+  done
+}
+
+@test "TRONCATURE : l accolade ferme le trou que « main » seul laisse ouvert" {
+  # ⚠ DEUX OCTETS, ET TOUT S'EXECUTE. Une troncature qui tombe exactement sur `main` ou `main ` donne
+  # a bash une commande VALIDE sans arguments : il APPELLE la fonction. `curl_bash_2026.md` ecrit
+  # « Resolu : la troncature (main(){…} en derniere ligne) » — c'est vrai a ces deux octets pres.
+  # `{ main` non fermee, elle, est une erreur de syntaxe, jamais une commande.
+  run tail -1 "$SRC"
+  [ "$output" = '{ main "$@"; }' ]
+  # ET RIEN NE SUIT : une ligne de plus apres l'appel s'executerait sur un flux tronque plus loin.
+  local dernier; dernier="$(grep -n '^{ main "\$@"; }$' "$SRC" | cut -d: -f1)"
+  local total; total="$(wc -l < "$SRC")"
+  [ "$dernier" -eq "$total" ]
+}
+
+
+@test "la version s affiche, et elle marche PIPEE" {
+  # Celui qui rapporte un probleme sur une porte qu'il a pipee doit pouvoir dire LAQUELLE. Donc
+  # `--version` ne lit pas son propre fichier : il n'y en a pas.
+  run bash "$SRC" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+  local v="$output"
+  run bash -c "cat '$SRC' | bash -s -- --version"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$v" ]
+}
+
+@test "l aide marche PIPEE aussi — une aide qui exige un fichier est une porte fermee" {
+  run bash -c "cat '$SRC' | bash -s -- --help"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--workstation"* ]]
+  [[ "$output" == *"--box"* ]]
+}
+
+@test "LA PORTE REFUSE ROOT — « curl | sudo bash » ne peut pas exister" {
+  # ⚠ LE REFUSER PAR CONSTRUCTION VAUT MIEUX QUE LE DECONSEILLER. Elle mesure, elle propose, elle
+  # delegue : rien de tout cela n'a besoin de privileges. Le sudo est demande par le delegue du rail
+  # poste, a SON debut, apres la validation.
+  #
+  # On ne joue pas la porte en root (ces temoins ne montent jamais) : on mesure la garde et sa
+  # position — avant toute mesure, avant tout parsing d'option.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'EUID" -eq 0' <<<"$code"
+  local l_garde l_parse
+  l_garde="$(grep -n 'EUID" -eq 0' "$SRC" | head -1 | cut -d: -f1)"
+  l_parse="$(grep -n '^while \[\[ \$# -gt 0 \]\]' "$SRC" | head -1 | cut -d: -f1)"
+  [ "$l_garde" -lt "$l_parse" ]
+}
+
+@test "AUCUN code hors fonction : le corps entier vit dans main" {
+  # C'est la premisse de tout ce qui precede. Une seule ligne executable au niveau top s'executerait
+  # sur un flux coupe n'importe ou apres elle.
+  #
+  # ⚠ LE CRITERE EST LA POSITION, PAS L'ANALYSE SYNTAXIQUE. Une premiere version comptait les blocs
+  # et fermait `main` au premier `}` en colonne 0 — c'est-a-dire a la fin de la PREMIERE fonction
+  # definie dedans. Elle accusait du code parfaitement enferme. Le corps de `main` est simplement ce
+  # qui vit entre `main() {` et la derniere accolade, celle qui precede l'appel.
+  local l_main l_appel total
+  l_main="$(grep -n '^main() {$' "$SRC" | head -1 | cut -d: -f1)"
+  l_appel="$(grep -n '^{ main "\$@"; }$' "$SRC" | head -1 | cut -d: -f1)"
+  total="$(wc -l < "$SRC")"
+  [ -n "$l_main" ] && [ -n "$l_appel" ]
+  [ "$l_appel" -eq "$total" ]
+
+  # AVANT `main` : rien d'executable. Un `set -e`, une constante, des commentaires — c'est tout.
+  run bash -c '
+    head -n $(( $2 - 1 )) "$1" | awk "
+      /^[[:space:]]*#/ { next } /^[[:space:]]*\$/ { next }
+      /^set -euo pipefail\$/ { next } /^LCARS_DOOR_VERSION=/ { next }
+      { print NR \": \" \$0 }"' _ "$SRC" "$l_main"
+  [ -z "$output" ] || { echo "code executable AVANT main :" >&2; echo "$output" >&2; return 1; }
+
+  # ENTRE la fin de `main` et l'appel : rien non plus.
+  run bash -c '
+    sed -n "$2,$3p" "$1" | awk "
+      /^[[:space:]]*#/ { next } /^[[:space:]]*\$/ { next } /^\}\$/ { next }
+      /^\{ main / { next }
+      { print \$0 }"' _ "$SRC" "$(( l_appel - 20 ))" "$l_appel"
+  [ -z "$output" ] || { echo "code executable ENTRE main et son appel :" >&2; echo "$output" >&2; return 1; }
 }
