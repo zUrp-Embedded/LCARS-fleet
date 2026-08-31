@@ -56,8 +56,11 @@ defmodule Fleet.Forge.Client.Repo do
 
   @doc """
   Generates a fresh repository from a native forge template, copying content, labels, and topics
-  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with
-  but not branch protection. Returns `:template_missing` on 404 and `:already_exists` on 409.
+  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with `${VAR}`
+  expansion (the files the template lists in `.gitea/template`), labels copied WITH their
+  descriptions, and its own FRESH history — not a fork, no link back. Webhooks and branch protection
+  are deliberately NOT copied: `protect_branch/3` stays the single branch-protection writer.
+  Returns `:template_missing` on 404 and `:already_exists` on 409.
   """
   @spec generate_repo(String.t(), String.t(), keyword()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
