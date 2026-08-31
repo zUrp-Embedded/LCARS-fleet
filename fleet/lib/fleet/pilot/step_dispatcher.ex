@@ -547,14 +547,11 @@ defmodule Fleet.Pilot.StepDispatcher do
          issue,
          opts
        ) do
-    # The GENRE gate first (chantier face-projet): a `destination/workshop` label on the routeless
-    # issue burns the WORKSHOP card — that path is a base function of every project, whatever its
-    # declared card, so it never transits .lcars.json. It said "the OPS card" until the third
-    # tree existed: the deliverable lands on `workshop`, and `ops` is the record the runtime
-    # keeps, which no producer writes. Read ONCE, here: the engraved `wfmap/*`
-    # stays the only route afterwards. Otherwise: THE PROJECT'S declared card (.lcars.json,
-    # F-29 chain) — legacy/undeclared project → the delegation default card. The criticality
-    # mechanic IS the card choice.
+    # LE GENRE D'ABORD : un label de destination sur une issue sans route brule la carte de cette
+    # face-la. C'est une fonction de BASE de tout projet, quelle que soit sa carte declaree, donc ce
+    # chemin ne transite jamais par la declaration. Lu UNE fois, ici — la route gravee reste ensuite
+    # la seule. Sinon : la carte DECLAREE du projet, ou celle par defaut s'il n'en declare pas. La
+    # mecanique de criticite EST le choix de la carte.
     labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
 
     workflow_map_name =
@@ -575,13 +572,10 @@ defmodule Fleet.Pilot.StepDispatcher do
     end
   end
 
-  # LE CAS QUI SURVIT au refus d'onboarding (`Declaration.refute_unloadable_card/2`) : une carte
-  # DECLAREE que le catalogue a perdue depuis. Ce site ne se rabat PAS, et c'est delibere — poser
-  # une route est DURABLE, et une route engravee sous une carte que personne n'a choisie fait
-  # tourner le projet sous une criticite que personne n'a declaree. `Roles.load_project_card/2`
-  # nomme deja cette substitution « pire qu'echouer » ; elle y est acceptable parce qu'elle LIT une
-  # politique, ici elle ECRIT la route. Les deux lecteurs de la meme declaration n'ont donc pas la
-  # meme direction sure, et c'est pourquoi un repli commun serait le mauvais partage.
+  # ⚠ CE SITE NE SE RABAT PAS, ET LA DIRECTION SURE DEPEND DE QUI LIT OU QUI ECRIT. Poser une route
+  # est DURABLE : une route engravee sous une carte que personne n'a choisie fait tourner le projet
+  # sous une criticite que personne n'a declaree. Un repli est acceptable la ou l'on LIT une
+  # politique ; ici on ECRIT la route — donc un repli COMMUN aux deux serait le mauvais partage.
   #
   # Ce qui manquait n'etait pas le repli, c'etait la TRACE : l'issue echouait a chaque tick,
   # indefiniment, sous un warning que personne ne relit, pendant que le projet etait rendu `ready`.

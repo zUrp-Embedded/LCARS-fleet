@@ -63,24 +63,12 @@ defmodule Fleet.Forge.Client do
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
   defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
 
-  # ⚠ ET LE MEME TROU A ETE TROUVE DEUX FOIS LE MEME JOUR, PAR DEUX APPELANTS. Vanille l'a rencontre
-  # par `Fleet.MCP.PodTools.Probe` (`forge().get_file`, chemin de `run_probe`, l'outil des juges) et
-  # a pose `probe_seam_contract_test.exs` ; bob l'a rencontre par `Delegation.ForgeWriter` et a pose
-  # `seam_conformance_test.exs`, qui verifie les cinq seams a la fois. Les deux murs restent : le
-  # premier garde CE seam-la, le second garde la classe. Un defaut trouve deux fois par deux chemins
-  # n'est pas un doublon a arbitrer — c'est la mesure de sa surface.
+  # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI COMME SON DEFAUT, pas parce que la facade
+  # voudrait grossir : une fonction sortie dans un sous-module sans etre reexposee ici fait mourir
+  # tout appel qui passe par ce seam.
   #
-  # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI, PAS PARCE QUE LA FACADE VOUDRAIT GROSSIR.
-  # `Delegation.ForgeWriter` declare six callbacks et pointe son defaut sur `Fleet.Forge.Client`.
-  # Cinq sont definis ici meme ; `put_file/4` est le seul a avoir ete sorti dans `Client.Files` sans
-  # etre reexpose. La demande d'outillage mourait donc en
-  # `{:seam_misconfigured, Fleet.Forge.Client, [put_file: 4]}` — mesure du 2026-08-21, un architecte
-  # qui tirait une toolchain rust, deux fois de suite.
-  #
-  # Le garde a fait exactement son travail : il a nomme le module ET la fonction manquante au lieu
-  # de lever un `UndefinedFunctionError` au fond de la delegation. Ce qui manquait est en amont —
-  # rien ne verifiait que l'implementation PAR DEFAUT d'un seam tient le contrat qui la designe.
-  # C'est ce que ferme desormais `seam_conformance_test.exs`, pour les cinq seams a la fois.
+  # Le trou etait EN AMONT : rien ne verifiait qu'une implementation PAR DEFAUT tient le contrat qui
+  # la designe. C'est ce qu'un temoin de conformite ferme desormais, pour tous les seams a la fois.
   @spec put_file(String.t(), String.t(), String.t(), Keyword.t()) ::
           {:ok, term()} | {:error, term()}
   defdelegate put_file(repo, path, content, opts), to: Fleet.Forge.Client.Files
@@ -935,21 +923,18 @@ defmodule Fleet.Forge.Client do
   # numbers. Fail-fast preserved: an error on a single PR fails the whole set — we never dispatch on
   # a partial view, the same rule as pagination.
   #
-  # ─── POURQUOI N REQUETES, ET POURQUOI ELLES SONT MAINTENANT PARALLELES (BL-6-40) ──────────────
-  # The N+1 is STRUCTURAL on the forge side: Gitea 1.26's `/pulls` does not carry `assigned_by`, so
-  # scoping goes through `/issues?type=pulls` — which returns ISSUE objects, with no `head.sha` and
-  # no `requested_reviewers`. Hence one `get_pull` per number, and no workaround removes it until
-  # the forge returns the field.
+  # ⚠ LE N+1 EST STRUCTUREL COTE FORGE : l'endpoint qui porte le scoping rend des objets ISSUE,
+  # sans `head.sha` ni reviewers demandes — d'ou une requete par numero, qu'aucun contournement ne
+  # retire tant que la forge ne rend pas le champ.
   #
-  # What IS removable is the SEQUENTIALITY. These requests are independent and side-effect free;
-  # chaining them made the tick pay the SUM of the latencies where the maximum suffices.
-  # `max_concurrency: 8` and not unbounded: they share the ForgeClient's Finch pool, and opening N
-  # connections to a forge to read N PRs would trade slowness for saturation.
+  # Ce qui EST retirable est la SEQUENTIALITE : ces requetes sont independantes et sans effet de
+  # bord, et les enchainer faisait payer au tick la SOMME des latences la ou le maximum suffit. La
+  # concurrence est BORNEE parce qu'elles partagent le meme pool de connexions — en ouvrir N
+  # echangerait de la lenteur contre de la saturation.
   #
-  # ⚠ The `updated_at` workaround (cache the complete shape and re-read only the modified PRs) is
-  # deliberately NOT DONE: the invalidation key would be `updated_at`, so a single Gitea mutation
-  # that does not bump it would serve a STALE PR to a merge decision. It demands VERIFYING which
-  # mutations bump it (review submitted, push on the head, reviewer change), not assuming it.
+  # ⚠ ET LE CACHE SUR `updated_at` EST DELIBEREMENT NON FAIT : la clef d'invalidation serait ce
+  # champ, donc une seule mutation qui ne le bouge pas servirait une PR PERIMEE a une decision de
+  # MERGE. Le faire demanderait de VERIFIER quelles mutations le bougent, pas de le supposer.
   defp fetch_pulls(numbers, repo, opts) do
     numbers
     |> Task.async_stream(&get_pull(repo, &1, opts),
@@ -1203,10 +1188,9 @@ defmodule Fleet.Forge.Client do
 
   # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
   #
-  # LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE. La regle de redaction jette la recette et
-  # l'horodatage d'une mesure faite sur NOTRE suite — ils ne survivent pas au correctif. Celle-ci
-  # porte sur un SYSTEME EXTERNE dont le comportement peut changer sans nous : sans sa version, la
-  # phrase n'est plus verifiable, et un lecteur ne peut pas savoir si elle vaut encore.
+  # ⚠ LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE : la mesure porte sur un SYSTEME EXTERNE
+  # dont le comportement peut changer sans nous. Sans sa version, la phrase n'est plus verifiable et
+  # un lecteur ne peut pas savoir si elle vaut encore.
   #
   # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
   # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
@@ -1738,19 +1722,17 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  # The NAME carries the protocol; the color carries the GLANCE. Operator palette, 2026-08-03.
+  # Le NOM porte le protocole, la couleur porte le COUP D'OEIL.
   #
-  # The former default was `#ededed` — near-white on a white UI. Every label outside the four
-  # `stage/*` landed there, so `genre/doc` was invisible on the very tickets whose genre it
-  # declares: present in the API, absent to the human. A label nobody can see is a label that is
-  # not there, and it fails silently in the one direction that matters (an operator scanning a
-  # list concludes the marker was never posed).
+  # ⚠ UN LABEL QUE PERSONNE NE VOIT EST UN LABEL QUI N'EST PAS LA, et il echoue dans la seule
+  # direction qui compte : un operateur qui parcourt une liste conclut que le marqueur n'a jamais
+  # ete pose. Un defaut quasi-blanc sur une interface blanche produit exactement ca — present dans
+  # l'API, absent a l'humain.
   #
-  # One tint per PROTOCOL family, and the four `stage/*` keep a progression readable without a
-  # legend (blue → yellow → purple → green = brief-review → build → review → merged). The palette
-  # is reserved for labels that MEAN something mechanically; the decorative `type:*` register gets
-  # a visible neutral instead of borrowing a protocol tint, so a color rhyme never suggests a
-  # kinship the code does not have.
+  # Une teinte par famille de PROTOCOLE, et les etapes gardent une progression lisible sans legende.
+  # La palette est reservee a ce qui SIGNIFIE quelque chose mecaniquement : le registre decoratif
+  # recoit un neutre visible plutot que d'emprunter une teinte de protocole, pour qu'une rime de
+  # couleur ne suggere jamais une parente que le code n'a pas.
   defp label_color(@lbl_in_flight), do: "#FF9900"
   defp label_color(@lbl_awaits_arch), do: "#CC6666"
   defp label_color(@lbl_destination_workshop), do: "#33BBCC"
