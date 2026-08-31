@@ -61,10 +61,10 @@ defmodule Fleet.Credentials.RoleToken do
 
   KEYED BY THE ACCOUNT, and that is the same distinction the forge frontier draws everywhere else:
   a token belongs to an ACCOUNT (`<tier>_<role>`), while a role name is only unique inside its own
-  catalogue. It used to be keyed by the bare role, so two catalogues each declaring a `writer` wrote
-  and read ONE `writer.gitea_token`: whichever was provisioned second took over the other's
-  identity, and nothing could report it — the file exists and its content is a valid token. The
-  ACCOUNT was already prefixed for exactly that reason; the file was not.
+  catalogue. Keyed by the BARE ROLE, two catalogues each declaring a `writer` write and read ONE
+  `writer.gitea_token`: whichever is provisioned second TAKES OVER the other's identity, and nothing
+  can report it — the file exists and its content is a valid token. The ACCOUNT is prefixed for
+  exactly that reason; the file must be too.
 
   A role no catalogue declares has NO account, therefore no token path — `:error`. That closes the
   door the flat namespace left open: a caller could name any string and be handed a credential for
@@ -105,13 +105,13 @@ defmodule Fleet.Credentials.RoleToken do
     end
   end
 
-  # ⚠ LE JETON SE DEMANDE, IL NE SE LIT PLUS. Il vivait en `0640 root:fleet` — donc lisible par TOUT
-  # humain de la boite, et ce groupe etait une PROJECTION de l'equipe `humans` de la forge, refaite
-  # toutes les trente secondes. Le droit de porter une identite de travail avait donc la peremption
-  # d'un cache : quelqu'un que la forge avait retire lisait encore jusqu'au tour suivant.
+  # ⚠ LE JETON SE DEMANDE, IL NE SE LIT PAS. Un fichier en `0640 root:fleet` est lisible par TOUT
+  # humain de la boite, et ce groupe est une PROJECTION de l'equipe `humans` de la forge, refaite
+  # periodiquement : le droit de porter une identite de travail aurait alors LA PEREMPTION D'UN
+  # CACHE, et quelqu'un que la forge a retire lirait encore jusqu'au tour suivant.
   #
-  # La question est maintenant posee au service d'autorite, qui la pose a la forge. Elle ne porte
-  # plus de peremption, et le service sait QUI demande — le noyau le lui dit.
+  # La question est posee au service d'autorite, qui la pose a la forge. Elle ne porte pas de
+  # peremption, et le service sait QUI demande — le noyau le lui dit.
   #
   # ⚠ LE CONTRAT NE BOUGE PAS : un jeton, ou `nil`. Tout le fail-closed des appelants
   # (`RoleIdentity.for_role/1` -> `{:error, :role_token_unavailable}`) continue de valoir sans une
@@ -150,16 +150,14 @@ defmodule Fleet.Credentials.RoleToken do
   # (`no_role_token`). Garder ce stat ici produirait un diagnostic sur un objet dont ce process n'est
   # plus responsable — et apres la fermeture des modes, il ne pourrait meme plus le traverser.
 
-  # ⚠ `dir/0` EST DEVENU PRIVE LE 2026-08-25, IL N'A PAS DISPARU — ET LA NUANCE EST UNE MESURE.
+  # ⚠ `dir/0` EST PRIVE, PAS SUPPRIME — ET LA NUANCE EST UNE MESURE. « Aucun appelant dans `lib/`
+  # ni `bin/` » est vrai des appels EXTERNES seulement : `path_for/1` l'appelle, dans ce module
+  # meme, et le supprimer casserait la construction du chemin. Un compte d'appelants qui ne
+  # distingue pas l'interne de l'externe conclut a mort sur du vivant.
   #
-  # Il etait annonce « sans aucun appelant dans `lib/` ni `bin/` », et c'etait vrai des appels
-  # EXTERNES. Le compilateur a dit le reste : `path_for/1` l'appelle, dans ce module meme. Le
-  # supprimer cassait la construction du chemin — et `path_for/1` est vivant, ce sont les fixtures de
-  # la suite qui l'emploient pour poser un jeton la ou la regle de nommage le veut.
-  #
-  # Ce qui est retire est donc l'ACCESSEUR PUBLIC : plus personne hors d'ici ne demande « ou vivent
-  # les jetons », parce que plus personne hors d'ici n'a de raison d'y aller. Le BEAM ne lit aucun de
-  # ces fichiers ; il demande au service d'autorite, qui possede le repertoire et resout le chemin de
+  # Ce qui n'existe pas est l'ACCESSEUR PUBLIC : personne hors d'ici ne demande « ou vivent les
+  # jetons », parce que personne hors d'ici n'a de raison d'y aller. Le BEAM ne lit aucun de ces
+  # fichiers ; il demande au service d'autorite, qui possede le repertoire et resout le chemin de
   # son cote.
   #
   # Le knob `:credentials_role_tokens_dir` reste — il steere `runtime.exs` et le double d'autorite de
