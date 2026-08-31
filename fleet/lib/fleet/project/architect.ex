@@ -57,12 +57,12 @@ defmodule Fleet.Project.Architect do
   segment). Accepts a `owner/name` full_name or a bare name. Every consumer (ArchWake, ArchFeed,
   open_project) derives through here — never a rebuilt literal.
 
-  The prefix was the LITERAL `architect-`, and it was the last one left: the 2026-08-01 pass closed
-  both literals of role RESOLUTION, so a catalogue naming its delegate `tech-lead` got the right
-  role and a pod called `architect-vitrine`. Measured on a bench, with `CLAUDE.md` and the SP of
-  that same pod both reading `tech-lead`. The operator sees the wrong name in `lcars list`, in the
-  logs and in tmux; an agent reading that trace sees a role its catalogue does not have. *« Tout ce
-  qu'il voit passer EST du poison si c'est pas instantanement vrai. »*
+  ⚠ THE PREFIX IS RESOLVED, NEVER THE LITERAL `architect-`. Closing the literals of role RESOLUTION
+  alone leaves this one: a catalogue naming its delegate `tech-lead` then gets the right role and a
+  pod called `architect-<project>`, while `CLAUDE.md` and that same pod's SP both read `tech-lead`.
+  The operator sees the wrong name in `lcars list`, in the logs and in tmux; an agent reading that
+  trace sees a role its catalogue does not have. *« Tout ce qu'il voit passer EST du poison si c'est
+  pas instantanement vrai. »*
 
   Deterministic per project and NOT `permanent-*`: the delegate is not a fleet permanent
   (PermanentWarden must not respawn it — the escalation rail and the open verbs do, on demand).
@@ -92,17 +92,17 @@ defmodule Fleet.Project.Architect do
   to need one. A human who opens their project's terminal in between finds nothing there — and
   the human is the one interlocutor that cannot be scheduled. `forever` has to be someone's job.
 
-  The liveness read is the TMUX SESSION, not the Registry: a registered pod whose session is gone
-  is exactly the corpse that made the fleet re-brief nothing for an hour on 2026-08-11.
+  The liveness read is the TMUX SESSION, not the Registry: a registered pod whose session is gone is
+  a corpse the Registry still answers for, and the fleet then re-briefs nothing for as long as
+  nobody looks.
 
   ## It KEEPS, it never CREATES — and that distinction is the whole point
 
   A keeper that also creates is not a keeper, it is a second onboarding path with no human in it.
   Its only caller is the poller, which iterates the ORG SCAN: every repo of the fleet org, whether
-  or not the human running this fleet ever asked for it. Measured on a bench with two humans
-  (2026-08-12): `lcars` made ONE call in his whole session, `project_create tetris`, and his fleet
-  was running an `architect-tetris-v2` — a project created by someone else, that he never opened.
-  Four architects for two projects, two of them wanted by nobody.
+  or not the human running this fleet ever asked for it. On a box with two humans, one who created
+  a single project ends up running a delegate for a project SOMEBODY ELSE created and that he never
+  opened — as many architects as the org has repos, most of them wanted by nobody.
 
   The org scan cannot answer "did MY human ask for this". Nothing on the forge records the asker,
   and the ops directory that gated this call is SHARED (`/home/projects.ops/<name>`) — so its
