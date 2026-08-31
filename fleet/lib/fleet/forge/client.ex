@@ -1011,9 +1011,9 @@ defmodule Fleet.Forge.Client do
   @doc """
   Resolves the merged PR from the latest `[merge:pr-N]` issue marker, not from rewritten branch refs.
 
-  NEVER by branch name: Gitea (1.26.4, verified live 2026-07-19) rewrites a merged PR's `head.ref`
-  to `refs/pull/N/head` once the head branch is deleted, so a branch scan cannot find a delivered
-  brick's PR.
+  NEVER by branch name: a merged PR's `head.ref` no longer resolves once its head branch is gone,
+  so a branch scan cannot find a delivered brick's PR. The measurement that establishes it lives
+  with the marker it justifies, in `Fleet.Forge.Protocol.merge_marker/1`.
 
   Returns `:none` only after a successful complete comment read. The marker is author-agnostic
   because it is observability-only and the gatekeeper role, not necessarily the system bot, writes

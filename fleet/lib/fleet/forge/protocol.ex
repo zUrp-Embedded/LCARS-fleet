@@ -191,7 +191,7 @@ defmodule Fleet.Forge.Protocol do
 
   # ============================================================
   # PUBLISH-FAIL marker `[publish-fail:issue-<n>:base-<sha12>]` — forge-native consecutive-failure
-  # counter (chantier frein-publish). The gate BASE moves ONLY on a successful push, so "consecutive
+  # counter. The gate BASE moves ONLY on a successful push, so "consecutive
   # failures" ≡ "failures sharing a base": no success marker, no RAM state — the max same-base group
   # among an issue's markers IS the streak, and a delivered brick starts a fresh group by construction.
   # ============================================================

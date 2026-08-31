@@ -99,7 +99,7 @@ defmodule Fleet.Forge.Client.Transport do
 
       is_binary(account = Keyword.get(opts, :account)) and account != "" ->
         # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un
-        # jeton mis en cache ici reprendrait exactement la peremption infinie que ce chantier retire.
+        # jeton mis en cache ici aurait une peremption infinie : il survivrait a sa propre rotation.
         # Le cout est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du
         # bruit. Le jour ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra
         # le dire ailleurs que dans un `defp`.
@@ -382,7 +382,7 @@ defmodule Fleet.Forge.Client.Transport do
   #
   # La FORME du retour ne change pas, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
   # un tuple different ferait tomber ces deux codes dans leurs catch-all — en silence, c'est-a-dire
-  # exactement le contraire du but. Ce qui manquait n'etait pas un type, c'etait de le DIRE.
+  # exactement le contraire du but. Ce qu'il faut n'est pas un type de retour, c'est de le DIRE.
   defp name_permanent(status, method, path, body) when status in [412, 423] do
     Logger.warning(
       "Transport: #{method} #{path} -> HTTP #{status} " <>
@@ -397,8 +397,8 @@ defmodule Fleet.Forge.Client.Transport do
   # condition qui se serait levee seule.
   #
   # La FORME du retour ne change pas, pour la meme raison que ci-dessus : vingt sites filtrent sur
-  # `{:http, ...}`. Ce qui manquait n'etait pas un type, c'etait de le DIRE — et de dire COMBIEN de
-  # temps, quand la forge le dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
+  # `{:http, ...}`. Ce qu'il faut n'est pas un type de retour, c'est de le DIRE — et de dire COMBIEN
+  # de temps, quand la forge le dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
   # boucle de reessai metier est un geste d'appelant (le motif existe, `do_merge/6`), pas de ce
   # transport, qui a `retry: false` par construction.
   defp name_permanent(429, method, path, body) do
