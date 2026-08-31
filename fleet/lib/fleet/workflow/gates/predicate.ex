@@ -18,17 +18,13 @@ defmodule Fleet.Workflow.Gates.Predicate do
     boolean, the pod reports an explicit fact — no lax truthiness).
   - **comparison**: `outputs[lhs] op operand`. Numbers for `>=/>/<=/<`;
     `==/!=` compare value ↔ operand (bareword → string, e.g. `critical`).
+    A multi-word RHS is captured as ONE bareword and compared whole:
+    `severity_max != very critical` tests against the entire string.
   - **conjunction**: `AND` only (the corpus uses neither `OR` nor
     parentheses nor negation beyond `!=`). A rule = conjunction of all its
     terms.
 
-  ## The two real grammar limits (measured 2026-08-05)
-
-  This section used to name a third one that does not exist: "a multi-word RHS operand is captured
-  as a single bareword". It is — and that is the CORRECT behaviour for `==`/`!=`, the only ops that
-  accept a bareword: `severity_max != very critical` compares against the whole string. Measured
-  against both branches. The note stood unmeasured long enough to be reported as a defect by an
-  audit that quoted it; what follows is what actually breaks.
+  ## The two grammar limits
 
   1. **`AND` inside an operand splits the rule.** The conjunction is cut BEFORE any parsing, so
      `severity_max != very AND critical` becomes two terms: `severity_max != very` (true for
@@ -36,12 +32,12 @@ defmodule Fleet.Workflow.Gates.Predicate do
      correct**. Fixing it needs quoting in the grammar; the canon corpus has no such operand, so it
      is named here rather than built. A workflow introducing one gets a wrong answer, not an error.
 
-  2. **A malformed comparison used to degrade SILENTLY to an atom.** `tasks count >= 1` (a space in
-     the identifier) does not match the comparison regex, fell through to `{:atom, term}`, and
-     became a lookup of the literal key `"tasks count >= 1"` — absent, therefore false, forever,
-     with no signal. Fail-closed is right for missing EVIDENCE; it is not right for a broken RULE.
-     The gate then rejects every delivery and looks strict. A term that carries an operator and
-     fails to parse is now logged LOUD (see `parse/1`).
+  2. **A malformed comparison must never degrade to an atom.** `tasks count >= 1` (a space in the
+     identifier) does not match the comparison regex; falling through to `{:atom, term}` would make
+     it a lookup of the literal key `"tasks count >= 1"` — absent, therefore false, forever, with no
+     signal, and the gate would reject every delivery while merely looking strict. Fail-closed is
+     right for missing EVIDENCE, never for a broken RULE: a term that carries an operator and fails
+     to parse is logged LOUD (see `parse/1`).
 
   ## Fail-closed
 
