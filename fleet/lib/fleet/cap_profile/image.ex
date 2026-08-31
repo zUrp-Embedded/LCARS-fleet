@@ -7,10 +7,10 @@ defmodule Fleet.CapProfile.Image do
 
   > proven-good image at boot, or do not boot.
 
-  Tier A (CanonProof) proves every canon role composes before readiness but leaves consumption
-  on the LIVE disk: a catalogue mutated mid-life still changed the pods spawn by spawn (the
-  epoch was closed per-resolve, not per-deployment). This module closes the epoch at the
-  DEPLOYMENT scale: `publish!/0` loads and validates EVERY profile and EVERY modop overlay at
+  Tier A (`Fleet.Spawner.CanonProof`) proves every canon role composes before readiness but leaves consumption on
+  the LIVE disk: a catalogue mutated mid-life still changes the pods spawn by spawn, its epoch being
+  closed per-RESOLVE rather than per-deployment. This module closes the epoch at the DEPLOYMENT
+  scale: `publish!/0` loads and validates EVERY profile and EVERY modop overlay at
   boot — any invalid artifact raises (crash-boot, same posture as the event registry) — then
   publishes the snapshot to `:persistent_term`. `Catalog.read_role/1` and `Catalog.read_modops/1`
   consume the image when published (the CLOSED world: a role absent from the image is
@@ -81,7 +81,7 @@ defmodule Fleet.CapProfile.Image do
       # ones that keep `web_search`, `code_execution` and friends away from every role.
       #
       # Those are checked on the COMPOSED profile (overlays merged, baseline denylist resolved),
-      # which does not exist yet at this point: `CanonProof.prove_all!/0` at boot, and
+      # which does not exist yet at this point: `Fleet.Spawner.CanonProof.prove_all!/0` at boot, and
       # `Pod.gate_cap_profile/1` in `:allocating` — the latter unconditional and on every launching
       # pod's path. Publication is therefore deliberately the weakest of the three checks, and an
       # over-provisioned profile fails at spawn rather than here.

@@ -174,7 +174,8 @@ defmodule Fleet.CapProfile.Catalog do
 
   # Filter on the ENTRIES ({name, raw}) BEFORE projecting the keys — the predicate reads the raw's
   # kind, `Map.keys/1` would hand it strings. An unfiltered list feeds a ReservedSeat to every
-  # enumerator (CanonProof, PermanentBoot) → the seat has no SP draft → fleet.boot_failed. Filter
+  # enumerator (`Spawner.CanonProof`, `PermanentBoot`) → the seat has no SP draft →
+  # fleet.boot_failed. Filter
   # BEFORE enumerate (BL-6-45).
   defp spawnable_names(index) do
     index
