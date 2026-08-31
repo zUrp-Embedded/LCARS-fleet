@@ -32,12 +32,12 @@ defmodule Fleet.Catalogue do
   which yields a fleet running THEIR cap-profiles over the BUNDLED SP fragments, a coherent-looking
   skew that no error message reports.
 
-  A catalogue is ONE object. Pointing at it nine times denies it.
+  A catalogue is ONE object. Pointing at it once per tree denies it.
 
   The per-tree config keys stay as FINE OVERRIDES, and they keep precedence over this root: they
   predate it, tests drive them, and panachage (an operator's cap-profiles over the bundled modops)
   is a legitimate — if rarely wise — deployment. The coarse knob moves everything; a fine knob
-  moves exactly its tree. Both narrownesses are now intentional instead of accidental.
+  moves exactly its tree. Both narrownesses are intentional, not accidental.
 
   ## The default
 
@@ -160,7 +160,8 @@ defmodule Fleet.Catalogue do
 
   ## Why this is not a second knob
 
-  The argument above against nine variables holds, and this does not contradict it: the system root
+  The argument above against one variable per tree holds, and this does not contradict it: the system
+  root
   is NOT an operator variable. It is embedded and resolved by `:code.priv_dir`, like `schema/` and
   `baseline/`, for the same reason — **what an operator must not be able to replace is a contract**.
   An operator brings their business; they do not choose their mechanism.
@@ -178,7 +179,7 @@ defmodule Fleet.Catalogue do
     # `:system_root` is a TEST SEAM, and the distinction from a knob is the whole point: it has no
     # env var, no line in the env template and no `config/runtime.exs` reader, so no deployment can
     # set it. Without it no test could build an ISOLATED catalogue — every fixture root would
-    # silently inherit the four mechanism roles and measure a deployment nobody assembled. A seam
+    # silently inherit the mechanism roles and measure a deployment nobody assembled. A seam
     # a test can reach and an operator cannot is not the knob this module argues against.
     Application.get_env(:lcars_fleet, :catalogue_system_root) ||
       Application.app_dir(:lcars_fleet, "priv/catalogue-system")
