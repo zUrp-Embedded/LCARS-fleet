@@ -240,9 +240,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. The gate used to read `outputs` that came
-  # entirely from the pod's own `result`, so the producer attested that its own deliverable existed
-  # and was not empty. `StepOutputs.derive/2` answers that from the card's declared `outputs`,
+  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. Reading `outputs` straight from the pod's
+  # own `result` has the PRODUCER attesting that its own deliverable exists and is not empty.
+  # `StepOutputs.derive/2` answers that from the card's declared `outputs`,
   # checked in the workspace the RUNTIME created — and the merge order is what makes it a fact
   # rather than an opinion: system LAST, so a `result` claiming `outputs_exist: true` is overridden,
   # not honoured.

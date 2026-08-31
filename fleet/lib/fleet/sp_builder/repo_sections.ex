@@ -18,7 +18,7 @@ defmodule Fleet.SPBuilder.RepoSections do
 
   A repo LCARS did not create is free to name its sections otherwise and then contributes nothing.
   That outcome is legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching
-  with zero repo context used to be indistinguishable from a pod given no repo file at all.
+  with zero repo context is otherwise indistinguishable from a pod given no repo file at all.
 
   A repo LCARS onboarded is a different case: `priv/catalogue/project_template` ships a `CLAUDE.md`
   on each writer face, and the one on the code face NAMES these headings and explains what each is
@@ -26,9 +26,6 @@ defmodule Fleet.SPBuilder.RepoSections do
   and the agent believe it has a command — so the warning on a fresh project is EXPECTED and says
   the sections have not been written yet, not that the convention was missed.
 
-  (This paragraph used to read "the template ships no CLAUDE.md, so the kept list is a bet". That
-  stopped being true when the template gained its doors, and it argued for treating an onboarded
-  project's silence as someone else's naming choice.)
   """
 
   require Logger
