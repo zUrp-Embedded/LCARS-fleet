@@ -14,9 +14,9 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE INSTALLE. La cle etait scalaire et les quatre arbres se resolvaient par
-    # `search/1`, donc les catalogues fusionnaient : le SP d'un role venait de n'importe lequel
-    # d'entre eux. Un pod de catalogue k doit recevoir le materiel de k, pas celui de son voisin.
+    # UNE image PAR CATALOGUE INSTALLE, cle sur sa racine : un pod du catalogue k doit recevoir le
+    # materiel de k, pas celui de son voisin. Une cle scalaire les fusionnerait, et le SP d'un role
+    # viendrait de n'importe lequel d'entre eux.
     for root <- Fleet.Catalogue.installed_roots(), do: publish_scope!(root)
     :ok
   end
@@ -27,17 +27,13 @@ defmodule Fleet.SPBuilder.Image do
     image = %{
       modop_sp:
         read_dir_map!(modop_roots(root), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
-      # ⚠ `read_dir_map` SANS le `!` DEPUIS LE 2026-08-19, ET C'EST UN CHANGEMENT DE CE QU'UNE
-      # ABSENCE SIGNIFIE. Cette classe exigeait au moins un artefact — garde juste tant qu'un
-      # cap-profile en déclarait un : zéro fichier voulait alors dire « déploiement cassé ».
-      # La sortie de superpowers a retiré les trois derniers templates ET les deux seules
-      # déclarations (`qualifier`, `reviewer` → `subagent_template: null`) : plus aucun rôle n'en
-      # demande, donc un ensemble VIDE est désormais la forme correcte, pas une panne. Garder le
-      # `!` faisait refuser le boot sur un catalogue parfaitement sain.
-      # Ce qui reste gardé, et c'est l'essentiel : un fichier TRONQUÉ lève toujours, et un rôle qui
-      # DÉCLARE un template introuvable échoue toujours au spawn (`read_subagent_template` →
-      # `subagent_template_missing`, épinglé par `catalogue_verify_test`). On a retiré l'exigence
-      # d'une population non vide, pas la détection d'un artefact manquant.
+      # ⚠ SANS le `!` : un ensemble VIDE est la forme CORRECTE de cette classe, pas une panne.
+      # Aucun rôle n'exige de template de subagent, donc exiger au moins un artefact ferait refuser
+      # le boot sur un catalogue parfaitement sain.
+      # Ce qui reste gardé, et c'est la distinction : un fichier TRONQUÉ lève, et un rôle qui
+      # DÉCLARE un template introuvable échoue au spawn (`read_subagent_template` →
+      # `subagent_template_missing`). Pas d'exigence de population, mais détection d'un artefact
+      # manquant.
       subagent:
         read_dir_map(
           subagent_roots(root),
@@ -55,11 +51,8 @@ defmodule Fleet.SPBuilder.Image do
         ),
       worker_protocol: read_worker_protocol!(root),
       human_protocol: read_protocol!(human_protocol_path(root), "human protocol"),
-      # (`sp_role_bases` lived here: a SECOND corpus of prompt files, keyed by path under the
-      # cap-profiles root, serving `spec.systemPrompt`. The field was forbidden by the schema, so no
-      # valid catalogue could name one — the map was always empty, and the key it would have been
-      # looked up by was a path. `spec.systemPrompt` now names a ROLE, so it resolves through
-      # `drafts` above and needs no corpus of its own.)
+      # (`spec.systemPrompt` names a ROLE, so it resolves through `drafts` above: no second corpus
+      # of prompt files keyed by path.)
       # The two EEx templates, frozen as SOURCE (rendered with eval_string against the image). A
       # template is the SHAPE of every prompt the fleet emits — the last thing that may drift
       # mid-life while the version claims otherwise.
@@ -79,9 +72,9 @@ defmodule Fleet.SPBuilder.Image do
     # Il ne quitte pas la VM (calcule ici, range en `persistent_term`, relu par le meme noeud) et
     # `lib/` ne le compare nulle part.
     #
-    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, et c'est le point sur lequel
-    # une revue a soupconne un aggravant : l'ordre de parcours d'une map ne serait pas stable entre
-    # executions. MESURE, et c'est FAUX sur cet OTP : `term_to_binary` rend le meme binaire pour
+    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, ce qui invite a craindre un
+    # ordre de parcours instable entre executions. MESURE sur cet OTP, et c'est FAUX :
+    # `term_to_binary` rend le meme binaire pour
     # deux maps construites dans des ordres opposes — 3 cles ou 60, cles binaires, et imbriquees
     # comprises. Pas de tri ajoute : il n'achete rien d'observable ici, et un geste qui n'achete
     # rien sur un tampon n'est pas neutre (il change toutes les versions deja tracees).
@@ -120,10 +113,10 @@ defmodule Fleet.SPBuilder.Image do
   # PER CATALOGUE, and that is what a deployment-wide check cannot do. `canon spawn-proof` already
   # refuses a role whose draft exists in NO root — but it reads the union, so a role declared by
   # catalogue A and prompted by an unrelated catalogue B passes: A's role silently runs B's
-  # behaviour. With the two bundled roots that configuration is unreachable (the only names both
-  # sides carry are the four the system also DECLARES, which is the legal override). It becomes
-  # reachable the moment an operator stacks catalogues, which is what the search path was built for
-  # — so the guard lands WITH the mechanism rather than after the first accident.
+  # behaviour. With the bundled roots alone that configuration is unreachable — the only shared
+  # names are the ones the system also DECLARES, which is the legal override. It becomes reachable
+  # the moment an operator stacks catalogues, which is what the search path was built for, so the
+  # guard lands WITH the mechanism rather than after the first accident.
   #
   # LIMIT, and it is structural: a FINE override moves one tree out of its catalogue, and nothing
   # can then attribute a role to a catalogue. Such a tree is not visited rather than guessed at.
