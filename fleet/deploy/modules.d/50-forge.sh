@@ -201,10 +201,22 @@ check_members_visible() {
     p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « fleet/deploy/box forge-apply » (il les publicise juste après la structure)"
   fi
 
+  # ⚠ CES DEUX ETATS NE SONT PAS DES DRIFTS, ET C'EST LE CANON DU 2026-08-30 QUI LE DIT. Le rail pose
+  # les AUTORITES — siège, admin de forge, master token, comptes de service ; les PERSONNES
+  # s'inscrivent sur la forge, et un propriétaire d'org les ajoute. Un humain pas encore membre est
+  # donc l'état NORMAL d'une machine fraîche, pas un écart à réduire.
+  #
+  # Le mot compte parce qu'il engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN
+  # faire — il n'a pas les credentials de la personne, et les avoir serait le contraire du canon. Un
+  # drift qui ne part jamais apprend à l'opérateur que le rapport se lit de travers, et le jour où
+  # un vrai drift s'y trouve, il est dans la même liste.
+  #
+  # Le motif est celui de `64-services` : on RECOPIE la cause et le geste qui la lève, on ne délègue
+  # pas le verdict à un état qu'on ne contrôle pas.
   if account_exists "$PROV_HUMAN"; then
     case "$(member_state "$PROV_HUMAN")" in
-      hidden) p_drift "adhésion org de $PROV_HUMAN privée — geste utilisateur : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
-      absent) p_drift "$PROV_HUMAN n'est membre d'aucune team de $PROV_FORGE_ORG — il ne verra pas les dépôts de l'org (team humans, lecture)" ;;
+      hidden) p_warn "adhésion org de $PROV_HUMAN privée — geste UTILISATEUR, hors de portée du rail : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
+      absent) p_warn "$PROV_HUMAN n'est membre d'aucune team de $PROV_FORGE_ORG — état normal tant qu'un propriétaire d'org ne l'a pas ajouté (team humans, lecture). Le rail pose les autorités, pas les personnes" ;;
     esac
   fi
 }

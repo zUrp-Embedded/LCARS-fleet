@@ -1030,6 +1030,64 @@ prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou �
   printf 'inconnue\n'
 }
 
+# ─── LES PARAMETRES QUE LA MACHINE SE RAPPELLE ──────────────────────────────────────────────────
+#
+# ⚠ TROIS, ET LA LISTE EST FERMEE. Ce sont les seules options de `provision apply` qui decrivent un
+# ETAT-CIBLE de la machine plutot qu'une intention du geste en cours. `--verbose` ou `--only` ne
+# sont pas de cette nature : les memoriser ferait qu'un doctor futur n'examinerait plus qu'un
+# module, parce que quelqu'un a un jour lance un apply cible.
+#
+# Elargir cette liste, c'est decider qu'un drapeau devient un fait persistant de la machine. Ca se
+# fait ligne par ligne, jamais par une regex sur les noms.
+PROV_REMEMBERED=(PROV_DECK_PORT PROV_FORGE_HOST_PORT PROV_FORGE_BASE)
+
+prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulement ce qui differe
+  local n out=""
+  for n in "${PROV_REMEMBERED[@]}"; do
+    [[ -n "${!n:-}" ]] && out="$out ${n}=${!n}"
+  done
+  printf '%s\n' "${out# }"
+}
+
+# ─── TROIS ETATS, JAMAIS DEUX ───────────────────────────────────────────────────────────────────
+#
+#   present       il est la, et on peut le lire
+#   unreadable    il est la, et CE compte ne peut pas l'ouvrir — un fait sur NOUS, pas sur lui
+#   absent        il n'est pas la, et on est en position de l'affirmer
+#   unmeasurable  on ne peut meme pas conclure : un ancetre n'est pas traversable d'ici
+#
+# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Mesure du 2026-09-01 sur le banc
+# 2004 : `55-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
+# parfaitement present — `0640 root:lcars-system`, que l'appelant ne peut pas OUVRIR mais peut
+# parfaitement CONSTATER. Le test de lisibilite tenait lieu de test d'existence, et le doctor
+# declarait non conforme une machine qui l'etait.
+#
+# UN VERDICT QUI NE PEUT PAS ETRE VRAI EST PIRE QU'UN VERDICT ABSENT : il envoie l'operateur
+# converger un objet deja pose, et lui apprend a ne plus croire le rapport.
+#
+# ⚠ ET `absent` SE MERITE. Un `-e` faux ne prouve l'absence que si l'on peut traverser le parent :
+# sous un repertoire ferme, tout parait absent. La boucle remonte donc jusqu'au premier ancetre qui
+# existe et demande s'il est traversable — sinon la reponse honnete est « je ne sais pas ».
+prov_file_state() { # prov_file_state <chemin> -> present | unreadable | absent | unmeasurable
+  local p="$1" d
+  if [[ -e "$p" ]]; then
+    [[ -r "$p" ]] && { printf 'present\n'; return 0; }
+    printf 'unreadable\n'; return 0
+  fi
+  d="$(dirname "$p")"
+  while [[ "$d" != "/" && ! -e "$d" ]]; do d="$(dirname "$d")"; done
+  if [[ -x "$d" ]]; then printf 'absent\n'; else printf 'unmeasurable\n'; fi
+}
+
+# La phrase qui accompagne un etat non concluant. Elle nomme le compte et le chemin : « non
+# mesurable » sans le pourquoi est un troisieme verdict aussi opaque que les deux qu'il remplace.
+prov_state_why() { # prov_state_why <etat> <chemin>
+  case "$1" in
+    unreadable)   printf 'présent, mais illisible pour %s — rien n'"'"'est conclu sur son contenu (relance sous sudo pour le mesurer)\n' "$(id -un 2>/dev/null || echo "ce compte")" ;;
+    unmeasurable) printf 'NON MESURABLE ici : un répertoire du chemin (%s) n'"'"'est pas traversable par %s — ni présent ni absent, on ne sait pas\n' "$(dirname "$2")" "$(id -un 2>/dev/null || echo "ce compte")" ;;
+  esac
+}
+
 # ─── LA FORME DE LA LIVRAISON — `binary` ou `source` ────────────────────────────────────────────
 #
 # DEUX FORMES, ET CHACUNE EST ENTIERE :

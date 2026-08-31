@@ -130,8 +130,18 @@ check() {
     p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — client OAuth2 du deck non convergé (le deck refusera de servir)"
     verdict_check
   fi
-  if [[ ! -r "$PROV_DECK_OIDC_FILE" ]]; then
+  # ⚠ TROIS ETATS, ET LA VERSION PRECEDENTE N'EN CONNAISSAIT QUE DEUX. `[[ ! -r ]]` puis « absent » :
+  # mesure du 2026-09-01 sur le banc 2004, ce module annoncait absent un fichier de 336 octets
+  # parfaitement present. Il est en `0640 root:lcars-system` — un doctor lance sans sudo ne peut pas
+  # l'OUVRIR, il peut parfaitement CONSTATER qu'il est la. Le test de lisibilite tenait lieu de test
+  # d'existence, et envoyait converger un objet deja pose.
+  local _st; _st="$(prov_file_state "$PROV_DECK_OIDC_FILE")"
+  if [[ "$_st" == "absent" ]]; then
     p_drift "$PROV_DECK_OIDC_FILE absent — le deck (port $PROV_DECK_PORT) sert 503 tant qu'il n'est pas posé"
+  elif [[ "$_st" != "present" ]]; then
+    # PAS un drift : un drift promet qu'`apply` converge, et on ne sait meme pas s'il y a quelque
+    # chose a converger. Ce qui manque est une MESURE, et le rapport doit dire laquelle.
+    p_warn "$PROV_DECK_OIDC_FILE $(prov_state_why "$_st" "$PROV_DECK_OIDC_FILE")"
   elif ! forge_up; then
     p_ok "$PROV_DECK_OIDC_FILE présent (forge injoignable : client non re-vérifié)"
   elif config_live; then

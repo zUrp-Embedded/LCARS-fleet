@@ -123,6 +123,13 @@ check() {
     elif [[ ! -x "$HELPERS_DIR/$n" ]]; then
       p_drift "$HELPERS_DIR/$n présent mais PAS exécutable (mode $(stat -c '%a' "$HELPERS_DIR/$n" 2>/dev/null || echo '?')) — l'apply pose 0755"
       stale=1
+    elif [[ ! -r "$SRC_DIR/$n" ]]; then
+      # ⚠ « DIVERGE » EST UNE CONCLUSION, ET ELLE EXIGE DEUX COTES. `helper_current` est un `cmp -s
+      # src dst` : source absente, `cmp` echoue, et l'appelant lisait cet echec comme une
+      # divergence. Mesure du 2026-09-01 sur le banc 2004 : ONZE drifts « diverge de la source »
+      # alors que `/opt/lcars/fleet/services` n'existait pas du tout. Onze verdicts faux par
+      # passage, dont aucun ne portait sur l'auxiliaire qu'il nommait.
+      p_warn "$HELPERS_DIR/$n : rien n'est conclu — la SOURCE est absente ou illisible ici ($SRC_DIR/$n). « diverge » demande deux côtés"
     elif ! helper_current "$n"; then
       p_drift "$HELPERS_DIR/$n diverge de la source ($SRC_DIR/$n)"
       stale=1

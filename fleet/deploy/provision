@@ -182,6 +182,37 @@ if [[ -n "$ENV_FILE" ]]; then
   set +a
 fi
 
+# ─── CE QUE LA MACHINE SE RAPPELLE, LU AVANT QUE LA LIB NE FIGE SES DEFAUTS ─────────────────────
+#
+# ⚠ L'ORDRE EST TOUT, ET IL EST DEJA CELUI DU FICHIER. Les options de la ligne de commande ont
+# EXPORTE leurs variables plus haut ; la lib, plus bas, pose ses defauts en `: "${VAR:=…}"`, qui ne
+# mord que sur du vide. En lisant ICI, entre les deux, la memoire de la machine s'intercale
+# exactement ou il faut : elle perd contre un drapeau explicite, elle gagne contre le defaut d'usine.
+#
+# LE DEFAUT QU'ELLE FERME : `apply --port-deck 20997` posait le deck sur 20997, et le `doctor` sans
+# drapeau exigeait 20999 — le rail declarait en drift une machine qu'il venait de convergir. Un
+# operateur voyait un drift qui ne partait jamais, sur un objet parfaitement conforme a ce qu'il
+# avait demande.
+#
+# ⚠ LE JOURNAL ET PAS UN FICHIER DE PLUS. Il dit deja « ce qui a ete pose sur CETTE machine » et il
+# porte deja `substrate` et `prefix` — des faits de la meme nature. Un second fichier d'etat aurait
+# ouvert la question de savoir lequel des deux ment quand ils divergent.
+_journal_params() {
+  local f="${LCARS_JOURNAL_FILE:-${PROV_ROOT:-/opt/lcars}/var/install.journal}" ligne kv k v
+  [[ -r "$f" ]] || return 0
+  ligne="$(sed -n 's/^params  *//p' "$f" | head -1)" || return 0
+  for kv in $ligne; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    [[ -n "$k" && "$k" != "$kv" ]] || continue
+    # La liste FERMEE vit dans la lib, mais elle n'est pas encore sourcee ici : la recopier serait
+    # une seconde source. On accepte donc tout `PROV_*` que le journal porte — c'est NOUS qui
+    # l'avons ecrit, et `prov_params_line` est le seul endroit qui decide de ce qui y entre.
+    [[ "$k" == PROV_* ]] || continue
+    [[ -n "${!k:-}" ]] || export "$k=$v"
+  done
+}
+_journal_params
+
 # shellcheck source=lib/provision-lib.sh
 . "$PROVISION_LIB"
 
@@ -885,6 +916,12 @@ else
         echo "posed_at      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "source_rev    ${PROV_SOURCE_REV:-inconnue}"
         echo "substrate     $SUBSTRATE"
+        # ⚠ CE QUE L'OPERATEUR A DEMANDE, POUR QUE LA PASSE SUIVANTE NE LE REDEMANDE PAS. Sans cette
+        # ligne, `apply --port-deck 20997` posait le deck sur 20997 et le `doctor` sans drapeau, une
+        # minute plus tard, exigeait 20999 : le rail declarait en drift une machine qu'il venait
+        # lui-meme de convergir. Un parametre passe a `apply` EST l'etat-cible de la machine jusqu'a
+        # ce qu'un autre `apply` le remplace — pas une opinion valable le temps d'une commande.
+        echo "params        $(prov_params_line)"
         # Sans repli : la lib pose `PROV_PREFIX`, et un « inconnu » afficherait un etat qui n'existe pas.
         echo "prefix        $PROV_PREFIX"
         echo "modules       total=$total ok=$ok drift=$drift failed=$failed"
