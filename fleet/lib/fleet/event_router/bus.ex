@@ -56,10 +56,10 @@ defmodule Fleet.EventRouter.Bus do
   # adresser au lieu de les diffuser.
   #
   # LA REPARTITION VIT ICI ET NULLE PART AILLEURS, et c'est le point. La faire faire aux emetteurs
-  # aurait mis un devoir de memoire a chaque site : celui qui oublie le sujet du pod ne casse rien
-  # de visible — le pod attend simplement un evenement qui ne viendra jamais, sans trace. Mesure du
-  # 2026-08-14 : `pubsub_broadcast/2` est le SEUL appel `Phoenix.PubSub.broadcast` de `lib/`, et
-  # aucun appelant ne passe de sujet autre que le principal. Un seul endroit tient l'invariant.
+  # mettrait un devoir de MEMOIRE a chaque site : celui qui oublie le sujet du pod ne casse rien de
+  # visible — le pod attend simplement un evenement qui ne viendra JAMAIS, sans trace.
+  # `pubsub_broadcast/2` est le SEUL appel `Phoenix.PubSub.broadcast` de `lib/`, donc un seul
+  # endroit tient l'invariant.
   #
   # Le sujet principal reste servi tel quel : les consommateurs transverses (read-model, audit,
   # step-run) y sont, et ils doivent tout voir.

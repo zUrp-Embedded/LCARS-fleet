@@ -22,11 +22,9 @@ defmodule Fleet.Admiral do
 
   @moduledoc """
   Le domaine SYSADMIN de la boîte, côté système : audit, MCP health, boot orchestration,
-  quiesce + drain, et le rail d'outillage. Il porte le nom de sa fonction depuis le 2026-08-19
-  ([BL-6-103], successeur du [BL-6-53] retiré) — il s'est appelé `Fleet.Starfleet` d'après un rôle
-  dont le sens avait bougé (l'ex-rôle sysadmin devenu front desk), une homonymie que le domaine ne
-  référençait pas une seule fois. Renommage en deux commits : mécanique, puis la valeur wire
-  `source: :admiral` (le dernier datum) dans le sien.
+  quiesce + drain, et le rail d'outillage. Il porte le nom de sa FONCTION et non celui d'un rôle
+  ([BL-6-103]) : un domaine nommé d'après un rôle suit le sens de ce rôle quand il bouge, alors même
+  qu'il ne le référence pas une seule fois.
 
   Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
 
