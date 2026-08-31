@@ -2,10 +2,9 @@ defmodule Fleet.CapProfile.Catalog do
   @moduledoc """
   Resolution + reading of the cap-profile catalogue YAML files.
 
-  Cluster extracted from `Fleet.CapProfile`. SINGLE concern: the FS FRONT of the
-  domain (directory scan, YAML decode, resolving a role/modop into a raw map
-  pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and
-  `read_modops/1`; it never touches the FS itself.
+  SINGLE concern: the FS FRONT of the domain (directory scan, YAML decode, resolving a role/modop
+  into a raw map pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and `read_modops/1`
+  and never touches the FS itself.
 
   ## Security invariant — resolution by `metadata.name`, never by filename
 
@@ -78,9 +77,9 @@ defmodule Fleet.CapProfile.Catalog do
   @doc """
   Le meme role, lu dans l'image d'un catalogue NOMME — la porte per-catalogue.
 
-  `nil` garde le comportement du jour : l'image du catalogue LIVRE. C'est ce que veut un
-  appelant sans projet en main ; un appelant qui en a un passe la racine de SON catalogue, parce
-  qu'un role n'existe que dans le catalogue qui le declare.
+  `nil` resout dans l'image du catalogue LIVRE — ce que veut un appelant sans projet en main. Un
+  appelant qui en a un passe la racine de SON catalogue, parce qu'un role n'existe que dans le
+  catalogue qui le declare.
   """
   @spec read_role(String.t(), Path.t() | nil) :: {:ok, map()} | {:error, term()}
   def read_role(role, root) do
@@ -333,7 +332,7 @@ defmodule Fleet.CapProfile.Catalog do
   Les memes overlays, dans l'image du catalogue NOMME — `nil` = celui qui est livre.
 
   Un modop appartient au catalogue qui le livre : celui d'un role du second catalogue n'existe pas
-  dans l'image du premier, et le chercher la rendait `:modop_not_found` sur un fichier bien present.
+  dans l'image du premier, et l'y chercher rend `:modop_not_found` SUR UN FICHIER BIEN PRESENT.
   """
   @spec read_modops([String.t()], Path.t() | nil) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set, root) when is_list(modop_set) do
@@ -362,8 +361,8 @@ defmodule Fleet.CapProfile.Catalog do
   defp read_modops_from_disk(modop_set, catalogue_root) do
     # Same scope as `read_role_from_disk/2`, same reason: a modop belongs to the catalogue that
     # ships it, and the mechanism ones live in the system half of the scope — which is why the
-    # scope is a PAIR (own + system) and never one root alone: reading only the business root made
-    # every hermetic test see a role whose default overlay had vanished. The name stays confined
+    # scope is a PAIR (own + system) and never one root alone: reading only the business root makes
+    # every hermetic test see a role whose default overlay has VANISHED. The name stays confined
     # under EACH root — trying a second one must not weaken what makes an untrusted name safe as a
     # path segment.
     scope = disk_scope(catalogue_root)
