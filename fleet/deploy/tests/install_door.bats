@@ -171,15 +171,6 @@ setup() {
   [[ "$output" != *"réservé à WSL2"* ]]
 }
 
-@test "machine dédiée: le drapeau SURVIT à l'escalade sudo" {
-  # `sudo` remet l'environnement à zéro. Sans ce drapeau dans la liste nommée, la porte le lit,
-  # décide de laisser passer, escalade — et la SECONDE instance ne le voit plus, donc se refuse
-  # elle-même en invitant à poser le drapeau qu'on vient de poser. Refus parfaitement circulaire, et
-  # rien dans la sortie ne dit que sudo est passé entre les deux.
-  run grep -n 'for _v in ' "$SRC"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
-}
 
 @test "machine dédiée: le drapeau n'ouvre PAS le rail poste dans un conteneur" {
   # Installer le rail poste DANS une boîte n'a pas de sens : c'est le rail boîte qui fait ça, au
@@ -245,29 +236,6 @@ setup() {
   [[ "$output" == *"Option inconnue : --fleet-human"* ]]
 }
 
-@test "la DERNIERE instruction lue est vraie sur CE terrain — pas celle d'un autre" {
-  # Le bandeau de cloture disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
-  # « fleet_v2 start — ta fleet, sous ton uid » alors que le rail poste fait tourner la fleet sous
-  # l'humain de fleet que la forge seme (48) et que le convergeur materialise (64), pas sous
-  # l'operateur : GUARD B refuse l'uid du siege, qui est justement le sien sur une machine standard.
-  # Un operateur qui suit cette ligne se fait refuser par un garde, sans savoir pourquoi.
-  #
-  # ⚠ ON MESURE LE TEXTE DU SCRIPT, PAS UNE EXECUTION : atteindre ce bandeau demande un
-  # provisionnement complet (paquets, /local, une forge), ce qu'un temoin ne joue pas. Ce qui se
-  # garde ici est que les deux formes EXISTENT et sont choisies par le terrain — un bandeau qui
-  # redeviendrait inconditionnel le perdrait sans que rien ne rougisse.
-  # ⚠ LA FORME NE NOMME PLUS PERSONNE (⚖ user 2026-08-30) : ce rail ne crée pas d'humain, et à
-  # l'instant où il parle il n'y en a peut-être aucun. Elle interrogeait `builtin-human` pour écrire
-  # « sudo -u lcars » ; nommer un compte que l'opérateur n'a pas, c'est lui faire taper une commande
-  # qui échoue — la même faute que celle décrite au-dessus, par l'autre bout.
-  run grep -c 'sudo -u <ton humain> fleet_v2 start' "$SRC"
-  [ "$output" = "1" ]
-  run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
-  [ "$output" = "1" ]
-  # Et la forme « sous ton uid » n'est plus inconditionnelle : elle vit dans la branche boite.
-  run grep -c 'RAIL" == "workstation" \]\]; then' "$SRC"
-  [ "$status" -eq 0 ]
-}
 
 @test "machine dédiée: le bandeau n'annonce PAS /etc/wsl.conf là où rien ne le touche" {
   # `30-wsl` porte `APPLY-ON: wsl`. Promettre une destruction qui n'aura pas lieu est du même ordre
@@ -622,33 +590,7 @@ SPY
   refute grep -q 'la forge du poste en a besoin' "$SRC"
 }
 
-@test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {
-  # Sur une machine qui a deja docker, rejouer trois modules serait du bruit ; sur une machine non
-  # declaree, ce serait une promesse que 00-preflight refusera.
-  #
-  # ⚠ LA COUTURE A CHANGE DE NOM, PAS DE SENS : la porte ne sonde plus (`command -v`), elle LIT le
-  # fait que `00-preflight` a pose. La double condition, elle, est la meme — et c'est elle qu'on
-  # mesure, pas l'orthographe de sa premiere moitie.
-  run bash -c "sed -n '/LES PAQUETS D.ABORD/,/^fi$/p' '$SRC'"
-  [[ "$output" == *'fait docker'* ]]
-  [[ "$output" == *"absent"* ]]
-  [[ "$output" == *"docker_installable_here"* ]]
-  # ET AUCUNE SONDE PROPRE : une seconde mesure ici retomberait dans la duplication que le canon
-  # proscrit, et elle conclurait peut-etre autrement que celle du module.
-  refute grep -q 'command -v\|docker_endpoint' <<<"$output"
-}
 
-@test "la MESURE est REJOUEE apres la tranche paquets — pas la sonde, la mesure" {
-  # Poser docker change la reponse : sans ce second passage, la suite du rail travaillerait sur une
-  # photographie prise avant l'installation. `remesurer` rejoue LE module — la porte n'a pas d'autre
-  # facon de savoir, et c'est le but.
-  run bash -c "sed -n '/LES PAQUETS D.ABORD/,/^fi$/p' '$SRC'"
-  [[ "$output" == *"remesurer"* ]]
-  # `remesurer` VIDE le fichier avant de rejouer : sans ca les faits s'empilent et `fait` rendrait
-  # la valeur la plus recente par accident de `tail -1`, pas par construction.
-  run bash -c "sed -n '/^remesurer() {/,/^}/p' '$SRC'"
-  [[ "$output" == *': > "$FACTS_FILE"'* ]]
-}
 
 # ─── LE DELEGUE DU RAIL BOITE FAIT PARTIE DU CHECKOUT ───────────────────────────────────────────
 #
@@ -782,4 +724,44 @@ SPY
   # ⚠ `<<<"$output"` : `refute_out` lit STDIN. Sans redirection il herite de celui du test —
   # vide — et passe au vert en n'ayant rien compare. Un mur d'absence prive de sa source felicite.
   refute_out 'DOCKERSH' <<<"$output"
+}
+
+# ─── E2 : LA PORTE DELEGUE LES DEUX RAILS, ELLE N EN EXECUTE AUCUN ──────────────────────────────
+
+@test "VERROU : « --consented » est REFUSE, il ne revient pas en passe-plat muet" {
+  # ⚠ MEME REGLE QUE `--fleet-human`, MEME MOTIF. Un drapeau retire doit RATER : accepte et sans
+  # effet, il ferait croire a un geste qui ne se produit plus. Celui-ci disait « saute l'accueil et
+  # la pause, c'est mon second passage » — une notion qui n'existe QUE si la porte se rejoue
+  # elle-meme sous sudo, ce qu'elle ne fait plus depuis que le rail poste a son propre script.
+  run bash "$SRC" --consented
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--consented"* ]]
+  [[ "$output" == *"workstation"* ]]
+}
+
+@test "la porte n ESCALADE PLUS, et ne provisionne plus : les deux rails SORTENT par un exec" {
+  # ⚠ LE POINT D'E2. Elle faisait DEUX metiers — choisir un rail, et en executer un : escalade sudo,
+  # clone sous l'humain, tranche paquets, `provision apply`, verdict, acceptation, identifiants,
+  # bandeau de fin. Cent quarante lignes, et le re-exec `--consented` avec.
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -q 'exec sudo' <<<"$code"
+  refute grep -q 'runuser' <<<"$code"
+  refute grep -qE '"\$PROVISION" apply|provision" apply' <<<"$code"
+  refute grep -q 'PROV_ANNOUNCE_FILE' <<<"$code"
+  # Et les deux sorties ont la MEME forme : un exec vers un delegue du clone.
+  grep -q 'exec "$WORKSTATION" up' <<<"$code"
+  grep -qE 'exec "\$SCRIPT_DIR/fleet/deploy/box"' <<<"$code"
+}
+
+@test "le delegue du rail POSTE fait partie du checkout — un absent nomme le CHECKOUT" {
+  # Meme propriete que pour la boite : l'erreur nomme sa cause. Un « workstation: command not found »
+  # enverrait chercher un binaire, alors que c'est l'arbre qui est incomplet.
+  local fake="$BATS_TEST_TMPDIR/sans-delegue"
+  rm -rf "$fake"; mkdir -p "$fake/fleet/deploy"
+  cp "$SRC" "$fake/install.sh"
+  _faux_provision "$fake" "${_faits_sains[@]}"
+  run bash "$fake/install.sh" --workstation --substrate wsl < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"workstation introuvable"* ]]
+  [[ "$output" == *"checkout"* ]]
 }

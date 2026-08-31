@@ -74,7 +74,10 @@ DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 WITH_BENCH=0
-CONSENTED=0          # posé par le re-exec sudo : la 2ᵉ instance saute l'accueil et la pause
+# ⚠ `CONSENTED` A DISPARU D'ICI, ET SON DRAPEAU EST REFUSÉ PLUS BAS. Il valait « la 2ᵉ instance
+# saute l'accueil et la pause » — une notion qui n'existe QUE si la porte se rejoue elle-même sous
+# sudo. Elle ne le fait plus : le rail poste a son propre script, et l'escalade de celui-là n'a rien
+# à sauter puisqu'il n'a ni accueil ni pause.
 declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
@@ -84,7 +87,11 @@ while [[ $# -gt 0 ]]; do
     --workstation)    RAIL=workstation; shift ;;
     --box)            RAIL=box; shift ;;
     --bench)          WITH_BENCH=1; shift ;;
-    --consented)      CONSENTED=1; shift ;;
+    # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
+    # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
+    --consented) echo "  --consented est retire : la porte ne se rejoue plus sous sudo." >&2
+                 echo "  Le rail poste vit dans fleet/deploy/workstation, et son escalade n'a rien a sauter." >&2
+                 exit 1 ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
@@ -327,7 +334,7 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   fi
 
-  if [[ "$CONSENTED" -eq 0 ]] && [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
+  if [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
     echo "  C'est la frontière de sécurité de la boîte (C: fermé, interop coupé), donc il n'est pas"
@@ -360,7 +367,7 @@ _box_emit() {
 }
 
 # ─── BANDEAU DE LA BRANCHE CHOISIE, ET LUI SEUL ─────────────────────────────
-if [[ "$CONSENTED" -eq 0 ]]; then
+if true; then
 cat <<EOF
 
 ${AMBER}     ____________________________________________________
@@ -552,145 +559,29 @@ if [[ "$RAIL" == "box" ]]; then
   exec "$SCRIPT_DIR/fleet/deploy/box" up
 fi
 
-# ─── LA BRANCHE POSTE : escalade, source, puis le délégué de provisionnement ─
-if [[ "$EUID" -ne 0 ]]; then
-  echo ""
-  echo "  ${W}[sudo]${N} Privilèges root requis — ton mot de passe peut être demandé."
-  REEXEC_ARGS=(--workstation --repo "$REPO_URL" --branch "$BRANCH" --consented)
-  [[ "$DOCTOR_MODE" -eq 1 ]] && REEXEC_ARGS+=(--check)
-  # ⚠ `sudo` FAIT `env_reset` : tout réglage posé avant l'escalade meurt en la traversant. Cette
-  # liste est le SEUL passage — une variable qui n'y figure pas est mangée en silence, et le geste
-  # qu'elle commande ne produit rien. On les nomme une par une plutôt que d'ouvrir `-E`.
-  REEXEC_ENV=()
-  for _v in PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET; do
-    [[ -n "${!_v:-}" ]] && REEXEC_ENV+=("$_v=${!_v}")
-  done
-  exec sudo "${REEXEC_ENV[@]}" bash "$(readlink -f "$0")" "${REEXEC_ARGS[@]}" "${PASSTHRU[@]}"
-fi
-# À partir d'ici : root, SUDO_USER = l'humain.
-
-PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
-
-if [[ ! -x "$PROVISION" ]]; then
-  HUMAN="${SUDO_USER:-root}"
-  HUMAN_HOME="$(getent passwd "$HUMAN" | cut -d: -f6)"
-  SRC_DIR="${LCARS_SRC:-$HUMAN_HOME/LCARS-fleet}"
-  if [[ -d "$SRC_DIR/.git" ]]; then
-    echo "[install] source existante : $SRC_DIR — sync sur $BRANCH"
-    runuser -u "$HUMAN" -- git -C "$SRC_DIR" fetch origin
-    runuser -u "$HUMAN" -- git -C "$SRC_DIR" checkout "$BRANCH"
-    runuser -u "$HUMAN" -- git -C "$SRC_DIR" pull --ff-only origin "$BRANCH"
-  else
-    echo "[install] clone $REPO_URL (branche $BRANCH) → $SRC_DIR"
-    runuser -u "$HUMAN" -- git clone --branch "$BRANCH" "$REPO_URL" "$SRC_DIR"
-  fi
-  PROVISION="$SRC_DIR/fleet/deploy/provision"
-  [[ -x "$PROVISION" ]] || { echo "[install] provision introuvable après clone : $PROVISION" >&2; exit 1; }
-fi
-
-# ─── LES PAQUETS D'ABORD, SI C'EST LE RAIL QUI POSE DOCKER ──────────────────
-if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
-   && [[ "$(fait docker)" == "absent" ]] \
-   && docker_installable_here; then
-  echo ""
-  echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
-  "$PROVISION" apply "${PASSTHRU[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
-    || echo "  ${W}la tranche paquets n'a pas tout convergé — 48-forge-host dira ce qui manque.${N}"
-  # LA MESURE SE REJOUE : le fait `docker` valait « absent » il y a trente secondes, et les faits
-  # portent encore cette réponse-là. Sans ce second passage, la suite du rail travaillerait sur une
-  # photographie périmée d'une machine qui a désormais docker.
-  remesurer
-fi
-
-# ─── Déléguer TOUT au provisioning (l'autorité) ─────────────────────────────
-if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-  exec "$PROVISION" doctor "${PASSTHRU[@]}"
-fi
-# `provision apply` rend 0 (convergé), 2 (appliqué, drift résiduel — rien n'est cassé) ou 1 (échec) :
-# sous `set -e`, une ligne nue tuerait la porte sur 1 ET 2, sans un mot. Même lecture que
-# `deploy/box` (`await_provision_verdict`) — deux portes qui en tirent deux verdicts, c'est un code
-# de retour qui ne veut plus rien dire.
-PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
-export PROV_ANNOUNCE_FILE
-
-# ⚠ IMPRIMER PUIS DÉTRUIRE, DANS LE MÊME GESTE ET SUR TOUS LES CHEMINS DE SORTIE (Ctrl-C compris).
-# Un `rm` qui s'exécute sans l'impression perd POUR DE BON un secret déjà posé sur la forge : le
-# compte existe, avec un mot de passe que personne n'a jamais vu.
-_CREDS_PRINTED=0
-print_credentials_once() {
-  [[ "$_CREDS_PRINTED" -eq 0 ]] || return 0
-  [[ -n "${PROV_ANNOUNCE_FILE:-}" && -s "$PROV_ANNOUNCE_FILE" ]] || return 0
-  _CREDS_PRINTED=1
-  # Sans `PROVISION_RUN` : il arme la garde de sortie de la lib, qui réclame un verdict de module.
-  # On n'en est pas un — on emprunte une mise en forme, pas un contrat.
-  # shellcheck source=fleet/deploy/lib/provision-lib.sh
-  ( . "$SCRIPT_DIR/fleet/deploy/lib/provision-lib.sh" 2>/dev/null \
-      && prov_print_credentials < "$PROV_ANNOUNCE_FILE" ) || cat "$PROV_ANNOUNCE_FILE"
+# ─── LA BRANCHE POSTE : on délègue, comme pour la boîte ─────────────────────
+#
+# ⚠ CE BLOC FAISAIT CENT QUARANTE LIGNES, ET C'ÉTAIT LE RAIL ENTIER. Escalade sudo, clone sous
+# l'humain, tranche paquets, `provision apply`, lecture du verdict, acceptation, identifiants,
+# bandeau de fin : la porte ne choisissait pas un rail, elle en EXÉCUTAIT un. Le canon l'a tranché
+# — « le rail poste sédimenté dans install.sh : il SORT, dans son propre script ».
+#
+# ⚠ ET LE RE-EXEC MEURT AVEC LUI. La porte se relançait sous sudo, donc elle devait se dire de
+# sauter l'accueil et la pause qu'elle venait de jouer : `--consented`, un drapeau pour contourner
+# un problème qu'elle s'était créé en voulant tout porter. `workstation` n'a ni accueil ni pause :
+# son escalade n'a rien à sauter, et `EUID` — un FAIT — lui suffit à reconnaître son second passage.
+#
+# Le rail poste et le rail boîte sortent maintenant par la même forme : un `exec` vers un délégué du
+# clone, et le code de retour est le sien.
+WORKSTATION="$SCRIPT_DIR/fleet/deploy/workstation"
+[[ -x "$WORKSTATION" ]] || {
+  echo "  ${R}fleet/deploy/workstation introuvable — ce rail exige le checkout complet.${N}"
+  echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --workstation"
+  exit 1
 }
-trap 'print_credentials_once; [[ -n "${PROV_ANNOUNCE_FILE:-}" ]] && rm -f "$PROV_ANNOUNCE_FILE"' EXIT INT TERM
-
-_apply_rc=0
-"$PROVISION" apply "${PASSTHRU[@]}" || _apply_rc=$?
-
-case "$_apply_rc" in
-  0) ;;
-  2)
-    echo ""
-    echo "  ${AMBER}Provisionnement APPLIQUÉ, avec DRIFT RÉSIDUEL.${N} Rien n'est cassé : un geste manque."
-    echo "  Les lignes DRIFT ci-dessus le nomment, et « bash $0 --check » les relit à tout moment."
-    ;;
-  *)
-    echo ""
-    echo "  ${R}Provisionnement EN ÉCHEC (rc=$_apply_rc) — l'installation n'est PAS complète.${N}"
-    echo "  Les lignes FAIL ci-dessus nomment ce qui a échoué ; « bash $0 --check » les relit."
-    exit "$_apply_rc"
-    ;;
-esac
-
-if [[ "$SUBSTRATE" == "wsl" ]]; then
-  _step1="${W}1.${N} WSL : si demandé, ${W}wsl --shutdown${N} (PowerShell),"
-  _step1b="   rouvrir un ${W}NOUVEL${N} onglet, relancer cet install."
-else
-  _step1="${W}1.${N} Rien à redémarrer : ce terrain n'a pas de WSL."
-  _step1b=""
+if [[ "$DOCTOR_MODE" -eq 1 ]]; then
+  exec "$WORKSTATION" doctor "${PASSTHRU[@]}"
 fi
-if [[ "$RAIL" == "workstation" ]]; then
-  # ⚠ AUCUN NOM ICI : ce rail n'en crée plus, et à cette seconde il n'y a peut-être encore personne.
-  # Nommer un compte que l'opérateur n'a pas serait lui faire taper une commande qui échoue.
-  _step3="${W}3.${N} ${W}sudo -u <ton humain> fleet_v2 start${N} — la fleet tourne sous un"
-  _step3b="     humain de fleet ; toi tu l'atteins par le groupe ${W}fleet${N}. Personne encore ? Inscris-toi sur la forge, team « humans »."
-else
-  _step3="${W}3.${N} ${W}fleet_v2 start${N} — depuis la console de ton humain de"
-  _step3b="     fleet (deck sur 20999) ; ssh entre en admiral, que GUARD B refuse."
-fi
-
-# ─── L'ACCEPTATION, AVANT DE SE DÉCLARER FINI ───────────────────────────────────────────────────
-# ⚠ ELLE SE JOUE ICI ET PAS APRÈS COUP : le mot de passe de la forge n'existe que pendant cette
-# passe — le `trap` détruit le fichier en sortant, et la forge n'en garde qu'un hash. Plus tard, on
-# ne pourrait plus vérifier « je peux me connecter », seulement « le compte existe ».
-if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 && -x "$SCRIPT_DIR/fleet/deploy/accept" ]]; then
-  _accept_args=(--announce-file "${PROV_ANNOUNCE_FILE:-/dev/null}")
-  _accept_rc=0
-  bash "$SCRIPT_DIR/fleet/deploy/accept" "${_accept_args[@]}" || _accept_rc=$?
-fi
-
-_box_title="       LCARS-FLEET v2 — PROVISIONING TERMINÉ"
-_box_body=(
-  "  Suite (les verdicts ci-dessus font foi) :"
-  "  $_step1"
-)
-[[ -n "$_step1b" ]] && _box_body+=("  $_step1b")
-_box_body+=("  ${W}2.${N} ${W}claude${N} → /login (geste d'identité, une fois).")
-_box_body+=("  $_step3")
-[[ -n "$_step3b" ]] && _box_body+=("  $_step3b")
-_box_body+=("  Sonde à tout moment : ${W}bash install.sh --check${N}")
-
 echo ""
-_box_emit --rule "$_box_title" "${_box_body[@]}"
-
-# Les identifiants en dernier : la dernière chose à l'écran est la seule qu'on est sûr de ne pas
-# avoir fait défiler. Le `trap` les imprimerait de toute façon — cet appel les place avant le code
-# de sortie sur le chemin nominal.
-print_credentials_once
-
-exit "${_accept_rc:-0}"
+echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/workstation"
+exec "$WORKSTATION" up "${PASSTHRU[@]}"

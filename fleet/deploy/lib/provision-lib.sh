@@ -727,6 +727,34 @@ _prov_pad() { # <texte> <colonnes>
   printf '%s%*s' "$s" "$n" ''
 }
 
+# ─── prov_box_emit [--rule] <titre> <ligne…> — LE CARTOUCHE ─────────────────────────────────────
+#
+# ⚠ IL COMPTE DES COLONNES, PAS DES OCTETS, ET IL RETIRE LES COULEURS AVANT DE COMPTER. Un cadre
+# calculé sur la chaîne colorée fait entrer les séquences ANSI dans la largeur : le bord droit part
+# à droite d'autant d'invisibles. Même piège que `_prov_pad` un cran plus loin — le français
+# accentué pèse deux octets par lettre.
+#
+# La largeur s'ADAPTE à la ligne la plus longue, plancher 57 colonnes : un cadre compté à la main
+# est un cadre qui ment dès qu'on touche à son contenu, et le corpus en a déjà payé un.
+_prov_box_plain() { printf '%s' "$1" | sed $'s/\033\\[[0-9;]*m//g'; }
+_prov_box_pad() { # <texte> <largeur>
+  local p n; p="$(_prov_box_plain "$1")"; n=$(( $2 - ${#p} )); (( n < 0 )) && n=0
+  printf '%s%*s' "$1" "$n" ''
+}
+prov_box_emit() {
+  local _sep=0
+  if [[ "${1:-}" == "--rule" ]]; then _sep=1; shift; fi
+  local _title="$1"; shift
+  local _w=57 _l _p _rule
+  for _l in "$_title" "$@"; do _p="$(_prov_box_plain "$_l")"; (( ${#_p} > _w )) && _w=${#_p}; done
+  _rule="$(printf '%*s' "$_w" '' | sed 's/ /─/g')"
+  printf '%s  ┌%s┐\n' "$_PC" "$_rule"
+  printf '  │%s%s%s│\n' "$_PG" "$(_prov_box_pad "$_title" "$_w")" "$_PC"
+  if (( _sep )); then printf '  ├%s┤\n' "$_rule"; fi
+  for _l in "$@"; do printf '  │%s%s%s│\n' "$_PN" "$(_prov_box_pad "$_l" "$_w")" "$_PC"; done
+  printf '  └%s┘%s\n' "$_rule" "$_PN"
+}
+
 prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » sur stdin
   local lbl login secret n=0
   while IFS=$'\t' read -r lbl login secret; do

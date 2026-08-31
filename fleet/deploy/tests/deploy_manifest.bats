@@ -21,6 +21,8 @@
 #   SC2020 — `tr` sur des CARACTERES, et c'est ce que le temoin mesure
 # shellcheck disable=SC1003,SC2020
 
+load refute
+
 setup() {
   SRC="$BATS_TEST_DIRNAME/.."
   ROOT="$BATS_TEST_TMPDIR/repo"
@@ -213,18 +215,25 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   [[ "$gate" == *"procps"* ]]           # les sondes qui lisent pgrep
 }
 
-@test "install.sh fait TRAVERSER ses reglages a l'escalade sudo" {
+@test "le rail POSTE fait TRAVERSER ses reglages a l'escalade sudo" {
   # `sudo` remet l'environnement a zero. Un reglage pose avant l'escalade (PROV_COLOR, PROV_VERBOSE)
   # meurt en la traversant : mesure du 2026-08-18, `PROV_COLOR=1 bash install.sh` colorisait le
   # preflight puis rendait un provisionnement blanc, sans un mot pour dire pourquoi. Troisieme
   # incarnation de ce piege dans la meme journee (le shim docker, le temp root de bench-swap).
-  SH="$BATS_TEST_DIRNAME/../../../install.sh"
+  #
+  # ⚠ CE TEMOIN A SUIVI SON SUJET (E2, 2026-08-31). L'escalade vivait dans `install.sh` ; elle est
+  # dans `fleet/deploy/workstation` depuis que le rail poste a son propre script. La porte, elle,
+  # n'escalade PLUS DU TOUT — un temoin qui aurait continue de la lire serait devenu vert a vide.
+  SH="$BATS_TEST_DIRNAME/../workstation"
   [ -f "$SH" ]
-  grep -q 'REEXEC_ENV+=' "$SH"
-  grep -q 'exec sudo "${REEXEC_ENV\[@\]}"' "$SH"
+  grep -q 'ESCALADE_ENV=(' "$SH"
+  grep -q 'exec sudo "${env_args\[@\]}"' "$SH"
   for v in PROV_COLOR NO_COLOR PROV_VERBOSE; do
     grep -q "$v" "$SH" || { echo "reglage $v non transmis a travers sudo" >&2; false; }
   done
+  # ET LA PORTE N'ESCALADE PLUS : sinon il y aurait deux listes, dont une que personne ne relit.
+  local door="$BATS_TEST_DIRNAME/../../../install.sh"
+  refute grep -q 'exec sudo' <<<"$(grep -vE '^\s*#' "$door")"
 }
 
 # ─── DOCKER : DEPENDANCE DURE DU RAIL POSTE, ET DE LUI SEUL ─────────────────────────────────────

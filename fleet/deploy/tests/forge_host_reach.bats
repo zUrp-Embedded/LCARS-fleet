@@ -777,12 +777,16 @@ STUB
   refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
-@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
-  # `sudo` fait env_reset : un drapeau absent de REEXEC_ENV est mange en silence, et le geste de
-  # l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.
-  local door="$BATS_TEST_DIRNAME/../../../install.sh"
-  [ -f "$door" ]
-  grep -qE '^\s*for _v in .*PROV_FORGE_ADMIN_RESET' "$door"
+@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo du rail POSTE" {
+  # `sudo` fait env_reset : un drapeau absent de la liste blanche est mange en silence, et le geste
+  # de l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.
+  #
+  # ⚠ CE TEMOIN A SUIVI SON SUJET (E2, 2026-08-31). L'escalade a quitte `install.sh` pour
+  # `fleet/deploy/workstation` ; continuer de lire la porte l'aurait rendu vert a vide, sur un
+  # fichier qui n'escalade plus.
+  local rail="$BATS_TEST_DIRNAME/../workstation"
+  [ -f "$rail" ]
+  grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_ADMIN_RESET' "$rail"
 }
 
 # ─── CHANGER LE PORT SANS CHANGER LE PROJET DEPLACE LA FORGE ────────────────────────────────────
