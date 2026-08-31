@@ -143,7 +143,7 @@ defmodule Fleet.Application do
     # les profils sont valides, et « un catalogue qui DECLARE un role lui doit son prompt ». Aucun
     # ne resout `steps[].role` ni `jury[]` contre les profils : un catalogue dont la carte dit `dev`
     # pendant que ses profils declarent `developer` passe les deux, boote, et meurt au PREMIER
-    # dispatch, sur un message qui accuse le runtime (mesure du 2026-08-16).
+    # dispatch, sur un message qui accuse LE RUNTIME.
     #
     # Meme posture que les gels : on ne boote pas sur un catalogue incoherent. Et c'est la MEME
     # fonction que joue `catalogue install` avant de toucher la forge — une seule verite, deux

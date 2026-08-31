@@ -254,12 +254,11 @@ defmodule Fleet.Application.CatalogueDeposits do
   #                               sur une forge ou `bob` est un humain, son org entrerait en collision
   #                               avec le compte.
   #
-  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI ET PLUS DANS `CatalogueLifecycle.stores/3`. Tant qu'il etait
-  # en aval, `split/2` rendait des CANDIDATS qu'un second lecteur recalait — et un candidat recale
-  # tombait dans un trou : ni magasin (pas une org), ni depot (deja classe magasin), aucun log,
-  # aucune ligne. Mesure du 2026-08-21 par relecture independante : `bob/mon-depot` declarant
-  # `name: bob` disparaissait de `catalogue list` sans un mot, ce qui est mot pour mot le defaut que
-  # ce module venait de fermer, avec une geometrie differente.
+  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI, PAS EN AVAL. Place plus loin, `split/2` rend des CANDIDATS
+  # qu'un second lecteur recale — et un candidat recale TOMBE DANS UN TROU : ni magasin (pas une
+  # org), ni depot (deja classe magasin), aucun log, aucune ligne. Un depot personnel declarant
+  # `name: <son propre compte>` disparait alors de `catalogue list` SANS UN MOT, ce qui est mot pour
+  # mot le defaut que ce module ferme un cran plus haut, avec une geometrie differente.
   #
   # La classification est donc COMPLETE ici, et le recale RETOMBE en depot — ce qu'il est. Il ne
   # s'installera jamais (son org entrerait en collision avec un compte), et ce refus-la appartient a
@@ -300,10 +299,10 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   defp owner_of(full_name), do: full_name |> String.split("/", parts: 2) |> hd()
 
-  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation. Elle avait sa copie ici jusqu'au
-  # 2026-08-21 ; la porte explicite (`Onboard.refute_store/2`) a eu besoin de la meme, et sa
-  # frontiere ne peut pas referencer celle-ci. Elargir une frontiere pour avoir raison n'est jamais
-  # le geste — la regle est descendue la ou les deux peuvent la lire.
+  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation, et pas en copie ici : la porte
+  # explicite (`Onboard.refute_store/2`) a besoin de la meme, et sa frontiere ne peut pas referencer
+  # celle-ci. ELARGIR UNE FRONTIERE POUR AVOIR RAISON N'EST JAMAIS LE GESTE — la regle descend la ou
+  # les deux peuvent la lire.
   defp manifest_name(yaml), do: Fleet.Catalogue.manifest_name(yaml)
 
   defp group(deposits) do
