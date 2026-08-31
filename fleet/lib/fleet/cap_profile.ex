@@ -115,8 +115,8 @@ defmodule Fleet.CapProfile do
   @doc """
   Le meme role, charge depuis le catalogue NOMME — et le profil rendu PORTE cette racine.
 
-  `nil` garde le comportement du jour (le premier catalogue installe). La racine voyage ensuite sur le
-  profil, ce qui evite de la threader dans les trois lecteurs qui le prennent deja.
+  `nil` resout dans le premier catalogue installe. La racine voyage ensuite SUR le profil, ce qui
+  evite de la threader dans chaque lecteur qui prend deja ce profil.
   """
   @spec load(String.t(), Path.t() | nil) :: {:ok, t()} | {:error, term()}
   def load(role, root) when is_binary(role) do
