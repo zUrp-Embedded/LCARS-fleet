@@ -68,11 +68,10 @@ defmodule Fleet.Admiral.AuditConsumer do
 
   # V2 extensions (MCPMonitor).
   #
-  # ⚠ UN HANDLER `sdk.upstream_alert` VIVAIT ICI SANS EMETTEUR (retire le 2026-08-14, 6-016). Il
-  # etait la moitie consommatrice de `MCPWatcher`, supprime le 2026-08-03 (BL-6-44) — la veille de
-  # derive du SDK est passee en CI. Le producteur est parti, la clause est restee : elle se lisait
-  # comme un rail d'audit vivant, et une clause qu'aucun evenement n'atteint ne se distingue pas
-  # d'une clause qui marche.
+  # ⚠ PAS DE HANDLER SANS EMETTEUR ICI (6-016). Quand un producteur part — la veille de derive du
+  # SDK est passee en CI, cf. BL-6-44 — sa clause de consommation reste et SE LIT COMME UN RAIL
+  # D'AUDIT VIVANT : une clause qu'aucun evenement n'atteint ne se distingue pas d'une clause qui
+  # marche.
   def handle_info(
         %Fleet.Event{source: :admiral, type: :"mcp.server_crashed", payload: p},
         state
@@ -136,9 +135,9 @@ defmodule Fleet.Admiral.AuditConsumer do
     )
   end
 
-  # (Clause `:"state.corrupt"` RETIREE le 2026-08-20 avec le rail de persistance du broker, BL-6-113.
-  # Elle journalisait la relecture ratee d'un `state.json` ; plus rien ne peut emettre ce type, et le
-  # registre d'evenements ne l'autorise plus. Une clause qui ne peut plus filtrer decrit un flux.)
+  # (Pas de clause `:"state.corrupt"` : le rail de persistance du broker n'existe plus (BL-6-113),
+  # rien ne peut emettre ce type et le registre d'evenements ne l'autorise pas. UNE CLAUSE QUI NE
+  # PEUT PLUS FILTRER DECRIT UN FLUX.)
   defp log_task_queue_event(_other, _event), do: :ok
 
   defp log_boot_event(:"fleet.boot_complete", payload) do

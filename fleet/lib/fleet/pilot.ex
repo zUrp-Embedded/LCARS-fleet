@@ -73,10 +73,9 @@ defmodule Fleet.Pilot do
   label write inside the escalation module finds nothing, which is why the three files the wall
   below measures are the completer, `ArchEscalation` and `IncidentConsumer`.
 
-  They no longer differ by effect. This register used to say *"only the terminal one unlocks
-  `lcars-in-flight`"*, which CI-04 had already made false at `ArchEscalation` — and the entry
-  claiming to be the family's single source pointed at the OPPOSITE of the code. All three clear
-  the lock today, and it is no longer a convention anyone must remember:
+  They do not differ by effect: ALL THREE clear `lcars-in-flight`. Writing here that only one of
+  them does would make the entry claiming to be the family's single source point at the OPPOSITE of
+  the code — and it is not a convention anyone must remember anyway:
   `labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` refuses a writer that sets
   the brake without releasing the lock. The reason is in that check's `@doc` — a lock left on a
   ticket nobody can advance is reclaimed by reconciliation and re-dispatched, so the brake is on
@@ -128,13 +127,13 @@ defmodule Fleet.Pilot do
       # BL-6-31: the adoption gate of import_external scans instruction material through the
       # reception filter — foundation, shared with SPBuilder's RepoSections door.
       Fleet.ReceptionFilter,
-      # The forge is a DOMAIN now, not a corner of this one. What used to sit here in its place was
-      # `Req`/`Req.Response`: the business domain declared the HTTP library, so "one HTTP exit" was
-      # a convention. It is compiled in `Fleet.Forge` instead.
+      # The forge is a DOMAIN, not a corner of this one. Declaring `Req`/`Req.Response` here
+      # instead would put the HTTP library in a BUSINESS domain's deps, making "one HTTP exit" a
+      # convention rather than something compiled.
       Fleet.Forge,
       # The project's LIFECYCLE (onboarding, card, roles, architect, worktrees) is its own domain:
       # imperative, called from outside on demand — the opposite nature of this reactive rail, and
-      # it used to sit under a facade that described only one of the two.
+      # a facade over both would describe only one of the two.
       Fleet.Project
     ],
     exports: [Application]
