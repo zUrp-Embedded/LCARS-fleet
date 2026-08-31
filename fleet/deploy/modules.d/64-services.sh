@@ -126,6 +126,32 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
   echo "« journalctl -u $1.service » dit pourquoi"
 }
 
+# ─── unit_cause <unite> — LA CAUSE, RECOPIEE, PAS DELEGUEE ──────────────────────────────────────
+#
+# ⚠ « status dit pourquoi » EST UN REMEDE QU'ON NE PEUT PAS TOUJOURS JOUER. Sur un rail lance en
+# fond, ou depuis un log qu'on relit le lendemain, le second geste n'est plus possible : le journal
+# a tourne, le conteneur est parti, la session est fermee. Le verdict doit PORTER la cause.
+#
+# ⚠ ET IL Y AVAIT DEJA `loop_hint`, MAIS SUR UNE SEULE BRANCHE. Un service qui a epuise son plafond
+# de redemarrages n'est plus `is-active` ET son compteur ne monte plus : ni « boucle » ni « debout ».
+# Il tombait donc dans la branche muette. Mesure du banc 2004 (2026-08-31) : le landing ne montait
+# pas, cause reelle « Address already in use » sur le port du deck — que `loop_hint` savait nommer,
+# et que personne ne lui demandait.
+unit_cause() { # unit_cause <unite> -> " — <cause>", vide si on ne sait rien dire
+  local u="$1" hint line
+  hint="$(loop_hint "$u")"
+  # La derniere ligne d'erreur du journal, quand systemd la garde. `|| true` : un journal absent
+  # (conteneur, machine sans persistance) est une REPONSE, pas une panne de ce module.
+  line="$($SYSTEMCTL --version >/dev/null 2>&1 \
+    && journalctl -u "$u.service" -n 30 --no-pager 2>/dev/null \
+       | grep -oE '(OSError|Error|error|Errno [0-9]+)[^"]*' | tail -1 || true)"
+  if [[ -n "$line" ]]; then
+    printf ' — %s (journal : %s)' "$hint" "$line"
+  else
+    printf ' — %s' "$hint"
+  fi
+}
+
 forge_url() { # vide tant que 48-forge-host n'a pas annonce d'adresse — ce n'est pas un echec
   local f="$PROV_TOKENS_DIR/forge.url"
   if [[ -r "$f" ]]; then head -n1 "$f" | tr -d '[:space:]'; fi
@@ -438,7 +464,16 @@ apply() {
         p_chg "$u.service activé et debout"
       fi
     else
-      p_fail "$u.service posé mais pas debout — « $SYSTEMCTL status $u.service » dit pourquoi"
+      # ⚠ LE VERDICT PORTE LA CAUSE, IL NE DÉLÈGUE PAS SA LECTURE. « status dit pourquoi » est un
+      # diagnostic juste dont l'action demande un SECOND geste — et sur un rail joué en fond, ou
+      # depuis un log qu'on relit le lendemain, ce second geste n'est plus possible : le journal a
+      # tourné. Mesure du banc 2004 (2026-08-31) : le landing ne montait pas, cause réelle
+      # « Address already in use » sur le port du deck, invisible dans la ligne du rail.
+      #
+      # C'est le motif que ce rail combat partout ailleurs — un remède nommé qu'on ne peut pas jouer
+      # (chemin publié inexistant, `docker exec` sur un conteneur qui redémarre). Ici il suffit de
+      # RECOPIER ce que le journal dit déjà.
+      p_fail "$u.service posé mais pas debout$(unit_cause "$u")"
     fi
   done
 

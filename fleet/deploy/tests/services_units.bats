@@ -812,3 +812,26 @@ box_services_present() {
   PROV_SUBSTRATE=docker mod check
   [[ "$output" == *"superviseur"* ]]
 }
+
+@test "un service qui ne monte pas PORTE sa cause — il ne renvoie pas a un second geste" {
+  # ⚠ « status dit pourquoi » EST UN REMEDE QU'ON NE PEUT PAS TOUJOURS JOUER. Sur un rail lance en
+  # fond, ou depuis un log relu le lendemain, ce second geste n'existe plus : le journal a tourne, la
+  # session est fermee. C'est le motif que ce rail combat partout ailleurs — un diagnostic juste dont
+  # l'action est introuvable.
+  #
+  # ⚠ ET `loop_hint` SAVAIT DEJA NOMMER LA CAUSE, SUR UNE SEULE BRANCHE. Un service qui a epuise son
+  # plafond de redemarrages n'est plus `is-active` ET son compteur ne monte plus : ni « boucle » ni
+  # « debout ». Il tombait dans la branche muette. Mesure du banc 2004 (2026-08-31) : le landing ne
+  # montait pas, cause reelle « Address already in use » sur le port du deck.
+  local code; code="$(grep -vE '^\s*#' "$MOD")"
+  # Les DEUX branches d'echec nomment la cause, et par la meme fonction.
+  grep -q 'p_fail "$u.service redémarre en boucle — $(loop_hint' <<<"$code"
+  grep -q 'p_fail "$u.service posé mais pas debout$(unit_cause' <<<"$code"
+  refute grep -q 'pas debout — « \$SYSTEMCTL status' <<<"$code"
+  # `unit_cause` s'appuie sur `loop_hint` : une seule table de causes, pas deux qui derivent.
+  local corps; corps="$(sed -n '/^unit_cause()/,/^}/p' "$MOD")"
+  grep -q 'loop_hint' <<<"$corps"
+  # ⚠ UN JOURNAL ABSENT EST UNE REPONSE, PAS UNE PANNE : le module tourne aussi dans un conteneur
+  # sans systemd persistant. La lecture ne doit pas pouvoir tuer le verdict qu'elle decrit.
+  grep -q '|| true' <<<"$corps"
+}
