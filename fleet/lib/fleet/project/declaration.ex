@@ -31,19 +31,18 @@ defmodule Fleet.Project.Declaration do
 
   require Logger
 
-  # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Il s'appelait `intensity.json`, en
-  # clair, a la racine du depot — y compris sur un projet ADOPTE, ou la fleet ecrit alors dans
-  # l'arbre de quelqu'un d'autre. Un fichier de configuration d'outil porte le point que portent
-  # tous les autres (`.gitignore`, `.editorconfig`), et son nom nomme son PROPRIETAIRE : un lecteur
-  # qui ouvre un depot inconnu doit pouvoir dire « ca, c'est a l'outil » sans lire le contenu.
+  # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Ce fichier atterrit a la racine d'un
+  # depot — y compris ADOPTE, ou la fleet ecrit dans l'arbre de quelqu'un d'autre. Un fichier de
+  # configuration d'outil porte le point que portent tous les autres (`.gitignore`,
+  # `.editorconfig`), et son nom nomme son PROPRIETAIRE : un lecteur qui ouvre un depot inconnu
+  # doit pouvoir dire « ca, c'est a l'outil » sans lire le contenu.
   #
   # ⚠ L'EXTENSION N'EST PAS POUR LE LECTEUR — `Jason.decode` ne la regarde pas et aucun glob
   # `*.json` ne ramasse ce fichier. Elle est ce qui evite une COLLISION : `.lcars` tout court est
-  # deja, 24 fois dans ce depot, le repertoire d'etat per-humain (`~/.lcars`) et celui du pod
+  # deja le repertoire d'etat per-humain (`~/.lcars`) et celui du pod
   # (`<pod_dir>/.lcars/system-prompt.md`). Un fichier `.lcars` a la racine d'un workspace, a cote
-  # d'un repertoire `.lcars/` dans le home du meme pod, ce sont deux natures sous une chaine — la
-  # faute exacte qui a coute le chantier `CLAUDE.md` du 2026-08-12.
-  # ⚠ LE NOM VIT DANS `Fleet.Layout`, PAS ICI, depuis 2026-08-13. Il a acquis un SECOND lecteur dans
+  # d'un repertoire `.lcars/` dans le home du meme pod, ce sont deux natures sous une chaine.
+  # ⚠ LE NOM VIT DANS `Fleet.Layout`, PAS ICI. Il a un SECOND lecteur dans
   # un autre domaine : `Workflow.DeliverableGate` refuse une chaine de livraison qui touche ce
   # fichier (un producteur ne modifie pas la declaration qui choisit son jury), et `Workflow` ne
   # depend pas de `Project` — donc un literal la-bas aurait fait deux sources pour un nom. Layout est
@@ -114,10 +113,10 @@ defmodule Fleet.Project.Declaration do
 
     # ⚠ L'ABSENCE SE DEMANDE, ELLE NE SE DEDUIT PAS D'UNE EXCEPTION.
     #
-    # Ce corps etait un `rescue _ ->` qui rebaptisait TOUTE levee de `load!` en « carte inconnue ».
-    # Mesure (BL-6-116) : un `{:error, {:unknown_card, "brief-gate"}}` intermittent sur une carte
-    # canon qui EXISTE — douze seeds pleins n'ont rien reproduit, parce que la preuve etait detruite
-    # a la source. `load!` leve pour au moins six raisons distinctes : nom non-slug (`Slug.cast!`),
+    # Un `rescue _ ->` rebaptise TOUTE levee de `load!` en « carte inconnue », et le symptome est
+    # un `{:error, {:unknown_card, …}}` intermittent sur une carte canon qui EXISTE — irreproductible
+    # par construction, puisque la preuve est detruite a la source (BL-6-116).
+    # `load!` leve pour au moins six raisons distinctes : nom non-slug (`Slug.cast!`),
     # carte absente de l'image publiee, YAML illisible, schema invalide, graphe invalide, `spec.ci`
     # manquant. UNE SEULE est une absence ; les cinq autres sont un catalogue casse, et se faisaient
     # passer pour la premiere.
@@ -128,9 +127,8 @@ defmodule Fleet.Project.Declaration do
     # predicat d'absence de `load!`, sans avoir a classer ce qu'il a leve — classer aurait voulu dire
     # reconnaitre un message d'exception, ce qui ment le jour ou le message est reformule.
     #
-    # Et le nom non-slug reste refuse comme inconnu, exactement comme avant : `Slug.cast!` VALIDE
-    # sans transformer (« validates ... without transforming them »), donc un nom invalide ne figure
-    # dans aucune liste. Les deux tests qui l'epinglent (`{:unknown_card, "wfmap/ghost"}`) tiennent.
+    # Et le nom non-slug reste refuse comme INCONNU : `Slug.cast!` VALIDE sans transformer, donc un
+    # nom invalide ne figure dans aucune liste.
     if name in Fleet.Workflow.Loader.canon_names(lopts) do
       load_declared(name, lopts)
     else

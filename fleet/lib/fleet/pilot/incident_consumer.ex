@@ -31,9 +31,8 @@ defmodule Fleet.Pilot.IncidentConsumer do
   PREMIÈRE occurrence via `IncidentRegistry.escalate_gated/5` — seuls les REPEATS de la même
   signature sous le cooldown du registre sont supprimés (l'issue ouverte porte l'alarme). Le kind
   est nommé dans la route (`escalate_kind`, exigé au boot par le Catalog : la table
-  `kind_describe` est close). L'ancien déguisement de cette porte — un second label de
-  sévérité sans définition, au bout d'une chaîne à quatre modules — est parti avec la brouette du
-  2026-08-19.
+  `kind_describe` est close). Ce n'est PAS une classe de sévérité : un second label sans définition,
+  au bout d'une chaîne de modules, dit la même chose sans que rien ne la vérifie.
 
   ## Offload (`:runner`)
 
@@ -154,7 +153,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
             if(inc.escalate_kind, do: [escalate_kind: inc.escalate_kind], else: []) ++
             for key <- inc.forward, do: {key, payload[Atom.to_string(key)]}
 
-        # LA PORTE EST UN CHAMP DE LA ROUTE, PAS UNE CLASSE DE SEVERITE (brouette 2026-08-19) :
+        # LA PORTE EST UN CHAMP DE LA ROUTE, PAS UNE CLASSE DE SEVERITE :
         # `immediate` ouvre l'issue des la PREMIERE occurrence (cooldown seul — via escalate_gated,
         # la meme porte que les kinds tires du code) ; `recurrence` note d'abord. Le Catalog a
         # deja garanti au boot qu'`immediate` porte un escalate_kind nomme.
