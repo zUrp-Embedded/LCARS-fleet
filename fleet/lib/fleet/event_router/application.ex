@@ -23,11 +23,11 @@ defmodule Fleet.EventRouter.Application do
   # being declared in a config file.
   #
   # Checked at BOOT and not per-call, deliberately: the dangerous form is the one DECLARED in
-  # config, and it is the only one visible here. The single test that uses the seam sets it with
-  # `put_env` after boot, so this stays silent for it — a warning on every broadcast would be noise
-  # nobody reads, which is the same as no warning at all.
+  # config, and it is the only one visible here. A test that sets it with `put_env` after boot
+  # stays silent, and that is the intent — a line on every broadcast would be noise nobody reads,
+  # which is the same as no line at all.
   #
-  # A warning and not a refusal: the seam is legitimate machinery, and a node that will not boot
+  # It LOGS and boots rather than refusing: the seam is legitimate machinery, and a node that will
   # because someone left a debug hook is a worse failure than one that says so loudly.
   defp warn_if_broadcast_seam_declared do
     case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do

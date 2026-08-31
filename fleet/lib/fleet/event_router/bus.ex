@@ -50,10 +50,9 @@ defmodule Fleet.EventRouter.Bus do
     end
   end
 
-  # 6-041 — LA COPIE VERS N BOITES ETAIT UN DEFAUT D'ADRESSAGE, PAS DE DEBIT. Chaque pod s'abonnait
-  # au sujet GLOBAL, donc tout evenement reveillait les N pods actifs (plafond 128) et N-1 le
-  # jetaient. Le pod ne consomme que des evenements qui portent SON `pod_id` : le bus peut donc les
-  # adresser au lieu de les diffuser.
+  # 6-041 — QUESTION D'ADRESSAGE, PAS DE DEBIT. Un pod ne consomme que les evenements portant SON
+  # `pod_id`, donc le bus les lui ADRESSE. L'abonnement au seul sujet GLOBAL reveillerait les N pods
+  # actifs (plafond 128) a chaque evenement, dont N-1 pour le jeter.
   #
   # LA REPARTITION VIT ICI ET NULLE PART AILLEURS, et c'est le point. La faire faire aux emetteurs
   # mettrait un devoir de MEMOIRE a chaque site : celui qui oublie le sujet du pod ne casse rien de
@@ -182,20 +181,19 @@ defmodule Fleet.EventRouter.Bus do
 
   # PERMISSIVE ON PURPOSE, AND IT IS LOAD-BEARING. An empty registry means "the registry is not
   # loaded YET", not "nothing is authorized": this default holds the window between the first line
-  # of boot and `Catalog.load!/0`. Measured on this tree — flipping it to `false` fails 101 of 2698
-  # tests, because the hermetic suite runs with the registry off by design
-  # (`event_router_load_event_registry: false`). A fail-closed default here does not harden the bus,
-  # it makes the boot and the whole suite unable to emit.
+  # of boot and `Catalog.load!/0`. The hermetic suite runs with the registry off by design
+  # (`event_router_load_event_registry: false`), so a fail-closed default here does not harden the
+  # bus: it makes the boot and a large part of the suite unable to emit at all.
   #
   # WHAT MAKES IT SAFE IS NOT WRITTEN IN THIS MODULE, so read it here: `Catalog.load!/0` RAISES on
   # an absent, invalid or empty `events.yaml`, and it runs in `EventRouter.Application.init/1`
   # ABOVE the children list. A fleet that reaches its first broadcast therefore has a populated
   # registry, and this branch is unreachable in a live fleet.
   #
-  # That ordering was held by convention alone until the `boot.event_registry_before_children` lock
-  # in `mix lcars.contracts.check`: moving the `load!/0` call one line down would have widened this
-  # window to the whole boot with nothing going red — the failure needs an unregistered event AND a
-  # real supervision tree, which no hermetic test plays.
+  # The `boot.event_registry_before_children` lock in `mix lcars.contracts.check` is what holds that
+  # ordering: moving the `load!/0` call one line below the children widens this window to the whole
+  # boot, and nothing else goes red — the failure needs an unregistered event AND a real supervision
+  # tree, which no hermetic test plays.
   @permit_empty_default true
 
   defp assert_authorized!(%Fleet.Event{type: type} = event) do
