@@ -100,14 +100,13 @@ defmodule Fleet.Forge do
   TWO SHAPES, one authority, because the callers are not asking the same question. The pilot's
   `Spawn.resolve_repo_id/3` wraps this one to `nil` and puts the id through `Opts.maybe_put` — for those, `nil` is the right answer to "optional, absent",
   and an `{:error, _}` they must unwrap would be noise. `Fleet.Project.Architect` makes it a FAILURE
-  condition (no id ⇒ no project identity ⇒ no arch), and a failure has to say why: it used to get a
-  bare `nil` and then GUESS in its log ("forge down?") over a forge that was answering. An
-  instrument that supposes is worse than one that is silent — the supposition gets quoted.
+  condition (no id ⇒ no project identity ⇒ no arch), and a failure has to say why: handed a bare
+  `nil`, it GUESSES in its log ("forge down?") over a forge that is answering. AN INSTRUMENT QUI
+  SUPPOSE EST PIRE QU'UN INSTRUMENT MUET — la supposition finit citee.
 
-  It lives HERE and not in the dispatcher that used to hold it: reading a repo's forge id is a
-  FORGE question, and the dispatcher was simply its first caller. The extraction of the project
-  lifecycle is what surfaced it — an architect needs the id to exist, and had to reach up into the
-  step rail to ask for it.
+  It lives HERE and not in the dispatcher: reading a repo's forge id is a FORGE question, and the
+  dispatcher is only one of its callers. An architect needs the id to exist, and would otherwise
+  have to reach UP into the step rail to ask for it.
 
   Reasons: the forge's own (`{:error, :no_id}`, HTTP tuple…), or `:repo_id_unsupported` when the
   seam module does not export `repo_id/2` at all (a test stub) — which is a fact about the wiring,
@@ -141,9 +140,9 @@ defmodule Fleet.Forge do
   `inspect/1` on the raw reason is right in a LOG (a grep rail, where the whole payload is the
   point) and wrong in a forge comment. Gitea puts a `"url" => ".../api/swagger"` pointer in every
   error body, and pasting the tuple verbatim shipped that pointer into the message a human reads.
-  Measured 2026-08-11 on a stalled PR: the signal was `403 user must be a collaborator`, and the
-  swagger URL — meaningless to any reader of that comment — was taken for signal twice, once by a
-  human asking which forge it named and once inside an architect's root-cause analysis.
+  On a stalled PR the signal is `403 user must be a collaborator`, and the swagger URL — meaningless
+  to any reader of that comment — gets taken FOR SIGNAL: once by a human asking which forge it names,
+  once inside an architect's root-cause analysis.
 
   Noise that survives into a message read by a decision-maker is not neutral: it gets interpreted.
   Operation tags are KEPT (`{:open_pr, _}` says which gesture failed) — only the vendor's

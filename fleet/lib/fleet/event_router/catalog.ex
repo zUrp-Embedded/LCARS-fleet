@@ -120,9 +120,8 @@ defmodule Fleet.EventRouter.Catalog do
 
   defp build_routing!(events) do
     for {type, %{"source" => source, "action" => action} = route} <- events, into: %{} do
-      # (Les actions du rail de severite max et leurs gardes de prefixe sont parties avec lui
-      # de severite max — brouette 2026-08-19. La garde qui survit dans leur esprit : une route
-      # `incident` a porte immediate exige un `escalate_kind` nomme, plus bas.)
+      # (Pas de rail de severite separe ni de gardes de prefixe : la seule garde de cet esprit est
+      # plus bas — une route `incident` a porte immediate exige un `escalate_kind` NOMME.)
       if route["incident"] && action != "incident" do
         raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
       end
@@ -130,7 +129,7 @@ defmodule Fleet.EventRouter.Catalog do
       incident =
         case route["incident"] do
           %{"op" => op, "subject" => subject} = inc ->
-            # LA PORTE EST DECLARATIVE (brouette 2026-08-19) : `immediate` = issue des la PREMIERE
+            # LA PORTE EST DECLARATIVE : `immediate` = issue des la PREMIERE
             # occurrence (escalate_gated, cooldown seul) ; `recurrence` (defaut) = 1re notee,
             # recidive escaladee (record_or_escalate). Le perimetre est borne : la porte
             # declarative vaut pour les evenements ROUTES PAR CETTE TABLE ; les kinds tires depuis
@@ -152,9 +151,8 @@ defmodule Fleet.EventRouter.Catalog do
               end
 
             # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
-            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue — la panne exacte de
-            # `:awaits_arch_stuck` (trouvee par revue, 2026-08-19). Refus au BOOT, pas au premier
-            # incident.
+            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue. Refus au BOOT, pas
+            # au premier incident.
             if gate == :immediate and is_nil(inc["escalate_kind"]) do
               raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
                       "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>
