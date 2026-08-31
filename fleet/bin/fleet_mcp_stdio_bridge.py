@@ -9,29 +9,15 @@
 # MCP server — at turn 1 the server is still "still connecting", the tools are deferred and the pod
 # gives up. Only stdio works (claude spawns the server → synchronous connection → tools inline at
 # turn 1). But a per-pod stdio server would hold ISOLATED state. This bridge gets both: claude spawns
-# it over stdio (synchronous, fine) and it forwards every tool-call to the REAL central fleet_mcp —
-# shared state, off the turn-1 critical path.
-#
-# IRON LAW: this is the ONE pod comm mechanism (MCP/stdio on the pod side). Not a variant — the bridge
-# IS the channel. Central (fleet_mcp) is the state backend, never reached directly by the pod.
-# Near-pure transport shim (ZERO fleet logic — the business logic lives in central, on the Elixir
-# side): the bridge only terminates the `initialize` handshake locally (pinned protocolVersion) and
-# forwards everything else.
+# it over stdio and it forwards every tool-call to the REAL central fleet_mcp.
 #
 # IDENTITY IS THE CHANNEL: each pod has ITS OWN AF_UNIX socket, mounted in its sandbox alone. Central
-# derives the pod_id from the socket it received on; the bridge injects NO identity into the arguments.
-# (The old loopback HTTP transport was shared by every pod and the pod_id was guessable there, so a
-# secret capability had to be presented in the args. The per-pod socket closes that hole by
-# construction — there is nothing left to present, the channel discriminates.)
-#
-# Single-threaded transport shim, tools-only (get_work_item IN / submit_result OUT). The push channel
-# was removed — 100% pull-driven through `get_work_item`.
+# derives the pod_id from the socket it received on; the bridge injects NO identity into the arguments
+# — there is nothing left to present, the channel discriminates.
 #
 # ENV:
 #   LCARS_FLEET_MCP_SOCKET: path of central's AF_UNIX socket for THIS pod (one socket file per pod,
 #                           mounted in the sandbox). REQUIRED.
-# (F-C138 — no more LCARS_ROLE: role filtering is done by central from the per-pod socket, the bridge
-#  no longer selects any surface locally.)
 # Protocol: newline-framed JSON-RPC on stdin/stdout (claude side); the same newline-framed JSON-RPC on
 # the AF_UNIX socket (central side) — one request = one line, one response = one line.
 import json
@@ -43,9 +29,7 @@ import time
 SOCKET_PATH = os.environ.get("LCARS_FLEET_MCP_SOCKET", "")
 PROTO = "2024-11-05"
 _req_id = [1000]
-# Timeout split — see central_call for the full reasoning. connect/send = "central DEAD" bound;
-# readline = "central WORKING" bound, above central's composed worst case (never below it: a read
-# timeout under the real bound turns a slow success into an error the agent retries).
+# connect/send borne le cas « central MORT », readline le cas « central OCCUPE » — cf. central_call.
 CONNECT_TIMEOUT = float(os.environ.get("LCARS_MCP_CONNECT_TIMEOUT", "30"))
 READ_TIMEOUT = float(os.environ.get("LCARS_MCP_READ_TIMEOUT", "600"))
 
@@ -61,29 +45,17 @@ def send(o):
 
 
 def central_call(method, params):
-    # Forwards a JSON-RPC call to central fleet_mcp over the per-pod AF_UNIX socket: one connection PER
-    # call (connect → write one line → read one line → close), no state between calls — central accepts
-    # connection by connection. Newline-framed: we send exactly `json + "\n"` (json.dumps without indent
-    # fits on ONE line, no internal `\n`) and read the response up to the first `\n`. Returns the result
-    # field, or raises: missing socket / connection refused / timeout / empty response all surface as an
-    # exception, and the tools/call caller turns it into a clean JSON-RPC error for claude — never a
-    # silent crash.
+    # Le framing par saut de ligne tient parce que `json.dumps` SANS indent produit UNE ligne, sans
+    # `\n` interne : on envoie `json + "\n"` et on lit jusqu'au premier `\n`.
     #
-    # INSTRUMENTATION (timeout diagnosis): each step (connect/send/readline) is timed and the current one
-    # kept in `stage`, so a failure logs WHERE it blocked — a slow `connect` means central is not
-    # accepting (busy/serialized acceptor); a slow `readline` means it accepted but is not answering.
-    # Without this the pod sees only a mute "timed out", indistinguishable either way. A successful but
-    # slow call (>1s) is logged too, with the same per-step breakdown.
-    # TWO timeouts, one per failure mode. CONNECT_TIMEOUT bounds the "central is DEAD" case: a dead
-    # or wedged acceptor shows at connect/send, and 30s is generous for a local AF_UNIX handshake.
-    # READ_TIMEOUT bounds the "central is WORKING" case — and must therefore exceed central's real
-    # composed worst case (a create_project chains ~8 SIGKILL-bounded 30s git ops + forge HTTP +
-    # write-spacing gaps; the publish path alone was measured at 165s). The old single 30s sat BELOW
-    # that bound: a slow mutation returned an ERROR to the agent while its effect completed on
-    # central, and the agent's re-emit created a duplicate. Central dedups retries now (core-side
-    # idempotency), but the bridge must not MANUFACTURE them: it waits out the real bound instead of
-    # lying at 30s. 600s = every composed central bound with margin, while a truly hung central
-    # still surfaces as a timeout. Both env-tunable (also what makes the split TESTABLE fast).
+    # `stage` porte l'etape en cours pour que l'echec dise OU il a bloque : un `connect` lent = central
+    # n'accepte pas ; un `readline` lent = il a accepte et ne repond pas. Sans elle, le pod ne voit
+    # qu'un « timed out » muet, identique dans les deux cas.
+    #
+    # ⚠ READ_TIMEOUT DOIT EXCEDER LE PIRE CAS COMPOSE DE CENTRAL, jamais l'inverse : sous la borne
+    # reelle, une mutation lente rend une ERREUR a l'agent pendant que son effet s'acheve, et le
+    # re-envoi de l'agent cree un DOUBLON. L'ancien timeout unique de 30 s etait sous la borne — le
+    # seul chemin publish a ete mesure a 165 s.
     _req_id[0] += 1
     rpc = {"jsonrpc": "2.0", "id": _req_id[0], "method": method, "params": params}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -118,11 +90,8 @@ def central_call(method, params):
 
 
 
-# F-C138 — the bridge carries NO tool catalogue any more: `tools/list` AND `tools/call` are both
-# forwarded to central, the SINGLE source of the schemas (`deftool`) and of role filtering (derived from
-# the cap-profile, indexed on the per-pod socket = identity through the channel). That is what makes the
-# "pure transport shim" claim true: zero logic, zero list, and no Python↔Elixir drift (whose symptom was
-# `project_install` being invisible to the pods).
+# F-C138 — le bridge ne porte AUCUN catalogue d'outils : central est la source unique des schemas et
+# du filtrage par role. Zero derive Python↔Elixir.
 def main():
     if not SOCKET_PATH:
         log("FATAL: LCARS_FLEET_MCP_SOCKET unset — the bridge has no central socket to reach")
@@ -145,9 +114,6 @@ def main():
         elif method == "notifications/initialized":
             pass
         elif method == "tools/list":
-            # F-C138 — FORWARD to central (like tools/call), no local catalogue: central is the single
-            # source of the schemas (deftool) AND of role filtering (derived from the cap-profile,
-            # indexed on the per-pod socket). The bridge knows no tool by heart any more.
             try:
                 result = central_call("tools/list", msg.get("params", {}))
                 send({"jsonrpc": "2.0", "id": mid, "result": result})
@@ -157,9 +123,7 @@ def main():
         elif method == "tools/call":
             p = msg.get("params", {})
             try:
-                # Forward to central AS-IS: NO identity injected into the arguments. Central derives the
-                # pod_id from the per-pod socket it received on (identity IS the channel); the wire no
-                # longer carries anything to prove. Central's answer goes back untouched.
+                # AS-IS : aucune identite injectee dans les arguments, central la derive de la socket.
                 result = central_call("tools/call", p)
                 send({"jsonrpc": "2.0", "id": mid, "result": result})
             except Exception as e:

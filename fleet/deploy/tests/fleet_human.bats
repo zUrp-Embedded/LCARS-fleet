@@ -188,12 +188,17 @@ nu() { # nu <check|apply>
   # un humain que le rail declare, ce que le canon interdit — pas seulement une seconde copie.
   # ⚠ LE MOTIF EXCLUT UN POINT DEVANT : `~/.lcars` est un REPERTOIRE, pas le nom d'un compte.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  ! grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
+  # ⚠ `refute`, PAS `!` : POSIX exempte d'`errexit` toute commande niee par `!`, donc un `! grep`
+  # qui n'est pas la DERNIERE ligne de son bloc s'execute, rend 1, et bats passe a la suite — verte
+  # au moment precis ou ce qu'elle interdit arrive. Les trois assertions d'ici etaient dans ce cas.
+  refute grep -qE '(^|[^.[:alnum:]_/])lcars([^[:alnum:]_.-]|$)' <<<"$code"
   # ⚠ ET PLUS AUCUNE SECONDE ORIGINE. `PROV_FLEET_HUMAN` etait posee par `--fleet-human`, retire :
   # la rouvrir redonnerait deux sources a un fait qui n'en a qu'une, et la seconde serait vide.
-  ! grep -q 'PROV_FLEET_HUMAN' <<<"$code"
-  # ET IL N'INTERROGE PLUS L'AUTORITE DU NOM : il n'a plus de nom a demander.
-  ! grep -q 'builtin-human' <<<"$code"
+  refute grep -q 'PROV_FLEET_HUMAN' <<<"$code"
+  # ET IL N'INTERROGE PLUS L'AUTORITE DU NOM : il n'a plus de nom a demander. Le temoin exigeait
+  # l'inverse — `grep -q 'forge-gestures.sh" builtin-human'` — et c'est le canon qui a change, pas
+  # la mesure : ce module enumere `fleet_humans`, il n'attend plus aucun compte nomme.
+  refute grep -q 'builtin-human' <<<"$code"
 }
 
 # ⚠ DEUX TEMOINS ONT DISPARU ICI, ET LEUR SUJET AVEC (⚖ user 2026-08-30) — pas leur motif, qu'il

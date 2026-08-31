@@ -11,7 +11,7 @@
 #                    no keyboard injection and no scraping.
 #
 # STATUS OF THIS FILE, stated because its location does not say it: it has NO live consumer. Its only
-# referrer is test/_archived_gates/gate-r-core-comm-inc4.sh, which short-circuits (it is a RETIRED
+# referrer is test/probes/_archived/gate-r-core-comm-inc4.sh, which short-circuits (it is a RETIRED
 # gate). It is kept as the data an archived gate would need if that gate were ever revived — which is
 # also why its tool is still named `get_task`: renaming it to the current `get_work_item` would break
 # the only thing that could ever drive it. Do not read this file as an example of the live protocol;

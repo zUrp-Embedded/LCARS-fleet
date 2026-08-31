@@ -206,7 +206,7 @@ printf "INSTALLED fleet -\n"
 #
 # CE QUI EST EPINGLE ICI EST LE CLIENT, PAS L'AUTORITE. La decision — « la forge dit-elle que ce
 # pair est admin ? » — vit dans `catalogue-executor.py`, dont le banc est
-# `fleet/test/test_catalogue_executor.py`. Ce fichier-ci tient l'autre moitie du contrat : que
+# `fleet/test/services/catalogue-executor_test.py`. Ce fichier-ci tient l'autre moitie du contrat : que
 # CHAQUE cause rendue par le service devienne la BONNE phrase, et qu'aucune ne se traduise en une
 # autre.
 #

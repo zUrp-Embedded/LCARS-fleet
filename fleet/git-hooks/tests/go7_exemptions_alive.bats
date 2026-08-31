@@ -28,6 +28,8 @@ need_git_checkout() {
     || skip "pas de checkout git (arbre livre par tarball) — ce temoin mesure un depot"
 }
 
+load ../../test/support/refute
+
 setup() {
   need_git_checkout
   HOOK="$BATS_TEST_DIRNAME/../pre-commit"
@@ -101,7 +103,7 @@ is_ipc_exception() {
     local base
     base=$(basename "$1")
     case "$base" in
-        *-handoff.md|jamais-vu-ici.md) return 0 ;;
+        scratchpad.md|jamais-vu-ici.md) return 0 ;;
     esac
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
     [[ "$1" == *"aucun-repertoire-de-ce-nom/"* ]] && return 0
@@ -114,8 +116,14 @@ EOF
   printf '%s\n' "$output" | grep -qxF "path	*aucun-repertoire-de-ce-nom/*"
   # ...et les clauses vivantes du meme fichier ne sont PAS signalees : un detecteur qui accuse tout
   # ne mesure rien.
-  ! printf '%s\n' "$output" | grep -qF "handoff"
-  ! printf '%s\n' "$output" | grep -qF "SKILL.md"
+  # `scratchpad.md` et pas `*-handoff.md` : ce dernier a quitte le vrai hook le 2026-08-20
+  # (ccbd45540, « les textes qui presentaient des objets supprimes comme cables ») et le depot ne
+  # porte AUCUN fichier `*-handoff.md`. La fixture le donnait encore en exemple de clause VIVANTE :
+  # le detecteur avait raison de le signaler, et cette ligne l'accusait a tort. Elle n'a jamais
+  # rougi parce que `! …` etait inerte — la purge de 2026-08-20 a rate cette occurrence pour
+  # exactement cette raison. `scratchpad.md` est ce que le hook porte aujourd'hui, et il vit (2 fichiers).
+  printf '%s\n' "$output" | refute_out 'scratchpad'
+  printf '%s\n' "$output" | refute_out 'SKILL\.md'
 }
 
 @test "une clause a deux branches ||  est lue comme DEUX clauses" {
@@ -140,5 +148,5 @@ EOF
 
   run dead_patterns "$fake"
   printf '%s\n' "$output" | grep -qxF "path	*branche-morte/*"
-  ! printf '%s\n' "$output" | grep -qF "skills"
+  printf '%s\n' "$output" | refute_out 'skills'
 }

@@ -299,7 +299,7 @@ STUB
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne grave aucun nom de compte humain, sous aucune forme
-  ! grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
+  refute grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
 }
 
 # ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
@@ -776,6 +776,7 @@ STUB
   grep -q 'curl -K -' <<<"$body"
   refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
+
 @test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
   # `sudo` fait env_reset : un drapeau absent de REEXEC_ENV est mange en silence, et le geste de
   # l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.

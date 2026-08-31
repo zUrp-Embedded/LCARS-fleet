@@ -5,7 +5,7 @@
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
-# test shell/python. Un test comme test/test_fleet_mcp_stdio_bridge.py peut donc devenir ROUGE en
+# test shell/python. Un test comme test/bin/fleet_mcp_stdio_bridge_test.py peut donc devenir ROUGE en
 # silence (le bridge renomme, le test jamais rejoue) — c'est exactement le bug qui a motive ce filet.
 # Ce script est le point d'entree unique des tests hors-mix, cablable dans `mix gate` (cf. mix.exs).
 #
@@ -34,10 +34,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # y est declare `:gated`) tout en n'etant JAMAIS joue — exactement le defaut que ce registre existe
 # pour attraper. Ajouter un test python = ajouter sa ligne ICI, et c'est tout.
 PYTESTS=(
-  "$HERE/test_fleet_mcp_stdio_bridge.py"
-  "$HERE/test_console_deck.py"
-  "$HERE/test_uninstructed_commands.py"
-  "$HERE/test_catalogue_executor.py"
+  "$HERE/bin/fleet_mcp_stdio_bridge_test.py"
+  "$HERE/services/console-deck_test.py"
+  "$HERE/crosscutting/uninstructed_commands_test.py"
+  "$HERE/services/catalogue-executor_test.py"
 )
 
 # Politique bats-absent : warning compte (defaut) vs echec dur. Overridable par env pour le jour du
