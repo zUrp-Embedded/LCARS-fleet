@@ -19,9 +19,8 @@ defmodule Fleet.Application do
       # d'un meme contrat dans deux domaines.
       Fleet.ReleaseDoor,
       # La projection du roster de forge d'un catalogue, atteinte par les deux taches Mix classees
-      # ici (`lcars.catalogue.roles`, `lcars.contracts.check`). Elle vivait SOUS ce namespace sans
-      # etre du code de boot ; elle est un domaine depuis le 2026-08-27, et cette ligne est ce que
-      # la racine en utilise vraiment.
+      # ici (`lcars.catalogue.roles`, `lcars.contracts.check`). Ce n'est pas du code de boot : c'est
+      # un domaine, et cette ligne est ce que la racine en utilise vraiment.
       Fleet.Roster,
       # Proven-good images at boot (tier B): the ROOT publishes both snapshots before any child
       # can spawn a pod — a boot concern by nature (do-not-boot on invalid), hence the two edges.
