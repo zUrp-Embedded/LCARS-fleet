@@ -2,14 +2,9 @@ defmodule Fleet.Admiral.AuditConsumer do
   @moduledoc """
   Audit consumer — events lifecycle + security.
 
-  Subscribes to the `Fleet.EventRouter.Bus` topic `fleet.events`, logs at
-  audit-grade for events:
-    * `:"pod.completed"` / `:"pod.failed"` — Pod GenServer Port stream lifecycle
-      (real producers: `Fleet.Spawner.Pod`).
-    * `:"fleet.boot_complete"` / `:"fleet.boot_partial"` / `:"fleet.boot_failed"`
-      — BootOrchestrator lifecycle.
-    * task-queue: `:"work_item.enqueued"` / `:"work_item.assigned"` / `:"work_item.completed"` /
-      `:"work_item.cleared"` / `:"work_item.failed"` (producer `Fleet.TaskQueue`).
+  Subscribes to the `Fleet.EventRouter.Bus` topic `fleet.events` and logs, at audit grade, the
+  lifecycle of pods, of the boot, and of the task queue. Which types exactly is the clause list
+  below — a second copy here would be one more thing to keep in step with it.
 
   ## HALF OF THIS SURVIVES A RESTART, AND IT IS NOT THE HALF YOU WOULD ASSUME
 
@@ -29,16 +24,14 @@ defmodule Fleet.Admiral.AuditConsumer do
   moving them would both lie about severity and bury the durable trace under routine passes — the
   reason `DurableLog` names for excluding `info` in the first place.
 
-  A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not
-  in a level bump. So
-  widening it is a DECISION with a schema behind it, not a patch.
+  A durable nominal timeline, if the fleet ever needs one, belongs in a structured ledger and not in
+  a level bump: widening it is a DECISION with a schema behind it, not a patch.
 
-  GenServer that subscribes at boot (init/1), dispatches via canonical `%Fleet.Event{}` clauses
-  ONLY (no tuple format exists on the Bus). No runtime side effect
-  beyond the log (forensics + a separate dashboard subscriber).
+  NO RUNTIME SIDE EFFECT BEYOND THE LOG — forensics, plus whatever separate subscriber a dashboard
+  runs. Nothing downstream may be made to depend on this consumer having seen an event.
 
-  Test-seam: `start_link(opts)` accepts `:subscribe` (default true)
-  → tests instantiate without the global subscribe.
+  Test-seam: `start_link(opts)` accepts `:subscribe` (default true) → tests instantiate without the
+  global subscribe.
   """
 
   use GenServer
@@ -58,16 +51,14 @@ defmodule Fleet.Admiral.AuditConsumer do
     {:ok, %{events_count: 0}}
   end
 
-  # Strict canonical %Fleet.Event{} schema (task_queue lifecycle) — every Bus producer emits
-  # %Fleet.Event{}, no tuple-format clause exists here.
+  # ⚠ CANONICAL `%Fleet.Event{}` ONLY, no tuple-format clause: every Bus producer emits the struct,
+  # and a tolerant clause here would let a producer ship a shape nothing else on the Bus accepts.
   @impl true
   def handle_info(%Fleet.Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  # V2 extensions (MCPMonitor).
-  #
   # ⚠ PAS DE HANDLER SANS EMETTEUR ICI (6-016). Quand un producteur part — la veille de derive du
   # SDK est passee en CI, cf. BL-6-44 — sa clause de consommation reste et SE LIT COMME UN RAIL
   # D'AUDIT VIVANT : une clause qu'aucun evenement n'atteint ne se distingue pas d'une clause qui
