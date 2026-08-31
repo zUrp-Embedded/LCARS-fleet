@@ -169,3 +169,80 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   grep -qE 'DOCKER_CONFIG:-.*\]\] && ! "\$PROV_DOCKER_BIN" compose version' <<<"$code"
   refute grep -qE 'detect_substrate.*==.*wsl.*&&.*_docker_mount_cli.*&&.*DOCKER_CONFIG' <<<"$code"
 }
+
+# ─── LE REPLI PAR LA SOCKET DU MONTAGE EST MORT (⚖ user 2026-08-31) ─────────────────────────────
+#
+# Sous WSL, le balayage essayait `/var/run/docker.sock` PUIS la socket du montage Docker Desktop
+# (`shared-sockets/guest-services/docker.proxy.sock`), qui est `root:root 755`. Ce repli n'avait
+# qu'un cas — une distro dont l'INTEGRATION WSL est desactivee — et il y repondait par `sudo`.
+#
+# ⚠ IL A COUTE DEUX FOIS. Le 2026-08-30, le refus accusait la proxy au lieu de la socket qui compte,
+# et envoyait chercher des droits qui ne bloquaient personne. Le 2026-08-31, il a fait batir un
+# diagnostic entier sur une socket hors sujet pendant que l'autre repondait.
+#
+# L'integration WSL devient un PRE-REQUIS : elle pose `/var/run/docker.sock` en `root:docker`, ce qui
+# rend WSL identique au linux natif — meme socket, meme groupe, meme condition d'acces.
+
+@test "UNE SEULE socket, sur TOUS les substrats — la proxy du montage a disparu" {
+  local code; code="$(grep -vE '^\s*#' "$LIB")"
+  refute grep -q 'docker.proxy.sock' <<<"$code"
+  refute grep -q '_docker_mount_sock' <<<"$code"
+  # Et le balayage ne depend plus du substrat : un seul chemin, partout.
+  local corps; corps="$(sed -n '/^_docker_sockets()/,/^}/p' <<<"$code")"
+  refute grep -q 'detect_substrate' <<<"$corps"
+  grep -q '/var/run/docker.sock' <<<"$corps"
+}
+
+@test "le refus SANS daemon nomme l INTEGRATION, pas seulement Docker Desktop" {
+  # Demarrer Docker Desktop ne suffit pas : sans l'integration activee pour CETTE distro, la socket
+  # n'apparait pas dans la distro. Un refus qui ne dit que « demarre Docker Desktop » envoie
+  # verifier ce qui est deja vrai.
+  local code; code="$(grep -vE '^\s*#' "$LIB")"
+  grep -q 'INTEGRATION WSL activee' <<<"$code"
+  grep -q 'WSL integration' <<<"$code"
+}
+
+# ─── LE REFUS NOMME LE GESTE, ET IL DISTINGUE TROIS ETATS ───────────────────────────────────────
+
+@test "docker_denied_geste : dans le groupe POUR LA SESSION" {
+  # L'acces est refuse alors que l'appartenance est active : ce n'est plus une question de groupe,
+  # c'est le mode de la socket. Le geste change de sujet.
+  local out; out="$(bash -c '. "$1"; docker_denied_geste "$2"' _ "$LIB" /var/run/docker.sock 2>/dev/null)"
+  if id -nG | tr ' ' '\n' | grep -qx "$(stat -Lc '%G' /var/run/docker.sock 2>/dev/null)"; then
+    [[ "$out" == *"bit d'ecriture"* ]]
+  else
+    skip "cette session n'est pas dans le groupe de la socket — cas couvert par les deux temoins suivants"
+  fi
+}
+
+@test "docker_denied_geste : dans /etc/group mais PAS dans la session — le cas qui s inverse" {
+  # ⚠ LES GROUPES D'UN PROCESSUS SONT FIXES A L'OUVERTURE DE SA SESSION. Un compte qu'on vient
+  # d'ajouter est membre pour le SYSTEME et ne l'est pas pour son SHELL. Dire « ajoute-toi au
+  # groupe » a quelqu'un qui y est deja l'envoie refaire ce qui est fait, et chercher ailleurs.
+  # Mesure du 2026-08-31 sur ce depot : ce cas exact s'est presente.
+  local grp; grp="$(stat -Lc '%G' /var/run/docker.sock 2>/dev/null)"
+  getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)" \
+    || skip "ce compte n'est pas dans « $grp » dans /etc/group — rien a simuler"
+  # On simule une session qui n'a PAS le groupe, en surchargeant `id -nG`.
+  run bash -c '. "$1"
+    id() { if [[ "$1" == "-nG" ]]; then echo "sans-le-groupe"; else command id "$@"; fi; }
+    docker_denied_geste /var/run/docker.sock' _ "$LIB"
+  [[ "$output" == *"DANS /etc/group mais PAS dans cette session"* ]]
+  [[ "$output" == *"sg "* ]]
+}
+
+@test "docker_denied_geste : hors du groupe — le geste est usermod, ET la reouverture" {
+  # `/etc/shadow` est root:shadow sur toute Debian : un groupe reel ou aucun compte de travail n'est.
+  [ -e /etc/shadow ] || skip "pas de /etc/shadow pour servir de groupe temoin"
+  local out; out="$(bash -c '. "$1"; docker_denied_geste "$2"' _ "$LIB" /etc/shadow 2>/dev/null)"
+  [[ "$out" == *"usermod -aG"* ]]
+  # ⚠ ET LA REOUVERTURE EST DITE. Sans elle, l'operateur joue usermod, relance, et retombe sur le
+  # meme refus — le geste etait bon, il manquait sa moitie.
+  [[ "$out" == *"ROUVRE ta session"* ]]
+}
+
+@test "docker_denied_geste : socket illisible — il ne raconte rien qu il ne sait pas" {
+  local out; out="$(bash -c '. "$1"; docker_denied_geste "$2"' _ "$LIB" /nexistepas/docker.sock 2>/dev/null)"
+  [[ "$out" == *"illisible"* ]]
+  refute grep -q 'usermod' <<<"$out"
+}

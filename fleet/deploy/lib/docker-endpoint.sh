@@ -54,8 +54,36 @@ PROV_DOCKER_SOCK=""
 # sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
 PROV_DOCKER_SUDO=""
 
+# ─── docker_denied_geste <socket> — LE GESTE, PAS SEULEMENT LE CONSTAT ──────────────────────────
+#
+# Le daemon repond mais refuse cet utilisateur. « la socket est root:docker 660 » est une MESURE
+# juste ; elle ne dit pas quoi TAPER, et un diagnostic dont l'action est introuvable coute plus cher
+# qu'un diagnostic absent.
+#
+# ⚠ TROIS ETATS, ET LES DEUX PREMIERS SE RESSEMBLENT AU POINT DE S'INVERSER. Les groupes d'un
+# processus sont fixes A L'OUVERTURE de sa session : un compte qu'on vient d'ajouter est membre pour
+# le SYSTEME (`/etc/group`) et ne l'est pas pour son SHELL (`id -nG`). Meme refus, deux gestes
+# opposes — « ajoute-toi au groupe » a quelqu'un qui y est deja l'envoie refaire ce qui est fait, et
+# chercher la panne ailleurs.
+#
+# MESURE DU 2026-08-31, SUR CE DEPOT MEME : ce cas exact s'est presente. `getent group docker`
+# listait bien le compte, `id -nG` non, et le message d'alors ne distinguait pas les deux — il a
+# fallu le trouver a la main.
+docker_denied_geste() { # docker_denied_geste <socket>
+  local sock="${1:?}" grp me
+  grp="$(stat -Lc '%G' "$sock" 2>/dev/null)"
+  me="$(id -un)"
+  [[ -n "$grp" ]] || { echo "socket illisible — qui la possede ?"; return 0; }
+  if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
+    echo "tu ES dans « $grp » pour cette session et l'acces est refuse quand meme — la socket porte-t-elle le bit d'ecriture pour son groupe ?"
+  elif getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' '\n' | grep -qx "$me"; then
+    echo "tu es dans « $grp » DANS /etc/group mais PAS dans cette session — les groupes sont fixes a l'ouverture : rouvre-la, ou joue « sg $grp -c '<commande>' »"
+  else
+    echo "ajoute-toi au groupe : « sudo usermod -aG $grp $me », puis ROUVRE ta session (un shell deja ouvert ne les recharge pas)"
+  fi
+}
+
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
-_docker_mount_sock() { echo "/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock"; }
 _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/docker/cli-plugins"; }
 
 # ─── _docker_plugin_config [<dir>] — UN `DOCKER_CONFIG` QUI VOIT LES PLUGINS DU MONTAGE ─────────
@@ -109,10 +137,24 @@ _docker_sockets() {
     printf '%s\n' "$LCARS_DOCKER_SOCKETS"
     return 0
   fi
-  case "$(detect_substrate)" in
-    wsl) printf '%s\n%s\n' /var/run/docker.sock "$(_docker_mount_sock)" ;;
-    *)   printf '%s\n' /var/run/docker.sock ;;
-  esac
+  # ⚠ UNE SEULE SOCKET, SUR TOUS LES SUBSTRATS (⚖ user 2026-08-31). Sous WSL, ce balayage essayait
+  # ensuite la socket du montage Docker Desktop (`shared-sockets/guest-services/docker.proxy.sock`),
+  # qui est `root:root 755` — donc un repli qui EXIGE root pour un daemon auquel l'intégration donne
+  # accès par un simple groupe.
+  #
+  # Ce repli n'avait qu'un cas : une distro dont l'intégration WSL est DÉSACTIVÉE. L'activer est un
+  # clic dans Docker Desktop ; offrir un contournement à `sudo` là où un clic suffit apprend le
+  # mauvais réflexe, et contredit le canon de la boîte (« elle ne demande jamais sudo »).
+  #
+  # ⚠ ET IL A COÛTÉ DEUX FOIS. Le 2026-08-30, le refus accusait la proxy au lieu de
+  # `/var/run/docker.sock` et envoyait chercher des droits qui ne bloquaient personne — correctif
+  # « la PREMIÈRE socket refusée » plus bas. Le 2026-08-31, il m'a fait bâtir un diagnostic entier
+  # sur une socket hors sujet pendant que celle qui comptait répondait.
+  #
+  # L'intégration WSL est donc un PRÉ-REQUIS, pas une commodité : elle expose
+  # `/var/run/docker.sock` dans la distro en `root:docker`, ce qui rend WSL identique au linux natif
+  # — même socket, même groupe, même condition d'accès.
+  printf '%s\n' /var/run/docker.sock
 }
 
 docker_endpoint() {
@@ -264,7 +306,7 @@ SHIM
       fi
       return 0
     fi
-    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · CLI retenue : $abs"
+    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · $(docker_denied_geste "$PROV_DOCKER_SOCK") · CLI retenue : $abs"
     return 1
   fi
 
@@ -278,7 +320,12 @@ SHIM
     fi
   done < <(_docker_sockets)
   if [[ "$(detect_substrate)" == "wsl" ]]; then
-    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$_envhost$tried. Sur WSL c'est Docker Desktop qui porte le daemon : démarre-le côté Windows, puis relance"
+    # ⚠ LE REFUS NOMME LE PRE-REQUIS, PAS SEULEMENT L'ABSENCE. Sur WSL le daemon vit dans la VM
+    # Docker Desktop, et c'est l'INTEGRATION qui l'expose dans la distro en posant
+    # `/var/run/docker.sock` (root:docker). Sans elle, il n'y a plus de chemin : le repli par la
+    # socket du montage a ete retire (⚖ user 2026-08-31) — il exigeait root pour un daemon auquel un
+    # clic donne acces par un groupe.
+    PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$_envhost$tried. Sur WSL, DEUX choses, dans cet ordre : Docker Desktop demarre cote Windows, et l'INTEGRATION WSL activee pour CETTE distro (Settings > Resources > WSL integration). C'est elle qui pose /var/run/docker.sock ici ; sans elle ce rail n'a aucun autre chemin"
   else
     PROV_DOCKER_WHY="aucun daemon docker joignable. CLI retenue : $resolved · sockets essayées :$_envhost$tried. Le service tourne-t-il, et suis-je dans le groupe docker ?"
   fi
