@@ -4,40 +4,27 @@
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — pose idempotente des role-tokens forge (A4) : mint + ecriture <dir>/<role>.gitea_token + sonde
 #
-# LE trou A4 : les tokens des comptes de role (architect, engineer, qualifier, reviewer, gatekeeper,
-# consultant) n'avaient AUCUN script de pose. Consequence : un humain NEUF ne peut pas faire tourner
-# la chaine (create_issue signe as-architect, donc 401), la « reinstall en 10 min » est une pretention,
-# et le jeu de tokens vivant n'existe que dans l'env prive du premier operateur. Ce script EST le
-# mecanisme : il mint les tokens sur UNE forge et les ecrit dans UN dossier (un jeu par forge, cf.
-# FORGE_ROLE_TOKENS_DIR cote runtime), rejouable a volonte.
+# Il minte les tokens des comptes de role sur UNE forge et les ecrit dans UN dossier — un jeu par
+# forge — rejouable a volonte.
 #
-# DROIT DE MINT (POSIX minimum, rien de maison) : minter le token d'un compte exige la BASIC AUTH
-# (`--passwords-file`). Gitea REFUSE la creation de token par header token — meme un token
-# site-admin, meme sur soi-meme (`POST /users/{u}/tokens` rend "auth required"). Le discriminant est
-# donc la METHODE d'authentification, pas le privilege.
+# DROIT DE MINT : minter le token d'un compte exige la BASIC AUTH (`--passwords-file`). Gitea REFUSE
+# la creation de token par header token, meme site-admin, meme sur soi-meme. Le discriminant est la
+# METHODE d'authentification, pas le privilege.
 #
-# ⚠ MAIS IL EXISTE UNE VOIE ADMIN, et cette ligne affirmait le contraire jusqu'au 2026-08-12.
-# Matrice re-mesuree cellule par cellule sur une forge vierge (Gitea 1.26.1) :
+# ⚠ IL EXISTE POURTANT UNE VOIE ADMIN — matrice mesuree cellule par cellule sur forge vierge :
 #   jeton systeme (non-admin), sans Sudo  -> 403 "doer should be the site admin or be same as the contextUser"
 #   jeton systeme (non-admin), avec Sudo  -> 403 "Only administrators allowed to sudo"
 #   jeton SITE-ADMIN, avec Sudo           -> 401 "auth required"        (l'auth par jeton ne passe jamais)
 #   BASIC AUTH site-admin + `Sudo: <u>`   -> 201, LE TOKEN EST CREE     pour <u>, sans son password
-# Ce qu'il faut donc, ce n'est PAS le password de la cible : c'est celui d'un SITE-ADMIN. Le detour
-# « poser un password sur la cible puis basic-auth » n'a jamais ete necessaire ; il etait la
-# consequence d'une matrice mesuree a moitie.
+# Ce qu'il faut n'est donc PAS le password de la cible, mais celui d'un SITE-ADMIN.
 #
-# CE SCRIPT NE PREND PAS CETTE VOIE, et c'est un choix : il minte des comptes de ROLE qu'il a lui-meme
-# fait creer, dont il detient donc legitimement les passwords. Emprunter le rail site-admin
-# exigerait qu'un credential capable de devenir n'importe qui vive la ou tourne ce script.
-# Le password est un SCALPEL (fichier operateur-only) : ce script se lance UNE fois par
-# quelqu'un qui a ce droit ; le runtime, lui, ne lit RIEN — il DEMANDE au service d'autorite, seul
-# proprietaire des fichiers poses (0600). Le script n'invente aucun droit : il echoue proprement
-# s'il n'a pas le sien.
+# CE SCRIPT NE PREND PAS CETTE VOIE, et c'est un choix : il minte des comptes de ROLE qu'il a fait
+# creer et dont il detient legitimement les passwords. Emprunter le rail site-admin exigerait qu'un
+# credential capable de devenir N'IMPORTE QUI vive la ou tourne ce script. Le runtime, lui, ne lit
+# RIEN : il DEMANDE au service d'autorite, seul proprietaire des fichiers poses.
 #
-# IDEMPOTENCE (provisioning brutal) : un token local DEJA VALIDE sur la forge est saute (aucune
-# ecriture). Invalide ou absent : l'ancien token remote du meme nom est supprime puis re-minte, et le
-# fichier est reecrit. Appliquer N fois = appliquer 1 fois. `--check` = sonde seule (exit non nul si un
-# token est invalide) — c'est le controle du nuke-drill.
+# IDEMPOTENCE : un token local DEJA VALIDE est saute, aucune ecriture. Invalide ou absent, l'ancien
+# token remote du meme nom est supprime puis re-minte. `--check` sonde sans jamais ecrire.
 #
 # USAGE :
 #   provision-role-tokens.sh --forge URL --passwords-file /root/forge/roles.json \
@@ -55,15 +42,13 @@
 # EXIT : 0 = tous les tokens poses ou valides · 1 = usage/dependance manquante · 2 = au moins un token
 #   en echec.
 
-# NOTE FOR SOURCE READERS: the header above is in French while the rest of this file's comments are in
-# English, and that is not an oversight. `usage()` renders that header verbatim — it IS the --help
-# output, i.e. text the box says to its operator. Translating it would translate the CLI. Everything
-# from here down is source prose and follows the English rule. If you ever split the two (a separate
-# heredoc for --help), the header goes English with the rest.
+# NOTE FOR SOURCE READERS: the header above is French because `usage()` renders it VERBATIM — it IS
+# the --help output, i.e. text the box says to its operator. Everything from here down is source
+# prose and follows the English rule.
 #
-# THE BLANK LINE ABOVE THIS NOTE IS LOAD-BEARING: `usage()` is `sed -n '2,/^$/p'`, so the range ends at
-# the FIRST blank line. That is what keeps this note out of --help — not its distance from the top.
-# Keep the blank line, and put anything that must NOT be printed below it.
+# ⚠ THE BLANK LINE ABOVE THIS NOTE IS LOAD-BEARING: `usage()` is `sed -n '2,/^$/p'`, so the range
+# ends at the FIRST blank line. That is what keeps this note out of --help, not its distance from
+# the top. Anything that must NOT be printed goes below it.
 
 set -euo pipefail
 
@@ -84,24 +69,17 @@ OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
 DIR_GROUP="${PROV_FLEET_GROUP:-fleet}"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
-# The SYSTEM account creates the org repos (create_project → onboard): POST /orgs/<org>/repos ALSO
-# requires write:organization (measured: without it the token is valid but the creation 403s; with it,
-# 201). Roles NEVER create an org repo, so they stay at the minimal scope — least privilege: a hijacked
-# role token must not be able to administer the org.
-# The user scope is the SYSTEM account's alone: only `forge_bot_login` (GET /user, resolving the bot
-# login to check the bot-authored markers on route/step_run/result) reads it, and it alone — ROLE
-# tokens are NEVER used for that GET. Roles WRITE through `as_role` (posts/reviews/merge); forge
-# READS, forge_bot_login included, ALWAYS go through the system token, never a role. A role holding
-# it could edit its own account profile, which is useless to its job.
-# IT IS `write:user` AND NOT `read:user` BECAUSE THE SYSTEM ACCOUNT OWNS THE DECK'S OAUTH2 CLIENT,
-# and registering one is a `/user/` WRITE. Measured 2026-08-12: `POST /user/applications/oauth2`
-# answers `required=[write:user]` on a token without it, 201 with it — a refusal about the SCOPE,
-# not the auth method, unlike minting a token which Gitea only accepts over basic auth. So
-# provisioning can register the client with a token and no password; without the scope the box has
-# no front door at all, since the deck refuses to serve anything unauthenticated.
-# Listing both would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
-# `write:user` alone. Measured on the widened token, `GET /user` still answers 200 — the write
-# scope subsumes the read, and the forge_bot_login rail is intact.
+# ⚠ THE SYSTEM ACCOUNT'S SCOPES ARE WIDER THAN A ROLE'S, AND EACH ADDITION IS MEASURED:
+#
+#   write:organization  it creates the org repos; without it the token is valid and the creation
+#                       403s. Roles NEVER create one, so they stay minimal — a hijacked role token
+#                       must not be able to administer the org.
+#   write:user          NOT `read:user`: the system account owns the deck's OAuth2 client, and
+#                       registering one is a `/user/` WRITE (`required=[write:user]` without it).
+#                       Without the scope the box has no front door at all.
+#
+# Listing `read:user` too would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
+# `write:user` alone, which subsumes the read.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 SYSTEM_SCOPES="$SCOPES,write:organization,write:user"
 PASSWORDS_FILE=""
@@ -111,9 +89,8 @@ CHECK_ONLY=0
 # Filled by `--extra-token <account>:<file>` (repeatable).
 declare -a EXTRA_ENTRIES
 
-# --help renders the header block above verbatim. It stops at the FIRST BLANK LINE rather than at a
-# hardcoded line number: the previous `2,40p` silently truncated the last sentence the moment the header
-# grew by one line, and a usage text that ends mid-sentence is worse than no usage text.
+# ⚠ FIRST BLANK LINE, NEVER A HARDCODED NUMBER: a `2,40p` truncates the last sentence in silence the
+# day the header grows by one line, and a usage text ending mid-sentence is worse than none.
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
@@ -150,19 +127,13 @@ if [[ -n "$PASSWORDS_FILE" && ! -r "$PASSWORDS_FILE" ]]; then
   exit 1
 fi
 
-# Token validity probe: GET /user WITH that token. A4 fix (a false negative that was caught in the
-# field): a narrowly-scoped token (a role, WITHOUT read:user) answers 403 on /user — ALIVE, merely
-# out-of-scope for THAT endpoint. Only 401 means dead/revoked (Gitea authenticates the token, then
-# refuses the SCOPE with a 403, distinct from the 401 "this token does not exist / has expired").
-# Measured: minimal token (write:repository,write:issue) → GET /user = 403; read:user token → 200;
-# revoked token → 401. So the correct probe is: {200,403} = alive; 401 — or anything else, 5xx /
-# timeout / connection failure — = invalid or undetermined → re-provision (fail-safe: never assume
-# valid on a doubt).
-# `-u "$role:$pwd"` and `-H "Authorization: token $tok"` put the secret in the process COMMAND LINE,
-# which is world-readable through /proc/<pid>/cmdline for the whole duration of the request. A local
-# observer harvests every role password, every existing token, and every freshly minted one — and a
-# password re-mints tokens forever, so rotating the captured token repairs nothing.
+# ⚠ {200,403} = ALIVE, AND THE 403 IS THE TRAP: a narrowly-scoped token answers 403 on /user while
+# being perfectly alive, merely out of scope for THAT endpoint. Gitea authenticates first, THEN
+# refuses the scope. Only 401 means dead or revoked; anything else — 5xx, timeout, connection
+# failure — counts as undetermined and re-provisions. Never assume valid on a doubt.
 #
+# ⚠ AND THE SECRET NEVER GOES IN ARGV: a password harvested from /proc re-mints tokens FOREVER, so
+# rotating a captured token repairs nothing.
 #
 # curl's config parser takes `name = "value"` with backslash escapes, so the value is ESCAPED rather
 # than hoped to be free of quotes — a password is exactly the kind of string that carries them.
@@ -180,31 +151,18 @@ token_valid() { # $1=token
   [[ "$code" == "200" || "$code" == "403" ]]
 }
 
-# ACTION auth on account $1: basic auth (the role's password). Builds the curl CONFIG line into the
-# global CURL_AUTH_CFG — it used to build an argv array, which is exactly what put the password on
-# the command line (6-141). The key lookup is CASE-INSENSITIVE: Gitea resolves accounts
-# case-insensitively, so a password-file with `Architect` matches the `architect` role — we align
-# with the underlying system rather than imposing a stricter constraint than it does. The value is
-# either a bare string OR an object `{password: ...}`. Basic auth is the only mint Gitea accepts.
+# The key lookup is CASE-INSENSITIVE because Gitea resolves accounts that way — we align with the
+# underlying system rather than imposing a stricter constraint than it does.
 CURL_AUTH_CFG=""
+
+# La voie FORCE ne demande AUCUN secret de plus : avec le jeton master, on pose un password neuf, on
+# minte avec, et on l'oublie — il ne survit ni en fichier, ni en variable exportee, ni au prochain
+# appel.
 #
-#
-# LA SORTIE NE DEMANDE AUCUN SECRET DE PLUS. Avec le jeton MASTER — que le rail detient deja, et qui
-# est le seul credential qu'il garde — on POSE un password neuf sur le compte, on minte avec, et on
-# l'oublie. Il ne survit a rien : ni fichier, ni variable exportee, ni second appel. Mesure du meme
-# jour, bout en bout : PATCH 200 · basic-auth 200 · token minte.
-#
-#
-# ⚠ RIEN NE PASSE PAR ARGV, NI LE JETON NI LE PASSWORD. `-d` mettrait le password dans la ligne de
-# commande, lisible dans /proc de tout l'hote pendant l'appel — cicatrice 6-141, payee deux fois sur
-# des credentials moins puissants. Le fichier de config de curl accepte `header =` ET `data =` : les
-# deux voyagent donc par stdin, comme l'auth basic plus bas.
-# ⚠ LE JETON MASTER NE MINTE JAMAIS, IL NE FAIT QUE POSER UN PASSWORD. La distinction porte le
-# nom de l'option : un mode qui MINTAIT par jeton admin a existe et a ete retire — Gitea rend
-# « auth required » sur cette voie, quel que soit le privilege, et un temoin garde ce nom-la mort.
-# Ici le jeton sert a un `PATCH /admin/users/<u>` (que Gitea accepte, mesure : 200) ; le mint qui
-# suit est une basic-auth de la CIBLE, la seule forme que Gitea ait jamais acceptee. Meme
-# credential, autre geste — d'ou un autre nom.
+# ⚠ LE JETON MASTER NE MINTE JAMAIS, IL NE FAIT QUE POSER UN PASSWORD, et la distinction porte le nom
+# de l'option. Un mode qui MINTAIT par jeton admin a existe et a ete retire : Gitea rend « auth
+# required » sur cette voie quel que soit le privilege. Ici le jeton sert a un `PATCH
+# /admin/users/<u>` ; le mint qui suit est une basic-auth de la CIBLE, seule forme jamais acceptee.
 force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
   local account="$1" admin_tok pw
   admin_tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null)" || return 1
