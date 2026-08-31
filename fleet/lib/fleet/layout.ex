@@ -32,8 +32,8 @@ defmodule Fleet.Layout do
   @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
   # TWO CATALOGUE DIRECTORIES, AND THEY HOLD TWO DIFFERENT KINDS OF THING — not one editable copy
-  # of the other. Reading them as a `php.ini` / `php.ini-production` pair is what made a shipped
-  # demonstration look installed.
+  # of the other. Read as a `php.ini` / `php.ini-production` pair, a shipped demonstration looks
+  # installed.
   #
   # `/opt/lcars/catalogues` is the IMAGE's tree: SEEDS. What lives there is deposited on the forge
   # at each apply and installed by nobody. It is rewritten by every update, which costs nothing —
@@ -111,10 +111,9 @@ defmodule Fleet.Layout do
   #
   # THE CUT, and it is the whole reason there are three rather than two: `ops` carries what the
   # SYSTEM manipulates — what was asked, what was judged, what was proven. `workshop` carries the
-  # material the project is built FROM. `code` carries what it IS. While `ops` held both the record
-  # and the drafting material, one branch was simultaneously the tree a producer writes and the
-  # tree its judgement is recorded in, and no rule could separate them because they were the same
-  # object.
+  # material the project is built FROM. `code` carries what it IS. Fold the drafting material back
+  # into `ops` and one branch becomes simultaneously the tree a producer writes and the tree its
+  # judgement is recorded in — no rule can separate them, because they are then the same object.
   #
   # THE NAMES PAIR MECHANICALLY: root = `projects.<face>`, branch = `<face>`, with `code` as the one
   # named exception (`/home/projects`, `main`) for a reason that is not ours — `main` is git's
