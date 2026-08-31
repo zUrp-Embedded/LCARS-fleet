@@ -347,10 +347,19 @@ MANIFEST_FILE="${LCARS_SYSTEM_MANIFEST:-$(dirname "$SELF")/system.manifest}"
 uninstall_run() {
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
 
-  local rows preserve_roots=() journal_pkgs=() cls obj _mode _owner sub
+  local rows preserve_roots=() journal_pkgs=() cls trait obj _mode _owner sub
   rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
 
+  # ⚠ LA CLASSE SE LIT TOUJOURS DECOUPEE. Un trait qualifie la classe (`anchor:cond`), il ne la
+  # remplace pas — comparer la colonne brute a « anchor » ferait tomber la ligne dans le silence du
+  # `case`, sans classe et sans erreur. Le seul mode de defaillance d'un suffixe optionnel est muet.
+  split_class() { # split_class <colonne 1> — pose `cls` et `trait`
+    cls="${1%%:*}"
+    trait="${1#*:}"; [[ "$trait" != "$1" ]] || trait=""
+  }
+
   while read -r cls obj _mode _owner sub; do
+    split_class "$cls"
     [[ "$cls" == "preserve" ]] && preserve_roots+=("$obj")
   done <<<"$rows"
 
@@ -414,8 +423,12 @@ uninstall_run() {
   local resolved
   local -a jokers=()
   while read -r cls obj _mode _owner sub; do
+    split_class "$cls"
     applies_here "$sub" || continue
     preserved "$obj" && continue
+    # `merge` : le fichier est a quelqu'un d'autre, on n'y a POSE qu'une cle. Le retirer detruirait
+    # la configuration de son proprietaire pour desinstaller la notre.
+    [[ "$trait" == "merge" ]] && continue
     while read -r resolved; do
       [[ -n "$resolved" ]] || continue
       # ⚠ CE QUI VIENT D'UN JOKER SE NOMME DANS LE PLAN : un chemin resolu depuis un motif est
@@ -650,7 +663,7 @@ audit_run() {
   local rows; rows="$(grep -vE '^\s*#|^\s*$' "$MANIFEST_FILE")"
   local -a declares=()
   local cls obj _mode _owner sub
-  while read -r cls obj _mode _owner sub; do declares+=("$obj"); done <<<"$rows"
+  while read -r cls obj _mode _owner sub; do declares+=("$obj"); done <<<"$rows"  # le trait ne change pas la couverture
 
   couvert() {
     local p="$1" d

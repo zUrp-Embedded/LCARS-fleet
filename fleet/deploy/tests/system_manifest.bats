@@ -42,7 +42,7 @@ setup() {
   DECL="$BATS_TEST_TMPDIR/decl"; ROOTS="$BATS_TEST_TMPDIR/roots"
   rows > "$BATS_TEST_TMPDIR/rows"
   awk '{print $2}' "$BATS_TEST_TMPDIR/rows" | sort -u > "$DECL"
-  awk '$1=="prefix"||$1=="dir"{print $2}' "$BATS_TEST_TMPDIR/rows" | sort -u > "$ROOTS"
+  awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"||c=="dir"{print $2}' "$BATS_TEST_TMPDIR/rows" | sort -u > "$ROOTS"
 
   # ⚠ EXEMPTIONS NOMMEES, JAMAIS GLISSEES DANS UNE LISTE. Ces quatre repertoires appartiennent a
   # l'OS : LCARS y DEPOSE des fichiers, il ne les CREE pas, et un uninstall qui les retirerait
@@ -63,9 +63,27 @@ setup() {
   # faute corrigee sur `/etc/sudoers.d/lcars-toolchain`, qui n'echappe a ce mur que parce que son
   # repertoire parent est exempte pour une TOUTE AUTRE raison. Le contrat d'absence est tenu par
   # `toolchain_legacy.bats`, et par lui seul.
+  #
+  # ⚠ `/home/catalogues` EST LA SEPTIEME, ET ELLE EST DE LA MEME NATURE QUE `/opt/elixir-` : un objet
+  # que le rail NOMME sans le poser. Le cache des catalogues a demenage sous `/opt/lcars/var` le
+  # 2026-09-01 ; `45-catalogues` nomme encore l'ancien chemin pour DIRE a l'operateur qu'il subsiste,
+  # parce que `/home` est hors du perimetre et qu'aucun geste ne le retirera. Le declarer dirait « on
+  # a le droit de poser ca » d'un chemin dont l'etat-cible est l'absence — et sur `/home`, ou rien ne
+  # se supprime, ce serait la pire des declarations : celle qu'on ne peut pas tenir.
+  #
+  # ⚠ `/etc/apt/keyrings` EST LA HUITIEME, ET SA RAISON EST A ELLE. LCARS le CREE quand il manque
+  # (`10-packages`, `ensure_dir` avant de deposer la cle docker) — donc l'argument des quatre
+  # premieres, « on y depose sans le creer », ne le couvre pas. Ce qui le couvre est l'autre bout :
+  # le repertoire est PARTAGE. Toutes les cles de tous les depots de la machine y vivent, et le
+  # declarer promettrait un retrait qui casserait les depots des autres.
+  #
+  # `preserve` serait le mot juste — « pose, jamais retire » — et c'est un piege : sa garde est
+  # ABSOLUE et s'evalue avant le journal, donc elle emporterait aussi `docker.asc`, que
+  # `10-packages` inscrit au journal precisement pour pouvoir le retirer. Une classe qui protege le
+  # contenant protegerait ici le contenu qu'on doit reprendre.
   EXEMPT="$BATS_TEST_TMPDIR/exempt"
   printf '%s\n' /usr/local/bin /etc/systemd/system /etc/sudoers.d /etc/tmpfiles.d \
-                /home/projects/LCARS /opt/elixir- > "$EXEMPT"
+                /home/projects/LCARS /opt/elixir- /home/catalogues /etc/apt/keyrings > "$EXEMPT"
 }
 
 # Les lignes de donnees du manifeste : ni commentaire, ni vide.
@@ -142,11 +160,20 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 }
 
 @test "FORME : cinq colonnes par ligne, et une classe du vocabulaire" {
-  local line n cls
+  local line n cls trait
   while read -r line; do
     n="$(awk '{print NF}' <<<"$line")"
     [ "$n" -eq 5 ] || { echo "ligne a $n colonnes : $line"; return 1; }
     cls="$(awk '{print $1}' <<<"$line")"
+    # ⚠ LE TRAIT EST UN SUFFIXE DE LA PREMIERE COLONNE, PAS UNE SIXIEME COLONNE. Le choix est celui
+    # que le manifeste fait deja pour le GID d'`account` : on n'ajoute pas un champ que la plupart
+    # des lignes laisseraient vide. Consequence a tenir : tout lecteur DECOUPE avant de comparer.
+    trait="${cls#*:}"; [[ "$trait" != "$cls" ]] || trait=""
+    cls="${cls%%:*}"
+    case "$trait" in
+      ""|cond|merge|single|unset) ;;
+      *) echo "trait inconnu « $trait » : $line"; return 1 ;;
+    esac
     case "$cls" in
       prefix|dir|anchor|link|group|runtime|human|preserve) ;;
       # ⚠ TROIS CLASSES AJOUTEES LE 2026-08-28, chacune sur une mesure de banc vierge :
@@ -217,6 +244,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   local cls p rest base stem bad=0 CODE
   CODE="$(code)"
   while read -r cls p rest; do
+    cls="${cls%%:*}"        # le trait qualifie la classe, il ne la remplace pas
     if [[ "$cls" == "group" ]]; then
       grep -qF "$p" <<<"$CODE" || { echo "GROUPE DECLARE, aucun poseur : $p"; bad=1; }
       continue
@@ -230,8 +258,16 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     # l'exemption dit pourquoi il n'a pas de poseur dans ce depot.
     # Elargir cette liste sans nommer l'outil rouvrirait la porte que ce temoin ferme : un objet
     # declare que personne ne pose est, par defaut, une ligne qui ment.
+    #
+    # ⚠ `~/.hex` NE PASSAIT QUE PAR COINCIDENCE, et c'est pourquoi il est nomme ici avec `~/.mix`.
+    # Les deux sont ecrits par `mix` quand `48-forge-host` et `60-deploy` invoquent `mix local.hex`
+    # et `mix local.rebar`. Le radical `.hex` trouvait cette invocation — la sous-chaine « local.hex »
+    # le contient — et le temoin le declarait couvert. `.mix`, lui, n'apparait nulle part : meme
+    # objet, meme poseur, meme nature, et un verdict oppose selon l'orthographe d'une commande.
     case "$p" in
-      /root/.terraform.d) continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
+      /root/.terraform.d)      continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
+      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   48-forge-host + 60-deploy
+      /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 48-forge-host + 60-deploy
     esac
     stem="$(sed -e 's#-<version>$##' -e 's#\.service$##' <<<"$base")"
     grep -qF "$stem" <<<"$CODE" || { echo "DECLARE, aucun poseur : $p (radical « $stem »)"; bad=1; }
@@ -276,16 +312,16 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   while read -r p; do
     grep -rqF -- "$p" "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
       || { echo "objet preserve sans poseur dans modules.d : $p"; return 1; }
-  done < <(awk '$1=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows")
+  done < <(awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows")
 
   local f
   for f in /home/projects /home/projects.ops /home/projects.workshop; do
-    awk '$1=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows" | grep -qx -- "$f" \
+    awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"{print $2}' "$BATS_TEST_TMPDIR/rows" | grep -qx -- "$f" \
       || { echo "face canonique DISPARUE de preserve : $f"; return 1; }
   done
 
   # ⚠ GARDE DE POPULATION : zero ligne `preserve` passerait les deux boucles ci-dessus.
-  [ "$(awk '$1=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -ge 3 ]
+  [ "$(awk '{c=$1;sub(/:.*/,"",c)} c=="preserve"' "$BATS_TEST_TMPDIR/rows" | wc -l)" -ge 3 ]
 }
 
 # ⚠ CE TEMOIN DISAIT « AUCUN LECTEUR », ET IL EST TOMBE — pas en rougissant, en RESTANT VERT.
@@ -377,7 +413,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # Garde d'instrument : un en-tete illisible rendrait vide, donc vert sur rien.
   [ -n "$applique" ]
   for u in $(grep '^UNITS=' "$mod" | head -1 | tr -d '()' | sed 's/^UNITS=//'); do
-    col="$(awk -v u="/etc/systemd/system/$u.service" '$1=="anchor" && $2==u { print $5 }' "$MANIFEST")"
+    col="$(awk -v u="/etc/systemd/system/$u.service" '{c=$1;sub(/:.*/,"",c)} c=="anchor" && $2==u { print $5 }' "$MANIFEST")"
     [ -n "$col" ] || { echo "unite non declaree : $u"; bad=1; continue; }
     # `wsl+linux` en table doit couvrir `wsl linux` en en-tete, dans les deux sens.
     local vu; vu="$(tr '+' '\n' <<<"$col" | sort | tr '\n' ' ')"
@@ -390,6 +426,10 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # Mesure .63 : fleet 1001, lcars-admin 1002, lcars-console 1003 — flottants, distribues par
   # `groupadd`. Le Dockerfile, lui, fixe fleet 2000 et lcars-console 2001. Les deux substrats
   # divergent donc sur un fait, et c'est la colonne de ce fichier qui les remettra d'accord.
+  # ⚠ LE TRAIT `unset` EST EXEMPTE, ET C'EST LE POINT DU TRAIT. Un groupe declare `group:unset` dit
+  # « on a le droit de poser ce groupe, on n'impose pas son numero » — exiger un GID de lui serait
+  # exiger le contraire de ce qu'il declare. Ce qui reste verrouille : tout groupe SANS trait porte
+  # un numero fixe, au-dessus du plancher.
   local g gid
   while read -r g gid; do
     [[ "$gid" =~ ^[0-9]+$ ]] || { echo "GID non numerique pour $g : $gid"; return 1; }

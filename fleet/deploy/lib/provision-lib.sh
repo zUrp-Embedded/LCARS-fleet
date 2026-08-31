@@ -61,7 +61,7 @@ PROVISION_LIB_LOADED=1
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
-: "${PROV_CATALOGUES_DIR:=/home/catalogues}"
+: "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
 : "${PROV_SYSTEM_ACCOUNT:=system_starfleet}"       # compte forge du SYSTÈME (signe les marqueurs)
 : "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
 : "${PROV_FORGE_ORG:=fleet}"                   # org qui porte les repos projet (forge.tf)
@@ -586,7 +586,11 @@ prov_group_owns_preserved() {
 prov_manifest_gid() {
   local grp="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
   [[ -r "$f" ]] || return 0
-  awk -v g="$grp" '$1=="group" && $2==g { print $3; exit }' "$f"
+  # `c` est la classe DECOUPEE de son trait : `group:cond` reste un groupe, et son GID se lit.
+  # ⚠ `-` EST UN GID ABSENT, PAS UN GID. Un groupe declare sans numero est declare FLOTTANT : la
+  # table dit qu'on a le droit de le poser, elle ne dit pas lequel. Rendre le tiret tel quel ferait
+  # un `groupadd -g -`, c'est-a-dire un refus a l'execution la ou l'intention etait « n'impose rien ».
+  awk -v g="$grp" '{ c=$1; sub(/:.*/, "", c) } c=="group" && $2==g && $3!="-" { print $3; exit }' "$f"
 }
 
 ensure_group() {
@@ -1019,6 +1023,30 @@ prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou �
   fi
   printf 'inconnue\n'
 }
+
+# ─── LA FORME DE LA LIVRAISON — `binary` ou `source` ────────────────────────────────────────────
+#
+# DEUX FORMES, ET CHACUNE EST ENTIERE :
+#   binary  la release Elixir ET la doc sont deja baties. Rien n'est a batir sur la cible, donc
+#           AUCUN outil de build n'a de raison d'y etre pose.
+#   source  on bâtit les deux. Les compilateurs vivent le temps du build.
+#
+# ⚠ ON N'EN FAIT JAMAIS LA MOITIE. Poser le toolchain Elixir « au cas ou » sur une livraison binaire,
+# ou n'y poser que node parce que la doc se bâtit, produirait une machine dont personne ne sait ce
+# qu'elle est : ni une boite de prod (elle porte des compilateurs), ni un poste de dev (il lui en
+# manque). La question se pose UNE fois, ici, et les modules la lisent.
+#
+# ⚠ LE DISCRIMINANT EST EXPLICITE, PAS DEDUIT — meme raison que dans `etc/deploy-release.sh`, et
+# c'est la meme convention : `pack.sh` ECRIT `$PROV_SOURCE_STAMP` a la racine du paquet. Sa presence
+# DIT « paquet ». Le deduire de l'absence d'un `.git` se tromperait sur un paquet detare dans un
+# depot, et sur un clone dont le `.git` a ete retire pour l'expedier.
+prov_delivery() { # prov_delivery [racine] -> `binary` | `source`
+  local root="${1:-$(repo_root)}"
+  if [[ -f "$root/$PROV_SOURCE_STAMP" ]]; then printf 'binary\n'; else printf 'source\n'; fi
+}
+
+# Le raccourci que les modules lisent : 0 quand la cible n'a RIEN a batir.
+prov_delivery_is_binary() { [[ "$(prov_delivery "$@")" == "binary" ]]; }
 
 # `A est-il un ANCÊTRE de B ?` — donc « la source est-elle EN RETARD sur ce qui est déjà posé ? ».
 # Rend 0 (oui, en retard), 1 (non) ou 2 (impossible à dire : pas de git, ou l'une des deux révisions

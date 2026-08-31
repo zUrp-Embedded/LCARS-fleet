@@ -136,7 +136,21 @@ local_installed() {
 remote_head() { GIT_TERMINAL_PROMPT=0 git ls-remote "$1" HEAD 2>/dev/null | awk 'NR==1{print $1}'; }
 local_head()  { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
 
+# ⚠ UN RELIQUAT QUE LE PRODUIT NE PEUT PAS RETIRER SE DIT — c'est la seule chose qu'on puisse en
+# faire honnetement. Le cache vivait en `/home/catalogues` jusqu'au 2026-09-01 ; `/home` est sorti du
+# perimetre entier, donc aucun geste du rail n'y touchera plus. Se taire laisserait un arbre orphelin
+# de plusieurs centaines de mega sur une machine dont l'operateur croit que le produit gere ses
+# chemins. Ce n'est PAS un drift : un drift promet qu'`apply` converge, et `apply` ne le fera jamais.
+LEGACY_CATALOGUES_DIR="${LCARS_LEGACY_CATALOGUES_DIR:-/home/catalogues}"
+
+say_leftover() {
+  [[ -d "$LEGACY_CATALOGUES_DIR" ]] || return 0
+  [[ "$LEGACY_CATALOGUES_DIR" != "$PROV_CATALOGUES_DIR" ]] || return 0
+  p_warn "$LEGACY_CATALOGUES_DIR subsiste — le cache des catalogues a déménagé sous $PROV_CATALOGUES_DIR. Rien sous /home n'est retiré par LCARS : à supprimer à la main si vous n'en voulez plus (« rm -rf $LEGACY_CATALOGUES_DIR »), le matériel se reclone depuis la forge"
+}
+
 check() {
+  say_leftover
   if [[ -z "$PROV_FORGE_URL" ]]; then
     p_warn "FORGE_BASE_URL non posé — le materiel des catalogues ne peut pas etre compare a son autorite"
     verdict_check
@@ -182,6 +196,9 @@ check() {
 }
 
 apply() {
+  # Dit AUSSI a l'apply : c'est le geste que l'operateur lance apres une mise a jour, donc celui ou
+  # le demenagement vient d'avoir lieu. Le taire ici le reserverait a qui pense a jouer un doctor.
+  say_leftover
   [[ -n "$PROV_FORGE_URL" ]] || { p_warn "FORGE_BASE_URL non posé — rien a converger"; verdict_apply; }
 
   local signed rc=0

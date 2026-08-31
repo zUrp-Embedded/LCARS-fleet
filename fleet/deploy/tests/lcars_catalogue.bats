@@ -384,7 +384,7 @@ FAIL:gesture_signalled:15"
   local defaut manifeste
   defaut="$(sed -n 's/^_CATALOGUE_SOCKET="${LCARS_CATALOGUE_SOCKET:-\(.*\)}"$/\1/p' "$SUT")"
   [ -n "$defaut" ]
-  manifeste="$(awk '$1 == "runtime" && $2 ~ /catalogue\.sock$/ { print $2 }' \
+  manifeste="$(awk '{c=$1;sub(/:.*/,"",c)} c == "runtime" && $2 ~ /catalogue\.sock$/ { print $2 }' \
                  "$BATS_TEST_DIRNAME/../system.manifest")"
   [ -n "$manifeste" ]
   [ "$defaut" = "$manifeste" ]

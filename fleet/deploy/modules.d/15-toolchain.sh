@@ -58,7 +58,24 @@ elixir_meets_floor() { # elixir_meets_floor <version lue> <plancher M.m>
   (( h_maj == f_maj && h_min >= f_min ))
 }
 
+# ⚠ UNE LIVRAISON BINAIRE N'A PAS BESOIN DE CE MODULE, ET LA RAISON EST DANS LA RELEASE : elle est
+# self-contained, ERTS bundlé. `bin/lcars_fleet` tourne sans un Erlang systeme, et il n'y a rien a
+# compiler puisque `pack.sh` a bati la release ET la doc. Exiger la toolchain la posait donc sur des
+# machines qui ne bâtissent jamais — 400 Mo de compilateurs pour une boite de prod, et une surface
+# d'attaque qui n'a aucune contrepartie.
+#
+# ⚠ CE QUI RESTE VRAI DANS LES DEUX FORMES : le NETTOYAGE des reliquats du precompile d'avant. Un
+# `/usr/local/bin/elixir` qui masque apt est un dechet quelle que soit la livraison — c'est une
+# convergence d'ABSENCE, elle ne depend pas de ce qu'on a a batir.
+rien_a_batir() { prov_delivery_is_binary; }
+
 check() {
+  if rien_a_batir; then
+    p_ok "toolchain non requise — livraison binaire, la release est bâtie et embarque son ERTS"
+    check_reliquats
+    verdict_check
+  fi
+
   if command -v erl >/dev/null; then
     local otp; otp="$(otp_release)"
     if [[ "$otp" -ge "$PROV_ELIXIR_OTP_MAJOR" ]]; then
@@ -86,6 +103,11 @@ check() {
     fi
   fi
 
+  check_reliquats
+  verdict_check
+}
+
+check_reliquats() {
   local -a old_links old_trees
   mapfile -t old_links < <(legacy_elixir_links)
   mapfile -t old_trees < <(legacy_elixir_trees)
@@ -95,7 +117,6 @@ check() {
   if [[ "${#old_trees[@]}" -gt 0 ]]; then
     p_drift "arbre(s) du precompile Elixir d'avant, que plus rien ne nomme : ${old_trees[*]}"
   fi
-  verdict_check
 }
 
 apply() {
@@ -113,7 +134,13 @@ apply() {
     fi
   done
 
-  if [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]] \
+  # ⚠ LE NETTOYAGE CI-DESSUS EST PASSE DANS LES DEUX FORMES, LA POSE NON. Sur une livraison binaire
+  # il n'y a rien a compiler : poser erlang et elixir y serait poser un outil de build sur une
+  # machine qui ne bâtit pas — la moitie d'une forme, exactement ce que la doctrine des deux
+  # livraisons entieres interdit.
+  if rien_a_batir; then
+    p_ok "erlang et elixir non posés — livraison binaire, rien à bâtir ici"
+  elif [[ "$(otp_release)" -lt "$PROV_ELIXIR_OTP_MAJOR" ]] \
      || ! elixir_meets_floor "$(elixir_version)" "$PROV_ELIXIR_MIN"; then
     apt_ensure erlang elixir || verdict_apply
   fi

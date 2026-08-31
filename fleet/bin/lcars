@@ -243,7 +243,7 @@ cmd_attach() {
 # LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout`) : un fait ecrit deux fois, dans deux
 # langages qui ne peuvent pas s'appeler. Changer ici sans l'autre cote donne une CLI qui lit un cache
 # sur lequel rien ne tourne — et elle l'affiche en mode DEGRADE, quand rien ne permet de la recouper.
-CAT_DIR="${LCARS_CATALOGUES_DIR:-/home/catalogues}"
+CAT_DIR="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}"
 CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
 # rien ne l'installe et rien ne le supprime — il est la, toujours.

@@ -24,9 +24,20 @@ NOLOGIN="${LCARS_NOLOGIN:-/usr/sbin/nologin}"
 USERADD="${LCARS_USERADD:-useradd}"
 USERMOD="${LCARS_USERMOD:-usermod}"
 PASSWD_FILE="${LCARS_PASSWD_FILE:-/etc/passwd}"
+GROUP_FILE="${LCARS_GROUP_FILE:-/etc/group}"
 
 account_exists() { awk -F: -v n="$1" '$1==n {found=1} END {exit !found}' "$PASSWD_FILE"; }
 shell_of()       { awk -F: -v n="$1" '$1==n {print $7; exit}' "$PASSWD_FILE"; }
+
+# ⚠ LE GROUPE PRIMAIRE SE LIT, IL NE SE DEDUIT PAS DE `useradd -g`. Le `-g` de la creation ne vaut
+# QU'A la creation : un compte qui existait deja, ou qu'un `usermod` a deplace, garde le groupe
+# qu'il a. Sans cette sonde, `21-service-accounts` rendait vert un `lcars-system` retombe sur
+# `nogroup` — c'est-a-dire l'etat exact que son propre message de drift decrit comme dangereux.
+primary_group_of() { # primary_group_of <compte> -> le NOM de son groupe primaire, ou vide
+  local gid; gid="$(awk -F: -v n="$1" '$1==n {print $4; exit}' "$PASSWD_FILE")"
+  [[ -n "$gid" ]] || return 0
+  awk -F: -v g="$gid" '$3==g {print $1; exit}' "$GROUP_FILE"
+}
 
 check() {
   if getent group "$AUTHORITY_GROUP" >/dev/null 2>&1; then
@@ -43,6 +54,15 @@ check() {
     fi
   else
     p_drift "compte de service $AUTHORITY_USER absent — le service d'autorité n'a pas d'identité, et personne ne peut détenir les secrets de forge à sa place"
+  fi
+
+  if account_exists "$AUTHORITY_USER"; then
+    local _pg; _pg="$(primary_group_of "$AUTHORITY_USER")"
+    if [[ "$_pg" == "$AUTHORITY_GROUP" ]]; then
+      p_ok "groupe primaire de $AUTHORITY_USER : $AUTHORITY_GROUP"
+    else
+      p_drift "groupe primaire de $AUTHORITY_USER : « ${_pg:-inconnu} » au lieu de $AUTHORITY_GROUP — tout ce qu'il écrit naît sur ce groupe-là, y compris les secrets de forge"
+    fi
   fi
 
   if account_exists "$AUTHORITY_USER" \
@@ -66,6 +86,15 @@ check() {
     fi
   else
     p_drift "compte de service $SYSTEM_USER absent — la landing retomberait sur « nobody », dont le groupe « nogroup » est partagé par plusieurs comptes système (le secret OAuth2 du deck leur serait lisible)"
+  fi
+
+  if account_exists "$SYSTEM_USER"; then
+    local _pgs; _pgs="$(primary_group_of "$SYSTEM_USER")"
+    if [[ "$_pgs" == "$SYSTEM_GROUP" ]]; then
+      p_ok "groupe primaire de $SYSTEM_USER : $SYSTEM_GROUP"
+    else
+      p_drift "groupe primaire de $SYSTEM_USER : « ${_pgs:-inconnu} » au lieu de $SYSTEM_GROUP — le secret OAuth2 du deck naîtrait sur ce groupe-là, lisible par tout ce qui le porte"
+    fi
   fi
 
   verdict_check
@@ -95,6 +124,17 @@ apply() {
     fi
   fi
 
+  # ⚠ APRES la creation, et PAS a sa place : `useradd -g` ne pose le groupe primaire que la premiere
+  # fois. Cette convergence est le seul geste qui rattrape un compte qui existait avant nous.
+  if [[ "$(primary_group_of "$AUTHORITY_USER")" != "$AUTHORITY_GROUP" ]]; then
+    if run_quiet "$USERMOD" -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $AUTHORITY_USER -> $AUTHORITY_GROUP"
+    else
+      p_fail "$AUTHORITY_USER : groupe primaire non convergé vers $AUTHORITY_GROUP"
+      verdict_apply
+    fi
+  fi
+
   ensure_member "$AUTHORITY_USER" "$PROV_FLEET_GROUP" || verdict_apply
 
   # Meme forme que ci-dessus, et une difference DELIBEREE : pas de `ensure_member` vers
@@ -118,6 +158,15 @@ apply() {
       p_chg "$SYSTEM_USER -> $NOLOGIN"
     else
       p_fail "$SYSTEM_USER : shell non convergé vers $NOLOGIN"
+    fi
+  fi
+
+  if [[ "$(primary_group_of "$SYSTEM_USER")" != "$SYSTEM_GROUP" ]]; then
+    if run_quiet "$USERMOD" -g "$SYSTEM_GROUP" -- "$SYSTEM_USER"; then
+      PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "groupe primaire de $SYSTEM_USER -> $SYSTEM_GROUP"
+    else
+      p_fail "$SYSTEM_USER : groupe primaire non convergé vers $SYSTEM_GROUP"
+      verdict_apply
     fi
   fi
 

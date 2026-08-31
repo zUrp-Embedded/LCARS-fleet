@@ -34,7 +34,12 @@ setup() {
   # plus un accord — ca interdit son RETOUR, ce qui est le seul service qu'une racine fermee peut
   # encore rendre. L'accord des huit defauts qui nomment la nouvelle, lui, est tenu par
   # `racine_jetons.bats` : un mur par propriete, jamais un mur qui fait les deux a moitie.
-  RACINES='/opt/lcars/runtime|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues'
+  # ⚠ `/home/catalogues` EST LA DEUXIEME RACINE MORTE, meme statut que `/home/private` : le cache des
+  # catalogues est passe sous `/opt/lcars/var/catalogues` le 2026-09-01, quand `/home` est sorti du
+  # perimetre d'uninstall. Elle reste ici pour interdire son RETOUR. Un seul site la nomme encore, et
+  # par un repli nomme (`45-catalogues.sh`, le reliquat qu'on signale sans pouvoir le retirer) : la
+  # forme `${VAR:-defaut}` est une couture, que `code_seul` exempte deja.
+  RACINES='/opt/lcars/runtime|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues|/opt/lcars/var/catalogues'
   # ⚠ `/opt/lcars` N'EST PAS DANS LA LISTE, ET C'EST DELIBERE : c'est la racine de l'IMAGE, que le
   # Dockerfile pose litteralement (`COPY fleet/services/X /opt/lcars/X`). Un `COPY` derive serait un
   # Dockerfile qui ne se lit plus. Elle entrera ici le jour ou la phase B en fait un prefixe unique.

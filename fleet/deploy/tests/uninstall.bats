@@ -583,6 +583,36 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   code | grep -q 'UNINSTALL_YES" -ne 1 || "\$EUID" -eq 0'
 }
 
+@test "TRAIT : un suffixe ne change pas la classe — \`anchor:cond\` reste une ancre" {
+  # Le mode de defaillance d'un suffixe optionnel est MUET : une classe non decoupee ne matche aucun
+  # bras du `case`, la ligne sort du plan, et rien ne le dit. Ce temoin compte, comme celui du
+  # substrat : c'est le nombre qui discrimine, pas un nom que le plan n'imprime pas.
+  nfic() { sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output"; }
+  local n_avant n_apres
+  plan; n_avant="$(nfic)"
+
+  : > "$FAKE/etc/lcars/ancre-conditionnelle"
+  printf 'anchor:cond  %s/etc/lcars/ancre-conditionnelle  0644 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+
+  plan; n_apres="$(nfic)"
+  [ "$n_apres" -eq "$((n_avant + 1))" ]
+}
+
+@test "TRAIT merge : un fichier qu'on MODIFIE n'entre JAMAIS dans ce qui part" {
+  # `merge` dit que le fichier est a quelqu'un d'autre et qu'on y a pose une cle. Le retirer
+  # detruirait la configuration de son proprietaire pour desinstaller la notre — la meme faute que
+  # `rm -rf` sur un home, par un chemin plus discret.
+  nfic() { sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output"; }
+  local n_avant n_apres
+  plan; n_avant="$(nfic)"
+
+  : > "$FAKE/etc/lcars/config-de-lautre"
+  printf 'anchor:merge  %s/etc/lcars/config-de-lautre  0644 root:root any\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+
+  plan; n_apres="$(nfic)"
+  [ "$n_apres" -eq "$n_avant" ]
+}
+
 @test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {
   # ⚠ LA LISTE EXACTE, ET C'EST VOULU : ajouter un verbe doit etre un geste VISIBLE, pas un effet
   # de bord. Ce temoin a rougi le jour ou `audit` est arrive — c'est exactement son metier.

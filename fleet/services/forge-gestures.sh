@@ -931,7 +931,7 @@ cmd_install() {
 # une syntaxe shellcheck) faisait ABANDONNER l'analyse du fichier entier.
 install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
   local name="$1"
-  local dir="${LCARS_CATALOGUES_DIR:-/home/catalogues}/$name"
+  local dir="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}/$name"
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
   GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \

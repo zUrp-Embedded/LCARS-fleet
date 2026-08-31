@@ -163,7 +163,7 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
       key="/run/lcars/console/<human>"
       want_owner="<human>:${owner#*:}"
     fi
-    row="$(awk -v p="$key" '$1=="runtime" && $2==p {print; exit}' "$manifest")"
+    row="$(awk -v p="$key" '{c=$1;sub(/:.*/,"",c)} c=="runtime" && $2==p {print; exit}' "$manifest")"
     [[ -n "$row" ]] || { echo "DANS LA TABLE, PAS AU MANIFESTE : $path"; bad=1; continue; }
     m_mode="$(awk '{print $3}' <<<"$row")"
     m_owner="$(awk '{print $4}' <<<"$row")"

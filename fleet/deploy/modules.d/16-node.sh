@@ -57,15 +57,25 @@ DECK_DOC="${LCARS_DECK_DOC:-$PROV_ROOT/share/doc}"
 check_doc_batie() {
   local n
   if [[ ! -s "$DECK_DOC/index.html" ]]; then
-    p_drift "doc du deck absente ($DECK_DOC/index.html) — /doc/ rendra 404 ; elle se bâtit au stage « site » de l'image, jamais ici"
+    p_drift "doc du deck absente ($DECK_DOC/index.html) — /doc/ rendra 404 ; sur cette machine elle arrive bâtie ($(rien_a_batir_car)), elle ne se bâtit jamais ici"
     return 0
   fi
   n="$(find "$DECK_DOC" -type f 2>/dev/null | wc -l)" || n="?"
   p_ok "doc du deck bâtie et posée ($DECK_DOC, $n fichiers)"
 }
 
+# ⚠ DEUX CHEMINS, UNE SEULE QUESTION : « y a-t-il quelque chose a batir ici ? ». Le substrat docker
+# repondait non depuis toujours (la doc sort du stage « site » de l'image) ; une livraison BINAIRE
+# repond non pour la meme raison, sur un poste — `pack.sh` a bati la doc en meme temps que la release.
+# Les separer produirait un poste qui telecharge 60 Mo de toolchain node pour ne rien batir.
+rien_a_batir() { [[ "${PROV_SUBSTRATE:-}" == "docker" ]] || prov_delivery_is_binary; }
+rien_a_batir_car() {
+  if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then echo "stage « site » de l'image"
+  else echo "livraison binaire — bâtie par pack.sh"; fi
+}
+
 check() {
-  if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
+  if rien_a_batir; then
     check_doc_batie
     verdict_check
   fi
@@ -82,6 +92,14 @@ check() {
 }
 
 apply() {
+  # Le symetrique du `check` : ce qu'on ne mesure pas ici, on ne le pose pas non plus. Un `apply`
+  # qui poserait node quand le `check` declare n'avoir rien a batir ferait diverger les deux verbes
+  # du meme module — et c'est `apply` qui a le dernier mot sur ce que la machine porte.
+  if rien_a_batir; then
+    p_ok "node non posé — rien à bâtir sur cette machine ($(rien_a_batir_car))"
+    verdict_apply
+  fi
+
   local arch want_sha
   arch="$(node_arch)"
   case "$arch" in
