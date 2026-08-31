@@ -1,8 +1,8 @@
 defmodule Fleet.Credentials.ForgeAuth do
   @moduledoc """
-  Single system-side git-auth source. Git 2.43 was verified to accept the token
-  through `GIT_CONFIG_*` child-environment variables, keeping it out of argv and
-  workspace config. Every result also disables interactive credential prompts.
+  Single system-side git-auth source. Git 2.43 accepts the token through `GIT_CONFIG_*`
+  child-environment variables (verified against that version), which keeps it out of argv and out of
+  the workspace config. Every result also disables interactive credential prompts.
   """
 
   # Anti-prompt is unconditional, including absent-auth local/test configurations.

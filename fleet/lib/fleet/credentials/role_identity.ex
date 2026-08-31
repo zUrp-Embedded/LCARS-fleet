@@ -62,12 +62,12 @@ defmodule Fleet.Credentials.RoleIdentity do
   @doc """
   The forge LOGIN `role` writes under, or `{:error, _}`.
 
-  THE SECOND HALF OF THE IDENTITY, and it was missing. This module's whole subject is "who a role
-  is on the forge", and it answered only the token: `as_role/2` handed callers the credential and
-  nothing told them the ACCOUNT. So the runtime addressed accounts by the bare role name while the
-  provisioning had created them as `<tier>_<role>`, and `request_review` asked a forge that has a
-  `fleet_qualifier` for a `qualifier` — 404, a deliverable PR with no judge, and a merge waiting on
-  approvals nobody had been asked for.
+  THE SECOND HALF OF THE IDENTITY. This module's subject is "who a role is on the forge", and
+  answering only the token leaves callers holding a credential with nothing to tell them the
+  ACCOUNT: the runtime then addresses accounts by the BARE ROLE NAME while the provisioning created
+  them as `<tier>_<role>`, so `request_review` asks a forge that has a `<tier>_qualifier` for a
+  `qualifier` — 404, a deliverable PR with no judge, and a merge waiting on approvals NOBODY WAS
+  ASKED FOR.
 
   The RULE lives in `Fleet.CapProfile.forge_login/1` (the roster and the tier split are its
   subject); this is the door the forge side comes through, so the two halves of an identity are

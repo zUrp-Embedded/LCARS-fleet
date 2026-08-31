@@ -38,12 +38,12 @@ defmodule Fleet.Credentials.RoleToken do
   PERTE D'INFORMATION deliberee : la politique fail-closed vit chez `RoleIdentity`, qui n'a pas a
   connaitre les causes.
 
-  Un appelant a pourtant besoin de les separer : le garde de BOOT du rail. Avant ce chantier,
-  « pas de jeton » voulait dire une seule chose — le provisionnement n'a pas tourne, la boite est
-  mal deployee, elle ne doit pas demarrer. Maintenant la meme absence recouvre aussi « le service
-  d'autorite ne tourne pas encore » et « la forge n'a pas repondu », qui sont des etats TRANSITOIRES
-  et distants. Refuser le boot dessus echangerait une panne rattrapable contre une boite morte, et
-  le message accuserait le provisionnement.
+  Un appelant a pourtant besoin de les separer : le garde de BOOT du rail. « Pas de jeton » ne
+  designe PAS une seule chose — c'est a la fois « le provisionnement n'a pas tourne » (LOCAL,
+  definitif : la boite est mal deployee et ne doit pas demarrer), « le service d'autorite ne tourne
+  pas encore » et « la forge n'a pas repondu », ces deux-la etant TRANSITOIRES et distants. Refuser
+  le boot dessus echangerait une panne rattrapable contre une boite morte, ET LE MESSAGE ACCUSERAIT
+  LE PROVISIONNEMENT.
   """
   @spec token_result(String.t() | nil) ::
           {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause() | :no_forge_login}
