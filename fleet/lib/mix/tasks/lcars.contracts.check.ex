@@ -1855,6 +1855,46 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Z3: single-app project — the task always runs at the project root (Mix sets the cwd
   # there). NO umbrella-style detection ("no `apps/` dir → go up two levels"): that case
   # does not exist, and such a heuristic would resolve to a `../..` OUTSIDE the project.
+
+  # LES DOSSIERS DANS LESQUELS AUCUN SCAN DE CORPUS NE DESCEND. Ni sources ni temoins : des artefacts
+  # de build, des dependances vendorees, et le bac a sable des `@tmp_dir` d'ExUnit.
+  @corpus_skip ~w(_build deps tmp node_modules .git)
+
+  # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure le
+  # 2026-08-31 sur ce depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de
+  # residus `@tmp_dir` accumulees par les runs), `_build/` et `deps/` avant qu'un `Enum.reject` ne
+  # les jette : 28 173 fichiers traverses en 4,5 s pour en retenir 1071. Elagué, le meme corpus sort
+  # en 30 ms.
+  #
+  # Ce n'etait pas qu'une question de vitesse. Trois checks appellent ce scan, et le temoin qui les
+  # enchaine tous a fini par depasser le timeout de 60 s d'ExUnit — un depot dont le `tmp/` a
+  # grossi rendait donc la suite ROUGE, sans qu'aucun contrat ne soit en cause.
+  #
+  # L'elagage est recursif PAR NOM, a toute profondeur : `fleet/tmp/` doit tomber aussi quand le
+  # scan part de la racine du depot, ce qu'un rejet applique aux seules entrees de premier niveau
+  # laisserait passer.
+  @spec corpus_files(String.t()) :: [String.t()]
+  defp corpus_files(base), do: corpus_walk(base, [])
+
+  defp corpus_walk(dir, acc) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        Enum.reduce(entries, acc, fn e, a ->
+          path = Path.join(dir, e)
+
+          cond do
+            e in @corpus_skip -> a
+            File.dir?(path) -> corpus_walk(path, a)
+            File.regular?(path) -> [path | a]
+            true -> a
+          end
+        end)
+
+      _ ->
+        acc
+    end
+  end
+
   defp project_root, do: File.cwd!()
 
   # ── Topology lock ──────────────────────────────────────────────
@@ -4356,14 +4396,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # « INSTRUMENT BROKEN — measured nothing » plutot qu'un vert creux), mais il ne mesurait rien,
       # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
       {racines, fichiers} =
-        Path.wildcard(Path.join(root, "**"), match_dot: true)
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(
-          &String.match?(
-            "/" <> Path.relative_to(&1, root),
-            ~r"/(_build|deps|\.git|tmp|node_modules)/"
-          )
-        )
+        corpus_files(root)
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4479,14 +4512,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       }
     else
       {vus, porteurs} =
-        Path.wildcard(Path.join(root, "**"), match_dot: true)
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(
-          &String.match?(
-            "/" <> Path.relative_to(&1, root),
-            ~r"/(_build|deps|\.git|tmp|node_modules)/"
-          )
-        )
+        corpus_files(root)
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4622,14 +4648,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       true ->
+        # `..` : ce check porte sur le depot ENTIER, pas sur `fleet/` seul. Le filtre residuel
+        # ne garde que ce que `@corpus_skip` ne couvre pas — et il porte sur le chemin relatif a
+        # la base REELLE du scan, pas a `root`, sans quoi tout ce qui vit hors de `fleet/` y
+        # echappe.
+        base = Path.expand(Path.join(root, ".."))
+
         vues =
-          Path.wildcard(Path.join([root, "..", "**"]), match_dot: true)
-          |> Enum.filter(&File.regular?/1)
+          corpus_files(base)
           |> Enum.reject(
-            &String.match?(
-              "/" <> Path.relative_to(&1, root),
-              ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/"
-            )
+            &String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/")
           )
           |> Enum.reduce(MapSet.new(), fn path, acc ->
             case File.read(path) do
