@@ -80,60 +80,32 @@ defmodule Fleet.ProjectBootstrap.Phase do
         else: {:error, {:unsafe_pod_dir, pod_dir}}
     end
 
-    # THE FORMAT IS PLACED, AND NOT MENTIONED. The work order used to DEMAND the trailer ("add the
-    # exact trailer to EVERY git commit") — it said WHAT and never WHERE, git parses only the last
-    # paragraph, and one line placed mid-message meant the push was refused after `submit_result`
-    # had succeeded: a full producer run redone, clone included, for a formatting detail.
+    # ⚠ RIEN N'EST DEMANDE A L'AGENT : une position DETERMINISTE n'est pas a produire par lui. Une
+    # instruction peut dire QUOI sans dire OU, git n'extrait que le dernier paragraphe, et une ligne
+    # echouee au milieu du message fait refuser le push APRES un run complet — clone compris.
     #
-    # The demand is gone, and so is the notice that briefly replaced it. A thing the agent has no
-    # action to take on does not belong in its world — announcing it is the same mistake one step
-    # quieter, and it spends brief on something that cannot change what the pod does.
+    # ⚠ APPEND MECANIQUE, PAS `git interpret-trailers` : son `--if-exists doNothing` inspecte le
+    # BLOC de trailers, pas le message, donc une ligne isolee au milieu ne compte pas comme existante
+    # et une seconde est ajoutee quand meme. La regle est donc la NOTRE, et elle tient en une phrase :
+    # si la derniere ligne non vide est deja exactement le trailer, ne rien faire ; sinon en faire le
+    # DERNIER PARAGRAPHE.
     #
-    # NOTHING IS ASKED OF THE AGENT, and the trailer is placed SYSTEMATICALLY. The brief used to
-    # carry a demand ("MANDATORY signature — add the exact trailer to EVERY git commit"); since
-    # 2026-08-05 it carries a NOTICE that the signature happens on its own. A deterministic position
-    # is not an agent's to produce: the instruction could say WHAT and never WHERE, git parses only
-    # the last paragraph, and one line placed mid-message meant the push was refused after
-    # `submit_result` had succeeded — a full producer run redone, clone included.
+    # ⚠ PARAGRAPHE, PAS LIGNE, et ce mot est tout le correctif : le gate lit le trailer par
+    # l'extraction de git, qui ne voit qu'un BLOC precede d'une ligne vide. Ajouter `\n<trailer>\n`
+    # ne produit cette ligne vide que si le message se terminait deja par une — donc ca passe sous
+    # `git commit -m`, et ca echoue sur un message construit autrement. `$(cat)` retirant les sauts
+    # finaux, le printf en rend toujours exactement une.
     #
-    # A MECHANICAL APPEND, not `git interpret-trailers`. The first version used git's own trailer
-    # parser with `--if-exists doNothing`, which reads far more forgiving than it is: the flag
-    # inspects the trailer BLOCK, not the message, so a line stranded mid-message did not count as
-    # existing and a second one was appended anyway. The behaviour was acceptable; the RULE was
-    # git's, it took a real-git measurement to learn, and the next reader would have had to make the
-    # same one.
+    # Survit a `--no-verify`, qui saute `pre-commit` et `commit-msg` mais pas celui-ci. Ce que le mur
+    # attrape ensuite CHANGE de nature : plus une negligence de placement, mais une FALSIFICATION —
+    # le seul cas pour lequel il etait interessant.
     #
-    # The rule is now ours and fits in a sentence: if the last non-empty line is already exactly the
-    # trailer, do nothing; otherwise make the trailer the LAST PARAGRAPH. A deterministic position
-    # is not something to ask an agent for, and not something to delegate to a parser whose notion
-    # of "already there" differs from ours.
+    # Il vit dans `.git/hooks/`, HORS de l'arbre de travail : l'agent ne voit aucun artefact LCARS
+    # dans la matiere sur laquelle il raisonne. Best-effort par construction — un hook qui ne peut
+    # pas s'ecrire ne doit pas faire echouer un clone, et le gate de push reste.
     #
-    # PARAGRAPH, not line, and that word is the whole fix. The push gate reads the trailer with
-    # git's own extraction (`%(trailers:key=…)`), which only sees a trailer BLOCK — the last
-    # paragraph, preceded by a blank line. A first version appended `\n<trailer>\n`, which yields a
-    # blank line only when the message already ended with one. `git commit -m` always does, so six
-    # tests passed; a message built without a trailing newline produced
-    # `prose\nCo-authored-by: …` in ONE paragraph, git reported NO trailer, and the gate refused the
-    # push — the exact failure this hook exists to remove, reintroduced by the hook itself.
-    # Measured against real git, both sides of the same constraint.
-    #
-    # `$(cat)` strips trailing newlines, so the printf always yields exactly one blank line whatever
-    # the agent's message ended with. One rule, no shape to know.
-    #
-    # Survives `--no-verify`, which skips `pre-commit` and `commit-msg` and not this one.
-    #
-    # What the wall then catches CHANGES: not negligence — a run burnt over placement — but
-    # FALSIFICATION, a commit that removed or forged the trailer. That is the only case it was ever
-    # interesting for.
-    #
-    # It lives in `.git/hooks/`, OUTSIDE the working tree, so the clean-world rule holds: the agent
-    # sees no LCARS artifact in the material it reasons from.
-    #
-    # Best-effort by construction: a hook that cannot be written must not fail a clone. The push gate
-    # is still there, and losing the convenience is not losing the guarantee.
-    # The role is read off the cap-profile rather than threaded through `opts`: the caller already
-    # hands the profile, and a parameter a future call site can forget to pass is a hook a future
-    # pod silently does without.
+    # Le role se lit sur le cap-profile plutot que de voyager en parametre : un parametre qu'un
+    # futur site d'appel peut oublier est un hook dont un futur pod se passe en silence.
     defp install_trailer_hook(ws, %Fleet.CapProfile{metadata: meta}) do
       case Map.get(meta || %{}, "name") do
         role when is_binary(role) and role != "" ->
@@ -631,17 +603,14 @@ defmodule Fleet.ProjectBootstrap.Phase do
       end
     end
 
-    # LE REF QUE LE PROMPT DES JUGES NOMMAIT N'EXISTAIT PAS (6-135), et le prompt disait lui-meme
-    # pourquoi : « le clone est mono-branche ». Il en tirait `origin/main`. Or au dispatch d'une
-    # review, `RoleDispatch` pose `base_branch: head` — le clone est donc `--branch <head>
-    # --single-branch` et NE CONTIENT PAS `main`. Les deux commandes de preuve prescrites au juge
-    # (`git diff origin/main...HEAD`, `git log origin/main..HEAD`) echouaient sur une revision
-    # inconnue, et un agent prive de son instrument improvise ou juge sur le seul brief. Pour une PR
-    # de face atelier, la base metier n'est de toute facon pas `main`.
+    # ⚠ UN CLONE DE REVIEW EST `--single-branch` SUR LA HEAD : il ne contient PAS la base. Les
+    # commandes de preuve prescrites a un juge echouaient donc sur une revision inconnue, et un
+    # agent prive de son instrument improvise ou juge sur le seul brief. Pour une PR de face
+    # atelier, la base metier n'est de toute facon pas la branche principale.
     #
-    # UN SEUL NOM, POUR TOUS LES PODS, et c'est la condition pour qu'un prompt puisse le nommer : un
+    # ⚠ UN SEUL NOM, POUR TOUS LES PODS : c'est la condition pour qu'un prompt puisse le NOMMER. Un
     # ref conditionnel obligerait l'instruction a dire « selon les cas », ce qu'un agent ne sait pas
-    # resoudre depuis l'interieur du workspace.
+    # resoudre depuis l'interieur de son workspace.
     #
     #   * un pod qui porte la base d'une PR (`pr_base_branch` : juge, rework) → on la RAPATRIE, elle
     #     n'est pas dans le clone ;
