@@ -117,49 +117,34 @@ defmodule Fleet.Pilot.MergeAndPromote do
         {:error, {:conflict_signal_unreadable, reason}}
 
       {:ok, resolved?} ->
-        # ⚖ TWO RAILS, TWO SIGNERS — user arbitrage 2026-08-20, and it REPLACES the conditional
-        # signature of rev 2-4 (chantier doc 02). That model made the signer depend on WHETHER A
-        # CONFLICT HAPPENED; this one makes it depend on WHICH RAIL THE ACT BELONGS TO:
+        # ⚖ DEUX RAILS, DEUX SIGNATAIRES (arbitrage user) : le signataire depend du RAIL auquel
+        # l'acte appartient, jamais de ce qui s'est passe pendant.
         #
-        #   * merge rail — `chief`: the merge, the push it lands on `main` (one Gitea call, one
-        #     doer, both feed lines — no actor parameter exists on the merge endpoint, measured on
-        #     1.26.1), and the head-branch delete;
-        #   * decision rail — `gatekeeper`: the promotion comment and the issue close.
+        #   * rail merge    — le merge, le push qu'il pose, la suppression de la branche ;
+        #   * rail decision — le commentaire de promotion et la fermeture de l'issue.
         #
-        # WHY IT IS NOT COSMETIC. `chief.yaml` states the reason the two roles were split at all:
-        # their dispatches carry OPPOSITE `brief_kind` values — `judge` ("never execute what you
-        # judge", a SECURITY property the schema requires declared) and `worker` ("execute it"),
-        # and one role cannot declare both. The gatekeeper declares `judge`, and MERGING IS AN
-        # EXECUTION: the old conditional therefore put the judging rail in the executor's seat on
-        # every clean PR — 90% of them — re-creating on the merge act the very violation the split
-        # exists to remove.
+        # ⚠ CE N'EST PAS COSMETIQUE : les deux roles portent des `brief_kind` OPPOSES — « ne jamais
+        # executer ce que tu juges », propriete de SECURITE, contre « execute-le » — et un role ne
+        # peut pas declarer les deux. MERGER EST UNE EXECUTION, donc faire signer le merge par le
+        # rail qui JUGE recreerait, sur l'acte de merge, la violation que la separation existe pour
+        # supprimer.
         #
-        # What the old signature carried is NOT lost: "a conflict was resolved here" lives in the
-        # resolution commit's `Co-authored-by: LCARS-chief` trailer (rev 4's own finding — the
-        # substrate discriminant is the TRAILER, not the author, and the rebase preserves it) and
-        # in `merge_method_line/1` right below. It stops being written twice in two places that
-        # can disagree.
-        #
-        # THE METHOD STAYS CONDITIONAL, and that is the trap of this change: a resolved conflict
-        # carries a merge commit on its head branch, and `Do: rebase` DROPS it (cf. A0 above).
-        # Collapsing the whole tuple would silently un-resolve every conflict.
+        # ⚠ LA METHODE, ELLE, RESTE CONDITIONNELLE, et c'est le piege : un conflit resolu porte un
+        # commit de merge sur sa branche, et le rebase le DROPPE. Uniformiser le tuple entier
+        # dé-resoudrait silencieusement tous les conflits.
         method = if resolved?, do: "merge", else: "rebase"
 
-        # ⚠ SEUL LE JETON DU RAIL MERGE EST RÉSOLU ICI, ET C'EST UN DÉFAUT QUE LA SUITE A ATTRAPÉ.
-        # Résoudre les DEUX en tête paraissait plus propre — fail-closed symétrique, une seule
-        # porte. C'était faux : LA TENTATIVE DE MERGE EST L'ENTRÉE DU RAIL CONFLIT. Une PR
-        # conflictuelle échoue ici PAR DESIGN, et `ReviewLifecycle` classe cet échec
-        # (`Remediation.route_merge_failure`) pour lancer le moteur tier-0. Refuser avant d'avoir
-        # ESSAYÉ rendait `{:error, :role_token_unavailable}` là où le rail attend
-        # `{:error, {:merge, _}}` : le moteur n'était plus jamais atteint, et un jeton manquant
-        # désarmait un mécanisme entier qui ne le concerne pas.
+        # ⚠ SEUL LE JETON DU RAIL MERGE EST RÉSOLU ICI. Résoudre les DEUX en tête paraît plus propre
+        # et ne l'est pas : LA TENTATIVE DE MERGE EST L'ENTRÉE DU RAIL CONFLIT. Une PR conflictuelle
+        # échoue ici PAR DESIGN, et cet échec est CLASSÉ pour lancer la remédiation. Refuser avant
+        # d'avoir ESSAYÉ rend une erreur de jeton là où le rail attend une erreur de merge : le
+        # moteur n'est plus jamais atteint, et un jeton manquant désarme un mécanisme entier qui ne
+        # le concerne pas. Celui du rail DÉCISION se résout donc après, là où il sert.
         #
-        # Le jeton du rail DÉCISION se résout donc APRÈS le merge, là où il sert (`do_seal`).
-        #
-        # Fail-closed sur celui-ci reste entier : pas de jeton chief → aucune tentative, et jamais
-        # de repli sur l'autre rail (ce serait faire signer une exécution par le rail qui juge). Le
-        # boot exige déjà les deux (`Pilot.Application.require_signer_tokens!`), donc une absence
-        # ici est une PERTE EN VOL, pas un trou de provisioning.
+        # Le fail-closed reste entier : pas de jeton → aucune tentative, et JAMAIS de repli sur
+        # l'autre rail, qui reviendrait à faire signer une exécution par le rail qui juge. Le boot
+        # exige déjà les deux, donc une absence ici est une PERTE EN VOL, pas un trou de
+        # provisioning.
         case Fleet.Forge.Client.as_role(
                forge_opts,
                Fleet.Project.Roles.conflict_resolver_role()
@@ -425,21 +410,17 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # the authoritative merged PR by `Delegation.issue_status`.
     _ = set_stage_merged_with_retry(forge, repo, issue_n, forge_opts)
 
-    # EXPLICIT close, as the LAST visible act on the issue (coherent chronology): never a
-    # `Closes #N` in the PR body (Gitea would auto-close AT MERGE, before even this comment — a
-    # "✅ delivered and merged" posted after the fact on an already-closed ticket). We close ourselves,
-    # AFTER the comment AND the stage/merged: nothing else posts
-    # on the issue once closed. Without `Closes #N`, THIS close is the gesture that
-    # takes the merged brick out of `list_open_issues` — a FAILED close is NOT harmless: the merged brick
-    # re-appears as an OPEN issue and `decide/1` re-engages it every tick (churn / double-delivery). So we
-    # LOG LOUD on failure (the merge is authoritative + done; the stuck-open issue must be visible).
+    # ⚠ FERMETURE EXPLICITE, JAMAIS UN `Closes #N` DANS LE CORPS DE LA PR : la forge fermerait AU
+    # MERGE, donc avant meme ce commentaire — un « livre et merge » poste apres coup sur un ticket
+    # deja clos. On ferme soi-meme, en DERNIER acte visible.
     #
-    # SIGNED GATEKEEPER (`gk_opts`), NOT system: the merge
-    # + the seal comment are ALREADY gatekeeper — a system close would create an identity break
-    # in the SAME sealing ceremony ("who finished this brick?" two different answers
-    # for three consecutive acts). `set_stage` (just above) STAYS system: it's a protocol
-    # label (stage/*), a separate category, WS1 doctrine (all stage/* are system, everywhere
-    # else in the pipeline) — not concerned by this inconsistency.
+    # ⚠ ET UN ECHEC DE FERMETURE N'EST PAS ANODIN : sans `Closes #N`, c'est CE geste qui sort la
+    # brique mergee des issues ouvertes. Ratee, la brique re-apparait ouverte et se fait re-engager
+    # a chaque tick — d'ou le log bruyant.
+    #
+    # Signee par le rail DECISION, pas par le systeme : le merge et le sceau le sont deja, et une
+    # fermeture systeme creerait une rupture d'identite dans la MEME ceremonie. Le label de stage,
+    # lui, reste systeme — c'est une autre categorie.
     # Gap BEFORE the close: the seal comment takes a `created_at` strictly earlier than
     # the close action (a same-second tie renders inverted in the feed).
     Fleet.Forge.WriteSpacing.gap(opts)
@@ -669,16 +650,12 @@ defmodule Fleet.Pilot.MergeAndPromote do
     end
   end
 
-  # ASYMMETRY CLOSED (BL-6-47.4). Both neighbouring branches logged; only one wrote ON THE FORGE.
-  # Incoherence comments the PR, a skip left nothing — so a merged PR looked exactly the same
-  # whether a deterministic wall had checked it or had never run at all. "Merged" suggested a
-  # verified provenance. The log does not close that gap: the PR is the artefact a human re-reads
-  # six months later, and nobody walks back through BEAM journals to learn whether a verification
-  # took place.
+  # ⚠ UNE TRACE SUR LA FORGE, PAS UN BLOCAGE. Sans elle, une PR mergee a exactement la meme allure
+  # selon qu'un mur deterministe l'a controlee ou n'a jamais tourne — et « mergee » suggere une
+  # provenance verifiee. Le log ne comble pas ce trou : la PR est l'artefact qu'un humain relit six
+  # mois plus tard, personne ne remonte les journaux du BEAM pour savoir si un controle a eu lieu.
   #
-  # A TRACE, not a block: this path is deliberately non-blocking ("a forge hiccup never blocks an
-  # approved merge", "incoherence alone blocks"), and the fix does not reverse that decision — it
-  # makes it LEGIBLE where its effects land.
+  # Ce chemin reste deliberement NON bloquant : seule l'incoherence bloque.
   #
   # Dedup on a signature DISTINCT from the refusal's: sharing one would let a "not verified" note
   # deduplicate a real refusal, or the reverse. Best-effort by obligation — a note that cannot be
@@ -847,20 +824,10 @@ defmodule Fleet.Pilot.MergeAndPromote do
     """
   end
 
-  # ⚠ `signer_line/1` A DISPARU AVEC LE PARAMÈTRE `signer`, ET SA SUPPRESSION EST LE POINT.
-  #
-  # Il avait deux clauses : "gatekeeper" → « gardien des PRs », et une générique → « le rail conflit
-  # a fermé cette PR ». Depuis que le merge appartient TOUJOURS au chief, la première serait morte
-  # et la seconde s'appliquerait à tous les tickets — elle annoncerait un conflit résolu sur des PR
-  # propres, 90% d'entre elles. Le renommage sans ce geste aurait remplacé une confusion de rôles
-  # par un MENSONGE DE FAIT.
-  #
-  # Le fait « conflit » n'est pas perdu pour autant : `merge_method_line/1` le porte déjà, et
-  # mieux — il le déduit de la MÉTHODE réellement employée, pas d'une variable qu'on lui passe.
-
-  # The method line is a TRACE, not decor: on a conflict-resolved PR the seal merges in `merge`
-  # (the resolution is a merge commit; rebase would drop it), and a hardcoded "rebase" here would
-  # be a lie on exactly those tickets — the class of contradiction this comment exists to avoid.
+  # ⚠ LA LIGNE DE METHODE EST UNE TRACE, PAS UN DECOR : sur une PR a conflit resolu le sceau merge
+  # en `merge` — la resolution EST un commit de fusion, qu'un rebase dropperait — donc une methode
+  # ecrite en dur mentirait exactement sur ces tickets-la. Elle se DEDUIT de la methode reellement
+  # employee, jamais d'une variable qu'on lui passe.
   defp merge_method_line("merge"),
     do:
       "merge `merge` (commit de fusion : cette PR est passée par un **conflit résolu** — la " <>
@@ -868,23 +835,17 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
   defp merge_method_line(_), do: "merge **rebase** (historique linéaire)"
 
-  # Judged path: name the accounts. Zero-judge path: say WHY there is no verdict, and on whose
-  # authority the merge happened — the card. « Aucun juge n'a répondu » would describe a failure;
-  # « la carte n'en pose pas » describes the design.
-  # « IL A ÉTÉ FRANCHI » ÉTAIT INCONDITIONNEL, et c'est la seule phrase de ce commentaire qui parlait
-  # du mur. Sur le chemin zéro-juge, elle est TOUT ce qui atteste la légitimité du merge — la carte
-  # ne pose aucun juge, donc le plancher mécanique est le dernier étage. Elle s'imprimait à
-  # l'identique que le mur ait tourné ou non.
+  # Chemin juge : on nomme les comptes. Chemin ZERO-JUGE : on dit POURQUOI il n'y a pas de verdict
+  # et de quelle autorite le merge tient — « aucun juge n'a repondu » decrirait une panne, « la
+  # carte n'en pose pas » decrit le design.
   #
-  # Le pire n'était même pas le silence : la note « Provenance NON vérifiée » posée juste après
-  # (BL-6-47.4) DIT le contraire, sur le même ticket. Un opérateur relisant six mois plus tard y
-  # trouvait deux phrases opposées et aucune raison de préférer l'une. Une contradiction lisible est
-  # plus coûteuse qu'une absence : elle fait douter de tout le reste du sceau.
-  # ⚖ « VALIDÉE PAR » EST DEVENU « AVIS DE » — 9e site de la formule corrigée le 2026-08-19, et il a
-  # survécu à cette passe parce qu'elle cherchait « le jury a approuvé » et pas « validée par ».
-  # Un juge rend un AVIS ; l'ACCEPTATION appartient au rail — et depuis la séparation des rails,
-  # c'est le gatekeeper qui la pose, en signant ce commentaire même. Écrire « validée par les
-  # juges » dans le texte que le rail signe attribuait donc l'acte du signataire à ceux qu'il lit.
+  # ⚠ LE MUR SE DIT CONDITIONNELLEMENT. Sur le chemin zero-juge, c'est TOUT ce qui atteste la
+  # legitimite du merge : l'annoncer franchi sans qu'il ait tourne contredirait, sur le MEME ticket,
+  # la note de provenance posee juste apres. Une contradiction lisible coute plus cher qu'une
+  # absence — elle fait douter de tout le reste du sceau.
+  #
+  # ⚖ « AVIS DE », JAMAIS « VALIDÉE PAR » : un juge rend un AVIS, l'ACCEPTATION appartient au rail
+  # qui signe ce commentaire meme. L'autre formule attribuerait l'acte du signataire a ceux qu'il lit.
   defp validation_line([], :ok),
     do:
       "**Avis de** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>

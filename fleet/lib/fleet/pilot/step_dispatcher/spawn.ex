@@ -113,20 +113,16 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     issue_id = Fleet.Pilot.IssueId.compose(issue_number)
     alive_before? = pod_alive?(spawner, pod_id)
 
-    # Capacity pre-flight BEFORE the forge lock — admission condition at the same stage as the
-    # scope gate (`gate_scope_decision`, "gate BEFORE any lock"). ONE ceiling reaches here: the
-    # per-role pool seats. The fleet-wide `max_pods` is a FUSE and not a policy — nothing consults
-    # it to decide, and blowing it is an anomaly that comes back loud as `{:error, :max_children}`.
+    # ⚠ PRE-VOL DE CAPACITE AVANT LE VERROU FORGE. Le mur qui refuse vraiment est DANS le spawn,
+    # donc apres le verrou : y decouvrir un seau plein coute un cycle verrou/deverrou par ticket et
+    # par tick en saturation, et compte « plein » comme une ERREUR — donc un backoff du poller comme
+    # si la forge etait tombee. Differer est un SKIP, ce qui est la verite : plein, en attente.
     #
-    # The wall that refuses is `PoolSlot.allocate/3`, INSIDE the spawn, i.e. past the forge lock.
-    # Discovering a full bucket there means a lock/unlock cycle per issue per tick at saturation
-    # (~4 forge writes/issue/30s polluting the timeline) and "full" tallied as an ERROR — a poller
-    # backoff as if the forge were down. Deferral is a SKIP (truth: "full, waiting").
+    # ⚠ IL INTERROGE LE MEME SEAU QUE CE MUR. Un pre-vol sur un autre seau est PIRE que pas de
+    # pre-vol : il differe sur un plafond qui n'est pas celui qui refuse.
     #
-    # It asks the SAME bucket as that wall: `(role, repo_id, slot_scope)`, the repo_id read off the
-    # spawn_opts the spawn itself will carry and the slot_scope off the cap-profile. A pre-flight on
-    # a different bucket is worse than none — it defers on a ceiling that is not the one that
-    # refuses.
+    # Un seul plafond arrive ici, les places du pool. Le maximum global est un FUSIBLE, pas une
+    # politique : rien ne le consulte pour decider, et le faire sauter est une anomalie bruyante.
     #
     # `not alive_before?` is load-bearing: re-briefing a LIVE pipe pod starts no child, so gating it
     # at saturation would starve the very pipe holding the seat.
@@ -175,13 +171,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          alive_before?,
          log_ctx
        ) do
-    # PHYSICAL brief: materialized ONCE (committed into ops → {ref, introducing-commit sha}) BEFORE the spawn,
-    # mandatorily — the pointer goes BOTH into the spawn_opts (→ pod data → pod.completed →
-    # SLSA triplet assembled at the completer, next to base_sha) AND into the enqueue (→ the pod).
-    # Three of its four failure causes REFUSE the dispatch instead of degrading it — cf.
-    # `materialize_order/5` below for why "provenance degrades, delivery never breaks" was the
-    # wrong rule. Refusal is FREE here: this runs BEFORE `add_label`, so there is no lock to
-    # compensate; the ticket simply is not dispatched this tick.
+    # Brief PHYSIQUE : materialise UNE fois avant le spawn, le pointeur partant a la fois dans les
+    # opts de spawn et dans l'enfilement.
+    #
+    # Le refus est GRATUIT ici : on tourne AVANT la pose du verrou, donc il n'y a rien a compenser —
+    # le ticket n'est simplement pas dispatche ce tour-ci.
     # Human-named (`issue-<n>-<role>`), routed by EFFECTIVE kind (worker → briefs/, judge →
     # gate-briefs/ — resolved by BriefBuilder), and PUBLISHED best-effort (F-15: an unpushed
     # triplet is unauditable from the forge and non-durable — a push failure warns and never
@@ -240,19 +234,16 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  # The order is materialized BEFORE the lock, and three of its four causes refuse the dispatch.
+  # ⚠ L'ORDRE EST MATERIALISE AVANT LE VERROU, ET UN ECHEC REFUSE LE DISPATCH — « la provenance
+  # degrade, la livraison ne casse jamais » se lit comme de la prudence et fait l'inverse : le
+  # pointeur EST la livraison des qu'un sha existe, donc degrader couvrait l'echec bon marche et
+  # laissait sans filet le cher, celui ou le pod ne peut pas lire son ordre.
   #
-  # The old rule was "provenance degrades, delivery never breaks", and it reads as prudence. It was
-  # the opposite. The nominal path replaces the brief TEXT with a pointer as soon as a sha exists,
-  # so the pointer IS the delivery — and the fallback covered the cheap failure (the commit) while
-  # leaving the expensive one (the pod cannot read its order) with no net at all.
-  #
-  # Worse, three of the four causes are permanent: a project never onboarded, a dispatch with no
-  # brief, a dispatch with no repo. Degrading on those turns a setup defect into a silent permanent
-  # mode — nothing fails, the work simply stops being provable, and the only trace is a warning at
-  # the second it happens. A brief is not instrumentation, it is the ORDER: losing a gauge's
-  # provenance costs a metric, losing the order's costs the ability to answer "what was this pod
-  # asked to do?" about a deliverable that went to production.
+  # La plupart des causes sont PERMANENTES — projet jamais onboarde, dispatch sans brief, sans
+  # depot. Degrader dessus transforme un defaut d'installation en mode permanent SILENCIEUX : rien
+  # n'echoue, le travail cesse simplement d'etre prouvable. Un brief n'est pas de l'instrumentation,
+  # c'est l'ORDRE — le perdre, c'est ne plus pouvoir repondre « qu'a-t-on demande a ce pod ? » sur
+  # un livrable parti en production.
   # La copie ne part que si une ADRESSE la remplace. `brief_ref` est le marqueur de la
   # materialisation : present, l'ordre est un objet git que le pod resout par son pointeur ; absent
   # (rail degrade), il n'y a rien vers quoi pointer.
@@ -352,20 +343,16 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          log_ctx
        ) do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
-         # Native time-tracking (discard: pure Gitea metric, NOT load-bearing for the dispatch — a
-         # failed start is swallowed here, unlogged; the time is simply not tracked for this run and
-         # nothing re-derives it): STARTS the stopwatch on the SAME object as the
-         # lock (issue or PR) — global mechanic, role-agnostic (cf. § Time-tracking, ForgeClient).
-         # Signed IN THE WORKER'S NAME (`as_role`) — NOT the label (protocol = system): Gitea attributes the
-         # tracked time to the AUTHENTICATED user, so a system stopwatch would count all the time
-         # under `system_starfleet`, never the real worker. Gitea requires the SAME identity for start AND stop
-         # (per-user stopwatch) — the symmetric stop lives in `unlock` (same role, except the
-         # ISSUE-lock case at the final `:promote`, cf. StepRunCompleter).
-         # A role that DECLARES no forge identity is not a provisioning hole: its writes go through
-         # the system by design, so there is no `as_role` to attempt and nothing to warn about. The
-         # declaration had no runtime reader until now, which made `forge_identity: false` unusable
-         # for any role the dispatch reaches — picking it bought a permanent "check your
-         # provisioning" warning on every spawn.
+         # Chronometre natif, metrique pure : un demarrage rate est avale ici, le temps n'est
+         # simplement pas suivi pour ce run.
+         #
+         # ⚠ SIGNE AU NOM DU TRAVAILLEUR, pas du systeme comme le label : la forge attribue le temps
+         # a l'utilisateur AUTHENTIFIE, donc un chronometre systeme compterait tout sous le compte
+         # systeme. Et elle exige la MEME identite au demarrage ET a l'arret — le stop symetrique
+         # doit donc porter le meme role.
+         #
+         # Un role qui ne DECLARE aucune identite de forge n'est pas un trou de provisioning : ses
+         # ecritures passent par le systeme par design, donc il n'y a rien a tenter ni a signaler.
          _ =
            (case forge_identity_or_none(profile, forge_opts, role) do
               {:ok, ro} ->
@@ -408,29 +395,17 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           {:ok, {:spawned, pod_id, role}}
 
         {:error, reason} ->
-          # NO compensation: lock kept (the pod is dispatched, the object IS in-flight), brief kept,
-          # pod kept. Only the wake-up failed → honest tally, and the work RESUMES — mais pas par le
-          # rail que cette phrase annoncait.
+          # AUCUNE compensation : verrou garde — le pod EST dispatche, l'objet EST en vol — brief
+          # garde, pod garde. Seul le reveil a rate.
           #
-          # ⚠ « RE-WAKE AT THE NEXT TICK » ETAIT FAUX, ET NOMMAIT UN MECANISME QUI N'EXISTE PAS. Le
-          # dispatcher ne repasse pas : `StepDispatcher.decide/1` rend `{:skip, :in_flight}` tant que
-          # `lcars-in-flight` est pose, et AUCUN des sites de wake n'est un rail periodique. Un
-          # lecteur en repartait avec l'idee qu'un tick reveille le pod ; personne ne le fait.
+          # ⚠ ET LA REPRISE NE VIENT PAS D'UN RE-WAKE : le dispatcher ne repasse pas tant que
+          # `lcars-in-flight` est pose, et aucun site de wake n'est periodique. Elle vient de la
+          # RECLAMATION D'ORPHELIN du poller — un brief enfile mais jamais TIRE ne possede pas son
+          # verrou, le pull etant l'ACK durable que le reveil a atterri, donc le verrou devient
+          # suspect, la grace court, il est reclame, et le dispatch peut reprendre.
           #
-          # LE VRAI RAIL EST LA RECONCILIATION DU POLLER, deux modules plus loin, et il est deja
-          # ecrit la-bas : la propriete d'un verrou se lit sur `@pulled_states [:assigned]`, donc un
-          # brief ENFILE MAIS JAMAIS TIRE (`:pending`) NE POSSEDE PAS son verrou. Le pull
-          # (`get_work_item`) est l'ACK durable que le wake a atterri — c'est exactement ce qui
-          # manque ici. La chaine de reprise, verifiee bout en bout :
-          #
-          #   wake rate -> item `:pending` -> `pod_pull_state` = `:not_pulled` -> le verrou n'est
-          #   possede par personne -> suspect, grace de 2 ticks (~60 s) -> `reclaim_lock` retire
-          #   `lcars-in-flight` -> `decide/1` ne skippe plus -> re-dispatch : `maybe_spawn` est un
-          #   no-op (le pod vit), l'enqueue supersede l'item `:pending` reste, et le wake est retente.
-          #
-          # C'est donc idempotent, mais par RECLAMATION D'ORPHELIN, pas par re-wake. La nuance
-          # compte : elle explique le delai (~60 s de grace, pas un tick) et elle dit ou regarder
-          # quand ca ne repart pas.
+          # La nuance explique le DELAI — une grace, pas un tick — et dit ou regarder quand ca ne
+          # repart pas.
           Logger.warning(
             "StepDispatcher: #{disposition(alive_before?)} role=#{role} pod=#{pod_id} #{log_ctx} " <>
               "BUT wake UNREACHABLE → #{inspect(reason)} (lock+brief kept, re-wake on next tick ; " <>
@@ -486,16 +461,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     end
   end
 
-  # Saturation reached AT THE WALL is the same truth as saturation caught at the pre-flight —
-  # "full, waiting" — and the compensation above has just undone everything, so nothing started.
-  # Returning it as an error made the two paths disagree about one fact: the pre-flight answered
-  # `{:skipped, :at_capacity}` (a wait, labelled `wait/capacity`), while its twin one layer down
-  # answered `{:error, _}`, which the funnel counts in `errors` and on which it deliberately writes
-  # NOTHING (an error says nothing about what a ticket waits for). So the residual TOCTOU — the
-  # last seat taken between the check and the spawn — produced a ticket that was silently not
-  # dispatched, tallied as a failure.
+  # ⚠ LA SATURATION ATTEINTE AU MUR EST LA MEME VERITE QUE CELLE ATTRAPEE AU PRE-VOL — « plein, en
+  # attente » — et la compensation vient de tout defaire, donc rien n'a demarre. La rendre en erreur
+  # ferait diverger les deux chemins sur un seul fait : le TOCTOU residuel, la derniere place prise
+  # entre le controle et le spawn, produirait un ticket silencieusement non dispatche et compte
+  # comme un echec.
   #
-  # Only THIS reason converts. Every other post-lock failure stays an error: they are failures.
+  # SEULE cette raison convertit. Tout autre echec post-verrou reste une erreur : c'en est une.
   defp compensated_verdict({:error, :role_at_capacity}), do: {:skipped, :role_at_capacity}
   defp compensated_verdict(err), do: err
 
