@@ -64,9 +64,9 @@ defmodule Fleet.Pilot.Application do
   @doc """
   The ForgeClient's Finch pool child spec.
 
-  The shape lives in `Fleet.Forge`, next to the pool's NAME: the pilot is where it was first
-  needed, not what it belongs to, and keeping it here made the pool unstartable by anything that
-  does not depend on the pilot.
+  The shape lives in `Fleet.Forge`, next to the pool's NAME: the pilot is where it is first needed,
+  not what it belongs to, and held here the pool is unstartable by anything that does not depend on
+  the pilot.
   """
   @spec forge_finch_spec() :: tuple()
   defdelegate forge_finch_spec, to: Fleet.Forge, as: :finch_spec
@@ -84,10 +84,11 @@ defmodule Fleet.Pilot.Application do
 
   ## What this verdict catches, and what it deliberately does not
 
-  The two health keys used to travel in the detail and were EXPLICITLY excluded from the predicate,
-  so no state of the polls could ever move the verdict. A forge unreachable, a dead DNS, an expired
-  token — every cause that fails 100 % of the polls WITHOUT killing a process — read `operational`
-  while not one ticket advanced. The probe built to reveal that gap contained it in a field.
+  The two health keys are part of the PREDICATE, not just of the detail. Excluded from it — the
+  natural shape, since they are the only non-boolean keys — no state of the polls could ever move
+  the verdict: a forge unreachable, a dead DNS, an expired token, every cause that fails 100 % of
+  the polls WITHOUT killing a process, would read `operational` while not one ticket advanced. A
+  probe built to reveal that gap would be containing it in a field.
 
   It is a BLACKOUT that flips the verdict, not a bad figure: the whole observed window failed, over
   at least #{@poll_blackout_window} samples. Anything narrower would make readiness — the instrument an operator
@@ -135,11 +136,11 @@ defmodule Fleet.Pilot.Application do
     end
   end
 
-  # THE PREDICATE OF THE VERDICT — it used to be an inline `Enum.all?` carrying an EXCLUSION LIST,
-  # and the exclusion was the defect: `key in [:repo_poll, :poll_cycle] or up?` let the two health
-  # keys through unconditionally. Note that DELETING the list would have changed nothing — every
-  # value they can take (a map, `:no_data`, `:unavailable`) is truthy — so the fix is a real
-  # classification, not the removal of a guard.
+  # THE PREDICATE OF THE VERDICT, and it CLASSIFIES rather than excluding. An exclusion list —
+  # `key in [:repo_poll, :poll_cycle] or up?` — lets the two health keys through unconditionally.
+  # Deleting such a list changes nothing either: every value those keys can take (a map, `:no_data`,
+  # `:unavailable`) is truthy. Only a real classification answers, which is why `key_healthy?/1`
+  # has a clause per shape.
   defp rail_healthy?(detail), do: Enum.all?(detail, &key_healthy?/1)
 
   # A process key is a boolean: alive or the rail is degraded. Unchanged, and it still wins — a dead
@@ -282,9 +283,8 @@ defmodule Fleet.Pilot.Application do
     [
       # The poller's telemetry, ATTACHED (BL-6-40 Phase 0). Started BEFORE the Poller so no tick is
       # emitted into the void, and it is the FIRST child of the rail because it measures the rail:
-      # the three emission sites have existed since the poller was written and nothing ever called
-      # `:telemetry.attach`, so every duration was computed and dropped. Nothing else in BL-6-40 is
-      # provable until this exists.
+      # the poller emits its durations whether or not anything listens, so without this child every
+      # one of them is computed and dropped. Nothing else in BL-6-40 is provable until this exists.
       Fleet.Pilot.PollerTelemetry,
       # Task supervisor for the offload of step_run completion (the ≤30s git push of the
       # StepRunConsumer does not block the singleton). Started BEFORE the StepRunConsumer (which refers to it).
@@ -351,16 +351,14 @@ defmodule Fleet.Pilot.Application do
   Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
   the raise into a finding.
   """
-  # ⚠ DEUX GARDES MANQUAIENT ICI, ET LE `@doc` AU-DESSUS DISAIT « EXACTLY » (6-008). Le boot en
-  # joue SIX (`step_children!`, l. 272-278) ; cette fonction en jouait QUATRE :
-  # `validate_workshop_card!` et `validate_default_card_loads!` n'y etaient pas. Un verificateur
-  # VERT pouvait donc preceder un boot ROUGE — le contraire exact de son objet, et sur les deux
-  # gardes qui refusent une carte d'atelier cassee et une carte par defaut qui ne charge pas.
+  # ⚠ CETTE SEQUENCE ET CELLE DU BOOT JOUENT LES MEMES GARDES, ET LE `@doc` AU-DESSUS DIT
+  # « EXACTLY » (6-008). Une garde presente au boot et absente ici laisse un verificateur VERT
+  # preceder un boot ROUGE — le contraire exact de son objet.
   #
-  # L'equivalence reste tenue A LA MAIN : rien dans le code ne lie les deux sequences. Ce qui la
-  # tient desormais est le check `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui
-  # lit les DEUX listes a l'AST et refuse la divergence. Ajouter une garde au boot sans l'ajouter
-  # ici fait maintenant rougir le gate, au lieu de rendre la phrase fausse en silence.
+  # RIEN DANS LE CODE NE LIE LES DEUX SEQUENCES : ce qui tient l'equivalence est le check
+  # `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui lit les DEUX listes a l'AST et
+  # refuse la divergence. Ajouter une garde d'un cote sans l'ajouter de l'autre fait rougir le
+  # gate, au lieu de rendre la phrase du `@doc` fausse en silence.
   # (Perimetre : les gardes de CATALOGUE, la famille `validate_*!`. Une garde de BOITE —
   # `require_signer_tokens!`, credentials sur disque — reste au boot seul : ce verificateur est
   # tokenless par construction, cf. son commentaire.)
@@ -389,13 +387,13 @@ defmodule Fleet.Pilot.Application do
   # sequence de garde d'un CATALOGUE, rejouee par un verificateur autonome qui est SANS JETON par
   # design — y jouer ce garde-ci refuserait des catalogues valides pour une question de credential.
   # Un garde de BOITE ne porte donc pas le nom de la famille.
-  # ⚠ CE GARDE A CHANGE DE NATURE SANS CHANGER DE LIGNE, ET IL FALLAIT LE RATTRAPER.
+  # ⚠ CE GARDE N'A PAS LA MEME PORTEE QUE SA LIGNE LE SUGGERE.
   #
-  # « pas de jeton » voulait dire UNE chose : le provisionnement n'a pas tourne, la boite est mal
-  # deployee, elle ne doit pas demarrer. C'etait vrai tant que le jeton etait un fichier local —
-  # une absence purement locale, definitive, qu'aucune attente ne repare.
+  # Tant qu'un jeton est un fichier local, « pas de jeton » veut dire UNE chose : le
+  # provisionnement n'a pas tourne, la boite est mal deployee, elle ne doit pas demarrer — une
+  # absence purement locale, definitive, qu'aucune attente ne repare.
   #
-  # Depuis que le jeton se DEMANDE au service d'autorite, la meme absence recouvre trois etats :
+  # Ce jeton-ci se DEMANDE au service d'autorite, et la meme absence recouvre alors trois etats :
   #
   #   provisionnement manquant    LOCAL, DEFINITIF   -> le boot refuse, comme avant
   #   service d'autorite muet     LOCAL, TRANSITOIRE -> une unite qui n'a pas fini de demarrer
@@ -460,15 +458,16 @@ defmodule Fleet.Pilot.Application do
   end
 
   # EVERY installed catalogue is proved, not just the bundled one. `canon_names!/1` with no opts
-  # reads the image of the BUNDLED root, so another catalogue's cards were validated by nobody and met
-  # their first reader at dispatch — far from the boot that could have refused them. Explicit opts
-  # still mean "this root and no other": that is the per-catalogue verifier naming its target.
+  # reads the image of the BUNDLED root: called that way, another catalogue's cards are validated by
+  # nobody and meet their first reader at dispatch — far from the boot that could refuse them.
+  # Explicit opts mean "this root and no other": that is the per-catalogue verifier naming its
+  # target.
   #
   # Each scope carries its catalogue ROOT beside the card directory. The root is not decoration: a
   # card names roles, and a role only exists in the catalogue that declares it. Validating `web`'s
-  # `standard` — jury `[code-reviewer]` — against the FIRST catalogue's image raised
-  # `:not_found` on a card that is perfectly coherent with itself, and killed the boot. The pair
-  # travels together or the reader resolves in the wrong world.
+  # `standard` — jury `[code-reviewer]` — against the FIRST catalogue's image raises `:not_found` on
+  # a card that is perfectly coherent with itself, and kills the boot. The pair travels together or
+  # the reader resolves in the wrong world.
   defp card_scopes([]) do
     Enum.map(Fleet.Workflow.Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
   end
@@ -511,9 +510,8 @@ defmodule Fleet.Pilot.Application do
   # when a catalogue simply has no rail. That is a legitimate deployment, not a defect: refusing the
   # boot there would be a policy this check has no mandate to set.
   #
-  # It used to guard a knob (`:lcars_fleet, :pilot_workshop_workflow_map`, default `"workshop-direct"` —
-  # the name of ONE catalogue's card) across three regimes, two of which existed only because a name
-  # can be wrong. A property cannot.
+  # Guarding a NAME instead — a knob holding one catalogue's card name — would need three regimes,
+  # two of which exist only because a name can be wrong. A property cannot.
   @spec validate_workshop_card!(keyword()) :: :ok
   def validate_workshop_card!(opts \\ []) do
     for {scope, _root} <- card_scopes(opts) do

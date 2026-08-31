@@ -90,9 +90,9 @@ defmodule Fleet.Pilot do
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
-  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
-  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
-  # deliberate API gesture.
+  # MEASURED cross-domain surface: an entry gets in by being an observed, reviewed violation,
+  # never by anticipation. The compiler refuses any violation — no discipline required. Shrinking
+  # it is a deliberate API gesture.
   use Boundary,
     deps: [
       # Le vocabulaire d'une demande d'outillage. FONDATION, partagee avec Fleet.MCP : le
@@ -119,8 +119,9 @@ defmodule Fleet.Pilot do
       Fleet.Credentials,
       Fleet.CapProfile,
       Fleet.TaskQueue,
-      # Foundation drain flag (CI-01): dispatch_issue refuses to open a new producer while the daemon
-      # quiesces — the poller-side reader, added to the two existing ones (ControlRouter, PermanentWarden).
+      # Foundation drain flag (CI-01): `StepDispatcher` refuses to open a new producer while the
+      # daemon quiesces. Every gesture that STARTS work reads it, each on its own side — this is
+      # this domain's.
       Fleet.Shutdown.Quiesce,
       Fleet.Publish.InFlight,
       # BL-6-31: the adoption gate of import_external scans instruction material through the
