@@ -38,13 +38,13 @@ defmodule Fleet.Application.CatalogueVerify do
     case verify(root) do
       {:ok, %{assumptions: assumptions}} ->
         print(assumptions)
-        # ⚠ CETTE LIGNE DISAIT « every check the boot runs passed » (6-008), et rien ne tenait
-        # l'equivalence. Mesure du 2026-08-14 : le rail de boot jouait CINQ gardes `validate_*!`,
-        # ce verificateur en rejouait QUATRE. Un vert d'ici precedait donc un boot rouge — le
-        # contraire de son objet. Les deux sequences sont desormais tenues par le check
-        # `boot.verifier_covers_rail`, qui les lit a l'AST et refuse la divergence.
+        # ⚠ CETTE LIGNE NE DIT PAS « every check the boot runs passed » (6-008) : rien ici ne
+        # tiendrait cette equivalence. Que ce verificateur rejoue UNE garde de moins que le rail de
+        # boot, et un vert d'ici PRECEDE un boot rouge — le contraire de son objet. L'equivalence
+        # des deux sequences est tenue par le check `boot.verifier_covers_rail`, qui les lit a
+        # l'AST et refuse la divergence.
         #
-        # La phrase nomme maintenant ce qui EST prouve. Le verificateur prouve UN REPERTOIRE avec
+        # La phrase nomme donc ce qui EST prouve. Le verificateur prouve UN REPERTOIRE avec
         # les fonctions du boot ; il ne prouve ni les credentials de deploiement, ni les surcharges
         # fines, ni l'ordre reel de demarrage — ce que la liste d'hypotheses au-dessus dit deja.
         IO.puts(
@@ -148,16 +148,16 @@ defmodule Fleet.Application.CatalogueVerify do
     end
   end
 
-  # What the BUSINESS half declares on its own, judged alone. One warning, and no refusal — the two
-  # it used to carry were RETRACTED, because the mechanism that made them right was replaced.
+  # What the BUSINESS half declares on its own, judged alone. One warning, and NO refusal — in
+  # particular pas ces deux-la : « un role metier ne peut pas declarer une capability systeme » et
+  # « un role metier ne peut pas prendre `role_index: 0` ».
   #
-  # They were: "a business role may not declare a system capability" and "a business role may not
-  # take `role_index: 0`". Both were correct while the catalogue was single-rooted and a name
-  # collision was itself a refusal — nothing could superpose anything, so declaring
-  # `project_delegate` could only be an usurpation. Since the resolver reads an ORDERED SEARCH PATH,
-  # overriding a system role BY NAME is the supported gesture, and an override of `architect.yaml`
-  # necessarily declares `project_delegate`; an override of `starfleet.yaml` necessarily carries
-  # slot 0. These two refusals stopped drawing a frontier and started forbidding the feature.
+  # Les deux sont justes SOUS UN CATALOGUE MONO-RACINE, ou une collision de nom est elle-meme un
+  # refus : rien ne peut se superposer a rien, donc declarer `project_delegate` ne peut etre qu'une
+  # usurpation. Des lors que le resolveur lit un CHEMIN DE RECHERCHE ORDONNE, surcharger un role
+  # systeme PAR NOM est le geste SUPPORTE — et une surcharge d'`architect.yaml` declare
+  # necessairement `project_delegate`, une surcharge de `starfleet.yaml` porte necessairement le
+  # slot 0. Ces deux refus cesseraient de tracer une frontiere pour INTERDIRE LA FONCTIONNALITE.
   #
   # What replaces them looks at the MERGED index instead of the files, which is what lets it tell
   # the two apart on its own: an override is ONE entry (one delegate, one claim on slot 0) and
