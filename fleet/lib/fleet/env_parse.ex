@@ -11,8 +11,10 @@ defmodule Fleet.EnvParse do
 
   Doctrine: a LOAD-BEARING knob (port, interval) with an invalid value →
   `raise` a clear message = boot REFUSED (a typo must not boot a broken daemon, but with a readable error,
-  not an opaque `String.to_integer` stacktrace). A boolean feature-flag typo → the documented default +
-  a LOUD warning (a flag typo should be visible, but must not kill the boot).
+  not an opaque `String.to_integer` stacktrace). A boolean FEATURE-flag typo → the documented default +
+  a LOUD warning (a flag typo should be visible, but must not kill the boot). A boolean SAFETY-flag
+  typo → `raise` too, which is `bool!/3` and not `bool/3`: falling back to the active default there
+  would silently arm the very thing the operator was reaching for the flag to disarm.
   """
 
   require Logger
