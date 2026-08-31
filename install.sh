@@ -101,70 +101,114 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ─── PRÉFLIGHT COMMUN — ce dont les DEUX branches ont besoin ────────────────
+# ─── PRÉFLIGHT — UNE SEULE MESURE, ET C'EST CELLE DU PROVISIONNEMENT ────────
+#
+# ⚠ CETTE PORTE MESURAIT ELLE-MÊME, et c'est la duplication que le canon proscrit nommément (« le
+# préflight dupliqué entre la porte et ce qui vit dans deploy/ : une seule mesure »). Deux sondes du
+# même fait dérivent — et celle qu'on ne relit pas est celle qui ment le jour où l'autre change.
+#
+# Le module `00-preflight` porte désormais les deux rails. Il parle deux fois : en lignes pour un
+# humain, et en faits `nom=valeur` (`p_fact`) dans `PROV_FACTS_FILE` pour qui doit DÉCIDER. La porte
+# est ce « qui » : elle ne mesure plus rien, elle lit.
+#
+# ⚠ `doctor`, PAS `apply`, ET SANS SUDO : `doctor` est read-only, `NEEDS: root` n'est contrôlé qu'à
+# l'apply (`provision`, `run_module`). La porte n'a pas de sudo et n'en aura pas — c'est le rail qui
+# escalade, à son début.
 preflight_ok=1
-# `return 0` : sans lui le code de sortie est celui d'`echo`, et un `A && say_ok || say_miss`
-# bascule en MANQUE sur un prérequis présent. Même règle que `p_ok` (provision-lib.sh).
 say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
-docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
-  [[ "${RAIL:-}" != "box" ]] || return 1
-  [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
-  local s="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || echo "")}"
-  [[ "$s" == "linux" ]]
+PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
+FACTS_FILE=""
+fait() { # fait <nom> — la valeur mesurée, vide si le fait n'a pas été posé
+  [[ -n "$FACTS_FILE" ]] || return 0
+  sed -n "s/^$1=//p" "$FACTS_FILE" 2>/dev/null | tail -1
 }
+
+# ⚠ UN DRAPEAU INVALIDE SE REFUSE AU PARSING, PAS APRÈS UNE MESURE. `provision` valide aussi son
+# `--substrate` et rendrait le même refus — mais dix secondes plus tard, noyé dans un rapport, sur
+# une machine qu'on aura sondée pour rien. Ce que l'opérateur a MAL TAPÉ ne demande aucune mesure.
+case "${FORCED_SUBSTRATE:-wsl}" in
+  wsl|docker|linux) ;;
+  *) echo ""; echo "  ${R}--substrate $FORCED_SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
+esac
 
 echo ""
 echo "  ${W}Préflight${N}"
-for t in git curl; do
-  if command -v "$t" >/dev/null 2>&1; then
-    say_ok "$t"
-  else
-    say_miss "$t — apt install $t"
-  fi
-done
-DOCKER_OK=0
-if [[ -r "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh" ]]; then
-  # shellcheck source=fleet/deploy/lib/docker-endpoint.sh
-  . "$SCRIPT_DIR/fleet/deploy/lib/docker-endpoint.sh"
-  if docker_endpoint; then
-    DOCKER_OK=1; say_ok "docker répond ($PROV_DOCKER_BIN)"
-  elif [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    # Pas de verdict ici : le poste escalade et s'en moque, la boîte tourne sous l'humain et ne
-    # peut pas travailler. Même fait, deux conclusions — la branche tranche.
-    echo "  ${W}[à voir]${N} $PROV_DOCKER_WHY"
-  elif docker_installable_here; then
-    if [[ -z "$RAIL" ]]; then
-      echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com) ;"
-      echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
-    else
-      echo "  ${W}[à voir]${N} docker absent — le rail le posera (docker-ce, dépôt upstream download.docker.com)"
-    fi
-  elif [[ "$RAIL" == "box" ]]; then
-    say_miss "$PROV_DOCKER_WHY"
-    echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
-    echo "           ou donne cette machine au rail poste — sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
-  else
-    say_miss "$PROV_DOCKER_WHY"
-  fi
-else
-  if command -v docker >/dev/null 2>&1; then
-    DOCKER_OK=1
-    say_ok "docker (sonde complète après le clone)"
-  else
-    say_miss "docker — Docker Desktop côté Windows, ou un docker natif (le rail le pose sur Linux dédié)"
-  fi
+
+if [[ ! -x "$PROVISION" ]]; then
+  # La porte seule (`wget install.sh` sans le dépôt) : le préflight vit dans le clone, donc la
+  # source doit venir avant lui. Ce chemin est le flux « standalone » — il se traite à sa place,
+  # dans l'accueil, pas ici en devinant ce que la machine vaut.
+  echo "  ${R}Ce script est seul : le préflight vit dans le dépôt, et il n'est pas là.${N}"
+  echo "  Clone d'abord, puis relance depuis le clone :"
+  echo "    git clone $REPO_URL && bash LCARS-fleet/install.sh"
+  exit 1
 fi
+
+FACTS_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || FACTS_FILE=""
+trap '[[ -n "${FACTS_FILE:-}" ]] && rm -f "$FACTS_FILE"' EXIT
+
+# La sortie du module est CAPTURÉE : la porte rend son propre préflight, à partir des faits. Le
+# rapport brut reste disponible pour qui le demande — il n'est pas jeté, il n'est pas imposé.
+# ⚠ `--substrate` EST UNE OPTION DU RUNNER, PAS UNE VARIABLE : `provision` pose lui-même
+# `PROV_SUBSTRATE` depuis son option (`provision:169`), donc une variable passée en environnement
+# est écrasée sans un mot. Le drapeau de la porte se traduit en drapeau du runner — c'est l'idiome
+# du reste de ce fichier (`PASSTHRU`), et c'est aussi ce qui donne la validation gratuitement.
+remesurer() { # rejoue le préflight et recharge les faits — la SEULE façon de re-mesurer ici
+  # ⚠ ET C'EST POURQUOI CETTE PORTE N'A PLUS DE SONDE À ELLE. Elle en avait une, et après une
+  # escalade ou une pose de paquets elle la rejouait — donc deux sondes du même fait, à deux
+  # instants, avec deux façons de conclure. Rejouer LE module garde la mesure unique dans le temps
+  # aussi, pas seulement dans l'espace.
+  : > "$FACTS_FILE"
+  PREFLIGHT_OUT="$(env PROV_FACTS_FILE="$FACTS_FILE" \
+    "$PROVISION" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} 2>&1)" || true
+}
+remesurer
+
+for t in git curl; do
+  if [[ "$(fait "$t")" == "oui" ]]; then say_ok "$t"; else say_miss "$t — apt install $t"; fi
+done
+
+DOCKER_OK=0
+case "$(fait docker)" in
+  oui)    DOCKER_OK=1; say_ok "docker répond ($(fait docker_bin))" ;;
+  refuse) # Même fait, deux conclusions : le poste escalade et s'en moque, la boîte tourne sous
+          # l'humain et ne peut pas travailler. La branche tranche, pas le préflight.
+          echo "  ${W}[à voir]${N} $(fait docker_why)" ;;
+  absent) if [[ "$(fait consent)" == "env" || "$(fait consent)" == "fichier" ]] \
+             && [[ "$(fait substrat)" == "linux" && "${RAIL:-}" != "box" ]]; then
+            echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com)"
+            [[ -n "$RAIL" ]] || echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
+          elif [[ "$RAIL" == "box" ]]; then
+            say_miss "$(fait docker_why)"
+            echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
+            echo "           ou donne cette machine au rail poste — sudo LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
+          else
+            say_miss "$(fait docker_why)"
+          fi ;;
+  *)      say_miss "le préflight n'a pas rendu de fait « docker » — provision doctor a-t-il tourné ?" ;;
+esac
 
 if [[ "$preflight_ok" -eq 0 ]]; then
   echo ""
   echo "  ${R}Prérequis manquants — rien n'a été fait. Comble-les et relance.${N}"
+  echo "  Le rapport complet du préflight :"
+  printf '%s\n' "$PREFLIGHT_OUT" | sed 's/^/    /'
   exit 1
 fi
 
-# ─── DÉTECTION : ce que la machine PERMET, jamais ce qu'elle VEUT ───────────
-SUBSTRATE="${FORCED_SUBSTRATE:-$(detect_substrate 2>/dev/null || { grep -qi microsoft /proc/version 2>/dev/null && echo wsl || echo linux; })}"
+# ─── LE SUBSTRAT SE LIT, IL NE SE REDÉTECTE PAS ─────────────────────────────
+# `--substrate` a été passé au module ci-dessus : ce qu'il rend EST la réponse, forcée ou mesurée.
+# Une seconde détection ici rouvrirait la divergence que ce bloc vient de fermer.
+SUBSTRATE="$(fait substrat)"
+[[ -n "$SUBSTRATE" ]] || SUBSTRATE="${FORCED_SUBSTRATE:-linux}"
+
+docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
+  [[ "${RAIL:-}" != "box" ]] || return 1
+  [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
+  [[ "$SUBSTRATE" == "linux" ]]
+}
 case "$SUBSTRATE" in
   wsl|docker|linux) ;;
   *) echo ""; echo "  ${R}--substrate $SUBSTRATE : inconnu (wsl|docker|linux).${N}"; exit 1 ;;
@@ -274,7 +318,9 @@ if [[ "$RAIL" == "workstation" ]]; then
     exit 1
   fi
 
-  if [[ "$EUID" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+  # `fait sudo` vaut `root` quand on y est déjà, `oui` quand la commande est là, `absent` sinon —
+  # trois états mesurés par le module, pas re-sondés ici.
+  if [[ "$(fait sudo)" == "absent" ]]; then
     echo ""
     echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
     echo "  La boîte, elle, ne modifie rien :  bash $0 --box"
@@ -400,20 +446,27 @@ if [[ "$RAIL" == "box" ]]; then
   # ⚠ NE PAS REMPLACER PAR UN `exec sudo` : ce rail bâtit une image sous l'uid de l'humain ; en root,
   # `git` lirait le clone en « dubious ownership » et l'image sortirait estampée `unknown`.
   # TTY exigé : sans terminal, l'invite pend jusqu'au timeout au lieu de refuser.
-  if [[ "$DOCKER_OK" -eq 0 && "${PROV_DOCKER_DENIED:-0}" == "1" ]] \
-     && command -v sudo >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
+  # ⚠ CES TROIS BRANCHES LISAIENT `PROV_DOCKER_DENIED`, `PROV_DOCKER_WHY` ET APPELAIENT
+  # `docker_endpoint` — trois choses que cette porte n'a plus, depuis qu'elle ne source plus la lib
+  # de sonde. Elles étaient MORTES et aucun témoin ne l'a vu : elles exigent un TTY et un daemon qui
+  # refuse, deux conditions qu'une suite ne reproduit pas. Le fait les remplace, et il vient du même
+  # module que tout le reste.
+  if [[ "$DOCKER_OK" -eq 0 && "$(fait docker)" == "refuse" ]] \
+     && [[ "$(fait sudo)" != "absent" ]] && [[ -t 0 && -t 1 ]]; then
     echo ""
     echo "  ${W}[sudo]${N} La socket du daemon appartient à root — une invite, une fois."
     echo "         Elle amorce le cache que la sonde consomme commande par commande ;"
     echo "         ce rail ne monte JAMAIS en root, ton image reste bâtie sous ton compte."
     if sudo -v; then
-      docker_endpoint && { DOCKER_OK=1; echo "  ${G}[ok]${N} docker répond ($PROV_DOCKER_BIN)"; }
+      remesurer
+      [[ "$(fait docker)" == "oui" ]] \
+        && { DOCKER_OK=1; echo "  ${G}[ok]${N} docker répond ($(fait docker_bin))"; }
     fi
   fi
   if [[ "$DOCKER_OK" -eq 0 ]]; then
     echo ""
-    echo "  ${R}$PROV_DOCKER_WHY${N}"
-    if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+    echo "  ${R}$(fait docker_why)${N}"
+    if [[ "$(fait docker)" == "refuse" ]]; then
       echo "  L'escalade a été tentée et refusée : « sudo -n » n'a pas abouti (mot de passe requis ?)."
       [[ -t 0 && -t 1 ]] \
         || echo "  Pas de terminal ici, donc pas d'invite possible : joue « sudo -v » d'abord, ou donne un NOPASSWD sur la CLI docker."
@@ -537,16 +590,16 @@ fi
 
 # ─── LES PAQUETS D'ABORD, SI C'EST LE RAIL QUI POSE DOCKER ──────────────────
 if [[ "$RAIL" == "workstation" && "$DOCTOR_MODE" -eq 0 ]] \
-   && ! command -v "${PROV_DOCKER_BIN:-docker}" >/dev/null 2>&1 \
+   && [[ "$(fait docker)" == "absent" ]] \
    && docker_installable_here; then
   echo ""
   echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
   "$PROVISION" apply "${PASSTHRU[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
     || echo "  ${W}la tranche paquets n'a pas tout convergé — 48-forge-host dira ce qui manque.${N}"
-  # LA SONDE SE REJOUE : `docker_endpoint` a répondu « absent » il y a trente secondes, et
-  # `PROV_DOCKER_BIN` porte encore cette réponse-là. Sans ce second passage, le build interrogerait
-  # un chemin périmé sur une machine qui a désormais docker.
-  docker_endpoint >/dev/null 2>&1 || true
+  # LA MESURE SE REJOUE : le fait `docker` valait « absent » il y a trente secondes, et les faits
+  # portent encore cette réponse-là. Sans ce second passage, la suite du rail travaillerait sur une
+  # photographie périmée d'une machine qui a désormais docker.
+  remesurer
 fi
 
 # ─── Déléguer TOUT au provisioning (l'autorité) ─────────────────────────────

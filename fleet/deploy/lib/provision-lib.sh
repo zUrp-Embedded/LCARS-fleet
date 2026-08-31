@@ -127,6 +127,31 @@ p_warn() { printf '%sWARN  %s:%s %s\n' "$_PA" "$PROV_MODULE_TAG" "$_PN" "$*" >&2
 p_fail() { printf '%sFAIL  %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
 p_die()  { PROV_VERDICT_RENDERED=1; printf '%sFATAL %s:%s %s\n' "$_PR" "$PROV_MODULE_TAG" "$_PN" "$*" >&2; exit 1; }
 
+# ─── p_fact <nom> <valeur> — LE MEME FAIT, POUR UNE MACHINE ─────────────────────────────────────
+#
+# Les `p_*` ci-dessus s'adressent a un humain : ils racontent. Un appelant qui doit DECIDER (la
+# porte, qui restreint son menu selon ce que la machine permet) a besoin du fait nu, et le tirer par
+# `grep` de ces lignes en ferait une prose-lock — le jour ou on reformule « docker repond », la
+# porte se trompe en silence.
+#
+# Meme idiome que `prov_announce_credential` : un composant sait, il l'ECRIT la ou un autre peut le
+# lire. L'appelant pose `PROV_FACTS_FILE`, le module y depose ses faits, l'appelant les relit.
+#
+# ⚠ SILENCIEUX SANS LA VARIABLE, et c'est deliberé. Un fait n'a d'interet que pour qui l'a demande ;
+# l'imprimer par defaut doublerait chaque ligne du rapport. Un module reste donc lisible seul, et le
+# canal ne change RIEN a ce qu'un operateur voit.
+#
+# ⚠ `2>/dev/null` AVANT `>>` : les redirections se traitent de gauche a droite, ecrite apres elle
+# arrive trop tard et le « No such file » du shell pollue la sortie de l'appelant (meme regle que
+# `prov_journal_acc`). Et `return 0` explicite, meme motif que `p_ok` : une fonction qui RAPPORTE ne
+# doit pas pouvoir renverser le verdict qu'elle rapporte.
+p_fact() { # p_fact <nom> <valeur…>
+  [[ -n "${PROV_FACTS_FILE:-}" ]] || return 0
+  [[ "$#" -ge 2 ]] || return 0
+  printf '%s=%s\n' "$1" "${*:2}" 2>/dev/null >> "$PROV_FACTS_FILE" || true
+  return 0
+}
+
 # Sortie standard d'un module : à appeler en FIN de check() et d'apply(). Le runner lit ces codes
 # tels quels — les changer ici change son bilan.
 #   check   0 conforme · 1 drift constaté · 2 échec de sonde (un `p_fail` a été appelé)

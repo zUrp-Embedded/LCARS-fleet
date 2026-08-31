@@ -321,7 +321,7 @@ setup() {
   # preflight COMMUN refuserait la machine de travail de quelqu'un qui voulait juste lancer une
   # boite depuis elle — c'est le cas de la machine ou ce rail a ete ecrit.
   local q pf
-  q="$(grep -n 'PRÉFLIGHT COMMUN' "$SRC" | head -1 | cut -d: -f1)"
+  q="$(grep -n 'PRÉFLIGHT — UNE SEULE MESURE' "$SRC" | head -1 | cut -d: -f1)"
   pf="$(grep -n 'PRÉFLIGHT DE LA BRANCHE' "$SRC" | head -1 | cut -d: -f1)"
   local choice; choice="$(grep -n '─── LE CHOIX' "$SRC" | head -1 | cut -d: -f1)"
   [ "$q" -lt "$choice" ]
@@ -391,6 +391,7 @@ printf '%s\n' "$#"; printf '[%s]' "$@"; echo
 SPY
   chmod 0755 "$fake/fleet/deploy/docker/bench/bench-up.sh"
   mkdir -p "$fake/fleet/deploy"; touch "$fake/fleet/deploy/box"; chmod 0755 "$fake/fleet/deploy/box"
+  _faux_provision "$fake" "${_faits_sains[@]}"
 
   run bash "$fake/install.sh" --box --bench -- --project bt --ssh-port 2299 < /dev/null
   [ "$status" -eq 0 ]
@@ -411,6 +412,34 @@ SPY
 #
 # CE QU'ILS MESURENT EST L'APPEL, JAMAIS LE BUILD : le delegue est un espion. Un temoin qui
 # batirait vraiment provisionnerait la machine qui joue la suite.
+
+# ─── LE DECOR POSE LES FAITS, IL NE FABRIQUE PLUS UNE MACHINE ───────────────────────────────────
+#
+# La porte ne sonde plus rien : elle appelle `fleet/deploy/provision doctor --only 00-preflight` et
+# lit les faits `nom=valeur` que le module depose. Ces temoins doivent donc fournir ce `provision`.
+#
+# ⚠ ET C'EST UN GAIN, PAS UNE CONTRAINTE. Pour obtenir « docker absent », il fallait jusqu'ici
+# contrefaire une machine — une doublure de CLI, un `DOCKER_HOST` vers /dev/null, une liste de
+# sockets vide — et le temoin mesurait alors la fidelite de sa contrefacon autant que la porte. Il
+# DECLARE maintenant le fait. Ce qui reste a contrefaire ne l'est plus que pour ce qu'on mesure
+# vraiment.
+_faux_provision() { # _faux_provision <arbre> [nom=valeur…]
+  local arbre="$1"; shift
+  mkdir -p "$arbre/fleet/deploy"
+  { echo '#!/usr/bin/env bash'
+    # Sans `PROV_FACTS_FILE` il ne fait rien : c'est la porte qui pose le canal, et un decor qui
+    # ecrirait quand meme masquerait une porte qui aurait oublie de le poser.
+    echo '[[ -n "${PROV_FACTS_FILE:-}" ]] || exit 0'
+    echo 'cat > "$PROV_FACTS_FILE" <<'"'"'FACTS'"'"''
+    printf '%s\n' "$@"
+    echo 'FACTS'
+  } > "$arbre/fleet/deploy/provision"
+  chmod 0755 "$arbre/fleet/deploy/provision"
+}
+
+# Les faits d'une machine SAINE — ce qu'un decor pose quand le sujet du temoin est ailleurs.
+_faits_sains=(git=oui curl=oui docker=oui docker_bin=/usr/bin/docker substrat=wsl wsl2=oui
+              consent=sans-objet wslconf=absent compose=oui sudo=oui)
 
 # Un arbre factice complet : la porte, la sonde reelle, et deux espions a la place des delegues.
 # `$1` = code de sortie de `image inspect` (0 presente, 1 absente) · `$2` = celui du delegue.
@@ -433,6 +462,7 @@ SPY
 [[ "\$1 \$2" == "image inspect" ]] && exit $inspect_rc
 exit 0
 SPY
+  _faux_provision "$fake" "${_faits_sains[@]}"
   chmod 0755 "$fake/fleet/deploy/box" "$fake/fleet/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
   printf '%s' "$fake"
 }
@@ -496,19 +526,30 @@ SPY
 # le substrat qui les separe, exactement comme dans `10-packages`.
 
 @test "la porte ne refuse plus docker sur un LINUX NATIF DECLARE — le rail le pose" {
-  grep -q 'docker_installable_here' "$SRC"
-  # la condition est double : substrat linux ET machine declaree dediee
-  run bash -c 'sed -n "/^docker_installable_here()/,/^}/p" "$1"' _ "$SRC"
-  [[ "$output" == *"LCARS_ALLOW_ANY_HOST"* ]]
-  [[ "$output" == *'"$s" == "linux"'* ]]
+  # ⚠ CE TEMOIN LISAIT L'ORTHOGRAPHE DE LA FONCTION (`"$s" == "linux"`), et il est tombe le jour ou
+  # la variable a change de nom — sur un comportement rigoureusement identique. C'est une
+  # prose-lock : elle epingle la facon d'ecrire, pas la regle. Les trois voisins, eux, EXECUTENT la
+  # fonction dans un decor pose ; celui-ci fait pareil desormais, et la double condition se mesure
+  # par ses deux moities plutot que par deux motifs de texte.
+  run bash -c "
+    export LCARS_ALLOW_ANY_HOST=1
+    SUBSTRATE=linux
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "oui" ]
+  # ET LA DECLARATION EST NECESSAIRE : le meme substrat sans elle ne passe pas.
+  run bash -c "
+    SUBSTRATE=linux
+    $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
+    docker_installable_here && echo oui || echo non"
+  [ "$output" = "non" ]
 }
 
 @test "sans la DECLARATION, docker reste un prerequis — sinon la porte promet ce que 00-preflight refusera" {
   # `LCARS_ALLOW_ANY_HOST` absent : ce provisionnement n'a pas le droit de toucher la machine, donc
   # annoncer qu'il y installera docker serait une promesse non tenue trois lignes plus loin.
   run bash -c "
-    FORCED_SUBSTRATE=linux
-    detect_substrate() { echo linux; }
+    SUBSTRATE=linux
     $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
     docker_installable_here && echo oui || echo non"
   [ "$output" = "non" ]
@@ -517,8 +558,7 @@ SPY
 @test "declaree ET linux : la porte laisse passer" {
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1
-    FORCED_SUBSTRATE=linux
-    detect_substrate() { echo linux; }
+    SUBSTRATE=linux
     $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
     docker_installable_here && echo oui || echo non"
   [ "$output" = "oui" ]
@@ -530,8 +570,7 @@ SPY
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1
     RAIL=box
-    FORCED_SUBSTRATE=linux
-    detect_substrate() { echo linux; }
+    SUBSTRATE=linux
     $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
     docker_installable_here && echo oui || echo non"
   [ "$output" = "non" ]
@@ -542,8 +581,7 @@ SPY
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1
     RAIL=workstation
-    FORCED_SUBSTRATE=linux
-    detect_substrate() { echo linux; }
+    SUBSTRATE=linux
     $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
     docker_installable_here && echo oui || echo non"
   [ "$output" = "oui" ]
@@ -587,14 +625,29 @@ SPY
 @test "la tranche paquets ne se joue QUE si docker manque ET que le rail peut le poser" {
   # Sur une machine qui a deja docker, rejouer trois modules serait du bruit ; sur une machine non
   # declaree, ce serait une promesse que 00-preflight refusera.
-  run bash -c "sed -n '/docker_installable_here; then/,/^fi$/p' '$SRC'"
-  [[ "$output" == *"command -v"* ]]
+  #
+  # ⚠ LA COUTURE A CHANGE DE NOM, PAS DE SENS : la porte ne sonde plus (`command -v`), elle LIT le
+  # fait que `00-preflight` a pose. La double condition, elle, est la meme — et c'est elle qu'on
+  # mesure, pas l'orthographe de sa premiere moitie.
+  run bash -c "sed -n '/LES PAQUETS D.ABORD/,/^fi$/p' '$SRC'"
+  [[ "$output" == *'fait docker'* ]]
+  [[ "$output" == *"absent"* ]]
   [[ "$output" == *"docker_installable_here"* ]]
+  # ET AUCUNE SONDE PROPRE : une seconde mesure ici retomberait dans la duplication que le canon
+  # proscrit, et elle conclurait peut-etre autrement que celle du module.
+  refute grep -q 'command -v\|docker_endpoint' <<<"$output"
 }
 
-@test "la sonde docker est REJOUEE apres la tranche paquets" {
-  run bash -c "sed -n '/docker_installable_here; then/,/^fi$/p' '$SRC'"
-  [[ "$output" == *"docker_endpoint"* ]]
+@test "la MESURE est REJOUEE apres la tranche paquets — pas la sonde, la mesure" {
+  # Poser docker change la reponse : sans ce second passage, la suite du rail travaillerait sur une
+  # photographie prise avant l'installation. `remesurer` rejoue LE module — la porte n'a pas d'autre
+  # facon de savoir, et c'est le but.
+  run bash -c "sed -n '/LES PAQUETS D.ABORD/,/^fi$/p' '$SRC'"
+  [[ "$output" == *"remesurer"* ]]
+  # `remesurer` VIDE le fichier avant de rejouer : sans ca les faits s'empilent et `fait` rendrait
+  # la valeur la plus recente par accident de `tail -1`, pas par construction.
+  run bash -c "sed -n '/^remesurer() {/,/^}/p' '$SRC'"
+  [[ "$output" == *': > "$FACTS_FILE"'* ]]
 }
 
 # ─── LE DELEGUE DU RAIL BOITE FAIT PARTIE DU CHECKOUT ───────────────────────────────────────────

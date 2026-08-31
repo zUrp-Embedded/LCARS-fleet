@@ -1102,3 +1102,89 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   '
   [ "$status" -eq 0 ]
 }
+
+# ─── p_fact : LE MEME FAIT, POUR UNE MACHINE ────────────────────────────────────────────────────
+#
+# Les `p_*` racontent a un humain ; `p_fact` depose un fait nu pour un appelant qui doit DECIDER.
+# Ce que ces temoins gardent, c'est qu'il ne peut RIEN casser chez son appelant : ni sa sortie, ni
+# son verdict, ni son processus. Un canal de faits qui tue le module qui l'alimente serait pire que
+# pas de canal du tout.
+
+@test "p_fact : SANS le fichier, il n ecrit rien et ne dit rien — un module reste lisible seul" {
+  module_sh '
+    out="$(p_fact substrat wsl 2>&1)"
+    [ -z "$out" ]
+  '
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "p_fact : AVEC le fichier, une ligne nom=valeur par fait, dans l ordre" {
+  module_sh "
+    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
+    p_fact substrat wsl
+    p_fact docker oui
+  "
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/facts"
+  [ "${lines[0]}" = "substrat=wsl" ]
+  [ "${lines[1]}" = "docker=oui" ]
+}
+
+@test "p_fact : la valeur garde ses espaces — une raison de refus est une phrase" {
+  module_sh "
+    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
+    p_fact docker_why 'le daemon repond mais pas a cet utilisateur'
+    p_fact docker_why2 le daemon repond pas
+  "
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/facts"
+  [ "${lines[0]}" = "docker_why=le daemon repond mais pas a cet utilisateur" ]
+  # Sans quotes non plus : la valeur est TOUT ce qui suit le nom, pas le seul mot suivant.
+  [ "${lines[1]}" = "docker_why2=le daemon repond pas" ]
+}
+
+@test "p_fact : un appel a UN seul argument n ecrit rien et ne tue pas l appelant" {
+  # Un fait sans valeur n'est pas un fait. Il ne doit pas produire « nom= » — une ligne qu'un
+  # appelant lirait comme « mesure faite, resultat vide » au lieu de « pas de mesure ».
+  module_sh "
+    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
+    p_fact orphelin
+    p_fact substrat wsl
+  "
+  [ "$status" -eq 0 ]
+  run cat "$BATS_TEST_TMPDIR/facts"
+  [ "${#lines[@]}" -eq 1 ]
+  [ "${lines[0]}" = "substrat=wsl" ]
+}
+
+@test "LE PIEGE : un fichier de faits INECRIVABLE ne tue pas le module et ne crie pas" {
+  # ⚠ L'ORDRE DES REDIRECTIONS EST LOAD-BEARING, et c'est la troisieme fois que ce corpus l'epingle
+  # (`prov_journal_acc`, `read_token`, ici). Elles se traitent de GAUCHE A DROITE : `2>/dev/null`
+  # ecrit APRES `>>` arrive trop tard, l'ouverture a deja echoue et le shell a deja imprime son
+  # « No such file » sur le VRAI stderr — au milieu du rapport de l'appelant.
+  #
+  # Et sous `set -e`, une redirection qui echoue tue le module. Un canal optionnel qui abat le
+  # provisionnement parce que /tmp est plein serait exactement l'inverse de ce qu'il achete.
+  module_sh "
+    export PROV_FACTS_FILE='/nonexistent/repertoire/facts'
+    out=\$(p_fact substrat wsl 2>&1)
+    [ -z \"\$out\" ]
+    p_ok 'le module continue apres'
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"le module continue apres"* ]]
+}
+
+@test "p_fact ne renverse JAMAIS le verdict qu il rapporte" {
+  # Meme motif que le `return 0` de `p_ok` : sans lui, le rc est celui du `printf`, et un
+  # `p_fact … || p_drift` annoncerait une derive que rien ne justifie. Ici on mesure la forme la
+  # plus commune — un module conforme qui depose ses faits doit sortir 0.
+  module_sh "
+    export PROV_FACTS_FILE='$BATS_TEST_TMPDIR/facts'
+    p_ok 'conforme'
+    p_fact substrat wsl
+    verdict_check
+  "
+  [ "$status" -eq 0 ]
+}
