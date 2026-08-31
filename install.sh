@@ -22,8 +22,14 @@
 #                       (/opt/lcars/runtime, RO) → STATE (~/.lcars per-humain).
 #       --box           LCARS tourne dans un conteneur. Rien hors de ton
 #                       clone et de docker.
-#       --bench         fournit les annexes (forge jetable, runner CI, humain de
-#                       démonstration) au lieu d'exiger que tu les aies déjà.
+#       --bench         axe FORGE : « monte-la-moi ». Il ne dit PAS la même chose
+#                       sur les deux rails, et c'est le § 13 qui les sépare :
+#                         --box   fournit les annexes — forge jetable, runner CI,
+#                                 humain de démonstration — en un geste.
+#                         --workstation  la forge est montée ICI même si
+#                                 FORGE_BASE_URL est posée. Rien d'autre : le
+#                                 runner et l'humain de démo sont l'axe
+#                                 DESTINATION, porté par --disposable.
 #                       L'humain EST une annexe : un déploiement de travail n'en
 #                       sème aucun, les personnes s'inscrivent sur la forge.
 #       --check         sonde read-only, rien n'est modifié.
@@ -553,6 +559,12 @@ if [[ "$RAIL" == "workstation" ]]; then
     "  sous l'humain de fleet : le siège a sudo, ses pods aussi."
     "  Pire cas = nuke + re-provision (minutes)."
   )
+  # ⚠ CE QUE `--bench` FAIT SUR **CE** RAIL, et rien de plus. La bannière boîte annonce « forge
+  # jetable + runner CI + humain de démo » — les deux derniers sont l'axe DESTINATION, que
+  # `--disposable` porte. Reprendre cette phrase ici promettrait ce que ce rail ne fait pas.
+  if [[ "$WITH_BENCH" -eq 1 ]]; then
+    _banner_body+=("  ${W}--bench : la forge est MONTÉE ici, même si FORGE_BASE_URL est posée.${N}")
+  fi
   _box_emit "  RAIL POSTE — LCARS s'installe DANS ce système." "${_banner_body[@]}"
 else
   _banner_body=(
@@ -688,6 +700,19 @@ WORKSTATION="$SCRIPT_DIR/fleet/deploy/workstation"
   echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --workstation"
   exit 1
 }
+# ⚠ `--bench` ÉTAIT AVALÉ SUR CE RAIL, ET IL AFFICHAIT UNE PROMESSE. Mesure : les trois usages de
+# `WITH_BENCH` en zone de sortie sont tous dans la branche BOÎTE, et le drapeau n'entre pas dans
+# `PASSTHRU` — sur le poste il posait une variable que personne ne lisait, après avoir annoncé
+# « forge jetable + runner CI + humain de démo ». Un drapeau accepté qui ne fait rien est pire qu'un
+# drapeau refusé : le refus laisse l'opérateur chercher, le silence le laisse croire.
+#
+# CE QU'IL FAIT ICI, ET C'EST TOUT CE QUE LE § 13 LUI DONNE : l'axe FORGE, « monte-la-moi ». Sur ce
+# rail la montée est déjà le défaut quand `FORGE_BASE_URL` est absente ; l'apport du drapeau est donc
+# de monter QUAND MÊME si elle est posée. Le runner CI et l'humain de démo sont l'axe DESTINATION,
+# et il a son porteur : `--disposable`.
+if [[ "$WITH_BENCH" -eq 1 ]]; then
+  export PROV_FORGE_MONTEE=1
+fi
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$WORKSTATION" doctor "${PASSTHRU[@]}"
 fi

@@ -71,7 +71,17 @@ deck_static_table() {
 # LE PROVISIONNEMENT EN FORME DE REPO, comme dans l'image : `repo_root()` de la lib résout ses
 # chemins inter-arbre depuis `<racine>/fleet/deploy/lib/`, donc le convergeur qui appelle
 # `/opt/lcars/fleet/deploy/provision` retrouve `fleet/etc` sans rien savoir de la machine.
-EMBEDDED=(deploy etc)
+# ⚠ `services` MANQUAIT, ET LE MEME MODULE EN DEPENDAIT. Il pose onze auxiliaires depuis
+# `$(repo_root)/fleet/services` (`SRC_DIR`) et n'emportait pas ce repertoire dans la copie : sur une
+# machine provisionnee, `repo_root()` resout `/opt/lcars`, et le comparateur n'avait donc JAMAIS sa
+# source. Mesure du 2026-09-01 sur le banc 2004 : `/opt/lcars/fleet/services` n'existe pas, et le
+# doctor rendait onze drifts « diverge de la source » a chaque passage — tous faux.
+#
+# Second lecteur, plus discret : `25-directories` invoque
+# `$(repo_root)/fleet/services/forge-gestures.sh builtin-human` pour connaitre l'humain integre. Sans
+# l'arbre, la sonde echoue derriere un `|| true` et rend une chaine vide — le repertoire de console
+# de cet humain n'etait simplement pas pose, sans un mot.
+EMBEDDED=(deploy etc services)
 
 helper_current() { # <nom> — 0 si la copie posée est IDENTIQUE à la source
   cmp -s "$SRC_DIR/$1" "$HELPERS_DIR/$1"

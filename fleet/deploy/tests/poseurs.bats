@@ -1,0 +1,147 @@
+#!/usr/bin/env bats
+# SOURCE: fleet/deploy/tests/poseurs.bats
+# AUTHOR: bob
+# STARDATE: (posee par /push-github)
+# STATUS: bats tests — CE QUE LES POSEURS LAISSENT DERRIERE EUX
+#
+# ─── UNE MEME FAUTE, CINQ FORMES ────────────────────────────────────────────────────────────────
+#
+# Ces cinq defauts n'ont rien a voir entre eux sauf leur nature : un module POSE un objet, et ce
+# qu'il en dit ne correspond pas a ce qu'il en fait. Aucun ne casse quoi que ce soit tout de suite —
+# c'est pourquoi ils ont vecu des semaines.
+#
+#   C1  `--bench` accepte sur le rail POSTE, annonce, et sans aucun effet
+#   C2  `~/.lcars/log` cree au umask alors que la table affirme 0700 — et un check aveugle
+#   C3  un `chown` dont l'echec est avale, sur un repertoire du home d'un humain
+#   C4  le CONTENU de `/usr/share/lcars` appartenant a qui possedait le checkout
+#   C6  la copie embarquee n'emportant pas l'arbre dont le meme module a besoin
+#
+# ⚠ LE PIRE DES CINQ EST LE DERNIER, et il ne se voyait pas : `EMBEDDED=(deploy etc)` privait
+# `62-runtime-helpers` de sa propre source de comparaison sur toute machine provisionnee. Onze
+# drifts faux par passage — mesure du 2026-09-01, banc 2004 — plus une sonde silencieuse de
+# `25-directories` qui rendait vide.
+
+# shellcheck disable=SC2030,SC2031
+
+load refute
+
+setup() {
+  DEPLOY="$BATS_TEST_DIRNAME/.."
+  MODS="$DEPLOY/modules.d"
+  PORTE="$BATS_TEST_DIRNAME/../../../install.sh"
+  [ -d "$MODS" ] && [ -f "$PORTE" ]
+}
+
+# ─── C1 — UN DRAPEAU FAIT CE QU'IL DIT, OU IL EST REFUSE ────────────────────────────────────────
+
+@test "C1 : --bench est CABLE sur le rail poste — il n'est plus avale" {
+  # Mesure : les usages de `WITH_BENCH` en zone de sortie etaient TOUS dans la branche boite, et le
+  # drapeau n'entre pas dans `PASSTHRU`. Sur le poste il posait une variable que personne ne lisait,
+  # apres avoir annonce « forge jetable + runner CI + humain de demo ». Un drapeau accepte qui ne
+  # fait rien est pire qu'un drapeau refuse : le refus laisse chercher, le silence laisse croire.
+  grep -q 'export PROV_FORGE_MONTEE=1' "$PORTE"
+  # et il traverse le `sudo` — ce qui n'est pas dans ESCALADE_ENV meurt a l'escalade, sans un mot
+  grep -q 'PROV_FORGE_MONTEE' "$DEPLOY/workstation"
+  grep -qE '^ESCALADE_ENV=\(.*PROV_FORGE_MONTEE' "$DEPLOY/workstation"
+}
+
+@test "C1 : le module HONORE la demande, meme quand FORGE_BASE_URL est posee" {
+  # C'est le seul apport du drapeau sur ce rail : la montee est deja le defaut sans URL. S'il ne
+  # gagnait pas sur `FORGE_BASE_URL`, il resterait exactement aussi inerte qu'avant.
+  local mod="$MODS/48-forge-host.sh"
+  local bloc; bloc="$(sed -n '/^if \[\[ "\${PROV_FORGE_MONTEE/,/^fi$/p' "$mod")"
+  [ -n "$bloc" ]
+  # la surcharge est TESTEE EN PREMIER, sinon `FORGE_BASE_URL` la court-circuite
+  local n_montee n_url
+  n_montee="$(grep -n 'PROV_FORGE_MONTEE' "$mod" | head -1 | cut -d: -f1)"
+  n_url="$(grep -n 'elif \[\[ -n "\${FORGE_BASE_URL' "$mod" | head -1 | cut -d: -f1)"
+  [ -n "$n_montee" ] && [ -n "$n_url" ]
+  [ "$n_montee" -lt "$n_url" ]
+}
+
+@test "C1 : la banniere du POSTE ne promet pas ce que fait la BOITE" {
+  # « forge jetable + runner CI + humain de demo » est vrai sur la boite. Le reprendre ici
+  # promettrait deux choses que ce rail ne fait pas — elles sont l'axe DESTINATION, et il a son
+  # porteur : `--disposable`.
+  # ⚠ LE BLOC SE BORNE PAR SON DEBUT, PAS PAR SON NOM. `_box_emit "  RAIL POSTE …"` est la DERNIERE
+  # ligne du bloc : partir de la faisait courir la plage jusqu'au `_box_emit` suivant — celui de la
+  # BOITE — et le temoin rougissait sur la banniere qu'il n'examinait pas. Un intervalle `sed` mal
+  # borne ne se voit pas, il change juste ce qu'on mesure.
+  local bloc; bloc="$(sed -n '/Ce rail ne crée aucun humain/,/RAIL POSTE/p' "$PORTE")"
+  [ -n "$bloc" ]
+  grep -q 'bench' <<<"$bloc"                    # le bloc contient bien la ligne --bench du POSTE
+  # Hors commentaires : le commentaire qui explique POURQUOI on ne reprend pas la phrase de la boite
+  # la cite forcement. Un temoin qui lit la prose interdit d'expliquer ce qu'il garde.
+  grep -vE '^[[:space:]]*#' <<<"$bloc" | refute_out 'runner CI|humain de d'
+}
+
+# ─── C2 — UN MODE AFFIRME SE POSE, ET SE VERIFIE ────────────────────────────────────────────────
+
+@test "C2 : ~/.lcars/log est chmode par l'apply — il ne nait plus au umask" {
+  # La table affirme 0700 ; l'apply creait le repertoire par `mkdir -p` et ne chmodait que `.lcars`
+  # et `pods`. Mesure : 0755 chez les deux humains de la machine — l'ecart etait constant, pas
+  # accidentel.
+  local mod="$MODS/70-human.sh"
+  local ligne; ligne="$(grep -n 'chmod 0700' "$mod" | head -1)"
+  [ -n "$ligne" ]
+  grep -q 'chmod 0700 .*\.lcars/log' "$mod"
+}
+
+@test "C2 : et le CHECK le regarde — sinon le doctor reste aveugle apres le correctif" {
+  # L'angle mort etait double, et la seconde moitie est la plus sournoise : corriger l'apply sans
+  # toucher au check aurait rendu le defaut invisible au lieu de le fermer.
+  local mod="$MODS/70-human.sh"
+  local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$mod")"
+  grep -q '\.lcars/log' <<<"$bloc"
+}
+
+# ─── C3 — UN ECHEC AVALE EST UN ETAT QUE PERSONNE NE CONNAIT ────────────────────────────────────
+
+@test "C3 : l'echec du chown sur ~/.claude est DIT, plus avale" {
+  # `2>/dev/null || true` sur le seul geste qui rend `~/.claude` et `~/.claude/skills` a leur
+  # proprietaire — les deux naissent `root:root` du `mkdir -p`. Quand il echouait, deux repertoires
+  # du home d'un humain restaient au groupe root ET le module annoncait « skill pose ».
+  local mod="$MODS/45-sudoers-toolchain.sh"
+  local bloc; bloc="$(sed -n '/chown -h "\$PROV_HUMAN:"/,/^          fi$/p' "$mod")"
+  [ -n "$bloc" ]
+  refute grep -q '|| true' <<<"$bloc"
+  grep -q 'p_drift' <<<"$bloc"
+  # et le p_ok ne survit plus a l'echec : il est dans la branche qui reussit
+  grep -q 'if chown -h' <<<"$bloc"
+}
+
+# ─── C4 — `cp -a` PRESERVE LE PROPRIETAIRE DE LA SOURCE ─────────────────────────────────────────
+
+@test "C4 : le contenu de /usr/share/lcars est rendu a root, pas laisse a l'operateur" {
+  # Les deux `find … chmod` rattrapaient les modes et JAMAIS les proprietaires. Un arbre systeme
+  # portait donc l'identite de qui avait lance l'install, et changeait de proprietaire selon QUI
+  # deployait — sur un objet que la table declare `root:root`.
+  local mod="$MODS/44-media.sh"
+  grep -q 'chown -R root:root "$MEDIA_ROOT"' "$mod"
+  # APRES les chmod : un chown qui precederait serait defait par rien, mais l'ordre dit l'intention
+  local n_chmod n_chown
+  n_chmod="$(grep -n 'find "$MEDIA_ROOT" -type f' "$mod" | head -1 | cut -d: -f1)"
+  n_chown="$(grep -n 'chown -R root:root' "$mod" | head -1 | cut -d: -f1)"
+  [ "$n_chmod" -lt "$n_chown" ]
+}
+
+# ─── C6 — LA COPIE EMBARQUEE PORTE CE DONT LE RAIL POSE A BESOIN ────────────────────────────────
+
+@test "C6 : la copie embarquee emporte services/ — le module en depend LUI-MEME" {
+  # ⚠ LE DEFAUT LE PLUS CHER DU RANG, ET IL TENAIT EN UN MOT. `62-runtime-helpers` pose onze
+  # auxiliaires depuis `$(repo_root)/fleet/services` et n'emportait pas ce repertoire : sur une
+  # machine provisionnee `repo_root()` resout `/opt/lcars`, et le comparateur n'avait jamais sa
+  # source. Onze drifts « diverge de la source » par passage, tous faux.
+  local mod="$MODS/62-runtime-helpers.sh"
+  grep -qE '^EMBEDDED=\(.*services' "$mod"
+  # et l'arbre que le module LIT est bien celui-la
+  grep -q 'services' "$mod"
+}
+
+@test "C6 : le second lecteur de l'arbre est servi lui aussi" {
+  # `25-directories` invoque `fleet/services/forge-gestures.sh builtin-human` pour connaitre
+  # l'humain integre. Sans l'arbre, la sonde echouait derriere un `|| true` et rendait vide — le
+  # repertoire de console de cet humain n'etait pas pose, sans un mot. Le meme correctif le sert.
+  grep -q 'fleet/services/forge-gestures.sh' "$MODS/25-directories.sh"
+  grep -qE '^EMBEDDED=\(.*services' "$MODS/62-runtime-helpers.sh"
+}

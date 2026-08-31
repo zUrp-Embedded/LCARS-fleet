@@ -112,6 +112,13 @@ apply() {
   fi
   find "$MEDIA_ROOT" -type d -exec chmod a-s,u=rwx,go=rx {} + || p_warn "mode dossiers non posé sous $MEDIA_ROOT"
   find "$MEDIA_ROOT" -type f -exec chmod a+rX {} + || p_warn "lecture fichiers non posée sous $MEDIA_ROOT"
+  # ⚠ LE PROPRIETAIRE SUIT LE MEME RAISONNEMENT QUE LE MODE, ET IL MANQUAIT. `cp -a` PRESERVE le
+  # proprietaire de la SOURCE : le contenu de `/usr/share/lcars/*` appartenait donc a qui possedait
+  # le checkout — un humain, sur un poste. Les deux `find` ci-dessus rattrapaient les modes et
+  # jamais les proprietaires, si bien qu'un arbre systeme portait l'identite de l'operateur qui
+  # avait lance l'install, et changeait de proprietaire selon QUI deployait. `root:root` est ce que
+  # la table declare pour cet arbre ; c'est ici qu'on le tient.
+  chown -R root:root "$MEDIA_ROOT" || p_warn "propriétaire non posé sous $MEDIA_ROOT — le contenu garde celui de la source (« cp -a » le préserve)"
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]} doc)"
   verdict_apply

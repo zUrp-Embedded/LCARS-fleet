@@ -30,6 +30,12 @@ PACKAGES=(
   # compilent des extensions C, les modules npm natifs veulent node-gyp, et les crates rust en
   # `-sys` veulent cc + pkg-config + le `-dev` de la lib C visée.
   build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip
+  # ⚠ `sudo` A PERDU SA JUSTIFICATION ECRITE AVEC LA REGLE QU'ELLE CITAIT. Elle disait que ce paquet
+  # est « ce que la regle etroite de 45-sudoers-toolchain designe » — cette regle est retiree, et la
+  # phrase est partie avec elle. Ce qui reste vrai, et qui n'etait ecrit nulle part : c'est le RAIL
+  # lui-meme qui en depend. `install.sh` refuse de continuer sans lui (« sudo est absent, et ce rail
+  # en a besoin pour provisionner ce systeme »), et `workstation` s'escalade par `exec sudo`. Une
+  # ligne sans raison finit par etre retiree par quelqu'un qui cherche a alleger.
   util-linux-extra sudo less bash-completion
   # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
   # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.

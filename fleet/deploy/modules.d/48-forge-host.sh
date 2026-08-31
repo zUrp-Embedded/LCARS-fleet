@@ -57,7 +57,16 @@ forge_service_known() {
 # pour celle qu'on monte, pas pour celle de quelqu'un d'autre. Exiger un daemon pour parler à une URL
 # refuserait une machine parfaitement capable de travailler — c'est la première conséquence concrète
 # de l'axe, et elle se voit ici.
-if [[ -n "${FORGE_BASE_URL:-}" ]]; then
+#
+# ⚠ ET UN TROISIEME CAS, QUI EST UNE DEMANDE EXPLICITE : `PROV_FORGE_MONTEE=1` force la montee meme
+# quand `FORGE_BASE_URL` est posee. C'est ce que porte `--bench` sur le rail POSTE — le drapeau dit
+# « monte-la-moi », et sur ce rail c'est son seul apport, la montee etant deja le defaut sans URL.
+# Sans cette surcharge le drapeau n'avait AUCUN effet sur le poste : il etait accepte, affichait une
+# promesse (« forge jetable + runner CI + humain de demo ») et n'en tenait rien.
+if [[ "${PROV_FORGE_MONTEE:-}" == "1" ]]; then
+  FORGE_URL="http://127.0.0.1:${PROV_FORGE_HOST_PORT}"
+  FORGE_MONTEE=1
+elif [[ -n "${FORGE_BASE_URL:-}" ]]; then
   FORGE_URL="${FORGE_BASE_URL%/}"
   FORGE_MONTEE=0
 else

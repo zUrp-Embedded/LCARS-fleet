@@ -103,8 +103,20 @@ apply() {
           write_atomic "$skdst/list.sh"  0755 "$PROV_HUMAN:" < "$SKILL_SRC/system-issues/list.sh"  || p_fail "skill system-issues: list.sh"
           # `-h` : on ne dereference pas. `ensure_dir` a deja refuse les liens du chemin, ceci ferme
           # la fenetre entre les deux gestes — et ne coute rien sur un vrai repertoire.
-          chown -h "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null || true
-          p_ok "skill system-issues pose chez $PROV_HUMAN"
+          #
+          # ⚠ L'ECHEC ETAIT AVALE — `2>/dev/null || true` — ET C'EST CE SILENCE QUI COUTE, PAS LE
+          # CHOWN. Mesure : `0755 lordzurp:root` sur `~/.claude/skills`. Les deux repertoires
+          # parents naissent du `mkdir -p` d'`ensure_dir`, donc `root:root` ; ce chown est le SEUL
+          # geste qui les rend a leur proprietaire. Quand il echoue, un repertoire du home d'un
+          # humain reste au groupe root, et le module annonce quand meme « skill pose » — un p_ok
+          # sur un etat que personne n'a verifie.
+          if chown -h "$PROV_HUMAN:" "$home/.claude" "$home/.claude/skills" "$skdst" 2>/dev/null; then
+            p_ok "skill system-issues pose chez $PROV_HUMAN"
+          else
+            # PAS un `p_fail` : le skill EST pose et utilisable. Ce qui a echoue est la remise a son
+            # proprietaire des deux repertoires parents — un drift, que l'apply suivant retentera.
+            p_drift "skill system-issues pose chez $PROV_HUMAN, mais « chown $PROV_HUMAN: » a ECHOUE sur $home/.claude et $home/.claude/skills — ils restent au groupe root dans le home d'un humain"
+          fi
         else
           p_drift "skill system-issues: $skdst non convergé — RIEN n'est posé chez $PROV_HUMAN"
         fi

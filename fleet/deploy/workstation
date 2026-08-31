@@ -52,7 +52,12 @@ fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s
 #
 # On les nomme une par une plutôt que d'ouvrir `-E` : une liste blanche se relit, `-E` laisse passer
 # tout ce que l'appelant traîne, y compris ce qui retunerait les témoins du gate joué plus bas.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET)
+# ⚠ CETTE LISTE EST LA FRONTIERE DE L'ESCALADE, et ce qui n'y est pas MEURT au `sudo`. `sudo` remet
+# l'environnement a zero : une variable posee par la porte et absente d'ici traverse sans bruit et
+# n'arrive jamais — le geste demande par l'operateur disparait entre deux processus, sans une ligne.
+# `PROV_FORGE_MONTEE` porte `--bench` sur ce rail ; l'oublier ici aurait re-avale le drapeau qu'on
+# vient de cabler, un cran plus loin.
+ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE)
 
 escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0
