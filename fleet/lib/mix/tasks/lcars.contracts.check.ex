@@ -1982,7 +1982,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       [root, Path.join(Path.expand("..", root), ".claude")]
       |> Enum.filter(&File.dir?/1)
       |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.bats")))
-      |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|tmp|node_modules)/"))
+      |> Enum.reject(
+        &String.match?("/" <> Path.relative_to(&1, root), ~r"/(_build|deps|tmp|node_modules)/")
+      )
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -2954,7 +2956,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     scanned =
       ["lib", "test", "config"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs}"])) end)
-      |> Enum.reject(&(&1 =~ ~r{/(_build|tmp)/}))
+      # meme correction qu'aux scans globaux : sur le chemin RELATIF, sinon un depot pose sous
+      # un dossier `tmp` ou `_build` voit son corpus entier rejete (cf. le motif en tete de
+      # `check_platform_root_single_source`).
+      |> Enum.reject(&("/" <> Path.relative_to(&1, root) =~ ~r{/(_build|tmp)/}))
 
     offenders =
       scanned
@@ -4344,10 +4349,21 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
       pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
 
+      # ⚠ LE REJET PORTE SUR LE CHEMIN RELATIF, ET C'EST UNE CORRECTION, PAS UN GOUT. Applique au chemin
+      # ABSOLU, ce motif rejetait TOUT le corpus des que le depot vivait sous un dossier nomme `tmp`,
+      # `deps` ou `_build` — mesure le 2026-08-31 : 4328 fichiers vus, 0 retenus, depuis un worktree
+      # pose sous `/tmp/`. Le check ne mentait pas pour autant (sa garde d'instrument rendait
+      # « INSTRUMENT BROKEN — measured nothing » plutot qu'un vert creux), mais il ne mesurait rien,
+      # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
       {racines, fichiers} =
         Path.wildcard(Path.join(root, "**"), match_dot: true)
         |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reject(
+          &String.match?(
+            "/" <> Path.relative_to(&1, root),
+            ~r"/(_build|deps|\.git|tmp|node_modules)/"
+          )
+        )
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4465,7 +4481,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       {vus, porteurs} =
         Path.wildcard(Path.join(root, "**"), match_dot: true)
         |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reject(
+          &String.match?(
+            "/" <> Path.relative_to(&1, root),
+            ~r"/(_build|deps|\.git|tmp|node_modules)/"
+          )
+        )
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4605,7 +4626,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           Path.wildcard(Path.join([root, "..", "**"]), match_dot: true)
           |> Enum.filter(&File.regular?/1)
           |> Enum.reject(
-            &String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/")
+            &String.match?(
+              "/" <> Path.relative_to(&1, root),
+              ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/"
+            )
           )
           |> Enum.reduce(MapSet.new(), fn path, acc ->
             case File.read(path) do
