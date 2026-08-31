@@ -1,15 +1,13 @@
 defmodule Fleet.Roster do
-  # ⚠ CE MODULE VIVAIT SOUS `Fleet.Application`, ET IL N'EST PAS DU CODE DE BOOT. Mesure du
-  # 2026-08-27 : zero reference dans `application.ex`, aucune place dans la sequence de demarrage.
-  # Il y etait RANGE, pas deploye. Le cout de ce rangement s'est vu le jour ou il a fallu qu'il
-  # lise une identite de forge : la racine OTP aurait du declarer `Fleet.Credentials` dans ses deps,
-  # c'est-a-dire annoncer dans le graphe que le BOOT connait les identites — faux, et faux pour
-  # toujours, au benefice d'un seul emetteur.
+  # ⚠ CE MODULE N'EST PAS DU CODE DE BOOT, et le ranger sous la racine OTP coute cher le jour ou il
+  # doit lire une identite de forge : la racine devrait alors declarer `Fleet.Credentials` dans ses
+  # deps, c'est-a-dire ANNONCER DANS LE GRAPHE QUE LE BOOT CONNAIT LES IDENTITES — faux, et faux
+  # pour toujours, au benefice d'un seul emetteur.
   #
-  # ⚖ ARBITRAGE USER, 2026-08-27 : sortir le module plutot qu'elargir la racine. Un domaine a lui
-  # dit ce qu'il est — la PROJECTION du roster de forge d'un catalogue — et porte ses quatre deps
-  # sans en preter aucune a la racine. La liste de deps d'une boundary est l'enonce d'honnetete du
-  # graphe : elle doit nommer ce dont le domaine a besoin, jamais ce dont un locataire a besoin.
+  # ⚖ ARBITRAGE USER : un domaine a lui dit ce qu'il est — la PROJECTION du roster de forge d'un
+  # catalogue — et porte ses propres deps sans en preter aucune a la racine. La liste de deps d'une
+  # boundary est l'enonce d'honnetete du graphe : elle doit nommer ce dont LE DOMAINE a besoin,
+  # jamais ce dont un locataire a besoin.
   use Boundary,
     deps: [Fleet.CapProfile, Fleet.Catalogue, Fleet.Credentials, Fleet.ReleaseDoor],
     exports: []
@@ -123,12 +121,11 @@ defmodule Fleet.Roster do
            # repond alors a « quel catalogue le traite », interrogeable sans LCARS. La recette le
            # recoit d'ici plutot que de le tenir en litteral — un litteral ne peut nommer qu'une org.
            "org" => cat,
-           # ⚠ LE COMPTE SYSTEME SE CONSOMME, IL NE SE RECOPIE PLUS. Jusqu'au 2026-08-27 la recette
-           # portait `variable "system_account" { default = "system_starfleet" }`, un litteral
-           # qu'aucun `.tfvars` n'alimentait et qu'aucun verrou ne comparait — alors que ce compte
-           # est dans la team `Owners` de l'org, que son email passe le gate d'identite de commit
-           # et qu'il est le `forge_push_account` par defaut. Le compte qui POSSEDE l'org naissait
-           # d'un nom que personne ne tenait.
+           # ⚠ LE COMPTE SYSTEME SE CONSOMME, IL NE SE RECOPIE PAS. Un `variable "system_account"`
+           # a defaut litteral cote recette n'est alimente par aucun `.tfvars` et compare par aucun
+           # verrou — alors que ce compte est dans la team `Owners` de l'org, que son email passe le
+           # gate d'identite de commit et qu'il est le `forge_push_account` par defaut. LE COMPTE
+           # QUI POSSEDE L'ORG NAITRAIT D'UN NOM QUE PERSONNE NE TIENT.
            #
            # ⚖ Arbitrage user : l'autorite est `ForgeIdentity` — l'identite du compte (email,
            # signature, `allowed_emails/2`) en derive et ne peut pas s'en detacher. La recette le
