@@ -58,11 +58,11 @@ defmodule Fleet.Spawner.Pod.Liveness do
   # `Pod.arm_result_deadline_actions/1`, which arms `:infinity` for both watchdogs and never
   # reaches this module.
   #
-  # It used to be a two-clause `case` on the scope with `"forever" -> 60`, and that clause was
-  # unreachable: `monitor_timeout_ms/1` is its only caller and sits in the `else` of
-  # `if lifetime_scope == "forever"`. Nothing broke — the harm was READING. Two fragments
-  # contradicted each other about whether a permanent pod has a 60 s deadline, and the one that
-  # governs is the one that says it has none.
+  # NOT a two-clause `case` on the scope with a `"forever"` branch: that branch is UNREACHABLE,
+  # since `monitor_timeout_ms/1` is its only caller and sits in the `else` of
+  # `if lifetime_scope == "forever"`. Nothing would break — the harm is READING. Two fragments would
+  # contradict each other about whether a permanent pod has a deadline, and the one that GOVERNS is
+  # the one saying it has none.
   @default_response_sec 300
 
   # ============================================================

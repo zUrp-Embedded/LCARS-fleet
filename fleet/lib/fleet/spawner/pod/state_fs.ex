@@ -18,8 +18,8 @@ defmodule Fleet.Spawner.Pod.StateFs do
   Returns `{:error, reasons}` when a terminal snapshot was found and its erasure did NOT complete.
   That return is the whole point: a surviving `state.json` makes `recover_or_init/1` read the
   tombstone, class it `:release`, and stop the fresh pod right after teardown — a spawn that
-  reports success and produces nothing. The failure used to be logged here and then flattened to
-  `:ok`, so the caller could not tell a cleared tombstone from a surviving one.
+  reports success and produces nothing. Logging that failure here and then flattening it to `:ok`
+  leaves the caller unable to tell a CLEARED tombstone from a SURVIVING one.
   """
   @spec clear_terminal_snapshot(String.t(), Fleet.CapProfile.t(), keyword()) ::
           :ok | {:error, [term()]}

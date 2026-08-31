@@ -62,8 +62,8 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
       })
       when is_binary(role) and is_binary(pod_id) and is_binary(pod_dir) and
              is_binary(launcher) and is_binary(claude) do
-    # THE CONTRACT, WRITTEN ON THIS SIDE. The seven positions used to be a bare list whose meaning
-    # existed only in the receiving shell: `bwrap_launch.sh` and `host_launch.sh` both read
+    # THE CONTRACT, WRITTEN ON THIS SIDE. As a bare list, these seven positions have their meaning
+    # ONLY in the receiving shell: `bwrap_launch.sh` and `host_launch.sh` both read
     # `ROLE="$1"; POD_ID="$2"; POD_DIR="$3"; shift 3`, then `exec` the command in `"$@"` — which is
     # `claude_launch.sh` re-reading `$1/$2/$3` for itself. Two flattened contracts, no separator,
     # and a permutation here produces neither a compile error nor a type error: the launcher would

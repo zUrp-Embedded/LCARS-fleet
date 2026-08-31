@@ -37,9 +37,9 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
     # REQUIRED, never defaulted (chantier face-projet, inventory §D): the face decision is made
     # ONCE at the dispatch entry (issue flow: the card step's `face`; review flow: the PR head).
-    # This used to be `Keyword.get(opts, :base_branch, "main")` — a substituting default that
-    # looked like a seam: when the value did not arrive, the resolver silently pinned the CODE
-    # face instead of stopping, and five downstream twins did the same in two spellings. A caller
+    # NOT `Keyword.get(opts, :base_branch, "main")` — a SUBSTITUTING default that looks like a
+    # seam: when the value does not arrive, the resolver silently pins the CODE face instead of
+    # stopping, and every downstream twin does the same. A caller
     # without a base_branch has skipped the face decision; that is its bug to surface, not ours
     # to paper over.
     base_branch =
