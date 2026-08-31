@@ -258,22 +258,17 @@ defmodule Fleet.Pilot.Poller.Lease do
   # refusé au plafond n'a pas besoin qu'on interroge la forge sur ses arêtes. Le coût est donc UN
   # GET par ticket réellement candidat au démarrage, pas par ticket vu.
   #
-  # FORGE MUETTE ≠ AUCUN BLOQUEUR, et l'argument qui disait le contraire se réfutait dans le
-  # paragraphe au-dessus. Il tenait ainsi : « la forge REFUSERA la fermeture si un bloqueur est
-  # ouvert, donc le mur tient de toute façon ». C'est exactement le raisonnement que la lecture
-  # ci-dessus existe pour rejeter — le commentaire du site de dispatch dit que sans elle « le
-  # producteur travaille, livre, et le mur ne se révèle qu'au merge : deux rails parallèles qui ne
-  # se rencontrent qu'au moment le plus cher ». Se rabattre dessus en cas d'échec de lecture, c'est
-  # rétablir précisément l'état que la lecture supprime.
+  # ⚠ FORGE MUETTE ≠ AUCUN BLOQUEUR. L'argument contraire — « la forge REFUSERA la fermeture si un
+  # bloqueur est ouvert, donc le mur tient de toute façon » — est exactement celui que cette lecture
+  # existe pour rejeter : sans elle, le producteur travaille, livre, et le mur ne se révèle qu'au
+  # merge. Deux rails parallèles qui ne se rencontrent qu'au moment le plus cher.
   #
-  # L'autre moitié de l'argument était juste et reste servie : bloquer la FLEET sur un hoquet réseau
-  # serait pire. Mais refuser n'est pas bloquer — `Admission.refuse` marque CE ticket en attente et
-  # passe au suivant ; le tick d'après relit. Rien d'autre ne s'arrête.
+  # ⚠ ET REFUSER N'EST PAS BLOQUER : bloquer la FLEET sur un hoquet réseau serait pire, mais on
+  # marque CE ticket en attente et on passe au suivant. Le tick d'après relit ; rien d'autre ne
+  # s'arrête.
   #
-  # La forme suit le précédent déjà en place sur la porte CI : `{:ci_unreadable, _}` et ses jumeaux
-  # partagent l'étiquette de leur porte, parce que du côté du ticket c'est le MÊME fait — il est
-  # arrêté là, personne ne travaille dessus. La distinction vit dans la raison du skip, où elle est
-  # actionnable.
+  # Du côté du ticket, une porte illisible et une porte fermée sont le MÊME fait — il est arrêté là,
+  # personne ne travaille dessus. La distinction vit dans la RAISON du skip, où elle est actionnable.
   defp open_blockers(issue, %Seams{} = seams) do
     case seams.forge.issue_dependencies(seams.repo, Map.get(issue, "number"), seams.forge_opts) do
       {:ok, deps} when is_list(deps) ->
@@ -288,22 +283,19 @@ defmodule Fleet.Pilot.Poller.Lease do
     end
   end
 
-  # Dispatch of an item + update of the tally AND the lease. Two DISTINCT concerns, that the return of
-  # `dispatch_issue` mixes:
+  # ⚠ DEUX PREOCCUPATIONS DISTINCTES, QUE LE RETOUR DU DISPATCH MELANGE :
   #
-  #   * LEASE — did the workflow_run START (pod spawned + `lcars-in-flight` lock placed)? The canonical order
-  #     of the spawn (`StepDispatcher.spawn_step`) is lock → pod → enqueue → WAKE, the wake LAST. So
-  #     `{:error, {:wake_unreached, …}}` means: the workflow_run IS started (lock + pod + brief in place),
-  #     ONLY the tmux wake failed. The workflow_run therefore holds the repo-serialized lease — otherwise a 2nd issue of the same
-  #     repo in the same tick would start a 2nd workflow_run (two concurrent feature-branches → merge conflict).
-  #   * TALLY/telemetry — is there an anomaly to SURFACE? The missed wake is still counted in `errors` (it
-  #     surfaces via `last_tally_errors`/telemetry, NOT the `err_streak` backoff — per-item dispatch errors
-  #     do not feed it, only whole-tick failures do): an unreachable kick must NOT be swallowed as a silent
-  #     success (the pod does not run until it is woken).
+  #   * LE BAIL — le run a-t-il DEMARRE ? L'ordre canonique du spawn place le REVEIL en DERNIER,
+  #     donc un reveil rate signifie que le run EST demarre : verrou, pod et brief sont en place. Il
+  #     tient donc le bail — sinon une 2e issue du meme depot, dans le meme tick, lancerait un 2e
+  #     run, et deux branches concurrentes finissent en conflit de merge.
+  #   * LE COMPTE — y a-t-il une anomalie a FAIRE REMONTER ? Le reveil manque est compte comme
+  #     erreur : un kick injoignable ne doit PAS etre avale comme un succes silencieux, le pod ne
+  #     tournant pas tant qu'il n'est pas reveille.
   #
-  # Hence the 3rd case `wake_unreached` = (started for the LEASE, anomaly for the TALLY). We return
-  # `{tally, started?}`; `started?` (= a pod was actually put in flight this tick) drives the lease taking,
-  # INDEPENDENTLY of whether the dispatch finished without error.
+  # D'ou un troisieme cas : DEMARRE pour le bail, ANOMALIE pour le compte. C'est « un pod a-t-il ete
+  # mis en vol » qui pilote la prise du bail, INDEPENDAMMENT du fait que le dispatch se soit termine
+  # sans erreur.
   defp step_do_dispatch(payload, opts, acc, dispatcher) do
     Admission.admit(
       fn -> dispatcher.dispatch_issue(payload, opts) end,
