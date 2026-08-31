@@ -211,8 +211,9 @@ defmodule Fleet.Project.Roles do
 
   THE ONLY SITE THAT KNOWS THE TOKENS. The schema enum and this function are the two ends of one
   contract, and while the comparison lived at the call site it could drift from the schema without
-  anything going red: swapping `"required"` for `"requis"` in the reader left the whole suite green
-  (measured 2026-08-08). One site, one clause per enum member, and a mutation has nowhere to hide.
+  anything going red: swapping `"required"` for `"requis"` in a reader placed at the call site
+  leaves the whole suite GREEN. One site, one clause per enum member, and a mutation has nowhere
+  to hide.
 
   THE LAST CLAUSE IS NOT A DEFAULT, IT IS AN ALARM. `spec.ci` is mandatory, so a card reaching here
   without a readable policy did not come through `Loader.load!`. Answering `:ignore` would rebuild
@@ -422,9 +423,9 @@ defmodule Fleet.Project.Roles do
 
   ## ⚠ The capability key says `conflict_resolver`, and it now names a SUBSET of the job
 
-  ⚖ user, 2026-08-20: the rails were separated by DOMAIN — this one merges, the gatekeeper decides —
-  so this role signs every merge, not only the conflicted ones. Its key and its cap-profile header
-  still describe the day it was born (2026-08-04), when resolving a conflict was all it did.
+  ⚖ user: the rails are separated by DOMAIN — this one merges, the gatekeeper decides — so this
+  role signs EVERY merge, not only the conflicted ones. Its key and its cap-profile header describe
+  a narrower job, the one it was created for.
 
   The key is DELIBERATELY not renamed here, and the reason is the one this codebase keeps paying
   for: a capability key is a catalogue contract. Renaming it in `lib/` alone would leave every
@@ -436,12 +437,11 @@ defmodule Fleet.Project.Roles do
 
   ## Why it is its own capability, NOT `exception_judge`
 
-  Unchanged, and reinforced. The two responsibilities have lived on separate roles since the
-  2026-08-04 scission, and the reason is a SECURITY property the schema requires declared: their
-  briefs carry opposite `brief_kind` values — `judge` ("never execute what you judge") and `worker`
-  ("execute it"), and one role cannot declare both. Merging is an execution. Sharing one key would
-  let a catalogue edit move the write capability onto the judging role in silence — which is
-  precisely the state the 2026-08-20 separation had to undo in `MergeAndPromote`.
+  The two responsibilities live on separate roles, and the reason is a SECURITY property the schema
+  requires declared: their briefs carry opposite `brief_kind` values — `judge` ("never execute what
+  you judge") and `worker` ("execute it") — and one role cannot declare both. Merging is an
+  execution. Sharing one key would let a catalogue edit move the write capability onto the JUDGING
+  role, in silence.
   """
   @spec conflict_resolver_role(keyword()) :: String.t()
   def conflict_resolver_role(opts \\ []) do
@@ -454,7 +454,6 @@ defmodule Fleet.Project.Roles do
       )
   end
 
-  # (`architect_pod_id/1` — the singleton "permanent-architect" accessor + its config knob — was
-  # REMOVED by the 2026-07-19 reorg: the architect is PER-PROJECT, its pod id derives from the repo
-  # via the single authority `Fleet.Project.Architect.pod_id_for/1`.)
+  # No singleton "permanent-architect" accessor here: the architect is PER-PROJECT, and its pod id
+  # derives from the repo through the single authority `Fleet.Project.Architect.pod_id_for/1`.
 end
