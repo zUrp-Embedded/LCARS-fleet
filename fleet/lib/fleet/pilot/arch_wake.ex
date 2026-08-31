@@ -1,10 +1,10 @@
 defmodule Fleet.Pilot.ArchWake do
   @moduledoc """
   SINGLE authority for waking a project's architect on an `lcars-awaits-arch`
-  escalation: the ORDERED offer-then-wake pair, shared by the two rails — PER-PROJECT
-  since the 2026-07-19 reorg (one architect per repo, `Fleet.Project.Architect`).
+  escalation: the ORDERED offer-then-wake pair, shared by the two rails, PER-PROJECT
+  (one architect per repo, `Fleet.Project.Architect`).
 
-  Callers (design 2026-07-19 — "first kick immediate, protection BEHIND it"):
+  Callers — "first kick immediate, protection BEHIND it":
 
     * `StepRunConsumer.TerminalEscalation.freeze_to_arch` — the IMMEDIATE rail
       (`via: "immediate"`): fires right after the label+comment land on the forge.
@@ -12,7 +12,7 @@ defmodule Fleet.Pilot.ArchWake do
     * `Poller.maybe_rekick_arch` — the SAFETY NET (`via: "net"`): re-derives a wake
       from the persistent forge label, capped by a cooldown-since-last-kick.
 
-  ## Per-project grouping + on-demand ensure (reorg 2026-07-19)
+  ## Per-project grouping + on-demand ensure
 
   `awaits` may span repos → grouped BY REPO, each repo's architect addressed independently
   (project A no longer serializes behind project B — the "one mandate at a time" queue is
@@ -21,12 +21,12 @@ defmodule Fleet.Pilot.ArchWake do
   reboot, crash) → respawned here, and its bootstrap kick pulls the already-enqueued
   mandate. The ORDER stays the invariant: mandate enqueued BEFORE any wake (a wake fired
   before the mandate exists is classified spurious by the arch's doctrine-first
-  `get_work_item` — signal-before-content race, live 2026-07-18).
+  `get_work_item` — the signal-before-content race).
 
   Contract — per-repo outcomes, decided on that arch's LATEST work-item state:
 
     * mandate `:assigned` → `:busy`, complete silence — the arch already
-      knows its work; waking it again is pure noise (live 2026-07-18).
+      knows its work; waking it again is pure noise.
     * mandate `:pending` (offered but never fetched) → ensure + wake ONLY (`:woken_pending`).
       The signal may have been lost OR the pod died with the mandate pending — the ensure
       covers both; the content is already enqueued, re-offering would churn it.
