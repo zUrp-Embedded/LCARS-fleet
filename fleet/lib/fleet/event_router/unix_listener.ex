@@ -9,12 +9,12 @@ defmodule Fleet.EventRouter.UnixListener do
   way out. It does NOT build the child spec — `Fleet.EventRouter.Listener.cowboy_child/1` does, and
   it is the single builder in this runtime.
 
-  That separation was not a choice, it was taught three times. A call to `Plug.Cowboy.child_spec/1`
-  from `Fleet.Observation`: `forbidden reference` (that domain does not declare Plug.Cowboy). The
-  same call from here: the same refusal, for the same reason. A hand-written Cowboy child-spec
-  tuple: refused by `mix lcars.contracts.check`, rail `listener.no_cowboy_bypass`, whose own
-  remediation says to route through the builder. The third refusal is the useful one — with two
-  builders, the second drifts, and the first is loopback-by-construction for a reason.
+  Three walls hold that separation, and the third is the one that matters: `Plug.Cowboy.child_spec/1`
+  called from `Fleet.Observation` is a boundary `forbidden reference` (that domain does not declare
+  Plug.Cowboy), the same call from here is refused for the same reason, and a hand-written Cowboy
+  child-spec tuple is refused by `mix lcars.contracts.check`, rail `listener.no_cowboy_bypass`,
+  whose own remediation says to route through the builder. With two builders the second drifts, and
+  the first is loopback-by-construction for a reason.
 
   ⚠ The rail greps for the literal tuple opening and strips only `#` comments — a docstring is not
   stripped. So this prose must DESCRIBE that tuple, never spell it, or the module documenting the
@@ -27,12 +27,12 @@ defmodule Fleet.EventRouter.UnixListener do
   is not reachable at all — the protection stops being a rule somebody has to remember to apply and
   becomes a property of the topology.
 
-  ## The mode is a parameter, and the two callers want different ones
+  ## Why the mode is a parameter
 
-  `Fleet.API.ControlRouter` binds `0600`: only the BEAM's own owner opens it. This module's first
-  caller (the observation deck) binds `0660`, because the landing — a DIFFERENT uid holding the
-  console group — must open it. The directory is what keeps everyone else out; the file mode only
-  arbitrates between the owner and that one group.
+  Its one caller in `lib/`, the observation deck, takes the `0o660` default: the landing — a
+  DIFFERENT uid holding the console group — must open the socket. `0600`, which is what a socket
+  only the BEAM's own owner may open wants, is the other value the knob exists for. The directory
+  is what keeps everyone else out; the file mode only arbitrates between the owner and that group.
 
   ## Readiness is committed after the chmod, never before
 
@@ -73,15 +73,9 @@ defmodule Fleet.EventRouter.UnixListener do
     # kernel reclaims the resource; with a file, nobody does — so a clean restart needs this.
     _ = File.rm(sock)
 
-    # ⚠ LA SPEC VIENT DU CONSTRUCTEUR UNIQUE, ET L'ARCHITECTURE A REFUSE TROIS FOIS AVANT. D'abord
-    # un appel a `Plug.Cowboy.child_spec/1` depuis `Fleet.Observation` (boundary : forbidden
-    # reference), puis le meme appel depuis ici (meme refus — ce domaine ne DECLARE pas Plug.Cowboy),
-    # puis un tuple `{Plug.Cowboy, ...}` ecrit a la main, refuse par le check de contrat
-    # `listener.no_cowboy_bypass` : `listener.ex` est le SEUL constructeur d'un child-spec Cowboy.
-    #
-    # Les trois refus disaient la meme chose sous trois formes, et la troisieme est la plus utile :
-    # avec deux constructeurs, le second derive. Le nom de ce module dit ce qu'il APPORTE — le
-    # cycle de vie (socket residuelle, chmod, retrait a l'arret) — pas la construction.
+    # ⚠ LA SPEC VIENT DU CONSTRUCTEUR UNIQUE. Ni un `{Plug.Cowboy, ...}` ecrit a la main (refuse par
+    # `listener.no_cowboy_bypass`), ni un appel direct a `Plug.Cowboy.child_spec/1` (refuse par la
+    # boundary : ce domaine ne DECLARE pas Plug.Cowboy) — les trois murs sont dans le @moduledoc.
 
     # `:ref` is unique per start ON PURPOSE: Ranch cleans a previous listener up asynchronously, so a
     # restart that reused the name could collide with its own predecessor.
