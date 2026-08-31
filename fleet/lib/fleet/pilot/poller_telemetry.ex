@@ -22,10 +22,10 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   ⚠ **A sample is ONE REPO, not one cycle.** `[:lcars_fleet, :pilot_poller, :poll]` is emitted once per
   repo — every emission carries `repo:` — so this distribution describes what a single repo costs
-  to poll, never what a full pass costs. Measured on 2026-08-03: 12 repos at a 30 s interval made
-  the counter advance by 12 per cycle. **The cost of a CYCLE is not measured here**, and no name in
-  this module may suggest otherwise: the readiness key was first called `tick`, which asserted a
-  scope the mechanism does not have, and a measurement was read wrong before that name was fixed.
+  to poll, never what a full pass costs — N repos at a fixed interval make the counter advance by N
+  per cycle. **The cost of a CYCLE is not measured here**, and no name in this module may suggest
+  otherwise: a readiness key called `tick` asserts a scope the mechanism does not have, and a
+  measurement gets read wrong for exactly as long as such a name stands.
   Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
   not) — that is a different instrument, not an arithmetic on this one.
 

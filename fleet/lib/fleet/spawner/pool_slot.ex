@@ -2,12 +2,12 @@ defmodule Fleet.Spawner.PoolSlot do
   @moduledoc """
   Allocates the `pool` nibble of a pod's `session_id`, and CAPS the concurrency of a role.
 
-  ## Why the nibble was dead
+  ## Why the nibble needs an allocator
 
-  `Fleet.Spawner.SessionId` reserves a high nibble for a "pool" (`<P><R>`, 16 values) — measured
-  2026-08-03: **no caller ever passed it**, so it was always `0` and two concurrent pods of the
-  same role shared their `session_id`. Harmless while a repo ran one producer at a time (the
-  `pod_id` carried the uniqueness), and a latent lie the day producers fan out per ticket.
+  `Fleet.Spawner.SessionId` reserves a high nibble for a "pool" (`<P><R>`, 16 values). With no
+  caller passing it, it stays `0` and TWO CONCURRENT PODS OF THE SAME ROLE SHARE THEIR
+  `session_id` — harmless while a repo runs one producer at a time (the `pod_id` carries the
+  uniqueness), and a latent lie the day producers fan out per ticket.
 
   ## What this module decides
 
