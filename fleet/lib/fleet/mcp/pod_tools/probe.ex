@@ -43,7 +43,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # Une entrée = un nom public → le fichier de workflow que le projet porte. C'est le seul endroit
   # de la flotte qui connaisse des noms de sondes, et il ne connaît QUE des noms : ce que la sonde
   # fait vit dans le dépôt du projet, relisible et modifiable par lui. Une deuxième sonde s'ajoute
-  # ici en une ligne, ou — mieux — un jour, en lisant `.gitea/workflows/probe-*` du projet.
+  # ici en une ligne.
   #
   # Le préfixe `probe-` n'est pas cosmétique : un contexte de statut `probe-… / …` ne matche pas le
   # glob `CI / *` de la protection de `main` (cf. `Onboard.main_status_check_contexts/0`), donc une
@@ -188,31 +188,15 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ferait dépendre une mesure de rail d'une liste faite pour autre chose, et le jour où la liste
   # bouge la mesure bougerait sans raison.
   #
-  # ⚠ DEUX FAUTES CORRIGÉES LE 2026-08-20, TROUVÉES PAR RELECTURE ADVERSARIALE. Les deux étaient
-  # des cas où ce parseur lisait CONFIANT quelque chose qui n'était pas la déclaration du projet.
+  # LE TITRE SE CHERCHE HORS DES BLOCS DE CODE. Un `CLAUDE.md` DOCUMENTE la section `## Harness` et
+  # en montre un exemple encadré, dont la ligne `## Harness` est en colonne 0 : une regex `^` en
+  # mode `m` y matche, et la sonde lit l'EXEMPLE DE LA DOC puis toute la prose qui suit. Un projet
+  # qui écrit sa section SOUS la documentation — le geste naturel — n'est jamais lu.
   #
-  # 1. LES BLOCS DE CODE SONT MASQUÉS AVANT LA RECHERCHE. Le `CLAUDE.md` du template DOCUMENTE la
-  #    section `## Harness` et en montre un exemple dans un bloc `` ``` `` — dont la ligne
-  #    `## Harness` est en colonne 0. Avec le drapeau `m`, `^` matche à l'intérieur du bloc : la
-  #    sonde lisait l'EXEMPLE DE LA DOC, puis toute la prose qui suit, au lieu de la déclaration
-  #    écrite par le projet. Mesuré sur le template réel — `harness` valait
-  #    `"tests/ ``` **À quoi elle sert.** La sonde …"`. Un projet qui écrit sa section SOUS la
-  #    documentation (le geste naturel) ne la voyait jamais lue.
-  #
-  # 2. LE TITRE EST ANCRÉ EN FIN DE LIGNE, et le `\b` d'avant ne protégeait rien. Le commentaire
-  #    disait « sans lui, demander "Test" attraperait `## Test paths` » — c'est FAUX et c'est
-  #    l'inverse de ce que ce dépôt a mesuré ailleurs : `\b` tombe entre `t` et l'espace, DONC
-  #    `## Test paths` matchait. Un projet portant `## Test suite` avant son `## Test` faisait
-  #    tourner la sonde avec la mauvaise commande.
-  #
-  # La règle est maintenant : le titre est le nom, SEUL sur sa ligne (espaces de fin tolérés), ET
-  # hors de tout bloc de code.
-  #
-  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ. La première correction masquait
-  # les blocs avant la recherche — ce qui aurait effacé le CORPS d'une section dont la valeur est
-  # légitimement encadrée (`## Test` suivi d'un bloc contenant `mix test`, forme parfaitement
-  # normale). Le titre doit être cherché hors des blocs ; le corps doit être rendu tel qu'il est
-  # écrit. Une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
+  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ : masquer les blocs avant la
+  # recherche effacerait le CORPS d'une section dont la valeur est légitimement encadrée (`## Test`
+  # suivi d'un bloc contenant `mix test`). Le titre se cherche hors des blocs, le corps se rend tel
+  # qu'il est écrit — une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
   defp section(md, name) do
     md
     |> String.split("\n")
@@ -224,8 +208,6 @@ defmodule Fleet.MCP.PodTools.Probe do
     |> strip_fences()
   end
 
-  # Trois etats — `:before`, `:capturing`, `:done` — et un drapeau de bloc. Un titre ne compte que
-  # HORS bloc ; le corps, lui, est rendu tel qu'il est ecrit, blocs compris.
   defp scan_line(_line, {acc, in_fence?, :done}, _name), do: {acc, in_fence?, :done}
 
   defp scan_line(line, {acc, in_fence?, state}, name) do
@@ -234,16 +216,16 @@ defmodule Fleet.MCP.PodTools.Probe do
     heading? = not in_fence? and not fence? and String.starts_with?(line, "## ")
 
     case {state, heading?} do
-      # Un titre HORS bloc termine la capture en cours.
       {:capturing, true} -> {acc, in_fence?, :done}
       {:capturing, false} -> {[line | acc], next_fence?, :capturing}
-      # C'est le NOTRE qui la commence, a condition d'etre seul sur sa ligne.
       {:before, true} -> {acc, in_fence?, if(ours?(line, name), do: :capturing, else: :before)}
       {:before, false} -> {acc, next_fence?, :before}
     end
   end
 
-  # `## Harness` oui ; `## Harness paths`, `## Harnessing` non. Le nom est SEUL sur sa ligne.
+  # ANCRÉ EN FIN DE LIGNE, et un `\b` ne remplacerait pas l'ancre : il tombe entre `t` et l'espace,
+  # donc `## Test paths` matcherait — un projet portant `## Test suite` avant son `## Test` ferait
+  # tourner la sonde avec la mauvaise commande.
   defp ours?(line, name), do: String.trim_trailing(line) == "## " <> name
 
   # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins : la
@@ -256,9 +238,9 @@ defmodule Fleet.MCP.PodTools.Probe do
   #     make build
   #     make test
   #
-  # Joint par un espace, ça rendait `"make build make test"` — UNE commande avec des arguments, qui
-  # n'est ni l'une ni l'autre. La sonde tournait, rendait un verdict, et il portait sur autre chose
-  # que la suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
+  # Joint par un espace, ça rendrait `"make build make test"` — UNE commande avec des arguments, qui
+  # n'est ni l'une ni l'autre : la sonde tourne, rend un verdict, et il porte sur autre chose que la
+  # suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
   #
   # `## Harness`, lui, est une LISTE de chemins, et le workflow la découpe sur tout blanc — un saut
   # de ligne y est aussi bon qu'un espace. Les deux sections partagent donc ce nettoyage sans que
