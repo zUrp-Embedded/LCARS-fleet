@@ -169,9 +169,9 @@ defmodule Fleet.API.SpawnAdmission do
 
     if Fleet.CapProfile.catalogued?(cap) and Fleet.CapProfile.role_index(cap) == 0 do
       # `Map.get`, never dot access: `list_pods/0` is specced `[map()]` and makes no promise about
-      # the keys. A pod whose `:info` lacks `:role` raised a KeyError THROUGH the router — the whole
-      # spawn door answering 500 because one unrelated pod answered a short map. A guard that can
-      # crash the door it guards is worse than the hole it closes.
+      # the keys. A pod whose `:info` lacks `:role` then raises a KeyError THROUGH the router, and
+      # THE WHOLE SPAWN DOOR ANSWERS 500 because one unrelated pod returned a short map. A guard
+      # that can crash the door it guards is worse than the hole it closes.
       case Enum.find(Fleet.Spawner.list_pods(), &(Map.get(&1, :role) == name)) do
         nil -> :ok
         pod -> {:error, {:fleet_scope_occupied, name, Map.get(pod, :pod_id, "unknown")}}
@@ -194,7 +194,7 @@ defmodule Fleet.API.SpawnAdmission do
               Fleet.CapProfile.bwrap?(cap) ->
                 {:ok, cap}
 
-              # L'OUVERTURE NOMMÉE du verrou (BL-6-101, 2026-08-19). Un profil `containment: none`
+              # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none`
               # reste REFUSÉ sur ce chemin générique — sauf si l'opérateur le dit EXPLICITEMENT
               # (`host_native_ack: true`, posé par `lcars admiral`, jamais par un chemin auto : le
               # dispatcher ne passe pas par cette porte et n'a pas le champ). C'est la doctrine de
