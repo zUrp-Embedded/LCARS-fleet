@@ -112,15 +112,12 @@ defmodule Fleet.CapProfile.Catalog do
     if spawnable?(raw), do: {:ok, raw}, else: {:error, {:role_reserved, role}}
   end
 
-  # The disk regime reads the SAME SCOPE the image is built from, and the sentence below is the
-  # contract this fix re-establishes ONE LEVEL UP from where it was written. It read one root until
-  # the system catalogue existed (first divergence, fixed by reading the union); then the images
-  # became per-catalogue (2026-08-16) and the union became the NEW divergence: `read_role/2` honored
-  # `root` in the image branch and dropped it here, so a caller naming its catalogue got that
-  # catalogue's answer with an image and EVERY catalogue's answer without one. Latent while the two
-  # shipped catalogues declare disjoint role names; wrong the day two businesses both declare `dev`.
-  # Two regimes answering "does this role exist" differently is the defect; that they agree is the
-  # contract.
+  # THE DISK REGIME READS THE SAME SCOPE THE IMAGE IS BUILT FROM, and that agreement IS the
+  # contract: two regimes answering "does this role exist" differently is the defect. Honouring
+  # `root` in the image branch and dropping it here gives a caller naming its catalogue THAT
+  # catalogue's answer with an image and EVERY catalogue's answer without one — latent while the
+  # installed catalogues declare disjoint role names, wrong the day two businesses both declare
+  # `dev`.
   #
   # `disk_scope/1` mirrors `published_for/1` exactly: a named root reads ITS tree_scope (own
   # cap-profiles + system, the same pair its image is published from), nil reads the BUNDLED
@@ -237,13 +234,12 @@ defmodule Fleet.CapProfile.Catalog do
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   def forge_roster do
     # THE catalogue in hand plus the system half — never the union of every installed catalogue.
-    # The zero-arity's one production caller is `Fleet.Roster.tfvars/1`, which names its target
-    # through the big wheel (`:catalogue_root`) before calling: `disk_scope(nil)` resolves to that
-    # root + system, which is exactly the split tfvars derives accounts from. On the UNION, a box
-    # with a second catalogue installed would have folded B's roles into A's roster at install
-    # time — and the login projection prefixes with the TARGET org, so the recipe would have minted
-    # `A_<role-of-B>` accounts that belong to nobody. Found by pulling the audit's search/1 thread;
-    # latent only because the install's first pass runs before the cache holds a neighbour.
+    # The zero-arity's one production caller names its target through the big wheel
+    # (`:catalogue_root`) before calling, so `disk_scope(nil)` resolves to that root + system, which
+    # is exactly the split its accounts are derived from. On the UNION, a box with a second
+    # catalogue installed folds B's roles into A's roster at install time — and the login projection
+    # prefixes with the TARGET org, so the recipe mints `A_<role-of-B>` accounts that belong to
+    # nobody. Latent only because the install's first pass runs before the cache holds a neighbour.
     with {:ok, index} <- snapshot_roles(disk_scope(nil)), do: {:ok, roster_of(index)}
   end
 
