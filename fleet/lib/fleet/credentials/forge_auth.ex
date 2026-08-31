@@ -62,8 +62,8 @@ defmodule Fleet.Credentials.ForgeAuth do
   est déjà la porte de l'auth système ; il porte donc aussi cette question-là, et le jour où la
   résolution change — un cache, un second service, une autre voie — un seul endroit le sait.
 
-  ⚠ AUCUN CACHE, ET C'EST LA PROPRIÉTÉ ACHETÉE. Un jeton gardé ici reprendrait la péremption
-  infinie que ce chantier retire : la révocation ne mordrait plus qu'au redémarrage du nœud.
+  ⚠ AUCUN CACHE, ET C'EST LA PROPRIÉTÉ ACHETÉE. Un jeton gardé ici lui rendrait une péremption
+  INFINIE : la révocation ne mordrait plus qu'au redémarrage du nœud.
   """
   @spec token_for(String.t()) ::
           {:ok, String.t()} | {:error, Fleet.Credentials.Authority.cause()}

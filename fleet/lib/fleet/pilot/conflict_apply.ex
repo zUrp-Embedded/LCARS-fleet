@@ -8,11 +8,9 @@ defmodule Fleet.Pilot.ConflictApply do
   alias Fleet.Project.GitOps
 
   # A2 — the runtime's ONE identity (`ForgeIdentity.system_identity/0`), not a locally-minted one.
-  # `lcars-conflict-engine` was the measurement that the function needed a name (chief.yaml tells
-  # that story); it also mapped to NO forge account — a grey author, no avatar, no link — while
-  # every other runtime write (onboard, template sync) maps to `system_starfleet`. Measured on the
-  # bench (chantier doc 02 rev 3-4): one author per substrate is the signature matrix, and the
-  # mechanical substrate's author is the system.
+  # A locally-minted author maps to NO forge account: a grey author, no avatar, no link — while
+  # every other runtime write (onboard, template sync) maps to the system account. ONE AUTHOR PER
+  # SUBSTRATE is the signature matrix, and the mechanical substrate's author is the system.
   defp author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @doc """
