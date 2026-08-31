@@ -81,13 +81,12 @@ defmodule Fleet.Pilot do
   ticket nobody can advance is reclaimed by reconciliation and re-dispatched, so the brake is on
   and the wheel keeps turning.
 
-  ⚠ **On the old "merge at the 5th appearance" threshold: it counted the wrong dimension.** A
-  population of modules says nothing about a chain whose links sit at different depths — the fifth
-  link to appear was the LAST one, the only one that leaves the product, and merging on that count
-  would have fused the internal link with the sysadmin one. The threshold is not re-armed here, and
-  the merge is still not decided; what replaces it is the axis above. Whoever adds a link places it
-  in this table **by the depth it reaches**, which is the only thing that makes it comparable to
-  the others.
+  ⚠ **NO COUNT-BASED MERGE THRESHOLD HERE, and a population is the wrong dimension to count.** How
+  many modules appear says nothing about a chain whose links sit at DIFFERENT DEPTHS: the link that
+  appears last is the one that leaves the product, so merging on a count fuses an internal link with
+  the sysadmin one. The merge is not decided; what decides placement is the axis above. Whoever adds
+  a link places it in this table **by the depth it reaches**, which is the only thing that makes it
+  comparable to the others.
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
