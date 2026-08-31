@@ -127,13 +127,13 @@ defmodule Fleet.Project.WorktreeSync do
 
   # CODE face: `fetch` (network, forge token) then `reset --hard` — convergence dure vers l'origine.
   #
-  # ⚠ « THE WORKTREE IS A READ-ONLY SHOWCASE » N'ETAIT GARANTI PAR RIEN. La racine de cette face est
+  # ⚠ « CETTE VITRINE EST EN LECTURE SEULE » N'EST GARANTI PAR RIEN. La racine de cette face est
   # `Fleet.Layout.code_root/0` = **`/home/projects`** — le repertoire de travail par defaut de
   # l'humain, pas un dossier de la flotte. Les pods travaillent bien dans leurs clones ephemeres,
   # mais rien n'empeche un humain (ou un agent lance a la main) d'y avoir un fichier modifie non
   # commite. `reset --hard` le detruit sans copie, sans message, sans recuperation possible.
   #
-  # La soeur `align_writer/2`, vingt lignes plus bas, tient deja la posture : sur une divergence,
+  # La soeur `align_writer/2` tient deja la posture : sur une divergence,
   # elle ABANDONNE et propage fort — « that divergence is a human's call ». Meme regle ici : un
   # arbre SALE n'est pas aligne, il est REFUSE, bruyamment et avec la sortie de `status` pour que
   # l'humain voie ce qui l'a bloque.
