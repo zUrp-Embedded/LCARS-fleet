@@ -792,74 +792,48 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @doc """
   The catalogues this box SERVES — the mirror of `list_workflow_cards/1`, one level up.
 
-  Same gate, same shape, same authority discipline: the listing is read from
-  `Fleet.Catalogue.installed_catalogues/0`, the pairing that already answers this for the poller,
-  the card scopes and the enroller. Re-deriving "which catalogues exist" MCP-side would be a second
-  authority next to the one the boot resolves on.
-
-  ## Why the tool exists, measured
-
-  An agent asked for the catalogues and had no verb for it, so it DERIVED the answer from
-  `card_list` — which names each card's catalogue. That derivation is right only while every
-  installed catalogue ships at least one card: a catalogue with none is invisible to it, and the
-  answer is confidently short rather than wrong-looking. The same hole is why the listing here does
-  not go through `Loader.card_scopes/0` either.
+  The listing comes from the pairing the boot already resolves on. Re-deriving "which catalogues
+  exist" MCP-side would be a second authority beside it — and deriving it from the CARDS is wrong
+  in a specific way: a catalogue shipping no card is invisible to that route, so the answer comes
+  back confidently short rather than wrong-looking.
 
   ## What each entry carries, and what it deliberately does NOT
 
     * `name` — the DECLARED identity, carried by the catalogue and not by the directory it was
-      unpacked into. It is what addresses the catalogue outside this box: the forge org that holds
-      its projects, and the prefix of its role logins.
-    * `bundled` — it ships INSIDE the release, so it is installed by construction and cannot be
-      removed. That is an availability guarantee, not an authority: a bundled catalogue is a peer.
+      unpacked into. It is what addresses the catalogue OUTSIDE this box.
+    * `bundled` — it ships INSIDE the release, so it cannot be removed. An availability guarantee,
+      not an authority: a bundled catalogue is a peer.
 
       ⚠ C'EST LA RACINE QUI EST LIVREE, JAMAIS LE NOM, et les deux ne coincident pas toujours.
-      Comparer l'identite declaree a `bundled_name/0` se LIT comme le meme test et ne l'est pas :
-      `installed_dirs/0` ecarte le catalogue livre sur le `Path.basename`, donc un repertoire nomme
-      autrement dont le manifeste declare ce nom-la passe le filtre et ressortait marque `bundled` —
-      une seconde entree pretendant vivre dans un release qui n'en porte qu'une. La racine EST la
-      definition (`Fleet.Catalogue.root/0`, la tete de `installed_roots/0`), donc c'est elle qu'on
-      compare. Releve par relecture independante le 2026-08-22.
-    * `default_card` — the card a project of this catalogue takes when it declares none. Absent
-      when the catalogue ships no card at all. ABSENT, never `null`: "ships no card" and "default
-      unknown" are two answers, and only the first exists here.
+      Comparer l'identite DECLAREE au nom livre se lit comme le meme test et ne l'est pas : le
+      filtrage se fait sur le chemin, donc un repertoire nomme autrement dont le manifeste declare
+      ce nom-la ressortirait marque `bundled` — une seconde entree pretendant vivre dans un release
+      qui n'en porte qu'une.
+    * `default_card` — the card a project takes when it declares none. ABSENT, never `null`:
+      "ships no card" and "default unknown" are two answers, and only the first exists here.
 
-  No card list: `card_list` already names each card's catalogue, and a second rendering of the
-  same table is the copy that drifts. The two tools are complementary halves, never nested ones.
+  No card list: a second rendering of the same table is the copy that drifts.
 
   ## `unreadable`, and it is REACHABLE — that is why it is here
 
-  `Fleet.Catalogue.verify!/0` runs at boot on the BUNDLED root alone. The material converged under
-  `catalogue_install_dirs` is verified by an operator gesture (`lcars catalogue verify`), never by
-  the boot, so a root whose manifest yields no declared name is present, served by nothing, and
-  dropped from `installed_catalogues/0` in SILENCE. Reporting it is the same rule
-  `list_workflow_cards/1` holds for a card that fails to load: the catalogue never lies by omission.
+  The boot verifies the BUNDLED root alone; converged material is verified by an operator gesture.
+  A root whose manifest yields no declared name is therefore present, served by nothing, and
+  dropped in SILENCE. Reporting it is the rule this module holds throughout: never lie by omission.
 
-  ⚠ IL NOMME UNE CONSEQUENCE, PAS UNE CAUSE, et la premiere redaction disait « no `name:` » — plus
-  precis que le code. `installed_catalogues/0` ecarte une racine sur un catch-all qui couvre AUSSI
-  un YAML invalide, un manifeste illisible et un `name` qui n'est pas une chaine. Trancher entre ces
-  causes demanderait de relire le manifeste ici, c'est-a-dire un second lecteur de la regle du
-  manifeste a cote de son autorite — le defaut precis que ce module passe son temps a fermer.
-  Le mot rendu est donc la consequence commune (« servi par rien »), et le geste est `lcars
-  catalogue verify <racine>`, dont c'est le metier de nommer la cause.
+  ⚠ IL NOMME UNE CONSEQUENCE, PAS UNE CAUSE. La racine est ecartee sur un catch-all qui couvre
+  aussi un YAML invalide et un manifeste illisible ; trancher entre ces causes demanderait de
+  relire le manifeste ICI, c'est-a-dire un second lecteur de sa regle a cote de son autorite — le
+  defaut precis que ce module ferme. Le mot rendu est donc la consequence commune, et le geste qui
+  nomme la cause est `lcars catalogue verify <racine>`.
 
-  Le `Logger.warning` par racine ecartee n'est pas un doublon du payload : si l'agent ne rend pas la
-  reponse, la racine morte ne laisse aucune trace cote serveur. `list_workflow_cards/1` crie deja
-  chaque carte qui ne charge pas, pour cette raison-la.
-
-  Les deux moities se lisent dans UN module, un appel chacune — la difference ensembliste de
-  `installed_roots/0` et des racines qui ont repondu — donc rien ici ne relit un manifeste.
+  L'avertissement par racine ecartee n'est pas un doublon du payload : si l'agent ne rend pas la
+  reponse, la racine morte ne laisse AUCUNE trace cote serveur.
 
   ## L'offre VIDE est une erreur, et le refus PORTE ce qu'il a vu
 
   « Aucun catalogue n'existe » est le mensonge vide : cette boite sert toujours au moins le
   catalogue livre. Le refus emporte les racines ecartees, parce que « rien d'installe » et « tout
-  installe, tout casse » appellent deux gestes differents et qu'un refus qui les confond envoie
-  l'operateur chercher le mauvais objet.
-
-  `list_workflow_cards/1` tient la meme regle, et ne la tenait que sur un chemin sur quatre jusqu'au
-  2026-08-22 — son propre `@doc` porte la cicatrice. Les deux refus sont donc symetriques : une
-  offre vide n'est jamais un succes, ni ici ni un cran plus bas.
+  installe, tout casse » appellent deux gestes differents.
   """
   @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
   def list_catalogues(state) do
@@ -1328,40 +1302,20 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est fixe pour sa vie : « ou vit ce projet »
-  # repond a « quel catalogue le traite ». Le choix se fait au guichet, la ou l'humain choisit deja sa
-  # carte — starfleet porte les deux verbes.
+  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est FIXE POUR SA VIE : « ou vit ce
+  # projet » repond a « quel catalogue le traite ».
   #
-  # Un catalogue NON INSTALLE est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
-  # coller cette org a celle du poller : un projet onboarde dans une org que le poller ne scanne pas
-  # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
-  # orgs des catalogues INSTALLES, la condition se dit exactement ainsi.
+  # ⚠ UN CATALOGUE NON INSTALLE EST REFUSE : le poller scanne les orgs des catalogues INSTALLES,
+  # donc un projet onboarde ailleurs serait un RAIL MORT, silencieux — rien ne le dispatcherait
+  # jamais.
   #
-  # ⚖ LE CATALOGUE EST OBLIGATOIRE (user, 2026-08-17), ET CE QUI A ETE RETIRE VAUT D'ETRE LU.
+  # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference paraissait
+  # gratuite et ne l'etait pas : elle achetait un comportement qui CHANGE quand un tiers installe un
+  # catalogue portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
+  # POPULATION de la boite. L'information, elle, n'est pas absente — elle est dans l'objet que
+  # l'appelant vient de lire, qui rend chaque carte AVEC son catalogue.
   #
-  # Trois versions en une journee, chacune tuee par la meme question posee un cran plus loin :
-  #   1. l'omission prenait le PREMIER catalogue installe — deviner un lien fixe pour la vie ;
-  #   2. puis « un seul installe -> lui, sinon derive de la carte » — « tu cables un rail
-  #      d'exception par confort », et c'etait vrai : cette branche derivait de la POPULATION ;
-  #   3. puis la regle unique « quels catalogues peuvent repondre ? un -> il decide » — « donc tu as
-  #      encore un rail qui teste un truc, que tu supprimerais en posant le catalogue obligatoire ».
-  #
-  # Vrai aussi, et mon argument pour la garder etait FAUX. J'avais dit « friction pour zero
-  # information » : l'information n'est pas absente, elle est dans l'objet que l'appelant vient de
-  # lire — `card_list` rend chaque carte AVEC son catalogue. Exiger le champ coute une
-  # recopie, et l'inference achetait, contre ce rien : un comportement qui change quand un TIERS
-  # installe un catalogue portant le meme nom de carte, et deux branches dont laquelle s'execute
-  # depend de la population de la boite — donc jamais les deux au meme endroit.
-  #
-  # Le voisin le disait deja : `import_deposit/4` prend son catalogue en argument POSITIONNEL. Ce
-  # verbe-ci etait l'exception, pas la regle.
-  #
-  # « Quel metier traite ce projet » est la question la plus basique qu'on puisse poser sur lui, et
-  # elle n'a pas de defaut — bien moins que « quel niveau de soin », qui en a un (C0 non declare).
   # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.
-  #
-  # `:mcp_delegation_org` est mort avec l'inference : il n'avait que ce lecteur. `:pilot_fleet_org`
-  # survit, il appartient au poller.
   @doc false
   # La resolution d'org, exposee pour ses temoins : elle decide d'un lien FIXE POUR LA VIE d'un
   # projet, et la tester au travers de `project_create` demanderait une forge.
@@ -2021,35 +1975,24 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp with_supersedes(body, n),
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
-  # Retry-stable marker in the raw, non-rendered issue body.
-  # CE MARQUEUR EST UN IDENTIFIANT DURABLE, ET C'EST CE QUI LE REND DELICAT. Il n'est pas calcule
-  # puis jete : il est ECRIT DANS LE CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR
-  # — potentiellement apres une montee d'OTP. Sa stabilite depend donc de
-  # `:erlang.term_to_binary/1`, c'est-a-dire du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
-  # l'implementation, hors du depot. Aucun test d'ici ne peut surveiller cette propriete — il
+  # ⚠ CE MARQUEUR EST UN IDENTIFIANT DURABLE : il n'est pas calcule puis jete, il est ECRIT DANS LE
+  # CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR — potentiellement apres une
+  # montee d'OTP. Sa stabilite depend donc du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
+  # l'implementation, hors de ce depot. AUCUN test d'ici ne peut surveiller cette propriete — il
   # faudrait deux executions sur deux VM.
   #
-  # ⚠ LE DECLENCHEUR ANNONCE PAR L'AUDIT (« ordre interne d'une map ») EST MESURE FAUX SUR CET OTP :
-  # `term_to_binary` rend le MEME binaire pour `%{b: 1, a: 2}` et `%{a: 2, b: 1}` — cles atomes ou
-  # binaires, petites maps comme grandes (40 cles). Et il ne pourrait pas s'appliquer ici de toute
-  # facon : aucun champ hache n'est une map (`title`/`brief` binaires, `summary` binaire|nil,
-  # `supersedes` entier|nil, `brief_pointer` `{ref, sha}`|nil, `lot` binaire|nil).
-  #
-  # ⚠ UN ENCODEUR CANONIQUE EXPLICITE A ETE ECRIT ICI, PUIS ANNULE. Il rendait chaque champ en
-  # `TAG <> TAILLE <> ":" <> charge` pour que l'invariant vive dans ce module au lieu d'etre emprunte
-  # a un format tiers. MESURE PAR MUTATION : il n'achete AUCUNE propriete observable que
-  # `term_to_binary` n'ait deja sur cet OTP — desambiguisation binaire/entier, decoupage des champs,
-  # `nil` distinct de `""`, ordre des maps : les cinq tests ecrits pour lui restaient VERTS avec
-  # l'ancien encodeur. Et il n'etait pas gratuit : changer l'entree du digest ORPHELINE les marqueurs
-  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
-  #
   # LA LIGNE A RELIRE : si la flotte change de version MAJEURE d'OTP, verifier que ce digest est
-  # stable avant de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
+  # stable AVANT de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
   # acte. C'est le seul evenement qui rend le defaut reel.
   #
-  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee par `String.contains?` dans les
-  # issues OUVERTES d'UN depot — quelques milliers de marqueurs au plus, soit une collision de
-  # l'ordre de 1e-11. L'elargir couterait la lisibilite du corps de ticket pour le mauvais risque.
+  # ⚠ ET NE PAS REECRIRE L'ENCODEUR CANONIQUE QUI A ETE TENTE ICI : mesure par mutation, il
+  # n'achetait AUCUNE propriete observable de plus — les tests ecrits pour lui restaient verts avec
+  # l'encodage d'origine. Il n'etait pas gratuit non plus : changer l'entree du digest ORPHELINE les
+  # marqueurs deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
+  #
+  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee dans les issues OUVERTES d'UN depot
+  # — quelques milliers de marqueurs au plus. L'elargir couterait la lisibilite du corps de ticket
+  # pour le mauvais risque.
   defp op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria) do
     sig =
       :crypto.hash(
