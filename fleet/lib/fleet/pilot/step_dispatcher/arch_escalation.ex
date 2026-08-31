@@ -229,10 +229,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     # pas une résolution — le chief ne signe que là où il a agi.
     #
     # ⚠ L'APPEL PASSE DÉSORMAIS PAR `Forge.Client.as_role/2` DIRECTEMENT. Il transitait par un
-    # `as_gatekeeper/1` porté par le module du sceau, du temps où celui-ci s'appelait
-    # `GatekeeperSeal` : un adaptateur de credential logé dans le module de sortie du pipeline
-    # n'avait de sens que parce que le nom du module le suggérait. Le module renommé, l'emprunt
-    # n'en a plus, et `as_role/2` était déjà l'autorité unique — on l'appelle, on ne la relaie plus.
+    # PAS d'`as_gatekeeper/1` emprunte au module du sceau : un adaptateur de credential loge dans
+    # le module de SORTIE du pipeline n'a de sens que si le nom de ce module le suggere, ce qui fait
+    # dependre une resolution d'identite d'un choix de nommage. `as_role/2` est l'autorite unique —
+    # on l'appelle, on ne la relaie pas.
     #
     # Fail-CLOSED sur le jeton : indisponible → on SAUTE le commentaire (jamais sous le compte
     # système) mais on pose quand même le label porteur `lcars-awaits-arch` (système, le throttle du

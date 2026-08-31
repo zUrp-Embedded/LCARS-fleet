@@ -27,11 +27,8 @@ defmodule Fleet.DurableLog do
 
   ## What this is NOT
 
-  It is not the old domain audit NDJSON (mort avec le rail de severite max, brouette 2026-08-19)
-  — that one was a business
-  ledger with its own schema and its own two producers — tous morts avec lui, donc il ne reste rien
-  a lui reserver.
-  This is the operational trace: whatever any module chose to log at warning or above, in the
+  It is not a domain audit NDJSON — that would be a business ledger, with its own schema and its own
+  producers. This is the operational trace: whatever any module chose to log at warning or above, in the
   order it happened, surviving the process. Merging them would give the ledger a shape nobody can
   parse and the trace a filter nobody wants.
 
