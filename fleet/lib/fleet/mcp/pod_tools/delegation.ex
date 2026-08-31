@@ -6,34 +6,25 @@ defmodule Fleet.MCP.PodTools.Delegation do
   `delegation_org`, `delegation_target`): these tools form the channel through which
   the architect delegates work to the fleet and tracks it.
 
-    * `create_issue/4` — DELEGATION channel: places a forge issue ready for the poller.
-    * `create_project/3` — ONBOARDING channel: starts a fresh project (repo + its three faces).
-    * `import_project/2` — ONBOARDING channel (variant): imports an EXISTING forge repo into
-      the machine (the three faces, `main` content intact — ≠ `project_create`).
-    * `open_project/2` — ONBOARDING channel (variant): relaunches a project ALREADY on the
-      machine (the third portfolio verb — create / import / open; no forge/disk write, ensures
-      the per-project architect — the path back to a project after a fleet restart).
-    * `delete_project/3` — ONBOARDING channel: general teardown of a project (forge repo, then the
-      the face dirs, then the architect pod — stopped last, only if a dir is proven to be `full_name`),
-      fail-closed unless `args["force"] == true` (the delete is irreversible).
-    * `issue_status/3` — TRACKING channel: reads the state of a delegated issue (issue + PR).
-    * `list_issues/1` — READ channel (BL-6-28): the project's open-ticket board.
-    * `get_issue/2` — READ channel (BL-6-28): ONE ticket in full (body + comment thread).
+  ⚠ NO TOOL LIST HERE, for the reason `Fleet.MCP.PodTools` states about its own: the authority is
+  the `deftool` set over there, read BY THE AST by five walls (`mcp.tools_gated`,
+  `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
+  `mcp.required_for_real_backend`). Each function below carries its own contract in its `@doc`.
 
-  ## Two server-side gates (reorg 2026-07-19, cf. DESIGN-carte-des-roles §9)
+  ## Two server-side gates
 
   The barrier is server-side: the role is resolved from the CHANNEL identity (`state.pod_id`, carried by
   the socket acceptor — NOT a wire field), then asked for a CAPABILITY. Two heads, two capabilities,
   and neither gate knows a role name — which role carries which is the catalogue's business:
 
-    * **ONBOARDING gate** (`require_onboarder/1`) — `project_create` / `project_install` /
-      `project_open` / `project_close` / `project_delete` / `project_revise_card` /
-      `card_list` / `catalogue_list`: the PORTFOLIO head. Admits any role carrying `onboarder`.
-      Refusal → `:forbidden_not_onboarder`.
-    * **DELEGATION gate** (`require_architect/1`) — `issue_create` / `issue_status` / `escalation_list` /
-      `issue_list` / `issue_get` / `issue_comment`: the per-project head. Admits the role carrying
-      `project_delegate`, and additionally requires a repo binding — delegating outside a project is
-      not a thing. Refusal → `:forbidden_not_architect`.
+    * **ONBOARDING gate** (`require_onboarder/1`) — the PORTFOLIO head. Admits any role carrying
+      `onboarder`. Refusal → `:forbidden_not_onboarder`.
+    * **DELEGATION gate** (`require_architect/1`) — the per-project head. Admits the role carrying
+      `project_delegate`, and additionally requires a repo binding — delegating outside a project
+      is not a thing. Refusal → `:forbidden_not_architect`.
+
+  Which head a given tool sits behind is not listed here either: its function calls one of the two
+  in its own body, first thing, and that call is the answer.
 
   The two are DISJOINT in the bundled catalogue and that is a catalogue fact, not a law here: enrolling
   a project happens from outside any project, delegating happens inside one. A role declaring a
@@ -136,7 +127,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
       )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
-    # gate (the pod's spawn binding — reorg 2026-07-19): the arch has "the project", it never names
+    # gate (the pod's spawn binding): the arch has "the project", it never names
     # a repo over the wire (no param to refuse = no leak that other repos exist). The arch then
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
@@ -145,9 +136,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
     # dispatch-time ops push (F-15) — no separate publication rail.
     # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
-    # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
+    # threshold — ⚖ user: the ticket stays a readable summary, the
     # committed doc carries the detail; degraded → inline legacy, never a wall).
-    # `supersedes` (2026-07-19, #5 zombie loop): the rework gesture is ONE act with BOTH halves —
+    # `supersedes` — the rework gesture is ONE act with BOTH halves:
     # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
     # Without the second half, the old ticket stays dispatchable and loops (scoper re-reviews
     # the same stale brief every time the arch answers its escalation).
@@ -473,9 +464,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(repo)}.json")
 
-    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Il etait appele et son retour JETE : un fichier
-    # ecrit dont la serrure n'a pas pu etre posee ressortait `:ok`, et le binding restait lisible par
-    # tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le tient.
+    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Appele hors du `with`, son retour est jete : un
+    # fichier ecrit dont la serrure n'a pas pu etre posee ressort `:ok` et le binding reste lisible
+    # par tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le
+    # tient.
     # Meme forme fail-closed que `PodSocketAcceptor.restrict/2` : on ne laisse pas derriere soi une
     # porte sans verrou, on retire ce qu'on n'a pas su fermer.
     with {:ok, json} <- Jason.encode(binding, pretty: true),
@@ -617,14 +609,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       pr = issue_pr_status(forge, repo, number)
 
-      # Axiom (reorg 2026-07-19): no "repo" in the result — the arch has "the project".
-      # One meaning per shape (2026-07-19): no polysemous null — `title`/`pr` are ABSENT
+      # Axiom: no "repo" in the result — the arch has "the project".
+      # One meaning per shape: no polysemous null — `title`/`pr` are ABSENT
       # when there is nothing true to say, never null (cf. put_pr/2).
       # THE SIGNPOST TRAVELS IN THE ANSWER, not only in the catalogue read once at boot. Measured
       # on the bench: an architect complained that this status carried no timestamp, WITHOUT
       # inventorying its own toolbox — while `issue_get`'s description names this tool by name to
-      # orient the choice. That is the exact twin of the producer bias corrected the same night
-      # (delivering costs less than refusing): complaining costs less than looking.
+      # orient the choice. Same bias as the producer's — delivering costs less than refusing —
+      # here: complaining costs less than looking.
       #
       # So the pointer arrives where the agent actually looks — inside what it just received.
       # Same doctrine as the CI fact riding into the judge's brief: the information goes to the
@@ -699,39 +691,22 @@ defmodule Fleet.MCP.PodTools.Delegation do
   reported in `unreadable` (the catalogue never lies silently); an empty OFFER is an ERROR, never
   an empty listing — "no card exists" would be the vacuous lie.
 
-  ## ⚠ CETTE PROMESSE ETAIT ECRITE ET TENUE SUR UN CHEMIN SUR QUATRE
+  ## QUATRE ROUTES VERS UNE OFFRE VIDE, TROIS REFUS QUI LES DISTINGUENT
 
-  La ligne au-dessus disait deja « an ERROR, never an empty listing », et seule la racine
-  CONFIGUREE sans aucun `*.yaml` la tenait — parce que `canon_names!/1` leve, pas parce que quelque
-  chose ici le decidait. Les trois autres routes vers une offre vide rendaient `{:ok, %{"cards" =>
-  []}}` :
+  Rendre `{:ok, %{"cards" => []}}` sur l'une quelconque d'entre elles donnerait a l'architecte un
+  succes avec zero choix, au moment precis ou on lui demande de choisir. Les refus distinguent donc
+  ce que le geste suivant distingue :
 
-    * aucun catalogue installe ne porte de repertoire de cartes — `card_scopes/0` filtre sur
-      `File.dir?`, donc il n'y a meme pas de quoi lever : RIEN n'a ete balaye ;
-    * des cartes existent et AUCUNE ne charge — l'offre est vide, la cause est dans `unreadable` ;
-    * des cartes existent et toutes sont TECHNIQUES ou a portee ticket — rien de declarable pour un
-      projet.
-
-  Dans les trois cas, l'architecte recevait un succes avec zero choix, au moment precis ou on lui
-  demande de choisir. Releve le 2026-08-22 par relecture independante en marge du chantier
-  `catalogue_list`, et laisse ouvert un tour de trop au motif que c'etait « hors perimetre » — le
-  perimetre est le projet.
-
-  Les refus distinguent donc ce que le geste suivant distingue :
-
-    * `{:workflow_no_card_scope, why}` — rien a balayer. C'est un fait de DEPLOIEMENT : la boite ne
-      sert aucun catalogue portant des cartes (cf. `list_catalogues/1`).
-    * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
-      CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes ne chargent pas ;
-      vide, elles sont toutes techniques ou a portee ticket.
     * `{:workflow_catalogue_unavailable, message}` — le repertoire de cartes existe et ne porte
       AUCUN `*.yaml`. Il precede les deux autres et ne vient pas d'ici : `canon_names!/1` leve, et
-      `catalogue_cards/0` rattrape. C'est le seul des trois qui existait avant le 2026-08-22.
-
-      ⚠ IL EST DANS CETTE LISTE PARCE QU'ELLE PRETEND ETRE COMPLETE. Ecrite sans lui, elle
-      enumerait deux gestes sur trois sous un titre qui annonce le decoupage entier — une prose
-      fausse par omission, dans la section meme qui vient de fermer une promesse a moitie tenue.
-      Relevee par relecture independante le 2026-08-22, sur le texte ecrit la veille.
+      `catalogue_cards/0` rattrape.
+    * `{:workflow_no_card_scope, why}` — rien a balayer : aucun catalogue installe ne porte de
+      repertoire de cartes. `card_scopes/0` filtre sur `File.dir?`, donc il n'y a meme pas de quoi
+      lever. C'est un fait de DEPLOIEMENT (cf. `list_catalogues/1`).
+    * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
+      CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes existent et
+      AUCUNE ne charge ; vide, elles existent et sont toutes TECHNIQUES ou a portee ticket, donc
+      rien n'est declarable pour un projet.
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
@@ -865,8 +840,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
       # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR : `{offer, bad}` filtre aussi `bad == []`,
       # donc les intervertir poserait `"unreadable" => []` dans la reponse nominale — une cle vide la
-      # ou l'absence est la reponse, exactement ce que `put_present` refuse un cran plus haut. Mesure
-      # du 2026-08-22 : aucun temoin ne rougissait sur cette permutation ; il en existe un depuis.
+      # ou l'absence est la reponse, exactement ce que `put_present` refuse un cran plus haut.
       case {served, unreadable} do
         {[], bad} ->
           {:error,
@@ -882,8 +856,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Le TABLEAU catalogue x carte : chaque carte nommee par le catalogue qui la porte. Ce n'etait pas
-  # une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux, `standard` peut exister
+  # Le TABLEAU catalogue x carte : chaque carte nommee par le catalogue qui la porte. Avec un seul
+  # metier la question ne se pose pas ; des qu'il y en a deux, `standard` peut exister
   # des deux cotes et un nom seul ne designe plus rien. Le guichet presente donc l'offre ENTIERE en
   # une fois — c'est deja ce que son commentaire d'outil promettait (« framing FIRST: the catalogue
   # the human picks the card from »), sur un catalogue au lieu de N.
@@ -1309,9 +1283,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # donc un projet onboarde ailleurs serait un RAIL MORT, silencieux — rien ne le dispatcherait
   # jamais.
   #
-  # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference paraissait
-  # gratuite et ne l'etait pas : elle achetait un comportement qui CHANGE quand un tiers installe un
-  # catalogue portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
+  # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference parait gratuite
+  # et ne l'est pas : elle achete un comportement qui CHANGE quand un tiers installe un catalogue
+  # portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
   # POPULATION de la boite. L'information, elle, n'est pas absente — elle est dans l'objet que
   # l'appelant vient de lire, qui rend chaque carte AVEC son catalogue.
   #
@@ -1328,7 +1302,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     case Map.get(args, "catalogue") do
       cat when is_binary(cat) and cat != "" ->
         # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
-        # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
+        # deux formulations d'un meme refus dedoublent le vocabulaire.
         if cat in installed,
           do: {:ok, cat},
           else: Fleet.Project.Onboard.catalogue_not_installed(cat)
@@ -1360,13 +1334,11 @@ defmodule Fleet.MCP.PodTools.Delegation do
       # onboarding must target another org than the one being polled.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-      # ⚠ `allow_unverifiable_human_team?` VIVAIT ICI (DR-018) ET N'EXISTE PLUS (2026-08-17). Il
-      # ouvrait un mode degrade quand le jeton runtime ne pouvait pas PROUVER l'adhesion de l'humain a
-      # `<org>:humans`. La garde qu'il assouplissait est morte avec lui : elle exigeait un `read` que
-      # l'humain a deja (org publique, depots publics) pour des ecritures qu'il ne fait pas — c'est le
-      # jeton systeme qui ecrit. Son propre message de repli invoquait « downstream create_issue
-      # remains the net » : mesure du 2026-08-17, un non-membre de l'org cree une issue sur un depot
-      # public (201). Le filet n'existait pas.
+      # ⚠ AUCUNE GARDE D'ADHESION ICI, ET CE N'EST PAS UN OUBLI. Exiger que le jeton runtime PROUVE
+      # l'adhesion de l'humain a `<org>:humans` reclame un `read` qu'il a deja (org publique, depots
+      # publics) pour des ecritures qu'il ne fait pas — c'est le jeton SYSTEME qui ecrit. Et
+      # `create_issue` en aval n'est pas le filet qu'on croit : mesure, un non-membre de l'org cree
+      # une issue sur un depot public (201).
       opts = [
         org: org,
         description: Map.get(args, "description", pitch),
@@ -1401,10 +1373,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
     with {:ok, onboard} <- conforming_onboard() do
-      # PAS D'OPTS, ET C'EST UN RESTE QUI PART. Ce verbe ne portait que le drapeau
-      # `allow_unverifiable_human_team?` (DR-018), mort avec la garde qu'il assouplissait — cf. le
-      # commentaire de `do_onboard_project` plus haut. L'org, elle, n'a rien a faire ici : `import/2`
-      # la LIT du depot (`owner/nom`), elle ne se declare pas.
+      # PAS D'OPTS, ET RIEN A Y METTRE. L'org n'a rien a faire ici : `import/2` la LIT du depot
+      # (`owner/nom`), elle ne se declare pas. Et aucune garde d'adhesion ne s'y ajoute non plus,
+      # pour la raison ecrite chez `do_onboard_project`.
       case onboard.import(full_name, []) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
@@ -1500,9 +1471,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp do_adopt_project(name, args, role) do
     # LE CATALOGUE, RESOLU PAR LA MEME PORTE QUE `project_create` : adopter cree un depot sur la
-    # forge, donc c'est une creation, donc l'org est une declaration. Elle tombait sur le premier
-    # catalogue installe (`Onboard.default_org/0`, mort le 2026-08-17) — un projet adopte partait
-    # donc dans `fleet` quel que soit le metier auquel il appartient.
+    # forge, donc c'est une creation, donc l'org est une DECLARATION. La faire tomber sur le premier
+    # catalogue installe enverrait tout projet adopte dans `fleet`, quel que soit le metier auquel
+    # il appartient.
     with {:ok, onboard} <- conforming_onboard(),
          {:ok, org} <- resolve_org(args) do
       opts = [
@@ -1985,10 +1956,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # stable AVANT de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
   # acte. C'est le seul evenement qui rend le defaut reel.
   #
-  # ⚠ ET NE PAS REECRIRE L'ENCODEUR CANONIQUE QUI A ETE TENTE ICI : mesure par mutation, il
-  # n'achetait AUCUNE propriete observable de plus — les tests ecrits pour lui restaient verts avec
-  # l'encodage d'origine. Il n'etait pas gratuit non plus : changer l'entree du digest ORPHELINE les
-  # marqueurs deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
+  # ⚠ ET NE PAS REECRIRE UN ENCODEUR CANONIQUE ICI : mesure par mutation, il n'achete AUCUNE
+  # propriete observable de plus — les temoins ecrits pour lui restent verts avec l'encodage
+  # d'origine. Il n'est pas gratuit non plus : changer l'entree du digest ORPHELINE les marqueurs
+  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
   #
   # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee dans les issues OUVERTES d'UN depot
   # — quelques milliers de marqueurs au plus. L'elargir couterait la lisibilite du corps de ticket
@@ -2058,17 +2029,17 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Les deux relectures
-  # rendaient `:none` dans les deux cas : marqueur absent d'un tableau LU, et tableau ILLISIBLE. La
-  # creation a lieu dans les deux cas — c'est le bon arbitrage, poster bat perdre la reponse —, mais
-  # le retour MCP etait identique, donc l'agent ne pouvait pas savoir que son doublon etait
-  # possible. Or c'est lui qui reessaie : la relecture echoue precisement quand la forge va mal,
-  # c'est-a-dire au moment ou il va rejouer l'appel.
+  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Rendre `:none` pour les
+  # deux — marqueur absent d'un tableau LU, et tableau ILLISIBLE — laisse la creation avoir lieu dans
+  # les deux cas, ce qui est le bon arbitrage (poster bat perdre la reponse), mais rend le retour MCP
+  # identique : l'agent ne peut alors pas savoir que son doublon etait possible. Or c'est lui qui
+  # reessaie, et la relecture echoue precisement quand la forge va mal — au moment ou il va rejouer
+  # l'appel.
   #
   # Le projet interdit « never two live tickets for one brick » (`pod_tools.ex`) et le marqueur
   # existe pour ca. On ne refuse pas la creation pour autant : on la NOMME. Une reutilisation porte
   # `"idempotent" => true` ; une creation dont la deduplication n'a pas pu etre verifiee porte
-  # desormais `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
+  # `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
   defp with_dedup_unverified(result, {:unverified, why}),
     do: Map.put(result, "dedup_unverified", inspect(why))
 
@@ -2103,15 +2074,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # not a guess (a half-checked supersede could retire the wrong brick). An already-closed target is
   # LEGITIMATE (re-take an abandoned brick): filiation only, no retirement to execute.
   #
-  # A LIVE PR IS NO LONGER A REFUSAL, AND THE OLD REFUSAL WAS A WORKAROUND. It read as a policy
-  # ("let it land"); it was a CONSEQUENCE: nothing in the forge client knew how to close a PR.
-  # Retiring the ticket without closing it left the PR open on an INDEPENDENT rail
-  # (`dispatch_review` polls pulls, outside the lease) — judged, then merged, into a retired ticket.
-  # So the refusal protected against an incoherence the gesture itself should have prevented.
+  # A LIVE PR IS NOT A REFUSAL, IT IS THE OTHER HALF OF THE GESTURE. Retiring the ticket without
+  # closing its PR leaves that PR on an INDEPENDENT rail (`dispatch_review` polls pulls, outside the
+  # lease) — judged, then merged, into a retired ticket. Refusing the retirement instead would
+  # protect against an incoherence the gesture itself can prevent.
   #
   # And the intent of a retirement — stop the machine, bound the cost — does not depend on whether a
-  # PR exists. So the gesture is made COMPLETE (`:with_pr` → the PR closes with the ticket) instead
-  # of being forbidden.
+  # PR exists. So the gesture is COMPLETE (`:with_pr` → the PR closes with the ticket) rather than
+  # forbidden.
   defp target_state_preflight(_forge, _repo, nil), do: {:ok, nil}
 
   defp target_state_preflight(forge, repo, n) when is_integer(n) and n > 0 do
@@ -2395,12 +2365,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
       "L'arête est levée. Si c'était le dernier bloqueur de ##{n}, il devient fermable " <>
         "immédiatement — la forge ne retient plus rien."
 
-  # ❌ `publish_doc` A ETE SUPPRIME, avec le sous-arbre `ops/notes/` qu'il servait. Il laissait un
-  # agent ecrire dans l'arbre d'operations — le registre de ce qu'on lui a demande et de ce qu'on a
-  # juge de son travail — au motif que `notes/` etait « du materiau d'auteur que rien ne lit comme
-  # preuve ». MESURE : aucun cap-profile canon n'accordait cet outil. Ni l'architecte, ni personne.
-  # L'exception decrite par la doctrine n'existait donc pas en fait, et ce qui restait etait une
-  # porte ouverte dans le seul arbre qui doit rester en lecture seule pour tout le monde.
+  # ❌ AUCUN OUTIL N'OUVRE `ops/` A L'ECRITURE, ET IL N'Y A PAS DE SOUS-ARBRE D'EXCEPTION. C'est le
+  # registre de ce qu'on a demande a un agent et de ce qu'on a juge de son travail : une porte
+  # dedans, fut-elle « du materiau d'auteur que rien ne lit comme preuve », est une porte dans le
+  # seul arbre qui doit rester en lecture seule pour tout le monde.
   #
   # La MATIERE, elle, a une destination : une note de conception est de la DOC. Elle vit sur la face
   # `doc`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
@@ -2609,8 +2577,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     #   * what the old ticket BLOCKED is released the instant it closes (a CLOSED blocker counts as
     #     satisfied) — while the work has moved and is not delivered;
     #   * what the old ticket DEPENDED ON vanishes: the replacement is born without its precondition.
-    # Measured on the bench 2026-08-04 (A blocks B, supersede A -> A': `B dependencies` still
-    # returns A, closed, and A' carries no edge at all).
+    # Measured (A blocks B, supersede A -> A': `B dependencies` still returns A, closed, and A'
+    # carries no edge at all).
     # Closing first would release the blocked ones BEFORE the rewiring, and a dispatch can slip into
     # that window. We write onto the replacement, THEN we close.
     with :ok <- close_live_pr(forge, repo, pr),
@@ -2619,7 +2587,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
          # `closure: :retired` — a supersede delivers NOTHING: the work moved onto the replacement
          # (its edges were carried there just above). The ticket has to SAY it.
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
+      # A superseded ticket is a DEAD ticket: its pods die with it (⚖ user —
       # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
       # Pilot, same rule and same shape as `:forge_client`.
       _ = pod_reaper().reap_issue(repo, n)
@@ -2676,7 +2644,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
               _ =
                 forge.add_label(repo, number, Fleet.Labels.type_for_destination(destination), [])
 
-              # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
+              # Axiom: the repo is NEVER named back to the arch — it has "the
               # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
               # association instead of presuming it (protocol-carried correlation, not memory).
               {:ok,
@@ -2732,8 +2700,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Gitea 1.26.4 (live 2026-07-19) rewrites a deleted merged head to `refs/pull/N/head`;
-  # use the issue's `[merge:pr-N]` marker to recover that PR.
+  # A merged PR's head no longer resolves once its branch is deleted, so the issue's `[merge:pr-N]`
+  # marker is what recovers it — the measurement that establishes this lives with the marker, in
+  # `Fleet.Forge.Protocol.merge_marker/1`.
   defp merged_pr_fallback(forge, repo, number) do
     case forge.merged_pr_of_issue(repo, number, []) do
       {:ok, pr} ->
@@ -3107,8 +3076,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   # Le client canonique rend le NUMERO nu ({:ok, integer}, 409 compris — cf. le @callback de
-  # `ForgeWriter`). Les clauses map d'une v1 acceptaient ce qu'aucun writer reel ne rend : le
-  # double etait vert et la prod rendait `"pr" => nil`.
+  # `ForgeWriter`). Accepter ici une map — ce qu'aucun writer reel ne rend — rend le double vert
+  # pendant que la prod rend `"pr" => nil`.
   defp pr_number(n) when is_integer(n), do: n
   defp pr_number(_), do: nil
 end
