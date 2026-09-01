@@ -231,3 +231,36 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   local mod="$BATS_TEST_DIRNAME/../modules.d/50-forge.sh"
   [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
 }
+
+# ─── LES DEUX SITES QUE LA CAMPAGNE 2007 A TROUVES ──────────────────────────────────────────────
+#
+# ⚠ CE QUI LES A REVELES : une session FRAICHE. Sur le banc 2001, `bob` etait deja effectivement
+# dans le groupe `fleet`, donc il lisait `/opt/lcars/runtime` (0750 root:fleet) et
+# `/etc/lcars/services.env` (0640 root:fleet). Sur 2007, l'adhesion venait d'etre posee et n'etait
+# pas encore effective dans la session — et les deux sondes ont declare ABSENT ce qu'elles ne
+# pouvaient simplement pas ouvrir. Le cas juste est la session fraiche, pas l'inverse.
+
+@test "60-deploy : un prefixe non traversable ne rend pas « release absente »" {
+  local mod="$DEPLOY/modules.d/60-deploy.sh"
+  local bloc; bloc="$(sed -n '/^check()/,$p' "$mod" | grep -vE '^\s*#')"
+  grep -q 'prov_file_state "$PROV_PREFIX"' <<<"$bloc"
+  # la garde vient AVANT le drift, sinon elle ne sert a rien
+  local n_garde n_drift
+  n_garde="$(grep -n 'NON MESURABLE' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_drift="$(grep -n 'release absente sous' <<<"$bloc" | head -1 | cut -d: -f1)"
+  [ -n "$n_garde" ] && [ -n "$n_drift" ]
+  [ "$n_garde" -lt "$n_drift" ]
+}
+
+@test "64-services : un services.env illisible ne rend pas « aucun LCARS_SYSADMIN_UID »" {
+  # Un champ vide a DEUX causes quand le fichier est 0640 root:fleet : il n y est pas, ou on ne
+  # peut pas le lire. Une seule des deux est un drift.
+  local mod="$DEPLOY/modules.d/64-services.sh"
+  local bloc; bloc="$(sed -n '/^probe_seat_uid()/,/^}$/p' "$mod" | grep -vE '^\s*#')"
+  grep -q 'prov_file_state "$SERVICES_ENV"' <<<"$bloc"
+  local n_garde n_drift
+  n_garde="$(grep -n 'non sondable' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_drift="$(grep -n 'aucun LCARS_SYSADMIN_UID' <<<"$bloc" | head -1 | cut -d: -f1)"
+  [ -n "$n_garde" ] && [ -n "$n_drift" ]
+  [ "$n_garde" -lt "$n_drift" ]
+}

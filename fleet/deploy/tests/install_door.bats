@@ -936,3 +936,33 @@ SPY
     return 1
   }
 }
+
+@test "PORTS : les TROIS ports du banc sont passes au delegue, pas deux" {
+  # ⚠ MESURE DU 2026-09-01, BANC 2008 : « REFUS : un autre conteneur tient deja un des ports de ce
+  # banc · 2222 -> lcars-nuit-lcars-1 ». Le refus est JUSTE — les WSL d une meme machine partagent
+  # un daemon docker, donc un seul banc par port — mais la sortie qu il propose (`--ssh-port`)
+  # n existait pas a l entree : la porte ne traduisait que `--port-forge` et `--port-deck`.
+  #
+  # Un refus qui nomme un geste que la porte ne sait pas passer envoie l operateur contre un mur.
+  local porte="$BATS_TEST_DIRNAME/../../../install.sh"
+  # les trois entrent au parsing
+  grep -qE '^\s+--port-forge\|--port-deck\|--port-ssh\)' "$porte"
+  # et les trois sont TRADUITS vers les noms du delegue
+  local bloc; bloc="$(sed -n '/--port-forge|--port-deck|--port-ssh)/,/esac/p' "$porte" | grep -vE '^\s*#')"
+  grep -q -- '--forge-port' <<<"$bloc"
+  grep -q -- '--deck-port'  <<<"$bloc"
+  grep -q -- '--ssh-port'   <<<"$bloc"
+  # et le delegue les connait — sinon on traduit vers un drapeau qui n existe pas
+  local bench="$BATS_TEST_DIRNAME/../docker/bench/bench-up.sh"
+  grep -q -- '--ssh-port)' "$bench"
+}
+
+@test "PORTS : chacun est traduit vers SON nom, pas vers celui du voisin" {
+  # Le `case` remplace un `[[ … ]] && _d=…` a deux branches : avec trois valeurs, la forme courte
+  # aurait fait tomber la troisieme dans le defaut — donc `--port-ssh` aurait publie le port de la
+  # FORGE, silencieusement, sur le port que l operateur voulait pour SSH.
+  local porte="$BATS_TEST_DIRNAME/../../../install.sh"
+  local bloc; bloc="$(sed -n '/--port-forge|--port-deck|--port-ssh)/,/esac/p' "$porte")"
+  grep -qE '\-\-port-deck\)\s+_d="--deck-port"' <<<"$bloc"
+  grep -qE '\-\-port-ssh\)\s+_d="--ssh-port"'   <<<"$bloc"
+}

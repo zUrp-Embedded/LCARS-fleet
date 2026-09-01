@@ -309,6 +309,15 @@ probe_seat_uid() {
   local declared name
   declared="$(env_field "$SERVICES_ENV" LCARS_SYSADMIN_UID)"
   if [[ -z "$declared" ]]; then
+    # ⚠ « AUCUN » A DEUX CAUSES, ET UNE SEULE EST UN DRIFT. `services.env` est `0640 root:fleet` :
+    # un compte hors du groupe rend un champ vide sans avoir lu une ligne du fichier. Le declarer
+    # « aucun LCARS_SYSADMIN_UID » est alors un fait sur le LECTEUR, pas sur la machine — et il
+    # disparait sous sudo, sur la meme machine a la meme seconde (mesure du 2026-09-01, banc 2007).
+    local _st; _st="$(prov_file_state "$SERVICES_ENV")"
+    if [[ "$_st" != "present" && "$_st" != "absent" ]]; then
+      p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
+      return 0
+    fi
     p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — is_fleet_human et uid_floor retomberont sur le litteral 1000, qui n'est le siege que par coincidence (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
     return 0
   fi

@@ -29,8 +29,19 @@ build_sha() {
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
 
+  # ⚠ « ABSENTE » SE DIT D'UN PREFIXE QU'ON PEUT TRAVERSER. `$PROV_PREFIX` est `0750 root:fleet` :
+  # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
+  # « absente » de tout ce qui s'y trouve, y compris d'une release parfaitement posee.
+  #
+  # MESURE DU 2026-09-01, banc 2007 : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
+  # meme machine et a la meme seconde. Le banc 2001 ne le montrait pas — le groupe y etait deja
+  # effectif. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
+  local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
+  elif [[ "$_pfx" != "present" && "$_pfx" != "absent" ]]; then
+    p_warn "release NON MESURABLE — $PROV_PREFIX $(prov_state_why "$_pfx" "$PROV_PREFIX")"
+    verdict_check
   else
     p_drift "release absente sous $PROV_PREFIX"
     verdict_check   # sans release, sonder perms/liens n'apporte que du bruit

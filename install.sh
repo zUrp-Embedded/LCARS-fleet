@@ -35,6 +35,9 @@
 #       --check         sonde read-only, rien n'est modifié.
 #       --port-forge N  le port que publie la forge du poste (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
+#       --port-ssh N    le port SSH du banc (défaut 2222) — avec --bench uniquement.
+#                       Les trois sont les ports que « bench-up » publie : un banc par port, et
+#                       les WSL d une même machine partagent un daemon docker.
 #       --forge-project N  nomme l'instance de forge (défaut lcars-forge) —
 #                       conteneur, réseau, volumes et runner en dérivent. C'est
 #                       le geste qui en monte une SECONDE au lieu de déplacer
@@ -137,7 +140,7 @@ while [[ $# -gt 0 ]]; do
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
     # ports et nom d'instance : validés par `provision`, jamais ici
-    --port-forge|--port-deck) PASSTHRU+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
+    --port-forge|--port-deck|--port-ssh) PASSTHRU+=("$1" "${2:?$1 attend un port}"); shift 2 ;;
     --forge-project)          PASSTHRU+=("$1" "${2:?$1 attend un nom}"); shift 2 ;;
     --env|--human|--only) PASSTHRU+=("$1" "${2:?$1 attend une valeur}"); shift 2 ;;
     --) shift; DELEGATE_ARGS=("$@"); break ;;
@@ -153,7 +156,7 @@ while [[ $# -gt 0 ]]; do
       else
         echo "install.sh $LCARS_DOOR_VERSION — LA porte d'entrée."
         echo "  --workstation | --box   le rail · --bench  les annexes · --check  sonde read-only"
-        echo "  --port-forge N | --port-deck N | --forge-project N | --substrate S"
+        echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
       fi
       exit 0 ;;
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
@@ -626,9 +629,23 @@ if [[ "$RAIL" == "box" ]]; then
         else
           export LCARS_PROJECT="${PASSTHRU[$((_i + 1))]}"
         fi ;;
-      --port-forge|--port-deck)
+      # ⚠ TROIS PORTS, PAS DEUX, ET LE TROISIEME MANQUAIT. `bench-up.sh` en publie trois — forge,
+      # deck et SSH — et refuse net si l'un d'eux est tenu. La porte n'en traduisait que deux : un
+      # operateur pouvait donc deplacer la forge et le deck, et se faire refuser sur un port SSH
+      # qu'aucun drapeau ne savait bouger.
+      #
+      # MESURE DU 2026-09-01, banc 2008 : « REFUS : un autre conteneur tient deja un des ports de ce
+      # banc · 2222 -> lcars-nuit-lcars-1 ». Le refus est JUSTE — les bancs WSL partagent un meme
+      # daemon docker, donc un seul banc par port — mais la sortie qu'il propose (« --ssh-port »)
+      # n'existait pas a l'entree. Un refus qui nomme un geste que la porte ne sait pas passer
+      # envoie l'operateur contre un mur.
+      --port-forge|--port-deck|--port-ssh)
         if [[ "$WITH_BENCH" -eq 1 ]]; then
-          _d="--forge-port"; [[ "${PASSTHRU[$_i]}" == "--port-deck" ]] && _d="--deck-port"
+          case "${PASSTHRU[$_i]}" in
+            --port-deck) _d="--deck-port" ;;
+            --port-ssh)  _d="--ssh-port" ;;
+            *)           _d="--forge-port" ;;
+          esac
           DELEGATE_ARGS=("$_d" "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
           _box_reject+=("${PASSTHRU[$_i]} (les ports de la boite sont ceux du compose — ajoute --bench, ou edite le compose)")
