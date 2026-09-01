@@ -62,6 +62,22 @@ check() {
 build_doc() {
   [[ -d "$SITE_SRC" ]] \
     || { p_fail "sources du site absentes ($SITE_SRC) — l'arbre livre-t-il encore sa doc ?"; verdict_apply; }
+
+  # ⚠ EN LIVRAISON BINAIRE, ON NE BÂTIT PAS — ON POSE CE QUI EST ARRIVÉ BÂTI. `pack.sh` emporte le
+  # `dist/` à ce chemin exact, à côté de la release et pour la même raison : les deux sont
+  # gitignorés, donc `git archive` ne les emporte pas, donc le paquet les ajoute.
+  #
+  # Sans cette branche, une cible qui installe un paquet mourait ICI. `16-node` ne pose plus node en
+  # livraison binaire — c'est le geste R4 — donc `npm` est absent, et ce module échouait sur un
+  # « joue-le d'abord » qui désigne un module dont l'état-cible est justement de ne rien poser. Le
+  # rail s'envoyait à lui-même une instruction impossible.
+  if prov_delivery_is_binary; then
+    [[ -s "$SITE_SRC/dist/index.html" ]] \
+      || { p_fail "livraison binaire, mais le paquet n'apporte pas la doc bâtie ($SITE_SRC/dist) — « pack.sh » la bâtit ET l'emporte ; ce paquet est une demi-livraison"; verdict_apply; }
+    poser_doc
+    return 0
+  fi
+
   command -v "$NPM_BIN" >/dev/null 2>&1 \
     || { p_fail "npm absent — 16-node pose le précompilé épinglé ; joue-le d'abord"; verdict_apply; }
 
@@ -78,6 +94,14 @@ build_doc() {
   [[ -s "$SITE_SRC/dist/index.html" ]] \
     || { p_fail "build terminé sans index.html ($SITE_SRC/dist) — rien à servir"; verdict_apply; }
 
+  poser_doc
+}
+
+# ⚠ LA POSE EST COMMUNE AUX DEUX LIVRAISONS, ET C'EST DELIBERE. Ce qui change entre binaire et
+# source est de savoir QUI a bâti le `dist/` — pas ce qu'on en fait. Deux copies de ce bloc
+# dériveraient sur le mode, le propriétaire ou l'atomicité, et l'une des deux formes servirait une
+# doc que personne n'a relue.
+poser_doc() {
   # Pose atomique : un `doc/` à moitié recopié se sert en 404 silencieux.
   local partial; partial="$(doc_dir).partial"
   rm -rf "$partial"

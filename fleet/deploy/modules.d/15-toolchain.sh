@@ -167,6 +167,20 @@ apply() {
     done
   fi
 
+  # ⚠ LA VERIFICATION DU PLANCHER SUIT LA POSE, ET ELLE N'A DE SENS QUE SI ON A POSE. En livraison
+  # binaire on vient d'annoncer « erlang et elixir non poses, rien a batir ici » — puis ce bloc
+  # exigeait OTP >= 27 et rendait `p_fail "Erlang/OTP « 0 » toujours sous le plancher"`. Le module
+  # se contredisait en trois lignes, et l'apply mourait sur une machine dont l'etat etait
+  # exactement celui qu'il venait de declarer correct.
+  #
+  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006, sans erlang) : `OK` puis
+  # `FAIL` puis `ERREUR ... apply en echec (rc=1)`. La release embarque son ERTS : le plancher OTP
+  # de la MACHINE ne decide de rien quand personne ne compile dessus.
+  if rien_a_batir; then
+    p_ok "plancher OTP/Elixir non vérifié — la release embarque son ERTS, rien ne compile ici"
+    verdict_apply
+  fi
+
   local otp ev built; otp="$(otp_release)"; ev="$(elixir_version)"
   if [[ "$otp" -lt "$PROV_ELIXIR_OTP_MAJOR" ]]; then
     p_fail "Erlang/OTP « $otp » toujours sous le plancher $PROV_ELIXIR_OTP_MAJOR apres apt (distro trop vieille ?)"

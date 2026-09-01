@@ -19,20 +19,51 @@
 # LE TAR EST LE MÊME KIT QU'AUJOURD'HUI, la release en plus : on untar, on lance `install.sh`, ça
 # part. Il n'y a pas de second chemin à connaître.
 #
+# ⚠ « LA RELEASE EN PLUS » EST DEVENU « LA RELEASE ET LA DOC ». La doc n'était pas dans le périmètre
+# de ce script quand il a été écrit, et ça ne coûtait rien : la cible posait node et la bâtissait.
+# Depuis que le rail lit le discriminant de livraison (`prov_delivery`), une cible qui installe un
+# PAQUET ne pose plus node — donc si le paquet n'apporte pas la doc, personne ne la bâtira jamais.
+# Les deux produits voyagent ensemble ou la livraison est une moitié.
+#
 # ⚠ L'ARTEFACT PORTE SON OTP ET SON ARCH DANS SON NOM. Une release embarque son ERTS : elle est
 # compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
 # personne ne vérifie à ta place.
 #
-# USAGE : ./pack.sh            gate + release + tar (+ push si une forge est configurée)
+# USAGE : ./pack.sh            gate + release + DOC + tar (+ push si une forge est configurée)
 #         ./pack.sh --no-push  s'arrête au tar
 # ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
-# EXIT  : 0 le paquet est là · 1 gate rouge, build KO, ou push refusé
+#         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
+#         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
+#                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
+# PRÉ-REQUIS : `erl`, `mix` — et `npm`, depuis que ce script bâtit AUSSI la doc. Un poste en
+#              livraison source les a tous les trois : c'est de là qu'on packe.
+# EXIT  : 0 le paquet est là · 1 gate rouge, build KO, doc KO, ou push refusé
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
+
+# ─── L'ARBRE DOIT ÊTRE PROPRE, ET CE REFUS A ÉTÉ PAYÉ ───────────────────────────────────────────
+#
+# ⚠ CE SCRIPT S'EXÉCUTE DEPUIS L'ARBRE DE TRAVAIL ET ARCHIVE `HEAD`. Les deux divergent dès qu'une
+# modification n'est pas commitée — et alors le paquet contient un code que le gate N'A PAS VU :
+# `mix gate` et `mix release` lisent l'arbre, `git archive HEAD` lit le commit.
+#
+# MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : le tar portait la doc que la
+# section neuve venait de batir — donc l'arbre de travail avait bien tourne — et la version HEAD des
+# modules, sans le correctif qui va avec. `44-media` est mort sur « npm absent », un message qui
+# decrit exactement l'etat que le correctif absent devait empecher.
+#
+# LE TAMPON MENTAIT DANS LES DEUX SENS. Il portait `+local` pour dire « arbre modifie » ; le paquet,
+# lui, ne contenait AUCUNE de ces modifications. Un lecteur en deduisait le contraire de la verite.
+# Le `+local` disparait donc d'ici — il garde tout son sens dans `prov_source_rev`, qui decrit un
+# ARBRE, jamais un paquet.
+#
+# On refuse plutot que d'archiver l'arbre : un paquet qu'on pousse sur une forge doit etre
+# reproductible depuis un commit. « Mieux vaut un echec explicite qu'un succes ambigu. »
+git diff --quiet HEAD -- 2>/dev/null || die "arbre modifie — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes differents dans un meme paquet. Commite (ou remise) d'abord."
 
 say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
@@ -72,6 +103,40 @@ say "gate (compile strict + suite + bats + contrats + topologie + dialyzer)…"
 
 say "release prod…"
 ( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+
+# ─── LA DOC — LA SECONDE MOITIÉ DE LA LIVRAISON, ET ELLE MANQUAIT ───────────────────────────────
+#
+# ⚠ CE SCRIPT NE BÂTISSAIT QUE LA RELEASE, et ce n'était pas un oubli quand il a été écrit : la doc
+# n'était pas dans son périmètre. Ce qui a changé, c'est la doctrine des deux livraisons — un paquet
+# est BINAIRE, donc « Elixir compilé ET doc compilée, rien à bâtir sur la cible ». Depuis que
+# `16-node` lit ce discriminant, une cible qui installe un paquet ne pose PLUS node : elle n'a donc
+# aucun moyen de bâtir la doc, et `44-media` échouerait sur « npm absent ».
+#
+# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni une
+# boîte de prod (elle a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
+# bâtir) — un troisième état que personne n'a décrit, avec un DRIFT que l'apply ne peut pas
+# converger.
+#
+# ⚠ NODE DEVIENT UN PRÉ-REQUIS DE CE SCRIPT, au même titre qu'`erl` et `mix`. C'est cohérent : on
+# packe depuis un poste, et un poste en livraison SOURCE pose node. Ça se dit, ça ne se devine pas.
+#
+# ⚠ ET `LCARS_SITE_BASE` VOYAGE, comme dans `44-media` et dans le Dockerfile. Sans elle le site sort
+# pour la racine : servi sous `/doc/`, chacune de ses URL d'asset serait fausse. Trois poseurs, une
+# seule valeur — celle-ci suit les deux autres.
+SITE_SRC="${LCARS_SITE_SRC:-assets/github.io}"
+SITE_BASE="${LCARS_SITE_BASE:-/doc/}"
+[[ -d "$SITE_SRC" ]] || die "sources du site absentes ($SITE_SRC) — le paquet serait une demi-livraison"
+command -v npm >/dev/null 2>&1 \
+  || die "npm absent — ce script bâtit AUSSI la doc depuis $SITE_SRC ; pose node (le rail le fait en livraison source), puis relance"
+
+say "doc du deck (npm ci + build, base $SITE_BASE)…"
+( cd "$SITE_SRC" && npm ci --no-audit --no-fund >/dev/null 2>&1 ) \
+  || die "npm ci en echec ($SITE_SRC) — la doc ne peut pas etre batie"
+( cd "$SITE_SRC" && LCARS_SITE_BASE="$SITE_BASE" npm run build >/dev/null 2>&1 ) \
+  || die "build du site en echec ($SITE_SRC) — un chemin du runtime a-t-il bouge ? le build LIT l arbre"
+[[ -s "$SITE_SRC/dist/index.html" ]] \
+  || die "build termine sans index.html ($SITE_SRC/dist) — rien a servir"
+say "doc batie : $(find "$SITE_SRC/dist" -type f | wc -l) fichier(s)"
 
 # ─── LE TAR — le kit d'install, release comprise ─────────────────────────────────────────────────
 # `git archive` donne l'arbre suivi (ce que la forge sert déjà en `main.tar.gz`), et on y ajoute le
@@ -116,12 +181,19 @@ git archive --format=tar HEAD | tar -x -C "$STAGE/$ROOT" || die "git archive KO"
 # rouvrait un étage au-dessus. `prov_rev_is_behind` fait déjà `${1%%+*}`, il l'encaisse.
 _rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
   || die "révision indéterminable — le paquet serait intraçable, et l'install le dirait mal"
-git diff --quiet HEAD -- 2>/dev/null || _rev="${_rev}+local"
 printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
 say "révision estampillée : $_rev"
 
 mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
 cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
+
+# ⚠ LA DOC VOYAGE AU CHEMIN QUE `44-media` LIT DÉJÀ, et c'est ce qui évite d'inventer une convention.
+# Ce module copie `$SITE_SRC/dist/.` vers `/opt/lcars/share/doc` ; en posant le `dist/` bâti là où il
+# le cherche, le paquet n'a RIEN de nouveau à faire connaître au rail. Même raison que pour la
+# release : `git archive` ne l'emporte pas (`dist/` est gitignoré, comme `_build/`), donc les deux
+# s'ajoutent ici, côte à côte, pour la même raison.
+mkdir -p "$STAGE/$ROOT/$SITE_SRC"
+cp -a "$SITE_SRC/dist" "$STAGE/$ROOT/$SITE_SRC/" || die "doc introuvable apres le build ($SITE_SRC/dist)"
 tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 ( cd "$PACK_DIR" && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256" )
 

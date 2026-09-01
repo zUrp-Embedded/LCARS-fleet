@@ -76,7 +76,16 @@ check() {
 apply() {
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_apply; }
-  command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
+  # ⚠ `mix` N'EST EXIGE QUE SI L'ON BATIT, et ce module ne bâtit pas toujours. En livraison BINAIRE
+  # la release arrive faite : `deploy-release.sh` la voit et ne compile pas — c'est tout l'objet du
+  # discriminant. Exiger `mix` avant de le lire renvoyait vers `15-toolchain`, dont l'etat-cible en
+  # binaire est justement de ne rien poser : le rail s'envoyait une instruction impossible.
+  #
+  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : `FAIL 60-deploy: mix absent
+  # — lance d'abord 15-toolchain`, sur une machine ou la release etait deja dans le paquet.
+  if ! prov_delivery_is_binary; then
+    command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
+  fi
   id "$PROV_HUMAN" >/dev/null 2>&1 || { p_fail "humain-bâtisseur inconnu: $PROV_HUMAN"; verdict_apply; }
 
   local src_sha deployed_sha

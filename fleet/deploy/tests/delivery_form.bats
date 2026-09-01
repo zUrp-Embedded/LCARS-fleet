@@ -154,3 +154,124 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -q '^apt_already .*erlang' "$PROV_JOURNAL_ACC"
   grep -q '^apt_already .*elixir' "$PROV_JOURNAL_ACC"
 }
+
+# ─── LE PAQUET PORTE LES DEUX MOITIES ───────────────────────────────────────────────────────────
+
+@test "PACK : le paquet emporte la DOC autant que la release — sinon c'est une demi-livraison" {
+  # ⚠ LE DEFAUT QUE CE TEMOIN FERME EST NE DE R4, ET IL ETAIT INVISIBLE AVANT. Tant que la cible
+  # posait node dans tous les cas, un paquet sans doc se rattrapait tout seul : `44-media` la
+  # batissait sur place. Depuis que `16-node` lit le discriminant, une cible qui installe un paquet
+  # n'a plus node — donc si le paquet n'apporte pas la doc, PERSONNE ne la batira jamais, et le
+  # drift « doc du deck absente » ne se converge par aucun geste.
+  local pack="$BATS_TEST_DIRNAME/../../../pack.sh"
+  [ -f "$pack" ]
+  grep -q 'npm run build' "$pack"                       # il la BATIT
+  grep -qE 'cp -a "\$SITE_SRC/dist"' "$pack"            # et il l EMPORTE
+  # les deux produits partent cote a cote, pour la meme raison : gitignores, donc hors `git archive`
+  local n_rel n_doc
+  n_rel="$(grep -n '_build/prod/rel/lcars_fleet' "$pack" | tail -1 | cut -d: -f1)"
+  n_doc="$(grep -n 'cp -a "\$SITE_SRC/dist"' "$pack" | head -1 | cut -d: -f1)"
+  [ -n "$n_rel" ] && [ -n "$n_doc" ]
+  [ "$n_rel" -lt "$n_doc" ]
+  # et le tar se ferme APRES les deux
+  local n_tar; n_tar="$(grep -n 'tar -czf' "$pack" | head -1 | cut -d: -f1)"
+  [ "$n_doc" -lt "$n_tar" ]
+}
+
+@test "PACK : le chemin du dist est celui que 44-media LIT — aucune convention nouvelle" {
+  # Si les deux divergeaient, le paquet porterait sa doc a un endroit que le rail ne regarde pas :
+  # un fichier de plus dans le tar, et un drift de plus sur la cible.
+  local pack="$BATS_TEST_DIRNAME/../../../pack.sh"
+  local media="$DEPLOY/modules.d/44-media.sh"
+  grep -qE '^SITE_SRC="\$\{LCARS_SITE_SRC:-assets/github\.io\}"' "$pack"
+  grep -qE 'SITE_SRC="\$\{LCARS_SITE_SRC:-\$\(repo_root\)/assets/github\.io\}"' "$media"
+  # et la BASE d'URL est la meme des deux cotes — servie ailleurs, chaque asset serait faux
+  grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$pack"
+  grep -qE 'SITE_BASE="\$\{LCARS_SITE_BASE:-/doc/\}"' "$media"
+}
+
+@test "44-media : livraison binaire — il POSE la doc du paquet, il ne la batit pas" {
+  # Le symetrique de R4 : « rien a batir sur la cible ». Sans cette branche le module mourait sur
+  # « npm absent — 16-node pose le precompile ; joue-le d abord » — une instruction impossible,
+  # puisque l etat-cible de `16-node` en livraison binaire est justement de ne rien poser.
+  local media="$DEPLOY/modules.d/44-media.sh"
+  local bloc; bloc="$(sed -n '/^build_doc()/,/^}$/p' "$media")"
+  [ -n "$bloc" ]
+  grep -q 'prov_delivery_is_binary' <<<"$bloc"
+  # la garde est AVANT le test de npm, sinon elle ne sert a rien
+  local n_bin n_npm
+  n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_npm="$(grep -n 'command -v "\$NPM_BIN"' <<<"$bloc" | head -1 | cut -d: -f1)"
+  [ -n "$n_bin" ] && [ -n "$n_npm" ]
+  [ "$n_bin" -lt "$n_npm" ]
+  # et un paquet SANS doc est un echec NOMME, pas un build silencieux
+  grep -q 'demi-livraison' <<<"$bloc"
+}
+
+@test "44-media : la POSE est commune aux deux livraisons — une seule copie" {
+  # Ce qui change est QUI a bati le dist, pas ce qu on en fait. Deux copies de la pose deriveraient
+  # sur le mode, le proprietaire ou l atomicite, et une des deux formes servirait une doc que
+  # personne n a relue.
+  local media="$DEPLOY/modules.d/44-media.sh"
+  [ "$(grep -c 'poser_doc' "$media")" -ge 3 ]           # la fonction + ses deux appelants
+  [ "$(grep -c 'cp -a "\$SITE_SRC/dist/\."' "$media")" -eq 1 ]
+}
+
+# ─── CE QUE LA PREMIERE INSTALL BINAIRE REELLE A TROUVE (banc 2006, 2026-09-01) ─────────────────
+
+@test "PACK : un arbre MODIFIE est REFUSE — le gate et le tar liraient deux codes differents" {
+  # ⚠ LE DEFAUT LE PLUS CHER DE CE SCRIPT, ET IL ETAIT INVISIBLE. `pack.sh` s EXECUTE depuis l arbre
+  # de travail (`mix gate`, `mix release`, `npm run build` lisent l arbre) et ARCHIVE `HEAD`. Les
+  # deux divergent des qu une modification n est pas commitee : le paquet contient alors un code que
+  # le gate n a jamais vu.
+  #
+  # Mesure : le tar portait la doc que la section neuve venait de batir — donc l arbre avait bien
+  # tourne — ET la version HEAD des modules, sans le correctif qui va avec. `44-media` est mort sur
+  # « npm absent », le message exact que ce correctif absent devait empecher.
+  local pack="$BATS_TEST_DIRNAME/../../../pack.sh"
+  grep -qE 'git diff --quiet HEAD .*\|\| die' "$pack"
+  # et le refus arrive AVANT le gate : echouer apres sept minutes de compilation est une punition
+  local n_refus n_gate
+  # ⚠ HORS COMMENTAIRES : l en-tete CITE « mix gate » pour dire ce que le script ne reimplemente pas.
+  # Un `grep -n` nu comparait donc le refus a une ligne de PROSE, et rougissait sur du code juste.
+  local code; code="$(grep -vnE "^\\s*#" "$pack" | sed "s/^\\([0-9]*\\):/\\1:/")"
+  n_refus="$(grep -E "git diff --quiet HEAD" <<<"$code" | head -1 | cut -d: -f1)"
+  n_gate="$(grep -E "mix gate" <<<"$code" | head -1 | cut -d: -f1)"
+  [ "$n_refus" -lt "$n_gate" ]
+}
+
+@test "PACK : le tampon ne porte plus « +local » — il decrit le PAQUET, pas l arbre" {
+  # Il mentait dans les DEUX sens : il disait « arbre modifie » d un paquet qui ne contenait AUCUNE
+  # de ces modifications. `+local` garde tout son sens dans `prov_source_rev`, qui decrit un arbre.
+  local pack="$BATS_TEST_DIRNAME/../../../pack.sh"
+  grep -vE '^\s*#' "$pack" | refute_out '\+local'
+  grep -q 'rev-parse --short=8 HEAD' "$pack"
+}
+
+@test "15-toolchain : livraison binaire — le plancher OTP n est PAS verifie" {
+  # Le module s est contredit en trois lignes sur le banc 2006 : « erlang et elixir non poses,
+  # livraison binaire » puis « Erlang/OTP « 0 » toujours sous le plancher 27 » puis rc=1. La release
+  # embarque son ERTS : le plancher OTP de la MACHINE ne decide de rien quand rien ne compile.
+  local mod="$DEPLOY/modules.d/15-toolchain.sh"
+  # ⚠ HORS COMMENTAIRES, pour la meme raison : la prose du correctif CITE le message qu il corrige.
+  local bloc; bloc="$(sed -n "/^apply()/,\$p" "$mod" | grep -vE "^\\s*#")"
+  local n_garde n_plancher
+  n_garde="$(grep -n 'plancher OTP/Elixir non vérifié' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_plancher="$(grep -n 'toujours sous le plancher' <<<"$bloc" | head -1 | cut -d: -f1)"
+  [ -n "$n_garde" ] && [ -n "$n_plancher" ]
+  [ "$n_garde" -lt "$n_plancher" ]
+}
+
+@test "60-deploy : livraison binaire — \`mix\` n est pas exige" {
+  # La release arrive faite ; `deploy-release.sh` la voit et ne compile pas. Exiger `mix` renvoyait
+  # vers `15-toolchain`, dont l etat-cible en binaire est de ne RIEN poser.
+  local mod="$DEPLOY/modules.d/60-deploy.sh"
+  # ⚠ HORS COMMENTAIRES, pour la meme raison : la prose du correctif CITE le message qu il corrige.
+  local bloc; bloc="$(sed -n "/^apply()/,\$p" "$mod" | grep -vE "^\\s*#")"
+  grep -q 'prov_delivery_is_binary' <<<"$bloc"
+  # l exigence vit DANS la branche source, pas avant elle
+  local n_bin n_mix
+  n_bin="$(grep -n 'prov_delivery_is_binary' <<<"$bloc" | head -1 | cut -d: -f1)"
+  n_mix="$(grep -n 'mix absent' <<<"$bloc" | head -1 | cut -d: -f1)"
+  [ "$n_bin" -lt "$n_mix" ]
+}
