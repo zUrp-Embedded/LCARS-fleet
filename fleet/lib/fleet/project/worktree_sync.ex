@@ -37,13 +37,14 @@ defmodule Fleet.Project.WorktreeSync do
 
   WHY THE RUNTIME DOES THIS AND NOT THE POD. The architect arbitrates on deliverables and its code
   face is a read-only bind, so its own `git fetch` dies on `.git/FETCH_HEAD` — measured from inside
-  the pod, and the cost was not the missing diff: it arbitrated ANYWAY and invented an explanation
-  for what it could not see. The fetch happens host-side, in the worktree this GenServer already
+  the pod. What that costs is not the missing diff: it arbitrates ANYWAY and invents an explanation
+  for what it cannot see. The fetch happens host-side, in the worktree this GenServer already
   serializes, and the pod only READS the result through its bind.
 
   A NAMED ref per role, not `FETCH_HEAD`. `FETCH_HEAD` is overwritten by the next fetch and does not
-  say what it is the head OF — the same pod declared its code face "frozen" while that file was two
-  minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next fetch.
+  say what it is the head OF — measured, a pod declares its code face "frozen" while that file is
+  two minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next
+  fetch.
 
   A WILDCARD refspec, so no forge read is needed to learn the producer's role: every branch of the
   ticket lands, whichever role opened it, and an escalation covering several of them gets all of

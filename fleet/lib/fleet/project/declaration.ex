@@ -20,8 +20,8 @@ defmodule Fleet.Project.Declaration do
   project may hold in flight. It lives HERE and not on the workflow card, and the difference is not
   cosmetic — a card serves one workflow_run and a project can carry several, so a per-card ceiling
   could not bound a project whose tickets route through two different cards. Absent = the fleet
-  default (`--max-fan` / `LCARS_MAX_FAN`), which is what made serializing ONE project impossible:
-  the counter was per project and the knob was per box.
+  default (`--max-fan` / `LCARS_MAX_FAN`) — which alone cannot serialize ONE project: the counter
+  is per project and that knob is per box.
 
   Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
   the delegation default card, silently. A file that no longer NAMES a card (unreadable, or the
@@ -141,8 +141,8 @@ defmodule Fleet.Project.Declaration do
   #
   # On ne laisse PAS l'exception voler — cette fonction est aussi le preflight de la creation de
   # projet (`Onboard`), dont tout le contrat est de rendre `:ok | {:error, _}` AVANT que le depot
-  # existe. Mais le terme d'erreur porte desormais le message d'origine, et le journal est en
-  # `error` et non en `warning` : au prochain flake, la cause est ecrite, pas a redecouvrir.
+  # existe. Mais le terme d'erreur porte le message d'origine, et le journal est en `error` et non
+  # en `warning` : au prochain flake, la cause est ecrite, pas a redecouvrir.
   defp load_declared(name, lopts) do
     case Fleet.Workflow.Loader.load!(name, lopts) do
       %{"scope" => "project"} ->
@@ -161,12 +161,12 @@ defmodule Fleet.Project.Declaration do
       {:error, {:card_load_failed, name, Exception.message(e)}}
   end
 
-  # Le refus d'une carte reellement absente d'ici. Corps inchange depuis le 2026-08-17 — seule son
-  # entree a change : il n'est plus atteint par la retombee d'une exception, mais par un test
-  # d'appartenance. Les deux termes qu'il rend sont les memes, et leurs appelants aussi.
+  # Le refus d'une carte reellement absente d'ici. Il est atteint par un test d'appartenance et non
+  # par la retombee d'une exception — la distinction vaut pour l'entree, pas pour les deux termes
+  # qu'il rend.
   defp refuse_absent(name, repo, lopts) do
     # ⚠ « INCONNUE ICI » N'EST PAS « INCONNUE », ET LA DIFFERENCE EST LA SEULE CHOSE UTILE A DIRE.
-    # Mesure du 2026-08-17, transcript d'un starfleet : le guichet lui presente `standard` du
+    # Mesure, transcript d'un starfleet : le guichet lui presente `standard` du
     # catalogue `web-demo` (la liste NOMME le catalogue de chaque carte), il la choisit, et
     # `project_create` la refuse en `{:unknown_card, "standard"}` — parce que l'appel n'a pas
     # porte `catalogue`, donc l'org a pris le defaut et la carte s'est resolue chez `fleet`. Le

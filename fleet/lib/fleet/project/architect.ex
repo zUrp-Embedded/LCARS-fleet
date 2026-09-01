@@ -1,9 +1,9 @@
 defmodule Fleet.Project.Architect do
   @moduledoc """
-  The PER-PROJECT architect — pod-id AUTHORITY + idempotent `ensure/2` (reorg 2026-07-19,
-  cf. DESIGN-carte-des-roles §6/§14). Replaces the old fleet-level permanent arch: ONE architect
-  per repo, project-bound identity (numeric repo id in its deterministic UUID → a stable Desktop
-  slot per project), spawned ON-OPEN (create/import/open) and ON-DEMAND (escalation rail).
+  The PER-PROJECT architect — pod-id AUTHORITY + idempotent `ensure/2`. ONE architect per repo, and
+  not one for the fleet: project-bound identity (numeric repo id in its deterministic UUID → a
+  stable Desktop slot per project), spawned ON-OPEN (create/import/open) and ON-DEMAND (escalation
+  rail).
 
   ## No clone — the three faces, and one of them only in reading
 

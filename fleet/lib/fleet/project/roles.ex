@@ -109,7 +109,8 @@ defmodule Fleet.Project.Roles do
     * `exception_judge` — **exactly one**. `Fleet.Pilot.MergeAndPromote` is the sole writer of the
       signed merge; two sealers is not a specialisation, it is an ambiguity about who signs.
     * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
-    * `project_delegate` — **exactly one**, and it is the one this check was MISSING. Unlike the
+    * `project_delegate` — **exactly one**, and it is the easiest of the three to leave out. Unlike
+      the
       producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. So a
       catalogue carrying two of them booted green and broke at the first `project_create`
       (`Fleet.Project.Architect`) or the first escalation (`Fleet.Pilot.ArchWake`) — hours after the
@@ -303,14 +304,14 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
-  Returns the CI policy of the project's declared card — the twin of `project_jury/2`, and it exists
-  because the two were NOT twins.
+  Returns the CI policy of the project's declared card — the twin of `project_jury/2`, and it has to
+  exist for the two to BE twins.
 
-  `ReviewLifecycle.issue_card_ci/2` claimed in comment to fall back "exactly like its jury"; its
-  jury fallback read the PROJECT's declared card while its CI fallback answered a hardcoded
-  `:ignore`. So a PR with no engraved route — a human PR, an adopted orphan — was judged under the
-  project's jury and under NO CI policy, on a project whose card demands one. The comment described
-  the code it should have had.
+  A CI fallback answering a hardcoded `:ignore`, beside a jury fallback that reads the PROJECT's
+  declared card, makes a PR with no engraved route — a human PR, an adopted orphan — judged under
+  the project's jury and under NO CI policy, on a project whose card demands one. That is the shape
+  `ReviewLifecycle.issue_card_ci/2` would take under a comment claiming to fall back "exactly like
+  its jury".
   """
   @spec project_ci(String.t(), keyword()) :: :required | :ignore
   def project_ci(repo, opts \\ []) when is_binary(repo), do: ci(load_project_card(repo, opts))
@@ -319,10 +320,10 @@ defmodule Fleet.Project.Roles do
     name = Fleet.Project.Declaration.pipeline_default(repo, opts)
     loader_opts = Keyword.take(opts, [:workflow_maps_root])
 
-    # THE PROJECT'S OWN CATALOGUE, and it was never consulted. This read named the card and let the
-    # loader answer from the default root — the BUNDLED catalogue — so a project belonging to
-    # any other one asked for a card the loader had published under another key and was told it does
-    # not exist. Measured: `web/test2` declares `standard`, the `web` catalogue carries it, and the
+    # THE PROJECT'S OWN CATALOGUE, and it must be consulted. Naming the card and letting the loader
+    # answer from the default root — the BUNDLED catalogue — makes a project belonging to any other
+    # one ask for a card the loader published under another key, and be told it does not exist.
+    # Measured: `web/test2` declares `standard`, the `web` catalogue carries it, and the
     # fleet raised `declared_card_unloadable` on every tick while falling back to a card the human
     # never chose. Falling back to another catalogue's default is worse than failing: the project
     # runs, quietly, under a criticality nobody declared for it.
@@ -366,8 +367,8 @@ defmodule Fleet.Project.Roles do
   @doc """
   The card a project takes when it declares none — DECLARED by the catalogue, not defaulted here.
 
-  It was the literal `"brief-gate"`, one catalogue's card: every catalogue shipping its own cards
-  silently inherited a default naming a card it does not have. Unlike the doc rail, no property
+  A literal here — `"brief-gate"`, one catalogue's card — makes every catalogue shipping its own
+  cards silently inherit a default naming a card it does not have. Unlike the doc rail, no property
   distinguishes this card from its siblings, so it is a choice and it is declared — the manifest
   says it, and `Fleet.Catalogue.verify!/0` refuses a catalogue that ships cards without naming one.
   """
@@ -379,8 +380,9 @@ defmodule Fleet.Project.Roles do
   @doc """
   The workflow map serving routeless `destination/workshop` issues — the catalogue's doc rail.
 
-  ⚠ NO DEFAULT NAME, and the `@doc` claimed one (`"workshop-direct"`) long after the knob that held
-  it was removed. The rail resolves by a PROPERTY (a card carrying a `face: workshop` producer), so
+  ⚠ NO DEFAULT NAME, whatever a `@doc` may be tempted to claim (`"workshop-direct"` is one
+  catalogue's card). The rail resolves by a PROPERTY (a card carrying a `face: workshop` producer),
+  so
   each catalogue answers with ITS own card and a catalogue shipping none answers `nil` — which the
   boot warns about by name. A default here would hand one catalogue's card to every other.
   """
@@ -392,10 +394,10 @@ defmodule Fleet.Project.Roles do
 
   # `catalogue_root: <repo>` is accepted as a REPO here and resolved to that project's cards. The
   # doc rail is resolved by a PROPERTY (a card carrying a `face: workshop` producer), and the
-  # property was searched in the default catalogue whatever the project: a `web` ticket therefore
-  # burned the `fleet` catalogue's rail, whose producer is `scribe` — an account that is a member of
-  # no `web` team. The push and the PR both answered `403 user must be a collaborator`, which reads
-  # as a permissions defect and was a card coming from the wrong catalogue.
+  # property searched in the default catalogue whatever the project makes a `web` ticket burn the
+  # `fleet` catalogue's rail, whose producer is `scribe` — an account that is a member of no `web`
+  # team. The push and the PR both answer `403 user must be a collaborator`, which reads as a
+  # permissions defect and is a card coming from the wrong catalogue.
   defp workshop_scope(opts) do
     case Keyword.get(opts, :catalogue_root) do
       repo when is_binary(repo) -> Fleet.Workflow.Loader.card_opts_for_repo(repo)

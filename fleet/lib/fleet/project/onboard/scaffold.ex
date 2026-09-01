@@ -171,7 +171,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
   **WHY AN IMPORTED REPOSITORY NEEDS THEM.** `main` protection requires a `CI / *` status, and a
   repository that ships no `.gitea/workflows/` produces none — ever. No check appears, no pull
   request can merge, and the delivery rail is dead before its first ticket. `CIGate` already reads
-  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured 2026-08-12 on a repository
+  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured on a repository
   imported from GitHub), but naming it leaves the human to write the file — which is how one of
   them landed with a `runs-on:` no runner served, waiting forever instead of failing.
 
