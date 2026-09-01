@@ -73,10 +73,38 @@ check_ci() {
     return
   fi
 
+  # ⚠ « AUCUN RUNNER » EST UN FAIT, PAS UN DEFAUT DE MESURE — ET LES DEUX SORTAIENT PAR LA MEME
+  # PORTE. Le sondage etait `curl -s` sans `-f` et sans code HTTP, suivi de `jq '.total_count // 0'`
+  # avec `|| echo 0` : les QUATRE echecs possibles tombaient dans la branche « AUCUN runner
+  # enregistre ». Mesure du 2026-09-01 sur les quatre corps reels — corps vide (reseau coupe,
+  # curl 6/7/28), `<html>404…` (jq echoue), `{"message":"token does not have … required scope(s)"}`
+  # (403), `{"message":"user should be the site admin"}` — tous rendaient n=0.
+  #
+  # Ce que ca coute ici et nulle part ailleurs : `accept` est joue par `workstation:194` et SON code
+  # de retour devient celui de l'installation (`workstation:203`). La derniere chose que lit
+  # l'operateur d'une install par ailleurs saine etait un diagnostic FAUX sur une forge qui porte
+  # trois runners.
+  #
+  # Le rail sait deja faire, a trois rangs d'ici : `50-forge.sh:250-259` sonde le MEME endpoint et
+  # separe les deux cas — `-fsS`, puis `[[ -n "$body" ]] || p_warn "… rien n'est conclu"`. Et
+  # `accept` possede deja le troisieme etat qu'il fallait emettre : `skip`, en tete de ce fichier.
+  local code
   body="$(printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$tokfile")" \
-          | curl -K - -s -m 15 "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
-  n="$(printf '%s' "$body" | jq -r '.total_count // 0' 2>/dev/null || echo 0)"
-  if [[ "${n:-0}" -eq 0 ]]; then
+          | curl -K - -s -m 15 -w '\n%{http_code}' "$FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  code="${body##*$'\n'}"
+  body="${body%$'\n'*}"
+  if [[ "$code" != "200" ]]; then
+    skip "CI : l'API admin des runners n'a pas repondu (HTTP ${code:-aucune}) — jeton hors portee site-admin, forge muette ou injoignable : rien n'est conclu, ni dans un sens ni dans l'autre"
+    return
+  fi
+  # `-e` : `jq` rend 1 sur `null`/absent. Sans lui, un corps 200 qui ne porte PAS `total_count`
+  # (une autre forme d'erreur, une autre version d'API) redeviendrait « AUCUN runner ».
+  n="$(printf '%s' "$body" | jq -er '.total_count' 2>/dev/null)" || {
+    skip "CI : reponse 200 de l'API admin sans « total_count » — forme inattendue, rien n'est conclu"
+    return
+  }
+  [[ "$n" =~ ^[0-9]+$ ]] || { skip "CI : « total_count » n'est pas un nombre (« $n ») — rien n'est conclu"; return; }
+  if [[ "$n" -eq 0 ]]; then
     no "CI : AUCUN runner enregistre — tout job reste en attente, aucune PR ne fusionne"
     return
   fi

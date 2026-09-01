@@ -117,6 +117,103 @@ fleet_v2_stub() { # fleet_v2_stub <vivant|mort|start-casse>
 joue() { run env PATH="$BINDIR:$PATH" HOME="$HOME_DIR" \
   bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; check_fleet_start"; }
 
+# ─── check_ci : « AUCUN RUNNER » EST UN FAIT, ET IL SORTAIT PAR LA PORTE DES NON-MESURES ────────
+#
+# ⚠ ZERO TEMOIN NE REGARDAIT `check_ci` — les onze de ce fichier portent tous sur `check_fleet_start`.
+# Le sondage etait `curl -s` sans `-f` et sans code HTTP, suivi de `jq '.total_count // 0'` avec
+# `|| echo 0`. Mesure du 2026-09-01 sur les quatre corps que produisent les echecs reels : corps vide
+# (reseau coupe), `<html>404…`, `{"message":"token does not have … required scope(s)"}` (403),
+# `{"message":"user should be the site admin"}` — LES QUATRE rendaient n=0, donc « AUCUN runner
+# enregistre », un verdict definitif sur une non-mesure.
+#
+# Et c'est ici que ca coute le plus : `accept` est joue par `workstation:194`, et son code de retour
+# DEVIENT celui de l'installation (`workstation:203`). La derniere chose que lit l'operateur d'une
+# install saine etait un diagnostic faux sur une forge qui porte trois runners.
+#
+# ⚠ ON MESURE LES COMPTEURS, PAS LA PHRASE. `FAILED` contre `SKIPPED` : c'est la difference entre
+# « constate » et « pas mesure », et c'est exactement ce que le defaut confondait. Chercher le texte
+# du message laisserait passer un `no` reformule.
+curl_stub() { # curl_stub — la doublure lit CURL_CODE / CURL_CORPS / CURL_RC de l'environnement
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'cat >/dev/null 2>&1 || true' \
+    'printf "%s" "${CURL_CORPS:-}"' \
+    'for a in "$@"; do case "$a" in *%{http_code}*) printf "\n%s" "${CURL_CODE:-000}";; esac; done' \
+    'exit "${CURL_RC:-0}"' > "$BINDIR/curl"
+  chmod 0755 "$BINDIR/curl"
+}
+
+joue_ci() { # joue_ci <code http> <corps> [rc de curl]
+  curl_stub
+  local priv="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$priv"
+  printf 'jeton-de-decor\n' > "$priv/forge-master.token"
+  # Le decor porte ses propres workflows : `check_ci` derive les labels attendus de l'arbre, et
+  # lire ceux du VRAI depot ferait dependre le temoin de la CI du jour.
+  mkdir -p "$BATS_TEST_TMPDIR/.gitea/workflows"
+  printf 'jobs:\n  a:\n    runs-on: shell\n' > "$BATS_TEST_TMPDIR/.gitea/workflows/gate.yml"
+  # ⚠ `--forge-url`, PAS UNE VARIABLE D ENVIRONNEMENT : `accept` pose `FORGE_URL=""` en dur avant de
+  # parser ses arguments (l. 11), donc un export est ECRASE. Le decor passe par la porte du script,
+  # comme un operateur — premiere version ecrite avec `env FORGE_URL=…`, les sept temoins rougissaient
+  # tous sur « aucune adresse de forge », c est-a-dire sur le decor et pas sur le code audite.
+  run env PATH="$BINDIR:/usr/bin:/bin" \
+    LCARS_PRIVATE_DIR="$priv" \
+    CURL_CODE="$1" CURL_CORPS="$2" CURL_RC="${3:-0}" \
+    bash -c "set -euo pipefail; source '$MOD' --forge-url http://forge.decor >/dev/null 2>&1; check_ci; printf 'COMPTEURS F=%s S=%s H=%s\n' \"\$FAILED\" \"\$SKIPPED\" \"\$HELD\""
+}
+
+@test "check_ci : une forge INJOIGNABLE est SAUTEE, jamais comptee comme zero runner" {
+  joue_ci 000 "" 7
+  [[ "$output" == *"COMPTEURS F=0 S=1 H=0"* ]] \
+    || { echo "une non-mesure a ete comptee comme un echec : $output"; return 1; }
+  refute_out "AUCUN runner" <<<"$output"
+}
+
+@test "check_ci : un jeton HORS PORTEE site-admin est SAUTE — 403 n est pas une mesure" {
+  joue_ci 403 '{"message":"token does not have at least one of required scope(s)"}'
+  [[ "$output" == *"COMPTEURS F=0 S=1 H=0"* ]] \
+    || { echo "un 403 a ete lu comme « aucun runner » : $output"; return 1; }
+  # ⚠ ET LE MESSAGE NOMME LE CODE, parce qu ici le message EST le livrable : `accept` est un outil
+  # de diagnostic, et « HTTP 403 » envoie vers la portee du jeton la ou « forme inattendue »
+  # envoie vers la forge. MESURE : sans la garde sur le code HTTP, le `jq -e` en aval saute AUSSI
+  # ces quatre corps — les compteurs seuls ne distinguent donc pas les deux gardes, et cette
+  # assertion-ci est la seule chose qui tienne celle du code HTTP.
+  [[ "$output" == *"403"* ]] \
+    || { echo "le refus ne nomme pas le code HTTP — l operateur ne sait pas quoi reparer : $output"; return 1; }
+}
+
+@test "check_ci : une reponse qui n est pas du JSON est SAUTEE" {
+  joue_ci 404 '<html><body>404 Not Found</body></html>'
+  [[ "$output" == *"COMPTEURS F=0 S=1 H=0"* ]] \
+    || { echo "un corps HTML a ete lu comme « aucun runner » : $output"; return 1; }
+}
+
+@test "check_ci : un 200 SANS total_count est SAUTE — forme inattendue, rien n est conclu" {
+  joue_ci 200 '{"ok":true}'
+  [[ "$output" == *"COMPTEURS F=0 S=1 H=0"* ]] \
+    || { echo "une forme inattendue a ete lue comme « aucun runner » : $output"; return 1; }
+}
+
+@test "check_ci : zero runner MESURE reste un ECHEC — la garde ne mange pas le vrai fait" {
+  # ⚠ SANS CE TEMOIN, LES QUATRE PRECEDENTS SONT SATISFAITS PAR UN check_ci QUI NE CONCLUT PLUS
+  # JAMAIS RIEN. C est le defaut symetrique, et il serait pire : une forge sans runner est un rail
+  # de livraison mort, et personne ne le dirait plus.
+  joue_ci 200 '{"total_count":0,"runners":[]}'
+  [[ "$output" == *"COMPTEURS F=1 S=0 H=0"* ]] \
+    || { echo "un zero runner MESURE n est plus un echec : $output"; return 1; }
+  [[ "$output" == *"AUCUN runner enregistre"* ]]
+}
+
+@test "check_ci : des runners qui servent les labels des workflows TIENNENT la capacite" {
+  joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"shell"}]}]}'
+  [[ "$output" == *"COMPTEURS F=0 S=0 H=1"* ]] \
+    || { echo "le chemin nominal ne tient plus : $output"; return 1; }
+}
+
+@test "check_ci : un runner qui ne sert PAS le label demande est un echec NOMME" {
+  joue_ci 200 '{"total_count":1,"runners":[{"name":"r1","labels":[{"name":"autre"}]}]}'
+  [[ "$output" == *"COMPTEURS F=1 S=0 H=0"* ]]
+  [[ "$output" == *"shell"* ]]
+}
+
 @test "LCARS header: SOURCE/AUTHOR/STARDATE/STATUS present" {
   run head -6 "$SRC"
   [[ "$output" == *"SOURCE:"* ]]
