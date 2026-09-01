@@ -289,11 +289,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
          {:ok, _} <- forge.post_comment(repo, n, body, comment_opts),
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
-         # UNLOCK, pas un `remove_label`. Ce chemin retirait `lcars-in-flight` EN LIGNE, donc il
-         # sautait les deux autres gestes de `unlock/6` : le chronometre Gitea du role n'etait
-         # jamais arrete — il tournait pendant TOUTE l'attente humaine, qui peut durer des jours —
-         # et `step.unlocked` n'etait jamais emis, donc une escalade ne laissait AUCUNE ligne de
-         # feed. Le seul etat que l'arch doit voir arriver etait le seul a n'en produire aucune.
+         # UNLOCK, pas un `remove_label`. Retirer `lcars-in-flight` EN LIGNE saute les deux autres
+         # gestes de `unlock/6` : le chronometre Gitea du role n'est jamais arrete — il tourne
+         # pendant TOUTE l'attente humaine, qui peut durer des jours — et `step.unlocked` n'est
+         # jamais emis, donc une escalade ne laisse AUCUNE ligne de feed. Le seul etat que l'arch
+         # doit voir arriver serait le seul a n'en produire aucune.
          {:ok, _} <- unlock(forge, repo, n, forge_opts, role, :awaiting_arch) do
       Logger.info(
         "StepRunCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
@@ -352,7 +352,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # PR-opened action (a same-second tie renders inverted in the feed).
          :ok <- space_writes(opts),
          # Both post-push legs record their failure ON THE ISSUE (BL-6-34): between a landed push
-         # and a born PR, an {:error, _} used to be a host-log line — pushed branch, mute ticket,
+         # and a born PR, an {:error, _} is otherwise a host-log line — pushed branch, mute ticket,
          # wedged brick. The marker turns the stall into a named refusal.
          {:ok, role_opts} <-
            ForgeClient.as_role(forge_opts, role) |> record_pr_open_failure(step_run, sha, opts),
@@ -410,7 +410,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.get(step_run, :role, "juge")
     work_dir = verdict_work_dir(repo, opts)
 
-    # C1 2026-08-18: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
+    # C1: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
     # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
     # same reason (OpsObject's idempotent content probe: a re-run re-finds the commit, never forks
     # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
@@ -544,12 +544,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # OPTIONAL payload never blocks a valid verdict.
   defp maybe_engrave_findings(step_run, work_dir, role) do
     case {Map.get(step_run, :review_findings), work_dir} do
-      # THIS SILENCE WAS RIGHT FOR ONE DAY AND WRONG THE NEXT. It read "no key = a legacy judge,
-      # today's path" -- true while `findings_v1` was brand new and no SP named it. Every judge's
-      # composed SP names it now, so an absence is no longer a judge that never heard of the key:
-      # it is a judge that was told and did not. MEASURED 2026-08-19 (bench, PR#34): the qualifier
-      # returned an excellent verdict -- it named the planted faux-vert structurally -- and NO
-      # machine payload at all, and nothing anywhere said so.
+      # SILENCE HERE READS "no key = a legacy judge, today's path", and that is only true while
+      # `findings_v1` is new and no SP names it. Every judge's composed SP names it, so an absence
+      # is NOT a judge that never heard of the key: it is a judge that was told and did not.
+      # MEASURED on the bench: a qualifier returns an excellent verdict — it names the planted
+      # faux-vert structurally — and NO machine payload at all, with nothing anywhere saying so.
       #
       # That silence is what would make the verdict function of C2 blind: f reads findings, an
       # absent payload starves it, and a starved f degrades to exactly today's boolean AND while
@@ -1055,7 +1054,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   # Records ONE post-push propagation failure on the issue (BL-6-34): the deliverable IS pushed
   # (the branch survives on the forge) but the PR was never born (role token unavailable, PR API
-  # refusal). Without the marker the stall was a host-side warning — pushed branch, MUTE ticket,
+  # refusal). Without the marker the stall is a host-side warning — pushed branch, MUTE ticket,
   # brick wedged under its lock with no automatic retry (unlike the publish leg, whose brake
   # replays rework). Same posture as `record_publish_failure`, its pre-push twin: BEST-EFFORT and
   # error-transparent — the original error passes through untouched, a failed post degrades to the
@@ -1161,8 +1160,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
         # this »*. Un abandon invitait donc a chainer dessus.
         #
         # `Labels.stage_retired/0` existe pour ca et le dit : « fermeture SANS livraison (supersede,
-        # abandon) ». L'intention etait ecrite, le cablage ne la lisait pas. L'appelant declare donc
-        # sa fermeture ; le defaut reste `:delivered`, qui est le cas nominal de tous les autres.
+        # abandon) ». L'intention est ecrite la ; encore faut-il que le cablage la lise. L'appelant
+        # declare donc sa fermeture, le defaut restant `:delivered` — le cas nominal de tous les
+        # autres.
         closure = Map.get(step_run, :closure, :delivered)
 
         case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, closure)) do

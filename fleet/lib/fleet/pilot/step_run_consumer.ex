@@ -727,8 +727,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @doc false
   # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
-  # resolved every role in the FIRST active catalogue's image: a `dev` of `web` looked up among
-  # `fleet`'s roles, was not there, and the step failed loud on a role that exists — the wedge the
+  # would resolve every role in the FIRST active catalogue's image: a `dev` of `web` looked up
+  # among `fleet`'s roles, absent there, and the step fails loud on a role that exists — the wedge
+  # the
   # boot validators cannot catch, because it only happens when a step of a second catalogue's
   # project runs. `nil` keeps the default image, which is what a single-catalogue deployment and
   # every test fixture want.
@@ -859,8 +860,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
         VerdictCorrection.request(
           n,
           role,
-          # Le repli n'est plus le cas nominal : les deux chemins qui atteignent ce point posent
-          # desormais `:invalid_reason`. Il reste pour un ctx construit ailleurs un jour.
+          # Repli, jamais le cas nominal : les deux chemins qui atteignent ce point posent
+          # `:invalid_reason`. Il couvre un ctx construit ailleurs un jour.
           Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision-v1.json` invalide",
           trace,
           %VerdictCorrection.Seams{
@@ -874,9 +875,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         )
 
       other ->
-        # (Le doublon `audit.verdict` est parti — brouette 2026-08-19 : il re-disait CE gel a une
-        # machinerie de coordination dont le terminus re-emettait un evenement. Le gel ci-dessous
-        # EST le chemin ; l'arch est reveille, le ticket est fige.)
+        # (Pas de second evenement `audit.verdict` ici : il re-dirait CE gel a une machinerie de
+        # coordination dont le terminus re-emet un evenement. Le gel ci-dessous EST le chemin :
+        # l'arch est reveille, le ticket est fige.)
         TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
     end
   end

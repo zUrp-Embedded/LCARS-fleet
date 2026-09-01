@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     event = Verdict.review_event(Verdict.gate_decision(result))
     step_run = Map.put(step_run, :review_event, event)
 
-    # C1 2026-08-18: the machine payload leaves the prose HERE, at the flattening point.
+    # C1: the machine payload leaves the prose HERE, at the flattening point.
     # `take_findings` validates `details.findings_v1` and, when valid, hands the object over
     # (`:review_findings` → engraved by `StepRunCompleter.record_review` next to the prose pin)
     # while stripping it from `result` so `judge_review_body` never inspect-dumps a machine map

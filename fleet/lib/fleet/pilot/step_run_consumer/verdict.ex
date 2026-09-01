@@ -231,14 +231,14 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # `%{"decision"=>...}` / the outputs, or the envelope `%{"status"=>"ok","result"=>...}`.
   # Without unwrapping: decision/outputs buried → false escalation / wrongful hard-gate.
   # `term()` et PAS `map()` : la derniere clause de `normalize_producer/1` rend ce qu'on lui donne.
-  # Le typer `map()` etait faux, et ça se voyait a trois modules de la : la clause defensive de
-  # `judge_review_body/2` devenait inatteignable, donc du code mort — pour une charge de pod qui
+  # Le typer `map()` est faux, et ça se voit a trois modules de la : la clause defensive de
+  # `judge_review_body/2` devient inatteignable, donc du code mort — pour une charge de pod qui
   # n'est pas une map, cas que ce rail existe precisement pour encaisser.
   @spec unwrap_worker_envelope(term()) :: term()
   def unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
 
   # The outer `status` is CARRIED IN rather than dropped: it is the very field the normalization
-  # below reads, and discarding it here was losing the fact one function before it could be used.
+  # below reads, and discarding it here loses the fact one function before it can be used.
   def unwrap_worker_envelope(%{"status" => status, "result" => inner}) when is_map(inner),
     do: inner |> Map.put_new("status", status) |> normalize_producer()
 

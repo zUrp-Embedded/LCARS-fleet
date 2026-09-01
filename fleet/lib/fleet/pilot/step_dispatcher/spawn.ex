@@ -179,8 +179,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
     # Human-named (`issue-<n>-<role>`), routed by EFFECTIVE kind (worker → briefs/, judge →
     # gate-briefs/ — resolved by BriefBuilder), and PUBLISHED best-effort (F-15: an unpushed
     # triplet is unauditable from the forge and non-durable — a push failure warns and never
-    # blocks the dispatch). The kind STAYS in spawn_opts (BL-6-20 — it used to be popped as
-    # "dispatch data"): judge-ness is resolved ONCE here at dispatch (step || profile, by
+    # blocks the dispatch). The kind STAYS in spawn_opts (BL-6-20 — popping it as "dispatch data"
+    # is the mistake): judge-ness is resolved ONCE here at dispatch (step || profile, by
     # BriefBuilder) and the pod's payload ECHOES it (`CompletedPayload`), so the completion never
     # re-derives it from a card that may not declare it — the fail-open default this closes.
     brief_kind = Keyword.get(spawn_opts, :brief_kind, "worker")
@@ -201,15 +201,15 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # UNE SEULE LIVRAISON DE L'ORDRE, ET C'EST LE POINTEUR.
         #
         # `materialize_order/6` rebinde la VARIABLE `brief` (elle devient le pointeur) mais rend des
-        # `extra_opts` qui ne portent que `brief_sha`/`brief_ref` : le `Keyword.merge` laissait donc
-        # intacte la cle `:brief` posee par l'appelant, avec le TEXTE INTEGRAL. Ce texte finissait
-        # dans `~/issues/<id>.md` — et `maybe_spawn/…` ne respawne pas un pod vivant, donc la copie
-        # n'etait JAMAIS reecrite : sur un engineer qui traverse trois rounds de rework, le fichier
-        # portait l'ordre v1 pendant que le pointeur avancait de sha en sha. Son contenu dependait
-        # de la LIVENESS du pod, pas de l'etat du ticket.
+        # `extra_opts` qui ne portent que `brief_sha`/`brief_ref` : un `Keyword.merge` laisse donc
+        # intacte la cle `:brief` posee par l'appelant, avec le TEXTE INTEGRAL. Ce texte finit dans
+        # `~/issues/<id>.md` — et `maybe_spawn/…` ne respawne pas un pod vivant, donc la copie n'est
+        # JAMAIS reecrite : sur un engineer qui traverse trois rounds de rework, le fichier porte
+        # l'ordre v1 pendant que le pointeur avance de sha en sha. Son contenu depend de la LIVENESS
+        # du pod, pas de l'etat du ticket.
         #
-        # Deux arbitrages user (2026-07-18, 2026-07-19) avaient ordonne le dedoublonnage ; il tenait
-        # sur le rail queue et pas sur le rail fichier. On retire donc la copie — mais SEULEMENT
+        # ⚖ user : le dedoublonnage vaut sur les DEUX rails, pas seulement sur celui de la queue. On
+        # retire donc la copie — mais SEULEMENT
         # quand une adresse la remplace : `Pod.Brief` est deja ecrit pour ce cas et NOMME le
         # pointeur (`brief_ref` + `brief_sha`, poses par ce meme dispatch). Sur le rail DEGRADE il
         # n'y a pas d'adresse a nommer, et il n'y a pas de derive non plus : rien n'avance a cote
@@ -249,10 +249,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # (rail degrade), il n'y a rien vers quoi pointer.
   #
   # La question « ce qui reste est-il encore un ordre ? » se pose a `Fleet.Spawner.order_present?/1`
-  # — l'AUTORITE PARTAGEE, celle que le spawn consultera juste apres. Ecrite ici en dur, elle a
-  # diverge de celle du garde : on retirait la copie sur la presence du `ref`, le garde ne
-  # regardait que le TEXTE, et tout pod one-shot dont le brief etait materialise se faisait
-  # refuser au spawn — indefiniment, la reconciliation redispatchant toutes les 30s. On interroge
+  # — l'AUTORITE PARTAGEE, celle que le spawn consultera juste apres. Ecrite ici en dur, elle
+  # diverge de celle du garde : retirer la copie sur la presence du `ref` pendant que le garde ne
+  # regarde que le TEXTE fait refuser au spawn tout pod one-shot dont le brief est materialise —
+  # indefiniment, la reconciliation redispatchant toutes les 30 s. On interroge
   # donc le RESTE, pas ce qu'on retire : si la reponse est non, la copie ne part pas.
   defp drop_duplicated_order(spawn_opts, extra_opts) do
     without_copy = Keyword.delete(spawn_opts, :brief)
@@ -362,8 +362,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
                 :ok
 
               {:error, :role_token_unavailable} ->
-                # STILL best-effort (a pure Gitea metric never blocks a dispatch) but no longer
-                # MUTE: a missing role token here is a provisioning defect (the four-list class),
+                # Best-effort (a pure Gitea metric never blocks a dispatch) but never MUTE: a
+                # missing role token here is a provisioning defect (the four-list class),
                 # and its only forge-visible symptom is "the worker never shows up on the ticket"
                 # — measured twice (eng_doc bench, scribe bench) at one diagnosis session each.
                 Logger.warning(
@@ -428,9 +428,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # c'est pour ca qu'un seul est propage.
         _ = if not alive_before?, do: safe_kill(spawner, pod_id)
 
-        # CI-10 (audit integrite 2026-07-20): the compensation's OWN verdict. A discarded `remove_label`
-        # return + a flat "lock removed" log LIED when the removal failed (the issue stays in-flight while
-        # the message claims the opposite). Capture it and log the FACT. A failed removal is
+        # CI-10: the compensation's OWN verdict. A discarded `remove_label` return plus a flat
+        # "lock removed" log LIES when the removal fails — the issue stays in-flight while the
+        # message claims the opposite. Capture it and log the FACT. A failed removal is
         # auto-repairable (unlike a teardown that erases its proof, CI-05): the Poller reconciliation
         # reclaims the orphan lock in ≤2 ticks — but we name the real cause instead of absorbing the
         # recovery time under a false success.
@@ -495,9 +495,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   defp enqueue_brief(task_queue, pod_id, role, number, payload, spawn_opts) do
     # `payload` is ALREADY the final order — the pointer when the brief was materialized, the
     # marked inline text on the one transient degradation. It is decided at `materialize_order/5`
-    # and not re-derived here: this used to rebuild it from `{brief_ref, brief_sha}`, which meant
-    # two places could disagree about what the pod receives. The pointer/inline arbitration lives
-    # at one site (user arbitration 2026-07-18, ending the inline-blob + pointer cohabitation).
+    # and not re-derived here: rebuilding it from `{brief_ref, brief_sha}` would let two places
+    # disagree about what the pod receives. The pointer/inline arbitration lives at ONE site
+    # (⚖ user — no inline-blob and pointer cohabiting).
     attrs = %{
       issue_id: Fleet.Pilot.IssueId.compose(number),
       role: role,
@@ -545,9 +545,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # qui voulait dire ce qui s'est passe ne le pouvait pas — et l'un d'eux annoncait « reaped » sur
   # cette base (JG-120).
   #
-  # Le retour devient donc classe, et c'est PUREMENT ADDITIF : les trois sites l'ignorent
-  # aujourd'hui (`@spec … :: any()` disait deja qu'il n'etait pas defini). Personne ne branche
-  # dessus ; ce qui change, c'est qu'on PEUT.
+  # Le retour est donc CLASSE : les trois sites l'ignorent, personne ne branche dessus, mais un
+  # `@spec … :: any()` dirait qu'il n'est pas defini — et ce qui n'est pas defini ne peut pas etre
+  # lu le jour ou quelqu'un le veut.
   @spec safe_kill(module(), String.t()) :: :ok | :unsupported | {:error, term()}
   def safe_kill(spawner, pod_id) do
     if function_exported?(spawner, :kill_pod, 1) do
@@ -676,13 +676,13 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           :proceed | :role_busy | :ready_needs_reprovision
   def project_scope_decision("one-shot", _spawner, _pod_id, _slot), do: :proceed
 
-  # TICKET-LIVE (2026-08-03) — a context-long producer keyed on the ISSUE.
-  # `:ready` does NOT mean the same thing under the two keyings, and reading it as one thing was
-  # the defect: under `project` the pod is shared, so `:ready` = "free for ANOTHER subject" and the
+  # TICKET-LIVE — a context-long producer keyed on the ISSUE.
+  # `:ready` does NOT mean the same thing under the two keyings, and reading it as one thing is the
+  # defect: under `project` the pod is shared, so `:ready` = "free for ANOTHER subject" and the
   # workspace reset + `/clear` are the price of the switch. Under `instance` the pod belongs to ONE
   # ticket, so `:ready` = "MY ticket is coming back" (rework after REQUEST_CHANGES) — and clearing
   # there destroys exactly what makes the rework cheap: what the producer built and why. Measured
-  # in production 2026-08-03: deliverable 1 came back to the engineer WITH a `/clear`; it re-read
+  # in production: a deliverable came back to the engineer WITH a `/clear`, and it re-read
   # everything cold while the reviews faulted decisions it no longer remembered making.
   # So: re-brief in place, no reset, no `/clear`. The context is an asset of the ticket and lives
   # until the merge.
@@ -791,10 +791,10 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # (honest degrade: we do not block, but without the cold guarantee of this round).
   @doc """
   A0.5 — on a CONFLICT rework, the base has moved by definition; a live instance-scoped pod is
-  re-briefed in place (`:proceed`, context kept — 2026-08-03) and its `refs/lcars/base` must
+  re-briefed in place (`:proceed`, context kept) and its `refs/lcars/base` must
   follow anyway. `:ready_needs_reprovision` already re-pins inside the cold reset (6-135);
   `:proceed` on a DEAD pod pins at clone; only `:proceed` on a LIVE pod carries the hole —
-  measured on the bench 2026-08-18: two rework rounds merging a stale base ("Already up to
+  measured on the bench: two rework rounds merging a stale base ("Already up to
   date"), a burned budget, and an arch escalated over a conflict the pod was never shown.
 
   Fail direction: a live pod whose refresh FAILS is NOT briefed (skip → retry next tick) —
