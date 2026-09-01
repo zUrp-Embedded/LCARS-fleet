@@ -16,18 +16,18 @@ defmodule Fleet.Roster do
   Reads the forge roster OF A CATALOGUE — the roles a deployment must enroll before that catalogue
   can work — without starting a fleet.
 
-  ## The list this replaces
+  ## Why it is read and not held
 
-  The roster existed in THREE hand-held copies outside the catalogue: `forge.tf` (the accounts),
+  Three hand-held copies of the roster live outside the catalogue: `forge.tf` (the accounts),
   `provision-role-tokens.sh` (the token mint) and `provision-lib.sh` (`PROV_ROLES`, which WINS on
   deploy). `mix lcars.contracts.check`'s `roles.provisioning_locked` measures their equality with
-  the reference catalogue, and the comment on the third one names the exit it was waiting for:
+  the reference catalogue, and the comment on the third one names the exit it waits for:
   *"d'ici sa derivation, cette ligne se tient a la main"*.
 
-  Held by hand, the list is wrong twice a year — the same defect landed on `eng_doc` and again on
-  its rename to `scribe`, both times as a producer looping on `role_token_unavailable`. Held by
-  hand against a SECOND catalogue, it is wrong by construction: nothing in the reference's roster
-  describes someone else's business.
+  Held by hand, the list is wrong twice a year — measured on `eng_doc` and again on its rename to
+  `scribe`, both times as a producer looping on `role_token_unavailable`. Held by hand against a
+  SECOND catalogue, it is wrong by construction: nothing in the reference's roster describes
+  someone else's business.
 
   So the catalogue answers instead. It already carries the declaration
   (`metadata.forge_identity`, absent = true) — this module only makes it readable from outside a
@@ -149,10 +149,10 @@ defmodule Fleet.Roster do
   # refuse un nom de catalogue qui en porte, et le nom de role est verifie ici. Et Gitea plafonne un
   # login a 40 caracteres (mesure), donc la composition l'est aussi.
   #
-  # THE RULE ITSELF NOW LIVES IN `Fleet.CapProfile.forge_login/1`, and moving it there was the fix
-  # for a real defect: held here, only the PROVISIONING side could read it. The accounts were
-  # created as `<tier>_<role>` while the runtime went on addressing roles by their bare name, so
-  # `request_review` asked the forge for a `qualifier` that does not exist and the PR got no judge.
+  # THE RULE ITSELF LIVES IN `Fleet.CapProfile.forge_login/1`, and not here: held here, only the
+  # PROVISIONING side can read it — the accounts get created as `<tier>_<role>` while the runtime
+  # goes on addressing roles by their bare name, so `request_review` asks the forge for a
+  # `qualifier` that does not exist and the PR gets no judge.
   # A projection that only the writer of a name can compute is a name the reader cannot use.
   defp login_projection do
     with {:ok, _} <- catalogue_name() do

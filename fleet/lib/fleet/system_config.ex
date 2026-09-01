@@ -13,8 +13,8 @@ defmodule Fleet.SystemConfig do
   construction: a fleet starts WITH or WITHOUT, never flips mid-flight.
 
   Failure directions, and both are deliberate:
-    * file ABSENT → every default (a box never configured behaves like today, silently — absence
-      is the nominal state of a fresh install, not an event worth a log line);
+    * file ABSENT → every default, silently (absence is the nominal state of a fresh install, not
+      an event worth a log line);
     * file PRESENT but unreadable/malformed → every default + a LOUD warning (an admin who wrote
       a file expects it to act; a typo must be visible, but must not kill the boot — same doctrine
       as `Fleet.EnvParse` boolean flags);
