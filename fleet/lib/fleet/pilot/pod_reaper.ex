@@ -23,11 +23,11 @@ defmodule Fleet.Pilot.PodReaper do
   encodes no instance → `parse_ref` rejects it → it is never touched, which is the whole point:
   it outlives the tickets by design.
 
-  **Why a superseded ticket loses its pods** (⚖ user): handing the live
-  producer over to the replacement ticket was rejected on three counts — it would re-create the
-  resident-that-changes-subject the ticket-live lot just removed, breaking "one pod, one ticket"
-  at its first exception; a supersede happens BECAUSE the brief was wrong, so the producer
-  reasoned from a RETRACTED premise and would have to un-believe it selectively; and the
+  **Why a superseded ticket loses its pods** (⚖ user): handing the live producer over to the
+  replacement ticket is wrong on three counts — it re-creates the resident-that-changes-subject,
+  breaking "one pod, one ticket" at its first exception; a supersede happens BECAUSE the brief was
+  wrong, so the producer reasoned from a RETRACTED premise and would have to un-believe it
+  selectively; and the
   knowledge worth keeping already travels IN WRITING (the new ticket's body states what the old
   one got wrong) — a fact is never carried by RAM alone. A lost warm context costs a re-read; a
   dead premise carried forward costs a deliverable, and it surfaces late.

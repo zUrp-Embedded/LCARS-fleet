@@ -4,12 +4,12 @@ defmodule Fleet.Pilot.Poller.Lease do
   repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
   Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
 
-  ⚠ **CE PARAGRAPHE DISAIT « at most ONE active workflow_run per repo », ET C'ETAIT FAUX AU DEFAUT
-  LIVRE.** Le booleen `:repo_serialized_lease` a ete remplace par un COMPTEUR (`Admission` le dit :
-  « Serial is this ceiling at 1, not another mechanism »), et cette phrase est restee. Un lecteur en
-  repartait avec un invariant de serialisation que le runtime n'a plus : sur un projet qui ne declare
-  rien, cinq workflow_runs peuvent voler ensemble. Corrige le 2026-08-13 (BL-6-75) — le nom du module
-  garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet est un plafond.
+  ⚠ **CE N'EST PAS « at most ONE active workflow_run per repo », ET LE DEFAUT LIVRE LE DIT.** Le
+  mecanisme est un COMPTEUR, pas un booleen (`Admission` : « Serial is this ceiling at 1, not
+  another mechanism ») : sur un projet qui ne declare rien, CINQ workflow_runs peuvent voler
+  ensemble. Ecrire ici « un seul » rend au lecteur un invariant de serialisation que le runtime
+  n'a pas. Le nom du module garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet
+  est un plafond.
 
   **Le plafond est PER HUMAIN, et c'est le modele — pas une fuite du filtre.** Le compte se fait sur
   la liste obtenue avec `assigned_by=<mon humain>`, donc deux humains sur un depot tiennent deux
@@ -139,27 +139,24 @@ defmodule Fleet.Pilot.Poller.Lease do
       end)
       |> Enum.sort_by(fn {issue, _pr?, _engaged, _pf} -> Map.get(issue, "number") end)
 
-    # THE CEILING (2026-08-03) — `max_fan`: how many workflow_runs this project may hold in flight
-    # at once. It REPLACES the `:repo_serialized_lease` boolean, because the boolean and the counter
-    # were the same parameter at two resolutions: **serial IS this ceiling at 1**. The boolean could
-    # only say "one" or "as many as there are", and "as many as there are" was genuinely unbounded —
-    # a repo with forty queued tickets started forty runs.
+    # THE CEILING — `max_fan`: how many workflow_runs this project may hold in flight at once. A
+    # boolean would be the same parameter at a coarser resolution (**serial IS this ceiling at 1**),
+    # and it could only say "one" or "as many as there are" — the second being genuinely unbounded:
+    # a repo with forty queued tickets starts forty runs.
     #
-    # Two behaviour changes to state rather than discover: `serialized? = false` used to mean
-    # UNLIMITED and now means 5 by default; and a repo can now hold several runs without the operator
-    # flipping anything, which is the point of the item and the reason the ceiling is low.
-    # PER PROJECT, not per box (2026-08-05): the count was already per project and the knob was
-    # fleet-wide, so serializing one project to watch its pipeline end to end serialized every other
+    # A repo holds several runs without the operator flipping anything, which is why the default
+    # ceiling is LOW (5). PER PROJECT, not per box: the count is per project, and a fleet-wide knob
+    # would make serializing one project to watch its pipeline end to end serialize every other
     # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)
 
-    # IN-FLIGHT crosses BOTH dispatch rails. It used to count only what it could see on its own rail
-    # — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is dispatched
-    # through the pulls) and therefore counted for nothing. Consequence, measured and not
-    # theoretical: a repo serialized to one workflow_run started a SECOND one as soon as the first
-    # reached its jury. The hole was already open in serial; the fan-out only makes it visible.
+    # IN-FLIGHT crosses BOTH dispatch rails. Counting only what this rail can see — the ENGAGED
+    # issues — misses a ticket in its jury phase: it has left the issues side (it is dispatched
+    # through the pulls) and counts for nothing. Consequence, measured and not theoretical: a repo
+    # serialized to one workflow_run starts a SECOND one as soon as the first reaches its jury. The
+    # hole is open in serial too; the fan-out only makes it visible.
     #
-    # The two halves were already side by side: `pr_issue_ids` is passed in and already computes
+    # The two halves are side by side: `pr_issue_ids` is passed in and already computes
     # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
     # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
     # never a union to deduplicate.
@@ -204,9 +201,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
               {acc2, fan}
 
-            # The project is FULL → the ticket waits, and it SAYS so. This branch was the one the
-            # wait convergence never reached, so a ticket held back was silent tick after tick,
-            # indistinguishable from a forgotten one.
+            # The project is FULL → the ticket waits, and it SAYS so. Silent, this branch makes a
+            # held-back ticket indistinguishable from a forgotten one, tick after tick.
             fan >= max_fan ->
               {acc2, _} = Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
               {acc2, fan}
@@ -329,13 +325,13 @@ defmodule Fleet.Pilot.Poller.Lease do
       {true, []}
     else
       # Route DERIVED from the labels already in hand (BL-6-40 Phase 2): `list_open_issues` returns
-      # them with the issue, and `get_route` was redoing a GET per issue per tick for the same data.
-      # The number is not even read here anymore — it only ever served to ADDRESS the request.
+      # them with the issue, and `get_route` would redo a GET per issue per tick for the same data.
+      # The number is not read here at all — it only ever serves to ADDRESS a request.
       #
-      # `get_route`'s `{:error, _}` branch disappears for THIS caller, and that consequence is worth
-      # naming: it existed only because there was a network call. With no call, there is no
-      # transient failure to cover; the fail-closed it carried stays whole for the callers of
-      # `get_route/3`, which do still read.
+      # `get_route`'s `{:error, _}` branch has no meaning for THIS caller, and that is worth naming:
+      # it exists only because there is a network call. With no call, there is no transient failure
+      # to cover; the fail-closed it carries stays whole for the callers of `get_route/3`, which do
+      # still read.
       case seams.forge.route_from_labels(Map.get(issue, "labels") || []) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
@@ -385,7 +381,7 @@ defmodule Fleet.Pilot.Poller.Lease do
         # FOREVER silently (Jupiter: nobody will see it). We ESCALATE: IncidentRegistry keyed
         # by signature → 1st occurrence = WAL note, RECURRENCE (map missing at every tick) = ONE
         # sysadmin issue, then the registry's escalation COOLDOWN suppresses the per-tick repeats
-        # (the dedup alone was NOT a throttle: it escalated on EVERY recurrence — one issue per
+        # (the dedup alone is NOT a throttle: it escalates on EVERY recurrence — one issue per
         # tick on a durable failure, ~2 880/day). The escalation must never break the
         # tick (rescue in escalate_workflow_map_incident, silent at this site); the load failure
         # recurs at EVERY tick while the map stays broken, so a skipped escalation is re-attempted

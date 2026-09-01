@@ -5,14 +5,14 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @moduledoc """
   The poller's telemetry, ATTACHED (BL-6-40 Phase 0).
 
-  `Fleet.Pilot.Poller` has emitted `[:lcars_fleet, :pilot_poller, :poll]` from three sites since it was
-  written — duration, dispatched/skipped/errors, per-repo status. Nothing anywhere in `lib/` ever
-  called `:telemetry.attach`, so every one of those measurements was computed and dropped: nobody,
-  human or agent, could state how long a poll actually took. The amplifiers that make polls slow
-  (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
-  network `ls-remote` inside the GenServer) were therefore only ever REASONED about. This module
-  is what turns them into something measurable, and it is deliberately the first phase: the rest
-  of BL-6-40 is a set of optimisations that cannot be proven without it.
+  `Fleet.Pilot.Poller` emits `[:lcars_fleet, :pilot_poller, :poll]` from three sites — duration,
+  dispatched/skipped/errors, per-repo status. Emission alone measures nothing: with no
+  `:telemetry.attach` anywhere in `lib/`, every one of those samples is computed and dropped, and
+  nobody, human or agent, can state how long a poll actually took. The amplifiers that make polls
+  slow (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
+  network `ls-remote` inside the GenServer) can then only be REASONED about. This module is what
+  turns them into something measurable, and it is deliberately the first phase: the rest of BL-6-40
+  is a set of optimisations that cannot be proven without it.
 
   ## What it does, and what it deliberately does NOT do
 

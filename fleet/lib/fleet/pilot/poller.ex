@@ -441,8 +441,9 @@ defmodule Fleet.Pilot.Poller do
         # reste `assigned_by`, au niveau de l'issue : la fleet ne traite QUE ses issues, meme quand
         # `list_org_repos` lui montre les depots des autres humains du groupe.
         #
-        # ⚠ UN SEUL `list_pods` POUR TOUT LE TICK (BL-6-40) : par depot, c'etait R appels au Spawner
-        # a 5 s de timeout pour un instantane qui ne change pas utilement d'un depot au suivant. Il
+        # ⚠ UN SEUL `list_pods` POUR TOUT LE TICK (BL-6-40) : par depot, ce serait R appels au
+        # Spawner a 5 s de timeout pour un instantane qui ne change pas utilement d'un depot au
+        # suivant. Il
         # voyage en PARAMETRE explicite — dans `%Seams{}` il contredirait le contrat « les seams
         # reconcile LISENT », dans `state` il deviendrait un cache a invalider.
         #
@@ -487,10 +488,10 @@ defmodule Fleet.Pilot.Poller do
         # set only changes on poll reads — evaluating between them is pure churn).
         base = if mode == :tick, do: maybe_rekick_arch(awaits, base), else: base
 
-        # Desired-state pass of the main branch-protection (throttled per repo, regular
-        # ticks only): the rule was projected ONCE at onboarding and "already exist" used
-        # to be a blind :ok — an imported repo's stale rule or a card changed since then
-        # kept a main protection out of line with the CURRENT jury until now.
+        # Desired-state pass of the main branch-protection (throttled per repo, regular ticks
+        # only). Projecting the rule ONCE at onboarding and treating "already exist" as a blind
+        # :ok leaves an imported repo's stale rule, or a card changed since, holding a main
+        # protection out of line with the CURRENT jury — with nothing to say so.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
         # The CYCLE, measured AT ITS OWN SCALE — strictly distinct from `[:poller, :poll]`, which
@@ -542,10 +543,10 @@ defmodule Fleet.Pilot.Poller do
       state.protection_reconciler ||
         (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
-    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Le tampon etait pose sur TOUS les `due`, echecs
-    # compris : un depot dont la reconciliation venait d'echouer repartait donc pour une periode
-    # entiere avant d'etre retente, alors que la seule chose qu'on savait de lui, c'est qu'on n'avait
-    # pas su le lire. Un echec n'est pas un travail fait, et le throttle existe pour espacer le
+    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Pose sur TOUS les `due`, echecs compris, le tampon
+    # renvoie pour une periode entiere un depot dont la reconciliation vient d'echouer — alors que
+    # la seule chose qu'on sait de lui, c'est qu'on n'a pas su le lire. Un echec n'est pas un
+    # travail fait, et le throttle existe pour espacer le
     # travail — pas pour espacer les retentatives d'un travail qui n'a pas eu lieu.
     reconciled =
       Enum.filter(due, fn repo ->
@@ -573,8 +574,8 @@ defmodule Fleet.Pilot.Poller do
 
   # Une enumeration de pods en echec est DEUX choses a la fois : un fail-safe correct — on ne
   # reclame rien plutot que de deverrouiller a l'aveugle — et une panne potentiellement DURABLE,
-  # pendant laquelle un `lcars-in-flight` survit indefiniment a son pod. Muette, elle etait
-  # indiscernable d'un tick qui n'avait simplement rien a reclamer.
+  # pendant laquelle un `lcars-in-flight` survit indefiniment a son pod. Muette, elle est
+  # indiscernable d'un tick qui n'a simplement rien a reclamer.
   #
   # ⚠ ON PARLE SUR LA TRANSITION, jamais par tick, et le RETABLISSEMENT s'annonce aussi : sans lui,
   # l'operateur qui a vu l'alerte ne peut pas distinguer resolu de mort.
@@ -679,8 +680,8 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # UN PERMANENT QUE RIEN NE SONDE EST UN PERMANENT DE NOM. L'architecte est `lifetime_scope:
-  # forever`, mais n'etait assure que sur des EVENEMENTS — entre deux, un redemarrage laissait le
-  # projet sans arbitre, sans erreur ni escalade : un etat invisible.
+  # forever` ; assure sur des EVENEMENTS seulement, un redemarrage entre deux laisse le projet sans
+  # arbitre, sans erreur ni escalade : un etat invisible.
   #
   # ICI, ET PRECISEMENT ICI : c'est le point ou le depot est connu ONBOARDE et NON PARQUE, les deux
   # sans un appel de forge de plus. Ticks reguliers seulement — un kick de webhook est un indice de

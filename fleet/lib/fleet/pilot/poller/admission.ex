@@ -5,12 +5,12 @@ defmodule Fleet.Pilot.Poller.Admission do
 
   ## Why it exists
 
-  There are two entry points into dispatch, and every TRANSVERSE rule had to be written twice with
-  nothing checking that it was. The asymmetry ran in both directions and cost real behaviour: the
-  in-flight count lived on the issues rail only (repaired in the commit before this one — a repo
-  serialized to one workflow_run started a second as soon as the first reached its jury), while the
-  wait-label convergence was written on the pulls rail and forgotten on the lease branch. Two rules,
-  two rails, two different omissions, and both were invisible until someone counted.
+  There are two entry points into dispatch, and a TRANSVERSE rule written on one of them is written
+  once for a system that reads it twice. Nothing checks the second copy, and the asymmetry runs in
+  both directions: an in-flight count kept on the issues rail only lets a repo serialized to one
+  workflow_run start a second as soon as the first reaches its jury; a wait-label convergence
+  written on the pulls rail alone leaves the lease branch silent. Two rules, two rails, two
+  different omissions — and neither is visible until someone counts.
 
   So the rule is not "remember to write it twice". The rule is that a transverse decision has ONE
   home and both rails traverse it. What lives here:
@@ -103,9 +103,9 @@ defmodule Fleet.Pilot.Poller.Admission do
   @doc """
   The ceiling for THIS project: its declaration if it made one, the fleet default otherwise.
 
-  The item this closes, in one sentence: the counter was per project and the knob was per box, so
-  `--max-fan 1` to watch one pipeline end to end serialized every other project in the fleet —
-  a brake laid on unrelated work. The declaration lives in `<project>/.lcars.json` (see
+  Per PROJECT, because the counter is: a per-box knob would make `--max-fan 1`, used to watch one
+  pipeline end to end, serialize every other project in the fleet — a brake laid on unrelated work.
+  The declaration lives in `<project>/.lcars.json` (see
   `ProjectDeclaration`) because a project can route its tickets through several cards, and a
   per-card ceiling cannot bound something that spans them.
 
@@ -129,9 +129,9 @@ defmodule Fleet.Pilot.Poller.Admission do
   the `max_fan` ceiling.
 
   Same funnel as `admit/5`, and that is the point: a refusal is a decision about a ticket, so it
-  owes that ticket the same wait vocabulary a dispatched skip does. These two branches were the
-  ones the convergence had never reached — a ticket held back by the lease waited silently, tick
-  after tick, indistinguishable from a forgotten one.
+  owes that ticket the same wait vocabulary a dispatched skip does. Left out of the convergence,
+  these two branches make a ticket held back by the lease wait silently, tick after tick,
+  indistinguishable from a forgotten one.
 
   Always `{tally, false}`: refusing takes nothing.
   """
