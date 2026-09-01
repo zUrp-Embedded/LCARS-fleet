@@ -63,9 +63,9 @@ defmodule Fleet.Spawner.Pod.SessionFiles do
   before the pod's first turn), or it holds nothing this function may read.
 
   `{:error, {:sessions_unreadable, reason}}` means the directory IS there and could not be listed.
-  That was `:none` too, and the two are opposite facts: the first says "not yet", the second says
+  Folded into `:none`, the two opposite facts collapse: the first says "not yet", the second says
   "the instrument cannot see". A caller that checkpoints on `:none` skips quietly and loses the
-  pod's transcript; on `{:error, _}` it now knows why nothing was captured. `Path.wildcard/1` cannot
+  pod's transcript; on `{:error, _}` it knows why nothing was captured. `Path.wildcard/1` cannot
   make the distinction on its own — it returns `[]` for both.
   """
   @spec latest_jsonl(Path.t()) :: {:ok, Path.t()} | :none | {:error, term()}

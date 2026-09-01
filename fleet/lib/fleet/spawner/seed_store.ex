@@ -98,12 +98,11 @@ defmodule Fleet.Spawner.SeedStore do
   # The seed's basename. `<role>` for a pod keyed on its PROJECT (one per repo by construction,
   # so the role alone identifies it); `<role>-<issue>` for a pod keyed on its TICKET.
   #
-  # Before this discriminator, every producer of a project wrote `<role>.jsonl`: the day producers
-  # became ticket-scoped, the engineers of tickets 41 and 42 checkpointed to the SAME file and the
-  # last to die won. A `recall` then resumed whichever session happened to end last — another
-  # ticket's conversation, silently, on a rail whose whole purpose is to restore the right memory.
-  # Same class as the pool nibble: a key that was faithful under "one producer per repo" and became
-  # a lie the moment that assumption was removed.
+  # Without that discriminator every producer of a project writes `<role>.jsonl`, so two
+  # ticket-scoped engineers checkpoint to the SAME file and the last to die wins. A `recall` then
+  # resumes whichever session happened to end last — another ticket's conversation, silently, on a
+  # rail whose whole purpose is to restore the right memory. Same class as the pool nibble: a key
+  # faithful under "one producer per repo" becomes a lie the moment that assumption is removed.
   defp seed_basename(role, nil), do: role
   defp seed_basename(role, issue) when is_integer(issue), do: "#{role}-#{issue}"
 
@@ -114,9 +113,9 @@ defmodule Fleet.Spawner.SeedStore do
       :none ->
         :none
 
-      # UNREADABLE IS NOT "NOT YET". Both used to arrive as `:none`, and a checkpoint that skips on
-      # `:none` skips quietly — the pod's transcript is lost and the operator reads the same silence
-      # as for a pod that had simply not spoken. Named here so the loss has a cause attached to it.
+      # UNREADABLE IS NOT "NOT YET". Collapsed into one `:none`, a checkpoint that skips on `:none`
+      # skips QUIETLY — the pod's transcript is lost and the operator reads the same silence as for
+      # a pod that had simply not spoken. Named here so the loss has a cause attached to it.
       {:error, reason} = err ->
         Logger.error(
           "SeedStore: checkpoint #{project}/#{role} — sessions directory unreadable " <>
@@ -278,7 +277,7 @@ defmodule Fleet.Spawner.SeedStore do
 
   The F5 seed contains the latest `mode`, `permission-mode`, `bridge-session` and
   `system/bridge_status` records, merged by type with the previous sidecar so resumed sessions
-  cannot thin it. Both RC identity formats were observed live on 2026-07-19 and either may be
+  cannot thin it. Both RC identity formats are observed live and either may be
   emitted; capture starts only after at least one is present.
 
   `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
@@ -334,7 +333,7 @@ defmodule Fleet.Spawner.SeedStore do
     _ -> :ok
   end
 
-  # Most recent F5 record of each type; both RC formats were observed live on 2026-07-19.
+  # Most recent F5 record of each type; both RC formats are observed live.
   defp seed_records(jsonl_path) do
     jsonl_path
     |> bounded_lines()

@@ -2,9 +2,9 @@ defmodule Fleet.Conflict.ConfidenceScore do
   @moduledoc """
   Composite confidence for one automatic resolution: a multi-dimensional score, not a flat label.
 
-  The score and its label are derived in ONE place (`Fleet.Conflict.Score`). The engine this was
-  ported from carried THREE divergent copies of the formula; a hunk silently lost a penalty the
-  first time a secondary path re-scored it. Callers pass dimensions, never a pre-rolled score.
+  The score and its label are derived in ONE place (`Fleet.Conflict.Score`). Divergent copies of the
+  formula make a hunk SILENTLY LOSE a penalty the first time a secondary path re-scores it, so
+  callers pass dimensions, never a pre-rolled score.
   """
   @type label :: :certain | :high | :medium | :low
   @type t :: %__MODULE__{
@@ -75,9 +75,10 @@ defmodule Fleet.Conflict.Hunk do
     :explanation,
     :trace,
     # Result of the three-way merge, CARRIED rather than recomputed. `NonOverlapping.detect?/1`
-    # answers by performing the merge; the assembler then asked for the same merge again, so the
-    # most expensive computation of the subsystem (two quadratic LCS tables) ran TWICE per hunk and
-    # the first result was thrown away. `nil` for every other type, and for a hunk built by hand.
+    # answers BY PERFORMING the merge; without this field the assembler asks for the same merge
+    # again, so the subsystem's most expensive computation (two quadratic LCS tables) runs TWICE per
+    # hunk and the first result is thrown away. `nil` for every other type, and for a hunk built by
+    # hand.
     :merged_lines,
     zdiff3: false
   ]

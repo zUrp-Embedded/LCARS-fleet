@@ -26,10 +26,10 @@ defmodule Fleet.Conflict do
   caller then routes to the producer conflict-rework / chief exception pass, never writing on a partial guess.
 
   `resolve/2` returns `{:error, {:unterminated_conflict, state, line}}` when the markers do not
-  close. That case USED to come back as `{:ok, %Report{merged: nil, hunks: [], stats: %{total: 0}}}`
-  -- the exact report of a file with no conflict -- so "I could not read this" and "there is nothing
-  here" were the same answer. It is an error and not an empty report because the two demand opposite
-  moves from every caller: one aborts, the other proceeds.
+  close. Returning an empty report there would be the EXACT report of a file with no conflict, so
+  "I could not read this" and "there is nothing here" would be the same answer. It is an error and
+  not an empty report because the two demand opposite moves from every caller: one aborts, the other
+  proceeds.
 
   Even when `merged` is set, the LCARS pipeline re-judges the pushed head, so a wrong trivial
   resolution is caught downstream -- the guard the standalone engine lacked.
@@ -39,10 +39,10 @@ defmodule Fleet.Conflict do
   @confidence_rank %{certain: 4, high: 3, medium: 2, low: 1}
 
   # WRITE-SAFETY, a dimension the confidence score does NOT carry. The score answers "how sure am I
-  # of this classification"; it says nothing about what being wrong COSTS. MEASURED against the
-  # deployed build: `whitespace_only` scores 76 and `non_overlapping` 80 -- both `:high`, both above
-  # the write floor -- yet being wrong about the first rewrites Python indentation while being wrong
-  # about the second is near-impossible (the base proves the two sides touch disjoint lines).
+  # of this classification"; it says nothing about what being wrong COSTS. Two patterns can both
+  # score `:high` and sit above the write floor -- `whitespace_only` and `non_overlapping` do -- yet
+  # being wrong about the first rewrites Python indentation while being wrong about the second is
+  # near-impossible (the base proves the two sides touch disjoint lines).
   #
   # A pattern is auto-WRITABLE only when its correctness follows from the base and the two sides
   # ALONE, with no assumption about the language:
@@ -69,8 +69,8 @@ defmodule Fleet.Conflict do
   #                           (default)". A coin flip must not ride a `:high` label to disk.
   #
   # These stay CLASSIFIED (the diagnosis "this is shallow, a producer fixes it in one round" is real
-  # and drives tier-0 routing) but are never WRITTEN by the machine. This is the set the source
-  # audit recommended enabling and no more; the port kept the classifier and lost that line.
+  # and drives tier-0 routing) but are never WRITTEN by the machine. Keeping the classifier without
+  # this line is the shape of the bug: a diagnosis that quietly becomes a write authorisation.
   @writable_types [:same_change, :one_side_change, :delete_no_change, :non_overlapping]
 
   @type opt :: {:min_confidence, Fleet.Conflict.ConfidenceScore.label()}
@@ -94,12 +94,12 @@ defmodule Fleet.Conflict do
             hunk = Classifier.to_hunk(raw)
 
             case try_resolve(hunk, min) do
-              # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here on:
-              # nothing may be appended for this hunk. A `restore_markers/1` did rebuild the marker
-              # block into `out` and its result was provably never read -- the same branch that
-              # called it set `all_resolved?` to false. It also wrote FIXED labels (`<<<<<<< ours`)
-              # where git writes the branch or revision, so the day someone consumed it, partial
-              # merge would have shipped files whose markers lost the names a human resolves by.
+              # An unresolved hunk forces `merged` to nil, so `out` is discarded WHOLE from here
+              # on: nothing may be appended for this hunk. ⚠ ET SURTOUT PAS UNE RECONSTRUCTION DU
+              # BLOC DE MARQUEURS : elle ecrirait des labels FIXES (`<<<<<<< ours`) la ou git ecrit
+              # la BRANCHE ou la revision, donc le jour ou quelqu'un consommerait ce `out`, un merge
+              # partiel expedierait des fichiers dont les marqueurs ont perdu LES NOMS PAR LESQUELS
+              # UN HUMAIN RESOUT.
               {:ok, lines} -> {out ++ lines, [hunk | hs], ok}
               :unresolved -> {out, [hunk | hs], false}
             end

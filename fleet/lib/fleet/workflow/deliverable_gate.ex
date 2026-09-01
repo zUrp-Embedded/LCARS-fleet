@@ -32,19 +32,16 @@ defmodule Fleet.Workflow.DeliverableGate do
     {~r/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/, "jwt_token"},
     {~r/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "private_key"},
     {~r/AKIA[0-9A-Z]{16}/, "aws_access_key"},
-    # ⚠ THE FORGE TOKENS WERE ONE PATTERN, OF ONE FORGE, AND NOT THE SHAPE WE USE OURSELVES.
-    # The list carried `ghp_` alone — the CLASSIC personal access token. GitHub documents six
-    # prefixes (`ghp_` classic, `github_pat_` fine-grained, `gho_` OAuth, `ghu_` user-to-server,
-    # `ghs_` installation, `ghr_` refresh), and `gho_` is precisely what `gh auth status` reports
-    # on a machine where the operator ran `gh auth login`. The gate that refuses a leaked
-    # credential in a deliverable did not recognise the credential of its own tooling.
+    # ⚠ ONE FORGE PREFIX IS NOT THE SHAPE WE USE OURSELVES. GitHub documents six (`ghp_` classic,
+    # `github_pat_` fine-grained, `gho_` OAuth, `ghu_` user-to-server, `ghs_` installation, `ghr_`
+    # refresh), and `gho_` is precisely what `gh auth status` reports on a machine where the
+    # operator ran `gh auth login`: a gate carrying `ghp_` alone would not recognise the credential
+    # of its own tooling. GitLab needs its own — this fleet announces it as a first-class forge on
+    # BOTH the import and the export side, so a `glpat-` travels through without a word.
     #
-    # AND NOTHING AT ALL FOR GITLAB, on a fleet whose import AND export both announce GitLab as a
-    # first-class forge: a `glpat-` travelled through without a word.
-    #
-    # THE BODY LENGTH IS NO LONGER FIXED. `{36}` encoded the classic format as if it were the only
-    # one; GitHub shipped a stateless `ghs_APPID_JWT` form on 2026-04-27 warning that anything
-    # assuming a fixed length would mishandle it. A floor (`{20,}`) refuses the same secrets and
+    # THE BODY LENGTH IS A FLOOR, NOT A COUNT. `{36}` would encode the classic format as if it were
+    # the only one; GitHub shipped a stateless `ghs_APPID_JWT` form on 2026-04-27 warning that
+    # anything assuming a fixed length will mishandle it. `{20,}` refuses the same secrets and
     # survives the next format.
     {~r/gh[pousr]_[A-Za-z0-9]{20,}/, "github_token"},
     {~r/github_pat_[A-Za-z0-9_]{20,}/, "github_pat_fine_grained"},
@@ -146,14 +143,13 @@ defmodule Fleet.Workflow.DeliverableGate do
   @doc """
   Requires each FIRST-PARENT commit author and committer email to be allowed; empty range is valid.
   """
-  # A0 (chantier rails) — FIRST-PARENT, same cut as the secret scan below, and the asymmetry was
-  # the defect: a conflict resolution is a MERGE commit, and the full `base..HEAD` range then
-  # imports the BASE's own commits — system-authored onboard writes (`system_starfleet@lcars.local`),
-  # sibling bricks trailed by OTHER roles — all already gated when they landed on the base.
-  # Re-walking them here refused every merge-bearing deliverable ({:bad_identity, system_starfleet}),
-  # and the chief's exception pass had NO success path at all. The pod's own line IS the
-  # first-parent line; the merge commit itself sits on it, authored by the pod's human and
-  # hook-trailed, and stays fully checked.
+  # A0 — FIRST-PARENT, same cut as the secret scan below, and any asymmetry between the two is a
+  # defect: a conflict resolution is a MERGE commit, so the full `base..HEAD` range imports the
+  # BASE's own commits — system-authored onboard writes, sibling bricks trailed by OTHER roles —
+  # all already gated when they landed on the base. Re-walking them here refuses EVERY merge-bearing
+  # deliverable on `{:bad_identity, …}`, leaving the chief's exception pass with no success path at
+  # all. The pod's own line IS the first-parent line; the merge commit itself sits on it, authored
+  # by the pod's human and hook-trailed, and stays fully checked.
   @spec check_identity(Path.t(), String.t(), [String.t()]) :: :ok | {:error, reason()}
   def check_identity(workspace, base_sha, allowed) do
     case git(workspace, ["log", "--first-parent", "#{base_sha}..HEAD", "--format=%ae%n%ce"]) do
@@ -192,8 +188,8 @@ defmodule Fleet.Workflow.DeliverableGate do
   Requires the expected `Co-authored-by: LCARS-<role>` trailer per FIRST-PARENT commit.
   """
   # FIRST-PARENT for the same reason as `check_identity` above: a merge imports commits trailed
-  # by their OWN producers — demanding THIS role's trailer on a sibling brick's commit refused
-  # the range wholesale ({:missing_coauthor_trailer}). The pod's own commits stay checked.
+  # by their OWN producers, so demanding THIS role's trailer on a sibling brick's commit refuses
+  # the range wholesale (`{:missing_coauthor_trailer}`). The pod's own commits stay checked.
   @spec check_coauthor_trailer(Path.t(), String.t(), String.t()) :: :ok | {:error, reason()}
   def check_coauthor_trailer(workspace, base_sha, expected_role) when is_binary(expected_role) do
     # F-03: git parses real trailers; prose mentioning a trailer cannot attest a commit.
@@ -298,16 +294,16 @@ defmodule Fleet.Workflow.DeliverableGate do
   # planteraient de la matiere directive dans le depot cible. Le `CLAUDE.md` RACINE reste legitime —
   # un scribe documente son projet.
   #
-  # Le second est la DECLARATION DU PROJET, `.lcars.json` a la racine, et il est arrive apres coup
-  # (2026-08-13) parce que personne n'avait mis les deux faits cote a cote : ce fichier porte
-  # `pipeline_default`, c'est-a-dire QUELLE CARTE route le ticket — donc quel jury, quelles portes,
-  # quel CI. Il est lu a chaud par `StepDispatcher` (`Declaration.pipeline_default/2`) depuis la face
-  # code, alignee sur `main` apres merge. Un producteur pouvait donc le reecrire dans son espace de
-  # travail, le commiter, et la porte laissait passer : elle verifie l'ancetre, l'identite, le
-  # trailer et les secrets, jamais ce chemin. Basculer la declaration vers une carte `jury: []` /
-  # `ci: ignore` faisait tomber les juges du ticket SUIVANT, et la seule chose qui restait entre
-  # l'agent et ce resultat etait qu'un relecteur remarque le diff — exactement la garantie qu'un
-  # plancher mecanique existe pour ne pas avoir a demander.
+  # Le second est la DECLARATION DU PROJET, `.lcars.json` a la racine, et il demande de mettre deux
+  # faits cote a cote : ce fichier porte `pipeline_default`, c'est-a-dire QUELLE CARTE route le
+  # ticket — donc quel jury, quelles portes, quel CI — et il est lu a chaud par `StepDispatcher`
+  # (`Declaration.pipeline_default/2`) depuis la face code, alignee sur `main` apres merge. Sans ce
+  # chemin dans la liste, un producteur le reecrit dans son espace de travail, le commite, et la
+  # porte laisse passer : elle verifie l'ancetre, l'identite, le trailer et les secrets, jamais ce
+  # fichier. Basculer la declaration vers une carte `jury: []` / `ci: ignore` fait tomber les juges
+  # du ticket SUIVANT, et la seule chose qui reste alors entre l'agent et ce resultat est qu'un
+  # relecteur remarque le diff — exactement la garantie qu'un plancher mecanique existe pour ne pas
+  # avoir a demander.
   #
   # ⚠ Uniquement A LA RACINE, et c'est deliberе : rien ne lit un `.lcars.json` plus profond, et
   # interdire un chemin que personne ne lit est une regle que le prochain lecteur ne saura pas

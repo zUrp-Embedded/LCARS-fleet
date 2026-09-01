@@ -9,7 +9,7 @@ defmodule Fleet.Workflow.Pinning do
   the surface exactly what a human scanning the PR needs.
 
   Below the threshold, this does nothing. A pointer to four lines costs more than the four lines —
-  the reader has to follow it to learn there was nothing to follow.
+  the reader has to follow it to learn there is nothing to follow.
 
   ## The failure semantic is the load-bearing part
 

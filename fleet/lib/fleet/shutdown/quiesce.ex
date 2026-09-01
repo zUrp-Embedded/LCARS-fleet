@@ -34,7 +34,7 @@ defmodule Fleet.Shutdown.Quiesce do
   # The drain's aggregate counts the broker's work-items and the completion offloads —
   # but a finalizer running SYNCHRONOUSLY inside a singleton (the poller tick's
   # review/merge work, a completion handler between event reception and its offload)
-  # was invisible: three zero reads could conclude :drained while a merge was in
+  # is invisible to it: three zero reads would conclude :drained while a merge is in
   # flight. `busy/1` makes that window countable. Iron Law kept: an `:atomics` ref,
   # no process (and no per-write `:persistent_term` put — the ref is stored once).
 

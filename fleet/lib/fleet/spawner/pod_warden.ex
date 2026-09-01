@@ -43,8 +43,8 @@ defmodule Fleet.Spawner.PodWarden do
         {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
 
       {_, :unavailable} ->
-        # Same posture as an unavailable Registry, and it was missing: a reconciliation needs BOTH
-        # sides. Freeze the grace clocks rather than read an unreadable directory as an empty one.
+        # Same posture as an unavailable Registry: a reconciliation needs BOTH sides. Freeze the
+        # grace clocks rather than read an unreadable directory as an empty one.
         Logger.warning(
           "PodWarden: socket base unavailable (#{PodTmux.sock_base()}) — reap tick SKIPPED " <>
             "(no decision without the list of live sockets)"
@@ -184,15 +184,14 @@ defmodule Fleet.Spawner.PodWarden do
     _ -> :unavailable
   end
 
-  # THE SHAPE OF ITS TWIN, five lines up, and for the same reason. An unreadable socket base used to
-  # come back as an EMPTY MapSet, so `difference(socks, live)` was empty, so the warden concluded
-  # "no orphan" — fail-safe (nothing is killed by mistake) and INDISTINGUISHABLE from the nominal
-  # tick. `live_pod_ids/0` was written precisely to make that distinction visible on the other
-  # source; this one threw it away.
+  # THE SHAPE OF ITS TWIN, just above, and for the same reason. An unreadable socket base coming
+  # back as an EMPTY MapSet makes `difference(socks, live)` empty, so the warden concludes "no
+  # orphan" — fail-safe (nothing is killed by mistake) and INDISTINGUISHABLE from the nominal tick.
+  # `live_pod_ids/0` exists precisely to make that distinction visible on the other source.
   #
   # `:unavailable` on any read failure, and the tick is skipped as a whole: a reconciliation needs
   # BOTH sides, and one side missing is not one side empty. The reclaim outcome is unchanged — no
-  # orphan is declared either way — but the operator now sees why nothing happened.
+  # orphan is declared either way — but the operator sees why nothing happened.
   defp sock_pod_ids do
     base = PodTmux.sock_base()
 

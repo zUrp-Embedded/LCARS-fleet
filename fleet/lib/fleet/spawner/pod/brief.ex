@@ -80,9 +80,9 @@ defmodule Fleet.Spawner.Pod.Brief do
   # What the file says when the spawn opts carry no `:brief` — which is the PRODUCER's normal case,
   # not an anomaly: the step dispatcher sends the order through the queue alone.
   #
-  # It used to say "(No brief provided)". That is FALSE and it is false on the pod's own disk, in a
-  # file named after its issue: the pod HAS an order, and the very opts this function reads carry
-  # its address (`brief_ref` + `brief_sha`, put there by the same dispatch). An artifact that tells
+  # NEVER "(No brief provided)": that is FALSE, and false on the pod's own disk, in a file named
+  # after its issue. The pod HAS an order, and the very opts this function reads carry its address
+  # (`brief_ref` + `brief_sha`, put there by the same dispatch). An artifact that tells
   # an agent it was asked nothing, while its work item holds an order, is the cheapest possible way
   # to make it guess: an agent that finds nothing where its order should be infers its surroundings,
   # and an inferred order is worse than a missing one because it looks like work.
@@ -90,12 +90,12 @@ defmodule Fleet.Spawner.Pod.Brief do
   # The pointer NOTATION comes from `Fleet.Layout`, foundation, which already owns it for exactly
   # this reason ("two domains, one truth"): `Fleet.Workflow.BriefArtifact` is not in this domain's
   # boundary deps, and re-writing its prose here would be a second source for one sentence.
-  # LA PHRASE QUI DISAIT « No need to write any file yourself » A ETE RETIREE DE L'EN-TETE
-  # CI-DESSUS, ET C'EST UNE CORRECTION DE CONTRAT, PAS DE STYLE. Elle etait vraie pour un juge
-  # (dont le livrable EST le verdict) et fausse pour un producteur, dont le SP dit « ton livrable =
-  # tes commits ». Un producteur qui ouvre `issues/<id>.md` avant son SP ne commite rien et rend un
-  # payload vide — mesure d'un audit de pod, 2026-08-08. Ce fichier ne connait pas le contrat du
-  # role : il nomme le canal de retour et renvoie au SP pour ce qui compte comme travail.
+  # ⚠ PAS DE « No need to write any file yourself » DANS L'EN-TETE CI-DESSUS : ce serait une faute
+  # de CONTRAT, pas de style. La phrase est vraie pour un juge, dont le livrable EST le verdict, et
+  # fausse pour un producteur, dont le SP dit « ton livrable = tes commits » — un producteur qui
+  # ouvre `issues/<id>.md` avant son SP ne commite rien et rend un payload VIDE. Ce fichier ne
+  # connait pas le contrat du role : il nomme le canal de retour et renvoie au SP pour ce qui compte
+  # comme travail.
   defp request_body(brief, _opts, _issue_id) when is_binary(brief) and brief != "", do: brief
 
   defp request_body(_brief, opts, issue_id) do
@@ -103,10 +103,10 @@ defmodule Fleet.Spawner.Pod.Brief do
     sha = Keyword.get(opts, :brief_sha)
 
     if is_binary(ref) and is_binary(sha) do
-      # PAS DE CHEMIN ICI. Cette branche rendait le pointeur `Brief: <ref> @ <sha>`, qui envoyait le
-      # pod lire l'arbre d'operations monte — donc exigeait de le monter. Le work item porte
-      # desormais le CONTENU a sa version pinnee ; ce fichier nomme le canal et l'adresse a citer,
-      # rien de plus. Un pod qui ne trouve pas son ordre ici doit demander, pas aller le chercher.
+      # PAS DE CHEMIN ICI. Rendre le pointeur `Brief: <ref> @ <sha>` enverrait le pod LIRE l'arbre
+      # d'operations, donc exigerait de le lui monter. Le work item porte le CONTENU a sa version
+      # pinnee ; ce fichier nomme le canal et l'adresse a citer, rien de plus. Un pod qui ne trouve
+      # pas son ordre ici doit DEMANDER, pas aller le chercher.
       "Your work item carries the order, in full, at the version it was pinned to. Pull it with " <>
         "the MCP tool `get_work_item`. Cite `#{String.slice(sha, 0, 7)}` — that is the version " <>
         "you acted on, and it is what makes your work auditable by a third party."

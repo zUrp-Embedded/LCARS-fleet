@@ -4,10 +4,9 @@ defmodule Fleet.Forge.WriteSpacing do
   matters. Events produced by one forge call remain inseparable by construction.
 
   It lives in the FORGE domain and not the pilot's, because that is what it is about: the pilot
-  called it only where it writes to the forge. The config key is `:lcars_fleet,
-  :pilot_forge_write_spacing_ms` — the per-domain PREFIX is what the 15 legacy `:fleet_<dom>` atoms
-  became (BL-6-05), and renaming one at the
-  edge of a move is how an operator's env file silently stops being read.
+  calls it exactly where it writes to the forge. The config key keeps its `pilot_` prefix
+  (`:lcars_fleet, :pilot_forge_write_spacing_ms`) — renaming a key at the edge of a move is how an
+  operator's env file silently stops being read.
   """
 
   @doc """

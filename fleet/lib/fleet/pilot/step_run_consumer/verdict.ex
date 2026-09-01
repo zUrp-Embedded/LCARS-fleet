@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   ## The optional machine payload (`details.findings_v1`)
 
   A judge MAY carry its findings machine-readable under the VERSIONED key
-  `details.findings_v1` (`findings-v1.json`, C1 2026-08-18). The envelope stays intact:
+  `details.findings_v1` (`findings-v1.json`, C1). The envelope stays intact:
   a legacy judge without the key crosses exactly as before. `take_findings/1` validates
   the payload and the failure direction is the opposite of the envelope's, on purpose:
   an INVALID `findings_v1` never flips the decision — the envelope was already validated,
@@ -87,13 +87,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @doc """
   La meme decision, PLUS ce qui a ete refuse.
 
-  ⚠ **LE MOTIF ETAIT CONSOMME DANS UN LOG ET PERDU** (trouve par relecture adversariale,
-  2026-08-20). Cette fonction validait l'enveloppe, journalisait les violations de schema, et
-  rendait `"halt_invalid"` — une chaine sans memoire. La passe de correction du juge
-  (`VerdictCorrection`, B4) promet de lui remettre « ce qui n'allait pas » ; elle lisait une cle
-  `:invalid_reason` que PERSONNE ne posait, donc elle envoyait toujours son texte de repli
-  generique. Le mecanisme entier tenait sur un detail que rien ne produisait — et il aurait demande
-  au juge de deviner, ce qu'il promettait justement d'eviter.
+  ⚠ **RENDRE `"halt_invalid"` SEUL EST UNE CHAINE SANS MEMOIRE.** Valider l'enveloppe, journaliser
+  les violations de schema et ne rendre que la decision CONSOMME LE MOTIF DANS UN LOG. Or la passe
+  de correction du juge (`VerdictCorrection`, B4) promet de lui remettre « ce qui n'allait pas » :
+  sans ce motif elle envoie son texte de repli generique et demande au juge de DEVINER — ce qu'elle
+  promettait justement d'eviter. Un mecanisme entier peut ainsi tenir sur une cle que rien ne pose.
 
   Rend `{decision, reason}`, `reason` valant `nil` quand il n'y a rien a dire : un verdict valide
   n'a pas de violation a nommer, et en inventer une serait pire que de n'en pas avoir.
@@ -128,8 +126,8 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   #
   # UNE SEULE CLAUSE, et pas de repli `defp describe_violations(other)` : Dialyzer prouve qu'il
   # serait mort — `ExJsonSchema.Validator.validate/2` rend toujours une liste sur `{:error, _}`.
-  # Une clause de garde inatteignable est exactement ce que ce chantier traque ailleurs ; on ne va
-  # pas en poser une ici pour se rassurer. Le `inspect/1` INTERNE, lui, reste : il couvre une forme
+  # Une clause inatteignable posee pour se rassurer est du code mort qui a l'air d'un filet. Le
+  # `inspect/1` INTERNE, lui, reste : il couvre une forme
   # d'entree que la bibliotheque peut faire evoluer sans changer le type de retour.
   defp describe_violations(errors) when is_list(errors) do
     errors
@@ -159,7 +157,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   end
 
   @doc false
-  # C1 2026-08-18: the OPTIONAL machine payload, extracted AND validated in one gesture.
+  # C1 — the OPTIONAL machine payload, extracted AND validated in one gesture.
   #
   # Returns `{findings, result}` where `findings` is the valid `details.findings_v1` map or `nil`,
   # and `result` is the envelope WITHOUT the key when findings are valid (the prose rendering must
@@ -173,12 +171,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # make one optional payload's fate depend on a check it has already lost or won elsewhere.
   @spec take_findings(term()) :: {map() | nil, term()}
   def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
-    # ON DÉCODE UNE CHAÎNE AVANT DE JUGER, ET C'EST MESURÉ, PAS PRÉVENTIF. Banc du 2026-08-19,
-    # probe-rails#47 : un juge a rendu `findings_v1` sous forme de JSON SÉRIALISÉ
-    # (`"{\"findings\":[]}"`), refusé par le schéma en « Expected Object but got String » — sa
-    # mesure était juste, son encodage non, et le rail a tout jeté. Un agent qui produit du JSON
-    # dans un champ hésite naturellement entre l'objet et sa sérialisation ; refuser la seconde
-    # ne défend RIEN (le contenu est identique une fois décodé) et coûte la mesure entière.
+    # ON DÉCODE UNE CHAÎNE AVANT DE JUGER. Un agent qui produit du JSON dans un champ hésite
+    # naturellement entre l'objet et sa sérialisation : un `findings_v1` rendu en JSON SÉRIALISÉ
+    # (`"{\"findings\":[]}"`) est refusé par le schéma en « Expected Object but got String » —
+    # mesure juste, encodage faux, et le rail jette tout. Refuser la seconde forme ne défend RIEN
+    # (le contenu est identique une fois décodé) et coûte la mesure entière.
     # Libéral sur la forme reçue, strict sur le fond : ce qui sort du décodage passe le MÊME
     # schéma, et une chaîne qui ne décode pas reste un refus.
     findings = decode_if_string(findings)
@@ -234,14 +231,14 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # `%{"decision"=>...}` / the outputs, or the envelope `%{"status"=>"ok","result"=>...}`.
   # Without unwrapping: decision/outputs buried → false escalation / wrongful hard-gate.
   # `term()` et PAS `map()` : la derniere clause de `normalize_producer/1` rend ce qu'on lui donne.
-  # Le typer `map()` etait faux, et ça se voyait a trois modules de la : la clause defensive de
-  # `judge_review_body/2` devenait inatteignable, donc du code mort — pour une charge de pod qui
+  # Le typer `map()` est faux, et ça se voit a trois modules de la : la clause defensive de
+  # `judge_review_body/2` devient inatteignable, donc du code mort — pour une charge de pod qui
   # n'est pas une map, cas que ce rail existe precisement pour encaisser.
   @spec unwrap_worker_envelope(term()) :: term()
   def unwrap_worker_envelope(%{"decision" => _} = direct), do: direct
 
   # The outer `status` is CARRIED IN rather than dropped: it is the very field the normalization
-  # below reads, and discarding it here was losing the fact one function before it could be used.
+  # below reads, and discarding it here loses the fact one function before it can be used.
   def unwrap_worker_envelope(%{"status" => status, "result" => inner}) when is_map(inner),
     do: inner |> Map.put_new("status", status) |> normalize_producer()
 
@@ -249,22 +246,18 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   # ── One fact, one vocabulary — enforced by the SYSTEM, not by the pod's memory ──
   #
-  # THREE vocabularies were in play for the same fact, measured 2026-08-05:
-  #   * the system reads `summary` + `blocked: true` (SP block `producer-output.md`);
-  #   * the `subagent-driven` modop teaches its SUBAGENTS to report
-  #     `{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", "concerns": [...]}`;
-  #   * the clause above tolerated `%{"status", "result"}` — a shape NO live producer emits (two
-  #     test fixtures do, one of them under `_archived_gates/`): the tolerance aimed at a fossil.
+  # DEUX VOCABULAIRES PORTENT LE MEME FAIT, et ni l'un ni l'autre n'est negociable ici :
+  #   * le systeme lit `summary` + `blocked: true` ;
+  #   * un subagent rapporte `{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT",
+  #     "concerns": [...]}`.
   #
-  # The shape actually produced matched NEITHER. Measured end to end: a report
-  # `{"status": "BLOCKED", "concerns": [...]}` forwarded as `result` yielded `eng_summary` = "" and
-  # `blocked_flag?` = false. A pod passing its subagent's refusal through DELIVERED IN SILENCE —
-  # the exact wedge the flag exists to prevent, and the one `producer-output.md` spends three
-  # paragraphs teaching the pod to avoid.
+  # Sans traduction, un rapport `{"status": "BLOCKED", "concerns": [...]}` transmis tel quel en
+  # `result` donne `eng_summary` = "" et `blocked_flag?` = false : un pod qui fait passer le refus
+  # de son subagent LIVRE EN SILENCE — exactement le coin que le drapeau existe pour empecher.
   #
-  # Translating between the two vocabularies was pure pod cognition, taught in neither document.
-  # Nothing caught a pod that forgot, and forgetting cost an escalation nobody received. So the
-  # system does the translation: what it can take charge of leaves the agent's head.
+  # Traduire serait de la cognition de pod, enseignee dans aucun des deux documents, que rien ne
+  # rattrape quand elle manque et dont l'oubli coute une escalade que personne ne recoit. Le systeme
+  # traduit donc : ce dont il peut se charger quitte la tete de l'agent.
   #
   # It MOVES the agent's words, it never writes any. `concerns` fill the `summary` slot only when
   # the pod left it empty — the aggregation of several subagents into one narration stays the pod's
@@ -274,8 +267,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # `status` is TRANSPORT, not business data — the same call the TaskQueue already makes on
   # `work_item_id` ("a correlator, not business data of the result"). It is read here, turned into
   # the canonical `blocked`, and dropped: what leaves this funnel has ONE shape, and a deliverable's
-  # `outputs` are not polluted by the vocabulary that carried it. An existing gate test asserted
-  # exactly that and was right against my first version.
+  # `outputs` are not polluted by the vocabulary that carried it.
   defp normalize_producer(m) when is_map(m) do
     m |> block_from_status() |> summary_from_concerns() |> Map.delete("status")
   end

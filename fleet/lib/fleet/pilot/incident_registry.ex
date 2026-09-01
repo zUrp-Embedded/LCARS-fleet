@@ -313,15 +313,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
         end
       )
 
-    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` QUARANTE LIGNES PLUS HAUT, et il manquait ICI.
-    # `_ = write_wal(...)` jetait le seul fait qui distingue « tampon grave » de « tampon perdu »,
-    # donc AUCUN appelant ne pouvait le savoir : la reponse etait `:ok` dans les deux cas.
+    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` PLUS HAUT DANS CE MODULE. Un `_ = write_wal(...)`
+    # jette le seul fait qui distingue « tampon grave » de « tampon perdu », et aucun appelant ne
+    # peut alors le savoir : la reponse est `:ok` dans les deux cas.
     #
     # ⚠ La consequence n'est PAS celle du voisin, et c'est pour ca que le retour public de
     # `record_or_escalate/4` ne bouge pas : la-bas un WAL perdu perd l'INCIDENT (la chronologie
     # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
-    # recurrence suivante — borne, et qui se repare tout seul. Ce qui manquait n'etait pas un
-    # nouveau verdict, c'etait que le fait EXISTE quelque part.
+    # recurrence suivante — borne, et qui se repare tout seul. Ce qu'il faut n'est pas un nouveau
+    # verdict, c'est que le fait EXISTE quelque part.
     reply =
       case write_wal(state.wal_path, registry) do
         :ok -> :ok
@@ -558,22 +558,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
     end
   end
 
-  # ⚠ CETTE FONCTION RENDAIT `%{}` SUR UN FICHIER CORROMPU, ET SON PROPRE COMMENTAIRE LE DISAIT :
-  # « real amnesia, not an absence … cross-machine memory is lost until the file is overwritten by
-  # the next sync ». Elle nommait la perte et la faisait quand meme.
+  # ⚠ UN FICHIER CORROMPU EST LE MEME FAIT QU'UN FICHIER ILLISIBLE : dans les deux cas on ignore ce
+  # que la forge contient, donc rendre un vide et pousser notre vue LOCALE ECRASE des incidents
+  # inter-machines qu'on n'a pas su lire — et le SHA du fichier corrompu fait REUSSIR l'ecrasement.
+  # Fail-closed, comme la lecture d'une forge muette un peu plus haut.
   #
-  # Or `sync_forge/2` porte deja la discipline exacte qui l'interdit, cent-cinquante lignes plus
-  # haut : « an unreadable forge is NOT an empty one … pushing our LOCAL view would OVERWRITE
-  # cross-machine incidents we could not read (data loss). Fail-closed. » Un fichier CORROMPU est le
-  # meme fait qu'un fichier ILLISIBLE — dans les deux cas on ignore ce que la forge contient — et
-  # c'est le SHA du fichier corrompu qui partait ensuite en `sha:` du PUT, donc l'ecrasement
-  # reussissait. La garde existait, elle etait juste branchee sur la mauvaise moitie du probleme.
-  #
-  # ⚠ DEUX CORRUPTIONS, DEUX POIDS, et une seule devient fail-closed. Racine indecodable ou non-map
-  # → on ne sait RIEN, refus. Entrees individuelles non-map → le reste du fichier est authentique,
-  # et refuser bloquerait TOUTE synchronisation jusqu'a ce qu'un humain repare un fichier que
-  # personne ne regarde : la sync ne se repare pas toute seule, elle se coince. On garde donc le
-  # tri, deja bruyant (`drop_non_map_entries/2` loggue en `error` avec les signatures perdues).
+  # ⚠ DEUX CORRUPTIONS, DEUX POIDS, ET UNE SEULE EST FAIL-CLOSED. Racine indecodable : on ne sait
+  # RIEN, refus. Entrees individuelles invalides : le reste du fichier est AUTHENTIQUE, et refuser
+  # bloquerait TOUTE synchronisation jusqu'a ce qu'un humain repare un fichier que personne ne
+  # regarde — la sync ne se repare pas toute seule, elle se coince. On trie donc, bruyamment.
   defp decode(content) do
     case Jason.decode(content) do
       {:ok, reg} when is_map(reg) ->

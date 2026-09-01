@@ -2,17 +2,16 @@ defmodule Fleet.Workflow.CardRoles do
   @moduledoc """
   Does every role a catalogue's cards NAME actually exist in that catalogue?
 
-  ## The edge nobody was checking
+  ## The edge the two boot freezes do not cover
 
   Two boot-time freezes already refuse a broken catalogue, each on its own tree:
   `CapProfile.Image` on the profiles, `SPBuilder.Image` on "a catalogue that DECLARES a role owes
   its prompt". Both are sound and both are blind to the same thing — the edge BETWEEN them.
 
-  Measured 2026-08-16: nothing resolves `steps[].role` or `jury[]` against the cap-profiles. A
-  catalogue whose card says `dev` while its profiles declare `developer` passes both freezes (each
-  tree is internally fine), boots, and dies at the FIRST dispatch — a role token that was never
-  minted, a spawn that refuses a name nobody declared. Far from the cause, and on a message that
-  accuses the runtime.
+  Nothing ELSE resolves `steps[].role` or `jury[]` against the cap-profiles. A catalogue whose card
+  says `dev` while its profiles declare `developer` passes both freezes (each tree is internally
+  fine), boots, and dies at the FIRST dispatch — a role token nobody minted, a spawn that
+  refuses a name nobody declared. Far from the cause, and on a message that ACCUSES THE RUNTIME.
 
   ## Why it is checked HERE and not at load
 
@@ -27,8 +26,8 @@ defmodule Fleet.Workflow.CardRoles do
   A role resolves in the catalogue's own profiles, or in `catalogue-system` — the mechanism layer
   (`starfleet`, `chief`, `gatekeeper`, `architect`), inalienable and irreplaceable by design.
 
-  It does NOT resolve in another business catalogue, `fleet` included. ⚖ user, 2026-08-16: `fleet`
-  is undeletable to guarantee ONE valid catalogue always exists — availability, not authority. It
+  It does NOT resolve in another business catalogue, `fleet` included. ⚖ user: `fleet` is
+  undeletable to guarantee ONE valid catalogue always exists — availability, not authority. It
   is a peer. `Loader` already says the same thing for the cards themselves: *"a card names roles,
   and a role belongs to the catalogue that declares it — a card from one catalogue over the roles of
   another describes a fleet nobody assembled."* This module is that sentence, enforced.
@@ -114,14 +113,12 @@ defmodule Fleet.Workflow.CardRoles do
     end)
   end
 
-  # ⚠ `spec.steps` EST UNE MAP, cle = le nom de l'etape — pas une liste. Ma premiere lecture faisait
-  # `List.wrap` dessus, ce qui rend `[la map entiere]`, et `s["role"]` valait donc `nil` : le
-  # controle passait sur TOUTES les cartes reelles en n'en lisant aucun role. Mesure du 2026-08-16
-  # sur les onze cartes des deux catalogues livres — toutes en map, aucune en liste.
+  # ⚠ `spec.steps` EST UNE MAP, cle = le nom de l'etape — PAS une liste. Un `List.wrap` dessus rend
+  # `[la map entiere]`, donc `s["role"]` vaut `nil` et LE CONTROLE PASSE SUR TOUTES LES CARTES EN
+  # N'EN LISANT AUCUN ROLE : un mur qui dit toujours oui.
   #
-  # Le `jury` existe a la RACINE du spec et par ETAPE. Les onze cartes le portent a la racine
-  # aujourd'hui, mais la forme par-etape est lue par le runtime : ne lire que la premiere ferait
-  # passer en silence une carte dont le jury d'etape est casse.
+  # Le `jury` existe a la RACINE du spec ET par ETAPE, et les deux formes sont lues par le runtime :
+  # ne lire que la premiere ferait passer en silence une carte dont le jury d'etape est casse.
   defp roles_of(path) do
     case YamlElixir.read_from_file(path) do
       {:ok, %{} = yaml} ->

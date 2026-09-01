@@ -65,8 +65,8 @@ defmodule Fleet.Spawner.Pod.SessionMint do
       not Fleet.CapProfile.catalogued?(cap_profile) ->
         UUID.uuid4()
 
-      # FLEET-SCOPE ≡ starfleet (role_index 0) — the ONLY pod with no project dimension since the
-      # 2026-07-19 reorg (the old `fleet_level` flag collapsed into this identity, then died).
+      # FLEET-SCOPE ≡ `role_index 0` — the ONLY pod with no project dimension, and the identity IS
+      # the test: no separate `fleet_level` flag to keep in agreement with it.
       Fleet.CapProfile.role_index(cap_profile) == 0 ->
         Fleet.Spawner.SessionId.encode(
           Fleet.CapProfile.role_index(cap_profile),

@@ -8,9 +8,8 @@ defmodule Fleet.Workflow do
   `Fleet.Workflow.DeliverableGate`,
   `Fleet.Workflow.GateDecision` (decision vocabulary), `Fleet.Workflow.BriefArtifact`
   and `Fleet.Workflow.Provenance` (physical-brief provenance).
-  (The resident-singleton `Fleet.Workflow.Gatekeeper` was REMOVED by the 2026-07-19 reorg:
-  the gatekeeper is a one-shot per-project judge, spawned per gate eval by the pilot's
-  `GatekeeperEscalation` — the module was the documented MVP awaiting the project model.)
+  (No resident-singleton gatekeeper here: the gatekeeper is a ONE-SHOT per-project judge, spawned
+  per gate eval by the pilot's `GatekeeperEscalation`.)
   """
 
   # COMPILED domain boundary: deps = the declared inter-domain graph, exports = the

@@ -62,15 +62,14 @@ defmodule Fleet.Workflow.Gates do
   # a :pass by `Enum.all?([]) == true` vacuity. The schema also rejects it at load (`if type==hard then rules
   # minItems 1`) — this eval-boundary guard is defense-in-depth for a schema-bypassed (in-memory) gate.
   #
-  # SHAPE BEFORE VERDICT, and the asymmetry it removes was declared "known" and traced on one side
-  # only. The terminal branch below has always refused a non-string `rules` with a NAMED message;
-  # the hard branch handed every item to `Predicate.eval?`, whose total fail-closed clause answers
-  # `false` — so a malformed gate produced "unsatisfied rule(s)", indistinguishable from a rule the
-  # delivery genuinely failed. Someone reads that message and looks at the deliverable; the fault is
-  # in the card.
+  # SHAPE BEFORE VERDICT, on BOTH branches. The terminal branch below refuses a non-string `rules`
+  # with a NAMED message; handing every item straight to `Predicate.eval?` instead — whose total
+  # fail-closed clause answers `false` — makes a malformed gate produce "unsatisfied rule(s)",
+  # indistinguishable from a rule the delivery genuinely failed. Someone reads that message and
+  # looks at the deliverable; the fault is in the card.
   #
-  # The VERDICT does not change (both were and remain a refusal). What changes is that the refusal
-  # says which of the two happened. Same distinction as `Predicate.parse/1`: a rule the engine
+  # The VERDICT is a refusal either way. What the shape check buys is that the refusal says which
+  # of the two happened. Same distinction as `Predicate.parse/1`: a rule the engine
   # cannot read is not a verdict about the work.
   defp eval_by_type(%{"gate" => %{"type" => "hard", "rules" => rules}}, outputs, _ctx)
        when is_list(rules) and rules != [] do

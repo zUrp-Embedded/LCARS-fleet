@@ -33,8 +33,8 @@ defmodule Fleet.Workflow.OpsObject do
   things are not "false": `:pushed` (the push ran and landed), `:local_only` (it ran and failed —
   the object exists here and nowhere else), `:not_requested` (no `:push` opt: nobody asked). A
   caller that CITES this commit to a human — `Pinning` rendering `<ref> @ <sha>` — is naming
-  something that may not be reachable, and until 2026-08-05 the answer existed inside
-  `maybe_push/2` and was thrown away one function before its reader.
+  something that MAY NOT BE REACHABLE, and the answer exists inside `maybe_push/2`: dropping it
+  there throws the fact away ONE FUNCTION BEFORE ITS READER.
 
   `opts`:
   - `:label` — commit-message prefix (`"<label>: <ref>"`), REQUIRED (the artifact family

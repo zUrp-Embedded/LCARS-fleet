@@ -60,13 +60,12 @@ defmodule Fleet.Workflow.Loader do
 
   # Keep only normalized fields with current consumers.
   #
-  # UN CHAMP QUI A UN CONSOMMATEUR ET QUI NE PASSE PAS ICI EST UNE GARANTIE MORTE. `spec.ci` etait
-  # declare par le schema (enum `required|ignore`), pose par trois cartes canon, et lu par
-  # `ReviewLifecycle.issue_card_ci/2` — sur la carte NORMALISEE. Absent de cette map, `Map.get` y
-  # rendait toujours `nil`, donc `:ignore` : la porte CI etait desarmee sur les trois cartes qui la
-  # reclamaient, et aucune carte n'etait distinguable d'une carte qui ne declare rien. Le mecanisme
-  # entier (`CiGate`, l'attente bornee, l'escalade, le fait qui voyage dans le brief) existait et
-  # etait injoignable.
+  # UN CHAMP QUI A UN CONSOMMATEUR ET QUI NE PASSE PAS ICI EST UNE GARANTIE MORTE. Un champ declare
+  # au schema, pose par des cartes, et lu sur la carte NORMALISEE rend `nil` s'il ne traverse pas
+  # cette map — pour `spec.ci`, ce `nil` vaut `:ignore` : la porte CI serait desarmee sur les cartes
+  # qui la reclament, aucune ne serait distinguable d'une carte qui ne declare rien, et tout le
+  # mecanisme (`CiGate`, l'attente bornee, l'escalade, le fait qui voyage dans le brief) existerait
+  # sans etre joignable.
   #
   # La regle, puisque cette map est un filtre : on n'ajoute rien ici sans consommateur, et on ne
   # RETIRE rien tant qu'il en reste un.
@@ -86,8 +85,8 @@ defmodule Fleet.Workflow.Loader do
       # C2 — la courbe de tolérance de la carte, et `get` PLUTÔT QUE `fetch!` à dessein : contre
       # `ci`/`jury`/`max_rework_rounds`, ce champ est OPTIONNEL au schéma. Une carte qui n'en
       # déclare pas doit garder l'agrégation booléenne, à l'octet près — c'est la condition pour
-      # que les huit cartes du canon migrent quand elles veulent, une par une, au lieu d'être
-      # forcées ensemble par une exception au chargement. `nil` est donc ici une VALEUR («aucune
+      # que les cartes du canon migrent quand elles veulent, une par une, au lieu d'être forcées
+      # ensemble par une exception au chargement. `nil` est donc ici une VALEUR («aucune
       # courbe déclarée»), pas un défaut choisi par accident : la différence tient à ce que le
       # consommateur en fait, et il ne fabrique aucun seuil à partir d'une absence.
       "verdict_policy" => Map.get(spec, "verdict_policy"),
@@ -98,19 +97,16 @@ defmodule Fleet.Workflow.Loader do
       # A production card can still be unavailable at project scope: a card reached by an issue's
       # genre, declared by a project, would route EVERY ticket through it.
       #
-      # ⚠ IL SE DERIVE, ET IL SE TENAIT A LA MAIN. `scope: ticket` etait un champ que l'auteur d'un
-      # catalogue devait penser a ecrire — a cote d'une PROPRIETE qui dit deja la meme chose, et que
-      # le runtime derive deja pour resoudre le rail doc (`workshop_card_name/1`, qui a remplace un
-      # knob nomme pour cette exact raison : « one knob cannot name N cards »). Le meme fichier
-      # portait donc les deux regimes, et la moitie tenue a la main a pourri.
+      # ⚠ IL SE DERIVE, PARCE QU'UN CHAMP TENU A LA MAIN A COTE D'UNE PROPRIETE QUI DIT DEJA LA
+      # MEME CHOSE POURRIT. Le runtime derive deja cette propriete pour resoudre le rail doc
+      # (`workshop_card_name/1`), donc l'ecrire une seconde fois a la main fait porter au meme
+      # fichier deux regimes dont un seul est verifie.
       #
-      # MESURE 2026-08-17, sur les onze cartes livrees : la correlation `scope: ticket` <->
-      # producteur `face: workshop` est EXACTE, sauf sur `web-demo/content` — qui porte la face et a
-      # oublie le champ. Consequence mesuree, `declarable_card("content") == :ok` : un projet
-      # `web-demo` pouvait declarer la carte d'atelier, et TOUT son travail de production serait
-      # parti sur la branche d'atelier, sans jury, sans CI, sans jamais atteindre `main`. Les deux
-      # gardes qui l'auraient arrete — le guichet et `declarable_card/3` — lisent le MEME champ
-      # absent : elles tombent ensemble.
+      # ET L'OUBLI NE SE RATTRAPE NULLE PART : une carte qui porte la face et omet le champ passe
+      # `declarable_card/3`, un projet peut alors declarer la carte d'ATELIER, et TOUT son travail
+      # de production part sur la branche d'atelier — sans jury, sans CI, sans jamais atteindre
+      # `main`. Les deux gardes qui l'arreteraient, le guichet et `declarable_card/3`, lisent le
+      # MEME champ absent : elles tombent ensemble.
       #
       # POURQUOI LA DERIVATION EST FONDEE ET PAS UNE COMMODITE : `ensure_one_workshop_rail!/2`
       # refuse deja DEUX cartes a producteur d'atelier par catalogue. Porter cette face implique
@@ -187,10 +183,9 @@ defmodule Fleet.Workflow.Loader do
   """
   @spec publish_image!() :: :ok
   def publish_image! do
-    # ONE image PER INSTALLED CATALOGUE, and the key was already per-root (`image_key/1`) — only
-    # the publication was single. It published from `workflow_maps_root([])`, i.e. the bundled
-    # root, so the cards of every other catalogue existed on disk and in no image. A
-    # project served by such a catalogue found no card at all.
+    # ONE image PER INSTALLED CATALOGUE. Publishing from `workflow_maps_root([])` alone — the
+    # bundled root — leaves the cards of every other catalogue on disk and in no image, and a
+    # project served by such a catalogue finds no card at all.
     #
     # Not a search path: cards do not supersede across catalogues. A card names roles, and a role
     # belongs to the catalogue declaring it — merging them would describe a fleet nobody assembled.
@@ -272,10 +267,9 @@ defmodule Fleet.Workflow.Loader do
   The card directory serving the project `owner/name`, or `nil`.
 
   How a PROJECT finds its OWN cards. The repo-to-catalogue half is `Fleet.Catalogue.root_for_repo/1`
-  and stays there — its own doc records that three call sites re-derived that split within an hour
-  of each other, which is how one fact acquires three answers. This adds only the half that belongs
-  here: from that catalogue's root to the directory THIS loader serves, through `card_scopes/0`, so
-  a fine override still wins exactly as it does everywhere else.
+  and stays there; this adds only the half that belongs here — from that catalogue's root to the
+  directory THIS loader serves, through `card_scopes/0`, so a fine override still wins exactly as it
+  does everywhere else.
 
   `nil` for a repo no installed catalogue claims, and the caller keeps the default root — the reading
   `root_for_repo/1` already prescribes for its own `nil`.
@@ -324,10 +318,9 @@ defmodule Fleet.Workflow.Loader do
   The card carrying this catalogue's WORKSHOP producer, or `nil` — the doc rail, resolved by what a
   card IS rather than by a name someone configured.
 
-  It was a global config knob (`:lcars_fleet, :pilot_workshop_workflow_map`, defaulting to
-  `"workshop-direct"` — the name of ONE catalogue's card). One knob cannot name N cards, and the
-  catalogue serving a project is not the one that named the default. Same shape as
-  `Roles.gatekeeper_role/1`, which resolves by capability rather than by a configured name.
+  NOT a config knob naming a card: one knob cannot name N cards, and the catalogue serving a project
+  is not the one that would have named the default. Same shape as `Roles.gatekeeper_role/1`, which
+  resolves by capability rather than by a configured name.
 
   `publish_image!/0` refuses two claimants, so this can only ever find one.
   """
@@ -390,11 +383,10 @@ defmodule Fleet.Workflow.Loader do
 
   defp image_key(root), do: {__MODULE__, :image, root}
 
-  # THE IMAGE IS RESOLVED BY ROOT, like the publication that fills it. `publish_image!/0` was made
-  # per-catalogue and this reader was left single: it always answered from the FIRST installed root, so
-  # a project served by any other catalogue asked for a card that had been published — under another
-  # key — and was told it is not in the image at all. Measured on a bench: `web/test2` declares
-  # `standard`, the `web` catalogue carries it, and every tick raised `declared_card_unloadable`.
+  # THE IMAGE IS RESOLVED BY ROOT, like the publication that fills it. A single-root reader always
+  # answers from the FIRST installed root, so a project served by any other catalogue asks for a card
+  # that HAS been published — under another key — and is told it is not in the image at all. The
+  # symptom is a `declared_card_unloadable` on every tick, for a card that is right there.
   #
   # A root with NO published image still falls through to a direct disk read: that is a fixture
   # pointing at its own canon, and it must stay hermetic. So naming a root never LOSES the boot
@@ -439,10 +431,10 @@ defmodule Fleet.Workflow.Loader do
   #                          hermetic by contract.
   #   neither                the default root's image, as before.
   #
-  # Folding them into one key was tried and it is wrong in both directions: a fixture that points at
-  # its own canon would start being answered by whatever image happens to share its path, and the
-  # per-catalogue read would have to give up the boot proof to get its directory honoured. One name
-  # cannot carry "trust the boot" and "trust nothing but this disk".
+  # Folding them into one key is wrong in both directions: a fixture pointing at its own canon would
+  # be answered by whatever image happens to share its path, and the per-catalogue read would have to
+  # give up the boot proof to get its directory honoured. One name cannot carry "trust the boot" and
+  # "trust nothing but this disk".
   defp image_root(opts) do
     cond do
       is_binary(opts[:catalogue_root]) -> opts[:catalogue_root]

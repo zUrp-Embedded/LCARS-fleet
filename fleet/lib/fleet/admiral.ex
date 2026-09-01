@@ -22,13 +22,9 @@ defmodule Fleet.Admiral do
 
   @moduledoc """
   Le domaine SYSADMIN de la boîte, côté système : audit, MCP health, boot orchestration,
-  quiesce + drain, et le rail d'outillage. Il porte le nom de sa fonction depuis le 2026-08-19
-  ([BL-6-103], successeur du [BL-6-53] retiré) — il s'est appelé `Fleet.Starfleet` d'après un rôle
-  dont le sens avait bougé (l'ex-rôle sysadmin devenu front desk), une homonymie que le domaine ne
-  référençait pas une seule fois. Renommage en deux commits : mécanique, puis la valeur wire
-  `source: :admiral` (le dernier datum) dans le sien.
-
-  Read what follows as "the system-side sysadmin function", never as "the starfleet pod".
+  quiesce + drain, et le rail d'outillage. Il porte le nom de sa FONCTION et non celui d'un rôle
+  ([BL-6-103]) : un domaine nommé d'après un rôle suit le sens de ce rôle quand il bouge, alors même
+  qu'il ne le référence pas une seule fois.
 
   **No pod, no inference, no automatic ACTION in this module** — the system detects, logs and
   tickets (`error_system`, the admiral inbox); a human treats, off-box.
@@ -36,21 +32,9 @@ defmodule Fleet.Admiral do
 
   ## Sub-modules
 
-    * `Fleet.Admiral.Application` — the app's supervisor (consumers gated
-      by config: test hermeticity)
-    * `Fleet.Admiral.AuditConsumer` — Bus consumer of the AUDIT rail
-      (lifecycle + security, log prefix `AUDIT <event.type>`)
-    * `Fleet.Admiral.ToolchainReconciler` — le déclencheur du rail d'outillage
-      (comparaison head↔SHA appliqué sur `PeriodicCheck` ; le seul geste privilégié du rail)
-    * `Fleet.Admiral.BootOrchestrator` — post-readiness orchestrator (fire-and-forget
-      Task triggered via `boot_orchestrate/0` by the root AFTER full boot;
-      emits `fleet.boot_complete`/`boot_partial`/`boot_failed`)
-    * `Fleet.Admiral.Shutdown` (+ behaviour `Shutdown.Dispatcher`,
-      `NoOpDispatcher`, `AggregateDispatcher`) — quiesce + bounded drain of the BEAM
-    * `Fleet.Admiral.MCPMonitor` — passive health check of the pod-facing
-      MCP substrate (`Fleet.MCP.PodSocketSupervisor`)
-    * `Fleet.Admiral.PeriodicCheck` — shared plumbing for the periodic
-      checks (`MCPMonitor`)
+  The index lives in the domain's map (`lib/fleet/admiral/README.md`), where a new module costs one
+  line. Duplicating it here would be a second copy of one fact, and the copy that goes stale is
+  always the one nobody edits.
 
   ## Vendor boundary
 

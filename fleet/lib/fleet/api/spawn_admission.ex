@@ -8,13 +8,11 @@ defmodule Fleet.API.SpawnAdmission do
   ## Why a strict admission on a no-auth surface
 
   `/api/admin/spawn` is no-auth (boundary = the AF_UNIX socket's `0600` mode and container
-  isolation, cf. `Fleet.API.ControlRouter` — la surface TCP qui portait cette doctrine a ete
-  supprimee le 2026-08-14). The `PublishConsumer` THEN converts
+  isolation, cf. `Fleet.API.ControlRouter`). The `PublishConsumer` THEN converts
   `payload["opts"]` into internal spawner opts via `to_keyword/1` — without a
-  filter, privileged opts (`pod_dir_root`, `state_fs_root`, `human`,
-  `project` → clone of an attacker repo into the pod, `recall_seed_jsonl`,
-  `resume`, `session_id`, `rc_name`, `allow_no_brief`, module/fun seams…)
-  would become drivable from the API. The pipeline (fixed order):
+  filter, privileged opts would become drivable from the API: FS roots, identity,
+  session/resume seams, and `project`, which clones an ATTACKER repo into the pod.
+  The pipeline (fixed order):
 
     1. **DTO allowlist** (`@admin_spawn_public_fields`) — only a FLAT public
        DTO is admitted; any unknown key (including a raw `opts`) →
@@ -28,7 +26,7 @@ defmodule Fleet.API.SpawnAdmission do
        soon as the broadcast happened, a non-existent `cap_profile_name` would
        be detected ONLY in `PublishConsumer` (mere warning, ZERO pod) → lying
        202. Same loader as the consumer (single source `Fleet.CapProfile.load/1`).
-    4. **Host-native refused SAUF acquittement explicite** ([BL-6-101], 2026-08-19) — a
+    4. **Host-native refused SAUF acquittement explicite** ([BL-6-101]) — a
        `containment: none` cap-profile would launch a pod OUT-OF-SANDBOX on the host *as* the
        human (the strongest power of the fleet) via this generic no-auth door: 422 at admission.
        L'OUVERTURE NOMMÉE : `host_native_ack: true` dans le DTO — le GESTE de l'opérateur
@@ -38,14 +36,13 @@ defmodule Fleet.API.SpawnAdmission do
        siège machine — et l'unicité est tenue par le témoin anti-bitrot du control_router : un
        second profil hors sandbox exige son propre arbitrage.
     5. **Fleet-scope singleton already alive** — `role_index: 0` is the fleet-level slot: ONE per
-       fleet, by construction (the reaper spares it, its session UUID carries no project). The door
-       did not know, so `lcars spawn starfleet` next to a running permanent was ADMITTED: a second
-       pod, a random UUID, nothing ever addressed to it, twelve wake attempts and an incident whose
-       message says the agent never acked — the symptom, never the cause. Refused here, naming the
-       pod that holds the slot and the gesture that works, because the operator who typed the
-       obvious command has no way to learn it otherwise.
-    6. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`
-       (`Fleet.Spawner.brief_guard`): a one-shot without `brief` would leave
+       fleet, by construction (the reaper spares it, its session UUID carries no project). Admitting
+       a second one costs a pod with a random UUID that nothing will ever address, and the incident
+       it eventually raises accuses the agent of never acking — the symptom, never the cause. So the
+       refusal names the pod holding the slot AND the gesture that works: the operator who typed the
+       obvious command has no other way to learn it.
+    6. **Brief required for a one-shot** — MIRROR of `Fleet.Spawner.brief_guard`:
+       a one-shot without `brief` would leave
        without work → the spawner would refuse it (ZERO pod), so the 202 would lie.
        `Fleet.Spawner.brief_required?/1` IS the shared authority (no copied
        rule, no possible divergence).
@@ -172,9 +169,9 @@ defmodule Fleet.API.SpawnAdmission do
 
     if Fleet.CapProfile.catalogued?(cap) and Fleet.CapProfile.role_index(cap) == 0 do
       # `Map.get`, never dot access: `list_pods/0` is specced `[map()]` and makes no promise about
-      # the keys. A pod whose `:info` lacks `:role` raised a KeyError THROUGH the router — the whole
-      # spawn door answering 500 because one unrelated pod answered a short map. A guard that can
-      # crash the door it guards is worse than the hole it closes.
+      # the keys. A pod whose `:info` lacks `:role` then raises a KeyError THROUGH the router, and
+      # THE WHOLE SPAWN DOOR ANSWERS 500 because one unrelated pod returned a short map. A guard
+      # that can crash the door it guards is worse than the hole it closes.
       case Enum.find(Fleet.Spawner.list_pods(), &(Map.get(&1, :role) == name)) do
         nil -> :ok
         pod -> {:error, {:fleet_scope_occupied, name, Map.get(pod, :pod_id, "unknown")}}
@@ -197,7 +194,7 @@ defmodule Fleet.API.SpawnAdmission do
               Fleet.CapProfile.bwrap?(cap) ->
                 {:ok, cap}
 
-              # L'OUVERTURE NOMMÉE du verrou (BL-6-101, 2026-08-19). Un profil `containment: none`
+              # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none`
               # reste REFUSÉ sur ce chemin générique — sauf si l'opérateur le dit EXPLICITEMENT
               # (`host_native_ack: true`, posé par `lcars admiral`, jamais par un chemin auto : le
               # dispatcher ne passe pas par cette porte et n'a pas le champ). C'est la doctrine de

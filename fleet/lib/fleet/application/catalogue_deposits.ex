@@ -21,13 +21,12 @@ defmodule Fleet.Application.CatalogueDeposits do
   The store is the copy WE pushed into an installed catalogue's own org. Listing it as a deposit
   would report every installed catalogue as also available from itself.
 
-  It used to be recognised by NAME — any repo called `catalogue`, whoever owned it. That reserved
-  the most natural repo name in every user's namespace, and did it in SILENCE: a user who called
-  their deposit `catalogue` was dropped with no log, no line, no refusal.
+  Recognising it by NAME — any repo called `catalogue`, whoever owns it — would reserve the most
+  natural repo name in every user's namespace, and would do it in SILENCE: a user calling their
+  deposit `catalogue` gets dropped with no log, no line, no refusal.
 
   The discriminant is `owner == manifest.name`, and it is true BY CONSTRUCTION: the org is created
-  from the manifest (`/orgs/${name}/repos`), and *"the NAME comes from the repo's manifest, never
-  from the repo name nor from you"*.
+  from the manifest (`/orgs/${name}/repos`).
 
   What makes it not a rarity bet — the part a prefix could never buy — is that Gitea gives users and
   organisations ONE namespace. A catalogue named `X` requires the org `X`, so no user account can be
@@ -39,7 +38,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   ## Two deposits of the same name: we REFUSE, and we name both
 
-  ⚖ user, 2026-08-16. We do not guess which one is the real one — not the first, not the newest,
+  ⚖ user. We do not guess which one is the real one — not the first, not the newest,
   not the biggest. Each of those is a choice we could not justify to whoever loses. The list refuses
   and names both owners; the humans sort it out by deleting one.
 
@@ -127,8 +126,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   # ⚠ `into: %{}` GARDAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous deux
   # declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
-  # effectif etait alors celui que l'ordre de `/repos/search` designait. Trouve par relecture
-  # independante le 2026-08-21.
+  # effectif serait alors celui que l'ordre de `/repos/search` designe.
   #
   # ON NE REFUSE PAS LA LISTE, contrairement au doublon de DEPOTS, et l'asymetrie est voulue : un
   # doublon de depots est une question sans reponse (« lequel installer ? ») ; ici le catalogue EST
@@ -211,8 +209,8 @@ defmodule Fleet.Application.CatalogueDeposits do
       owner_of(full) == name and org_owner?(name, repo_mod, opts) ->
         [{:store, name, repo}]
 
-      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et depuis le 2026-08-21 il
-      # existe un depot qui le porte : la fleet publie sa propre reference sur la forge, pour qu'elle
+      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et un depot le porte : la
+      # fleet publie sa propre reference sur la forge, pour qu'elle
       # soit LISIBLE et FORKABLE. Sans cette clause, ce depot serait un candidat de plus nomme
       # `fleet` — et le premier fork qui garde son manifeste tel quel en ferait DEUX, donc
       # `{:duplicate_catalogues, ...}`, donc `catalogue list` refusant la liste ENTIERE pour tout le
@@ -255,12 +253,11 @@ defmodule Fleet.Application.CatalogueDeposits do
   #                               sur une forge ou `bob` est un humain, son org entrerait en collision
   #                               avec le compte.
   #
-  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI ET PLUS DANS `CatalogueLifecycle.stores/3`. Tant qu'il etait
-  # en aval, `split/2` rendait des CANDIDATS qu'un second lecteur recalait — et un candidat recale
-  # tombait dans un trou : ni magasin (pas une org), ni depot (deja classe magasin), aucun log,
-  # aucune ligne. Mesure du 2026-08-21 par relecture independante : `bob/mon-depot` declarant
-  # `name: bob` disparaissait de `catalogue list` sans un mot, ce qui est mot pour mot le defaut que
-  # ce module venait de fermer, avec une geometrie differente.
+  # ⚠ ET C'EST POURQUOI LE TEST VIT ICI, PAS EN AVAL. Place plus loin, `split/2` rend des CANDIDATS
+  # qu'un second lecteur recale — et un candidat recale TOMBE DANS UN TROU : ni magasin (pas une
+  # org), ni depot (deja classe magasin), aucun log, aucune ligne. Un depot personnel declarant
+  # `name: <son propre compte>` disparait alors de `catalogue list` SANS UN MOT, ce qui est mot pour
+  # mot le defaut que ce module ferme un cran plus haut, avec une geometrie differente.
   #
   # La classification est donc COMPLETE ici, et le recale RETOMBE en depot — ce qu'il est. Il ne
   # s'installera jamais (son org entrerait en collision avec un compte), et ce refus-la appartient a
@@ -301,10 +298,10 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   defp owner_of(full_name), do: full_name |> String.split("/", parts: 2) |> hd()
 
-  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation. Elle avait sa copie ici jusqu'au
-  # 2026-08-21 ; la porte explicite (`Onboard.refute_store/2`) a eu besoin de la meme, et sa
-  # frontiere ne peut pas referencer celle-ci. Elargir une frontiere pour avoir raison n'est jamais
-  # le geste — la regle est descendue la ou les deux peuvent la lire.
+  # LA REGLE DU MANIFESTE VIT DANS `Fleet.Catalogue`, la fondation, et pas en copie ici : la porte
+  # explicite (`Onboard.refute_store/2`) a besoin de la meme, et sa frontiere ne peut pas referencer
+  # celle-ci. ELARGIR UNE FRONTIERE POUR AVOIR RAISON N'EST JAMAIS LE GESTE — la regle descend la ou
+  # les deux peuvent la lire.
   defp manifest_name(yaml), do: Fleet.Catalogue.manifest_name(yaml)
 
   defp group(deposits) do

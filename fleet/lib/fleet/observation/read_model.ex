@@ -28,11 +28,10 @@ defmodule Fleet.Observation.ReadModel do
     {"fleet.boot", :diagnostics},
     {"oauth.", :diagnostics},
     {"mcp.server_crashed", :diagnostics}
-    # `sdk.upstream_alert` retire le 2026-08-14 (6-016) : residu de `MCPWatcher` (supprime BL-6-44,
-    # la veille du SDK est passee en CI). `state.corrupt` retire le 2026-08-20 (BL-6-113) : residu
-    # du rail de persistance du broker (`Fleet.TaskQueue.Store`), supprime avec lui. MEME MOTIF, ET
-    # C'EST POURQUOI LA REGLE EST ECRITE ICI PLUTOT QUE DEUX FOIS — une regle de routage pour un
-    # type que personne n'emet trie un flux vide, et se lit comme une categorie alimentee.
+    # ⚠ AUCUNE ENTREE POUR UN TYPE QUE PERSONNE N'EMET : elle trierait un FLUX VIDE tout en se
+    # lisant comme une categorie alimentee. Le motif est toujours le meme — un consommateur reste
+    # apres le depart de son producteur (6-016, BL-6-113) — et c'est pourquoi la regle est ecrite
+    # UNE fois plutot qu'a chaque entree.
   ]
 
   # ── Client ────────────────────────────────────────────────────────────────

@@ -79,14 +79,14 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   Loads through a module or function and normalizes exceptions into
   `{:error, {:workflow_map_load_failed, name, message}}`.
 
-  `opts` carries WHICH CATALOGUE answers, and the arity of the seam is why it did not exist. An
-  engraved route is a bare NAME (`wfmap/standard`), and two catalogues may each declare a card by
-  that name — the card that must answer is the one of the project's own catalogue. Every reader
-  here went through a UNARY seam, so there was no room for the question: the name resolved in the
-  default image, always. Measured on the bench: `web/test2` got the doc rail of the `fleet`
-  catalogue, whose producer is `scribe`, whose forge account is a member of no `web` team — the
-  push and the PR both answered `403 user must be a collaborator`, and the diagnosis read as a
-  forge permission problem when the permissions were right and the CARD was foreign.
+  `opts` carries WHICH CATALOGUE answers, and the arity of the seam is what leaves room for the
+  question. An engraved route is a bare NAME (`wfmap/standard`), and two catalogues may each declare
+  a card by that name — the card that must answer is the one of the project's own catalogue. A
+  reader going through a UNARY seam has nowhere to ask it: the name resolves in the DEFAULT image,
+  always. A project then gets the doc rail of another catalogue, whose producer's
+  forge account is a member of none of its teams — the push and the PR both answer
+  `403 user must be a collaborator`, AND THE DIAGNOSIS READS AS A FORGE PERMISSION PROBLEM when the
+  permissions are right and the CARD is foreign.
 
   A unary seam still works and is left alone: that is every test stub, and a stub answers for the
   one catalogue it fabricates.

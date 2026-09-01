@@ -23,10 +23,10 @@ defmodule Fleet.Conflict.Parser do
   Splits conflict-marked `content` into ordered `:text` / `:conflict` segments.
 
   Fails with `{:error, {:unterminated_conflict, state, start_line}}` when the content ends while a
-  conflict is still open. THE SILENCE WAS THE DEFECT: the accumulated `ours`/`base`/`theirs` lines
-  only ever become a segment on the closing `>>>>>>>`, so an unterminated conflict used to be
-  dropped whole — and the caller received the segment list of a CLEAN file. Two ways that bit, and
-  the second is the expensive one:
+  conflict is still open. THE SILENCE IS THE DEFECT: the accumulated `ours`/`base`/`theirs` lines
+  only ever become a segment on the closing `>>>>>>>`, so an unterminated conflict gets dropped
+  WHOLE and the caller receives the segment list of a CLEAN file. Two ways that bites, and the
+  second is the expensive one:
 
     * alone, it made `resolve/2` return a report byte-identical to a file with no conflict at all,
       so a probe reported "clean" on a file it had failed to read;

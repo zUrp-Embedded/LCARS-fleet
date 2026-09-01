@@ -5,14 +5,14 @@ defmodule Fleet.Pilot.PollerTelemetry do
   @moduledoc """
   The poller's telemetry, ATTACHED (BL-6-40 Phase 0).
 
-  `Fleet.Pilot.Poller` has emitted `[:lcars_fleet, :pilot_poller, :poll]` from three sites since it was
-  written — duration, dispatched/skipped/errors, per-repo status. Nothing anywhere in `lib/` ever
-  called `:telemetry.attach`, so every one of those measurements was computed and dropped: nobody,
-  human or agent, could state how long a poll actually took. The amplifiers that make polls slow
-  (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
-  network `ls-remote` inside the GenServer) were therefore only ever REASONED about. This module
-  is what turns them into something measurable, and it is deliberately the first phase: the rest
-  of BL-6-40 is a set of optimisations that cannot be proven without it.
+  `Fleet.Pilot.Poller` emits `[:lcars_fleet, :pilot_poller, :poll]` from three sites — duration,
+  dispatched/skipped/errors, per-repo status. Emission alone measures nothing: with no
+  `:telemetry.attach` anywhere in `lib/`, every one of those samples is computed and dropped, and
+  nobody, human or agent, can state how long a poll actually took. The amplifiers that make polls
+  slow (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
+  network `ls-remote` inside the GenServer) can then only be REASONED about. This module is what
+  turns them into something measurable, and it is deliberately the first phase: the rest of BL-6-40
+  is a set of optimisations that cannot be proven without it.
 
   ## What it does, and what it deliberately does NOT do
 
@@ -22,10 +22,10 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   ⚠ **A sample is ONE REPO, not one cycle.** `[:lcars_fleet, :pilot_poller, :poll]` is emitted once per
   repo — every emission carries `repo:` — so this distribution describes what a single repo costs
-  to poll, never what a full pass costs. Measured on 2026-08-03: 12 repos at a 30 s interval made
-  the counter advance by 12 per cycle. **The cost of a CYCLE is not measured here**, and no name in
-  this module may suggest otherwise: the readiness key was first called `tick`, which asserted a
-  scope the mechanism does not have, and a measurement was read wrong before that name was fixed.
+  to poll, never what a full pass costs — N repos at a fixed interval make the counter advance by N
+  per cycle. **The cost of a CYCLE is not measured here**, and no name in this module may suggest
+  otherwise: a readiness key called `tick` asserts a scope the mechanism does not have, and a
+  measurement gets read wrong for exactly as long as such a name stands.
   Deriving a cycle cost from these figures requires knowing how the repos are folded (serially or
   not) — that is a different instrument, not an arithmetic on this one.
 

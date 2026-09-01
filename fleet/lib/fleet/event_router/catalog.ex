@@ -54,15 +54,15 @@ defmodule Fleet.EventRouter.Catalog do
   Returns the registry's event type strings. An empty registry yields `[]`; an UNPARSEABLE one
   raises, exactly like `load!/0` on the same fault.
 
-  THE TWO READERS OF `events.yaml` NOW TREAT THE SAME FAULT THE SAME WAY. They did not: `load!/0`
-  raised on an absent or invalid file while this one returned `[]` in silence — and `[]` was also
-  what a legitimately empty registry returns, so the two were indistinguishable at the output.
+  THE TWO READERS OF `events.yaml` TREAT THE SAME FAULT THE SAME WAY, and they must: returning `[]`
+  on an unparseable file would give it the answer a legitimately empty registry gives, leaving the
+  two indistinguishable at the output.
 
-  The silence was harmless on the nominal path (`load!/0` raises one line later, so the boot dies
-  anyway) and NOT harmless where the registry is deliberately off
+  Silence would cost nothing on the nominal path — `load!/0` raises one line later and the boot
+  dies anyway — and everything where the registry is deliberately off
   (`event_router_load_event_registry: false`, the hermetic test baseline and any maintenance run):
   there `load!/0` is a no-op, this function is the ONLY source of pre-registered event atoms, and an
-  unparseable file left the fleet with none. Every later `String.to_existing_atom/1` on a binary
+  unparseable file leaves the fleet with none. Every later `String.to_existing_atom/1` on a binary
   event type — `Bus.coerce_type/1`, the gitea webhook — then raises an ArgumentError naming the
   type, pointing at the consumer instead of at the file that could not be read.
 
@@ -93,12 +93,11 @@ defmodule Fleet.EventRouter.Catalog do
   end
 
   defp validate_against_schema!(events) do
-    # THROUGH THE SHARED CACHE, like every other schema of the repo. This site inlined
-    # `File.read! |> Jason.decode! |> resolve()` — the exact body of
-    # `SchemaCache.resolve_json_schema!/2` — and was the ONLY one to do so without saying why.
-    # Measured: three sites in `lib/` call `ExJsonSchema.Schema.resolve/1` — the shared mechanism,
-    # ONE documented exception (`CapProfile.Schema`, whose `{:error, :schema_unavailable}` must stay
-    # retryable and therefore uncacheable), and this one.
+    # THROUGH THE SHARED CACHE, like every other schema of the repo — NOT an inlined
+    # `File.read! |> Jason.decode! |> resolve()`, which is the exact body of
+    # `SchemaCache.resolve_json_schema!/2`. `lib/` calls `ExJsonSchema.Schema.resolve/1` in the
+    # shared mechanism and in ONE documented exception (`CapProfile.Schema`, whose
+    # `{:error, :schema_unavailable}` must stay retryable and therefore uncacheable). Nowhere else.
     #
     # Safe to cache here and NOT there: the variable artifact of this module is `events.yaml`, which
     # the tests rewrite under it; the SCHEMA is immutable `priv/` resolved through `:code.priv_dir`,
@@ -120,9 +119,8 @@ defmodule Fleet.EventRouter.Catalog do
 
   defp build_routing!(events) do
     for {type, %{"source" => source, "action" => action} = route} <- events, into: %{} do
-      # (Les actions du rail de severite max et leurs gardes de prefixe sont parties avec lui
-      # de severite max — brouette 2026-08-19. La garde qui survit dans leur esprit : une route
-      # `incident` a porte immediate exige un `escalate_kind` nomme, plus bas.)
+      # (Pas de rail de severite separe ni de gardes de prefixe : la seule garde de cet esprit est
+      # plus bas — une route `incident` a porte immediate exige un `escalate_kind` NOMME.)
       if route["incident"] && action != "incident" do
         raise "Catalog: #{type} carries incident block but action=#{action} is not incident"
       end
@@ -130,7 +128,7 @@ defmodule Fleet.EventRouter.Catalog do
       incident =
         case route["incident"] do
           %{"op" => op, "subject" => subject} = inc ->
-            # LA PORTE EST DECLARATIVE (brouette 2026-08-19) : `immediate` = issue des la PREMIERE
+            # LA PORTE EST DECLARATIVE : `immediate` = issue des la PREMIERE
             # occurrence (escalate_gated, cooldown seul) ; `recurrence` (defaut) = 1re notee,
             # recidive escaladee (record_or_escalate). Le perimetre est borne : la porte
             # declarative vaut pour les evenements ROUTES PAR CETTE TABLE ; les kinds tires depuis
@@ -152,9 +150,8 @@ defmodule Fleet.EventRouter.Catalog do
               end
 
             # UNE PORTE IMMEDIATE EXIGE UN KIND NOMME : `Escalation.kind_describe/1` est une table
-            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue — la panne exacte de
-            # `:awaits_arch_stuck` (trouvee par revue, 2026-08-19). Refus au BOOT, pas au premier
-            # incident.
+            # close, et un kind sans clause y CRASHE au lieu d'ouvrir l'issue. Refus au BOOT, pas
+            # au premier incident.
             if gate == :immediate and is_nil(inc["escalate_kind"]) do
               raise "Catalog: #{type} declares gate=immediate without escalate_kind — the " <>
                       "immediate path calls Escalation.escalate/5 whose kind table is closed; " <>

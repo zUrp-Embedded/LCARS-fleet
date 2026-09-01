@@ -5,33 +5,25 @@ defmodule Fleet.DurableLog do
   @moduledoc """
   The warning-and-above trace, ON DISK (BL-6-41).
 
-  `config :logger, level:` was the project's ONLY logger configuration — no file handler, no
-  rotation. Every load-bearing warning (a `publish_deadline` firing, a drift, a `pr-open-fail`, a
-  swallowed arrival chrono) lived in the daemon's tmux ring buffer and died with it.
-
-  `Fleet.Spawner.Pod` names the consequence at the exact spot where it bites: *"THIS WARNING IS
-  THE ONLY TRACE, AND IT IS NOT RECOVERABLE — nobody can find out AFTER THE FACT whether this ever
-  fired. Not for lack of access, because nothing records it."* The comment left the decision open
-  and nobody took it. Taken here.
-
-  ## The two decisions the item asked for
+  Without this handler installed, `config :logger, level:` is the whole of the logger's
+  configuration — no file, no rotation — and every load-bearing warning (a `publish_deadline`
+  firing, a drift, a `pr-open-fail`, a swallowed arrival chrono) lives in the daemon's tmux ring
+  buffer and dies with it. Nobody can then find out AFTER THE FACT whether one ever fired: not for
+  lack of access, because nothing recorded it.
 
   **Which level becomes durable: `warning` and above.** Not `info`, and the reason is the same one
   that keeps the poller's nominal tick silent — a rail that writes a line per routine pass buries
   the one line that matters. Warning is the level at which this codebase already says "something
   degraded"; below it there is nothing an incident review would look for.
 
-  **Where: `<human home>/.lcars/log/fleet.log`**, beside `fleet_v2.env` and the rest of the
-  human's LCARS state, rotated. NOT under the release: a release directory is replaced by the next
-  deploy, and a trace that a deploy erases is not a trace.
+  **Where is the operator's, and `config/runtime.exs` resolves it** — this module writes wherever
+  it is handed. The one bound on that choice: NOT under the release, whose directory the next
+  deploy replaces, because a trace a deploy erases is not a trace.
 
   ## What this is NOT
 
-  It is not the old domain audit NDJSON (mort avec le rail de severite max, brouette 2026-08-19)
-  — that one was a business
-  ledger with its own schema and its own two producers — tous morts avec lui, donc il ne reste rien
-  a lui reserver.
-  This is the operational trace: whatever any module chose to log at warning or above, in the
+  It is not a domain audit NDJSON — that would be a business ledger, with its own schema and its own
+  producers. This is the operational trace: whatever any module chose to log at warning or above, in the
   order it happened, surviving the process. Merging them would give the ledger a shape nobody can
   parse and the trace a filter nobody wants.
 
@@ -98,9 +90,9 @@ defmodule Fleet.DurableLog do
         compress_on_rotate: true
       },
       level: Keyword.get(opts, :level, :warning),
-      # `colors: [enabled: false]` — NOT cosmetic. Measured 2026-08-03 on a live bench: the file
-      # came out carrying `\e[33m`/`\e[0m` around every line, because the formatter inherits the
-      # console's colour setting. A trace exists to be READ AFTER THE FACT, by a human grepping or
+      # `colors: [enabled: false]` — NOT cosmetic. The formatter inherits the console's colour
+      # setting, so without this the file comes out carrying `\e[33m`/`\e[0m` around every line.
+      # A trace exists to be READ AFTER THE FACT, by a human grepping or
       # an agent parsing; escape codes break both (`grep "^\[warning\]"` matches nothing, and every
       # line has invisible bytes at its ends). Colour belongs to a terminal, not to a file.
       formatter:

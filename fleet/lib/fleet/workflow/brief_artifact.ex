@@ -21,8 +21,8 @@ defmodule Fleet.Workflow.BriefArtifact do
   the content's sha256 (hintless legacy/test path).
 
   **This module MATERIALIZES; what a failure costs is the CALLER's contract, and the two callers
-  differ on purpose** (revised 2026-08-03 — DR-010's "best-effort, never breaks the dispatch" held
-  for both and was wrong for one of them):
+  differ on purpose** — a single "best-effort, never breaks the dispatch" rule (DR-010) holds for
+  one of them and is wrong for the other:
 
     * TICKET CREATION (`physicalize_attrs/3`, the arch writing an issue) — degrades on every
       cause. Refusing to create a ticket because ops is not ready would block the very
@@ -116,10 +116,10 @@ defmodule Fleet.Workflow.BriefArtifact do
   Same materialization, but it SAYS WHY it failed instead of flattening every reason into
   `{nil, nil}`.
 
-  The flattening was the defect: three of the four causes are not transient, and a caller that
-  cannot tell them apart can only pick one policy for all of them. It picked "degrade", so a
-  project misconfigured once produced unauditable work indefinitely — nothing ever failed, it just
-  stopped being provable.
+  Flattening is the defect: three of the four causes are not transient, and a caller that cannot
+  tell them apart can only pick one policy for all of them. Pick "degrade" and a project
+  misconfigured once produces unauditable work indefinitely — nothing fails, it just stops being
+  provable.
 
     * `:no_brief` — no brief, or an empty one. Not a degraded dispatch, a bug upstream.
     * `:no_repo` — no repo to materialize into. Same.

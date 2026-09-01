@@ -4,22 +4,22 @@ defmodule Fleet.Workflow.StepOutputs do
 
   ## Why this module exists (BL-6-59)
 
-  The only hard gate rule of the canon corpus was `audit_doc_exists AND audit_doc_non_empty`, and
-  both facts came from the pod's own `result`: **the producer attested that its own document existed
-  and was not empty.** Meanwhile the card DECLARED the expected path three lines above the rule
-  (`outputs: - audits/scribe-{date}.json`) and `outputs` had ZERO readers — the system knew what had
-  to exist, in a field it never read, and asked the agent whether it existed.
+  A hard gate rule like `audit_doc_exists AND audit_doc_non_empty` takes both facts from the pod's
+  own `result`: **the producer attests that its own document exists and is not empty.** Meanwhile
+  the card DECLARES the expected path three lines above the rule (`outputs: -
+  audits/scribe-{date}.json`), and with `outputs` unread the system knows what has to exist, in a
+  field nobody reads, and asks the agent whether it exists.
 
-  What this closes is that split: the declaration and the verification now meet. `outputs_exist` and
+  What this closes is that split: the declaration and the verification meet. `outputs_exist` and
   `outputs_non_empty` are produced HERE, from the card's own declaration, against a workspace path
   the runtime created itself (`Fleet.Layout.pod_workspace_path/1`) — it never has to believe the pod
   to obtain it.
 
   ## The convention that had to be decided, and why it is a GLOB
 
-  Closing this needed a resolution convention for the `{date}` family, not a repair — and the naming
-  is the trap: a derivation that resolves `{date}` to `2026-08-13` and demands an exact match
-  answers `false` for a pod that wrote `20260813`, which BLOCKS every audit. Worse than the
+  Closing this needs a resolution CONVENTION for the `{date}` family, not a repair — and the naming
+  is the trap: a derivation that resolves `{date}` to a formatted date and demands an EXACT match
+  answers `false` for a pod that spelled it otherwise, which BLOCKS every audit. Worse than the
   self-declaration it replaces.
 
   So a declared path is read as a **pattern**: every `{...}` segment becomes `*`, and the result is

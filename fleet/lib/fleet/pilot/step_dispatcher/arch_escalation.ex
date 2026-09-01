@@ -42,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   This PR-side freeze and the issue-side `StepRunCompleter.await_arch` share the SAME shape —
   dedup comment addressed to the arch → `lcars-awaits-arch` throttle (load-bearing) → `lcars-in-flight`
-  removal (invariant maintenance) — and now the SAME integrity discipline: the throttle is verified and
+  removal (invariant maintenance) — and the SAME integrity discipline: the throttle is verified and
   surfaces on failure (C-02), the in-flight retrait is verified and surfaces on failure (CI-04, `escalate_to_arch`
   below). They stay SEPARATE functions on purpose: the SIGNATORY differs (gatekeeper here — a ruling on
   rework/merge — vs the JUDGE on `await_arch`, whose comment IS the verdict record), and so does the
@@ -229,10 +229,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     # pas une résolution — le chief ne signe que là où il a agi.
     #
     # ⚠ L'APPEL PASSE DÉSORMAIS PAR `Forge.Client.as_role/2` DIRECTEMENT. Il transitait par un
-    # `as_gatekeeper/1` porté par le module du sceau, du temps où celui-ci s'appelait
-    # `GatekeeperSeal` : un adaptateur de credential logé dans le module de sortie du pipeline
-    # n'avait de sens que parce que le nom du module le suggérait. Le module renommé, l'emprunt
-    # n'en a plus, et `as_role/2` était déjà l'autorité unique — on l'appelle, on ne la relaie plus.
+    # PAS d'`as_gatekeeper/1` emprunte au module du sceau : un adaptateur de credential loge dans
+    # le module de SORTIE du pipeline n'a de sens que si le nom de ce module le suggere, ce qui fait
+    # dependre une resolution d'identite d'un choix de nommage. `as_role/2` est l'autorite unique —
+    # on l'appelle, on ne la relaie pas.
     #
     # Fail-CLOSED sur le jeton : indisponible → on SAUTE le commentaire (jamais sous le compte
     # système) mais on pose quand même le label porteur `lcars-awaits-arch` (système, le throttle du
@@ -284,12 +284,13 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         {:error, {:awaits_arch_label_failed, reason}}
 
       _ ->
-        # INVARIANT (live 2026-07-19, fleet/hello#3): awaits-arch ⇒ NO `lcars-in-flight` on the issue —
-        # "parked, nobody works" and "someone works" are contradictory, and a stale in-flight also shields
-        # the brick's pods from the quiesced-pod reap for the whole (human-timescale) park. The throttle
-        # took, so we now maintain the invariant: remove in-flight. VERIFIED, no more silent `_ =` (CI-04:
-        # the audit flagged "removes in-flight without verifying that removal" while the comment ASSERTS
-        # invariant). Same standard as `StepRunCompleter.await_arch` (which verifies its remove in the
+        # INVARIANT: awaits-arch ⇒ NO `lcars-in-flight` on the issue — "parked, nobody works" and
+        # "someone works" are contradictory, and a stale in-flight also shields the brick's pods
+        # from the quiesced-pod reap for the whole (human-timescale) park. The throttle took, so the
+        # invariant is maintained here: remove in-flight, VERIFIED and never a silent `_ =` (CI-04 —
+        # removing in-flight without verifying the removal, under a comment that ASSERTS the
+        # invariant). Same standard as `StepRunCompleter.await_arch` (which verifies its remove in
+        # the
         # `with`). `remove_label` is idempotent (`{:ok, :already_absent}`); on failure we SURFACE — both
         # labels present contradicts the invariant AND the stale in-flight leaks the reap-shield — so the
         # poller re-attempts next tick (idempotent add+remove), same honest tally as the throttle failure.
