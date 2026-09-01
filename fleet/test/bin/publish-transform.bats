@@ -11,9 +11,12 @@
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-transform.sh"
+  # shellcheck source=../../bin/publish-transform.sh
   source "$SCRIPT"
   TMP="$(mktemp -d)"
-  cd "$TMP"
+  # `|| return 1` : sans garde, un `mktemp` en echec laisse TMP vide, `cd ""` echoue
+  # en silence, et le `git init` de la ligne suivante s'execute DANS LE DEPOT.
+  cd "$TMP" || return 1
   git init -q .
   git config user.name "Human Name"
   git config user.email "human@example.com"

@@ -94,7 +94,11 @@ probe_identity() {
 # couplees par un `return` : ne pas connaitre le nom de l'org faisait sauter la verification du
 # compte, qui n'en depend pas. Un correctif qui emporte une mesure voisine est un demi-correctif.
 probe_org() {
-  local org="$1" u="$FORGE/api/v1/orgs/$org"
+  # ⚠ DEUX `local`, ET C'EST UN CORRECTIF. Sur une seule ligne, `local org="$1" u=".../$org"`
+  # construit `u` AVANT que `org` ait pris effet : l'URL sondee etait `$FORGE/api/v1/orgs/` — sans
+  # l'org — et l'evidence affichait ce meme chemin tronque. Mesure 2026-09-01 (SC2318).
+  local org="$1"
+  local u="$FORGE/api/v1/orgs/$org"
   if http_probe "$u" 6; then
     case "$SOTF_HTTP_CODE" in
       2*)  emit "forge.org" "$PLANE" "operational" "reseau" "curl $u" \

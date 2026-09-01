@@ -147,11 +147,14 @@ http_probe() {
     SOTF_HTTP_BODY="$(trim "${out//$'\n'/ }" 200)"
     return 0
   }
+  # shellcheck disable=SC2034  # sorties de cette fonction, lues par les sondes qui la sourcent
+  #   (50-projects.sh l.334-350, 40-forge.sh) — shellcheck ne suit pas le `source` dynamique.
   SOTF_HTTP_CODE="${out##*$'\n'}"
   # FULL body, deliberately untrimmed. Truncation is a PRESENTATION concern and belongs at `emit`;
   # doing it here cut a JSON payload mid-object and made every downstream `jq` fail silently — the
   # readiness endpoint answered correctly and the probe reported "forme inattendue". Callers trim
   # what they quote; they parse what they received.
+  # shellcheck disable=SC2034  # meme raison que SOTF_HTTP_CODE ci-dessus : c'est une SORTIE
   SOTF_HTTP_BODY="${out%$'\n'*}"
   return 0
 }

@@ -148,11 +148,11 @@ print(a[0]["web_url"] if isinstance(a, list) and a else "")' <<<"$out")" || exit
 # BY THE TIME WE GET HERE THE REQUEST IS CREATED; only its URL is uncertain. Never report a failure
 # for a request that exists — the operator would open a second one.
 resolve_request_url() { # <create output> -> url on stdout, exit 3 if unresolvable
-  local url i
+  local url
   url="$(grep -oE 'https?://[^[:space:]]+' <<<"${1:-}" | tail -1 || true)"
   [[ -n "$url" ]] && { printf '%s' "$url"; return 0; }
 
-  for i in $(seq 1 "${FORGE_CLI_URL_RETRIES:-3}"); do
+  for _ in $(seq 1 "${FORGE_CLI_URL_RETRIES:-3}"); do
     url="$(cmd_request_find || true)"
     [[ -n "$url" ]] && { printf '%s' "$url"; return 0; }
     sleep "${FORGE_CLI_URL_DELAY:-1}"

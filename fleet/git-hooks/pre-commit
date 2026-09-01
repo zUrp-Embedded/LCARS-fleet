@@ -77,8 +77,11 @@ is_evidence_dir() {
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK_CONFIG="$HOOK_DIR/hook-config.sh"
 if [ -f "$HOOK_CONFIG" ]; then
+    # shellcheck source=hook-config.sh
     source "$HOOK_CONFIG"
 else
+    # shellcheck disable=SC2034  # repli du contrat de `hook-config.sh` : les deux variables
+    #   vont par paire, et `pre-push` (l.52) lit HOOK_REPO_TYPE.
     HOOK_REPO_TYPE="project"
     HOOK_DATE_FORMAT="iso"
 fi

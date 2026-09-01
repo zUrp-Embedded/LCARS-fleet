@@ -118,7 +118,7 @@ capability_verdict() {
   # Le maillon bloquant est CITE avec son propre constat. Une ligne de capacite qui se contente de
   # nommer un id oblige le lecteur a redescendre dans le tableau ; or `diag` existe pour etre lu par
   # quelqu'un qui est sur le point d'agir, pas pour l'envoyer chercher.
-  local why; why() { local l="${1# }"; l="${l%% *}"; local e; e="$(evidence_of "$l")"; printf '%s' "${e:+ — « $(trim "$e" 120) »}"; }
+  why() { local l="${1# }"; l="${l%% *}"; local e; e="$(evidence_of "$l")"; printf '%s' "${e:+ — « $(trim "$e" 120) »}"; }
   if   [[ -n "$missing"    ]]; then echo "unreachable|maillon(s) inconnu(s) du flux :$missing — la chaine designe des sondes qui n'existent plus"
   elif [[ -n "$bad_deg"    ]]; then echo "degraded|bloque par :$bad_deg$(why "$bad_deg")"
   elif [[ -n "$bad_unr"    ]]; then echo "unreachable|non mesurable :$bad_unr$(why "$bad_unr")"

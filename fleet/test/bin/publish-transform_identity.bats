@@ -81,7 +81,7 @@ Co-authored-by: LCARS-engineer <engineer@lcars.local>"
 
 run_transform() {
   run "$SCRIPT" --repo fleet/proj --forge "$FORGE" --token-file "$TOKEN" \
-    --out "$OUT" --vendor-identity "$VENDOR" --filter-repo-bin "$FR" "$@"
+    --out "$OUT" --vendor-identity "$VENDOR" --filter-repo-bin "$FR"
 }
 
 emails_after() { git -C "$OUT" log --all --format='%ae %ce' | tr ' ' '\n' | sort -u; }

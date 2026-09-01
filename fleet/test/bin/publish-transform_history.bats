@@ -54,7 +54,7 @@ make_fixture() {
 
 run_transform() {
   run "$SCRIPT" --repo fleet/demo --forge "$TMP/forge" --token-file "$TMP/token" \
-    --out "$TMP/out" --vendor-identity "$TMP/vendor.identity" --filter-repo-bin "$FR" "$@"
+    --out "$TMP/out" --vendor-identity "$TMP/vendor.identity" --filter-repo-bin "$FR"
 }
 
 @test "D1: la transformation complete — les 3 reecritures, mesurees sur l'historique produit" {
@@ -109,6 +109,7 @@ make_bubble() { # un main avec une bulle de resolution (la forme que le rail con
 @test "D2: la linearisation aplatit la bulle, arbre final BYTE-IDENTIQUE, zero merge survivant" {
   d="$(make_bubble)"
   before_tree="$(git -C "$d" rev-parse 'main^{tree}')"
+  # shellcheck source=../../bin/publish-transform.sh
   source "$SCRIPT"
   run linearize_first_parent "$d" main
   [ "$status" -eq 0 ]
@@ -123,6 +124,7 @@ make_bubble() { # un main avec une bulle de resolution (la forme que le rail con
 @test "D2: une branche inconnue est refusee, rien n'est ecrit" {
   d="$(make_bubble)"
   tip="$(git -C "$d" rev-parse main)"
+  # shellcheck source=../../bin/publish-transform.sh
   source "$SCRIPT"
   run linearize_first_parent "$d" nope
   [ "$status" -ne 0 ]
@@ -135,6 +137,7 @@ make_bubble() { # un main avec une bulle de resolution (la forme que le rail con
   printf 'a\n' > "$d/f.txt"; git_h "$d" add -A; git_h "$d" commit -q -m a
   printf 'b\n' > "$d/f.txt"; git_h "$d" commit -qam b
   before_tree="$(git -C "$d" rev-parse 'main^{tree}')"
+  # shellcheck source=../../bin/publish-transform.sh
   source "$SCRIPT"
   run linearize_first_parent "$d" main
   [ "$status" -eq 0 ]

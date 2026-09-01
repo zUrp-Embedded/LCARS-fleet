@@ -58,6 +58,10 @@ dead_patterns() {
   local kind pat f b hit
   while IFS=$'\t' read -r kind pat; do
     hit=0
+    # shellcheck disable=SC2254,SC2053  # `$pat` DOIT globber : c'est un motif extrait du `case` du
+    #   hook (`*-handoff.md`, `*/skills/*/SKILL.md`) et cette fonction reproduit son matching. Le
+    #   quoter ferait echouer toute comparaison — `dead_patterns` declarerait alors MORTES les
+    #   clauses vivantes, et le temoin passerait au vert sur un detecteur devenu aveugle.
     if [[ "$kind" == base ]]; then
       for f in "${FILES[@]}"; do b="${f##*/}"; case "$b" in $pat) hit=1; break ;; esac; done
     else
