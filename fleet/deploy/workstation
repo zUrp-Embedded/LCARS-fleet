@@ -57,7 +57,22 @@ fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s
 # n'arrive jamais — le geste demande par l'operateur disparait entre deux processus, sans une ligne.
 # `PROV_FORGE_MONTEE` porte `--bench` sur ce rail ; l'oublier ici aurait re-avale le drapeau qu'on
 # vient de cabler, un cran plus loin.
-ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE)
+#
+# ⚠ ET C'EST EXACTEMENT CE QUI EST ARRIVE A L'AUTRE MOITIE DE L'AXE. Aucune `FORGE_*` ne figurait
+# ici, alors que le rail les lit : `FORGE_BASE_URL` decide de MONTER ou de CONSOMMER
+# (`48-forge-host.sh:69`, `lib/provision-lib.sh:79`) et `FORGE_PUBLIC_URL` porte l'adresse que le
+# navigateur doit resoudre (`lib/provision-lib.sh:88`). Mesure : `FORGE_BASE_URL=http://forge.lan:3000
+# bash install.sh --workstation` affichait « forge fournie » au preflight — qui tourne NON-ROOT,
+# donc avant l'escalade — puis montait un conteneur Gitea sur 127.0.0.1, et `70-human.sh:195`
+# ecrivait ensuite cette adresse locale dans le `fleet_v2.env` de chaque humain. La fleet visait la
+# mauvaise forge, sans qu'une seule ligne ait dit non. Sur ce rail, l'axe « forge fournie » du § 13
+# n'existait donc pas : la porte refuse root, `workstation up` escalade TOUJOURS.
+#
+# ⚠ AUCUN JETON ICI, ET C'EST UNE REGLE, PAS UN OUBLI. `sudo VAR=valeur` met la valeur dans l'argv
+# d'un process root, lisible par tout compte local. Un secret traverse par un FICHIER
+# (`$PROV_TOKENS_DIR`), jamais par cette liste — c'est la meme frontiere que le shim docker, qui
+# ecarte explicitement `*TOKEN*`, `*PASSWORD*` et `*SECRET*` de ce qu'il repasse.
+ESCALADE_ENV=(PROV_COLOR NO_COLOR PROV_VERBOSE PROV_DUMP_LINES LCARS_ALLOW_ANY_HOST PROV_FORGE_ADMIN_RESET PROV_FORGE_MONTEE FORGE_BASE_URL FORGE_PUBLIC_URL)
 
 escalade_si_besoin() {
   [[ "$EUID" -ne 0 ]] || return 0

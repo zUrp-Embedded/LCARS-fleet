@@ -79,6 +79,40 @@ setup() {
   [[ "$output" == *"PROV_FORGE_ADMIN_RESET"* ]]
 }
 
+# ─── LA LISTE SE DERIVE DE CE QUE LE RAIL LIT, ELLE NE SE RELIT PAS ─────────────────────────────
+#
+# ⚠ LE TEMOIN DU DESSUS EPINGLAIT DEUX NOMS, ET LA LISTE EN OUBLIAIT DEUX AUTRES. Aucune `FORGE_*`
+# n y figurait, alors que `lib/provision-lib.sh` les lit DANS L ENVIRONNEMENT : `FORGE_BASE_URL`
+# (l. 79) decide de MONTER ou de CONSOMMER une forge, `FORGE_PUBLIC_URL` (l. 88) porte l adresse que
+# le navigateur doit resoudre. Le preflight tourne NON-ROOT, donc avant l escalade : il affichait
+# « forge fournie », puis le sudo mangeait la variable et `48-forge-host` montait un conteneur.
+# L axe « forge fournie » du § 13 n existait pas sur ce rail.
+#
+# Le discriminant est mecanique et il est le bon : la lib est l endroit ou l environnement de
+# l operateur ENTRE dans le rail. Ce qu elle y lit doit traverser le sudo, sinon le geste demande
+# disparait entre deux processus.
+@test "ESCALADE : toute FORGE_ que la lib lit dans l environnement TRAVERSE le sudo" {
+  local lib="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  local lues manquantes="" v
+  lues="$(grep -ohE '\$\{FORGE_[A-Z_]+' "$lib" | tr -d '${' | sort -u)"
+  [ -n "$lues" ] || { echo "extraction ratee : aucune FORGE_ lue dans la lib"; return 1; }
+  for v in $lues; do
+    grep -qE "ESCALADE_ENV=\(.*[( ]$v([) ]|\$)" "$SRC" \
+      || manquantes="$manquantes $v"
+  done
+  [ -z "$manquantes" ] \
+    || { echo "lue(s) par la lib et MANGEE(S) par le sudo :$manquantes"; return 1; }
+}
+
+@test "ESCALADE : aucun secret dans la liste — sudo met la valeur dans l argv d un process root" {
+  # `sudo VAR=valeur` rend la valeur lisible par tout compte local. Un secret traverse par un
+  # FICHIER, jamais par cette liste. Meme frontiere que le shim docker, qui ecarte explicitement
+  # `*TOKEN*`, `*PASSWORD*` et `*SECRET*` de ce qu il repasse.
+  local decl; decl="$(grep 'ESCALADE_ENV=(' "$SRC")"
+  [ -n "$decl" ]
+  refute grep -qiE 'TOKEN|PASSWORD|SECRET|CREDENTIAL|PASSWD|_PW=|_KEY' <<<"$decl"
+}
+
 @test "la liste blanche vit en UN SEUL endroit, et l escalade l emploie" {
   # Deux listes deriveraient, et celle qu'on ne relit pas mangerait un drapeau en silence.
   run grep -c 'ESCALADE_ENV' "$SRC"
