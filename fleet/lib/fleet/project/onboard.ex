@@ -22,7 +22,7 @@ defmodule Fleet.Project.Onboard do
 
   It is a **mechanical rail** (structural compliance): starfleet (the fleet-master) *triggers* via the
   MCP tool `project_create`, the SYSTEM *executes* this deterministic sequence — the caller never types
-  git. Reorg 2026-07-19: onboarding also spawns the project's per-project architect (`maybe_open_architect`).
+  git. Onboarding also spawns the project's per-project architect (`maybe_open_architect`).
 
   Sequence (FAIL-LOUD if the repo already exists on the forge — onboard CREATES, it must NOT
   scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
@@ -85,13 +85,13 @@ defmodule Fleet.Project.Onboard do
           :project_dir => Path.t(),
           :work_dir => Path.t(),
           :doc_dir => Path.t(),
-          # Per-project architect ensure outcome (reorg 2026-07-19) — reported, never dropped:
+          # Per-project architect ensure outcome — reported, never dropped:
           # %{status: "up", pod_id: _} | %{status: "failed", reason: _}.
           :architect => map(),
-          # LA RE-EMISSION CONVERGENTE SE DIT DANS LE RESULTAT, et ce type l'oubliait.
+          # LA RE-EMISSION CONVERGENTE SE DIT DANS LE RESULTAT, donc ce type la declare.
           # `refute_existing_or_converge` pose cette cle quand l'etat de fin est deja realise : le
           # verbe rend alors `{:ok, result}` sans rien avoir cree. Absente de la declaration, elle
-          # rendait `%{idempotent: true}` formellement INATTEIGNABLE — un appelant qui distingue
+          # rend `%{idempotent: true}` formellement INATTEIGNABLE — un appelant qui distingue
           # « importe » de « deja la » ecrivait un motif que Dialyzer refusait, sur une valeur que
           # le code produit vraiment.
           optional(:idempotent) => true
@@ -149,11 +149,11 @@ defmodule Fleet.Project.Onboard do
   # cannot be created, a git binary gone, a full disk — walks straight past the `case` above, and
   # what it leaves is a repo on the forge plus however many face trees were already built.
   #
-  # Measured 2026-08-09 on a fresh bench, and it is the shape of the whole failure: `/home/
-  # projects.doc` did not exist, `mkdir_p!` raised, and the forge repo, the cloned-and-committed
-  # code face and the initialised ops face ALL survived. The caller got `tool_crashed` and no way
-  # to know a cleanup was owed; the next attempt then met the 409/refute_existing walls this
-  # compensation exists to prevent.
+  # Measured on a fresh bench, and it is the shape of the whole failure: `/home/projects.doc` does
+  # not exist, `mkdir_p!` raises, and the forge repo, the cloned-and-committed code face and the
+  # initialised ops face ALL survive. The caller gets `tool_crashed` and no way to know a cleanup
+  # is owed; the next attempt then meets the 409/refute_existing walls this compensation exists to
+  # prevent.
   #
   # RE-RAISED, NOT SWALLOWED. The crash stays a crash, with its kind and its stacktrace — only the
   # machine is left clean. Converting it to `{:error, _}` here would dress an unforeseen failure as
@@ -518,12 +518,11 @@ defmodule Fleet.Project.Onboard do
   # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
   # les orgs des catalogues INSTALLES, donc le projet deviendrait invisible, pas casse.
   #
-  # ⚠ IL Y AVAIT TROIS ETATS ; IL EN RESTE DEUX, ET C'EST LE POINT. Ce refus s'appelait
-  # `catalogue_not_active` et lisait une declaration locale d'ACTIVITE — un troisieme etat, entre
-  # « le materiel est la » et « la forge le porte », que quelqu'un tenait a la main. Deux etats qui
-  # repondent a la meme question finissent par se contredire, et l'ecart a tue une flotte entiere au
-  # banc le 2026-08-15 : declare actif, jamais installe, le poller derivait ses orgs de la
-  # declaration et cherchait des jetons de role que personne n'avait frappes.
+  # ⚠ DEUX ETATS, ET PAS TROIS. Une declaration locale d'ACTIVITE serait un troisieme etat entre
+  # « le materiel est la » et « la forge le porte », tenu a la main. Deux etats qui repondent a la
+  # meme question finissent par se contredire, et l'ecart tue une flotte entiere : mesure au banc,
+  # declare actif et jamais installe, le poller derive ses orgs de la declaration et cherche des
+  # jetons de role que personne n'a frappes.
   #
   # Ce qui reste tient en une phrase : le materiel est ICI ou il n'y est pas, et il n'y arrive que
   # par la forge. Le pendant forge (le preflight, plus bas) n'est PAS un
@@ -537,11 +536,10 @@ defmodule Fleet.Project.Onboard do
 
   ## Why the payload is a SENTENCE and not the installed list
 
-  Until 2026-08-16 two sites answered the same atom with different third elements: a LIST of
-  installed names from the local guards, a gestures STRING from the forge preflight
-  (ex-`catalogue_org_absent`). A caller holding `{:catalogue_not_installed, name, x}` could not
-  know which it had — the same ambiguity as the two atoms before, moved down one level instead of
-  removed. ⚖ Concession recorded in the cross-audit: the ACTION is identical in both cases (a
+  Two sites answering the same atom with different third elements — a LIST of installed names from
+  the local guards, a gestures STRING from the forge preflight — leave a caller holding
+  `{:catalogue_not_installed, name, x}` unable to know which it has: an ambiguity moved down one
+  level instead of removed. ⚖ The ACTION is identical in both cases (a
   forge admin installs it), and an inventory is only worth printing inside a sentence that says
   what to do with it. The sentence carries the inventory.
 
@@ -566,8 +564,8 @@ defmodule Fleet.Project.Onboard do
   end
 
   # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
-  # cosmetique : sur un banc, ce geste a annonce « trois faces repointees » sur une boite ou les
-  # trois etaient absentes — la moitie forge etait juste, et le rapport mentait. Un appelant qui
+  # cosmetique : sur un banc, ce geste annonce « trois faces repointees » sur une boite ou les
+  # trois sont absentes — la moitie forge est juste, et le rapport ment. Un appelant qui
   # affiche la liste visee affirme un travail qu'il n'a pas fait.
   defp repoint_faces(dirs, url) do
     Enum.reduce_while(Map.values(dirs), {:ok, []}, fn dir, {:ok, done} ->
@@ -663,7 +661,7 @@ defmodule Fleet.Project.Onboard do
   `list_projects/1` enumere le DISQUE (`code_root`) : sur une boite neuve — ou apres un nuke, ou
   pour un second humain qui arrive sur une fleet deja peuplee — il n'y a rien a enumerer, alors que
   les projets, eux, sont intacts. Aucun verbe n'est ecrit ici : `import/2` est deja le rail
-  forge→boite et deja idempotent. Ce qui manquait etait la LISTE.
+  forge→boite et deja idempotent. Ce qui n'existe nulle part ailleurs, c'est la LISTE.
 
   Sortie : un mot par projet, sur une ligne. `check` ne touche rien (`DEJA` / `MANQUE`), `apply`
   importe (`DEJA` / `IMPORTE`). Un projet en echec n'arrete pas les autres — une boite a laquelle il
@@ -705,13 +703,13 @@ defmodule Fleet.Project.Onboard do
 
   LE FILTRE EST `.lcars.json` SUR `main`, et il ne se derive pas du nom. Une org de catalogue porte
   aussi des depots qui ne sont pas des projets — a commencer par le `catalogue` qui la signe — et les
-  importer creerait trois faces autour d'un depot qu'aucun humain n'a ouvert. Mesure du 2026-08-17
-  sur la forge du banc : un projet rend `200` sur ce fichier, le magasin rend `404`.
+  importer creerait trois faces autour d'un depot qu'aucun humain n'a ouvert. Mesure sur la forge du
+  banc : un projet rend `200` sur ce fichier, le magasin rend `404`.
 
   La liste de ces depots n'est PAS fermee, et c'est la raison d'etre du filtre par propriete : un
   humain depose ce qu'il veut dans son org, et un garde qui enumererait des noms devrait etre corrige
-  a chaque depot nouveau. Le 2026-08-21 la liste en a d'ailleurs perdu un — `project-template`, retire
-  avec le depot modele — sans que ce garde ait a bouger d'une ligne.
+  a chaque depot nouveau — et a chaque depot retire, ce qui arrive aussi. Le filtre par propriete ne
+  bouge d'aucune ligne dans les deux cas.
   """
   @spec reconcile(:check | :apply, keyword()) :: [
           %{repo: String.t(), status: atom(), reason: term()}
@@ -764,11 +762,11 @@ defmodule Fleet.Project.Onboard do
       else: %{repo: full_name, status: :missing, reason: nil}
   end
 
-  # ⚠ L'ARCHITECTE NE S'ASSURE PAS D'ICI, ET CE N'EST PAS UN RACCOURCI. Mesure du 2026-08-17 au
-  # banc : l'import posait ses trois faces puis MOURAIT sur
+  # ⚠ L'ARCHITECTE NE S'ASSURE PAS D'ICI, ET CE N'EST PAS UN RACCOURCI. Mesure au banc : l'import
+  # pose ses trois faces puis MEURT sur
   # `GenServer.call(Fleet.Spawner.Supervisor, …) ** (EXIT) no process` — `eval` charge l'app, il ne
   # la demarre pas, donc aucun superviseur de spawn n'existe dans cette VM. La convergence
-  # aboutissait sur le disque et rendait un echec, sans compensation, a la derniere jambe.
+  # aboutit sur le disque et rend un echec, sans compensation, a la derniere jambe.
   #
   # Ce qui prend la suite existe deja : le poller de la fleet assure l'architecte de chaque projet
   # qu'il sert (`Architect.ensure_alive/2`, a chaque tour). La reconvergence pose les FACES ; les
@@ -820,15 +818,15 @@ defmodule Fleet.Project.Onboard do
   def import(full_name, opts \\ []) when is_binary(full_name) do
     # L'ORG VIENT DU DEPOT, pas d'une option ni d'un defaut. L'argument de ce verbe EST
     # `owner/nom`, et un projet vit dans l'org de son catalogue : le proprietaire NOMME l'org, il
-    # n'y a rien a choisir. Avant, `opts[:org] || default_org()` rendait le PREMIER catalogue actif,
-    # et l'humain etait alors verifie contre l'org d'un autre catalogue que celui du depot.
+    # n'y a rien a choisir. Un `opts[:org] || default_org()` rendrait le PREMIER catalogue actif, et
+    # l'humain serait alors verifie contre l'org d'un autre catalogue que celui du depot.
     org = full_name |> String.split("/") |> List.first()
     name = Fleet.Layout.project_name(full_name)
     dirs = face_dirs(name, opts)
 
-    # ⚠ LE TROU QUE L'ALIGNEMENT A MONTRE : ce verbe etait le seul des cinq a ne pas verifier que la
-    # carte est DECLARABLE. Un depot importe avec une carte d'atelier (`scope: ticket`) ou une faute
-    # de frappe passait ici, la ou les quatre autres refusent.
+    # ⚠ CE VERBE VERIFIE QUE LA CARTE EST DECLARABLE, COMME LES QUATRE AUTRES. Sans ce controle, un
+    # depot importe avec une carte d'atelier (`scope: ticket`) ou une faute de frappe passe ici, la
+    # ou les quatre autres refusent.
     # `admit` (local) avant `refute_store` (un aller-retour forge) : la loi d'ordre en trois temps.
     with :ok <- admit(org, name, opts),
          :ok <- refute_store(full_name, opts),
@@ -855,9 +853,9 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  # Cette phrase etait AFFIRMEE, elle est desormais LUE. « repo untouched — pre-existing » n'etait
-  # vrai que tant que rien n'avait ete pousse, et `ensure_writer_faces` publie `ops` avant de tenter
-  # `workshop` : la ligne annoncait donc un depot intact au moment precis ou il ne l'etait plus.
+  # CETTE PHRASE EST LUE, JAMAIS AFFIRMEE. « repo untouched — pre-existing » n'est vrai que tant que
+  # rien n'a ete pousse, et `ensure_writer_faces` publie `ops` avant de tenter `workshop` : affirmee,
+  # la ligne annoncerait un depot intact au moment precis ou il ne l'est plus.
   defp remote_state({:import_not_compensated, _reason, left}),
     do:
       "(⚠ REPO MUTATED — branches pushed by this attempt SURVIVE: " <>
@@ -1103,7 +1101,7 @@ defmodule Fleet.Project.Onboard do
   # laissee, et le retry la lira comme preexistante. Ce cas-la porte donc son propre nom.
   #
   # ⚠ On ne supprime QUE `published`. Une branche clonee etait deja la ; une branche dont la
-  # lecture a echoue n'a jamais ete touchee (`ensure_face` refuse desormais avant d'ecrire).
+  # lecture a echoue n'a jamais ete touchee (`ensure_face` refuse avant d'ecrire).
   defp undo_published(_full_name, [], reason, _opts), do: {:error, reason}
 
   defp undo_published(full_name, published, reason, opts) do
@@ -1197,10 +1195,9 @@ defmodule Fleet.Project.Onboard do
   @doc """
   Enumerates the projects on this box, with what governs each one.
 
-  The onboarder could `create`, `open`, `import`, `adopt`, `close`, `revise` and `delete` a
-  project, and could not LIST them: it was able to destroy a project it had no way to name. This
-  is that missing half, and it is a pure read — the only listing in the delegation surface that
-  writes nothing.
+  The onboarder can `create`, `open`, `import`, `adopt`, `close`, `revise` and `delete` a project.
+  Without this verb it could destroy a project it had no way to name. A pure read — the only
+  listing in the delegation surface that writes nothing.
 
   Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
   the forge that was never cloned here is not something this box can act on, and a disk project not
@@ -1942,8 +1939,8 @@ defmodule Fleet.Project.Onboard do
   # `**/.claude` and `**/CLAUDE.md`, and a foreign repo can carry a `.gitmodules` pointing anywhere.
   # Nothing is fetched from it: `clone_external` passes `--no-recurse-submodules`, and the fleet
   # never runs `git submodule update` on an imported project — so the practical risk today is low.
-  # The reason this sentence exists is that the limit was written NOWHERE, and a gate whose
-  # perimeter nobody knows is a gate people lean on too hard. Widening the probe is a decision, not
+  # This sentence exists because an unwritten limit makes a gate people lean on too hard, and a
+  # perimeter nobody knows is exactly that. Widening the probe is a decision, not
   # a reflex; the honest minimum is to say what is not looked at, next to what is.
   defp adoption_gate(scratch) do
     case foreign_claude_dirs(scratch) do
@@ -2058,9 +2055,9 @@ defmodule Fleet.Project.Onboard do
     with :ok <- validate_name(name),
          :ok <- require_force(full_name, opts),
          {:ok, forge} <- delete_forge(full_name, opts) do
-      # THE WORKERS DIE BEFORE THEIR WORLD DOES. Until now only the architect was stopped, so an
-      # engineer in flight outlived the removal of its own project: its workspace still existed, so
-      # it did not even crash — it kept reading a reference that was no longer there and carried on.
+      # THE WORKERS DIE BEFORE THEIR WORLD DOES. Stop the architect alone and an engineer in flight
+      # outlives the removal of its own project: its workspace still exists, so it does not even
+      # crash — it keeps reading a reference that is no longer there and carries on.
       # Killed FIRST, before the faces go: a pod losing its world mid-read has nothing to say about
       # it, whereas one killed outright is indistinguishable from a crash, which the reconciliation
       # is built to handle.
@@ -2180,11 +2177,12 @@ defmodule Fleet.Project.Onboard do
     )
   end
 
-  # A REVISION REWRITES THE WHOLE DECLARATION, AND IT USED TO REWRITE IT FROM THE OPTS ALONE.
+  # A REVISION REWRITES THE WHOLE DECLARATION, SO IT MUST NOT REWRITE IT FROM THE OPTS ALONE.
   # `ProjectDeclaration.compose/1` is a pure function of its opts — correct for an ONBOARD, where
   # "absent" means "the human declared nothing". At a REVISION "absent" means "the reviser did not
-  # mention it", and the two were indistinguishable: a revision naming only the card DELETED
-  # `max_fan` — the throughput the human chose — while `declared_by` moved to the reviser.
+  # mention it", and composing from the opts alone makes the two indistinguishable: a revision
+  # naming only the card DELETES `max_fan` — the throughput the human chose — while `declared_by`
+  # moves to the reviser.
   #
   # So the carry-forward lives HERE, at the revision's edge, and `compose/1` stays a pure function
   # of what it is handed. What the revision states wins; what it does not state survives.
@@ -2194,7 +2192,7 @@ defmodule Fleet.Project.Onboard do
   # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a
   # `max_fan` a human chose and this revision merely carried. It names the last writer, not the
   # origin of every field, and the schema (`lcars/declaration-v1`) has no per-field provenance. It is
-  # the smaller lie: the alternative was deleting the human's declaration outright.
+  # the smaller lie: the alternative is deleting the human's declaration outright.
   defp revision_write_opts(opts, previous) do
     [
       workflow_map: Keyword.get(opts, :workflow_map),
@@ -2509,11 +2507,11 @@ defmodule Fleet.Project.Onboard do
       else: {:error, {:not_on_machine, full_name}}
   end
 
-  # `require_org_membership/2` a ete RETIRE ici (2026-08-11). Il comparait le depot a UNE org —
-  # celle des opts ou le premier catalogue installe — et son seul comportement atteignable etait un
-  # refus faux : un proprietaire qui n'est pas un catalogue installe est deja arrete par
+  # ⚠ PAS DE `require_org_membership` ICI. Comparer le depot a UNE org — celle des opts ou le
+  # premier catalogue installe — n'a qu'un comportement atteignable, et c'est un refus faux : un
+  # proprietaire qui n'est pas un catalogue installe est deja arrete par
   # `require_catalogue_installed`, et un proprietaire qui l'est n'a aucune raison d'etre compare au
-  # PREMIER de la liste. Il ne pouvait donc mordre que le second catalogue, a tort. La question
+  # PREMIER de la liste. Un tel garde ne peut mordre que le second catalogue, a tort. La question
   # « ce depot est-il enrollable ici ? » a une seule autorite, et c'est le catalogue du proprietaire.
 
   defp require_default_branch_main(full_name, opts) do
