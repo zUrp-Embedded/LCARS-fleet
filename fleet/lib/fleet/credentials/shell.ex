@@ -96,8 +96,8 @@ defmodule Fleet.Credentials.Shell do
   require Logger
 
   @default_timeout_ms 30_000
-  # Codex audit F-04 (2026-07-19): the wall deadline bounds TIME, not MEMORY — a 20 MB output
-  # was accepted whole (repro'd), and a hostile/verbose producer has the full timeout window to
+  # F-04 — the wall deadline bounds TIME, not MEMORY: a 20 MB output is accepted whole (repro'd),
+  # and a hostile/verbose producer has the full timeout window to
   # fill the BEAM heap. 8 MiB is generous for every git site in the codebase (ls-remote,
   # rev-parse, push porcelain); larger flows must stream, not buffer.
   @default_max_output_bytes 8_388_608

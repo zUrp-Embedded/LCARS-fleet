@@ -136,9 +136,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     %{state | last_result: elem(result, 0), rejected_sha: elem(result, 1)}
   end
 
-  # Rend `{résultat, sha_refusé}` — LE SHA REFUSÉ EST COLLANT (audit 2026-08-19) : un convergeur
-  # qui sort 2 dit « ce DOCUMENT est faux, un humain corrige ». Sans mémoire, la comparaison
-  # revoyait le même écart au tick suivant et rebouclait toutes les 60 s sur une faute qu'aucun
+  # Rend `{résultat, sha_refusé}` — LE SHA REFUSÉ EST COLLANT : un convergeur qui sort 2 dit « ce
+  # DOCUMENT est faux, un humain corrige ». Sans mémoire, la comparaison revoit le même écart au
+  # tick suivant et reboucle toutes les 60 s sur une faute qu'aucun
   # rejeu ne répare — en re-téléchargeant l'installeur à chaque tour. Le gel se PURGE dès que la
   # branche bouge : le head suivant est un autre document, il a droit à sa chance.
   defp reconcile_pass(state) do

@@ -101,7 +101,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # A0 (chantier rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
     # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
     # and Gitea's `Do: rebase` DROPS merge commits: the resolution vanishes, the conflict
-    # resurfaces mid-replay — measured 2026-08-18 on a live 1.26.1 (409, EMPTY body, and the
+    # resurfaces mid-replay — measured on a live Gitea 1.26.1 (409, EMPTY body, and the
     # PR settles back on `mergeable: true`, so the failure would be classified `:policy`, the
     # wrong ladder, with a motive naming reviews for a rebase problem). The signal is the
     # conflict rail's own forge-visible markers — the same marks that already bound its

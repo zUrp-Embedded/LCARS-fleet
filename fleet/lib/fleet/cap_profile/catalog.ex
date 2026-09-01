@@ -506,8 +506,8 @@ defmodule Fleet.CapProfile.Catalog do
   # Union of the search path's role indexes, in PRECEDENCE order — the first root that carries a
   # name wins, and the later one is not read.
   #
-  # It REFUSED a name held on both sides until 2026-08-10. Refusing made overriding impossible,
-  # which is the opposite of what a default catalogue is for: a business catalogue that ships its
+  # Refusing a name held on both sides would make overriding impossible, which is the opposite of
+  # what a default catalogue is for: a business catalogue that ships its
   # own `architect.yaml` means to replace the system's, and it should not have to declare it — the
   # child-theme rule, and the reason a search path costs nothing to extend.
   #

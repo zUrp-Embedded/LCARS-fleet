@@ -408,11 +408,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.
   #
-  # ⚠ CE SITE PORTAIT UNE LISTE DE CINQ MOTS NUS DANS UN SIGIL, pour ~17 mutateurs (6-106). Elle ne
-  # ressemblait a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
-  # prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE. Une liste qui ne
-  # s'ecrit pas comme les autres est une liste qu'un renommage rate — et elle vivait LOIN des
-  # definitions qu'elle pretendait couvrir, ce qui est l'autre moitie du probleme.
+  # ⚠ PAS DE LISTE DE MOTS NUS DANS UN SIGIL ICI (6-106). Des noms d'outils poses ainsi ne
+  # ressemblent a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
+  # prose), donc un renommage objet-d'abord les manque EN SILENCE. Une liste qui ne s'ecrit pas
+  # comme les autres est une liste qu'un renommage rate — et posee LOIN des definitions qu'elle
+  # pretend couvrir, elle porte l'autre moitie du probleme.
   #
   # L'effet vit desormais A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate.
   # Ici on ne fait plus que LIRE une decision prise la-bas.

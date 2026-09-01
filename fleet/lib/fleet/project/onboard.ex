@@ -2585,9 +2585,9 @@ defmodule Fleet.Project.Onboard do
   #
   # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
   # illisible (on ne sait pas — on le DIT et l'appelant retentera).
-  # ⚠ LE CAS PARTICULIER DU DEPOT TEMPLATE A DISPARU AVEC LUI (2026-08-21). Il fallait exclure
-  # `<catalogue>/project-template` pour que la reconciliation ne lui pose pas une protection de
-  # `main` dimensionnee sur un jury qui ne le concernait pas. Plus rien ne cree ce depot.
+  # ⚠ PAS DE CAS PARTICULIER POUR UN DEPOT TEMPLATE : rien ne cree plus
+  # `<catalogue>/project-template`, donc rien n'a besoin d'etre exclu pour que la reconciliation ne
+  # lui pose pas une protection de `main` dimensionnee sur un jury qui ne le concerne pas.
   #
   # Ce qui reste est un garde par PROPRIETE, et il est meilleur que le nom qu'il remplace : un depot
   # qui ne porte pas de branche `ops` n'est pas un projet, quel que soit son nom. Le magasin d'un
@@ -2599,7 +2599,7 @@ defmodule Fleet.Project.Onboard do
   @doc """
   Les contextes de statut EXIGÉS sur `main` d'un projet — l'autorité, et la seule.
 
-  Extrait de la règle ci-dessous le 2026-08-20 parce qu'un SECOND lecteur est apparu : le template
+  Extrait de la règle ci-dessous parce qu'un SECOND lecteur la lit : le template
   livre désormais des workflows de SONDE (`probe-*`), dont toute la protection tient à ce que leur
   contexte ne matche PAS ce glob. Une sonde renommée `CI-…` deviendrait un statut requis et son
   rouge bloquerait le merge — on aurait retiré le CI de la boucle en croyant l'augmenter.
@@ -2618,7 +2618,7 @@ defmodule Fleet.Project.Onboard do
       dismiss_stale_approvals: true,
       block_on_rejected_reviews: true,
       enable_push: false,
-      # THE CI GATE IS THE FORGE'S, NOT THE RUNTIME'S. Measured 2026-08-03 on a live bench: a PR
+      # THE CI GATE IS THE FORGE'S, NOT THE RUNTIME'S. Measured on a live bench: a PR
       # whose head carried `CI / ci (push)` = failure was promoted, and the PR showed no check at
       # all. Two doors were open at once — nothing in `lib/` reads a commit status (the seal merges
       # on jury verdicts alone), and the forge rule had `enable_status_check: false`. The rail ran,
@@ -2784,8 +2784,8 @@ defmodule Fleet.Project.Onboard do
   #
   # ⚖ user. Ce chemin passait par `generate_repo` — la fonction « template » de Gitea,
   # qui recopie un depot `<catalogue>/project-template` que la boite avait pousse. Ce depot etait une
-  # COPIE du catalogue, et une copie derive : mesure du 2026-08-21, un banc portait un workflow sur
-  # les deux, sans que rien ne le dise, parce que le `sync` n'est joue qu'a la naissance de la boite.
+  # COPIE du catalogue, et une copie derive : mesure, un banc portait un workflow sur les deux, sans
+  # que rien ne le dise, parce que le `sync` n'est joue qu'a la naissance de la boite.
   #
   # POURQUOI PAS « GARDER GITEA ET NE COPIER QU'UNE PARTIE » : `GenerateRepoOption` (swagger de la
   # forge, mesure) n'a AUCUN champ de chemin — `git_content` est un booleen, tout ou rien. Gitea ne

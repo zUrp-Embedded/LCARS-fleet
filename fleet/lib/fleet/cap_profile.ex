@@ -919,7 +919,7 @@ defmodule Fleet.CapProfile do
   Returns `spec.invocation.lifetime_scope`, using `"one-shot"` or the supplied default
   when absent.
 
-  ## ⚠ CE CHAMP NE DIT PAS COMBIEN DE TEMPS UN POD VIT (B3, 2026-08-20)
+  ## ⚠ CE CHAMP NE DIT PAS COMBIEN DE TEMPS UN POD VIT (B3)
 
   Son nom le promet, quatre valeurs le suggèrent (`one-shot`, `pipe`, `run`, `forever`), et c'est
   faux. Un juge déclaré `one-shot` vit jusqu'à ce que son verdict soit ingéré

@@ -341,8 +341,8 @@ defmodule Fleet.Catalogue do
   # Unset — the whole of `:test`, and any deployment that never wired it — means the shipped
   # catalogue alone.
   #
-  # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed
-  # 2026-08-10, `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
+  # ⚠ Do NOT "simplify" this into `System.user_home!/0` here. It is CACHED by the VM: probed,
+  # `put_env("HOME", …)` then `user_home!()` still answers the boot-time value, so a
   # test moving HOME would silently measure the real `~/.lcars` of whoever ran the suite.
   defp install_dirs, do: Application.get_env(:lcars_fleet, :catalogue_install_dirs, [])
 

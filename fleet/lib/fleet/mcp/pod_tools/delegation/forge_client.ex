@@ -162,7 +162,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   @doc """
   Resolves a merged PR through its `[merge:pr-N]` seal marker.
 
-  Gitea rewrites deleted merged-branch `head.ref` values (observed live 2026-07-19), so branch
+  Gitea rewrites deleted merged-branch `head.ref` values (observed live), so branch
   scanning alone cannot recover them. `:none` means no marker; outages remain errors.
   """
   @callback merged_pr_of_issue(repo :: String.t(), issue_number :: integer(), opts :: keyword()) ::

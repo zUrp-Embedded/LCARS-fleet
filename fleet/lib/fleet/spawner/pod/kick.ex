@@ -126,7 +126,7 @@ defmodule Fleet.Spawner.Pod.Kick do
       the global knob `:wake_send_keys` (off ⇒ flag-only: we validate the Monitor in isolation, no fallback)
       AND by the pod's cap-profile (`invocation.wake_send_keys: false` ⇒ flag-only for THIS pod —
       set on the ARCHITECT: its terminal is the HUMAN's interactive session, a fallback `wake`
-      lands in the human's prompt and costs a spurious turn, live 2026-07-19; the no-ACK
+      lands in the human's prompt and costs a spurious turn, measured live; the no-ACK
       `wake.failed` escalation remains the terminal net).
 
   The bootstrap `"engage"` is never gated by the GLOBAL knob — muting it globally would leave every

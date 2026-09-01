@@ -126,8 +126,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   # ⚠ `into: %{}` GARDAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous deux
   # declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
-  # effectif etait alors celui que l'ordre de `/repos/search` designait. Trouve par relecture
-  # independante le 2026-08-21.
+  # effectif serait alors celui que l'ordre de `/repos/search` designe.
   #
   # ON NE REFUSE PAS LA LISTE, contrairement au doublon de DEPOTS, et l'asymetrie est voulue : un
   # doublon de depots est une question sans reponse (« lequel installer ? ») ; ici le catalogue EST
@@ -210,8 +209,8 @@ defmodule Fleet.Application.CatalogueDeposits do
       owner_of(full) == name and org_owner?(name, repo_mod, opts) ->
         [{:store, name, repo}]
 
-      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et depuis le 2026-08-21 il
-      # existe un depot qui le porte : la fleet publie sa propre reference sur la forge, pour qu'elle
+      # ⚠ LE NOM DU CATALOGUE LIVRE NE PEUT PAS ETRE UNE CANDIDATURE, et un depot le porte : la
+      # fleet publie sa propre reference sur la forge, pour qu'elle
       # soit LISIBLE et FORKABLE. Sans cette clause, ce depot serait un candidat de plus nomme
       # `fleet` — et le premier fork qui garde son manifeste tel quel en ferait DEUX, donc
       # `{:duplicate_catalogues, ...}`, donc `catalogue list` refusant la liste ENTIERE pour tout le
