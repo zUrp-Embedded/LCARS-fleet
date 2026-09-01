@@ -1024,6 +1024,31 @@ repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../../.."; }
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
 PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 
+# ─── DEUX FAITS, DEUX FICHIERS — ET ILS ONT PORTÉ LE MÊME NOM ───────────────────────────────────
+#
+# ⚠ UN SEUL FICHIER A PORTÉ DEUX FAITS SANS RAPPORT, ET LE SECOND SE LISAIT COMME LE PREMIER.
+#   `$PROV_SOURCE_STAMP`   « ce répertoire est un PAQUET » — écrit par `pack.sh` à la racine du
+#                          paquet, lu par `prov_delivery` pour décider BINAIRE ou SOURCE, c'est-à-
+#                          dire pour décider si la machine porte un toolchain.
+#   `$PROV_HELPERS_STAMP`  « les auxiliaires posés ici sortent de CETTE révision » — écrit par
+#                          `62-runtime-helpers` sous `$PROV_ROOT`, lu par lui seul.
+#
+# LA COLLISION : `62-runtime-helpers` écrivait le SECOND sous le nom du PREMIER, en `/opt/lcars/
+# .source-revision`. Or `repo_root()` remonte trois crans depuis `<racine>/fleet/deploy/lib` — donc
+# rejouer `/opt/lcars/fleet/deploy/provision`, qui EST le geste nominal du convergeur
+# (`fleet/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
+# devenait le discriminant de livraison. Un poste installé depuis un clone se déclarait BINAIRE au
+# rejeu, `15-toolchain` rendait « toolchain non requise » sans jamais évaluer son plancher OTP, et
+# `16-node` ne mesurait plus rien. Sur une machine qui COMPILE, le doctor rendait vert sur des
+# questions qu'il avait cessé de poser.
+#
+# ⚠ ET RENOMMER NE SUFFIT PAS : il faut PROPAGER. Sans le second geste, le rejeu depuis
+# `/opt/lcars` d'une machine installée par PAQUET ne trouverait plus rien et se déclarerait SOURCE
+# — le défaut symétrique, qui exigerait un toolchain sur une boîte qui n'en a pas. `62-runtime-
+# helpers` pose donc le discriminant sous `$PROV_ROOT` quand la livraison courante est binaire, et
+# le RETIRE quand elle est source : la copie porte la vraie forme, dans les deux sens.
+PROV_HELPERS_STAMP="${LCARS_HELPERS_STAMP:-.helpers-revision}"
+
 prov_source_rev() { # prov_source_rev [racine] — la révision de l'arbre, ou « inconnue »
   local root="${1:-$(repo_root)}" rev
   if rev="$(git -C "$root" rev-parse --short=8 HEAD 2>/dev/null)" && [[ -n "$rev" ]]; then

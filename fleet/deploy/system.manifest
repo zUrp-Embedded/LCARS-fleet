@@ -64,13 +64,24 @@ prefix    /opt/lcars/runtime                              0750  root:fleet      
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
 dir       /opt/lcars                                   0755  root:root           wsl+linux
-# ⚠ COUVERT PAR SON ANCETRE, ET DECLARE QUAND MEME. La regle « un chemin est couvert par ses
+# ⚠ COUVERTS PAR LEUR ANCETRE, ET DECLARES QUAND MEME. La regle « un chemin est couvert par ses
 # ancetres » evite une table de cent lignes ; elle n'a jamais dit qu'un objet FONCTIONNEL devait
-# rester anonyme. Celui-ci porte deux decisions du rail : `62-runtime-helpers` compare la revision
-# posee a celle de la source, et `prov_delivery` lit sa presence a la racine d'un arbre pour dire
-# BINAIRE ou SOURCE — c'est-a-dire pour decider si la machine porte un toolchain. Un objet dont
-# depend ce que la machine PORTE se nomme dans la table qui dit ce qu'on a le droit d'y poser.
-anchor    /opt/lcars/.source-revision                  0644  root:root           any
+# rester anonyme. Un objet dont depend ce que la machine PORTE se nomme dans la table qui dit ce
+# qu'on a le droit d'y poser.
+#
+# ⚠ ET CE SONT DEUX OBJETS, PAS UN — CE COMMENTAIRE A DECRIT LEUR FUSION SANS LA VOIR. Il disait
+# « celui-ci porte deux decisions du rail », en nommant les deux lecteurs d'un fichier unique comme
+# si les avoir enumeres suffisait. Ils portent DEUX FAITS SANS RAPPORT :
+#   .helpers-revision   d'ou sortent les auxiliaires poses ici — ecrit et lu par 62-runtime-helpers
+#   .source-revision    « cet arbre est un PAQUET » — lu par `prov_delivery` pour dire BINAIRE ou
+#                       SOURCE, c'est-a-dire pour decider si la machine porte un toolchain
+# Ils tombaient au meme endroit parce que `repo_root()` remonte exactement a /opt/lcars quand on
+# rejoue la copie : le tampon des auxiliaires se lisait comme le discriminant de livraison, et un
+# poste installe depuis un clone se declarait BINAIRE au rejeu. Le second est desormais PROPAGE
+# dans la copie par 62-runtime-helpers — pose si la livraison est binaire, RETIRE sinon — donc il
+# est ici sur les deux rails, et il dit vrai dans les deux sens.
+anchor:cond /opt/lcars/.source-revision                0644  root:root           any
+anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
 dir       /opt/lcars/admiral-skills                    0755  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux

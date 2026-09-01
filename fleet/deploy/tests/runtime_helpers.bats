@@ -325,9 +325,90 @@ need_git_checkout() {
   # (`libexec/fleet`) ferait diverger les deux, le tampon serait pose a cote, lu par personne — et un
   # temoin qui epingle le chemin litteral resterait VERT.
   local lu; lu="$(cd "$LCARS_HELPERS_DIR/fleet/deploy/lib" && readlink -f ../../..)"
-  [ -s "$lu/.source-revision" ]
-  [ -s "$LCARS_HELPERS_DIR/.source-revision" ]
-  [ "$(cat "$LCARS_HELPERS_DIR/.source-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
+  [ -s "$lu/.helpers-revision" ]
+  [ -s "$LCARS_HELPERS_DIR/.helpers-revision" ]
+  [ "$(cat "$LCARS_HELPERS_DIR/.helpers-revision")" = "$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)$(cd "$BATS_TEST_DIRNAME" && git diff --quiet HEAD -- || echo '+local')" ]
+}
+
+# ─── LE TAMPON N EST PLUS LE DISCRIMINANT DE LIVRAISON — ILS PORTAIENT LE MEME NOM ──────────────
+#
+# ⚠ CE FICHIER EPINGLAIT LA CAUSE. Le temoin ci-dessus exigeait que le tampon tombe exactement sur
+# le `repo_root()` de la copie — ce qui est juste — mais ce tampon s appelait `.source-revision`,
+# c est-a-dire le nom que `prov_delivery` cherche a la racine d un arbre pour dire BINAIRE ou
+# SOURCE. Rejouer `/opt/lcars/fleet/deploy/provision`, LE GESTE NOMINAL DU CONVERGEUR, faisait donc
+# lire le tampon des auxiliaires comme « ce repertoire est un paquet » : un poste installe depuis un
+# clone se declarait BINAIRE, `15-toolchain` rendait « toolchain non requise » sans jamais evaluer
+# son plancher OTP, et `16-node` ne mesurait plus rien.
+@test "le tampon des auxiliaires n est PAS le discriminant de livraison" {
+  need_git_checkout
+  stub_curl "peu importe"
+  mod apply
+  # La source de ce decor est un clone : la copie doit donc se declarer SOURCE, donc ne porter
+  # AUCUN `.source-revision` — alors qu elle porte bien son tampon d auxiliaires.
+  [ -s "$LCARS_HELPERS_DIR/.helpers-revision" ]
+  [ ! -e "$LCARS_HELPERS_DIR/.source-revision" ] \
+    || { echo "la copie porte un discriminant de livraison que rien ne justifie"; return 1; }
+}
+
+# ⚠ LE DECOR POSSEDE SA PROPRE RACINE, ET IL LE DOIT. `prov_delivery` lit son discriminant a la
+# racine de la SOURCE, c est-a-dire au `repo_root()` de la lib qui tourne. Faire passer l arbre de
+# travail pour un paquet reviendrait a ECRIRE dans le depot — un temoin interrompu y laisserait un
+# `.source-revision` que `pack.sh` refuserait et que `prov_delivery` lirait ensuite comme vrai.
+#
+# `readlink -f` canonicalise AVANT de remonter les `..` : un `fleet/deploy/lib` en lien symbolique
+# ferait donc retomber `repo_root()` sur le vrai depot. Les deux repertoires que la remontee
+# traverse sont COPIES (116 Ko + 316 Ko) ; tout le reste est lie — `fleet/deps` seul pese 74 Mo et
+# `assets/` 180 Mo, un decor qui les copierait ne serait pas un decor.
+racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declare « paquet »
+  local src="$BATS_TEST_TMPDIR/paquet"
+  mkdir -p "$src/fleet/deploy"
+  cp -a "$BATS_TEST_DIRNAME/../lib"       "$src/fleet/deploy/lib"
+  cp -a "$BATS_TEST_DIRNAME/../modules.d" "$src/fleet/deploy/modules.d"
+  ln -s "$BATS_TEST_DIRNAME/../../etc"      "$src/fleet/etc"
+  ln -s "$BATS_TEST_DIRNAME/../../services" "$src/fleet/services"
+  ln -s "$BATS_TEST_DIRNAME/../../bin"      "$src/fleet/bin"
+  ln -s "$BATS_TEST_DIRNAME/../../../assets"     "$src/assets"
+  ln -s "$BATS_TEST_DIRNAME/../../../catalogues" "$src/catalogues"
+  echo "cafe1234" > "$src/.source-revision"
+  printf '%s\n' "$src"
+}
+
+@test "la copie d une livraison BINAIRE porte le discriminant — sinon le rejeu reclame un toolchain" {
+  # Le defaut symetrique, et il serait pire : sans propagation, un apply rejoue depuis la copie
+  # d une machine installee PAR PAQUET se declarerait SOURCE et exigerait des compilateurs sur une
+  # boite dont c est justement le contraire qui a ete decide.
+  stub_curl "peu importe"
+  local src; src="$(racine_paquet)"
+  run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" \
+    bash "$src/fleet/deploy/modules.d/62-runtime-helpers.sh" apply
+  [ -s "$LCARS_HELPERS_DIR/.source-revision" ] \
+    || { echo "la forme BINAIRE n a pas ete propagee dans la copie"; echo "$output"; return 1; }
+  [ "$(cat "$LCARS_HELPERS_DIR/.source-revision")" = "cafe1234" ]
+  # et le tampon des auxiliaires reste un objet SEPARE, il ne devient pas le discriminant
+  [ -s "$LCARS_HELPERS_DIR/.helpers-revision" ]
+}
+
+@test "TEMOIN DU TEMOIN : la racine du decor est bien vue comme un PAQUET, pas comme le depot" {
+  # Sans cette mesure, le temoin precedent serait vert sur un decor qui aurait silencieusement
+  # retrouve le vrai depot — et il mesurerait alors la livraison de la machine qui le joue.
+  local src; src="$(racine_paquet)"
+  run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" bash -c '
+    . "$PROVISION_LIB"; printf "%s %s\n" "$(repo_root)" "$(prov_delivery)"'
+  [[ "$output" == "$src binary" ]] \
+    || { echo "le decor ne tient pas sa propre racine : $output"; return 1; }
+}
+
+@test "MIGRATION : un discriminant PERIME est retire, il ne survit pas a sa cause" {
+  # Le fichier herite d avant ce correctif — un tampon d auxiliaires ecrit sous le nom du
+  # discriminant. Un apply en livraison source doit le RETIRER, sinon la machine continue de se
+  # declarer binaire pour toujours.
+  need_git_checkout
+  stub_curl "peu importe"
+  mkdir -p "$LCARS_HELPERS_DIR"
+  echo "vieux1234" > "$LCARS_HELPERS_DIR/.source-revision"
+  mod apply
+  [ ! -e "$LCARS_HELPERS_DIR/.source-revision" ] \
+    || { echo "le discriminant perime a survecu a l apply"; return 1; }
 }
 
 @test "sans tampon, le check DIT qu'il ne sait pas — il ne suppose pas que c'est a jour" {
@@ -343,7 +424,7 @@ need_git_checkout() {
   # HEAD~1 est un ancetre de HEAD : on fait donc croire que la source est en retard d'un commit.
   local head; head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
   local prev; prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
-  echo "$head" > "$LCARS_HELPERS_DIR/.source-revision"
+  echo "$head" > "$LCARS_HELPERS_DIR/.helpers-revision"
 
   PROV_SOURCE_REV="$prev" mod check
   [ "$status" -eq 2 ]
@@ -357,7 +438,7 @@ need_git_checkout() {
   mod apply
   local head; head="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD)"
   local prev; prev="$(cd "$BATS_TEST_DIRNAME" && git rev-parse --short=8 HEAD~1)"
-  echo "$head" > "$LCARS_HELPERS_DIR/.source-revision"
+  echo "$head" > "$LCARS_HELPERS_DIR/.helpers-revision"
 
   rm -f "$LCARS_HELPERS_DIR/console.sh"
   PROV_SOURCE_REV="$prev" mod apply
@@ -371,7 +452,7 @@ need_git_checkout() {
 @test "une parente INDETERMINABLE se dit — elle ne se lit ni comme a jour ni comme en retard" {
   stub_curl "peu importe"
   mod apply
-  echo "deadbeef" > "$LCARS_HELPERS_DIR/.source-revision"
+  echo "deadbeef" > "$LCARS_HELPERS_DIR/.helpers-revision"
   mod check
   [[ "$output" == *"parenté indéterminable"* ]]
 }

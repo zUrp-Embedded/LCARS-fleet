@@ -54,7 +54,14 @@ deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
 # coïncident aujourd'hui — `repo_root()` remonte trois crans depuis `<copie>/fleet/deploy/lib`, et la
 # copie est posée en `$HELPERS_DIR/fleet` — mais c'est une COÏNCIDENCE ARITHMÉTIQUE, pas une règle.
 EMBEDDED_FLEET="$HELPERS_DIR/fleet"
-helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.source-revision}"; }
+# ⚠ ET CE TAMPON A PORTÉ LE NOM D'UN AUTRE FAIT. Il valait `$PROV_SOURCE_STAMP`, c'est-à-dire le
+# discriminant que `prov_delivery` lit à la racine d'un arbre pour dire BINAIRE ou SOURCE. Comme la
+# coïncidence arithmétique ci-dessus fait tomber les deux sur `/opt/lcars`, un apply rejoué depuis
+# la copie — LE GESTE NOMINAL DU CONVERGEUR — lisait ce tampon comme « paquet ». La SSoT des deux
+# noms vit dans la lib, avec le récit complet.
+helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_HELPERS_STAMP:-.helpers-revision}"; }
+# Le discriminant de livraison, tel qu'il doit exister DANS la copie — voir `propage_livraison`.
+copie_delivery_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.source-revision}"; }
 
 posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
@@ -194,6 +201,18 @@ check() {
     fi
   done
 
+  # ⚠ LA FORME DE LA LIVRAISON DANS LA COPIE SE SONDE, PARCE QUE PERSONNE D'AUTRE NE LA VOIT. Ce
+  # discriminant ne se lit QUE depuis `$HELPERS_DIR/fleet/deploy/provision` — le geste du
+  # convergeur. Un doctor lancé depuis l'arbre de travail, lui, lit celui de l'arbre de travail :
+  # il peut donc être vert sur une machine dont la copie ment sur ce qu'elle est.
+  local _veut _a
+  _veut="$(prov_delivery)"; _a="source"; [[ -f "$(copie_delivery_stamp)" ]] && _a="binary"
+  if [[ "$_veut" == "$_a" ]]; then
+    p_ok "forme de livraison propagée dans la copie ($_a)"
+  else
+    p_drift "la copie de $HELPERS_DIR se déclare « $_a » alors que cette source est « $_veut » — un apply rejoué depuis $HELPERS_DIR/fleet/deploy/provision poserait (ou refuserait) un toolchain sur la mauvaise décision"
+  fi
+
   verdict_check
 }
 
@@ -301,6 +320,28 @@ apply() {
   # certifierait une copie qu'un échec deux lignes plus bas aurait laissée à moitié faite.
   write_atomic "$(helpers_stamp)" 0644 "$HELPERS_OWNER" <<<"$src" \
     || { p_fail "révision de source non tamponnée ($(helpers_stamp)) — la prochaine passe ne saura pas d'où sort ce qui est ici"; verdict_apply; }
+
+  # ─── LA FORME DE LA LIVRAISON SE PROPAGE DANS LA COPIE ────────────────────────────────────────
+  #
+  # ⚠ RENOMMER LE TAMPON NE SUFFISAIT PAS, ET L'OUBLIER PRODUISAIT LE DÉFAUT SYMÉTRIQUE. Un apply
+  # rejoué depuis `$HELPERS_DIR/fleet/deploy/provision` fait tomber `repo_root()` sur `$HELPERS_DIR`
+  # — c'est là que `prov_delivery` cherche son discriminant. Sans ce bloc, une machine installée
+  # par PAQUET s'y déclarerait SOURCE au rejeu : `15-toolchain` et `16-node` exigeraient des
+  # compilateurs sur une boîte dont c'est justement le contraire qui a été décidé.
+  #
+  # LES DEUX SENS, PARCE QU'UN TAMPON QUI SURVIT À SA CAUSE MENT. Une machine réinstallée depuis un
+  # clone après l'avoir été depuis un paquet garderait sinon un discriminant « binaire » que plus
+  # rien ne justifie — et c'est aussi ce qui fait la MIGRATION de l'ancien nom : le fichier hérité
+  # d'avant ce correctif est retiré par le premier apply en livraison source.
+  if prov_delivery_is_binary; then
+    write_atomic "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER" <<<"$(prov_source_rev)" \
+      || { p_fail "forme de livraison non propagée ($(copie_delivery_stamp)) — un apply rejoué depuis $HELPERS_DIR se croirait en livraison SOURCE et réclamerait un toolchain"; verdict_apply; }
+  elif [[ -e "$(copie_delivery_stamp)" ]]; then
+    rm -f "$(copie_delivery_stamp)" \
+      || { p_fail "discriminant de livraison PÉRIMÉ non retiré ($(copie_delivery_stamp)) — cette machine se déclarerait BINAIRE alors qu'elle bâtit"; verdict_apply; }
+    PROV_CHANGED=$((PROV_CHANGED + 1))
+    p_chg "discriminant de livraison retiré ($(copie_delivery_stamp)) — cette machine bâtit, elle ne consomme pas un paquet"
+  fi
 
   # ⚠ LE RÉSEAU EN DERNIER, ET C'EST UN ORDRE, PAS UN RANGEMENT. Tout ce qui précède se pose depuis
   # l'arbre local et ne peut échouer que sur un disque. Le client de terminal, lui, dépend d'un CDN :
