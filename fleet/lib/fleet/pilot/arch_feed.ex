@@ -16,7 +16,7 @@ defmodule Fleet.Pilot.ArchFeed do
   arch via `Fleet.Spawner.notify_pod/2` (typed flag message, NO kick net, zero send-keys — it
   must never cost the human a turn). Everything else is pull-only (the file).
 
-  Axiom (reorg): a line NEVER names the repo — the arch has "the project", nothing else
+  Axiom: a line NEVER names the repo — the arch has "the project", nothing else
   (issue numbers only).
 
   Lines carry the issue TITLE (`#3 « Script chifoumi » LIVRÉE`) so the MESSAGE is self-sufficient

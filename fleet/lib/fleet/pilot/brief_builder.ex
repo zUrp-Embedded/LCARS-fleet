@@ -156,8 +156,8 @@ defmodule Fleet.Pilot.BriefBuilder do
         ci_failure_section(forge, repo, pr, forge_opts)
 
       {:error, reason} ->
-        # Rail prefix = the FACADE this module was extracted from (StepDispatcher), not its own
-        # last segment: extracting a cluster must never fragment the trace an operator greps.
+        # Rail prefix = the FACADE (`StepDispatcher`), not this module's own last segment:
+        # extracting a cluster must never fragment the trace an operator greps.
         Logger.warning(
           "StepDispatcher: rework feedback UNREADABLE repo=#{repo} pr=#{pr} " <>
             "reason=#{inspect(reason)} — the producer reworks without the reviews (degraded, not deferred)"
@@ -171,9 +171,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # AUCUNE review REQUEST_CHANGES — alors POURQUOI ce rework ? La cause commune est un CI ROUGE :
-  # `protect_main` exige `CI / *`, et un CI rouge ne pose AUCUNE review, donc l'ancien `""` renvoyait
-  # le producteur en rework SANS lui dire quoi corriger (mesuré 2026-08-23, chifoumi ET pile-ou-face :
-  # « l'ordre de rework annonce une review, mais ne la porte pas »). On DEMANDE l'état CI de la tête
+  # `protect_main` exige `CI / *`, et un CI rouge ne pose AUCUNE review : un `""` renvoie donc le
+  # producteur en rework SANS lui dire quoi corriger — mesuré sur deux projets, chifoumi et
+  # pile-ou-face, « l'ordre de rework annonce une review, mais ne la porte pas ». On DEMANDE l'état
+  # CI de la tête
   # de PR ; `:failure` → on le dit et on pointe le run. Vert/pending/aucun → silence (pas de raison
   # CI, et le dire serait du bruit). Forge illisible → on trace et on l'écrit, jamais un ordre muet.
   defp ci_failure_section(forge, repo, pr, forge_opts) do
@@ -331,7 +332,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   # source (an inline/degraded order) → no mount. `filename` is the name the spawner mounts under in
   # `~/issues/` AND the name the order text points at — ONE value threaded from the builder, so the
   # two can never diverge (transport_brief_v2): `brief.md` for what a producer/scoper reads, `criteria.md`
-  # for what a deliverable judge reads. "mandate" is a concept (the order), no longer a filename.
+  # for what a deliverable judge reads. "mandate" is a concept (the order), not a filename.
   defp mandate_from_source({ref, sha}, filename, repo, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
 
@@ -358,9 +359,8 @@ defmodule Fleet.Pilot.BriefBuilder do
          opts
        ) do
     # The STEP's `brief_kind` (workflow_map) TAKES PRECEDENCE over the profile's (per-step override) — it
-    # drives a worker profile as a JUDGE for one step without duplicating the profile. NO canon role uses
-    # it today: `scoper` was its only user and became a NATIVE judge at the 2026-07-30 split (the override
-    # described a dual nature it never had). The mechanism stays because it is the generic way to answer
+    # drives a worker profile as a JUDGE for one step without duplicating the profile. NO canon role
+    # uses it today. The mechanism stays because it is the generic way to answer
     # "this step judges", and removing it would force a duplicate profile the day one is needed.
     # ABSENT at the step → profile default
     # (itself "worker" by default, fail-safe) via the `||`: absence is NOT an anomaly. What
@@ -376,7 +376,7 @@ defmodule Fleet.Pilot.BriefBuilder do
       # BRIEF judge (judge_target:brief) → judges the issue.body (executable?), NOT a deliverable
       # (no code upstream). The brief is in hand (poller-listed) → no criterion read-error path.
       {"judge", "brief"} ->
-        # The BRIEF judge (scoper) now READS a mounted file, like every other pod (transport_brief_v2):
+        # The BRIEF judge (scoper) READS a mounted file, like every other pod (transport_brief_v2):
         # the brief it judges is `~/issues/<mount>`, content-addressed, not inlined into `outputs`. The
         # mount source is the resolved brief pointer (`_brief_source`) — `nil` on a degraded/inline
         # dispatch, which is the no-mount branch. `mandate_from_source` wraps it in `build_brief`.
@@ -417,12 +417,11 @@ defmodule Fleet.Pilot.BriefBuilder do
   # commit (`:no_deliverable_commit`). The pod commits LOCALLY; the SYSTEM pushes + opens the
   # PR (forge-blind).
   #
-  # NO SIGNATURE SLOT (removed 2026-08-05). The role trailer is appended MECHANICALLY by a
-  # `prepare-commit-msg` hook installed at clone time, so the pod has no action to take on it — and
-  # a thing an agent has no action to take on does not belong in its world. The order used to demand
-  # it, which cost a full producer run the day a line landed mid-message; then it briefly ANNOUNCED
-  # it, which was the same mistake one step quieter. Minimal world: only what it needs, and all of
-  # what it needs.
+  # NO SIGNATURE SLOT. The role trailer is appended MECHANICALLY by a `prepare-commit-msg` hook
+  # installed at clone time, so the pod has no action to take on it — and a thing an agent has no
+  # action to take on does not belong in its world. Demanding it costs a full producer run the day a
+  # line lands mid-message; merely ANNOUNCING it is the same mistake one step quieter. Minimal
+  # world: only what it needs, and all of what it needs.
   defp build_worker_brief(role, issue) do
     Fleet.Workflow.BriefTemplate.render("work-order-build", %{
       "role" => role,
@@ -432,7 +431,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # SAME MOVE AS THE JUDGE: when a pointer resolved, the producer's order is a MOUNTED file it reads
-  # (`~/issues/brief.md`, content-addressed), not inline text. `pin_object` materialized it at the
+  # (`~/issues/brief.md`, content-addressed), not inline text. `pin_object` materializes it at the
   # pinned sha, so what the producer works from is exactly what was authored. Inline (`:none`, a
   # degraded/PoC brief) → the body is the order, there being nothing to mount.
   defp worker_order_body(%{"_brief_source" => _source}),
@@ -440,8 +439,8 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   defp worker_order_body(issue), do: issue["body"] || ""
 
-  # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source, because they were
-  # near-identical and would have drifted the day one was retouched (nobody would find the other). It
+  # THE SENTENCE THE PRODUCER'S ORDER AND THE JUDGE'S CRITERION SHARE — one source: near-identical,
+  # they drift the day one is retouched, and nobody finds the other. It
   # names the mounted, content-addressed file ONLY — never its sha: the pin is the runtime's to
   # engrave (commit message + forge), not the agent's to relay on trust (transport_brief_v2). `file`
   # is the mount name (`brief.md`/`criteria.md`), threaded from the builder so the name the order says
@@ -454,8 +453,8 @@ defmodule Fleet.Pilot.BriefBuilder do
       "vérifier ni recalculer#{tail}"
   end
 
-  # (transport_brief_v2) The order no longer cites its source in the body: `brief_source_line/1` is
-  # gone. Provenance for a human lives on the forge (the `Brief:` pointer trailer in the ticket) and
+  # (transport_brief_v2) The order does NOT cite its source in the body. Provenance for a human
+  # lives on the forge (the `Brief:` pointer trailer in the ticket) and
   # durably in the ops commit message; the agent's order carries the mount, not an address to relay.
 
   # A **judge** pod must know WHAT
@@ -619,10 +618,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   end
 
   # TROIS ÉTATS, PAS DEUX — et le troisième est celui que l'arbitre doit pouvoir distinguer.
-  # La version d'avant rangeait « ce juge a mesuré et n'a RIEN trouvé » sous « aucune sévérité
-  # lisible », qui se lit comme un défaut de sa charge. Mesuré au banc le 2026-08-19 (PR71) : le
-  # reviewer avait rendu `{"findings": [], "severity_max": "none"}` — une mesure valide, explicite,
-  # et le brief du gatekeeper la lui a présentée comme illisible. Un arbitre convoqué pour trancher
+  # Ranger « ce juge a mesuré et n'a RIEN trouvé » sous « aucune sévérité lisible » se lit comme un
+  # défaut de sa charge. Mesuré au banc : un reviewer rend `{"findings": [], "severity_max":
+  # "none"}` — une mesure valide, explicite — et le brief du gatekeeper la lui présenterait comme
+  # illisible. Un arbitre convoqué pour trancher
   # une contradiction entre une approbation et une mesure ne peut pas travailler si le rail lui
   # décrit une mesure claire comme du bruit.
   # L'arbitre doit savoir qu'il arbitre sur un TROU, pas sur une mesure. C'est le seul état où la
@@ -664,10 +663,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   defp ran_line(contexts),
     do: "Ce qui a tourne, exactement : #{Enum.map_join(contexts, ", ", &"`#{&1}`")}."
 
-  # F-C083 — READ-ERROR ≠ ABSENCE, applied to the PREDECESSOR read. The rule is stated 35 lines
-  # below for the CRITERION read and was NOT applied here: a bare `_ -> nil` collapsed the seam's
-  # three-valued contract (`{:ok, map} | :none | {:error, term}`) into two branches, so a TRANSIENT
-  # forge failure landed in the git-native fallback. Consequence, and it is the worst shape a bug
+  # F-C083 — READ-ERROR ≠ ABSENCE, applied to the PREDECESSOR read. The same rule governs the
+  # CRITERION read below. A bare `_ -> nil` collapses the seam's three-valued contract
+  # (`{:ok, map} | :none | {:error, term}`) into two branches, so a TRANSIENT forge failure lands in
+  # the git-native fallback. Consequence, and it is the worst shape a bug
   # can take here: the judge grades the BRANCH CODE instead of the payload its predecessor actually
   # produced — a verdict rendered on the wrong matter, silently, and INDISTINGUISHABLE from the
   # legitimate git-native case. Nothing downstream can catch it: the brief is well-formed, the judge
@@ -737,9 +736,10 @@ defmodule Fleet.Pilot.BriefBuilder do
         # only when no criteria was authored.
         with {:ok, issue} <- resolve_judge_criterion(issue, repo, opts) do
           # THE MOUNT SOURCE TRAVELS OUT WITH THE BRIEF — the `{ref, sha}` `judge_criterion/1` just
-          # referenced. Returning it here is the whole fix for the PR-judge path: the dispatcher sets
-          # `:mandate` from THIS, so the file the order names is the file the spawner materializes.
-          # One resolution, not two — the mount can no longer diverge from what the brief points at.
+          # referenced. Returning it here is what holds the PR-judge path together: the dispatcher
+          # sets `:mandate` from THIS, so the file the order names is the file the spawner
+          # materializes. One resolution, not two — the mount cannot diverge from what the brief
+          # points at.
           {:ok,
            Fleet.Workflow.GateBrief.build(%{
              step: step,
