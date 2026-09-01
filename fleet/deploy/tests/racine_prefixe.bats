@@ -66,15 +66,36 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   #
   # Le mur COMPTE autant qu'il compare : un compte seul passerait au vert le jour ou l'un d'eux
   # change ailleurs, et une comparaison seule ne dirait rien d'un huitieme qui apparait.
-  local f n=0 b
+  # ⚠ ET IL Y A DEUX NATURES, PAS UNE — CE MUR N EN CONNAISSAIT QU UNE, ET IL A EU RAISON DE
+  # ROUGIR QUAND LA SECONDE EST APPARUE. La release POSEE vit sous `$PROV_PREFIX` ; la release
+  # BATIE vit dans l arbre, en `fleet/_build/prod/rel/…`, la ou `mix release` la depose et ou
+  # `pack.sh:188` la prend pour l embarquer. Ce sont deux objets distincts au meme nom de binaire :
+  # `prov_release_bin` cherche la seconde AVANT la premiere, precisement parce qu elle est celle que
+  # la passe en cours apporte et que `60-deploy` posera.
+  #
+  # Confondre les deux serait exiger que la release du paquet vive sous le prefixe d install —
+  # c est-a-dire qu elle y soit AVANT d y etre posee. Le mur classe donc par nature, et compte
+  # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
+  # comparaison seule ne dirait rien d un huitieme qui apparait.
+  local f n=0 nb=0 b
   for f in "$R/deploy/lib/provision-lib.sh" "$R/bin/lcars" "$R/deploy/docker/entrypoint.sh"; do
     while read -r b; do
       [ -n "$b" ] || continue
-      n=$(( n + 1 ))
-      [ "$b" = "$BIN_REL" ] || { echo "$f : « $b » au lieu de « $BIN_REL »" >&2; return 1; }
+      case "$b" in
+        */_build/prod/rel/lcars_fleet/bin/lcars_fleet)
+          nb=$(( nb + 1 ))
+          # La release BATIE se derive de la racine de l arbre, jamais du prefixe d install : un
+          # chemin absolu en dur ici designerait la machine de celui qui a ecrit la ligne.
+          [ "$b" = "/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
+            || { echo "$f : chemin de release BATIE non derive de la racine : « $b »" >&2; return 1; } ;;
+        *)
+          n=$(( n + 1 ))
+          [ "$b" = "$BIN_REL" ] || { echo "$f : « $b » au lieu de « $BIN_REL »" >&2; return 1; } ;;
+      esac
     done < <(bins_de "$f")
   done
-  [ "$n" -eq 2 ] || { echo "deux chemins de release attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  [ "$n" -eq 2 ] || { echo "deux chemins de release POSEE attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  [ "$nb" -eq 1 ] || { echo "un seul chemin de release BATIE attendu, $nb trouve(s)" >&2; return 1; }
 }
 
 @test "LE DOCKERFILE construit, copie et cable sous le MEME prefixe" {
