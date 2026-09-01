@@ -17,10 +17,10 @@ defmodule Fleet.Workflow.OpsObjectSync do
   a routing key. So a commit for project B queues behind project A's even though they share no lock. It
   is a chosen simplicity (no Registry, no per-project process lifecycle); its price is cross-project
   head-of-line blocking, bounded by the caller's call budget and widened by the push staying inside
-  the transaction. A queue whose composed budget exceeds that call timeout no longer loses its
-  result: on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`,
-  no lock) and returns the sha if the transaction landed — a false-negative timeout can no longer make
-  a landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
+  the transaction. A queue whose composed budget exceeds that call timeout does not lose its result:
+  on a caller timeout `commit_object/5` does a READ-ONLY readback (`OpsObject.committed_sha`, no
+  lock) and returns the sha if the transaction landed — so a false-negative timeout cannot make a
+  landed brief look unmaterialized. Sharding per `work_dir` (`:via` a Registry) is the exit if the
   head-of-line blocking ever bites. What the suite pins (BL-6-43.4) is the ROUTING KEY — the server is
   the only address, `work_dir` is payload — which is the first thing a sharding refactor changes. It
   deliberately does NOT pin mutual exclusion across `work_dir`s by timing: proving "these two never

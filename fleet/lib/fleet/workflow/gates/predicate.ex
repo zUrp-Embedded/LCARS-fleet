@@ -85,11 +85,10 @@ defmodule Fleet.Workflow.Gates.Predicate do
     |> Enum.all?(&eval_term(String.trim(&1), outputs))
   end
 
-  # TOTAL fail-closed clause, and it is now a NET rather than the only guard. Until 2026-08-05 the
-  # hard gate handed every item of `rules` here without checking it was a string, while the terminal
-  # gate filtered upstream — an asymmetry declared "known" and traced on this side only, so the hard
-  # path answered "unsatisfied rule(s)" for a malformed CARD. Both branches now reject the shape by
-  # name before evaluating; this clause stays for what reaches it anyway.
+  # TOTAL fail-closed clause, and it is a NET rather than the only guard. Both gate branches reject
+  # the shape BY NAME before evaluating; handing every item of `rules` here unchecked instead makes
+  # the hard path answer "unsatisfied rule(s)" for a malformed CARD. This clause stays for what
+  # reaches it anyway.
   # A non-string `rule` (an UNSCHEMATIZED override — an in-memory workflow_map that bypassed the
   # loader's schema; there is NO v1 input, a v1 YAML fails the v2.5 schema before normalize)
   # — or non-map `outputs` — renders `false`:
@@ -107,13 +106,13 @@ defmodule Fleet.Workflow.Gates.Predicate do
 
   # "identifier op operand" → {:cmp, ...} ; otherwise bare identifier → {:atom, id}.
   #
-  # The atom fallback is TOTAL, and that used to swallow malformed comparisons. A term carrying an
-  # operator that does not parse (`tasks count >= 1`, a space in the identifier) became a lookup of
+  # The atom fallback is TOTAL, and left alone it swallows malformed comparisons. A term carrying an
+  # operator that does not parse (`tasks count >= 1`, a space in the identifier) becomes a lookup of
   # the literal key — absent, false, forever, silent. The gate then rejects every delivery while
   # looking strict, which is the worst shape a configuration error can take: it does not fail, it
   # succeeds at being wrong.
   #
-  # Fail-closed stays (the return is still `false`); what changes is that it now SAYS SO. Missing
+  # Fail-closed either way (the return is `false`); what the named refusal buys is SAYING SO. Missing
   # evidence is a legitimate false; a rule the evaluator cannot read is not a verdict, it is a
   # broken instrument answering anyway.
   defp parse(term) do

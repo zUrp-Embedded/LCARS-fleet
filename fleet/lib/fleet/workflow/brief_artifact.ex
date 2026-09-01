@@ -116,10 +116,10 @@ defmodule Fleet.Workflow.BriefArtifact do
   Same materialization, but it SAYS WHY it failed instead of flattening every reason into
   `{nil, nil}`.
 
-  The flattening was the defect: three of the four causes are not transient, and a caller that
-  cannot tell them apart can only pick one policy for all of them. It picked "degrade", so a
-  project misconfigured once produced unauditable work indefinitely — nothing ever failed, it just
-  stopped being provable.
+  Flattening is the defect: three of the four causes are not transient, and a caller that cannot
+  tell them apart can only pick one policy for all of them. Pick "degrade" and a project
+  misconfigured once produces unauditable work indefinitely — nothing fails, it just stops being
+  provable.
 
     * `:no_brief` — no brief, or an empty one. Not a degraded dispatch, a bug upstream.
     * `:no_repo` — no repo to materialize into. Same.

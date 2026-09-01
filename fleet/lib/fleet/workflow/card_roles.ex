@@ -2,7 +2,7 @@ defmodule Fleet.Workflow.CardRoles do
   @moduledoc """
   Does every role a catalogue's cards NAME actually exist in that catalogue?
 
-  ## The edge nobody was checking
+  ## The edge the two boot freezes do not cover
 
   Two boot-time freezes already refuse a broken catalogue, each on its own tree:
   `CapProfile.Image` on the profiles, `SPBuilder.Image` on "a catalogue that DECLARES a role owes
@@ -10,7 +10,7 @@ defmodule Fleet.Workflow.CardRoles do
 
   Nothing ELSE resolves `steps[].role` or `jury[]` against the cap-profiles. A catalogue whose card
   says `dev` while its profiles declare `developer` passes both freezes (each tree is internally
-  fine), boots, and dies at the FIRST dispatch — a role token that was never minted, a spawn that
+  fine), boots, and dies at the FIRST dispatch — a role token nobody minted, a spawn that
   refuses a name nobody declared. Far from the cause, and on a message that ACCUSES THE RUNTIME.
 
   ## Why it is checked HERE and not at load
