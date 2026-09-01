@@ -30,7 +30,9 @@
 # TOUT pod par design, et l'inscrire en bloquant declarerait `project_create` mort en permanence sur
 # une fleet parfaitement capable de le faire.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : une sonde qui echoue est un VERDICT (`unknown`, `degraded`),
+                          # pas une panne du diagnostic. `-e` ferait mourir le rapport au premier
+                          # instrument absent — exactement ce que la sonde 10 existe pour dire.
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 P="$SKILL_DIR/probes"
 # shellcheck source=probes/lib.sh

@@ -32,7 +32,7 @@
 #         Input:   stdin JSON (tool_name, tool_input.command, session_id)
 #         Output:  hookSpecificOutput.updatedInput, ou rien (passthrough)
 #
-set -u
+set -u          # PAS -e : un hook qui meurt bloque la session de l'humain.
 
 # Coupe franche, avant meme de chercher la brique.
 #

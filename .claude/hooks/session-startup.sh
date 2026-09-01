@@ -45,7 +45,8 @@
 #
 # --- END HEADER ---
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : meme raison que les autres hooks — un demarrage de session ne
+                          # doit pas echouer parce qu'une verification interne a echoue.
 
 # Lire le payload stdin AVANT toute autre logique — stdin n'est disponible qu'une fois
 HOOK_PAYLOAD=$(cat)

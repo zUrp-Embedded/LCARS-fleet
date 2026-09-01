@@ -254,7 +254,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   #   * the `subagent-driven` modop teaches its SUBAGENTS to report
   #     `{"status": "DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT", "concerns": [...]}`;
   #   * the clause above tolerated `%{"status", "result"}` — a shape NO live producer emits (two
-  #     test fixtures do, one of them under `_archived_gates/`): the tolerance aimed at a fossil.
+  #     test fixtures did, one of them a retired gate since deleted): the tolerance aimed at a fossil.
   #
   # The shape actually produced matched NEITHER. Measured end to end: a report
   # `{"status": "BLOCKED", "concerns": [...]}` forwarded as `result` yielded `eng_summary` = "" and

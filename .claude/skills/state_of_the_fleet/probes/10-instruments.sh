@@ -12,6 +12,11 @@
 # This probe never concludes anything about the fleet, the forge or a project. It measures ONE
 # thing: where my blind spots are. Everything it finds `unreachable` downstream is explained here.
 
+# ⚠ AUCUN `set -e` ICI, ET C'EST LA DOCTRINE DES SONDES. Une sonde qui meurt n'emet AUCUN verdict :
+# son plan disparait du rapport sans que rien ne le signale. Elle doit survivre a ses propres
+# echecs pour les DIRE (`unknown`, `degraded`) — c'est precisement ce que la sonde 10 existe pour
+# empecher. Pas de `-u` non plus : une variable absente est un fait a rapporter, pas une mort.
+
 SOTF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$SOTF_DIR/lib.sh"

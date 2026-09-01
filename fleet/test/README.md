@@ -46,7 +46,6 @@ ci-dessous. Il n'y a pas de troisième cas — et la racine de `test/` ne porte 
 | `test/crosscutting/` | témoins sans cible unique (scan du dépôt entier) | `shell_gate` |
 | `test/integration/` | multi-cible, hors-mix | manuel |
 | `test/probes/` | sondes manuelles (`gate-r*.sh`), hors `mix gate` — leurs en-têtes le disent | manuel |
-| `test/probes/_archived/` | sondes retirées : `exit 2/3` immédiat, conservées comme archive d'incrément | rien, délibérément |
 | `test/support/` | stubs, doubles, TestEnv — compilés par `elixirc_paths(:test)` | — |
 | `test/fixtures/` | données | — |
 
