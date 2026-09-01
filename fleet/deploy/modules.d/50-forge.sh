@@ -183,7 +183,14 @@ check_members_visible() {
   local hidden absent unknown org_accounts="$PROV_ROLES $PROV_SYSTEM_ACCOUNT"
   unknown="$(members_in_state unknown "$org_accounts")"
   if [[ -n "$unknown" ]]; then
-    p_drift "adhésions org NON SONDABLES (jeton système absent : $PROV_SYSTEM_TOKEN_FILE) — l'apply le minte dès que le seed est posé ; rien n'est conclu sur les comptes en attendant"
+    # ⚠ DEUX CAUSES SOUS UN SEUL MESSAGE, ET ELLES N'APPELLENT PAS LE MEME VERDICT. Jeton ABSENT :
+    # l'apply le minte, c'est un drift. Jeton PRESENT mais illisible par CE compte : rien n'a été
+    # mesuré, donc rien n'est à converger — et le dire « drift » produisait un écart qui apparaît
+    # sans sudo et disparaît avec, sur une machine identique.
+    case "$(prov_file_state "$PROV_SYSTEM_TOKEN_FILE")" in
+      absent) p_drift "adhésions org non sondables — jeton système ABSENT ($PROV_SYSTEM_TOKEN_FILE) ; l'apply le minte dès que le seed est posé" ;;
+      *)      p_warn  "adhésions org NON SONDABLES — jeton système $(prov_state_why "$(prov_file_state "$PROV_SYSTEM_TOKEN_FILE")" "$PROV_SYSTEM_TOKEN_FILE"). Rien n'est conclu sur les comptes" ;;
+    esac
     return 0
   fi
 
@@ -306,12 +313,23 @@ check_human_onboardable() {
     return 0
   fi
   p_ok "compte forge de l'humain ($PROV_HUMAN)"
-  [[ -r "$tokfile" ]] || { p_drift "token système illisible ($tokfile) — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0; }
+  # Même partage qu'au-dessus : un jeton absent se converge, un jeton qu'on ne peut pas ouvrir se
+  # dit. Les deux menaient au même `p_drift`, donc au même faux écart entre un doctor et un sudo.
+  case "$(prov_file_state "$tokfile")" in
+    present) ;;
+    absent)  p_drift "token système ABSENT ($tokfile) — l'apply le minte ; appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable en attendant"; return 0 ;;
+    *)       p_warn  "token système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0 ;;
+  esac
   code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
   case "$code" in
     204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
-    404) p_drift "$PROV_HUMAN N'EST PAS membre de l'org $PROV_FORGE_ORG — l'onboarding projet le refusera ; il entre dans la team humans par « fleet/deploy/box forge-apply »" ;;
-    *)   p_drift "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non vérifiable (HTTP $code) — scope du token système ?" ;;
+    # ⚠ LE SECOND SITE DU CANON DU 2026-08-30, ET JE L'AVAIS MANQUE en ne corrigeant que
+    # `member_state`. Mesure du 2026-09-01, banc 2001 : `doctor` SOUS SUDO rendait « bob N'EST PAS
+    # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
+    # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
+    # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
+    404) p_warn "$PROV_HUMAN n'est pas membre de l'org $PROV_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« fleet/deploy/box forge-apply »). L'onboarding projet le refusera d'ici là" ;;
+    *)   p_warn "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
   esac
 }
 

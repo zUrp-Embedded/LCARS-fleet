@@ -49,7 +49,14 @@ check() {
     if [[ "$mode" == "exec" && ! -x "$PROV_PREFIX/bin/$name" ]]; then
       p_drift "bin/$name absent/non exécutable sous $PROV_PREFIX/bin"
     elif [[ "$mode" == "noexec" && ! -r "$PROV_PREFIX/bin/$name" ]]; then
-      p_drift "bin/$name absent/illisible sous $PROV_PREFIX/bin"
+      # ⚠ « absent/illisible » MELANGEAIT DEUX ETATS SOUS UNE BARRE OBLIQUE, et ils n'appellent pas
+      # le meme verdict : l'apply POSE un binaire absent, il ne peut rien faire d'un binaire present
+      # que ce compte n'a pas le droit d'ouvrir. Le prefixe est en 0750 root:fleet — un doctor lance
+      # par un compte hors du groupe lit donc « absent » de tout ce qui est parfaitement la.
+      case "$(prov_file_state "$PROV_PREFIX/bin/$name")" in
+        absent) p_drift "bin/$name ABSENT sous $PROV_PREFIX/bin — l'apply le pose" ;;
+        *)      p_warn  "bin/$name $(prov_state_why "$(prov_file_state "$PROV_PREFIX/bin/$name")" "$PROV_PREFIX/bin/$name")" ;;
+      esac
     else
       p_ok "bin/$name"
     fi

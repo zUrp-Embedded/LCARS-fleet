@@ -203,6 +203,10 @@ check() {
   elif ! forge_up; then
     # Une forge FOURNIE qui ne répond pas est un DRIFT, pas un échec de sonde : rien n'est cassé
     # ici, c'est l'adresse qu'on nous a donnée qui est muette. Le geste appartient à qui la tient.
+    # ⚠ DRIFT ET PAS WARN, ET J AI FAIT L ERREUR INVERSE EN PASSANT. « drift » ne veut pas dire
+    # « apply va le corriger » — le contrat des codes dit « etat-cible non tenu », et une forge qui
+    # ne repond pas est un FAIT etabli, pas une ignorance. Ce qui distingue un warn est de ne PAS
+    # SAVOIR ; ici on sait, et la machine est inutilisable tant que ca dure.
     p_drift "forge FOURNIE muette ($FORGE_URL) — c'est l'adresse de FORGE_BASE_URL ; ce rail ne la monte pas, il la consomme"
     verdict_check
   fi

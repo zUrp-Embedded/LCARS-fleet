@@ -1049,6 +1049,24 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
   printf '%s\n' "${out# }"
 }
 
+# ─── DRIFT OU WARN : LE CRITERE EST « SAIT-ON ? », PAS « PEUT-ON CORRIGER ? » ───────────────────
+#
+#   p_drift  L'ETAT-CIBLE N'EST PAS TENU, et c'est un fait ETABLI. Que `apply` sache le corriger ou
+#            non ne change rien : une forge fournie qui ne repond pas est un drift, meme si ce rail
+#            ne la monte pas et ne pourra jamais la relever.
+#   p_warn   ON NE SAIT PAS, ou la question est HORS DU PERIMETRE du rail. Un objet qu'on ne peut pas
+#            lire d'ici ; une adhesion d'org qu'une personne pose elle-meme sur la forge.
+#
+# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS, le 2026-09-01. D'abord en laissant
+# `p_drift` sur des sondes qui DISAIENT ne pas savoir — « non mesurable », « NON SONDABLE »,
+# « illisible » — ce qui produisait cinq drifts sans sudo qui disparaissaient avec, sur une machine
+# identique. Puis, en corrigeant, en passant a `p_warn` une forge muette et un manifeste illisible :
+# deux etats parfaitement ETABLIS, dont le verdict ne depend pas de qui lance le doctor. Trois
+# temoins existants ont rougi et ils avaient raison.
+#
+# LE TEST QUI TRANCHE : « ce verdict changerait-il si quelqu'un d'autre lancait la meme commande ? »
+# Si oui, c'est qu'on mesure le LECTEUR et pas la machine — donc un warn, et il doit dire pourquoi.
+#
 # ─── TROIS ETATS, JAMAIS DEUX ───────────────────────────────────────────────────────────────────
 #
 #   present       il est la, et on peut le lire

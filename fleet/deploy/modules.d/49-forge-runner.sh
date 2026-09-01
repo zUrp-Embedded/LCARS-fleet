@@ -89,7 +89,12 @@ check() {
   fi
   local n; n="$(ci_runner_count || true)"
   if [[ -z "$n" ]]; then
-    p_drift "runner CI non mesurable (jeton master illisible ou API muette) — la CI peut être sans machine"
+    # ⚠ CE VERDICT DISAIT LUI-MEME QU'IL NE SAVAIT PAS, ET IL ETAIT CLASSE DRIFT. Le bon motif est
+    # dix lignes plus haut, dans ce meme fichier : « forge éteinte — le runner n'est pas mesurable,
+    # et son absence n'est pas une dérive ». Un drift promet qu'`apply` converge ; ici on n'a MEME
+    # PAS mesuré, donc il n'y a rien a converger — mesure du 2026-09-01 sur le banc 2001, ou ce
+    # drift apparaissait sans sudo et disparaissait avec.
+    p_warn "runner CI non mesurable (jeton master illisible ou API muette) — la CI peut être sans machine ; relance sous sudo pour conclure"
   elif [[ "$n" -gt 0 ]]; then
     p_ok "$n runner(s) CI enregistré(s) — la CI de cette forge a une machine"
   else
