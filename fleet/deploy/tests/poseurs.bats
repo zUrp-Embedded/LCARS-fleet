@@ -145,3 +145,54 @@ setup() {
   grep -q 'fleet/services/forge-gestures.sh' "$MODS/25-directories.sh"
   grep -qE '^EMBEDDED=\(.*services' "$MODS/62-runtime-helpers.sh"
 }
+
+# ─── C6, LA SUITE : LE RAIL POSE DOIT POUVOIR SE REJOUER ────────────────────────────────────────
+#
+# ⚠ MESURE DU 2026-09-01, BANC 2007. Un apply rejoue depuis `/opt/lcars/fleet/deploy/provision` —
+# LE GESTE NOMINAL DU CONVERGEUR, celui que l en-tete de `62-runtime-helpers` decrit — echouait sur
+# trois modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
+# /opt/lcars/fleet ». Le rail pose ne pouvait pas se rejouer entierement.
+#
+# `services` (C6) avait ete trouve parce qu il produisait ONZE FAUX DRIFTS visibles. Ceux-ci ne se
+# voient qu en REJOUANT un apply depuis la copie — ce qu aucun geste de la suite ne faisait.
+
+@test "C6+ : les arbres de la RACINE sont embarques, pas seulement ceux de fleet/" {
+  local mod="$MODS/62-runtime-helpers.sh"
+  grep -qE '^EMBEDDED_ROOT=\(.*assets' "$mod"
+  grep -qE '^EMBEDDED_ROOT=\(.*catalogues' "$mod"
+  # ⚠ DEUX LISTES, PAS UNE : la copie n a pas la meme forme. `EMBEDDED` va sous `fleet/`,
+  # `EMBEDDED_ROOT` a cote. Les fondre ferait une liste dont chaque entree porte un chemin
+  # implicite different.
+  grep -q 'cp -a "$(repo_root)/fleet/$n"' "$mod"
+  grep -q 'cd "$(repo_root)/$n"' "$mod"
+}
+
+@test "C6+ : ce que les modules LISENT hors de fleet/ est ce qui est embarque" {
+  # Le sens qui ferme la boucle : si un module se met a lire un troisieme arbre de la racine, ce
+  # temoin le dit. C est la moitie qui manquait a C6 — on avait ajoute `services` sans verifier
+  # qu il ne restait rien d autre.
+  local lus; lus="$(grep -rhoE 'repo_root\)/[a-z]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
+    | sed 's|repo_root)/||' | sort -u | grep -v '^fleet$')"
+  local n
+  for n in $lus; do
+    grep -qE "^EMBEDDED_ROOT=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" \
+      || { echo "lu sous repo_root mais PAS embarque : $n"; return 1; }
+  done
+}
+
+@test "C6+ : node_modules est EXCLU — 179 Mo sur 180" {
+  # `assets/` pese 180 Mo sur disque et 904 Ko dans git : tout le reste est l arbre npm de la doc,
+  # un artefact local. Un `cp -a` l aurait recopie sous /opt/lcars a CHAQUE apply.
+  # ⚠ `dist/` RESTE : en livraison binaire c est lui que `44-media` pose, rien ne le batit la.
+  local mod="$MODS/62-runtime-helpers.sh"
+  grep -q 'exclude=node_modules' "$mod"
+  grep -vE '^\s*#' "$mod" | refute_out 'exclude=dist'
+}
+
+@test "C6+ : le CHECK sonde la seconde liste — sinon le correctif est invisible" {
+  # L angle mort double deja rencontre sur `~/.lcars/log` (C2) : corriger l apply sans toucher au
+  # check rend le defaut invisible au lieu de le fermer.
+  local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$MODS/62-runtime-helpers.sh")"
+  grep -q 'EMBEDDED_ROOT' <<<"$bloc"
+  grep -q 'arbre embarqué ABSENT' <<<"$bloc"
+}

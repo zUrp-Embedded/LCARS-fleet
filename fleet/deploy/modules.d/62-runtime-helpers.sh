@@ -82,6 +82,12 @@ deck_static_table() {
 # l'arbre, la sonde echoue derriere un `|| true` et rend une chaine vide — le repertoire de console
 # de cet humain n'etait simplement pas pose, sans un mot.
 EMBEDDED=(deploy etc services)
+# ⚠ LA RACINE, ET C'EST UNE SECONDE LISTE PARCE QUE LA COPIE N'A PAS LA MEME FORME. `EMBEDDED` va
+# sous `fleet/` ; ceux-ci vont a cote. Les fondre ferait une liste dont chaque entree porterait un
+# chemin implicite different — l'inverse de ce qu'une liste sert a dire.
+#   assets      les medias (`44-media`) ET les sources de la doc
+#   catalogues  le catalogue de demonstration (`48-forge-host`)
+EMBEDDED_ROOT=(assets catalogues)
 
 helper_current() { # <nom> — 0 si la copie posée est IDENTIQUE à la source
   cmp -s "$SRC_DIR/$1" "$HELPERS_DIR/$1"
@@ -175,6 +181,19 @@ check() {
   done
   [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && p_ok "provisionnement embarqué posé ($EMBEDDED_FLEET/deploy/provision)"
 
+  # ⚠ LA SECONDE LISTE SE SONDE AUSSI, SINON LE CORRECTIF EST INVISIBLE AU DOCTOR. C'est l'angle
+  # mort double deja rencontre sur `~/.lcars/log` (C2) : corriger l'apply sans toucher au check
+  # rend le defaut invisible au lieu de le fermer. Et celui-ci ne se voit QU'EN rejouant un apply
+  # depuis la copie — donc jamais, si le doctor ne le dit pas.
+  local _r
+  for _r in "${EMBEDDED_ROOT[@]}"; do
+    if [[ -d "$HELPERS_DIR/$_r" ]]; then
+      p_ok "arbre embarqué $HELPERS_DIR/$_r"
+    else
+      p_drift "arbre embarqué ABSENT ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/fleet/deploy/provision échouera : c'est le geste du convergeur"
+    fi
+  done
+
   verdict_check
 }
 
@@ -242,6 +261,41 @@ apply() {
       || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
   done
   p_chg "provisionnement embarqué ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
+
+  # ─── CE QUI VIT A LA RACINE DU DEPOT, ET QUE `EMBEDDED` NE POUVAIT PAS ATTEINDRE ──────────────
+  #
+  # ⚠ TROIS LECTURES SORTENT DE `fleet/`, ET AUCUNE N'ETAIT EMBARQUEE. `44-media` lit
+  # `$(repo_root)/assets` (les medias, ET les sources de la doc) ; `48-forge-host` lit
+  # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus fait `cp -a "$(repo_root)/fleet/$n"` :
+  # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
+  #
+  # MESURE DU 2026-09-01, banc 2007 : un apply rejoue depuis `/opt/lcars/fleet/deploy/provision` —
+  # LE GESTE NOMINAL DU CONVERGEUR, celui que l'en-tete de ce module decrit — echouait sur trois
+  # modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
+  # /opt/lcars/fleet ». Le rail pose ne pouvait pas se rejouer entierement.
+  #
+  # C'est le meme defaut que `services` (C6), sur deux repertoires de plus. `services` avait ete
+  # trouve parce qu'il produisait onze faux drifts VISIBLES ; ceux-ci ne se voient qu'en rejouant un
+  # apply depuis la copie, ce qu'aucun geste de la suite ne faisait.
+  #
+  # ⚠ `node_modules` EST EXCLU, ET C'EST 179 Mo SUR 180. Mesure : `assets/` pese 180 Mo sur disque
+  # et 904 Ko dans git — tout le reste est l'arbre npm de la doc, un artefact local que `cp -a`
+  # aurait recopie sous `/opt/lcars` a chaque apply. `dist/` (476 Ko) RESTE : en livraison binaire
+  # c'est lui que `44-media` pose, puisque rien ne le batit sur la cible.
+  for n in "${EMBEDDED_ROOT[@]}"; do
+    [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
+    rm -rf "${HELPERS_DIR:?}/$n.new"
+    ensure_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    # `tar` plutot que `cp -a` : il EXCLUT a la source, donc on ne copie jamais les 179 Mo qu'il
+    # faudrait ensuite retirer. Meme outil que celui qui pose node, deja un pre-requis du rail.
+    ( cd "$(repo_root)/$n" && tar -cf - --exclude=node_modules . ) \
+      | ( cd "$HELPERS_DIR/$n.new" && tar -xf - ) \
+      || { p_fail "copie ratée: $n"; verdict_apply; }
+    rm -rf "${HELPERS_DIR:?}/$n"
+    mv "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
+      || { p_fail "bascule ratée: $n"; verdict_apply; }
+  done
+  p_chg "arbres de la racine embarqués ($HELPERS_DIR/{${EMBEDDED_ROOT[*]}}, sans node_modules)"
 
   # LE TAMPON S'ÉCRIT APRÈS LA POSE, JAMAIS AVANT : il atteste ce qui EST là. Posé d'avance, il
   # certifierait une copie qu'un échec deux lignes plus bas aurait laissée à moitié faite.
