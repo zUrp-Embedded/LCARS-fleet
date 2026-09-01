@@ -194,6 +194,105 @@ module_sh() {
   grep -qE '^\s*\( cd .* \)$' "$lib"
 }
 
+# ─── ensure_group / ensure_member : LEUR MOITIE ECRIVANTE N ETAIT JOUEE NULLE PART ──────────────
+#
+# ⚠ LES DEUX VERBES S EXECUTAIENT DANS LE CORPUS, MAIS JAMAIS LA BRANCHE QUI ECRIT. Le decor de
+# `service_accounts.bats` porte des groupes qui EXISTENT deja, donc les deux fonctions y prennent
+# toujours leur sortie « rien a faire » : le `groupadd` et le `usermod -aG` n avaient aucune
+# couverture. Et leur seul appelant du rail natif, `modules.d/20-groups.sh`, n est joue par aucun
+# des .bats du corpus — ses deux mentions y sont des COMMENTAIRES.
+#
+# CE QUE CA PORTE : `20-groups` est le seul poseur de `lcars-console` sur le rail natif (`groupadd`
+# ne parait ailleurs que dans le Dockerfile), et `25-directories` batit ensuite
+# `/run/lcars/console/<humain>` en 2710 `<humain>:<ce groupe>`. Une regression silencieuse s y
+# solde par une landing qui meurt au boot sur « setpriv: unknown group ».
+
+_bin_groupes() { # _bin_groupes — doublures de getent/groupadd/id/usermod, pilotees par des marqueurs
+  local b="$BATS_TEST_TMPDIR/bin-groupes"; mkdir -p "$b"
+  cat > "$b/getent" <<'STUB'
+#!/usr/bin/env bash
+# `getent group <nom>` : present seulement si le marqueur existe
+[[ -e "$BATS_TEST_TMPDIR/groupe-$2" ]] || exit 2
+printf '%s:x:4242:\n' "$2"
+STUB
+  cat > "$b/groupadd" <<'STUB'
+#!/usr/bin/env bash
+echo "GROUPADD:$*" >> "$BATS_TEST_TMPDIR/trace"
+: > "$BATS_TEST_TMPDIR/groupe-${*: -1}"
+STUB
+  cat > "$b/id" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -nG) cat "$BATS_TEST_TMPDIR/membres" 2>/dev/null || echo "rien" ;;
+  *)   printf 'uid=4242\n' ;;
+esac
+STUB
+  cat > "$b/usermod" <<'STUB'
+#!/usr/bin/env bash
+echo "USERMOD:$*" >> "$BATS_TEST_TMPDIR/trace"
+# `-aG <grp> <user>` : le groupe devient effectif
+echo "$2" >> "$BATS_TEST_TMPDIR/membres"
+STUB
+  chmod 0755 "$b"/*
+  export BIN_GROUPES="$b"
+
+}
+
+@test "ensure_group : la branche qui CREE — groupadd joue, le compteur bouge, le journal note" {
+  _bin_groupes
+  module_sh '
+    PATH="$BIN_GROUPES:$PATH"
+    export PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/journal"
+    ensure_group groupe-decor 4242
+    [ "$PROV_CHANGED" -eq 1 ]
+    grep -q "GROUPADD:-g 4242 groupe-decor" "$BATS_TEST_TMPDIR/trace"
+    grep -q "posed_group groupe-decor" "$PROV_JOURNAL_ACC"
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "ensure_group : un groupe DEJA la ne se recree pas, et le gid divergent est un DRIFT" {
+  _bin_groupes
+  module_sh '
+    PATH="$BIN_GROUPES:$PATH"
+    : > "$BATS_TEST_TMPDIR/groupe-groupe-decor"
+    ensure_group groupe-decor 4242
+    [ "$PROV_CHANGED" -eq 0 ]
+    [ ! -e "$BATS_TEST_TMPDIR/trace" ]
+    ensure_group groupe-decor 9999
+    [ "$PROV_DRIFT" -ge 1 ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"une machine ne se renumerote pas"* ]]
+}
+
+@test "ensure_member : la branche qui ECRIT — usermod joue, et l adhesion est RE-SONDEE apres" {
+  # La re-sonde n est pas decorative : `usermod` peut rendre 0 sans que l adhesion soit effective
+  # (nsswitch, base distante). Sans elle, le rail annoncerait une appartenance qu il n a pas.
+  _bin_groupes
+  module_sh '
+    PATH="$BIN_GROUPES:$PATH"
+    ensure_member humain-decor groupe-decor
+    [ "$PROV_CHANGED" -eq 1 ]
+    grep -q "USERMOD:-aG groupe-decor humain-decor" "$BATS_TEST_TMPDIR/trace"
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "ensure_member : un usermod qui MENT est attrape par la re-sonde" {
+  _bin_groupes
+  # celui-ci rend 0 sans rien changer — exactement le cas que la re-sonde existe pour voir
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN_GROUPES/usermod"; chmod 0755 "$BIN_GROUPES/usermod"
+  module_sh '
+    PATH="$BIN_GROUPES:$PATH"
+    rc=0; ensure_member humain-decor groupe-decor || rc=$?
+    [ "$rc" -eq 1 ]
+    [ "$PROV_FAILED" -ge 1 ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"toujours hors de"* ]]
+}
+
 # ─── prov_release_bin — UN MODULE LISAIT LA RELEASE DOUZE RANGS AVANT SON POSEUR ────────────────
 #
 # ⚠ `48-forge-host` derivait le roster du catalogue par `--release "$PROV_PREFIX/rel/…"`, chemin

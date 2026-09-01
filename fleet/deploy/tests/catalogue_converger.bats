@@ -414,3 +414,39 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet_engineer"* ]]
 }
+
+# ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE — ET IL DISAIT TOUJOURS WARN ───
+#
+# ⚠ AUCUN TEMOIN NE COUVRAIT CETTE BRANCHE : le setup exporte `PROV_FORGE_URL` dans TOUS les tests.
+# La cause du trou est une inversion de rang non declarable — l adresse se derive de
+# `$PROV_TOKENS_DIR/forge.url`, dont le seul poseur est `48-forge-host`, TROIS RANGS PLUS LOIN, et
+# `provision:327` refuse un `AFTER` qui ne precede pas.
+#
+# Le module rendait `p_warn` dans les deux cas. Or `p_warn` n incremente ni PROV_DRIFT ni
+# PROV_FAILED : sur une re-provision dont les jetons ont disparu alors que le volume de la forge a
+# survecu, la passe etait INERTE et le bilan restait vert.
+
+@test "FORGE INCONNUE : sans catalogue installe, c est un WARN — l ordre des rangs est normal" {
+  PROV_FORGE_URL="" run bash "$MOD" check
+  [ "$status" -eq 0 ] || { echo "un WARN ne doit pas colorer le verdict : $output"; return 1; }
+  [[ "$output" == *"AUCUN catalogue installe"* ]]
+}
+
+@test "FORGE INCONNUE : avec du materiel LOCAL, c est un DRIFT — un etat-cible cesse d etre tenu" {
+  mkdir -p "$PROV_CATALOGUES_DIR/web-demo"
+  PROV_FORGE_URL="" run bash "$MOD" check
+  # ⚠ 1, PAS 2 : les deux verbes n ont pas le meme bareme. `verdict_check` rend 1 sur drift et 2 sur
+  # echec ; `verdict_apply` l inverse — un apply qui n a pas converge est un ECHEC, un check qui
+  # constate un ecart ne l est pas. Les deux temoins voisins le montrent en s opposant.
+  [ "$status" -eq 1 ] || { echo "le drift n a pas colore le verdict (rc=$status) : $output"; return 1; }
+  [[ "$output" == *"1 catalogue(s) sont deja installes"* ]]
+  # et le refus NOMME la sortie : c est un rail, pas un constat
+  [[ "$output" == *"48-forge-host"* ]]
+}
+
+@test "FORGE INCONNUE : l apply distingue les deux cas comme le check — meme fonction" {
+  mkdir -p "$PROV_CATALOGUES_DIR/web-demo"
+  PROV_FORGE_URL="" run bash "$MOD" apply
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"deja installes"* ]]
+}

@@ -149,10 +149,37 @@ say_leftover() {
   p_warn "$LEGACY_CATALOGUES_DIR subsiste — le cache des catalogues a déménagé sous $PROV_CATALOGUES_DIR. Rien sous /home n'est retiré par LCARS : à supprimer à la main si vous n'en voulez plus (« rm -rf $LEGACY_CATALOGUES_DIR »), le matériel se reclone depuis la forge"
 }
 
+# ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE DEJA ───────────────────────────
+#
+# ⚠ LA CAUSE EST UNE INVERSION DE RANG QUI NE PEUT PAS SE DECLARER. `PROV_FORGE_URL` se derive de
+# `FORGE_BASE_URL` ou de `$PROV_TOKENS_DIR/forge.url` (`lib/provision-lib.sh:79`), et ce fichier n'a
+# QU'UN poseur : `48-forge-host.sh:312`, TROIS RANGS PLUS LOIN. `provision:315` ordonne les modules
+# par leur rang et `provision:327` refuse un `AFTER` qui ne precede pas — la dependance est REELLE
+# et non declarable. La nommer ici est tout ce qu'on peut en faire.
+#
+# ⚠ ET ELLE NE MORD PAS OU L'ON CROIT. Sur une PREMIERE passe, a l'heure du rang 45, aucun catalogue
+# n'est installe sur une forge qui n'existe pas encore : il n'y a rien a cloner. C'est une absence de
+# travail, pas du travail tu — et la fleet tourne alors sur le catalogue embarque du release.
+#
+# Elle mord sur une RE-PROVISION dont les jetons ont disparu alors que le volume de la forge a
+# survecu : il y a du materiel LOCAL, et plus d'autorite a qui le comparer. Le premier cas est un
+# WARN (on ne sait pas, et ca ne coute rien) ; le second un DRIFT (un etat-cible cesse d'etre tenu,
+# et `p_warn` n'incremente ni PROV_DRIFT ni PROV_FAILED — le bilan resterait vert).
+forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, selon ce qui est deja la
+  local n=0
+  [[ -d "$PROV_CATALOGUES_DIR" ]] \
+    && n="$(find "$PROV_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  if [[ "$n" -gt 0 ]]; then
+    p_drift "adresse de forge inconnue alors que $n catalogue(s) sont deja installes ici ($PROV_CATALOGUES_DIR) — leur autorite est injoignable, rien ne peut etre compare ni converge. Pose FORGE_BASE_URL, ou rejoue « 48-forge-host » qui ecrit $PROV_TOKENS_DIR/forge.url"
+  else
+    p_warn "adresse de forge inconnue, et AUCUN catalogue installe ici — rien a comparer. Sur une premiere passe c'est l'ordre normal : « 48-forge-host » ecrit cette adresse trois rangs plus loin"
+  fi
+}
+
 check() {
   say_leftover
   if [[ -z "$PROV_FORGE_URL" ]]; then
-    p_warn "FORGE_BASE_URL non posé — le materiel des catalogues ne peut pas etre compare a son autorite"
+    forge_inconnue check
     verdict_check
   fi
 
@@ -199,7 +226,7 @@ apply() {
   # Dit AUSSI a l'apply : c'est le geste que l'operateur lance apres une mise a jour, donc celui ou
   # le demenagement vient d'avoir lieu. Le taire ici le reserverait a qui pense a jouer un doctor.
   say_leftover
-  [[ -n "$PROV_FORGE_URL" ]] || { p_warn "FORGE_BASE_URL non posé — rien a converger"; verdict_apply; }
+  [[ -n "$PROV_FORGE_URL" ]] || { forge_inconnue apply; verdict_apply; }
 
   local signed rc=0
   signed="$(forge_installed)" || rc=$?

@@ -379,7 +379,18 @@ code_of() { sed 's/#.*//' "$1"; }
   need services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
   # Les DEUX createurs, un par rail, et ils doivent s'accorder sur le gid : un groupe de meme nom
   # et de gid different sur les deux rails, c'est un `chown` qui reussit et une traversee qui non.
+  #
+  # ⚠ ET LE MUR N'EN GARDAIT QU'UN. Ce commentaire annonce « les DEUX createurs » depuis le premier
+  # jour, et la seule ligne posee etait celle de l'image : le createur du rail NATIF,
+  # `modules.d/20-groups.sh`, n'a jamais ete garde. Rien n'aurait dit qu'il cesse de creer
+  # `lcars-console` — et sur ce rail le groupe n'a AUCUN autre poseur (`groupadd` ne parait que
+  # dans le Dockerfile et dans `ensure_group`). La landing meurt alors au boot sur
+  # « setpriv: unknown group », sur une machine dont le provisionnement s'est declare vert.
+  #
+  # Le rail natif ne cite pas le gid : il le lit dans la table par `prov_manifest_gid`, ce qui EST
+  # la bonne forme — l'accord sur le gid y est structurel, pas recopie. On garde donc son GESTE.
   need deploy/docker/Dockerfile     "groupadd -g $gid $nom([[:space:]]|\\\\|$)"  "la creation dans l'image (gid $gid)"
+  need deploy/modules.d/20-groups.sh "ensure_group \"\\\$PROV_CONSOLE_GROUP\""    "la creation sur le rail natif"
   need deploy/system.manifest       "^runtime[[:space:]]+/run/lcars/console/<human>[[:space:]]+2710[[:space:]]+<human>:$nom" "la possession du repertoire de socket"
 
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
