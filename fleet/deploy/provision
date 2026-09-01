@@ -472,12 +472,24 @@ uninstall_run() {
   fi
 
   # ─── LE PLAN ──────────────────────────────────────────────────────────────────────────────────
-  local -a files=() dirs=() groups=() humans=() accounts=() refuses_home=()
+  local -a files=() dirs=() groups=() humans=() accounts=() refuses_home=() refuses_home_j=()
   applies_here() { # applies_here <colonne substrat> -> 0 si cet objet concerne CE substrat
     local col="$1"
     [[ "$col" == "any" ]] && return 0
     [[ ",${col//+/,}," == *",$SUBSTRATE,"* ]]
   }
+  # ⚠ UN SEUL PREDICAT, PARCE QUE LE DEFAUT ETAIT D'EN AVOIR UN SEUL SITE. La boucle de la TABLE
+  # portait cette garde ; celle du JOURNAL, non — et le journal alimente le MEME plan executable.
+  # Deux modules `NEEDS: root` posent sous /home par des primitives qui JOURNALISENT (`30-wsl` :
+  # `$home/.config` et un lien ; `45-sudoers-toolchain` : `$home/.claude/skills/system-issues`),
+  # donc ces chemins entraient dans le `rm -rf` pendant que le bilan imprimait, deux ecrans plus
+  # haut, « JAMAIS retires, par aucun drapeau ». Mesure du 2026-09-01 : plan vierge = 0 fichier /
+  # 2 dirs ; les trois memes entrees ajoutees au journal = 1 fichier / 4 dirs.
+  #
+  # Une garde qui vit a UN endroit du plan n'est pas une garde : elle est une propriete du chemin
+  # qu'on a relu. Un predicat nomme, lui, se cherche — et son absence dans une quatrieme boucle se
+  # voit.
+  sous_home() { [[ "$1" == /home || "$1" == /home/* ]]; }
 
   expand_version() { # expand_version <chemin pouvant porter <version>> -> 0..n chemins reels
     local pat="$1"
@@ -506,7 +518,7 @@ uninstall_run() {
       # qu'un objet operator-facing semblait y avoir sa place — retomberait sinon dans un `rm -rf`
       # sans qu'aucun relecteur ait a s'en apercevoir. Un perimetre qui depend de la vigilance de
       # celui qui edite la table n'est pas un perimetre.
-      if [[ "$resolved" == /home || "$resolved" == /home/* ]]; then
+      if sous_home "$resolved"; then
         [[ "$cls" == "human" ]] && humans+=("$resolved")   # inventaire seul : on le DIT, on n'y touche pas
         [[ "$cls" == "human" ]] || refuses_home+=("$cls $resolved")
         continue
@@ -530,6 +542,8 @@ uninstall_run() {
     while read -r _o; do
       [[ -n "$_o" ]] || continue
       preserved "$_o" && continue
+      # `preserved` N'EST PAS UN PERIMETRE : il protege ce qu'on a pense a y ecrire. Voir `sous_home`.
+      sous_home "$_o" && { refuses_home_j+=("$_o"); continue; }
       _known=0
       for _k in ${files[@]+"${files[@]}"} ${dirs[@]+"${dirs[@]}"}; do
         [[ "$_o" == "$_k" || "$_o" == "$_k"/* ]] && { _known=1; break; }
@@ -541,6 +555,7 @@ uninstall_run() {
     while read -r _o; do
       [[ -n "$_o" ]] || continue
       preserved "$_o" && continue
+      sous_home "$_o" && { refuses_home_j+=("$_o"); continue; }
       _known=0
       for _k in ${dirs[@]+"${dirs[@]}"}; do
         [[ "$_o" == "$_k" || "$_o" == "$_k"/* ]] && { _known=1; break; }
@@ -604,6 +619,15 @@ uninstall_run() {
   if [[ "${#refuses_home[@]}" -gt 0 ]]; then
     printf '  %-10s %s\n' "écartés" "${_PA}${#refuses_home[@]} ligne(s) de la table visent /home et sont IGNORÉES :${_PN}"
     printf '             %s\n' "${refuses_home[@]}"
+  fi
+  # ⚠ CEUX-CI SE NOMMENT AUSSI, ET LEUR CAUSE N'EST PAS LA MEME. Une ligne de TABLE qui vise /home
+  # s'est trompee de perimetre — c'est une faute d'edition. Un objet de JOURNAL sous /home a ete
+  # POSE la par un module, legitimement (`30-wsl`, `45-sudoers-toolchain`) : il n'y a rien a
+  # corriger en amont, et tout a dire ici, parce que ce sont exactement les objets que la
+  # desinstallation LAISSE derriere elle sans que la table en parle.
+  if [[ "${#refuses_home_j[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "écartés" "${_PC}${#refuses_home_j[@]} objet(s) du JOURNAL sous /home — POSÉS par cette install, JAMAIS retirés :${_PN}"
+    printf '             %s\n' "${refuses_home_j[@]}"
   fi
   [[ "${#jokers[@]}" -eq 0 ]] \
     || printf '  %-10s %s\n' "résolus" "${jokers[*]}"

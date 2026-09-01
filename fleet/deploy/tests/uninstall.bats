@@ -417,6 +417,57 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   refute_out 'essai-journal' <<<"$output"
 }
 
+# ─── LA GARDE /home MANQUAIT DU COTE JOURNAL, ET LE JOURNAL ALIMENTE LE MEME PLAN ──────────────
+#
+# ⚠ MESURE DU 2026-09-01. La boucle de la TABLE portait la garde ; celle du JOURNAL n'avait que
+# `preserved` pour filtre — et `preserved` ne connait que les racines qu'on a pense a ecrire. Or
+# DEUX modules `NEEDS: root` posent sous /home par des primitives qui JOURNALISENT : `30-wsl`
+# (`$home/.config`, plus un lien) et `45-sudoers-toolchain` (`$home/.claude/skills/system-issues`).
+# Plan vierge = 0 fichier / 2 dirs ; les trois memes entrees au journal = 1 fichier / 4 dirs. Les
+# chemins entraient dans le `rm -rf` pendant que le bilan imprimait « JAMAIS retires, par aucun
+# drapeau » deux ecrans plus haut.
+#
+# ⚠ ON COMPTE, ON NE CHERCHE PAS LE NOM — meme piege que les deux temoins du dessus. Le plan NOMME
+# ces objets sous « hors table » : chercher leur nom dans la sortie resterait vert alors meme
+# qu'ils seraient planifies.
+@test "JOURNAL : ce qui est pose sous /home est ECARTE du plan executable, et le plan le DIT" {
+  local f_avant f_apres d_avant d_apres
+  plan
+  f_avant="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  d_avant="$(sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output")"
+  [ -n "$f_avant" ] && [ -n "$d_avant" ] \
+    || { echo "extraction ratee des compteurs du plan"; echo "$output"; return 1; }
+
+  printf 'posed_dir /home/victime/.config\n'                      >> "$LCARS_JOURNAL_FILE"
+  printf 'posed_dir /home/victime/.claude/skills/system-issues\n' >> "$LCARS_JOURNAL_FILE"
+  printf 'posed_link /home/victime/.config/lcars-decor\n'         >> "$LCARS_JOURNAL_FILE"
+
+  plan
+  f_apres="$(sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output")"
+  d_apres="$(sed -n 's/^  dirs *\([0-9]*\) répertoire.*/\1/p' <<<"$output")"
+  [ "$f_apres" -eq "$f_avant" ] \
+    || { echo "un objet /home du journal est entre dans les FICHIERS ($f_avant -> $f_apres)"; echo "$output"; return 1; }
+  [ "$d_apres" -eq "$d_avant" ] \
+    || { echo "un objet /home du journal est entre dans les DIRS ($d_avant -> $d_apres)"; echo "$output"; return 1; }
+
+  # Ecarte SANS LE DIRE serait un demi-geste : ce sont exactement les objets que la desinstallation
+  # laisse derriere elle et dont la table ne parle pas.
+  [[ "$output" == *"du JOURNAL sous /home"* ]]
+  [[ "$output" == *"/home/victime/.claude/skills/system-issues"* ]]
+}
+
+@test "JOURNAL : la garde /home est un predicat NOMME, partage par les trois boucles du plan" {
+  # La forme, pas le comportement — et c'est le point : le defaut n'etait pas une garde fausse,
+  # c'etait une garde presente a UN seul des trois endroits qui alimentent le meme plan. Un predicat
+  # nomme se cherche ; son absence dans une quatrieme boucle se voit.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  grep -q 'sous_home() {' <<<"$body"
+  [ "$(grep -c 'sous_home ' <<<"$body")" -ge 3 ] \
+    || { echo "moins de trois sites appellent sous_home : une boucle du plan n'est pas gardee"; return 1; }
+  # et la forme inline ne revient pas par la bande
+  refute grep -qE '== /home/\*' <<<"$(sed '/sous_home() {/d' <<<"$body")"
+}
+
 @test "JOURNAL : un objet DEJA couvert par la table n'est pas planifie DEUX fois" {
   # `/opt/lcars/runtime` est le prefixe declare : ce qui vit dessous part avec lui. Le re-lister
   # ferait un compteur qui ment et un operateur qui relit deux fois la meme ligne.
