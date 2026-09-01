@@ -447,7 +447,13 @@ COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # le bashrc etendu (ll/la/l, couleurs, completion, lesspipe) qu'une base ubuntu minimale n'a PAS, plus le
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
-COPY fleet/services/skel.bashrc      /etc/skel/.bashrc
+#
+# ⚠ `--chmod` EST OBLIGATOIRE, ET SON ABSENCE ETAIT UN ECART POSTE/BOITE. Un `COPY` nu PRESERVE le
+# mode du fichier dans le contexte de build : `skel.bashrc` est `0664` dans le depot, donc l'image
+# le portait en 664 quand la table declare `0644` et que `62-runtime-helpers` le pose bien en 0644
+# sur un poste. Le meme objet, deux modes, selon le rail — trouve par le releve croise du rang D
+# (bancs 2001 et 2002, 2026-09-01), et invisible autrement : rien ne compare les deux substrats.
+COPY --chmod=0644 fleet/services/skel.bashrc /etc/skel/.bashrc
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
 # `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la

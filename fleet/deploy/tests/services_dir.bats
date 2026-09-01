@@ -33,8 +33,13 @@ helpers() {
 
 # Ce que le Dockerfile pose a plat dans /opt/lcars depuis `services/`, plus le convergeur qui va
 # ailleurs (`/usr/local/bin`) — il est pose, donc il compte.
+# ⚠ `COPY` PORTE DES OPTIONS, ET LE MOTIF LES IGNORAIT. `COPY --chmod=0644 fleet/services/x /y` ne
+# matchait pas « ^COPY fleet/services/ » : le fichier etait declare « pose NULLE PART » alors qu'il
+# etait copie juste devant. Le premier `--chmod` du Dockerfile (2026-09-01, ecart de mode
+# poste/boite) a fait rougir ce temoin — et un mur qui rougit sur la CORRECTION du defaut qu'il
+# existe pour attraper est un mur qui apprend a etre contourne.
 copied() {
-  sed -n 's|^COPY fleet/services/\([^ ]*\) .*|\1|p' "$DOCKERFILE"
+  sed -n 's|^COPY \(--[^ ]* \)*fleet/services/\([^ ]*\) .*|\2|p' "$DOCKERFILE"
 }
 
 @test "GARDE D'INSTRUMENT : les trois listes sont NON VIDES" {

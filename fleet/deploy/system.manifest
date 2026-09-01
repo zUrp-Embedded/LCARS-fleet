@@ -171,8 +171,17 @@ runtime   /run/lcars/authority                         0750  lcars-authority:fle
 # ⚠ L'ACL D'UNE SOCKET NE PORTE AUCUNE AUTORISATION. Elle borne qui peut FRAPPER ; qui a le droit se
 # decide par `SO_PEERCRED` puis par une question a la forge. Confondre les deux serait refaire le
 # defaut que ce chantier retire — une decision prise en lisant une projection de groupe.
-runtime   /run/lcars/authority/catalogue.sock          0660  lcars-authority:fleet  any
-runtime   /run/lcars/authority/roles.sock              0660  lcars-authority:fleet  any
+# ⚠ `cond`, ET LE RELEVE CROISE DU RANG D EN A DONNE LA PREUVE. Ces deux sockets n'existent que si
+# le service d'autorite TOURNE, et il refuse de demarrer sans `forge-master.token` — ce qu'il dit
+# lui-meme : « ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans
+# elle ». Une boite montee sans `box config` ne les a donc pas, et c'est un de ses deux etats
+# NORMAUX, pas une derive.
+#
+# Mesure du 2026-09-01, bancs 2001 (poste) et 2002 (boite) : elles etaient presentes d'un cote,
+# absentes de l'autre, et la table les declarait sans condition — donc l'un des deux substrats
+# mentait forcement. Sans le trait, il n'y avait aucune facon d'ecrire ce qui est vrai.
+runtime:cond /run/lcars/authority/catalogue.sock       0660  lcars-authority:fleet  any
+runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fleet  any
 # ─── LA PORTE DU SERVICE PRIVILEGIE ─────────────────────────────────────────────────────────────
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
