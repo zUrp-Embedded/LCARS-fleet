@@ -111,7 +111,16 @@ apply() {
   #    sous-shell du pipe perdait PROV_FAILED → wsl.conf non posé rapporté vert).
   local wsl_tmp
   wsl_tmp="$(mktemp "${TMPDIR:-/tmp}/prov-wslconf.XXXXXX")" || { p_fail "tmp wsl.conf impossible"; verdict_apply; }
-  desired_wsl_conf > "$wsl_tmp"
+  # ⚠ LA SECONDE COUCHE SE LIT AUSSI. `write_atomic` garde desormais le rc de son `cat`, mais elle
+  # ne peut rien dire d'un tampon qu'un AUTRE geste a tronque avant elle : un contenu vide est un
+  # contenu valide de son point de vue. Le rc de la redirection ET la non-vacuite du tampon, parce
+  # que ce fichier-ci est la frontiere de securite de la boite — un `wsl.conf` vide laisse l'interop
+  # Windows OUVERTE, et c'est le seul objet du rail dont l'echec silencieux ROUVRE une porte au lieu
+  # d'en fermer une.
+  desired_wsl_conf > "$wsl_tmp" \
+    || { rm -f "$wsl_tmp"; p_fail "wsl.conf: ecriture du tampon RATEE (disque plein ? quota ?)"; verdict_apply; }
+  [[ -s "$wsl_tmp" ]] \
+    || { rm -f "$wsl_tmp"; p_fail "wsl.conf: tampon VIDE — la frontiere ne sera pas armee, rien n'est pose"; verdict_apply; }
   write_atomic "$WSL_CONF" 0644 root:root < "$wsl_tmp" || { rm -f "$wsl_tmp"; verdict_apply; }
   rm -f "$wsl_tmp"
 

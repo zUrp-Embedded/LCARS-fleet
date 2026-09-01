@@ -502,7 +502,17 @@ write_atomic() {
   dir="$(dirname "$dest")"
   [[ -d "$dir" ]] || { p_fail "write_atomic: dossier absent: $dir"; return 1; }
   tmp="$(mktemp "$dir/.prov.XXXXXX")" || { p_fail "write_atomic: tmp impossible dans $dir"; return 1; }
-  cat > "$tmp"
+  # ⚠ LE RC DE `cat` SE LIT, ET IL NE SE LISAIT PAS — LA LIGNE ETAIT NUE. Les trois gestes suivants
+  # (chmod, chown, mv) REUSSISSENT tous sur un tampon tronque : le fichier bascule, PROV_CHANGED
+  # s'incremente, et `p_chg` imprime POSE. Un echec d'ecriture ressortait donc en SUCCES.
+  #
+  # MESURE DU 2026-09-01 : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
+  # « POSE », rc 0, et un fichier de ZERO octet. Tout ce que le rail pose sous /etc passe par ici —
+  # `seat.uid` vide fait refuser tout `fleet_v2 start` par le GUARD B ; `services.env` vide demarre
+  # les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide laisse l'interop Windows OUVERTE sur
+  # une machine dont le bilan annonce la frontiere armee. Le pire des trois est le dernier : il est
+  # SILENCIEUX et il ment sur une frontiere de securite.
+  cat > "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: ecriture du tampon RATEE (disque plein ? quota ?): $dest"; return 1; }
   if [[ -f "$dest" ]] && cmp -s "$tmp" "$dest"; then
     rm -f "$tmp"
     ensure_mode "$dest" "$mode" "$owner"   # le contenu est bon ; mode/owner convergés à part

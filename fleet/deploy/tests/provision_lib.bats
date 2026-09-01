@@ -208,6 +208,37 @@ module_sh() {
   [ "$status" -eq 0 ]
 }
 
+# ─── L ECRITURE QUI RATE — ET AUCUN TEMOIN DU CORPUS N EN JOUAIT UNE ────────────────────────────
+#
+# ⚠ `cat > "$tmp"` ETAIT NU. Les trois gestes suivants du primitif (chmod, chown, mv) REUSSISSENT
+# tous sur un tampon tronque : le fichier basculait, PROV_CHANGED s incrementait, `p_chg` imprimait
+# POSE, et le verbe rendait 0. Mesure du 2026-09-01 : sous `ulimit -f 0`, un fichier de ZERO octet
+# annonce POSE.
+#
+# Ce que ca coute la ou le rail ecrit : `seat.uid` vide fait refuser tout `fleet_v2 start` par le
+# GUARD B ; `services.env` vide demarre les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide
+# laisse l interop Windows OUVERTE sur une machine dont le bilan annonce la frontiere armee.
+#
+# ⚠ REDIRECTION, JAMAIS UN PIPE — c est le piege B3 de l en-tete de ce fichier. `printf | write_atomic`
+# mettrait le primitif a DROITE d un pipe, donc dans un sous-shell, donc PROV_FAILED mourrait avec
+# lui et ce temoin mesurerait le mauvais shell.
+@test "write_atomic: une ecriture qui RATE ne bascule rien, et ne s annonce pas POSEE" {
+  module_sh '
+    src="$BATS_TEST_TMPDIR/source"; printf "contenu\n" > "$src"
+    f="$BATS_TEST_TMPDIR/plein.conf"
+    # aucun fichier ne peut grandir : `mktemp` cree bien son tampon de 0 octet, le `cat` du
+    # primitif meurt dessus. Le decor le plus proche du disque plein sans monter de FS.
+    ulimit -f 0
+    write_atomic "$f" 0644 < "$src" || true
+    [ ! -e "$f" ]                 # rien na bascule
+    [ "$PROV_CHANGED" -eq 0 ]     # rien nest compte comme pose
+    [ "$PROV_FAILED" -ge 1 ]      # et lechec est COMPTE, pas avale
+  ' 2>/dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ecriture du tampon RATEE"* ]]
+  refute_out "POSE"
+}
+
 @test "write_atomic: missing parent dir fails loud (PROV_FAILED counted)" {
   module_sh '
     write_atomic "$BATS_TEST_TMPDIR/absent-dir/f" 0644 <<< "x" || true
