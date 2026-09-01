@@ -21,17 +21,14 @@
         # You can give explicit globs or simply directories.
         # In the latter case `**/*.{ex,exs}` will be used.
         #
-        included: [
-          "lib/",
-          "src/",
-          "test/",
-          "web/",
-          "apps/*/lib/",
-          "apps/*/src/",
-          "apps/*/test/",
-          "apps/*/web/"
-        ],
-        excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/"]
+        # ⚠ LA LISTE GENEREE SCANNAIT TROIS ARBRES QUI N'EXISTENT PAS ICI. `mix credo.gen.config`
+        # pose `src/`, `web/` et `apps/*/` — les deux premiers viennent d'Erlang et de Phoenix, le
+        # troisieme de l'ere umbrella que la migration Z3 a repliee. Aucun n'existe dans ce depot,
+        # et une config qui nomme des dossiers absents ne dit pas ce qu'elle mesure : elle laisse
+        # croire a une couverture qu'elle n'a pas. Mesure 2026-09-01 : seuls `lib/` et `test/`
+        # portent du .ex/.exs ici.
+        included: ["lib/", "test/"],
+        excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/", ~r"/vendor/"]
       },
       #
       # Load and configure plugins here:

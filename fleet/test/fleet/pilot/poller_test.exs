@@ -581,11 +581,20 @@ defmodule Fleet.Pilot.PollerTest do
   # process's DEATH, which is asynchronous — a register at the next test's first line can race
   # it (seed-dependent flake, measured in the gate). Bounded wait: the only possible owner is
   # the dying predecessor of THIS serial module, never a live peer.
-  defp register_reap_listener!(tries \\ 50) do
+  defp register_reap_listener!(tries \\ 50)
+
+  # L'abandon est une CLAUSE, pas un `raise` dans le `rescue` — credo le demande
+  # (`Warning.RaiseInsideRescue`) et la mesure dit que la trace ne changeait pas : un `raise` dans un
+  # `rescue` porte deja sa propre pile, la bonne ligne dans la bonne fonction. Ce qui est perdu, c'est
+  # la trace de l'`ArgumentError`, qui pointe sur `Process.register/2` — donc ce que le message dit
+  # deja. `reraise` remplacerait ici un message utile par un message inutile ; sortir le `raise` du
+  # bloc satisfait la regle sans rien echanger.
+  defp register_reap_listener!(0), do: raise("reap_test_listener never freed")
+
+  defp register_reap_listener!(tries) do
     Process.register(self(), :reap_test_listener)
   rescue
     ArgumentError ->
-      if tries == 0, do: raise("reap_test_listener never freed")
       Process.sleep(10)
       register_reap_listener!(tries - 1)
   end
