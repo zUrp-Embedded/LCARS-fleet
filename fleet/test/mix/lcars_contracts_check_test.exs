@@ -131,7 +131,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.mkdir_p!(target)
 
       assert_raise RuntimeError, ~r/INSTRUMENT BROKEN/, fn ->
-        Mix.Tasks.Lcars.Contracts.Check.code_match?(
+        Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
           root,
           "lib/fleet/sp_builder.ex",
           ~r/anything/
@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "grep_lines : ABSENT rend toujours [] — l'appelant modelise ce cas lui-meme", %{
       root: root
     } do
-      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      refute Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                root,
                "lib/fleet/nowhere.ex",
                ~r/anything/
@@ -579,7 +579,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      refute Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                tmp,
                "prose_only.ex",
                ~r/:brief_required/,
@@ -607,7 +607,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      assert Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                tmp,
                "real_guard.ex",
                ~r/:brief_required/,
