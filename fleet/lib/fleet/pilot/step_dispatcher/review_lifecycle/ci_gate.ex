@@ -284,9 +284,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   # « ON ATTEND » ET « ON ATTEND DEPUIS TOUJOURS » NE RENDENT PLUS LE MEME MOTIF. Sans date, le
   # calcul d'age vaut 0, donc `0 > 2700` est faux A JAMAIS : le ticket n'escalade pas, ne progresse
-  # pas, et son motif d'attente etait le meme que celui d'une CI qui tourne depuis dix secondes.
+  # pas, et sans motif distinct il porte le meme que celui d'une CI qui tourne depuis dix secondes.
   #
-  # Le motif est desormais distinct, et il porte l'ETIQUETTE DE SA PORTE — `wait/ci`, comme ses deux
+  # Le motif est donc distinct, et il porte l'ETIQUETTE DE SA PORTE — `wait/ci`, comme ses deux
   # voisins `{:ci_head_unreadable, _}` et `{:ci_unreadable, _}` : du cote du ticket c'est le meme
   # fait (il est arrete a la porte CI), et la distinction vit dans la RAISON du skip, ou elle est
   # actionnable. Rien n'est bloque : escalader ici poserait `lcars-awaits-arch` et parquerait le
@@ -346,10 +346,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # ⚠ `age_sec(nil), do: 0` ETAIT LE MECANISME ENTIER DU DEFAUT : sans date, l'age valait 0, donc
-  # `0 > @pending_deadline_sec` etait faux a jamais. La clause `nil` est morte maintenant que
-  # `stalled_or_wait/4` intercepte l'absence de date AVANT le calcul — dialyzer l'a dit, et la
-  # laisser en place remettrait le zero a portee du prochain appelant.
+  # ⚠ PAS DE CLAUSE `age_sec(nil), do: 0` ICI, ET C'EST LE MECANISME ENTIER DU DEFAUT QU'ELLE
+  # OUVRE : sans date, l'age vaut 0, donc `0 > @pending_deadline_sec` est faux a jamais.
+  # `stalled_or_wait/4` intercepte l'absence de date AVANT le calcul, ce qui rend une telle clause
+  # inatteignable — dialyzer le dit —, et la poser quand meme remettrait le zero a portee du
+  # prochain appelant.
   defp age_sec(%DateTime{} = dt), do: DateTime.diff(DateTime.utc_now(), dt, :second)
 
   @doc """

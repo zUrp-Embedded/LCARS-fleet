@@ -274,9 +274,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       :policy ->
         reconverge_policy(pr_number, head, ctx)
 
-      # A REAL git conflict is mechanically recoverable by the PRODUCER (tier 1, live retex
-      # fleet/hello#3 2026-07-19: a full re-delegated chain — 4 agent passes, ~7 min — for what a
-      # local merge-resolve on the SAME PR handles): bounded conflict-rework, budget exhausted →
+      # A REAL git conflict is mechanically recoverable by the PRODUCER (tier 1 — measured live, a
+      # full re-delegated chain costs 4 agent passes and ~7 min for what a local merge-resolve on
+      # the SAME PR handles): bounded conflict-rework, budget exhausted →
       # honest escalation (tier 3). `:unknown` stays a straight escalation (we don't guess).
       :conflict ->
         conflict_rework(pr_number, head, reason, ctx)
@@ -344,9 +344,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   # THE ENGINE'S REASONING REACHES A READER. `Fleet.Conflict` names the DecisionTrace its durable
-  # value — "the REFUSAL is documented as much as the acceptance" — and it was produced per hunk,
-  # carried by every Report, and dropped here: this router read `totals` and nothing else. The engine
-  # wrote a machine's worth of reasoning and published a count.
+  # value — "the REFUSAL is documented as much as the acceptance" — and it is produced per hunk and
+  # carried by every Report. Dropped here, with this router reading `totals` and nothing else, the
+  # engine writes a machine's worth of reasoning and publishes a count.
   #
   # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by the runtime
   # (`system_starfleet`, ForgeIdentity's single authority — A2). The two are different facts and both
@@ -420,13 +420,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   @doc false
   # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
   #
-  # `:chief`, NOT `:escalate` (2026-08-05). An all-semantic conflict used to go STRAIGHT to the arch
-  # — "rounds skipped" — jumping tiers 1 AND 2, the PRODUCER and the CHIEF, to immobilize a human.
-  # Skipping the producer is right and is the whole point of the deterministic pre-filter: the
+  # `:chief`, NOT `:escalate`. Sending an all-semantic conflict STRAIGHT to the arch — "rounds
+  # skipped" — jumps tiers 1 AND 2, the PRODUCER and the CHIEF, to immobilize a human. Skipping the
+  # producer is right and is the whole point of the deterministic pre-filter: the
   # engine has just proven there is nothing shallow to fix, so a producer round would burn a full
   # run to rediscover it.
   #
-  # Skipping the CHIEF was not. Composing two intentions that both passed their jury, on a branch
+  # Skipping the CHIEF is not. Composing two intentions that both passed their jury, on a branch
   # the outsider did not write, IS the chief's case — it is what the exception pass exists for. The
   # ladder is tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch, and tier 0 may skip the
   # PRODUCER on evidence; it has none about the CHIEF. The atom is renamed with the routing so the name cannot outlive the
@@ -501,10 +501,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
     name = Fleet.Layout.project_name(ctx.repo)
 
-    # ⚠ ON DELEGUE A L'AUTORITE DES FACES PLUTOT QUE DE LES ENUMERER ICI. Une enumeration ecrite a la
-    # main en a deja oublie une : la PR basee sur cette face-la tombait sur un `case` sans clause —
-    # CaseClauseError, sur le chemin de remediation d'un conflit. L'intention etait juste, l'
-    # inventaire incomplet, et c'est exactement ce qu'une liste tenue a la main coute.
+    # ⚠ ON DELEGUE A L'AUTORITE DES FACES PLUTOT QUE DE LES ENUMERER ICI. Une enumeration ecrite a
+    # la main en oublie une : la PR basee sur cette face-la tombe sur un `case` sans clause —
+    # CaseClauseError, sur le chemin de remediation d'un conflit. L'intention est juste,
+    # l'inventaire incomplet, et c'est exactement ce qu'une liste tenue a la main coute.
     #
     # Le `nil` reste une decision ecrite : ce n'est PAS une face, c'est une PR empilee sur une
     # branche de travail, resolue dans le worktree de code — la seule reponse disponible, la base ne
@@ -526,12 +526,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Producer conflict-rework budget exhausted → tier-2: give the OUTSIDER a single inference pass
   # before immobilizing a human (tier-3). The gate lives INSIDE `exception_stage` (its own flag,
-  # A1) — this call site no longer decides anything.
+  # A1) — this call site decides nothing.
   #
-  # A1 — THIS READ THE GITWAND SWITCH, AND THAT WAS AN OWNERSHIP BUG: `pilot_conflict_diagnosis?`
-  # is the ADMIN's kill-switch for an engine of external origin (tier 0), while the chief pass is
-  # a rung of the FLEET's own escalation ladder. One switch, two owners — the admin's GitWand
-  # choice silently removed a rung that has nothing to do with GitWand (the pass consumes neither
+  # A1 — ET SURTOUT PAS LE COMMUTATEUR GITWAND, qui serait un defaut de propriete :
+  # `pilot_conflict_diagnosis?` est le coupe-circuit de l'ADMIN pour un moteur d'origine externe
+  # (tier 0), tandis que la passe du chief est un barreau de l'echelle d'escalade de la FLOTTE. Un
+  # commutateur, deux proprietaires — le choix GitWand de l'admin retirerait en silence un barreau
+  # qui n'a rien a voir avec GitWand (la passe ne consomme ni
   # probe nor applier: it counts forge markers and dispatches a pod).
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     exception_stage(pr_number, head, reason, ctx, producer_rounds)
@@ -569,11 +570,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         # card) or when the head is not a fleet branch. That skip is already LOUD — an unresolvable
         # role goes on the incident rail and its recurrence opens a sysadmin issue — but loud is not
         # the same as handled: the conflict itself would then sit on the PR with nobody left to look
-        # at it, because the tier that was supposed to try LAST could not run at all.
+        # at it, because the tier meant to try LAST could not run at all.
         #
-        # Pre-existing on the producer-exhausted path, and tier-0 would have extended it to the
-        # all-semantic one. A rung that cannot be climbed hands over to the next, it does not end
-        # the ladder.
+        # A rung that cannot be climbed hands over to the next, it does not end the ladder.
         case dispatch_exception_rework(pr_number, head, ctx) do
           {:skipped, why} ->
             Logger.warning(
@@ -612,11 +611,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited it to guess at
   # an intention it does not hold. Same mechanics, addressed to who is actually there.
   #
-  # MARKER RENAMED `[conflict-gatekeeper:pr-N` → `[conflict-chief:pr-N`. It is FORGE-VISIBLE and
-  # load-bearing (`count_comments_marked` reads it to bound the pass to one), so a rename is a
-  # migration: a PR already carrying the old marker would count 0 and get a SECOND pass. Safe here
-  # because this tier has never fired in production (user, 2026-08-04) — stated as the reason, not
-  # measured by me. Had it fired, the correct move was to count both prefixes for one cycle.
+  # ⚠ CE MARQUEUR EST FORGE-VISIBLE ET PORTANT (`count_comments_marked` le lit pour borner la passe
+  # a une), donc le RENOMMER est une migration : une PR portant deja l'ancien compterait 0 et
+  # obtiendrait une SECONDE passe. Le renommage `[conflict-gatekeeper:pr-N` -> `[conflict-chief:pr-N`
+  # a ete fait sans migration parce que ce tier n'a jamais tire en production (⚖ user) — enonce
+  # comme la raison, pas mesure ici. Le geste sur un tier qui tire : compter les deux prefixes
+  # pendant un cycle.
   defp dispatch_exception_rework(pr_number, head, %Ctx{} = ctx) do
     signature = "[conflict-chief:pr-#{pr_number}:round-1]"
 
@@ -670,7 +670,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     )
   end
 
-  # Tier 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
+  # Tier 1 of the conflict model (⚖ user): the producer resolves ON ITS PR — it has
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
