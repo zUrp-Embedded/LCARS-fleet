@@ -9,17 +9,17 @@ defmodule Fleet.Pilot.MergeAndPromote do
     1.26.1, it is the API's shape, not this client's.
   - **decision rail — `gatekeeper`**: the promotion comment and the issue close.
 
-  ## Why the name changed, and why it was not cosmetic
+  ## Why this module is named after a FUNCTION and not a role
 
-  This module was `GatekeeperSeal`, and it was the ONLY one in the pilot named after a ROLE rather
-  than a function (`StepDispatcher`, `StepRunCompleter`, `ArchEscalation`, `BriefBuilder`). The name
-  was the symptom: one signer variable served three acts across two rails, so a clean PR — 90% of
-  them — had the DECISION rail signing the git write.
+  Every other module of the rail is (`StepDispatcher`, `StepRunCompleter`, `ArchEscalation`,
+  `BriefBuilder`), and here the name is load-bearing rather than tidy: a role name invites ONE
+  signer variable to serve the three acts across the two rails, which puts the DECISION rail on the
+  git write for a clean PR — 90 % of them.
 
-  That is not untidiness. `chief.yaml` states why the two roles were split at all: their dispatches
-  carry OPPOSITE `brief_kind` values — `judge` ("never execute what you judge", a SECURITY property
-  the schema requires declared) and `worker` ("execute it"), and one role cannot declare both. The
-  gatekeeper declares `judge`, and MERGING IS AN EXECUTION. The old conditional therefore re-created,
+  `chief.yaml` states why the two roles are split at all: their dispatches carry OPPOSITE
+  `brief_kind` values — `judge` ("never execute what you judge", a SECURITY property the schema
+  requires declared) and `worker` ("execute it") — and one role cannot declare both. The gatekeeper
+  declares `judge`, and MERGING IS AN EXECUTION. A conditional on one signer therefore re-creates,
   on the merge act, the very violation the split exists to remove.
 
   ## The order is load-bearing, and it is why this stays ONE module
@@ -253,13 +253,13 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # delivered brick's PR in `issue_status`, cf. `ForgeClient.merged_pr_of_issue`).
     signature = Fleet.Forge.Protocol.merge_marker(pr_number)
 
-    # WHO ACTUALLY APPROVED — read, never asserted. The comment used to state "the judges APPROVED
-    # the PR (native reviews)" unconditionally, which is FALSE on a zero-judge card: `workshop-direct`
-    # declares no jury on purpose (no mechanical ground truth on prose), the seal is nominal there,
-    # and the ticket ended up carrying a sentence claiming approvals that no account ever gave —
-    # measured 2026-08-04 on `hello-world#4`, PR with 0 review. A closing comment is the trace an
-    # operator reads months later; one that names approvers who do not exist is worse than no
-    # comment, and it sat under a line that said "nothing is faked".
+    # WHO ACTUALLY APPROVED — read, never asserted. Stating "the judges APPROVED the PR (native
+    # reviews)" unconditionally is FALSE on a zero-judge card: `workshop-direct` declares no jury on
+    # purpose (no mechanical ground truth on prose), the seal is nominal there, and the ticket then
+    # carries a sentence claiming approvals that no account ever gave — measured on a PR with 0
+    # review. A closing comment is the trace an operator reads months later; one that names
+    # approvers who do not exist is worse than no comment, under a line that says "nothing is
+    # faked".
     approvers = approving_judges(forge, repo, pr_number, forge_opts)
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
@@ -300,10 +300,10 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
       {:error, _} = err ->
         # A merge POST that errors does NOT prove the merge did not happen: a timeout can
-        # cut the reply AFTER the server committed it. The postcondition queue used to be
-        # skipped on ANY merge error — a server-merged brick then kept no `stage/merged`,
-        # stayed open with an orphaned lock, and the reconciliation re-dispatched an
-        # already-merged brick (double-delivery). So: READ BACK the real PR state, same
+        # cut the reply AFTER the server committed it. Skipping the postcondition queue on ANY
+        # merge error leaves a server-merged brick with no `stage/merged`, open with an orphaned
+        # lock, and the reconciliation re-dispatches an already-merged brick (double-delivery).
+        # So: READ BACK the real PR state, same
         # classification authority as the remediation rail (`MergeOutcome`). Server says
         # merged → converge the SAME postconditions as the nominal path (the forge is the
         # truth; the wire's verdict is not). Unreadable or not merged → propagate the
@@ -731,8 +731,8 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # This label proves the merge to `decide/1` (F-C066 anti-redispatch guard when the close fails) AND
   # historically to `Delegation.issue_status` (delivery detection). A transient blip (HTTP 500 / lock
   # contention) self-heals on retry; a PERSISTENT failure is logged LOUD — the merge is authoritative and
-  # done: the kept `lcars-in-flight` lock backstops `decide/1` (close-also-fails case), and Delegation now
-  # ALSO derives delivery from the merged PR (its `outcome/3`), so a definitively-lost label is no longer
+  # done: the kept `lcars-in-flight` lock backstops `decide/1` (close-also-fails case), and Delegation
+  # ALSO derives delivery from the merged PR (its `outcome/3`), so a definitively-lost label is not
   # an arch-waits-forever. Not propagated (a lost label ≠ a failed close: the promote flow reads the close
   # result, not this projection). Immediate retries (offloaded completion task, momentary hiccup dominant).
   @set_stage_attempts 3
@@ -868,15 +868,14 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # none to require: printing it there would contradict the line above it in the same comment.
   defp interim_note([]), do: ""
 
-  # ⚠ CETTE NOTE A SURVECU A LA SEPARATION DES RAILS, ET ELLE LA CONTREDISAIT DANS LE MEME
-  # COMMENTAIRE. Elle disait « puis le `gatekeeper` (habilité au merge) scelle » — trois lignes sous
-  # un « Fusionnée par : le rail merge (`chief`) » que ce module venait d'ecrire. Mesure : ticket
-  # #4 de `fleet/chifoumi` sur le banc, 2026-08-20 04:41, `merged_by: system_chief` a la forge et
-  # le texte annoncant le gatekeeper juste en dessous.
+  # ⚠ CETTE NOTE NE DOIT NOMMER AUCUNE HABILITATION. Ecrire ici « puis le `gatekeeper` (habilité au
+  # merge) scelle » contredit, trois lignes plus bas, le « Fusionnée par : le rail merge (`chief`) »
+  # que ce module vient d'ecrire — et la forge, elle, porte `merged_by: system_chief`. Mesure sur le
+  # banc : le ticket sortait avec les deux phrases l'une sous l'autre.
   #
-  # Le lot D avait corrige tout ce qui NOMMAIT un signataire ; celui-ci decrit une HABILITATION,
-  # donc aucune des relectures ne l'a attrape. C'est le premier defaut rendu par le banc, et il
-  # n'etait trouvable que la : une suite verte ne lit pas la prose qu'elle produit.
+  # Chercher les phrases qui NOMMENT un signataire ne suffit pas : celle-ci decrit une
+  # HABILITATION, et aucune relecture par nom ne l'attrape. Une suite verte ne lit pas la prose
+  # qu'elle produit — seul le banc la rend.
   defp interim_note(_approvers),
     do:
       "\n> ⚠ **Interim (dev)** : la branch-protection native **EXIGE les approbations des juges** " <>
@@ -899,8 +898,10 @@ defmodule Fleet.Pilot.MergeAndPromote do
     _ -> :unknown
   end
 
-  # Couture unique avec `Fleet.MCP.PodTools.Probe` (`:forge_actions`) : la sonde et sa verification
-  # interrogent le MEME sous-domaine, et deux clefs en donneraient deux avis en test.
+  # Clef PARTAGEE (`:forge_actions`) avec `Fleet.MCP.PodTools.Probe` et
+  # `Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate` : la sonde et sa verification interrogent le
+  # MEME sous-domaine, et deux clefs en donneraient deux avis en test. L'exception a la convention
+  # de prefixe est argumentee chez la sonde, et elle se lit AUX TROIS SITES.
   defp forge_actions,
     do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
 
@@ -927,9 +928,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # rewrite history nor block the close. Unreadable → `[]` → the zero-judge sentence, which claims
   # nothing about judges that may exist. Under-claiming is the only safe direction for a trace.
   #
-  # UNSCOPED, AND NOW IT IS ASKED FOR. This read used to pass no `:head_sha` at all, which the jury
-  # silently took as "every review counts". Since that implicit mode is gone, the choice has to be
-  # stated: `head_sha: :unscoped`. It is defensible HERE and nowhere else on this rail — this runs
+  # UNSCOPED, AND IT IS ASKED FOR. Passing no `:head_sha` at all would leave the jury to take it
+  # silently as "every review counts"; there is no implicit mode, so the choice is stated:
+  # `head_sha: :unscoped`. It is defensible HERE and nowhere else on this rail — this runs
   # AFTER a real merge and feeds a sentence, not a decision, and its only failure direction is
   # under-claiming.
   #
@@ -937,7 +938,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # among the approvers of the merged one. The sentence over-claims by exactly that much. Scoping it
   # properly needs the merged sha threaded down through `merge_and_promote/8` → `do_seal/9`, or a
   # second forge read on a best-effort post-merge path; neither is this fiche's subject, and the
-  # decision path it protects is `step_dispatcher`, which is now fail-closed.
+  # decision path it protects is `step_dispatcher`, which is fail-closed.
   defp approving_judges(forge, repo, pr_number, forge_opts) do
     case forge.pr_review_state(repo, pr_number, Keyword.put(forge_opts, :head_sha, :unscoped)) do
       {:ok, %{verdicts: verdicts}} when is_map(verdicts) ->

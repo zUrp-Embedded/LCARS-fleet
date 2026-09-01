@@ -265,14 +265,14 @@ defmodule Fleet.Pilot.IncidentConsumer do
   end
 
   # ─── LE FREIN (BL-6-37.6) ────────────────────────────────────────────────────────────────────
-  # The incident rail already KNEW "recurrence" — its sysadmin issue says "Deja vu — ROOT-CAUSE
-  # required" — and the poller re-dispatched anyway, forever. Measured 2026-08-02 on the tetris
-  # bench: a producer killed mid-writing, respawned in a loop, invisible on its own ticket.
-  # Detecting without unplugging builds a damage counter, not a brake.
+  # The incident rail KNOWS "recurrence" — its sysadmin issue says "Deja vu — ROOT-CAUSE required" —
+  # and that alone does not stop the poller re-dispatching, forever. Measured on the tetris bench: a
+  # producer killed mid-writing, respawned in a loop, invisible on its own ticket. Detecting without
+  # unplugging builds a damage counter, not a brake.
   #
-  # The missing consequence: put `lcars-awaits-arch` on the WORK TICKET. The vocabulary exists and
-  # does exactly the right thing — the poller takes an issue carrying it OUT of dispatch, and a
-  # human/the arch decides. We do not kill, we do not retry harder: we hand back.
+  # The consequence that makes it one: put `lcars-awaits-arch` on the WORK TICKET. The vocabulary
+  # exists and does exactly the right thing — the poller takes an issue carrying it OUT of dispatch,
+  # and a human/the arch decides. We do not kill, we do not retry harder: we hand back.
   #
   # ⚠ RESTRICTED to the timeout, deliberately. The entry measures `result_timeout` — a loop where
   # the pod is working and gets cut. Braking on ANY recurrent category would pull tickets out of
@@ -299,17 +299,15 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # which is itself the rail of last resort. Failure is said LOUD — without that, we would have a
   # silently absent brake, which is worse than no brake at all (you would believe you are covered).
   @spec default_brake(String.t(), integer(), term()) :: :ok
-  # ⚠ LE SEAM `:pilot_forge_client` A ETE RETIRE ICI LE 2026-08-21, ET C'EST UNE SUPPRESSION DE CODE
-  # MORT, PAS UN DURCISSEMENT. Mesure : UN seul lecteur (cette ligne), ZERO poseur — ni `config/`,
-  # ni `runtime.exs`, ni un test, ni le deploiement. Il rendait donc `Fleet.Forge.Client` a tous les
-  # coups. Ce n'etait pas un seam, c'etait `Fleet.Forge.Client` ecrit en trois lignes, et son seul
-  # effet observable etait d'etre un TROISIEME nom pour le meme client (`:forge_client`,
-  # `:mcp_forge_client`).
+  # ⚠ PAS DE SEAM ICI, ET C'EST UNE ABSENCE MESUREE. Un `:pilot_forge_client` a cet endroit aurait
+  # UN lecteur et ZERO poseur — ni `config/`, ni `runtime.exs`, ni un test, ni le deploiement — donc
+  # il rendrait `Fleet.Forge.Client` a tous les coups : le client ecrit en trois lignes, et un
+  # TROISIEME nom pour lui (`:forge_client`, `:mcp_forge_client`).
   #
   # ⚠ NE PAS BALAYER SES VOISINS PAR RESSEMBLANCE. `:mcp_pod_reaper` et `:mcp_tool_handler` n'ont pas
   # de poseur non plus, et ils sont LEGITIMES : ce sont des seams de FRONTIERE — `Fleet.MCP` n'a pas
   # le droit de dependre de `Fleet.Pilot` a la compilation, et l'indirection est ce qui casse le lien.
-  # Celui-ci n'avait pas cette excuse : son propre defaut nommait `Fleet.Forge.Client` en litteral,
+  # Un seam d'ici n'aurait pas cette excuse : son defaut nommerait `Fleet.Forge.Client` en litteral,
   # dans un module de `Pilot` qui en depend deja partout ailleurs. Le critere n'est pas « personne ne
   # le pose », c'est « il ne casse rien ET personne ne le pose ».
   def default_brake(repo, number, reason) do
@@ -344,7 +342,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
   # `awaits-arch` takes the ticket out of dispatch. It does NOT release the in-flight lock, and a
   # lock left on a ticket nobody can advance is not inert: the poller's reconciliation finds it
   # orphaned (no live pod), reclaims it, and re-dispatches — a fresh pod goes and blocks in the
-  # same place. Observed on the bench 2026-08-09, and only closing the ticket by hand stopped it.
+  # same place. Observed on the bench, and only closing the ticket by hand stops it.
   # So the two labels must never coexist, and every site that sets one clears the other
   # (`labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` holds all three).
   #

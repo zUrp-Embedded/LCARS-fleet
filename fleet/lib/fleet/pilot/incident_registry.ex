@@ -313,15 +313,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
         end
       )
 
-    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` QUARANTE LIGNES PLUS HAUT, et il manquait ICI.
-    # `_ = write_wal(...)` jetait le seul fait qui distingue « tampon grave » de « tampon perdu »,
-    # donc AUCUN appelant ne pouvait le savoir : la reponse etait `:ok` dans les deux cas.
+    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` PLUS HAUT DANS CE MODULE. Un `_ = write_wal(...)`
+    # jette le seul fait qui distingue « tampon grave » de « tampon perdu », et aucun appelant ne
+    # peut alors le savoir : la reponse est `:ok` dans les deux cas.
     #
     # ⚠ La consequence n'est PAS celle du voisin, et c'est pour ca que le retour public de
     # `record_or_escalate/4` ne bouge pas : la-bas un WAL perdu perd l'INCIDENT (la chronologie
     # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
-    # recurrence suivante — borne, et qui se repare tout seul. Ce qui manquait n'etait pas un
-    # nouveau verdict, c'etait que le fait EXISTE quelque part.
+    # recurrence suivante — borne, et qui se repare tout seul. Ce qu'il faut n'est pas un nouveau
+    # verdict, c'est que le fait EXISTE quelque part.
     reply =
       case write_wal(state.wal_path, registry) do
         :ok -> :ok

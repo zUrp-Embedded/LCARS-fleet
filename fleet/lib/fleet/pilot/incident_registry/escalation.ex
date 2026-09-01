@@ -378,10 +378,11 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
 
-  # TROUVE PAR LA RELECTURE 2026-08-19 : ce kind est emis par `StepRunConsumer.drain_failed/4`
-  # (drain de `lcars-awaits-arch`), et il n'avait PAS de clause ici — l'escalade crashait en
-  # FunctionClauseError au lieu d'ouvrir l'issue, precisement sur le chemin « un ticket sort du
-  # pipeline en silence ». Le temoin du drain stubbe `escalate_fun`, donc il ne pouvait pas le voir.
+  # ⚠ CE KIND DOIT AVOIR SA CLAUSE ICI : il est emis par `StepRunConsumer.drain_failed/4` (drain de
+  # `lcars-awaits-arch`), et sans clause l'escalade crashe en FunctionClauseError au lieu d'ouvrir
+  # l'issue — precisement sur le chemin « un ticket sort du pipeline en silence ». Le temoin du
+  # drain stubbe `escalate_fun`, donc il ne peut pas le voir : cette table est close, et un kind
+  # sans clause y crashe (cf. l'interdit de la porte immediate).
   defp kind_describe(:awaits_arch_stuck),
     do:
       {"awaits-arch NON draine — ticket sorti du pipeline",
