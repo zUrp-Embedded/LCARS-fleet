@@ -147,8 +147,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_declaration_max_fan_ceiling(root),
         check_test_corpora_on_record(root),
         check_doctest_declarations_have_examples(root),
-        check_test_paths_mirror_lib(root),
-        check_test_exs_are_discoverable(root),
+        check_test_dirs_mirror_source(root),
+        check_witness_naming(root),
+        check_negations_bite(root),
         check_refute_copies_agree(root),
         check_public_functions_documented(root)
         # NB no `pipeline.bounded_retry_system_side` rail here: bounded rework lives on the
@@ -1829,6 +1830,46 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Z3: single-app project — the task always runs at the project root (Mix sets the cwd
   # there). NO umbrella-style detection ("no `apps/` dir → go up two levels"): that case
   # does not exist, and such a heuristic would resolve to a `../..` OUTSIDE the project.
+
+  # LES DOSSIERS DANS LESQUELS AUCUN SCAN DE CORPUS NE DESCEND. Ni sources ni temoins : des artefacts
+  # de build, des dependances vendorees, et le bac a sable des `@tmp_dir` d'ExUnit.
+  @corpus_skip ~w(_build deps tmp node_modules .git)
+
+  # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure sur ce
+  # depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de
+  # residus `@tmp_dir` accumulees par les runs), `_build/` et `deps/` avant qu'un `Enum.reject` ne
+  # les jette : 28 173 fichiers traverses en 4,5 s pour en retenir 1071. Elagué, le meme corpus sort
+  # en 30 ms.
+  #
+  # Ce n'est pas qu'une question de vitesse. Trois checks appellent ce scan, et le temoin qui les
+  # enchaine tous depasse le timeout de 60 s d'ExUnit des que `tmp/` a grossi — la suite passe donc
+  # au ROUGE sans qu'aucun contrat soit en cause.
+  #
+  # L'elagage est recursif PAR NOM, a toute profondeur : `fleet/tmp/` doit tomber aussi quand le
+  # scan part de la racine du depot, ce qu'un rejet applique aux seules entrees de premier niveau
+  # laisserait passer.
+  @spec corpus_files(String.t()) :: [String.t()]
+  defp corpus_files(base), do: corpus_walk(base, [])
+
+  defp corpus_walk(dir, acc) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        Enum.reduce(entries, acc, fn e, a ->
+          path = Path.join(dir, e)
+
+          cond do
+            e in @corpus_skip -> a
+            File.dir?(path) -> corpus_walk(path, a)
+            File.regular?(path) -> [path | a]
+            true -> a
+          end
+        end)
+
+      _ ->
+        acc
+    end
+  end
+
   defp project_root, do: File.cwd!()
 
   # ── Topology lock ──────────────────────────────────────────────
@@ -1916,7 +1957,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       [root, Path.join(Path.expand("..", root), ".claude")]
       |> Enum.filter(&File.dir?/1)
       |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.bats")))
-      |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|tmp|node_modules)/"))
+      |> Enum.reject(
+        &String.match?("/" <> Path.relative_to(&1, root), ~r"/(_build|deps|tmp|node_modules)/")
+      )
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -2900,7 +2943,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     scanned =
       ["lib", "test", "config"]
       |> Enum.flat_map(fn d -> Path.wildcard(Path.join([root, d, "**", "*.{ex,exs}"])) end)
-      |> Enum.reject(&(&1 =~ ~r{/(_build|tmp)/}))
+      # meme correction qu'aux scans globaux : sur le chemin RELATIF, sinon un depot pose sous
+      # un dossier `tmp` ou `_build` voit son corpus entier rejete (cf. le motif en tete de
+      # `check_platform_root_single_source`).
+      |> Enum.reject(&("/" <> Path.relative_to(&1, root) =~ ~r{/(_build|tmp)/}))
 
     offenders =
       scanned
@@ -4290,10 +4336,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
       pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
 
+      # ⚠ LE REJET PORTE SUR LE CHEMIN RELATIF, ET CE N'EST PAS UN GOUT. Applique au chemin ABSOLU,
+      # ce motif rejette TOUT le corpus des que le depot vit sous un dossier nomme `tmp`, `deps` ou
+      # `_build` — mesure : 4328 fichiers vus, 0 retenus, depuis un worktree pose sous `/tmp/`. Le
+      # check ne ment pas pour autant (sa garde d'instrument rend « INSTRUMENT BROKEN — measured
+      # nothing » plutot qu'un vert creux), mais il ne mesure rien,
+      # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
       {racines, fichiers} =
-        Path.wildcard(Path.join(root, "**"), match_dot: true)
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        corpus_files(root)
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4409,9 +4459,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       }
     else
       {vus, porteurs} =
-        Path.wildcard(Path.join(root, "**"), match_dot: true)
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        corpus_files(root)
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4547,11 +4595,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         }
 
       true ->
+        # `..` : ce check porte sur le depot ENTIER, pas sur `fleet/` seul. Le filtre residuel
+        # ne garde que ce que `@corpus_skip` ne couvre pas — et il porte sur le chemin relatif a
+        # la base REELLE du scan, pas a `root`, sans quoi tout ce qui vit hors de `fleet/` y
+        # echappe.
+        base = Path.expand(Path.join(root, ".."))
+
         vues =
-          Path.wildcard(Path.join([root, "..", "**"]), match_dot: true)
-          |> Enum.filter(&File.regular?/1)
+          corpus_files(base)
           |> Enum.reject(
-            &String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/")
+            &String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/")
           )
           |> Enum.reduce(MapSet.new(), fn path, acc ->
             case File.read(path) do
@@ -6059,129 +6112,282 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Les zones de `test/` qui ne sont PAS des miroirs de `lib/`, NOMMEES plutot que devinees : deux
-  # rangent des non-temoins (`support/` compile par `elixirc_paths(:test)`, `fixtures/`), les autres
-  # rangent des temoins qui n'ont pas de source Elixir en face (bats des scripts de `bin/`, `etc/`,
-  # `services/`, sondes manuelles, integration, et le transverse qui scanne le depot entier). Un
-  # dossier hors de cette liste et sans jumeau sous `lib/` est un chemin faux, pas une exception
-  # tacite : c'est ce que le mur ci-dessous refuse.
-  @test_nonmirror_zones ~w(support fixtures integration crosscutting probes bin etc services)
+  # LES DEUX ARBRES DE TEMOINS, ET LEURS RACINES. Le depot porte DEUX programmes : le runtime
+  # (`fleet/`) et son installeur (`fleet/deploy/`), qui doit pouvoir vivre sans lui. Chacun a son
+  # arbre de temoins, et dans chacun le chemin d'un temoin est celui de sa cible.
+  #
+  # ⚠ `lib` EST ELIDE D'UN COTE ET PAS DE L'AUTRE, et ce n'est pas une incoherence — c'est la seule
+  # chose de tout ce dispositif qui ne se lit PAS dans l'arbre, donc elle est ici plutot que dans une
+  # prose que personne ne peut verifier. `fleet/lib/` contient TOUT le code Elixir : c'est un prefixe
+  # qui ne discrimine rien, et l'elider est la convention de l'ecosysteme (`mix new` genere
+  # `lib/foo/bar.ex` ↔ `test/foo/bar_test.exs`). `deploy/lib/` est trois fichiers a cote de
+  # `modules.d/`, `docker/`, `deps/` : il discrimine, donc il reste. Meme nom, roles opposes.
+  #
+  # Un dossier de temoins se qualifie donc SEUL, par l'existence de son jumeau — aucune convention de
+  # nommage a retenir, aucun prefixe a decoder. Les zones qui n'ont legitimement pas de source en face
+  # sont NOMMEES ci-dessous : une liste se relit, une regle typographique s'imite de travers.
+  @test_zones %{
+    "test" => ~w(support fixtures integration crosscutting probes),
+    "deploy/tests" => ~w(transverse)
+  }
+
+  # Les racines sources de chaque arbre, dans l'ordre d'essai.
+  @test_source_roots %{"test" => ["lib", "."], "deploy/tests" => ["deploy"]}
 
   @doc false
   # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
-  # chemin faux se LIT COMME UNE REPONSE. Mesure : neuf temoins vivaient sous
-  # `test/fleet/pilot/project_onboard/` et `test/fleet/pilot/forge_client/`, deux dossiers qui
-  # n'existent nulle part sous `lib/`. Leurs modules disaient `Fleet.Project.Onboard.*` et
-  # `Fleet.Forge.Client.*` — qui cherche les temoins d'`onboard.ex` sous `test/fleet/project/` n'y
-  # trouve rien et en conclut une absence de couverture qui est fausse.
+  # chemin faux SE LIT COMME UNE REPONSE. La forme, mesuree : des temoins sous un
+  # `test/fleet/pilot/project_onboard/` que rien ne porte sous `lib/`, alors que leurs modules
+  # disent `Fleet.Project.Onboard.*` — qui cherche les temoins d'`onboard.ex` sous
+  # `test/fleet/project/` n'y trouve rien et en conclut une absence de couverture qui est fausse.
   #
-  # LA QUESTION EST DECIDABLE ET SANS ETAT, et c'est ce qui la met ici plutot que sous la forme d'un
-  # plancher enregistre : « le dossier de ce temoin existe-t-il sous `lib/` ? » se repond avec le
-  # disque, jamais avec un compte d'hier.
+  # La question se repond avec le disque, jamais avec un compte d'hier : elle est decidable et sans
+  # etat, comme l'exige ce fichier a propos de son mur sur les doctests.
   #
-  # ⚠ CE MUR NE DIT PAS QUE CHAQUE SOURCE A UN TEMOIN, et le silence est delibere. Cette moitie-la
-  # n'est pas decidable sans plancher. Mesure : 130 sources sur 247 n'ont pas de
-  # temoin canonique — 26 ont au moins un satellite qui porte leur nom, et pour les 104 autres le
-  # NOM DE FICHIER NE TRANCHE PAS, parce qu'un temoin nomme d'apres le contrat qu'il epingle ne
-  # nomme pas sa cible. Reclamer le canonique ici fabriquerait 104 coquilles « pas de test » dont
-  # personne n'aurait verifie la verite — un mur satisfait par une phrase fausse. Ce qui se decide
-  # sans etat se decide ici ; le reste est un chantier, pas une ligne de gate.
-  @spec check_test_paths_mirror_lib(String.t()) :: result()
-  def check_test_paths_mirror_lib(root) do
+  # ⚠ CE MUR NE RECLAME PAS UN TEMOIN PAR SOURCE. Cette moitie-la n'est pas decidable sans plancher
+  # (130 sources sur 247 sans temoin canonique, dont 26 avec un satellite qui les
+  # nomme) et la reclamer fabriquerait des coquilles « pas de test » que personne n'aurait verifiees.
+  @spec check_test_dirs_mirror_source(String.t()) :: result()
+  def check_test_dirs_mirror_source(root) do
+    {checked, strays} =
+      Enum.reduce(@test_source_roots, {0, []}, fn {troot, sroots}, {n, acc} ->
+        dirs =
+          Path.join([root, troot, "**", "*.{exs,bats,py}"])
+          |> Path.wildcard()
+          |> Enum.filter(
+            &(Path.extname(&1) == ".bats" or String.contains?(Path.basename(&1), "test"))
+          )
+          |> Enum.map(&(&1 |> Path.dirname() |> Path.relative_to(Path.join(root, troot))))
+          |> Enum.reject(&(&1 in [".", ""]))
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        zones = Map.fetch!(@test_zones, troot)
+
+        bad =
+          Enum.reject(dirs, fn d ->
+            [head | _] = Path.split(d)
+
+            head in zones or
+              Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, d])) end)
+          end)
+
+        {n + length(dirs), acc ++ Enum.map(bad, &"#{troot}/#{&1}")}
+      end)
+
+    %{
+      id: "tests.dirs_mirror_source",
+      remediation:
+        "deplacer le temoin sous le dossier qui reflete sa cible, ou nommer sa zone dans " <>
+          "@test_zones si elle n'a legitimement pas de source en face — un chemin de test qui ne " <>
+          "reflete rien se lit comme une absence de couverture",
+      status: if(checked > 0 and strays == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          checked == 0 ->
+            ["INSTRUMENT CASSE — aucun dossier de temoins trouve ; ce mur n'a rien mesure"]
+
+          strays != [] ->
+            Enum.map(strays, &"#{&1}/ : aucune source en face")
+
+          true ->
+            []
+        end,
+      note: "#{checked} dossier(s) de temoins, #{checked - length(strays)} adosse(s) a une source"
+    }
+  end
+
+  @doc false
+  # CE QU'UN NOM DE FICHIER DOIT DIRE, ET POURQUOI L'APPROXIMATION SE PROPAGE ICI PLUS QU'AILLEURS.
+  # Trois langages cohabitent dans les deux arbres de temoins, et l'extension ne suffit que pour un :
+  # `.bats` NE VEUT DIRE QUE « temoin » ; `.py` et `.exs` ne disent rien. D'ou la regle — le suffixe
+  # `_test` existe la ou l'extension ne parle pas, et nulle part ailleurs. Les 320 fichiers du depot
+  # la respectent, et TACITEMENT : sans ce mur, rien ne la tient.
+  #
+  # Une convention tacite n'est pas une convention, c'est un pari sur le prochain lecteur. Le depot
+  # est repris par des agents, qui ne distinguent pas le bancal du juste : ils construisent DESSUS.
+  # Un `test_foo.py` (habitude pytest) pose a cote d'un `foo_test.py` enseigne deux regles pour un
+  # meme dossier, et la troisieme reprise en inventera une troisieme.
+  #
+  # ⚠ ET LE COUT EST ASYMETRIQUE, ce qui justifie un mur plutot qu'une relecture. Un `.exs` mal
+  # nomme n'est pas ramasse par `mix test` (`test_pattern`, defaut `*_test.exs`) et il ne le DIT
+  # pas : la faute est une lettre, la consequence est une suite entiere qui figure dans l'arbre et
+  # n'a jamais tourne. Ce mur remplace `tests.exs_are_discoverable`, qui ne voyait que l'Elixir —
+  # deux murs qui se recouvrent apprennent a leur lecteur qu'aucun ne fait autorite.
+  @spec check_witness_naming(String.t()) :: result()
+  def check_witness_naming(root) do
+    service = ~w(README.md test_helper.exs shell_gate.sh refute.bash)
+
     files =
-      Path.join(root, "test/**/*_test.exs")
-      |> Path.wildcard()
-      |> Enum.map(&Path.relative_to(&1, root))
+      Enum.flat_map(["test", "deploy/tests"], fn troot ->
+        Path.join([root, troot, "**", "*"])
+        |> Path.wildcard()
+        |> Enum.reject(&File.dir?/1)
+        |> Enum.map(&Path.relative_to(&1, root))
+      end)
+      |> Enum.reject(fn f ->
+        # les zones qui ne portent pas de temoins : helpers, donnees, sondes, lanceurs
+        case Path.split(f) do
+          [_, zone | _] when zone in ~w(support fixtures probes integration) -> true
+          _ -> Path.basename(f) in service
+        end
+      end)
       |> Enum.sort()
 
-    strays =
-      Enum.filter(files, fn f ->
-        case Path.split(Path.dirname(f)) do
-          # La racine de `test/` n'est le miroir de rien : `lib/` n'est pas un domaine. Un temoin
-          # pose la ne se cherche par aucun chemin — il se trouve en listant tout le dossier.
-          ["test"] -> true
-          ["test", zone | _] when zone in @test_nonmirror_zones -> false
-          ["test" | rest] -> not File.dir?(Path.join([root, "lib" | rest]))
-          _ -> true
+    misnamed =
+      Enum.reject(files, fn f ->
+        case Path.extname(f) do
+          ".bats" -> true
+          ".exs" -> String.ends_with?(f, "_test.exs")
+          ".py" -> String.ends_with?(f, "_test.py")
+          _ -> false
         end
       end)
 
     %{
-      id: "tests.paths_mirror_lib",
+      id: "tests.witness_naming",
       remediation:
-        "deplacer le temoin sous le dossier qui reflete sa cible (`lib/<x>/` -> `test/<x>/`), " <>
-          "ou nommer sa zone dans @test_nonmirror_zones si elle n'a legitimement pas de source " <>
-          "Elixir en face — un chemin de test qui ne reflete rien se lit comme une absence de couverture",
-      status: if(files != [] and strays == [], do: :pass, else: :fail),
+        "nommer le temoin `<cible>_test.py` ou `<cible>_test.exs` — l'extension `.bats` suffit, " <>
+          "les autres non ; ou le sortir vers une zone qui ne porte pas de temoins " <>
+          "(support/, fixtures/, probes/, integration/)",
+      status: if(files != [] and misnamed == [], do: :pass, else: :fail),
       evidence:
         cond do
           files == [] ->
-            ["INSTRUMENT CASSE — aucun *_test.exs trouve sous test/ ; ce mur n'a rien mesure"]
+            [
+              "INSTRUMENT CASSE — aucun fichier trouve dans les deux arbres ; ce mur n'a rien mesure"
+            ]
 
-          strays != [] ->
-            Enum.map(strays, fn f ->
-              "#{f}: aucun dossier `lib/#{Enum.join(tl(Path.split(Path.dirname(f))), "/")}/` en face"
+          misnamed != [] ->
+            Enum.map(misnamed, fn f ->
+              "#{f} : ni `.bats`, ni `_test#{Path.extname(f)}` — un lecteur ne peut pas dire si c'est un temoin"
             end)
 
           true ->
             []
         end,
       note:
-        "#{length(files)} temoins ExUnit, #{length(files) - length(strays)} sous un dossier qui reflete lib/"
+        "#{length(files)} temoins dans les deux arbres, #{length(files) - length(misnamed)} nommes selon la regle"
     }
   end
 
   @doc false
-  # `mix test` NE RAMASSE QUE CE QUI FINIT PAR `_test.exs` (`test_pattern`, defaut `*_test.exs`), et
-  # il ne dit RIEN de ce qu'il laisse. Un fichier baptise `foo_tests.exs`, `foo_spec.exs` ou
-  # simplement `foo.exs` est donc un corpus qui compte pour zero en silence — le meme faux-vert que
-  # `@test_corpora` attrape a l'echelle du depot, ici a l'echelle du fichier. Le cout est asymetrique
-  # et c'est ce qui justifie un mur : la faute est une lettre, la consequence est une suite entiere
-  # qui n'a jamais tourne tout en figurant dans l'arbre des tests.
+  # `! cmd` N'EST PAS UNE ASSERTION SOUS BATS, et c'est le faux-vert le plus cher du depot parce
+  # qu'il se LIT comme une garde. POSIX exempte d'`errexit` toute commande niee par `!` : la ligne
+  # s'execute, rend 1, et bats passe a la suivante. Elle ne mord QUE si elle est la derniere de son
+  # bloc `@test`, ou si un `||` rattrape son echec. Partout ailleurs elle est verte au moment PRECIS
+  # ou ce qu'elle interdit arrive.
   #
-  # Exempts : `test_helper.exs` (que `mix test` charge par un autre chemin) et les deux zones qui ne
-  # portent pas de temoin — `support/` (compile par `elixirc_paths(:test)`) et `fixtures/`.
-  @spec check_test_exs_are_discoverable(String.t()) :: result()
-  def check_test_exs_are_discoverable(root) do
-    all =
-      Path.join(root, "test/**/*.exs")
-      |> Path.wildcard()
-      |> Enum.map(&Path.relative_to(&1, root))
+  # ⚠ UN MUR SE POSE VERT, JAMAIS ROUGE : pose sur les 30 sites qu'il aurait signales, il aurait
+  # appris a lire « rouge » comme « normal » — ce que le depot a deja paye avec shellcheck. Les 30
+  # sont convertis et la mesure est a zero, donc il nait vert : c'est la seule position depuis
+  # laquelle un mur protege quelque chose.
+  #
+  # CE QU'IL EMPECHE DE REVENIR, mesure et non suppose. Deux temoins de securite ont menti des
+  # semaines sous cette forme : un jeton de forge qui ne devait pas passer par `argv` (lisible de
+  # tout le systeme via /proc), et une sonde qui ne devait pas recracher le mot de passe d'une URL
+  # d'origin. Les deux rendaient `ok` sur la fuite injectee. Et deux temoins sont NES faux sans que
+  # personne le voie, parce qu'une assertion muette n'est jamais confrontee : son motif ne l'est pas
+  # non plus.
+  #
+  # Les formes qui MORDENT et restent donc autorisees : la negation terminale (son code devient celui
+  # du test) et `! cmd || { echo "…"; return 1; }` — le `||` rattrape, et son message nomme la cause
+  # mieux que ne le ferait `refute`. Le remede pour les autres est `refute` / `refute_out`
+  # (`refute.bash`) : un APPEL DE FONCTION est soumis a `errexit` ou qu'il soit dans le bloc.
+  @spec check_negations_bite(String.t()) :: result()
+  def check_negations_bite(root) do
+    files =
+      Enum.flat_map(["test", "deploy/tests", "../.claude/skills", "git-hooks/tests"], fn r ->
+        Path.join([root, r, "**", "*.bats"]) |> Path.wildcard()
+      end)
+      |> Enum.uniq()
       |> Enum.sort()
 
-    unreachable =
-      Enum.filter(all, fn f ->
-        case Path.split(f) do
-          ["test", "test_helper.exs"] -> false
-          ["test", zone | _] when zone in ["support", "fixtures"] -> false
-          _ -> not String.ends_with?(f, "_test.exs")
-        end
+    inert =
+      Enum.flat_map(files, fn f ->
+        lines = f |> File.read!() |> String.split("\n")
+
+        lines
+        |> test_blocks()
+        |> Enum.flat_map(fn {a, b} ->
+          code =
+            a..b
+            |> Enum.filter(fn n ->
+              l = Enum.at(lines, n, "")
+              String.trim(l) != "" and not String.starts_with?(String.trim_leading(l), "#")
+            end)
+
+          last = List.last(code)
+
+          Enum.filter(code, fn n ->
+            l = Enum.at(lines, n)
+
+            negation?(l) and n != last and
+              not String.contains?(logical_line(lines, n), "||")
+          end)
+          |> Enum.map(&"#{Path.relative_to(f, root)}:#{&1 + 1}")
+        end)
       end)
 
     %{
-      id: "tests.exs_are_discoverable",
+      id: "tests.negations_bite",
       remediation:
-        "renommer le fichier en `<sujet>_test.exs`, ou le sortir de `test/` — `mix test` ignore " <>
-          "tout le reste SANS le dire, et un corpus qu'aucun lanceur ne ramasse rapporte une " <>
-          "couverture qu'il ne fournit pas",
-      status: if(all != [] and unreachable == [], do: :pass, else: :fail),
+        "remplacer `! cmd` par `refute cmd` (ou `cmd | refute_out 'motif'` pour un tube) — sous " <>
+          "bats une negation suivie d'une autre instruction est INERTE, donc verte au moment ou ce " <>
+          "qu'elle interdit arrive",
+      status: if(files != [] and inert == [], do: :pass, else: :fail),
       evidence:
         cond do
-          all == [] ->
-            ["INSTRUMENT CASSE — aucun .exs trouve sous test/ ; ce mur n'a rien mesure"]
+          files == [] ->
+            ["INSTRUMENT CASSE — aucun .bats trouve ; ce mur n'a rien mesure"]
 
-          unreachable != [] ->
-            Enum.map(
-              unreachable,
-              &"#{&1}: ne finit pas par `_test.exs` — jamais ramasse par `mix test`"
-            )
+          inert != [] ->
+            Enum.map(inert, &"#{&1} : negation NON terminale et non gardee — inerte")
 
           true ->
             []
         end,
-      note:
-        "#{length(all)} .exs sous test/, #{length(all) - length(unreachable)} joignables par `mix test`"
+      note: "#{length(files)} suites bats, #{length(inert)} assertion(s) niee(s) inerte(s)"
     }
+  end
+
+  # Les bornes {premiere, derniere} de chaque bloc `@test … { … }`, par comptage d'accolades.
+  defp test_blocks(lines) do
+    lines
+    |> Enum.with_index()
+    |> Enum.reduce({[], nil, 0}, fn {l, i}, {acc, start, depth} ->
+      cond do
+        is_nil(start) and String.starts_with?(l, "@test ") ->
+          {acc, i, count_braces(l)}
+
+        is_nil(start) ->
+          {acc, nil, 0}
+
+        true ->
+          d = depth + count_braces(l)
+          if d <= 0, do: {[{start + 1, i - 1} | acc], nil, 0}, else: {acc, start, d}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp count_braces(l),
+    do:
+      String.graphemes(l)
+      |> Enum.count(&(&1 == "{"))
+      |> Kernel.-(String.graphemes(l) |> Enum.count(&(&1 == "}")))
+
+  # tete de ligne OU tete de tube : `! cmd` et `cmd | ! grep …` sont le meme piege
+  defp negation?(l), do: Regex.match?(~r/^\s*!\s|\|\s*!\s/, l)
+
+  # la ligne LOGIQUE : les continuations `\` en font partie, et c'est souvent la que vit le `||`
+  defp logical_line(lines, n) do
+    Enum.reduce_while(n..min(n + 8, length(lines) - 1), "", fn i, acc ->
+      l = Enum.at(lines, i, "")
+      acc2 = acc <> " " <> l
+      if String.ends_with?(String.trim_trailing(l), "\\"), do: {:cont, acc2}, else: {:halt, acc2}
+    end)
   end
 
   @doc false
