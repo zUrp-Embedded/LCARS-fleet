@@ -98,7 +98,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
     #
     # Survit a `--no-verify`, qui saute `pre-commit` et `commit-msg` mais pas celui-ci. Ce que le mur
     # attrape ensuite CHANGE de nature : plus une negligence de placement, mais une FALSIFICATION —
-    # le seul cas pour lequel il etait interessant.
+    # le seul cas pour lequel il est interessant.
     #
     # Il vit dans `.git/hooks/`, HORS de l'arbre de travail : l'agent ne voit aucun artefact LCARS
     # dans la matiere sur laquelle il raisonne. Best-effort par construction — un hook qui ne peut
@@ -174,8 +174,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
           # loops forever on clone_failed). The pod OWNS its pod_dir (spawn guard = 1 pod/pod_id) → a residual
           # `ws` can only come from a dead predecessor → clean slate (the `base_sha` is re-pinned
           # just after, a fresh clone is always correct). The slate is cleaned through the MORGUE,
-          # never a mute shredder (debug scribe 2026-08-02): a deadline-killed producer left 10+ min
-          # of uncommitted work in ws, and this rm_rf erased it — deliverable loss is the house's
+          # never a mute shredder: a deadline-killed producer leaves 10+ min of uncommitted work
+          # in ws, and a bare rm_rf erases it — deliverable loss is the house's
           # top severity. A residual ws MOVES to `<ws>.morgue` (previous morgue replaced: ONE
           # generation kept — the operator salvage window, not an archive), logged ERROR.
           morgue_residual_workspace(ws)
@@ -184,9 +184,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
           # ASSERTED, never defaulted (chantier face-projet): the resolver ALWAYS engraves
           # `base_branch` in the project map — the face decision made once at dispatch. The old
-          # `|| "main"` was dead code on the live path and a substituting default on any other:
-          # a project map without a base_branch has skipped the face decision, and cloning the
-          # code face over it would bury exactly the bug this chantier exists to kill.
+          # `|| "main"` would be dead code on the live path and a substituting default on any
+          # other: a project map without a base_branch has skipped the face decision, and cloning
+          # the code face over it buries exactly that.
           base =
             project["base_branch"] ||
               raise(ArgumentError,
@@ -236,7 +236,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                # `pin_base_sha` is unaffected: a pinned `base_sha` is an ancestor of `base` by
                # construction (the rail captures it from an ls-remote of that branch), so it is in
                # the fetched history; and its targeted `fetch origin <sha>` fallback stays for the
-               # anomalous case it was written for.
+               # anomalous case it exists for.
                {:ok, {_, 0}} <-
                  Fleet.Credentials.Shell.git(
                    @hooks_off ++
@@ -269,8 +269,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
             # Named, and BEFORE the catch-all: the fall-through would have dressed them as
             # `{:git_exit, ...}`, i.e. a refusal reported as a git failure that never happened. The
             # two shapes differ (`{:invalid_base_sha, _}` bare, `{:error, {:invalid_pr_base_branch,
-            # _}}` wrapped) because their producers were written at different times -- which is
-            # exactly why they are matched explicitly rather than left to the union.
+            # _}}` wrapped) because their producers do not share a convention -- which is exactly
+            # why they are matched explicitly rather than left to the union.
             {:invalid_base_sha, s} ->
               {:error, {:clone_failed, {:invalid_base_sha, s}}}
 
@@ -320,9 +320,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
         sha when is_binary(sha) and sha != "" ->
           # pin_base_sha REUSED (reset --hard sha + targeted fetch as fallback if the base has advanced).
           # clean + checkout bounded via Shell.git (no bare `System.cmd git`; bare env, local).
-          # `sanitize_workspace` LAST and NON-optional (BL-6-16) — but NOT for the reason this
-          # comment used to give. It claimed `reset --hard` erases the CE_SKIP_WORKTREE bits and
-          # restores every tracked victim. MEASURED, git 2.x: the bit SURVIVES `reset --hard`,
+          # `sanitize_workspace` LAST and NON-optional (BL-6-16) — and NOT because `reset --hard`
+          # would erase the CE_SKIP_WORKTREE bits and restore every tracked victim.
+          # MEASURED, git 2.x: the bit SURVIVES `reset --hard`,
           # `checkout -B` and `clean -fdx`, and the victim stays absent through all three. Remove
           # the bit and `reset --hard` does restore the file — so what protects ticket N+1 is the
           # bit set at CLONE time, not a re-sanitisation.
@@ -436,13 +436,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
     def sanitize_workspace(ws) do
       victims = claude_dirs(ws) ++ nested_claude_mds(ws)
 
-      # ⚠ LA RACINE `CLAUDE.md` N'EST PLUS FLAGUEE, ET C'EST LE CORRECTIF, PAS UN OUBLI. Elle
-      # l'etait parce qu'on ECRASAIT ce fichier avec le CLAUDE.md compose du pod : le flag empechait
-      # notre copie de partir dans le livrable. Effet de bord mesure le 2026-08-12 : sur un depot qui
-      # TRACKE sa racine `CLAUDE.md` — c'est-a-dire tout projet cree par la fleet, le template en pose
-      # un — un producteur ne pouvait plus livrer ce fichier. Son edition n'etait jamais stagee,
-      # `git status` restait propre et `git diff` vide EN AYANT TORT, donc un producteur appliquant la
-      # discipline de preuve obtenait un faux negatif et declarait le critere tenu de bonne foi.
+      # ⚠ LA RACINE `CLAUDE.md` N'EST PAS FLAGUEE, ET CE N'EST PAS UN OUBLI. La flaguer protegerait
+      # notre copie composee de partir dans le livrable — mais sur un depot qui TRACKE sa racine
+      # `CLAUDE.md`, c'est-a-dire tout projet cree par la fleet puisque le template en pose un, un
+      # producteur ne peut plus livrer ce fichier. Effet de bord mesure : son edition n'est jamais
+      # stagee, `git status` reste propre et `git diff` vide EN AYANT TORT, donc un producteur
+      # appliquant la discipline de preuve obtient un faux negatif et declare le critere tenu de
+      # bonne foi.
       # L'environnement neutralisait l'instrument de preuve qu'il exige par ailleurs.
       # Le Scaffold n'ecrase plus un `CLAUDE.md` tracke (il n'y a donc plus rien a masquer), et le
       # cas non-tracke reste couvert par `.git/info/exclude`, qui lui ne ment a personne.
@@ -569,8 +569,8 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # `sha` REACHED THE GIT COMMAND LINE UNVERIFIED, IN LAST POSITION AND WITHOUT `--`. An argument
     # starting with `-` is an OPTION to git, not a revision -- and the second call here is the one
     # that carries the forge credentials and touches the network. The sibling checks two lines up
-    # (`base`, `feature`) already went through `GitRef.valid?/1`; this argument was the one that did
-    # not, on the same `with`, in the same function.
+    # (`base`, `feature`) already go through `GitRef.valid?/1`; this argument is on the same `with`,
+    # in the same function, and must go through it too.
     #
     # `GitRef.valid?/1` and not a hex-only test: this field legitimately holds a ref as well as a
     # sha, and the validator is the one every other ref on this path uses. Measured against what it
@@ -624,11 +624,11 @@ defmodule Fleet.ProjectBootstrap.Phase do
     # pas pris : le verrou n'a pas ete pose, le tick suivant retente, et un echec durable remonte
     # sous son propre nom au lieu de produire un juge aveugle.
     @doc """
-    A0.5 (chantier rails, mesuré au banc 2026-08-18) — refreshes `refs/lcars/base` ALONE on a live
+    A0.5 (mesuré au banc) — refreshes `refs/lcars/base` ALONE on a live
     workspace, no reset, no clean, no `/clear`.
 
     The hole it closes sits at the INTERSECTION of two deliberate decisions: an instance-scoped
-    producer in rework is re-briefed in place without reprovision (2026-08-03 — the ticket's
+    producer in rework is re-briefed in place without reprovision (the ticket's
     context is an asset), and `refs/lcars/base` only moves inside the reprovision path (6-135 —
     "le re-brief déplace la base, donc le ref doit suivre"). A CONFLICT rework is precisely the
     case where the base HAS moved — measured: the pod merged its stale `lcars/base` ("Already up
