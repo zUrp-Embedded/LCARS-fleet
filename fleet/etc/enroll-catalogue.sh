@@ -21,12 +21,15 @@
 #   droits. Un catalogue nomme ses gens ; la recette dit ce qu'etre l'un d'eux permet.
 #
 # USAGE
-#   enroll-catalogue.sh --tofu-dir <dir> [--catalogue <root>] [--image <img>] [--repo <fleet-dir>]
+#   enroll-catalogue.sh --tofu-dir <dir> [--catalogue <root>]
+#                       [--image <img>] [--repo <fleet-dir>] [--release <bin>]
 #                       [--served "<roles deja servis par cette boite>"]
 #
-#   Deux chemins de lecture, selon ce qu'on a sous la main :
+#   TROIS chemins de lecture, selon ce qu'on a sous la main :
 #     --image <img>    une image livree   -> docker run --rm IMG roles-tfvars [<root>]
 #     --repo <dir>     un arbre avec mix  -> mix lcars.catalogue.roles <root>  (exige Elixir SUR L'HOTE)
+#     --release <bin>  une release posee  -> <bin> eval Fleet.Roster.eval_tfvars(<root>)
+#                                            (ni mix ni docker — le chemin du POSTE en livraison binaire)
 #   Sans l'un ni l'autre : le depot de ce script, s'il porte un mix.exs.
 #
 #   ⚠ PREFERER `--image`, ET CE N'EST PAS UN GOUT. `--repo` compile l'arbre source : il exige un
@@ -47,6 +50,7 @@ CATALOGUE=""
 TOFU_DIR=""
 IMAGE=""
 REPO=""
+RELEASE=""
 SERVED=""
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 
@@ -59,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --tofu-dir)  TOFU_DIR="${2:?}";  shift 2 ;;
     --image)     IMAGE="${2:?}";     shift 2 ;;
     --repo)      REPO="${2:?}";      shift 2 ;;
+    --release)   RELEASE="${2:?}";   shift 2 ;;
     # Les roles DEJA servis par cette boite (sortie d'un enrolement precedent, ou le defaut de
     # provision-lib). Sans eux, le PROV_ROLES rendu ici est complet pour CE catalogue et faux pour
     # la boite : le mint ne verrait plus les autres.
@@ -71,7 +76,9 @@ done
 # ⚠ `--catalogue` EST FACULTATIF AVEC `--image`, ET SON ABSENCE VEUT DIRE « CELUI DE L'IMAGE ».
 # Une image porte son catalogue ; lui en nommer un autre n'a de sens que pour en enroler un que
 # l'operateur apporte. Avec `--repo` il reste obligatoire : un arbre source en porte plusieurs.
-[[ -n "$CATALOGUE" || -n "$IMAGE" ]] || die "--catalogue <root> requis (ou --image, qui porte le sien)"
+# ⚠ ET `--release` PORTE LE SIEN AUSSI, pour la meme raison qu'une image : c'est la MEME release
+# a l'interieur. `Fleet.Catalogue.root()` rend le catalogue livre quand on ne nomme rien.
+[[ -n "$CATALOGUE" || -n "$IMAGE" || -n "$RELEASE" ]] || die "--catalogue <root> requis (ou --image / --release, qui portent le sien)"
 [[ -n "$TOFU_DIR"  ]] || die "--tofu-dir <dir> requis"
 [[ -d "$TOFU_DIR"  ]] || die "tofu-dir introuvable: $TOFU_DIR" 3
 
@@ -81,7 +88,7 @@ done
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
 # Le depot par defaut : ce script vit dans fleet/etc/, donc fleet/ est un cran au-dessus.
-[[ -n "$REPO" || -n "$IMAGE" ]] || REPO="$(cd "$HERE/.." && pwd)"
+[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/.." && pwd)"
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
 # Une seule autorite de lecture des deux cotes : `Fleet.Roster.tfvars/1`. Le
@@ -102,6 +109,32 @@ if [[ -n "$IMAGE" ]]; then
   # Sans `--catalogue`, la porte de l'image lit le SIEN : ni chemin, ni montage, ni droits.
   TFVARS="$("$DOCKER_BIN" run --rm ${MOUNT[@]+"${MOUNT[@]}"} "$IMAGE" roles-tfvars ${CATALOGUE:+"$CATALOGUE"} 2>/dev/null)" \
     || die "l'image ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
+elif [[ -n "$RELEASE" ]]; then
+  # ─── LA TROISIEME PORTE : LA RELEASE POSEE ────────────────────────────────────────────────────
+  #
+  # ⚠ CE N'EST PAS UN TROISIEME MECANISME, C'EST LE MEME. `--image` fait deja
+  # `docker run IMG roles-tfvars`, et cette porte-la n'est qu'un enrobage : l'entrypoint execute
+  # `"$RELEASE_BIN" eval "Fleet.Roster.eval_tfvars(...)"`. Docker n'y sert qu'a transporter la
+  # release. Quand la release est DEJA POSEE sur la machine, le detour n'a plus d'objet.
+  #
+  # POURQUOI IL MANQUAIT : les deux portes existantes couvrent la boite (`--image`, docker) et le
+  # poste en livraison SOURCE (`--repo`, mix). Un poste en livraison BINAIRE n'a ni l'un ni
+  # l'autre — pas de mix, c'est le geste R5 qui le veut ; pas d'image, c'est un poste. Il a la
+  # release, et personne ne savait la lire.
+  #
+  # Le mur etait connu et ecrit plus haut : « le banc est mort dessus sur la premiere machine
+  # neuve (2026-08-18, `mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
+  # ne vaut que pour qui a docker.
+  #
+  # ⚠ MEME FONCTION, MEME AUTORITE : `Fleet.Roster.eval_tfvars`. La regle de placement (siege /
+  # juge / ecrivain) reste en Elixir, testee — elle n'est reecrite ni ici, ni en jq, ni ailleurs.
+  SRC="release $RELEASE"
+  [[ -x "$RELEASE" ]] || die "release non executable : $RELEASE" 1
+  _arg="Fleet.Catalogue.root()"
+  [[ -n "$CATALOGUE" ]] && _arg="\"$CATALOGUE\""
+  TFVARS="$(env HOME="${TMPDIR:-/tmp}" RELEASE_TMP="${TMPDIR:-/tmp}" LCARS_TOOL_EVAL=1 \
+              "$RELEASE" eval "Fleet.Roster.eval_tfvars(${_arg})" 2>/dev/null)" \
+    || die "la release ne rend pas le roster de ${CATALOGUE:-son catalogue livre}" 2
 else
   SRC="depot $REPO"
   [[ -f "$REPO/mix.exs" ]] || die "pas de mix.exs dans $REPO (utiliser --image pour une install livree)" 1
@@ -188,7 +221,9 @@ say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""
 
-say "catalogue : ${CATALOGUE:-<celui de l image>} (lu via $SRC)"
+# ⚠ « celui de l image » ETAIT VRAI QUAND IL N'Y AVAIT QUE DEUX PORTES. Une release posee porte le
+# sien tout autant, et nommer le mauvais porteur envoie chercher un objet qui n'existe pas ici.
+say "catalogue : ${CATALOGUE:-<celui de la livraison>} (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"
 say "org       : ${ORG_LINE:-<non declaree>}"

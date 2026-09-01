@@ -121,9 +121,27 @@ apply() {
   GATE_PACKAGES=(python3-pytest bats procps)
   apt_ensure "${GATE_PACKAGES[@]}" || { p_fail "outillage du gate non installé (${GATE_PACKAGES[*]})"; verdict_apply; }
 
-  p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
-  run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
-  run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
+  # ⚠ L'OUTILLAGE `mix` NE SERT QU'AU BUILD, et en livraison binaire il n'y a pas de build. Le
+  # raisonnement est déjà écrit trois lignes plus haut pour les paquets du gate — « un besoin qui
+  # n'existe qu'ici, à la minute du build » — et il vaut a fortiori pour `hex` et `rebar` : la
+  # release est faite, `deploy-release.sh` la voit et ne compile pas.
+  #
+  # MESURE DU 2026-09-01, banc 2006 : `FAIL 60-deploy: commande en échec (rc=127) : … mix
+  # local.hex` — `mix` n'existe pas sur une cible binaire, c'est le geste R5 qui le veut. Le module
+  # mourait ici, donc `deploy-release.sh` n'était jamais appelé, donc la release du PAQUET n'était
+  # jamais posée. Un paquet complet, refusé par un outil de compilation absent.
+  #
+  # ⚠ LES TROIS PAQUETS DU GATE RESTENT, eux. Le commentaire ci-dessus les dit « pas de runtime »,
+  # mais il ajoute que « plusieurs sondes lisent `pgrep` (procps) » — deux affirmations qui ne
+  # tiennent pas ensemble. Tant que la seconde n'est pas mesurée, les retirer serait parier sur la
+  # première ; ils sont légers, et un doute non mesuré ne se tranche pas dans un geste de passage.
+  if prov_delivery_is_binary; then
+    p_ok "outillage mix non posé — livraison binaire, la release est déjà bâtie"
+  else
+    p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
+    run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
+    run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
+  fi
 
   run_step --ok 3 "build de la release" -- \
     as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/deploy-release.sh"

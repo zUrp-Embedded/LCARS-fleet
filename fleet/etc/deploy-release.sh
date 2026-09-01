@@ -251,7 +251,20 @@ done < "$MANIFEST"
 [[ "${#MF_FILES[@]}" -gt 0 ]] || die "manifest vide : $MANIFEST"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
-command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
+# ⚠ `mix` N'EST EXIGE QUE POUR CONSTRUIRE, ET CE SCRIPT NE CONSTRUIT PAS TOUJOURS. `build_release()`
+# sait deja lire le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » —
+# mais ce garde s'executait AVANT, et refusait donc la seule livraison qui n'a rien a compiler.
+#
+# MESURE DU 2026-09-01, banc 2006 : `install: ERREUR — mix introuvable`, sur une machine dont le
+# paquet portait la release COMPLETE, prete a poser. Le script mourait dix lignes avant la fonction
+# qui aurait dit « rien a batir ».
+#
+# ⚠ ET LE TAMPON EST LU ICI COMME AILLEURS, PAS DEDUIT. Ce script est autonome — il ne source pas la
+# lib du rail, c'est ecrit plus bas — donc il refait le meme test que `prov_delivery` au lieu de
+# l'appeler. Deux lecteurs, une seule convention : le fichier a la racine du paquet.
+if [[ ! -f "$RUNTIME_DIR/../.source-revision" ]]; then
+  command -v mix >/dev/null 2>&1 || die "mix introuvable (Elixir requis pour construire la release)"
+fi
 
 # Both guards BEFORE the build: a refusal must cost a second, not a full gate.
 # shellcheck disable=SC2119  # sans argument = le defaut `$EUID` : c'est le cas de production.

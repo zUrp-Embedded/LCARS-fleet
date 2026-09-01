@@ -388,31 +388,54 @@ apply() {
   fi
 
   local tree; tree="$(repo_root)/fleet"
-  p_step "outillage mix pour dériver le roster ($PROV_HUMAN)"
-  run_quiet as_human env -C "$tree" mix local.hex --force \
-    || { p_fail "hex non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
-  run_quiet as_human env -C "$tree" mix local.rebar --force \
-    || { p_fail "rebar non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
-  run_step "dépendances Elixir" -- as_human env -C "$tree" mix deps.get \
-    || { p_fail "dépendances Elixir non récupérables ($tree) — sans elles l'arbre ne compile pas"; verdict_apply; }
+  local ref_catalogue="" refout
 
-  local ref_catalogue refout
-  refout="$(mktemp "${TMPDIR:-/tmp}/prov-catroot.XXXXXX")" \
-    || { p_fail "tmp impossible pour la dérivation du catalogue"; verdict_apply; }
-  as_human env -C "$tree" LCARS_TOOL_EVAL=1 mix run --no-start \
-    -e 'IO.puts("LCARS_CATALOGUE_ROOT=" <> Fleet.Catalogue.root())' >"$refout" 2>&1 || true
-  ref_catalogue="$(grep -m1 '^LCARS_CATALOGUE_ROOT=' "$refout" | cut -d= -f2- || true)"
-  if [[ ! -d "$ref_catalogue" ]]; then
-    p_fail "catalogue de référence introuvable dans $tree (rendu : « ${ref_catalogue:-<rien>} »)"
-    p_fail "dernières lignes de mix : $(tail -n3 "$refout" | tr '\n' '·')"
-    rm -f "$refout"; verdict_apply
+  # ⚠ DEUX FACONS DE LIRE LE MEME CATALOGUE, ET C'EST LA LIVRAISON QUI CHOISIT. En BINAIRE il n'y a
+  # ni mix ni image : la release est posee, et elle porte son catalogue. Tout ce bloc `mix` était
+  # donc impossible — mesure du 2026-09-01, banc 2006 : `FAIL 48-forge-host: commande en échec
+  # (rc=127) : … mix local.hex`, sur une machine ou le roster etait parfaitement lisible autrement.
+  #
+  # ⚠ ET CE N'EST PAS UN SECOND MECANISME. `enroll-catalogue.sh` appelle
+  # `Fleet.Roster.eval_tfvars` par les trois portes ; l'entrypoint docker ne fait rien d'autre que
+  # ça depuis toujours. Docker et mix ne sont que des moyens d'ATTEINDRE la fonction — quand la
+  # release est deja la, le detour n'a plus d'objet.
+  if prov_delivery_is_binary; then
+    p_ok "roster lu dans la release posée — ni mix ni docker (livraison binaire)"
+  else
+    p_step "outillage mix pour dériver le roster ($PROV_HUMAN)"
+    run_quiet as_human env -C "$tree" mix local.hex --force \
+      || { p_fail "hex non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
+    run_quiet as_human env -C "$tree" mix local.rebar --force \
+      || { p_fail "rebar non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
+    run_step "dépendances Elixir" -- as_human env -C "$tree" mix deps.get \
+      || { p_fail "dépendances Elixir non récupérables ($tree) — sans elles l'arbre ne compile pas"; verdict_apply; }
+
+    refout="$(mktemp "${TMPDIR:-/tmp}/prov-catroot.XXXXXX")" \
+      || { p_fail "tmp impossible pour la dérivation du catalogue"; verdict_apply; }
+    as_human env -C "$tree" LCARS_TOOL_EVAL=1 mix run --no-start \
+      -e 'IO.puts("LCARS_CATALOGUE_ROOT=" <> Fleet.Catalogue.root())' >"$refout" 2>&1 || true
+    ref_catalogue="$(grep -m1 '^LCARS_CATALOGUE_ROOT=' "$refout" | cut -d= -f2- || true)"
+    if [[ ! -d "$ref_catalogue" ]]; then
+      p_fail "catalogue de référence introuvable dans $tree (rendu : « ${ref_catalogue:-<rien>} »)"
+      p_fail "dernières lignes de mix : $(tail -n3 "$refout" | tr '\n' '·')"
+      rm -f "$refout"; verdict_apply
+    fi
+    rm -f "$refout"
   fi
-  rm -f "$refout"
 
   local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
   chown "$PROV_HUMAN" "$enroll" \
     || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" --repo "$tree" --catalogue "$ref_catalogue" \
+  # La porte suit la livraison : `--release` en binaire (elle porte son catalogue, donc pas de
+  # `--catalogue`), `--repo` + le catalogue derive en source. Une seule ligne d'appel, deux jeux
+  # d'arguments — le script, lui, appelle la MEME fonction dans les deux cas.
+  local -a enroll_src
+  if prov_delivery_is_binary; then
+    enroll_src=(--release "${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}")
+  else
+    enroll_src=(--repo "$tree" --catalogue "$ref_catalogue")
+  fi
+  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" "${enroll_src[@]}" \
     || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
