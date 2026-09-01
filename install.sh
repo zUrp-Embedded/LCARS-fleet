@@ -618,9 +618,39 @@ if [[ "$RAIL" == "box" ]]; then
     exec "$SCRIPT_DIR/fleet/deploy/box" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
+  # ─── L'ARITÉ SE DÉCLARE, ELLE NE SE SUPPOSE PAS ────────────────────────────────────────────────
+  #
+  # ⚠ CETTE BOUCLE AVANÇAIT DE DEUX EN DEUX, ET UN DRAPEAU DE `PASSTHRU` EST IMPAIR. `--disposable`
+  # y pousse UN seul jeton (l. 132) — c'est le seul —, donc dès qu'il est présent, tout ce qui suit
+  # tombe sur des index décalés d'un cran et AUCUN `case` ne le voit.
+  #
+  # MESURE DU 2026-09-01 : `--box --bench --disposable --port-ssh 2223 --forge-project alice4` fait
+  # partir `bench-up` avec ZÉRO argument traduit — il repart sur ses défauts et se fait refuser par
+  # son propre pré-vol des ports. Et `--box --disposable --human alice` sort 0 : `--human`, drapeau
+  # du rail POSTE que la ligne du dessous doit REFUSER, est avalé sans un mot.
+  #
+  # ⚠ L'ARITÉ EST DÉCLARÉE, ET UN DRAPEAU INCONNU EST REFUSÉ. Deviner « c'est sûrement une paire »
+  # est exactement ce qui a produit le défaut : le prochain drapeau solo ajouté à `PASSTHRU` le
+  # reproduirait en silence. Ici il fait rater la porte, en se nommant.
+  #
+  # ⚠ ET `--disposable` N'EST PAS TRADUIT POUR LA BOÎTE — c'est un FAIT, pas un oubli de ce
+  # correctif : la destination jetable n'a aujourd'hui aucun geste côté boîte, et son transport
+  # passe par `PASSTHRU` vers `provision` (l. 151), que ce rail-ci n'appelle pas.
+  passthru_arite() { # passthru_arite <drapeau> -> 2 (drapeau + valeur) · 1 (solo) · 0 (inconnu)
+    case "$1" in
+      --disposable) echo 1 ;;
+      --substrate|--port-forge|--port-deck|--port-ssh|--forge-project|--env|--human|--only) echo 2 ;;
+      *) echo 0 ;;
+    esac
+  }
   _box_reject=()
   _i=0
   while [[ "$_i" -lt "${#PASSTHRU[@]}" ]]; do
+    _arite="$(passthru_arite "${PASSTHRU[$_i]}")"
+    if [[ "$_arite" -eq 0 ]]; then
+      _box_reject+=("${PASSTHRU[$_i]} (arité non déclarée dans la traduction de la boîte — la deviner décalerait tout ce qui suit, en silence)")
+      break
+    fi
     case "${PASSTHRU[$_i]}" in
       --forge-project)
         if [[ "$WITH_BENCH" -eq 1 ]]; then
@@ -653,7 +683,7 @@ if [[ "$RAIL" == "box" ]]; then
       --env|--human|--only)
         _box_reject+=("${PASSTHRU[$_i]} (drapeau du rail POSTE : il pilote « provision », que la boite n'appelle pas)") ;;
     esac
-    _i=$((_i + 2))
+    _i=$((_i + _arite))
   done
   if [[ "${#_box_reject[@]}" -gt 0 ]]; then
     echo ""

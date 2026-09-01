@@ -607,6 +607,49 @@ SPY
   [[ "$output" == *"--deck-port 21091"* ]]
 }
 
+# ─── L ARITE : UN SEUL DRAPEAU IMPAIR, ET IL DECALAIT TOUT CE QUI SUIT ──────────────────────────
+#
+# ⚠ LA BOUCLE DE TRADUCTION AVANCAIT DE DEUX EN DEUX. `--disposable` pousse UN seul jeton dans
+# `PASSTHRU` — c est le seul —, donc des qu il est present, tous les drapeaux suivants tombent sur
+# des index impairs et AUCUN `case` ne les voit. Mesure du 2026-09-01 : `--box --bench --disposable
+# --port-ssh 2223 --forge-project alice4` faisait partir `bench-up` avec ZERO argument.
+#
+# ⚠ ET LE SECOND EFFET EST PIRE QUE LE PREMIER : `--box --disposable --human alice` sortait 0.
+# `--human` est un drapeau du rail POSTE que cette boucle doit REFUSER ; decale, il etait avale sans
+# un mot. Un drapeau non traduit fait tourner le delegue sur ses defauts ; un drapeau non REFUSE
+# fait croire a un geste qui ne se produit pas.
+
+@test "ARITE : \`--disposable\` est IMPAIR, et ce qui le suit est traduit quand meme" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 --forge-project alice4 < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"--ssh-port 2223"* ]] \
+    || { echo "le port SSH n a pas ete traduit — la boucle est decalee : $output"; return 1; }
+  [[ "$output" == *"--project alice4"* ]] \
+    || { echo "le projet n a pas ete traduit — la boucle est decalee : $output"; return 1; }
+}
+
+@test "ARITE : un drapeau du rail POSTE reste REFUSE meme derriere \`--disposable\`" {
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --box --disposable --human alice < /dev/null
+  [ "$status" -ne 0 ] \
+    || { echo "un drapeau du rail POSTE a ete avale en silence : $output"; return 1; }
+  [[ "$output" == *"--human"* ]]
+}
+
+@test "ARITE : un drapeau dont l arite n est pas declaree fait RATER la porte, il ne se devine pas" {
+  # ⚠ C EST LA MOITIE QUI EMPECHE LE DEFAUT DE REVENIR. Deviner « c est surement une paire » est
+  # exactement ce qui l a produit : le prochain drapeau solo ajoute a `PASSTHRU` le reproduirait en
+  # silence. On simule cet ajout futur en poussant un drapeau que la table d arite ignore.
+  local fake; fake="$(_fake_tree 0 0)"
+  # `--substrate` a une arite declaree ; on la retire de la table pour jouer l oubli.
+  sed -i 's/    --substrate|--port-forge/    --port-forge/' "$fake/install.sh"
+  run bash "$fake/install.sh" --box --bench --substrate docker --forge-project alice4 < /dev/null
+  [ "$status" -ne 0 ] \
+    || { echo "un drapeau d arite inconnue a ete traverse en silence : $output"; return 1; }
+  [[ "$output" == *"arité non déclarée"* ]]
+}
+
 @test "PRECEDENCE : ce que l'operateur ecrit APRES \`--\` gagne sur la traduction" {
   # Le delegue lit en dernier-gagne ; la traduction est donc PREPOSEE. Celui qui nomme les deux
   # obtient celui qu'il a ecrit pour le delegue — sinon la porte deciderait a sa place.
