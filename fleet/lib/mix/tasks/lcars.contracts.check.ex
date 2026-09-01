@@ -28,6 +28,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   either has an executable check or it is not listed.
   """
 
+  alias Mix.Tasks.Lcars.Contracts.Check.SingleSource
   alias Mix.Tasks.Lcars.Contracts.Check.Support
 
   # Les combinateurs, les lecteurs de code et le parcours de corpus vivent dans `Support` — importes
@@ -35,9 +36,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # verdict y vit aussi : il decrit ce que les combinateurs RENDENT, il appartient donc a l'outil, et
   # le redefinir ici en ferait deux definitions d'une meme forme.
   import Mix.Tasks.Lcars.Contracts.Check.Support
-
-  @typedoc "Le verdict d'UN check — defini par `Support`, qui le fabrique."
-  @type result :: Support.result()
 
   use Mix.Task
 
@@ -109,14 +107,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         check_sp_adresser_un_agent(root),
         check_sourcers_set_strict(root),
         check_face_roots_provisioned(root),
-        check_toolchain_branch_single_source(root),
-        check_catalogue_roots_single_source(root),
-        check_private_dir_single_source(root),
-        check_system_account_single_source(root),
-        check_platform_root_single_source(root),
-        check_runtime_root_single_source(root),
-        check_face_roots_single_source(root),
-        check_ops_repo_single_source(root),
+        SingleSource.check_toolchain_branch_single_source(root),
+        SingleSource.check_catalogue_roots_single_source(root),
+        SingleSource.check_private_dir_single_source(root),
+        SingleSource.check_system_account_single_source(root),
+        SingleSource.check_platform_root_single_source(root),
+        SingleSource.check_runtime_root_single_source(root),
+        SingleSource.check_face_roots_single_source(root),
+        SingleSource.check_ops_repo_single_source(root),
         check_tool_descriptions_no_permuted_names(root),
         check_tool_grants_resolve(root),
         check_catalogue_enumerates_no_tools(root),
@@ -171,7 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
   # what the name claims (it long scanned only api/ws.ex, the last migrant).
   @doc false
-  @spec check_event_consumers_canon(String.t()) :: result()
+  @spec check_event_consumers_canon(String.t()) :: Support.result()
   def check_event_consumers_canon(root) do
     # The check's NAME claims the canon for ALL consumers; it long grepped ws.ex alone (the last
     # migrant), leaving the guarantee narrower than its label. The residue scan now covers
@@ -195,7 +193,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # "v1/v2.5" = external envelope vs internal flat (same version, two shapes), NOT two versions.
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   @doc false
-  @spec check_pipeline_v25_normalized(String.t()) :: result()
+  @spec check_pipeline_v25_normalized(String.t()) :: Support.result()
   def check_pipeline_v25_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
@@ -242,7 +240,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Every handler referenced in events.yaml must exist, otherwise the route is a
   # phantom handler tolerated silently.
   @doc false
-  @spec check_events_handlers_exist(String.t()) :: result()
+  @spec check_events_handlers_exist(String.t()) :: Support.result()
   def check_events_handlers_exist(root) do
     yaml = Path.join(root, "priv/event_router/events.yaml")
 
@@ -303,7 +301,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `gates/predicate.ex` passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste
   # dans `Fleet.Workflow`. Les deux couches se composent et aucune ne couvre l'autre.
   @doc false
-  @spec check_gates_no_runtime_seam(String.t()) :: result()
+  @spec check_gates_no_runtime_seam(String.t()) :: Support.result()
   def check_gates_no_runtime_seam(root) do
     rel = "lib/fleet/workflow/gates.ex"
     gates_path = Path.join(root, rel)
@@ -387,7 +385,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # chaine), `maybe_complete/2` (deux formes de retour sur quatre). Aucun n'aurait pu passer en
   # silence : c'est la propriete qui rend ce mur sur a poser.
   @doc false
-  @spec check_public_functions_spec(String.t()) :: result()
+  @spec check_public_functions_spec(String.t()) :: Support.result()
   def check_public_functions_spec(root) do
     files = Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
 
@@ -551,7 +549,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # sur la regle sans la nommer resterait invisible — c'est le prix d'une dependance qui ne
   # s'execute pas, et le nommage est deja la discipline du depot.
   @doc false
-  @spec check_pulled_states_declared(String.t()) :: result()
+  @spec check_pulled_states_declared(String.t()) :: Support.result()
   def check_pulled_states_declared(root) do
     rel = "lib/fleet/pilot/poller/reconciliation.ex"
 
@@ -632,7 +630,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @severity_max_empty "none"
 
   @doc false
-  @spec check_findings_severities_aligned(String.t()) :: result()
+  @spec check_findings_severities_aligned(String.t()) :: Support.result()
   def check_findings_severities_aligned(root) do
     rel_ex = "lib/fleet/findings_wire.ex"
     rel_json = "priv/workflow/schema/findings-v1.json"
@@ -749,7 +747,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Angle mort declare : un kind construit dynamiquement (variable, interpolation) est invisible —
   # aucun n'existe aujourd'hui, et un mur precis vaut mieux qu'un mur qui devine.
   @doc false
-  @spec check_escalation_kinds_closed(String.t()) :: result()
+  @spec check_escalation_kinds_closed(String.t()) :: Support.result()
   def check_escalation_kinds_closed(root) do
     rel = "lib/fleet/pilot/incident_registry/escalation.ex"
 
@@ -870,7 +868,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas n'existe pas
   # aujourd'hui et un compteur exact vaut mieux qu'un resolveur qui devine.
   @doc false
-  @spec check_visual_types_derived(String.t()) :: result()
+  @spec check_visual_types_derived(String.t()) :: Support.result()
   def check_visual_types_derived(root) do
     rel = "lib/fleet/labels.ex"
     ast = quoted!(root, rel)
@@ -963,7 +961,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # (string form `spec, "lifetime_scope"`) — future-proof against a regression that
   # would reintroduce the wrong path under another form.
   @doc false
-  @spec check_capprofile_lifetime_scope_path(String.t()) :: result()
+  @spec check_capprofile_lifetime_scope_path(String.t()) :: Support.result()
   def check_capprofile_lifetime_scope_path(root) do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
@@ -983,7 +981,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # than the grep: any CODE mention of `modop_incompatible` on a
   # `Map.get(spec, …)` line counts, even reformatted.
   @doc false
-  @spec check_capprofile_modop_incompatible_path(String.t()) :: result()
+  @spec check_capprofile_modop_incompatible_path(String.t()) :: Support.result()
   def check_capprofile_modop_incompatible_path(root) do
     residue_check(root, %{
       id: "capprofile.modop_incompatible_path",
@@ -1012,7 +1010,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # even a comment mention of TmuxBackend in the runtime config is
   # a resurrection signal to flag.
   @doc false
-  @spec check_launch_backend_containment(String.t()) :: result()
+  @spec check_launch_backend_containment(String.t()) :: Support.result()
   def check_launch_backend_containment(root) do
     rt = "config/runtime.exs"
     tb = "lib/fleet/spawner/launch_backend/tmux_backend.ex"
@@ -1053,7 +1051,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # the doc line (prose prefixed by a backtick, not `{:error,`) does not count. Unwiring the
   # real clause turns it RED again, whatever the doc says.
   @doc false
-  @spec check_mcp_required_real_backend(String.t()) :: result()
+  @spec check_mcp_required_real_backend(String.t()) :: Support.result()
   def check_mcp_required_real_backend(root) do
     pod = "lib/fleet/spawner/pod.ex"
     mcp = "lib/fleet/spawner/pod/mcp_provision.ex"
@@ -1093,7 +1091,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #      nobody chose for it, which is undetectable from the outside.
   # Unwiring any clause turns this RED, whatever the docs say.
   @doc false
-  @spec check_spawn_has_brief(String.t()) :: result()
+  @spec check_spawn_has_brief(String.t()) :: Support.result()
   def check_spawn_has_brief(root) do
     spawner = "lib/fleet/spawner.ex"
 
@@ -1134,7 +1132,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # in prose; `code_match?` excludes doc blocks, and the tuple-shape confirm excludes an inline mention).
   # Red if absent.
   @doc false
-  @spec check_skills_declared_present(String.t()) :: result()
+  @spec check_skills_declared_present(String.t()) :: Support.result()
   def check_skills_declared_present(root) do
     presence_check(root, %{
       id: "skills.declared_present",
@@ -1158,7 +1156,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # covered by the fail-loud validation of the broadcast at runtime (an unregistered type
   # crashes its emitter), so this check covers only the consumption side.
   @doc false
-  @spec check_events_registry_keys_aligned(String.t()) :: result()
+  @spec check_events_registry_keys_aligned(String.t()) :: Support.result()
   def check_events_registry_keys_aligned(root) do
     registry = registry_event_keys(root)
 
@@ -1325,7 +1323,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ⚠ This checker file is scanned too: its own evidence/note prose must AVOID the literal `{Plug.Cowboy,`
   # token (it would self-flag — strip_comment removes it from comments, not from string bodies).
   @doc false
-  @spec check_no_cowboy_bypass(String.t()) :: result()
+  @spec check_no_cowboy_bypass(String.t()) :: Support.result()
   def check_no_cowboy_bypass(root) do
     builder = "lib/fleet/event_router/listener.ex"
 
@@ -1383,7 +1381,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #       would arrive without ever leaving `:monitoring` → deadline not cancelled → kill at cycle 2).
   # Red if one is missing, OR if the band-aid `"forever" -> 60_000` (a HACK) reappears.
   @doc false
-  @spec check_result_deadline_cancelled(String.t()) :: result()
+  @spec check_result_deadline_cancelled(String.t()) :: Support.result()
   def check_result_deadline_cancelled(root) do
     pod = "lib/fleet/spawner/pod.ex"
     src = File.read!(Path.join(root, pod))
@@ -1443,7 +1441,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #     (3) LaunchEnv.build contains Fleet.Credentials.Gate.validate — the login-validity gate.
   # Red if one is missing. A gate that runs only in test guards nothing in prod.
   @doc false
-  @spec check_spawn_gates_wired(String.t()) :: result()
+  @spec check_spawn_gates_wired(String.t()) :: Support.result()
   def check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
@@ -1486,7 +1484,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `|>` (precedence > `||`) would apply flat_map to `[]`, not to the list of
   # workflow_maps (`(true && l) || [] |> map` ⇒ `l`, map skipped).
   @doc false
-  @spec check_gatekeeper_not_a_step(String.t()) :: result()
+  @spec check_gatekeeper_not_a_step(String.t()) :: Support.result()
   def check_gatekeeper_not_a_step(root) do
     dir = "priv/catalogue/workflow/canon/workflow_maps"
     abs = Path.join(root, dir)
@@ -1534,7 +1532,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # decision (resume_gate/gate_result) OR evaluating the gate (gate_decide) — otherwise
   # decision/outputs stay buried → false escalation / wrongful hard-gate.
   @doc false
-  @spec check_verdict_envelope_unwrapped(String.t()) :: result()
+  @spec check_verdict_envelope_unwrapped(String.t()) :: Support.result()
   def check_verdict_envelope_unwrapped(root) do
     step_run = "lib/fleet/pilot/step_run_consumer.ex"
     abs = Path.join(root, step_run)
@@ -1578,7 +1576,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # confirmation looser than the grep (`root` alone): the long marker may live partly
   # in a comment on the line, only `root` needs to survive in the code.
   @doc false
-  @spec check_no_root_runtime_guard(String.t()) :: result()
+  @spec check_no_root_runtime_guard(String.t()) :: Support.result()
   def check_no_root_runtime_guard(root) do
     presence_check(root, %{
       id: "runtime.no_root_boot_guard",
@@ -1603,7 +1601,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # cf. A-08 comment in the function) — reordering it breaks the boot WITHOUT a compile
   # error. Hence the honest check id: `boot.order_f8`.
   @doc false
-  @spec check_boot_order_f8(String.t()) :: result()
+  @spec check_boot_order_f8(String.t()) :: Support.result()
   def check_boot_order_f8(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
@@ -1706,7 +1704,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # the eval and renders as a plain backtick. So this wall does not ban the repository's habit of
   # quoting code in a test name — it requires the one backslash that makes the name inert.
   @doc false
-  @spec check_bats_descriptions_inert(String.t()) :: result()
+  @spec check_bats_descriptions_inert(String.t()) :: Support.result()
   def check_bats_descriptions_inert(root) do
     # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Ce check a d'abord nomme `test/` et `deploy/tests/` :
     # il ratait les six suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement
@@ -1791,7 +1789,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_site_build_inputs(String.t()) :: result()
+  @spec check_site_build_inputs(String.t()) :: Support.result()
   def check_site_build_inputs(root) do
     repo = Path.expand("..", root)
     wf = Path.join(repo, ".github/workflows/site.yml")
@@ -2035,7 +2033,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_gitea_template_expansion(String.t()) :: result()
+  @spec check_gitea_template_expansion(String.t()) :: Support.result()
   def check_gitea_template_expansion(root) do
     face = Path.join([root, "priv", "catalogue", "project_template", "main"])
     control = Path.join([face, ".gitea", "template"])
@@ -2119,7 +2117,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # il demande un catalogue invalide ET des images publiees, c'est-a-dire exactement le boot qu'un
   # test hermetique ne joue pas.
   @doc false
-  @spec check_catalogue_before_freeze(String.t()) :: result()
+  @spec check_catalogue_before_freeze(String.t()) :: Support.result()
   def check_catalogue_before_freeze(root) do
     app_src = File.read!(Path.join(root, "lib/fleet/application.ex"))
 
@@ -2166,7 +2164,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
   # compare les APPELS de `validate_*!` dans les deux corps de fonction.
   @doc false
-  @spec check_verifier_covers_rail(String.t()) :: result()
+  @spec check_verifier_covers_rail(String.t()) :: Support.result()
   def check_verifier_covers_rail(root) do
     rel = "lib/fleet/pilot/application.ex"
     ast = quoted!(root, rel)
@@ -2243,7 +2241,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # flipped ANYWHERE ELSE than `config/test.exs`: it silently moves a production daemon onto
   # evaluate-whatever-is-on-disk, and nothing in the code would look different.
   @doc false
-  @spec check_proven_image_regime(String.t()) :: result()
+  @spec check_proven_image_regime(String.t()) :: Support.result()
   def check_proven_image_regime(root) do
     files = Path.wildcard(Path.join(root, "config/*.exs"))
 
@@ -2314,7 +2312,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `@permit_empty_default` to `false` yields **101 failures out of 2698**. The permissive default
   # is load-bearing. What was missing was never the fail-closed posture — it was this lock.
   @doc false
-  @spec check_event_registry_loaded_before_children(String.t()) :: result()
+  @spec check_event_registry_loaded_before_children(String.t()) :: Support.result()
   def check_event_registry_loaded_before_children(root) do
     rel = "lib/fleet/event_router/application.ex"
     src = File.read!(Path.join(root, rel))
@@ -2367,7 +2365,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # system), a ReservedSeat (vulcan) counts as a seat = an account + a token, both inert.
   # Boundary can NEVER see any of this: three of the four lists are outside the BEAM.
   @doc false
-  @spec check_roles_provisioning_locked(String.t()) :: result()
+  @spec check_roles_provisioning_locked(String.t()) :: Support.result()
   def check_roles_provisioning_locked(root) do
     # Decoded reads (kind/forge_identity are yaml fields, not greppable shapes) — the task
     # context does not start :yaml_elixir by itself; same explicit start as lcars.sp.gen.
@@ -2488,21 +2486,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     }
   end
 
-  # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
-  defp tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
-
-  defp split_out_of_scope(lists) do
-    {out, kept} = Enum.split_with(lists, fn {_l, scope, _r, _rem} -> scope == :out_of_scope end)
-    {Enum.map(kept, fn {l, _scope, r, rem} -> {l, r, rem} end), Enum.map(out, &elem(&1, 0))}
-  end
-
-  defp skipped_note([]), do: ""
-
-  defp skipped_note(labels),
-    do:
-      " · NOT CHECKED here (tree absent from this artifact — runtime-only context): " <>
-        Enum.join(labels, ", ")
-
   # role_index is the role's slot in the hexspeak UUID — the schema bounds it (0..15) per file,
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
@@ -2534,7 +2517,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Les `ReservedSeat` sont hors perimetre : un siege n'a pas de `spec`, donc pas de SP a garnir.
   @adresser_bundle "adresser-un-agent"
   @doc false
-  @spec check_sp_adresser_un_agent(String.t()) :: result()
+  @spec check_sp_adresser_un_agent(String.t()) :: Support.result()
   def check_sp_adresser_un_agent(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
@@ -2608,7 +2591,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_roles_role_index_unique(String.t()) :: result()
+  @spec check_roles_role_index_unique(String.t()) :: Support.result()
   def check_roles_role_index_unique(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
 
@@ -2688,7 +2671,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # l'appel) et les cles DYNAMIQUES (une variable, un attribut de module). La premiere est attrapee
   # ici ; la seconde ne peut l'etre par personne — d'ou la regle posee au meme moment : une cle de
   # config se lit EN TOUTES LETTRES a son point d'usage, jamais assemblee.
-  @spec check_no_legacy_config_namespace(String.t()) :: result()
+  @spec check_no_legacy_config_namespace(String.t()) :: Support.result()
   def check_no_legacy_config_namespace(root) do
     scanned =
       ["lib", "test", "config"]
@@ -2729,7 +2712,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_sanctuary_contained(String.t()) :: result()
+  @spec check_sanctuary_contained(String.t()) :: Support.result()
   def check_sanctuary_contained(root) do
     # EVERY FILE OF THE THREE TREES, not the three source extensions. `**/*.{ex,exs,sh}` could not
     # see `bin/claude_launch.egress`, which carried the word, in a scanned directory, with no
@@ -2787,7 +2770,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
   @doc false
-  @spec check_sourcers_set_strict(String.t()) :: result()
+  @spec check_sourcers_set_strict(String.t()) :: Support.result()
   def check_sourcers_set_strict(root) do
     # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
@@ -2914,7 +2897,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   enumerations were removed the day this was written, across SP drafts, cap-profile comments, a brief
   and a project template.
   """
-  @spec check_catalogue_enumerates_no_tools(String.t()) :: result()
+  @spec check_catalogue_enumerates_no_tools(String.t()) :: Support.result()
   def check_catalogue_enumerates_no_tools(root) do
     id = "catalogue.enumerates_no_tools"
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
@@ -3010,7 +2993,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   argument — `IO.puts(:stderr, x)` en a deux et ne compte pas) ou la capture `&IO.puts/1`, sans
   appel a `Fleet.ReleaseDoor.claim_stdout!/0` dans le meme corps.
   """
-  @spec check_eval_doors_claim_stdout(String.t()) :: result()
+  @spec check_eval_doors_claim_stdout(String.t()) :: Support.result()
   def check_eval_doors_claim_stdout(root) do
     id = "runtime.eval_doors_claim_stdout"
 
@@ -3116,7 +3099,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   Derived from the authority, so there is nothing to maintain: `deftool` declares, cap-profiles copy,
   and a tool added or renamed tomorrow moves the wall by itself.
   """
-  @spec check_tool_grants_resolve(String.t()) :: result()
+  @spec check_tool_grants_resolve(String.t()) :: Support.result()
   def check_tool_grants_resolve(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
     id = "roles.tool_grants_resolve"
@@ -3224,7 +3207,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `issue_status`. One such stem exists today; the cost grows with the catalogue, and a tool whose
   segment ends in a non-plural `s` is the shape to avoid.
   """
-  @spec check_tool_descriptions_no_permuted_names(String.t()) :: result()
+  @spec check_tool_descriptions_no_permuted_names(String.t()) :: Support.result()
   def check_tool_descriptions_no_permuted_names(root) do
     id = "mcp.tool_descriptions_no_permuted_names"
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
@@ -3327,1206 +3310,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     end)
   end
 
-  @doc """
-  The tool-request branch is named in ONE place and copied everywhere else, and the copies are
-  checked here.
-
-  Six components must agree on that name: the provisioning module that creates the branch, the
-  gesture that protects it, the admiral skill that reads the letterbox, the converger that refuses
-  any other head, the root executor that asks the forge for that head, and `Fleet.Toolchain` that
-  declares it. Four are shell, one is python, one is the BEAM — they cannot share a literal, so
-  `Toolchain` DECLARES it and the others copy. A copy nobody verifies is not a single source of
-  truth; this check is what makes the claim true.
-
-  It also refuses `LCARS_SYSADMIN_BRANCH` anywhere under `deploy/`. That variable made the name
-  HALF tunable: turning it moved the shell side while the BEAM kept its own default, so the branch
-  was created and protected under one name while the reconciler polled another — manifests landing
-  where nobody looks, no message, a rail that looks calm.
-
-  ⚠ A PARTIAL LOCK IS THE DANGEROUS SHAPE, AND THIS ONE WAS PARTIAL FOR EIGHT DAYS. It held four
-  of five copies and its own note said "no tunable left". A lock that covers a fraction of its
-  fact is green while the rest drifts, and it reads like a guarantee — strictly worse than no lock
-  at all, which at least prompts someone to look. When a reader of this fact is added, it is added
-  to `mirrors` in the same gesture, or this doc is a lie again.
-  """
-  @spec check_toolchain_branch_single_source(String.t()) :: result()
-  def check_toolchain_branch_single_source(root) do
-    mirrors = [
-      "deploy/modules.d/52-ops-branch.sh",
-      "services/forge-gestures.sh",
-      "deploy/admiral/skills/system-issues/list.sh",
-      # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
-      # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
-      # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
-      "bin/lcars-toolchain-converge",
-      # FIFTH MIRROR, and it is the OTHER half of that security bound. The converger refuses any
-      # SHA that is not the head of the branch IT names; the root executor ASKS the forge for the
-      # head of the branch IT names. The bound only holds while both names agree — and until
-      # 2026-08-27 this wall watched the second and not the first. Measured: renaming the literal
-      # here alone left the check green, with the only root process on this machine converging on
-      # a branch nobody else writes to.
-      "services/privileged-executor.py"
-    ]
-
-    # ⚠ SCOPE IS DECIDED PER MIRROR, AND IT USED TO BE DECIDED BY ONE TREE FOR ALL FIVE. The guard
-    # asked `is deploy/ here?` and, on a miss, declared the whole check "NOT CHECKED" — including
-    # `services/` and `bin/`, which the image's build stage DOES carry (it excludes only `deploy`,
-    # `git-hooks`, `system-prompt`). So in the artifact where this gate runs most often, three
-    # readable mirrors went unread and the check reported a clean skip. A blanket scope is a
-    # coverage hole that answers "not my business" on files it is holding.
-    {checked, skipped} =
-      Enum.split_with(mirrors, fn rel ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
-      end)
-
-    id = "toolchain.branch_single_source"
-
-    remediation =
-      "copy the literal from `Fleet.Toolchain.branch/0` into the copy, and never reintroduce " <>
-        "`LCARS_SYSADMIN_BRANCH` — a name half of the rail can retune is a rail that splits in " <>
-        "silence"
-
-    expected =
-      case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
-        {:ok, src} ->
-          # ⚠ ANCRE EN FIN DE LIGNE, ET SANS CA LE FAIL-CLOSED ETAIT UN FAUX. Sans `\s*$`, la regex
-          # accepte un PREFIXE : `do: "tool_" <> "request"` se lit `"tool_"`, et le check compare
-          # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
-          # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
-          # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure du
-          # 2026-08-27, sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
-          case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
-            [_, name] -> name
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    case checked do
-      [] ->
-        %{
-          id: id,
-          remediation: "—",
-          status: :pass,
-          evidence: [],
-          note:
-            "NOT CHECKED here — no mirror tree present in this artifact (runtime-only context): " <>
-              Enum.join(skipped, ", ")
-        }
-
-      _ ->
-        if is_nil(expected) do
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: ["lib/fleet/toolchain.ex"],
-            # Fail-closed: an unreadable authority is not "nothing to compare", it is the one case
-            # where every mirror would pass by default.
-            note:
-              "`Fleet.Toolchain.branch/0` no longer reads as a frozen literal — the authority is " <>
-                "unreadable, so nothing was compared"
-          }
-        else
-          bad =
-            Enum.flat_map(checked, fn rel ->
-              case File.read(Path.expand(rel, root)) do
-                {:ok, body} ->
-                  cond do
-                    # ⚠ LA FORME, PAS UN NOM. Cette clause a epingle le litteral
-                    # `LCARS_SYSADMIN_BRANCH` — donc un quatrieme lecteur qui a nomme sa
-                    # variable AUTREMENT est passe au vert en rendant la borne reglable.
-                    # Un mur qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse
-                    # est qu'un nom de branche vienne d'une expansion, quel que soit son nom.
-                    Regex.match?(~r/\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[\}:]/, body) ->
-                      [
-                        {rel,
-                         "derives the branch from an expansion — the name is frozen, not tunable"}
-                      ]
-
-                    # THE SAME REFUSAL, WRITTEN IN THE OTHER LANGUAGE THIS LIST NOW HOLDS. The
-                    # clause above refuses a shell expansion; a python mirror cannot produce one,
-                    # so on its own it would have watched a file against a shape that file can
-                    # never take. The tunable gesture in python is a read from the environment —
-                    # and in `privileged-executor.py` the line above the branch is exactly that
-                    # (`os.environ.get("LCARS_OPS_REPO", …)`), so the half-tunable this wall
-                    # exists to refuse is one copy-paste away.
-                    Regex.match?(
-                      ~r/os\.(?:environ\.get|getenv)\(\s*["'][^"']*BRANCH|os\.environ\[\s*["'][^"']*BRANCH/,
-                      body
-                    ) ->
-                      [
-                        {rel,
-                         "reads the branch from the environment — the name is frozen, not tunable"}
-                      ]
-
-                    String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
-                      [{rel, "carries LCARS_SYSADMIN_BRANCH — the name is frozen, not tunable"}]
-
-                    not String.contains?(body, "\"#{expected}\"") ->
-                      [{rel, "does not carry the literal #{inspect(expected)}"}]
-
-                    true ->
-                      []
-                  end
-
-                _ ->
-                  [{rel, "unreadable"}]
-              end
-            end)
-
-          if bad == [] do
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: checked,
-              note:
-                "#{inspect(expected)} declared by Fleet.Toolchain.branch/0 and copied by the " <>
-                  "#{length(checked)} readers that carry it; no tunable left" <>
-                  skipped_note(skipped)
-            }
-          else
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: Enum.map(bad, &elem(&1, 0)),
-              note:
-                "authority says #{inspect(expected)} — " <>
-                  Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-                  skipped_note(skipped)
-            }
-          end
-        end
-    end
-  end
-
-  @doc """
-  The two catalogue roots are declared ONCE in `Fleet.Layout` and copied into the shell, and the
-  copies are checked here.
-
-  `catalogues_shipped_dir/0` (`@platform_root` + `@catalogues_dirname`) is where the IMAGE deposits
-  its seeds; `catalogues_installed_dir/0` (`@installed_catalogues_root`) is the cache the forge
-  restores into. Nine files carry one of the two: the BEAM declares them, the Dockerfile CREATES
-  the shipped tree, the manifest creates the installed one, and five shell/CLI readers copy them.
-  They cannot share a literal across the language boundary, so `Layout` DECLARES and the rest copy.
-
-  ⚠ `bin/lcars` ALREADY NAMED THIS LOCK, AND THE LOCK DID NOT EXIST. Its comment reads: *"C'est un
-  fait ecrit deux fois, dans deux langages qui ne peuvent pas s'appeler — la meme forme que les
-  listes de roles verrouillees par `mix lcars.contracts.check`"*. It named the pattern, named the
-  tool, and nothing held it. Naming a cost is not paying it.
-
-  ⚠ AND TWO WITNESSES PINNED THE LITERAL WITHOUT KNOWING THE AUTHORITY.
-  `forge_host_reach.bats` asserts the exact strings `/opt/lcars/catalogues/web-demo` and
-  `COPY catalogues /opt/lcars/catalogues`. Move `@platform_root` and both stay GREEN on the old
-  value — a witness that pins a literal defends the literal, not the agreement.
-
-  What breaks without this: the fleet reads seeds where the image never wrote them. `bin/lcars`
-  says when it hurts most — the CLI shows the cache in DEGRADED mode, release unreachable, which
-  is precisely the moment the operator has no second source to cross-check against.
-  """
-  @spec check_catalogue_roots_single_source(String.t()) :: result()
-  def check_catalogue_roots_single_source(root) do
-    id = "layout.catalogue_roots_single_source"
-
-    remediation =
-      "copy the value from `Fleet.Layout.catalogues_shipped_dir/0` / `catalogues_installed_dir/0` " <>
-        "into the shell copy — the BEAM and the shell cannot call each other, so the agreement is " <>
-        "what makes the single source true"
-
-    src =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, s} -> s
-        _ -> nil
-      end
-
-    attr = fn name ->
-      with true <- is_binary(src),
-           # Ancre de fin de ligne : une valeur composee (`"/opt/" <> "lcars"`) doit rendre
-           # l'autorite ILLISIBLE, pas un prefixe silencieusement tronque.
-           [_, v] <- Regex.run(~r/@#{name}\s+"([^"]+)"\s*$/m, src) do
-        v
-      else
-        _ -> nil
-      end
-    end
-
-    platform = attr.("platform_root")
-    dirname = attr.("catalogues_dirname")
-    installed = attr.("installed_catalogues_root")
-
-    if is_nil(platform) or is_nil(dirname) or is_nil(installed) do
-      # Fail-closed, same rule as its sibling: an unreadable authority is not "nothing to compare",
-      # it is the one case where every mirror passes by default.
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/layout.ex"],
-        note:
-          "Fleet.Layout no longer reads as three frozen literals (@platform_root, " <>
-            "@catalogues_dirname, @installed_catalogues_root) — nothing was compared"
-      }
-    else
-      shipped = Path.join(platform, dirname)
-
-      mirrors = [
-        {"bin/lcars", ~r/CAT_SHIPPED="\$\{LCARS_CATALOGUES_SHIPPED:-#{Regex.escape(shipped)}\}"/,
-         "the CLI's shipped-catalogue default"},
-        {"bin/lcars", ~r/CAT_DIR="\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}"/,
-         "the CLI's installed-catalogue default"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_DEMO_CATALOGUE:-#{Regex.escape(shipped)}\//,
-         "the demo catalogue the forge gesture publishes"},
-        {"services/forge-gestures.sh", ~r/\$\{LCARS_CATALOGUES_DIR:-#{Regex.escape(installed)}\}/,
-         "the installed root the forge gesture reads"},
-        # ⚠ LE CREATEUR, PAS UN LECTEUR — et c'est le miroir qui compte le plus. Si le `COPY` ne
-        # suit pas l'autorite, la fleet lit un arbre que l'image n'a jamais ecrit.
-        {"deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
-         "the image COPY that creates the shipped tree"},
-        {"deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
-         "the manifest row that creates the installed tree"},
-        {"deploy/lib/provision-lib.sh",
-         ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(installed)}\}"/,
-         "the provisioning default"}
-      ]
-
-      # ⚠ LE PERIMETRE SE DIT PAR MIROIR. `bin/` et `services/` partent avec l'image, `deploy/` non
-      # (le stage `build` l'exclut explicitement). Un perimetre decide sur un seul arbre declarerait
-      # « NOT CHECKED » sur quatre fichiers presents — la faute corrigee le meme jour sur les deux
-      # verrous voisins.
-      {checked, skipped} =
-        Enum.split_with(mirrors, fn {rel, _rx, _what} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
-        end)
-
-      bad =
-        Enum.flat_map(checked, fn {rel, rx, what} ->
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} ->
-              if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-
-            _ ->
-              [{rel, "unreadable"}]
-          end
-        end)
-
-      skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-      if bad == [] do
-        %{
-          id: id,
-          remediation: "—",
-          status: :pass,
-          evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
-          note:
-            "shipped=#{inspect(shipped)} installed=#{inspect(installed)} declared by Fleet.Layout " <>
-              "and carried by the #{length(checked)} checked copies" <>
-              skipped_note(skipped_labels)
-        }
-      else
-        %{
-          id: id,
-          remediation: remediation,
-          status: :fail,
-          evidence: Enum.map(bad, &elem(&1, 0)),
-          note:
-            "authority says shipped=#{inspect(shipped)} installed=#{inspect(installed)} — " <>
-              Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-              skipped_note(skipped_labels)
-        }
-      end
-    end
-  end
-
-  @doc """
-  The secrets directory is DECLARED in five places and created in a sixth, and they must agree.
-
-  ## No authority is designated, and that is deliberate
-
-  Its four siblings in this section read ONE declaration and compare copies against it. This fact
-  has no such declaration to read: it is named by `@default_dir` in `Fleet.Credentials.RoleToken`,
-  by `PROV_TOKENS_DIR` in `provision-lib.sh`, by `LCARS_PRIVATE_DIR` in `deploy/accept`, and twice
-  more inside the box entrypoint's file paths. **Nobody has said which one prevails**, and choosing
-  here would be inventing an arbitration rather than checking one.
-
-  The manifest cannot serve as the authority either, and the reason is worth writing down: its row
-  is `dir <path> <mode> <owner> <rail>` — there is no NAME to ask. You cannot query it for "the
-  secrets directory"; you can only confirm that a path you already know is created there. A creator
-  is not a declaration.
-
-  So this check states the weaker claim that is actually true: **whatever the authority turns out
-  to be, the declarations agree, and the machine creates exactly the directory they name.** A
-  designation can be added later and this check keeps holding; a designation invented today would
-  be a decision no one made, written into a wall.
-
-  ## What breaks without it
-
-  `/home/private` is the most copied fact in the corpus. It holds the forge master token, the seed,
-  the role tokens and the uid map, in `0710 lcars-authority:fleet`. A declaration that drifts from
-  the created directory does not fail loudly: the daemon reads an empty directory and reports the
-  credential as absent — the same output as a machine that was never provisioned.
-  """
-  @spec check_private_dir_single_source(String.t()) :: result()
-  def check_private_dir_single_source(root) do
-    id = "layout.private_dir_single_source"
-
-    remediation =
-      "make every declaration of the secrets directory name the same path, and the manifest " <>
-        "create exactly that path — no authority is designated, so agreement IS the invariant"
-
-    # Chaque porteur : {fichier, regex de capture, ce qu'il est}. Le PERIMETRE se dit par fichier —
-    # `lib/` part avec l'image, `deploy/` non.
-    holders = [
-      # Ancre de fin de ligne, meme raison que les trois voisins : une valeur composee doit rendre
-      # la declaration ILLISIBLE, jamais un prefixe.
-      {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
-       "the BEAM's role-token directory"},
-      {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
-       "the provisioning default"},
-      {"deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
-       "the acceptance gate's default"},
-      # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
-      # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
-      # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's uid-map path"},
-      {"deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's master-token path"}
-    ]
-
-    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme desormais sa
-    # racine UNE fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au
-    # litteral des quatre autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus
-    # parfaitement d'accord — et la seule facon de faire taire ce faux rouge serait de RECOPIER le
-    # littéral dans provision-lib, c'est-a-dire de reintroduire la copie que ce mur existe pour
-    # interdire. Un mur qui punit la forme correcte pousse a la forme fausse.
-    #
-    # La resolution est DELIBEREMENT bornee aux defauts `: "${VAR:=valeur}"` de provision-lib, une
-    # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait
-    # pas resoudre reste telle quelle et le desaccord se voit — c'est le comportement d'avant.
-    prov_defauts =
-      case File.read(Path.expand("deploy/lib/provision-lib.sh", root)) do
-        {:ok, src} ->
-          ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
-          |> Regex.scan(src)
-          |> Map.new(fn [_, nom, val] -> {nom, val} end)
-
-        _ ->
-          %{}
-      end
-
-    resoudre = fn v ->
-      Regex.replace(~r/\$\{?([A-Z_][A-Z0-9_]*)\}?/, v, fn entier, nom ->
-        Map.get(prov_defauts, nom, entier)
-      end)
-    end
-
-    read_holder = fn {rel, rx, what} ->
-      case File.read(Path.expand(rel, root)) do
-        {:ok, body} ->
-          # Les deux corrections se composent et aucune ne suffit seule : `code_of/1` ecarte les
-          # declarations qui ne vivent que dans un commentaire, `resoudre/1` rend sa valeur a une
-          # declaration derivee. L'une repond a « ou lit-on ? », l'autre a « que vaut ce qu'on lit ? ».
-          case Regex.run(rx, code_of(body)) do
-            [_, v] -> {:ok, rel, what, resoudre.(v)}
-            _ -> {:unreadable, rel, what}
-          end
-
-        _ ->
-          {:absent, rel, what}
-      end
-    end
-
-    {in_scope, out} =
-      Enum.split_with(holders, fn {rel, _, _} ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
-      end)
-
-    results = Enum.map(in_scope, read_holder)
-    values = for {:ok, rel, what, v} <- results, do: {rel, what, v}
-
-    broken =
-      for {:unreadable, rel, what} <- results, do: {rel, "#{what}: declaration not readable"}
-
-    skipped = out |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-    cond do
-      # Moins de DEUX declarations lisibles : il n'y a pas d'accord a verifier. On le DIT, on ne
-      # rend pas un vert muet — c'est la regle de tout ce fichier.
-      length(values) < 2 and broken == [] ->
-        %{
-          id: id,
-          remediation: "—",
-          status: :pass,
-          evidence: [],
-          note:
-            "NOT CHECKED here — fewer than two declarations present in this artifact " <>
-              "(runtime-only context)" <> skipped_note(skipped)
-        }
-
-      broken != [] ->
-        %{
-          id: id,
-          remediation: remediation,
-          status: :fail,
-          evidence: Enum.map(broken, &elem(&1, 0)),
-          note:
-            "a declaration no longer reads as a frozen literal — " <>
-              Enum.map_join(broken, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-              skipped_note(skipped)
-        }
-
-      true ->
-        distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
-        [expected | _] = distinct
-
-        manifest_rel = "deploy/system.manifest"
-        manifest_scoped? = tree_scope(Path.expand("deploy", root)) == :required
-
-        manifest_ok? =
-          not manifest_scoped? or
-            case File.read(Path.expand(manifest_rel, root)) do
-              {:ok, m} -> Regex.match?(~r/^dir\s+#{Regex.escape(expected)}\s/m, m)
-              _ -> false
-            end
-
-        cond do
-          length(distinct) > 1 ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: Enum.map(values, fn {rel, _, _} -> rel end),
-              note:
-                "#{length(distinct)} different paths declared for one directory — " <>
-                  Enum.map_join(values, " · ", fn {f, what, v} -> "#{f} (#{what}): #{v}" end) <>
-                  skipped_note(skipped)
-            }
-
-          not manifest_ok? ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: [manifest_rel],
-              note:
-                "every declaration says #{inspect(expected)} but the manifest creates no such " <>
-                  "directory — the box would come up without it" <> skipped_note(skipped)
-            }
-
-          true ->
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: values |> Enum.map(fn {rel, _, _} -> rel end) |> Enum.uniq(),
-              note:
-                "#{length(values)} declaration(s) agree on #{inspect(expected)}" <>
-                  if(manifest_scoped?, do: ", and the manifest creates it", else: "") <>
-                  skipped_note(skipped)
-            }
-        end
-    end
-  end
-
-  @doc """
-  The SYSTEM forge account is named ONCE, in `Fleet.Credentials.ForgeIdentity`, and copied ten
-  times. This is what makes the ten agree.
-
-  ## Why this account, and why an authority had to be designated
-
-  `system_starfleet` is not a service among others. It is in the `Owners` team of the `fleet` org
-  (it owns every project repo), its email is in `allowed_emails/2` of the commit-identity gate (a
-  commit it signs passes the door), it is the default `forge_push_account`, and it sits in the
-  `push_whitelist_usernames` of protected branches. It is also the writing hand of the `starfleet`
-  role, which carries `forge_identity: false` in the canon precisely because every write of its own
-  goes through this account.
-
-  THREE INDEPENDENT DECLARATIONS EXISTED and none was designated: `@system_name` here,
-  `PROV_SYSTEM_ACCOUNT` in `provision-lib.sh`, and — the sharpest — `variable "system_account"` in
-  `forge.tf`, whose default is what actually CREATES the account and which nothing derives and
-  nothing compared. `roles.provisioning_locked` holds `roles`/`system_roles`/`writers`/`judges`/
-  `externals`; this name is in none of those lists, so the account that owns the org was created
-  from a literal outside every lock.
-
-  ⚖ user, 2026-08-27: the BEAM declaration prevails. The reason is structural, not a preference —
-  the account's IDENTITY derives from this literal (`@system_email`, `allowed_emails/2`,
-  `system_identity/0`) and cannot be moved without moving what the fleet signs as.
-
-  ## Why the value is not plumbed through to tofu
-
-  The obvious follow-up — emit `system_account` in `Fleet.Roster.tfvars/1` so tofu consumes it
-  instead of holding a literal — would make `Fleet.Application` reference `Fleet.Credentials`,
-  which is NOT in the root boundary's deps. That is an API change of a domain, a decision to be
-  argued on its own, not a side effect of writing a wall. So this check does what
-  `toolchain.branch_single_source` does for the branch name: one side DECLARES, the others copy,
-  and the copies are verified. Fewer copies would be better; copies nobody compares are the defect.
-  """
-  @spec check_system_account_single_source(String.t()) :: result()
-  def check_system_account_single_source(root) do
-    id = "forge.system_account_single_source"
-
-    remediation =
-      "copy the literal from `Fleet.Credentials.ForgeIdentity` `@system_name` — it is the " <>
-        "designated authority (user, 2026-08-27): the account's email, its signature and the " <>
-        "commit-identity gate all derive from it"
-
-    expected =
-      case File.read(Path.expand("lib/fleet/credentials/forge_identity.ex", root)) do
-        {:ok, src} ->
-          # Ancre de fin de ligne : voir la cicatrice du jumeau `toolchain.branch_single_source`.
-          case Regex.run(~r/@system_name\s+"([^"]+)"\s*$/m, src) do
-            [_, name] -> name
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/credentials/forge_identity.ex"],
-        note:
-          "`@system_name` no longer reads as a frozen literal — the authority is unreadable, so " <>
-            "nothing was compared"
-      }
-    else
-      e = Regex.escape(expected)
-
-      # Chaque miroir est ancre sur SON GESTE, pas sur la simple presence du nom : un commentaire,
-      # une phrase de doc ou un nom de fichier voisin ne doivent pas pouvoir satisfaire ce mur.
-      # `MUR 4 bis` d'`adminite_walls` a coute exactement cette lecon le meme jour — il etait
-      # satisfait par `lcars-authority-ask`, puis par un commentaire.
-      mirrors = [
-        # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
-        # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
-        # ⚠ CE MIROIR A CHANGE DE NATURE LE JOUR MEME OU IL A ETE ECRIT, et c'est un progres :
-        # `forge.tf` ne porte plus le litteral, il RECOIT la valeur par `roles.auto.tfvars.json`,
-        # projetee depuis l'autorite. Ce qui se garde ici n'est donc plus « la copie s'accorde »
-        # mais « il n'y a PLUS de copie » — un `default =` reintroduit rendrait a tofu le pouvoir
-        # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
-        # ce que la suppression a ferme.
-        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
-         "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
-         :forbidden},
-        {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
-         "the provisioning default (its token file derives from it)"},
-        {"deploy/deps/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
-         "the avatar map key"},
-        {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the human converger's fallback"},
-        {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the forge gesture's fallback"},
-        {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the token minter's fallback"},
-        {"deploy/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
-         "the admiral skill's fallback"},
-        {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
-        {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,
-         "the publish rewrite's system email"},
-        {"config/runtime.exs", ~r/FORGE_BOT_LOGIN"\)\s*\|\|\s*"#{e}"/,
-         "the runtime's push-account fallback"}
-      ]
-
-      {checked, skipped} =
-        Enum.split_with(mirrors, fn m ->
-          rel = elem(m, 0)
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
-        end)
-
-      bad =
-        Enum.flat_map(checked, fn
-          # Miroir INVERSE : ce qui est verifie est une ABSENCE. Un miroir qui doit porter le
-          # litteral et un miroir qui ne doit plus rien porter sont deux formes du meme invariant —
-          # « le nom vit a un seul endroit » — et le moteur les traite ensemble plutot que dans deux
-          # boucles qui deriveraient.
-          {rel, rx, what, :forbidden} ->
-            case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [{rel, what}], else: []
-              _ -> [{rel, "unreadable"}]
-            end
-
-          {rel, rx, what} ->
-            case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-              _ -> [{rel, "unreadable"}]
-            end
-        end)
-
-      skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-      cond do
-        checked == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
-                Enum.join(skipped_labels, ", ")
-          }
-
-        bad == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: checked |> Enum.map(&elem(&1, 0)) |> Enum.uniq(),
-            note:
-              "#{inspect(expected)} declared by ForgeIdentity @system_name; #{length(checked)} " <>
-                "sites checked (tofu RECEIVES it, it no longer copies it)" <>
-                skipped_note(skipped_labels)
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: Enum.map(bad, &elem(&1, 0)),
-            note:
-              "authority says #{inspect(expected)} — " <>
-                Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-                skipped_note(skipped_labels)
-          }
-      end
-    end
-  end
-
-  @doc """
-  The platform root is declared ONCE, in `Fleet.Layout`, and 121 literals in the corpus repeat it.
-  This makes them agree.
-
-  ## Why an allow-list of OTHER roots, and not a list of mirrors
-
-  Its four siblings name their mirrors. Here the mirrors are 22 files and growing — a hand-kept
-  list of that size is the defect, not the guard: it goes stale, and a stale list is a wall that
-  is green about files it no longer holds. So the check is INVERTED. It does not ask "do these 22
-  files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
-
-  `/opt` is not ours alone — the image also carries `/opt/homebrew`, `/opt/elixir-*`, `/opt/node-*`,
-  `/opt/bin`, `/opt/skills`, `/opt/token-saver` and the vendor launcher. Those are DECLARED below,
-  by name, each one a decision a reviewer can see — the same shape as
-  `no_check_passes_on_nothing`'s exemption list, and for the same reason: matching on a pattern
-  would let any new root earn its exemption by looking plausible.
-
-  What this catches, and nothing else did: `@platform_root` moves, the 22 literals do not, and the
-  set of roots in use no longer contains the authority's value. Measured 2026-08-28 as part of
-  redoing §21 from a derived sweep — `/opt/lcars` is the single most copied fact of the corpus
-  (121 occurrences, 22 files) and it had no lock at all.
-  """
-  @spec check_platform_root_single_source(String.t()) :: result()
-  def check_platform_root_single_source(root) do
-    id = "layout.platform_root_single_source"
-
-    remediation =
-      "every `/opt/...` path of LCARS derives from `Fleet.Layout` `@platform_root` — a second " <>
-        "root means half the box installs somewhere the other half never looks"
-
-    # ⚠ CHAQUE ENTREE EST UNE DECISION ECRITE, PAS UN MOTIF. Ce sont les racines de `/opt` qui
-    # n'appartiennent PAS a LCARS et vivent dans la meme image.
-    etrangeres = [
-      # la frontiere vendor N1 : le launcher de Claude, pose par le Dockerfile
-      "/opt/claude_launch",
-      # outillage du substrat, hors LCARS
-      "/opt/homebrew",
-      "/opt/bin",
-      "/opt/skills",
-      "/opt/my",
-      "/opt/token-saver",
-      # ⚠ DECOR DE TEMOIN, PAS UNE RACINE DE LA MACHINE. `deploy/tests/audit_machine.bats` fabrique
-      # ces deux-la pour mesurer que l'audit ne laisse PAS un prefixe commun couvrir un objet voisin
-      # (« /opt/decor couvrirait /opt/decor-autre »). Elles n'existent sur aucune image et ne sont
-      # posees par aucun module ; les taire par un motif `^/opt/decor` masquerait aussi une vraie
-      # racine qui s'appellerait ainsi un jour, donc elles sont nommees une par une, comme les autres.
-      "/opt/decor",
-      "/opt/decor-autre"
-    ]
-
-    expected =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, src} ->
-          case Regex.run(~r/@platform_root\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/layout.ex"],
-        note:
-          "`@platform_root` no longer reads as a frozen literal — the authority is unreadable, " <>
-            "so nothing was compared"
-      }
-    else
-      # ⚠ LES VERSIONNEES SONT ECARTEES PAR LEUR FORME, PAS PAR LEUR NOM : `/opt/elixir-1.18.4` et
-      # `/opt/node-20` portent leur version, donc les nommer serait une liste a maintenir a chaque
-      # montee de version — exactement le genre d'entretien qu'on ne fait pas.
-      # ⚠ ET LA FORME SE MESURE APRES TRONCATURE, pas avant — ma premiere ecriture l'ignorait et
-      # rendait CINQ fausses accusations. `/opt/elixir-${ELIXIR_VERSION}` laisse `/opt/elixir-` dans
-      # le code (la version est une expansion), et une ellipse de prose `/opt/lcars/...` laisse
-      # `/opt/...`. Une racine qui se termine par `-` est donc une racine CONSTRUITE, et une racine
-      # qui porte un point n'est pas une racine.
-      # ⚠ delimiteur `{}` : le sigil `~r|…|` prend `|` pour sa borne, et l'alternance le coupe.
-      versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
-      pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
-
-      # ⚠ LE REJET PORTE SUR LE CHEMIN RELATIF, ET C'EST UNE CORRECTION, PAS UN GOUT. Applique au chemin
-      # ABSOLU, ce motif rejetait TOUT le corpus des que le depot vivait sous un dossier nomme `tmp`,
-      # `deps` ou `_build` — mesure le 2026-08-31 : 4328 fichiers vus, 0 retenus, depuis un worktree
-      # pose sous `/tmp/`. Le check ne mentait pas pour autant (sa garde d'instrument rendait
-      # « INSTRUMENT BROKEN — measured nothing » plutot qu'un vert creux), mais il ne mesurait rien,
-      # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
-      {racines, fichiers} =
-        corpus_files(root)
-        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
-          case File.read(path) do
-            {:ok, body} ->
-              vus =
-                body
-                |> String.split("\n")
-                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                |> Enum.flat_map(&Regex.scan(~r|/opt/\.?[A-Za-z0-9_.-]+|, &1))
-                |> Enum.map(&hd/1)
-                |> Enum.map(&Regex.replace(~r|(/opt/\.?[A-Za-z0-9_-]+).*|, &1, "\\1"))
-                |> MapSet.new()
-
-              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
-
-            _ ->
-              {acc, n}
-          end
-        end)
-
-      inconnues =
-        racines
-        |> Enum.reject(&(&1 == expected))
-        |> Enum.reject(&(&1 in etrangeres))
-        |> Enum.reject(&Regex.match?(versionnee, &1))
-        |> Enum.reject(&(not Regex.match?(pas_une_racine, &1)))
-        |> Enum.sort()
-
-      cond do
-        # Garde d'instrument : l'autorite DOIT figurer parmi les racines vues. Si elle n'y est pas,
-        # le balayage n'a pas lu le corpus — et un ensemble vide n'accuse personne.
-        not MapSet.member?(racines, expected) ->
-          broken_result(id, "occurrence of #{expected} in the corpus")
-
-        inconnues == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "#{inspect(expected)} declared by Fleet.Layout @platform_root is the ONLY LCARS root " <>
-                "under /opt (#{fichiers} files carry a /opt path; #{length(etrangeres)} foreign " <>
-                "roots declared, versioned toolchains excluded by shape)"
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: inconnues,
-            note:
-              "authority says #{inspect(expected)} — #{length(inconnues)} other root(s) under " <>
-                "/opt are neither the authority nor declared foreign: " <>
-                Enum.join(inconnues, ", ")
-          }
-      end
-    end
-  end
-
-  @doc """
-  The runtime state root is declared ONCE, in `Fleet.Layout`, and fourteen literals repeat it.
-
-  `/run/lcars` carries the sockets of the authority, the privileged executor, MCP, egress and the
-  consoles — the whole surface by which a pod talks to the rest of the machine — plus the boot
-  markers (`/run/lcars-provision.rc`, `/run/lcars-humans.rc`) and the converger's refusal lock.
-  The derived sweep of 2026-08-28 ranked it SECOND of the corpus, with no source at all. The
-  authority (`@runtime_root`) was created that day; this check is what makes it true.
-
-  ## Two shapes, one rule
-
-  The tree (`/run/lcars/...`) and its flat siblings (`/run/lcars-provision.rc`) are both LCARS
-  runtime state, and both begin with the authority's value as a STRING. So one rule covers both:
-  every `/run` path that names LCARS must start with `@runtime_root`.
-
-  ## Where the value is derived, and where it cannot be
-
-  `Fleet.Spawner` has `Fleet.Layout` in its boundary deps, so `Pod.Egress` DERIVES its default and
-  its literal is gone. `Fleet.MCP` does NOT have Layout in its deps: `PodSocketSupervisor` keeps a
-  literal, because deriving it would widen a domain's API — a decision to argue on its own, not a
-  side effect of writing a wall. The shell and the manifest cannot call the BEAM at all. What this
-  check buys is that all of them AGREE, and the ones that can derive, do.
-  """
-  @spec check_runtime_root_single_source(String.t()) :: result()
-  def check_runtime_root_single_source(root) do
-    id = "layout.runtime_root_single_source"
-
-    remediation =
-      "every `/run` path of LCARS starts with `Fleet.Layout` `@runtime_root` — a second runtime " <>
-        "root means a socket written where nobody listens, on a tmpfs that forgets between boots"
-
-    expected =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, src} ->
-          case Regex.run(~r/@runtime_root\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/layout.ex"],
-        note:
-          "`@runtime_root` no longer reads as a frozen literal — the authority is unreadable, so " <>
-            "nothing was compared"
-      }
-    else
-      {vus, porteurs} =
-        corpus_files(root)
-        |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
-          case File.read(path) do
-            {:ok, body} ->
-              # ⚠ ON NE RETIENT QUE CE QUI NOMME LCARS. `/run/user`, `/run/systemd`, `/run/sshd`
-              # appartiennent au systeme : les compter ferait accuser la machine hote.
-              vus =
-                body
-                |> String.split("\n")
-                |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                |> Enum.flat_map(&Regex.scan(~r|/run/[A-Za-z0-9_.-]*lcars[A-Za-z0-9_.-]*|, &1))
-                |> Enum.map(&hd/1)
-                |> MapSet.new()
-
-              {MapSet.union(acc, vus), if(MapSet.size(vus) > 0, do: n + 1, else: n)}
-
-            _ ->
-              {acc, n}
-          end
-        end)
-
-      # ⚠ UN PREFIXE N'EST PAS UNE APPARTENANCE, ET LA MUTATION L'A MONTRE. `String.starts_with?`
-      # seul laisse passer `/run/lcarsx/...` : il commence bien par `/run/lcars`. C'est la TROISIEME
-      # coincidence de sous-chaine de la journee — `MUR 4 bis` etait satisfait par
-      # `lcars-authority-ask`, un nom de binaire. Le prefixe doit etre suivi d'une FRONTIERE : `/`
-      # pour l'arbre, `-` ou `.` pour les fichiers freres (`/run/lcars-provision.rc`), ou la fin.
-      sous_la_racine? = fn v ->
-        String.starts_with?(v, expected) and
-          (byte_size(v) == byte_size(expected) or
-             String.at(v, byte_size(expected)) in ["/", "-", "."])
-      end
-
-      orphelins = vus |> Enum.reject(sous_la_racine?) |> Enum.sort()
-
-      cond do
-        # Garde d'instrument : sans une seule occurrence de l'autorite, le balayage n'a rien lu et
-        # un ensemble vide n'accuse personne.
-        not Enum.any?(vus, sous_la_racine?) ->
-          broken_result(id, "occurrence of #{expected} in the corpus")
-
-        orphelins == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "every LCARS path under /run starts with #{inspect(expected)}, declared by " <>
-                "Fleet.Layout @runtime_root (#{MapSet.size(vus)} distinct ROOTS — the scan stops " <>
-                "at the first `/`, so `/run/lcars/authority/roles.sock` counts as `/run/lcars` — " <>
-                "across #{porteurs} files)"
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: orphelins,
-            note:
-              "authority says #{inspect(expected)} — #{length(orphelins)} LCARS path(s) under " <>
-                "/run do not start with it: " <> Enum.join(orphelins, ", ")
-          }
-      end
-    end
-  end
-
-  @doc """
-  The three project faces are declared ONCE, in `Fleet.Layout`, and this makes every `/home/projects`
-  root in the corpus agree with them.
-
-  `face_root/1` names three faces — `code`, `workshop`, `ops` — and RAISES on a fourth, so the
-  BEAM side cannot invent one. The shell, the Dockerfile and the manifest have no such door: they
-  write the paths as literals, twenty-nine times across the corpus. This check is what stops a
-  fourth root appearing there without passing through the declaration.
-
-  ⚠ ITS SIBLING `layout.face_roots_provisioned` CHECKS A DIFFERENT THING and the two are not
-  redundant: that one asks whether the machine CREATES the faces the code declares; this one asks
-  whether the corpus NAMES any root the code does not declare. Creation and agreement fail apart —
-  a face can be created under a name nobody reads, and a name can be read that nothing creates.
-
-  ## The one non-face tree, declared by name
-
-  `/home/projects.work` is the agents' work tree — six carriers, all under `.claude/hooks/`. It is
-  not a project face and has no business being derived from one; naming it here is the decision,
-  visible to a reviewer, rather than a pattern that would let any future `/home/projects.*` pass.
-  """
-  @spec check_face_roots_single_source(String.t()) :: result()
-  def check_face_roots_single_source(root) do
-    id = "layout.face_roots_single_source"
-
-    remediation =
-      "every `/home/projects*` root is a face declared by `Fleet.Layout.face_root/1` — a root the " <>
-        "declaration does not know is a tree the runtime will never look at"
-
-    src =
-      case File.read(Path.expand("lib/fleet/layout.ex", root)) do
-        {:ok, s} -> s
-        _ -> nil
-      end
-
-    # Les faces se lisent par leurs CLAUSES, pas par une liste : `face_root("code"), do: @code_root`
-    # dit a la fois le nom de la face et l'attribut qui porte sa racine.
-    faces =
-      if src do
-        ~r/def face_root\("([a-z]+)"\), do: @([a-z_]+)/
-        |> Regex.scan(src)
-        |> Enum.map(fn [_, face, attr] ->
-          case Regex.run(~r/@#{attr}\s+"([^"]+)"\s*$/m, src) do
-            [_, v] -> {face, v}
-            _ -> {face, nil}
-          end
-        end)
-      else
-        []
-      end
-
-    racines = faces |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1)
-
-    # ⚠ DECLARE PAR SON NOM, pas par un motif : l'arbre de travail des agents.
-    hors_face = ["/home/projects.work"]
-
-    cond do
-      length(faces) < 3 or Enum.any?(faces, fn {_, v} -> is_nil(v) end) ->
-        %{
-          id: id,
-          remediation: remediation,
-          status: :fail,
-          evidence: ["lib/fleet/layout.ex"],
-          note:
-            "the faces no longer read as frozen literals in Fleet.Layout " <>
-              "(#{length(faces)} clause(s) found, #{length(racines)} with a readable root) — " <>
-              "nothing was compared"
-        }
-
-      true ->
-        # `..` : ce check porte sur le depot ENTIER, pas sur `fleet/` seul. Le filtre residuel
-        # ne garde que ce que `@corpus_skip` ne couvre pas — et il porte sur le chemin relatif a
-        # la base REELLE du scan, pas a `root`, sans quoi tout ce qui vit hors de `fleet/` y
-        # echappe.
-        base = Path.expand(Path.join(root, ".."))
-
-        vues =
-          corpus_files(base)
-          |> Enum.reject(
-            &String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/")
-          )
-          |> Enum.reduce(MapSet.new(), fn path, acc ->
-            case File.read(path) do
-              {:ok, body} ->
-                if String.contains?(body, <<0>>) do
-                  acc
-                else
-                  body
-                  |> String.split("\n")
-                  |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                  |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
-                  |> Enum.map(&hd/1)
-                  # ⚠ LE POINT FINAL D'UNE PHRASE N'EST PAS UNE RACINE. « … sous /home/projects. »
-                  # rendait `/home/projects.`, une quatrieme face inexistante. Deuxieme fois qu'une
-                  # ponctuation pollue un extracteur aujourd'hui — `/opt/...` etait la premiere.
-                  |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
-                  |> MapSet.new()
-                  |> MapSet.union(acc)
-                end
-
-              _ ->
-                acc
-            end
-          end)
-
-        inconnues =
-          vues
-          |> Enum.reject(&(&1 in racines or &1 in hors_face))
-          |> Enum.sort()
-
-        cond do
-          not Enum.all?(racines, &MapSet.member?(vues, &1)) ->
-            broken_result(id, "occurrence of every declared face root in the corpus")
-
-          inconnues == [] ->
-            %{
-              id: id,
-              remediation: "—",
-              status: :pass,
-              evidence: [],
-              note:
-                "the #{length(racines)} faces declared by Fleet.Layout.face_root/1 " <>
-                  "(#{Enum.join(racines, ", ")}) are the only /home/projects roots in the corpus, " <>
-                  "plus #{length(hors_face)} declared non-face tree"
-            }
-
-          true ->
-            %{
-              id: id,
-              remediation: remediation,
-              status: :fail,
-              evidence: inconnues,
-              note:
-                "Fleet.Layout declares #{Enum.join(racines, ", ")} — " <>
-                  "#{length(inconnues)} other /home/projects root(s) are neither a face nor " <>
-                  "declared: " <> Enum.join(inconnues, ", ")
-            }
-        end
-    end
-  end
-
-  @doc """
-  The ops repository is named by `Fleet.Toolchain.ops_repo/0` and copied by the two services that
-  reach it without the BEAM. This makes the copies agree.
-
-  ⚠ ITS TWIN `toolchain.branch_single_source` LOCKS THE BRANCH OF THE SAME REPOSITORY AND NOT THE
-  REPOSITORY. The pair `<org>/<repo>` and the branch name are two halves of one address: the
-  converger refuses any SHA that is not the head of `<repo>@<branch>`, and the root executor asks
-  the forge for that head. Locking one half and not the other leaves the address half-guarded —
-  the exact shape §22 found for the branch itself, one field over.
-
-  `services/forge-gestures.sh` and `services/privileged-executor.py` carry the literal because they
-  run as CHILD processes of modules and cannot call the BEAM: measured, `provision-lib` exports
-  nothing and `deploy/provision` exports only its CLI flags. Their fallback is their only source —
-  it is not removed, it is held equal.
-  """
-  @spec check_ops_repo_single_source(String.t()) :: result()
-  def check_ops_repo_single_source(root) do
-    id = "toolchain.ops_repo_single_source"
-
-    remediation =
-      "copy the literal from `Fleet.Toolchain.ops_repo/0` — the repository and its branch are two " <>
-        "halves of one address, and the branch is already locked"
-
-    expected =
-      case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
-        {:ok, src} ->
-          case Regex.run(
-                 ~r/def ops_repo, do: Application\.get_env\([^,]+,\s*[^,]+,\s*"([^"]+)"\)/,
-                 src
-               ) do
-            [_, v] -> v
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/toolchain.ex"],
-        note:
-          "`Fleet.Toolchain.ops_repo/0` no longer reads as a frozen default — the authority is " <>
-            "unreadable, so nothing was compared"
-      }
-    else
-      e = Regex.escape(expected)
-
-      mirrors = [
-        {"services/forge-gestures.sh", ~r/LCARS_OPS_REPO:-#{e}\}/,
-         "the forge gesture's ops-repo fallback"},
-        {"services/privileged-executor.py", ~r/os\.environ\.get\("LCARS_OPS_REPO",\s*"#{e}"\)/,
-         "the root executor's ops-repo fallback"}
-      ]
-
-      {checked, skipped} =
-        Enum.split_with(mirrors, fn {rel, _, _} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
-        end)
-
-      bad =
-        Enum.flat_map(checked, fn {rel, rx, what} ->
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-            _ -> [{rel, "unreadable"}]
-          end
-        end)
-
-      labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-      cond do
-        checked == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
-                Enum.join(labels, ", ")
-          }
-
-        bad == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: Enum.map(checked, &elem(&1, 0)),
-            note:
-              "#{inspect(expected)} declared by Fleet.Toolchain.ops_repo/0 and copied by the " <>
-                "#{length(checked)} services that cannot call the BEAM" <> skipped_note(labels)
-          }
-
-        true ->
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: Enum.map(bad, &elem(&1, 0)),
-            note:
-              "authority says #{inspect(expected)} — " <>
-                Enum.map_join(bad, " · ", fn {f, why} -> "#{f}: #{why}" end) <>
-                skipped_note(labels)
-          }
-      end
-    end
-  end
-
   # A face's root must EXIST on the machine before anything can put a repo in it, and the runtime
   # cannot create it: the fleet runs as the human, `/home` belongs to root. Two creators write it,
   # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
@@ -4547,7 +3330,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # passing on an empty read. A renamed line would otherwise turn the guard off in silence, which is
   # worse than the drift it watches.
   @doc false
-  @spec check_face_roots_provisioned(String.t()) :: result()
+  @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
     entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
     module = Path.expand("deploy/modules.d/25-directories.sh", root)
@@ -4841,7 +3624,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # anti-regression test exists (deleting the test is visible to the gate — belt over
   # the ExUnit net).
   @doc false
-  @spec check_mcp_wire_inputschema(String.t()) :: result()
+  @spec check_mcp_wire_inputschema(String.t()) :: Support.result()
   def check_mcp_wire_inputschema(root) do
     acceptor = "lib/fleet/mcp/pod_socket_acceptor.ex"
     test = "test/fleet/mcp/pod_socket_test.exs"
@@ -4915,7 +3698,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # never distinguish "nothing wrong" from "nothing measured". It takes its root as an argument
   # precisely so a test can hand it one.
   @doc false
-  @spec check_mcp_tools_gated(String.t()) :: result()
+  @spec check_mcp_tools_gated(String.t()) :: Support.result()
   def check_mcp_tools_gated(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -4994,7 +3777,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # Meme posture d'instrument que son voisin : les findings sont des ABSENCES, et un parseur casse
   # produit les memes. Le plancher attrape un instrument aveugle, il ne fige pas le nombre d'outils.
   @doc false
-  @spec check_mcp_tool_effects(String.t()) :: result()
+  @spec check_mcp_tool_effects(String.t()) :: Support.result()
   def check_mcp_tool_effects(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
 
@@ -5073,7 +3856,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @modop_not_tools %{}
 
   @doc false
-  @spec check_modop_tools_granted(String.t()) :: result()
+  @spec check_modop_tools_granted(String.t()) :: Support.result()
   def check_modop_tools_granted(root) do
     profiles = catalogue_profiles(root)
     bundles = catalogue_modop_bundles(root)
@@ -5176,7 +3959,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # not happen is the two lists drifting, which is why this wall exists: every key the resolver
   # WRITES must be declared on one side or the other, and no key may be on both.
   @doc false
-  @spec check_cap_profile_project_keys(String.t()) :: result()
+  @spec check_cap_profile_project_keys(String.t()) :: Support.result()
   def check_cap_profile_project_keys(root) do
     resolver_rel = "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
     schema_rel = "priv/cap_profile/schema/cap-profile-v2.5.json"
@@ -5284,7 +4067,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # reach the forge; it owes the start. The false positive (a door that names Forge without
   # calling it) costs three lines; the false negative costs a bench session.
   @doc false
-  @spec check_eval_doors_start_transport(String.t()) :: result()
+  @spec check_eval_doors_start_transport(String.t()) :: Support.result()
   def check_eval_doors_start_transport(root) do
     files =
       Path.wildcard(Path.join(root, "lib/**/*.ex"))
@@ -5346,7 +4129,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
   # NAMED in the note; tree present and the default gone = the real defect, FAIL.
   @doc false
-  @spec check_catalogue_paths_locked(String.t()) :: result()
+  @spec check_catalogue_paths_locked(String.t()) :: Support.result()
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
@@ -5486,7 +4269,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # an inert capability is not covered — its boot refuses an unresolvable capability, never a
   # useless one.
   @doc false
-  @spec check_capabilities_exercisable(String.t()) :: result()
+  @spec check_capabilities_exercisable(String.t()) :: Support.result()
   def check_capabilities_exercisable(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -5630,7 +4413,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @seam_reflection [behaviour_info: 1]
 
   @doc false
-  @spec check_mcp_seam_surface(String.t(), [module()]) :: result()
+  @spec check_mcp_seam_surface(String.t(), [module()]) :: Support.result()
   def check_mcp_seam_surface(root, behaviours \\ @seam_behaviours) do
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
 
@@ -5792,7 +4575,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # This wall answers the DECIDABLE half of that: a declaration whose module holds no example runs
   # no test. It does NOT claim to notice a deleted test file or a shrunk suite — those need a
   # recorded floor, which is state that rots. One decidable question, answered without state.
-  @spec check_doctest_declarations_have_examples(String.t()) :: result()
+  @spec check_doctest_declarations_have_examples(String.t()) :: Support.result()
   def check_doctest_declarations_have_examples(root) do
     declarations =
       Path.wildcard(Path.join(root, "test/**/*.exs"))
@@ -5903,7 +4686,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ⚠ CE MUR NE RECLAME PAS UN TEMOIN PAR SOURCE. Cette moitie-la n'est pas decidable sans plancher
   # (130 sources sur 247 sans temoin canonique au 2026-08-30, dont 26 avec un satellite qui les
   # nomme) et la reclamer fabriquerait des coquilles « pas de test » que personne n'aurait verifiees.
-  @spec check_test_dirs_mirror_source(String.t()) :: result()
+  @spec check_test_dirs_mirror_source(String.t()) :: Support.result()
   def check_test_dirs_mirror_source(root) do
     {checked, strays} =
       Enum.reduce(@test_source_roots, {0, []}, fn {troot, sroots}, {n, acc} ->
@@ -5970,7 +4753,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # pas : la faute est une lettre, la consequence est une suite entiere qui figure dans l'arbre et
   # n'a jamais tourne. Ce mur remplace `tests.exs_are_discoverable`, qui ne voyait que l'Elixir —
   # deux murs qui se recouvrent apprennent a leur lecteur qu'aucun ne fait autorite.
-  @spec check_witness_naming(String.t()) :: result()
+  @spec check_witness_naming(String.t()) :: Support.result()
   def check_witness_naming(root) do
     service = ~w(README.md test_helper.exs shell_gate.sh refute.bash)
 
@@ -6050,7 +4833,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # du test) et `! cmd || { echo "…"; return 1; }` — le `||` rattrape, et son message nomme la cause
   # mieux que ne le ferait `refute`. Le remede pour les autres est `refute` / `refute_out`
   # (`refute.bash`) : un APPEL DE FONCTION est soumis a `errexit` ou qu'il soit dans le bloc.
-  @spec check_negations_bite(String.t()) :: result()
+  @spec check_negations_bite(String.t()) :: Support.result()
   def check_negations_bite(root) do
     files =
       Enum.flat_map(["test", "deploy/tests", "../.claude/skills", "git-hooks/tests"], fn r ->
@@ -6162,7 +4945,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # ../support/refute` la-bas). Un `cmp` serait donc rouge pour toujours — un mur toujours rouge
   # apprend a lire « rouge » comme « normal ». Ce qui doit etre identique est le COMPORTEMENT : les
   # lignes non-commentaires, et elles seules.
-  @spec check_refute_copies_agree(String.t()) :: result()
+  @spec check_refute_copies_agree(String.t()) :: Support.result()
   def check_refute_copies_agree(root) do
     copies =
       Path.join(root, "**/refute.bash")
@@ -6229,7 +5012,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # modules — dominated by behaviour implementations — and excluding `@impl` left 9 modules and 12
   # functions, four of which were verified BY HAND before anything shipped. Those twelve were
   # documented; the check then starts green, which is the only state a wall may be born in.
-  @spec check_public_functions_documented(String.t()) :: result()
+  @spec check_public_functions_documented(String.t()) :: Support.result()
   def check_public_functions_documented(root) do
     undocumented =
       Path.wildcard(Path.join([root, "lib", "**", "*.ex"]))
@@ -6372,7 +5155,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_test_corpora_on_record(String.t()) :: result()
+  @spec check_test_corpora_on_record(String.t()) :: Support.result()
   def check_test_corpora_on_record(root) do
     repo = Path.expand("..", root)
 
@@ -6481,7 +5264,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # module. Let those two drift and a project declares a throughput the schema accepts and the
   # engine silently clamps away — a declaration that validates and does not apply, which is the
   # worst of the three possible outcomes.
-  @spec check_declaration_max_fan_ceiling(String.t()) :: result()
+  @spec check_declaration_max_fan_ceiling(String.t()) :: Support.result()
   def check_declaration_max_fan_ceiling(root) do
     path = Path.join([root, "priv", "cap_profile", "schema", "declaration-v1.json"])
     src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
@@ -6538,7 +5321,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc false
-  @spec check_forge_fields_read(String.t()) :: result()
+  @spec check_forge_fields_read(String.t()) :: Support.result()
   def check_forge_fields_read(root) do
     lib = Path.join(root, "fleet/lib")
     lib = if File.dir?(lib), do: lib, else: Path.join(root, "lib")
@@ -6619,7 +5402,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   }
 
   @doc false
-  @spec check_forge_mutations_exposed(String.t()) :: result()
+  @spec check_forge_mutations_exposed(String.t()) :: Support.result()
   def check_forge_mutations_exposed(root) do
     deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
     path = Path.join(root, deleg_rel)

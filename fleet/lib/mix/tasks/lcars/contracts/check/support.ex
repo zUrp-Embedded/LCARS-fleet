@@ -352,4 +352,26 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
         acc
     end
   end
+
+  # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
+  @doc false
+  @spec tree_scope(String.t()) :: :required | :out_of_scope
+  def tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
+
+  @doc false
+  @spec split_out_of_scope([{term(), :required | :out_of_scope, term(), term()}]) ::
+          {[{term(), term(), term()}], [term()]}
+  def split_out_of_scope(lists) do
+    {out, kept} = Enum.split_with(lists, fn {_l, scope, _r, _rem} -> scope == :out_of_scope end)
+    {Enum.map(kept, fn {l, _scope, r, rem} -> {l, r, rem} end), Enum.map(out, &elem(&1, 0))}
+  end
+
+  @doc false
+  @spec skipped_note([String.t()]) :: String.t()
+  def skipped_note([]), do: ""
+
+  def skipped_note(labels),
+    do:
+      " · NOT CHECKED here (tree absent from this artifact — runtime-only context): " <>
+        Enum.join(labels, ", ")
 end
