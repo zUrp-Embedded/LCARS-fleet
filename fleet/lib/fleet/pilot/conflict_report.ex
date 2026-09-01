@@ -5,14 +5,13 @@ defmodule Fleet.Pilot.ConflictReport do
   `Fleet.Conflict` names the `DecisionTrace` its durable value — "every evaluated pattern is
   recorded; the REFUSAL is documented as much as the acceptance; the durable audit artifact". It is
   produced per hunk, carried by each `Report`, and `Remediation` reads the TOTALS and nothing else.
-  So the artifact was computed on every conflict and reached no reader: the engine wrote a machine's
-  worth of reasoning and published a count.
+  Without this render the artifact is computed on every conflict and reaches no reader: a machine's
+  worth of reasoning, published as a count.
 
   That matters most on the path where the machine WRITES. An auto-resolution pushes to a producer's
-  branch, and the only trace was a commit authored by the runtime (`system_starfleet` since A2 — the
-  engine minted itself `lcars-conflict-engine` before the function had a name). A human seeing an
-  unexpected line asks "why did the machine touch this", and the answer existed, in memory, and was
-  dropped one function before it could be posted.
+  branch, and its only other trace is a commit authored by the runtime (`system_starfleet`, A2). A
+  human seeing an unexpected line asks "why did the machine touch this", and the answer exists, in
+  memory, one function away from being posted.
 
   ## Two audiences, one render
 

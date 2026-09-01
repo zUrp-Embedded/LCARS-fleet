@@ -77,11 +77,11 @@ defmodule Fleet.Pilot.ConflictApply do
   # patterns prove their correctness AGAINST THE BASE (`one_side_change`: only one side moved;
   # `delete_no_change`: the deletion is unilateral; `non_overlapping`: the two changes touch disjoint
   # regions). Git's DEFAULT style emits diff2 -- ours and theirs, no base -- so on that input those
-  # three cannot fire at all, and the only patterns left able to resolve were the format-assuming
-  # ones this engine refuses to write. MEASURED, not deduced: the probe diagnosed `non_overlapping`
-  # (it feeds `merge-file` the base blob explicitly) while this path saw the SAME conflict as
-  # unresolvable — the diagnosis that authorized the write and the write itself were reading
-  # different inputs. Asking git for the base makes them agree.
+  # three cannot fire at all, and the only patterns left able to resolve are the format-assuming
+  # ones this engine refuses to write. MEASURED, not deduced: the probe diagnoses `non_overlapping`
+  # (it feeds `merge-file` the base blob explicitly) while this path sees the SAME conflict as
+  # unresolvable — the diagnosis that authorizes the write and the write itself then read different
+  # inputs. Asking git for the base makes them agree.
   defp merge_and_resolve(wt, base_branch) do
     case GitOps.run(
            ["-C", wt, "-c", "merge.conflictStyle=diff3", "merge", "--no-edit", base_branch],
@@ -131,9 +131,9 @@ defmodule Fleet.Pilot.ConflictApply do
       else
         # TOTAL over what the `with` can produce, and no catch-all: `Conflict.resolve/1` only ever
         # returns `{:ok, %Report{}}`, so the sole non-binary `merged` reaching here is `nil`, and
-        # every other step returns `{:error, _}`. A third defensive clause was here and Dialyzer
-        # proved it unreachable — a branch that cannot run defends nothing and hides the day the
-        # union genuinely widens (which the strict flags will then say out loud, right here).
+        # every other step returns `{:error, _}`. A third, defensive clause is unreachable and
+        # Dialyzer says so — a branch that cannot run defends nothing and hides the day the union
+        # genuinely widens (which the strict flags will then say out loud, right here).
         {:ok, %{merged: nil}} -> {:halt, {:error, {:residual, file}}}
         {:error, _} = err -> {:halt, err}
       end

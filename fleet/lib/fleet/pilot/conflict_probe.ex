@@ -159,10 +159,10 @@ defmodule Fleet.Pilot.ConflictProbe do
 
   # 3-way `git merge-file` on temp blobs -> diff3-marked content.
   #
-  # ⚠ LA PHRASE « hard failure -> `:error` » NE TENAIT PAS : le motif `{:ok, {out, _code}}` acceptait
-  # TOUS les codes retour, echecs compris. Le commentaire decrivait l'intention, pas la clause.
+  # ⚠ « hard failure -> `:error` » NE TIENT QUE SI LA CLAUSE LIT LE CODE : un motif
+  # `{:ok, {out, _code}}` accepte TOUS les codes retour, echecs compris.
   #
-  # Le contrat de `git merge-file` fait la difference que le `_code` effacait : **0** = fusion
+  # Le contrat de `git merge-file` fait la difference qu'un `_code` efface : **0** = fusion
   # propre, **1..127** = NOMBRE de conflits — deux REPONSES — et **au-dela** (typiquement 255) une
   # ERREUR de l'outil. Ce sont trois choses, et deux seulement sont du contenu.
   #
@@ -173,8 +173,8 @@ defmodule Fleet.Pilot.ConflictProbe do
   # rend un rapport a ZERO hunk : une panne de l'outil de merge se lit « fichier sans conflit »,
   # et les totaux de routage tier-0 comptent un fichier propre qui n'a jamais ete fusionne.
   #
-  # La soeur `show/3`, douze lignes plus haut, filtre pourtant `{:ok, {out, 0}}` — le meme fichier
-  # portait deja la bonne posture sur l'autre lecture.
+  # La soeur `show/3`, plus haut dans ce fichier, filtre `{:ok, {out, 0}}` — meme posture, sur
+  # l'autre lecture.
   #
   # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant sait
   # quoi en faire, encore faut-il que la clause qui y mene soit atteignable.
@@ -228,9 +228,9 @@ defmodule Fleet.Pilot.ConflictProbe do
   # The conservative verdict: one residual hunk, nothing writable. Reached by three DIFFERENT
   # facts that share one consequence -- a genuine add/delete conflict, a `git merge-file` tool
   # failure, and content whose markers do not close. None of them is trivially resolvable, and
-  # none may be reported as a clean file; the caller reads the shape, not the cause. It was named
-  # `add_delete_report` while already serving the tool failure, so the name asserted a cause that
-  # was wrong at two of its call sites.
+  # none may be reported as a clean file; the caller reads the shape, not the cause. Hence a name
+  # that says the VERDICT and not one of the three causes: `add_delete_report` would assert a cause
+  # that is wrong at two of its three call sites.
   defp residual_report,
     do: %Report{merged: nil, hunks: [], stats: %{trivial: 0, complex: 1, total: 1}}
 
