@@ -154,18 +154,18 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   @spec reconcile(list(map()), list(map()), MapSet.t(), MapSet.t(), Seams.t(), [map()] | :error) ::
           MapSet.t()
   def reconcile(issues, pulls, pr_issue_ids, prior_suspects, %Seams{} = seams, pods) do
-    # UN SEUL `list_pods` par passe (BL-6-40 Phase 1). Il y en avait 2 + N : deux duties
-    # called it, and `lock_diagnosis` once PER candidate lock. Each call is a `GenServer.call` at a
-    # 5 s timeout to the Spawner — so a single wedged pod cost 5 s x (2 + N) x repo_count per tick,
-    # and nothing said so (which is exactly what Phase 0 now makes measurable).
+    # UN SEUL `list_pods` par passe (BL-6-40 Phase 1). Per duty it would be 2 + N: two duties call
+    # it, and `lock_diagnosis` once PER candidate lock. Each call is a `GenServer.call` at a 5 s
+    # timeout to the Spawner — so a single wedged pod costs 5 s x (2 + N) x repo_count per tick,
+    # and nothing says so (which is exactly what Phase 0 makes measurable).
     #
     # The snapshot is DATA, not a seam: it travels as an explicit parameter rather than entering
     # `%Seams{}`, whose contract is "the 5 seams reconcile/5 READS" and not "what it has read".
     # Adding it there would have made the struct carry a cache.
     #
     # The fail-safe MOVES here without changing meaning: an impossible enumeration yields `:error`
-    # and the whole pass reclaims nothing — exactly what `live_owned_refs` did on its own, except
-    # the three consumers are now covered by the same read.
+    # and the whole pass reclaims nothing — exactly what `live_owned_refs` answers on its own, with
+    # the three consumers covered by the same read.
     case pods do
       {:error, _reason} ->
         prior_suspects
@@ -178,9 +178,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   @doc """
   Photo UNIQUE des pods vivants, prise par le TICK et descendue en parametre (BL-6-40).
 
-  Elle vivait dans `reconcile/5`, donc elle etait prise une fois par REPO — R appels
-  `GenServer.call` a 5 s de timeout pour une donnee qui ne change pas utilement d'un repo a
-  l'autre du meme tick. L'appelant la prend une fois avant sa boucle.
+  Prise dans `reconcile/5`, elle le serait une fois par REPO — R appels `GenServer.call` a 5 s de
+  timeout pour une donnee qui ne change pas utilement d'un repo a l'autre du meme tick. L'appelant
+  la prend une fois avant sa boucle.
 
   Publique parce que l'appelant est dans un AUTRE module (`Fleet.Pilot.Poller`) : c'est le prix
   de sortir la lecture du callee. Le fail-safe reste ICI et pas chez l'appelant — `:error` fait
@@ -319,16 +319,16 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _, _ -> MapSet.new()
   end
 
-  # The reap is the NOMINAL end-of-life of a per-brick pod since 2026-07-19 (a one-shot never
+  # The reap is the NOMINAL end-of-life of a per-brick pod (a one-shot never
   # "ends itself", cf. quiesced_brick_pods) → `info`, not warning (≠ reclaim_lock, which flags an
   # ANOMALY). Kill via the SINGLE authority `Spawn.safe_kill/2` (no fork of the kill wrapper);
   # a kill that fails is swallowed there — the next tick re-suspects, self-healing.
-  # ⚠ LA LIGNE ANNONCAIT « reaped » AU PASSE, AVANT L'APPEL. Elle etait donc vraie de l'INTENTION et
+  # ⚠ NE PAS ANNONCER « reaped » AU PASSE AVANT L'APPEL. Une telle ligne est vraie de l'INTENTION et
   # jamais du fait : `safe_kill/2` avale par conception, et le seul lecteur de cette flotte — un
-  # operateur qui grep `reaped` — lisait un kill accompli la ou il n'y avait qu'un kill tente.
+  # operateur qui grep `reaped` — lirait un kill accompli la ou il n'y a qu'un kill tente.
   #
   # L'avalement RESTE (le tick suivant re-suspecte et retente, c'est l'arbitrage du site appelant).
-  # Ce qui change, c'est que la trace suit l'acte au lieu de le preceder, et qu'elle dit lequel des
+  # Ce qui compte, c'est que la trace SUIVE l'acte au lieu de le preceder, et qu'elle dise lequel des
   # trois etats a eu lieu. `{:error, :not_found}` n'est PAS un echec : le pod n'est plus la, le
   # devoir est accompli — le confondre avec un kill rate ferait crier la trace sur le cas nominal
   # d'une course benigne.
@@ -492,13 +492,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # `{:ok, nil}` (idle) and the TERMINAL states (`:completed`/`:failed`/`:cleared`) → `false`: a delivered
   # (`:completed`) pod no longer owns its lock (F-C050 — else a completion LOST before open_pr wedges the
   # lock forever). An anomaly is NEVER `false` here — it is `:unknown`.
-  # THREE STATES, because two of them used to be one and the difference is a reap.
+  # THREE STATES, and folding any two of them costs a reap.
   #
   # `{:ok, nil}` and the terminal states mean the queue ANSWERED and the pod owns nothing: an
   # established idle, and the orphan this duty exists to collect. An `exit`/timeout means the queue
   # did not answer AT ALL — `pod_status/1` is a `GenServer.call` with no explicit timeout (5 s) to
   # a single server shared by every pod, so a restart or a load spike lands here. Folding both into
-  # `false` reaped a possibly-WORKING pod for a hiccup that was not its own.
+  # `false` would reap a possibly-WORKING pod for a hiccup that is not its own.
   #
   # The repo already decided this exact question, one module over, and wrote the reasoning that was
   # missing here — `spawn.ex`, F-C059: *"aliveness UNKNOWN: fail-CLOSED -> DEFER, NEVER :dead.
@@ -573,10 +573,11 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   # What the reconciliation actually MEASURED about the orphan's pod — for the log, never the
   # decision (the reclaim itself is correct for BOTH causes: dead pod AND live-but-idle pod, the
-  # deliberate parked-pod repair of the moduledoc). The old message asserted "pod dead without
-  # completion" over pods that were demonstrably ALIVE (faceproof bench: the pipe idled between
-  # two rework rounds while the log declared it dead every tick) — a diagnosis the code never
-  # made, quoted as one. Same discipline as the arch-onboard log: report what was measured, and
+  # deliberate parked-pod repair of the moduledoc). Asserting "pod dead without completion" here
+  # would say it over pods that are demonstrably ALIVE — measured on the faceproof bench, the pipe
+  # idling between two rework rounds while the log declares it dead every tick: a diagnosis the code
+  # never made, quoted as one. Same discipline as the arch-onboard log: report what was measured,
+  # and
   # when the enumeration itself fails, say UNKNOWN rather than guess.
   defp lock_diagnosis(%Seams{repo: repo}, number, pods) do
     live_for_ref =

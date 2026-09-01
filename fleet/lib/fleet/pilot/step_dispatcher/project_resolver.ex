@@ -88,9 +88,9 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
     do: {:ok, clone_base_sha}
 
   # THE TWO REFS COINCIDE ON THE FORWARD PATH, and the moduledoc says so — build/rework take
-  # `gate_base_branch == base_branch`. We still paid a SECOND `ls-remote` (network, bounded at 15 s,
-  # INSIDE the poller's GenServer) for a value already in hand. Over D dispatches that was a ceiling
-  # of 2 x 15 s x D where 1 x 15 s x D suffices (BL-6-40, amplifier 3).
+  # `gate_base_branch == base_branch`. A SECOND `ls-remote` (network, bounded at 15 s, INSIDE the
+  # poller's GenServer) pays for a value already in hand: over D dispatches, a ceiling of
+  # 2 x 15 s x D where 1 x 15 s x D suffices (BL-6-40, amplifier 3).
   #
   # And it is not merely an economy: two `ls-remote` on THE SAME ref at two instants can return two
   # different shas if somebody pushes in between. The pod would then clone one base and be judged

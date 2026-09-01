@@ -182,16 +182,16 @@ defmodule Fleet.Pilot.StepDispatcher do
              # THE single default site of the project FACE (inventory §D): the card's step says
              # which face its producer works on; absent = the code face — decided HERE, once, and
              # threaded as `:base_branch`. Every downstream consumer ASSERTS the value instead of
-             # re-defaulting (the resolver raises without it): six sites used to substitute `main`
-             # in two spellings when the value did not reach them, each coherent alone, wrong at
-             # the junction. `face_branch/1` raises on a value outside the schema enum — a card
+             # re-defaulting (the resolver raises without it): let each site substitute `main` on
+             # its own and there are six of them, in two spellings, each coherent alone and wrong
+             # at the junction. `face_branch/1` raises on a value outside the schema enum — a card
              # that bypassed validation must not dispatch onto a guessed branch.
              face = Map.get(step_spec || %{}, "face", "code"),
              face_branch = Fleet.Layout.face_branch(face),
              # A ticket may carry a LOT: matter (docs, a directory, images) committed by the
              # delegating role and published as `lcars/lot-<slug>`. It moves the CLONE base — the
              # producer starts from the matter instead of the head of its face — and, with it, the
-             # PR base, which on every other ticket is the same value and so was never named.
+             # PR base, which on every other ticket is the same value and so goes unnamed.
              {:ok, lot} <- lot_of_issue(issue),
              face_opts = lot_base_opts(opts, lot, face_branch),
              {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
@@ -319,7 +319,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:skipped, reason}` | `{:error, _}`.
   """
   # `{:merged, _}` is NOT a variant of `{:spawned, _, _}`: the seal path closes a PR without ever
-  # opening a pod, and the spec used to omit it. A contract that does not say what it returns sends
+  # opening a pod, so the spec must name it. A contract that does not say what it returns sends
   # its caller to write a mapping against a shape it will not always get.
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}}
@@ -361,7 +361,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # Stable review records are unioned with volatile requested reviewers. Read through the SAME
     # frontier as the verdicts (`pr_review_state` translates its own): this list comes straight off
     # the raw PR payload, so it carries forge ACCOUNTS, and the card it is measured against carries
-    # ROLES. Untranslated, a real judge landed in `foreign` and its verdict was thrown away.
+    # ROLES. Untranslated, a real judge lands in `foreign` and its verdict is thrown away.
     requested_field =
       pr
       |> Map.get("requested_reviewers")
@@ -382,13 +382,13 @@ defmodule Fleet.Pilot.StepDispatcher do
         {:skipped, :awaits_arch}
 
       true ->
-        # Verdicts are scoped to the current head SHA — and a MISSING sha is now a refusal, not a
-        # wider read. `get_in(pr, ["head", "sha"])` yields `nil` on a forge answer whose PR object
-        # omits the field, and that `nil` used to mean "count every review ever placed on this PR":
-        # a verdict given on an earlier commit promoted a PR whose current commit no judge had seen.
-        # `pr_review_state/3` now answers `{:error, {:head_sha_required, nil}}`, which lands in the
+        # Verdicts are scoped to the current head SHA — and a MISSING sha is a refusal, not a wider
+        # read. `get_in(pr, ["head", "sha"])` yields `nil` on a forge answer whose PR object omits
+        # the field; taking that `nil` as "count every review ever placed on this PR" lets a verdict
+        # given on an earlier commit promote a PR whose current commit no judge has seen.
+        # `pr_review_state/3` answers `{:error, {:head_sha_required, nil}}`, which lands in the
         # error branch below and stops the routing — fail-closed at the only place where the
-        # alternative was merging unjudged code.
+        # alternative is merging unjudged code.
         verdict_opts = Keyword.put(ctx.forge_opts, :head_sha, head_sha)
 
         case ctx.forge.pr_review_state(ctx.repo, pr_number, verdict_opts) do
@@ -577,8 +577,8 @@ defmodule Fleet.Pilot.StepDispatcher do
   # sous une criticite que personne n'a declaree. Un repli est acceptable la ou l'on LIT une
   # politique ; ici on ECRIT la route — donc un repli COMMUN aux deux serait le mauvais partage.
   #
-  # Ce qui manquait n'etait pas le repli, c'etait la TRACE : l'issue echouait a chaque tick,
-  # indefiniment, sous un warning que personne ne relit, pendant que le projet etait rendu `ready`.
+  # Ce qu'il faut n'est pas un repli, c'est la TRACE : sans elle l'issue echoue a chaque tick,
+  # indefiniment, sous un warning que personne ne relit, pendant que le projet est rendu `ready`.
   defp record_unloadable_card(
          repo,
          {:error, {:workflow_map_load_failed, name, message}} = err,
@@ -607,11 +607,11 @@ defmodule Fleet.Pilot.StepDispatcher do
     err
   end
 
-  # LE SECOND CHEMIN SANS CARTE, et il etait muet. `refute_missing_rail/1` rend
+  # LE SECOND CHEMIN SANS CARTE, et sans cette clause il est muet. `refute_missing_rail/1` rend
   # `:no_doc_rail_in_catalogue` quand le catalogue du projet ne declare aucun rail doc : chaque
-  # ticket documentaire de ce depot echoue alors A CHAQUE TICK, indefiniment, et tombait dans la
-  # clause fourre-tout ci-dessous — le meme mode de panne que la clause du dessus a ete ecrite pour
-  # fermer (« ce qui manquait n'etait pas le repli, c'etait la TRACE »), sur la moitie voisine.
+  # ticket documentaire de ce depot echoue alors A CHAQUE TICK, indefiniment, et tomberait dans la
+  # clause fourre-tout ci-dessous — le meme mode de panne que la clause du dessus ferme, sur la
+  # moitie voisine.
   # MEME `op` que la carte illisible : les deux disent « la resolution de carte de ce depot a
   # echoue », donc ils partagent une signature de dedup et le registre n'ouvre qu'un ticket.
   defp record_unloadable_card(repo, {:error, :no_doc_rail_in_catalogue} = err, opts) do
@@ -695,7 +695,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   # THE REPO NAMES THE CATALOGUE, and an engraved route is a bare name. Two catalogues may each
   # declare a card called `standard`; the one that answers must be the project's own, or the fleet
   # dispatches a role that does not exist in that org — measured, `403 user must be a collaborator`
-  # on a push whose permissions were never the problem.
+  # on a push whose permissions are not the problem.
   defp load_workflow_map(workflow_map_name, workflow_map_loader, repo),
     do:
       Fleet.Pilot.WorkflowMapNav.safe_load(
