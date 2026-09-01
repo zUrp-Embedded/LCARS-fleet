@@ -25,7 +25,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolDescriptionsCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
 
@@ -48,7 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolDescriptionsCheckTest do
     root
   end
 
-  defp check(src), do: Check.check_tool_descriptions_no_permuted_names(tree(src))
+  defp check(src), do: Tools.check_tool_descriptions_no_permuted_names(tree(src))
 
   defp tool(name, description) do
     "  deftool \"#{name}\" do\n    meta do\n      description(\"#{description}\")\n    end\n  end\n"

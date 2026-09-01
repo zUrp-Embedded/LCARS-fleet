@@ -374,4 +374,31 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     do:
       " · NOT CHECKED here (tree absent from this artifact — runtime-only context): " <>
         Enum.join(labels, ", ")
+
+  # ── Lecture d'AST ────────────────────────────────────────────────────
+
+  @doc false
+  @spec quoted!(String.t(), String.t()) :: Macro.t()
+  def quoted!(root, rel), do: root |> Path.join(rel) |> File.read!() |> Code.string_to_quoted!()
+
+  @doc false
+  @spec def_name(Macro.t()) :: atom() | nil
+  def def_name({:when, _, [inner, _guard]}), do: def_name(inner)
+  def def_name({name, _, _args}) when is_atom(name), do: name
+  def def_name(_), do: nil
+
+  # Walks an AST and keeps every non-nil result of `fun`.
+  @doc false
+  @spec collect(Macro.t(), (Macro.t() -> term() | nil)) :: [term()]
+  def collect(ast, fun) do
+    {_ast, acc} =
+      Macro.prewalk(ast, [], fn node, acc ->
+        case fun.(node) do
+          nil -> {node, acc}
+          value -> {node, [value | acc]}
+        end
+      end)
+
+    Enum.reverse(acc)
+  end
 end

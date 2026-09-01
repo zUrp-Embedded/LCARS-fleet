@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
   @deleg_rel "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -69,7 +69,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
     root
   end
 
-  defp check(tools_src, deleg_src), do: Check.check_mcp_tools_gated(tree(tools_src, deleg_src))
+  defp check(tools_src, deleg_src), do: Tools.check_mcp_tools_gated(tree(tools_src, deleg_src))
 
   describe "the instrument answers for itself first" do
     test "a tree it cannot parse into tools FAILS as broken — it never passes by measuring nothing" do
@@ -255,7 +255,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
 
   describe "against the real tree" do
     test "the repo passes, and the note says what was actually measured" do
-      result = Check.check_mcp_tools_gated(File.cwd!())
+      result = Tools.check_mcp_tools_gated(File.cwd!())
 
       assert result.status == :pass
       assert result.note =~ "tools, each pod-scoped or role-gated"
