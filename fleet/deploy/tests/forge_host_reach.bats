@@ -1141,3 +1141,70 @@ STUB
   grep -q -- '--disposable) *DISPOSABLE=1' <<<"$code"
   grep -q 'PASSTHRU+=("$1")' <<<"$code"
 }
+
+# ─── LA DERIVATION DE LA RELEASE — LE SEUL FRAGMENT D `apply()` QUE CE FICHIER JOUE ─────────────
+#
+# ⚠ LE HARNAIS DE CE FICHIER COUPE A `check()`, DONC `apply()` N EST JOUE NULLE PART. C est un
+# perimetre assume (les gestes d apply parlent a docker), mais il laissait nu le fragment qui a
+# casse : la derivation de la release, qui designait le chemin POSE par `60-deploy` — douze rangs
+# plus loin, et `provision:327` interdit a 48 de declarer la dependance.
+#
+# On extrait donc CE fragment du module et on le joue contre des doublures. Il ne parle a personne :
+# c est du choix de chemin, la seule partie d `apply()` qui se mesure sans daemon.
+harnais_enroll() { # harnais_enroll <racine de source> [PROV_PREFIX]
+  sed -n '/^  local -a enroll_src$/,/^  fi$/p' "$SRC" > "$BATS_TEST_TMPDIR/frag-enroll.sh"
+  [ -s "$BATS_TEST_TMPDIR/frag-enroll.sh" ] || { echo "extraction du fragment ratee"; return 1; }
+  cat > "$BATS_TEST_TMPDIR/h-enroll.sh" <<HARNAIS
+set -euo pipefail
+. "\$PROVISION_LIB"
+p_fail() { echo "FAIL \$*"; }
+verdict_apply() { exit 9; }
+prov_delivery_is_binary() { return 0; }
+repo_root() { echo "$1"; }
+PROV_PREFIX="${2:-/inexistant}"
+enroll="\$BATS_TEST_TMPDIR/enroll-decor"; mkdir -p "\$enroll"
+tree="$1"; ref_catalogue="$1"
+# ⚠ DANS UNE FONCTION, PARCE QUE LE FRAGMENT COMMENCE PAR \`local\` : le sourcer au niveau du
+# script rend « local: can only be used in a function » et le temoin mesure son propre harnais.
+enroll_bloc() {
+  source "\$BATS_TEST_TMPDIR/frag-enroll.sh"
+  printf 'ENROLL_SRC:%s\n' "\${enroll_src[*]}"
+}
+enroll_bloc
+HARNAIS
+  run env BATS_TEST_TMPDIR="$BATS_TEST_TMPDIR" PROVISION_LIB="$PROVISION_LIB" \
+    bash "$BATS_TEST_TMPDIR/h-enroll.sh"
+}
+
+_pose_release() { # _pose_release <chemin complet du binaire>
+  mkdir -p "$(dirname "$1")"; printf '#!/bin/sh\n' > "$1"; chmod 0755 "$1"
+}
+
+@test "ENROLL : la release du PAQUET suffit — 60-deploy ne l a pas encore posee" {
+  # Le cas exact de la premiere install d un paquet : rien sous PROV_PREFIX, tout dans le paquet.
+  local src="$BATS_TEST_TMPDIR/paquet"
+  _pose_release "$src/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
+  harnais_enroll "$src" "$BATS_TEST_TMPDIR/prefix-vide"
+  [ "$status" -eq 0 ] || { echo "le module a refuse alors que le paquet porte sa release : $output"; return 1; }
+  [[ "$output" == *"ENROLL_SRC:--release $src/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"* ]]
+}
+
+@test "ENROLL : sans AUCUNE release, le refus NOMME les deux endroits cherches" {
+  # Avant : `enroll-catalogue.sh` mourait plus loin sur « release non executable » et le module
+  # rendait « roster non derivable de l ARBRE » — un message qui accuse la source alors que le
+  # paquet est complet. Le diagnostic doit designer ce qui manque, pas ce qui est la.
+  harnais_enroll "$BATS_TEST_TMPDIR/vide" "$BATS_TEST_TMPDIR/prefix-vide"
+  [ "$status" -eq 9 ] || { echo "le module a continue sans release (rc=$status) : $output"; return 1; }
+  [[ "$output" == *"_build/prod/rel"* ]]
+  [[ "$output" == *"posée"* ]]
+  # et il n accuse plus l arbre
+  refute grep -q 'roster non dérivable' <<<"$output"
+}
+
+@test "ENROLL : le module ne COMPOSE plus le chemin — il le demande a la lib" {
+  # La forme, et elle compte : recomposer `$PROV_PREFIX/rel/...` ici rendrait la garde de la lib
+  # inoperante sans qu aucun temoin de comportement ne bouge.
+  local corps; corps="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'prov_release_bin' <<<"$corps"
+  refute grep -q 'enroll_src=(--release "${PROV_RELEASE_BIN:-' <<<"$corps"
+}

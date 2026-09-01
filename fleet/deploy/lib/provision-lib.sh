@@ -1310,6 +1310,33 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
   return 0
 }
 
+# ─── LA RELEASE : CELLE QUE LA PASSE APPORTE, PUIS CELLE QUE LA MACHINE PORTE ───────────────────
+#
+# ⚠ UN MODULE LISAIT LA RELEASE POSEE DOUZE RANGS AVANT SON POSEUR. `48-forge-host` derivait le
+# roster du catalogue par `--release "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"` — chemin ecrit
+# par `60-deploy` SEUL, et `provision:327` interdit a 48 de declarer `AFTER: 60-deploy` (un `AFTER`
+# doit PRECEDER dans l'ordre du rang). Sur la premiere install d'un paquet, `enroll-catalogue.sh`
+# mourait donc sur « release non executable », le module rendait « roster non derivable de l'arbre »
+# — un message qui accuse l'ARBRE alors que le paquet est complet — et `workstation` sortait 1. Le
+# second apply passait : defaut intermittent, donc invisible a toute campagne qui rejoue.
+#
+# ⚠ LE PAQUET D'ABORD, ET C'EST UN ORDRE, PAS UNE PREFERENCE. `pack.sh` embarque la release en
+# `fleet/_build/prod/rel/lcars_fleet` : elle est LA avant d'etre posee, et elle EST celle que
+# `60-deploy` posera. La release deja posee peut, elle, sortir d'un paquet PLUS ANCIEN — rejouer un
+# paquet neuf sur une machine installee deriverait alors le roster d'une release perimee.
+#
+# Rend 1 sans rien ecrire quand aucun candidat n'est executable : c'est a l'appelant de dire ce que
+# son geste en fait, et les deux appelants n'en font pas la meme chose.
+prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE, ou rien (rc 1)
+  local c
+  for c in "${PROV_RELEASE_BIN:-}" \
+           "$(repo_root)/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
+           "${PROV_PREFIX:-}/rel/lcars_fleet/bin/lcars_fleet"; do
+    [[ -n "$c" && -x "$c" ]] && { printf '%s\n' "$c"; return 0; }
+  done
+  return 1
+}
+
 prov_roles() {
   local out="$PROV_ROLES" root
   local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"

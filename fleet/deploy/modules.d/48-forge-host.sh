@@ -431,7 +431,18 @@ apply() {
   # d'arguments — le script, lui, appelle la MEME fonction dans les deux cas.
   local -a enroll_src
   if prov_delivery_is_binary; then
-    enroll_src=(--release "${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}")
+    # ⚠ ON DEMANDE A LA LIB, ON NE COMPOSE PAS LE CHEMIN ICI — et c'est la cicatrice. Ce site
+    # designait la release POSEE, que `60-deploy` pose DOUZE RANGS PLUS LOIN : sur la premiere
+    # install d'un paquet elle n'existe pas encore, et le rang interdit de declarer la dependance
+    # (`provision:327` refuse un `AFTER` qui ne precede pas). `prov_release_bin` prend d'abord celle
+    # que le PAQUET transporte — elle est la, et c'est elle que 60-deploy posera.
+    local rel
+    rel="$(prov_release_bin)" || {
+      p_fail "aucune release exécutable : ni dans ce paquet ($(repo_root)/fleet/_build/prod/rel/…), ni posée ($PROV_PREFIX/rel/…)"
+      p_fail "  le roster du catalogue s'en dérive — sans elle, la structure de la forge serait posée sans comptes"
+      rm -rf "$enroll"; verdict_apply
+    }
+    enroll_src=(--release "$rel")
   else
     enroll_src=(--repo "$tree" --catalogue "$ref_catalogue")
   fi
