@@ -352,8 +352,8 @@ defmodule Fleet.Spawner.Pod do
     # Is the disk still what the epoch validated? Asked HERE because this is the moment the question
     # means something: a pod is about to be built from that material. The pod is built ANYWAY, from
     # the image — serving proven-good is the whole point, and bytes that appeared after boot must not
-    # reach an agent. What was missing is saying it: an edit to the deployed program's prompt material
-    # used to be a NON-EVENT, absorbed in silence by the very mechanism protecting against it.
+    # reach an agent. What this adds is SAYING it: unsaid, an edit to the deployed program's prompt
+    # material is a NON-EVENT, absorbed in silence by the very mechanism protecting against it.
     warn_on_image_drift()
 
     with {:ok, sp_compose} <-
@@ -413,8 +413,8 @@ defmodule Fleet.Spawner.Pod do
          # Recall deliberate : la graine est restauree AVANT le lancement. C'est la seule moitie
          # de cette phrase qui soit vraie, et elle l'est par position dans le `with`.
          #
-         # Ce qui etait ecrit ici jusqu'au 2026-08-08 — « (after workspace = cwd set) » — affirmait
-         # une DEPENDANCE qui n'existe pas. Mesure : `LaunchSpec.pod_cwd/3` et ses deux helpers ne
+         # ⚠ NE PAS ECRIRE ICI « (after workspace = cwd set) » : ce serait affirmer une DEPENDANCE
+         # qui n'existe pas. Mesure : `LaunchSpec.pod_cwd/3` et ses deux helpers ne
          # lisent PAS le disque (le cwd est CALCULE depuis opts/cap_profile/pod_dir, pas pose par le
          # bootstrap) ; `SeedStore.restore/4` fait son propre `mkdir_p!` ; et le seul geste
          # destructeur du bootstrap (`morgue_residual_workspace/1`) vise `ws`, jamais
@@ -426,8 +426,8 @@ defmodule Fleet.Spawner.Pod do
          :ok <- Scaffold.maybe_recall_restore(data) do
       # SP no longer stored in data (no longer in argv): the SOURCE = .lcars/system-prompt.md (written above),
       # read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
-      # :launching (BL-6-22 — they used to be validated then thrown away; the delivery half is
-      # `LaunchSpec.skills_paths_env/1` consuming them from here).
+      # :launching (BL-6-22 — validating them and then throwing them away is the half-fix; the
+      # delivery half is `LaunchSpec.skills_paths_env/1` consuming them from here).
       # The socket path is RETAINED, not just used: `Pod.Liveness` derives the MCP activity marker
       # from it (Fleet.Layout.pod_mcp_activity_marker/1). The spawner cannot ask the MCP domain for
       # this path — the seam exists because a literal would close a cycle — so the one moment it
@@ -495,8 +495,8 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  # LE SEED EST PRIS AVANT LE TEARDOWN — et la raison ecrite ici jusqu'au 2026-08-08 etait FAUSSE.
-  # Elle disait « avant que le teardown retire l'acces au JSONL ». Mesure : `teardown_backend/1` tue
+  # LE SEED EST PRIS AVANT LE TEARDOWN — ET PAS « avant que le teardown retire l'acces au JSONL »,
+  # qui serait faux. Mesure : `teardown_backend/1` tue
   # le holder (port/tmux) et retire le sock-dir, RIEN D'AUTRE ; et `bwrap_launch.sh` monte le pod_dir
   # en BIND hote (`--bind "$POD_DIR" "$SANDBOX_HOME"`), donc le transcript est cote hote et survit.
   # L'acces n'est pas retire.
@@ -530,9 +530,9 @@ defmodule Fleet.Spawner.Pod do
       # the only reader able to tell a project apart fell back to scanning `/proc` for an ops mount
       # that `pod_mounts_env` had deliberately removed. Three layers agreeing on a wrong answer.
       #
-      # `:project_slug` is already threaded by BOTH dispatch sites and by the architect's spawn; it
-      # was simply never published. Exposing it is the whole fix: no dispatcher change, and the
-      # `/proc` scan has nothing left to justify it.
+      # `:project_slug` is already threaded by BOTH dispatch sites and by the architect's spawn, so
+      # publishing it costs no dispatcher change — and leaves the `/proc` scan nothing to justify
+      # it.
       project_slug: Keyword.get(data.opts, :project_slug),
       # LE MEME DEFAUT QUE `:project_slug` JUSTE AU-DESSUS, ET LE MEME REMEDE : deja filete par les
       # deux sites de dispatch, jamais publie. `:repo` est `nil` pour tout producteur et tout juge —
@@ -732,7 +732,7 @@ defmodule Fleet.Spawner.Pod do
       # "already done"). Keying the fallback on get_work_item mistook that decision for a missed turn,
       # so a busy or judging agent got a spurious `wake` typed in, then a false `wake.failed` at the cap.
       # Delivered ⇒ stop: a delivered-but-stuck agent is a LIVENESS case (result deadline + drift/periodic
-      # monitors), not a delivery failure. The wake now fires ONLY on genuine non-delivery (a dead
+      # monitors), not a delivery failure. The wake fires ONLY on genuine non-delivery (a dead
       # Monitor: `.seen` never catches up → this stays false → the send-keys/`wake.failed` rails below run).
       polled and Fleet.Spawner.Pod.TurnFlag.delivered?(Map.get(data, :pod_dir)) ->
         Logger.debug(
@@ -746,11 +746,11 @@ defmodule Fleet.Spawner.Pod do
       # now or takes its brief via the rail ("Monitor event: ton tour"). A pod lands here right after
       # ÉTAPE 0 arms its Monitor, killing the #2/#3 engage drizzle.
       #
-      # ⚠ THIS CLAUSE IS WHAT MAKES A RESUMED POD SAFE TO TYPE INTO, and it used to say the opposite —
-      # "a RESUMED pod self-arms and lands here with NO engage sent". It does not self-arm: `TurnFlag`
-      # clears `.seen` at EVERY launch, resumed included and by design. So a resumed pod reached
-      # neither this stop nor an engage, and burned its whole cap in silence (measured 2026-08-19).
-      # The gate on `resume?` is gone from `kick_keyword`; THIS armed-stop is the real guard, and it
+      # ⚠ THIS CLAUSE IS WHAT MAKES A RESUMED POD SAFE TO TYPE INTO, and "a RESUMED pod self-arms
+      # and lands here with NO engage sent" is the opposite of true. It does not self-arm: `TurnFlag`
+      # clears `.seen` at EVERY launch, resumed included and by design. Gated on `resume?` instead,
+      # a resumed pod reaches neither this stop nor an engage, and burns its whole cap in silence
+      # (measured). THIS armed-stop is the real guard, and it
       # is keyed on what is observable — the rail being live — not on how the pod was started.
       not polled and Fleet.Spawner.Pod.TurnFlag.monitor_armed?(Map.get(data, :pod_dir)) ->
         Logger.debug(
@@ -790,7 +790,7 @@ defmodule Fleet.Spawner.Pod do
       # session whose TUI has not started, and the TUI then replays each buffered line as its own
       # submission. The loop's stop condition cannot fire during that window either: every ACK it
       # knows (`pulled`/`polled`) requires a turn, which requires the REPL. So every kick fired
-      # during a cold start is a guaranteed duplicate — measured 2026-08-04: 15 s + 6 x 2.5 s of
+      # during a cold start is a guaranteed duplicate — measured: 15 s + 6 x 2.5 s of
       # cadence against a 20-40 s bwrap cold start = a scribe with SEVEN `engage` in its REPL,
       # seven spurious turns on one dispatch.
       # `repl_up?` is the in-band proof that exists in that window: the pod's MCP client speaks on
@@ -891,9 +891,9 @@ defmodule Fleet.Spawner.Pod do
      [Publishing.cancel_publish_deadline_action()]}
   end
 
-  # (6-041 — la clause miroir qui vivait ici absorbait `deliverable.published` d'un AUTRE pod. Sur
-  # le sujet par-pod ce cas n'arrive plus : elle etait devenue morte, et une clause morte se lit
-  # exactement comme une clause qui marche.)
+  # (6-041 — pas de clause miroir ici : elle absorberait `deliverable.published` d'un AUTRE pod, cas
+  # que le sujet par-pod ne produit plus. Une clause morte se lit exactement comme une clause qui
+  # marche.)
 
   # BL-6-03: a witnessed publication-task death lifts the flag with a named cause.
   def handle_event(
@@ -921,8 +921,8 @@ defmodule Fleet.Spawner.Pod do
   # 6-041 — CE QUI RESTE NON TRAITE EST DESORMAIS ADRESSE A CE POD, DONC CA SE DIT. Le fourre-tout
   # `handle_event(:info, _msg, …)` plus bas doit rester muet (ports, timers, DOWN, bruit divers) ;
   # mais un `%Fleet.Event{}` qui arrive ici a franchi le routage par-pod — il est POUR nous, et
-  # qu'aucune clause ne le reconnaisse est un fait, pas du bruit. Avant, il se noyait dans les
-  # evenements des N-1 autres pods et se jeter etait la bonne reponse.
+  # qu'aucune clause ne le reconnaisse est un fait, pas du bruit. Sur un sujet global il se noierait
+  # dans les evenements des N-1 autres pods, et se jeter serait la bonne reponse.
   def handle_event(:info, %Fleet.Event{} = ev, state, data) do
     Logger.warning(
       "pod #{data.pod_id} received #{ev.type} on its own topic with no clause for it " <>
@@ -1245,7 +1245,7 @@ defmodule Fleet.Spawner.Pod do
     }
   end
 
-  # UNIFIED seed decision (core Decision 1, reorg 2026-07-19) — FRESH first-boot only (the caller
+  # UNIFIED seed decision (core Decision 1) — FRESH first-boot only (the caller
   # gates on :enoent). Precedence:
   #   1. explicit recall/resume (opts) → untouched (the deliberate paths stay authoritative);
   #   2. non-RC pod → fresh create (it never captured, nothing to resume);

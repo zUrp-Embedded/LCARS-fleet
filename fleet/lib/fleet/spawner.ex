@@ -110,7 +110,7 @@ defmodule Fleet.Spawner do
 
   This is an ADMISSION question, not a delivery one: the live order reaches the pod through the
   task queue either way. `:brief` here is the pod's FILE copy of it, and a caller that materialized
-  the brief drops that copy on purpose (the durable, citable version now lives at `:brief_ref`, and
+  the brief drops that copy on purpose (the durable, citable version lives at `:brief_ref`, and
   a file copy nobody rewrites on a live pod drifts from it round after round).
 
   SHARED AUTHORITY, because two sites answer this same question: the dispatch drops the copy on the
@@ -311,8 +311,8 @@ defmodule Fleet.Spawner do
   defp seed_or_error(:none), do: {:error, :no_seed}
   defp seed_or_error({:ok, _} = ok), do: ok
 
-  # A ticket-keyed role has ONE seed PER TICKET, so "recall the engineer of project P" no longer
-  # has a single answer. Refused by name rather than served with whichever pod died last — that
+  # A ticket-keyed role has ONE seed PER TICKET, so "recall the engineer of project P" has no
+  # single answer. Refused by name rather than served with whichever pod died last — that
   # silent pick is exactly the defect the per-ticket key exists to remove, and serving it anyway
   # would reintroduce it at the only caller that can ask: a human.
   # The symmetric mismatch is refused too: a project-keyed role has one seed and no ticket to name.
@@ -674,8 +674,8 @@ defmodule Fleet.Spawner do
   a spawn flood through the no-auth loopback, or a rail gone haywire. Hitting it is an anomaly,
   it comes back as `{:error, :max_children}`, and it is meant to be loud.
 
-  Why it moved from 24. That number was chosen as "a wide margin above the real" when the lease
-  serialized a repo to ONE workflow_run — the real was ~6 permanents plus a handful of step
+  Why 24 is the wrong number. It reads as "a wide margin above the real" only while the lease
+  serializes a repo to ONE workflow_run — the real being ~6 permanents plus a handful of step
   workers. With `max_fan` the nominal peak is computable and 24 sits UNDER it: a project at the
   default fan of 5, whose heaviest canon jury is 2 (`standard-qa`), peaks around 15 pods, so a
   two-project fleet crosses 24 while doing exactly what it was configured to do. A fuse that blows
@@ -768,7 +768,7 @@ defmodule Fleet.Spawner do
   It carries the message but arms neither the mandate kick fallback nor its response deadline.
   An unknown or unreachable pod yields `{:error, reason}` and a warning — it is NOT delivered.
 
-  The `:ok` return used to be unconditional, and the `@spec` froze the caller's inability to know.
+  An unconditional `:ok` return, frozen into the `@spec`, leaves the caller unable to know.
   That is tolerable for a feed line and not for a TERMINAL escalation, which travels this same
   function: the message vanished, the return said `:ok`, and no log said otherwise. This function
   cannot know the stakes of its message, so it reports the fact at `warning` and hands the caller
