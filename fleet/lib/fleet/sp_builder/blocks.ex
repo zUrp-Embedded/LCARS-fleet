@@ -61,9 +61,9 @@ defmodule Fleet.SPBuilder.Blocks do
   @doc """
   Refuses a catalogue whose ROLES and BLOCKS disagree, naming every disagreement at once.
 
-  `sp-map.yaml` has carried this promise in its header since it was written — *"a catalogue role
-  with no entry here → the generator FAILS (fail-loud)"* — and nothing enforced it: `generate!/2`
-  iterates the MAP, never the catalogue, so a role absent from both simply was not generated and
+  `sp-map.yaml` carries this promise in its header — *"a catalogue role with no entry here → the
+  generator FAILS (fail-loud)"* — and nothing else enforces it: `generate!/2` iterates the MAP,
+  never the catalogue, so a role absent from both is simply not generated and
   died much later at spawn with `:agent_draft_missing`. The comment described the code it should
   have had.
 

@@ -174,9 +174,9 @@ defmodule Fleet.SPBuilder.Image do
   `[{path, :modified | :vanished}]`. `[]` = the disk still agrees with the epoch; `:unpublished`
   when no image is live (nothing was ever validated, so nothing can have drifted).
 
-  Answers the question the image used to swallow. A non-empty list means the deployed program's
-  prompt material changed under a running daemon: the pods keep receiving the proven-good content
-  (that is the defence), and the operator gets told (that is what was missing).
+  A non-empty list means the deployed program's prompt material changed under a running daemon: the
+  pods keep receiving the proven-good content (that is the defence), and the operator is told (which
+  the freeze alone does not do).
   """
   @spec drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
   def drift do
@@ -225,10 +225,10 @@ defmodule Fleet.SPBuilder.Image do
   # `File.Error` brut, remonte par `publish!/0` jusqu'au refus de boot. La POSTURE est juste
   # (proven-good ou pas de boot) ; ce qui manquait est le nom de la condition.
   #
-  # L'asymetrie qui prouve que c'etait un defaut et non un choix : `read_dir_map/3` leve une erreur
-  # NOMMEE a la ligne suivante pour le fichier VIDE, et une erreur de bibliotheque pour le fichier
-  # illisible. Meme fonction, meme artefact, deux traitements — la parade etait litteralement en
-  # dessous. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas en
+  # L'asymetrie a eviter : `read_dir_map/3` leve une erreur NOMMEE pour le fichier VIDE et une
+  # erreur de bibliotheque pour le fichier illisible. Meme fonction, meme artefact, deux
+  # traitements. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas
+  # en
   # `:vanished`. Ici on ne peut pas degrader (une epoque qui ne couvre pas la matiere qu'elle gele
   # n'est pas une epoque), donc on leve — mais en nommant.
   defp read_artifact!(path, what) do
@@ -362,9 +362,8 @@ defmodule Fleet.SPBuilder.Image do
     end
   end
 
-  # `roots` is ALWAYS a search path. The single-root clause that used to sit beside this one went
-  # dead the day the last reader stopped resolving on its own — dialyzer said so before I did, and
-  # that unreachability is the proof the door is single.
+  # `roots` is ALWAYS a search path. A single-root clause beside this one is unreachable — dialyzer
+  # says so — and that unreachability is the proof the door is single.
   defp read_dir_map!(roots, glob, key_fun) when is_list(roots) do
     if Enum.all?(roots, &(Path.wildcard(Path.join(&1, glob)) == [])) do
       raise "SPBuilder.Image: no artifact matches #{glob} under #{inspect(roots)} — " <>
@@ -381,8 +380,8 @@ defmodule Fleet.SPBuilder.Image do
     # `Map.put_new` and the roots in PRECEDENCE order: the first root that carries a key wins, and
     # the later one is not read. That is the child-theme rule — a business catalogue shipping its
     # own `rubber-duck` REPLACES the system's, without declaring anything, which is the whole point
-    # of a search path. It refused the collision until 2026-08-10; refusing made overriding
-    # impossible, which is the opposite of what a default is for.
+    # of a search path. Refusing the collision instead makes overriding impossible, which is the
+    # opposite of what a default is for.
     Enum.reduce(roots, %{}, fn root, acc ->
       root
       |> Path.join(glob)
@@ -422,7 +421,7 @@ defmodule Fleet.SPBuilder.Image do
   # SAME resolution as `Pod.Assets`' machine half (override first, bundled worker default
   # otherwise) — the image must freeze what the consumer would have read, or it freezes the wrong
   # file and the override silently escapes the epoch. Reading another domain's config ATOM creates
-  # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative was a second
+  # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative is a second
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
     Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
@@ -457,9 +456,8 @@ defmodule Fleet.SPBuilder.Image do
 
   defp drafts_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_drafts)
 
-  # Two of the three readers that never learned the search path, and were defects for it: the EEx
-  # templates shape the MECHANISM's prompts, and the human protocol was demanded from catalogues
-  # that have no human-facing role at all (W-13). They go through the same door as the rest. The
-  # third was `sp_role_bases`, and it is gone rather than fixed — see the publish above.
+  # Two readers that must go through the search path like the rest: the EEx templates shape the
+  # MECHANISM's prompts, and demanding the human protocol from catalogues that have no human-facing
+  # role at all is a defect of its own (W-13).
   defp template_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_templates)
 end
