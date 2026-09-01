@@ -109,8 +109,32 @@ code() {
     "$BATS_TEST_DIRNAME"/../docker/*.sh \
     "$BATS_TEST_DIRNAME"/../../services/*.sh \
     "$BATS_TEST_DIRNAME"/../../services/*.py \
+    ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
     "$BATS_TEST_DIRNAME"/../lib/*.sh 2>/dev/null
 }
+
+# ⚠ LES BINAIRES QUE LE RAIL INSTALLE SONT DU CODE DU RAIL, ET ILS MANQUAIENT AU CORPUS.
+# `62-runtime-helpers.sh` les `install` sous /usr/local/bin depuis `BIN_SRC_DIR="$(repo_root)/
+# fleet/bin"` : un objet que l'un d'eux cree a donc bien un poseur dans ce depot. Mesure du
+# 2026-09-01 : `/var/tmp/lcars/toolchain-work`, cree par `bin/lcars-toolchain-converge:50`, etait
+# refuse par ISO 2/2 au moment meme ou on le declarait — alors que son poseur existe.
+#
+# ⚠ ET LA LISTE SE DERIVE DU MODULE, ELLE NE SE GLOBBE PAS. `fleet/bin/*` fait entrer les launchers
+# de pods (`bwrap_launch.sh`, `host_launch.sh`, `claude_launch.sh`), qui appartiennent au RUNTIME :
+# mesure faite, ISO 1/2 rougit alors sur `/run/lcars/egress`, `/run/lcars/mcp` et
+# `/run/lcars/tmux-sock` — des chemins de POD, que la table du deploiement n'a pas a declarer. Le
+# discriminant honnete n'est pas « ce qui est dans bin/ », c'est « ce que le rail POSE ».
+#
+# La difference avec la liste d'exemptions plus bas est nette : celle-la EXCUSE un objet sans
+# poseur, celle-ci reconnait un poseur qui existait deja. Elargir la premiere ferme un oeil ;
+# corriger la seconde en ouvre un.
+_bins_du_rail=()
+while read -r _n; do
+  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../bin/$_n" ] \
+    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../bin/$_n")
+done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
+           "$BATS_TEST_DIRNAME"/../modules.d/62-runtime-helpers.sh 2>/dev/null \
+         | sed 's|.*/||; s|"$||' | sort -u)
 
 # Les chemins litteraux que le code pose, normalises : `}` de `${VAR:-/chemin}` retire, ponctuation
 # de fin retiree, versions repliees sur le joker du manifeste.
@@ -129,7 +153,7 @@ posed() {
   # par le radical `lcars`, trop generique pour discriminer quoi que ce soit. Les deux sens etaient
   # donc muets sur cet objet : un second `/run/lock/<truc>` pose sans declaration serait invisible,
   # et la ligne de la table pourrait disparaitre sans que rien ne crie.
-  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
+  code | grep -ohE '(/usr/local/bin|/usr/share/lcars|/etc/systemd/system|/etc/tmpfiles\.d|/etc/sudoers\.d|/opt/[a-z]|/home/catalogues|/home/projects|/var/lib/lcars|/var/tmp/lcars|/opt/lcars/runtime|/etc/lcars|/run/lock|/run/lcars)[^"$ ),;:'"'"']*' \
     | tr -d '}' \
     | sed -e 's#/$##' -e 's#\.$##' \
           `# ⚠ LA NORMALISATION D'ELIXIR EST PARTIE AVEC SON OBJET. Elle ramenait` \
@@ -457,4 +481,49 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   local decl; decl="$(awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"{print $3, $4; exit}' "$MANIFEST")"
   [ "$decl" = "0750 root:fleet" ]
   grep -qE 'PROV_PREFIX 0750 root:\$PROV_FLEET_GROUP' <<<"$liste"
+}
+
+# ─── LES REPERTOIRES DE TRAVAIL SOUS /var : DECLARES, SUR LES DEUX RAILS, ET DURCIS ─────────────
+#
+# ⚠ MESURE DU 2026-09-01, BANC 2007 — un POSTE : `/var/lib/lcars/tofu/.apply.lock` y survivait a la
+# desinstallation. La table declarait `/var/lib/lcars` en « docker », alors que
+# `fleet/services/forge-gestures.sh:102` derive `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction
+# de rail — et ce fichier part sur les deux (EMBEDDED de 62-runtime-helpers d un cote, COPY du
+# Dockerfile de l autre).
+#
+# LA REGLE : une colonne de substrat plus etroite que le rail qui CREE l objet ne protege rien. Elle
+# le rend invisible a `applies_here`, donc au plan de desinstallation — l objet est pose partout et
+# retire nulle part.
+
+@test "TRAVAIL : les racines de travail sous /var sont declarees, et couvrent les DEUX rails" {
+  local r col vues=0
+  for r in $(code | grep -ohE '/var/(lib|tmp)/lcars' | sort -u); do
+    vues=$(( vues + 1 ))
+    col="$(awk -v p="$r" '{cl=$1; sub(/:.*/,"",cl)} (cl=="dir"||cl=="prefix") && $2==p {print $NF; exit}' \
+           "$BATS_TEST_TMPDIR/rows")"
+    [ -n "$col" ] \
+      || { echo "racine de travail POSEE et NON DECLAREE : $r"; return 1; }
+    [ "$col" = "any" ] \
+      || { echo "$r declare « $col » — or les scripts qui le creent partent sur LES DEUX rails, donc il est pose partout et retire nulle part"; return 1; }
+  done
+  # GARDE D INSTRUMENT : si l extraction ne trouve plus rien, ce mur devient vert en n ayant rien vu.
+  [ "$vues" -ge 2 ] \
+    || { echo "extraction ratee : $vues racine(s) de travail trouvee(s) dans le code, 2 attendues"; return 1; }
+}
+
+@test "TRAVAIL : le repertoire ou root telecharge PUIS execute est 0700 root:root" {
+  # ⚠ `/var/tmp` EST 1777, et `bin/lcars-toolchain-converge:50` y fait `mkdir -p` — qui accepte ce
+  # qu il trouve, sans re-stat. Le premier a creer le chemin en est proprietaire, et root travaille
+  # ensuite dedans : `curl -o`, `sha256sum -c`, puis `sh "$script"`. Verification et execution sont
+  # deux gestes separes sur un chemin dont le proprietaire du parent decide.
+  #
+  # Declare ici, le rail le POSE et `ensure_mode` re-stat son proprietaire a chaque passe : la
+  # fenetre se ferme au provisionnement, et le doctor la rouvrirait a voix haute. Le mode fait donc
+  # partie du correctif, pas de son decor — un 0755 rendrait la declaration inoperante.
+  local l; l="$(awk '$2=="/var/tmp/lcars/toolchain-work"{print; exit}' "$BATS_TEST_TMPDIR/rows")"
+  [ -n "$l" ] || { echo "le repertoire de travail du convergeur de toolchain n est plus declare"; return 1; }
+  [ "$(awk '{print $3}' <<<"$l")" = "0700" ] \
+    || { echo "mode « $(awk '{print $3}' <<<"$l") » : root y telecharge et y execute, 0700 est le contrat"; return 1; }
+  [ "$(awk '{print $4}' <<<"$l")" = "root:root" ] \
+    || { echo "proprietaire « $(awk '{print $4}' <<<"$l") » au lieu de root:root"; return 1; }
 }

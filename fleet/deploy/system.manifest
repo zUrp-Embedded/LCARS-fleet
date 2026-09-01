@@ -106,7 +106,30 @@ dir       /opt/lcars/var/tokens                       0710  lcars-authority:flee
 # intenable le jour ou `/home` est sorti du perimetre ENTIER : un cache pose sous `/home` serait cree
 # par chaque install et retire par aucune. La SSoT est `Fleet.Layout.@installed_catalogues_root`.
 dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
-dir       /var/lib/lcars                               0755  root:root           docker
+# ⚠ `any`, ET C'ETAIT `docker` — MESURE DU 2026-09-01, BANC 2007 (un POSTE) : /var/lib/lcars/tofu/
+# .apply.lock y survit a la desinstallation. `fleet/services/forge-gestures.sh:102` derive
+# `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction de rail, et ce fichier part sur les deux
+# (il est dans `EMBEDDED` de 62-runtime-helpers). Le poste creait donc un repertoire que la table
+# disait propre a la boite : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
+# jamais. Une colonne de substrat trop etroite ne protege rien — elle rend l'objet INVISIBLE au
+# rail qui le cree quand meme.
+dir       /var/lib/lcars                               0755  root:root           any
+
+# ─── LES REPERTOIRES DE TRAVAIL DES GESTES ROOT ─────────────────────────────────────────────────
+#
+# ⚠ ILS N'ETAIENT PAS DECLARES, ET LE SCRIPT CROYAIT QU'ILS L'ETAIENT.
+# `fleet/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
+# RECOPIE ICI : deploy/system.manifest en est la source unique » — puis derive
+# `WORK=/var/tmp/lcars/toolchain-work` (l. 34) que cette table ne nommait nulle part. Le commentaire
+# decrivait une regle que la table n'appliquait pas.
+#
+# CE QUE CA COUTE : `/var/tmp` est 1777. Le premier a creer `/var/tmp/lcars` en est proprietaire, et
+# root travaille ensuite dedans — `curl -o`, `sha256sum -c`, puis `sh "$script"`. Verification et
+# execution sont deux gestes separes sur un chemin dont le proprietaire du parent decide. Declares
+# ici, le rail les POSE et `ensure_mode` re-stat leur proprietaire a chaque passe : la fenetre se
+# ferme au provisionnement, et le doctor la rouvrirait a voix haute.
+dir       /var/tmp/lcars                               0755  root:root           any
+dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
 
 dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
