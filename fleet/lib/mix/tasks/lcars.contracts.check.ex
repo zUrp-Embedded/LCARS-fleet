@@ -260,8 +260,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           |> Enum.reject(&module_exists?/1)
 
         _ ->
-          # HOLLOW-GREEN GUARD (R0-EVT-012): an ABSENT/invalid events.yaml used to yield `[]` → `:pass`
-          # — the "every handler exists" check passing precisely when the registry it reads is GONE. An
+          # HOLLOW-GREEN GUARD (R0-EVT-012): an ABSENT/invalid events.yaml yielding `[]` reads as
+          # `:pass` — the "every handler exists" check passing precisely when the registry it reads
+          # is GONE. An
           # unreadable registry is a broken deploy → FAIL, not a silent green.
           [
             "events.yaml absent or invalid at #{yaml} — handlers unverifiable (hollow-green guard)"
@@ -371,7 +372,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP NOMMES ne sont
   # PAS exclus — ils portent un contrat propre a chaque module.
   #
-  # ## Preuve (mesure et mutation, 2026-08-20)
+  # ## Preuve (mesure et mutation)
   # Pose a 540/540. Retirer un `@spec` -> ECHEC, fonction et fichier nommes. Et l'exercice s'est
   # auto-verifie pendant qu'on le faisait : QUATRE specs ecrits de bonne foi etaient FAUX, et
   # Dialyzer les a nommes un par un — `paginate/3` (une chaine de requete prise pour un keyword,
@@ -423,13 +424,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Les unites publiques d'UN fichier qui n'ont pas de `@spec`, par NOM ET ARITE.
   #
-  # ⚠ RECRITURE SUR L'AST (2026-08-20), et le motif de la reecriture est le defaut qu'elle repare :
+  # ⚠ RECRITURE SUR L'AST, et le motif de la reecriture est le defaut qu'elle repare :
   # la premiere version lisait ligne a ligne avec une machine a phases, et sa bascule de heredoc
   # (`String.starts_with?(trimmed, ~s("""))`) ne basculait PAS sur `@moduledoc """` — cette ligne ne
   # COMMENCE pas par les trois guillemets. Seule la fermeture basculait, donc tout ce qui suivait un
-  # moduledoc etait invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
-  # moitie, et onze fichiers vus a ZERO. Le mur annonçait 100 % sur 92,8 % de reel. Meme classe de
-  # bug que celui trouve le matin meme dans l'outil de replay de l'audit — un compteur qui se trompe
+  # moduledoc est invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
+  # moitie, et onze fichiers vus a ZERO. Le mur annonce alors 100 % sur 92,8 % de reel. Un compteur
+  # qui se trompe
   # de phase ne se rapiece pas, il se refait sur la seule structure qui ne ment pas.
   #
   # TROIS choses que la version ligne a ligne ne pouvait pas faire :
@@ -448,7 +449,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     |> Enum.sort()
   end
 
-  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose (2026-08-20) :
+  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose :
   #   * un corps a UN SEUL statement n'est pas un `__block__` — un module d'une fonction etait
   #     entierement invisible ;
   #   * les statements d'un module IMBRIQUE sont aussi des statements du parent. Melanger les deux
@@ -563,7 +564,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       |> Enum.filter(&String.contains?(File.read!(&1), "@pulled_states"))
       |> Enum.map(&Path.relative_to(&1, root))
       # Le fournisseur lui-meme, et CE FICHIER : le gate LIT la regle, il n'en depend pas. S'auto-
-      # compter ferait rougir le mur sur sa propre pose — mesure a la pose, 2026-08-20.
+      # compter ferait rougir le mur sur sa propre pose — mesure a la pose.
       |> Enum.reject(&(&1 in [rel, "lib/mix/tasks/lcars.contracts.check.ex"]))
       |> MapSet.new()
 
@@ -605,7 +606,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # Ce check compare les ENSEMBLES, jamais l'ordre — un enum JSON n'en porte aucun.
   #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # ## Preuve (mutation jouee a la pose)
   # (a) Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est
   #     nommee absente des DEUX enums.
   # (b) Remplacer `"important"` par `"zzz"` dans le seul enum `severity_max` -> ECHEC, une absence
@@ -836,7 +837,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # La DERIVATION ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee
   # cote production ait bien sa destination declaree.
   #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # ## Preuve (mutation jouee a la pose)
   # (a) Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
   #     `@destinations` -> ECHEC, 3 clauses annoncees pour 2 destinations.
   # (b) Rendre `visual_types/0` a sa forme d'avant — `do: ["type:feature", "type:doc"]`, la recopie
@@ -844,8 +845,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #     nommes. La version qui comptait seulement clauses contre destinations restait verte : elle
   #     ne lisait jamais la fonction dont elle porte le nom.
   # Son angle mort, declare : il compte, il ne resout pas — deux clauses rendant le MEME type
-  # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas n'existe pas
-  # aujourd'hui et un compteur exact vaut mieux qu'un resolveur qui devine.
+  # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas ne se presente
+  # pas, et un compteur exact vaut mieux qu'un resolveur qui devine.
   @doc false
   @spec check_visual_types_derived(String.t()) :: result()
   def check_visual_types_derived(root) do
@@ -1348,7 +1349,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
   # kills the long-lived forever/pipe/run pods at cycle 2). Since the `Pod` →
-  # `gen_statem` migration, the cancellation is no longer a home-made impl (`Process.cancel_timer`) but
+  # `gen_statem` migration, the cancellation is not a home-made impl (`Process.cancel_timer`) but
   # NATIVE: `:result_deadline` is a **state_timeout of the `:monitoring` state**, and the
   # `:monitoring → :extracting` transition (triggered by the result arriving,
   # `work_item.completed`) AUTOMATICALLY cancels this state_timeout (a state_timeout is
@@ -1413,7 +1414,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # NOT test-only, otherwise they are HOLLOW containment/credentials gates (called
   # in test but never in prod — the "hollow-gate" failure mode this checker
   # exists to block). The containment gate stays direct in pod.ex; the credentials
-  # gate (login-validity — the scope/plan sub-gates were nuked 2026-07-20 as vendor-redundant)
+  # gate (login-validity — the scope/plan sub-gates are gone as vendor-redundant)
   # lives behind Fleet.Credentials.Gate, reached through Pod.LaunchEnv. 3 checks (all required):
   #     (1) CapProfile.validate — containment gate (refusal of native server-tools), at do_allocate;
   #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
@@ -1765,7 +1766,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # locks read the RAW body of each mirror and ask `Regex.match?`. A file whose CODE carries the
   # wrong value stays green as long as the right one appears in a COMMENT — and the context that
   # makes it likely is the ordinary one: `# Note: was <old value>` on the very line a migration
-  # touches. Measured 2026-08-29 on three of them: code mutated + the pattern quoted in a comment
+  # touches. Measured on three of them: code mutated + the pattern quoted in a comment
   # → `status: pass`.
   #
   # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
@@ -1793,7 +1794,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # has been deleted. For a RESIDUE check, grep a glob of real files
   # (`Path.wildcard`), not a single potentially dead file path.
   #
-  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` used to answer both.
+  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` answers both.
   # Absence is a state every caller models: a presence-prover reports the missing proof and fails,
   # a residue check reads the file itself and turns it into evidence. Unreadability is not a state
   # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
@@ -2033,12 +2034,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       case File.read(wf) do
         {:ok, y} ->
           # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Ce motif ne
-          # prenait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur etait vert —
-          # mais passer une entree en double-quote ou en nu l'aurait rendue invisible a `listed`,
-          # donc tous les chemins qu'elle couvre auraient ete declares NON couverts. Un FAUX ROUGE
-          # sur un filtre correct, et l'operateur aurait cherche le defaut dans le filtre. Un
-          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine. (Revue
-          # 2026-08-20.)
+          # ne prendrait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur reste
+          # vert — mais passer une entree en double-quote ou en nu la rend invisible a `listed`,
+          # donc tous les chemins qu'elle couvre sont declares NON couverts. Un FAUX ROUGE sur un
+          # filtre correct, et l'operateur cherche le defaut dans le filtre. Un
+          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine.
           ~r/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s#'"][^\s#]*))\s*$/m
           |> Regex.scan(y, capture: :all_but_first)
           |> List.flatten()
@@ -2095,13 +2095,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # lecture de `assets/avatars/` AU BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Les deux
   # etaient invisibles ici.
   #
-  # Mesure du 2026-08-22 : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
+  # Mesure : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
   # contrat a repondu `pass`. Avec ce filtre, ajouter un avatar de role ne rebatit plus la vitrine
   # qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer, et il le
   # laissait passer parce qu'il ne regardait qu'un tiers des fichiers.
   #
-  # ⚠ ET C'EST UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle etait juste ; l'instrument lisait a
-  # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
+  # ⚠ CE SERAIT UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle est juste ; c'est l'instrument qui
+  # lit a cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais
+  # pas », il
   # dit « pass ».
   @site_sources [
     "src/lib/*.js",
@@ -2153,10 +2154,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
             # `{dir, :dir}`, c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un
             # glob, et nommer trois fichiers ne le ferme pas.
             #
-            # ⚠ CETTE CLAUSE MANQUAIT, et son absence n'etait pas inerte : `site_resolve` rend TROIS
-            # formes depuis toujours, le `case` en connaissait deux. La premiere constante dynamique
-            # du site a fait tomber le contrat par CaseClauseError — un contrat qui CRASHE ne dit
-            # rien, ni pass ni fail (2026-08-22, `assets/github.io/src/lib/catalogue.js:81`).
+            # ⚠ CETTE CLAUSE EST OBLIGATOIRE, et son absence n'est pas inerte : `site_resolve` rend
+            # TROIS formes, et un `case` qui n'en connait que deux tombe par CaseClauseError sur la
+            # premiere constante dynamique du site — un contrat qui CRASHE ne dit
+            # rien, ni pass ni fail (`assets/github.io/src/lib/catalogue.js:81`).
             {:dynamic, _} ->
               m
 
@@ -2270,14 +2271,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # ⚠ GARDE D'INSTRUMENT, ET IL MANQUAIT. `bearing` vient d'un `Path.wildcard` — repertoire absent
     # rend l'ensemble VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les
     # deux vides rendent les deux differences vides, donc `:pass`. Prouve par mutation le
-    # 2026-08-27 : renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
+    # renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
     # `pass — 0 fail, 58 pass`. Cinq autres contrats passent aussi sur perimetre vide, mais ILS LE
-    # DISENT ; celui-ci etait le seul muet.
+    # DISENT ; celui-ci doit le dire aussi.
     #
     # ⚠ ET IL ECHAPPAIT AU FILET QUI EXISTE POUR CA. `no_check_passes_on_nothing_test` enumere les
-    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC — ce check etait `defp`. La
-    # garantie « aucun check ne passe sur rien » couvrait 55 des 58, et le trou etait exactement la
-    # ou personne ne regardait. Les trois checks prives sont passes `def` dans le meme geste.
+    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` y echappe, et
+    # la garantie « aucun check ne passe sur rien » ne couvre alors que ce qui est deja visible. Les
+    # checks de ce fichier sont `def` pour cette raison.
     #
     # ICI ON ECHOUE, on ne declare pas « hors perimetre » : `priv/catalogue` part avec CHAQUE
     # artefact — le stage `build` de l'image copie `fleet` en entier moins `deploy`, `git-hooks` et
@@ -2373,7 +2374,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # LE VERIFICATEUR AUTONOME AFFIRMAIT COUVRIR LE BOOT, ET L'EQUIVALENCE N'ETAIT TENUE PAR RIEN
   # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
   # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
-  # rail boot ». Mesure du 2026-08-14 : le boot en jouait SIX, le verificateur QUATRE —
+  # rail boot ». Mesure : le boot en jouait SIX, le verificateur QUATRE —
   # `validate_workshop_card!` et `validate_default_card_loads!` (alors `validate_default_card_matrix!`)
   # manquaient. Un verificateur VERT
   # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
@@ -2591,7 +2592,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     catalogue = scan_catalogue_roles(root)
 
-    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent desormais. Le
+    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent. Le
     # verrou ne change pas de nature — il reste l'egalite stricte des quatre — mais il compare les
     # memes objets. Meme regle que la derivation runtime : le prefixe suit le TIER, donc ou le nom
     # est declare en premier, et non le fichier qui gagne la superposition (un catalogue metier peut
@@ -2604,7 +2605,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
-    # `deploy/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
+    # `deploy/deps/`: the tofu recipe is the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
     # the gesture that touched it.
     tf_path = Path.expand("deploy/deps/forge.tf", root)
@@ -2622,7 +2623,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        # `variable "roles"` since the enroll derivation (2026-08-10): the roster moved from a
+        # `variable "roles"` since the enroll derivation: the roster moved from a
         # `local` to a VARIABLE so a deployment can supply the roster of the catalogue it brings.
         # The DEFAULT is what this check measures, and that is the right target — it is the value
         # a deployment gets when it supplies nothing, so it is the one that must equal the canon.
@@ -2759,12 +2760,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `incompatible` est une liste de PAIRES : le bundle ne doit apparaitre dans aucune.
     #
     # ⚠ ET ON ACCEPTE AUSSI L'ENTREE PLATE, QUI EST UNE MALFORMATION. `incompatible:
-    # [adresser-un-agent]` (des chaines au lieu de paires) faisait echouer le `is_list(pair)` :
-    # chaque element etait une chaine, aucun n'etait signale, et le mur passait au VERT sur un
+    # [adresser-un-agent]` (des chaines au lieu de paires) fait echouer le `is_list(pair)` : chaque
+    # element est une chaine, aucun n'est signale, et le mur passe au VERT sur un
     # profil qui retire pourtant le bundle. Le schema doit refuser cette forme en amont — mais un
     # mur qui ne tient que si un AUTRE controle a fait son travail ne tient rien par lui-meme, et
-    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire. (Revue
-    # 2026-08-20.)
+    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire.
     excluded =
       profiles
       |> Enum.filter(fn p ->
@@ -2862,7 +2862,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # WHAT IT DOES NOT REACH, and the sentence above must not be read past it: THE SOURCE TREE ONLY.
   # The word also lives in the SP corpus (`priv/catalogue*/sp_builder/**`), which is not scanned
   # here — and that is the population where the prior does its work, since those texts are injected
-  # into the agents' own context. Measured 2026-08-13: the block `core/pod-sanctuary`, composed into
+  # into the agents' own context. Measured: the block `core/pod-sanctuary`, composed into
   # SIX roles, opens on the heading "## Ton monde (sanctuaire)" with NO antibody anywhere in it.
   # Extending the scan there is not a lint change but a change to authored prompt material, whose
   # calibration belongs to its author — the finding is on record, the edit is not this wall's to
@@ -2881,12 +2881,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   # BL-6-05 — LE MUR D'EXHAUSTIVITE DE LA MIGRATION DE NAMESPACE, et il est ne AVANT elle.
   #
-  # Les 15 atoms `:fleet_<dom>` etaient LEGACY-VALIDES (D-07) : ils fonctionnaient, la config ETS
-  # etant keyee par atom. Ce qu'ils coutaient etait a l'ENTREE — dix messages de Mix a chaque
+  # Les 15 atoms `:fleet_<dom>` sont LEGACY-VALIDES (D-07) : ils fonctionnent, la config ETS etant
+  # keyee par atom. Ce qu'ils coutent est a l'ENTREE — dix messages de Mix a chaque
   # `mix test`, disant a qui decouvre le depot que sa configuration est fausse.
   #
   # ⚠ CE CHECK EXISTE PARCE QUE LE MODE DE DEFAILLANCE EST SILENCIEUX. Un site oublie appelle
-  # `Application.get_env(:fleet_x, :k)` sur un namespace desormais vide : il recoit le DEFAUT, pas
+  # `Application.get_env(:fleet_x, :k)` sur un namespace vide : il recoit le DEFAUT, pas
   # une erreur. La config cesse de s'appliquer sans que rien ne le dise, et un test qui n'exerce pas
   # ce knob reste vert. Une migration de 535 sites ne peut pas se verifier a la relecture.
   #
@@ -2987,7 +2987,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
   # `[object Object]`).
   #
-  # Measured 2026-08-03: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
+  # Measured: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
   # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
   @doc false
@@ -2999,7 +2999,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # ⚠ LE PERIMETRE SE DISAIT SUR `deploy/` SEUL, POUR UNE POPULATION QUI VIT SOUS DEUX RACINES.
     # Le commentaire du calcul plus bas nommait deja l'asymetrie — « these are TWO roots, only one
     # of them is scoped » — et l'a portee au garde de POPULATION sans la porter au garde de
-    # PERIMETRE. Consequence mesuree le 2026-08-27 : `etc/` porte DEUX sourcers
+    # PERIMETRE. Consequence mesuree : `etc/` porte DEUX sourcers
     # (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY fleet/etc`,
     # et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Dans l'artefact, ce
     # check declarait « NOT CHECKED » sur deux fichiers qu'il tenait dans la main.
@@ -3187,7 +3187,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `Fleet.ReleaseDoor.claim_stdout!/0` le renvoie vers stderr, et c'est le seul geste qui separe les
   deux flux.
 
-  Le 2026-08-23, sur un poste : `lcars catalogue install web-demo` a rendu
+  Mesure, sur un poste : `lcars catalogue install web-demo` rend
 
       forge-gestures: web-demo <-  (@)
       fatal: repository 'http://127.0.0.1:21000/.git/' not found
@@ -3226,8 +3226,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     naked = for {f, n, _, claim} <- writers, not claim, do: "#{Path.relative_to(f, root)}: #{n}"
 
     # INSTRUMENT GUARD. Chaque finding est une ABSENCE, et un parseur casse en produit autant. La
-    # premiere ecriture de cette sonde ratait la forme `def f(x) when g` — la tete est enveloppee
-    # dans un `:when`, donc aucun corps n'etait scanne — et elle rendait un vert parfait sur un
+    # forme `def f(x) when g` est le piege : la tete est enveloppee dans un `:when`, donc une sonde
+    # naive ne scanne aucun corps — et rend un vert parfait sur un
     # arbre qui portait TROIS portes nues. Le plancher est pose sous l'etat du jour, pas dessus.
     broken =
       cond do
@@ -3309,7 +3309,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   `roles.capabilities_exercisable` does NOT cover this. It fails only when a role carries NONE of a
   capability's tools, so the architect — who holds four delegation tools — stays green after losing
-  one. Measured 2026-08-22, renaming three ids that were granted by name: the wall would not have
+  one. Measured by renaming three ids granted by name: the wall would not have
   moved.
 
   The alignment was verified BY HAND that day. A hand check protects the rename that prompted it and
@@ -3384,10 +3384,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   ## The same rename, missing the same way, twice
 
-  Tool names went object-first on 2026-08-11 (`create_project` → `project_create`). The rename moved
+  Tool names are object-first (`create_project` → `project_create`). Such a rename moves
   the `deftool` names and the `mcp__fleet__` citations. It did NOT move the bare names written INSIDE
   the description strings — and those strings are the tool catalogue an agent reads. Measured
-  2026-08-21: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
+  Measured: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
   `project_import` even referred to itself by its old name.
 
   This is worse than a stale comment. A comment misleads a human who can check; a description is an
@@ -3413,7 +3413,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   It was first written as `mcp.tool_descriptions_name_real_tools`, opening on *"no description may
   name a tool that does not exist"* — a claim wider than the code, caught by independent review on
-  2026-08-22. An INVENTED name that is not a reordering passes: `project_import_external`,
+  An INVENTED name that is not a reordering passes: `project_import_external`,
   `issue_open`, `project_list_all`. A guard whose name promises more than it measures is green
   exactly where a reader trusts it most, which is this repo's own definition of a bad wall.
 
@@ -3451,7 +3451,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # multiset de segments normalises) s'ecrasent dans la map : le survivant garde sa couverture,
       # le perdant n'est plus jamais mesure, et rien dans la sortie ne le dit. Les autres gardes de
       # ce fichier comptent leur population ; celui-ci ne verifiait pas qu'elle survit a
-      # l'indexation. Trouve par relecture independante le 2026-08-22.
+      # l'indexation.
       length(Enum.uniq(shapes)) != length(shapes) ->
         broken_result(
           id,
@@ -3516,7 +3516,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `description/1` de l'AST. Ca tient tant que `pod_tools.ex` n'est fait que de `deftool` — donc
   # tant que personne n'y ecrit une fonction d'aide du meme nom, ou n'importe un `description/1`
   # etranger. Le jour ou ca arrive, le mur mesure une population qu'il ne pretend pas mesurer, dans
-  # un sens comme dans l'autre. Trouve par relecture independante le 2026-08-22.
+  # un sens comme dans l'autre.
   defp description_texts(ast) do
     ast
     |> collect(fn
@@ -3566,13 +3566,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # FIFTH MIRROR, and it is the OTHER half of that security bound. The converger refuses any
       # SHA that is not the head of the branch IT names; the root executor ASKS the forge for the
       # head of the branch IT names. The bound only holds while both names agree — and until
-      # 2026-08-27 this wall watched the second and not the first. Measured: renaming the literal
+      # Watching the second and not the first is the easy miss. Measured: renaming the literal
       # here alone left the check green, with the only root process on this machine converging on
       # a branch nobody else writes to.
       "services/privileged-executor.py"
     ]
 
-    # ⚠ SCOPE IS DECIDED PER MIRROR, AND IT USED TO BE DECIDED BY ONE TREE FOR ALL FIVE. The guard
+    # ⚠ SCOPE IS DECIDED PER MIRROR, NEVER BY ONE TREE FOR ALL FIVE. The guard
     # asked `is deploy/ here?` and, on a miss, declared the whole check "NOT CHECKED" — including
     # `services/` and `bin/`, which the image's build stage DOES carry (it excludes only `deploy`,
     # `git-hooks`, `system-prompt`). So in the artifact where this gate runs most often, three
@@ -3598,7 +3598,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
           # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
           # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure du
-          # 2026-08-27, sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
+          # Mesure sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
           case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
             [_, name] -> name
             _ -> nil
@@ -3901,7 +3901,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
        "the box's master-token path"}
     ]
 
-    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme desormais sa
+    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
     # racine UNE fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au
     # litteral des quatre autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus
     # parfaitement d'accord — et la seule facon de faire taire ce faux rouge serait de RECOPIER le
@@ -4106,15 +4106,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
       # Chaque miroir est ancre sur SON GESTE, pas sur la simple presence du nom : un commentaire,
       # une phrase de doc ou un nom de fichier voisin ne doivent pas pouvoir satisfaire ce mur.
-      # `MUR 4 bis` d'`adminite_walls` a coute exactement cette lecon le meme jour — il etait
-      # satisfait par `lcars-authority-ask`, puis par un commentaire.
+      # `MUR 4 bis` d'`adminite_walls` porte exactement la meme lecon : il se laisse satisfaire par
+      # `lcars-authority-ask`, puis par un commentaire.
       mirrors = [
         # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
         # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
-        # ⚠ CE MIROIR A CHANGE DE NATURE LE JOUR MEME OU IL A ETE ECRIT, et c'est un progres :
-        # `forge.tf` ne porte plus le litteral, il RECOIT la valeur par `roles.auto.tfvars.json`,
-        # projetee depuis l'autorite. Ce qui se garde ici n'est donc plus « la copie s'accorde »
-        # mais « il n'y a PLUS de copie » — un `default =` reintroduit rendrait a tofu le pouvoir
+        # ⚠ CE MIROIR NE GARDE PAS UNE COPIE, IL GARDE SON ABSENCE. `forge.tf` ne porte pas le
+        # litteral : il RECOIT la valeur par `roles.auto.tfvars.json`, projetee depuis l'autorite.
+        # Ce qui se garde ici n'est donc pas « la copie s'accorde » mais « il n'y a PAS de copie » —
+        # un `default =` rendrait a tofu le pouvoir
         # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
         # ce que la suppression a ferme.
         {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
@@ -4206,15 +4206,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   @doc """
-  The platform root is declared ONCE, in `Fleet.Layout`, and 121 literals in the corpus repeat it.
-  This makes them agree.
+  The platform root is declared ONCE, in `Fleet.Layout`, and the corpus repeats that literal in
+  scores of places. This makes them agree.
 
   ## Why an allow-list of OTHER roots, and not a list of mirrors
 
-  Its four siblings name their mirrors. Here the mirrors are 22 files and growing — a hand-kept
-  list of that size is the defect, not the guard: it goes stale, and a stale list is a wall that
-  is green about files it no longer holds. So the check is INVERTED. It does not ask "do these 22
-  files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
+  Its four siblings name their mirrors. Here the mirrors are dozens of files and growing — a
+  hand-kept list of that size is the defect, not the guard: it goes stale, and a stale list is a
+  wall that is green about files it no longer holds. So the check is INVERTED. It does not ask "do
+  these files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
 
   `/opt` is not ours alone — the image also carries `/opt/homebrew`, `/opt/elixir-*`, `/opt/node-*`,
   `/opt/bin`, `/opt/skills`, `/opt/token-saver` and the vendor launcher. Those are DECLARED below,
@@ -4222,10 +4222,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `no_check_passes_on_nothing`'s exemption list, and for the same reason: matching on a pattern
   would let any new root earn its exemption by looking plausible.
 
-  What this catches, and nothing else did: `@platform_root` moves, the 22 literals do not, and the
-  set of roots in use no longer contains the authority's value. Measured 2026-08-28 as part of
-  redoing §21 from a derived sweep — `/opt/lcars` is the single most copied fact of the corpus
-  (121 occurrences, 22 files) and it had no lock at all.
+  What this catches, and nothing else does: `@platform_root` moves, the literals do not, and the set
+  of roots in use stops containing the authority's value. Measured on a derived sweep — `/opt/lcars`
+  is the single most copied fact of the corpus, and the one a hand-kept mirror list would cover
+  worst.
   """
   @spec check_platform_root_single_source(String.t()) :: result()
   def check_platform_root_single_source(root) do
@@ -4360,7 +4360,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   `/run/lcars` carries the sockets of the authority, the privileged executor, MCP, egress and the
   consoles — the whole surface by which a pod talks to the rest of the machine — plus the boot
   markers (`/run/lcars-provision.rc`, `/run/lcars-humans.rc`) and the converger's refusal lock.
-  The derived sweep of 2026-08-28 ranked it SECOND of the corpus, with no source at all. The
+  A derived sweep ranks it SECOND of the corpus, with no source at all. The
   authority (`@runtime_root`) was created that day; this check is what makes it true.
 
   ## Two shapes, one rule
@@ -4434,7 +4434,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
       # ⚠ UN PREFIXE N'EST PAS UNE APPARTENANCE, ET LA MUTATION L'A MONTRE. `String.starts_with?`
       # seul laisse passer `/run/lcarsx/...` : il commence bien par `/run/lcars`. C'est la TROISIEME
-      # coincidence de sous-chaine de la journee — `MUR 4 bis` etait satisfait par
+      # coincidence de sous-chaine du corpus — `MUR 4 bis` se laisse satisfaire par
       # `lcars-authority-ask`, un nom de binaire. Le prefixe doit etre suivi d'une FRONTIERE : `/`
       # pour l'arbre, `-` ou `.` pour les fichiers freres (`/run/lcars-provision.rc`), ou la fin.
       sous_la_racine? = fn v ->
@@ -4565,8 +4565,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
                   |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
                   |> Enum.map(&hd/1)
                   # ⚠ LE POINT FINAL D'UNE PHRASE N'EST PAS UNE RACINE. « … sous /home/projects. »
-                  # rendait `/home/projects.`, une quatrieme face inexistante. Deuxieme fois qu'une
-                  # ponctuation pollue un extracteur aujourd'hui — `/opt/...` etait la premiere.
+                  # rend `/home/projects.`, une quatrieme face inexistante. La ponctuation pollue
+                  # un extracteur des qu'on la laisse passer — `/opt/...` porte le meme piege.
                   |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
                   |> MapSet.new()
                   |> MapSet.union(acc)
@@ -4729,13 +4729,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
   # that drifts without a word.
   #
-  # THE WALL HELD ONE OF THE TWO, and the one it held is the narrower. Until 2026-08-13 it read the
+  # TWO SITES, AND THE NARROWER ONE IS THE EASY MISS. Reading only
   # docker entrypoint alone, so it was green on a rail that recognises THREE substrates
   # (`docker`, `wsl`, `linux`) while creating the zones on one. On `wsl` they existed "by history of
   # the substrate" — by hand, one day, on the author's machine — and on a native `linux`, not at
   # all. Same failure as the `doc` face below, on the path the check did not cover.
   #
-  # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
+  # Measured on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
   # fleet started, and the first `project_create` died on `could not make directory (with -p)
   # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
@@ -5174,7 +5174,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # L'acceptor protegeait cinq outils sur ~17 contre le double effet, depuis une liste de mots nus
   # posee LOIN des definitions. Deplacer cette liste a cote des `deftool` la rend traversable par un
-  # renommage — ce qui repare la panne du 2026-08-11 — mais ne repare PAS l'oubli : rien n'oblige
+  # renommage, mais pas l'oubli : rien n'oblige
   # celui qui ajoute un `deftool` a le classer.
   #
   # Ce check est ce qui l'oblige, et il porte dans les DEUX sens :
@@ -5236,7 +5236,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # 6-136 — UN MODOP QUI ORDONNE UN OUTIL QUE SON PORTEUR N'A PAS **GELE LE POD**, ET RIEN NE LE
   # DISAIT NULLE PART.
   #
-  # Ce n'est pas une gene de prompt. Mesure de banc du 2026-08-09, ecrite dans `architect.yaml` et
+  # Ce n'est pas une gene de prompt. Mesure de banc, ecrite dans `architect.yaml` et
   # dans `launch_env.ex` : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
   # saute PAS, il PROMPTE (« Do you want to… 1. Yes 2. Yes, allow all 3. No ») — et un pod n'a
   # personne pour repondre. Il reste vivant, tient son creneau et le verrou `lcars-in-flight` du
@@ -5246,18 +5246,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Le premier jet bornait
   # le vocabulaire aux noms deja declares par un cap-profile — exact, sans faux positif… et MUET sur
-  # le defaut qui l'a motive : `TodoWrite` n'etait declare NULLE PART, donc rien ne le reconnaissait
-  # comme outil. Un mur qu'on desarme en retirant la derniere declaration ne protege rien.
+  # le defaut qui le motive : un outil declare NULLE PART n'est reconnu comme outil par personne. Un
+  # mur qu'on desarme en retirant la derniere declaration ne protege rien.
   #
   # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
   # porteurs, ou figurer ci-dessous avec sa raison. La liste se PURGE quand son sujet disparait
   # (lecon 6-091 : une exemption qui ne correspond plus a rien n'exempte rien et masque la
-  # suivante) — et elle vient de le faire, toute seule, le 2026-08-19.
+  # suivante) — et elle le fait.
   #
-  # ⚠ ELLE ETAIT VIDEE PAR LA SORTIE DE SUPERPOWERS, ET C'EST LA GARDE QUI L'A DIT. Son unique
-  # entree, `MailerTest`, etait un nom de module cite par le test d'exemple de `tdd/sp.md` ; le
-  # bundle supprime, l'exemption ne designait plus rien et le check a demande sa purge de lui-meme
-  # (« MailerTest is cited by no bundle — purge it »). Une exemption survivante aurait laisse un
+  # ⚠ UNE EXEMPTION QUE PLUS AUCUN BUNDLE NE CITE EST VIDE, ET LA GARDE LE DIT. Un nom de module
+  # cite par le seul exemple d'un bundle disparait avec lui : l'exemption ne designe plus rien, et
+  # le check demande sa purge de lui-meme (« … is cited by no bundle — purge it »). Une exemption
+  # survivante laisserait un
   # trou nomme dans un mur, pret a couvrir le prochain nom homonyme.
   #
   # La map reste, VIDE : c'est la porte par ou une future exemption entre AVEC sa raison, et son
@@ -5465,7 +5465,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   #
   # ⚠ THIS HAS NOW BEEN FOUND TWICE, ON TWO DIFFERENT DOORS, WITH THE SAME MESSAGE. `eval_migrate`
   # carries the scar and its fix inline; `CatalogueLifecycle`'s two doors were written afterwards
-  # and reintroduced it, measured on a bench 2026-08-16 — `lcars catalogue list` printed the
+  # and reintroduced it, measured on a bench — `lcars catalogue list` prints the
   # ArgumentError under its own "the forge did not answer" line, i.e. a network diagnostic for a
   # startup failure. Unit tests cannot catch it: they inject forge doubles, so the path that needs
   # the pool is taken by nobody.
@@ -5533,7 +5533,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # what happens when nobody sets anything, which is every deployment.
   #
   # ⚠ THE PROVISIONING HALF IS A SIBLING TREE, AND ONE LEGITIMATE CONTEXT DOES NOT CARRY IT: the
-  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured 2026-08-16 — adding
+  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured — adding
   # the third source turned the image build red on a file it cannot have. Absence is read at the
   # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
   # NAMED in the note; tree present and the default gone = the real defect, FAIL.
@@ -5892,7 +5892,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # ── Forge payload fields: received, and read? ────────────────────────
-  # PROBE N°1 of the 2026-08-04 pattern hunt, promoted from a one-off command to a wall.
+  # PROBE N°1 of the pattern hunt, promoted from a one-off command to a wall.
   #
   # The forge hands back whole objects. The code picks what it needs and the rest is dropped
   # silently — which is correct, right up until the dropped part is the answer to a question someone
@@ -5932,7 +5932,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # EVERY test corpus in the repo — bats AND python — and what happens to it. `:gated` = shell_gate discovers it;
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
-  # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
+  # WHY THIS EXISTS, and it is worth three findings in one evening: nothing in this repo
   # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
@@ -5975,7 +5975,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   # A SUITE DOES NOT GO RED OVER A TEST THAT WAS REMOVED — it goes green over one fewer.
   #
-  # Measured 2026-08-06 while replaying the GC-prose transplant: `forge_protocol.ex` went from 13
+  # Measured while replaying the GC-prose transplant: `forge_protocol.ex` goes from 13
   # `iex>` lines to zero, `mix test` reported "0 failures" on both sides, and the count moved from
   # 13 doctests to 10 with nothing to see. The examples were round-trip assertions — the predicate
   # recognises what the builder records — and `test/…/forge_protocol_test.exs` still carries
@@ -6069,18 +6069,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   @doc false
   # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
-  # chemin faux se LIT COMME UNE REPONSE. Mesure du 2026-08-30 : neuf temoins vivaient sous
+  # chemin faux se LIT COMME UNE REPONSE. Mesure : neuf temoins vivaient sous
   # `test/fleet/pilot/project_onboard/` et `test/fleet/pilot/forge_client/`, deux dossiers qui
   # n'existent nulle part sous `lib/`. Leurs modules disaient `Fleet.Project.Onboard.*` et
-  # `Fleet.Forge.Client.*` depuis toujours — qui cherchait les temoins d'`onboard.ex` sous
-  # `test/fleet/project/` ne trouvait rien et en concluait une absence de couverture qui etait fausse.
+  # `Fleet.Forge.Client.*` — qui cherche les temoins d'`onboard.ex` sous `test/fleet/project/` n'y
+  # trouve rien et en conclut une absence de couverture qui est fausse.
   #
   # LA QUESTION EST DECIDABLE ET SANS ETAT, et c'est ce qui la met ici plutot que sous la forme d'un
   # plancher enregistre : « le dossier de ce temoin existe-t-il sous `lib/` ? » se repond avec le
   # disque, jamais avec un compte d'hier.
   #
   # ⚠ CE MUR NE DIT PAS QUE CHAQUE SOURCE A UN TEMOIN, et le silence est delibere. Cette moitie-la
-  # n'est pas decidable sans plancher. Mesure du 2026-08-30 : 130 sources sur 247 n'ont pas de
+  # n'est pas decidable sans plancher. Mesure : 130 sources sur 247 n'ont pas de
   # temoin canonique — 26 ont au moins un satellite qui porte leur nom, et pour les 104 autres le
   # NOM DE FICHIER NE TRANCHE PAS, parce qu'un temoin nomme d'apres le contrat qu'il epingle ne
   # nomme pas sa cible. Reclamer le canonique ici fabriquerait 104 coquilles « pas de test » dont
