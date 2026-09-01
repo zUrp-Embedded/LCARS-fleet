@@ -435,6 +435,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# LE PLANCHER PYTHON. Meme forme que le plancher shellcheck ci-dessus, et pour la meme raison : ce
+# depot n'avait AUCUN outillage python — ni ruff, ni flake8, ni config — sur douze fichiers maison
+# (bridge MCP, executeurs, deck, et leurs temoins). L'absence totale se remarque avant le contenu.
+#
+# ⚠ `E9,F` ET RIEN D'AUTRE, et c'est une mesure. Au 2026-09-01 : E9=0, F=0 (les 16 F821 du callback
+# git-filter-repo portent leur `noqa` motive, cf. `bin/publish-transform-attribution.py`), mais
+# UP=113, S=31, E/W=160. Entrer plus haut rendrait la chaine rouge en permanence — c'est la
+# lecon de l'outil shell, retiré du gate le 2026-08-29 pour exactement ca. Le reste se mesure a la demande :
+# `ruff check --select UP,S`. Le perimetre et la config vivent dans `pyproject.toml` a la racine.
+#
+# RUFF ABSENT = ECHEC, jamais un avertissement : meme regle que python3 et shellcheck ci-dessus. Un
+# plancher qu'on peut sauter en silence n'est pas un plancher.
+# ---------------------------------------------------------------------------
+if ! command -v ruff >/dev/null 2>&1; then
+  echo "ECHEC: ruff absent — le python maison n'est PAS audite. Installer : pip install ruff (ou apt)." >&2
+  GATE_FAIL=1
+else
+  set +e
+  RUFF_OUT="$(cd "$REPO_ROOT" && ruff check --no-cache --output-format=concise 2>&1)"
+  RUFF_RC=$?
+  set -e
+  if [[ "$RUFF_RC" -ne 0 ]]; then
+    printf '%s\n' "$RUFF_OUT" >&2
+    echo "ECHEC: ruff plancher — $(printf '%s\n' "$RUFF_OUT" | grep -c ':') signalement(s) E9/F." >&2
+    GATE_FAIL=1
+  else
+    echo "--- ruff plancher (E9,F — vendor exclu) : OK ---"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # L'AUDIT COMPLET, opt-in : toutes severites, deploy compris, informatif.
 # ---------------------------------------------------------------------------
 if [[ -n "${LCARS_SHELL_LINT:-}" ]]; then
