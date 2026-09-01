@@ -443,6 +443,10 @@ uninstall_run() {
     awk '$1=="posed_apt_repo"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
 
   # LES PAQUETS : le journal, et lui seul.
+  # Le FAIT « ce journal etait lisible » se capture ici parce qu'il ne le sera plus a la fin : la
+  # boucle `dirs` emporte la racine d'install, journal compris, bien avant le bilan de sortie.
+  local _journal_lisible=0
+  [[ -r "$JOURNAL_FILE" ]] && _journal_lisible=1
   if [[ -r "$JOURNAL_FILE" ]]; then
     mapfile -t journal_pkgs < <(awk '$1=="apt_installed"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
   fi
@@ -729,10 +733,18 @@ uninstall_run() {
   echo "  ${_PC}travail préservé${_PN}      ${preserve_roots[*]}"
   echo "  ${_PC}sous /home${_PN}           tout — ni un « rm », ni un « userdel -r ». Les homes, leur contenu,"
   echo "                       et les ${#humans[@]} objet(s) que LCARS y a posés."
-  if [[ "${#journal_pkgs[@]}" -eq 0 && -r "$JOURNAL_FILE" ]]; then
-    echo "  ${_PC}paquets apt${_PN}          aucun retiré — le journal dit qu'aucun n'a été posé par ce rail"
-  else
+  # ⚠ LE JOURNAL N'EXISTE PLUS QUAND CETTE LIGNE S'IMPRIME, et c'est pourquoi la question se pose
+  # PLUS HAUT. Il vit sous la racine d'install, que la boucle `dirs` vient d'emporter au `rm -rf` :
+  # un `-r "$JOURNAL_FILE"` teste ici l'absence que le script vient lui-meme de creer, et tombe
+  # toujours dans la branche « la machine portait deja ». Mesure du 2026-09-01, banc 2001. C'est la
+  # meme cicatrice d'ordre que « les paquets d'abord » — ce fichier meurt en cours de route, donc
+  # tout ce qu'on veut en dire se lit AVANT.
+  if [[ "${#journal_pkgs[@]}" -eq 0 && "$_journal_lisible" -eq 1 ]]; then
+    echo "  ${_PC}paquets apt${_PN}          aucun retiré — le journal disait qu'aucun n'a été posé par ce rail"
+  elif [[ "$_journal_lisible" -eq 1 ]]; then
     echo "  ${_PC}paquets apt${_PN}          ceux que la machine portait DÉJÀ (« apt_already » au journal) restent"
+  else
+    echo "  ${_PC}paquets apt${_PN}          ${_PA}aucun retiré — le journal était illisible ou absent : impossible de distinguer ce que LCARS a posé de ce qui était déjà là${_PN}"
   fi
   # Le cache des catalogues a demenage sous le prefixe le 2026-09-01 ; ce qui reste a l'ancienne
   # adresse est sous /home, donc hors de portee de ce script — et invisible si personne ne le dit.

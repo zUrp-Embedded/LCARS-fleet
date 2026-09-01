@@ -712,3 +712,20 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   # de bord. Ce temoin a rougi le jour ou `audit` est arrive — c'est exactement son metier.
   code | grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|uninstall\|audit\)'
 }
+
+@test "BILAN DE SORTIE : le journal se lit AVANT d'etre emporte, pas apres" {
+  # ⚠ MESURE DU 2026-09-01, BANC 2001. Le bilan testait `-r "$JOURNAL_FILE"` a la toute fin — or le
+  # journal vit sous la racine d'install, que la boucle `dirs` vient d'emporter au `rm -rf`. Il
+  # testait donc l'absence que le script venait lui-meme de creer, et tombait toujours dans la
+  # branche « la machine portait deja ». Meme cicatrice d'ordre que « les paquets d'abord » : ce
+  # fichier meurt en cours de route, donc tout ce qu'on veut en dire se lit AVANT.
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  local n_capture n_usage
+  n_capture="$(grep -n '_journal_lisible=1' <<<"$body" | head -1 | cut -d: -f1)"
+  n_usage="$(grep -n 'journal_lisible" -eq 1' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_capture" ] && [ -n "$n_usage" ]
+  [ "$n_capture" -lt "$n_usage" ]
+  # et le bilan ne re-teste PLUS le fichier lui-meme
+  local bilan; bilan="$(sed -n '/CE QUI RESTE SUR CETTE MACHINE/,/^  return 0$/p' <<<"$body")"
+  refute grep -q 'r "$JOURNAL_FILE"' <<<"$bilan"
+}

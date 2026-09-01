@@ -438,3 +438,23 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   grep -qE '^group +fleet +2000 ' "$MANIFEST"
   grep -qE '^group +lcars-console +2001 ' "$MANIFEST"
 }
+
+@test "PREFIX : la classe la plus importante de la table a un POSEUR, pas un effet de bord" {
+  # ⚠ TROUVE PAR LE CYCLE DU RANG D, PAS PAR CE FICHIER, et l'angle mort merite d'etre nomme :
+  # ISO 2/2 cherche un RADICAL du chemin dans le code. « runtime » apparait partout, donc
+  # `/opt/lcars/runtime` etait declare « couvert » alors qu'aucun module ne le CREAIT — c'est
+  # `etc/deploy-release.sh` qui le faisait apparaitre par `mkdir -p`, sous `runuser -u bob`.
+  #
+  # Consequence mesuree (banc 2001, 2026-09-01) : apres `uninstall --yes` puis re-apply, le prefixe
+  # renaissait en `bob:fleet` au lieu de `root:fleet`. Invisible sur une machine ou il existe deja,
+  # parce que `mkdir -p` ne touche pas aux droits d'un repertoire present.
+  local dirs_mod="$BATS_TEST_DIRNAME/../modules.d/25-directories.sh"
+  local liste; liste="$(sed -n '/^prov_dirs()/,/^}$/p' "$dirs_mod")"
+  [ -n "$liste" ]
+  grep -q 'PROV_PREFIX' <<<"$liste"
+
+  # et il est pose avec ce que la TABLE declare, pas avec autre chose
+  local decl; decl="$(awk '{c=$1;sub(/:.*/,"",c)} c=="prefix"{print $3, $4; exit}' "$MANIFEST")"
+  [ "$decl" = "0750 root:fleet" ]
+  grep -qE 'PROV_PREFIX 0750 root:\$PROV_FLEET_GROUP' <<<"$liste"
+}

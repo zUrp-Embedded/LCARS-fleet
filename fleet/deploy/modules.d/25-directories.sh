@@ -41,8 +41,20 @@ prov_runtime_dirs() {
 }
 
 prov_dirs() {
+  # ⚠ LE PREFIXE MANQUAIT A CETTE LISTE, ET PERSONNE NE LE POSAIT. La table le declare
+  # `prefix /opt/lcars/runtime 0750 root:fleet` — mais aucun module ne le creait : c'est
+  # `etc/deploy-release.sh:270` qui le faisait apparaitre par `mkdir -p "$PREFIX/bin" …`, et ce
+  # script tourne sous `runuser -u bob`. Le prefixe naissait donc a l'identite de l'OPERATEUR.
+  #
+  # ⚠ INVISIBLE TANT QU'ON NE DESINSTALLE PAS, et c'est le cycle du rang D qui l'a trouve : sur une
+  # machine ou le repertoire existe deja — pose une fois, correctement, par un geste ancien —
+  # `mkdir -p` ne touche pas a ses droits. Il faut l'avoir RETIRE pour le voir renaitre en
+  # `bob:fleet` : mesure du 2026-09-01, banc 2001, apres `uninstall --yes` puis re-apply.
+  #
+  # Une install qui reussit ne prouve rien de ce qu'elle laisse.
   printf '%s\n' \
     "$PROV_ROOT 0755 root:root" \
+    "$PROV_PREFIX 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_TOKENS_DIR 0710 $PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_DIR 0750 root:$PROV_FLEET_GROUP" \
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \

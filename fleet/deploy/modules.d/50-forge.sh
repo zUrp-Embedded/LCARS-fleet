@@ -107,6 +107,17 @@ converge_authority_modes() {
   return 0
 }
 
+# 0 si CE compte peut ouvrir au moins un des jetons que la sonde A4 va lire. La question n'est pas
+# « le repertoire existe-t-il » mais « puis-je en ouvrir le contenu » : c'est ce que fait A4, et
+# c'est donc la seule chose dont son echec puisse temoigner.
+tokens_lisibles_ici() {
+  local r
+  for r in $ROLES "$PROV_SYSTEM_ACCOUNT"; do
+    [[ -r "$PROV_TOKENS_DIR/$r.gitea_token" ]] && return 0
+  done
+  return 1
+}
+
 a4_check() {
   "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
     --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")" --check >/dev/null 2>&1
@@ -288,6 +299,18 @@ check() {
   if [[ -x "$A4_SCRIPT" ]]; then
     if a4_check; then
       p_ok "role-tokens valides (sonde A4 --check)"
+    elif ! tokens_lisibles_ici; then
+      # ⚠ CE N'EST PAS LE REPERTOIRE QUI BLOQUE, CE SONT LES FICHIERS — et ma premiere correction
+      # sondait le mauvais objet. Mesure du 2026-09-01, banc 2001 : `/opt/lcars/var/tokens` est
+      # `0710 lcars-authority:fleet` et le siege EST dans `fleet`, donc il TRAVERSE ; mais chaque
+      # jeton est `0600 lcars-authority:lcars-authority`, donc il n'en ouvre aucun. Un test `-x` sur
+      # le repertoire passait, et le drift restait.
+      #
+      # `a4_check` echoue alors TOUJOURS hors de `lcars-authority`, et son echec etait lu comme
+      # « tokens absents/invalides » : le drift apparaissait sans sudo et disparaissait avec, sur des
+      # jetons parfaitement valides. Une sonde qui ne peut pas ouvrir ce qu'elle mesure ne mesure
+      # rien — elle se mesure elle-meme.
+      p_warn "role-tokens NON SONDABLES — aucun jeton de $PROV_TOKENS_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $PROV_AUTHORITY_USER) ; relance sous sudo pour conclure"
     else
       p_drift "role-tokens absents/invalides (sonde A4 --check) — l'apply les re-mint"
     fi
