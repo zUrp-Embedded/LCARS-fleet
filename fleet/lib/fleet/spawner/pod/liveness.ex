@@ -109,7 +109,7 @@ defmodule Fleet.Spawner.Pod.Liveness do
   No baseline (1st tick, `prev = nil`) → alive (benefit of the doubt). Called by the same tick handler
   as `liveness_sample/1`.
 
-  TRI-STATE, not binary: a NEW sample of `{nil, nil}` means BOTH signals were UNOBSERVABLE
+  TRI-STATE, not binary: a NEW sample of `{nil, nil}` means BOTH signals are UNOBSERVABLE
   this tick (no jsonl yet AND the holder's /proc unreadable) — that is UNKNOWN, not proven
   silence. Counting it as "not moved" would let an observation failure accumulate toward the
   kill, destroying a pod we simply could not measure. So `{nil, nil}` reads as moved (re-arm +
@@ -118,9 +118,9 @@ defmodule Fleet.Spawner.Pod.Liveness do
 
   The tuple has GROWN over time (2 -> 3 -> 4 signals) and every arity is still answered, because a
   sample is compared against the PREVIOUS one: a node that adds a signal, or a test that injects a
-  probe of another shape, would otherwise meet a sample pair of mismatched arity. That pair used to
-  raise `FunctionClauseError` and kill the pod inside its own liveness tick — the one place where an
-  observation failure must never be fatal. It now reads as UNKNOWN, like the all-nil sample.
+  probe of another shape, would otherwise meet a sample pair of mismatched arity. Unanswered, that
+  pair raises `FunctionClauseError` and kills the pod inside its own liveness tick — the one place
+  where an observation failure must never be fatal. It reads as UNKNOWN, like the all-nil sample.
   """
   @spec liveness_moved?(term(), term()) :: boolean()
   def liveness_moved?(nil, _now), do: true

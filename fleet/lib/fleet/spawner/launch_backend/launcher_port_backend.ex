@@ -74,8 +74,8 @@ defmodule Fleet.Spawner.LaunchBackend.LauncherPortBackend do
     # three values, two different readers.
     #
     # Named here rather than in a struct: the vector must stay a flat list of binaries for
-    # `Port.open/2`, and any wrapper would be unwrapped one line later. What was missing was not a
-    # type — it was the sentence.
+    # `Port.open/2`, and any wrapper would be unwrapped one line later. What this needs is not a
+    # type — it is the sentence.
     sandbox_args = [role, pod_id, pod_dir]
     vendor_argv = [claude, role, pod_id, pod_dir]
     argv = sandbox_args ++ vendor_argv

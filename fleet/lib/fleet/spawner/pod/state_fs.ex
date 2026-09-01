@@ -116,12 +116,13 @@ defmodule Fleet.Spawner.Pod.StateFs do
       "boot_id" => Fleet.Spawner.BootEpoch.id(),
       # THE POOL SLOT THIS POD HOLDS, made durable.
       #
-      # `PoolSlot` exists to stop two processes from sharing a deterministic `session_id`, and its
-      # source of truth was the in-memory `Registry` alone. Pods are `:temporary` and the Registry
+      # `PoolSlot` exists to stop two processes from sharing a deterministic `session_id`, and the
+      # in-memory `Registry` alone cannot be its source of truth. Pods are `:temporary` and the
+      # Registry
       # dies with the BEAM, so after a restart it reads EMPTY while orphaned bwrap holders are
       # still alive (a `kill -9` never runs `terminate/3`, and closing the port does not kill the
       # holder). The PodWarden reaps them, but only after two ticks — and in that window the same
-      # index was reallocatable, which is exactly the collision the module exists to prevent.
+      # index is reallocatable, which is exactly the collision the module exists to prevent.
       #
       # WRITTEN, not derived. The pool is already recoverable in principle — `SessionId.encode/5`
       # packs it into the high nibble of the id stored right above — but decoding it would create a

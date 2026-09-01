@@ -195,7 +195,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   # scope's OWN tree, never a foreign one — send the author to the tree they own.
   #
   # The rule is stated here rather than delegated to another function's name: a rule that outlives
-  # the function it was attached to should not go looking for it.
+  # the function it is attached to should not go looking for it.
   defp protocol_from_disk(root, name, error_tag) do
     scope_root = root || Fleet.Catalogue.root()
     scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)

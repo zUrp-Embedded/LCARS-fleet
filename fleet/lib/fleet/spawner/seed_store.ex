@@ -277,7 +277,7 @@ defmodule Fleet.Spawner.SeedStore do
 
   The F5 seed contains the latest `mode`, `permission-mode`, `bridge-session` and
   `system/bridge_status` records, merged by type with the previous sidecar so resumed sessions
-  cannot thin it. Both RC identity formats were observed live on 2026-07-19 and either may be
+  cannot thin it. Both RC identity formats are observed live and either may be
   emitted; capture starts only after at least one is present.
 
   `:ok` (captured) · `:none` (no jsonl / not registered yet → caller retries) · `{:error, _}`.
@@ -333,7 +333,7 @@ defmodule Fleet.Spawner.SeedStore do
     _ -> :ok
   end
 
-  # Most recent F5 record of each type; both RC formats were observed live on 2026-07-19.
+  # Most recent F5 record of each type; both RC formats are observed live.
   defp seed_records(jsonl_path) do
     jsonl_path
     |> bounded_lines()

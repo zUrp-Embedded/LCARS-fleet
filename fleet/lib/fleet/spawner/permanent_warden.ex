@@ -37,7 +37,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   intervention). This halt is NOT silent: the human escalation goes through the incident rail, so
   the warden carries NO escalation wiring of its own (composition, not an authority fork). A death
   with a STALE respawn stamp (or none) means an external actor resurrected the role since — that IS
-  the external repair signal: new cycle, the spend was borne by the actor (cattle, E2).
+  the external repair signal: new cycle, the spend borne by the actor (cattle, E2).
 
   ## Seams (tests)
 

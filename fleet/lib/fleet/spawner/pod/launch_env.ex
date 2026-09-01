@@ -165,8 +165,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
       # another; (2) the second call sits OUTSIDE the `try/rescue` above, so its raise —
       # `passwd_home/1` is fail-loud by design — kills the `gen_statem` with no
       # `transition_failed`, leaving an orphaned `:pending` task and a state.json frozen at the
-      # stale phase. That is exactly the hole the `try` was written to close, reopened one line
-      # below its `end`.
+      # stale phase. That is exactly the hole the `try` closes, reopened one line below its `end`.
       {:ok, human, claude_dir, env} ->
         with {:ok, env} <- maybe_put_git_identity(put_auth_mode(env), human, role),
              :ok <- Fleet.Credentials.Gate.validate(claude_dir) do

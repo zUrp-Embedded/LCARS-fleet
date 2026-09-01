@@ -139,7 +139,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   """
   @spec kick_send(map(), boolean()) :: :ok
   def kick_send(state, polled) do
-    # TWO gates, two scopes (2026-07-19 — do not re-merge them):
+    # TWO gates, two scopes — do not merge them:
     #  - PER-POD (cap-profile `invocation.wake_send_keys: false` — the human-terminal class:
     #    arch, starfleet): gates EVERY send-keys, `engage` INCLUDED. The pod's REPL is a
     #    human-facing conversation (bridge/Desktop) — every keystroke lands as a spurious user
@@ -179,7 +179,7 @@ defmodule Fleet.Spawner.Pod.Kick do
   #
   # The gate could only ever fire on an UNARMED pod — i.e. exactly where engage is required — because
   # the handler's `not polled and monitor_armed?` clause cancels the loop BEFORE `kick_send` runs.
-  # It was dead where it was right, and harmful where it fired.
+  # It is dead where it is right, and harmful where it fires.
   #
   # What still holds the ORIGINAL scar (a resumed starfleet taking the engage drizzle for ~3 min,
   # because `polled?` is broker RAM wiped at fleet restart): the PER-POD profile gate, not this one.

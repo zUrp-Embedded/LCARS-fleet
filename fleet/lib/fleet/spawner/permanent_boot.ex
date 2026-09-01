@@ -56,8 +56,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   @doc """
   Builds a permanent pod_id from its role — the CONSTRUCTOR half of the same authority.
 
-  The prefix was typed once and readable only backwards: consumers could recognize a permanent
-  pod_id, and anyone needing to NAME one (a feed addressing the front desk, say) had to retype the
+  A prefix typed once and readable only backwards lets consumers recognize a permanent pod_id while
+  anyone needing to NAME one (a feed addressing the front desk, say) has to retype the
   literal. One authority, both directions.
   """
   @spec pod_id_for(String.t()) :: String.t()
