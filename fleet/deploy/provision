@@ -46,7 +46,7 @@
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
-#   provision uninstall [--substrate S] [--humans] [--yes]
+#   provision uninstall [--substrate S] [--humans] [--annexes] [--yes]
 #
 # ⚠ `uninstall` MANQUAIT A CETTE LISTE, et c'est le seul verbe qui detruit. Un operateur qui lit
 # l'en-tete ne pouvait pas savoir qu'il existe, ni — surtout — que SANS `--yes` il n'execute RIEN :
@@ -56,6 +56,11 @@
 #   `--yes`     execute. Demande root, parce qu'il retire des objets systeme.
 #   `--humans`  retire aussi les COMPTES unix des personnes. ⚠ JAMAIS leur home : `/home` est hors
 #               du perimetre entier, par tous les binaires — ni un `rm`, ni un `userdel -r`.
+#   `--annexes` retire aussi les ANNEXES docker (§ 13) — la forge et le runner CI. SANS lui elles
+#               sont GARDEES, et c'est le defaut : la forge est le PET du corpus, elle porte les
+#               depots et le backlog. Un banc se jette par `bench-down.sh`, dont c'est le metier ;
+#               `uninstall` desinstalle un DEPLOIEMENT et n'a pas a emporter ce qui le nourrit.
+#               Les volumes restent dans les deux cas — ce drapeau ne touche que conteneurs+reseau.
 #
 # `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
 # Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
@@ -113,6 +118,7 @@ UNINSTALL_YES=0
 AUDIT_BEFORE=""
 AUDIT_AFTER=""
 UNINSTALL_HUMANS=0
+UNINSTALL_ANNEXES=0
 declare -a ONLY=()
 
 # ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
@@ -162,6 +168,7 @@ while [[ $# -gt 0 ]]; do
     --porcelain) PORCELAIN=1; shift ;;
     --yes)       UNINSTALL_YES=1; shift ;;
     --humans)    UNINSTALL_HUMANS=1; shift ;;
+    --annexes)   UNINSTALL_ANNEXES=1; shift ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS : ce parseur consomme tout `$@` avant que le verbe ne
     # tourne, donc un argument positionnel meurt sur « option inconnue » sans jamais l'atteindre.
@@ -430,9 +437,22 @@ uninstall_run() {
 
   # LES PROJETS DOCKER : le journal, et lui seul. Leur nom se DERIVE de `PROV_FORGE_PROJECT`,
   # surchargeable par `--forge-project` — aucune table statique ne peut le porter.
-  local -a docker_projects=()
+  local -a docker_projects=() annexes_gardees=()
   [[ -r "$JOURNAL_FILE" ]] && mapfile -t docker_projects < <(
     awk '$1=="posed_docker"{ $1=""; sub(/^ /,""); print }' "$JOURNAL_FILE" | tr ' ' '\n' | grep -v '^$' | sort -u)
+
+  # ⚠ LA DECISION SE PREND ICI, A LA LECTURE — PAS A L'EXECUTION. C'est l'emplacement de la garde
+  # `/home` (A1), et pour la meme raison : ce qui est ECARTE ne doit jamais entrer dans le plan.
+  # Une garde posee apres le point de non-retour laisse le plan annoncer une destruction qui
+  # n'aura pas lieu — et le plan est justement ce que l'operateur lit AVANT de decider.
+  #
+  # ⚠ ET C'EST CE QUI REND LE CONTRAT TESTABLE. `--yes` exige root, donc aucune suite ne peut jouer
+  # l'execution : une garde qui n'agit que la n'est verifiable que par lecture du code. Ici, le
+  # PLAN compte — et un temoin qui compte mord, comme celui du substrat.
+  if [[ "$UNINSTALL_ANNEXES" -ne 1 && "${#docker_projects[@]}" -gt 0 ]]; then
+    annexes_gardees=("${docker_projects[@]}")
+    docker_projects=()
+  fi
 
   # LE DEPOT APT POSE SOUS CONDITION : le journal, et lui seul. Il n'est pose que sur `linux` et
   # seulement si aucun daemon ne repond — une condition qu'aucune ligne statique ne sait porter. Le
@@ -550,7 +570,7 @@ uninstall_run() {
   printf '  %-10s %d groupe(s)\n' "groupes" "${#groups[@]}"
   printf '  %-10s %d compte(s) de service\n' "comptes" "${#accounts[@]}"
   if [[ "${#docker_projects[@]}" -gt 0 ]]; then
-    printf '  %-10s %s\n' "docker" "${docker_projects[*]}"
+    printf '  %-10s %s\n' "docker" "${docker_projects[*]} — ${_PA}DÉTRUITS (--annexes)${_PN} : conteneurs et réseau. Les volumes restent."
   fi
   if [[ "${#journal_pkgs[@]}" -gt 0 ]]; then
     printf '  %-10s %d paquet(s) : %s\n' "apt" "${#journal_pkgs[@]}" "${journal_pkgs[*]}"
@@ -574,6 +594,13 @@ uninstall_run() {
   # Une ligne de la table qui vise `/home` sans etre de classe `human` est une ligne qui s'est
   # trompee de perimetre. La garde l'ecarte ; se taire ferait croire que la table est appliquee
   # telle qu'elle est ecrite.
+  # Les annexes ecartees se NOMMENT, au meme titre que les lignes qui visent /home : un plan qui
+  # tait ce qu'il epargne laisse croire qu'il n'a rien vu. Et c'est ce qui rend la garde mesurable
+  # depuis le plan — donc testable sans root.
+  if [[ "${#annexes_gardees[@]}" -gt 0 ]]; then
+    printf '  %-10s %s\n' "annexes" "${_PC}${annexes_gardees[*]} GARDÉES (défaut) — la forge et le runner continuent de tourner.${_PN}"
+    printf '             %s\n' "« --annexes » les retire · « bench-down.sh --project <nom> --yes » détruit un banc"
+  fi
   if [[ "${#refuses_home[@]}" -gt 0 ]]; then
     printf '  %-10s %s\n' "écartés" "${_PA}${#refuses_home[@]} ligne(s) de la table visent /home et sont IGNORÉES :${_PN}"
     printf '             %s\n' "${refuses_home[@]}"
@@ -645,8 +672,26 @@ uninstall_run() {
     [[ -d "$o" ]] || continue
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
   done
-  # ─── LES OBJETS DOCKER ────────────────────────────────────────────────────────────────────────
+  # ─── LES OBJETS DOCKER — GARDÉS PAR DÉFAUT, DÉTRUITS SUR DEMANDE ──────────────────────────────
+  #
+  # ⚠ LE DÉFAUT S'EST INVERSÉ, ET C'EST LA MÊME RÈGLE QUE POUR `/home`. Ces projets sont les
+  # ANNEXES du § 13 — la forge et le runner CI. La forge est le PET du corpus : elle porte les
+  # dépôts, le backlog, et sur WSL elle vit SOUS le substrat (§ 10) — elle survit même à un
+  # `wsl --unregister`. Un `uninstall` qui la détruisait rendait la désinstallation du rail plus
+  # destructrice que la destruction de la machine.
+  #
+  # ⚠ ET LE VOCABULAIRE DES GESTES LE DISAIT DÉJÀ (§ 11) : nuke (banc, routine) ≠ désinstallation
+  # (déploiement, admin) ≠ reconstruction. Un banc se jette par `bench-down.sh --yes`, qui existe et
+  # dont c'est le métier. `uninstall` désinstalle un DÉPLOIEMENT : il n'avait aucune raison
+  # d'emporter avec lui une forge que quelqu'un d'autre alimente.
+  #
+  # Les volumes étaient déjà gardés et nommés ; ce qui tombait était le CONTENEUR, donc le service.
+  # Garder les données d'une forge éteinte est un demi-geste : elle ne répond plus.
+  # ⚠ AUCUNE GARDE ICI, ET C'EST VOULU : la liste est deja vide quand `--annexes` n'est pas demande.
+  # Une seconde garde a cet endroit serait redondante ET nuisible — elle ferait croire que la
+  # decision se prend a l'execution, alors qu'elle se prend a la lecture, comme celle de `/home`.
   local proj cid vol
+  kept=$((kept + ${#annexes_gardees[@]}))
   for proj in ${docker_projects[@]+"${docker_projects[@]}"}; do
     command -v docker >/dev/null 2>&1 || { echo "  ${_PA}docker absent — projet « $proj » laissé entier${_PN}"; break; }
     while read -r cid; do

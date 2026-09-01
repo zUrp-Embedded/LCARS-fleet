@@ -729,3 +729,59 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   local bilan; bilan="$(sed -n '/CE QUI RESTE SUR CETTE MACHINE/,/^  return 0$/p' <<<"$body")"
   refute grep -q 'r "$JOURNAL_FILE"' <<<"$bilan"
 }
+
+
+# ─── LES ANNEXES DOCKER : GARDEES PAR DEFAUT ────────────────────────────────────────────────────
+#
+# ⚠ LE DEFAUT S EST INVERSE, ET C EST LA MEME REGLE QUE POUR `/home`. Ces projets sont la forge et
+# le runner CI — les ANNEXES du § 13. La forge est le PET du corpus : elle porte les depots et le
+# backlog, et sur WSL elle vit SOUS le substrat (§ 10), donc elle survit meme a un
+# `wsl --unregister`. Un `uninstall` qui la detruisait rendait la DESINSTALLATION DU RAIL plus
+# destructrice que la destruction de la machine. Le § 11 le disait deja : nuke (banc) ≠
+# desinstallation (deploiement) ≠ reconstruction — un banc se jette par `bench-down.sh`.
+#
+# ⚠ ET LA DECISION SE PREND A LA LECTURE, PAS A L EXECUTION. C est ce qui rend ces temoins HONNETES.
+# Premiere version : la garde vivait apres le point de non-retour, donc au-dela de ce qu une suite
+# sans root peut jouer — trois temoins sur quatre lisaient l ANNONCE du plan, et neutraliser la
+# garde ne les faisait pas rougir. Deplacee la ou est celle de `/home` (A1), elle vide la liste
+# AVANT le plan : le plan COMPTE juste, et un temoin qui compte mord.
+
+@test "ANNEXES : gardees par defaut — elles n entrent PAS dans ce qui part" {
+  printf 'posed_docker lcars-forge lcars-runner\n' > "$LCARS_JOURNAL_FILE"
+  plan
+  # la ligne « docker » du plan n existe QUE pour ce qui va etre detruit
+  printf '%s\n' "$output" | refute_out '^  docker '
+  [[ "$output" == *"lcars-forge lcars-runner GARDÉES (défaut)"* ]]
+  [[ "$output" == *"continuent de tourner"* ]]
+}
+
+@test "ANNEXES : avec --annexes elles entrent, et le plan le DIT" {
+  # Le sens qui manque au precedent : sans lui, un code qui n aurait plus AUCUNE branche de
+  # destruction passerait le premier en ayant cesse de savoir detruire.
+  printf 'posed_docker lcars-forge\n' > "$LCARS_JOURNAL_FILE"
+  run bash "$RUNNER" uninstall --annexes
+  [[ "$output" == *"docker"*"lcars-forge"*"DÉTRUITS (--annexes)"* ]]
+  [[ "$output" == *"volumes restent"* ]]        # les trois natures gardent leurs trois destins (A7)
+  printf '%s\n' "$output" | refute_out 'GARDÉES'
+}
+
+@test "ANNEXES : la garde vide la liste AVANT le plan — pas apres le point de non-retour" {
+  # ⚠ CE QUI REND LES DEUX TEMOINS CI-DESSUS MESURABLES. `--yes` exige root, donc aucune suite ne
+  # peut jouer l execution : une garde qui n agirait que la ne serait verifiable que par lecture du
+  # code, et le plan pourrait annoncer une destruction qui n aura pas lieu.
+  local body; body="$(code | sed -n '/^uninstall_run()/,$p')"
+  local n_garde n_plan n_yes
+  n_garde="$(grep -n 'annexes_gardees=(' <<<"$body" | head -1 | cut -d: -f1)"
+  n_plan="$(grep -n 'annexes.*GARDÉES' <<<"$body" | head -1 | cut -d: -f1)"
+  n_yes="$(grep -n 'RIEN N.A ÉTÉ RETIRÉ' <<<"$body" | head -1 | cut -d: -f1)"
+  [ -n "$n_garde" ] && [ -n "$n_plan" ] && [ -n "$n_yes" ]
+  [ "$n_garde" -lt "$n_plan" ]     # elle agit avant qu on annonce
+  [ "$n_plan" -lt "$n_yes" ]       # et l annonce est dans le PLAN, pas dans l execution
+}
+
+@test "ANNEXES : le drapeau est DECLARE et documente, sinon il n existe pas" {
+  # Meme regle que pour les verbes du dispatch : un drapeau accepte en silence est pire qu un
+  # drapeau refuse — c est ce que `--bench` avale sur le poste a coute au rang C.
+  code | grep -qE '\-\-annexes\)\s+UNINSTALL_ANNEXES=1'
+  sed -n '/^# USAGE :/,/^$/p' "$RUNNER" | grep -q -- '--annexes'
+}

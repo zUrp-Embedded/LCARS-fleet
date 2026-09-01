@@ -402,9 +402,20 @@ STUB
   # `enroll-catalogue.sh` PREFERE `--image`, et le dit : `--repo` exige un toolchain Elixir sur la
   # machine qui appelle, que le chemin de LIVRAISON n'a pas. Le rail poste, lui, l'a pose au module
   # 15 — il batit le runtime. La contrainte qui justifiait l'image n'existe pas ici.
+  #
+  # ⚠ CE TEMOIN EPINGLAIT UNE LIGNE D'APPEL, ET LA LIVRAISON EN A FAIT DEUX. En SOURCE le rail
+  # derive de l'arbre — Elixir est la, c'est ce que dit ce temoin depuis le debut. En BINAIRE il n'y
+  # a ni mix ni image : la RELEASE est posee et porte la meme fonction, donc `--release`. Ce qui
+  # reste vrai des deux cotes, et que ce temoin garde : ce rail ne passe JAMAIS par `--image`, parce
+  # que la contrainte qui justifie l'image (« pas de toolchain sur la cible ») se resout ici
+  # autrement — par l'arbre, ou par la release deja installee.
   local d="$BATS_TEST_DIRNAME/../modules.d"
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" --repo'
+  code | grep -q 'enroll_src=(--repo "\$tree" --catalogue "\$ref_catalogue")'
+  code | grep -q 'enroll_src=(--release'
+  code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" "\${enroll_src\[@\]}"'
+  # et le choix se fait sur le DISCRIMINANT, pas sur autre chose
+  code | grep -q 'prov_delivery_is_binary'
   # Pas de `--` a passer : `refute_out` porte le sien devant son motif, donc un motif qui commence
   # par un tiret arrive entier. Le lui donner ici en ferait le MOTIF, et le temoin chercherait « -- ».
   code | refute_out '--image "\$PROV_FORGE_IMAGE"'
@@ -555,8 +566,15 @@ STUB
 @test "le roster NOMME son catalogue — \`--catalogue\` n'est facultatif qu'avec \`--image\`" {
   # Mesure a froid du 2026-08-22 : « ERREUR: --catalogue <root> requis (ou --image, qui porte le
   # sien) ». Le script le dit dans son en-tete ; je l'avais lu et pas applique.
+  #
+  # ⚠ « FACULTATIF QU'AVEC `--image` » EST DEVENU « QU'AVEC UNE LIVRAISON QUI PORTE LE SIEN ». Une
+  # release posee porte son catalogue exactement comme une image — c'est la MEME release dedans.
+  # Ce que ce temoin garde, inchange : avec `--repo`, le catalogue se NOMME, parce qu'un arbre
+  # source en porte plusieurs et que le script refuse net (mesure a froid du 2026-08-22).
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'enroll-catalogue.sh".*--repo.*--catalogue'
+  code | grep -q 'enroll_src=(--repo "\$tree" --catalogue "\$ref_catalogue")'
+  # et la branche release ne le nomme PAS — elle n'a pas a choisir pour l'operateur
+  code | grep -q 'enroll_src=(--release'
   # et la racine est derivee AVANT le roster, pas apres — elle sert aux deux usages
   local d r
   d="$(code | grep -n 'Fleet.Catalogue.root()' | head -1 | cut -d: -f1)"
