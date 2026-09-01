@@ -82,12 +82,19 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     root
   end
 
+  # Les `{module, fonction}` joignables par reflexion, dans CHAQUE module que `run_checks/0` nomme.
+  # La liste des modules n'est pas ecrite ici : elle se lit dans les appels, comme le reste.
   defp check_functions do
-    Check.__info__(:functions)
-    |> Enum.filter(fn {name, arity} ->
-      arity == 1 and String.starts_with?(Atom.to_string(name), "check_")
-    end)
+    called_checks()
     |> Enum.map(&elem(&1, 0))
+    |> Enum.uniq()
+    |> Enum.flat_map(fn mod ->
+      mod.__info__(:functions)
+      |> Enum.filter(fn {name, arity} ->
+        arity == 1 and String.starts_with?(Atom.to_string(name), "check_")
+      end)
+      |> Enum.map(fn {name, _arity} -> {mod, name} end)
+    end)
   end
 
   test "every check either fails, raises, or SAYS it measured nothing — none is quietly green" do
@@ -95,9 +102,9 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
 
     quietly_green =
       check_functions()
-      |> Enum.map(fn fun ->
+      |> Enum.map(fn {mod, fun} ->
         try do
-          {fun, apply(Check, fun, [root])}
+          {fun, apply(mod, fun, [root])}
         rescue
           # Fail-loud is an acceptable answer on an empty tree: the task dies and takes the gate
           # with it. Only silence is refused.
@@ -134,28 +141,64 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     # Le garde COMPTE DESORMAIS CE QUE LA TACHE APPELLE, dans sa propre source. Un check ajoute a
     # `run_checks` sans etre joignable par reflexion — parce qu'il est prive — rougit ici, au lieu
     # d'echapper en silence a la garantie que ce fichier annonce.
-    called = called_check_names()
+    called = called_checks()
+
+    # ⚠ LE GARDE DU GARDE. Reconnaitre les appels par un motif rend ce fichier vulnerable a une
+    # FORME d'appel qu'il ne connait pas : `called` retrecit, l'inclusion ci-dessous reste vraie, et
+    # rien ne rougit. C'est arrive au premier decoupage. On compte donc aussi les appels par un
+    # motif DELIBEREMENT lache — n'importe quel `check_x(root)`, prefixe ou non — et les deux
+    # comptes doivent coincider. Une forme non reconnue creuse un ecart au lieu de disparaitre.
+    assert length(called) == length(loose_check_calls()),
+           "le motif de `called_checks/0` ne reconnait pas toutes les formes d'appel de " <>
+             "`run_checks/0` : #{length(called)} reconnus pour #{length(loose_check_calls())} " <>
+             "appels presents. Un mur invisible a ce fichier est un mur hors garantie"
 
     assert MapSet.subset?(MapSet.new(called), MapSet.new(found)),
            "checks appeles par run_checks mais INVISIBLES a la reflexion (donc hors de la " <>
              "garantie de ce fichier) : " <>
              inspect(Enum.sort(called -- found)) <>
-             " — un check d'arite 1 doit etre `def`, pas `defp`"
+             " — un check d'arite 1 doit etre `def`, pas `defp`, dans le module qui le porte"
 
     assert length(found) >= 25, "only #{length(found)} check functions found by reflection"
-    assert :check_test_corpora_on_record in found
+    assert {Check.Tests, :check_test_corpora_on_record} in found
   end
 
-  # Les `check_*(root)` que `run_checks/0` appelle, lus dans la source de la tache. C'est la MEME
-  # famille de mesure que les contrats eux-memes : la liste d'appels est la seule autorite sur « ce
-  # que le gate joue », et la recopier ici en ferait une seconde qui derive.
-  defp called_check_names do
+  # Les `check_*(root)` que `run_checks/0` appelle, lus dans la source de la tache, AVEC le module
+  # qui les porte. C'est la MEME famille de mesure que les contrats eux-memes : la liste d'appels
+  # est la seule autorite sur « ce que le gate joue », et la recopier ici en ferait une seconde qui
+  # derive.
+  #
+  # ⚠ LE PREFIXE DE FAMILLE EST LU, PAS SUPPOSE ABSENT — ET C'EST UNE LECON PAYEE. Depuis le
+  # decoupage du 2026-09-02 un mur vit dans `Check`, `Check.SingleSource` ou `Check.Tests`. Le motif
+  # precedent n'acceptait que l'appel NU : au premier deplacement il a cesse de voir huit murs, la
+  # liste `called` a retreci, l'inclusion `called ⊆ found` est restee vraie et le gate est reste
+  # VERT. Un garde qui retrecit en silence est la panne exacte que ce fichier existe pour empecher,
+  # arrivee a l'interieur de lui.
+  # Le meme corps, compte par un motif qui ne suppose RIEN du prefixe. Sert uniquement de temoin de
+  # completude a `called_checks/0` — il ne dit pas dans quel module vit le mur, seulement qu'il est
+  # appele.
+  defp loose_check_calls do
+    ~r/(?:^|\s|\.)(check_[a-z0-9_]+)\(root\)/m
+    |> Regex.scan(run_checks_body())
+    |> Enum.map(fn [_, name] -> name end)
+    |> Enum.uniq()
+  end
+
+  defp run_checks_body do
     src = File.read!(Path.join(File.cwd!(), "lib/mix/tasks/lcars.contracts.check.ex"))
     [_, body] = Regex.run(~r/def run_checks do\n(.*?)\n  end\n/s, src)
+    body
+  end
 
-    ~r/^\s*(check_[a-z0-9_]+)\(root\),?$/m
+  defp called_checks do
+    body = run_checks_body()
+
+    ~r/^\s*(?:([A-Z][A-Za-z0-9_.]*)\.)?(check_[a-z0-9_]+)\(root\),?$/m
     |> Regex.scan(body)
-    |> Enum.map(fn [_, name] -> String.to_atom(name) end)
+    |> Enum.map(fn
+      [_, "", name] -> {Check, String.to_atom(name)}
+      [_, family, name] -> {Module.concat(Check, family), String.to_atom(name)}
+    end)
     |> Enum.uniq()
   end
 end
