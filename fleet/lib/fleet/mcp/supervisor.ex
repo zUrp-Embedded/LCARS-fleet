@@ -59,37 +59,41 @@ defmodule Fleet.MCP.Supervisor do
   @spec pod_facing_status() :: {:operational | :degraded | :unknown, map()}
   def pod_facing_status do
     if acceptor_supervisor_alive?() do
-      sockets = active_sockets()
-
       # Socket files without acceptors witness deaf pods after an acceptor cascade.
       #
       # LE STATUT ET L'INCIDENT LISENT LA MEME SOUSTRACTION. `deaf_pods/0` NOMME les sourds ; ce
       # statut n'en garde que le compte. Recalculer ici `fichiers - enfants_du_superviseur` donnerait
       # un second resultat, et un statut qui contredit l'incident qu'il accompagne est pire que pas
       # de statut : c'est celui qu'on croit parce qu'il est plus facile a lire.
-      case deaf_pods() do
-        {:ok, deaf} ->
-          orphaned = length(deaf)
+      #
+      # ⚠ LES DEUX LECTURES PEUVENT ECHOUER, ET AUCUNE NE REND UN CHIFFRE PLAUSIBLE QUAND ELLE
+      # ECHOUE. C'est le contrat annonce par le `@moduledoc` de cette fonction — « scan failure is
+      # `:unknown`, never a hollow operational state » — et il ne tenait que pour l'une des deux.
+      with {:ok, sockets} <- active_sockets(),
+           {:ok, deaf} <- deaf_pods() do
+        orphaned = length(deaf)
 
-          if orphaned > 0 do
-            {:degraded,
-             %{
-               acceptor_supervisor: true,
-               sockets: sockets,
-               socket_files: sockets + orphaned,
-               deaf_pods: Enum.sort(deaf),
-               note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
-             }}
-          else
-            {:operational, %{acceptor_supervisor: true, sockets: sockets}}
-          end
-
+        if orphaned > 0 do
+          {:degraded,
+           %{
+             acceptor_supervisor: true,
+             sockets: sockets,
+             socket_files: sockets + orphaned,
+             deaf_pods: Enum.sort(deaf),
+             note: "#{orphaned} socket file(s) WITHOUT an acceptor (cascade?) — deaf pods"
+           }}
+        else
+          {:operational, %{acceptor_supervisor: true, sockets: sockets}}
+        end
+      else
         {:error, reason} ->
           {:unknown,
            %{
              acceptor_supervisor: true,
-             sockets: sockets,
-             note: "deaf-pod cross-check could not run (#{inspect(reason)}) — status unverified"
+             note:
+               "pod-facing cross-check could not run (#{inspect(reason)}) — status unverified. " <>
+                 "Aucun compte n'est rendu ici : un chiffre issu d'une lecture qui a echoue se lit " <>
+                 "comme une mesure"
            }}
       end
     else
@@ -110,17 +114,54 @@ defmodule Fleet.MCP.Supervisor do
   """
   @spec deaf_pods() :: {:ok, [String.t()]} | {:error, term()}
   def deaf_pods do
-    with {:ok, on_disk} <- socket_dirs_on_disk() do
-      {:ok, MapSet.to_list(MapSet.difference(on_disk, MapSet.new(live_acceptor_ids())))}
+    with {:ok, on_disk} <- socket_dirs_on_disk(),
+         {:ok, live} <- live_acceptor_ids() do
+      {:ok, MapSet.to_list(MapSet.difference(on_disk, MapSet.new(live)))}
     end
   end
 
+  # ⚠ CETTE FONCTION RENDAIT `[]` SUR ECHEC, ET C'ETAIT L'INVARIANT DU `@doc` CI-DESSUS APPLIQUE A
+  # UNE SEULE MOITIE. Il dit : « an unreadable directory is NOT an empty one, and answering `[]`
+  # there would clear pods this function cannot see ». La meme phrase vaut pour l'autre operande, en
+  # sens inverse : un superviseur injoignable n'est pas un superviseur SANS acceptor, et repondre
+  # `[]` ici declare SOURDS tous les pods du disque — `difference(on_disk, [])` vaut `on_disk`.
+  #
+  # Le warden ne tue pas un pod sourd (il refuse de reparer, deliberement), mais il ouvre un
+  # incident `pod.deaf` par pod apres confirmation sur deux ticks, avec issue sysadmin a la
+  # recurrence. Une panne du superviseur d'acceptors produisait donc une alarme de masse, au moment
+  # precis ou le signal reel comptait le plus.
+  #
+  # Le chemin d'erreur EXISTAIT DEJA : le `@spec` autorise `{:error, term()}`, et
+  # `SocketWarden.report_deaf_pods/1` traite `:error` par « on ne blanchit personne ». Seul cet
+  # operande ne s'en servait pas.
   defp live_acceptor_ids do
-    Fleet.MCP.PodSocketSupervisor.live_pod_ids()
+    {:ok, Fleet.MCP.PodSocketSupervisor.live_pod_ids()}
   rescue
-    _ -> []
+    e -> acceptor_enumeration_failed(e)
   catch
-    :exit, _ -> []
+    :exit, reason -> acceptor_enumeration_failed({:exit, reason})
+  end
+
+  # `count_children` sur un superviseur vivant ne devrait pas echouer — mais « ne devrait pas » est
+  # exactement ce que ce module refuse ailleurs : un `0` rendu par une lecture cassee est
+  # indiscernable d'un `0` mesure, et il ferait rendre `:operational` a un statut aveugle.
+  defp active_sockets do
+    %{active: active} = DynamicSupervisor.count_children(Fleet.MCP.PodSocketSupervisor)
+    {:ok, active}
+  rescue
+    e -> acceptor_enumeration_failed(e)
+  catch
+    :exit, reason -> acceptor_enumeration_failed({:exit, reason})
+  end
+
+  defp acceptor_enumeration_failed(reason) do
+    Logger.warning(
+      "MCP.Supervisor: acceptor enumeration FAILED (#{inspect(reason)}) — pod-facing status = " <>
+        ":unknown and NO deaf-pod verdict is issued (fail-closed: answering an empty set here " <>
+        "would declare every pod on disk deaf)"
+    )
+
+    {:error, {:acceptor_enumeration, reason}}
   end
 
   # Le repertoire porte le pod_id — c'est `PodSocketSupervisor.socket_path/1` qui le pose. On rend
@@ -152,14 +193,5 @@ defmodule Fleet.MCP.Supervisor do
       pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
     end
-  end
-
-  defp active_sockets do
-    %{active: active} = DynamicSupervisor.count_children(Fleet.MCP.PodSocketSupervisor)
-    active
-  rescue
-    _ -> 0
-  catch
-    :exit, _ -> 0
   end
 end
