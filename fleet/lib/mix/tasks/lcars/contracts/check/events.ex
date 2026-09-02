@@ -636,9 +636,4 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         []
     end
   end
-
-  # L'arbre du verificateur de contrats : la tache et ses familles. Une regle, pas une liste — la
-  # liste devrait etre tenue a jour a chaque decoupage, et c'est exactement ce qui a lache.
-  defp checker_source?("lib/mix/tasks/lcars.contracts.check.ex"), do: true
-  defp checker_source?(rel), do: String.starts_with?(rel, "lib/mix/tasks/lcars/contracts/")
 end

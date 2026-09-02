@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "aucun fichier lu → INSTRUMENT BROKEN, jamais un vert" do
       root = fixture_root!("vide")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sourcers_set_strict(root)
 
       assert result.status == :fail,
              "un contrat qui n'a ouvert aucun fichier a rendu #{result.status}"
@@ -58,7 +58,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       . "$(dirname "$0")/../lib/provision-lib.sh"
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sourcers_set_strict(root)
 
       assert result.status == :pass
       assert result.note =~ "1 shell file(s) scanned"
@@ -83,7 +83,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     test "cible ABSENTE → fail nomme (temoin : la garde d'origine tient toujours)", %{root: root} do
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :fail
       assert Enum.any?(result.evidence, &(&1 =~ "MISSING(enoent)"))
@@ -92,7 +92,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "cible ILLISIBLE → fail, pas un vert", %{root: root, target: target} do
       File.mkdir_p!(target)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :fail,
              "un contrat a declare l'absence de residu sur un fichier qu'il n'a pas pu lire " <>
@@ -113,7 +113,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -291,7 +291,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "# the sanctuary is vendor-aware\n"
       )
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :fail, "un porteur a echappe par son extension"
       assert result.evidence == ["bin/launcher.egress"]
@@ -300,7 +300,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "un lanceur SANS extension est vu aussi", %{root: root} do
       File.write!(Path.join([root, "bin", "fleet_v2"]), "#!/bin/sh\n# le sanctuaire du pod\n")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :fail
       assert result.evidence == ["bin/fleet_v2"]
@@ -312,7 +312,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "un fichier non-texte ne fait ni echouer ni planter le mur", %{root: root} do
       File.write!(Path.join([root, "bin", "bytecode.pyc"]), <<0xC3, 0x28, 0xA0, 0xA1, 0x00>>)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -325,11 +325,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "# sanctuary, et l'anticorps juste a cote\n"
       )
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).status == :pass
+      assert Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root).status ==
+               :pass
     end
 
     test "la note dit COMBIEN de fichiers ont gagne le vert", %{root: root} do
-      note = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).note
+      note = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root).note
 
       assert note =~ "1 fichier(s) de lib/, bin/ et etc/ balayes"
       assert note =~ "corpus SP"
@@ -455,7 +456,9 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root).status ==
+      assert Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(
+               root
+             ).status ==
                :pass
     end
 
@@ -471,7 +474,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+      result =
+        Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(root)
 
       assert result.status == :fail,
              "la fenetre permissive a ete elargie a tout le boot sans que rien ne rougisse"
@@ -487,7 +491,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+      result =
+        Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(root)
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "fail-closed"
@@ -627,7 +632,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.write!(Path.join(dir, name), body)
     end
 
-    defp verdict(tmp), do: Mix.Tasks.Lcars.Contracts.Check.check_awaits_arch_clears_in_flight(tmp)
+    defp verdict(tmp),
+      do: Mix.Tasks.Lcars.Contracts.Check.Runtime.check_awaits_arch_clears_in_flight(tmp)
 
     @tag :tmp_dir
     test "a writer that sets the brake WITHOUT releasing the lock is named", %{tmp_dir: tmp} do

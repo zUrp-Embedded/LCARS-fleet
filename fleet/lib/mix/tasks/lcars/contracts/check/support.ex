@@ -401,4 +401,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
 
     Enum.reverse(acc)
   end
+
+  # ── L'arbre du verificateur lui-meme ─────────────────────────────────
+
+  # UN MUR QUI GREPPE UN MOTIF LE CONTIENT, PAR CONSTRUCTION. Trois murs cherchent dans `lib/` une
+  # chose qui ne doit pas s'y trouver — un namespace de config mort, un mot a prior dominant, la
+  # citation d'une regle de propriete — et leur propre source porte ce qu'ils cherchent : ils se
+  # comptent eux-memes comme fautifs. Ils s'exemptaient par un CHEMIN EN DUR vers la tache.
+  #
+  # ⚠ LE DECOUPAGE DU 2026-09-02 A FAIT ROUGIR LES TROIS D'UN COUP : les murs avaient demenage, les
+  # exemptions pointaient l'ancienne adresse. Une liste de chemins en dur grossit a chaque coupe,
+  # rougit la fois ou on l'oublie, et — plus grave — peut exempter DE TRAVERS apres un renommage :
+  # un fichier reel prendrait la place de l'ancien nom et passerait exempt sans un mot.
+  #
+  # La regle remplace la liste : ce qui vit dans l'arbre du verificateur LIT ce qu'il cherche, il
+  # n'en est jamais un exemplaire. Aucune maintenance, aucune adresse a tenir a jour.
+  @doc false
+  @spec checker_source?(String.t()) :: boolean()
+  def checker_source?("lib/mix/tasks/lcars.contracts.check.ex"), do: true
+  def checker_source?(rel), do: String.starts_with?(rel, "lib/mix/tasks/lcars/contracts/")
 end
