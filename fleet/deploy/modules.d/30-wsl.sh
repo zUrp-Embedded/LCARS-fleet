@@ -106,6 +106,52 @@ apply() {
     p_fail "home de $PROV_HUMAN introuvable — masque gpg impossible"
   fi
 
+  # 2-bis. LE CREDENTIAL HELPER DE DOCKER DESKTOP EST UN `.exe`, ET ON S'APPRÊTE À LUI COUPER LE
+  #        SEUL MOYEN DE S'EXÉCUTER.
+  #
+  # ⚠ CE MODULE CASSE DOCKER, ET IL DOIT LE RÉPARER DANS LE MÊME GESTE. `~/.docker/config.json`
+  # porte `"credsStore": "desktop.exe"` sur toute machine où Docker Desktop est intégré, et
+  # `/usr/bin/docker-credential-desktop.exe` est un LIEN vers un binaire Windows. Un `.exe` ne
+  # s'exécute sous WSL que par l'interop (binfmt) — celle que `wsl.conf` coupe deux blocs plus bas.
+  #
+  # LA CHAÎNE, MESURÉE LE 2026-09-02 SUR LE BANC 2010 (vierge, non redémarré) :
+  #   /usr/bin/docker-credential-desktop.exe  ->  lien vers /Docker/host/bin/…exe
+  #   /proc/sys/fs/binfmt_misc/WSLInterop     ->  enabled
+  #   le helper interrogé                     ->  rc=0, il rend les identifiants
+  # Après `wsl --shutdown`, binfmt disparaît : le helper devient inexécutable et TOUT `docker pull`
+  # ou `docker build` meurt sur « error getting credentials », un message qui ne nomme ni l'interop,
+  # ni le helper, ni le geste qui l'a coupé.
+  #
+  # ⚠ ET LE DÉFAUT NE SE VOIT PAS PENDANT L'INSTALL. `wsl.conf` ne prend effet qu'au redémarrage,
+  # qui vient APRÈS — donc la passe qui casse docker se termine en vert, et c'est la SUIVANTE qui
+  # échoue. Le contournement a été fait à la main deux fois avant d'être instruit.
+  #
+  # UN `credsStore` QUI DÉSIGNE UN BINAIRE INEXÉCUTABLE EST UNE CONFIGURATION MORTE : on la retire.
+  # Les registres publics n'exigent aucune authentification ; un registre privé redemandera un
+  # `docker login`, qui écrira ses identifiants dans ce même fichier — sans helper.
+  #
+  # ⚠ ON ÉDITE BIEN UN FICHIER DE L'HUMAIN, ET C'EST LÉGITIME ICI : ce module est `APPLY-ON: wsl`,
+  # et une instance WSL est du CATTLE — une commodité recréable, pas une machine possédée. Le même
+  # geste sur un linux natif dédié demanderait la prudence qu'on applique à `/etc/skel/.bashrc`.
+  local dcfg="$home/.docker/config.json"
+  if [[ -f "$dcfg" ]] && grep -q '"credsStore"' "$dcfg" 2>/dev/null; then
+    local dtmp
+    dtmp="$(mktemp "${TMPDIR:-/tmp}/prov-dockercfg.XXXXXX")" || { p_fail "tmp config docker impossible"; verdict_apply; }
+    # Les AUTRES clés survivent — `auths`, `plugins`, `currentContext`. On retire une clé, pas un
+    # fichier : la virgule qui la suivait ou la précédait part avec elle.
+    sed -e 's/"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"[[:space:]]*,//g' \
+        -e 's/,[[:space:]]*"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"//g' \
+        -e 's/"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"//g' \
+        "$dcfg" > "$dtmp" \
+      || { rm -f "$dtmp"; p_fail "config docker: réécriture ratée ($dcfg)"; verdict_apply; }
+    [[ -s "$dtmp" ]] \
+      || { rm -f "$dtmp"; p_fail "config docker: résultat VIDE — rien n'est écrit ($dcfg)"; verdict_apply; }
+    write_atomic "$dcfg" 0600 "$PROV_HUMAN:" < "$dtmp" \
+      || { rm -f "$dtmp"; verdict_apply; }
+    rm -f "$dtmp"
+    p_warn "credsStore retiré de $dcfg — il désignait un helper Windows (.exe) que la coupure de l'interop rendra inexécutable. Les registres publics restent joignables ; un registre privé demandera « docker login »"
+  fi
+
   # 3. wsl.conf EN DERNIER (le contrat de la dette de guerre : rien n'arme le reboot tant que
   #    tout le reste n'est pas posé). B3 : redirection, jamais de pipe vers write_atomic (le
   #    sous-shell du pipe perdait PROV_FAILED → wsl.conf non posé rapporté vert).

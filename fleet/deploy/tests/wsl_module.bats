@@ -9,6 +9,8 @@ setup() {
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
     < <(compgen -v | grep -E '^(LCARS_|PROV_)' || true)
   MOD="$BATS_TEST_DIRNAME/../modules.d/30-wsl.sh"
+  export PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh"
+  export PROVISION_MODULE=30-wsl
   [ -f "$MOD" ]
 }
 
@@ -99,4 +101,75 @@ systemd=true
   run gpg_socket_mask_path
   [ "$status" -eq 0 ]
   [ "$output" = "/home/x/.config/systemd/user/gpg-agent-ssh.socket" ]
+}
+
+# ─── LE credsStore QUE LA COUPURE DE L INTEROP REND MORT ────────────────────────────────────────
+#
+# ⚠ CE MODULE CASSE DOCKER, ET CE BLOC EST SA REPARATION. `/usr/bin/docker-credential-desktop.exe`
+# est un LIEN vers un binaire Windows ; un `.exe` ne s execute sous WSL que par binfmt, que
+# `wsl.conf` coupe quelques lignes plus bas. Apres le redemarrage, tout `docker pull`/`build` meurt
+# sur « error getting credentials » — un message qui ne nomme ni l interop, ni le helper, ni le
+# geste qui l a coupe.
+#
+# ⚠ ET LE DEFAUT NE SE VOIT PAS PENDANT L INSTALL : `wsl.conf` ne prend effet qu au redemarrage, qui
+# vient APRES. La passe qui casse docker se termine en vert ; c est la SUIVANTE qui echoue. Mesure
+# du 2026-09-02 : contourne A LA MAIN deux fois, sur deux bancs, avant d etre instruit — et le
+# commentaire de contournement affirmait « c est l environnement, pas le code ».
+#
+# ⚠ EDITER UN FICHIER DE L HUMAIN EST LEGITIME ICI, ET SEULEMENT ICI : ce module est `APPLY-ON: wsl`,
+# et une instance WSL est du CATTLE. Le meme geste sur un linux natif dedie demanderait la prudence
+# appliquee a `/etc/skel/.bashrc`.
+harnais_creds() { # harnais_creds <contenu de config.json | VIDE pour aucun fichier>
+  sed -n '/^  local dcfg=/,/^  fi$/p' "$MOD" > "$BATS_TEST_TMPDIR/frag-creds.sh"
+  [ -s "$BATS_TEST_TMPDIR/frag-creds.sh" ] || { echo "extraction du fragment ratee"; return 1; }
+  local h="$BATS_TEST_TMPDIR/home"; rm -rf "$h"; mkdir -p "$h/.docker"
+  [ -n "$1" ] && printf '%s' "$1" > "$h/.docker/config.json"
+  cat > "$BATS_TEST_TMPDIR/h-creds.sh" <<HARNAIS
+set -euo pipefail
+. "\$PROVISION_LIB"
+p_fail() { echo "FAIL \$*"; }
+p_warn() { echo "WARN \$*"; }
+verdict_apply() { exit 9; }
+PROV_HUMAN="\$(id -un)"
+home="$h"
+enveloppe() {
+  source "\$BATS_TEST_TMPDIR/frag-creds.sh"
+}
+enveloppe
+echo "APRES:\$(cat "$h/.docker/config.json" 2>/dev/null || echo '<pas de fichier>')"
+HARNAIS
+  run env BATS_TEST_TMPDIR="$BATS_TEST_TMPDIR" PROVISION_LIB="$PROVISION_LIB" \
+    bash "$BATS_TEST_TMPDIR/h-creds.sh"
+}
+
+@test "credsStore : retire quand il designe le helper Windows" {
+  harnais_creds '{"credsStore":"desktop.exe"}'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *'APRES:{}'* ]] || { echo "pas retire : $output"; return 1; }
+  [[ "$output" == *"credsStore retiré"* ]]
+  [[ "$output" == *"docker login"* ]]   # le refus NOMME la consequence et la sortie
+}
+
+@test "credsStore : les AUTRES cles survivent — on retire une cle, pas un fichier" {
+  harnais_creds '{"auths":{"reg.example":{"auth":"eyJ="}},"credsStore":"desktop.exe"}'
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *'"auths"'* ]] || { echo "les auths ont ete perdues : $output"; return 1; }
+  [[ "$output" == *'reg.example'* ]]
+  # ⚠ ON VISE LA LIGNE `APRES:`, PAS LA SORTIE ENTIERE : le message du module CONTIENT le mot
+  # « credsStore » — le chercher partout faisait rougir le temoin sur la propre annonce du geste.
+  local apres; apres="$(printf '%s' "$output" | sed -n 's/^APRES://p')"
+  [[ "$apres" != *credsStore* ]] || { echo "credsStore survit dans le fichier : $apres"; return 1; }
+}
+
+@test "credsStore : rien a faire si la cle n y est pas — le fichier n est pas touche" {
+  harnais_creds '{"auths":{}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'APRES:{"auths":{}}'* ]]
+  [[ "$output" != *"credsStore retiré"* ]] || { echo "geste annonce sans objet : $output"; return 1; }
+}
+
+@test "credsStore : aucun fichier, aucun geste — on n en fabrique pas un" {
+  harnais_creds ''
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'<pas de fichier>'* ]] || { echo "un config.json a ete invente : $output"; return 1; }
 }
