@@ -6,6 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
+# AFTER: 20-groups
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

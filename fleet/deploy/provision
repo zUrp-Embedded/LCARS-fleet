@@ -321,6 +321,29 @@ for mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
   [[ -n "$apply_on" ]] || die "$name: header '# APPLY-ON:' manquant"
   [[ -n "$check_on" ]] || die "$name: header '# CHECK-ON:' manquant"
   [[ -n "$needs" ]]    || die "$name: header '# NEEDS:' manquant"
+  # ─── CE QUE `AFTER` GARANTIT, ET CE QU'IL NE GARANTIT PAS ─────────────────────────────────────
+  #
+  # ⚠ IL VERIFIE DEUX CHOSES, ET IL EN LAISSE CROIRE TROIS. Les deux qu'il tient :
+  #   · le module nomme EXISTE (une dependance vers un module renomme meurt ici, pas au run) ;
+  #   · il PRECEDE dans l'ordre du rang (une arete qui remonte est refusee a l'ouverture).
+  #
+  # Ce qu'il ne tient pas, et qu'un lecteur suppose :
+  #   · que TOUTES les dependances reelles soient declarees. Rien ne le mesure. Quatre aretes
+  #     manquaient au 2026-09-02 — `60-deploy`->`15-toolchain`, `22-fleet-human`->`20-groups`,
+  #     `25-directories`->`20-groups`+`21-service-accounts`, `64-services`->trois de plus — toutes
+  #     reelles, toutes declarables, aucune declaree. Elles le sont maintenant ; rien n'empeche la
+  #     cinquieme d'etre oubliee.
+  #   · que `--only` ferme transitivement. Il ne joue QUE ce qu'on lui nomme : demander un module
+  #     sans ses `AFTER` est permis, et c'est parfois le geste voulu.
+  #
+  # ⚠ ET CERTAINES ARETES REELLES NE SONT PAS DECLARABLES DU TOUT — c'est la limite dure, pas un
+  # oubli. La garde du rang refuse une dependance qui ne precede pas, or il en existe deux :
+  # `45-catalogues` a besoin de l'adresse de forge qu'ecrit `48-forge-host` (trois rangs plus loin),
+  # et `48-forge-host` lisait la release que `60-deploy` pose (douze rangs plus loin). Les deux sont
+  # traitees dans les modules concernes, en le NOMMANT ; aucune ne peut vivre ici.
+  #
+  # Ce champ est donc une liste de CICATRICES D'ORDRE verifiees, pas un graphe de dependances
+  # complet. Le prefixe numerique reste l'autorite.
   after="$(module_field "$mod" AFTER)"
   for dep in $after; do
     [[ -f "$MODULES_DIR/$dep.sh" ]] || die "$name: AFTER nomme « $dep », qui n'est pas un module de $MODULES_DIR"

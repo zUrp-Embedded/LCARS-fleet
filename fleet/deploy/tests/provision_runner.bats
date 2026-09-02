@@ -977,6 +977,31 @@ MOD
   [[ "$output" == *"AFTER=20-amont"* ]]
 }
 
+@test "AFTER : `--only` ne FERME PAS transitivement — il joue ce qu on lui nomme, et rien de plus" {
+  # ⚠ CE CONTRAT EST DOCUMENTE DANS `provision`, ET RIEN NE L EPINGLAIT. `AFTER` verifie qu une
+  # dependance existe et qu elle precede ; il ne dit pas que `--only` l entrainera. Un jour ou
+  # l autre quelqu un « ameliorera » `--only` pour tirer les AFTER — ce serait un changement de
+  # contrat silencieux, et le geste « joue-moi CE module, seul » disparaitrait sans un mot.
+  #
+  # Le refus de fermer est DELIBERE : rejouer un seul module sur une machine convergee est le geste
+  # de diagnostic le plus courant du rail.
+  stub_module 20-amont any any human
+  cat > "$SANDBOX/modules.d/30-aval.sh" <<MOD
+#!/usr/bin/env bash
+# APPLY-ON: any
+# CHECK-ON: any
+# NEEDS: human
+# AFTER: 20-amont
+set -euo pipefail
+echo "30-aval:\$1" >> "\$RUN_LOG"
+exit 0
+MOD
+  run "$SANDBOX/provision" doctor --substrate docker --only 30-aval
+  [ "$status" -eq 0 ]
+  grep -q "30-aval:check" "$RUN_LOG"
+  refute grep -q "20-amont:check" "$RUN_LOG"
+}
+
 @test "AFTER : les modules REELS declarent un ordre que leur rang respecte — sinon le runner refuse au boot" {
   # Le sandbox porte des stubs ; ce temoin lit le vrai modules.d et rejoue la meme regle.
   local mod name dep n=0

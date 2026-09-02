@@ -273,13 +273,25 @@ preserve  /home/projects                               2775  root:fleet         
 preserve  /home/projects.ops                           2775  root:fleet          any
 preserve  /home/projects.workshop                      2775  root:fleet          any
 
-# ⚠ CE FICHIER EXISTAIT AVANT NOUS, ET C'EST TOUTE LA RAISON DE SA CLASSE. `/etc/skel/.bashrc` est
-# livre par la distribution ; LCARS l'ECRASE (`62-runtime-helpers`, table DATA) pour que tout humain
-# cree ensuite recoive le prompt, les alias et `force_color_prompt` du rail — `useradd -m` recopie
-# `/etc/skel` a la CREATION, jamais apres.
+# ⚠ CE FICHIER EXISTAIT AVANT NOUS, ET LCARS NE L'ECRASE PLUS. Il l'a fait jusqu'au 2026-09-02 :
+# `skel.bashrc` etait le `.bashrc` de la distribution recopie EN ENTIER — 117 lignes — avec trois
+# lignes changees. Ce commentaire disait alors « restaurer l'original demanderait de l'avoir
+# sauvegarde, ce qu'on ne fait pas » : c'etait exact, et c'etait le probleme, pas sa justification.
 #
-# Le RETIRER a la desinstallation laisserait la machine sans squelette du tout, donc dans un etat
-# PIRE qu'avant l'install : chaque compte cree ensuite naitrait sans `.bashrc`. `preserve` dit
-# exactement ca — pose, jamais repris. Restaurer l'original demanderait de l'avoir sauvegarde, ce
-# qu'on ne fait pas : on ne promet pas une reversibilite qu'on ne tient pas.
-preserve  /etc/skel/.bashrc                            0644  root:root           any
+# LCARS n'apporte desormais que ce qui est a lui : `/etc/lcars/lcars.bashrc` porte le reglage, et un
+# BLOC GERE de trois lignes le source depuis ce fichier-ci. Tout le reste est preserve octet pour
+# octet par `ensure_managed_block`. Une mise a jour de `bash` par la distribution atteint de nouveau
+# le squelette.
+#
+# `merge` ET PLUS `preserve`, PARCE QUE LE FAIT A CHANGE. On ne POSE plus ce fichier : on le
+# MODIFIE. Le trait dit exactement ca — un fichier qu'on modifie n'entre jamais dans ce qui part —
+# et il vaut ici pour la meme raison que sur `~/.claude/settings.json` : il appartient a quelqu'un
+# d'autre.
+#
+# ⚠ CE QUI SURVIT A LA DESINSTALLATION EST LE BLOC, ET IL EST INERTE PAR CONSTRUCTION. Il teste la
+# presence du fichier avant de le sourcer ; `/etc/lcars` part avec l'install, donc le bloc ne trouve
+# plus rien et ne fait plus rien. On ne promet pas une restauration bit-a-bit — on promet que ce
+# qu'on laisse ne nuit pas, ce qui est tenable et se verifie.
+anchor:merge /etc/skel/.bashrc                         0644  root:root           any
+# Le reglage de shell de LCARS — sous `/etc/lcars`, donc repris avec lui a la desinstallation.
+anchor    /etc/lcars/lcars.bashrc                      0644  root:root           any

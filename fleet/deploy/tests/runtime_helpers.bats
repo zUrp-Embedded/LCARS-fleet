@@ -45,6 +45,8 @@ setup() {
   # ou aucun temoin n'ecrit. Sans cette ligne, `apply` echoue sur la pose et CINQ temoins voisins
   # rougissent sur une cause qui n'est pas la leur — mesure du 2026-08-26, en ajoutant la table DATA.
   export LCARS_SKEL_FILE="$BATS_TEST_TMPDIR/etc/skel/.bashrc"
+  # Meme couture, meme raison : le reglage de shell va sous /etc/lcars, ou aucun temoin n ecrit.
+  export LCARS_BASHRC_FILE="$BATS_TEST_TMPDIR/etc/lcars/lcars.bashrc"
   export LCARS_HELPERS_OWNER
   LCARS_HELPERS_OWNER="$(id -un):$(id -gn)"
   export PROV_SUBSTRATE=linux
@@ -280,13 +282,14 @@ sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' |
   cmp -s "$SRC_DIR/console.tmux.conf" "$LCARS_HELPERS_DIR/console.tmux.conf"
   [ "$(stat -c %a "$LCARS_HELPERS_DIR/console.tmux.conf")" = "644" ]
 
-  [ -f "$LCARS_SKEL_FILE" ]
-  cmp -s "$SRC_DIR/skel.bashrc" "$LCARS_SKEL_FILE"
-  [ "$(stat -c %a "$LCARS_SKEL_FILE")" = "644" ]
+  [ -f "$LCARS_BASHRC_FILE" ]
+  cmp -s "$SRC_DIR/lcars.bashrc" "$LCARS_BASHRC_FILE"
+  [ "$(stat -c %a "$LCARS_BASHRC_FILE")" = "644" ]
 
-  # ⚠ ET PAS EXECUTABLES. C'est toute la raison de la seconde table : `HELPERS` pose en 0755, et
-  # un `.bashrc` executable est un fichier que quelqu'un finira par lancer au lieu de le sourcer.
-  [[ "$(stat -c %A "$LCARS_SKEL_FILE")" != *x* ]]
+  # ⚠ ET PAS EXECUTABLES. C est toute la raison de la seconde table : `HELPERS` pose en 0755, et
+  # un fichier de reglage executable est un fichier que quelqu un finira par lancer au lieu de le
+  # sourcer.
+  [[ "$(stat -c %A "$LCARS_BASHRC_FILE")" != *x* ]]
 }
 
 # ─── LA REVISION VOYAGE AVEC LA COPIE ───────────────────────────────────────────────────────────
@@ -457,3 +460,59 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
   [[ "$output" == *"parenté indéterminable"* ]]
 }
 
+
+# ─── LE SQUELETTE DE LA DISTRIBUTION SURVIT — C EST CE QUE LE RACCORD ACHETE ────────────────────
+#
+# ⚠ JUSQU AU 2026-09-02, LE RAIL ECRASAIT `/etc/skel/.bashrc` PAR UNE COPIE DE 117 LIGNES dont trois
+# etaient a nous. L original n etait sauvegarde nulle part, et le manifeste l ECRIVAIT :
+# « restaurer l original demanderait de l avoir sauvegarde, ce qu on ne fait pas ». Une machine
+# desinstallee gardait notre squelette a la place du sien, pour toujours.
+#
+# `ensure_managed_block` existait depuis le debut, garde par cinq temoins de la lib, et n avait
+# AUCUN appelant. Le depot portait la forme juste pendant qu on ecrasait.
+@test "SKEL : le .bashrc preexistant est PRESERVE octet pour octet — on ajoute, on ne remplace pas" {
+  stub_curl "peu importe"
+  mkdir -p "$(dirname "$LCARS_SKEL_FILE")"
+  # Un squelette de distribution, avec une ligne que personne d autre ne doit toucher.
+  printf '# .bashrc de la distribution\nexport MARQUEUR_DISTRIBUTION=intact\nalias ll="ls -alF"\n' \
+    > "$LCARS_SKEL_FILE"
+  local avant; avant="$(cat "$LCARS_SKEL_FILE")"
+
+  mod apply
+
+  # tout ce qui etait la y est encore, dans l ordre
+  [ "$(head -3 "$LCARS_SKEL_FILE")" = "$avant" ] \
+    || { echo "le squelette preexistant a ete modifie :"; diff <(printf '%s\n' "$avant") <(head -3 "$LCARS_SKEL_FILE") || true; return 1; }
+  grep -q 'MARQUEUR_DISTRIBUTION=intact' "$LCARS_SKEL_FILE"
+}
+
+@test "SKEL : le raccord TESTE avant de sourcer — reste inerte si l install est retiree" {
+  # ⚠ C EST CE QUI REND LE GESTE HONNETE. Le bloc survit a la desinstallation dans un fichier qui
+  # n est pas a nous ; `/etc/lcars` part avec l install. Sans le test de presence, chaque nouveau
+  # compte de la machine heriterait d un `.bashrc` qui source un fichier absent.
+  stub_curl "peu importe"
+  mkdir -p "$(dirname "$LCARS_SKEL_FILE")"; : > "$LCARS_SKEL_FILE"
+  mod apply
+  # ⚠ `if`, ET SURTOUT PAS `[ -r … ] && . …` : la liste `&&` rend 1 quand le fichier manque, et sous
+  # `set -e` elle TUE le shell qui source. C est le MUR I3 de ce corpus. La premiere version de ce
+  # raccord refaisait exactement cette faute, et c est le SECOND bloc de ce temoin qui l a attrapee
+  # — pas une relecture.
+  grep -qF "if [ -r $LCARS_BASHRC_FILE ]; then . $LCARS_BASHRC_FILE; fi" "$LCARS_SKEL_FILE" \
+    || { echo "le raccord ne teste pas la presence avant de sourcer :"; cat "$LCARS_SKEL_FILE"; return 1; }
+
+  # et on le PROUVE : le fichier retire, le squelette se joue sans erreur et sans rien definir
+  rm -f "$LCARS_BASHRC_FILE"
+  run bash -c "set -e; . '$LCARS_SKEL_FILE'; echo OK-INERTE"
+  [ "$status" -eq 0 ] || { echo "le squelette casse une fois l install retiree : $output"; return 1; }
+  [[ "$output" == *"OK-INERTE"* ]]
+}
+
+@test "SKEL : le rail ne pose plus AUCUN fichier complet sur le squelette" {
+  # La forme interdite est le remplacement. `skel.bashrc` a disparu de l arbre ; ce temoin garde que
+  # personne ne le ressuscite sous un autre nom.
+  local corps; corps="$(grep -vE '^\s*#' "$MOD")"
+  refute grep -qE 'write_atomic +"?\$SKEL_FILE' <<<"$corps"
+  grep -q 'ensure_managed_block "$SKEL_FILE"' <<<"$corps"
+  [ ! -e "$SRC_DIR/skel.bashrc" ] \
+    || { echo "fleet/services/skel.bashrc est revenu — la copie de 117 lignes avec lui"; return 1; }
+}

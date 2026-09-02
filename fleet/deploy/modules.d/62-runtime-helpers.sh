@@ -37,9 +37,16 @@ HELPERS=(
 )
 
 SKEL_FILE="${LCARS_SKEL_FILE:-/etc/skel/.bashrc}"
+# ⚠ LE REGLAGE DE SHELL EST A NOUS, LE SQUELETTE NE L'EST PAS. `skel.bashrc` etait le `.bashrc` de
+# la distribution recopie EN ENTIER — 117 lignes — avec trois lignes changees, et il ECRASAIT
+# `/etc/skel/.bashrc`. L'original n'etait sauvegarde nulle part : le manifeste le classait
+# `preserve` en l'ecrivant lui-meme (« restaurer l'original demanderait de l'avoir sauvegarde, ce
+# qu'on ne fait pas »). Une machine desinstallee gardait donc notre squelette a la place du sien,
+# pour toujours, et une mise a jour de `bash` ne pouvait plus l'atteindre.
+LCARS_BASHRC="${LCARS_BASHRC_FILE:-/etc/lcars/lcars.bashrc}"
 DATA=(
   "console.tmux.conf $HELPERS_DIR/console.tmux.conf 0644"
-  "skel.bashrc $SKEL_FILE 0644"
+  "lcars.bashrc $LCARS_BASHRC 0644"
 )
 
 XTERM_VERSION="${LCARS_XTERM_VERSION:-5.5.0}"
@@ -265,6 +272,26 @@ apply() {
     write_atomic "$d_dst" "$d_mode" < "$SRC_DIR/$d_src" \
       || { p_fail "pose ratée: $d_dst"; verdict_apply; }
   done
+
+  # ─── LE RACCORD, ET NON PLUS LE REMPLACEMENT ──────────────────────────────────────────────────
+  #
+  # ⚠ `ensure_managed_block` EXISTAIT DEPUIS LE DEBUT, GARDE PAR CINQ TEMOINS, ET N'AVAIT AUCUN
+  # APPELANT. Le depot portait deja la forme juste — remplacer un bloc entre marqueurs, preserver
+  # tout le reste octet pour octet — pendant qu'on ecrasait 117 lignes de la distribution.
+  #
+  # LE BLOC TESTE AVANT DE SOURCER, ET C'EST CE QUI REND LE GESTE HONNETE. La desinstallation
+  # reprend `/etc/lcars` (donc notre reglage) ; le bloc, lui, survit dans un fichier qui n'est pas a
+  # nous — et il devient INERTE au lieu de casser le shell de chaque nouveau compte. On ne promet
+  # pas une restauration bit-a-bit qu'on ne tiendrait pas ; on promet que ce qu'on laisse ne nuit
+  # pas.
+  ensure_dir "$(dirname "$SKEL_FILE")" 0755 || verdict_apply
+  # ⚠ AUCUN PROPRIETAIRE PASSE, COMME LA BOUCLE DATA JUSTE AU-DESSUS : ce fichier appartient a la
+  # distribution, et le rail tourne deja en root. Un `chown root:root` explicite n ajouterait rien
+  # en production et casserait tout decor qui ne l est pas — mesure : trois temoins voisins rouges
+  # sur une cause qui n etait pas la leur.
+  ensure_managed_block "$SKEL_FILE" skel 0644 <<BLOC || { p_fail "raccord du squelette non posé ($SKEL_FILE)"; verdict_apply; }
+if [ -r $LCARS_BASHRC ]; then . $LCARS_BASHRC; fi
+BLOC
 
   ensure_dir "$(dirname "$TOOLCHAIN_BIN")" 0755 "$HELPERS_OWNER" || verdict_apply
   install -m 0755 "${own[@]}" "$BIN_SRC_DIR/lcars-toolchain-converge" "$TOOLCHAIN_BIN" \

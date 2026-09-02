@@ -7,6 +7,7 @@
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
+# AFTER: 20-groups 21-service-accounts
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

@@ -453,7 +453,15 @@ COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # le portait en 664 quand la table declare `0644` et que `62-runtime-helpers` le pose bien en 0644
 # sur un poste. Le meme objet, deux modes, selon le rail — trouve par le releve croise du rang D
 # (bancs 2001 et 2002, 2026-09-01), et invisible autrement : rien ne compare les deux substrats.
-COPY --chmod=0644 fleet/services/skel.bashrc /etc/skel/.bashrc
+# ⚠ LE RACCORD, ET NON PLUS LE REMPLACEMENT — meme geste que `62-runtime-helpers` cote poste.
+# L image ecrasait `/etc/skel/.bashrc` par une copie de 117 lignes de la distribution dont trois
+# etaient a nous. Elle pose desormais le seul reglage LCARS, et raccorde le squelette de la
+# distribution par un bloc qui teste avant de sourcer.
+COPY --chmod=0644 fleet/services/lcars.bashrc /etc/lcars/lcars.bashrc
+RUN printf "%s\n%s\n%s\n" \
+      "# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)" \
+      "if [ -r /etc/lcars/lcars.bashrc ]; then . /etc/lcars/lcars.bashrc; fi" \
+      "# <<< lcars:skel <<<" >> /etc/skel/.bashrc
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
 # `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la

@@ -348,7 +348,14 @@ if [[ "$SUBSTRATE" == "wsl" ]]; then
 elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
   :
 elif [[ "$SUBSTRATE" == "linux" ]]; then
-  POSTE_POURQUOI="linux natif non déclaré. Ce rail est réservé à WSL2, ou à une machine DÉDIÉE qui l'assume : il possède /etc et /opt/lcars, et n'a pas de désinstalleur. Pour l'assumer : LCARS_ALLOW_ANY_HOST=1"
+  # ⚠ « N'A PAS DE DESINSTALLEUR » ETAIT FAUX, ET LE MEME FICHIER DISAIT L'INVERSE 98 LIGNES PLUS
+  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe depuis le
+  # 2026-08-22, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
+  #
+  # Ce que ce refus doit dire est plus precis, et c'est ce qui aide a decider : le rail POSSEDE la
+  # machine, il sait REPRENDRE ce qu'il a pose, et il ne sait pas RESTAURER ce qu'il a modifie
+  # avant lui. La nuance est le vrai contenu de l'avertissement — pas une absence d'outil.
+  POSTE_POURQUOI="linux natif non déclaré. Ce rail est réservé à WSL2, ou à une machine DÉDIÉE qui l'assume : il possède /etc et /opt/lcars. « provision uninstall » reprend ce qu'il a posé, mais un retour à l'identique demande un instantané. Pour l'assumer : LCARS_ALLOW_ANY_HOST=1"
 else
   POSTE_POURQUOI="substrat « $SUBSTRATE ». Ce rail est réservé à WSL2, ou à une machine DÉDIÉE déclarée telle par LCARS_ALLOW_ANY_HOST=1"
 fi

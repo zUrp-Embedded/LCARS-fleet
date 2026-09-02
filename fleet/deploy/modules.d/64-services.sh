@@ -6,7 +6,7 @@
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 48-forge-host
+# AFTER: 21-service-accounts 25-directories 48-forge-host 62-runtime-helpers
 #
 # Le convergeur a besoin de `useradd` : il n'y a pas de version non privilégiée de créer un humain.
 # La landing démarre en root et se DÉPOSE elle-même — `console-landing.sh` fait

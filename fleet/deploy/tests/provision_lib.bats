@@ -933,12 +933,27 @@ STUB
   rm -f "$f"
 }
 
+# ⚠ CE TEMOIN COMPTAIT UN REPERTOIRE PARTAGE, ET IL MESURAIT DONC LA MACHINE QUI LE JOUE. Il faisait
+# son `find` dans `${TMPDIR:-/tmp}` — le /tmp de tout le monde. Mesure du 2026-09-02 : 551 fichiers
+# `prov-out.*` y dormaient deja, et DEUX gates tournaient en parallele sur la machine, chacune en
+# creant et en supprimant. Le compte bougeait entre le « avant » et le « apres » pour des raisons
+# qui n'ont rien a voir avec `run_step`.
+#
+# Il a rougi dans la gate du 2026-09-02 et il est passe VERT rejoue seul, a la meme seconde et sur
+# le meme code : la difference etait le voisinage, pas le sujet. C'est exactement ce que l'en-tete
+# de `system_manifest.bats` interdit — « un temoin qui pretendrait mesurer la machine depuis ce
+# poste mesurerait ce poste ».
+#
+# Le decor POSSEDE desormais son TMPDIR, comme le reste du corpus. Le fait garde est le meme, et il
+# devient vrai quoi qu'il arrive a cote.
 @test "run_step: un succes ne laisse AUCUN fichier derriere lui" {
-  before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
-  module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
+  local box="$BATS_TEST_TMPDIR/tmp-run-step"; mkdir -p "$box"
+  before="$(find "$box" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  TMPDIR="$box" module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
   [ "$status" -eq 0 ]
-  after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
-  [ "$after" -eq "$before" ]
+  after="$(find "$box" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  [ "$after" -eq "$before" ] \
+    || { echo "run_step a laisse $((after - before)) fichier(s) dans son propre TMPDIR :"; find "$box" -maxdepth 1 -name 'prov-out.*'; return 1; }
 }
 
 @test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
