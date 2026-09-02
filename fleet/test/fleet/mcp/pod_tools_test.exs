@@ -11,6 +11,7 @@ defmodule Fleet.MCP.PodToolsTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
   alias Fleet.TestEnv
   alias Fleet.TaskQueue
@@ -305,23 +306,24 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
-         %{
-           "state" => "closed",
-           "labels" => [%{"name" => "stage/merged"}],
-           "title" => "Brique livrée"
-         }}
+         PayloadFixture.issue(
+           title: "Brique livrée",
+           state: "closed",
+           label_names: ["stage/merged"]
+         )}
 
     @impl true
     def list_pulls(_repo, _opts),
       do:
         {:ok,
          [
-           %{
-             "number" => 6,
-             "state" => "closed",
-             "merged" => true,
-             "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
-           }
+           PayloadFixture.pull(
+             number: 6,
+             state: "closed",
+             merged: true,
+             head_ref: "refs/pull/6/head",
+             head_sha: "9d5bd4e"
+           )
          ]}
 
     @impl true
@@ -334,12 +336,13 @@ defmodule Fleet.MCP.PodToolsTest do
     def merged_pr_of_issue(_repo, 5, _opts),
       do:
         {:ok,
-         %{
-           "number" => 6,
-           "state" => "closed",
-           "merged" => true,
-           "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
-         }}
+         PayloadFixture.pull(
+           number: 6,
+           state: "closed",
+           merged: true,
+           head_ref: "refs/pull/6/head",
+           head_sha: "9d5bd4e"
+         )}
 
     def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
@@ -410,11 +413,11 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
-         %{
-           "state" => "closed",
-           "labels" => [%{"name" => "lcars-onboarded"}],
-           "title" => "Livrée sans label"
-         }}
+         PayloadFixture.issue(
+           title: "Livrée sans label",
+           state: "closed",
+           label_names: ["lcars-onboarded"]
+         )}
 
     @impl true
     defdelegate list_pulls(repo, opts), to: MergedMarkerForge
@@ -473,12 +476,13 @@ defmodule Fleet.MCP.PodToolsTest do
       do:
         {:ok,
          [
-           %{
-             "number" => 9,
-             "state" => "open",
-             "merged" => false,
-             "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}
-           }
+           PayloadFixture.pull(
+             number: 9,
+             state: "open",
+             merged: false,
+             head_ref: "lcars/issue-5-engineer",
+             head_sha: "abc"
+           )
          ]}
 
     @impl true
@@ -781,16 +785,12 @@ defmodule Fleet.MCP.PodToolsTest do
       # F-C047 — tunable labels (`:test_issue_labels`, list of names): `delivered` requires
       # `stage/merged`, no longer `closed` alone. Default [] → a closed issue WITHOUT merge proof =
       # not delivered.
-      labels =
-        Application.get_env(:lcars_fleet, :mcp_test_issue_labels, [])
-        |> Enum.map(&%{"name" => &1})
-
       {:ok,
-       %{
-         "state" => Application.get_env(:lcars_fleet, :mcp_test_issue_state, "open"),
-         "labels" => labels,
-         "title" => "Brique de test"
-       }}
+       PayloadFixture.issue(
+         title: "Brique de test",
+         state: Application.get_env(:lcars_fleet, :mcp_test_issue_state, "open"),
+         label_names: Application.get_env(:lcars_fleet, :mcp_test_issue_labels, [])
+       )}
     end
 
     @impl true
@@ -864,13 +864,13 @@ defmodule Fleet.MCP.PodToolsTest do
         :idem_issues,
         issues ++
           [
-            %{
-              "number" => number,
-              "title" => title,
-              "body" => body,
-              "state" => "open",
-              "assignees" => [%{"login" => "starfleet"}]
-            }
+            PayloadFixture.issue(
+              number: number,
+              body: body,
+              title: title,
+              state: "open",
+              assignee_logins: ["starfleet"]
+            )
           ]
       )
 
@@ -2561,17 +2561,17 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_open_issues("fleet/alpha", _opts) do
       {:ok,
        [
-         %{
-           "number" => 4,
-           "title" => "sonde retour",
-           "labels" => [%{"name" => "lcars-awaits-arch"}]
-         },
-         %{"number" => 5, "title" => "vraie feature", "labels" => [%{"name" => "type:feature"}]}
+         PayloadFixture.issue(
+           number: 4,
+           title: "sonde retour",
+           label_names: ["lcars-awaits-arch"]
+         ),
+         PayloadFixture.issue(number: 5, title: "vraie feature", label_names: ["type:feature"])
        ]}
     end
 
     def list_open_issues(_other_repo, _opts),
-      do: {:ok, [%{"number" => 9, "title" => "rien", "labels" => []}]}
+      do: {:ok, [PayloadFixture.issue(number: 9, title: "rien", label_names: [])]}
 
     @impl true
     def list_comments("fleet/alpha", 4, _opts) do
@@ -2888,16 +2888,13 @@ defmodule Fleet.MCP.PodToolsTest do
 
     def get_issue("fleet/alpha", 5, _opts) do
       {:ok,
-       %{
-         "number" => 5,
-         "title" => "vraie feature",
-         "state" => "open",
-         "body" => "le brief complet du ticket",
-         # Coherent pair: a `destination/workshop` ticket wears `type:workshop`. The fixture used to pin
-         # `type:feature` here — a read-side fixture teaching the very contradiction the write
-         # side was producing.
-         "labels" => [%{"name" => "type:workshop"}, %{"name" => "destination/workshop"}]
-       }}
+       PayloadFixture.issue(
+         number: 5,
+         body: "le brief complet du ticket",
+         title: "vraie feature",
+         state: "open",
+         label_names: ["type:workshop", "destination/workshop"]
+       )}
     end
 
     def get_route(_r, _n, _o), do: :none
@@ -2927,16 +2924,16 @@ defmodule Fleet.MCP.PodToolsTest do
         :read_channel_board,
         {:ok,
          [
-           %{
-             "number" => 4,
-             "title" => "sonde retour",
-             "labels" => [%{"name" => "lcars-awaits-arch"}]
-           },
-           %{
-             "number" => 5,
-             "title" => "vraie feature",
-             "labels" => [%{"name" => "type:feature"}, %{"name" => "stage/build"}]
-           }
+           PayloadFixture.issue(
+             number: 4,
+             title: "sonde retour",
+             label_names: ["lcars-awaits-arch"]
+           ),
+           PayloadFixture.issue(
+             number: 5,
+             title: "vraie feature",
+             label_names: ["type:feature", "stage/build"]
+           )
          ]}
       )
     end

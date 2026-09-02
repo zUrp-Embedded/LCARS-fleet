@@ -8,6 +8,7 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StubTaskQueue
   alias Fleet.TestEnv
@@ -72,12 +73,13 @@ defmodule Fleet.Pilot.StepDispatcherSpawnAsRoleTest do
 
   test "spawn_step (dispatch_issue): start_stopwatch signed AS THE ENGINEER, not the system" do
     payload = %{
-      "issue" => %{
-        "number" => 42,
-        "body" => "fais le hello",
-        "labels" => [],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      "issue" =>
+        PayloadFixture.issue(
+          number: 42,
+          body: "fais le hello",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
     }
 
     assert {:ok, {:spawned, "lordzurp-lcars-test-engineer", "engineer"}} =
