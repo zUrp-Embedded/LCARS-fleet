@@ -267,15 +267,12 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     lock = Fleet.Toolchain.waiting_label()
 
     case forge().get_issue(repo, issue, []) do
-      {:ok, %{"labels" => labels}} ->
-        if Enum.any?(labels || [], &(&1["name"] == lock)) do
+      {:ok, payload} ->
+        if lock in Payload.label_names(payload) do
           do_drain(repo, issue, pr, why, lock)
         else
           :ok
         end
-
-      {:ok, _shape} ->
-        :ok
 
       {:error, reason} ->
         Logger.warning(

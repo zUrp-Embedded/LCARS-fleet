@@ -37,6 +37,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   of waiting one more tick forever.
   """
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
   require Logger
@@ -332,11 +333,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # d'attente dit maintenant que l'echeance est hors d'atteinte.
   defp head_commit(pr_number, head, %Ctx{} = ctx) do
     case ctx.forge.get_pull(ctx.repo, pr_number, ctx.forge_opts) do
-      {:ok, %{"head" => %{"sha" => sha}} = pull} when is_binary(sha) ->
-        {:ok, sha, pull_updated_at(pull)}
-
-      {:ok, _} ->
-        {:error, {:no_head_sha, head}}
+      {:ok, pull} ->
+        # Nested rather than a flat `with`: an outer shape that is neither {:ok,_} nor {:error,_}
+        # must keep raising. A `with/else` would funnel it into {:no_head_sha, _} — a precise
+        # diagnosis of the wrong failure.
+        case Payload.head_sha(pull) do
+          sha when is_binary(sha) -> {:ok, sha, pull_updated_at(pull)}
+          _ -> {:error, {:no_head_sha, head}}
+        end
 
       {:error, reason} ->
         {:error, reason}

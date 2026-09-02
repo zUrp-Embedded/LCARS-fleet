@@ -97,6 +97,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   use GenServer
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.EventRouter.Bus
   alias Fleet.Opts
   alias Fleet.Pilot.CompletionOutbox
@@ -565,7 +566,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   defp payload_repo(payload),
-    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
+    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp run_step_run(payload, n, state) do
     role = payload["role"]

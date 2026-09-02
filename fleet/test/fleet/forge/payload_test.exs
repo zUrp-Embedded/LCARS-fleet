@@ -82,13 +82,13 @@ defmodule Fleet.Forge.PayloadTest do
       exportees =
         Payload.__info__(:functions) |> Enum.map(&elem(&1, 0)) |> MapSet.new()
 
-      # `merged` se lit par `merged?/1`, `labels` par `label_names/1` : la table nomme le FAIT, le
-      # lecteur nomme la question posee.
+      # Le FAIT se nomme par ce qu'on obtient, pas par la clef du fil : `label_names` et non
+      # `labels`, `assignee_logins` et non `assignees`. Le lecteur porte donc le meme nom, et la
+      # seule tolerance est le `?` d'un predicat. Un cas particulier par fait rendrait ce garde
+      # complice de la derive qu'il surveille.
       sans_lecteur =
         Enum.reject(faits, fn f ->
-          MapSet.member?(exportees, f) or
-            MapSet.member?(exportees, :"#{f}?") or
-            (f == :labels and MapSet.member?(exportees, :label_names))
+          MapSet.member?(exportees, f) or MapSet.member?(exportees, :"#{f}?")
         end)
 
       assert sans_lecteur == [],

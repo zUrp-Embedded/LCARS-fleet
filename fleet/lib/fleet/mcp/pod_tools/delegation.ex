@@ -654,7 +654,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp outcome(_open, _labels, {:ok, %{"state" => "open"}}), do: "in_review"
   defp outcome(_open, _labels, _none_error_or_closed_pr), do: "open"
 
-  defp pr_merged?({:ok, %{"merged" => true}}), do: true
+  defp pr_merged?({:ok, pr}), do: Payload.merged?(pr)
   defp pr_merged?(_), do: false
 
   defp put_present(map, _key, nil), do: map
@@ -1200,7 +1200,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   defp comment_entry(c) when is_map(c) do
     %{"body" => Map.get(c, "body")}
-    |> put_present("author", get_in(c, ["user", "login"]))
+    |> put_present("author", Payload.author_login(c))
     |> put_present("created_at", Map.get(c, "created_at"))
   end
 
@@ -2144,15 +2144,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp issue_assignee(issue) do
-    case Map.get(issue, "assignees") do
-      [%{"login" => login} | _] ->
-        login
-
-      _ ->
-        case Map.get(issue, "assignee") do
-          %{"login" => login} -> login
-          _ -> nil
-        end
+    case Payload.assignee_logins(issue) do
+      [login | _] -> login
+      [] -> Payload.assignee_login(issue)
     end
   end
 

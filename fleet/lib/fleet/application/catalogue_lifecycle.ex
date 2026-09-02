@@ -41,6 +41,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   fresh.
   """
 
+  alias Fleet.Forge.Payload
   alias Fleet.Application.CatalogueDeposits
 
   @bundled Fleet.Catalogue.bundled_name()
@@ -282,8 +283,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
     do: %{name: name, state: :available, updatable?: nil, deposit: deposit, store: nil}
 
   defp entry(name, deposit, store, repo_mod, opts) when is_map(store) do
-    full = store["full_name"]
-    branch = store["default_branch"] || "main"
+    full = Payload.full_name(store)
+    branch = Payload.default_branch(store) || "main"
 
     case repo_mod.branch_commit(full, branch, opts) do
       {:ok, head} ->

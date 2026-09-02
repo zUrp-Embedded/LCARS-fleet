@@ -1279,4 +1279,86 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           if(absents == [], do: "", else: ": " <> Enum.join(absents, ", "))
     }
   end
+
+  # LA FORME D'UNE REPONSE DE LA FORGE EST CONNUE D'UN SEUL DOMAINE.
+  #
+  # `Fleet.Forge.Client` rend les reponses Gitea telles quelles. Mesure du 2026-09-02 : quatorze
+  # modules de `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string. La forme
+  # de l'API d'un TIERS etait donc connue hors du domaine qui la parle — une montee de version se
+  # traitait au `grep`, et rien ne repondait a « de quels champs dependons-nous ».
+  #
+  # `Fleet.Forge.Payload` ferme ca : un chemin par fait, declare une fois. Ce mur empeche la
+  # reouverture.
+  #
+  # ⚠ CE QU'IL NE COUVRE PAS, ET LE DIRE FAIT PARTIE DU MUR. Il attrape les deux formes de LECTURE
+  # qui ne sont pas ambigues — l'indexation `x["head"]` et `get_in(x, ["head", "ref"])`. Il ne
+  # regarde PAS les motifs `%{"head" => h}` : textuellement, un motif et une CONSTRUCTION s'ecrivent
+  # pareil, et le depot construit legitimement des corps de requete Gitea (`"base" => "main"`) et
+  # des reponses d'outil MCP portant les memes noms de clef. Un mur qui confondrait les deux serait
+  # rouge sur du code correct, donc il serait desarme.
+  #
+  # Couverture partielle ENONCEE plutot que couverture totale supposee : la forme non couverte est
+  # celle qu'on ecrit en migrant, pas celle qu'on ecrit par reflexe.
+  # ⚠ `base` ET `login` SONT ABSENTS DE CETTE LISTE, ET C'EST UNE MESURE, PAS UN OUBLI. Le depot
+  # les emploie pour ses PROPRES formes : `project_publish` lit `b["base"]` dans un paquet
+  # d'arguments CLI qu'il vient de construire, et `brief_builder` lit `fb["login"]` dans la
+  # projection que `Jury.change_requests_by_reviewer/1` fabrique elle-meme. Les nommer ici rendrait
+  # le mur ROUGE sur du code correct — et un mur rouge sur du correct se desarme, il ne se respecte
+  # pas. Le prix est enonce : une lecture par ces deux clefs echapperait au mur.
+  @forge_response_keys ~w(full_name html_url pull_request merged merged_at commit_id dismissed
+                          sha head labels assignee assignees mergeable repository
+                          default_branch)a
+
+  @doc false
+  @spec check_forge_shape_contained(String.t()) :: Support.result()
+  def check_forge_shape_contained(root) do
+    fichiers =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.reject(&String.starts_with?(&1, "lib/fleet/forge/"))
+      |> Enum.reject(&checker_source?/1)
+
+    fautes = Enum.flat_map(fichiers, &forge_shape_reads(root, &1))
+
+    if measured_nothing?(fichiers) do
+      broken_result("forge.shape_contained", "source under lib/ outside the forge domain")
+    else
+      %{
+        id: "forge.shape_contained",
+        remediation:
+          "lire la charge par `Fleet.Forge.Payload` — un chemin par fait, declare une fois et " <>
+            "verifie contre une capture reelle. Un module hors du domaine forge qui connait la " <>
+            "forme de l'API rend toute montee de version de la forge indetectable au gate",
+        status: if(fautes == [], do: :pass, else: :fail),
+        evidence: fautes,
+        note:
+          "#{length(fichiers)} source(s) hors du domaine forge — acces `x[\"k\"]` et `get_in/2` " <>
+            "sur l'AST ; les MOTIFS ne sont pas couverts, cf. le commentaire ci-dessus"
+      }
+    end
+  end
+
+  # SUR L'AST, PAS SUR LES LIGNES. Une premiere version greppait le texte et a signale une ligne de
+  # PROSE dans un `@moduledoc` — la faute exacte que ce depot corrige ailleurs par `code_of/1`, et
+  # qu'un `@moduledoc` rend pire encore : son contenu n'est pas un commentaire `#`, donc aucun
+  # decapage de commentaire ne l'aurait retire. L'AST ne voit que du code, et il ignore aussi les
+  # MOTIFS par construction — un motif ne peut pas contenir d'appel.
+  defp forge_shape_reads(root, rel) do
+    root
+    |> quoted!(rel)
+    |> collect(fn
+      {{:., meta, [Access, :get]}, _, [_, clef]} when is_binary(clef) ->
+        if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}
+
+      {:get_in, meta, [_, chemin]} when is_list(chemin) ->
+        if Enum.any?(chemin, &(is_binary(&1) and String.to_atom(&1) in @forge_response_keys)),
+          do: {rel, meta[:line]}
+
+      _ ->
+        nil
+    end)
+    |> Enum.map(fn {f, l} -> "#{f}:#{l}" end)
+  end
 end

@@ -32,6 +32,7 @@ defmodule Fleet.Pilot.Poller.Admission do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.Poller.Lease
 
   @doc """
@@ -203,9 +204,9 @@ defmodule Fleet.Pilot.Poller.Admission do
   def current_wait(payload) when is_map(payload) do
     prefix = Fleet.Labels.wait_prefix()
 
-    (payload["labels"] || [])
-    |> Enum.map(& &1["name"])
-    |> Enum.find(&(is_binary(&1) and String.starts_with?(&1, prefix)))
+    payload
+    |> Payload.label_names()
+    |> Enum.find(&String.starts_with?(&1, prefix))
   end
 
   def current_wait(_), do: nil

@@ -91,9 +91,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     # Meme racine que le rail : le role se resout dans le catalogue du projet, nomme par le `owner`
     # du depot que le payload porte deja.
     root =
-      Fleet.Catalogue.root_for_repo(
-        get_in(payload, ["repository", "full_name"]) || payload["repo"]
-      )
+      Fleet.Catalogue.root_for_repo(Payload.repository_full_name(payload) || payload["repo"])
 
     case GateEngine.producer?(role, seams.deliverable_mode_fun, payload["deliverable_mode"], root) do
       {:ok, true} ->

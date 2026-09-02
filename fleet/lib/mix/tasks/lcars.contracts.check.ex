@@ -144,6 +144,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         SingleSource.check_face_roots_single_source(root),
         SingleSource.check_ops_repo_single_source(root),
         SingleSource.check_config_single_default(root),
+        SingleSource.check_forge_shape_contained(root),
         Tools.check_tool_descriptions_no_permuted_names(root),
         Tools.check_tool_grants_resolve(root),
         Tools.check_catalogue_enumerates_no_tools(root),

@@ -48,11 +48,13 @@ defmodule Fleet.Forge.Payload do
     head_ref: ["head", "ref"],
     head_sha: ["head", "sha"],
     base_ref: ["base", "ref"],
-    labels: ["labels"],
+    label_names: ["labels"],
     assignee_login: ["assignee", "login"],
     author_login: ["user", "login"],
     repository_full_name: ["repository", "full_name"],
-    full_name: ["full_name"]
+    full_name: ["full_name"],
+    default_branch: ["default_branch"],
+    assignee_logins: ["assignees"]
   }
 
   @doc """
@@ -120,7 +122,7 @@ defmodule Fleet.Forge.Payload do
   @doc false
   @spec label_names(t()) :: [String.t()]
   def label_names(p) do
-    case get(p, :labels) do
+    case get(p, :label_names) do
       l when is_list(l) -> for %{"name" => n} <- l, is_binary(n), do: n
       _ -> []
     end
@@ -142,4 +144,18 @@ defmodule Fleet.Forge.Payload do
   @doc false
   @spec full_name(t()) :: String.t() | nil
   def full_name(p), do: get(p, :full_name)
+
+  @doc false
+  @spec default_branch(t()) :: String.t() | nil
+  def default_branch(p), do: get(p, :default_branch)
+
+  # Gitea carries BOTH `assignees` (list) and `assignee` (single); the list wins when present.
+  @doc false
+  @spec assignee_logins(t()) :: [String.t()]
+  def assignee_logins(p) do
+    case get(p, :assignee_logins) do
+      l when is_list(l) -> for %{"login" => n} <- l, is_binary(n), do: n
+      _ -> []
+    end
+  end
 end

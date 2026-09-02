@@ -10,6 +10,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
@@ -148,7 +149,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   defp payload_repo(payload),
-    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
+    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp judge_kind?(payload, spec) do
     case payload["brief_kind"] do

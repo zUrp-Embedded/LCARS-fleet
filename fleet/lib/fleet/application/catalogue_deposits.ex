@@ -53,6 +53,8 @@ defmodule Fleet.Application.CatalogueDeposits do
   The absence from the list IS the message; there is nothing to detect and nothing to explain.
   """
 
+  alias Fleet.Forge.Payload
+
   require Logger
 
   @manifest Fleet.Catalogue.manifest_file()
@@ -143,12 +145,12 @@ defmodule Fleet.Application.CatalogueDeposits do
         {name, one}
 
       {name, many} ->
-        [chosen | _] = sorted = Enum.sort_by(many, & &1["full_name"])
+        [chosen | _] = sorted = Enum.sort_by(many, &Payload.full_name/1)
 
         Logger.warning(
           "CatalogueDeposits: #{length(many)} repos claim to be the store of '#{name}' " <>
-            "(#{sorted |> Enum.map(& &1["full_name"]) |> Enum.join(", ")}). Following " <>
-            "#{chosen["full_name"]} — first by name, so every box reading this forge follows the " <>
+            "(#{sorted |> Enum.map(&Payload.full_name/1) |> Enum.join(", ")}). Following " <>
+            "#{Payload.full_name(chosen)} — first by name, so every box reading this forge follows the " <>
             "same one. Delete the others: only one of them is what `catalogue install` pushes to."
         )
 
@@ -164,8 +166,17 @@ defmodule Fleet.Application.CatalogueDeposits do
   # Returns a one-element list or none — `flat_map` so that a repo we cannot read drops out with a
   # named warning instead of failing the whole listing. A single unreadable repo among fifty must
   # not hide the other forty-nine.
-  defp classify(%{"full_name" => full} = repo, repo_mod, files_mod, opts) when is_binary(full) do
-    branch = Map.get(repo, "default_branch") || "main"
+  defp classify(repo, repo_mod, files_mod, opts) when is_map(repo) do
+    case Payload.full_name(repo) do
+      full when is_binary(full) -> do_classify(repo, full, repo_mod, files_mod, opts)
+      _ -> []
+    end
+  end
+
+  defp classify(_repo, _repo_mod, _files_mod, _opts), do: []
+
+  defp do_classify(repo, full, repo_mod, files_mod, opts) do
+    branch = Payload.default_branch(repo) || "main"
 
     with {:ok, %{content: yaml}} <-
            files_mod.get_file(full, @manifest, Keyword.put(opts, :ref, branch)),
@@ -194,8 +205,6 @@ defmodule Fleet.Application.CatalogueDeposits do
         unreadable(full, reason)
     end
   end
-
-  defp classify(_repo, _repo_mod, _files_mod, _opts), do: []
 
   # ⚠ LE STORE SE RECONNAIT ICI, ET NULLE PART AILLEURS. C'est le seul point du code ou l'identite
   # declaree et le proprietaire sont tous les deux connus, donc le seul ou la question puisse etre

@@ -86,6 +86,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   injected seams (spawner/task_queue/forge).
   """
 
+  alias Fleet.Forge.Payload
+
   require Logger
 
   # workflow_run lock: single source `Fleet.Labels` (compile-time constant). SAME source as
@@ -469,7 +471,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       for %{metadata: meta, state: item_state} <- tq.list_active(),
           item_state in @pulled_states,
           meta["gate_eval"] == true,
-          get_in(meta, ["resume_payload", "repository", "full_name"]) == repo,
+          Payload.repository_full_name(meta["resume_payload"]) == repo,
           n = meta["resume_n"],
           is_integer(n),
           into: MapSet.new(),

@@ -31,6 +31,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
   # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
   alias Fleet.Pilot.ConflictReport
@@ -955,7 +956,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # a wrong answer.
   defp head_sha(head, pr_number, %Ctx{} = ctx) do
     case ctx.forge.get_pull(ctx.repo, pr_number, ctx.forge_opts) do
-      {:ok, %{"head" => %{"sha" => sha}}} when is_binary(sha) -> sha
+      {:ok, pull} -> Payload.head_sha(pull) || head
       _ -> head
     end
   end
