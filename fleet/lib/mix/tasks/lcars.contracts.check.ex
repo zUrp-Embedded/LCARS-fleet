@@ -3613,7 +3613,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     mirrors = [
       "deploy/modules.d/52-ops-branch.sh",
       "services/forge-gestures.sh",
-      "deploy/admiral/skills/system-issues/list.sh",
+      "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
       # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
       # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
@@ -4186,7 +4186,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
          "the forge gesture's fallback"},
         {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
-        {"deploy/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},
         {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
         {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,

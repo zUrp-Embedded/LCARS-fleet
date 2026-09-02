@@ -22,7 +22,7 @@ load refute
 setup() {
   SRC="$BATS_TEST_DIRNAME/../modules.d/45-sudoers-toolchain.sh"
   [ -f "$SRC" ]
-  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../admiral/skills"
+  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../../services/admiral/skills"
   # ⚠ SANS cette couture, la branche skill ecrirait dans le VRAI ~/.claude de qui joue les tests.
   export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$LCARS_SIEGE_HOME"
 
@@ -232,18 +232,25 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [ -x "$LCARS_SIEGE_HOME/.claude/skills/system-issues/list.sh" ]
 }
 
-@test "skill: la source se trouve AUSSI hors image — le rail poste n'a pas /opt/lcars" {
-  # `/opt/lcars/admiral-skills` est un chemin d'IMAGE (Dockerfile COPY). Sur le rail poste il
-  # n'existe pas, et le module derivait en accusant l'image — « image sans les sources admiral ? » —
-  # sur une machine qui n'est pas une image. Mesure du 2026-08-21, install a froid sur machine
-  # dediee. Le siege n'y recevait jamais son skill, et le message envoyait chercher la faute dans
-  # un artefact absent.
+@test "skill: UN SEUL chemin de source, et il vaut sur les DEUX rails" {
+  # ⚠ IL Y EN AVAIT DEUX, ET LE MODULE CHOISISSAIT ENTRE EUX. L'image posait le skill en
+  # `/opt/lcars/admiral-skills`, le depot le portait sous `deploy/admiral/skills` : le module
+  # essayait le premier, retombait sur le second. Ce repli ne corrigeait pas la divergence, il la
+  # contournait — sur le rail poste le module derivait en accusant l'image (« image sans les sources
+  # admiral ? ») sur une machine qui n'est pas une image, et le siege n'y recevait jamais son skill
+  # (mesure du 2026-08-21, install a froid sur machine dediee). Le message envoyait chercher la
+  # faute dans un artefact absent.
+  #
+  # Le skill vit maintenant sous `fleet/services/admiral/skills`, ou `EMBEDDED` et le `COPY` de
+  # l'image le posent au MEME endroit. Ce qui se mesure ici n'est donc plus « il existe un repli »
+  # mais « il n'y a plus rien entre quoi choisir » : un chemin, derive de `repo_root()`, et il
+  # porte reellement le skill — sinon ce temoin ne prouverait qu'une chaine bien formee.
   unset LCARS_ADMIRAL_SKILLS_SRC
   run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; echo \"\$SKILL_SRC\""
   [ "$status" -eq 0 ]
   # Sur la machine qui joue ce test, /opt/lcars n'existe pas : la source est donc celle du DEPOT,
   # et elle porte reellement le skill (sinon ce temoin ne prouverait qu'un chemin bien forme).
-  [[ "$output" == */fleet/deploy/admiral/skills ]]
+  [[ "$output" == */fleet/services/admiral/skills ]]
   [ -f "$output/system-issues/SKILL.md" ]
 }
 

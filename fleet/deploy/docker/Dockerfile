@@ -429,7 +429,7 @@ COPY fleet/services/human-converger.sh /opt/lcars/human-converger.sh
 COPY fleet/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converge
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
-COPY fleet/deploy/admiral/skills /opt/lcars/admiral-skills
+COPY fleet/services/admiral/skills /opt/lcars/fleet/services/admiral/skills
 # Les gestes forge, DANS l'image : `box` et le banc les jouent par la meme porte, au lieu
 # d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
 # couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).

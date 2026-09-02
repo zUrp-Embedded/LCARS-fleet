@@ -82,7 +82,6 @@ dir       /opt/lcars                                   0755  root:root          
 # est ici sur les deux rails, et il dit vrai dans les deux sens.
 anchor:cond /opt/lcars/.source-revision                0644  root:root           any
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
-dir       /opt/lcars/admiral-skills                    0755  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
 dir       /opt/lcars/share                                  0755  root:root           wsl+linux

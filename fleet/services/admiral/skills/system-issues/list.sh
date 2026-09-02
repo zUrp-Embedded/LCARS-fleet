@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/admiral/skills/system-issues/list.sh
+# SOURCE: fleet/services/admiral/skills/system-issues/list.sh
 # AUTHOR: bob
 # STARDATE: 2026-08-19
 # STATUS: PROTO-V2 — la boite de reception d'admiral (05 §7, chantier admiral)
