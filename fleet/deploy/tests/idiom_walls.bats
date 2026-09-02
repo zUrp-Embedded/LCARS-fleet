@@ -242,3 +242,43 @@ I3_AWK='
   done
   [ "$bad" -eq 0 ]
 }
+
+# ─── MUR I14 : UNE ASSERTION QUI LIT STDIN DOIT ETRE ALIMENTEE ──────────────────────────────────
+#
+# ⚠ CE MUR NAIT D UN BLOCAGE DE HUIT HEURES, PAS D UNE INTUITION. L helper de negation par motif lit
+# STDIN — son en-tete l ecrit noir sur blanc, sous la forme `cmd | <helper> 'motif'`. Un appel sans
+# tube ni redirection laisse son `grep` attendre l entree standard, et le test ne rate pas : il PEND.
+#
+# Et il pend SELECTIVEMENT, ce qui est le pire. Joue seul depuis un terminal, stdin est ferme et
+# `grep` rend tout de suite : le fichier passe, le temoin a l air bon. Joue par `shell_gate`, stdin
+# est un tube ouvert que personne n alimente — et le harnais dort. Mesure du 2026-09-02 : le
+# `mix gate` de `pack.sh` et un `provision apply` de banc sont restes suspendus toute la nuit sur
+# un seul appel de ce genre.
+#
+# UN TEST QUI PEND EST PIRE QU UN TEST FAUX. Le faux rougit ; celui-la immobilise le harnais qui le
+# joue, et ce qu on lit ensuite n est pas « echec » mais l absence de toute nouvelle.
+#
+# ⚠ CE FICHIER EST HORS DU SCAN, ET C EST STRUCTUREL : il PARLE de l helper sans jamais l appeler.
+# Un mur qui s audite lui-meme rougit sur sa propre prose — piege deja referme trois fois dans cette
+# passe. Le motif exige en plus un DEBUT D INSTRUCTION, pour ne pas confondre une mention et un appel.
+@test "MUR I14: toute negation par motif est ALIMENTEE — sinon son grep attend stdin et le test PEND" {
+  local helper='refute_out' nus total
+  # ⚠ LE TUBE EST EXCLU DU MOTIF, PAS FILTRE APRES : `| refute_out` EST la forme nominale. Une
+  # premiere version mettait `|` dans la classe des debuts d instruction et denoncait les quatre
+  # appels corrects du corpus — un mur qui accuse l idiome qu il defend.
+  nus="$(grep -rn --exclude=idiom_walls.bats -E "(^|;|&) *${helper} " \
+           "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../test/*/*.bats 2>/dev/null \
+         | grep -vE '<<<|< *"' || true)"
+  [ -z "$nus" ] || {
+    echo "appel sans tube ni redirection — son grep attendra stdin, et le test PENDRA :" >&2
+    printf '%s\n' "$nus" >&2
+    return 1
+  }
+  # GARDE D INSTRUMENT : sans elle, ce mur devient vert le jour ou l extraction ne trouve plus rien
+  # — exactement la faute qu il existe pour attraper ailleurs.
+  # Le compte porte sur TOUS les appels, tube compris : c est la population que le mur surveille.
+  total="$(grep -rho --exclude=idiom_walls.bats -E "${helper} " \
+             "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../test/*/*.bats 2>/dev/null | wc -l)"
+  [ "${total:-0}" -ge 5 ] \
+    || { echo "instrument casse : $total appel(s) trouve(s), 5 au moins attendus" >&2; return 1; }
+}

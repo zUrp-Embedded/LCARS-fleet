@@ -415,7 +415,12 @@ STUB
   ' 2>/dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"ecriture du tampon RATEE"* ]]
-  refute_out "POSE"
+  # ⚠ `<<<`, ET SON ABSENCE A COUTE LA NUIT. `refute_out` LIT STDIN — son en-tete l'ecrit
+  # (`cmd | refute_out 'motif'`). Sans rien lui donner, son `grep` attend l'entree standard et le
+  # test PEND. Joue seul, stdin est ferme et grep rend tout de suite ; joue par `shell_gate`, stdin
+  # est un tube ouvert que personne n'alimente — et le harnais dort. Deux chantiers ont ete
+  # suspendus huit heures dessus, et le premier diagnostic (`ulimit`) accusait le mauvais coupable.
+  refute_out "POSE" <<<"$output"
 }
 
 @test "write_atomic: missing parent dir fails loud (PROV_FAILED counted)" {
