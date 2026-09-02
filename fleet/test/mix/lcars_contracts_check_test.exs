@@ -188,7 +188,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
 
       assert result.status == :fail
       assert result.evidence == ["lib/fleet/nested.ex: Inner.undocumented_here"]
@@ -216,7 +216,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
 
       assert result.status == :fail,
              "la doc du parent a couvert l'homonyme imbrique (rendu #{result.status})"
@@ -244,7 +244,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root).status ==
+      assert Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root).status ==
                :pass
 
       File.write!(src, """
@@ -260,7 +260,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
       assert result.status == :fail
       assert result.evidence == ["lib/fleet/nested.ex: Inner.leaked"]
     end
