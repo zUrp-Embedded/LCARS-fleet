@@ -388,7 +388,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       zones = ["/home/projects", "/home/projects.ops"]
       write_mirrors!(root, zones, zones)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -396,7 +396,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "face absente du MODULE provision → fail nommant wsl et linux", %{root: root} do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], ["/home/projects"])
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail,
              "une face absente du seul createur commun aux trois substrats est passee au vert"
@@ -409,7 +409,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "face absente de l'ENTRYPOINT → fail, l'ancien mur tient toujours", %{root: root} do
       write_mirrors!(root, ["/home/projects"], ["/home/projects", "/home/projects.ops"])
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
       assert result.evidence == ["/home/projects.ops: absent de l'entrypoint docker"]
@@ -419,7 +419,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], [])
       File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
       assert result.note =~ "unreadable"
@@ -726,7 +726,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "api_version: 1\nname: fleet\n"
       )
 
-      res = Mix.Tasks.Lcars.Contracts.Check.check_roles_provisioning_locked(root)
+      res = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_roles_provisioning_locked(root)
 
       assert res.status in [:pass, :fail], "la verification doit RENDRE, pas exploser"
 
