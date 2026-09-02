@@ -257,16 +257,30 @@ sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' |
   # Ce temoin lit TOUTES les lignes `COPY fleet/services/...` quelle que soit leur destination, et
   # exige que chaque source soit posee par le module — en executable (`HELPERS`) ou en donnee
   # (`DATA`). L'exemption se reduit a `entrypoint.sh`, qui n'a aucun sens hors conteneur.
-  local n vus=0
-  while read -r n; do
+  # ⚠ IL Y A UNE TROISIEME VOIE, ET ELLE N'EST PAS UNE EXEMPTION. `HELPERS` et `DATA` existent parce
+  # que l'image pose ces fichiers AILLEURS que la ou la copie embarquee les met — `console.sh` va en
+  # `/opt/lcars/console.sh`, pas en `/opt/lcars/fleet/services/console.sh` — donc le module doit les
+  # y poser explicitement. Une source dont le `COPY` vise EXACTEMENT la destination de la boucle
+  # `EMBEDDED` n'a, elle, rien a poser en plus : `EMBEDDED` copie `fleet/services` EN ENTIER, donc
+  # elle y est deja. C'est le cas de la recette de la charte forge depuis qu'elle a quitte
+  # `deploy/deps` — un repertoire, pas un fichier, qu'aucune des deux tables ne peut nommer.
+  #
+  # ⚠ LA CONDITION EST DOUBLE, ET LA SECONDE MOITIE EST CE QUI EMPECHE LE TROU : la destination doit
+  # coincider ET `services` doit reellement figurer dans `EMBEDDED`. Le retirer de cette liste — le
+  # defaut deja vu deux fois, sur `services` puis sur `bin` — rouvrirait ce temoin au lieu de le
+  # laisser vert sur une couverture qui n'existe plus.
+  local n dest vus=0
+  while read -r n dest; do
     case "$n" in entrypoint.sh) continue ;; esac
     vus=$((vus + 1))
     helpers        | grep -qx "$n" && continue
     data_srcs      | grep -qx "$n" && continue
     sources_citees | grep -qx "$n" && continue
-    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : fleet/services/$n"
+    if [ "$dest" = "/opt/lcars/fleet/services/$n" ] \
+       && grep -qE '^EMBEDDED=\(.*\bservices\b' "$MOD"; then continue; fi
+    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : fleet/services/$n (destination $dest)"
     return 1
-  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) .*|\1|p' "$DOCKERFILE")
+  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) \{1,\}\([^ ]*\).*|\1 \2|p' "$DOCKERFILE")
 
   # ⚠ GARDE D'INSTRUMENT : un `sed` casse rend zero ligne, et zero ligne examinee se lit comme un
   # accord parfait. C'est la forme exacte du defaut que ce temoin vient fermer.
@@ -418,14 +432,32 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 # ⚠ LE DECOR PORTE AUSSI UN FICHIER QUI DOIT ARRIVER (`charte.tf`). Sans lui, ces temoins seraient
 # verts sur un module qui ne copie plus RIEN — le seul echec qu'une liste d'exclusions puisse
 # produire en silence.
+#
+# ⚠ ET LE DECOR DOIT POSSEDER L ARBRE OU IL ECRIT. `racine_paquet` LIE `fleet/services` au vrai
+# depot (il ne COPIE que `lib/` et `modules.d/`, les deux repertoires que la remontee de
+# `repo_root()` traverse). Ce temoin-ci, lui, ECRIT dans l arbre qu il vise : sans la substitution
+# ci-dessous, le `mkdir` traverserait le lien et poserait un `.terraform`, un `terraform.tfstate` et
+# un `secrets.tfvars` DANS `fleet/services/forge-recipe/` — c est-a-dire dans le depot, sous des noms
+# que le `.gitignore` de la recette rend invisibles a `git status`. Un temoin qui salit son sujet
+# est pire qu un temoin absent : le suivant mesure la salissure.
+#
+# La copie coute 476 Ko, et elle est le prix de l ecriture. Les temoins qui ne font que LIRE
+# gardent le lien.
 racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locaux de la recette tofu
   local src; src="$(racine_paquet)"
-  mkdir -p "$src/fleet/deploy/deps/.terraform/providers"
-  head -c 4096 /dev/zero > "$src/fleet/deploy/deps/.terraform/providers/gros.bin"
+  rm -f "$src/fleet/services"
+  cp -a "$BATS_TEST_DIRNAME/../../services" "$src/fleet/services" \
+    || { echo "decor : services non copiable"; return 1; }
+  # ⚠ ET ON VERIFIE QUE CE N EST PLUS UN LIEN. Si la ligne du dessus changeait de forme, l ecriture
+  # repartirait en silence vers le depot — le defaut exact que cette garde existe pour rendre
+  # impossible.
+  [ ! -L "$src/fleet/services" ] || { echo "decor : services est encore un LIEN vers le depot"; return 1; }
+  mkdir -p "$src/fleet/services/forge-recipe/.terraform/providers"
+  head -c 4096 /dev/zero > "$src/fleet/services/forge-recipe/.terraform/providers/gros.bin"
   printf '{"outputs":{"admin_token":{"value":"JETON-DE-FORGE"}}}\n' \
-    > "$src/fleet/deploy/deps/terraform.tfstate"
-  printf 'admin_token = "JETON-DE-FORGE"\n' > "$src/fleet/deploy/deps/secrets.tfvars"
-  printf 'resource "gitea_org" "x" {}\n'    > "$src/fleet/deploy/deps/charte.tf"
+    > "$src/fleet/services/forge-recipe/terraform.tfstate"
+  printf 'admin_token = "JETON-DE-FORGE"\n' > "$src/fleet/services/forge-recipe/secrets.tfvars"
+  printf 'resource "gitea_org" "x" {}\n'    > "$src/fleet/services/forge-recipe/charte.tf"
   printf '%s\n' "$src"
 }
 
@@ -434,7 +466,7 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   local src; src="$(racine_avec_artefacts)"
   run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" \
     bash "$src/fleet/deploy/modules.d/62-runtime-helpers.sh" apply
-  local pose="$LCARS_HELPERS_DIR/fleet/deploy/deps"
+  local pose="$LCARS_HELPERS_DIR/fleet/services/forge-recipe"
   # LE TEMOIN DU TEMOIN D'ABORD : la recette elle-meme est bien arrivee. Sans cette ligne, un module
   # qui ne copie plus rien passerait les trois assertions suivantes.
   [ -s "$pose/charte.tf" ] \
@@ -448,7 +480,7 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   local src; src="$(racine_avec_artefacts)"
   run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" \
     bash "$src/fleet/deploy/modules.d/62-runtime-helpers.sh" apply
-  local pose="$LCARS_HELPERS_DIR/fleet/deploy/deps"
+  local pose="$LCARS_HELPERS_DIR/fleet/services/forge-recipe"
   [ -s "$pose/charte.tf" ] || { echo "decor casse : la recette n'est pas arrivee"; echo "$output"; return 1; }
   [ ! -e "$pose/terraform.tfstate" ] \
     || { echo "l'etat tofu — donc les jetons — a ete pose sous le prefix"; return 1; }

@@ -23,7 +23,7 @@
 # shellcheck disable=SC2016
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../deps/provision-forge-charte.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-recipe/provision-forge-charte.sh"
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
@@ -105,7 +105,7 @@ run_avatars() {
   # Et le favicon de l'org se lit dans SON arbre, pas parmi les avatars : il n'est pas un role.
   grep -qE 'org_file="\$LCARS_MEDIA_ROOT/favicon/favicon-512\.png"' "$SCRIPT"
   # Le dossier qui portait la copie n'existe plus — sinon le defaut pourrait y retomber sans bruit.
-  [ ! -d "$BATS_TEST_DIRNAME/../deps/avatars" ]
+  [ ! -d "$BATS_TEST_DIRNAME/../../services/forge-recipe/avatars" ]
 }
 
 @test "medias: une racine ABSENTE est un ECHEC nomme — jamais un repli silencieux" {

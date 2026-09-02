@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/deps/forge-existing.sh
+# SOURCE: fleet/services/forge-recipe/forge-existing.sh
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
 # STATUS: existence source feeding the `import` blocks of both recipe modules

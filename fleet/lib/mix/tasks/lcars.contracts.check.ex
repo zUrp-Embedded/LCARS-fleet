@@ -1981,7 +1981,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       [root, Path.join(Path.expand("..", root), ".claude")]
       |> Enum.filter(&File.dir?/1)
       |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.bats")))
-      |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|tmp|node_modules)/"))
+      |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|tmp|node_modules|\.terraform)/"))
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -2648,10 +2648,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
-    # `deploy/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
-    # v1 tree, and this check reading it across trees is what caught the move — the wall working on
-    # the gesture that touched it.
-    tf_path = Path.expand("deploy/deps/forge.tf", root)
+    # The tofu recipe has moved TWICE, and this check caught both — the wall working on the gesture
+    # that touched it. 2026-08-05, `deploy/deps/`: it was the LAST live leg of the v1 tree.
+    # 2026-09-03, `services/forge-recipe/`: its only RUNTIME reader is `services/forge-gestures.sh`,
+    # so it had no business living in the installer tree — and `deps` was a name already taken, by
+    # the Elixir dependencies two directories up.
+    tf_path = Path.expand("services/forge-recipe/forge.tf", root)
     lib_path = Path.expand("deploy/lib/provision-lib.sh", root)
 
     # The two SIBLING-TREE lists are outside `fleet`, and one legitimate context does not
@@ -4170,12 +4172,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # mais « il n'y a PLUS de copie » — un `default =` reintroduit rendrait a tofu le pouvoir
         # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
         # ce que la suppression a ferme.
-        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
+        {"services/forge-recipe/forge.tf",
+         ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
         {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
          "the provisioning default (its token file derives from it)"},
-        {"deploy/deps/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
+        {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
         {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the human converger's fallback"},
@@ -4343,10 +4346,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
       pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
 
+      # ⚠ `.terraform` A REJOINT `_build`, `deps` ET `node_modules` DANS LE REJET, et c'est la meme
+      # famille : un cache de dependances TELECHARGEES, jamais du code de ce depot. Les providers
+      # tofu sont des binaires Go compiles sur un runner GitHub, et ils portent les chemins de LEUR
+      # machine de build — `/opt/hostedtoolcache` s'est presente ici comme « une racine sous /opt ni
+      # declaree ni etrangere », c'est-a-dire comme une faute de CE depot.
+      #
+      # ⚠ ET CE CACHE N'ETAIT PAS EXEMPTE : IL ETAIT INVISIBLE PAR COINCIDENCE DE NOMMAGE. La recette
+      # vivait dans `deploy/deps/`, et le rejet porte sur `deps` — le repertoire des dependances
+      # Elixir. Deux repertoires sans rapport, un seul nom, et l'un exemptait l'autre sans que
+      # personne l'ait decide. Le jour ou la recette a demenage en `services/forge-recipe/`, 74 Mo de
+      # binaires sont entres dans le corpus d'un coup. Une exemption qui tient a un homonyme n'est
+      # pas une exemption : c'est un angle mort qui se referme au premier renommage.
+
       {racines, fichiers} =
         Path.wildcard(Path.join(root, "**"), match_dot: true)
         |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.terraform)/"))
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4464,7 +4480,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       {vus, porteurs} =
         Path.wildcard(Path.join(root, "**"), match_dot: true)
         |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules)/"))
+        |> Enum.reject(&String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.terraform)/"))
         |> Enum.reduce({MapSet.new(), 0}, fn path, {acc, n} ->
           case File.read(path) do
             {:ok, body} ->
@@ -4604,7 +4620,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           Path.wildcard(Path.join([root, "..", "**"]), match_dot: true)
           |> Enum.filter(&File.regular?/1)
           |> Enum.reject(
-            &String.match?(&1, ~r"/(_build|deps|\.git|tmp|node_modules|\.expert|tests?)/")
+            &String.match?(
+              &1,
+              ~r"/(_build|deps|\.git|tmp|node_modules|\.terraform|\.expert|tests?)/"
+            )
           )
           |> Enum.reduce(MapSet.new(), fn path, acc ->
             case File.read(path) do

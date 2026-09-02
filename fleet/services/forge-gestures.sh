@@ -95,7 +95,7 @@ SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 # ramasser un site-admin.
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
-RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
+RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/services/forge-recipe}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
 # que le verrou d'apply y vit desormais — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/deploy/deps/provision-forge-charte.sh
+# SOURCE: fleet/services/forge-recipe/provision-forge-charte.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-06
 # STATUS: PROTO-V2 — pose la CHARTE sur la forge : avatars des comptes + org, et le nom du siège master

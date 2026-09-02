@@ -334,6 +334,15 @@ RUN set -eu; \
 # les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
 COPY fleet/deploy /opt/lcars/fleet/deploy
 COPY fleet/etc     /opt/lcars/fleet/etc
+# ⚠ LA RECETTE ARRIVE ICI, ET PAS AVEC LE RESTE DE `fleet/services` — parce que le bloc `tofu` juste
+# en dessous JOUE dedans (`providers mirror` puis `init`), et que `COPY fleet/services` vit 70 lignes
+# plus bas. Le jour ou la recette a quitte `fleet/deploy/deps` pour `fleet/services/forge-recipe`,
+# elle est passee du COPY d'au-dessus a celui d'en-dessous sans que le bloc tofu bouge : l'image
+# mourait sur « No such file or directory » a un endroit dont le chemin venait d'etre corrige
+# partout. Un renommage textuel deplace des chemins, jamais des ORDRES.
+# Le `COPY fleet/services` plus bas repasse dessus sans dommage : il porte les memes octets, et le
+# `.terraform` que `tofu init` cree ici ne figure pas dans le contexte de build (`.dockerignore`).
+COPY fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe
 
 # Meme discipline que ttyd et le precompile Elixir : version + sha256 epingles ICI, nulle part
 # ailleurs, et l'arch vient de `TARGETARCH` (BuildKit) et jamais d'un `uname -m`, qui repondrait
@@ -372,7 +381,7 @@ RUN set -eu; \
 ENV TF_CLI_CONFIG_FILE=/opt/lcars/tofu/tofurc
 RUN set -eu; \
     mkdir -p /opt/lcars/tofu/providers; \
-    for m in /opt/lcars/fleet/deploy/deps /opt/lcars/fleet/deploy/deps/instance; do \
+    for m in /opt/lcars/fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe/instance; do \
       (cd "$m" && tofu providers mirror -platform="linux_${TARGETARCH}" /opt/lcars/tofu/providers); \
     done; \
     { echo 'provider_installation {'; \
@@ -385,7 +394,7 @@ RUN set -eu; \
       echo '  }'; \
       echo '}'; } > /opt/lcars/tofu/tofurc; \
     chmod -R a+rX /opt/lcars/tofu; \
-    for m in /opt/lcars/fleet/deploy/deps /opt/lcars/fleet/deploy/deps/instance; do \
+    for m in /opt/lcars/fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe/instance; do \
       (cd "$m" && tofu init -input=false -no-color >/dev/null) || { echo "tofu: init hors-ligne en echec dans $m" >&2; exit 1; }; \
     done; \
     echo "tofu: miroir de providers complet, init hors-ligne OK"

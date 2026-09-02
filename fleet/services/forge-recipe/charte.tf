@@ -1,4 +1,4 @@
-# SOURCE: fleet/deploy/deps/charte.tf
+# SOURCE: fleet/services/forge-recipe/charte.tf
 # AUTHOR: consultant
 # STARDATE: 2026-08-01
 # STATUS: la charte graphique posee PAR `tofu apply` — un appel, pas une declaration

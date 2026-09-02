@@ -463,8 +463,8 @@ apply() {
   p_step "forge du poste : pose de la structure (orgs, comptes de rôle, teams, dépôt modèle)"
 
   local recipe; recipe="$(mktemp -d "${TMPDIR:-/tmp}/prov-recipe.XXXXXX")"
-  cp -a "$(repo_root)/fleet/deploy/deps/." "$recipe/" \
-    || { p_fail "recette non copiable ($(repo_root)/fleet/deploy/deps)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+  cp -a "$(repo_root)/fleet/services/forge-recipe/." "$recipe/" \
+    || { p_fail "recette non copiable ($(repo_root)/fleet/services/forge-recipe)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
   cp "$enroll/roles.auto.tfvars.json" "$recipe/roles.auto.tfvars.json" \
     || { p_fail "roster non déposé dans la recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
 

@@ -81,7 +81,7 @@ setup() {
   grep -qE "^COPY assets/avatars +${root}/avatars\$" "$DOCKERFILE"
   grep -qE "^COPY assets/favicon +${root}/favicon\$" "$DOCKERFILE"
   # Les deux dossiers qui portaient les copies ont disparu, sinon elles repousseraient.
-  [ ! -d "$BATS_TEST_DIRNAME/../deps/avatars" ]
+  [ ! -d "$BATS_TEST_DIRNAME/../../services/forge-recipe/avatars" ]
   [ ! -d "$BATS_TEST_DIRNAME/../../priv/observation/static/assets" ]
 }
 

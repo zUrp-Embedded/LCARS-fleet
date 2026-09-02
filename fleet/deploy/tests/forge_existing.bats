@@ -13,7 +13,7 @@
 # qui journalise `"$@"` ET son stdin. Chaque assertion d'attaque va par paire avec un temoin (P-40).
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../deps/forge-existing.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../services/forge-recipe/forge-existing.sh"
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
