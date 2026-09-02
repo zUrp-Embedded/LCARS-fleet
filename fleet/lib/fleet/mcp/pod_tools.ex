@@ -170,10 +170,6 @@ defmodule Fleet.MCP.PodTools do
   @spec tool_effect(String.t()) :: :mutation | :protocol | :read | :unknown
   def tool_effect(tool) when is_binary(tool), do: Map.get(@tool_effects, tool, :unknown)
 
-  @doc false
-  @spec declared_tool_effects() :: %{String.t() => atom()}
-  def declared_tool_effects, do: @tool_effects
-
   deftool "get_work_item" do
     # vitrine: Tire de la fleet la prochaine tâche à traiter ; réponse vide = plus rien à faire, le pod s'arrête.
     meta do
