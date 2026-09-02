@@ -18,6 +18,8 @@ defmodule Fleet.Forge.Client.Labels do
   toucherait dix sites hors du domaine forge.
   """
 
+  alias Fleet.Forge.Client.Transport
+
   require Logger
 
   # Les memes primitives que le client : ce module appelle la forge, il n'en reimplemente aucune.
@@ -40,7 +42,7 @@ defmodule Fleet.Forge.Client.Labels do
 
   @doc false
   # Les labels portes par une issue.
-  @spec get_issue_labels(term(), String.t(), integer()) ::
+  @spec get_issue_labels(Transport.config(), String.t(), integer()) ::
           {:ok, [map()]} | {:error, term()}
   def get_issue_labels(config, repo, issue_number) do
     case http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels") do
@@ -51,7 +53,8 @@ defmodule Fleet.Forge.Client.Labels do
 
   @doc false
   # Pose un label, en le CREANT sur le depot s'il n'y existe pas encore.
-  @spec add_issue_label(term(), String.t(), integer(), String.t()) :: :ok | {:error, term()}
+  @spec add_issue_label(Transport.config(), String.t(), integer(), String.t()) ::
+          :ok | {:error, term()}
   def add_issue_label(config, repo, issue_number, label_name) do
     case post_issue_label(config, repo, issue_number, label_name) do
       {:ok, true} ->
@@ -72,7 +75,7 @@ defmodule Fleet.Forge.Client.Labels do
 
   @doc false
   # Le POST nu — `{:ok, false}` quand la forge ne connait pas le label.
-  @spec post_issue_label(term(), String.t(), integer(), String.t()) ::
+  @spec post_issue_label(Transport.config(), String.t(), integer(), String.t()) ::
           {:ok, boolean()} | {:error, term()}
   def post_issue_label(config, repo, issue_number, label_name) do
     case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels", %{
@@ -86,7 +89,8 @@ defmodule Fleet.Forge.Client.Labels do
 
   @doc false
   # Verifie apres coup que les labels attendus existent bien sur le depot.
-  @spec verify_labels_present(term(), String.t(), [String.t()]) :: :ok | {:error, term()}
+  @spec verify_labels_present(Transport.config(), String.t(), [String.t()]) ::
+          :ok | {:error, term()}
   def verify_labels_present(config, repo, expected) do
     case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
       {:ok, labels} when is_list(labels) ->
@@ -119,7 +123,7 @@ defmodule Fleet.Forge.Client.Labels do
   # rattrape a la demande par `add_issue_label/4`. Le semis ne peut donc pas echouer au sens de
   # l'appelant — dialyzer l'a dit avant moi, mon premier spec annoncait un `{:error, _}` que
   # cette chaine ne produit jamais.
-  @spec ensure_repo_label(term(), String.t(), String.t()) :: :ok
+  @spec ensure_repo_label(Transport.config(), String.t(), String.t()) :: :ok
   def ensure_repo_label(config, repo, label_name) do
     case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
       {:ok, labels} when is_list(labels) ->
@@ -141,7 +145,7 @@ defmodule Fleet.Forge.Client.Labels do
   # so this never turns a working forge into a failed seeding.
   @doc false
   # Aligne la couleur d'un label existant sur celle que le protocole declare.
-  @spec reconcile_label_color(term(), String.t(), map(), String.t()) :: :ok
+  @spec reconcile_label_color(Transport.config(), String.t(), map(), String.t()) :: :ok
   def reconcile_label_color(config, repo, %{"id" => id, "color" => current}, label_name) do
     wanted = label_color(label_name)
 
@@ -167,7 +171,7 @@ defmodule Fleet.Forge.Client.Labels do
 
   @doc false
   # Cree le label sur le depot, avec sa couleur et sa description de protocole.
-  @spec create_repo_label(term(), String.t(), String.t()) :: :ok
+  @spec create_repo_label(Transport.config(), String.t(), String.t()) :: :ok
   def create_repo_label(config, repo, label_name) do
     # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
     # Gitea removes the old `scope/*` from the issue when a new one is set (verified forge 1.26.1, org AND

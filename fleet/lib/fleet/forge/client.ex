@@ -38,6 +38,9 @@ defmodule Fleet.Forge.Client do
 
   require Logger
 
+  alias Fleet.Forge.Client.CI
+  alias Fleet.Forge.Client.Merge
+  alias Fleet.Forge.Client.Signing
   alias Fleet.Forge.Client.Jury
   alias Fleet.Forge.Client.Labels
   alias Fleet.Forge.Client.Repo
@@ -211,7 +214,7 @@ defmodule Fleet.Forge.Client do
     sig = Keyword.get(opts, :dedup_signature)
 
     with {:ok, config} <- resolve_config(opts) do
-      if sig && signed_or_warn(config, repo, issue_number, sig, opts) do
+      if sig && Signing.signed_or_warn(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
         case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
@@ -780,142 +783,8 @@ defmodule Fleet.Forge.Client do
     with {:ok, config} <- resolve_config(opts) do
       method = Keyword.get(opts, :method, "rebase")
       delay = Keyword.get(opts, :merge_retry_delay_ms, 800)
-      do_merge(config, repo, index, method, delay, @merge_checking_retries)
+      Merge.do_merge(config, repo, index, method, delay, @merge_checking_retries)
     end
-  end
-
-  defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` marchait par tolerance du
-    # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
-    case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
-           "do" => method
-         }) do
-      {:ok, _} ->
-        delete_head_branch_spaced(config, repo, index)
-        :ok
-
-      {:error, {:http, 405, body}} = err ->
-        # ⚠ LE LIBELLE NE SEPARE PAS LES DEUX FAITS, ET LA MESURE L'A PROUVE.
-        #
-        # `fleet/probe-rails#24`, 2026-08-18 : conflit git REEL et DEFINITIF
-        # (`git merge-tree` -> `CONFLICT (content): journal.txt`), et Gitea rend
-        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours. Le
-        # commentaire ci-dessous supposait que l'anglais discriminait ; sa propre premisse etait le
-        # contre-exemple. Cout mesure : 1447 tentatives en 21 h, ~2880 requetes/jour pour un
-        # resultat connu d'avance, et 1,6 s de `sleep` a chaque tick du pilote.
-        #
-        # L'ETAT, LUI, EST FIABLE. On relit la PR : `mergeable: false` tranche le definitif sans
-        # dependre d'une chaine. C'est un GET sur un chemin deja en echec — le cas nominal (200) ne
-        # le paie jamais.
-        case still_unmergeable?(config, repo, index) do
-          true ->
-            Logger.warning(
-              "ForgeClient: merge_pr ##{index} — 405 whose MESSAGE reads transient, but the PR " <>
-                "state still reports `mergeable: false`: no retry. The cause is CLASSIFIED " <>
-                "upstream (`MergeOutcome`), not here. body=#{inspect(body)}"
-            )
-
-            {:error, {:merge_blocked, body}}
-
-          false ->
-            do_merge_retry(config, repo, index, method, delay, attempts_left, body, err)
-        end
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # ⚠ CECI N'EST PAS UNE CLASSIFICATION, ET LA DISTINCTION EST TOUT LE SOIN DE CE BLOC.
-  #
-  # `Fleet.Pilot.MergeOutcome` est l'autorite qui dit ce qu'un echec de merge EST — conflit, brouillon,
-  # politique, deja fusionne, inconnu — et elle reste seule a le dire : la frontiere interdit d'ici
-  # de l'appeler, et c'est tant mieux, parce qu'un second classificateur donnerait un second avis.
-  # Le rail de routage la consulte deja apres coup (`Remediation.route_merge_failure`).
-  #
-  # Ce qu'on lit ici est UN BIT, et il ne sert qu'a une chose : decider s'il vaut la peine de
-  # REESSAYER. « La forge se dit encore non-fusionnable » ne nomme aucune cause ; elle dit seulement
-  # que retenter dans 800 ms n'y changera rien. Un brouillon y tombe aussi, et c'est correct : le
-  # retenter est tout aussi vain.
-  #
-  # LA LECTURE RATEE VAUT `false`, jamais `true`. Se tromper de ce cote-la coute une tentative de
-  # plus ; se tromper de l'autre transformerait un transitoire en blocage annonce sur une forge qui
-  # n'a simplement pas repondu.
-  defp still_unmergeable?(config, repo, index) do
-    case http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}") do
-      {:ok, %{"mergeable" => false}} -> true
-      _ -> false
-    end
-  end
-
-  defp do_merge_retry(config, repo, index, method, delay, attempts_left, body, err) do
-    if attempts_left > 1 and merge_checking?(body) do
-      Logger.info(
-        "ForgeClient: merge_pr ##{index} mergeability in progress ('try again later') → " <>
-          "retry in #{delay}ms (#{attempts_left - 1} remaining)"
-      )
-
-      Process.sleep(delay)
-      do_merge(config, repo, index, method, delay, attempts_left - 1)
-    else
-      # DEUX SILENCES DANS UN SEUL `else`, et le premier est le plus cher.
-      #
-      # Gitea rend `405` pour deux faits opposes : « la mergeabilite est encore en cours de
-      # calcul » (transitoire, il faut reessayer) et « cette PR n'est pas fusionnable »
-      # (definitif : conflits, controles en echec). Rien de STRUCTURE ne les separe dans la
-      # reponse recue — seul le libelle anglais le fait, `"try again later"`. La detection
-      # textuelle reste donc, faute d'autre chose, mais elle ne peut plus DEGRADER EN SILENCE :
-      # le jour ou Gitea reformule ce message, tout `405` devient « definitif », les merges
-      # echouent, et rien ne disait pourquoi — seule la branche RECONNUE ecrivait au journal.
-      #
-      # Le corps entier est journalise, et c'est delibere : il est a la fois le diagnostic du
-      # jour et la matiere du jour ou un champ structure apparaitra. On ne peut pas affirmer
-      # qu'il n'en existe pas — on peut faire en sorte de le voir arriver.
-      _ =
-        if merge_checking?(body) do
-          Logger.warning(
-            "ForgeClient: merge_pr ##{index} — mergeability still computing after " <>
-              "#{@merge_checking_retries} attempts, giving up: #{inspect(body)}"
-          )
-        else
-          Logger.warning(
-            "ForgeClient: merge_pr ##{index} — HTTP 405 NOT recognised as transient " <>
-              "(no \"try again later\" in the message) → treated as DEFINITIVE. If Gitea " <>
-              "reworded it, this line is the only thing that says so: #{inspect(body)}"
-          )
-        end
-
-      err
-    end
-  end
-
-  defp merge_checking?(body) when is_map(body),
-    do: body |> Map.get("message", "") |> String.downcase() |> String.contains?("try again later")
-
-  defp merge_checking?(_), do: false
-
-  defp delete_head_branch_spaced(config, repo, index) do
-    with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
-         head_ref when is_binary(head_ref) and head_ref != "" <- get_in(pr, ["head", "ref"]) do
-      Fleet.Forge.WriteSpacing.gap()
-
-      case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(head_ref)}") do
-        {:ok, _} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning(
-            "ForgeClient: post-merge delete of #{head_ref} failed (#{inspect(reason)}) — dead branch survives"
-          )
-      end
-    else
-      other ->
-        Logger.warning(
-          "ForgeClient: post-merge head.ref unreadable for #{repo}##{index} (#{inspect(other)}) — branch not deleted"
-        )
-    end
-
-    :ok
   end
 
   @doc """
@@ -1141,7 +1010,7 @@ defmodule Fleet.Forge.Client do
         |> Enum.uniq()
         |> Enum.sort()
 
-      {:ok, {statuses |> current_per_context() |> worst_ci_state(), contexts}}
+      {:ok, {statuses |> CI.current_per_context() |> CI.worst_ci_state(), contexts}}
     end
   end
 
@@ -1166,105 +1035,7 @@ defmodule Fleet.Forge.Client do
     with {:ok, config} <- resolve_config(opts),
          {:ok, statuses} <-
            paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
-      {:ok, red_contexts(statuses)}
-    end
-  end
-
-  defp red_contexts(statuses) do
-    statuses
-    |> Enum.group_by(& &1["context"])
-    |> Enum.flat_map(fn
-      {context, group} when is_binary(context) ->
-        if Enum.all?(group, &is_integer(&1["id"])) do
-          latest = Enum.max_by(group, & &1["id"])
-
-          if latest["status"] in ~w(failure error),
-            do: [red_context(context, latest)],
-            else: []
-        else
-          []
-        end
-
-      _ ->
-        []
-    end)
-    |> Enum.sort_by(& &1.context)
-  end
-
-  defp red_context(context, entry) do
-    %{
-      context: context,
-      description: presence(entry["description"]),
-      target_url: presence(entry["target_url"])
-    }
-  end
-
-  defp presence(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
-  defp presence(_), do: nil
-
-  # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
-  #
-  # LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE. La regle de redaction jette la recette et
-  # l'horodatage d'une mesure faite sur NOTRE suite — ils ne survivent pas au correctif. Celle-ci
-  # porte sur un SYSTEME EXTERNE dont le comportement peut changer sans nous : sans sa version, la
-  # phrase n'est plus verifiable, et un lecteur ne peut pas savoir si elle vaut encore.
-  #
-  # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
-  # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
-  # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui gardait la
-  # PREMIERE occurrence par contexte gardait donc la plus ANCIENNE : sur un contexte pose
-  # `success` puis `failure`, `commit_ci_state` rendait `{:ok, :success}` — la porte de merge
-  # lisant vert sur un commit rouge.
-  #
-  # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat), `status`
-  # sur CommitStatus (l'element), et cet appel liste des CommitStatus.
-  defp current_per_context(statuses) do
-    statuses
-    |> Enum.group_by(& &1["context"])
-    |> Enum.flat_map(fn {_context, group} ->
-      if Enum.all?(group, &is_integer(&1["id"])) do
-        [group |> Enum.max_by(& &1["id"]) |> Map.get("status")]
-      else
-        # Ordre indeterminable : on garde TOUT le groupe, donc `worst_ci_state/1` prend le pire.
-        # Ne jamais rendre le meilleur d'un ensemble qu'on ne sait pas ordonner — c'est une porte
-        # de merge qui lit le resultat.
-        Enum.map(group, & &1["status"])
-      end
-    end)
-  end
-
-  # Worst-of, in the order that matters to a merge decision: one failure sinks it; otherwise any
-  # unfinished run means "not yet", never "yes".
-  defp worst_ci_state([]), do: :none
-
-  # LES SIX ETATS QUE LE CONTRAT DECLARE, ET CE QU'ILS VALENT POUR UNE PORTE DE MERGE.
-  #
-  # `CommitStatus.status` : `pending | success | error | failure | warning | skipped` (enum du
-  # swagger de l'instance). Trois d'entre eux etaient traites par la clause fourre-tout « etat
-  # inconnu -> :pending », ce qui est juste pour un etat VRAIMENT inconnu et faux pour deux qui sont
-  # au contrat :
-  #
-  #   * `skipped` — l'etape ne s'est PAS executee et ne devait pas : sa condition `if:` etait
-  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » faisait attendre la porte
-  #     45 min puis ESCALADER vers un humain — une fausse alarme sur un saut delibere, et une
-  #     fausse alarme est ce qui apprend a un humain a ignorer le canal. Un contexte sans verdict ne
-  #     VOTE PAS ; si tous sont sautes, il ne reste rien et `:none` (aucun statut) est la reponse
-  #     juste, que la porte traite deja en attente bornee.
-  #   * `warning` — la verification a TOURNE et n'a pas echoue. La faire bloquer indefiniment est un
-  #     etat dont aucun humain ne peut sortir autrement qu'en relancant ; elle ouvre donc la porte,
-  #     comme un succes, parce que c'est ce qu'elle est : un succes qui commente.
-  #
-  # Le fourre-tout reste, et il reste `:pending` : un etat que ce code ne connait pas ne doit pas
-  # elargir la porte. La difference est qu'il ne couvre plus que l'inconnu REEL.
-  defp worst_ci_state(states) do
-    voting = Enum.reject(states, &(&1 == "skipped"))
-
-    cond do
-      voting == [] -> :none
-      Enum.any?(voting, &(&1 in ["failure", "error"])) -> :failure
-      Enum.any?(voting, &(&1 == "pending")) -> :pending
-      Enum.all?(voting, &(&1 in ["success", "warning"])) -> :success
-      true -> :pending
+      {:ok, CI.red_contexts(statuses)}
     end
   end
 
@@ -1276,88 +1047,6 @@ defmodule Fleet.Forge.Client do
 
   # Le doute ne change pas le GESTE (on poste), il change ce qu'on en SAIT. `false` ici veut dire
   # « poste » dans les deux cas, mais un seul des deux est une mesure.
-  defp signed_or_warn(config, repo, issue_number, sig, opts) do
-    case comment_signed?(config, repo, issue_number, sig, opts) do
-      {:ok, signed?} ->
-        signed?
-
-      {:unverified, why} ->
-        Logger.warning(
-          "ForgeClient: dedup NOT verified on #{repo}##{issue_number} (#{inspect(why)}) — posting " <>
-            "anyway (refusing would drop a legitimate comment), but this marker may be a DUPLICATE. " <>
-            "These signatures are business-bearing (rounds budget, seal, escalation), so the cost " <>
-            "lands elsewhere and later: signature=#{inspect(sig)}"
-        )
-
-        false
-    end
-  end
-
-  # ⚠ `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menaient a
-  # poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
-  # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
-  # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
-  # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
-  # ailleurs, plus tard, et loin d'ici. Rendre le doute distinct est ce qui permet de le NOMMER au
-  # moment ou il naît ; c'est le seul endroit ou la correlation existe encore.
-  defp comment_signed?(config, repo, issue_number, sig, opts) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      {:ok, comments} when is_list(comments) ->
-        # Counted markers trust the system author; observability markers may opt into any author.
-        trusted =
-          cond do
-            Keyword.get(opts, :dedup_any_author, false) ->
-              {:ok, comments}
-
-            true ->
-              # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
-              # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
-              # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-              # premier ; se limiter au systeme rendait la dedup aveugle a tout ce qui est signe par
-              # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
-              case trusted_logins(config, opts) do
-                {:ok, logins} ->
-                  {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
-
-                # LA LECTURE A REUSSI, LES IDENTITES NON. `[]` disait « aucun commentaire de
-                # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a
-                # ecrit quoi. Second pliage du meme genre que celui d'en dessous, une branche plus
-                # loin.
-                {:error, why} ->
-                  {:unverified, {:trusted_logins, why}}
-              end
-          end
-
-        case trusted do
-          {:unverified, _} = unverified ->
-            unverified
-
-          {:ok, list} ->
-            {:ok, Enum.any?(list, &String.contains?(&1["body"] || "", sig))}
-        end
-
-      other ->
-        {:unverified, {:comments_unreadable, other}}
-    end
-  end
-
-  defp trusted_logins(config, opts) do
-    with {:ok, bot} <- forge_bot_login(config, opts) do
-      case Keyword.get(opts, :dedup_role) do
-        role when is_binary(role) ->
-          case role_login(role, opts) do
-            {:ok, login} -> {:ok, [bot, login]}
-            # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
-            # publication pour une question de dedup.
-            {:error, _} -> {:ok, [bot]}
-          end
-
-        _ ->
-          {:ok, [bot]}
-      end
-    end
-  end
-
   @stage_prefix Fleet.Labels.stage_prefix()
   @wfmap_prefix Fleet.Labels.wfmap_prefix()
 
