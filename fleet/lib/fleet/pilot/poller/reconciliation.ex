@@ -598,7 +598,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   defp parse_pod_ref(_, _), do: []
 
   defp locked?(item) do
-    @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+    @in_flight in Payload.label_names(item)
   end
 
   # What the reconciliation actually MEASURED about the orphan's pod — for the log, never the

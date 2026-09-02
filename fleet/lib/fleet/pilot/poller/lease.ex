@@ -54,6 +54,7 @@ defmodule Fleet.Pilot.Poller.Lease do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.Poller.Admission
 
   # workflow_run lock (single source `Fleet.Labels`) — fast-path `classify_issue`
@@ -331,7 +332,7 @@ defmodule Fleet.Pilot.Poller.Lease do
   defp classify_issue(_issue, true = _pr?, _seams), do: {false, []}
 
   defp classify_issue(issue, false = _pr?, seams) do
-    labels = Enum.map(Map.get(issue, "labels") || [], & &1["name"])
+    labels = Payload.label_names(issue)
 
     if @in_flight in labels do
       {true, []}
@@ -344,7 +345,7 @@ defmodule Fleet.Pilot.Poller.Lease do
       # naming: it existed only because there was a network call. With no call, there is no
       # transient failure to cover; the fail-closed it carried stays whole for the callers of
       # `get_route/3`, which do still read.
-      case seams.forge.route_from_labels(Map.get(issue, "labels") || []) do
+      case seams.forge.route_from_labels(Payload.labels(issue)) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
           # The lease reads on the ROUTE (append-only, robust), NEVER on the success of the load of the

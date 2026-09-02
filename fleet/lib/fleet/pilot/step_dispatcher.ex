@@ -357,7 +357,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     pr_number = pr["number"]
     head = Payload.head_ref(pr) || ""
     head_sha = Payload.head_sha(pr)
-    labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
+    labels = Payload.label_names(pr)
 
     # Stable review records are unioned with volatile requested reviewers. Read through the SAME
     # frontier as the verdicts (`pr_review_state` translates its own): this list comes straight off
@@ -375,7 +375,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         {:skipped, :in_flight}
 
       # Draft PR is explicitly parked by the human.
-      Map.get(pr, "draft") == true ->
+      Payload.draft?(pr) ->
         {:skipped, :draft}
 
       # Parent issue architect lock suppresses PR redispatch.

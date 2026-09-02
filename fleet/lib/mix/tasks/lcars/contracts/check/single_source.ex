@@ -1299,15 +1299,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   #
   # Couverture partielle ENONCEE plutot que couverture totale supposee : la forme non couverte est
   # celle qu'on ecrit en migrant, pas celle qu'on ecrit par reflexe.
-  # ⚠ `base` ET `login` SONT ABSENTS DE CETTE LISTE, ET C'EST UNE MESURE, PAS UN OUBLI. Le depot
+  # ⚠ `base`, `login` ET `sha` SONT ABSENTS DE CETTE LISTE, ET C'EST UNE MESURE, PAS UN OUBLI. Le depot
   # les emploie pour ses PROPRES formes : `project_publish` lit `b["base"]` dans un paquet
   # d'arguments CLI qu'il vient de construire, et `brief_builder` lit `fb["login"]` dans la
   # projection que `Jury.change_requests_by_reviewer/1` fabrique elle-meme. Les nommer ici rendrait
   # le mur ROUGE sur du code correct — et un mur rouge sur du correct se desarme, il ne se respecte
-  # pas. Le prix est enonce : une lecture par ces deux clefs echapperait au mur.
+  # pas. `sha` s'y ajoute pour la meme raison — `api/build_info` le lit dans un fichier `k=v` de
+  # build. Le prix est enonce, et il est plus petit qu'il n'y parait : une lecture de `head.sha`
+  # reste attrapee par sa clef PARENTE `head`, qui n'a pas d'homonyme dans le depot.
   @forge_response_keys ~w(full_name html_url pull_request merged merged_at commit_id dismissed
-                          sha head labels assignee assignees mergeable repository
-                          default_branch)a
+                          head labels assignee assignees mergeable repository
+                          default_branch draft updated_at created_at)a
 
   @doc false
   @spec check_forge_shape_contained(String.t()) :: Support.result()
@@ -1334,7 +1336,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         status: if(fautes == [], do: :pass, else: :fail),
         evidence: fautes,
         note:
-          "#{length(fichiers)} source(s) hors du domaine forge — acces `x[\"k\"]` et `get_in/2` " <>
+          "#{length(fichiers)} source(s) hors du domaine forge — acces `x[\"k\"]`, `get_in/2` et `Map.get/2` " <>
             "sur l'AST ; les MOTIFS ne sont pas couverts, cf. le commentaire ci-dessus"
       }
     end
@@ -1355,6 +1357,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       {:get_in, meta, [_, chemin]} when is_list(chemin) ->
         if Enum.any?(chemin, &(is_binary(&1) and String.to_atom(&1) in @forge_response_keys)),
           do: {rel, meta[:line]}
+
+      # ⚠ `Map.get/2,3` ET `Map.fetch/2` SONT DES LECTURES, et la premiere version du mur ne
+      # cherchait que `Access.get` (`x["k"]`) et `get_in/2`. Quatre lectures reelles lui
+      # echappaient — `draft` deux fois, `updated_at`, `created_at` — trouvees en migrant les
+      # temoins, pas par le mur. Un mur qui ne connait qu'une des trois portes d'entree garde une
+      # porte, pas une frontiere.
+      {{:., meta, [{:__aliases__, _, [:Map]}, f]}, _, [_, clef | _]}
+      when f in [:get, :fetch, :fetch!] and is_binary(clef) ->
+        if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}
 
       _ ->
         nil

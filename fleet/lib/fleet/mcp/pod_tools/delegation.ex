@@ -601,8 +601,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
       {issue_state, issue_labels, title} =
         case forge.get_issue(repo, number, []) do
           {:ok, issue} ->
-            {Map.get(issue, "state", "unknown"),
-             Enum.map(Map.get(issue, "labels") || [], & &1["name"]), Map.get(issue, "title")}
+            {Map.get(issue, "state", "unknown"), Payload.label_names(issue),
+             Map.get(issue, "title")}
 
           # LOUD before the fallback: without the warning, a forge outage folds into
           # {outcome: "unknown"} with no operator trace. "unknown" stays SAFE (the arch waits),
@@ -1146,7 +1146,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp issue_label_names(issue) do
-    (Map.get(issue, "labels") || [])
+    Payload.labels(issue)
     |> Enum.filter(&is_map/1)
     |> Enum.map(& &1["name"])
     |> Enum.filter(&is_binary/1)
@@ -1201,7 +1201,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp comment_entry(c) when is_map(c) do
     %{"body" => Map.get(c, "body")}
     |> put_present("author", Payload.author_login(c))
-    |> put_present("created_at", Map.get(c, "created_at"))
+    |> put_present("created_at", Payload.created_at(c))
   end
 
   defp comment_entry(_), do: %{"body" => nil}
@@ -1290,7 +1290,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp has_awaits_arch_label?(issue) do
-    (Map.get(issue, "labels") || [])
+    Payload.labels(issue)
     |> Enum.any?(&(is_map(&1) and &1["name"] == @awaits_arch_label))
   end
 

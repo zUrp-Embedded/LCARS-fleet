@@ -1132,7 +1132,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp awaits_arch?(item) do
-    @awaits_arch in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+    @awaits_arch in Payload.label_names(item)
   end
 
   # Issues carrying an open fleet PR (`lcars/issue-N-role`) = workflow_runs in JUDGE phase:

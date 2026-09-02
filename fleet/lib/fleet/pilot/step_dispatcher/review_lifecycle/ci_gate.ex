@@ -222,7 +222,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
           end
         end)
         |> Enum.filter(&unclaimed?/1)
-        |> Enum.flat_map(&(Map.get(&1, "labels") || []))
+        |> Enum.flat_map(&Payload.labels/1)
         |> Enum.uniq()
 
       {:ok, labels}
@@ -351,7 +351,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # per-sha, and a new push restarts it. Absent/unparseable → `nil` → treated as "just now", i.e.
   # we wait rather than escalate on a date we could not read.
   defp pull_updated_at(pull) do
-    with str when is_binary(str) <- Map.get(pull, "updated_at"),
+    with str when is_binary(str) <- Payload.updated_at(pull),
          {:ok, dt, _} <- DateTime.from_iso8601(str) do
       dt
     else

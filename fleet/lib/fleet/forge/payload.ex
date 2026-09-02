@@ -48,12 +48,16 @@ defmodule Fleet.Forge.Payload do
     head_ref: ["head", "ref"],
     head_sha: ["head", "sha"],
     base_ref: ["base", "ref"],
+    labels: ["labels"],
     label_names: ["labels"],
     assignee_login: ["assignee", "login"],
     author_login: ["user", "login"],
     repository_full_name: ["repository", "full_name"],
     full_name: ["full_name"],
     default_branch: ["default_branch"],
+    draft: ["draft"],
+    updated_at: ["updated_at"],
+    created_at: ["created_at"],
     assignee_logins: ["assignees"]
   }
 
@@ -119,6 +123,17 @@ defmodule Fleet.Forge.Payload do
 
   # Les NOMS des labels. La charge rend des objets complets ; aucun appelant du depot n'a besoin
   # d'autre chose que du nom, et rendre l'objet reconduirait la fuite qu'on ferme.
+  # Les objets BRUTS. Un seul usage legitime : les rendre a une fonction du domaine forge qui les
+  # attend sous cette forme (`route_from_labels/1`). Partout ailleurs, `label_names/1`.
+  @doc false
+  @spec labels(t()) :: [map()]
+  def labels(p) do
+    case get(p, :labels) do
+      l when is_list(l) -> l
+      _ -> []
+    end
+  end
+
   @doc false
   @spec label_names(t()) :: [String.t()]
   def label_names(p) do
@@ -158,4 +173,16 @@ defmodule Fleet.Forge.Payload do
       _ -> []
     end
   end
+
+  @doc false
+  @spec draft?(t()) :: boolean()
+  def draft?(p), do: get(p, :draft) == true
+
+  @doc false
+  @spec updated_at(t()) :: String.t() | nil
+  def updated_at(p), do: get(p, :updated_at)
+
+  @doc false
+  @spec created_at(t()) :: String.t() | nil
+  def created_at(p), do: get(p, :created_at)
 end
