@@ -102,29 +102,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
     case checked do
       [] ->
-        %{
-          id: id,
-          remediation: "—",
-          status: :pass,
-          evidence: [],
-          note:
-            "NOT CHECKED here — no mirror tree present in this artifact (runtime-only context): " <>
-              Enum.join(skipped, ", ")
-        }
+        out_of_scope(id, "no mirror tree present", skipped)
 
       _ ->
         if is_nil(expected) do
-          %{
-            id: id,
-            remediation: remediation,
-            status: :fail,
-            evidence: ["lib/fleet/toolchain.ex"],
-            # Fail-closed: an unreadable authority is not "nothing to compare", it is the one case
-            # where every mirror would pass by default.
-            note:
-              "`Fleet.Toolchain.branch/0` no longer reads as a frozen literal — the authority is " <>
-                "unreadable, so nothing was compared"
-          }
+          unreadable_authority(
+            id,
+            remediation,
+            "lib/fleet/toolchain.ex",
+            "Fleet.Toolchain.branch/0"
+          )
         else
           bad =
             Enum.flat_map(checked, fn rel ->
@@ -453,15 +440,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # Moins de DEUX declarations lisibles : il n'y a pas d'accord a verifier. On le DIT, on ne
       # rend pas un vert muet — c'est la regle de tout ce fichier.
       length(values) < 2 and broken == [] ->
-        %{
-          id: id,
-          remediation: "—",
-          status: :pass,
-          evidence: [],
-          note:
-            "NOT CHECKED here — fewer than two declarations present in this artifact " <>
-              "(runtime-only context)" <> skipped_note(skipped)
-        }
+        out_of_scope(id, "fewer than two declarations present", skipped)
 
       broken != [] ->
         %{
@@ -584,15 +563,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       end
 
     if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/credentials/forge_identity.ex"],
-        note:
-          "`@system_name` no longer reads as a frozen literal — the authority is unreadable, so " <>
-            "nothing was compared"
-      }
+      unreadable_authority(
+        id,
+        remediation,
+        "lib/fleet/credentials/forge_identity.ex",
+        "@system_name"
+      )
     else
       e = Regex.escape(expected)
 
@@ -660,15 +636,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       cond do
         checked == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
-                Enum.join(skipped_labels, ", ")
-          }
+          out_of_scope(id, "no copy present", skipped_labels)
 
         bad == [] ->
           %{
@@ -760,15 +728,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       end
 
     if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/layout.ex"],
-        note:
-          "`@platform_root` no longer reads as a frozen literal — the authority is unreadable, " <>
-            "so nothing was compared"
-      }
+      unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@platform_root")
     else
       # ⚠ LES VERSIONNEES SONT ECARTEES PAR LEUR FORME, PAS PAR LEUR NOM : `/opt/elixir-1.18.4` et
       # `/opt/node-20` portent leur version, donc les nommer serait une liste a maintenir a chaque
@@ -894,15 +854,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       end
 
     if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/layout.ex"],
-        note:
-          "`@runtime_root` no longer reads as a frozen literal — the authority is unreadable, so " <>
-            "nothing was compared"
-      }
+      unreadable_authority(id, remediation, "lib/fleet/layout.ex", "@runtime_root")
     else
       {vus, porteurs} =
         corpus_files(root)
@@ -1151,15 +1103,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       end
 
     if is_nil(expected) do
-      %{
-        id: id,
-        remediation: remediation,
-        status: :fail,
-        evidence: ["lib/fleet/toolchain.ex"],
-        note:
-          "`Fleet.Toolchain.ops_repo/0` no longer reads as a frozen default — the authority is " <>
-            "unreadable, so nothing was compared"
-      }
+      unreadable_authority(
+        id,
+        remediation,
+        "lib/fleet/toolchain.ex",
+        "Fleet.Toolchain.ops_repo/0",
+        "default"
+      )
     else
       e = Regex.escape(expected)
 
@@ -1187,15 +1137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       cond do
         checked == [] ->
-          %{
-            id: id,
-            remediation: "—",
-            status: :pass,
-            evidence: [],
-            note:
-              "NOT CHECKED here — no copy present in this artifact (runtime-only context): " <>
-                Enum.join(labels, ", ")
-          }
+          out_of_scope(id, "no copy present", labels)
 
         bad == [] ->
           %{
@@ -1297,5 +1239,44 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             "#{lectures |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length()} clef(s) distincte(s)"
       }
     end
+  end
+
+  # UNE AUTORITE ILLISIBLE N'EST PAS « RIEN A COMPARER » — c'est le seul cas ou chaque copie
+  # passerait par DEFAUT, donc le seul ou un verrou vert serait un mensonge complet. Cinq des huit
+  # verrous rendent ce verdict, et ils recopiaient la meme phrase cinq fois : une situation, une
+  # phrase, et le fail-closed enonce a un seul endroit.
+  @spec unreadable_authority(String.t(), String.t(), String.t(), String.t(), String.t()) ::
+          Support.result()
+  defp unreadable_authority(id, remediation, source, autorite, forme \\ "literal") do
+    %{
+      id: id,
+      remediation: remediation,
+      status: :fail,
+      evidence: [source],
+      note:
+        "`#{autorite}` no longer reads as a frozen #{forme} — the authority is unreadable, so " <>
+          "nothing was compared"
+    }
+  end
+
+  # « RIEN A VERIFIER ICI » N'EST PAS UN VERT ORDINAIRE : c'est un `pass` qui DIT qu'il n'a rien
+  # mesure, et dont la note NOMME ce qu'il n'a pas vu — la seule forme de vert que ce depot accepte
+  # sur une population absente.
+  #
+  # ⚠ QUATRE VERROUS LE RENDAIENT, AVEC TROIS FORMULATIONS POUR UNE SEULE SITUATION. Trois
+  # contournaient de surcroit l'assemblage de la liste, chacun avec son propre `Enum.join`. Une
+  # situation, une phrase : le SUJET reste une donnee (un arbre miroir, une copie, deux
+  # declarations), la phrase ne se recopie plus.
+  @spec out_of_scope(String.t(), String.t(), [String.t()]) :: Support.result()
+  defp out_of_scope(id, sujet, absents) do
+    %{
+      id: id,
+      remediation: "—",
+      status: :pass,
+      evidence: [],
+      note:
+        "NOT CHECKED here — #{sujet} in this artifact (runtime-only context)" <>
+          if(absents == [], do: "", else: ": " <> Enum.join(absents, ", "))
+    }
   end
 end
