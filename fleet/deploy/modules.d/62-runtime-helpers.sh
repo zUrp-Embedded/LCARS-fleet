@@ -88,7 +88,16 @@ deck_static_table() {
 # `$(repo_root)/fleet/services/forge-gestures.sh builtin-human` pour connaitre l'humain integre. Sans
 # l'arbre, la sonde echoue derriere un `|| true` et rend une chaine vide — le repertoire de console
 # de cet humain n'etait simplement pas pose, sans un mot.
-EMBEDDED=(deploy etc services)
+# ⚠ `bin` A ETE AJOUTE LE 2026-09-02, ET SON ABSENCE ETAIT LE MEME DEFAUT QUE C6, SUR UN QUATRIEME
+# REPERTOIRE. `BIN_SRC_DIR="$(repo_root)/fleet/bin"` (l. 18) est lu par ce module meme pour poser
+# `lcars-toolchain-converge` et `lcars-authority-ask` — mais `bin` ne figurait pas dans cette liste.
+# Au rejeu depuis la copie, `repo_root()` rend `/opt/lcars`, `BIN_SRC_DIR` pointe donc sur un
+# repertoire qui n'a jamais ete embarque, et la pose rate.
+#
+# MESURE, BANC 2006 : « FAIL 62-runtime-helpers: pose ratée: /usr/local/bin/lcars-toolchain-converge »
+# sur un apply rejoue depuis /opt/lcars. Le module echouait a poser un binaire dont il est
+# l'unique poseur, faute d'avoir embarque sa propre source.
+EMBEDDED=(deploy etc services bin)
 # ⚠ LA RACINE, ET C'EST UNE SECONDE LISTE PARCE QUE LA COPIE N'A PAS LA MEME FORME. `EMBEDDED` va
 # sous `fleet/` ; ceux-ci vont a cote. Les fondre ferait une liste dont chaque entree porterait un
 # chemin implicite different — l'inverse de ce qu'une liste sert a dire.

@@ -527,3 +527,65 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$(awk '{print $4}' <<<"$l")" = "root:root" ] \
     || { echo "proprietaire « $(awk '{print $4}' <<<"$l") » au lieu de root:root"; return 1; }
 }
+
+# ─── DECLARER N EST PAS POSER — ET ISO 2/2 NE VOIT PAS LA DIFFERENCE ────────────────────────────
+#
+# ⚠ MESURE DU 2026-09-02, BANC 2006 : `/var/tmp/lcars` et `/var/tmp/lcars/toolchain-work`, declares
+# a la table la veille, sont ABSENTS apres un apply complet. Aucun module ne les creait.
+#
+# ISO 2/2 les avait laisses passer, POUR LA RAISON QU IL DOCUMENTE LUI-MEME : il cherche le RADICAL
+# du chemin dans le TEXTE du code, et « toolchain-work » apparait bien dans
+# `bin/lcars-toolchain-converge` — qui le LIT, ne le pose pas. Le mur a ete satisfait par une
+# mention. Meme piege que « .hex » trouve dans la sous-chaine « local.hex », deja nomme plus haut.
+#
+# CE MUR-CI NE LIT PAS DU TEXTE : il compare deux LISTES. Les repertoires que la table declare, et
+# ceux que le poseur enumere. Un `dir` couvert par un ancetre declare n a pas besoin d y figurer —
+# c est la regle 1 de ce fichier — mais un `dir` qui n a ni ancetre ni poseur ne sera jamais cree,
+# et la table promet alors un objet que la machine n aura pas.
+@test "POSEUR : tout \`dir\` sans ancetre declare est ENUMERE par le poseur, pas seulement mentionne" {
+  # ⚠ ON EXECUTE LE POSEUR, ON NE LE GREPPE PAS — ET LA PREMIERE VERSION LE GREPPAIT. Elle acceptait
+  # un chemin des que son `basename` apparaissait dans le texte : `basename /var/tmp/lcars` vaut
+  # « lcars », present partout. Le mur ne mordait donc sur rien. C est EXACTEMENT le piege du radical
+  # qu il existe pour fermer chez ISO 2/2 — reproduit en le denoncant, et vu par mutation.
+  #
+  # Ici on source la lib, on injecte les deux fonctions du poseur, et on lui demande la liste qu il
+  # produit VRAIMENT. Les variables sont alors developpees par leur SSoT, pas devinees.
+  local poseur
+  poseur="$(env -i PATH="$PATH" HOME="$BATS_TEST_TMPDIR" bash -c '
+    . "'"$BATS_TEST_DIRNAME"'/../lib/provision-lib.sh" >/dev/null 2>&1
+    prov_console_human() { echo "<human>"; }
+    '"$(sed -n '/^prov_runtime_dirs()/,/^}/p;/^prov_dirs()/,/^}/p' \
+          "$BATS_TEST_DIRNAME/../modules.d/25-directories.sh")"'
+    prov_dirs 2>/dev/null | awk "{print \$1}"
+  ' 2>/dev/null)"
+  [ -n "$poseur" ] \
+    || { echo "le poseur n a rendu AUCUN chemin — instrument casse, pas table vide"; return 1; }
+
+  local p orphelins="" vus=0 couvert
+  while read -r p; do
+    # Les JOKERS ne sont pas des chemins : le poseur les compose a l execution, le nom complet
+    # n apparait nulle part. Meme raison que le `<human>` d ISO 2/2.
+    [[ "$p" == *"<human>"* || "$p" == *"<version>"* ]] && continue
+    # ⚠ EXEMPTION NOMMEE, LA MEME QU ISO 2/2 ET POUR LA MEME RAISON — pas une seconde liste qui
+    # deriverait. `/root/.terraform.d` est le cache de plugins que le binaire `tofu` ecrit sous le
+    # HOME de root quand `46-tofu` l invoque : aucun module ne le pose, on le declare parce qu on le
+    # PROVOQUE, et c est ce que l uninstall doit pouvoir retirer.
+    [[ "$p" == /root/.terraform.d ]] && continue
+    # Couvert par un ancetre DECLARE ? (regle 1 : un chemin est couvert par ses ancetres)
+    couvert=0
+    local a="$p"
+    while [[ "$a" == */* ]]; do
+      a="${a%/*}"; [ -z "$a" ] && break
+      grep -qE "^(dir|prefix)[a-z:]* +${a}( |$)" "$MANIFEST" && { couvert=1; break; }
+    done
+    [ "$couvert" -eq 1 ] && continue
+    vus=$(( vus + 1 ))
+    # Le poseur rend des chemins DEVELOPPES : on compare des chemins entiers, jamais des morceaux.
+    grep -qxF "$p" <<<"$poseur" || orphelins="$orphelins $p"
+  done < <(awk '{c=$1; sub(/:.*/,"",c)} c=="dir" {print $2}' "$BATS_TEST_TMPDIR/rows")
+
+  [ -z "$orphelins" ] \
+    || { echo "DECLARE sans ancetre et NON ENUMERE par le poseur central — son mode et son proprietaire ne convergent depuis nulle part :$orphelins"; return 1; }
+  [ "$vus" -ge 3 ] \
+    || { echo "instrument casse : $vus repertoire(s) racine examine(s), 3 au moins attendus"; return 1; }
+}

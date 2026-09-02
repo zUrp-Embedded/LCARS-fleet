@@ -180,6 +180,33 @@ setup() {
   done
 }
 
+# ⚠ CE TEMOIN-CI EST LA MOITIE QUE LE PRECEDENT N AVAIT PAS, ET SON ABSENCE A COUTE UN QUATRIEME
+# DEFAUT DU MEME MOTIF. Celui du dessus ne regarde que les arbres de la RACINE (`assets`,
+# `catalogues`). Les SOUS-ARBRES de `fleet/` relevent d une autre liste — `EMBEDDED` — et personne
+# ne verifiait qu elle etait complete.
+#
+# MESURE DU 2026-09-02, BANC 2006 : `BIN_SRC_DIR="$(repo_root)/fleet/bin"` est lu par
+# `62-runtime-helpers` lui-meme, `fleet/bin` n etait pas dans `EMBEDDED`, et un apply rejoue depuis
+# /opt/lcars rendait « pose ratée: /usr/local/bin/lcars-toolchain-converge ». Le module echouait a
+# poser un binaire dont il est l unique poseur, faute d avoir embarque sa propre source.
+#
+# Les deux temoins couvrent donc les deux niveaux, et ils sont distincts parce que les deux listes
+# le sont : `EMBEDDED` va sous `fleet/`, `EMBEDDED_ROOT` a cote.
+@test "C6+ : ce que les modules LISENT sous fleet/ est dans EMBEDDED" {
+  local lus; lus="$(grep -rhoE 'repo_root\)/fleet/[a-z_]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
+    | sed 's|repo_root)/fleet/||' | sort -u)"
+  [ -n "$lus" ] || { echo "extraction ratee : aucune lecture sous fleet/ trouvee"; return 1; }
+  local n manquants=""
+  for n in $lus; do
+    # `_build` est l arbre de BUILD : il ne s embarque pas, il se consomme la ou il est bati.
+    # `prov_release_bin` le cherche dans le PAQUET, jamais dans la copie posee.
+    [ "$n" = "_build" ] && continue
+    grep -qE "^EMBEDDED=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" || manquants="$manquants $n"
+  done
+  [ -z "$manquants" ] \
+    || { echo "lu sous repo_root/fleet mais PAS dans EMBEDDED :$manquants"; return 1; }
+}
+
 @test "C6+ : node_modules est EXCLU — 179 Mo sur 180" {
   # `assets/` pese 180 Mo sur disque et 904 Ko dans git : tout le reste est l arbre npm de la doc,
   # un artefact local. Un `cp -a` l aurait recopie sous /opt/lcars a CHAQUE apply.

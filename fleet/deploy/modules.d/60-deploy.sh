@@ -85,6 +85,26 @@ check() {
 }
 
 apply() {
+  # ─── LE REJEU DEPUIS LA COPIE N'A NI SOURCE NI RIEN A BATIR ───────────────────────────────────
+  #
+  # ⚠ ET CE N'EST PAS LA LIVRAISON QUI DECIDE ICI, C'EST L'EMPLACEMENT — les deux questions sont
+  # distinctes, et confondre l'une avec l'autre a laisse ce module echouer sur les deux rails.
+  # Le bloc `mix` ci-dessous lit la LIVRAISON ; celui-ci demande « suis-je dans l'arbre de travail,
+  # ou dans la copie que le rail a lui-meme posee ? ».
+  #
+  # MESURE DU 2026-09-02, BANCS 2006 ET 2007 : un apply rejoue depuis
+  # `/opt/lcars/fleet/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
+  # source runtime introuvable: /opt/lcars/fleet ». Sur les DEUX, en livraison binaire comme en
+  # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
+  # `fleet/{deploy,etc,services,bin}`, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
+  # pas — la release est POSEE.
+  #
+  # La copie sert a REJOUER le rail, pas a le RECONSTRUIRE. Le module n'a donc rien a faire, et le
+  # dire est son etat-cible : echouer ici faisait rater tout le rejeu sur une machine convergee.
+  if prov_dans_la_copie && [[ ! -f "$RUNTIME_DIR/mix.exs" ]] && release_present; then
+    p_ok "rejeu depuis la copie posée : release en place, aucune source ici ($RUNTIME_DIR) — rien à bâtir"
+    verdict_apply
+  fi
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_apply; }
   # ⚠ `mix` N'EST EXIGE QUE SI L'ON BATIT, et ce module ne bâtit pas toujours. En livraison BINAIRE

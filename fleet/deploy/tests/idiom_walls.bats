@@ -282,3 +282,37 @@ I3_AWK='
   [ "${total:-0}" -ge 5 ] \
     || { echo "instrument casse : $total appel(s) trouve(s), 5 au moins attendus" >&2; return 1; }
 }
+
+# ─── MUR I15 : QUI BATIT DEPUIS UN ARBRE DE SOURCE DOIT SAVOIR OU IL EST ────────────────────────
+#
+# ⚠ TROIS MODULES ONT BATI DANS LA COPIE POSEE, ET LES TROIS ONT ECHOUE — mesure du 2026-09-02 sur
+# les bancs 2006 ET 2007, apply rejoue depuis `/opt/lcars/fleet/deploy/provision` :
+#     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#
+# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# le rail se REJOUE, pas pour qu il se RECONSTRUISE : il n y a la ni `mix.exs`, ni `deps/`, ni
+# `node_modules`. Un module qui l ignore n echoue pas seulement — `npm ci` a INSTALLE 176 Mo sous
+# /opt/lcars avant de rater son build.
+#
+# ⚠ LE MUR CIBLE LES VERBES QUI LISENT UN ARBRE DE SOURCE, pas ceux qui posent un binaire. `16-node`
+# telecharge un precompile : il ne lit aucune source, et rien ne lui interdit de le faire depuis la
+# copie. Le discriminant est « ce geste a-t-il besoin d un arbre de build ? », pas « ce module
+# prononce-t-il le mot npm ».
+@test "MUR I15: un module qui BATIT depuis une source consulte prov_dans_la_copie" {
+  local f nom corps manquants=""
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    corps="$(grep -vE '^\s*#' "$f")"
+    grep -qE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' <<<"$corps" || continue
+    nom="$(basename "$f")"
+    grep -q 'prov_dans_la_copie' <<<"$corps" || manquants="$manquants $nom"
+  done
+  [ -z "$manquants" ] \
+    || { echo "batit depuis une source SANS savoir s il est dans la copie posee :$manquants" >&2; return 1; }
+  # GARDE D INSTRUMENT : si plus aucun module ne batit, ce mur devient vert en n ayant rien regarde.
+  local batisseurs
+  batisseurs="$(grep -lE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' "$DEPLOY"/modules.d/*.sh | wc -l)"
+  [ "$batisseurs" -ge 3 ] \
+    || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 3 au moins attendus" >&2; return 1; }
+}

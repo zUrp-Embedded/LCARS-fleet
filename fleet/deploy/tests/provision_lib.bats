@@ -1403,3 +1403,51 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   "
   [ "$status" -eq 0 ]
 }
+
+# ─── prov_dans_la_copie — LA COPIE POSEE N EST PAS UN ARBRE DE BUILD ────────────────────────────
+#
+# ⚠ TROIS MODULES ONT TENTE D Y BATIR, MESURE DU 2026-09-02 SUR DEUX BANCS INDEPENDANTS (2006 et
+# 2007), sur un apply rejoue depuis `/opt/lcars/fleet/deploy/provision` — le geste NOMINAL du
+# convergeur :
+#     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#
+# Et le premier ne faisait pas qu echouer : `npm ci` a INSTALLE 176 Mo sous /opt/lcars avant de
+# rater son build. La copie n est pas seulement incapable de batir — la laisser essayer la pollue.
+#
+# LES DEUX QUESTIONS SONT DISTINCTES : la LIVRAISON dit s il y a quelque chose a batir, l EMPLACEMENT
+# dit si on est a un endroit ou l on PEUT batir. Les trois modules savaient lire la premiere.
+@test "prov_dans_la_copie : vrai quand le rail tourne DEPUIS la racine qu il a posee" {
+  module_sh '
+    D="$BATS_TEST_TMPDIR/copie"; mkdir -p "$D"
+    repo_root() { echo "$D"; }
+    PROV_ROOT="$D"
+    prov_dans_la_copie
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "prov_dans_la_copie : faux depuis l arbre de travail — c est la ou l on batit" {
+  module_sh '
+    mkdir -p "$BATS_TEST_TMPDIR/travail" "$BATS_TEST_TMPDIR/opt"
+    repo_root() { echo "$BATS_TEST_TMPDIR/travail"; }
+    PROV_ROOT="$BATS_TEST_TMPDIR/opt"
+    rc=0; prov_dans_la_copie || rc=$?
+    [ "$rc" -eq 1 ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "prov_dans_la_copie : faux depuis un SOUS-repertoire de la racine — c est l egalite qui compte" {
+  # Un `case "$root" in "$PROV_ROOT"*)` aurait rendu vrai pour /opt/lcars-autre-chose. On compare
+  # des chemins entiers, comme partout ailleurs dans cette lib.
+  module_sh '
+    mkdir -p "$BATS_TEST_TMPDIR/opt"
+    repo_root() { echo "$BATS_TEST_TMPDIR/opt-voisin"; }
+    PROV_ROOT="$BATS_TEST_TMPDIR/opt"
+    rc=0; prov_dans_la_copie || rc=$?
+    [ "$rc" -eq 1 ]
+  '
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}

@@ -399,8 +399,16 @@ apply() {
   # `Fleet.Roster.eval_tfvars` par les trois portes ; l'entrypoint docker ne fait rien d'autre que
   # ça depuis toujours. Docker et mix ne sont que des moyens d'ATTEINDRE la fonction — quand la
   # release est deja la, le detour n'a plus d'objet.
-  if prov_delivery_is_binary; then
-    p_ok "roster lu dans la release posée — ni mix ni docker (livraison binaire)"
+  # ⚠ ET LA COPIE POSEE COMPTE AUTANT QUE LA LIVRAISON — c'est la seconde moitie du discriminant, et
+  # son absence a fait echouer ce module sur le rail SOURCE. Un poste installe depuis un clone puis
+  # rejoue depuis `/opt/lcars` arrivait dans la branche `mix` et lancait `mix deps.get` dans
+  # `/opt/lcars/fleet`, ou il n'y a ni `mix.exs` ni `deps/`.
+  #
+  # MESURE DU 2026-09-02, BANC 2007 : « FAIL 48-forge-host: dépendances Elixir non récupérables
+  # (/opt/lcars/fleet) ». La release, elle, etait posee et parfaitement lisible — le detour par mix
+  # n'avait pas plus d'objet ici qu'en livraison binaire.
+  if prov_delivery_is_binary || prov_dans_la_copie; then
+    p_ok "roster lu dans la release posée — ni mix ni docker (pas de source de build ici)"
   else
     p_step "outillage mix pour dériver le roster ($PROV_HUMAN)"
     run_quiet as_human env -C "$tree" mix local.hex --force \
@@ -430,7 +438,9 @@ apply() {
   # `--catalogue`), `--repo` + le catalogue derive en source. Une seule ligne d'appel, deux jeux
   # d'arguments — le script, lui, appelle la MEME fonction dans les deux cas.
   local -a enroll_src
-  if prov_delivery_is_binary; then
+  # Meme discriminant que le bloc `mix` plus haut, et pour la meme raison : dans la copie posee il
+  # n y a pas d arbre a lire, seulement une release a interroger.
+  if prov_delivery_is_binary || prov_dans_la_copie; then
     # ⚠ ON DEMANDE A LA LIB, ON NE COMPOSE PAS LE CHEMIN ICI — et c'est la cicatrice. Ce site
     # designait la release POSEE, que `60-deploy` pose DOUZE RANGS PLUS LOIN : sur la premiere
     # install d'un paquet elle n'existe pas encore, et le rang interdit de declarer la dependance

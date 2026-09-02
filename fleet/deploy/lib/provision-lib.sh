@@ -1327,6 +1327,33 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 #
 # Rend 1 sans rien ecrire quand aucun candidat n'est executable : c'est a l'appelant de dire ce que
 # son geste en fait, et les deux appelants n'en font pas la meme chose.
+# ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
+#
+# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Mesure du
+# 2026-09-02, bancs 2006 ET 2007, sur un apply rejoué depuis `/opt/lcars/fleet/deploy/provision` —
+# le geste NOMINAL du convergeur :
+#
+#   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
+#   FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
+#   FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#
+# Et le premier ne faisait pas qu'échouer : `npm ci` a INSTALLÉ 176 Mo d'arbre npm SOUS /opt/lcars
+# avant de rater son build. La copie n'est pas seulement incapable de bâtir — la laisser essayer la
+# pollue.
+#
+# CE QUI MANQUAIT EST UN DISCRIMINANT, PAS UNE GARDE DE PLUS. Les trois modules savaient déjà lire
+# la LIVRAISON (`prov_delivery_is_binary`) ; aucun ne savait répondre à « suis-je dans l'arbre de
+# travail, ou dans la copie que j'ai moi-même posée ? ». Ce sont deux questions distinctes : un
+# poste en livraison SOURCE rejoué depuis la copie n'a ni `mix.exs` ni `node_modules`, et il n'en a
+# pas besoin — la release et le `dist/` sont déjà posés.
+#
+# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# le rail puisse se REJOUER, pas pour qu'il puisse se RECONSTRUIRE. La distinction est le contrat
+# de cette copie.
+prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la copie posée
+  [[ "$(repo_root)" == "${PROV_ROOT}" ]]
+}
+
 prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE, ou rien (rc 1)
   local c
   for c in "${PROV_RELEASE_BIN:-}" \

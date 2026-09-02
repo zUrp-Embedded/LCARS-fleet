@@ -78,6 +78,26 @@ build_doc() {
     return 0
   fi
 
+  # ⚠ LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD, ET CELUI-CI Y INSTALLAIT 176 Mo AVANT D'ÉCHOUER.
+  # La branche du dessus lit la LIVRAISON ; celle-ci lit l'EMPLACEMENT, et les deux questions sont
+  # distinctes. Un poste en livraison SOURCE rejoué depuis `/opt/lcars` arrivait ici, lançait
+  # `npm ci` dans `/opt/lcars/assets/github.io` — que `62-runtime-helpers` embarque justement SANS
+  # `node_modules` — puis mourait sur `npm run build`.
+  #
+  # MESURE DU 2026-09-02, BANC 2007 : `FAIL 44-media: build du site en échec`, et
+  # `/opt/lcars/assets` pesant 176 Mo au relevé suivant. L'échec était visible ; la pollution, non.
+  #
+  # Le `dist/` embarqué EST la doc de cette machine. S'il manque, c'est un drift à nommer — pas un
+  # build à lancer depuis un arbre qui n'a jamais eu vocation à en porter un.
+  if prov_dans_la_copie; then
+    if [[ -s "$SITE_SRC/dist/index.html" ]]; then
+      poser_doc
+      return 0
+    fi
+    p_drift "doc non bâtie dans la copie posée ($SITE_SRC/dist) — ce rail se REJOUE ici, il ne s'y reconstruit pas : relance l'apply depuis l'arbre de travail"
+    return 0
+  fi
+
   command -v "$NPM_BIN" >/dev/null 2>&1 \
     || { p_fail "npm absent — 16-node pose le précompilé épinglé ; joue-le d'abord"; verdict_apply; }
 

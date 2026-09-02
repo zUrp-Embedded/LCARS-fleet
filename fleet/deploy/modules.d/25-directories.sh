@@ -60,7 +60,32 @@ prov_dirs() {
     "$PROV_CATALOGUES_WORK 0700 $PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" \
     "/home/projects 2775 root:$PROV_FLEET_GROUP" \
     "/home/projects.ops 2775 root:$PROV_FLEET_GROUP" \
-    "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP"
+    "/home/projects.workshop 2775 root:$PROV_FLEET_GROUP" \
+    `# ⚠ LES REPERTOIRES DE TRAVAIL DES GESTES ROOT — DECLARES A LA TABLE LE 2026-09-01, ET POSES` \
+    `# PAR PERSONNE JUSQU'ICI. Mesure du 2026-09-02, banc 2006 : les deux sont ABSENTS apres un` \
+    `# apply complet, alors que le manifeste les declare. Declarer sans poser ne ferme rien — ca` \
+    `# deplace seulement le mensonge de la machine vers la table.` \
+    `#` \
+    `# ⚠ ET ISO 2/2 A LAISSE PASSER, POUR LA RAISON QU'IL DOCUMENTE LUI-MEME : il cherche le RADICAL` \
+    `# du chemin dans le texte du code, et « toolchain-work » apparait dans` \
+    `# bin/lcars-toolchain-converge — qui le LIT, ne le pose pas. Le mur a ete satisfait par une` \
+    `# mention. Meme piege que « .hex » trouve dans « local.hex », deja nomme dans ce corpus.` \
+    `#` \
+    `# Le 0700 est le correctif : /var/tmp est 1777, et le rail doit POSSEDER ce chemin avant que` \
+    `# le convergeur n'y telecharge puis n'y execute.` \
+    "/var/lib/lcars 0755 root:root" \
+    "/var/tmp/lcars 0755 root:root" \
+    "/var/tmp/lcars/toolchain-work 0700 root:root" \
+    `# ⚠ POSE PAR DEUX \`dirname\`, NOMME PAR PERSONNE — et c'est la meme situation que le prefixe` \
+    `# ci-dessus. \`05-host-consent:51\` et \`64-services:427\` le creent en derivant le dossier de` \
+    `# LEUR fichier ; aucun des deux ne le declare. Il nait donc du mode et du proprietaire que le` \
+    `# premier arrive lui donne, et il disparaitrait le jour ou ces deux modules cesseraient d'y` \
+    `# ecrire — sans que la table, qui le declare, ait bouge.` \
+    `#` \
+    `# Les deux \`dirname\` RESTENT : \`05-host-consent\` tourne au rang 05, vingt rangs avant ce` \
+    `# poseur, et il a besoin du dossier a ce moment-la. Ce qu'on ajoute ici n'est pas la creation,` \
+    `# c'est la CONVERGENCE — le mode et le proprietaire relus a chaque passe, depuis un seul site.` \
+    "/etc/lcars 0755 root:root"
   prov_runtime_dirs
 }
 
