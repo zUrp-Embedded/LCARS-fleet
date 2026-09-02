@@ -391,18 +391,29 @@ STUB
 # mettrait le primitif a DROITE d un pipe, donc dans un sous-shell, donc PROV_FAILED mourrait avec
 # lui et ce temoin mesurerait le mauvais shell.
 @test "write_atomic: une ecriture qui RATE ne bascule rien, et ne s annonce pas POSEE" {
+  # ⚠ UNE DOUBLURE DE `cat`, ET SURTOUT PAS `ulimit -f 0` — MESURE DU 2026-09-02, HUIT HEURES
+  # PERDUES. La premiere version posait `ulimit -f 0` dans le shell de `module_sh`. Jouee SEULE, la
+  # suite passait ; jouee dans la SUITE COMPLETE, `bats-exec-suite` ecrit ses fichiers
+  # intermediaires depuis ce meme shell, la limite les bloque, et le processus PEND au lieu
+  # d echouer. Le gate de `pack.sh` et un `apply` de banc sont restes suspendus toute la nuit sur ce
+  # seul test — un temoin qui prend en otage le harnais qui le joue.
+  #
+  # La doublure fait exactement le meme fait — `cat` rend non-zero sans avoir tout ecrit — de facon
+  # DETERMINISTE et sans toucher a l environnement de bats. Un decor qui casse le harnais ne mesure
+  # plus le code : il mesure le harnais.
+  local b="$BATS_TEST_TMPDIR/bin-cat"; mkdir -p "$b"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$b/cat"; chmod 0755 "$b/cat"
+  export BIN_CAT="$b"
   module_sh '
+    PATH="$BIN_CAT:$PATH"
     src="$BATS_TEST_TMPDIR/source"; printf "contenu\n" > "$src"
     f="$BATS_TEST_TMPDIR/plein.conf"
-    # aucun fichier ne peut grandir : `mktemp` cree bien son tampon de 0 octet, le `cat` du
-    # primitif meurt dessus. Le decor le plus proche du disque plein sans monter de FS.
-    ulimit -f 0
     write_atomic "$f" 0644 < "$src" || true
     [ ! -e "$f" ]                 # rien na bascule
     [ "$PROV_CHANGED" -eq 0 ]     # rien nest compte comme pose
     [ "$PROV_FAILED" -ge 1 ]      # et lechec est COMPTE, pas avale
   ' 2>/dev/null
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"ecriture du tampon RATEE"* ]]
   refute_out "POSE"
 }

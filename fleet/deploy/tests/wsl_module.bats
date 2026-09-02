@@ -51,11 +51,18 @@ HARNAIS
 }
 
 @test "wsl.conf : un tampon dont l ecriture RATE ne devient jamais un wsl.conf pose" {
-  # `ulimit -f 0` : aucun fichier ne peut grandir. `mktemp` cree son tampon de 0 octet, la
-  # redirection meurt dessus. Le decor le plus proche du disque plein sans monter de FS.
+  # ⚠ UNE DOUBLURE DE `cat`, PAS `ulimit -f 0` — MEME LECON QUE `provision_lib`, ET ELLE A COUTE
+  # HUIT HEURES. Une limite de taille de fichier posee dans un decor de temoin ne s arrete pas au
+  # code audite : elle atteint tout ce que le harnais ecrit ensuite, et un `bats-exec-suite` qui ne
+  # peut plus ecrire PEND au lieu d echouer. Ici la limite etait confinee a un bash fils, donc sans
+  # doute inoffensive — mais « sans doute inoffensif » n est pas une mesure, et la version
+  # deterministe ne coute rien de plus.
+  mkdir -p "$BATS_TEST_TMPDIR/bin-cat"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$BATS_TEST_TMPDIR/bin-cat/cat"
+  chmod 0755 "$BATS_TEST_TMPDIR/bin-cat/cat"
   harnais_wsl_tmp '[boot]
 systemd=true
-' 'ulimit -f 0'
+' 'PATH="$TMPDIR/bin-cat:$PATH"'
   [ "$status" -eq 9 ] || { echo "le module a CONTINUE (rc=$status) : $output"; return 1; }
   [[ "$output" != *"WRITE_ATOMIC APPELE"* ]] || { echo "un tampon rate a ete pose : $output"; return 1; }
   [[ "$output" != *"SUITE DU MODULE ATTEINTE"* ]]
