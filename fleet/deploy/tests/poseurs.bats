@@ -163,7 +163,14 @@ setup() {
   # ⚠ DEUX LISTES, PAS UNE : la copie n a pas la meme forme. `EMBEDDED` va sous `fleet/`,
   # `EMBEDDED_ROOT` a cote. Les fondre ferait une liste dont chaque entree porte un chemin
   # implicite different.
-  grep -q 'cp -a "$(repo_root)/fleet/$n"' "$mod"
+  #
+  # ⚠ ON VISE LE CHEMIN, PAS L OUTIL — et la premiere version visait l outil. Elle epinglait
+  # `cp -a` pour la boucle de `fleet/` et `cd` pour celle de la racine : deux outils differents
+  # etaient alors le signe le plus visible de deux listes, mais ce n est pas ce que ce temoin veut
+  # dire. Le jour ou la boucle de `fleet/` est passee a `tar` elle aussi (pour cesser d emporter
+  # 73 Mo de cache tofu), ce temoin a rougi sur un CORRECTIF — en accusant la seule chose qu il ne
+  # mesurait pas. Ce qui distingue les deux listes est le chemin d ou elles partent, et lui seul.
+  grep -q 'cd "$(repo_root)/fleet/$n"' "$mod"
   grep -q 'cd "$(repo_root)/$n"' "$mod"
 }
 

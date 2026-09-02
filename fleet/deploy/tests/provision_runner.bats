@@ -977,7 +977,7 @@ MOD
   [[ "$output" == *"AFTER=20-amont"* ]]
 }
 
-@test "AFTER : `--only` ne FERME PAS transitivement — il joue ce qu on lui nomme, et rien de plus" {
+@test "AFTER : \`--only\` ne FERME PAS transitivement — il joue ce qu on lui nomme, et rien de plus" {
   # ⚠ CE CONTRAT EST DOCUMENTE DANS `provision`, ET RIEN NE L EPINGLAIT. `AFTER` verifie qu une
   # dependance existe et qu elle precede ; il ne dit pas que `--only` l entrainera. Un jour ou
   # l autre quelqu un « ameliorera » `--only` pour tirer les AFTER — ce serait un changement de
