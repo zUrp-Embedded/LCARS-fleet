@@ -1222,4 +1222,80 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       end
     end
   end
+
+  # UNE CLEF DE CONFIGURATION, UN SEUL REPLI — le pendant intra-BEAM des verrous ci-dessus.
+  #
+  # Les huit murs de ce module gardent un fait recopie D'UN LANGAGE A L'AUTRE, parce que le shell ne
+  # peut pas appeler le BEAM. Entre deux modules Elixir, rien ne regardait : on suppose qu'ils
+  # s'appellent. Mesure du 2026-09-02 : DEUX clefs etaient lues a deux endroits avec deux replis
+  # ecrits separement.
+  #
+  #   · `:mcp_pod_resolver`  — `Delegation.default_pod_resolver/1` et `Probe.default_resolver/1`,
+  #     corps identiques au nom pres, alors que le commentaire de `Probe` exigeait DEJA le contraire :
+  #     « deux resolveurs de la meme identite de canal donneraient deux avis » ;
+  #   · `:mcp_forge_client`  — `@default_writer` et `@default_client`, tous deux `Fleet.Forge.Client`.
+  #
+  # ⚠ CE QUI REND CE DEFAUT PARTICULIEREMENT SOURNOIS : UN REPLI NE S'EXERCE QUE QUAND LA CLEF EST
+  # ABSENTE. En test, elle est presque toujours posee — le seam existe pour ca. Les deux replis ne
+  # divergent donc QU'EN PRODUCTION, sur le chemin que personne ne joue.
+  #
+  # Le mur compare les expressions de repli, pas leur valeur : deux ecritures differentes du meme
+  # module resteraient deux ecritures a maintenir. Une lecture SANS repli (`get_env/2`) ne compte
+  # pas — elle ne declare rien, elle accepte `nil`.
+  @doc false
+  @spec check_config_single_default(String.t()) :: Support.result()
+  def check_config_single_default(root) do
+    lectures =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn path ->
+        rel = Path.relative_to(path, root)
+
+        path
+        |> File.read!()
+        |> Code.string_to_quoted!()
+        |> collect(fn
+          {{:., _, [{:__aliases__, _, [:Application]}, verbe]}, _, [_app, cle, defaut]}
+          when verbe in [:get_env, :compile_env] and is_atom(cle) ->
+            {cle, Macro.to_string(defaut), rel}
+
+          _ ->
+            nil
+        end)
+      end)
+
+    divergentes =
+      lectures
+      |> Enum.group_by(&elem(&1, 0))
+      |> Enum.filter(fn {_cle, v} ->
+        v |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> length() > 1
+      end)
+      |> Enum.sort()
+
+    if measured_nothing?(lectures) do
+      broken_result("config.single_default", "Application.get_env/3 call under lib/")
+    else
+      %{
+        id: "config.single_default",
+        remediation:
+          "une clef de configuration porte UN repli — que le module qui declare le contrat le " <>
+            "porte, et que les autres l'appellent (cf. `Delegation.ForgeClient.resolved/0`). Deux " <>
+            "replis pour une clef ne divergent qu'en l'absence de configuration, donc jamais en " <>
+            "test et toujours en production",
+        status: if(divergentes == [], do: :pass, else: :fail),
+        evidence:
+          Enum.map(divergentes, fn {cle, v} ->
+            "#{inspect(cle)} : " <>
+              (v
+               |> Enum.map(fn {_c, d, rel} -> "#{rel} -> #{d}" end)
+               |> Enum.uniq()
+               |> Enum.join(" · "))
+          end),
+        note:
+          "#{length(lectures)} lecture(s) avec repli sur " <>
+            "#{lectures |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length()} clef(s) distincte(s)"
+      }
+    end
+  end
 end

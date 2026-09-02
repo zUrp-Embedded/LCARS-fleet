@@ -2942,20 +2942,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Spawn-bound identity comes from Spawner; unknown identity fails closed.
   defp resolve_identity(pod_id) when is_binary(pod_id) do
-    resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver, &default_pod_resolver/1)
-
-    case resolver.(pod_id) do
+    case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
       {:ok, %{role: role} = identity} -> {:ok, %{role: role, repo: Map.get(identity, :repo)}}
       _ -> {:error, :pod_unknown}
     end
-  end
-
-  defp default_pod_resolver(pod_id) when is_binary(pod_id) do
-    Fleet.Spawner.pod_info(pod_id)
-  rescue
-    _ -> {:error, :pod_unknown}
-  catch
-    _, _ -> {:error, :pod_unknown}
   end
 
   # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a

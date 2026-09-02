@@ -89,8 +89,6 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
               opts :: keyword()
             ) :: {:ok, integer()} | {:error, term()}
 
-  @default_writer Fleet.Forge.Client
-
   @doc """
   L'implémentation configurée, ou le client canonique.
 
@@ -98,7 +96,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   objet, seul le contrat qu'on lui demande de tenir diffère. Deux clefs pour un client seraient deux
   façons de brancher un test sur des moitiés différentes de la même forge, et un test qui remplace
   l'une sans l'autre verrait ses écritures partir sur la vraie.
+
+  ⚠ CE MODULE PORTAIT SA PROPRE COPIE DU DÉFAUT (`@default_writer Fleet.Forge.Client`). La clef
+  était bien unique — le paragraphe ci-dessus y veillait — mais pas le REPLI : changer
+  l'implantation canonique d'un côté laissait l'autre sur l'ancienne, et seulement en l'absence de
+  configuration, donc jamais en test et toujours en production. La délégation rend l'invariant vrai
+  par construction au lieu de le rendre vrai par relecture. Même forme que `EscalationForge`.
   """
   @spec resolved() :: module()
-  def resolved, do: Application.get_env(:lcars_fleet, :mcp_forge_client, @default_writer)
+  def resolved, do: Fleet.MCP.PodTools.Delegation.ForgeClient.resolved()
 end
