@@ -30,6 +30,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # Authority of the brief FORMAT (worker/judge/brief-review/rework/conflict). StepDispatcher
   # CHOOSES which brief per the forge state; BriefBuilder FORMS it.
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.BriefBuilder
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
@@ -332,7 +333,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # pod dispatched OFF an existing PR (judges, rework, conflict-rework) clones the FEATURE branch,
     # so its clone-base cannot answer "which face does this PR land on" — the PR itself is the only
     # honest source, and it is in hand exactly here.
-    opts = Keyword.put(opts, :pr_base_branch, get_in(pr, ["base", "ref"]))
+    opts = Keyword.put(opts, :pr_base_branch, Payload.base_ref(pr))
 
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
@@ -354,8 +355,8 @@ defmodule Fleet.Pilot.StepDispatcher do
     }
 
     pr_number = pr["number"]
-    head = get_in(pr, ["head", "ref"]) || ""
-    head_sha = get_in(pr, ["head", "sha"])
+    head = Payload.head_ref(pr) || ""
+    head_sha = Payload.head_sha(pr)
     labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
 
     # Stable review records are unioned with volatile requested reviewers. Read through the SAME

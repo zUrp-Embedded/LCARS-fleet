@@ -9,6 +9,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepRunConsumer.GateEngine
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
@@ -125,7 +126,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
         nil
 
       [{^n, pr}] ->
-        get_in(pr, ["head", "ref"])
+        Payload.head_ref(pr)
 
       several ->
         numbers = Enum.map(several, fn {_n, pr} -> pr["number"] end)

@@ -76,6 +76,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # The two behaviour-contracts of the upward seams (fleet_mcp → fleet_pilot, runtime dispatch).
   # ⚠ This local `ForgeClient` is the CONTRACT (behaviour + resolver), NOT `Fleet.Forge.Client`
   # (the real impl, never referenced by a direct call here — compile dep forbidden).
+  alias Fleet.Forge.Payload
   alias Fleet.EventRouter.Bus
   alias Fleet.MCP.PodTools.ProjectPublish
   alias Fleet.Project.GitOps
@@ -2769,7 +2770,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         # C-05: parsing remains delegated; this seam owns only selection and merged fallback.
         pulls
         |> Enum.filter(fn pr ->
-          head = get_in(pr, ["head", "ref"]) || ""
+          head = Payload.head_ref(pr) || ""
           match?({:ok, {^number, _role}}, forge.parse_feature_branch(head))
         end)
         |> pick_pr()
@@ -2832,7 +2833,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     policy = Fleet.Project.Roles.verdict_policy_for(forge, repo, issue_number)
 
     read_opts = [
-      head_sha: get_in(pr, ["head", "sha"]),
+      head_sha: Payload.head_sha(pr),
       verdict_policy: policy,
       # C3 — même exigence que la courbe : l'arbitre entre des DEUX côtés ou d'aucun. Sans lui,
       # cette surface rendrait `gray_zone` sur une PR que le gate a déjà tranchée.
@@ -2874,7 +2875,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     %{
       "number" => pr["number"],
       "state" => pr["state"],
-      "merged" => pr["merged"],
+      "merged" => Payload.merged?(pr),
       "review" => review,
       "verdicts" => verdicts
     }

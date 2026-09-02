@@ -65,6 +65,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Admiral.PeriodicCheck
 
   @default_interval_ms 60_000
@@ -229,7 +230,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   defp maybe_drain(pr, branch, branch_result) do
     # Ceinture : le serveur a filtre `base=`, on re-verifie quand meme (un double de test ou une
     # forge exotique pourraient rendre plus large).
-    with true <- pr["base"]["ref"] == branch,
+    with true <- Payload.base_ref(pr) == branch,
          {:ok, item_repo, item_issue} <- Fleet.Toolchain.parse_workitem_marker(pr["body"]) do
       case pr_outcome(pr) do
         :open ->
@@ -252,7 +253,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   defp pr_outcome(pr) do
     cond do
-      pr["merged"] == true -> :merged
+      Payload.merged?(pr) -> :merged
       pr["state"] == "closed" -> :refused
       true -> :open
     end
