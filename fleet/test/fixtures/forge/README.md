@@ -20,6 +20,18 @@ Elles ne sont pas des fixtures de test : ce sont la RÉFÉRENCE contre laquelle 
 calibrent, et le `Fleet.Forge.Payload` à venir (plan `beyond_#6/frontiere_forge.md`) en tirera ses
 valeurs par défaut plutôt que de les inventer.
 
+## Ce que la capture porte
+
+`pr.json` · `issue.json` · `repo.json` — une forme par objet, parce qu'aucune ne porte tout :
+la PR seule a `head`/`base`/`merged`, l'issue seule a `repository` et un assigné, le dépôt seul a
+`full_name`/`default_branch`. L'issue porte **un label et un assigné**, la PR n'en a **aucun** :
+les deux cas sont dans la capture, délibérément — c'est ce qui permet d'écrire un témoin sur
+l'absence sans l'inventer.
+
+⚠ **`payload_fixture_test.exs` exige que chaque chemin déclaré résolve sur au moins une de ces
+trois captures.** Un fait qu'aucune ne couvre se corrige en **capturant**, jamais en relâchant
+l'assertion.
+
 ## Ce qu'elles ont déjà établi
 
 - **Tous les champs que le runtime lit existent** — 14 sur `Issue`, 16 sur `PullRequest`. Aucune

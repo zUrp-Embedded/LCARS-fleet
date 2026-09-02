@@ -53,13 +53,14 @@ defmodule Fleet.Forge.PayloadTest do
     end
 
     test "un champ NULL de la forge devient `nil`, jamais une exception" do
-      # ⚠ MESURE : `assignee` vaut `null` sur les deux charges quand personne n'est assigne, et la
-      # specification OpenAPI de cette version ne declare AUCUN champ requis. Un acces non garde
-      # (`payload["assignee"]["login"]`) casserait ici.
-      for nom <- ~w(pr issue) do
-        assert Payload.assignee_login(charge(nom)) == nil
-        assert Payload.label_names(charge(nom)) == []
-      end
+      # ⚠ MESURE : la PR n'a ni assigne ni label, l'issue a les deux. La specification OpenAPI de
+      # cette version ne declare AUCUN champ requis, donc un acces non garde
+      # (`payload["assignee"]["login"]`) casse sur la PR. Les deux cas sont dans la capture.
+      assert Payload.assignee_login(charge("pr")) == nil
+      assert Payload.label_names(charge("pr")) == []
+
+      assert Payload.assignee_login(charge("issue")) == "mesure"
+      assert Payload.label_names(charge("issue")) == ["lcars-in-flight"]
     end
 
     test "une charge vide ne fait lever aucun lecteur — la forge ne garantit rien" do
