@@ -39,6 +39,7 @@ defmodule Fleet.Forge.Client do
   require Logger
 
   alias Fleet.Forge.Client.Jury
+  alias Fleet.Forge.Client.Labels
   alias Fleet.Forge.Client.Repo
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
@@ -112,10 +113,10 @@ defmodule Fleet.Forge.Client do
   def add_label(repo, issue_number, label_name, opts \\ [])
       when is_binary(repo) and is_integer(issue_number) and is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number),
+         {:ok, current} <- Labels.get_issue_labels(config, repo, issue_number),
          current_names = Enum.map(current, & &1["name"]),
          false <- label_name in current_names && :already_present,
-         :ok <- add_issue_label(config, repo, issue_number, label_name) do
+         :ok <- Labels.add_issue_label(config, repo, issue_number, label_name) do
       {:ok, :added}
     else
       :already_present -> {:ok, :already_present}
@@ -231,7 +232,7 @@ defmodule Fleet.Forge.Client do
   def remove_label(repo, issue_number, label_name, opts \\ [])
       when is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number) do
+         {:ok, current} <- Labels.get_issue_labels(config, repo, issue_number) do
       # Attached-label ids cover repository and organization labels.
       case Enum.find(current, &(&1["name"] == label_name)) do
         nil ->
@@ -1393,7 +1394,7 @@ defmodule Fleet.Forge.Client do
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
   def get_route(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, labels} <- get_issue_labels(config, repo, issue_number) do
+         {:ok, labels} <- Labels.get_issue_labels(config, repo, issue_number) do
       route_from_labels(labels)
     end
   end
@@ -1571,253 +1572,48 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  defp get_issue_labels(config, repo, issue_number) do
-    case http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels") do
-      {:ok, labels} when is_list(labels) -> {:ok, labels}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp add_issue_label(config, repo, issue_number, label_name) do
-    case post_issue_label(config, repo, issue_number, label_name) do
-      {:ok, true} ->
-        :ok
-
-      {:ok, false} ->
-        with :ok <- ensure_repo_label(config, repo, label_name),
-             {:ok, true} <- post_issue_label(config, repo, issue_number, label_name) do
-          :ok
-        else
-          _ -> {:error, {:label_not_added, label_name}}
-        end
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp post_issue_label(config, repo, issue_number, label_name) do
-    case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels", %{
-           labels: [label_name]
-         }) do
-      {:ok, body} when is_list(body) -> {:ok, Enum.any?(body, &(&1["name"] == label_name))}
-      {:ok, _non_list} -> {:ok, false}
-      {:error, _} = err -> err
-    end
-  end
-
   @doc """
   Ensures static lock, destination, and stage labels exist with their protocol metadata.
 
   Success is based on complete readback, not create responses. Missing or unreadable labels return
   `:labels_missing` or `:labels_unverifiable`; dynamic workflow-map labels are not seeded.
   """
+
   # LES CONSTANTES DE PROTOCOLE VIENNENT DE `Fleet.Labels`, ET C'EST SON CONTRAT, PAS UN STYLE.
   # Son `@moduledoc` l'écrit : « Re-declaring one as a local `@attr` or literal = silent drift on a
   # rename. Centralized here, consumed everywhere. » Ce fichier les épelait toutes en littéral —
   # dans la liste de seeding ET dans les clauses de `label_color/1` / `label_description/1` — donc
   # un renommage côté Labels laissait ici sept chaînes orphelines, sans un mot. Attributs évalués à
   # la compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
-  @lbl_in_flight Fleet.Labels.in_flight()
-  @lbl_awaits_arch Fleet.Labels.awaits_arch()
-  @lbl_destination_workshop Fleet.Labels.destination_workshop()
-  @lbl_stage_review Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review()
-  @lbl_stage_merged Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
-  @lbl_stage_retired Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
 
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       statics =
         [
-          @lbl_in_flight,
-          @lbl_awaits_arch,
+          Fleet.Labels.in_flight(),
+          Fleet.Labels.awaits_arch(),
           # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-          @lbl_destination_workshop,
+          Fleet.Labels.destination_workshop(),
           # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step
           # names carried by the workflow MAPS (data), not protocol constants — `Fleet.Labels` says
           # so itself ("brief-review/build values come from the MAP"). Seeding them here pre-creates
           # the two canonical steps' labels; a card naming other steps gets them on demand.
           "stage/brief-review",
           "stage/build",
-          @lbl_stage_review,
-          @lbl_stage_merged,
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged(),
           # RETIRED was missing, and its absence was not a routing hole — `add_issue_label/4`
           # creates a label on demand when the POST does not take. What it cost is the palette: a
           # lazily-created label is born with the default grey and no description, so the ONE stage
           # that says "closed without delivering" looked like noise next to five coloured ones.
-          @lbl_stage_retired
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
         ] ++ Fleet.Labels.visual_types()
 
-      Enum.each(statics, &ensure_repo_label(config, repo, &1))
-      verify_labels_present(config, repo, statics)
+      Enum.each(statics, &Labels.ensure_repo_label(config, repo, &1))
+      Labels.verify_labels_present(config, repo, statics)
     end
-  end
-
-  defp verify_labels_present(config, repo, expected) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
-      {:ok, labels} when is_list(labels) ->
-        present = MapSet.new(labels, & &1["name"])
-
-        case Enum.reject(expected, &MapSet.member?(present, &1)) do
-          [] -> :ok
-          missing -> {:error, {:labels_missing, missing}}
-        end
-
-      other ->
-        {:error, {:labels_unverifiable, other}}
-    end
-  end
-
-  # Creates the missing protocol label at the REPO level. The routing labels (`stage/*`/`wfmap/*`) and the
-  # flat locks (`lcars-*`) live PER-REPO: the routing state belongs to ITS repo's issues (the
-  # forge = state-store, self-contained per project), and the system account creates them via its **repo-write** —
-  # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 "Must be an organization
-  # owner"). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
-  # the human hovering over the label on the forge — a cryptic protocol string means
-  # nothing outside the code). TRUE idempotence = check-then-create: Gitea does NOT reject a
-  # duplicate label NAME (no 409 — verified live 2026-07-18: a double template sync left every
-  # label twice, faithfully copied into every generated repo). A failed existence read falls
-  # through to the POST (the label matters more than the dedup); a failed POST stays tolerated
-  # (`:ok` — it's the re-POST + its verification that decide, cf. `add_issue_label`).
-  defp ensure_repo_label(config, repo, label_name) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
-      {:ok, labels} when is_list(labels) ->
-        case Enum.find(labels, &(&1["name"] == label_name)) do
-          nil -> create_repo_label(config, repo, label_name)
-          existing -> reconcile_label_color(config, repo, existing, label_name)
-        end
-
-      _ ->
-        create_repo_label(config, repo, label_name)
-    end
-  end
-
-  # An already-present label keeps its id, and with it every issue wearing it — only its COLOR is
-  # reconciled. Creating-only would leave every repo seeded before the palette wearing the old
-  # near-white default, and the marker that motivated the palette (`genre/doc`) is precisely one
-  # that already exists on all of them: a fix that only reaches repos nobody has created yet is not
-  # a fix. Best-effort by design — a repo whose labels cannot be repainted still routes correctly,
-  # so this never turns a working forge into a failed seeding.
-  defp reconcile_label_color(config, repo, %{"id" => id, "color" => current}, label_name) do
-    wanted = label_color(label_name)
-
-    if normalize_color(current) == normalize_color(wanted) do
-      :ok
-    else
-      _ = http_patch(config, "/repos/#{encode_repo(repo)}/labels/#{id}", %{color: wanted})
-      :ok
-    end
-  end
-
-  defp reconcile_label_color(_config, _repo, _existing, _label_name), do: :ok
-
-  # Gitea answers `"ededed"` and accepts `"#ededed"` — comparing the two raw would repaint every
-  # label on every pass, forever.
-  defp normalize_color(color) when is_binary(color),
-    do: color |> String.trim_leading("#") |> String.downcase()
-
-  defp normalize_color(_), do: ""
-
-  defp create_repo_label(config, repo, label_name) do
-    # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
-    # Gitea removes the old `scope/*` from the issue when a new one is set (verified forge 1.26.1, org AND
-    # repo level, by NAME). This is the mechanism of `stage/*` (workflow_map position = visible state
-    # machine): native unrepresentability (never 2 steps). The FLAT locks (`lcars-*`) are non-exclusive.
-    body = %{
-      name: label_name,
-      exclusive: String.contains?(label_name, "/"),
-      color: label_color(label_name),
-      description: label_description(label_name)
-    }
-
-    case http_post(config, "/repos/#{encode_repo(repo)}/labels", body) do
-      {:ok, _} -> :ok
-      {:error, _} -> :ok
-    end
-  end
-
-  # The NAME carries the protocol; the color carries the GLANCE. Operator palette, 2026-08-03.
-  #
-  # The former default was `#ededed` — near-white on a white UI. Every label outside the four
-  # `stage/*` landed there, so `genre/doc` was invisible on the very tickets whose genre it
-  # declares: present in the API, absent to the human. A label nobody can see is a label that is
-  # not there, and it fails silently in the one direction that matters (an operator scanning a
-  # list concludes the marker was never posed).
-  #
-  # One tint per PROTOCOL family, and the four `stage/*` keep a progression readable without a
-  # legend (blue → yellow → purple → green = brief-review → build → review → merged). The palette
-  # is reserved for labels that MEAN something mechanically; the decorative `type:*` register gets
-  # a visible neutral instead of borrowing a protocol tint, so a color rhyme never suggests a
-  # kinship the code does not have.
-  defp label_color(@lbl_in_flight), do: "#FF9900"
-  defp label_color(@lbl_awaits_arch), do: "#CC6666"
-  defp label_color(@lbl_destination_workshop), do: "#33BBCC"
-  defp label_color("stage/brief-review"), do: "#6699CC"
-  defp label_color("stage/build"), do: "#FFCC33"
-  defp label_color(@lbl_stage_review), do: "#9966CC"
-  defp label_color(@lbl_stage_merged), do: "#99CC66"
-  # Deliberately NOT a green: `retired` is the twin of `merged` in position and its opposite in
-  # meaning — a ticket that closed without delivering. A shared hue would read as a delivery.
-  defp label_color(@lbl_stage_retired), do: "#777788"
-  defp label_color("wfmap/" <> _map), do: "#CC99CC"
-  defp label_color("type:" <> _kind), do: "#999999"
-  defp label_color(_), do: "#999999"
-
-  # Description PER FAMILY (Gitea tooltip on hover) — the NAME stays the protocol (LCARS vocab intact,
-  # parsed as-is by the code), the description is the ONLY place where we explain in plain terms to a human
-  # looking at the forge without the code in front of them. `wfmap/<map>` and `stage/<step>` have
-  # dynamic values (map name / step name varying by workflow_map) → match on the PREFIX, not the
-  # exact value (unlike `label_color`, which differentiates each stage it knows by name).
-  defp label_description(@lbl_in_flight),
-    do:
-      "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
-
-  defp label_description(@lbl_awaits_arch),
-    do:
-      "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
-
-  defp label_description("stage/" <> _step),
-    do:
-      "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
-
-  defp label_description("wfmap/" <> map) do
-    case card_description(map) do
-      {:ok, desc} ->
-        String.slice(
-          "Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc,
-          0,
-          240
-        )
-
-      :error ->
-        "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
-    end
-  end
-
-  # Ce texte est lu par un HUMAIN sur la forge, et il a nommé la mauvaise branche pendant tout le
-  # chantier des trois faces : il disait « la voie ops (branche ops) » alors que le livrable
-  # documentaire part sur `workshop`. `ops` est le registre que le runtime écrit, qu'aucun
-  # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
-  defp label_description(@lbl_destination_workshop),
-    do:
-      "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche workshop, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
-
-  defp label_description("type:" <> _kind),
-    do:
-      "Type VISUEL du ticket — décoratif, aucun mécanisme ne le lit. Il suit la destination : ce qui ROUTE est `destination/*`."
-
-  defp label_description(_),
-    do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
-
-  defp card_description(map) do
-    case Fleet.Workflow.Loader.load!(map)["description"] do
-      desc when is_binary(desc) and desc != "" -> {:ok, desc}
-      _ -> :error
-    end
-  rescue
-    _ -> :error
   end
 
   @doc """
