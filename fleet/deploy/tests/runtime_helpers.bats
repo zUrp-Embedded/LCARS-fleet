@@ -401,6 +401,78 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
     || { echo "le decor ne tient pas sa propre racine : $output"; return 1; }
 }
 
+# ─── CE QUE LA COPIE EMPORTAIT, ET QUE `git` NE VOIT MEME PAS ───────────────────────────────────
+#
+# ⚠ 73 Mo SUR 76, ET AUCUN N'EST VERSIONNE. Mesure du 2026-09-02 sur l'arbre de travail :
+# `fleet/deploy` pese 2,4 Mo dans git et 76 Mo sur disque. L'ecart ENTIER est le cache de providers
+# tofu (`deps/.terraform` + `deps/instance/.terraform`), que la boucle `EMBEDDED` recopiait sous
+# `/opt/lcars` a chaque apply. C'est le meme defaut que les 176 Mo de `npm ci` — deja corrige pour
+# la boucle de la RACINE (`--exclude=node_modules`, et son commentaire dit « un artefact local que
+# `cp -a` aurait recopie »), jamais applique a celle-ci.
+#
+# ⚠ ET LE `.tfstate` EST LE CAS GRAVE, PAS LE CAS DE FIGURE. `forge-gestures.sh` l'ecrit noir sur
+# blanc : « `cmd_apply` joue la recette DANS `$RECIPE_DIR`, donc y laisse un `terraform.tfstate` ».
+# Sur un poste ou l'operateur a joue la recette depuis son checkout, ce fichier EXISTE, il porte les
+# jetons de la forge, et `cp -a` le posait sous un prefix lisible par tout le groupe `fleet`.
+#
+# ⚠ LE DECOR PORTE AUSSI UN FICHIER QUI DOIT ARRIVER (`charte.tf`). Sans lui, ces temoins seraient
+# verts sur un module qui ne copie plus RIEN — le seul echec qu'une liste d'exclusions puisse
+# produire en silence.
+racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locaux de la recette tofu
+  local src; src="$(racine_paquet)"
+  mkdir -p "$src/fleet/deploy/deps/.terraform/providers"
+  head -c 4096 /dev/zero > "$src/fleet/deploy/deps/.terraform/providers/gros.bin"
+  printf '{"outputs":{"admin_token":{"value":"JETON-DE-FORGE"}}}\n' \
+    > "$src/fleet/deploy/deps/terraform.tfstate"
+  printf 'admin_token = "JETON-DE-FORGE"\n' > "$src/fleet/deploy/deps/secrets.tfvars"
+  printf 'resource "gitea_org" "x" {}\n'    > "$src/fleet/deploy/deps/charte.tf"
+  printf '%s\n' "$src"
+}
+
+@test "EMBEDDED : le cache de providers tofu n'est JAMAIS recopie sous le prefix" {
+  stub_curl "peu importe"
+  local src; src="$(racine_avec_artefacts)"
+  run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" \
+    bash "$src/fleet/deploy/modules.d/62-runtime-helpers.sh" apply
+  local pose="$LCARS_HELPERS_DIR/fleet/deploy/deps"
+  # LE TEMOIN DU TEMOIN D'ABORD : la recette elle-meme est bien arrivee. Sans cette ligne, un module
+  # qui ne copie plus rien passerait les trois assertions suivantes.
+  [ -s "$pose/charte.tf" ] \
+    || { echo "la recette n'est pas arrivee — l'exclusion mord ce qu'elle ne doit pas"; echo "$output"; return 1; }
+  [ ! -e "$pose/.terraform" ] \
+    || { echo "le cache de providers a ete recopie sous le prefix ($pose/.terraform)"; return 1; }
+}
+
+@test "EMBEDDED : l'etat tofu et ses variables — les JETONS ne voyagent pas sous /opt/lcars" {
+  stub_curl "peu importe"
+  local src; src="$(racine_avec_artefacts)"
+  run env PROVISION_LIB="$src/fleet/deploy/lib/provision-lib.sh" \
+    bash "$src/fleet/deploy/modules.d/62-runtime-helpers.sh" apply
+  local pose="$LCARS_HELPERS_DIR/fleet/deploy/deps"
+  [ -s "$pose/charte.tf" ] || { echo "decor casse : la recette n'est pas arrivee"; echo "$output"; return 1; }
+  [ ! -e "$pose/terraform.tfstate" ] \
+    || { echo "l'etat tofu — donc les jetons — a ete pose sous le prefix"; return 1; }
+  [ ! -e "$pose/secrets.tfvars" ] \
+    || { echo "les variables tofu ont ete posees sous le prefix"; return 1; }
+  # ⚠ ET ON CHERCHE LE JETON LUI-MEME, pas seulement les noms de fichiers : c'est la consequence
+  # qu'on refuse, pas la forme. Un futur artefact d'un autre nom porterait la meme fuite.
+  ! grep -rq 'JETON-DE-FORGE' "$LCARS_HELPERS_DIR" 2>/dev/null \
+    || { echo "un jeton de forge est lisible sous $LCARS_HELPERS_DIR"; return 1; }
+}
+
+@test "EMBEDDED et EMBEDDED_ROOT partagent UNE liste d'exclusions — deux copies derivent" {
+  # Le defaut d'origine EST une seconde liste : la boucle de la racine excluait `node_modules`, la
+  # boucle de `fleet/` n'excluait rien, et le commentaire qui justifiait l'exclusion vivait a cote
+  # de celle qui l'appliquait. Une seule declaration, deux usages.
+  [ "$(grep -c -- '"${EMBEDDED_EXCLUDE\[@\]}"' "$MOD")" -eq 2 ] \
+    || { echo "les deux boucles ne partagent pas la meme liste d'exclusions"; return 1; }
+  grep -qE '^\s*--exclude=\.terraform$' "$MOD"
+  grep -qE '^\s*--exclude=node_modules$' "$MOD"
+  # ⚠ ET PLUS AUCUN `cp -a` DANS LA POSE : c'est lui qui ne pouvait pas exclure a la source.
+  ! grep -q 'cp -a "$(repo_root)/fleet/\$n"' "$MOD" \
+    || { echo "la boucle EMBEDDED copie encore par cp -a, qui n'exclut rien"; return 1; }
+}
+
 @test "MIGRATION : un discriminant PERIME est retire, il ne survit pas a sa cause" {
   # Le fichier herite d avant ce correctif — un tampon d auxiliaires ecrit sous le nom du
   # discriminant. Un apply en livraison source doit le RETIRER, sinon la machine continue de se

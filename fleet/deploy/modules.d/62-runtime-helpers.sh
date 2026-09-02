@@ -112,6 +112,33 @@ EMBEDDED=(deploy etc services bin)
 #   catalogues  le catalogue de demonstration (`48-forge-host`)
 EMBEDDED_ROOT=(assets catalogues)
 
+# ─── CE QUE LA COPIE N'EMPORTE PAS — UNE SEULE LISTE, POUR LES DEUX BOUCLES ──────────────────────
+#
+# ⚠ `cp -a` EMPORTAIT 73 Mo QUE `git` NE VOIT MEME PAS. Mesure du 2026-09-02, arbre de travail :
+# `fleet/deploy` pese 2,4 Mo dans git et 76 Mo sur disque. L'ecart ENTIER est `deps/.terraform` +
+# `deps/instance/.terraform` — le cache de providers tofu, gitignore, recopie sous `/opt/lcars` a
+# chaque apply. Les deux AUTRES copieurs de cette recette (`46-tofu`, `48-forge-host`) faisaient
+# deja `rm -rf "$work/.terraform"` juste apres leur `cp -a` ; cette boucle-ci ne retirait rien.
+#
+# ⚠ ET LE `.tfstate` N'EST PAS UNE PRECAUTION ABSTRAITE. `forge-gestures.sh` le dit lui-meme :
+# « `cmd_apply` joue la recette DANS `$RECIPE_DIR`, donc y laisse un `terraform.tfstate` ». Sur un
+# poste ou l'operateur a joue la recette depuis son checkout, ce fichier EXISTE, il porte les jetons
+# de la forge — et `cp -a` le posait sous un prefix lisible par tout le groupe `fleet`. Le
+# `.gitignore` de la recette nomme exactement ces artefacts ; c'est sa liste qu'on reprend.
+#
+# C'est le raisonnement deja ecrit plus bas pour `node_modules` (« un artefact local que `cp -a`
+# aurait recopie »), applique a l'autre boucle : rien ne justifiait qu'il ne vaille que la-bas.
+# UNE liste pour les deux — deux copies d'un meme contrat derivent, et celle qu'on lit n'est jamais
+# celle qu'on a corrigee.
+EMBEDDED_EXCLUDE=(
+  --exclude=.terraform
+  --exclude=node_modules
+  --exclude='*.tfstate'
+  --exclude='*.tfstate.*'
+  --exclude='*.tfvars'
+  --exclude=crash.log
+)
+
 helper_current() { # <nom> — 0 si la copie posée est IDENTIQUE à la source
   cmp -s "$SRC_DIR/$1" "$HELPERS_DIR/$1"
 }
@@ -309,7 +336,11 @@ BLOC
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(repo_root)/fleet/$n" ]] || { p_fail "source absente: $(repo_root)/fleet/$n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n.new"
-    cp -a "$(repo_root)/fleet/$n" "$EMBEDDED_FLEET/$n.new" \
+    ensure_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    # `tar` plutot que `cp -a` : il EXCLUT a la source, donc les 73 Mo de cache tofu ne sont jamais
+    # ecrits — pas ecrits puis retires, JAMAIS ecrits. Meme forme que la boucle de la racine.
+    ( cd "$(repo_root)/fleet/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
+      | ( cd "$EMBEDDED_FLEET/$n.new" && tar -xf - ) \
       || { p_fail "copie ratée: fleet/$n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n"
     mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
@@ -321,7 +352,7 @@ BLOC
   #
   # ⚠ TROIS LECTURES SORTENT DE `fleet/`, ET AUCUNE N'ETAIT EMBARQUEE. `44-media` lit
   # `$(repo_root)/assets` (les medias, ET les sources de la doc) ; `48-forge-host` lit
-  # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus fait `cp -a "$(repo_root)/fleet/$n"` :
+  # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus part de `$(repo_root)/fleet/$n` :
   # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
   #
   # MESURE DU 2026-09-01, banc 2007 : un apply rejoue depuis `/opt/lcars/fleet/deploy/provision` —
@@ -343,7 +374,7 @@ BLOC
     ensure_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc on ne copie jamais les 179 Mo qu'il
     # faudrait ensuite retirer. Meme outil que celui qui pose node, deja un pre-requis du rail.
-    ( cd "$(repo_root)/$n" && tar -cf - --exclude=node_modules . ) \
+    ( cd "$(repo_root)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
       | ( cd "$HELPERS_DIR/$n.new" && tar -xf - ) \
       || { p_fail "copie ratée: $n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n"
