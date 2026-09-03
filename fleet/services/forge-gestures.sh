@@ -92,7 +92,7 @@ STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 _entrypoint_path() {
   local here c
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for c in "$here/entrypoint.sh" "$here/fleet/deploy/docker/entrypoint.sh"; do
+  for c in "$here/entrypoint.sh" "$here/deploy/docker/entrypoint.sh"; do
     [[ -r "$c" ]] && { printf '%s' "$c"; return 0; }
   done
   # Aucun candidat lisible : on rend le premier quand meme, pour qu'un refus NOMME un chemin.
@@ -104,7 +104,7 @@ need_entrypoint() {
   [[ -r "$ENTRYPOINT" ]] && return 0
   die "portes outil du release introuvables ($ENTRYPOINT).
   Ce script les appelle pour resoudre, verifier et enroler un catalogue. Sur un poste elles vivent
-  dans l'arbre embarque (<prefixe>/fleet/deploy/docker/entrypoint.sh), pose par « provision apply ».
+  dans l'arbre embarque (<prefixe>/deploy/docker/entrypoint.sh), pose par « provision apply ».
   « LCARS_ENTRYPOINT=<chemin> » force la resolution."
 }
 
@@ -113,7 +113,7 @@ die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 need_forge_url() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
     echo "forge-gestures: cette boite n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
-    echo "                FORGE_BASE_URL=<url> fleet/deploy/box up, puis rejoue." >&2
+    echo "                FORGE_BASE_URL=<url> deploy/box up, puis rejoue." >&2
     exit 2; }
 }
 
@@ -310,9 +310,9 @@ cmd_apply() {
   seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
 
   local manque=""
-  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> fleet/deploy/box up"
-  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config"
-  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> deploy/box up"
+  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> deploy/box config"
+  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> deploy/box config"
   if [[ -n "$manque" ]]; then
     printf 'forge-gestures: la boite ne detient pas ce qu il faut :%b\n' "$manque" >&2
     exit 1
@@ -453,7 +453,7 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   need_forge_url
   [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
 
   # ⚠ LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` : cette ligne en est une
   # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Rendu reglable ICI seulement, il
@@ -485,7 +485,7 @@ cmd_runner_token() {
   local tok
   tok="$(read_stdin_secret)"
   [[ -n "$tok" ]] || tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
 
   local body
   body="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -516,9 +516,9 @@ cmd_install() {
   need_entrypoint
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
-  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config »"
+  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> deploy/box config »"
 
   # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
   #    avec son code — on ne traduit pas, on relaie.

@@ -3091,7 +3091,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
       _ ->
         # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
-        # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
+        # guards the PERIMETER — is `deploy` part of this artifact — and it was doing that job
         # alone. The population is a different question: these are TWO roots, only one of them is
         # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
         # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`
@@ -4847,7 +4847,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
           remediation: "—",
           status: :pass,
           evidence: [],
-          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+          note: "NOT CHECKED here (deploy absent from this artifact — runtime-only context)"
         }
 
       :required ->
@@ -6018,7 +6018,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
   # WHY THIS EXISTS, and it is worth three findings in one evening: nothing in this repo
-  # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
+  # answered "which test corpora exist, and which ones do we run". `deploy/tests`
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
   # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
@@ -6031,7 +6031,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # chaine d'install, et ils ont leur propre porte depuis le detachement. `:gated` aurait ete FAUX
     # ici — `shell_gate.sh` ne les decouvre plus — et `{:out, why}` aurait ete pire : ils sont joues,
     # simplement ailleurs. D'ou le troisieme etat, qui NOMME la porte au lieu de la sous-entendre.
-    {"fleet/deploy/tests", {:gated_by, "fleet/deploy/gate.sh"}},
+    {"deploy/tests", {:gated_by, "deploy/gate.sh"}},
     {"fleet/git-hooks/tests", :gated},
     {"fleet/vendor/token_saver/lcars_tests", :gated},
     {"fleet/vendor/token_saver/tests",
@@ -6149,7 +6149,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   end
 
   # LES DEUX ARBRES DE TEMOINS, ET LEURS RACINES. Le depot porte DEUX programmes : le runtime
-  # (`fleet/`) et son installeur (`fleet/deploy/`), qui doit pouvoir vivre sans lui. Chacun a son
+  # (`fleet/`) et son installeur (`deploy/`), qui doit pouvoir vivre sans lui. Chacun a son
   # arbre de temoins, et dans chacun le chemin d'un temoin est celui de sa cible.
   #
   # ⚠ `lib` EST ELIDE D'UN COTE ET PAS DE L'AUTRE, et ce n'est pas une incoherence — c'est la seule

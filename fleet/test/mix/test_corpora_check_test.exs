@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
   The instrument that answers "which test corpora exist, and which ones do we run".
 
   It exists because nothing did, and that cost three findings in one evening (2026-08-05):
-  `fleet/deploy/tests` and `fleet/git-hooks/tests` had never been run by any gate, and
+  `deploy/tests` and `fleet/git-hooks/tests` had never been run by any gate, and
   `fleet/tests/unit/v1` had been failing at `setup` on all 447 of its cases since a tidying commit
   moved the paths out from under it. All three were found by a `find` run out of curiosity.
 
@@ -56,7 +56,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       ~w(fleet/test .claude/skills fleet/git-hooks/tests fleet/vendor/token_saver/lcars_tests)
     )
 
-    porte.(Path.join(runtime, "deploy/gate.sh"), ~w(fleet/deploy/tests))
+    porte.(Path.join(runtime, "deploy/gate.sh"), ~w(deploy/tests))
 
     runtime
   end

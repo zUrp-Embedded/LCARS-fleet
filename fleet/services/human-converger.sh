@@ -30,7 +30,7 @@ TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_toke
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
-PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
+PROVISION="${LCARS_PROVISION:-/opt/lcars/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme

@@ -133,7 +133,7 @@ while [[ $# -gt 0 ]]; do
     # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
     # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
     --consented) echo "  --consented est retire : la porte ne se rejoue plus sous sudo." >&2
-                 echo "  Le rail poste vit dans fleet/deploy/workstation, et son escalade n'a rien a sauter." >&2
+                 echo "  Le rail poste vit dans deploy/workstation, et son escalade n'a rien a sauter." >&2
                  exit 1 ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
     --branch) BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
@@ -173,7 +173,7 @@ preflight_ok=1
 say_ok()   { echo "  ${G}[ok]${N} $1"; return 0; }
 say_miss() { echo "  ${R}[MANQUE]${N} $1"; preflight_ok=0; }
 
-PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
+PROVISION="$SCRIPT_DIR/deploy/provision"
 FACTS_FILE=""
 fait() { # fait <nom> — la valeur mesurée, vide si le fait n'a pas été posé
   [[ -n "$FACTS_FILE" ]] || return 0
@@ -213,7 +213,7 @@ EOF
 # ⚠ SOUS L'HUMAIN, SANS SUDO. L'ancienne porte clonait EN ROOT (`runuser`) après son escalade : le
 # clone appartenait à root, et `git` le lisait ensuite en « dubious ownership ». Ici il n'y a pas
 # d'escalade du tout — git est le seul prérequis de cette étape.
-if [[ -z "$SCRIPT_DIR" || ! -x "$SCRIPT_DIR/fleet/deploy/provision" ]]; then
+if [[ -z "$SCRIPT_DIR" || ! -x "$SCRIPT_DIR/deploy/provision" ]]; then
   command -v git >/dev/null 2>&1 || {
     echo "  ${R}git est absent, et c'est le seul prérequis de cette étape.${N}"
     echo "    apt install git   (ou l'équivalent de ta distro)"
@@ -232,7 +232,7 @@ if [[ -z "$SCRIPT_DIR" || ! -x "$SCRIPT_DIR/fleet/deploy/provision" ]]; then
       || { echo "  ${R}le clone a échoué — règle-le, puis relance.${N}"; exit 1; }
   fi
   SCRIPT_DIR="$SRC_DIR"
-  PROVISION="$SCRIPT_DIR/fleet/deploy/provision"
+  PROVISION="$SCRIPT_DIR/deploy/provision"
   [[ -x "$PROVISION" ]] || {
     echo "  ${R}provision introuvable après la source : $PROVISION${N}"
     echo "  L'arbre est incomplet — ce n'est pas docker qui manque, c'est le checkout."
@@ -422,7 +422,7 @@ else
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : fleet/deploy/workstation doctor · fleet/deploy/box doctor"
+    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box doctor"
     exit 0
   fi
   ans=""
@@ -580,7 +580,7 @@ else
   _banner_body=(
     "  Pas de paquet, pas d'utilisateur, pas de groupe, rien"
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
-    "  Pour tout défaire : ${W}fleet/deploy/box reset${N} — 30 s."
+    "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
   )
   if [[ -n "${PROV_DOCKER_SUDO:-}" ]]; then
     _banner_body+=(
@@ -616,13 +616,13 @@ if [[ "$RAIL" == "box" ]]; then
   #
   # Ce que ce bloc lisait était de toute façon MORT depuis E1 : `PROV_DOCKER_DENIED`,
   # `PROV_DOCKER_WHY`, `docker_endpoint`. Trois variables d'une lib que cette porte ne source plus.
-  [[ -x "$SCRIPT_DIR/fleet/deploy/box" ]] || {
-    echo "  ${R}fleet/deploy/box introuvable — ce rail exige le checkout complet.${N}"
+  [[ -x "$SCRIPT_DIR/deploy/box" ]] || {
+    echo "  ${R}deploy/box introuvable — ce rail exige le checkout complet.${N}"
     echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"
     exit 1
   }
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    exec "$SCRIPT_DIR/fleet/deploy/box" doctor
+    exec "$SCRIPT_DIR/deploy/box" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
   # ─── L'ARITÉ SE DÉCLARE, ELLE NE SE SUPPOSE PAS ────────────────────────────────────────────────
@@ -705,7 +705,7 @@ if [[ "$RAIL" == "box" ]]; then
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
     echo "  Deux voies :"
     echo "    ${W}--bench${N}                     LCARS monte une forge jetable, un runner et un humain de démo"
-    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« fleet/deploy/box forge-check »)"
+    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« deploy/box forge-check »)"
     exit 1
   fi
 
@@ -727,11 +727,11 @@ if [[ "$RAIL" == "box" ]]; then
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI + humain de démo, en un geste."
     # Le délégué reçoit la résolution du daemon, il ne la refait pas — le fait vient du module.
     export DOCKER_BIN="$(fait docker_bin)"
-    exec "$SCRIPT_DIR/fleet/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
+    exec "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""
-  echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/box"
-  exec "$SCRIPT_DIR/fleet/deploy/box" up
+  echo "  ${W}up${N} — la sortie qui suit est celle de deploy/box"
+  exec "$SCRIPT_DIR/deploy/box" up
 fi
 
 # ─── LA BRANCHE POSTE : on délègue, comme pour la boîte ─────────────────────
@@ -748,9 +748,9 @@ fi
 #
 # Le rail poste et le rail boîte sortent maintenant par la même forme : un `exec` vers un délégué du
 # clone, et le code de retour est le sien.
-WORKSTATION="$SCRIPT_DIR/fleet/deploy/workstation"
+WORKSTATION="$SCRIPT_DIR/deploy/workstation"
 [[ -x "$WORKSTATION" ]] || {
-  echo "  ${R}fleet/deploy/workstation introuvable — ce rail exige le checkout complet.${N}"
+  echo "  ${R}deploy/workstation introuvable — ce rail exige le checkout complet.${N}"
   echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --workstation"
   exit 1
 }
@@ -771,7 +771,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$WORKSTATION" doctor "${PASSTHRU[@]}"
 fi
 echo ""
-echo "  ${W}up${N} — la sortie qui suit est celle de fleet/deploy/workstation"
+echo "  ${W}up${N} — la sortie qui suit est celle de deploy/workstation"
 exec "$WORKSTATION" up "${PASSTHRU[@]}"
 
 }

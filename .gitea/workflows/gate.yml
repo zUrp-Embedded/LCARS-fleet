@@ -58,7 +58,7 @@ jobs:
         working-directory: .
         run: |
           set -eu
-          lib=fleet/deploy/lib/provision-lib.sh
+          lib=deploy/lib/provision-lib.sh
           # ⚠ CE SONT DES PLANCHERS, PLUS DES PINS, ET `setup-beam` SAIT LES LIRE. Le rail poste
           # epinglait `PROV_ELIXIR_VERSION` (1.18.4) parce que l'apt de la distro d'alors servait
           # 1.14 ; sur la cible (ubuntu 26.04) il sert 1.18.3, donc le pin est tombe et il ne reste
@@ -154,4 +154,4 @@ jobs:
       # La même borne, pour la même raison : un gate sans fin ne rend pas un verdict tardif, il n'en
       # rend aucun. Mesure du 2026-09-03 sur ce poste : 1302 cas en ~7 min.
       - name: Gate de l'installeur (la chaîne d'install, bats)
-        run: timeout --signal=TERM --kill-after=60s 20m bash fleet/deploy/gate.sh
+        run: timeout --signal=TERM --kill-after=60s 20m bash deploy/gate.sh

@@ -89,7 +89,7 @@ wsl -d builder -- whoami   # vérifier
 # Renommer le répertoire partagé #2_Home (adapter le chemin réel) :
 # Rename-Item "X:\...\#2_Home\build-arm" "builder"
 # puis depuis architect :
-bash /home/wsl-root/#0_LCARS-fleet/deploy.sh
+bash /home/wsl-root/#0_LCARS-deploy.sh
 # si OK :
 wsl --unregister build-arm
 del C:\WSL\backups\build-arm-backup.tar

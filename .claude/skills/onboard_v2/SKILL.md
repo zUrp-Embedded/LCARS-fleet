@@ -50,7 +50,7 @@ Do NOT proceed. Deployment error, not user error.
 ## Step 1 — Pre-flight
 
 ```bash
-fleet/deploy/provision doctor          # v1 onboard-preflight.sh retire 2026-08-06 (excommunion) ; la sonde read-only v2 est `doctor`
+deploy/provision doctor          # v1 onboard-preflight.sh retire 2026-08-06 (excommunion) ; la sonde read-only v2 est `doctor`
 ```
 
 Parse all KEY=VALUE output. If `DEPLOY_OK=true`: onboarding already complete, offer re-run. STOP.
@@ -299,7 +299,7 @@ Only if `OFFLINE_BOOTSTRAP=true` from preflight:
 FLEET_USER=$(_yq '.fleet.identity.fleet_user' ~/.lcars/fleet/fleet.yaml)
 gh auth token --hostname github.com \
     | sudo -u "$FLEET_USER" gh auth login --with-token --hostname github.com 2>/dev/null || true
-sudo fleet/deploy/provision apply      # v1 post-install-offline.sh retire 2026-08-06 ; un seul geste idempotent remplace la chaine
+sudo deploy/provision apply      # v1 post-install-offline.sh retire 2026-08-06 ; un seul geste idempotent remplace la chaine
 ```
 
 Report result.
@@ -324,7 +324,7 @@ fi
 bash ~/.lcars/fleet/fleet-build-yaml.sh
 
 # Redeploy (propagates git config, remotes, credentials)
-sudo fleet/deploy/provision apply 2>&1 | tail -5   # v1 deploy.sh retire 2026-08-06 ; meme geste que ci-dessus, idempotent
+sudo deploy/provision apply 2>&1 | tail -5   # v1 deploy.sh retire 2026-08-06 ; meme geste que ci-dessus, idempotent
 ```
 
 ---

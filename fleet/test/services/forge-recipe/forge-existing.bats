@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/forge_existing.bats
+# SOURCE: fleet/test/services/forge-recipe/forge-existing.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
 # STATUS: bats tests for deps/forge-existing.sh — la sonde qui alimente les blocs `import`

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/deploy/tests/forge_charte.bats
+# SOURCE: fleet/test/services/forge-recipe/provision-forge-charte.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for deps/provision-forge-charte.sh — 6-115 + la fuite argv jumelle

@@ -113,7 +113,7 @@ say "gate du RUNTIME (compile strict + suite + bats + contrats + topologie + dia
 # rougir sur du code neuf, et parce que la release qui suit en depend. Mais les DEUX sont des
 # conditions, aucune n'est un avertissement.
 say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
-bash fleet/deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
+bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
 say "release prod…"
 ( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"

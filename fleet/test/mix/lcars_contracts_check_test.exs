@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   """
   use ExUnit.Case, async: true
 
-  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « fleet/deploy
+  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « deploy
   # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
   # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
   # absent rend `[]` en silence : un `deploy/` present avec un `modules.d/` vide ou deplace donnait

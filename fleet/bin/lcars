@@ -407,7 +407,7 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
   machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
   quantite de reessais ne le repose — c'est un geste d'admin, une fois :
-    FORGE_ADMIN_TOKEN=<jeton site-admin> fleet/deploy/box config
+    FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/box config
   « journalctl -u lcars-catalogue » dit lequel des quatre cas c'est." ;;
     forge_unreachable)
       die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.

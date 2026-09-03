@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   alias Mix.Tasks.Lcars.Contracts.Check
 
   # The admissible `:pass` on nothing, admissible because it SAYS so: the note reads "NOT CHECKED
-  # here (fleet/deploy absent from this artifact — runtime-only context)". A pass that declares it
+  # here (deploy absent from this artifact — runtime-only context)". A pass that declares it
   # looked at nothing is an answer; a pass that stays silent about it is the defect.
   #
   # THIS LIST IS AN ALLOW-LIST BY ID, NOT A NOTE-SNIFFER, AND THAT IS DELIBERATE. Matching on the
@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # that this list must be edited when a check of this shape is added — which is exactly the moment
   # to ask whether the exemption is warranted.
   #
-  # The three entries share ONE cause: their subject is `fleet/deploy`, which the image's `build`
+  # The three entries share ONE cause: their subject is `deploy`, which the image's `build`
   # stage excludes on purpose (a compose edit would otherwise invalidate the layer and repay a ~10
   # min gate). They are checks about the MACHINE, played inside an artifact that does not carry it.
   #

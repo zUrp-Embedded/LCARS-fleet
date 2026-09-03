@@ -18,7 +18,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   ## Pourquoi ici et pas dans `lcars.contracts.check`
 
   C'est la forme de `toolchain.branch_single_source`, qui vit là-bas — mais qui a dû s'inscrire sur
-  la liste d'exemptions de `NoCheckPassesOnNothingTest`, parce que son sujet (`fleet/deploy`) est
+  la liste d'exemptions de `NoCheckPassesOnNothingTest`, parce que son sujet (`deploy`) est
   absent de l'artefact runtime et qu'un mur y rendrait `:pass` sur un ensemble vide.
 
   Un témoin `mix test` n'a pas ce problème : il tourne sur le DÉPÔT, où `deploy/` existe toujours.
@@ -31,7 +31,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   # supprime. Ce sont les deux seuls fichiers qui portent l'adresse hors du BEAM.
   @mirrors [
     "services/forge-gestures.sh",
-    "deploy/modules.d/45-catalogues.sh"
+    "../deploy/modules.d/45-catalogues.sh"
   ]
 
   test "l'autorite est un litteral GELE — sinon il n'y a rien a comparer" do
