@@ -42,7 +42,7 @@ puis archiver les deux anciens repos et nettoyer les références résiduelles.
 - Ligne ~133 : `_POST_SCRIPT="$HOME/.wsl-setup/post-install.sh"` → supprimer ou pointer vers source LCARS-fleet
 
 **Commit** : `fix(lordzurp): CLAUDE.md + .bashrc — supprimer refs anciens repos`
-**Deploy** : `bash /home/wsl-root/#0_LCARS-deploy.sh` (propagation à tous les agents)
+**Deploy** : `bash /home/wsl-root/#0_LCARS-fleet/deploy.sh` (propagation à tous les agents)
 
 ---
 
@@ -92,7 +92,7 @@ grep -r "claude-directives\|WSL-setup" /home/wsl-root/#0_LCARS-fleet/ \
   | grep -v ".git" | grep -v "#9_archives"
 
 # 2. Vérifier deploy.sh produit le bon état
-bash /home/wsl-root/#0_LCARS-deploy.sh --dry-run 2>/dev/null
+bash /home/wsl-root/#0_LCARS-fleet/deploy.sh --dry-run 2>/dev/null
 
 # 3. Vérifier home lordzurp propre
 ls -la ~/.claude-directives ~/.wsl-setup 2>&1  # doit retourner "No such file"

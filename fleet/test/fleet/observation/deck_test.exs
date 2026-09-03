@@ -162,7 +162,7 @@ defmodule Fleet.Observation.DeckTest do
 
   describe "/media — one installed source, and the guards that keep it one" do
     # ⚠ CE QUE CES TEMOINS TIENNENT. Les avatars ont eu TROIS exemplaires — `assets/` (la marque),
-    # `deploy/deps/avatars/` (les png de la charte forge) et `priv/observation/static/assets/`
+    # `fleet/deploy/deps/avatars/` (les png de la charte forge) et `priv/observation/static/assets/`
     # (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf roles communs differaient entre la
     # marque et ce deck, non par decision mais parce qu'une mise a jour touchait un dossier et pas
     # les autres. Le deck affichait une generation d'avatars pendant que la forge en posait une

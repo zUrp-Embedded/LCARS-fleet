@@ -1,0 +1,193 @@
+# SOURCE: fleet/deploy/docker/docker-compose.yml
+# AUTHOR: DrDree
+# STARDATE: 2026-07-05
+# STATUS: PROTO-V2 — LCARS fleet v2. UN SEUL service : la forge n'est PAS ici (cf. ci-dessous)
+#
+# Detail d'implementation derriere `fleet/deploy/box` — l'humain ne le touche pas.
+#
+# LA FORGE N'EST PAS DANS CE FICHIER, ET C'EST LA DÉCISION QUI COMPTE (user) :
+# LCARS est CATTLE (on ne le soigne pas, on le nuke et on redéploie) ; la forge est le PET —
+# elle porte les repos, les issues, les PR, c'est-à-dire la seule copie durable du travail.
+# Deux natures dans un même projet compose partagent l'interrupteur de destruction : `down -v`
+# emporte les deux, et un drapeau de sécurité ne l'empêche pas — seule la séparation des projets
+# le fait. La forge est donc provisionnée par l'OPÉRATEUR, avec
+# l'outil qu'il veut (app TrueNAS, Docker Desktop, machine dédiée), et LCARS ne la connaît que
+# par deux entrées : son URL, et un token master fourni au déploiement.
+# Pour un BANC (une forge jetable en une commande) : `docker/forge-compose.yml`, projet
+# SÉPARÉ, hors du chemin nominal — cf. son en-tête. Ce dossier s'appelait `dev/`, et le nom mentait
+# depuis qu'on livre le banc complet : ce qu'on tend à quelqu'un pour essayer LCARS n'est pas un
+# outil de développeur.
+#
+# bwrap DANS le conteneur : les pods exigent unshare/mount/pivot_root/setns (userns + mountns).
+# Le profil seccomp Docker par défaut les bloque → cap SYS_ADMIN sur CE service. Trade assumé et
+# documenté : la frontière de containment des PODS est bwrap À L'INTÉRIEUR (l'octogone) ; la
+# frontière du conteneur, elle, est perméable aux syscalls de namespaces. PAS de
+# `privileged: true` (surface bien plus large).
+#
+# 6-071 — L'ARBITRAGE EST MESURÉ, PLUS SUPPOSÉ, et le `seccomp=unconfined` est TOMBÉ. Quatre runs
+# sur l'image du banc, `bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true` :
+#
+#   1. seccomp=unconfined + SYS_ADMIN ........ OK  (l'état d'avant)
+#   2. seccomp=lcars-hardened + SYS_ADMIN .... OK  ← ce que ce fichier pose désormais
+#   3. seccomp=lcars-hardened SANS SYS_ADMIN . KO  « No permissions to create new namespace »
+#   4. seccomp DÉFAUT docker + SYS_ADMIN ..... KO  « pivot_root: Operation not permitted »
+#
+# Donc : le profil durci (défaut docker + les syscalls de namespace, `defaultAction: ERRNO`) suffit,
+# et `SYS_ADMIN` n'est PAS retirable — mesuré, pas déduit. Le run 4 confirme au passage la prémisse
+# de ce commentaire, qui n'avait jamais été vérifiée.
+#
+# ⚠ `apparmor=unconfined` RESTE, et la mesure qui manquait a ete faite le 2026-08-18 sur une Debian
+# 13 dont `docker info` annonce AppArmor : le conteneur y tourne bien `unconfined`, donc AppArmor
+# n'est PAS ce qui bloquait. Cette ligne garde sa raison d'etre et n'a plus a etre reverifiee.
+#
+# ⚠ `systempaths=unconfined` — LA LIGNE SANS LAQUELLE AUCUN POD NE NAIT SUR UN LINUX ORDINAIRE.
+# Meme jour, meme machine : la boite montait, la fleet demarrait, et le pod permanent `starfleet`
+# mourait en boucle sur `bwrap: Can't mount proc on /newroot/proc: Operation not permitted` —
+# jusqu'a l'escalade d'incident. Docker MASQUE des chemins sous `/proc` (mknod par-dessus) ; dans un
+# user-namespace le noyau refuse alors de monter un `/proc` neuf, parce que ce montage cacherait des
+# mounts verrouilles. Le pod ne peut donc pas construire son sanctuaire.
+#
+# Isole en une commande, en tant qu'utilisateur non privilegie, sur l'image du banc :
+#     bwrap --unshare-all --dev-bind / / --proc /proc true
+#       sans systempaths ......... rc=1  « Can't mount proc … Operation not permitted »
+#       avec systempaths ......... rc=0
+#
+# Le chemin du profil est RELATIF au fichier compose, pas au cwd de l'appelant — vérifié par un
+# contrôle : profil retiré d'à côté du compose, docker nomme le chemin absolu qu'il a tenté.
+
+name: lcars
+
+services:
+  lcars:
+    build:
+      context: ../../..
+      dockerfile: fleet/deploy/docker/Dockerfile
+      args:
+        GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
+        BUILD_DATE: "${LCARS_BUILD_DATE:-unknown}"
+    # LE TAG EST UNE VARIABLE, ET CE N'EST PAS DU CONFORT. Ecrit en dur, un `compose build` ECRASE
+    # ce tag pour tout le monde — y compris un banc qui TOURNE et qui le reference : le conteneur
+    # vivant n'est pas touche (il tient son image par son id), mais l'image d'origine cesse d'etre
+    # adressable et son prochain redemarrage le fait glisser en silence sur le code du dernier
+    # build. Mesure du 2026-08-03, sur ce fichier : un build lance avec `LCARS_IMAGE=lcars-fleet:nuit`
+    # a quand meme ecrase `:2`, parce que la variable n'etait lue nulle part ici. Le compose
+    # d'installation, lui, la lisait deja — la dissymetrie etait le piege.
+    #
+    # Pour construire A COTE d'un banc qui travaille : `LCARS_IMAGE=lcars-fleet:<nom> docker compose build`.
+    image: "${LCARS_IMAGE:-lcars-fleet:2}"
+    # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
+    hostname: "${LCARS_HOSTNAME:-bridge}"
+    environment:
+      # ⚠ VIDE EST LA VALEUR NOMINALE, et un défaut ici tuerait la dérivation. L'entrypoint résout le
+      # siège depuis le #1 de la forge ; `LCARS_ADMIRAL` est la SEMENCE du seul cas où rien ne
+      # préexiste (`--bench`, qui la passe lui-même). Le défaut `:-admiral` qui vivait là rendait la
+      # variable TOUJOURS définie dans le conteneur, donc la dérivation ne s'exécutait jamais.
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
+      LCARS_UID: "${LCARS_UID:-1000}"
+      LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
+      # La forge de l'opérateur. Pas de défaut vers un sidecar qui n'existe plus : vide =
+      # les modules forge passent en instruct-only et le doctor le DIT (drift, pas panne).
+      # Depuis un conteneur, l'hôte se joint par `host.docker.internal` (mesuré vivant).
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # LA MEME FORGE, VUE D'UN NAVIGATEUR. `FORGE_BASE_URL` est l'adresse que le SERVEUR compose ;
+      # dans un conteneur c'est le nom du service, que la machine d'une personne ne résout pas. La
+      # porte du deck envoie le navigateur ICI pour s'identifier, donc une valeur interne rend
+      # l'identification impossible depuis n'importe quel autre poste. Vide = on retombe sur
+      # l'interne, et `55-deck-oidc` le DIT en drift plutôt que de poser une porte qui ne s'ouvre pas.
+      FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
+      # Les adresses par lesquelles on entre VRAIMENT sur le deck (séparées par des virgules).
+      # OAuth2 compare le `redirect_uri` EXACTEMENT : une entrée non déclarée échoue au RETOUR,
+      # après l'identification, là où c'est le plus déroutant. La loopback est toujours incluse
+      # par le module ; ce qui se déclare ici, c'est le reste (l'adresse de bind, le nom d'hôte).
+      LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      LCARS_STORE_ROOT: /var/lib/lcars
+    ports:
+      # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
+      # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
+      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+      # ⚠ PLUS AUCUN PORT DE BLOC N'EST PUBLIÉ, ET C'EST LA FIN D'UN GESTE COMMENCÉ À MOITIÉ.
+      #
+      # POURQUOI CE N'EST PAS NEUTRE : les listeners bindent `0.0.0.0` DANS le conteneur — c'est
+      # délibéré, la frontière réelle est la publication. Donc CE BLOC EST LA FRONTIÈRE, et un port
+      # publié en trop est une porte ouverte sur un service qui n'existe pas encore, dans un
+      # conteneur qui porte SYS_ADMIN.
+      #
+      # ⚠ PRÉ-REQUIS DE L'UID TIRÉ DE LA FORGE : tant qu'une plage était pré-publiée par bloc, un
+      # UID non contigu la manquait en silence. `lcars` = id forge 3 → uid 1003 → bloc 21030, hors
+      # de toute plage devinée ici. Ne PAS re-publier par bloc : ce fichier ne peut pas savoir.
+      #
+      # La HOME de la boîte, hors de l'espace des blocs parce qu'elle n'appartient à aucun humain :
+      # c'est la porte de la boîte, et désormais la SEULE avec ssh.
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
+    volumes:
+      - home:/home
+      - var:/opt/lcars/var
+      # LE MAGASIN — des volumes EXTERNES, donc hors projet, donc `down -v` ne peut pas les
+      # emporter. Ce n'est pas de la discipline, c'est le contrat de docker.
+      #
+      # ⚠ MAIS `external` DEPREFIXE AUSSI, ET C'EST POURQUOI LE NOM PORTE LE PROJET. Retirer un
+      # volume du projet joue dans les deux sens : compose ne le detruit pas, et il ne le prefixe pas
+      # non plus. Sans le `name:` derive ci-dessous, DEUX INSTALLATIONS SUR UNE MACHINE tombent sur
+      # les quatre memes volumes — une prod et un test cote a cote, le cas que docker existe pour
+      # servir, et jouer avec le test vide la prod. Le prefixe est le nom du projet compose, qui est
+      # deja l'identite d'une installation ; le motif complet vit dans `lib/store.sh`.
+      #
+      # QUATRE, et il y en avait deux dans le premier jet : trois des cinq chemins declares par le
+      # rail toolchain n'avaient pas de volume. Le pire est `state/` — le perdre ne casse RIEN DE
+      # VISIBLE : la toolchain reste, le pod cesse juste de la voir, l'install sort verte et la
+      # compilation echoue sans que rien ne relie les deux symptomes.
+      #
+      # ⚠ ILS DOIVENT EXISTER AVANT CE `up`, sinon compose refuse de demarrer. C'est
+      # `store_ensure_volumes` (fleet/deploy/lib/store.sh) qui les pose, appelee par le script
+      # d'ENTREE — seul endroit qui s'execute avant. Un `docker compose up` joue a la main sans
+      # passer par lui echouera en nommant le volume manquant : c'est un refus lisible, et il vaut
+      # mieux que de fabriquer un volume vide en silence.
+      - lcars-cache:/var/lib/lcars/cache
+      - lcars-toolchains:/var/lib/lcars/toolchains
+      - lcars-sysroots:/var/lib/lcars/sysroots
+      - lcars-state:/var/lib/lcars/state
+      # PAS de bind-mount de la source ici, et c'est MESURÉ, pas frileux : le daemon ne voit pas
+      # forcément le FS d'où l'on parle (Docker Desktop + WSL non intégrée → le bind se résout
+      # dans le VM du daemon et rend un dossier VIDE, silencieusement — pire que pas de montage,
+      # la fleet croirait sa source présente). La source vit donc DANS le volume d'état, posée
+      # par le geste « box source-push » qui marche quelle que soit la topologie.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      # 6-071 — mesuré : ce profil suffit à bwrap, le défaut docker non (cf. l'en-tête).
+      - seccomp=./lcars-hardened-seccomp.json
+      - apparmor=unconfined
+      - systempaths=unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+    networks: [default]
+
+volumes:
+  # Ceux-ci appartiennent au PROJET : ses humains et son etat sont ceux de CETTE boite, et ils
+  # meurent avec elle.
+  home:
+  var:
+  # ⚠ LA CLEF EST LOCALE, LE `name:` EST LE NOM REEL. La clef (`lcars-cache`) ne sert qu'au montage
+  # ci-dessus ; c'est `name:` que docker voit. `:?` et non `:-` : un prefixe absent doit REFUSER le
+  # up, jamais retomber sur un nom nu — ce nom nu est precisement celui que deux installations se
+  # partageraient. `lib/store.sh` derive les memes noms pour les creer ; les deux lisent la meme
+  # variable, posee par le script d'entree.
+  lcars-cache:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait)}-cache"
+  lcars-toolchains:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"
+  lcars-sysroots:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-sysroots"
+  lcars-state:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
+
+networks:
+  default:

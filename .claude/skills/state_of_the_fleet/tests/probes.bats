@@ -326,7 +326,7 @@ JSONL
 @test "render terminal : la limite est cachee sur un OK, montree des que ce n'est plus vert" {
   run bash -c "$(declare -f fixture); fixture | $PROBES/render.sh"
   # `[[ ]]` plutot que `! … | grep` : un test avec operateur `!=` n'est pas une commande niee,
-  # donc errexit y mord (cf. deploy/tests/refute.bash). La skill n'importe aucun helper —
+  # donc errexit y mord (cf. fleet/deploy/tests/refute.bash). La skill n'importe aucun helper —
   # c'est le seul objet d'ici concu pour voyager sans le depot.
   [[ "$output" != *"limite-A"* ]] || { printf 'INTERDIT : « limite-A » dans la sortie :\n%s\n' "$output" >&2; false; }
   echo "$output" | grep -q "limite-B"

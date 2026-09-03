@@ -2654,7 +2654,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # so it had no business living in the installer tree — and `deps` was a name already taken, by
     # the Elixir dependencies two directories up.
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
-    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
+    lib_path = Path.expand("deploy/lib/provision-lib.sh", root)
 
     # The two SIBLING-TREE lists are outside `fleet`, and one legitimate context does not
     # carry them: the image BUILD stage copies `fleet` ALONE (Dockerfile), then runs this
@@ -2679,7 +2679,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         # d'instance partagee. Le canon ne connait pas cette coupure — il connait les comptes — donc
         # c'est ici qu'on recolle, sans quoi le verrou declarerait trois roles « manquants ».
         {"forge.tf var.roles + var.system_roles defaults",
-         tree_scope(Path.expand("../deploy", root)),
+         tree_scope(Path.expand("deploy", root)),
          merge_lists(
            read_list(tf_path, ~r/variable\s+"roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s, :quoted),
            read_list(
@@ -2691,7 +2691,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
            "its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
+        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
          "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
            "absent here gets no token on a fresh fleet)"}
@@ -2752,25 +2752,6 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
   # Sibling trees that are simply NOT PART of this artifact (runtime-only image build stage).
   defp tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
-
-  # L'ARBRE DONT CE CHEMIN RELEVE — et il y en a maintenant DEUX espèces, depuis que l'installeur
-  # est sorti de `fleet/`. Un miroir de ce registre est écrit relativement au root Mix (`fleet/`) :
-  # `etc/provision-role-tokens.sh` relève de `etc`, `bin/lcars` de `bin`. Ceux de l'installeur, eux,
-  # traversent vers un arbre FRÈRE : `../deploy/lib/provision-lib.sh`.
-  #
-  # ⚠ `hd(Path.split(rel))` VIVAIT ICI, ET IL RENDAIT `".."` POUR TOUT L'INSTALLEUR. `Path.expand("..",
-  # root)` est la racine du dépôt — un répertoire qui existe TOUJOURS — donc `tree_scope` répondait
-  # `:required` quoi qu'il arrive, et les cinq murs qui s'en servent auraient cessé de savoir
-  # distinguer « l'installeur est là » de « l'installeur n'est pas dans cet artefact ». Ils ne
-  # seraient pas devenus rouges : ils auraient continué de mesurer, sur des fichiers absents, en
-  # rapportant des miroirs illisibles comme des divergences. Le contraire exact de ce que le
-  # commentaire d'à côté demande — « a blanket scope is a coverage hole ».
-  defp arbre_de(rel) do
-    case Path.split(rel) do
-      ["..", tree | _] -> Path.join("..", tree)
-      [tree | _] -> tree
-    end
-  end
 
   defp split_out_of_scope(lists) do
     {out, kept} = Enum.split_with(lists, fn {_l, scope, _r, _rem} -> scope == :out_of_scope end)
@@ -3081,7 +3062,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
     # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
     roots = [
-      {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")},
+      {"deploy/modules.d", Path.join(Path.expand("deploy", root), "modules.d")},
       {"etc", Path.join(root, "etc")}
     ]
 
@@ -3102,7 +3083,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
       _ ->
         # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
-        # guards the PERIMETER — is `deploy` part of this artifact — and it was doing that job
+        # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
         # alone. The population is a different question: these are TWO roots, only one of them is
         # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
         # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`
@@ -3630,7 +3611,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @spec check_toolchain_branch_single_source(String.t()) :: result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "../deploy/modules.d/52-ops-branch.sh",
+      "deploy/modules.d/52-ops-branch.sh",
       "services/forge-gestures.sh",
       "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
@@ -3654,7 +3635,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # coverage hole that answers "not my business" on files it is holding.
     {checked, skipped} =
       Enum.split_with(mirrors, fn rel ->
-        tree_scope(Path.expand(arbre_de(rel), root)) == :required
+        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
       end)
 
     id = "toolchain.branch_single_source"
@@ -3862,11 +3843,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
          "the installed root the forge gesture reads"},
         # ⚠ LE CREATEUR, PAS UN LECTEUR — et c'est le miroir qui compte le plus. Si le `COPY` ne
         # suit pas l'autorite, la fleet lit un arbre que l'image n'a jamais ecrit.
-        {"../deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
+        {"deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
          "the image COPY that creates the shipped tree"},
-        {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
+        {"deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
-        {"../deploy/lib/provision-lib.sh",
+        {"deploy/lib/provision-lib.sh",
          ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(installed)}\}"/,
          "the provisioning default"}
       ]
@@ -3877,7 +3858,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # verrous voisins.
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _rx, _what} ->
-          tree_scope(Path.expand(arbre_de(rel), root)) == :required
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
       bad =
@@ -3962,16 +3943,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       # la declaration ILLISIBLE, jamais un prefixe.
       {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
-      {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+      {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
        "the provisioning default"},
-      {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
+      {"deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
       # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
       # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
       # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
+      {"deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
        "the box's uid-map path"},
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
+      {"deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
        "the box's master-token path"}
     ]
 
@@ -3986,7 +3967,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait
     # pas resoudre reste telle quelle et le desaccord se voit — c'est le comportement d'avant.
     prov_defauts =
-      case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
+      case File.read(Path.expand("deploy/lib/provision-lib.sh", root)) do
         {:ok, src} ->
           ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
           |> Regex.scan(src)
@@ -4020,7 +4001,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
     {in_scope, out} =
       Enum.split_with(holders, fn {rel, _, _} ->
-        tree_scope(Path.expand(arbre_de(rel), root)) == :required
+        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
       end)
 
     results = Enum.map(in_scope, read_holder)
@@ -4061,8 +4042,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
         [expected | _] = distinct
 
-        manifest_rel = "../deploy/system.manifest"
-        manifest_scoped? = tree_scope(Path.expand("../deploy", root)) == :required
+        manifest_rel = "deploy/system.manifest"
+        manifest_scoped? = tree_scope(Path.expand("deploy", root)) == :required
 
         manifest_ok? =
           not manifest_scoped? or
@@ -4195,7 +4176,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
          ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
-        {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
+        {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
          "the provisioning default (its token file derives from it)"},
         {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
@@ -4217,7 +4198,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       {checked, skipped} =
         Enum.split_with(mirrors, fn m ->
           rel = elem(m, 0)
-          tree_scope(Path.expand(arbre_de(rel), root)) == :required
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
       bad =
@@ -4764,7 +4745,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
 
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _, _} ->
-          tree_scope(Path.expand(arbre_de(rel), root)) == :required
+          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
       bad =
@@ -4837,8 +4818,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("../deploy/docker/entrypoint.sh", root)
-    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
+    entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
+    module = Path.expand("deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
@@ -4846,14 +4827,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
-    case tree_scope(Path.expand("../deploy", root)) do
+    case tree_scope(Path.expand("deploy", root)) do
       :out_of_scope ->
         %{
           id: "layout.face_roots_provisioned",
           remediation: "—",
           status: :pass,
           evidence: [],
-          note: "NOT CHECKED here (deploy absent from this artifact — runtime-only context)"
+          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
         }
 
       :required ->
@@ -5025,7 +5006,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `deploy/` (COPY explicite, par choix), donc la recette n'y est pas : les listes existantes se
     # skippaient proprement pendant que celle-ci rendait « not readable — fail-closed ». Un gate vert
     # sur l'hote et rouge dans l'image, sur un artefact qui n'a jamais fait partie du perimetre.
-    if File.dir?(Path.expand("../deploy", root)) and File.dir?(catalogue) do
+    if File.dir?(Path.expand("deploy", root)) and File.dir?(catalogue) do
       case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->
           ev =
@@ -5638,7 +5619,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
-    lib = "../deploy/lib/provision-lib.sh"
+    lib = "deploy/lib/provision-lib.sh"
     layout_src = read_or_empty(root, layout)
     cli_src = read_or_empty(root, cli)
     lib_src = read_or_empty(root, lib)
@@ -5666,7 +5647,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # `${VAR:=default}` in the lib, `${VAR:-default}` in the CLI — two different shell operators for
     # the same fact. `shell_default/2` reads both, because the difference is about who ASSIGNS, not
     # about what the default IS.
-    deploy? = File.dir?(Path.expand("../deploy", root))
+    deploy? = File.dir?(Path.expand("deploy", root))
 
     sources =
       [{cli, cli_src, expected || %{}}] ++
@@ -6029,7 +6010,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
   # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
-  # answered "which test corpora exist, and which ones do we run". `deploy/tests`
+  # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
   # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
@@ -6042,7 +6023,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     # chaine d'install, et ils ont leur propre porte depuis le detachement. `:gated` aurait ete FAUX
     # ici — `shell_gate.sh` ne les decouvre plus — et `{:out, why}` aurait ete pire : ils sont joues,
     # simplement ailleurs. D'ou le troisieme etat, qui NOMME la porte au lieu de la sous-entendre.
-    {"deploy/tests", {:gated_by, "deploy/gate.sh"}},
+    {"fleet/deploy/tests", {:gated_by, "fleet/deploy/gate.sh"}},
     {"fleet/git-hooks/tests", :gated},
     {"fleet/vendor/token_saver/lcars_tests", :gated},
     {"fleet/vendor/token_saver/tests",

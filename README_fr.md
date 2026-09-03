@@ -172,7 +172,7 @@ Le runner est déjà enregistré, donc un projet dont la carte exige une CI vert
 ## Détruire
 
 ```bash
-deploy/docker/bench/bench-down.sh --project lcars-nuit
+fleet/deploy/docker/bench/bench-down.sh --project lcars-nuit
 ```
 
 Retire la boîte, la forge, le runner et leurs volumes. Puis, pour récupérer l'espace de build :
@@ -208,11 +208,11 @@ Dit franchement, parce qu'un outil qui cache ses bords fait perdre du temps :
 La pile est faite pour dire ce qui manque plutôt que pour avoir l'air en bonne santé :
 
 ```bash
-deploy/box -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
-deploy/box -p lcars-nuit logs     # le récit que la boîte fait de son propre boot
+fleet/deploy/box -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
+fleet/deploy/box -p lcars-nuit logs     # le récit que la boîte fait de son propre boot
 ```
 
-⚠ `-p lcars-nuit` n'est pas optionnel ici. `deploy/box` vise par défaut un projet appelé `lcars`, et
+⚠ `-p lcars-nuit` n'est pas optionnel ici. `fleet/deploy/box` vise par défaut un projet appelé `lcars`, et
 le banc ci-dessus en crée un appelé `lcars-nuit` — sans le drapeau, tu interrogerais un déploiement
 qui n'existe pas. (`install.sh --box --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
 porte toujours le bon.)

@@ -50,16 +50,16 @@ Look for:
 - References to old paths (`#0_directives`, `#1_docs`, `#2_fleet`, `#7_exchange`, `#8_handoffs` in code)
 - `$HOME/.lcars` used inconsistently vs the canonical symlink
 
-Search in: `fleet/`, `.claude/hooks/`, `*.sh`, `deploy/provision`
+Search in: `fleet/`, `.claude/hooks/`, `*.sh`, `fleet/deploy/provision`
 
 **Group B — Provisioning coherence**
 Look for:
-- Discrepancies between `deploy/provision` and its `modules.d/` steps (the three v1 scripts this named were retired 2026-08-06 with the v1 tree; no v2 file carries their names)
+- Discrepancies between `fleet/deploy/provision` and its `modules.d/` steps (the three v1 scripts this named were retired 2026-08-06 with the v1 tree; no v2 file carries their names)
 - Steps documented in guides but not implemented (or vice versa)
 - Ordering issues in post-install scripts (sourcing before definition, subshell calls losing context)
 - CLAUDE.md directives referenced in scripts that don't match current file content
 
-Search in: `deploy/`, `docs/`
+Search in: `fleet/deploy/`, `docs/`
 
 **Group C — CLAUDE.md directives vs code reality**
 Look for:

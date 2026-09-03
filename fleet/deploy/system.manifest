@@ -1,0 +1,296 @@
+# SOURCE: fleet/deploy/system.manifest
+# STARDATE: (posée par /push-github)
+# STATUS: data, not code — CE QUE LE PROVISIONNEMENT A LE DROIT DE POSER SUR UNE MACHINE.
+# ⚠ IL N'A AUCUN LECTEUR AU MOMENT OU IL EST POSE, ET C'EST VOULU. Trois gestes le liront
+# (`20-groups` pour les GID, `25-directories` pour sa table, `provision uninstall` a l'envers) ;
+# aucun ne peut etre ecrit avant lui. C'etait le trou d'ordre du corpus d'alice : trois gestes
+# bloques sur un objet que personne n'avait la charge de creer.
+#
+# ─── FORMAT ─────────────────────────────────────────────────────────────────────────────────────
+#
+#   <classe>[:<trait>]  <objet>  <mode>  <proprietaire>  <substrat>
+#
+#   classe     prefix   la racine de l'install
+#              dir      un repertoire durable
+#              anchor   un fichier a un chemin FIXE hors prefixe (ce que l'OS ou le PATH exige)
+#              link     un symlink hors prefixe
+#              group    un groupe unix, avec son GID
+#              runtime  un objet volatile, refait au boot (tmpfs)
+#              human    un objet dans le home d'une personne — POSE, jamais preserve
+#              account  un compte unix de SERVICE, avec son groupe propre — retire TOUJOURS
+#              person   un compte unix d'HUMAIN — retire JAMAIS sans `--humans` explicite
+#              docker   un objet docker : conteneur, reseau ou volume
+#              preserve ce qu'une desinstallation ne doit JAMAIS toucher
+#
+# ⚠ POUR `account`, LE `mode` PORTE LE GID et le `proprietaire` porte le shell — une reutilisation de
+# colonnes, assumee, plutot qu'un sixieme champ que sept classes sur neuf laisseraient vide. Le GID
+# est celui du groupe PRIMAIRE eponyme du compte : un compte de service `lcars-deck` a un groupe
+# `lcars-deck` de meme GID, et c'est cela que la colonne fixe.
+# ⚠ POUR `docker`, LE `mode` PORTE LA NATURE — `container`, `network` ou `volume`. Meme reutilisation,
+# meme raison : trois natures qui ne se retirent pas du tout de la meme facon, et un nom d'objet
+# docker ne dit pas laquelle (`lcars` peut etre les trois a la fois).
+#   mode       octal, ou `-` quand la classe n'en porte pas
+#   proprietaire `user:group`, ou `-`
+#   substrat   `any` | `wsl` | `linux` | `docker`, ou une combinaison separee par `+`
+#
+#   `<human>` dans un chemin est un joker : il vaut pour chaque humain enrole.
+#
+# ─── LES TRAITS ─────────────────────────────────────────────────────────────────────────────────
+#
+# Un trait qualifie une classe, il ne la remplace pas : `anchor:cond` EST une ancre. Quatre etats
+# que la classe seule ne sait pas dire, et dont le silence a produit quatre verdicts faux :
+#
+#   cond    POSE SOUS CONDITION — l'objet peut legitimement etre absent. Son absence n'est PAS un
+#           drift : elle est un des deux etats normaux. Sans ce trait, un doctor honnete est force
+#           de mentir dans un sens ou dans l'autre.
+#   merge   MODIFIE, PAS POSE — le fichier appartient a quelqu'un d'autre et le rail y fusionne une
+#           cle. On ne le retire JAMAIS : desinstaller, c'est retirer notre cle, ou ne rien faire.
+#   single  POSE POUR UNE PERSONNE — le joker `<human>` ne s'applique pas. L'objet vise un compte
+#           precis et un seul ; l'etendre a tous les humains serait un autre geste.
+#   unset   MODE OBSERVE, PAS AFFIRME — la colonne `mode` dit ce qu'on a MESURE, le rail ne le fixe
+#           pas. Un doctor qui compare ce mode compare a une valeur que personne ne garantit.
+#
+# Un objet sans trait est : pose inconditionnellement, cree par nous, pour chaque humain quand il
+# porte le joker, avec le mode que le rail AFFIRME. C'est le cas courant, et il ne s'ecrit pas.
+#
+# ─── CE QUI EST DELIBEREMENT ABSENT ─────────────────────────────────────────────────────────────
+#
+# Les paquets apt. Ils ont deja leur table (`10-packages.sh`) et leur temoin bidirectionnel
+# (`deploy_manifest.bats`) ; ce qui manquait etait le JOURNAL — qui distingue `apt_installed` de
+# `apt_already` — et il est genere par machine, pas declare ici.
+
+# ─── LA RACINE ──────────────────────────────────────────────────────────────────────────────────
+prefix    /opt/lcars/runtime                              0750  root:fleet          wsl+linux
+
+# ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
+dir       /opt/lcars                                   0755  root:root           wsl+linux
+# ⚠ COUVERTS PAR LEUR ANCETRE, ET DECLARES QUAND MEME. La regle « un chemin est couvert par ses
+# ancetres » evite une table de cent lignes ; elle n'a jamais dit qu'un objet FONCTIONNEL devait
+# rester anonyme. Un objet dont depend ce que la machine PORTE se nomme dans la table qui dit ce
+# qu'on a le droit d'y poser.
+#
+# ⚠ ET CE SONT DEUX OBJETS, PAS UN — CE COMMENTAIRE A DECRIT LEUR FUSION SANS LA VOIR. Il disait
+# « celui-ci porte deux decisions du rail », en nommant les deux lecteurs d'un fichier unique comme
+# si les avoir enumeres suffisait. Ils portent DEUX FAITS SANS RAPPORT :
+#   .helpers-revision   d'ou sortent les auxiliaires poses ici — ecrit et lu par 62-runtime-helpers
+#   .source-revision    « cet arbre est un PAQUET » — lu par `prov_delivery` pour dire BINAIRE ou
+#                       SOURCE, c'est-a-dire pour decider si la machine porte un toolchain
+# Ils tombaient au meme endroit parce que `repo_root()` remonte exactement a /opt/lcars quand on
+# rejoue la copie : le tampon des auxiliaires se lisait comme le discriminant de livraison, et un
+# poste installe depuis un clone se declarait BINAIRE au rejeu. Le second est desormais PROPAGE
+# dans la copie par 62-runtime-helpers — pose si la livraison est binaire, RETIRE sinon — donc il
+# est ici sur les deux rails, et il dit vrai dans les deux sens.
+anchor:cond /opt/lcars/.source-revision                0644  root:root           any
+anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
+dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
+dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
+dir       /opt/lcars/share                                  0755  root:root           wsl+linux
+dir       /opt/lcars/share/avatars                     0755  root:root           wsl+linux
+dir       /opt/lcars/share/favicon                     0755  root:root           wsl+linux
+dir       /opt/lcars/share/doc                         0755  root:root           wsl+linux
+# ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
+# HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
+# du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la
+# boite en silence : le noeud demarre vert et le premier push meurt sur une auth vide.
+# `lcars-authority` traverse par le groupe `fleet`, dont il est membre.
+# ⚠ CE REPERTOIRE NE CONTIENT PAS QUE DES SECRETS, et c'est ce qui a impose le `0710`. `forge.url`
+# et `forge.public.url` y vivent en `0644` : ce sont des ADRESSES, pas des secrets.
+# `0710` : le groupe TRAVERSE, il ne LISTE pas. Un chemin connu s'ouvre (`forge.url`), l'enumeration
+# des comptes reste fermee, et les secrets restent `0600` — mesure sur banc : `cat forge.url` OK,
+# `ls` refuse, `cat` d'un `0600` refuse.
+dir       /opt/lcars/var/tokens                       0710  lcars-authority:fleet  any
+# ⚠ IL ETAIT EN `/home/catalogues` JUSQU'AU 2026-09-01. Le cache des catalogues installes est du
+# materiel operator-facing, et il vivait la ou l'operateur regarde deja. Ce placement etait paye par
+# cette ligne meme — `dir` et pas `preserve`, donc un uninstall le retire. La promesse est devenue
+# intenable le jour ou `/home` est sorti du perimetre ENTIER : un cache pose sous `/home` serait cree
+# par chaque install et retire par aucune. La SSoT est `Fleet.Layout.@installed_catalogues_root`.
+dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
+# ⚠ `any`, ET C'ETAIT `docker` — MESURE DU 2026-09-01, BANC 2007 (un POSTE) : /var/lib/lcars/tofu/
+# .apply.lock y survit a la desinstallation. `fleet/services/forge-gestures.sh:102` derive
+# `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction de rail, et ce fichier part sur les deux
+# (il est dans `EMBEDDED` de 62-runtime-helpers). Le poste creait donc un repertoire que la table
+# disait propre a la boite : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
+# jamais. Une colonne de substrat trop etroite ne protege rien — elle rend l'objet INVISIBLE au
+# rail qui le cree quand meme.
+dir       /var/lib/lcars                               0755  root:root           any
+
+# ─── LES REPERTOIRES DE TRAVAIL DES GESTES ROOT ─────────────────────────────────────────────────
+#
+# ⚠ ILS N'ETAIENT PAS DECLARES, ET LE SCRIPT CROYAIT QU'ILS L'ETAIENT.
+# `fleet/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
+# RECOPIE ICI : deploy/system.manifest en est la source unique » — puis derive
+# `WORK=/var/tmp/lcars/toolchain-work` (l. 34) que cette table ne nommait nulle part. Le commentaire
+# decrivait une regle que la table n'appliquait pas.
+#
+# CE QUE CA COUTE : `/var/tmp` est 1777. Le premier a creer `/var/tmp/lcars` en est proprietaire, et
+# root travaille ensuite dedans — `curl -o`, `sha256sum -c`, puis `sh "$script"`. Verification et
+# execution sont deux gestes separes sur un chemin dont le proprietaire du parent decide. Declares
+# ici, le rail les POSE et `ensure_mode` re-stat leur proprietaire a chaque passe : la fenetre se
+# ferme au provisionnement, et le doctor la rouvrirait a voix haute.
+dir       /var/tmp/lcars                               0755  root:root           any
+dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
+
+dir       /opt/lcars/var                               0755  root:root           any
+dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
+dir       /etc/lcars                                   0755  root:root           wsl+linux
+
+# ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
+dir       /opt/node-<version>                          0755  root:root           wsl+linux
+
+# ─── ANCRES — fichiers a chemin fixe hors prefixe ───────────────────────────────────────────────
+anchor    /etc/tmpfiles.d/lcars-console.conf           0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-landing.service    0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-converger.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-catalogue.service  0644  root:root           wsl+linux
+anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root           wsl+linux
+anchor    /etc/lcars/host-consent                      0644  root:root           linux
+anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
+anchor    /etc/lcars/seat.uid                          0644  root:root           any
+anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
+anchor    /usr/local/bin/tofu                          0755  root:root           wsl+linux
+anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
+anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
+
+# ─── SYMLINKS DE PATH ───────────────────────────────────────────────────────────────────────────
+
+# ⚠ LES LIENS D'ACTIVATION DE SYSTEMD, POSES PAR `systemctl enable`, JAMAIS PAR NOUS.
+# `64-services:497` fait `enable --now` ; systemd ecrit le lien dans la cible. Ils n'etaient declares
+# nulle part — MESURE DU 2026-08-28 : les quatre survivent a `uninstall --yes`, pointant vers des
+# unites SUPPRIMEES, donc quatre liens morts dans `multi-user.target` que le prochain boot signale.
+# Le nom se compose a l'execution (`unit_path() { "$1.service" }`) sous un repertoire exempte : ni
+# ISO 1/2 ni ISO 2/2 ne pouvaient les voir. Les declarer est ce qui les rend retirables.
+link      /etc/systemd/system/multi-user.target.wants/lcars-landing.service     -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
+link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
+
+link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
+link      /usr/local/bin/lcars                         -     -                   wsl+linux
+link      /usr/local/bin/node                          -     -                   wsl+linux
+link      /usr/local/bin/npm                           -     -                   wsl+linux
+link      /usr/local/bin/npx                           -     -                   wsl+linux
+
+# ─── GROUPES ────────────────────────────────────────────────────────────────────────────────────
+group     fleet                                        2000  -                   any
+group     lcars-console                                2001  -                   any
+
+# ⚠ LEUR GID N'EST PAS FIXE, ET C'EST DELIBERE — d'ou le trait `unset`. `21-service-accounts` cree
+# ces deux groupes par `ensure_group`, qui lit cette table : y poser un numero le figerait. Mesure
+# du 2026-08-28 : ils tombent en 2002/2003 parce que 2000 et 2001 sont pris. Les figer demande de
+# choisir des numeros qu'aucune machine installee ne porte — un geste separe, pas un effet de bord
+# de cette ligne.
+# ⚠ ET ILS SE DECLARENT QUAND MEME. Sans ces deux lignes, le groupe propre de chaque compte de
+# service ne dependait que du bon vouloir de `userdel` (qui ne retire un groupe eponyme que sous
+# `USERGROUPS_ENAB`, et seulement s'il l'a cree lui-meme). Un objet dont le retrait depend d'une
+# option de `login.defs` n'est pas retire : il est parie.
+group:unset lcars-authority                            -     -                   any
+group:unset lcars-system                               -     -                   any
+
+# ─── COMPTES DE SERVICE ─────────────────────────────────────────────────────────────────────────
+# Leur groupe PRIMAIRE est le groupe eponyme declare juste au-dessus. `21-service-accounts` le sonde
+# et le converge : `useradd -g` ne vaut qu'a la creation, et un compte qui a derive vers `nogroup`
+# passait au vert en rendant le secret OAuth2 du deck lisible a tout ce qui porte ce groupe.
+account   lcars-authority                              -     /usr/sbin/nologin   any
+account   lcars-system                                 -     /usr/sbin/nologin   any
+
+# ─── VOLATILES — refaits au boot ────────────────────────────────────────────────────────────────
+runtime   /run/lcars                                   0755  root:root           wsl+linux
+runtime   /run/lcars/console                           0711  root:root           wsl+linux
+runtime   /run/lcars/console/<human>                   2710  <human>:lcars-console  wsl+linux
+# Le sgid est porteur : le marqueur pose par le BEAM doit rester du groupe `fleet`.
+runtime   /run/lcars/toolchain                         2775  root:fleet          any
+runtime   /run/lcars/authority                         0750  lcars-authority:fleet  any
+# ─── LES DEUX PORTES DU SERVICE D'AUTORITE ──────────────────────────────────────────────────────
+# ⚠ L'ACL D'UNE SOCKET NE PORTE AUCUNE AUTORISATION. Elle borne qui peut FRAPPER ; qui a le droit se
+# decide par `SO_PEERCRED` puis par une question a la forge. Confondre les deux serait refaire le
+# defaut que ce chantier retire — une decision prise en lisant une projection de groupe.
+# ⚠ `cond`, ET LE RELEVE CROISE DU RANG D EN A DONNE LA PREUVE. Ces deux sockets n'existent que si
+# le service d'autorite TOURNE, et il refuse de demarrer sans `forge-master.token` — ce qu'il dit
+# lui-meme : « ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans
+# elle ». Une boite montee sans `box config` ne les a donc pas, et c'est un de ses deux etats
+# NORMAUX, pas une derive.
+#
+# Mesure du 2026-09-01, bancs 2001 (poste) et 2002 (boite) : elles etaient presentes d'un cote,
+# absentes de l'autre, et la table les declarait sans condition — donc l'un des deux substrats
+# mentait forcement. Sans le trait, il n'y avait aucune facon d'ecrire ce qui est vrai.
+runtime:cond /run/lcars/authority/catalogue.sock       0660  lcars-authority:fleet  any
+runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fleet  any
+# ─── LA PORTE DU SERVICE PRIVILEGIE ─────────────────────────────────────────────────────────────
+runtime   /run/lcars/privileged                        0750  root:fleet          any
+runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
+runtime   /run/lcars-converger.refused                 0644  root:root           any
+
+runtime   /run/lock/lcars                              0700  root:root           any
+
+# ⚠ POSE PAR TOFU LUI-MEME, PAS PAR UN MODULE. `46-tofu` invoque le binaire, qui ecrit son cache de
+# plugins sous le HOME de root. Mesure du 2026-08-28 : present apres l'install, survivant a
+# l'uninstall, et dans aucune liste — ni la mienne, ni celle du plan. C'est le cas « pose par un
+# tiers » : on le declare parce qu'on le PROVOQUE, pas parce qu'on l'ecrit.
+dir       /root/.terraform.d                           0755  root:root           wsl+linux
+runtime   /run/lcars-provision.rc                      0644  root:root           docker
+runtime   /run/lcars-humans.rc                         0644  root:root           docker
+
+# ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
+human     /home/<human>/.lcars                         0700  <human>:-           any
+human     /home/<human>/.lcars/log                     0700  <human>:-           any
+human     /home/<human>/.lcars/fleet_v2.env            0600  <human>:-           any
+human     /home/<human>/pods                           0700  <human>:-           any
+human     /home/<human>/.local/bin/claude              0755  <human>:-           any
+
+# ─── L'ARBRE `~/.claude` — TROIS NATURES, TROIS TRAITS ──────────────────────────────────────────
+# Il etait entierement absent de cette table, et les trois lignes qui suivent ne se distinguent que
+# par leur trait. Sans le vocabulaire, une seule ligne aurait du les couvrir — et elle aurait menti
+# sur deux d'entre elles.
+#
+#   le repertoire  `70-human` le cree par `mkdir -p`, donc au umask : le mode est OBSERVE (775 sur
+#                  une machine a umask 002), jamais affirme. Un doctor qui le comparerait a une
+#                  valeur ecrite ici accuserait une machine correcte.
+#   settings.json  `70-human` y FUSIONNE une cle. Le fichier est a l'humain — il y met ses propres
+#                  reglages — et desinstaller ne peut pas vouloir dire le supprimer.
+#   le skill       `45-sudoers-toolchain` le pose dans le `~/.claude` du SIEGE, et de lui seul
+#                  (uid 1000). Le joker `<human>` ne vaut pas ici : l'etendre a tous les humains
+#                  donnerait a chacun la boite de reception des incidents systeme.
+human:unset  /home/<human>/.claude                        775   <human>:-        any
+human:merge  /home/<human>/.claude/settings.json          0644  <human>:-        any
+human:single /home/<human>/.claude/skills/system-issues   0755  <human>:-        any
+
+# ⚠ POSES PAR `mix` LUI-MEME, comme `/root/.terraform.d` l'est par tofu : on les declare parce qu'on
+# les PROVOQUE (`mix local.hex`), pas parce qu'on les ecrit. Leur mode suit l'umask de la machine —
+# 770 mesure le 2026-09-01 sur un poste a umask 002 — donc OBSERVE, jamais affirme.
+human:unset  /home/<human>/.hex                           770   <human>:-        any
+human:unset  /home/<human>/.mix                           770   <human>:-        any
+
+# ─── LES PERSONNES ──────────────────────────────────────────────────────────────────────────────
+# ⚠ LE COMPTE, ET AVEC LUI SON GROUPE PRIVE ET SON HOME — les trois arrivent ensemble par `useradd`
+# et aucun des trois ne repart. `/home` est hors du perimetre d'uninstall ENTIER depuis le
+# 2026-09-01 : ni un `rm`, ni un `userdel -r`. Cette ligne dit donc ce qu'on a le droit de CREER, et
+# rien d'autre — c'est le seul cas de la table ou declarer n'ouvre aucun droit de retrait.
+person    <human>                                      -     /bin/bash           any
+
+# ─── PRESERVE — ce qu'une desinstallation ne touche JAMAIS ──────────────────────────────────────
+preserve  /home/projects                               2775  root:fleet          any
+preserve  /home/projects.ops                           2775  root:fleet          any
+preserve  /home/projects.workshop                      2775  root:fleet          any
+
+# ⚠ CE FICHIER EXISTAIT AVANT NOUS, ET LCARS NE L'ECRASE PLUS. Il l'a fait jusqu'au 2026-09-02 :
+# `skel.bashrc` etait le `.bashrc` de la distribution recopie EN ENTIER — 117 lignes — avec trois
+# lignes changees. Ce commentaire disait alors « restaurer l'original demanderait de l'avoir
+# sauvegarde, ce qu'on ne fait pas » : c'etait exact, et c'etait le probleme, pas sa justification.
+#
+# LCARS n'apporte desormais que ce qui est a lui : `/etc/lcars/lcars.bashrc` porte le reglage, et un
+# BLOC GERE de trois lignes le source depuis ce fichier-ci. Tout le reste est preserve octet pour
+# octet par `ensure_managed_block`. Une mise a jour de `bash` par la distribution atteint de nouveau
+# le squelette.
+#
+# `merge` ET PLUS `preserve`, PARCE QUE LE FAIT A CHANGE. On ne POSE plus ce fichier : on le
+# MODIFIE. Le trait dit exactement ca — un fichier qu'on modifie n'entre jamais dans ce qui part —
+# et il vaut ici pour la meme raison que sur `~/.claude/settings.json` : il appartient a quelqu'un
+# d'autre.
+#
+# ⚠ CE QUI SURVIT A LA DESINSTALLATION EST LE BLOC, ET IL EST INERTE PAR CONSTRUCTION. Il teste la
+# presence du fichier avant de le sourcer ; `/etc/lcars` part avec l'install, donc le bloc ne trouve
+# plus rien et ne fait plus rien. On ne promet pas une restauration bit-a-bit — on promet que ce
+# qu'on laisse ne nuit pas, ce qui est tenable et se verifie.
+anchor:merge /etc/skel/.bashrc                         0644  root:root           any
+# Le reglage de shell de LCARS — sous `/etc/lcars`, donc repris avec lui a la desinstallation.
+anchor    /etc/lcars/lcars.bashrc                      0644  root:root           any

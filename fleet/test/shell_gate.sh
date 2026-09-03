@@ -54,8 +54,8 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # que le registre compare a « fleet/vendor/… » : deux ecritures du meme repertoire, et une
 # comparaison de chaines qui echoue sur une egalite vraie.
 #
-# ⚠ ET `deploy/tests` N'EST PLUS LA. Ses 1294 cas — 73 % de tout le corpus bats que cette
-# porte jouait — sont ceux de L'INSTALLEUR, et ils ont desormais la leur : `deploy/gate.sh`.
+# ⚠ ET `fleet/deploy/tests` N'EST PLUS LA. Ses 1294 cas — 73 % de tout le corpus bats que cette
+# porte jouait — sont ceux de L'INSTALLEUR, et ils ont desormais la leur : `fleet/deploy/gate.sh`.
 # Le detachement n'est pas declaratif : `pack.sh` joue les deux portes avant d'empaqueter, et
 # `tests.corpora_on_record` DEMANDE a chaque porte ce qu'elle joue au lieu de croire un mot-cle.
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
@@ -172,21 +172,12 @@ fi
 # commis trois fois de suite le 2026-08-06 (marqueur oublie, liste d'exemptions perimee, deux des
 # trois formes d'en-tete acceptees). Le hook reste l'autorite ; ce pas le REJOUE sur tout l'arbre.
 #
-# PERIMETRE : `fleet/` ET `deploy/`, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
+# PERIMETRE : `fleet/` seulement, et c'est un choix ON RECORD. Le reste de l'arbre porte 32
 # fichiers non conformes, tous dans `.claude/` (les artefacts de Claude Code lui-meme),
 # `docs/#_Archived/` (l'ancien `docs_OBSOLETE/`, deplace au demenagement) ou v1 (supprime par
 # l'excommunion, recuperable au tag `v1-excommunication-base`) — gater ces
-# trois zones ferait rougir le gate sur du sursis. Les deux arbres gates, eux, sont a ZERO : le mur
+# trois zones ferait rougir le gate sur du sursis. Le runtime, lui, est a ZERO aujourd'hui : le mur
 # se pose sans dette.
-#
-# ⚠ `deploy` EST NOMME PARCE QU'IL A QUITTE `fleet/`, ET C'EST LE PIEGE LE PLUS SILENCIEUX DE CE
-# DEMENAGEMENT. Ce mur ne visait qu'un arbre, `fleet` ; l'installeur en est sorti avec 118 fichiers,
-# et sans cette ligne ils auraient cesse d'etre gates SANS QU'UNE LIGNE LE DISE — le pas serait
-# reste vert en mesurant 118 fichiers de moins. C'est la meme espece que les trois exemptions
-# perimees par un renommage que ce chantier a corrigees (`deps` masque par homonymie,
-# `*/skills/*/SKILL.md`, `project_template/`), a une difference pres : ici ce n'est pas une
-# exemption qui cesse de s'appliquer, c'est une COUVERTURE qui cesse de couvrir. La seconde est
-# pire : une exemption qui tombe fait rougir, une couverture qui tombe fait verdir.
 # ---------------------------------------------------------------------------
 GO7_HOOK="$REPO_ROOT/fleet/git-hooks/pre-commit"
 
@@ -215,7 +206,7 @@ fi
 
 if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
 
-  echo "--- GO-7 : en-tetes declaratifs sous fleet/ et deploy/ ---"
+  echo "--- GO-7 : en-tetes declaratifs sous fleet/ ---"
   eval "$(sed -n '/^is_ipc_exception()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^check_md_header()/,/^}/p' "$GO7_HOOK")"
@@ -244,10 +235,10 @@ if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
       # donc tout marqueur de presence serait vert par construction. Le motif complet est dans
       # l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
-  done < <(git -C "$REPO_ROOT" ls-files fleet deploy)
+  done < <(git -C "$REPO_ROOT" ls-files fleet)
 
   if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
-    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/ ou deploy/ :" >&2
+    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/ :" >&2
     printf '   %s
 ' "${GO7_BAD[@]}" >&2
     echo "   (le hook pre-commit dit la forme attendue par extension)" >&2
@@ -303,7 +294,7 @@ fi
 #    tout le depot, y compris a lui-meme, et il n'avait aucun test — un mur non teste ne se
 #    distingue d'un mur absent que le jour ou on le contourne.
 #
-#    `deploy/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
+#    `fleet/deploy/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
 #    2026-07-30 et AUCUN gate ne les jouait — un test que personne ne lance est un test qui
 #    pourrit, et il donne la couverture sans la donner. Meme raison que les skills : le
 #    provisioning est ce qui fabrique la machine sur laquelle tout le reste tourne. Absence du
@@ -320,7 +311,7 @@ fi
 #
 # ⚠ ET `PROVISION_TESTS` N'EST PLUS DECOUVERT — c'est le detachement de l'installeur. Ses 69
 # fichiers / 1294 cas etaient 73 % de tout ce que cette boucle jouait, et ils ne mesurent pas le
-# runtime : ils mesurent la chaine d'install. `deploy/gate.sh` est leur porte.
+# runtime : ils mesurent la chaine d'install. `fleet/deploy/gate.sh` est leur porte.
 mapfile -t BATS_FILES < <(
   find "$HERE" -type f -name '*.bats'
   [[ -d "$SKILLS_TESTS" ]] && find "$SKILLS_TESTS" -type f -path '*/tests/*.bats'

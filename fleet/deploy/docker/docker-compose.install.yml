@@ -1,0 +1,166 @@
+# SOURCE: fleet/deploy/docker/docker-compose.install.yml
+# AUTHOR: consultant
+# STARDATE: 2026-08-01
+# STATUS: le compose d'INSTALLATION — il TIRE une image, il n'en fabrique aucune
+#
+# ─── POURQUOI UN SECOND FICHIER PLUTOT QU'UN DRAPEAU ────────────────────────────────────────────
+# `docker-compose.yml` porte `build:` ET `image:`. C'est juste pour un poste de DEV : l'image
+# manquante se fabrique. Pour qui INSTALLE, c'est un piege — il n'a pas les sources, donc compose
+# lui proposerait un build qui echouerait sur un contexte absent, et le message parlerait de
+# Dockerfile introuvable au lieu de dire « cette image ne se telecharge pas ».
+# Compose n'a pas de conditionnel : on ne peut pas rendre `build:` inerte selon un mode. La
+# separation est donc un FICHIER, pas une variable. Ce fichier n'a aucune section `build` — s'il
+# ne peut pas tirer l'image, il le dit, et c'est le seul diagnostic possible.
+#
+# ─── L'IMAGE ───────────────────────────────────────────────────────────────────────────────────
+# `LCARS_IMAGE` porte le nom COMPLET, registry comprise. Le defaut pointe la forge LAN de ce
+# deploiement (10.42.0.118) parce que c'est la seule registry ou l'image existe REELLEMENT
+# aujourd'hui. ADR 012 vise GHCR pour la release publique ; tant que `publish.yml` n'existe pas,
+# mettre un defaut GHCR serait un chemin qui rend 404 — un defaut qui ment est pire qu'un defaut
+# local. Le jour ou GHCR est alimente, ce defaut change, et lui seul.
+#
+# Registry en HTTP pur : Docker REFUSE par defaut. Il faut la declarer dans `insecure-registries`
+# (Docker Desktop → Settings → Docker Engine, puis Apply & Restart — le daemon redemarre, ce n'est
+# pas un rechargement a chaud).
+#
+# LE PORT EST DANS LE NOM, ET CE N'EST PAS COSMETIQUE. Le daemon parle HTTPS et ne se replie en
+# HTTP que si la clef EXACTE du nom d'image, port compris, est declaree insecure :
+#   - `10.42.0.118/...`    → il vise :443, ou rien n'ecoute ici : refus reseau, et le repli HTTP
+#                            ne se declenche jamais sur un refus de connexion.
+#   - `10.42.0.118:80/...` → il obtient une reponse en clair sur :80 et ne se replie que si
+#                            `10.42.0.118:80`, port compris, figure dans les registries insecure.
+# Il faut donc `"insecure-registries": ["10.42.0.118", "10.42.0.118:80"]`, et referencer l'image
+# AVEC le port. Meme regle de clef exacte pour les credentials : un `docker login` sur la forme
+# sans port ne vaut pas pour la forme avec port.
+#
+# Pour installer A COTE du dev, forcer un autre projet a la ligne de commande :
+#   docker compose -f docker-compose.install.yml -p lcars-install up -d
+#
+# ─── CE QUI EST COPIE A L'IDENTIQUE DEPUIS LE COMPOSE DE DEV, ET POURQUOI ───────────────────────
+# ports, volumes, cap_add, security_opt, logging, restart : une install qui divergerait du dev sur
+# ces points ne testerait pas la meme boite. Les raisons de chaque ligne vivent dans l'en-tete et
+# les commentaires de `docker-compose.yml` — elles ne sont pas recopiees ici : deux copies d'une
+# meme justification derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
+#
+# USAGE : docker compose -f docker-compose.install.yml up -d
+# (depuis ce repertoire ; aucune source du projet n'est necessaire — ce fichier suffit)
+
+name: lcars
+
+services:
+  lcars:
+    # Le defaut pointe la derniere image PUBLIEE, et ne bouge que dans le geste qui publie —
+    # un defaut en avance sur la registry rend un 404 a la premiere install venue.
+    image: "${LCARS_IMAGE:-10.42.0.118:80/fleet/lcars:2.1.2}"
+    # `missing` (le defaut) et pas `always` : le tag est IMMUABLE par ADR 012, donc re-tirer a
+    # chaque `up` telechargerait indefiniment un contenu identique. Pour PROUVER qu'un pull a bien
+    # lieu, on supprime l'image locale avant — la preuve vient du geste, pas d'une option.
+    pull_policy: missing
+    hostname: "${LCARS_HOSTNAME:-bridge}"
+    environment:
+      LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
+      LCARS_UID: "${LCARS_UID:-1000}"
+      # Le magasin. MEME VALEUR QUE `docker-compose.yml`, et ces deux fichiers sont les SEULS a
+      # l'ecrire : tout ce qui vit dans la boite la lit ici, aucun script ne la redefault.
+      LCARS_STORE_ROOT: /var/lib/lcars
+      # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
+      # ses listeners (API, deck d'observation) en loopback par defaut : dans une boite, cette
+      # loopback est celle du CONTENEUR — le deck repond a l'interieur et reste injoignable depuis
+      # un navigateur, alors que le deck de la boite en propose l'onglet. La frontiere reelle
+      # d'une install docker n'est pas le bind mais la PUBLICATION compose ci-dessous, qui n'expose
+      # que sur la loopback de l'hote. Meme raisonnement que ttyd (cf. console.sh).
+      LCARS_BIND_HOST: "${LCARS_BIND_HOST:-0.0.0.0}"
+      LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
+      # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
+      # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci
+      # est la seule variable par laquelle la boite ECRIT sur une forge (comptes, org, depots,
+      # PR, issues). Un defaut qui vise une forge de production ferait qu'une install de test
+      # l'ecrit sans que personne l'ait demande. Vide = les modules forge du provisioning passent
+      # en instruct-only et le declarent en drift.
+      # Pour tester : la forge jetable de `forge-compose.yml`, projet separe.
+      #
+      # QUI LIT QUOI : le provisioning lit l'environnement du conteneur (cette variable, reprise
+      # en PROV_FORGE_URL par provision-lib). Le runtime ne la lit pas : il lit
+      # `~/.lcars/fleet_v2.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
+      # valeur si elle est posee a ce moment-la ; ensuite ce fichier appartient a l'humain et
+      # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
+      # jamais pour une boite deja seedee.
+      FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
+      # LA MEME FORGE, VUE D'UN NAVIGATEUR — et ce n'est pas la meme valeur. Celle du dessus est
+      # celle que le SERVEUR compose ; dans un conteneur c'est un nom de service, qu'aucune machine
+      # ne resout depuis l'exterieur. La porte du deck envoie le navigateur ICI pour s'identifier,
+      # donc une valeur interne rend l'identification impossible depuis tout autre poste. Vide = on
+      # retombe sur l'interne, et `55-deck-oidc` le DIT en drift plutot que de poser une porte qui
+      # ne s'ouvre pas.
+      FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
+      LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
+      # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
+      # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
+      # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
+      # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.
+      LCARS_SOURCE_REMOTE: "${LCARS_SOURCE_REMOTE:-http://10.42.0.118/fleet/lcars.git}"
+      LCARS_SOURCE_REF: "${LCARS_SOURCE_REF:-}"
+    ports:
+      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+      # Le POURQUOI complet vit dans `docker-compose.yml`, a cote de la meme liste — il ne se
+      # recopie pas ici : deux copies d'une explication derivent, et celle qu'on lit n'est jamais
+      # celle qu'on a corrigee.
+      - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
+    volumes:
+      - lcars-home:/home
+      # L'ETAT DE L'INSTALLATION — au PROJET comme `lcars-home`. Motif dans `docker-compose.yml`.
+      - lcars-var:/opt/lcars/var
+      # ⚠ MEME LISTE QUE `docker-compose.yml`, ET ELLE DOIT LE RESTER. Quatre volumes EXTERNES —
+      # hors projet, donc `down -v` ne peut pas les emporter — et NOMMES PAR LE PROJET, sans quoi
+      # deux installations sur une machine partageraient leur magasin. Le POURQUOI (les quatre durees
+      # de vie, la mesure du `down -v`, le prix du « il doit exister avant le up », le prefixe) vit
+      # dans `docker-compose.yml` et `lib/store.sh`, sources uniques.
+      #
+      # Ils doivent exister AVANT ce `up` : c'est `store_ensure_volumes`
+      # (fleet/deploy/lib/store.sh) qui les pose, appelee par le script d'entree.
+      - lcars-cache:/var/lib/lcars/cache
+      - lcars-toolchains:/var/lib/lcars/toolchains
+      - lcars-sysroots:/var/lib/lcars/sysroots
+      - lcars-state:/var/lib/lcars/state
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      # 6-071 — mesuré : ce profil suffit à bwrap, le défaut docker non. L'arbitrage complet (les
+      # quatre runs, et pourquoi `apparmor=unconfined` reste faute d'hôte pour le mesurer) vit dans
+      # l'en-tête de `docker-compose.yml`, source unique.
+      - seccomp=./lcars-hardened-seccomp.json
+      - apparmor=unconfined
+      # Sans lui, `bwrap` ne peut pas monter son `/proc` et AUCUN pod ne naît sur un Linux
+      # ordinaire (mesuré le 2026-08-18 sur Debian 13 : la fleet démarre et ne produit jamais).
+      # Le motif complet vit dans l'en-tête de `docker-compose.yml`, source unique.
+      - systempaths=unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+    networks: [lcars]
+
+volumes:
+  # Au PROJET : ses humains et son etat sont ceux de cette boite, ils meurent avec elle.
+  lcars-home:
+  lcars-var:
+  # Hors projet : compose ne les cree pas et ne les detruit pas — mais il ne les prefixe pas non
+  # plus, d'ou le `name:` derive du projet. Cf. `docker-compose.yml`, source unique.
+  lcars-cache:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent — pose-le au nom du projet compose (le script d'entree le fait)}-cache"
+  lcars-toolchains:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-toolchains"
+  lcars-sysroots:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-sysroots"
+  lcars-state:
+    external: true
+    name: "${LCARS_STORE_PREFIX:?LCARS_STORE_PREFIX absent}-state"
+
+networks:
+  lcars:
