@@ -48,14 +48,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   Nature of the PR dispatch. `:conflict_rework` and `:conflict_rework_exception` share the SAME
   mechanics (clone the feature branch, resolve, system pushes, jury re-judges) and differ ONLY in
   the brief's voice — the producer resumes ITS OWN approved work, the exception pass arrives on
-  someone else's. A single kind for both made that pass read a brief saying "ton brief est
+  someone else's. A single kind for both makes that pass read a brief saying "ton brief est
   INCHANGÉ" about a brief it never had.
 
-  `_exception` and not `_gatekeeper`: the distinction this kind carries is OWNER vs OUTSIDER, and
-  it survived the role moving to `chief`. Naming it after whoever happens to hold the
-  `conflict_resolver` capability is what made it look removable — the plan for this item said
-  "retirer `:conflict_rework_gatekeeper`", which would have re-merged two voices that differ for a
-  reason that has nothing to do with the role.
+  `_exception` and not `_gatekeeper`: the distinction this kind carries is OWNER vs OUTSIDER, and it
+  survives the role moving between capability holders. Naming it after whoever happens to hold the
+  `conflict_resolver` capability is what makes it look removable — and removing it re-merges two
+  voices that differ for a reason having nothing to do with the role.
   """
   @type kind :: :judge | :rework | :conflict_rework | :conflict_rework_exception
 
@@ -112,7 +111,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   # A jury role that does not RESOLVE is a durable config defect, never a transient: the same card is
   # re-read on every tick, so the same skip repeats forever while the PR keeps displaying "judge at
-  # work". Returning a bare `{:skipped, :no_role}` made a TYPO in a card indistinguishable from a
+  # work". Returning a bare `{:skipped, :no_role}` makes a TYPO in a card indistinguishable from a
   # step that legitimately has no judge — and because the second case is ordinary, nobody goes
   # looking. One missing letter freezes a brick, in silence, indefinitely.
   #
@@ -237,10 +236,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
             |> Opts.maybe_put(:project, project)
             |> Spawn.maybe_put_route(route)
             |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
-            # THE PR-DRIVEN JUDGE GETS ITS MANDATE MOUNT TOO — the bug this closes: the judge's order
-            # references its mounted criterion (`~/issues/criteria.md`), so the spawner MUST
-            # materialize it. `build_brief` surfaces it (same resolution that rendered the brief, and
-            # the same name the order points at); this path used to drop it.
+            # THE PR-DRIVEN JUDGE GETS ITS MANDATE MOUNT TOO: the judge's order references its
+            # mounted criterion (`~/issues/criteria.md`), so the spawner MUST materialize it, and
+            # dropping it here leaves the order pointing at a file the pod does not have.
+            # `build_brief` surfaces it — same resolution that rendered the brief, same name the
+            # order points at.
             |> Opts.maybe_put(:mandate, mandate)
 
           # Spawn LEAF shared with dispatch_issue (lock → pod → enqueue → wake + compensation).

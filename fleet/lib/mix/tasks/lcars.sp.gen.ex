@@ -20,10 +20,9 @@ defmodule Mix.Tasks.Lcars.Sp.Gen do
   """
   use Mix.Task
 
-  # BOTH ends are catalogue trees now, resolved through `Fleet.Catalogue` rather than by a relative
-  # `Path.expand` from this file. The blocks stopped being an orphan build-time tree when `core/`
-  # went into the system catalogue as a supersedable default; the two halves are then read by ONE
-  # search path, which no hardcoded pair of paths can express.
+  # BOTH ends are catalogue trees, resolved through `Fleet.Catalogue` rather than by a relative
+  # `Path.expand` from this file. `core/` lives in the system catalogue as a supersedable default,
+  # so the two halves are read by ONE search path — which no hardcoded pair of paths can express.
   #
   # These resolve under `_build`, and the writes still land in the SOURCE tree: Mix symlinks
   # `_build/<env>/lib/<app>/priv` to it. That symlink is what makes a generator addressing the

@@ -73,28 +73,26 @@ defmodule Fleet.Pilot do
   label write inside the escalation module finds nothing, which is why the three files the wall
   below measures are the completer, `ArchEscalation` and `IncidentConsumer`.
 
-  They no longer differ by effect. This register used to say *"only the terminal one unlocks
-  `lcars-in-flight`"*, which CI-04 had already made false at `ArchEscalation` — and the entry
-  claiming to be the family's single source pointed at the OPPOSITE of the code. All three clear
-  the lock today, and it is no longer a convention anyone must remember:
+  They do not differ by effect: ALL THREE clear `lcars-in-flight`. Writing here that only one of
+  them does would make the entry claiming to be the family's single source point at the OPPOSITE of
+  the code — and it is not a convention anyone must remember anyway:
   `labels.awaits_arch_clears_in_flight` in `mix lcars.contracts.check` refuses a writer that sets
   the brake without releasing the lock. The reason is in that check's `@doc` — a lock left on a
   ticket nobody can advance is reclaimed by reconciliation and re-dispatched, so the brake is on
   and the wheel keeps turning.
 
-  ⚠ **On the old "merge at the 5th appearance" threshold: it counted the wrong dimension.** A
-  population of modules says nothing about a chain whose links sit at different depths — the fifth
-  link to appear was the LAST one, the only one that leaves the product, and merging on that count
-  would have fused the internal link with the sysadmin one. The threshold is not re-armed here, and
-  the merge is still not decided; what replaces it is the axis above. Whoever adds a link places it
-  in this table **by the depth it reaches**, which is the only thing that makes it comparable to
-  the others.
+  ⚠ **NO COUNT-BASED MERGE THRESHOLD HERE, and a population is the wrong dimension to count.** How
+  many modules appear says nothing about a chain whose links sit at DIFFERENT DEPTHS: the link that
+  appears last is the one that leaves the product, so merging on a count fuses an internal link with
+  the sysadmin one. The merge is not decided; what decides placement is the axis above. Whoever adds
+  a link places it in this table **by the depth it reaches**, which is the only thing that makes it
+  comparable to the others.
   """
 
   # COMPILED frontier of the domain: deps = the declared inter-domain graph, exports = the
-  # MEASURED cross-domain surface (started at [] — only observed, reviewed violations were
-  # added). The compiler refuses any violation — no discipline required. Shrinking it is a
-  # deliberate API gesture.
+  # MEASURED cross-domain surface: an entry gets in by being an observed, reviewed violation,
+  # never by anticipation. The compiler refuses any violation — no discipline required. Shrinking
+  # it is a deliberate API gesture.
   use Boundary,
     deps: [
       # Le vocabulaire d'une demande d'outillage. FONDATION, partagee avec Fleet.MCP : le
@@ -121,20 +119,21 @@ defmodule Fleet.Pilot do
       Fleet.Credentials,
       Fleet.CapProfile,
       Fleet.TaskQueue,
-      # Foundation drain flag (CI-01): dispatch_issue refuses to open a new producer while the daemon
-      # quiesces — the poller-side reader, added to the two existing ones (ControlRouter, PermanentWarden).
+      # Foundation drain flag (CI-01): `StepDispatcher` refuses to open a new producer while the
+      # daemon quiesces. Every gesture that STARTS work reads it, each on its own side — this is
+      # this domain's.
       Fleet.Shutdown.Quiesce,
       Fleet.Publish.InFlight,
       # BL-6-31: the adoption gate of import_external scans instruction material through the
       # reception filter — foundation, shared with SPBuilder's RepoSections door.
       Fleet.ReceptionFilter,
-      # The forge is a DOMAIN now, not a corner of this one. What used to sit here in its place was
-      # `Req`/`Req.Response`: the business domain declared the HTTP library, so "one HTTP exit" was
-      # a convention. It is compiled in `Fleet.Forge` instead.
+      # The forge is a DOMAIN, not a corner of this one. Declaring `Req`/`Req.Response` here
+      # instead would put the HTTP library in a BUSINESS domain's deps, making "one HTTP exit" a
+      # convention rather than something compiled.
       Fleet.Forge,
       # The project's LIFECYCLE (onboarding, card, roles, architect, worktrees) is its own domain:
       # imperative, called from outside on demand — the opposite nature of this reactive rail, and
-      # it used to sit under a facade that described only one of the two.
+      # a facade over both would describe only one of the two.
       Fleet.Project
     ],
     exports: [Application]

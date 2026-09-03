@@ -9,11 +9,11 @@ defmodule Fleet.TaskQueue.Application do
 
   @impl Supervisor
   def init(_init_arg) do
-    # Il y avait ici un `persist: false` explicite, et le commentaire qui l'accompagnait plaidait
-    # qu'il etait « UNE DECISION, PAS UN OUBLI » — parce que la machinerie `Store` restait intacte
-    # derriere, et que rien ne disait laquelle des deux etait l'accident. Le rail est retire
-    # (BL-6-113) : il n'y a plus de choix a declarer, donc plus de plaidoirie a lire. Le broker est
-    # ephemere par construction.
+    # Pas de `persist: false` a declarer ici : le broker est EPHEMERE PAR CONSTRUCTION, il n'y a
+    # pas de rail de persistance derriere (BL-6-113) et donc pas de choix a plaider. Un drapeau
+    # accompagne d'un commentaire jurant qu'il est « une decision, pas un oubli » signale surtout
+    # qu'une machinerie intacte subsiste a cote, et que rien ne dit laquelle des deux est
+    # l'accident.
     #
     # L'AUTORITE reste le `@moduledoc` de `Fleet.TaskQueue.Server` (axiome de source unique : la
     # forge est la verite du travail, le broker n'en est que le FRONT RAM). On POINTE, on ne recopie

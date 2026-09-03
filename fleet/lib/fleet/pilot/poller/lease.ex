@@ -4,12 +4,12 @@ defmodule Fleet.Pilot.Poller.Lease do
   repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
   Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
 
-  ⚠ **CE PARAGRAPHE DISAIT « at most ONE active workflow_run per repo », ET C'ETAIT FAUX AU DEFAUT
-  LIVRE.** Le booleen `:repo_serialized_lease` a ete remplace par un COMPTEUR (`Admission` le dit :
-  « Serial is this ceiling at 1, not another mechanism »), et cette phrase est restee. Un lecteur en
-  repartait avec un invariant de serialisation que le runtime n'a plus : sur un projet qui ne declare
-  rien, cinq workflow_runs peuvent voler ensemble. Corrige le 2026-08-13 (BL-6-75) — le nom du module
-  garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet est un plafond.
+  ⚠ **CE N'EST PAS « at most ONE active workflow_run per repo », ET LE DEFAUT LIVRE LE DIT.** Le
+  mecanisme est un COMPTEUR, pas un booleen (`Admission` : « Serial is this ceiling at 1, not
+  another mechanism ») : sur un projet qui ne declare rien, CINQ workflow_runs peuvent voler
+  ensemble. Ecrire ici « un seul » rend au lecteur un invariant de serialisation que le runtime
+  n'a pas. Le nom du module garde « lease » parce que c'est le vocabulaire du corpus, mais l'objet
+  est un plafond.
 
   **Le plafond est PER HUMAIN, et c'est le modele — pas une fuite du filtre.** Le compte se fait sur
   la liste obtenue avec `assigned_by=<mon humain>`, donc deux humains sur un depot tiennent deux
@@ -139,27 +139,24 @@ defmodule Fleet.Pilot.Poller.Lease do
       end)
       |> Enum.sort_by(fn {issue, _pr?, _engaged, _pf} -> Map.get(issue, "number") end)
 
-    # THE CEILING (2026-08-03) — `max_fan`: how many workflow_runs this project may hold in flight
-    # at once. It REPLACES the `:repo_serialized_lease` boolean, because the boolean and the counter
-    # were the same parameter at two resolutions: **serial IS this ceiling at 1**. The boolean could
-    # only say "one" or "as many as there are", and "as many as there are" was genuinely unbounded —
-    # a repo with forty queued tickets started forty runs.
+    # THE CEILING — `max_fan`: how many workflow_runs this project may hold in flight at once. A
+    # boolean would be the same parameter at a coarser resolution (**serial IS this ceiling at 1**),
+    # and it could only say "one" or "as many as there are" — the second being genuinely unbounded:
+    # a repo with forty queued tickets starts forty runs.
     #
-    # Two behaviour changes to state rather than discover: `serialized? = false` used to mean
-    # UNLIMITED and now means 5 by default; and a repo can now hold several runs without the operator
-    # flipping anything, which is the point of the item and the reason the ceiling is low.
-    # PER PROJECT, not per box (2026-08-05): the count was already per project and the knob was
-    # fleet-wide, so serializing one project to watch its pipeline end to end serialized every other
+    # A repo holds several runs without the operator flipping anything, which is why the default
+    # ceiling is LOW (5). PER PROJECT, not per box: the count is per project, and a fleet-wide knob
+    # would make serializing one project to watch its pipeline end to end serialize every other
     # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)
 
-    # IN-FLIGHT crosses BOTH dispatch rails. It used to count only what it could see on its own rail
-    # — the ENGAGED issues — while a ticket in its jury phase left the issues side (it is dispatched
-    # through the pulls) and therefore counted for nothing. Consequence, measured and not
-    # theoretical: a repo serialized to one workflow_run started a SECOND one as soon as the first
-    # reached its jury. The hole was already open in serial; the fan-out only makes it visible.
+    # IN-FLIGHT crosses BOTH dispatch rails. Counting only what this rail can see — the ENGAGED
+    # issues — misses a ticket in its jury phase: it has left the issues side (it is dispatched
+    # through the pulls) and counts for nothing. Consequence, measured and not theoretical: a repo
+    # serialized to one workflow_run starts a SECOND one as soon as the first reaches its jury. The
+    # hole is open in serial too; the fan-out only makes it visible.
     #
-    # The two halves were already side by side: `pr_issue_ids` is passed in and already computes
+    # The two halves are side by side: `pr_issue_ids` is passed in and already computes
     # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
     # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
     # never a union to deduplicate.
@@ -204,9 +201,8 @@ defmodule Fleet.Pilot.Poller.Lease do
 
               {acc2, fan}
 
-            # The project is FULL → the ticket waits, and it SAYS so. This branch was the one the
-            # wait convergence never reached, so a ticket held back was silent tick after tick,
-            # indistinguishable from a forgotten one.
+            # The project is FULL → the ticket waits, and it SAYS so. Silent, this branch makes a
+            # held-back ticket indistinguishable from a forgotten one, tick after tick.
             fan >= max_fan ->
               {acc2, _} = Admission.refuse(:at_capacity, item_opts, issue["number"], wait, acc)
               {acc2, fan}
@@ -258,22 +254,17 @@ defmodule Fleet.Pilot.Poller.Lease do
   # refusé au plafond n'a pas besoin qu'on interroge la forge sur ses arêtes. Le coût est donc UN
   # GET par ticket réellement candidat au démarrage, pas par ticket vu.
   #
-  # FORGE MUETTE ≠ AUCUN BLOQUEUR, et l'argument qui disait le contraire se réfutait dans le
-  # paragraphe au-dessus. Il tenait ainsi : « la forge REFUSERA la fermeture si un bloqueur est
-  # ouvert, donc le mur tient de toute façon ». C'est exactement le raisonnement que la lecture
-  # ci-dessus existe pour rejeter — le commentaire du site de dispatch dit que sans elle « le
-  # producteur travaille, livre, et le mur ne se révèle qu'au merge : deux rails parallèles qui ne
-  # se rencontrent qu'au moment le plus cher ». Se rabattre dessus en cas d'échec de lecture, c'est
-  # rétablir précisément l'état que la lecture supprime.
+  # ⚠ FORGE MUETTE ≠ AUCUN BLOQUEUR. L'argument contraire — « la forge REFUSERA la fermeture si un
+  # bloqueur est ouvert, donc le mur tient de toute façon » — est exactement celui que cette lecture
+  # existe pour rejeter : sans elle, le producteur travaille, livre, et le mur ne se révèle qu'au
+  # merge. Deux rails parallèles qui ne se rencontrent qu'au moment le plus cher.
   #
-  # L'autre moitié de l'argument était juste et reste servie : bloquer la FLEET sur un hoquet réseau
-  # serait pire. Mais refuser n'est pas bloquer — `Admission.refuse` marque CE ticket en attente et
-  # passe au suivant ; le tick d'après relit. Rien d'autre ne s'arrête.
+  # ⚠ ET REFUSER N'EST PAS BLOQUER : bloquer la FLEET sur un hoquet réseau serait pire, mais on
+  # marque CE ticket en attente et on passe au suivant. Le tick d'après relit ; rien d'autre ne
+  # s'arrête.
   #
-  # La forme suit le précédent déjà en place sur la porte CI : `{:ci_unreadable, _}` et ses jumeaux
-  # partagent l'étiquette de leur porte, parce que du côté du ticket c'est le MÊME fait — il est
-  # arrêté là, personne ne travaille dessus. La distinction vit dans la raison du skip, où elle est
-  # actionnable.
+  # Du côté du ticket, une porte illisible et une porte fermée sont le MÊME fait — il est arrêté là,
+  # personne ne travaille dessus. La distinction vit dans la RAISON du skip, où elle est actionnable.
   defp open_blockers(issue, %Seams{} = seams) do
     case seams.forge.issue_dependencies(seams.repo, Map.get(issue, "number"), seams.forge_opts) do
       {:ok, deps} when is_list(deps) ->
@@ -288,22 +279,19 @@ defmodule Fleet.Pilot.Poller.Lease do
     end
   end
 
-  # Dispatch of an item + update of the tally AND the lease. Two DISTINCT concerns, that the return of
-  # `dispatch_issue` mixes:
+  # ⚠ DEUX PREOCCUPATIONS DISTINCTES, QUE LE RETOUR DU DISPATCH MELANGE :
   #
-  #   * LEASE — did the workflow_run START (pod spawned + `lcars-in-flight` lock placed)? The canonical order
-  #     of the spawn (`StepDispatcher.spawn_step`) is lock → pod → enqueue → WAKE, the wake LAST. So
-  #     `{:error, {:wake_unreached, …}}` means: the workflow_run IS started (lock + pod + brief in place),
-  #     ONLY the tmux wake failed. The workflow_run therefore holds the repo-serialized lease — otherwise a 2nd issue of the same
-  #     repo in the same tick would start a 2nd workflow_run (two concurrent feature-branches → merge conflict).
-  #   * TALLY/telemetry — is there an anomaly to SURFACE? The missed wake is still counted in `errors` (it
-  #     surfaces via `last_tally_errors`/telemetry, NOT the `err_streak` backoff — per-item dispatch errors
-  #     do not feed it, only whole-tick failures do): an unreachable kick must NOT be swallowed as a silent
-  #     success (the pod does not run until it is woken).
+  #   * LE BAIL — le run a-t-il DEMARRE ? L'ordre canonique du spawn place le REVEIL en DERNIER,
+  #     donc un reveil rate signifie que le run EST demarre : verrou, pod et brief sont en place. Il
+  #     tient donc le bail — sinon une 2e issue du meme depot, dans le meme tick, lancerait un 2e
+  #     run, et deux branches concurrentes finissent en conflit de merge.
+  #   * LE COMPTE — y a-t-il une anomalie a FAIRE REMONTER ? Le reveil manque est compte comme
+  #     erreur : un kick injoignable ne doit PAS etre avale comme un succes silencieux, le pod ne
+  #     tournant pas tant qu'il n'est pas reveille.
   #
-  # Hence the 3rd case `wake_unreached` = (started for the LEASE, anomaly for the TALLY). We return
-  # `{tally, started?}`; `started?` (= a pod was actually put in flight this tick) drives the lease taking,
-  # INDEPENDENTLY of whether the dispatch finished without error.
+  # D'ou un troisieme cas : DEMARRE pour le bail, ANOMALIE pour le compte. C'est « un pod a-t-il ete
+  # mis en vol » qui pilote la prise du bail, INDEPENDAMMENT du fait que le dispatch se soit termine
+  # sans erreur.
   defp step_do_dispatch(payload, opts, acc, dispatcher) do
     Admission.admit(
       fn -> dispatcher.dispatch_issue(payload, opts) end,
@@ -337,13 +325,13 @@ defmodule Fleet.Pilot.Poller.Lease do
       {true, []}
     else
       # Route DERIVED from the labels already in hand (BL-6-40 Phase 2): `list_open_issues` returns
-      # them with the issue, and `get_route` was redoing a GET per issue per tick for the same data.
-      # The number is not even read here anymore — it only ever served to ADDRESS the request.
+      # them with the issue, and `get_route` would redo a GET per issue per tick for the same data.
+      # The number is not read here at all — it only ever serves to ADDRESS a request.
       #
-      # `get_route`'s `{:error, _}` branch disappears for THIS caller, and that consequence is worth
-      # naming: it existed only because there was a network call. With no call, there is no
-      # transient failure to cover; the fail-closed it carried stays whole for the callers of
-      # `get_route/3`, which do still read.
+      # `get_route`'s `{:error, _}` branch has no meaning for THIS caller, and that is worth naming:
+      # it exists only because there is a network call. With no call, there is no transient failure
+      # to cover; the fail-closed it carries stays whole for the callers of `get_route/3`, which do
+      # still read.
       case seams.forge.route_from_labels(Map.get(issue, "labels") || []) do
         {:ok, {workflow_map_name, step} = route}
         when is_binary(workflow_map_name) and is_binary(step) ->
@@ -393,7 +381,7 @@ defmodule Fleet.Pilot.Poller.Lease do
         # FOREVER silently (Jupiter: nobody will see it). We ESCALATE: IncidentRegistry keyed
         # by signature → 1st occurrence = WAL note, RECURRENCE (map missing at every tick) = ONE
         # sysadmin issue, then the registry's escalation COOLDOWN suppresses the per-tick repeats
-        # (the dedup alone was NOT a throttle: it escalated on EVERY recurrence — one issue per
+        # (the dedup alone is NOT a throttle: it escalates on EVERY recurrence — one issue per
         # tick on a durable failure, ~2 880/day). The escalation must never break the
         # tick (rescue in escalate_workflow_map_incident, silent at this site); the load failure
         # recurs at EVERY tick while the map stays broken, so a skipped escalation is re-attempted

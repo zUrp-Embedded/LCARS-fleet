@@ -37,13 +37,14 @@ defmodule Fleet.Project.WorktreeSync do
 
   WHY THE RUNTIME DOES THIS AND NOT THE POD. The architect arbitrates on deliverables and its code
   face is a read-only bind, so its own `git fetch` dies on `.git/FETCH_HEAD` — measured from inside
-  the pod, and the cost was not the missing diff: it arbitrated ANYWAY and invented an explanation
-  for what it could not see. The fetch happens host-side, in the worktree this GenServer already
+  the pod. What that costs is not the missing diff: it arbitrates ANYWAY and invents an explanation
+  for what it cannot see. The fetch happens host-side, in the worktree this GenServer already
   serializes, and the pod only READS the result through its bind.
 
   A NAMED ref per role, not `FETCH_HEAD`. `FETCH_HEAD` is overwritten by the next fetch and does not
-  say what it is the head OF — the same pod declared its code face "frozen" while that file was two
-  minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next fetch.
+  say what it is the head OF — measured, a pod declares its code face "frozen" while that file is
+  two minutes old. `refs/lcars/pr/<n>/<role>` is stable, self-describing, and survives the next
+  fetch.
 
   A WILDCARD refspec, so no forge read is needed to learn the producer's role: every branch of the
   ticket lands, whichever role opened it, and an escalation covering several of them gets all of
@@ -127,13 +128,13 @@ defmodule Fleet.Project.WorktreeSync do
 
   # CODE face: `fetch` (network, forge token) then `reset --hard` — convergence dure vers l'origine.
   #
-  # ⚠ « THE WORKTREE IS A READ-ONLY SHOWCASE » N'ETAIT GARANTI PAR RIEN. La racine de cette face est
+  # ⚠ « CETTE VITRINE EST EN LECTURE SEULE » N'EST GARANTI PAR RIEN. La racine de cette face est
   # `Fleet.Layout.code_root/0` = **`/home/projects`** — le repertoire de travail par defaut de
   # l'humain, pas un dossier de la flotte. Les pods travaillent bien dans leurs clones ephemeres,
   # mais rien n'empeche un humain (ou un agent lance a la main) d'y avoir un fichier modifie non
   # commite. `reset --hard` le detruit sans copie, sans message, sans recuperation possible.
   #
-  # La soeur `align_writer/2`, vingt lignes plus bas, tient deja la posture : sur une divergence,
+  # La soeur `align_writer/2` tient deja la posture : sur une divergence,
   # elle ABANDONNE et propage fort — « that divergence is a human's call ». Meme regle ici : un
   # arbre SALE n'est pas aligne, il est REFUSE, bruyamment et avec la sortie de `status` pour que
   # l'humain voie ce qui l'a bloque.

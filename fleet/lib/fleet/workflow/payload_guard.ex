@@ -2,13 +2,12 @@ defmodule Fleet.Workflow.PayloadGuard do
   @moduledoc """
   Placement + SECURITY-validation of an UNTRUSTED file payload into a
   workspace: "write what the pod produced, without letting it escape the
-  workspace or arm the world-side git plumbing". Standalone filter, extracted
-  from `Fleet.Workflow.Deliverable` — it knows nothing
-  about deliverable modes, the gate, nor the push: it only knows a workspace
-  and an adversarial `%{"path" => …, "content" => …}` list.
+  workspace or arm the world-side git plumbing". Standalone filter — it knows
+  nothing about deliverable modes, the gate, nor the push: it only knows a
+  workspace and an adversarial `%{"path" => …, "content" => …}` list.
 
-  SINGLE source of payload application: one sole authority for deliverable
-  placement (a divergent placement is made unrepresentable). 2 passes:
+  SOLE authority for deliverable placement, which makes a divergent placement
+  unrepresentable. 2 passes:
   (1) validate ALL paths before any write — a partially INVALID payload writes
   NOTHING; (2) write — a `File.write` failure mid-pass stops there and returns
   the error, files already written REMAIN (no rollback), but the caller
@@ -34,9 +33,8 @@ defmodule Fleet.Workflow.PayloadGuard do
       disablable via `-c` (git has no "disable all filters"). The ONLY real
       lock on this vector is therefore THIS content refusal →
       `{:dangerous_gitattributes, path}`. `Fleet.Credentials.Shell` closes the
-      GLOBAL-config vector with `core.attributesFile=/dev/null` and leaves this
-      one to us ON PURPOSE — weakening the clause below removes the only net,
-      and nothing upstream will catch it.
+      GLOBAL-config vector and leaves this one to us ON PURPOSE — weakening the
+      clause below removes the only net, and nothing upstream will catch it.
     * **Symlink in the chain** — `Path.expand` is LEXICAL (resolves `..`, NOT
       symlinks): a symlink checked into the cloned repo
       (`out -> /home/<human>/.claude`) passes the prefix check, but

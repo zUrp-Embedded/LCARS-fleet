@@ -49,9 +49,9 @@ tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 # HORS du garde `tool_mode?`, et c'est un correctif : ce bloc n'ouvre aucun port et ne demarre rien.
 # Il dit seulement OU vit le materiel des catalogues installes — un fait de lecture dont TOUTE porte
 # `eval` a besoin. Enferme dans le garde, `LCARS_TOOL_EVAL=1` le sautait avec le reste, et un outil
-# ne voyait que le catalogue livre : `lcars project migrate <projet> web` refusait « web inconnu »
-# sur une boite ou il tournait. Mesure du 2026-08-11 : `installed_names()` rendait ["fleet"] sous
-# eval la ou le boot en voyait deux.
+# ne verrait que le catalogue livre : `lcars project migrate <projet> web` refuserait « web
+# inconnu » sur une boite ou il tourne. Mesure : `installed_names()` rend ["fleet"] sous eval la ou
+# le boot en voit deux.
 #
 # UN SEUL REPERTOIRE, et le second n'est pas parti par simplification. `catalogues_shipped_dir/0`
 # porte les GRAINES de l'image — deposees sur la forge a chaque apply, installees par personne. L'y
@@ -75,9 +75,9 @@ end
 # `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet_v2.env`,
 # derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
-# BEAM. La lire ici, c'etait lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut
-# code en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte
-# un autre nom, et muet dans les deux cas.
+# BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
+# en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte un
+# autre nom, et muet dans les deux cas.
 forge_push_account =
   System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") || "system_starfleet"
 
@@ -85,10 +85,10 @@ forge_push_account =
 # variables d'env n'ouvre rien et ne demarre rien. Resolue par `ForgeClient.resolve_config/1` a
 # l'appel, cette config est ce qui permet a une porte `eval` d'AGIR sur la forge — et c'est le
 # design : `bin/lcars` n'a aucun acces forge, lui en donner un ferait d'une commande locale un
-# acteur distant, donc c'est le release qui agit. Enfermee dans le garde, elle rendait
-# `lcars project migrate` structurellement incapable : mesure du 2026-08-11 sur banc,
+# acteur distant, donc c'est le release qui agit. Enfermee dans le garde, elle rend
+# `lcars project migrate` structurellement incapable : mesure sur banc,
 # `ECHEC : {:config, {:missing, :base_url}}` — le transfert echoue FERME, sans demi-etat, mais la
-# porte n'avait jamais pu fonctionner.
+# porte ne peut jamais fonctionner.
 #
 # ⚠ `token_file:` A QUITTE CETTE CONFIG, ET C'EST LE PLUS GROS LECTEUR DU CHANTIER — celui que
 # l'inventaire de la phase 0b a manque. Le balayage cherchait la CHAINE `FORGE_TOKEN_FILE` et l'a
@@ -117,9 +117,9 @@ if forge_opts != [] do
 end
 
 # ⚠ HORS DU GARDE `tool_mode?`, ET POUR LA MEME RAISON QUE LE BLOC CI-DESSUS. Il vivait dedans, donc
-# `LCARS_TOOL_EVAL=1` le sautait — et toute porte `eval` qui POUSSE se retrouvait sans credential :
-# « fatal: could not read Username for 'http://…': terminal prompts disabled ». Mesure du
-# 2026-08-18, en creant un projet depuis une porte outil sur un banc entierement cable.
+# `LCARS_TOOL_EVAL=1` le sauterait — et toute porte `eval` qui POUSSE se retrouverait sans
+# credential : « fatal: could not read Username for 'http://…': terminal prompts disabled ». Mesure,
+# en creant un projet depuis une porte outil sur un banc entierement cable.
 #
 # Le defaut ne se voyait pas depuis `eval_reconcile`, qui l'a pourtant sous la main : sur un projet
 # dont les branches d'ecriture existent DEJA, `ensure_face` CLONE et ne pousse jamais. Il fallait un
@@ -137,16 +137,16 @@ end
 # Il y vivait EN CLAIR POUR TOUTE LA VIE DU NOEUD, lu au BOOT depuis un fichier. Deux consequences
 # que ce bloc portait, et qui disparaissent avec lui :
 #
-#   1. UNE PANNE MUETTE. Sur echec de lecture la branche etait `_ -> nil`, donc
-#      `:credentials_forge_auth` n'etait JAMAIS pose, donc `git_env` rendait des credentials vides.
-#      Le noeud demarrait VERT et TOUS les push mouraient au premier essai sur une auth vide —
+#   1. UNE PANNE MUETTE. Sur echec de lecture, une branche `_ -> nil` ne pose JAMAIS
+#      `:credentials_forge_auth`, donc `git_env` rend des credentials vides. Le noeud demarre VERT
+#      et TOUS les push meurent au premier essai sur une auth vide —
 #      onboarding, completion de step, merge. Un boot vert et un produit mort.
 #   2. UNE PEREMPTION INFINIE. Un jeton revoque sur la forge restait en memoire jusqu'au
 #      redemarrage du noeud ; rien dans la boite ne l'apprenait.
 #
-# Ce qui est pose ici est desormais un NOM DE COMPTE, pas un secret. `ForgeAuth` demande le jeton au
-# service d'autorite au moment de s'en servir — donc la revocation mord au geste suivant, et il n'y
-# a plus rien a voler dans l'application env.
+# Ce qui est pose ici est un NOM DE COMPTE, pas un secret. `ForgeAuth` demande le jeton au service
+# d'autorite au moment de s'en servir — donc la revocation mord au geste suivant, et il n'y a rien a
+# voler dans l'application env.
 #
 # LA PROPRIETE DE SURFACE QUI RENDAIT L'ANCIEN ETAT ACCEPTABLE N'A PLUS D'OBJET ICI, mais elle reste
 # vraie et vaut d'etre sue : rien dans le runtime ne lit l'application env EN BLOC, et la surface MCP
@@ -176,7 +176,7 @@ end
 
 if config_env() != :test and not tool_mode? do
   # ============================================================
-  # R-no-root-runtime — anti-root boot guard + LA RESERVATION DU SIEGE (B9, 2026-08-19)
+  # R-no-root-runtime — anti-root boot guard + LA RESERVATION DU SIEGE (B9)
   # ============================================================
   # The fleet daemon NEVER runs as root (the BEAM runs under the human's UID; this self-check
   # catches dev/manual launches as root, where `~/.gitea_token` resolves to `/root/.gitea_token` =
@@ -185,8 +185,8 @@ if config_env() != :test and not tool_mode? do
   # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet_v2:363`)
   # refuse une fleet sous l'uid du sysadmin — le BEAM herite de l'uid de son lanceur, ses pods
   # avec : une fleet sous le siege donnerait des pods sudo-capables, l'exact inverse de la
-  # sandbox. Mais la release elle-meme (`rel/.../lcars_fleet start`) est sur le PATH d'admiral et
-  # ce fichier ne refusait que "0" : le contournement etait a une commande. Le miroir BEAM de
+  # sandbox. Mais la release elle-meme (`rel/.../lcars_fleet start`) est sur le PATH d'admiral, et
+  # un fichier qui ne refuse que "0" laisse le contournement a une commande. Le miroir BEAM de
   # GUARD B vit ICI — keye sur l'UID (`LCARS_SYSADMIN_UID`, defaut 1000), JAMAIS sur un login
   # (`00` §5 : le login du siege est variable, l'uid est la reservation).
   #
@@ -213,8 +213,8 @@ if config_env() != :test and not tool_mode? do
 
   # ─── LA CLEF DE LA GARDE NE VIENT PLUS DE L'ENVIRONNEMENT DU GARDE ─────────────────────────────
   #
-  # ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARMAIT CETTE GARDE. Elle
-  # lisait sa politique dans l'environnement du processus qu'elle garde — or cet environnement
+  # ⚠ MESURE : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARME CETTE GARDE des qu'elle lit sa
+  # politique dans l'environnement du processus qu'elle garde — or cet environnement
   # appartient au garde, qui n'a qu'a le poser en prefixe de commande. Et le BEAM, lance APRES
   # `setup_env`, heritait en plus de `~/.lcars/fleet_v2.env`, un fichier que le template invite
   # explicitement l'humain a editer : la dispense y devenait persistante.
@@ -247,23 +247,23 @@ if config_env() != :test and not tool_mode? do
     end
 
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
-  # ET la frontiere systeme/humain (`uid >= UID_MIN`). Un compte SYSTEME (uid < 1000) lancant la
-  # release directement passait le BEAM et n'etait refuse que par le launcher.
+  # ET la frontiere systeme/humain (`uid >= UID_MIN`). Sans ce miroir, un compte SYSTEME
+  # (uid < 1000) lancant la release directement passe le BEAM et n'est refuse que par le launcher.
   #
-  # ⚠ ET LA SECONDE REGLE LISAIT SA BORNE DANS L'ENVIRONNEMENT DU PROCESSUS QU'ELLE GARDE. Elle
-  # faisait `System.get_env("LCARS_UID_MIN", "1000")`, et le SEUL site de cette variable dans tout
-  # le depot etait sa propre lecture : personne ne la posait. Une molette qui n'existait que pour
-  # etre tournee contre la garde. Mesure du 2026-08-27 : `LCARS_UID_MIN=0` laissait booter un uid
-  # 999 ; `LCARS_UID_MIN=2000` faisait refuser un uid 1000. La frontiere obeissait a qui la
+  # ⚠ ET LA SECONDE REGLE NE LIT PAS SA BORNE DANS L'ENVIRONNEMENT DU PROCESSUS QU'ELLE GARDE. Un
+  # `System.get_env("LCARS_UID_MIN", "1000")` ferait de cette variable une molette dont le seul site
+  # du depot serait sa propre lecture : personne ne la pose, elle n'existe que pour etre tournee
+  # contre la garde. Mesure : `LCARS_UID_MIN=0` laisse booter un uid 999 ; `LCARS_UID_MIN=2000` fait
+  # refuser un uid 1000. La frontiere obeirait a qui la
   # franchit.
   #
   # C'est le meme trou que celui ferme quinze lignes plus haut sur l'autre moitie de GUARD B
   # (`LCARS_SYSADMIN_UID=99999 fleet_v2 start`), et la reponse est la meme : LA BORNE EST UN FAIT DE
   # MACHINE. `/etc/login.defs` la DECLARE, `useradd` la lit pour creer les comptes, et QUATRE autres
   # lecteurs de ce depot la lisent la (`bin/fleet_v2`, `services/console-humans.sh`,
-  # `services/human-converger.sh`, `deploy/lib/provision-lib.sh`). Le BEAM etait le cinquieme, et le
-  # seul a ne pas la lire — donc le seul dont la frontiere pouvait etre autre chose que celle du
-  # systeme qu'il garde.
+  # `services/human-converger.sh`, `deploy/lib/provision-lib.sh`). Le BEAM est le cinquieme, et ne
+  # pas la lire ferait de lui le seul dont la frontiere puisse etre autre chose que celle du systeme
+  # qu'il garde.
   #
   # `PASSWD_DEFS` est la couture des quatre autres, reprise telle quelle : elle deplace le CHEMIN,
   # jamais la valeur. Un jeu de noms, un fait.
@@ -318,11 +318,11 @@ if config_env() != :test and not tool_mode? do
   # The code default of `Fleet.MCP.Server.boot_environment` is `:pod` — it refuses BY OMISSION, and
   # a boot that declares neither here nor in config/test.exs is refused, never started permissively.
   #
-  # THE POSITIVE DECLARATION IS NOW ACTUALLY POSITIVE (D2, closed 2026-08-05). This line used to be
-  # unconditional, so ANY BEAM running this app declared itself host — including, in principle, one
+  # THE POSITIVE DECLARATION HAS TO BE ACTUALLY POSITIVE (D2). Unconditional, this line makes ANY
+  # BEAM running this app declare itself host — including, in principle, one
   # started inside a pod. The doctrine said "a boot that does not declare `:host` is refused by
-  # omission"; the declaration was made by the file itself, so the omission could not happen and the
-  # guard vouched for a fact nobody had checked.
+  # omission"; a declaration made by the file itself means the omission cannot happen, and the guard
+  # vouches for a fact nobody checked.
   #
   # `LCARS_HOST_BOOT` is exported by `bin/fleet_v2` at daemon start. A pod's projected environment is
   # a WHITELIST built by `LaunchEnv` (`LCARS_POD_*`, `LCARS_PROJECT_OPS`, …) and carries no such
@@ -330,7 +330,7 @@ if config_env() != :test and not tool_mode? do
   # supervisor refuses to boot.
   #
   # COST, written next to the switch: a boot that bypasses `bin/fleet_v2` — a developer's
-  # `iex -S mix` starting the whole app — must now say so: `LCARS_HOST_BOOT=1 iex -S mix`. That is
+  # `iex -S mix` starting the whole app — must say so: `LCARS_HOST_BOOT=1 iex -S mix`. That is
   # the point rather than a side effect; the alternative is a declaration that declares nothing.
   # (`mix test` is unaffected: `config/test.exs` declares `:host` on its own.)
   config :lcars_fleet,
@@ -380,9 +380,10 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # The warning+ trace ON DISK (BL-6-41)
   # ============================================================
-  # `config :logger, level:` above used to be the ONLY logger configuration of this project: every
-  # load-bearing warning lived in the daemon's tmux ring buffer and died with it, which makes an
-  # incident un-auditable after the fact. `Fleet.DurableLog` owns the two decisions (warning+, and
+  # Without the handler below, `config :logger, level:` above is the whole of this project's logger
+  # configuration: every load-bearing warning lives in the daemon's tmux ring buffer and dies with
+  # it, which makes an incident un-auditable after the fact. `Fleet.DurableLog` owns the two
+  # decisions (warning+, and
   # the human's `.lcars/log/` beside their env file rather than the release directory a deploy
   # replaces); here we only resolve the PATH, since it is the operator's to move.
   #
@@ -453,7 +454,7 @@ if config_env() != :test and not tool_mode? do
     # profiles reference — modop bundles (`:lcars_fleet, :sp_builder_modop_root`) and subagent templates —
     # stay resolved from the catalogue root (or their own config keys). An operator overriding the
     # profiles WITHOUT the matching SP roots runs overridden profiles over the catalogue's SP
-    # fragments: a coherent-looking skew. That narrowness is now a CHOICE, not the only option —
+    # fragments: a coherent-looking skew. That narrowness is a CHOICE, not the only option —
     # to bring a whole catalogue, set `LCARS_CATALOGUE_ROOT` above and none of the fine keys.
   end
 
@@ -486,13 +487,12 @@ if config_env() != :test and not tool_mode? do
   # the agents' reaction is measured in MINUTES. The cost/risk/benefit ratio does not justify it.
   # Do NOT turn it back on "for latency" without re-asking the human this question.
   #
-  # ⚖ LA QUESTION A ETE RE-POSEE ET TRANCHEE — 2026-08-14. *« C'etait pour short le poller, pour
-  # etre responsive et gagner des secondes de latence. Avec des agents en minutes, on s'en fiche
-  # completement. »* Donc : PAS pour la latence, jamais. Ce paragraphe garde sa question — elle a
-  # fait son travail, elle s'est fait relire au bon moment — et recoit desormais sa reponse.
+  # ⚖ QUESTION POSEE ET TRANCHEE. *« C'etait pour short le poller, pour etre responsive et gagner
+  # des secondes de latence. Avec des agents en minutes, on s'en fiche completement. »* Donc : PAS
+  # pour la latence, jamais.
   #
-  # ⚠ ET UNE DEUXIEME RAISON, TROUVEE EN RELISANT : la forme etait FAUSSE. Le port etait derive du
-  # bloc par-humain (`base+3`, pose par `bin/fleet_v2`) — or le Poller sonde l'ORG, partagee, et ne
+  # ⚠ ET UNE DEUXIEME RAISON, DE FORME : deriver le port du bloc par-humain (`base+3`, pose par
+  # `bin/fleet_v2`) est faux — le Poller sonde l'ORG, partagee, et ne
   # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE : un port
   # par humain demanderait a la forge de notifier N adresses du meme evenement. Le lanceur ne pose
   # plus ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
@@ -515,8 +515,8 @@ if config_env() != :test and not tool_mode? do
   # `init/1` RAISES before any `:os.set_signal` (fail-loud boot: enabling it is a misconfiguration,
   # never a silent capture of SIGTERM/SIGHUP). The real fix, when the day comes = a gen_event
   # handler on `:erl_signal_server` (OS signals do not reach a GenServer). Stays gated-off, and
-  # the registry declares NO `os.signal.*` type: keys for a producer that does not exist were three
-  # atoms created at every boot for a broadcast nothing could emit. Whoever lands the handler
+  # the registry declares NO `os.signal.*` type: keys for a producer that does not exist are atoms
+  # created at every boot for a broadcast nothing can emit. Whoever lands the handler
   # declares its types in the same gesture.
 
   # ============================================================
@@ -693,17 +693,17 @@ if config_env() != :test and not tool_mode? do
          :admiral_completion_inflight_fun,
          &Fleet.Pilot.StepRunConsumer.inflight_completions/0
 
-  # (`:project_incident_rail` RETIRÉ — BL-6-114, arbitrage user 2026-08-19 : l'arête montante
-  # `Project → Pilot` passée en valeur est remplacée par le rail catalogué — `Project.Incidents`
-  # publie `project.card_failed`/`project.declaration_invalid` sur le bus (dep déclarée, vers le
-  # bas), routes `incident` de `events.yaml`, `gate: immediate`. Même destination, un seul chemin.)
+  # (Pas de `:project_incident_rail` — ⚖ user : une arête montante `Project → Pilot` passée en
+  # valeur est remplacée par le rail catalogué. `Project.Incidents` publie
+  # `project.card_failed`/`project.declaration_invalid` sur le bus (dep déclarée, vers le bas),
+  # routes `incident` de `events.yaml`, `gate: immediate`. Même destination, un seul chemin.)
 
   # ============================================================
   # fleet_api — plus de port : le domaine n'a que son socket de contrôle
   # ============================================================
-  # ⚠ `LCARS_API_PORT` A ÉTÉ RETIRÉE, PAS RENDUE OPTIONNELLE (2026-08-14). Ce bloc LEVAIT quand elle
-  # manquait — une exigence dure pour un port que plus rien ne bind : la surface TCP de ce domaine a
-  # été supprimée faute de capacité propre (états servis par l'observation, `/ws` débranché,
+  # ⚠ `LCARS_API_PORT` EST RETIRÉE, PAS RENDUE OPTIONNELLE. Un bloc qui LÈVE quand elle manque est
+  # une exigence dure pour un port que plus rien ne bind : ce domaine n'a pas de surface TCP, faute
+  # de capacité propre (états servis par l'observation, `/ws` débranché,
   # diagnostics avec un jumeau CLI, écritures déjà sur le socket ci-dessous), et personne ne
   # l'appelait. Une variable OBLIGATOIRE dont la valeur ne configure rien bloque un démarrage sans
   # rien régler.
@@ -725,8 +725,8 @@ if config_env() != :test and not tool_mode? do
   # Listener started in prod/dev (the hermetic `start_listener: false` of
   # test.exs is not reached here: runtime.exs is guarded out of :test).
   #
-  # ⚠ `LCARS_OBSERVATION_PORT` A ETE RETIREE, PAS RENDUE OPTIONNELLE (6-072/6-098). Ce bloc LEVAIT
-  # quand elle manquait — une exigence dure pour une valeur que plus rien ne bind : le deck ecoute
+  # ⚠ `LCARS_OBSERVATION_PORT` EST RETIREE, PAS RENDUE OPTIONNELLE (6-072/6-098). Un bloc qui LEVE
+  # quand elle manque est une exigence dure pour une valeur que plus rien ne bind : le deck ecoute
   # sur `/run/lcars/console/<humain>/deck.sock`. Une variable obligatoire dont la valeur ne sert a
   # rien est le pire des deux mondes : elle bloque un demarrage ET elle ne configure rien.
   #
@@ -747,7 +747,7 @@ if config_env() != :test and not tool_mode? do
   # Les avatars ont eu TROIS exemplaires — la marque, les png de la charte forge, les svg du deck —
   # et sept des neuf roles communs avaient derive entre eux. `assets/` est la source, l'installation
   # la pose ici, tout le monde lit ici. AUCUN REPLI sur `priv/` : une boite sans ses medias est une
-  # installation ratee, et un repli servirait justement l'ancienne generation.
+  # installation ratee, et un repli servirait une generation perimee.
   config :lcars_fleet,
          :media_root,
          System.get_env("LCARS_MEDIA_ROOT", "/opt/lcars/share")
@@ -756,8 +756,8 @@ if config_env() != :test and not tool_mode? do
   # fleet_pilot — only the forge-state-machine rail exists (config `LCARS_PILOT_STEP`). There is no
   # label-routing knob, no legacy dispatcher knob, and no fixed-repo knob: MULTI-PROJECT, the Poller
   # DISCOVERS its projects by org-membership (`list_org_repos`, WS3); repo+remote travel in the
-  # `pod.completed` event. (`LCARS_PILOT_POLL_REPO` is REMOVED — it was parsed into `:poll_repo` with NO
-  # runtime reader, a false ops contract: setting it did nothing. Do not reintroduce it as a dead knob.)
+  # `pod.completed` event. (No `LCARS_PILOT_POLL_REPO`: parsed into `:poll_repo` with NO runtime
+  # reader, it is a false ops contract — setting it does nothing. Do not introduce it as a dead knob.)
   # ============================================================
 
   if interval = System.get_env("LCARS_PILOT_POLL_INTERVAL_MS") do
@@ -822,19 +822,19 @@ if config_env() != :test and not tool_mode? do
   # branch birth → content push). Reader default: 2000 ms. Gitea's own notification-queue
   # INSERTION lag (~1-2 s measured) can visually re-glue what the runtime spaced — raise
   # above the lag (e.g. 5000) for a strictly-readable feed. This line is the knob's ONLY
-  # deployment surface: without it, an operator RPC was the sole way to set it, and it
-  # evaporated at every reboot.
+  # deployment surface: without it, an operator RPC is the sole way to set it, and it evaporates at
+  # every reboot.
   if ms = System.get_env("LCARS_FORGE_WRITE_SPACING_MS") do
     config :lcars_fleet,
       pilot_forge_write_spacing_ms: Fleet.EnvParse.positive_ms("LCARS_FORGE_WRITE_SPACING_MS", ms)
   end
 
-  # ⚠ `LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM` A VECU ICI (DR-018) ET N'EXISTE PLUS (2026-08-17), avec
-  # la garde qu'il assouplissait. Ne pas le reintroduire : le preflight d'onboarding verifiait
-  # l'adhesion de l'humain a `<org>:humans` avant de creer un projet, c'est-a-dire un `read` que
+  # ⚠ PAS DE `LCARS_ALLOW_UNVERIFIABLE_HUMAN_TEAM` (DR-018), ni de la garde qu'il assouplirait. Ne
+  # pas l'introduire : un preflight d'onboarding verifiant l'adhesion de l'humain a `<org>:humans`
+  # avant de creer un projet exige un `read` que
   # l'humain a deja (l'org est publique, ses depots aussi) pour des ecritures qu'il ne fait pas —
   # c'est le jeton systeme qui ecrit. Son mode degrade se justifiait par « downstream create_issue
-  # remains the net » : mesure du 2026-08-17, un compte non-membre de l'org cree une issue sur un
+  # remains the net » : mesure, un compte non-membre de l'org cree une issue sur un
   # depot public (201). Le filet n'existait pas, donc le knob assouplissait une garde qui ne
   # gardait rien.
 
@@ -853,9 +853,9 @@ if config_env() != :test and not tool_mode? do
   # (No `LCARS_POD_HUMAN` knob: the human = the runtime process user, derived in-code, never
   #  a config. Cf. pod.ex `runtime_user`/`runtime_home`.)
 
-  # (`LCARS_STATE_PATH` / `:task_queue_state_path` RETIRE le 2026-08-20, BL-6-113 : il nommait le
-  #  `state.json` du broker, dont le rail de persistance est supprime. Un bouton qui ne branche plus
-  #  rien est pire qu'absent — il promet un reglage. NE PAS le confondre avec `LCARS_STATE_FS_ROOT`
+  # (Pas de `LCARS_STATE_PATH` / `:task_queue_state_path`, BL-6-113 : il nommerait le `state.json`
+  #  du broker, dont le rail de persistance n'existe pas. Un bouton qui ne branche rien est pire
+  #  qu'absent — il promet un reglage. NE PAS le confondre avec `LCARS_STATE_FS_ROOT`
   #  juste en dessous : celui-la est l'etat par POD, et il vit toujours.)
 
   # Pod FS state (session_id/phase, recovery). Default `~/.lcars/state` (fleet under the human
@@ -901,8 +901,8 @@ if config_env() != :test and not tool_mode? do
   # posted when the operator typed the variable, never otherwise. `SeedStore.root/0` holds the ONE
   # definition of this path (`Fleet.Layout.state_dir()` + `seeds`).
   #
-  # This block used to post an unconditional default — a SECOND definition, reached only when HOME
-  # is unresolvable, and disagreeing with the code's on exactly that case: it fabricated
+  # An unconditional default here would be a SECOND definition, reached only when HOME is
+  # unresolvable, and disagreeing with the code's on exactly that case: it fabricates
   # `/var/lib/lcars/.lcars/seeds`, a path no other component targets, where `Layout` raises. Two
   # answers to one question, the divergence hidden in the case nobody exercises.
   #

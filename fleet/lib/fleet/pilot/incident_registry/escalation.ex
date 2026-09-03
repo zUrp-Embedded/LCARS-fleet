@@ -122,8 +122,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # full_name, on n'assigne pas une issue a un full_name). Le provisioning le PROJETTE a chaque
   # boot dans `<store>/state/pilot.assignee` (module `45-sudoers-toolchain`, keye sur l'uid du
   # siege) ; ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
-  # toute boite dont l'installeur n'a pas ce login — la v1 portait en dur le nom du front desk,
-  # un role qui ne pouvait pas ouvrir l'issue le nommant (la cicatrice du 2026-08-05).
+  # toute boite dont l'installeur n'a pas ce login, et nommer un ROLE plutot que le siege assigne
+  # l'issue a quelqu'un qui ne peut pas l'ouvrir.
   #
   # Etats, et qui les dit :
   #   * fichier present, non vide  -> l'assignee projete ;
@@ -218,15 +218,15 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
 
   # Readback idempotency: an OPEN issue already carrying this occurrence's marker → its number.
   #
-  # L'ARBITRAGE NE CHANGE PAS — une relecture ratee ne doit PAS supprimer une alarme, donc on cree
-  # quand meme : le risque de doublon est le moindre mal devant une non-escalade silencieuse.
+  # L'ARBITRAGE : une relecture ratee ne doit PAS supprimer une alarme, donc on cree quand meme —
+  # le risque de doublon est le moindre mal devant une non-escalade silencieuse.
   #
-  # ⚠ CE QUI CHANGE : `nil` disait DEUX choses. « Le tableau a ete LU et ne porte pas ce marqueur »
-  # et « le tableau est ILLISIBLE » menaient au meme geste, et surtout au meme RESULTAT — une issue
-  # sysadmin identique dans les deux cas. Le lecteur de cette issue est un humain devant le tableau
-  # ops : si un doublon apparait, rien dans l'issue ne lui dit POURQUOI, ni qu'il doit chercher sa
-  # jumelle. C'est la meme forme que JG-045 (creation conservee, doute nomme), sauf qu'ici le doute
-  # doit voyager jusqu'a l'HUMAIN, pas jusqu'a l'appelant.
+  # ⚠ MAIS `:none` ET `{:unverified, _}` SONT DEUX FAITS, PAS UN. « Le tableau a ete LU et ne porte
+  # pas ce marqueur » et « le tableau est ILLISIBLE » menent au meme geste ; les rendre par une
+  # meme valeur leur fait produire la meme ISSUE. Or le lecteur de cette issue est un humain devant
+  # le tableau ops : si un doublon apparait, rien ne lui dit POURQUOI, ni qu'il doit chercher sa
+  # jumelle. Meme forme que JG-045 (creation conservee, doute nomme), sauf qu'ici le doute doit
+  # voyager jusqu'a l'HUMAIN et pas jusqu'a l'appelant.
   defp find_open_incident(list_fun, repo, marker) do
     case list_fun.(repo, []) do
       {:ok, issues} when is_list(issues) ->
@@ -296,16 +296,16 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # label, and the missing assignee is visible on the issue). Forge down on both attempts -> {:error, _}
   # propagated (record_or_escalate renders it as {:escalation_failed, _}, never a lying {:escalated}).
   #
-  # KEEP: the retry drops the assignee on ANY first error, not only an invalid-assignee 422.
-  # Assessed harmless → KEPT: a real forge-down fails BOTH attempts (→ {:error}, no spurious drop); the
-  # invalid-assignee case is exactly when dropping is correct; only a transient error resolving BETWEEN the
-  # two attempts drops a valid assignee — a rare race. And the assignee is a SECONDARY discovery path: the
-  # DURABLE one is the `error_system` label (retried + fail-loud-surfaced, F-C075), so a dropped assignee
-  # loses NO discoverability. A precise "drop only on a 422-assignee error" would couple to the forge HTTP
-  # error shape (fragile) for a negligible gain — not worth it.
+  # THE RETRY DROPS THE ASSIGNEE ON ANY FIRST ERROR, not only an invalid-assignee 422, and that
+  # width is deliberate: a real forge-down fails BOTH attempts (→ `{:error}`, no spurious drop), the
+  # invalid-assignee case is exactly when dropping is correct, and only a transient error resolving
+  # BETWEEN the two attempts drops a valid assignee — a rare race, on a SECONDARY discovery path.
+  # The durable one is the `error_system` label (retried, surfaced fail-loud, F-C075), so a dropped
+  # assignee loses NO discoverability. Narrowing this to "drop only on a 422-assignee error" would
+  # couple the retry to the forge's HTTP error shape for a negligible gain.
   # ASSIGNEE NIL => L'OPTION EST OMISE, UN SEUL APPEL. Un `assignees: [nil]` (ou `[""]`) partirait
   # sur la forge, echouerait, et le retry ci-dessous rattraperait — temoin vert, un appel API brule
-  # par escalade, panne invisible. Trouve par la validation adversariale du PLAN (passe 2).
+  # par escalade, panne invisible.
   defp create_system_issue(create_fun, repo, title, body, nil) do
     create_fun.(repo, title, body, [])
   end
@@ -378,10 +378,11 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
          "récurrent = ce n'est PAS « l'agent est con » → le **SP est mauvais / a dérivé / le modèle réagit " <>
          "autrement**. ROOT-CAUSE = le PROMPT du rôle, pas l'agent."}
 
-  # TROUVE PAR LA RELECTURE 2026-08-19 : ce kind est emis par `StepRunConsumer.drain_failed/4`
-  # (drain de `lcars-awaits-arch`), et il n'avait PAS de clause ici — l'escalade crashait en
-  # FunctionClauseError au lieu d'ouvrir l'issue, precisement sur le chemin « un ticket sort du
-  # pipeline en silence ». Le temoin du drain stubbe `escalate_fun`, donc il ne pouvait pas le voir.
+  # ⚠ CE KIND DOIT AVOIR SA CLAUSE ICI : il est emis par `StepRunConsumer.drain_failed/4` (drain de
+  # `lcars-awaits-arch`), et sans clause l'escalade crashe en FunctionClauseError au lieu d'ouvrir
+  # l'issue — precisement sur le chemin « un ticket sort du pipeline en silence ». Le temoin du
+  # drain stubbe `escalate_fun`, donc il ne peut pas le voir : cette table est close, et un kind
+  # sans clause y crashe (cf. l'interdit de la porte immediate).
   defp kind_describe(:awaits_arch_stuck),
     do:
       {"awaits-arch NON draine — ticket sorti du pipeline",

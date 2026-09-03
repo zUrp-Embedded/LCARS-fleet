@@ -145,14 +145,13 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
   defp maybe_put_deliverable(step_run, :judge, _role, _payload, _n, _seams), do: step_run
 
-  # A0.6 (mesuré au banc 2026-08-18, premiere passe chief REELLE) — ON LIVRE LA OU ON A REPRIS.
-  # Le target etait `feature_branch(n, role)` : juste pour un producteur (son build CREE sa
-  # branche ; son rework la reprend — meme nom, la formule coincide). Pour la passe d'exception,
-  # role=chief, et la formule a pousse une resolution PARFAITE (les deux intentions composees,
-  # verifie au fichier pres) sur `lcars/issue-N-chief` — une branche qu'AUCUNE PR ne regarde. La
-  # PR est restee conflictee, la passe consommee (marqueur round-1 pose), l'arch immobilise au-
-  # dessus d'un travail deja fait et invisible. Le discriminant est la BASE DE CLONE : un pod qui
-  # a cloné une branche de feature fleet (rework, exception) re-livre DESSUS ; un pod qui a cloné
+  # A0.6 — ON LIVRE LA OU ON A REPRIS. Cibler `feature_branch(n, role)` est juste pour un
+  # producteur (son build CREE sa branche, son rework la reprend — meme nom, la formule coincide)
+  # et FAUX pour la passe d'exception, dont le role differe : la formule pousse alors une
+  # resolution PARFAITE sur `lcars/issue-N-<autre-role>`, une branche qu'AUCUNE PR ne regarde. La
+  # PR reste conflictee, la passe est consommee (marqueur de round pose), et l'arch est immobilise
+  # au-dessus d'un travail deja fait et invisible. Le discriminant est la BASE DE CLONE : un pod qui
+  # a clone une branche de feature fleet (rework, exception) re-livre DESSUS ; un pod qui a clone
   # une face (build) livre sur SA branche de formule, qu'il cree.
   defp delivery_branch(role, payload, n) do
     base = payload["base_branch"]
@@ -195,7 +194,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     event = Verdict.review_event(Verdict.gate_decision(result))
     step_run = Map.put(step_run, :review_event, event)
 
-    # C1 2026-08-18: the machine payload leaves the prose HERE, at the flattening point.
+    # C1: the machine payload leaves the prose HERE, at the flattening point.
     # `take_findings` validates `details.findings_v1` and, when valid, hands the object over
     # (`:review_findings` → engraved by `StepRunCompleter.record_review` next to the prose pin)
     # while stripping it from `result` so `judge_review_body` never inspect-dumps a machine map
@@ -206,11 +205,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
 
     # DISTINGUER « rien envoyé » DE « envoyé et refusé », PARCE QUE LE COMPLETER ACCUSE. Son log
     # d'absence dit « judge X submitted NO details.findings_v1 » — vrai quand le juge s'est tu,
-    # FAUX quand il a émis un payload que le schéma a écarté, et c'est le cas qu'on a mesuré
-    # (banc 2026-08-19 : deux refus sur trois émissions — un JSON sérialisé, un `severity_max`
-    # hors énumération). Accuser un juge d'un silence qu'il n'a pas commis envoie corriger le
-    # mauvais bout : on cherche pourquoi il n'émet pas alors qu'il émet, et c'est exactement ce
-    # que cette mesure m'a coûté avant de le voir.
+    # FAUX quand il a émis un payload que le schéma a écarté, et ce second cas est le plus frequent
+    # des deux (un JSON sérialisé, un `severity_max` hors énumération). Accuser un juge d'un silence
+    # qu'il n'a pas commis envoie corriger le mauvais bout : on cherche pourquoi il n'émet pas alors
+    # qu'il émet.
     step_run =
       if findings == nil and is_map(result["details"]) and
            Map.has_key?(result["details"], Verdict.findings_key()) do

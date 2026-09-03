@@ -1,26 +1,25 @@
 defmodule Fleet.Admiral.PeriodicCheck do
   @moduledoc """
-  Plumbing for the admiral domain's periodic-check GenServers (its clients call
-  `start_link/1` — grep for them, this list would rot). Kept generic rather than inlined: the next
-  periodic check should not have to re-derive the tick/re-arm/test-hook shape.
+  Plumbing for the admiral domain's periodic-check GenServers (its clients call `start_link/1` —
+  grep for them, a list here would rot). Kept generic rather than inlined: the next periodic check
+  should not have to re-derive the tick/re-arm/test-hook shape.
 
-  Both twins carry the SAME skeleton: named GenServer + recursive `Process.send_after/3`
+  Every client carries the SAME skeleton: named GenServer + recursive `Process.send_after/3`
   (a single deadline armed at any instant: the tick runs the check then re-arms the next) +
   test hook `:check_now` (a sync call that replays the timer's full code path). This skeleton lives
-  HERE, as FUNCTIONS called from their callbacks — no `use` macro: functions
-  suffice, and a callback that delegates explicitly stays auditable line by line (no generated
-  code to reconstruct from memory).
+  HERE, as FUNCTIONS called from their callbacks — no `use` macro: functions suffice, and a callback
+  that delegates explicitly stays auditable line by line (no generated code to reconstruct from
+  memory).
 
-  Each twin keeps what is its OWN: its `init/1` (the state fields differ — target and
-  status for the monitor, package/fetcher/versions for the watcher), its `do_check/1` (the business logic)
-  and the SHAPE of its `:check_now` reply (`{:ok, status}` for the monitor, `:ok` for the watcher).
-  Minimal state contract: a map carrying `interval_ms` (re-read on EVERY re-arm).
+  Each client keeps what is its OWN: its `init/1` (the state fields differ), its `do_check/1` (the
+  business logic) and the SHAPE of its `:check_now` reply. Minimal state contract: a map carrying
+  `interval_ms` (re-read on EVERY re-arm).
 
-  Do NOT generalize beyond these two modules: the runtime's other periodic GenServers
-  (e.g. `Fleet.Spawner.PodWarden`) have their own nuances (handle_continue, tick skip) — folding
-  them in here would force speculative parameters. Two real clients, zero hypothetical clients.
+  ⚠ Do NOT generalize beyond the clients that actually call it: the runtime's other periodic
+  GenServers have their own nuances (handle_continue, tick skip), and folding them in would force
+  SPECULATIVE parameters. Real clients only, zero hypothetical ones.
 
-  ## Contract (called by `MCPMonitor`)
+  ## Contract
 
   - `start_link(module, opts)` — starts the named GenServer `module` (`opts[:name]`, default the
     module itself — tests inject a unique name to co-exist).

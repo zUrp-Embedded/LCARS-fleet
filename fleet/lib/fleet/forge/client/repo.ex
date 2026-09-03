@@ -56,8 +56,11 @@ defmodule Fleet.Forge.Client.Repo do
 
   @doc """
   Generates a fresh repository from a native forge template, copying content, labels, and topics
-  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with
-  but not branch protection. Returns `:template_missing` on 404 and `:already_exists` on 409.
+  (native scaffolding, VERIFIED live on this forge 2026-07-18): git content copied with `${VAR}`
+  expansion (the files the template lists in `.gitea/template`), labels copied WITH their
+  descriptions, and its own FRESH history — not a fork, no link back. Webhooks and branch protection
+  are deliberately NOT copied: `protect_branch/3` stays the single branch-protection writer.
+  Returns `:template_missing` on 404 and `:already_exists` on 409.
   """
   @spec generate_repo(String.t(), String.t(), keyword()) ::
           {:ok, String.t() | :already_exists} | {:error, term()}
@@ -237,14 +240,13 @@ defmodule Fleet.Forge.Client.Repo do
   @doc """
   Distingue une branche PROUVEE absente (`{:ok, false}`) d'une forge qu'on n'a pas su lire.
 
-  ⚠ **CETTE FONCTION RENDAIT `false` DANS LES DEUX CAS**, et son ancien `@doc` l'assumait (« Any
-  error returns `false` »). Or ses trois appelants en tirent trois decisions DIFFERENTES, et aucune
-  n'est sure sous cette confusion : une protection de branche silencieusement sautee, un import
-  declare satisfait, une face republiee par-dessus une existante.
+  ⚠ **RENDRE `false` DANS LES DEUX CAS** — « la branche n'existe pas » et « la forge n'a pas
+  repondu » — condamne ses trois appelants a trois decisions DIFFERENTES dont aucune n'est sure :
+  une protection de branche silencieusement sautee, un import declare satisfait, une face republiee
+  par-dessus une existante.
 
-  **La reponse etait huit lignes plus bas** : `user_exists?/2` distingue deja un 404 PROUVE
-  (`{:ok, false}`) d'une panne (`{:error, _}`), et son `@doc` le dit. Meme module, fonction suivante.
-  Le 404 est une REPONSE de la forge ; tout le reste est une absence de reponse.
+  `user_exists?/2`, la fonction suivante, tient la meme distinction : le 404 est une REPONSE de la
+  forge, tout le reste est une ABSENCE de reponse.
   """
   @spec branch_exists?(String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
@@ -449,11 +451,10 @@ defmodule Fleet.Forge.Client.Repo do
   # ONLY by the card-revision lift (`ProjectOnboard.revise_card` — scoped lift-push-restore);
   # the canonical `protect_main` rule does not name them, so an operator whitelist stays
   # untouched outside that one deliberate gesture.
-  # `enable_status_check`/`status_check_contexts` ARE projected (2026-08-03). The comment above used
-  # to name status checks as the example of an "operator enrichment" the runtime must not clobber —
-  # a posture that assumed an operator who never came: measured on a live bench, every repo had
-  # `enable_status_check: false` and a red CI merged. An enrichment nobody applies is not an
-  # enrichment, it is a hole with a polite name.
+  # `enable_status_check`/`status_check_contexts` ARE projected. Treating status checks as an
+  # "operator enrichment" the runtime must not clobber assumes an operator who comes: on a live
+  # bench every repo carried `enable_status_check: false` and a red CI merged. AN ENRICHMENT NOBODY
+  # APPLIES IS NOT AN ENRICHMENT, IT IS A HOLE WITH A POLITE NAME.
   @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames enable_status_check status_check_contexts)
 
   defp projected_protection_fields(rule) do

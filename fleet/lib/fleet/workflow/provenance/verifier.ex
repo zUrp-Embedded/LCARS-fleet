@@ -31,7 +31,7 @@ defmodule Fleet.Workflow.Provenance.Verifier do
   @doc """
   Same verification, on a statement already IN HAND (the git object pushed with the brick).
 
-  The attestation no longer lives in a file whose name a reader must guess: it rides
+  The attestation does not live in a file whose name a reader must guess: it rides
   `refs/lcars/provenance/<sha>`, pushed in the same `git push` as the deliverable (BL-6-43). The
   caller has read it, so this takes the CONTENT — nothing here computes a path any more.
   """

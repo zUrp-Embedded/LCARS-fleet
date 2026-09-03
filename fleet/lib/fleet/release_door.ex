@@ -11,10 +11,10 @@ defmodule Fleet.ReleaseDoor do
 
   ⚠ THE DEFAULT ERLANG LOG HANDLER WRITES TO THAT SAME `stdout`, and a door which does nothing
   about it is not "usually fine" — it is correct only while the code under it happens to stay
-  quiet. Measured on the bench, 2026-08-17: `Onboard.eval_reconcile(:apply)` SUCCEEDED — three
-  faces laid, right modes — and its caller reported failure, because `import/2` logged one `info`
-  and four `warning` and every one of those lines reached the parser as an unreadable verdict. The
-  contract "one word per line" was unachievable by construction, not broken by drift.
+  quiet. The shape it takes: a door SUCCEEDS — the work is done, the state is right — and its
+  CALLER reports failure, because the code under it logged one `info` and four `warning` and every
+  one of those lines reached the parser as an unreadable verdict. The contract "one word per line"
+  is then unachievable BY CONSTRUCTION, not broken by drift.
 
   Nothing is silenced. The diagnostics move to `stderr`, which is where a caller that separates the
   two streams already looks for them, and where a human reading the door still sees them.

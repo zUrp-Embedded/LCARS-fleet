@@ -27,17 +27,14 @@ defmodule Fleet.CapProfile do
 
     * the `Fleet.CapProfile.Loader` behaviour (`load/1`, `compose/2`,
       `validate/1`) plus the in-memory validated constructor `from_map/1`; and
-    * the single-authority accessor surface for a composed profile's
-      properties (`name/1`, `role_index/1`, `containment/1`, `slot_scope/1`,
-      `lifetime_scope/2`, `deliverable_mode/2`, `brief_kind/2`, …) — each the
-      sole reader of its field, so cross-app callers never re-derive it.
+    * the single-authority accessor surface for a composed profile's properties — each accessor is
+      the SOLE reader of its field, so a cross-domain caller never re-derives one.
 
-  The schema version (LCARS v2.5) is pinned by the code / the bundled schema file path —
-  never by a field embedded in the YAML. Every profile is matched against
-  `priv/schema/cap-profile-v2.5.json` at load time. Modops are
-  matched against `priv/schema/modop-profile.json` (strict — reserved
-  keys forbidden, so a modop cannot override the base profile's
-  containment/name/kind).
+  The schema version (LCARS v2.5) is pinned by the code and by the bundled schema file's path —
+  never by a field embedded in the YAML. Every profile is matched at load time against
+  `priv/cap_profile/schema/cap-profile-v2.5.json`; modops against
+  `priv/cap_profile/schema/modop-profile.json`, which is STRICT — reserved keys are forbidden, so a
+  modop cannot override the base profile's containment/name/kind.
 
   Composition is deterministic: deep-merge last-wins in declared order;
   the canonical JSON encoding (recursive key sort) and the `:crypto` sha256
@@ -48,32 +45,19 @@ defmodule Fleet.CapProfile do
 
   @behaviour Fleet.CapProfile.Loader
 
-  # JSON-schema validation cluster (structural conformance), UPSTREAM of the core.
-  # `load`/`compose` delegate to it (and via `Catalog.read_modops` too); no cycle
-  # (Schema calls nothing here).
   require Logger
 
+  # The four clusters below are all UPSTREAM of this core and none calls back into it: Schema
+  # (structural conformance), Catalog (resolution by `metadata.name`, YAML scan, Slug confinement),
+  # DisallowedTools (baseline git-denied union profile) and CanonicalJson (a pure leaf).
   alias Fleet.CapProfile.Schema
-
-  # Catalogue FS cluster (resolution by metadata.name, YAML scan, Slug confinement).
-  # `load`/`compose` call `Catalog.read_role`/`Catalog.read_modops`; `list/1` and
-  # `root_dir/0` (consumed out-of-app) delegate to it. No cycle: Catalog is UPSTREAM
-  # (it depends on Schema, not on the core).
   alias Fleet.CapProfile.Catalog
-
-  # Write-time resolution cluster for `spec.scope.disallowedTools` (baseline
-  # git-denied ∪ profile). The three public helpers below delegate to it; no
-  # cycle (DisallowedTools depends on the struct, not on the core API).
   alias Fleet.CapProfile.DisallowedTools
-
-  # Canonical encoding + hash cluster (composition determinism) — a concern
-  # orthogonal to the loader and the accessors, extracted. `sha256/1` (consumed
-  # by tests + determinism assertions) delegates to it; no cycle (CanonicalJson
-  # is a pure leaf, zero dependency onto the core).
   alias Fleet.CapProfile.CanonicalJson
 
-  # No `api_version` field: the schema versioning is carried by the code
-  # (release v2), not by a field embedded in the YAML.
+  # No `api_version` field: the schema versioning is carried by the CODE, not by a field embedded
+  # in the YAML — a file that declares its own version can disagree with the validator that reads
+  # it.
   # @enforce_keys: a cap-profile does not exist without its three faces (kind/metadata/spec).
   # The single construction boundary `to_struct/1` always populates them → additive, does not
   # break normal construction; what it forbids = a partial `%CapProfile{}` hand-built outside load.
@@ -86,10 +70,9 @@ defmodule Fleet.CapProfile do
   # direct `compose/2`); readers must use `active_modops/1`, which falls back to the role's defaults.
   # `catalogue_root` : LE CATALOGUE D'OU CE PROFIL VIENT, porte par le profil lui-meme.
   #
-  # Trois lecteurs en aval prennent deja un `%CapProfile{}` — la composition du SP, le draft d'agent,
-  # le protocole utilisateur — et lisaient tous l'image du PREMIER catalogue actif. Leur passer une
-  # racine en argument aurait ete transporter a cote du profil un fait qui EST du profil : son SP,
-  # son draft et ses modops viennent tous du catalogue qui le declare.
+  # Les lecteurs en aval prennent deja un `%CapProfile{}`. Leur passer une racine en ARGUMENT serait
+  # transporter a cote du profil un fait qui EST du profil : son SP, son draft et ses modops
+  # viennent tous du catalogue qui le declare.
   #
   # `nil` = charge sans catalogue nomme, donc le premier installe. C'est le comportement du jour, et il
   # reste juste tant qu'un appelant n'a pas de projet en main.
@@ -119,11 +102,10 @@ defmodule Fleet.CapProfile do
   @spec load(String.t()) :: {:ok, t()} | {:error, atom() | String.t()}
   def load(role) when is_binary(role), do: load(role, nil)
 
-  # WHICH CATALOGUE declares the role. `load/2` has carried the root since lot 4 and this resolver
-  # went on calling `load/1`, so a card of catalogue B naming ITS producer resolved that name in
-  # catalogue A and answered `:not_found` — the card was right, the role existed, and the lookup was
-  # in the wrong library. `nil` keeps the default root, and a loader exporting only `load/1` is a
-  # test stub answering for the single catalogue it fabricates.
+  # WHICH CATALOGUE declares the role. Calling `load/1` here resolves the name in the DEFAULT
+  # catalogue, so a card of catalogue B naming ITS producer gets `:not_found` while the role exists
+  # — a right card, and a lookup in the wrong library. `nil` keeps the default root, and a loader
+  # exporting only `load/1` is a test stub answering for the single catalogue it fabricates.
   defp load_in(loader, role, root) do
     if root && function_exported?(loader, :load, 2),
       do: loader.load(role, root),
@@ -133,8 +115,8 @@ defmodule Fleet.CapProfile do
   @doc """
   Le meme role, charge depuis le catalogue NOMME — et le profil rendu PORTE cette racine.
 
-  `nil` garde le comportement du jour (le premier catalogue installe). La racine voyage ensuite sur le
-  profil, ce qui evite de la threader dans les trois lecteurs qui le prennent deja.
+  `nil` resout dans le premier catalogue installe. La racine voyage ensuite SUR le profil, ce qui
+  evite de la threader dans chaque lecteur qui prend deja ce profil.
   """
   @spec load(String.t(), Path.t() | nil) :: {:ok, t()} | {:error, term()}
   def load(role, root) when is_binary(role) do
@@ -161,8 +143,8 @@ defmodule Fleet.CapProfile do
          merged <- Enum.reduce(modops, raw, &deep_merge_last_wins(&2, &1)),
          :ok <- Schema.validate(merged, :cap_profile) do
       # La racine SURVIT a la composition : superposer des modops ne change pas de quel catalogue le
-      # role vient. Sans ce report, composer effacait l'appartenance et les lecteurs d'aval
-      # retombaient sur le premier catalogue installe — le defaut meme que ce champ existe pour fermer.
+      # role vient. Sans ce report, composer efface l'appartenance et les lecteurs d'aval retombent
+      # sur le premier catalogue installe — le defaut meme que ce champ existe pour fermer.
       {:ok, to_struct(merged, base.catalogue_root)}
     end
   end
@@ -205,10 +187,10 @@ defmodule Fleet.CapProfile do
   def roles_with_capability(cap) do
     case Fleet.CapProfile.Image.published() do
       %{index: index} ->
-        # LES DEUX BRANCHES DOIVENT RENDRE LA MEME CHOSE, ET ELLES NE LE FAISAIENT PAS. La branche
-        # sans image passe par `Catalog.list/1`, qui filtre les `ReservedSeat` (`spawnable?/1`,
-        # BL-6-45) ; celle-ci les laissait passer. Un meme catalogue rendait donc deux reponses
-        # selon qu'une image etait publiee ou non.
+        # LES DEUX BRANCHES DOIVENT RENDRE LA MEME CHOSE. La branche sans image passe par
+        # `Catalog.list/1`, qui filtre les `ReservedSeat` (`spawnable?/1`, BL-6-45) ; sans le filtre
+        # ci-dessous, celle-ci les laisserait passer, et un meme catalogue rendrait deux reponses
+        # selon qu'une image est publiee ou non.
         #
         # ⚠ ET LA DIVERGENCE EST INATTEIGNABLE AUJOURD'HUI — ce filtre ne repare pas un bug
         # observable, il rend l'accord LOCAL au lieu de l'emprunter. Mesure : le schema
@@ -244,10 +226,9 @@ defmodule Fleet.CapProfile do
 
       {:error, reason} ->
         # A profile that does not LOAD cannot declare anything, so `false` is the only honest
-        # answer — but silence made it indistinguishable from "loads fine, does not carry this
+        # answer — but SILENTLY it is indistinguishable from "loads fine, does not carry this
         # capability". The caller is usually a structural resolver, which then raises "no role
-        # declares X — fix the catalogue": true, and pointing at the wrong thing. Measured cost:
-        # three probes to discover that the profile had simply stopped parsing.
+        # declares X — fix the catalogue": true, and pointing at the wrong thing.
         Logger.warning(
           "CapProfile: role #{inspect(role)} does NOT load (#{inspect(reason)}) while resolving " <>
             "capability #{inspect(cap)} — it counts as not declaring it; a structural resolver " <>
@@ -482,11 +463,7 @@ defmodule Fleet.CapProfile do
     * `"project"` → visible. One stable pod per (repo, role): a handle worth having.
     * `"instance"` → invisible. One pod per ticket, gone with it. A handle on something that will
       not be there tomorrow is not a handle, it is a leak — and it scales with the fan-out, which
-      is what made "visible unless someone said otherwise" tenable while producers were one per
-      repo and Desktop pollution the day they fanned out per ticket.
-
-  The flat `true` default was that "unless someone said otherwise", and the two roles it silently
-  covered (`engineer`, `scribe`) are exactly the ones that fan out.
+      is what turns a flat `true` default from tenable into Desktop pollution.
 
   Not a total derivation: a declaration overrides it in BOTH directions, and `g24_16` requires one
   from every project-keyed role — the derivation's `"project"` branch is therefore unreachable for
@@ -539,16 +516,11 @@ defmodule Fleet.CapProfile do
   absent = `true`.)
 
   `false` is the explicit declaration of an asymmetry: an orchestrator whose forge writes all go
-  through the system account (`starfleet`). Until now the field had NO runtime reader — only
-  `mix lcars.contracts.check` consulted it, to exclude such a role from the four-list provisioning
-  equality. So the runtime could not tell "this role declares no identity" from "this role's token
-  is MISSING", and the two got the same treatment: an attempt, a failure, and a warning telling the
-  operator to check a provisioning that is working as declared.
-
-  That mattered beyond tidiness. It made `forge_identity: false` unusable for any role reached by
-  the dispatch: choosing it meant accepting a permanent "provisioning defect" warning on every
-  spawn — so the choice between "give this role an account" and "declare it has none" was not a
-  choice at all.
+  through the system account. Without a RUNTIME reader of this field, "this role declares no
+  identity" is indistinguishable from "this role's token is MISSING", and both get the same
+  treatment — an attempt, a failure, and a warning sending the operator to check a provisioning
+  that works as declared. `forge_identity: false` would then be unusable for any role the dispatch
+  reaches: choosing it would mean a permanent "provisioning defect" warning on every spawn.
   """
   @spec forge_identity?(t()) :: boolean()
   def forge_identity?(%__MODULE__{metadata: meta}) when is_map(meta),
@@ -607,11 +579,6 @@ defmodule Fleet.CapProfile do
         "CapProfile without a valid role_index (integer 0..15) — not a catalogued role"
       )
 
-  # (`protected?/1` and `fleet_level?/1` were REMOVED by the 2026-07-19 reorg: once every other role
-  # went per-project, both bits collapsed into "role_index 0 ≡ starfleet" — `kill_class/1` carries the
-  # kill tier, and the fleet-scope (repo 0000) is `role_index == 0` at the mint. The schema no longer
-  # accepts the fields.)
-
   @doc """
   The role's identity/slot granularity — **DERIVED from `lifetime_scope`**, never a declared
   property: "unique vs multi" is not data, it is a CONSEQUENCE of "context-long vs one-shot"
@@ -629,14 +596,13 @@ defmodule Fleet.CapProfile do
   (`g24_4`) → always present+valid for a loaded profile; the `"one-shot"` default is the safe fail (a role
   without a lifetime = ephemeral = fans out, never a shared serialized slot claimed by mistake).
 
-  **DECLARABLE since 2026-08-03** — `invocation.slot_scope` (optional, enum-gated by the schema)
-  OVERRIDES the derivation. Reason, measured: the derivation is a total function, so ONE
-  combination could not be written — context-long AND one pod per ticket. That combination is
-  what a producer needs: it must survive its rework rounds (keep the context of what it just
-  built) WITHOUT outliving its ticket. Under the pure derivation a producer was project-keyed,
-  so the next ticket re-briefed the SAME pod through a workspace reset + `/clear`: the process
-  survived and the context died — neither fan-out nor memory. Absent field = historical
-  derivation, so every profile that does not declare keeps its behaviour to the letter.
+  **DECLARABLE** — `invocation.slot_scope` (optional, enum-gated by the schema) OVERRIDES the
+  derivation, because the derivation is a total function and ONE combination cannot be written
+  through it: context-long AND one pod per ticket. That combination is what a producer needs — it
+  must survive its rework rounds (keep the context of what it just built) WITHOUT outliving its
+  ticket. Derived alone, a producer is project-keyed, so the next ticket re-briefs the SAME pod
+  through a workspace reset + `/clear`: the process survives and the context dies, which is neither
+  fan-out nor memory. Absent field = the derivation, to the letter.
   """
   @spec slot_scope(t()) :: String.t()
   def slot_scope(%__MODULE__{spec: spec} = profile) do
@@ -664,33 +630,27 @@ defmodule Fleet.CapProfile do
     * `2` — **les producteurs**.
     * `3` — **les juges** : `brief_kind: "judge"`.
 
-  ## Pourquoi ce n'est plus le cycle de vie qui trie
+  ## Pourquoi ce n'est pas le cycle de vie qui trie
 
-  Ca l'etait jusqu'au 2026-08-20, et le critere etait faux sur DEUX points a la fois (user).
+  Trier la classe 3 sur `lifetime_scope == "one-shot"` est faux sur DEUX points a la fois. **Un juge
+  n'est pas one-shot** : il meurt quand son livrable est traite, exactement comme un producteur —
+  esperance de vie plus courte, nature identique. Et « jetable » **ne distingue rien** : un
+  producteur est jetable aussi, simplement plus cher.
 
-  Il testait `lifetime_scope == "one-shot"` pour la classe 3. Or **un juge n'est pas one-shot** : il
-  meurt quand son livrable est traite, exactement comme un producteur — esperance de vie plus
-  courte, nature identique. Et le tri se justifiait par « jetable », qui **ne distingue rien** : un
-  producteur est jetable aussi, simplement plus cher. Mesure de l'ampleur : la classe 3 contenait
-  quatre juges ET un ouvrier de merge (`chief`, `brief_kind: worker`).
-
-  `brief_kind` porte le nouveau critere et il ne s'invente pas pour l'occasion : REQUIS au schema,
+  `brief_kind` porte le critere et il ne s'invente pas pour l'occasion : REQUIS au schema,
   fail-closed, et declare propriete de SECURITE (« judge-ness is a SECURITY property, NEVER
-  inferred »). C'est le meme axe qui a separe `chief` de `gatekeeper`.
+  inferred »).
 
-  ## Ce que le nombre dit encore, et qu'il disait mal
+  ## Ce que le nombre dit d'autre
 
-  **Le gradient de cout survit** — `1` coute une conversation humaine, `2` le travail d'un ticket,
-  `3` une passe de verdict. Le nombre se lit donc de deux facons, toutes deux vraies : mission ET
-  cout. L'ancien enonce n'en portait qu'une, et fausse.
+  **Le gradient de cout** — `1` coute une conversation humaine, `2` le travail d'un ticket, `3` une
+  passe de verdict. Le nombre se lit donc de deux facons, toutes deux vraies : mission ET cout.
 
-  Effet acquis en prime : l'UUID devient un **temoin visible de la judge-ness**. Editer le
-  `brief_kind` d'un profil change l'identite de ses pods, donc se voit.
+  Effet acquis en prime : l'UUID est un **temoin visible de la judge-ness**. Editer le `brief_kind`
+  d'un profil change l'identite de ses pods, donc se voit.
 
-  NO ROLE IS NAMED HERE, deliberately. This doc listed them until 2026-08-11 and the list was FALSE:
-  it filed `gatekeeper` under 1 while its profile had carried `lifetime_scope: one-shot` for weeks.
-  A comment that inventories another artefact lies the day that artefact moves, in silence. The
-  criterion is stated; roles sort themselves into it.
+  NO ROLE IS NAMED HERE, deliberately: a comment that inventories another artefact lies the day that
+  artefact moves, in silence. The criterion is stated; roles sort themselves into it.
 
   Reaping, and ALWAYS anchor on `claude.*`: a bare pattern reaps any concurrent `grep` carrying it in
   its argv (cf. `SessionId` moduledoc).
@@ -713,8 +673,8 @@ defmodule Fleet.CapProfile do
       # ⚠ UN PROFIL SANS `brief_kind` NE PRODUIT PAS, IL EST CASSE. La cle est REQUISE au schema,
       # donc ce cas n'existe pas en production ; il existe pour un profil forge a la main, et le
       # laisser tomber dans le `true ->` ci-dessous le classerait PRODUCTEUR sans un mot — un juge
-      # de fixture range parmi les jetables, ce qui est exactement l'erreur que B1 vient de
-      # corriger. On le nomme, on le classe au plus cher (l'architecte), et on le dit.
+      # de fixture range parmi les jetables (B1). On le nomme, on le classe au plus cher
+      # (l'architecte), et on le dit.
       is_nil(brief_kind(profile)) ->
         Logger.warning(
           "CapProfile: #{inspect(name(profile))} has NO `brief_kind` — the schema requires it, so " <>
@@ -725,9 +685,7 @@ defmodule Fleet.CapProfile do
         1
 
       # `true` ET PAS `slot_scope == "instance"`, et la difference est une AFFIRMATION plutot qu'un
-      # reste : tout ce qui n'est ni l'accueil, ni lie au projet, ni un juge, PRODUIT. L'ancien
-      # critere mettait les producteurs dans son fourre-tout ; ici c'est l'etage 1 qui a cesse d'en
-      # etre un.
+      # reste : tout ce qui n'est ni l'accueil, ni lie au projet, ni un juge, PRODUIT.
       true ->
         2
     end
@@ -767,13 +725,11 @@ defmodule Fleet.CapProfile do
   @doc """
   The forge LOGIN a role writes under — `<tier>_<role>`, or `{:error, _}`.
 
-  THE RULE WAS ALREADY HERE, AND ONLY THE PROVISIONING SIDE COULD SEE IT. It lived private inside
-  `Fleet.Roster`, which emits the tofu roster, so the accounts got CREATED as
-  `fleet_qualifier` while the runtime kept addressing them as `qualifier`. Measured 2026-08-11: a
-  deliverable PR opened, `request_review` answered `404 User 'qualifier' not exist`, and the PR sat
-  with no judge — the review leg simply never started. The read half fails the same way and more
-  quietly: verdicts come back under LOGINS, get compared to the card's ROLES, and every real judge
-  is classified `foreign` by F-C061.
+  THE RULE MUST BE READABLE FROM BOTH SIDES. Held private on the provisioning side, accounts get
+  CREATED under their login while the runtime keeps addressing them by ROLE: `request_review`
+  answers `404 User 'qualifier' not exist` and the PR sits with no judge, the review leg never
+  starting. The read half fails the same way and more quietly: verdicts come back under LOGINS, get
+  compared to the card's ROLES, and every real judge is classified `foreign` by F-C061.
 
   The prefix follows the TIER, never the file that wins the overlay: a business catalogue may ship
   its own `architect.yaml` to widen its tools, and the account stays `system_architect`, because
@@ -820,10 +776,9 @@ defmodule Fleet.CapProfile do
 
   defp login_maps do
     # Keyed on THE ACTIVE SET, because that is what the map is derived from. Keyed on the default
-    # root alone it leaked across fixtures that swap the active declaration while the default root
-    # stays put: the second one read the first one's answer, and the projection was silently for
-    # someone else's catalogues. A memo whose key is narrower than its input is a wrong answer with
-    # a fast path.
+    # root alone it leaks across fixtures that swap the active declaration while the default root
+    # stays put, and the projection is silently for someone else's catalogues. A memo whose key is
+    # narrower than its input is a wrong answer with a fast path.
     key =
       {__MODULE__, :forge_logins, Fleet.Catalogue.installed_roots(),
        Fleet.Catalogue.system_root()}
@@ -840,14 +795,12 @@ defmodule Fleet.CapProfile do
     end
   end
 
-  # ONE PASS PER INSTALLED CATALOGUE, and it has to be. The rule is "the prefix follows the TIER", and
-  # the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". The
-  # projection came from `Fleet.Roster`, where it ran with a single catalogue
-  # BORROWED into `:lcars_fleet, :catalogue_root`, so `Fleet.Catalogue.name()` was the declaring
-  # catalogue and asking it was correct. Lifted here it runs globally, where that name is only the
-  # DEFAULT catalogue: measured, a role declared by `biz` projected to `fleet_biz-dev` while its
-  # account is `biz_biz-dev`. A projection that is right for one catalogue and silently wrong for
-  # every other is worse than none — it is the 404 this whole rail was built to stop, relocated.
+  # ONE PASS PER INSTALLED CATALOGUE, and it has to be. The rule is "the prefix follows the TIER",
+  # and the tier of a business role is THE CATALOGUE THAT DECLARES IT — not "the default one". This
+  # runs globally, so `Fleet.Catalogue.name()` names only the DEFAULT catalogue: asking it projects
+  # a role declared by `biz` to `fleet_biz-dev` while its account is `biz_biz-dev`. A projection
+  # that is right for one catalogue and silently wrong for every other is worse than none — it is
+  # the 404 this whole rail was built to stop, relocated.
   #
   # `installed_roots/0` ORDER decides (`put_new`), which is the same rule stated for the overlay: a business
   # catalogue may ship its own `architect.yaml` and the account stays `system_architect`, because
@@ -966,7 +919,7 @@ defmodule Fleet.CapProfile do
   Returns `spec.invocation.lifetime_scope`, using `"one-shot"` or the supplied default
   when absent.
 
-  ## ⚠ CE CHAMP NE DIT PAS COMBIEN DE TEMPS UN POD VIT (B3, 2026-08-20)
+  ## ⚠ CE CHAMP NE DIT PAS COMBIEN DE TEMPS UN POD VIT (B3)
 
   Son nom le promet, quatre valeurs le suggèrent (`one-shot`, `pipe`, `run`, `forever`), et c'est
   faux. Un juge déclaré `one-shot` vit jusqu'à ce que son verdict soit ingéré
@@ -982,14 +935,12 @@ defmodule Fleet.CapProfile do
        « context-long vs one-shot » pour choisir entre un processus RÉSIDENT re-briefé et un pod
        froid.
 
-  **Ce qu'elle NE décide plus** : la classe de fauche. `kill_class/1` triait dessus jusqu'au
-  2026-08-20 et se trompait deux fois — un juge n'est pas plus jetable qu'un producteur, et
-  « jetable » ne distingue rien. Elle trie désormais par MISSION (`brief_kind`, `slot_scope`).
+  **Ce qu'elle NE décide PAS** : la classe de fauche. `kill_class/1` trie par MISSION (`brief_kind`,
+  `slot_scope`) — un juge n'est pas plus jetable qu'un producteur, et « jetable » ne distingue rien.
 
-  On ne renomme pas le champ : il est écrit dans dix-huit profils, dans le schéma, et dans les
-  invariants `g24_15`/`G24-11`. Un renommage sans lecteur qui le réclame échangerait un nom
-  imprécis contre une migration — et le nom n'a jamais été le mécanisme, seulement sa description.
-  Ce paragraphe est la description corrigée.
+  On ne renomme pas le champ : il est écrit dans les profils, dans le schéma et dans les invariants
+  `g24_15`/`G24-11`. Un renommage sans lecteur qui le réclame échangerait un nom imprécis contre une
+  migration — et le nom n'a jamais été le mécanisme, seulement sa description.
   """
   @spec lifetime_scope(t(), String.t() | nil) :: String.t() | nil
   def lifetime_scope(%__MODULE__{spec: spec}, default \\ "one-shot") do
@@ -1022,8 +973,8 @@ defmodule Fleet.CapProfile do
 
   ⚠ **`nil` EST POSSIBLE, ET C'EST UN PROFIL HORS SCHEMA.** La cle est REQUISE — un profil charge
   par le catalogue est valide avant d'entrer dans le runtime, donc la production n'y arrive pas.
-  Un profil construit a la main (fixture, injection ad hoc) le peut, et depuis que `kill_class/1`
-  trie sur la judge-ness (B1, 2026-08-20) le `nil` y classait un juge en PRODUCTEUR, silencieusement.
+  Un profil construit a la main (fixture, injection ad hoc) le peut, et comme `kill_class/1` trie
+  sur la judge-ness (B1), un `nil` y classerait un juge en PRODUCTEUR, silencieusement.
 
   On ne met PAS de defaut a `"worker"` ici, et le refus est le meme que celui du schema : la
   judge-ness est une propriete de SECURITE qui ne s'infere jamais. Un defaut ferait exactement

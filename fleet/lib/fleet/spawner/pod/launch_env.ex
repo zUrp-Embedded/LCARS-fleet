@@ -87,19 +87,18 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # (e.g. "bypassPermissions" to explicitly re-open yolo). NB: write enforcement =
           # the MOUNT (RO/RW), not the tool-list → the judges keep Write/Edit (reports), bounded by the mount.
           #
-          # ⚠ THIS CHOICE RESTED ON "the bypass is useless, it would only neutralize our lists", AND
-          # THAT HALF IS MEASURED FALSE. It is not neutral: under `default` a tool absent from
-          # `allowedTools` does not get skipped, it PROMPTS — and a pod has nobody to answer.
-          # Measured on a bench 2026-08-09 with a real pod: a scribe reached for `NotebookEdit`
-          # (in neither list) and froze on "Do you want to insert this cell? 1. Yes 2. Yes, allow
-          # all 3. No", still alive, still holding its slot and the ticket's in-flight lock,
-          # producing nothing. The recovery chain then re-dispatches a pod that wedges identically.
+          # ⚠ `default` N'EST PAS NEUTRE, ET C'EST MESURE. Un outil absent d'`allowedTools` n'est
+          # pas ignore, il DEMANDE — et un pod n'a personne pour repondre. Mesure sur banc avec un
+          # pod reel : un scribe atteint `NotebookEdit` (dans aucune des deux listes) et gele sur
+          # « Do you want to insert this cell? 1. Yes 2. Yes, allow all 3. No », toujours vivant,
+          # tenant toujours son slot et le verrou en vol du ticket, ne produisant rien. La chaine de
+          # recovery re-dispatche alors un pod qui se coince a l'identique.
           #
-          # What the rest of the comment says stays TRUE and is the reason the trade is arguable:
-          # the wall is the MOUNT, so a bypass lowers no real barrier — it only removes the prompt
-          # path. Every canon cap-profile leaves this field undeclared, so every pod runs `default`
-          # today. Which posture the fleet wants is an operator decision, NOT a code one; it is
-          # open, and the measurement above is what it should be decided on.
+          # L'autre moitie du raisonnement reste vraie et rend l'arbitrage ouvert : le mur est le
+          # MONTAGE, donc un bypass n'abaisse aucune barriere reelle — il retire seulement le chemin
+          # du prompt. Tant qu'aucun profil ne declare ce champ, tout pod tourne en `default`.
+          # Quelle posture la flotte veut est une decision d'OPERATEUR, pas de code ; elle est
+          # ouverte, et c'est sur la mesure ci-dessus qu'elle doit se prendre.
           |> Map.put("LCARS_PERMISSION_MODE", LaunchSpec.permission_mode(state.cap_profile))
           # RC Desktop name: `<project>_<role>` supplied by the dispatch (`opts[:rc_name]`); default = role
           # alone (permanent / project-less pods). claude_launch passes it as
@@ -107,10 +106,10 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # Per-user RC sessions (the human sees ONLY their own). NB: the VALUE is the EXACT name,
           # not a prefix — the legacy env name (`_NAME_PREFIX`) is kept (less churn).
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
-          # Desktop VISIBILITY, decided here and obeyed there. claude_launch.sh used to re-derive it
-          # from the cap-profile with its own jq read: two derivations of one fact, which agree only
-          # until something tries to change it. `LaunchSpec.remote_control?/1` is now the single
-          # authority and this env carries its answer.
+          # Desktop VISIBILITY, decided here and obeyed there. Re-deriving it launcher-side from the
+          # cap-profile with a jq read gives two derivations of one fact, which agree only until
+          # something tries to change it. `LaunchSpec.remote_control?/1` is the single authority and
+          # this env carries its answer.
           |> Map.put(
             "LCARS_POD_REMOTE_CONTROL",
             to_string(LaunchSpec.remote_control?(state.cap_profile))
@@ -123,8 +122,8 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # pod_dir). The binary is resolved robustly here (from ~/.local/bin, not the `command -v` gamble).
           # The pod runs UNDER the human's UID BY CONSTRUCTION: the runtime runs *as* the human
           # (each human = THEIR fleet under their user), the pod = BEAM Port inherits this UID →
-          # ownership/perms/OS isolation for free, NO systemd-run --uid — for EVERY role (since the
-          # 2026-07-19 reorg starfleet is an ordinary bwrap pod too, no dedicated off-fleet user).
+          # ownership/perms/OS isolation for free, NO systemd-run --uid — for EVERY role, the
+          # fleet-level one included (an ordinary bwrap pod, no dedicated off-fleet user).
           |> Map.put("CLAUDE_DIR", claude_dir)
           |> maybe_put_vendor_bin(human)
           |> LaunchSpec.maybe_put_pod_cwd(state.opts, state.cap_profile, state.pod_dir)
@@ -160,14 +159,13 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
       end
 
     case launch_env do
-      # `claude_dir` TRAVELS, it is not re-resolved. The gate below used to call `claude_dir_for/1`
-      # a second time, and that cost more than a duplicate `getent`: (1) the two reads are
-      # INDEPENDENT, so a directory service answering differently between them validates one path
-      # and launches with another; (2) the second call sits OUTSIDE the `try/rescue` above, so its
-      # raise — `passwd_home/1` is fail-loud by design — killed the `gen_statem` with no
+      # `claude_dir` TRAVELS, it is not re-resolved. Calling `claude_dir_for/1` a second time in the
+      # gate below costs more than a duplicate `getent`: (1) the two reads are INDEPENDENT, so a
+      # directory service answering differently between them validates one path and launches with
+      # another; (2) the second call sits OUTSIDE the `try/rescue` above, so its raise —
+      # `passwd_home/1` is fail-loud by design — kills the `gen_statem` with no
       # `transition_failed`, leaving an orphaned `:pending` task and a state.json frozen at the
-      # stale phase. That is exactly the hole the `try` was written to close, reopened one line
-      # below its `end`.
+      # stale phase. That is exactly the hole the `try` closes, reopened one line below its `end`.
       {:ok, human, claude_dir, env} ->
         with {:ok, env} <- maybe_put_git_identity(put_auth_mode(env), human, role),
              :ok <- Fleet.Credentials.Gate.validate(claude_dir) do

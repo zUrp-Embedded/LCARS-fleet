@@ -32,8 +32,8 @@ defmodule Fleet.Layout do
   @workshop_root "/home/projects.workshop"
   @state_dirname ".lcars"
   # TWO CATALOGUE DIRECTORIES, AND THEY HOLD TWO DIFFERENT KINDS OF THING — not one editable copy
-  # of the other. Reading them as a `php.ini` / `php.ini-production` pair is what made a shipped
-  # demonstration look installed.
+  # of the other. Read as a `php.ini` / `php.ini-production` pair, a shipped demonstration looks
+  # installed.
   #
   # `/opt/lcars/catalogues` is the IMAGE's tree: SEEDS. What lives there is deposited on the forge
   # at each apply and installed by nobody. It is rewritten by every update, which costs nothing —
@@ -72,10 +72,9 @@ defmodule Fleet.Layout do
   # redemarrage ne doit pas cohabiter avec ce qui EST l'image. `/run` est un tmpfs ; poser cet etat
   # ailleurs le ferait survivre a un boot, et un marqueur qui survit ment sur le boot qu'il decrit.
   #
-  # ⚠ CETTE DECLARATION N'EXISTAIT PAS AVANT LE 2026-08-28, et quatorze faits la recopiaient.
-  # `/run/lcars` porte les sockets de l'autorite, du privilegie, du MCP, de l'egress et des consoles
-  # — c'est-a-dire toute la surface par laquelle un pod parle au reste de la machine. Le balayage
-  # derive du §21 l'a rendue deuxieme du corpus, sans une source.
+  # ⚠ UNE SOURCE, PARCE QUE CETTE RACINE PORTE TOUTE LA SURFACE PAR LAQUELLE UN POD PARLE AU RESTE
+  # DE LA MACHINE : les sockets de l'autorite, du privilegie, du MCP, de l'egress et des consoles.
+  # Un chemin recopie chez chaque consommateur derive sans que rien ne rougisse.
   @runtime_root "/run/lcars"
 
   # Sibling of the pod's AF_UNIX socket, inside the per-pod MCP run dir.
@@ -92,11 +91,9 @@ defmodule Fleet.Layout do
   @briefs_subdir "briefs"
   @gate_briefs_subdir "gate-briefs"
   @provenance_subdir "provenance"
-  # NO SUBDIR HERE IS AGENT-WRITABLE, and there is no longer an exception. `notes/` was one: the
-  # subdir an architect could address through `publish_doc`, on the grounds that nothing read it as
-  # evidence. Measured: no canon cap-profile granted that tool, to any role — so the exception did
-  # not exist in fact, and what remained was a door in the one tree that must stay read-only for
-  # everyone. A note of design is DOC; it lives on the doc face, which its author mounts RW.
+  # NO SUBDIR HERE IS AGENT-WRITABLE, and there is no exception: a door in the one tree that must
+  # stay read-only for everyone is a door for everyone. A note of design is DOC; it lives on the doc
+  # face, which its author mounts RW.
   # Verdicts committed in full when they exceed the inlining threshold. RUNTIME-written like the
   # trees above: an agent must never be able to address the tree its own judgement is recorded in.
   @verdicts_subdir "verdicts"
@@ -123,22 +120,14 @@ defmodule Fleet.Layout do
   #
   # THE CUT, and it is the whole reason there are three rather than two: `ops` carries what the
   # SYSTEM manipulates — what was asked, what was judged, what was proven. `workshop` carries the
-  # material the project is built FROM. `code` carries what it IS. While `ops` held both the record
-  # and the drafting material, one branch was simultaneously the tree a producer writes and the
-  # tree its judgement is recorded in, and no rule could separate them because they were the same
-  # object.
+  # material the project is built FROM. `code` carries what it IS. Fold the drafting material back
+  # into `ops` and one branch becomes simultaneously the tree a producer writes and the tree its
+  # judgement is recorded in — no rule can separate them, because they are then the same object.
   #
   # THE NAMES PAIR MECHANICALLY: root = `projects.<face>`, branch = `<face>`, with `code` as the one
   # named exception (`/home/projects`, `main`) for a reason that is not ours — `main` is git's
-  # default. The old names broke that pairing by one notch: `/home/projects.work` was named after
-  # the `work/` PREFIX the two orphan branches shared, so it named the family and not the member,
-  # and four independent sites read it as "the doc one". The prefix carried no mechanism either —
-  # measured: never a glob, a refspec, a branch-protection rule or a `starts_with?` — so it went.
-  #
-  # ⚠ THE DOCUMENTATION THAT SHIPS IS NOT THE `workshop` FACE. It lives in `docs/` on `code`, is
-  # written by a producer working there, and is judged like any other deliverable. What separates
-  # the two is the DESTINATION, never the nature of the artefact — this is the confusion the face
-  # was renamed to end, back when it was called `doc` and collided head-on with `docs/`.
+  # default. A name shared by several faces names the FAMILY and not the member, and every reader
+  # then picks the member they had in mind.
   #
   # TWO VOCABULARIES, and their difference is what makes the invariant structural rather than
   # checked. A CARD's `face` enum is `code | workshop` — the faces a producer may work. This map is
@@ -262,7 +251,7 @@ defmodule Fleet.Layout do
   @doc """
   Project NAME from a repo `owner/name` (or a bare name): the last `/`-segment. The project's directory
   under `code_root`/`ops_root` is `<root>/<project_name>`. SINGLE SOURCE of the `owner/name → name`
-  derivation (C-06) — copied across ~8 sites before.
+  derivation (C-06).
   """
   @spec project_name(String.t()) :: String.t()
   def project_name(repo) when is_binary(repo), do: repo |> String.split("/") |> List.last()
@@ -290,8 +279,8 @@ defmodule Fleet.Layout do
   It is a LABEL: nothing downstream may read a fact back out of it. The project slug travels
   alongside it as the explicit `:project_slug` spawn opt, and the spawn choke point refuses a named
   pod that omits it (`Fleet.Spawner`, `:project_required`). Deriving the project from the label
-  instead is what previously froze this format: adding `#42` to the name would have silently
-  produced a pod with no cwd remap and no checkpoint seed.
+  instead is what FREEZES this format: adding `#42` to the name would then silently produce a pod
+  with no cwd remap and no checkpoint seed.
   """
   @spec pod_label(String.t() | nil, String.t(), pos_integer() | nil) :: String.t()
   def pod_label(project, role, ticket \\ nil)
@@ -344,8 +333,8 @@ defmodule Fleet.Layout do
 
   ## Why it is a BOX path and not `~/.lcars/catalogues`
 
-  It was per-human until 2026-08-16, on the grounds that everything else under `state_dir/0` is.
-  Three things make that the wrong family:
+  Everything else under `state_dir/0` is per-human, which makes that the obvious family. Three
+  things make it the wrong one:
 
   Which catalogues run is a property of the FORGE, and the forge is shared. Two humans on one box
   cannot legitimately serve different ones, so a per-human copy is N copies of one fact — and N
@@ -475,20 +464,16 @@ defmodule Fleet.Layout do
   @doc """
   Path-safe artifact name: anything outside `[A-Za-z0-9._-]` becomes `-`; leading dot refused.
 
-  `/u` is LOAD-BEARING. Without it the regex works on BYTES, so one accented character — two bytes
-  in UTF-8 — became two dashes: `"D: placement latéral des pièces"` came out
-  `D--placement-lat--ral-des-pi--ces`. Never unsafe (deterministic, still path-safe, still accepted
-  by `valid_brief_ref?/1`), which is why it survived: nothing broke, the names were just wrong in a
-  way only a human reading them would notice. One replacement per CHARACTER is the rule the
-  docstring always claimed.
+  `/u` is LOAD-BEARING, and dropping it fails SILENTLY. Without it the regex works on BYTES, so one
+  accented character — two bytes in UTF-8 — yields two dashes: `"D: placement latéral des pièces"`
+  comes out `D--placement-lat--ral-des-pi--ces`. Never unsafe (deterministic, still path-safe, still
+  accepted by `valid_brief_ref?/1`), which is exactly why such a regression survives: nothing breaks,
+  the names are merely wrong in a way only a human reading them notices. One replacement per
+  CHARACTER is the rule.
 
   It also costs LENGTH, and that is not cosmetic here: this name becomes a `brief_ref`, which is
   interpolated TWICE into the pointer work-order and is bounded by nothing (no truncation anywhere
-  in `brief_ref/2`). A French ticket title paid two characters per accent for nothing.
-
-  Old refs are unaffected: they are recorded as DATA (a step_run's `brief_ref`, a provenance
-  filename) pointing at immutable git objects, so `git show <sha>:<ref>` on a name minted before
-  this still resolves. Only names minted from now on change.
+  in `brief_ref/2`). A French ticket title would pay two characters per accent for nothing.
   """
   @spec sanitize_artifact_name(String.t()) :: String.t()
   def sanitize_artifact_name(name) do
@@ -499,8 +484,8 @@ defmodule Fleet.Layout do
   # ── POINTER notation, unified: Brief / Criteria / Verdict ─────────────────
   # A consequential brief/criteria (and a verdict) lives as a doc committed in ops; the forge surface
   # (ticket body, PR comment) carries a SUMMARY + a pointer to the pinned doc. ONE notation for every
-  # kind, ONE parser — they were three near-identical shapes and would have drifted the day one was
-  # retouched (nobody would find the others). Composed by the delegation tool / the verdict completer
+  # kind, ONE parser — three near-identical shapes drift the day one is retouched, and nobody finds
+  # the others. Composed by the delegation tool / the verdict completer
   # (mcp, pilot), parsed by the dispatch (pilot). The notation lives HERE once (same reason as the ref
   # shapes: two domains, one truth, foundation).
   #

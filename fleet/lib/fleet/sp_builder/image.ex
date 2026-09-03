@@ -14,9 +14,9 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec publish!() :: :ok
   def publish! do
-    # UNE image PAR CATALOGUE INSTALLE. La cle etait scalaire et les quatre arbres se resolvaient par
-    # `search/1`, donc les catalogues fusionnaient : le SP d'un role venait de n'importe lequel
-    # d'entre eux. Un pod de catalogue k doit recevoir le materiel de k, pas celui de son voisin.
+    # UNE image PAR CATALOGUE INSTALLE, cle sur sa racine : un pod du catalogue k doit recevoir le
+    # materiel de k, pas celui de son voisin. Une cle scalaire les fusionnerait, et le SP d'un role
+    # viendrait de n'importe lequel d'entre eux.
     for root <- Fleet.Catalogue.installed_roots(), do: publish_scope!(root)
     :ok
   end
@@ -27,17 +27,13 @@ defmodule Fleet.SPBuilder.Image do
     image = %{
       modop_sp:
         read_dir_map!(modop_roots(root), "*/sp.md", &(&1 |> Path.dirname() |> Path.basename())),
-      # ⚠ `read_dir_map` SANS le `!` DEPUIS LE 2026-08-19, ET C'EST UN CHANGEMENT DE CE QU'UNE
-      # ABSENCE SIGNIFIE. Cette classe exigeait au moins un artefact — garde juste tant qu'un
-      # cap-profile en déclarait un : zéro fichier voulait alors dire « déploiement cassé ».
-      # La sortie de superpowers a retiré les trois derniers templates ET les deux seules
-      # déclarations (`qualifier`, `reviewer` → `subagent_template: null`) : plus aucun rôle n'en
-      # demande, donc un ensemble VIDE est désormais la forme correcte, pas une panne. Garder le
-      # `!` faisait refuser le boot sur un catalogue parfaitement sain.
-      # Ce qui reste gardé, et c'est l'essentiel : un fichier TRONQUÉ lève toujours, et un rôle qui
-      # DÉCLARE un template introuvable échoue toujours au spawn (`read_subagent_template` →
-      # `subagent_template_missing`, épinglé par `catalogue_verify_test`). On a retiré l'exigence
-      # d'une population non vide, pas la détection d'un artefact manquant.
+      # ⚠ SANS le `!` : un ensemble VIDE est la forme CORRECTE de cette classe, pas une panne.
+      # Aucun rôle n'exige de template de subagent, donc exiger au moins un artefact ferait refuser
+      # le boot sur un catalogue parfaitement sain.
+      # Ce qui reste gardé, et c'est la distinction : un fichier TRONQUÉ lève, et un rôle qui
+      # DÉCLARE un template introuvable échoue au spawn (`read_subagent_template` →
+      # `subagent_template_missing`). Pas d'exigence de population, mais détection d'un artefact
+      # manquant.
       subagent:
         read_dir_map(
           subagent_roots(root),
@@ -55,11 +51,8 @@ defmodule Fleet.SPBuilder.Image do
         ),
       worker_protocol: read_worker_protocol!(root),
       human_protocol: read_protocol!(human_protocol_path(root), "human protocol"),
-      # (`sp_role_bases` lived here: a SECOND corpus of prompt files, keyed by path under the
-      # cap-profiles root, serving `spec.systemPrompt`. The field was forbidden by the schema, so no
-      # valid catalogue could name one — the map was always empty, and the key it would have been
-      # looked up by was a path. `spec.systemPrompt` now names a ROLE, so it resolves through
-      # `drafts` above and needs no corpus of its own.)
+      # (`spec.systemPrompt` names a ROLE, so it resolves through `drafts` above: no second corpus
+      # of prompt files keyed by path.)
       # The two EEx templates, frozen as SOURCE (rendered with eval_string against the image). A
       # template is the SHAPE of every prompt the fleet emits — the last thing that may drift
       # mid-life while the version claims otherwise.
@@ -79,9 +72,9 @@ defmodule Fleet.SPBuilder.Image do
     # Il ne quitte pas la VM (calcule ici, range en `persistent_term`, relu par le meme noeud) et
     # `lib/` ne le compare nulle part.
     #
-    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, et c'est le point sur lequel
-    # une revue a soupconne un aggravant : l'ordre de parcours d'une map ne serait pas stable entre
-    # executions. MESURE, et c'est FAUX sur cet OTP : `term_to_binary` rend le meme binaire pour
+    # ⚠ ICI L'ENTREE EST UNE MAP DE CONTENUS DE FICHIERS, NON TRIEE, ce qui invite a craindre un
+    # ordre de parcours instable entre executions. MESURE sur cet OTP, et c'est FAUX :
+    # `term_to_binary` rend le meme binaire pour
     # deux maps construites dans des ordres opposes — 3 cles ou 60, cles binaires, et imbriquees
     # comprises. Pas de tri ajoute : il n'achete rien d'observable ici, et un geste qui n'achete
     # rien sur un tampon n'est pas neutre (il change toutes les versions deja tracees).
@@ -120,10 +113,10 @@ defmodule Fleet.SPBuilder.Image do
   # PER CATALOGUE, and that is what a deployment-wide check cannot do. `canon spawn-proof` already
   # refuses a role whose draft exists in NO root — but it reads the union, so a role declared by
   # catalogue A and prompted by an unrelated catalogue B passes: A's role silently runs B's
-  # behaviour. With the two bundled roots that configuration is unreachable (the only names both
-  # sides carry are the four the system also DECLARES, which is the legal override). It becomes
-  # reachable the moment an operator stacks catalogues, which is what the search path was built for
-  # — so the guard lands WITH the mechanism rather than after the first accident.
+  # behaviour. With the bundled roots alone that configuration is unreachable — the only shared
+  # names are the ones the system also DECLARES, which is the legal override. It becomes reachable
+  # the moment an operator stacks catalogues, which is what the search path was built for, so the
+  # guard lands WITH the mechanism rather than after the first accident.
   #
   # LIMIT, and it is structural: a FINE override moves one tree out of its catalogue, and nothing
   # can then attribute a role to a catalogue. Such a tree is not visited rather than guessed at.
@@ -181,9 +174,9 @@ defmodule Fleet.SPBuilder.Image do
   `[{path, :modified | :vanished}]`. `[]` = the disk still agrees with the epoch; `:unpublished`
   when no image is live (nothing was ever validated, so nothing can have drifted).
 
-  Answers the question the image used to swallow. A non-empty list means the deployed program's
-  prompt material changed under a running daemon: the pods keep receiving the proven-good content
-  (that is the defence), and the operator gets told (that is what was missing).
+  A non-empty list means the deployed program's prompt material changed under a running daemon: the
+  pods keep receiving the proven-good content (that is the defence), and the operator is told (which
+  the freeze alone does not do).
   """
   @spec drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
   def drift do
@@ -232,10 +225,10 @@ defmodule Fleet.SPBuilder.Image do
   # `File.Error` brut, remonte par `publish!/0` jusqu'au refus de boot. La POSTURE est juste
   # (proven-good ou pas de boot) ; ce qui manquait est le nom de la condition.
   #
-  # L'asymetrie qui prouve que c'etait un defaut et non un choix : `read_dir_map/3` leve une erreur
-  # NOMMEE a la ligne suivante pour le fichier VIDE, et une erreur de bibliotheque pour le fichier
-  # illisible. Meme fonction, meme artefact, deux traitements — la parade etait litteralement en
-  # dessous. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas en
+  # L'asymetrie a eviter : `read_dir_map/3` leve une erreur NOMMEE pour le fichier VIDE et une
+  # erreur de bibliotheque pour le fichier illisible. Meme fonction, meme artefact, deux
+  # traitements. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas
+  # en
   # `:vanished`. Ici on ne peut pas degrader (une epoque qui ne couvre pas la matiere qu'elle gele
   # n'est pas une epoque), donc on leve — mais en nommant.
   defp read_artifact!(path, what) do
@@ -369,9 +362,8 @@ defmodule Fleet.SPBuilder.Image do
     end
   end
 
-  # `roots` is ALWAYS a search path. The single-root clause that used to sit beside this one went
-  # dead the day the last reader stopped resolving on its own — dialyzer said so before I did, and
-  # that unreachability is the proof the door is single.
+  # `roots` is ALWAYS a search path. A single-root clause beside this one is unreachable — dialyzer
+  # says so — and that unreachability is the proof the door is single.
   defp read_dir_map!(roots, glob, key_fun) when is_list(roots) do
     if Enum.all?(roots, &(Path.wildcard(Path.join(&1, glob)) == [])) do
       raise "SPBuilder.Image: no artifact matches #{glob} under #{inspect(roots)} — " <>
@@ -388,8 +380,8 @@ defmodule Fleet.SPBuilder.Image do
     # `Map.put_new` and the roots in PRECEDENCE order: the first root that carries a key wins, and
     # the later one is not read. That is the child-theme rule — a business catalogue shipping its
     # own `rubber-duck` REPLACES the system's, without declaring anything, which is the whole point
-    # of a search path. It refused the collision until 2026-08-10; refusing made overriding
-    # impossible, which is the opposite of what a default is for.
+    # of a search path. Refusing the collision instead makes overriding impossible, which is the
+    # opposite of what a default is for.
     Enum.reduce(roots, %{}, fn root, acc ->
       root
       |> Path.join(glob)
@@ -429,7 +421,7 @@ defmodule Fleet.SPBuilder.Image do
   # SAME resolution as `Pod.Assets`' machine half (override first, bundled worker default
   # otherwise) — the image must freeze what the consumer would have read, or it freezes the wrong
   # file and the override silently escapes the epoch. Reading another domain's config ATOM creates
-  # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative was a second
+  # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative is a second
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
     Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
@@ -464,9 +456,8 @@ defmodule Fleet.SPBuilder.Image do
 
   defp drafts_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_drafts)
 
-  # Two of the three readers that never learned the search path, and were defects for it: the EEx
-  # templates shape the MECHANISM's prompts, and the human protocol was demanded from catalogues
-  # that have no human-facing role at all (W-13). They go through the same door as the rest. The
-  # third was `sp_role_bases`, and it is gone rather than fixed — see the publish above.
+  # Two readers that must go through the search path like the rest: the EEx templates shape the
+  # MECHANISM's prompts, and demanding the human protocol from catalogues that have no human-facing
+  # role at all is a defect of its own (W-13).
   defp template_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_templates)
 end

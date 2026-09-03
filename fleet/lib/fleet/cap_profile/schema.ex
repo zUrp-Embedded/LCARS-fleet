@@ -58,15 +58,15 @@ defmodule Fleet.CapProfile.Schema do
             :ok
 
           {:error, errors} ->
-            # LE VERDICT REMONTE, LE DIAGNOSTIC RESTAIT ICI. `ExJsonSchema` rend la liste des
-            # violations avec leur pointeur JSON ; elle etait remplacee sur place par un atome
-            # unique, et l'operateur apprenait que son profil est non conforme sans apprendre OU.
-            # Sur un fichier de catalogue de plusieurs dizaines de cles, c'est la difference entre
-            # une correction et une chasse.
+            # LE VERDICT REMONTE, LE DIAGNOSTIC DOIT SORTIR ICI. `ExJsonSchema` rend la liste des
+            # violations avec leur pointeur JSON ; la remplacer sur place par un atome unique
+            # apprend a l'operateur que son profil est non conforme SANS lui apprendre OU — sur un
+            # fichier de catalogue de plusieurs dizaines de cles, c'est la difference entre une
+            # correction et une chasse.
             #
-            # L'atome de retour NE CHANGE PAS : les trois sont le contrat gele de `load/1` et
-            # `compose/2`, et les appelants branchent dessus. Ce qui manquait n'etait pas un type
-            # plus riche, c'etait une TRACE — le detail va au rail operateur, la ou on le cherche.
+            # L'atome de retour NE BOUGE PAS : les trois sont le contrat gele de `load/1` et
+            # `compose/2`, et les appelants branchent dessus. Ce qu'il faut n'est pas un type plus
+            # riche, c'est une TRACE — le detail va au rail operateur, la ou on le cherche.
             Logger.error("CapProfile.Schema: #{kind} REFUSED — #{describe_violations(errors)}")
 
             case kind do
@@ -173,9 +173,9 @@ defmodule Fleet.CapProfile.Schema do
   # LE REESSAI EST L'ARBITRAGE, L'INONDATION EST L'ACCIDENT. Ne pas memoriser l'echec est
   # DELIBERE (cf. `load_schema_file/1` : un `{:error, _}` gele pour la vie du BEAM rendrait un
   # schema redevenu lisible inaccessible sans redemarrage, et c'est le meme choix que la relecture
-  # du secret HMAC a chaque requete). Mais chaque validation refaisait alors `File.read` + `decode`
-  # + `resolve` ET reecrivait la MEME ligne de warning : une indisponibilite durable devenait
-  # proportionnelle au trafic, et la trace ou on l'aurait vue etait la premiere noyee.
+  # du secret HMAC a chaque requete). Mais chaque validation refait alors `File.read` + `decode` +
+  # `resolve` ET reecrit la MEME ligne de warning : une indisponibilite durable devient
+  # PROPORTIONNELLE AU TRAFIC, et la trace ou on la verrait est la premiere noyee.
   #
   # On journalise donc la TRANSITION, pas l'etat — exactement la discipline de la jauge de boite aux
   # lettres du poller : « un etat qui dure est UN fait ; le repeter noie la trace ». Un changement

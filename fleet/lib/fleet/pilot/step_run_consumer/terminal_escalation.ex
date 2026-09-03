@@ -190,10 +190,10 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
     if function_exported?(spawner, :notify_pod, 2) do
-      # ⚠ CETTE BRANCHE JETAIT LE RESULTAT, et le `@doc` juste au-dessus annonce « Failures are
-      # logged » — ce qui etait vrai de l'AUTRE branche seulement. C'est le chemin d'escalade
-      # TERMINALE : le moment ou un step_run a echoue definitivement et ou l'architecte du projet
-      # doit etre prevenu. Pod absent du registre -> message perdu, et rien ne le disait.
+      # ⚠ CETTE BRANCHE NE JETTE PAS SON RESULTAT, sans quoi le `@doc` juste au-dessus — « Failures
+      # are logged » — ne serait vrai que de l'AUTRE branche. C'est le chemin d'escalade TERMINALE :
+      # le moment ou un step_run a echoue definitivement et ou l'architecte du projet doit etre
+      # prevenu. Pod absent du registre -> message perdu, et rien ne le dirait.
       #
       # `error` et non `warning` : `notify_pod/2` ne connait pas l'enjeu de son message et le
       # signale au niveau du fait ; ICI on sait que ce qui vient d'etre perdu est le dernier

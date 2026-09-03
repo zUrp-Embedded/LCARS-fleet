@@ -10,11 +10,13 @@ defmodule Fleet.Conflict.Score do
               - algorithm_stability * 0.10
               - post_merge_risk     * 0.20
 
-  Labels: >=92 certain, >=68 high, >=44 medium, otherwise low.
+  The formula is here for its WEIGHTS — what the engine is most afraid of being wrong about. The
+  label thresholds are NOT: they live on `label_from_score/1` alone, for the reason that function
+  states.
   """
   alias Fleet.Conflict.ConfidenceScore
 
-  @doc "Size penalty by number of lines: 1-2 -> 0, 3-10 -> 15, 11-30 -> 35, >30 -> 55."
+  @doc "Size penalty by number of lines — a bigger block is a bigger blast radius."
   @spec scope_impact(non_neg_integer()) :: non_neg_integer()
   def scope_impact(lines) when lines <= 2, do: 0
   def scope_impact(lines) when lines <= 10, do: 15

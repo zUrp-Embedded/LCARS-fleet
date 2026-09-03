@@ -2,11 +2,10 @@ defmodule Fleet.Project.Incidents do
   @moduledoc """
   Producer of the project incident EVENTS — the downward replacement of an upward seam (BL-6-114).
 
-  Two sites here used to call `Fleet.Pilot.IncidentRegistry` through an app-env seam
-  (`:project_incident_rail`): the module crossed the boundary AS A VALUE, in the direction the
-  stratification exists to forbid (`work` → `steering`), and boundary could not see it. Since the
-  admiral chantier the registry is a COUNTER-AND-TICKET desk, nothing of the piloting layer — so
-  the dependency bought no semantics, only a private door.
+  Calling `Fleet.Pilot.IncidentRegistry` from here through an app-env seam passes the module across
+  the boundary AS A VALUE, in the direction the stratification exists to forbid (`work` →
+  `steering`), where boundary cannot see it. And the registry is a COUNTER-AND-TICKET desk, nothing
+  of the piloting layer: such a dependency buys NO SEMANTICS, only a private door.
 
   This module is the door's replacement: it PUBLISHES on the bus (`Fleet.EventRouter`, a declared
   dep, downward), and the conversion to a durable incident happens where it belongs — the

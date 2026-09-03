@@ -11,8 +11,8 @@ defmodule Fleet.Observation.Deck do
 
   alias Fleet.Observation.Deck.View
 
-  # `priv/` ne porte plus que la feuille de style : elle EST du runtime, versionnee avec le code qui
-  # la genere. Les medias de marque, eux, ont quitte cet arbre — cf. `media_root/0` plus bas.
+  # `priv/` ne porte que la feuille de style : elle EST du runtime, versionnee avec le code qui la
+  # genere. Les medias de marque vivent sous `media_root/0`, pose par l'installation.
   plug(Plug.Static,
     at: "/static",
     from: {:lcars_fleet, "priv/observation/static"},
@@ -32,8 +32,8 @@ defmodule Fleet.Observation.Deck do
   # ─── LES MEDIAS DE MARQUE ───────────────────────────────────────────────────────────────────────
   # Servis A LA MAIN plutot que par `Plug.Static`, et ce n'est pas un gout : `Plug.Static` resout son
   # `from:` a la COMPILATION (Plug.Builder appelle `init/1` la), donc il ne peut pas viser un chemin
-  # que la config pose au boot. Une racine de medias figee dans le BEAM serait exactement le contraire
-  # de ce que ce chantier retire.
+  # que la config pose au boot. Une racine de medias figee dans le BEAM ne peut plus etre deplacee
+  # par l'installation, qui est justement celle qui la pose.
   #
   # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE. `..` dans une URL est la faute la plus
   # vieille du web ; `Path.expand` + prefixe, sinon 404 — jamais un filtrage de la CHAINE, qui se
@@ -86,9 +86,9 @@ defmodule Fleet.Observation.Deck do
     end
   end
 
-  # `socket`, not `port` (6-072/6-098): this deck has no address. Reporting a port here would have
-  # been the most convincing lie of the lot — a health endpoint answering `200` while naming a number
-  # nothing binds. Whoever probes health is looking for where to reach this thing; the answer is a
+  # `socket`, not `port` (6-072/6-098): this deck has no address. Reporting a port here would be the
+  # most convincing lie of the lot — a health endpoint answering `200` while naming a number nothing
+  # binds. Whoever probes health is looking for where to reach this thing; the answer is a
   # path, and the caller reaching it over that very socket is what makes the field honest.
   get "/health" do
     conn
@@ -99,20 +99,18 @@ defmodule Fleet.Observation.Deck do
     })
   end
 
-  # ⚠ UNE ENTRÉE MALFORMÉE EMPORTAIT TOUT LE LISTING, ET C'EST UN ENDPOINT DE LECTURE.
+  # ⚠ UNE SEULE ENTRÉE MALFORMÉE EMPORTERAIT TOUT LE LISTING, ET C'EST UN ENDPOINT DE LECTURE.
   #
-  # `pod_view/2` fait `info.pod_id` — un accès STRICT, qui lève `KeyError` si la clé manque. Un seul
-  # pod dont l'info n'en porte pas faisait donc tomber `/api/pods` ENTIER : le deck n'affichait plus
-  # rien, et le message parlait d'une clé, pas d'un pod.
+  # `pod_view/2` fait `info.pod_id` — un accès STRICT, qui lève `KeyError` si la clé manque : un seul
+  # pod sans elle fait tomber `/api/pods` ENTIER, avec un message qui parle d'une clé, pas d'un pod.
+  # Or ce seam écarte DÉJÀ ce qu'il ne peut pas afficher, et un pod sans `pod_id` est exactement
+  # aussi inaffichable — on ne peut pas l'adresser. Il rejoint donc la même famille au lieu
+  # d'emporter ses voisins : une vue read-only qui meurt sur une donnée punit le lecteur pour l'état
+  # de ce qu'il regarde.
   #
-  # Or ce seam écarte DÉJÀ ce qu'il ne peut pas afficher. Un pod sans `pod_id` est exactement aussi
-  # inaffichable — on ne peut pas l'adresser — donc il rejoint la même famille au lieu d'emporter ses
-  # voisins. Une vue read-only qui meurt sur une donnée punit le lecteur pour l'état de ce qu'il
-  # regarde.
-  #
-  # ⚠ ET PAS `Map.get` → `pod_id: nil` : ce fichier interdit lui-même cette forme douze lignes plus
-  # bas, pour `role` — « indiscernable de : ce pod n'a pas de rôle ». Un pod servi avec un id nul
-  # s'afficherait comme un pod réel qu'on ne peut plus joindre. On écarte, et on le DIT.
+  # ⚠ ET PAS `Map.get` → `pod_id: nil` : ce fichier interdit lui-même cette forme pour `role` —
+  # « indiscernable de : ce pod n'a pas de rôle ». Un pod servi avec un id nul s'afficherait comme un
+  # pod réel qu'on ne peut plus joindre. On écarte, et on le DIT.
   #
   # ⚖ ICI ET PAS DANS `Fleet.Spawner.list_pods/0` : le seam d'affichage décide ce qui s'affiche.
   # `list_pods` sert aussi le groupage plus haut dans ce fichier, qui lit par `Map.get` et tolère
@@ -150,12 +148,10 @@ defmodule Fleet.Observation.Deck do
     |> send_resp(200, body)
   end
 
-  # THE READ-DIAGNOSTIC PLANE LIVES ON THE READ SOCKET. `fleet_api` used to serve these two over a
-  # TCP listener that is gone (socket-only fleet); the aggregator modules stay in `Fleet.API` (they
-  # already hold the cross-domain deps), and the read plane — `Fleet.Observation`, already an
-  # AF_UNIX plug the operator's `state_of_the_fleet` skill curls at `$OBS/api/pods` — reads them.
-  # Deleting the endpoints without re-homing them left that skill blind on `readiness/deep`
-  # ("red -> do not undertake work"), which is why they are back here and not gone.
+  # THE READ-DIAGNOSTIC PLANE LIVES ON THE READ SOCKET. The aggregator modules stay in `Fleet.API`
+  # (they already hold the cross-domain deps); the read plane serves them, because the operator's
+  # `state_of_the_fleet` skill curls this socket and gates on `readiness/deep` ("red -> do not
+  # undertake work"). Serving them anywhere else leaves that skill blind.
   get "/api/readiness/deep" do
     json(conn, 200, Fleet.API.Readiness.deep())
   end
@@ -178,25 +174,20 @@ defmodule Fleet.Observation.Deck do
   def pod_view(info, known) do
     %{
       pod_id: info.pod_id,
-      # 6-057 — LE ROLE EST LA VERITE, L'ICONE EST UNE QUESTION D'AFFICHAGE, et les deux etaient
-      # confondues : `role` ne sortait que si un `.svg` du meme nom existait. Un pod `chief` (le seul
-      # role du catalogue sans asset, mesure) etait donc servi `role: null` — indiscernable de « ce
-      # pod n'a pas de role », et c'est exactement ce que le commentaire de `project_slug` douze
-      # lignes plus bas interdit. Le repli generique existait DEJA cote vue
-      # (`favicon-minimal.svg`) : masquer le role etait le MOYEN d'y arriver, pas l'intention.
+      # 6-057 — LE ROLE EST LA VERITE, L'ICONE EST UNE QUESTION D'AFFICHAGE. Les confondre — ne
+      # sortir `role` que si un `.svg` du meme nom existe — sert `role: null` pour tout role sans
+      # asset, indiscernable de « ce pod n'a pas de role ». Le repli generique est cote vue.
       role: role_of(info),
       # Ce que la vue doit savoir, dit separement : quel asset utiliser, `nil` = le generique.
       role_icon: role_icon(Map.get(info, :role), known),
       issue_id: Map.get(info, :issue_id),
-      # THE LAST LINK OF THE CHAIN, and publishing it in `pod_info` was not enough: this view is
-      # what `/api/pods` serves, and it whitelists its keys. The landing deck reads THIS endpoint —
-      # so as long as the key stopped here, the slug existed everywhere except where its only
-      # consumer could see it, and that consumer went on scanning `/proc` for a mount that was
-      # deliberately removed.
+      # THE LAST LINK OF THE CHAIN: publishing a key in `pod_info` is not enough, because this view
+      # whitelists what `/api/pods` serves and the landing deck reads THIS endpoint. A key that
+      # stops short of here exists everywhere except where its only consumer can see it.
       #
       # `nil` is a real answer, not a gap: a fleet-level pod belongs to no project. It reads as
-      # "no project" ONLY because the runtime now states it — the same nil inferred from an absent
-      # mount meant "I could not tell", and the two were indistinguishable to the page.
+      # "no project" ONLY because the runtime STATES it — a nil inferred from an absent mount would
+      # mean "I could not tell", and the two are indistinguishable to the page.
       project_slug: Map.get(info, :project_slug),
       phase: info.phase,
       conditions: Map.get(info, :conditions, []),
@@ -220,22 +211,16 @@ defmodule Fleet.Observation.Deck do
 
   defp role_icon(_role, _known), do: nil
 
-  # LA RACINE DES MEDIAS INSTALLES — une source, posee par l'installation, lue par tout le monde.
-  #
-  # ⚠ IL Y EN AVAIT TROIS EXEMPLAIRES, ET ILS AVAIENT DERIVE. Les memes avatars vivaient sous
-  # `assets/avatars/` (la marque), `fleet/deploy/deps/avatars/` (les png de la charte forge) et
-  # `priv/observation/static/assets/` (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf
-  # roles communs differaient entre la marque et ce deck — pas par decision, mais parce qu'une mise a
-  # jour touchait un dossier et pas les autres. Le deck affichait donc une generation d'avatars
-  # pendant que la forge en posait une autre.
-  #
+  # LA RACINE DES MEDIAS INSTALLES — UNE source, posee par l'installation, lue par tout le monde.
   # `assets/` est la source ; l'installation la pose en `/opt/lcars/share/{avatars,favicon}`, a cote
-  # de la doc, et le rail de deploiement (`provision-forge-charte.sh`) lit le meme endroit.
+  # de la doc, et le rail de deploiement lit le meme endroit. Un deuxieme exemplaire derive en
+  # silence : une mise a jour touche un dossier et pas l'autre, et le deck affiche alors une
+  # generation d'avatars pendant que la forge en pose une autre.
   defp media_root, do: Application.get_env(:lcars_fleet, :media_root, "/opt/lcars/share")
 
   # ⚠ AUCUN REPLI SUR `priv/`, ET C'EST UNE DECISION. Une installation qui n'a pas pose ses medias
-  # est RATEE, pas degradee : un repli servirait l'ancienne generation d'avatars — c'est-a-dire
-  # exactement la panne qu'on vient de retirer — et rendrait vert un deploiement a moitie fait. Ici
+  # est RATEE, pas degradee : un repli servirait une generation d'avatars perimee et rendrait vert
+  # un deploiement a moitie fait. Ici
   # l'absence reste bruyante et l'affichage tombe sur l'icone generique, ce qui SE VOIT.
   @doc false
   # Public comme `roles_for_display/1` et pour la meme raison : c'est le point ou la source des
@@ -249,16 +234,13 @@ defmodule Fleet.Observation.Deck do
 
     case File.ls(dir) do
       {:ok, files} ->
-        # Le filtre `favicon` qui vivait ici est parti AVEC le fait qu'il decrivait : les deux
-        # favicons partageaient ce dossier, ils ont maintenant le leur. Une condition qui protege
-        # d'un cas devenu impossible enseigne un modele faux au prochain lecteur.
         for f <- files, String.ends_with?(f, ".svg"), do: Path.rootname(f)
 
       {:error, reason} ->
-        # `[]` reste la reponse — chaque pod tombera sur l'icone generique, ce qui est une
-        # degradation d'AFFICHAGE legitime depuis que le role ne passe plus par ici. Mais elle cesse
-        # d'etre muette : c'est la meme regle que `roles_for_display/1` plus bas (F-C125, « un
-        # catalogue illisible n'est PAS `[]` »), a la severite pres — une icone n'est pas une donnee.
+        # `[]` reste la reponse — chaque pod tombe sur l'icone generique, degradation d'AFFICHAGE
+        # legitime puisque le role ne passe plus par ici — mais elle n'est pas MUETTE. Meme regle que
+        # `roles_for_display/1` (F-C125, « un catalogue illisible n'est PAS `[]` »), a la severite
+        # pres : une icone n'est pas une donnee.
         Logger.warning(
           "Deck: role icons unreadable (#{dir} : #{inspect(reason)}) — every pod falls back to the " <>
             "generic icon. Roles themselves are UNAFFECTED (served from the runtime, not from assets)."
@@ -291,16 +273,11 @@ defmodule Fleet.Observation.Deck do
   def roles_for_display({:error, _reason} = err), do: err
 
   # Temporary HARD-CODED guard (user-validated): the Memory-X profiles are not agent roles to display.
-  # What the catalogue actually scans (`Catalog.name_index/1`) is `<dir>/*.yaml` + `<dir>/archivistes/*.yaml`
-  # — so the two halves of this guard are NOT in the same state:
-  #   * `archivist*` — reachable by construction: the `archivistes/` glob exists. The directory does not
-  #     exist on disk today, so the branch is inert for now, but it bites the day a profile lands there.
-  #   * `monk*` — NOT reachable from the catalogue: there is no `monks/` scan, deliberately (the monks are
-  #     frozen under `canon/_frozen-monks/`, out of the boot loop — `Catalog` says so at its glob). This
-  #     half is kept for the thaw that re-adds the scan; until then nothing can produce such a name here.
-  # Keeping it is cheap and closes the hole at thaw time; what it must NOT do is read as "the catalogue
-  # yields monks today". Clean in the long run = a semantic field (non-null `monk_registry`/`monk_instance`),
-  # not a name prefix.
+  # The two halves are NOT in the same state, and the guard must not read as "the catalogue yields
+  # monks today": `archivist*` is reachable by construction (`Catalog.name_index/1` globs
+  # `<dir>/archivistes/*.yaml`), while nothing scans the frozen monks, so that half is a cheap hole
+  # closed in advance of a thaw. Clean in the long run = a semantic field (non-null
+  # `monk_registry`/`monk_instance`), not a name prefix.
   defp memory_x_role?(name),
     do: String.starts_with?(name, "monk") or String.starts_with?(name, "archivist")
 

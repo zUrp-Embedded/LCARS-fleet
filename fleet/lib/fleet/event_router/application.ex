@@ -23,11 +23,11 @@ defmodule Fleet.EventRouter.Application do
   # being declared in a config file.
   #
   # Checked at BOOT and not per-call, deliberately: the dangerous form is the one DECLARED in
-  # config, and it is the only one visible here. The single test that uses the seam sets it with
-  # `put_env` after boot, so this stays silent for it — a warning on every broadcast would be noise
-  # nobody reads, which is the same as no warning at all.
+  # config, and it is the only one visible here. A test that sets it with `put_env` after boot
+  # stays silent, and that is the intent — a line on every broadcast would be noise nobody reads,
+  # which is the same as no line at all.
   #
-  # A warning and not a refusal: the seam is legitimate machinery, and a node that will not boot
+  # It LOGS and boots rather than refusing: the seam is legitimate machinery, and a node that will
   # because someone left a debug hook is a worse failure than one that says so loudly.
   defp warn_if_broadcast_seam_declared do
     case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
@@ -74,11 +74,11 @@ defmodule Fleet.EventRouter.Application do
   defp preregister_event_atoms do
     yaml_events = Fleet.EventRouter.Catalog.event_type_strings()
 
-    # NO hard-coded signal atoms here. `os.signal.*` used to be pre-registered for a producer that
-    # does not exist (`SignalsOS` is an inert tombstone) — three atoms created at every boot for a
-    # broadcast nothing could emit. Removed with their keys, BL-6-43: a transitively-dormant key
-    # outlives the reason anyone could name for it, and whoever lands the real producer adds its
-    # types in the same gesture — which is the only moment their presence means anything.
+    # NO hard-coded signal atoms here (BL-6-43). Pre-registering `os.signal.*` for a producer that
+    # does not exist creates atoms at EVERY boot for a broadcast nothing can emit — and a
+    # transitively-dormant key outlives the reason anyone could name for it. Whoever lands the real
+    # producer adds its types IN THE SAME GESTURE, which is the only moment their presence means
+    # anything.
     Enum.each(
       yaml_events ++ gitea_event_types(),
       fn event_type ->

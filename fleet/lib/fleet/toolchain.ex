@@ -162,16 +162,17 @@ defmodule Fleet.Toolchain do
   `mix lcars.contracts.check` refuse toute divergence. Un littéral vérifié vaut une source unique ;
   une convention non vérifiée n'en est pas une.
 
-  ⚠ ET IL N'EST PAS RÉGLABLE, PAR DÉCISION (⚖ user 2026-08-19). Il l'a été à moitié : une clef
-  d'app-env ici, une variable d'environnement côté shell, et aucun pont entre les deux. Les défauts
-  coïncidaient, donc rien ne cassait — jusqu'au jour où quelqu'un tourne celle du shell : la branche
-  se crée sous le nouveau nom, la protection le suit, et ce domaine continue d'interroger l'ancien
-  pendant que les manifestes atterrissent là où personne ne regarde. Aucun message, le rail a l'air
-  calme. **Une molette lue par la moitié des parties est pire que pas de molette.**
+  ⚠ ET IL N'EST PAS RÉGLABLE, PAR DÉCISION (⚖ user). Le réglable à MOITIÉ — une clef d'app-env
+  ici, une variable d'environnement côté shell, aucun pont entre les deux — ne casse rien tant que
+  les défauts coïncident. Le jour où quelqu'un tourne celle du shell : la branche se crée sous le
+  nouveau nom, la protection le suit, et ce domaine continue d'interroger l'ancien pendant que les
+  manifestes atterrissent là où personne ne regarde. Aucun message, le rail a l'air calme.
+  **Une molette lue par la moitié des parties est pire que pas de molette.**
 
-  LE NOM DIT CE QUE LA BRANCHE FAIT. Elle s'appelait `sysadmin` : un mot qui désigne un métier,
-  une posture et un ex-rôle, donc rien. Ce mécanisme-ci est le SEUL qui l'utilise — un pod dépose
-  une demande d'outil, un humain signe. Elle porte donc le nom de ce qu'on y dépose.
+  LE NOM DIT CE QUE LA BRANCHE FAIT, et pas quel métier s'en occupe : un mot qui désigne à la fois
+  une profession, une posture et un rôle ne désigne rien. Ce mécanisme-ci est le SEUL qui l'utilise
+  — un pod dépose une demande d'outil, un humain signe — donc elle porte le nom de ce qu'on y
+  dépose.
 
   PAS `ops`, et la raison est mesurée : le runtime ÉCRIT déjà sur `ops` (le registre d'incidents),
   donc la protéger casserait ces écritures. Même dépôt, branche différente, protections opposées.

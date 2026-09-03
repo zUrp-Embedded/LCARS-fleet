@@ -16,8 +16,8 @@ defmodule Fleet.CapProfile.Invariants do
   The error-atom vocabulary is **FROZEN**: the tests AND `mix lcars.contracts.check`
   match these exact codes — do NOT rename them (they are a wire contract, not a
   comment). The registry in `violations/1` is the list; naming an upper bound here
-  would be a second copy that goes stale the next time one is added, which is
-  exactly what happened to the `… :g24_14` this sentence used to end on.
+  would be a second copy that goes stale the next time one is added — and a sentence
+  ending on the highest code it knew is exactly how that staleness reads.
 
   ## Excluded from `validate/1` (documented at their sites below)
 

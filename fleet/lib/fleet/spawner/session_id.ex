@@ -1,32 +1,24 @@
 defmodule Fleet.Spawner.SessionId do
   @moduledoc """
-  PURE encoder of a fleet pod's DETERMINISTIC claude `session_id` (hexspeak). It transforms
-  `(role_index, kill_class, uid, repo[, pool])` — supplied by the CALLER — into a stable hexspeak
-  UUID, with no timestamp suffix. It no longer CATALOGUES the roles: the source of the WHAT (the role
-  index, the kill/lifecycle class, the fleet-level character) is the role's cap-profile
-  (`metadata.role_index` / `CapProfile.kill_class/1` / `fleet_level`); the WHO (the human's OS UID) is
-  supplied by the spawn side. Here we only do the string arithmetic.
+  PURE encoder of a fleet pod's DETERMINISTIC claude `session_id` (hexspeak): it turns
+  caller-supplied inputs into a stable UUID, with no timestamp suffix.
+
+  ⚠ IL NE CATALOGUE AUCUN ROLE. Le QUOI — index de role, classe de fauche, caractere fleet-level —
+  est declare par le cap-profile ; le QUI vient du cote spawn. Ici, on ne fait que de l'arithmetique
+  de chaine.
 
   Format: `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>`
 
-    - `<X>`            kill/HARVEST class (hex nibble) — LA MISSION DU POD, et par consequent ce que
-                      sa mort coute. L'AUTORITE EST `CapProfile.kill_class/1`, qui enonce le critere
-                      et NE NOMME AUCUN ROLE : un inventaire de roles ecrit ici perime en silence,
-                      puisque rien ne le relie a la source. `0` = l'accueil, hors flotte · `1` =
-                      l'architecte, une conversation humaine en cours · `2` = un producteur, le
-                      travail d'un ticket, re-dispatchable · `3` = un juge, une passe de verdict.
-                      `badcafe` = universal kill-marker → `pkill -f 'claude.*3badcafe'` sweeps the
-                      judges, `'claude.*2badcafe'` the producers, `0badcafe` always spared ;
-                      `pkill -f 'claude.*badcafe'` = all.
-                      ⚠ CES ETIQUETTES ONT CHANGE LE 2026-08-20 (B1) : la `3` disait « froid et fait
-                      pour etre fauche », ce qui triait sur le CYCLE DE VIE et mettait quatre juges
-                      avec un ouvrier de merge. Le tri est desormais la MISSION — et le gradient de
-                      cout tient toujours, dans le meme ordre.
-                      ⚠ ALWAYS anchor on `claude.*`:
-                      a bare `pkill -f 2badcafe` matches ANY cmdline carrying the pattern — a
-                      concurrent `grep -r 2badcafe` (yours, an analysis agent's, a deck probe's)
-                      carries it in its argv and gets reaped with the judges. Classic `pkill -f`
-                      footgun; the anchor closes it for free.
+    - `<X>`            classe de fauche (nibble hex) — LA MISSION du pod, donc ce que sa mort coute,
+                      les classes basses etant les plus cheres. ⚠ L'AUTORITE EST `CapProfile`, qui
+                      enonce le CRITERE et ne nomme aucun role : un inventaire de roles ecrit ici
+                      perimerait en silence, rien ne le reliant a sa source.
+                      `badcafe` = marqueur de fauche universel : un motif par classe balaye une
+                      classe, le motif nu les balaye toutes.
+                      ⚠ TOUJOURS ANCRER SUR `claude.*` : un `pkill -f <classe>badcafe` nu matche
+                      N'IMPORTE QUELLE ligne de commande portant le motif — un `grep` concurrent le
+                      porte dans son argv et se fait faucher avec la classe. Footgun classique de
+                      `pkill -f`, que l'ancre ferme gratuitement.
     - `<UID>`         the runtime human's OS **UID**, in **DECIMAL** 4 digits (exact copy, like `<REPO4>`
                       — grep-direct, zero conversion). Distinguishes two humans sharing ONE OAuth
                       account (same role → same UUID otherwise → ambiguous Desktop slot). BOUND 0..9999
@@ -42,21 +34,18 @@ defmodule Fleet.Spawner.SessionId do
                       BRUYAMMENT (le resume echoue), et le repli non deterministe existe deja
                       (`UUID.uuid4()` est le defaut hors pod). C'est une dependance a un comportement
                       qu'on ne controle pas : detectable, jamais garantie.
-    - `<REPO4>`       repo's forge id, in **DECIMAL** 4 digits (the forge creates the id in decimal → `grep
-                      <id>dec0de` direct, zero conversion). `0000` = fleet-level (permanents). The digits
-                      `0-9` ⊂ hex → the UUID stays legal. **BOUND 0..9999**: `encode/5` REFUSES a
-                      repo outside it (function-clause), and the caller-side mint (`Pod.SessionMint`) refuses
-                      it LOUD (DR-020) — the format has 4 decimal digits, so a forge id > 9999 is an explicit
-                      stop, NEVER folded by `rem` (a silent modulo would collide repo 10000 with repo 0 and
-                      hand two projects one deterministic identity). Widening `<REPO4>` = a format redesign.
-                      ⚠ ET LE REBOUCLAGE EST INTERDIT, PAS SEULEMENT LE `rem` : quand la borne tombe,
-                      « on repart de 0000 » est le MEME modulo, fait par decision au lieu d'être fait
-                      par l'operateur. Deux projets recoivent une identite, un pod reprend la
-                      conversation de l'AUTRE et le recall peut restaurer sa graine — fuite de contexte
-                      inter-projet, la seule famille de panne que ce depot refuse partout. Le biais de
-                      survie l'aggrave : les ids bas recycles retombent sur les depots les plus anciens
-                      et les plus porteurs, et `0000` est la sentinelle fleet-level qu'un redemarrage
-                      usurperait.
+    - `<REPO4>`       id de forge du depot, en DECIMAL sur 4 chiffres — la forge cree l'id en decimal,
+                      donc le grep est direct, sans conversion. `0000` = niveau flotte. Les chiffres
+                      etant inclus dans l'hex, l'UUID reste legal. BORNE 0..9999, et un depassement
+                      est un ARRET explicite : jamais un `rem`, dont le modulo silencieux
+                      donnerait a deux projets une seule identite deterministe.
+                      ⚠ ET LE REBOUCLAGE EST INTERDIT, PAS SEULEMENT LE `rem` : « on repart de 0000 »
+                      est le MEME modulo, decide au lieu d'etre subi. Deux projets partagent alors
+                      une identite, un pod reprend la conversation de l'AUTRE, et le rappel peut en
+                      restaurer la graine — fuite de contexte inter-projet, la seule famille de
+                      panne que ce depot refuse partout. Le biais de survie l'aggrave : les ids bas
+                      recycles retombent sur les depots les plus anciens, et `0000` est la sentinelle
+                      qu'un redemarrage usurperait. Elargir le champ est une refonte de FORMAT.
     - `dec0de`        filler.
     - `<P><R>`        pool (high nibble, `0` = sequential) + role index (low nibble) — **HEX** (R=0-F).
                       `R` = the `role_index` argument (= the cap-profile's `metadata.role_index`), NOT a

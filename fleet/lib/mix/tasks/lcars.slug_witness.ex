@@ -69,10 +69,10 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
         "— dont #{exercising} exercant un cas DISCRIMINANT (`_`, `.`, ou `-` consecutifs)"
     )
 
-    # ZERO TEMOIN N'EST PAS UN VERDICT, et c'etait le mode de defaillance de cette tache. Un compte
-    # nul se lisait dans la meme phrase que « rien ne contredit » — donc comme une mesure rassurante,
-    # alors que rien n'avait ete regarde. Les deux etats se disent maintenant separement : « je n'ai
-    # rien mesure » et « j'ai mesure, et ca ne discrimine pas » sont des reponses differentes.
+    # ZERO TEMOIN N'EST PAS UN VERDICT. Un compte nul rendu dans la meme phrase que « rien ne
+    # contredit » se lit comme une mesure RASSURANTE alors que rien n'a ete regarde. Les deux etats
+    # se disent donc separement : « je n'ai rien mesure » et « j'ai mesure, et ca ne discrimine
+    # pas » sont des reponses DIFFERENTES.
     cond do
       agreed == [] and disputed == [] ->
         Mix.shell().error(

@@ -47,11 +47,12 @@ defmodule Fleet.Pilot.Offload do
   defp label_meta({_consumer, _consequence, meta}) when is_map(meta), do: meta
 
   # Spawns + MONITORS the task (shared by async/3 and async_or_inline/3, no logging here — each
-  # entry point states ITS truth: dropped vs falling back). The task's DEATH is observed: before
-  # this, an offloaded task that DIED mid-work (raise past the caller's own rescue, kill, brutal
-  # shutdown) vanished — nobody owned the :DOWN, the consumer's catch-all swallowed it, and the
-  # only trace of a lost completion was the pod's publish deadline expiring 120s later for an
-  # unknown reason. The monitor is created IN the calling consumer (this runs in its GenServer),
+  # entry point states ITS truth: dropped vs falling back). The task's DEATH is observed, and it
+  # has to be: unmonitored, an offloaded task that DIES mid-work (raise past the caller's own
+  # rescue, kill, brutal shutdown) vanishes — nobody owns the :DOWN, the consumer's catch-all
+  # swallows it, and the only trace of a lost completion is the pod's publish deadline expiring
+  # 120 s later for an unknown reason. The monitor is created IN the calling consumer (this runs in
+  # its GenServer),
   # so the :DOWN lands in that consumer's mailbox: each consumer routes it to `handle_down/3`
   # BEFORE its catch-all. The label rides in the caller's process dictionary keyed by the monitor
   # ref — bounded (one entry per in-flight task, deleted at :DOWN), no state plumbing through two
