@@ -542,6 +542,16 @@ ensure_mode() {
   # stat rend le mode SANS zéro de tête ; on normalise la cible pareil (0750 → 750).
   local want_mode="${mode#0}"
   if [[ "$cur_mode" != "$want_mode" ]]; then
+    # ⚠ UN MODE NUMERIQUE NE RETIRE JAMAIS LE SETGID D'UN REPERTOIRE — c'est GNU chmod, pas une
+    # option : « you can set (but not clear) the bits with a numeric mode ». Un repertoire arrive
+    # en 2755 des qu'il herite d'un parent setgid ou qu'un `cp -a src/. dst/` lui recopie celui
+    # de sa source (tout checkout pose dans un arbre `fleet` setgid). Le `chmod 0755` passait, la
+    # relecture lisait 2755, et la primitive rendait « mode 2755 ≠ 755 après chmod » : le module
+    # echouait sur un etat qu'il venait de poser, et le rail cessait d'etre rejouable.
+    # Mesure du 2026-09-04, banc bob_1, second apply de `44-media` sur `/opt/lcars/share/avatars`.
+    # On efface d'abord les bits speciaux ; le mode numerique REPOSE ensuite ceux qu'il demande
+    # (2775 remet son setgid), donc rien n'est perdu pour un objet qui les veut.
+    chmod u-s,g-s,o-t "$path" 2>/dev/null || true
     chmod "$mode" "$path" || { p_fail "ensure_mode: chmod $mode refusé: $path"; return 1; }
     changed=1
   fi
