@@ -22,9 +22,9 @@
 # se mesurent a la demande (`ruff check --select UP,S`).
 
 [tool.ruff]
-# `fleet/vendor/` est du code tiers : il arbitre ses propres montees (cf. `@test_corpora` dans
+# `runtime/vendor/` est du code tiers : il arbitre ses propres montees (cf. `@test_corpora` dans
 # `lcars.contracts.check`, qui sort deja ses suites du gate pour la meme raison).
-exclude = ["fleet/vendor", "fleet/_build", "fleet/deps", "fleet/tmp"]
+exclude = ["runtime/vendor", "runtime/_build", "runtime/deps", "runtime/tmp"]
 
 # 100, et non le defaut 88 de ruff : le depot n'avait AUCUNE convention de longueur declaree, et
 # 100 est le voisin le plus proche du defaut Elixir (98) applique par `mix format` sur `lib/`.

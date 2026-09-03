@@ -27,15 +27,15 @@ tenir, pas de snapshot à resynchroniser, pas d'affichage de fraîcheur à maint
 
 | source | ce qu'on en tire |
 |---|---|
-| `fleet/priv/catalogue/workflow/canon/workflow_maps/` | les cartes, avec la `presentation:` que le catalogue écrit déjà pour un humain |
-| `fleet/priv/catalogue/cap_profile/canon/cap-profiles/` | les sièges — champs **structurels** seulement |
-| `fleet/priv/catalogue-system/cap_profile/canon/cap-profiles/` | les rôles de mécanique, comptés |
-| `fleet/priv/workflow/schema/gate-decision-v1.json` | les verdicts, lus dans l'`enum` |
-| `fleet/lib/fleet/catalogue.ex` | les 13 arbres d'un catalogue, les générations d'API, le nom réservé, les surcharges fines |
-| `fleet/lib/fleet/layout.ex` | où vivent les catalogues |
-| `fleet/bin/lcars`, `fleet/bin/fleet_v2` | les verbes de la console, et les trois états d'un catalogue |
-| `fleet/lib/fleet/mcp/pod_tools*.ex` | les outils, par porteur |
-| `fleet/bin/claude_launch.sh` | la frontière vendor |
+| `runtime/priv/catalogue/workflow/canon/workflow_maps/` | les cartes, avec la `presentation:` que le catalogue écrit déjà pour un humain |
+| `runtime/priv/catalogue/cap_profile/canon/cap-profiles/` | les sièges — champs **structurels** seulement |
+| `runtime/priv/catalogue-system/cap_profile/canon/cap-profiles/` | les rôles de mécanique, comptés |
+| `runtime/priv/workflow/schema/gate-decision-v1.json` | les verdicts, lus dans l'`enum` |
+| `runtime/lib/fleet/catalogue.ex` | les 13 arbres d'un catalogue, les générations d'API, le nom réservé, les surcharges fines |
+| `runtime/lib/fleet/layout.ex` | où vivent les catalogues |
+| `runtime/bin/lcars`, `runtime/bin/fleet_v2` | les verbes de la console, et les trois états d'un catalogue |
+| `runtime/lib/fleet/mcp/pod_tools*.ex` | les outils, par porteur |
+| `runtime/bin/claude_launch.sh` | la frontière vendor |
 
 **Ce qui n'est JAMAIS lu** : le texte de prompt des cap-profiles. C'est du package SP, écrit en
 français pour calibrer un comportement agentique, explicitement hors périmètre de publication.
@@ -103,4 +103,4 @@ la fois (`concurrency: pages`), et `workflow_dispatch` pour le jouer à la main.
 ## À décider avant publication
 
 L'org et le nom du dépôt — ils fixent l'URL servie (`site:` dans `astro.config.mjs`) — et si GitHub
-reçoit le dépôt tel quel ou un miroir réécrit par `fleet/bin/publish-transform.sh`.
+reçoit le dépôt tel quel ou un miroir réécrit par `runtime/bin/publish-transform.sh`.

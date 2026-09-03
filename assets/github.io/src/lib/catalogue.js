@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PRIV = join(here, '..', '..', '..', '..', 'fleet', 'priv');
+const PRIV = join(here, '..', '..', '..', '..', 'runtime', 'priv');
 const CANON = join(PRIV, 'catalogue');
 // Les catalogues d'EXEMPLE vivent HORS de priv/ (livres comme templates a forker).
 const CATALOGUES = join(here, '..', '..', '..', '..', 'catalogues');
@@ -116,8 +116,8 @@ export function verdicts() {
 // a la premiere addition d'arbre, et personne ne relit une page de manuel pour verifier.
 import { existsSync } from 'node:fs';
 
-const CATALOGUE_EX = join(here, '..', '..', '..', '..', 'fleet', 'lib', 'fleet', 'catalogue.ex');
-const LAYOUT_EX = join(here, '..', '..', '..', '..', 'fleet', 'lib', 'fleet', 'layout.ex');
+const CATALOGUE_EX = join(here, '..', '..', '..', '..', 'runtime', 'lib', 'fleet', 'catalogue.ex');
+const LAYOUT_EX = join(here, '..', '..', '..', '..', 'runtime', 'lib', 'fleet', 'layout.ex');
 
 /** Les arbres d'un catalogue : leur nom d'atome et leur chemin relatif, dans l'ordre du module. */
 export function trees() {
@@ -170,7 +170,7 @@ export function fineOverrides() {
  * verra a l'ecran, et fait ECHOUER ce build le jour ou un quatrieme etat apparait sans que
  * personne ne l'ait dit ici.
  */
-const LCARS_CLI = join(here, '..', '..', '..', '..', 'fleet', 'bin', 'lcars');
+const LCARS_CLI = join(here, '..', '..', '..', '..', 'runtime', 'bin', 'lcars');
 
 export function states() {
   const src = readFileSync(LCARS_CLI, 'utf8');

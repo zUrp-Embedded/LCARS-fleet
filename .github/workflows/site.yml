@@ -6,7 +6,7 @@
 # working-directory.
 #
 # POURQUOI LE SITE EST DANS LE DEPOT DU PRODUIT : son build LIT le catalogue
-# (fleet/priv/catalogue) pour en tirer les cartes, les sieges et les verdicts. Meme arbre,
+# (runtime/priv/catalogue) pour en tirer les cartes, les sieges et les verdicts. Meme arbre,
 # meme commit : le site ne peut pas decrire une autre version que celle qui est la — donc aucune
 # question d'epinglage, aucune peremption possible, aucun mecanisme de fraicheur a maintenir.
 # Corollaire assume : deplacer le catalogue CASSE ce build. C'est le comportement voulu — une
@@ -24,7 +24,7 @@ on:
     # MCP, changer un defaut `LCARS_*` de `fleet_v2` ou ajouter un cap-profile systeme ne publiait
     # rien.
     #
-    # AU GRAIN DU FICHIER LU, PAS DU REPERTOIRE QUI LE CONTIENT. `fleet/lib/fleet/**` couvrirait,
+    # AU GRAIN DU FICHIER LU, PAS DU REPERTOIRE QUI LE CONTIENT. `runtime/lib/fleet/**` couvrirait,
     # mais rebatirait la plaquette a chaque commit de runtime — le filtre ne servirait plus a rien.
     # Un fichier renomme casse le build (`throw`), et c'est le comportement voulu.
     #
@@ -35,25 +35,25 @@ on:
       - '.github/workflows/site.yml'
       # catalogue.js — le catalogue metier, le schema de verdict, et les DEUX sources Elixir dont il
       # tire le layout et les regles d'un catalogue.
-      - 'fleet/priv/catalogue/**'
-      - 'fleet/priv/workflow/schema/gate-decision-v1.json'
-      - 'fleet/lib/fleet/catalogue.ex'
-      - 'fleet/lib/fleet/layout.ex'
+      - 'runtime/priv/catalogue/**'
+      - 'runtime/priv/workflow/schema/gate-decision-v1.json'
+      - 'runtime/lib/fleet/catalogue.ex'
+      - 'runtime/lib/fleet/layout.ex'
       # catalogue.js + tools.js — les cap-profiles SYSTEME (le compte des sieges livres par defaut).
-      - 'fleet/priv/catalogue-system/cap_profile/canon/cap-profiles/**'
+      - 'runtime/priv/catalogue-system/cap_profile/canon/cap-profiles/**'
       # cli.js + catalogue.js + tools.js — les launchers dont il extrait verbes et env vars.
       # ⚠ LE REPERTOIRE ENTIER, ET C'EST LE SEUL DES SIX QUI LE SOIT. `cli.js` lit `join(BIN, name)`
       # avec un nom DYNAMIQUE : les trois fichiers d'aujourd'hui ne sont pas une liste close, et un
       # quatrieme launcher lu par le site retomberait dans le trou qu'on vient de boucher. Le grain
       # suit ce que la source peut dire, pas ce qu'elle fait ce mois-ci.
-      - 'fleet/bin/**'
+      - 'runtime/bin/**'
       # tools.js — les outils MCP declares, et la delegation.
-      - 'fleet/lib/fleet/mcp/pod_tools.ex'
-      - 'fleet/lib/fleet/mcp/pod_tools/delegation.ex'
+      - 'runtime/lib/fleet/mcp/pod_tools.ex'
+      - 'runtime/lib/fleet/mcp/pod_tools/delegation.ex'
       # catalogue.js — les catalogues d'EXEMPLE, qui vivent HORS de `priv/` (livres comme templates
       # a forker). La page equipage montre desormais un siege PAR CATALOGUE, celui de demonstration
       # compris : sans cette ligne, ajouter un siege a `web-demo` ne rebatit pas la vitrine qui le
-      # decrit. Le repertoire entier, comme `fleet/bin/**` et pour la meme raison — la lecture est
+      # decrit. Le repertoire entier, comme `runtime/bin/**` et pour la meme raison — la lecture est
       # DYNAMIQUE (`join(dir, f)` sur un `readdirSync`), donc les fichiers d'aujourd'hui ne sont pas
       # une liste close.
       - 'catalogues/**'

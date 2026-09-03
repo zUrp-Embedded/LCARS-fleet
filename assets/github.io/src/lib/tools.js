@@ -18,8 +18,8 @@ import yaml from 'js-yaml';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..', '..', '..');
-const MCP = join(ROOT, 'fleet', 'lib', 'fleet', 'mcp');
-const PRIV = join(ROOT, 'fleet', 'priv');
+const MCP = join(ROOT, 'runtime', 'lib', 'fleet', 'mcp');
+const PRIV = join(ROOT, 'runtime', 'priv');
 
 // Les cap-profiles vivent dans les catalogues. On lit les DEUX — le systeme porte la mecanique,
 // le metier porte les roles du produit — parce que la question « qui peut appeler quoi » n'a de
@@ -161,7 +161,7 @@ export function roles() {
  * recopiee ici divergerait le jour ou il en ajoute un troisieme.
  */
 export function universalTools() {
-  const src = readFileSync(join(ROOT, 'fleet', 'bin', 'claude_launch.sh'), 'utf8');
+  const src = readFileSync(join(ROOT, 'runtime', 'bin', 'claude_launch.sh'), 'utf8');
   const m = src.match(/ALLOWED_TOOLS="\$\{ALLOWED_TOOLS[^"]*?\}((?:mcp__fleet__[a-z_]+,?)+)"/);
   if (!m) throw new Error('tools.js: la liste universelle n’est plus lisible dans claude_launch.sh');
   return m[1].split(',').filter(Boolean).map((t) => t.replace('mcp__fleet__', ''));

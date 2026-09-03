@@ -16,7 +16,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const BIN = join(here, '..', '..', '..', '..', 'fleet', 'bin');
+const BIN = join(here, '..', '..', '..', '..', 'runtime', 'bin');
 
 const read = (name) => readFileSync(join(BIN, name), 'utf8');
 

@@ -1,0 +1,431 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LCARS Capability Profile v2.5",
+  "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24). STRICT: additionalProperties:false at every object level — an unknown/typo'd field (e.g. `containmnet`) is REJECTED, not silently ignored (R0-CAP-001). As the COMPOSED profile (base + modops) is validated here, this also catches junk fields introduced by a modop fragment (R0-CAP-009 backstop).",
+  "type": "object",
+  "required": [
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name",
+        "containment"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "containment": {
+          "type": "string"
+        },
+        "network": {
+          "type": "string",
+          "enum": ["vendor-only", "egress"],
+          "description": "Ce que le pod peut joindre. Absent = `vendor-only` (fail-closed) : la sortie passe par le proxy CONNECT du pod, dont l'allowlist est la declaration d'endpoints du vendor et rien d'autre. `egress` ajoute les hotes declares par le role. Un pod n'a JAMAIS de namespace reseau : le choix porte sur l'allowlist, pas sur l'ouverture."
+        },
+        "role_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "forge_identity": {
+          "type": "boolean",
+          "description": "Does this role hold a forge identity (account + role token)? Absent = true. The four-list equality check (roles.provisioning_locked, BL-6-45) counts only forge_identity roles against forge.tf/ROLES/PROV_ROLES. false is the EXPLICIT declaration of the asymmetry (starfleet: an orchestrator whose forge writes all go through the system account)."
+        },
+        "mounts": {
+          "type": "array",
+          "description": "CATALOGUE mounts projected into the bwrap sandbox — ONE OF THE TWO DECLARATIVE SURFACES, and the per-role one. bwrap_launch binds them at the SAME path, RO/RW, after the /home tmpfs. Inert when containment: none (host = native access). Empty/absent here means no extra CATALOGUE mount, never a bare pod: a pod's world is composed from five sources, and the other three are deliberately NOT here. Declarative: this list (per role) and the spawn call's `mounts:` opt (per call). RUNTIME INVARIANTS, in code precisely because a catalogue is SUBSTITUTABLE and an invariant an operator can replace does not constrain: the launcher's own directory (a pod that cannot exec its launcher is not a pod), the project's ops worktree, and the code worktree as a read-only reference for a producer working the other face. Do not migrate those three here — moving a rule into a file an operator brings makes it a setting. PRECEDENCE IS THE CONCATENATION ORDER, first occurrence of a path wins (`Enum.uniq_by`), and what it decides is a MODE: two sources naming one path resolve to the EARLIER one's ro/rw. So an audit of what a pod may write reads this list AND the order.",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "mode"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ro",
+                  "rw"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "scope",
+        "knowledge",
+        "invocation",
+        "modop_set",
+        "brief_kind",
+        "interlocutor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowedTools",
+            "disallowedTools"
+          ],
+          "$comment": "allowedTools AND disallowedTools are HARD-REQUIRED by bin/claude_launch.sh (`jq -r '.spec.scope.<field> | join(\",\")' || exit 1` — an absent field makes `join` hit null, jq fails, the pod NEVER launches). A profile that would crash the launcher is rejected at LOAD time, not at spawn.",
+          "properties": {
+            "allowedTools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The role's declared MCP/native tool surface — ONE OF THE TWO GRANTING MECHANISMS, and the per-role one. NOT THE WHOLE SURFACE, and reading it as such is the trap: `claude_launch.sh` APPENDS `mcp__fleet__get_work_item` and `mcp__fleet__submit_result` to every pod, unconditionally, because the fleet work-item protocol is universal — a pod that cannot pull its order or return its result is not a pod. That pair is a RUNTIME INVARIANT and belongs in the launcher precisely because a catalogue is SUBSTITUTABLE: an operator bringing their own profiles must not be able to produce a pod that cannot answer. Do not migrate it here, and do not list it here either — a line that restates an invariant reads as the thing that grants it, and the next reader removes it. ⚠ THE CONVERSE IS NOT TRUE: this list DECLARES a surface, the vendor CONSTRUCTS it. A tool absent here is not thereby unreachable; `disallowedTools` in particular has been measured not to remove what is served to the model. So this field answers \"what did we ask for\", never \"what can this pod do\"."
+            },
+            "disallowedTools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "git_ops_denied": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "egress_hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "LES HOTES QUE CE ROLE PEUT JOINDRE EN PLUS DE CEUX DE SON VENDOR — et rien tant que `metadata.network` ne vaut pas `egress`. `Fleet.Spawner.Pod.Egress.allowlist/2` compose `Vendor.hosts/1` (base obligatoire, lue a cote du launcher) PUIS cette liste, et seulement si le profil declare `network: egress`. Deux clefs, aucune ne suffit : `network` dit QUI a le droit de sortir, cette liste dit OU. ⚠ CETTE CLEF ETAIT LUE PAR LE CODE ET INTERDITE PAR CE SCHEMA. `role_hosts/1` fait `get_in([\"scope\", \"egress_hosts\"])` depuis son ecriture, alors que `scope` est en `additionalProperties: false` : aucun profil ne pouvait la porter, donc la moitie `role` de l'allowlist etait du code mort. Mesure 2026-08-19 : zero occurrence dans tout `runtime/priv`. Ajoutee ici pour que la declaration redevienne possible. UN HOTE PAR ENTREE, nom exact ou regle de sous-domaine `*.` ancree a droite — jamais un `contains`, jamais un suffixe nu : c'est l'ancre qui empeche `x.io.attaquant.net` de passer `*.x.io` (`Egress.decide/2`). Ni schema, ni port, ni chemin : le proxy ne decide que du HOTE."
+            }
+          }
+        },
+        "knowledge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "monk_registry": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "monk_instance": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sp_template": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "SP template used to materialize a PERMANENT pod (monk, archivist). Distinct from invocation.subagent_template, which implies a one-shot dispatch (G24-11)."
+            }
+          }
+        },
+        "invocation": {
+          "type": "object",
+          "required": [
+            "lifetime_scope"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "lifetime_scope": {
+              "type": "string",
+              "enum": [
+                "one-shot",
+                "pipe",
+                "run",
+                "forever"
+              ]
+            },
+            "boot_at_start": {
+              "type": "boolean"
+            },
+            "subagent_template": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "host_native": {
+              "type": "boolean"
+            },
+            "bridge_enabled": {
+              "type": "boolean"
+            },
+            "remote_control": {
+              "type": "boolean",
+              "description": "Claude Desktop visibility: false makes the launcher omit --remote-control (pod functional but invisible). Default (absent) = true. Set false on ephemeral judges (qualifier/reviewer)."
+            },
+            "wake_send_keys": {
+              "type": "boolean",
+              "description": "Send-keys wake fallback authorized for this pod. Default (absent) = true. false = flag-only: the kick loop never types into the pod's terminal (set on the architect - interactive human session); the no-ACK wake.failed escalation remains the terminal net."
+            },
+            "permission_mode": {
+              "type": "string",
+              "enum": [
+                "default",
+                "acceptEdits",
+                "bypassPermissions",
+                "plan"
+              ],
+              "description": "Claude CLI permission mode per role (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.LaunchSpec but the schema rejected the field, so it always fell to `default`). Absent = `default` (allow/deny lists ENFORCED). `bypassPermissions` re-opens yolo explicitly. Write enforcement is the MOUNT (RO/RW), not this — a judge keeps Write/Edit for its report, bounded by the mount."
+            },
+            "model": {
+              "type": "string"
+            },
+            "effort": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            "slot_scope": {
+              "type": "string",
+              "enum": [
+                "instance",
+                "project"
+              ],
+              "description": "POD IDENTITY GRANULARITY — optional. Absent => DERIVED from lifetime_scope (one-shot => instance, context-long => project), the historical rule. Explicit => wins. Exists because the derivation makes ONE combination inexpressible: context-long AND one pod per ticket (an engineer that survives its rework rounds but does not outlive its ticket)."
+            },
+            "output_compression": {
+              "type": "boolean",
+              "description": "INERT TODAY — declaring this changes nothing, in either direction: the composed verdict (LaunchSpec.output_compression?/1) reaches no launch, because the token-saver hook rides a PreToolUse tier a pod CANNOT load — the sanctuary mounts only plugins/ and skills/, pod_settings_json/1 writes no hooks key, and the human .claude is excluded BECAUSE of its hooks. No carrier was ever lost: the v1 one targeted the user tier that --setting-sources excludes unconditionally, so it would never have fired either (measured 2026-08-07). The brick itself IS shipped and tested; wiring it means INVENTING a vehicle in a sanctuary designed to mount none — a feature with a design decision behind it, not a fix. See vendor/token_saver/VENDOR.md. INTENDED semantics, kept so the field means the same thing the day it is wired: compress this role's Bash output before it enters the agent's context. Default (absent) = true. Set false where the FULL output is the work: a judge reading a diff, a debug run. Composed with the fleet knob by an AND — the fleet may only CUT compression, never force it on a role that declared false, because compression LOSES information and the safe direction is toward less of it."
+            }
+          }
+        },
+        "timeouts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "response_sec": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Per-role watchdog: max seconds of silence on the pod's active task before the result-deadline fires (catalogue chantier L2, B-06 2026-07-20 — the reader existed in Pod.Liveness but the schema rejected `timeouts`). Absent = a scope-coded default (one-shot 300 s; forever inert). INTEGER only (a float would crash the deadline arm)."
+            }
+          }
+        },
+        "modop_set": {
+          "type": "object",
+          "required": [
+            "default"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "optional": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "incompatible": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "onboarder",
+              "project_delegate",
+              "exception_judge",
+              "conflict_resolver",
+              "producer"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Business RESPONSIBILITIES the role carries (catalogue chantier L3, B-03 2026-07-20). The gates resolve a CAPABILITY via CapProfile.has_capability?, NEVER a magic role name. `onboarder` = may enrol and retire projects (create/import/open/adopt/close/revise) — a PREDICATE on the pod that knocks, so any number of carriers is legitimate and nothing resolves 'the onboarder'; `project_delegate` = delegates issues within its own project — EXACTLY ONE, it is ensured per repo and named by no card; `exception_judge` = the soft-gate escalation judge AND the signatory of the seal — EXACTLY ONE, two signatories is an ambiguity about who signs; `conflict_resolver` = handed a merge conflict the producer could not resolve — EXACTLY ONE, and a SEPARATE key from exception_judge on purpose, so substituting the resolver never moves the seal's signature; `producer` = produces the deliverable — AT LEAST ONE, several is a normal specialised catalogue since each card names which one it dispatches. Which role carries which is the CATALOGUE's business and is deliberately not stated here: an inventory in a contract is false for every catalogue but the one it was written from. Renaming/substituting a role = a cap-profile edit, not Elixir. Absent = no special responsibility."
+        },
+        "project": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "THE CATALOGUE HALF ONLY, and the slot carries two populations. What a card may declare is listed here and validated (additionalProperties: false). The pilot then INJECTS repo, base_sha, gate_base_sha and pr_base_branch at dispatch through Fleet.CapProfile.with_project/2, which does not re-validate — they are read by live code and are absent here BY DESIGN, since a card that set base_sha would validate and then be overwritten at every dispatch, i.e. a knob that reads as configuration and does nothing. Single source of the runtime half: Fleet.CapProfile.runtime_project_keys/0, held against this list by mix lcars.contracts.check.",
+          "additionalProperties": false,
+          "properties": {
+            "repo_path": {
+              "type": "string"
+            },
+            "base_branch": {
+              "type": "string"
+            },
+            "branch_isolation": {
+              "type": "boolean"
+            },
+            "reference_repo_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "deliverable_mode": {
+          "type": "string",
+          "enum": [
+            "payload",
+            "git_native"
+          ],
+          "description": "Shape of the role's deliverable, entry condition of Fleet.Workflow.Deliverable.publish/1 (differentiation by catalogue, not by code branch). `payload`: the pod produces a file payload, the SYSTEM writes+commits (verdict roles). `git_native`: the pod commits itself in its workspace, the system verifies (I-CBC gate) then pushes (code roles). Absent: the `payload` default is applied code-side (only relevant to steps with post_extract.git). OPTIONAL-with-default is DELIBERATE, the inverse of its dual `brief_kind` (REQUIRED): a wrong `payload` default is fail-SAFE (`StepRunConsumer.default_deliverable_mode` treats an unresolved role as `payload` = NON-producer, so its output is NEVER pushed as unverified code; only an EXPLICIT `git_native` enters the I-CBC gate), while a wrong `brief_kind` default (`worker`) would be fail-OPEN (a judge would execute attacking content) — hence `brief_kind` required and `deliverable_mode` not. Only the producer (engineer) declares `git_native`; judges/system omit it = correct `payload` default."
+        },
+        "brief_kind": {
+          "type": "string",
+          "enum": [
+            "worker",
+            "judge"
+          ],
+          "description": "Shape of the BRIEF the role receives — entry dual of deliverable_mode (differentiation by catalogue, not by magic code name). `worker`: brief = executable instruction (the issue body); the role ACTS. `judge`: the role JUDGES and receives a defused I-CBC GateBrief (context + deliverable + verdict contract, NO executable instruction). REQUIRED (`spec.required`): judge-ness is a SECURITY property, NEVER inferred — a profile without `brief_kind` is REJECTED at load. No silent `worker` default (a judge missing `judge` would fall back to worker=execute = fail-open on attacking content)."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of ANOTHER catalogue role whose SP this role reuses, INSTEAD of owning an `agent-<name>-base.md` of its own. Absent (the normal case) = this role owns its draft, and having neither is refused: a role's cap-profile grants PERMISSIONS, its SP decides BEHAVIOUR, so a role with no prompt of its own behaves like whoever's prompt it inherited and its name lies. The one case this exists for is RENAMING: a catalogue that renames `architect` to something in its own language declares the new name here with `systemPrompt: architect` and reuses the validated prompt, instead of copying 200 lines that then drift. A ROLE NAME and not a path — the reuse is stated in the vocabulary of the catalogue, and there is no path to sanitise, escape or resolve. Reuse must be DECLARED: a silent fallback to a generic prompt is the trap this whole no-fallback doctrine removed."
+        },
+        "interlocutor": {
+          "type": "string",
+          "enum": [
+            "fleet",
+            "both",
+            "human"
+          ],
+          "description": "Who this role's REPL converses with — the axis that decides which protocol contract is injected into `.lcars/protocole-user.md`. `fleet`: the fleet alone (engineer, judges) — machine protocol only, `engage` starts a work-item cycle and there is nobody to answer. `both`: the fleet AND a human at the same terminal (architect, starfleet) — machine protocol PLUS the human addendum; a pod the machine kicks and a human also talks to. `human`: a human alone — no work-item rail, no `engage`; the human is the source of work. REQUIRED (`spec.required`), NEVER inferred: an unstated interlocutor was silently `fleet` for every pod ever spawned, which is why an interactive architect was being served a protocol saying `SeeU` closes nothing and no handoff exists. Three values and not a human/machine boolean, because feeding and facing are INDEPENDENT and the architect proves it (machine-kicked via wake_send_keys AND human-facing via the bridge); the fourth cell — fed by a human, nobody in front — has no referent and is unrepresentable by construction."
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "G24-10 : boot_at_start: true requires lifetime_scope: forever",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "boot_at_start": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "boot_at_start"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "lifetime_scope": {
+                    "const": "forever"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "G24-11 : subagent_template != null requires lifetime_scope: one-shot",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "subagent_template": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "subagent_template"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "lifetime_scope": {
+                    "const": "one-shot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "G24-12 : host_native: true requires containment: none",
+          "if": {
+            "properties": {
+              "invocation": {
+                "properties": {
+                  "host_native": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "host_native"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "properties": {
+                  "containment": {
+                    "const": "none"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

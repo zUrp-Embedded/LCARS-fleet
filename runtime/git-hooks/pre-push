@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+#       ______________________________________________________
+#      /          LCARS FLEET - FEDERATION DATABASE           \
+#     |   ________   __________________________________________\
+#     |  |  2026  |  | SOURCE: pre-push
+#     |  |________|  | AUTHOR: LORDZURP
+#     |   ________   | SYSTEM: LCARS-FLEET v5.4
+#     |  |  v5.4  |  | STATUS: OPERATIONAL
+#     |  |________|  |__________________________________________
+#     |              \__________________________________________\
+#      \    "To boldly go where no code has gone before..."     /
+#       \______________________________________________________/
+#
+#     +-----------------------------------------------------------+
+#     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
+#     +-----------------------------------------------------------+
+#     | MODULE: PRE-PUSH          | SUBSYSTEM: GIT-HOOKS / TPD    |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.226             |
+#     +-------------------------+---------------------------------+
+#
+# pre-push — Temporal Prime Directive enforcement
+#   Force-push block on the PUBLISHED faces, not on main alone: detects a
+#   non-fast-forward push by comparing remote sha ancestry. The list depends on
+#   the repo type (hook-config.sh) — LCARS: main + work/ops; a project: main +
+#   ops + workshop. --force-with-lease on a feature branch = allowed.
+#
+# QA notification is handled by post-commit via fleet-send.sh (spool IPC).
+# No blocking gate here — QA runs asynchronously.
+#
+# Install: bash runtime/git-hooks/install-hooks.sh
+
+set -euo pipefail
+
+# Gate 1 — Force-push detection (Temporal Prime Directive)
+# stdin format: <local_ref> <local_sha> <remote_ref> <remote_sha>
+#
+# `main` N'EST PAS LA SEULE HISTOIRE QU'ON NE REECRIT PAS. La face OPS est le support de
+# l'AUDITABILITE : briefs materialises et epingles, attestations de provenance in-toto, verdicts de
+# gate, rapports de conflit. Toute cette chaine de preuve repose sur des pointeurs `<ref> @ <sha>`
+# qui designent des commits ; un force-push y fait disparaitre les objets vises, et les preuves
+# pendent dans le vide sans qu'aucune erreur ne se leve. C'est plus grave qu'un `main` reecrit,
+# qu'on remarque au premier `pull`.
+#
+# Le nom de la face DEPEND DU DEPOT, d'ou le passage par `hook-config.sh` — que la doc de ce fichier
+# annoncait deja comme source de ce hook, alors qu'il ne l'a jamais lue. Un depot projet porte les
+# faces orphelines `ops`/`workshop` (cf. `Fleet.Layout`), LCARS porte `work/ops`.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+[[ -f "$HOOK_DIR/hook-config.sh" ]] && source "$HOOK_DIR/hook-config.sh"
+
+if [[ "${HOOK_REPO_TYPE:-project}" == "lcars" ]]; then
+    PROTECTED_BRANCHES=(main work/ops)
+else
+    PROTECTED_BRANCHES=(main ops workshop)
+fi
+
+is_protected() {
+    local b
+    for b in "${PROTECTED_BRANCHES[@]}"; do
+        [[ "$1" == "$b" ]] && return 0
+    done
+    return 1
+}
+
+# shellcheck disable=SC2034  # `local_ref`/`local_sha` nomment le format stdin impose par git
+#   (cf. l.36) : les renommer `_` perdrait la documentation de ce que git envoie.
+while read -r local_ref local_sha remote_ref remote_sha; do
+    branch="${remote_ref#refs/heads/}"
+    is_protected "$branch" || continue
+    zero_sha="0000000000000000000000000000000000000000"
+    [[ "$remote_sha" == "$zero_sha" ]] && continue
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+        echo ""
+        echo "⛔  [pre-push] Force-push blocked on '$branch' — Temporal Prime Directive."
+        echo ""
+        echo "    The remote commit is not an ancestor of your local commit."
+        echo "    This would rewrite published history."
+        echo ""
+        echo "    If you need to recover: escalate to Architect."
+        echo "    --force-with-lease on a feature branch is allowed."
+        echo ""
+        exit 1
+    fi
+done
+
+exit 0
