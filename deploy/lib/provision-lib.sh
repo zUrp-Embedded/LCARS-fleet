@@ -1377,7 +1377,19 @@ prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE,
 prov_roles() {
   local out="$PROV_ROLES" root
   local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
-  local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
+  # ⚠ LES PORTES OUTIL VIVENT DANS L'ENTRYPOINT, ET IL N'EST PAS AU MEME ENDROIT SUR LES DEUX RAILS :
+  # `/opt/lcars/entrypoint.sh` dans l'image, `<racine>/deploy/docker/entrypoint.sh` sur un poste
+  # (62-runtime-helpers l'exclut de ses auxiliaires et embarque `deploy/` entier). Un seul chemin
+  # ici rendait le roster des catalogues installes VIDE sur tout poste : `50-forge` ne mintait que
+  # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
+  # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
+  # copie posee est 0644.
+  local entry="${PROV_ENTRYPOINT:-}" c
+  if [[ -z "$entry" ]]; then
+    for c in /opt/lcars/entrypoint.sh "$(repo_root)/deploy/docker/entrypoint.sh"; do
+      [[ -r "$c" ]] && { entry="$c"; break; }
+    done
+  fi
 
   # ⚠ `roles-tfvars` ET NON `roles` : les deux portes ne rendent pas la meme chose. `roles` rend des
   # noms de ROLE (`dev`, `writer`) quand `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`) —
@@ -1386,12 +1398,12 @@ prov_roles() {
   #
   # `.roles` porte les comptes du catalogue, `.system_roles` ceux du substrat partage. Le canon ne
   # connait pas cette coupure — il connait des comptes — donc on recolle ici.
-  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
+  if [[ -n "$entry" && -r "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
     for root in "$PROV_CATALOGUES_DIR"/*/; do
       [[ -f "${root}catalogue.yaml" ]] || continue
       # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
       # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
-      out="$out $("$entry" roles-tfvars "${root%/}" 2>/dev/null \
+      out="$out $(bash "$entry" roles-tfvars "${root%/}" 2>/dev/null \
                   | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     done
   fi
