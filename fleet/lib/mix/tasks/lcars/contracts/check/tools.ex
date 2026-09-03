@@ -439,11 +439,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @spec check_mcp_tools_gated(String.t()) :: Support.result()
   def check_mcp_tools_gated(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
-    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
 
     declared = deftool_names(quoted!(root, tools_rel))
     clauses = dispatch_clauses(quoted!(root, tools_rel))
-    gated_fns = role_gated_functions(quoted!(root, deleg_rel))
+
+    gated_fns =
+      root
+      |> delegation_asts()
+      |> Enum.map(&role_gated_functions/1)
+      |> Enum.reduce(MapSet.new(), &MapSet.union/2)
 
     ungated =
       declared
@@ -815,12 +819,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @spec check_capabilities_exercisable(String.t()) :: Support.result()
   def check_capabilities_exercisable(root) do
     {:ok, _} = Application.ensure_all_started(:yaml_elixir)
-    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
 
-    deleg_ast = quoted!(root, deleg_rel)
-    gates = capability_gates(deleg_ast)
-    gated_delegations = delegation_capabilities(deleg_ast, gates)
+    asts = delegation_asts(root)
+    gates = asts |> Enum.map(&capability_gates/1) |> Enum.reduce(%{}, &Map.merge/2)
+
+    gated_delegations =
+      asts |> Enum.map(&delegation_capabilities(&1, gates)) |> Enum.reduce(%{}, &Map.merge/2)
+
     tools_by_capability = capability_tools(quoted!(root, tools_rel), gated_delegations)
 
     inert =
@@ -850,9 +856,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       status: if(is_nil(broken) and inert == [], do: :pass, else: :fail),
       evidence:
         cond do
-          broken -> ["#{deleg_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
-          inert != [] -> Enum.sort(inert)
-          true -> []
+          broken ->
+            ["delegation family: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+
+          inert != [] ->
+            Enum.sort(inert)
+
+          true ->
+            []
         end,
       note:
         "#{map_size(tools_by_capability)} tool-gated capabilities derived from the AST; " <>
@@ -958,9 +969,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @doc false
   @spec check_mcp_seam_surface(String.t(), [module()]) :: Support.result()
   def check_mcp_seam_surface(root, behaviours \\ @seam_behaviours) do
-    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
-
-    called = seam_calls(quoted!(root, deleg_rel))
+    called = root |> delegation_asts() |> Enum.flat_map(&seam_calls/1) |> Enum.uniq()
 
     declared =
       behaviours
@@ -997,10 +1006,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       evidence:
         cond do
           broken ->
-            ["#{deleg_rel}: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+            ["delegation family: INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
 
           undeclared != [] ->
-            ["#{deleg_rel}: called through a seam, declared nowhere: #{inspect(undeclared)}"]
+            ["delegation family: called through a seam, declared nowhere: #{inspect(undeclared)}"]
 
           true ->
             []
@@ -1147,19 +1156,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @doc false
   @spec check_forge_mutations_exposed(String.t()) :: Support.result()
   def check_forge_mutations_exposed(root) do
-    deleg_rel = "lib/fleet/mcp/pod_tools/delegation.ex"
-    path = Path.join(root, deleg_rel)
-
+    # ⚠ LE `File.exists?` A DISPARU AVEC LE CHEMIN EN DUR, ET C'EST UN GAIN. Il rendait un ensemble
+    # VIDE sur un fichier absent — donc `undecided` valait toutes les mutations, un rouge bruyant
+    # plutot qu'un vert muet, mais un rouge qui ne disait pas la vraie cause. `quoted!/2` leve : une
+    # source illisible est nommee pour ce qu'elle est.
     called =
-      if File.exists?(path) do
-        path
-        |> File.read!()
-        |> Code.string_to_quoted!()
-        |> seam_calls()
-        |> MapSet.new(&elem(&1, 0))
-      else
-        MapSet.new()
-      end
+      root
+      |> delegation_asts()
+      |> Enum.flat_map(&seam_calls/1)
+      |> MapSet.new(&elem(&1, 0))
 
     undecided =
       Enum.reject(@forge_mutations, fn m ->
@@ -1171,7 +1176,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
     broken =
       cond do
-        not File.exists?(path) -> "#{deleg_rel} not found under #{root}"
+        delegation_sources(root) == [] -> "no delegation source found under #{root}"
         length(@forge_mutations) < 8 -> "inventory shrank to #{length(@forge_mutations)}"
         MapSet.size(called) < 5 -> "only #{MapSet.size(called)} seam calls parsed"
         true -> nil
@@ -1313,4 +1318,38 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # A bare `{:error, reason, state}` return: no gate, no work.
   defp inert?(%{body: {:{}, _, [:error | _]}}), do: true
   defp inert?(_), do: false
+
+  # LA FAMILLE DE LA DELEGATION, ET NON UN CHEMIN.
+  #
+  # Quatre murs derivaient leur population de `pod_tools/delegation.ex` NOMME EN DUR. Un mur attache
+  # a une ADRESSE cesse de voir ce qui demenage : le garde d'enumeration des contrats l'a demontre
+  # le 2026-09-02 — au premier decoupage il a cesse de voir huit murs, sa population a retreci, et
+  # le gate est reste VERT.
+  #
+  # `delegation.ex` fait plus de trois mille lignes et sera decoupe ; ses sous-modules existent
+  # deja (`delegation/forge_client.ex` et cinq autres). Lire la famille rend ces murs indifferents
+  # au decoupage, AVANT qu'il ait lieu — l'ordre inverse aurait coute quatre gardes muets.
+  @doc false
+  @spec delegation_sources(String.t()) :: [String.t()]
+  def delegation_sources(root) do
+    racine = "lib/fleet/mcp/pod_tools/delegation.ex"
+
+    sous =
+      root
+      |> Path.join("lib/fleet/mcp/pod_tools/delegation/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.sort()
+
+    # ⚠ SEULES LES SOURCES QUI EXISTENT, et c'est un temoin qui l'a impose. `probe n°4` de
+    # `forge_fields_check_test` exige qu'une delegation absente rende un INSTRUMENT CASSE NOMME, pas
+    # une exception : un mur doit rendre un verdict lisible, pas tuer la tache qui l'appelle. La
+    # premiere version de ce helper laissait `quoted!/2` lever, et j'avais annonce ce retrait comme
+    # un gain — il l'etait pour la lisibilite, pas pour le contrat.
+    Enum.filter([racine | sous], &File.exists?(Path.join(root, &1)))
+  end
+
+  # L'AST de chaque source de la famille. Une source illisible fait LEVER `quoted!/2` — un mur qui
+  # avalerait l'erreur rendrait une population amputee, donc un vert sur moins que le sujet.
+  defp delegation_asts(root), do: Enum.map(delegation_sources(root), &quoted!(root, &1))
 end
