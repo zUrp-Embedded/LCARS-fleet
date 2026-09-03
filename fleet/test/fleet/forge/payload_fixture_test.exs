@@ -40,6 +40,26 @@ defmodule Fleet.Forge.PayloadFixtureTest do
     assignee_logins: ["scribe", "vulcan"]
   }
 
+  describe "un fait ENONCE est le fait EFFECTIF" do
+    # Le runtime lit `assignee_logins` D'ABORD (`Delegation.Issues.issue_assignee/1`), avec
+    # `assignee_login` en repli. La capture reelle porte `assignees: ["mesure"]` : sans ce
+    # miroir, un temoin qui ecrit `assignee_login: "l"` obtient un objet dont l'assigne effectif
+    # reste "mesure". La fabrique disait une chose et l'objet en portait une autre.
+    test "`assignee_login` pose AUSSI la liste — sinon la capture la recouvre en silence" do
+      charge = PayloadFixture.issue(assignee_login: "l")
+
+      assert Payload.assignee_login(charge) == "l"
+      assert Payload.assignee_logins(charge) == ["l"]
+    end
+
+    test "un `assignee_logins` EXPLICITE gagne — un fait nomme n'est jamais derive" do
+      charge = PayloadFixture.issue(assignee_login: "l", assignee_logins: ["a", "b"])
+
+      assert Payload.assignee_login(charge) == "l"
+      assert Payload.assignee_logins(charge) == ["a", "b"]
+    end
+  end
+
   describe "chaque chemin declare RESOUT sur la capture reelle" do
     # Le garde qui mord. Une capture par forme : la PR porte `head`/`base`/`merged`, l'issue porte
     # `repository` et son assigne, le depot porte `full_name`/`default_branch`. Un fait qui ne
@@ -87,7 +107,7 @@ defmodule Fleet.Forge.PayloadFixtureTest do
       # ⚠ CE QUI FAIT TOUT L'INTERET : un temoin qui n'enonce qu'un fait recoit quand meme la forme
       # COMPLETE. C'est ce qui empeche un garde lisant un autre champ de retomber sur son repli.
       assert Payload.head_sha(charge) == Payload.head_sha(PayloadFixture.raw(:pull))
-      assert Payload.base_ref(charge) == "main"
+      assert Payload.base_ref(charge) == Payload.base_ref(PayloadFixture.raw(:pull))
       assert Payload.merged?(charge) == true
     end
 

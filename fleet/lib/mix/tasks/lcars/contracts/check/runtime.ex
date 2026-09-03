@@ -367,9 +367,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     match_source?(path, Regex.compile!("#{fun}\\(#{@label_arg_span}(#{label_alt})", "s"))
   end
 
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE. La version precedente cherchait le motif dans la source
+  # BRUTE : un `# was: unlock(...)` laisse par un auteur qui venait justement de RETIRER l'appel
+  # satisfaisait le mur. Le commentaire qui explique la suppression tenait lieu de la chose
+  # supprimee. `code_of/1` retire les commentaires ligne a ligne — il existe pour ca.
   defp match_source?(path, re) do
     case File.read(path) do
-      {:ok, src} -> Regex.match?(re, src)
+      {:ok, src} -> Regex.match?(re, code_of(src))
       _ -> false
     end
   end
@@ -787,6 +791,88 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end)
     |> List.flatten()
     |> MapSet.new()
+  end
+
+  @doc """
+  Toute fonction nommee dans une porte `eval` d'un script est EXPORTEE par le module qu'elle nomme.
+
+  ## Le defaut qui a pose ce mur
+
+  `bin/lcars project migrate` execute
+  `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"`. Le decoupage d'`onboard.ex` a descendu
+  `eval_migrate/2` et `eval_reconcile/1` dans `Onboard.Migration` SANS les re-exporter. Les deux
+  verbes du CLI levaient un `UndefinedFunctionError`, et le provisioning d'une machine fraiche
+  echouait a l'etape `lcars project reconcile`.
+
+  RIEN NE POUVAIT LE VOIR. Le CLI est du SHELL : le compilateur ne lit pas cette chaine, dialyzer
+  non plus, et les temoins de la fonction avaient ete rebranches sur le sous-module — donc verts.
+  Huit etapes de gate, zero signal. C'est la definition d'une couture non tenue : un appel qui
+  traverse une frontiere de langage n'est verifie par personne, sauf par un mur qui la traverse
+  aussi.
+
+  ## Ce qu'il mesure exactement
+
+  Dans `bin/` et `etc/`, chaque `eval "Module.fonction(...)"` ; puis, dans le module ainsi nomme
+  (retrouve par son `defmodule`, pas par une derivation de chemin — plusieurs modules vivent dans
+  un meme fichier), la presence d'un `def fonction` ou d'un `defdelegate fonction`.
+
+  Le NOM, pas l'arite : les arguments d'une porte sont interpoles par le shell, et compter des
+  virgules dans une chaine shell serait un instrument plus fragile que ce qu'il mesure. Le nom
+  suffit pour la classe de defaut qui existe — une fonction qui DEMENAGE.
+  """
+  @spec check_eval_doors_resolve(String.t()) :: Support.result()
+  def check_eval_doors_resolve(root) do
+    id = "runtime.eval_doors_resolve"
+
+    modules =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn f ->
+        src = File.read!(f)
+
+        Regex.scan(~r/^defmodule\s+([A-Za-z0-9_.]+)\s+do/m, src)
+        |> Enum.map(fn [_, nom] -> {nom, src} end)
+      end)
+      |> Map.new()
+
+    portes =
+      ["bin/*", "etc/*"]
+      |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.flat_map(fn f ->
+        f
+        |> File.read!()
+        |> then(&Regex.scan(~r/eval\s+"([A-Za-z0-9_.]+)\.([a-z_][A-Za-z0-9_?!]*)\(/, &1))
+        |> Enum.map(fn [_, mod, fun] -> {Path.relative_to(f, root), mod, fun} end)
+      end)
+      |> Enum.uniq()
+
+    absents =
+      for {rel, mod, fun} <- portes,
+          src = Map.get(modules, mod),
+          not (is_binary(src) and
+                 Regex.match?(~r/^\s*(def|defdelegate)\s+#{Regex.escape(fun)}\b/m, src)),
+          do:
+            "#{rel}: #{mod}.#{fun} — #{if src, do: "le module ne l'exporte pas", else: "module introuvable"}"
+
+    broken = if length(portes) < 3, do: "only #{length(portes)} eval door(s) found (expected 3+)"
+
+    %{
+      id: id,
+      remediation:
+        "re-exporte la fonction depuis le module que le script nomme (`defdelegate`), ou change " <>
+          "le script : une porte `eval` est un appel qui traverse une frontiere de langage, et " <>
+          "aucune etape du gate ne lit cette chaine a part ce mur",
+      status: if(is_nil(broken) and absents == [], do: :pass, else: :fail),
+      evidence:
+        cond do
+          broken -> ["INSTRUMENT BROKEN — #{broken}; this check measured nothing"]
+          absents != [] -> Enum.sort(absents)
+          true -> []
+        end,
+      note: "#{length(portes)} porte(s) `eval` nommee(s) par les scripts, chacune resolue"
+    }
   end
 
   @doc """

@@ -45,9 +45,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Types         les jumeaux `@spec` et `@doc` sur les fonctions publiques
       Boot          le verrou de topologie : l'ORDRE du demarrage
 
-  ⚠ CE FICHIER FAISAIT 7134 LIGNES. Le decoupage du 2026-09-02 n'a rien change au comportement — 69
-  murs avant, 69 apres, verifies par la tache et non de memoire — mais il a change ce qu'un lecteur
-  doit tenir en tete pour en ouvrir un seul.
+  ⚠ CE FICHIER FAISAIT 7134 LIGNES. Le decoupage n'a rien change au comportement — le MEME nombre
+  de murs avant et apres, verifie par la tache et non de memoire — mais il a change ce qu'un lecteur
+  doit tenir en tete pour en ouvrir un seul. Le nombre du jour ne se recopie pas ici : la tache le
+  rend (`mix lcars.contracts.check --quiet`), et des murs ont ete ajoutes depuis.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Artifact
@@ -165,6 +166,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Tools.check_capabilities_exercisable(root),
         Catalogue.check_catalogue_paths_locked(root),
         Runtime.check_eval_doors_start_transport(root),
+        Runtime.check_eval_doors_resolve(root),
         Runtime.check_bare_alias_resolves(root),
         Tools.check_mcp_seam_surface(root),
         Tools.check_forge_fields_read(root),

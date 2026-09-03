@@ -435,8 +435,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   def check_mcp_tools_gated(root) do
     tools_rel = "lib/fleet/mcp/pod_tools.ex"
 
-    declared = deftool_names(quoted!(root, tools_rel))
-    clauses = dispatch_clauses(quoted!(root, tools_rel))
+    tools_ast = quoted!(root, tools_rel)
+    declared = deftool_names(tools_ast)
+    clauses = dispatch_clauses(tools_ast)
+    table = alias_table(tools_ast)
 
     gated_fns =
       root
@@ -446,7 +448,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
     ungated =
       declared
-      |> Enum.reject(&tool_gated?(Map.get(clauses, &1, []), gated_fns))
+      |> Enum.reject(&tool_gated?(Map.get(clauses, &1, []), gated_fns, table))
       |> Enum.sort()
 
     undeclared = clauses |> Map.keys() |> Enum.reject(&(&1 in declared)) |> Enum.sort()
@@ -930,10 +932,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesse de le voir au premier
   # decoupage — le mur a rougi sur « ungated tools [escalation_list, scratch] » le jour ou les
   # canaux sont sortis.
-  defp capabilities_of_clause(%{body: body}, gated_delegations) do
+  defp capabilities_of_clause(%{body: body}, gated_delegations, table) do
     collect(body, fn
       {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
-        if :Delegation in aliases, do: Map.get(gated_delegations, fun), else: nil
+        if delegation_call?(aliases, table), do: Map.get(gated_delegations, fun), else: nil
 
       _ ->
         nil
@@ -942,11 +944,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   # capability => the tool names that reach it, inverted from the dispatch clauses.
   defp capability_tools(tools_ast, gated_delegations) do
+    table = alias_table(tools_ast)
+
     tools_ast
     |> dispatch_clauses()
     |> Enum.flat_map(fn {tool, clauses} ->
       clauses
-      |> Enum.flat_map(&capabilities_of_clause(&1, gated_delegations))
+      |> Enum.flat_map(&capabilities_of_clause(&1, gated_delegations, table))
       |> List.flatten()
       |> Enum.uniq()
       |> Enum.map(&{&1, tool})
@@ -1246,6 +1250,53 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   # `def handle_tool_call("name", args, state)` clauses, grouped by tool name. The catch-all
   # (`handle_tool_call(_unknown, …)`) has no literal name and is skipped: it refuses by definition.
+  # ⚠ ON RESOUT L'ALIAS, ON NE COMPARE PAS UNE ORTHOGRAPHE. Les deux lecteurs de dispatch
+  # cherchaient le segment `:Delegation` dans le nom TEL QU'ECRIT. Ca marche tant que
+  # `pod_tools.ex` ecrit `Delegation.Issues.create_issue(...)`. Le jour ou quelqu'un pose
+  # `alias Fleet.MCP.PodTools.Delegation.Issues` et appelle `Issues.create_issue(...)` — la forme
+  # idiomatique — le segment disparait, les murs cessent de voir un outil pourtant garde, et
+  # rougissent sur du code CORRECT. Un mur faux-positif est un mur qu'on desarme.
+  #
+  # La table d'alias du fichier donne le module REEL ; c'est lui qu'on interroge.
+  defp alias_table(ast) do
+    {_, table} =
+      Macro.prewalk(ast, %{}, fn
+        {:alias, _, [{:__aliases__, _, segs}]} = n, acc ->
+          {n, Map.put(acc, List.last(segs), segs)}
+
+        {:alias, _, [{:__aliases__, _, segs}, opts]} = n, acc when is_list(opts) ->
+          court =
+            case opts[:as] do
+              {:__aliases__, _, x} -> List.last(x)
+              _ -> List.last(segs)
+            end
+
+          {n, Map.put(acc, court, segs)}
+
+        {:alias, _, [{{:., _, [{:__aliases__, _, base}, :{}]}, _, enfants}]} = n, acc ->
+          {n,
+           Enum.reduce(enfants, acc, fn {:__aliases__, _, s}, a ->
+             Map.put(a, List.last(s), base ++ s)
+           end)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    table
+  end
+
+  # Le nom d'appel appartient-il a la famille `Delegation` une fois l'alias resolu ?
+  defp delegation_call?(aliases, table) do
+    resolus =
+      case Map.fetch(table, hd(aliases)) do
+        {:ok, plein} -> plein ++ tl(aliases)
+        :error -> aliases
+      end
+
+    :Delegation in resolus
+  end
+
   defp dispatch_clauses(ast) do
     ast
     |> collect(fn
@@ -1283,15 +1334,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # Gated = every clause is pod-scoped, role-gated or inert, AND at least one actually carries a
   # gate. A tool made only of refusals is not "safe by absence" — it is a tool that does nothing,
   # and it should not be advertised.
-  defp tool_gated?([], _gated_fns), do: false
+  defp tool_gated?([], _gated_fns, _table), do: false
 
-  defp tool_gated?(clauses, gated_fns) do
-    Enum.all?(clauses, &clause_ok?(&1, gated_fns)) and
-      Enum.any?(clauses, &(pod_scoped?(&1) or role_gated?(&1, gated_fns)))
+  defp tool_gated?(clauses, gated_fns, table) do
+    Enum.all?(clauses, &clause_ok?(&1, gated_fns, table)) and
+      Enum.any?(clauses, &(pod_scoped?(&1) or role_gated?(&1, gated_fns, table)))
   end
 
-  defp clause_ok?(clause, gated_fns),
-    do: pod_scoped?(clause) or role_gated?(clause, gated_fns) or inert?(clause)
+  defp clause_ok?(clause, gated_fns, table),
+    do: pod_scoped?(clause) or role_gated?(clause, gated_fns, table) or inert?(clause)
 
   # POD-SCOPED = THE CLAUSE USES THE CHANNEL IDENTITY, not merely receives it. `PodSocketAcceptor`
   # builds `%{pod_id: pod_id}` for EVERY `tools/call`, unconditionally and identically for every
@@ -1315,12 +1366,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
     end
   end
 
-  defp role_gated?(%{body: body}, gated_fns) do
+  defp role_gated?(%{body: body}, gated_fns, table) do
     body
     |> collect(fn
       {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
-        # Meme raison qu'au-dessus : la famille entiere, pas son seul module racine.
-        if :Delegation in aliases, do: fun, else: nil
+        if delegation_call?(aliases, table), do: fun, else: nil
 
       _ ->
         nil

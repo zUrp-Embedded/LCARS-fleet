@@ -51,7 +51,24 @@ defmodule Fleet.Forge.PayloadFixture do
   def raw(:issue), do: @issue
   def raw(:repo), do: @repo
 
+  # ⚠ UN FAIT ENONCE DOIT ETRE LE FAIT EFFECTIF, et `assignee_login` ne l'etait pas. La capture
+  # reelle porte `assignees: ["mesure"]`, et le SEUL lecteur d'assigne du runtime
+  # (`Delegation.Issues.issue_assignee/1`) lit `assignee_logins` D'ABORD, avec `assignee_login` en
+  # repli. Un temoin qui ecrivait `assignee_login: "l"` obtenait donc un objet dont l'assigne
+  # effectif restait "mesure" : la fabrique disait une chose, l'objet en portait une autre, et
+  # aucune assertion ne pouvait le voir.
+  #
+  # Une vraie forge pose les DEUX pour un assigne unique — c'est ce que montre la capture. Enoncer
+  # `assignee_login` pose donc les deux, sauf si l'appelant a nomme `assignee_logins` lui-meme :
+  # un fait explicite gagne toujours sur un fait derive.
   defp apply_faits(payload, faits) do
+    faits =
+      case {Keyword.fetch(faits, :assignee_login), Keyword.has_key?(faits, :assignee_logins)} do
+        {{:ok, login}, false} when is_binary(login) -> faits ++ [assignee_logins: [login]]
+        {{:ok, nil}, false} -> faits ++ [assignee_logins: []]
+        _ -> faits
+      end
+
     Enum.reduce(faits, payload, fn {fait, valeur}, acc ->
       chemin =
         Payload.paths()[fait] ||

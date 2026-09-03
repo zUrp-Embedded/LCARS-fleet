@@ -114,11 +114,16 @@ defmodule Fleet.Forge.ClientCiStateTest do
              ci_state([st(1, "ci/build", "failure"), st(2, "ci/build", "success")])
   end
 
-  # LA CAPTURE ELLE-MEME, sans rien lui faire dire. Le commentaire de `Client.CI` affirme un fait
-  # sur un SYSTEME EXTERNE — « l'ordre par defaut de `/commits/{ref}/statuses` est OLDEST-first sur
-  # Gitea 1.26.1 » — et c'est de ce fait que vient tout le reste : c'est parce que l'ordre ment que
-  # le rang se lit dans `id`. Une capture que personne n'assertit est un fait que personne ne
-  # verifie ; ces deux temoins la font parler.
+  # LA CAPTURE ELLE-MEME. Le commentaire de `Client.CI` affirme un fait sur un SYSTEME EXTERNE —
+  # « l'ordre par defaut de `/commits/{ref}/statuses` est OLDEST-first sur Gitea 1.26.1 » — et
+  # c'est de ce fait que vient tout le reste : c'est parce que l'ordre ment que le rang se lit dans
+  # `id`.
+  #
+  # ⚠ CE QUE CE PREMIER TEMOIN PROUVE, EXACTEMENT : que le FICHIER de capture est oldest-first et
+  # porte les trois clefs lues. C'est une SENTINELLE DE DERIVE — elle mord si quelqu'un recapture
+  # contre une forge dont l'ordre a change, ou fabrique le fichier a la main. Elle ne prouve pas le
+  # comportement de Gitea : aucune assertion sur un fichier qu'on controle ne le peut. Celui qui le
+  # prouve est le SECOND, qui fait passer la capture ET son inverse par le meme verdict.
   test "la capture reelle est OLDEST-first, et porte `status` — jamais `state`" do
     ids = Enum.map(@capture, & &1["id"])
 

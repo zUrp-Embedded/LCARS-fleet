@@ -159,6 +159,16 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
              inspect(Enum.sort(called -- found)) <>
              " — un check d'arite 1 doit etre `def`, pas `defp`, dans le module qui le porte"
 
+    # ⚠ ET L'INCLUSION INVERSE, qui manquait. La ligne au-dessus tient « tout ce qui est APPELE est
+    # visible » ; sans celle-ci, un mur PUBLIC ajoute a un module de la famille mais jamais cable
+    # dans `run_checks/0` passe inapercu : il est propre sur un arbre vide, il ne rougit nulle
+    # part, et il ne s'execute JAMAIS. Un mur qui ne tourne pas ne garde rien, et c'est le mode de
+    # defaillance le plus silencieux de ce fichier.
+    assert MapSet.subset?(MapSet.new(found), MapSet.new(called)),
+           "checks PUBLICS jamais appeles par `run_checks/0`, donc jamais joues : " <>
+             inspect(Enum.sort(found -- called)) <>
+             " — ajoute-les a la chaine, ou rends-les prives s'ils sont des helpers"
+
     assert length(found) >= 25, "only #{length(found)} check functions found by reflection"
     assert {Check.Tests, :check_test_corpora_on_record} in found
   end

@@ -15,7 +15,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   `mcp.required_for_real_backend`). Ce qui suit nomme les MODULES de cette famille, pas les outils
   d'un autre fichier : chaque canal porte son contrat dans son propre `@moduledoc`.
 
-  ## Les canaux — un module chacun
+  ## La famille
 
     * `Delegation.Issues` — DELEGATION / TRACKING / READ : poser un ticket pour le poller, puis
       relire ce qu'il est devenu.
@@ -30,8 +30,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     * `Delegation.Scratchpad` — SCRATCHPAD : les notes courantes sur un projet.
     * `Delegation.Toolchain` — TOOLCHAIN : la demande de changement sur l'outillage de la fleet.
     * `Delegation.Gate` — le socle : les deux gates, l'identite, la conformance de seam.
-    * `Delegation.Render` / `Delegation.Workshop` — les deux ecritures de rendu partagees, et la
-      racine de la face atelier.
+    * `Delegation.Render` — les deux ecritures de rendu partagees par tous les canaux.
+    * `Delegation.Workshop` — la racine de la face atelier et le workspace d'un lot.
 
   Les cinq behaviours de seam (`ForgeClient`, `EscalationForge`, `DependencyForge`, `ForgeWriter`,
   `ProjectOnboard`) vivent dans la meme famille et portent chacun leur contrat.

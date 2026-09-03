@@ -1354,6 +1354,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       when f in [:get, :fetch, :fetch!] and is_binary(clef) ->
         if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}
 
+      # ⚠ QUATRIEME PORTE, ET ELLE NE RESSEMBLE PAS AUX AUTRES DANS L'AST. `x["k"]` est du SUCRE :
+      # le compilateur l'expanse en `{{:., _, [Access, :get]}, _, _}` ou `Access` est un ATOME. Ecrit
+      # a la main, `Access.fetch(x, "k")` produit un noeud `{:__aliases__, _, [:Access]}` — une
+      # forme que ni la clause du sucre ni celle de `Map` ne reconnait. Le mur laissait donc passer
+      # la seule ecriture qui NOMME explicitement l'acces.
+      {{:., meta, [{:__aliases__, _, [:Access]}, f]}, _, [_, clef | _]}
+      when f in [:get, :fetch] and is_binary(clef) ->
+        if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}
+
       _ ->
         nil
     end)

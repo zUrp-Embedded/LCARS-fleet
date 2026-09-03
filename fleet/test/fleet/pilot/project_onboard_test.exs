@@ -559,19 +559,35 @@ defmodule Fleet.Project.OnboardTest do
     # ce cout qui a laisse la divergence s'installer.
     @entry_verbs ~w(onboard import adopt_project import_external import_deposit)
 
-    defp famille_admission do
-      ["lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")]
-      |> Enum.map_join("\n", &File.read!/1)
+    # ⚠ PAR FICHIER, JAMAIS SUR UNE SOURCE CONCATENEE. La premiere version collait toute la famille
+    # puis coupait au verbe : la fenetre de lecture debordait alors sur la fonction SUIVANTE, voire
+    # sur le fichier suivant, et le motif cherche pouvait etre trouve chez un voisin. `door_preamble/1`
+    # de `store_gate_test` avait deja la bonne forme — celle-ci ne l'avait pas copiee.
+    #
+    # Zero comme plusieurs definitions font FLUNK : un temoin de source qui ne sait pas lequel des
+    # deux corps il lit ne prouve rien, et le silence est le pire des deux.
+    defp corps_du_verbe(verb) do
+      motif = ~r/^  def #{verb}\(/m
+
+      corps =
+        for f <- famille_src(), source = File.read!(f), Regex.match?(motif, source) do
+          [_, body] = String.split(source, motif, parts: 2)
+          String.slice(body, 0, 1200)
+        end
+
+      case corps do
+        [body] -> body
+        [] -> flunk("`def #{verb}(` introuvable dans la famille onboarding")
+        n -> flunk("`def #{verb}(` defini #{length(n)} fois : le temoin ne sait pas lequel lire")
+      end
     end
 
+    defp famille_src,
+      do: ["lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")]
+
     test "les cinq verbes d'entree appellent `admit/3` — aucun ne refait le preambule" do
-      src = famille_admission()
-
       for verb <- @entry_verbs do
-        [_, body] = String.split(src, ~r/^  def #{verb}\(/m, parts: 2)
-        head = String.slice(body, 0, 1200)
-
-        assert head =~ "admit(",
+        assert corps_du_verbe(verb) =~ "admit(",
                "#{verb}/n ne passe pas par l'admission commune — un sixieme preambule est ne"
       end
     end
@@ -581,11 +597,7 @@ defmodule Fleet.Project.OnboardTest do
       # temoin l'a montre dans la minute : une URL externe invalide, refusee jusque-la sans toucher
       # le monde, coutait desormais un appel forge. La loi d'ordre est en trois temps — admission
       # locale, gardes pures du verbe, puis le monde — et c'est ce que ce temoin tient.
-      src = famille_admission()
-      [_, body] = String.split(src, ~r/^  def admit\(/m, parts: 2)
-      corps = String.slice(body, 0, 400)
-
-      refute corps =~ "ensure_human_provisioned",
+      refute String.slice(corps_du_verbe("admit"), 0, 400) =~ "ensure_human_provisioned",
              "l'admission touche la forge — un refus local en paie le prix"
     end
   end

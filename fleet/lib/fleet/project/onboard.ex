@@ -103,6 +103,16 @@ defmodule Fleet.Project.Onboard do
   #
   # Le CONTRAT de chaque verbe vit dans son `@doc`, a cote de son code, dans le module qui
   # l'implemente. Ici ne restent que la signature et l'adresse.
+  #
+  # ⚠ LA REGLE DE RE-EXPORT, pour qu'une absence se lise comme un CHOIX et pas comme un oubli : un
+  # verbe est re-exporte ICI quand quelque chose HORS de la famille le nomme a CETTE adresse — un
+  # `@callback` de behaviour, un seam d'un autre domaine, une porte `eval` d'un script shell. Rien
+  # d'autre. `migrate/3`, `reconcile/2`, `refute_store/2` et `refute_store_address/2` ne sont donc
+  # PAS ici : leurs seuls appelants sont leurs temoins, qui vont a l'adresse reelle.
+  #
+  # Le cas des portes `eval` est celui qui a mordu, et il est le moins visible : un script SHELL
+  # nomme un module dans une chaine que ni le compilateur ni dialyzer ne lisent. C'est
+  # `runtime.eval_doors_resolve` qui tient cette moitie-la.
 
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   defdelegate onboard(name, opts \\ []), to: Create
@@ -136,6 +146,19 @@ defmodule Fleet.Project.Onboard do
 
   @spec import_deposit(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   defdelegate import_deposit(source, catalogue, opts \\ []), to: Import
+
+  # ⚠ RE-EXPORTEES PARCE QU'UN SCRIPT LES NOMME. `bin/lcars project migrate` et
+  # `lcars project reconcile` executent `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"` :
+  # une chaine de SHELL, que ni le compilateur ni dialyzer ne lisent. Le decoupage les a descendues
+  # dans `Onboard.Migration` sans les re-exporter, les deux verbes du CLI levaient un
+  # `UndefinedFunctionError`, et le provisioning d'une machine fraiche echouait a l'etape
+  # `lcars project reconcile` — huit etapes de gate, zero signal. C'est ce que `runtime.eval_doors_resolve`
+  # tient desormais.
+  @spec eval_migrate(String.t(), String.t()) :: no_return()
+  defdelegate eval_migrate(full_name, catalogue), to: Fleet.Project.Onboard.Migration
+
+  @spec eval_reconcile(atom()) :: no_return()
+  defdelegate eval_reconcile(mode), to: Fleet.Project.Onboard.Migration
 
   # ⚠ RE-EXPORTE POUR NE PAS ELARGIR LA FRONTIERE. `Fleet.Pilot` cable cette fonction comme defaut
   # de son seam de reconvergence, et `Fleet.Project` n'exporte pas `Onboard.Migration` — l'ajouter
