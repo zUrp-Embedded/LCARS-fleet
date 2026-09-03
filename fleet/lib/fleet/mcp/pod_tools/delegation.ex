@@ -81,18 +81,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   alias Fleet.MCP.PodTools.ProjectPublish
   alias Fleet.Project.GitOps
 
-  @scratch_file "scratchpad.md"
-  # En NOTES. Une note occupe plusieurs lignes : compter les lignes reclamerait le tri cinq fois
-  # trop tot.
-  @scratch_nudge_at 150
-
-  alias Fleet.MCP.PodTools.Delegation.{
-    DependencyForge,
-    EscalationForge,
-    ForgeClient,
-    ForgeWriter,
-    ProjectOnboard
-  }
+  # ⚠ Des cinq behaviours de seam, un seul est encore alias ici : `DependencyForge`, dont ce
+  # module resout le seam lui-meme en passant le module deja resolu a `Gate.conforming/2`. Les
+  # `conforming_*/0` sont partis dans `Gate`, et `ForgeWriter` avec le canal TOOLCHAIN.
+  alias Fleet.MCP.PodTools.Delegation.{DependencyForge, Gate, Workshop}
 
   @doc """
   Places a forge issue ready for the poller — architect gate included.
@@ -152,8 +144,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
     # Without the second half, the old ticket stays dispatchable and loops (scoper re-reviews
     # the same stale brief every time the arch answers its escalation).
-    with {:ok, forge} <- conforming_forge(),
-         {:ok, %{role: role, repo: repo}} <- require_architect(state),
+    with {:ok, forge} <- Gate.conforming_forge(),
+         {:ok, %{role: role, repo: repo}} <- Gate.require_architect(state),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role),
          :ok <- refuse_pointing_criteria(criteria),
          :ok <- require_criteria_for_code(destination, criteria),
@@ -265,7 +257,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec create_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def create_project(name, args, state) when is_binary(name) and is_map(args) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, role} -> do_create_project(name, args, role)
     end
@@ -276,7 +268,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec import_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def import_project(full_name, state) when is_binary(full_name) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_import_project(full_name)
     end
@@ -297,7 +289,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec project_publish(map(), map()) :: {:ok, map()} | {:error, term()}
   def project_publish(%{"full_name" => repo}, state) when is_binary(repo) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} ->
         {:error, reason}
 
@@ -357,8 +349,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_deposits(map()) :: {:ok, map()} | {:error, term()}
   def list_deposits(state) do
-    with {:ok, _role} <- require_onboarder(state),
-         {:ok, onboard} <- conforming_onboard(),
+    with {:ok, _role} <- Gate.require_onboarder(state),
+         {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, human} <- Fleet.Credentials.Human.current() do
       case onboard.deposit_candidates(human, []) do
         {:ok, candidates} ->
@@ -378,7 +370,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_forges(map()) :: {:ok, map()} | {:error, term()}
   def list_forges(state) do
-    with {:ok, _role} <- require_onboarder(state) do
+    with {:ok, _role} <- Gate.require_onboarder(state) do
       dir = Path.join([System.user_home!(), ".lcars", "forges"])
 
       forges =
@@ -424,7 +416,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec publish_link(map(), map()) :: {:ok, map()} | {:error, term()}
   def publish_link(%{"full_name" => repo, "forge" => forge_name, "as" => as}, state)
       when is_binary(repo) and is_binary(forge_name) and is_binary(as) do
-    with {:ok, _role} <- require_onboarder(state),
+    with {:ok, _role} <- Gate.require_onboarder(state),
          true <- valid_repo?(repo),
          {:ok, forge} <- read_forge(forge_name),
          dest_repo = "#{forge["owner"]}/#{as}",
@@ -506,8 +498,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec import_deposit(String.t(), String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def import_deposit(source, catalogue, args, state)
       when is_binary(source) and is_binary(catalogue) and is_map(args) do
-    with {:ok, role} <- require_onboarder(state),
-         {:ok, onboard} <- conforming_onboard() do
+    with {:ok, role} <- Gate.require_onboarder(state),
+         {:ok, onboard} <- Gate.conforming_onboard() do
       opts = [
         justification: Map.get(args, "justification"),
         workflow_map: Map.get(args, "workflow_map"),
@@ -568,7 +560,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         {:error, :delete_project_disabled}
 
       true ->
-        case require_onboarder(state) do
+        case Gate.require_onboarder(state) do
           {:error, reason} -> {:error, reason}
           {:ok, _role} -> do_delete_project(full_name, args)
         end
@@ -596,8 +588,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec issue_status(integer(), map()) :: {:ok, map()} | {:error, term()}
   def issue_status(number, state) when is_integer(number) do
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_forge() do
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
+         {:ok, forge} <- Gate.conforming_forge() do
       {issue_state, issue_labels, title} =
         case forge.get_issue(repo, number, []) do
           {:ok, issue} ->
@@ -681,8 +673,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_projects(map()) :: {:ok, map()} | {:error, term()}
   def list_projects(state) do
-    with {:ok, _role} <- require_onboarder(state),
-         {:ok, onboard} <- conforming_onboard(),
+    with {:ok, _role} <- Gate.require_onboarder(state),
+         {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, projects} <- onboard.list_projects([]) do
       {:ok, %{"projects" => projects, "count" => length(projects)}}
     end
@@ -736,7 +728,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
-    with {:ok, _role} <- require_onboarder(state),
+    with {:ok, _role} <- Gate.require_onboarder(state),
          {:ok, pairs} <- catalogue_cards() do
       {cards, unreadable} =
         Enum.reduce(pairs, {[], []}, fn {cat, name, opts}, {ok, bad} ->
@@ -864,7 +856,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
   def list_catalogues(state) do
-    with {:ok, _role} <- require_onboarder(state) do
+    with {:ok, _role} <- Gate.require_onboarder(state) do
       installed = Fleet.Catalogue.installed_catalogues()
       bundled_root = Fleet.Catalogue.root()
 
@@ -955,172 +947,12 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   @doc """
-  Lists the current project's `lcars-awaits-arch` issues for architect arbitration.
-  """
-  @spec list_escalations(map()) :: {:ok, map()} | {:error, term()}
-  def list_escalations(state) do
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_escalation_forge(),
-         {:ok, escalations} <- collect_awaits_arch(forge, repo, escalation_human()) do
-      {:ok, %{"count" => length(escalations), "escalations" => escalations}}
-    end
-  end
-
-  @doc """
-  Appends one stamped note to the project's workshop scratchpad, commits and pushes it.
-
-  THE REFLEX IS THE FEATURE. A pod's L0 — session-level, ephemeral, alive — is exactly what a
-  compaction eats, and LCARS turned the vendor's own memory OFF for every pod
-  (`autoMemoryEnabled: false`: siloed, useless to the fleet, doctrine pollution). What replaces it
-  has to cost nothing at the moment of the thought: ONE argument, no path, no format, no decision
-  about where things live. An architect who must choose a file at the instant it has an idea does
-  not park the idea — measured on real architects, it writes its in-flight state into `backlog.md`
-  under a `## en vol` section it invents, because that file is the only one that LOOKS like it
-  accepts what happened.
-
-  APPEND-ONLY IS A PROPERTY OF THE DOOR, NOT A PROMISE. This tool only knows how to add, so the
-  discipline holds during the whole flow without anyone maintaining it. Cleaning is a separate,
-  deliberate act: the architect has the face mounted RW and edits the file by hand at triage time.
-  An absolute ban would end in a 50k-line file nobody can exploit, which is the same uselessness
-  by the other door.
-
-  THE NUDGE RIDES ON THE RETURN VALUE, and that is the whole mechanism. Past `#{@scratch_nudge_at}`
-  NOTES the answer stops being a receipt and asks for a triage. An agent cannot NOT read what the
-  tool it just called gave back — this is the only place in the system where a rule reaches it AT
-  THE MOMENT OF THE GESTURE, instead of a spawn-time instruction that a compaction removes first.
-
-  It PUSHES, and that is a change of contract for this face: `workshop` was declared "nothing
-  pushes it on its own". Pushing an orphan branch that is never merged publishes nothing into the
-  product — it makes the notes survive the box, which is the point of writing them.
-  """
-  @spec scratch(map(), String.t()) :: {:ok, map()} | {:error, term()}
-  def scratch(state, note) when is_binary(note) do
-    # LA PORTE EST ICI, DANS CE CORPS, et pas un cran plus bas : le contrat `mcp.tools_gated` lit
-    # l'AST et exige que la fonction de delegation appelee par le tool porte elle-meme son gate —
-    # un tool dont la porte vit dans un helper prive est, pour lui, un tool sans porte. C'est la
-    # bonne exigence : elle empeche qu'un refactor deplace la garde hors de vue sans que rien ne
-    # le dise. Et autoriser AVANT de valider la charge utile est l'ordre juste de toute facon.
-    with {:ok, %{repo: repo}} <- require_architect(state) do
-      case String.trim(note) do
-        "" -> {:error, :note_empty}
-        trimmed -> scratch_write(repo, trimmed)
-      end
-    end
-  end
-
-  # La racine passe par `workshop_root/0` : une porte qui ecrit un chemin de production en dur ne
-  # peut etre prouvee par aucun test.
-  defp scratch_write(repo, note) do
-    dir = Path.join(workshop_root(), Fleet.Layout.project_name(repo))
-    path = Path.join(dir, @scratch_file)
-
-    if File.dir?(dir) do
-      case File.write(path, scratch_block(note), [:append]) do
-        :ok ->
-          _ = scratch_publish(dir, repo)
-          {:ok, scratch_receipt(path)}
-
-        {:error, reason} ->
-          {:error, {:scratch_write_failed, reason}}
-      end
-    else
-      {:error, {:no_workshop_face, dir}}
-    end
-  end
-
-  # Un bloc markdown par note — le fichier est lu dans un rendu, et la note garde sa mise en forme.
-  #
-  #     <ligne vide>
-  #     #### AAAA-MM-JJ - hh:mm
-  #     <ligne vide>
-  #     la note
-  #     <ligne vide>
-  #     ---
-  #
-  # ⚠ LA LIGNE VIDE AVANT `---` EST PORTANTE. Colle sous du texte, `---` n'est pas une barre : c'est
-  # un SOULIGNEMENT DE TITRE, et il transforme la derniere ligne de la note en `<h2>`. Le defaut ne
-  # se voit qu'au rendu.
-  #
-  # `####` et pas `###` : au tri, les notes se rangent sous les titres `###` que l'architecte pose,
-  # sans retoucher chaque bloc.
-  defp scratch_block(note) do
-    {{y, mo, d}, {h, mi, _s}} = :calendar.local_time()
-
-    stamp =
-      :io_lib.format("~4..0B-~2..0B-~2..0B - ~2..0B:~2..0B", [y, mo, d, h, mi])
-      |> IO.iodata_to_binary()
-
-    "\n#### #{stamp}\n\n#{String.trim(note)}\n\n---\n"
-  end
-
-  # Best-effort DELIBERE : une note ecrite mais non poussee est une note ecrite. Faire echouer le
-  # tool sur un push rate apprendrait a l'agent que le geste est cher, et un geste cher n'est plus
-  # un reflexe — c'est exactement la propriete qu'on achete ici.
-  defp scratch_publish(dir, repo) do
-    branch = Fleet.Layout.workshop_branch()
-
-    with :ok <- GitOps.run(["-C", dir, "add", "--", @scratch_file], auth: false),
-         :ok <-
-           GitOps.run(
-             [
-               "-C",
-               dir,
-               # Demandee a `ForgeIdentity`, jamais recopiee : c'est lui l'autorite du nom systeme.
-               "-c",
-               "user.name=#{Fleet.Credentials.ForgeIdentity.system_identity().name}",
-               "-c",
-               "user.email=#{Fleet.Credentials.ForgeIdentity.system_email()}",
-               "commit",
-               "-q",
-               "-m",
-               "chore(scratch): note d'atelier"
-             ],
-             auth: false
-           ) do
-      GitOps.run(["-C", dir, "push", "origin", "HEAD:" <> branch], auth: true)
-    else
-      other ->
-        Logger.warning(
-          "Delegation: scratch note ECRITE mais non publiee (#{repo}) — #{inspect(other)} ; " <>
-            "elle vit dans la face atelier locale et partira au prochain geste qui pousse"
-        )
-
-        other
-    end
-  end
-
-  # On compte les TITRES, c'est-a-dire les notes. Compter les lignes rendait le meme nombre tant
-  # qu'une note valait une ligne ; en blocs, il rendrait cinq fois trop.
-  defp scratch_receipt(path) do
-    notes =
-      case File.read(path) do
-        {:ok, c} -> Regex.scan(~r/^#### /m, c) |> length()
-        _ -> 0
-      end
-
-    base = %{"ok" => true, "notes" => notes}
-
-    if notes >= @scratch_nudge_at do
-      Map.put(
-        base,
-        "next",
-        "Le scratchpad porte #{notes} notes. Propose un tri a ton humain : ce qui reste a faire " <>
-          "part au backlog, ce qui est specifie part en plans/, ce qui attend son jour de neige " <>
-          "reste nomme, le reste se jette. Puis vide ce qui a ete range — l'append-only vaut pour " <>
-          "l'ecriture au fil de l'eau, pas contre le menage."
-      )
-    else
-      base
-    end
-  end
-
-  @doc """
   Lists the current project's open issue board. An unreadable forge is an error, not an empty board.
   """
   @spec list_issues(map()) :: {:ok, map()} | {:error, term()}
   def list_issues(state) do
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_escalation_forge() do
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
+         {:ok, forge} <- Gate.conforming_escalation_forge() do
       case forge.list_open_issues(repo, []) do
         {:ok, issues} when is_list(issues) ->
           entries = Enum.map(issues, &issue_entry/1)
@@ -1157,9 +989,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec get_issue(integer(), map()) :: {:ok, map()} | {:error, term()}
   def get_issue(number, state) when is_integer(number) do
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_forge(),
-         {:ok, esc_forge} <- conforming_escalation_forge() do
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
+         {:ok, forge} <- Gate.conforming_forge(),
+         {:ok, esc_forge} <- Gate.conforming_escalation_forge() do
       case forge.get_issue(repo, number, []) do
         {:ok, issue} ->
           base =
@@ -1212,8 +1044,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec comment_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def comment_issue(number, body, state)
       when is_integer(number) and is_binary(body) do
-    with {:ok, %{role: role, repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_escalation_forge(),
+    with {:ok, %{role: role, repo: repo}} <- Gate.require_architect(state),
+         {:ok, forge} <- Gate.conforming_escalation_forge(),
          {:ok, identity} <- Fleet.Credentials.RoleIdentity.for_role(role) do
       # Durable marker readback converges bridge retries; intentionally identical comments collapse.
       marker = comment_op_marker(number, body)
@@ -1247,146 +1079,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
     end
   end
 
-  # Runtime seams are duck-typed; resolve missing callbacks as a typed error before dispatch.
-  defp conforming_forge, do: conforming(ForgeClient, ForgeClient.resolved())
-  defp conforming_onboard, do: conforming(ProjectOnboard, ProjectOnboard.resolved())
-
-  defp conforming(behaviour, impl) do
-    _ = Code.ensure_loaded(impl)
-
-    missing =
-      for {fun, arity} <- behaviour.behaviour_info(:callbacks),
-          not function_exported?(impl, fun, arity),
-          do: {fun, arity}
-
-    if missing == [], do: {:ok, impl}, else: {:error, {:seam_misconfigured, impl, missing}}
-  end
-
-  defp conforming_escalation_forge,
-    do: conforming(EscalationForge, EscalationForge.resolved())
-
-  @awaits_arch_label Fleet.Labels.awaits_arch()
-
-  @spec collect_awaits_arch(module(), String.t(), String.t()) ::
-          {:ok, [map()]} | {:error, {:inbox_unreadable, String.t(), term()}}
-  defp collect_awaits_arch(forge, repo, human) do
-    case forge.list_open_issues(repo, assigned_by: human) do
-      {:ok, issues} when is_list(issues) ->
-        entries =
-          issues
-          |> Enum.filter(&has_awaits_arch_label?/1)
-          |> Enum.map(&escalation_entry(forge, repo, &1))
-
-        {:ok, entries}
-
-      other ->
-        Logger.warning(
-          "Delegation: list_escalations — inbox unreadable: repo #{repo} (#{inspect(other)}) — " <>
-            "surfaced as error, not an empty inbox"
-        )
-
-        {:error, {:inbox_unreadable, repo, other}}
-    end
-  end
-
-  defp has_awaits_arch_label?(issue) do
-    Payload.labels(issue)
-    |> Enum.any?(&(is_map(&1) and &1["name"] == @awaits_arch_label))
-  end
-
-  defp escalation_entry(forge, repo, issue) do
-    number = Map.get(issue, "number")
-
-    %{
-      "number" => number,
-      "title" => Map.get(issue, "title"),
-      "verdict" => latest_verdict(forge, repo, number)
-    }
-  end
-
-  defp latest_verdict(_forge, _repo, number) when not is_integer(number), do: nil
-
-  # LE DERNIER COMMENTAIRE N'EST PAS UN VERDICT. Cette fonction rendait le dernier corps non vide du
-  # fil, sans filtre : des que l'arch avait repondu a une escalade, l'inbox lui renvoyait SA PROPRE
-  # REPONSE comme etant la question a trancher — sous une description d'outil qui promet « the
-  # worker's escalation comment — the reasoning ». On cherche donc le marqueur d'escalade, pas la
-  # recence.
-  #
-  # `nil` quand aucun commentaire n'en porte, et c'est un resultat : le frein sur recurrence
-  # (`IncidentConsumer.default_brake/3`) pose le label SANS commentaire, donc il n'y a rien a
-  # rendre. Mieux vaut « pas de verdict enregistre » qu'un texte qui n'en est pas un.
-  defp latest_verdict(forge, repo, number) do
-    case forge.escalation_verdict(repo, number, []) do
-      {:ok, body} ->
-        body
-
-      other ->
-        Logger.warning(
-          "Delegation: list_escalations — comments of #{repo}##{number} unreadable (#{inspect(other)})"
-        )
-
-        nil
-    end
-  end
-
-  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est fixe pour sa vie : « ou vit ce projet »
-  # repond a « quel catalogue le traite ». Le choix se fait au guichet, la ou l'humain choisit deja sa
-  # carte — starfleet porte les deux verbes.
-  #
-  # Un catalogue NON INSTALLE est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
-  # coller cette org a celle du poller : un projet onboarde dans une org que le poller ne scanne pas
-  # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
-  # orgs des catalogues INSTALLES, la condition se dit exactement ainsi.
-  #
-  # ⚖ LE CATALOGUE EST OBLIGATOIRE (user, 2026-08-17), ET CE QUI A ETE RETIRE VAUT D'ETRE LU.
-  #
-  # Trois versions en une journee, chacune tuee par la meme question posee un cran plus loin :
-  #   1. l'omission prenait le PREMIER catalogue installe — deviner un lien fixe pour la vie ;
-  #   2. puis « un seul installe -> lui, sinon derive de la carte » — « tu cables un rail
-  #      d'exception par confort », et c'etait vrai : cette branche derivait de la POPULATION ;
-  #   3. puis la regle unique « quels catalogues peuvent repondre ? un -> il decide » — « donc tu as
-  #      encore un rail qui teste un truc, que tu supprimerais en posant le catalogue obligatoire ».
-  #
-  # Vrai aussi, et mon argument pour la garder etait FAUX. J'avais dit « friction pour zero
-  # information » : l'information n'est pas absente, elle est dans l'objet que l'appelant vient de
-  # lire — `card_list` rend chaque carte AVEC son catalogue. Exiger le champ coute une
-  # recopie, et l'inference achetait, contre ce rien : un comportement qui change quand un TIERS
-  # installe un catalogue portant le meme nom de carte, et deux branches dont laquelle s'execute
-  # depend de la population de la boite — donc jamais les deux au meme endroit.
-  #
-  # Le voisin le disait deja : `import_deposit/4` prend son catalogue en argument POSITIONNEL. Ce
-  # verbe-ci etait l'exception, pas la regle.
-  #
-  # « Quel metier traite ce projet » est la question la plus basique qu'on puisse poser sur lui, et
-  # elle n'a pas de defaut — bien moins que « quel niveau de soin », qui en a un (C0 non declare).
-  # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.
-  #
-  # `:mcp_delegation_org` est mort avec l'inference : il n'avait que ce lecteur. `:pilot_fleet_org`
-  # survit, il appartient au poller.
-  @doc false
-  # La resolution d'org, exposee pour ses temoins : elle decide d'un lien FIXE POUR LA VIE d'un
-  # projet, et la tester au travers de `project_create` demanderait une forge.
-  @spec resolve_org_for_test(map()) :: {:ok, String.t()} | {:error, term()}
-  def resolve_org_for_test(args), do: resolve_org(args)
-
-  defp resolve_org(args) do
-    installed = Fleet.Project.Onboard.installed_orgs()
-
-    case Map.get(args, "catalogue") do
-      cat when is_binary(cat) and cat != "" ->
-        # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
-        # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
-        if cat in installed,
-          do: {:ok, cat},
-          else: Fleet.Project.Onboard.catalogue_not_installed(cat)
-
-      _ ->
-        {:error, {:catalogue_required, installed}}
-    end
-  end
-
-  defp escalation_human, do: Fleet.Credentials.Human.current!()
-
   # ============================================================
   # Forge mechanics (run ONLY after the gate)
   # ============================================================
@@ -1396,8 +1088,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # behaviour Delegation.ProjectOnboard; default Fleet.Project.Onboard, runtime dispatch —
   # no compile-time dep on fleet_pilot).
   defp do_create_project(name, args, onboarder_role) do
-    with {:ok, onboard} <- conforming_onboard(),
-         {:ok, org} <- resolve_org(args) do
+    with {:ok, onboard} <- Gate.conforming_onboard(),
+         {:ok, org} <- Gate.resolve_org(args) do
       # SAME config key as the poller's discovery org (`:lcars_fleet, :pilot_fleet_org`) — a project
       # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
       # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
@@ -1447,7 +1139,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       # PAS D'OPTS, ET C'EST UN RESTE QUI PART. Ce verbe ne portait que le drapeau
       # `allow_unverifiable_human_team?` (DR-018), mort avec la garde qu'il assouplissait — cf. le
       # commentaire de `do_onboard_project` plus haut. L'org, elle, n'a rien a faire ici : `import/2`
@@ -1504,7 +1196,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   end
 
   defp do_delete_project(full_name, args) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       opts = [force: Map.get(args, "force", false) == true]
 
       case onboard.delete_project(full_name, opts) do
@@ -1539,7 +1231,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec adopt_project(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def adopt_project(name, args, state) when is_binary(name) and is_map(args) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, role} -> do_adopt_project(name, args, role)
     end
@@ -1550,8 +1242,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # forge, donc c'est une creation, donc l'org est une declaration. Elle tombait sur le premier
     # catalogue installe (`Onboard.default_org/0`, mort le 2026-08-17) — un projet adopte partait
     # donc dans `fleet` quel que soit le metier auquel il appartient.
-    with {:ok, onboard} <- conforming_onboard(),
-         {:ok, org} <- resolve_org(args) do
+    with {:ok, onboard} <- Gate.conforming_onboard(),
+         {:ok, org} <- Gate.resolve_org(args) do
       opts = [
         org: org,
         description: Map.get(args, "description", ""),
@@ -1592,7 +1284,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
           {:ok, map()} | {:error, term()}
   def import_external_project(url, name, args, state)
       when is_binary(url) and is_binary(name) and is_map(args) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, role} -> do_import_external(url, name, args, role)
     end
@@ -1601,8 +1293,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp do_import_external(url, name, args, role) do
     # Meme porte que les deux autres creations : importer un depot EXTERNE cree un depot sur NOTRE
     # forge, donc l'org est une declaration. Elle tombait sur le premier catalogue installe.
-    with {:ok, onboard} <- conforming_onboard(),
-         {:ok, org} <- resolve_org(args) do
+    with {:ok, onboard} <- Gate.conforming_onboard(),
+         {:ok, org} <- Gate.resolve_org(args) do
       opts = [
         org: org,
         justification: Map.get(args, "justification"),
@@ -1636,14 +1328,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec close_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def close_project(full_name, state) when is_binary(full_name) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_close_project(full_name)
     end
   end
 
   defp do_close_project(full_name) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       case onboard.close_project(full_name, []) do
         {:ok, %{repo: repo, outcome: outcome} = result} ->
           {:ok,
@@ -1679,7 +1371,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec revise_project_card(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def revise_project_card(full_name, args, state)
       when is_binary(full_name) and is_map(args) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, role} -> do_revise_card(full_name, args, role)
     end
@@ -1697,7 +1389,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp jury_reduction(_), do: nil
 
   defp do_revise_card(full_name, args, role) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       opts = [
         workflow_map: Map.get(args, "workflow_map"),
         justification: Map.get(args, "justification"),
@@ -1741,14 +1433,14 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec reset_project_ci_rail(String.t(), map(), map()) :: {:ok, map()} | {:error, term()}
   def reset_project_ci_rail(full_name, args, state)
       when is_binary(full_name) and is_map(args) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, role} -> do_reset_ci_rail(full_name, args, role)
     end
   end
 
   defp do_reset_ci_rail(full_name, args, role) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       opts = [justification: Map.get(args, "justification"), reset_by: role]
 
       case onboard.reset_ci_rail(full_name, opts) do
@@ -1777,7 +1469,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec open_project(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def open_project(full_name, state) when is_binary(full_name) do
-    case require_onboarder(state) do
+    case Gate.require_onboarder(state) do
       {:error, reason} -> {:error, reason}
       {:ok, _role} -> do_open_project(full_name)
     end
@@ -1785,7 +1477,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
   # Open sequence — same :project_onboard seam, callback :open.
   defp do_open_project(full_name) do
-    with {:ok, onboard} <- conforming_onboard() do
+    with {:ok, onboard} <- Gate.conforming_onboard() do
       case onboard.open(full_name, []) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
@@ -1958,7 +1650,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp publish_lot(_repo, _role, nil), do: {:ok, nil}
 
   defp publish_lot(repo, role, name) when is_binary(name) do
-    dir = lot_workspace(repo)
+    dir = Workshop.lot_workspace(repo)
     face = Fleet.Layout.workshop_branch()
 
     with {:ok, ref} <- Fleet.Forge.Protocol.lot_branch(name),
@@ -1994,17 +1686,6 @@ defmodule Fleet.MCP.PodTools.Delegation do
       push?: true
     })
   end
-
-  # The lot is sourced from the WORKSHOP face — a layout fact, not a privilege of the calling role:
-  # `workshop` is where a project's drafting matter lives (`Fleet.Layout`), which is what a lot is
-  # made of. The root is overridable the same way the brief's ops root is, for tests that own a
-  # temporary clone.
-  defp lot_workspace(repo), do: Path.join(workshop_root(), Fleet.Layout.project_name(repo))
-
-  # UNE clef pour la racine des faces atelier, deux lecteurs. Deux clefs seraient deux facons de
-  # brancher une moitie et pas l'autre.
-  defp workshop_root,
-    do: Application.get_env(:lcars_fleet, :mcp_workshop_root) || Fleet.Layout.workshop_root()
 
   defp with_lot(body, nil), do: body
 
@@ -2221,7 +1902,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
     # non-conforming seam must degrade the order, not crash a gesture that succeeded. Without this,
     # a stub missing the callback raised deep inside the loop and the caller lost a created ticket
     # to an UndefinedFunctionError.
-    case conforming(DependencyForge, forge) do
+    case Gate.conforming(DependencyForge, forge) do
       {:ok, _} ->
         failed =
           Enum.reject(blockers, fn b ->
@@ -2264,7 +1945,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   # dropped — and closing RELEASES everything it blocked. The guard turns that into the same refusal
   # as any other carry failure, which the caller already knows not to close through.
   defp carry_dependencies(forge, repo, old_n, new_n) do
-    with {:ok, _} <- conforming(DependencyForge, forge),
+    with {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, blockers} <- forge.issue_dependencies(repo, old_n, []),
          {:ok, blocked} <- forge.issue_blocks(repo, old_n, []),
          :ok <- copy_edges(blockers, fn b -> forge.add_issue_dependency(repo, new_n, b, []) end),
@@ -2322,10 +2003,10 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec emergency_stop(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def emergency_stop(reason, state) when is_binary(reason) and reason != "" do
-    with {:ok, _role} <- require_onboarder(state),
-         {:ok, forge} <- conforming_forge(),
-         {:ok, _} <- conforming(DependencyForge, forge),
-         {:ok, onboard} <- conforming_onboard(),
+    with {:ok, _role} <- Gate.require_onboarder(state),
+         {:ok, forge} <- Gate.conforming_forge(),
+         {:ok, _} <- Gate.conforming(DependencyForge, forge),
+         {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, projects} <- onboard.list_projects([]) do
       targets = Enum.filter(projects, &(&1["state"] == "open"))
       skipped = Enum.map(projects -- targets, & &1["repo"])
@@ -2390,7 +2071,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec add_dependency(integer(), integer(), map()) :: {:ok, map()} | {:error, term()}
   def add_dependency(number, blocker, state) do
-    with {:ok, %{repo: repo}} <- require_architect(state), do: edge(:add, repo, number, blocker)
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
+         do: edge(:add, repo, number, blocker)
   end
 
   @doc """
@@ -2399,7 +2081,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   """
   @spec remove_dependency(integer(), integer(), map()) :: {:ok, map()} | {:error, term()}
   def remove_dependency(number, blocker, state) do
-    with {:ok, %{repo: repo}} <- require_architect(state),
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
          do: edge(:remove, repo, number, blocker)
   end
 
@@ -2410,8 +2092,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp edge(op, repo, number, blocker)
        when is_integer(number) and number > 0 and is_integer(blocker) and blocker > 0 and
               number != blocker do
-    with {:ok, forge} <- conforming_forge(),
-         {:ok, _} <- conforming(DependencyForge, forge),
+    with {:ok, forge} <- Gate.conforming_forge(),
+         {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, _} <- apply_edge(op, forge, repo, number, blocker) do
       {:ok,
        %{
@@ -2512,9 +2194,9 @@ defmodule Fleet.MCP.PodTools.Delegation do
   @spec retire_issue(integer(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def retire_issue(number, reason, state)
       when is_integer(number) and number > 0 and is_binary(reason) and reason != "" do
-    with {:ok, %{repo: repo}} <- require_architect(state),
-         {:ok, forge} <- conforming_forge(),
-         {:ok, _} <- conforming(DependencyForge, forge),
+    with {:ok, %{repo: repo}} <- Gate.require_architect(state),
+         {:ok, forge} <- Gate.conforming_forge(),
+         {:ok, _} <- Gate.conforming(DependencyForge, forge),
          {:ok, target} <- target_state_preflight(forge, repo, number) do
       do_retire_issue(forge, repo, number, reason, target)
     end
@@ -2893,264 +2575,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp review_string(:gray_zone), do: "gray_zone"
 
   # Channel identity supplies role and project binding; missing or unbound identity is refused.
-  defp require_architect(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
-    case resolve_identity(pod_id) do
-      {:ok, %{role: role} = identity} ->
-        # B-03: authorize the capability, never a role name.
-        if role_has_capability?(role, :project_delegate) do
-          case Map.get(identity, :repo) do
-            repo when is_binary(repo) and repo != "" -> {:ok, %{role: role, repo: repo}}
-            _ -> {:error, :repo_unbound}
-          end
-        else
-          {:error, :forbidden_not_architect}
-        end
-
-      {:error, _reason} = err ->
-        err
-    end
-  end
-
-  defp require_architect(_state), do: {:error, :pod_id_required}
-
-  # Onboarding also resolves its capability from channel identity, never the wire.
-  defp require_onboarder(%{pod_id: pod_id}) when is_binary(pod_id) and pod_id != "" do
-    case resolve_identity(pod_id) do
-      # B-03: authorize the capability, never a role list.
-      {:ok, %{role: role}} ->
-        if role_has_capability?(role, :onboarder),
-          do: {:ok, role},
-          else: {:error, :forbidden_not_onboarder}
-
-      {:error, _reason} = err ->
-        err
-    end
-  end
-
-  defp require_onboarder(_state), do: {:error, :pod_id_required}
-
-  # B-03: Spawner owns cap-profile lookup; unknown identities have no capability.
-  defp role_has_capability?(role, cap) when is_binary(role) and role != "",
-    do: Fleet.Spawner.role_has_capability?(role, cap)
-
-  defp role_has_capability?(_role, _cap), do: false
-
-  # Spawn-bound identity comes from Spawner; unknown identity fails closed.
-  defp resolve_identity(pod_id) when is_binary(pod_id) do
-    case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
-      {:ok, %{role: role} = identity} -> {:ok, %{role: role, repo: Map.get(identity, :repo)}}
-      _ -> {:error, :pod_unknown}
-    end
-  end
-
   # Upward seam (MCP -> Pilot): reaping the pods of a retired ticket. Module ATTRIBUTE, never a
   # literal remote call — the boundary forbids `Fleet.MCP -> Fleet.Pilot` (cf. `:forge_client`).
   @default_pod_reaper Fleet.Pilot.PodReaper
   defp pod_reaper, do: Application.get_env(:lcars_fleet, :mcp_pod_reaper, @default_pod_reaper)
-
-  @doc """
-  Ouvre la demande d'outillage d'un pod bloqué : branche, manifeste, pull request.
-
-  L'IDENTITÉ EST LE CANAL. `pod_id` vient de l'accepteur de socket (un pod, une socket) et le
-  work-item s'en DÉDUIT — jamais d'un argument. Rien dans la demande ne nomme un ticket : il n'y a
-  donc rien à prouver, la socket discrimine. C'est ce que `mix lcars.contracts.check` exige d'un
-  outil MCP, et c'est aussi ce qui empêche un pod de demander au nom d'un autre.
-
-  LECTURE PURE DU WORK-ITEM, et c'est un piège évité : `TaskQueue.get_for_pod/1` **mute** — il
-  enregistre un poll et fait passer l'item de `:pending` à `:assigned` avec un broadcast. L'appeler
-  ici émettrait une assignation fantôme et remettrait à zéro l'horloge de poll d'un pod qui, lui,
-  n'a rien demandé de tel. `list_active/0` est une lecture, et les items actifs se comptent sur les
-  doigts.
-
-  DEUX CHEMINS, ET L'ABSENCE DE TICKET N'EST PLUS UN REFUS. Un pod qui bute sur l'outil manquant
-  en cours de travail met son work-item en attente et le fait re-dispatcher ; un pod SANS work-item
-  — l'architecte qui anticipe, ce pour quoi son cap-profile lui accorde cet outil — ouvre la même
-  PR sans verrou, sans marqueur et sans re-dispatch. Le drain saute déjà une PR sans marqueur
-  (`Toolchain.parse_workitem_marker/1`), donc le second chemin ne demande rien de neuf en aval.
-
-  IDEMPOTENT PAR LA BRANCHE : son nom dérive du work-item, ou du pod quand il n'y en a pas — deux
-  préfixes distincts, jamais un espace de noms partagé. Un second appel réécrit le même fichier sur
-  la même branche au lieu d'ouvrir une deuxième pull request pour un seul besoin. Une branche déjà
-  là n'est pas une erreur.
-  """
-  @spec request_toolchain(map(), String.t()) :: {:ok, map()} | {:error, term()}
-  def request_toolchain(args, pod_id) when is_map(args) and is_binary(pod_id) and pod_id != "" do
-    with :ok <- Fleet.Toolchain.validate_form(args),
-         {:ok, forge} <- conforming(ForgeWriter, ForgeWriter.resolved()) do
-      case active_work_item(pod_id) do
-        {:ok, work_item} -> toolchain_for_work_item(args, pod_id, work_item, forge)
-        {:error, :no_active_work_item} -> toolchain_anticipated(args, pod_id, forge)
-      end
-    end
-  end
-
-  def request_toolchain(_args, _pod_id), do: {:error, :pod_id_required}
-
-  # LE CHEMIN AVEC TICKET — un pod bute sur l'outil manquant EN COURS DE TRAVAIL. Son work-item est
-  # mis en attente et re-dispatché quand l'outil atterrit ; ce sont le verrou et le marqueur qui le
-  # portent, jamais la mémoire du runtime.
-  defp toolchain_for_work_item(args, pod_id, work_item, forge) do
-    repo = Fleet.Toolchain.ops_repo()
-    base = Fleet.Toolchain.branch()
-    branch = Fleet.Toolchain.branch_for(work_item.id)
-    eco = args["ecosystem"]
-
-    content =
-      Fleet.Toolchain.render(args,
-        issue: work_item.issue_id,
-        role: work_item.role,
-        work_item_id: work_item.id
-      )
-
-    # UNE BRANCHE DÉJÀ LÀ N'EST PAS UNE ERREUR : c'est le second appel du même besoin. On écrase
-    # le manifeste et on laisse la PR existante porter le diff mis à jour.
-    _ = forge.create_branch(repo, branch, base, [])
-
-    # LE LIEN EST ÉCRIT SUR LA FORGE, DANS LES DEUX SENS, jamais en mémoire (`01` §7.3) :
-    #   * le corps de la PR porte le work-item (`workitem_marker`) — c'est ce que la seconde
-    #     passe du réconciliateur lit pour savoir QUEL ticket drainer quand la PR se ferme
-    #     (une fermeture sans merge ne fait pas bouger la branche : sans ce marqueur, le
-    #     work-item attendrait un événement qui n'arrivera jamais) ;
-    #   * l'issue du work-item porte le verrou `lcars-awaits-toolchain` + le marqueur de PR —
-    #     le dispatcher la SAUTE tant que le verrou est posé.
-    # L'échec du VERROU est fatal (fail-loud, le pod ré-émet — toute la chaîne amont est
-    # idempotente : branche réutilisée, put_file écrase, open_pr rend la PR existante sur 409).
-    # Le COMMENTAIRE est best-effort : sa perte ne coûte que du contexte humain, le drain se key
-    # sur le verrou et le marqueur de PR.
-    with {:ok, item_repo, item_issue} <- workitem_address(pod_id, work_item),
-         {:ok, _} <-
-           forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
-         {:ok, pr} <-
-           forge.open_pr(repo, branch, base, "[toolchain] #{eco}",
-             body:
-               "Demande d'outillage — work-item `#{work_item.id}` (#{item_repo}##{item_issue}).\n" <>
-                 Fleet.Toolchain.workitem_marker(item_repo, item_issue)
-           ),
-         {:ok, _} <- forge.add_label(item_repo, item_issue, Fleet.Toolchain.waiting_label(), []) do
-      case forge.post_comment(
-             item_repo,
-             item_issue,
-             "Demande d'outillage en vol : PR #{repo}!#{pr_number(pr)} — ce ticket attend la " <>
-               "signature d'un admin (ou son refus).\n" <>
-               Fleet.Toolchain.marker(pr_number(pr) || 0),
-             []
-           ) do
-        {:ok, _} ->
-          :ok
-
-        {:error, why} ->
-          Logger.warning(
-            "Delegation: toolchain_request — commentaire de lien NON posé sur " <>
-              "#{item_repo}##{item_issue} (#{inspect(why)}) ; le verrou et le marqueur de PR " <>
-              "portent le drain, seule la lisibilité humaine est perdue"
-          )
-      end
-
-      arm_auto_merge(forge, repo, pr)
-
-      {:ok, %{"status" => "toolchain_requested", "ecosystem" => eco, "pr" => pr_number(pr)}}
-    end
-  end
-
-  # UN CLIC ADMIN (⚖ user) : l'auto-merge est armé par le runtime, la signature humaine est
-  # l'approbation, la forge merge seule. GATE sur config, DÉFAUT OFF — armé sans protection de
-  # branche, « conditions remplies » voudrait dire TOUT DE SUITE : merge sans signature, convergeur
-  # derrière. Le geste d'installation pose la protection ET la config ENSEMBLE.
-  # Best-effort : un armement raté laisse le chemin deux-clics (approve puis merge à la main).
-  #
-  # FACTORISÉ parce qu'il est joué par les DEUX chemins de demande. Recopié, il dériverait — et la
-  # copie qui dérive serait celle du chemin qu'on joue le moins, donc celle que personne ne verrait.
-  defp arm_auto_merge(forge, repo, pr) do
-    if Application.get_env(:lcars_fleet, :toolchain_auto_merge, false) do
-      case forge.schedule_auto_merge(repo, pr_number(pr), []) do
-        {:ok, _} ->
-          :ok
-
-        :ok ->
-          :ok
-
-        {:error, why} ->
-          Logger.warning(
-            "Delegation: toolchain_request — auto-merge NON armé sur ##{pr_number(pr)} " <>
-              "(#{inspect(why)}) ; le chemin deux-clics reste (approve puis merge)"
-          )
-      end
-    end
-
-    :ok
-  end
-
-  # LE CHEMIN SANS TICKET — L'ANTICIPATION, et c'est l'usage au nom duquel l'architecte a reçu ce
-  # grant : « l'arch peut demander un outillage AVANT que les producers butent dessus »
-  # (`architect.yaml`). La garde `active_work_item/1` le refusait en `:no_active_work_item`, donc la
-  # capacité était MORTE pour sa seule raison d'être — le grant et la garde avaient été écrits sur
-  # des hypothèses opposées, et rien ne les confrontait. Le mur `toolchain.grant_reachable` le fait
-  # désormais (`lcars.contracts.check`).
-  #
-  # CE QUI TOMBE ICI, ET POURQUOI CE N'EST PAS UNE PERTE : il n'y a AUCUN ticket à verrouiller ni à
-  # re-dispatcher. Pas de `lcars-awaits-toolchain`, pas de commentaire de lien, pas de
-  # `workitem_marker` — et le drain le sait DÉJÀ : `Toolchain.parse_workitem_marker/1` rend `:error`
-  # sur un corps sans marqueur, et la seconde passe du réconciliateur saute cette PR. Le chemin sans
-  # ticket ne demande donc rien de neuf en aval ; il demande de ne pas mentir en amont.
-  #
-  # LE CORPS DE LA PR LE DIT, et ce n'est pas de la décoration : un admin qui merge doit savoir
-  # qu'il installe un outil et qu'il ne débloque personne. Une PR d'anticipation qui ressemblerait à
-  # une PR de déblocage ferait attendre un re-dispatch qui n'arrivera jamais.
-  defp toolchain_anticipated(args, pod_id, forge) do
-    with {:ok, %{role: role}} <- resolve_identity(pod_id) do
-      repo = Fleet.Toolchain.ops_repo()
-      base = Fleet.Toolchain.branch()
-      branch = Fleet.Toolchain.branch_for_pod(pod_id)
-      eco = args["ecosystem"]
-
-      content = Fleet.Toolchain.render(args, role: role)
-
-      # Même idempotence que l'autre chemin : une branche déjà là est le second appel du même besoin.
-      _ = forge.create_branch(repo, branch, base, [])
-
-      with {:ok, _} <-
-             forge.put_file(repo, Fleet.Toolchain.manifest_path(eco), content, branch: branch),
-           {:ok, pr} <-
-             forge.open_pr(repo, branch, base, "[toolchain] #{eco} (anticipation)",
-               body:
-                 "Demande d'outillage ANTICIPÉE — rôle `#{role}`, AUCUN ticket en attente.\n\n" <>
-                   "Merger installe l'outil sur les boîtes qui suivent cette branche. " <>
-                   "Aucun work-item ne sera re-dispatché : il n'y en a pas."
-             ) do
-        arm_auto_merge(forge, repo, pr)
-        {:ok, %{"status" => "toolchain_requested", "ecosystem" => eco, "pr" => pr_number(pr)}}
-      end
-    end
-  end
-
-  # L'ADRESSE du work-item (dépôt du projet + numéro d'issue) — les deux clés du verrou. Le repo
-  # vient de l'IDENTITÉ du pod (le canal, jamais le wire) ; le numéro de son issue_id. Un work-item
-  # sans issue rattachable n'a pas de ticket à verrouiller ni à re-dispatcher : refus typé, le pod
-  # sait que sa demande n'est pas traçable.
-  defp workitem_address(pod_id, work_item) do
-    with {:ok, %{repo: repo}} when is_binary(repo) and repo != "" <- resolve_identity(pod_id),
-         {:ok, n} <- Fleet.Toolchain.workitem_issue_number(work_item.issue_id) do
-      {:ok, repo, n}
-    else
-      :error -> {:error, :work_item_issue_unparseable}
-      {:ok, _} -> {:error, :pod_repo_unbound}
-      {:error, _} = err -> err
-    end
-  end
-
-  # Le work-item ACTIF de ce pod, en lecture seule. `:no_active_work_item` plutôt qu'un `nil` qui
-  # laisserait la suite composer un manifeste sans traçabilité — une demande qu'aucun ticket ne
-  # réclame est une demande que personne ne saura rattacher au merge.
-  defp active_work_item(pod_id) do
-    case Enum.find(Fleet.TaskQueue.list_active(), &(&1.pod_id == pod_id)) do
-      nil -> {:error, :no_active_work_item}
-      item -> {:ok, item}
-    end
-  end
-
-  # Le client canonique rend le NUMERO nu ({:ok, integer}, 409 compris — cf. le @callback de
-  # `ForgeWriter`). Les clauses map d'une v1 acceptaient ce qu'aucun writer reel ne rend : le
-  # double etait vert et la prod rendait `"pr" => nil`.
-  defp pr_number(n) when is_integer(n), do: n
-  defp pr_number(_), do: nil
 end

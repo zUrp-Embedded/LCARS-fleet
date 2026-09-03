@@ -356,8 +356,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         lines
         |> test_blocks()
         |> Enum.flat_map(fn {a, b} ->
+          # ⚠ `a..b` AVEC UN PAS EXPLICITE. Un `@test` a corps VIDE rend `b == a - 1`, et un
+          # `first..last` decroissant prend en Elixir un pas de -1 : le bloc etait parcouru A
+          # L'ENVERS, donc `List.last(code)` designait la PREMIERE ligne et l'exemption « negation
+          # terminale » tombait sur la mauvaise. Le warning d'Elixir le disait a chaque passe.
           code =
-            a..b
+            if(b < a, do: [], else: Enum.to_list(a..b//1))
             |> Enum.filter(fn n ->
               l = Enum.at(lines, n, "")
               String.trim(l) != "" and not String.starts_with?(String.trim_leading(l), "#")

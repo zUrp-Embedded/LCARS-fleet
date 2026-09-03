@@ -14,7 +14,7 @@ defmodule Fleet.MCP.ScratchTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.MCP.PodTools.Delegation
+  alias Fleet.MCP.PodTools.Delegation.Scratchpad
 
   setup do
     tmp = Fleet.TestEnv.tmp_path("scratch")
@@ -39,7 +39,7 @@ defmodule Fleet.MCP.ScratchTest do
     Application.put_env(:lcars_fleet, :mcp_workshop_root, root)
 
     try do
-      Delegation.scratch(%{pod_id: "pod-arch", role: "architect", repo: "fleet/demo"}, note)
+      Scratchpad.scratch(%{pod_id: "pod-arch", role: "architect", repo: "fleet/demo"}, note)
     after
       if prev,
         do: Application.put_env(:lcars_fleet, :mcp_workshop_root, prev),
@@ -125,7 +125,7 @@ defmodule Fleet.MCP.ScratchTest do
       end)
 
       assert {:error, {:no_workshop_face, _}} =
-               Delegation.scratch(%{pod_id: "p", role: "architect", repo: "fleet/demo"}, "x")
+               Scratchpad.scratch(%{pod_id: "p", role: "architect", repo: "fleet/demo"}, "x")
 
       refute File.exists?(absent)
     end

@@ -1411,7 +1411,7 @@ defmodule Fleet.MCP.PodTools do
     # the work item is DERIVED from it — nothing in the arguments names a ticket, so there is
     # nothing to prove: the socket discriminates. That is also what stops a pod requesting on
     # another's behalf.
-    case Delegation.request_toolchain(args, pod_id) do
+    case Delegation.Toolchain.request_toolchain(args, pod_id) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1585,7 +1585,7 @@ defmodule Fleet.MCP.PodTools do
 
   # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
   def handle_tool_call("scratch", %{"note" => note}, state) when is_binary(note) do
-    case Delegation.scratch(state, note) do
+    case Delegation.Scratchpad.scratch(state, note) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1596,7 +1596,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("escalation_list", _arguments, state) do
-    case Delegation.list_escalations(state) do
+    case Delegation.Escalations.list_escalations(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end

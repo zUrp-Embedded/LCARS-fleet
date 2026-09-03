@@ -871,14 +871,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
     }
   end
 
-  # `defp require_x(...)` whose body asks `role_has_capability?(_, :cap)` — the gate, and the
+  # `require_x(...)` whose body asks `role_has_capability?(_, :cap)` — the gate, and the
   # capability it gates, read from the tree so a mention in a comment cannot answer for it. A gate
   # asking about several capabilities is skipped rather than guessed: there would be no single
   # answer to "which tools does this capability open".
+  #
+  # ⚠ `def` AUTANT QUE `defp`, et c'est le decoupage qui l'a impose : les deux gates sont sorties
+  # dans `Delegation.Gate`, donc publiques (`@doc false`) pour que les canaux les appellent. La
+  # version qui ne lisait que `defp` a rendu INSTRUMENT BROKEN au premier deplacement — le
+  # plancher a tenu, mais une derivation attachee a la VISIBILITE d'une fonction mesure son
+  # rangement, pas son role.
   defp capability_gates(ast) do
     ast
     |> collect(fn
-      {:defp, _, [head, [do: body]]} ->
+      {d, _, [head, [do: body]]} when d in [:def, :defp] ->
         with name when not is_nil(name) <- def_name(head),
              [cap] <- body |> collect(&capability_asked/1) |> Enum.uniq() do
           {name, to_string(cap)}
@@ -895,7 +901,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   defp capability_asked({:role_has_capability?, _, [_role, cap]}) when is_atom(cap), do: cap
   defp capability_asked(_), do: nil
 
-  # A `Delegation` function is gated by whichever `require_*` its own body calls.
+  # A `Delegation` function is gated by whichever `require_*` its own body calls — appele NU quand
+  # la gate vit dans le meme module, QUALIFIE (`Gate.require_architect(state)`) quand elle vit
+  # dans le socle de la famille. Les deux formes designent la meme gate et doivent compter pareil.
   defp delegation_capabilities(ast, gates) do
     ast
     |> collect(fn
@@ -904,6 +912,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
           body
           |> collect(fn
             {fun, _, _} when is_atom(fun) -> Map.get(gates, fun)
+            {{:., _, [{:__aliases__, _, _}, fun]}, _, _} when is_atom(fun) -> Map.get(gates, fun)
             _ -> nil
           end)
           |> Enum.uniq()
@@ -929,7 +938,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       |> Enum.flat_map(fn %{body: body} ->
         collect(body, fn
           {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
-            if List.last(aliases) == :Delegation, do: Map.get(gated_delegations, fun), else: nil
+            # LA FAMILLE, pas le dernier segment : un canal extrait s'appelle
+            # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesse de le voir
+            # au premier decoupage — le mur a rougi sur « ungated tools [escalation_list,
+            # scratch] » le jour ou les canaux sont sortis.
+            if :Delegation in aliases, do: Map.get(gated_delegations, fun), else: nil
 
           _ ->
             nil
@@ -1307,7 +1320,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
     body
     |> collect(fn
       {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
-        if List.last(aliases) == :Delegation, do: fun, else: nil
+        # Meme raison qu'au-dessus : la famille entiere, pas son seul module racine.
+        if :Delegation in aliases, do: fun, else: nil
 
       _ ->
         nil
