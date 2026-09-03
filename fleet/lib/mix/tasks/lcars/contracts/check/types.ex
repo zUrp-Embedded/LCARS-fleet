@@ -305,16 +305,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
               %{st | mods: [{depth, mod} | pop_to(st.mods, depth)], doc?: false, impl?: false}
 
             match?([_, _, _], Regex.run(@def_re, line)) ->
-              [_, indent, name] = Regex.run(@def_re, line)
-              key = {enclosing_module(st.mods, String.length(indent)), name}
-              st = if st.impl?, do: %{st | impls: MapSet.put(st.impls, key)}, else: st
-
-              if name in otp do
-                %{st | doc?: false, impl?: false}
-              else
-                st = if st.doc?, do: %{st | documented: MapSet.put(st.documented, key)}, else: st
-                %{st | public: MapSet.put(st.public, key), doc?: false, impl?: false}
-              end
+              note_public(st, Regex.run(@def_re, line), otp)
 
             Regex.match?(@defp_re, line) ->
               %{st | doc?: false, impl?: false}
@@ -340,6 +331,20 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   # written back at the shallower depth. `nil` for the file's outermost module, so its functions
   # keep printing as bare names — a qualified name means "this one is nested", which is precisely
   # what a reader needs to find it.
+  # Une definition PUBLIQUE rencontree : elle rejoint la surface, et consomme le `@doc`/`@impl` en
+  # attente. Un callback OTP n'entre pas dans la surface — son contrat vit dans son behaviour.
+  defp note_public(st, [_, indent, name], otp) do
+    key = {enclosing_module(st.mods, String.length(indent)), name}
+    st = if st.impl?, do: %{st | impls: MapSet.put(st.impls, key)}, else: st
+
+    if name in otp do
+      %{st | doc?: false, impl?: false}
+    else
+      st = if st.doc?, do: %{st | documented: MapSet.put(st.documented, key)}, else: st
+      %{st | public: MapSet.put(st.public, key), doc?: false, impl?: false}
+    end
+  end
+
   defp pop_to(mods, depth), do: Enum.drop_while(mods, fn {d, _} -> d >= depth end)
 
   defp enclosing_module(mods, indent) do

@@ -424,20 +424,26 @@ defmodule Fleet.Forge.Client.Repo do
     else
       case http_get(config, path) do
         {:ok, existing} when is_map(existing) ->
-          if Map.take(existing, Map.keys(projected)) == projected do
-            {:ok, :unchanged}
-          else
-            case http_patch(config, path, projected) do
-              {:ok, _} -> {:ok, :updated}
-              {:error, reason} -> {:error, {:protection_reconcile_failed, reason}}
-            end
-          end
+          converge_protection(config, path, projected, existing)
 
         {:ok, other} ->
           {:error, {:protection_readback_invalid, other}}
 
         {:error, reason} ->
           {:error, {:protection_readback_failed, reason}}
+      end
+    end
+  end
+
+  # L'etat DESIRE est deja la, ou il ne l'est pas. On compare sur les seules clefs projetees : la
+  # forge en rend d'autres, et exiger l'egalite complete ferait patcher a chaque tour.
+  defp converge_protection(config, path, projected, existing) do
+    if Map.take(existing, Map.keys(projected)) == projected do
+      {:ok, :unchanged}
+    else
+      case http_patch(config, path, projected) do
+        {:ok, _} -> {:ok, :updated}
+        {:error, reason} -> {:error, {:protection_reconcile_failed, reason}}
       end
     end
   end

@@ -32,39 +32,39 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
         {:error, reason}
 
       {:ok, _role} ->
-        if valid_repo?(repo) do
-          # The requesting pod, carried to the worker so its outcome wakes it back (notify_pod via a
-          # Spawner-side consumer on project_publish.{done,failed}). nil for a caller without a pod_id.
-          requester = Map.get(state, :pod_id)
-
-          case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
-                 ProjectPublish.run(repo, requester)
-               end) do
-            {:ok, _pid} ->
-              # `_ =` DELIBERE : le Bus est le rail LOSSY (doctrine D1), et cet evenement annonce un
-              # travail deja lance — le perdre ne change rien a ce qui se passe. `safe_emit` porte
-              # deja son propre log d'echec. Ce qui n'est PAS acceptable est de jeter le retour sans
-              # le dire : `_ =` est la difference entre « on a choisi » et « on n'a pas regarde ».
-              _ =
-                Bus.safe_emit(
-                  :mcp,
-                  :"project_publish.started",
-                  [payload: %{"repo" => repo, "requester_pod_id" => requester}],
-                  context: "project_publish"
-                )
-
-              {:ok, %{"status" => "queued", "repo" => repo}}
-
-            {:error, reason} ->
-              {:error, {:publish_enqueue_failed, reason}}
-          end
-        else
-          {:error, :invalid_arguments}
-        end
+        if valid_repo?(repo),
+          do: enqueue_publish(repo, Map.get(state, :pod_id)),
+          else: {:error, :invalid_arguments}
     end
   end
 
   def project_publish(_args, _state), do: {:error, :invalid_arguments}
+
+  # `requester` est le pod DEMANDEUR, porte jusqu'au worker pour que l'issue le reveille (notify_pod
+  # via un consumer Spawner sur `project_publish.{done,failed}`) — nil pour un appelant sans pod_id.
+  defp enqueue_publish(repo, requester) do
+    case Task.Supervisor.start_child(Fleet.MCP.PublishTaskSupervisor, fn ->
+           ProjectPublish.run(repo, requester)
+         end) do
+      {:ok, _pid} ->
+        # `_ =` DELIBERE : le Bus est le rail LOSSY (doctrine D1), et cet evenement annonce un
+        # travail deja lance — le perdre ne change rien a ce qui se passe. `safe_emit` porte deja
+        # son propre log d'echec. Ce qui n'est PAS acceptable est de jeter le retour sans le dire :
+        # `_ =` est la difference entre « on a choisi » et « on n'a pas regarde ».
+        _ =
+          Bus.safe_emit(
+            :mcp,
+            :"project_publish.started",
+            [payload: %{"repo" => repo, "requester_pod_id" => requester}],
+            context: "project_publish"
+          )
+
+        {:ok, %{"status" => "queued", "repo" => repo}}
+
+      {:error, reason} ->
+        {:error, {:publish_enqueue_failed, reason}}
+    end
+  end
 
   # owner/name, exactly two non-empty segments, no path-traversal component.
   defp valid_repo?(repo) do

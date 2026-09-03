@@ -210,21 +210,7 @@ defmodule Fleet.Workflow.DeliverableGate do
         missing =
           out
           |> String.split(<<0>>, trim: true)
-          |> Enum.flat_map(fn chunk ->
-            case String.split(chunk, <<0x1F>>, parts: 2) do
-              # One real trailer value must start with the expected role.
-              [sha, values] ->
-                covered? =
-                  values
-                  |> String.split("\n", trim: true)
-                  |> Enum.any?(&(String.trim_leading(&1) |> String.starts_with?(needle)))
-
-                if covered?, do: [], else: [String.trim(sha)]
-
-              _ ->
-                []
-            end
-          end)
+          |> Enum.flat_map(&uncovered_sha(&1, needle))
 
         case missing do
           [] -> :ok
@@ -337,12 +323,7 @@ defmodule Fleet.Workflow.DeliverableGate do
           |> Enum.filter(&(String.starts_with?(&1, "+") and not String.starts_with?(&1, "+++")))
           |> Enum.join("\n")
 
-        case Enum.find_value(@secret_patterns, fn {re, kind} ->
-               if Regex.match?(re, added), do: kind, else: nil
-             end) do
-          nil -> :ok
-          kind -> {:error, {:secret_detected, kind, "diff added lines"}}
-        end
+        refuse_secret(added, "diff added lines")
 
       {out, rc} ->
         {:error, classify_git_error(out, rc)}
@@ -367,6 +348,34 @@ defmodule Fleet.Workflow.DeliverableGate do
       {:error, {:exit, reason}} -> {"git exec error: #{inspect(reason)}", 125}
       # Preserve future Shell errors as hard git failures.
       {:error, reason} -> {"git shell error: #{inspect(reason)}", 125}
+    end
+  end
+
+  # La premiere forme de secret reconnue dans un texte, ou `:ok`. Le NOM de la forme voyage avec le
+  # refus : « un secret » sans dire lequel envoie l'auteur relire tout son diff.
+  defp refuse_secret(texte, ou) do
+    case Enum.find_value(@secret_patterns, fn {re, kind} ->
+           if Regex.match?(re, texte), do: kind, else: nil
+         end) do
+      nil -> :ok
+      kind -> {:error, {:secret_detected, kind, ou}}
+    end
+  end
+
+  # Le sha d'un commit dont AUCUNE valeur de trailer ne commence par le role attendu. Un chunk sans
+  # separateur n'a pas de trailer du tout : il ne prouve rien, donc il n'accuse rien.
+  defp uncovered_sha(chunk, needle) do
+    case String.split(chunk, <<0x1F>>, parts: 2) do
+      [sha, values] ->
+        couvert? =
+          values
+          |> String.split("\n", trim: true)
+          |> Enum.any?(&(String.trim_leading(&1) |> String.starts_with?(needle)))
+
+        if couvert?, do: [], else: [String.trim(sha)]
+
+      _ ->
+        []
     end
   end
 

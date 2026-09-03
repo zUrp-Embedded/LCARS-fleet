@@ -142,21 +142,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
                 "(la doctrine du pod arrive par le system-prompt, plus par ce fichier)"
             )
           else
-            case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
-              :ok ->
-                # Anti-leak, UNTRACKED case (measured live on the scribe bench: `?? CLAUDE.md` in
-                # git status): on a repo that does not track a root CLAUDE.md, OUR composed copy is
-                # stageable — a pod's `git add -A` would ship pod-identity material in its
-                # deliverable, and the gate's path wall deliberately allows the ROOT CLAUDE.md.
-                # `.git/info/exclude` hides it from add/status, is clone-local, and never ships.
-                exclude_composed_claude_md(workspace)
-
-              {:error, reason} ->
-                Logger.warning(
-                  "pod #{state.pod_id} CLAUDE.md → workspace copy FAILED (#{inspect(reason)}) — " <>
-                    "the agent's cwd lacks its codebase-doc (pod identity)"
-                )
-            end
+            copy_composed_claude_md(state, workspace)
           end
 
           Logger.info(
@@ -205,6 +191,24 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   end
 
   # cf. the call-site comment (anti-leak, untracked case). Idempotent; best-effort LOUD.
+  # Anti-leak, cas UNTRACKED (mesure sur le banc scribe : `?? CLAUDE.md` dans git status) : sur un
+  # depot qui ne suit pas de CLAUDE.md racine, NOTRE copie composee est stageable — un `git add -A`
+  # du pod embarquerait de la matiere d'identite dans son livrable, et le mur de chemins du gate
+  # autorise deliberement le CLAUDE.md racine. `.git/info/exclude` la cache d'add/status, reste
+  # local au clone, et ne part jamais.
+  defp copy_composed_claude_md(state, workspace) do
+    case File.cp(Path.join(state.pod_dir, "CLAUDE.md"), Path.join(workspace, "CLAUDE.md")) do
+      :ok ->
+        exclude_composed_claude_md(workspace)
+
+      {:error, reason} ->
+        Logger.warning(
+          "pod #{state.pod_id} CLAUDE.md → workspace copy FAILED (#{inspect(reason)}) — " <>
+            "the agent's cwd lacks its codebase-doc (pod identity)"
+        )
+    end
+  end
+
   defp exclude_composed_claude_md(workspace) do
     exclude = Path.join(workspace, ".git/info/exclude")
     line = "/CLAUDE.md"

@@ -316,9 +316,7 @@ defmodule Fleet.Workflow.Git do
   def write_provenance(workspace, sha, json)
       when is_binary(sha) and sha != "" and is_binary(json) do
     with {:ok, blob} <- hash_object(workspace, json),
-         :ok <- update_ref(workspace, provenance_ref(sha), blob) do
-      :ok
-    end
+         do: update_ref(workspace, provenance_ref(sha), blob)
   end
 
   @doc """

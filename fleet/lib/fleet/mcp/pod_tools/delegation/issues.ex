@@ -125,39 +125,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
           # the producer has its order. A lot has no inline form — degrading would create a ticket
           # that HAS matter into one that has none, and the producer would work against material it
           # never saw. Published before the brief doc so a refusal costs no ops push either.
-          with {:ok, lot_pointer} <- publish_lot(repo, role, lot) do
-            {body, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
-
-            # THE JUDGE'S CRITERIA, a SECOND artefact — not a second copy of the brief. Materialized
-            # under `gate-briefs/` (kind: "judge") and pointed to by `Criteria: <ref> @ <sha>`, so
-            # the dispatch resolves a DIFFERENT pinned doc for the judge than for the producer. A
-            # workshop ticket (no jury) passes no criteria; degraded materialization drops the
-            # pointer rather than walling the ticket, same posture as the brief.
-            criteria_pointer = ensure_criteria_pointer(repo, title, criteria)
-
-            full_body =
-              body
-              |> with_pointer(pointer, repo)
-              |> with_criteria_pointer(criteria_pointer, repo)
-              |> with_lot(lot_pointer)
-              |> with_supersedes(supersedes)
-              |> with_op_marker(marker)
-
-            with {:ok, created} <-
-                   create_and_finish(
-                     forge,
-                     repo,
-                     title,
-                     full_body,
-                     identity,
-                     destination,
-                     depends_on,
-                     supersedes,
-                     target_state
-                   ) do
-              {:ok, with_dedup_unverified(created, dedup)}
-            end
-          end
+          compose_and_create(
+            forge,
+            repo,
+            role,
+            {title, brief, brief_pointer, summary, criteria, lot, marker},
+            {identity, destination, depends_on, supersedes, target_state},
+            dedup
+          )
       end
     else
       {:error, :role_token_unavailable} = err ->
@@ -170,6 +145,54 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # LE LOT D'ABORD, et son echec est un REFUS la ou celui du brief est une degradation. Les deux ne
+  # sont pas le meme objet : un brief qui ne se materialise pas voyage quand meme, inline, donc le
+  # producteur a son ordre. Un lot n'a pas de forme inline — degrader creerait un ticket qui A de la
+  # matiere en un ticket qui n'en a pas, et le producteur travaillerait contre du materiel qu'il n'a
+  # jamais vu. Publie avant le doc de brief pour qu'un refus ne coute meme pas un push ops.
+  #
+  # LES CRITERES DU JUGE sont un SECOND artefact, pas une seconde copie du brief : materialises sous
+  # `gate-briefs/` (kind: "judge") et pointes par `Criteria: <ref> @ <sha>`, pour que le dispatch
+  # resolve un document EPINGLE DIFFERENT pour le juge et pour le producteur. Un ticket d'atelier
+  # (sans jury) ne passe aucun critere ; une materialisation degradee laisse tomber le pointeur
+  # plutot que de murer le ticket, meme posture que le brief.
+  defp compose_and_create(
+         forge,
+         repo,
+         role,
+         {title, brief, brief_pointer, summary, criteria, lot, marker},
+         {identity, destination, depends_on, supersedes, target_state},
+         dedup
+       ) do
+    with {:ok, lot_pointer} <- publish_lot(repo, role, lot) do
+      {corps, pointer} = ensure_pointer(repo, title, brief, brief_pointer, summary)
+      criteria_pointer = ensure_criteria_pointer(repo, title, criteria)
+
+      full_body =
+        corps
+        |> with_pointer(pointer, repo)
+        |> with_criteria_pointer(criteria_pointer, repo)
+        |> with_lot(lot_pointer)
+        |> with_supersedes(supersedes)
+        |> with_op_marker(marker)
+
+      with {:ok, created} <-
+             create_and_finish(
+               forge,
+               repo,
+               title,
+               full_body,
+               identity,
+               destination,
+               depends_on,
+               supersedes,
+               target_state
+             ) do
+        {:ok, with_dedup_unverified(created, dedup)}
+      end
     end
   end
 

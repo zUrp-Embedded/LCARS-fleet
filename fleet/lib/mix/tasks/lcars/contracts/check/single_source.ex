@@ -113,52 +113,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             "Fleet.Toolchain.branch/0"
           )
         else
-          bad =
-            Enum.flat_map(checked, fn rel ->
-              case File.read(Path.expand(rel, root)) do
-                {:ok, body} ->
-                  cond do
-                    # ⚠ LA FORME, PAS UN NOM. Cette clause a epingle le litteral
-                    # `LCARS_SYSADMIN_BRANCH` — donc un quatrieme lecteur qui a nomme sa
-                    # variable AUTREMENT est passe au vert en rendant la borne reglable.
-                    # Un mur qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse
-                    # est qu'un nom de branche vienne d'une expansion, quel que soit son nom.
-                    Regex.match?(~r/\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[\}:]/, body) ->
-                      [
-                        {rel,
-                         "derives the branch from an expansion — the name is frozen, not tunable"}
-                      ]
-
-                    # THE SAME REFUSAL, WRITTEN IN THE OTHER LANGUAGE THIS LIST NOW HOLDS. The
-                    # clause above refuses a shell expansion; a python mirror cannot produce one,
-                    # so on its own it would have watched a file against a shape that file can
-                    # never take. The tunable gesture in python is a read from the environment —
-                    # and in `privileged-executor.py` the line above the branch is exactly that
-                    # (`os.environ.get("LCARS_OPS_REPO", …)`), so the half-tunable this wall
-                    # exists to refuse is one copy-paste away.
-                    Regex.match?(
-                      ~r/os\.(?:environ\.get|getenv)\(\s*["'][^"']*BRANCH|os\.environ\[\s*["'][^"']*BRANCH/,
-                      body
-                    ) ->
-                      [
-                        {rel,
-                         "reads the branch from the environment — the name is frozen, not tunable"}
-                      ]
-
-                    String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
-                      [{rel, "carries LCARS_SYSADMIN_BRANCH — the name is frozen, not tunable"}]
-
-                    not String.contains?(body, "\"#{expected}\"") ->
-                      [{rel, "does not carry the literal #{inspect(expected)}"}]
-
-                    true ->
-                      []
-                  end
-
-                _ ->
-                  [{rel, "unreadable"}]
-              end
-            end)
+          bad = Enum.flat_map(checked, &branch_freeze_gap(&1, root, expected))
 
           if bad == [] do
             %{
@@ -184,6 +139,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
             }
           end
         end
+    end
+  end
+
+  # Miroir INVERSE : ce qui est verifie est une ABSENCE. Un miroir qui doit porter le litteral et un
+  # miroir qui ne doit plus rien porter sont deux formes du meme invariant — « le nom vit a un seul
+  # endroit » — et le moteur les traite ensemble plutot que dans deux boucles qui deriveraient.
+  defp mirror_or_absence_gap({rel, rx, what, :forbidden}, root) do
+    case File.read(Path.expand(rel, root)) do
+      {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [{rel, what}], else: []
+      _ -> [{rel, "unreadable"}]
+    end
+  end
+
+  defp mirror_or_absence_gap({rel, rx, what}, root), do: mirror_gap({rel, rx, what}, root)
+
+  # Les racines de face citees par UN fichier. Un binaire est saute (`<<0>>`), les commentaires sont
+  # retires avant l'extraction, et la ponctuation finale ne fait pas partie d'un chemin : « … sous
+  # /home/projects. » rendrait `/home/projects.`, une quatrieme face inexistante.
+  defp collect_face_roots(path, acc) do
+    case File.read(path) do
+      {:ok, body} ->
+        if String.contains?(body, <<0>>) do
+          acc
+        else
+          body
+          |> String.split("\n")
+          |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
+          |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
+          |> Enum.map(&hd/1)
+          |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
+          |> MapSet.new()
+          |> MapSet.union(acc)
+        end
+
+      _ ->
+        acc
+    end
+  end
+
+  # Ce qui, dans UN miroir, casse le gel du nom de branche.
+  #
+  # ⚠ LA FORME, PAS UN NOM. La premiere clause a epingle le litteral `LCARS_SYSADMIN_BRANCH` — donc
+  # un quatrieme lecteur qui a nomme sa variable AUTREMENT est passe au vert en rendant la borne
+  # reglable. Un mur qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse est qu'un nom de
+  # branche vienne d'une expansion, quel que soit son nom.
+  #
+  # ⚠ LE MEME REFUS, ECRIT DANS L'AUTRE LANGAGE DE CETTE LISTE. Un miroir python ne peut pas
+  # produire d'expansion shell ; seule, la clause du dessus le surveillerait contre une forme qu'il
+  # ne peut pas prendre. Le geste reglable en python est une lecture d'environnement — et dans
+  # `privileged-executor.py`, la ligne au-dessus de la branche est exactement cela.
+  defp branch_freeze_gap(rel, root, expected) do
+    case File.read(Path.expand(rel, root)) do
+      {:ok, body} -> branch_freeze_verdict(rel, body, expected)
+      _ -> [{rel, "unreadable"}]
+    end
+  end
+
+  defp branch_freeze_verdict(rel, body, expected) do
+    cond do
+      Regex.match?(~r/\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[\}:]/, body) ->
+        [{rel, "derives the branch from an expansion — the name is frozen, not tunable"}]
+
+      Regex.match?(
+        ~r/os\.(?:environ\.get|getenv)\(\s*["\'][^"\']*BRANCH|os\.environ\[\s*["\'][^"\']*BRANCH/,
+        body
+      ) ->
+        [{rel, "reads the branch from the environment — the name is frozen, not tunable"}]
+
+      String.contains?(body, "LCARS_SYSADMIN_BRANCH") ->
+        [{rel, "carries LCARS_SYSADMIN_BRANCH — the name is frozen, not tunable"}]
+
+      not String.contains?(body, "\"#{expected}\"") ->
+        [{rel, "does not carry the literal #{inspect(expected)}"}]
+
+      true ->
+        []
+    end
+  end
+
+  # Le manque d'UN miroir. Un fichier illisible se NOMME `unreadable` au lieu de compter comme
+  # conforme : « le motif n'y est pas » et « je n'ai pas pu lire » sont le meme vide et la reponse
+  # opposee.
+  defp mirror_gap({rel, rx, what}, root) do
+    case File.read(Path.expand(rel, root)) do
+      {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
+      _ -> [{rel, "unreadable"}]
     end
   end
 
@@ -285,16 +326,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
-      bad =
-        Enum.flat_map(checked, fn {rel, rx, what} ->
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} ->
-              if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-
-            _ ->
-              [{rel, "unreadable"}]
-          end
-        end)
+      bad = Enum.flat_map(checked, &mirror_gap(&1, root))
 
       skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
@@ -614,23 +646,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         end)
 
       bad =
-        Enum.flat_map(checked, fn
-          # Miroir INVERSE : ce qui est verifie est une ABSENCE. Un miroir qui doit porter le
-          # litteral et un miroir qui ne doit plus rien porter sont deux formes du meme invariant —
-          # « le nom vit a un seul endroit » — et le moteur les traite ensemble plutot que dans deux
-          # boucles qui deriveraient.
-          {rel, rx, what, :forbidden} ->
-            case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [{rel, what}], else: []
-              _ -> [{rel, "unreadable"}]
-            end
-
-          {rel, rx, what} ->
-            case File.read(Path.expand(rel, root)) do
-              {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-              _ -> [{rel, "unreadable"}]
-            end
-        end)
+        Enum.flat_map(checked, &mirror_or_absence_gap(&1, root))
 
       skipped_labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
@@ -1004,29 +1020,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           |> Enum.reject(
             &String.match?("/" <> Path.relative_to(&1, base), ~r"/(\.expert|tests?)/")
           )
-          |> Enum.reduce(MapSet.new(), fn path, acc ->
-            case File.read(path) do
-              {:ok, body} ->
-                if String.contains?(body, <<0>>) do
-                  acc
-                else
-                  body
-                  |> String.split("\n")
-                  |> Enum.map(&Regex.replace(~r/#.*/, &1, ""))
-                  |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
-                  |> Enum.map(&hd/1)
-                  # ⚠ LE POINT FINAL D'UNE PHRASE N'EST PAS UNE RACINE. « … sous /home/projects. »
-                  # rend `/home/projects.`, une quatrieme face inexistante. La ponctuation pollue
-                  # un extracteur des qu'on la laisse passer — `/opt/...` porte le meme piege.
-                  |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
-                  |> MapSet.new()
-                  |> MapSet.union(acc)
-                end
-
-              _ ->
-                acc
-            end
-          end)
+          |> Enum.reduce(MapSet.new(), &collect_face_roots/2)
 
         inconnues =
           vues
@@ -1125,14 +1119,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
         end)
 
-      bad =
-        Enum.flat_map(checked, fn {rel, rx, what} ->
-          case File.read(Path.expand(rel, root)) do
-            {:ok, body} -> if Regex.match?(rx, code_of(body)), do: [], else: [{rel, what}]
-            _ -> [{rel, "unreadable"}]
-          end
-        end)
-
+      bad = Enum.flat_map(checked, &mirror_gap(&1, root))
       labels = skipped |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
       cond do

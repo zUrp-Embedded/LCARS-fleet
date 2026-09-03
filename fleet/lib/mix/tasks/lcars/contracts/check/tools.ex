@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
         broken_result(id, "file under the catalogue trees")
 
       true ->
-        names = declared |> MapSet.to_list() |> Enum.map(&Regex.escape/1) |> Enum.join("|")
+        names = declared |> MapSet.to_list() |> Enum.map_join("|", &Regex.escape/1)
         rx = Regex.compile!("`?(#{names})`?[ \t]*[,/][ \t]*`?(#{names})`?")
 
         offenders =
@@ -924,25 +924,29 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
     |> Map.new()
   end
 
+  # Les capabilities qu'une clause de dispatch atteint.
+  #
+  # LA FAMILLE, pas le dernier segment : un canal extrait s'appelle
+  # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesse de le voir au premier
+  # decoupage — le mur a rougi sur « ungated tools [escalation_list, scratch] » le jour ou les
+  # canaux sont sortis.
+  defp capabilities_of_clause(%{body: body}, gated_delegations) do
+    collect(body, fn
+      {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
+        if :Delegation in aliases, do: Map.get(gated_delegations, fun), else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
   # capability => the tool names that reach it, inverted from the dispatch clauses.
   defp capability_tools(tools_ast, gated_delegations) do
     tools_ast
     |> dispatch_clauses()
     |> Enum.flat_map(fn {tool, clauses} ->
       clauses
-      |> Enum.flat_map(fn %{body: body} ->
-        collect(body, fn
-          {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
-            # LA FAMILLE, pas le dernier segment : un canal extrait s'appelle
-            # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesse de le voir
-            # au premier decoupage — le mur a rougi sur « ungated tools [escalation_list,
-            # scratch] » le jour ou les canaux sont sortis.
-            if :Delegation in aliases, do: Map.get(gated_delegations, fun), else: nil
-
-          _ ->
-            nil
-        end)
-      end)
+      |> Enum.flat_map(&capabilities_of_clause(&1, gated_delegations))
       |> List.flatten()
       |> Enum.uniq()
       |> Enum.map(&{&1, tool})

@@ -119,6 +119,25 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
+  # Un cap-profile qui ne charge PLUS exclut son role de la reconvergence, en le disant : le
+  # respawn silencieux d'un role dont l'artefact est casse relancerait un pod sur une definition
+  # que personne ne peut plus lire.
+  defp permanent_if_boot_at_start(role, loader) do
+    case loader.(role) do
+      {:ok, %CapProfile{} = cp} ->
+        if boot_at_start?(cp.spec), do: [role], else: []
+
+      {:error, reason} ->
+        Logger.warning(
+          "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
+            "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
+            "until the artefact is repaired"
+        )
+
+        []
+    end
+  end
+
   @doc """
   Returns eligible permanent roles for reconciliation.
 
@@ -132,21 +151,7 @@ defmodule Fleet.Spawner.PermanentBoot do
 
     case list_roles(dir) do
       {:ok, roles} ->
-        Enum.flat_map(roles, fn role ->
-          case loader.(role) do
-            {:ok, %CapProfile{} = cp} ->
-              if boot_at_start?(cp.spec), do: [role], else: []
-
-            {:error, reason} ->
-              Logger.warning(
-                "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
-                  "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
-                  "until the artefact is repaired"
-              )
-
-              []
-          end
-        end)
+        Enum.flat_map(roles, &permanent_if_boot_at_start(&1, loader))
 
       {:error, _} ->
         []

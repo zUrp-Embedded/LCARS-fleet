@@ -73,26 +73,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # Line-based scan: enter on `@…doc [~sS]?"""`, exit on a lone `"""`. A heredoc cannot contain an
   # unescaped `"""` (Elixir), so the first lone `"""` closes it. Single-line `@doc "..."` is not a
   # heredoc — left to `strip_comment/1`'s inline-string tracking. Used by `code_match?/4` (BND-111).
+  # Un pas du balayage : dans un heredoc, la premiere ligne qui n'est QUE `"""` le ferme — Elixir
+  # interdit un `"""` non echappe a l'interieur, donc il n'y a pas d'ambiguite a lever.
+  defp doc_block_step({line, ln}, {acc, true}) do
+    if Regex.match?(~r/^\s*"""\s*$/, line),
+      do: {MapSet.put(acc, ln), false},
+      else: {MapSet.put(acc, ln), true}
+  end
+
+  defp doc_block_step({line, ln}, {acc, false}) do
+    if Regex.match?(~r/^\s*@(module|type|short)?doc\s+(~[sS])?"""/, line),
+      do: {MapSet.put(acc, ln), true},
+      else: {acc, false}
+  end
+
   defp doc_block_lines(path) do
     case File.read(path) do
       {:ok, content} ->
         content
         |> String.split("\n")
         |> Enum.with_index(1)
-        |> Enum.reduce({MapSet.new(), false}, fn {line, ln}, {acc, in_doc?} ->
-          cond do
-            in_doc? ->
-              if Regex.match?(~r/^\s*"""\s*$/, line),
-                do: {MapSet.put(acc, ln), false},
-                else: {MapSet.put(acc, ln), true}
-
-            Regex.match?(~r/^\s*@(module|type|short)?doc\s+(~[sS])?"""/, line) ->
-              {MapSet.put(acc, ln), true}
-
-            true ->
-              {acc, in_doc?}
-          end
-        end)
+        |> Enum.reduce({MapSet.new(), false}, &doc_block_step/2)
         |> elem(0)
 
       _ ->
@@ -259,7 +260,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @doc false
   @spec code_of(String.t()) :: String.t()
   def code_of(body),
-    do: body |> String.split("\n") |> Enum.map(&strip_comment/1) |> Enum.join("\n")
+    do: body |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1)
 
   defp do_strip_comment([], acc, _in_str), do: acc
   defp do_strip_comment([?# | _rest], acc, false), do: acc

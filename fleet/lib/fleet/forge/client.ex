@@ -1141,6 +1141,39 @@ defmodule Fleet.Forge.Client do
     end
   end
 
+  # UN commentaire signe compte-t-il ? Le marqueur nomme un ROLE ; on ne croit ce role que si
+  # l'auteur du commentaire est le compte de ce role, ou le compte systeme.
+  defp count_signed(c, {:ok, n}, bot, opts) do
+    role = ForgeProtocol.step_run_marker_role(c["body"])
+    author = get_in(c, ["user", "login"])
+
+    cond do
+      author == bot ->
+        {:cont, {:ok, n + 1}}
+
+      true ->
+        case role_login(role, opts) do
+          {:ok, ^author} ->
+            {:cont, {:ok, n + 1}}
+
+          {:ok, _other} ->
+            {:cont, {:ok, n}}
+
+          # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
+          # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
+          # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
+          # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
+          {:error, :role_token_unavailable} ->
+            {:cont, {:ok, n}}
+
+          # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
+          # que de rendre un total qui pourrait etre bas.
+          {:error, reason} ->
+            {:halt, {:error, {:role_login_unresolved, role, reason}}}
+        end
+    end
+  end
+
   @doc """
   Counts the FLEET's step-run markers across all comment pages for the anti-runaway budget.
 
@@ -1164,36 +1197,7 @@ defmodule Fleet.Forge.Client do
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       comments
       |> Enum.filter(&(ForgeProtocol.step_run_marker_role(&1["body"]) != nil))
-      |> Enum.reduce_while({:ok, 0}, fn c, {:ok, n} ->
-        role = ForgeProtocol.step_run_marker_role(c["body"])
-        author = get_in(c, ["user", "login"])
-
-        cond do
-          author == bot ->
-            {:cont, {:ok, n + 1}}
-
-          true ->
-            case role_login(role, opts) do
-              {:ok, ^author} ->
-                {:cont, {:ok, n + 1}}
-
-              {:ok, _other} ->
-                {:cont, {:ok, n}}
-
-              # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
-              # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
-              # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
-              # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
-              {:error, :role_token_unavailable} ->
-                {:cont, {:ok, n}}
-
-              # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
-              # que de rendre un total qui pourrait etre bas.
-              {:error, reason} ->
-                {:halt, {:error, {:role_login_unresolved, role, reason}}}
-            end
-        end
-      end)
+      |> Enum.reduce_while({:ok, 0}, &count_signed(&1, &2, bot, opts))
     end
   end
 

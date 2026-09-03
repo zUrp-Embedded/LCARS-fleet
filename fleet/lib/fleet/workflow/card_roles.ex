@@ -52,20 +52,25 @@ defmodule Fleet.Workflow.CardRoles do
         |> Path.join("*.yaml")
         |> Path.wildcard()
         |> Enum.sort()
-        |> Enum.reduce_while({:ok, []}, fn path, {:ok, acc} ->
-          case roles_of(path) do
-            {:ok, roles} ->
-              card = Path.basename(path, ".yaml")
-              missing = roles |> Enum.reject(&MapSet.member?(known, &1)) |> Enum.map(&{card, &1})
-              {:cont, {:ok, acc ++ missing}}
-
-            {:error, reason} ->
-              {:halt, {:error, {:cards_unreadable, path, reason}}}
-          end
-        end)
+        |> Enum.reduce_while({:ok, []}, &collect_unresolved(&1, &2, known))
       end
     else
       {:ok, []}
+    end
+  end
+
+  # Le pas de l'accumulation, nomme : une carte illisible ARRETE l'inventaire au lieu de le
+  # raccourcir en silence — « aucun role manquant » et « je n'ai pas pu lire » ne se distinguent
+  # pas dans une liste vide.
+  defp collect_unresolved(path, {:ok, acc}, known) do
+    case roles_of(path) do
+      {:ok, roles} ->
+        card = Path.basename(path, ".yaml")
+        missing = roles |> Enum.reject(&MapSet.member?(known, &1)) |> Enum.map(&{card, &1})
+        {:cont, {:ok, acc ++ missing}}
+
+      {:error, reason} ->
+        {:halt, {:error, {:cards_unreadable, path, reason}}}
     end
   end
 

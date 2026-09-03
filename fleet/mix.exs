@@ -139,12 +139,19 @@ defmodule LcarsFleet.MixProject do
   # un lecteur en conclut raisonnablement qu'un `mix gate` vert prouve les regles Credo. Il ne les
   # prouve pas.
   #
-  # MESURE : `mix credo` rend **exit 30** — 1 warning, 173 pistes de refactoring, 45
-  # points de lisibilite, 364 suggestions de conception, sur 509 fichiers. L'ajouter a la chaine la
-  # rendrait rouge en permanence ; la rendre verte demande de trier 583 signalements, c'est-a-dire un
-  # chantier avec ses arbitrages, pas une ligne d'alias. Credo reste donc un outil qu'on LANCE
-  # (`mix credo`), jamais un plancher que le gate tient — et c'est ecrit ici pour que personne n'ait
-  # a le deduire de son absence.
+  # `mix credo` rend exit 30. La MESURE se relance (`mix credo --format oneline | cut -d\' \' -f2`),
+  # elle ne se recopie pas ici : un compte grave dans un commentaire est faux au commit suivant, et
+  # celui qui etait ecrit a cette place l'etait de 53 signalements.
+  #
+  # CE QUE CREDO TIENT, PAR CLASSE — ca, ca ne derive pas : des pistes de REFACTORING (imbrication,
+  # complexite cyclomatique, arite), des points de LISIBILITE (ordre des alias, modules imbriques
+  # non alias), des suggestions de CONCEPTION (`TODO`, expressions repetees). Les `.credo.exs` est
+  # le fichier genere par defaut : 69 checks aux seuils stock, jamais arbitres.
+  #
+  # L'ajouter a la chaine la rendrait rouge en permanence, et la rendre verte demande un tri avec
+  # ses arbitrages — pas une ligne d'alias. Credo reste donc un outil qu'on LANCE, jamais un
+  # plancher que le gate tient, et c'est ecrit ici pour que personne n'ait a le deduire de son
+  # absence.
 
   # `mix gate` step: the ExUnit suite, as a SUBPROCESS so its failure halts the chain.
   #

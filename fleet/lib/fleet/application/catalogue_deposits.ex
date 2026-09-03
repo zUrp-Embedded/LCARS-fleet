@@ -147,7 +147,7 @@ defmodule Fleet.Application.CatalogueDeposits do
 
         Logger.warning(
           "CatalogueDeposits: #{length(many)} repos claim to be the store of '#{name}' " <>
-            "(#{sorted |> Enum.map(&Payload.full_name/1) |> Enum.join(", ")}). Following " <>
+            "(#{Enum.map_join(sorted, ", ", &Payload.full_name/1)}). Following " <>
             "#{Payload.full_name(chosen)} — first by name, so every box reading this forge follows the " <>
             "same one. Delete the others: only one of them is what `catalogue install` pushes to."
         )

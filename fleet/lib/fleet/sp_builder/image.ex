@@ -388,23 +388,26 @@ defmodule Fleet.SPBuilder.Image do
       root
       |> Path.join(glob)
       |> Path.wildcard()
-      |> Enum.reduce(acc, fn path, inner ->
-        key = key_fun.(path)
-
-        if Map.has_key?(inner, key) do
-          inner
-        else
-          content = read_artifact!(path, "artifact")
-
-          if content == "" do
-            raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
-                    "non-empty artifacts (truncated file in deploy?)"
-          end
-
-          Map.put(inner, key, content)
-        end
-      end)
+      |> Enum.reduce(acc, &put_first_seen(&2, key_fun.(&1), &1))
     end)
+  end
+
+  # PREMIERE racine gagnante : le scope est ordonne (propre, puis systeme), et une clef deja vue
+  # vient donc de la racine la plus specifique. Un artefact VIDE fait lever — une image « prouvee
+  # bonne » qui gele un fichier tronque prouve le contraire de ce qu'elle annonce.
+  defp put_first_seen(inner, key, path) do
+    if Map.has_key?(inner, key) do
+      inner
+    else
+      content = read_artifact!(path, "artifact")
+
+      if content == "" do
+        raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
+                "non-empty artifacts (truncated file in deploy?)"
+      end
+
+      Map.put(inner, key, content)
+    end
   end
 
   defp read_worker_protocol!(root),
