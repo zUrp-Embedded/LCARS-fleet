@@ -34,7 +34,7 @@ defmodule Fleet.Forge.Client.Merge do
         ) ::
           :ok | {:error, term()}
   def do_merge(config, repo, index, method, delay, attempts_left) do
-    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` marchait par tolerance du
+    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` ne passe que par tolerance du
     # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
     case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
            "do" => method
@@ -48,10 +48,10 @@ defmodule Fleet.Forge.Client.Merge do
         #
         # `fleet/probe-rails#24`, 2026-08-18 : conflit git REEL et DEFINITIF
         # (`git merge-tree` -> `CONFLICT (content): journal.txt`), et Gitea rend
-        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours. Le
-        # commentaire ci-dessous supposait que l'anglais discriminait ; sa propre premisse etait le
-        # contre-exemple. Cout mesure : 1447 tentatives en 21 h, ~2880 requetes/jour pour un
-        # resultat connu d'avance, et 1,6 s de `sleep` a chaque tick du pilote.
+        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours.
+        # S'en remettre au libelle seul fait donc retenter un resultat connu d'avance : mesure sur
+        # ce cas, 1447 tentatives en 21 h, ~2880 requetes/jour, et 1,6 s de `sleep` a chaque tick
+        # du pilote.
         #
         # L'ETAT, LUI, EST FIABLE. On relit la PR : `mergeable: false` tranche le definitif sans
         # dependre d'une chaine. C'est un GET sur un chemin deja en echec — le cas nominal (200) ne

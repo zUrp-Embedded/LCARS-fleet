@@ -118,39 +118,22 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   reported in `unreadable` (the catalogue never lies silently); an empty OFFER is an ERROR, never
   an empty listing — "no card exists" would be the vacuous lie.
 
-  ## ⚠ CETTE PROMESSE ETAIT ECRITE ET TENUE SUR UN CHEMIN SUR QUATRE
+  ## QUATRE ROUTES VERS UNE OFFRE VIDE, TROIS REFUS QUI LES DISTINGUENT
 
-  La ligne au-dessus disait deja « an ERROR, never an empty listing », et seule la racine
-  CONFIGUREE sans aucun `*.yaml` la tenait — parce que `canon_names!/1` leve, pas parce que quelque
-  chose ici le decidait. Les trois autres routes vers une offre vide rendaient `{:ok, %{"cards" =>
-  []}}` :
+  Rendre `{:ok, %{"cards" => []}}` sur l'une quelconque d'entre elles donnerait a l'architecte un
+  succes avec zero choix, au moment precis ou on lui demande de choisir. Les refus distinguent donc
+  ce que le geste suivant distingue :
 
-    * aucun catalogue installe ne porte de repertoire de cartes — `card_scopes/0` filtre sur
-      `File.dir?`, donc il n'y a meme pas de quoi lever : RIEN n'a ete balaye ;
-    * des cartes existent et AUCUNE ne charge — l'offre est vide, la cause est dans `unreadable` ;
-    * des cartes existent et toutes sont TECHNIQUES ou a portee ticket — rien de declarable pour un
-      projet.
-
-  Dans les trois cas, l'architecte recevait un succes avec zero choix, au moment precis ou on lui
-  demande de choisir. Releve le 2026-08-22 par relecture independante en marge du chantier
-  `catalogue_list`, et laisse ouvert un tour de trop au motif que c'etait « hors perimetre » — le
-  perimetre est le projet.
-
-  Les refus distinguent donc ce que le geste suivant distingue :
-
-    * `{:workflow_no_card_scope, why}` — rien a balayer. C'est un fait de DEPLOIEMENT : la boite ne
-      sert aucun catalogue portant des cartes (cf. `list_catalogues/1`).
-    * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
-      CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes ne chargent pas ;
-      vide, elles sont toutes techniques ou a portee ticket.
     * `{:workflow_catalogue_unavailable, message}` — le repertoire de cartes existe et ne porte
       AUCUN `*.yaml`. Il precede les deux autres et ne vient pas d'ici : `canon_names!/1` leve, et
-      `catalogue_cards/0` rattrape. C'est le seul des trois qui existait avant le 2026-08-22.
-
-      ⚠ IL EST DANS CETTE LISTE PARCE QU'ELLE PRETEND ETRE COMPLETE. Ecrite sans lui, elle
-      enumerait deux gestes sur trois sous un titre qui annonce le decoupage entier — une prose
-      fausse par omission, dans la section meme qui vient de fermer une promesse a moitie tenue.
-      Relevee par relecture independante le 2026-08-22, sur le texte ecrit la veille.
+      `catalogue_cards/0` rattrape.
+    * `{:workflow_no_card_scope, why}` — rien a balayer : aucun catalogue installe ne porte de
+      repertoire de cartes. `card_scopes/0` filtre sur `File.dir?`, donc il n'y a meme pas de quoi
+      lever. C'est un fait de DEPLOIEMENT (cf. `list_catalogues/1`).
+    * `{:workflow_offer_empty, unreadable, why}` — balaye, rien a offrir. C'est un fait de
+      CATALOGUE, et `unreadable` tranche les deux sous-cas : non vide, les cartes existent et
+      AUCUNE ne charge ; vide, elles existent et sont toutes TECHNIQUES ou a portee ticket, donc
+      rien n'est declarable pour un projet.
   """
   @spec list_workflow_cards(map()) :: {:ok, map()} | {:error, term()}
   def list_workflow_cards(state) do
@@ -211,74 +194,48 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   @doc """
   The catalogues this box SERVES — the mirror of `list_workflow_cards/1`, one level up.
 
-  Same gate, same shape, same authority discipline: the listing is read from
-  `Fleet.Catalogue.installed_catalogues/0`, the pairing that already answers this for the poller,
-  the card scopes and the enroller. Re-deriving "which catalogues exist" MCP-side would be a second
-  authority next to the one the boot resolves on.
-
-  ## Why the tool exists, measured
-
-  An agent asked for the catalogues and had no verb for it, so it DERIVED the answer from
-  `card_list` — which names each card's catalogue. That derivation is right only while every
-  installed catalogue ships at least one card: a catalogue with none is invisible to it, and the
-  answer is confidently short rather than wrong-looking. The same hole is why the listing here does
-  not go through `Loader.card_scopes/0` either.
+  The listing comes from the pairing the boot already resolves on. Re-deriving "which catalogues
+  exist" MCP-side would be a second authority beside it — and deriving it from the CARDS is wrong
+  in a specific way: a catalogue shipping no card is invisible to that route, so the answer comes
+  back confidently short rather than wrong-looking.
 
   ## What each entry carries, and what it deliberately does NOT
 
     * `name` — the DECLARED identity, carried by the catalogue and not by the directory it was
-      unpacked into. It is what addresses the catalogue outside this box: the forge org that holds
-      its projects, and the prefix of its role logins.
-    * `bundled` — it ships INSIDE the release, so it is installed by construction and cannot be
-      removed. That is an availability guarantee, not an authority: a bundled catalogue is a peer.
+      unpacked into. It is what addresses the catalogue OUTSIDE this box.
+    * `bundled` — it ships INSIDE the release, so it cannot be removed. An availability guarantee,
+      not an authority: a bundled catalogue is a peer.
 
       ⚠ C'EST LA RACINE QUI EST LIVREE, JAMAIS LE NOM, et les deux ne coincident pas toujours.
-      Comparer l'identite declaree a `bundled_name/0` se LIT comme le meme test et ne l'est pas :
-      `installed_dirs/0` ecarte le catalogue livre sur le `Path.basename`, donc un repertoire nomme
-      autrement dont le manifeste declare ce nom-la passe le filtre et ressortait marque `bundled` —
-      une seconde entree pretendant vivre dans un release qui n'en porte qu'une. La racine EST la
-      definition (`Fleet.Catalogue.root/0`, la tete de `installed_roots/0`), donc c'est elle qu'on
-      compare. Releve par relecture independante le 2026-08-22.
-    * `default_card` — the card a project of this catalogue takes when it declares none. Absent
-      when the catalogue ships no card at all. ABSENT, never `null`: "ships no card" and "default
-      unknown" are two answers, and only the first exists here.
+      Comparer l'identite DECLAREE au nom livre se lit comme le meme test et ne l'est pas : le
+      filtrage se fait sur le chemin, donc un repertoire nomme autrement dont le manifeste declare
+      ce nom-la ressortirait marque `bundled` — une seconde entree pretendant vivre dans un release
+      qui n'en porte qu'une.
+    * `default_card` — the card a project takes when it declares none. ABSENT, never `null`:
+      "ships no card" and "default unknown" are two answers, and only the first exists here.
 
-  No card list: `card_list` already names each card's catalogue, and a second rendering of the
-  same table is the copy that drifts. The two tools are complementary halves, never nested ones.
+  No card list: a second rendering of the same table is the copy that drifts.
 
   ## `unreadable`, and it is REACHABLE — that is why it is here
 
-  `Fleet.Catalogue.verify!/0` runs at boot on the BUNDLED root alone. The material converged under
-  `catalogue_install_dirs` is verified by an operator gesture (`lcars catalogue verify`), never by
-  the boot, so a root whose manifest yields no declared name is present, served by nothing, and
-  dropped from `installed_catalogues/0` in SILENCE. Reporting it is the same rule
-  `list_workflow_cards/1` holds for a card that fails to load: the catalogue never lies by omission.
+  The boot verifies the BUNDLED root alone; converged material is verified by an operator gesture.
+  A root whose manifest yields no declared name is therefore present, served by nothing, and
+  dropped in SILENCE. Reporting it is the rule this module holds throughout: never lie by omission.
 
-  ⚠ IL NOMME UNE CONSEQUENCE, PAS UNE CAUSE, et la premiere redaction disait « no `name:` » — plus
-  precis que le code. `installed_catalogues/0` ecarte une racine sur un catch-all qui couvre AUSSI
-  un YAML invalide, un manifeste illisible et un `name` qui n'est pas une chaine. Trancher entre ces
-  causes demanderait de relire le manifeste ici, c'est-a-dire un second lecteur de la regle du
-  manifeste a cote de son autorite — le defaut precis que ce module passe son temps a fermer.
-  Le mot rendu est donc la consequence commune (« servi par rien »), et le geste est `lcars
-  catalogue verify <racine>`, dont c'est le metier de nommer la cause.
+  ⚠ IL NOMME UNE CONSEQUENCE, PAS UNE CAUSE. La racine est ecartee sur un catch-all qui couvre
+  aussi un YAML invalide et un manifeste illisible ; trancher entre ces causes demanderait de
+  relire le manifeste ICI, c'est-a-dire un second lecteur de sa regle a cote de son autorite — le
+  defaut precis que ce module ferme. Le mot rendu est donc la consequence commune, et le geste qui
+  nomme la cause est `lcars catalogue verify <racine>`.
 
-  Le `Logger.warning` par racine ecartee n'est pas un doublon du payload : si l'agent ne rend pas la
-  reponse, la racine morte ne laisse aucune trace cote serveur. `list_workflow_cards/1` crie deja
-  chaque carte qui ne charge pas, pour cette raison-la.
-
-  Les deux moities se lisent dans UN module, un appel chacune — la difference ensembliste de
-  `installed_roots/0` et des racines qui ont repondu — donc rien ici ne relit un manifeste.
+  L'avertissement par racine ecartee n'est pas un doublon du payload : si l'agent ne rend pas la
+  reponse, la racine morte ne laisse AUCUNE trace cote serveur.
 
   ## L'offre VIDE est une erreur, et le refus PORTE ce qu'il a vu
 
   « Aucun catalogue n'existe » est le mensonge vide : cette boite sert toujours au moins le
   catalogue livre. Le refus emporte les racines ecartees, parce que « rien d'installe » et « tout
-  installe, tout casse » appellent deux gestes differents et qu'un refus qui les confond envoie
-  l'operateur chercher le mauvais objet.
-
-  `list_workflow_cards/1` tient la meme regle, et ne la tenait que sur un chemin sur quatre jusqu'au
-  2026-08-22 — son propre `@doc` porte la cicatrice. Les deux refus sont donc symetriques : une
-  offre vide n'est jamais un succes, ni ici ni un cran plus bas.
+  installe, tout casse » appellent deux gestes differents.
   """
   @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
   def list_catalogues(state) do
@@ -310,8 +267,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
       # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR : `{offer, bad}` filtre aussi `bad == []`,
       # donc les intervertir poserait `"unreadable" => []` dans la reponse nominale — une cle vide la
-      # ou l'absence est la reponse, exactement ce que `put_present` refuse un cran plus haut. Mesure
-      # du 2026-08-22 : aucun temoin ne rougissait sur cette permutation ; il en existe un depuis.
+      # ou l'absence est la reponse, exactement ce que `put_present` refuse un cran plus haut.
       case {served, unreadable} do
         {[], bad} ->
           {:error,
@@ -327,8 +283,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
     end
   end
 
-  # Le TABLEAU catalogue x carte : chaque carte nommee par le catalogue qui la porte. Ce n'etait pas
-  # une question tant qu'il n'y avait qu'un metier ; des qu'il y en a deux, `standard` peut exister
+  # Le TABLEAU catalogue x carte : chaque carte nommee par le catalogue qui la porte. Avec un seul
+  # metier la question ne se pose pas ; des qu'il y en a deux, `standard` peut exister
   # des deux cotes et un nom seul ne designe plus rien. Le guichet presente donc l'offre ENTIERE en
   # une fois — c'est deja ce que son commentaire d'outil promettait (« framing FIRST: the catalogue
   # the human picks the card from »), sur un catalogue au lieu de N.
@@ -392,13 +348,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
       # onboarding must target another org than the one being polled.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
-      # ⚠ `allow_unverifiable_human_team?` VIVAIT ICI (DR-018) ET N'EXISTE PLUS (2026-08-17). Il
-      # ouvrait un mode degrade quand le jeton runtime ne pouvait pas PROUVER l'adhesion de l'humain a
-      # `<org>:humans`. La garde qu'il assouplissait est morte avec lui : elle exigeait un `read` que
-      # l'humain a deja (org publique, depots publics) pour des ecritures qu'il ne fait pas — c'est le
-      # jeton systeme qui ecrit. Son propre message de repli invoquait « downstream create_issue
-      # remains the net » : mesure du 2026-08-17, un non-membre de l'org cree une issue sur un depot
-      # public (201). Le filet n'existait pas.
+      # ⚠ AUCUNE GARDE D'ADHESION ICI, ET CE N'EST PAS UN OUBLI. Exiger que le jeton runtime PROUVE
+      # l'adhesion de l'humain a `<org>:humans` reclame un `read` qu'il a deja (org publique, depots
+      # publics) pour des ecritures qu'il ne fait pas — c'est le jeton SYSTEME qui ecrit. Et
+      # `create_issue` en aval n'est pas le filet qu'on croit : mesure, un non-membre de l'org cree
+      # une issue sur un depot public (201).
       opts = [
         org: org,
         description: Map.get(args, "description", pitch),
@@ -433,10 +387,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   # Import sequence — same :project_onboard seam, callback :import instead of :onboard.
   defp do_import_project(full_name) do
     with {:ok, onboard} <- Gate.conforming_onboard() do
-      # PAS D'OPTS, ET C'EST UN RESTE QUI PART. Ce verbe ne portait que le drapeau
-      # `allow_unverifiable_human_team?` (DR-018), mort avec la garde qu'il assouplissait — cf. le
-      # commentaire de `do_onboard_project` plus haut. L'org, elle, n'a rien a faire ici : `import/2`
-      # la LIT du depot (`owner/nom`), elle ne se declare pas.
+      # PAS D'OPTS, ET RIEN A Y METTRE. L'org n'a rien a faire ici : `import/2` la LIT du depot
+      # (`owner/nom`), elle ne se declare pas. Et aucune garde d'adhesion ne s'y ajoute non plus,
+      # pour la raison ecrite chez `do_onboard_project`.
       case onboard.import(full_name, []) do
         {:ok, %{repo: repo, project_dir: pdir, work_dir: wdir, doc_dir: ddir} = result} ->
           {:ok,
@@ -532,9 +485,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
   defp do_adopt_project(name, args, role) do
     # LE CATALOGUE, RESOLU PAR LA MEME PORTE QUE `project_create` : adopter cree un depot sur la
-    # forge, donc c'est une creation, donc l'org est une declaration. Elle tombait sur le premier
-    # catalogue installe (`Onboard.default_org/0`, mort le 2026-08-17) — un projet adopte partait
-    # donc dans `fleet` quel que soit le metier auquel il appartient.
+    # forge, donc c'est une creation, donc l'org est une DECLARATION. La faire tomber sur le premier
+    # catalogue installe enverrait tout projet adopte dans `fleet`, quel que soit le metier auquel
+    # il appartient.
     with {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, org} <- Gate.resolve_org(args) do
       opts = [

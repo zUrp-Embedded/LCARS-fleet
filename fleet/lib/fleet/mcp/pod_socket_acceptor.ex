@@ -101,11 +101,12 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # LA SOCKET EST UNE PORTE, SES PERMISSIONS EN SONT LA SERRURE.
   #
   # `:gen_tcp.listen` cree le noeud AF_UNIX au UMASK du processus : rien ne garantit qu'il soit
-  # ferme. C'etait la seule porte de la famille sans serrure posee ici — le socket de controle fait
-  # du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est en 0700, celle-ci s'en
-  # remettait aux permissions du home. Un home lisible par le groupe suffit alors a rendre la
-  # socket MCP d'un pod joignable par un autre humain de la boite, et cette socket EST le canal
-  # d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le fil).
+  # ferme. Sans ce chmod, c'est la seule porte de la famille sans serrure posee ici — le socket de
+  # controle fait du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est cree
+  # `install -d -m 0700` — et celle-ci s'en remet aux permissions du home. Un home lisible par le
+  # groupe suffit alors a rendre la socket MCP d'un pod joignable par un autre humain de la boite,
+  # et cette socket EST le canal d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le
+  # fil).
   #
   # Fail-closed, comme son jumeau : une socket ouverte dont on n'a pas pu poser la serrure ne
   # demarre pas, et on la referme au lieu de laisser une porte sans verrou derriere soi.
@@ -258,8 +259,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     # this socket means the pod's MCP client is connected — which happens at TUI init, before the
     # agent takes any turn, so LONG before the work-item poll that everything else waits on. The
     # kick loop consumes it: keys typed into a REPL that is not up yet are not lost, tmux buffers
-    # them and the TUI replays each as its own submission (measured 2026-08-04: a scribe took 7
-    # `engage` in its REPL, one per kick fired during the cold start).
+    # them and the TUI replays each as its own submission — measured: a scribe took 7 `engage` in
+    # its REPL, one per kick fired during the cold start.
     # Marked on EVERY line, not only the first: it is a cast into a `Map.put_new`, and marking on
     # `tools/list` alone would miss a pod that reconnects mid-life (fleet restart) without
     # re-listing.
@@ -269,38 +270,20 @@ defmodule Fleet.MCP.PodSocketAcceptor do
       {:ok, %{"method" => "tools/call", "id" => id, "params" => params}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => call_tool(params, pod_id, tools)})
 
-      # F-C138 — the pod socket serves `tools/list` (a bridge-side hard-coded catalogue would
-      # DRIFT from the deftools). Single source: the schemas come from `PodTools.get_tools/0` (the
-      # `deftool` authority), filtered to base (universal) plus whatever names were threaded at
-      # spawn.
+      # SOURCE UNIQUE des schemas : un catalogue ecrit en dur cote pont DERIVERAIT de l'autorite des
+      # outils. La liste servie est la base universelle, plus ce qui a ete file au spawn.
       #
-      # DISCOVERY *AND* AUTHORIZATION SINCE 6-099, and the same list serves both: `call_tool/3`
-      # refuses anything outside `base_tool_names() ++ threaded` before dispatch. This paragraph
-      # used to read "DISCOVERY, NOT AUTHORIZATION: `tools/call` does not re-check this list, so a
-      # pod that knows an off-list name calls it anyway" — exact, and it described the hole rather
-      # than closing it.
+      # ⚠ DECOUVERTE *ET* AUTORISATION, LA MEME LISTE SERVANT LES DEUX : l'appel refuse tout nom
+      # hors liste AVANT dispatch. Le pont, lui, relaie aveuglement — le refus se fait ICI.
       #
-      # The per-tool barrier stays FIRST and untouched: the delegation tools carry a server-side
-      # role gate (`require_architect`/`require_onboarder`, `Delegation`) and
-      # `get_work_item`/`submit_result` derive their subject from the channel's pod_id, never from a
-      # wire argument. INVARIANT, held by `mcp.tools_gated` in `lcars.contracts.check`: every tool is
-      # role-gated or pod-scoped. The list is now a SECOND barrier, not a replacement — it buys what
-      # the role gate cannot express, namely two variants of one role with different surfaces.
-      # The bridge still forwards blindly; the refusal happens here.
+      # ⚠ LA BARRIERE PAR OUTIL RESTE LA PREMIERE : chaque outil est role-gated ou pod-scope, ceux
+      # qui derivent leur sujet du canal ne le lisant JAMAIS du fil. C'est un invariant tenu par un
+      # mur. Cette liste est une SECONDE barriere, pas un remplacement — elle achete ce que le role
+      # gate ne peut pas exprimer : deux variantes d'un meme role avec des surfaces differentes.
       #
-      # ⚠ LE DEMI-FILETE ETAIT VIDE DANS TOUS LES PROFILS LIVRES, ET IL A CESSE DE L'ETRE LE
-      # 2026-08-20. Les noms viennent de `CapProfile.mcp_fleet_tools/1`, c'est-a-dire des entrees
-      # `scope.allowedTools` prefixees `mcp__fleet__`. Ce paragraphe disait « pas un seul profil
-      # canon n'en declare une » : `qualifier` et `reviewer` declarent desormais
-      # `mcp__fleet__run_probe`, et ce sont les deux SEULS.
-      #
-      # Ce que ca change : la liste est maintenant un filtre qui MORD pour un outil — un pod dont le
-      # profil ne le declare pas se voit refuser `run_probe` ici meme, avant tout dispatch.
-      #
-      # Ce que ca ne change pas : elle reste vide pour tous les autres, donc l'ecart historique
-      # entre DECOUVERTE et INSTRUCTION tient — les agents travaillent depuis leur prompt, qui nomme
-      # une douzaine d'outils que ce filtre ne connait pas. A lire comme la surface qu'un profil PEUT
-      # restreindre, jamais comme la surface qu'un role A.
+      # ⚠ A LIRE COMME LA SURFACE QU'UN PROFIL PEUT RESTREINDRE, JAMAIS COMME LA SURFACE QU'UN ROLE
+      # A : elle est vide pour la plupart des profils, et les agents travaillent depuis leur prompt,
+      # qui nomme des outils que ce filtre ne connait pas.
       {:ok, %{"method" => "tools/list", "id" => id}} ->
         encode(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => list_tools(tools)}})
 
@@ -425,11 +408,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
 
   # Forge mutations converge durably; single-flight only collapses concurrent retries.
   #
-  # ⚠ CE SITE PORTAIT UNE LISTE DE CINQ MOTS NUS DANS UN SIGIL, pour ~17 mutateurs (6-106). Elle ne
-  # ressemblait a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
-  # prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE. Une liste qui ne
-  # s'ecrit pas comme les autres est une liste qu'un renommage rate — et elle vivait LOIN des
-  # definitions qu'elle pretendait couvrir, ce qui est l'autre moitie du probleme.
+  # ⚠ PAS DE LISTE DE MOTS NUS DANS UN SIGIL ICI (6-106). Des noms d'outils poses ainsi ne
+  # ressemblent a aucune autre occurrence d'un nom d'outil (ni chaine citee, ni `mcp__fleet__`, ni
+  # prose), donc un renommage objet-d'abord les manque EN SILENCE. Une liste qui ne s'ecrit pas
+  # comme les autres est une liste qu'un renommage rate — et posee LOIN des definitions qu'elle
+  # pretend couvrir, elle porte l'autre moitie du probleme.
   #
   # L'effet vit desormais A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate.
   # Ici on ne fait plus que LIRE une decision prise la-bas.
@@ -485,28 +468,24 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # So the errno alone cannot name the fault: carry the first component that does NOT exist plus
   # the writability of its parent. That pair separates the two cases the bare errno merges — a
   # level nobody created, versus a level we are not allowed to create under.
-  # LE REPERTOIRE EST LA SERRURE QUE LA SOCKET N'A PAS ENCORE. `:gen_tcp.listen` cree le noeud
-  # AF_UNIX au UMASK du processus et `restrict/2` le referme ensuite : entre les deux, le noeud
-  # existe avec les droits de l'umask. Sous l'umask MESURE de cette flotte (`0002`) cela fait
-  # `0775` — le bit d'ecriture groupe, donc `connect(2)` autorise — et une connexion etablie dans
-  # cette fenetre RESTE ouverte apres le chmod : les droits d'une socket Unix ne sont verifies qu'a
-  # la connexion. L'auteur tient alors le canal d'outils du pod sans etre ce pod.
+  # ⚠ LE REPERTOIRE EST LA SERRURE QUE LA SOCKET N'A PAS ENCORE. L'ecoute cree le noeud AF_UNIX au
+  # UMASK du processus et le `chmod` le referme ENSUITE : entre les deux, le noeud porte les droits
+  # de l'umask — et une connexion etablie dans cette fenetre RESTE OUVERTE apres le chmod, les
+  # droits d'une socket Unix n'etant verifies qu'a la connexion. Le connecte tient alors le canal
+  # d'outils du pod sans etre ce pod.
   #
-  # ⚠ La fenetre ne se ferme pas la ou on la voit. Le BEAM ne sait pas creer un noeud AF_UNIX avec
-  # un mode ; il n'y a pas de `listen` atomique en `0600`. Ce qui se ferme, c'est la TRAVERSEE : un
-  # parent en `0700` rend `<base>/<pod_id>/sock` inatteignable pour tout autre compte, quel que soit
-  # le mode transitoire du noeud. Le `0600` final reste la seconde serrure, pas la premiere.
+  # ⚠ ET LA FENETRE NE SE FERME PAS LA OU ON LA VOIT : le BEAM ne sait pas creer un noeud AF_UNIX
+  # avec un mode, il n'existe pas d'ecoute atomique en `0600`. Ce qui ferme est la TRAVERSEE — un
+  # parent en `0700` rend le chemin inatteignable a tout autre compte, quel que soit le mode
+  # transitoire du noeud. Le mode final de la socket est la SECONDE serrure, pas la premiere.
   #
-  # LE JUMEAU EXISTE ET IL EST ATOMIQUE : `bin/bwrap_launch.sh` cree le sock-dir TMUX par
-  # `install -d -m 0700`. Le meme launcher documente la divergence — « UNLIKE tmux: the socket file
-  # (and its dir) is created OUTSIDE the sandbox by the BEAM BEFORE this launch … no `install -d` »
-  # — sans voir que ce cote-ci n'a jamais pose de mode du tout. C'est le mode du jumeau qui arrive
-  # ici, pas une regle nouvelle.
+  # Le jumeau shell, lui, cree son repertoire de socket ATOMIQUEMENT (`install -d -m 0700`) : c'est
+  # son mode qui arrive ici, pas une regle nouvelle.
   #
-  # `mkdir_p` + `chmod` n'est pas atomique non plus, mais son residu ne porte plus l'effet de la
-  # fiche : dans cette fenetre-la, la socket n'existe pas encore. Ce qui reste est VERIFIE plutot
-  # que suppose — on relit le mode avant de servir, et un repertoire qu'on n'a pas pu fermer ne
-  # devient pas une porte ouverte : il devient un refus de demarrage.
+  # `mkdir_p` puis `chmod` n'est pas atomique non plus, mais dans CETTE fenetre-la la socket
+  # n'existe pas encore. Ce qui reste est VERIFIE plutot que suppose : on relit le mode avant de
+  # servir, et un repertoire qu'on n'a pas pu fermer devient un refus de demarrage, jamais une
+  # porte ouverte.
   defp ensure_parent_dir(path) do
     dir = Path.dirname(path)
 

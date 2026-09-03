@@ -56,10 +56,10 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   # A NON-CONNECT REQUEST IS NOT A BLOCKED HOST, AND ANSWERING BOTH WITH 403 COST A DIAGNOSIS.
   # `HTTP(S)_PROXY` covers everything a pod emits, and a plain `http://` origin makes the client
-  # send an absolute-URI GET rather than a tunnel request. This proxy only tunnels, so that GET was
-  # answered "blocked by the allowlist" — measured 2026-08-11: an architect's `git fetch` on the
-  # forge got it, read it as the FORGE refusing, and wrote a diagnosis concluding the fleet account
-  # was not a collaborator of the repo. The permissions were right. The sandbox was talking.
+  # send an absolute-URI GET rather than a tunnel request. This proxy only tunnels, so answering
+  # that GET with "blocked by the allowlist" hands an agent a refusal it attributes to the FORGE: an
+  # architect whose `git fetch` gets it writes a diagnosis concluding the fleet account is not a
+  # collaborator of the repo. The permissions are right. The sandbox is talking.
   #
   # 501 says WHOSE refusal it is and that nothing left the box. Read it as an answer to "should a
   # pod reach this over the network at all": its project arrives through its mounts, and the forge
@@ -175,8 +175,8 @@ defmodule Fleet.Spawner.Pod.Egress do
       Application.get_env(
         :lcars_fleet,
         :spawner_egress_sock_base,
-        # DERIVE, plus recopie : `Fleet.Layout` declare la racine runtime depuis le 2026-08-28.
-        # Spawner a Layout dans ses deps, donc l'arete est legale et le litteral disparait.
+        # DERIVE, jamais recopie : `Fleet.Layout` declare la racine runtime, et Spawner l'a dans ses
+        # deps — l'arete est legale, donc un litteral ici serait une seconde source.
         Path.join(Fleet.Layout.runtime_root(), "egress")
       )
 

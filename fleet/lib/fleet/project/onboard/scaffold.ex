@@ -25,18 +25,17 @@ defmodule Fleet.Project.Onboard.Scaffold do
   ## Pourquoi ce n'est pas `Fleet.Catalogue.root/0`
 
   `root/0` rend TOUJOURS la racine livrée. Un `Scaffold.main` branché dessus scaffolde chaque
-  projet depuis le catalogue de référence, quel que soit le sien — et c'est un défaut MESURÉ, le
-  2026-08-16 : un projet `web-demo/*` naissait du template de `fleet` pendant que `web-demo`
-  livrait treize fichiers à lui que rien ne lisait jamais. Un arbre présent dans un catalogue et
-  inatteignable par tout appelant n'est pas une fonctionnalité en attente de câblage, c'est du
-  poids mort qui a l'air câblé.
+  projet depuis le catalogue de référence, quel que soit le sien : un projet naît du template de
+  `fleet` pendant que son propre catalogue livre des fichiers que rien ne lit jamais. Un arbre
+  présent dans un catalogue et inatteignable par tout appelant n'est pas une fonctionnalité en
+  attente de câblage, c'est du poids mort qui a l'air câblé.
 
-  La résolution vivait dans la couche template (`resolve_template`, retirée avec le dépôt modèle le
-  2026-08-21). Elle descend ici, parce que c'est désormais ce chemin-ci qui peuple un projet neuf.
+  La résolution vit ICI et pas dans une couche template, parce que c'est ce chemin-ci qui peuple un
+  projet neuf.
 
   ## Le repli, et pourquoi il est ANNONCÉ
 
-  ⚖ user, 2026-08-16 : *« le template, on peut prendre celui de fleet par défaut s'il n'y en a pas,
+  ⚖ user : *« le template, on peut prendre celui de fleet par défaut s'il n'y en a pas,
   ça ne change rien »*. C'est le SEUL arbre qui puisse se replier, et la raison est structurelle :
   tout le reste d'un catalogue est nommé PAR SON NOM — une carte nomme un rôle, un rôle nomme son
   profil — donc se replier résoudrait un nom dans un catalogue qui ne l'a jamais déclaré. Un
@@ -88,19 +87,17 @@ defmodule Fleet.Project.Onboard.Scaffold do
 
   # ⚠ TROIS ETATS, ET LE TROISIEME EST LE PLUS DANGEREUX. Un repli sur un catalogue NOMME est
   # legitime et se dit une fois. Un appelant SANS org, lui, ne sait pas de quel catalogue il parle :
-  # il scaffolde depuis le livre sans que personne ne l ait decide, et c est exactement le defaut
-  # mesure le 2026-08-16, avec une cause de plus — l absence d argument au lieu d une resolution
-  # cablee en dur. Il monte donc d un cran : `warning`.
-  # ⚠ IL Y AVAIT ICI UNE CLAUSE QUI TAISAIT LE REPLI DU CATALOGUE LIVRE, et elle etait morte.
+  # il scaffolde depuis le livre sans que personne ne l ait decide — le meme defaut que ci-dessus,
+  # avec une cause de plus : l absence d argument au lieu d une resolution cablee en dur. Il monte
+  # donc d un cran : `warning`.
+  # ⚠ PAS DE CLAUSE QUI TAIRAIT LE REPLI DU CATALOGUE LIVRE : elle serait MORTE, puisque
   # `root_for(<nom livre>)` rend la racine livree, qui porte son propre `project_template/` — donc
-  # `:own`, jamais `:fallback`. Le seul monde ou elle aurait pu tirer est celui d'un release dont le
+  # `:own`, jamais `:fallback`. Le seul monde ou elle tirerait est celui d'un release dont le
   # catalogue livre n'a pas d'arbre : la racine de repli y est le MEME repertoire absent, rien n'est
-  # ecrit, et taire cette ligne-la cacherait la seule trace du probleme.
-  #
-  # Elle portait en plus le nom du catalogue livre en dur — troisieme copie, dans la livraison meme
-  # qui l'a recentre dans `Fleet.Catalogue`. La relecture independante du 2026-08-21 a vu la copie ;
-  # la mutation a montre que le temoin ne rougissait pas, ce qui a montre la clause morte. Retirer
-  # bat parametrer : un littereal qui n'existe plus ne peut pas deriver.
+  # ecrit, et taire cette ligne-la cacherait la seule trace du probleme. Une telle clause porterait
+  # en plus le nom du catalogue livre en dur, troisieme copie d'un nom qui vit dans
+  # `Fleet.Catalogue` — et retirer bat parametrer : un litteral qui n'existe pas ne peut pas
+  # deriver.
   defp announce_fallback(:own, _org), do: :ok
 
   defp announce_fallback(:fallback, org) when is_binary(org) do
@@ -174,7 +171,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
   **WHY AN IMPORTED REPOSITORY NEEDS THEM.** `main` protection requires a `CI / *` status, and a
   repository that ships no `.gitea/workflows/` produces none — ever. No check appears, no pull
   request can merge, and the delivery rail is dead before its first ticket. `CIGate` already reads
-  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured 2026-08-12 on a repository
+  that dead end and names it (`{:ci_impossible, :no_workflow}`, measured on a repository
   imported from GitHub), but naming it leaves the human to write the file — which is how one of
   them landed with a `runs-on:` no runner served, waiting forever instead of failing.
 

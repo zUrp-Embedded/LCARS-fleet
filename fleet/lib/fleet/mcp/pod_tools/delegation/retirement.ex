@@ -136,12 +136,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     end
   end
 
-  # ❌ `publish_doc` A ETE SUPPRIME, avec le sous-arbre `ops/notes/` qu'il servait. Il laissait un
-  # agent ecrire dans l'arbre d'operations — le registre de ce qu'on lui a demande et de ce qu'on a
-  # juge de son travail — au motif que `notes/` etait « du materiau d'auteur que rien ne lit comme
-  # preuve ». MESURE : aucun cap-profile canon n'accordait cet outil. Ni l'architecte, ni personne.
-  # L'exception decrite par la doctrine n'existait donc pas en fait, et ce qui restait etait une
-  # porte ouverte dans le seul arbre qui doit rester en lecture seule pour tout le monde.
+  # ❌ AUCUN OUTIL N'OUVRE `ops/` A L'ECRITURE, ET IL N'Y A PAS DE SOUS-ARBRE D'EXCEPTION. C'est le
+  # registre de ce qu'on a demande a un agent et de ce qu'on a juge de son travail : une porte
+  # dedans, fut-elle « du materiau d'auteur que rien ne lit comme preuve », est une porte dans le
+  # seul arbre qui doit rester en lecture seule pour tout le monde.
   #
   # La MATIERE, elle, a une destination : une note de conception est de la DOC. Elle vit sur la face
   # `doc`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
@@ -350,8 +348,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
     #   * what the old ticket BLOCKED is released the instant it closes (a CLOSED blocker counts as
     #     satisfied) — while the work has moved and is not delivered;
     #   * what the old ticket DEPENDED ON vanishes: the replacement is born without its precondition.
-    # Measured on the bench 2026-08-04 (A blocks B, supersede A -> A': `B dependencies` still
-    # returns A, closed, and A' carries no edge at all).
+    # Measured (A blocks B, supersede A -> A': `B dependencies` still returns A, closed, and A'
+    # carries no edge at all).
     # Closing first would release the blocked ones BEFORE the rewiring, and a dispatch can slip into
     # that window. We write onto the replacement, THEN we close.
     with :ok <- IssuePR.close_live_pr(forge, repo, pr),
@@ -360,7 +358,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
          # `closure: :retired` — a supersede delivers NOTHING: the work moved onto the replacement
          # (its edges were carried there just above). The ticket has to SAY it.
          {:ok, _} <- forge.close_issue(repo, n, closure: :retired) do
-      # A superseded ticket is a DEAD ticket: its pods die with it (user arbitrage 2026-08-03 —
+      # A superseded ticket is a DEAD ticket: its pods die with it (⚖ user —
       # the three reasons live in `Fleet.Pilot.PodReaper`). Upward seam: MCP may not reference
       # Pilot, same rule and same shape as `:forge_client`.
       _ = pod_reaper().reap_issue(repo, n)

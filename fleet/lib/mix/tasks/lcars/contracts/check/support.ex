@@ -245,7 +245,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # locks read the RAW body of each mirror and ask `Regex.match?`. A file whose CODE carries the
   # wrong value stays green as long as the right one appears in a COMMENT — and the context that
   # makes it likely is the ordinary one: `# Note: was <old value>` on the very line a migration
-  # touches. Measured 2026-08-29 on three of them: code mutated + the pattern quoted in a comment
+  # touches. Measured on three of them: code mutated + the pattern quoted in a comment
   # → `status: pass`.
   #
   # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
@@ -275,7 +275,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # has been deleted. For a RESIDUE check, grep a glob of real files
   # (`Path.wildcard`), not a single potentially dead file path.
   #
-  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` used to answer both.
+  # ABSENCE AND UNREADABILITY ARE NOT THE SAME FAULT, and one `_ -> []` answers both.
   # Absence is a state every caller models: a presence-prover reports the missing proof and fails,
   # a residue check reads the file itself and turns it into evidence. Unreadability is not a state
   # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
@@ -317,15 +317,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # de build, des dependances vendorees, et le bac a sable des `@tmp_dir` d'ExUnit.
   @corpus_skip ~w(_build deps tmp node_modules .git)
 
-  # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure le
-  # 2026-08-31 sur ce depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de
+  # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure sur ce
+  # depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de
   # residus `@tmp_dir` accumulees par les runs), `_build/` et `deps/` avant qu'un `Enum.reject` ne
   # les jette : 28 173 fichiers traverses en 4,5 s pour en retenir 1071. Elagué, le meme corpus sort
   # en 30 ms.
   #
-  # Ce n'etait pas qu'une question de vitesse. Trois checks appellent ce scan, et le temoin qui les
-  # enchaine tous a fini par depasser le timeout de 60 s d'ExUnit — un depot dont le `tmp/` a
-  # grossi rendait donc la suite ROUGE, sans qu'aucun contrat ne soit en cause.
+  # Ce n'est pas qu'une question de vitesse. Trois checks appellent ce scan, et le temoin qui les
+  # enchaine tous depasse le timeout de 60 s d'ExUnit des que `tmp/` a grossi — la suite passe donc
+  # au ROUGE sans qu'aucun contrat soit en cause.
   #
   # L'elagage est recursif PAR NOM, a toute profondeur : `fleet/tmp/` doit tomber aussi quand le
   # scan part de la racine du depot, ce qu'un rejet applique aux seules entrees de premier niveau
@@ -409,7 +409,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # citation d'une regle de propriete — et leur propre source porte ce qu'ils cherchent : ils se
   # comptent eux-memes comme fautifs. Ils s'exemptaient par un CHEMIN EN DUR vers la tache.
   #
-  # ⚠ LE DECOUPAGE DU 2026-09-02 A FAIT ROUGIR LES TROIS D'UN COUP : les murs avaient demenage, les
+  # ⚠ UN DECOUPAGE A FAIT ROUGIR LES TROIS D'UN COUP : les murs avaient demenage, les
   # exemptions pointaient l'ancienne adresse. Une liste de chemins en dur grossit a chaque coupe,
   # rougit la fois ou on l'oublie, et — plus grave — peut exempter DE TRAVERS apres un renommage :
   # un fichier reel prendrait la place de l'ancien nom et passerait exempt sans un mot.

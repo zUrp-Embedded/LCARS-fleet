@@ -190,19 +190,17 @@ defmodule Fleet.Forge.Client.Labels do
     end
   end
 
-  # The NAME carries the protocol; the color carries the GLANCE. Operator palette, 2026-08-03.
+  # Le NOM porte le protocole, la couleur porte le COUP D'OEIL.
   #
-  # The former default was `#ededed` — near-white on a white UI. Every label outside the four
-  # `stage/*` landed there, so `genre/doc` was invisible on the very tickets whose genre it
-  # declares: present in the API, absent to the human. A label nobody can see is a label that is
-  # not there, and it fails silently in the one direction that matters (an operator scanning a
-  # list concludes the marker was never posed).
+  # ⚠ UN LABEL QUE PERSONNE NE VOIT EST UN LABEL QUI N'EST PAS LA, et il echoue dans la seule
+  # direction qui compte : un operateur qui parcourt une liste conclut que le marqueur n'a jamais
+  # ete pose. Un defaut quasi-blanc sur une interface blanche produit exactement ca — present dans
+  # l'API, absent a l'humain.
   #
-  # One tint per PROTOCOL family, and the four `stage/*` keep a progression readable without a
-  # legend (blue → yellow → purple → green = brief-review → build → review → merged). The palette
-  # is reserved for labels that MEAN something mechanically; the decorative `type:*` register gets
-  # a visible neutral instead of borrowing a protocol tint, so a color rhyme never suggests a
-  # kinship the code does not have.
+  # Une teinte par famille de PROTOCOLE, et les etapes gardent une progression lisible sans legende.
+  # La palette est reservee a ce qui SIGNIFIE quelque chose mecaniquement : le registre decoratif
+  # recoit un neutre visible plutot que d'emprunter une teinte de protocole, pour qu'une rime de
+  # couleur ne suggere jamais une parente que le code n'a pas.
   @doc false
   # La couleur de protocole d'un label — donnee, pas decoration.
   @spec label_color(String.t()) :: String.t()

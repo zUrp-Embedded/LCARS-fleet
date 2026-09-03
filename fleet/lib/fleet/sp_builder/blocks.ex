@@ -61,9 +61,9 @@ defmodule Fleet.SPBuilder.Blocks do
   @doc """
   Refuses a catalogue whose ROLES and BLOCKS disagree, naming every disagreement at once.
 
-  `sp-map.yaml` has carried this promise in its header since it was written — *"a catalogue role
-  with no entry here → the generator FAILS (fail-loud)"* — and nothing enforced it: `generate!/2`
-  iterates the MAP, never the catalogue, so a role absent from both simply was not generated and
+  `sp-map.yaml` carries this promise in its header — *"a catalogue role with no entry here → the
+  generator FAILS (fail-loud)"* — and nothing else enforces it: `generate!/2` iterates the MAP,
+  never the catalogue, so a role absent from both is simply not generated and
   died much later at spawn with `:agent_draft_missing`. The comment described the code it should
   have had.
 
@@ -149,9 +149,9 @@ defmodule Fleet.SPBuilder.Blocks do
   # A role with no draft yet is new business material and lands in `drafts_dir`; adding a mechanism
   # role is a deliberate act that starts by creating its file where it belongs.
   #
-  # ⚠ CONFINED (`--catalogue <root>`) TURNS THIS OFF, and it must. Measured 2026-08-10 by running
-  # the documented gesture: an operator composing THEIR catalogue with a `gatekeeper` entry in their
-  # map OVERWROTE the shipped system draft — the one file the target state calls never modifiable.
+  # ⚠ CONFINED (`--catalogue <root>`) TURNS THIS OFF, and it must. Without that, the documented
+  # gesture — an operator composing THEIR catalogue with a `gatekeeper` entry in their map —
+  # OVERWRITES the shipped system draft, the one file the target state calls never modifiable.
   # Their `gatekeeper` is their OVERRIDE of it, and an override belongs in their own tree, where the
   # search path makes it win. The rule read correctly is the same one: a draft goes where its MAP
   # is, and an explicit root says which map is being composed.

@@ -344,10 +344,10 @@ defmodule Fleet.SPBuilder do
         Map.fetch(templates, name)
 
       nil ->
-        # Le SCOPE du catalogue du pod (le sien + le systeme), plus jamais la porte aplatie
-        # `find/2` : elle resolvait au premier catalogue installe qui portait le template, tous
-        # confondus — le regime image d'a cote etait deja per-catalogue, et deux regimes qui
-        # repondent differemment est LE defaut (dette `search/1`, fermee 2026-08-16).
+        # Le SCOPE du catalogue du pod (le sien + le systeme), JAMAIS une porte aplatie type
+        # `find/2` : elle resoudrait au premier catalogue installe qui porte le template, tous
+        # confondus, pendant que le regime image d'a cote est per-catalogue — et deux regimes qui
+        # repondent differemment est LE defaut (dette `search/1`).
         scope_root = root || Fleet.Catalogue.root()
 
         Fleet.Catalogue.tree_scope(scope_root, :subagent_templates)
@@ -421,9 +421,9 @@ defmodule Fleet.SPBuilder do
   catalogue, then the system one. `nil` = the first installed catalogue, because that is what the
   image regime answers for the same caller.
 
-  It rode the flattened `find/2` until 2026-08-16 (the `search/1` debt): a role declared by two
-  catalogues took its DRAFT from whichever installed first, while the image regime resolved in the
-  pod's own — two regimes answering differently, the defect itself.
+  NOT the flattened `find/2` (the `search/1` debt): under it a role declared by two catalogues takes
+  its DRAFT from whichever installed first, while the image regime resolves in the pod's own — two
+  regimes answering differently, the defect itself.
 
   Returns the scope's OWN path when the role has no draft anywhere, so the caller's `:enoent`
   names the file an author would have to create — in their tree, never a foreign one.
@@ -432,9 +432,7 @@ defmodule Fleet.SPBuilder do
   def sp_draft_path(role, root \\ nil) when is_binary(role) do
     # `Catalogue.root/0` et pas `hd(installed_roots())` : les deux rendent le meme chemin — la liste
     # est CONSTRUITE a partir de cette fonction — mais l'un le NOMME la ou l'autre designe une
-    # position. Au passage, `hd/1` etait deja obligatoire face a `List.first/1`, qui ajoutait un
-    # `nil` fantome au typage que le spec `Path.t()` ne couvre pas (dialyzer `missing_range`) ; la
-    # question ne se pose plus.
+    # POSITION.
     scope_root = root || Fleet.Catalogue.root()
     name = "agent-#{role}-base.md"
 

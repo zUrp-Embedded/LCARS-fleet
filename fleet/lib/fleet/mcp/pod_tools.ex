@@ -11,59 +11,17 @@ defmodule Fleet.MCP.PodTools do
   So the schema SDK is swappable (e.g. Hermes) without touching the transport or the
   tool consumers.
 
-  The domain logic lives in two sub-modules with disjoint consumers:
+  The domain logic lives in two sub-modules with DISJOINT consumers:
 
-    * `Fleet.MCP.PodTools.WorkItems` — work-item drive (every pod):
-      - `get_work_item`  : IN  channel — the pod PULLs its brief from `Fleet.TaskQueue`.
-        `{"done": true}` when there is no brief (the pod stops). Otherwise
-        `{"done": false, "work_item": {"work_item_id", "issue_id", "role", "brief", ...}}`.
-      - `submit_result` : OUT channel — the pod PUSHes its deliverable (`payload`),
-        `work_item_id` MANDATORY (correlator).
-    * `Fleet.MCP.PodTools.Delegation` — forge delegation (architect only, server-side
-      `require_architect` gate):
-      - `issue_create`     : the arch delegates an implementation brick (forge issue).
-      - `project_create`   : the arch starts a fresh project (repo + three faces + scaffold).
-      - `project_install`   : the arch imports an EXISTING forge repo (three faces, main content
-        intact — ≠ create_project which starts a fresh one).
-      - `project_revise_card` : revises an existing project's validation card (BL-6-29 — the
-        engraved declaration gets a tracked revision path; future tickets only).
-      - `project_close`    : parks a project (BL-6-30 — marker issue holds the state, the
-        poller skips the repo; disk + forge intact, `project_open` reopens).
-      - `project_adopt`    : publishes a DISK-only project to the forge (BL-6-32 — the inverse
-        of import; local content never overwritten).
-      - `project_import` : repatriates a GitHub/GitLab repo through the adoption gate (BL-6-31).
-      - `project_publish`   : phase-2 publish of a project to its linked external forge as a rolling
-        PR/MR (ASYNC — returns queued, outcome on the bus; the token stays host-side).
-      - `issue_status` : the arch tracks a delegation (issue + PR, `outcome`).
-      - `escalation_list` : the arch reads its escalation inbox (awaits-arch issues).
-      - `issue_list`      : the arch reads its project's open-ticket board (BL-6-28: the
-        write channel existed without its read half — a radio that transmits but not receives).
-      - `issue_get`        : the arch reads ONE ticket in full (body + comment thread).
-      - `issue_comment`    : the arch replies on an in-flight ticket (in the role's name).
-      - `dependency_add` / `dependency_remove` : the arch states the order between two tickets
-        AFTER creation. The result SAYS what it does not do — on a ticket already in flight the
-        edge blocks the CLOSURE, it does not stop the run.
-      - `issue_retire`     : the arch abandons a ticket with NO replacement — the live PR is
-        closed, the dependents are told and RELEASED (a supersede carries its edges, a
-        retirement lifts them), `stage/retired`.
-      - `project_list`    : the READ half of the project surface — the onboarder could destroy a
-        project it had no way to enumerate.
-      - `emergency_stop`   : the brake. Mass CLOSE of everything in flight, fleet-wide (never a
-        kill: killing pods leaves the tickets open and the poller re-dispatches).
-      - `project_open`     : the inverse of `project_close` (the parking marker is lifted).
-      - `project_delete`   : destroys a project. Disarmed by deployment flag.
-      - `card_list` : the validation cards a project can be onboarded against.
-      - `catalogue_list` : the catalogues this box SERVES — the offer a card is picked FROM
-        (`project_create` refuses a catalogue that is not installed here).
-      - `forge_list`        : the human's registered external forges (the publish pool) — read-only.
-      - `forge_link`      : link a project to a forge (writes its publish binding) — reversible intent,
-        not a push (the human's `lcars approve` + PR merge stay the gates).
+    * work-item drive (every pod) — the IN channel by which a pod PULLS its brief, and the OUT
+      channel by which it PUSHES its deliverable against a mandatory correlator.
+    * forge delegation (architect only, server-side gate) — creating and steering projects,
+      tickets, dependencies, escalations, and the external publish surface.
 
-  ⚠ The list above is a READING MAP and it has drifted before (three tools were missing when
-  `issue_retire` was added). The authority is the `deftool` set itself, and the gate reads it from
-  the AST: `mcp.tools_gated` in `lcars.contracts.check` refuses any tool that is neither pod-scoped
-  nor role-gated, and any dispatch clause with no schema. A tool absent from this prose is a stale
-  comment; a tool absent from that check does not exist.
+  ⚠ N'ENUMERE PAS LES OUTILS ICI — une liste posee dans ce paragraphe a deja derive DEUX fois.
+  L'AUTORITE est l'ensemble des `deftool`, juste en dessous, et un mur la lit PAR L'AST : il refuse
+  tout outil qui n'est ni pod-scope ni role-gated, et toute clause de dispatch sans schema. Un outil
+  absent d'une prose est un commentaire perime ; un outil absent de ce mur n'existe pas.
 
   Server-side mediation: the pod never touches the TaskQueue nor the forge directly
   (the queue, its schema, its storage stay invisible to the pod); everything goes through
@@ -91,13 +49,13 @@ defmodule Fleet.MCP.PodTools do
 
   # L'EFFET DE CHAQUE OUTIL SUR LE MONDE, DECLARE ICI ET NULLE PART AILLEURS (6-106).
   #
-  # ⚠ Ce que ca remplace : une liste de CINQ mots nus dans un sigil, chez l'acceptor. Elle ne
-  # ressemblait a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
-  # `mcp__fleet__`, ni prose), donc le renommage objet-d'abord du 2026-08-11 l'a manquee EN SILENCE
-  # et le dedup single-flight a cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas
-  # comme les autres est une liste qu'un renommage rate.
+  # ⚠ PAS UNE LISTE AILLEURS. Des noms d'outils poses en mots nus dans un sigil, chez l'acceptor,
+  # ne ressemblent a aucune autre occurrence d'un nom d'outil du depot (ni chaine citee, ni
+  # `mcp__fleet__`, ni prose) : un renommage objet-d'abord les manque EN SILENCE, et le dedup
+  # single-flight cesse de reconnaitre les mutations. Une liste qui ne s'ecrit pas comme les autres
+  # est une liste qu'un renommage rate.
   #
-  # Elle vit desormais A COTE des definitions — donc un renommage la traverse — et son exhaustivite
+  # Ici, elle vit A COTE des definitions — donc un renommage la traverse — et son exhaustivite
   # est MECANIQUE : `mix lcars.contracts.check` lit les `deftool` par l'AST et refuse un outil sans
   # effet declare, ou un effet declare pour un outil qui n'existe pas. C'est la seule forme qui
   # empeche d'ajouter un mutateur et de l'oublier ; une liste, meme bien rangee, ne le peut pas.
@@ -197,12 +155,11 @@ defmodule Fleet.MCP.PodTools do
       )
     end
 
-    # ⚠ `payload` ÉTAIT UN `object` NU, ET C'EST LÀ QUE LA CHARGE MACHINE DES JUGES SE PERDAIT.
-    # MESURÉ le 2026-08-19 au banc, sur deux juges indépendants (probe-rails PR#34 puis PR#37) :
-    # trois verdicts rendus, trois gravures en prose, ZÉRO `details.findings_v1`. La consigne
-    # existe pourtant — `core/judge-verdict` la compose dans le SP de chaque juge — mais elle vit
-    # dans un bloc de prose lu au démarrage, à des centaines de lignes du moment où l'agent
-    # remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
+    # ⚠ UN `object` NU ICI, ET LA CHARGE MACHINE DES JUGES SE PERD. Mesuré au banc sur deux juges
+    # indépendants (probe-rails PR#34 puis PR#37) : trois verdicts rendus, trois gravures en prose,
+    # ZÉRO `details.findings_v1`. La consigne existe pourtant — `core/judge-verdict` la compose
+    # dans le SP de chaque juge — mais elle vit dans un bloc de prose lu au démarrage, à des
+    # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
     # disait « un objet ». Un objet, c'est tout ce qu'il rendait.
     #
     # Le schéma reste PERMISSIF (aucun `required` ajouté, aucun `additionalProperties: false`) :
@@ -1307,9 +1264,9 @@ defmodule Fleet.MCP.PodTools do
   # ============================================================
 
   # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
-  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. Since the
-  # 2026-07-19 reorg there is NO `project` wire param on the delegation tools: the arch has "the
-  # project", the system knows which — a param to refuse would itself leak that other repos exist.
+  # binding — never from the wire) is applied INSIDE Delegation, before any forge mechanics. There is
+  # NO `project` wire param on the delegation tools: the arch has "the project", the system knows
+  # which — a param to refuse would itself leak that other repos exist.
 
   def handle_tool_call("issue_create", %{"title" => title, "brief" => brief} = args, state)
       when is_binary(title) and is_binary(brief) do

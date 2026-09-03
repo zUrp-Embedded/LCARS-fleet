@@ -2,10 +2,8 @@ defmodule Fleet.Pilot.PodFeed do
   @moduledoc """
   The pod-visible feed FILE: one stamped line appended, bounded, never raising.
 
-  Extracted from `ArchFeed` when a SECOND writer appeared (FleetFeed, mort depuis — brouette
-  2026-08-19 ; l'extraction reste correcte, un format n'appartient pas a son unique client). What
-  is shared is not the
-  editorial line — the two feeds watch opposite things and follow opposite axioms — it is the
+  Extracted from `ArchFeed`, and it stays extracted even with a single client: a format does not
+  belong to its only reader. What is shared is not the editorial line — the two feeds watch opposite things and follow opposite axioms — it is the
   FORMAT: the file name the pod reads at `~/fleet.feed`, the `HH:MM` stamp, the 200-line bound. A
   format owned twice is a format that drifts, and the reader that would notice is an agent looking
   at a file that stopped looking like the one its instructions describe.
@@ -49,14 +47,13 @@ defmodule Fleet.Pilot.PodFeed do
   @spec append(String.t(), String.t()) :: :ok | {:error, term()}
   def append(pod_dir, line) when is_binary(pod_dir) and is_binary(line) do
     path = Path.join(pod_dir, @feed_file)
-    # LA DATE, ET C'EST LE CORRECTIF D'UN COMPORTEMENT, PAS UNE COQUETTERIE. L'estampille etait
-    # `HH:MM` seule sur un fichier borne a 200 lignes — qui couvre donc plusieurs JOURS sur un
-    # projet calme. Un `09:14` y apparait trois fois sans qu'on puisse dire lequel est
-    # d'aujourd'hui, et le lecteur ne peut pas repondre a « ou on en est » sans compter les
-    # lignes. Mesure 2026-08-12, sur plusieurs architectes reels : faute de voir l'etat d'un coup
-    # d'oeil ici, ils le recopiaient a la main dans le backlog de leur atelier, sous une section
-    # « ## en vol » qu'ils inventaient — dans un fichier qui est une FILE d'attente, pas un
-    # registre. Le defaut n'etait pas un fichier manquant chez eux, il etait dans cette ligne.
+    # LA DATE, ET C'EST UN COMPORTEMENT, PAS UNE COQUETTERIE. Une estampille `HH:MM` SEULE sur un
+    # fichier borne a 200 lignes couvre plusieurs JOURS sur un projet calme : un `09:14` y apparait
+    # trois fois sans qu'on puisse dire lequel est d'aujourd'hui, et le lecteur ne peut pas repondre
+    # a « ou on en est » sans compter les lignes. Des architectes prives de cette vue d'un coup
+    # d'oeil la RECOPIENT A LA MAIN dans le backlog de leur atelier, sous une section « ## en vol »
+    # qu'ils inventent — dans un fichier qui est une FILE d'attente, pas un registre. Le defaut
+    # n'est pas un fichier manquant chez eux, il est dans cette ligne.
     {{_y, mo, d}, {h, mi, _s}} = :calendar.local_time()
 
     stamp =

@@ -13,7 +13,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
   alias Fleet.MCP.PodTools.ProjectPublish
 
   @doc """
-  ENQUEUES a phase-2 publish of `repo` to its linked external forge (chantier-publication-github).
+  ENQUEUES a publish of `repo` to its linked external forge.
 
   Gated behind the onboarder capability, then ASYNC: the actual rail (clone + filter-repo + push +
   PR/MR) runs OFF this call in a `Fleet.MCP.PublishTaskSupervisor` Task — it is O(history) minutes on
@@ -204,9 +204,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Deposits do
     File.mkdir_p!(dir)
     path = Path.join(dir, "#{ProjectPublish.binding_key(repo)}.json")
 
-    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Il etait appele et son retour JETE : un fichier
-    # ecrit dont la serrure n'a pas pu etre posee ressortait `:ok`, et le binding restait lisible par
-    # tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le tient.
+    # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Appele hors du `with`, son retour est jete : un
+    # fichier ecrit dont la serrure n'a pas pu etre posee ressort `:ok` et le binding reste lisible
+    # par tout le monde. Le commentaire au-dessus promet « Mode 600 » — c'est cette ligne qui le
+    # tient.
     # Meme forme fail-closed que `PodSocketAcceptor.restrict/2` : on ne laisse pas derriere soi une
     # porte sans verrou, on retire ce qu'on n'a pas su fermer.
     with {:ok, json} <- Jason.encode(binding, pretty: true),

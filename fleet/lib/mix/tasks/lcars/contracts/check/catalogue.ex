@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
     catalogue = scan_catalogue_roles(root)
 
-    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent desormais. Le
+    # PROJETE en LOGINS avant de comparer, parce que les trois listes en portent. Le
     # verrou ne change pas de nature — il reste l'egalite stricte des quatre — mais il compare les
     # memes objets. Meme regle que la derivation runtime : le prefixe suit le TIER, donc ou le nom
     # est declare en premier, et non le fichier qui gagne la superposition (un catalogue metier peut
@@ -110,7 +110,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
-    # `deploy/deps/`, moved there 2026-08-05: the tofu recipe was the LAST live leg of the
+    # `deploy/deps/`: the tofu recipe is the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
     # the gesture that touched it.
     tf_path = Path.expand("deploy/deps/forge.tf", root)
@@ -128,7 +128,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        # `variable "roles"` since the enroll derivation (2026-08-10): the roster moved from a
+        # `variable "roles"` since the enroll derivation: the roster moved from a
         # `local` to a VARIABLE so a deployment can supply the roster of the catalogue it brings.
         # The DEFAULT is what this check measures, and that is the right target — it is the value
         # a deployment gets when it supplies nothing, so it is the one that must equal the canon.
@@ -214,31 +214,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # nothing enforced uniqueness across the catalogue (BL-6-45 F7): two roles on one slot would
   # make `pkill -f '<X>badcafe'` kill classes collide. Seats included (a seat CLAIMS its slot).
   # ── sp.adresser_un_agent ───────────────────────────────────────────────────────────────────────
-  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR — et c'est le mur qui rend les deux premiers tenables.
+  # UNE SOURCE DE PROSE, DIX NOMS, UN MUR. La regle doit atteindre TOUS les roles, et elle ne peut
+  # pas passer par un bloc partage : l'audit impose UNE source par role, et les roles a draft sont
+  # justement les premiers concernes. Recopier le paragraphe en ferait deux exemplaires de prose —
+  # et deux proses divergent en restant plausibles. Elle passe donc par l'ENVELOPPE, que chaque
+  # carte NOMME.
   #
-  # La regle « le destinataire de ce que tu ecris est le meme agent que toi » doit atteindre TOUS les
-  # roles. Elle ne peut pas passer par un bloc `core/*` : `Blocks.audit!` impose UNE source par role
-  # — une entree dans `sp-map.yaml` OU un draft ecrit a la main, jamais les deux — et `architect` et
-  # `starfleet`, qui ont un draft, sont precisement les deux premiers concernes. Y recopier le
-  # paragraphe en ferait deux exemplaires de prose, et deux prose divergent en restant plausibles.
+  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX : un role dont la carte oublie la
+  # ligne ne recoit rien, et rien ne le dit. Un drapeau peut manquer, une prose peut mentir — l'un
+  # se detecte, l'autre non, et c'est tout ce que ce mur achete.
   #
-  # Elle passe donc par l'ENVELOPPE : `sp_template.eex` rend `@modop_fragments` pour tout pod, quelle
-  # que soit l'origine de son SP. Le bundle est la source unique ; chaque carte le NOMME.
+  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE : aucun appelant de production n'active un
+  # bundle `optional`, donc un role qui declarerait celui-ci ainsi passerait un controle naif en ne
+  # recevant RIEN. Le second volet lit `incompatible:` pour la meme raison — l'y nommer retirerait
+  # legalement le bundle, et ce n'est pas un mode commutable.
   #
-  # ⚠ CE CHECK EXISTE PARCE QU'UN NOM MANQUANT EST SILENCIEUX. Un role dont la carte oublie la ligne
-  # ne recoit rien, et rien ne le dit — meme classe de panne que la prose qui derive, en plus discret.
-  # Un drapeau peut manquer, une prose peut mentir : l'un se detecte, l'autre non. C'est tout ce que
-  # ce mur achete, et ca suffit a rendre la voie bundle superieure a la voie bloc.
-  #
-  # ⚠ ET IL PORTE SUR `default`, PAS SUR LA PRESENCE. Le piege est deja mesure dans ce depot :
-  # `architect.yaml` ecrit que « aucun appelant de production n'active un bundle `optional` »
-  # (`CapProfile.resolve/4` est toujours appele a deux arguments), donc les bundles ranges la sont
-  # livres et jamais composes. Un role qui declarerait celui-ci en `optional` passerait un controle
-  # naif en ne recevant rien. Le second volet lit `incompatible:` pour la meme raison : l'y nommer
-  # retirerait legalement le bundle a un role, et ce n'est pas un mode commutable — il n'existe
-  # aucune conduite ou ecrire a un agent en le prenant pour un executant serait juste.
-  #
-  # Les `ReservedSeat` sont hors perimetre : un siege n'a pas de `spec`, donc pas de SP a garnir.
+  # Les sieges reserves sont hors perimetre : sans `spec`, pas de SP a garnir.
   @adresser_bundle "adresser-un-agent"
   @doc false
   @spec check_sp_adresser_un_agent(String.t()) :: Support.result()
@@ -259,12 +250,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # `incompatible` est une liste de PAIRES : le bundle ne doit apparaitre dans aucune.
     #
     # ⚠ ET ON ACCEPTE AUSSI L'ENTREE PLATE, QUI EST UNE MALFORMATION. `incompatible:
-    # [adresser-un-agent]` (des chaines au lieu de paires) faisait echouer le `is_list(pair)` :
-    # chaque element etait une chaine, aucun n'etait signale, et le mur passait au VERT sur un
+    # [adresser-un-agent]` (des chaines au lieu de paires) fait echouer le `is_list(pair)` : chaque
+    # element est une chaine, aucun n'est signale, et le mur passe au VERT sur un
     # profil qui retire pourtant le bundle. Le schema doit refuser cette forme en amont — mais un
     # mur qui ne tient que si un AUTRE controle a fait son travail ne tient rien par lui-meme, et
-    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire. (Revue
-    # 2026-08-20.)
+    # c'est precisement la classe de faux-vert que ce fichier existe pour interdire.
     excluded =
       profiles
       |> Enum.filter(fn p ->
@@ -351,13 +341,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
   # that drifts without a word.
   #
-  # THE WALL HELD ONE OF THE TWO, and the one it held is the narrower. Until 2026-08-13 it read the
+  # TWO SITES, AND THE NARROWER ONE IS THE EASY MISS. Reading only
   # docker entrypoint alone, so it was green on a rail that recognises THREE substrates
   # (`docker`, `wsl`, `linux`) while creating the zones on one. On `wsl` they existed "by history of
   # the substrate" — by hand, one day, on the author's machine — and on a native `linux`, not at
   # all. Same failure as the `doc` face below, on the path the check did not cover.
   #
-  # Measured 2026-08-09 on a fresh bench: the `doc` face was in the code AND in the image's `build`
+  # Measured on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
   # fleet started, and the first `project_create` died on `could not make directory (with -p)
   # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
@@ -642,7 +632,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # what happens when nobody sets anything, which is every deployment.
   #
   # ⚠ THE PROVISIONING HALF IS A SIBLING TREE, AND ONE LEGITIMATE CONTEXT DOES NOT CARRY IT: the
-  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured 2026-08-16 — adding
+  # image BUILD stage copies `fleet` ALONE and then runs this gate. Measured — adding
   # the third source turned the image build red on a file it cannot have. Absence is read at the
   # TREE level, like the provisioning lists above: no `deploy` tree = out of scope, SKIPPED and
   # NAMED in the note; tree present and the default gone = the real defect, FAIL.

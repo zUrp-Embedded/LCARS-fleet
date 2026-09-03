@@ -4,7 +4,7 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   ## Ce que ce module refuse de faire, et pourquoi c'est l'essentiel
 
-  Trois formes étaient possibles pour cet outil. Deux sont écartées, et la raison ne se rattrape pas
+  Trois formes sont possibles pour cet outil. Deux sont écartées, et la raison ne se rattrape pas
   plus tard :
 
     * `check_test_relevance(fichier)` — l'outil EST la sonde. Plus court aujourd'hui, condamné
@@ -43,7 +43,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # Une entrée = un nom public → le fichier de workflow que le projet porte. C'est le seul endroit
   # de la flotte qui connaisse des noms de sondes, et il ne connaît QUE des noms : ce que la sonde
   # fait vit dans le dépôt du projet, relisible et modifiable par lui. Une deuxième sonde s'ajoute
-  # ici en une ligne, ou — mieux — un jour, en lisant `.gitea/workflows/probe-*` du projet.
+  # ici en une ligne.
   #
   # Le préfixe `probe-` n'est pas cosmétique : un contexte de statut `probe-… / …` ne matche pas le
   # glob `CI / *` de la protection de `main` (cf. `Onboard.main_status_check_contexts/0`), donc une
@@ -112,7 +112,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # `identity.repo` est `nil` pour un juge, et ne l'est PAS pour un architecte.
   #
   # On lit donc les deux, dans cet ordre — la chaîne quand elle est là, sinon la traduction de l'ID
-  # par la forge. Refuser sur l'absence de `:repo` aurait rendu cet outil inutilisable par
+  # par la forge. Refuser sur l'absence de `:repo` rendrait cet outil inutilisable par
   # exactement les rôles pour lesquels il est écrit.
   defp identity(pod_id, opts) do
     case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
@@ -176,31 +176,15 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ferait dépendre une mesure de rail d'une liste faite pour autre chose, et le jour où la liste
   # bouge la mesure bougerait sans raison.
   #
-  # ⚠ DEUX FAUTES CORRIGÉES LE 2026-08-20, TROUVÉES PAR RELECTURE ADVERSARIALE. Les deux étaient
-  # des cas où ce parseur lisait CONFIANT quelque chose qui n'était pas la déclaration du projet.
+  # LE TITRE SE CHERCHE HORS DES BLOCS DE CODE. Un `CLAUDE.md` DOCUMENTE la section `## Harness` et
+  # en montre un exemple encadré, dont la ligne `## Harness` est en colonne 0 : une regex `^` en
+  # mode `m` y matche, et la sonde lit l'EXEMPLE DE LA DOC puis toute la prose qui suit. Un projet
+  # qui écrit sa section SOUS la documentation — le geste naturel — n'est jamais lu.
   #
-  # 1. LES BLOCS DE CODE SONT MASQUÉS AVANT LA RECHERCHE. Le `CLAUDE.md` du template DOCUMENTE la
-  #    section `## Harness` et en montre un exemple dans un bloc `` ``` `` — dont la ligne
-  #    `## Harness` est en colonne 0. Avec le drapeau `m`, `^` matche à l'intérieur du bloc : la
-  #    sonde lisait l'EXEMPLE DE LA DOC, puis toute la prose qui suit, au lieu de la déclaration
-  #    écrite par le projet. Mesuré sur le template réel — `harness` valait
-  #    `"tests/ ``` **À quoi elle sert.** La sonde …"`. Un projet qui écrit sa section SOUS la
-  #    documentation (le geste naturel) ne la voyait jamais lue.
-  #
-  # 2. LE TITRE EST ANCRÉ EN FIN DE LIGNE, et le `\b` d'avant ne protégeait rien. Le commentaire
-  #    disait « sans lui, demander "Test" attraperait `## Test paths` » — c'est FAUX et c'est
-  #    l'inverse de ce que ce dépôt a mesuré ailleurs : `\b` tombe entre `t` et l'espace, DONC
-  #    `## Test paths` matchait. Un projet portant `## Test suite` avant son `## Test` faisait
-  #    tourner la sonde avec la mauvaise commande.
-  #
-  # La règle est maintenant : le titre est le nom, SEUL sur sa ligne (espaces de fin tolérés), ET
-  # hors de tout bloc de code.
-  #
-  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ. La première correction masquait
-  # les blocs avant la recherche — ce qui aurait effacé le CORPS d'une section dont la valeur est
-  # légitimement encadrée (`## Test` suivi d'un bloc contenant `mix test`, forme parfaitement
-  # normale). Le titre doit être cherché hors des blocs ; le corps doit être rendu tel qu'il est
-  # écrit. Une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
+  # ⚠ LECTURE LIGNE À LIGNE, ET PAS UNE REGEX SUR UN TEXTE MASQUÉ : masquer les blocs avant la
+  # recherche effacerait le CORPS d'une section dont la valeur est légitimement encadrée (`## Test`
+  # suivi d'un bloc contenant `mix test`). Le titre se cherche hors des blocs, le corps se rend tel
+  # qu'il est écrit — une seule passe qui suit l'état de fence répond aux deux sans en sacrifier une.
   defp section(md, name) do
     md
     |> String.split("\n")
@@ -212,8 +196,6 @@ defmodule Fleet.MCP.PodTools.Probe do
     |> strip_fences()
   end
 
-  # Trois etats — `:before`, `:capturing`, `:done` — et un drapeau de bloc. Un titre ne compte que
-  # HORS bloc ; le corps, lui, est rendu tel qu'il est ecrit, blocs compris.
   defp scan_line(_line, {acc, in_fence?, :done}, _name), do: {acc, in_fence?, :done}
 
   defp scan_line(line, {acc, in_fence?, state}, name) do
@@ -222,16 +204,16 @@ defmodule Fleet.MCP.PodTools.Probe do
     heading? = not in_fence? and not fence? and String.starts_with?(line, "## ")
 
     case {state, heading?} do
-      # Un titre HORS bloc termine la capture en cours.
       {:capturing, true} -> {acc, in_fence?, :done}
       {:capturing, false} -> {[line | acc], next_fence?, :capturing}
-      # C'est le NOTRE qui la commence, a condition d'etre seul sur sa ligne.
       {:before, true} -> {acc, in_fence?, if(ours?(line, name), do: :capturing, else: :before)}
       {:before, false} -> {acc, next_fence?, :before}
     end
   end
 
-  # `## Harness` oui ; `## Harness paths`, `## Harnessing` non. Le nom est SEUL sur sa ligne.
+  # ANCRÉ EN FIN DE LIGNE, et un `\b` ne remplacerait pas l'ancre : il tombe entre `t` et l'espace,
+  # donc `## Test paths` matcherait — un projet portant `## Test suite` avant son `## Test` ferait
+  # tourner la sonde avec la mauvaise commande.
   defp ours?(line, name), do: String.trim_trailing(line) == "## " <> name
 
   # Une commande ou des chemins écrits dans un bloc de code restent une commande et des chemins : la
@@ -244,9 +226,9 @@ defmodule Fleet.MCP.PodTools.Probe do
   #     make build
   #     make test
   #
-  # Joint par un espace, ça rendait `"make build make test"` — UNE commande avec des arguments, qui
-  # n'est ni l'une ni l'autre. La sonde tournait, rendait un verdict, et il portait sur autre chose
-  # que la suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
+  # Joint par un espace, ça rendrait `"make build make test"` — UNE commande avec des arguments, qui
+  # n'est ni l'une ni l'autre : la sonde tourne, rend un verdict, et il porte sur autre chose que la
+  # suite du projet. Même classe que la commande vide : un fait faux présenté comme mesure.
   #
   # `## Harness`, lui, est une LISTE de chemins, et le workflow la découpe sur tout blanc — un saut
   # de ligne y est aussi bon qu'un espace. Les deux sections partagent donc ce nettoyage sans que
@@ -341,37 +323,31 @@ defmodule Fleet.MCP.PodTools.Probe do
 
   # ── Coutures ───────────────────────────────────────────────────────────────────────────────────
   #
-  # ⚖ RENOMMEE LE 2026-08-21 : `:forge_client` -> `:mcp_probe_forge_client`. `:forge_actions` reste
-  # nue, et le motif est juste en dessous — ce n'est pas un oubli.
+  # ⚖ `:mcp_probe_forge_client` porte son proprietaire ; `:forge_actions` reste nue, et le motif
+  # est juste en dessous — ce n'est pas un oubli.
   #
-  # LA REGLE N'EST PAS UN GOUT, ELLE ETAIT DEJA EN VIGUEUR. Les ~110 clefs d'app env de ce projet
-  # sont toutes `<proprietaire>_<chose>` — `admiral_`, `mcp_`, `pilot_`, `spawner_`, `workflow_`,
-  # `credentials_`… `:forge_client` et `:forge_actions` etaient les deux SEULES clefs de MODULE sans
-  # proprietaire. Deux exceptions a une convention, pas deux noms discutables.
-  #
-  # CE QUE L'ANCIEN NOM COUTAIT, ET IL NE COUTAIT RIEN A LA MACHINE : `:forge_client` designait
-  # DEUX mecanismes de portees differentes — 22 `Keyword.get(opts, :forge_client, …)` dans `Pilot`
-  # (injection par appel) et 2 `Application.get_env` (globale au noeud, dont celle-ci). Et
-  # `:forge_actions` etait partage par deux PROPRIETAIRES, ici et `Fleet.Pilot.MergeAndPromote`.
-  # Rien ne se branchait de travers — les trois suites concernees sont `async: false`, verifie — mais
-  # il fallait tenir tout ca en tete pour lire trois lignes.
+  # LA REGLE : les clefs d'app env de ce projet sont `<proprietaire>_<chose>` — `admiral_`, `mcp_`,
+  # `pilot_`, `spawner_`, `workflow_`, `credentials_`… Un prefixe DIT QUI POSE ; sans lui, un meme
+  # nom nu peut couvrir deux mecanismes de portees differentes (une injection par appel et une
+  # valeur globale au noeud), et il faut tenir la difference en tete pour lire trois lignes.
   #
   # POURQUOI PAS `:mcp_forge_client`, QUI EXISTE : ce serait unifier avec le seam de `Delegation`,
   # et sa propre doctrine le prescrirait (« le seam est le MEME objet »). Elle ne mord pas ici : sa
   # raison est qu'un test qui remplace une moitie du client et pas l'autre verrait ses ecritures
   # partir sur la vraie forge — or la sonde et la delegation sont deux chaines independantes,
-  # qu'aucun appel ne traverse ensemble. Unifier n'achetait donc rien et couplait deux suites.
+  # qu'aucun appel ne traverse ensemble. Unifier n'achete rien et couple deux suites.
   defp forge, do: Application.get_env(:lcars_fleet, :mcp_probe_forge_client, Fleet.Forge.Client)
 
-  # ⚠ `:forge_actions` NE SUIT PAS LA REGLE, ET C'EST VOULU — JE L'AI RENOMMEE PUIS ANNULEE.
-  # Elle est PARTAGEE A DESSEIN avec `Fleet.Pilot.MergeAndPromote`, qui porte le motif : « la sonde
-  # et sa verification interrogent le MEME sous-domaine, et deux clefs en donneraient deux avis en
-  # test ». Un prefixe de proprietaire est donc faux ici : la clef n'a pas UN proprietaire, elle a
-  # un sous-domaine, et c'est precisement ce que le partage exprime.
+  # ⚠ `:forge_actions` NE SUIT PAS LA REGLE, ET C'EST VOULU. Elle est PARTAGEE A DESSEIN par TROIS
+  # modules — cette sonde, `Fleet.Pilot.MergeAndPromote` et
+  # `Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate` — qui interrogent le MEME sous-domaine :
+  # deux clefs en donneraient deux avis en test. Un prefixe de proprietaire est donc faux ici : la
+  # clef n'a pas UN proprietaire, elle a un sous-domaine, et c'est precisement ce que le partage
+  # exprime.
   #
-  # La convention veut un prefixe parce qu'un prefixe DIT QUI POSE. Quand la reponse est « deux
-  # modules, exprès », le nom nu est la forme juste — et cette exception se lit ici et chez son
-  # jumeau, jamais deduite du silence.
+  # La convention veut un prefixe parce qu'un prefixe DIT QUI POSE. Quand la reponse est « trois
+  # modules, exprès », le nom nu est la forme juste — et cette exception se lit AUX TROIS SITES,
+  # jamais deduite du silence.
   defp forge_actions,
     do: Application.get_env(:lcars_fleet, :forge_actions, Fleet.Forge.Client.Actions)
 

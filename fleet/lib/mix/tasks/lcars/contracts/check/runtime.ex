@@ -25,29 +25,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # workflow side. `Workflow.Gates` is SYSTEM machinery and stays PURE — it must not acquire a
   # runtime seam that re-installs a judgement inside it.
   #
-  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM. La version precedente cherchait
-  # `coord_backend|CoordBackend` : deux chaines qu'aucun commit ne pouvait produire depuis que
-  # `Fleet.Coord` est parti entier (brouette 2026-08-19). Un mur contre une resurrection que
-  # personne ne peut accomplir se lit comme une garantie et n'en tient aucune — et il verdissait
-  # sur n'importe quelle delegation vers un AUTRE destinataire.
+  # ⚠ CE QUI EST GREPE EST UNE FORME, PLUS UN NOM : un mur qui cherche des chaines qu'aucun commit
+  # ne peut plus produire se lit comme une garantie et n'en tient AUCUNE — tout en verdissant sur la
+  # vraie faute.
   #
   # `boundary` attrape deja toute delegation EN DUR vers un autre domaine, a la compilation. Ce
-  # qu'il ne voit pas, c'est le seam passe EN VALEUR (`Application.get_env` puis `apply/3`) — le
-  # mecanisme exact de feu `:coord_backend`. C'est donc lui qu'on refuse ici, et les deux couches
-  # se composent sans se recouvrir.
+  # qu'il ne voit PAS est le seam passe EN VALEUR — lecture d'app-env puis `apply/3` — et c'est donc
+  # lui qu'on refuse ici. Les deux couches se composent sans se recouvrir.
   #
-  # Ne pond aucun faux positif aujourd'hui : `gates.ex` n'a ni lecture d'app-env ni `apply/3`
-  # (mesure a la pose, 2026-08-20) — le mur nait VERT, seul etat dans lequel un mur puisse naitre.
+  # Le mur nait VERT, seul etat dans lequel un mur puisse naitre.
   #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
-  # Insere `defp _mutation_seam, do: Application.get_env(:lcars_fleet, :gate_backend)` dans
-  # `gates.ex` : ce check ECHOUE et nomme `lib/fleet/workflow/gates.ex:43`. Mutation retiree.
-  # Quatre contournements de la version grep, rejoues et ROUGES depuis la lecture AST :
-  # `Application.get_all_env(…)`, `@x Application.compile_env(…)` en corps de module,
-  # `seam.eval?(1, 2)` (dispatch sur une cible non statique) et `inj.(1)` (fonction injectee).
-  # Son angle mort, declare : la granularite est le FICHIER `gates.ex`. Un seam installe dans
-  # `gates/predicate.ex` passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste
-  # dans `Fleet.Workflow`. Les deux couches se composent et aucune ne couvre l'autre.
+  # ## Preuve, mutation jouee a la pose
+  # Un seam insere dans `gates.ex` fait ECHOUER ce check, qui NOMME le site. Quatre contournements
+  # de la version grep sont rejoues et ROUGES depuis la lecture AST : `get_all_env`, un
+  # `compile_env` en attribut de module, un dispatch sur cible non statique, une fonction injectee.
+  #
+  # ANGLE MORT DECLARE : la granularite est le FICHIER. Un seam installe dans un module voisin
+  # passerait — `boundary` le verrait s'il traverse un domaine, pas s'il reste dans le meme.
   @doc false
   @spec check_gates_no_runtime_seam(String.t()) :: Support.result()
   def check_gates_no_runtime_seam(root) do
@@ -435,7 +429,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
   # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
   # kills the long-lived forever/pipe/run pods at cycle 2). Since the `Pod` →
-  # `gen_statem` migration, the cancellation is no longer a home-made impl (`Process.cancel_timer`) but
+  # `gen_statem` migration, the cancellation is not a home-made impl (`Process.cancel_timer`) but
   # NATIVE: `:result_deadline` is a **state_timeout of the `:monitoring` state**, and the
   # `:monitoring → :extracting` transition (triggered by the result arriving,
   # `work_item.completed`) AUTOMATICALLY cancels this state_timeout (a state_timeout is
@@ -500,7 +494,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # NOT test-only, otherwise they are HOLLOW containment/credentials gates (called
   # in test but never in prod — the "hollow-gate" failure mode this checker
   # exists to block). The containment gate stays direct in pod.ex; the credentials
-  # gate (login-validity — the scope/plan sub-gates were nuked 2026-07-20 as vendor-redundant)
+  # gate (login-validity — the scope/plan sub-gates are gone as vendor-redundant)
   # lives behind Fleet.Credentials.Gate, reached through Pod.LaunchEnv. 3 checks (all required):
   #     (1) CapProfile.validate — containment gate (refusal of native server-tools), at do_allocate;
   #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
@@ -723,7 +717,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # LE VERIFICATEUR AUTONOME AFFIRMAIT COUVRIR LE BOOT, ET L'EQUIVALENCE N'ETAIT TENUE PAR RIEN
   # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
   # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
-  # rail boot ». Mesure du 2026-08-14 : le boot en jouait SIX, le verificateur QUATRE —
+  # rail boot ». Mesure : le boot en jouait SIX, le verificateur QUATRE —
   # `validate_workshop_card!` et `validate_default_card_loads!` (alors `validate_default_card_matrix!`)
   # manquaient. Un verificateur VERT
   # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
@@ -806,7 +800,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   `Fleet.ReleaseDoor.claim_stdout!/0` le renvoie vers stderr, et c'est le seul geste qui separe les
   deux flux.
 
-  Le 2026-08-23, sur un poste : `lcars catalogue install web-demo` a rendu
+  Mesure, sur un poste : `lcars catalogue install web-demo` rend
 
       forge-gestures: web-demo <-  (@)
       fatal: repository 'http://127.0.0.1:21000/.git/' not found
@@ -845,8 +839,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     naked = for {f, n, _, claim} <- writers, not claim, do: "#{Path.relative_to(f, root)}: #{n}"
 
     # INSTRUMENT GUARD. Chaque finding est une ABSENCE, et un parseur casse en produit autant. La
-    # premiere ecriture de cette sonde ratait la forme `def f(x) when g` — la tete est enveloppee
-    # dans un `:when`, donc aucun corps n'etait scanne — et elle rendait un vert parfait sur un
+    # forme `def f(x) when g` est le piege : la tete est enveloppee dans un `:when`, donc une sonde
+    # naive ne scanne aucun corps — et rend un vert parfait sur un
     # arbre qui portait TROIS portes nues. Le plancher est pose sous l'etat du jour, pas dessus.
     broken =
       cond do
@@ -924,7 +918,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   #
   # ⚠ THIS HAS NOW BEEN FOUND TWICE, ON TWO DIFFERENT DOORS, WITH THE SAME MESSAGE. `eval_migrate`
   # carries the scar and its fix inline; `CatalogueLifecycle`'s two doors were written afterwards
-  # and reintroduced it, measured on a bench 2026-08-16 — `lcars catalogue list` printed the
+  # and reintroduced it, measured on a bench — `lcars catalogue list` prints the
   # ArgumentError under its own "the forge did not answer" line, i.e. a network diagnostic for a
   # startup failure. Unit tests cannot catch it: they inject forge doubles, so the path that needs
   # the pool is taken by nobody.

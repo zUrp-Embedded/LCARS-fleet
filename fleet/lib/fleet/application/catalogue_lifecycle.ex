@@ -4,7 +4,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## Two states, and a qualifier on one of them
 
-  ⚖ user, 2026-08-16. A catalogue is INSTALLED (the forge carries its source, everyone is served
+  ⚖ user. A catalogue is INSTALLED (the forge carries its source, everyone is served
   by it) or AVAILABLE (somebody deposited it, nobody installed it). There is no third state and no
   per-human declaration: activation was a display filter that decided what the fleet worked on, and
   it is gone.
@@ -23,8 +23,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   It sits at `<org>/_catalogue`, and that is an ADDRESS, not the signature. What signs is
   `owner == manifest.name` (`CatalogueDeposits.split/2`) TOGETHER WITH the owner being an ORG —
-  complementary conditions, neither covering the other. Signing on the repo NAME, as this did until
-  2026-08-21, reserved the most natural repo name in every user's namespace, and did it in silence.
+  complementary conditions, neither covering the other. Signing on the repo NAME would reserve the
+  most natural repo name in every user's namespace, and would do it in silence.
 
   ## The reference catalogue is installed by construction
 
@@ -94,7 +94,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## The third field is the DEPOSIT, and it is deliberately empty for an installed catalogue
 
-  ⚖ user, 2026-08-16: *"can `catalogue list` show which user an available catalogue comes from?
+  ⚖ user : *"can `catalogue list` show which user an available catalogue comes from?
   Once installed, its origin does not matter — at install time it is useful."*
 
   It is the `<owner>/<repo>` of the deposit, so the owner is its first segment — the forge's own
@@ -134,11 +134,11 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
-  # ON NE COMPARE PAS DEUX SHA DE COMMIT DE PART ET D'AUTRE D'UNE PROJECTION, ET C'EST CE QUE FAISAIT
-  # LA PREMIERE VERSION. Le store est un commit FRAIS qui reflete l'arbre du depot : deux commits de
-  # contenu identique ne partagent jamais de sha, donc la comparaison repondait « commit different »,
-  # ce qui est toujours vrai. Mesure sur banc du 2026-08-16 : `web-demo`, installe trente secondes
-  # plus tot, sortait UPDATABLE — et le seul geste offert etait de le reinstaller pour rien.
+  # ON NE COMPARE PAS DEUX SHA DE COMMIT DE PART ET D'AUTRE D'UNE PROJECTION. Le store est un commit
+  # FRAIS qui reflete l'arbre du depot : deux commits de contenu identique ne partagent JAMAIS de
+  # sha, donc une telle comparaison repond « commit different », ce qui est toujours vrai. Le
+  # symptome est un catalogue installe trente secondes plus tot qui sort UPDATABLE, avec pour seul
+  # geste offert de le reinstaller pour rien.
   #
   # La projection porte donc SA SOURCE (`Source-Commit:`, ecrit par `push_store`), et c'est elle
   # qu'on compare. Pas de trailer = `nil`, « on ne peut pas savoir » : un store pousse par une
@@ -161,20 +161,16 @@ defmodule Fleet.Application.CatalogueLifecycle do
   Prints `<repo> <branch> <sha>` on stdout, and nothing else: the caller feeds it to `git clone`,
   so a line of politeness would become part of a URL.
 
-  ⚠ CETTE PHRASE ETAIT ECRITE ET RIEN NE LA TENAIT, et elle a coute une install. `claim_stdout!/0`
-  renvoie le handler Logger vers stderr ; ses quatre soeurs l'appellent (`eval_main/0` juste
-  au-dessus, les deux portes d'`Onboard`, `CatalogueVerify`), celle-ci ne l'appelait pas.
+  ⚠ ET RIEN NE TIENT CETTE PHRASE SANS `claim_stdout!/0`, qui renvoie le handler Logger vers
+  stderr. Ses quatre soeurs l'appellent (`eval_main/0` juste au-dessus, les deux portes d'`Onboard`,
+  `CatalogueVerify`) ; l'oublier ici dort tant qu'aucun log ne sort sur ce chemin, et se reveille au
+  premier — par exemple une candidature de depot ecartee, que `CatalogueDeposits` DIT deliberement
+  plutot que d'ecarter en silence.
 
-  Le defaut a dormi tant qu'aucun log ne sortait sur ce chemin. Il s'est reveille le 2026-08-21,
-  quand la fleet a commence a publier son catalogue de reference sur la forge : `CatalogueDeposits`
-  ecarte ce depot en le DISANT (`Logger.info`, deliberement — une candidature ecartee en silence
-  etait le defaut d'avant), et cette ligne est tombee sur le stdout de la porte.
-
-  Mesure du 2026-08-23, sur un poste : la porte a rendu une ligne vide, puis le log, puis la
-  reponse. `read -r repo branch sha` a lu la PREMIERE ligne. Les trois champs sont sortis vides,
-  l'URL a ete construite sur du neant, et git a repondu
-  `fatal: repository 'http://127.0.0.1:21000/.git/' not found` — l'outil a qui on venait de passer
-  du vide s'est fait accuser. La bonne ligne etait la troisieme.
+  Ce que ca coute : la porte rend une ligne vide, puis le log, puis la reponse. `read -r repo branch
+  sha` lit la PREMIERE ligne, les trois champs sortent VIDES, l'URL est construite sur du neant, et
+  git repond `fatal: repository 'http://.../.git/' not found` — l'outil a qui on vient de passer du
+  vide se fait accuser. La bonne ligne etait la troisieme.
 
   The three refusals it owes the caller, each with its own exit code, because they call for three
   different gestures:
@@ -232,15 +228,15 @@ defmodule Fleet.Application.CatalogueLifecycle do
     end
   end
 
-  # LE TRANSPORT N'EST PAS DEMARRE SOUS `LCARS_TOOL_EVAL=1`, ET AUCUN TEMOIN NE POUVAIT LE VOIR.
+  # LE TRANSPORT N'EST PAS DEMARRE SOUS `LCARS_TOOL_EVAL=1`, ET AUCUN TEMOIN NE PEUT LE VOIR.
   # Une porte `eval` saute tout le corps de config de deploiement — c'est le but du drapeau — donc
-  # l'app n'est pas demarree et le pool Finch de `Fleet.Forge` n'existe pas. Les deux portes d'ici
-  # appellent la forge : mesure du 2026-08-16 sur banc, `lcars catalogue list` rendait
+  # l'app n'est pas demarree et le pool Finch de `Fleet.Forge` n'existe pas. Or les deux portes
+  # d'ici appellent la forge : sans le demarrage ci-dessous, `lcars catalogue list` rend
   # `** (ArgumentError) unknown registry: Fleet.Forge.Finch` sous la ligne « la forge n'a pas
-  # repondu », c'est-a-dire un diagnostic de reseau pour une panne de demarrage.
+  # repondu », c'est-a-dire UN DIAGNOSTIC DE RESEAU POUR UNE PANNE DE DEMARRAGE.
   #
-  # Les temoins ne pouvaient pas l'attraper parce qu'ils injectent des doublures de `forge_repo` et
-  # `forge_files` : le chemin qui a besoin du pool n'etait pris par personne.
+  # ⚠ ET LES TEMOINS NE PEUVENT PAS L'ATTRAPER : ils injectent des doublures de `forge_repo` et
+  # `forge_files`, donc le chemin qui a besoin du pool n'est pris par personne.
   # `Fleet.Project.Onboard.eval_migrate/2` porte deja ce demarrage et dit pourquoi — c'est la meme
   # raison, a la meme frontiere.
   #

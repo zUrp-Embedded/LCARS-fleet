@@ -2,21 +2,21 @@ defmodule Fleet.Pilot.CompletionOutbox do
   @moduledoc """
   Durable journal of the step_run completions still owed to the forge — 6-127.
 
-  ## Ce qu'il repare, et ce qui existait deja
+  ## Ce qu'il tient, et ce que la chaine tient deja
 
   La chaine de `StepRunCompleter` est DEJA concue pour la reprise : son ordre est choisi pour ca
   (verrou leve EN DERNIER, apres la route gravee), et ses ecritures sont idempotentes — dedup du
   commentaire par signature, push idempotent, write-ops rejouables. Son `@moduledoc` l'annonce :
   *« recovery replays the sequence, the done steps skip »*.
 
-  **Personne ne rejouait.** Le resultat de l'agent est consomme par `TaskQueue` — l'item passe
-  `completed` des que la diffusion locale rend `:ok` — et le pod est relache. Une Task de completion
-  qui meurt entre-temps emportait donc la seule copie du resultat : le verrou restait sur la forge,
-  le poller reclamait l'orphelin apres sa grace, et **un agent refaisait le travail**. Degradation
-  bornee, mais la phrase du completer promettait mieux que ce que la fleet tenait.
+  **Mais rien ne rejoue tout seul.** Le resultat de l'agent est consomme par `TaskQueue` — l'item
+  passe `completed` des que la diffusion locale rend `:ok` — et le pod est relache. Sans journal,
+  une Task de completion qui meurt entre-temps emporte la SEULE copie du resultat : le verrou reste
+  sur la forge, le poller reclame l'orphelin apres sa grace, et **un agent refait le travail**.
+  Degradation bornee, mais la phrase du completer promet alors plus que ce que la fleet tient.
 
-  Ce module est la moitie manquante : le resultat est POSE ICI avant que la chaine ne tourne, et
-  RETIRE quand elle a fini. Ce qui reste au demarrage est, par construction, une completion due.
+  Ce module est l'autre moitie : le resultat est POSE ICI avant que la chaine ne tourne, et RETIRE
+  quand elle a fini. Ce qui reste au demarrage est, par construction, une completion due.
 
   ## Pourquoi un fichier, alors que la file de taches est EPHEMERE en production
 
@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.CompletionOutbox do
   Journalise une completion due. `{:error, :no_work_item_id}` si la charge n'en porte pas.
 
   L'appelant ne doit PAS traiter une erreur ici comme fatale : la completion se deroule de toute
-  facon, elle ne sera simplement pas reprenable — c'est l'etat d'avant 6-127.
+  facon, elle ne sera simplement pas reprenable.
   """
   @spec put(payload()) :: {:ok, String.t()} | {:error, term()}
   def put(payload) when is_map(payload) do

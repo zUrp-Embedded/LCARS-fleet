@@ -18,21 +18,15 @@ defmodule Fleet.API.ControlRouter do
   in the pod's mount namespace. The human's `lcars` runs host-side and reaches it via
   `curl --unix-socket`; the pod cannot.
 
-  ⚠ THIS PARAGRAPH USED TO REST ON A SECOND WALL THAT NO LONGER EXISTS, and the two must not be
-  confused. It said a pod runs `bwrap --share-net`, therefore shares the host network namespace,
-  therefore reaches any TCP loopback listener. That has been false since the per-pod CONNECT proxy
-  landed: `bwrap_launch.sh` passes `--unshare-all` and the flag is gone from the file entirely
-  (`Fleet.Spawner.Pod.Egress` states the current shape). So there are now TWO independent walls —
-  the mount namespace (this one) and the network namespace (that one). Writing the mount reason as
-  a consequence of the network one made a reader believe that restoring pod networking would reopen
-  this door. It would not; and the day someone changes one wall, the other must still be read on
-  its own terms.
+  ⚠ DEUX MURS INDEPENDANTS, ET N'ECRIRE JAMAIS L'UN COMME CONSEQUENCE DE L'AUTRE. Celui-ci est le
+  namespace de MONTAGE ; le namespace RESEAU en est un second (`bwrap_launch.sh` passe
+  `--unshare-all`, cf. `Fleet.Spawner.Pod.Egress`). Formuler la raison du montage comme une suite de
+  celle du reseau fait croire a un lecteur que RESTAURER LE RESEAU DU POD ROUVRIRAIT CETTE PORTE.
+  C'est faux — et le jour ou quelqu'un change un mur, l'autre doit encore se lire sur ses propres
+  termes.
 
-  ⚠ IL N'Y A PLUS DE SURFACE DE LECTURE A COTE (2026-08-14). Ce paragraphe disait que les lectures
-  (`/api/health`, `/api/version`, …) et le flux WS restaient sur TCP parce qu'ils etaient a faible
-  risque. Elles ont ete SUPPRIMEES, pour une autre raison : aucune capacite propre et aucun
-  appelant. Cette porte-ci est donc devenue **la seule surface du domaine**, et le raisonnement
-  ci-dessus n'a plus de contrepoint — il tient seul.
+  Cette porte est **la seule surface du domaine** : le raisonnement ci-dessus n'a pas de contrepoint
+  a cote, il tient seul.
 
   ## Contract
 
@@ -156,8 +150,8 @@ defmodule Fleet.API.ControlRouter do
     end
   end
 
-  # CE 202 EST ADOSSE A DEUX MECANISMES, ET NI L'UN NI L'AUTRE N'ETAIT NOMME ICI — un lecteur y
-  # voyait un « accepte » nu, sans moyen de savoir ce qui le rattrape.
+  # CE 202 EST ADOSSE A DEUX MECANISMES, ET LES NOMMER ICI EST CE QUI L'EMPECHE DE SE LIRE COMME UN
+  # « accepte » NU, sans moyen de savoir ce qui le rattrape.
   #
   #   1. AVANT la diffusion : `spawn_dispatch_status/0` refuse en 503 si le consommateur unique est
   #      mort OU vivant-mais-non-abonne. C'est le cas « 202 dans le vide » (zero pod, zero alarme),

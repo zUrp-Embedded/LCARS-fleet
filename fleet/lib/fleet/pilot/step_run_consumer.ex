@@ -6,21 +6,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
   **step-dispatch** pod (assignee-driven), translates the event into a `step_run` and delegates the
   completion sequence to `Fleet.Pilot.StepRunCompleter`.
 
-  ## Sub-modules (hardened boundaries — each reads a narrow `Seams` struct, never `state`)
+  ## Sub-modules
 
-    * `GateEngine` — DECISION engine (resolve_next: gate/rebound/judge-verdict/escalation);
-      returns an intent, THIS module acts.
-    * `TerminalEscalation` — human wall (freeze_to_arch: await_arch + kick arch) for
-      non-transient terminal errors, blocked producers and fail-closed verdicts.
-    * `StepRunBuild` — construction of the PR-native step_run map (producer/judge classification,
-      deliverable_opts, review_event, eng_summary).
-    * `Verdict` — PURE verdict cluster (gate-decision-v1 decoding + text rendering).
-    * `GatekeeperEscalation` — async-out of the gatekeeper escalation (enqueue eval brief + kick).
+  Each is a hardened boundary reading a NARROW `Seams` struct, never the whole `state`. The
+  decision engine returns an INTENT; acting on it is this module's job, never the engine's.
 
-  THIS module keeps: the Bus GenServer (subscribe/handle_info), the `gate_evals` state (async
-  resumptions), the verdict application (`apply_verdict` — shared gatekeeper/scoper), the
-  sync/offload execution discipline (`run_completion`) and the per-step-run derivation of the
-  state (`step_run_state`: repo/remote from the event, multi-project).
+  THIS module keeps: the Bus GenServer, the async-resumption state, the verdict application, the
+  sync/offload execution discipline, and the per-step-run derivation of the state.
 
   ## Gatekeeper = exception (escalation), NOT a step
 
@@ -29,18 +21,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
     * `:pass`                  → advances in the workflow_map (next_step).
     * `{:fail, _}`             → bounded REBOUND to the 1st step (anti-runaway rework).
-    * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft`
-      gate is NOT a scheduling step — it is a summons
-      of the **one-shot per-project gatekeeper** (exception judge, reorg 2026-07-19). We enqueue
-      an eval brief to the gatekeeper (work-session, addressed by `pod_id` via
-      TaskQueue/MCP), we hold the resume context in RAM (`gate_evals`, keyed
-      by `correlation_id`), and the decision comes back async via
-      `%Fleet.Event{source: :task_queue, type: :"work_item.completed"}` → `resume_gate/3`.
+    * `{:dispatch_gatekeeper}` → **escalation**: an undecidable `soft` gate is NOT a scheduling
+      step, it is a SUMMONS of the one-shot per-project judge. The eval brief is enqueued, the
+      resume context is held in RAM, and the decision comes back ASYNC.
 
-  The judge is **rare by construction**: the engine cannot over-summon it
-  (the `soft`/undecidable is a *runtime condition*, not a *step tag*).
-  No `role: gatekeeper` step, no `soft⟺gatekeeper` biconditional —
-  there is no explicit-step machinery: the decision is forge-driven.
+  ⚠ The judge is **rare BY CONSTRUCTION**: the engine cannot over-summon it, because the
+  undecidable is a *runtime condition* and not a *step tag*. There is no `role: gatekeeper` step
+  and no `soft⟺gatekeeper` biconditional — the decision is forge-driven.
 
   ## Defensive `workflow_map_id` guard
 
@@ -644,23 +631,20 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # BL-6-03 S2
   #
-  # ⚠ CE POINT N'EST PAS UNE SAGA, ET LE RESULTAT DE L'AGENT EST DEJA CONSOMME QUAND ON Y ARRIVE.
-  # `TaskQueue` a persiste le work item `completed` AVANT que cette chaine ne tourne (F-037), et la
-  # chaine du completer est une suite de mutations forge (publier, ouvrir la PR, demander la revue,
-  # graver la route, deverrouiller). Une erreur transitoire APRES une mutation reussie laisse donc un
-  # etat partiel, et rien ici ne rejoue l'etape manquante a partir du resultat deja acquis : on
-  # journalise et on rend l'outcome.
+  # ⚠ CE POINT N'EST PAS UNE SAGA, ET LE RESULTAT DE L'AGENT EST DEJA CONSOMME QUAND ON Y ARRIVE :
+  # le work item est persiste `completed` AVANT que cette chaine ne tourne, et la chaine est une
+  # suite de mutations forge. Une erreur transitoire APRES une mutation reussie laisse donc un etat
+  # partiel, que rien ici ne rejoue.
   #
-  # CE QUI RATTRAPE, ET CE QUI NE RATTRAPE PAS — la difference compte pour qui lit une de ces lignes :
-  #   * le VERROU n'est pas perdu : un step_run interrompu laisse une issue dont plus aucun pod ne
-  #     possede le ref, donc reclamation d'orphelin (grace 2 ticks) puis re-dispatch ;
-  #   * mais le RESULTAT, lui, est consomme : le re-dispatch refait travailler un agent, il ne
-  #     reprend pas la chaine ou elle s'est arretee. Degradation bornee (un run de plus), pas un
-  #     blocage — et c'est la seule promesse qu'on peut tenir sans etat durable.
+  # CE QUI RATTRAPE, ET CE QUI NE RATTRAPE PAS :
+  #   * le VERROU n'est pas perdu — un step_run interrompu laisse une issue dont plus aucun pod ne
+  #     possede le ref, donc reclamation d'orphelin puis re-dispatch ;
+  #   * le RESULTAT, lui, est consomme — le re-dispatch REFAIT travailler un agent, il ne reprend
+  #     pas la chaine ou elle s'est arretee.
   #
-  # La rendre reprenable demande une saga persistee indexee par `work_item_id`, avec des points de
-  # controle idempotents. C'est le MEME mecanisme absent que quatre autres arbitrages reclament
-  # (outbox durable) : une seule question, et elle ne se tranche pas au detour d'un site.
+  # Degradation BORNEE, pas un blocage, et c'est la seule promesse tenable sans etat durable : la
+  # rendre reprenable demande une saga persistee a points de controle idempotents, qui est une
+  # question de conception a trancher ailleurs qu'au detour d'un site.
   defp run_completion(state, label, meta, fun) do
     exec = fn ->
       outcome = fun.()
@@ -744,8 +728,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   @doc false
   # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
-  # resolved every role in the FIRST active catalogue's image: a `dev` of `web` looked up among
-  # `fleet`'s roles, was not there, and the step failed loud on a role that exists — the wedge the
+  # would resolve every role in the FIRST active catalogue's image: a `dev` of `web` looked up
+  # among `fleet`'s roles, absent there, and the step fails loud on a role that exists — the wedge
+  # the
   # boot validators cannot catch, because it only happens when a step of a second catalogue's
   # project runs. `nil` keeps the default image, which is what a single-catalogue deployment and
   # every test fixture want.
@@ -862,15 +847,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
       # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
       #
-      # `halt_invalid` est le repli fail-closed de la validation de FORME : un `details` en chaine
-      # au lieu d'un objet, un `chain` d'objets au lieu de chaines nues. Le juge a lu le livrable,
-      # il a une opinion, il l'a mal emballee — et le geler immobilisait un humain pour un champ mal
-      # type. Une passe de correction, une seule, bornee par un marqueur forge.
+      # Le repli fail-closed porte sur la FORME : le juge a lu le livrable, il a une opinion, il l'a
+      # mal emballee — et le geler immobiliserait un humain pour un champ mal type. Une passe de
+      # correction, une seule, bornee par un marqueur forge.
       #
-      # LE POD EST ENCORE LA POUR LA RECEVOIR : aucune fauche n'est declenchee par la PRODUCTION
+      # ⚠ LE POD EST ENCORE LA POUR LA RECEVOIR : aucune fauche n'est declenchee par la PRODUCTION
       # d'un verdict, seulement par son INGESTION — et une enveloppe refusee n'est pas ingeree. Le
-      # juge vit donc encore, avec la lecture du livrable qui lui a coute son contexte, et c'est ce
-      # que la passe depense.
+      # juge vit donc encore, avec la lecture du livrable qui lui a coute son contexte.
       #
       # Auto-gate et ETEINT par defaut : au-dela de la passe, ou si elle n'est pas armee, c'est
       # exactement le gel d'avant — en nommant pourquoi.
@@ -878,8 +861,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
         VerdictCorrection.request(
           n,
           role,
-          # Le repli n'est plus le cas nominal : les deux chemins qui atteignent ce point posent
-          # desormais `:invalid_reason`. Il reste pour un ctx construit ailleurs un jour.
+          # Repli, jamais le cas nominal : les deux chemins qui atteignent ce point posent
+          # `:invalid_reason`. Il couvre un ctx construit ailleurs un jour.
           Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision-v1.json` invalide",
           trace,
           %VerdictCorrection.Seams{
@@ -893,9 +876,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
         )
 
       other ->
-        # (Le doublon `audit.verdict` est parti — brouette 2026-08-19 : il re-disait CE gel a une
-        # machinerie de coordination dont le terminus re-emettait un evenement. Le gel ci-dessous
-        # EST le chemin ; l'arch est reveille, le ticket est fige.)
+        # (Pas de second evenement `audit.verdict` ici : il re-dirait CE gel a une machinerie de
+        # coordination dont le terminus re-emet un evenement. Le gel ci-dessous EST le chemin :
+        # l'arch est reveille, le ticket est fige.)
         TerminalEscalation.freeze_to_arch(n, role, other, trace, terminal_seams(state))
     end
   end

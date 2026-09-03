@@ -45,8 +45,8 @@ defmodule Fleet.Forge.Client.Signing do
     end
   end
 
-  # ⚠ `false` DISAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menaient a
-  # poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
+  # ⚠ UN `false` NU DIRAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menent
+  # a poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
   # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
   # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
   # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
@@ -65,16 +65,15 @@ defmodule Fleet.Forge.Client.Signing do
               # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
               # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
               # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-              # premier ; se limiter au systeme rendait la dedup aveugle a tout ce qui est signe par
-              # un role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
+              # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
+              # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
               case trusted_logins(config, opts) do
                 {:ok, logins} ->
                   {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
 
-                # LA LECTURE A REUSSI, LES IDENTITES NON. `[]` disait « aucun commentaire de
-                # confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne sait pas QUI a
-                # ecrit quoi. Second pliage du meme genre que celui d'en dessous, une branche plus
-                # loin.
+                # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
+                # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
+                # sait pas QUI a ecrit quoi.
                 {:error, why} ->
                   {:unverified, {:trusted_logins, why}}
               end

@@ -2,49 +2,38 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   @moduledoc """
   Le déclencheur du rail d'outillage — et ce n'est pas un événement, c'est une COMPARAISON.
 
-  DOMAINE, PAS PILOT : converger la boîte est du system-side (le métier de ce domaine), pas de la
-  conduite de projet. Une v1 vivait dans `Fleet.Pilot` avec sa propre plomberie de tick — le
-  domaine portait déjà `PeriodicCheck`, gardé « pour le prochain check périodique » : le voici.
-  La plomberie (start_link nommé, tick + re-arm EN DERNIER, hook `:check_now` qui rejoue le chemin
-  complet SANS re-armer) vit là-bas ; ce module garde son état, son `do_check/1` et la forme de sa
-  réponse.
+  DOMAINE, PAS PILOT : converger la boîte est du system-side, pas de la conduite de projet. La
+  plomberie de tick vit dans `PeriodicCheck` ; ce module garde son état, son `do_check/1` et la
+  forme de sa réponse.
 
   ## Pourquoi rien n'écoute le merge
 
-  `CLAUDE.md` le pose pour toute la fleet : *« le webhook `gitea.*` est un ACCÉLÉRATEUR de poll,
-  jamais une source de vérité »* — et `gitea.merged` est déclaré **sans consommateur** dans
-  `priv/event_router/events.yaml`. Ce module lit donc le head de la branche protégée et le
-  compare au dernier SHA qu'il a appliqué. Ils diffèrent ⇒ il converge.
-
-  Trois propriétés tombent gratuitement, et c'est ce qui rend la comparaison meilleure qu'un
-  abonnement :
+  Un webhook de forge est un ACCÉLÉRATEUR de poll, jamais une source de vérité. Ce module lit donc
+  le head de la branche protégée et le compare au dernier SHA qu'il a appliqué. Ils diffèrent ⇒ il
+  converge. Trois propriétés tombent gratuitement, et c'est ce qui rend la comparaison meilleure
+  qu'un abonnement :
 
     * **le boot n'est pas un cas spécial.** C'est un tick comme un autre. Forge injoignable au
       démarrage ⇒ le tick suivant réessaie, au lieu d'un no-op silencieux qu'aucun rejeu ne rattrape.
     * **une PR fermée sans merge ne laisse rien de pendant** côté branche : le SHA n'a pas bougé,
-      il n'y a rien à réconcilier. (Côté work-item, elle laisse un verrou — cf. le cycle de vie,
-      `01` §7.3.)
+      il n'y a rien à réconcilier.
     * **rejouer est sans effet.** Deux invocations voient le même écart et font le même geste.
 
   ## Le rebuild, et pourquoi le marqueur vit AVEC LE CONTENEUR
 
   Le marqueur (`toolchain.applied`) décrit pour moitié l'état de `/usr`, qui meurt avec le
   conteneur. Il vit donc sous `LCARS_TOOLCHAIN_RUN_STATE` — défaut `/run/lcars/toolchain`, un
-  **tmpfs** : il meurt avec le conteneur PAR CONSTRUCTION, même motif que
-  `/run/lcars-provision.rc` (« le fichier décrit TOUJOURS ce boot-ci »). JAMAIS sur le magasin ni
-  sous un chemin qu'un volume pourrait recouvrir : une v2 le posait en `/var/lib/lcars/toolchain`
-  pendant que le convergeur défaute son STORE sur `/var/lib/lcars` — si le lot F montait le
-  magasin là, le marqueur « conteneur » aurait survécu au rebuild et la boîte se serait dite à
-  jour sur un /usr nu (le défaut de `b341f415f`, ré-ouvert par collision de défauts — audit).
-  Posé 2775 root:fleet par `45-sudoers-toolchain` à chaque boot. Après un rebuild, le marqueur
-  est mort ⇒ le premier tick reconverge — c'est le mécanisme qui remplace l'ancien « convergeur
-  dans la séquence d'entrypoint » de `01` §4.5.
+  **tmpfs** : il meurt avec le conteneur PAR CONSTRUCTION. JAMAIS sur le magasin ni sous un chemin
+  qu'un volume pourrait recouvrir : le convergeur défaute son STORE sur `/var/lib/lcars`, et un
+  marqueur « conteneur » posé là survivrait au rebuild — la boîte se dirait à jour sur un /usr nu
+  (`b341f415f`). Après un rebuild le marqueur est mort ⇒ le premier tick reconverge.
 
   ## Ce qu'il n'est pas
 
-  Il n'installe rien. Il constate un écart et appelle **un** binaire root, dont l'entrée est un
-  manifeste déjà mergé sur une branche protégée. Le seul geste privilégié de tout le rail tient
-  dans cette invocation, et son argument a été signé par un humain avant d'exister.
+  Il n'installe rien, et il ne désigne AUCUN binaire : il ouvre une socket, et c'est le service
+  privilégié qui résout la tête de la branche protégée et exécute. Le seul geste privilégié de tout
+  le rail tient dans cette invocation, dont l'argument a été signé par un humain avant d'exister —
+  un manifeste déjà mergé sur une branche protégée.
 
   ## Configuration
 
@@ -54,11 +43,6 @@ defmodule Fleet.Admiral.ToolchainReconciler do
       `toolchain.sock`, servie par `lcars-privileged`). Rend `{:ok, sha_appliqué}` ou
       `{:error, cause}` ; `:ok` nu reste accepté pour les doublures de témoins.
     * `:lcars_fleet, :toolchain_socket` — défaut `/run/lcars/privileged/toolchain.sock`
-
-  ⚠ `:toolchain_converger_bin` A DISPARU AVEC LE `sudo` QUI LE NOMMAIT. Ce module ne désigne plus
-  aucun binaire : il ne dit pas QUOI exécuter, ni sur QUOI — il ouvre une socket, et c'est le
-  service privilégié qui résout la tête de la branche protégée. Le nom du binaire vit chez lui,
-  qui est le seul à l'invoquer.
   """
 
   use GenServer
@@ -153,9 +137,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     %{state | last_result: elem(result, 0), rejected_sha: elem(result, 1)}
   end
 
-  # Rend `{résultat, sha_refusé}` — LE SHA REFUSÉ EST COLLANT (audit 2026-08-19) : un convergeur
-  # qui sort 2 dit « ce DOCUMENT est faux, un humain corrige ». Sans mémoire, la comparaison
-  # revoyait le même écart au tick suivant et rebouclait toutes les 60 s sur une faute qu'aucun
+  # Rend `{résultat, sha_refusé}` — LE SHA REFUSÉ EST COLLANT : un convergeur qui sort 2 dit « ce
+  # DOCUMENT est faux, un humain corrige ». Sans mémoire, la comparaison revoit le même écart au
+  # tick suivant et reboucle toutes les 60 s sur une faute qu'aucun
   # rejeu ne répare — en re-téléchargeant l'installeur à chaque tour. Le gel se PURGE dès que la
   # branche bouge : le head suivant est un autre document, il a droit à sa chance.
   defp reconcile_pass(state) do
@@ -479,7 +463,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         @default_interval_ms
       )
 
-  # ⚖ RENOMMEE LE 2026-08-21 : `:forge_client` -> `:admiral_forge_client`. Sa voisine juste
+  # ⚖ RENOMMEE : `:forge_client` -> `:admiral_forge_client`. Sa voisine juste
   # au-dessus porte deja le prefixe (`:admiral_toolchain_reconcile_interval_ms`) ; celle-ci etait
   # l'une des deux SEULES clefs de module du projet sans proprietaire, et le meme nom designait
   # ailleurs un mecanisme de portee differente (22 `Keyword.get(opts, :forge_client, …)` dans

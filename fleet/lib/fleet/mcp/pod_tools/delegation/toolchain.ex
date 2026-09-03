@@ -213,8 +213,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Toolchain do
   end
 
   # Le client canonique rend le NUMERO nu ({:ok, integer}, 409 compris — cf. le @callback de
-  # `ForgeWriter`). Les clauses map d'une v1 acceptaient ce qu'aucun writer reel ne rend : le
-  # double etait vert et la prod rendait `"pr" => nil`.
+  # `ForgeWriter`). Accepter ici une map — ce qu'aucun writer reel ne rend — rend le double vert
+  # pendant que la prod rend `"pr" => nil`.
   defp pr_number(n) when is_integer(n), do: n
   defp pr_number(_), do: nil
 end

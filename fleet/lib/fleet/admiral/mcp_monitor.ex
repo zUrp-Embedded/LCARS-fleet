@@ -6,18 +6,16 @@ defmodule Fleet.Admiral.MCPMonitor do
   ## Mechanics
 
   GenServer + recursive `Process.send_after/3` — the plumbing (named start_link, tick + re-arming,
-  test hook `:check_now`) lives in `Fleet.Admiral.PeriodicCheck` (shared plumbing kept generic
-  after MCPWatcher moved to CI — the shape outlived its second user); this
-  module keeps its state, its `do_check/1` and the shape of its reply (`{:ok, status}`). On each
-  tick (default 60s), checks the target's liveness:
+  test hook `:check_now`) lives in `Fleet.Admiral.PeriodicCheck`; this module keeps its state, its
+  `do_check/1` and the shape of its reply (`{:ok, status}`). On each tick, checks the target's
+  liveness:
 
     * target alive → status `:ok`
     * absent / dead → status `:crashed`
 
   Detects the `:ok → :crashed` transition (NOT `:unknown → :crashed` at boot,
   NOT `:crashed → :crashed` so as not to spam) and broadcasts a canonical event.
-  The `:crashed → :ok` return just logs (silent recovery, no dedicated event
-  in the MVP).
+  The `:crashed → :ok` return just logs — silent recovery, with no dedicated event.
 
   ## Target
 

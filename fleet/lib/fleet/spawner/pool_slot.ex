@@ -2,12 +2,12 @@ defmodule Fleet.Spawner.PoolSlot do
   @moduledoc """
   Allocates the `pool` nibble of a pod's `session_id`, and CAPS the concurrency of a role.
 
-  ## Why the nibble was dead
+  ## Why the nibble needs an allocator
 
-  `Fleet.Spawner.SessionId` reserves a high nibble for a "pool" (`<P><R>`, 16 values) — measured
-  2026-08-03: **no caller ever passed it**, so it was always `0` and two concurrent pods of the
-  same role shared their `session_id`. Harmless while a repo ran one producer at a time (the
-  `pod_id` carried the uniqueness), and a latent lie the day producers fan out per ticket.
+  `Fleet.Spawner.SessionId` reserves a high nibble for a "pool" (`<P><R>`, 16 values). With no
+  caller passing it, it stays `0` and TWO CONCURRENT PODS OF THE SAME ROLE SHARE THEIR
+  `session_id` — harmless while a repo runs one producer at a time (the `pod_id` carries the
+  uniqueness), and a latent lie the day producers fan out per ticket.
 
   ## What this module decides
 
@@ -17,9 +17,9 @@ defmodule Fleet.Spawner.PoolSlot do
   Reserving 0 rather than 0xF is not cosmetic. `SessionMint` already mints `pool: 0` for every
   caller that does not allocate, so the reserved value is the one the un-allocated ALREADY carry:
   the reservation needs no new default, and every session_id minted before this module existed
-  (the nibble was measured never-allocated, so all of them) reads retroactively as what it was —
-  a pod outside the managed fan-out. Reserving the top value instead would have required changing
-  that default AND left the whole history claiming a slot it never held.
+  (the nibble is measured never-allocated, so all of them) reads retroactively as what it is —
+  a pod outside the managed fan-out. Reserving the top value instead would require changing that
+  default AND leave the whole history claiming a slot it never held.
 
   The seat is for a pod that is deliberately NOT a fan-out member — a producer held for the life
   of a project rather than a ticket. Note what the seat does and does not buy: such a pod is
@@ -146,14 +146,14 @@ defmodule Fleet.Spawner.PoolSlot do
   @doc """
   Pool indexes held by `(role, repo)` — the LIVE registry UNION the survivors on disk.
 
-  ## Why the registry alone was not the answer
+  ## Why the registry alone cannot answer
 
-  This module exists so two processes never share a deterministic `session_id`, and it read only
-  `Fleet.Spawner.Registry` — which lives in RAM. Pods are `:temporary` and the registry dies with
+  This module exists so two processes never share a deterministic `session_id`, and
+  `Fleet.Spawner.Registry` lives in RAM. Pods are `:temporary` and the registry dies with
   the BEAM, so after a restart it reads EMPTY. Meanwhile a `kill -9` or a VM crash leaves the bwrap
   holder alive: `terminate/3` never ran, and closing the port does not kill it (the holder is a
   `sleep infinity` that ignores an stdin EOF on its own). The PodWarden collects those, but only
-  after two ticks. In that window the registry said "free" about an index a live holder was sitting
+  after two ticks. In that window the registry says "free" about an index a live holder is sitting
   on — the exact collision this module is for.
 
   The survivors are read from the state snapshots each pod wrote, and counted only when the pod is

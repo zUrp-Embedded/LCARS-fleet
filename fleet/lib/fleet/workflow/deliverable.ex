@@ -65,10 +65,10 @@ defmodule Fleet.Workflow.Deliverable do
 
   # LA PREUVE PART AVEC LA BRIQUE, ET C'EST TOUT LE FIX (BL-6-43).
   #
-  # L'attestation etait une SECONDE ecriture, sur une AUTRE face, APRES le PR, best-effort. Trois
-  # proprietes en decoulaient, toutes mauvaises : elle pouvait ne pas exister pour une brique
-  # publiee ; elle pouvait exister pour un AUTRE sha que celui qu'on scellait ; et son absence etait
-  # indiscernable de son echec. Le sceau ne pouvait donc que gerer des consequences.
+  # Une attestation ecrite EN SECOND, sur une AUTRE face, APRES le PR et en best-effort, porte
+  # trois proprietes qui sont toutes mauvaises : elle peut ne pas exister pour une brique PUBLIEE ;
+  # elle peut exister pour un AUTRE sha que celui qu'on scelle ; et son absence est indiscernable de
+  # son echec. Le sceau ne peut alors que gerer des consequences.
   #
   # Ici elle devient un objet git de l'espace de travail, sous une ref NOMMEE PAR LE SHA
   # (`refs/lcars/provenance/<sha>`), poussee dans le MEME `git push` que la branche. Deux
@@ -77,9 +77,9 @@ defmodule Fleet.Workflow.Deliverable do
   #     publiee non plus, donc il n'y a rien a attester ;
   #   - elle ne peut pas parler d'un autre commit : son NOM est le commit.
   #
-  # Une ecriture d'attestation qui echoue FAIT ECHOUER la publication, et c'est delibere : le
-  # commentaire d'origine disait « never a blocked PR over a trace file », mais cette phrase valait
-  # quand la trace etait un fichier de courtoisie sur une autre face. Ici l'ecriture est LOCALE
+  # Une ecriture d'attestation qui echoue FAIT ECHOUER la publication, et c'est delibere. « Jamais
+  # une PR bloquee pour un fichier de trace » vaut quand la trace est un fichier de courtoisie sur
+  # une autre face ; ici l'ecriture est LOCALE
   # (hash-object + update-ref, aucun reseau) — elle ne peut echouer que sur un depot casse, cas ou
   # publier serait pire.
   defp with_provenance(opts, sha) do

@@ -80,17 +80,12 @@ defmodule Fleet.Pilot.Poller do
 
   @default_interval_ms 30_000
 
-  # COOLDOWN of the awaits-arch NET (design 2026-07-19: "first kick immediate, protection
-  # BEHIND it"). The FIRST kick of an escalation is fired immediately by TerminalEscalation
-  # (ArchWake, offer-then-wake ordered); this net only re-derives a wake from the persistent
-  # `lcars-awaits-arch` label when the last kick is OLDER than the cooldown. NEVER a sampling
-  # grid (`rem(poll_count, N)`): a grid makes even a FRESH escalation draw a 0-5 min latency
-  # lottery — the cap must protect AFTER the first kick, not delay it (scar 2026-07-19).
-  # Rationale for the cap itself: a wake can cost a claude TURN → uncapped, a lingering label
-  # would churn a wake every 30s (unbounded spend, anti-Jupiter).
-  # ⚠ Evaluated on REGULAR ticks only: webhook kick-polls (:kick mode) never call
-  # maybe_rekick_arch — the arch's own wake generates forge events whose kicks would
-  # re-evaluate the net at webhook rate (self-amplified spend).
+  # « Premier reveil immediat, protection DERRIERE lui » : le plafond protege APRES le premier
+  # reveil, il ne le retarde pas.
+  #
+  # ⚠ JAMAIS UNE GRILLE D'ECHANTILLONNAGE (`rem(poll_count, N)`) : une grille ferait tirer a une
+  # escalade FRAICHE une loterie de latence de 0 a 5 minutes. Le plafond existe parce qu'un reveil
+  # peut couter un TOUR de claude — sans lui, un label qui traine en declenche un toutes les 30 s.
   @awaits_rekick_cooldown_ms 300_000
 
   # Coalescence window of the webhook kick: a burst of events within the window = ONE poll.
@@ -107,13 +102,9 @@ defmodule Fleet.Pilot.Poller do
     # The human of THIS fleet (OS user, `Human.current!()`). Multi-user scoping: we dispatch
     # ONLY its issues (otherwise Alice's poller spawns for Bob). Test seam: opt `:human`.
     :my_human,
-    # The forge org = THE admission frontier: the poller discovers via `list_org_repos(org)`, every repo
-    # of the org IS a fleet project. Default `fleet` (config `:lcars_fleet, :pilot_fleet_org`); MUST match the org of
-    # create_project (`:lcars_fleet, :mcp_delegation_org`) — both default to `fleet`. Test seam: opt `:org`.
-    # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE INSTALLE, et l'org porte le nom du
-    # catalogue. C'etait un scalaire tant qu'il n'y avait qu'un metier ; un scalaire ne peut pas
-    # nommer N orgs, et le projet d'un catalogue vit dans la sienne. Seam de test : opt `:orgs`
-    # (ou `:org`, un singleton, pour les appelants qui en nommaient une).
+    # Les orgs de la frontiere d'admission — UNE PAR CATALOGUE INSTALLE, l'org portant le nom du
+    # catalogue. Tout depot d'une de ces orgs EST un projet de la fleet. Seam de test : `:orgs`, ou
+    # `:org` en singleton pour les appelants qui en nommaient une.
     :orgs,
     :forge_client_override,
     forge_opts: [],
@@ -369,41 +360,13 @@ defmodule Fleet.Pilot.Poller do
   # Internals — GenServer poll orchestration
   # ============================================================
 
-  # STEP mode only. The scan is in
-  # `step_do_poll/1`; this wrapper keeps the single entry point (shared jitter/backoff/safety-net).
-  # Forge-driven discovery. The poller scans ALL the repos of the fleet org (`list_org_repos`;
-  # every repo of the org IS a fleet project), not a hard-coded `:repo`. Per-repo: the step logic
-  # UNCHANGED (state.repo set per iteration). Discovery OK → forge up → err_streak reset; the issue
-  # scoping `assigned_by=my_human` stays the anti-theft guard even if one of Alice's repos leaked.
-  # Discovery KO → backoff (handle_poll_error). The repo-serialized lease stays per-repo (concurrent across,
-  # sequential within).
+  # ⚠ UNE ORG ABSENTE N'EST PAS UNE ORG ILLISIBLE. Le fail-closed vaut parce qu'« une decouverte
+  # partielle ne se distingue pas de "pas de travail" » — raison qui ne s'applique PAS a un 404 :
+  # une org qui N'EXISTE PAS ne porte aucun depot, donc la retirer ne cache rien par construction.
+  # Un 5xx, un timeout ou un 403 laissent au contraire des depots peut-etre non lus, d'ou le `halt`.
   #
-  # Per-repo state: the per-item DISPATCH errors live in the TALLY (not the streak — a repo that
-  # lists badly does NOT backoff the whole fleet, the forge is up since discovery succeeded). BUT the
-  # RECONCILIATION state (`orphan_lock_suspects`, 2-tick grace) MUST persist cross-tick: without re-threading,
-  # the grace never accumulates → an orphaned lock is NEVER reclaimed (the pipe wedges). We aggregate it
-  # (union over all repos) in the returned state. `poll_count` +1/tick (observability).
-  # The lock refs are REPO-QUALIFIED (`{repo, :issue|:pr, n}`, built in
-  # `Reconciliation`): the cross-repo union of suspects cannot collide on the number
-  # alone → a live pod #N/repoB CANNOT mask an orphan #N/repoA, and the 2-tick grace does not
-  # contaminate across repos (no double-spawn). The key carries the identity.
-  # ⚠ UNE ORG ABSENTE N'EST PAS UNE ORG ILLISIBLE, et confondre les deux a coute une flotte entiere.
-  # Mesure du 2026-08-15 au banc : le catalogue `web` servi ici sur une forge qui n'a jamais porte
-  # l'org `web` rendait 404 ici, le `{:halt, …}` jetait l'accumulateur — `fleet` INCLUS, deja liste —
-  # et la passe entiere tombait. Pas seulement le dispatch : tout le corps de `do_poll` (snapshot des
-  # pods, fold des repos, filet arch, recheck des protections) pour TOUS les projets de TOUTES les
-  # orgs saines. Le backoff saturait ensuite a 300 s sans jamais redescendre, puisque `err_streak` ne
-  # retombe que sur une decouverte reussie.
-  #
-  # LE FAIL-CLOSED RESTE, sa raison n'a pas bouge : « une decouverte partielle ne se distingue pas de
-  # "pas de travail" ». Mais cette raison ne s'applique PAS a un 404, et c'est la nuance qui compte —
-  # une org qui N'EXISTE PAS ne porte AUCUN depot, donc la retirer ne cache rien par construction.
-  # Il n'y a pas de travail a rendre muet. Un 5xx, un timeout, un 403 : la, des depots existent
-  # peut-etre et on ne les a pas lus → la passe echoue, comme avant.
-  #
-  # Les orgs absentes remontent avec les depots plutot que d'etre logguees ici : le site qui sait si
-  # l'absence est NOUVELLE est celui qui tient l'etat, et repeter la phrase a chaque tick la rend
-  # invisible aussi surement que se taire.
+  # Les absentes REMONTENT au lieu d'etre logguees ici : seul le site qui tient l'etat sait si
+  # l'absence est NOUVELLE, et repeter la phrase a chaque tick la rend invisible comme le silence.
   defp discover(forge, state) do
     Enum.reduce_while(state.orgs, {:ok, [], []}, fn org, {:ok, acc, absent} ->
       case forge.list_org_repos(org, state.forge_opts) do
@@ -474,23 +437,19 @@ defmodule Fleet.Pilot.Poller do
             :kick -> %{state | err_streak: 0, kick_count: state.kick_count + 1, last_error: nil}
           end
 
-        # ADMISSION = ORG-MEMBERSHIP (WS3): every repo of the org IS a fleet project — the org is THE frontier
-        # of the trust group, managed UPSTREAM by the human admin (LCARS is not adversarial multi-tenant).
-        # No more mutable topic nor server-side seal to verify. Per-human scoping stays
-        # `assigned_by` (issue-level, `step_do_poll`): the fleet processes ONLY its issues, even if
-        # `list_org_repos` shows it the repos of the OTHER humans of the group (the anti-theft guard holds).
+        # ADMISSION = ORG-MEMBERSHIP : l'org EST la frontiere du groupe de confiance, tenue en amont
+        # par l'admin humain — LCARS n'est pas du multi-tenant adversarial. Le scoping par humain
+        # reste `assigned_by`, au niveau de l'issue : la fleet ne traite QUE ses issues, meme quand
+        # `list_org_repos` lui montre les depots des autres humains du groupe.
         #
-        # The fold accumulates exactly the two cross-repo monoids step_do_poll yields (tally merge,
-        # suspects union) + the awaits-arch union — nothing else survives the per-repo pass.
-        # ONE `list_pods` FOR THE WHOLE TICK (BL-6-40, tick context). It used to live in
-        # `reconcile/5`, so it ran once per REPO: over R repos, R `GenServer.call`s at a 5 s timeout
-        # to the Spawner for a snapshot that does not usefully change from one repo to the next.
-        # The snapshot is DATA, so it travels as an explicit parameter — never inside `%Seams{}`,
-        # whose contract is "the seams reconcile READS", nor in `state`, where it would become a
-        # cache to invalidate.
+        # ⚠ UN SEUL `list_pods` POUR TOUT LE TICK (BL-6-40) : par depot, ce serait R appels au
+        # Spawner a 5 s de timeout pour un instantane qui ne change pas utilement d'un depot au
+        # suivant. Il
+        # voyage en PARAMETRE explicite — dans `%Seams{}` il contredirait le contrat « les seams
+        # reconcile LISENT », dans `state` il deviendrait un cache a invalider.
         #
-        # `:tick` ONLY: the kick does not reconcile (dispatch-only), so taking the snapshot for it
-        # would ADD a call instead of removing one — the exact opposite of the point.
+        # `:tick` SEULEMENT : le kick ne reconcilie pas, donc prendre l'instantane pour lui AJOUTERAIT
+        # un appel au lieu d'en retirer un.
         pods =
           if mode == :tick,
             do: Reconciliation.snapshot_pods(state.spawner || Fleet.Spawner),
@@ -498,21 +457,14 @@ defmodule Fleet.Pilot.Poller do
 
         base = note_pods_snapshot(base, pods)
 
-        # UN DEPOT QUI LEVE N'EMPORTE PLUS CEUX QUI LE SUIVENT. `safe_poll/2` capture bien, mais
-        # AU-DESSUS de ce fold : les depots situes apres celui qui a leve n'etaient pas traites du
-        # tout pendant ce cycle. Et comme la cause est deterministe — la meme PR, le meme fichier,
-        # le meme conflit pathologique — elle se reproduit a chaque tick : un seul depot malade
-        # privait de service tous ceux qui le suivaient dans l'ordre d'iteration, indefiniment.
+        # ⚠ LE FILET EST ICI, PAR DEPOT, ET IL NE REMPLACE PAS CELUI DU DESSUS. `safe_poll/2` capture
+        # au-dessus du fold, donc une levee y privait de service TOUS les depots suivants — et comme
+        # la cause est deterministe, a chaque tick. `safe_poll/2` garde son role pour ce qui est hors
+        # du fold.
         #
-        # Le filet est donc DESCENDU d'un cran, par depot, et il ne remplace pas celui du dessus :
-        # `safe_poll/2` garde son role (une levee hors du fold — construction de `base`, snapshot
-        # des pods, filet arch — reste un echec de tick, avec son `err_streak` et son repli).
-        #
-        # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL. `acc_s` est l'union des suspects, et le laisser
-        # inchange PERDRAIT les suspects de ce depot — c'est-a-dire remettrait a zero la grace de
-        # deux ticks qui protege ses verrous. On reporte donc ses suspects anterieurs, exactement ce
-        # que font les chemins de skip volontaire (`not_onboarded_skip`, `parked_skip`) : un depot
-        # non traite n'est pas un depot sans suspects.
+        # ⚠ L'ACCUMULATEUR N'EST PAS RENDU TEL QUEL sur une levee : laisser `acc_s` inchange perdrait
+        # les suspects de ce depot, donc remettrait a zero la grace de deux ticks qui protege ses
+        # verrous. Un depot non traite n'est pas un depot sans suspects.
         {tally, suspects, awaits} =
           Enum.reduce(repos, {Lease.zero_tally(), MapSet.new(), MapSet.new()}, fn repo,
                                                                                   {acc_t, acc_s,
@@ -537,10 +489,10 @@ defmodule Fleet.Pilot.Poller do
         # set only changes on poll reads — evaluating between them is pure churn).
         base = if mode == :tick, do: maybe_rekick_arch(awaits, base), else: base
 
-        # Desired-state pass of the main branch-protection (throttled per repo, regular
-        # ticks only): the rule was projected ONCE at onboarding and "already exist" used
-        # to be a blind :ok — an imported repo's stale rule or a card changed since then
-        # kept a main protection out of line with the CURRENT jury until now.
+        # Desired-state pass of the main branch-protection (throttled per repo, regular ticks
+        # only). Projecting the rule ONCE at onboarding and treating "already exist" as a blind
+        # :ok leaves an imported repo's stale rule, or a card changed since, holding a main
+        # protection out of line with the CURRENT jury — with nothing to say so.
         base = if mode == :tick, do: maybe_recheck_protection(base, repos), else: base
 
         # The CYCLE, measured AT ITS OWN SCALE — strictly distinct from `[:poller, :poll]`, which
@@ -592,10 +544,10 @@ defmodule Fleet.Pilot.Poller do
       state.protection_reconciler ||
         (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
-    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Le tampon etait pose sur TOUS les `due`, echecs
-    # compris : un depot dont la reconciliation venait d'echouer repartait donc pour une periode
-    # entiere avant d'etre retente, alors que la seule chose qu'on savait de lui, c'est qu'on n'avait
-    # pas su le lire. Un echec n'est pas un travail fait, et le throttle existe pour espacer le
+    # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Pose sur TOUS les `due`, echecs compris, le tampon
+    # renvoie pour une periode entiere un depot dont la reconciliation vient d'echouer — alors que
+    # la seule chose qu'on sait de lui, c'est qu'on n'a pas su le lire. Un echec n'est pas un
+    # travail fait, et le throttle existe pour espacer le
     # travail — pas pour espacer les retentatives d'un travail qui n'a pas eu lieu.
     reconciled =
       Enum.filter(due, fn repo ->
@@ -621,18 +573,16 @@ defmodule Fleet.Pilot.Poller do
     }
   end
 
-  # A failing pod enumeration is TWO things at once: a correct fail-safe (we reclaim nothing rather
-  # than unlock blindly) AND a potentially DURABLE outage. While it lasts, no orphaned lock is ever
-  # taken back — so an `lcars-in-flight` outlives its pod indefinitely, and the brick stays held
-  # without anyone learning it. Silent, it was indistinguishable from a tick that simply had nothing
-  # to reclaim: that is what made it invisible, not any lack of severity.
+  # Une enumeration de pods en echec est DEUX choses a la fois : un fail-safe correct — on ne
+  # reclame rien plutot que de deverrouiller a l'aveugle — et une panne potentiellement DURABLE,
+  # pendant laquelle un `lcars-in-flight` survit indefiniment a son pod. Muette, elle est
+  # indiscernable d'un tick qui n'a simplement rien a reclamer.
   #
-  # We speak on the TRANSITION, never per tick — repeating the same fact every 30 s would drown the
-  # trace, the same discipline as the mailbox gauge and the silent nominal tick. RECOVERY is
-  # announced too: without it, an operator who saw the alert cannot tell resolved from dead.
+  # ⚠ ON PARLE SUR LA TRANSITION, jamais par tick, et le RETABLISSEMENT s'annonce aussi : sans lui,
+  # l'operateur qui a vu l'alerte ne peut pas distinguer resolu de mort.
   #
-  # `:none` (kick) changes nothing: a kick takes NO snapshot, so it has nothing to say about its
-  # health. Treating it as a success would erase an ongoing outage at the first webhook.
+  # `:none` (kick) ne dit RIEN de la sante : un kick ne prend pas d'instantane, et le compter comme
+  # un succes effacerait une panne en cours au premier webhook.
   defp note_pods_snapshot(%__MODULE__{} = state, :none), do: state
 
   defp note_pods_snapshot(%__MODULE__{} = state, {:error, reason}) do
@@ -646,14 +596,10 @@ defmodule Fleet.Pilot.Poller do
 
       _ =
         try do
-          # ⚠ LE SUJET N'EST PAS UNE ORG, et en nommer une rendait la CLE DE RECURRENCE instable.
-          # C'etait `hd(state.orgs)` — la premiere org de la liste, arbitraire : le spawner
-          # injoignable est une panne de la BOITE, aucune org n'y est pour rien. Or le sujet entre
-          # dans `signature(op, subject, reason)`, donc activer, desactiver ou reordonner un
-          # catalogue changeait la signature d'une panne identique : cooldown remis a zero, meme
-          # incident re-escalade comme neuf, et un titre qui accusait un catalogue au hasard.
-          # Le sujet ne ROUTE rien (le depot vient de `:pilot_system_issue_repo`) — il nomme, et il
-          # doit donc nommer ce qui est reellement en panne.
+          # ⚠ LE SUJET N'EST PAS UNE ORG : il entre dans la CLE DE RECURRENCE, donc en nommer une
+          # ferait changer la signature d'une panne identique des qu'un catalogue est active ou
+          # reordonne — cooldown remis a zero, meme incident re-escalade comme neuf. Un spawner
+          # injoignable est une panne de la BOITE ; le sujet ne route rien, il NOMME.
           incident.("pod_enumeration", "spawner", :spawner_unreachable,
             reason_detail: inspect(reason)
           )
@@ -717,25 +663,16 @@ defmodule Fleet.Pilot.Poller do
     started = System.monotonic_time()
     forge = step_forge_client(state)
 
-    # DISCOVERY IS NOT ADMISSION. The org scan says which repos we LOOK AT; it does not say which
-    # ones we can SERVE. A repo that reached the org without ever being onboarded has no project
-    # directory, and the rail half-serves it FOREVER: the route gets engraved on its issues
-    # (`ensure_workflow_map_or_onboard` posts labels and nothing else), then every dispatch
-    # degrades — no ops to materialize the brief in, so no `brief_sha` and no provenance; no
-    # face worktrees, so no read-only reference for a producer. Each of those is a LOUD warning on
-    # its own line, once per dispatch, and none of them names the actual cause: this project was
-    # never set up.
+    # ⚠ DISCOVERY IS NOT ADMISSION : le scan d'org dit ce qu'on REGARDE, jamais ce qu'on peut
+    # SERVIR. Un depot arrive dans l'org sans avoir ete onboarde n'a pas de repertoire de projet, et
+    # le rail le sert A MOITIE pour toujours — la route s'grave sur ses issues, puis chaque dispatch
+    # degrade en signalant bruyamment son propre symptome, aucun ne nommant la cause.
     #
-    # Onboarding is a DELIBERATE gesture and the corpus says so by having four distinct human
-    # verbs for it (`create`, `import`, `open`, `project_adopt`). Auto-provisioning on discovery
-    # would make creating a repo in the org enough to trigger a clone — a policy nobody chose.
-    # So: skipped, named once, like a parked project. The check is a local `File.dir?` — no forge
-    # call, so an unserved repo also stops costing two API calls per tick.
+    # L'onboarding est un geste DELIBERE, et l'auto-provisionner sur decouverte ferait d'un `git
+    # init` dans l'org le declencheur d'un clone — une politique que personne n'a choisie.
     if onboarded?(state.repo) do
-      # LE DRAPEAU EST EFFACE ICI, exactement comme son jumeau `:parked_logged` l'est a la sortie du
-      # parking. Il ne l'etait NULLE PART : un depot qui repassait en « non onboarde » apres en etre
-      # sorti se taisait pour toute la vie du process — la memoire d'affichage devenait une memoire
-      # DEFINITIVE, et la seconde disparition de l'arborescence ne laissait aucune trace.
+      # ⚠ EFFACE ICI, sinon une memoire d'AFFICHAGE devient une memoire DEFINITIVE : un depot qui
+      # repasserait « non onboarde » se tairait pour toute la vie du process.
       Process.delete({__MODULE__, :not_onboarded_logged, state.repo})
       step_do_poll_onboarded(state, mode, pods, started, forge)
     else
@@ -743,31 +680,19 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # THE ARCHITECT IS `lifetime_scope: forever` AND NOBODY HELD THAT PROMISE. It was ensured on
-  # project-open and just before an escalation wake — both EVENTS. Between them, a fleet restart or
-  # a crash left the project with no architect, and the state was invisible: no error, no
-  # escalation, just a project whose arbiter is not there. A human who opens their project's
-  # terminal in that window finds nothing, and the human is the one interlocutor that cannot be
-  # scheduled around. A permanent that nothing polls is a permanent in name.
+  # UN PERMANENT QUE RIEN NE SONDE EST UN PERMANENT DE NOM. L'architecte est `lifetime_scope:
+  # forever` ; assure sur des EVENEMENTS seulement, un redemarrage entre deux laisse le projet sans
+  # arbitre, sans erreur ni escalade : un etat invisible.
   #
-  # HERE, and precisely here: this is the point where the repo is known ONBOARDED (its ops face
-  # exists) and NOT PARKED (the marker was read in the listing this pass already made) — a parked
-  # project must not get an arbiter, and any earlier site would have to buy that fact with a forge
-  # call. Regular ticks only, like the other two fleet-wide passes: a webhook kick is a dispatch
-  # hint, and the arch's own wake produces those webhooks.
+  # ICI, ET PRECISEMENT ICI : c'est le point ou le depot est connu ONBOARDE et NON PARQUE, les deux
+  # sans un appel de forge de plus. Ticks reguliers seulement — un kick de webhook est un indice de
+  # dispatch, et le reveil de l'arch produit justement ces webhooks.
   #
-  # ⚠ AND THIS LOOP CANNOT SAY WHOSE PROJECT IT IS. It walks the ORG SCAN — every repo of the fleet
-  # org, including the ones another human onboarded. The gate above proves the project is set up on
-  # this MACHINE, never that the human running this fleet asked for it: `/home/projects.ops` is
-  # SHARED, so its presence is someone's gesture, not necessarily ours. Measured 2026-08-12 on a
-  # two-human bench: a fleet whose human had made a single `project_create` call was running an
-  # architect for a project created by the other human and never opened here.
-  # The "is it ours" question is therefore answered where the record lives — `ensure_alive` keeps
-  # what this box has ON RECORD and creates nothing (`{:ok, :not_ours}` otherwise). Creation stays
-  # with the four deliberate verbs, which is where a human is actually present.
-  #
-  # Best-effort, and silent when it works: `ensure_alive` costs one `File.dir?` then one
-  # `has-session` on the normal path. A failure is already logged, named, by `Architect.ensure`.
+  # ⚠ CETTE BOUCLE NE PEUT PAS DIRE A QUI EST LE PROJET. Elle parcourt le SCAN D'ORG, et le garde
+  # au-dessus prouve que le projet est installe sur cette MACHINE — jamais que l'humain qui fait
+  # tourner cette fleet l'a demande, la racine des projets etant PARTAGEE. La question « est-ce le
+  # notre » se tranche donc la ou vit le registre : `ensure_alive` garde ce que cette boite a EN
+  # REGISTRE et ne cree rien.
   defp keep_architect(state) do
     keeper = state.architect_keeper || (&Fleet.Project.Architect.ensure_alive/2)
     _ = keeper.(state.repo, state.forge_opts)
@@ -822,20 +747,13 @@ defmodule Fleet.Pilot.Poller do
   defp project_work_dir(repo),
     do: Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(repo))
 
-  # Same stance and same shape as `parked_skip/2`: no dispatch, no lease, no reclaim seeding, no
-  # awaits union, suspects passed through unchanged. Logged ONCE per repo (display-only pdict
-  # memory in the Poller singleton) — a ~30s cron must not cry every tick, and an onboarding is
-  # exactly the kind of thing that gets done minutes after the log.
+  # Meme forme que `parked_skip/2`, et logue UNE fois par depot : un cron de 30 s ne doit pas crier
+  # a chaque tour, et un onboarding se fait souvent dans les minutes qui suivent le message.
   defp not_onboarded_skip(state, repo_prior) do
-    # « JAMAIS ONBOARDE » ET « LE SUBSTRAT A DISPARU » RENDAIENT LA MEME PHRASE, et le second est une
-    # panne de la boite. Un projet absent sous une racine PRESENTE est un fait ordinaire : il n'a pas
-    # ete onboarde, un humain le fera. La RACINE elle-meme absente ou illisible — un montage tombe,
-    # une permission perdue — saute le rail d'etapes pour TOUS les depots a la fois : la flotte
-    # tourne alors a vide, les cycles se succedent, la telemetrie rapporte des comptes nuls, et rien
-    # ne distingue « aucun travail a faire » de « le sol a disparu ».
-    #
-    # Le discriminant est la racine, pas le projet : `File.dir?` sur `ops_root()` separe exactement
-    # les deux mondes, et il ne coute rien puisqu'on est deja sur le chemin du skip.
+    # ⚠ « JAMAIS ONBOARDE » ET « LE SUBSTRAT A DISPARU » RENDAIENT LA MEME PHRASE, et le second est
+    # une panne de la boite : la racine absente saute le rail pour TOUS les depots a la fois, la
+    # flotte tourne a vide, et rien ne distingue « aucun travail » de « le sol a disparu ».
+    # Le discriminant est la RACINE, pas le projet, et il ne coute rien sur le chemin du skip.
     present? = state.substrate_present_fun || fn -> File.dir?(Fleet.Layout.ops_root()) end
 
     if present?.() do
@@ -995,13 +913,9 @@ defmodule Fleet.Pilot.Poller do
     # dispatch opts computed ONCE/tick (shared issues + pulls), not 2×.
     opts = step_dispatch_opts(state)
 
-    # SET of `lcars-awaits-arch` issues (already listed at the tick → ZERO added I/O), threaded
-    # to the pulls via `:awaits_arch_ids` → `dispatch_review` skips the judge of a PR whose parent issue
-    # awaits the arch (symmetric to `decide/1` on the issue side). Without this: escalation places `awaits-arch` on
-    # the ISSUE but `dispatch_review` reads ONLY the PR's labels → judge re-spawn every tick (churn).
-    # The arch re-kick itself is NOT fired here: `ArchWake` fans it out per-repo (one architect per
-    # project), so the set is returned repo-QUALIFIED (issue numbers collide across repos) and `do_poll`
-    # kicks ONCE on the union — that single call reaches every project's architect.
+    # ⚠ L'ESCALADE POSE `awaits-arch` SUR L'ISSUE, et `dispatch_review` ne lit QUE les labels de la
+    # PR : sans ce fil, le juge d'une PR dont l'issue attend l'arch est respawne a chaque tick.
+    # L'ensemble est repo-QUALIFIE — les numeros d'issue se telescopent entre depots.
     awaits_arch_ids = awaits_arch_ids(issues)
 
     # BL-6-48 step 3, PR half. Same gesture as the line above, and for the same reason: the PR path
@@ -1071,24 +985,14 @@ defmodule Fleet.Pilot.Poller do
     for i <- issues, n = i["number"], awaits_arch?(i), into: MapSet.new(), do: n
   end
 
-  # G4 — the awaits-arch NET. The FIRST kick of an escalation is immediate
-  # (TerminalEscalation → ArchWake, offer-then-wake ordered); if that wake was lost (arch
-  # dead-then-respawned by the PermanentWarden, enqueue failure, flag missed), the issue must
-  # not stay out-of-dispatch FOREVER: the truth is the `lcars-awaits-arch` label on the forge,
-  # re-read at every tick — and THIS net re-derives a wake from it, capped by
-  # `@awaits_rekick_cooldown_ms` since the last SENT signal. The net only NUDGES the airlock
-  # (a wake, nothing more): the label stays human-released, we never force the verdict.
-  # Called ONCE per tick by `do_poll` on the CROSS-REPO union — the architect is PER-PROJECT, and
-  # `ArchWake.offer_then_wake` groups `awaits_ids` BY REPO to wake each project's architect on its own
-  # `{repo}` queue, so this single call fans out to all of them. `awaits_ids` is repo-qualified
-  # (`{repo, n}` — bare issue numbers collide across repos) so the logged count is the honest
-  # fleet-wide backlog (the sum across projects, not one fleet airlock).
-  # Resolves `state.spawner || Fleet.Spawner` at the call site (symmetric to reconciliation_seams /
-  # lease_seams). Prod does NOT inject the seams → the REAL modules are used — resolve the
-  # defaults HERE, never a nil-guard on the seam (a guard that skips on nil turns this prod
-  # rail into a silent no-op). The offer/busy/wake mechanics live in `ArchWake` (single
-  # authority shared with the immediate rail); outcomes that SENT nothing (:busy, enqueue
-  # failure) do NOT stamp the cooldown — see `last_arch_rekick_at`.
+  # G4 — LE FILET awaits-arch. Le premier reveil d'une escalade est immediat ; s'il est PERDU, la
+  # verite reste le label sur la forge, relu a chaque tick, et ce filet en RE-DERIVE un reveil.
+  #
+  # ⚠ IL NE FAIT QUE POUSSER LE SAS : le label reste libere par l'humain, jamais par nous.
+  #
+  # ⚠ LES DEFAUTS SE RESOLVENT ICI, jamais par un garde sur nil : la prod n'injecte PAS les seams,
+  # donc un garde qui saute quand le seam est nil transformerait ce rail en no-op silencieux.
+  # Un resultat qui n'a RIEN envoye (`:busy`, echec d'enqueue) n'estampille pas le cooldown.
   defp maybe_rekick_arch(awaits_ids, %__MODULE__{} = state) do
     now = System.monotonic_time(:millisecond)
 

@@ -26,24 +26,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
-  # LE JUMEAU DE `docs.public_functions_documented`, sur l'autre contrat.
+  # ⚠ UNE FONCTION SANS `@spec` FAIT VERDIR DIALYZER SANS ETRE ANALYSEE PAR LUI. Ses drapeaux les
+  # plus stricts comparent le DECLARE a l'INFERE : sans declaration, ils sont INERTES et la fonction
+  # est hors de portee de l'instrument le plus severe du gate — tout en le faisant passer.
   #
-  # Dialyzer tourne au dernier maillon du gate avec `:extra_return` et `:missing_return` — deux
-  # drapeaux dont tout le metier est de comparer le DECLARE a l'INFERE. Ils sont INERTES sur une
-  # fonction sans `@spec` : le fichier est analyse, mais avec le contrat le plus permissif que
-  # l'inference veuille bien lui accorder. Une fonction sans spec n'est donc pas « moins finie »,
-  # elle est HORS DE PORTEE de l'instrument le plus strict du gate, tout en le faisant verdir.
+  # ⚖ Arbitrage user : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est le dernier
+  # kilometre ». La fuite s'ELARGISSAIT toute seule : chaque check ajoute ici ajoutait une fonction
+  # publique sans spec.
   #
-  # ⚖ Arbitrage user, 2026-08-20 : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est
-  # le dernier kilometre ». La couverture etait a 89,0 % (64 fonctions sur 16 fichiers) et la fuite
-  # S'ELARGISSAIT — chaque check ajoute a ce fichier ajoutait une fonction publique sans spec.
+  # `@impl` EXCLU : le contrat d'un callback vit dans son behaviour, et le restater par
+  # implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP NOMMES ne sont
+  # PAS exclus — ils portent un contrat propre a chaque module.
   #
-  # `@impl` EXCLU, meme motif que le jumeau : le contrat d'un callback vit dans son behaviour, et le
-  # restater par implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP
-  # NOMMES ne sont PAS exclus, eux : `start_link/1` et `child_spec/1` portent un contrat propre a
-  # chaque module, et les exclure retirerait du mur ce qu'on vient de fermer.
-  #
-  # ## Preuve (mesure et mutation, 2026-08-20)
+  # ## Preuve (mesure et mutation)
   # Pose a 540/540. Retirer un `@spec` -> ECHEC, fonction et fichier nommes. Et l'exercice s'est
   # auto-verifie pendant qu'on le faisait : QUATRE specs ecrits de bonne foi etaient FAUX, et
   # Dialyzer les a nommes un par un — `paginate/3` (une chaine de requete prise pour un keyword,
@@ -95,13 +90,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
   # Les unites publiques d'UN fichier qui n'ont pas de `@spec`, par NOM ET ARITE.
   #
-  # ⚠ RECRITURE SUR L'AST (2026-08-20), et le motif de la reecriture est le defaut qu'elle repare :
+  # ⚠ RECRITURE SUR L'AST, et le motif de la reecriture est le defaut qu'elle repare :
   # la premiere version lisait ligne a ligne avec une machine a phases, et sa bascule de heredoc
   # (`String.starts_with?(trimmed, ~s("""))`) ne basculait PAS sur `@moduledoc """` — cette ligne ne
   # COMMENCE pas par les trois guillemets. Seule la fermeture basculait, donc tout ce qui suivait un
-  # moduledoc etait invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
-  # moitie, et onze fichiers vus a ZERO. Le mur annonçait 100 % sur 92,8 % de reel. Meme classe de
-  # bug que celui trouve le matin meme dans l'outil de replay de l'audit — un compteur qui se trompe
+  # moduledoc est invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
+  # moitie, et onze fichiers vus a ZERO. Le mur annonce alors 100 % sur 92,8 % de reel. Un compteur
+  # qui se trompe
   # de phase ne se rapiece pas, il se refait sur la seule structure qui ne ment pas.
   #
   # TROIS choses que la version ligne a ligne ne pouvait pas faire :
@@ -120,7 +115,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     |> Enum.sort()
   end
 
-  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose (2026-08-20) :
+  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose :
   #   * un corps a UN SEUL statement n'est pas un `__block__` — un module d'une fonction etait
   #     entierement invisible ;
   #   * les statements d'un module IMBRIQUE sont aussi des statements du parent. Melanger les deux

@@ -5,8 +5,8 @@ defmodule Fleet.Opts do
   Pure option-list helpers, shared across domains.
 
   Foundation because it is: two total functions over keyword lists, no dependency, no subject of
-  its own. It sat under the pilot for as long as the pilot was its only caller — which stopped
-  being true the day the forge became a domain, and an upward reference is what said so.
+  its own. Held inside a domain, it would owe that domain an upward reference from every other
+  caller.
   """
 
   @doc """

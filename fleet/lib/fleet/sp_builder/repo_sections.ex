@@ -18,7 +18,7 @@ defmodule Fleet.SPBuilder.RepoSections do
 
   A repo LCARS did not create is free to name its sections otherwise and then contributes nothing.
   That outcome is legitimate, so it stays `{:ok, ""}` — but it is logged, because a pod launching
-  with zero repo context used to be indistinguishable from a pod given no repo file at all.
+  with zero repo context is otherwise indistinguishable from a pod given no repo file at all.
 
   A repo LCARS onboarded is a different case: `priv/catalogue/project_template` ships a `CLAUDE.md`
   on each writer face, and the one on the code face NAMES these headings and explains what each is
@@ -26,9 +26,6 @@ defmodule Fleet.SPBuilder.RepoSections do
   and the agent believe it has a command — so the warning on a fresh project is EXPECTED and says
   the sections have not been written yet, not that the convention was missed.
 
-  (This paragraph used to read "the template ships no CLAUDE.md, so the kept list is a bet". That
-  stopped being true when the template gained its doors, and it argued for treating an onboarded
-  project's silence as someone else's naming choice.)
   """
 
   require Logger
@@ -101,8 +98,9 @@ defmodule Fleet.SPBuilder.RepoSections do
     end
   end
 
-  # THE DROP WAS SILENT ON THE SIDE THAT MATTERS. The fleet logged `error`; the POD was told
-  # nothing, and read a repo doc whose most prescriptive section had vanished. The filter's patterns
+  # A SILENT DROP IS SILENT ON THE SIDE THAT MATTERS. The fleet logs `error`; without this notice
+  # the POD is told nothing, and reads a repo doc whose most prescriptive section has vanished. The
+  # filter's patterns
   # are LEXICAL and do not tell an instruction from a mention — `\brebase\b.*\bmain\b` matches
   # "rebase onto main" and "never rebase onto main" alike. So the section most likely to be dropped
   # is the one that DOCUMENTS the repo's prohibitions, i.e. exactly what `Conventions` and `Gotchas`
@@ -111,7 +109,8 @@ defmodule Fleet.SPBuilder.RepoSections do
   #
   # The pattern list stays untouched — its own contract says EXTENSIBLE, NEVER REDUCIBLE, and
   # teaching it to tell a mention from an order is the V4 threat the doctrine puts out of scope.
-  # What is fixed is the SILENCE: the pod now learns that constraints exist which it was not given.
+  # What the notice closes is the SILENCE: the pod learns that constraints exist which it was not
+  # given.
   #
   # ⚠ THE NOTICE NAMES THE SECTIONS AND NEVER QUOTES THEM. Carrying the matched excerpt would
   # re-inject through the message exactly what the filter just refused — the door held, and the
@@ -140,14 +139,14 @@ defmodule Fleet.SPBuilder.RepoSections do
     |> String.trim_trailing()
   end
 
-  # THIRD state, previously folded into the first. This module already separates "no path supplied"
+  # THIRD state, easily folded into the first. This module separates "no path supplied"
   # ({:ok, ""} — legitimate, the template renders an empty zone) from "path supplied but unreadable"
-  # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections was silently
-  # indistinguishable from the first: the pod launched with no repo context at all and nothing said so.
+  # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections is otherwise
+  # indistinguishable from the first: the pod launches with no repo context at all and nothing says so.
   # The closed list is a BET on the target repo's headings — LCARS does not impose them (its
   # `priv/catalogue/project_template` ships no CLAUDE.md), so a repo naming its sections `## Setup` /
   # `## Architecture` contributes nothing, legitimately and invisibly. Not an error (a repo owes us no
-  # heading), so `{:ok, ""}` stands — but it is now VISIBLE. `extract/1` stays pure: the log lives here,
+  # heading), so `{:ok, ""}` stands — but VISIBLY. `extract/1` stays pure: the log lives here,
   # on the side that already does I/O.
   defp warn_if_no_section("", path) do
     Logger.warning(

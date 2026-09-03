@@ -14,9 +14,8 @@ defmodule Fleet.TaskQueue.WorkItem do
       malformed `deadline`/`metadata`/`role`/`brief`… as `{:error, {:bad_attr, _}}`, sets `id`/
       `enqueued_at`/`state: :pending` itself.
 
-  There were TWO until the 2026-08-20: `from_map/1` rebuilt an item read back from `state.json`. It
-  is gone with the persistence rail it served (BL-6-113) — a broker that never reads a state file
-  has nothing to recover, so its recovery constructor described a door that no longer exists.
+  ONE constructor and no recovery twin: a broker that never reads a state file has nothing to
+  recover (BL-6-113).
 
   Hand-forging a `%WorkItem{}` bypasses these casts (`state` outside the vocabulary, non-map
   `metadata`): tolerated ONLY in explicitly named corruption/ghost-state tests (`:sys.replace_state`
@@ -28,19 +27,14 @@ defmodule Fleet.TaskQueue.WorkItem do
 
   # LE VOCABULAIRE D'ETATS EST CLOS, ET IL SE MERITE.
   #
-  # `:in_progress` a figure dans ce type, dans `@active_states` et dans une douzaine de gardes a
-  # travers cinq modules — et AUCUNE transition ne l'a jamais pose, dans toute l'histoire du depot
-  # (verifie au `git log -S`, pas infere). Il annoncait une etape intermediaire entre `:assigned` et
-  # `:completed` qui n'a jamais existe, donc chaque lecteur — un humain, et un agent qui lit le type
-  # — deduisait un cycle de vie que la machine n'a pas. Un test le STUBBAIT meme, epinglant la
-  # fiction comme si c'etait un comportement. Retire le 2026-08-03 (BL-6-42).
+  # PAS DE `:in_progress` ICI, et ne pas le remettre comme documentation d'une intention (BL-6-42).
+  # Un etat qu'AUCUNE transition ne pose annonce une etape qui n'existe pas, donc chaque lecteur —
+  # un humain, et un agent qui lit le type — deduit un cycle de vie que la machine n'a pas ; un test
+  # finit meme par le stubber, epinglant la fiction comme si c'etait un comportement. La distinction
+  # qu'il semble offrir est deja portee : `:assigned` EST l'etat tire, le Server le pose sur
+  # `get_work_item`.
   #
-  # Ne pas le remettre comme documentation d'une intention : `:assigned` EST l'etat tire (le Server
-  # le pose sur `get_work_item`), donc la distinction qu'il semblait offrir est deja portee. Un etat
-  # gagne sa place ici en ayant une transition qui l'ecrit.
-  #
-  # (Cette regle vivait sur `parse_state/1`, le decodeur de `state.json`, parti avec son rail le
-  # 2026-08-20. Elle ne parlait pas du decodeur : elle parle du vocabulaire, qui est ici.)
+  # UN ETAT GAGNE SA PLACE ICI EN AYANT UNE TRANSITION QUI L'ECRIT.
   @type state :: :pending | :assigned | :completed | :failed | :cleared
 
   @type t :: %__MODULE__{
@@ -100,18 +94,16 @@ defmodule Fleet.TaskQueue.WorkItem do
   @spec active?(state()) :: boolean()
   def active?(state), do: state in @active_states
 
-  # `to_map/1` ET `from_map/1` SONT PARTIS AVEC LEUR UNIQUE APPELANT (BL-6-113, 2026-08-20). Ils
-  # n'existaient que pour la serialisation `state.json` de `Fleet.TaskQueue.Store`, rail retire ;
-  # hors de lui, `git grep` ne leur trouvait que leurs propres tests. Une paire de fonctions dont la
-  # seule preuve est qu'elles s'inversent l'une l'autre ne prouve rien du systeme.
+  # PAS DE COUPLE `to_map`/`from_map` ICI : il n'existait que pour une serialisation `state.json`
+  # qui n'a plus de rail (BL-6-113), et une paire de fonctions dont la seule preuve est qu'elles
+  # s'inversent l'une l'autre ne prouve rien du systeme.
   #
-  # Ce que leur prose valait, et qui ne doit pas partir avec elles : `from_map` REFUSAIT une date
-  # optionnelle illisible au lieu de la degrader en `nil`, parce que `nil` a un sens ici — *pas
-  # d'echeance* — et qu'une date qu'on n'a pas su lire n'est pas une absence d'echeance. Les plier
-  # l'une sur l'autre produisait un mandat que la file ne ferait JAMAIS expirer
-  # (`deadline_reached?/1` ne conclut rien sur `nil`). La lecon survit au rail : **un defaut qui
-  # absorbe une erreur de lecture fabrique un etat qui ne se repare pas tout seul.** `new/2`, la
-  # seule voie de construction validee restante, casse pareil sur un attribut mal type.
+  # CE QUE LEUR PROSE VALAIT, et qui doit survivre a leur absence : une date optionnelle ILLISIBLE
+  # se REFUSE, elle ne se degrade pas en `nil` — parce que `nil` a un sens ici, *pas d'echeance*, et
+  # qu'une date qu'on n'a pas su lire n'est pas une absence d'echeance. Plier l'une sur l'autre
+  # produit un mandat que la file n'expirera JAMAIS (`deadline_reached?/1` ne conclut rien sur
+  # `nil`). **Un defaut qui absorbe une erreur de lecture fabrique un etat qui ne se repare pas tout
+  # seul.** `new/2`, la seule voie de construction validee, casse pareil sur un attribut mal type.
 
   @doc """
   Builds a pending work item from atom- or string-keyed attributes.

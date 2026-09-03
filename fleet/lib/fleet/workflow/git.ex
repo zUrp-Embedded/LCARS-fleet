@@ -291,11 +291,11 @@ defmodule Fleet.Workflow.Git do
   @doc """
   The ref that carries the attestation OF one commit: `refs/lcars/provenance/<sha>`.
 
-  KEYED ON THE SHA, and that is the whole design (BL-6-43). The attestation used to live in a file
-  whose NAME was derived from the head of the branch — so a head that moved after the engrave made
-  the reader compute a name nobody had written, and a proof about another commit read exactly like
-  no proof at all. A ref named after the commit cannot be looked up wrong: it exists for that commit
-  or it does not exist.
+  KEYED ON THE SHA, and that is the whole design (BL-6-43). An attestation whose NAME derives from
+  the head of the branch lets a head that moves after the engrave make the reader compute a name
+  NOBODY HAS WRITTEN — and a proof about another commit reads exactly like no proof at all. A ref
+  named after the commit cannot be looked up wrong: it exists for that commit or it does not
+  exist.
 
   A fresh name per attested commit also removes the concurrency that a shared ref (a notes ref)
   would have introduced on the publication path: two pods publishing at once write two DIFFERENT

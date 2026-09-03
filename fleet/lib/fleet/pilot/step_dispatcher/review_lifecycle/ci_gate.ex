@@ -2,12 +2,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   @moduledoc """
   The CI verdict as a PRE-CONDITION of summoning the jury.
 
-  WHY THIS EXISTS. Until this module, the machine rail and the judgement rail were parallel and
-  never met: the runner posted a state on the head sha, and NOTHING in `lib/` read it before
-  spending judge tokens on it. The only reader was `Remediation.reconverge_policy/3`, at the very
-  END — after the merge attempt is refused by the forge. That reading is correct and it stays; it
-  is simply the LAST net, and it is the most expensive place to learn that the code does not
-  build: the jury has already run, on red.
+  WHY THIS EXISTS. Without it the machine rail and the judgement rail never meet before the spend:
+  the runner posts a state on the head sha, and the first reader is
+  `Remediation.reconverge_policy/3`, at the very END — after the forge refuses the merge. That
+  reading is correct and it stays; it is simply the LAST net, and the most expensive place to learn
+  that the code does not build, since the jury has already run on red.
 
   WHAT IT IS NOT. It is not "the judge reads the CI". A CI verdict is a MACHINE fact, per-sha,
   binary; a judge attests something else — that the proof PROVES (coverage of the brief, hollow
@@ -18,10 +17,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   THE CARD GOVERNS, THE ENGINE STAYS AGNOSTIC (F-C061, same rule as the jury). `spec.ci` on the
   workflow map: `required` (the gate applies) or `ignore` (the pre-`ci` rail). MANDATORY, with no
   default on either side — the twin of `jury` and `max_rework_rounds`, which already carried the
-  rule ("no hidden default in code: the map's author declares"). While `ignore` was the default, a
-  card that FORGOT was indistinguishable from a card that DECIDED, and the silent branch was the
-  permissive one: the omission wore the face of a decision to skip. The fix is not a better default
-  but the absence of one, so that the un-declared card cannot be loaded at all.
+  rule ("no hidden default in code: the map's author declares"). Any default makes a card that
+  FORGOT indistinguishable from a card that DECIDED, and the silent branch would be the permissive
+  one: the omission would wear the face of a decision to skip. The answer is not a better default
+  but the ABSENCE of one, so that the un-declared card cannot be loaded at all.
 
   THE THREE STATES, AND WHY `:none` IS NOT `:success`. `ForgeClient.commit_ci_state/3` answers
   `:success | :pending | :failure | :none`, worst-of across contexts (two triggers -> two contexts
@@ -30,8 +29,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   is green", which is the exact failure this module exists to end. Under `required` it is therefore
   treated as `:pending` — a bounded WAIT, never a pass.
 
-  THE DEADLINE IS THE POINT, NOT A COMFORT. A `pending` with no runner waits forever, in silence
-  (measured 2026-08-02 on the bench). The bound is stateless on purpose: it compares the head
+  THE DEADLINE IS THE POINT, NOT A COMFORT. A `pending` with no runner waits forever, in silence.
+  The bound is stateless on purpose: it compares the head
   commit's own date to now, so nothing has to be remembered between ticks and a new push (new sha,
   new date) restarts the clock by construction. Past the deadline the gate ESCALATES LOUD instead
   of waiting one more tick forever.
@@ -48,9 +47,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   @pending_deadline_sec 45 * 60
 
   # ⚠ UN JOB QUE PERSONNE N'A PRIS N'EST PAS UNE CI LENTE, et lui donner la patience d'une CI lente
-  # a coute deux heures a un operateur le 2026-08-21. Son job affichait « Waiting », 0 s, avec un
-  # `runs-on:` qu'aucun runner de la boite ne servait : indiscernable d'un job en cours, et bloquant
-  # la fusion sans jamais rougir. Un rouge dit quelque chose ; une attente ressemble a du travail.
+  # coute des heures a un operateur : le job affiche « Waiting », 0 s, avec un `runs-on:` qu'aucun
+  # runner de la boite ne sert — indiscernable d'un job en cours, et bloquant la fusion sans jamais
+  # rougir. Un rouge dit quelque chose ; une attente ressemble a du travail.
   #
   # CE DELAI EST COURT PARCE QUE LA MESURE EST DIFFERENTE. On n'attend plus « que la CI finisse » :
   # on attend qu'un runner la RECLAME, ce qui prend des secondes quand un runner sert le label. Au
@@ -70,10 +69,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
           :ci_pending
           | {:ci_head_unreadable, term()}
           | {:ci_unreadable, term()}
-          # LE COMMENTAIRE AU-DESSUS ETAIT DEJA LA CICATRICE, ET J'AI REJOUE LA MEME : ajouter un
-          # motif d'attente sans l'ajouter ICI fait declarer par dialyzer que la clause de l'appelant
-          # (`ReviewLifecycle.gate_then_dispatch/4`) ne peut jamais matcher. Le code etait juste ; la
-          # DECLARATION mentait, et c'est elle qui fait autorite pour un appelant.
           | {:ci_deadline_unreachable, term()}
 
   @type decision ::
@@ -162,10 +157,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # has not reported — wait. "No workflow in this repository" is a status that will NEVER come, and
   # waiting 45 minutes for it is waiting for something structurally impossible.
   #
-  # Measured 2026-08-12: a repo imported from GitHub ships no `.gitea/workflows/`, its card declares
-  # `ci: required`, and the gate spent three quarters of an hour before asking whether a runner
-  # served the label. The runner was fine. There was nothing to run. The question was answerable at
-  # the first tick, for one read.
+  # A repo imported from another forge ships no `.gitea/workflows/` at all, and its card may still
+  # declare `ci: required`: the question is answerable at the FIRST tick, for one read, instead of
+  # three quarters of an hour spent suspecting a runner that is fine.
   #
   # UNREADABLE IS NOT ABSENT. A listing we could not fetch says nothing about what the repo
   # declares, so it keeps the bounded wait — the same stance the rest of this gate takes on every
@@ -229,20 +223,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # ⚠ `"queued"` EST CE QUE L'API REND ; `"waiting"` EST LE NOM INTERNE DE GITEA. Ce predicat n'a
-  # teste que le second jusqu'au 2026-08-22, donc il n'a JAMAIS ete vrai : tout le chemin des cinq
-  # minutes etait mort, et un job que personne ne reclamait retombait dans l'attente generique de 45
-  # minutes puis sortait en `{:ci_stalled, :pending}` — « echec de merge non classifie », c'est-a-dire
-  # le refus muet que ce garde existe pour remplacer.
-  #
-  # MESURE, pas relue : sur une forge 1.26 portant sept courses qu'aucun runner ne servait,
-  # `/actions/runs/<id>/jobs` a rendu SEPT FOIS `status: "queued", runner_id: 0, labels: ["shell"]`,
-  # et jamais `"waiting"`. Le commentaire du dessus affirmait « l'API le dit en une lecture » en
-  # citant le vocabulaire du code source de la forge — une mesure ecrite sans avoir ete faite.
+  # ⚠ `"queued"` EST CE QUE L'API REND ; `"waiting"` EST LE NOM INTERNE DE GITEA. MESURE sur une
+  # forge 1.26 portant sept courses qu'aucun runner ne servait : `/actions/runs/<id>/jobs` a rendu
+  # SEPT FOIS `status: "queued", runner_id: 0, labels: ["shell"]`, et jamais `"waiting"`. Lire le
+  # vocabulaire du code source de la forge donne l'autre mot, et un predicat qui ne teste que
+  # celui-la n'est JAMAIS vrai : tout le chemin des cinq minutes meurt sans un bruit, et un job que
+  # personne ne reclame retombe dans l'attente generique puis sort en `{:ci_stalled, :pending}` —
+  # « echec de merge non classifie », c'est-a-dire le refus muet que ce garde remplace.
   #
   # LES DEUX SONT ACCEPTES parce qu'aucun des deux n'est garanti par un contrat : c'est une
   # conversion interne de Gitea, libre de changer dans un sens comme dans l'autre. Un garde qui ne
-  # reconnait qu'un seul mot meurt en silence a la version suivante — il vient de le faire.
+  # reconnait qu'un seul mot meurt en silence a la version suivante.
   @unclaimed_statuses ["queued", "waiting"]
 
   defp unclaimed?(job) do
@@ -294,9 +285,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   # « ON ATTEND » ET « ON ATTEND DEPUIS TOUJOURS » NE RENDENT PLUS LE MEME MOTIF. Sans date, le
   # calcul d'age vaut 0, donc `0 > 2700` est faux A JAMAIS : le ticket n'escalade pas, ne progresse
-  # pas, et son motif d'attente etait le meme que celui d'une CI qui tourne depuis dix secondes.
+  # pas, et sans motif distinct il porte le meme que celui d'une CI qui tourne depuis dix secondes.
   #
-  # Le motif est desormais distinct, et il porte l'ETIQUETTE DE SA PORTE — `wait/ci`, comme ses deux
+  # Le motif est donc distinct, et il porte l'ETIQUETTE DE SA PORTE — `wait/ci`, comme ses deux
   # voisins `{:ci_head_unreadable, _}` et `{:ci_unreadable, _}` : du cote du ticket c'est le meme
   # fait (il est arrete a la porte CI), et la distinction vit dans la RAISON du skip, ou elle est
   # actionnable. Rien n'est bloque : escalader ici poserait `lcars-awaits-arch` et parquerait le
@@ -359,10 +350,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # ⚠ `age_sec(nil), do: 0` ETAIT LE MECANISME ENTIER DU DEFAUT : sans date, l'age valait 0, donc
-  # `0 > @pending_deadline_sec` etait faux a jamais. La clause `nil` est morte maintenant que
-  # `stalled_or_wait/4` intercepte l'absence de date AVANT le calcul — dialyzer l'a dit, et la
-  # laisser en place remettrait le zero a portee du prochain appelant.
+  # ⚠ PAS DE CLAUSE `age_sec(nil), do: 0` ICI, ET C'EST LE MECANISME ENTIER DU DEFAUT QU'ELLE
+  # OUVRE : sans date, l'age vaut 0, donc `0 > @pending_deadline_sec` est faux a jamais.
+  # `stalled_or_wait/4` intercepte l'absence de date AVANT le calcul, ce qui rend une telle clause
+  # inatteignable — dialyzer le dit —, et la poser quand meme remettrait le zero a portee du
+  # prochain appelant.
   defp age_sec(%DateTime{} = dt), do: DateTime.diff(DateTime.utc_now(), dt, :second)
 
   @doc """

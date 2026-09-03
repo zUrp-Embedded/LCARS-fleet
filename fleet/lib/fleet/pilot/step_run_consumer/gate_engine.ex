@@ -172,8 +172,8 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     if judge_kind?(payload, spec) do
       # `_with_reason` ET PAS `gate_decision/1` : le motif du refus de schema voyage jusqu'au ctx,
       # parce que la passe de correction (B4) promet au juge de lui dire CE QUI N'ALLAIT PAS. Il
-      # etait journalise puis jete, et `VerdictCorrection` lisait une cle que personne ne posait —
-      # donc elle demandait au juge de deviner, ce qu'elle promettait justement d'eviter.
+      # journalise puis jete, il laisserait `VerdictCorrection` lire une cle que personne ne pose —
+      # donc demander au juge de deviner, ce qu'elle promet justement d'eviter.
       {decision, invalid_reason} = Verdict.gate_decision_with_reason(result)
       trace = Verdict.verdict_comment(payload["role"], decision, result)
 
@@ -241,9 +241,9 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. The gate used to read `outputs` that came
-  # entirely from the pod's own `result`, so the producer attested that its own deliverable existed
-  # and was not empty. `StepOutputs.derive/2` answers that from the card's declared `outputs`,
+  # BL-6-59 — THE SYSTEM'S FACTS WIN OVER THE SUBJECT'S. Reading `outputs` straight from the pod's
+  # own `result` has the PRODUCER attesting that its own deliverable exists and is not empty.
+  # `StepOutputs.derive/2` answers that from the card's declared `outputs`,
   # checked in the workspace the RUNTIME created — and the merge order is what makes it a fact
   # rather than an opinion: system LAST, so a `result` claiming `outputs_exist: true` is overridden,
   # not honoured.

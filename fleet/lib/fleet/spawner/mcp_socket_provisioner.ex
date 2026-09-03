@@ -42,9 +42,9 @@ defmodule Fleet.Spawner.McpSocketProvisioner do
   The canonical default, PUBLIC because it is part of the seam's contract rather than an
   implementation detail.
 
-  It was not, and the omission had a cost that only a mutation showed: changing this attribute left
-  the whole suite green, because `config/test.exs` pins a stub here and no test ever sees the
-  fallback. Asserting it through `resolved/0` would mean DELETING the key globally, which under an
+  Left private, changing this attribute leaves the whole suite green — only a mutation shows it,
+  because `config/test.exs` pins a stub here and no test ever sees the fallback. Asserting it
+  through `resolved/0` would mean DELETING the key globally, which under an
   async suite hands the real provisioner to whatever pod test happens to be running — a hazard
   bought to test a constant. Exposing the value costs one function and no risk.
   """

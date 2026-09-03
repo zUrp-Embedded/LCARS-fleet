@@ -1,7 +1,7 @@
 import Config
 
-# fleet_api : PLUS RIEN À ÉTEINDRE. Le domaine n'a plus de listener TCP (surface retirée le
-# 2026-08-14, aucune capacité propre), et son unique listener — le socket de contrôle AF_UNIX — ne
+# fleet_api : RIEN À ÉTEINDRE. Le domaine n'a pas de listener TCP, et son unique listener — le
+# socket de contrôle AF_UNIX — ne
 # démarre que si `:api_control_socket` est posé. Ce fichier ne le pose pas : l'hermétisme vient donc
 # d'une ABSENCE, pas d'un drapeau. Un drapeau qui doit valoir `false` en test est une chose de plus
 # qui peut valoir `true` par accident.
@@ -15,12 +15,11 @@ config :lcars_fleet, mcp_boot_environment: :host
 # résiduels sous :sock_base. Sans cet override il taperait `/run/lcars/mcp` réel (fleet vivante
 # même host/user) au boot de `mix test`. On l'isole sous un tmp de test.
 #
-# ⚠ ET LE SUFFIXE PAR PID N'EST PAS COSMETIQUE : ce chemin etait CONSTANT, donc deux `mix test`
-# concurrents sur la meme machine ecrivaient au meme endroit — et ce sweep-la SUPPRIME ce qu'il
-# trouve. La suite A effaçait les sockets de la suite B en demarrant. L'hermetisme ci-dessus a ete
-# ecrit contre une fleet VIVANTE, pas contre une seconde suite : il tenait la question qu'on lui
-# posait, et pas celle-ci. (Relaye par le consultant, 2026-08-17, en enquetant sur des echecs non
-# reproductibles ; verifie ici.)
+# ⚠ ET LE SUFFIXE PAR PID N'EST PAS COSMETIQUE : un chemin CONSTANT fait ecrire au meme endroit
+# deux `mix test` concurrents sur la meme machine — et ce sweep-la SUPPRIME ce qu'il trouve, donc la
+# suite A efface les sockets de la suite B en demarrant. L'hermetisme ci-dessus est ecrit contre une
+# fleet VIVANTE, pas contre une seconde suite : il tient la question qu'on lui pose, et pas
+# celle-ci. Symptome : des echecs non reproductibles.
 #
 # `System.pid/0` plutot qu'un entier unique : le dossier DIT quelle execution le possede, ce qui
 # transforme un residu dans `/tmp` en information au lieu d'un dechet anonyme.
@@ -32,7 +31,8 @@ config :lcars_fleet,
 # Sans cet override, `mix test` y écrirait ses charges utiles et, pire, le `StepRunConsumer`
 # démarré par un cas rejouerait au boot les completions RÉELLES qu'il y trouverait — des écritures
 # forge déclenchées par une suite de tests. On l'isole sous un tmp.
-# Meme suffixe par PID, meme raison qu'au-dessus : deux suites concurrentes partageaient ce journal.
+# Meme suffixe par PID, meme raison qu'au-dessus : sans lui, deux suites concurrentes partagent ce
+# journal.
 config :lcars_fleet,
   pilot_completion_outbox_root:
     Path.join(System.tmp_dir!(), "lcars-completion-outbox-test-#{System.pid()}")
@@ -96,18 +96,18 @@ config :lcars_fleet, admiral_start_audit_consumer: false
 config :lcars_fleet, admiral_start_boot_orchestrator: false
 # BL-021 chantier 8 — Extension V2 off par défaut en test (hermétisme : MCPMonitor fait
 # Process.whereis + un timer qui broadcast sur le Bus, ce qui pollue les tests async). Les tests
-# dédiés instancient avec opts. (`start_mcp_watcher` retiré avec MCPWatcher le 2026-08-03 — la
-# veille amont est passée en CI ; une clef de config sans lecteur est une promesse morte.)
+# dédiés instancient avec opts. (Pas de `start_mcp_watcher` : la veille amont est en CI, et une
+# clef de config sans lecteur est une promesse morte.)
 config :lcars_fleet, admiral_start_mcp_monitor: false
 config :lcars_fleet, admiral_start_toolchain_reconciler: false
 
-# Conformité 2026-07-04 (trou d'hermétisme PROUVÉ par probe : les 2 PIDs vivants pendant mix test) :
+# Trou d'hermétisme PROUVÉ par probe (deux PIDs vivants pendant `mix test`) :
 # Shutdown expose un drain global — off en test,
 # les tests dédiés démarrent leur instance avec opts isolés (même règle que les consumers ci-dessus).
 config :lcars_fleet, admiral_start_shutdown: false
 config :lcars_fleet, spawner_start_publish_consumer: false
 
-# (ArchFeed : déménagé côté pilot, démarré par le rail step — `:step_dispatch?` off en test le coupe.)
+# (ArchFeed vit côté pilot, démarré par le rail step — `:step_dispatch?` off en test le coupe.)
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :lcars_fleet, spawner_start_pod_warden: false
 # G5 : pas de respawn de permanents en test (pas de vrais permanents ; un test qui en a besoin
@@ -115,15 +115,14 @@ config :lcars_fleet, spawner_start_pod_warden: false
 config :lcars_fleet, spawner_start_permanent_warden: false
 
 # fleet_pilot hermétisme test : le mode step est OFF par défaut (`:step_dispatch?` absent →
-# `step_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite). Le knob legacy
-# `start_dispatcher` a été retiré (②.3 / BL-050, rail AutoDispatcher supprimé).
+# `step_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite).
 
 # F-E7 — pas de gap inter-écritures en test (le défaut prod = 2000ms ; Fleet.Pilot.WriteSpacing.gap →
 # Process.sleep, partagé StepRunCompleter + ProjectOnboard). Tests rapides ET déterministes.
 config :lcars_fleet, pilot_forge_write_spacing_ms: 0
 
 # CI-11 — le sérialiseur work/ops (OpsObjectSync) NE démarre PAS en test : la suite prend son fallback
-# direct (logs OpsObject dans le process appelant, comportement pré-CI-11 → pas de bleed capture_log
+# direct (logs OpsObject dans le process appelant → pas de bleed capture_log
 # induit par la sérialisation d'un singleton partagé entre tests async). La sérialisation elle-même est
 # prouvée en isolation par OpsObjectSyncTest (instance dédiée, nom custom, commit_object/5).
 config :lcars_fleet, pilot_start_ops_object_sync: false
@@ -136,8 +135,8 @@ config :lcars_fleet, pilot_start_ops_object_sync: false
 # dans `etc/fleet_v2.env.template` ne l'offre. `PollerTest` le rallume pour épingler la porte.
 config :lcars_fleet, pilot_require_onboarded: false
 
-# (Gatekeeper : plus d'autoboot — juge one-shot per-projet depuis la réorg 2026-07-19,
-# spawné par éval de gate ; les tests stubbent le spawner de GatekeeperEscalation.)
+# (Gatekeeper : pas d'autoboot — c'est un juge one-shot par projet, spawné par éval de gate ; les
+# tests stubbent le spawner de GatekeeperEscalation.)
 
 # BL-027 — hermétisme : registry events.yaml non chargé en test (authorized_event_types
 # vide → escape-hatch assert_authorized! → Bus.broadcast/2 ne valide pas). Le test dédié

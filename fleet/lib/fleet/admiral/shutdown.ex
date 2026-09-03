@@ -36,8 +36,9 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcher do
 
   ## `refuse_new_jobs/1`
 
-  Activates `Fleet.Shutdown.Quiesce` → the points that OPEN new work refuse it: the REST admin door
-  (`/api/admin/spawn`, `Fleet.API.ControlRouter`), the permanent respawn (`Fleet.Spawner.PermanentWarden`),
+  Activates `Fleet.Shutdown.Quiesce` → the points that OPEN new work refuse it: the admin write door
+  (`POST /api/admin/spawn` on the AF_UNIX control socket, `Fleet.API.ControlRouter`), the permanent
+  respawn (`Fleet.Spawner.PermanentWarden`),
   AND the producer-spawn point (`Fleet.Pilot.StepDispatcher.dispatch_issue`, CI-01 — a fresh issue or the
   next step of an engaged run). The FINALIZATION of an in-flight step_run (completion/review/merge) is NOT
   gated (cf. `Fleet.Shutdown.Quiesce` for the full reader list + the finish-vs-open rationale).
@@ -52,8 +53,8 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcher do
       `:assigned` being worked). This IS the real forge work, and it EXCLUDES the idle
       residents by construction: a project architect (`architect-<name>`, `forever` but NOT
       `permanent-` prefixed) or a `pipe` engineer between briefs has NO active work-item → not counted.
-      (The old `list_pods` count kept them in — one open project ⇒ `in_flight > 0` FOREVER ⇒ every stop
-      timed out. An arch mid-arbitration DOES have a work-item and IS counted, correctly.)
+      ⚠ COUNTING PODS INSTEAD keeps them in, so ONE OPEN PROJECT ⇒ `in_flight > 0` FOREVER ⇒ every
+      stop times out. An arch mid-arbitration DOES have a work-item and IS counted, correctly.
     * the **completion offloads** via the `:completion_inflight_fun` seam — after `pod.completed`, the
       business completion (push + PR + forge writes, ≤30s) runs in `Fleet.Pilot.StepRunConsumer`'s
       `Task.Supervisor`: neither a pod nor a work-item (the item is already `:completed`), so the
@@ -173,8 +174,11 @@ defmodule Fleet.Admiral.Shutdown do
   `begin/1` refuses new jobs, then synchronously polls the configured dispatcher
   until it observes zero in-flight work on consecutive reads or reaches its grace
   deadline. Synchronous handling is required so teardown cannot proceed before the
-  drain replies. The launcher has a separate outer fallback and may terminate the
-  BEAM before the default internal deadline.
+  drain replies.
+
+  ⚠ THE LAUNCHER'S OUTER FALLBACK IS DERIVED FROM THIS DEADLINE, NOT SET BESIDE IT: `bin/fleet_v2`
+  waits `grace + margin`, so it cannot hand back on a fleet that is still draining. An independent
+  literal there would be a second number for one fact — cf. `grace_ms/0`.
 
   `drain_in_flight/1` runs the same bounded loop without refusing work and exists
   for tests. `NoOpDispatcher` is the unwired default; production config selects
@@ -215,11 +219,9 @@ defmodule Fleet.Admiral.Shutdown do
   # so the item leaves `list_active` before this consumer has even decided, let alone offloaded.
   # Raising the count would buy the same instrument, slower, at the price of every clean shutdown.
   #
-  # THE LEASE EXISTS, AND THIS COMMENT DECLARED IT MISSING (corrige 2026-08-03, BL-6-43.1). The
-  # paragraph above described the right fix — "a LEASE taken BEFORE the work-item flips" — and
-  # closed on "Open." while `in_flight_count/0`, 130 lines up, already adds
-  # `Quiesce.busy_count()`, and `StepRunConsumer` already wraps its whole `pod.completed` handoff
-  # in `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
+  # THE LEASE IS WHAT CLOSES IT (BL-6-43.1), and it is already taken: `in_flight_count/0` adds
+  # `Quiesce.busy_count()`, and `StepRunConsumer` wraps its whole `pod.completed` handoff in
+  # `Quiesce.busy/1`. So the ~10s `GateEngine.resolve_next` read is INSIDE the lease and is
   # counted: the drain cannot conclude while it runs.
   #
   # WHAT REMAINS UNCOVERED, precisely, because "closed" said flatly would be the next lie: the Bus
@@ -229,12 +231,8 @@ defmodule Fleet.Admiral.Shutdown do
   # orders of magnitude. And it cannot widen under load: a backed-up consumer mailbox means the
   # previous message is being handled, so the lease is already held and the count is not zero.
   #
-  # The debounce therefore keeps its original job (not a SINGLE racy 0-read) and no longer carries
-  # a window it was never sized for. Raising the count would still buy nothing.
-  #
-  # ⚠ Kept as a SPECIMEN: this comment outlived the delivery that invalidated it, and it announced
-  # a known hole in the very file that closed it. A reader — human or agent — walks away with a debt
-  # that does not exist, and the first thing they will do is "repair" it.
+  # The debounce therefore keeps its own job — not a SINGLE racy 0-read — and carries no window it
+  # was never sized for. Raising the count buys nothing.
   @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) for the case where the real

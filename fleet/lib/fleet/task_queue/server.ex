@@ -8,14 +8,10 @@ defmodule Fleet.TaskQueue.Server do
   hence no stale tasks surviving a reboot. On restart, the queue re-derives itself from the forge
   polls (canonical reconciliation rail).
 
-  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** Jusqu'au 2026-08-20 l'axiome ci-dessus cohabitait
-  avec un rail de persistance `state.json` opt-in (`Fleet.TaskQueue.Store`, `persist: true`), garde
-  « pour un etat durable cote broker — AUCUN n'existe a ce jour ». Retire (BL-6-113) : 92 lignes de
-  rail, 135 de test et son orchestration ici, pour un mode dont zero appelant demandait
-  l'activation. Le garder coutait plus que sa dette — l'axiome est devenu une POUTRE du cycle de vie
-  du worker, donc rallumer `persist: true` ne serait plus inutile, ce serait FAUX : on
-  ressusciterait au demarrage des mandats que la forge a deja depasses. Un mecanisme dormant qui
-  s'allume detruit du travail ; un mecanisme retire de trop se reecrit.
+  ⚠ **ET CE N'EST PLUS UN REGIME PARMI DEUX.** L'axiome ci-dessus est une POUTRE du cycle de vie du
+  worker, pas une option : reintroduire une persistance cote broker ne serait pas inutile, ce serait
+  FAUX — on ressusciterait au demarrage des mandats que la forge a deja depasses.
+  **Un mecanisme dormant qui s'allume detruit du travail ; un mecanisme retire de trop se reecrit.**
 
   Broadcasts `%Fleet.Event{source: :task_queue, ...}` on `Phoenix.PubSub`
   topic `fleet.events`, `correlation_id = work_item.id`. Reconciliation across a restart goes
@@ -46,18 +42,7 @@ defmodule Fleet.TaskQueue.Server do
   domain's source, not its dependency. `Fleet.TaskQueue.Broadcast` states the full reasoning; the
   durable half of completion is the forge reconciliation (F-C050), never this ephemeral broker.
 
-  ## Split — what was extracted, what stays (and why)
-
-  One concern extracted into a stateless module (the GenServer state no longer traverses it):
-
-    * `Fleet.TaskQueue.Broadcast` — load-bearing vs lossy-observability policy + the
-      `event/3` envelope. The Server keeps one-line adapters that unpack
-      `state.bus`/`state.topic` (the per-instance seams).
-
-  A second one, `Fleet.TaskQueue.Store`, was extracted the same day and REMOVED the day the axiom
-  above became load-bearing (BL-6-113) — cf. the warning at the top.
-
-  Two concerns REFUSED for extraction (2 clean cuts > 4 forced ones):
+  ## Deux extractions REFUSEES, et leurs raisons
 
     * **Deadline-watchdog** (`maybe_schedule_deadline/1` + `handle_info {:check_deadline}`):
       the arm/check pair is coupled to the PROCESS (`Process.send_after(self(), ...)` →
@@ -170,9 +155,9 @@ defmodule Fleet.TaskQueue.Server do
 
         new_state = state |> put_work_item(work_item)
 
-        # Supersede was the ONLY terminal transition with no event: the mandates it closes went
-        # `:cleared` behind a debug log, so the audit trail lied by omission about their fate and
-        # any consumer holding per-mandate context (StepRunConsumer's `gate_evals`) kept it
+        # Supersede must not be the one terminal transition with no event: mandates going
+        # `:cleared` behind a debug log make the audit trail lie by omission about their fate, and
+        # any consumer holding per-mandate context (StepRunConsumer's `gate_evals`) keeps it
         # forever. One `work_item.cleared` per superseded item, SAME shape as the clear_for_pod
         # rail (payload `work_item_id` + `reason` — the reason distinguishes the two paths).
         for t <- superseded do
@@ -230,14 +215,15 @@ defmodule Fleet.TaskQueue.Server do
           tid when tid != nil and tid != work_item.id ->
             {:reply, {:error, :work_item_id_mismatch}, state}
 
-          # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and until now that held by accident.
+          # A MANDATE IS NOT CLOSABLE BEFORE IT IS READ, and matching `@active_states` here would
+          # leave that to accident.
           #
-          # `@active_states` is `[:pending, :assigned]`, so this branch accepted a `:pending` item —
-          # one the pod never pulled. Nothing exploited it, for a reason that is not a rule: the id
+          # `@active_states` is `[:pending, :assigned]`, so such a branch accepts a `:pending` item
+          # — one the pod never pulled. Nothing exploits it, for a reason that is not a rule: the id
           # is only obtainable through `get_work_item`, which transitions the item to `:assigned` on
-          # its way out. The guarantee "the pod saw the brief before closing it" was therefore a
-          # property of who knows an id, not of the state machine. A confused pod, a misplaced retry
-          # or a future caller holding an id another way would each turn it off silently.
+          # its way out. The guarantee "the pod saw the brief before closing it" is then a property
+          # of who knows an id, not of the state machine. A confused pod, a misplaced retry or a
+          # future caller holding an id another way would each turn it off silently.
           #
           # The distinction already exists in the codebase — `Poller.Reconciliation` keys its own
           # ownership rule on `@pulled_states [:assigned]` for exactly this reason. Applying it here
@@ -279,14 +265,14 @@ defmodule Fleet.TaskQueue.Server do
             # `StepRunCompleter` (lock lifted LAST) and the Pod (`pod.completed` re-emitted until it passes). On
             # failure NOTHING is committed: the item STAYS active (`:assigned`) → `find_active`
             # returns it → a re-submit RE-PLAYS honestly (re-broadcast), and the pod is never lied to with a
-            # `:double_submit_ignored`/"already received" on an UNdelivered item. Pre-CI-03 the commit was done
-            # first, so a lost broadcast left a terminal `:completed` + a false success at retry.
+            # `:double_submit_ignored`/"already received" on an UNdelivered item. Commit first and a
+            # lost broadcast leaves a terminal `:completed` plus a false success at retry.
             #
-            # ⚠ THE SYMBOL USED TO BE `⟺`, AND THAT BICONDITIONAL IS FALSE IN THE DIRECTION THAT
-            # MATTERS: zero subscriber yields `:ok`, not an error. What the discipline needs is only
-            # the implication below — a refusal proves nobody got it — and reading it as an
-            # equivalence turns "the bus accepted" into "a consumer received", which nothing here
-            # establishes (cf. `Broadcast.required`, which now states what `:ok` does not buy).
+            # ⚠ AN IMPLICATION, NEVER `⟺`: a biconditional is false in the direction that matters,
+            # since zero subscriber yields `:ok` and not an error. The discipline needs only the
+            # implication below — a refusal proves nobody got it — and reading it as an equivalence
+            # turns "the bus accepted" into "a consumer received", which nothing here establishes
+            # (cf. `Broadcast.required`, which states what `:ok` does not buy).
             # INVARIANT this rests on: `required_broadcast {:error} ⟹ ZERO subscriber delivered`. True on the
             # current mono-node Phoenix.PubSub (both failure modes are pre-dispatch, all-or-nothing:
             # `{:error,_}` adapter-unreachable, or `UnregisteredError` raised by `assert_authorized!` BEFORE any
@@ -427,11 +413,11 @@ defmodule Fleet.TaskQueue.Server do
     |> Enum.max_by(& &1.enqueued_at, DateTime, fn -> nil end)
   end
 
-  # D4 — THE RUNTIME ENGRAVES THE ORDER'S VERSION; THE POD NO LONGER CITES IT. The broker dispatched
+  # D4 — THE RUNTIME ENGRAVES THE ORDER'S VERSION; THE POD DOES NOT CITE IT. The broker dispatched
   # this work item at a pinned `brief_sha`/`brief_ref`, so it OVERWRITES whatever the pod put (or
   # omitted) in its result. The provenance triplet downstream then cites the version the runtime
-  # RESOLVED — PROVEN — instead of a pod relaying a sha it could not verify (the old F-15 citation,
-  # honest only if the pod was). `nil` (a degraded/inline order, nothing materialized) → untouched.
+  # RESOLVED — PROVEN — instead of a pod relaying a sha it cannot verify, a citation honest only if
+  # the pod is. `nil` (a degraded/inline order, nothing materialized) → untouched.
   defp put_runtime_brief(result, %WorkItem{brief_sha: sha, brief_ref: ref}) when is_binary(sha) do
     result |> Map.put("brief_sha", sha) |> Map.put("brief_ref", ref)
   end
@@ -475,10 +461,10 @@ defmodule Fleet.TaskQueue.Server do
   #
   # The sequence that produced it, and none of its steps is exotic: the pod completes mandate A, a
   # mandate B is enqueued, a teardown clears B, and B's `submit_result` — already in flight on the
-  # socket — arrives. `find_active` is nil, the old predicate saw A, and B's result was dropped
-  # under an acknowledgement. The `work_item_id_mismatch` guard could not catch it either: it only
-  # runs on the branch where an ACTIVE item exists, so on this path the submitted id was never
-  # compared to anything.
+  # socket — arrives. `find_active` is nil, a predicate keyed on the pod sees A, and B's result is
+  # dropped under an acknowledgement. The `work_item_id_mismatch` guard does not catch it either:
+  # it only runs on the branch where an ACTIVE item exists, so on this path the submitted id is
+  # never compared to anything.
   #
   # Correlating by id also states the honest answer when there is nothing to correlate: no id, or
   # an id we never completed, is `:no_active_work_item` — "we have nothing of yours", which is

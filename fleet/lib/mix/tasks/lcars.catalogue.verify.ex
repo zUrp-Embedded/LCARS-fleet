@@ -36,10 +36,12 @@ defmodule Mix.Tasks.Lcars.Catalogue.Verify do
   defp report({:ok, %{assumptions: assumptions}}, quiet?) do
     unless quiet? do
       print_assumptions(assumptions)
-      # LA MEME PHRASE VIVAIT A DEUX ENDROITS, et corriger l'un sans l'autre aurait laisse le
-      # mensonge sur le chemin `mix` — celui que l'operateur lance a la main (6-008). Elle
-      # affirmait « every check the boot runs passed » : mesure du 2026-08-14, le rail de boot
-      # joue CINQ gardes `validate_*!`, le verificateur en rejouait QUATRE.
+
+      # LA MEME PHRASE VIT A DEUX ENDROITS — ici et sur la porte release — donc corriger l'un sans
+      # l'autre laisse le mensonge sur le chemin `mix`, celui que l'operateur lance A LA MAIN
+      # (6-008). Elle ne dit PAS « every check the boot runs passed » : il suffit que le rail de
+      # boot joue une garde `validate_*!` de plus que ce verificateur pour qu'un vert d'ici precede
+      # un boot rouge.
       Mix.shell().info(
         "catalogue OK — les controles catalogue du boot passent (cf. hypotheses ci-dessus)."
       )

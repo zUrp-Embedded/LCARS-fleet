@@ -52,40 +52,20 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
   def conforming_escalation_forge,
     do: conforming(EscalationForge, EscalationForge.resolved())
 
-  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est fixe pour sa vie : « ou vit ce projet »
-  # repond a « quel catalogue le traite ». Le choix se fait au guichet, la ou l'humain choisit deja sa
-  # carte — starfleet porte les deux verbes.
+  # L'ORG DU PROJET EST CELLE DE SON CATALOGUE, et ce lien est FIXE POUR SA VIE : « ou vit ce
+  # projet » repond a « quel catalogue le traite ».
   #
-  # Un catalogue NON INSTALLE est refuse, et c'est la meme raison que l'ancien commentaire donnait pour
-  # coller cette org a celle du poller : un projet onboarde dans une org que le poller ne scanne pas
-  # est un RAIL MORT, silencieux — rien ne le dispatcherait jamais. Le poller scannant desormais les
-  # orgs des catalogues INSTALLES, la condition se dit exactement ainsi.
+  # ⚠ UN CATALOGUE NON INSTALLE EST REFUSE : le poller scanne les orgs des catalogues INSTALLES,
+  # donc un projet onboarde ailleurs serait un RAIL MORT, silencieux — rien ne le dispatcherait
+  # jamais.
   #
-  # ⚖ LE CATALOGUE EST OBLIGATOIRE (user, 2026-08-17), ET CE QUI A ETE RETIRE VAUT D'ETRE LU.
+  # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference parait gratuite
+  # et ne l'est pas : elle achete un comportement qui CHANGE quand un tiers installe un catalogue
+  # portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
+  # POPULATION de la boite. L'information, elle, n'est pas absente — elle est dans l'objet que
+  # l'appelant vient de lire, qui rend chaque carte AVEC son catalogue.
   #
-  # Trois versions en une journee, chacune tuee par la meme question posee un cran plus loin :
-  #   1. l'omission prenait le PREMIER catalogue installe — deviner un lien fixe pour la vie ;
-  #   2. puis « un seul installe -> lui, sinon derive de la carte » — « tu cables un rail
-  #      d'exception par confort », et c'etait vrai : cette branche derivait de la POPULATION ;
-  #   3. puis la regle unique « quels catalogues peuvent repondre ? un -> il decide » — « donc tu as
-  #      encore un rail qui teste un truc, que tu supprimerais en posant le catalogue obligatoire ».
-  #
-  # Vrai aussi, et mon argument pour la garder etait FAUX. J'avais dit « friction pour zero
-  # information » : l'information n'est pas absente, elle est dans l'objet que l'appelant vient de
-  # lire — `card_list` rend chaque carte AVEC son catalogue. Exiger le champ coute une
-  # recopie, et l'inference achetait, contre ce rien : un comportement qui change quand un TIERS
-  # installe un catalogue portant le meme nom de carte, et deux branches dont laquelle s'execute
-  # depend de la population de la boite — donc jamais les deux au meme endroit.
-  #
-  # Le voisin le disait deja : `import_deposit/4` prend son catalogue en argument POSITIONNEL. Ce
-  # verbe-ci etait l'exception, pas la regle.
-  #
-  # « Quel metier traite ce projet » est la question la plus basique qu'on puisse poser sur lui, et
-  # elle n'a pas de defaut — bien moins que « quel niveau de soin », qui en a un (C0 non declare).
   # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.
-  #
-  # `:mcp_delegation_org` est mort avec l'inference : il n'avait que ce lecteur. `:pilot_fleet_org`
-  # survit, il appartient au poller.
   @doc false
   @spec resolve_org(map()) :: {:ok, String.t()} | {:error, term()}
   def resolve_org(args) do
@@ -94,7 +74,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
     case Map.get(args, "catalogue") do
       cat when is_binary(cat) and cat != "" ->
         # Le refus vient de la SEULE fonction qui le formule (`Onboard.catalogue_not_installed/1`) :
-        # deux formulations d'un meme refus, c'est ainsi que le vocabulaire s'etait dedouble.
+        # deux formulations d'un meme refus dedoublent le vocabulaire.
         if cat in installed,
           do: {:ok, cat},
           else: Fleet.Project.Onboard.catalogue_not_installed(cat)

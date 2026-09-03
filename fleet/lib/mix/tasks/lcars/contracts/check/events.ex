@@ -120,8 +120,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
           |> Enum.reject(&module_exists?/1)
 
         _ ->
-          # HOLLOW-GREEN GUARD (R0-EVT-012): an ABSENT/invalid events.yaml used to yield `[]` → `:pass`
-          # — the "every handler exists" check passing precisely when the registry it reads is GONE. An
+          # HOLLOW-GREEN GUARD (R0-EVT-012): an ABSENT/invalid events.yaml yielding `[]` reads as
+          # `:pass` — the "every handler exists" check passing precisely when the registry it reads
+          # is GONE. An
           # unreadable registry is a broken deploy → FAIL, not a silent green.
           [
             "events.yaml absent or invalid at #{yaml} — handlers unverifiable (hollow-green guard)"
@@ -140,25 +141,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
 
   # LA DEPENDANCE INVISIBLE DU FOURNISSEUR — nature de couture SANS PRECEDENT dans ce depot.
   #
-  # `Reconciliation.@pulled_states [:assigned]` dit qu'un work-item `:pending` (enfile, jamais tire)
-  # ne possede AUCUN verrou. Trois modules raisonnent sur cette regle sans jamais l'appeler : ils la
-  # citent en commentaire. Le fournisseur, lui, ignorait qu'il portait une garantie pour eux — la
-  # changer casse leur raisonnement en silence, et rien ne relie les quatre fichiers.
+  # `@pulled_states` dit qu'un work-item enfile mais jamais TIRE ne possede AUCUN verrou. Des
+  # modules raisonnent sur cette regle sans jamais l'appeler : ils la CITENT. Le fournisseur ignore
+  # donc qu'il porte une garantie pour eux, et la changer casse leur raisonnement en silence.
   #
-  # Les cinq autres natures de couture se verifient entre deux ENSEMBLES qui s'ecrivent. Celle-ci
-  # n'a rien a comparer : la dependance ne laisse aucune trace executable. La seule forme qui la
-  # rende verifiable est que le fournisseur la DECLARE — d'ou `pulled_states_dependents/0`, une
-  # valeur dont le seul lecteur est ce mur.
+  # ⚠ RIEN A COMPARER : cette dependance ne laisse aucune trace executable, contrairement aux autres
+  # natures de couture qui s'observent entre deux ensembles ecrits. La seule forme qui la rende
+  # verifiable est que le fournisseur la DECLARE — d'ou une valeur dont le seul lecteur est ce mur.
   #
-  # DEUX SENS, et le second est celui qui coute : un dependant qui apparait sans etre declare
+  # DEUX SENS, et le second est celui qui coute : un dependant qui apparait SANS etre declare
   # reintroduit exactement l'angle mort qu'on ferme.
   #
-  # ## Preuve (mutations jouees a la pose, 2026-08-20)
-  # (a) un dependant retire de la declaration -> ECHEC, fichier nomme cote « cite, non declare » ;
-  # (b) un fichier declare qui ne cite plus rien -> ECHEC, nomme cote « declare, ne cite plus ».
-  # Angle mort declare : la citation est un GREP sur `@pulled_states`. Un module qui raisonnerait
-  # sur la regle sans la nommer resterait invisible — c'est le prix d'une dependance qui ne
-  # s'execute pas, et le nommage est deja la discipline du depot.
+  # ## Preuve, mutations jouees a la pose
+  # (a) dependant retire de la declaration -> ECHEC, « cite, non declare » ;
+  # (b) fichier declare qui ne cite plus rien -> ECHEC, « declare, ne cite plus ».
+  #
+  # ANGLE MORT DECLARE : la citation est un GREP. Un module qui raisonnerait sur la regle sans la
+  # NOMMER resterait invisible — c'est le prix d'une dependance qui ne s'execute pas.
   @doc false
   @spec check_pulled_states_declared(String.t()) :: Support.result()
   def check_pulled_states_declared(root) do
@@ -182,10 +181,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
       |> Enum.filter(&String.contains?(File.read!(&1), "@pulled_states"))
       |> Enum.map(&Path.relative_to(&1, root))
       # Le fournisseur lui-meme, et L'ARBRE DU VERIFICATEUR : le gate LIT la regle, il n'en depend
-      # pas. S'auto-compter ferait rougir le mur sur sa propre pose — mesure a la pose, 2026-08-20.
+      # pas. S'auto-compter ferait rougir le mur sur sa propre pose — mesure a la pose.
       #
-      # ⚠ C'ETAIT UN CHEMIN EN DUR vers `lcars.contracts.check.ex`, et le decoupage du 2026-09-02 a
-      # fait rougir ce mur : il avait demenage, et son exemption pointait son ancienne adresse. Une
+      # ⚠ C'ETAIT UN CHEMIN EN DUR vers `lcars.contracts.check.ex`, et un decoupage a fait rougir
+      # ce mur : il avait demenage, et son exemption pointait son ancienne adresse. Une
       # liste de chemins en dur grossit a chaque coupe et rougit la fois ou on l'oublie — la REGLE
       # la remplace : ce qui vit dans l'arbre du verificateur LIT la regle, il n'en depend jamais.
       |> Enum.reject(&(&1 == rel or checker_source?(&1)))
@@ -219,22 +218,17 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
     end
   end
 
-  # L'ECHELLE DE SEVERITE, ECRITE DEUX FOIS.
+  # ⚠ L'ECHELLE DE SEVERITE EST ECRITE DEUX FOIS, EN DEUX FORMES : l'Elixir porte l'ORDRE — ce a
+  # quoi un seuil de blocage se compare — et le schema porte l'APPARTENANCE, ce qu'un juge a le
+  # droit d'ecrire. Un `@doc` qui se dit « le SEUL endroit » est donc vrai de l'ordre et faux de
+  # l'ensemble.
   #
-  # `FindingsWire.severities/0` porte l'ORDRE (du plus faible au plus fort) : le `block_at` d'une
-  # carte s'y compare. `findings-v1.json` porte l'APPARTENANCE : ce qu'un juge a le droit d'ecrire.
-  # Deux formes, un seul vocabulaire — et le `@doc` de la fonction affirme etre « the ONLY place
-  # this order is written », ce qui est vrai de l'ORDRE et faux de l'ENSEMBLE.
+  # Le cout du desaccord est mesure : un juge ayant ecrit une severite que l'enum ne portait pas a
+  # vu TOUTE sa charge mourir pour un mot.
   #
-  # La paire est nee DANS le lot qui a paye le cas `"none"` : un juge avait ecrit `"none"` pour dire
-  # « rien trouve », l'enum ne le portait pas, et toute sa charge est morte pour un mot. La lecon du
-  # lot etait « tout ce qu'un juge peut ecrire doit etre accepte ou refuse lisiblement » ; le meme
-  # lot a cree une seconde copie du meme vocabulaire, sans mur.
+  # Ce check compare les ENSEMBLES, jamais l'ordre — un enum JSON n'en porte aucun.
   #
-  # Ce check compare les ENSEMBLES, jamais l'ordre : l'ordre n'existe que cote Elixir, et un enum
-  # JSON n'en porte aucun. Une severite ajoutee d'un cote et pas de l'autre est refusee ici.
-  #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # ## Preuve (mutation jouee a la pose)
   # (a) Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est
   #     nommee absente des DEUX enums.
   # (b) Remplacer `"important"` par `"zzz"` dans le seul enum `severity_max` -> ECHEC, une absence
@@ -336,32 +330,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
 
   # LA TABLE DES KINDS D'ESCALADE, FERMEE DANS LES DEUX SENS.
   #
-  # `Escalation.kind_describe/1` est une table CLOSE : un kind sans clause n'ouvre pas d'issue, il
-  # leve un `FunctionClauseError`. C'est ce qui est arrive a `:awaits_arch_stuck` — emis par
-  # `StepRunConsumer.drain_failed/4`, sans clause — et il a crashe exactement sur le chemin
-  # « un ticket sort du pipeline en silence ». Le temoin du drain stubbait `escalate_fun`, donc il
-  # ne pouvait pas le voir : une couverture de test ne dit rien d'une couture.
+  # La table des kinds est CLOSE : un kind sans clause n'ouvre pas d'issue, il LEVE — et il le fait
+  # exactement sur le chemin « un ticket sort du pipeline en silence ». Un temoin qui stubbe
+  # l'escalade ne peut pas le voir : une couverture de test ne dit rien d'une COUTURE.
   #
-  # L'autre sens coute moins cher mais ment autant : une clause sans producteur (`:pod_failed`,
-  # 2026-08-20) se lit comme une garantie que quelque chose sait remonter ce cas. C'est le motif
-  # « mensonge du registre » que `events.yaml` nomme deja pour ses propres cles.
+  # L'autre sens coute moins cher et ment autant : une clause SANS producteur se lit comme une
+  # garantie que quelque chose sait remonter ce cas.
   #
-  # DEUX SOURCES DE PRODUCTION, et il faut les deux : les routes declaratives d'`events.yaml`
-  # (`escalate_kind:`) et les sites de code, ou le kind est le PREMIER argument d'un appel a cinq
-  # arguments dont l'appele nomme une escalade (`escalate`, `escalate_gated`, `escalate_or_signal`,
-  # ou la couture homonyme). Le Catalog garde deja au boot qu'une route `immediate` PORTE un
-  # `escalate_kind` ; il ne verifie pas que ce kind ait une clause.
+  # DEUX SOURCES DE PRODUCTION, et il faut les deux : les routes declaratives, et les sites de code
+  # ou le kind est argument d'un appel d'escalade. Le catalogue garde deja au boot qu'une route
+  # immediate PORTE un kind ; il ne verifie pas que ce kind ait une clause.
   #
-  # ## Preuve (mutations jouees a la pose, 2026-08-20)
-  # (a) clause retiree pour un kind produit -> ECHEC, kind nomme cote « sans clause » ;
-  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme cote « morte » ;
-  # (c) `escalate_kind: :disk_full` pose chez un appelant de `record_or_escalate/4` -> ECHEC, kind
-  #     nomme « emis SANS clause ». C'est la voie CANONIQUE, et la version precedente la manquait
-  #     entierement : le kind ne passe pas en argument, il voyage dans les opts ;
-  # (d) une clause morte gardee vivante par un COMMENTAIRE de `events.yaml` -> ECHEC. Le regex
-  #     lisait le texte brut, donc une ligne d'historique suffisait a nier la mort d'une clause.
-  # Angle mort declare : un kind construit dynamiquement (variable, interpolation) est invisible —
-  # aucun n'existe aujourd'hui, et un mur precis vaut mieux qu'un mur qui devine.
+  # ## Preuve, mutations jouees a la pose
+  # (a) clause retiree pour un kind produit -> ECHEC, kind nomme « sans clause » ;
+  # (b) clause ajoutee pour un kind que personne ne produit -> ECHEC, kind nomme « morte » ;
+  # (c) kind pose dans les OPTS d'un appelant -> ECHEC. C'est la voie CANONIQUE, et une version
+  #     lisant les seuls arguments la manquait entierement ;
+  # (d) clause morte maintenue vivante par un COMMENTAIRE de la source declarative -> ECHEC : lire
+  #     le texte brut laissait une ligne d'historique nier la mort d'une clause.
+  #
+  # ANGLE MORT DECLARE : un kind construit dynamiquement est invisible. Aucun n'existe, et un mur
+  # precis vaut mieux qu'un mur qui devine.
   @doc false
   @spec check_escalation_kinds_closed(String.t()) :: Support.result()
   def check_escalation_kinds_closed(root) do
@@ -463,17 +452,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   defp callee_name(n) when is_atom(n), do: n
   defp callee_name(_), do: nil
 
-  # LE COUPLE `type_for_destination/1` <-> `visual_types/0` : l'un PRODUIT les types visuels, l'autre
-  # les SEME sur chaque depot. Deux ensembles qui doivent rester egaux, et qui ont divergé pendant
-  # SEIZE JOURS — `type:doc` seme et porte par personne, `type:workshop` porte et jamais seme, donc
-  # cree paresseusement, gris et sans description.
+  # ⚠ UN TYPE PRODUIT ET JAMAIS SEME NAIT PARESSEUSEMENT, GRIS ET SANS DESCRIPTION. Les deux
+  # ensembles — ce qui produit les types, ce qui les seme — doivent rester egaux, et leur divergence
+  # est passee inapercue pendant plus de deux semaines.
   #
-  # `visual_types/0` est desormais DERIVEE : elle mappe `type_for_destination/1` sur `@destinations`.
-  # La derivation ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee a
-  # `type_for_destination/1` ait sa destination dans `@destinations`. Sans lui, un troisieme type
-  # naitrait produit et jamais seme, exactement comme le deuxieme.
+  # La DERIVATION ferme la recopie ; ce mur ferme ce qu'elle laisse ouvert — qu'une clause ajoutee
+  # cote production ait bien sa destination declaree.
   #
-  # ## Preuve (mutation jouee a la pose, 2026-08-20)
+  # ## Preuve (mutation jouee a la pose)
   # (a) Ajouter une clause `def type_for_destination("ops"), do: "type:ops"` sans toucher
   #     `@destinations` -> ECHEC, 3 clauses annoncees pour 2 destinations.
   # (b) Rendre `visual_types/0` a sa forme d'avant — `do: ["type:feature", "type:doc"]`, la recopie
@@ -481,8 +467,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   #     nommes. La version qui comptait seulement clauses contre destinations restait verte : elle
   #     ne lisait jamais la fonction dont elle porte le nom.
   # Son angle mort, declare : il compte, il ne resout pas — deux clauses rendant le MEME type
-  # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas n'existe pas
-  # aujourd'hui et un compteur exact vaut mieux qu'un resolveur qui devine.
+  # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas ne se presente
+  # pas, et un compteur exact vaut mieux qu'un resolveur qui devine.
   @doc false
   @spec check_visual_types_derived(String.t()) :: Support.result()
   def check_visual_types_derived(root) do

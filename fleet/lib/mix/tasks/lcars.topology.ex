@@ -13,16 +13,16 @@ defmodule Mix.Tasks.Lcars.Topology do
   `Boundary.Mix.View.build/0`), not our source text. It therefore shows what the compiler actually
   enforces, which is the only thing worth comparing a committed map against.
 
-  This used to be a regex over the source, and the regex was the mechanism that always said YES: a
-  `deps:` list containing a COMMENT with a `[]` in it truncated the capture at that bracket, and every
-  dependency declared after it vanished. That was live on `Fleet.Spawner`, whose declared dependency
-  on `Fleet.Shutdown.Quiesce` never reached the extractor.
+  ⚠ NOT A REGEX OVER THE SOURCE, and that is the whole reason: such a regex IS a mechanism that
+  always says YES. A `deps:` list containing a COMMENT with a `[]` in it truncates the capture at
+  that bracket, and every dependency declared after it vanishes — a real shape, on a real domain
+  whose declared dependency on a foundation module never reaches the extractor.
 
-  It produced no VISIBLE error, and the reason is worth stating because it is luck rather than design:
-  this table renders `H`, not dep lists, and `H = 1 + max(H(deps))` — the lost dep is a `deps: []`
-  foundation at height 0, so dropping it could not move a height. A lost dep of NON-zero height would
-  have shifted a floor with nothing to catch it. The extractor was wrong; the projection happened to
-  absorb it.
+  And it produces no VISIBLE error, for a reason worth stating because it is LUCK rather than
+  design: this table renders `H`, not dep lists, and `H = 1 + max(H(deps))` — a lost `deps: []`
+  foundation sits at height 0, so dropping it cannot move a height. A lost dep of NON-zero height
+  would shift a floor with nothing to catch it. The extractor would be wrong and the projection
+  would happen to absorb it.
 
   The price is one function: `Boundary.Mix.View.build/0` is `@moduledoc false`, a private entry point
   of the dependency (everything after it — `Boundary.all/1`, the `%Boundary{}` fields — is public and
@@ -59,19 +59,15 @@ defmodule Mix.Tasks.Lcars.Topology do
   # — those swap an implementation for hermeticity, they do not cross a forbidden edge.
   @seams [
     {"Fleet.Spawner", "Fleet.MCP", ":mcp_socket_provisioner"},
-    # `:forge_client` and `:project_onboard` USED TO BE HERE, and they are not upward any more:
-    # their targets were extracted into `Fleet.Forge` and `Fleet.Project`, both BELOW MCP, so the
-    # edges are ordinary compile deps the boundary checker holds. The seams still exist — they are
-    # how a test injects a stub — but as INJECTION over a declared dep, which this table does not
-    # draw (same class as `:coord_backend`, cf. CLAUDE.md § Seams).
+    # NOT here, and the test says why: `:forge_client` and `:project_onboard` reach targets that
+    # sit BELOW MCP, so their edges are ordinary compile deps the boundary checker holds. Those
+    # seams exist — they are how a test injects a stub — but as INJECTION over a DECLARED dep, the
+    # class this table does not draw (same as `:coord_backend`, cf. CLAUDE.md § Seams).
     {"Fleet.MCP", "Fleet.Pilot", ":pod_reaper"},
-    # An edge this table UNDER-DECLARED, and a comment authorized it: `config/runtime.exs` filed
-    # it "same shape as `:coord_backend`",
-    # which is the class excluded just above. The test is the `deps:` list, not the injection
-    # mechanism — `Fleet.Pilot` is not in Admiral's deps. It crosses an edge boundary forbids.
-    # (Its former twin `:project_incident_rail` is GONE — BL-6-114, arbitrage user 2026-08-19:
-    # `Project.Incidents` now publishes on the bus, a declared downward dep, and the incident
-    # conversion lives in the `events.yaml` routes. One seam repaid, not redrawn.)
+    # LISTED, and the near-miss is worth naming: filing this one "same shape as `:coord_backend`"
+    # puts it in the class excluded just above and drops it from the table. THE TEST IS THE `deps:`
+    # LIST, NOT THE INJECTION MECHANISM — `Fleet.Pilot` is not in Admiral's deps, so this crosses an
+    # edge boundary forbids and belongs here.
     {"Fleet.Admiral", "Fleet.Pilot", ":admiral_completion_inflight_fun"}
   ]
 
@@ -125,8 +121,8 @@ defmodule Mix.Tasks.Lcars.Topology do
     # `Fleet.Credentials` (pod primitives), donc elle est au-dessus. Ni composition de pod, ni
     # pilotage — elle ne tourne pas au runtime : elle est lue par les portes CLI et par le gate.
     # `work` est le premier etage qui la contienne honnetement, avec ses voisins qui dependent
-    # eux aussi de Credentials. Elle vivait sous `Fleet.Application` sans etre du code de boot
-    # (2026-08-27, arbitrage user) — le rangement precedent la mettait au sommet du graphe.
+    # eux aussi de Credentials. La ranger sous le boot la mettrait au SOMMET du graphe sans qu'elle
+    # soit du code de boot.
     "Fleet.Roster" => "work",
     "Fleet.Observation" => "surface",
     "Fleet.Pilot" => "steering",

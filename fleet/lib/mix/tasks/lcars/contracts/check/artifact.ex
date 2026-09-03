@@ -22,59 +22,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
   import Mix.Tasks.Lcars.Contracts.Check.Support
 
-  # DEUX MECANISMES D'EXPANSION POUR LE MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN.
-  # La face `main` d'un projet est generee par GITEA depuis le repo-modele : l'expansion des
-  # `${VAR}` y est pilotee par le fichier de controle `.gitea/template`, une LISTE de chemins. Les
-  # faces `ops`/`workshop`, elles, sont ecrites par `Onboard.Scaffold`, qui expanse TOUT ce qu'il
-  # copie. Ajouter un placeholder a un fichier de `main` sans l'ajouter a cette liste ne casse rien
-  # ici : ca casse dans le projet livre, des mois plus tard.
+  # ⚠ A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER. From bats-core
+  # 1.11, a description goes through `eval`: everything a double-quoted string expands, a test NAME
+  # expands — a backtick pair RUNS a command, `$(…)` runs a command, `$VAR` interpolates.
   #
-  # Mesure du 2026-08-12 sur `fleet/chifoumi` : `README.md` (liste) portait « # chifoumi », et
-  # `CLAUDE.md` (hors liste) portait « # ${REPO_NAME} » — dans le fichier meme que la fleet relit a
-  # chaque spawn de producteur, avec une date qui n'est pas une date et un en-tete LCARS malforme.
-  # Tous les projets crees par la fleet le portaient.
+  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose, nobody reviews it
+  # as code, and the danger scales with how ORDINARY the quoted words look. Nothing ran on bats
+  # 1.10, so an estate can carry this for months and discover it the day one machine upgrades —
+  # with reported failures naming assertions that were fine, the eval's stderr having leaked into
+  # `$output`.
   #
-  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN ${...} ». `ci.yml` contient
-  # `${GITHUB_REF}`, `${GITHUB_REPOSITORY}`, `${GITHUB_SHA}` — des variables du JOB CI, pas les
-  # notres. Les inscrire ici confierait a Gitea des noms qu'il ne connait pas, et le jour ou il
-  # expanserait l'inconnu en vide, le script CI partirait en morceaux. La liste des cinq variables
-  # est celle de `Onboard.Scaffold` : une seule autorite, des deux cotes.
-  # ── site.build_inputs ──────────────────────────────────────────────────────────────────────────
-  # LE SITE VITRINE LIT LE RUNTIME POUR L'ENUMERER : chaque fichier que son build ouvre est une
-  # ENTREE, et le workflow qui le publie filtre sur `paths:`. Une entree absente de ce filtre est un
-  # changement qui ne redeclenche RIEN — le site reste en ligne et decrit la version d'avant.
-  #
-  # ⚠ LE MODE DE PANNE EST MUET DANS LA MAUVAISE DIRECTION, et c'est ce qui justifie un contrat
-  # plutot qu'une relecture. L'en-tete du workflow dit vouloir l'inverse — « une plaquette qui ne
-  # trouve plus ce qu'elle decrit doit ECHOUER, pas servir la version d'avant » — et les vingt
-  # `throw` des sources du site sont ecrits pour ca. Ils ne servent a rien quand le build NE TOURNE
-  # PAS : le filtre decide s'il tourne, donc le filtre decide si les gardes existent. Mesure du
-  # 2026-08-20 : huit entrees sur dix hors filtre (les cap-profiles systeme, les deux sources Elixir
-  # du catalogue, les launchers, les deux fichiers MCP).
-  #
-  # CE QUI EST DERIVE, ET LA LIMITE ASSUMEE. On resout les `join()` des sources du site : `const X =
-  # join(here, '..'x4, …)` puis `join(X, …)`, style uniforme dans ces quatre fichiers. Un segment
-  # NON litteral (`join(BIN, name)`) ne se resout pas — on rend alors le prefixe connu comme un
-  # repertoire, qui exige une couverture en `**`. C'est volontairement conservateur : mieux vaut
-  # exiger trop large sur le seul cas dynamique que de certifier une liste close qui ne l'est pas.
-  # A BATS TEST NAME IS EVALUATED BY THE SHELL, AND THAT IS NOT A STYLE MATTER.
-  #
-  # From bats-core 1.11, `bats_test_function` resolves variable references in a description with
-  # `eval "printf -v d '%s' \"$2\""`. Everything a double-quoted string expands, a test NAME expands:
-  # a backtick pair runs a command, `$(…)` runs a command, `$VAR` interpolates. Measured 2026-08-20
-  # on bats 1.11.1: the description « ce que `box reset` epargne » RAN `box reset` at file load —
-  # twice — and the name printed in the report came back MUTILATED, with the quoted text gone.
-  #
-  # THE COST IS NOT THE MANGLED NAME, IT IS THE EXECUTION. A description is prose: nobody reviews it
-  # as code, and the danger scales with how ordinary the quoted words look. `box reset`, `ip`, `..`,
-  # `/`, `-`, `:=` were all in this repository, in files that also drive a real provisioning rail.
-  # Nothing ran on bats 1.10, so a whole estate can carry this for months and see it the day one
-  # machine upgrades — six suites went red at once on the native workbench, and the reported failures
-  # named assertions that were fine: the eval's stderr had leaked into `$output`.
-  #
-  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT (measured, both forms, in isolation): `\`` survives
-  # the eval and renders as a plain backtick. So this wall does not ban the repository's habit of
-  # quoting code in a test name — it requires the one backslash that makes the name inert.
+  # ESCAPING IS ENOUGH AND KEEPS THE PROSE INTACT: an escaped backtick survives the eval and renders
+  # as a plain one. This wall does not ban quoting code in a test name, it requires the one
+  # backslash that makes the name inert.
   @doc false
   @spec check_bats_descriptions_inert(String.t()) :: Support.result()
   def check_bats_descriptions_inert(root) do
@@ -160,6 +120,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
+  # ⚠ LE FILTRE `paths:` DU WORKFLOW DECIDE SI LES GARDES EXISTENT. Le site vitrine lit le runtime
+  # pour l'enumerer, donc chaque fichier que son build ouvre est une ENTREE ; une entree hors du
+  # filtre est un changement qui ne redeclenche RIEN, et le site reste en ligne en decrivant la
+  # version d'avant.
+  #
+  # Le mode de panne est MUET DANS LA MAUVAISE DIRECTION : les `throw` des sources du site sont
+  # ecrits pour echouer plutot que servir du perime, et ils ne servent a rien quand le build NE
+  # TOURNE PAS. D'ou un contrat plutot qu'une relecture.
+  #
+  # LIMITE ASSUMEE : on resout les `join()` litteraux des sources. Un segment NON litteral ne se
+  # resout pas — on rend alors le prefixe connu comme un REPERTOIRE, qui exige une couverture large.
+  # Volontairement conservateur : mieux vaut exiger trop que certifier close une liste qui ne l'est pas.
   @doc false
   @spec check_site_build_inputs(String.t()) :: Support.result()
   def check_site_build_inputs(root) do
@@ -197,12 +169,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
       case File.read(wf) do
         {:ok, y} ->
           # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Ce motif ne
-          # prenait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur etait vert —
-          # mais passer une entree en double-quote ou en nu l'aurait rendue invisible a `listed`,
-          # donc tous les chemins qu'elle couvre auraient ete declares NON couverts. Un FAUX ROUGE
-          # sur un filtre correct, et l'operateur aurait cherche le defaut dans le filtre. Un
-          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine. (Revue
-          # 2026-08-20.)
+          # ne prendrait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur reste
+          # vert — mais passer une entree en double-quote ou en nu la rend invisible a `listed`,
+          # donc tous les chemins qu'elle couvre sont declares NON couverts. Un FAUX ROUGE sur un
+          # filtre correct, et l'operateur cherche le defaut dans le filtre. Un
+          # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine.
           ~r/^\s*-\s*(?:'([^']+)'|"([^"]+)"|([^\s#'"][^\s#]*))\s*$/m
           |> Regex.scan(y, capture: :all_but_first)
           |> List.flatten()
@@ -259,13 +230,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # lecture de `assets/avatars/` AU BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Les deux
   # etaient invisibles ici.
   #
-  # Mesure du 2026-08-22 : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
+  # Mesure : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
   # contrat a repondu `pass`. Avec ce filtre, ajouter un avatar de role ne rebatit plus la vitrine
   # qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer, et il le
   # laissait passer parce qu'il ne regardait qu'un tiers des fichiers.
   #
-  # ⚠ ET C'EST UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle etait juste ; l'instrument lisait a
-  # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
+  # ⚠ CE SERAIT UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle est juste ; c'est l'instrument qui
+  # lit a cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais
+  # pas », il
   # dit « pass ».
   @site_sources [
     "src/lib/*.js",
@@ -317,10 +289,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
             # `{dir, :dir}`, c'est-a-dire l'exigence la plus forte — un repertoire ouvert reclame un
             # glob, et nommer trois fichiers ne le ferme pas.
             #
-            # ⚠ CETTE CLAUSE MANQUAIT, et son absence n'etait pas inerte : `site_resolve` rend TROIS
-            # formes depuis toujours, le `case` en connaissait deux. La premiere constante dynamique
-            # du site a fait tomber le contrat par CaseClauseError — un contrat qui CRASHE ne dit
-            # rien, ni pass ni fail (2026-08-22, `assets/github.io/src/lib/catalogue.js:81`).
+            # ⚠ CETTE CLAUSE EST OBLIGATOIRE, et son absence n'est pas inerte : `site_resolve` rend
+            # TROIS formes, et un `case` qui n'en connait que deux tombe par CaseClauseError sur la
+            # premiere constante dynamique du site — un contrat qui CRASHE ne dit
+            # rien, ni pass ni fail (`assets/github.io/src/lib/catalogue.js:81`).
             {:dynamic, _} ->
               m
 
@@ -404,6 +376,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     end
   end
 
+  # ⚠ DEUX MECANISMES D'EXPANSION POUR UN MEME TEMPLATE, ET UN SEUL EST TENU A LA MAIN. La face
+  # `main` est generee par la forge depuis le repo-modele, ou l'expansion est pilotee par une LISTE
+  # de chemins ; les autres faces sont ecrites par le scaffold, qui expanse tout ce qu'il copie.
+  # Ajouter un placeholder a un fichier de `main` sans l'inscrire dans cette liste ne casse rien
+  # ICI : ca casse dans le projet livre, des mois plus tard, dans un fichier que la fleet relit a
+  # chaque spawn.
+  #
+  # ⚠ LE PREDICAT EST « PORTE UNE DE NOS VARIABLES », PAS « PORTE UN `${...}` » : un workflow CI
+  # porte les siennes, et les inscrire ici confierait a la forge des noms qu'elle ne connait pas —
+  # le jour ou elle expanserait l'inconnu en vide, le script partirait en morceaux.
   @doc false
   @spec check_gitea_template_expansion(String.t()) :: Support.result()
   def check_gitea_template_expansion(root) do
@@ -424,14 +406,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # ⚠ GARDE D'INSTRUMENT, ET IL MANQUAIT. `bearing` vient d'un `Path.wildcard` — repertoire absent
     # rend l'ensemble VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les
     # deux vides rendent les deux differences vides, donc `:pass`. Prouve par mutation le
-    # 2026-08-27 : renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
+    # renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
     # `pass — 0 fail, 58 pass`. Cinq autres contrats passent aussi sur perimetre vide, mais ILS LE
-    # DISENT ; celui-ci etait le seul muet.
+    # DISENT ; celui-ci doit le dire aussi.
     #
     # ⚠ ET IL ECHAPPAIT AU FILET QUI EXISTE POUR CA. `no_check_passes_on_nothing_test` enumere les
-    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC — ce check etait `defp`. La
-    # garantie « aucun check ne passe sur rien » couvrait 55 des 58, et le trou etait exactement la
-    # ou personne ne regardait. Les trois checks prives sont passes `def` dans le meme geste.
+    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` y echappe, et
+    # la garantie « aucun check ne passe sur rien » ne couvre alors que ce qui est deja visible. Les
+    # checks de ce fichier sont `def` pour cette raison.
     #
     # ICI ON ECHOUE, on ne declare pas « hors perimetre » : `priv/catalogue` part avec CHAQUE
     # artefact — le stage `build` de l'image copie `fleet` en entier moins `deploy`, `git-hooks` et
@@ -550,12 +532,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   @doc false
   # BL-6-05 — LE MUR D'EXHAUSTIVITE DE LA MIGRATION DE NAMESPACE, et il est ne AVANT elle.
   #
-  # Les 15 atoms `:fleet_<dom>` etaient LEGACY-VALIDES (D-07) : ils fonctionnaient, la config ETS
-  # etant keyee par atom. Ce qu'ils coutaient etait a l'ENTREE — dix messages de Mix a chaque
+  # Les 15 atoms `:fleet_<dom>` sont LEGACY-VALIDES (D-07) : ils fonctionnent, la config ETS etant
+  # keyee par atom. Ce qu'ils coutent est a l'ENTREE — dix messages de Mix a chaque
   # `mix test`, disant a qui decouvre le depot que sa configuration est fausse.
   #
   # ⚠ CE CHECK EXISTE PARCE QUE LE MODE DE DEFAILLANCE EST SILENCIEUX. Un site oublie appelle
-  # `Application.get_env(:fleet_x, :k)` sur un namespace desormais vide : il recoit le DEFAUT, pas
+  # `Application.get_env(:fleet_x, :k)` sur un namespace vide : il recoit le DEFAUT, pas
   # une erreur. La config cesse de s'appliquer sans que rien ne le dise, et un test qui n'exerce pas
   # ce knob reste vert. Une migration de 535 sites ne peut pas se verifier a la relecture.
   #
@@ -620,7 +602,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # WHAT IT DOES NOT REACH, and the sentence above must not be read past it: THE SOURCE TREE ONLY.
   # The word also lives in the SP corpus (`priv/catalogue*/sp_builder/**`), which is not scanned
   # here — and that is the population where the prior does its work, since those texts are injected
-  # into the agents' own context. Measured 2026-08-13: the block `core/pod-sanctuary`, composed into
+  # into the agents' own context. Measured: the block `core/pod-sanctuary`, composed into
   # SIX roles, opens on the heading "## Ton monde (sanctuaire)" with NO antibody anywhere in it.
   # Extending the scan there is not a lint change but a change to authored prompt material, whose
   # calibration belongs to its author — the finding is on record, the edit is not this wall's to
@@ -631,8 +613,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # day the word came back that file would have carried it exempt and unremarked. An allowlist is
   # audited by re-measuring, never by reading it.
   # ⚠ L'ARBRE DU VERIFICATEUR N'EST PLUS DANS CETTE LISTE, il est exclu par `checker_source?/1`.
-  # Il y figurait par son chemin, et le decoupage du 2026-09-02 a fait rougir ce mur : il avait
-  # demenage. Une entree en dur ici est pire qu'ailleurs — cette liste est une ALLOWLIST, et une
+  # Il y figurait par son chemin, et un decoupage a fait rougir ce mur : il avait demenage. Une entree en dur ici est pire qu'ailleurs — cette liste est une ALLOWLIST, et une
   # entree qui survit a son sujet devient un creneau pre-autorise, exactement ce que le paragraphe
   # ci-dessus reproche a `launch_spec.ex`.
   @sanctuary_allowed ~w(
@@ -695,7 +676,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
   # `[object Object]`).
   #
-  # Measured 2026-08-03: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
+  # Measured: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
   # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
   # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
   @doc false
@@ -707,7 +688,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # ⚠ LE PERIMETRE SE DISAIT SUR `deploy/` SEUL, POUR UNE POPULATION QUI VIT SOUS DEUX RACINES.
     # Le commentaire du calcul plus bas nommait deja l'asymetrie — « these are TWO roots, only one
     # of them is scoped » — et l'a portee au garde de POPULATION sans la porter au garde de
-    # PERIMETRE. Consequence mesuree le 2026-08-27 : `etc/` porte DEUX sourcers
+    # PERIMETRE. Consequence mesuree : `etc/` porte DEUX sourcers
     # (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY fleet/etc`,
     # et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Dans l'artefact, ce
     # check declarait « NOT CHECKED » sur deux fichiers qu'il tenait dans la main.

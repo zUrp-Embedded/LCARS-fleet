@@ -30,7 +30,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # EVERY test corpus in the repo — bats AND python — and what happens to it. `:gated` = shell_gate discovers it;
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
-  # WHY THIS EXISTS, and it cost three findings in one evening (2026-08-05): nothing in this repo
+  # WHY THIS EXISTS, and it is worth three findings in one evening: nothing in this repo
   # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   @doc false
   # A SUITE DOES NOT GO RED OVER A TEST THAT WAS REMOVED — it goes green over one fewer.
   #
-  # Measured 2026-08-06 while replaying the GC-prose transplant: `forge_protocol.ex` went from 13
+  # Measured while replaying the GC-prose transplant: `forge_protocol.ex` goes from 13
   # `iex>` lines to zero, `mix test` reported "0 failures" on both sides, and the count moved from
   # 13 doctests to 10 with nothing to see. The examples were round-trip assertions — the predicate
   # recognises what the builder records — and `test/…/forge_protocol_test.exs` still carries
@@ -181,17 +181,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
   @doc false
   # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
-  # chemin faux SE LIT COMME UNE REPONSE. Mesure du 2026-08-30 : neuf temoins vivaient sous
-  # `test/fleet/pilot/project_onboard/`, un dossier qui n'existait nulle part sous `lib/`, quand
-  # leurs modules disaient `Fleet.Project.Onboard.*` depuis toujours. Qui cherchait les temoins
-  # d'`onboard.ex` sous `test/fleet/project/` ne trouvait rien et en concluait une absence de
-  # couverture qui etait FAUSSE.
+  # chemin faux SE LIT COMME UNE REPONSE. La forme, mesuree : des temoins sous un
+  # `test/fleet/pilot/project_onboard/` que rien ne porte sous `lib/`, alors que leurs modules
+  # disent `Fleet.Project.Onboard.*` — qui cherche les temoins d'`onboard.ex` sous
+  # `test/fleet/project/` n'y trouve rien et en conclut une absence de couverture qui est fausse.
   #
   # La question se repond avec le disque, jamais avec un compte d'hier : elle est decidable et sans
   # etat, comme l'exige ce fichier a propos de son mur sur les doctests.
   #
   # ⚠ CE MUR NE RECLAME PAS UN TEMOIN PAR SOURCE. Cette moitie-la n'est pas decidable sans plancher
-  # (130 sources sur 247 sans temoin canonique au 2026-08-30, dont 26 avec un satellite qui les
+  # (130 sources sur 247 sans temoin canonique, dont 26 avec un satellite qui les
   # nomme) et la reclamer fabriquerait des coquilles « pas de test » que personne n'aurait verifiees.
   @spec check_test_dirs_mirror_source(String.t()) :: Support.result()
   def check_test_dirs_mirror_source(root) do
@@ -247,8 +246,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # CE QU'UN NOM DE FICHIER DOIT DIRE, ET POURQUOI L'APPROXIMATION SE PROPAGE ICI PLUS QU'AILLEURS.
   # Trois langages cohabitent dans les deux arbres de temoins, et l'extension ne suffit que pour un :
   # `.bats` NE VEUT DIRE QUE « temoin » ; `.py` et `.exs` ne disent rien. D'ou la regle — le suffixe
-  # `_test` existe la ou l'extension ne parle pas, et nulle part ailleurs. Elle etait respectee par
-  # les 320 fichiers du depot le 2026-08-31, et TACITE : rien ne la tenait.
+  # `_test` existe la ou l'extension ne parle pas, et nulle part ailleurs. Les 320 fichiers du depot
+  # la respectent, et TACITEMENT : sans ce mur, rien ne la tient.
   #
   # Une convention tacite n'est pas une convention, c'est un pari sur le prochain lecteur. Le depot
   # est repris par des agents, qui ne distinguent pas le bancal du juste : ils construisent DESSUS.
@@ -324,10 +323,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # bloc `@test`, ou si un `||` rattrape son echec. Partout ailleurs elle est verte au moment PRECIS
   # ou ce qu'elle interdit arrive.
   #
-  # ⚠ CE MUR NE POUVAIT PAS ETRE POSE AVANT LE 2026-08-31 : il aurait rougi sur 30 sites, et un mur
-  # qu'on sait toujours rouge apprend a lire « rouge » comme « normal » (le depot l'a deja paye avec
-  # shellcheck). Les 30 sont convertis, la mesure est a zero, il nait donc VERT — et c'est la seule
-  # position depuis laquelle un mur protege quelque chose.
+  # ⚠ UN MUR SE POSE VERT, JAMAIS ROUGE : pose sur les 30 sites qu'il aurait signales, il aurait
+  # appris a lire « rouge » comme « normal » — ce que le depot a deja paye avec shellcheck. Les 30
+  # sont convertis et la mesure est a zero, donc il nait vert : c'est la seule position depuis
+  # laquelle un mur protege quelque chose.
   #
   # CE QU'IL EMPECHE DE REVENIR, mesure et non suppose. Deux temoins de securite ont menti des
   # semaines sous cette forme : un jeton de forge qui ne devait pas passer par `argv` (lisible de

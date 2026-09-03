@@ -110,13 +110,13 @@ defmodule Fleet.Spawner do
 
   This is an ADMISSION question, not a delivery one: the live order reaches the pod through the
   task queue either way. `:brief` here is the pod's FILE copy of it, and a caller that materialized
-  the brief drops that copy on purpose (the durable, citable version now lives at `:brief_ref`, and
+  the brief drops that copy on purpose (the durable, citable version lives at `:brief_ref`, and
   a file copy nobody rewrites on a live pod drifts from it round after round).
 
-  SHARED AUTHORITY, because two sites answer this same question and they answered it with two
-  hand-written shapes: the dispatch dropped the copy on the presence of the ref, the spawn guard
-  looked only for the text. They disagreed, and every one-shot pod whose brief was materialized was
-  refused at spawn, forever, on the rail two arbitrations had made canonical.
+  SHARED AUTHORITY, because two sites answer this same question: the dispatch drops the copy on the
+  presence of the ref, the spawn guard admits on the presence of an order. Two hand-written shapes
+  disagree, and the disagreement refuses at spawn EVERY one-shot pod whose brief was materialized —
+  forever, on the canonical rail.
 
   Call this from BOTH sides rather than re-deriving the shape. A caller that drops the copy must
   ask it about what REMAINS, not about what it is dropping.
@@ -169,7 +169,7 @@ defmodule Fleet.Spawner do
       when is_binary(issue_id) and is_list(opts) do
     # DR-019 — the STRUCTURAL guard: `lifetime_scope` is schema-REQUIRED — it decides brief-required, slot
     # scope, state-fs scope AND release. A %CapProfile{} without it is an INVALID state the struct type
-    # still allows (an unvalidated/hand-forged struct); letting it spawn gave it DIVERGENT downstream
+    # still allows (an unvalidated/hand-forged struct); letting it spawn gives it DIVERGENT downstream
     # reads (brief-exempt at the guard, yet "one-shot" at extraction → releases). We refuse it at THE
     # choke point (every spawn — publish_consumer, step_dispatcher, recall — funnels here), so no
     # unvalidated profile ever reaches the divergent readers.
@@ -311,10 +311,10 @@ defmodule Fleet.Spawner do
   defp seed_or_error(:none), do: {:error, :no_seed}
   defp seed_or_error({:ok, _} = ok), do: ok
 
-  # A ticket-keyed role has ONE seed PER TICKET, so "recall the engineer of project P" no longer
-  # has a single answer. Refused by name rather than served with whichever pod died last — that
-  # silent pick is exactly the defect the per-ticket key exists to remove, and honouring the old
-  # two-argument call would have reintroduced it at the only remaining caller: a human.
+  # A ticket-keyed role has ONE seed PER TICKET, so "recall the engineer of project P" has no
+  # single answer. Refused by name rather than served with whichever pod died last — that
+  # silent pick is exactly the defect the per-ticket key exists to remove, and serving it anyway
+  # would reintroduce it at the only caller that can ask: a human.
   # The symmetric mismatch is refused too: a project-keyed role has one seed and no ticket to name.
   defp recall_key_guard(cap_profile, role, issue) do
     case {Fleet.CapProfile.slot_scope(cap_profile), issue} do
@@ -339,18 +339,13 @@ defmodule Fleet.Spawner do
   # the silence this refuses. The pair is inseparable BY CONSTRUCTION (every caller builds the
   # label FROM the project), so requiring both together costs nothing and cannot be satisfied by
   # guessing.
-  # A DRAIN REFUSES NEW PODS, at the chokepoint rather than at one call site (A-13, decided
-  # 2026-08-05).
+  # A DRAIN REFUSES NEW PODS, at the chokepoint rather than at one call site (A-13).
   #
-  # `Quiesce.refuse!/0` is named for exactly this, and it had two readers: the warden's reconcile
-  # gate and the HTTP control surface. The poller's dispatch was not one of them — its ticks are
-  # wrapped in `Quiesce.busy/1`, which makes the drain WAIT for the tick without stopping the tick
-  # from starting a brand-new pod. So the mechanism that makes a drain safe also makes it longer,
-  # once per tick, with no bound: the drain ends up waiting for a pod born after it began.
-  #
-  # The warden composed the check itself (`:reconcile_enabled_fun`) — correct at that call site, and
-  # a PARALLEL PATH to the chokepoint, which is the shape that leaves every other caller uncovered.
-  # Here they all pass: warden respawn, step dispatch, arch wake, boot orchestrator, admin spawn.
+  # ⚠ `Quiesce.busy/1` NE SUFFIT PAS, et c'est le piege : il fait ATTENDRE le drain pendant un tick
+  # sans empecher ce tick de demarrer un pod tout neuf. Le mecanisme qui rend un drain sur le rend
+  # donc aussi plus long, une fois par tick et sans borne — le drain finit par attendre un pod ne
+  # apres lui. Composer le controle a un site d'appel est un CHEMIN PARALLELE au chokepoint : c'est
+  # la forme qui laisse tous les autres appelants decouverts. Ici ils passent tous.
   #
   # A typed REFUSAL, not a raise: the callers already route `{:error, _}` into their skip-and-retry
   # path, so a drain simply stops producing work instead of failing a tick.
@@ -370,10 +365,9 @@ defmodule Fleet.Spawner do
       # one — not by parsing its label, which is the very habit this guard exists to break.
       #
       # The guard demands "what the label was built FROM", and a permanent's label is built from no
-      # project on purpose. Demanding one refuses the pod that BOOTS the fleet: measured on a bench
-      # the day the permanents were given an `rc_name` — `spawn of permanent starfleet failed
-      # (:project_required)`, `permanent_pods=0`. Nothing in the suite spawns a permanent, so the
-      # gate stayed green through it.
+      # project on purpose. Demanding one here refuses the pod that BOOTS the fleet — and NOTHING IN
+      # THE SUITE SPAWNS A PERMANENT, so the gate stays green through that failure. It shows up on a
+      # bench, as `spawn of permanent … failed (:project_required)` and `permanent_pods=0`.
       match?(
         {:ok, _},
         Fleet.Spawner.PermanentBoot.parse_permanent(Keyword.get(opts, :pod_id, ""))
@@ -398,8 +392,8 @@ defmodule Fleet.Spawner do
     # THE QUESTION IS "DOES THIS POD HAVE AN ORDER?", NOT "IS THERE TEXT IN `:brief`?" — and it is
     # answered by `order_present?/1`, the shared authority, NOT by a shape re-written here. The
     # dispatch that drops the inline copy asks the same function about what remains, so the two
-    # halves of the invariant cannot drift apart. Re-deriving the shape locally is what produced
-    # the endless re-dispatch loop this guard now accepts.
+    # halves of the invariant cannot drift apart. Re-deriving the shape locally is what produces
+    # the endless re-dispatch loop this guard accepts.
     cond do
       order_present?(opts) ->
         :ok
@@ -680,8 +674,8 @@ defmodule Fleet.Spawner do
   a spawn flood through the no-auth loopback, or a rail gone haywire. Hitting it is an anomaly,
   it comes back as `{:error, :max_children}`, and it is meant to be loud.
 
-  Why it moved from 24. That number was chosen as "a wide margin above the real" when the lease
-  serialized a repo to ONE workflow_run — the real was ~6 permanents plus a handful of step
+  Why 24 is the wrong number. It reads as "a wide margin above the real" only while the lease
+  serializes a repo to ONE workflow_run — the real being ~6 permanents plus a handful of step
   workers. With `max_fan` the nominal peak is computable and 24 sits UNDER it: a project at the
   default fan of 5, whose heaviest canon jury is 2 (`standard-qa`), peaks around 15 pods, so a
   two-project fleet crosses 24 while doing exactly what it was configured to do. A fuse that blows
@@ -774,7 +768,7 @@ defmodule Fleet.Spawner do
   It carries the message but arms neither the mandate kick fallback nor its response deadline.
   An unknown or unreachable pod yields `{:error, reason}` and a warning — it is NOT delivered.
 
-  The `:ok` return used to be unconditional, and the `@spec` froze the caller's inability to know.
+  An unconditional `:ok` return, frozen into the `@spec`, leaves the caller unable to know.
   That is tolerable for a feed line and not for a TERMINAL escalation, which travels this same
   function: the message vanished, the return said `:ok`, and no log said otherwise. This function
   cannot know the stakes of its message, so it reports the fact at `warning` and hands the caller

@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @doc """
   A catalogue may not ENUMERATE tools. It may name the tool of a step.
 
-  ⚖ user, 2026-08-22: *"les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
+  ⚖ user : *"les catalogues ne doivent pas citer d'outil : les agents ont `tools/list`
   pour voir ce qui existe, on n'a pas besoin de refaire une liste qui mentira."*
 
   ## The defect is the LIST, not the name
@@ -132,7 +132,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   `roles.capabilities_exercisable` does NOT cover this. It fails only when a role carries NONE of a
   capability's tools, so the architect — who holds four delegation tools — stays green after losing
-  one. Measured 2026-08-22, renaming three ids that were granted by name: the wall would not have
+  one. Measured by renaming three ids granted by name: the wall would not have
   moved.
 
   The alignment was verified BY HAND that day. A hand check protects the rename that prompted it and
@@ -207,10 +207,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   ## The same rename, missing the same way, twice
 
-  Tool names went object-first on 2026-08-11 (`create_project` → `project_create`). The rename moved
+  Tool names are object-first (`create_project` → `project_create`). Such a rename moves
   the `deftool` names and the `mcp__fleet__` citations. It did NOT move the bare names written INSIDE
   the description strings — and those strings are the tool catalogue an agent reads. Measured
-  2026-08-21: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
+  Measured: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
   `project_import` even referred to itself by its old name.
 
   This is worse than a stale comment. A comment misleads a human who can check; a description is an
@@ -236,7 +236,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   It was first written as `mcp.tool_descriptions_name_real_tools`, opening on *"no description may
   name a tool that does not exist"* — a claim wider than the code, caught by independent review on
-  2026-08-22. An INVENTED name that is not a reordering passes: `project_import_external`,
+  An INVENTED name that is not a reordering passes: `project_import_external`,
   `issue_open`, `project_list_all`. A guard whose name promises more than it measures is green
   exactly where a reader trusts it most, which is this repo's own definition of a bad wall.
 
@@ -274,7 +274,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       # multiset de segments normalises) s'ecrasent dans la map : le survivant garde sa couverture,
       # le perdant n'est plus jamais mesure, et rien dans la sortie ne le dit. Les autres gardes de
       # ce fichier comptent leur population ; celui-ci ne verifiait pas qu'elle survit a
-      # l'indexation. Trouve par relecture independante le 2026-08-22.
+      # l'indexation.
       length(Enum.uniq(shapes)) != length(shapes) ->
         broken_result(
           id,
@@ -339,7 +339,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # `description/1` de l'AST. Ca tient tant que `pod_tools.ex` n'est fait que de `deftool` — donc
   # tant que personne n'y ecrit une fonction d'aide du meme nom, ou n'importe un `description/1`
   # etranger. Le jour ou ca arrive, le mur mesure une population qu'il ne pretend pas mesurer, dans
-  # un sens comme dans l'autre. Trouve par relecture independante le 2026-08-22.
+  # un sens comme dans l'autre.
   defp description_texts(ast) do
     ast
     |> collect(fn
@@ -408,33 +408,28 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   end
 
   # ── Tool authorization (A1) ──────────────────────────────────────────
-  # `tools/list` is DISCOVERY, not authorization: `tools/call` re-verifies nothing against it.
-  # Every pod's MCP session is handed the same tool catalogue, so what stops a producer from
-  # calling a destructive project op is never the catalogue — it is the gate on that tool's own
-  # dispatch path. The invariant held by discipline alone: nothing refused a new `deftool` wired
-  # to an ungated body, and such a tool is callable by ANY pod with nothing said about it.
+  # ⚠ `tools/list` IS DISCOVERY, NOT AUTHORIZATION: `tools/call` re-verifies nothing against it, and
+  # every pod is handed the SAME catalogue. What stops a producer from calling a destructive op is
+  # never the catalogue — it is the gate on that tool's own dispatch path, and nothing refused a new
+  # tool wired to an ungated body.
   #
   # Two admissible forms, and no third:
-  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the tool's
-  #     subject comes from the socket (one pod, one socket) and never from the wire. Receiving
-  #     `%{pod_id: _}` is not the property: the acceptor hands that map to every tool alike.
-  #   * ROLE-GATED — the body calls a `Delegation` function whose own body calls
-  #     `require_architect`/`require_onboarder`, which resolve role AND repo from the spawn binding.
-  # A clause whose body is a bare `{:error, _, state}` (bad arguments) is inert: it neither needs
-  # nor supplies a gate, and a tool made only of those is not gated.
+  #   * POD-SCOPED — the clause BINDS the channel identity and its body USES it, so the subject
+  #     comes from the SOCKET and never from the wire. Merely receiving the identity is not the
+  #     property: the acceptor hands it to every tool alike.
+  #   * ROLE-GATED — the body reaches a function that resolves role AND repo from the spawn binding.
+  # A clause whose body is a bare argument error is inert: it neither needs nor supplies a gate.
   #
-  # INVERSE TWIN, and it is the sharper half: a `handle_tool_call` clause with NO `deftool` schema
-  # is not dead code. It is absent from `tools/list` and still dispatched by `tools/call` — a tool
-  # that works and that no catalogue admits.
+  # ⚠ INVERSE TWIN, AND IT IS THE SHARPER HALF: a dispatch clause with NO schema is not dead code —
+  # it is absent from `tools/list` and still dispatched by `tools/call`. A tool that works and that
+  # no catalogue admits.
   #
-  # Read from the AST, never from a grep: a comment mentioning `require_architect` must not be able
-  # to green this check (BND-111, applied to the thing rather than to a stripped line).
+  # Read from the AST, never from a grep: a COMMENT naming a gate must not be able to green this.
   #
-  # PUBLIC (@doc false) for the same reason as `code_match?/4`: this check reports ABSENCES, and a
-  # broken parser reports the same absences as a clean tree. Its refusals must be provable against
-  # CRAFTED fixture trees, not only observed green on the real one — the whole-repo smoke test can
-  # never distinguish "nothing wrong" from "nothing measured". It takes its root as an argument
-  # precisely so a test can hand it one.
+  # ⚠ PUBLIC ON PURPOSE: this check reports ABSENCES, and a broken parser reports the same absences
+  # as a clean tree. Its refusals must be provable against CRAFTED fixtures, not merely observed
+  # green on the real tree — a whole-repo smoke test can never distinguish "nothing wrong" from
+  # "nothing measured". It takes its root as an argument precisely so a test can hand it one.
   @doc false
   @spec check_mcp_tools_gated(String.t()) :: Support.result()
   def check_mcp_tools_gated(root) do
@@ -507,7 +502,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   #
   # L'acceptor protegeait cinq outils sur ~17 contre le double effet, depuis une liste de mots nus
   # posee LOIN des definitions. Deplacer cette liste a cote des `deftool` la rend traversable par un
-  # renommage — ce qui repare la panne du 2026-08-11 — mais ne repare PAS l'oubli : rien n'oblige
+  # renommage, mais pas l'oubli : rien n'oblige
   # celui qui ajoute un `deftool` a le classer.
   #
   # Ce check est ce qui l'oblige, et il porte dans les DEUX sens :
@@ -569,7 +564,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # 6-136 — UN MODOP QUI ORDONNE UN OUTIL QUE SON PORTEUR N'A PAS **GELE LE POD**, ET RIEN NE LE
   # DISAIT NULLE PART.
   #
-  # Ce n'est pas une gene de prompt. Mesure de banc du 2026-08-09, ecrite dans `architect.yaml` et
+  # Ce n'est pas une gene de prompt. Mesure de banc, ecrite dans `architect.yaml` et
   # dans `launch_env.ex` : sous `--permission-mode default`, un outil absent d'`allowedTools` ne se
   # saute PAS, il PROMPTE (« Do you want to… 1. Yes 2. Yes, allow all 3. No ») — et un pod n'a
   # personne pour repondre. Il reste vivant, tient son creneau et le verrou `lcars-in-flight` du
@@ -579,18 +574,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   #
   # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Le premier jet bornait
   # le vocabulaire aux noms deja declares par un cap-profile — exact, sans faux positif… et MUET sur
-  # le defaut qui l'a motive : `TodoWrite` n'etait declare NULLE PART, donc rien ne le reconnaissait
-  # comme outil. Un mur qu'on desarme en retirant la derniere declaration ne protege rien.
+  # le defaut qui le motive : un outil declare NULLE PART n'est reconnu comme outil par personne. Un
+  # mur qu'on desarme en retirant la derniere declaration ne protege rien.
   #
   # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
   # porteurs, ou figurer ci-dessous avec sa raison. La liste se PURGE quand son sujet disparait
   # (lecon 6-091 : une exemption qui ne correspond plus a rien n'exempte rien et masque la
-  # suivante) — et elle vient de le faire, toute seule, le 2026-08-19.
+  # suivante) — et elle le fait.
   #
-  # ⚠ ELLE ETAIT VIDEE PAR LA SORTIE DE SUPERPOWERS, ET C'EST LA GARDE QUI L'A DIT. Son unique
-  # entree, `MailerTest`, etait un nom de module cite par le test d'exemple de `tdd/sp.md` ; le
-  # bundle supprime, l'exemption ne designait plus rien et le check a demande sa purge de lui-meme
-  # (« MailerTest is cited by no bundle — purge it »). Une exemption survivante aurait laisse un
+  # ⚠ UNE EXEMPTION QUE PLUS AUCUN BUNDLE NE CITE EST VIDE, ET LA GARDE LE DIT. Un nom de module
+  # cite par le seul exemple d'un bundle disparait avec lui : l'exemption ne designe plus rien, et
+  # le check demande sa purge de lui-meme (« … is cited by no bundle — purge it »). Une exemption
+  # survivante laisserait un
   # trou nomme dans un mur, pret a couvrir le prochain nom homonyme.
   #
   # La map reste, VIDE : c'est la porte par ou une future exemption entre AVEC sa raison, et son
@@ -1048,7 +1043,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   end
 
   # ── Forge payload fields: received, and read? ────────────────────────
-  # PROBE N°1 of the 2026-08-04 pattern hunt, promoted from a one-off command to a wall.
+  # PROBE N°1 of the pattern hunt, promoted from a one-off command to a wall.
   #
   # The forge hands back whole objects. The code picks what it needs and the rest is dropped
   # silently — which is correct, right up until the dropped part is the answer to a question someone
@@ -1337,8 +1332,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   #
   # Quatre murs derivaient leur population de `pod_tools/delegation.ex` NOMME EN DUR. Un mur attache
   # a une ADRESSE cesse de voir ce qui demenage : le garde d'enumeration des contrats l'a demontre
-  # le 2026-09-02 — au premier decoupage il a cesse de voir huit murs, sa population a retreci, et
-  # le gate est reste VERT.
+  # — au premier decoupage il a cesse de voir huit murs, sa population a retreci, et le gate est
+  # reste VERT.
   #
   # `delegation.ex` fait plus de trois mille lignes et sera decoupe ; ses sous-modules existent
   # deja (`delegation/forge_client.ex` et cinq autres). Lire la famille rend ces murs indifferents

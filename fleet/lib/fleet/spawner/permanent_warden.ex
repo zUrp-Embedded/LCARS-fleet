@@ -2,10 +2,10 @@ defmodule Fleet.Spawner.PermanentWarden do
   @moduledoc """
   Respawn of dead PERMANENT pods (cattle, rebuildable) — Bus consumer of `pod.failed`.
 
-  A permanent pod (`permanent-<role>`: architect, gatekeeper, …) is `restart: :temporary` on the OTP
-  side (like every pod: the respawn is EVENT-driven, not supervisor-driven — a bare OTP restart would
-  relaunch the gen_statem without the clean boot sequence). Without this module, its death would be
-  a DEFINITIVE stop until the BEAM restart — a dead archivist/architect silently absent.
+  A permanent pod (`permanent-<role>`) is `restart: :temporary` on the OTP side (like every pod: the
+  respawn is EVENT-driven, not supervisor-driven — a bare OTP restart would relaunch the gen_statem
+  without the clean boot sequence). Without this module, its death would be a DEFINITIVE stop until
+  the BEAM restart: a role silently absent.
 
   ## Mechanics — two rails, one respawn path
 
@@ -21,12 +21,9 @@ defmodule Fleet.Spawner.PermanentWarden do
      any missing one is respawned through the SAME counter/backoff (a reconciliation cannot spend
      more than the event rail). The tick is a no-op when the permanent boot is disabled
      (`LCARS_BOOT_PERMANENT_AT_START=false` — the documented maintenance mode is respected).
-     During a drain, the quiesce gate LIVES at the mechanical chokepoint (`Fleet.Spawner.spawn_pod`
-     — A-13 decided 2026-08-05), which covers this tick for free. The composition below stays: it
-     spares a pointless reconcile pass, and it is now belt over braces rather than the only strap.
-     The arbitration mattered because the warden was one of only TWO readers of `quiescing?/0` —
-     the poller's dispatch was not, so a drain could keep spawning fresh pods it then had to wait
-     for.
+     During a drain, the quiesce gate LIVES at the mechanical chokepoint (`Fleet.Spawner.spawn_pod`,
+     A-13), which covers this tick for free; the composition below stays as belt over braces — it
+     spares a pointless reconcile pass.
 
   ## BOUNDED spend (the failure mode = spend, never a churn)
 
@@ -36,14 +33,11 @@ defmodule Fleet.Spawner.PermanentWarden do
   The counter resets ONLY on OBSERVED survival: the pod must live past `:min_uptime_ms` after
   a warden respawn. A `start_child` `{:ok, pid}` proves NOTHING (the allocate→launch chain is
   async) — resetting there let a boot-then-die pod loop forever at ~5s with the HALT unreachable
-  and the spend unbounded, the exact failure mode this bound exists for. Exhausted → retry HALT
-  + `Logger.error` (the role stays dead until intervention). This halt is NOT silent: the human
-  escalation has ALREADY gone through the incident rail (`IncidentConsumer` records every
-  `pod.failed`; the RECURRENCE of the same signature opens an `error_system` sysadmin issue on
-  the forge — a repaired rail) — so the warden carries NO escalation wiring of its own
-  (composition, not an authority fork). A death with a STALE respawn stamp (or none) means an
-  external actor resurrected the role since — that IS the external repair signal: new cycle,
-  the spend was borne by the actor (cattle, E2).
+  and the spend unbounded. Exhausted → retry HALT + `Logger.error` (the role stays dead until
+  intervention). This halt is NOT silent: the human escalation goes through the incident rail, so
+  the warden carries NO escalation wiring of its own (composition, not an authority fork). A death
+  with a STALE respawn stamp (or none) means an external actor resurrected the role since — that IS
+  the external repair signal: new cycle, the spend borne by the actor (cattle, E2).
 
   ## Seams (tests)
 

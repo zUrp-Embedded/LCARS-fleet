@@ -130,15 +130,13 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # SLSA triplet at the EXTRACT: `(brief_sha, base_sha=input_sha, livrable_sha)`.
-  # Called from `open_deliverable_pr` — the publication point of the producer deliverable (PR-native
-  # path), NOT `complete/2` (which only carries verdicts without a deliverable). `brief_sha`/`base_sha`
-  # traveled via pod.completed → step_run; `livrable_sha` = the published commit. Emits ONLY for a real
-  # git deliverable (`:deliverable_opts` present = producer) with a ops. brief_sha absent
-  # (degraded) → 2/3 provenance (input→output), never an invented digest (cf. Provenance).
-  # `:ops_root` (opt, default `Fleet.Layout.ops_root()`) = SEAM of the ops root — test
-  # hermeticity (the real root is a hardcoded global path; injecting it makes the
-  # producer→provenance wiring exercisable — otherwise the green never walks the real path).
+  # Triplet de provenance a l'EXTRACTION : le brief, l'entree, le livrable. Emis UNIQUEMENT pour un
+  # vrai livrable git.
+  #
+  # ⚠ UN BRIEF ABSENT DONNE UNE PROVENANCE PARTIELLE — entree vers sortie — JAMAIS UN DIGEST INVENTE.
+  #
+  # La racine d'ops est une COUTURE parce que la vraie est un chemin global en dur : sans
+  # l'injecter, le vert ne marche jamais sur le chemin reel.
   # The project's ops worktree, or `nil` when there is none — a project that was never onboarded
   # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:ops_root` seam as
   # the provenance emission below, for the same reason: the real root is a hardcoded global path.
@@ -152,20 +150,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
     if File.dir?(dir), do: dir
   end
 
-  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE, et elle l'etait (BL-6-43). Ce garde rendait `:ok` sur un
-  # `else` fourre-tout : une brique pouvait etre publiee, mergee et scellee sans qu'une seule ligne
-  # n'ait jamais dit que sa preuve n'avait pas ete ECRITE. Vu du sceau, ce silence est indiscernable
-  # d'une gravure ratee (qui, elle, loggue) — donc la seule question qu'on pouvait poser en aval
-  # etait « faut-il bloquer une brique sans preuve ? », alors que la vraie etait « pourquoi n'y en
-  # a-t-il pas ? » et que personne ne pouvait y repondre.
+  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE. Un `else` fourre-tout rendant `:ok` laisse une brique
+  # etre publiee, mergee et scellee sans qu'une ligne n'ait dit que sa preuve n'avait pas ete
+  # ECRITE — et vu du sceau, ce silence est indiscernable d'une gravure RATEE, qui elle loggue. La
+  # seule question posable en aval devient alors « faut-il bloquer une brique sans preuve ? » quand
+  # la vraie est « pourquoi n'y en a-t-il pas ? », a laquelle plus personne ne peut repondre.
   #
-  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se nomment :
-  #   - pas de `deliverable_opts` ICI est une ANOMALIE, pas le cas nominal : cette fonction n'est
-  #     appelee que depuis `open_deliverable_pr`, le point de publication d'un livrable producteur.
-  #     Le chemin verdict-seul (`complete/2`) ne passe pas par la.
-  #   - pas d'ops = le projet n'a pas de face atelier. Meme fait que le `{:work_dir_missing, _}` de
-  #     `BriefArtifact`, qui le dit LOUD et le declare PERMANENT jusqu'a l'onboard — ici il ne
-  #     disait rien.
+  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se NOMMENT :
+  #   - l'absence d'options de livrable ICI est une ANOMALIE, pas le cas nominal — le chemin
+  #     verdict-seul ne passe pas par cette fonction ;
+  #   - l'absence d'ops dit que le projet n'a pas de face atelier : un fait PERMANENT jusqu'a
+  #     l'onboard, qui doit se dire aussi fort ici qu'ailleurs.
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
     ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
     repo = Map.get(step_run, :repo)
@@ -294,11 +289,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
          {:ok, _} <- forge.post_comment(repo, n, body, comment_opts),
          :ok <- space_writes(opts),
          {:ok, _} <- forge.add_label(repo, n, @awaits_arch_label, forge_opts),
-         # UNLOCK, pas un `remove_label`. Ce chemin retirait `lcars-in-flight` EN LIGNE, donc il
-         # sautait les deux autres gestes de `unlock/6` : le chronometre Gitea du role n'etait
-         # jamais arrete — il tournait pendant TOUTE l'attente humaine, qui peut durer des jours —
-         # et `step.unlocked` n'etait jamais emis, donc une escalade ne laissait AUCUNE ligne de
-         # feed. Le seul etat que l'arch doit voir arriver etait le seul a n'en produire aucune.
+         # UNLOCK, pas un `remove_label`. Retirer `lcars-in-flight` EN LIGNE saute les deux autres
+         # gestes de `unlock/6` : le chronometre Gitea du role n'est jamais arrete — il tourne
+         # pendant TOUTE l'attente humaine, qui peut durer des jours — et `step.unlocked` n'est
+         # jamais emis, donc une escalade ne laisse AUCUNE ligne de feed. Le seul etat que l'arch
+         # doit voir arriver serait le seul a n'en produire aucune.
          {:ok, _} <- unlock(forge, repo, n, forge_opts, role, :awaiting_arch) do
       Logger.info(
         "StepRunCompleter: #{repo}##{n} role=#{role} → awaiting_arch (decision=#{inspect(decision)})"
@@ -357,7 +352,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
          # PR-opened action (a same-second tie renders inverted in the feed).
          :ok <- space_writes(opts),
          # Both post-push legs record their failure ON THE ISSUE (BL-6-34): between a landed push
-         # and a born PR, an {:error, _} used to be a host-log line — pushed branch, mute ticket,
+         # and a born PR, an {:error, _} is otherwise a host-log line — pushed branch, mute ticket,
          # wedged brick. The marker turns the stall into a named refusal.
          {:ok, role_opts} <-
            ForgeClient.as_role(forge_opts, role) |> record_pr_open_failure(step_run, sha, opts),
@@ -415,7 +410,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.get(step_run, :role, "juge")
     work_dir = verdict_work_dir(repo, opts)
 
-    # C1 2026-08-18: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
+    # C1: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
     # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
     # same reason (OpsObject's idempotent content probe: a re-run re-finds the commit, never forks
     # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
@@ -441,17 +436,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
         repo: repo
       )
 
-    # C2 — THE MACHINE VERDICT RIDES THE REVIEW ITSELF. C1 engraved it as an ops object, which is
-    # the right ARCHIVE and the wrong transport: the gate that has to consume it (`Jury`) already
-    # fetches every review body in one call, while the ops store is write-only. Appended here,
-    # `findings_v1` reaches the gate with no extra request and no new read path, scoped to the very
-    # review that carried it -- a superseded review takes its findings out of play WITH it.
+    # ⚠ LE VERDICT MACHINE VOYAGE SUR LA REVUE ELLE-MEME. Le graver comme objet d'archive est le bon
+    # ARCHIVAGE et le mauvais TRANSPORT : la porte qui doit le consommer lit deja tous les corps de
+    # revue en un appel, la ou l'archive est en ecriture seule. Ajoute ici, il l'atteint sans requete
+    # ni chemin de lecture supplementaires — et une revue supersedee emporte ses conclusions AVEC elle.
     #
-    # OUTSIDE `Pinning.render`, deliberately, and this is the same lesson the conflict rail already
-    # paid for its `[conflict-engine:...]` marker: a pinned body is SUMMARIZED, so anything folded
-    # into the prose is dropped exactly on the long verdicts -- the ones that carry the findings
-    # worth reading. Rendered inside, the wire would work on short reviews only, which is where
-    # nobody would notice it missing.
+    # ⚠ HORS DU RENDU EPINGLE, DELIBEREMENT : un corps epingle est RESUME, donc ce qu'on y fond
+    # disparait exactement sur les verdicts LONGS — ceux dont les conclusions valent d'etre lues.
+    # Rendu dedans, le fil marcherait sur les revues courtes, c'est-a-dire la ou personne ne
+    # remarquerait son absence.
     body = body <> Fleet.FindingsWire.render(Map.get(step_run, :review_findings))
 
     # The native review is posted IN THE NAME OF THE JUDGE (role token, `as_role`): on the forge,
@@ -551,12 +544,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # OPTIONAL payload never blocks a valid verdict.
   defp maybe_engrave_findings(step_run, work_dir, role) do
     case {Map.get(step_run, :review_findings), work_dir} do
-      # THIS SILENCE WAS RIGHT FOR ONE DAY AND WRONG THE NEXT. It read "no key = a legacy judge,
-      # today's path" -- true while `findings_v1` was brand new and no SP named it. Every judge's
-      # composed SP names it now, so an absence is no longer a judge that never heard of the key:
-      # it is a judge that was told and did not. MEASURED 2026-08-19 (bench, PR#34): the qualifier
-      # returned an excellent verdict -- it named the planted faux-vert structurally -- and NO
-      # machine payload at all, and nothing anywhere said so.
+      # SILENCE HERE READS "no key = a legacy judge, today's path", and that is only true while
+      # `findings_v1` is new and no SP names it. Every judge's composed SP names it, so an absence
+      # is NOT a judge that never heard of the key: it is a judge that was told and did not.
+      # MEASURED on the bench: a qualifier returns an excellent verdict — it names the planted
+      # faux-vert structurally — and NO machine payload at all, with nothing anywhere saying so.
       #
       # That silence is what would make the verdict function of C2 blind: f reads findings, an
       # absent payload starves it, and a starved f degrades to exactly today's boolean AND while
@@ -1062,7 +1054,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   # Records ONE post-push propagation failure on the issue (BL-6-34): the deliverable IS pushed
   # (the branch survives on the forge) but the PR was never born (role token unavailable, PR API
-  # refusal). Without the marker the stall was a host-side warning — pushed branch, MUTE ticket,
+  # refusal). Without the marker the stall is a host-side warning — pushed branch, MUTE ticket,
   # brick wedged under its lock with no automatic retry (unlike the publish leg, whose brake
   # replays rework). Same posture as `record_publish_failure`, its pre-push twin: BEST-EFFORT and
   # error-transparent — the original error passes through untouched, a failed post degrades to the
@@ -1168,8 +1160,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
         # this »*. Un abandon invitait donc a chainer dessus.
         #
         # `Labels.stage_retired/0` existe pour ca et le dit : « fermeture SANS livraison (supersede,
-        # abandon) ». L'intention etait ecrite, le cablage ne la lisait pas. L'appelant declare donc
-        # sa fermeture ; le defaut reste `:delivered`, qui est le cas nominal de tous les autres.
+        # abandon) ». L'intention est ecrite la ; encore faut-il que le cablage la lise. L'appelant
+        # declare donc sa fermeture, le defaut restant `:delivered` — le cas nominal de tous les
+        # autres.
         closure = Map.get(step_run, :closure, :delivered)
 
         case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, closure)) do

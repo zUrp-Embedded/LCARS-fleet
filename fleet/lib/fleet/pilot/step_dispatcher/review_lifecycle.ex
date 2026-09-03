@@ -134,11 +134,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     # carried, on the stable jury, by `pr_review_state.outcome` for the arch's status read) — a
     # divergence between what the gate does and what the status says would be a second truth.
     #
-    # THE FULL ARITY, and naming the `/2` here was wrong: it cannot return `:gray_zone` at all
-    # (the behaviour's contract says so, and Dialyzer holds it), so a reader who followed this
-    # comment went looking for the gray zone in a function structurally incapable of producing
-    # one. Same defect class this chantier paid for twice — a text describing a neighbouring
-    # behaviour rather than the one under it.
+    # THE FULL ARITY, and naming the `/2` here would be wrong: it cannot return `:gray_zone` at
+    # all (the behaviour's contract says so, and Dialyzer holds it), so a reader following such a
+    # comment goes looking for the gray zone in a function structurally incapable of producing one
+    # — a text describing a neighbouring behaviour rather than the one under it.
     case Fleet.Forge.Client.Jury.review_outcome(
            requested,
            verdicts,
@@ -196,9 +195,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # THE CI IS A PRE-CONDITION OF THE SUMMONS, not an afterthought at merge time. Until this gate,
-  # the machine rail and the judgement rail never met: judges were spawned on code nobody had built,
-  # and the red surfaced at the PROMOTE, after the tokens were spent. `CiGate` decides (the CARD
+  # THE CI IS A PRE-CONDITION OF THE SUMMONS, not an afterthought at merge time. Without this gate
+  # the machine rail and the judgement rail never meet: judges are spawned on code nobody has built,
+  # and the red surfaces at the PROMOTE, after the tokens are spent. `CiGate` decides (the CARD
   # governs — `spec.ci`), and when it lets through, the fact it measured RIDES to the judge instead
   # of being re-derived there.
   defp gate_then_dispatch(pr_number, head, next, %Ctx{} = ctx) do
@@ -293,18 +292,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # The card's CI policy, read exactly like its jury and through the same fallback: the ISSUE's
-  # engraved card when a route exists, the PROJECT's declared card otherwise. The sentence was here
-  # before the code was — the jury fallback read the project card, this one answered a hardcoded
-  # `:ignore`, and the divergence was invisible because the comment covered it. A PR with no
-  # engraved route (human PR, adopted orphan) was therefore judged under the project's jury and
-  # under no CI policy at all, on projects whose card demands one.
-  # PUBLIC (@doc false) pour la meme raison que `retire_superseded` l'est : la propriete qui compte
-  # n'est ni « le champ traverse le loader » (tenu par `LoaderV25Test`) ni « la porte gate sur
-  # :required » (tenu par `CiGateTest`, policy bouchee) — c'est la JOINTURE des deux, et elle n'est
-  # observable que d'ici. Le maillon EST le token compare, mais il ne vit plus ici : `Roles.ci/1`
-  # est le site unique qui connait les valeurs de l'enum, pour qu'un renommage n'ait qu'un endroit
-  # ou echouer. `CiGateTest` tient la jointure contre le loader canon.
+  # La politique CI de la carte, lue exactement comme son jury et par le MEME repli : la carte
+  # gravee de l'issue quand une route existe, la carte declaree du projet sinon.
+  #
+  # ⚠ LES DEUX REPLIS DOIVENT LIRE LA MEME CARTE. Celui du jury lit la carte declaree du projet ;
+  # que celui-ci rende une constante et la divergence est INVISIBLE — la phrase ci-dessus la
+  # couvre. Une PR sans route gravee serait alors jugee sous le jury du projet et sous AUCUNE
+  # politique CI, sur des projets dont la carte en exige une.
+  #
+  # PUBLIC exprès : la propriete qui compte n'est ni « le champ traverse le loader » ni « la porte
+  # gate sur la valeur », toutes deux tenues ailleurs — c'est leur JOINTURE, et elle n'est
+  # observable que d'ici. Les valeurs de l'enum, elles, vivent en UN seul site, pour qu'un renommage
+  # n'ait qu'un endroit ou echouer.
   @doc false
   @spec issue_card_ci(String.t(), Ctx.t()) :: :required | :ignore
   def issue_card_ci(head, %Ctx{} = ctx) do
@@ -356,23 +355,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   # Sortie du pipeline : merge signé chief, promotion signée gatekeeper
   # ============================================================
 
-  # PROMOTE PR-state-driven (interim, without branch-protection): all judges have
-  # approved → the pipeline EXITS. ⚠ CE COMMENTAIRE DÉCRIVAIT L'ANCIENNE CONDITIONNELLE — « signé
-  # par la FONCTION qui a fermé la PR : gatekeeper sur une propre, chief sur un conflit résolu ».
-  # Cette conditionnelle-là est morte (revue 2026-08-20) : la signature suit désormais le DOMAINE de
-  # l'acte, pas l'histoire de la PR. Le merge est TOUJOURS signé chief, la promotion TOUJOURS
-  # gatekeeper ; seule la MÉTHODE reste conditionnelle au conflit. HONEST comment
-  # (we don't lie, we show): delivered by the eng, AVIS FAVORABLE of the judges (APPROVED), merged
-  # by the system (branch-protection OFF in dev → LCARS aggregates, not Gitea — made explicit). The
-  # `rebase` merge on the clean path (LINEAR, handles a `main` advanced under a parallel PR —
-  # multi-issue, cf. merge_pr; a conflict-resolved PR merges in `merge`, its resolution IS a
-  # merge commit) —
-  # `merge_and_promote` closes the issue EXPLICITLY, AFTER the comment (never `Closes #N`/Gitea
-  # auto-close: coherent chronology). No lock (single-process poller); PR already
-  # merged → 409 → the PR disappears on the next tick (idempotent).
+  # PROMOTION pilotee par l'etat de la PR : tous les juges ont approuve, le pipeline SORT.
   #
-  # `promote_comment` + the signer choice + the merge live in `Fleet.Pilot.MergeAndPromote`
-  # (SINGLE seal shared with `StepRunCompleter.promote` — no fork of the merge signature).
+  # Le commentaire de sceau est HONNETE — on ne ment pas, on montre : livre par l'ingenieur, AVIS
+  # FAVORABLE des juges, merge par le SYSTEME. C'est LCARS qui agrege les avis, pas la forge, et le
+  # dire explicitement est ce qui empeche de lire une protection de branche la ou il n'y en a pas.
+  #
+  # L'issue est fermee EXPLICITEMENT et APRES le commentaire, jamais par une auto-fermeture de la
+  # forge : chronologie coherente. Pas de verrou ici — le poller est mono-processus — et une PR deja
+  # mergee rend un 409, donc elle disparait au tick suivant : idempotent.
+  #
+  # Le sceau lui-meme (commentaire, signataire, merge) vit dans UNE autorite partagee, jamais forkee.
   defp promote_pr(pr_number, head, %Ctx{} = ctx) do
     with {:ok, {issue_n, producer}} <- RoleDispatch.parse_feature_branch_or_skip(head) do
       # SINGLE seal shared with `StepRunCompleter.promote`: gatekeeper comment + gatekeeper-signed
@@ -412,28 +405,27 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
           # same `StepRunCompleter.unlock/5` authority as the workflow_map path (no fork).
           # `:delivered` — THE terminal unlock of this path (issue lock, post-seal): types the
           # feed line "brique LIVRÉE" and triggers the arch's single informational wake.
-          # (Missed on the first live round 2026-07-18: only the completer's promote carried
-          # it — the poller promote, the path real rounds actually take, said "étape franchie".)
+          # (Easy to miss: the completer's promote carries it, while the poller promote — the path
+          # real rounds actually take — is the one that must not say "étape franchie".)
           #
-          # CI-08 — the caller must NOT announce the retrait before its VERDICT. `merge_and_promote` has
-          # just CLOSED the issue, so the OPEN-issue poll no longer revisits it: a lost unlock leaves a
-          # residual `lcars-in-flight` + a stopwatch running forever with NO natural retry. We therefore
-          # (a) VERIFY the verdict (no more `_ =` + a blanket "lock released" log that lied on failure),
-          # (b) RETRY it bounded — this is the LAST reconciliation opportunity (idempotent: `unlock` no-ops
-          # a removed label / a 409'd stopwatch), and (c) log per the ACTUAL outcome. We deliberately do NOT
-          # fold the unlock into `MergeAndPromote.seal_and_finalize` (the Cible's other option): unlock
-          # (stop_stopwatch + remove in-flight + emit) is a concern OWNED by `StepRunCompleter.unlock` (its
-          # SOLE-AUTHORITY @doc), and the stop identity differs between callers (here the branch-parsed
-          # `producer`; `route(:promote)` uses `producer_stop_role`) — folding it would couple the seal to
-          # the lock/stopwatch lifecycle AND fork that identity. The convergence that matters is the shared
-          # honesty discipline (verify-then-announce), not a physical merge.
+          # ⚠ NE PAS ANNONCER LE RETRAIT AVANT SON VERDICT. L'issue vient d'etre FERMEE, donc le
+          # balayage des issues ouvertes ne repassera plus : un unlock perdu laisse un verrou
+          # residuel et un chronometre qui court, SANS aucune reprise naturelle. C'est la DERNIERE
+          # occasion de reconcilier — d'ou un verdict verifie, une reprise bornee (l'unlock etant
+          # idempotent) et un journal conforme au resultat REEL, jamais un « verrou libere » pose
+          # d'avance qui mentirait sur un echec.
+          #
+          # ⚠ ET L'UNLOCK N'EST PAS FONDU DANS LE SCEAU : il appartient a une autre autorite, et
+          # l'IDENTITE qui arrete le chronometre DIFFERE selon l'appelant. Les fondre coupleraient le
+          # sceau au cycle de vie du verrou ET forkeraient cette identite. Ce qui converge est la
+          # discipline — verifier puis annoncer — pas les deux gestes.
           case finalize_issue_unlock(ctx, issue_n, producer) do
             :ok ->
-              # ⚠ CE LOG DISAIT « rebase merge, gatekeeper sealed » — DEUX FAITS FAUX depuis la
-              # séparation des rails (revue 2026-08-20). Le merge est signé `chief`, et `rebase`
-              # n'est la méthode que sur une PR propre. Un opérateur qui filtrait ses logs sur
-              # « gatekeeper » pour auditer les merges croisait ensuite le fil Gitea, y trouvait
-              # `system_chief`, et enquêtait sur une contradiction qui n'existait que dans ce texte.
+              # ⚠ CE LOG NE DIT NI « rebase » NI « gatekeeper sealed » : le merge est signé
+              # `chief`, et `rebase` n'est la méthode que sur une PR propre. Un opérateur qui
+              # filtre ses logs sur « gatekeeper » pour auditer les merges croiserait ensuite le
+              # fil Gitea, y trouverait `system_chief`, et enquêterait sur une contradiction qui
+              # n'existerait que dans ce texte.
               Logger.info(
                 "StepDispatcher: PROMOTE pr=#{ctx.repo}##{pr_number} issue=##{issue_n} " <>
                   "(judges OK → chief merged, gatekeeper promoted + explicit close ; " <>

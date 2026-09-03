@@ -53,8 +53,8 @@ defmodule LcarsFleet.MixProject do
 
   # Type net (Dialyxir). The PLT covers the single app +
   # `:mix`/`:ex_unit` (Mix tasks: release lock, lcars.*; test code). PLT under
-  # `_build/plts` (stable across envs). The old fleet_* atoms MUST NOT
-  # come back into plt_add_apps: not apps anymore → dialyzer crash "unknown application".
+  # `_build/plts` (stable across envs). The `fleet_*` atoms MUST NOT be in
+  # plt_add_apps: they are not apps → dialyzer crash "unknown application".
   defp dialyzer do
     [
       # `:boundary` is `runtime: false` (compile-time guardian), so its modules are NOT in the default
@@ -90,20 +90,21 @@ defmodule LcarsFleet.MixProject do
       gate: [
         # FIRST because it is the cheapest signal in the chain (seconds, no compile) and because a
         # formatting drift is the one failure that is fixed by running one command. Locked here rather
-        # than left to discipline: the tree was 86 files out of format before this step existed, which
-        # is what an unenforced convention converges to.
+        # than left to discipline: unenforced, a formatting convention converges to a tree with
+        # dozens of files out of format — measured, 86 of them.
         "format --check-formatted",
         "compile --warnings-as-errors",
-        # WRAPPED, and not the bare `"test"` it was until 2026-08-06. `mix test` is the ONLY step of
+        # WRAPPED, and never the bare `"test"`. `mix test` is the ONLY step of
         # this chain that does not HALT it: it posts its exit status through `System.at_exit` and
         # hands control back, so `format`, `shell_gate`, `contracts.check` and `topology` all stop
         # the chain on failure and `test` alone does not. Measured with a deliberately red canary:
         # the gate returned 2 — the contract held — while shell_gate, the contracts and dialyzer all
-        # ran afterwards, so the LAST line a reader saw was dialyzer's own
+        # ran afterwards, so the LAST line a reader sees is dialyzer's own
         # "done (passed successfully)" at the end of a FAILED gate.
         #
-        # The exit code was always right; the OUTPUT invited the mistake, and it collected one — a
-        # session read that trailing line as the verdict for about ten commits (BL-6-69). Making the
+        # The exit code is right either way; it is the OUTPUT that invites the mistake, and it has
+        # collected one — a session read that trailing line as the verdict for about ten commits
+        # (BL-6-69). Making the
         # step behave like its five neighbours costs the "see every failure in one run" property,
         # which a re-run gives back; it removes a green last line after a red step, which attention
         # does not give back.
@@ -118,11 +119,11 @@ defmodule LcarsFleet.MixProject do
         # (PLT built once per _build); warm ~2s. Runs in MIX_ENV=test like the
         # rest (preferred_envs) — same env as the suite, a single _build analyzed.
         "dialyzer",
-        # SOBELOW AU SEUIL `High`, ET LE SEUIL EST UNE MESURE, PAS UN GOUT. Etat du depot au
-        # 2026-08-14 : 158 signalements — 146 `Low`, 12 `Medium`, **0 `High`**. Codes de sortie
-        # verifies un par un : `--exit High` rend **0**, `--exit Medium` rend **1**, `--exit` (defaut
-        # `Low`) rend **1**. Entrer au seuil `Medium` aurait donc rougi la chaine des le premier
-        # commit et transforme un gate en obstacle a contourner ; entrer a `High` la laisse verte
+        # SOBELOW AU SEUIL `High`, ET LE SEUIL EST UNE MESURE, PAS UN GOUT. Etat du depot mesure :
+        # 158 signalements — 146 `Low`, 12 `Medium`, **0 `High`**. Codes de sortie verifies un par
+        # un : `--exit High` rend **0**, `--exit Medium` rend **1**, `--exit` (defaut `Low`) rend
+        # **1**. Entrer au seuil `Medium` rougirait donc la chaine des le premier commit et
+        # transformerait un gate en obstacle a contourner ; entrer a `High` la laisse verte
         # aujourd'hui ET refuse le jour ou une trouvaille de haute confiance apparait, ce qui est
         # exactement ce qu'un plancher doit faire.
         #
@@ -138,7 +139,7 @@ defmodule LcarsFleet.MixProject do
   # un lecteur en conclut raisonnablement qu'un `mix gate` vert prouve les regles Credo. Il ne les
   # prouve pas.
   #
-  # MESURE au 2026-08-14 : `mix credo` rend **exit 30** — 1 warning, 173 pistes de refactoring, 45
+  # MESURE : `mix credo` rend **exit 30** — 1 warning, 173 pistes de refactoring, 45
   # points de lisibilite, 364 suggestions de conception, sur 509 fichiers. L'ajouter a la chaine la
   # rendrait rouge en permanence ; la rendre verte demande de trier 583 signalements, c'est-a-dire un
   # chantier avec ses arbitrages, pas une ligne d'alias. Credo reste donc un outil qu'on LANCE
@@ -242,13 +243,13 @@ defmodule LcarsFleet.MixProject do
       {:ex_mcp, "~> 0.12.0"},
       # PINNED, and load-bearing: 1.11.11+ ships `jose_json_otp.erl`, which declares the `dynamic()`
       # type. OTP 25 (what the Ubuntu LTS serves, cf. the apt-only toolchain posture) does not know
-      # that type, so the dep does not COMPILE — `type dynamic() undefined`, measured 2026-07-30 by
+      # that type, so the dep does not COMPILE — `type dynamic() undefined`, measured by
       # unpinning it. `override: true` because ex_mcp asks for `~> 1.11` and would otherwise pull the
       # newest. Nothing here references JOSE directly; the pin exists only to hold the dep on the last
       # release this Erlang can build. It lifts when OTP does, not before — and the reason is written
       # HERE because an exact pin with no stated cause reads as gratuitous and gets removed.
-      # ⚠ ITS CONDITION IS GONE (2026-08-22): the toolchain floor moved to OTP 27, which knows
-      # `dynamic()` (EEP-61, OTP 26). The pin is now HELD, not required — lifting it is a resolver
+      # ⚠ ITS CONDITION NO LONGER HOLDS: the toolchain floor is OTP 27, which knows
+      # `dynamic()` (EEP-61, OTP 26). The pin is HELD, not required — lifting it is a resolver
       # change, so it belongs to the pass that purges the PLT and runs the gate, not to the pin bump.
       {:jose, "1.11.10", override: true},
       # — forge HTTP (Fleet.Forge ; finch aussi demarre seul par les portes `eval`) —
@@ -263,19 +264,18 @@ defmodule LcarsFleet.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       # `:test` ajoute pour que `mix gate` puisse l'appeler : la chaine force `MIX_ENV=test`
-      # (preferred_envs), et une dep `only: :dev` y est absente — l'outil etait donc installe et
+      # (preferred_envs), et une dep `only: :dev` y est absente — l'outil serait donc installe et
       # inatteignable depuis le seul point d'entree qui compte.
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false}
     ]
   end
 
   # Mix release (per-human launch via bin/fleet_v2). The release is named after the app it
-  # contains, `lcars_fleet`, and that is not cosmetic: it used to be `fleet_umbrella`, a name that
-  # stopped being true at the 2026-07-12 collapse and then described the build to every reader for
-  # a month. D-08 had kept it on the ground that renaming "would break the launcher for a cosmetic
-  # gain" — a bad trade once the reader is an agent, for which a name that is not instantly true is
-  # not neutral, it is a wrong model carried into everything it does next. The launcher was three
-  # paths.
+  # contains, `lcars_fleet`, and that is not cosmetic: a release named after a structure the tree no
+  # longer has — `fleet_umbrella` — describes the build wrongly to every reader. "Renaming would
+  # break the launcher for a cosmetic gain" is a bad trade once the reader is an agent, for which a
+  # name that is not instantly true is not neutral: it is a wrong model carried into everything it
+  # does next. The launcher is three paths.
   # A single :permanent app; the domain boot order lives in Fleet.Application (F8 scar there).
   defp releases do
     [

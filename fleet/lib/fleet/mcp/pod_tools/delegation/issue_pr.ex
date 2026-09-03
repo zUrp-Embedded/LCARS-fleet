@@ -18,15 +18,14 @@ defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
   # not a guess (a half-checked supersede could retire the wrong brick). An already-closed target is
   # LEGITIMATE (re-take an abandoned brick): filiation only, no retirement to execute.
   #
-  # A LIVE PR IS NO LONGER A REFUSAL, AND THE OLD REFUSAL WAS A WORKAROUND. It read as a policy
-  # ("let it land"); it was a CONSEQUENCE: nothing in the forge client knew how to close a PR.
-  # Retiring the ticket without closing it left the PR open on an INDEPENDENT rail
-  # (`dispatch_review` polls pulls, outside the lease) — judged, then merged, into a retired ticket.
-  # So the refusal protected against an incoherence the gesture itself should have prevented.
+  # A LIVE PR IS NOT A REFUSAL, IT IS THE OTHER HALF OF THE GESTURE. Retiring the ticket without
+  # closing its PR leaves that PR on an INDEPENDENT rail (`dispatch_review` polls pulls, outside the
+  # lease) — judged, then merged, into a retired ticket. Refusing the retirement instead would
+  # protect against an incoherence the gesture itself can prevent.
   #
   # And the intent of a retirement — stop the machine, bound the cost — does not depend on whether a
-  # PR exists. So the gesture is made COMPLETE (`:with_pr` → the PR closes with the ticket) instead
-  # of being forbidden.
+  # PR exists. So the gesture is COMPLETE (`:with_pr` → the PR closes with the ticket) rather than
+  # forbidden.
   @doc false
   @spec target_state_preflight(module(), String.t(), integer() | nil | term()) ::
           {:ok, nil | :closed | :open | {:open, integer()}} | {:error, term()}
@@ -99,8 +98,9 @@ defmodule Fleet.MCP.PodTools.Delegation.IssuePR do
     end
   end
 
-  # Gitea 1.26.4 (live 2026-07-19) rewrites a deleted merged head to `refs/pull/N/head`;
-  # use the issue's `[merge:pr-N]` marker to recover that PR.
+  # A merged PR's head no longer resolves once its branch is deleted, so the issue's `[merge:pr-N]`
+  # marker is what recovers it — the measurement that establishes this lives with the marker, in
+  # `Fleet.Forge.Protocol.merge_marker/1`.
   defp merged_pr_fallback(forge, repo, number) do
     case forge.merged_pr_of_issue(repo, number, []) do
       {:ok, pr} ->

@@ -2,26 +2,24 @@ defmodule Fleet.API.Application do
   @moduledoc """
   Supervises the API domain's AF_UNIX control listener — the ONLY listener this domain has.
 
-  ## Il n'y a plus de surface TCP, et ce n'est pas un durcissement
+  ## Pas de surface TCP ici, et ce n'est pas un durcissement
 
-  Ce domaine servait aussi un listener TCP (`Fleet.API.Rest` + `/ws`). Il a ete retire le
-  2026-08-14 parce qu'il n'avait **aucune capacite propre**, et la mesure porte son lieu :
+  Un listener TCP (REST + `/ws`) n'aurait **aucune capacite propre**, et l'inventaire porte son
+  lieu :
 
-    * les lectures d'etat (`pods`, `issues`, `workflow_runs`) rendaient **501** en renvoyant vers
-      `Fleet.Observation` — ce n'etait pas son autorite, et son message de renvoi nommait un port
-      (`deck :8091`) mort depuis que l'observation est passee sur socket ;
-    * `/ws` etait deja debranche (coupure reversible du 2026-08-14, meme journee) ;
+    * les lectures d'etat (`pods`, `issues`, `workflow_runs`) ne sont pas l'autorite de ce domaine —
+      elles rendraient **501** en renvoyant vers `Fleet.Observation`, qui vit sur socket ;
     * `health` / `readiness` / `version` ont un **jumeau CLI** — `fleet_v2 version` lit le MEME
       fichier (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet eteinte ;
-    * les ecritures n'ont jamais transite par la : elles vivent sur le socket de controle ci-dessous.
+    * les ecritures n'y transitent pas : elles vivent sur le socket de controle ci-dessous.
 
-  Et **personne ne l'appelait** : ni `bin/lcars` (son propre commentaire dit que `$API_URL` n'est
-  lu nulle part), ni le BEAM, ni le healthcheck du conteneur (qui teste le port 22), et les tests
-  appelaient le plug directement, sans reseau.
+  Et personne ne l'appellerait : ni `bin/lcars` (dont le propre commentaire dit que `$API_URL` n'est
+  lu nulle part), ni le BEAM, ni le healthcheck du conteneur, et les tests appellent le plug
+  directement, sans reseau.
 
-  ⚠ LE SOCKET DE CONTROLE N'EST PLUS DERRIERE UN DRAPEAU DE LISTENER TCP. Il etait imbrique dans
-  `if api_start_listener` : le chemin d'ECRITURE dependait donc d'un commutateur nomme d'apres une
-  surface de LECTURE. Il ne depend plus que de sa propre configuration — pose ou absent.
+  ⚠ LE SOCKET DE CONTROLE N'EST PAS DERRIERE UN DRAPEAU DE LISTENER TCP. Imbrique dans un
+  `if api_start_listener`, le chemin d'ECRITURE dependrait d'un commutateur nomme d'apres une
+  surface de LECTURE. Il ne depend que de sa propre configuration — pose ou absent.
   """
 
   use Supervisor

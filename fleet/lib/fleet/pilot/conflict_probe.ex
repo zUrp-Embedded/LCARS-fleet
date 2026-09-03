@@ -66,10 +66,10 @@ defmodule Fleet.Pilot.ConflictProbe do
   @doc """
   Fetches `feature_ref` into a throwaway ref, then diagnoses the merge against `:base_branch`.
 
-  `:base_branch` AND `:dir` are REQUIRED (chantier face-projet): this used to default to
-  `"origin/main"` probed in the CODE-face worktree — on an ops PR both halves were silently wrong
-  (wrong merge target, wrong repository). The caller (Remediation) reads the PR's own base and
-  derives the face worktree; a caller that cannot say either has skipped the face decision.
+  `:base_branch` AND `:dir` are REQUIRED, with no default: defaulting to `"origin/main"` in the
+  CODE-face worktree makes BOTH halves silently wrong on an ops PR — wrong merge target, wrong
+  repository. The caller reads the PR's own base and derives the face worktree; a caller that cannot
+  say either has skipped the face decision.
   Returns `{:ok, diagnosis}` or `{:error, reason}` (fail-safe).
   """
   @spec probe(String.t(), String.t(), keyword()) :: {:ok, diagnosis()} | {:error, term()}
@@ -80,11 +80,11 @@ defmodule Fleet.Pilot.ConflictProbe do
     probe_ref = "refs/lcars/conflict-probe/" <> sanitize(feature_ref)
 
     if File.dir?(Path.join(dir, ".git")) do
-      # TWO fetches, and the FIRST one is the fix for a measured lie. The probe used to fetch ONLY
-      # the feature ref and judge the merge against whatever `origin/<base>` this clone last saw.
-      # On the bench (probe-rails PR#30): a sister brick landed on main AFTER the clone's last
-      # fetch — the forge said CONFLICT, the probe merged clean against yesterday's base (0 hunks),
-      # and tier 0 silently degraded to a producer round. Same input-skew disease ConflictApply's
+      # TWO fetches, and the FIRST one is what keeps the diagnosis honest. Fetching ONLY the feature
+      # ref judges the merge against whatever `origin/<base>` this clone last saw: let a sister
+      # brick land on the base AFTER that fetch, and the forge says CONFLICT while the probe merges
+      # clean against yesterday's base (0 hunks) — tier 0 then degrades silently to a producer
+      # round. Same input-skew disease ConflictApply's
       # diff3 note documents: the diagnosis and the write must read the SAME inputs — and apply
       # already runs a full `fetch origin` before writing. Two commands, not one refspec list: an
       # explicit refspec on `git fetch` REPLACES the default refspec, so a single call would update
@@ -159,10 +159,10 @@ defmodule Fleet.Pilot.ConflictProbe do
 
   # 3-way `git merge-file` on temp blobs -> diff3-marked content.
   #
-  # ⚠ LA PHRASE « hard failure -> `:error` » NE TENAIT PAS : le motif `{:ok, {out, _code}}` acceptait
-  # TOUS les codes retour, echecs compris. Le commentaire decrivait l'intention, pas la clause.
+  # ⚠ « hard failure -> `:error` » NE TIENT QUE SI LA CLAUSE LIT LE CODE : un motif
+  # `{:ok, {out, _code}}` accepte TOUS les codes retour, echecs compris.
   #
-  # Le contrat de `git merge-file` fait la difference que le `_code` effacait : **0** = fusion
+  # Le contrat de `git merge-file` fait la difference qu'un `_code` efface : **0** = fusion
   # propre, **1..127** = NOMBRE de conflits — deux REPONSES — et **au-dela** (typiquement 255) une
   # ERREUR de l'outil. Ce sont trois choses, et deux seulement sont du contenu.
   #
@@ -173,11 +173,11 @@ defmodule Fleet.Pilot.ConflictProbe do
   # rend un rapport a ZERO hunk : une panne de l'outil de merge se lit « fichier sans conflit »,
   # et les totaux de routage tier-0 comptent un fichier propre qui n'a jamais ete fusionne.
   #
-  # La soeur `show/3`, douze lignes plus haut, filtre pourtant `{:ok, {out, 0}}` — le meme fichier
-  # portait deja la bonne posture sur l'autre lecture.
+  # La soeur `show/3`, plus haut dans ce fichier, filtre `{:ok, {out, 0}}` — meme posture, sur
+  # l'autre lecture.
   #
-  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant
-  # sait deja quoi en faire, seule la clause qui y menait etait inatteignable.
+  # `:error` mene a `residual_report/0` (residuel conservateur, jamais « propre ») : l'appelant sait
+  # quoi en faire, encore faut-il que la clause qui y mene soit atteignable.
   defp merge_file(base, ours, theirs) do
     tmp = Path.join(System.tmp_dir!(), "lcars-cprobe-#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -228,9 +228,9 @@ defmodule Fleet.Pilot.ConflictProbe do
   # The conservative verdict: one residual hunk, nothing writable. Reached by three DIFFERENT
   # facts that share one consequence -- a genuine add/delete conflict, a `git merge-file` tool
   # failure, and content whose markers do not close. None of them is trivially resolvable, and
-  # none may be reported as a clean file; the caller reads the shape, not the cause. It was named
-  # `add_delete_report` while already serving the tool failure, so the name asserted a cause that
-  # was wrong at two of its call sites.
+  # none may be reported as a clean file; the caller reads the shape, not the cause. Hence a name
+  # that says the VERDICT and not one of the three causes: `add_delete_report` would assert a cause
+  # that is wrong at two of its three call sites.
   defp residual_report,
     do: %Report{merged: nil, hunks: [], stats: %{trivial: 0, complex: 1, total: 1}}
 

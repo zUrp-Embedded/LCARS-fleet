@@ -275,9 +275,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       :policy ->
         reconverge_policy(pr_number, head, ctx)
 
-      # A REAL git conflict is mechanically recoverable by the PRODUCER (tier 1, live retex
-      # fleet/hello#3 2026-07-19: a full re-delegated chain — 4 agent passes, ~7 min — for what a
-      # local merge-resolve on the SAME PR handles): bounded conflict-rework, budget exhausted →
+      # A REAL git conflict is mechanically recoverable by the PRODUCER (tier 1 — measured live, a
+      # full re-delegated chain costs 4 agent passes and ~7 min for what a local merge-resolve on
+      # the SAME PR handles): bounded conflict-rework, budget exhausted →
       # honest escalation (tier 3). `:unknown` stays a straight escalation (we don't guess).
       :conflict ->
         conflict_rework(pr_number, head, reason, ctx)
@@ -287,22 +287,18 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # Tier-0 conflict handling (deterministic, config-gated, OFF by default). A diagnosis routes the
-  # conflict BEFORE any producer round: an all-semantic one goes to the CHIEF's exception pass (the
-  # producer is skipped on evidence — the engine has proven there is nothing shallow to fix — and
-  # the chief is not, because composing two jury-approved intentions is its case); an all-trivial
-  # one is auto-resolved and pushed by the runtime (the jury re-judges the new head, so a wrong
-  # resolution is caught downstream); anything else — and any probe/apply failure — falls through to
-  # the legacy producer conflict-rework. The gain only ever SHORTENS a path, never breaks one.
-  # Enabled by `:lcars_fleet, :pilot_conflict_diagnosis?`; diagnoser/applier are injectable seams
-  # (`:conflict_diagnoser` / `:conflict_applier`).
+  # Traitement de conflit deterministe, gate par config et ETEINT par defaut : le diagnostic route
+  # AVANT toute ronde de producteur. Un conflit tout-semantique va a la passe d'exception — le
+  # producteur est saute SUR PREUVE, le moteur ayant etabli qu'il n'y a rien de superficiel a
+  # reparer ; un tout-trivial est resolu par le runtime, le jury rejugeant la tete neuve, donc une
+  # mauvaise resolution est rattrapee en aval ; tout le reste retombe sur la voie longue.
   #
-  # The ladder in one line: tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch (the
-  # @moduledoc defines it, `tier0_*` anchors it). Tier 0 may skip the PRODUCER on evidence; it has
-  # none about the CHIEF, and it used to skip it anyway — straight to a human.
-  # ONE numbering, and rungs are also named where the number alone would be read against another
-  # scale: an `L1..L4` variant offset by one used to sit in these comments, and a rung counted off
-  # by one routes to the wrong actor.
+  # ⚠ LE GAIN NE FAIT QUE RACCOURCIR UN CHEMIN, JAMAIS EN CASSER UN. Sauter le producteur se fait
+  # sur preuve ; il n'y en a AUCUNE sur l'echelon suivant, qu'il ne faut donc pas sauter — sans quoi
+  # on va droit a un humain.
+  #
+  # ⚠ UNE SEULE NUMEROTATION, ET LES ECHELONS SONT NOMMES : une variante decalee d'un cran a cohabite
+  # dans ces commentaires, et un echelon mal compte route vers le MAUVAIS acteur.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     if diagnosis_enabled?() do
       case tier0_conflict_route(pr_number, head, reason, ctx) do
@@ -349,9 +345,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   end
 
   # THE ENGINE'S REASONING REACHES A READER. `Fleet.Conflict` names the DecisionTrace its durable
-  # value — "the REFUSAL is documented as much as the acceptance" — and it was produced per hunk,
-  # carried by every Report, and dropped here: this router read `totals` and nothing else. The engine
-  # wrote a machine's worth of reasoning and published a count.
+  # value — "the REFUSAL is documented as much as the acceptance" — and it is produced per hunk and
+  # carried by every Report. Dropped here, with this router reading `totals` and nothing else, the
+  # engine writes a machine's worth of reasoning and publishes a count.
   #
   # Posted UNDER THE CHIEF's identity, while the resolution commit stays authored by the runtime
   # (`system_starfleet`, ForgeIdentity's single authority — A2). The two are different facts and both
@@ -425,13 +421,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   @doc false
   # PURE routing decision from the diagnosis totals (isolated so it is unit-testable).
   #
-  # `:chief`, NOT `:escalate` (2026-08-05). An all-semantic conflict used to go STRAIGHT to the arch
-  # — "rounds skipped" — jumping tiers 1 AND 2, the PRODUCER and the CHIEF, to immobilize a human.
-  # Skipping the producer is right and is the whole point of the deterministic pre-filter: the
+  # `:chief`, NOT `:escalate`. Sending an all-semantic conflict STRAIGHT to the arch — "rounds
+  # skipped" — jumps tiers 1 AND 2, the PRODUCER and the CHIEF, to immobilize a human. Skipping the
+  # producer is right and is the whole point of the deterministic pre-filter: the
   # engine has just proven there is nothing shallow to fix, so a producer round would burn a full
   # run to rediscover it.
   #
-  # Skipping the CHIEF was not. Composing two intentions that both passed their jury, on a branch
+  # Skipping the CHIEF is not. Composing two intentions that both passed their jury, on a branch
   # the outsider did not write, IS the chief's case — it is what the exception pass exists for. The
   # ladder is tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch, and tier 0 may skip the
   # PRODUCER on evidence; it has none about the CHIEF. The atom is renamed with the routing so the name cannot outlive the
@@ -506,21 +502,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
     name = Fleet.Layout.project_name(ctx.repo)
 
-    # One clause per face, and the THIRD one is a decision rather than the fall-through it used to
-    # be. A fleet PR's base is a face branch, so `nil` means a stacked PR based on a feature branch:
-    # it is resolved in the code worktree, which is right for a code-face stack and is the only
-    # answer available — the base alone does not say which face the branch it forks from lives on.
-    # Written out because as an `else` it also swallowed every future face.
-    # ⚠ CETTE ENUMERATION EN OUBLIAIT UNE, ET LA TROISIEME FACE EXISTE : `@face_branches` porte
-    # `code`, `workshop` et `ops`. Une PR basee sur `workshop` — precisement le cas « PR de face
-    # doc » — tombait donc sur un `case` sans clause : CaseClauseError, sur le chemin de
-    # remediation d'un conflit. Le commentaire ci-dessus disait « written out because as an `else`
-    # it also swallowed every future face » : l'intention etait juste, l'inventaire incomplet, et
-    # c'est exactement ce qu'une enumeration ecrite a la main coute.
+    # ⚠ ON DELEGUE A L'AUTORITE DES FACES PLUTOT QUE DE LES ENUMERER ICI. Une enumeration ecrite a
+    # la main en oublie une : la PR basee sur cette face-la tombe sur un `case` sans clause —
+    # CaseClauseError, sur le chemin de remediation d'un conflit. L'intention est juste,
+    # l'inventaire incomplet, et c'est exactement ce qu'une liste tenue a la main coute.
     #
-    # `Fleet.Layout.face_root/1` EST l'autorite, et son `@doc` le dit : « a consumer that knows
-    # which face it is on must never re-derive which directory that means ». On delegue ; la seule
-    # decision qui reste ici est celle du `nil`, qui n'est PAS une face et garde sa raison ecrite.
+    # Le `nil` reste une decision ecrite : ce n'est PAS une face, c'est une PR empilee sur une
+    # branche de travail, resolue dans le worktree de code — la seule reponse disponible, la base ne
+    # disant pas sur quelle face vit la branche dont elle fourche.
     dir =
       case Fleet.Layout.face_of(base) do
         nil -> Path.join(Fleet.Layout.code_root(), name)
@@ -538,12 +527,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Producer conflict-rework budget exhausted → tier-2: give the OUTSIDER a single inference pass
   # before immobilizing a human (tier-3). The gate lives INSIDE `exception_stage` (its own flag,
-  # A1) — this call site no longer decides anything.
+  # A1) — this call site decides nothing.
   #
-  # A1 — THIS READ THE GITWAND SWITCH, AND THAT WAS AN OWNERSHIP BUG: `pilot_conflict_diagnosis?`
-  # is the ADMIN's kill-switch for an engine of external origin (tier 0), while the chief pass is
-  # a rung of the FLEET's own escalation ladder. One switch, two owners — the admin's GitWand
-  # choice silently removed a rung that has nothing to do with GitWand (the pass consumes neither
+  # A1 — ET SURTOUT PAS LE COMMUTATEUR GITWAND, qui serait un defaut de propriete :
+  # `pilot_conflict_diagnosis?` est le coupe-circuit de l'ADMIN pour un moteur d'origine externe
+  # (tier 0), tandis que la passe du chief est un barreau de l'echelle d'escalade de la FLOTTE. Un
+  # commutateur, deux proprietaires — le choix GitWand de l'admin retirerait en silence un barreau
+  # qui n'a rien a voir avec GitWand (la passe ne consomme ni
   # probe nor applier: it counts forge markers and dispatches a pod).
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     exception_stage(pr_number, head, reason, ctx, producer_rounds)
@@ -581,11 +571,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
         # card) or when the head is not a fleet branch. That skip is already LOUD — an unresolvable
         # role goes on the incident rail and its recurrence opens a sysadmin issue — but loud is not
         # the same as handled: the conflict itself would then sit on the PR with nobody left to look
-        # at it, because the tier that was supposed to try LAST could not run at all.
+        # at it, because the tier meant to try LAST could not run at all.
         #
-        # Pre-existing on the producer-exhausted path, and tier-0 would have extended it to the
-        # all-semantic one. A rung that cannot be climbed hands over to the next, it does not end
-        # the ladder.
+        # A rung that cannot be climbed hands over to the next, it does not end the ladder.
         case dispatch_exception_rework(pr_number, head, ctx) do
           {:skipped, why} ->
             Logger.warning(
@@ -624,11 +612,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # has no brief of its own to resume, and being told "ton brief est INCHANGÉ" invited it to guess at
   # an intention it does not hold. Same mechanics, addressed to who is actually there.
   #
-  # MARKER RENAMED `[conflict-gatekeeper:pr-N` → `[conflict-chief:pr-N`. It is FORGE-VISIBLE and
-  # load-bearing (`count_comments_marked` reads it to bound the pass to one), so a rename is a
-  # migration: a PR already carrying the old marker would count 0 and get a SECOND pass. Safe here
-  # because this tier has never fired in production (user, 2026-08-04) — stated as the reason, not
-  # measured by me. Had it fired, the correct move was to count both prefixes for one cycle.
+  # ⚠ CE MARQUEUR EST FORGE-VISIBLE ET PORTANT (`count_comments_marked` le lit pour borner la passe
+  # a une), donc le RENOMMER est une migration : une PR portant deja l'ancien compterait 0 et
+  # obtiendrait une SECONDE passe. Le renommage `[conflict-gatekeeper:pr-N` -> `[conflict-chief:pr-N`
+  # a ete fait sans migration parce que ce tier n'a jamais tire en production (⚖ user) — enonce
+  # comme la raison, pas mesure ici. Le geste sur un tier qui tire : compter les deux prefixes
+  # pendant un cycle.
   defp dispatch_exception_rework(pr_number, head, %Ctx{} = ctx) do
     signature = "[conflict-chief:pr-#{pr_number}:round-1]"
 
@@ -682,7 +671,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     )
   end
 
-  # Tier 1 of the conflict model (user go 2026-07-19): the producer resolves ON ITS PR — it has
+  # Tier 1 of the conflict model (⚖ user): the producer resolves ON ITS PR — it has
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
@@ -898,32 +887,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # the rest on the next tick). It's the "re-request a judgment" button doing its job. No
   # re-requested = policy block not mechanically liftable (signed commits required, or — if ever enabled —
   # CI not green, to be gated by a status read before escalating) → honest escalation rather than a silent wedge.
-  # A policy block has TWO causes and they do not go to the same place. This function used to know
-  # only one — the human re-request — so anything else fell through to `{:policy, :no_rerequest}`,
-  # summoning a human with a reason that named the absence of a re-request rather than the actual
-  # cause. Since the CI became a REQUIRED check (`protect_main`), the other cause is the common one.
+  # ⚠ UN BLOCAGE POLICY A DEUX CAUSES, ET ELLES NE VONT PAS AU MEME ENDROIT. N'en connaitre qu'une —
+  # la re-demande humaine — fait tomber l'autre dans un fourre-tout qui convoque un humain en nommant
+  # l'ABSENCE de re-demande plutot que la cause reelle.
   #
-  # A red CI is not a human matter and it does NOT re-converge: nothing changes until the producer
-  # pushes a new commit. So it routes to the producer, exactly like a REQUEST_CHANGES round, and the
-  # rework budget bounds it — a CI that stays red does not loop forever, it ends up escalating with
-  # the rounds spent, which is a true statement about what was tried.
-  # DEUX CICATRICES OPPOSEES SUR LA MEME LIGNE, et la carte n'etait la bonne reponse a aucune.
+  # Une CI rouge n'est pas une affaire humaine et NE RE-CONVERGE PAS : rien ne change tant que le
+  # producteur ne pousse pas. Elle route donc vers lui, comme une ronde de revue, et le budget de
+  # rework la borne — une CI qui reste rouge finit par escalader AVEC les rondes depensees, ce qui
+  # est un enonce vrai de ce qui a ete tente.
   #
-  # 2026-08-10 (banc) : carte `ci: ignore` + deploiement SANS runner → le ticket prenait `wait/ci`
-  # pour toujours. Le court-circuit "carte ignore → ne lis pas la CI" a ete pose ici pour ca.
-  # 2026-08-18 (banc, premier conflit reel de bout en bout) : le meme court-circuit a MAL ESCALADE
-  # un merge parfaitement sain. La protection de main exige le status `CI / *` (plancher pose a
-  # l'onboard, INDEPENDANT de la carte) ; le seal a tente 3 s apres la livraison de la resolution ;
-  # Gitea a rendu 405 « Not all required status checks successful » — un etat TRANSITOIRE (le
-  # runner n'avait pas encore couru sur le sha neuf) — et ce chemin, aveugle a la CI par la carte,
-  # l'a classe :policy et a immobilise un humain pour une attente de 30 secondes.
+  # ⚠ ET CE SITE LIT TOUJOURS L'ETAT REEL DE LA CI, MEME QUAND LA CARTE DIT DE L'IGNORER : la carte
+  # gouverne le JURY — convoquer ou non des juges — tandis que la protection de branche est un FAIT
+  # de la forge, que la carte ne peut pas abroger. Court-circuiter la lecture sur la foi de la carte
+  # classe en `:policy` un refus TRANSITOIRE — le runner n'a pas encore couru sur le sha neuf — et
+  # immobilise un humain pour une attente de trente secondes.
   #
-  # La carte gouverne le JURY (convoquer ou pas des juges sur la CI) ; la protection est un FAIT de
-  # la forge, que la carte ne peut pas abroger. Ce site lit donc TOUJOURS l'etat reel — et le
-  # mecanisme du hang de 08-10 n'existe plus dans ce lecteur : `:none` (aucun runner n'a jamais
-  # repondu) tombe dans le catch-all → re-request, exactement le chemin que le court-circuit
-  # donnait. Seuls `:pending` (un rail COURT — on retick) et `:failure` (rouge sur la tete — le
-  # producteur repare : un merge protege ne passera pas) changent, et c'est le but.
+  # Le cas « aucun runner n'a jamais repondu » tombe dans le catch-all et re-demande, donc rien ne
+  # se bloque : seuls un rail EN COURS (on retick) et un rouge sur la tete (le producteur repare)
+  # changent de traitement.
   defp reconverge_policy(pr_number, head, %Ctx{} = ctx) do
     reconverge_on_ci(pr_number, head, ctx)
   end

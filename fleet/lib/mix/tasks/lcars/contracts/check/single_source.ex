@@ -58,13 +58,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # FIFTH MIRROR, and it is the OTHER half of that security bound. The converger refuses any
       # SHA that is not the head of the branch IT names; the root executor ASKS the forge for the
       # head of the branch IT names. The bound only holds while both names agree — and until
-      # 2026-08-27 this wall watched the second and not the first. Measured: renaming the literal
+      # Watching the second and not the first is the easy miss. Measured: renaming the literal
       # here alone left the check green, with the only root process on this machine converging on
       # a branch nobody else writes to.
       "services/privileged-executor.py"
     ]
 
-    # ⚠ SCOPE IS DECIDED PER MIRROR, AND IT USED TO BE DECIDED BY ONE TREE FOR ALL FIVE. The guard
+    # ⚠ SCOPE IS DECIDED PER MIRROR, NEVER BY ONE TREE FOR ALL FIVE. The guard
     # asked `is deploy/ here?` and, on a miss, declared the whole check "NOT CHECKED" — including
     # `services/` and `bin/`, which the image's build stage DOES carry (it excludes only `deploy`,
     # `git-hooks`, `system-prompt`). So in the artifact where this gate runs most often, three
@@ -90,7 +90,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
           # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
           # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
           # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure du
-          # 2026-08-27, sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
+          # Mesure sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
           case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
             [_, name] -> name
             _ -> nil
@@ -380,7 +380,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the box's master-token path"}
     ]
 
-    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme desormais sa
+    # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
     # racine UNE fois (`PROV_ROOT`) et compose le reste ; comparer `$PROV_ROOT/var/tokens` au
     # litteral des quatre autres porteurs rendrait « 2 chemins pour un repertoire » sur un corpus
     # parfaitement d'accord — et la seule facon de faire taire ce faux rouge serait de RECOPIER le
@@ -527,7 +527,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   `externals`; this name is in none of those lists, so the account that owns the org was created
   from a literal outside every lock.
 
-  ⚖ user, 2026-08-27: the BEAM declaration prevails. The reason is structural, not a preference —
+  ⚖ user : the BEAM declaration prevails. The reason is structural, not a preference —
   the account's IDENTITY derives from this literal (`@system_email`, `allowed_emails/2`,
   `system_identity/0`) and cannot be moved without moving what the fleet signs as.
 
@@ -574,15 +574,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       # Chaque miroir est ancre sur SON GESTE, pas sur la simple presence du nom : un commentaire,
       # une phrase de doc ou un nom de fichier voisin ne doivent pas pouvoir satisfaire ce mur.
-      # `MUR 4 bis` d'`adminite_walls` a coute exactement cette lecon le meme jour — il etait
-      # satisfait par `lcars-authority-ask`, puis par un commentaire.
+      # `MUR 4 bis` d'`adminite_walls` porte exactement la meme lecon : il se laisse satisfaire par
+      # `lcars-authority-ask`, puis par un commentaire.
       mirrors = [
         # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
         # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
-        # ⚠ CE MIROIR A CHANGE DE NATURE LE JOUR MEME OU IL A ETE ECRIT, et c'est un progres :
-        # `forge.tf` ne porte plus le litteral, il RECOIT la valeur par `roles.auto.tfvars.json`,
-        # projetee depuis l'autorite. Ce qui se garde ici n'est donc plus « la copie s'accorde »
-        # mais « il n'y a PLUS de copie » — un `default =` reintroduit rendrait a tofu le pouvoir
+        # ⚠ CE MIROIR NE GARDE PAS UNE COPIE, IL GARDE SON ABSENCE. `forge.tf` ne porte pas le
+        # litteral : il RECOIT la valeur par `roles.auto.tfvars.json`, projetee depuis l'autorite.
+        # Ce qui se garde ici n'est donc pas « la copie s'accorde » mais « il n'y a PAS de copie » —
+        # un `default =` rendrait a tofu le pouvoir
         # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
         # ce que la suppression a ferme.
         {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
@@ -666,15 +666,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   end
 
   @doc """
-  The platform root is declared ONCE, in `Fleet.Layout`, and 121 literals in the corpus repeat it.
-  This makes them agree.
+  The platform root is declared ONCE, in `Fleet.Layout`, and the corpus repeats that literal in
+  scores of places. This makes them agree.
 
   ## Why an allow-list of OTHER roots, and not a list of mirrors
 
-  Its four siblings name their mirrors. Here the mirrors are 22 files and growing — a hand-kept
-  list of that size is the defect, not the guard: it goes stale, and a stale list is a wall that
-  is green about files it no longer holds. So the check is INVERTED. It does not ask "do these 22
-  files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
+  Its four siblings name their mirrors. Here the mirrors are dozens of files and growing — a
+  hand-kept list of that size is the defect, not the guard: it goes stale, and a stale list is a
+  wall that is green about files it no longer holds. So the check is INVERTED. It does not ask "do
+  these files carry the root"; it asks **"is there any OTHER LCARS-shaped root under `/opt`?"**
 
   `/opt` is not ours alone — the image also carries `/opt/homebrew`, `/opt/elixir-*`, `/opt/node-*`,
   `/opt/bin`, `/opt/skills`, `/opt/token-saver` and the vendor launcher. Those are DECLARED below,
@@ -682,10 +682,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   `no_check_passes_on_nothing`'s exemption list, and for the same reason: matching on a pattern
   would let any new root earn its exemption by looking plausible.
 
-  What this catches, and nothing else did: `@platform_root` moves, the 22 literals do not, and the
-  set of roots in use no longer contains the authority's value. Measured 2026-08-28 as part of
-  redoing §21 from a derived sweep — `/opt/lcars` is the single most copied fact of the corpus
-  (121 occurrences, 22 files) and it had no lock at all.
+  What this catches, and nothing else does: `@platform_root` moves, the literals do not, and the set
+  of roots in use stops containing the authority's value. Measured on a derived sweep — `/opt/lcars`
+  is the single most copied fact of the corpus, and the one a hand-kept mirror list would cover
+  worst.
   """
   @spec check_platform_root_single_source(String.t()) :: Support.result()
   def check_platform_root_single_source(root) do
@@ -742,11 +742,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       versionnee = ~r{^/opt/\.?[a-z]+-([0-9]|$)}
       pas_une_racine = ~r|^/opt/\.?[a-z0-9][a-z0-9_-]*$|
 
-      # ⚠ LE REJET PORTE SUR LE CHEMIN RELATIF, ET C'EST UNE CORRECTION, PAS UN GOUT. Applique au chemin
-      # ABSOLU, ce motif rejetait TOUT le corpus des que le depot vivait sous un dossier nomme `tmp`,
-      # `deps` ou `_build` — mesure le 2026-08-31 : 4328 fichiers vus, 0 retenus, depuis un worktree
-      # pose sous `/tmp/`. Le check ne mentait pas pour autant (sa garde d'instrument rendait
-      # « INSTRUMENT BROKEN — measured nothing » plutot qu'un vert creux), mais il ne mesurait rien,
+      # ⚠ LE REJET PORTE SUR LE CHEMIN RELATIF, ET CE N'EST PAS UN GOUT. Applique au chemin ABSOLU,
+      # ce motif rejette TOUT le corpus des que le depot vit sous un dossier nomme `tmp`, `deps` ou
+      # `_build` — mesure : 4328 fichiers vus, 0 retenus, depuis un worktree pose sous `/tmp/`. Le
+      # check ne ment pas pour autant (sa garde d'instrument rend « INSTRUMENT BROKEN — measured
+      # nothing » plutot qu'un vert creux), mais il ne mesure rien,
       # et l'emplacement du clone n'a pas a decider de ce qu'un mur regarde.
       {racines, fichiers} =
         corpus_files(root)
@@ -816,7 +816,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   `/run/lcars` carries the sockets of the authority, the privileged executor, MCP, egress and the
   consoles — the whole surface by which a pod talks to the rest of the machine — plus the boot
   markers (`/run/lcars-provision.rc`, `/run/lcars-humans.rc`) and the converger's refusal lock.
-  The derived sweep of 2026-08-28 ranked it SECOND of the corpus, with no source at all. The
+  A derived sweep ranks it SECOND of the corpus, with no source at all. The
   authority (`@runtime_root`) was created that day; this check is what makes it true.
 
   ## Two shapes, one rule
@@ -880,7 +880,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       # ⚠ UN PREFIXE N'EST PAS UNE APPARTENANCE, ET LA MUTATION L'A MONTRE. `String.starts_with?`
       # seul laisse passer `/run/lcarsx/...` : il commence bien par `/run/lcars`. C'est la TROISIEME
-      # coincidence de sous-chaine de la journee — `MUR 4 bis` etait satisfait par
+      # coincidence de sous-chaine du corpus — `MUR 4 bis` se laisse satisfaire par
       # `lcars-authority-ask`, un nom de binaire. Le prefixe doit etre suivi d'une FRONTIERE : `/`
       # pour l'arbre, `-` ou `.` pour les fichiers freres (`/run/lcars-provision.rc`), ou la fin.
       sous_la_racine? = fn v ->
@@ -1016,8 +1016,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
                   |> Enum.flat_map(&Regex.scan(~r|/home/projects[A-Za-z0-9_.-]*|, &1))
                   |> Enum.map(&hd/1)
                   # ⚠ LE POINT FINAL D'UNE PHRASE N'EST PAS UNE RACINE. « … sous /home/projects. »
-                  # rendait `/home/projects.`, une quatrieme face inexistante. Deuxieme fois qu'une
-                  # ponctuation pollue un extracteur aujourd'hui — `/opt/...` etait la premiere.
+                  # rend `/home/projects.`, une quatrieme face inexistante. La ponctuation pollue
+                  # un extracteur des qu'on la laisse passer — `/opt/...` porte le meme piege.
                   |> Enum.map(&Regex.replace(~r/[.\-]+$/, &1, ""))
                   |> MapSet.new()
                   |> MapSet.union(acc)
@@ -1169,8 +1169,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   #
   # Les huit murs de ce module gardent un fait recopie D'UN LANGAGE A L'AUTRE, parce que le shell ne
   # peut pas appeler le BEAM. Entre deux modules Elixir, rien ne regardait : on suppose qu'ils
-  # s'appellent. Mesure du 2026-09-02 : DEUX clefs etaient lues a deux endroits avec deux replis
-  # ecrits separement.
+  # s'appellent. A la pose : DEUX clefs etaient lues a deux endroits avec deux replis ecrits
+  # separement.
   #
   #   · `:mcp_pod_resolver`  — `Delegation.default_pod_resolver/1` et `Probe.default_resolver/1`,
   #     corps identiques au nom pres, alors que le commentaire de `Probe` exigeait DEJA le contraire :
@@ -1282,8 +1282,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   # LA FORME D'UNE REPONSE DE LA FORGE EST CONNUE D'UN SEUL DOMAINE.
   #
-  # `Fleet.Forge.Client` rend les reponses Gitea telles quelles. Mesure du 2026-09-02 : quatorze
-  # modules de `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string. La forme
+  # `Fleet.Forge.Client` rend les reponses Gitea telles quelles. A la pose : quatorze modules de
+  # `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string. La forme
   # de l'API d'un TIERS etait donc connue hors du domaine qui la parle — une montee de version se
   # traitait au `grep`, et rien ne repondait a « de quels champs dependons-nous ».
   #

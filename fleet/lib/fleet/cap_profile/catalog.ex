@@ -2,10 +2,9 @@ defmodule Fleet.CapProfile.Catalog do
   @moduledoc """
   Resolution + reading of the cap-profile catalogue YAML files.
 
-  Cluster extracted from `Fleet.CapProfile`. SINGLE concern: the FS FRONT of the
-  domain (directory scan, YAML decode, resolving a role/modop into a raw map
-  pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and
-  `read_modops/1`; it never touches the FS itself.
+  SINGLE concern: the FS FRONT of the domain (directory scan, YAML decode, resolving a role/modop
+  into a raw map pre-`to_struct`). The `load`/`compose` core calls `read_role/1` and `read_modops/1`
+  and never touches the FS itself.
 
   ## Security invariant — resolution by `metadata.name`, never by filename
 
@@ -78,9 +77,9 @@ defmodule Fleet.CapProfile.Catalog do
   @doc """
   Le meme role, lu dans l'image d'un catalogue NOMME — la porte per-catalogue.
 
-  `nil` garde le comportement du jour : l'image du catalogue LIVRE. C'est ce que veut un
-  appelant sans projet en main ; un appelant qui en a un passe la racine de SON catalogue, parce
-  qu'un role n'existe que dans le catalogue qui le declare.
+  `nil` resout dans l'image du catalogue LIVRE — ce que veut un appelant sans projet en main. Un
+  appelant qui en a un passe la racine de SON catalogue, parce qu'un role n'existe que dans le
+  catalogue qui le declare.
   """
   @spec read_role(String.t(), Path.t() | nil) :: {:ok, map()} | {:error, term()}
   def read_role(role, root) do
@@ -112,15 +111,12 @@ defmodule Fleet.CapProfile.Catalog do
     if spawnable?(raw), do: {:ok, raw}, else: {:error, {:role_reserved, role}}
   end
 
-  # The disk regime reads the SAME SCOPE the image is built from, and the sentence below is the
-  # contract this fix re-establishes ONE LEVEL UP from where it was written. It read one root until
-  # the system catalogue existed (first divergence, fixed by reading the union); then the images
-  # became per-catalogue (2026-08-16) and the union became the NEW divergence: `read_role/2` honored
-  # `root` in the image branch and dropped it here, so a caller naming its catalogue got that
-  # catalogue's answer with an image and EVERY catalogue's answer without one. Latent while the two
-  # shipped catalogues declare disjoint role names; wrong the day two businesses both declare `dev`.
-  # Two regimes answering "does this role exist" differently is the defect; that they agree is the
-  # contract.
+  # THE DISK REGIME READS THE SAME SCOPE THE IMAGE IS BUILT FROM, and that agreement IS the
+  # contract: two regimes answering "does this role exist" differently is the defect. Honouring
+  # `root` in the image branch and dropping it here gives a caller naming its catalogue THAT
+  # catalogue's answer with an image and EVERY catalogue's answer without one — latent while the
+  # installed catalogues declare disjoint role names, wrong the day two businesses both declare
+  # `dev`.
   #
   # `disk_scope/1` mirrors `published_for/1` exactly: a named root reads ITS tree_scope (own
   # cap-profiles + system, the same pair its image is published from), nil reads the BUNDLED
@@ -178,7 +174,8 @@ defmodule Fleet.CapProfile.Catalog do
 
   # Filter on the ENTRIES ({name, raw}) BEFORE projecting the keys — the predicate reads the raw's
   # kind, `Map.keys/1` would hand it strings. An unfiltered list feeds a ReservedSeat to every
-  # enumerator (CanonProof, PermanentBoot) → the seat has no SP draft → fleet.boot_failed. Filter
+  # enumerator (`Spawner.CanonProof`, `PermanentBoot`) → the seat has no SP draft →
+  # fleet.boot_failed. Filter
   # BEFORE enumerate (BL-6-45).
   defp spawnable_names(index) do
     index
@@ -237,13 +234,12 @@ defmodule Fleet.CapProfile.Catalog do
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}
   def forge_roster do
     # THE catalogue in hand plus the system half — never the union of every installed catalogue.
-    # The zero-arity's one production caller is `Fleet.Roster.tfvars/1`, which names its target
-    # through the big wheel (`:catalogue_root`) before calling: `disk_scope(nil)` resolves to that
-    # root + system, which is exactly the split tfvars derives accounts from. On the UNION, a box
-    # with a second catalogue installed would have folded B's roles into A's roster at install
-    # time — and the login projection prefixes with the TARGET org, so the recipe would have minted
-    # `A_<role-of-B>` accounts that belong to nobody. Found by pulling the audit's search/1 thread;
-    # latent only because the install's first pass runs before the cache holds a neighbour.
+    # The zero-arity's one production caller names its target through the big wheel
+    # (`:catalogue_root`) before calling, so `disk_scope(nil)` resolves to that root + system, which
+    # is exactly the split its accounts are derived from. On the UNION, a box with a second
+    # catalogue installed folds B's roles into A's roster at install time — and the login projection
+    # prefixes with the TARGET org, so the recipe mints `A_<role-of-B>` accounts that belong to
+    # nobody. Latent only because the install's first pass runs before the cache holds a neighbour.
     with {:ok, index} <- snapshot_roles(disk_scope(nil)), do: {:ok, roster_of(index)}
   end
 
@@ -337,7 +333,7 @@ defmodule Fleet.CapProfile.Catalog do
   Les memes overlays, dans l'image du catalogue NOMME — `nil` = celui qui est livre.
 
   Un modop appartient au catalogue qui le livre : celui d'un role du second catalogue n'existe pas
-  dans l'image du premier, et le chercher la rendait `:modop_not_found` sur un fichier bien present.
+  dans l'image du premier, et l'y chercher rend `:modop_not_found` SUR UN FICHIER BIEN PRESENT.
   """
   @spec read_modops([String.t()], Path.t() | nil) :: {:ok, [map()]} | {:error, term()}
   def read_modops(modop_set, root) when is_list(modop_set) do
@@ -366,8 +362,8 @@ defmodule Fleet.CapProfile.Catalog do
   defp read_modops_from_disk(modop_set, catalogue_root) do
     # Same scope as `read_role_from_disk/2`, same reason: a modop belongs to the catalogue that
     # ships it, and the mechanism ones live in the system half of the scope — which is why the
-    # scope is a PAIR (own + system) and never one root alone: reading only the business root made
-    # every hermetic test see a role whose default overlay had vanished. The name stays confined
+    # scope is a PAIR (own + system) and never one root alone: reading only the business root makes
+    # every hermetic test see a role whose default overlay has VANISHED. The name stays confined
     # under EACH root — trying a second one must not weaken what makes an untrusted name safe as a
     # path segment.
     scope = disk_scope(catalogue_root)
@@ -510,8 +506,8 @@ defmodule Fleet.CapProfile.Catalog do
   # Union of the search path's role indexes, in PRECEDENCE order — the first root that carries a
   # name wins, and the later one is not read.
   #
-  # It REFUSED a name held on both sides until 2026-08-10. Refusing made overriding impossible,
-  # which is the opposite of what a default catalogue is for: a business catalogue that ships its
+  # Refusing a name held on both sides would make overriding impossible, which is the opposite of
+  # what a default catalogue is for: a business catalogue that ships its
   # own `architect.yaml` means to replace the system's, and it should not have to declare it — the
   # child-theme rule, and the reason a search path costs nothing to extend.
   #

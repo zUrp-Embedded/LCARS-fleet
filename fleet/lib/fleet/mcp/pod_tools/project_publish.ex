@@ -1,6 +1,6 @@
 defmodule Fleet.MCP.PodTools.ProjectPublish do
   @moduledoc """
-  ASYNC worker behind the `project_publish` tool (phase 2 of chantier-publication-github).
+  ASYNC worker behind the `project_publish` tool.
 
   The tool call itself only ENQUEUES (a Task under `Fleet.MCP.PublishTaskSupervisor`) and returns
   `queued` — filter-repo rewrites the WHOLE history every run (O(history), ~minutes on a large repo),
@@ -116,8 +116,8 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
       end
     else
       # ⚠ ECHEC AVANT LE RAIL : `materialise_token/1` a pu creer `base` et y ecrire un SECRET. Le
-      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie. Ce
-      # n'etait pas necessaire avant ce chantier — aucun des maillons precedents n'ecrivait rien.
+      # `with` sort ici sans passer par le balayage ci-dessus, donc c'est ICI qu'on nettoie — un
+      # maillon qui ECRIT quelque chose doit nettoyer son propre chemin d'erreur.
       #
       # La clause est TOTALE (`other`), pas `{:error, _}`. Un `else` partiel leve un
       # `WithClauseError` sur toute forme non prevue : le maillon suivant deciderait ce que fait le
@@ -130,9 +130,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   # ─── LE JETON SE DEMANDE, ET IL FINIT QUAND MEME DANS UN FICHIER ──────────────────────────────
   #
-  # `env("FORGE_TOKEN_FILE")` rendait ici le chemin de `/opt/lcars/var/tokens/<compte>.gitea_token`, ouvert
-  # par le rail SOUS L'UID DU POD — donc sous celui de l'humain, a travers le groupe `fleet`, qui
-  # etait une projection de l'equipe `humans` refaite toutes les trente secondes.
+  # Lire `FORGE_TOKEN_FILE` rendrait ici le chemin d'un jeton du magasin, ouvert par le rail SOUS
+  # L'UID DU POD — donc sous celui de l'humain, a travers un groupe dont l'appartenance est une
+  # projection refaite periodiquement.
   #
   # ⚠ CE LECTEUR-CI N'EST PAS DE LA MEME CLASSE QUE LES DEUX AUTRES. `lcars publish run` est tape
   # par un humain qui voit le refus ; ici c'est un AGENT en vol, au milieu d'un workflow. Son echec
@@ -175,12 +175,11 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     end
   end
 
-  # NOBODY SWEPT, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail refuses
-  # a path that already exists. Phase 1 (`lcars approve`) has swept since day one — `trap 'rm -rf' EXIT`
-  # — and phase 2 never did. Every publish therefore left a COMPLETE rewritten clone of the project
-  # in the system temp dir, forever: the size of the repository, once per publication. The unique
-  # path per run was written to satisfy the rail's refusal, and the question "what becomes of the
-  # previous one?" was never asked.
+  # NOBODY ELSE SWEEPS, AND THE RAIL CANNOT: it is the caller who allocates `--work`, and the rail
+  # refuses a path that already exists (phase 1, `lcars approve`, sweeps its own with
+  # `trap 'rm -rf' EXIT`). Without this, every publish leaves a COMPLETE rewritten clone of the
+  # project in the system temp dir, forever: the size of the repository, once per publication. A
+  # unique path per run satisfies the rail's refusal and answers nothing about the previous one.
   #
   # A COMPOUND EFFECT WORTH NAMING: `System.unique_integer/1` is unique WITHIN a runtime instance and
   # restarts low after a reboot. With nothing ever swept, a path left by a pre-restart run can be
@@ -198,15 +197,15 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   def sweep_work(_work, @keep_work_on_exit), do: :kept_for_inspection
   def sweep_work(work, _code), do: File.rm_rf(work)
 
-  # The per-human binding is the source of truth for WHERE this project publishes (chantier §5bis).
+  # The per-human binding is the source of truth for WHERE this project publishes.
   #
-  # ⚠ `base` EST UNE CLE REQUISE, et elle ne l'etait pas. `rail_args/5` faisait
-  # `Map.get(b, "base") || "main"` : une liaison ecrite par une version anterieure d'`approve`,
-  # editee a la main ou tronquee publiait donc silencieusement contre `main`, quelle que soit la
-  # branche par defaut de la destination. Le defaut avait DEUX entrees independantes — l'ecriture
-  # (`approve` supposait `main`) et la lecture (ici). Fermer une seule des deux laissait le rail
-  # casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une liaison : elle est
-  # refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une supposition.
+  # ⚠ `base` EST UNE CLE REQUISE. Un `Map.get(b, "base") || "main"` ici ferait publier
+  # silencieusement contre `main` toute liaison ecrite par une version anterieure d'`approve`,
+  # editee a la main ou tronquee — quelle que soit la branche par defaut de la destination. Et le
+  # defaut a DEUX entrees independantes, l'ecriture (`approve`) et la lecture (ici) : en fermer une
+  # seule laisse le rail casse par l'autre. Une liaison qui ne dit pas ou elle publie n'est pas une
+  # liaison : elle est refusee par son nom (`{:binding_missing_keys, …}`), jamais completee par une
+  # supposition.
   defp read_binding(slug) do
     path = Path.join([System.user_home!(), ".lcars", "publish", "#{slug}.json"])
 
@@ -323,9 +322,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
   end
 
   # ⚠ REND `:ok` EXPLICITEMENT, ET C'EST CE QUI REND LE `@spec` DE `run/2` VRAI. `Bus.safe_emit/4`
-  # rend `:ok | {:error, _}` ; les branches de `run/2` se terminaient dessus, donc la fonction
-  # rendait ce type-la alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec
-  # absent : dialyzer l'a dit en `unmatched_return`, et le lecteur, lui, l'aurait cru.
+  # rend `:ok | {:error, _}` : une branche de `run/2` qui se termine dessus fait rendre CE type-la a
+  # la fonction, alors que son spec annonce `:: :ok`. Un spec qui ment est pire qu'un spec absent —
+  # dialyzer le dit en `unmatched_return`, le lecteur, lui, le croit.
   #
   # Le rejet est DELIBERE : le Bus est le rail lossy (doctrine D1), `run/2` rapporte son issue par
   # evenement et ne doit JAMAIS crasher — un raise ici ferait redemarrer la Task, donc re-publier.

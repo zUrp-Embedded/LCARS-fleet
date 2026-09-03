@@ -78,10 +78,9 @@ defmodule Fleet.Forge.Client.CI do
 
   # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
   #
-  # LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE. La regle de redaction jette la recette et
-  # l'horodatage d'une mesure faite sur NOTRE suite — ils ne survivent pas au correctif. Celle-ci
-  # porte sur un SYSTEME EXTERNE dont le comportement peut changer sans nous : sans sa version, la
-  # phrase n'est plus verifiable, et un lecteur ne peut pas savoir si elle vaut encore.
+  # ⚠ LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE : la mesure porte sur un SYSTEME EXTERNE
+  # dont le comportement peut changer sans nous. Sans sa version, la phrase n'est plus verifiable et
+  # un lecteur ne peut pas savoir si elle vaut encore.
   #
   # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
   # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
@@ -121,12 +120,11 @@ defmodule Fleet.Forge.Client.CI do
   # LES SIX ETATS QUE LE CONTRAT DECLARE, ET CE QU'ILS VALENT POUR UNE PORTE DE MERGE.
   #
   # `CommitStatus.status` : `pending | success | error | failure | warning | skipped` (enum du
-  # swagger de l'instance). Trois d'entre eux etaient traites par la clause fourre-tout « etat
-  # inconnu -> :pending », ce qui est juste pour un etat VRAIMENT inconnu et faux pour deux qui sont
-  # au contrat :
+  # swagger de l'instance). La clause fourre-tout « etat inconnu -> :pending » est juste pour un
+  # etat VRAIMENT inconnu et fausse pour deux qui sont AU CONTRAT :
   #
   #   * `skipped` — l'etape ne s'est PAS executee et ne devait pas : sa condition `if:` etait
-  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » faisait attendre la porte
+  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » fait attendre la porte
   #     45 min puis ESCALADER vers un humain — une fausse alarme sur un saut delibere, et une
   #     fausse alarme est ce qui apprend a un humain a ignorer le canal. Un contexte sans verdict ne
   #     VOTE PAS ; si tous sont sautes, il ne reste rien et `:none` (aucun statut) est la reponse
@@ -135,8 +133,8 @@ defmodule Fleet.Forge.Client.CI do
   #     etat dont aucun humain ne peut sortir autrement qu'en relancant ; elle ouvre donc la porte,
   #     comme un succes, parce que c'est ce qu'elle est : un succes qui commente.
   #
-  # Le fourre-tout reste, et il reste `:pending` : un etat que ce code ne connait pas ne doit pas
-  # elargir la porte. La difference est qu'il ne couvre plus que l'inconnu REEL.
+  # Le fourre-tout couvre l'inconnu REEL, et il rend `:pending` : un etat que ce code ne connait pas
+  # ne doit pas elargir la porte.
   def worst_ci_state(states) do
     voting = Enum.reject(states, &(&1 == "skipped"))
 

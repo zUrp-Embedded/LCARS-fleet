@@ -74,7 +74,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
       )
       when is_binary(title) and is_binary(brief) do
     # Delegating an issue is an ARCHITECT act: gate BEFORE any mechanics. The REPO comes from the
-    # gate (the pod's spawn binding — reorg 2026-07-19): the arch has "the project", it never names
+    # gate (the pod's spawn binding): the arch has "the project", it never names
     # a repo over the wire (no param to refuse = no leak that other repos exist). The arch then
     # posts the issue IN ITS OWN NAME: the caller's role-account token. `conforming_forge/0` guards the
     # DUCK-TYPED forge seam → a misconfigured seam is a typed error, not an obscure apply/3 crash (R2-05).
@@ -83,9 +83,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     # brief; the dispatch resolves it (BriefBuilder). Its forge publication rides the
     # dispatch-time ops push (F-15) — no separate publication rail.
     # WITHOUT a pointer, the brief is ALWAYS materialized as the authored doc (no size
-    # threshold — user arbitration 2026-07-18: the ticket stays a readable summary, the
+    # threshold — ⚖ user: the ticket stays a readable summary, the
     # committed doc carries the detail; degraded → inline legacy, never a wall).
-    # `supersedes` (2026-07-19, #5 zombie loop): the rework gesture is ONE act with BOTH halves —
+    # `supersedes` — the rework gesture is ONE act with BOTH halves:
     # create the corrected ticket AND retire the replaced one (SYSTEM-side: comment + close).
     # Without the second half, the old ticket stays dispatchable and loops (scoper re-reviews
     # the same stale brief every time the arch answers its escalation).
@@ -242,14 +242,14 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
       pr = issue_pr_status(forge, repo, number)
 
-      # Axiom (reorg 2026-07-19): no "repo" in the result — the arch has "the project".
-      # One meaning per shape (2026-07-19): no polysemous null — `title`/`pr` are ABSENT
+      # Axiom: no "repo" in the result — the arch has "the project".
+      # One meaning per shape: no polysemous null — `title`/`pr` are ABSENT
       # when there is nothing true to say, never null (cf. put_pr/2).
       # THE SIGNPOST TRAVELS IN THE ANSWER, not only in the catalogue read once at boot. Measured
       # on the bench: an architect complained that this status carried no timestamp, WITHOUT
       # inventorying its own toolbox — while `issue_get`'s description names this tool by name to
-      # orient the choice. That is the exact twin of the producer bias corrected the same night
-      # (delivering costs less than refusing): complaining costs less than looking.
+      # orient the choice. Same bias as the producer's — delivering costs less than refusing —
+      # here: complaining costs less than looking.
       #
       # So the pointer arrives where the agent actually looks — inside what it just received.
       # Same doctrine as the CI fact riding into the judge's brief: the information goes to the
@@ -421,17 +421,17 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Les deux relectures
-  # rendaient `:none` dans les deux cas : marqueur absent d'un tableau LU, et tableau ILLISIBLE. La
-  # creation a lieu dans les deux cas — c'est le bon arbitrage, poster bat perdre la reponse —, mais
-  # le retour MCP etait identique, donc l'agent ne pouvait pas savoir que son doublon etait
-  # possible. Or c'est lui qui reessaie : la relecture echoue precisement quand la forge va mal,
-  # c'est-a-dire au moment ou il va rejouer l'appel.
+  # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Rendre `:none` pour les
+  # deux — marqueur absent d'un tableau LU, et tableau ILLISIBLE — laisse la creation avoir lieu dans
+  # les deux cas, ce qui est le bon arbitrage (poster bat perdre la reponse), mais rend le retour MCP
+  # identique : l'agent ne peut alors pas savoir que son doublon etait possible. Or c'est lui qui
+  # reessaie, et la relecture echoue precisement quand la forge va mal — au moment ou il va rejouer
+  # l'appel.
   #
   # Le projet interdit « never two live tickets for one brick » (`pod_tools.ex`) et le marqueur
   # existe pour ca. On ne refuse pas la creation pour autant : on la NOMME. Une reutilisation porte
   # `"idempotent" => true` ; une creation dont la deduplication n'a pas pu etre verifiee porte
-  # desormais `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
+  # `"dedup_unverified"`, avec la raison. Present = doute, absent = mesure.
   defp with_dedup_unverified(result, {:unverified, why}),
     do: Map.put(result, "dedup_unverified", inspect(why))
 
@@ -491,7 +491,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
               _ =
                 forge.add_label(repo, number, Fleet.Labels.type_for_destination(destination), [])
 
-              # Axiom (reorg 2026-07-19): the repo is NEVER named back to the arch — it has "the
+              # Axiom: the repo is NEVER named back to the arch — it has "the
               # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
               # association instead of presuming it (protocol-carried correlation, not memory).
               {:ok,
@@ -786,35 +786,24 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_supersedes(body, n),
     do: body <> "\n\n---\nRemplace : ##{n} (supersede — l'ancien ticket est retiré par la fleet)"
 
-  # Retry-stable marker in the raw, non-rendered issue body.
-  # CE MARQUEUR EST UN IDENTIFIANT DURABLE, ET C'EST CE QUI LE REND DELICAT. Il n'est pas calcule
-  # puis jete : il est ECRIT DANS LE CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR
-  # — potentiellement apres une montee d'OTP. Sa stabilite depend donc de
-  # `:erlang.term_to_binary/1`, c'est-a-dire du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
-  # l'implementation, hors du depot. Aucun test d'ici ne peut surveiller cette propriete — il
+  # ⚠ CE MARQUEUR EST UN IDENTIFIANT DURABLE : il n'est pas calcule puis jete, il est ECRIT DANS LE
+  # CORPS D'UN TICKET, sur la forge, et relu par un noeud ULTERIEUR — potentiellement apres une
+  # montee d'OTP. Sa stabilite depend donc du FORMAT EXTERNE DE L'ERLANG : versionne, decide par
+  # l'implementation, hors de ce depot. AUCUN test d'ici ne peut surveiller cette propriete — il
   # faudrait deux executions sur deux VM.
   #
-  # ⚠ LE DECLENCHEUR ANNONCE PAR L'AUDIT (« ordre interne d'une map ») EST MESURE FAUX SUR CET OTP :
-  # `term_to_binary` rend le MEME binaire pour `%{b: 1, a: 2}` et `%{a: 2, b: 1}` — cles atomes ou
-  # binaires, petites maps comme grandes (40 cles). Et il ne pourrait pas s'appliquer ici de toute
-  # facon : aucun champ hache n'est une map (`title`/`brief` binaires, `summary` binaire|nil,
-  # `supersedes` entier|nil, `brief_pointer` `{ref, sha}`|nil, `lot` binaire|nil).
-  #
-  # ⚠ UN ENCODEUR CANONIQUE EXPLICITE A ETE ECRIT ICI, PUIS ANNULE. Il rendait chaque champ en
-  # `TAG <> TAILLE <> ":" <> charge` pour que l'invariant vive dans ce module au lieu d'etre emprunte
-  # a un format tiers. MESURE PAR MUTATION : il n'achete AUCUNE propriete observable que
-  # `term_to_binary` n'ait deja sur cet OTP — desambiguisation binaire/entier, decoupage des champs,
-  # `nil` distinct de `""`, ordre des maps : les cinq tests ecrits pour lui restaient VERTS avec
-  # l'ancien encodeur. Et il n'etait pas gratuit : changer l'entree du digest ORPHELINE les marqueurs
-  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
-  #
   # LA LIGNE A RELIRE : si la flotte change de version MAJEURE d'OTP, verifier que ce digest est
-  # stable avant de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
+  # stable AVANT de deployer, ou basculer sur un encodage explicite en acceptant la fenetre d'un
   # acte. C'est le seul evenement qui rend le defaut reel.
   #
-  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee par `String.contains?` dans les
-  # issues OUVERTES d'UN depot — quelques milliers de marqueurs au plus, soit une collision de
-  # l'ordre de 1e-11. L'elargir couterait la lisibilite du corps de ticket pour le mauvais risque.
+  # ⚠ ET NE PAS REECRIRE UN ENCODEUR CANONIQUE ICI : mesure par mutation, il n'achete AUCUNE
+  # propriete observable de plus — les temoins ecrits pour lui restent verts avec l'encodage
+  # d'origine. Il n'est pas gratuit non plus : changer l'entree du digest ORPHELINE les marqueurs
+  # deja poses sur une forge, donc un retry qui traverse le deploiement cree une seconde fois.
+  #
+  # ⚠ TRONCATURE A 64 BITS, assumee : la signature est cherchee dans les issues OUVERTES d'UN depot
+  # — quelques milliers de marqueurs au plus. L'elargir couterait la lisibilite du corps de ticket
+  # pour le mauvais risque.
   defp op_marker(title, brief, summary, supersedes, brief_pointer, lot, criteria) do
     sig =
       :crypto.hash(
