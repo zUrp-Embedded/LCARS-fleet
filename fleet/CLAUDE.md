@@ -1,122 +1,185 @@
-# CLAUDE.md
+# CLAUDE.md — `fleet/`, le runtime
 
 **Date** : 2026-05-26
-**Dernière révision** : 2026-08-19 (chantier admiral : domaine `Fleet.Starfleet` renommé `Fleet.Admiral` (knobs `admiral_*`), profil `admiral` hors sandbox par geste nommé, seam `:project_incident_rail` remboursé (BL-6-114), `:coord_backend` mort avec la brouette — les passages qui affirmaient l'ancien état sont corrigés ; règle de langue 2026-08-10 et migration single-app 2026-07-12 toujours en vigueur)
-**Statut** : guide runtime v2.
-**Référencé par** : —
+**Dernière révision** : 2026-09-04
+**Statut** : guide d'entrée pour un agent qui touche `fleet/`. Chargé par Claude Code au premier
+fichier lu sous ce dossier, pas à l'ouverture du dépôt.
+**Référencé par** : `lib/fleet/README.md`
 
-Ce fichier oriente un agent (Claude Code) dans ce dépôt : où vivent les choses, les invariants à ne pas casser, les conventions. Il ne recopie PAS ce qui a une source de vérité ailleurs (env vars, contrats de module) — il y pointe.
+Ce fichier dit où sont les choses, ce que le gate tient, et ce qu'il ne tient pas. Il ne recopie
+aucun contrat : le contrat d'un module est son `@moduledoc`, celui d'un domaine est sa façade
+`Fleet.<Dom>` plus sa carte `lib/fleet/<dom>/README.md`.
 
-## Project
+## Ce que c'est
 
-LCARS Fleet runtime — **app Elixir/OTP unique `:lcars_fleet`** (monolithe modulaire, frontières compilées par [boundary](https://hexdocs.pm/boundary)), couche runtime du projet LCARS (`/home/projects/LCARS/`), lancée par humain via `bin/fleet_v2`. Le contrat de chaque module vit dans son `@moduledoc` (SSoT, machine-visible via `h`/ExDoc) ; le `README.md` d'un domaine (`lib/fleet/<dom>/README.md`) est une **carte** (index + pointeurs), PAS une copie du contrat. Pour comprendre un domaine : le `@moduledoc` de sa façade `Fleet.<Dom>` + la carte. **Pour comprendre le workflow entier : le récit des 5 phases dans `Fleet.Pilot` (@moduledoc) + son spécimen exécutable `test/fleet/pilot/chain_integration_test.exs` — LE point d'entrée de lecture transverse.**
+Une app Elixir/OTP unique, `:lcars_fleet`, qui lance, surveille et récolte des pods d'agents
+(un processus Claude Code par rôle, sandboxé) et fait avancer le travail sur une forge Gitea.
+**La forge est la machine à états** : l'état vit dans les issues, PR et labels, jamais en RAM
+seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de vérité.
 
-## Build / test / release
+`fleet/` est un logiciel distinct de `deploy/`, l'installeur, qui a sa propre porte
+(`deploy/gate.sh`) et son propre `CLAUDE.md`. Rien ici ne parle de l'installation.
+
+## Où sont les choses
+
+| chemin | ce que c'est |
+|---|---|
+| `lib/fleet/<dom>/` | un domaine par dossier, sa façade `lib/fleet/<dom>.ex`, sa carte `README.md` |
+| `lib/fleet/*.ex` sans dossier | les modules **foundation** : vocabulaire et validation purs, `deps: []` |
+| `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (73 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` |
+| `bin/` | les launchers N0/N1 des pods, `fleet_v2` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
+| `etc/` | lancement et release : `fleet_v2.env.template` (catalogue des env vars), `release.manifest`, `deploy-release.sh` |
+| `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
+| `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
+| `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |
+| `priv/canon/` | legacy gelé, lu par rien |
+| `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
+| `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
+| `test/` | ExUnit (284 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
+| `git-hooks/` | pre-commit (stardate, en-têtes GO-7) et pre-push (pas de force-push sur les faces publiées) ; à installer par `install-hooks.sh` |
+
+## Build, test, gate
 
 ```bash
 mix deps.get
-mix compile --warnings-as-errors    # gate obligatoire — inclut BOUNDARY (violation d'architecture = warning = échec)
-
-mix test                            # suite complète (plus d'umbrella : un seul projet, un seul mix test)
-mix test test/fleet/api/rest_test.exs:42    # un seul test (n° de ligne) — le footgun `mix test apps/…` est MORT avec apps/
-
-mix gate                            # gate complet — la CHAÎNE fait autorité dans `mix.exs` (alias `gate:`), pas ici
-MIX_ENV=prod mix release            # _build/prod/rel/lcars_fleet (self-contained, ERTS bundlé)
+mix compile --warnings-as-errors      # inclut boundary : une arête interdite est un warning, donc un échec
+mix test                              # un seul projet, un seul mix test
+mix test test/fleet/api/control_router_test.exs:42
+mix gate                              # LA porte ; la chaîne fait autorité dans mix.exs
+MIX_ENV=prod mix release              # _build/prod/rel/lcars_fleet, ERTS embarqué
 ```
 
-Elixir `~> 1.18`. Le release s'appelle **`lcars_fleet`**, comme l'app qu'il contient. Il s'appelait `fleet_umbrella` — nom devenu faux au collapse du 2026-07-12 et conservé un mois au motif que le renommer « casserait le launcher pour un gain cosmétique » : mauvais arbitrage dès lors que le lecteur est un agent, pour qui un nom qui n'est pas vrai n'est pas neutre mais un modèle faux emporté dans tout ce qu'il fait ensuite. La procédure deploy/run (lancement `bin/fleet_v2`, env file, install des launchers) est dans `etc/README.md` — ne pas la re-dériver.
+`mix gate` enchaîne, dans cet ordre : format, compile strict, ExUnit, `shell_gate` (python du
+bridge MCP, bats de `test/`, `git-hooks/tests`, `.claude/skills/*/tests`, `lcars_tests` de
+token-saver), `lcars.contracts.check`, `lcars.topology --check`, dialyzer strict, sobelow au seuil
+`High`. Chaque étape arrête la chaîne, ExUnit compris.
+
+Ce que le gate **ne couvre pas** : `deploy/tests` (sa porte est `deploy/gate.sh`), les sondes
+manuelles de `test/probes/` et `test/integration/` (listées dans `etc/README.md`), et la règle de
+langue ci-dessous.
+
+Un message de commit qui déclare « gate vert » engage un gate relancé dans ce geste.
 
 ## Architecture
 
-### App unique + boundaries (post-collapse 2026-07-12/13)
+**Une app, des domaines, des frontières compilées.** Chaque façade déclare ses deps et ses
+exports dans `use Boundary`. Le graphe est un DAG, une dépendance va vers le bas, et une arête
+montante casse la compilation. La carte des couches est **générée** depuis ces déclarations
+(`mix lcars.topology`) dans `lib/fleet/README.md`, et le gate refuse toute divergence. Le seul
+nom de couche vérifiable mécaniquement est `foundation` (`deps: []`) ; les autres sont une
+lecture éditoriale déclarée une fois dans `lcars.topology.ex`.
 
-L'ex-umbrella (14 apps) est collapsée en une app unique ; les ex-apps sont des **domaines** sous `lib/fleet/<dom>/`, et les frontières sont **COMPILÉES** par boundary — trois invariants que `mix compile` refuse de laisser violer :
+Les libs sensibles sont clôturées par boundary : `ex_mcp` (mcp seul), `req`/`finch` (forge et
+ses clients légitimes), `plug*` (api, observation, event_router), `phoenix_pubsub` (event_router
+seul). Une référence nouvelle se déclare dans la boundary qui l'utilise.
 
-1. **Direction des deps** : chaque façade `Fleet.<Dom>` déclare ses deps dans son `use Boundary`. Le graphe est un DAG (boundary interdit les cycles). Ajouter une dep inter-domaines = l'ajouter à la déclaration (geste VISIBLE en review), pas contourner.
-2. **Surface d'appel** : les `exports:` de chaque boundary = la surface cross-domaine MESURÉE (~25 modules pour toute la fleet). Tout le reste est inatteignable d'un autre domaine. Élargir un export = décision d'API, pas un réflexe.
-3. **Frontière libs sensibles** : `ex_mcp` (mcp seul), `req`/`finch` (forge, workflow, project — l’extraction `Fleet.Forge` a sorti le HTTP des domaines métier), `plug*` (api/observation/event_router), `phoenix_pubsub` (event_router seul) — fencées via `boundary: [default: [check: [apps: […]]]]` du mix.exs. Une réf nouvelle = à déclarer dans la boundary utilisatrice.
+**Boot.** `Fleet.Application` est l'unique callback OTP. L'ordre de ses enfants est l'invariant
+(event_router premier, mcp avant spawner), tenu par le mur `boot.order_f8`. `max_restarts: 0` au
+sommet : un domaine qui meurt tue le nœud. Les pods permanents sont lancés après le boot, par
+`Fleet.Admiral.BootOrchestrator`, jamais par un superviseur.
 
-**Boot** : `Fleet.Application` (l'UNIQUE callback OTP) démarre les superviseurs de domaine dans un ordre qui EST l'invariant (cicatrice F8 inline : event_router premier, mcp avant spawner). Le spawn des pods permanents (BootOrchestrator) est déclenché POST-boot par la racine — après le `start_link` OK, fleet entière prouvée up (acte4 A-08 ; « post-readiness » mécanique, plus une promesse). `max_restarts: 0` au sommet = mort d'un domaine → mort du node (sémantique umbrella conservée, cf. D-17 du chantier migration). Le check `boot.order_f8` de `mix lcars.contracts.check` verrouille l'ordre.
+**Seams montants.** Quatre injections de module par config, là où l'appel direct ferait un cycle :
+`:spawner_launch_backend`, `:spawner_mcp_socket_provisioner`, `:mcp_pod_reaper`,
+`:admiral_completion_inflight_fun`. Un seam est un point d'injection pour les tests et le seul
+chemin légal vers la couche du dessus. ⚠ Boundary ne voit que les appels littéraux : un module
+posé dans un attribut et appelé via une variable lui est invisible. Déclarer la dep achète
+l'honnêteté du graphe, pas une vérification du défaut de seam.
 
-**Topologie (l'enforcement est dans boundary ; la carte est GÉNÉRÉE)** : la vue en couches vit dans `lib/fleet/README.md`, projetée depuis les `use Boundary` par `mix lcars.topology` (le gate refuse toute divergence — la carte ne peut pas mentir). Vocabulaire : la position d'un domaine ne se déclare JAMAIS en prose (elle EST sa déclaration boundary) ; une relation se nomme par DOMAINE (`Pilot.GateBrief`), jamais par numéro d'étage ; seul nom de couche mécaniquement vérifiable : **foundation** ≡ `deps: []` (le terme « Ring N » est banni du code — héritage `topologie-ring.md` #3.1, acceptions divergentes, cf. chantier doc-coherence 2026-07-18). Repères : `pilot` = driver forge (off sans `:step_dispatch?`), `api` REST/WS no-auth by design, `observation` read-only, launchers `bin/` sous `spawner`.
+**Lecture transverse.** Le récit des cinq phases d'un cycle, détection, dispatch, exécution,
+complétion, revue et merge, est dans le `@moduledoc` de `Fleet.Pilot`. Son spécimen exécutable
+est `test/fleet/pilot/chain_integration_test.exs`. C'est le point d'entrée pour comprendre le
+workflow entier.
 
-**Seams runtime ASSUMÉS** — deux natures distinctes. (1) Seams MONTANTS (injection de module via config, PAS des deps compile — boundary les rend mécaniques : un appel littéral à la place = `forbidden reference`) : `spawner→mcp` (`:mcp_socket_provisioner` — un littéral fermerait un cycle) ; `mcp→pilot` (`:pod_reaper` — Pilot ∉ deps de MCP) ; `admiral→pilot` (`:admiral_completion_inflight_fun` — les Tasks de complétion à drainer ; ex-`starfleet_*`, renommage du domaine 2026-08-19). ⚠ `:project_incident_rail` (`project→pilot`) était ici et n'y est PLUS (BL-6-114, arbitrage user 2026-08-19) : l'arête montante est morte — `Project.Incidents` publie `project.card_failed`/`project.intensity_invalid` sur le bus (dep déclarée, vers le bas), routes `incident` de `events.yaml`. Un seam montant se REMBOURSE quand la couche du dessus n'achète plus de sémantique, il ne se redessine pas. ⚠ `:forge_client` et `:project_onboard` étaient ici et n'y sont PLUS non plus : leurs cibles ont été extraites en `Fleet.Forge` et `Fleet.Project`, tous deux SOUS MCP, donc l'arête est légale et MCP la DÉCLARE. Les seams subsistent — c'est ainsi qu'un test injecte un stub, et le `conforming/2` de chaque behaviour est ce qui empêche un stub de mentir sur le contrat. **MESURÉ, et l'intuition est fausse** : retirer ces deps produit ZÉRO `forbidden reference`. Boundary voit des APPELS, et un nom de module posé dans un attribut puis dispatché via une variable lui est invisible. La déclaration achète donc l'honnêteté du graphe et le droit d'appeler ces domaines en direct — **pas** une vérification du défaut de seam par le compilateur. (2) Seams d'INJECTION sur une dep compile EXISTANTE (swap d'implémentation, pas de frontière contournée) : `:launch_backend` (hermétisme test).
+## Runtime et catalogue
 
-### Frontière runtime / catalogue
+Le code porte la mécanique, le métier est une donnée de catalogue. `Fleet.Catalogue` est la
+seule autorité de son layout : une racine (`LCARS_CATALOGUE_ROOT`, défaut `priv/catalogue`), un
+manifeste `catalogue.yaml` dont l'`api_version` est vérifiée au boot avant que les images ne
+gèlent quoi que ce soit, et des clés par arbre qui restent des surcharges fines.
 
-Le code porte la mécanique, le métier est de la **donnée de catalogue** — et le catalogue est UN objet, pointé UNE fois. `Fleet.Catalogue` (foundation) est la seule autorité de son layout : une racine (`LCARS_CATALOGUE_ROOT`, défaut = le `priv/` bundlé) dont chaque arbre dérive son sous-chemin, plus le manifeste `catalogue.yaml` (`api_version`) vérifié au boot AVANT que les images ne gèlent quoi que ce soit. Les clés par-arbre (`:lcars_fleet, :cap_profile_root_dir` etc.) restent des **surcharges fines** et gardent la priorité : la grosse molette apporte un catalogue entier, une fine déplace exactement son arbre.
+Le discriminant tient partout dans `priv/` : `canon/`, `config/`, `templates/` sont du catalogue,
+et eux seuls passent par `Fleet.Catalogue`. Tout le reste est runtime, résolu par
+`:code.priv_dir` sans molette. **Ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat,
+et un contrat qu'on peut remplacer ne contraint pas.** Un plancher posé sous `canon/` part avec
+le catalogue exporté et ne contraint plus rien, sans qu'aucun message ne le dise.
 
-Le discriminant est mécanique et tient partout dans `priv/` : `canon/`, `config/`, `templates/` = **catalogue** (et eux seuls passent par `Fleet.Catalogue`) ; tout le reste est **runtime**, résolu par `:code.priv_dir` sans knob — `<dom>/schema/` (le contrat contre lequel un catalogue est validé) et `cap_profile/baseline/` (un plancher qu'un catalogue ne peut pas abaisser : la denylist git universelle). Même règle pour les deux : **ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat, et un contrat qu'on peut remplacer ne contraint pas.**
+`Fleet.Layout` est la même autorité pour la machine : trois faces par projet, `code`, `workshop`,
+`ops`, et `~/.lcars` par humain. Ces chemins sont fixés par design, pas configurables.
 
-Deux fautes symétriques, et la seconde est silencieuse. Ajouter un arbre de métier sans le déclarer dans `Fleet.Catalogue` : un opérateur qui apporte SON catalogue tourne sur cet arbre-là resté bundlé, sans qu'aucun message ne le dise. Poser un plancher ou un contrat sous `canon/` : il part avec le catalogue exporté, son auteur l'édite, **et rien ne change** — un mensonge dit par le rangement, que ni le gate ni la review n'attrapent.
+## Pods
 
-### Frontière vendor (N0 / N1)
+Un pod est lancé par un launcher N0 choisi par `metadata.containment` du cap-profile :
+`bin/bwrap_launch.sh` (défaut) projette le **sanctuaire** du pod, mounts en lecture seule, `/home`
+en tmpfs, credentials bindés ; `bin/host_launch.sh` (`containment: none`) tourne sur l'hôte sans
+sandbox, et un seul cap-profile canon y a droit, `admiral`, par le geste nommé `lcars admiral`.
+Tout autre chemin vers `containment: none` est refusé par `SpawnAdmission`. Les deux `exec`
+`bin/claude_launch.sh`, l'unique frontière vendor N1 : pas de module bridge, la frontière est le
+script. Un vendor de plus, c'est un `bin/<vendor>_launch.sh` de plus, même forme d'arguments.
 
-Tout ce qui parle à un vendor précis (Claude SDK, futur OpenAI) est **N1**, isolé derrière un launcher shell dans `bin/` (`claude_launch.sh`). **Il n'y a pas de module `fleet_claude_bridge` : la frontière vendor N1 EST le script `bin/`.** Tout le reste est **N0** (vendor-agnostic). Nouveau vendor → nouveau `bin/<vendor>_launch.sh` co-localisé, même forme d'arguments. Mélanger des flags vendor dans du code N0 casse le contrat. (Le jumeau compilé de cette frontière : le fencing boundary des libs wire, cf. ci-dessus.)
+Le pod tourne sous l'UID de l'humain qui a lancé le BEAM, par héritage. Son `pod_dir` est
+`/home/<humain>/pods/pod_<id>`, `0700`. Un pod ne charge ni hooks ni `settings.json` humain : le
+sanctuaire ne monte que `plugins/` et `skills/`, et `pod_test.exs` le vérifie. Le `.claude/` de ce
+dépôt est pour l'agent qui édite le dépôt, jamais pour un pod.
 
-### Pod sandboxing
+## Bus
 
-Un pod (process agent par rôle) est lancé par l'un des deux launchers N0, choisi par `metadata.containment` du cap-profile :
-- `bin/bwrap_launch.sh` (défaut, `containment: bwrap`) — projette le **sanctuaire du pod**. RENVERSEMENT de la sandbox : bwrap ne CAGE pas l'agent pour protéger le monde de lui, il protège l'**agent du monde** (mounts RO + tmpfs `/home` + bind credentials → l'agent a EXACTEMENT ce dont il a besoin, ne peut rien casser). Le *sanctuaire* est le monde projeté POUR l'agent ; **le fichier, lui, est du code ordinaire — édité et testé (bats) comme le reste. Aucun code n'est sacré.** Un containment différent = un launcher N0 de plus (un launcher par mode, même forme d'arguments) : motif d'extension propre, PAS une intouchabilité.
-- `bin/host_launch.sh` (`containment: none`) — même mécanique tmux **sans** sandbox : le pod tourne sur l'hôte *comme* l'humain (`HOME` = home réel → `~/.claude` natif). **UN SEUL cap-profile canon le sélectionne** : `admiral` (chantier 2026-08-19), le siège machine du sysadmin — et il ne s'atteint que par le geste nommé `lcars admiral` (`host_native_ack: true` dans le DTO, lu du raw, jamais broadcasté). Tout autre chemin vers `/api/admin/spawn` REFUSE `containment: none` par construction (`SpawnAdmission`, `{:host_native_forbidden, name}`) ; le témoin de pré-condition du control_router refuse un DEUXIÈME profil hors sandbox — il exige son propre arbitrage, jamais l'héritage de celui-ci. Hors sandbox, c'est le pouvoir maximal de la fleet.
+`Fleet.EventRouter.Bus` est l'unique substrat broadcast/subscribe, topic `fleet.events`, registre
+`priv/event_router/events.yaml`. Le webhook Gitea est un accélérateur de poll, jamais une source
+de vérité. Le double saut de complétion, `work_item.completed` broker → pod puis `pod.completed`
+pod → pilot enrichi, est un relais fonctionnel : ne pas le « simplifier ».
 
-Les deux `exec` le launcher vendor `claude_launch.sh`. Le pod tourne *comme* l'humain par **héritage d'UID** : le BEAM est lancé par l'humain → le Port du pod hérite l'UID (pas de `systemd-run --uid`, pas de drop). Le pod_dir est **`/home/<humain>/pods/pod_<id>`** (per-humain, `0700`, isolé par l'ownership OS — pas un dossier partagé, pas sous `/tmp` que le tmpfs bwrap orphelinerait). bwrap exige les syscalls `unshare`/`mount`/`setns`/`pivot_root` → le **container** doit les accorder (cap-add/seccomp).
+## Configuration
 
-### Bus d'événements
+Trois fichiers, dans cet ordre : `config/config.exs`, `config/<env>.exs`, `config/runtime.exs`.
+`runtime.exs` lit les env vars de l'humain (`~/.lcars/fleet_v2.env`) et **tout son corps est sous
+`if config_env() != :test`** : hors de ce garde, `mix test` ouvrirait un port et le boot casserait.
+Toute config runtime nouvelle reste dans le garde.
 
-`Fleet.EventRouter.Bus` (Phoenix.PubSub) est l'unique substrat broadcast/subscribe. Les domaines publient sur `fleet.events` et consomment via `subscribe/1`. Le Bus est le fast-path LOSSY ; la vérité durable vit dans le substrat forge+poll (doctrine D1). ⚠ Le « double-hop » de complétion (`work_item.completed` broker→pod, puis `pod.completed` pod→pilot enrichi) est un RELAIS fonctionnel, pas une redondance — cicatrice dans `pod.ex`, ne pas « simplifier ». Le webhook `gitea.*` est un ACCÉLÉRATEUR de poll (hint coalescé, Z6e), jamais une source de vérité. En `:test`, l'hermétisme vient des consumers coupés + `load_event_registry: false`.
+Toute la config vit sous `:lcars_fleet`, la clé préfixée par son domaine
+(`api_http_port`, `spawner_launch_backend`). Le préfixe évite une collision réelle entre `api` et
+`observation`, et le mur `config.no_legacy_config_namespace` refuse l'ancien namespace
+`:fleet_<dom>`, dont le mode de défaillance est silencieux : un site oublié lit un namespace vide
+et reçoit le défaut.
 
-## Configuration layering
+## Tests
 
-Trois fichiers de config, évalués dans cet ordre :
+`config/test.exs` pose un baseline hermétique dont toute la suite dépend : listeners éteints,
+consommateurs de bus éteints, `load_event_registry: false`, `StubBackend` comme backend de spawn,
+tous les `admiral_start_*` à `false`. Un test qui a besoin du vrai comportement l'instancie
+lui-même avec `start_supervised` et des opts explicites ; il ne flippe pas la config globale.
+Les modules de support vivent sous `test/support/<dom>/`.
 
-1. `config/config.exs` — défauts compile-time.
-2. `config/<env>.exs` — `test.exs` pose le baseline hermétique (StubBackend, consumers off, `load_event_registry: false`, `start_listener: false`).
-3. `config/runtime.exs` — config de boot, lit les env vars de l'env humain (`~/.lcars/fleet_v2.env`, posé par `bin/fleet_v2`). **C'est la source de vérité des env vars** ; le catalogue complet est dans `etc/fleet_v2.env.template`.
+La forme du corpus est tenue par des murs, pas par discipline : `tests.dirs_mirror_source`
+(`lib/<x>/<y>.ex` a ses témoins sous `test/<x>/`, préfixés `<y>`), `tests.witness_naming` (un
+témoin mal nommé n'est pas ramassé, et le mur le dit), `tests.corpora_on_record` (tout corpus
+bats ou python est déclaré gated ou nommé hors gate). Le gate ne réclame pas un témoin par source : `test/README.md` dit
+pourquoi. Les charges Gitea des témoins se calibrent sur `test/fixtures/forge/`, seule référence
+non circulaire.
 
-**Invariant critique** dans `config/runtime.exs` : tout le fichier est wrappé dans `if config_env() != :test do … end`. Sans ce garde, `mix test` évalue runtime.exs, met `start_listener: true`, et Cowboy tente de bind le port → crash du boot. Toute config runtime ajoutée reste DANS le garde.
+## Conventions
 
-**Les atoms de config `:fleet_<dom>` N'EXISTENT PLUS** — la migration est faite (ex-BL-6-05). D-07 ne l'interdisait pas, il en prescrivait la forme : *« migration de namespace = chantier dédié »*, et ce chantier a eu lieu. Toute la config vit sous `:lcars_fleet`, la clef préfixée par son domaine — `config :fleet_api, http_port:` est devenu `config :lcars_fleet, api_http_port:`.
-
-Le préfixe n'est pas cosmétique : `http_port` et `start_listener` **collisionnent** entre `api` et `observation`, donc une fusion à plat ferait écouter un service sur le port d'un autre, sans un mot. Le mur `config.no_legacy_namespace` de `mix lcars.contracts.check` refuse le retour en arrière — et il existe parce que le mode de défaillance est SILENCIEUX : un site oublié lit un namespace vide et reçoit le défaut, jamais une erreur.
-
-⚠ Ce paragraphe a affirmé l'inverse pendant une semaine après la migration, en instruisant chaque agent de ne pas corriger ce qui n'existait plus. Le mur ne lit pas le markdown : il a certifié la migration terminée pendant que ce fichier la niait.
-
-Plusieurs env vars ont été **retirées** (plus aucun lecteur, ou dangereuses) — ne pas les réintroduire : le transport MCP HTTP-loopback partagé (remplacé par une socket AF_UNIX par-pod), le vault de credentials, le routing par label, le drop-UID / TmuxBackend hors-bwrap.
-
-## Test hermeticity
-
-`config/test.exs` impose un baseline hermétique dont les autres tests dépendent. Ne pas l'affaiblir :
-
-- `fleet_api, start_listener: false` — les tests REST passent par `Plug.Test`, WS par callbacks Cowboy directs, jamais une vraie socket.
-- consumers off (`start_*: false`) + `load_event_registry: false` — pas de broadcast Bus parasite en async. (Même logique : `subscribe_gitea` du Poller est opt-in, défaut false, câblé true par `step_children!` seul.)
-- `fleet_spawner, launch_backend: StubBackend` — pas de vrai spawn bwrap ; les tests le re-posent en `setup` et **ne le suppriment pas** en `on_exit`.
-- `lcars_fleet, admiral_start_*: false` (audit_consumer, boot_orchestrator, mcp_monitor, toolchain_reconciler, shutdown — ex-`fleet_starfleet, start_*`, renommage 2026-08-19) + `lcars_fleet, spawner_start_publish_consumer: false` — un test qui en a besoin démarre manuellement avec des opts isolés.
-
-Quand un test a besoin du vrai backend, il l'instancie directement (`start_supervised` avec args explicites), il ne flippe pas la config globale. Les modules de support vivent sous `test/support/<dom>/` (compilés via `elixirc_paths(:test)`).
-
-## Code conventions
-
-- **Langue — la règle** : *ce qui part avec la boîte est en ANGLAIS ; ce que la boîte énonce une fois livrée suit la langue de son opérateur.* Le test est la **livraison**, pas l'emplacement dans l'arbre.
-  - **Part avec la boîte → EN** (pré-requis, PAS une préférence) : toute prose qui vit dans un fichier source — commentaire inline, `@moduledoc`, `@doc`, nom de variable/fonction, message de log interne — **et les messages de commit**. RAISON : LCARS est la vitrine de sa propre thèse, « du code propre, 100% généré par des agents ». Cette thèse se vérifie dans le code ET dans le log, seuls endroits où l'on voit les arbitrages et ce qui a été refusé. Du français y réduit le nombre de gens qui peuvent auditer la démonstration.
-  - **Énoncé par la boîte → langue de l'opérateur** : texte du dashboard, sortie CLI, message affiché à l'opérateur, corps des issues/commentaires/PR écrits par les agents sur la forge. Aujourd'hui le français y est **câblé en dur** ; la résolution par locale (i18n) est un chantier ouvert, non commencé.
-    - **Les accents.** Interdits dans la prose source (commentaire, `@moduledoc`, `@doc`, log) : ils cassent les greps qu'un opérateur lance sur le code. **Pas dans les PAYLOADS émis** — un corps d'issue, un body de PR/review, un brief, une ligne de dashboard, un template de `priv/workflow/` sont de la **donnée texte**, comme un `.md` : ils gardent leurs accents (arbitrage user 2026-07-21). Le français accentué dans `lib/` et dans les assertions de test qui l'épinglent est donc CORRECT et ne se « corrige » pas.
-    - **La sortie CLI d'un script shell, elle, est désaccentuée** (`bin/`, `etc/`) : elle vit dans un fichier source qu'on grep. Elle se **reformule** en français sans accent, jamais en stripant les accents — « détachée » → « daemon tmux », pas « detachee ».
-  - **Un log reste EN, même lu par l'opérateur** (y compris les rails operator-facing type `LCARS config:`). Un log est un rail de debug qu'on grep, pas une interface : sa langue suit le code qu'il trace, pas le lecteur qui le consulte. C'est la frontière la plus facile à franchir par erreur.
-  - **Hors périmètre — le package SP**, et le périmètre se dit en **catalogue**, plus en `priv/` : `<catalogue>/sp_builder/**` (blocs ET drafts), `<catalogue>/cap_profile/canon/modop-bundles/*/sp.md`, `<catalogue>/cap_profile/canon/subagent-templates/**`, et le *texte de prompt* des `<catalogue>/cap_profile/canon/cap-profiles/*.yaml` — leurs commentaires de structure restent EN. `<catalogue>` vaut pour les deux livrés (`priv/catalogue/`, `priv/catalogue-system/`) **et pour celui qu'un opérateur apporte**, qui ne vit pas sous `priv/` du tout. Les chemins listés ici étaient `priv/sp_builder/**` et `priv/cap_profile/**` : les deux ont déménagé au découpage, et une exemption qui cite un chemin mort n'exempte rien.
-  - **Pourquoi le SP est hors périmètre** (⚖ arbitrage user 2026-08-10, il REMPLACE le motif précédent) : *un bon SP se ponce dans la langue de son auteur*. On ne calibre pas finement un comportement agentique dans une langue seconde — un SP ne se traduit pas, il se **ré-écrit**. Le motif d'avant était « il est substituable, un autre opérateur apporte le sien » : vrai, mais il ne dit pas pourquoi la langue suivrait l'auteur plutôt que la boîte, et il devient trompeur maintenant que `core/` est un **défaut système** substituable comme le reste — la substituabilité ne trie plus rien. Conséquence concrète et inchangée : le package livré EST en français, on n'y touche pas, et **un agent NE TRADUIT JAMAIS un SP**.
-  - **Corollaire pour un agent qui édite le runtime** : n'introduire JAMAIS de français dans la boîte, et traduire vers l'EN le français qu'on touche au passage — jamais une retraduction partielle en vrac (reliquat = chantier dédié).
-  - ⚖ **ARBITRAGE USER (2026-08-05) — la règle garde son POURQUOI, elle perd son caractère de porte** : « t'acharnes pas à lutter contre le français posé inline, c'est un réflexe des agents, je préfère un bon commentaire FR qu'un commentaire torturé EN ». Donc : **aucune passe de traduction en vrac**, jamais parce qu'un compteur désigne un fichier ; le critère est la **qualité** du commentaire avant sa langue ; et **le mur ne se pose pas** — un gate qui refuserait la prose FR ferait d'un réflexe d'agent un échec de build sur un critère déclaré secondaire. Le corollaire « n'introduire jamais de FR dans la boîte, traduire ce qu'on touche au passage » reste la bonne pratique par défaut, pas une condition d'acceptation.
-  - **État réel — MESURÉ le 2026-08-05, et il contredit ce qui était écrit ici** : `bin/`, `etc/*.sh` et le shell de `test/` sont en EN. La prose source de `lib/` et `test/`, **non** : 87 lignes de commentaire accentuées, dont **69 de prose française** et 18 de citation légitime (un commentaire EN qui cite un payload FR), plus 9 `@doc`/`@moduledoc`. Concentré : `test/fleet/labels_test.exs` 21 · `lib/fleet/pilot/poller/lease.ex` 15 · `test/fleet/pilot/brief_builder_test.exs` 11. Ce fichier affirmait l'inverse — « la prose source est passée en EN », « ce qui reste est de la donnée émise » — parce que la mesure ci-dessous ne pouvait pas voir le reste.
-  - ⚠ **L'INSTRUMENT — la classe imprimée ici jusqu'au 2026-08-05 sous-mesurait, et elle a servi à clore un chantier.** `grep -rlE '[éèêàçùôîûïœ]'` a **deux** angles morts qui se composent : (1) **aucune majuscule accentuée** — `# Cible AVEC une PR vivante : on ferme la PR dans le MÊME geste` ne porte qu'un `Ê` et était invisible ; (2) **aucun français non accentué** — `# Cible SANS PR vivante : le chemin nominal.` n'a rien à trouver. Les deux étaient dans le même fichier déclaré « propre en une passe ». Mesure honnête : sur l'AST (`Code.string_to_quoted_with_comments/1`), classe UTF-8 avec le modificateur `/u` **et** les majuscules, citations (`"…"`, `« … »`, `` `…` ``) retirées avant de compter, plus un balayage lexical pour le FR non accentué. Sans `/u` la classe opère sur des **bytes** et matche tous les tirets cadratins du dépôt. Un compte exact sur un périmètre faux est plus dangereux qu'une absence de compte : il clôt.
-  - **Aucun gate ne verrouille cette règle, et par arbitrage aucun ne le fera** — un mur anti-FR ne pourrait porter que sur la prose source et devrait distinguer commentaire et littéral émis (le package SP en est hors, il n'a rien à y exempter).
-- **Logger levels — doctrine** : `error` = perte réelle ou condition terminale (donnée NON gravée, event load-bearing NON émis, HALT, corruption) ; `warning` = dégradé/retry/anomalie non-fatale ; `info` = jalon de lifecycle ; les ticks nominaux sont SILENCIEUX.
-- **Préfixe des messages de log** : le préfixe est le **rail opérateur** — le nom que l'opérateur greppe pour suivre un flux. Un module autonome loggue sous son dernier segment (`Poller:`, `ReadModel:`) ; un sous-module EXTRAIT d'une façade loggue sous la FAÇADE de son rail (`Emissions`/`Spawn`/`GateEngine` → `StepRunCompleter:`/`StepDispatcher:`/`StepRunConsumer:`) — extraire un cluster ne fragmente jamais la trace, et un même module n'utilise qu'UN préfixe (le nom de fonction, s'il porte du signal, descend dans le corps du message). Exceptions nommées : `AUDIT <event.type>` et `pod <id> …` (rails délibérés), `MCP.Supervisor:` (dernier segment trop générique seul), `LCARS config:` (message operator-facing du parsing env).
-- Le contrat de chaque module = son `@moduledoc` (SSoT). Le `README.md` d'un domaine est une **carte qui POINTE, jamais une copie**. Nouveau module → une ligne dans la carte ; le contrat reste dans son `@moduledoc`.
-- **Boundary fait partie du contrat** : toucher `use Boundary` (deps/exports) = changement d'API du domaine — le motiver dans le commit comme tel. Ne JAMAIS « réparer » une `forbidden reference` en élargissant la boundary sans comprendre pourquoi l'appel n'était pas prévu.
-- En-têtes des scripts shell au format LCARS (`SOURCE: / AUTHOR: / STARDATE: / STATUS:`). La stardate est posée par la skill `/push-github` — ne pas l'éditer à la main.
-- **Commentaires self-contained** (doctrine BL-058) : la CICATRICE — le POURQUOI / l'invariant / le piège — vit INLINE et autonome, en forme PRINCIPE pas histoire. L'ANCRE de régression (`#578`, `BL-055`, `F-C…`, `Z…` du chantier migration) se GARDE. Un commentaire périmé = mensonge → tuer/corriger.
-  - **Pourquoi cette règle est la plus chère à enfreindre** : le commentaire est le seul artefact du dépôt que ni le gate ni la review ne filtrent, et un agent le lit comme vrai au présent. Un code faux casse ; un commentaire faux oriente **toutes** les sessions suivantes, sans date et sans signature. L'histoire, elle, a deux maisons datées par construction : le message de commit et le JOURNAL du chantier.
-  - **Trois formes que « pas histoire » ne couvrait pas explicitement, et qui ont mordu** (expurge 2026-08-01) : (1) **l'état d'un AUTRE artefact** (« le template porte X en dur », « deux rôles portent cette capability ») — ça ment en silence dès que l'autre bouge, souvent dans le même commit ; énoncer la règle, pas l'inventaire. (2) **la sortie d'un instrument citée comme motif** (message de sonde, de doctor, de linter) — un instrument MESURE, il ne norme pas ; le motif est la contrainte système, jamais le cri de l'outil. (3) **le pointeur vers un artefact non embarqué** (`work/`, un JOURNAL, une issue locale) — illisible depuis un fork, un pod ou un release : ce qui est nécessaire à la compréhension est inline, l'ancre de régression reste la seule référence externe admise.
-  - **Corollaire hors commentaires** : un message de commit qui déclare une vérification (« gate vert », « testé ») engage la vérification **relancée dans ce geste**. Un vert recopié est un mensonge opérationnel, et il survit dans un historique qu'on ne réécrit pas.
-- `tmp/` racine = artefacts ExUnit `@tag :tmp_dir` gitignorés — ne jamais committer.
+- **`@moduledoc` = contrat, `README.md` = carte.** Une carte pointe, elle ne recopie pas. Nouveau
+  module, une ligne dans la carte de son domaine ; le contrat reste dans le module.
+- **`use Boundary` fait partie de l'API.** Toucher deps ou exports est un changement d'API du
+  domaine, motivé comme tel dans le commit. Une `forbidden reference` ne se répare jamais en
+  élargissant la boundary sans comprendre pourquoi l'appel n'était pas prévu.
+- **Commentaires.** Le pourquoi et l'invariant vivent inline, au présent, en forme de règle. Ce
+  qui raconte l'état d'avant, la sortie d'un instrument citée comme motif, ou un pointeur vers
+  `work/` ne va pas dans le code. L'histoire a deux maisons datées : le message de commit et le
+  journal du chantier. L'ancre de régression (`BL-…`, `F-…`, `#NNN`) se garde. Un commentaire faux
+  oriente toutes les sessions suivantes sans date ni signature : il se tue ou se corrige, jamais
+  ne se laisse.
+- **Logs.** `error` = perte réelle ou condition terminale ; `warning` = dégradé ou retry ; `info` =
+  jalon de lifecycle ; les ticks nominaux sont silencieux. Le préfixe d'un message est le rail que
+  l'opérateur greppe : un sous-module extrait loggue sous la façade de son rail.
+- **En-têtes shell** au format `SOURCE: / AUTHOR: / STARDATE: / STATUS:`. La stardate est posée
+  par le pre-commit de `git-hooks/` sur les fichiers stagés ; ne pas l'éditer à la main.
+- **Langue.** Ce qui part avec la boîte est en anglais : prose source, `@moduledoc`, noms, logs,
+  messages de commit. Ce que la boîte énonce à un opérateur suit sa langue : sortie CLI, dashboard,
+  corps d'issues et de PR. Le package SP (`<catalogue>/sp_builder/**`, modop-bundles, texte des
+  cap-profiles) est hors périmètre et ne se traduit jamais. Un log reste en anglais même lu par
+  l'opérateur. Pas d'accents dans la prose source, parce qu'on la greppe. **Aucun mur ne tient
+  cette règle, par arbitrage : un bon commentaire en français vaut mieux qu'un mauvais en
+  anglais**, et l'état réel du dépôt, log de commits compris, est majoritairement en français.
+  Ne pas introduire de français dans la boîte ; ne pas lancer de passe de traduction en vrac.
+- `tmp/` = artefacts ExUnit `@tag :tmp_dir`, gitignoré, jamais commité.
