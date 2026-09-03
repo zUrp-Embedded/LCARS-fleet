@@ -50,6 +50,7 @@ on:
       # tools.js — les outils MCP declares, et la delegation.
       - 'fleet/lib/fleet/mcp/pod_tools.ex'
       - 'fleet/lib/fleet/mcp/pod_tools/delegation.ex'
+      - 'fleet/lib/fleet/mcp/pod_tools/delegation/**'
       # catalogue.js — les catalogues d'EXEMPLE, qui vivent HORS de `priv/` (livres comme templates
       # a forker). La page equipage montre desormais un siege PAR CATALOGUE, celui de demonstration
       # compris : sans cette ligne, ajouter un siege a `web-demo` ne rebatit pas la vitrine qui le
