@@ -91,11 +91,16 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
 
     # LE REFUTE NOMME SA PROPRE CIBLE. `capture_log/1` capture le DEVICE, pas le processus, et ce
     # fichier est `async: true` : un voisin qui journalise « → incident recorded » pendant la
-    # fenetre faisait tomber un refute global — vert en isolation, rouge en suite complete. Mesure
-    # du 2026-08-11 : c'est `IncidentConsumer: pod.failed pod_1 → incident recorded` qui est passe.
-    # L'intention est « CE reveil n'a pas menti en disant l'ancre posee », et le message porte la
-    # cle du wake : le nommer suffit, sans dependre de qui d'autre ecrit au meme instant.
-    refute log =~ "wake:issue-N-engineer:dead → incident recorded"
+    # fenetre faisait tomber un refute global — vert en isolation, rouge en suite complete. C'est
+    # `IncidentConsumer: pod.failed pod_1 → incident recorded` qui passait. L'intention est « CE
+    # reveil n'a pas menti en disant l'ancre posee », et le message porte la cle du wake : la
+    # nommer suffit, sans dependre de qui d'autre ecrit au meme instant.
+    #
+    # ⚠ ET IL AVAIT ETE RESSERRE JUSQU'A NE PLUS RIEN POUVOIR TOUCHER : il niait
+    # `wake:issue-N-engineer:dead → …`, qui ne correspond ni au prefixe emis (`WakeRecovery:`), ni
+    # a la cle de ce temoin (`issue-7-engineer`). Une negation qu'aucune sortie ne peut satisfaire
+    # est verte pour toujours — le contraire de ce qu'un resserrement cherche.
+    refute log =~ "issue-7-engineer : re-roll OK → incident recorded"
   end
 
   test "fail + never seen + re-roll FAILS → escalation :reroll_failed + {:error,{:escalated,_}}" do
