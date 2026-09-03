@@ -29,7 +29,7 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
   """
   use ExUnit.Case, async: true
 
-  alias Fleet.Project.Onboard, as: ProjectOnboard
+  alias Fleet.Project.Onboard.Refute, as: ProjectOnboard
 
   @moduletag :tmp_dir
 
@@ -110,7 +110,11 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
     # Ce temoin lit la SOURCE, comme celui de l'admission commune et pour la meme raison : exercer
     # les trois portes de bout en bout demanderait trois mondes (forge, depots, arbres locaux), et
     # c'est precisement ce cout qui laisse une porte non gardee passer inapercue.
-    @src "lib/fleet/project/onboard.ex"
+    # ⚠ LA FAMILLE, PAS UN FICHIER. Ce temoin lisait `lib/fleet/project/onboard.ex` seul ; au
+    # decoupage, `migrate/3` a change de module et le temoin est tombe sur un `MatchError` — le cas
+    # heureux. Un temoin de SOURCE attache a une adresse cesse de voir ce qui demenage, et le
+    # silencieux, c'est celui qui aurait trouve son verbe ailleurs et l'aurait rate.
+    @src ["lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")]
 
     test "`import/2` interroge l'identite de sa cible" do
       assert door_preamble("import") =~ "refute_store(full_name, opts)"
@@ -132,8 +136,19 @@ defmodule Fleet.Project.Onboard.StoreGateTest do
     end
 
     defp door_preamble(verb) do
-      [_, body] = String.split(File.read!(@src), ~r/^  def #{verb}\(/m, parts: 2)
-      String.slice(body, 0, 1400)
+      motif = ~r/^  def #{verb}\(/m
+
+      corps =
+        for f <- @src, source = File.read!(f), Regex.match?(motif, source) do
+          [_, body] = String.split(source, motif, parts: 2)
+          String.slice(body, 0, 1400)
+        end
+
+      case corps do
+        [body] -> body
+        [] -> flunk("`def #{verb}(` introuvable dans la famille onboarding")
+        n -> flunk("`def #{verb}(` defini #{length(n)} fois : le temoin ne sait pas lequel lire")
+      end
     end
   end
 end

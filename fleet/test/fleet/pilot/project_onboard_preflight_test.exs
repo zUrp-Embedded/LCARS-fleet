@@ -125,14 +125,14 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # INSTALLES, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
       # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
       assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
-               ProjectOnboard.migrate("fleet/vitrine", "grominet")
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "grominet")
 
       assert gestures =~ "fleet"
     end
 
     test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
       assert {:error, {:already_in_catalogue, "fleet"}} =
-               ProjectOnboard.migrate("fleet/vitrine", "fleet")
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "fleet")
     end
   end
 

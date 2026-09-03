@@ -18,7 +18,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Project.Onboard, as: ProjectOnboard
+  alias Fleet.Project.Onboard.Migration, as: ProjectOnboard
 
   @moduletag :tmp_dir
 

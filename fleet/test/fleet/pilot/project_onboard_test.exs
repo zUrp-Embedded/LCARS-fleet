@@ -321,7 +321,7 @@ defmodule Fleet.Project.OnboardTest do
     end
 
     defp reconcile(repo) do
-      ProjectOnboard.reconcile_main_protection(repo,
+      ProjectOnboard.Migration.reconcile_main_protection(repo,
         forge_repo: ProbeRepo,
         reviewer_roles: ["reviewer"]
       )
@@ -374,7 +374,7 @@ defmodule Fleet.Project.OnboardTest do
 
     test "JG-121: forge ILLISIBLE → erreur nommee, jamais un `:ok` qui vaut « rien a faire »" do
       assert {:error, {:seeded_unreadable, {:http, 503, "down"}}} =
-               ProjectOnboard.reconcile_main_protection("fleet/unknowable",
+               ProjectOnboard.Migration.reconcile_main_protection("fleet/unknowable",
                  forge_repo: UnreadableRepo,
                  reviewer_roles: ["reviewer"]
                )
@@ -395,7 +395,7 @@ defmodule Fleet.Project.OnboardTest do
 
       capture_log(fn ->
         assert :ok =
-                 ProjectOnboard.reconcile_main_protection("fleet/proj",
+                 ProjectOnboard.Migration.reconcile_main_protection("fleet/proj",
                    forge_repo: OutcomeRepo,
                    reviewer_roles: ["reviewer", "qualifier"]
                  )
