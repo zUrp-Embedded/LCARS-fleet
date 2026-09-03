@@ -15,7 +15,7 @@ Trois choses, et rien d'autre :
 |---|---|
 | **Astro 5** | générateur statique — zéro JS envoyé au navigateur, pas de framework d'interface |
 | **js-yaml** | pour lire les YAML du catalogue |
-| **Node 20** | la version que le workflow épingle (`setup-node`) |
+| **Node 24** | la version que le workflow épingle (`setup-node`) |
 
 Pas de CMS, pas de base, pas d'API : le build lit des fichiers du dépôt et écrit du HTML.
 

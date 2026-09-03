@@ -15,7 +15,7 @@ knowledge:
   skills: [deploiement, revue-securite]
 ```
 
-La liste est une **liste blanche** : `[]` — ce que font les six rôles de ce catalogue — veut dire
+La liste est une **liste blanche** : `[]` — ce que font les quatre rôles de ce catalogue — veut dire
 qu'aucune skill n'est montée. Un nom qui ne correspond à aucun dossier ici fait échouer le
 lancement du pod, en le nommant.
 
@@ -26,7 +26,7 @@ déploiement, une grille de revue, un rituel de mise en production. Écrite dans
 elle occupe son contexte à chaque tâche même quand il n'en a pas besoin. Mise ici, elle est
 disponible sans être imposée.
 
-Ce catalogue n'en a aucune, parce qu'aucune de ses six mécaniques ne le justifie encore. Ajouter une
+Ce catalogue n'en a aucune, parce qu'aucun de ses quatre rôles ne le justifie encore. Ajouter une
 skill vide « pour l'exemple » aurait rempli l'arbre sans rien apprendre.
 
 ## Ce qui distingue une skill d'un mode opératoire
