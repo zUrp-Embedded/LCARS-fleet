@@ -272,6 +272,11 @@ if ! resolve_admiral; then
   # sonde ssh et le deck) la declare `unhealthy`. « Up » sans « healthy » est exactement son etat.
   # `tini` est PID 1 et relaie SIGTERM : un `docker stop` la couche proprement.
   say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « box config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+  # ⚠ L'ETAT SE PUBLIE, COMME LE VERDICT DE PROVISIONNEMENT PLUS BAS. Sans cette ligne, `box up`
+  # attendait `/run/lcars-provision.rc` jusqu'a son timeout (300 a 900 s) pour rendre « verdict
+  # NON LU » — sur une boite qui SAIT qu'elle attend et vient de l'ecrire dans ses logs. Mesure du
+  # 2026-09-04, banc bob_2, premiere boite contre une forge fournie. `/run`, donc ce boot-ci.
+  printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
   exec sleep infinity
 fi
 if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then

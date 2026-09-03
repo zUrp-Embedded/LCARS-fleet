@@ -222,6 +222,15 @@ await_provision_verdict() {
     rc="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
     [[ "$rc" =~ ^[0-9]+$ ]] && break
     rc=""
+    # ⚠ UNE BOITE QUI ATTEND SA CONFIGURATION NE RENDRA JAMAIS DE VERDICT, et l'entrypoint le dit
+    # (`/run/lcars-boot.state`). Attendre le timeout ici, c'est faire patienter l'operateur cinq
+    # a quinze minutes pour lui annoncer « NON LU » — alors que le geste qui debloque est connu.
+    if [[ "$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" == "awaiting-config" ]]; then
+      echo ""
+      echo "box up: boîte EN ATTENTE DE CONFIGURATION — le siège ne peut pas se dériver sans l'autorité de la forge."
+      echo "              FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… deploy/box -p $PROJECT config, puis « docker restart »."
+      return 0
+    fi
     sleep 5
   done
 
