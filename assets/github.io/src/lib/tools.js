@@ -184,6 +184,26 @@ function routing() {
 }
 
 /**
+ * Les sources de la famille delegation, concatenees : la facade `delegation.ex` et ses canaux
+ * sous `delegation/`. Depuis le decoupage de la facade, un gate vit dans le canal qui porte son
+ * verbe ; lire la facade seule rendait « aucun gate » et tuait le build de la doc, donc l'image
+ * et le rail poste (44-media). Lecture RECURSIVE : un glob mono-niveau est encore une adresse,
+ * et la prochaine coupe la rendrait fausse sans un mot.
+ */
+function delegationSources() {
+  const root = join(MCP, 'pod_tools');
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .flatMap((e) =>
+        e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.ex') ? [join(dir, e.name)] : [],
+      );
+  const family = join(root, 'delegation');
+  const files = [join(root, 'delegation.ex'), ...(existsSync(family) ? walk(family) : [])];
+  return files.map((f) => readFileSync(f, 'utf8')).join('\n');
+}
+
+/**
  * Vrai si `delete_project` est desarme par defaut — un refus VOULU, pas un oubli.
  *
  * C'est une garde EN PLUS de son gate, pas a sa place : le verbe porte bien `require_onboarder`,
@@ -191,7 +211,7 @@ function routing() {
  * le reglage n'est pas pose.
  */
 export function deleteDisarmed() {
-  const src = readFileSync(join(MCP, 'pod_tools', 'delegation.ex'), 'utf8');
+  const src = delegationSources();
   return /defp delete_armed\?, do: Application\.get_env\([^)]*,\s*false\)/.test(src);
 }
 
@@ -200,7 +220,7 @@ export function deleteDisarmed() {
  * l'allowlist evite une demande de confirmation). Lu dans la fonction de chaque verbe.
  */
 export function gates() {
-  const src = readFileSync(join(MCP, 'pod_tools', 'delegation.ex'), 'utf8');
+  const src = delegationSources();
   const out = new Map();
 
   // Decoupe par TETE de fonction publique, chacune jusqu'a la suivante : une fenetre de taille
@@ -231,7 +251,7 @@ export function gates() {
     if (!out.has(head[2])) out.set(head[2], cap);
   });
 
-  if (out.size === 0) throw new Error('tools.js: aucun gate `require_*` lu dans delegation.ex');
+  if (out.size === 0) throw new Error('tools.js: aucun gate `require_*` lu dans la famille delegation');
   return out;
 }
 
