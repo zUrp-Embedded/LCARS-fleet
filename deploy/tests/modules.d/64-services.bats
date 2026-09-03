@@ -149,7 +149,6 @@ mod() { run bash "$MOD" "$1"; }
   mod apply
   grep -q "^PROV_FORGE_ORG=" "$LCARS_SERVICES_ENV"
   grep -q "^PROV_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$LCARS_SERVICES_ENV"
 }
 
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
@@ -542,7 +541,6 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   # CE QUI VIENT DU FICHIER — donc ce que le daemon aura aussi.
   grep -q '^PROV_HUMANS_TEAM=' "$CONV_ENV"
   grep -q '^FORGE_BASE_URL=http://127.0.0.1:3000$' "$CONV_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$CONV_ENV"
   # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
   # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.
   absent_de_l_env '^PROV_TOKENS_DIR='

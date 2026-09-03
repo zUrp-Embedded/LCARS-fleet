@@ -175,7 +175,6 @@ services_env_body() {
   # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
   # personne n'écoute — la panne tombe au RETOUR du login, là où elle est le moins lisible.
   echo "LCARS_LANDING_PORT=$PROV_DECK_PORT"
-  echo "LCARS_PROVISION=$HELPERS_DIR/deploy/provision"
 }
 
 unit_body() { # unit_body <nom sans .service>
@@ -414,11 +413,12 @@ check() {
 apply() {
   local u
 
-  if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — rien à poser, et c'est dit plutôt que fait à moitié. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
-    verdict_apply
-  fi
-
+  # ⚠ LE SIEGE ET L'ENVIRONNEMENT SE POSENT AVANT LA PORTE SYSTEMD, ET L'ORDRE EST LE CORRECTIF.
+  # `seat.uid` est ce que lit GUARD B (`bin/fleet_v2`, `runtime.exs`) ; il ne depend d'aucune
+  # unite. Pose apres le test de systemd, il manquait sur un WSL vierge au premier apply — `30-wsl`
+  # vient d'ecrire `systemd=true`, qui n'agit qu'apres `wsl --shutdown` — et `fleet_v2 start`
+  # refusait entre les deux passes pendant que le verdict de ce module etait vert (« rien a poser »).
+  # `services.env` suit pour la meme raison : les unites le liront quand elles existeront.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
     p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et uid_floor, qui retomberaient sur le littéral 1000"
     verdict_apply
@@ -437,6 +437,11 @@ apply() {
   # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
     || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B refusera tout lancement sur cette machine"; verdict_apply; }
+
+  if ! have_systemd; then
+    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — le siege et l'environnement sont poses, AUCUNE unite ne l'est, et c'est dit plutôt que fait à moitié. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
+    verdict_apply
+  fi
 
   local reload=0 body
   for u in "${UNITS[@]}"; do
