@@ -479,7 +479,13 @@ apply() {
 
   local rc=0 tf_out
   tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
-  run_step "structure de la forge" -- env \
+  # ⚠ PAS `run_step … | tee`, ET LE COMPTEUR PLUS BAS EN DEPEND. `run_step` capture la sortie de
+  # la commande dans SON fichier et n'emet que ses lignes de phase : le `tee` ne voyait jamais
+  # « Apply complete! », `moved` valait 0, et une forge NEUVE etait annoncee « deja conforme — rien
+  # a poser » pendant que `50-forge` trouvait tous les comptes que tofu venait de creer. Mesure
+  # du 2026-09-04, banc bob_1. La commande s'execute nue, sa sortie est le fichier qu'on compte.
+  p_step "structure de la forge"
+  env \
     LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
     `# ⚠ LE DÉTENTEUR VOYAGE AVEC LE CHEMIN, ET LES SÉPARER LES FAIT DIVERGER. « put_secret » pose` \
     `# désormais un PROPRIÉTAIRE sur ce qu'il écrit ; sans cette ligne il retomberait sur son défaut` \
@@ -497,10 +503,13 @@ apply() {
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
     LCARS_REFERENCE_CATALOGUE="$ref_catalogue" \
     TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-    bash "$(repo_root)/fleet/services/forge-gestures.sh" apply 2>&1 | tee "$tf_out" || rc="${PIPESTATUS[0]}"
+    bash "$(repo_root)/fleet/services/forge-gestures.sh" apply >"$tf_out" 2>&1 || rc=$?
   rm -rf "$recipe" "$enroll"
-  [[ "$rc" -eq 0 ]] \
-    || { rm -f "$tf_out"; p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"; verdict_apply; }
+  if [[ "$rc" -ne 0 ]]; then
+    p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"
+    { printf '───── sortie : %s dernières lignes ─────\n' "$PROV_DUMP_LINES"; tail -n "$PROV_DUMP_LINES" "$tf_out"; printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$tf_out"; } >&2
+    verdict_apply
+  fi
 
   # ⚠ « APPLIQUÉ » N'EST PAS « CHANGÉ », ET LE CODE DE SORTIE NE LES DISTINGUE PAS. La recette est
   # idempotente : elle rend 0 aussi bien après avoir tout posé qu'après n'avoir rien eu à faire.
