@@ -1,8 +1,8 @@
 # Fleet.API — domain card
 
 **Date**: 2026-07-12
-**Last revised**: 2026-07-20
-**Status**: active — external surface of the fleet (REST + WS + admin control socket)
+**Last revised**: 2026-09-04
+**Status**: active — the fleet's admin write door (AF_UNIX control socket; no TCP surface)
 **Referenced by**: —
 
 The fleet's external surface. Client-agnostic: `bin/lcars`, health/readiness probes and
@@ -18,32 +18,27 @@ restated, only pointed at.**
 
 ## Invariants
 
-- **Il n'y a plus de surface TCP du tout** (2026-08-14). Ce domaine ne sert qu'une chose : la porte
-  d'écriture `POST /api/admin/spawn`, sur une socket AF_UNIX locale qu'un pod du réseau partagé ne
-  peut pas atteindre. L'invariant n'est plus « la surface publique est en lecture seule » — c'est
-  **il n'y a pas de surface publique**.
+- **Il n'y a pas de surface publique.** Ce domaine ne sert qu'une chose : la porte d'écriture
+  `POST /api/admin/spawn`, sur une socket AF_UNIX locale qu'un pod du réseau partagé ne peut pas
+  atteindre. Aucune surface TCP, ni REST ni WebSocket.
 - La confidentialité de la socket d'admin repose sur son mode `0600`. La changer est une décision de
   sécurité.
 
-## Ce qui a été retiré, et pourquoi — pour que personne ne le reconstruise
+## Pourquoi il n'y a pas de listener TCP — et pourquoi ne pas en ajouter un
 
-`Fleet.API.Rest`, `Fleet.API.WS` et `Fleet.API.Readiness` ont été **supprimés**, avec le listener
-TCP. Mesure du 2026-08-14 : ce listener n'avait **aucune capacité propre**.
+Un listener TCP ici n'aurait **aucune capacité propre** (mesuré, 2026-08-14) :
 
-- les lectures d'état (`pods`, `issues`, `workflow_runs`) rendaient **501** en renvoyant vers
-  `Fleet.Observation` — ce n'était pas son autorité, et son message de renvoi nommait un port
-  (`deck :8091`) mort depuis que l'observation est passée sur socket ;
-- `/ws` était déjà débranché — coupure réversible du même jour, pour une raison qui tenait :
-  il projetait le flux d'événements **complet et sans authentification**, capture d'écran tmux d'un
-  pod comprise ;
+- les lectures d'état (`pods`, `issues`, `workflow_runs`) sont l'autorité de `Fleet.Observation`,
+  servie sur socket — une route ici ne pourrait que renvoyer vers elle ;
+- un flux d'événements sur le réseau serait **complet et sans authentification**, capture d'écran
+  tmux d'un pod comprise ;
 - `health` / `readiness` / `version` ont un **jumeau CLI** : `fleet_v2 version` lit le MÊME fichier
   (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet éteinte ;
-- **personne ne l'appelait** : ni `bin/lcars` (son propre commentaire le disait), ni le BEAM, ni le
-  healthcheck du conteneur (qui teste le port 22) ; les tests appelaient le plug directement.
+- **aucun client n'en a besoin** : ni `bin/lcars`, ni le BEAM, ni le healthcheck du conteneur (qui
+  teste le port 22) ; les tests appellent le plug directement.
 
-⚠ Le retirer a aussi découplé l'écriture : `control_socket_child/0` était imbriqué dans
-`if api_start_listener` — le chemin d'ÉCRITURE dépendait d'un commutateur nommé d'après une surface
-de LECTURE.
+⚠ Le chemin d'ÉCRITURE (`control_socket_child/0`) ne dépend d'aucun commutateur nommé d'après une
+surface de LECTURE. Le remettre sous un `if api_start_listener` recréerait ce couplage.
 
 ## Modules — read the `@moduledoc` for the contract
 
@@ -51,6 +46,7 @@ de LECTURE.
 - `Fleet.API.ControlRouter` — the admin write door, on the AF_UNIX socket. **La seule surface.**
 - `Fleet.API.SpawnAdmission` — the spawn-admission pipeline (pure functions)
 - `Fleet.API.BuildInfo` — observable build stamp (lu par le log de boot et par `fleet_v2 version`)
+- `Fleet.API.Readiness` — live operational read-model: MCP pod-facing status, pilot rail liveness (no route serves it; consumers call it)
 - `Fleet.API.Application` — the domain supervisor + control-listener wiring
 
 ## Config & deps

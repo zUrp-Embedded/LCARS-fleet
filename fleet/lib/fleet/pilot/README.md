@@ -1,7 +1,7 @@
 # Fleet.Pilot — domain card
 
 **Date**: 2026-05-26
-**Last revised**: 2026-08-13
+**Last revised**: 2026-09-04
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
@@ -18,14 +18,18 @@ restated, only pointed at.
 ## Modules
 
 **Reactor & dispatch**
-- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation}` = tick timing / repo-serialized lease / orphan-lock reconciliation.
-- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .RoleDispatch, .Remediation}` (the PR review lifecycle).
+- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / repo-serialized lease / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
+- `Fleet.Pilot.PollerTelemetry` — the poller's telemetry, attached (BL-6-40).
+- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
 - `Fleet.Pilot.BriefBuilder` — the authority on brief FORMAT (worker / judge / rework / conflict).
+- `Fleet.Pilot.PodReaper` — reaps the pods bound to a DEAD ticket (the `:pod_reaper` seam MCP injects).
 
 **Step-run completion**
-- `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, StepRunBuild}`.
+- `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, StepRunBuild, VerdictCorrection}` (`VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
 - `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
+- `Fleet.Pilot.CompletionOutbox` — durable journal of the step_run completions still owed to the forge (6-127).
 - `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/6`), shared by both merge points.
+- `Fleet.Pilot.ConflictProbe` / `ConflictApply` / `ConflictReport` — the tier-0 conflict rail: impure probe preserving raw blob bytes, write path re-checking every file in an isolated worktree, and the diagnosis rendered for a human on the PR.
 
 **Forge — NOT here any more**
 - The client and the wire protocol are their own domain: `Fleet.Forge` (`lib/fleet/forge/`, own map). The pilot DRIVES it and declares it as a dep; it does not contain it. What made the move necessary: `Req`/`Req.Response` were deps of THIS boundary, so "one HTTP exit" was a convention any new call could break — it is compiled over there now.
@@ -44,11 +48,11 @@ restated, only pointed at.
 
 **Primitives (single-authority utils)**
 - `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
-- `Fleet.PodId` (FOUNDATION depuis le 2026-08-11 — le format des pod_id est lu par Spawner et Project, qui sont sous Pilot)
+- `Fleet.PodId` — FOUNDATION, not this domain: the pod_id format is read by Spawner and Project, which sit below Pilot
 - `Fleet.Project.Roles` / `Opts` / `Offload` / `IssueId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
 
 ## Config & deps
 
 - Boot: `:step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet_v2.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
-- Deps (all descending): the truth is the `use Boundary` of `lib/fleet/pilot.ex` — notably workflow (workflow-map nav + gate briefs), spawner, credentials, cap_profile, task_queue, event_router. Upward runtime seams (duck-typed, NOT compile deps): `:forge_client` and `:project_onboard` consumed by mcp, readiness probed by api.
+- Deps (all descending): the truth is the `use Boundary` of `lib/fleet/pilot.ex` — notably workflow (workflow-map nav + gate briefs), spawner, credentials, cap_profile, task_queue, event_router. Upward runtime seams (config-injected, NOT compile deps): `:pod_reaper` (mcp → `Fleet.Pilot.PodReaper`), and readiness probed by api. `:forge_client` / `:project_onboard` are not upward: their targets `Fleet.Forge` and `Fleet.Project` sit below mcp (`CLAUDE.md`, "Seams runtime").
 - Not core: the core can be driven manually OR by pilot afterwards — decoupled by design.

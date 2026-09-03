@@ -1,7 +1,7 @@
 # Fleet.SPBuilder — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-14
+**Last revised**: 2026-09-04
 **Status**: active — System Prompt composer from blocks
 **Referenced by**: —
 
@@ -16,10 +16,11 @@ there, not restated here.
 
 ## Modules
 - `Fleet.SPBuilder` — the facade + `Composer` impl (`compose/3`, `compose_claude_md/3`, `filter_skills/2`, `resolve_monk_injection/2` defdelegate); EEx templating (`priv/catalogue/sp_builder/templates/*.eex`) + role-SP / modop reads + path resolution
-- `Fleet.SPBuilder.Blocks` — block-based composition of the per-role SPs (`priv/sp_builder/sp_blocks/` + `sp-map.yaml`; `mix lcars.sp.gen` writes the flat drafts that `Fleet.Spawner.Pod.Assets` reads, N2); fail-loud no-fallback (no SP → no pod)
+- `Fleet.SPBuilder.Blocks` — block-based composition of the per-role SPs (`<catalogue>/sp_builder/sp_blocks/` + `sp-map.yaml`, i.e. `priv/catalogue/` and `priv/catalogue-system/`; `mix lcars.sp.gen` writes the flat drafts that `Fleet.Spawner.Pod.Assets` reads, N2); fail-loud no-fallback (no SP → no pod)
 - `Fleet.SPBuilder.Monk` — monk-injection resolution (`resolve/2`, `resolve_or_empty/2`, `persona_section/1`); the composer's only YAML-registry I/O. NB: the monks are FROZEN — dormant by design, empty injection everywhere (its `@moduledoc`)
 - `Fleet.SPBuilder.RepoSections` — markdown mini-parser lifting the target repo `CLAUDE.md` named sections into the pod `CLAUDE.md`
 - `Fleet.SPBuilder.Composer` — the behaviour (test mock + future 2nd vendor)
+- `Fleet.SPBuilder.Image` — versioned closed-world snapshot of all SP-builder prompt material, read at boot
 
 ## Config & deps
 - Knob `:lcars_fleet, :sp_builder_modop_root` — read by the facade; config-overridable, bundled default (rationale on `modop_root/0`).
@@ -34,19 +35,12 @@ a closed list of **7**: `Stack`, `Build`, `Test`, `Doc`, `Conventions`, `Command
 (`@repo_section_re`). Sections outside this list are silently dropped; a warning logs if none
 matches.
 
-**Content IS filtered, and this section said the opposite.** Every kept section passes through
-`Fleet.ReceptionFilter.scan/1` (`admit_section?/2`, BL-6-16): a matching section is **dropped
-whole** and logged at `error` — the pod launches with LESS context, never with poison, and a spawn
-is never wedged over prose. The repo file is authored OUTSIDE the trust boundary, and this is the
-door where its content becomes pod DIRECTIVES.
+**Content IS filtered.** Every kept section passes through `Fleet.ReceptionFilter.scan/1`
+(`admit_section?/2`, BL-6-16): a matching section is **dropped whole** and logged at `error` — the
+pod launches with LESS context, never with poison, and a spawn is never wedged over prose. The repo
+file is authored OUTSIDE the trust boundary, and this is the door where its content becomes pod
+DIRECTIVES. ⚠ `admit_section?/2` is therefore not a redundancy with any upstream check: nothing
+else stands between that file and the pod's `CLAUDE.md`.
 
-⚠ **CE PARAGRAPHE DÉCRIVAIT UN TROU OUVERT, ET IL EST FERMÉ.** Il disait « Content is not
-filtered », « **This is a KNOWN HOLE** », et argumentait sur une demi-page que la fermeture
-« belongs at repo adoption », pas ici. Un lecteur qui le croyait avait toutes les raisons de
-**retirer** `admit_section?/2` comme une redondance sans objet — la carte ne se contentait pas de
-taire la protection, elle **plaidait contre elle**. C'est le sens grave d'une prose fausse : elle
-ne fait pas perdre du temps, elle fait défaire.
-
-Ce qui reste vrai de l'ancien texte, et qui n'est pas cette couche : la porte d'adoption d'un dépôt
-cloné de l'extérieur. Le filtre ici lit un `CLAUDE.md` **section par section** ; il ne juge pas la
-légitimité du dépôt lui-même, et ne prétend pas le faire.
+What this layer does NOT do: judge the legitimacy of the repo itself. The filter reads a
+`CLAUDE.md` **section by section**; the adoption door of an externally cloned repo is elsewhere.

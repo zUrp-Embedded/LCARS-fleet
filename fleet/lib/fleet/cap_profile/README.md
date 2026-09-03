@@ -1,7 +1,7 @@
 # Fleet.CapProfile — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-08-13
+**Last revised**: 2026-09-04
 **Status**: active — cap-profile composer/loader/validator (substrate, schema v2.5)
 **Referenced by**: —
 
@@ -21,6 +21,7 @@ restated, only pointed at.
 - `Fleet.CapProfile.Catalog` — FS front of the catalogue (scan/decode, resolve by `metadata.name`, Slug-confined)
 - `Fleet.CapProfile.DisallowedTools` — write-time `spec.scope.disallowedTools` resolution (baseline ∪ profile patterns)
 - `Fleet.CapProfile.CanonicalJson` — canonical (order-independent) JSON encode + sha256 (FROZEN hash format)
+- `Fleet.CapProfile.Image` — the PROVEN-GOOD cap-profile image: profiles + modop overlays frozen at boot into one versioned snapshot
 
 Related, NOT this domain: `Fleet.Slug` and `Fleet.Layout` (own foundation boundaries at
 `lib/fleet/slug.ex` / `lib/fleet/layout.ex`, reachable from any domain).

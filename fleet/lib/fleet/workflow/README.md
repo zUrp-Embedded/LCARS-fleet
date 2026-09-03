@@ -1,7 +1,7 @@
 # Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-08-09
+**Last revised**: 2026-09-04
 **Status**: active — domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: —
 
@@ -21,9 +21,6 @@ is restated, only pointed at.
 - `Fleet.Workflow.Gates.Predicate` — `eval?/2`: pure evaluator of v2.5 rule-strings against self-reported `outputs`, fail-closed
 - `Fleet.Workflow.GateBrief` — `build/1`: pure markdown brief the gatekeeper pulls via MCP to judge a gate
 - `Fleet.Workflow.GateDecision` — `decisions/0`: single authority for the gatekeeper decision vocabulary (mirrored by `gate-decision-v1.json`)
-  <!-- `Fleet.Workflow.Gatekeeper` (singleton boot/registration seam) REMOVED — the resident
-       singleton was replaced by the one-shot per-project gatekeeper (reorg 2026-07-19); its
-       summoning now lives in `Fleet.Pilot.StepRunConsumer.GatekeeperEscalation`. -->
 - `Fleet.Workflow.Deliverable` — unified publication of a pod deliverable (`:payload` / `:git_native`)
 - `Fleet.Workflow.PayloadGuard` — `apply_files/2`: fail-closed placement + security-validation of an untrusted file payload
 - `Fleet.Workflow.DeliverableGate` — `verify/4`: mechanical world-side gate (base ancestor, identity, secrets) before push
@@ -34,6 +31,9 @@ is restated, only pointed at.
 - `Fleet.Workflow.BriefTemplate` — calibration-template renderer (`priv/catalogue/workflow/brief_templates/`, F-23: prose is data)
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
 - `Fleet.Workflow.Provenance.Verifier` — deterministic triplet verifier, the non-LLM wall (+ `mix lcars.provenance.verify`)
+- `Fleet.Workflow.CardRoles` — does every role a catalogue's cards NAME exist in that catalogue?
+- `Fleet.Workflow.StepOutputs` — the SYSTEM's own facts about a step's declared `outputs`, checked in the pod workspace
+- `Fleet.Workflow.Pinning` — what an agent EMITS on the forge: a short body on the surface, the full text committed and cited
 
 Related, NOT this domain: `Fleet.GitRef` (`valid?/1`, git ref-name validation) — a foundation
 boundary at `lib/fleet/git_ref.ex`, reachable from any domain.

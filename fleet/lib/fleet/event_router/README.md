@@ -1,7 +1,7 @@
 # Fleet.EventRouter — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-07-18
+**Last revised**: 2026-09-04
 **Status**: active — PubSub event bus `fleet.events` + events.yaml registry (substrate)
 **Referenced by**: —
 
@@ -22,6 +22,7 @@ Nothing here is restated, only pointed at.
 - `Fleet.EventRouter.WebhooksGitea` — Gitea webhook HTTP endpoint (Plug.Router + HMAC SHA256)
 - `Fleet.EventRouter.BindAddress` — single source of the listener bind IP (loopback default, exposure = named opt-in)
 - `Fleet.EventRouter.Listener` — single source of the Cowboy HTTP child-spec (the "spec" counterpart of `BindAddress`)
+- `Fleet.EventRouter.UnixListener` — binds a Plug on an AF_UNIX socket; announces readiness only once the socket's mode is right
 - `Fleet.EventRouter.SignalsOS` — OS-signal → bus bridge, **INERT / gated off** (see its moduledoc)
 
 Related, NOT this domain: `Fleet.Event` (the canonical wire struct — its own foundation

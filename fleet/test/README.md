@@ -1,7 +1,7 @@
 # test/ — map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-08-30
+**Last revised**: 2026-09-04
 **Status**: active — index of the test tree (a map, not a contract)
 **Referenced by**: —
 
@@ -22,10 +22,9 @@ tous par `<y>` :
 nommé d'après le CONTRAT qu'il épingle (`bus_safe_emit`, `application_boot_knob`) porte plus
 d'information qu'un `<module>_test.exs` muet — le préfixe le rend trouvable sans lui coûter ce nom.
 
-Cette forme est **vérifiée à l'échelle du dossier** par `tests.paths_mirror_lib`
+Cette forme est **vérifiée à l'échelle du dossier** par `tests.dirs_mirror_source`
 (`mix lcars.contracts.check`) : un témoin sous un dossier qui n'existe pas sous `lib/` fait rougir
-le gate. Neuf témoins vivaient sous `test/fleet/pilot/project_onboard/`, un dossier qui n'existait
-nulle part, alors que leurs modules disaient `Fleet.Project.Onboard.*` depuis toujours (2026-08-30).
+le gate.
 
 ⚠ **Le gate ne réclame PAS un témoin par source.** Cette moitié-là n'est pas décidable sans un
 plancher enregistré. Mesure du 2026-08-30 : 130 sources sur 247 n'ont pas de témoin canonique — 26
@@ -69,9 +68,10 @@ pas dans cette phrase, qui ne fait que la répéter.
 
 ## Deux faux-verts que le gate ferme
 
-- `tests.exs_are_discoverable` — `mix test` ne ramasse que `*_test.exs` (`test_pattern`) et ne dit
+- `tests.witness_naming` — `mix test` ne ramasse que `*_test.exs` (`test_pattern`) et ne dit
   RIEN de ce qu'il laisse. Un `foo_spec.exs` ou un `foo_tests.exs` est une suite entière qui compte
-  pour zéro en silence. La faute est une lettre, la conséquence est un corpus fantôme.
+  pour zéro en silence. La faute est une lettre, la conséquence est un corpus fantôme. Le mur tient
+  la même règle de nommage pour les `.bats` et les `.py`.
 - `tests.corpora_on_record` — tout corpus bats/python du dépôt est déclaré `:gated` ou
   `{:out, motif}`. Un corpus que personne ne joue ne pourrit pas bruyamment : il rapporte une
   couverture qu'il ne fournit pas.

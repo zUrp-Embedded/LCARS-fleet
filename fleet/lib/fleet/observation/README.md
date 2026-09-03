@@ -1,7 +1,7 @@
 # Fleet.Observation — domain card
 
 **Date**: 2026-06-10
-**Last revised**: 2026-08-13
+**Last revised**: 2026-09-04
 **Status**: active — read-only observation deck (surface)
 **Referenced by**: —
 
@@ -24,9 +24,9 @@ restated, only pointed at.
 
 - **Aucune molette de port** (6-072/6-098) : le deck n'a pas d'adresse. Il écoute sur
   `/run/lcars/console/<humain>/deck.sock`, chemin **dérivé** de l'humain qui lance le BEAM
-  (`Application.deck_socket/0`) et jamais déclaré. `LCARS_OBSERVATION_PORT` et
-  `:observation_http_port` ont été **retirées**, pas rendues optionnelles : une variable obligatoire
-  dont la valeur ne sert à rien bloque un démarrage sans rien configurer.
+  (`Application.deck_socket/0`) et jamais déclaré. Pas de `LCARS_OBSERVATION_PORT`, pas de
+  `:observation_http_port`, pas même en option : une variable obligatoire dont la valeur ne sert à
+  rien bloque un démarrage sans rien configurer.
 - Knobs `:lcars_fleet, :observation_start_listener` / `:observation_start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
 - Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, same as the API domain).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/observation.ex`) — this card points at it and does not copy it. A dependency list transcribed here goes stale the day an edge moves, and nothing goes red: boundary compiles the real one.
