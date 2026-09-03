@@ -165,6 +165,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Tools.check_capabilities_exercisable(root),
         Catalogue.check_catalogue_paths_locked(root),
         Runtime.check_eval_doors_start_transport(root),
+        Runtime.check_bare_alias_resolves(root),
         Tools.check_mcp_seam_surface(root),
         Tools.check_forge_fields_read(root),
         Tools.check_forge_mutations_exposed(root),

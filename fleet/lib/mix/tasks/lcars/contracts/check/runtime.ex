@@ -969,4 +969,114 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       note: "#{length(files)} forge-reaching `eval` door file(s), each starting its own transport"
     }
   end
+
+  # ── Un nom de module NU qui ne resout sur rien ───────────────────────
+  # Elixir fait d'un `__aliases__` un ATOME, toujours : `DependencyForge` non alias devient
+  # `Elixir.DependencyForge`, un atome parfaitement valide. Quand ce nom est APPELE, le
+  # compilateur avertit (« module is not available ») ; quand il est passe comme VALEUR —
+  # `Gate.conforming(DependencyForge, forge)` — il n'avertit RIEN. Le decoupage de `Delegation` a
+  # produit exactement ca : 34 temoins sont tombes au runtime, et rien d'autre ne l'avait vu, ni
+  # `--warnings-as-errors`, ni les 71 murs.
+  #
+  # DEUX RESTRICTIONS, chacune parce qu'elle separe le defaut d'un usage legitime :
+  #   · UN SEUL SEGMENT. Un nom de processus enregistre (`Fleet.PubSub`, `Fleet.MCP.PodSocketRegistry`)
+  #     est un atome qui ne designe aucun module ET c'est voulu ; ils sont tous qualifies. Le
+  #     defaut, lui, est le nom court qu'on a oublie d'aliaser.
+  #   · HORS `use Boundary`. Ses `deps:`/`exports:` nomment des modules RELATIFS a la frontiere,
+  #     et c'est boundary qui les resout — pas le compilateur d'Elixir.
+  @doc false
+  @spec check_bare_alias_resolves(String.t()) :: Support.result()
+  def check_bare_alias_resolves(root) do
+    fichiers = root |> Path.join("lib/**/*.ex") |> Path.wildcard()
+
+    {examines, trous} =
+      Enum.reduce(fichiers, {0, []}, fn f, {n, acc} ->
+        ast = f |> File.read!() |> Code.string_to_quoted!()
+        alias_ = aliases_of(ast)
+        locaux = MapSet.new(defmodules_of(ast))
+
+        manquants =
+          ast
+          |> bare_refs()
+          |> Enum.reject(fn {seg, _l} ->
+            Map.has_key?(alias_, seg) or Module.concat([seg]) in locaux or
+              Support.module_exists?(Atom.to_string(seg))
+          end)
+          |> Enum.map(fn {seg, l} -> "#{Path.relative_to(f, root)}:#{l}: #{seg}" end)
+
+        {n + length(bare_refs(ast)), manquants ++ acc}
+      end)
+
+    cond do
+      length(fichiers) < 100 ->
+        Support.broken_result("code.bare_alias_resolves", "source file under lib/")
+
+      examines < 200 ->
+        Support.broken_result("code.bare_alias_resolves", "single-segment module reference")
+
+      true ->
+        %{
+          id: "code.bare_alias_resolves",
+          remediation:
+            "alias the module, or write it in full — a single-segment name Elixir cannot resolve " <>
+              "is a valid atom, so it compiles, passes every wall, and dies at runtime the first " <>
+              "time something dispatches on it",
+          status: if(trous == [], do: :pass, else: :fail),
+          evidence: Enum.sort(trous),
+          note: "#{examines} single-segment references over #{length(fichiers)} files"
+        }
+    end
+  end
+
+  defp aliases_of(ast) do
+    {_, m} =
+      Macro.prewalk(ast, %{}, fn
+        {:alias, _, [{:__aliases__, _, segs}]} = n, acc ->
+          {n, Map.put(acc, List.last(segs), true)}
+
+        {:alias, _, [{:__aliases__, _, segs}, opts]} = n, acc when is_list(opts) ->
+          court =
+            case opts[:as] do
+              {:__aliases__, _, s} -> List.last(s)
+              _ -> List.last(segs)
+            end
+
+          {n, Map.put(acc, court, true)}
+
+        {:alias, _, [{{:., _, [{:__aliases__, _, _}, :{}]}, _, enfants}]} = n, acc ->
+          {n,
+           Enum.reduce(enfants, acc, fn {:__aliases__, _, s}, a ->
+             Map.put(a, List.last(s), true)
+           end)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    m
+  end
+
+  defp defmodules_of(ast) do
+    {_, l} =
+      Macro.prewalk(ast, [], fn
+        {:defmodule, _, [{:__aliases__, _, segs} | _]} = n, acc ->
+          {n, [Module.concat(segs) | acc]}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    l
+  end
+
+  defp bare_refs(ast) do
+    {_, l} =
+      Macro.prewalk(ast, [], fn
+        {:use, _, [{:__aliases__, _, [:Boundary]} | _]}, acc -> {nil, acc}
+        {:__aliases__, meta, [seg]} = n, acc when is_atom(seg) -> {n, [{seg, meta[:line]} | acc]}
+        n, acc -> {n, acc}
+      end)
+
+    l
+  end
 end
