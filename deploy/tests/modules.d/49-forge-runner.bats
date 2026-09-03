@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/forge_runner_apply.bats
+# SOURCE: deploy/tests/modules.d/49-forge-runner.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for 49-forge-runner — l'APPLY, que rien ne tenait

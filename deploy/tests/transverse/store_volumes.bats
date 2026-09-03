@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/store_volumes.bats
+# SOURCE: deploy/tests/transverse/store_volumes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for the STORE — what survives a destruction, and what says so

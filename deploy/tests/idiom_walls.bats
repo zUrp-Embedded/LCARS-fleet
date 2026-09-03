@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: LCARS-bob
+# SOURCE: deploy/tests/idiom_walls.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-30
 # STATUS: murs d'idiomes — la forme fragile ne revient pas une fois le code corrige

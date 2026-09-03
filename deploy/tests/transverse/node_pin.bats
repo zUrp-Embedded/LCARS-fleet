@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/node_pin.bats
+# SOURCE: deploy/tests/transverse/node_pin.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
 # STATUS: bats tests for 16-node — TROIS producteurs de la meme doc, et rien ne les confrontait

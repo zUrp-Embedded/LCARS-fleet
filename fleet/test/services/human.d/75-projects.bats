@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/projects_reconcile.bats
+# SOURCE: fleet/test/services/human.d/75-projects.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for modules.d/75-projects.sh — la forge dit quels projets existent, le disque suit

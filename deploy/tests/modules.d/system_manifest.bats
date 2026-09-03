@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/system_manifest.bats
+# SOURCE: deploy/tests/modules.d/system_manifest.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: bats tests for deploy/system.manifest — le TROISIEME temoin ISO, celui de l'EMPREINTE

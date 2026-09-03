@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/entrypoint_seat.bats
+# SOURCE: deploy/tests/docker/entrypoint_seat.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
 # STATUS: bats tests for entrypoint.sh — le SIEGE de la boite est le #1 de la forge, et il le DERIVE

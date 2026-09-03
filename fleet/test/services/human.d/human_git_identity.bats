@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/human_git_identity.bats
+# SOURCE: fleet/test/services/human.d/human_git_identity.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for 70-human — l'identite git de l'humain vient de son COMPTE FORGE

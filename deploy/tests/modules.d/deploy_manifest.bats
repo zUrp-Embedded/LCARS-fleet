@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/deploy_manifest.bats
+# SOURCE: deploy/tests/modules.d/deploy_manifest.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for 60-deploy check — manifest-driven, source-independent

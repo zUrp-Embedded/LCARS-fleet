@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/console_socket_topology.bats
+# SOURCE: deploy/tests/docker/console_socket_topology.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for console.sh + console-landing.sh — JG-072/JG-098, le terminal n'a plus de port

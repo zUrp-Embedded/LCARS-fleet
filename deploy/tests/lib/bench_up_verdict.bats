@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/bench_up_verdict.bats
+# SOURCE: deploy/tests/lib/bench_up_verdict.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for bench-up.sh — 6-133, le verdict final et son code de retour

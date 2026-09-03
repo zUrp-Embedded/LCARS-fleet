@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/enroll_catalogue.bats
+# SOURCE: deploy/tests/docker/enroll_catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for etc/enroll-catalogue.sh — la derivation du roster ne demande pas de

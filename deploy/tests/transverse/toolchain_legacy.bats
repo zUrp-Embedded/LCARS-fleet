@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/toolchain_legacy.bats
+# SOURCE: deploy/tests/transverse/toolchain_legacy.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
 # STATUS: bats tests for 15-toolchain — le SEUL geste destructif du module, et ce qu'il refuse de toucher

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/store_modes.bats
+# SOURCE: deploy/tests/transverse/store_modes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for 26-store.sh — the MODES of the store, and the guard that keeps the table honest

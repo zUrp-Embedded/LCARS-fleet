@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/catalogue_converger.bats
+# SOURCE: deploy/tests/modules.d/45-catalogues.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for modules.d/45-catalogues.sh + prov_roles — le materiel suit la FORGE

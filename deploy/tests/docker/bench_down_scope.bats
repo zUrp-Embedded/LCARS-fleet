@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/bench_down_scope.bats
+# SOURCE: deploy/tests/docker/bench_down_scope.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-09
 # STATUS: bats tests for bench-down.sh — WHAT a bench is made of, and the order it comes apart in

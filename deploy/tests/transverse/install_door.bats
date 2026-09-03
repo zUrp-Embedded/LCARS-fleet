@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/install_door.bats
+# SOURCE: deploy/tests/transverse/install_door.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for install.sh — LA porte : ce qu'elle detecte, ce qu'elle demande, ce qu'elle refuse

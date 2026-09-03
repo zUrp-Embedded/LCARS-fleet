@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/sudoers_toolchain.bats
+# SOURCE: deploy/tests/transverse/sudoers_toolchain.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-19
 # STATUS: bats tests for 45-sudoers-toolchain — le cablage systeme du rail toolchain

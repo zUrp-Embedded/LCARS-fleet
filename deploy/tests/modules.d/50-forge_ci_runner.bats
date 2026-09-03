@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/forge_ci_runner.bats
+# SOURCE: deploy/tests/modules.d/50-forge_ci_runner.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-22
 # STATUS: bats tests for 50-forge — la sonde du runner CI, et sa distinction entre ZERO et INCONNU

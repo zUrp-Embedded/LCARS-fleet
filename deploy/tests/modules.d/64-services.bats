@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/services_units.bats
+# SOURCE: deploy/tests/modules.d/64-services.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: bats tests for 64-services — la landing et le convergeur TENUS, pas seulement poses

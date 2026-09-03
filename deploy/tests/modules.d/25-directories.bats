@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/directories_runtime.bats
+# SOURCE: deploy/tests/modules.d/25-directories.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
 # STATUS: bats tests for 25-directories.sh — la racine des sockets de console, et sa survie au reboot

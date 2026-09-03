@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/bench_runner_labels.bats
+# SOURCE: deploy/tests/docker/bench_runner_labels.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-05
 # STATUS: bats tests for forge-runner.sh — a label is a promise, checked before it is made

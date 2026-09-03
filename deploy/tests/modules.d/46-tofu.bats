@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/tofu_tool.bats
+# SOURCE: deploy/tests/modules.d/46-tofu.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: bats tests for 46-tofu — l'outil qui pose la structure de forge, SUR la machine

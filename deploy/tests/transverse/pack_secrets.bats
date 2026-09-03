@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/pack_secrets.bats
+# SOURCE: deploy/tests/transverse/pack_secrets.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for pack.sh — ce que le packageur DIT d'un secret, jamais le secret

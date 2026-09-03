@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/runtime_helpers.bats
+# SOURCE: deploy/tests/transverse/runtime_helpers.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: bats tests for 62-runtime-helpers — ce que le `COPY` du Dockerfile pose, et que le rail poste ne posait pas

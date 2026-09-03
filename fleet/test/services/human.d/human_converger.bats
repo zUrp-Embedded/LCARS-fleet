@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/human_converger.bats
+# SOURCE: fleet/test/services/human.d/human_converger.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for services/human-converger.sh — l'ADMISSION, et elle seule

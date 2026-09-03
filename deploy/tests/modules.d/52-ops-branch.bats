@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/ops_branch.bats
+# SOURCE: deploy/tests/modules.d/52-ops-branch.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
 # STATUS: bats tests for 52-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »

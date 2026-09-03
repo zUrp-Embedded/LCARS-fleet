@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/fleet_human.bats
+# SOURCE: deploy/tests/modules.d/22-fleet-human.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: bats tests for 22-fleet-human — la SONDE de l'humain de fleet du poste

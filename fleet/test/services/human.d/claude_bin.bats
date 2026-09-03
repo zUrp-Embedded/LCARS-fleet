@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/claude_bin.bats
+# SOURCE: fleet/test/services/human.d/claude_bin.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
 # STATUS: bats tests for 40-claude-bin — UNE seule source, l'installeur officiel

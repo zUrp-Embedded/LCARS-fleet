@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/entrypoint_humans.bats
+# SOURCE: deploy/tests/docker/entrypoint_humans.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population

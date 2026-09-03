@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/provision_runner.bats
+# SOURCE: deploy/tests/modules.d/provision_runner.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for the runner's D6 substrate model (APPLY-ON / CHECK-ON)

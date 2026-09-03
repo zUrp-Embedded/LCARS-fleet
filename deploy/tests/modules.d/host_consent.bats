@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/host_consent.bats
+# SOURCE: deploy/tests/modules.d/host_consent.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: bats tests for 05-host-consent + la seconde source de 00-preflight

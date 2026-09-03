@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/media_tree.bats
+# SOURCE: deploy/tests/transverse/media_tree.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: bats tests for 44-media — les medias partages, jumeau FICHIER du trou ISO des paquets

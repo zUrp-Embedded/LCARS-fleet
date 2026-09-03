@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/pack_outdir.bats
+# SOURCE: deploy/tests/transverse/pack_outdir.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for pack.sh — le paquet atterrit HORS de l'arbre, et le chemin est derive

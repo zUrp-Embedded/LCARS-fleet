@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/container_privileges.bats
+# SOURCE: deploy/tests/transverse/container_privileges.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-14
 # STATUS: bats tests for 6-071 — the container's privileges are the narrowest that let bwrap run

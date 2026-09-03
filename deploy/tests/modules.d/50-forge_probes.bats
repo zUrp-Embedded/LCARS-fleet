@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/forge_probes.bats
+# SOURCE: deploy/tests/modules.d/50-forge_probes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
 # STATUS: bats tests for 50-forge — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat

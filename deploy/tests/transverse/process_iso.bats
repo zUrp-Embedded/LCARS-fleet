@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/process_iso.bats
+# SOURCE: deploy/tests/transverse/process_iso.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-22
 # STATUS: bats tests — l'ISO des PROCESSUS : ce qui TOURNE apres le boot, des deux cotes

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/deck_origins.bats
+# SOURCE: deploy/tests/modules.d/55-deck-oidc.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for modules.d/55-deck-oidc — la LISTE DES ENTREES doit converger

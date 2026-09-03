@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: LCARS-bob
+# SOURCE: deploy/tests/wsl_module.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-30
 # STATUS: temoins de 30-wsl.sh — le module n'avait aucune suite

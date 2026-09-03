@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/forge_host_reach.bats
+# SOURCE: deploy/tests/docker/forge_host_reach.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-21
 # STATUS: bats tests for 48-forge-host — les DEUX adresses de la forge du poste, et ce qu'elles coutent

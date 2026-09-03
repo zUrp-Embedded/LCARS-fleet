@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/bench_swap_creds.bats
+# SOURCE: deploy/tests/docker/bench_swap_creds.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for bench-swap-image.sh — la sonde des credentials ne fait pas descendre le secret

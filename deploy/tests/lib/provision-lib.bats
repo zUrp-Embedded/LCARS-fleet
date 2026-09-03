@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/provision_lib.bats
+# SOURCE: deploy/tests/lib/provision-lib.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for lib/provision-lib.sh — the lib's one promise is "never lie green"

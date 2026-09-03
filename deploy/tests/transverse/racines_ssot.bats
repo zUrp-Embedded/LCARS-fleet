@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/racines_ssot.bats
+# SOURCE: deploy/tests/transverse/racines_ssot.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests — une racine se DEMANDE, elle ne se recopie pas
