@@ -52,6 +52,8 @@ defmodule Fleet.Project.Architect do
 
   require Logger
 
+  alias Fleet.Layout
+
   @doc """
   THE pod-id authority for a project's delegate: `<delegate-role>-<name>` (`name` = the repo's name
   segment). Accepts a `owner/name` full_name or a bare name. Every consumer (ArchWake, ArchFeed,
@@ -75,7 +77,7 @@ defmodule Fleet.Project.Architect do
   def pod_id_for(repo_or_name) when is_binary(repo_or_name),
     do:
       Fleet.Project.Roles.project_delegate_role() <>
-        "-" <> Fleet.Layout.project_name(repo_or_name)
+        "-" <> Layout.project_name(repo_or_name)
 
   @doc """
   Ensures the architect of `repo` is up, CHEAPLY when it already is — the form a periodic keeper
@@ -156,10 +158,10 @@ defmodule Fleet.Project.Architect do
     loader = Keyword.get(opts, :loader, Fleet.CapProfile)
     forge_opts = Keyword.take(opts, [:token, :base_url])
 
-    name = Fleet.Layout.project_name(repo)
-    proj_dir = Path.join(Keyword.get(opts, :code_root, Fleet.Layout.code_root()), name)
-    work_dir = Path.join(Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()), name)
-    doc_dir = Path.join(Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root()), name)
+    name = Layout.project_name(repo)
+    proj_dir = Path.join(Keyword.get(opts, :code_root, Layout.code_root()), name)
+    work_dir = Path.join(Keyword.get(opts, :ops_root, Layout.ops_root()), name)
+    doc_dir = Path.join(Keyword.get(opts, :workshop_root, Layout.workshop_root()), name)
     repo_id_result = Fleet.Forge.repo_id(forge, repo, forge_opts)
 
     cond do
@@ -195,7 +197,7 @@ defmodule Fleet.Project.Architect do
             # resolve "the project" from the channel identity (the arch never names it).
             repo: repo,
             repo_id: repo_id,
-            rc_name: Fleet.Layout.pod_label(name, "architect"),
+            rc_name: Layout.pod_label(name, "architect"),
             project_slug: name,
             # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
             # face and it is `doc` — the face it produces on. `ops` is the record it is judged

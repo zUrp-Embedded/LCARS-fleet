@@ -24,6 +24,8 @@ defmodule Fleet.Spawner.SeedStore do
   """
   require Logger
 
+  alias Fleet.Slug
+
   # Budget for the JSONL scans (`first_round/1`, `seed_records/1`): these run in the pod's
   # GenStatem callback during CAPTURE and BEFORE teardown — an enormous, malformed or
   # marker-less file (a runaway agent, a corrupt transcript) would hold the mailbox, delay
@@ -67,9 +69,9 @@ defmodule Fleet.Spawner.SeedStore do
     # destination directory under the root BEFORE any `mkdir_p!`/`write!` — a malformed name never
     # reaches the FS (refusal = logged warning + `{:error, _}`; the checkpoint is a non-fatal
     # memory bonus, the dying pod proceeds).
-    with {:ok, project_slug} <- Fleet.Slug.cast(project),
-         {:ok, role_slug} <- Fleet.Slug.cast(role),
-         {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug) do
+    with {:ok, project_slug} <- Slug.cast(project),
+         {:ok, role_slug} <- Slug.cast(role),
+         {:ok, project_dir} <- Slug.confined_join(root(), project_slug) do
       do_checkpoint(
         pod_dir,
         project_slug,
@@ -147,7 +149,7 @@ defmodule Fleet.Spawner.SeedStore do
         # source changed shape mid-read is dropped rather than engraved into a seed that a later pod
         # will resume. Detection is worth more here than anywhere else in the chain: this is the
         # step that turns a file the daemon can read into a file the NEXT pod receives.
-        unless Fleet.Slug.link_free_under?(jsonl, pod_dir) do
+        unless Slug.link_free_under?(jsonl, pod_dir) do
           raise ArgumentError,
                 "SeedStore.checkpoint: #{inspect(jsonl)} became a symlink while being read — " <>
                   "capture DROPPED (a pod that swaps its own transcript for a host file is " <>
@@ -209,9 +211,9 @@ defmodule Fleet.Spawner.SeedStore do
     # Leaf-read of the seed-store: `project`/`role` are path components. Same casts as
     # `checkpoint/5` (an exposed `recall/3` takes these args from a caller) → an unconfined name
     # yields `:none` (seed not found) rather than reading an arbitrary host `.json`/`.jsonl`.
-    with {:ok, project_slug} <- Fleet.Slug.cast(project),
-         {:ok, role_slug} <- Fleet.Slug.cast(role),
-         {:ok, project_dir} <- Fleet.Slug.confined_join(root(), project_slug),
+    with {:ok, project_slug} <- Slug.cast(project),
+         {:ok, role_slug} <- Slug.cast(role),
+         {:ok, project_dir} <- Slug.confined_join(root(), project_slug),
          dir = Path.join(project_dir, "pods"),
          base = seed_basename(role_slug, issue),
          jsonl = Path.join(dir, "#{base}.jsonl"),
@@ -235,7 +237,7 @@ defmodule Fleet.Spawner.SeedStore do
     dir = Path.join([pod_dir, ".claude", "projects", slugify(cwd)])
     dest = Path.expand(Path.join(dir, "#{uuid}.jsonl"))
 
-    unless Fleet.Slug.under_root?(dest, pod_dir) do
+    unless Slug.under_root?(dest, pod_dir) do
       raise ArgumentError,
             "SeedStore.restore: unconfined uuid (#{inspect(uuid)}) — escape refused"
     end
@@ -249,7 +251,7 @@ defmodule Fleet.Spawner.SeedStore do
     #
     # Checked BEFORE `mkdir_p!`: creating the tree first would walk through the link and the
     # verification would come too late to matter.
-    unless Fleet.Slug.link_free_under?(dest, pod_dir) do
+    unless Slug.link_free_under?(dest, pod_dir) do
       raise ArgumentError,
             "SeedStore.restore: a symlink stands between #{inspect(pod_dir)} and " <>
               "#{inspect(dest)} — restore REFUSED. The pod owns its tree; it does not get to " <>

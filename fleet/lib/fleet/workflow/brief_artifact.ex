@@ -47,6 +47,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   # connections + the poller dispatch) on the same project's ops worktree would race on
   # `.git/index.lock`. `OpsObjectSync` funnels one git transaction at a time; `OpsObject` stays the
   # engine (reached only via the gate). Same signature, so the switch is a one-liner.
+  alias Fleet.Layout
   alias Fleet.Workflow.{OpsObject, OpsObjectSync}
 
   @type ok :: %{ref: String.t(), sha: String.t(), push: OpsObject.push_state() | :unknown}
@@ -69,7 +70,7 @@ defmodule Fleet.Workflow.BriefArtifact do
   """
   @spec commit(Path.t(), String.t(), keyword()) :: {:ok, ok()} | {:error, term()}
   def commit(work_dir, content, opts \\ []) when is_binary(work_dir) and is_binary(content) do
-    ref = Fleet.Layout.brief_ref(Keyword.get(opts, :kind), object_name(content, opts))
+    ref = Layout.brief_ref(Keyword.get(opts, :kind), object_name(content, opts))
 
     case OpsObjectSync.commit_object(work_dir, ref, content, Keyword.put(opts, :label, "brief")) do
       # `push` carried through: a brief is READ by the pod from the local worktree mount, so its
@@ -138,8 +139,8 @@ defmodule Fleet.Workflow.BriefArtifact do
 
   def materialize(brief, repo, opts)
       when is_binary(brief) and brief != "" and is_binary(repo) and repo != "" do
-    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
-    work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
+    ops_root = Keyword.get(opts, :ops_root, Layout.ops_root())
+    work_dir = Path.join(ops_root, Layout.project_name(repo))
 
     case commit(work_dir, brief, Keyword.delete(opts, :ops_root)) do
       # `push` is dropped HERE and only here: the brief's load-bearing reader is the pod, which
@@ -188,11 +189,11 @@ defmodule Fleet.Workflow.BriefArtifact do
           {:ok, String.t()} | {:error, term()}
   def resolve(repo, ref, sha, opts \\ [])
       when is_binary(repo) and is_binary(ref) and is_binary(sha) do
-    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
-    work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
+    ops_root = Keyword.get(opts, :ops_root, Layout.ops_root())
+    work_dir = Path.join(ops_root, Layout.project_name(repo))
 
     cond do
-      not Fleet.Layout.valid_brief_ref?(ref) -> {:error, {:invalid_pointer_ref, ref}}
+      not Layout.valid_brief_ref?(ref) -> {:error, {:invalid_pointer_ref, ref}}
       not File.dir?(work_dir) -> {:error, {:work_dir_missing, work_dir}}
       true -> Fleet.Workflow.Git.show(work_dir, sha, ref)
     end

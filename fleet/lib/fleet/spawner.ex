@@ -78,6 +78,7 @@ defmodule Fleet.Spawner do
     * `{:error, :brief_required}` — one-shot pod without an order (neither inline text nor pointer)
   """
 
+  alias Fleet.CapProfile
   alias Fleet.Spawner.Pod
 
   require Logger
@@ -100,8 +101,8 @@ defmodule Fleet.Spawner do
 
   A missing scope returns false here; `spawn_pod/3` rejects it before consulting this predicate.
   """
-  @spec brief_required?(Fleet.CapProfile.t()) :: boolean()
-  def brief_required?(%Fleet.CapProfile{spec: spec}) do
+  @spec brief_required?(CapProfile.t()) :: boolean()
+  def brief_required?(%CapProfile{spec: spec}) do
     get_in(spec, ["invocation", "lifetime_scope"]) == "one-shot"
   end
 
@@ -137,8 +138,8 @@ defmodule Fleet.Spawner do
   """
   @spec role_has_capability?(String.t(), atom() | String.t()) :: boolean()
   def role_has_capability?(role, cap) when is_binary(role) do
-    case Fleet.CapProfile.load(role) do
-      {:ok, profile} -> Fleet.CapProfile.has_capability?(profile, cap)
+    case CapProfile.load(role) do
+      {:ok, profile} -> CapProfile.has_capability?(profile, cap)
       _ -> false
     end
   end
@@ -163,9 +164,9 @@ defmodule Fleet.Spawner do
         `{:error, :brief_required}`.
       * `:allow_no_brief` — admin/diagnostic escape hatch (bool, default false).
   """
-  @spec spawn_pod(Fleet.CapProfile.t(), String.t(), keyword()) ::
+  @spec spawn_pod(CapProfile.t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
-  def spawn_pod(%Fleet.CapProfile{} = cap_profile, issue_id, opts \\ [])
+  def spawn_pod(%CapProfile{} = cap_profile, issue_id, opts \\ [])
       when is_binary(issue_id) and is_list(opts) do
     # DR-019 — the STRUCTURAL guard: `lifetime_scope` is schema-REQUIRED — it decides brief-required, slot
     # scope, state-fs scope AND release. A %CapProfile{} without it is an INVALID state the struct type
@@ -178,8 +179,8 @@ defmodule Fleet.Spawner do
     # machine contract — the exact silence the field exists to end, and one that reads as correct
     # from the outside (the pod boots, the human just gets an agent holding a worker's contract).
     with :ok <- quiesce_guard(),
-         {:ok, _scope} <- Fleet.CapProfile.fetch_lifetime_scope(cap_profile),
-         {:ok, _who} <- Fleet.CapProfile.fetch_interlocutor(cap_profile),
+         {:ok, _scope} <- CapProfile.fetch_lifetime_scope(cap_profile),
+         {:ok, _who} <- CapProfile.fetch_interlocutor(cap_profile),
          :ok <- project_guard(opts),
          :ok <- brief_guard(cap_profile, opts) do
       pod_id = Keyword.get_lazy(opts, :pod_id, &generate_pod_id/0)
@@ -261,7 +262,7 @@ defmodule Fleet.Spawner do
       cap_profile: cap_profile,
       issue_id: issue_id,
       pod_id: pod_id,
-      slot_key: %{role: Fleet.CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
+      slot_key: %{role: CapProfile.name(cap_profile), repo: Keyword.get(opts, :repo_id)},
       opts: opts
     }
 
@@ -292,7 +293,7 @@ defmodule Fleet.Spawner do
     # `resolve` (base + default modops), NOT bare `load` — a recalled pod must come back with the
     # SAME effective profile a fresh spawn composes, else a structural modop overlay would be
     # silently dropped on recall. Resolved FIRST because the profile decides how the seed is KEYED.
-    with {:ok, cap_profile} <- Fleet.CapProfile.resolve(Fleet.CapProfile, role),
+    with {:ok, cap_profile} <- CapProfile.resolve(CapProfile, role),
          :ok <- recall_key_guard(cap_profile, role, issue),
          {:ok, %{uuid: uuid, jsonl: jsonl}} <-
            seed_or_error(Fleet.Spawner.SeedStore.read_map(project, role, issue)) do
@@ -317,7 +318,7 @@ defmodule Fleet.Spawner do
   # would reintroduce it at the only caller that can ask: a human.
   # The symmetric mismatch is refused too: a project-keyed role has one seed and no ticket to name.
   defp recall_key_guard(cap_profile, role, issue) do
-    case {Fleet.CapProfile.slot_scope(cap_profile), issue} do
+    case {CapProfile.slot_scope(cap_profile), issue} do
       {"instance", nil} -> {:error, {:ticket_required, role}}
       {"project", n} when is_integer(n) -> {:error, {:ticket_not_applicable, role}}
       _ -> :ok
@@ -388,7 +389,7 @@ defmodule Fleet.Spawner do
     end
   end
 
-  defp brief_guard(%Fleet.CapProfile{} = cap_profile, opts) do
+  defp brief_guard(%CapProfile{} = cap_profile, opts) do
     # THE QUESTION IS "DOES THIS POD HAVE AN ORDER?", NOT "IS THERE TEXT IN `:brief`?" — and it is
     # answered by `order_present?/1`, the shared authority, NOT by a shape re-written here. The
     # dispatch that drops the inline copy asks the same function about what remains, so the two
@@ -805,7 +806,7 @@ defmodule Fleet.Spawner do
 
   defp pod_child_spec(args) do
     cap_profile = args.cap_profile
-    scope = Fleet.CapProfile.lifetime_scope(cap_profile)
+    scope = CapProfile.lifetime_scope(cap_profile)
 
     %{
       id: args.pod_id,

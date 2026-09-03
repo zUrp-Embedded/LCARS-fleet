@@ -13,6 +13,7 @@ defmodule Fleet.Project.Onboard.Faces do
   que les gestes vivent dans des modules voisins.
   """
 
+  alias Fleet.Layout
   alias Fleet.Project.GitOps
   alias Fleet.Project.Onboard.Repo
   alias Fleet.Project.Onboard.Scaffold
@@ -20,9 +21,9 @@ defmodule Fleet.Project.Onboard.Faces do
 
   require Logger
 
-  @code_root Fleet.Layout.code_root()
-  @ops_root Fleet.Layout.ops_root()
-  @workshop_root Fleet.Layout.workshop_root()
+  @code_root Layout.code_root()
+  @ops_root Layout.ops_root()
+  @workshop_root Layout.workshop_root()
 
   @doc false
   @spec code_root(keyword()) :: String.t()
@@ -129,10 +130,10 @@ defmodule Fleet.Project.Onboard.Faces do
           {:ok, [String.t()]} | {:error, term(), [String.t()]}
   def ensure_writer_faces(full_name, url, dirs, name, opts) do
     faces = [
-      %{dir: dirs.ops, branch: Fleet.Layout.ops_branch(), template: "ops", mode: 0o2755},
+      %{dir: dirs.ops, branch: Layout.ops_branch(), template: "ops", mode: 0o2755},
       %{
         dir: dirs.workshop,
-        branch: Fleet.Layout.workshop_branch(),
+        branch: Layout.workshop_branch(),
         template: "workshop",
         mode: 0o2775
       }

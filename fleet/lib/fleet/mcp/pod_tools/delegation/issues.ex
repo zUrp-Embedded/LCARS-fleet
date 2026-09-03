@@ -20,6 +20,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
   require Logger
 
+  alias Fleet.Labels
+  alias Fleet.Layout
   alias Fleet.Forge.Payload
   alias Fleet.MCP.PodTools.Delegation.{Dependencies, Gate, IssuePR, Render, Retirement, Workshop}
   alias Fleet.Project.GitOps
@@ -29,7 +31,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # wire enum and this clause drift apart, and the drift is silent in the worst direction: the
   # tool advertises a value the router does not match, so every documentary ticket takes the
   # code path while the description says otherwise.
-  @workshop_destination Fleet.Labels.destination_workshop_token()
+  @workshop_destination Labels.destination_workshop_token()
 
   @doc """
   Places a forge issue ready for the poller — architect gate included.
@@ -206,7 +208,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # F-C047 — the WS1 "merged" marker (set by the gatekeeper seal at merge). The forge-protocol
   # vocabulary lives at the foundation (`Fleet.Labels`, deps: []) — MCP DEPENDS ON the SSOT directly,
   # a local literal would drift ("stage/merged" = `stage_prefix() <> stage_merged()`).
-  @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
+  @merged_label Labels.stage_prefix() <> Labels.stage_merged()
 
   @doc """
   Reads the state of a delegated issue (issue + linked PR) — architect gate (tracking a
@@ -467,7 +469,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
         issue_opts_result =
           case destination do
             @workshop_destination ->
-              case forge.repo_label_id(repo, Fleet.Labels.destination_workshop(), author_opts) do
+              case forge.repo_label_id(repo, Labels.destination_workshop(), author_opts) do
                 {:ok, id} -> {:ok, Keyword.put(issue_opts, :labels, [id])}
                 {:error, reason} -> {:error, {:destination_label_unresolved, inspect(reason)}}
               end
@@ -489,7 +491,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
               # workshop ticket wearing `type:feature` contradicts the card its own destination routes
               # it to, and the contradiction is only visible to the human it misleads.
               _ =
-                forge.add_label(repo, number, Fleet.Labels.type_for_destination(destination), [])
+                forge.add_label(repo, number, Labels.type_for_destination(destination), [])
 
               # Axiom: the repo is NEVER named back to the arch — it has "the
               # project". `title` is ECHOED as registered so the arch CONFIRMS the number↔title
@@ -608,11 +610,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     opts =
       case Application.get_env(:lcars_fleet, :mcp_brief_ops_root) do
         nil ->
-          [name_hint: Fleet.Layout.sanitize_artifact_name(title), kind: "worker", push: :ops]
+          [name_hint: Layout.sanitize_artifact_name(title), kind: "worker", push: :ops]
 
         root ->
           [
-            name_hint: Fleet.Layout.sanitize_artifact_name(title),
+            name_hint: Layout.sanitize_artifact_name(title),
             kind: "worker",
             push: :ops,
             ops_root: root
@@ -638,7 +640,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_pointer(brief, nil, _repo), do: brief
 
   defp with_pointer(brief, {ref, sha}, repo),
-    do: brief <> "\n\n---\n" <> Fleet.Layout.brief_pointer_trailer(ref, sha, repo)
+    do: brief <> "\n\n---\n" <> Layout.brief_pointer_trailer(ref, sha, repo)
 
   # The criteria doc lives under `gate-briefs/` — `kind: "judge"` routes it there (`brief_ref/2`).
   # `nil`/empty criteria (a workshop ticket, or a degraded materialize) → no pointer, never a wall:
@@ -655,7 +657,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     # trees. The suffix kills that trap. The suffix cannot land in `brief_ref/2`: that primitive also
     # names the judge WORK-ORDERS (`issue-N-<role>.md`), which must stay unmarked.
     base = [
-      name_hint: Fleet.Layout.sanitize_artifact_name(title) <> "--criteria",
+      name_hint: Layout.sanitize_artifact_name(title) <> "--criteria",
       kind: "judge",
       push: :ops
     ]
@@ -675,7 +677,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   defp with_criteria_pointer(body, nil, _repo), do: body
 
   defp with_criteria_pointer(body, {ref, sha}, repo),
-    do: body <> "\n" <> Fleet.Layout.criteria_pointer_line(ref, sha, repo)
+    do: body <> "\n" <> Layout.criteria_pointer_line(ref, sha, repo)
 
   # THE CRITERIA MUST STAND ALONE — the judge mounts nothing but its criterion, so a criterion that
   # DELEGATES to another committed doc points at a tree the judge will never read. This wall is the
@@ -691,10 +693,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # would have to guess.
   defp refuse_pointing_criteria(criteria) when is_binary(criteria) and criteria != "" do
     cond do
-      match?({:ok, _}, Fleet.Layout.parse_brief_pointer(criteria)) ->
+      match?({:ok, _}, Layout.parse_brief_pointer(criteria)) ->
         {:error, {:criteria_not_self_contained, :embeds_brief_pointer}}
 
-      match?({:ok, _}, Fleet.Layout.parse_criteria_pointer(criteria)) ->
+      match?({:ok, _}, Layout.parse_criteria_pointer(criteria)) ->
         {:error, {:criteria_not_self_contained, :embeds_criteria_pointer}}
 
       true ->
@@ -709,7 +711,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # the criteria is actually authored. A `workshop` ticket has no jury (the arch closes the loop in
   # its own mount), so it carries none. Absent/`code` destination = it ships → criteria required.
   defp require_criteria_for_code(destination, criteria) do
-    workshop = Fleet.Labels.destination_workshop_token()
+    workshop = Labels.destination_workshop_token()
 
     cond do
       destination == workshop -> :ok
@@ -734,7 +736,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
   defp publish_lot(repo, role, name) when is_binary(name) do
     dir = Workshop.lot_workspace(repo)
-    face = Fleet.Layout.workshop_branch()
+    face = Layout.workshop_branch()
 
     with {:ok, ref} <- Fleet.Forge.Protocol.lot_branch(name),
          {:ok, identity} <- Fleet.Credentials.ForgeIdentity.for_role(role),

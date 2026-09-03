@@ -9,6 +9,7 @@ defmodule Fleet.Project.Onboard.Create do
   protection de `main`.
   """
 
+  alias Fleet.Layout
   alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
   alias Fleet.Project.Onboard.Refute
@@ -101,7 +102,7 @@ defmodule Fleet.Project.Onboard.Create do
              full_name,
              url,
              dirs.ops,
-             Fleet.Layout.ops_branch(),
+             Layout.ops_branch(),
              "ops",
              name,
              opts
@@ -112,7 +113,7 @@ defmodule Fleet.Project.Onboard.Create do
              full_name,
              url,
              dirs.workshop,
-             Fleet.Layout.workshop_branch(),
+             Layout.workshop_branch(),
              "workshop",
              name,
              opts
@@ -120,7 +121,7 @@ defmodule Fleet.Project.Onboard.Create do
          :ok <- Faces.lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ready — main=#{dirs.code}, " <>
-          "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
+          "#{Layout.ops_branch()}=#{dirs.ops}, #{Layout.workshop_branch()}=#{dirs.workshop}"
       )
 
       {:ok, Onboard.onboard_result(full_name, dirs, opts)}
@@ -174,7 +175,7 @@ defmodule Fleet.Project.Onboard.Create do
     # n'y a rien a choisir. Un `opts[:org] || default_org()` rendrait le PREMIER catalogue actif, et
     # l'humain serait alors verifie contre l'org d'un autre catalogue que celui du depot.
     org = full_name |> String.split("/") |> List.first()
-    name = Fleet.Layout.project_name(full_name)
+    name = Layout.project_name(full_name)
     dirs = Faces.face_dirs(name, opts)
 
     # ⚠ CE VERBE VERIFIE QUE LA CARTE EST DECLARABLE, COMME LES QUATRE AUTRES. Sans ce controle, un
@@ -272,7 +273,7 @@ defmodule Fleet.Project.Onboard.Create do
     # travail. Une forge illisible n'est pas une preuve de publication — elle vaut « pas satisfait »,
     # ce qui coute au pire un re-import idempotent.
     published? =
-      Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.workshop_branch()], fn branch ->
+      Enum.all?([Layout.ops_branch(), Layout.workshop_branch()], fn branch ->
         Repo.repo_mod(opts).branch_exists?(full_name, branch, Repo.fc_opts(opts)) == {:ok, true}
       end)
 

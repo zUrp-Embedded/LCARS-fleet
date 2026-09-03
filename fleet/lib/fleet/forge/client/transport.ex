@@ -38,6 +38,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   require Logger
 
+  alias Req.Response
   alias Fleet.Opts
 
   @type config :: %{
@@ -264,7 +265,7 @@ defmodule Fleet.Forge.Client.Transport do
     path = "#{path_base}#{sep}page=#{page}&limit=#{@page_limit}"
 
     case request_raw(config, :get, path, nil) |> unwrap_page(unwrap) do
-      {:ok, %Req.Response{status: status, body: items} = resp}
+      {:ok, %Response{status: status, body: items} = resp}
       when status in 200..299 and is_list(items) ->
         acc = [items | acc]
         got = Enum.reduce(acc, 0, fn page_items, n -> n + length(page_items) end)
@@ -279,10 +280,10 @@ defmodule Fleet.Forge.Client.Transport do
           true -> do_paginate(config, path_base, query, unwrap, page + 1, acc)
         end
 
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+      {:ok, %Response{status: status, body: body}} when status in 200..299 ->
         {:error, {:unexpected_page_shape, path, page, body}}
 
-      {:ok, %Req.Response{status: status, body: body}} ->
+      {:ok, %Response{status: status, body: body}} ->
         {:error, {:http, status, body}}
 
       {:error, exception} ->
@@ -295,7 +296,7 @@ defmodule Fleet.Forge.Client.Transport do
   # on the response the stop condition reads.
   defp unwrap_page(result, nil), do: result
 
-  defp unwrap_page({:ok, %Req.Response{status: status, body: body} = resp}, key)
+  defp unwrap_page({:ok, %Response{status: status, body: body} = resp}, key)
        when status in 200..299 and is_map(body) do
     {:ok, %{resp | body: Map.get(body, key)}}
   end
@@ -366,10 +367,10 @@ defmodule Fleet.Forge.Client.Transport do
   # heuristique (cf. `do_paginate/5`).
   defp request(config, method, path, body) do
     case request_raw(config, method, path, body) do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+      {:ok, %Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
-      {:ok, %Req.Response{status: status, body: body}} ->
+      {:ok, %Response{status: status, body: body}} ->
         _ = name_permanent(status, method, path, body)
         {:error, {:http, status, body}}
 
@@ -423,8 +424,8 @@ defmodule Fleet.Forge.Client.Transport do
 
   # Le total annonce, ou `nil` s'il ne l'est pas. `nil` n'est PAS zero : il veut dire « non dit »,
   # et la pagination retombe alors sur son heuristique en le sachant.
-  defp total_count(%Req.Response{} = resp) do
-    case Req.Response.get_header(resp, "x-total-count") do
+  defp total_count(%Response{} = resp) do
+    case Response.get_header(resp, "x-total-count") do
       [v | _] ->
         case Integer.parse(v) do
           {n, _} when n >= 0 -> n
@@ -436,6 +437,6 @@ defmodule Fleet.Forge.Client.Transport do
     end
   end
 
-  defp forge_result_tag({:ok, %Req.Response{status: status}}), do: "http #{status}"
+  defp forge_result_tag({:ok, %Response{status: status}}), do: "http #{status}"
   defp forge_result_tag({:error, exception}), do: "transport #{inspect(exception)}"
 end

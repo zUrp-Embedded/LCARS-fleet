@@ -8,6 +8,8 @@ defmodule Fleet.MCP.Supervisor do
 
   use Supervisor
 
+  alias Fleet.MCP.PodSocketSupervisor
+
   require Logger
 
   @spec start_link(keyword()) :: Supervisor.on_start()
@@ -18,7 +20,7 @@ defmodule Fleet.MCP.Supervisor do
   @impl Supervisor
   def init(opts) do
     # Before any acceptor exists, every socket file is cold-boot residue.
-    Fleet.MCP.PodSocketSupervisor.sweep_stale_sockets()
+    PodSocketSupervisor.sweep_stale_sockets()
 
     children = [
       {Fleet.MCP.Server, opts},
@@ -31,7 +33,7 @@ defmodule Fleet.MCP.Supervisor do
       # job the tool call must not block on. A separate pool so a slow publish never starves the
       # connection tasks above; the small cap bounds concurrent history rewrites.
       {Task.Supervisor, name: Fleet.MCP.PublishTaskSupervisor, max_children: 4},
-      Fleet.MCP.PodSocketSupervisor
+      PodSocketSupervisor
     ]
 
     children = children ++ socket_warden_child()
@@ -135,7 +137,7 @@ defmodule Fleet.MCP.Supervisor do
   # `SocketWarden.report_deaf_pods/1` traite `:error` par « on ne blanchit personne ». Seul cet
   # operande ne s'en servait pas.
   defp live_acceptor_ids do
-    {:ok, Fleet.MCP.PodSocketSupervisor.live_pod_ids()}
+    {:ok, PodSocketSupervisor.live_pod_ids()}
   rescue
     e -> acceptor_enumeration_failed(e)
   catch
@@ -146,7 +148,7 @@ defmodule Fleet.MCP.Supervisor do
   # exactement ce que ce module refuse ailleurs : un `0` rendu par une lecture cassee est
   # indiscernable d'un `0` mesure, et il ferait rendre `:operational` a un statut aveugle.
   defp active_sockets do
-    %{active: active} = DynamicSupervisor.count_children(Fleet.MCP.PodSocketSupervisor)
+    %{active: active} = DynamicSupervisor.count_children(PodSocketSupervisor)
     {:ok, active}
   rescue
     e -> acceptor_enumeration_failed(e)
@@ -168,7 +170,7 @@ defmodule Fleet.MCP.Supervisor do
   # donc les NOMS et non un compte : un compte dit qu'il y a des sourds, il ne dit pas lesquels, et
   # un incident sans sujet n'est pas actionnable.
   defp socket_dirs_on_disk do
-    base = Fleet.MCP.PodSocketSupervisor.base_dir()
+    base = PodSocketSupervisor.base_dir()
 
     ids =
       base
@@ -189,7 +191,7 @@ defmodule Fleet.MCP.Supervisor do
   end
 
   defp acceptor_supervisor_alive? do
-    case Process.whereis(Fleet.MCP.PodSocketSupervisor) do
+    case Process.whereis(PodSocketSupervisor) do
       pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
     end

@@ -22,25 +22,26 @@ defmodule Fleet.TaskQueue do
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
   """
 
+  alias Fleet.TaskQueue.WorkItem
   alias Fleet.TaskQueue.Server
 
   @server Server
 
   @doc "Enqueues a work item for the identified pod. Generates a `task.id` (UUID v4 = correlation_id)."
-  @spec enqueue(String.t(), map()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, term()}
+  @spec enqueue(String.t(), map()) :: {:ok, WorkItem.t()} | {:error, term()}
   def enqueue(pod_id, task_attrs), do: enqueue(@server, pod_id, task_attrs)
 
   @spec enqueue(GenServer.server(), String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, term()}
+          {:ok, WorkItem.t()} | {:error, term()}
   def enqueue(server, pod_id, task_attrs) when is_binary(pod_id) and is_map(task_attrs),
     do: GenServer.call(server, {:enqueue, pod_id, task_attrs})
 
   @doc "Retrieves the pod's active work item, idempotently until completion or clear."
-  @spec get_for_pod(String.t()) :: {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_work_item}
+  @spec get_for_pod(String.t()) :: {:ok, WorkItem.t()} | {:error, :no_work_item}
   def get_for_pod(pod_id), do: get_for_pod(@server, pod_id)
 
   @spec get_for_pod(GenServer.server(), String.t()) ::
-          {:ok, Fleet.TaskQueue.WorkItem.t()} | {:error, :no_work_item}
+          {:ok, WorkItem.t()} | {:error, :no_work_item}
   def get_for_pod(server, pod_id) when is_binary(pod_id),
     do: GenServer.call(server, {:get_for_pod, pod_id})
 
@@ -53,7 +54,7 @@ defmodule Fleet.TaskQueue do
   can replay delivery.
   """
   @spec submit_result(String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.WorkItem.t()}
+          {:ok, WorkItem.t()}
           | {:error,
              :no_active_work_item
              | :double_submit_ignored
@@ -63,7 +64,7 @@ defmodule Fleet.TaskQueue do
   def submit_result(pod_id, result), do: submit_result(@server, pod_id, result)
 
   @spec submit_result(GenServer.server(), String.t(), map()) ::
-          {:ok, Fleet.TaskQueue.WorkItem.t()}
+          {:ok, WorkItem.t()}
           | {:error,
              :no_active_work_item
              | :double_submit_ignored
@@ -74,10 +75,10 @@ defmodule Fleet.TaskQueue do
     do: GenServer.call(server, {:submit_result, pod_id, result})
 
   @doc "Lists pending work items."
-  @spec list_pending() :: [Fleet.TaskQueue.WorkItem.t()]
+  @spec list_pending() :: [WorkItem.t()]
   def list_pending, do: list_pending(@server)
 
-  @spec list_pending(GenServer.server()) :: [Fleet.TaskQueue.WorkItem.t()]
+  @spec list_pending(GenServer.server()) :: [WorkItem.t()]
   def list_pending(server), do: GenServer.call(server, :list_pending)
 
   @doc """
@@ -88,10 +89,10 @@ defmodule Fleet.TaskQueue do
   eval is owned (the task's `gate_eval` metadata carries the work unit); an eval that is
   `:cleared` (superseded) or `:completed` no longer is → the reclaim takes over.
   """
-  @spec list_active() :: [Fleet.TaskQueue.WorkItem.t()]
+  @spec list_active() :: [WorkItem.t()]
   def list_active, do: list_active(@server)
 
-  @spec list_active(GenServer.server()) :: [Fleet.TaskQueue.WorkItem.t()]
+  @spec list_active(GenServer.server()) :: [WorkItem.t()]
   def list_active(server), do: GenServer.call(server, :list_active)
 
   @doc "Clears all active work items for a pod. Idempotent."

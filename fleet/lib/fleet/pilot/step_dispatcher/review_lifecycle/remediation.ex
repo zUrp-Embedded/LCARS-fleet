@@ -31,6 +31,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
   # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
+  alias Fleet.Forge.Protocol
+  alias Fleet.Layout
   alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
@@ -54,7 +56,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   @spec dispatch_rework(integer(), String.t(), Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch_rework(pr_number, head, %Ctx{} = ctx) do
-    case Fleet.Forge.Protocol.parse_feature_branch(head) do
+    case Protocol.parse_feature_branch(head) do
       {:ok, {issue_n, producer_role}} ->
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, rounds} <-
@@ -132,14 +134,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # `{:skipped, :role_busy}` ou `{:skipped, :role_at_capacity}` sans rien lancer : marquer là
   # dépenserait un round que personne n'a joué, et le budget se viderait sur une file d'attente.
   defp dispatch_ci_rework(pr_number, head, %Ctx{} = ctx) do
-    case Fleet.Forge.Protocol.parse_feature_branch(head) do
+    case Protocol.parse_feature_branch(head) do
       {:ok, {issue_n, _producer_role}} ->
         with {:ok, budget} <- pr_rework_budget(ctx, issue_n),
              {:ok, spent} <-
                ctx.forge.count_comments_marked(
                  ctx.repo,
                  issue_n,
-                 Fleet.Forge.Protocol.ci_rework_prefix(issue_n),
+                 Protocol.ci_rework_prefix(issue_n),
                  ctx.forge_opts
                ) do
           if spent >= budget do
@@ -171,7 +173,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   defp record_ci_rework(pr_number, head, issue_n, %Ctx{} = ctx, {:ok, _} = dispatched) do
     sha = head_sha(head, pr_number, ctx)
-    marker = Fleet.Forge.Protocol.ci_rework_marker(issue_n, sha)
+    marker = Protocol.ci_rework_marker(issue_n, sha)
 
     body =
       "⚠ Rework demandé par une CI ROUGE (aucune review ne l'a demandé) — le round est compté : " <>
@@ -365,7 +367,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       |> ConflictReport.render(outcome)
       |> Pinning.render(
         work_dir: conflict_report_work_dir(ctx),
-        ref: Fleet.Layout.conflict_ref(pr_number),
+        ref: Layout.conflict_ref(pr_number),
         kind: "Rapport",
         label: "conflict",
         repo: ctx.repo
@@ -414,7 +416,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp report_loss_consequence(_outcome, _pr_number), do: ""
 
   defp conflict_report_work_dir(%Ctx{} = ctx) do
-    dir = Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(ctx.repo))
+    dir = Path.join(Layout.ops_root(), Layout.project_name(ctx.repo))
     if File.dir?(dir), do: dir
   end
 
@@ -500,7 +502,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp conflict_face_opts(%Ctx{} = ctx) do
     base = Keyword.fetch!(ctx.opts, :pr_base_branch)
 
-    name = Fleet.Layout.project_name(ctx.repo)
+    name = Layout.project_name(ctx.repo)
 
     # ⚠ ON DELEGUE A L'AUTORITE DES FACES PLUTOT QUE DE LES ENUMERER ICI. Une enumeration ecrite a
     # la main en oublie une : la PR basee sur cette face-la tombe sur un `case` sans clause —
@@ -511,9 +513,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     # branche de travail, resolue dans le worktree de code — la seule reponse disponible, la base ne
     # disant pas sur quelle face vit la branche dont elle fourche.
     dir =
-      case Fleet.Layout.face_of(base) do
-        nil -> Path.join(Fleet.Layout.code_root(), name)
-        face -> Path.join(Fleet.Layout.face_root(face), name)
+      case Layout.face_of(base) do
+        nil -> Path.join(Layout.code_root(), name)
+        face -> Path.join(Layout.face_root(face), name)
       end
 
     [base_branch: "origin/" <> base, dir: dir]
@@ -746,7 +748,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # The head was already parsed by the caller (conflict_rework) — a re-parse failure here is
   # unreachable by construction; raise loud rather than a silent wrong role.
   defp producer_of!(head) do
-    {:ok, {_issue_n, producer}} = Fleet.Forge.Protocol.parse_feature_branch(head)
+    {:ok, {_issue_n, producer}} = Protocol.parse_feature_branch(head)
     producer
   end
 

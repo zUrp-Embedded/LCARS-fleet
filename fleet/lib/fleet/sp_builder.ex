@@ -65,6 +65,9 @@ defmodule Fleet.SPBuilder do
 
   @behaviour Fleet.SPBuilder.Composer
 
+  alias Fleet.CapProfile
+  alias Fleet.Catalogue
+  alias Fleet.SPBuilder.Image
   alias Fleet.SPBuilder.Monk
   alias Fleet.SPBuilder.RepoSections
 
@@ -89,29 +92,29 @@ defmodule Fleet.SPBuilder do
 
   @doc "Publishes the validated prompt-artifact image; unreadable artifacts raise."
   @spec publish_image!() :: :ok
-  defdelegate publish_image!(), to: Fleet.SPBuilder.Image, as: :publish!
+  defdelegate publish_image!(), to: Image, as: :publish!
 
   @doc "Returns a published role draft, `:not_found`, or `:unpublished`."
   @spec image_draft(String.t()) :: {:ok, String.t()} | :not_found | :unpublished
-  defdelegate image_draft(role), to: Fleet.SPBuilder.Image, as: :draft
+  defdelegate image_draft(role), to: Image, as: :draft
   @spec image_draft(String.t(), Path.t() | nil) :: {:ok, String.t()} | :not_found | :unpublished
-  defdelegate image_draft(role, root), to: Fleet.SPBuilder.Image, as: :draft
+  defdelegate image_draft(role, root), to: Image, as: :draft
 
   @doc "Returns the published worker protocol or `:unpublished`."
   @spec image_worker_protocol() :: {:ok, String.t()} | :unpublished
-  defdelegate image_worker_protocol(), to: Fleet.SPBuilder.Image, as: :worker_protocol
+  defdelegate image_worker_protocol(), to: Image, as: :worker_protocol
   @spec image_worker_protocol(Path.t() | nil) :: {:ok, String.t()} | :unpublished
-  defdelegate image_worker_protocol(root), to: Fleet.SPBuilder.Image, as: :worker_protocol
+  defdelegate image_worker_protocol(root), to: Image, as: :worker_protocol
 
   @doc "Returns the published human protocol or `:unpublished`."
   @spec image_human_protocol() :: {:ok, String.t()} | :unpublished
-  defdelegate image_human_protocol(), to: Fleet.SPBuilder.Image, as: :human_protocol
+  defdelegate image_human_protocol(), to: Image, as: :human_protocol
   @spec image_human_protocol(Path.t() | nil) :: {:ok, String.t()} | :unpublished
-  defdelegate image_human_protocol(root), to: Fleet.SPBuilder.Image, as: :human_protocol
+  defdelegate image_human_protocol(root), to: Image, as: :human_protocol
 
   @doc "Returns modified/vanished image sources, or `:unpublished`."
   @spec image_drift() :: {:ok, [{Path.t(), :modified | :vanished}]} | :unpublished
-  defdelegate image_drift(), to: Fleet.SPBuilder.Image, as: :drift
+  defdelegate image_drift(), to: Image, as: :drift
 
   @doc """
   Composes a system prompt from a cap profile and ordered modop bundles.
@@ -121,9 +124,9 @@ defmodule Fleet.SPBuilder do
   errors.
   """
   @impl Fleet.SPBuilder.Composer
-  @spec compose(Fleet.CapProfile.t(), [String.t()], compose_opts()) ::
+  @spec compose(CapProfile.t(), [String.t()], compose_opts()) ::
           {:ok, composed()} | {:error, term()}
-  def compose(%Fleet.CapProfile{} = cap_profile, modop_bundles, opts \\ [])
+  def compose(%CapProfile{} = cap_profile, modop_bundles, opts \\ [])
       when is_list(modop_bundles) and is_list(opts) do
     with :ok <- validate_compose_opts(opts),
          {:ok, modop_fragments} <-
@@ -178,14 +181,14 @@ defmodule Fleet.SPBuilder do
   Commands and Gotchas.
   """
   @impl Fleet.SPBuilder.Composer
-  @spec compose_claude_md(Fleet.CapProfile.t(), String.t() | nil, keyword()) ::
+  @spec compose_claude_md(CapProfile.t(), String.t() | nil, keyword()) ::
           {:ok, String.t()} | {:error, term()}
-  def compose_claude_md(%Fleet.CapProfile{} = cap_profile, repo_claude_md_path, _opts \\ []) do
+  def compose_claude_md(%CapProfile{} = cap_profile, repo_claude_md_path, _opts \\ []) do
     with {:ok, repo_sections} <- RepoSections.read(repo_claude_md_path) do
       assigns = [
-        role: Fleet.CapProfile.name(cap_profile),
-        containment: Fleet.CapProfile.containment(cap_profile),
-        lifetime_scope: Fleet.CapProfile.lifetime_scope(cap_profile, "unknown"),
+        role: CapProfile.name(cap_profile),
+        containment: CapProfile.containment(cap_profile),
+        lifetime_scope: CapProfile.lifetime_scope(cap_profile, "unknown"),
         repo_claude_md_sections: repo_sections
       ]
 
@@ -200,14 +203,14 @@ defmodule Fleet.SPBuilder do
   entries are delivered separately and are excluded from filesystem checks.
   """
   @impl Fleet.SPBuilder.Composer
-  @spec filter_skills(Fleet.CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
-  def filter_skills(%Fleet.CapProfile{} = cap_profile, skills_root)
+  @spec filter_skills(CapProfile.t(), Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
+  def filter_skills(%CapProfile{} = cap_profile, skills_root)
       when is_binary(skills_root) do
     # THE resolver, like every other reader — a role and the material it declares resolve from the
     # same search path, or a catalogue can carry a role it cannot equip (W-11: `starfleet` declares
     # `card-revision`, the skill followed the role into the system catalogue, and the permanent pod
     # respawn-looped every five seconds).
-    roots = Fleet.Catalogue.search(skills_root, Fleet.Catalogue.rel(:skills))
+    roots = Catalogue.search(skills_root, Catalogue.rel(:skills))
 
     if roots == [] do
       {:error, :skills_root_missing}
@@ -238,7 +241,7 @@ defmodule Fleet.SPBuilder do
   @doc """
   Resolves the cap profile's monk injection through `Fleet.SPBuilder.Monk`.
   """
-  @spec resolve_monk_injection(Fleet.CapProfile.t(), keyword()) ::
+  @spec resolve_monk_injection(CapProfile.t(), keyword()) ::
           {:ok, Monk.injection()} | :not_a_monk | {:error, term()}
   defdelegate resolve_monk_injection(cap_profile, opts \\ []), to: Monk, as: :resolve
 
@@ -258,8 +261,8 @@ defmodule Fleet.SPBuilder do
     end
   end
 
-  defp sp_image(nil), do: Fleet.SPBuilder.Image.published()
-  defp sp_image(root) when is_binary(root), do: Fleet.SPBuilder.Image.published(root)
+  defp sp_image(nil), do: Image.published()
+  defp sp_image(root) when is_binary(root), do: Image.published(root)
 
   defp read_modop_fragments([], _root), do: {:ok, []}
 
@@ -286,7 +289,7 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_modop_fragments_from_disk(modop_bundles) do
-    roots = Fleet.Catalogue.search(:modops)
+    roots = Catalogue.search(:modops)
 
     result =
       Enum.reduce_while(modop_bundles, {:ok, []}, fn name, {:ok, acc} ->
@@ -320,7 +323,7 @@ defmodule Fleet.SPBuilder do
   end
 
   defp read_subagent_template(
-         %Fleet.CapProfile{spec: %{"invocation" => %{"subagent_template" => name}}} = cap
+         %CapProfile{spec: %{"invocation" => %{"subagent_template" => name}}} = cap
        )
        when is_binary(name) and name != "" do
     if Fleet.Slug.valid?(name) do
@@ -348,10 +351,10 @@ defmodule Fleet.SPBuilder do
         # `find/2` : elle resoudrait au premier catalogue installe qui porte le template, tous
         # confondus, pendant que le regime image d'a cote est per-catalogue — et deux regimes qui
         # repondent differemment est LE defaut (dette `search/1`).
-        scope_root = root || Fleet.Catalogue.root()
+        scope_root = root || Catalogue.root()
 
-        Fleet.Catalogue.tree_scope(scope_root, :subagent_templates)
-        |> Fleet.Catalogue.find_in("subagent-#{name}.md")
+        Catalogue.tree_scope(scope_root, :subagent_templates)
+        |> Catalogue.find_in("subagent-#{name}.md")
         |> case do
           nil -> :error
           path -> with {:error, _} <- File.read(path), do: :error
@@ -394,7 +397,7 @@ defmodule Fleet.SPBuilder do
   #     it elsewhere moves a production daemon onto evaluate-whatever-is-on-disk and nothing in the
   #     code would look any different.
   defp do_render(name, assigns) do
-    case Fleet.SPBuilder.Image.template(name) do
+    case Image.template(name) do
       {:ok, source} -> {:ok, EEx.eval_string(source, assigns: assigns)}
       :not_found -> {:error, {:template_missing_from_image, name}}
       :unpublished -> {:ok, EEx.eval_file(template_path(name), assigns: assigns)}
@@ -403,7 +406,7 @@ defmodule Fleet.SPBuilder do
     e -> {:error, {:template_render_failed, Exception.message(e)}}
   end
 
-  defp template_path(name), do: Path.join(Fleet.Catalogue.sp_templates_root(), name)
+  defp template_path(name), do: Path.join(Catalogue.sp_templates_root(), name)
 
   @doc """
   Returns the shared root used both to publish role drafts and to serve the
@@ -412,7 +415,7 @@ defmodule Fleet.SPBuilder do
   @spec sp_drafts_root() :: String.t()
   def sp_drafts_root do
     Application.get_env(:lcars_fleet, :sp_builder_sp_drafts_root) ||
-      Fleet.Catalogue.sp_drafts_root()
+      Catalogue.sp_drafts_root()
   end
 
   @doc """
@@ -433,13 +436,13 @@ defmodule Fleet.SPBuilder do
     # `Catalogue.root/0` et pas `hd(installed_roots())` : les deux rendent le meme chemin — la liste
     # est CONSTRUITE a partir de cette fonction — mais l'un le NOMME la ou l'autre designe une
     # POSITION.
-    scope_root = root || Fleet.Catalogue.root()
+    scope_root = root || Catalogue.root()
     name = "agent-#{role}-base.md"
 
-    scope = Fleet.Catalogue.tree_scope(scope_root, :sp_drafts)
+    scope = Catalogue.tree_scope(scope_root, :sp_drafts)
 
-    case Fleet.Catalogue.find_in(scope, name) do
-      nil -> Path.join([scope_root, Fleet.Catalogue.rel(:sp_drafts), name])
+    case Catalogue.find_in(scope, name) do
+      nil -> Path.join([scope_root, Catalogue.rel(:sp_drafts), name])
       path -> path
     end
   end

@@ -15,6 +15,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
   require Logger
 
+  alias Fleet.Catalogue
   alias Fleet.MCP.PodTools.Delegation.{Gate, Render}
   alias Fleet.MCP.PodTools.ProjectPublish
 
@@ -240,19 +241,19 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   @spec list_catalogues(map()) :: {:ok, map()} | {:error, term()}
   def list_catalogues(state) do
     with {:ok, _role} <- Gate.require_onboarder(state) do
-      installed = Fleet.Catalogue.installed_catalogues()
-      bundled_root = Fleet.Catalogue.root()
+      installed = Catalogue.installed_catalogues()
+      bundled_root = Catalogue.root()
 
       answered = MapSet.new(installed, & &1.root)
 
       unreadable =
-        Fleet.Catalogue.installed_roots()
+        Catalogue.installed_roots()
         |> Enum.reject(&MapSet.member?(answered, &1))
         |> Enum.map(&Path.basename/1)
 
       for name <- unreadable do
         Logger.warning(
-          "Delegation: catalogue material '#{name}' carries a #{Fleet.Catalogue.manifest_file()} " <>
+          "Delegation: catalogue material '#{name}' carries a #{Catalogue.manifest_file()} " <>
             "that yields no declared name — served by NOTHING and offered to nobody. Its cause is " <>
             "not decided here (absent, unparseable, or without a `name:`): `lcars catalogue " <>
             "verify` names it. Without this line the directory would vanish in silence."
@@ -262,7 +263,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
       served =
         Enum.map(installed, fn %{name: name, root: root} ->
           %{"name" => name, "bundled" => root == bundled_root}
-          |> Render.put_present("default_card", Fleet.Catalogue.default_card(root))
+          |> Render.put_present("default_card", Catalogue.default_card(root))
         end)
 
       # ⚠ L'ORDRE DES DEUX DERNIERES CLAUSES EST PORTEUR : `{offer, bad}` filtre aussi `bad == []`,

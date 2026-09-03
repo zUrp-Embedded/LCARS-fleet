@@ -7,6 +7,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   prouve l'identite, ou un arbre prouve vide. Il n'y a pas de `rm` de confiance dans ce fichier.
   """
 
+  alias Fleet.Forge.Protocol
   alias Fleet.Project.Onboard
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Project.GitOps
@@ -61,7 +62,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     case forge.list_open_issues(full_name, Repo.fc_opts(opts)) do
       {:ok, issues} ->
         issues
-        |> Enum.filter(&Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
+        |> Enum.filter(&Protocol.parked_issue_title?(&1["title"]))
         |> close_markers(full_name, forge, opts)
 
       {:error, reason} ->
@@ -162,7 +163,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
            ) do
       numbers =
         issues
-        |> Enum.reject(&Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
+        |> Enum.reject(&Protocol.parked_issue_title?(&1["title"]))
         |> Enum.map(&Map.get(&1, "number"))
         |> Enum.filter(&is_integer/1)
 
@@ -209,7 +210,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   defp parked_state(full_name, opts) do
     case forge_issues(opts).list_open_issues(full_name, Repo.fc_opts(opts)) do
       {:ok, issues} ->
-        parked? = Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
+        parked? = Enum.any?(issues, &Protocol.parked_issue_title?(&1["title"]))
         %{"state" => if(parked?, do: "parked", else: "open")}
 
       {:error, reason} ->
@@ -246,7 +247,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
          :ok <- Onboard.require_on_machine(full_name, proj_dir),
          :ok <- require_proven_identity(full_name, proj_dir, opts),
          {:ok, issues} <- read_parked_state(forge, full_name, opts) do
-      if Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"])) do
+      if Enum.any?(issues, &Protocol.parked_issue_title?(&1["title"])) do
         {:ok,
          %{
            repo: full_name,
@@ -276,7 +277,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
         issue_opts = Keyword.put(Repo.fc_opts(opts), :assignees, [human])
-        title = Fleet.Forge.Protocol.parked_issue_title()
+        title = Protocol.parked_issue_title()
 
         case forge.create_issue(full_name, title, parked_marker_body(), issue_opts) do
           {:ok, n} ->

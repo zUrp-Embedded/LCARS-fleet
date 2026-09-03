@@ -21,6 +21,8 @@ defmodule Fleet.Spawner.Pod.Assets do
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
   """
 
+  alias Fleet.CapProfile
+  alias Fleet.SPBuilder
   alias Fleet.Spawner.Pod.Fs
 
   @doc """
@@ -51,8 +53,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   `claude_launch.sh`'s `.claude.json`, with the measurement written next to it. A setting that declares an intention it cannot enforce is worse
   than no setting: it tells every reader the matter is handled.
   """
-  @spec pod_settings_json(Fleet.CapProfile.t()) :: String.t()
-  def pod_settings_json(%Fleet.CapProfile{} = cap_profile) do
+  @spec pod_settings_json(CapProfile.t()) :: String.t()
+  def pod_settings_json(%CapProfile{} = cap_profile) do
     base = %{
       "hasCompletedOnboarding" => true,
       "hasAcknowledgedCostThreshold" => true,
@@ -92,20 +94,20 @@ defmodule Fleet.Spawner.Pod.Assets do
   that makes it safe is DECLARED versus SILENT: a role inheriting a prompt by accident stays
   refused; one that says so in its yaml has assumed it.
   """
-  @spec read_agent_draft(Fleet.CapProfile.t()) ::
+  @spec read_agent_draft(CapProfile.t()) ::
           {:ok, String.t()}
           | {:error,
              {:agent_draft_missing, Path.t(), File.posix()}
              | {:agent_draft_invalid_role, String.t()}}
-  def read_agent_draft(%Fleet.CapProfile{spec: spec} = cap) do
+  def read_agent_draft(%CapProfile{spec: spec} = cap) do
     role =
       case spec do
         %{"systemPrompt" => borrowed} when is_binary(borrowed) -> borrowed
-        _ -> Fleet.CapProfile.name(cap)
+        _ -> CapProfile.name(cap)
       end
 
     if Fleet.Slug.valid?(role) do
-      case Fleet.SPBuilder.image_draft(role, cap.catalogue_root) do
+      case SPBuilder.image_draft(role, cap.catalogue_root) do
         {:ok, content} ->
           {:ok, content}
 
@@ -116,7 +118,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
         :unpublished ->
           read_tagged(
-            Fleet.SPBuilder.sp_draft_path(role, cap.catalogue_root),
+            SPBuilder.sp_draft_path(role, cap.catalogue_root),
             :agent_draft_missing
           )
       end
@@ -132,15 +134,15 @@ defmodule Fleet.Spawner.Pod.Assets do
   `both` receives machine then human. The configured protocol path overrides only
   the machine half.
   """
-  @spec read_protocole_user(Fleet.CapProfile.t()) ::
+  @spec read_protocole_user(CapProfile.t()) ::
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
-  def read_protocole_user(%Fleet.CapProfile{} = cap) do
+  def read_protocole_user(%CapProfile{} = cap) do
     # La racine vient du PROFIL : le protocole qu'un pod recoit appartient au catalogue qui declare
     # son role. Sans ca, un role du second catalogue recevait le protocole du premier — un contrat de
     # conversation ecrit pour d'autres gens.
     root = cap.catalogue_root
 
-    case Fleet.CapProfile.interlocutor(cap) do
+    case CapProfile.interlocutor(cap) do
       "human" ->
         read_human_protocol(root)
 
@@ -156,14 +158,14 @@ defmodule Fleet.Spawner.Pod.Assets do
   end
 
   defp read_worker_protocol(root) do
-    case Fleet.SPBuilder.image_worker_protocol(root) do
+    case SPBuilder.image_worker_protocol(root) do
       {:ok, content} -> {:ok, content}
       :unpublished -> read_worker_protocol_from_disk(root)
     end
   end
 
   defp read_human_protocol(root) do
-    case Fleet.SPBuilder.image_human_protocol(root) do
+    case SPBuilder.image_human_protocol(root) do
       {:ok, content} ->
         {:ok, content}
 
@@ -225,12 +227,12 @@ defmodule Fleet.Spawner.Pod.Assets do
   @doc """
   Filters the profile's skills under `root`; a nil root yields an empty selection.
   """
-  @spec maybe_filter_skills(Fleet.CapProfile.t(), Path.t() | nil) ::
+  @spec maybe_filter_skills(CapProfile.t(), Path.t() | nil) ::
           {:ok, [Path.t()]} | {:error, term()}
   def maybe_filter_skills(_cap_profile, nil), do: {:ok, []}
 
   def maybe_filter_skills(cap_profile, root) do
-    Fleet.SPBuilder.filter_skills(cap_profile, root)
+    SPBuilder.filter_skills(cap_profile, root)
   end
 
   @doc """

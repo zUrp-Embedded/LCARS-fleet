@@ -8,6 +8,7 @@ defmodule Fleet.Project.Onboard.Adopt do
   residu, soit supprimer le travail de quelqu'un d'autre.
   """
 
+  alias Fleet.Layout
   alias Fleet.Project.Onboard
   alias Fleet.Project.GitOps
   alias Fleet.Project.Onboard.Faces
@@ -89,9 +90,9 @@ defmodule Fleet.Project.Onboard.Adopt do
   end
 
   defp classify_adopt_writer_faces(dirs) do
-    with {:ok, ops} <- classify_adopt_face(dirs.ops, Fleet.Layout.ops_branch()),
+    with {:ok, ops} <- classify_adopt_face(dirs.ops, Layout.ops_branch()),
          {:ok, workshop} <-
-           classify_adopt_face(dirs.workshop, Fleet.Layout.workshop_branch()) do
+           classify_adopt_face(dirs.workshop, Layout.workshop_branch()) do
       {:ok, %{ops: ops, workshop: workshop}}
     end
   end
@@ -115,7 +116,7 @@ defmodule Fleet.Project.Onboard.Adopt do
              states.ops,
              url,
              dirs.ops,
-             Fleet.Layout.ops_branch(),
+             Layout.ops_branch(),
              "ops",
              name,
              opts
@@ -126,7 +127,7 @@ defmodule Fleet.Project.Onboard.Adopt do
              states.workshop,
              url,
              dirs.workshop,
-             Fleet.Layout.workshop_branch(),
+             Layout.workshop_branch(),
              "workshop",
              name,
              opts
@@ -134,7 +135,7 @@ defmodule Fleet.Project.Onboard.Adopt do
          :ok <- Faces.lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ADOPTED from disk — main published, " <>
-          "#{Fleet.Layout.ops_branch()} and #{Fleet.Layout.workshop_branch()} up, protection placed"
+          "#{Layout.ops_branch()} and #{Layout.workshop_branch()} up, protection placed"
       )
 
       {:ok, Onboard.onboard_result(full_name, dirs, opts)}

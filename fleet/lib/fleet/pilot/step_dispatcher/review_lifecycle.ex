@@ -47,6 +47,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
   # SINGLE-AUTHORITY spawn leaf: `safe_kill/2` (die-on-promote) — same authority as the
   # judge/rework spawn (via RoleDispatch), never a fork.
+  alias Fleet.Project.Roles
   alias Fleet.Pilot.StepDispatcher.Spawn
 
   # BOUNDED remediation (rework forge-native budget / merge-failure classification) — DECIDES, then
@@ -143,7 +144,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
            verdicts,
            findings,
            issue_card_verdict_policy(head, ctx),
-           Fleet.Project.Roles.gatekeeper_role(ctx.opts)
+           Roles.gatekeeper_role(ctx.opts)
          ) do
       {:pending, [next | _]} ->
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
@@ -262,9 +263,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
            ) do
       # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
-      Fleet.Project.Roles.jury(map, ctx.opts)
+      Roles.jury(map, ctx.opts)
     else
-      _ -> Fleet.Project.Roles.project_jury(ctx.repo, ctx.opts)
+      _ -> Roles.project_jury(ctx.repo, ctx.opts)
     end
   end
 
@@ -277,7 +278,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   defp issue_card_verdict_policy(head, %Ctx{} = ctx) do
     case RoleDispatch.parse_feature_branch_or_skip(head) do
       {:ok, {issue_n, _producer}} ->
-        Fleet.Project.Roles.verdict_policy_for(
+        Roles.verdict_policy_for(
           ctx.forge,
           ctx.repo,
           issue_n,
@@ -288,7 +289,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       # card still governs it — same fallback as the jury and the CI policy, for the same PRs
       # (human PR, adopted orphan).
       _ ->
-        Fleet.Project.Roles.project_verdict_policy(ctx.repo, ctx.opts)
+        Roles.project_verdict_policy(ctx.repo, ctx.opts)
     end
   end
 
@@ -321,9 +322,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              map_name,
              Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
            ) do
-      Fleet.Project.Roles.ci(map)
+      Roles.ci(map)
     else
-      _ -> Fleet.Project.Roles.project_ci(ctx.repo, ctx.opts)
+      _ -> Roles.project_ci(ctx.repo, ctx.opts)
     end
   end
 

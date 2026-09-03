@@ -57,6 +57,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   require Logger
 
+  alias Fleet.Layout
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Forge.Protocol, as: ForgeProtocol
   alias Fleet.Labels
@@ -143,8 +144,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp verdict_work_dir(repo, opts) do
     dir =
       Path.join(
-        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
-        Fleet.Layout.project_name(repo)
+        Keyword.get(opts, :ops_root, Layout.ops_root()),
+        Layout.project_name(repo)
       )
 
     if File.dir?(dir), do: dir
@@ -162,12 +163,12 @@ defmodule Fleet.Pilot.StepRunCompleter do
   #   - l'absence d'ops dit que le projet n'a pas de face atelier : un fait PERMANENT jusqu'a
   #     l'onboard, qui doit se dire aussi fort ici qu'ailleurs.
   defp maybe_emit_provenance(step_run, livrable_sha, opts) do
-    ops_root = Keyword.get(opts, :ops_root, Fleet.Layout.ops_root())
+    ops_root = Keyword.get(opts, :ops_root, Layout.ops_root())
     repo = Map.get(step_run, :repo)
 
     case {Map.get(step_run, :deliverable_opts), repo} do
       {%{} = dopts, repo} when is_binary(repo) ->
-        work_dir = Path.join(ops_root, Fleet.Layout.project_name(repo))
+        work_dir = Path.join(ops_root, Layout.project_name(repo))
 
         if File.dir?(work_dir) do
           emit_provenance(work_dir, step_run, dopts, livrable_sha)
@@ -430,7 +431,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       |> Map.get(:review_body, Texts.review_body(role, event))
       |> Pinning.render(
         work_dir: work_dir,
-        ref: Fleet.Layout.verdict_ref(Map.fetch!(step_run, :issue_number), role),
+        ref: Layout.verdict_ref(Map.fetch!(step_run, :issue_number), role),
         kind: "Verdict",
         label: "verdict",
         repo: repo
@@ -589,7 +590,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
         :ok
 
       {findings, work_dir} ->
-        ref = Fleet.Layout.verdict_findings_ref(Map.fetch!(step_run, :issue_number), role)
+        ref = Layout.verdict_findings_ref(Map.fetch!(step_run, :issue_number), role)
 
         case Fleet.Workflow.OpsObjectSync.commit_object(
                work_dir,

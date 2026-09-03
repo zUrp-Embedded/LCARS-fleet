@@ -1,6 +1,10 @@
 defmodule Fleet.Pilot.Application do
   require Logger
 
+  alias Fleet.Pilot.IncidentConsumer
+  alias Fleet.Pilot.StepRunConsumer
+  alias Fleet.Workflow.Loader
+
   @moduledoc """
   Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
 
@@ -216,11 +220,11 @@ defmodule Fleet.Pilot.Application do
       # `:degraded` and visible than `:operational` and blind.
       poller_telemetry: Fleet.Pilot.PollerTelemetry,
       poller: Fleet.Pilot.Poller,
-      step_run_consumer: Fleet.Pilot.StepRunConsumer,
-      step_run_task_supervisor: Fleet.Pilot.StepRunConsumer.task_supervisor(),
+      step_run_consumer: StepRunConsumer,
+      step_run_task_supervisor: StepRunConsumer.task_supervisor(),
       incident_registry: Fleet.Pilot.IncidentRegistry,
-      incident_consumer: Fleet.Pilot.IncidentConsumer,
-      incident_task_supervisor: Fleet.Pilot.IncidentConsumer.task_supervisor(),
+      incident_consumer: IncidentConsumer,
+      incident_task_supervisor: IncidentConsumer.task_supervisor(),
       worktree_sync: Fleet.Project.WorktreeSync,
       arch_feed: Fleet.Pilot.ArchFeed
     ]
@@ -263,7 +267,7 @@ defmodule Fleet.Pilot.Application do
     # runtime consumer after them — then read what was just proved, never the live
     # disk (a post-boot catalogue edit is inert until restart). Missing, empty or
     # invalid catalogue → raise HERE, same dead-man's-switch as the base_url guard.
-    Fleet.Workflow.Loader.publish_image!()
+    Loader.publish_image!()
 
     validate_card_juries!()
     validate_card_steps!()
@@ -290,7 +294,7 @@ defmodule Fleet.Pilot.Application do
       # StepRunConsumer does not block the singleton). Started BEFORE the StepRunConsumer (which refers to it).
       # max_children: bounds the burst (cascade of pod.completed -> N concurrent forge pushes =
       # thundering herd). Beyond -> {:error, :max_children}, handled fail-loud by offload_async.
-      {Task.Supervisor, name: Fleet.Pilot.StepRunConsumer.task_supervisor(), max_children: 16},
+      {Task.Supervisor, name: StepRunConsumer.task_supervisor(), max_children: 16},
       # Persistent memory of system incidents (resilient owner). Consumed by WakeRecovery
       # (kick_gatekeeper / safe_wake) AND by the IncidentConsumer (`*.failed` events). The truth lives
       # in the local WAL (written first, crash-survivable); the forge is the ASYNC cross-machine
@@ -300,8 +304,8 @@ defmodule Fleet.Pilot.Application do
       # Bus consumer SEPARATE from the pod FAILURE events (`pod.failed`/`wake.failed`) → IncidentRegistry.
       # Its Task.Supervisor (offload of the registry's forge writes) started BEFORE it (it refers to it). Separate from
       # the StepRunConsumer: distinct concern, the failure burst does not share the completion's mailbox.
-      {Task.Supervisor, name: Fleet.Pilot.IncidentConsumer.task_supervisor(), max_children: 16},
-      {Fleet.Pilot.IncidentConsumer, runner: &Fleet.Pilot.IncidentConsumer.offload_async/1},
+      {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 16},
+      {IncidentConsumer, runner: &IncidentConsumer.offload_async/1},
       # Serializer that aligns the local clone after merge: projects the deliverable (`origin/main`) onto
       # `/home/projects/<name>`. Started BEFORE Poller + StepRunConsumer — its two merge triggers
       # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
@@ -315,8 +319,7 @@ defmodule Fleet.Pilot.Application do
       # The routing lives in scoped labels `wfmap/*`+`stage/*` (engraved by `post_route`); the Poller reads them (state-machine).
       # subscribe_gitea: the webhook accelerates the tick (a hint; the poll remains the truth).
       {Fleet.Pilot.Poller, interval_ms: interval, subscribe_gitea: true},
-      {Fleet.Pilot.StepRunConsumer,
-       forge_opts: [], step_run_runner: &Fleet.Pilot.StepRunConsumer.offload_async/2}
+      {StepRunConsumer, forge_opts: [], step_run_runner: &StepRunConsumer.offload_async/2}
     ]
   end
 
@@ -364,7 +367,7 @@ defmodule Fleet.Pilot.Application do
   # tokenless par construction, cf. son commentaire.)
   @spec verify_cards_and_roles!(keyword()) :: :ok
   def verify_cards_and_roles!(opts \\ []) do
-    Fleet.Workflow.Loader.publish_image!()
+    Loader.publish_image!()
     validate_card_juries!(opts)
     validate_card_steps!(opts)
     validate_structural_roles!()
@@ -469,7 +472,7 @@ defmodule Fleet.Pilot.Application do
   # a card that is perfectly coherent with itself, and kills the boot. The pair travels together or
   # the reader resolves in the wrong world.
   defp card_scopes([]) do
-    Enum.map(Fleet.Workflow.Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
+    Enum.map(Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
   end
 
   # Explicit opts name ONE directory and no catalogue: roles resolve in the default image, which is
@@ -482,8 +485,8 @@ defmodule Fleet.Pilot.Application do
   @spec validate_card_juries!(keyword()) :: :ok
   def validate_card_juries!(opts \\ []) do
     for {scope, root} <- card_scopes(opts),
-        map_name <- Fleet.Workflow.Loader.canon_names!(scope),
-        role <- Fleet.Workflow.Loader.load!(map_name, scope)["jury"] do
+        map_name <- Loader.canon_names!(scope),
+        role <- Loader.load!(map_name, scope)["jury"] do
       case Fleet.CapProfile.load(role, root) do
         {:ok, cp} ->
           kind = Fleet.CapProfile.brief_kind(cp)
@@ -515,7 +518,7 @@ defmodule Fleet.Pilot.Application do
   @spec validate_workshop_card!(keyword()) :: :ok
   def validate_workshop_card!(opts \\ []) do
     for {scope, _root} <- card_scopes(opts) do
-      if Fleet.Workflow.Loader.workshop_card_name(scope) == nil do
+      if Loader.workshop_card_name(scope) == nil do
         Logger.warning(
           "fleet_pilot: no doc card in #{inspect(Keyword.get(scope, :workflow_maps_root))} — no " <>
             "card there carries a `face: workshop` producer, so this catalogue serves NO " <>
@@ -532,7 +535,7 @@ defmodule Fleet.Pilot.Application do
   # catalogue that declares a default among them. `:catalogue_root` closes that: one key, and the
   # guard is drivable from a test instead of only from a boot.
   defp default_card_scopes([]),
-    do: Enum.map(Fleet.Workflow.Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
+    do: Enum.map(Loader.card_scopes(), &{[workflow_maps_root: &1.dir], &1.root})
 
   defp default_card_scopes(opts), do: [{opts, Keyword.get(opts, :catalogue_root)}]
 
@@ -553,7 +556,7 @@ defmodule Fleet.Pilot.Application do
         is_binary(root),
         card_name = Fleet.Catalogue.default_card(root),
         is_binary(card_name) do
-      _ = Fleet.Workflow.Loader.load!(card_name, scope)
+      _ = Loader.load!(card_name, scope)
     end
 
     :ok
@@ -569,8 +572,8 @@ defmodule Fleet.Pilot.Application do
   @spec validate_card_steps!(keyword()) :: :ok
   def validate_card_steps!(opts \\ []) do
     for {scope, root} <- card_scopes(opts),
-        map_name <- Fleet.Workflow.Loader.canon_names!(scope),
-        card = Fleet.Workflow.Loader.load!(map_name, scope),
+        map_name <- Loader.canon_names!(scope),
+        card = Loader.load!(map_name, scope),
         {step_name, spec} <- card["steps"] || %{},
         role = Map.get(spec, "role"),
         is_binary(role) do

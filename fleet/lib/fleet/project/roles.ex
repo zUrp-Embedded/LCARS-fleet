@@ -27,6 +27,8 @@ defmodule Fleet.Project.Roles do
 
   require Logger
 
+  alias Fleet.Workflow.Loader
+
   # The capability each structural role is resolved BY. Not a role name: the point of B-03 is that a
   # gate resolves a responsibility, never a magic name.
   @producer_capability :producer
@@ -191,7 +193,7 @@ defmodule Fleet.Project.Roles do
   end
 
   defp jury_of(%{"jury" => jury}, _opts) when is_list(jury), do: jury
-  defp jury_of(nil, opts), do: Fleet.Workflow.Loader.load!(delegation_workflow_map(opts))["jury"]
+  defp jury_of(nil, opts), do: Loader.load!(delegation_workflow_map(opts))["jury"]
 
   @doc """
   Returns the jury of the project's declared card, checking `:reviewer_roles` first.
@@ -298,7 +300,7 @@ defmodule Fleet.Project.Roles do
   # project card fallback right above stays the interesting path, and an unreadable engraved card
   # is reported by the routing that OWNS that failure, not invented a second time here.
   defp safe_load_card(map_name, repo) do
-    {:ok, Fleet.Workflow.Loader.load!(map_name, Fleet.Workflow.Loader.card_opts_for_repo(repo))}
+    {:ok, Loader.load!(map_name, Loader.card_opts_for_repo(repo))}
   rescue
     _ -> :error
   end
@@ -331,13 +333,13 @@ defmodule Fleet.Project.Roles do
     # The org names the catalogue (that is the point of naming it so), and an unclaimed org keeps
     # the default — an explicit `:workflow_maps_root` still wins, it is the fixture's own door.
     loader_opts =
-      case {loader_opts, Fleet.Workflow.Loader.card_root_for_repo(repo)} do
+      case {loader_opts, Loader.card_root_for_repo(repo)} do
         {[], dir} when is_binary(dir) -> [catalogue_root: dir]
         {given, _} -> given
       end
 
     try do
-      Fleet.Workflow.Loader.load!(name, loader_opts)
+      Loader.load!(name, loader_opts)
     rescue
       e ->
         Logger.warning(
@@ -360,7 +362,7 @@ defmodule Fleet.Project.Roles do
               )
           end
 
-        Fleet.Workflow.Loader.load!(delegation_workflow_map(opts), loader_opts)
+        Loader.load!(delegation_workflow_map(opts), loader_opts)
     end
   end
 
@@ -389,7 +391,7 @@ defmodule Fleet.Project.Roles do
   @spec workshop_workflow_map(keyword()) :: String.t() | nil
   def workshop_workflow_map(opts \\ []) do
     Keyword.get(opts, :workshop_workflow_map) ||
-      Fleet.Workflow.Loader.workshop_card_name(workshop_scope(opts))
+      Loader.workshop_card_name(workshop_scope(opts))
   end
 
   # `catalogue_root: <repo>` is accepted as a REPO here and resolved to that project's cards. The
@@ -400,7 +402,7 @@ defmodule Fleet.Project.Roles do
   # permissions defect and is a card coming from the wrong catalogue.
   defp workshop_scope(opts) do
     case Keyword.get(opts, :catalogue_root) do
-      repo when is_binary(repo) -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+      repo when is_binary(repo) -> Loader.card_opts_for_repo(repo)
       _ -> opts
     end
   end

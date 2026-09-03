@@ -14,6 +14,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   use GenServer
   require Logger
 
+  alias Fleet.Event
   alias Fleet.EventRouter.Bus
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -31,7 +32,7 @@ defmodule Fleet.Spawner.PublishConsumer do
 
   @impl true
   def handle_info(
-        %Fleet.Event{source: :api, type: :"admin.spawn.request", payload: payload},
+        %Event{source: :api, type: :"admin.spawn.request", payload: payload},
         state
       )
       when is_map(payload) do
@@ -64,7 +65,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   # Relay a finished publish back to the pod that asked for it. Only when `requester_pod_id` is a
   # real pod (a caller without one falls through to the ignore clause).
   def handle_info(
-        %Fleet.Event{type: :"project_publish.done", payload: %{"requester_pod_id" => pod} = p},
+        %Event{type: :"project_publish.done", payload: %{"requester_pod_id" => pod} = p},
         state
       )
       when is_binary(pod) do
@@ -84,7 +85,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{type: :"project_publish.failed", payload: %{"requester_pod_id" => pod} = p},
+        %Event{type: :"project_publish.failed", payload: %{"requester_pod_id" => pod} = p},
         state
       )
       when is_binary(pod) do
@@ -94,7 +95,7 @@ defmodule Fleet.Spawner.PublishConsumer do
     {:noreply, state}
   end
 
-  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
+  def handle_info(%Event{}, state), do: {:noreply, state}
   def handle_info(_other, state), do: {:noreply, state}
 
   # Best-effort wake — a dead/absent pod yields {:error, _} (logged in notify_pod), and any raise is
@@ -154,7 +155,7 @@ defmodule Fleet.Spawner.PublishConsumer do
   # Alarm loss is non-fatal but loud: the original request was already acknowledged.
   defp emit_spawn_failed(payload, reason) when is_map(payload) do
     # Keep the signature stable and JSON-safe; variable detail remains separate.
-    {reason_cat, reason_detail} = Fleet.Event.reason_fields(reason)
+    {reason_cat, reason_detail} = Event.reason_fields(reason)
 
     result =
       Bus.emit(:spawner, :"spawn.failed",

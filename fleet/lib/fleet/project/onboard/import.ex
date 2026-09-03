@@ -8,6 +8,7 @@ defmodule Fleet.Project.Onboard.Import do
   les separe d'`import/2`, dont la cible preexiste et qui ne peut defaire que ce qu'il a pousse.
   """
 
+  alias Fleet.Credentials.Shell
   alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
   alias Fleet.Project.Onboard.Repo
@@ -202,7 +203,7 @@ defmodule Fleet.Project.Onboard.Import do
   defp clone_deposit(url, scratch, opts) do
     timeout = Keyword.get(opts, :clone_timeout_ms, 120_000)
 
-    case Fleet.Credentials.Shell.git(["clone", "--no-recurse-submodules", url, scratch],
+    case Shell.git(["clone", "--no-recurse-submodules", url, scratch],
            timeout_ms: timeout
          ) do
       {:ok, {_, 0}} ->
@@ -379,7 +380,7 @@ defmodule Fleet.Project.Onboard.Import do
     # ForgeAuth.git_env/0 — GIT_TERMINAL_PROMPT=0 (a missing helper fails LOUD, never hangs a headless
     # clone) plus the INTERNAL forge extraheader, scoped to the internal host and so inert for an
     # external clone (a private external repo needs gh/glab authed, or a wired helper — Tier 2).
-    case Fleet.Credentials.Shell.git(
+    case Shell.git(
            ["clone", "--no-recurse-submodules", url, scratch],
            timeout_ms: timeout
          ) do
@@ -446,11 +447,11 @@ defmodule Fleet.Project.Onboard.Import do
   # we never guess which branch is the real one; the operator settles it at the source.
   defp normalize_default_branch(scratch) do
     with {:ok, {head_out, 0}} <-
-           Fleet.Credentials.Shell.git(["-C", scratch, "symbolic-ref", "--short", "HEAD"],
+           Shell.git(["-C", scratch, "symbolic-ref", "--short", "HEAD"],
              env: []
            ),
          {:ok, {remotes_out, 0}} <-
-           Fleet.Credentials.Shell.git(
+           Shell.git(
              ["-C", scratch, "branch", "-r", "--format=%(refname:short)"],
              env: []
            ) do
@@ -465,7 +466,7 @@ defmodule Fleet.Project.Onboard.Import do
           {:error, {:branch_collision, {head, "main"}}}
 
         true ->
-          case Fleet.Credentials.Shell.git(["-C", scratch, "branch", "-m", head, "main"],
+          case Shell.git(["-C", scratch, "branch", "-m", head, "main"],
                  env: []
                ) do
             {:ok, {_, 0}} ->

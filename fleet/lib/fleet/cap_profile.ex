@@ -50,6 +50,7 @@ defmodule Fleet.CapProfile do
   # The four clusters below are all UPSTREAM of this core and none calls back into it: Schema
   # (structural conformance), Catalog (resolution by `metadata.name`, YAML scan, Slug confinement),
   # DisallowedTools (baseline git-denied union profile) and CanonicalJson (a pure leaf).
+  alias Fleet.Catalogue
   alias Fleet.CapProfile.Schema
   alias Fleet.CapProfile.Catalog
   alias Fleet.CapProfile.DisallowedTools
@@ -780,8 +781,7 @@ defmodule Fleet.CapProfile do
     # stays put, and the projection is silently for someone else's catalogues. A memo whose key is
     # narrower than its input is a wrong answer with a fast path.
     key =
-      {__MODULE__, :forge_logins, Fleet.Catalogue.installed_roots(),
-       Fleet.Catalogue.system_root()}
+      {__MODULE__, :forge_logins, Catalogue.installed_roots(), Catalogue.system_root()}
 
     case :persistent_term.get(key, :unset) do
       %{} = maps ->
@@ -806,15 +806,15 @@ defmodule Fleet.CapProfile do
   # catalogue may ship its own `architect.yaml` and the account stays `system_architect`, because
   # the system roster is consulted first for every name.
   defp build_login_maps do
-    system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
+    system_dir = Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
 
     with {:ok, system_roster} <- forge_roster(system_dir) do
       system_names = MapSet.new(system_roster, & &1.name)
 
       to_login =
-        Fleet.Catalogue.installed_catalogues()
+        Catalogue.installed_catalogues()
         |> Enum.reduce(%{}, fn %{name: cat, root: root}, acc ->
-          dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
+          dir = Path.join(root, Catalogue.rel(:cap_profiles))
 
           case forge_roster(dir) do
             {:ok, roster} -> Enum.reduce(roster, acc, &put_login(&2, &1.name, system_names, cat))

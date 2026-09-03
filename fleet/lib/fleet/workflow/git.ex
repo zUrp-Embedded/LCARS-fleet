@@ -10,6 +10,8 @@ defmodule Fleet.Workflow.Git do
 
   require Logger
 
+  alias Fleet.Credentials.Shell
+
   @type opts :: %{
           required(:workspace) => Path.t(),
           required(:author_name) => String.t(),
@@ -32,7 +34,7 @@ defmodule Fleet.Workflow.Git do
 
   # Pod-controlled workspaces can arm git config; Shell neutralizes hooks and global config.
   # PayloadGuard owns the remaining in-tree filter vector.
-  @hooks_off Fleet.Credentials.Shell.git_safe_config_args()
+  @hooks_off Shell.git_safe_config_args()
 
   @doc """
   Commits paths in `workspace` without pushing and returns the resulting HEAD SHA.
@@ -78,7 +80,7 @@ defmodule Fleet.Workflow.Git do
     case validate_add_paths(paths) do
       :ok ->
         # `--` makes option-like pathspecs literal; Shell bounds hangs and neutralizes config.
-        case Fleet.Credentials.Shell.git(@hooks_off ++ ["add", "--" | paths],
+        case Shell.git(@hooks_off ++ ["add", "--" | paths],
                cd: opts.workspace,
                timeout_ms: git_local_timeout_ms()
              ) do
@@ -118,7 +120,7 @@ defmodule Fleet.Workflow.Git do
 
       true ->
         # Preserve ForgeAuth's no-prompt environment while supplying commit identity.
-        case Fleet.Credentials.Shell.git(@hooks_off ++ ["commit", "-m", opts.message],
+        case Shell.git(@hooks_off ++ ["commit", "-m", opts.message],
                cd: opts.workspace,
                timeout_ms: git_local_timeout_ms(),
                env: Fleet.Credentials.ForgeAuth.git_env() ++ commit_env(opts)
@@ -134,7 +136,7 @@ defmodule Fleet.Workflow.Git do
 
   defp has_staged_changes?(workspace) do
     # Bound and neutralize config; anomalies proceed to commit for a contextual error.
-    case Fleet.Credentials.Shell.git(@hooks_off ++ ["diff", "--cached", "--quiet"],
+    case Shell.git(@hooks_off ++ ["diff", "--cached", "--quiet"],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
          ) do
@@ -159,7 +161,7 @@ defmodule Fleet.Workflow.Git do
   @spec read_head_sha(Path.t()) :: {:ok, String.t()} | {:error, term()}
   def read_head_sha(workspace) do
     # All system-side git reads share bounded, neutralized configuration.
-    case Fleet.Credentials.Shell.git(@hooks_off ++ ["rev-parse", "HEAD"],
+    case Shell.git(@hooks_off ++ ["rev-parse", "HEAD"],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
          ) do
@@ -177,7 +179,7 @@ defmodule Fleet.Workflow.Git do
   @spec last_commit_sha(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def last_commit_sha(workspace, path) do
     with :ok <- validate_cli_arg(path, :invalid_path) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["log", "-1", "--format=%H", "--", path],
+      case Shell.git(@hooks_off ++ ["log", "-1", "--format=%H", "--", path],
              cd: workspace,
              timeout_ms: git_local_timeout_ms()
            ) do
@@ -197,7 +199,7 @@ defmodule Fleet.Workflow.Git do
   @spec commit_exists?(Path.t(), String.t()) :: {:ok, boolean()} | {:error, term()}
   def commit_exists?(workspace, sha) do
     with :ok <- validate_cli_arg(sha, :invalid_sha) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["cat-file", "-e", sha <> "^{commit}"],
+      case Shell.git(@hooks_off ++ ["cat-file", "-e", sha <> "^{commit}"],
              cd: workspace,
              timeout_ms: git_local_timeout_ms()
            ) do
@@ -219,7 +221,7 @@ defmodule Fleet.Workflow.Git do
   def ancestor?(workspace, ancestor, descendant) do
     with :ok <- validate_cli_arg(ancestor, :invalid_sha),
          :ok <- validate_cli_arg(descendant, :invalid_sha) do
-      case Fleet.Credentials.Shell.git(
+      case Shell.git(
              @hooks_off ++ ["merge-base", "--is-ancestor", ancestor, descendant],
              cd: workspace,
              timeout_ms: git_local_timeout_ms()
@@ -245,7 +247,7 @@ defmodule Fleet.Workflow.Git do
     with :ok <- validate_cli_arg(path, :invalid_path) do
       args = @hooks_off ++ ["log", "-n", Integer.to_string(limit), "--format=%H", "--", path]
 
-      case Fleet.Credentials.Shell.git(args, cd: workspace, timeout_ms: git_local_timeout_ms()) do
+      case Shell.git(args, cd: workspace, timeout_ms: git_local_timeout_ms()) do
         {:ok, {out, 0}} ->
           {:ok, out |> String.split("\n", trim: true) |> Enum.map(&String.trim/1)}
 
@@ -272,7 +274,7 @@ defmodule Fleet.Workflow.Git do
   def show(workspace, sha, path) do
     with :ok <- validate_cli_arg(sha, :invalid_sha),
          :ok <- validate_cli_arg(path, :invalid_path) do
-      case Fleet.Credentials.Shell.git(@hooks_off ++ ["show", "#{sha}:#{path}"],
+      case Shell.git(@hooks_off ++ ["show", "#{sha}:#{path}"],
              cd: workspace,
              timeout_ms: git_local_timeout_ms()
            ) do
@@ -327,7 +329,7 @@ defmodule Fleet.Workflow.Git do
   """
   @spec read_provenance(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def read_provenance(dir, sha) when is_binary(sha) and sha != "" do
-    case Fleet.Credentials.Shell.git(@hooks_off ++ ["cat-file", "-p", provenance_ref(sha)],
+    case Shell.git(@hooks_off ++ ["cat-file", "-p", provenance_ref(sha)],
            cd: dir,
            timeout_ms: git_local_timeout_ms()
          ) do
@@ -349,7 +351,7 @@ defmodule Fleet.Workflow.Git do
     try do
       with :ok <- File.write(tmp, json),
            {:ok, {out, 0}} <-
-             Fleet.Credentials.Shell.git(@hooks_off ++ ["hash-object", "-w", tmp],
+             Shell.git(@hooks_off ++ ["hash-object", "-w", tmp],
                cd: workspace,
                timeout_ms: git_local_timeout_ms()
              ) do
@@ -363,7 +365,7 @@ defmodule Fleet.Workflow.Git do
   end
 
   defp update_ref(workspace, ref, object) do
-    case Fleet.Credentials.Shell.git(@hooks_off ++ ["update-ref", ref, object],
+    case Shell.git(@hooks_off ++ ["update-ref", ref, object],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
          ) do
@@ -532,7 +534,7 @@ defmodule Fleet.Workflow.Git do
 
   # Remote-tracking SHA is the lease basis; absent means no force retry.
   defp read_remote_tracking_sha(workspace, remote, target) do
-    case Fleet.Credentials.Shell.git(
+    case Shell.git(
            @hooks_off ++ ["rev-parse", "--verify", "--quiet", "refs/remotes/#{remote}/#{target}"],
            cd: workspace,
            timeout_ms: git_local_timeout_ms()
@@ -565,8 +567,7 @@ defmodule Fleet.Workflow.Git do
 
   # Push/readback seam supports timeout-outcome tests.
   defp git_runner,
-    do:
-      Application.get_env(:lcars_fleet, :workflow_git_push_runner, &Fleet.Credentials.Shell.git/2)
+    do: Application.get_env(:lcars_fleet, :workflow_git_push_runner, &Shell.git/2)
 
   # Retry only explicit history divergence, never generic rejection or server policy refusal.
   defp non_fast_forward?(out) do
