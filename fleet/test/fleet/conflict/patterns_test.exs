@@ -148,7 +148,7 @@ defmodule Fleet.Conflict.PatternsTest do
       theirs = big <> "\nTHEIRS"
       content = "<<<<<<< ours\n#{ours}\n||||||| base\n#{big}\n=======\n#{theirs}\n>>>>>>> theirs"
 
-      {:ok, r} = Fleet.Conflict.resolve(content)
+      {:ok, r} = Conflict.resolve(content)
 
       assert [%{type: type, trace: trace}] = r.hunks
 
@@ -217,7 +217,7 @@ defmodule Fleet.Conflict.PatternsTest do
     test "un hunk non-overlapping resolu ne fusionne qu'une fois" do
       content = "<<<<<<< ours\nX\na\nb\n||||||| base\na\nb\n=======\na\nb\nY\n>>>>>>> theirs"
 
-      calls = count_merges(fn -> {:ok, _} = Fleet.Conflict.resolve(content) end)
+      calls = count_merges(fn -> {:ok, _} = Conflict.resolve(content) end)
 
       assert calls == 1, "la fusion a tourne #{calls} fois pour un seul hunk"
     end
@@ -237,7 +237,7 @@ defmodule Fleet.Conflict.PatternsTest do
     test "un hunk regle par un motif PRIORITAIRE ne paie jamais la fusion" do
       # La capture reste PARESSEUSE : `same_change` gagne avant que `non_overlapping` soit atteint.
       calls =
-        count_merges(fn -> {:ok, _} = Fleet.Conflict.resolve(diff3("b", "a", "b")) end)
+        count_merges(fn -> {:ok, _} = Conflict.resolve(diff3("b", "a", "b")) end)
 
       assert calls == 0
     end

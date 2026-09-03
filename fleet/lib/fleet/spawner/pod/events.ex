@@ -2,7 +2,7 @@ defmodule Fleet.Spawner.Pod.Events do
   @moduledoc """
   Broadcasts pod lifecycle events in the canonical `%Fleet.Event{source: :spawner}` envelope.
 
-  `lossy_broadcast/2` carries observability events through `Fleet.EventRouter.Bus.safe_emit/4` and
+  `lossy_broadcast/2` carries observability events through `Bus.safe_emit/4` and
   always returns `:ok`. `required_broadcast/2` carries `pod.completed`; it returns a broadcast error
   so the pod remains in extraction and can retry instead of releasing an orphaned completion.
 

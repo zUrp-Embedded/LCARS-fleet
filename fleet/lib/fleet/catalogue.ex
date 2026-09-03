@@ -185,10 +185,6 @@ defmodule Fleet.Catalogue do
       Application.app_dir(:lcars_fleet, "priv/catalogue-system")
   end
 
-  @doc "Path of the system manifest."
-  @spec system_manifest_path() :: Path.t()
-  def system_manifest_path, do: Path.join(system_root(), @manifest_basename)
-
   @doc """
   The SEARCH PATH of a tree: the business directory, then the system one — existing only.
 

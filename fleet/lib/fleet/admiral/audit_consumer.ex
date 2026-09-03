@@ -37,6 +37,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   use GenServer
   require Logger
 
+  alias Fleet.Event
   alias Fleet.EventRouter.Bus
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -54,7 +55,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   # ⚠ CANONICAL `%Fleet.Event{}` ONLY, no tuple-format clause: every Bus producer emits the struct,
   # and a tolerant clause here would let a producer ship a shape nothing else on the Bus accepts.
   @impl true
-  def handle_info(%Fleet.Event{source: :task_queue, type: type} = event, state) do
+  def handle_info(%Event{source: :task_queue, type: type} = event, state) do
     log_task_queue_event(type, event)
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
@@ -64,7 +65,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   # D'AUDIT VIVANT : une clause qu'aucun evenement n'atteint ne se distingue pas d'une clause qui
   # marche.
   def handle_info(
-        %Fleet.Event{source: :admiral, type: :"mcp.server_crashed", payload: p},
+        %Event{source: :admiral, type: :"mcp.server_crashed", payload: p},
         state
       ) do
     Logger.error(
@@ -77,7 +78,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{source: :admiral, type: type, payload: payload},
+        %Event{source: :admiral, type: type, payload: payload},
         state
       )
       when type in [:"fleet.boot_complete", :"fleet.boot_partial", :"fleet.boot_failed"] do
@@ -86,7 +87,7 @@ defmodule Fleet.Admiral.AuditConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{source: :spawner, type: type, payload: payload},
+        %Event{source: :spawner, type: type, payload: payload},
         state
       )
       when type in [:"pod.completed", :"pod.failed"] do
@@ -94,27 +95,27 @@ defmodule Fleet.Admiral.AuditConsumer do
     {:noreply, %{state | events_count: state.events_count + 1}}
   end
 
-  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
+  def handle_info(%Event{}, state), do: {:noreply, state}
 
   def handle_info(_other, state), do: {:noreply, state}
 
-  defp log_task_queue_event(:"work_item.enqueued", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+  defp log_task_queue_event(:"work_item.enqueued", %Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.enqueued pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:"work_item.assigned", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+  defp log_task_queue_event(:"work_item.assigned", %Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.assigned pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:"work_item.completed", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+  defp log_task_queue_event(:"work_item.completed", %Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.completed pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:"work_item.cleared", %Fleet.Event{pod_id: pid, correlation_id: tid}) do
+  defp log_task_queue_event(:"work_item.cleared", %Event{pod_id: pid, correlation_id: tid}) do
     Logger.info("AUDIT task_queue.work_item.cleared pod=#{pid} work_item=#{tid}")
   end
 
-  defp log_task_queue_event(:"work_item.failed", %Fleet.Event{
+  defp log_task_queue_event(:"work_item.failed", %Event{
          pod_id: pid,
          correlation_id: tid,
          payload: p

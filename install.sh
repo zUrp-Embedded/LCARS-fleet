@@ -115,6 +115,9 @@ declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
 while [[ $# -gt 0 ]]; do
+  # shellcheck disable=SC2034  # DISPOSABLE est un marqueur d axe DESTINATION, epingle par
+  # forge_host_reach.bats:1158 (`--disposable) *DISPOSABLE=1`) : le drapeau lui-meme voyage par
+  # PASSTHRU, la variable dit dans le code ce que la boucle transmet. La retirer casse le temoin.
   case "$1" in
     --check|--doctor) DOCTOR_MODE=1; shift ;;
     --workstation)    RAIL=workstation; shift ;;
@@ -726,7 +729,7 @@ if [[ "$RAIL" == "box" ]]; then
     echo ""
     echo "  ${W}--bench${N} : forge jetable + boîte + runner CI + humain de démo, en un geste."
     # Le délégué reçoit la résolution du daemon, il ne la refait pas — le fait vient du module.
-    export DOCKER_BIN="$(fait docker_bin)"
+    DOCKER_BIN="$(fait docker_bin)"; export DOCKER_BIN
     exec "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""

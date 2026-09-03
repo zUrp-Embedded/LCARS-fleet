@@ -10,6 +10,7 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepDispatcher
   alias Fleet.Pilot.StepDispatcher.Spawn
   alias Fleet.Pilot.StubTaskQueue
@@ -66,12 +67,13 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
 
   defp payload do
     %{
-      "issue" => %{
-        "number" => 42,
-        "body" => "fais le hello",
-        "labels" => [],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      "issue" =>
+        PayloadFixture.issue(
+          number: 42,
+          body: "fais le hello",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
     }
   end
 

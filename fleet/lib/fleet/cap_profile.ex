@@ -50,10 +50,11 @@ defmodule Fleet.CapProfile do
   # The four clusters below are all UPSTREAM of this core and none calls back into it: Schema
   # (structural conformance), Catalog (resolution by `metadata.name`, YAML scan, Slug confinement),
   # DisallowedTools (baseline git-denied union profile) and CanonicalJson (a pure leaf).
-  alias Fleet.CapProfile.Schema
+  alias Fleet.CapProfile.CanonicalJson
   alias Fleet.CapProfile.Catalog
   alias Fleet.CapProfile.DisallowedTools
-  alias Fleet.CapProfile.CanonicalJson
+  alias Fleet.CapProfile.Schema
+  alias Fleet.Catalogue
 
   # No `api_version` field: the schema versioning is carried by the CODE, not by a field embedded
   # in the YAML — a file that declares its own version can disagree with the validator that reads
@@ -207,7 +208,7 @@ defmodule Fleet.CapProfile do
         {:ok,
          index
          |> Enum.filter(fn {_role, raw} ->
-           Fleet.CapProfile.Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
+           Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
          end)
          |> Enum.map(&elem(&1, 0))
          |> Enum.sort()}
@@ -715,7 +716,7 @@ defmodule Fleet.CapProfile do
   Role names this catalogue declares a forge identity for — the roster to provision, seats INCLUDED.
 
   Distinct from `list/1`, which drops ReservedSeats: a seat cannot be spawned but still owns its
-  account. See `Fleet.CapProfile.Catalog.forge_identity_roles/1`.
+  account. See `Catalog.forge_identity_roles/1`.
   """
   @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   @spec forge_identity_roles() :: {:ok, [String.t()]} | {:error, term()}
@@ -780,8 +781,7 @@ defmodule Fleet.CapProfile do
     # stays put, and the projection is silently for someone else's catalogues. A memo whose key is
     # narrower than its input is a wrong answer with a fast path.
     key =
-      {__MODULE__, :forge_logins, Fleet.Catalogue.installed_roots(),
-       Fleet.Catalogue.system_root()}
+      {__MODULE__, :forge_logins, Catalogue.installed_roots(), Catalogue.system_root()}
 
     case :persistent_term.get(key, :unset) do
       %{} = maps ->
@@ -806,15 +806,15 @@ defmodule Fleet.CapProfile do
   # catalogue may ship its own `architect.yaml` and the account stays `system_architect`, because
   # the system roster is consulted first for every name.
   defp build_login_maps do
-    system_dir = Path.join(Fleet.Catalogue.system_root(), Fleet.Catalogue.rel(:cap_profiles))
+    system_dir = Path.join(Catalogue.system_root(), Catalogue.rel(:cap_profiles))
 
     with {:ok, system_roster} <- forge_roster(system_dir) do
       system_names = MapSet.new(system_roster, & &1.name)
 
       to_login =
-        Fleet.Catalogue.installed_catalogues()
+        Catalogue.installed_catalogues()
         |> Enum.reduce(%{}, fn %{name: cat, root: root}, acc ->
-          dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
+          dir = Path.join(root, Catalogue.rel(:cap_profiles))
 
           case forge_roster(dir) do
             {:ok, roster} -> Enum.reduce(roster, acc, &put_login(&2, &1.name, system_names, cat))
@@ -856,14 +856,14 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The raw role index of ONE root — the business half judged apart from what it inherits.
-  See `Fleet.CapProfile.Catalog.index_of/1`.
+  See `Catalog.index_of/1`.
   """
   @spec index_of(String.t()) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   defdelegate index_of(dir), to: Catalog
 
   @doc """
   The forge roster with the facts a provisioning needs to place each role — `%{name, seat?,
-  judge?}`. See `Fleet.CapProfile.Catalog.forge_roster/1`.
+  judge?}`. See `Catalog.forge_roster/1`.
   """
   @spec forge_roster(String.t()) ::
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}

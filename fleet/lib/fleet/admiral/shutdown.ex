@@ -261,6 +261,30 @@ defmodule Fleet.Admiral.Shutdown do
     Application.get_env(:lcars_fleet, :admiral_shutdown_dispatcher, @default_dispatcher)
   end
 
+  @doc """
+  Le dispatcher configure ET son CONTRAT, verifies ensemble.
+
+  Le resolveur seul rend un module ; il ne dit pas si ce module existe, ni s'il tient le behaviour.
+  Une sonde qui compare le resultat au NoOp lit donc `Fleet.NExistePas` comme operationnel — un
+  module absent n'est pas le NoOp. Meme forme que `Spawner.LaunchBackend.resolved_conforming/0`, et
+  meme motif : ce qui n'est pas verifie ne se declare pas.
+  """
+  @spec resolved_conforming() ::
+          {:ok, module()} | {:error, {:shutdown_dispatcher_misconfigured, module(), [atom()]}}
+  def resolved_conforming do
+    mod = configured_dispatcher()
+    _ = Code.ensure_loaded(mod)
+
+    manquants =
+      for {fun, arite} <- [refuse_new_jobs: 1, in_flight_count: 0],
+          not function_exported?(mod, fun, arite),
+          do: fun
+
+    if manquants == [],
+      do: {:ok, mod},
+      else: {:error, {:shutdown_dispatcher_misconfigured, mod, manquants}}
+  end
+
   @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."
   @spec begin(keyword()) :: :ok
   def begin(opts \\ []) do

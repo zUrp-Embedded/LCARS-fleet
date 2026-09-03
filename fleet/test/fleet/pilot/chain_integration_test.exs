@@ -488,7 +488,7 @@ defmodule Fleet.Pilot.ChainIntegrationTest do
     assert o2[:step] == "review"
 
     # review finishes WITH a soft gate -> gatekeeper escalation (brief enqueued, NO advance).
-    # "corr-1" = the fixed id returned by Fleet.Pilot.StubTaskQueue.enqueue/2 (shared support).
+    # "corr-1" = the fixed id returned by StubTaskQueue.enqueue/2 (shared support).
     assert {:escalate, "corr-1", eval_ctx} =
              StepRunConsumer.maybe_complete(
                completed(o2, "reviewer", %{"severity_max" => "ok"}),

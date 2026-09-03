@@ -1,6 +1,8 @@
 defmodule Fleet.Forge.ProtocolTest do
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
+
   # PURE wire-protocol vocabulary (no I/O): build+parse co-located. Each describe proves the
   # invariant `parse ∘ build == identity` (a format change breaks the test here, not in prod).
   alias Fleet.Forge.Protocol, as: ForgeProtocol
@@ -107,9 +109,9 @@ defmodule Fleet.Forge.ProtocolTest do
   describe "fleet_prs_by_issue/1 — the single issue↔PR selector (C-05)" do
     test "keeps only pulls whose head parses as a fleet feature-branch, as {issue, pull} pairs" do
       pulls = [
-        %{"number" => 10, "head" => %{"ref" => "lcars/issue-42-engineer"}},
-        %{"number" => 11, "head" => %{"ref" => "feature/manual-branch"}},
-        %{"number" => 12, "head" => %{"ref" => "lcars/issue-7-reviewer"}},
+        PayloadFixture.pull(number: 10, head_ref: "lcars/issue-42-engineer"),
+        PayloadFixture.pull(number: 11, head_ref: "feature/manual-branch"),
+        PayloadFixture.pull(number: 12, head_ref: "lcars/issue-7-reviewer"),
         %{"number" => 13, "head" => %{}}
       ]
 

@@ -40,14 +40,15 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   require Logger
 
+  alias Fleet.Event
   alias Fleet.TaskQueue.WorkItem
 
   @doc """
   Builds a task-queue event using the work-item ID as correlation ID.
   """
-  @spec event(atom(), WorkItem.t(), map()) :: Fleet.Event.t()
+  @spec event(atom(), WorkItem.t(), map()) :: Event.t()
   def event(type, %WorkItem{} = work_item, payload) do
-    Fleet.Event.new(:task_queue, type,
+    Event.new(:task_queue, type,
       pod_id: work_item.pod_id,
       correlation_id: work_item.id,
       payload: payload
@@ -59,9 +60,9 @@ defmodule Fleet.TaskQueue.Broadcast do
 
   Exceptions and delivery errors are logged.
   """
-  @spec lossy(module(), String.t(), Fleet.Event.t()) :: :ok
+  @spec lossy(module(), String.t(), Event.t()) :: :ok
   # CI-09
-  def lossy(bus, topic, %Fleet.Event{} = ev) do
+  def lossy(bus, topic, %Event{} = ev) do
     case bus.broadcast(topic, ev) do
       {:error, reason} ->
         Logger.warning(
@@ -86,10 +87,10 @@ defmodule Fleet.TaskQueue.Broadcast do
   `:ok` proves the bus accepted the message, NOT that a consumer received it — zero subscribers is
   `:ok`. The moduledoc states why the probe that would prove delivery cannot live in this domain.
   """
-  @spec required(module(), String.t(), Fleet.Event.t()) ::
+  @spec required(module(), String.t(), Event.t()) ::
           :ok | {:error, {:broadcast_failed, term()}}
   # CI-03
-  def required(bus, topic, %Fleet.Event{} = ev) do
+  def required(bus, topic, %Event{} = ev) do
     case bus.broadcast(topic, ev) do
       :ok ->
         :ok

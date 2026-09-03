@@ -313,6 +313,7 @@ converge_human() { # converge_human <login>
       is_fleet_human() { local u; u="$(id -u -- "${1:-$PROV_HUMAN}" 2>/dev/null)" || return 1
                          [[ "$u" -ge "$(awk '/^UID_MIN/{print $2}' /etc/login.defs 2>/dev/null || echo 1000)" ]]; }
       run_quiet()     { local o; if ! o="$("$@" 2>&1)"; then printf "%s\n" "$o" >&2; return 1; fi; }
+      # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
       . "$m" apply
     ) >"${out:-/dev/null}" 2>&1 || rc=$?
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then

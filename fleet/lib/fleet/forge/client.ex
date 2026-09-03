@@ -38,8 +38,12 @@ defmodule Fleet.Forge.Client do
 
   require Logger
 
+  alias Fleet.Forge.Client.CI
   alias Fleet.Forge.Client.Jury
+  alias Fleet.Forge.Client.Labels
+  alias Fleet.Forge.Client.Merge
   alias Fleet.Forge.Client.Repo
+  alias Fleet.Forge.Client.Signing
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
   import Fleet.Forge.Client.Transport,
@@ -61,7 +65,7 @@ defmodule Fleet.Forge.Client do
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
-  defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
+  defdelegate branch_head(repo, branch, opts), to: Repo
 
   # ⚠ RE-EXPORTE PARCE QU'UN BEHAVIOUR NOMME CE MODULE-CI COMME SON DEFAUT, pas parce que la facade
   # voudrait grossir : une fonction sortie dans un sous-module sans etre reexposee ici fait mourir
@@ -100,10 +104,10 @@ defmodule Fleet.Forge.Client do
   def add_label(repo, issue_number, label_name, opts \\ [])
       when is_binary(repo) and is_integer(issue_number) and is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number),
+         {:ok, current} <- Labels.get_issue_labels(config, repo, issue_number),
          current_names = Enum.map(current, & &1["name"]),
          false <- label_name in current_names && :already_present,
-         :ok <- add_issue_label(config, repo, issue_number, label_name) do
+         :ok <- Labels.add_issue_label(config, repo, issue_number, label_name) do
       {:ok, :added}
     else
       :already_present -> {:ok, :already_present}
@@ -198,7 +202,7 @@ defmodule Fleet.Forge.Client do
     sig = Keyword.get(opts, :dedup_signature)
 
     with {:ok, config} <- resolve_config(opts) do
-      if sig && signed_or_warn(config, repo, issue_number, sig, opts) do
+      if sig && Signing.signed_or_warn(config, repo, issue_number, sig, opts) do
         {:ok, :already}
       else
         case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", %{
@@ -219,7 +223,7 @@ defmodule Fleet.Forge.Client do
   def remove_label(repo, issue_number, label_name, opts \\ [])
       when is_binary(label_name) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, current} <- get_issue_labels(config, repo, issue_number) do
+         {:ok, current} <- Labels.get_issue_labels(config, repo, issue_number) do
       # Attached-label ids cover repository and organization labels.
       case Enum.find(current, &(&1["name"] == label_name)) do
         nil ->
@@ -765,142 +769,8 @@ defmodule Fleet.Forge.Client do
     with {:ok, config} <- resolve_config(opts) do
       method = Keyword.get(opts, :method, "rebase")
       delay = Keyword.get(opts, :merge_retry_delay_ms, 800)
-      do_merge(config, repo, index, method, delay, @merge_checking_retries)
+      Merge.do_merge(config, repo, index, method, delay, @merge_checking_retries)
     end
-  end
-
-  defp do_merge(config, repo, index, method, delay, attempts_left) do
-    # `do`, la cle du contrat (`MergePullRequestOption`). `"Do"` ne passe que par tolerance du
-    # decodeur Go, jamais par contrat — et une tolerance n'est pas une garantie de portage.
-    case http_post(config, "/repos/#{encode_repo(repo)}/pulls/#{index}/merge", %{
-           "do" => method
-         }) do
-      {:ok, _} ->
-        delete_head_branch_spaced(config, repo, index)
-        :ok
-
-      {:error, {:http, 405, body}} = err ->
-        # ⚠ LE LIBELLE NE SEPARE PAS LES DEUX FAITS, ET LA MESURE L'A PROUVE.
-        #
-        # `fleet/probe-rails#24`, 2026-08-18 : conflit git REEL et DEFINITIF
-        # (`git merge-tree` -> `CONFLICT (content): journal.txt`), et Gitea rend
-        # `405 {"message":"Please try again later"}` — le message reserve au calcul en cours.
-        # S'en remettre au libelle seul fait donc retenter un resultat connu d'avance : mesure sur
-        # ce cas, 1447 tentatives en 21 h, ~2880 requetes/jour, et 1,6 s de `sleep` a chaque tick
-        # du pilote.
-        #
-        # L'ETAT, LUI, EST FIABLE. On relit la PR : `mergeable: false` tranche le definitif sans
-        # dependre d'une chaine. C'est un GET sur un chemin deja en echec — le cas nominal (200) ne
-        # le paie jamais.
-        case still_unmergeable?(config, repo, index) do
-          true ->
-            Logger.warning(
-              "ForgeClient: merge_pr ##{index} — 405 whose MESSAGE reads transient, but the PR " <>
-                "state still reports `mergeable: false`: no retry. The cause is CLASSIFIED " <>
-                "upstream (`MergeOutcome`), not here. body=#{inspect(body)}"
-            )
-
-            {:error, {:merge_blocked, body}}
-
-          false ->
-            do_merge_retry(config, repo, index, method, delay, attempts_left, body, err)
-        end
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  # ⚠ CECI N'EST PAS UNE CLASSIFICATION, ET LA DISTINCTION EST TOUT LE SOIN DE CE BLOC.
-  #
-  # `Fleet.Pilot.MergeOutcome` est l'autorite qui dit ce qu'un echec de merge EST — conflit, brouillon,
-  # politique, deja fusionne, inconnu — et elle reste seule a le dire : la frontiere interdit d'ici
-  # de l'appeler, et c'est tant mieux, parce qu'un second classificateur donnerait un second avis.
-  # Le rail de routage la consulte deja apres coup (`Remediation.route_merge_failure`).
-  #
-  # Ce qu'on lit ici est UN BIT, et il ne sert qu'a une chose : decider s'il vaut la peine de
-  # REESSAYER. « La forge se dit encore non-fusionnable » ne nomme aucune cause ; elle dit seulement
-  # que retenter dans 800 ms n'y changera rien. Un brouillon y tombe aussi, et c'est correct : le
-  # retenter est tout aussi vain.
-  #
-  # LA LECTURE RATEE VAUT `false`, jamais `true`. Se tromper de ce cote-la coute une tentative de
-  # plus ; se tromper de l'autre transformerait un transitoire en blocage annonce sur une forge qui
-  # n'a simplement pas repondu.
-  defp still_unmergeable?(config, repo, index) do
-    case http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}") do
-      {:ok, %{"mergeable" => false}} -> true
-      _ -> false
-    end
-  end
-
-  defp do_merge_retry(config, repo, index, method, delay, attempts_left, body, err) do
-    if attempts_left > 1 and merge_checking?(body) do
-      Logger.info(
-        "ForgeClient: merge_pr ##{index} mergeability in progress ('try again later') → " <>
-          "retry in #{delay}ms (#{attempts_left - 1} remaining)"
-      )
-
-      Process.sleep(delay)
-      do_merge(config, repo, index, method, delay, attempts_left - 1)
-    else
-      # DEUX SILENCES DANS UN SEUL `else`, et le premier est le plus cher.
-      #
-      # Gitea rend `405` pour deux faits opposes : « la mergeabilite est encore en cours de
-      # calcul » (transitoire, il faut reessayer) et « cette PR n'est pas fusionnable »
-      # (definitif : conflits, controles en echec). Rien de STRUCTURE ne les separe dans la
-      # reponse recue — seul le libelle anglais le fait, `"try again later"`. La detection
-      # textuelle reste donc, faute d'autre chose, mais elle ne peut plus DEGRADER EN SILENCE :
-      # le jour ou Gitea reformule ce message, tout `405` devient « definitif », les merges
-      # echouent, et rien ne disait pourquoi — seule la branche RECONNUE ecrivait au journal.
-      #
-      # Le corps entier est journalise, et c'est delibere : il est a la fois le diagnostic du
-      # jour et la matiere du jour ou un champ structure apparaitra. On ne peut pas affirmer
-      # qu'il n'en existe pas — on peut faire en sorte de le voir arriver.
-      _ =
-        if merge_checking?(body) do
-          Logger.warning(
-            "ForgeClient: merge_pr ##{index} — mergeability still computing after " <>
-              "#{@merge_checking_retries} attempts, giving up: #{inspect(body)}"
-          )
-        else
-          Logger.warning(
-            "ForgeClient: merge_pr ##{index} — HTTP 405 NOT recognised as transient " <>
-              "(no \"try again later\" in the message) → treated as DEFINITIVE. If Gitea " <>
-              "reworded it, this line is the only thing that says so: #{inspect(body)}"
-          )
-        end
-
-      err
-    end
-  end
-
-  defp merge_checking?(body) when is_map(body),
-    do: body |> Map.get("message", "") |> String.downcase() |> String.contains?("try again later")
-
-  defp merge_checking?(_), do: false
-
-  defp delete_head_branch_spaced(config, repo, index) do
-    with {:ok, pr} <- http_get(config, "/repos/#{encode_repo(repo)}/pulls/#{index}"),
-         head_ref when is_binary(head_ref) and head_ref != "" <- get_in(pr, ["head", "ref"]) do
-      Fleet.Forge.WriteSpacing.gap()
-
-      case http_delete(config, "/repos/#{encode_repo(repo)}/branches/#{encode_seg(head_ref)}") do
-        {:ok, _} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning(
-            "ForgeClient: post-merge delete of #{head_ref} failed (#{inspect(reason)}) — dead branch survives"
-          )
-      end
-    else
-      other ->
-        Logger.warning(
-          "ForgeClient: post-merge head.ref unreadable for #{repo}##{index} (#{inspect(other)}) — branch not deleted"
-        )
-    end
-
-    :ok
   end
 
   @doc """
@@ -1127,7 +997,7 @@ defmodule Fleet.Forge.Client do
         |> Enum.uniq()
         |> Enum.sort()
 
-      {:ok, {statuses |> current_per_context() |> worst_ci_state(), contexts}}
+      {:ok, {statuses |> CI.current_per_context() |> CI.worst_ci_state(), contexts}}
     end
   end
 
@@ -1152,103 +1022,7 @@ defmodule Fleet.Forge.Client do
     with {:ok, config} <- resolve_config(opts),
          {:ok, statuses} <-
            paginate(config, "/repos/#{encode_repo(repo)}/commits/#{encode_seg(sha)}/statuses", "") do
-      {:ok, red_contexts(statuses)}
-    end
-  end
-
-  defp red_contexts(statuses) do
-    statuses
-    |> Enum.group_by(& &1["context"])
-    |> Enum.flat_map(fn
-      {context, group} when is_binary(context) ->
-        if Enum.all?(group, &is_integer(&1["id"])) do
-          latest = Enum.max_by(group, & &1["id"])
-
-          if latest["status"] in ~w(failure error),
-            do: [red_context(context, latest)],
-            else: []
-        else
-          []
-        end
-
-      _ ->
-        []
-    end)
-    |> Enum.sort_by(& &1.context)
-  end
-
-  defp red_context(context, entry) do
-    %{
-      context: context,
-      description: presence(entry["description"]),
-      target_url: presence(entry["target_url"])
-    }
-  end
-
-  defp presence(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
-  defp presence(_), do: nil
-
-  # LE RANG SE LIT DANS LA DONNEE, PAS DANS L'ORDRE DE LA REPONSE.
-  #
-  # ⚠ LA DATE ET LA VERSION RESTENT ICI, ET C'EST DELIBERE : la mesure porte sur un SYSTEME EXTERNE
-  # dont le comportement peut changer sans nous. Sans sa version, la phrase n'est plus verifiable et
-  # un lecteur ne peut pas savoir si elle vaut encore.
-  #
-  # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
-  # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
-  # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui gardait la
-  # PREMIERE occurrence par contexte gardait donc la plus ANCIENNE : sur un contexte pose
-  # `success` puis `failure`, `commit_ci_state` rendait `{:ok, :success}` — la porte de merge
-  # lisant vert sur un commit rouge.
-  #
-  # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat), `status`
-  # sur CommitStatus (l'element), et cet appel liste des CommitStatus.
-  defp current_per_context(statuses) do
-    statuses
-    |> Enum.group_by(& &1["context"])
-    |> Enum.flat_map(fn {_context, group} ->
-      if Enum.all?(group, &is_integer(&1["id"])) do
-        [group |> Enum.max_by(& &1["id"]) |> Map.get("status")]
-      else
-        # Ordre indeterminable : on garde TOUT le groupe, donc `worst_ci_state/1` prend le pire.
-        # Ne jamais rendre le meilleur d'un ensemble qu'on ne sait pas ordonner — c'est une porte
-        # de merge qui lit le resultat.
-        Enum.map(group, & &1["status"])
-      end
-    end)
-  end
-
-  # Worst-of, in the order that matters to a merge decision: one failure sinks it; otherwise any
-  # unfinished run means "not yet", never "yes".
-  defp worst_ci_state([]), do: :none
-
-  # LES SIX ETATS QUE LE CONTRAT DECLARE, ET CE QU'ILS VALENT POUR UNE PORTE DE MERGE.
-  #
-  # `CommitStatus.status` : `pending | success | error | failure | warning | skipped` (enum du
-  # swagger de l'instance). La clause fourre-tout « etat inconnu -> :pending » est juste pour un
-  # etat VRAIMENT inconnu et fausse pour deux qui sont AU CONTRAT :
-  #
-  #   * `skipped` — l'etape ne s'est PAS executee et ne devait pas : sa condition `if:` etait
-  #     fausse. Elle n'a pas de verdict. La compter comme « pas encore » fait attendre la porte
-  #     45 min puis ESCALADER vers un humain — une fausse alarme sur un saut delibere, et une
-  #     fausse alarme est ce qui apprend a un humain a ignorer le canal. Un contexte sans verdict ne
-  #     VOTE PAS ; si tous sont sautes, il ne reste rien et `:none` (aucun statut) est la reponse
-  #     juste, que la porte traite deja en attente bornee.
-  #   * `warning` — la verification a TOURNE et n'a pas echoue. La faire bloquer indefiniment est un
-  #     etat dont aucun humain ne peut sortir autrement qu'en relancant ; elle ouvre donc la porte,
-  #     comme un succes, parce que c'est ce qu'elle est : un succes qui commente.
-  #
-  # Le fourre-tout couvre l'inconnu REEL, et il rend `:pending` : un etat que ce code ne connait pas
-  # ne doit pas elargir la porte.
-  defp worst_ci_state(states) do
-    voting = Enum.reject(states, &(&1 == "skipped"))
-
-    cond do
-      voting == [] -> :none
-      Enum.any?(voting, &(&1 in ["failure", "error"])) -> :failure
-      Enum.any?(voting, &(&1 == "pending")) -> :pending
-      Enum.all?(voting, &(&1 in ["success", "warning"])) -> :success
-      true -> :pending
+      {:ok, CI.red_contexts(statuses)}
     end
   end
 
@@ -1260,87 +1034,6 @@ defmodule Fleet.Forge.Client do
 
   # Le doute ne change pas le GESTE (on poste), il change ce qu'on en SAIT. `false` ici veut dire
   # « poste » dans les deux cas, mais un seul des deux est une mesure.
-  defp signed_or_warn(config, repo, issue_number, sig, opts) do
-    case comment_signed?(config, repo, issue_number, sig, opts) do
-      {:ok, signed?} ->
-        signed?
-
-      {:unverified, why} ->
-        Logger.warning(
-          "ForgeClient: dedup NOT verified on #{repo}##{issue_number} (#{inspect(why)}) — posting " <>
-            "anyway (refusing would drop a legitimate comment), but this marker may be a DUPLICATE. " <>
-            "These signatures are business-bearing (rounds budget, seal, escalation), so the cost " <>
-            "lands elsewhere and later: signature=#{inspect(sig)}"
-        )
-
-        false
-    end
-  end
-
-  # ⚠ UN `false` NU DIRAIT DEUX CHOSES : « lu, aucun marqueur » et « pas pu lire ». Les deux menent
-  # a poster — l'arbitrage est ecrit dans le `@doc` de `post_comment/4` (« If the bot identity or
-  # comment history cannot be resolved, no existing marker is trusted and the comment is posted »)
-  # et il NE CHANGE PAS : refuser de poster sur une lecture ratee supprimerait un commerce legitime.
-  # Mais ces marqueurs sont METIER — budget de rounds, sceau, escalade — donc un doublon a un cout
-  # ailleurs, plus tard, et loin d'ici. Rendre le doute distinct est ce qui permet de le NOMMER au
-  # moment ou il naît ; c'est le seul endroit ou la correlation existe encore.
-  defp comment_signed?(config, repo, issue_number, sig, opts) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
-      {:ok, comments} when is_list(comments) ->
-        # Counted markers trust the system author; observability markers may opt into any author.
-        trusted =
-          cond do
-            Keyword.get(opts, :dedup_any_author, false) ->
-              {:ok, comments}
-
-            true ->
-              # Les comptes que le daemon DETIENT : le systeme, plus le role sous lequel l'appelant
-              # ecrit quand il le declare (`:dedup_role`). Elargir a « n'importe quel auteur »
-              # laisserait un tiers SUPPRIMER un commentaire legitime en postant sa signature en
-              # premier ; s'y limiter rendrait la dedup aveugle a tout ce qui est signe par un
-              # role, c'est-a-dire a la quasi-totalite de ce qu'elle garde.
-              case trusted_logins(config, opts) do
-                {:ok, logins} ->
-                  {:ok, Enum.filter(comments, fn c -> get_in(c, ["user", "login"]) in logins end)}
-
-                # LA LECTURE A REUSSI, LES IDENTITES NON. Rendre `[]` ici dirait « aucun
-                # commentaire de confiance », c'est-a-dire « pas de marqueur » — alors qu'on ne
-                # sait pas QUI a ecrit quoi.
-                {:error, why} ->
-                  {:unverified, {:trusted_logins, why}}
-              end
-          end
-
-        case trusted do
-          {:unverified, _} = unverified ->
-            unverified
-
-          {:ok, list} ->
-            {:ok, Enum.any?(list, &String.contains?(&1["body"] || "", sig))}
-        end
-
-      other ->
-        {:unverified, {:comments_unreadable, other}}
-    end
-  end
-
-  defp trusted_logins(config, opts) do
-    with {:ok, bot} <- forge_bot_login(config, opts) do
-      case Keyword.get(opts, :dedup_role) do
-        role when is_binary(role) ->
-          case role_login(role, opts) do
-            {:ok, login} -> {:ok, [bot, login]}
-            # Le role n'a pas de jeton ici : on garde le systeme seul plutot que d'echouer une
-            # publication pour une question de dedup.
-            {:error, _} -> {:ok, [bot]}
-          end
-
-        _ ->
-          {:ok, [bot]}
-      end
-    end
-  end
-
   @stage_prefix Fleet.Labels.stage_prefix()
   @wfmap_prefix Fleet.Labels.wfmap_prefix()
 
@@ -1377,7 +1070,7 @@ defmodule Fleet.Forge.Client do
           {:ok, {String.t(), String.t()}} | :none | {:error, term()}
   def get_route(repo, issue_number, opts \\ []) do
     with {:ok, config} <- resolve_config(opts),
-         {:ok, labels} <- get_issue_labels(config, repo, issue_number) do
+         {:ok, labels} <- Labels.get_issue_labels(config, repo, issue_number) do
       route_from_labels(labels)
     end
   end
@@ -1448,6 +1141,39 @@ defmodule Fleet.Forge.Client do
     end
   end
 
+  # UN commentaire signe compte-t-il ? Le marqueur nomme un ROLE ; on ne croit ce role que si
+  # l'auteur du commentaire est le compte de ce role, ou le compte systeme.
+  defp count_signed(c, {:ok, n}, bot, opts) do
+    role = ForgeProtocol.step_run_marker_role(c["body"])
+    author = get_in(c, ["user", "login"])
+
+    cond do
+      author == bot ->
+        {:cont, {:ok, n + 1}}
+
+      true ->
+        case role_login(role, opts) do
+          {:ok, ^author} ->
+            {:cont, {:ok, n + 1}}
+
+          {:ok, _other} ->
+            {:cont, {:ok, n}}
+
+          # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
+          # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
+          # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
+          # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
+          {:error, :role_token_unavailable} ->
+            {:cont, {:ok, n}}
+
+          # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
+          # que de rendre un total qui pourrait etre bas.
+          {:error, reason} ->
+            {:halt, {:error, {:role_login_unresolved, role, reason}}}
+        end
+    end
+  end
+
   @doc """
   Counts the FLEET's step-run markers across all comment pages for the anti-runaway budget.
 
@@ -1471,36 +1197,7 @@ defmodule Fleet.Forge.Client do
            paginate(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/comments", "") do
       comments
       |> Enum.filter(&(ForgeProtocol.step_run_marker_role(&1["body"]) != nil))
-      |> Enum.reduce_while({:ok, 0}, fn c, {:ok, n} ->
-        role = ForgeProtocol.step_run_marker_role(c["body"])
-        author = get_in(c, ["user", "login"])
-
-        cond do
-          author == bot ->
-            {:cont, {:ok, n + 1}}
-
-          true ->
-            case role_login(role, opts) do
-              {:ok, ^author} ->
-                {:cont, {:ok, n + 1}}
-
-              {:ok, _other} ->
-                {:cont, {:ok, n}}
-
-              # PAS DE JETON POUR CE ROLE = ce role n'existe pas dans cette fleet, donc le marqueur
-              # qui le nomme n'a pas pu etre ecrit par elle. Ne pas le compter n'est pas un
-              # sous-compte permissif, c'est refuser un faux — et c'est ce qui empeche un tiers de
-              # casser le compteur en postant `[step_run:fake:ccc]` (F059 : le fixture le fait).
-              {:error, :role_token_unavailable} ->
-                {:cont, {:ok, n}}
-
-              # Tout le reste — reseau, forge muette — est une VRAIE incertitude : on echoue plutot
-              # que de rendre un total qui pourrait etre bas.
-              {:error, reason} ->
-                {:halt, {:error, {:role_login_unresolved, role, reason}}}
-            end
-        end
-      end)
+      |> Enum.reduce_while({:ok, 0}, &count_signed(&1, &2, bot, opts))
     end
   end
 
@@ -1554,251 +1251,48 @@ defmodule Fleet.Forge.Client do
     end
   end
 
-  defp get_issue_labels(config, repo, issue_number) do
-    case http_get(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels") do
-      {:ok, labels} when is_list(labels) -> {:ok, labels}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp add_issue_label(config, repo, issue_number, label_name) do
-    case post_issue_label(config, repo, issue_number, label_name) do
-      {:ok, true} ->
-        :ok
-
-      {:ok, false} ->
-        with :ok <- ensure_repo_label(config, repo, label_name),
-             {:ok, true} <- post_issue_label(config, repo, issue_number, label_name) do
-          :ok
-        else
-          _ -> {:error, {:label_not_added, label_name}}
-        end
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp post_issue_label(config, repo, issue_number, label_name) do
-    case http_post(config, "/repos/#{encode_repo(repo)}/issues/#{issue_number}/labels", %{
-           labels: [label_name]
-         }) do
-      {:ok, body} when is_list(body) -> {:ok, Enum.any?(body, &(&1["name"] == label_name))}
-      {:ok, _non_list} -> {:ok, false}
-      {:error, _} = err -> err
-    end
-  end
-
   @doc """
   Ensures static lock, destination, and stage labels exist with their protocol metadata.
 
   Success is based on complete readback, not create responses. Missing or unreadable labels return
   `:labels_missing` or `:labels_unverifiable`; dynamic workflow-map labels are not seeded.
   """
+
   # LES CONSTANTES DE PROTOCOLE VIENNENT DE `Fleet.Labels`, ET C'EST SON CONTRAT, PAS UN STYLE.
   # Son `@moduledoc` l'écrit : « Re-declaring one as a local `@attr` or literal = silent drift on a
   # rename. Centralized here, consumed everywhere. » Les épeler en littéral — dans la liste de
   # seeding comme dans les clauses de `label_color/1` / `label_description/1` — laisse ici autant de
   # chaînes orphelines au premier renommage côté Labels, sans un mot. Attributs évalués à la
   # compilation (la forme que le moduledoc prescrit), utilisables en PATTERN.
-  @lbl_in_flight Fleet.Labels.in_flight()
-  @lbl_awaits_arch Fleet.Labels.awaits_arch()
-  @lbl_destination_workshop Fleet.Labels.destination_workshop()
-  @lbl_stage_review Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review()
-  @lbl_stage_merged Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
-  @lbl_stage_retired Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
 
   @spec ensure_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_protocol_labels(repo, opts \\ []) when is_binary(repo) do
     with {:ok, config} <- resolve_config(opts) do
       statics =
         [
-          @lbl_in_flight,
-          @lbl_awaits_arch,
+          Fleet.Labels.in_flight(),
+          Fleet.Labels.awaits_arch(),
           # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
-          @lbl_destination_workshop,
+          Fleet.Labels.destination_workshop(),
           # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step
           # names carried by the workflow MAPS (data), not protocol constants — `Fleet.Labels` says
           # so itself ("brief-review/build values come from the MAP"). Seeding them here pre-creates
           # the two canonical steps' labels; a card naming other steps gets them on demand.
           "stage/brief-review",
           "stage/build",
-          @lbl_stage_review,
-          @lbl_stage_merged,
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_review(),
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged(),
           # RETIRED is seeded for the PALETTE, not for routing — `add_issue_label/4` creates a
           # label on demand when the POST does not take. A lazily-created label is born with the
           # default grey and no description, so the ONE stage that says "closed without delivering"
           # would read as noise next to five coloured ones.
-          @lbl_stage_retired
+          Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_retired()
         ] ++ Fleet.Labels.visual_types()
 
-      Enum.each(statics, &ensure_repo_label(config, repo, &1))
-      verify_labels_present(config, repo, statics)
+      Enum.each(statics, &Labels.ensure_repo_label(config, repo, &1))
+      Labels.verify_labels_present(config, repo, statics)
     end
-  end
-
-  defp verify_labels_present(config, repo, expected) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
-      {:ok, labels} when is_list(labels) ->
-        present = MapSet.new(labels, & &1["name"])
-
-        case Enum.reject(expected, &MapSet.member?(present, &1)) do
-          [] -> :ok
-          missing -> {:error, {:labels_missing, missing}}
-        end
-
-      other ->
-        {:error, {:labels_unverifiable, other}}
-    end
-  end
-
-  # Creates the missing protocol label at the REPO level. The routing labels (`stage/*`/`wfmap/*`) and the
-  # flat locks (`lcars-*`) live PER-REPO: the routing state belongs to ITS repo's issues (the
-  # forge = state-store, self-contained per project), and the system account creates them via its **repo-write** —
-  # never needing to be org-owner (which `POST /orgs/*/labels` would require → 403 "Must be an organization
-  # owner"). Color + description PER FAMILY (the NAME carries the protocol, the description EXPLAINS it to
-  # the human hovering over the label on the forge — a cryptic protocol string means
-  # nothing outside the code). TRUE idempotence = check-then-create: Gitea does NOT reject a
-  # duplicate label NAME (no 409 — verified live 2026-07-18: a double template sync left every
-  # label twice, faithfully copied into every generated repo). A failed existence read falls
-  # through to the POST (the label matters more than the dedup); a failed POST stays tolerated
-  # (`:ok` — it's the re-POST + its verification that decide, cf. `add_issue_label`).
-  defp ensure_repo_label(config, repo, label_name) do
-    case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
-      {:ok, labels} when is_list(labels) ->
-        case Enum.find(labels, &(&1["name"] == label_name)) do
-          nil -> create_repo_label(config, repo, label_name)
-          existing -> reconcile_label_color(config, repo, existing, label_name)
-        end
-
-      _ ->
-        create_repo_label(config, repo, label_name)
-    end
-  end
-
-  # An already-present label keeps its id, and with it every issue wearing it — only its COLOR is
-  # reconciled. Creating-only would leave every repo seeded before the palette wearing the old
-  # near-white default, and the marker that motivated the palette (`genre/doc`) is precisely one
-  # that already exists on all of them: a fix that only reaches repos nobody has created yet is not
-  # a fix. Best-effort by design — a repo whose labels cannot be repainted still routes correctly,
-  # so this never turns a working forge into a failed seeding.
-  defp reconcile_label_color(config, repo, %{"id" => id, "color" => current}, label_name) do
-    wanted = label_color(label_name)
-
-    if normalize_color(current) == normalize_color(wanted) do
-      :ok
-    else
-      _ = http_patch(config, "/repos/#{encode_repo(repo)}/labels/#{id}", %{color: wanted})
-      :ok
-    end
-  end
-
-  defp reconcile_label_color(_config, _repo, _existing, _label_name), do: :ok
-
-  # Gitea answers `"ededed"` and accepts `"#ededed"` — comparing the two raw would repaint every
-  # label on every pass, forever.
-  defp normalize_color(color) when is_binary(color),
-    do: color |> String.trim_leading("#") |> String.downcase()
-
-  defp normalize_color(_), do: ""
-
-  defp create_repo_label(config, repo, label_name) do
-    # A SCOPED label (name `scope/value`, contains "/") is created MUTUALLY EXCLUSIVE (`exclusive:true`):
-    # Gitea removes the old `scope/*` from the issue when a new one is set (verified forge 1.26.1, org AND
-    # repo level, by NAME). This is the mechanism of `stage/*` (workflow_map position = visible state
-    # machine): native unrepresentability (never 2 steps). The FLAT locks (`lcars-*`) are non-exclusive.
-    body = %{
-      name: label_name,
-      exclusive: String.contains?(label_name, "/"),
-      color: label_color(label_name),
-      description: label_description(label_name)
-    }
-
-    case http_post(config, "/repos/#{encode_repo(repo)}/labels", body) do
-      {:ok, _} -> :ok
-      {:error, _} -> :ok
-    end
-  end
-
-  # Le NOM porte le protocole, la couleur porte le COUP D'OEIL.
-  #
-  # ⚠ UN LABEL QUE PERSONNE NE VOIT EST UN LABEL QUI N'EST PAS LA, et il echoue dans la seule
-  # direction qui compte : un operateur qui parcourt une liste conclut que le marqueur n'a jamais
-  # ete pose. Un defaut quasi-blanc sur une interface blanche produit exactement ca — present dans
-  # l'API, absent a l'humain.
-  #
-  # Une teinte par famille de PROTOCOLE, et les etapes gardent une progression lisible sans legende.
-  # La palette est reservee a ce qui SIGNIFIE quelque chose mecaniquement : le registre decoratif
-  # recoit un neutre visible plutot que d'emprunter une teinte de protocole, pour qu'une rime de
-  # couleur ne suggere jamais une parente que le code n'a pas.
-  defp label_color(@lbl_in_flight), do: "#FF9900"
-  defp label_color(@lbl_awaits_arch), do: "#CC6666"
-  defp label_color(@lbl_destination_workshop), do: "#33BBCC"
-  defp label_color("stage/brief-review"), do: "#6699CC"
-  defp label_color("stage/build"), do: "#FFCC33"
-  defp label_color(@lbl_stage_review), do: "#9966CC"
-  defp label_color(@lbl_stage_merged), do: "#99CC66"
-  # Deliberately NOT a green: `retired` is the twin of `merged` in position and its opposite in
-  # meaning — a ticket that closed without delivering. A shared hue would read as a delivery.
-  defp label_color(@lbl_stage_retired), do: "#777788"
-  defp label_color("wfmap/" <> _map), do: "#CC99CC"
-  defp label_color("type:" <> _kind), do: "#999999"
-  defp label_color(_), do: "#999999"
-
-  # Description PER FAMILY (Gitea tooltip on hover) — the NAME stays the protocol (LCARS vocab intact,
-  # parsed as-is by the code), the description is the ONLY place where we explain in plain terms to a human
-  # looking at the forge without the code in front of them. `wfmap/<map>` and `stage/<step>` have
-  # dynamic values (map name / step name varying by workflow_map) → match on the PREFIX, not the
-  # exact value (unlike `label_color`, which differentiates each stage it knows by name).
-  defp label_description(@lbl_in_flight),
-    do:
-      "Verrou : un pod travaille déjà cette brique (anti double-spawn). Levé par le système en fin de step — jamais à retirer à la main."
-
-  defp label_description(@lbl_awaits_arch),
-    do:
-      "Cette issue attend une action HUMAINE via l'architecte (verdict escalade/halt/redirect) — le poller la laisse tranquille tant qu'il est posé."
-
-  defp label_description("stage/" <> _step),
-    do:
-      "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
-
-  defp label_description("wfmap/" <> map) do
-    case card_description(map) do
-      {:ok, desc} ->
-        String.slice(
-          "Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc,
-          0,
-          240
-        )
-
-      :error ->
-        "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
-    end
-  end
-
-  # Ce texte est lu par un HUMAIN sur la forge, et il a nommé la mauvaise branche pendant tout le
-  # chantier des trois faces : il disait « la voie ops (branche ops) » alors que le livrable
-  # documentaire part sur `workshop`. `ops` est le registre que le runtime écrit, qu'aucun
-  # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
-  defp label_description(@lbl_destination_workshop),
-    do:
-      "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche workshop, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."
-
-  defp label_description("type:" <> _kind),
-    do:
-      "Type VISUEL du ticket — décoratif, aucun mécanisme ne le lit. Il suit la destination : ce qui ROUTE est `destination/*`."
-
-  defp label_description(_),
-    do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
-
-  defp card_description(map) do
-    case Fleet.Workflow.Loader.load!(map)["description"] do
-      desc when is_binary(desc) and desc != "" -> {:ok, desc}
-      _ -> :error
-    end
-  rescue
-    _ -> :error
   end
 
   @doc """

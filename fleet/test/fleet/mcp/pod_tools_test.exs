@@ -11,9 +11,10 @@ defmodule Fleet.MCP.PodToolsTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
-  alias Fleet.TestEnv
   alias Fleet.TaskQueue
+  alias Fleet.TestEnv
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 
@@ -305,23 +306,24 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
-         %{
-           "state" => "closed",
-           "labels" => [%{"name" => "stage/merged"}],
-           "title" => "Brique livrée"
-         }}
+         PayloadFixture.issue(
+           title: "Brique livrée",
+           state: "closed",
+           label_names: ["stage/merged"]
+         )}
 
     @impl true
     def list_pulls(_repo, _opts),
       do:
         {:ok,
          [
-           %{
-             "number" => 6,
-             "state" => "closed",
-             "merged" => true,
-             "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
-           }
+           PayloadFixture.pull(
+             number: 6,
+             state: "closed",
+             merged: true,
+             head_ref: "refs/pull/6/head",
+             head_sha: "9d5bd4e"
+           )
          ]}
 
     @impl true
@@ -334,12 +336,13 @@ defmodule Fleet.MCP.PodToolsTest do
     def merged_pr_of_issue(_repo, 5, _opts),
       do:
         {:ok,
-         %{
-           "number" => 6,
-           "state" => "closed",
-           "merged" => true,
-           "head" => %{"ref" => "refs/pull/6/head", "sha" => "9d5bd4e"}
-         }}
+         PayloadFixture.pull(
+           number: 6,
+           state: "closed",
+           merged: true,
+           head_ref: "refs/pull/6/head",
+           head_sha: "9d5bd4e"
+         )}
 
     def merged_pr_of_issue(_repo, _n, _opts), do: :none
 
@@ -410,11 +413,11 @@ defmodule Fleet.MCP.PodToolsTest do
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
-         %{
-           "state" => "closed",
-           "labels" => [%{"name" => "lcars-onboarded"}],
-           "title" => "Livrée sans label"
-         }}
+         PayloadFixture.issue(
+           title: "Livrée sans label",
+           state: "closed",
+           label_names: ["lcars-onboarded"]
+         )}
 
     @impl true
     defdelegate list_pulls(repo, opts), to: MergedMarkerForge
@@ -473,12 +476,13 @@ defmodule Fleet.MCP.PodToolsTest do
       do:
         {:ok,
          [
-           %{
-             "number" => 9,
-             "state" => "open",
-             "merged" => false,
-             "head" => %{"ref" => "lcars/issue-5-engineer", "sha" => "abc"}
-           }
+           PayloadFixture.pull(
+             number: 9,
+             state: "open",
+             merged: false,
+             head_ref: "lcars/issue-5-engineer",
+             head_sha: "abc"
+           )
          ]}
 
     @impl true
@@ -781,16 +785,12 @@ defmodule Fleet.MCP.PodToolsTest do
       # F-C047 — tunable labels (`:test_issue_labels`, list of names): `delivered` requires
       # `stage/merged`, no longer `closed` alone. Default [] → a closed issue WITHOUT merge proof =
       # not delivered.
-      labels =
-        Application.get_env(:lcars_fleet, :mcp_test_issue_labels, [])
-        |> Enum.map(&%{"name" => &1})
-
       {:ok,
-       %{
-         "state" => Application.get_env(:lcars_fleet, :mcp_test_issue_state, "open"),
-         "labels" => labels,
-         "title" => "Brique de test"
-       }}
+       PayloadFixture.issue(
+         title: "Brique de test",
+         state: Application.get_env(:lcars_fleet, :mcp_test_issue_state, "open"),
+         label_names: Application.get_env(:lcars_fleet, :mcp_test_issue_labels, [])
+       )}
     end
 
     @impl true
@@ -864,13 +864,13 @@ defmodule Fleet.MCP.PodToolsTest do
         :idem_issues,
         issues ++
           [
-            %{
-              "number" => number,
-              "title" => title,
-              "body" => body,
-              "state" => "open",
-              "assignees" => [%{"login" => "starfleet"}]
-            }
+            PayloadFixture.issue(
+              number: number,
+              body: body,
+              title: title,
+              state: "open",
+              assignee_logins: ["starfleet"]
+            )
           ]
       )
 
@@ -2561,17 +2561,17 @@ defmodule Fleet.MCP.PodToolsTest do
     def list_open_issues("fleet/alpha", _opts) do
       {:ok,
        [
-         %{
-           "number" => 4,
-           "title" => "sonde retour",
-           "labels" => [%{"name" => "lcars-awaits-arch"}]
-         },
-         %{"number" => 5, "title" => "vraie feature", "labels" => [%{"name" => "type:feature"}]}
+         PayloadFixture.issue(
+           number: 4,
+           title: "sonde retour",
+           label_names: ["lcars-awaits-arch"]
+         ),
+         PayloadFixture.issue(number: 5, title: "vraie feature", label_names: ["type:feature"])
        ]}
     end
 
     def list_open_issues(_other_repo, _opts),
-      do: {:ok, [%{"number" => 9, "title" => "rien", "labels" => []}]}
+      do: {:ok, [PayloadFixture.issue(number: 9, title: "rien", label_names: [])]}
 
     @impl true
     def list_comments("fleet/alpha", 4, _opts) do
@@ -2888,16 +2888,13 @@ defmodule Fleet.MCP.PodToolsTest do
 
     def get_issue("fleet/alpha", 5, _opts) do
       {:ok,
-       %{
-         "number" => 5,
-         "title" => "vraie feature",
-         "state" => "open",
-         "body" => "le brief complet du ticket",
-         # Coherent pair: a `destination/workshop` ticket wears `type:workshop`. The fixture used to pin
-         # `type:feature` here — a read-side fixture teaching the very contradiction the write
-         # side was producing.
-         "labels" => [%{"name" => "type:workshop"}, %{"name" => "destination/workshop"}]
-       }}
+       PayloadFixture.issue(
+         number: 5,
+         body: "le brief complet du ticket",
+         title: "vraie feature",
+         state: "open",
+         label_names: ["type:workshop", "destination/workshop"]
+       )}
     end
 
     def get_route(_r, _n, _o), do: :none
@@ -2927,16 +2924,16 @@ defmodule Fleet.MCP.PodToolsTest do
         :read_channel_board,
         {:ok,
          [
-           %{
-             "number" => 4,
-             "title" => "sonde retour",
-             "labels" => [%{"name" => "lcars-awaits-arch"}]
-           },
-           %{
-             "number" => 5,
-             "title" => "vraie feature",
-             "labels" => [%{"name" => "type:feature"}, %{"name" => "stage/build"}]
-           }
+           PayloadFixture.issue(
+             number: 4,
+             title: "sonde retour",
+             label_names: ["lcars-awaits-arch"]
+           ),
+           PayloadFixture.issue(
+             number: 5,
+             title: "vraie feature",
+             label_names: ["type:feature", "stage/build"]
+           )
          ]}
       )
     end
@@ -3084,14 +3081,14 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "l'org d'un projet ne se DEVINE pas — le catalogue est OBLIGATOIRE" do
     setup do
-      tmp = Fleet.TestEnv.tmp_path("orgs")
+      tmp = TestEnv.tmp_path("orgs")
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       root = Path.join(tmp, "aaa")
       File.mkdir_p!(Path.join(root, Fleet.Catalogue.rel(:workflow_maps)))
       File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: aaa\n")
 
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
       :ok
     end
 
@@ -3106,7 +3103,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # son catalogue). Ce qu'elle achetait, en echange de rien : un comportement qui change quand un
       # TIERS installe un catalogue portant le meme nom de carte.
       assert {:error, {:catalogue_required, orgs}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"workflow_map" => "standard"})
+               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"workflow_map" => "standard"})
 
       assert "aaa" in orgs and "fleet" in orgs
     end
@@ -3115,19 +3112,19 @@ defmodule Fleet.MCP.PodToolsTest do
       # Le piege des deux versions precedentes : une branche qui ne s'execute que dans une certaine
       # POPULATION est une branche que personne n'exerce jamais dans l'autre. Ici il n'y en a plus
       # qu'une, donc elle est prise partout.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
       assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
 
       assert {:error, {:catalogue_required, ["fleet"]}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{})
+               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{})
     end
 
     test "`catalogue` explicite : accepte s'il est installe, refuse sinon — en le NOMMANT" do
       assert {:ok, "aaa"} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => "aaa"})
+               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => "aaa"})
 
       assert {:error, {:catalogue_not_installed, "jamais-vu", _gestes}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => "jamais-vu"})
+               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => "jamais-vu"})
     end
 
     test "une chaine VIDE n'est pas une reponse — elle vaut l'absence" do
@@ -3135,7 +3132,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # produirait un refus `catalogue_not_installed ""`, qui accuse l'appelant d'avoir nomme un
       # catalogue inconnu la ou il n'a rien nomme du tout.
       assert {:error, {:catalogue_required, _}} =
-               Fleet.MCP.PodTools.Delegation.resolve_org_for_test(%{"catalogue" => ""})
+               Fleet.MCP.PodTools.Delegation.Gate.resolve_org(%{"catalogue" => ""})
     end
   end
 end

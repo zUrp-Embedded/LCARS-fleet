@@ -30,6 +30,9 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # Authority of the brief FORMAT (worker/judge/brief-review/rework/conflict). StepDispatcher
   # CHOOSES which brief per the forge state; BriefBuilder FORMS it.
+  alias Fleet.CapProfile
+  alias Fleet.Forge.Payload
+  alias Fleet.Labels
   alias Fleet.Pilot.BriefBuilder
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).
@@ -51,12 +54,12 @@ defmodule Fleet.Pilot.StepDispatcher do
   alias Fleet.Pilot.StepDispatcher.Spawn
 
   # Protocol vocabulary = single source Fleet.Labels (compile-time constants).
-  @in_flight_label Fleet.Labels.in_flight()
-  @awaits_arch_label Fleet.Labels.awaits_arch()
-  @awaits_toolchain_label Fleet.Labels.awaits_toolchain()
+  @in_flight_label Labels.in_flight()
+  @awaits_arch_label Labels.awaits_arch()
+  @awaits_toolchain_label Labels.awaits_toolchain()
   # Scoped label `stage/merged` (set by MergeAndPromote BEFORE the close). Composed from the TWO
   # Labels authorities (prefix + value), not a forked literal.
-  @merged_label Fleet.Labels.stage_prefix() <> Fleet.Labels.stage_merged()
+  @merged_label Labels.stage_prefix() <> Labels.stage_merged()
 
   @type decision :: :engage | {:skip, atom()}
 
@@ -118,7 +121,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp do_dispatch_issue(payload, opts) do
     forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
-    loader = Keyword.get(opts, :loader, Fleet.CapProfile)
+    loader = Keyword.get(opts, :loader, CapProfile)
     spawner = Keyword.get(opts, :spawner, Fleet.Spawner)
     task_queue = Keyword.get(opts, :task_queue, Fleet.TaskQueue)
     resolver = Keyword.get(opts, :project_resolver, &default_project_resolver/2)
@@ -168,12 +171,12 @@ defmodule Fleet.Pilot.StepDispatcher do
                  :role_resolution
                ),
              # Catalogue lifetime owns pod identity and serialization.
-             scope = Fleet.CapProfile.slot_scope(profile),
+             scope = CapProfile.slot_scope(profile),
              pod_id = Spawn.pod_id_for_scope(scope, repo, number, role),
              slug = Spawn.feature_slug(issue),
              decision =
                Spawn.project_scope_decision(
-                 Fleet.CapProfile.lifetime_scope(profile),
+                 CapProfile.lifetime_scope(profile),
                  spawner,
                  pod_id,
                  scope
@@ -332,7 +335,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # pod dispatched OFF an existing PR (judges, rework, conflict-rework) clones the FEATURE branch,
     # so its clone-base cannot answer "which face does this PR land on" — the PR itself is the only
     # honest source, and it is in hand exactly here.
-    opts = Keyword.put(opts, :pr_base_branch, get_in(pr, ["base", "ref"]))
+    opts = Keyword.put(opts, :pr_base_branch, Payload.base_ref(pr))
 
     # Full context of the review flow, built at this UNIQUE site and threaded to ReviewLifecycle. Armored
     # struct `%ReviewLifecycle.Ctx{}` (not a bare map): `@enforce_keys` forces each field, an access
@@ -341,7 +344,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     # module (uni-directional, no cycle).
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Forge.Client),
-      loader: Keyword.get(opts, :loader, Fleet.CapProfile),
+      loader: Keyword.get(opts, :loader, CapProfile),
       workflow_map_loader:
         Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
@@ -354,9 +357,9 @@ defmodule Fleet.Pilot.StepDispatcher do
     }
 
     pr_number = pr["number"]
-    head = get_in(pr, ["head", "ref"]) || ""
-    head_sha = get_in(pr, ["head", "sha"])
-    labels = Enum.map(Map.get(pr, "labels") || [], & &1["name"])
+    head = Payload.head_ref(pr) || ""
+    head_sha = Payload.head_sha(pr)
+    labels = Payload.label_names(pr)
 
     # Stable review records are unioned with volatile requested reviewers. Read through the SAME
     # frontier as the verdicts (`pr_review_state` translates its own): this list comes straight off
@@ -374,7 +377,7 @@ defmodule Fleet.Pilot.StepDispatcher do
         {:skipped, :in_flight}
 
       # Draft PR is explicitly parked by the human.
-      Map.get(pr, "draft") == true ->
+      Payload.draft?(pr) ->
         {:skipped, :draft}
 
       # Parent issue architect lock suppresses PR redispatch.
@@ -451,11 +454,11 @@ defmodule Fleet.Pilot.StepDispatcher do
   # 2nd load; `nil` (tests, other callers) → load via `workflow_map_loader` (fallback).
   @spec workflow_map_role(
           {String.t(), String.t()} | nil,
-          (String.t() -> {:ok, Fleet.CapProfile.t()} | {:error, term()}),
+          (String.t() -> {:ok, CapProfile.t()} | {:error, term()}),
           (String.t() -> map()) | (String.t(), keyword() -> map()),
           map() | nil,
           String.t()
-        ) :: {:ok, {String.t(), Fleet.CapProfile.t(), map()}} | {:error, term()}
+        ) :: {:ok, {String.t(), CapProfile.t(), map()}} | {:error, term()}
   # Route nil = ANOMALY: the poller onboards every routeless one BEFORE dispatch (ensure_workflow_map_or_onboard)
   # → if we arrive here without a route, fail-loud, NEVER a silent eng fallback. The role ALWAYS comes from the
   # workflow_map position (written route).
@@ -484,7 +487,7 @@ defmodule Fleet.Pilot.StepDispatcher do
          step_spec = get_in(workflow_map, ["steps", step]),
          step_modops = step_modops(step_spec),
          {:ok, profile} <-
-           Fleet.CapProfile.resolve(
+           CapProfile.resolve(
              loader,
              role,
              step_modops,
@@ -555,7 +558,7 @@ defmodule Fleet.Pilot.StepDispatcher do
     labels = issue |> Map.get("labels", []) |> Enum.map(&(&1["name"] || &1))
 
     workflow_map_name =
-      if Fleet.Labels.destination_workshop() in labels,
+      if Labels.destination_workshop() in labels,
         do: Fleet.Project.Roles.workshop_workflow_map(catalogue_root: repo),
         else: Fleet.Project.Declaration.pipeline_default(repo)
 

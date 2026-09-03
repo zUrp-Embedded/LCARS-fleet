@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tests
 
   defp tree(files) do
     root = Fleet.TestEnv.tmp_path("batscorp")
@@ -63,7 +63,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
 
   describe "against the real repo" do
     test "it passes, and the note splits gated from deliberately-out" do
-      result = Check.check_test_corpora_on_record(File.cwd!())
+      result = Tests.check_test_corpora_on_record(File.cwd!())
 
       assert result.status == :pass
       assert result.note =~ "gated"
@@ -75,7 +75,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     test "a tree that is not the repo root FAILS as broken — it never passes by measuring nothing" do
       nowhere = Fleet.TestEnv.tmp_path("nowhere")
 
-      result = Check.check_test_corpora_on_record(nowhere)
+      result = Tests.check_test_corpora_on_record(nowhere)
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
@@ -84,7 +84,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     test "a repo root with zero .bats is BROKEN, not compliant" do
       # Zero findings and full compliance look identical from the outside. The whole class of defect
       # this check exists for is a measurement that returns nothing and reads as a pass.
-      result = Check.check_test_corpora_on_record(tree([]))
+      result = Tests.check_test_corpora_on_record(tree([]))
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       # instrument that answers for one kind and stays silent on the other reports a coverage it
       # does not have — the very thing it was built to refuse.
       result =
-        Check.check_test_corpora_on_record(tree(["fleet/ailleurs/test_quelque_chose.py"]))
+        Tests.check_test_corpora_on_record(tree(["fleet/ailleurs/test_quelque_chose.py"]))
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "fleet/ailleurs"
@@ -109,7 +109,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       runtime =
         tree(["fleet/test/x/a.bats", "PoC/p/.venv/lib/site-packages/z/test_up.py"])
 
-      assert Check.check_test_corpora_on_record(runtime).status == :pass
+      assert Tests.check_test_corpora_on_record(runtime).status == :pass
     end
   end
 
@@ -122,14 +122,14 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       runtime =
         tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/processors/test_output.py"])
 
-      assert Check.check_test_corpora_on_record(runtime).status == :pass
+      assert Tests.check_test_corpora_on_record(runtime).status == :pass
     end
 
     test "but a real suite under src/tests/ IS one" do
       # The exclusion is on the source root, not on the word: a test directory deeper in the path
       # wins. Otherwise the rule would hide real suites to avoid one false positive.
       result =
-        Check.check_test_corpora_on_record(
+        Tests.check_test_corpora_on_record(
           tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/tests/test_engine.py"])
         )
 
@@ -139,7 +139,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
 
     test "a `.bats` file needs no such care — the extension has one meaning anywhere" do
       result =
-        Check.check_test_corpora_on_record(
+        Tests.check_test_corpora_on_record(
           tree(["fleet/test/x/a.bats", "fleet/vendor/tk/src/b.bats"])
         )
 
@@ -151,7 +151,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
   describe "an undeclared corpus is a FAILURE, not a note" do
     test "a suite in a directory no record mentions is named" do
       result =
-        Check.check_test_corpora_on_record(
+        Tests.check_test_corpora_on_record(
           tree(["fleet/test/x/a.bats", "fleet/quelque_part/b.bats"])
         )
 
@@ -169,7 +169,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       runtime = tree(["fleet/test/x/a.bats"])
       File.mkdir_p!(Path.join([runtime, "tests", ".bats"]))
 
-      assert Check.check_test_corpora_on_record(runtime).status == :pass
+      assert Tests.check_test_corpora_on_record(runtime).status == :pass
     end
   end
 end

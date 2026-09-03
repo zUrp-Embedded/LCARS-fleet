@@ -44,7 +44,9 @@
 #
 # --- END HEADER ---
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : un hook qui meurt bloque la session de l'humain. Ce fichier sort 0 sur
+                          # TOUS ses chemins (l.100, l.167) — l'echec d'une sonde ne doit jamais
+                          # devenir l'echec du prompt.
 
 # Debug log — traces chaque run pour diagnostiquer les hook errors intermittents
 _HOOK_LOG="/tmp/on-prompt-debug-${CLAUDE_AGENT_NAME:-unknown}.log"

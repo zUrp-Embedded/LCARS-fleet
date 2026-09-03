@@ -9,6 +9,7 @@ defmodule Fleet.Pilot.Poller.LeaseDependsTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller.Lease
 
   defp issue(n), do: %{"number" => n, "title" => "t#{n}", "body" => "b", "labels" => []}
@@ -26,8 +27,12 @@ defmodule Fleet.Pilot.Poller.LeaseDependsTest do
 
   defmodule Forge do
     # #1 is blocked by #7 (open) ; #2 is blocked by #8 (CLOSED = satisfied) ; #3 has no edge.
-    def issue_dependencies(_repo, 1, _opts), do: {:ok, [%{"number" => 7, "state" => "open"}]}
-    def issue_dependencies(_repo, 2, _opts), do: {:ok, [%{"number" => 8, "state" => "closed"}]}
+    def issue_dependencies(_repo, 1, _opts),
+      do: {:ok, [PayloadFixture.issue(number: 7, state: "open")]}
+
+    def issue_dependencies(_repo, 2, _opts),
+      do: {:ok, [PayloadFixture.issue(number: 8, state: "closed")]}
+
     def issue_dependencies(_repo, 3, _opts), do: {:ok, []}
     # #4: the forge cannot answer.
     def issue_dependencies(_repo, 4, _opts), do: {:error, :boom}

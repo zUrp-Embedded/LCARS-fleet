@@ -48,14 +48,12 @@ defmodule Fleet.Workflow.Provenance.Verifier do
     with {:ok, livrable} <- subject_sha(statement),
          :ok <- commit_exists(project_dir, livrable, {:unknown_livrable, livrable}),
          :ok <- base_descends(project_dir, statement, livrable),
-         :ok <-
+         do:
            brief_coherent(
              Keyword.get(opts, :work_dir, project_dir),
              statement,
              Keyword.get(opts, :expected_brief_sha)
-           ) do
-      :ok
-    end
+           )
   end
 
   defp decode_typed(raw) do

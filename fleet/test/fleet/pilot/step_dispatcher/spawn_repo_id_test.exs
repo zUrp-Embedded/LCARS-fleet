@@ -12,8 +12,8 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnRepoIdTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.StepDispatcher.Spawn
   alias Fleet.Pilot.ColdForgeStub
+  alias Fleet.Pilot.StepDispatcher.Spawn
 
   defmodule NoRepoIdForge do
     @moduledoc false

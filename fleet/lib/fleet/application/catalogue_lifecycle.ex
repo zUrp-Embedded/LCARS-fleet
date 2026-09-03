@@ -42,6 +42,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   """
 
   alias Fleet.Application.CatalogueDeposits
+  alias Fleet.Forge.Payload
 
   @bundled Fleet.Catalogue.bundled_name()
 
@@ -202,7 +203,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
     # livre, un manifeste illisible), et un log emis avant ce geste part sur stdout.
     Fleet.ReleaseDoor.claim_stdout!()
 
-    case with_transport(fn -> Fleet.Application.CatalogueDeposits.list([]) end) do
+    case with_transport(fn -> CatalogueDeposits.list([]) end) do
       {:ok, deposits} ->
         case Map.fetch(deposits, name) do
           {:ok, d} ->
@@ -278,8 +279,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
     do: %{name: name, state: :available, updatable?: nil, deposit: deposit, store: nil}
 
   defp entry(name, deposit, store, repo_mod, opts) when is_map(store) do
-    full = store["full_name"]
-    branch = store["default_branch"] || "main"
+    full = Payload.full_name(store)
+    branch = Payload.default_branch(store) || "main"
 
     case repo_mod.branch_commit(full, branch, opts) do
       {:ok, head} ->

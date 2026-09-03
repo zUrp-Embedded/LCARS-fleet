@@ -15,6 +15,7 @@ defmodule Fleet.MCP.RetireIssueTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
   alias Fleet.TestEnv
 
@@ -125,7 +126,7 @@ defmodule Fleet.MCP.RetireIssueTest do
   describe "a live pull request" do
     setup do
       Process.put(:pulls, [
-        %{"state" => "open", "number" => 21, "head" => %{"ref" => "lcars/issue-42-eng_sw"}}
+        PayloadFixture.pull(number: 21, state: "open", head_ref: "lcars/issue-42-eng_sw")
       ])
 
       :ok

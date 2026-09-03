@@ -18,6 +18,7 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
 
   import ExUnit.CaptureLog
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
   alias Fleet.TestEnv
 
@@ -50,12 +51,13 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
       do:
         {:ok,
          [
-           %{
-             "number" => 6,
-             "state" => "open",
-             "merged" => false,
-             "head" => %{"ref" => "lcars/issue-42-eng_sw", "sha" => "deadbeef"}
-           }
+           PayloadFixture.pull(
+             number: 6,
+             state: "open",
+             merged: false,
+             head_ref: "lcars/issue-42-eng_sw",
+             head_sha: "deadbeef"
+           )
          ]}
 
     @impl true

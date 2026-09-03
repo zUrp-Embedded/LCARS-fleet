@@ -31,7 +31,18 @@ defmodule Fleet.Forge.ClientCiStateTest do
     end
   end
 
-  defp st(id, context, status), do: %{"id" => id, "context" => context, "status" => status}
+  # ⚠ LA FORME VIENT DE LA CAPTURE REELLE, PAS D'UN LITTERAL A TROIS CLEFS. Un element
+  # `CommitStatus` de Gitea en porte neuf plus un `creator` imbrique ; une forme inventee peut etre
+  # INCOMPLETE, et une forme incomplete desarme en silence tout garde qui lirait un champ que le
+  # double a oublie — le defaut est au dossier de ce depot. Les trois clefs nommees ici sont
+  # exactement celles sur lesquelles chaque temoin ci-dessous branche ; le reste est ce que la
+  # forge envoie vraiment.
+  @statuses_file Path.join([__DIR__, "..", "..", "fixtures", "forge", "statuses.json"])
+  @external_resource @statuses_file
+  @capture @statuses_file |> File.read!() |> Jason.decode!()
+
+  defp st(id, context, status),
+    do: Map.merge(hd(@capture), %{"id" => id, "context" => context, "status" => status})
 
   defp ci_state(items) do
     opts = [
@@ -101,6 +112,41 @@ defmodule Fleet.Forge.ClientCiStateTest do
   test "a context that went red THEN green is green — a recovery must be seen too" do
     assert {:ok, :success} =
              ci_state([st(1, "ci/build", "failure"), st(2, "ci/build", "success")])
+  end
+
+  # LA CAPTURE ELLE-MEME. Le commentaire de `Client.CI` affirme un fait sur un SYSTEME EXTERNE —
+  # « l'ordre par defaut de `/commits/{ref}/statuses` est OLDEST-first sur Gitea 1.26.1 » — et
+  # c'est de ce fait que vient tout le reste : c'est parce que l'ordre ment que le rang se lit dans
+  # `id`.
+  #
+  # ⚠ CE QUE CE PREMIER TEMOIN PROUVE, EXACTEMENT : que le FICHIER de capture est oldest-first et
+  # porte les trois clefs lues. C'est une SENTINELLE DE DERIVE — elle mord si quelqu'un recapture
+  # contre une forge dont l'ordre a change, ou fabrique le fichier a la main. Elle ne prouve pas le
+  # comportement de Gitea : aucune assertion sur un fichier qu'on controle ne le peut. Celui qui le
+  # prouve est le SECOND, qui fait passer la capture ET son inverse par le meme verdict.
+  test "la capture reelle est OLDEST-first, et porte `status` — jamais `state`" do
+    ids = Enum.map(@capture, & &1["id"])
+
+    assert length(ids) > 1, "une capture d'un seul element ne dit rien d'un ORDRE"
+    assert ids == Enum.sort(ids), "la capture n'est plus oldest-first : le fait externe a bouge"
+
+    Enum.each(@capture, fn statut ->
+      assert is_integer(statut["id"])
+      assert is_binary(statut["context"])
+
+      # `status` sur un CommitStatus, `state` sur l'agregat CombinedStatus. Confondre les deux rend
+      # `nil` partout, et un `nil` groupe par contexte se lit comme un contexte sans verdict.
+      assert is_binary(statut["status"])
+      refute Map.has_key?(statut, "state")
+    end)
+  end
+
+  test "sur la capture reelle, le verdict est celui du statut le PLUS RECENT du contexte" do
+    # La capture porte `ci/build` en `failure` (id 1) puis `success` (id 2). Garder la PREMIERE
+    # occurrence rendrait `:failure` sur un commit vert ; lire le rang dans `id` rend `:success`,
+    # dans les deux sens de lecture.
+    assert {:ok, :success} = ci_state(@capture)
+    assert {:ok, :success} = ci_state(Enum.reverse(@capture))
   end
 
   test "the ORDER of the payload does not move the verdict" do

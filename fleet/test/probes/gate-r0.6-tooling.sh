@@ -21,7 +21,8 @@
 # full output is CAPTURED first and matched afterwards — piping into `grep -q` made grep exit on the
 # first match and SIGPIPE the tool, which for Sobelow (whose banner prints BEFORE the scan) killed it
 # before it analysed a single file, and still scored PASS.
-set -u
+set -u          # PAS -e : la sonde teste la PRESENCE d'outils, donc des commandes qui echouent
+                # sont son sujet, pas sa panne.
 RT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$RT" || exit 1
 FAIL=0

@@ -252,6 +252,8 @@ freeze_env() { # freeze_env <tree> <env_script> <eco>
   local tree="$1" out="$STORE/state/env.d/$3.env" before after tmp
   mkdir -p "$(dirname "$out")"
   before="$(env | sort)"
+  # shellcheck disable=SC1090  # `$tree` est un arbre TEMPORAIRE fabrique a l'appel : il n'y a
+  #   pas de chemin constant a declarer, c'est le sujet meme de la mesure.
   after="$(cd "$tree" && HOME="$tree" . "$tree/$2" >/dev/null 2>&1 && env | sort || true)"
   [[ -z "$after" ]] && { echo "toolchain-converger: env_script muet pour $3" >&2; return 0; }
 

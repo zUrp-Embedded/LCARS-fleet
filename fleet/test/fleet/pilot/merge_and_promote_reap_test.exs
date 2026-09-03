@@ -47,8 +47,8 @@ defmodule Fleet.Pilot.MergeAndPromoteReapTest do
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
     # Les DEUX rails du sceau : `chief` fusionne, `gatekeeper` promeut (séparation 2026-08-20).
     # Le boot les exige tous les deux ; un fixture qui n'en pose qu'un décrit le monde d'avant.
-    Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
-    Fleet.TestEnv.put_role_token!("chief", "tok-chief")
+    TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
+    TestEnv.put_role_token!("chief", "tok-chief")
     :ok
   end
 

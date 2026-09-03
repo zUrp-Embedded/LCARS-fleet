@@ -57,6 +57,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.PermanentBoot
 
   # Per-role spend bound.
   @max_attempts 5
@@ -71,7 +72,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   @impl true
   def init(opts) do
     if Keyword.get(opts, :subscribe, true), do: :ok = Bus.subscribe()
-    respawn_fun = Keyword.get(opts, :respawn_fun, &Fleet.Spawner.PermanentBoot.respawn/1)
+    respawn_fun = Keyword.get(opts, :respawn_fun, &PermanentBoot.respawn/1)
     base = Keyword.get(opts, :backoff_base_ms, 5_000)
     min_uptime = Keyword.get(opts, :min_uptime_ms, 60_000)
     reconcile_ms = Keyword.get(opts, :reconcile_ms, 60_000)
@@ -102,7 +103,7 @@ defmodule Fleet.Spawner.PermanentWarden do
         state
       )
       when is_binary(pod_id) do
-    case Fleet.Spawner.PermanentBoot.parse_permanent(pod_id) do
+    case PermanentBoot.parse_permanent(pod_id) do
       :not_permanent ->
         {:noreply, state}
 
@@ -209,7 +210,7 @@ defmodule Fleet.Spawner.PermanentWarden do
     new_state
   end
 
-  defp default_expected_roles, do: Fleet.Spawner.PermanentBoot.expected_permanent_roles()
+  defp default_expected_roles, do: PermanentBoot.expected_permanent_roles()
 
   defp schedule_reconcile(ms) when is_integer(ms) do
     _ = Process.send_after(self(), :reconcile, ms)
@@ -221,7 +222,7 @@ defmodule Fleet.Spawner.PermanentWarden do
   defp default_live_roles do
     Fleet.Spawner.list_pods()
     |> Enum.flat_map(fn pod ->
-      case Fleet.Spawner.PermanentBoot.parse_permanent(pod[:pod_id] || "") do
+      case PermanentBoot.parse_permanent(pod[:pod_id] || "") do
         {:ok, role} -> [role]
         :not_permanent -> []
       end
@@ -230,7 +231,7 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   # Maintenance and quiesce suppress desired-state reconciliation.
   defp default_reconcile_enabled? do
-    Fleet.Spawner.PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()
+    PermanentBoot.auto_boot_enabled?() and not Fleet.Shutdown.Quiesce.quiescing?()
   end
 
   defp handle_permanent_death(role, state) do

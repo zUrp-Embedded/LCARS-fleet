@@ -146,7 +146,7 @@ defmodule Fleet.Pilot.ListProjectsTest do
       end)
 
       assert {:error, reason} =
-               Fleet.MCP.PodTools.Delegation.list_projects(%{pod_id: "pod-eng"})
+               Fleet.MCP.PodTools.Delegation.Portfolio.list_projects(%{pod_id: "pod-eng"})
 
       assert reason in [:forbidden_not_onboarder, :forbidden_not_architect]
     end

@@ -1,4 +1,5 @@
 # SOURCE: bin/publish-transform-attribution.py
+# ruff: noqa: F821  # `commit` est libre ICI : filter-repo l'injecte (cf. l'encadre ci-dessous).
 # AUTHOR: DrDree
 # STARDATE: 2026-07-07
 # STATUS: PROTO-V1 — the --commit-callback body of publish-transform.sh

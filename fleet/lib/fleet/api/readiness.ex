@@ -71,16 +71,28 @@ defmodule Fleet.API.Readiness do
     probe("spawn.dispatch", state, detail)
   end
 
+  # ⚠ LE CONTRAT, PAS L'IDENTITE D'UN MODULE. Cette sonde a compare le backend au NoOp : tout ce
+  # qui n'etait pas le NoOp passait pour operationnel — un module INEXISTANT compris. « Ce n'est pas
+  # le repli degrade » ne dit rien sur ce que la chose sait faire, et une sonde de readiness qui se
+  # trompe dans ce sens-la fait exactement ce qu'elle existe pour empecher.
   defp shutdown_dispatcher do
-    backend = Fleet.Admiral.Shutdown.configured_dispatcher()
+    case Fleet.Admiral.Shutdown.resolved_conforming() do
+      {:ok, Fleet.Admiral.Shutdown.NoOpDispatcher} ->
+        probe("shutdown.dispatcher", :degraded, %{
+          backend: "NoOpDispatcher",
+          note: "NoOp drain (AggregateDispatcher not wired) — 0 in-flight, immediate drain"
+        })
 
-    if backend == Fleet.Admiral.Shutdown.NoOpDispatcher do
-      probe("shutdown.dispatcher", :degraded, %{
-        backend: "NoOpDispatcher",
-        note: "NoOp drain (AggregateDispatcher not wired) — 0 in-flight, immediate drain"
-      })
-    else
-      probe("shutdown.dispatcher", :operational, %{backend: inspect(backend)})
+      {:ok, backend} ->
+        probe("shutdown.dispatcher", :operational, %{backend: inspect(backend)})
+
+      {:error, {:shutdown_dispatcher_misconfigured, mod, manquants}} ->
+        probe("shutdown.dispatcher", :degraded, %{
+          backend: inspect(mod),
+          note:
+            "backend does not carry the drain contract (missing #{inspect(manquants)}) — " <>
+              "a shutdown would neither refuse new jobs nor count what is in flight"
+        })
     end
   end
 

@@ -100,7 +100,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
       # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
       assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
-               Fleet.Project.Onboard.import("grominet/vitrine")
+               ProjectOnboard.import("grominet/vitrine")
 
       # LA CHARGE UTILE EST UNE PHRASE, une seule forme pour tous les sites : elle porte
       # l'inventaire ET le geste, parce qu'un inventaire ne vaut qu'a l'interieur d'une phrase qui
@@ -114,7 +114,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # seulement que le refus LOCAL laisse passer une org dont le materiel est bien la.
       refute match?(
                {:error, {:catalogue_not_installed, _, _}},
-               Fleet.Project.Onboard.import("fleet/quelque-chose")
+               ProjectOnboard.import("fleet/quelque-chose")
              )
     end
   end
@@ -125,14 +125,14 @@ defmodule Fleet.Project.OnboardPreflightTest do
       # INSTALLES, donc migrer vers un catalogue absent rendrait le projet INVISIBLE — pas casse, ce qui
       # est pire. Et le refus tombe AVANT l'appel forge : on ne transfere pas pour se raviser apres.
       assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
-               Fleet.Project.Onboard.migrate("fleet/vitrine", "grominet")
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "grominet")
 
       assert gestures =~ "fleet"
     end
 
     test "migrer vers son PROPRE catalogue est refuse — un geste sans effet n'est pas un succes" do
       assert {:error, {:already_in_catalogue, "fleet"}} =
-               Fleet.Project.Onboard.migrate("fleet/vitrine", "fleet")
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "fleet")
     end
   end
 

@@ -25,10 +25,18 @@ setup() {
   [[ "$output" == *"survecu:[]"* ]]
 }
 
-@test "shellcheck absent et LCARS_SHELL_LINT vide : le pas se declare HORS GATE, et rien ne rougit" {
-  # Le pas est desactive par defaut (dette connue, ⚖ user 2026-08-29) ; absent ou present, il doit le
-  # DIRE. On lit la branche telle qu'elle est ecrite : la condition sur la variable vient en premier.
-  run sed -n '/^if \[\[ -z "\${LCARS_SHELL_LINT:-}" \]\]; then$/,/^elif/p' "$GATE"
+@test "shellcheck absent est un ECHEC NOMME, plus une dette toleree" {
+  # ⚠ CE TEMOIN A CHANGE DE SUJET PARCE QUE LE SUJET A CHANGE. Il epinglait « le pas se declare
+  # HORS GATE, et rien ne rougit » — vrai tant que shellcheck etait hors du gate (⚖ user
+  # 2026-08-29). Le plancher l y a fait rentrer : un binaire absent ne laisse plus des fichiers
+  # NON audites derriere un message tranquille, il arrete la porte. Garder l ancienne assertion
+  # aurait verrouille l etat d avant contre celui d apres — un temoin defendant la dette qu on
+  # venait de payer, et vert pour cela.
+  #
+  # On lit la branche telle qu elle est ecrite : c est l ABSENCE du binaire qui decide, et elle
+  # decide AVANT toute question de severite ou de perimetre.
+  run sed -n '/^if \[\[ -z "\$SC_VERSION" \]\]; then$/,/^elif/p' "$GATE"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"HORS GATE"* ]]
+  [[ "$output" == *"ECHEC: shellcheck absent"* ]]
+  [[ "$output" == *"GATE_FAIL=1"* ]]
 }

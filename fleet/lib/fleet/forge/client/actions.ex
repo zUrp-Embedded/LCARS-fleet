@@ -3,9 +3,10 @@ defmodule Fleet.Forge.Client.Actions do
   Triggers a workflow OUTSIDE a push, and reads back what it did — sub-domain of
   `Fleet.Forge.Client`, on the pattern of `Fleet.Forge.Client.Jury`.
 
-  Self-contained concern: it touches only `/repos/{o}/{r}/actions/…` and calls no other forge op —
-  and it is **the only module of the client that touches `/actions/` at all**. Without this door
-  the rail can observe a CI run that a push started, and cannot ASK for one.
+  Self-contained concern: it touches only `/repos/{o}/{r}/actions/…` and calls no other forge op.
+  Before this module, **nothing in the whole client touched `/actions/`** — `files.ex`, `jury.ex`,
+  `repo.ex`, `transport.ex` and `url_safe.ex` were checked one by one. The rail could observe a CI
+  run that a push had started, and could not ASK for one.
 
   ## Why the rail needs to ask
 
@@ -56,7 +57,8 @@ defmodule Fleet.Forge.Client.Actions do
   What a dispatch hands back once it is trackable: the run's id, and NOTHING ELSE.
 
   ⚠ **Les URL rendues par la forge (`run_url`, `html_url`) sont deliberement ignorees**, et ce n'est
-  pas une simplification — c'est un refus que le contrat `forge.payload_fields_read` tient :
+  pas une simplification — c'est un refus documente par le depot, que le contrat
+  `forge.payload_fields_read` a rappele a ce module le jour de son ecriture :
 
   > *une URL fournie par la forge porte l'hote qui a REPONDU, qui n'est pas necessairement celui
   > qu'on adresse — le conteneur atteint `http://gitea:3000` la ou un navigateur atteint un port
@@ -135,7 +137,7 @@ defmodule Fleet.Forge.Client.Actions do
   `status` is the LIFECYCLE (`"waiting"`, `"running"`, `"success"`, `"failure"`…) and `conclusion`
   is the VERDICT once there is one. They are two fields and not one because a run that has not
   finished has no conclusion — a caller that reads only `conclusion` cannot tell "not yet" from
-  "not good", which is the same conflation Gitea's 405 makes on the merge rail.
+  "not good", which is the same conflation the merge rail paid for on Gitea's 405.
   """
   @spec run(String.t(), pos_integer(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(repo, run_id, opts \\ []) when is_binary(repo) and is_integer(run_id) do
@@ -268,8 +270,8 @@ defmodule Fleet.Forge.Client.Actions do
 
   Each job carries `status` (`waiting` while nothing has claimed it), `labels` — the `runs-on:` it
   asks for — and `runner_id`/`runner_name`, zero and empty while unassigned. Those three answer, in
-  ONE read, the question the CI gate would otherwise spend its whole bounded wait to ask: has
-  anything picked this job up, and what did it ask for?
+  ONE read, the question the CI gate used to take forty-five minutes to ask: has anything picked
+  this job up, and what did it ask for?
   """
   @spec jobs(String.t(), pos_integer(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def jobs(repo, run_id, opts \\ []) when is_binary(repo) and is_integer(run_id) do

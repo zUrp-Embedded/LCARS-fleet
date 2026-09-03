@@ -29,6 +29,24 @@ defmodule Fleet.MCP.PodTools do
   acceptor (one pod = one socket), never read from the wire — the clauses here check its
   presence (`:pod_id_required`, fail-closed), the architect gate lives in `Delegation`.
 
+  ## Pourquoi ce fichier est GROS, et pourquoi il le reste
+
+  Mesure du contenu, pas impression : 1031 lignes de `deftool` (32 declarations de schema wire),
+  388 lignes de clauses de `handle_tool_call/3`, et le reste en `@moduledoc` et attributs. Il ne
+  porte que TROIS fonctions publiques et trois privees.
+
+  Il n'est donc pas decomposable, et ce n'est pas une preference :
+
+    * `deftool` ENREGISTRE dans le module ou la macro est appelee. Deplacer des declarations
+      ailleurs les sortirait de la table que cinq murs lisent comme autorite unique
+      (`mcp.tools_gated`, `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
+      `mcp.required_for_real_backend`) — et cette table EST le contrat du serveur.
+    * les 59 clauses de dispatch sont les clauses d'UNE fonction. Elixir exige qu'elles vivent dans
+      un seul module ; les repartir n'est pas un arbitrage, c'est impossible.
+
+  Chaque clause fait en moyenne sept lignes et delegue : le metier vit dans `Delegation.*` et
+  `Probe`. Ce fichier est une TABLE, et une table longue n'est pas un objet-dieu.
+
   The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).
@@ -128,10 +146,6 @@ defmodule Fleet.MCP.PodTools do
   @spec tool_effect(String.t()) :: :mutation | :protocol | :read | :unknown
   def tool_effect(tool) when is_binary(tool), do: Map.get(@tool_effects, tool, :unknown)
 
-  @doc false
-  @spec declared_tool_effects() :: %{String.t() => atom()}
-  def declared_tool_effects, do: @tool_effects
-
   deftool "get_work_item" do
     # vitrine: Tire de la fleet la prochaine tâche à traiter ; réponse vide = plus rien à faire, le pod s'arrête.
     meta do
@@ -217,7 +231,7 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "probe" => %{
           "type" => "string",
-          "enum" => Fleet.MCP.PodTools.Probe.known(),
+          "enum" => Probe.known(),
           "description" => "Le NOM de la sonde à jouer."
         },
         "inputs" => %{
@@ -1196,7 +1210,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — work-item drive (Fleet.MCP.PodTools.WorkItems)
+  # Dispatch — work-item drive (WorkItems)
   # ============================================================
 
   @impl true
@@ -1236,7 +1250,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — mesure demandee par un juge (Fleet.MCP.PodTools.Probe)
+  # Dispatch — mesure demandee par un juge (Probe)
   # ============================================================
 
   # POD-SCOPE, comme `get_work_item`/`submit_result` et pour la meme raison : le SUJET de l'appel
@@ -1264,7 +1278,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — architect forge delegation (Fleet.MCP.PodTools.Delegation)
+  # Dispatch — architect forge delegation (Delegation)
   # ============================================================
 
   # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
@@ -1283,7 +1297,7 @@ defmodule Fleet.MCP.PodTools do
           _ -> nil
         end
 
-      case Delegation.create_issue(
+      case Delegation.Issues.create_issue(
              title,
              brief,
              state,
@@ -1311,7 +1325,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("project_create", %{"name" => name} = args, state) when is_binary(name) do
-    case Delegation.create_project(name, args, state) do
+    case Delegation.Portfolio.create_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1324,7 +1338,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_install", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.import_project(full_name, state) do
+      case Delegation.Portfolio.import_project(full_name, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1338,7 +1352,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_open", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.open_project(full_name, state) do
+      case Delegation.Portfolio.open_project(full_name, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1360,7 +1374,7 @@ defmodule Fleet.MCP.PodTools do
   # No wire parameter, by construction: the human is the one this fleet runs for. A login on the
   # wire would turn an import tool into an enumerator of other people's personal spaces.
   def handle_tool_call("deposit_list", _args, state) do
-    case Delegation.list_deposits(state) do
+    case Delegation.Deposits.list_deposits(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1372,7 +1386,7 @@ defmodule Fleet.MCP.PodTools do
     # the work item is DERIVED from it — nothing in the arguments names a ticket, so there is
     # nothing to prove: the socket discriminates. That is also what stops a pod requesting on
     # another's behalf.
-    case Delegation.request_toolchain(args, pod_id) do
+    case Delegation.Toolchain.request_toolchain(args, pod_id) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1386,14 +1400,14 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("forge_list", _args, state) do
-    case Delegation.list_forges(state) do
+    case Delegation.Deposits.list_forges(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
   def handle_tool_call("forge_link", %{"full_name" => _, "forge" => _, "as" => _} = args, state) do
-    case Delegation.publish_link(args, state) do
+    case Delegation.Deposits.publish_link(args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1409,7 +1423,7 @@ defmodule Fleet.MCP.PodTools do
       )
       when is_binary(source) and is_binary(catalogue) and catalogue != "" do
     if valid_repo_ref?(source) do
-      case Delegation.import_deposit(source, catalogue, args, state) do
+      case Delegation.Deposits.import_deposit(source, catalogue, args, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1426,7 +1440,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("project_adopt", %{"name" => name} = args, state) when is_binary(name) do
-    case Delegation.adopt_project(name, args, state) do
+    case Delegation.Portfolio.adopt_project(name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1438,7 +1452,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("project_import", %{"url" => url, "name" => name} = args, state)
       when is_binary(url) and is_binary(name) and url != "" and name != "" do
-    case Delegation.import_external_project(url, name, args, state) do
+    case Delegation.Portfolio.import_external_project(url, name, args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1450,7 +1464,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("project_publish", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) do
-    case Delegation.project_publish(args, state) do
+    case Delegation.Deposits.project_publish(args, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1463,7 +1477,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_close", %{"full_name" => full_name}, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.close_project(full_name, state) do
+      case Delegation.Portfolio.close_project(full_name, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1481,7 +1495,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_revise_card", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.revise_project_card(full_name, args, state) do
+      case Delegation.Portfolio.revise_project_card(full_name, args, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1499,7 +1513,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_reset_ci_rail", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.reset_project_ci_rail(full_name, args, state) do
+      case Delegation.Portfolio.reset_project_ci_rail(full_name, args, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1517,7 +1531,7 @@ defmodule Fleet.MCP.PodTools do
   def handle_tool_call("project_delete", %{"full_name" => full_name} = args, state)
       when is_binary(full_name) and full_name != "" do
     if valid_repo_ref?(full_name) do
-      case Delegation.delete_project(full_name, args, state) do
+      case Delegation.Portfolio.delete_project(full_name, args, state) do
         {:ok, result} -> {:ok, %{content: [json(result)]}, state}
         {:error, reason} -> {:error, reason, state}
       end
@@ -1534,7 +1548,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("issue_status", %{"number" => number}, state)
       when is_integer(number) do
-    case Delegation.issue_status(number, state) do
+    case Delegation.Issues.issue_status(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1546,7 +1560,7 @@ defmodule Fleet.MCP.PodTools do
 
   # Escalation inbox (architect gate inside Delegation, from the CHANNEL identity — never the wire).
   def handle_tool_call("scratch", %{"note" => note}, state) when is_binary(note) do
-    case Delegation.scratch(state, note) do
+    case Delegation.Scratchpad.scratch(state, note) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1557,7 +1571,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("escalation_list", _arguments, state) do
-    case Delegation.list_escalations(state) do
+    case Delegation.Escalations.list_escalations(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1566,14 +1580,14 @@ defmodule Fleet.MCP.PodTools do
   # Project board + full-thread read (BL-6-28): the arch's READ half — architect gate inside
   # Delegation, repo from the channel binding (never the wire), like every delegation tool.
   def handle_tool_call("issue_list", _arguments, state) do
-    case Delegation.list_issues(state) do
+    case Delegation.Issues.list_issues(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
   def handle_tool_call("issue_get", %{"number" => number}, state) when is_integer(number) do
-    case Delegation.get_issue(number, state) do
+    case Delegation.Issues.get_issue(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1584,14 +1598,14 @@ defmodule Fleet.MCP.PodTools do
   end
 
   def handle_tool_call("card_list", _arguments, state) do
-    case Delegation.list_workflow_cards(state) do
+    case Delegation.Portfolio.list_workflow_cards(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
   def handle_tool_call("catalogue_list", _arguments, state) do
-    case Delegation.list_catalogues(state) do
+    case Delegation.Portfolio.list_catalogues(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1599,7 +1613,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("issue_comment", %{"number" => number, "body" => body}, state)
       when is_integer(number) and is_binary(body) and body != "" do
-    case Delegation.comment_issue(number, body, state) do
+    case Delegation.Issues.comment_issue(number, body, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1612,7 +1626,7 @@ defmodule Fleet.MCP.PodTools do
   # Order between tickets, declared after creation (architect gate inside Delegation).
   def handle_tool_call("dependency_add", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
-    case Delegation.add_dependency(n, b, state) do
+    case Delegation.Dependencies.add_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1624,7 +1638,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("dependency_remove", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
-    case Delegation.remove_dependency(n, b, state) do
+    case Delegation.Dependencies.remove_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1637,7 +1651,7 @@ defmodule Fleet.MCP.PodTools do
   # The brake (onboarder gate inside Delegation) — a mass CLOSE, never a kill.
   def handle_tool_call("emergency_stop", %{"reason" => reason}, state)
       when is_binary(reason) and reason != "" do
-    case Delegation.emergency_stop(reason, state) do
+    case Delegation.Retirement.emergency_stop(reason, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1649,7 +1663,7 @@ defmodule Fleet.MCP.PodTools do
 
   # The READ half of the project surface (onboarder gate inside Delegation).
   def handle_tool_call("project_list", _arguments, state) do
-    case Delegation.list_projects(state) do
+    case Delegation.Portfolio.list_projects(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1658,7 +1672,7 @@ defmodule Fleet.MCP.PodTools do
   # Retirement without a replacement (architect gate inside Delegation, repo from the channel).
   def handle_tool_call("issue_retire", %{"number" => number, "reason" => reason}, state)
       when is_integer(number) and is_binary(reason) and reason != "" do
-    case Delegation.retire_issue(number, reason, state) do
+    case Delegation.Retirement.retire_issue(number, reason, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end

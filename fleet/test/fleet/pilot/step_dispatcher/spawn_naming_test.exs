@@ -76,7 +76,7 @@ defmodule Fleet.Pilot.StepDispatcher.SpawnNamingTest do
         end)
 
       assert offenders == [],
-             "rc_name built outside Fleet.Layout.pod_label/3:\n" <> Enum.join(offenders, "\n")
+             "rc_name built outside Layout.pod_label/3:\n" <> Enum.join(offenders, "\n")
     end
   end
 

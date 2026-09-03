@@ -456,17 +456,17 @@ code_of() { sed 's/#.*//' "$1"; }
   # TEMOIN APPARIE DU FILTRE CI-DESSUS. Un filtre qui ecarte trop rend ce mur vert par cecite, et
   # c'est la panne la plus chere : elle se lit comme un succes. Les trois formes sur une sonde
   # synthetique — la POSEE doit sortir, la LUE et celle A DEFAUT doivent rester.
-  local probe="$BATS_TEST_TMPDIR/prov_probe.sh" vus=""
+  local probe="$BATS_TEST_TMPDIR/prov_probe.sh" retenus=""
   printf '%s\n' 'PROV_POSEE=1' 'echo "$PROV_POSEE $PROV_LUE"' 'PROV_DEFAUT="${PROV_DEFAUT:-x}"' > "$probe"
   for v in $(grep -oE 'PROV_[A-Z_]+' "$probe" | sort -u); do
     if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" "$probe" \
          | sed "s/.*$v=//" | grep -qv "$v"; then
       continue
     fi
-    vus="$vus $v"
+    retenus="$retenus $v"
   done
-  [ "$vus" = " PROV_DEFAUT PROV_LUE" ] || {
-    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$vus », attendu « PROV_DEFAUT PROV_LUE »" >&2
+  [ "$retenus" = " PROV_DEFAUT PROV_LUE" ] || {
+    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$retenus », attendu « PROV_DEFAUT PROV_LUE »" >&2
     return 1
   }
 

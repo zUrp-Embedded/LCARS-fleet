@@ -17,7 +17,7 @@ defmodule Fleet.Project.OnboardTest do
   describe "classify_create_repo/3 (F-C084 — pre-existing repo is not an onboard target)" do
     test "genuine CREATE ({:ok, full_name}) → {:ok, full_name} (onboard owns the fresh repo)" do
       assert {:ok, "fleet/neuf"} =
-               ProjectOnboard.classify_create_repo({:ok, "fleet/neuf"}, "fleet", "neuf")
+               ProjectOnboard.Repo.classify_create_repo({:ok, "fleet/neuf"}, "fleet", "neuf")
     end
 
     test "repo ALREADY existing (409 → {:ok, :already_exists}) → {:error, {:repo_already_exists, _}} (FAIL-LOUD)" do
@@ -25,12 +25,16 @@ defmodule Fleet.Project.OnboardTest do
       # push onto the existing `main` = silent CLOBBER. Fail-loud instead → the operator uses
       # import_project (adopts, content intact) or deletes the stale/partial repo.
       assert {:error, {:repo_already_exists, "fleet/deja"}} =
-               ProjectOnboard.classify_create_repo({:ok, :already_exists}, "fleet", "deja")
+               ProjectOnboard.Repo.classify_create_repo({:ok, :already_exists}, "fleet", "deja")
     end
 
     test "forge error propagated as-is (no interpretation)" do
       assert {:error, {:http, 500, "boom"}} =
-               ProjectOnboard.classify_create_repo({:error, {:http, 500, "boom"}}, "fleet", "x")
+               ProjectOnboard.Repo.classify_create_repo(
+                 {:error, {:http, 500, "boom"}},
+                 "fleet",
+                 "x"
+               )
     end
   end
 
@@ -317,7 +321,7 @@ defmodule Fleet.Project.OnboardTest do
     end
 
     defp reconcile(repo) do
-      ProjectOnboard.reconcile_main_protection(repo,
+      ProjectOnboard.Migration.reconcile_main_protection(repo,
         forge_repo: ProbeRepo,
         reviewer_roles: ["reviewer"]
       )
@@ -370,7 +374,7 @@ defmodule Fleet.Project.OnboardTest do
 
     test "JG-121: forge ILLISIBLE → erreur nommee, jamais un `:ok` qui vaut « rien a faire »" do
       assert {:error, {:seeded_unreadable, {:http, 503, "down"}}} =
-               ProjectOnboard.reconcile_main_protection("fleet/unknowable",
+               ProjectOnboard.Migration.reconcile_main_protection("fleet/unknowable",
                  forge_repo: UnreadableRepo,
                  reviewer_roles: ["reviewer"]
                )
@@ -391,7 +395,7 @@ defmodule Fleet.Project.OnboardTest do
 
       capture_log(fn ->
         assert :ok =
-                 ProjectOnboard.reconcile_main_protection("fleet/proj",
+                 ProjectOnboard.Migration.reconcile_main_protection("fleet/proj",
                    forge_repo: OutcomeRepo,
                    reviewer_roles: ["reviewer", "qualifier"]
                  )
@@ -503,19 +507,27 @@ defmodule Fleet.Project.OnboardTest do
     #
     # Le comportement de l'aiguillage lui-meme, lui, est mesure — cf. `project_declaration_test.exs`,
     # « write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme ».
-    @onboard_src "lib/fleet/project/onboard.ex"
+    # ⚠ LA FAMILLE, PAS UN FICHIER. Ces temoins lisaient `onboard.ex` seul ; au decoupage, quatre
+    # des cinq portes ont change de module et deux d'entre eux ont vire au rouge. Un temoin de
+    # SOURCE dit une propriete du CODE, pas d'une adresse : il lit donc tout l'arbre du domaine, et
+    # `familie_src/0` est la seule definition de ce perimetre.
+    @onboard_src [
+      "lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")
+    ]
+
+    defp famille, do: Enum.map_join(@onboard_src, "\n", &File.read!/1)
 
     test "aucune porte n'appelle `Declaration.write` en direct — toutes passent par l'entonnoir" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # Un seul appel direct subsiste : celui QUI EST l'entonnoir. Deux voudraient dire qu'une porte
       # a repris le chemin court, et le chemin court est celui qui oublie.
       assert length(Regex.scan(~r/Fleet\.Project\.Declaration\.write\(/, src)) == 1
-      assert src =~ ~r/defp write_declaration\(proj_dir, full_name, opts\)/
+      assert src =~ ~r/defp? write_declaration\(proj_dir, full_name, opts\)/
     end
 
     test "l'entonnoir POSE le depot dans les options — le lire ailleurs ne suffirait pas" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # ⚠ `Keyword.put`, PAS `put_new` : `revision_write_opts/2` reconstruit une liste neuve, et un
       # appelant qui porterait un `repo:` perime le ferait gagner sur le depot reel.
@@ -523,13 +535,13 @@ defmodule Fleet.Project.OnboardTest do
     end
 
     test "le depot est POSITIONNEL chez les relais — une cle optionnelle s'oublie en silence" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # C'est toute la difference entre ce correctif et un quatrieme rustine : le compilateur refuse
       # desormais un appel qui ne nomme pas le depot. `Declaration.write/2` ne peut pas l'exiger de son
       # cote — 38 appels legitimes prennent la racine a bon droit — mais ici, l'omettre est TOUJOURS
       # un defaut.
-      assert src =~ ~r/defp ensure_declaration\(\s*proj_dir,\s*full_name,\s*opts,/
+      assert src =~ ~r/defp? ensure_declaration\(\s*proj_dir,\s*full_name,\s*opts,/
       refute src =~ ~r/ensure_declaration\((?:dirs\.code|scratch), opts[,)]/
     end
   end
@@ -547,14 +559,35 @@ defmodule Fleet.Project.OnboardTest do
     # ce cout qui a laisse la divergence s'installer.
     @entry_verbs ~w(onboard import adopt_project import_external import_deposit)
 
+    # ⚠ PAR FICHIER, JAMAIS SUR UNE SOURCE CONCATENEE. La premiere version collait toute la famille
+    # puis coupait au verbe : la fenetre de lecture debordait alors sur la fonction SUIVANTE, voire
+    # sur le fichier suivant, et le motif cherche pouvait etre trouve chez un voisin. `door_preamble/1`
+    # de `store_gate_test` avait deja la bonne forme — celle-ci ne l'avait pas copiee.
+    #
+    # Zero comme plusieurs definitions font FLUNK : un temoin de source qui ne sait pas lequel des
+    # deux corps il lit ne prouve rien, et le silence est le pire des deux.
+    defp corps_du_verbe(verb) do
+      motif = ~r/^  def #{verb}\(/m
+
+      corps =
+        for f <- famille_src(), source = File.read!(f), Regex.match?(motif, source) do
+          [_, body] = String.split(source, motif, parts: 2)
+          String.slice(body, 0, 1200)
+        end
+
+      case corps do
+        [body] -> body
+        [] -> flunk("`def #{verb}(` introuvable dans la famille onboarding")
+        n -> flunk("`def #{verb}(` defini #{length(n)} fois : le temoin ne sait pas lequel lire")
+      end
+    end
+
+    defp famille_src,
+      do: ["lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")]
+
     test "les cinq verbes d'entree appellent `admit/3` — aucun ne refait le preambule" do
-      src = File.read!("lib/fleet/project/onboard.ex")
-
       for verb <- @entry_verbs do
-        [_, body] = String.split(src, ~r/^  def #{verb}\(/m, parts: 2)
-        head = String.slice(body, 0, 1200)
-
-        assert head =~ "admit(",
+        assert corps_du_verbe(verb) =~ "admit(",
                "#{verb}/n ne passe pas par l'admission commune — un sixieme preambule est ne"
       end
     end
@@ -564,11 +597,7 @@ defmodule Fleet.Project.OnboardTest do
       # temoin l'a montre dans la minute : une URL externe invalide, refusee jusque-la sans toucher
       # le monde, coutait desormais un appel forge. La loi d'ordre est en trois temps — admission
       # locale, gardes pures du verbe, puis le monde — et c'est ce que ce temoin tient.
-      src = File.read!("lib/fleet/project/onboard.ex")
-      [_, body] = String.split(src, ~r/^  def admit\(/m, parts: 2)
-      corps = String.slice(body, 0, 400)
-
-      refute corps =~ "ensure_human_provisioned",
+      refute String.slice(corps_du_verbe("admit"), 0, 400) =~ "ensure_human_provisioned",
              "l'admission touche la forge — un refus local en paie le prix"
     end
   end

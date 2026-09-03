@@ -84,16 +84,18 @@ defmodule Fleet.Pilot.StepRunConsumer do
   use GenServer
   require Logger
 
+  alias Fleet.Event
   alias Fleet.EventRouter.Bus
+  alias Fleet.Forge.Payload
   alias Fleet.Opts
   alias Fleet.Pilot.CompletionOutbox
 
-  alias Fleet.Pilot.StepRunConsumer.Verdict
-  alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.GateEngine
-  alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
-  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
+  alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
+  alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+  alias Fleet.Pilot.StepRunConsumer.Verdict
+  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
 
   defstruct [
     :repo,
@@ -230,13 +232,13 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   @impl GenServer
-  def handle_info(%Fleet.Event{source: :spawner, type: :"pod.completed", payload: p}, state) do
+  def handle_info(%Event{source: :spawner, type: :"pod.completed", payload: p}, state) do
     # CI-02
     Fleet.Shutdown.Quiesce.busy(fn -> handle_pod_completed(p, state) end)
   end
 
   def handle_info(
-        %Fleet.Event{source: :task_queue, type: :"work_item.completed", correlation_id: corr} =
+        %Event{source: :task_queue, type: :"work_item.completed", correlation_id: corr} =
           ev,
         state
       )
@@ -250,7 +252,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   def handle_info(
-        %Fleet.Event{source: :task_queue, type: :"work_item.cleared", correlation_id: corr},
+        %Event{source: :task_queue, type: :"work_item.cleared", correlation_id: corr},
         state
       )
       when is_binary(corr) do
@@ -286,7 +288,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     {:noreply, %{state | gate_evals: Map.new(kept)}}
   end
 
-  def handle_info(%Fleet.Event{}, state), do: {:noreply, state}
+  def handle_info(%Event{}, state), do: {:noreply, state}
 
   # BL-6-03 S2
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
@@ -306,7 +308,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp emit_publish_lost(pod_id, death_reason, meta) do
     _ =
-      Fleet.EventRouter.Bus.safe_emit(
+      Bus.safe_emit(
         :workflow,
         :"deliverable.publish_lost",
         [
@@ -425,14 +427,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
     end
   end
 
-  defp arch_escalation_resolved?(%Fleet.Event{payload: payload}) when is_map(payload) do
+  defp arch_escalation_resolved?(%Event{payload: payload}) when is_map(payload) do
     meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
     is_map(meta) and Map.get(meta, "awaits_arch") == true
   end
 
   defp arch_escalation_resolved?(_), do: false
 
-  defp drain_awaits_arch(%Fleet.Event{payload: payload}, state) do
+  defp drain_awaits_arch(%Event{payload: payload}, state) do
     meta = Map.get(payload, :metadata) || Map.get(payload, "metadata") || %{}
     repo = Map.get(meta, "repo")
     number = Map.get(meta, "number")
@@ -552,7 +554,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   end
 
   defp payload_repo(payload),
-    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
+    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp run_step_run(payload, n, state) do
     role = payload["role"]

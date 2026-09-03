@@ -9,7 +9,8 @@
 #
 # EXIT 0 TOUJOURS : une liste vide est un resultat, pas une erreur.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : ce script rend TOUJOURS 0 (cf. en-tete) — une liste vide est
+                          # un resultat, et `-e` la transformerait en panne.
 
 VERBOSE=0
 [[ "${1:-}" == "--verbose" ]] && VERBOSE=1

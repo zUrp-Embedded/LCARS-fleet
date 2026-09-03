@@ -245,7 +245,7 @@ defmodule Fleet.Toolchain do
   def parse_workitem_marker(_), do: :error
 
   @doc """
-  The label a work item wears while its request is in flight — `Fleet.Labels.awaits_toolchain/0`.
+  The label a work item wears while its request is in flight — `Labels.awaits_toolchain/0`.
 
   Restated here as a function rather than inlined at call sites so the vocabulary keeps ONE
   source; `Fleet.Labels` explains why it is not `awaits_arch`.

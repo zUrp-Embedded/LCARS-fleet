@@ -80,7 +80,7 @@ defmodule Fleet.Workflow.GateBriefTest do
 
   test "subject :brief MOUNTED → the order names the mounted file, no text, no pin" do
     brief =
-      Fleet.Workflow.GateBrief.build(%{
+      GateBrief.build(%{
         step: "brief-review",
         workflow_map_id: "brief-gate",
         gate: nil,
@@ -104,7 +104,7 @@ defmodule Fleet.Workflow.GateBriefTest do
 
   test "subject :brief INLINE (degraded, no authored doc) → embedded blockquote as before" do
     brief =
-      Fleet.Workflow.GateBrief.build(%{
+      GateBrief.build(%{
         step: "brief-review",
         workflow_map_id: "brief-gate",
         gate: nil,

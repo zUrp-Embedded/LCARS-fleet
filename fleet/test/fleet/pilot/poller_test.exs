@@ -7,6 +7,7 @@ defmodule Fleet.Pilot.PollerTest do
   # reproduce it. The restore-on-exit is correct and was never the problem: the value is right
   # after the test, and wrong DURING it for everyone else.
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller
 
   # Legacy rail (poll_once/4 → Routing → Dispatcher → RAM Executor) REMOVED (②.3 / BL-050). Its
@@ -31,12 +32,12 @@ defmodule Fleet.Pilot.PollerTest do
         start_entry_poller(
           {:ok,
            [
-             %{
-               "number" => 42,
-               "body" => "x",
-               "labels" => [],
-               "assignees" => [%{"login" => "lordzurp"}]
-             }
+             PayloadFixture.issue(
+               number: 42,
+               body: "x",
+               label_names: [],
+               assignee_logins: ["lordzurp"]
+             )
            ]},
           %{42 => {"ghostmap", "deploy"}},
           workflow_map_loader: RaisingWorkflowMapLoader,
@@ -112,12 +113,13 @@ defmodule Fleet.Pilot.PollerTest do
       # `when not is_nil(spawner)` guard made maybe_rekick_arch fall into a MUTE no-op → the
       # anti-"awaits-arch issue stuck forever" rail NEVER ran. This test exercises the nil path
       # (= prod) that the other setups (spawner: StepStubSpawner) do not cover.
-      issue = %{
-        "number" => 42,
-        "body" => "x",
-        "labels" => [%{"name" => "lcars-awaits-arch"}],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
 
       # FREE arch (busy → deliberate silence since the offer-then-wake coupling): the wiring
       # under test is the nil-spawner path, exercised on the path that still wakes.
@@ -200,12 +202,13 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "A-10: 2 awaits-arch repos → EXACTLY 1 re-kick per throttle tick (not 1 per repo)" do
-      issue = %{
-        "number" => 42,
-        "body" => "x",
-        "labels" => [%{"name" => "lcars-awaits-arch"}],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
 
       # `forge_opts` replaced wholesale (Keyword.merge): same stub issues + 2-repo discovery.
       # The default spawner (StepStubSpawner.wake_pod → :ok) is kept — its wake REACHES, so the
@@ -245,12 +248,13 @@ defmodule Fleet.Pilot.PollerTest do
     # its queue. If the arch is FREE, the poller ENQUEUES the arbitration mandate to it
     # (get_work_item stops returning {done:true} — probe #4).
     test "FREE arch + awaits-arch issue → the poller ENQUEUES an arbitration mandate to the arch" do
-      issue = %{
-        "number" => 42,
-        "body" => "x",
-        "labels" => [%{"name" => "lcars-awaits-arch"}],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
 
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchFreeTQ)
 
@@ -268,12 +272,13 @@ defmodule Fleet.Pilot.PollerTest do
     # kick's wake was lost) → the net RE-WAKES without re-offering (re-enqueue would churn the
     # pending item). Closes the lost-wake liveness hole: pending no longer silences the net.
     test "PENDING arch mandate (never fetched) → re-wake ONLY, no new enqueue" do
-      issue = %{
-        "number" => 42,
-        "body" => "x",
-        "labels" => [%{"name" => "lcars-awaits-arch"}],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
 
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchPendingTQ)
 
@@ -293,12 +298,13 @@ defmodule Fleet.Pilot.PollerTest do
     # pure noise, observed live 2026-07-18). The backlog stays on the forge, re-offered + woken
     # next tick once the arch submits and the label drains.
     test "BUSY arch (active work-item) → NO enqueue, NO wake (it already knows its mandate)" do
-      issue = %{
-        "number" => 42,
-        "body" => "x",
-        "labels" => [%{"name" => "lcars-awaits-arch"}],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
 
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchBusyTQ)
 
@@ -581,11 +587,20 @@ defmodule Fleet.Pilot.PollerTest do
   # process's DEATH, which is asynchronous — a register at the next test's first line can race
   # it (seed-dependent flake, measured in the gate). Bounded wait: the only possible owner is
   # the dying predecessor of THIS serial module, never a live peer.
-  defp register_reap_listener!(tries \\ 50) do
+  defp register_reap_listener!(tries \\ 50)
+
+  # L'abandon est une CLAUSE, pas un `raise` dans le `rescue` — credo le demande
+  # (`Warning.RaiseInsideRescue`) et la mesure dit que la trace ne changeait pas : un `raise` dans un
+  # `rescue` porte deja sa propre pile, la bonne ligne dans la bonne fonction. Ce qui est perdu, c'est
+  # la trace de l'`ArgumentError`, qui pointe sur `Process.register/2` — donc ce que le message dit
+  # deja. `reraise` remplacerait ici un message utile par un message inutile ; sortir le `raise` du
+  # bloc satisfait la regle sans rien echanger.
+  defp register_reap_listener!(0), do: raise("reap_test_listener never freed")
+
+  defp register_reap_listener!(tries) do
     Process.register(self(), :reap_test_listener)
   rescue
     ArgumentError ->
-      if tries == 0, do: raise("reap_test_listener never freed")
       Process.sleep(10)
       register_reap_listener!(tries - 1)
   end
@@ -745,7 +760,7 @@ defmodule Fleet.Pilot.PollerTest do
     # restart between them left the project with no arbiter and nothing said so — and the human,
     # who cannot be scheduled around, is exactly who finds an empty terminal in that window.
     test "a regular tick keeps the architect of a LIVE project" do
-      issues = [%{"number" => 7, "body" => "x", "labels" => [], "assignee" => %{"login" => "l"}}]
+      issues = [PayloadFixture.issue(number: 7, body: "x", label_names: [], assignee_login: "l")]
       me = self()
       {name, _pid} = start_keeper_poller(issues, fn repo, _o -> send(me, {:kept, repo}) end)
 
@@ -760,13 +775,12 @@ defmodule Fleet.Pilot.PollerTest do
       # parks in this test the day the prefix moves, and the test would keep passing on a fleet
       # that no longer parks at all.
       parked = [
-        %{
-          "number" => 1,
-          "title" => Fleet.Forge.Protocol.parked_issue_title(),
-          "body" => "",
-          "labels" => [],
-          "assignee" => nil
-        }
+        PayloadFixture.issue(
+          number: 1,
+          body: "",
+          title: Fleet.Forge.Protocol.parked_issue_title(),
+          label_names: []
+        )
       ]
 
       me = self()
@@ -820,7 +834,7 @@ defmodule Fleet.Pilot.PollerTest do
       # API calls per tick. Asserting the ABSENCE of the forge call is what pins the ORDER;
       # asserting only "no spawn" would pass with the check placed anywhere downstream.
       issues = [
-        %{"number" => 7, "body" => "x", "labels" => [], "assignee" => %{"login" => "lordzurp"}}
+        PayloadFixture.issue(number: 7, body: "x", label_names: [], assignee_login: "lordzurp")
       ]
 
       {name, pid} = start_step_poller({:ok, issues}, {:ok, []}, substrate_present())
@@ -973,12 +987,12 @@ defmodule Fleet.Pilot.PollerTest do
   describe "step mode — force_poll" do
     test "ROUTELESS assigned issue → onboarded onto the default workflow_map (skip, no spawn)" do
       issues = [
-        %{
-          "number" => 7,
-          "body" => "fais le hello",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 7,
+          body: "fais le hello",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} = start_step_poller({:ok, issues})
@@ -1003,12 +1017,12 @@ defmodule Fleet.Pilot.PollerTest do
         },
         # An issue that would be ONBOARDED (routeless → default map recorded) on a live repo —
         # the skip must stop even that write, not just spawns.
-        %{
-          "number" => 7,
-          "body" => "fais le hello",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 7,
+          body: "fais le hello",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} = start_step_poller({:ok, issues})
@@ -1033,12 +1047,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "lcars-in-flight lock → skip, no spawn" do
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} = start_step_poller({:ok, issues})
@@ -1052,12 +1066,12 @@ defmodule Fleet.Pilot.PollerTest do
     test "reconciliation (B): orphan lock reclaimed at the 2nd tick (grace), not the 1st" do
       # #8 locked but NO live pod (StepStubSpawner.list_pods → []) = confirmed orphan.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} = start_step_poller({:ok, issues})
@@ -1089,12 +1103,12 @@ defmodule Fleet.Pilot.PollerTest do
       register_reap_listener!()
 
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-awaits-arch"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_reap_#{System.unique_integer([:positive])}"
@@ -1129,12 +1143,12 @@ defmodule Fleet.Pilot.PollerTest do
       register_reap_listener!()
 
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_reap_locked_#{System.unique_integer([:positive])}"
@@ -1167,12 +1181,7 @@ defmodule Fleet.Pilot.PollerTest do
       register_reap_listener!()
 
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(number: 8, body: "x", label_names: [], assignee_logins: ["lordzurp"])
       ]
 
       name = :"P_reap_active_#{System.unique_integer([:positive])}"
@@ -1235,12 +1244,12 @@ defmodule Fleet.Pilot.PollerTest do
       # Here the pod (active task on issue 8) is recognized as owner → its lock is NEVER
       # reclaimed, even after 2 ticks.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_live_lock_#{System.unique_integer([:positive])}"
@@ -1273,12 +1282,12 @@ defmodule Fleet.Pilot.PollerTest do
       # reclaimed its own -> re-dispatch loop. Here the eng (active task on #8 via its issue_id
       # "issue-8") is recognized as owner -> #8 NEVER reclaimed, even after 2 ticks.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_proj_lock_#{System.unique_integer([:positive])}"
@@ -1310,12 +1319,12 @@ defmodule Fleet.Pilot.PollerTest do
       # pod on it stays a REAL orphan -> reclaimed after the 2-tick grace (otherwise a legitimate
       # orphan would wedge).
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_proj_other_#{System.unique_integer([:positive])}"
@@ -1353,20 +1362,20 @@ defmodule Fleet.Pilot.PollerTest do
       # whose judge is DEAD (no live pr-6-* pod). issue-8 is PR-backed → never reclaimed
       # (pr_issue_ids). The PR#6 lock MUST be reclaimed (2-tick grace).
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       pulls = [
-        %{
-          "number" => 6,
-          "head" => %{"ref" => "lcars/issue-8-engineer"},
-          "labels" => [%{"name" => "lcars-in-flight"}]
-        }
+        PayloadFixture.pull(
+          number: 6,
+          head_ref: "lcars/issue-8-engineer",
+          label_names: ["lcars-in-flight"]
+        )
       ]
 
       name = :"P_pr_orphan_#{System.unique_integer([:positive])}"
@@ -1412,12 +1421,12 @@ defmodule Fleet.Pilot.PollerTest do
       # (PR open): HERE no PR → no pr_issue_ids exclusion → the only rampart was (wrongly) the
       # `:completed` ownership.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_c050_#{System.unique_integer([:positive])}"
@@ -1457,12 +1466,12 @@ defmodule Fleet.Pilot.PollerTest do
       # it from the suspects with the acted set would force tick3 to re-suspect and tick4 to retry
       # (while the log promised "retry next tick"). Kept suspect, the retry is genuinely at tick3.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_reclaim_retry_#{System.unique_integer([:positive])}"
@@ -1509,12 +1518,12 @@ defmodule Fleet.Pilot.PollerTest do
       # admission does not own → the orphan is reclaimed (2-tick grace), the next dispatch re-attempts
       # activation. The nominal enqueue→pull window (seconds) is covered by the ~60s grace.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_rf21_#{System.unique_integer([:positive])}"
@@ -1554,12 +1563,12 @@ defmodule Fleet.Pilot.PollerTest do
       # (double workflow_run + phantom verdict). With the fix: the ref is owned by the active eval
       # (gate_eval_owned_refs) → never reclaimed, for as many ticks as the eval lasts.
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_g1_eval_#{System.unique_integer([:positive])}"
@@ -1594,12 +1603,12 @@ defmodule Fleet.Pilot.PollerTest do
       # as ownership). The PULL is the activation proof: a never-pulled eval loses ownership on the
       # 2-tick grace → reclaim → the next dispatch re-escalates a FRESH eval (self-heal).
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_g1_pending_#{System.unique_integer([:positive])}"
@@ -1635,12 +1644,12 @@ defmodule Fleet.Pilot.PollerTest do
       # covers the "clobbered eval" (cleared) case: an eval outside list_active owns nothing (same
       # path — the ref becomes orphaned again → reclaim → re-dispatch → re-escalation, self-heal).
       issues = [
-        %{
-          "number" => 8,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-in-flight"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 8,
+          body: "x",
+          label_names: ["lcars-in-flight"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_g1_other_#{System.unique_integer([:positive])}"
@@ -1797,12 +1806,8 @@ defmodule Fleet.Pilot.PollerTest do
     test "F-037: multi-repo discovery → EACH repo scanned, tally aggregated over all" do
       # Heart of the effort: 2 repos discovered → the poller scans BOTH, tally summed. Routeless
       # assigned issue in each repo → onboarded then deferred (skip) ⇒ skipped:2 (1 per repo).
-      issue = %{
-        "number" => 1,
-        "body" => "x",
-        "labels" => [],
-        "assignees" => [%{"login" => "lordzurp"}]
-      }
+      issue =
+        PayloadFixture.issue(number: 1, body: "x", label_names: [], assignee_logins: ["lordzurp"])
 
       name = :"P_multi_#{System.unique_integer([:positive])}"
 
@@ -1833,12 +1838,12 @@ defmodule Fleet.Pilot.PollerTest do
       # lease → STARTS → the poller dispatches the current step's role (build → engineer via
       # workflow_map_role).
       issues = [
-        %{
-          "number" => 10,
-          "body" => "neuf",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 10,
+          body: "neuf",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       name = :"P_routed_#{System.unique_integer([:positive])}"
@@ -2104,15 +2109,12 @@ defmodule Fleet.Pilot.PollerTest do
       # Cas reellement atteignable, et semantiquement juste : `lcars-awaits-arch` porte deja
       # l'attente. Laisser `wait/role` a cote serait deux verites pour un fait — et un etat perime.
       issues = [
-        %{
-          "number" => 21,
-          "body" => "x",
-          "labels" => [
-            %{"name" => Fleet.Labels.awaits_arch()},
-            %{"name" => "wait/role"}
-          ],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 21,
+          body: "x",
+          label_names: ["wait/role"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       pulls = [
@@ -2142,7 +2144,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "chemin PR : une PR ETRANGERE n'ecrit rien — ce n'est pas notre ticket" do
-      pulls = [%{"number" => 91, "head" => %{"ref" => "refs/pull/6/head"}}]
+      pulls = [PayloadFixture.pull(number: 91, head_ref: "refs/pull/6/head")]
 
       {name, _pid} =
         start_entry_poller({:ok, []}, %{},
@@ -2188,18 +2190,18 @@ defmodule Fleet.Pilot.PollerTest do
       # the lease AND its current step is dispatched (continues the step_run). #12 routed
       # qa-build:build (1st step = QUEUED) → lease held → waits.
       issues = [
-        %{
-          "number" => 11,
-          "body" => "en cours",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
-        %{
-          "number" => 12,
-          "body" => "en file",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 11,
+          body: "en cours",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        ),
+        PayloadFixture.issue(
+          number: 12,
+          body: "en file",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} =
@@ -2212,18 +2214,18 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "two QUEUED issues -> only one starts, the other waits (lease taken within the tick)" do
       issues = [
-        %{
-          "number" => 13,
-          "body" => "file1",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
-        %{
-          "number" => 14,
-          "body" => "file2",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 13,
+          body: "file1",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        ),
+        PayloadFixture.issue(
+          number: 14,
+          body: "file2",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} =
@@ -2245,19 +2247,19 @@ defmodule Fleet.Pilot.PollerTest do
       issues = [
         # #21 is in its jury phase: an open fleet PR carries it. Skipped on the issues rail (the
         # pulls rail advances it), but it IS in flight.
-        %{
-          "number" => 21,
-          "body" => "en jury",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
+        PayloadFixture.issue(
+          number: 21,
+          body: "en jury",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        ),
         # #22 is QUEUED and routeless: with a free lease it would start.
-        %{
-          "number" => 22,
-          "body" => "en attente",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 22,
+          body: "en attente",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       pulls = [
@@ -2288,12 +2290,12 @@ defmodule Fleet.Pilot.PollerTest do
 
     test "free lease (no engaged pipeline) -> the QUEUED issue starts" do
       issues = [
-        %{
-          "number" => 15,
-          "body" => "file",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 15,
+          body: "file",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} = start_entry_poller({:ok, issues}, %{15 => {"qa-build", "build"}})
@@ -2317,18 +2319,18 @@ defmodule Fleet.Pilot.PollerTest do
       # increases → the lease stays free → the 2nd issue STARTS a 2nd pipeline → the tally becomes
       # `skipped:0, errors:2` (two concurrent feature-branches), the `skipped:1` assert fails.
       issues = [
-        %{
-          "number" => 16,
-          "body" => "file1",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
-        %{
-          "number" => 17,
-          "body" => "file2",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 16,
+          body: "file1",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        ),
+        PayloadFixture.issue(
+          number: 17,
+          body: "file2",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} =
@@ -2364,18 +2366,18 @@ defmodule Fleet.Pilot.PollerTest do
       # lease set → #19 sees the lease FREE → STARTS a 2nd pipeline → the tally becomes
       # `dispatched:1` (instead of `dispatched:0, skipped:1`), the assert fails.
       issues = [
-        %{
-          "number" => 18,
-          "body" => "avance",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        },
-        %{
-          "number" => 19,
-          "body" => "file",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 18,
+          body: "avance",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        ),
+        PayloadFixture.issue(
+          number: 19,
+          body: "file",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       {name, pid} =
@@ -2440,12 +2442,12 @@ defmodule Fleet.Pilot.PollerTest do
       # #99 assigned engineer BUT its PR is open -> judge phase: the issue path SKIPS (otherwise
       # re-spawn of the already-finished producer); the judge is dispatched by the pulls path.
       issues = [
-        %{
-          "number" => 99,
-          "body" => "x",
-          "labels" => [],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 99,
+          body: "x",
+          label_names: [],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       pulls = [
@@ -2546,7 +2548,7 @@ defmodule Fleet.Pilot.PollerTest do
       # orphan (no repoA pod), repoB#8 is owned (live repoB pod) → only repoA#8 is reclaimed after
       # the grace.
       issue8 = fn ->
-        %{"number" => 8, "body" => "x", "labels" => [%{"name" => "lcars-in-flight"}]}
+        PayloadFixture.issue(number: 8, body: "x", label_names: ["lcars-in-flight"])
       end
 
       issues_by_repo = %{
@@ -2599,12 +2601,12 @@ defmodule Fleet.Pilot.PollerTest do
       # With the fix: the poller computes the awaits-arch SET (issue 42, already listed → zero I/O)
       # and threads it to the pulls → dispatch_review skips → the judge is NOT dispatched.
       issues = [
-        %{
-          "number" => 42,
-          "body" => "x",
-          "labels" => [%{"name" => "lcars-awaits-arch"}],
-          "assignees" => [%{"login" => "lordzurp"}]
-        }
+        PayloadFixture.issue(
+          number: 42,
+          body: "x",
+          label_names: ["lcars-awaits-arch"],
+          assignee_logins: ["lordzurp"]
+        )
       ]
 
       pulls = [

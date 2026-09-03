@@ -54,6 +54,7 @@ defmodule Fleet.Pilot.Poller do
   use GenServer
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Opts
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.StepDispatcher
@@ -1035,7 +1036,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp awaits_arch?(item) do
-    @awaits_arch in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+    @awaits_arch in Payload.label_names(item)
   end
 
   # Issues carrying an open fleet PR (`lcars/issue-N-role`) = workflow_runs in JUDGE phase:
@@ -1096,7 +1097,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   defp pr_issue_number(pr) do
-    case Fleet.Forge.Protocol.parse_feature_branch(get_in(pr, ["head", "ref"]) || "") do
+    case Fleet.Forge.Protocol.parse_feature_branch(Payload.head_ref(pr) || "") do
       {:ok, {n, _role}} -> n
       _ -> nil
     end

@@ -31,8 +31,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
     |> Enum.map(&String.replace(&1, "\t", "  "))
     |> Enum.map(&String.trim/1)
     |> drop_blank_edges()
-    |> Enum.map(&collapse_spaces/1)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &collapse_spaces/1)
   end
 
   @doc "Single-line normalization: tabs->spaces, trim, collapse runs."

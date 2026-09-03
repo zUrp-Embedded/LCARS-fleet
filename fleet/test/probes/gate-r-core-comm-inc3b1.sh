@@ -11,7 +11,9 @@
 # REAL tool layer (the ex_mcp SDK), as opposed to the python fixture.
 # NB: this is a thin wrapper around `mix test test/fleet/mcp/pod_tools_test.exs`, which `mix gate` already runs.
 # It exists to be invokable alone while working on the tool layer, not to add coverage.
-set -uo pipefail
+set -uo pipefail          # PAS -e : cette sonde ENCHAINE ses mesures et rend un code de sortie
+                          # qui les resume. `-e` s'arreterait a la premiere rouge, et le bilan —
+                          # qui est le produit — n'existerait plus.
 HERE="$(cd "$(dirname "$0")" && pwd)"; RT="$(cd "$HERE/../.." && pwd)"
 echo "== Gate R-CORE.comm inc3b.1 — tool layer ExMCP.Server (get_work_item IN / submit_result OUT) =="
 cd "$RT" && mix test test/fleet/mcp/pod_tools_test.exs

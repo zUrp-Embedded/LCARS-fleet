@@ -28,8 +28,8 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
     # projection, not the token.
     # Les DEUX rails du sceau depuis le 2026-08-20 : `chief` fusionne, `gatekeeper` promeut.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
-    Fleet.TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
-    Fleet.TestEnv.put_role_token!("chief", "tok-chief")
+    TestEnv.put_role_token!("gatekeeper", "tok-gatekeeper")
+    TestEnv.put_role_token!("chief", "tok-chief")
 
     :ok
   end
@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
     #
     # Fail-closed intact, et c'est ce qu'on epingle ici : sans le jeton du rail merge, AUCUNE
     # tentative, jamais de repli sur le compte systeme ni sur l'autre rail.
-    empty = Fleet.TestEnv.tmp_path("no-role-token")
+    empty = TestEnv.tmp_path("no-role-token")
     File.mkdir_p!(empty)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, empty)
 
@@ -92,7 +92,7 @@ defmodule Fleet.Pilot.MergeAndPromoteWorktreeTest do
     # peut pas etre signee. Ni commentaire ni fermeture, retour honnete `{:close_after_merge, _}` —
     # et la projection se fait quand meme, parce que la brique EST fusionnee : c'est la forge qui
     # fait foi, pas la ceremonie.
-    Fleet.TestEnv.delete_role_token!("gatekeeper")
+    TestEnv.delete_role_token!("gatekeeper")
 
     assert {:error, {:close_after_merge, :role_token_unavailable}} =
              MergeAndPromote.merge_and_promote(OkForge, "fleet/myproj", 7, 42, "engineer", [],

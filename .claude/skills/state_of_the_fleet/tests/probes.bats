@@ -388,7 +388,7 @@ JSONL
 # chosen codes exercises the REAL curl path — stubbing `http_probe` would test the harness instead.
 
 stub_server() {
-  local dir="$1" port
+  local dir="$1"
   python3 - "$dir" <<'PY' &
 import http.server, socketserver, sys, os, json, threading
 d = sys.argv[1]
@@ -896,6 +896,7 @@ $(jl fleet.subsystem.pilot.step operational)"
   load_sotf
   JSONL="$(jl instruments.mcp_socket operational)
 $(jl fleet.health operational)"
+  # shellcheck disable=SC2034  # entree du sujet : `sotf.sh` la lit via `plane_ran()` (l.77)
   RAN_PLANES=" instruments fleet "   # les deux sondes ONT tourne : l'absence est donc une derive
   run capability_verdict "$(chain_of card_list)"
   [[ "$output" == unreachable\|* ]]
@@ -907,6 +908,7 @@ $(jl fleet.health operational)"
   # d'un cote, derive de l'autre. Les confondre ferait crier a la panne a chaque `diag` cible.
   load_sotf
   JSONL="$(jl instruments.mcp_socket operational)"
+  # shellcheck disable=SC2034  # entree du sujet : `sotf.sh` la lit via `plane_ran()` (l.77)
   RAN_PLANES=" instruments "
   run capability_verdict "$(chain_of card_list)"
   [[ "$output" == operational\|* ]]
@@ -915,6 +917,7 @@ $(jl fleet.health operational)"
 @test "sotf : rien a atteindre reste inactive, ce n'est pas une panne" {
   load_sotf
   JSONL="$(jl instruments.mcp_socket inactive 'hors pod')"
+  # shellcheck disable=SC2034  # entree du sujet : `sotf.sh` la lit via `plane_ran()` (l.77)
   RAN_PLANES=" instruments "
   run capability_verdict "$(chain_of project_create)"
   [[ "$output" == inactive\|* ]]
@@ -935,9 +938,11 @@ $(jl fleet.subsystem.mcp.pod_facing operational)"
   # Les sondes tournent dans des processus separes : leurs compteurs n'arrivent jamais au runner.
   # `--raw` rendait donc 0 sur un run aveugle — un succes ambigu, la faute que ce toolkit refuse.
   load_sotf
+  # shellcheck disable=SC2034  # entree du sujet : lue par `jsonl_exit_code`, appelee par `run`
   JSONL="$(jl a.b operational)"; run jsonl_exit_code; [ "$output" = 0 ]
   JSONL="$(jl a.b degraded)";    run jsonl_exit_code; [ "$output" = 1 ]
   JSONL="$(jl a.b unreachable)"; run jsonl_exit_code; [ "$output" = 2 ]
+  # shellcheck disable=SC2034  # entree du sujet : lue par `jsonl_exit_code`, appelee par `run`
   JSONL="$(jl a.b degraded)
 $(jl c.d unreachable)"
   run jsonl_exit_code; [ "$output" = 2 ]

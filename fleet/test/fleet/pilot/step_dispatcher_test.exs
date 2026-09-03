@@ -2120,11 +2120,12 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_exception_pass?, false)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_diagnoser, AllSemanticProbe)
 
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:skipped, {:merge_blocked_escalated, 6}} =
-                   StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
-        end)
+      # La capture n'est plus LIEE : plus aucune assertion ne porte sur le texte du log (voir
+      # ci-dessous). Elle reste pour avaler la sortie du dispatch, pas pour etre lue.
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:skipped, {:merge_blocked_escalated, 6}} =
+                 StepDispatcher.dispatch_review(conflict_pr(), conflict_opts([]))
+      end)
 
       # ⚠ L'ANCIENNE FORME ÉTAIT `refute log =~ "chief exception pass NOT dispatched"` — une
       # assertion NÉGATIVE sur un libellé exact, donc verte le jour où la production renomme ce

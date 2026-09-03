@@ -423,6 +423,21 @@ SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
 SC_VERSION=""
 command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | sed -n 's/^version: //p')"
 
+# LE PLANCHER PORTE SUR TOUT LE SHELL SUIVI, deploy/ COMPRIS. Une exclusion nommee vivait ici : elle
+# soustrayait deploy/ au plancher parce que l installeur etait « en chantier ailleurs », et elle
+# ecrivait elle-meme sa condition de sortie — la fermeture de ce chantier. Il est ferme.
+#
+# La mesure qui l accompagnait tient encore, prise avec l INSTRUMENT DU GATE et non un shellcheck nu :
+# `-x --source-path=SCRIPTDIR` suit les `source`, donc il voit les lectures qu un shellcheck seul ne
+# relie pas — sans `-x`, trois SC2034 apparaissent dans docker/entrypoint.sh sur des PROV_* que
+# provision-lib lit apres le `.`, et ces trois-la n existent pas. Avec l instrument juste : 36
+# fichiers shell sous deploy/, ZERO signalement de severite >= warning.
+#
+# Une exclusion gardee au-dela de sa condition de sortie ne protege plus un chantier : elle soustrait
+# un arbre au plancher, et le compte affiche continue de dire « OK » sans nommer ce qu il n a pas lu.
+SHELL_FILES_FLOOR=("${SHELL_FILES[@]}")
+FLOOR_COUNT="${#SHELL_FILES_FLOOR[@]}"
+
 # ─── LE PAS EST HORS GATE PAR DEFAUT ────────────────────────────────────────────────────────────
 #
 # ⚖ USER 2026-08-29 : « on ne teste pas un truc qui n'est pas testable ».
@@ -441,34 +456,86 @@ command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | se
 #
 # POUR LE RALLUMER POUR DE BON : remettre `[[ -n "${LCARS_SHELL_LINT:-}" ]] ||` en commentaire ici,
 # le jour ou le compte est a zero. Rien d'autre ne bouge.
-if [[ -z "${LCARS_SHELL_LINT:-}" ]]; then
-  echo "--- shellcheck : HORS GATE (dette connue, ni mesuree ni bloquante ici — LCARS_SHELL_LINT=1 pour l'auditer) ---"
-elif [[ -z "$SC_VERSION" ]]; then
-  echo "ECHEC: shellcheck absent — $SHELL_FILE_COUNT fichier(s) shell NON audites. Installer : apt install shellcheck." >&2
+# ---------------------------------------------------------------------------
+# LE PLANCHER, ET IL TOURNE TOUJOURS. Rallume le 2026-09-01, au seuil `warning` — le contrat que
+# l'en-tete de ce fichier annoncait « a restaurer le jour ou le compte est a zero ». Il l'est.
+#
+# ⚠ POURQUOI `-S warning` ET PAS LE DEFAUT, et c'est une MESURE, pas un gout. Au defaut (`style`),
+# la commande ci-dessous rend 170 signalements sur 21 fichiers, TOUS de severite `note` : entrer la
+# rendrait la chaine rouge en permanence, et un gate qu'on sait toujours rouge apprend a lire
+# « rouge » comme « normal » — c'est exactement ce qui a coute a shellcheck sa place le 2026-08-29.
+# Au seuil `warning` : 0 error, 0 warning au 2026-09-01. Le plancher est donc VERT aujourd'hui et
+# mord au premier warning introduit. Meme forme que `sobelow --exit High` dans `mix.exs`.
+#
+# Les 170 notes ne sont pas absoutes : elles sont HORS de ce plancher-ci, et se lisent avec
+# `LCARS_SHELL_LINT=1` (audit complet, toutes severites, deploy compris).
+# ---------------------------------------------------------------------------
+if [[ -z "$SC_VERSION" ]]; then
+  echo "ECHEC: shellcheck absent — $FLOOR_COUNT fichier(s) shell NON audites. Installer : apt install shellcheck." >&2
   GATE_FAIL=1
-elif [[ "$SHELL_FILE_COUNT" -eq 0 ]]; then
+elif [[ "$FLOOR_COUNT" -eq 0 ]]; then
   # Zero fichier n'est pas un depot sans shell : c'est une decouverte cassee, et elle rendrait vert.
-  echo "ECHEC: aucun fichier shell suivi trouve — la decouverte est cassee, pas le depot." >&2
+  echo "ECHEC: aucun fichier shell suivi hors deploy/ — la decouverte est cassee, pas le depot." >&2
   GATE_FAIL=1
 else
-  echo "--- shellcheck $SC_VERSION : $SHELL_FILE_COUNT fichier(s) suivi(s), aucun filtre ---"
   set +e
-  # ⚠ `-x` N'EST PAS UN FILTRE, C'EST DAVANTAGE D'ANALYSE — il fait SUIVRE les `source`. Sans lui,
-  # chaque module rend un SC1091 « Not following » et shellcheck ignore ce que la lib definit ; avec
-  # lui il resout `# shellcheck source=../lib/provision-lib.sh`, deja ecrit dans les modules.
-  # `--source-path=SCRIPTDIR` est ce qui manquait : ces directives sont relatives au SCRIPT, pas au
-  # repertoire d'ou le gate est lance.
-  # MESURE sur la liste ci-dessus : 1249 -> 1208 signalements, dont -21 sur le seul rail deploy.
-  # AUCUN signalement ajoute : suivre une source ne peut que lever des faux positifs, jamais en creer.
-  SC_OUT="$(shellcheck -x --source-path=SCRIPTDIR -f gcc "${SHELL_FILES[@]}" 2>&1)"
-  SC_RC=$?
+  SC_FLOOR="$(shellcheck -x --source-path=SCRIPTDIR -S warning -f gcc "${SHELL_FILES_FLOOR[@]}" 2>&1)"
+  SC_FLOOR_RC=$?
   set -e
-  if [[ "$SC_RC" -ne 0 ]]; then
-    printf '%s\n' "$SC_OUT" >&2
-    echo "ECHEC: shellcheck — $(printf '%s\n' "$SC_OUT" | grep -c ':') signalement(s) sur $(printf '%s\n' "$SC_OUT" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
+  if [[ "$SC_FLOOR_RC" -ne 0 ]]; then
+    printf '%s\n' "$SC_FLOOR" >&2
+    echo "ECHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de severite >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
     GATE_FAIL=1
   else
-    echo "--- shellcheck : OK ($SHELL_FILE_COUNT fichier(s)) ---"
+    echo "--- shellcheck plancher (-S warning, $FLOOR_COUNT fichier(s), tout le shell suivi) : OK ---"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# LE PLANCHER PYTHON. Meme forme que le plancher shellcheck ci-dessus, et pour la meme raison : ce
+# depot n'avait AUCUN outillage python — ni ruff, ni flake8, ni config — sur douze fichiers maison
+# (bridge MCP, executeurs, deck, et leurs temoins). L'absence totale se remarque avant le contenu.
+#
+# ⚠ `E9,F` ET RIEN D'AUTRE, et c'est une mesure. Au 2026-09-01 : E9=0, F=0 (les 16 F821 du callback
+# git-filter-repo portent leur `noqa` motive, cf. `bin/publish-transform-attribution.py`), mais
+# UP=113, S=31, E/W=160. Entrer plus haut rendrait la chaine rouge en permanence — c'est la
+# lecon de l'outil shell, retiré du gate le 2026-08-29 pour exactement ca. Le reste se mesure a la demande :
+# `ruff check --select UP,S`. Le perimetre et la config vivent dans `pyproject.toml` a la racine.
+#
+# RUFF ABSENT = ECHEC, jamais un avertissement : meme regle que python3 et shellcheck ci-dessus. Un
+# plancher qu'on peut sauter en silence n'est pas un plancher.
+# ---------------------------------------------------------------------------
+if ! command -v ruff >/dev/null 2>&1; then
+  echo "ECHEC: ruff absent — le python maison n'est PAS audite. Installer : pip install ruff (ou apt)." >&2
+  GATE_FAIL=1
+else
+  set +e
+  RUFF_OUT="$(cd "$REPO_ROOT" && ruff check --no-cache --output-format=concise 2>&1)"
+  RUFF_RC=$?
+  set -e
+  if [[ "$RUFF_RC" -ne 0 ]]; then
+    printf '%s\n' "$RUFF_OUT" >&2
+    echo "ECHEC: ruff plancher — $(printf '%s\n' "$RUFF_OUT" | grep -c ':') signalement(s) E9/F." >&2
+    GATE_FAIL=1
+  else
+    echo "--- ruff plancher (E9,F — vendor exclu) : OK ---"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# L'AUDIT COMPLET, opt-in : toutes severites, deploy compris, informatif.
+# ---------------------------------------------------------------------------
+if [[ -n "${LCARS_SHELL_LINT:-}" ]]; then
+  if [[ -z "$SC_VERSION" ]]; then
+    echo "--- shellcheck : audit demande mais binaire absent ---" >&2
+  else
+    echo "--- shellcheck $SC_VERSION : audit complet, $SHELL_FILE_COUNT fichier(s), aucun filtre ---"
+    set +e
+    SC_OUT="$(shellcheck -x --source-path=SCRIPTDIR -f gcc "${SHELL_FILES[@]}" 2>&1)"
+    SC_RC=$?
+    set -e
+    printf '%s\n' "$SC_OUT"
+    echo "--- audit : $(printf '%s\n' "$SC_OUT" | grep -c ':') signalement(s), rc=$SC_RC (informatif, hors plancher) ---"
   fi
 fi
 

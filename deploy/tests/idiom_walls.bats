@@ -240,7 +240,7 @@ I3_AWK='
     while read -r ref; do
       mod="${ref%.*}"                       # le dernier segment est la fonction (snake_case)
       [[ "$mod" == *.* ]] || continue       # `Fleet.chose` : pas un appel de module qualifie
-      grep -rqE "^defmodule[[:space:]]+$mod[[:space:]]+do" "$lib" \
+      grep -rqE "^defmodule[[:space:]]+${mod}[[:space:]]+do" "$lib" \
         || { echo "${f##*/} nomme « $mod » — aucun defmodule dans lib/"; bad=1; }
     done < <(code "$f" | grep -oE 'Fleet(\.[A-Z][A-Za-z0-9]*)+\.[a-z_][a-z0-9_]*' | sort -u)
   done

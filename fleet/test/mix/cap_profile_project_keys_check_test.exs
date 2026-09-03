@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @schema_rel "priv/cap_profile/schema/cap-profile-v2.5.json"
   @resolver_rel "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
@@ -54,7 +54,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
     root
   end
 
-  defp check(props, keys), do: Check.check_cap_profile_project_keys(tree(props, keys))
+  defp check(props, keys), do: Tools.check_cap_profile_project_keys(tree(props, keys))
 
   # The four the pilot really injects — the check reads them from the live module, not from the
   # crafted tree, so a test that renamed them would be measuring itself.
@@ -75,7 +75,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
       File.write!(Path.join(root, @resolver_rel), "defmodule R do\n  def f, do: :ok\nend\n")
       on_exit(fn -> File.rm_rf!(root) end)
 
-      r = Check.check_cap_profile_project_keys(root)
+      r = Tools.check_cap_profile_project_keys(root)
       assert r.status == :fail
     end
   end
@@ -124,7 +124,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
 
   describe "l'arbre REEL" do
     test "le depot passe son propre mur, et le compte n'est pas zero" do
-      r = Check.check_cap_profile_project_keys(File.cwd!())
+      r = Tools.check_cap_profile_project_keys(File.cwd!())
 
       assert r.status == :pass
       assert r.note =~ "4 catalogue keys"

@@ -99,17 +99,17 @@ defmodule Fleet.API.ReadinessTest do
       assert backend =~ "AggregateDispatcher"
     end
 
-    @tag :skip
-    test "un module INEXISTANT ne doit pas se lire comme operationnel — TROU CONNU" do
-      # La contre-epreuve que le test ci-dessus laissait passer, ecrite et MARQUEE plutot
-      # qu'omise : elle echoue aujourd'hui, parce que la sonde ne sait dire que « ce n'est pas le
-      # NoOp ». Un trou nomme vaut mieux qu'un trou vert.
-      #
-      # Le geste qui la leverait est cote PRODUCTION (`readiness.ex:77`) : verifier que le backend
-      # exporte le contrat attendu (`in_flight_count/0`, `refuse_new_jobs/1`) au lieu de le comparer
-      # a un module. C'est un changement de sonde, pas de test — hors de ce lot.
+    test "un module INEXISTANT ne se lit PAS comme operationnel, et le refus NOMME ce qui manque" do
+      # La contre-epreuve. Elle a ete ecrite MARQUEE `:skip` le jour ou le trou a ete vu — la sonde
+      # ne savait dire que « ce n'est pas le NoOp », donc un module absent passait pour operationnel.
+      # Elle mord depuis que la sonde verifie le CONTRAT du backend au lieu de son identite.
       Application.put_env(:lcars_fleet, :admiral_shutdown_dispatcher, Fleet.NExistePas)
-      assert %{state: :degraded} = sub(Readiness.deep(), "shutdown.dispatcher")
+
+      assert %{state: :degraded, detail: %{note: note}} =
+               sub(Readiness.deep(), "shutdown.dispatcher")
+
+      assert note =~ "refuse_new_jobs"
+      assert note =~ "in_flight_count"
     end
 
     # Drift-kill: key unset → readiness reads the OWNER's canonical default

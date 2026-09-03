@@ -12,7 +12,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
 
@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
     root
   end
 
-  defp check(tools_src), do: Check.check_mcp_tool_effects(tree(tools_src))
+  defp check(tools_src), do: Tools.check_mcp_tool_effects(tree(tools_src))
 
   describe "the instrument answers for itself first" do
     test "a tree it cannot parse into tools FAILS as broken — it never passes by measuring nothing" do
@@ -102,7 +102,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolEffectsCheckTest do
 
   describe "le depot lui-meme" do
     test "l'arbre reel passe, et l'instrument y voit bien quelque chose" do
-      result = Check.check_mcp_tool_effects(File.cwd!())
+      result = Tools.check_mcp_tool_effects(File.cwd!())
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
 

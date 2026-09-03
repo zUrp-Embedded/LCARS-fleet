@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Runtime
 
   # Le plancher d'instrument est de 6 portes, ET au moins une ecriture sur stdout : une population
   # muette ne se distingue pas d'un scanner casse. Les porteuses sont donc CONFORMES — elles
@@ -57,7 +57,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
   end
 
   defp check(extra, kind \\ :conformes),
-    do: Check.check_eval_doors_claim_stdout(tree(extra, kind))
+    do: Runtime.check_eval_doors_claim_stdout(tree(extra, kind))
 
   describe "l'instrument repond de lui-meme d'abord" do
     test "moins de 6 portes : INSTRUMENT BROKEN" do
@@ -71,7 +71,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
 
       on_exit(fn -> File.rm_rf!(root) end)
 
-      assert %{status: :fail, evidence: [ev]} = Check.check_eval_doors_claim_stdout(root)
+      assert %{status: :fail, evidence: [ev]} = Runtime.check_eval_doors_claim_stdout(root)
       assert ev =~ "INSTRUMENT BROKEN"
     end
 

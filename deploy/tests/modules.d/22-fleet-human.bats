@@ -60,8 +60,8 @@ setup() {
   # `:-1000` dans la lib, une fixture qui ne le pose pas mesure une machine sans siege.
   export LCARS_SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
   export PROVISION_MODULE=22-fleet-human
-  export PROV_FLEET_GROUP="$(id -gn)"
-  export PROV_HUMAN="$(id -un)"
+  PROV_FLEET_GROUP="$(id -gn)"; export PROV_FLEET_GROUP
+  PROV_HUMAN="$(id -un)"; export PROV_HUMAN
 
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"
   mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"

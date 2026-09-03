@@ -210,7 +210,7 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     }
 
     assert {:error, :role_token_unavailable} =
-             Fleet.Pilot.StepRunCompleter.open_deliverable_pr(step_run,
+             StepRunCompleter.open_deliverable_pr(step_run,
                deliverable: PushOnlyDeliverable,
                forge_client: MarkerCaptureForge,
                forge_opts: [token: "system-token"]

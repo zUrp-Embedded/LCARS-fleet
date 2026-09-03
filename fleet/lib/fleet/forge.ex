@@ -51,6 +51,19 @@ defmodule Fleet.Forge do
       Client.Files,
       Client.UrlSafe,
       Protocol,
+      # LA LECTURE DES CHARGES, EXPORTEE A DESSEIN — et `boundary` a exige que ce soit dit.
+      #
+      # Ce domaine rend les reponses de la forge telles quelles : des maps JSON. Quatorze modules
+      # de `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string, donc la forme
+      # de l'API d'un tiers etait connue hors d'ici — une montee de version se traitait au `grep`.
+      # `Payload` est la couche qui ferme ca : UN chemin par fait, declare une fois, verifie contre
+      # une capture REELLE (`test/fixtures/forge/`).
+      #
+      # L'exporter est le geste inverse d'une fuite : au lieu que chacun connaisse la forme, un
+      # seul module la connait et les autres lui posent des questions. Le mur qui suit interdira
+      # les clefs string discriminantes hors de ce domaine — sans cet export, il n'aurait pas
+      # d'alternative a offrir.
+      Payload,
       # Called by the pilot wherever IT writes to the forge — the spacing is a property of the
       # write, so it belongs to the domain that owns the writes.
       WriteSpacing

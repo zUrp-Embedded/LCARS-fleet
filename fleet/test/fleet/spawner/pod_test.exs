@@ -32,7 +32,7 @@ defmodule Fleet.Spawner.PodTest do
     def broadcast(topic, ev) do
       agent = Application.fetch_env!(:lcars_fleet, :spawner_flaky_agent)
       n = Agent.get_and_update(agent, fn n -> {n, n + 1} end)
-      if n == 0, do: {:error, :transient}, else: Fleet.EventRouter.Bus.broadcast(topic, ev)
+      if n == 0, do: {:error, :transient}, else: Bus.broadcast(topic, ev)
     end
   end
 
@@ -220,7 +220,7 @@ defmodule Fleet.Spawner.PodTest do
     # (`Bus.pod_topic/1`) et c'est `Bus.broadcast/2` qui l'y adresse ; une diffusion posee a la main
     # sur `fleet.events` ne l'atteint plus. Le contournement mesurait de toute facon le montage du
     # test plutot que le rail — le remplacer fait passer ces tests par le chemin d'emission REEL.
-    Fleet.EventRouter.Bus.broadcast_main(
+    Bus.broadcast_main(
       Fleet.Event.new(:task_queue, :"work_item.completed",
         pod_id: pod_id,
         correlation_id: "test-corr-#{pod_id}",
@@ -390,7 +390,7 @@ defmodule Fleet.Spawner.PodTest do
       # work_item.completed for brick issue-3 (re-brief), NOT the issue-4 spawn (issue_id in the payload,
       # like the real TaskQueue event which carries completed.issue_id).
       # 6-041 — par le Bus (cf. `submit_result_event/2`) : le pod ecoute son propre sujet.
-      Fleet.EventRouter.Bus.broadcast_main(
+      Bus.broadcast_main(
         Fleet.Event.new(:task_queue, :"work_item.completed",
           pod_id: pod_id,
           correlation_id: "c-adopt",

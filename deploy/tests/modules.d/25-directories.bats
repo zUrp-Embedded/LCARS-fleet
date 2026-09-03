@@ -39,7 +39,7 @@ setup() {
   # `--fleet-human`, retire. Le module interroge desormais l'AUTORITE du nom, et la seule facon
   # honnete de la piloter est sa propre surcharge — celle que `forge-gestures.sh` declare. Poser une
   # variable que le code ne lit plus aurait rendu ces temoins verts sur la machine du lanceur.
-  export LCARS_BUILTIN_HUMAN="$(id -un)"
+  LCARS_BUILTIN_HUMAN="$(id -un)"; export LCARS_BUILTIN_HUMAN
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
   export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export PROV_CATALOGUES_WORK="$BATS_TEST_TMPDIR/catalogues-work"

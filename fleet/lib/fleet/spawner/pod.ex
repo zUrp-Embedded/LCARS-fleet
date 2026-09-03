@@ -57,6 +57,19 @@ defmodule Fleet.Spawner.Pod do
   release, fail). At the next `init/1`, `recover_or_init` reads the file → `Pod.Recovery`
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
+  ## Pourquoi ce fichier est GROS, et pourquoi il le reste
+
+  Mesure du contenu, pas impression : 24 clauses de `handle_event/4` pour ~600 lignes, sur ~1470.
+  Le reste est la machine a etats elle-meme (`init`, `callback_mode`, les transitions) et ses
+  helpers.
+
+  Il n'est donc pas decomposable, et ce n'est pas une preference : les clauses d'une fonction
+  vivent dans UN module — c'est la regle du langage, pas un arbitrage — et `handle_event/4` est le
+  callback unique d'un `:gen_statem` en mode `handle_event_function`. Les repartir n'est pas
+  possible ; ce qui l'est, et qui a ete fait, est de sortir le TRAVAIL de chaque etat dans des
+  sous-modules (`Pod.Scaffold`, `Pod.Assets`, `Pod.Egress`, `Pod.LaunchSpec`, `Pod.SessionFiles`…),
+  pour que chaque clause reste un aiguillage et non une implementation.
+
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come
@@ -66,6 +79,8 @@ defmodule Fleet.Spawner.Pod do
 
   require Logger
 
+  alias Fleet.CapProfile
+  alias Fleet.Event
   alias Fleet.EventRouter.Bus
   alias Fleet.Spawner.Pod.Assets
   alias Fleet.Spawner.Pod.Backend
@@ -112,7 +127,7 @@ defmodule Fleet.Spawner.Pod do
           session_id: String.t() | nil,
           started_at: DateTime.t(),
           resume: boolean(),
-          cap_profile: Fleet.CapProfile.t(),
+          cap_profile: CapProfile.t(),
           env_vars: %{String.t() => String.t()},
           pod_dir: Path.t(),
           state_fs_path: Path.t(),
@@ -162,7 +177,7 @@ defmodule Fleet.Spawner.Pod do
     # reading of "outside the managed fan-out".
     case Map.get(args, :slot_key) do
       %{role: role, repo: repo} ->
-        scope = Fleet.CapProfile.slot_scope(args.cap_profile)
+        scope = CapProfile.slot_scope(args.cap_profile)
 
         case Fleet.Spawner.PoolSlot.allocate(role, repo, scope) do
           {:error, :role_at_capacity} = err ->
@@ -254,7 +269,7 @@ defmodule Fleet.Spawner.Pod do
         "pod_id" => data.pod_id,
         "issue_id" => data.issue_id,
         "issue" => issue_number_of(data.issue_id),
-        "role" => Fleet.CapProfile.name(data.cap_profile),
+        "role" => CapProfile.name(data.cap_profile),
         "repo" => LaunchSpec.effective_project(data.opts, data.cap_profile)["repo"]
       })
     end
@@ -364,7 +379,7 @@ defmodule Fleet.Spawner.Pod do
              # defaults for a profile built outside it). Their `sp.md` fragments are composed into the
              # pod's system prompt (F-C146). A modop declared without a bundle →
              # `{:error, {:modop_bundle_missing, _}}` surfaces here (fail-loud: the pod does not launch).
-             Fleet.CapProfile.active_modops(data.cap_profile),
+             CapProfile.active_modops(data.cap_profile),
              pod_id: data.pod_id,
              job_id: data.issue_id
            ),
@@ -398,7 +413,7 @@ defmodule Fleet.Spawner.Pod do
          {:ok, mcp_socket_path} <-
            McpProvision.ensure_pod_socket(
              data.pod_id,
-             Fleet.CapProfile.mcp_fleet_tools(data.cap_profile)
+             CapProfile.mcp_fleet_tools(data.cap_profile)
            ),
          :ok <-
            McpProvision.maybe_provision_mcp_config(
@@ -562,7 +577,7 @@ defmodule Fleet.Spawner.Pod do
   # that design withheld on a conflict: the base that moved). Touching a ref is safe on an idle
   # pod — the working tree does not change under anyone.
   def handle_event({:call, from}, {:refresh_work_base, project}, _state, data) do
-    ws = Fleet.Spawner.Pod.Paths.pod_workspace_path(data.pod_dir)
+    ws = Paths.pod_workspace_path(data.pod_dir)
 
     case Fleet.ProjectBootstrap.Phase.Clone.refresh_work_base(ws, project) do
       {:ok, :refreshed} ->
@@ -580,7 +595,7 @@ defmodule Fleet.Spawner.Pod do
 
   # Cold pipe reset is destructive and relies on the caller's :ready/:publishing gate.
   def handle_event({:call, from}, {:reprovision_pipe_workspace, project, opts}, _state, data) do
-    eff_cap = Fleet.CapProfile.with_project(data.cap_profile, project)
+    eff_cap = CapProfile.with_project(data.cap_profile, project)
 
     # F-28: only a successful disk reset may advance the payload's project provenance.
     repinned = %{data | opts: Keyword.put(data.opts, :project, project)}
@@ -774,7 +789,7 @@ defmodule Fleet.Spawner.Pod do
           "pod #{data.pod_id} kick (#{phase}) abandoned after #{n} attempts — agent never acked → escalating"
         )
 
-        {reason, reason_detail} = Fleet.Event.reason_fields({:no_ack, phase})
+        {reason, reason_detail} = Event.reason_fields({:no_ack, phase})
 
         Events.lossy_broadcast("wake.failed", %{
           "pod_id" => data.pod_id,
@@ -848,7 +863,7 @@ defmodule Fleet.Spawner.Pod do
   # Only this pod's completion advances it; leaving monitoring cancels the state timeout natively.
   def handle_event(
         :info,
-        %Fleet.Event{
+        %Event{
           source: :task_queue,
           type: :"work_item.completed",
           pod_id: pid,
@@ -870,7 +885,7 @@ defmodule Fleet.Spawner.Pod do
 
   def handle_event(
         :info,
-        %Fleet.Event{source: :task_queue, type: :"work_item.completed"},
+        %Event{source: :task_queue, type: :"work_item.completed"},
         _state,
         _data
       ),
@@ -879,7 +894,7 @@ defmodule Fleet.Spawner.Pod do
   # Forge confirmation makes this pipe re-briefable and cancels its publication deadline.
   def handle_event(
         :info,
-        %Fleet.Event{type: :"deliverable.published", pod_id: pid},
+        %Event{type: :"deliverable.published", pod_id: pid},
         _state,
         %{pod_id: pid} = data
       ) do
@@ -898,7 +913,7 @@ defmodule Fleet.Spawner.Pod do
   # BL-6-03: a witnessed publication-task death lifts the flag with a named cause.
   def handle_event(
         :info,
-        %Fleet.Event{type: :"deliverable.publish_lost", pod_id: pid} = ev,
+        %Event{type: :"deliverable.publish_lost", pod_id: pid} = ev,
         _state,
         %{pod_id: pid} = data
       ) do
@@ -923,7 +938,7 @@ defmodule Fleet.Spawner.Pod do
   # mais un `%Fleet.Event{}` qui arrive ici a franchi le routage par-pod — il est POUR nous, et
   # qu'aucune clause ne le reconnaisse est un fait, pas du bruit. Sur un sujet global il se noierait
   # dans les evenements des N-1 autres pods, et se jeter serait la bonne reponse.
-  def handle_event(:info, %Fleet.Event{} = ev, state, data) do
+  def handle_event(:info, %Event{} = ev, state, data) do
     Logger.warning(
       "pod #{data.pod_id} received #{ev.type} on its own topic with no clause for it " <>
         "(state=#{inspect(state)}) — addressed to this pod and dropped"
@@ -1114,7 +1129,7 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp lifetime_scope(%Fleet.CapProfile{} = cp), do: Fleet.CapProfile.lifetime_scope(cp)
+  defp lifetime_scope(%CapProfile{} = cp), do: CapProfile.lifetime_scope(cp)
 
   defp maybe_checkpoint_seed(data) do
     case LaunchSpec.rc_project(data.opts, data.cap_profile) do
@@ -1148,7 +1163,7 @@ defmodule Fleet.Spawner.Pod do
   # an issue_id crosses into this domain as an opaque string, and the day it stops being
   # `issue-<n>` the one parser here is what needs revisiting, not a dependency edge.
   defp checkpoint_issue(data) do
-    if Fleet.CapProfile.slot_scope(data.cap_profile) == "instance",
+    if CapProfile.slot_scope(data.cap_profile) == "instance",
       do: issue_number_of(data.issue_id)
   end
 
@@ -1315,11 +1330,11 @@ defmodule Fleet.Spawner.Pod do
     end
   end
 
-  defp cap_profile_name(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.name(cap)
+  defp cap_profile_name(%CapProfile{} = cap), do: CapProfile.name(cap)
 
-  defp cap_profile_containment(%Fleet.CapProfile{} = cap), do: Fleet.CapProfile.containment(cap)
+  defp cap_profile_containment(%CapProfile{} = cap), do: CapProfile.containment(cap)
 
-  defp cap_profile_containment(_), do: Fleet.CapProfile.default_containment()
+  defp cap_profile_containment(_), do: CapProfile.default_containment()
 
   # Recovery snapshots need the state name reattached to the callback data.
   defp put_phase(data, phase), do: Map.put(data, :phase, phase)
@@ -1337,7 +1352,7 @@ defmodule Fleet.Spawner.Pod do
     StateFs.write_state_fs(put_phase(data, :failed))
 
     # Normalize terms before the raw JSON websocket edge while retaining diagnostic detail.
-    {category, reason_detail} = Fleet.Event.reason_fields(reason)
+    {category, reason_detail} = Event.reason_fields(reason)
 
     Events.lossy_broadcast("pod.failed", %{
       "pod_id" => data.pod_id,
@@ -1419,7 +1434,7 @@ defmodule Fleet.Spawner.Pod do
   defp capture_slot_max, do: Application.get_env(:lcars_fleet, :spawner_capture_slot_max, 20)
 
   defp safe_resolve_disallowed(cap_profile) do
-    {:ok, Fleet.CapProfile.with_resolved_disallowed_tools(cap_profile)}
+    {:ok, CapProfile.with_resolved_disallowed_tools(cap_profile)}
   rescue
     e -> {:error, {:baseline_corrupt, Exception.message(e)}}
   end
@@ -1436,7 +1451,7 @@ defmodule Fleet.Spawner.Pod do
   # Un profil sur-provisionne peut donc etre PUBLIE et survivre a un boot dont la preuve est
   # coupee ; il ne peut pas atteindre un pod. L'echec est tardif plutot que precoce, jamais muet.
   defp gate_cap_profile(resolved) do
-    case Fleet.CapProfile.validate(resolved) do
+    case CapProfile.validate(resolved) do
       :ok -> :ok
       {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
     end

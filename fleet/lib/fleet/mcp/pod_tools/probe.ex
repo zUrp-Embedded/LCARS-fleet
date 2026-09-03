@@ -46,7 +46,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ici en une ligne.
   #
   # Le préfixe `probe-` n'est pas cosmétique : un contexte de statut `probe-… / …` ne matche pas le
-  # glob `CI / *` de la protection de `main` (cf. `Onboard.main_status_check_contexts/0`), donc une
+  # glob `CI / *` de la protection de `main` (cf. `Onboard.Faces.main_status_check_contexts/0`), donc une
   # sonde ne peut pas devenir un mur. Ajouter ici un workflow nommé autrement contournerait cette
   # garde par le catalogue.
   @probes %{
@@ -115,9 +115,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # par la forge. Refuser sur l'absence de `:repo` rendrait cet outil inutilisable par
   # exactement les rôles pour lesquels il est écrit.
   defp identity(pod_id, opts) do
-    resolver = Application.get_env(:lcars_fleet, :mcp_pod_resolver, &default_resolver/1)
-
-    case resolver.(pod_id) do
+    case Fleet.MCP.PodTools.PodResolver.resolved().(pod_id) do
       {:ok, %{repo: repo}} when is_binary(repo) and repo != "" ->
         {:ok, %{repo: repo}}
 
@@ -133,16 +131,6 @@ defmodule Fleet.MCP.PodTools.Probe do
       {:error, _} = err ->
         err
     end
-  end
-
-  # Même couture et même résolveur que `Delegation` (`:mcp_pod_resolver`) : deux résolveurs de la
-  # même identité de canal donneraient deux avis sur « à quel dépôt ce pod est lié ».
-  defp default_resolver(pod_id) do
-    Fleet.Spawner.pod_info(pod_id)
-  rescue
-    _ -> {:error, :pod_unknown}
-  catch
-    _, _ -> {:error, :pod_unknown}
   end
 
   # LE NUMÉRO DE PR VIENT DU POD_ID, PAS DU FIL. Un juge de livrable est minté `for_pr/3`, donc son

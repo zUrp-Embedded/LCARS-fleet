@@ -15,6 +15,8 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.Forge.PayloadFixture
+
   alias Fleet.Admiral.ToolchainReconciler, as: R
 
   defmodule ForgeUp do
@@ -201,21 +203,23 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   end
 
   describe "la seconde passe — le drain (une PR fermee ne fait pas bouger la branche)" do
-    defp pr(attrs) do
-      Map.merge(
-        %{
-          "number" => 7,
-          "state" => "open",
-          "merged" => false,
-          "base" => %{"ref" => Fleet.Toolchain.branch()},
-          "body" => "demande\n" <> Fleet.Toolchain.workitem_marker("fleet/morse", 42)
-        },
-        attrs
+    # La forme complete vient de la capture reelle ; ce fichier n'enonce que les FAITS dont il
+    # depend. Un champ qu'il ne nomme pas garde sa valeur reelle au lieu d'etre absent — un garde
+    # qui le lirait ne retombe donc plus sur son repli sans le dire.
+    defp pr(faits \\ []) do
+      PayloadFixture.pull(
+        [
+          number: 7,
+          state: "open",
+          merged: false,
+          base_ref: Fleet.Toolchain.branch(),
+          body: "demande\n" <> Fleet.Toolchain.workitem_marker("fleet/morse", 42)
+        ] ++ faits
       )
     end
 
     test "PR MERGEE + branche appliquee => verrou retire + commentaire", %{server: server} do
-      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
 
       assert {:ok, :converged, _} = R.check_now(server)
       assert_received {:removed, "fleet/morse", 42, "lcars-awaits-toolchain"}
@@ -228,7 +232,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     } do
       # Re-dispatcher un work-item AVANT que sa toolchain soit posee le renverrait au mur.
       converger_result({:error, :boom})
-      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
 
       assert {:error, :boom} = R.check_now(server)
       refute_received {:removed, _, _, _}
@@ -237,7 +241,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "PR FERMEE SANS MERGE => drain SANS condition, avec le refus commente", %{server: server} do
       # Il n'y a rien a attendre : la branche n'a pas bouge et ne bougera pas pour cette PR.
       converger_result({:error, :boom})
-      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => false})])
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: false)])
 
       assert {:error, :boom} = R.check_now(server)
       assert_received {:removed, "fleet/morse", 42, "lcars-awaits-toolchain"}
@@ -246,7 +250,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     end
 
     test "PR OUVERTE => aucun geste", %{server: server} do
-      :persistent_term.put({ForgeUp, :prs}, [pr(%{})])
+      :persistent_term.put({ForgeUp, :prs}, [pr()])
       {:ok, :converged, _} = R.check_now(server)
       refute_received {:removed, _, _, _}
     end
@@ -254,7 +258,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     test "verrou DEJA absent => idempotent, aucun geste (pas de re-annonce a chaque tick)", %{
       server: server
     } do
-      :persistent_term.put({ForgeUp, :prs}, [pr(%{"state" => "closed", "merged" => true})])
+      :persistent_term.put({ForgeUp, :prs}, [pr(state: "closed", merged: true)])
       :persistent_term.put({ForgeUp, :issue_labels}, [])
 
       {:ok, :converged, _} = R.check_now(server)
@@ -266,8 +270,8 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       server: server
     } do
       :persistent_term.put({ForgeUp, :prs}, [
-        pr(%{"body" => "posee a la main", "state" => "closed", "merged" => true}),
-        pr(%{"base" => %{"ref" => "main"}, "state" => "closed", "merged" => true})
+        pr(body: "posee a la main", state: "closed", merged: true),
+        pr(base_ref: "main", state: "closed", merged: true)
       ])
 
       {:ok, :converged, _} = R.check_now(server)

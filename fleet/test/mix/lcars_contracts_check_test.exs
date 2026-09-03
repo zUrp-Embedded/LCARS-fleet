@@ -30,18 +30,24 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # Les deux tests vont par paire : sans le second, supprimer la mesure suffirait a rendre le
   # premier vert.
   describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
+    # ⚠ LE DECOR PORTE LA TOPOLOGIE REELLE, ET CE N EST PAS UN DETAIL DE RANGEMENT. `root` est le
+    # repertoire depuis lequel le controleur tourne — `fleet/` — et `deploy/` en est le FRERE depuis
+    # la separation des deux logiciels. Un decor qui pose `root/deploy` fabrique une arborescence
+    # qui n existe sur aucune machine : le mur y trouverait ce qu il ne trouve plus en vrai, ou
+    # l inverse. Un temoin qui valide contre une topologie imaginaire ne mesure que lui-meme.
     defp fixture_root!(ctx) do
-      root = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      base = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
+      root = Path.join(base, "fleet")
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
       File.mkdir_p!(Path.join(root, "etc"))
-      on_exit(fn -> File.rm_rf(root) end)
+      on_exit(fn -> File.rm_rf(base) end)
       root
     end
 
     test "aucun fichier lu → INSTRUMENT BROKEN, jamais un vert" do
       root = fixture_root!("vide")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sourcers_set_strict(root)
 
       assert result.status == :fail,
              "un contrat qui n'a ouvert aucun fichier a rendu #{result.status}"
@@ -52,13 +58,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "population NON vide et conforme → pass (le garde n'a pas rendu le contrat impossible)" do
       root = fixture_root!("conforme")
 
-      File.write!(Path.join([root, "deploy", "modules.d", "10-x.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "10-x.sh"]), """
       #!/usr/bin/env bash
       set -euo pipefail
       . "$(dirname "$0")/../lib/provision-lib.sh"
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sourcers_set_strict(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sourcers_set_strict(root)
 
       assert result.status == :pass
       assert result.note =~ "1 shell file(s) scanned"
@@ -83,7 +89,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     test "cible ABSENTE → fail nomme (temoin : la garde d'origine tient toujours)", %{root: root} do
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :fail
       assert Enum.any?(result.evidence, &(&1 =~ "MISSING(enoent)"))
@@ -92,7 +98,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "cible ILLISIBLE → fail, pas un vert", %{root: root, target: target} do
       File.mkdir_p!(target)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :fail,
              "un contrat a declare l'absence de residu sur un fichier qu'il n'a pas pu lire " <>
@@ -113,7 +119,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_capprofile_lifetime_scope_path(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Runtime.check_capprofile_lifetime_scope_path(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -131,7 +137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.mkdir_p!(target)
 
       assert_raise RuntimeError, ~r/INSTRUMENT BROKEN/, fn ->
-        Mix.Tasks.Lcars.Contracts.Check.code_match?(
+        Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
           root,
           "lib/fleet/sp_builder.ex",
           ~r/anything/
@@ -142,7 +148,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "grep_lines : ABSENT rend toujours [] — l'appelant modelise ce cas lui-meme", %{
       root: root
     } do
-      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      refute Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                root,
                "lib/fleet/nowhere.ex",
                ~r/anything/
@@ -188,7 +194,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
 
       assert result.status == :fail
       assert result.evidence == ["lib/fleet/nested.ex: Inner.undocumented_here"]
@@ -216,7 +222,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
 
       assert result.status == :fail,
              "la doc du parent a couvert l'homonyme imbrique (rendu #{result.status})"
@@ -244,7 +250,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root).status ==
+      assert Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root).status ==
                :pass
 
       File.write!(src, """
@@ -260,7 +266,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_public_functions_documented(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Types.check_public_functions_documented(root)
       assert result.status == :fail
       assert result.evidence == ["lib/fleet/nested.ex: Inner.leaked"]
     end
@@ -291,7 +297,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "# the sanctuary is vendor-aware\n"
       )
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :fail, "un porteur a echappe par son extension"
       assert result.evidence == ["bin/launcher.egress"]
@@ -300,7 +306,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "un lanceur SANS extension est vu aussi", %{root: root} do
       File.write!(Path.join([root, "bin", "fleet_v2"]), "#!/bin/sh\n# le sanctuaire du pod\n")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :fail
       assert result.evidence == ["bin/fleet_v2"]
@@ -312,7 +318,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "un fichier non-texte ne fait ni echouer ni planter le mur", %{root: root} do
       File.write!(Path.join([root, "bin", "bytecode.pyc"]), <<0xC3, 0x28, 0xA0, 0xA1, 0x00>>)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -325,11 +331,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "# sanctuary, et l'anticorps juste a cote\n"
       )
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).status == :pass
+      assert Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root).status ==
+               :pass
     end
 
     test "la note dit COMBIEN de fichiers ont gagne le vert", %{root: root} do
-      note = Mix.Tasks.Lcars.Contracts.Check.check_sanctuary_contained(root).note
+      note = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root).note
 
       assert note =~ "1 fichier(s) de lib/, bin/ et etc/ balayes"
       assert note =~ "corpus SP"
@@ -349,10 +356,11 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # {docker,wsl,linux}` montre le module selectionne sur les trois.
   describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
     setup do
-      root = Fleet.TestEnv.tmp_path("jg070")
+      base = Fleet.TestEnv.tmp_path("jg070")
+      root = Path.join(base, "fleet")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
-      File.mkdir_p!(Path.join([root, "deploy", "docker"]))
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      File.mkdir_p!(Path.join([base, "deploy", "docker"]))
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
 
       File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
       defmodule Fleet.Layout do
@@ -369,13 +377,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
       File.write!(
-        Path.join([root, "deploy", "docker", "entrypoint.sh"]),
+        Path.join([root, "..", "deploy", "docker", "entrypoint.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
       rows = Enum.map_join(module_zones, " \\\n", &~s(    "#{&1} 2775 root:$PROV_FLEET_GROUP"))
 
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
       prov_dirs() {
         printf '%s\\n' \\
           "/opt/lcars 0755 root:root" \\
@@ -388,7 +396,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       zones = ["/home/projects", "/home/projects.ops"]
       write_mirrors!(root, zones, zones)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :pass, "evidence: #{inspect(result.evidence)}"
     end
@@ -396,7 +404,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "face absente du MODULE provision → fail nommant wsl et linux", %{root: root} do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], ["/home/projects"])
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail,
              "une face absente du seul createur commun aux trois substrats est passee au vert"
@@ -409,7 +417,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "face absente de l'ENTRYPOINT → fail, l'ancien mur tient toujours", %{root: root} do
       write_mirrors!(root, ["/home/projects"], ["/home/projects", "/home/projects.ops"])
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
       assert result.evidence == ["/home/projects.ops: absent de l'entrypoint docker"]
@@ -417,9 +425,9 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], [])
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
+      result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
       assert result.note =~ "unreadable"
@@ -455,7 +463,9 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root).status ==
+      assert Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(
+               root
+             ).status ==
                :pass
     end
 
@@ -471,7 +481,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+      result =
+        Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(root)
 
       assert result.status == :fail,
              "la fenetre permissive a ete elargie a tout le boot sans que rien ne rougisse"
@@ -487,7 +498,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      result = Mix.Tasks.Lcars.Contracts.Check.check_event_registry_loaded_before_children(root)
+      result =
+        Mix.Tasks.Lcars.Contracts.Check.Boot.check_event_registry_loaded_before_children(root)
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "fail-closed"
@@ -537,9 +549,15 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # runtime-only one (the image build stage copies fleet alone) must NAME what it
     # could not see — the one thing that must never happen is a silent pass on absent ground.
     # SAME derivation as the check: the runtime root, then its SIBLING tree
-    # (test/mix -> la racine Mix = "../..", puis "deploy" — depuis le demenagement `deploy/` est un
-    # ENFANT de la racine, plus un frere : le prefixe `../` visait `fleet/` quand la racine etait
-    # `fleet/runtime`.)
+    # (test/mix -> la racine Mix = `fleet/`, puis `../deploy`).
+    #
+    # ⚠ CETTE LIGNE A PORTE L AFFIRMATION INVERSE, ET C EST CE QUI A AVEUGLE LE TEMOIN. Elle disait
+    # « depuis le demenagement `deploy/` est un ENFANT de la racine, plus un frere ». C etait vrai
+    # de l etape ou l installeur vivait sous le runtime ; depuis la separation des deux logiciels il
+    # est redevenu un FRERE. Le temoin derivait donc `fleet/deploy`, ne le trouvait pas, et exigeait
+    # le `NOT CHECKED` que le mur rendait pour la meme raison : les deux se sont accordes sur une
+    # topologie que ni l un ni l autre n avait verifiee. Un temoin et son sujet qui derivent le meme
+    # chemin faux sont VERTS ensemble, et c est le seul cas ou un miroir ne reflete rien.
     #
     # `deploy`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
     # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
@@ -548,7 +566,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # that agrees by coincidence is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
-    if File.dir?(Path.expand("deploy", runtime_root)) do
+    if File.dir?(Path.expand("../deploy", runtime_root)) do
       refute lock.note =~ "NOT CHECKED"
     else
       assert lock.note =~ "NOT CHECKED"
@@ -579,7 +597,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      refute Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      refute Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                tmp,
                "prose_only.ex",
                ~r/:brief_required/,
@@ -607,7 +625,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      assert Mix.Tasks.Lcars.Contracts.Check.code_match?(
+      assert Mix.Tasks.Lcars.Contracts.Check.Support.code_match?(
                tmp,
                "real_guard.ex",
                ~r/:brief_required/,
@@ -627,7 +645,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       File.write!(Path.join(dir, name), body)
     end
 
-    defp verdict(tmp), do: Mix.Tasks.Lcars.Contracts.Check.check_awaits_arch_clears_in_flight(tmp)
+    defp verdict(tmp),
+      do: Mix.Tasks.Lcars.Contracts.Check.Runtime.check_awaits_arch_clears_in_flight(tmp)
 
     @tag :tmp_dir
     test "a writer that sets the brake WITHOUT releasing the lock is named", %{tmp_dir: tmp} do
@@ -726,7 +745,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
         "api_version: 1\nname: fleet\n"
       )
 
-      res = Mix.Tasks.Lcars.Contracts.Check.check_roles_provisioning_locked(root)
+      res = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_roles_provisioning_locked(root)
 
       assert res.status in [:pass, :fail], "la verification doit RENDRE, pas exploser"
 

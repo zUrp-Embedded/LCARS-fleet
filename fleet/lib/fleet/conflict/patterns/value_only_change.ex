@@ -3,7 +3,7 @@ defmodule Fleet.Conflict.Patterns.ValueOnlyChange do
   Same structure, only volatile value(s) differ (hash / version / timestamp). `requires: :both`,
   because with a base a UNILATERAL value change is already `one_side_change` (priority 30): this
   pattern only ever sees the both-sides-changed case. Delegates to
-  `Fleet.Conflict.Patterns.Utils.detect_value_only_change/3`.
+  `Utils.detect_value_only_change/3`.
   """
   @behaviour Fleet.Conflict.Pattern
   alias Fleet.Conflict.Patterns.Utils

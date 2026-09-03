@@ -13,8 +13,8 @@ defmodule Fleet.Spawner.Pod.AssetsProtocolTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.SPBuilder.Image
   alias Fleet.Spawner.Pod.Assets
+  alias Fleet.SPBuilder.Image
 
   @moduletag :tmp_dir
 

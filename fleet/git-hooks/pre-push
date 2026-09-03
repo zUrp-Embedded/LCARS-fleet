@@ -63,7 +63,9 @@ is_protected() {
     return 1
 }
 
-while read local_ref local_sha remote_ref remote_sha; do
+# shellcheck disable=SC2034  # `local_ref`/`local_sha` nomment le format stdin impose par git
+#   (cf. l.36) : les renommer `_` perdrait la documentation de ce que git envoie.
+while read -r local_ref local_sha remote_ref remote_sha; do
     branch="${remote_ref#refs/heads/}"
     is_protected "$branch" || continue
     zero_sha="0000000000000000000000000000000000000000"

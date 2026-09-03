@@ -15,6 +15,7 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
   """
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller
 
   defmodule EmptyOrgForge do
@@ -80,12 +81,12 @@ defmodule Fleet.Pilot.PollerGiteaKickTest do
     def list_open_issues(_repo, _opts) do
       {:ok,
        [
-         %{
-           "number" => 8,
-           "body" => "x",
-           "labels" => [%{"name" => "lcars-in-flight"}],
-           "assignees" => [%{"login" => "test-human"}]
-         }
+         PayloadFixture.issue(
+           number: 8,
+           body: "x",
+           label_names: ["lcars-in-flight"],
+           assignee_logins: ["test-human"]
+         )
        ]}
     end
 

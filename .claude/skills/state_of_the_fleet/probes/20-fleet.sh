@@ -14,6 +14,11 @@
 # resolves to ONE path and this operator can only reach their OWN deck.sock, so a 200 here is always
 # our fleet, never a neighbour's answered on a mis-derived port.
 
+# ⚠ AUCUN `set -e` ICI, ET C'EST LA DOCTRINE DES SONDES. Une sonde qui meurt n'emet AUCUN verdict :
+# son plan disparait du rapport sans que rien ne le signale. Elle doit survivre a ses propres
+# echecs pour les DIRE (`unknown`, `degraded`) — c'est precisement ce que la sonde 10 existe pour
+# empecher. Pas de `-u` non plus : une variable absente est un fait a rapporter, pas une mort.
+
 SOTF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$SOTF_DIR/lib.sh"

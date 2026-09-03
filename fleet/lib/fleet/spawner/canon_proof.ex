@@ -7,6 +7,8 @@ defmodule Fleet.Spawner.CanonProof do
 
   require Logger
 
+  alias Fleet.CapProfile
+
   @doc """
   Proves every canon role spawn-ready. Raises on the first role that is not —
   fail-loud before readiness, the same dead-man's-switch contract as the workflow
@@ -34,7 +36,7 @@ defmodule Fleet.Spawner.CanonProof do
   end
 
   defp prove_catalogue!(root) do
-    case Fleet.CapProfile.list_from_published(root) do
+    case CapProfile.list_from_published(root) do
       {:ok, roles} ->
         prove_roles!(roles, root)
 
@@ -57,7 +59,7 @@ defmodule Fleet.Spawner.CanonProof do
   end
 
   defp legacy_prove_all! do
-    case Fleet.CapProfile.list() do
+    case CapProfile.list() do
       {:ok, []} ->
         # An empty catalogue would make every proof below pass VACUOUSLY — the same
         # trap as an empty workflow catalogue, refused for the same reason.
@@ -95,11 +97,11 @@ defmodule Fleet.Spawner.CanonProof do
   defp prove_composition!(role, extras, root) do
     label = if extras == [], do: "defaults", else: "optional #{inspect(extras)}"
 
-    with {:ok, base} <- Fleet.CapProfile.load(role, root),
+    with {:ok, base} <- CapProfile.load(role, root),
          {:ok, profile} <- resolve_loaded(base, extras),
          :ok <- validate(profile),
          {:ok, _sp} <-
-           Fleet.SPBuilder.compose(profile, Fleet.CapProfile.active_modops(profile), []),
+           Fleet.SPBuilder.compose(profile, CapProfile.active_modops(profile), []),
          {:ok, _draft} <- Fleet.Spawner.Pod.Assets.read_agent_draft(profile),
          {:ok, _protocole} <- Fleet.Spawner.Pod.Assets.read_protocole_user(profile) do
       profile
@@ -116,22 +118,22 @@ defmodule Fleet.Spawner.CanonProof do
   # valider les modops optionnels demandes, puis composer — sans repasser par un chargement qui
   # perdrait le scope.
   defp resolve_loaded(base, extras) do
-    active = Fleet.CapProfile.default_modops(base) ++ extras
+    active = CapProfile.default_modops(base) ++ extras
 
-    case Fleet.CapProfile.compose(base, active) do
+    case CapProfile.compose(base, active) do
       {:ok, composed} -> {:ok, %{composed | active_modops: active}}
       {:error, _} = err -> err
     end
   end
 
   defp validate(profile) do
-    case Fleet.CapProfile.validate(profile) do
+    case CapProfile.validate(profile) do
       :ok -> :ok
       {:error, violations} -> {:error, {:cap_profile_invalid, violations}}
     end
   end
 
-  defp optionals(%Fleet.CapProfile{spec: spec}) do
+  defp optionals(%CapProfile{spec: spec}) do
     case spec do
       %{"modop_set" => %{"optional" => opt}} when is_list(opt) -> opt
       _ -> []

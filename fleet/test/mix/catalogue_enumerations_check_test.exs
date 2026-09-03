@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
 
@@ -51,7 +51,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
   end
 
   defp check(content, opts \\ []),
-    do: Check.check_catalogue_enumerates_no_tools(tree(content, opts))
+    do: Tools.check_catalogue_enumerates_no_tools(tree(content, opts))
 
   describe "l'instrument repond de lui-meme d'abord" do
     test "moins de 12 deftool : INSTRUMENT BROKEN" do

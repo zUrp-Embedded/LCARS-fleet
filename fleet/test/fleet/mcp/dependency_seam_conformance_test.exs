@@ -80,7 +80,10 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
   describe "creation path — best effort, so it degrades" do
     test "a blind seam does not lose the created issue; the order is reported as NOT written" do
       result =
-        Delegation.attach_dependencies(BlindForge, "fleet/p", %{"issue" => 17}, [4, 9])
+        Delegation.Dependencies.attach_dependencies(BlindForge, "fleet/p", %{"issue" => 17}, [
+          4,
+          9
+        ])
 
       assert result["issue"] == 17
       assert result["depends_on"] == []
@@ -89,7 +92,12 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
 
     test "INVERSE TWIN — a conforming seam writes the edges and raises no warning" do
       result =
-        Delegation.attach_dependencies(ConformingForge, "fleet/p", %{"issue" => 17}, [4, 9])
+        Delegation.Dependencies.attach_dependencies(
+          ConformingForge,
+          "fleet/p",
+          %{"issue" => 17},
+          [4, 9]
+        )
 
       assert result["depends_on"] == [4, 9]
       refute Map.has_key?(result, "depends_on_warning")
@@ -98,7 +106,8 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
 
   describe "retirement path — load bearing, so it refuses" do
     test "a blind seam does NOT close the old ticket: the edges were never carried" do
-      result = Delegation.retire_superseded(BlindForge, "fleet/p", 16, :open, %{"issue" => 17})
+      result =
+        Delegation.Retirement.retire_superseded(BlindForge, "fleet/p", 16, :open, %{"issue" => 17})
 
       refute_received {:close, 16}
       assert result["supersede_warning"] =~ "encore ouvert"
@@ -106,7 +115,9 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
 
     test "the refusal happens even though the PR was already closed — that is the costly case" do
       result =
-        Delegation.retire_superseded(BlindForge, "fleet/p", 16, {:open, 21}, %{"issue" => 17})
+        Delegation.Retirement.retire_superseded(BlindForge, "fleet/p", 16, {:open, 21}, %{
+          "issue" => 17
+        })
 
       assert_received {:pr_closed, 21}
       refute_received {:close, 16}
@@ -115,7 +126,7 @@ defmodule Fleet.MCP.DependencySeamConformanceTest do
 
     test "INVERSE TWIN — a conforming seam closes normally; the guard refuses nothing valid" do
       assert %{"supersedes" => 16} =
-               Delegation.retire_superseded(ConformingForge, "fleet/p", 16, :open, %{
+               Delegation.Retirement.retire_superseded(ConformingForge, "fleet/p", 16, :open, %{
                  "issue" => 17
                })
 

@@ -11,7 +11,9 @@
 # l'argument d'URL qui les discrimine. Un ttyd par pod voudrait dire un processus, une socket et
 # une unite de plus a chaque mission.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : `die()` fait `exec sleep infinity` pour que l'humain LISE le
+                          # message dans son onglet ttyd. Une sortie non nulle fermerait l'onglet
+                          # et escamoterait la cause du refus.
 
 POD_ID="${1:-}"
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
