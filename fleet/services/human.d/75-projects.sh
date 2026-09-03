@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/75-projects.sh
+# SOURCE: fleet/services/human.d/75-projects.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — les faces locales des projets, convergees depuis la forge

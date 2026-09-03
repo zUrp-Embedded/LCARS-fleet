@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/70-human.sh
+# SOURCE: fleet/services/human.d/70-human.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — enrôlement per-humain : ~/.lcars, ~/pods, env seed-once, sondes creds (instruct-only)
@@ -24,7 +24,11 @@ TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 # La source vit dans le provisionnement lui-même — pas sous `$PROV_PREFIX/etc` comme le template
 # d'env : celui-là dépend de `60-deploy`, et un garde-fou qui n'existe que si un autre module a
 # réussi avant lui est absent précisément les jours où il compte.
-AUTOMODE_SRC="$(repo_root)/deploy/agent/claude-automode.json"
+# ⚠ RELATIF AU MODULE, PLUS `repo_root()`. Ce fichier a suivi le module hors de l installeur : il
+# vit desormais en frere (`../agent/`). Le deriver de `repo_root()` demandait une racine — donc un
+# contrat avec qui joue le module — la ou un chemin relatif au fichier dit la meme chose sans rien
+# supposer de son lanceur.
+AUTOMODE_SRC="${LCARS_AUTOMODE_SRC:-$(dirname "${BASH_SOURCE[0]}")/../agent/claude-automode.json}"
 CLAUDE_SETTINGS="$HOME_DIR/.claude/settings.json"
 
 # Le fichier porte-t-il DÉJÀ le bloc canonique ? Comparaison sur la valeur normalisée (`jq -S`),

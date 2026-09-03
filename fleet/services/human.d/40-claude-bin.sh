@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/40-claude-bin.sh
+# SOURCE: fleet/services/human.d/40-claude-bin.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — binaire claude PER-HUMAIN (~/.local/bin) via l'installer officiel

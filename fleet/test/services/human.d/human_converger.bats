@@ -26,7 +26,7 @@
 # shellcheck disable=SC2016
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../fleet/services/human-converger.sh"
+  SUT="$BATS_TEST_DIRNAME/../../../services/human-converger.sh"
   export SUT
   [ -f "$SUT" ]
   PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
@@ -554,7 +554,7 @@ EOF
 # defaut litteral reste ecrit DEUX FOIS. C'est cette egalite-la qu'on epingle, faute de pouvoir la
 # deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
 @test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
-  lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  lib="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
   for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
     # Meme garde qu'ailleurs : `env -i` pour lire le DEFAUT et pas une surcharge de temoin.
@@ -674,42 +674,38 @@ EOF
 # ne peut pas la sourcer comme `reserved`/`valid_login`. On l'EXTRAIT — meme idiome que l'en-tete
 # seule dans `forge_host_reach.bats`.
 
-converge_with() { # converge_with <script-provision> — joue converge_human contre une doublure
+# ⚠ LA DOUBLURE EST UN MODULE, PLUS UN `provision`. Ce service ne passe plus par l'installeur : il
+# joue les modules per-humain lui-meme, depuis `$HUMAN_MODULES`. Le decor a suivi — il posait un
+# faux `deploy/provision` et un `modules.d/` a grepper, il pose maintenant le module que le
+# convergeur SOURCE. Un decor qui garde la forme de l'ancien chemin mesure un chemin qui n'existe
+# plus.
+converge_with() { # converge_with <corps du module factice> — joue converge_human contre lui
   local fn="$BATS_TEST_TMPDIR/fn.sh"
   sed -n '/^converge_human() {/,/^}/p' "$SUT" > "$fn"
   [ -s "$fn" ] || { echo "converge_human introuvable dans $SUT" >&2; return 1; }
-  mkdir -p "$BATS_TEST_TMPDIR/modules.d"
-  printf '# NEEDS: human\n' > "$BATS_TEST_TMPDIR/modules.d/70-human.sh"
+  local mods="$BATS_TEST_TMPDIR/human.d"
+  rm -rf "$mods"; mkdir -p "$mods"
+  printf '%s\n' "$1" > "$mods/70-human.sh"
   run bash -c "
     set -uo pipefail
     err() { echo \"[err] \$*\"; }
-    PROVISION='$1'
+    HUMAN_MODULES='$mods'
     source '$fn'
     converge_human zoe && echo CONVERGE || echo REFUSE"
 }
 
 @test "un echec per-humain LAISSE une trace — les dernieres lignes, pas un renvoi vers plus tard" {
-  local prov="$BATS_TEST_TMPDIR/prov-fail"
-  cat > "$prov" <<'EOF'
-#!/usr/bin/env bash
-echo "OK    10-truc: quelque chose"
-echo "FAIL  70-human: la panne exacte qu'on veut lire"
-exit 1
-EOF
-  chmod 0755 "$prov"
-
-  converge_with "$prov"
+  converge_with 'echo "OK    10-truc: quelque chose"
+echo "FAIL  70-human: la panne exacte qu'"'"'on veut lire"
+exit 1'
   [[ "$output" == *"REFUSE"* ]]
   [[ "$output" == *"rc=1"* ]]
   [[ "$output" == *"la panne exacte qu'on veut lire"* ]]
 }
 
 @test "un tour NOMINAL reste muet — deux passes par minute, un journal lisible" {
-  local prov="$BATS_TEST_TMPDIR/prov-ok"
-  printf '#!/usr/bin/env bash\necho "OK  tout va bien"\nexit 0\n' > "$prov"
-  chmod 0755 "$prov"
-
-  converge_with "$prov"
+  converge_with 'echo "OK  tout va bien"
+exit 0'
   [[ "$output" == *"CONVERGE"* ]]
   [[ "$output" != *"tout va bien"* ]]
 }
@@ -717,11 +713,8 @@ EOF
 @test "le rc 2 reste un SUCCES, et il ne laisse pas de trace non plus" {
   # APPLIQUE avec drift residuel : le cas nominal d'un humain frais, a qui il manque ses credentials
   # `claude` — geste d'identite que personne ne peut automatiser.
-  local prov="$BATS_TEST_TMPDIR/prov-drift"
-  printf '#!/usr/bin/env bash\necho "DRIFT  70-human: credentials claude absentes"\nexit 2\n' > "$prov"
-  chmod 0755 "$prov"
-
-  converge_with "$prov"
+  converge_with 'echo "DRIFT  70-human: credentials claude absentes"
+exit 2'
   [[ "$output" == *"CONVERGE"* ]]
   [[ "$output" != *"rc=2"* ]]
 }

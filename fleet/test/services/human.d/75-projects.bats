@@ -44,8 +44,8 @@ setup() {
   # On pose donc un PROV_TOKENS_DIR a nous : le repli ne trouve rien, comme sur une machine nue.
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
   mkdir -p "$PROV_TOKENS_DIR"
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/75-projects.sh"
-  LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  MOD="$BATS_TEST_DIRNAME/../../../services/human.d/75-projects.sh"
+  LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
   # `-f`, pas `-x` : un module est joue par `bash`, jamais lance directement — il refuse meme de
   # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
   [ -f "$MOD" ]

@@ -109,6 +109,7 @@ code() {
     "$BATS_TEST_DIRNAME"/../../docker/*.sh \
     "$BATS_TEST_DIRNAME"/../../../fleet/services/*.sh \
     "$BATS_TEST_DIRNAME"/../../../fleet/services/*.py \
+    "$BATS_TEST_DIRNAME"/../../../fleet/services/human.d/*.sh \
     ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
     "$BATS_TEST_DIRNAME"/../../lib/*.sh 2>/dev/null
 }

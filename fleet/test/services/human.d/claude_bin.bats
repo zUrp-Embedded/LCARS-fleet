@@ -23,7 +23,10 @@
 #     paie en travail, et elle n'avait de temoin que par la bande.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../.."
+  SRC="$BATS_TEST_DIRNAME/../../../../deploy"
+  # ⚠ DEUX RACINES DEPUIS LA SEPARATION : la LIB vient de l installeur (`$SRC`), le MODULE du
+  # runtime. Ce temoin joue un module per-humain, qui a suivi le convergeur hors de `deploy/`.
+  MOD="$BATS_TEST_DIRNAME/../../../services/human.d/40-claude-bin.sh"
   SANDBOX="$BATS_TEST_TMPDIR/box"
   HOMEDIR="$SANDBOX/home"
   BINDIR="$BATS_TEST_TMPDIR/stubbin"
@@ -95,7 +98,7 @@ EOF
 }
 
 run_apply() {
-  run bash "$SRC/modules.d/40-claude-bin.sh" apply
+  run bash "$MOD" apply
 }
 
 @test "l'installeur officiel EST appele — c'est le comportement exige, pas un repli" {
@@ -142,6 +145,6 @@ EOF
 @test "aucune SOURCE alternative ne subsiste dans le module" {
   # Epingle la FORME, pas le comportement : ce qui a produit le defaut est une seconde source
   # preferee au reseau. Qu'elle ne puisse pas revenir par une variable oubliee se verifie ici.
-  run grep -c "PROV_CLAUDE_SEED" "$SRC/modules.d/40-claude-bin.sh"
+  run grep -c "PROV_CLAUDE_SEED" "$MOD"
   [ "$output" -eq 1 ]   # la seule occurrence restante est l'avertissement « ne pas la remettre »
 }

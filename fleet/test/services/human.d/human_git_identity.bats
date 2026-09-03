@@ -25,10 +25,10 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
-load ../refute
+load ../../support/refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../modules.d/70-human.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/human.d/70-human.sh"
   [ -f "$SRC" ]
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   export PATH="$BIN:$PATH"
@@ -40,7 +40,7 @@ cat "$FORGE_PAYLOAD"
 SH
   chmod +x "$BIN/curl"
 
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=70-human
   export PROV_HUMAN
   PROV_HUMAN="$(id -un)"
@@ -55,6 +55,12 @@ SH
   # Le module sans son `case` final : on veut ses fonctions, pas son cycle complet.
   MOD="$BATS_TEST_TMPDIR/mod.sh"
   sed '/^case "${1:?usage/,$d' "$SRC" > "$MOD"
+  # ⚠ COUTURE OBLIGATOIRE PARCE QUE CE DECOR COPIE LE MODULE. Le fichier de reglages d'agent se
+  # derive de `${BASH_SOURCE[0]}` — vrai en production, ou le module vit a cote de `../agent/` —
+  # mais `$MOD` est une copie dans un tmpdir, ou ce frere n'existe pas. Sans cette ligne, les trois
+  # temoins du garde-fou mesurent l'absence du decor au lieu de leur sujet.
+  export LCARS_AUTOMODE_SRC="$BATS_TEST_DIRNAME/../../../services/agent/claude-automode.json"
+  [ -f "$LCARS_AUTOMODE_SRC" ]
 }
 
 run_fn() { run bash -c "set -euo pipefail; source \"$MOD\"; $1"; }
@@ -131,7 +137,7 @@ account() { # account <full_name> <email>
 @test "TEMOIN STRUCTUREL : l'entrypoint ne pose plus d'identite git" {
   # La regression exacte : un bloc d'identite dans l'entrypoint vise UN compte — celui de l'entree
   # du conteneur — et rate par construction tout humain enrole apres le boot.
-  EP="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  EP="$BATS_TEST_DIRNAME/../../../../deploy/docker/entrypoint.sh"
   refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   refute grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }
@@ -198,7 +204,7 @@ sandbox() { # sandbox <expr> — joue <expr> avec un home jetable
   # Le bloc pose EST le fichier canonique, pas une copie qui lui ressemble.
   local pose; pose="$(jq -S -c '.autoMode | {hard_deny, classifyAllShell}' "$BATS_TEST_TMPDIR/agent/.claude/settings.json")"
   [ -n "$pose" ]
-  [ "$pose" = "$(jq -S -c '{hard_deny, classifyAllShell}' "$BATS_TEST_DIRNAME/../../agent/claude-automode.json")" ]
+  [ "$pose" = "$(jq -S -c '{hard_deny, classifyAllShell}' "$BATS_TEST_DIRNAME/../../../services/agent/claude-automode.json")" ]
 
   # ⚠ ET LA FORME DU BLOC, parce que l'egalite ci-dessus est vraie QUOI QUE DISE la source : elle
   # mesure la plomberie. Un fichier canonique vide ou reduit a `{}` la laisserait verte, et chaque

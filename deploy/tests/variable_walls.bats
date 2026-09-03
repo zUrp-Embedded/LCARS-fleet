@@ -425,14 +425,50 @@ code_of() { sed 's/#.*//' "$1"; }
   }
 
   # (3) Ce que ces daemons LISENT, formes shell et python.
-  local d lus="" f
+  # ⚠ MENTIONNER N'EST PAS LIRE, ET L'ECART EST TOUT LE SUJET DE CE MUR. Un daemon qui POSE
+  # lui-meme un `PROV_*` avant de s'en servir ne l'attend pas de la table : c'est une variable de
+  # SON protocole, pas de la config du provisionnement. Un convergeur pose `PROV_HUMAN` a chaque
+  # humain qu'il parcourt — le transporter figerait dans `services.env` UN humain choisi a
+  # l'install, pour une boucle qui les visite tous. Exiger ces noms dans la table ferait ecrire
+  # une ligne fausse a seule fin de taire un mur : le mur aurait cause l'erreur qu'il cherche.
+  #
+  # Le critere est mecanique et ne se negocie pas au cas par cas : la variable est POSEE ici s'il
+  # existe une assignation dont la partie DROITE ne se relit pas elle-meme. `PROV_X="${PROV_X:-d}"`
+  # SE relit — c'est un defaut sur une valeur transportee, donc une lecture, donc toujours attrapee.
+  local d lus="" f src v
   for d in $daemons; do
     f="$REPO/fleet/services/$d"
     [ -r "$f" ] || { echo "MUR 7 — daemon introuvable : services/$d" >&2; return 1; }
-    lus="$lus$(sed 's/#.*//' "$f" | grep -oE 'PROV_[A-Z_]+' | sort -u)
+    src="$(sed 's/#.*//' "$f")"
+    for v in $(grep -oE 'PROV_[A-Z_]+' <<<"$src" | sort -u); do
+      # `… | grep -q … && continue` rendrait le rc du grep en fin de corps : la forme `if` est
+      # obligatoire ici, c'est ce que MUR I3 de idiom_walls mesure sur le code de production.
+      if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" \
+           | sed "s/.*$v=//" | grep -qv "$v"; then
+        continue
+      fi
+      lus="$lus$v
 "
+    done
   done
   lus="$(printf '%s\n' "$lus" | grep . | sort -u)"
+
+  # TEMOIN APPARIE DU FILTRE CI-DESSUS. Un filtre qui ecarte trop rend ce mur vert par cecite, et
+  # c'est la panne la plus chere : elle se lit comme un succes. Les trois formes sur une sonde
+  # synthetique — la POSEE doit sortir, la LUE et celle A DEFAUT doivent rester.
+  local probe="$BATS_TEST_TMPDIR/prov_probe.sh" vus=""
+  printf '%s\n' 'PROV_POSEE=1' 'echo "$PROV_POSEE $PROV_LUE"' 'PROV_DEFAUT="${PROV_DEFAUT:-x}"' > "$probe"
+  for v in $(grep -oE 'PROV_[A-Z_]+' "$probe" | sort -u); do
+    if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" "$probe" \
+         | sed "s/.*$v=//" | grep -qv "$v"; then
+      continue
+    fi
+    vus="$vus $v"
+  done
+  [ "$vus" = " PROV_DEFAUT PROV_LUE" ] || {
+    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$vus », attendu « PROV_DEFAUT PROV_LUE »" >&2
+    return 1
+  }
 
   local manquants; manquants="$(comm -23 <(printf '%s\n' "$lus") <(printf '%s\n' "$table"))"
   [ -z "$manquants" ] || {
@@ -1037,8 +1073,8 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   local rompu=0
   need16() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qF -- "$2" || {
       echo "MUR 16 rompu — $1 ne porte pas « $2 » ($3)" >&2; rompu=1; }; }
-  need16 deploy/modules.d/70-human.sh "$dir_etat/$nom" "l'ecrivain du rail poste"
-  need16 deploy/modules.d/70-human.sh "$nom.template"  "le template dont il derive le fichier"
+  need16 fleet/services/human.d/70-human.sh "$dir_etat/$nom" "l'ecrivain du rail poste"
+  need16 fleet/services/human.d/70-human.sh "$nom.template"  "le template dont il derive le fichier"
   [ -r "$REPO/fleet/etc/$nom.template" ] || {
     echo "MUR 16 rompu — etc/$nom.template n'existe pas : l'ecrivain derive d'un fichier absent" >&2
     rompu=1

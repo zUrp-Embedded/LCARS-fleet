@@ -12,7 +12,11 @@ load refute
 setup() {
   DEPLOY="$BATS_TEST_DIRNAME/.."
   mapfile -t SOURCES < <(ls "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision)
-  [ "${#SOURCES[@]}" -ge 28 ]
+  # Temoin de non-cecite : un mur qui grep une liste VIDE est vert, et le dit comme un succes. Le
+  # plancher tient sous la population reelle, assez pres pour crier si le `ls` se met a ne plus
+  # rien trouver. Il se regle donc a la baisse quand un fichier quitte legitimement le corpus —
+  # ce qui est un geste VISIBLE, et c'est tout ce qu'on lui demande.
+  [ "${#SOURCES[@]}" -ge 25 ]
 }
 
 code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est de la prose

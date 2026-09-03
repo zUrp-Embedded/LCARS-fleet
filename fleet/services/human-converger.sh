@@ -30,7 +30,6 @@ TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_toke
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
-PROVISION="${LCARS_PROVISION:-/opt/lcars/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
@@ -258,35 +257,72 @@ team_id() {
 }
 
 # L'ETAT PER-HUMAIN, convergé — appelé A LA CREATION *et* a chaque reconciliation.
-# La liste des modules se CALCULE : le provisioning DECLARE lesquels sont per-humain
-# (`# NEEDS: human`), on lit cette declaration au lieu de la recopier. Une liste en dur redevient
-# fausse au prochain module ajoute — c'est arrive deux fois (la console, puis le binaire `claude`).
+#
+# ⚠ CE SERVICE NE PASSE PLUS PAR L'INSTALLEUR, ET C'EST TOUT L'OBJET DE LA SEPARATION. Il appelait
+# `deploy/provision apply --human <login> --only …`, donc ce daemon — qui TOURNE, toutes les trente
+# secondes, sur une machine installee — dependait de l'arbre d'install. Le critere est ⚖ user :
+# « une fois installe, si on supprime deploy/, il doit rien se passer ». Un convergeur qui crie
+# toutes les trente secondes, c'est le contraire de rien.
+#
+# ⚠ ET IL Y AVAIT DEUX CHEMINS VERS LE MEME ETAT : l'installeur convergeait le premier humain a
+# l'apply, ce service convergeait tous les suivants. Deux chemins vers un etat, c'est celui qu'on
+# ne relit pas qui derive. Il n'y en a plus qu'un — celui-ci — et l'installeur ne joue plus AUCUN
+# module `NEEDS: human` : il n'en porte plus. ⚖ user : « pas besoin d'avoir du code en + pour faire
+# ce que le service qu'on pose fait a son premier tour ».
+#
+# LE PRIX ASSUME : a la seconde ou l'apply se termine, le siege n'a pas encore son `~/.lcars`. Il
+# l'a au premier tour de ce service, trente secondes plus tard. Une install qui se dit finie avant
+# que son convergeur ait tourne une fois n'a jamais decrit la machine reelle.
+#
+# LE VOCABULAIRE EST DEFINI ICI, PAS DANS UNE LIB DE PLUS. Les modules attendent sept fonctions
+# d'impression et deux de verdict ; ce sont des `printf` et deux compteurs. Une lib runtime en
+# regard de celle de l'installeur ferait DEUX copies d'un meme contrat, et c'est celle qu'on ne
+# relit pas qui ment. Les modules sont SOURCES dans un sous-shell : leur `case "$1"` final les
+# dispatche, et le sous-shell garantit qu'aucun n'empoisonne le suivant.
+HUMAN_MODULES="${LCARS_HUMAN_MODULES:-/opt/lcars/fleet/services/human.d}"
+
 converge_human() { # converge_human <login>
   local login=$1
-  [[ -x "$PROVISION" ]] || return 1
-  local -a only=(); local m
-  while IFS= read -r m; do only+=(--only "$(basename "$m" .sh)"); done < <(
-    grep -l '^# NEEDS: human' "$(dirname "$PROVISION")/modules.d"/*.sh 2>/dev/null | sort)
-  # Repli EXPLICITE : si la declaration est illisible, on converge au moins le substrat plutot que
-  # de ne rien converger en silence.
-  [[ "${#only[@]}" -gt 0 ]] || only=(--only 70-human)
-  # `provision` resout `--substrate auto` par `detect_substrate` (/.dockerenv, /proc/version), donc
-  # il repond deja juste DANS le conteneur : le litteral n'achetait rien et coutait le rail poste.
-  # ⚠ LES CODES DE `apply` NE SONT PAS CEUX DE `check`, ET LE 2 EST UN SUCCES ICI :
-  #   0 convergé · 1 ÉCHEC · 2 APPLIQUÉ, drift résiduel.
-  local rc=0 out
+  [[ -d "$HUMAN_MODULES" ]] || { err "$login : modules per-humain introuvables ($HUMAN_MODULES)"; return 1; }
+
+  local m rc_all=0 out
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
-  if [[ -n "$out" ]]; then
-    "$PROVISION" apply --human "$login" "${only[@]}" >"$out" 2>&1 || rc=$?
+
+  # L'ORDRE EST CELUI DU PREFIXE NUMERIQUE, lisible dans un `ls` — meme regle que `modules.d`.
+  for m in "$HUMAN_MODULES"/[0-9][0-9]-*.sh; do
+    [[ -f "$m" ]] || continue
+    local rc=0
+    (
+      set -euo pipefail
+      PROV_HUMAN="$login"; export PROV_HUMAN
+      PROV_MODULE_TAG="$(basename "$m" .sh)"
+      PROV_DRIFT=0; PROV_FAILED=0
+      p_ok()   { echo "[lcars-converger] OK    $PROV_MODULE_TAG: $*"; return 0; }
+      p_chg()  { echo "[lcars-converger] POSÉ  $PROV_MODULE_TAG: $*"; return 0; }
+      p_drift(){ echo "[lcars-converger] DRIFT $PROV_MODULE_TAG: $*" >&2; PROV_DRIFT=$((PROV_DRIFT+1)); }
+      p_warn() { echo "[lcars-converger] WARN  $PROV_MODULE_TAG: $*" >&2; }
+      p_fail() { echo "[lcars-converger] FAIL  $PROV_MODULE_TAG: $*" >&2; PROV_FAILED=$((PROV_FAILED+1)); }
+      p_step() { echo "[lcars-converger] >>    $PROV_MODULE_TAG: $*"; }
+      p_die()  { echo "[lcars-converger] FATAL $PROV_MODULE_TAG: $*" >&2; exit 1; }
+      # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel, qui est le cas
+      # NOMINAL d'un humain frais (il lui manque ses credentials `claude`, geste d'identite).
+      verdict_apply() { [[ "$PROV_FAILED" -gt 0 ]] && exit 1; [[ "$PROV_DRIFT" -gt 0 ]] && exit 2; exit 0; }
+      verdict_check() { verdict_apply; }
+      human_home()    { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
+      repo_root()     { printf '%s\n' "${LCARS_HELPERS_DIR:-/opt/lcars}"; }
+      is_fleet_human() { local u; u="$(id -u -- "${1:-$PROV_HUMAN}" 2>/dev/null)" || return 1
+                         [[ "$u" -ge "$(awk '/^UID_MIN/{print $2}' /etc/login.defs 2>/dev/null || echo 1000)" ]]; }
+      run_quiet()     { local o; if ! o="$("$@" 2>&1)"; then printf "%s\n" "$o" >&2; return 1; fi; }
+      . "$m" apply
+    ) >"${out:-/dev/null}" 2>&1 || rc=$?
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
-      err "$login : provisioning per-humain rc=$rc — les 15 dernieres lignes :"
-      tail -n 15 "$out" | while IFS= read -r l; do err "  | $l"; done
+      rc_all=1
+      err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
+      [[ -n "$out" ]] && tail -n 15 "$out" | while IFS= read -r l; do err "  | $l"; done
     fi
-    rm -f "$out"
-  else
-    "$PROVISION" apply --human "$login" "${only[@]}" >/dev/null 2>&1 || rc=$?
-  fi
-  [[ "$rc" -eq 0 || "$rc" -eq 2 ]]
+  done
+  [[ -n "$out" ]] && rm -f "$out"
+  [[ "$rc_all" -eq 0 ]]
 }
 
 # LES TROIS GESTES DE LA REVOCATION, dans l'ordre qui les rend vrais (cf. l'en-tete). Chacun est
@@ -336,7 +372,7 @@ reconcile_humans() { # reconcile_humans <login…>
   local login n=0
   for login in "$@"; do
     id "$login" >/dev/null 2>&1 || continue
-    converge_human "$login" || { err "$login : reconciliation per-humain en echec — diagnose : $PROVISION doctor --human $login"; continue; }
+    converge_human "$login" || { err "$login : reconciliation per-humain en echec — les modules ont dit leur cause ci-dessus"; continue; }
     n=$((n + 1))
   done
   [[ "$n" -gt 0 ]] && say "$n humain(s) reconcilie(s) (passe lente, toutes les ${RECONCILE_EVERY}s)"
@@ -415,12 +451,8 @@ converge_once() {
       created=$((created + 1))
       # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.
-      if [[ -x "$PROVISION" ]]; then
-        converge_human "$login" \
-          || err "$login : user cree mais le provisioning per-humain a echoue — diagnose : $PROVISION doctor --human $login"
-      else
-        err "$login : user cree mais $PROVISION introuvable — son ~/.lcars n'est PAS pose"
-      fi
+      converge_human "$login" \
+        || err "$login : user cree mais le provisioning per-humain a echoue — les modules ont dit leur cause ci-dessus ($HUMAN_MODULES)"
       # Meme interrupteur que l'entrypoint : qui coupe les consoles les coupe pour tout le monde.
       ensure_console "$login"
     else

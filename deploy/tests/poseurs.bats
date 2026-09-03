@@ -81,7 +81,7 @@ setup() {
   # La table affirme 0700 ; l'apply creait le repertoire par `mkdir -p` et ne chmodait que `.lcars`
   # et `pods`. Mesure : 0755 chez les deux humains de la machine — l'ecart etait constant, pas
   # accidentel.
-  local mod="$MODS/70-human.sh"
+  local mod="$BATS_TEST_DIRNAME/../../fleet/services/human.d/70-human.sh"
   local ligne; ligne="$(grep -n 'chmod 0700' "$mod" | head -1)"
   [ -n "$ligne" ]
   grep -q 'chmod 0700 .*\.lcars/log' "$mod"
@@ -90,7 +90,7 @@ setup() {
 @test "C2 : et le CHECK le regarde — sinon le doctor reste aveugle apres le correctif" {
   # L'angle mort etait double, et la seconde moitie est la plus sournoise : corriger l'apply sans
   # toucher au check aurait rendu le defaut invisible au lieu de le fermer.
-  local mod="$MODS/70-human.sh"
+  local mod="$BATS_TEST_DIRNAME/../../fleet/services/human.d/70-human.sh"
   local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$mod")"
   grep -q '\.lcars/log' <<<"$bloc"
 }
