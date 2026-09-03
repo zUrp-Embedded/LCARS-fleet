@@ -1322,7 +1322,7 @@ defmodule Fleet.MCP.PodTools do
           _ -> nil
         end
 
-      case Delegation.create_issue(
+      case Delegation.Issues.create_issue(
              title,
              brief,
              state,
@@ -1573,7 +1573,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("issue_status", %{"number" => number}, state)
       when is_integer(number) do
-    case Delegation.issue_status(number, state) do
+    case Delegation.Issues.issue_status(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1605,14 +1605,14 @@ defmodule Fleet.MCP.PodTools do
   # Project board + full-thread read (BL-6-28): the arch's READ half — architect gate inside
   # Delegation, repo from the channel binding (never the wire), like every delegation tool.
   def handle_tool_call("issue_list", _arguments, state) do
-    case Delegation.list_issues(state) do
+    case Delegation.Issues.list_issues(state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
   def handle_tool_call("issue_get", %{"number" => number}, state) when is_integer(number) do
-    case Delegation.get_issue(number, state) do
+    case Delegation.Issues.get_issue(number, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1638,7 +1638,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("issue_comment", %{"number" => number, "body" => body}, state)
       when is_integer(number) and is_binary(body) and body != "" do
-    case Delegation.comment_issue(number, body, state) do
+    case Delegation.Issues.comment_issue(number, body, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1651,7 +1651,7 @@ defmodule Fleet.MCP.PodTools do
   # Order between tickets, declared after creation (architect gate inside Delegation).
   def handle_tool_call("dependency_add", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
-    case Delegation.add_dependency(n, b, state) do
+    case Delegation.Dependencies.add_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1663,7 +1663,7 @@ defmodule Fleet.MCP.PodTools do
 
   def handle_tool_call("dependency_remove", %{"number" => n, "blocker" => b}, state)
       when is_integer(n) and is_integer(b) do
-    case Delegation.remove_dependency(n, b, state) do
+    case Delegation.Dependencies.remove_dependency(n, b, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1676,7 +1676,7 @@ defmodule Fleet.MCP.PodTools do
   # The brake (onboarder gate inside Delegation) — a mass CLOSE, never a kill.
   def handle_tool_call("emergency_stop", %{"reason" => reason}, state)
       when is_binary(reason) and reason != "" do
-    case Delegation.emergency_stop(reason, state) do
+    case Delegation.Retirement.emergency_stop(reason, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, why} -> {:error, why, state}
     end
@@ -1697,7 +1697,7 @@ defmodule Fleet.MCP.PodTools do
   # Retirement without a replacement (architect gate inside Delegation, repo from the channel).
   def handle_tool_call("issue_retire", %{"number" => number, "reason" => reason}, state)
       when is_integer(number) and is_binary(reason) and reason != "" do
-    case Delegation.retire_issue(number, reason, state) do
+    case Delegation.Retirement.retire_issue(number, reason, state) do
       {:ok, result} -> {:ok, %{content: [json(result)]}, state}
       {:error, reason} -> {:error, reason, state}
     end
