@@ -58,7 +58,7 @@ jobs:
         working-directory: .
         run: |
           set -eu
-          lib=fleet/deploy/lib/provision-lib.sh
+          lib=deploy/lib/provision-lib.sh
           # ⚠ CE SONT DES PLANCHERS, PLUS DES PINS, ET `setup-beam` SAIT LES LIRE. Le rail poste
           # epinglait `PROV_ELIXIR_VERSION` (1.18.4) parce que l'apt de la distro d'alors servait
           # 1.14 ; sur la cible (ubuntu 26.04) il sert 1.18.3, donc le pin est tombe et il ne reste
@@ -153,5 +153,13 @@ jobs:
       #
       # La même borne, pour la même raison : un gate sans fin ne rend pas un verdict tardif, il n'en
       # rend aucun. Mesure du 2026-09-03 sur ce poste : 1302 cas en ~7 min.
+      #
+      # ⚠ `working-directory: .` EST LOAD-BEARING, ET SON ABSENCE A ÉTÉ MON SECOND DÉFAUT DE SUITE
+      # SUR CE FICHIER. Le job déclare `defaults.run.working-directory: fleet` ; sans cette clé,
+      # `bash deploy/gate.sh` cherche `fleet/deploy/gate.sh` — le chemin d'AVANT la séparation, qui
+      # n'existe plus. Le pas serait mort sur « No such file », après que le pas précédent a rendu
+      # vert : un workflow dont la moitié installeur ne tourne pas, exactement ce que ce pas existe
+      # pour empêcher.
       - name: Gate de l'installeur (la chaîne d'install, bats)
-        run: timeout --signal=TERM --kill-after=60s 20m bash fleet/deploy/gate.sh
+        working-directory: .
+        run: timeout --signal=TERM --kill-after=60s 20m bash deploy/gate.sh

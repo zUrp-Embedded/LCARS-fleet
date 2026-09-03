@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   """
   use ExUnit.Case, async: true
 
-  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « fleet/deploy
+  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « deploy
   # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
   # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
   # absent rend `[]` en silence : un `deploy/` present avec un `modules.d/` vide ou deplace donnait
@@ -30,11 +30,16 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # Les deux tests vont par paire : sans le second, supprimer la mesure suffirait a rendre le
   # premier vert.
   describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
+    # ⚠ LE DECOR A DEUX ETAGES DEPUIS QUE L'INSTALLEUR EST SORTI DE `fleet/`. Ce que le check recoit
+    # est le root MIX ; `deploy/` est desormais son FRERE, pas son enfant. Un decor qui le poserait
+    # dedans ferait repondre `tree_scope` « hors perimetre » et le temoin mesurerait l'absence de
+    # l'installeur au lieu de son sujet.
     defp fixture_root!(ctx) do
-      root = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      base = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
+      root = Path.join(base, "fleet")
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
       File.mkdir_p!(Path.join(root, "etc"))
-      on_exit(fn -> File.rm_rf(root) end)
+      on_exit(fn -> File.rm_rf(base) end)
       root
     end
 
@@ -52,7 +57,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "population NON vide et conforme → pass (le garde n'a pas rendu le contrat impossible)" do
       root = fixture_root!("conforme")
 
-      File.write!(Path.join([root, "deploy", "modules.d", "10-x.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "10-x.sh"]), """
       #!/usr/bin/env bash
       set -euo pipefail
       . "$(dirname "$0")/../lib/provision-lib.sh"
@@ -349,10 +354,14 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # {docker,wsl,linux}` montre le module selectionne sur les trois.
   describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
     setup do
-      root = Fleet.TestEnv.tmp_path("jg070")
+      # ⚠ MEME DECOR A DEUX ETAGES QUE `fixture_root!` PLUS HAUT, ET MEME RAISON : ce que le check
+      # recoit est le root MIX, et `deploy/` est son FRERE depuis que l'installeur est sorti de
+      # `fleet/`. Pose dedans, il serait hors perimetre et ces temoins mesureraient son absence.
+      base = Fleet.TestEnv.tmp_path("jg070")
+      root = Path.join(base, "fleet")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
-      File.mkdir_p!(Path.join([root, "deploy", "docker"]))
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      File.mkdir_p!(Path.join([base, "deploy", "docker"]))
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
 
       File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
       defmodule Fleet.Layout do
@@ -363,19 +372,20 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       end
       """)
 
-      on_exit(fn -> File.rm_rf(root) end)
+      # `base`, pas `root` : le decor a deux etages, nettoyer `fleet/` seul laisserait `deploy/`.
+      on_exit(fn -> File.rm_rf(base) end)
       %{root: root}
     end
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
       File.write!(
-        Path.join([root, "deploy", "docker", "entrypoint.sh"]),
+        Path.join([root, "..", "deploy", "docker", "entrypoint.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
       rows = Enum.map_join(module_zones, " \\\n", &~s(    "#{&1} 2775 root:$PROV_FLEET_GROUP"))
 
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
       prov_dirs() {
         printf '%s\\n' \\
           "/opt/lcars 0755 root:root" \\
@@ -417,7 +427,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], [])
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
 
       result = Mix.Tasks.Lcars.Contracts.Check.check_face_roots_provisioned(root)
 
@@ -537,9 +547,15 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # runtime-only one (the image build stage copies fleet alone) must NAME what it
     # could not see — the one thing that must never happen is a silent pass on absent ground.
     # SAME derivation as the check: the runtime root, then its SIBLING tree
-    # (test/mix -> la racine Mix = "../..", puis "deploy" — depuis le demenagement `deploy/` est un
-    # ENFANT de la racine, plus un frere : le prefixe `../` visait `fleet/` quand la racine etait
-    # `fleet/runtime`.)
+    # (test/mix -> la racine Mix = "../..", puis "../deploy").
+    #
+    # ⚠ CETTE LIGNE A CHANGE DE SENS DEUX FOIS, ET LA DERIVATION DOIT SUIVRE LE MEME CHEMIN QUE LE
+    # CHECK, JAMAIS UN CHEMIN QUI SE TROUVE D'ACCORD. Quand la racine Mix etait `fleet/runtime`,
+    # `deploy/` etait un frere et le prefixe `../` visait `fleet/`. Le demenagement du 2026-08-07 en
+    # a fait un ENFANT de la racine Mix — ce commentaire l'a dit. Le 2026-09-03, la separation
+    # installeur/runtime l'a REMIS a cote de `fleet/` : frere de nouveau, `../deploy`. Une condition
+    # de temoin qui pointerait ailleurs que son check serait d'accord par coincidence, ce qui est
+    # exactement ce que le paragraphe suivant reproche a l'ancienne version.
     #
     # `deploy`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
     # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
@@ -548,7 +564,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # that agrees by coincidence is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
-    if File.dir?(Path.expand("deploy", runtime_root)) do
+    if File.dir?(Path.expand("../deploy", runtime_root)) do
       refute lock.note =~ "NOT CHECKED"
     else
       assert lock.note =~ "NOT CHECKED"

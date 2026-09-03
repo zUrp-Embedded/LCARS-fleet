@@ -223,7 +223,7 @@ defmodule Fleet.Observation.Deck do
   # LA RACINE DES MEDIAS INSTALLES — une source, posee par l'installation, lue par tout le monde.
   #
   # ⚠ IL Y EN AVAIT TROIS EXEMPLAIRES, ET ILS AVAIENT DERIVE. Les memes avatars vivaient sous
-  # `assets/avatars/` (la marque), `fleet/deploy/deps/avatars/` (les png de la charte forge) et
+  # `assets/avatars/` (la marque), `deploy/deps/avatars/` (les png de la charte forge) et
   # `priv/observation/static/assets/` (les svg de ce deck). Mesure du 2026-08-20 : SEPT des neuf
   # roles communs differaient entre la marque et ce deck — pas par decision, mais parce qu'une mise a
   # jour touchait un dossier et pas les autres. Le deck affichait donc une generation d'avatars

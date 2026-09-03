@@ -129,7 +129,7 @@ INTERVAL="${LCARS_CONVERGER_INTERVAL:-30}"
 # PREMIERE passe apres le boot verifie tout le monde — la reconciliation au demarrage est la
 # fonctionnalite, pas une rafale a raboter.
 RECONCILE_EVERY="${LCARS_CONVERGER_RECONCILE:-3600}"
-PROVISION="${LCARS_PROVISION:-/opt/lcars/fleet/deploy/provision}"
+PROVISION="${LCARS_PROVISION:-/opt/lcars/deploy/provision}"
 CONSOLE="${LCARS_CONSOLE_SH:-/opt/lcars/console.sh}"
 SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme

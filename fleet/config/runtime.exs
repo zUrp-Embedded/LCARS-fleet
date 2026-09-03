@@ -243,7 +243,7 @@ if config_env() != :test and not tool_mode? do
       _ ->
         raise "R-no-seat: the seat UID could not be established (#{seat_uid_path} missing or not " <>
                 "an integer) — GUARD B refuses a boot it cannot verify. This machine is not " <>
-                "provisioned: run `sudo fleet/deploy/provision apply`."
+                "provisioned: run `sudo deploy/provision apply`."
     end
 
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege

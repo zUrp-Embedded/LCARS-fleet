@@ -56,7 +56,7 @@ Le nom du script, tirets compris, est le préfixe — ce qui se cherche est ce q
 
 ## La frontière avec `deploy/tests/`
 
-`fleet/deploy/tests/` est un corpus à part, et son critère n'est pas le nôtre : il répond à « le
+`deploy/tests/` est un corpus à part, et son critère n'est pas le nôtre : il répond à « le
 déploiement pose-t-il correctement », pas à « ce fichier se comporte-t-il correctement ». **La cible
 d'un témoin n'y indique donc pas son domaine** — `console_socket_topology.bats` mesure
 `services/console.sh` et reste là-bas, parce qu'il le confronte au `Dockerfile` de la boîte.
@@ -68,7 +68,7 @@ de l'installeur : six l'ont fait le 2026-08-30 (`supervise`, `console_creds_drif
 dépendre `fleet/test/` de `deploy/`, la dépendance inverse de celle qu'on venait de retirer.
 
 Les deux corpus n'échangent rien — `refute.bash` existe des deux côtés, et `tests.refute_copies_agree`
-refuse qu'ils divergent. Voir `fleet/deploy/tests/README.md`.
+refuse qu'ils divergent. Voir `deploy/tests/README.md`.
 
 ## Deux faux-verts que le gate ferme
 
@@ -83,6 +83,6 @@ refuse qu'ils divergent. Voir `fleet/deploy/tests/README.md`.
 
 `shell_gate.sh` (câblé dans `mix gate`) est le point d'entrée des tests que `mix test` ne voit pas :
 les quatre suites python, nommées une par une dans son registre `PYTESTS`, et tous les `.bats`
-trouvés récursivement sous `test/`, `.claude/skills/`, `fleet/deploy/tests/` et
+trouvés récursivement sous `test/`, `.claude/skills/`, `deploy/tests/` et
 `fleet/git-hooks/tests/`. `bats` absent n'échoue pas — le compte des suites manquées est ANNONCÉ,
 et `BATS_MISSING_FATAL=1` durcit le jour où `bats-core` est un prérequis posé partout.

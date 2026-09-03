@@ -3,7 +3,7 @@
 **Date** : 2026-08-10
 **Dernière révision** : 2026-08-16
 **Statut** : actif
-**Référencé par** : `fleet/deploy/docker/Dockerfile` (copie dans l'image)
+**Référencé par** : `deploy/docker/Dockerfile` (copie dans l'image)
 
 ## Ce que c'est
 
