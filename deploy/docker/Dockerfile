@@ -263,7 +263,14 @@ RUN apt-get update -qq \
     `# ⚠ MEMBRE DE fleet POUR TRAVERSER /opt/lcars/runtime (0750 root:fleet), JAMAIS POUR DECIDER.` \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
     `# convergeur d'humains, qui a useradd et ne detient rien.` \
-    && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
+    `# ⚠ SON PROPRE GROUPE D'ABORD, ET fleet EN GROUPE SECONDAIRE — c'est ce que 21-service-accounts` \
+    `# pose et ce que la table declare (group:unset lcars-authority). L'image le creait avec -g fleet` \
+    `# et AUCUN groupe a son nom : put_secret (chown lcars-authority:lcars-authority) mourait sur` \
+    `# « invalid group », donc box config etait injouable sur une image neuve, et le` \
+    `# setpriv --regid lcars-authority de l'entrypoint ne pouvait pas demarrer l'executeur de` \
+    `# catalogue. Mesure du 2026-09-04, banc bob_2, premiere boite contre une forge fournie.` \
+    && groupadd --system lcars-authority \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-authority -G fleet lcars-authority \
     `# LE COMPTE DE LA LANDING, MIROIR DE 21-service-accounts DU RAIL POSTE. Il N'EST QUE quelqu'un :` \
     `# le deck ne detient rien de durable et n'a aucun privilege, il a seulement besoin de ne PAS` \
     `# etre nobody. Le prix de nobody se lit sur son GROUPE : deck-oidc.json porte le client_secret` \
