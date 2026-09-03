@@ -6259,6 +6259,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Path.join([root, troot, "**", "*"])
         |> Path.wildcard()
         |> Enum.reject(&File.dir?/1)
+        # ⚠ CE QUE `git` IGNORE N'EST PAS UN TEMOIN MAL NOMME. `__pycache__/` est dans le
+        # `.gitignore` du depot : ses `.pyc` sont des artefacts que l'interpreteur pose en JOUANT
+        # les temoins python, et ils portent des noms que cette regle ne peut pas satisfaire
+        # (`x_test.cpython-314-pytest-9.0.2.pyc`). Ce mur etait donc VERT sur une machine qui n'a
+        # jamais lance la suite python et ROUGE sur celle qui vient de la jouer — mesure du
+        # 2026-09-03, a la fusion : quatre accusations, aucune sur un fichier du depot.
+        # Un mur dont le verdict depend de ce que l'operateur a lance la veille ne mesure pas le
+        # depot ; il mesure la machine.
+        |> Enum.reject(&(&1 =~ ~r"/__pycache__/"))
         |> Enum.map(&Path.relative_to(&1, root))
       end)
       |> Enum.reject(fn f ->
