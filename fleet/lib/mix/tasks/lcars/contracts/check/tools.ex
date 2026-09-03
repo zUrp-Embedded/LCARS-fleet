@@ -1399,7 +1399,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
     sous =
       root
-      |> Path.join("lib/fleet/mcp/pod_tools/delegation/*.ex")
+      # ⚠ `**`, PAS `*` : un glob mono-niveau redevient une ADRESSE des que la famille gagne un
+      # sous-dossier. C'est le meme defaut que celui-ci corrige, un cran plus bas — et il serait
+      # silencieux, puisque les quatre murs continueraient de rendre un verdict sur une population
+      # amputee. `**` couvre le niveau courant a l'identique (verifie : 17 fichiers des deux
+      # facons), donc la generalisation ne coute rien aujourd'hui et tient demain.
+      |> Path.join("lib/fleet/mcp/pod_tools/delegation/**/*.ex")
       |> Path.wildcard()
       |> Enum.map(&Path.relative_to(&1, root))
       |> Enum.sort()
