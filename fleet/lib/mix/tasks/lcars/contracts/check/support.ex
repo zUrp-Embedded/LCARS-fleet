@@ -367,6 +367,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   @spec tree_scope(String.t()) :: :required | :out_of_scope
   def tree_scope(dir), do: if(File.dir?(dir), do: :required, else: :out_of_scope)
 
+  # The TREE a mirror path belongs to: its leading `..` segments plus the first real one —
+  # `services/x` -> `services`, `../deploy/lib/x` -> `../deploy`. Deciding the scope on
+  # `hd(Path.split(rel))` answered `..` for every sibling-tree mirror the day `deploy/` left
+  # `fleet/` (4583be78a): the PARENT of the runtime is always there, so a mirror the artifact does
+  # not carry was demanded, then reported missing. Measured on the image build stage (which
+  # excludes `deploy/` on purpose): four locks red, `mix release` refused, the box unbuildable.
+  @doc false
+  @spec mirror_scope(String.t(), String.t()) :: :required | :out_of_scope
+  def mirror_scope(rel, root), do: tree_scope(Path.expand(mirror_tree(rel), root))
+
+  @doc false
+  @spec mirror_tree(String.t()) :: String.t()
+  def mirror_tree(rel) do
+    {ups, rest} = rel |> Path.split() |> Enum.split_while(&(&1 == ".."))
+    Path.join(ups ++ Enum.take(rest, 1))
+  end
+
   @doc false
   @spec split_out_of_scope([{term(), :required | :out_of_scope, term(), term()}]) ::
           {[{term(), term(), term()}], [term()]}

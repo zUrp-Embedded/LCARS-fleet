@@ -72,7 +72,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     # coverage hole that answers "not my business" on files it is holding.
     {checked, skipped} =
       Enum.split_with(mirrors, fn rel ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        mirror_scope(rel, root) == :required
       end)
 
     id = "toolchain.branch_single_source"
@@ -323,7 +323,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # verrous voisins.
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _rx, _what} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad = Enum.flat_map(checked, &mirror_gap(&1, root))
@@ -457,7 +457,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
     {in_scope, out} =
       Enum.split_with(holders, fn {rel, _, _} ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        mirror_scope(rel, root) == :required
       end)
 
     results = Enum.map(in_scope, read_holder)
@@ -643,7 +643,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       {checked, skipped} =
         Enum.split_with(mirrors, fn m ->
           rel = elem(m, 0)
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad =
@@ -1117,7 +1117,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _, _} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad = Enum.flat_map(checked, &mirror_gap(&1, root))
