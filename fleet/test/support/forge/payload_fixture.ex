@@ -56,7 +56,7 @@ defmodule Fleet.Forge.PayloadFixture do
       chemin =
         Payload.paths()[fait] ||
           raise ArgumentError,
-                "#{inspect(fait)} is not a declared fact of Fleet.Forge.Payload — " <>
+                "#{inspect(fait)} is not a declared fact of Payload — " <>
                   "declare its path there rather than writing a raw key here"
 
       put_chemin(acc, chemin, ecrire(fait, valeur))

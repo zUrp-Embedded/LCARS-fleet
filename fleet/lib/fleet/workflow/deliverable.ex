@@ -42,7 +42,7 @@ defmodule Fleet.Workflow.Deliverable do
   passes here gets pushed to a repository. Its ancestry, identity and trailer checks are decidable;
   its secret scan matches known credential SHAPES on added text and cannot see a shapeless one --
   a Gitea token is 40 hex, indistinguishable from a SHA (scope on
-  `Fleet.Workflow.DeliverableGate.scan_secrets/2`). Reading `{:ok, :verified}` as "no secret in
+  `DeliverableGate.scan_secrets/2`). Reading `{:ok, :verified}` as "no secret in
   this chain" is the one mistake this door invites, because it is the only door there is.
   """
   @spec publish(opts()) :: {:ok, result()} | {:error, term()}
@@ -184,7 +184,7 @@ defmodule Fleet.Workflow.Deliverable do
 
   # Keep git read failure distinct from an empty native deliverable.
   defp head_advanced(workspace, base_sha) do
-    case Fleet.Workflow.Git.read_head_sha(workspace) do
+    case Git.read_head_sha(workspace) do
       {:ok, sha} when sha != base_sha -> :ok
       {:ok, _same_as_base} -> {:error, :no_deliverable_commit}
       {:error, reason} -> {:error, {:head_read_failed, reason}}
@@ -219,5 +219,5 @@ defmodule Fleet.Workflow.Deliverable do
   defp local_ref(opts), do: Map.get(opts, :local_ref, "HEAD")
 
   # Delegated to bounded Git authority.
-  defp head_sha(workspace), do: Fleet.Workflow.Git.read_head_sha(workspace)
+  defp head_sha(workspace), do: Git.read_head_sha(workspace)
 end

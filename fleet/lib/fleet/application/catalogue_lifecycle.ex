@@ -207,7 +207,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
     # livre, un manifeste illisible), et un log emis avant ce geste part sur stdout.
     Fleet.ReleaseDoor.claim_stdout!()
 
-    case with_transport(fn -> Fleet.Application.CatalogueDeposits.list([]) end) do
+    case with_transport(fn -> CatalogueDeposits.list([]) end) do
       {:ok, deposits} ->
         case Map.fetch(deposits, name) do
           {:ok, d} ->

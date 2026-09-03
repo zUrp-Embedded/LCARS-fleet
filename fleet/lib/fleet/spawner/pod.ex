@@ -583,7 +583,7 @@ defmodule Fleet.Spawner.Pod do
   # that design withheld on a conflict: the base that moved). Touching a ref is safe on an idle
   # pod — the working tree does not change under anyone.
   def handle_event({:call, from}, {:refresh_work_base, project}, _state, data) do
-    ws = Fleet.Spawner.Pod.Paths.pod_workspace_path(data.pod_dir)
+    ws = Paths.pod_workspace_path(data.pod_dir)
 
     case Fleet.ProjectBootstrap.Phase.Clone.refresh_work_base(ws, project) do
       {:ok, :refreshed} ->

@@ -109,7 +109,7 @@ defmodule Fleet.TaskQueue.Server do
       # Same in-mem/ephemeral nature as `polls`, same purge point (`clear_for_pod`).
       connects: %{},
       topic: Keyword.get(opts, :topic, Bus.main_topic()),
-      # Bus seam (default = the real `Fleet.EventRouter.Bus`). Module with `broadcast/2`. Lets us
+      # Bus seam (default = the real `Bus`). Module with `broadcast/2`. Lets us
       # test the non-swallowed lifecycle path (a stub bus that returns `{:error,_}` / raises on work_item.completed)
       # without touching the global `:persistent_term` registry.
       bus: Keyword.get(opts, :bus, Bus),

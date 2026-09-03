@@ -226,7 +226,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
       # d'en poser un. La PR partait au sceau sans arbitre et sans escalade, témoin unique une
       # ligne de log. Le sens correct est l'inverse : inconnu ne se dépense pas comme non.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
-      findings = %{"qualifier" => Fleet.FindingsWire.unreadable()}
+      findings = %{"qualifier" => FindingsWire.unreadable()}
 
       assert :gray_zone =
                Jury.review_outcome(@jury, verdicts, findings, %{"block_at" => "critical"})
@@ -236,7 +236,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
       # La dégénérescence tient sur ce cas aussi — sinon le correctif aurait taxé tous les projets
       # qui ne demandent rien.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
-      findings = %{"qualifier" => Fleet.FindingsWire.unreadable()}
+      findings = %{"qualifier" => FindingsWire.unreadable()}
 
       assert :approved = Jury.review_outcome(@jury, verdicts, findings, nil)
       assert :approved = Jury.review_outcome(@jury, verdicts, findings, %{})
@@ -245,7 +245,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
     test "l'arbitre peut trancher ce trou comme il tranche un désaccord" do
       # Le barreau existe pour ça : quelqu'un regarde, au lieu d'un sceau muet.
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved, "gatekeeper" => :approved}
-      findings = %{"qualifier" => Fleet.FindingsWire.unreadable()}
+      findings = %{"qualifier" => FindingsWire.unreadable()}
 
       assert :approved =
                Jury.review_outcome(
@@ -259,7 +259,7 @@ defmodule Fleet.Forge.JuryVerdictFunctionTest do
 
     test "un juge illisible HORS jury ne bloque personne" do
       verdicts = %{"qualifier" => :approved, "reviewer" => :approved}
-      findings = %{"un-humain" => Fleet.FindingsWire.unreadable()}
+      findings = %{"un-humain" => FindingsWire.unreadable()}
 
       assert :approved =
                Jury.review_outcome(@jury, verdicts, findings, %{"block_at" => "minor"})

@@ -58,7 +58,7 @@ defmodule Fleet.Pilot.StepRunCompleter.Emissions do
   def post_eng_summary(step_run, opts) do
     case Map.get(step_run, :eng_summary) do
       summary when is_binary(summary) and summary != "" ->
-        forge = Keyword.get(opts, :forge_client, Fleet.Forge.Client)
+        forge = Keyword.get(opts, :forge_client, ForgeClient)
         forge_opts = Keyword.get(opts, :forge_opts, [])
         repo = Map.fetch!(step_run, :repo)
         n = Map.fetch!(step_run, :issue_number)

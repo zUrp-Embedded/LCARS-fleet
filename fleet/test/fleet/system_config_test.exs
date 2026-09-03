@@ -26,7 +26,7 @@ defmodule Fleet.SystemConfigTest do
         assert %{conflict_engine: false} = SystemConfig.read(Path.join(dir, "nope.json"))
       end)
 
-    refute log =~ "Fleet.SystemConfig"
+    refute log =~ "SystemConfig"
   end
 
   test "conflict_engine: true → armed", %{tmp_dir: dir} do

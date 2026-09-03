@@ -225,7 +225,7 @@ defmodule Fleet.CapProfile do
         {:ok,
          index
          |> Enum.filter(fn {_role, raw} ->
-           Fleet.CapProfile.Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
+           Catalog.spawnable?(raw) and raw_has_capability?(raw, cap)
          end)
          |> Enum.map(&elem(&1, 0))
          |> Enum.sort()}
@@ -757,7 +757,7 @@ defmodule Fleet.CapProfile do
   Role names this catalogue declares a forge identity for — the roster to provision, seats INCLUDED.
 
   Distinct from `list/1`, which drops ReservedSeats: a seat cannot be spawned but still owns its
-  account. See `Fleet.CapProfile.Catalog.forge_identity_roles/1`.
+  account. See `Catalog.forge_identity_roles/1`.
   """
   @spec forge_identity_roles(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   @spec forge_identity_roles() :: {:ok, [String.t()]} | {:error, term()}
@@ -903,14 +903,14 @@ defmodule Fleet.CapProfile do
 
   @doc """
   The raw role index of ONE root — the business half judged apart from what it inherits.
-  See `Fleet.CapProfile.Catalog.index_of/1`.
+  See `Catalog.index_of/1`.
   """
   @spec index_of(String.t()) :: {:ok, %{optional(String.t()) => map()}} | {:error, term()}
   defdelegate index_of(dir), to: Catalog
 
   @doc """
   The forge roster with the facts a provisioning needs to place each role — `%{name, seat?,
-  judge?}`. See `Fleet.CapProfile.Catalog.forge_roster/1`.
+  judge?}`. See `Catalog.forge_roster/1`.
   """
   @spec forge_roster(String.t()) ::
           {:ok, [%{name: String.t(), seat?: boolean(), judge?: boolean()}]} | {:error, term()}

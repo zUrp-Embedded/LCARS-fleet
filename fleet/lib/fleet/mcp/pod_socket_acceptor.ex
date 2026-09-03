@@ -24,7 +24,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   `tools/call` AND `tools/list` are both served here (`tools/list` per F-C138 — the
   `deftool` schemas filtered to this pod's role-gated surface, see `list_tools/1`); only
   `initialize` is answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). The
-  response frame reuses `Fleet.MCP.PodTools.handle_tool_call/3`:
+  response frame reuses `PodTools.handle_tool_call/3`:
 
     * `{:ok, content, _}`  → `result` = that `content` (already in MCP format);
     * `{:error, reason, _}` → `result` = `%{"content" => [text], "isError" => true}`
@@ -444,7 +444,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   defp safe_handle_tool_call(tool, tool_args, pod_id) do
     handle = fn -> tool_handler().handle_tool_call(tool, tool_args, %{pod_id: pod_id}) end
 
-    if Fleet.MCP.PodTools.tool_effect(tool) in @single_flight_effects do
+    if PodTools.tool_effect(tool) in @single_flight_effects do
       key = {pod_id, tool, :crypto.hash(:sha256, :erlang.term_to_binary(tool_args))}
       Fleet.MCP.Idempotency.run(key, handle, succeeded?: &match?({:ok, _, _}, &1))
     else

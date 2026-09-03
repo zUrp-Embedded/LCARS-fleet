@@ -1218,7 +1218,7 @@ defmodule Fleet.Project.Onboard do
 
   # Issue-side forge seam of the close/open verbs (the repo seam `:forge_repo` carries only the
   # provisioning ops). Default = the real client; injectable for tests.
-  defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, Fleet.Forge.Client)
+  defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, ForgeClient)
 
   @doc """
   Enumerates the projects on this box, with what governs each one.
@@ -1682,7 +1682,7 @@ defmodule Fleet.Project.Onboard do
           end
 
         try do
-          Fleet.Project.Roles.ci(Fleet.Workflow.Loader.load!(card, loader_opts))
+          Roles.ci(Fleet.Workflow.Loader.load!(card, loader_opts))
         rescue
           _ -> :required
         end
@@ -2858,7 +2858,7 @@ defmodule Fleet.Project.Onboard do
   # lot : une source, pas une copie.
   defp seed_protocol_labels(full_name, opts) do
     seeder =
-      Keyword.get(opts, :ensure_labels, &Fleet.Forge.Client.ensure_protocol_labels/2)
+      Keyword.get(opts, :ensure_labels, &ForgeClient.ensure_protocol_labels/2)
 
     case seeder.(full_name, fc_opts(opts)) do
       :ok -> :ok

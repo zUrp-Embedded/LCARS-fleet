@@ -320,7 +320,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   defp emit_publish_lost(pod_id, death_reason, meta) do
     _ =
-      Fleet.EventRouter.Bus.safe_emit(
+      Bus.safe_emit(
         :workflow,
         :"deliverable.publish_lost",
         [

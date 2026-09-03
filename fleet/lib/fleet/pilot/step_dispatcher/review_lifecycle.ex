@@ -250,7 +250,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   defp issue_card_jury(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
          {:ok, {map_name, _step}} <-
-           Fleet.Pilot.StepDispatcher.Spawn.route_for(
+           Spawn.route_for(
              ctx.forge,
              ctx.repo,
              issue_n,
@@ -310,7 +310,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   def issue_card_ci(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
          {:ok, {map_name, _step}} <-
-           Fleet.Pilot.StepDispatcher.Spawn.route_for(
+           Spawn.route_for(
              ctx.forge,
              ctx.repo,
              issue_n,

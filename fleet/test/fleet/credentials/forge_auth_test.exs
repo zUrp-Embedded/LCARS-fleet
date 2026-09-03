@@ -21,7 +21,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     # Tests set/delete :forge_auth themselves; here we only capture the restoration.
     TestEnv.restore_env_on_exit(:lcars_fleet, :credentials_forge_auth)
 
-    tmp = Fleet.TestEnv.tmp_path("forgeauth-test")
+    tmp = TestEnv.tmp_path("forgeauth-test")
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf(tmp) end)
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)

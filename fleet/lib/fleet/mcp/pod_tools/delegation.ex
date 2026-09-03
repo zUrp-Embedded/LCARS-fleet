@@ -472,7 +472,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   defp write_binding(repo, binding) do
     dir = Path.join([System.user_home!(), ".lcars", "publish"])
     File.mkdir_p!(dir)
-    path = Path.join(dir, "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(repo)}.json")
+    path = Path.join(dir, "#{ProjectPublish.binding_key(repo)}.json")
 
     # ⚠ LE CHMOD EST DANS LA CHAINE, PAS APRES ELLE. Il etait appele et son retour JETE : un fichier
     # ecrit dont la serrure n'a pas pu etre posee ressortait `:ok`, et le binding restait lisible par
@@ -1484,7 +1484,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
         System.user_home!(),
         ".lcars",
         "publish",
-        "#{Fleet.MCP.PodTools.ProjectPublish.binding_key(full_name)}.json"
+        "#{ProjectPublish.binding_key(full_name)}.json"
       ])
 
     case File.rm(path) do
@@ -1963,8 +1963,8 @@ defmodule Fleet.MCP.PodTools.Delegation do
 
     with {:ok, ref} <- Fleet.Forge.Protocol.lot_branch(name),
          {:ok, identity} <- Fleet.Credentials.ForgeIdentity.for_role(role),
-         :ok <- Fleet.Project.GitOps.run(["-C", dir, "fetch", "origin", face], auth: true),
-         {:ok, base_sha} <- Fleet.Project.GitOps.read(["-C", dir, "rev-parse", "FETCH_HEAD"]),
+         :ok <- GitOps.run(["-C", dir, "fetch", "origin", face], auth: true),
+         {:ok, base_sha} <- GitOps.read(["-C", dir, "rev-parse", "FETCH_HEAD"]),
          {:ok, %{commit_sha: sha}} <- publish_lot_commits(dir, ref, base_sha, identity) do
       {:ok, {ref, sha}}
     else

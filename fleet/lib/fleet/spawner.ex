@@ -756,8 +756,8 @@ defmodule Fleet.Spawner do
         # trigger + the arming of the net; the control (ACK = pull) lives in the loop
         # (`kick_attempt`). The `:wake_send_keys` knob (flag-only) is read by the loop.
         _ = Fleet.Spawner.Pod.TurnFlag.touch(info)
-        _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :rearm_deadline)
-        _ = GenServer.cast(Fleet.Spawner.Pod.name(pod_id), :arm_kick)
+        _ = GenServer.cast(Pod.name(pod_id), :rearm_deadline)
+        _ = GenServer.cast(Pod.name(pod_id), :arm_kick)
         :ok
 
       {:ok, _info} ->

@@ -65,7 +65,7 @@ defmodule Fleet.Forge.Client do
   defdelegate parse_feature_branch(head), to: ForgeProtocol
 
   @spec branch_head(String.t(), String.t(), Keyword.t()) :: {:ok, String.t()} | {:error, term()}
-  defdelegate branch_head(repo, branch, opts), to: Fleet.Forge.Client.Repo
+  defdelegate branch_head(repo, branch, opts), to: Repo
 
   # ⚠ ET LE MEME TROU A ETE TROUVE DEUX FOIS LE MEME JOUR, PAR DEUX APPELANTS. Vanille l'a rencontre
   # par `Fleet.MCP.PodTools.Probe` (`forge().get_file`, chemin de `run_probe`, l'outil des juges) et

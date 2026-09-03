@@ -207,7 +207,7 @@ defmodule Fleet.CatalogueTest do
     # A minimal, schema-valid card. One step, no jury, CI ignored — the shape `workshop-direct` and
     # `quick-fix` already ship; enough for the loader to accept it and for the image to hold it.
     defp install_card(dir, name) do
-      maps = Path.join(dir, Fleet.Catalogue.rel(:workflow_maps))
+      maps = Path.join(dir, Catalogue.rel(:workflow_maps))
       File.mkdir_p!(maps)
 
       File.write!(Path.join(maps, "#{name}.yaml"), """
@@ -251,7 +251,7 @@ defmodule Fleet.CatalogueTest do
             {premier, "carte-une", "carte-deux"},
             {second, "carte-deux", "carte-une"}
           ] do
-        opts = [workflow_maps_root: Path.join(dir, Fleet.Catalogue.rel(:workflow_maps))]
+        opts = [workflow_maps_root: Path.join(dir, Catalogue.rel(:workflow_maps))]
         assert Fleet.Workflow.Loader.canon_names!(opts) == [attendue]
         # `load!` rend la carte APLATIE (metadata + spec fusionnes), pas l'arbre du YAML.
         assert %{"name" => ^attendue, "steps" => %{"build" => _}} =
@@ -403,7 +403,7 @@ defmodule Fleet.CatalogueTest do
       # qu'il n'a pas. Aucune propriete ne distingue la carte par defaut de ses soeurs : il faut le
       # dire, et le boot le verifie contre les cartes REELLES du catalogue.
       root = fake_root(tmp)
-      maps = Path.join(root, Fleet.Catalogue.rel(:workflow_maps))
+      maps = Path.join(root, Catalogue.rel(:workflow_maps))
       File.mkdir_p!(maps)
       File.write!(Path.join(maps, "la-mienne.yaml"), "kind: WorkflowMap\n")
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, root)

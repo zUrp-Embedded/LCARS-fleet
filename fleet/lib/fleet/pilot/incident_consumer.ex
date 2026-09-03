@@ -100,7 +100,7 @@ defmodule Fleet.Pilot.IncidentConsumer do
       brake_fun: Keyword.get(opts, :brake_fun, &__MODULE__.default_brake/3),
       # The event → op/escalation-kind CLASSIFICATION is TABLE data (`events.yaml` routing —
       # audit B-05); the seam keeps the unit tests hermetic (no global persistent_term mutation).
-      routing_fun: Keyword.get(opts, :routing_fun, &Fleet.EventRouter.Bus.event_routing/0)
+      routing_fun: Keyword.get(opts, :routing_fun, &Bus.event_routing/0)
     }
 
     {:ok, state}

@@ -1,11 +1,11 @@
 defmodule Fleet.CapProfile.Invariants do
   @moduledoc """
-  The **pure** G24 business invariants of a composed `%Fleet.CapProfile{}`
+  The **pure** G24 business invariants of a composed `%CapProfile{}`
   (cap-profile canon v2.5 + containment gate).
 
   Pure validation cluster extracted from `Fleet.CapProfile`: one function per
   check, aggregated by `violations/1`. Pure — no process read, no FS read
-  (same struct ⇒ same verdict), zero I/O. `Fleet.CapProfile.validate/1`
+  (same struct ⇒ same verdict), zero I/O. `CapProfile.validate/1`
   DELEGATES here: it wraps `violations/1` in its return contract
   (`:ok | {:error, [atom()]}`) and is the single public entry point.
 
@@ -34,7 +34,7 @@ defmodule Fleet.CapProfile.Invariants do
       only its pure both-or-neither structural part is checked here.
 
   Single dependency direction (no cycle): this module depends on the
-  `%Fleet.CapProfile{}` struct (compile-dep); `Fleet.CapProfile.validate/1`
+  `%CapProfile{}` struct (compile-dep); `CapProfile.validate/1`
   calls `violations/1` (runtime-dep).
   """
 
@@ -71,7 +71,7 @@ defmodule Fleet.CapProfile.Invariants do
   pass). Stable order = the declaration order of the registry below.
   Pure: same struct ⇒ same list.
 
-  `Fleet.CapProfile.validate/1` is the sole consumer; it translates `[]` into
+  `CapProfile.validate/1` is the sole consumer; it translates `[]` into
   `:ok` and a non-empty list into `{:error, list}`.
   """
   @spec violations(CapProfile.t()) :: [atom()]
@@ -121,7 +121,7 @@ defmodule Fleet.CapProfile.Invariants do
     modop_set = Map.get(spec, "modop_set", %{})
 
     pairs = if is_map(modop_set), do: Map.get(modop_set, "incompatible", []), else: []
-    active = MapSet.new(Fleet.CapProfile.active_modops(profile))
+    active = MapSet.new(CapProfile.active_modops(profile))
 
     conflict? =
       Enum.any?(pairs, fn pair ->

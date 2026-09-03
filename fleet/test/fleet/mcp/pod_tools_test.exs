@@ -3081,14 +3081,14 @@ defmodule Fleet.MCP.PodToolsTest do
 
   describe "l'org d'un projet ne se DEVINE pas — le catalogue est OBLIGATOIRE" do
     setup do
-      tmp = Fleet.TestEnv.tmp_path("orgs")
+      tmp = TestEnv.tmp_path("orgs")
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       root = Path.join(tmp, "aaa")
       File.mkdir_p!(Path.join(root, Fleet.Catalogue.rel(:workflow_maps)))
       File.write!(Path.join(root, "catalogue.yaml"), "api_version: 1\nname: aaa\n")
 
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [tmp])
       :ok
     end
 
@@ -3112,7 +3112,7 @@ defmodule Fleet.MCP.PodToolsTest do
       # Le piege des deux versions precedentes : une branche qui ne s'execute que dans une certaine
       # POPULATION est une branche que personne n'exerce jamais dans l'autre. Ici il n'y en a plus
       # qu'une, donc elle est prise partout.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
+      TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [])
       assert ["fleet"] = Fleet.Project.Onboard.installed_orgs()
 
       assert {:error, {:catalogue_required, ["fleet"]}} =

@@ -75,7 +75,7 @@ defmodule Fleet.SPBuilderImageParityTest do
     # (machine only, machine + human, human only): a parity proven on `fleet` alone would leave
     # the two branches that actually gained an image accessor unchecked.
     for who <- ["fleet", "both", "human"] do
-      cap = %Fleet.CapProfile{
+      cap = %CapProfile{
         kind: "CapabilityProfile",
         metadata: %{"name" => "probe"},
         spec: %{"interlocutor" => who}

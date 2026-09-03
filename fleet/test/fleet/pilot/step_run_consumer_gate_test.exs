@@ -901,7 +901,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     {:ok, pid} =
       StepRunConsumer.start_link(
         # UNIQUE name per test: this file is `async: true` and `start_link` without `:name` falls
-        # back to the global name `Fleet.Pilot.StepRunConsumer` → two co-scheduled GenServer tests
+        # back to the global name `StepRunConsumer` → two co-scheduled GenServer tests
         # collide with `{:already_started}`. A unique name isolates each instance (the test drives
         # `pid`, not the name).
         name: :"step_run_gate_#{System.unique_integer([:positive])}",

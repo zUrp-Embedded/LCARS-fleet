@@ -265,18 +265,18 @@ defmodule Fleet.Project.DeclarationTest do
       # l'agent en a conclu, raisonnablement et faussement, que « la creation ne sait resoudre que
       # les cartes de fleet ».
       assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-               Fleet.Project.Declaration.declarable_card("propre-a-aaa", "bbb/un-projet", [])
+               ProjectDeclaration.declarable_card("propre-a-aaa", "bbb/un-projet", [])
     end
 
     test "vraiment inconnue partout : `unknown_card`, comme avant" do
       # Le refus d'origine survit pour ce qu'il decrit VRAIMENT — une faute de frappe. Sans cette
       # separation, le nouveau message dirait « elle existe ailleurs » en listant zero catalogue.
       assert {:error, {:unknown_card, "carte-fantome"}} =
-               Fleet.Project.Declaration.declarable_card("carte-fantome", "bbb/un-projet", [])
+               ProjectDeclaration.declarable_card("carte-fantome", "bbb/un-projet", [])
     end
 
     test "la carte de SON catalogue passe — le refus ne mord pas sur le cas nominal" do
-      assert :ok = Fleet.Project.Declaration.declarable_card("commune", "bbb/un-projet", [])
+      assert :ok = ProjectDeclaration.declarable_card("commune", "bbb/un-projet", [])
     end
 
     # ─── LE MEME AIGUILLAGE, MAIS PAR LA PORTE QUE LES APPELANTS EMPRUNTENT ─────────────────────
@@ -291,7 +291,7 @@ defmodule Fleet.Project.DeclarationTest do
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       assert :ok =
-               Fleet.Project.Declaration.write(tmp,
+               ProjectDeclaration.write(tmp,
                  workflow_map: "propre-a-aaa",
                  repo: "aaa/un-projet",
                  onboarded_by: "starfleet"
@@ -304,7 +304,7 @@ defmodule Fleet.Project.DeclarationTest do
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-               Fleet.Project.Declaration.write(tmp,
+               ProjectDeclaration.write(tmp,
                  workflow_map: "propre-a-aaa",
                  repo: "bbb/un-projet",
                  onboarded_by: "starfleet"
@@ -333,7 +333,7 @@ defmodule Fleet.Project.DeclarationTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_in_another_catalogue, "propre-a-aaa", ["aaa"]}} =
-                   Fleet.Project.Declaration.write(tmp,
+                   ProjectDeclaration.write(tmp,
                      workflow_map: "propre-a-aaa",
                      onboarded_by: "starfleet"
                    )
@@ -356,7 +356,7 @@ defmodule Fleet.Project.DeclarationTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, {:card_load_failed, "cassee", message}} =
-                   Fleet.Project.Declaration.declarable_card("cassee", "bbb/un-projet", [])
+                   ProjectDeclaration.declarable_card("cassee", "bbb/un-projet", [])
 
           assert message =~ "schema"
         end)
@@ -369,7 +369,7 @@ defmodule Fleet.Project.DeclarationTest do
 
       refute match?(
                {:error, {:unknown_card, _}},
-               Fleet.Project.Declaration.declarable_card("cassee", "bbb/un-projet", [])
+               ProjectDeclaration.declarable_card("cassee", "bbb/un-projet", [])
              )
     end
   end

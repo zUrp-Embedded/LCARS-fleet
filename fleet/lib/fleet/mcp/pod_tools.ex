@@ -256,7 +256,7 @@ defmodule Fleet.MCP.PodTools do
       "properties" => %{
         "probe" => %{
           "type" => "string",
-          "enum" => Fleet.MCP.PodTools.Probe.known(),
+          "enum" => Probe.known(),
           "description" => "Le NOM de la sonde à jouer."
         },
         "inputs" => %{
@@ -1235,7 +1235,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — work-item drive (Fleet.MCP.PodTools.WorkItems)
+  # Dispatch — work-item drive (WorkItems)
   # ============================================================
 
   @impl true
@@ -1275,7 +1275,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — mesure demandee par un juge (Fleet.MCP.PodTools.Probe)
+  # Dispatch — mesure demandee par un juge (Probe)
   # ============================================================
 
   # POD-SCOPE, comme `get_work_item`/`submit_result` et pour la meme raison : le SUJET de l'appel
@@ -1303,7 +1303,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   # ============================================================
-  # Dispatch — architect forge delegation (Fleet.MCP.PodTools.Delegation)
+  # Dispatch — architect forge delegation (Delegation)
   # ============================================================
 
   # The architect gate (require_architect: role AND repo resolved from the channel — the pod's spawn
