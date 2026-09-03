@@ -63,11 +63,18 @@ setup() {
 
 # `say` journalise, `setsid` ne detache RIEN (sinon un daemon survit au temoin), et `$PROVISION`
 # est une doublure dont on pilote le verdict.
-bloc() { # bloc <rc du convergeur> <rc du doctor>
-  local conv_rc="$1" doctor_rc="$2"
+bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
+  # ⚠ LE DOUBLE DU DOCTOR REND TOUJOURS 0. C'est le point mesure : `64-services` est VERT sur une
+  # boite conforme sans humain (l'absence y est un WARN), donc son code de retour ne dit rien. Ce
+  # qui decide est le FAIT `fleet_humans=` qu'il depose dans `PROV_FACTS_FILE` — le double le pose
+  # plein ou vide, comme le module, et le bloc doit lire CELA.
+  local conv_rc="$1" sonde="$2" humans="zoe"
+  [ "$sonde" -eq 0 ] || humans=""
   printf '%s\n' '#!/usr/bin/env bash' "exit $conv_rc" > "$LCARS_HUMAN_CONVERGER"
   chmod 0755 "$LCARS_HUMAN_CONVERGER"
-  printf '%s\n' '#!/usr/bin/env bash' "exit $doctor_rc" > "$BIN/provision-double"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    '[ -n "${PROV_FACTS_FILE:-}" ] && printf "fleet_humans=%s\n" "'"$humans"'" >> "$PROV_FACTS_FILE"' \
+    'exit 0' > "$BIN/provision-double"
   chmod 0755 "$BIN/provision-double"
   run bash -c "
     set -euo pipefail
@@ -112,9 +119,11 @@ bloc() { # bloc <rc du convergeur> <rc du doctor>
   grep -q 'présent' "$JOURNAL"
 }
 
-@test "sonde en DERIVE : le verdict publie non-zero, et il nomme GUARD B" {
+@test "doctor VERT et PERSONNE : le verdict publie non-zero, et il nomme GUARD B" {
   # Le cas d'une boite de production ou personne ne s'est encore enrole. Ce n'est pas une panne —
   # mais ca doit se LIRE, sinon l'operateur cherche pourquoi `fleet_v2 start` refuse.
+  # Mesure du 2026-09-04, banc bob_2 : le doctor rendait 0 (l'absence est un WARN), le bloc lisait
+  # ce 0 comme « present(s) », et la boite l'annoncait avec le seul siege a bord.
   bloc 0 1
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = "1" ]

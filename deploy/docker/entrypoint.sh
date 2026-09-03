@@ -517,8 +517,16 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  humans_rc=0
-  "$PROVISION" doctor --substrate docker --only 64-services >/dev/null 2>&1 || humans_rc=$?
+  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rend 0 sur une boite conforme SANS
+  # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
+  # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
+  # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et la boite l'annoncait.
+  # Le module DEPOSE le fait (`p_fact fleet_humans`), on le relit — le canal de la porte.
+  humans_facts="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || humans_facts=""
+  PROV_FACTS_FILE="$humans_facts" "$PROVISION" doctor --substrate docker --only 64-services >/dev/null 2>&1 || true
+  humans_rc=1
+  [[ -n "$humans_facts" ]] && [[ -n "$(sed -n 's/^fleet_humans=//p' "$humans_facts" 2>/dev/null | tail -1 | tr -d '[:space:]')" ]] && humans_rc=0
+  rm -f "$humans_facts"
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet_v2 start » a quelqu'un pour le lancer"
   else

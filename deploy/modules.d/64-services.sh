@@ -293,6 +293,11 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
 # « fleet_v2 start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
+  # LE FAIT, pour qui doit decider : l'entrypoint de la boite publie « quelqu'un peut lancer une
+  # fleet » et lisait pour cela le CODE DE RETOUR de ce module — qui vaut 0 sur une boite conforme
+  # SANS humain, puisque l'absence est un WARN. « humain(s) present(s) » etait donc toujours vrai.
+  # Mesure du 2026-09-04, banc bob_2 : seul le siege existait. Meme canal que `00-preflight`.
+  p_fact fleet_humans "$found"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
   else
