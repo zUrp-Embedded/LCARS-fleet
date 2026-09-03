@@ -1,6 +1,8 @@
 defmodule Fleet.Forge.ClientTest do
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
+
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
@@ -388,7 +390,7 @@ defmodule Fleet.Forge.ClientTest do
           {200,
            [
              %{"number" => 1, "labels" => []},
-             %{"number" => 2, "labels" => [%{"name" => "lcars-in-flight"}]}
+             PayloadFixture.issue(number: 2, label_names: ["lcars-in-flight"])
            ]}
       }
 
@@ -477,7 +479,8 @@ defmodule Fleet.Forge.ClientTest do
     test "get_pull/3: GET a single PR → full shape" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/lcars/pulls/6"} =>
-          {200, %{"number" => 6, "head" => %{"ref" => "lcars/issue-9-engineer", "sha" => "abc"}}}
+          {200,
+           PayloadFixture.pull(number: 6, head_ref: "lcars/issue-9-engineer", head_sha: "abc")}
       }
 
       assert {:ok, %{"number" => 6, "head" => %{"sha" => "abc"}}} =
@@ -1673,8 +1676,8 @@ defmodule Fleet.Forge.ClientTest do
         {"GET", "/api/v1/repos/fleet/proj/pulls"} =>
           {200,
            [
-             %{"number" => 3, "head" => %{"ref" => "other"}, "base" => %{"ref" => "main"}},
-             %{"number" => 9, "head" => %{"ref" => "feature/x"}, "base" => %{"ref" => "main"}}
+             PayloadFixture.pull(number: 3, head_ref: "other", base_ref: "main"),
+             PayloadFixture.pull(number: 9, head_ref: "feature/x", base_ref: "main")
            ]}
       }
 
@@ -1685,7 +1688,7 @@ defmodule Fleet.Forge.ClientTest do
     test "get_pr_for_branch: no open head→base PR → :pr_not_found" do
       handlers = %{
         {"GET", "/api/v1/repos/fleet/proj/pulls"} =>
-          {200, [%{"number" => 3, "head" => %{"ref" => "other"}, "base" => %{"ref" => "main"}}]}
+          {200, [PayloadFixture.pull(number: 3, head_ref: "other", base_ref: "main")]}
       }
 
       assert {:error, :pr_not_found} =
@@ -1702,7 +1705,7 @@ defmodule Fleet.Forge.ClientTest do
         for n <- 1..50,
             do: %{"number" => n, "head" => %{"ref" => "other-#{n}"}, "base" => %{"ref" => "main"}}
 
-      page2 = [%{"number" => 77, "head" => %{"ref" => "feature/x"}, "base" => %{"ref" => "main"}}]
+      page2 = [PayloadFixture.pull(number: 77, head_ref: "feature/x", base_ref: "main")]
 
       handlers = %{
         {"GET", "/api/v1/repos/fleet/proj/pulls"} => fn ->
@@ -1744,7 +1747,7 @@ defmodule Fleet.Forge.ClientTest do
       # the Poller/MCP. The page budget bounds it fail-loud (never a silently truncated view).
       full =
         for n <- 1..50,
-            do: %{"number" => n, "head" => %{"ref" => "x"}, "base" => %{"ref" => "main"}}
+            do: PayloadFixture.pull(number: n, head_ref: "x", base_ref: "main")
 
       handlers = %{{"GET", "/api/v1/repos/fleet/proj/pulls"} => {200, full}}
 

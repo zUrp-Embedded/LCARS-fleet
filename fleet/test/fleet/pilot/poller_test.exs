@@ -1371,11 +1371,11 @@ defmodule Fleet.Pilot.PollerTest do
       ]
 
       pulls = [
-        %{
-          "number" => 6,
-          "head" => %{"ref" => "lcars/issue-8-engineer"},
-          "labels" => [%{"name" => "lcars-in-flight"}]
-        }
+        PayloadFixture.pull(
+          number: 6,
+          head_ref: "lcars/issue-8-engineer",
+          label_names: ["lcars-in-flight"]
+        )
       ]
 
       name = :"P_pr_orphan_#{System.unique_integer([:positive])}"
@@ -2144,7 +2144,7 @@ defmodule Fleet.Pilot.PollerTest do
     end
 
     test "chemin PR : une PR ETRANGERE n'ecrit rien — ce n'est pas notre ticket" do
-      pulls = [%{"number" => 91, "head" => %{"ref" => "refs/pull/6/head"}}]
+      pulls = [PayloadFixture.pull(number: 91, head_ref: "refs/pull/6/head")]
 
       {name, _pid} =
         start_entry_poller({:ok, []}, %{},

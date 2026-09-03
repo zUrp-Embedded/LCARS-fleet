@@ -29,6 +29,24 @@ defmodule Fleet.MCP.PodTools do
   acceptor (one pod = one socket), never read from the wire — the clauses here check its
   presence (`:pod_id_required`, fail-closed), the architect gate lives in `Delegation`.
 
+  ## Pourquoi ce fichier est GROS, et pourquoi il le reste
+
+  Mesure du contenu, pas impression : 1031 lignes de `deftool` (32 declarations de schema wire),
+  388 lignes de clauses de `handle_tool_call/3`, et le reste en `@moduledoc` et attributs. Il ne
+  porte que TROIS fonctions publiques et trois privees.
+
+  Il n'est donc pas decomposable, et ce n'est pas une preference :
+
+    * `deftool` ENREGISTRE dans le module ou la macro est appelee. Deplacer des declarations
+      ailleurs les sortirait de la table que cinq murs lisent comme autorite unique
+      (`mcp.tools_gated`, `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
+      `mcp.required_for_real_backend`) — et cette table EST le contrat du serveur.
+    * les 59 clauses de dispatch sont les clauses d'UNE fonction. Elixir exige qu'elles vivent dans
+      un seul module ; les repartir n'est pas un arbitrage, c'est impossible.
+
+  Chaque clause fait en moyenne sept lignes et delegue : le metier vit dans `Delegation.*` et
+  `Probe`. Ce fichier est une TABLE, et une table longue n'est pas un objet-dieu.
+
   The `Fleet.TaskQueue` broker itself broadcasts `%Fleet.Event{work_item.completed}` on
   `fleet.events` — this module emits NO event of its own (the broker is the single
   emitter of the completion lifecycle).

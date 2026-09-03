@@ -2,6 +2,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   use ExUnit.Case, async: true
   import Fleet.Test.Barrier, only: [settle: 1]
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepRunConsumer
 
   # StepRunCompleter seam: captures the received PR-native step_run + returns a fixed outcome.
@@ -56,7 +57,7 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
   # (without a workflow_map). Stub = one open PR for issue 42, head = the producer's branch.
   defmodule StubForge do
     def list_open_pulls(_repo, _opts) do
-      {:ok, [%{"number" => 7, "head" => %{"ref" => "lcars/issue-42-engineer"}}]}
+      {:ok, [PayloadFixture.pull(number: 7, head_ref: "lcars/issue-42-engineer")]}
     end
   end
 
