@@ -130,10 +130,10 @@ code() {
 # corriger la seconde en ouvre un.
 _bins_du_rail=()
 while read -r _n; do
-  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../bin/$_n" ] \
-    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../bin/$_n")
+  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../../bin/$_n" ] \
+    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../../bin/$_n")
 done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
-           "$BATS_TEST_DIRNAME"/../modules.d/62-runtime-helpers.sh 2>/dev/null \
+           "$BATS_TEST_DIRNAME"/../../modules.d/62-runtime-helpers.sh 2>/dev/null \
          | sed 's|.*/||; s|"$||' | sort -u)
 
 # Les chemins litteraux que le code pose, normalises : `}` de `${VAR:-/chemin}` retire, ponctuation
@@ -472,7 +472,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # Consequence mesuree (banc 2001, 2026-09-01) : apres `uninstall --yes` puis re-apply, le prefixe
   # renaissait en `bob:fleet` au lieu de `root:fleet`. Invisible sur une machine ou il existe deja,
   # parce que `mkdir -p` ne touche pas aux droits d'un repertoire present.
-  local dirs_mod="$BATS_TEST_DIRNAME/../modules.d/25-directories.sh"
+  local dirs_mod="$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
   local liste; liste="$(sed -n '/^prov_dirs()/,/^}$/p' "$dirs_mod")"
   [ -n "$liste" ]
   grep -q 'PROV_PREFIX' <<<"$liste"
@@ -552,10 +552,10 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # produit VRAIMENT. Les variables sont alors developpees par leur SSoT, pas devinees.
   local poseur
   poseur="$(env -i PATH="$PATH" HOME="$BATS_TEST_TMPDIR" bash -c '
-    . "'"$BATS_TEST_DIRNAME"'/../lib/provision-lib.sh" >/dev/null 2>&1
+    . "'"$BATS_TEST_DIRNAME"'/../../lib/provision-lib.sh" >/dev/null 2>&1
     prov_console_human() { echo "<human>"; }
     '"$(sed -n '/^prov_runtime_dirs()/,/^}/p;/^prov_dirs()/,/^}/p' \
-          "$BATS_TEST_DIRNAME/../modules.d/25-directories.sh")"'
+          "$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh")"'
     prov_dirs 2>/dev/null | awk "{print \$1}"
   ' 2>/dev/null)"
   [ -n "$poseur" ] \

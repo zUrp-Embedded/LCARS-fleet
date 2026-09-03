@@ -1005,11 +1005,11 @@ MOD
 @test "AFTER : les modules REELS declarent un ordre que leur rang respecte — sinon le runner refuse au boot" {
   # Le sandbox porte des stubs ; ce temoin lit le vrai modules.d et rejoue la meme regle.
   local mod name dep n=0
-  for mod in "$BATS_TEST_DIRNAME"/../modules.d/[0-9][0-9]-*.sh; do
+  for mod in "$BATS_TEST_DIRNAME"/../../modules.d/[0-9][0-9]-*.sh; do
     name="$(basename "$mod" .sh)"
     for dep in $(sed -n 's/^# AFTER: *//p' "$mod" | head -1); do
       n=$((n+1))
-      [ -f "$BATS_TEST_DIRNAME/../modules.d/$dep.sh" ]
+      [ -f "$BATS_TEST_DIRNAME/../../modules.d/$dep.sh" ]
       [[ "$dep" < "$name" ]]
     done
   done

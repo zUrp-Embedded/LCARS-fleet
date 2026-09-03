@@ -232,7 +232,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
     grep -q "$v" "$SH" || { echo "reglage $v non transmis a travers sudo" >&2; false; }
   done
   # ET LA PORTE N'ESCALADE PLUS : sinon il y aurait deux listes, dont une que personne ne relit.
-  local door="$BATS_TEST_DIRNAME/../../../install.sh"
+  local door="$BATS_TEST_DIRNAME/../../../../install.sh"
   refute grep -q 'exec sudo' <<<"$(grep -vE '^\s*#' "$door")"
 }
 
@@ -475,7 +475,7 @@ repo_sh() { # repo_sh <corps a jouer apres la source> — decor complet, machine
 repo_echec() { # repo_echec — le decor ou `apt-get update` REFUSE la source
   local head="$BATS_TEST_TMPDIR/repo-head.sh"
   sed '/^check() {/,$d' "$(pkg_mod)" > "$head"
-  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../lib/provision-lib.sh" \
+  run env PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh" \
           LCARS_DOCKER_KEYRING="$BATS_TEST_TMPDIR/keyrings/docker.asc" \
           LCARS_DOCKER_LIST="$BATS_TEST_TMPDIR/docker.list" \
           PROV_JOURNAL_ACC="$BATS_TEST_TMPDIR/install.journal" \

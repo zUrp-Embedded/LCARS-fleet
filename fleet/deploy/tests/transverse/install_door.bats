@@ -987,7 +987,7 @@ SPY
   # n existait pas a l entree : la porte ne traduisait que `--port-forge` et `--port-deck`.
   #
   # Un refus qui nomme un geste que la porte ne sait pas passer envoie l operateur contre un mur.
-  local porte="$BATS_TEST_DIRNAME/../../../install.sh"
+  local porte="$BATS_TEST_DIRNAME/../../../../install.sh"
   # les trois entrent au parsing
   grep -qE '^\s+--port-forge\|--port-deck\|--port-ssh\)' "$porte"
   # et les trois sont TRADUITS vers les noms du delegue
@@ -996,7 +996,7 @@ SPY
   grep -q -- '--deck-port'  <<<"$bloc"
   grep -q -- '--ssh-port'   <<<"$bloc"
   # et le delegue les connait — sinon on traduit vers un drapeau qui n existe pas
-  local bench="$BATS_TEST_DIRNAME/../docker/bench/bench-up.sh"
+  local bench="$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh"
   grep -q -- '--ssh-port)' "$bench"
 }
 
@@ -1004,7 +1004,7 @@ SPY
   # Le `case` remplace un `[[ … ]] && _d=…` a deux branches : avec trois valeurs, la forme courte
   # aurait fait tomber la troisieme dans le defaut — donc `--port-ssh` aurait publie le port de la
   # FORGE, silencieusement, sur le port que l operateur voulait pour SSH.
-  local porte="$BATS_TEST_DIRNAME/../../../install.sh"
+  local porte="$BATS_TEST_DIRNAME/../../../../install.sh"
   local bloc; bloc="$(sed -n '/--port-forge|--port-deck|--port-ssh)/,/esac/p' "$porte")"
   grep -qE '\-\-port-deck\)\s+_d="--deck-port"' <<<"$bloc"
   grep -qE '\-\-port-ssh\)\s+_d="--ssh-port"'   <<<"$bloc"

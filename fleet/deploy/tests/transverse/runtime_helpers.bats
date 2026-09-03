@@ -379,13 +379,13 @@ need_git_checkout() {
 racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declare « paquet »
   local src="$BATS_TEST_TMPDIR/paquet"
   mkdir -p "$src/fleet/deploy"
-  cp -a "$BATS_TEST_DIRNAME/../lib"       "$src/fleet/deploy/lib"
-  cp -a "$BATS_TEST_DIRNAME/../modules.d" "$src/fleet/deploy/modules.d"
-  ln -s "$BATS_TEST_DIRNAME/../../etc"      "$src/fleet/etc"
-  ln -s "$BATS_TEST_DIRNAME/../../services" "$src/fleet/services"
-  ln -s "$BATS_TEST_DIRNAME/../../bin"      "$src/fleet/bin"
-  ln -s "$BATS_TEST_DIRNAME/../../../assets"     "$src/assets"
-  ln -s "$BATS_TEST_DIRNAME/../../../catalogues" "$src/catalogues"
+  cp -a "$BATS_TEST_DIRNAME/../../lib"       "$src/fleet/deploy/lib"
+  cp -a "$BATS_TEST_DIRNAME/../../modules.d" "$src/fleet/deploy/modules.d"
+  ln -s "$BATS_TEST_DIRNAME/../../../etc"      "$src/fleet/etc"
+  ln -s "$BATS_TEST_DIRNAME/../../../services" "$src/fleet/services"
+  ln -s "$BATS_TEST_DIRNAME/../../../bin"      "$src/fleet/bin"
+  ln -s "$BATS_TEST_DIRNAME/../../../../assets"     "$src/assets"
+  ln -s "$BATS_TEST_DIRNAME/../../../../catalogues" "$src/catalogues"
   echo "cafe1234" > "$src/.source-revision"
   printf '%s\n' "$src"
 }
@@ -446,7 +446,7 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locaux de la recette tofu
   local src; src="$(racine_paquet)"
   rm -f "$src/fleet/services"
-  cp -a "$BATS_TEST_DIRNAME/../../services" "$src/fleet/services" \
+  cp -a "$BATS_TEST_DIRNAME/../../../services" "$src/fleet/services" \
     || { echo "decor : services non copiable"; return 1; }
   # ⚠ ET ON VERIFIE QUE CE N EST PLUS UN LIEN. Si la ligne du dessus changeait de forme, l ecriture
   # repartirait en silence vers le depot — le defaut exact que cette garde existe pour rendre

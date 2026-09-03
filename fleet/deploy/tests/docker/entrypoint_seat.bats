@@ -236,7 +236,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # Le refus n'a pas bouge — un siege inventable ne s'invente toujours pas. Ce qui change, c'est
   # qu'il n'emporte plus le conteneur avec lui : meme arbitrage que pour l'echec de convergence,
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
-  local src="$BATS_TEST_DIRNAME/../docker/entrypoint.sh"
+  local src="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
   grep -q 'if ! resolve_admiral; then' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"

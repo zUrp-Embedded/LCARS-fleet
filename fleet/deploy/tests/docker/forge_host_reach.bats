@@ -794,27 +794,15 @@ STUB
   refute grep -qE 'curl[^|]* -d ' <<<"$body"
 }
 
-@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo du rail POSTE" {
-  # `sudo` fait env_reset : un drapeau absent de la liste blanche est mange en silence, et le geste
-  # de l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.
-  #
-  # ⚠ ELLE A LU `PROV_FLEET_HUMAN` D'ABORD, ET C'ETAIT UNE SECONDE ORIGINE. Elle ne portait un nom
-  # que si un drapeau l'avait dit ; sinon elle retombait sur l'autorite — donc le chemin nominal
-  # etait le REPLI, et le chemin nomme etait celui que personne n'exercait. Le drapeau retire, il ne
-  # reste que la question, et elle est posee sans condition.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^announce_builtin_human_password()/,/^}/p')"
-  grep -q 'forge-gestures.sh" builtin-human' <<<"$body"
-  refute grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  refute grep -q '"lcars"' <<<"$body"
-}
-
 @test "le nom du compte integre a UNE autorite, et elle repond" {
   local g="$BATS_TEST_DIRNAME/../../../services/forge-gestures.sh"
   [ -f "$g" ]
   run bash "$g" builtin-human
   [ "$status" -eq 0 ]
-  [ -n "$output" ]
+  # ⚠ `[ -n "$output" ]` VIVAIT ICI, ET L'ARBITRAGE DU 2026-08-30 L'A RENVERSE. Le defaut est VIDE :
+  # le rail pose les autorites, il ne fabrique plus d'humain de travail. Les trois etats du nom
+  # (rien / le defaut de la destination / l'explicite) sont gardes par le temoin « § 13 : la
+  # DESTINATION a son porteur » — un seul endroit, et c'est celui qui porte la decision.
   # La surcharge passe par la meme porte — sinon ce serait une seconde autorite deguisee en defaut.
   run env LCARS_BUILTIN_HUMAN=vanille bash "$g" builtin-human
   [ "$output" = "vanille" ]
@@ -823,23 +811,7 @@ STUB
   [ "$(grep -vE '^\s*#' "$g" | grep -c 'LCARS_BUILTIN_HUMAN:-')" -eq 1 ]
 }
 
-@test "la repose couvre les DEUX comptes — une porte a moitie n'est pas une porte" {
-  # L'annonce de l'humain integre est liee a la passe qui POSE la structure : sur une machine deja
-  # provisionnee elle est sautee. Un operateur qui a perdu ses identifiants les a perdus tous les
-  # deux, donc le recours doit rendre les deux.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  local body; body="$(code | sed -n '/^reset_admin_password_if_asked()/,/^}/p')"
-  grep -q 'announce_builtin_human_password' <<<"$body"
-  # ⚠ ET L'APPEL EST INCONDITIONNEL. Il vivait sous un `if [[ -n "$PROV_FLEET_HUMAN" ]]`, donc la
-  # moitie « humain integre » de cette porte ne rouvrait que si l'operateur avait tape un drapeau —
-  # c'est-a-dire presque jamais, pendant que la perte qu'elle repare, elle, arrivait a l'identique.
-  # Une porte qui ne rouvre que la moitie de ce qu'on a perdu n'est pas une porte, et une porte
-  # conditionnee a un geste que personne ne fait n'en est pas une non plus.
-  refute grep -q 'PROV_FLEET_HUMAN' <<<"$body"
-  refute grep -q 'fleet-human' <<<"$body"
-}
-
-@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo d'install.sh" {
+@test "VERROU : le drapeau de repose SURVIT a l'escalade sudo du rail POSTE" {
   # `sudo` fait env_reset : un drapeau absent de REEXEC_ENV est mange en silence, et le geste de
   # l'operateur ne produit RIEN. C'est le cinquieme exemplaire de ce piege dans ce fichier.
   # ⚠ CE TEMOIN A SUIVI SON SUJET (E2, 2026-08-31). L'escalade a quitte `install.sh` pour
@@ -1165,10 +1137,10 @@ STUB
   # premiere version de cette ligne — elle ecrivait un defaut ici, donc une seconde autorite.
   refute grep -q 'LCARS_BUILTIN_HUMAN' <<<"$code"
   # Le drapeau traverse le runner.
-  local runner; runner="$BATS_TEST_DIRNAME/../provision"
+  local runner; runner="$BATS_TEST_DIRNAME/../../provision"
   grep -q -- '--disposable) export PROV_DISPOSABLE=1' "$runner"
   # Et l'AUTORITE du nom en tire les trois etats : rien, le defaut de la destination, l'explicite.
-  local g="$BATS_TEST_DIRNAME/../../services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../services/forge-gestures.sh"
   [ -z "$(bash "$g" builtin-human)" ]
   [ "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" = "lcars" ]
   # ⚠ L'ORDRE EST LOAD-BEARING : un nom explicite l'emporte sur le defaut de la destination.
@@ -1179,7 +1151,7 @@ STUB
 @test "§ 13 : la porte OUVRE --bench au poste, et le refus a disparu" {
   # Il constatait une CAPACITE ABSENTE, pas un choix : `48-forge-host` montait en dur, donc « monte
   # la forge » n'avait aucun sens sur ce rail. Il la consomme desormais aussi.
-  local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
+  local door; door="$BATS_TEST_DIRNAME/../../../../install.sh"
   local code; code="$(grep -vE '^\s*#' "$door")"
   refute grep -q "bench n'a pas d'objet sur le rail poste" <<<"$code"
   # Et le nouveau porteur traverse la porte jusqu'au runner.
