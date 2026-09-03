@@ -17,7 +17,7 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
-load refute
+load ../refute
 
 setup() {
   # ⚠ LE DECOR POSSEDE SON ENVIRONNEMENT, ET CE FICHIER ETAIT LE SEUL DU CORPUS A NE PAS LE FAIRE.

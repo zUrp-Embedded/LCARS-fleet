@@ -21,7 +21,7 @@
 #   SC2020 — `tr` sur des CARACTERES, et c'est ce que le temoin mesure
 # shellcheck disable=SC1003,SC2020
 
-load refute
+load ../refute
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../.."

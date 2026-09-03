@@ -30,7 +30,7 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
-load refute
+load ../refute
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
