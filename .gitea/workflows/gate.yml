@@ -79,8 +79,13 @@ jobs:
           otp-version: ${{ steps.toolchain.outputs.otp }}
 
       # `mix gate` n'est pas que du mix : il enchaîne `shell_gate`, qui joue les suites bats de
-      # `bin/`, `etc/`, `deploy/` et `git-hooks/`. Sans bats, cette moitié du filet ne tourne pas —
+      # `bin/`, `etc/` et `git-hooks/`. Sans bats, cette moitié du filet ne tourne pas —
       # et `shell_gate` le DIT (« bats=… MANQUES ») plutôt que de rendre un vert amputé.
+      #
+      # ⚠ `deploy/` N'EST PLUS DANS CETTE LISTE, ET C'EST POURQUOI LE PAS SUIVANT EXISTE. Ses 1294
+      # cas — 73 % de tout le corpus bats — sont ceux de l'INSTALLEUR et ont leur propre porte
+      # depuis le détachement. Cette ligne les a nommés jusqu'à ce commit ; la laisser telle quelle
+      # aurait fait dire à la CI qu'elle joue ce qu'elle ne joue plus. Bats sert donc les DEUX pas.
       #
       # ⚠ L'ACTION OFFICIELLE, PAS UN `apt-get`. Le paquet d'une distro sert la version qu'elle a
       # figée, qui n'est pas celle sur laquelle les suites sont écrites ; le fournisseur du projet
@@ -134,3 +139,19 @@ jobs:
       # pire cas 10.3 min. Le double du pire vert, jamais le tour de la mediane.
       - name: Gate (compile strict + suite + contracts.check)
         run: MIX_ENV=test timeout --signal=TERM --kill-after=60s 20m mix gate
+
+      # ─── ET LA PORTE DE L'INSTALLEUR — SANS ELLE, CE WORKFLOW EST UN VERT AMPUTÉ ───────────────
+      #
+      # ⚠ LE PAS AU-DESSUS A CESSÉ DE JOUER 1294 CAS, et rien dans son nom ne le dit. Le corpus de
+      # `deploy/tests` a quitté `shell_gate` au détachement de l'installeur : sans ce second pas, la
+      # CI rendrait vert sur 73 % de moins qu'avant, en gardant exactement le même libellé. C'est la
+      # forme même du défaut que `@test_corpora` nomme — « a corpus nobody runs rots while reporting
+      # a coverage it does not provide » — au niveau du workflow cette fois.
+      #
+      # ⚠ ET IL EST UN PAS À PART, PAS UNE LIGNE DANS LE PRÉCÉDENT : deux logiciels, deux verdicts.
+      # Un opérateur qui lit la liste des pas doit voir lequel des deux est rouge sans ouvrir le log.
+      #
+      # La même borne, pour la même raison : un gate sans fin ne rend pas un verdict tardif, il n'en
+      # rend aucun. Mesure du 2026-09-03 sur ce poste : 1302 cas en ~7 min.
+      - name: Gate de l'installeur (la chaîne d'install, bats)
+        run: timeout --signal=TERM --kill-after=60s 20m bash fleet/deploy/gate.sh

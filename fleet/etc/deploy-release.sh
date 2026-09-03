@@ -131,6 +131,13 @@ build_release() {
     if [[ "${LCARS_INSTALL_SKIP_GATE:-0}" == "1" ]]; then
       echo "install: ATTENTION — gate saute (LCARS_INSTALL_SKIP_GATE=1) : la release n'est PAS attestee par le gate de ce commit" >&2
     else
+      # ⚠ CE GATE EST CELUI DU RUNTIME, ET IL N'APPELLE PAS LA PORTE DE L'INSTALLEUR — c'est
+      # delibere, et la question se pose des qu'on lit `pack.sh`, qui joue les deux. Ce script-ci
+      # atteste LA RELEASE qu'il s'apprete a poser : son sujet est le runtime. Et il est joue par
+      # `60-deploy` PENDANT une installation, donc alors que l'installeur TOURNE — lui faire jouer
+      # sa propre suite a ce moment serait circulaire, et couterait sept minutes a chaque apply pour
+      # re-attester le code en train de s'executer. `pack.sh` et la CI sont les deux endroits ou les
+      # deux portes ont un sens ensemble : ils EMPAQUETENT et PUBLIENT les deux logiciels.
       echo "install: gate complet sur l'arbre source (compile-strict + tests + bats + topologie + dialyzer)…" >&2
       # SC2209 : `MIX_ENV="test"` avec les guillemets — sans eux, shellcheck lit `test` comme un
       # NOM DE COMMANDE et croit a un `MIX_ENV=$(test)` oublie. Le signalement est un faux positif,
