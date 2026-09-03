@@ -19,15 +19,27 @@ boîte, et c'est ce que `fleet/services/` veut dire.
 
 ## Le protocole
 
-Chaque module est un exécutable qui répond à deux gestes — `<module> check|apply` — et rien
-d'autre. C'est le protocole des modules de provisionnement, décrit une seule fois dans
-`deploy/README.md` ; il vaut ici à l'identique.
+Chaque module répond à deux gestes — `<module> check|apply` — et rien d'autre. C'est le protocole
+des modules de provisionnement, décrit une seule fois dans `deploy/README.md` ; il vaut ici à
+l'identique.
 
-Ce qui change, c'est **qui appelle**. Sous `deploy/`, c'est `provision` qui fournit les helpers
-(`p_ok`, `p_chg`, `p_drift`, `verdict_apply`…). Ici c'est `human-converger.sh`, qui les
-redéfinit dans un sous-shell et pose `PROV_HUMAN` avant de sourcer le module. Un module ne sait
-donc **pas** lequel des deux le lance, et ne doit pas chercher à le savoir : il n'appelle que les
-helpers du protocole, jamais un chemin de `deploy/`.
+Ce qui change, c'est **comment on l'invoque**, et l'écart est réel :
+
+|  | `deploy/provision` | `human-converger.sh` |
+|---|---|---|
+| invocation | `bash <module> <geste>` — un processus | `. <module> apply` — sourcé dans un sous-shell |
+| helpers | fournis par `provision-lib.sh` | redéfinis par le convergeur |
+| cible | la machine, ou un humain via `as_human` | l'humain de `PROV_HUMAN`, sous root |
+
+Un module ne sait donc **pas** lequel des deux le lance, et ne doit pas chercher à le savoir : il
+n'appelle que les helpers du protocole, jamais un chemin de `deploy/`. Le corollaire est
+pratique, et il ne se déduit pas de la lecture d'un seul des deux appelants : pas de `$0`, pas de
+`cd` — il déplacerait le répertoire courant du convergeur pour tous les modules suivants — et
+`${BASH_SOURCE[0]}` pour se localiser, seule forme qui dise vrai sous les deux invocations.
+
+Aucun des deux n'exige le bit exécutable, et les modules ne le portent pas : `bash <fichier>` et
+`.` lisent un fichier, ils ne l'exécutent pas. Le poser suggérerait un troisième appelant qui
+n'existe pas.
 
 Le verdict d'`apply` est un code de sortie : `0` convergé, `2` drift constaté et non réparable,
 autre chose = échec. Le convergeur ne tient l'échec que pour ce qui n'est ni `0` ni `2` — un drift
