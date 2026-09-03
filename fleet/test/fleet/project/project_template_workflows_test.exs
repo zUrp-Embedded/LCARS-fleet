@@ -37,7 +37,7 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
       # ⚠ LE GLOB EST LU CHEZ SON PROPRIÉTAIRE, JAMAIS RECOPIÉ. Si `Onboard` durcit un jour sa
       # protection, ce test doit BOUGER AVEC — un `"CI / *"` en dur ici resterait vert en décrivant
       # une protection qui n'existe plus, et c'est exactement le mode de panne qu'on traque.
-      globs = Fleet.Project.Onboard.main_status_check_contexts()
+      globs = Fleet.Project.Onboard.Faces.main_status_check_contexts()
 
       # Garde d'instrument n°1 : un glob dont on ne saurait pas extraire le préfixe rendrait
       # `matches_glob?/2` faux pour tout le monde, et ce test vert sans rien mesurer.
@@ -62,7 +62,7 @@ defmodule Fleet.Project.TemplateWorkflowsTest do
     test "TÉMOIN — `ci.yml`, lui, matche : sans ça la garde ci-dessus passerait pour rien" do
       # Le contre-test. Si `matches_glob?/2` rendait toujours `false`, le test précédent serait vert
       # quel que soit le nom des sondes. Ici on prouve que l'instrument SAIT dire oui.
-      [glob | _] = Fleet.Project.Onboard.main_status_check_contexts()
+      [glob | _] = Fleet.Project.Onboard.Faces.main_status_check_contexts()
       assert matches_glob?(workflow_name(read_wf("ci.yml")), glob)
     end
   end

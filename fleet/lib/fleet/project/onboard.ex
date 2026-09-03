@@ -66,19 +66,11 @@ defmodule Fleet.Project.Onboard do
 
   # Content + writing of the scaffold (pure templates, one subtree per face) — extracted:
   # no dependency on the orchestration, onboard calls it at the right moments of its sequence.
+  alias Fleet.Project.Onboard.Faces
+  alias Fleet.Project.Onboard.Repo
   alias Fleet.Project.Onboard.Scaffold
 
   require Logger
-
-  # Derived from the single authority of the container layout (Fleet.Layout).
-  @code_root Fleet.Layout.code_root()
-  @ops_root Fleet.Layout.ops_root()
-  @workshop_root Fleet.Layout.workshop_root()
-  # onboarding author = the system (it GENERATES the scaffold) — not the arch (mere relay), not the user
-  # (wrote nothing). committer = the human (git config) traces who initiated.
-  # System identity: SINGLE AUTHORITY = Fleet.Credentials.ForgeIdentity.system_identity/0
-  # (a name/email retyped here would be a divergence in the making with the gate).
-  defp onboard_author, do: Fleet.Credentials.ForgeIdentity.system_identity()
 
   @type result :: %{
           :repo => String.t(),
@@ -120,7 +112,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec onboard(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def onboard(name, opts \\ []) when is_binary(name) do
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     # `admit/3` porte le preambule commun aux cinq verbes d'entree — dont le refus de carte, qui
     # doit tomber AVANT que le depot existe : la regle vit chez le seul ecrivain
@@ -128,7 +120,7 @@ defmodule Fleet.Project.Onboard do
     # apres une creation, donc une compensation.
     with {:ok, org} <- required_org(opts),
          :ok <- admit(org, name, opts),
-         :ok <- ensure_catalogue_org_on_forge(org, opts),
+         :ok <- Repo.ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge("#{org}/#{name}", dirs, opts),
          {:ok, full_name} <- create_repo(name, org, opts) do
       case guarded_finish(full_name, dirs, name, opts) do
@@ -168,13 +160,13 @@ defmodule Fleet.Project.Onboard do
 
   defp finish_onboard(full_name, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
-         {:ok, url} <- repo_url(full_name, opts),
-         :ok <- seed_protocol_labels(full_name, opts),
-         :ok <- clone_main(url, dirs.code),
+         {:ok, url} <- Repo.repo_url(full_name, opts),
+         :ok <- Repo.seed_protocol_labels(full_name, opts),
+         :ok <- Faces.clone_main(url, dirs.code),
          :ok <- Scaffold.main(dirs.code, name, with_ci_stance(full_name, opts)),
          :ok <- write_declaration(dirs.code, full_name, opts),
-         :ok <- commit(dirs.code, "chore(onboard): scaffold initial du projet"),
-         :ok <- push(dirs.code, "main", false),
+         :ok <- Faces.commit(dirs.code, "chore(onboard): scaffold initial du projet"),
+         :ok <- Faces.push(dirs.code, "main", false),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            build_writer_face(
@@ -197,7 +189,7 @@ defmodule Fleet.Project.Onboard do
              name,
              opts
            ),
-         :ok <- lock_main(full_name, opts) do
+         :ok <- Faces.lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ready — main=#{dirs.code}, " <>
           "#{Fleet.Layout.ops_branch()}=#{dirs.ops}, #{Fleet.Layout.workshop_branch()}=#{dirs.workshop}"
@@ -210,10 +202,10 @@ defmodule Fleet.Project.Onboard do
   # Build-and-publish, for a repo we just created: the branch cannot pre-exist, so unlike
   # `ensure_face/7` there is nothing to clone.
   defp build_writer_face(_full_name, url, dir, branch, template, name, opts) do
-    with :ok <- init_face(dir, url, branch),
+    with :ok <- Faces.init_face(dir, url, branch),
          :ok <- Scaffold.face(dir, template, name, opts),
-         :ok <- commit(dir, "chore(onboard): init #{branch}") do
-      publish_face(dir, branch)
+         :ok <- Faces.commit(dir, "chore(onboard): init #{branch}") do
+      Faces.publish_face(dir, branch)
     end
   end
 
@@ -229,29 +221,18 @@ defmodule Fleet.Project.Onboard do
 
   defp compensate_onboard(full_name, dirs, reason, opts) do
     forge =
-      case delete_forge(full_name, opts) do
+      case Repo.delete_forge(full_name, opts) do
         {:ok, verdict} -> verdict
         {:error, e} -> {:delete_failed, e}
       end
 
     Logger.warning(
       "ProjectOnboard: onboard #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-        "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
-        "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-        "doc_dir #{inspect(compensate_dir(dirs.workshop))} " <>
+        "forge #{inspect(forge)}, project_dir #{inspect(Faces.compensate_dir(dirs.code))}, " <>
+        "work_dir #{inspect(Faces.compensate_dir(dirs.ops))}, " <>
+        "doc_dir #{inspect(Faces.compensate_dir(dirs.workshop))} " <>
         "(a clean retry is possible; incomplete legs above must be cleared first)"
     )
-  end
-
-  defp compensate_dir(dir) do
-    if File.exists?(dir) do
-      case nuke_dir(dir) do
-        :ok -> :removed
-        {:error, _} -> :removal_incomplete
-      end
-    else
-      :absent
-    end
   end
 
   # TROIS ISSUES, ET LA TROISIEME N'EST NI UN SUCCES NI UN ECHEC. Un appelant qui n'a pas de fleet
@@ -362,7 +343,7 @@ defmodule Fleet.Project.Onboard do
   def migrate(full_name, target_catalogue, opts \\ [])
       when is_binary(full_name) and is_binary(target_catalogue) do
     name = Fleet.Layout.project_name(full_name)
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     # La loi d'ordre, la meme qu'a l'import : les refus PURS et LOCAUX d'abord, la forge ensuite.
     # `refute_store` lit le manifeste de la cible ; le faire avant `require_target_installed` ferait
@@ -371,8 +352,8 @@ defmodule Fleet.Project.Onboard do
          :ok <- require_target_installed(target_catalogue),
          :ok <- refute_store(full_name, opts),
          {:ok, new_full_name} <-
-           repo_mod(opts).transfer_repo(full_name, target_catalogue, fc_opts(opts)),
-         {:ok, url} <- repo_url(new_full_name, opts),
+           Repo.repo_mod(opts).transfer_repo(full_name, target_catalogue, Repo.fc_opts(opts)),
+         {:ok, url} <- Repo.repo_url(new_full_name, opts),
          {:ok, repointed} <- repoint_faces(dirs, url) do
       Logger.info(
         "ProjectOnboard: #{full_name} MIGRE vers #{new_full_name} — " <>
@@ -497,9 +478,9 @@ defmodule Fleet.Project.Onboard do
   # l'autre lecteur (`Fleet.Application.CatalogueDeposits`) est derriere une frontiere que
   # `Fleet.Project` ne peut pas referencer — et on n'elargit pas une frontiere pour avoir raison.
   defp declared_catalogue_name(full_name, opts) do
-    fc = Keyword.put(fc_opts(opts), :ref, "HEAD")
+    fc = Keyword.put(Repo.fc_opts(opts), :ref, "HEAD")
 
-    case files_mod(opts).get_file(full_name, Fleet.Catalogue.manifest_file(), fc) do
+    case Repo.files_mod(opts).get_file(full_name, Fleet.Catalogue.manifest_file(), fc) do
       {:ok, %{content: yaml}} ->
         case Fleet.Catalogue.manifest_name(yaml) do
           {:ok, name} -> {:ok, name}
@@ -721,7 +702,7 @@ defmodule Fleet.Project.Onboard do
   # UNE ORG ILLISIBLE EST UN ECHEC, PAS UNE ORG VIDE. Rendre `[]` ferait lire « rien a importer » a
   # un `check` qui n'a simplement pas su demander, et les autres orgs, elles, restent lisibles.
   defp reconcile_org(org, mode, opts) do
-    case repo_mod(opts).list_org_repos(org, fc_opts(opts)) do
+    case Repo.repo_mod(opts).list_org_repos(org, Repo.fc_opts(opts)) do
       {:ok, names} ->
         names |> Enum.sort() |> Enum.flat_map(&reconcile_repo(&1, mode, opts))
 
@@ -740,9 +721,9 @@ defmodule Fleet.Project.Onboard do
 
   defp declared_project?(full_name, opts) do
     file = Fleet.Layout.project_declaration_file()
-    fc = Keyword.put(fc_opts(opts), :ref, "main")
+    fc = Keyword.put(Repo.fc_opts(opts), :ref, "main")
 
-    case files_mod(opts).get_file(full_name, file, fc) do
+    case Repo.files_mod(opts).get_file(full_name, file, fc) do
       {:ok, _} -> {:ok, true}
       {:error, :not_found} -> {:ok, false}
       # Une forge muette ne prouve pas l'absence de declaration : la nommer ici evite qu'un projet
@@ -752,7 +733,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp converge_project(full_name, :check, opts) do
-    dirs = face_dirs(Fleet.Layout.project_name(full_name), opts)
+    dirs = Faces.face_dirs(Fleet.Layout.project_name(full_name), opts)
 
     # LES TROIS FACES, PAS UNE. Un projet dont il manque une seule face n'est pas ouvert ici : son
     # architecte monterait un chemin absent. `check` ne tranche pas plus finement — il dit qu'il y a
@@ -822,7 +803,7 @@ defmodule Fleet.Project.Onboard do
     # l'humain serait alors verifie contre l'org d'un autre catalogue que celui du depot.
     org = full_name |> String.split("/") |> List.first()
     name = Fleet.Layout.project_name(full_name)
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     # ⚠ CE VERBE VERIFIE QUE LA CARTE EST DECLARABLE, COMME LES QUATRE AUTRES. Sans ce controle, un
     # depot importe avec une carte d'atelier (`scope: ticket`) ou une faute de frappe passe ici, la
@@ -830,7 +811,7 @@ defmodule Fleet.Project.Onboard do
     # `admit` (local) avant `refute_store` (un aller-retour forge) : la loi d'ordre en trois temps.
     with :ok <- admit(org, name, opts),
          :ok <- refute_store(full_name, opts),
-         :ok <- ensure_catalogue_org_on_forge(org, opts),
+         :ok <- Repo.ensure_catalogue_org_on_forge(org, opts),
          :ok <- refute_existing_or_converge(full_name, dirs, opts),
          :ok <- require_default_branch_main(full_name, opts) do
       case finish_import(full_name, dirs, name, opts) do
@@ -840,9 +821,9 @@ defmodule Fleet.Project.Onboard do
         {:error, reason} = err ->
           Logger.warning(
             "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-              "project_dir #{inspect(compensate_dir(dirs.code))}, " <>
-              "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-              "doc_dir #{inspect(compensate_dir(dirs.workshop))} #{remote_state(reason)}"
+              "project_dir #{inspect(Faces.compensate_dir(dirs.code))}, " <>
+              "work_dir #{inspect(Faces.compensate_dir(dirs.ops))}, " <>
+              "doc_dir #{inspect(Faces.compensate_dir(dirs.workshop))} #{remote_state(reason)}"
           )
 
           err
@@ -902,21 +883,21 @@ defmodule Fleet.Project.Onboard do
          :ok <- require_public_source(source, opts) do
       name = Keyword.get(opts, :name, src_name)
       full_name = "#{catalogue}/#{name}"
-      dirs = face_dirs(name, opts)
+      dirs = Faces.face_dirs(name, opts)
 
       with :ok <- admit(catalogue, name, opts),
-           :ok <- ensure_catalogue_org_on_forge(catalogue, opts),
+           :ok <- Repo.ensure_catalogue_org_on_forge(catalogue, opts),
            :ok <- require_machine_absent(full_name, dirs),
-           :ok <- require_forge_absent(full_name, opts),
-           {:ok, source_url} <- repo_url(source, opts) do
+           :ok <- Repo.require_forge_absent(full_name, opts),
+           {:ok, source_url} <- Repo.repo_url(source, opts) do
         scratch = external_scratch_dir(name)
 
         try do
           with :ok <- clone_deposit(source_url, scratch, opts),
                :ok <- adoption_gate(scratch),
                :ok <- normalize_default_branch(scratch),
-               {:ok, forge_url} <- repo_url(full_name, opts),
-               {:ok, full_name} <- create_empty_repo(name, catalogue, opts) do
+               {:ok, forge_url} <- Repo.repo_url(full_name, opts),
+               {:ok, full_name} <- Repo.create_empty_repo(name, catalogue, opts) do
             case finish_external(
                    full_name,
                    forge_url,
@@ -959,8 +940,8 @@ defmodule Fleet.Project.Onboard do
   """
   @spec deposit_candidates(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def deposit_candidates(human, opts \\ []) when is_binary(human) do
-    repo = repo_mod(opts)
-    fc = fc_opts(opts)
+    repo = Repo.repo_mod(opts)
+    fc = Repo.fc_opts(opts)
 
     with {:ok, mine} <- repo.list_user_repos(human, fc),
          {:ok, enrolled} <- enrolled_names(repo, fc) do
@@ -1038,7 +1019,7 @@ defmodule Fleet.Project.Onboard do
   # public org repo. A visibility change nobody asked for is worse than a refusal, and it is
   # invisible exactly when it happens.
   defp require_public_source(source, opts) do
-    case repo_mod(opts).private?(source, fc_opts(opts)) do
+    case Repo.repo_mod(opts).private?(source, Repo.fc_opts(opts)) do
       {:ok, false} -> :ok
       {:ok, true} -> {:error, {:deposit_not_public, source}}
       {:error, reason} -> {:error, {:deposit_visibility_unreadable, source, reason}}
@@ -1070,17 +1051,17 @@ defmodule Fleet.Project.Onboard do
   # Ici il preexiste, on ne peut donc defaire QUE ce qu'on a soi-meme pousse — d'ou l'inventaire
   # remonte par `ensure_writer_faces/5`.
   defp finish_import(full_name, dirs, name, opts) do
-    with {:ok, url} <- repo_url(full_name, opts),
-         :ok <- clone_main(url, dirs.code) do
-      case ensure_writer_faces(full_name, url, dirs, name, opts) do
+    with {:ok, url} <- Repo.repo_url(full_name, opts),
+         :ok <- Faces.clone_main(url, dirs.code) do
+      case Faces.ensure_writer_faces(full_name, url, dirs, name, opts) do
         {:ok, published} -> lock_and_announce(full_name, dirs, published, opts)
-        {:error, reason, published} -> undo_published(full_name, published, reason, opts)
+        {:error, reason, published} -> Faces.undo_published(full_name, published, reason, opts)
       end
     end
   end
 
   defp lock_and_announce(full_name, dirs, published, opts) do
-    case lock_main(full_name, opts) do
+    case Faces.lock_main(full_name, opts) do
       :ok ->
         Logger.info(
           "ProjectOnboard: #{full_name} imported — main=#{dirs.code}, " <>
@@ -1090,43 +1071,7 @@ defmodule Fleet.Project.Onboard do
         {:ok, onboard_result(full_name, dirs, opts)}
 
       {:error, reason} ->
-        undo_published(full_name, published, reason, opts)
-    end
-  end
-
-  # LA COMPENSATION SE DIT DANS LE RETOUR, pas seulement dans un log — parce que l'appelant decide
-  # a partir du retour, et que ce qu'il en deduit ici est « je peux retenter proprement ». Tant que
-  # tout a ete retire, c'est vrai et l'erreur d'origine passe intacte. Des qu'une suppression
-  # echoue, elle devient fausse : le depot d'un tiers porte une branche que cette tentative y a
-  # laissee, et le retry la lira comme preexistante. Ce cas-la porte donc son propre nom.
-  #
-  # ⚠ On ne supprime QUE `published`. Une branche clonee etait deja la ; une branche dont la
-  # lecture a echoue n'a jamais ete touchee (`ensure_face` refuse avant d'ecrire).
-  defp undo_published(_full_name, [], reason, _opts), do: {:error, reason}
-
-  defp undo_published(full_name, published, reason, opts) do
-    outcomes =
-      Enum.map(published, fn branch ->
-        {branch, repo_mod(opts).delete_branch(full_name, branch, fc_opts(opts))}
-      end)
-
-    case Enum.reject(outcomes, &match?({_b, {:ok, _}}, &1)) do
-      [] ->
-        Logger.warning(
-          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) — forge compensated: " <>
-            "#{inspect(Enum.map(outcomes, fn {b, {:ok, o}} -> {b, o} end))}"
-        )
-
-        {:error, reason}
-
-      left ->
-        Logger.error(
-          "ProjectOnboard: import #{full_name} FAILED (#{inspect(reason)}) and its forge " <>
-            "compensation did NOT complete — branches pushed by this attempt SURVIVE on a " <>
-            "third-party repo: #{inspect(left)}"
-        )
-
-        {:error, {:import_not_compensated, reason, left}}
+        Faces.undo_published(full_name, published, reason, opts)
     end
   end
 
@@ -1140,7 +1085,7 @@ defmodule Fleet.Project.Onboard do
   @spec open(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def open(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- require_all_faces_on_machine(full_name, dirs),
@@ -1155,7 +1100,7 @@ defmodule Fleet.Project.Onboard do
   defp unpark(full_name, opts) do
     forge = forge_issues(opts)
 
-    case forge.list_open_issues(full_name, fc_opts(opts)) do
+    case forge.list_open_issues(full_name, Repo.fc_opts(opts)) do
       {:ok, issues} ->
         issues
         |> Enum.filter(&Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
@@ -1172,7 +1117,7 @@ defmodule Fleet.Project.Onboard do
     Enum.reduce_while(markers, :ok, fn %{"number" => n}, :ok ->
       # `closure: :marker` — ce ne sont PAS des tickets mais les marqueurs de parking de l'onboard :
       # rien a estampiller, et surtout pas un `stage/*` qui les ferait ressembler a du travail.
-      case forge.close_issue(full_name, n, Keyword.put(fc_opts(opts), :closure, :marker)) do
+      case forge.close_issue(full_name, n, Keyword.put(Repo.fc_opts(opts), :closure, :marker)) do
         {:ok, _} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, {:unpark_failed, {n, reason}}}}
       end
@@ -1219,7 +1164,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec list_projects(keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_projects(opts \\ []) do
-    root = Keyword.get(opts, :code_root, @code_root)
+    root = Faces.code_root(opts)
 
     case File.ls(root) do
       {:ok, entries} ->
@@ -1255,7 +1200,7 @@ defmodule Fleet.Project.Onboard do
          {:ok, issues} <-
            forge_issues(opts).list_open_issues(
              full_name,
-             Keyword.put(fc_opts(opts), :assigned_by, human)
+             Keyword.put(Repo.fc_opts(opts), :assigned_by, human)
            ) do
       numbers =
         issues
@@ -1304,7 +1249,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp parked_state(full_name, opts) do
-    case forge_issues(opts).list_open_issues(full_name, fc_opts(opts)) do
+    case forge_issues(opts).list_open_issues(full_name, Repo.fc_opts(opts)) do
       {:ok, issues} ->
         parked? = Enum.any?(issues, &Fleet.Forge.Protocol.parked_issue_title?(&1["title"]))
         %{"state" => if(parked?, do: "parked", else: "open")}
@@ -1336,7 +1281,7 @@ defmodule Fleet.Project.Onboard do
   @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def close_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
+    proj_dir = Path.join(Faces.code_root(opts), name)
     forge = forge_issues(opts)
 
     with :ok <- validate_name(name),
@@ -1357,13 +1302,13 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp require_proven_identity(full_name, proj_dir, opts) do
-    if origin_full_name(proj_dir, opts) == {:ok, full_name},
+    if Repo.origin_full_name(proj_dir, opts) == {:ok, full_name},
       do: :ok,
       else: {:error, {:identity_unproven, full_name}}
   end
 
   defp read_parked_state(forge, full_name, opts) do
-    case forge.list_open_issues(full_name, fc_opts(opts)) do
+    case forge.list_open_issues(full_name, Repo.fc_opts(opts)) do
       {:ok, issues} -> {:ok, issues}
       {:error, reason} -> {:error, {:close_failed, {:parked_state_unreadable, reason}}}
     end
@@ -1372,7 +1317,7 @@ defmodule Fleet.Project.Onboard do
   defp do_close(full_name, forge, opts) do
     case Fleet.Credentials.Human.current() do
       {:ok, human} ->
-        issue_opts = Keyword.put(fc_opts(opts), :assignees, [human])
+        issue_opts = Keyword.put(Repo.fc_opts(opts), :assignees, [human])
         title = Fleet.Forge.Protocol.parked_issue_title()
 
         case forge.create_issue(full_name, title, parked_marker_body(), issue_opts) do
@@ -1408,19 +1353,19 @@ defmodule Fleet.Project.Onboard do
   """
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def adopt_project(name, opts \\ []) when is_binary(name) do
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     with {:ok, org} <- required_org(opts),
          full_name = "#{org}/#{name}",
          :ok <- refute_store_address(full_name, name),
          :ok <- admit(org, name, opts),
          :ok <- require_local_main(dirs.code),
-         :ok <- ensure_catalogue_org_on_forge(org, opts),
+         :ok <- Repo.ensure_catalogue_org_on_forge(org, opts),
          :ok <- require_adoptable_origin(full_name, dirs.code, opts),
          {:ok, states} <- classify_adopt_writer_faces(dirs),
-         :ok <- require_forge_absent(full_name, opts),
-         {:ok, url} <- repo_url(full_name, opts),
-         {:ok, full_name} <- create_empty_repo(name, org, opts) do
+         :ok <- Repo.require_forge_absent(full_name, opts),
+         {:ok, url} <- Repo.repo_url(full_name, opts),
+         {:ok, full_name} <- Repo.create_empty_repo(name, org, opts) do
       case finish_adopt(full_name, url, dirs, states, name, opts) do
         {:ok, result} ->
           {:ok, result}
@@ -1443,7 +1388,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp require_adoptable_origin(full_name, proj_dir, opts) do
-    case origin_full_name(proj_dir, opts) do
+    case Repo.origin_full_name(proj_dir, opts) do
       {:ok, ^full_name} -> :ok
       {:ok, other} -> {:error, {:origin_conflict, other}}
       {:error, _no_origin} -> :ok
@@ -1477,30 +1422,10 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  defp require_forge_absent(full_name, opts) do
-    case repo_mod(opts).default_branch(full_name, fc_opts(opts)) do
-      {:ok, _branch} -> {:error, {:repo_already_exists, full_name}}
-      {:error, {:http, 404, _}} -> :ok
-      {:error, reason} -> {:error, {:forge_unverifiable, reason}}
-    end
-  end
-
-  defp create_empty_repo(name, org, opts) do
-    desc = Keyword.get(opts, :description, "")
-
-    result =
-      repo_mod(opts).create_repo(
-        name,
-        Keyword.merge(opts, org: org, description: desc, auto_init: false)
-      )
-
-    classify_create_repo(result, org, name)
-  end
-
   defp finish_adopt(full_name, url, dirs, states, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
-         :ok <- seed_protocol_labels(full_name, opts),
-         :ok <- set_origin(dirs.code, url),
+         :ok <- Repo.seed_protocol_labels(full_name, opts),
+         :ok <- Faces.set_origin(dirs.code, url),
          :ok <- ensure_declaration(dirs.code, full_name, opts),
          :ok <-
            ensure_ci_workflows(
@@ -1509,7 +1434,7 @@ defmodule Fleet.Project.Onboard do
              with_ci_stance(full_name, opts),
              "ci(adopt): rail CI du depot (.gitea/workflows)"
            ),
-         :ok <- push(dirs.code, "main", true),
+         :ok <- Faces.push(dirs.code, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          :ok <-
            adopt_face(
@@ -1532,20 +1457,13 @@ defmodule Fleet.Project.Onboard do
              name,
              opts
            ),
-         :ok <- lock_main(full_name, opts) do
+         :ok <- Faces.lock_main(full_name, opts) do
       Logger.info(
         "ProjectOnboard: #{full_name} ADOPTED from disk — main published, " <>
           "#{Fleet.Layout.ops_branch()} and #{Fleet.Layout.workshop_branch()} up, protection placed"
       )
 
       {:ok, onboard_result(full_name, dirs, opts)}
-    end
-  end
-
-  defp set_origin(dir, url) do
-    case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
-      {:ok, _present} -> GitOps.run(["-C", dir, "remote", "set-url", "origin", url], auth: false)
-      {:error, _} -> GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
     end
   end
 
@@ -1591,15 +1509,15 @@ defmodule Fleet.Project.Onboard do
   @spec reset_ci_rail(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def reset_ci_rail(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
+    proj_dir = Path.join(Faces.code_root(opts), name)
 
     with :ok <- require_on_machine(full_name, proj_dir),
          :ok <- require_justification(opts),
-         {:ok, url} <- repo_url(full_name, opts) do
+         {:ok, url} <- Repo.repo_url(full_name, opts) do
       scratch = scratch_dir(name)
 
       try do
-        with :ok <- clone_main(url, scratch),
+        with :ok <- Faces.clone_main(url, scratch),
              {:ok, files} <-
                Scaffold.reset_ci_workflows(scratch, name, with_ci_stance(full_name, opts)),
              {:ok, :changed} <- revision_changed(scratch) do
@@ -1620,9 +1538,9 @@ defmodule Fleet.Project.Onboard do
   defp publish_ci_rail(full_name, scratch, files, opts) do
     msg = "ci(reset): rail CI remis a l'etat livre (#{Enum.join(files, ", ")})"
 
-    with :ok <- commit(scratch, msg),
+    with :ok <- Faces.commit(scratch, msg),
          :ok <- lift_protection(full_name, opts) do
-      case push(scratch, "main", false) do
+      case Faces.push(scratch, "main", false) do
         :ok ->
           protection = restore_protection(full_name, opts)
 
@@ -1673,7 +1591,7 @@ defmodule Fleet.Project.Onboard do
           "ProjectOnboard: rail CI pose sur un depot importe — #{Enum.join(added, ", ")}"
         )
 
-        commit(proj_dir, msg)
+        Faces.commit(proj_dir, msg)
 
       {:error, _} = err ->
         err
@@ -1695,7 +1613,7 @@ defmodule Fleet.Project.Onboard do
       :ok
     else
       with :ok <- write_declaration(proj_dir, full_name, opts) do
-        commit(proj_dir, msg)
+        Faces.commit(proj_dir, msg)
       end
     end
   end
@@ -1721,22 +1639,22 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp adopt_face(:absent, url, dir, branch, template, name, opts) do
-    with :ok <- init_face(dir, url, branch),
+    with :ok <- Faces.init_face(dir, url, branch),
          :ok <- Scaffold.face(dir, template, name, opts),
-         :ok <- commit(dir, "chore(adopt): init #{branch}") do
-      publish_face(dir, branch)
+         :ok <- Faces.commit(dir, "chore(adopt): init #{branch}") do
+      Faces.publish_face(dir, branch)
     end
   end
 
   defp adopt_face(:present_git, url, dir, branch, _template, _name, _opts) do
-    with :ok <- set_origin(dir, url) do
-      publish_face(dir, branch)
+    with :ok <- Faces.set_origin(dir, url) do
+      Faces.publish_face(dir, branch)
     end
   end
 
   defp compensate_adopt(full_name, dirs, states, reason, opts) do
     forge =
-      case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
+      case Repo.repo_mod(opts).delete_repo(full_name, Repo.fc_opts(opts)) do
         :ok -> :deleted
         {:error, e} -> {:delete_failed, e}
       end
@@ -1745,7 +1663,7 @@ defmodule Fleet.Project.Onboard do
     # per-face because the states are: adopting a project with a ops of its own and no
     # workshop must not delete the former while cleaning up the latter.
     undo = fn state, dir ->
-      if state == :absent, do: compensate_dir(dir), else: :kept_preexisting
+      if state == :absent, do: Faces.compensate_dir(dir), else: :kept_preexisting
     end
 
     Logger.warning(
@@ -1793,7 +1711,7 @@ defmodule Fleet.Project.Onboard do
   """
   @spec import_external(String.t(), String.t(), keyword()) :: {:ok, result()} | {:error, term()}
   def import_external(url, name, opts \\ []) when is_binary(url) and is_binary(name) do
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
     # Injection seam over the pure gate (tests drive file:// fixtures) — prod default enforces.
     url_gate = Keyword.get(opts, :url_gate, &default_external_url_gate/1)
 
@@ -1802,17 +1720,17 @@ defmodule Fleet.Project.Onboard do
          :ok <- admit(org, name, opts),
          full_name = "#{org}/#{name}",
          :ok <- url_gate.(url),
-         :ok <- ensure_catalogue_org_on_forge(org, opts),
+         :ok <- Repo.ensure_catalogue_org_on_forge(org, opts),
          :ok <- require_machine_absent(full_name, dirs),
-         :ok <- require_forge_absent(full_name, opts) do
+         :ok <- Repo.require_forge_absent(full_name, opts) do
       scratch = external_scratch_dir(name)
 
       try do
         with :ok <- clone_external(url, scratch, opts),
              :ok <- adoption_gate(scratch),
              :ok <- normalize_default_branch(scratch),
-             {:ok, forge_url} <- repo_url(full_name, opts),
-             {:ok, full_name} <- create_empty_repo(name, org, opts) do
+             {:ok, forge_url} <- Repo.repo_url(full_name, opts),
+             {:ok, full_name} <- Repo.create_empty_repo(name, org, opts) do
           source_host =
             case URI.parse(url).host do
               h when h in [nil, ""] -> "external"
@@ -1856,7 +1774,7 @@ defmodule Fleet.Project.Onboard do
 
   defp finish_external(full_name, forge_url, scratch, dirs, name, opts) do
     with :ok <- Fleet.Forge.WriteSpacing.gap(opts),
-         :ok <- seed_protocol_labels(full_name, opts),
+         :ok <- Repo.seed_protocol_labels(full_name, opts),
          # The commit message names the ACTUAL door: this leg is shared by the external import and
          # the deposit, and a deposit whose history says "import-externe" tells the project's own
          # log something that did not happen.
@@ -1868,8 +1786,8 @@ defmodule Fleet.Project.Onboard do
              with_ci_stance(full_name, opts),
              "ci(import): rail CI du depot (.gitea/workflows)"
            ),
-         :ok <- set_origin(scratch, forge_url),
-         :ok <- push(scratch, "main", true),
+         :ok <- Faces.set_origin(scratch, forge_url),
+         :ok <- Faces.push(scratch, "main", true),
          :ok <- Fleet.Forge.WriteSpacing.gap(opts),
          {:ok, result} <- finish_import(full_name, dirs, name, opts) do
       Logger.info(
@@ -2025,16 +1943,16 @@ defmodule Fleet.Project.Onboard do
   # unlike adopt, EVERYTHING local here was created by this call.
   defp compensate_external(full_name, dirs, reason, opts) do
     forge =
-      case repo_mod(opts).delete_repo(full_name, fc_opts(opts)) do
+      case Repo.repo_mod(opts).delete_repo(full_name, Repo.fc_opts(opts)) do
         :ok -> :deleted
         {:error, e} -> {:delete_failed, e}
       end
 
     Logger.warning(
       "ProjectOnboard: import_external #{full_name} FAILED (#{inspect(reason)}) — compensated: " <>
-        "forge #{inspect(forge)}, project_dir #{inspect(compensate_dir(dirs.code))}, " <>
-        "work_dir #{inspect(compensate_dir(dirs.ops))}, " <>
-        "doc_dir #{inspect(compensate_dir(dirs.workshop))} (a clean retry is possible)"
+        "forge #{inspect(forge)}, project_dir #{inspect(Faces.compensate_dir(dirs.code))}, " <>
+        "work_dir #{inspect(Faces.compensate_dir(dirs.ops))}, " <>
+        "doc_dir #{inspect(Faces.compensate_dir(dirs.workshop))} (a clean retry is possible)"
     )
   end
 
@@ -2050,11 +1968,11 @@ defmodule Fleet.Project.Onboard do
   @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def delete_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    dirs = face_dirs(name, opts)
+    dirs = Faces.face_dirs(name, opts)
 
     with :ok <- validate_name(name),
          :ok <- require_force(full_name, opts),
-         {:ok, forge} <- delete_forge(full_name, opts) do
+         {:ok, forge} <- Repo.delete_forge(full_name, opts) do
       # THE WORKERS DIE BEFORE THEIR WORLD DOES. Stop the architect alone and an engineer in flight
       # outlives the removal of its own project: its workspace still exists, so it does not even
       # crash — it keeps reading a reference that is no longer there and carries on.
@@ -2105,18 +2023,18 @@ defmodule Fleet.Project.Onboard do
   @spec revise_card(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def revise_card(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
-    proj_dir = Path.join(Keyword.get(opts, :code_root, @code_root), name)
+    proj_dir = Path.join(Faces.code_root(opts), name)
     card = Keyword.get(opts, :workflow_map)
 
     with :ok <- require_on_machine(full_name, proj_dir),
          :ok <- require_justification(opts),
          :ok <- require_loadable_card(card, full_name, opts),
-         {:ok, url} <- repo_url(full_name, opts) do
+         {:ok, url} <- Repo.repo_url(full_name, opts) do
       previous = declared_card(proj_dir)
       scratch = scratch_dir(name)
 
       try do
-        with :ok <- clone_main(url, scratch),
+        with :ok <- Faces.clone_main(url, scratch),
              :ok <-
                write_declaration(
                  scratch,
@@ -2226,9 +2144,9 @@ defmodule Fleet.Project.Onboard do
     jury_delta = jury_delta(previous, card, opts)
     msg = "card revision: #{previous || "(undeclared)"} -> #{card}#{jury_suffix(jury_delta)}"
 
-    with :ok <- commit(scratch, msg),
+    with :ok <- Faces.commit(scratch, msg),
          :ok <- lift_protection(full_name, opts) do
-      case push(scratch, "main", false) do
+      case Faces.push(scratch, "main", false) do
         :ok ->
           sync_showcase(full_name, opts)
           protection = restore_protection(full_name, opts)
@@ -2308,14 +2226,14 @@ defmodule Fleet.Project.Onboard do
       push_whitelist_usernames: [Fleet.Credentials.ForgeIdentity.system_identity().name]
     }
 
-    case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do
+    case Repo.repo_mod(opts).protect_branch(repo, rule, Repo.fc_opts(opts)) do
       {:ok, _outcome} -> :ok
       {:error, reason} -> {:error, {:protection_lift_failed, reason}}
     end
   end
 
   defp restore_protection(repo, opts) do
-    case protect_main(repo, opts) do
+    case Faces.protect_main(repo, opts) do
       :ok ->
         :restored
 
@@ -2357,7 +2275,7 @@ defmodule Fleet.Project.Onboard do
 
   defp nuke_if_is(full_name, dir, opts) do
     if File.exists?(dir),
-      do: nuke_proven(full_name, dir, origin_full_name(dir, opts)),
+      do: nuke_proven(full_name, dir, Repo.origin_full_name(dir, opts)),
       else: :absent
   end
 
@@ -2380,7 +2298,7 @@ defmodule Fleet.Project.Onboard do
   end
 
   defp remove_proven(dir) do
-    case nuke_dir(dir) do
+    case Faces.nuke_dir(dir) do
       :ok -> :removed
       {:error, _} -> :removal_incomplete
     end
@@ -2411,41 +2329,8 @@ defmodule Fleet.Project.Onboard do
     end
   end
 
-  defp origin_full_name(dir, _opts) do
-    case GitOps.read(["-C", dir, "config", "--get", "remote.origin.url"]) do
-      {:ok, url} -> {:ok, origin_to_full_name(url)}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp origin_to_full_name(url) do
-    url
-    |> String.trim()
-    |> String.trim_trailing("/")
-    |> String.replace_suffix(".git", "")
-    |> String.split("/")
-    |> Enum.take(-2)
-    |> Enum.join("/")
-  end
-
   defp require_force(full_name, opts) do
     if Keyword.get(opts, :force, false), do: :ok, else: {:error, {:force_required, full_name}}
-  end
-
-  defp delete_forge(full_name, opts) do
-    repo_mod = repo_mod(opts)
-    fc = fc_opts(opts)
-
-    case repo_mod.default_branch(full_name, fc) do
-      {:error, {:http, 404, _}} ->
-        {:ok, :absent}
-
-      {:error, reason} ->
-        {:error, {:forge_check_failed, reason}}
-
-      {:ok, _branch} ->
-        with :ok <- repo_mod.delete_repo(full_name, fc), do: {:ok, :deleted}
-    end
   end
 
   # Best-effort like `stop_architect/2` below, and for the same reason: the faces are already
@@ -2487,17 +2372,6 @@ defmodule Fleet.Project.Onboard do
       :error
   end
 
-  defp nuke_dir(dir) do
-    case File.rm_rf(dir) do
-      {:ok, _} ->
-        :ok
-
-      {:error, reason, path} ->
-        Logger.warning("ProjectOnboard: reset could not fully remove #{path}: #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
   # ALL THREE faces, and the doc one is not optional here: `open` is what hands a project to the
   # architect, whose producer path is on `doc`. Opening a project whose doc face never landed would
   # succeed and then fail at the first documentary ticket, far from the cause.
@@ -2515,49 +2389,12 @@ defmodule Fleet.Project.Onboard do
   # « ce depot est-il enrollable ici ? » a une seule autorite, et c'est le catalogue du proprietaire.
 
   defp require_default_branch_main(full_name, opts) do
-    case repo_mod(opts).default_branch(full_name, fc_opts(opts)) do
+    case Repo.repo_mod(opts).default_branch(full_name, Repo.fc_opts(opts)) do
       {:ok, "main"} -> :ok
       {:ok, other} -> {:error, {:unexpected_default_branch, other}}
       {:error, _} = err -> err
     end
   end
-
-  # L'INVENTAIRE SE CONSTRUIT EN AVANCANT, il ne se prend pas d'avance : une branche n'entre dans la
-  # liste que quand son push a REUSSI, donc chaque entree est une mutation prouvee de cette
-  # tentative. Un etat releve avant la boucle serait deja perime au premier push, et c'est
-  # exactement sur cet ecart qu'une compensation supprime ce qu'elle n'a pas cree.
-  #
-  # L'echec porte l'inventaire avec lui (`{:error, reason, published}`) parce que les faces sont
-  # posees EN SEQUENCE : `ops` peut etre publiee avant que `workshop` echoue, et c'est le cas exact
-  # que la fiche 6-124 decrit.
-  #
-  # ⚠ LE MODE EST UN FAIT DE LAYOUT, ET IL SE DECLARE PLUTOT QUE DE SE LAISSER A L'UMASK. Les faces
-  # vivent sous des racines PARTAGEES, donc un projet ouvert par un humain est vu par les autres.
-  # `workshop` est la seule montee en **rw** : heritant son mode de l'umask, le second humain a le
-  # groupe mais PAS le bit d'ecriture, et ses pods meurent a la premiere ecriture avec une erreur
-  # qui accuse bwrap. `ops` est montee `ro` et garde le mode plus etroit — le declarer ici est ce
-  # qui rend la difference LISIBLE.
-  defp ensure_writer_faces(full_name, url, dirs, name, opts) do
-    faces = [
-      %{dir: dirs.ops, branch: Fleet.Layout.ops_branch(), template: "ops", mode: 0o2755},
-      %{
-        dir: dirs.workshop,
-        branch: Fleet.Layout.workshop_branch(),
-        template: "workshop",
-        mode: 0o2775
-      }
-    ]
-
-    Enum.reduce_while(faces, {:ok, []}, fn %{branch: branch} = face, {:ok, published} ->
-      case ensure_face(full_name, url, face, name, opts) do
-        {:ok, :published} -> {:cont, {:ok, published ++ [branch]}}
-        {:ok, :cloned} -> {:cont, {:ok, published}}
-        {:error, reason} -> {:halt, {:error, reason, published}}
-      end
-    end)
-  end
-
-  defp lock_main(full_name, opts), do: protect_main(full_name, opts)
 
   @doc """
   Reprojects the canonical `main` protection for a fully seeded project.
@@ -2571,7 +2408,7 @@ defmodule Fleet.Project.Onboard do
     opts = Keyword.put(forge_opts, :forge_opts, forge_opts)
 
     case seeded_project?(repo, opts) do
-      {:ok, true} -> protect_main(repo, opts)
+      {:ok, true} -> Faces.protect_main(repo, opts)
       {:ok, false} -> :ok
       {:error, reason} -> {:error, {:seeded_unreadable, reason}}
     end
@@ -2593,122 +2430,7 @@ defmodule Fleet.Project.Onboard do
   # qui ne porte pas de branche `ops` n'est pas un projet, quel que soit son nom. Le magasin d'un
   # catalogue n'en porte pas — il est donc deja hors de portee, sans que rien n'ait a le nommer.
   defp seeded_project?(repo, opts) do
-    repo_mod(opts).branch_exists?(repo, "ops", fc_opts(opts))
-  end
-
-  @doc """
-  Les contextes de statut EXIGÉS sur `main` d'un projet — l'autorité, et la seule.
-
-  Extrait de la règle ci-dessous parce qu'un SECOND lecteur la lit : le template
-  livre désormais des workflows de SONDE (`probe-*`), dont toute la protection tient à ce que leur
-  contexte ne matche PAS ce glob. Une sonde renommée `CI-…` deviendrait un statut requis et son
-  rouge bloquerait le merge — on aurait retiré le CI de la boucle en croyant l'augmenter.
-
-  Le test qui garde ça (`project_template_workflows_test`) lit CETTE fonction. Recopier `"CI / *"`
-  chez lui aurait fait deux vérités d'un même fait, et c'est celle du test qui aurait survécu au
-  jour où celle-ci change.
-  """
-  @spec main_status_check_contexts() :: [String.t()]
-  def main_status_check_contexts, do: ["CI / *"]
-
-  defp protect_main(repo, opts) do
-    rule = %{
-      rule_name: "main",
-      required_approvals: length(Roles.project_jury(repo, opts)),
-      dismiss_stale_approvals: true,
-      block_on_rejected_reviews: true,
-      enable_push: false,
-      # THE CI GATE IS THE FORGE'S, NOT THE RUNTIME'S. Measured on a live bench: a PR
-      # whose head carried `CI / ci (push)` = failure was promoted, and the PR showed no check at
-      # all. Two doors were open at once — nothing in `lib/` reads a commit status (the seal merges
-      # on jury verdicts alone), and the forge rule had `enable_status_check: false`. The rail ran,
-      # produced a verdict, and nobody was listening.
-      #
-      # It belongs HERE rather than in the seal: the forge IS the state machine, so a gate the
-      # runtime enforces is a gate that a human pressing "merge" walks straight through. Projected
-      # as protection, it binds every actor.
-      #
-      # `CI / *` and not the exact contexts: Gitea's Actions contexts are
-      # `<workflow name> / <job> (<trigger>)`, so a commit carries BOTH `(push)` and
-      # `(pull_request)`. The glob covers both and survives a project renaming its JOB — which the
-      # shipped workflow explicitly invites ("chaque projet le RÉÉCRIT quand il sait ce qu'il est").
-      # What it does NOT survive is a project renaming the WORKFLOW away from `CI`; that is the
-      # coupling this leaves, deliberately, because the alternative (`*`) would require every
-      # status any tool ever posts on the commit.
-      enable_status_check: true,
-      status_check_contexts: main_status_check_contexts()
-    }
-
-    case repo_mod(opts).protect_branch(repo, rule, fc_opts(opts)) do
-      {:ok, outcome} -> announce_protection(repo, rule, outcome)
-      {:error, reason} -> {:error, {:protect_main, reason}}
-    end
-  end
-
-  defp announce_protection(_repo, _rule, :unchanged), do: :ok
-
-  defp announce_protection(repo, rule, outcome) when outcome in [:created, :updated] do
-    Logger.info(
-      "ProjectOnboard: #{repo} main-protection #{outcome} " <>
-        "(approvals=#{rule.required_approvals}, direct push refused)"
-    )
-
-    :ok
-  end
-
-  defp fc_opts(opts), do: Keyword.get(opts, :forge_opts, [])
-
-  defp repo_mod(opts), do: Keyword.get(opts, :forge_repo, ForgeClient.Repo)
-
-  defp files_mod(opts), do: Keyword.get(opts, :forge_files, ForgeClient.Files)
-
-  # L'ORG DU CATALOGUE EXISTE-T-ELLE SUR CETTE FORGE ? C'est la SEULE question que cette porte pose,
-  # et elle la pose DIRECTEMENT.
-  #
-  # ⚠ ELLE NE VERIFIE PAS L'HUMAIN, et ce n'est pas un trou : l'admission est tenue UNE FOIS au
-  # lancement — le BEAM refuse de demarrer sous un uid systeme et herite de cet uid pour ses pods.
-  # Le verifier ici exigerait de l'humain un droit qu'il a deja et n'utilise pas : l'org est
-  # publique donc il LIT, et ce n'est pas lui qui ecrit mais le JETON SYSTEME.
-  #
-  # ⚠ ET LE 404 NE SE DEDUIT PAS D'UNE AUTRE QUESTION : porte par la branche d'erreur d'un test
-  # voisin, il ne tombe que si CE test-la rend 404 — donc jamais quand la reponse arrive autrement.
-  # La question se pose EN DIRECT.
-  #
-  # ⚠ `org_exists?/2` ET PAS UNE SONDE SUR LES COMPTES : dans Gitea une org est une ligne de la MEME
-  # table `user`, donc un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
-  # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test rendait
-  # `true` et le seul message qui nomme le geste manquant retombait en erreur brute.
-  defp ensure_catalogue_org_on_forge(org, opts) do
-    users = Keyword.get(opts, :forge_users, ForgeClient.Repo)
-
-    case users.org_exists?(org, fc_opts(opts)) do
-      {:ok, true} ->
-        :ok
-
-      # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus local lit le
-      # materiel present sur la boite ; celui-ci demande a la forge si l'org existe. Les deux ne
-      # peuvent diverger qu'entre les deux moities d'un install interrompu, et c'est precisement ce
-      # cas-la qu'il faut nommer : sans lui l'appelant recevrait, deux gestes plus tard, un « user
-      # redirect does not exist [name: web] / GetOrgByName » dont personne ne remonte jusqu'a « le
-      # materiel est ici et la forge ne porte pas son org ».
-      {:ok, false} ->
-        {:error, {:catalogue_not_installed, org, half_install_gesture(org)}}
-
-      # ON N'HABILLE PAS UNE LECTURE RATEE D'UN DIAGNOSTIC INVENTE : forge injoignable, jeton mort,
-      # 500 — l'erreur remonte brute, et l'appelant sait qu'il n'a pas mesure.
-      {:error, reason} ->
-        {:error, {:forge_preflight_failed, reason}}
-    end
-  end
-
-  # UNE SEULE FORME RESTE, donc plus d'atome de tag ni d'argument ignore : elles etaient la
-  # forme d'une famille (`:account`, `:team`, `:team_read`) morte avec le preflight humain.
-  defp half_install_gesture(org) do
-    "the catalogue '#{org}' has its material on this box but its org does NOT exist on the forge — " <>
-      "half an install. Nothing can be onboarded into it until the forge carries the org and its " <>
-      "role accounts, and ONE gesture lays both: `lcars catalogue install #{org}`, played by an " <>
-      "admin inside the box. Replaying it is the fix — it is convergent, and it is also how the " <>
-      "material got here. `lcars catalogue list` shows what the forge actually carries."
+    Repo.repo_mod(opts).branch_exists?(repo, "ops", Repo.fc_opts(opts))
   end
 
   # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
@@ -2760,7 +2482,7 @@ defmodule Fleet.Project.Onboard do
   defp satisfied_end_state?(full_name, dirs, opts) do
     ours? =
       Enum.all?([dirs.code, dirs.ops, dirs.workshop], fn dir ->
-        origin_full_name(dir, opts) == {:ok, full_name}
+        Repo.origin_full_name(dir, opts) == {:ok, full_name}
       end)
 
     # ⚠ SITE 2 SUR 3 — LA DIRECTION SURE EST L'INVERSE DE CELLE DES DEUX AUTRES, et c'est pour ca
@@ -2770,14 +2492,14 @@ defmodule Fleet.Project.Onboard do
     # ce qui coute au pire un re-import idempotent.
     published? =
       Enum.all?([Fleet.Layout.ops_branch(), Fleet.Layout.workshop_branch()], fn branch ->
-        repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) == {:ok, true}
+        Repo.repo_mod(opts).branch_exists?(full_name, branch, Repo.fc_opts(opts)) == {:ok, true}
       end)
 
     ours? and forge_repo_present?(full_name, opts) and published?
   end
 
   defp forge_repo_present?(full_name, opts) do
-    match?({:ok, _branch}, repo_mod(opts).default_branch(full_name, fc_opts(opts)))
+    match?({:ok, _branch}, Repo.repo_mod(opts).default_branch(full_name, Repo.fc_opts(opts)))
   end
 
   # ─── UNE SEULE SOURCE : LE CATALOGUE SUR DISQUE ─────────────────────────────────────────────────
@@ -2797,146 +2519,10 @@ defmodule Fleet.Project.Onboard do
   # ni a comparer.
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
-    result = repo_mod(opts).create_repo(name, Keyword.merge(opts, org: org, description: desc))
-    classify_create_repo(result, org, name)
-  end
 
-  # BL-6-33
-  #
-  # ⚠ LES LABELS CHANGENT DE SOURCE AVEC LE RETRAIT DU TEMPLATE, et c'est voulu. La branche
-  # `:generated` ne faisait RIEN parce que Gitea recopiait les labels avec le depot (`labels: true`).
-  # Ils viennent desormais du CODE, par le seul chemin qui existe — ce qui est le point de tout le
-  # lot : une source, pas une copie.
-  defp seed_protocol_labels(full_name, opts) do
-    seeder =
-      Keyword.get(opts, :ensure_labels, &ForgeClient.ensure_protocol_labels/2)
+    result =
+      Repo.repo_mod(opts).create_repo(name, Keyword.merge(opts, org: org, description: desc))
 
-    case seeder.(full_name, fc_opts(opts)) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:protocol_labels, reason}}
-    end
-  end
-
-  @doc false
-  # F-C084
-  @spec classify_create_repo(
-          {:ok, String.t() | :already_exists} | {:error, term()},
-          String.t(),
-          String.t()
-        ) :: {:ok, String.t()} | {:error, term()}
-  def classify_create_repo({:ok, full_name}, _org, _name) when is_binary(full_name),
-    do: {:ok, full_name}
-
-  def classify_create_repo({:ok, :already_exists}, org, name),
-    do: {:error, {:repo_already_exists, "#{org}/#{name}"}}
-
-  def classify_create_repo({:error, _} = err, _org, _name), do: err
-
-  defp repo_url(full_name, opts) do
-    base =
-      Keyword.get(opts, :base_url) ||
-        Application.get_env(:lcars_fleet, :pilot_forge, [])[:base_url]
-
-    case base do
-      b when is_binary(b) and b != "" ->
-        {:ok, String.trim_trailing(b, "/") <> "/" <> full_name <> ".git"}
-
-      _ ->
-        {:error, {:config, {:missing, :base_url}}}
-    end
-  end
-
-  defp clone_main(url, proj_dir) do
-    File.mkdir_p!(Path.dirname(proj_dir))
-    GitOps.run(["clone", "--branch", "main", url, proj_dir], auth: true)
-  end
-
-  defp publish_face(dir, branch), do: push(dir, branch, true)
-
-  # STANDALONE, not a linked worktree, and this is the reason both non-code faces are built this
-  # way: `git worktree add` keeps the gitdir under the PARENT repository, so a face checked out
-  # that way is uncommittable from any context that has the parent read-only — which is every pod
-  # mounting `/home/projects` RO, and the architect itself. A standalone clone owns its `.git`.
-  defp init_face(dir, url, branch) do
-    File.mkdir_p!(Path.dirname(dir))
-
-    with :ok <- GitOps.run(["init", "-q", "-b", branch, dir], auth: false) do
-      GitOps.run(["-C", dir, "remote", "add", "origin", url], auth: false)
-    end
-  end
-
-  # Clone the face if the forge already carries the branch, otherwise build and publish it. Same
-  # shape for both writer faces: every per-face input travels in ONE map (branch, template subtree,
-  # host mode), so a third face costs a call site and no new logic.
-  #
-  # ⚠ SITE 3 SUR 3 — ET C'EST LUI QUI ECRIT. Sur une forge illisible, l'ancien `false` envoyait dans
-  # le `else` : init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une
-  # face distante ECRASEE sur un simple timeout. L'inverse (traiter l'erreur comme « existe ») ferait
-  # cloner une branche peut-etre absente : moins destructeur, mais toujours une decision prise sans
-  # savoir. On ne devine pas : on REFUSE, et l'import s'arrete avec la raison — l'appelant garde son
-  # « repo untouched, a clean retry is possible ».
-  #
-  # Il rend `:cloned` ou `:published` et non `:ok`, parce que c'est la SEULE difference qui compte
-  # pour defaire : `:published` est une branche que CETTE tentative a mise sur la forge, `:cloned`
-  # une branche qui appartenait deja au depot. Confondre les deux, c'est soit laisser un residu,
-  # soit supprimer le travail de quelqu'un d'autre.
-  defp ensure_face(full_name, url, face, name, opts) do
-    %{dir: dir, branch: branch, template: template, mode: mode} = face
-
-    case repo_mod(opts).branch_exists?(full_name, branch, fc_opts(opts)) do
-      {:error, reason} ->
-        {:error, {:branch_unreadable, branch, reason}}
-
-      {:ok, true} ->
-        File.mkdir_p!(Path.dirname(dir))
-
-        with :ok <- GitOps.run(["clone", "--branch", branch, url, dir], auth: true),
-             :ok <- chmod_face(dir, mode) do
-          {:ok, :cloned}
-        end
-
-      {:ok, false} ->
-        with :ok <- init_face(dir, url, branch),
-             :ok <- chmod_face(dir, mode),
-             :ok <- Scaffold.face(dir, template, name, opts),
-             :ok <- commit(dir, "chore(import): init #{branch}"),
-             :ok <- publish_face(dir, branch) do
-          {:ok, :published}
-        end
-    end
-  end
-
-  # NOMME L'ECHEC. Un `{:error, :eperm}` nu remonterait jusqu'a l'appelant sans dire de quel
-  # repertoire il parle, dans un `with` qui en enchaine cinq.
-  defp chmod_face(dir, mode) do
-    case File.chmod(dir, mode) do
-      :ok -> :ok
-      {:error, reason} -> {:error, {:face_mode_failed, dir, mode, reason}}
-    end
-  end
-
-  # The three host roots of a project, resolved once per entry point. Named rather than threaded as
-  # three positional paths: a face is added by extending this map and its template, not by widening
-  # every signature between here and the git calls.
-  defp face_dirs(name, opts) do
-    %{
-      code: Path.join(Keyword.get(opts, :code_root, @code_root), name),
-      workshop: Path.join(Keyword.get(opts, :workshop_root, @workshop_root), name),
-      ops: Path.join(Keyword.get(opts, :ops_root, @ops_root), name)
-    }
-  end
-
-  defp commit(dir, message) do
-    with :ok <- GitOps.run(["-C", dir, "add", "-A"], auth: false) do
-      GitOps.run(["-C", dir, "commit", "-m", message], auth: false, author: onboard_author())
-    end
-  end
-
-  defp push(dir, branch, set_upstream?) do
-    args =
-      ["-C", dir, "push"] ++
-        if(set_upstream?, do: ["-u"], else: []) ++ ["origin", branch]
-
-    GitOps.run(args, auth: true)
+    Repo.classify_create_repo(result, org, name)
   end
 end

@@ -17,7 +17,7 @@ defmodule Fleet.Project.OnboardTest do
   describe "classify_create_repo/3 (F-C084 — pre-existing repo is not an onboard target)" do
     test "genuine CREATE ({:ok, full_name}) → {:ok, full_name} (onboard owns the fresh repo)" do
       assert {:ok, "fleet/neuf"} =
-               ProjectOnboard.classify_create_repo({:ok, "fleet/neuf"}, "fleet", "neuf")
+               ProjectOnboard.Repo.classify_create_repo({:ok, "fleet/neuf"}, "fleet", "neuf")
     end
 
     test "repo ALREADY existing (409 → {:ok, :already_exists}) → {:error, {:repo_already_exists, _}} (FAIL-LOUD)" do
@@ -25,12 +25,16 @@ defmodule Fleet.Project.OnboardTest do
       # push onto the existing `main` = silent CLOBBER. Fail-loud instead → the operator uses
       # import_project (adopts, content intact) or deletes the stale/partial repo.
       assert {:error, {:repo_already_exists, "fleet/deja"}} =
-               ProjectOnboard.classify_create_repo({:ok, :already_exists}, "fleet", "deja")
+               ProjectOnboard.Repo.classify_create_repo({:ok, :already_exists}, "fleet", "deja")
     end
 
     test "forge error propagated as-is (no interpretation)" do
       assert {:error, {:http, 500, "boom"}} =
-               ProjectOnboard.classify_create_repo({:error, {:http, 500, "boom"}}, "fleet", "x")
+               ProjectOnboard.Repo.classify_create_repo(
+                 {:error, {:http, 500, "boom"}},
+                 "fleet",
+                 "x"
+               )
     end
   end
 

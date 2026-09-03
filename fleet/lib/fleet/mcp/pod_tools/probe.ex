@@ -46,7 +46,7 @@ defmodule Fleet.MCP.PodTools.Probe do
   # ici en une ligne.
   #
   # Le préfixe `probe-` n'est pas cosmétique : un contexte de statut `probe-… / …` ne matche pas le
-  # glob `CI / *` de la protection de `main` (cf. `Onboard.main_status_check_contexts/0`), donc une
+  # glob `CI / *` de la protection de `main` (cf. `Onboard.Faces.main_status_check_contexts/0`), donc une
   # sonde ne peut pas devenir un mur. Ajouter ici un workflow nommé autrement contournerait cette
   # garde par le catalogue.
   @probes %{
