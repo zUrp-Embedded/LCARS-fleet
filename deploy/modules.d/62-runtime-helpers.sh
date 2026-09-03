@@ -224,12 +224,22 @@ check() {
     p_drift "$AUTHORITY_ASK_BIN absent — « lcars publish run », « lcars approve » et le skill system-issues n'ont aucun moyen d'obtenir un jeton de forge"
   fi
 
-  for n in "${EMBEDDED[@]}"; do
-    [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && break
-    p_drift "provisionnement embarqué absent ($EMBEDDED_FLEET/$n) — le convergeur ne pourra pas converger un humain"
-    break
-  done
-  [[ -x "$EMBEDDED_FLEET/deploy/provision" ]] && p_ok "provisionnement embarqué posé ($EMBEDDED_FLEET/deploy/provision)"
+  # ⚠ LE PROVISIONNEMENT NE VIT PLUS SOUS `fleet/`, ET CETTE SONDE POINTAIT ENCORE LA-BAS. Elle
+  # testait `$EMBEDDED_FLEET/deploy/provision`, c'est-a-dire `/opt/lcars/fleet/deploy/provision` — un
+  # chemin que la separation installeur/runtime a rendu IMPOSSIBLE : `deploy` est passe dans
+  # `EMBEDDED_ROOT`, donc pose en `/opt/lcars/deploy`. Le doctor aurait rendu un DRIFT permanent sur
+  # chaque machine, et son `p_ok` ne se serait plus jamais affiche : un mur qui accuse toujours
+  # n'accuse plus rien, on apprend a lire son rouge comme un decor.
+  #
+  # ⚠ ET LA BOUCLE SUR `EMBEDDED` N'AVAIT PLUS D'OBJET : elle iterait sur les arbres de `fleet/` pour
+  # juger un binaire de l'installeur, qui n'en fait plus partie — d'ou un message qui nommait
+  # `/opt/lcars/fleet/etc` pour se plaindre d'un `provision` absent. Le sujet est UN fichier, il se
+  # nomme une fois. Trouve sur le banc 2010, par le doctor lui-meme.
+  if [[ -x "$HELPERS_DIR/deploy/provision" ]]; then
+    p_ok "provisionnement embarqué posé ($HELPERS_DIR/deploy/provision)"
+  else
+    p_drift "provisionnement embarqué absent ($HELPERS_DIR/deploy/provision) — le convergeur ne pourra pas converger un humain"
+  fi
 
   # ⚠ LA SECONDE LISTE SE SONDE AUSSI, SINON LE CORRECTIF EST INVISIBLE AU DOCTOR. C'est l'angle
   # mort double deja rencontre sur `~/.lcars/log` (C2) : corriger l'apply sans toucher au check
@@ -346,7 +356,11 @@ BLOC
     mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
       || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
   done
-  p_chg "provisionnement embarqué ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
+  # ⚠ CE MESSAGE DISAIT « provisionnement embarque », ET IL NE POSE PLUS LE PROVISIONNEMENT. Depuis
+  # la separation, cette boucle porte les arbres de `fleet/` ; l installeur, lui, part avec
+  # `EMBEDDED_ROOT` et s annonce plus bas. Un geste qui annonce ce qu il ne fait pas est la moitie
+  # d une trace fausse — l autre moitie etant le mur qui la lit.
+  p_chg "arbres du runtime embarqués ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
 
   # ─── CE QUI VIT A LA RACINE DU DEPOT, ET QUE `EMBEDDED` NE POUVAIT PAS ATTEINDRE ──────────────
   #
