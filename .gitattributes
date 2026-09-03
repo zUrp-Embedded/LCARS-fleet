@@ -7,6 +7,24 @@
 *.json text eol=lf
 Dockerfile text eol=lf
 
+# ── Binaires ─────────────────────────────────────────────────────────────────
+# DECLARES, jamais devines. Sans ces lignes ces fichiers sont `unspecified` et
+# leur sort depend de l'heuristique du client : un git Windows en
+# `core.autocrlf=true` peut les prendre pour du texte et convertir leurs fins de
+# ligne. La signature PNG porte justement un CRLF (`89 50 4e 47 0d 0a 1a 0a`) —
+# un octet de controle place la POUR detecter ce cas. Une conversion transforme
+# chaque `0d 0a` en `0d 0d 0a` : l'image est detruite, le diff n'en montre rien,
+# et aucun gate ne mesure l'integrite d'un asset.
+# Mesure du 2026-09-03 : les 23 binaires suivis sont sains.
+*.png   binary
+*.ico   binary
+*.jpg   binary
+*.jpeg  binary
+*.gz    binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+
 # ── Briques vendorées ────────────────────────────────────────────────────────
 # Code tiers copié tel quel dans l'arbre (voir <brique>/VENDOR.md).
 #
