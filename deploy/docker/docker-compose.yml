@@ -60,7 +60,7 @@ name: lcars
 services:
   lcars:
     build:
-      context: ../../..
+      context: ../..
       dockerfile: deploy/docker/Dockerfile
       args:
         GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
