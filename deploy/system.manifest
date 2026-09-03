@@ -83,6 +83,9 @@ dir       /opt/lcars                                   0755  root:root          
 anchor:cond /opt/lcars/.source-revision                0644  root:root           any
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
+# L'outillage du GATE que la distro ne sert pas : `ruff`, dans un venv sous la racine (60-deploy),
+# et son lien PATH. Livraison SOURCE seulement — en binaire rien ne se bâtit, donc rien n'y est.
+dir       /opt/lcars/tools                             0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
 dir       /opt/lcars/share                                  0755  root:root           wsl+linux
 dir       /opt/lcars/share/avatars                     0755  root:root           wsl+linux
@@ -169,6 +172,7 @@ link      /usr/local/bin/lcars                         -     -                  
 link      /usr/local/bin/node                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
 link      /usr/local/bin/npx                           -     -                   wsl+linux
+link      /usr/local/bin/ruff                          -     -                   wsl+linux
 
 # ─── GROUPES ────────────────────────────────────────────────────────────────────────────────────
 group     fleet                                        2000  -                   any

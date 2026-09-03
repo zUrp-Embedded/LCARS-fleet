@@ -13,6 +13,7 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 RUNTIME_DIR="$(repo_root)/fleet"
+RUFF_VENV="${LCARS_RUFF_VENV:-$PROV_ROOT/tools/ruff}"
 MANIFEST="$RUNTIME_DIR/etc/release.manifest"
 mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/vides sautés
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
@@ -173,6 +174,25 @@ apply() {
     p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
+
+    # ⚠ LE GATE A GAGNE DEUX PLANCHERS LE 2026-09-03 (shellcheck sur tout le shell suivi, ruff sur
+    # le python), ET IL LES EXIGE — il refuse de les sauter en silence. Sur une machine neuve ils
+    # n'y sont pas, et ce module rendait « gate rouge » sur un arbre parfaitement vert ailleurs :
+    #     ECHEC: shellcheck absent — 206 fichier(s) shell NON audites.
+    #     ECHEC: ruff absent — le python maison n'est PAS audite.
+    # Mesure du 2026-09-04, banc bob_1. Meme raisonnement que les trois paquets du gate ci-dessus :
+    # un besoin qui n'existe qu'ici, a la minute du build — donc sous la meme condition que mix.
+    # `ruff` n'a pas de paquet apt sur la cible (ubuntu 26.04 : « Candidate: (none) ») ; la CI le
+    # prend par pip. Ici il vit dans un venv SOUS LA RACINE — declare a la table, retire avec
+    # elle — et un lien PATH, jamais un `pip install` dans le python du systeme.
+    apt_ensure shellcheck || { p_fail "shellcheck non installé — le gate refusera d'auditer le shell"; verdict_apply; }
+    if ! command -v ruff >/dev/null 2>&1; then
+      ensure_dir "$PROV_ROOT/tools" 0755 root:root || verdict_apply
+      run_quiet python3 -m venv "$RUFF_VENV" || { p_fail "venv de ruff non créé ($RUFF_VENV)"; verdict_apply; }
+      run_quiet "$RUFF_VENV/bin/pip" install --quiet ruff || { p_fail "ruff non installé dans $RUFF_VENV"; verdict_apply; }
+      ensure_symlink "$PROV_LINK_DIR/ruff" "$RUFF_VENV/bin/ruff" || verdict_apply
+      command -v ruff >/dev/null 2>&1 || { p_fail "ruff posé mais absent du PATH ($PROV_LINK_DIR/ruff)"; verdict_apply; }
+    fi
   fi
 
   run_step --ok 3 "build de la release" -- \
