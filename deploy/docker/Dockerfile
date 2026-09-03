@@ -306,6 +306,12 @@ COPY --from=site /src/assets/github.io/dist /opt/lcars/share/doc
 # sont de la matiere, pas un derive l'un de l'autre, et aucun rasteriseur n'a a exister ici.
 COPY assets/avatars  /opt/lcars/share/avatars
 COPY assets/favicon  /opt/lcars/share/favicon
+# La SOURCE des medias, a cote de leur copie posee — le miroir de ce que \`62-runtime-helpers\`
+# embarque sur un poste (\`EMBEDDED_ROOT\` porte \`assets\`) et de ce que \`44 check\` compare
+# (\`$(repo_root)/assets/<arbre>\` contre \`share/<arbre>\`). Sans elle, \`62 check\` rendait « arbre
+# embarque ABSENT (/opt/lcars/assets) » et \`44 check\` comparait a une source absente.
+COPY assets/avatars  /opt/lcars/assets/avatars
+COPY assets/favicon  /opt/lcars/assets/favicon
 
 # Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
 # (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
@@ -522,7 +528,14 @@ RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
 # apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que
 # `PROV_SOURCE_REV` (declare plus haut) : les trois ne peuvent donc pas diverger, et le module
 # compare deux valeurs qui ont une seule origine.
-RUN printf '%s\n' "${GIT_SHA}" > /opt/lcars/.source-revision
+# ⚠ DEUX TAMPONS, DEUX FAITS — la lib les a separes (\`PROV_HELPERS_STAMP\`, \`PROV_SOURCE_STAMP\`)
+# et cette ligne n'en ecrivait qu'un, sous l'ancien nom. \`62 check\` en docker rendait
+# « .helpers-revision absent — impossible de dire de quelle revision sortent les auxiliaires »,
+# donc un ECHEC permanent (APPLY-ON=wsl linux). Mesure du 2026-09-04, banc bob_2.
+#   .helpers-revision  d'ou sortent les auxiliaires poses ici (lu par 62)
+#   .source-revision   « cet arbre est une LIVRAISON BINAIRE » (lu par prov_delivery) — vrai d'une image
+RUN printf '%s\n' "${GIT_SHA}" > /opt/lcars/.helpers-revision \
+    && printf '%s\n' "${GIT_SHA}" > /opt/lcars/.source-revision
 
 # DEUX volumes d'état, et ils portent deux choses différentes.
 #
