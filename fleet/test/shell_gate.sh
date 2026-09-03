@@ -29,6 +29,46 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ⚠ `REPO_ROOT` EST DEFINI EN TETE, ET IL L'A ETE DEUX FOIS PLUS BAS. Il vivait au §1ter, avec ce
+# motif : « la premiere version de ce pas le lisait avant sa definition, donc `$GO7_HOOK` valait
+# "/fleet/git-hooks/pre-commit", le `-f` echouait, et le pas entier se sautait EN SILENCE ». Le
+# motif reste vrai et il vaut a fortiori ici : `--list-corpora` doit repondre AVANT le premier pas,
+# donc avant que quoi que ce soit ne tourne. Une seule definition, au plus haut, pour tout le
+# fichier.
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
+
+# ─── LES CORPUS QUE CETTE PORTE JOUE — DEFINIS ICI, IMPRIMES A LA DEMANDE ───────────────────────
+#
+# ⚠ `--list-corpora` NE DECLARE RIEN : il imprime les VARIABLES que la decouverte utilise plus bas.
+# Une liste ecrite a cote des chemins reels serait une seconde verite, et c'est precisement le
+# defaut que le registre `@test_corpora` (lcars.contracts.check) existe pour attraper — « a corpus
+# nobody runs does not rot loudly : it rots while reporting a coverage it does not provide ». Une
+# porte qui MENT sur ce qu'elle joue est ce meme defaut, d'un cran plus haut.
+#
+# ⚠ IL REPOND ET SORT AVANT TOUT PAS : le registre l'interroge, il ne veut pas jouer 205 tests
+# python pour obtenir quatre lignes. Ma premiere ecriture le posait apres le §1 et faisait
+# exactement cela.
+#
+# ⚠ ET LES CHEMINS SORTENT CANONIQUES. `$HERE/../vendor/...` rendait « fleet/test/../vendor/… »,
+# que le registre compare a « fleet/vendor/… » : deux ecritures du meme repertoire, et une
+# comparaison de chaines qui echoue sur une egalite vraie.
+#
+# ⚠ ET `fleet/deploy/tests` N'EST PLUS LA. Ses 1294 cas — 73 % de tout le corpus bats que cette
+# porte jouait — sont ceux de L'INSTALLEUR, et ils ont desormais la leur : `fleet/deploy/gate.sh`.
+# Le detachement n'est pas declaratif : `pack.sh` joue les deux portes avant d'empaqueter, et
+# `tests.corpora_on_record` DEMANDE a chaque porte ce qu'elle joue au lieu de croire un mot-cle.
+SKILLS_TESTS="$REPO_ROOT/.claude/skills"
+HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"
+TS_TESTS="$REPO_ROOT/fleet/vendor/token_saver/lcars_tests"
+
+if [[ "${1:-}" == "--list-corpora" ]]; then
+  for _c in "$HERE" "$SKILLS_TESTS" "$HOOK_TESTS" "$TS_TESTS"; do
+    [[ -d "$_c" ]] && printf '%s\n' "$(cd "$_c" && pwd)" | sed "s|^$REPO_ROOT/||"
+  done
+  exit 0
+fi
+
 # LES tests python hors-mix. Une LISTE, pas un chemin : un second fichier pose a cote d'un crochet
 # code en dur serait compte comme corpus gate par `lcars.contracts.check` (le dossier `fleet/test`
 # y est declare `:gated`) tout en n'etant JAMAIS joue — exactement le defaut que ce registre existe
@@ -139,10 +179,6 @@ fi
 # trois zones ferait rougir le gate sur du sursis. Le runtime, lui, est a ZERO aujourd'hui : le mur
 # se pose sans dette.
 # ---------------------------------------------------------------------------
-# `REPO_ROOT` est (re)defini ICI et pas plus bas : la premiere version de ce pas le lisait avant sa
-# definition, donc `$GO7_HOOK` valait "/fleet/git-hooks/pre-commit", le `-f` echouait, et le pas
-# entier se sautait EN SILENCE — un mur pose le matin meme ou j'en fermais six de cette forme.
-REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 GO7_HOOK="$REPO_ROOT/fleet/git-hooks/pre-commit"
 
 # ABSENCE = ECHEC DANS UN DEPOT, jamais un saut. Le hook vit DANS le depot : s'il manque la, l'arbre
@@ -227,7 +263,6 @@ fi
 # arbitre les merges amont, update_vendor.sh la joue au moment ou elle sert. Elle est declaree
 # {:out, …} au registre des corpus.
 # ---------------------------------------------------------------------------
-TS_TESTS="$HERE/../vendor/token_saver/lcars_tests"
 if [[ -d "$TS_TESTS" ]]; then
   if ! python3 -c "import pytest" >/dev/null 2>&1; then
     echo "ECHEC: pytest absent — les lcars_tests de token-saver ne peuvent pas tourner (pas de skip silencieux)." >&2
@@ -270,13 +305,16 @@ fi
 # exactement ce qui rend la seconde dangereuse : le jour ou l'une des deux bouge, celle qu'on ne
 # relit pas gagne pour la moitie du gate. La definition d'en haut (avec le motif de sa position)
 # fait autorite pour tout le fichier.
-SKILLS_TESTS="$REPO_ROOT/.claude/skills"
-PROVISION_TESTS="$REPO_ROOT/fleet/deploy/tests"
-HOOK_TESTS="$REPO_ROOT/fleet/git-hooks/tests"
+# ⚠ `SKILLS_TESTS` ET `HOOK_TESTS` SONT DEFINIS EN TETE, avec les autres corpus et le mode
+# `--list-corpora` qui les imprime. Ils vivaient ICI en second exemplaire — la faute exacte que le
+# commentaire ci-dessus reproche a `REPO_ROOT`, trois lignes plus haut, dans le meme fichier.
+#
+# ⚠ ET `PROVISION_TESTS` N'EST PLUS DECOUVERT — c'est le detachement de l'installeur. Ses 69
+# fichiers / 1294 cas etaient 73 % de tout ce que cette boucle jouait, et ils ne mesurent pas le
+# runtime : ils mesurent la chaine d'install. `fleet/deploy/gate.sh` est leur porte.
 mapfile -t BATS_FILES < <(
   find "$HERE" -type f -name '*.bats'
   [[ -d "$SKILLS_TESTS" ]] && find "$SKILLS_TESTS" -type f -path '*/tests/*.bats'
-  [[ -d "$PROVISION_TESTS" ]] && find "$PROVISION_TESTS" -type f -name '*.bats'
   [[ -d "$HOOK_TESTS" ]] && find "$HOOK_TESTS" -type f -name '*.bats'
   true
 )
@@ -284,7 +322,13 @@ mapfile -t BATS_FILES < <(printf '%s\n' "${BATS_FILES[@]}" | sort -u)
 BATS_FILE_COUNT="${#BATS_FILES[@]}"
 # Nombre de cas @test (info plus fine que le nb de fichiers pour l'avertissement « N tests manques »).
 if [[ "$BATS_FILE_COUNT" -gt 0 ]]; then
-  BATS_TEST_COUNT="$(grep -hcE '^@test' "${BATS_FILES[@]}" 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+  # ⚠ `|| true` LOAD-BEARING (mur I3), et le defaut etait LATENT ici. `grep -c` rend 1 quand il ne
+  # trouve rien, et sous `set -euo pipefail` ce 1 traverse le tube et tue le script. Le cas ne se
+  # produit que si AUCUN fichier `.bats` decouvert ne porte de `@test` — une suite videe par un
+  # refactor, c'est-a-dire exactement ce qu'un gate doit voir. Trouve dans la porte jumelle
+  # (`deploy/gate.sh`) par son propre temoin ; corrige des deux cotes, la meme forme ayant le meme
+  # mode de mort.
+  BATS_TEST_COUNT="$( { grep -hcE '^@test' "${BATS_FILES[@]}" 2>/dev/null || true; } | awk '{s+=$1} END {print s+0}')"
 else
   BATS_TEST_COUNT=0
 fi

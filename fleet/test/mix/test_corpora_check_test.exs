@@ -32,6 +32,32 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
       File.write!(path, "@test \"x\" { true; }\n")
     end)
 
+    # ⚠ UN DECOR QUI PREND LA PLACE D'UN DEPOT DOIT PORTER SES PORTES. Depuis le detachement de
+    # l'installeur, le registre ne CROIT plus le mot `:gated` : il demande a chaque porte, par
+    # `--list-corpora`, ce qu'elle joue reellement. Un decor sans portes fait donc echouer le check
+    # pour une raison qui n'est pas celle que ces temoins mesurent — et un decor qui fait rougir
+    # autre chose que son sujet deplace le diagnostic au lieu de le donner.
+    #
+    # Les doublures ANNONCENT tous les corpus declares : ce que ces temoins-ci mesurent est la
+    # DETECTION d'un corpus (nommage pytest, repertoire `.bats`, virtualenv vendore), pas le
+    # cablage des portes — qui a ses propres temoins, dans `deploy/tests/installer_gate.bats` et
+    # dans les deux mutations du registre.
+    porte = fn chemin, corpora ->
+      File.mkdir_p!(Path.dirname(chemin))
+
+      File.write!(chemin, """
+      #!/usr/bin/env bash
+      [ "${1:-}" = --list-corpora ] && printf '%s\\n' #{Enum.map_join(corpora, " ", &"'#{&1}'")}
+      """)
+    end
+
+    porte.(
+      Path.join(runtime, "test/shell_gate.sh"),
+      ~w(fleet/test .claude/skills fleet/git-hooks/tests fleet/vendor/token_saver/lcars_tests)
+    )
+
+    porte.(Path.join(runtime, "deploy/gate.sh"), ~w(fleet/deploy/tests))
+
     runtime
   end
 

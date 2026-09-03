@@ -98,8 +98,22 @@ OUT="$PACK_DIR/${NAME}.tar.gz"
 # ─── LE GATE, PUIS LA RELEASE — dans cet ordre et sans échappatoire ──────────────────────────────
 # C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
 # passés. Le sauter ici rendrait le paquet indistinguable d'un `mix release` à la main.
-say "gate (compile strict + suite + bats + contrats + topologie + dialyzer)…"
+say "gate du RUNTIME (compile strict + suite + bats + contrats + topologie + dialyzer)…"
 ( cd fleet && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
+
+# ─── ET LA PORTE DE L'INSTALLEUR — LE PAQUET PORTE LES DEUX LOGICIELS ────────────────────────────
+#
+# ⚠ SANS CETTE LIGNE, LE DETACHEMENT AURAIT ETE UNE PERTE DE COUVERTURE DEGUISEE EN RANGEMENT. Les
+# 1294 cas de `deploy/tests` — 73 % de tout le corpus bats — etaient joues par `mix gate` ; ils ne
+# le sont plus. Ce tar embarque `deploy/` (git archive HEAD le prend), donc il livre l'installeur :
+# l'empaqueter sans l'avoir joue reproduirait exactement ce que `@test_corpora` raconte, « a corpus
+# nobody runs rots while reporting a coverage it does not provide ».
+#
+# L'ORDRE N'EST PAS INDIFFERENT : le gate du runtime d'abord, parce qu'il est le plus long a
+# rougir sur du code neuf, et parce que la release qui suit en depend. Mais les DEUX sont des
+# conditions, aucune n'est un avertissement.
+say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
+bash fleet/deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
 say "release prod…"
 ( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"

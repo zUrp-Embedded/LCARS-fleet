@@ -6019,7 +6019,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @test_corpora [
     {"fleet/test", :gated},
     {".claude/skills", :gated},
-    {"fleet/deploy/tests", :gated},
+    # ⚠ 1294 CAS, 73 % DE TOUT LE CORPUS BATS, ET ILS NE MESURENT PAS LE RUNTIME. Ils mesurent la
+    # chaine d'install, et ils ont leur propre porte depuis le detachement. `:gated` aurait ete FAUX
+    # ici — `shell_gate.sh` ne les decouvre plus — et `{:out, why}` aurait ete pire : ils sont joues,
+    # simplement ailleurs. D'ou le troisieme etat, qui NOMME la porte au lieu de la sous-entendre.
+    {"fleet/deploy/tests", {:gated_by, "fleet/deploy/gate.sh"}},
     {"fleet/git-hooks/tests", :gated},
     {"fleet/vendor/token_saver/lcars_tests", :gated},
     {"fleet/vendor/token_saver/tests",
@@ -6569,23 +6573,92 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       end
 
     gated = Enum.count(@test_corpora, fn {_, v} -> v == :gated end)
+    gated_by = Enum.count(@test_corpora, fn {_, v} -> match?({:gated_by, _}, v) end)
+
+    # ⚠ ON DEMANDE A CHAQUE PORTE CE QU'ELLE JOUE, ON NE CROIT PLUS LE MOT-CLE. `:gated` etait
+    # DECLARATIF : rien ne confrontait ce mot a ce que `shell_gate.sh` decouvre reellement, et un
+    # corpus debranche par megarde restait « gated » dans ce registre pour toujours. C'est
+    # exactement la maladie que ce registre existe pour attraper — « a corpus nobody runs does not
+    # rot loudly : it rots while reporting a coverage it does not provide » — appliquee au registre
+    # lui-meme. Chaque porte expose `--list-corpora`, qui IMPRIME ses variables de decouverte (pas
+    # une seconde liste ecrite a cote), et c'est cette sortie qui fait foi ici.
+    #
+    # Une porte injoignable est un ECHEC, jamais un saut : un chemin mort rendrait ce mur muet
+    # precisement le jour ou il sert.
+    porte_liste = fn script ->
+      chemin = Path.join(repo, script)
+
+      if File.regular?(chemin) do
+        case System.cmd("bash", [chemin, "--list-corpora"], stderr_to_stdout: true) do
+          {out, 0} -> String.split(out, "\n", trim: true)
+          _ -> :error
+        end
+      else
+        :error
+      end
+    end
+
+    listings =
+      [{:gated, "fleet/test/shell_gate.sh"} | Enum.map(@test_corpora, fn {_, v} -> v end)]
+      |> Enum.flat_map(fn
+        {:gated, s} -> [s]
+        {:gated_by, s} -> [s]
+        _ -> []
+      end)
+      |> Enum.uniq()
+      |> Map.new(&{&1, porte_liste.(&1)})
+
+    # ⚠ ON N'INTERROGE QUE POUR UN CORPUS PRESENT DANS CET ARBRE — meme regle que `tree_scope` plus
+    # haut. Un corpus declare mais absent (artefact runtime-only, arbre partiel) n'a pas de porte a
+    # interroger : exiger la sienne ferait rougir ce mur sur ce qu'il n'a pas a mesurer ici. Present
+    # et sa porte muette, en revanche, EST le defaut — et c'est le seul cas ou la question se pose.
+    injouables =
+      @test_corpora
+      |> Enum.filter(fn {corpus, _} -> File.dir?(Path.join(repo, corpus)) end)
+      |> Enum.flat_map(fn
+        {corpus, :gated} -> verifie_porte(corpus, "fleet/test/shell_gate.sh", listings)
+        {corpus, {:gated_by, s}} -> verifie_porte(corpus, s, listings)
+        _ -> []
+      end)
 
     %{
       id: "tests.corpora_on_record",
       remediation:
-        "wire the corpus into test/shell_gate.sh, or add it to @test_corpora as {:out, why} — " <>
-          "a corpus nobody runs reports a coverage it does not provide",
-      status: if(is_nil(broken) and unknown == [], do: :pass, else: :fail),
+        "wire the corpus into a gate (test/shell_gate.sh for the runtime, deploy/gate.sh for the " <>
+          "installer), or add it to @test_corpora as {:out, why} — a corpus nobody runs reports a " <>
+          "coverage it does not provide",
+      status: if(is_nil(broken) and unknown == [] and injouables == [], do: :pass, else: :fail),
       evidence:
         cond do
           broken -> ["INSTRUMENT BROKEN — #{broken}"]
           unknown != [] -> ["test corpora on no record: #{inspect(unknown)}"]
+          injouables != [] -> injouables
           true -> []
         end,
       note:
         "#{length(found)} test files (bats + python) over #{length(@test_corpora)} corpora — " <>
-          "#{gated} gated, #{length(@test_corpora) - gated} deliberately out ON RECORD"
+          "#{gated} gated by the runtime door, #{gated_by} by another door (ASKED, not assumed), " <>
+          "#{length(@test_corpora) - gated - gated_by} deliberately out ON RECORD"
     }
+  end
+
+  # Le corpus figure-t-il dans ce que sa porte DIT jouer ? Un prefixe suffit : une porte peut
+  # nommer une racine qui contient le corpus declare, jamais l'inverse.
+  defp verifie_porte(corpus, script, listings) do
+    case Map.get(listings, script) do
+      :error ->
+        ["#{corpus}: its door `#{script}` is unreadable or refused `--list-corpora`"]
+
+      nil ->
+        ["#{corpus}: no door listed for it"]
+
+      lignes ->
+        if Enum.any?(lignes, &(&1 == corpus or String.starts_with?(corpus, &1 <> "/"))) do
+          []
+        else
+          ["#{corpus}: its door `#{script}` does NOT list it (it plays #{inspect(lignes)})"]
+        end
+    end
   end
 
   @doc false
