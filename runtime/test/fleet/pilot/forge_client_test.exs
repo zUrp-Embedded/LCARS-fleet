@@ -116,7 +116,7 @@ defmodule Fleet.Forge.ClientTest do
       # Every label already exists → no POST needed; the convergent read confirms them all.
       h = %{{"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, all}}
 
-      assert :ok = ForgeClient.ensure_protocol_labels("runtime/tmpl", opts(h))
+      assert :ok = ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
     end
 
     test "a label still missing after the sync → error, never a bare :ok" do
@@ -131,7 +131,7 @@ defmodule Fleet.Forge.ClientTest do
       }
 
       assert {:error, {:labels_missing, [@missing_label]}} =
-               ForgeClient.ensure_protocol_labels("runtime/tmpl", opts(h))
+               ForgeClient.ensure_protocol_labels("fleet/tmpl", opts(h))
     end
 
     test "a STALE label color is repainted; one already right is left alone (idempotent)" do
@@ -157,7 +157,7 @@ defmodule Fleet.Forge.ClientTest do
 
       assert :ok =
                ForgeClient.ensure_protocol_labels(
-                 "runtime/tmpl",
+                 "fleet/tmpl",
                  opts(%{
                    {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, labels_with.("ededed")},
                    {"PATCH", "/api/v1/repos/fleet/tmpl/labels/7"} => patch
@@ -170,7 +170,7 @@ defmodule Fleet.Forge.ClientTest do
       # the two raw forms would repaint every label on every pass, forever.
       assert :ok =
                ForgeClient.ensure_protocol_labels(
-                 "runtime/tmpl",
+                 "fleet/tmpl",
                  opts(%{
                    {"GET", "/api/v1/repos/fleet/tmpl/labels"} => {200, labels_with.("33bbcc")},
                    {"PATCH", "/api/v1/repos/fleet/tmpl/labels/7"} => patch
@@ -193,7 +193,7 @@ defmodule Fleet.Forge.ClientTest do
         {"GET", "/api/v1/repos/fleet/tmpl/pulls/9"} => {200, %{"number" => 9}}
       }
 
-      assert {:ok, prs} = ForgeClient.list_open_pulls("runtime/tmpl", opts(h))
+      assert {:ok, prs} = ForgeClient.list_open_pulls("fleet/tmpl", opts(h))
       assert Enum.map(prs, & &1["number"]) == [7, 8, 9]
     end
 
@@ -207,7 +207,7 @@ defmodule Fleet.Forge.ClientTest do
         {"GET", "/api/v1/repos/fleet/tmpl/pulls/8"} => {500, %{"error" => "boom"}}
       }
 
-      assert {:error, _} = ForgeClient.list_open_pulls("runtime/tmpl", opts(h))
+      assert {:error, _} = ForgeClient.list_open_pulls("fleet/tmpl", opts(h))
     end
   end
 
