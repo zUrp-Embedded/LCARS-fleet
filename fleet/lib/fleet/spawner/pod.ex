@@ -57,6 +57,19 @@ defmodule Fleet.Spawner.Pod do
   release, fail). At the next `init/1`, `recover_or_init` reads the file → `Pod.Recovery`
   decides: terminal phase → `:release` (nothing to relaunch), everything else → `:recreate`
   (from scratch, fresh session). We NEVER attempt `--resume` on a dead session.
+  ## Pourquoi ce fichier est GROS, et pourquoi il le reste
+
+  Mesure du contenu, pas impression : 24 clauses de `handle_event/4` pour ~600 lignes, sur ~1470.
+  Le reste est la machine a etats elle-meme (`init`, `callback_mode`, les transitions) et ses
+  helpers.
+
+  Il n'est donc pas decomposable, et ce n'est pas une preference : les clauses d'une fonction
+  vivent dans UN module — c'est la regle du langage, pas un arbitrage — et `handle_event/4` est le
+  callback unique d'un `:gen_statem` en mode `handle_event_function`. Les repartir n'est pas
+  possible ; ce qui l'est, et qui a ete fait, est de sortir le TRAVAIL de chaque etat dans des
+  sous-modules (`Pod.Scaffold`, `Pod.Assets`, `Pod.Egress`, `Pod.LaunchSpec`, `Pod.SessionFiles`…),
+  pour que chaque clause reste un aiguillage et non une implementation.
+
   """
 
   # `@behaviour :gen_statem` (NOT `use GenServer`). The `restart: :temporary` does NOT come

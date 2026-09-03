@@ -39,11 +39,11 @@ defmodule Fleet.Forge.Client do
   require Logger
 
   alias Fleet.Forge.Client.CI
-  alias Fleet.Forge.Client.Merge
-  alias Fleet.Forge.Client.Signing
   alias Fleet.Forge.Client.Jury
   alias Fleet.Forge.Client.Labels
+  alias Fleet.Forge.Client.Merge
   alias Fleet.Forge.Client.Repo
+  alias Fleet.Forge.Client.Signing
   alias Fleet.Forge.Protocol, as: ForgeProtocol
 
   import Fleet.Forge.Client.Transport,

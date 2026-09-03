@@ -7,10 +7,10 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   prouve l'identite, ou un arbre prouve vide. Il n'y a pas de `rm` de confiance dans ce fichier.
   """
 
-  alias Fleet.Forge.Protocol
-  alias Fleet.Project.Onboard
   alias Fleet.Forge.Client, as: ForgeClient
+  alias Fleet.Forge.Protocol
   alias Fleet.Project.GitOps
+  alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
   alias Fleet.Project.Onboard.Repo
 

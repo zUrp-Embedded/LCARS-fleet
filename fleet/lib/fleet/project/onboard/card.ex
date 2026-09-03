@@ -7,8 +7,8 @@ defmodule Fleet.Project.Onboard.Card do
   sans quoi la boite juge selon l'ancienne carte en affichant la nouvelle.
   """
 
-  alias Fleet.Project.Onboard
   alias Fleet.Project.GitOps
+  alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
   alias Fleet.Project.Onboard.Repo
   alias Fleet.Project.Onboard.Scaffold

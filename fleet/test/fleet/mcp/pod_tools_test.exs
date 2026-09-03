@@ -13,8 +13,8 @@ defmodule Fleet.MCP.PodToolsTest do
 
   alias Fleet.Forge.PayloadFixture
   alias Fleet.MCP.PodTools
-  alias Fleet.TestEnv
   alias Fleet.TaskQueue
+  alias Fleet.TestEnv
 
   defp uniq(p), do: "#{p}-#{System.unique_integer([:positive])}"
 

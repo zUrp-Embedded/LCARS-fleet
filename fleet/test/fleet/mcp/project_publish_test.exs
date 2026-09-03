@@ -7,9 +7,9 @@ defmodule Fleet.MCP.ProjectPublishTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.EventRouter.Bus
   alias Fleet.MCP.PodTools
   alias Fleet.MCP.PodTools.ProjectPublish
-  alias Fleet.EventRouter.Bus
   alias Fleet.TestEnv
 
   defp call(args, state), do: PodTools.handle_tool_call("project_publish", args, state)

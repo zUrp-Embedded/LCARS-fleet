@@ -41,8 +41,8 @@ defmodule Fleet.Application.CatalogueLifecycle do
   fresh.
   """
 
-  alias Fleet.Forge.Payload
   alias Fleet.Application.CatalogueDeposits
+  alias Fleet.Forge.Payload
 
   @bundled Fleet.Catalogue.bundled_name()
 

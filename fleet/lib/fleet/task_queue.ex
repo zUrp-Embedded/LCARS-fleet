@@ -22,8 +22,8 @@ defmodule Fleet.TaskQueue do
   `get_for_pod/2`) for test isolation via an anonymous server (`name: nil`).
   """
 
-  alias Fleet.TaskQueue.WorkItem
   alias Fleet.TaskQueue.Server
+  alias Fleet.TaskQueue.WorkItem
 
   @server Server
 

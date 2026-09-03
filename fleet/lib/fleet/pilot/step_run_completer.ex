@@ -57,10 +57,10 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   require Logger
 
-  alias Fleet.Layout
   alias Fleet.Forge.Client, as: ForgeClient
   alias Fleet.Forge.Protocol, as: ForgeProtocol
   alias Fleet.Labels
+  alias Fleet.Layout
   alias Fleet.Project.Roles
 
   # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by

@@ -11,8 +11,8 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcherTest do
   use ExUnit.Case, async: false
   import Fleet.Test.Barrier, only: [settle: 1]
 
-  alias Fleet.Shutdown.Quiesce
   alias Fleet.Admiral.Shutdown.AggregateDispatcher
+  alias Fleet.Shutdown.Quiesce
 
   # Broker stubs injected via `:lcars_fleet, :admiral_task_queue_mod`. The REAL broker IS present in the test
   # env (so `task_queue_running?` is true) — these induce specific `list_active` returns/failures.

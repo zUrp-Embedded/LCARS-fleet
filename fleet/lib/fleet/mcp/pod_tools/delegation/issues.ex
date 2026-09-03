@@ -20,9 +20,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Labels
   alias Fleet.Layout
-  alias Fleet.Forge.Payload
   alias Fleet.MCP.PodTools.Delegation.{Dependencies, Gate, IssuePR, Render, Retirement, Workshop}
   alias Fleet.Project.GitOps
 

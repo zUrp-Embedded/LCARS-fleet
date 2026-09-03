@@ -85,17 +85,17 @@ defmodule Fleet.Pilot.StepRunConsumer do
   require Logger
 
   alias Fleet.Event
-  alias Fleet.Forge.Payload
   alias Fleet.EventRouter.Bus
+  alias Fleet.Forge.Payload
   alias Fleet.Opts
   alias Fleet.Pilot.CompletionOutbox
 
-  alias Fleet.Pilot.StepRunConsumer.Verdict
-  alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.GateEngine
-  alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
-  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
+  alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
+  alias Fleet.Pilot.StepRunConsumer.TerminalEscalation
+  alias Fleet.Pilot.StepRunConsumer.Verdict
+  alias Fleet.Pilot.StepRunConsumer.VerdictCorrection
 
   defstruct [
     :repo,

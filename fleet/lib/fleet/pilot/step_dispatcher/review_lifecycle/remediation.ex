@@ -31,17 +31,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
   # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
+  alias Fleet.Forge.Payload
   alias Fleet.Forge.Protocol
   alias Fleet.Layout
-  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepDispatcher.ArchEscalation
 
-  alias Fleet.Pilot.ConflictReport
   alias Fleet.Forge.Client, as: ForgeClient
-  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
-  alias Fleet.Workflow.Pinning
+  alias Fleet.Pilot.ConflictReport
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
+  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch
+  alias Fleet.Workflow.Pinning
 
   @doc """
   Judge rework: the PR carries a current REQUEST_CHANGES verdict (the state was already read by

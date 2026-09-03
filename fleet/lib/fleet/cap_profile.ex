@@ -50,11 +50,11 @@ defmodule Fleet.CapProfile do
   # The four clusters below are all UPSTREAM of this core and none calls back into it: Schema
   # (structural conformance), Catalog (resolution by `metadata.name`, YAML scan, Slug confinement),
   # DisallowedTools (baseline git-denied union profile) and CanonicalJson (a pure leaf).
-  alias Fleet.Catalogue
-  alias Fleet.CapProfile.Schema
+  alias Fleet.CapProfile.CanonicalJson
   alias Fleet.CapProfile.Catalog
   alias Fleet.CapProfile.DisallowedTools
-  alias Fleet.CapProfile.CanonicalJson
+  alias Fleet.CapProfile.Schema
+  alias Fleet.Catalogue
 
   # No `api_version` field: the schema versioning is carried by the CODE, not by a field embedded
   # in the YAML — a file that declares its own version can disagree with the validator that reads

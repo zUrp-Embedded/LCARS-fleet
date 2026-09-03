@@ -22,8 +22,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   """
 
   alias Fleet.CapProfile
-  alias Fleet.SPBuilder
   alias Fleet.Spawner.Pod.Fs
+  alias Fleet.SPBuilder
 
   @doc """
   The pod REPL's `settings.json` — COMPLETE, single-owner (written to `.lcars/` by the

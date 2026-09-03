@@ -10,10 +10,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
   require Logger
 
-  alias Fleet.Pilot.WorkflowMapNav
   alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.Verdict
+  alias Fleet.Pilot.WorkflowMapNav
 
   defmodule Seams do
     @moduledoc """

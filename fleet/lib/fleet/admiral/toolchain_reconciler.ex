@@ -49,8 +49,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   require Logger
 
-  alias Fleet.Forge.Payload
   alias Fleet.Admiral.PeriodicCheck
+  alias Fleet.Forge.Payload
 
   @default_interval_ms 60_000
   @default_run_state "/run/lcars/toolchain"

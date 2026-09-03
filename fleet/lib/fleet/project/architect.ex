@@ -187,53 +187,53 @@ defmodule Fleet.Project.Architect do
         # The role is RESOLVED by the `project_delegate` capability, never named — same source as
         # the gate that admits the call (`Delegation.require_architect/1`, B-03). Naming it here
         # would gate correctly on a renamed delegate and then ensure a role the catalogue lacks.
-        with {:ok, cap} <-
-               Fleet.CapProfile.resolve(loader, Fleet.Project.Roles.project_delegate_role()) do
-          pod_id = pod_id_for(name)
+        case Fleet.CapProfile.resolve(loader, Fleet.Project.Roles.project_delegate_role()) do
+          {:ok, cap} ->
+            pod_id = pod_id_for(name)
 
-          spawn_opts = [
-            pod_id: pod_id,
-            # The repo the pod is BOUND to — exposed by `pod_info` so the MCP delegation tools
-            # resolve "the project" from the channel identity (the arch never names it).
-            repo: repo,
-            repo_id: repo_id,
-            rc_name: Layout.pod_label(name, "architect"),
-            project_slug: name,
-            # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
-            # face and it is `doc` — the face it produces on. `ops` is the record it is judged
-            # against, so it reads it and cannot touch it; `code` goes through the pipeline like
-            # everyone else's.
-            #
-            # ORDER MATTERS HERE. `pod_cwd/3` falls back to the FIRST rw mount for a pod with no
-            # project remap, and `pod_mounts_env/3` keeps the FIRST occurrence of a path. Putting
-            # the two read-only faces ahead of the writable one is therefore not cosmetic.
-            mounts: [
-              %{"mode" => "ro", "path" => proj_dir},
-              %{"mode" => "ro", "path" => work_dir},
-              %{"mode" => "rw", "path" => doc_dir}
+            spawn_opts = [
+              pod_id: pod_id,
+              # The repo the pod is BOUND to — exposed by `pod_info` so the MCP delegation tools
+              # resolve "the project" from the channel identity (the arch never names it).
+              repo: repo,
+              repo_id: repo_id,
+              rc_name: Layout.pod_label(name, "architect"),
+              project_slug: name,
+              # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
+              # face and it is `doc` — the face it produces on. `ops` is the record it is judged
+              # against, so it reads it and cannot touch it; `code` goes through the pipeline like
+              # everyone else's.
+              #
+              # ORDER MATTERS HERE. `pod_cwd/3` falls back to the FIRST rw mount for a pod with no
+              # project remap, and `pod_mounts_env/3` keeps the FIRST occurrence of a path. Putting
+              # the two read-only faces ahead of the writable one is therefore not cosmetic.
+              mounts: [
+                %{"mode" => "ro", "path" => proj_dir},
+                %{"mode" => "ro", "path" => work_dir},
+                %{"mode" => "rw", "path" => doc_dir}
+              ]
             ]
-          ]
 
-          case spawner.spawn_pod(cap, pod_id, spawn_opts) do
-            {:ok, _pid} ->
-              Logger.info(
-                "Project.Architect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
-              )
+            case spawner.spawn_pod(cap, pod_id, spawn_opts) do
+              {:ok, _pid} ->
+                Logger.info(
+                  "Project.Architect: architect ensured for #{repo} (pod #{pod_id}, spawned)"
+                )
 
-              {:ok, pod_id}
+                {:ok, pod_id}
 
-            {:error, {:already_started, _pid}} ->
-              {:ok, pod_id}
+              {:error, {:already_started, _pid}} ->
+                {:ok, pod_id}
 
-            {:error, reason} = err ->
-              Logger.error(
-                "Project.Architect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
-                  "retried on the next open/escalation trigger"
-              )
+              {:error, reason} = err ->
+                Logger.error(
+                  "Project.Architect: architect spawn for #{repo} FAILED (#{inspect(reason)}) — " <>
+                    "retried on the next open/escalation trigger"
+                )
 
-              err
-          end
-        else
+                err
+            end
+
           {:error, reason} = err ->
             Logger.error(
               "Project.Architect: architect cap-profile load/compose failed (#{inspect(reason)})"

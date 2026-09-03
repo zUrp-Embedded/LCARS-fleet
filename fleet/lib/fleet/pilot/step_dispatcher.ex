@@ -31,8 +31,8 @@ defmodule Fleet.Pilot.StepDispatcher do
   # Authority of the brief FORMAT (worker/judge/brief-review/rework/conflict). StepDispatcher
   # CHOOSES which brief per the forge state; BriefBuilder FORMS it.
   alias Fleet.CapProfile
-  alias Fleet.Labels
   alias Fleet.Forge.Payload
+  alias Fleet.Labels
   alias Fleet.Pilot.BriefBuilder
 
   # Single source of the "put the key IF non-nil" idiom (spawn_opts builders).

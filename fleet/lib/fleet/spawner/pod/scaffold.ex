@@ -101,57 +101,54 @@ defmodule Fleet.Spawner.Pod.Scaffold do
       _repo_path ->
         eff_cap = Fleet.CapProfile.with_project(state.cap_profile, project)
 
-        with {:ok, workspace, branch} <-
-               Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(
-                 state.pod_dir,
-                 eff_cap,
-                 []
-               ) do
-          # Repo-section rail, revived HERE and not at :projecting (BL-6-16): the composer runs
-          # at :projecting, the clone at :launching — the original rail expected
-          # `CLAUDE.md.repo-source` to exist BEFORE composition, an order the state machine
-          # contradicts, which is why its writer never existed and zero repo sections ever
-          # reached a pod. Post-clone is the first moment the original is READABLE (from GIT,
-          # never the working tree — from the 2nd spawn on the tree carries OUR composed file):
-          # write repo-source, re-compose the CLAUDE.md with it (RepoSections filters each
-          # section through Fleet.ReceptionFilter — hostile sections are dropped loud there),
-          # overwrite the pod_dir copy. Best-effort LOUD: a failure degrades to the
-          # identity-only CLAUDE.md of :projecting, never a HALT.
-          repo_doc = maybe_enrich_claude_md(state, workspace)
+        case Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(state.pod_dir, eff_cap, []) do
+          {:ok, workspace, branch} ->
+            # Repo-section rail, revived HERE and not at :projecting (BL-6-16): the composer runs
+            # at :projecting, the clone at :launching — the original rail expected
+            # `CLAUDE.md.repo-source` to exist BEFORE composition, an order the state machine
+            # contradicts, which is why its writer never existed and zero repo sections ever
+            # reached a pod. Post-clone is the first moment the original is READABLE (from GIT,
+            # never the working tree — from the 2nd spawn on the tree carries OUR composed file):
+            # write repo-source, re-compose the CLAUDE.md with it (RepoSections filters each
+            # section through Fleet.ReceptionFilter — hostile sections are dropped loud there),
+            # overwrite the pod_dir copy. Best-effort LOUD: a failure degrades to the
+            # identity-only CLAUDE.md of :projecting, never a HALT.
+            repo_doc = maybe_enrich_claude_md(state, workspace)
 
-          # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
-          # the agent pops into an already-documented project. The :projecting state writes it at the
-          # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
-          # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD,
-          # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
-          # ⚠ ON N'ECRASE PLUS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
-          # tout producteur (ses sept sections voyagent dans le prompt compose) et il doit rester
-          # LIVRABLE : c'est par la que ses conventions se mettent a jour quand la pile change.
-          # L'ecraser obligerait a le masquer (`skip-worktree`), donc a rendre `git status` propre
-          # et `git diff` vide EN AYANT TORT — un producteur qui applique la discipline de preuve
-          # obtient alors un FAUX NEGATIF et declare le critere tenu de bonne foi.
-          #
-          # Ce que la copie apporterait vit ailleurs : l'identite arrive par
-          # `--system-prompt-file` (remplacante et fiable, claude_launch.sh), et la doctrine de
-          # sortie/preuve/path est dans les blocs SP (le bloc du monde projete, `evidence`,
-          # `producer-output`). Un fichier compose ne porterait que l'identite dupliquee et les
-          # sections du depot — que l'agent lit a leur source.
-          if repo_doc == :tracked do
+            # Composed CLAUDE.md (pod-identity + repo conventions) at the root of the CWD (workspace):
+            # the agent pops into an already-documented project. The :projecting state writes it at the
+            # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
+            # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD,
+            # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
+            # ⚠ ON N'ECRASE PLUS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
+            # tout producteur (ses sept sections voyagent dans le prompt compose) et il doit rester
+            # LIVRABLE : c'est par la que ses conventions se mettent a jour quand la pile change.
+            # L'ecraser obligerait a le masquer (`skip-worktree`), donc a rendre `git status` propre
+            # et `git diff` vide EN AYANT TORT — un producteur qui applique la discipline de preuve
+            # obtient alors un FAUX NEGATIF et declare le critere tenu de bonne foi.
+            #
+            # Ce que la copie apporterait vit ailleurs : l'identite arrive par
+            # `--system-prompt-file` (remplacante et fiable, claude_launch.sh), et la doctrine de
+            # sortie/preuve/path est dans les blocs SP (le bloc du monde projete, `evidence`,
+            # `producer-output`). Un fichier compose ne porterait que l'identite dupliquee et les
+            # sections du depot — que l'agent lit a leur source.
+            if repo_doc == :tracked do
+              Logger.info(
+                "pod #{state.pod_id} workspace CLAUDE.md: celui du DEPOT, intact et livrable " <>
+                  "(la doctrine du pod arrive par le system-prompt, plus par ce fichier)"
+              )
+            else
+              copy_composed_claude_md(state, workspace)
+            end
+
             Logger.info(
-              "pod #{state.pod_id} workspace CLAUDE.md: celui du DEPOT, intact et livrable " <>
-                "(la doctrine du pod arrive par le system-prompt, plus par ce fichier)"
+              "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})"
             )
-          else
-            copy_composed_claude_md(state, workspace)
-          end
 
-          Logger.info(
-            "pod #{state.pod_id} workspace=#{workspace} (branch=#{branch || "default"})"
-          )
+            :ok
 
-          :ok
-        else
-          {:error, reason} -> {:error, {:project_workspace_clone_failed, reason}}
+          {:error, reason} ->
+            {:error, {:project_workspace_clone_failed, reason}}
         end
     end
   end

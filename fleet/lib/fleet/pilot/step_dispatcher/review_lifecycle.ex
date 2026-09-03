@@ -47,8 +47,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
   # SINGLE-AUTHORITY spawn leaf: `safe_kill/2` (die-on-promote) — same authority as the
   # judge/rework spawn (via RoleDispatch), never a fork.
-  alias Fleet.Project.Roles
   alias Fleet.Pilot.StepDispatcher.Spawn
+  alias Fleet.Project.Roles
 
   # BOUNDED remediation (rework forge-native budget / merge-failure classification) — DECIDES, then
   # descends back onto RoleDispatch (producer re-spawn) or ArchEscalation (human wall).

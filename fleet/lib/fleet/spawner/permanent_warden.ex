@@ -56,8 +56,8 @@ defmodule Fleet.Spawner.PermanentWarden do
 
   require Logger
 
-  alias Fleet.Spawner.PermanentBoot
   alias Fleet.EventRouter.Bus
+  alias Fleet.Spawner.PermanentBoot
 
   # Per-role spend bound.
   @max_attempts 5

@@ -38,8 +38,8 @@ defmodule Fleet.Forge.Client.Transport do
 
   require Logger
 
-  alias Req.Response
   alias Fleet.Opts
+  alias Req.Response
 
   @type config :: %{
           base_url: String.t(),

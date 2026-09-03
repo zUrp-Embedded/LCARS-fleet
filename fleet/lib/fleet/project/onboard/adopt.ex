@@ -9,8 +9,8 @@ defmodule Fleet.Project.Onboard.Adopt do
   """
 
   alias Fleet.Layout
-  alias Fleet.Project.Onboard
   alias Fleet.Project.GitOps
+  alias Fleet.Project.Onboard
   alias Fleet.Project.Onboard.Faces
   alias Fleet.Project.Onboard.Refute
   alias Fleet.Project.Onboard.Repo

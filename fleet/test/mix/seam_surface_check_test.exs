@@ -12,8 +12,8 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check.Tools
   alias Fleet.MCP.PodTools.Delegation
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @rel "lib/fleet/mcp/pod_tools/delegation.ex"
 
