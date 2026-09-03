@@ -33,7 +33,8 @@
 #
 # Standalone (needs bwrap + userns + tmux) — outside `mix test`. bwrap is NOT edited here: read and run.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : meme raison — le temoin compte ses echecs au lieu de mourir
+                          # au premier, pour rendre un bilan plutot qu'un arret.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BWRAP_LAUNCH="${ROOT}/bin/bwrap_launch.sh"

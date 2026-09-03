@@ -25,6 +25,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   use Plug.Router
 
+  alias Plug.Conn
+
   require Logger
 
   # ONE bound, ONE source. The read below and `Plug.Parsers` must agree on the cap or the two would
@@ -127,8 +129,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   end
 
   @doc false
-  @spec read_raw_body(Plug.Conn.t(), keyword()) ::
-          {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
+  @spec read_raw_body(Conn.t(), keyword()) ::
+          {:ok, binary(), Conn.t()} | {:more, binary(), Conn.t()} | {:error, term()}
   def read_raw_body(conn, opts) do
     # SERVES WHAT `authenticate_webhook/2` ALREADY READ. A body can only be read once: on the
     # webhook route the authenticating plug has consumed it, so a second `read_body` here would
@@ -140,8 +142,8 @@ defmodule Fleet.EventRouter.WebhooksGitea do
         {:ok, body, conn}
 
       _ ->
-        case Plug.Conn.read_body(conn, opts) do
-          {:ok, body, conn} -> {:ok, body, Plug.Conn.assign(conn, :raw_body, body)}
+        case Conn.read_body(conn, opts) do
+          {:ok, body, conn} -> {:ok, body, Conn.assign(conn, :raw_body, body)}
           {:more, partial, conn} -> {:more, partial, conn}
           {:error, _} = err -> err
         end
@@ -150,14 +152,14 @@ defmodule Fleet.EventRouter.WebhooksGitea do
 
   # Only the webhook route: `/health` carries no body and no signature, and the 404 fallback must
   # stay a 404 rather than become a 401 about a route that does not exist.
-  defp authenticate_webhook(%Plug.Conn{method: "POST", path_info: ["webhook", "gitea"]} = conn, _) do
-    case Plug.Conn.read_body(conn, length: @max_body) do
+  defp authenticate_webhook(%Conn{method: "POST", path_info: ["webhook", "gitea"]} = conn, _) do
+    case Conn.read_body(conn, length: @max_body) do
       {:ok, body, conn} ->
-        conn = Plug.Conn.assign(conn, :raw_body, body)
+        conn = Conn.assign(conn, :raw_body, body)
 
         case verify_hmac(conn) do
           :ok ->
-            Plug.Conn.assign(conn, :hmac_verified, true)
+            Conn.assign(conn, :hmac_verified, true)
 
           {:error, reason} ->
             Logger.warning("WebhooksGitea: webhook REFUSED 401 — HMAC verification: #{reason}")
@@ -202,7 +204,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
   rail — never a source of truth. A read per request on a path that is not the durable one is a
   trade this fleet can make; the same read on the poll rail would not be.
   """
-  @spec verify_hmac(Plug.Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
+  @spec verify_hmac(Conn.t()) :: :ok | {:error, :hmac_mismatch | :secret_missing}
   def verify_hmac(conn) do
     secret_path =
       Application.get_env(

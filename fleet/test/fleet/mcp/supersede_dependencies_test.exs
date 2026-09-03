@@ -73,10 +73,16 @@ defmodule Fleet.MCP.SupersedeDependenciesTest do
   end
 
   defp retire(forge),
-    do: PodTools.Delegation.retire_superseded(forge, "fleet/p", 16, :open, %{"issue" => 17})
+    do:
+      PodTools.Delegation.Retirement.retire_superseded(forge, "fleet/p", 16, :open, %{
+        "issue" => 17
+      })
 
   defp retire_with_pr(forge),
-    do: PodTools.Delegation.retire_superseded(forge, "fleet/p", 16, {:open, 21}, %{"issue" => 17})
+    do:
+      PodTools.Delegation.Retirement.retire_superseded(forge, "fleet/p", 16, {:open, 21}, %{
+        "issue" => 17
+      })
 
   describe "carrying the edges" do
     test "both directions are rewritten onto the replacement, BEFORE the close" do

@@ -18,7 +18,8 @@
 # deterministic), and the only volatile field is the header timestamp — one line, easy to diff past.
 # Two runs of a healthy fleet differ by that line alone.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : le rendu ne doit RIEN masquer — s'il meurt en route, le
+                          # verdict deja ecrit est perdu et le lecteur ne voit qu'une sortie tronquee.
 
 MODE="term" FULL=0 OUT=""
 while [[ $# -gt 0 ]]; do

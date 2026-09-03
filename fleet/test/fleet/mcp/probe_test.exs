@@ -196,7 +196,7 @@ defmodule Fleet.MCP.PodTools.ProbeTest do
 
     defp declared(content) do
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_probe_forge_client, md_forge(content))
-      {:ok, d} = Fleet.MCP.PodTools.Probe.declarations("fleet/p", "sha")
+      {:ok, d} = Probe.declarations("fleet/p", "sha")
       d
     end
 

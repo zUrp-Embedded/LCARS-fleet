@@ -42,7 +42,7 @@
 #
 # --- END HEADER ---
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : un rappel qui echoue ne doit pas faire echouer ce qu'il rappelle.
 
 PAYLOAD=$(cat)
 FILE_PATH=$(echo "$PAYLOAD" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))" 2>/dev/null)

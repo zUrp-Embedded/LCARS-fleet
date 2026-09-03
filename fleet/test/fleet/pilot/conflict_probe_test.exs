@@ -162,7 +162,7 @@ defmodule Fleet.Pilot.ConflictProbeTest do
       git.(work, ["push", "-q", "origin", "main"])
 
       {:ok, diag} =
-        Fleet.Pilot.ConflictProbe.probe(
+        ConflictProbe.probe(
           "x/probe-fetch",
           "feature",
           base_branch: "origin/main",

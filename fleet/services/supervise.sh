@@ -7,7 +7,9 @@
 # `Type=notify` : ce fichier relance un processus, c'est tout. Un demi-systemd serait un objet dont
 # personne ne connaitrait les limites.
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : ce script SURVIT a l'echec de ce qu'il supervise — c'est son
+                          # travail. `-e` le tuerait au premier plantage du processus relance,
+                          # c'est-a-dire exactement quand il sert.
 
 NAME=""
 LOG=""

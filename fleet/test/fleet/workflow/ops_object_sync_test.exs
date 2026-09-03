@@ -340,7 +340,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         _ =
-          Fleet.Workflow.OpsObjectSync.commit_object(
+          OpsObjectSync.commit_object(
             :absent_serializer_name,
             "/nonexistent-workdir",
             "ref",
@@ -358,7 +358,7 @@ defmodule Fleet.Workflow.OpsObjectSyncTest do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         _ =
-          Fleet.Workflow.OpsObjectSync.commit_object(
+          OpsObjectSync.commit_object(
             :absent_serializer_name,
             "/nonexistent-workdir",
             "ref",

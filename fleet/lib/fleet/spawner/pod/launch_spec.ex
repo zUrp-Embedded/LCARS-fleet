@@ -35,7 +35,10 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   require Logger
 
-  @spec effective_project(keyword() | nil, Fleet.CapProfile.t()) :: map()
+  alias Fleet.CapProfile
+  alias Fleet.Credentials.Shell
+
+  @spec effective_project(keyword() | nil, CapProfile.t()) :: map()
   def effective_project(opts, cap_profile) do
     Keyword.get(opts || [], :project) || get_in(cap_profile.spec, ["project"]) || %{}
   end
@@ -58,7 +61,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   that HAS a directory has a name on which both derivations agree. Pinned as an invariant in
   `Fleet.LayoutTest` — widen that charset and the test parts company before a pod does.
   """
-  @spec rc_project(keyword(), Fleet.CapProfile.t()) :: String.t() | nil
+  @spec rc_project(keyword(), CapProfile.t()) :: String.t() | nil
   def rc_project(opts, _cap_profile) do
     # The key is `:project_slug`, NOT `:project`: `:project` is ALREADY the project MAP of the brief
     # (`effective_project/2` — repo_path / base_branch / repo). Two different objects, two keys. A
@@ -89,7 +92,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   Project workers use `/home/<project>`, orchestrators use their first RW mount, and other pods use
   their workspace path relocated under the sandbox home when applicable.
   """
-  @spec pod_cwd(keyword(), Fleet.CapProfile.t(), Path.t()) :: String.t()
+  @spec pod_cwd(keyword(), CapProfile.t(), Path.t()) :: String.t()
   def pod_cwd(opts, cap_profile, pod_dir) do
     cond do
       project = rc_project(opts, cap_profile) ->
@@ -110,9 +113,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @doc """
   Returns `/home/.pod` for bwrap containment and the real pod directory otherwise.
   """
-  @spec sandbox_home(Fleet.CapProfile.t(), Path.t()) :: String.t()
+  @spec sandbox_home(CapProfile.t(), Path.t()) :: String.t()
   def sandbox_home(cap_profile, pod_dir) do
-    if Fleet.CapProfile.bwrap?(cap_profile), do: "/home/.pod", else: pod_dir
+    if CapProfile.bwrap?(cap_profile), do: "/home/.pod", else: pod_dir
   end
 
   defp first_rw_mount(cap_profile, opts) do
@@ -130,7 +133,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @doc """
   Adds the agent-visible cwd and, for project workers, its real bind source to the launch environment.
   """
-  @spec maybe_put_pod_cwd(map(), keyword(), Fleet.CapProfile.t(), Path.t()) :: map()
+  @spec maybe_put_pod_cwd(map(), keyword(), CapProfile.t(), Path.t()) :: map()
   def maybe_put_pod_cwd(env, opts, cap_profile, pod_dir) do
     env = Map.put(env, "LCARS_POD_CWD", pod_cwd(opts, cap_profile, pod_dir))
 
@@ -142,9 +145,9 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   @doc """
   Adds `LCARS_POD_HOME` for bwrap pods; host pods retain their native home.
   """
-  @spec maybe_put_sandbox_home(map(), Fleet.CapProfile.t(), Path.t()) :: map()
+  @spec maybe_put_sandbox_home(map(), CapProfile.t(), Path.t()) :: map()
   def maybe_put_sandbox_home(env, cap_profile, pod_dir) do
-    if Fleet.CapProfile.bwrap?(cap_profile),
+    if CapProfile.bwrap?(cap_profile),
       do: Map.put(env, "LCARS_POD_HOME", sandbox_home(cap_profile, pod_dir)),
       else: env
   end
@@ -165,7 +168,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   A present value outside the enum raises instead of being normalized.
   """
   @spec permission_mode(term()) :: String.t()
-  def permission_mode(%Fleet.CapProfile{spec: spec}),
+  def permission_mode(%CapProfile{spec: spec}),
     do: bound_permission_mode(get_in(spec || %{}, ["invocation", "permission_mode"]) || "default")
 
   def permission_mode(_), do: "default"
@@ -195,7 +198,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   """
   @spec remote_control?(term()) :: boolean()
   def remote_control?(cap_profile) do
-    Fleet.CapProfile.remote_control?(cap_profile) or Fleet.Spawner.debug_visibility?()
+    CapProfile.remote_control?(cap_profile) or Fleet.Spawner.debug_visibility?()
   end
 
   @doc """
@@ -234,7 +237,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   """
   @spec output_compression?(term()) :: boolean()
   def output_compression?(cap_profile) do
-    Fleet.CapProfile.output_compression?(cap_profile) and
+    CapProfile.output_compression?(cap_profile) and
       Fleet.Spawner.output_compression_allowed?()
   end
 
@@ -263,8 +266,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   Unqualified skills are ignored; an empty result returns no environment entry.
   """
-  @spec skills_plugins_env(Fleet.CapProfile.t()) :: map()
-  def skills_plugins_env(%Fleet.CapProfile{spec: spec}) do
+  @spec skills_plugins_env(CapProfile.t()) :: map()
+  def skills_plugins_env(%CapProfile{spec: spec}) do
     plugins =
       (spec || %{})
       |> Map.get("knowledge", %{})
@@ -328,7 +331,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   that buys nothing: the brief and the judging criterion travel as TEXT. The architect keeps the
   tree, through its explicit spawn `mounts:`, because reporting on the work IS its function.
   """
-  @spec pod_mounts_env(Fleet.CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
+  @spec pod_mounts_env(CapProfile.t(), keyword(), String.t(), Path.t() | nil) :: String.t()
   def pod_mounts_env(cap_profile, opts, claude_launch_path, pod_dir \\ nil) do
     (system_mounts(claude_launch_path) ++
        store_mounts() ++
@@ -554,12 +557,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
     with :ok <- require_repo_toplevel(source),
          {:ok, {_, 0}} <-
-           Fleet.Credentials.Shell.git(
+           Shell.git(
              ["-C", source, "archive", "--format=tar", "-o", tarball, "HEAD"],
              env: []
            ),
          :ok <- File.mkdir_p(dest),
-         {:ok, {_, 0}} <- Fleet.Credentials.Shell.run("tar", ["-xf", tarball, "-C", dest]) do
+         {:ok, {_, 0}} <- Shell.run("tar", ["-xf", tarball, "-C", dest]) do
       _ = File.rm(tarball)
       {:ok, dest}
     else
@@ -612,12 +615,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
     with :ok <- require_commit_sha(sha),
          :ok <- require_repo_toplevel(source),
          {:ok, {_, 0}} <-
-           Fleet.Credentials.Shell.git(
+           Shell.git(
              ["-C", source, "archive", "--format=tar", "-o", tarball, sha, "--", path],
              env: []
            ),
          :ok <- File.mkdir_p(dest),
-         {:ok, {_, 0}} <- Fleet.Credentials.Shell.run("tar", ["-xf", tarball, "-C", dest]) do
+         {:ok, {_, 0}} <- Shell.run("tar", ["-xf", tarball, "-C", dest]) do
       _ = File.rm(tarball)
       {:ok, Path.join(dest, path)}
     else
@@ -652,7 +655,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   # under the LCARS checkout, so the first run copied the whole runtime into the pod instead of
   # failing. A source that is not its own toplevel is refused rather than approximated.
   defp require_repo_toplevel(source) do
-    case Fleet.Credentials.Shell.git(["-C", source, "rev-parse", "--show-toplevel"], env: []) do
+    case Shell.git(["-C", source, "rev-parse", "--show-toplevel"], env: []) do
       {:ok, {out, 0}} ->
         same? = Path.expand(String.trim(out)) == Path.expand(source)
         if same?, do: :ok, else: {:error, {:not_a_face_repo, source, String.trim(out)}}
@@ -675,7 +678,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   `roots` is a test seam: `%{"code" => path, "workshop" => path}`, defaulting to the layout.
   """
-  @spec other_face_reference_path(keyword(), Fleet.CapProfile.t(), map()) :: String.t() | nil
+  @spec other_face_reference_path(keyword(), CapProfile.t(), map()) :: String.t() | nil
   def other_face_reference_path(opts, cap_profile, roots \\ default_face_roots()) do
     with face when face in ["code", "workshop"] <-
            Fleet.Layout.face_of(effective_project(opts, cap_profile)["base_branch"]),
@@ -697,7 +700,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
       "workshop" => Fleet.Layout.face_root("workshop")
     }
 
-  defp cap_profile_mounts(%Fleet.CapProfile{metadata: meta}) when is_map(meta) do
+  defp cap_profile_mounts(%CapProfile{metadata: meta}) when is_map(meta) do
     Map.get(meta, "mounts") || Map.get(meta, :mounts) || []
   end
 

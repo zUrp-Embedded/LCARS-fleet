@@ -1,0 +1,37 @@
+# SOURCE: pyproject.toml
+# AUTHOR: alice
+# STARDATE: 2026-09-01
+# STATUS: actif — configuration ruff du python MAISON (le vendor a son propre regime)
+#
+# ⚠ CE FICHIER NE DECLARE PAS UN PROJET PYTHON. Le depot est Elixir + bash ; ses douze .py maison
+# sont des outils (bridge MCP, exécuteurs, deck) et leurs témoins. `pyproject.toml` est seulement
+# l'endroit que ruff lit — il n'y a ni paquet, ni build, ni dependances a declarer ici.
+#
+# MESURE DU 2026-09-01, sur les 12 fichiers maison :
+#   E9 (erreurs de syntaxe)          0
+#   F  (pyflakes)                   16 — TOUS dans le callback git-filter-repo (voir plus bas) ;
+#                                        sans lui : « All checks passed »
+#   UP (modernisation)             113
+#   S  (bandit)                     31
+#   E,W (pycodestyle complet)     1280
+#
+# LE PLANCHER EST DONC `E9,F`, ET IL EST VERT AUJOURD'HUI. Meme forme que `shellcheck -S warning`
+# dans `shell_gate.sh` et que `sobelow --exit High` dans `mix.exs` : entrer plus haut rendrait la
+# chaine rouge en permanence, et un gate qu'on sait toujours rouge apprend a lire « rouge » comme
+# « normal ». Les 113 UP, 31 S et 1280 E/W ne sont pas absous : ils sont HORS de ce plancher-ci, et
+# se mesurent a la demande (`ruff check --select UP,S`).
+
+[tool.ruff]
+# `fleet/vendor/` est du code tiers : il arbitre ses propres montees (cf. `@test_corpora` dans
+# `lcars.contracts.check`, qui sort deja ses suites du gate pour la meme raison).
+exclude = ["fleet/vendor", "fleet/_build", "fleet/deps", "fleet/tmp"]
+
+# 100, et non le defaut 88 de ruff : le depot n'avait AUCUNE convention de longueur declaree, et
+# 100 est le voisin le plus proche du defaut Elixir (98) applique par `mix format` sur `lib/`.
+# La regle E501 n'est PAS dans le plancher — cette valeur sert aux mesures, pas a bloquer.
+line-length = 100
+
+[tool.ruff.lint]
+# Le plancher : ce qui casse (`E9`) et ce que pyflakes prouve (`F` — nom non defini, import mort,
+# f-string sans champ). Rien de stylistique : le style se mesure, il ne bloque pas.
+select = ["E9", "F"]

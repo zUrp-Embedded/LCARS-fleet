@@ -6,8 +6,8 @@ defmodule Fleet.Admiral.BootOrchestratorTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.EventRouter.Bus
   alias Fleet.Admiral.BootOrchestrator
+  alias Fleet.EventRouter.Bus
 
   setup do
     :ok = Bus.subscribe()

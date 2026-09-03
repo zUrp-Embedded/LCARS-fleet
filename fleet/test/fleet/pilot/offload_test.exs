@@ -129,7 +129,7 @@ defmodule Fleet.Pilot.OffloadTest do
   } do
     ref = make_ref()
     pid = spawn(fn -> :ok end)
-    Process.put({Fleet.Pilot.Offload, ref}, {"OffloadConsumer", "work lost"})
+    Process.put({Offload, ref}, {"OffloadConsumer", "work lost"})
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -159,7 +159,7 @@ defmodule Fleet.Pilot.OffloadTest do
       test = self()
 
       assert {:ok, :inline} =
-               Fleet.Pilot.Offload.async_or_inline(
+               Offload.async_or_inline(
                  sup_name(sup),
                  fn -> send(test, :ran_inline) end,
                  {"StepRunConsumer", "completion lost"}
@@ -181,7 +181,7 @@ defmodule Fleet.Pilot.OffloadTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, :inline_crashed} =
-                   Fleet.Pilot.Offload.async_or_inline(
+                   Offload.async_or_inline(
                      sup_name(sup),
                      fn -> raise "poison" end,
                      {"IncidentConsumer", "incident NOT recorded"}
@@ -205,7 +205,7 @@ defmodule Fleet.Pilot.OffloadTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:error, :inline_crashed} =
-                   Fleet.Pilot.Offload.async_or_inline(
+                   Offload.async_or_inline(
                      sup_name(sup),
                      fn -> exit(:boom) end,
                      {"StepRunConsumer", "completion lost"}
@@ -218,7 +218,7 @@ defmodule Fleet.Pilot.OffloadTest do
 
     test "pool available → offloaded normally ({:ok, :offloaded})", %{sup: _} = ctx do
       assert {:ok, :offloaded} =
-               Fleet.Pilot.Offload.async_or_inline(sup_name(ctx.sup), fn -> :ok end, {"C", "x"})
+               Offload.async_or_inline(sup_name(ctx.sup), fn -> :ok end, {"C", "x"})
     end
   end
 

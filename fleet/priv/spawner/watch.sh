@@ -11,7 +11,8 @@
 # seul → "ton tour" (un mandat attend, l'agent fait get_work_item) ; flag =
 # "<token> <message>" → le MESSAGE verbatim (information pure — progression fleet —
 # l'agent ne PULL PAS). L'outil Monitor transforme chaque ligne en réveil de l'agent.
-set -uo pipefail
+set -uo pipefail          # PAS -e : moniteur in-pod, il tourne en boucle et doit survivre a
+                          # chaque tour qui echoue — sinon la surveillance s'arrete au premier hoquet.
 FLAG="${1:?usage: watch.sh <flagfile>}"
 # Baseline = le contenu ACTUEL du flag : le token résiduel du kick de boot (écrit AVANT
 # l'armement) ne rejoue pas comme un faux réveil — un événement émis = un wake RÉEL

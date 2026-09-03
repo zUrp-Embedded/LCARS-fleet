@@ -21,6 +21,7 @@
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../bin/publish-transform.sh"
+  # shellcheck source=../../bin/publish-transform.sh
   source "$SCRIPT"
   SYSTEM_EMAIL="system_starfleet@lcars.local"
   TMP="$(mktemp -d)"

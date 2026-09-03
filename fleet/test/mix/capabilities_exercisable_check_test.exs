@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
   @deleg_rel "lib/fleet/mcp/pod_tools/delegation.ex"
@@ -84,14 +84,14 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
   test "a role carrying a tool of the capability it declares PASSES" do
     root = tree([{"worker", ["cap_1"], ["Read", "mcp__fleet__tool_1"]}])
 
-    assert %{status: :pass, evidence: []} = Check.check_capabilities_exercisable(root)
+    assert %{status: :pass, evidence: []} = Tools.check_capabilities_exercisable(root)
   end
 
   test "a role declaring a capability and carrying NONE of its tools is REFUSED, and named" do
     # The exact defect: the gate would say yes, and no call can reach it.
     root = tree([{"worker", ["cap_1"], ["Read", "mcp__fleet__tool_2"]}])
 
-    assert %{status: :fail, evidence: evidence} = Check.check_capabilities_exercisable(root)
+    assert %{status: :fail, evidence: evidence} = Tools.check_capabilities_exercisable(root)
     assert evidence == ["worker declares cap_1 and carries none of its tools"]
   end
 
@@ -104,7 +104,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
         gates: 2
       )
 
-    assert %{status: :pass} = Check.check_capabilities_exercisable(root)
+    assert %{status: :pass} = Tools.check_capabilities_exercisable(root)
   end
 
   test "a capability NO gate reads is out of scope, not a violation" do
@@ -112,7 +112,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
     # nothing about them is exercised by reaching for a tool, so there is no list to compare.
     root = tree([{"worker", ["producer"], ["Read"]}])
 
-    assert %{status: :pass, evidence: []} = Check.check_capabilities_exercisable(root)
+    assert %{status: :pass, evidence: []} = Tools.check_capabilities_exercisable(root)
   end
 
   test "several roles: every violation is reported, sorted — not just the first" do
@@ -123,7 +123,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
         {"gamma", ["cap_1"], ["mcp__fleet__tool_1"]}
       ])
 
-    assert %{status: :fail, evidence: evidence} = Check.check_capabilities_exercisable(root)
+    assert %{status: :fail, evidence: evidence} = Tools.check_capabilities_exercisable(root)
 
     assert evidence == [
              "alpha declares cap_1 and carries none of its tools",
@@ -137,7 +137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
     # is the failure mode it exists to prevent in the roles it inspects.
     root = tree([{"worker", ["cap_1"], ["Read"]}], gates: 1)
 
-    assert %{status: :fail, evidence: [evidence]} = Check.check_capabilities_exercisable(root)
+    assert %{status: :fail, evidence: [evidence]} = Tools.check_capabilities_exercisable(root)
     assert evidence =~ "INSTRUMENT BROKEN"
   end
 end

@@ -26,8 +26,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     # (`Pilot.Application.require_signer_tokens!`) — ici, une absence est une PERTE en vol, pas un
     # trou de provisioning.
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tmp)
-    Fleet.TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
-    Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
+    TestEnv.put_role_token!("gatekeeper", "GK-TOKEN")
+    TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
 
     :ok
   end
@@ -612,7 +612,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       # Collapser les deux ensemble aurait dé-résolu tous les conflits : `Do: rebase` DROPPE le
       # commit de fusion qui porte la résolution. C'est la seule moitié de l'ancienne conditionnelle
       # qui devait survivre, et ce test est ce qui l'empêche de partir avec l'autre.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
 
       assert :ok =
                MergeAndPromote.merge_and_promote(ConflictForge, "fleet/p", 7, 42, "engineer", [],
@@ -639,8 +639,8 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       # chief fusionne à tous les coups, un merge propre dépend lui aussi de son jeton. C'est la
       # contrepartie assumée de la séparation, et le boot l'exige déjà des deux
       # (`require_signer_tokens!`) — une absence ici est une PERTE en vol.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
-      Fleet.TestEnv.delete_role_token!("chief")
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_conflict_resolver_role, "chief")
+      TestEnv.delete_role_token!("chief")
 
       assert {:error, :role_token_unavailable} =
                MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],
@@ -684,12 +684,12 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     # une phrase qui a un sens.
     defmodule JuryForge do
       @moduledoc false
-      defdelegate count_comments_marked(r, n, p, o), to: Fleet.Pilot.ForgeStubs.OkForge
-      defdelegate post_comment(r, n, b, o), to: Fleet.Pilot.ForgeStubs.OkForge
-      defdelegate merge_pr(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
-      defdelegate set_stage(r, n, s, o), to: Fleet.Pilot.ForgeStubs.OkForge
-      defdelegate close_issue(r, n, o), to: Fleet.Pilot.ForgeStubs.OkForge
-      defdelegate pr_refs(r, pr, o), to: Fleet.Pilot.ForgeStubs.OkForge
+      defdelegate count_comments_marked(r, n, p, o), to: OkForge
+      defdelegate post_comment(r, n, b, o), to: OkForge
+      defdelegate merge_pr(r, pr, o), to: OkForge
+      defdelegate set_stage(r, n, s, o), to: OkForge
+      defdelegate close_issue(r, n, o), to: OkForge
+      defdelegate pr_refs(r, pr, o), to: OkForge
       def get_route(_r, _n, _o), do: :none
 
       def pr_review_state(_repo, _n, _opts),
@@ -730,7 +730,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     end
 
     defp seal_body(actions) do
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, actions)
+      TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, actions)
 
       assert :ok =
                MergeAndPromote.merge_and_promote(JuryForge, "fleet/p", 7, 42, "engineer", [],
@@ -786,7 +786,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       # Il mesure maintenant la propriété qui compte VRAIMENT : sur un dépôt sans jury, aucun
       # verdict n'a été rendu, donc l'absence de sonde ne dit rien — et le sceau ne dépense même
       # pas la lecture forge pour s'en assurer.
-      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
+      TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
 
       assert :ok =
                MergeAndPromote.merge_and_promote(OkForge, "fleet/p", 7, 42, "engineer", [],

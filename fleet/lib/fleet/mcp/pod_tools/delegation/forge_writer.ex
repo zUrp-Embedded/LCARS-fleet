@@ -78,9 +78,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   # LE CONTRAT EST CELUI DU CLIENT CANONIQUE, ET IL EST ETROIT : `Fleet.Forge.Client.open_pr/5`
   # rend `{:ok, integer}` — le NUMERO de la PR — dans ses DEUX branches, y compris le 409 (une PR
   # existe deja pour ce couple head→base : le client la retrouve et rend son numero). Un `{:ok,
-  # term()}` laisse une DOUBLURE rendre une map : la doublure est VERTE, pendant qu'en production
-  # `pr_number/1` recoit un entier qu'il ne sait pas lire — et la reponse MCP porte `"pr" => nil` a
-  # chaque appel.
+  # term()}` laissait un double rendre une map, le double etait vert, et `pr_number/1` en prod
+  # recevait un entier qu'il ne savait pas lire — la reponse MCP portait `"pr" => nil` a chaque
+  # appel. Trouve par la relecture du 2026-08-19.
   @callback open_pr(
               repo :: String.t(),
               head :: String.t(),
@@ -89,8 +89,6 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
               opts :: keyword()
             ) :: {:ok, integer()} | {:error, term()}
 
-  @default_writer Fleet.Forge.Client
-
   @doc """
   L'implémentation configurée, ou le client canonique.
 
@@ -98,7 +96,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   objet, seul le contrat qu'on lui demande de tenir diffère. Deux clefs pour un client seraient deux
   façons de brancher un test sur des moitiés différentes de la même forge, et un test qui remplace
   l'une sans l'autre verrait ses écritures partir sur la vraie.
+
+  ⚠ CE MODULE PORTAIT SA PROPRE COPIE DU DÉFAUT (`@default_writer Fleet.Forge.Client`). La clef
+  était bien unique — le paragraphe ci-dessus y veillait — mais pas le REPLI : changer
+  l'implantation canonique d'un côté laissait l'autre sur l'ancienne, et seulement en l'absence de
+  configuration, donc jamais en test et toujours en production. La délégation rend l'invariant vrai
+  par construction au lieu de le rendre vrai par relecture. Même forme que `EscalationForge`.
   """
   @spec resolved() :: module()
-  def resolved, do: Application.get_env(:lcars_fleet, :mcp_forge_client, @default_writer)
+  def resolved, do: Fleet.MCP.PodTools.Delegation.ForgeClient.resolved()
 end

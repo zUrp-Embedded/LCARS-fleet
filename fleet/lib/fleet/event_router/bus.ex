@@ -14,12 +14,15 @@ defmodule Fleet.EventRouter.Bus do
 
   require Logger
 
+  alias Fleet.Event
+  alias Phoenix.PubSub
+
   @pubsub_name Fleet.PubSub
   @main_topic "fleet.events"
 
   @doc "Phoenix.PubSub child spec for `Fleet.PubSub`."
   @spec child_spec(term()) :: Supervisor.child_spec()
-  def child_spec(_opts), do: Phoenix.PubSub.child_spec(name: @pubsub_name)
+  def child_spec(_opts), do: PubSub.child_spec(name: @pubsub_name)
 
   @doc "Returns the canonical main topic, `\"fleet.events\"`."
   @spec main_topic() :: String.t()
@@ -40,8 +43,8 @@ defmodule Fleet.EventRouter.Bus do
 
   An event carrying a `pod_id` ALSO lands on that pod's own topic (6-041) — see `pod_topic/1`.
   """
-  @spec broadcast(String.t(), Fleet.Event.t()) :: :ok | {:error, term()}
-  def broadcast(topic, %Fleet.Event{} = event) when is_binary(topic) do
+  @spec broadcast(String.t(), Event.t()) :: :ok | {:error, term()}
+  def broadcast(topic, %Event{} = event) when is_binary(topic) do
     assert_authorized!(event)
 
     case pubsub_broadcast(topic, event) do
@@ -70,8 +73,8 @@ defmodule Fleet.EventRouter.Bus do
   #
   # Le sujet principal, lui, est diffuse normalement : un observateur doit tout voir, y compris ce
   # qu'il a emis.
-  defp fan_out_to_pod(@main_topic, %Fleet.Event{pod_id: pod_id} = event) when is_binary(pod_id),
-    do: Phoenix.PubSub.broadcast_from(@pubsub_name, self(), pod_topic(pod_id), event)
+  defp fan_out_to_pod(@main_topic, %Event{pod_id: pod_id} = event) when is_binary(pod_id),
+    do: PubSub.broadcast_from(@pubsub_name, self(), pod_topic(pod_id), event)
 
   defp fan_out_to_pod(_topic, _event), do: :ok
 
@@ -79,18 +82,18 @@ defmodule Fleet.EventRouter.Bus do
   defp pubsub_broadcast(topic, event) do
     case Application.get_env(:lcars_fleet, :event_router_broadcast_fun) do
       fun when is_function(fun, 3) -> fun.(@pubsub_name, topic, event)
-      _ -> Phoenix.PubSub.broadcast(@pubsub_name, topic, event)
+      _ -> PubSub.broadcast(@pubsub_name, topic, event)
     end
   end
 
   @doc "Broadcasts a registered event on `main_topic/0`."
-  @spec broadcast_main(Fleet.Event.t()) :: :ok | {:error, term()}
-  def broadcast_main(%Fleet.Event{} = event), do: broadcast(@main_topic, event)
+  @spec broadcast_main(Event.t()) :: :ok | {:error, term()}
+  def broadcast_main(%Event{} = event), do: broadcast(@main_topic, event)
 
   @doc "Constructs an event with `Fleet.Event.new/3` and broadcasts it on the main topic."
-  @spec emit(Fleet.Event.source(), atom(), keyword()) :: :ok | {:error, term()}
+  @spec emit(Event.source(), atom(), keyword()) :: :ok | {:error, term()}
   def emit(source, type, opts \\ []) do
-    event = Fleet.Event.new(source, type, opts)
+    event = Event.new(source, type, opts)
     broadcast_main(event)
   end
 
@@ -105,7 +108,7 @@ defmodule Fleet.EventRouter.Bus do
   Do not use this function for lifecycle-bearing events: tolerated construction or registry
   failures are indistinguishable from successful delivery to the caller.
   """
-  @spec safe_emit(Fleet.Event.source(), atom() | String.t(), keyword(), keyword()) ::
+  @spec safe_emit(Event.source(), atom() | String.t(), keyword(), keyword()) ::
           :ok | {:error, term()}
   def safe_emit(source, type, opts \\ [], safe_opts \\ []) do
     case emit(source, coerce_type(type), opts) do
@@ -196,7 +199,7 @@ defmodule Fleet.EventRouter.Bus do
   # tree, which no hermetic test plays.
   @permit_empty_default true
 
-  defp assert_authorized!(%Fleet.Event{type: type} = event) do
+  defp assert_authorized!(%Event{type: type} = event) do
     types = authorized_event_types()
 
     cond do
@@ -232,13 +235,13 @@ defmodule Fleet.EventRouter.Bus do
   @doc "Subscribes the caller to a topic; defaults to `main_topic/0`."
   @spec subscribe(String.t()) :: :ok | {:error, term()}
   def subscribe(topic \\ @main_topic) when is_binary(topic) do
-    Phoenix.PubSub.subscribe(@pubsub_name, topic)
+    PubSub.subscribe(@pubsub_name, topic)
   end
 
   @doc "Unsubscribes the caller from a topic; defaults to `main_topic/0`."
   @spec unsubscribe(String.t()) :: :ok
   def unsubscribe(topic \\ @main_topic) when is_binary(topic) do
-    Phoenix.PubSub.unsubscribe(@pubsub_name, topic)
+    PubSub.unsubscribe(@pubsub_name, topic)
   end
 
   @doc """

@@ -16,8 +16,8 @@ defmodule Fleet.Admiral.MCPMonitorTest do
   use ExUnit.Case, async: false
   import Fleet.Test.Barrier, only: [settle: 1]
 
-  alias Fleet.EventRouter.Bus
   alias Fleet.Admiral.MCPMonitor
+  alias Fleet.EventRouter.Bus
 
   defmodule FakeTarget do
     use GenServer

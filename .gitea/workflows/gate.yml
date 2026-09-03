@@ -103,6 +103,17 @@ jobs:
       - name: ShellCheck (shell_gate)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck && shellcheck --version
 
+      # ⚠ MEME RAISON QUE SHELLCHECK, ET MEME EXIGENCE : `shell_gate` fait ECHOUER le gate si `ruff`
+      # est absent, plutot que de sauter le plancher python en silence. Sans cette etape la CI
+      # rougirait — c'est voulu : un plancher qu'on peut sauter n'est pas un plancher.
+      #
+      # `pip` et non `apt` : la distro ne sert pas ruff, et `--break-system-packages` est le prix
+      # d'un runner ephemere ou aucun venv ne survit a l'etape suivante. `ruff --version` est
+      # IMPRIME pour la meme raison que celle de shellcheck : une divergence de verdict entre la CI
+      # et un poste doit se lire sur cette ligne au lieu de se deviner.
+      - name: Ruff (plancher python de shell_gate)
+        run: pip install --quiet --break-system-packages ruff && ruff --version
+
       - name: Cache Mix
         uses: actions/cache@v4
         with:

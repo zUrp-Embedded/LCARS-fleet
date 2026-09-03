@@ -31,6 +31,9 @@ defmodule Fleet.Project.Declaration do
 
   require Logger
 
+  alias Fleet.Layout
+  alias Fleet.Workflow.Loader
+
   # LE NOM DIT A QUI EST LE FICHIER, PAS CE QU'IL CONTIENT. Ce fichier atterrit a la racine d'un
   # depot — y compris ADOPTE, ou la fleet ecrit dans l'arbre de quelqu'un d'autre. Un fichier de
   # configuration d'outil porte le point que portent tous les autres (`.gitignore`,
@@ -47,7 +50,7 @@ defmodule Fleet.Project.Declaration do
   # fichier (un producteur ne modifie pas la declaration qui choisit son jury), et `Workflow` ne
   # depend pas de `Project` — donc un literal la-bas aurait fait deux sources pour un nom. Layout est
   # l'autorite du rangement et les deux domaines en dependent deja.
-  @file_name Fleet.Layout.project_declaration_file()
+  @file_name Layout.project_declaration_file()
 
   # The declaration schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
@@ -129,7 +132,7 @@ defmodule Fleet.Project.Declaration do
     #
     # Et le nom non-slug reste refuse comme INCONNU : `Slug.cast!` VALIDE sans transformer, donc un
     # nom invalide ne figure dans aucune liste.
-    if name in Fleet.Workflow.Loader.canon_names(lopts) do
+    if name in Loader.canon_names(lopts) do
       load_declared(name, lopts)
     else
       refuse_absent(name, repo, lopts)
@@ -144,7 +147,7 @@ defmodule Fleet.Project.Declaration do
   # existe. Mais le terme d'erreur porte le message d'origine, et le journal est en `error` et non
   # en `warning` : au prochain flake, la cause est ecrite, pas a redecouvrir.
   defp load_declared(name, lopts) do
-    case Fleet.Workflow.Loader.load!(name, lopts) do
+    case Loader.load!(name, lopts) do
       %{"scope" => "project"} ->
         :ok
 
@@ -184,7 +187,7 @@ defmodule Fleet.Project.Declaration do
 
     Logger.warning(
       "ProjectDeclaration: card #{inspect(name)} is not declarable by a project — REFUSED " <>
-        "(available: #{Enum.join(Fleet.Workflow.Loader.canon_names(lopts), ", ")})" <>
+        "(available: #{Enum.join(Loader.canon_names(lopts), ", ")})" <>
         case elsewhere do
           [] ->
             ""
@@ -205,18 +208,18 @@ defmodule Fleet.Project.Declaration do
   # deriver ici en second ferait de ce refus et de cette inference deux verites d'un meme fait.
   defp carriers_of(name, repo) do
     mine =
-      case Fleet.Workflow.Loader.card_root_for_repo(repo) do
+      case Loader.card_root_for_repo(repo) do
         nil ->
           nil
 
         dir ->
           Enum.find_value(
-            Fleet.Workflow.Loader.card_scopes(),
+            Loader.card_scopes(),
             &if(&1.dir == dir, do: &1.catalogue)
           )
       end
 
-    Fleet.Workflow.Loader.catalogues_carrying(name) -- [mine]
+    Loader.catalogues_carrying(name) -- [mine]
   end
 
   # LA MEME RESOLUTION QUE LES LECTEURS, et c'est une condition de correction et non un detail :
@@ -229,7 +232,7 @@ defmodule Fleet.Project.Declaration do
   #     autre org se voyait refuser une carte que son propre catalogue publie.
   defp loader_opts(repo, opts) do
     case Keyword.take(opts, [:workflow_maps_root]) do
-      [] -> Fleet.Workflow.Loader.card_opts_for_repo(repo)
+      [] -> Loader.card_opts_for_repo(repo)
       given -> given
     end
   end
@@ -254,8 +257,8 @@ defmodule Fleet.Project.Declaration do
   """
   @spec pipeline_default(String.t(), keyword()) :: String.t()
   def pipeline_default(repo, opts \\ []) when is_binary(repo) do
-    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
-    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
+    root = Keyword.get(opts, :code_root, Layout.code_root())
+    path = Path.join([root, Layout.project_name(repo), @file_name])
 
     # Legacy-tolerant read: only that a card is NAMED, never the whole schema. A legacy `.lcars.json`
     # still carrying a retired key (`level`, `nature`) is `additionalProperties: false`-invalid but
@@ -307,8 +310,8 @@ defmodule Fleet.Project.Declaration do
   """
   @spec declared_max_fan(String.t(), keyword()) :: pos_integer() | nil
   def declared_max_fan(repo, opts \\ []) when is_binary(repo) do
-    root = Keyword.get(opts, :code_root, Fleet.Layout.code_root())
-    path = Path.join([root, Fleet.Layout.project_name(repo), @file_name])
+    root = Keyword.get(opts, :code_root, Layout.code_root())
+    path = Path.join([root, Layout.project_name(repo), @file_name])
 
     with {:ok, raw} <- File.read(path),
          {:ok, %{"max_fan" => n}} when is_integer(n) <- Jason.decode(raw) do

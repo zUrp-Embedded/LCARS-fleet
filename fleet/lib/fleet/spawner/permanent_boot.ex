@@ -34,6 +34,8 @@ defmodule Fleet.Spawner.PermanentBoot do
 
   require Logger
 
+  alias Fleet.CapProfile
+
   # AUTHORITY of the permanent pod_id prefix ("permanent-<role>", deterministic id). Typed ONCE,
   # parsed by `PermanentWarden` alone.
   #
@@ -70,8 +72,8 @@ defmodule Fleet.Spawner.PermanentBoot do
   `spec.invocation.lifetime_scope == "forever"` AND
   **`spec.invocation.host_native != true`** (anti-violation guard).
   """
-  @spec boot_at_start?(Fleet.CapProfile.t() | map()) :: boolean()
-  def boot_at_start?(%Fleet.CapProfile{spec: spec}), do: boot_at_start?(spec)
+  @spec boot_at_start?(CapProfile.t() | map()) :: boolean()
+  def boot_at_start?(%CapProfile{spec: spec}), do: boot_at_start?(spec)
 
   def boot_at_start?(%{} = spec) do
     inv = Map.get(spec, "invocation", %{})
@@ -84,7 +86,7 @@ defmodule Fleet.Spawner.PermanentBoot do
   def boot_at_start?(_), do: false
 
   @doc "Filters profiles through `boot_at_start?/1`."
-  @spec select_permanent([Fleet.CapProfile.t()]) :: [Fleet.CapProfile.t()]
+  @spec select_permanent([CapProfile.t()]) :: [CapProfile.t()]
   def select_permanent(cap_profiles) when is_list(cap_profiles) do
     Enum.filter(cap_profiles, &boot_at_start?/1)
   end
@@ -100,7 +102,7 @@ defmodule Fleet.Spawner.PermanentBoot do
           [{:ok, String.t()} | {:error, {String.t(), term()}}] | {:error, term()}
   def boot_permanent_pods(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
+    loader = Keyword.get(opts, :loader, &CapProfile.resolve(CapProfile, &1))
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
 
     with {:ok, roles} <- list_roles(dir),
@@ -117,6 +119,25 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
+  # Un cap-profile qui ne charge PLUS exclut son role de la reconvergence, en le disant : le
+  # respawn silencieux d'un role dont l'artefact est casse relancerait un pod sur une definition
+  # que personne ne peut plus lire.
+  defp permanent_if_boot_at_start(role, loader) do
+    case loader.(role) do
+      {:ok, %CapProfile{} = cp} ->
+        if boot_at_start?(cp.spec), do: [role], else: []
+
+      {:error, reason} ->
+        Logger.warning(
+          "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
+            "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
+            "until the artefact is repaired"
+        )
+
+        []
+    end
+  end
+
   @doc """
   Returns eligible permanent roles for reconciliation.
 
@@ -126,25 +147,11 @@ defmodule Fleet.Spawner.PermanentBoot do
   @spec expected_permanent_roles(keyword()) :: [String.t()]
   def expected_permanent_roles(opts \\ []) when is_list(opts) do
     dir = Keyword.get(opts, :cap_profiles_dir) || cap_profiles_dir()
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
+    loader = Keyword.get(opts, :loader, &CapProfile.resolve(CapProfile, &1))
 
     case list_roles(dir) do
       {:ok, roles} ->
-        Enum.flat_map(roles, fn role ->
-          case loader.(role) do
-            {:ok, %Fleet.CapProfile{} = cp} ->
-              if boot_at_start?(cp.spec), do: [role], else: []
-
-            {:error, reason} ->
-              Logger.warning(
-                "PermanentBoot: role #{role} EXCLUDED from permanent reconciliation — its " <>
-                  "cap-profile no longer loads (#{inspect(reason)}); it will NOT be respawned " <>
-                  "until the artefact is repaired"
-              )
-
-              []
-          end
-        end)
+        Enum.flat_map(roles, &permanent_if_boot_at_start(&1, loader))
 
       {:error, _} ->
         []
@@ -157,11 +164,11 @@ defmodule Fleet.Spawner.PermanentBoot do
   """
   @spec respawn(String.t(), keyword()) :: {:ok, String.t()} | {:error, {String.t(), term()}}
   def respawn(role, opts \\ []) when is_binary(role) and is_list(opts) do
-    loader = Keyword.get(opts, :loader, &Fleet.CapProfile.resolve(Fleet.CapProfile, &1))
+    loader = Keyword.get(opts, :loader, &CapProfile.resolve(CapProfile, &1))
     spawner = Keyword.get(opts, :spawner, &Fleet.Spawner.spawn_pod/3)
 
     case loader.(role) do
-      {:ok, %Fleet.CapProfile{} = cp} ->
+      {:ok, %CapProfile{} = cp} ->
         if boot_at_start?(cp.spec),
           do: spawn_one(cp, spawner),
           else: {:error, {role, :not_a_permanent}}
@@ -178,20 +185,20 @@ defmodule Fleet.Spawner.PermanentBoot do
   end
 
   defp cap_profiles_dir do
-    Application.get_env(:lcars_fleet, :spawner_cap_profiles_dir) || Fleet.CapProfile.root_dir()
+    Application.get_env(:lcars_fleet, :spawner_cap_profiles_dir) || CapProfile.root_dir()
   end
 
   defp list_roles(dir) do
-    case Fleet.CapProfile.list_from_published() do
+    case CapProfile.list_from_published() do
       {:ok, roles} -> {:ok, roles}
-      {:error, :not_published} -> Fleet.CapProfile.list(dir)
+      {:error, :not_published} -> CapProfile.list(dir)
     end
   end
 
   defp load_all(roles, loader) do
     case Enum.reduce_while(roles, {:ok, []}, fn role, {:ok, acc} ->
            case loader.(role) do
-             {:ok, %Fleet.CapProfile{} = cp} ->
+             {:ok, %CapProfile{} = cp} ->
                {:cont, {:ok, [cp | acc]}}
 
              {:error, reason} ->
@@ -207,8 +214,8 @@ defmodule Fleet.Spawner.PermanentBoot do
     end
   end
 
-  defp spawn_one(%Fleet.CapProfile{} = cp, spawner) do
-    name = Fleet.CapProfile.name(cp)
+  defp spawn_one(%CapProfile{} = cp, spawner) do
+    name = CapProfile.name(cp)
 
     # DETERMINISTIC pod_id (stable, no timestamp suffix) → idempotent re-spawn (same id: reap-orphan +
     # relaunch if dead, `{:already_started}` no-op if alive; no more holder-leak/accumulation).

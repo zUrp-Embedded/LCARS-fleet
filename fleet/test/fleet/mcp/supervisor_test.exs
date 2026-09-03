@@ -52,6 +52,47 @@ defmodule Fleet.MCP.SupervisorTest do
       assert {:ok, []} = Fleet.MCP.Supervisor.deaf_pods()
     end
 
+    test "énumération des acceptors impossible → {:error, _}, JAMAIS une liste vide", %{
+      base: base
+    } do
+      # ⚠ LE SYMÉTRIQUE DU CAS CI-DESSOUS, ET C'EST CELUI QUI MANQUAIT. `deaf_pods/0` soustrait les
+      # acceptors VIVANTS des fichiers PRÉSENTS. Le témoin d'à côté garde l'opérande « fichiers » :
+      # répondre `[]` sur un répertoire illisible BLANCHIRAIT des pods. L'autre opérande a la faute
+      # inverse et personne ne la gardait : répondre `[]` sur une énumération cassée déclare SOURDS
+      # tous les pods du disque, puisque `difference(on_disk, [])` vaut `on_disk`.
+      #
+      # Le warden ne tue pas un pod sourd, mais il ouvre un incident `pod.deaf` par pod après deux
+      # ticks, avec issue sysadmin à la récurrence : une panne du registre produisait une alarme de
+      # masse au moment précis où le signal réel comptait.
+      put_socket_file(base, "pod-x")
+
+      # ⚠ LA PREMIÈRE VERSION DE CE TÉMOIN NE FORÇAIT RIEN. Elle retirait la liaison de NOM du
+      # registre (`Process.unregister/1`) en croyant faire lever `Registry.select/2` — or celui-ci
+      # lit les tables ETS dérivées de l'ATOME, pas le processus enregistré : le select réussissait,
+      # et l'assertion échouait en le disant. Une mutation qui ne mute rien est un témoin vert sur
+      # une garantie absente.
+      #
+      # On arrête donc le registre pour de bon, par son superviseur — déterministe, réversible, et
+      # sans course : aucun pod n'est provisionné dans l'env de test, donc aucun acceptor ne
+      # référence ce registre.
+      Supervisor.terminate_child(Fleet.MCP.Supervisor, Fleet.MCP.PodSocketRegistry)
+
+      try do
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _} = Fleet.MCP.Supervisor.deaf_pods()
+        end)
+
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:unknown, detail} = Fleet.MCP.Supervisor.pod_facing_status()
+          # Aucun compte rendu ici : un chiffre issu d'une lecture qui a échoué se lit comme une
+          # mesure.
+          refute Map.has_key?(detail, :sockets)
+        end)
+      after
+        Supervisor.restart_child(Fleet.MCP.Supervisor, Fleet.MCP.PodSocketRegistry)
+      end
+    end
+
     test "scan impossible → {:error, _}, JAMAIS une liste vide" do
       # ⚠ LA DISTINCTION QUI PORTE TOUT : repondre `[]` sur un repertoire qu'on n'a pas pu lire
       # BLANCHIRAIT des pods que la sonde ne voit pas. « je n'ai rien trouve » et « je n'ai pas pu

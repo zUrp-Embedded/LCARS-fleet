@@ -10,8 +10,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
   require Logger
 
+  alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepRunConsumer.GatekeeperEscalation
   alias Fleet.Pilot.StepRunConsumer.Verdict
+  alias Fleet.Pilot.WorkflowMapNav
 
   defmodule Seams do
     @moduledoc """
@@ -112,7 +114,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     do: tag_advance(advance(workflow_map, step), producer?)
 
   defp inherited_route?(workflow_map, step, role) do
-    case Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step) do
+    case WorkflowMapNav.step_spec(workflow_map, step) do
       {:ok, spec} ->
         case Map.get(spec, "role") do
           r when is_binary(r) -> r != role
@@ -127,7 +129,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   # A lifecycle name is a stage only when it is absent from the map's steps.
   defp lifecycle_stage?(workflow_map, step) do
     step in [Fleet.Labels.stage_review(), Fleet.Labels.stage_merged()] and
-      not match?({:ok, _}, Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step))
+      not match?({:ok, _}, WorkflowMapNav.step_spec(workflow_map, step))
   end
 
   defp no_workflow_map_resolve(payload, seams) do
@@ -148,7 +150,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   defp payload_repo(payload),
-    do: get_in(payload, ["repository", "full_name"]) || payload["repo"]
+    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp judge_kind?(payload, spec) do
     case payload["brief_kind"] do
@@ -160,7 +162,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
 
   defp gate_decide(workflow_map, step, payload, n, seams) do
     spec =
-      case Fleet.Pilot.WorkflowMapNav.step_spec(workflow_map, step) do
+      case WorkflowMapNav.step_spec(workflow_map, step) do
         {:ok, s} -> s
         :error -> %{}
       end
@@ -279,7 +281,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   defp tag(_intent, other), do: other
 
   defp advance(workflow_map, step) do
-    case Fleet.Pilot.WorkflowMapNav.next_step(workflow_map, step) do
+    case WorkflowMapNav.next_step(workflow_map, step) do
       {:ok, {next_step, next_role}} -> {:ok, {next_role, next_step}}
       :terminal -> {:ok, {nil, nil}}
       {:error, reason} -> {:error, {:workflow_map_nav, reason}}
@@ -294,7 +296,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
         {:error, {:rework_exhausted, %{step_runs: step_runs, budget: budget}}}
 
       {:ok, _step_runs} ->
-        case Fleet.Pilot.WorkflowMapNav.first_step(workflow_map) do
+        case WorkflowMapNav.first_step(workflow_map) do
           {:ok, {first_step, first_role}} -> {:ok, {first_role, first_step}}
           {:error, reason} -> {:error, {:workflow_map_nav, reason}}
         end
@@ -342,7 +344,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   # an engraved route is a bare name, and the card that answers must be the project's own.
   defp load_workflow_map(seams, workflow_map_name, payload),
     do:
-      Fleet.Pilot.WorkflowMapNav.safe_load(
+      WorkflowMapNav.safe_load(
         seams.loader,
         workflow_map_name,
         Fleet.Workflow.Loader.card_opts_for_repo(payload_repo(payload))

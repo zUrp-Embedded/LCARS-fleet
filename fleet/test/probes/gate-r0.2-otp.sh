@@ -8,7 +8,8 @@
 # BEAM lifecycle = a buildable supervision tree). There is no "systemd daemon active" check any more:
 # the fleet is launched per-human through bin/fleet_v2 (the human-launches model, ADR-E), not an
 # always-on system service.
-set -uo pipefail
+set -uo pipefail          # PAS -e : meme raison — la sonde mesure plusieurs points et rend un
+                          # bilan, pas le verdict de sa premiere commande.
 RT="$(cd "$(dirname "$0")/../.." && pwd)"
 FAIL=0
 echo "== Gate R0.2 — OTP supervisor =="

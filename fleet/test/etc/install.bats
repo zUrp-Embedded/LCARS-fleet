@@ -13,6 +13,7 @@ load ../support/refute
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../etc/install.sh"
+  # shellcheck source=../../etc/install.sh
   source "$SCRIPT"
   TMP="$(mktemp -d)"
 }
@@ -234,7 +235,9 @@ MIX
   # deux moities : le lien ancien est toujours la, ET la fonction refuse.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
+  # shellcheck disable=SC2034  # entrees de `wire_path_links`, la fonction sous test
   MF_FILES=(fleet_v2)
+  # shellcheck disable=SC2034
   MF_LINKS=(1)
   mkdir -p "$PREFIX/bin" "$LINK_DIR" "$TMP/ancienne/bin"
   ln -s "$TMP/ancienne/bin/fleet_v2" "$LINK_DIR/fleet_v2"

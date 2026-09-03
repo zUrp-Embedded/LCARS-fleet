@@ -1,5 +1,6 @@
 defmodule ReconciliationUnreachableTqTest do
   use ExUnit.Case, async: false
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.Poller.Reconciliation.Seams
 
@@ -257,7 +258,7 @@ defmodule ReconciliationUnreachableTqTest do
 
       # Une issue VERROUILLEE (`lcars-in-flight`), deja suspecte au tick precedent : la grace de
       # 2 ticks est satisfaite, donc CE tick reclame — sauf si la propriete est indeterminee.
-      issues = [%{"number" => 7, "labels" => [%{"name" => "lcars-in-flight"}]}]
+      issues = [PayloadFixture.issue(number: 7, label_names: ["lcars-in-flight"])]
       prior = MapSet.new([{@repo, :issue, 7}])
       pods = Reconciliation.snapshot_pods(KillSpy)
       _ = Reconciliation.reconcile(issues, [], MapSet.new(), prior, seams, pods)

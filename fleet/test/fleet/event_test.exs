@@ -29,7 +29,7 @@ defmodule Fleet.EventTest do
     # Without this guard, adding a source to ONE list only passes silently: missing from the
     # enforcement → legitimate producer rejected; missing from the type → ghost doc.
     test "anti-drift guard: @type source ≡ @canonical_sources (same atoms)" do
-      {:ok, types} = Code.Typespec.fetch_types(Fleet.Event)
+      {:ok, types} = Code.Typespec.fetch_types(Event)
 
       {:type, {:source, union_ast, []}} =
         Enum.find(types, fn

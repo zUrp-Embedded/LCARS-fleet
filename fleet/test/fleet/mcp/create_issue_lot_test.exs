@@ -109,7 +109,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
     TestEnv.put_env_restoring(:lcars_fleet, :mcp_workshop_root, Path.join(tmp, "workshop"))
     # The DIRECTORY before the token: the path is derived from it (`RoleIdentity.token_path/1`).
     TestEnv.put_env_restoring(:lcars_fleet, :credentials_role_tokens_dir, tokens)
-    Fleet.TestEnv.put_role_token!("architect", "tok-arch")
+    TestEnv.put_role_token!("architect", "tok-arch")
 
     TestEnv.put_env_restoring(:lcars_fleet, :mcp_pod_resolver, fn _pod_id ->
       {:ok, %{role: "architect", repo: @repo}}

@@ -76,6 +76,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   The kill goes through a SINGLE authority, never forked here.
   """
 
+  alias Fleet.Forge.Payload
+
   require Logger
 
   # workflow_run lock: single source `Fleet.Labels` (compile-time constant). SAME source as
@@ -441,7 +443,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
       for %{metadata: meta, state: item_state} <- tq.list_active(),
           item_state in @pulled_states,
           meta["gate_eval"] == true,
-          get_in(meta, ["resume_payload", "repository", "full_name"]) == repo,
+          Payload.repository_full_name(meta["resume_payload"]) == repo,
           n = meta["resume_n"],
           is_integer(n),
           into: MapSet.new(),
@@ -568,7 +570,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   defp parse_pod_ref(_, _), do: []
 
   defp locked?(item) do
-    @in_flight in Enum.map(Map.get(item, "labels") || [], & &1["name"])
+    @in_flight in Payload.label_names(item)
   end
 
   # What the reconciliation actually MEASURED about the orphan's pod — for the log, never the

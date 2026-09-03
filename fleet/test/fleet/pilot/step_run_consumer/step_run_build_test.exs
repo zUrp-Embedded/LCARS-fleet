@@ -1,6 +1,7 @@
 defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
   use ExUnit.Case, async: true
 
+  alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.StepRunConsumer.StepRunBuild
 
   # Two OPEN fleet PRs both claiming issue 8 — a protocol violation (one issue = one producer
@@ -9,8 +10,8 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
     def list_open_pulls(_repo, _opts) do
       {:ok,
        [
-         %{"number" => 21, "head" => %{"ref" => "lcars/issue-8-engineer"}},
-         %{"number" => 22, "head" => %{"ref" => "lcars/issue-8-engineer"}}
+         PayloadFixture.pull(number: 21, head_ref: "lcars/issue-8-engineer"),
+         PayloadFixture.pull(number: 22, head_ref: "lcars/issue-8-engineer")
        ]}
     end
   end

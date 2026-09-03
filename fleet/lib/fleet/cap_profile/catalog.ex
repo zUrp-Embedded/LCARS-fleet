@@ -281,6 +281,31 @@ defmodule Fleet.CapProfile.Catalog do
   # `:invalid_schema` (role corrupt), and `list/1` (enumerated by PermanentBoot) would amputate it
   # from boot silently → a "green" but incomplete deploy). A corrupt file = a broken deploy artifact →
   # we propagate `{:error, {:invalid_yaml, path}}` (fail-loud). Assumed consequence: a single
+  # Un role sans `metadata.name` est SAUTE, pas refuse — un fragment prefixe `_` est deliberement
+  # sans nom. Une COLLISION, elle, arrete tout : deux fichiers qui revendiquent le meme role
+  # rendraient l'index dependant de l'ordre du glob.
+  defp index_named(acc, path, name, raw) when is_binary(name) and name != "" do
+    if Map.has_key?(acc, name) do
+      Logger.error("Catalog: metadata.name collision #{inspect(name)} (#{path})")
+      {:halt, {:error, :name_collision}}
+    else
+      {:cont, {:ok, Map.put(acc, name, raw)}}
+    end
+  end
+
+  defp index_named(acc, path, _sans_nom, _raw) do
+    base = Path.basename(path)
+
+    unless String.starts_with?(base, "_") do
+      Logger.warning(
+        "Catalog: #{base} has no metadata.name — skipped (a role needs a name; " <>
+          "`_`-prefix a file that is a deliberate non-role fragment)"
+      )
+    end
+
+    {:cont, {:ok, acc}}
+  end
+
   # unreadable file poisons the whole index (corrupt catalogue = we load NONE of it) — consistent with
   # "we do not save a wounded thing".
   defp name_index(dir) do
@@ -291,27 +316,7 @@ defmodule Fleet.CapProfile.Catalog do
     Enum.reduce_while(files, {:ok, %{}}, fn path, {:ok, acc} ->
       case decode_yaml(path) do
         {:ok, raw} ->
-          case get_in(raw, ["metadata", "name"]) do
-            name when is_binary(name) and name != "" ->
-              if Map.has_key?(acc, name) do
-                Logger.error("Catalog: metadata.name collision #{inspect(name)} (#{path})")
-                {:halt, {:error, :name_collision}}
-              else
-                {:cont, {:ok, Map.put(acc, name, raw)}}
-              end
-
-            _ ->
-              base = Path.basename(path)
-
-              unless String.starts_with?(base, "_") do
-                Logger.warning(
-                  "Catalog: #{base} has no metadata.name — skipped (a role needs a name; " <>
-                    "`_`-prefix a file that is a deliberate non-role fragment)"
-                )
-              end
-
-              {:cont, {:ok, acc}}
-          end
+          index_named(acc, path, get_in(raw, ["metadata", "name"]), raw)
 
         {:error, reason} ->
           Logger.error(
@@ -359,6 +364,19 @@ defmodule Fleet.CapProfile.Catalog do
     end
   end
 
+  # Le chemin du `profile.yaml` d'un modop sous UNE racine, ou nil. Le nom reste CONFINE sous
+  # chaque racine : essayer la suivante ne doit pas affaiblir ce qui rend un nom non fiable sur
+  # comme segment de chemin.
+  defp modop_profile_path(root, name) do
+    with {:ok, dir} <- Fleet.Slug.confined_join(Path.join(root, "modop"), name),
+         path = Path.join(dir, "profile.yaml"),
+         true <- File.exists?(path) do
+      path
+    else
+      _ -> nil
+    end
+  end
+
   defp read_modops_from_disk(modop_set, catalogue_root) do
     # Same scope as `read_role_from_disk/2`, same reason: a modop belongs to the catalogue that
     # ships it, and the mechanism ones live in the system half of the scope — which is why the
@@ -370,17 +388,7 @@ defmodule Fleet.CapProfile.Catalog do
 
     result =
       Enum.reduce_while(modop_set, {:ok, []}, fn name, {:ok, acc} ->
-        found =
-          Enum.find_value(scope, fn root ->
-            case Fleet.Slug.confined_join(Path.join(root, "modop"), name) do
-              {:ok, dir} ->
-                path = Path.join(dir, "profile.yaml")
-                if File.exists?(path), do: path, else: nil
-
-              {:error, _} ->
-                nil
-            end
-          end)
+        found = Enum.find_value(scope, &modop_profile_path(&1, name))
 
         case found ||
                Fleet.Slug.confined_join(Path.join(List.first(scope, root_dir()), "modop"), name) do

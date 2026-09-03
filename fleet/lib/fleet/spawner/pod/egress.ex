@@ -48,6 +48,7 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   require Logger
 
+  alias Fleet.CapProfile
   alias Fleet.Spawner.Pod.Egress.Vendor
 
   @connect_re ~r/\ACONNECT ([A-Za-z0-9._-]+):(\d{1,5}) HTTP\/1\.[01]\r?\n/
@@ -80,7 +81,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   only when its profile says `network: egress`. Fail-closed by construction — a profile that says
   nothing gets the vendor's list, which is what a pod needs to work and nothing more.
   """
-  @spec provision(String.t(), Fleet.CapProfile.t(), Path.t()) ::
+  @spec provision(String.t(), CapProfile.t(), Path.t()) ::
           {:ok, Path.t() | nil} | {:error, term()}
   def provision(pod_id, cap_profile, launcher_path) do
     path = socket_path(pod_id)
@@ -91,7 +92,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     # logged once per pod for a condition that is not a failure — a rail that shouts on a
     # configuration it cannot see is a rail nobody reads.
     cond do
-      not Fleet.CapProfile.bwrap?(cap_profile) ->
+      not CapProfile.bwrap?(cap_profile) ->
         {:ok, nil}
 
       not File.dir?(Path.dirname(Path.dirname(path))) ->
@@ -147,11 +148,11 @@ defmodule Fleet.Spawner.Pod.Egress do
   silently, since a pod that reaches nothing looks exactly like a pod nobody opened. The converged
   file lives on the state volume, which survives, and that is the whole reason it exists.
   """
-  @spec allowlist(Fleet.CapProfile.t(), Path.t()) :: [String.t()]
+  @spec allowlist(CapProfile.t(), Path.t()) :: [String.t()]
   def allowlist(cap_profile, launcher_path) do
     vendor = Vendor.hosts(launcher_path)
 
-    case Fleet.CapProfile.network(cap_profile) do
+    case CapProfile.network(cap_profile) do
       "egress" ->
         Enum.uniq(vendor ++ role_hosts(cap_profile) ++ converged_hosts(cap_profile))
 
@@ -183,7 +184,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     Path.join([base, pod_id, "sock"])
   end
 
-  defp role_hosts(%Fleet.CapProfile{spec: spec}) do
+  defp role_hosts(%CapProfile{spec: spec}) do
     spec
     |> get_in(["scope", "egress_hosts"])
     |> List.wrap()
@@ -216,7 +217,7 @@ defmodule Fleet.Spawner.Pod.Egress do
         []
 
       dir ->
-        role = Fleet.CapProfile.name(cap_profile)
+        role = CapProfile.name(cap_profile)
         warn_unless_applied(dir)
         read_hosts(Path.join(dir, role <> ".hosts"))
     end
@@ -275,12 +276,12 @@ defmodule Fleet.Spawner.Pod.Egress do
   # Named on BOTH facts, because either alone sends the reader to the wrong side.
   defp warn_if_converged_but_sealed(cap_profile) do
     with dir when is_binary(dir) <- converged_dir(),
-         role = Fleet.CapProfile.name(cap_profile),
+         role = CapProfile.name(cap_profile),
          path = Path.join(dir, role <> ".hosts"),
          true <- File.exists?(path) do
       Logger.warning(
         "Egress: #{path} exists but role #{role} declares network=" <>
-          "#{Fleet.CapProfile.network(cap_profile)} — the converged hosts are IGNORED. Two keys " <>
+          "#{CapProfile.network(cap_profile)} — the converged hosts are IGNORED. Two keys " <>
           "are required: the catalogue grants `network: egress`, the converged file names the " <>
           "hosts. This pod reaches its vendor and nothing else."
       )

@@ -12,8 +12,8 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
   alias Fleet.MCP.PodTools.Delegation
+  alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
   @rel "lib/fleet/mcp/pod_tools/delegation.ex"
 
@@ -70,12 +70,12 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
   end
 
   defp check(extra_lines, behaviours \\ @behaviours),
-    do: Check.check_mcp_seam_surface(tree(delegation_source(extra_lines)), behaviours)
+    do: Tools.check_mcp_seam_surface(tree(delegation_source(extra_lines)), behaviours)
 
   describe "the instrument answers for itself first" do
     test "a delegation the walker cannot read as seam calls FAILS as broken" do
       root = tree("defmodule Delegation do\n  def nothing, do: :ok\nend\n")
-      result = Check.check_mcp_seam_surface(root, @behaviours)
+      result = Tools.check_mcp_seam_surface(root, @behaviours)
 
       assert result.status == :fail
       assert hd(result.evidence) =~ "INSTRUMENT BROKEN"
@@ -131,7 +131,7 @@ defmodule Mix.Tasks.Lcars.Contracts.SeamSurfaceCheckTest do
 
   describe "against the real tree" do
     test "the repo passes — every seam op the delegation calls is written down somewhere" do
-      result = Check.check_mcp_seam_surface(File.cwd!())
+      result = Tools.check_mcp_seam_surface(File.cwd!())
 
       assert result.status == :pass
       assert result.evidence == []

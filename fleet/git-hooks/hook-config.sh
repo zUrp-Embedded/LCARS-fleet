@@ -44,6 +44,10 @@
 #
 # --- END HEADER ---
 
+# ⚠ AUCUN `set` ICI : ce fichier est SOURCE (pre-commit l.80, pre-push, repo_type.bats). Un
+# `set -e` y imposerait son mode a l'appelant — un hook qui n'en veut pas mourrait sur la
+# premiere commande non nulle d'un autre fichier que le sien.
+
 HOOK_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
 
 # LA BRANCHE `lcars` ETAIT MORTE, ET RIEN NE LE DISAIT. Le marqueur teste etait

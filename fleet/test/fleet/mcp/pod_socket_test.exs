@@ -663,11 +663,11 @@ defmodule Fleet.MCP.PodSocketTest do
     # forbidden) → the compiler does NOT check conformance. This test locks the IMPL side:
     # PodSocketSupervisor MUST export the callbacks the consumer (Pod.McpProvision, R1-23 guard) calls.
     # A drifting signature breaks THIS test, not a pod in prod. Contract = Fleet.Spawner.McpSocketProvisioner.
-    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :ensure_pod_socket, 1)
+    assert function_exported?(PodSocketSupervisor, :ensure_pod_socket, 1)
     # /2 is the CONTRACT arity (pod_id + threaded role tools) — /1 alone was a stale lock: the
     # behaviour callback is /2 and the spawner calls it with the tools list.
-    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :ensure_pod_socket, 2)
-    assert function_exported?(Fleet.MCP.PodSocketSupervisor, :release_pod_socket, 1)
+    assert function_exported?(PodSocketSupervisor, :ensure_pod_socket, 2)
+    assert function_exported?(PodSocketSupervisor, :release_pod_socket, 1)
   end
 
   test "a pod opening MUTE connections does NOT starve the fleet (per-pod cap + idle timeout)" do

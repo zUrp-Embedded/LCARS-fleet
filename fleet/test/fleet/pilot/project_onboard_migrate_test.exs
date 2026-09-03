@@ -237,7 +237,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
       dirs = Map.new(~w(code workshop ops), &{&1, face(tmp, &1)})
 
       assert {:ok, %{repo: "web/vitrine", from: "fleet/vitrine", faces: faces, absent: absent}} =
-               ProjectOnboard.migrate("fleet/vitrine", "web", opts(tmp))
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "web", opts(tmp))
 
       assert length(faces) == 3
       assert absent == []
@@ -253,7 +253,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
       code = face(tmp, "code")
 
       assert {:ok, %{repo: "web/vitrine", faces: faces, absent: absent}} =
-               ProjectOnboard.migrate("fleet/vitrine", "web", opts(tmp))
+               ProjectOnboard.Migration.migrate("fleet/vitrine", "web", opts(tmp))
 
       assert origin(code) == "http://forge.test/web/vitrine.git"
 

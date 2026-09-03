@@ -5,6 +5,8 @@ defmodule Fleet.Pilot.MergeOutcome do
   drafts also report non-mergeable.
   """
 
+  alias Fleet.Forge.Payload
+
   @type class :: :merged | :closed | :draft | :conflict | :policy | :unknown
 
   @doc """
@@ -13,11 +15,11 @@ defmodule Fleet.Pilot.MergeOutcome do
   @spec classify(map()) :: class()
   def classify(pull) when is_map(pull) do
     cond do
-      Map.get(pull, "merged") == true -> :merged
+      Payload.merged?(pull) -> :merged
       Map.get(pull, "state") == "closed" -> :closed
-      Map.get(pull, "draft") == true -> :draft
-      Map.get(pull, "mergeable") == false -> :conflict
-      Map.get(pull, "mergeable") == true -> :policy
+      Payload.draft?(pull) -> :draft
+      Payload.mergeable(pull) == false -> :conflict
+      Payload.mergeable(pull) == true -> :policy
       true -> :unknown
     end
   end

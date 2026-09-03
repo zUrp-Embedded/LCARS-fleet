@@ -145,6 +145,11 @@ defmodule Fleet.Pilot.PollerTelemetry do
   # The telemetry callback. Public because `:telemetry` dispatches to it by name from the poller's
   # process — NOT an API anyone should call (BL-6-42: a public function that exists only for a
   # framework is documented as such, here, rather than left looking like a surface).
+  #
+  # `@spec` and not `@impl`: `:telemetry` takes a raw function reference, it declares no behaviour,
+  # so nothing else carries these types. Both clauses `rescue` to `:ok` — a telemetry handler that
+  # raises is DETACHED by `:telemetry` for the rest of the run, and the counters would go quiet.
+  @spec handle_event([atom()], map(), map(), term()) :: :ok
   def handle_event(@cycle_event, measurements, metadata, _config) do
     GenServer.cast(
       __MODULE__,

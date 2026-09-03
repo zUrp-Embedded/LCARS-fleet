@@ -18,7 +18,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.Contracts.Check
+  alias Mix.Tasks.Lcars.Contracts.Check.Artifact
 
   defp tree(files) do
     root = Fleet.TestEnv.tmp_path("image_regime")
@@ -36,7 +36,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
 
   describe "the instrument answers for itself first" do
     test "no config file at all is BROKEN, never a pass" do
-      r = Check.check_proven_image_regime(tree([]))
+      r = Artifact.check_proven_image_regime(tree([]))
       assert r.status == :fail
       assert Enum.any?(r.evidence, &(&1 =~ "measured nothing" or &1 =~ "BROKEN"))
     end
@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
     test "config files but NO switch found is BROKEN too — the reader lost its subject" do
       # `config/test.exs` turns both off by design. Finding none means the extractor stopped seeing
       # the switch, and a wall that cannot see its subject passes everything.
-      r = Check.check_proven_image_regime(tree([{"test.exs", "import Config\n"}]))
+      r = Artifact.check_proven_image_regime(tree([{"test.exs", "import Config\n"}]))
       assert r.status == :fail
       assert Enum.any?(r.evidence, &(&1 =~ "measured nothing" or &1 =~ "BROKEN"))
     end
@@ -57,7 +57,8 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
       config :lcars_fleet, sp_builder_publish_image: false
       """
 
-      r = Check.check_proven_image_regime(tree([{"test.exs", @hermetic}, {"runtime.exs", src}]))
+      r =
+        Artifact.check_proven_image_regime(tree([{"test.exs", @hermetic}, {"runtime.exs", src}]))
 
       assert r.status == :fail
       assert Enum.any?(r.evidence, &(&1 =~ "runtime.exs" and &1 =~ "sp_builder_publish_image"))
@@ -69,7 +70,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
       config :lcars_fleet, cap_profile_publish_image: false
       """
 
-      r = Check.check_proven_image_regime(tree([{"test.exs", @hermetic}, {"config.exs", src}]))
+      r = Artifact.check_proven_image_regime(tree([{"test.exs", @hermetic}, {"config.exs", src}]))
 
       assert r.status == :fail
       assert Enum.any?(r.evidence, &(&1 =~ "config.exs"))
@@ -80,7 +81,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
     test "l'hermetisme des suites reste legitime" do
       # Sans ce temoin, un mur qui refuserait tout commutateur eteint passerait les deux tests
       # ci-dessus — et casserait l'hermetisme que les suites reposent dessus.
-      r = Check.check_proven_image_regime(tree([{"test.exs", @hermetic}]))
+      r = Artifact.check_proven_image_regime(tree([{"test.exs", @hermetic}]))
 
       assert r.status == :pass
       assert r.evidence == []
@@ -96,13 +97,15 @@ defmodule Mix.Tasks.Lcars.Contracts.ProvenImageRegimeCheckTest do
       """
 
       assert %{status: :pass} =
-               Check.check_proven_image_regime(tree([{"test.exs", @hermetic}, {"prod.exs", src}]))
+               Artifact.check_proven_image_regime(
+                 tree([{"test.exs", @hermetic}, {"prod.exs", src}])
+               )
     end
   end
 
   describe "l'arbre REEL" do
     test "le depot passe son propre mur, et le compte n'est pas zero" do
-      r = Check.check_proven_image_regime(File.cwd!())
+      r = Artifact.check_proven_image_regime(File.cwd!())
 
       assert r.status == :pass
       assert r.note =~ "2 switch"

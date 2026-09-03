@@ -4,11 +4,13 @@ defmodule Fleet.MCP.PodTools.Delegation.DependencyForge do
   tickets (`depends_on` at creation, edge carry-over at supersede), DISTINCT from the delegation
   `ForgeClient` behaviour.
 
-  Why it exists: `conforming/2` turns a seam module missing a callback into a clear
+  Why it exists: these three ops were called through the seam WITHOUT being declared anywhere. The
+  `conforming/2` guard is there so a seam module missing a callback yields a clear
   `{:seam_misconfigured, mod, missing}` instead of an obscure `UndefinedFunctionError` deep in the
-  delegation — but only for what a behaviour DECLARES. A seam call with no `@callback` on its path
-  is vouched for by nothing, and these three ops go through the seam. Declaring them is what puts
-  them under the guard.
+  delegation — and for the dependency ops it could not, because it only knows what a behaviour
+  declares. The guard was not wrong; it was blind to a surface nobody had written down. Measured
+  A seam call with no @callback on its path is vouched for by nothing: `conforming/2` can only
+  answer for what a behaviour declares.
 
   The failure it prevents is not cosmetic. The edge carry-over runs INSIDE the supersede retirement,
   after the live PR has been closed: an `UndefinedFunctionError` there leaves the old ticket closed

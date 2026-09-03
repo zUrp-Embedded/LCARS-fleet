@@ -47,8 +47,8 @@ defmodule Fleet.Forge.Client.Jury do
   ## The one rule that keeps this safe
 
   **A card can only be STRICTER. It never repeals a judge's explicit refusal.** `:changes_requested`
-  in, `:changes_requested` out, whatever the curve says. It is the same line the CI path holds
-  (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
+  in, `:changes_requested` out, whatever the curve says. This is the same line the CI path was
+  corrected onto (a card's `ci: ignore` cannot repeal the forge's floor): a judge that refuses is a
   floor, a card's tolerance is a ceiling, and a machine that promotes over an explicit human-shaped
   refusal is not a policy — it is an override.
 
@@ -73,12 +73,12 @@ defmodule Fleet.Forge.Client.Jury do
       when is_list(jury) and is_map(verdicts) and is_map(findings) do
     # DEUX ÉTAGES, ET L'ORDRE EST LE MODÈLE : le PLANCHER d'abord (ce que le jury dit), le PLAFOND
     # de la carte ensuite, et il ne s'applique qu'à une approbation. Écrit comme un `cond` à cinq
-    # branches, le même comportement laisserait croire que la courbe est un juré de plus ; écrit
+    # branches, le même comportement laissait croire que la courbe est un juré de plus ; écrit
     # ainsi, on lit qu'elle ne peut QUE durcir — il n'existe aucun chemin par lequel elle promeut.
     #
     # C'est aussi ce qui rend `review_outcome/2` prouvablement incapable de rendre `:gray_zone`
-    # (Dialyzer le vérifie) : sans politique il n'y a pas de zone grise, et cette impossibilité est
-    # STRUCTURELLE au lieu d'être une propriété qu'il faut croire sur parole.
+    # (Dialyzer le vérifie) : sans politique il n'y a pas de zone grise, et cette impossibilité
+    # est maintenant STRUCTURELLE au lieu d'être une propriété qu'il fallait croire sur parole.
     case base_outcome(jury, verdicts) do
       :approved ->
         if policy_blocks?(jury, findings, policy),
@@ -113,8 +113,9 @@ defmodule Fleet.Forge.Client.Jury do
   # C3 — LA ZONE GRISE, ET ELLE A UNE DÉFINITION ÉTROITE : le jury a TOUT approuvé, et c'est la
   # courbe de la carte qui refuse. Rien d'autre n'est gris. Un refus de juge est net (plancher), une
   # PR propre est nette ; ici la machine s'apprête à renverser une approbation humaine-de-forme sur
-  # la foi de mesures que ce même juge a écrites. C'est le cas nommé de l'arbitrage : le runtime ne
-  # peut pas trancher seul.
+  # la foi de mesures que ce même juge a écrites. C'est exactement le cas que le SP du gatekeeper
+  # décrit depuis dix mois — « tu es invoqué quand le runtime ne peut pas trancher seul » — et qui
+  # n'avait jamais eu de code.
   #
   # L'arbitre n'est PAS un juré de plus : sa voix n'est lue QUE dans cette zone. Hors d'elle il ne
   # peut ni sauver un livrable qu'un juge refuse (le plancher est au-dessus de lui), ni bloquer une
@@ -182,9 +183,10 @@ defmodule Fleet.Forge.Client.Jury do
   force for this reviewer" is a single question and two implementations of it would drift — the
   routing would then act on one answer while the human read the other.
 
-  Why it matters: a rubber stamp and a real review are indistinguishable in `verdicts` — both are
-  `:approved`. On the forge they never are: two `submitted_at` seconds apart versus a minute, and
-  two incomparable bodies.
+  Why it matters, and it is measured: a rubber stamp and a real review are indistinguishable in
+  `verdicts` — both are `:approved`. On the forge they never were: two `submitted_at` seconds apart
+  versus a minute, and two incomparable bodies. The architect's first blind spot was FALSE at the
+  level of the data and TRUE at the level of its tools; this is the half that was missing.
   """
   @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
           {:ok,
@@ -198,19 +200,19 @@ defmodule Fleet.Forge.Client.Jury do
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # NO IMPLICIT UNSCOPED MODE. A `Keyword.get/2` here lands an ABSENT key and a `nil` VALUE both
-    # on "count every review ever placed on this PR" — and `nil` is exactly what the production
-    # caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR object omits
-    # `head.sha` (a lighter listing shape, a Gitea version, a partial response).
+    # NO IMPLICIT UNSCOPED MODE. `head_sha` used to be a `Keyword.get/2`, so an ABSENT key and a
+    # `nil` VALUE both landed on "count every review ever placed on this PR" — and `nil` is exactly
+    # what the production caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR
+    # object omits `head.sha` (a lighter listing shape, a Gitea version, a partial response).
     #
-    # WHAT THAT COSTS is the whole severity: a PR approved on commit A and then completed by commit
-    # B reads as still approved, `review_outcome/2` yields `:approved`, the routing promotes, and
-    # `MergeAndPromote` merges. Code no judge ever saw lands on the main branch, under a seal that
-    # attests the opposite.
+    # WHAT THAT COST, and it is the whole severity of the finding: a PR approved on commit A and
+    # then completed by commit B reads as still approved, `review_outcome/2` yields `:approved`,
+    # the routing promotes, and `MergeAndPromote` merges. Code no judge ever saw lands on the main
+    # branch, under a seal that attests the opposite.
     #
-    # The unscoped mode exists — some callers legitimately want every review — but it is ASKED FOR
-    # (`head_sha: :unscoped`), never inherited from a missing key. That is the whole difference
-    # between a default and a decision.
+    # The unscoped mode still exists — some callers legitimately want every review — but it is now
+    # ASKED FOR (`head_sha: :unscoped`), never inherited from a missing key. That is the whole
+    # difference between a default and a decision.
     case Keyword.fetch(opts, :head_sha) do
       {:ok, :unscoped} -> do_review_state(repo, index, opts, nil)
       {:ok, sha} when is_binary(sha) and sha != "" -> do_review_state(repo, index, opts, sha)
@@ -225,10 +227,10 @@ defmodule Fleet.Forge.Client.Jury do
       decisive = decisive_by_reviewer(reviews, head_sha)
 
       # THE FORGE ANSWERS IN LOGINS, THE FLEET REASONS IN ROLES — translated here, at the frontier,
-      # so nothing above ever holds an account name. Left untranslated, a fleet judge comes back
-      # under its LOGIN and gets measured against a card that names its ROLE: F-C061 then files the
-      # jury itself as `foreign` and drops the verdicts it carried. A login belonging to no role
-      # stays verbatim — that is a HUMAN, and it must remain visibly foreign.
+      # so nothing above ever holds an account name. Left untranslated, every fleet judge came back
+      # as `fleet_qualifier` and got measured against a card that says `qualifier`: F-C061 filed the
+      # jury itself as `foreign`, and the verdicts it carried were dropped. A login belonging to no
+      # role stays verbatim — that is a HUMAN, and it must remain visibly foreign.
       verdicts =
         Map.new(decisive, fn {login, r} ->
           {RoleIdentity.role_or_login(login), decisive_verdict(r["state"])}
@@ -276,11 +278,12 @@ defmodule Fleet.Forge.Client.Jury do
         {:ok, findings} ->
           Map.put(acc, RoleIdentity.role_or_login(login), findings)
 
-        # A block that is present and broken is NOT the same fact as no block, and DROPPING it
-        # spends the difference at the moment it matters. Under a card that declares a floor, a
-        # dropped payload reads downstream as "this judge measured nothing", so an unreadable
-        # measurement REMOVES a block instead of raising one: a gray zone that owes an arbitration
-        # gets sealed as `:approved`, with a log line as its only witness.
+        # A block that is present and broken is NOT the same fact as no block -- and this used to
+        # DROP it, which spent the difference the moment it mattered. Under a card that declares a
+        # floor, a dropped payload is read downstream as "this judge measured nothing", so an
+        # unreadable measurement REMOVED a block instead of raising one: a gray zone that owed an
+        # arbitration got sealed as `:approved`, with a log line as its only witness. Measured
+        # 2026-08-19 on the two shipped cards that declare `block_at: critical`.
         #
         # So it is RECORDED, as a fact of its own kind. Not as a fabricated finding -- inventing a
         # `critical` nobody measured would put a defect in the record -- but as the honest one:
@@ -334,6 +337,10 @@ defmodule Fleet.Forge.Client.Jury do
   # is STALE — the judged code no longer exists, the judge must re-judge. Indispensable because Gitea does
   # NOT dismiss a REQUEST_CHANGES on push (only stale approvals via branch-protection are): without this
   # filter, a stale REQUEST_CHANGES that is never re-dispatched blocks the PR FOREVER.
+  # The IN-FORCE review per reviewer, as the raw forge record. ONE definition of "in force", from
+  # which both the routing verdict and the human-facing record derive: two implementations of the
+  # same question drift, and the gate would then route on one answer while the architect reads the
+  # other.
   defp decisive_by_reviewer(reviews, head_sha) do
     reviews
     |> Enum.reject(&Map.get(&1, "dismissed", false))
@@ -413,11 +420,7 @@ defmodule Fleet.Forge.Client.Jury do
   @doc """
   Returns downcased judges with an unanswered re-request after a prior review.
 
-  A re-request is the human gesture "judge this again" (the forge's UI button), and neither source
-  the runtime already reads reveals it: the review-records are NOT dismissed on re-request (Gitea,
-  verified live), and `requested_reviewers` is volatile. Left unread, a re-request is invisible —
-  the judge is never re-dispatched and the merge loops on `not enough approvals`.
-
+  review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
   The paginated timeline is counted rather than timestamp-ordered because forge timestamps have
   second granularity. Removals cancel requests; truncated or malformed timelines fail.
   """

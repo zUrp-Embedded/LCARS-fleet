@@ -7,6 +7,8 @@ defmodule Fleet.SPBuilder.Image do
 
   require Logger
 
+  alias Fleet.Catalogue
+
   @doc """
   Builds and publishes the SP image from the live roots. Raises on any unreadable root —
   the artifacts are load-bearing prompt material, a hole is a broken deploy. Gated by the
@@ -17,7 +19,7 @@ defmodule Fleet.SPBuilder.Image do
     # UNE image PAR CATALOGUE INSTALLE, cle sur sa racine : un pod du catalogue k doit recevoir le
     # materiel de k, pas celui de son voisin. Une cle scalaire les fusionnerait, et le SP d'un role
     # viendrait de n'importe lequel d'entre eux.
-    for root <- Fleet.Catalogue.installed_roots(), do: publish_scope!(root)
+    for root <- Catalogue.installed_roots(), do: publish_scope!(root)
     :ok
   end
 
@@ -127,9 +129,9 @@ defmodule Fleet.SPBuilder.Image do
     # the same thing on both sides. The lie needs a name introduced by one catalogue and prompted by
     # another that never heard of it.
     carried =
-      Enum.reduce([scope_root, Fleet.Catalogue.system_root()], %{}, fn root, acc ->
-        cap_dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
-        drafts_dir = Path.join(root, Fleet.Catalogue.rel(:sp_drafts))
+      Enum.reduce([scope_root, Catalogue.system_root()], %{}, fn root, acc ->
+        cap_dir = Path.join(root, Catalogue.rel(:cap_profiles))
+        drafts_dir = Path.join(root, Catalogue.rel(:sp_drafts))
 
         case Fleet.CapProfile.index_of(cap_dir) do
           {:ok, index} ->
@@ -249,7 +251,7 @@ defmodule Fleet.SPBuilder.Image do
   @doc "The published image of a catalogue, or nil. No argument = the BUNDLED catalogue."
   @spec published() :: map() | nil
   def published do
-    published(Fleet.Catalogue.root())
+    published(Catalogue.root())
   end
 
   @spec published(Path.t()) :: map() | nil
@@ -274,7 +276,7 @@ defmodule Fleet.SPBuilder.Image do
   """
   @spec republish(map()) :: :ok
   def republish(%{} = image) do
-    :persistent_term.put(image_key(Fleet.Catalogue.root()), image)
+    :persistent_term.put(image_key(Catalogue.root()), image)
     :ok
   end
 
@@ -386,23 +388,26 @@ defmodule Fleet.SPBuilder.Image do
       root
       |> Path.join(glob)
       |> Path.wildcard()
-      |> Enum.reduce(acc, fn path, inner ->
-        key = key_fun.(path)
-
-        if Map.has_key?(inner, key) do
-          inner
-        else
-          content = read_artifact!(path, "artifact")
-
-          if content == "" do
-            raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
-                    "non-empty artifacts (truncated file in deploy?)"
-          end
-
-          Map.put(inner, key, content)
-        end
-      end)
+      |> Enum.reduce(acc, &put_first_seen(&2, key_fun.(&1), &1))
     end)
+  end
+
+  # PREMIERE racine gagnante : le scope est ordonne (propre, puis systeme), et une clef deja vue
+  # vient donc de la racine la plus specifique. Un artefact VIDE fait lever — une image « prouvee
+  # bonne » qui gele un fichier tronque prouve le contraire de ce qu'elle annonce.
+  defp put_first_seen(inner, key, path) do
+    if Map.has_key?(inner, key) do
+      inner
+    else
+      content = read_artifact!(path, "artifact")
+
+      if content == "" do
+        raise "SPBuilder.Image: artifact #{path} is empty — proven-good image requires " <>
+                "non-empty artifacts (truncated file in deploy?)"
+      end
+
+      Map.put(inner, key, content)
+    end
   end
 
   defp read_worker_protocol!(root),
@@ -425,8 +430,8 @@ defmodule Fleet.SPBuilder.Image do
   # resolution of the same asset, one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
     Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
-      Fleet.Catalogue.find_in(
-        Fleet.Catalogue.tree_scope(root, :sp_drafts),
+      Catalogue.find_in(
+        Catalogue.tree_scope(root, :sp_drafts),
         "protocole-user-worker.md"
       )
   end
@@ -437,8 +442,8 @@ defmodule Fleet.SPBuilder.Image do
   # a second knob now would be inventing the mechanism twice before either exists.
   defp human_protocol_path(root),
     do:
-      Fleet.Catalogue.find_in(
-        Fleet.Catalogue.tree_scope(root, :sp_drafts),
+      Catalogue.find_in(
+        Catalogue.tree_scope(root, :sp_drafts),
         "protocole-user-human.md"
       )
 
@@ -450,14 +455,14 @@ defmodule Fleet.SPBuilder.Image do
   # the business root only; the system root is never dropped, and an absent directory is — which is
   # what lets the system catalogue ship only what its roles need (it has no subagent template and
   # must not fake one).
-  defp modop_roots(root), do: Fleet.Catalogue.tree_scope(root, :modops)
+  defp modop_roots(root), do: Catalogue.tree_scope(root, :modops)
 
-  defp subagent_roots(root), do: Fleet.Catalogue.tree_scope(root, :subagent_templates)
+  defp subagent_roots(root), do: Catalogue.tree_scope(root, :subagent_templates)
 
-  defp drafts_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_drafts)
+  defp drafts_roots(root), do: Catalogue.tree_scope(root, :sp_drafts)
 
   # Two readers that must go through the search path like the rest: the EEx templates shape the
   # MECHANISM's prompts, and demanding the human protocol from catalogues that have no human-facing
   # role at all is a defect of its own (W-13).
-  defp template_roots(root), do: Fleet.Catalogue.tree_scope(root, :sp_templates)
+  defp template_roots(root), do: Catalogue.tree_scope(root, :sp_templates)
 end

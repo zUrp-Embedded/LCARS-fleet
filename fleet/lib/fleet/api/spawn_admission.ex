@@ -52,6 +52,7 @@ defmodule Fleet.API.SpawnAdmission do
   `{:error, _}` (HTTP 400 surface on the ControlRouter side), never a handler crash.
   """
 
+  alias Fleet.CapProfile
   alias Fleet.EventRouter.Bus
 
   @typedoc """
@@ -165,9 +166,9 @@ defmodule Fleet.API.SpawnAdmission do
   # gate is the wrong place to discover that a catalogue is malformed — the image refuses that at
   # boot. Here, no valid index simply means "not the fleet-scope slot".
   defp check_fleet_scope_free(cap) do
-    name = Fleet.CapProfile.name(cap)
+    name = CapProfile.name(cap)
 
-    if Fleet.CapProfile.catalogued?(cap) and Fleet.CapProfile.role_index(cap) == 0 do
+    if CapProfile.catalogued?(cap) and CapProfile.role_index(cap) == 0 do
       # `Map.get`, never dot access: `list_pods/0` is specced `[map()]` and makes no promise about
       # the keys. A pod whose `:info` lacks `:role` then raises a KeyError THROUGH the router, and
       # THE WHOLE SPAWN DOOR ANSWERS 500 because one unrelated pod returned a short map. A guard
@@ -185,13 +186,13 @@ defmodule Fleet.API.SpawnAdmission do
   defp host_native_ack?(_), do: false
 
   defp validate_cap_profile(payload, ack?) do
-    case Fleet.CapProfile.name_from_request(payload) do
+    case CapProfile.name_from_request(payload) do
       name when is_binary(name) ->
         # Admission gates the effective profile, including default modops.
-        case Fleet.CapProfile.resolve(Fleet.CapProfile, name) do
+        case CapProfile.resolve(CapProfile, name) do
           {:ok, cap} ->
             cond do
-              Fleet.CapProfile.bwrap?(cap) ->
+              CapProfile.bwrap?(cap) ->
                 {:ok, cap}
 
               # L'OUVERTURE NOMMÉE du verrou (BL-6-101). Un profil `containment: none`

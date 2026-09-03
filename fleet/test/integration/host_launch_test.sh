@@ -31,7 +31,8 @@
 #
 # Standalone (needs tmux) — not part of `mix test`. Usage: bash test/integration/host_launch_test.sh
 
-set -uo pipefail
+set -uo pipefail          # PAS -e : ce temoin ENCHAINE des cas et compte les echecs pour rendre
+                          # un bilan. `-e` s'arreterait au premier, et le compte n'existerait plus.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LAUNCHER="${ROOT}/bin/host_launch.sh"

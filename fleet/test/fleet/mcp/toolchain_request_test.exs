@@ -10,7 +10,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.MCP.PodTools.Delegation
+  alias Fleet.MCP.PodTools.Delegation.Toolchain
   alias Fleet.TaskQueue
 
   # UNE seule doublure, scriptée par le dictionnaire de processus : la délégation tourne dans le
@@ -111,8 +111,8 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     test "sans `pod_id`, la demande est refusée — et typée" do
       # Un manifeste dont on ne connaît pas l'origine est un manifeste qu'aucun humain ne peut
       # juger et qu'aucun merge ne se laisse retracer.
-      assert {:error, :pod_id_required} = Delegation.request_toolchain(req(), nil)
-      assert {:error, :pod_id_required} = Delegation.request_toolchain(req(), "")
+      assert {:error, :pod_id_required} = Toolchain.request_toolchain(req(), nil)
+      assert {:error, :pod_id_required} = Toolchain.request_toolchain(req(), "")
     end
 
     test "un pod sans work-item ET sans identité résolvable est refusé — typé" do
@@ -121,7 +121,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       Application.put_env(:lcars_fleet, :mcp_pod_resolver, fn _ -> {:error, :pod_unknown} end)
 
       assert {:error, :pod_unknown} =
-               Delegation.request_toolchain(req(), "pod-sans-item-#{System.unique_integer()}")
+               Toolchain.request_toolchain(req(), "pod-sans-item-#{System.unique_integer()}")
     end
   end
 
@@ -144,14 +144,14 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       pod = "architect-hello-#{System.unique_integer([:positive])}"
 
       assert {:ok, %{"status" => "toolchain_requested", "ecosystem" => "python", "pr" => 412}} =
-               Delegation.request_toolchain(req(), pod)
+               Toolchain.request_toolchain(req(), pod)
 
       assert_received {:open_pr, _repo, _head, _base, "[toolchain] python (anticipation)", _body}
     end
 
     test "la branche est celle du POD, dans un espace de noms qui ne croise pas les work-items" do
       pod = "architect-hello-#{System.unique_integer([:positive])}"
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
 
       expected = Fleet.Toolchain.branch_for_pod(pod)
       assert_received {:create_branch, _repo, ^expected, _base}
@@ -164,7 +164,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
     test "AUCUN verrou, AUCUN commentaire — il n'y a pas de ticket à mettre en attente" do
       pod = "architect-hello-#{System.unique_integer([:positive])}"
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
 
       refute_received {:add_label, _, _, _}
       refute_received {:post_comment, _, _, _}
@@ -172,7 +172,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
     test "le corps de PR ne porte PAS de marqueur de work-item, et le dit" do
       pod = "architect-hello-#{System.unique_integer([:positive])}"
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
 
       assert_received {:open_pr, _repo, _head, _base, _title, body}
 
@@ -188,7 +188,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
     test "le manifeste porte le rôle du demandeur, sans issue ni work-item" do
       pod = "architect-hello-#{System.unique_integer([:positive])}"
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
 
       assert_received {:put_file, _repo, "ops/toolchains.d/python.yaml", content, _branch}
       assert content =~ "role: architect"
@@ -203,7 +203,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       item = enqueue!(pod)
       assert item.state == :pending
 
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
 
       # LE PIÈGE ÉVITÉ : `TaskQueue.get_for_pod/1` enregistre un poll ET fait passer l'item en
       # `:assigned` avec un broadcast. L'appeler ici émettrait une assignation que personne n'a
@@ -221,7 +221,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       bad = req(%{"sysroot" => %{"arch" => "arm64", "sources" => [], "packages" => []}})
 
-      assert {:error, {:toolchain_form, _}} = Delegation.request_toolchain(bad, pod)
+      assert {:error, {:toolchain_form, _}} = Toolchain.request_toolchain(bad, pod)
       refute_received {:create_branch, _, _, _}
       refute_received {:put_file, _, _, _, _}
     end
@@ -231,7 +231,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       item = enqueue!(pod)
 
       assert {:ok, %{"status" => "toolchain_requested", "pr" => 412}} =
-               Delegation.request_toolchain(req(), pod)
+               Toolchain.request_toolchain(req(), pod)
 
       branch = Fleet.Toolchain.branch_for(item.id)
       base = Fleet.Toolchain.branch()
@@ -263,7 +263,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       # IDEMPOTENCE PAR LA BRANCHE : son nom dérive du work-item, donc un retry réécrit le même
       # fichier au lieu d'ouvrir une DEUXIÈME pull request pour un seul besoin.
-      assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+      assert {:ok, %{"pr" => 412}} = Toolchain.request_toolchain(req(), pod)
       assert_received {:put_file, _, _, _, _}
     end
 
@@ -271,7 +271,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       pod = "pod-eco-#{System.unique_integer([:positive])}"
       enqueue!(pod)
 
-      {:ok, _} = Delegation.request_toolchain(req(%{"ecosystem" => "rust"}), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(%{"ecosystem" => "rust"}), pod)
       assert_received {:put_file, _, "ops/toolchains.d/rust.yaml", _, _}
     end
   end
@@ -281,7 +281,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       pod = "pod-verrou-#{System.unique_integer([:positive])}"
       enqueue!(pod)
 
-      assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+      assert {:ok, %{"pr" => 412}} = Toolchain.request_toolchain(req(), pod)
 
       lock = Fleet.Toolchain.waiting_label()
       assert_received {:add_label, "fleet/morse", 412, ^lock}
@@ -294,7 +294,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
       enqueue!(pod)
       Process.put(:add_label_result, {:error, {:http, 500, "boom"}})
 
-      assert {:error, {:http, 500, _}} = Delegation.request_toolchain(req(), pod)
+      assert {:error, {:http, 500, _}} = Toolchain.request_toolchain(req(), pod)
       # Sans le verrou, le dispatcher re-proposerait un ticket dont la demande est en vol — le
       # refus force le ré-émit, et toute la chaîne amont se rejoue sans doublon.
       refute_received {:post_comment, _, _, _}
@@ -307,7 +307,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+          assert {:ok, %{"pr" => 412}} = Toolchain.request_toolchain(req(), pod)
         end)
 
       assert log =~ "commentaire de lien NON pos"
@@ -318,7 +318,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
     test "defaut : PAS d'armement (sans protection de branche, l'armer mergerait sans signature)" do
       pod = "pod-am-off-#{System.unique_integer([:positive])}"
       enqueue!(pod)
-      {:ok, _} = Delegation.request_toolchain(req(), pod)
+      {:ok, _} = Toolchain.request_toolchain(req(), pod)
       refute_received {:auto_merge_armed, _, _}
     end
 
@@ -334,7 +334,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
 
       pod = "pod-am-on-#{System.unique_integer([:positive])}"
       enqueue!(pod)
-      assert {:ok, %{"pr" => 412}} = Delegation.request_toolchain(req(), pod)
+      assert {:ok, %{"pr" => 412}} = Toolchain.request_toolchain(req(), pod)
       assert_received {:auto_merge_armed, _repo, 412}
     end
   end

@@ -11,9 +11,10 @@ defmodule Fleet.Project.WorktreeSync do
 
   require Logger
 
+  alias Fleet.Layout
   alias Fleet.Project.GitOps
 
-  @code_root Fleet.Layout.code_root()
+  @code_root Layout.code_root()
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -61,8 +62,8 @@ defmodule Fleet.Project.WorktreeSync do
     {:ok,
      %{
        root: Keyword.get(opts, :code_root, @code_root),
-       ops_root: Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
-       workshop_root: Keyword.get(opts, :workshop_root, Fleet.Layout.workshop_root())
+       ops_root: Keyword.get(opts, :ops_root, Layout.ops_root()),
+       workshop_root: Keyword.get(opts, :workshop_root, Layout.workshop_root())
      }}
   end
 
@@ -83,23 +84,22 @@ defmodule Fleet.Project.WorktreeSync do
   end
 
   defp do_sync(repo, branch, state) do
-    name = Fleet.Layout.project_name(repo)
+    name = Layout.project_name(repo)
 
     # One clause per face and NO catch-all: the day `@face_branches` names a third one, this case
     # raises with the face in the message instead of quietly routing it to a worktree that is not
     # its own. A crash that names the missing branch is a two-minute fix; a doc deliverable
     # realigned into the code worktree is a corruption nobody attributes.
     {dir, aligner} =
-      case Fleet.Layout.face_of(branch) do
+      case Layout.face_of(branch) do
         "code" ->
           {Path.join(state.root, name), &align_code/1}
 
         "workshop" ->
-          {Path.join(state.workshop_root, name),
-           &align_writer(&1, Fleet.Layout.workshop_branch())}
+          {Path.join(state.workshop_root, name), &align_writer(&1, Layout.workshop_branch())}
 
         "ops" ->
-          {Path.join(state.ops_root, name), &align_writer(&1, Fleet.Layout.ops_branch())}
+          {Path.join(state.ops_root, name), &align_writer(&1, Layout.ops_branch())}
 
         nil ->
           {nil, nil}
@@ -145,9 +145,9 @@ defmodule Fleet.Project.WorktreeSync do
   # reste simplement perimee : elle n'est load-bearing pour rien (les pods clonent depuis la forge).
   defp align_code(dir) do
     with :ok <-
-           GitOps.run(["-C", dir, "fetch", "origin", Fleet.Layout.code_branch()], auth: true),
+           GitOps.run(["-C", dir, "fetch", "origin", Layout.code_branch()], auth: true),
          :ok <- refuse_if_dirty(dir) do
-      GitOps.run(["-C", dir, "reset", "--hard", "origin/" <> Fleet.Layout.code_branch()],
+      GitOps.run(["-C", dir, "reset", "--hard", "origin/" <> Layout.code_branch()],
         auth: false
       )
     end
@@ -207,7 +207,7 @@ defmodule Fleet.Project.WorktreeSync do
   end
 
   defp do_fetch_issue_refs(repo, issue_n, state) do
-    dir = Path.join(state.root, Fleet.Layout.project_name(repo))
+    dir = Path.join(state.root, Layout.project_name(repo))
 
     cond do
       not File.dir?(Path.join(dir, ".git")) ->

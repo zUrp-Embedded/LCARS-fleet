@@ -7,9 +7,9 @@ defmodule Fleet.MCP.ProjectPublishTest do
   """
   use ExUnit.Case, async: false
 
+  alias Fleet.EventRouter.Bus
   alias Fleet.MCP.PodTools
   alias Fleet.MCP.PodTools.ProjectPublish
-  alias Fleet.EventRouter.Bus
   alias Fleet.TestEnv
 
   defp call(args, state), do: PodTools.handle_tool_call("project_publish", args, state)
@@ -47,7 +47,7 @@ defmodule Fleet.MCP.ProjectPublishTest do
 
   describe "the worker: fail-closed on the bus" do
     test "a project with no publish binding emits project_publish.failed (not_linked), never a crash" do
-      tmp = Fleet.TestEnv.tmp_path("gh-pub")
+      tmp = TestEnv.tmp_path("gh-pub")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf(tmp) end)
 
