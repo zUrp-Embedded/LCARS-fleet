@@ -113,8 +113,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # `deploy/deps/`: the tofu recipe is the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
     # the gesture that touched it.
-    tf_path = Path.expand("deploy/deps/forge.tf", root)
-    lib_path = Path.expand("deploy/lib/provision-lib.sh", root)
+    tf_path = Path.expand("services/forge-recipe/forge.tf", root)
+    lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
 
     # The two SIBLING-TREE lists are outside `fleet`, and one legitimate context does not
     # carry them: the image BUILD stage copies `fleet` ALONE (Dockerfile), then runs this
@@ -139,7 +139,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         # d'instance partagee. Le canon ne connait pas cette coupure — il connait les comptes — donc
         # c'est ici qu'on recolle, sans quoi le verrou declarerait trois roles « manquants ».
         {"forge.tf var.roles + var.system_roles defaults",
-         tree_scope(Path.expand("deploy", root)),
+         tree_scope(Path.expand("../deploy", root)),
          merge_lists(
            read_list(tf_path, ~r/variable\s+"roles"\s*\{.*?default\s*=\s*\[([^\]]*)\]/s, :quoted),
            read_list(
@@ -151,7 +151,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
          "add/remove the role in the `roles` variable default (forge account) — the canon is the " <>
            "source: a role only in forge.tf needs its cap-profile or a ReservedSeat, or loses " <>
            "its account"},
-        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("deploy", root)),
+        {"provision-lib.sh PROV_ROLES", tree_scope(Path.expand("../deploy", root)),
          read_list(lib_path, ~r/\$\{PROV_ROLES:=([^}]*)\}/, :plain),
          "add/remove the role in PROV_ROLES (the list that WINS the mint on deploy — a role " <>
            "absent here gets no token on a fresh fleet)"}
@@ -358,8 +358,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("deploy/docker/entrypoint.sh", root)
-    module = Path.expand("deploy/modules.d/25-directories.sh", root)
+    entrypoint = Path.expand("../deploy/docker/entrypoint.sh", root)
+    module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
@@ -367,14 +367,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
-    case tree_scope(Path.expand("deploy", root)) do
+    case tree_scope(Path.expand("../deploy", root)) do
       :out_of_scope ->
         %{
           id: "layout.face_roots_provisioned",
           remediation: "—",
           status: :pass,
           evidence: [],
-          note: "NOT CHECKED here (fleet/deploy absent from this artifact — runtime-only context)"
+          note: "NOT CHECKED here (deploy/ absent from this artifact — runtime-only context)"
         }
 
       :required ->
@@ -546,7 +546,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # `deploy/` (COPY explicite, par choix), donc la recette n'y est pas : les listes existantes se
     # skippaient proprement pendant que celle-ci rendait « not readable — fail-closed ». Un gate vert
     # sur l'hote et rouge dans l'image, sur un artefact qui n'a jamais fait partie du perimetre.
-    if File.dir?(Path.expand("deploy", root)) and File.dir?(catalogue) do
+    if File.dir?(Path.expand("../deploy", root)) and File.dir?(catalogue) do
       case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->
           ev =
@@ -641,7 +641,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   def check_catalogue_paths_locked(root) do
     layout = "lib/fleet/layout.ex"
     cli = "bin/lcars"
-    lib = "deploy/lib/provision-lib.sh"
+    lib = "../deploy/lib/provision-lib.sh"
     layout_src = read_or_empty(root, layout)
     cli_src = read_or_empty(root, cli)
     lib_src = read_or_empty(root, lib)
@@ -669,7 +669,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # `${VAR:=default}` in the lib, `${VAR:-default}` in the CLI — two different shell operators for
     # the same fact. `shell_default/2` reads both, because the difference is about who ASSIGNS, not
     # about what the default IS.
-    deploy? = File.dir?(Path.expand("deploy", root))
+    deploy? = File.dir?(Path.expand("../deploy", root))
 
     sources =
       [{cli, cli_src, expected || %{}}] ++

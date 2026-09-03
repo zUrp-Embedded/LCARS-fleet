@@ -31,10 +31,33 @@ set -euo pipefail
 # temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /opt/lcars/var/tokens. Les defauts
 # sont les chemins reels ; aucun appelant de production ne les passe.
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
-# Le compte integre, resolu UNE fois : les deux `TF_VAR_builtin_human` plus bas et le verbe
-# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-lcars}` dans le meme fichier
-# seraient trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
-BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-lcars}"
+# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER. Son nom etait ecrit en dur dans les deux
+# projections de catalogue (`git -c user.name=...`), donc le renommer demandait de les retrouver.
+# Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
+# chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
+# une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
+# Le compte integre, resolu UNE fois : le `TF_VAR_builtin_human` plus bas et le verbe
+# `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-…}` dans le meme fichier seraient
+# trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
+#
+# ⚠ VIDE PAR DEFAUT, ET C'EST LE CANON (⚖ user 2026-08-30). Il valait `lcars` : tout deploiement
+# semait donc un compte humain, avec un mot de passe pose et ANNONCE. Or aucun deploiement de
+# TRAVAIL ne fabrique d'humain — le rail pose les autorites (le siege, l'admin de forge, le master
+# token) et les personnes s'enrolent par la page d'inscription, sous leur nom. Le commentaire
+# ci-dessous le disait deja sans en tirer la consequence : « le siege BUILT-IN de DEMONSTRATION ».
+#
+# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
+# ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
+#
+# ⚠ ET `LCARS_DISPOSABLE` LE DEMANDE SANS LE NOMMER (40-RAILS.md § 13). C'est l'axe DESTINATION :
+# un appelant qui sait que son deploiement est jetable — `--disposable` sur la porte, le drapeau
+# traverse jusqu'a `48-forge-host` — demande les annexes de demonstration sans avoir a decider QUI
+# elles sont. Ce fichier reste le seul declarant du nom ; deux temoins de `forge_host_reach.bats` le
+# gardent, et ils ont attrape une premiere version qui ecrivait ce defaut dans le module appelant.
+#
+# L'ORDRE EST LOAD-BEARING : un nom EXPLICITE l'emporte toujours sur le defaut de la destination.
+# L'inverse ferait ignorer en silence ce que l'operateur a tape.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${LCARS_DISPOSABLE:+lcars}}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
@@ -45,9 +68,12 @@ AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}
 # et la table diraient deux choses differentes du meme objet.
 FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
+# ⚠ NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des jetons de ROLE
+# (`<login>.gitea_token`, plus bas). Le premier lecteur qui globbera ce repertoire ne doit pas
+# ramasser un site-admin.
 MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
-RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/deploy/deps}"
+RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/fleet/services/forge-recipe}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
 # que le verrou d'apply y vit desormais — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
@@ -66,7 +92,7 @@ STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 _entrypoint_path() {
   local here c
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for c in "$here/entrypoint.sh" "$here/fleet/deploy/docker/entrypoint.sh"; do
+  for c in "$here/entrypoint.sh" "$here/deploy/docker/entrypoint.sh"; do
     [[ -r "$c" ]] && { printf '%s' "$c"; return 0; }
   done
   # Aucun candidat lisible : on rend le premier quand meme, pour qu'un refus NOMME un chemin.
@@ -78,7 +104,7 @@ need_entrypoint() {
   [[ -r "$ENTRYPOINT" ]] && return 0
   die "portes outil du release introuvables ($ENTRYPOINT).
   Ce script les appelle pour resoudre, verifier et enroler un catalogue. Sur un poste elles vivent
-  dans l'arbre embarque (<prefixe>/fleet/deploy/docker/entrypoint.sh), pose par « provision apply ».
+  dans l'arbre embarque (<prefixe>/deploy/docker/entrypoint.sh), pose par « provision apply ».
   « LCARS_ENTRYPOINT=<chemin> » force la resolution."
 }
 
@@ -87,7 +113,7 @@ die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 need_forge_url() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
     echo "forge-gestures: cette boite n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
-    echo "                FORGE_BASE_URL=<url> fleet/deploy/box up, puis rejoue." >&2
+    echo "                FORGE_BASE_URL=<url> deploy/box up, puis rejoue." >&2
     exit 2; }
 }
 
@@ -284,9 +310,9 @@ cmd_apply() {
   seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
 
   local manque=""
-  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> fleet/deploy/box up"
-  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config"
-  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || manque="$manque\n  l'URL de la forge   -> FORGE_BASE_URL=<url> deploy/box up"
+  [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> deploy/box config"
+  [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> deploy/box config"
   if [[ -n "$manque" ]]; then
     printf 'forge-gestures: la boite ne detient pas ce qu il faut :%b\n' "$manque" >&2
     exit 1
@@ -296,7 +322,8 @@ cmd_apply() {
   export TF_VAR_gitea_token="$tok"
   export TF_VAR_seed_password="$seed"
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
-  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
+  # Sans compte de demonstration, pas d'adresse a lui donner : la deriver rendrait « @lcars.local ».
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human:+${TF_VAR_builtin_human}@lcars.local}}"
 
   # L'ORDRE EST UN INVARIANT, pas une preference : `instance/` porte les comptes partages, et une
   # adhesion peut nommer un compte qu'elle ne cree pas, jamais un compte qui n'existe pas.
@@ -426,7 +453,7 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   need_forge_url
   [[ $# -ge 1 ]] || die "toolchain-protection: le LOGIN du siege est requis (variable — celui de l'installeur ; jamais en dur)"
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
 
   # ⚠ LE NOM EST GELE, ET SON AUTORITE EST `Fleet.Toolchain.branch/0` : cette ligne en est une
   # RECOPIE, tenue par le contrat `toolchain.branch_single_source`. Rendu reglable ICI seulement, il
@@ -458,7 +485,7 @@ cmd_runner_token() {
   local tok
   tok="$(read_stdin_secret)"
   [[ -n "$tok" ]] || tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
 
   local body
   body="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -489,9 +516,9 @@ cmd_install() {
   need_entrypoint
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
-  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> fleet/deploy/box config »"
+  [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
   local seed; seed="$(cat "$SEED_FILE" 2>/dev/null || true)"
-  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> fleet/deploy/box config »"
+  [[ -n "$seed" ]] || die "install: pas de seed — « FORGE_SEED_PASSWORD=<mot de passe> deploy/box config »"
 
   # 1. QUI porte ce catalogue. La porte refuse l'absent, le doublon et le catalogue livre, chacun
   #    avec son code — on ne traduit pas, on relaie.
@@ -601,7 +628,8 @@ cmd_install() {
   #    reecriture — `var.org` porte le nom du catalogue depuis le premier jour.
   export TF_VAR_gitea_url="$FORGE_BASE_URL" TF_VAR_gitea_token="$tok" TF_VAR_seed_password="$seed"
   export TF_VAR_builtin_human="$BUILTIN_HUMAN"
-  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human}@lcars.local}"
+  # Sans compte de demonstration, pas d'adresse a lui donner : la deriver rendrait « @lcars.local ».
+  export TF_VAR_builtin_email="${LCARS_BUILTIN_EMAIL:-${TF_VAR_builtin_human:+${TF_VAR_builtin_human}@lcars.local}}"
   ( cd "$dir" && tofu init -input=false -no-color >/dev/null && tofu apply -auto-approve -input=false -no-color ) \
     || die "install: apply de la structure de $name en echec"
 
@@ -642,7 +670,7 @@ cmd_install() {
 # `local a="$1" b="/base/$a"` le `$a` n'est pas celui qu'on vient d'ecrire — `b` vaut `/base/`.
 install_material() { # $1=catalogue  $2=arbre (non utilise : on clone l autorite)
   local name="$1"
-  local dir="${LCARS_CATALOGUES_DIR:-/home/catalogues}/$name"
+  local dir="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}/$name"
   mkdir -p "$(dirname "$dir")"
   rm -rf "$dir.tmp"
   GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \

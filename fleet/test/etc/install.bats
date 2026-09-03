@@ -2,7 +2,7 @@
 # SOURCE: fleet/test/etc/install.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
-# STATUS: bats tests for etc/install.sh atomic-swap helpers (crash-safe deploy)
+# STATUS: bats tests for etc/deploy-release.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
 # a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the
@@ -12,8 +12,8 @@
 load ../support/refute
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/install.sh"
-  # shellcheck source=../../etc/install.sh
+  SCRIPT="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
+  # shellcheck source=../../etc/deploy-release.sh
   source "$SCRIPT"
   TMP="$(mktemp -d)"
 }
@@ -113,7 +113,7 @@ MIX
   refute grep -q RELEASE-RAN "$MIX_CALL_LOG"
 }
 
-@test "sourcing install.sh never runs the deploy (source guard)" {
+@test "sourcing deploy-release.sh never runs the deploy (source guard)" {
   run bash -c "source '$SCRIPT'; echo sourced-ok"
   [ "$status" -eq 0 ]
   [[ "$output" == *"sourced-ok"* ]]

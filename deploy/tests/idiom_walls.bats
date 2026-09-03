@@ -1,0 +1,322 @@
+#!/usr/bin/env bats
+# SOURCE: deploy/tests/idiom_walls.bats
+# AUTHOR: bob
+# STARDATE: 2026-08-30
+# STATUS: murs d'idiomes — la forme fragile ne revient pas une fois le code corrige
+#
+# Chaque mur remplace un commentaire qui defendait le code contre une simplification : le
+# commentaire disait « ne fais pas ca », le mur le mesure. Il grep le CODE seul, jamais la prose.
+
+load refute
+
+setup() {
+  DEPLOY="$BATS_TEST_DIRNAME/.."
+  mapfile -t SOURCES < <(ls "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision)
+  # Temoin de non-cecite : un mur qui grep une liste VIDE est vert, et le dit comme un succes. Le
+  # plancher tient sous la population reelle, assez pres pour crier si le `ls` se met a ne plus
+  # rien trouver. Il se regle donc a la baisse quand un fichier quitte legitimement le corpus —
+  # ce qui est un geste VISIBLE, et c'est tout ce qu'on lui demande.
+  [ "${#SOURCES[@]}" -ge 25 ]
+}
+
+code() { grep -vE '^[[:space:]]*#' "$1"; }   # une ligne qui COMMENCE par # est de la prose
+
+@test "MUR I1: write_atomic n'est jamais nourri par une substitution de processus" {
+  # `write_atomic … < <(fn)` : si `fn` echoue, `cat` lit un flux vide, le fichier est ecrit vide et
+  # le rc est 0. La forme sure capture d'abord : `body="$(fn)" || refus ; write_atomic … <<<"$body"`.
+  local f hits=0
+  for f in "${SOURCES[@]}"; do
+    if code "$f" | grep -qE 'write_atomic[^|]*< <\('; then
+      echo "MUR I1 rompu — $f : write_atomic nourri par < <( )" >&2; hits=$((hits+1))
+    fi
+  done
+  [ "$hits" -eq 0 ]
+  # le mur mord : la forme interdite, presentee au meme grep, est vue
+  echo '  write_atomic "$f" 0644 root < <(body)' | grep -qE 'write_atomic[^|]*< <\('
+}
+
+@test "MUR I1bis: write_atomic n'est jamais la cible d'un pipe" {
+  # `fn | write_atomic` : le dernier element d'un pipeline tourne dans un sous-shell, les compteurs
+  # p_fail/p_chg de write_atomic y meurent. Redirection ou here-string, jamais un pipe.
+  local f hits=0
+  for f in "${SOURCES[@]}"; do
+    if code "$f" | grep -qE '(^|[^|])\|[[:space:]]*write_atomic'; then
+      echo "MUR I1bis rompu — $f : write_atomic en aval d'un pipe" >&2; hits=$((hits+1))
+    fi
+  done
+  [ "$hits" -eq 0 ]
+  echo '  body_fn | write_atomic "$f" 0644' | grep -qE '(^|[^|])\|[[:space:]]*write_atomic'
+  # et un `||` (repli) n'est pas un pipe : le mur ne le prend pas pour tel
+  refute grep -qE '(^|[^|])\|[[:space:]]*write_atomic' <<<'  x || write_atomic "$f" 0644'
+}
+
+@test "MUR I2: aucun jeton de forge ne passe par argv — forge_curl le porte sur stdin" {
+  # `-H "Authorization: token $tok"` met le jeton dans la ligne de commande, lisible dans /proc de
+  # tout l'hote pendant l'appel (cicatrice 6-141). La lib porte `forge_curl`, qui le passe par
+  # `-K -`. Un module qui a besoin d'un en-tete d'autorisation l'appelle, il ne refait pas curl.
+  local f hits=0
+  for f in "${SOURCES[@]}"; do
+    if code "$f" | grep -qE -- '-H ["'"'"']?Authorization: token'; then
+      echo "MUR I2 rompu — $f : jeton en argv" >&2; hits=$((hits+1))
+    fi
+  done
+  [ "$hits" -eq 0 ]
+  echo '  curl -s -H "Authorization: token $tok" "$url"' | grep -qE -- '-H ["'"'"']?Authorization: token'
+  # la forme sure — un en-tete ecrit dans une config lue sur stdin — n'est pas prise pour la fragile
+  refute grep -qE -- '-H ["'"'"']?Authorization: token' <<<'  printf '"'"'header = "Authorization: token %s"\n'"'"' "$tok" | curl -K - "$url"'
+}
+
+# Derniere instruction d une fonction : `[[ … ]] && cmd` sans `||`. Sous set -e, le rc du test
+# devient celui de la fonction, et un appelant qui capture par affectation — `x="$(f)"` — meurt sans
+# verdict. Un PREDICAT (nom en `_ok`) est exempte : son rc EST son contrat, ses appelants sont des if.
+I3_AWK='
+  FNR==1 { fn="" }
+  /^[a-z_][a-z0-9_]*\(\)[ \t]*\{/ { fn=$1; sub(/\(\).*/, "", fn); last=""; next }
+  fn!="" && /^\}/ {
+    if (last ~ /^[ \t]*\[\[.*\]\][ \t]*&&[ \t]/ && last !~ /\|\|/ && fn !~ /_ok$/) print FILENAME ": " fn
+    fn=""; next
+  }
+  fn!="" && !/^[ \t]*(#|$)/ { last=$0 }
+'
+
+@test "MUR I3: aucune fonction ne finit sur [[ … ]] && cmd — son rc tuerait l appelant qui l affecte" {
+  local hits
+  hits="$(awk "$I3_AWK" "${SOURCES[@]}")"
+  [ -z "$hits" ] || { echo "MUR I3 rompu —" >&2; echo "$hits" >&2; false; }
+  # le mur mord : une fonction fautive est vue, un predicat _ok ne l est pas
+  printf 'get_x() {\n  [[ -n "$x" ]] && echo "$x"\n}\nx_ok() {\n  [[ -x "$b" ]] && "$b" --version\n}\n' > "$BATS_TEST_TMPDIR/probe.sh"
+  [ "$(awk "$I3_AWK" "$BATS_TEST_TMPDIR/probe.sh")" = "$BATS_TEST_TMPDIR/probe.sh: get_x" ]
+}
+
+@test "MUR I4: toute lecture de /dev/urandom est BORNEE par un head -c en tete de pipeline" {
+  # `tr -dc … < /dev/urandom | head -c N` : tr lit un flux infini, head ferme le tuyau, tr meurt de
+  # SIGPIPE — et sous pipefail c est le rc du pipeline. `head -c N /dev/urandom | …` en tete est la
+  # seule forme qui termine par elle-meme. Et un `| head -c` EN AVAL d un flux fini peut encore
+  # fermer le tuyau avant le dernier write de l amont — latent, il depend du buffer. La longueur se
+  # borne par `cut -c1-N`, qui lit tout et ne ferme rien.
+  local f l hits=0
+  for f in "${SOURCES[@]}"; do
+    while IFS= read -r l; do
+      grep -qE 'head -c [0-9]+ /dev/urandom' <<<"$l" || { echo "MUR I4 rompu — $f : source non bornee : $l" >&2; hits=$((hits+1)); }
+      grep -qE '\|[[:space:]]*head -c' <<<"$l" && { echo "MUR I4 rompu — $f : head -c en aval : $l" >&2; hits=$((hits+1)); }
+    done < <(code "$f" | grep -E '(^|[[:space:]<])/dev/urandom' || true)   # une LECTURE, pas un message qui le cite
+  done
+  [ "$hits" -eq 0 ]
+  refute grep -qE 'head -c [0-9]+ /dev/urandom' <<<'  tr -dc A-Z < /dev/urandom | head -c 10'
+  grep -qE '\|[[:space:]]*head -c' <<<'  head -c 200 /dev/urandom | tr -dc A-Z | head -c 10'
+}
+
+@test "MUR I5: l architecture se demande a arch_tag — dpkg et uname -m ne se lisent dans aucun module" {
+  # Trois modules mappaient dpkg vers le vocabulaire d une release, chacun a sa facon. Une seule
+  # table, dans la lib. `00-preflight` garde son `uname -m` : il verifie le NOYAU (x86_64, aarch64),
+  # pas le nom d un tarball — l exemption est nommee, pas devinee.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -q 'dpkg --print-architecture'; then echo "MUR I5 rompu — $f : dpkg" >&2; hits=$((hits+1)); fi
+    [[ "$f" == */00-preflight.sh ]] && continue
+    if code "$f" | grep -q 'uname -m'; then echo "MUR I5 rompu — $f : uname -m" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  code "$DEPLOY/lib/provision-lib.sh" | grep -q 'dpkg --print-architecture'
+}
+
+@test "MUR I6: comm ne se lit dans aucun module — set_diff trie lui-meme" {
+  # `comm` exige des entrees triees et, sur GNU, ne le verifie pas : deux listes dans le mauvais
+  # ordre rendent un resultat faux sans un mot. Sur uutils il le verifie — l instrument de la machine
+  # de dev ne dit pas ce que fait la cible. Une seule table de difference, dans la lib.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -qE '\bcomm -'; then echo "MUR I6 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  code "$DEPLOY/lib/provision-lib.sh" | grep -qE '^set_diff\(\)'
+}
+
+@test "MUR I7: une valeur d un fichier d environnement se lit par env_field, jamais par un sed nu" {
+  # `x="$(sed -n 's/^CLE=//p' "$f" | tail -n1)"` : sur un fichier absent sed rend 2, pipefail le
+  # propage, l affectation echoue et set -e tue la fonction AVANT le if qui savait dire l absence.
+  # Trois sites portaient la forme ; un seul avait son `|| true`.
+  local f hits=0
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    if code "$f" | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"; then echo "MUR I7 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+  echo '  x="$(sed -n '"'"'s/^LCARS_X=//p'"'"' "$f" | tail -n1)"' | grep -qE "sed -n ['\"]s/\^[A-Z_]+=//p['\"]"
+}
+
+@test "MUR I8: un fichier de jeton se lit par read_token ou forge_curl — jamais par une redirection nue" {
+  # `tr < "$X_TOKEN_FILE" 2>/dev/null` : la redirection d'entree est appliquee AVANT le detournement
+  # de stderr, et quand le fichier manque c'est le shell qui crie « No such file » sur le vrai
+  # stderr. `{ …; } 2>/dev/null` le tait, mais cette forme ne tient que par un commentaire.
+  local hits=0 f
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh; do
+    if code "$f" | grep -qE '<[[:space:]]*"?\$[A-Za-z_]*TOKEN_FILE' || code "$f" | grep -qF "tr -d '[:space:]' <"; then echo "MUR I8 rompu — $f" >&2; hits=$((hits+1)); fi
+  done
+  [ "$hits" -eq 0 ]
+}
+
+@test "MUR I9: un temoin dont le code nomme une fonction du siege pose LCARS_SEAT_UID_FILE — il ne lit jamais celui de la machine" {
+  # `prov_seat_uid` lit `/etc/lcars/seat.uid` AVANT `LCARS_SYSADMIN_UID`, et ce fichier existe sur
+  # toute machine provisionnee. Un temoin sans decor y lit le siege reel — celui qui joue le gate —
+  # et tout ce qu'il attend d'un humain « qui passe GUARD B » rougit au second run (banc .63,
+  # 2026-08-30 : vert a l'install, rouge au re-run). Le scrub du shell_gate ne peut rien : c'est un
+  # DEFAUT de chemin, pas une variable. Perimetre : le CODE des temoins (une ligne `#` ne lit rien).
+  local f bad=0
+  for f in "$BATS_TEST_DIRNAME"/*.bats; do
+    [[ "$f" == */idiom_walls.bats ]] && continue
+    grep -vE '^[[:space:]]*#' "$f" | grep -qE 'is_fleet_human|prov_seat_uid|fleet_humans|uid_floor' || continue
+    grep -qE '^[[:space:]]*export LCARS_SEAT_UID_FILE=' "$f" || { echo "${f##*/} nomme une fonction du siege sans poser LCARS_SEAT_UID_FILE"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I10: qui LIT PROV_DOCKER_BIN joue la sonde — sinon il passe une CLI VIDE a son delegue" {
+  # `PROV_DOCKER_BIN` vaut la CHAINE VIDE tant que `docker_endpoint` n'a pas tourne
+  # (`docker-endpoint.sh` la declare ainsi). Un module qui la lit sans sonder passe `DOCKER_BIN=""`,
+  # son delegue retombe sur `${DOCKER_BIN:-docker}` — un `docker` nu, introuvable dans une VM WSL ou
+  # rien n'installe de CLI. Banc WSL, 2026-08-30 : `49-forge-runner` refusait trois images
+  # PRESENTES sur le daemon, et son propre commentaire promettait « la CLI RESOLUE ». Sur un Linux
+  # natif le PATH porte `docker` (pose par le rail) : le defaut y est invisible.
+  local f bad=0
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh "$BATS_TEST_DIRNAME"/../box "$BATS_TEST_DIRNAME"/../accept; do
+    [[ -f "$f" ]] || continue
+    code "$f" | grep -q 'PROV_DOCKER_BIN' || continue
+    code "$f" | grep -qE 'docker_endpoint' \
+      || { echo "${f##*/} lit PROV_DOCKER_BIN sans jouer docker_endpoint"; bad=1; }
+  done
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I11: un fichier designe par \$HERE ou \$DOCKER_DIR EXISTE — bench/ ne porte que des scripts de banc" {
+  # `bench/` ne contient QUE ses propres scripts : les compose ET les gestes partages vivent dans
+  # `docker/`. Un `"$HERE/<x>"` ecrit depuis `bench/` designe donc un fichier absent, et rien ne le
+  # dit avant l'execution — apres avoir construit l'image entiere.
+  # ⚠ LA PORTEE EST LE FICHIER, PAS L'EXTENSION : ce mur n'a d'abord regarde que les `.yml`, et il a
+  # laisse passer `"$HERE/forge-runner.sh"` a la ligne 507 de `bench-up.sh` — le TROISIEME site du
+  # meme defaut, apres trois lignes de `bench-down.sh` et une de `bench-up.sh`. Une garde taillee
+  # sur les cas deja trouves ne trouve rien de neuf.
+  local f here dockerdir ref path bad=0
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../docker/bench/*.sh; do
+    [[ -f "$f" ]] || continue
+    here="$(cd "$(dirname "$f")" && pwd)"
+    dockerdir="$(cd "$here/.." && pwd)"
+    while read -r ref; do
+      path="${ref/\$HERE/$here}"
+      path="${path/\$DOCKER_DIR/$dockerdir}"
+      # un chemin construit depuis une AUTRE variable (repertoire genere) sort de la portee du mur
+      [[ "$path" == *'$'* ]] && continue
+      [[ -f "$path" ]] || { echo "${f##*/} : $ref -> $path INTROUVABLE"; bad=1; }
+    done < <(code "$f" | grep -oE '\$(HERE|DOCKER_DIR)/[A-Za-z0-9._-]+\.[a-z]+' | sort -u)
+  done
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I12: un script de bench/ est EXECUTABLE DANS L INDEX — son appelant ne le prefixe pas de bash" {
+  # `bench-up.sh` lance ses sous-scripts PAR LEUR CHEMIN (`"$HERE/bench-forge-bootstrap.sh" …`), pas
+  # par `bash <chemin>` : un mode 100644 dans l'index rend 126 sur TOUT clone frais, et le message
+  # (« Permission non accordee ») nomme le sous-script sans dire que le fautif est son mode.
+  # Le bit se perd en REECRIVANT un fichier — un geste qu'aucune relecture de diff ne montre, et que
+  # le disque de celui qui l'a fait ne trahit pas : `git ls-files -s` est le seul temoin. Mesure du
+  # 2026-08-30 : perdu sur `bench-forge-bootstrap.sh` par un commit qui ne touchait qu'a sa prose.
+  local root bad=0 mode path
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || skip "hors arbre git"
+  while read -r mode _ _ path; do
+    [[ "$mode" == 100755 ]] || { echo "${path##*/} : mode $mode dans l index — attendu 100755"; bad=1; }
+  done < <(git -C "$root" ls-files -s 'deploy/docker/bench/*.sh')
+  [ "$bad" -eq 0 ]
+}
+
+@test "MUR I13: tout module Elixir nomme par un script de deploiement EXISTE — un renommage cote lib ne se voit pas ici" {
+  # `entrypoint.sh` appelle la release par `eval "<Module>.<fonction>(<arg>)"` : le nom du module est
+  # une CHAINE, que ni le compilateur ni boundary ne voient. Un module extrait ou renomme laisse
+  # l'appelant intact, et le defaut ne parait qu'au runtime, DANS l'image, sous un `2>/dev/null` qui
+  # le reduit a « l'image ne rend pas le roster ». Mesure du 2026-08-30 : `CatalogueRoles` etait
+  # devenu `Fleet.Roster` et le rail boite mourait a l'amorcage de la forge, sans nommer la cause.
+  local lib f ref mod bad=0
+  lib="$(cd "$BATS_TEST_DIRNAME/../../fleet/lib" && pwd)"
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../../fleet/etc/*.sh; do
+    [[ -f "$f" ]] || continue
+    while read -r ref; do
+      mod="${ref%.*}"                       # le dernier segment est la fonction (snake_case)
+      [[ "$mod" == *.* ]] || continue       # `Fleet.chose` : pas un appel de module qualifie
+      grep -rqE "^defmodule[[:space:]]+${mod}[[:space:]]+do" "$lib" \
+        || { echo "${f##*/} nomme « $mod » — aucun defmodule dans lib/"; bad=1; }
+    done < <(code "$f" | grep -oE 'Fleet(\.[A-Z][A-Za-z0-9]*)+\.[a-z_][a-z0-9_]*' | sort -u)
+  done
+  [ "$bad" -eq 0 ]
+}
+
+# ─── MUR I14 : UNE ASSERTION QUI LIT STDIN DOIT ETRE ALIMENTEE ──────────────────────────────────
+#
+# ⚠ CE MUR NAIT D UN BLOCAGE DE HUIT HEURES, PAS D UNE INTUITION. L helper de negation par motif lit
+# STDIN — son en-tete l ecrit noir sur blanc, sous la forme `cmd | <helper> 'motif'`. Un appel sans
+# tube ni redirection laisse son `grep` attendre l entree standard, et le test ne rate pas : il PEND.
+#
+# Et il pend SELECTIVEMENT, ce qui est le pire. Joue seul depuis un terminal, stdin est ferme et
+# `grep` rend tout de suite : le fichier passe, le temoin a l air bon. Joue par `shell_gate`, stdin
+# est un tube ouvert que personne n alimente — et le harnais dort. Mesure du 2026-09-02 : le
+# `mix gate` de `pack.sh` et un `provision apply` de banc sont restes suspendus toute la nuit sur
+# un seul appel de ce genre.
+#
+# UN TEST QUI PEND EST PIRE QU UN TEST FAUX. Le faux rougit ; celui-la immobilise le harnais qui le
+# joue, et ce qu on lit ensuite n est pas « echec » mais l absence de toute nouvelle.
+#
+# ⚠ CE FICHIER EST HORS DU SCAN, ET C EST STRUCTUREL : il PARLE de l helper sans jamais l appeler.
+# Un mur qui s audite lui-meme rougit sur sa propre prose — piege deja referme trois fois dans cette
+# passe. Le motif exige en plus un DEBUT D INSTRUCTION, pour ne pas confondre une mention et un appel.
+@test "MUR I14: toute negation par motif est ALIMENTEE — sinon son grep attend stdin et le test PEND" {
+  local helper='refute_out' nus total
+  # ⚠ LE TUBE EST EXCLU DU MOTIF, PAS FILTRE APRES : `| refute_out` EST la forme nominale. Une
+  # premiere version mettait `|` dans la classe des debuts d instruction et denoncait les quatre
+  # appels corrects du corpus — un mur qui accuse l idiome qu il defend.
+  nus="$(grep -rn --exclude=idiom_walls.bats -E "(^|;|&) *${helper} " \
+           "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../fleet/test/*/*.bats 2>/dev/null \
+         | grep -vE '<<<|< *"' || true)"
+  [ -z "$nus" ] || {
+    echo "appel sans tube ni redirection — son grep attendra stdin, et le test PENDRA :" >&2
+    printf '%s\n' "$nus" >&2
+    return 1
+  }
+  # GARDE D INSTRUMENT : sans elle, ce mur devient vert le jour ou l extraction ne trouve plus rien
+  # — exactement la faute qu il existe pour attraper ailleurs.
+  # Le compte porte sur TOUS les appels, tube compris : c est la population que le mur surveille.
+  total="$(grep -rho --exclude=idiom_walls.bats -E "${helper} " \
+             "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../fleet/test/*/*.bats 2>/dev/null | wc -l)"
+  [ "${total:-0}" -ge 5 ] \
+    || { echo "instrument casse : $total appel(s) trouve(s), 5 au moins attendus" >&2; return 1; }
+}
+
+# ─── MUR I15 : QUI BATIT DEPUIS UN ARBRE DE SOURCE DOIT SAVOIR OU IL EST ────────────────────────
+#
+# ⚠ TROIS MODULES ONT BATI DANS LA COPIE POSEE, ET LES TROIS ONT ECHOUE — mesure du 2026-09-02 sur
+# les bancs 2006 ET 2007, apply rejoue depuis `/opt/lcars/deploy/provision` :
+#     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#
+# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# le rail se REJOUE, pas pour qu il se RECONSTRUISE : il n y a la ni `mix.exs`, ni `deps/`, ni
+# `node_modules`. Un module qui l ignore n echoue pas seulement — `npm ci` a INSTALLE 176 Mo sous
+# /opt/lcars avant de rater son build.
+#
+# ⚠ LE MUR CIBLE LES VERBES QUI LISENT UN ARBRE DE SOURCE, pas ceux qui posent un binaire. `16-node`
+# telecharge un precompile : il ne lit aucune source, et rien ne lui interdit de le faire depuis la
+# copie. Le discriminant est « ce geste a-t-il besoin d un arbre de build ? », pas « ce module
+# prononce-t-il le mot npm ».
+@test "MUR I15: un module qui BATIT depuis une source consulte prov_dans_la_copie" {
+  local f nom corps manquants=""
+  for f in "$DEPLOY"/modules.d/*.sh; do
+    corps="$(grep -vE '^\s*#' "$f")"
+    grep -qE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' <<<"$corps" || continue
+    nom="$(basename "$f")"
+    grep -q 'prov_dans_la_copie' <<<"$corps" || manquants="$manquants $nom"
+  done
+  [ -z "$manquants" ] \
+    || { echo "batit depuis une source SANS savoir s il est dans la copie posee :$manquants" >&2; return 1; }
+  # GARDE D INSTRUMENT : si plus aucun module ne batit, ce mur devient vert en n ayant rien regarde.
+  local batisseurs
+  batisseurs="$(grep -lE 'npm (ci|run build)|mix (deps\.get|compile)|mix\.exs' "$DEPLOY"/modules.d/*.sh | wc -l)"
+  [ "$batisseurs" -ge 3 ] \
+    || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 3 au moins attendus" >&2; return 1; }
+}

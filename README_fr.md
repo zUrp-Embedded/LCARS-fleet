@@ -21,13 +21,14 @@ installer sur ton système.
 
 ## Ce qu'il te faut
 
-Trois choses, et ta distribution les a presque certainement toutes les trois :
+Quatre choses, et ta distribution a presque certainement les trois premières :
 
 | | pourquoi |
 |---|---|
 | **docker** | tout tourne en conteneurs — la boîte, la forge, le runner |
 | **curl** | l'amorçage parle à la forge en HTTP |
 | **python3** | il lit les réponses JSON de la forge |
+| **WSL 2** | sous Windows seulement — WSL 1 n'a pas de namespaces, donc pas de pods |
 
 Rien d'autre. **Pas d'Elixir, pas d'Erlang, aucun toolchain sur ta machine** — le runtime est
 compilé dans un conteneur de build jetable, et seul le résultat est gardé.
@@ -171,7 +172,7 @@ Le runner est déjà enregistré, donc un projet dont la carte exige une CI vert
 ## Détruire
 
 ```bash
-fleet/deploy/docker/bench/bench-down.sh --project lcars-nuit
+deploy/docker/bench/bench-down.sh --project lcars-nuit
 ```
 
 Retire la boîte, la forge, le runner et leurs volumes. Puis, pour récupérer l'espace de build :
@@ -207,11 +208,11 @@ Dit franchement, parce qu'un outil qui cache ses bords fait perdre du temps :
 La pile est faite pour dire ce qui manque plutôt que pour avoir l'air en bonne santé :
 
 ```bash
-fleet/deploy/box -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
-fleet/deploy/box -p lcars-nuit logs     # le récit que la boîte fait de son propre boot
+deploy/box -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
+deploy/box -p lcars-nuit logs     # le récit que la boîte fait de son propre boot
 ```
 
-⚠ `-p lcars-nuit` n'est pas optionnel ici. `fleet/deploy/box` vise par défaut un projet appelé `lcars`, et
+⚠ `-p lcars-nuit` n'est pas optionnel ici. `deploy/box` vise par défaut un projet appelé `lcars`, et
 le banc ci-dessus en crée un appelé `lcars-nuit` — sans le drapeau, tu interrogerais un déploiement
 qui n'existe pas. (`install.sh --box --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
 porte toujours le bon.)

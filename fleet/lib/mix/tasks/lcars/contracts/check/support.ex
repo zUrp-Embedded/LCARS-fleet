@@ -316,7 +316,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
 
   # LES DOSSIERS DANS LESQUELS AUCUN SCAN DE CORPUS NE DESCEND. Ni sources ni temoins : des artefacts
   # de build, des dependances vendorees, et le bac a sable des `@tmp_dir` d'ExUnit.
-  @corpus_skip ~w(_build deps tmp node_modules .git)
+  # ⚠ `.terraform` EST DANS CETTE LISTE POUR UNE RAISON MESUREE, PAS PAR SYMETRIE. `tofu init` pose
+  # sous `fleet/services/forge-recipe/.terraform/` des binaires de providers de plusieurs dizaines
+  # de Mo, gitignores, qui portent en dur les chemins de la machine ou ILS ont ete batis — un
+  # runner CI, donc `/opt/hostedtoolcache`. Sans cette entree, `check_platform_root_single_source`
+  # les lit et accuse une « seconde racine sous /opt » qui n appartient a personne ici : le gate est
+  # vert sur un poste qui n a jamais initialise tofu, et rouge sur celui qui vient de le faire.
+  # Un mur dont le verdict depend de ce que l operateur a lance la veille mesure la machine, pas le
+  # depot — et le scan par NOM de repertoire est ce qui rend cet ecart reparable en un mot.
+  @corpus_skip ~w(_build deps tmp node_modules .git .terraform)
 
   # ⚠ ON ELAGUE, ON NE FILTRE PAS APRES COUP — et la difference est un facteur 150, mesure sur ce
   # depot. `Path.wildcard("<root>/**")` DESCEND dans `tmp/` (37 860 entrees de

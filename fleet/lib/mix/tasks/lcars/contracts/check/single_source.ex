@@ -48,9 +48,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "deploy/modules.d/52-ops-branch.sh",
+      "../deploy/modules.d/52-ops-branch.sh",
       "services/forge-gestures.sh",
-      "deploy/admiral/skills/system-issues/list.sh",
+      "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
       # refuse tout SHA qui n'est pas la tete de cette branche, et c'est ce refus qui empeche
       # un membre du groupe de faire installer en root un manifeste que personne n'a signe.
@@ -308,11 +308,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the installed root the forge gesture reads"},
         # ⚠ LE CREATEUR, PAS UN LECTEUR — et c'est le miroir qui compte le plus. Si le `COPY` ne
         # suit pas l'autorite, la fleet lit un arbre que l'image n'a jamais ecrit.
-        {"deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
+        {"../deploy/docker/Dockerfile", ~r/^COPY\s+catalogues\s+#{Regex.escape(shipped)}\s*$/m,
          "the image COPY that creates the shipped tree"},
-        {"deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
+        {"../deploy/system.manifest", ~r/^dir\s+#{Regex.escape(installed)}\s/m,
          "the manifest row that creates the installed tree"},
-        {"deploy/lib/provision-lib.sh",
+        {"../deploy/lib/provision-lib.sh",
          ~r/:\s*"\$\{PROV_CATALOGUES_DIR:=#{Regex.escape(installed)}\}"/,
          "the provisioning default"}
       ]
@@ -399,16 +399,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # la declaration ILLISIBLE, jamais un prefixe.
       {"lib/fleet/credentials/role_token.ex", ~r/@default_dir\s+"([^"]+)"\s*$/m,
        "the BEAM's role-token directory"},
-      {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+      {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
        "the provisioning default"},
-      {"deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
+      {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
       # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
       # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
       # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
+      {"../deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
        "the box's uid-map path"},
-      {"deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
+      {"../deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
        "the box's master-token path"}
     ]
 
@@ -423,7 +423,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     # seule passe, sans recursion : ce n'est pas un interpreteur shell. Une variable qu'on ne sait
     # pas resoudre reste telle quelle et le desaccord se voit — c'est le comportement d'avant.
     prov_defauts =
-      case File.read(Path.expand("deploy/lib/provision-lib.sh", root)) do
+      case File.read(Path.expand("../deploy/lib/provision-lib.sh", root)) do
         {:ok, src} ->
           ~r/:\s*"\$\{([A-Z_][A-Z0-9_]*):=([^}"]*)\}"/
           |> Regex.scan(src)
@@ -490,8 +490,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         distinct = values |> Enum.map(fn {_, _, v} -> v end) |> Enum.uniq()
         [expected | _] = distinct
 
-        manifest_rel = "deploy/system.manifest"
-        manifest_scoped? = tree_scope(Path.expand("deploy", root)) == :required
+        manifest_rel = "../deploy/system.manifest"
+        manifest_scoped? = tree_scope(Path.expand("../deploy", root)) == :required
 
         manifest_ok? =
           not manifest_scoped? or
@@ -617,12 +617,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         # un `default =` rendrait a tofu le pouvoir
         # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
         # ce que la suppression a ferme.
-        {"deploy/deps/forge.tf", ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
+        {"services/forge-recipe/forge.tf",
+         ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
          :forbidden},
-        {"deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
+        {"../deploy/lib/provision-lib.sh", ~r/:\s*"\$\{PROV_SYSTEM_ACCOUNT:=#{e}\}"/,
          "the provisioning default (its token file derives from it)"},
-        {"deploy/deps/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
+        {"services/forge-recipe/provision-forge-charte.sh", ~r/"#{e}:[A-Za-z0-9_.-]+"/,
          "the avatar map key"},
         {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the human converger's fallback"},
@@ -630,7 +631,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the forge gesture's fallback"},
         {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
-        {"deploy/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},
         {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
         {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,

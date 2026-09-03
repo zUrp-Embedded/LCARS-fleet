@@ -6,7 +6,7 @@ defmodule Fleet.ReleaseDoor do
 
   A release door is a function reached by `bin/lcars_fleet eval '…'`: it prints, it halts with a
   verdict, and something on the shell side READS what it printed — `bin/lcars` parses catalogue
-  states word by word, `deploy/modules.d/75-projects.sh` parses one verdict per project. That makes
+  states word by word, `fleet/services/human.d/75-projects.sh` parses one verdict per project. That makes
   the door's output a wire format, not a console.
 
   ⚠ THE DEFAULT ERLANG LOG HANDLER WRITES TO THAT SAME `stdout`, and a door which does nothing

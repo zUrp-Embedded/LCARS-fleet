@@ -696,7 +696,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
     # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
     roots = [
-      {"deploy/modules.d", Path.join(Path.expand("deploy", root), "modules.d")},
+      {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")},
       {"etc", Path.join(root, "etc")}
     ]
 
@@ -717,7 +717,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
       _ ->
         # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
-        # guards the PERIMETER — is `fleet/deploy` part of this artifact — and it was doing that job
+        # guards the PERIMETER — is `deploy/` part of this artifact — and it was doing that job
         # alone. The population is a different question: these are TWO roots, only one of them is
         # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
         # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`

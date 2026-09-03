@@ -243,7 +243,7 @@ cmd_attach() {
 # LES DEUX CHEMINS SONT AUSSI CONNUS D'ELIXIR (`Fleet.Layout`) : un fait ecrit deux fois, dans deux
 # langages qui ne peuvent pas s'appeler. Changer ici sans l'autre cote donne une CLI qui lit un cache
 # sur lequel rien ne tourne — et elle l'affiche en mode DEGRADE, quand rien ne permet de la recouper.
-CAT_DIR="${LCARS_CATALOGUES_DIR:-/home/catalogues}"
+CAT_DIR="${LCARS_CATALOGUES_DIR:-/opt/lcars/var/catalogues}"
 CAT_SHIPPED="${LCARS_CATALOGUES_SHIPPED:-/opt/lcars/catalogues}"
 # Le nom reserve du catalogue metier livre DANS le release : il n'a pas de dossier installe, donc
 # rien ne l'installe et rien ne le supprime — il est la, toujours.
@@ -407,7 +407,7 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
   machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
   quantite de reessais ne le repose — c'est un geste d'admin, une fois :
-    FORGE_ADMIN_TOKEN=<jeton site-admin> fleet/deploy/box config
+    FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/box config
   « journalctl -u lcars-catalogue » dit lequel des quatre cas c'est." ;;
     forge_unreachable)
       die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.

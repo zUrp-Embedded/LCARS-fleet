@@ -58,7 +58,7 @@ case "$reponse" in
   FAIL:no_authority)
     echo "autorite: cette BOITE n'a pas d'autorite utilisable sur sa forge — jeton master absent,
   illisible, vide, ou refuse. Aucun reessai ne le repose :
-  « FORGE_ADMIN_TOKEN=<jeton> fleet/deploy/box config »" >&2
+  « FORGE_ADMIN_TOKEN=<jeton> deploy/box config »" >&2
     exit 1 ;;
   FAIL:forge_unreachable)
     echo "autorite: la forge n'a pas repondu. Ce n'est pas un refus, c'est une absence de reponse —

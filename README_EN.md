@@ -20,13 +20,14 @@ dashboard — all brought up by one command, in containers, with nothing install
 
 ## What you need
 
-Three things, and your distribution almost certainly has all three:
+Four things, and your distribution almost certainly has the first three:
 
 | | why |
 |---|---|
 | **docker** | everything runs in containers — the box, the forge, the runner |
 | **curl** | the bootstrap talks to the forge over HTTP |
 | **python3** | it reads the forge's JSON answers |
+| **WSL 2** | on Windows only — WSL 1 has no namespaces, so no pods |
 
 Nothing else. **No Elixir, no Erlang, no toolchain on your machine** — the runtime is compiled
 inside a throwaway build container and only the result is kept.
@@ -167,7 +168,7 @@ The runner is already registered, so a project whose card requires green CI actu
 ## Tearing it down
 
 ```bash
-fleet/deploy/docker/bench/bench-down.sh --project lcars-nuit
+deploy/docker/bench/bench-down.sh --project lcars-nuit
 ```
 
 Removes the box, the forge, the runner and their volumes. Then, to reclaim the build space:
@@ -202,11 +203,11 @@ Said plainly, because a tool that hides its edges wastes your time:
 The stack is built to say what is missing rather than to look healthy:
 
 ```bash
-fleet/deploy/box -p lcars-nuit doctor   # what is provisioned, what drifted, and the gesture that fixes it
-fleet/deploy/box -p lcars-nuit logs     # the box's own account of its boot
+deploy/box -p lcars-nuit doctor   # what is provisioned, what drifted, and the gesture that fixes it
+deploy/box -p lcars-nuit logs     # the box's own account of its boot
 ```
 
-⚠ `-p lcars-nuit` is not optional here. `fleet/deploy/box` defaults to a project called `lcars`, and the
+⚠ `-p lcars-nuit` is not optional here. `deploy/box` defaults to a project called `lcars`, and the
 bench above creates one called `lcars-nuit` — without the flag you would be asking about a
 deployment that does not exist. (`install.sh --box --bench -- --project <name>` changes it; the teardown line it
 prints always carries the right one.)

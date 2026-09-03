@@ -39,27 +39,36 @@ defmodule Fleet.Layout do
   # at each apply and installed by nobody. It is rewritten by every update, which costs nothing —
   # a seed is a projection of the image, not a state.
   #
-  # `/home/catalogues` holds what is INSTALLED, and it is a cache: `lcars catalogue install` drops
-  # the material and provisioning restores it from the forge at every boot. The authority is
-  # `<name>/_catalogue` on the forge; this is a local read-through of it.
+  # `/opt/lcars/var/catalogues` holds what is INSTALLED, and it is a cache: `lcars catalogue
+  # install` drops the material and provisioning restores it from the forge at every boot. The
+  # authority is `<name>/_catalogue` on the forge; this is a local read-through of it.
   #
   # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
   # layout INSIDE a catalogue. The split is the same one this module already draws for the project
   # faces: where things sit on the box is one authority, what is inside them is another.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
-  # The INSTALLED cache — a sibling of the project faces, where the operator already looks for what
-  # they work on. It is OPERATOR-FACING business material: they read it, they may want to keep a
-  # copy. `dir` in `system.manifest`, not `preserve` — so an uninstall does remove it; the class
-  # column carries that, never the path.
+  # The INSTALLED cache. It sits under `/opt/lcars/var` — the named volume that already carries the
+  # forge tokens, and that survives an image swap.
   #
-  # ⚠ WHAT HOLDS THE PLACEMENT IS WHO THE TREE IS FOR, not which layer carries it. Survival across
-  # an image swap does NOT discriminate here: `/opt/lcars/var` is a named project volume in both
-  # composes, so it survives one exactly like `/home` does.
-  @installed_catalogues_root "/home/catalogues"
+  # ⚠ IT LIVED UNDER `/home` UNTIL 2026-09-01, ON A REASON THAT A DOCTRINE KILLED. The reason was
+  # « operator-facing material belongs where the operator already looks », and the placement was
+  # paid for by a promise written right here: `dir` in `system.manifest` and not `preserve`, so an
+  # uninstall removes it.
+  #
+  # That promise can no longer be kept. `/home` is now OUT of the uninstall perimeter ENTIRELY — no
+  # `rm`, no `userdel -r`, no exception and no motive to resolve — because a deploy that can reach
+  # under `/home` can destroy work that was never ours. A cache placed there would be created by
+  # every install and removed by none: it would accumulate, forever, on a path the operator was
+  # told the product manages.
+  #
+  # The material is still operator-facing, and that has not stopped being true — it stopped being
+  # DECISIVE. Where a tree that we create and must be able to remove can sit is settled before the
+  # question of who reads it is even asked.
+  @installed_catalogues_root "/opt/lcars/var/catalogues"
 
   # L'ETAT RUNTIME DE LA BOITE — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
-  # `/run` et pas sous `@platform_root` pour la meme raison que `/home/catalogues` : ce qui MEURT au
+  # `/run` et pas sous `@platform_root` pour la meme raison que le cache des catalogues : ce qui MEURT au
   # redemarrage ne doit pas cohabiter avec ce qui EST l'image. `/run` est un tmpfs ; poser cet etat
   # ailleurs le ferait survivre a un boot, et un marqueur qui survit ment sur le boot qu'il decrit.
   #

@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   """
   use ExUnit.Case, async: true
 
-  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « fleet/deploy
+  # JG-097 — LE PERIMETRE ETAIT GARDE, LA POPULATION NON. `tree_scope/1` repond « deploy
   # est-il dans cet artefact », et c'est tout ce qui etait verifie. Or la population vient de DEUX
   # racines (`deploy/modules.d` et `etc`), une seule est scopee, et `Path.wildcard` sur un chemin
   # absent rend `[]` en silence : un `deploy/` present avec un `modules.d/` vide ou deplace donnait
@@ -30,11 +30,17 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # Les deux tests vont par paire : sans le second, supprimer la mesure suffirait a rendre le
   # premier vert.
   describe "shell.sourcers_set_strict — la POPULATION fait partie du contrat" do
+    # ⚠ LE DECOR PORTE LA TOPOLOGIE REELLE, ET CE N EST PAS UN DETAIL DE RANGEMENT. `root` est le
+    # repertoire depuis lequel le controleur tourne — `fleet/` — et `deploy/` en est le FRERE depuis
+    # la separation des deux logiciels. Un decor qui pose `root/deploy` fabrique une arborescence
+    # qui n existe sur aucune machine : le mur y trouverait ce qu il ne trouve plus en vrai, ou
+    # l inverse. Un temoin qui valide contre une topologie imaginaire ne mesure que lui-meme.
     defp fixture_root!(ctx) do
-      root = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      base = Fleet.TestEnv.tmp_path("jg097-#{ctx}")
+      root = Path.join(base, "fleet")
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
       File.mkdir_p!(Path.join(root, "etc"))
-      on_exit(fn -> File.rm_rf(root) end)
+      on_exit(fn -> File.rm_rf(base) end)
       root
     end
 
@@ -52,7 +58,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     test "population NON vide et conforme → pass (le garde n'a pas rendu le contrat impossible)" do
       root = fixture_root!("conforme")
 
-      File.write!(Path.join([root, "deploy", "modules.d", "10-x.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "10-x.sh"]), """
       #!/usr/bin/env bash
       set -euo pipefail
       . "$(dirname "$0")/../lib/provision-lib.sh"
@@ -350,10 +356,11 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   # {docker,wsl,linux}` montre le module selectionne sur les trois.
   describe "layout.face_roots_provisioned — DEUX miroirs, et chacun doit tenir" do
     setup do
-      root = Fleet.TestEnv.tmp_path("jg070")
+      base = Fleet.TestEnv.tmp_path("jg070")
+      root = Path.join(base, "fleet")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
-      File.mkdir_p!(Path.join([root, "deploy", "docker"]))
-      File.mkdir_p!(Path.join([root, "deploy", "modules.d"]))
+      File.mkdir_p!(Path.join([base, "deploy", "docker"]))
+      File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
 
       File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
       defmodule Fleet.Layout do
@@ -370,13 +377,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
       File.write!(
-        Path.join([root, "deploy", "docker", "entrypoint.sh"]),
+        Path.join([root, "..", "deploy", "docker", "entrypoint.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
       rows = Enum.map_join(module_zones, " \\\n", &~s(    "#{&1} 2775 root:$PROV_FLEET_GROUP"))
 
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), """
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), """
       prov_dirs() {
         printf '%s\\n' \\
           "/opt/lcars 0755 root:root" \\
@@ -418,7 +425,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do
       write_mirrors!(root, ["/home/projects", "/home/projects.ops"], [])
-      File.write!(Path.join([root, "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
+      File.write!(Path.join([root, "..", "deploy", "modules.d", "25-directories.sh"]), "# vide\n")
 
       result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
@@ -542,9 +549,15 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # runtime-only one (the image build stage copies fleet alone) must NAME what it
     # could not see — the one thing that must never happen is a silent pass on absent ground.
     # SAME derivation as the check: the runtime root, then its SIBLING tree
-    # (test/mix -> la racine Mix = "../..", puis "deploy" — depuis le demenagement `deploy/` est un
-    # ENFANT de la racine, plus un frere : le prefixe `../` visait `fleet/` quand la racine etait
-    # `fleet/runtime`.)
+    # (test/mix -> la racine Mix = `fleet/`, puis `../deploy`).
+    #
+    # ⚠ CETTE LIGNE A PORTE L AFFIRMATION INVERSE, ET C EST CE QUI A AVEUGLE LE TEMOIN. Elle disait
+    # « depuis le demenagement `deploy/` est un ENFANT de la racine, plus un frere ». C etait vrai
+    # de l etape ou l installeur vivait sous le runtime ; depuis la separation des deux logiciels il
+    # est redevenu un FRERE. Le temoin derivait donc `fleet/deploy`, ne le trouvait pas, et exigeait
+    # le `NOT CHECKED` que le mur rendait pour la meme raison : les deux se sont accordes sur une
+    # topologie que ni l un ni l autre n avait verifiee. Un temoin et son sujet qui derivent le meme
+    # chemin faux sont VERTS ensemble, et c est le seul cas ou un miroir ne reflete rien.
     #
     # `deploy`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
     # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
@@ -553,7 +566,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # that agrees by coincidence is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
-    if File.dir?(Path.expand("deploy", runtime_root)) do
+    if File.dir?(Path.expand("../deploy", runtime_root)) do
       refute lock.note =~ "NOT CHECKED"
     else
       assert lock.note =~ "NOT CHECKED"

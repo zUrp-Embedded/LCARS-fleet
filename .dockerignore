@@ -1,10 +1,10 @@
-# .dockerignore — contexte de build = la racine du repo (cf. fleet/deploy/docker/).
+# .dockerignore — contexte de build = la racine du repo (cf. deploy/docker/).
 # WHITELIST : tout est exclu, on n'embarque QUE ce que le Dockerfile consomme. Un contexte
 # minimal = build rapide, zéro fuite (pas de work/, pas de credentials, pas de PoC) et un cache
 # qui ne s'invalide pas pour un fichier sans rapport.
 *
 !fleet
-!fleet/deploy
+!deploy
 !catalogues
 !LICENSE
 # LA DOC ENTRE DANS LE CONTEXTE, ET SEULEMENT CE QU'ELLE LIT. Le stage `site` du Dockerfile batit
@@ -27,9 +27,23 @@ fleet/_build
 fleet/deps
 fleet/apps/*/tmp
 fleet/.elixir_ls
+# ⚠ LE CACHE tofu ET L'ETAT tofu — MEME REGLE QUE `node_modules` CI-DESSUS, ET ELLE MANQUAIT ICI.
+# `!fleet` fait entrer l'arbre entier ; la recette de la charte forge y traine, sur le poste d'un
+# operateur qui l'a jouee, un `.terraform` de 73 Mo (le miroir de providers) que l'image REFAIT elle-
+# meme trois lignes plus bas — donc 73 Mo envoyes a chaque build pour etre ecrases.
+# ⚠ ET SURTOUT UN `terraform.tfstate`, QUI PORTE LES JETONS DE LA FORGE. `forge-gestures.sh` l'ecrit
+# noir sur blanc : « cmd_apply joue la recette DANS $RECIPE_DIR, donc y laisse un terraform.tfstate ».
+# Un contexte de build qui l'emporte le grave dans un layer d'image, ou il reste lisible meme si une
+# instruction ulterieure l'efface. Ce fichier dit lui-meme la regle — « zero fuite » — en tete.
+fleet/services/forge-recipe/.terraform
+fleet/services/forge-recipe/instance/.terraform
+fleet/services/forge-recipe/**/*.tfstate
+fleet/services/forge-recipe/**/*.tfstate.*
+fleet/services/forge-recipe/**/*.tfvars
+fleet/services/forge-recipe/**/crash.log
 
 # ─── LE KIT DE `pack.sh`, ET C'EST CE FICHIER QUI EMPÊCHAIT L'IMAGE DE S'EN SERVIR ──────────────
-# `etc/install.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
+# `etc/deploy-release.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
 # plus une release dans `_build/prod/rel` disent « paquet », et il rend 0 sans gate ni compilation.
 # `pack.sh` produit exactement cette forme. Le rail poste en profite, l'install y roule en trente
 # secondes — et l'image, elle, rebâtissait, parce que les deux lignes qui le lui permettent

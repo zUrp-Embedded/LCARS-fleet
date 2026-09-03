@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
   # WHY THIS EXISTS, and it is worth three findings in one evening: nothing in this repo
-  # answered "which test corpora exist, and which ones do we run". `fleet/deploy/tests`
+  # answered "which test corpora exist, and which ones do we run". `deploy/tests` (alors sous `fleet/`)
   # and `fleet/git-hooks/tests` had never been run by any gate, and `fleet/tests/unit/v1` had been
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
   # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
@@ -40,7 +40,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   @test_corpora [
     {"fleet/test", :gated},
     {".claude/skills", :gated},
-    {"fleet/deploy/tests", :gated},
+    # ⚠ CE CORPUS N EST PAS JOUE PAR LA MEME PORTE QUE LES AUTRES, ET LE DIRE `:gated` MENTIRAIT.
+    # `deploy/` est sorti de `fleet/` : c est un logiciel a part, avec sa propre porte. Le declarer
+    # `:gated` affirmerait que `fleet/test/shell_gate.sh` le joue — il ne le decouvre plus — et
+    # `{:out, why}` serait pire encore : ces temoins SONT joues, par `deploy/gate.sh`. Un corpus
+    # gate ailleurs a besoin d un troisieme mot, sinon le seul choix honnete est un mensonge.
+    {"deploy/tests", {:gated_by, "deploy/gate.sh"}},
     {"fleet/git-hooks/tests", :gated},
     {"fleet/vendor/token_saver/lcars_tests", :gated},
     {"fleet/vendor/token_saver/tests",
@@ -158,7 +163,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   end
 
   # LES DEUX ARBRES DE TEMOINS, ET LEURS RACINES. Le depot porte DEUX programmes : le runtime
-  # (`fleet/`) et son installeur (`fleet/deploy/`), qui doit pouvoir vivre sans lui. Chacun a son
+  # (`fleet/`) et son installeur (`deploy/`, arbre frere), qui doit pouvoir vivre sans lui. Chacun a son
   # arbre de temoins, et dans chacun le chemin d'un temoin est celui de sa cible.
   #
   # ⚠ `lib` EST ELIDE D'UN COTE ET PAS DE L'AUTRE, et ce n'est pas une incoherence — c'est la seule
@@ -173,11 +178,22 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # sont NOMMEES ci-dessous : une liste se relit, une regle typographique s'imite de travers.
   @test_zones %{
     "test" => ~w(support fixtures integration crosscutting probes),
-    "deploy/tests" => ~w(transverse)
+    "../deploy/tests" => ~w(transverse)
   }
 
   # Les racines sources de chaque arbre, dans l'ordre d'essai.
-  @test_source_roots %{"test" => ["lib", "."], "deploy/tests" => ["deploy"]}
+  #
+  # ⚠ LES CLES SONT RELATIVES A `root`, QUI VAUT `fleet/` — ET C EST TOUT L ECART AVEC
+  # `@test_corpora` JUSTE AU-DESSUS, dont les chemins partent de la RACINE du depot. Deux
+  # conventions dans un meme fichier se confondent au premier coup d oeil ; celle-ci se lit dans
+  # l appelant (`check_test_dirs_mirror_source(root)`, `root = File.cwd!()`), celle-la dans le sien
+  # (`repo = Path.expand("..", root)`).
+  #
+  # Depuis que `deploy/` est sorti de `fleet/`, il est un arbre FRERE : `deploy/tests` resolu depuis
+  # `fleet/` ne designe plus rien. Ecrit ainsi, `Path.wildcard` rendait une liste VIDE, `strays`
+  # restait vide, et le mur passait au vert en n ayant pas lu un seul temoin de l installeur — la
+  # panne la plus chere, celle qui se presente comme un succes.
+  @test_source_roots %{"test" => ["lib", "."], "../deploy/tests" => ["../deploy"]}
 
   @doc false
   # UN CHEMIN QUI MENT SUR SON DOMAINE COUTE PLUS CHER QU'UN TEMOIN ABSENT : l'absence se voit, le
@@ -194,30 +210,41 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # nomme) et la reclamer fabriquerait des coquilles « pas de test » que personne n'aurait verifiees.
   @spec check_test_dirs_mirror_source(String.t()) :: Support.result()
   def check_test_dirs_mirror_source(root) do
-    {checked, strays} =
-      Enum.reduce(@test_source_roots, {0, []}, fn {troot, sroots}, {n, acc} ->
-        dirs =
-          Path.join([root, troot, "**", "*.{exs,bats,py}"])
-          |> Path.wildcard()
-          |> Enum.filter(
-            &(Path.extname(&1) == ".bats" or String.contains?(Path.basename(&1), "test"))
-          )
-          |> Enum.map(&(&1 |> Path.dirname() |> Path.relative_to(Path.join(root, troot))))
-          |> Enum.reject(&(&1 in [".", ""]))
-          |> Enum.uniq()
-          |> Enum.sort()
+    {checked, strays, absents} =
+      Enum.reduce(@test_source_roots, {0, [], []}, fn {troot, sroots}, {n, acc, abs} ->
+        # ⚠ UN ARBRE DECLARE MAIS ABSENT SE NOMME, IL NE SE COMPTE PAS ZERO. Sans ce garde, un
+        # `Path.wildcard` sur un chemin qui n existe pas rend `[]`, `bad` rend `[]`, et le mur
+        # additionne un zero silencieux a un autre arbre qui, lui, a repondu : le total reste
+        # positif, `strays` reste vide, le verdict est `pass`. Le mur ne dit alors plus « rien a
+        # signaler » mais « je n ai pas regarde », et les deux se lisent pareil.
+        base = Path.expand(Path.join(root, troot))
 
-        zones = Map.fetch!(@test_zones, troot)
+        if not File.dir?(base) do
+          {n, acc, abs ++ [troot]}
+        else
+          dirs =
+            Path.join([base, "**", "*.{exs,bats,py}"])
+            |> Path.wildcard()
+            |> Enum.filter(
+              &(Path.extname(&1) == ".bats" or String.contains?(Path.basename(&1), "test"))
+            )
+            |> Enum.map(&(&1 |> Path.dirname() |> Path.relative_to(base)))
+            |> Enum.reject(&(&1 in [".", ""]))
+            |> Enum.uniq()
+            |> Enum.sort()
 
-        bad =
-          Enum.reject(dirs, fn d ->
-            [head | _] = Path.split(d)
+          zones = Map.fetch!(@test_zones, troot)
 
-            head in zones or
-              Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, d])) end)
-          end)
+          bad =
+            Enum.reject(dirs, fn d ->
+              [head | _] = Path.split(d)
 
-        {n + length(dirs), acc ++ Enum.map(bad, &"#{troot}/#{&1}")}
+              head in zones or
+                Enum.any?(sroots, fn s -> File.dir?(Path.join([root, s, d])) end)
+            end)
+
+          {n + length(dirs), acc ++ Enum.map(bad, &"#{troot}/#{&1}"), abs}
+        end
       end)
 
     %{
@@ -225,10 +252,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       remediation:
         "deplacer le temoin sous le dossier qui reflete sa cible, ou nommer sa zone dans " <>
           "@test_zones si elle n'a legitimement pas de source en face — un chemin de test qui ne " <>
-          "reflete rien se lit comme une absence de couverture",
-      status: if(checked > 0 and strays == [], do: :pass, else: :fail),
+          "reflete rien se lit comme une absence de couverture ; et si c'est un ARBRE entier qui " <>
+          "manque, corriger sa cle dans @test_source_roots plutot que de la laisser pointer le vide",
+      status: if(checked > 0 and strays == [] and absents == [], do: :pass, else: :fail),
       evidence:
         cond do
+          absents != [] ->
+            Enum.map(
+              absents,
+              &("#{&1}/ : arbre DECLARE dans @test_source_roots, absent du disque — " <>
+                  "ce mur n'a lu aucun de ses temoins")
+            )
+
           checked == 0 ->
             ["INSTRUMENT CASSE — aucun dossier de temoins trouve ; ce mur n'a rien mesure"]
 
@@ -238,7 +273,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
           true ->
             []
         end,
-      note: "#{checked} dossier(s) de temoins, #{checked - length(strays)} adosse(s) a une source"
+      note:
+        "#{checked} dossier(s) de temoins sur #{map_size(@test_source_roots)} arbre(s) declare(s), " <>
+          "#{checked - length(strays)} adosse(s) a une source"
     }
   end
 
@@ -264,10 +301,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
     service = ~w(README.md test_helper.exs shell_gate.sh refute.bash)
 
     files =
-      Enum.flat_map(["test", "deploy/tests"], fn troot ->
+      Enum.flat_map(["test", "../deploy/tests"], fn troot ->
         Path.join([root, troot, "**", "*"])
         |> Path.wildcard()
         |> Enum.reject(&File.dir?/1)
+        # ⚠ CE QUE `git` IGNORE N EST PAS UN TEMOIN MAL NOMME. `__pycache__/` est dans le
+        # `.gitignore` du depot : ses `.pyc` sont les artefacts que l interpreteur pose en JOUANT
+        # les temoins python, et ils portent des noms que cette regle ne peut pas satisfaire
+        # (`x_test.cpython-314-pytest-9.0.2.pyc`). Ce mur etait donc VERT sur une machine qui n a
+        # jamais lance la suite python et ROUGE sur celle qui vient de la jouer — quatre
+        # accusations, aucune portant sur un fichier du depot.
+        # Un mur dont le verdict depend de ce que l operateur a lance la veille ne mesure pas le
+        # depot : il mesure la machine.
+        |> Enum.reject(&(&1 =~ ~r"/__pycache__/"))
         |> Enum.map(&Path.relative_to(&1, root))
       end)
       |> Enum.reject(fn f ->
@@ -342,7 +388,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   @spec check_negations_bite(String.t()) :: Support.result()
   def check_negations_bite(root) do
     files =
-      Enum.flat_map(["test", "deploy/tests", "../.claude/skills", "git-hooks/tests"], fn r ->
+      Enum.flat_map(["test", "../deploy/tests", "../.claude/skills", "git-hooks/tests"], fn r ->
         Path.join([root, r, "**", "*.bats"]) |> Path.wildcard()
       end)
       |> Enum.uniq()
@@ -585,22 +631,87 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       end
 
     gated = Enum.count(@test_corpora, fn {_, v} -> v == :gated end)
+    gated_by = Enum.count(@test_corpora, fn {_, v} -> match?({:gated_by, _}, v) end)
+
+    # ⚠ `:gated` ETAIT UN MOT, PAS UNE MESURE. Rien ne confrontait cette declaration a ce que la
+    # porte JOUE reellement : un corpus pouvait etre marque « gate » ici pendant que la porte avait
+    # cesse de le decouvrir, et ce mur — dont le sujet est precisement « un corpus que personne ne
+    # joue » — l aurait certifie couvert. On DEMANDE donc a chaque porte la liste de ce qu elle
+    # joue (`--list-corpora`), au lieu de la deduire de notre propre table.
+    porte_liste = fn script ->
+      chemin = Path.join(repo, script)
+
+      if File.regular?(chemin) do
+        case System.cmd("bash", [chemin, "--list-corpora"], stderr_to_stdout: true) do
+          {out, 0} -> String.split(out, "\n", trim: true)
+          _ -> :error
+        end
+      else
+        :error
+      end
+    end
+
+    listings =
+      [{:gated, "fleet/test/shell_gate.sh"} | Enum.map(@test_corpora, fn {_, v} -> v end)]
+      |> Enum.flat_map(fn
+        {:gated, s} -> [s]
+        {:gated_by, s} -> [s]
+        _ -> []
+      end)
+      |> Enum.uniq()
+      |> Map.new(&{&1, porte_liste.(&1)})
+
+    # ⚠ ON N INTERROGE QUE POUR UN CORPUS PRESENT DANS CET ARBRE. Un corpus declare mais absent
+    # (artefact runtime-only, arbre partiel) n a pas de porte a interroger : exiger la sienne ferait
+    # rougir ce mur sur ce qu il n a pas a mesurer ici. Present et sa porte muette, en revanche, EST
+    # le defaut — et c est le seul cas ou la question se pose.
+    injouables =
+      @test_corpora
+      |> Enum.filter(fn {corpus, _} -> File.dir?(Path.join(repo, corpus)) end)
+      |> Enum.flat_map(fn
+        {corpus, :gated} -> verifie_porte(corpus, "fleet/test/shell_gate.sh", listings)
+        {corpus, {:gated_by, s}} -> verifie_porte(corpus, s, listings)
+        _ -> []
+      end)
 
     %{
       id: "tests.corpora_on_record",
       remediation:
-        "wire the corpus into test/shell_gate.sh, or add it to @test_corpora as {:out, why} — " <>
-          "a corpus nobody runs reports a coverage it does not provide",
-      status: if(is_nil(broken) and unknown == [], do: :pass, else: :fail),
+        "wire the corpus into a gate (fleet/test/shell_gate.sh for the runtime, deploy/gate.sh " <>
+          "for the installer), or add it to @test_corpora as {:out, why} — a corpus nobody runs " <>
+          "reports a coverage it does not provide",
+      status: if(is_nil(broken) and unknown == [] and injouables == [], do: :pass, else: :fail),
       evidence:
         cond do
           broken -> ["INSTRUMENT BROKEN — #{broken}"]
           unknown != [] -> ["test corpora on no record: #{inspect(unknown)}"]
+          injouables != [] -> injouables
           true -> []
         end,
       note:
         "#{length(found)} test files (bats + python) over #{length(@test_corpora)} corpora — " <>
-          "#{gated} gated, #{length(@test_corpora) - gated} deliberately out ON RECORD"
+          "#{gated} gated by the runtime door, #{gated_by} by another door (ASKED, not assumed), " <>
+          "#{length(@test_corpora) - gated - gated_by} deliberately out ON RECORD"
     }
+  end
+
+  # Confronte un corpus a ce que SA porte annonce jouer. Le mot `:gated` de la table dit une
+  # intention ; cette fonction lit la reponse de la porte. L ecart entre les deux est exactement le
+  # defaut que `tests.corpora_on_record` existe pour attraper, et il etait hors de sa portee.
+  defp verifie_porte(corpus, script, listings) do
+    case Map.get(listings, script) do
+      :error ->
+        ["#{corpus}: its door `#{script}` is unreadable or refused `--list-corpora`"]
+
+      nil ->
+        ["#{corpus}: no door listed for it"]
+
+      lignes ->
+        if Enum.any?(lignes, &(&1 == corpus or String.starts_with?(corpus, &1 <> "/"))) do
+          []
+        else
+          ["#{corpus}: its door `#{script}` does NOT list it (it plays #{inspect(lignes)})"]
+        end
+    end
   end
 end

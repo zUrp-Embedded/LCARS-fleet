@@ -55,8 +55,8 @@ Le nom du script, tirets compris, est le préfixe — ce qui se cherche est ce q
 
 ## La frontière avec `deploy/tests/`
 
-`fleet/deploy` est un autre programme — l'installeur — et il a son propre arbre de témoins, en
-miroir de `deploy/` : voir `fleet/deploy/tests/README.md`. Les deux arbres n'échangent rien, pas
+`deploy` est un autre programme — l'installeur — et il a son propre arbre de témoins, en
+miroir de `deploy/` : voir `deploy/tests/README.md`. Les deux arbres n'échangent rien, pas
 même leur helper : `refute.bash` existe de chaque côté et `tests.refute_copies_agree` refuse qu'ils
 divergent.
 
@@ -80,6 +80,6 @@ pas dans cette phrase, qui ne fait que la répéter.
 
 `shell_gate.sh` (câblé dans `mix gate`) est le point d'entrée des tests que `mix test` ne voit pas :
 les quatre suites python, nommées une par une dans son registre `PYTESTS`, et tous les `.bats`
-trouvés récursivement sous `test/`, `.claude/skills/`, `fleet/deploy/tests/` et
+trouvés récursivement sous `test/`, `.claude/skills/`, `deploy/tests/` et
 `fleet/git-hooks/tests/`. `bats` absent n'échoue pas — le compte des suites manquées est ANNONCÉ,
 et `BATS_MISSING_FATAL=1` durcit le jour où `bats-core` est un prérequis posé partout.

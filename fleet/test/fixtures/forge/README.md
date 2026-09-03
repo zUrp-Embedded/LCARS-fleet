@@ -48,7 +48,7 @@ l'assertion.
 ## Comment les refaire
 
 ```sh
-cd fleet/deploy/docker
+cd deploy/docker
 LCARS_DEVFORGE_PORT=23101 docker compose -f forge-compose.yml -p <à-toi> up -d
 docker exec <à-toi>-gitea-1 gitea admin user create --username mesure \
   --password '<...>' --email mesure@localhost --admin --must-change-password=false
