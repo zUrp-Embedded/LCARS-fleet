@@ -133,7 +133,7 @@ defmodule Fleet.Pilot.Poller do
     # would drown the trace it exists to raise. Starts `true` — the first failure IS a transition.
     pods_snapshot_ok?: true,
     # Desired-state pass of the main branch-protection (default nil →
-    # `ProjectOnboard.Migration.reconcile_main_protection/2`) — seam for tests (zero forge).
+    # `ProjectOnboard.reconcile_main_protection/2`) — seam for tests (zero forge).
     protection_reconciler: nil,
     # Keeper of the per-project architect (default nil → `Project.Architect.ensure_alive/2`) —
     # seam for tests (zero forge, zero tmux).
@@ -542,7 +542,7 @@ defmodule Fleet.Pilot.Poller do
 
     reconciler =
       state.protection_reconciler ||
-        (&Fleet.Project.Onboard.Migration.reconcile_main_protection/2)
+        (&Fleet.Project.Onboard.reconcile_main_protection/2)
 
     # ⚠ ON N'HORODATE QUE CE QU'ON A RECONCILIE. Pose sur TOUS les `due`, echecs compris, le tampon
     # renvoie pour une periode entiere un depot dont la reconciliation vient d'echouer — alors que

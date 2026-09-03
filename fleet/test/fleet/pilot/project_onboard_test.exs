@@ -507,19 +507,27 @@ defmodule Fleet.Project.OnboardTest do
     #
     # Le comportement de l'aiguillage lui-meme, lui, est mesure — cf. `project_declaration_test.exs`,
     # « write/2 resout la carte dans le catalogue DU DEPOT qu'on lui nomme ».
-    @onboard_src "lib/fleet/project/onboard.ex"
+    # ⚠ LA FAMILLE, PAS UN FICHIER. Ces temoins lisaient `onboard.ex` seul ; au decoupage, quatre
+    # des cinq portes ont change de module et deux d'entre eux ont vire au rouge. Un temoin de
+    # SOURCE dit une propriete du CODE, pas d'une adresse : il lit donc tout l'arbre du domaine, et
+    # `familie_src/0` est la seule definition de ce perimetre.
+    @onboard_src [
+      "lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")
+    ]
+
+    defp famille, do: Enum.map_join(@onboard_src, "\n", &File.read!/1)
 
     test "aucune porte n'appelle `Declaration.write` en direct — toutes passent par l'entonnoir" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # Un seul appel direct subsiste : celui QUI EST l'entonnoir. Deux voudraient dire qu'une porte
       # a repris le chemin court, et le chemin court est celui qui oublie.
       assert length(Regex.scan(~r/Fleet\.Project\.Declaration\.write\(/, src)) == 1
-      assert src =~ ~r/defp write_declaration\(proj_dir, full_name, opts\)/
+      assert src =~ ~r/defp? write_declaration\(proj_dir, full_name, opts\)/
     end
 
     test "l'entonnoir POSE le depot dans les options — le lire ailleurs ne suffirait pas" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # ⚠ `Keyword.put`, PAS `put_new` : `revision_write_opts/2` reconstruit une liste neuve, et un
       # appelant qui porterait un `repo:` perime le ferait gagner sur le depot reel.
@@ -527,13 +535,13 @@ defmodule Fleet.Project.OnboardTest do
     end
 
     test "le depot est POSITIONNEL chez les relais — une cle optionnelle s'oublie en silence" do
-      src = File.read!(@onboard_src)
+      src = famille()
 
       # C'est toute la difference entre ce correctif et un quatrieme rustine : le compilateur refuse
       # desormais un appel qui ne nomme pas le depot. `Declaration.write/2` ne peut pas l'exiger de son
       # cote — 38 appels legitimes prennent la racine a bon droit — mais ici, l'omettre est TOUJOURS
       # un defaut.
-      assert src =~ ~r/defp ensure_declaration\(\s*proj_dir,\s*full_name,\s*opts,/
+      assert src =~ ~r/defp? ensure_declaration\(\s*proj_dir,\s*full_name,\s*opts,/
       refute src =~ ~r/ensure_declaration\((?:dirs\.code|scratch), opts[,)]/
     end
   end
@@ -551,8 +559,13 @@ defmodule Fleet.Project.OnboardTest do
     # ce cout qui a laisse la divergence s'installer.
     @entry_verbs ~w(onboard import adopt_project import_external import_deposit)
 
+    defp famille_admission do
+      ["lib/fleet/project/onboard.ex" | Path.wildcard("lib/fleet/project/onboard/*.ex")]
+      |> Enum.map_join("\n", &File.read!/1)
+    end
+
     test "les cinq verbes d'entree appellent `admit/3` — aucun ne refait le preambule" do
-      src = File.read!("lib/fleet/project/onboard.ex")
+      src = famille_admission()
 
       for verb <- @entry_verbs do
         [_, body] = String.split(src, ~r/^  def #{verb}\(/m, parts: 2)
@@ -568,7 +581,7 @@ defmodule Fleet.Project.OnboardTest do
       # temoin l'a montre dans la minute : une URL externe invalide, refusee jusque-la sans toucher
       # le monde, coutait desormais un appel forge. La loi d'ordre est en trois temps — admission
       # locale, gardes pures du verbe, puis le monde — et c'est ce que ce temoin tient.
-      src = File.read!("lib/fleet/project/onboard.ex")
+      src = famille_admission()
       [_, body] = String.split(src, ~r/^  def admit\(/m, parts: 2)
       corps = String.slice(body, 0, 400)
 
