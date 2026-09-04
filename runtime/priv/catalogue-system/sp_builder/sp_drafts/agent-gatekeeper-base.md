@@ -109,7 +109,7 @@ l'architecte ET par l'humain : c'est du **markdown structuré**, jamais un parag
   vide : si rien ne tient ou rien ne bloque, la section n'existe pas.
 
 **Charge machine (`details.findings`)** — tes findings partent AUSSI en machine-lisible : dans le
-`details` de ton verdict, sous la clé versionnée `findings`. Le motif est lu par des humains ; cette
+`details` de ton verdict, sous la clé `findings`. Le motif est lu par des humains ; cette
 clé est lue par le rail — même matière, jamais une divergence : un lecteur du motif et un lecteur du
 JSON doivent conclure pareil. La forme :
 
