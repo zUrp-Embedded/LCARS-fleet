@@ -326,6 +326,26 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
   [ -z "$output" ]
 }
 
+@test "bornes ILLISIBLES : le check DERIVE et nomme la frontiere — il ne dit pas « aucun humain », et le remede est dit UNE FOIS" {
+  # ⚖ user 2026-09-05 (solution A) : la lib devinait 1000/60000 ; un UID_MIN reel a 2000 devine a
+  # 1000 faisait « humain de fleet » de tout ce qui vit entre les deux. Illisible = personne n'est
+  # reconnu — et ce n'est PAS l'etat d'une machine neuve (« personne ne s'est enrole »), c'est une
+  # machine qui ne SAIT PAS : une derive, dont le remede est le fichier.
+  passwd_with "zoe:x:1001:1001::/home/zoe:/bin/bash"
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  LCARS_SYSADMIN_UID=1000 nu check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE "^DRIFT .*frontiere systeme/humain n'est pas etablie"
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 2 ]   # le WARN de la lib (une fois) + le DRIFT du module
+  refute grep -q 'aucun humain de fleet sur cette machine' <<<"$output"
+  refute grep -q 'zoe' <<<"$output"
+  # Et l'apply ne pose rien sur une frontiere devinee : il derive de la meme facon, sans usermod.
+  LCARS_SYSADMIN_UID=1000 nu apply
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qE "^DRIFT .*frontiere systeme/humain n'est pas etablie"
+}
+
 @test "un compte ABSENT : DRIFT dans la sonde, JAMAIS un echec dans l'apply — chaque verbe son code" {
   # ⚠ LES CODES SONT INVERSES ENTRE LES DEUX VERBES, et ce module servait les deux avec UN SEUL
   # verdict :

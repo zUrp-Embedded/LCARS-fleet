@@ -21,8 +21,8 @@
 
 # ⚠ L'IDENTITE DU LANCEUR EST POSEE, JAMAIS HERITEE — ET CE N'EST PAS DE LA PRUDENCE : ce fichier
 # a ete VERT sur la machine de dev et ROUGE dans la CI du banc, au premier tour. Le module
-# court-circuite pour qui n'est pas un humain de fleet (`is_fleet_human` : uid >= UID_MIN et
-# uid != SYSADMIN_UID), le job de CI tourne en ROOT (uid 0), et les neuf temoins de traduction
+# court-circuite pour qui n'est pas un humain de fleet (`is_fleet_human` : UID_MIN <= uid <= UID_MAX
+# et uid != SYSADMIN_UID), le job de CI tourne en ROOT (uid 0), et les neuf temoins de traduction
 # recevaient donc « n'est pas un humain de fleet » a la place du verdict qu'ils mesurent.
 #
 # Un test qui lit l'uid de sa machine mesure la machine. Les deux entrees de la regle sont des
@@ -57,8 +57,10 @@ setup() {
   LCARS_LOGIN="$(id -un)"
   mkdir -p "$LCARS_LINK_DIR"
 
-  # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris.
-  echo "UID_MIN 0" > "$BATS_TEST_TMPDIR/login.defs"
+  # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris. UID_MAX au plafond
+  # des uid : la regle a DEUX bornes (2026-09-05), et un login.defs qui n'en porte qu'une n'etablit
+  # pas la frontiere — le module passerait son tour pour tout le monde.
+  printf 'UID_MIN 0\nUID_MAX 4294967294\n' > "$BATS_TEST_TMPDIR/login.defs"
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
   # Le siege du sysadmin est un uid que personne ici ne porte.
   export LCARS_SYSADMIN_UID="$(( $(id -u) + 1 ))"
@@ -220,9 +222,36 @@ EOF
   # par login.defs, et la reservation du siege du sysadmin, que login.defs ne peut PAS exprimer.
   # Un UID_MIN au-dessus de l'uid courant simule le compte systeme sans en creer un — il ECRASE le
   # `UID_MIN 0` du setup, qui existe pour que les autres temoins ne dependent pas de l'uid reel.
-  echo "UID_MIN $(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN %s\nUID_MAX 4294967294\n' "$(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
   run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"n'est pas un humain de fleet"* ]]
+}
+
+@test "un uid AU-DESSUS de UID_MAX (la place de nobody) est ecarte par la meme garde" {
+  # La regle a deux bornes (⚖ user 2026-09-05, solution E) : `nobody` (65534) est sur toute machine,
+  # au-dessus de UID_MIN et different du siege — la regle basse seule le compte. Un UID_MAX sous
+  # l'uid courant simule ce cas sans creer de compte.
+  printf 'UID_MIN 0\nUID_MAX %s\n' "$(( $(id -u) - 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
+  fake_door 0 <<< "MANQUE  fleet/vitrine"
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n'est pas un humain de fleet"* ]]
+  [ ! -f "$BATS_TEST_TMPDIR/argv" ]
+}
+
+@test "bornes ILLISIBLES : le module passe son tour — et le protocole nomme le fichier a reparer, UNE FOIS" {
+  # Fail-closed (⚖ user 2026-09-05, solution A) : un login.defs illisible n'est pas « la frontiere
+  # est a 1000 », c'est « la frontiere n'est pas etablie » — la politique que le BEAM applique a
+  # son boot (R-no-uid-min). Le module ne joue pas la porte, et le lecteur sait QUOI reparer.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  fake_door 0 <<< "MANQUE  fleet/vitrine"
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n'est pas un humain de fleet"* ]]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
+  [ ! -f "$BATS_TEST_TMPDIR/argv" ]
 }

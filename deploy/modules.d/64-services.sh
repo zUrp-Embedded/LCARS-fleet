@@ -332,7 +332,7 @@ probe_seat_uid() {
       p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
       return 0
     fi
-    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — is_fleet_human et uid_floor retomberont sur le litteral 1000, qui n'est le siege que par coincidence (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — sans siege declare, is_fleet_human repond non a tout le monde et le convergeur refuse de demarrer (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque) : aucun repli, un refus qui ne se voit qu'au boot"
     return 0
   fi
   # ⚠ `|| true` PARCE QU'UN UID ABSENT EST UNE REPONSE, PAS UNE PANNE. `getent` sort en 2 quand la
@@ -435,7 +435,7 @@ apply() {
   # refusait entre les deux passes pendant que le verdict de ce module etait vert (« rien a poser »).
   # `services.env` suit pour la meme raison : les unites le liront quand elles existeront.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
-    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et uid_floor, qui retomberaient sur le littéral 1000"
+    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et le convergeur : le premier répondrait non à tout le monde, le second refuserait de démarrer (aucun repli, par décision)"
     verdict_apply
   }
 
