@@ -95,4 +95,37 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
       assert "continue" == Verdict.gate_decision(result)
     end
   end
+
+  test "a NEAR-MISS key (findings_v1, Findings) is named in the log, never aliased, never extracted" do
+    for key <- ["findings_v1", "Findings", "machine_findings"] do
+      result = envelope(%{"critere" => "ok", key => valid_findings()})
+
+      {took, log} = ExUnit.CaptureLog.with_log(fn -> Verdict.take_findings(result) end)
+      # Untouched: the payload stays in the prose (noisy rather than lost), nothing is extracted.
+      assert {nil, ^result} = took
+      assert log =~ "details.#{key} ignored"
+      assert log =~ "the machine payload key is `findings`"
+      assert "continue" == Verdict.gate_decision(result)
+
+      # And the builder can tell « sent under the wrong key » from « silent »: the completer
+      # then says REFUSED upstream instead of accusing the judge of a silence it did not commit.
+      assert Verdict.findings_offered?(result)
+    end
+  end
+
+  test "findings_offered?/1: exact key (even refused) → true; nothing findings-like → false" do
+    assert Verdict.findings_offered?(envelope(%{"findings" => "oops"}))
+    refute Verdict.findings_offered?(envelope(%{"critere" => "ok"}))
+    refute Verdict.findings_offered?(%{"decision" => "continue", "reason" => "ok"})
+    refute Verdict.findings_offered?(%{"decision" => "continue", "details" => "oops"})
+  end
+
+  test "both keys present → the exact one is judged, the neighbour is left alone without a warning" do
+    result = envelope(%{"findings" => valid_findings(), "findings_v1" => "old"})
+    {took, log} = ExUnit.CaptureLog.with_log(fn -> Verdict.take_findings(result) end)
+    assert {findings, stripped} = took
+    assert findings == valid_findings()
+    assert stripped["details"] == %{"findings_v1" => "old"}
+    refute log =~ "ignored"
+  end
 end

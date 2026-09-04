@@ -42,7 +42,8 @@ defmodule Fleet.Project.Onboard.Import do
 
   Le depot source n'est PAS consomme : il reste chez son proprietaire, c'est sa copie.
   """
-  @spec import_deposit(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec import_deposit(String.t(), String.t(), keyword()) ::
+          {:ok, Onboard.result()} | {:error, term()}
   def import_deposit(source, catalogue, opts \\ [])
       when is_binary(source) and is_binary(catalogue) do
     with {:ok, owner, src_name} <- split_repo(source),

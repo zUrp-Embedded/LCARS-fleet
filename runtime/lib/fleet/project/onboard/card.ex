@@ -55,7 +55,8 @@ defmodule Fleet.Project.Onboard.Card do
   `opts` : `:justification` (requise), `:reset_by` (le rôle qui agit).
   Rend `%{repo:, outcome: :reset | :unchanged, files:}`.
   """
-  @spec reset_ci_rail(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec reset_ci_rail(String.t(), keyword()) ::
+          {:ok, Onboard.reset_ci_result()} | {:error, term()}
   def reset_ci_rail(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
     proj_dir = Path.join(Faces.code_root(opts), name)
@@ -116,7 +117,7 @@ defmodule Fleet.Project.Onboard.Card do
   restore failure after a landed push is returned in the successful result. An identical declaration
   is an `:unchanged` no-op. Existing issues retain their engraved route.
   """
-  @spec revise_card(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec revise_card(String.t(), keyword()) :: {:ok, Onboard.revise_result()} | {:error, term()}
   def revise_card(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
     proj_dir = Path.join(Faces.code_root(opts), name)

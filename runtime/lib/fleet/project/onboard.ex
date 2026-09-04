@@ -88,7 +88,63 @@ defmodule Fleet.Project.Onboard do
           # rend `%{idempotent: true}` formellement INATTEIGNABLE — un appelant qui distingue
           # « importe » de « deja la » ecrivait un motif que Dialyzer refusait, sur une valeur que
           # le code produit vraiment.
-          optional(:idempotent) => true
+          optional(:idempotent) => true,
+          # Posée par `import_deposit/3` seul : la source personnelle (`<login>/<name>`) d'où la
+          # copie a été prise — le dépôt d'origine n'est pas consommé, et le fil rend `from`.
+          optional(:from) => String.t()
+        }
+
+  # THE FOUR OTHER LIFECYCLE VERBS, TYPED THE SAME WAY as `delete_result/0` and for the same reason:
+  # `{:ok, map()}` on both sides of the seam is a shape nobody can be held to. Each type is the
+  # union of what the verb's clauses actually build (2026-09-05).
+  @type close_result :: %{
+          :repo => String.t(),
+          :outcome => :closed | :already_closed,
+          # Best-effort stop: `:stopped` | `:none` (no architect was up) | `:error` (spawner hiccup).
+          :architect => :stopped | :none | :error,
+          # The parked marker issue — only when THIS call posted it (`:closed`).
+          optional(:marker_issue) => pos_integer()
+        }
+
+  @type revise_result :: %{
+          :repo => String.t(),
+          :card => String.t(),
+          :previous_card => String.t() | nil,
+          :outcome => :revised | :unchanged,
+          # Both only when the revision was pushed (`:revised`).
+          optional(:jury_delta) => term(),
+          optional(:protection) => term()
+        }
+
+  @type reset_ci_result :: %{
+          :repo => String.t(),
+          :outcome => :reset | :unchanged,
+          :files => [String.t()],
+          # Only when the rail was pushed (`:reset`): the protection restore outcome, as a string.
+          optional(:protection) => String.t()
+        }
+
+  # The shape `delete_project/2` returns — ONE declaration, read by `Lifecycle`'s `@spec` AND by the
+  # MCP behaviour's `@callback` (`Fleet.MCP.PodTools.Delegation.ProjectOnboard`). It lives HERE and
+  # not on the behaviour because this module cannot depend on `Fleet.MCP` (Boundary, MCP sits
+  # above), while MCP already names this module as its default. `{:ok, map()}` on both sides let
+  # `workers_killed` be computed, tested, and never relayed on the wire (2026-09-04): a key the
+  # type does not name is a key the readers cannot be held to.
+  @type delete_result :: %{
+          :repo => String.t(),
+          # `:deleted` | `:absent` (the forge had no such repo — the local proof still runs).
+          :forge => :deleted | :absent,
+          # `:stopped` | `:none` | `:error` | `:skipped_identity` (no local face was proven ours).
+          :architect => :stopped | :none | :error | :skipped_identity,
+          # Workers swept BEFORE the faces go — reported, because a deletion that cost work in
+          # flight must not read as free.
+          :workers_killed => non_neg_integer(),
+          :project_dir => Path.t(),
+          :work_dir => Path.t(),
+          :doc_dir => Path.t(),
+          # One verdict per face: `:removed` | `:absent` | `:kept_identity_unproven` |
+          # `:removal_incomplete`.
+          :local => %{project: atom(), ops: atom(), workshop: atom()}
         }
 
   # ── LA SURFACE DU SEAM, RE-EXPORTEE ─────────────────────────────────
@@ -128,10 +184,10 @@ defmodule Fleet.Project.Onboard do
   @spec list_stoppable_issues(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   defdelegate list_stoppable_issues(full_name, opts \\ []), to: Lifecycle
 
-  @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec close_project(String.t(), keyword()) :: {:ok, close_result()} | {:error, term()}
   defdelegate close_project(full_name, opts \\ []), to: Lifecycle
 
-  @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec delete_project(String.t(), keyword()) :: {:ok, delete_result()} | {:error, term()}
   defdelegate delete_project(full_name, opts \\ []), to: Lifecycle
 
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
@@ -165,10 +221,10 @@ defmodule Fleet.Project.Onboard do
   @spec reconcile_main_protection(String.t(), keyword()) :: :ok | {:error, term()}
   defdelegate reconcile_main_protection(repo, opts \\ []), to: Fleet.Project.Onboard.Migration
 
-  @spec revise_card(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec revise_card(String.t(), keyword()) :: {:ok, revise_result()} | {:error, term()}
   defdelegate revise_card(full_name, opts \\ []), to: Card
 
-  @spec reset_ci_rail(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec reset_ci_rail(String.t(), keyword()) :: {:ok, reset_ci_result()} | {:error, term()}
   defdelegate reset_ci_rail(full_name, opts \\ []), to: Card
 
   @doc false

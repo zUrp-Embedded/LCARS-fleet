@@ -198,9 +198,35 @@ defmodule Fleet.MCP.PodTools do
               "projet de peser ton verdict au lieu de seulement le compter. L'omettre ne casse rien " <>
               "et ne perd que ça — mais elle est perdue pour de bon."
         },
-        "work_item_id" => %{"type" => "string"}
+        "work_item_id" => %{
+          "type" => "string",
+          "description" =>
+            "OBLIGATOIRE : l'identifiant reçu de get_work_item, rappelé ICI, au premier niveau."
+        }
       },
-      "required" => ["payload", "work_item_id"]
+      # `work_item_id` IS MANDATORY AND IS NOT IN `required`. Both are true, and the second follows
+      # from a measured failure, not from tolerance:
+      #
+      #   * e2e regression (`result_event_test`, « NESTED in the payload »): a judge put its
+      #     `work_item_id` INSIDE the verdict payload. Refused with the bare `:work_item_id_required`,
+      #     it retried the same call forever, the review step_run timed out, escalated, and the
+      #     PIPELINE FROZE. The id is a correlator — transport, not business data — so the handler
+      #     now reads it top-level OR inside `payload` (`WorkItems.effective_work_item_id/2`), and
+      #     refuses only when it is in NEITHER (the impersonation lever, « the pod's latest active »,
+      #     stays closed). Same doctrine as `Verdict.normalize_producer/1`: what the SYSTEM can carry
+      #     leaves the agent's head.
+      #   * Since 2026-09-05 the socket ENFORCES this schema before dispatch. A `required` naming
+      #     `work_item_id` would refuse on the wire, with « property not present », a call whose id
+      #     IS present one level down — the exact call that froze the pipeline, refused again with a
+      #     message the agent cannot act on. An `anyOf` (top-level OR in payload) would state the
+      #     handler's rule exactly, but ExJsonSchema renders its failure as « none of the schemata
+      #     matched », naming no key: an opaque refusal where the handler's typed one names the fault.
+      #
+      # So the schema states what the wire ENFORCES (`payload`), the description states what the
+      # agent must DO (the id, here), and the handler's typed refusal names the fault when it does
+      # neither. Making this `required` again is a behaviour change on the pod side; it needs a
+      # measurement stronger than the frozen pipeline above.
+      "required" => ["payload"]
     })
   end
 

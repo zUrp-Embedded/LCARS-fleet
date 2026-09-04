@@ -44,6 +44,67 @@ defmodule Fleet.Application.CatalogueVerifyTest do
     assert Enum.any?(assumptions, &(&1 =~ "IGNORED"))
   end
 
+  test "a catalogue with NO cap-profiles of its own says so in the assumptions, and is not refused for it",
+       %{tmp_dir: tmp} do
+    copy = catalogue_copy(tmp)
+    File.rm_rf!(Path.join(copy, "cap_profile/cap-profiles"))
+
+    # Legal per `Fleet.Workflow.CardRoles` (its cards may only name system roles) — so the advice
+    # stage never refuses it. Whether the copy passes depends on what its cards name; what this
+    # test pins is that the state is NAMED, so a mislaid directory cannot pass for a choice.
+    {verdict, log} = ExUnit.CaptureLog.with_log(fn -> CatalogueVerify.verify(copy) end)
+
+    assumptions =
+      case verdict do
+        {:ok, %{assumptions: a}} ->
+          a
+
+        {:error, %{assumptions: a, findings: findings}} ->
+          refute Enum.any?(findings, &(&1.stage == "business catalogue advice")),
+                 "the advice stage must not refuse an absent directory: #{inspect(findings)}"
+
+          a
+      end
+
+    assert Enum.any?(assumptions, &(&1 =~ "cap-profiles: NONE of its own"))
+    refute log =~ "declares NO judge", "no judge to advise about when there is no index at all"
+  end
+
+  test "the bundled catalogue's assumptions name where its cap-profiles were read" do
+    assert {:ok, %{assumptions: assumptions}} =
+             CatalogueVerify.verify(to_string(Fleet.Catalogue.root()))
+
+    assert Enum.any?(assumptions, &(&1 =~ "cap-profiles: read from"))
+  end
+
+  test "a catalogue whose own roles carry NO judge gets the advice, as a warning and not a refusal",
+       %{tmp_dir: tmp} do
+    copy = catalogue_copy(tmp)
+    dir = Path.join(copy, "cap_profile/cap-profiles")
+
+    judges =
+      dir
+      |> File.ls!()
+      |> Enum.map(&Path.join(dir, &1))
+      |> Enum.filter(&(File.regular?(&1) and File.read!(&1) =~ "brief_kind: judge"))
+
+    assert judges != [], "the bundled catalogue is expected to declare at least one judge"
+    Enum.each(judges, &File.rm!/1)
+
+    {verdict, log} = ExUnit.CaptureLog.with_log(fn -> CatalogueVerify.verify(copy) end)
+    assert log =~ "declares NO judge"
+
+    # Removing the judges breaks the cards that name them — that refusal belongs to the card
+    # stage. The advice stage itself must not be among the findings.
+    case verdict do
+      {:ok, _} ->
+        :ok
+
+      {:error, %{findings: findings}} ->
+        refute Enum.any?(findings, &(&1.stage == "business catalogue advice"))
+    end
+  end
+
   test "it restores the previous root on the way out", %{tmp_dir: tmp} do
     Application.delete_env(:lcars_fleet, :catalogue_root)
     _ = CatalogueVerify.verify(catalogue_copy(tmp))
