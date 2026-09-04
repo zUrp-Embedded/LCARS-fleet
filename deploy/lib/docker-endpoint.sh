@@ -81,6 +81,30 @@ docker_denied_geste() { # docker_denied_geste <socket>
   fi
 }
 
+# ─── _docker_sock_listening <socket> — QUELQU'UN ECOUTE-T-IL, SANS S'Y CONNECTER ? ─────────────
+#
+# ⚠ « REFUSE » N'EST PAS « REPOND » (M2, relecture hostile du 2026-09-04). `-w` sur la socket dit si
+# CE compte peut s'en servir ; il ne dit rien de ce qu'il y a derriere. Une socket ORPHELINE — le
+# daemon a crashe, le fichier lui survit — lue par un compte hors du groupe rendait « le daemon
+# docker REPOND, mais pas a « X » » et envoyait chercher un probleme de groupe la ou il n'y a plus
+# de daemon : le diagnostic qui accuse le mauvais objet, celui que ce fichier combat partout.
+#
+# La seule sonde qui ne demande AUCUN droit sur la socket : `/proc/net/unix` liste les sockets unix
+# du namespace, et une socket sur laquelle un processus fait `listen()` porte le drapeau
+# `__SO_ACCEPTCON` (00010000). Un fichier socket sans ligne a ce drapeau n'a personne derriere.
+# Rend 0 si un processus ecoute, 1 si la table est lisible et ne le porte pas, 2 si la question ne
+# peut pas etre posee (pas de /proc/net/unix) — et ce troisieme etat se DIT, il ne se devine pas.
+_docker_sock_listening() { # _docker_sock_listening <socket> -> 0 ecoute · 1 orpheline · 2 non mesurable
+  local sock="${1:?}" real _num _ref _proto flags _type _st _inode path
+  [[ -r /proc/net/unix ]] || return 2
+  real="$(readlink -f "$sock" 2>/dev/null || printf '%s' "$sock")"
+  while read -r _num _ref _proto flags _type _st _inode path; do
+    [[ "$path" == "$sock" || "$path" == "$real" ]] || continue
+    [[ "$flags" == "00010000" ]] && return 0
+  done < /proc/net/unix
+  return 1
+}
+
 _docker_mount_cli() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/bin/docker"; }
 _docker_mount_plugins() { echo "/mnt/wsl/docker-desktop/cli-tools/usr/local/lib/docker/cli-plugins"; }
 
@@ -251,6 +275,20 @@ docker_endpoint() {
     [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }
   done < <(_docker_sockets)
 
+  # ⚠ « REFUSE » NE DEVIENT « REPOND » QU'UNE FOIS L'ECOUTE ETABLIE (M2). Sans un processus derriere
+  # la socket, le refus est celui d'un FICHIER : DENIED retombe a 0 et le diagnostic tombe dans
+  # « rien ne repond », en nommant la socket orpheline — c'est le daemon qu'il faut aller voir, pas
+  # le groupe. Quand la question ne peut pas etre posee, on garde DENIED et on le DIT.
+  local _orpheline="" _ecoute=""
+  if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
+    _docker_sock_listening "$PROV_DOCKER_SOCK"; case "$?" in
+      0) ;;
+      1) PROV_DOCKER_DENIED=0
+         _orpheline=" · la socket $PROV_DOCKER_SOCK refuse l'acces a « $(id -un) » ($(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null)) MAIS aucun processus n'y ecoute (/proc/net/unix) : daemon arrete ou socket orpheline — daemon vivant NON etabli, le groupe n'est pas la question" ;;
+      *) _ecoute=" (ecoute non verifiable : /proc/net/unix illisible — daemon vivant PRESUME, pas etabli)" ;;
+    esac
+  fi
+
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
     # ⚖ lot 10 (point 10) : PLUS D'ESCALADE. Le shim sudo (une CLI fabriquee qui passait chaque
     # commande sous sudo avec un environnement filtre) couvrait le poste ou la socket appartient a
@@ -258,12 +296,12 @@ docker_endpoint() {
     # loi 5 (docker_denied_geste : le geste, pas seulement le constat) ont rendu marginal, pour trente
     # lignes qui faisaient tourner compose en root sur le clone de l'humain. Le refus nomme le geste.
     local abs; abs="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
-    PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · $(docker_denied_geste "$PROV_DOCKER_SOCK") · CLI retenue : $abs"
+    PROV_DOCKER_WHY="le daemon docker REPOND$_ecoute, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · $(docker_denied_geste "$PROV_DOCKER_SOCK") · CLI retenue : $abs"
     return 1
   fi
 
   # 3. Rien ne répond.
-  local resolved tried=""
+  local resolved tried="$_orpheline"
   resolved="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
   while read -r sock; do
     if [[ -S "$sock" ]]; then tried+=" ${sock}[socket$([[ -w "$sock" ]] && echo ",accessible" || echo ",NON-ACCESSIBLE")]"
