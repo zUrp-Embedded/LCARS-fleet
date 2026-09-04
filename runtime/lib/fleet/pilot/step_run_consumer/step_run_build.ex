@@ -207,10 +207,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     # FAUX quand il a émis un payload que le schéma a écarté, et ce second cas est le plus frequent
     # des deux (un JSON sérialisé, un `severity_max` hors énumération). Accuser un juge d'un silence
     # qu'il n'a pas commis envoie corriger le mauvais bout : on cherche pourquoi il n'émet pas alors
-    # qu'il émet.
+    # qu'il émet. `findings_offered?/1` couvre aussi la clé VOISINE (`findings_v1`, `Findings`),
+    # que `take_findings/1` a nommée dans son log : là encore le juge a parlé.
     step_run =
-      if findings == nil and is_map(result["details"]) and
-           Map.has_key?(result["details"], Verdict.findings_key()) do
+      if findings == nil and Verdict.findings_offered?(result) do
         Map.put(step_run, :review_findings_refused, true)
       else
         step_run
