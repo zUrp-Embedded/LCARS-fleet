@@ -96,12 +96,26 @@ uid_bounds() { # pose UID_MIN et UID_MAX depuis login.defs — 0 si les deux se 
 # les comptes systeme sont en dessous, `nobody` au-dessus), et qui n'est pas le SIEGE — le siege
 # est le sysadmin, converge par l'installeur, jamais par ces modules. Bornes illisibles : personne
 # n'est un humain, et `uid_bounds` a dit pourquoi.
+# Le SIEGE fait partie de la frontiere : un siege inconnu ne peut pas etre exclu, donc il passerait
+# pour un humain. Meme politique que les bornes (et que le BEAM, R-no-seat) : pas de siege, pas
+# d'humain, dit une fois. Le remede nomme les deux lectures (fichier, puis LCARS_SYSADMIN_UID).
+_SEAT_SAID=""
+seat_established() { # pose SEAT_UID — 0 si le siege se lit ; 1 sinon, dit une fois
+  SEAT_UID="$(seat_uid)"
+  [[ -n "$SEAT_UID" ]] && return 0
+  if [[ -z "$_SEAT_SAID" ]]; then
+    _SEAT_SAID=1
+    p_warn "le siege n'est pas declare (${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid} illisible, LCARS_SYSADMIN_UID non pose) — sans lui la frontiere n'est pas etablie : cette machine n'est pas provisionnee, joue « deploy/provision apply »"
+  fi
+  return 1
+}
+
 is_fleet_human() { # [login] (defaut : LCARS_LOGIN) — 0 si oui
-  local login="${1:-${LCARS_LOGIN:-}}" uid seat
+  local login="${1:-${LCARS_LOGIN:-}}" uid
   [[ -n "$login" ]] || return 1
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
   uid_bounds || return 1
-  seat="$(seat_uid)"
-  (( uid >= UID_MIN && uid <= UID_MAX )) && [[ "$uid" != "$seat" ]]
+  seat_established || return 1
+  (( uid >= UID_MIN && uid <= UID_MAX )) && [[ "$uid" != "$SEAT_UID" ]]
 }

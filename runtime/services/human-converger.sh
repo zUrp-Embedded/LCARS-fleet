@@ -450,6 +450,15 @@ converge_once() {
   while IFS=$'\t' read -r forge_id login; do
     [[ -n "$login" ]] || continue
     if id "$login" >/dev/null 2>&1; then
+      # UN COMPTE QUI EXISTE N'EST PAS UN HUMAIN POUR AUTANT. `sshd`, `nobody`, un compte de service
+      # inscrit sur la forge par erreur passaient ici SANS `reserved` et se retrouvaient dans le
+      # groupe fleet — le meme refus que pour un compte a creer, prononce une fois.
+      if reserved "$login"; then
+        already_refused "$login" || {
+          err "REFUS $login — compte EXISTANT reserve (uid hors [UID_MIN..UID_MAX], compte systeme ou de service) ; ni reintegre, ni console"
+          mark_refused "$login" "ce login existe deja sur cette boite comme compte systeme ou de service : il ne devient pas un humain de fleet"; }
+        continue
+      fi
       # GUARD A : jamais restaurer (ni toucher) l'uid reserve du sysadmin (admiral).
       if [[ "$(uid_of "$login")" != "$SYSADMIN_UID" ]] &&
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then

@@ -152,3 +152,24 @@ proto() { # proto <script> — source le protocole (sujet : zoe) puis joue <scri
   [[ "$output" == *"SANS_SUJET_NON"* ]]
   [[ "$output" == *"home=[]"* ]]
 }
+
+@test "siege NON DECLARE (ni fichier ni LCARS_SYSADMIN_UID) : personne n'est un humain, et le remede est dit UNE FOIS" {
+  # Sans siege, on ne peut pas l'exclure : il passerait pour un humain. Meme politique que les bornes.
+  unset LCARS_SYSADMIN_UID
+  proto 'is_fleet_human zoe && echo OUI-zoe || echo NON-zoe; is_fleet_human zoe || true; is_fleet_human admiral && echo OUI-admiral || echo NON-admiral'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NON-zoe"* ]]
+  [[ "$output" == *"NON-admiral"* ]]
+  refute_out 'OUI-' <<<"$output"
+  [ "$(grep -c "le siege n'est pas declare" <<<"$output")" -eq 1 ]
+  [[ "$output" == *"$LCARS_SEAT_UID_FILE"* ]]
+  [[ "$output" == *"provision apply"* ]]
+}
+
+@test "siege declare par LCARS_SYSADMIN_UID seul (fichier absent) : la regle s'applique, sans message" {
+  proto 'is_fleet_human zoe && echo OUI-zoe; is_fleet_human admiral || echo NON-admiral'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OUI-zoe"* ]]
+  [[ "$output" == *"NON-admiral"* ]]
+  refute_out 'siege' <<<"$output"
+}

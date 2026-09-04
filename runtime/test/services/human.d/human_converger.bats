@@ -924,3 +924,34 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   [ "$status" -eq 0 ]
   [ "$output" = "1002" ]
 }
+
+@test "un compte EXISTANT reserve (sshd, uid 100) inscrit sur la forge n'est PAS reintegre — refus nomme, une fois, pas de console" {
+  # Trou nomme par le lot 14b : la branche « le compte existe » restaurait sans consulter `reserved`.
+  local fn="$BATS_TEST_TMPDIR/once.sh"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":4,\"login\":\"sshd\"}]'; }
+    id() { [[ \"\$*\" == *sshd* ]]; }
+    getent() { case \"\$1\" in passwd) [[ \"\$2\" == 1000 ]] ;; group) echo 'fleet:x:2000:' ;; esac; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    usermod() { echo \"USERMOD \$*\" >> '$GESTES'; }
+    restore_human() { echo \"RESTORE \$1\" >> '$GESTES'; }
+    ensure_console() { echo \"CONSOLE \$1\" >> '$GESTES'; }
+    converge_human() { echo \"CONVERGE \$1\" >> '$GESTES'; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    converge_once; converge_once"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GESTES" ] || { echo "un geste a ete joue sur sshd :"; cat "$GESTES"; return 1; }
+  [ "$(grep -c 'REFUS sshd' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"compte EXISTANT reserve"* ]]
+  grep -q '^sshd	' "$BATS_TEST_TMPDIR/refused"
+}
