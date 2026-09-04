@@ -651,6 +651,18 @@ prov_manifest_gid() {
   awk -v g="$grp" '{ c=$1; sub(/:.*/, "", c) } c=="group" && $2==g && $3!="-" { print $3; exit }' "$f"
 }
 
+# prov_manifest_substrate <chemin> -> la colonne substrat que la TABLE declare pour cet objet, ou vide
+# Lu par `25-directories` (`prov_dir_scope`) pour savoir OU une entree de sa table se mesure : le
+# module n'a AUCUNE colonne substrat a lui — la table est la seule source de ce fait, et deux
+# tables qui disent le meme fait divergent.
+# ⚠ MEME FICHIER, MEME REPLI que `prov_manifest_gid`, et PAS de fonction commune : un temoin de
+# `system_manifest.bats` eval-ue `prov_manifest_gid` SEULE, son corps doit rester autonome.
+prov_manifest_substrate() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $2==p { print $5; exit }' "$f"
+}
+
 ensure_group() {
   local grp="$1" gid="${2:-}"
   [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
