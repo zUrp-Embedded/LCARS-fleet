@@ -215,7 +215,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   #
   # Le mot engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN faire — il n'a pas
   # les credentials de la personne, et les avoir serait le contraire du canon.
-  local mod="$BATS_TEST_DIRNAME/../modules.d/63-forge-tokens.sh"
+  local mod="$BATS_TEST_DIRNAME/../../fleet/services/forge.d/tokens.sh"
   local bloc; bloc="$(sed -n '/case "\$(member_state "\$PROV_HUMAN")"/,/esac/p' "$mod")"
   [ -n "$bloc" ]
   refute grep -q 'p_drift' <<<"$bloc"
@@ -228,7 +228,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 @test "63-forge-tokens : ce que le rail PEUT converger reste un drift" {
   # Le sens qui manquait. `63-forge-tokens` porte de vrais drifts — structure absente, tokens a re-minter —
   # et les passer tous en warn aurait rendu le module incapable de signaler quoi que ce soit.
-  local mod="$BATS_TEST_DIRNAME/../modules.d/63-forge-tokens.sh"
+  local mod="$BATS_TEST_DIRNAME/../../fleet/services/forge.d/tokens.sh"
   [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
 }
 

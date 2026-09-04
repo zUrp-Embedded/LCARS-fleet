@@ -227,7 +227,7 @@ secret_writers() {
     "$REPO/fleet/services/provision-role-tokens.sh" \
     "$REPO/fleet/services/forge-gestures.sh" \
     "$REPO/deploy/modules.d/48-forge-host.sh" \
-    "$REPO/deploy/modules.d/63-forge-tokens.sh" \
+    "$REPO/fleet/services/forge.d/tokens.sh" \
     "$REPO/deploy/modules.d/25-directories.sh"
 }
 

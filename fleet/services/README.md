@@ -49,9 +49,10 @@ donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `PROV_*`), sur le pr
 
 - `human.d/` — les modules per-humain, joués par `human-converger.sh` à chaque humain que la
   forge inscrit, sous l'identité de l'humain ;
-- `forge.d/` — les gestes de forge (cache des catalogues, branche ops, client OAuth2 du deck),
-  joués par la boîte à l'init de son instance et à chaque boot, et par l'installeur à l'install
-  (`deploy/modules.d/45-catalogues`, `65-ops-branch`, `66-deck-oidc` sont des appelants minces).
+- `forge.d/` — les gestes de forge (jetons de rôle, cache des catalogues, branche ops, client
+  OAuth2 du deck), joués par la boîte à l'init de son instance et à chaque boot, et par
+  l'installeur à l'install (`deploy/modules.d/45-catalogues`, `63-forge-tokens`, `65-ops-branch`,
+  `66-deck-oidc` sont des appelants minces).
 
 L'installeur APPELLE ces modules ; il ne leur prête rien, et ils ne lui empruntent rien — c'est
 la frontière. Chaque dossier porte son README, qui instruit le protocole `<module> check|apply`.

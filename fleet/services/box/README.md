@@ -36,8 +36,7 @@ joués par l'entrypoint après lui ; les humains (le convergeur) ; les services 
 
 ## Ce qui reste à l'entrypoint, et pour combien de temps
 
-`deploy/docker/entrypoint.sh` appelle `init.sh apply`, puis `provision --only 63-forge-tokens`
-(le dernier module de l'installeur joué au boot : il dépend de `prov_roles`, donc des portes outil
-du release), puis les gestes de `forge.d`, puis démarre les services et sshd. Quand les portes
-outil vivront dans `bin/lcars` et le mint côté produit, le boot entier sera ici (`boot.sh`) et
-`deploy/` quittera l'image.
+`deploy/docker/entrypoint.sh` appelle `init.sh apply`, puis les quatre gestes de `forge.d`
+(`tokens`, `catalogues`, `ops-branch`, `deck-oidc`), puis démarre les services et sshd. Il ne
+joue plus AUCUN module de l'installeur ; ses portes outil délèguent à `lcars tool`. Le boot
+entier deviendra `boot.sh` ici, et `deploy/` quittera l'image (lot 7).

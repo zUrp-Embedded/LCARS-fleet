@@ -23,13 +23,16 @@
 # ON EXECUTE LE MODULE, on ne le source pas : patron des autres temoins de `deploy/`.
 
 setup() {
-  MODULE="$BATS_TEST_DIRNAME/../../modules.d/63-forge-tokens.sh"
+  MODULE="$BATS_TEST_DIRNAME/../../../services/forge.d/tokens.sh"
   [ -f "$MODULE" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN" "$BATS_TEST_TMPDIR/tokens"
 
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
+  export PROV_MODULE_TAG=63-forge-tokens
+  # le roster vient du release par « lcars tool » : ici, une CLI de doublure qui rend un roster fixe
+  mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
   export PROV_FORGE_URL="http://forge.test"
   export PROV_HUMAN="zoe"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
@@ -84,7 +87,7 @@ EOF
   # traverse sans les nommer — un motif qui compte les antislashs se casserait au prochain reformat.
   cite="$(sed -n 's/.*\([0-9][0-9]-[a-z-]*\)[^ ]* l.enrole.*/\1/p' "$MODULE" | head -1)"
   [ -n "$cite" ]
-  local f="$BATS_TEST_DIRNAME/../../modules.d/${cite}.sh"
+  local f="$BATS_TEST_DIRNAME/../../../../deploy/modules.d/${cite}.sh"
   [ -f "$f" ]
   # ⚠ « contient le mot runner » NE SUFFIT PAS : `48-forge-host` le porte encore (il nomme le projet
   # compose du runner) et le temoin restait vert sur le mauvais module — mesure par mutation.

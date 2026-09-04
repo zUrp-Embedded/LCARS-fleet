@@ -64,7 +64,6 @@ esac
 # attente de configuration », et la boite reste debout pour que « box config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
-PROVISION=/opt/lcars/deploy/provision
 BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/fleet/services/box/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/fleet/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
@@ -90,22 +89,16 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 
 # ─── 2. LES GESTES DE FORGE ──────────────────────────────────────────────────────────────────────
 #
-# Les jetons de role d'abord (`63-forge-tokens`, encore un module de l'installeur : il depend de
-# `prov_roles`, donc des portes outil de ce fichier — il suivra quand elles vivront dans `bin/lcars`),
-# puis les trois gestes du produit (`forge.d/`) : cache des catalogues, branche ops, client OAuth2 du
-# deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
+# Les quatre gestes du produit (`forge.d/`) : jetons de role, cache des catalogues, branche ops,
+# client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
 PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
-"$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" --only 63-forge-tokens || prov_rc=$?
-case "$prov_rc" in
-  0) say "jetons de role : converges" ;;
-  2) say "jetons de role : APPLIQUE, DRIFT RESIDUEL — un geste manque (forge, autorite). Detail : $PROVISION doctor --only 63-forge-tokens" ;;
-  *) say "jetons de role : ECHEC (rc=$prov_rc) — la boite demarre quand meme ; diagnose : $PROVISION doctor --only 63-forge-tokens" ;;
-esac
-for gesture in catalogues ops-branch deck-oidc; do
+# Les jetons de role d'abord (le geste `tokens` lit le siege pour sonder son onboardabilite), puis
+# les trois autres. Plus AUCUN module de l'installeur au boot : `deploy/` n'y est plus pour rien.
+for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
-  LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" PROV_MODULE_TAG="$gesture" \
+  LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" PROV_MODULE_TAG="$gesture" PROV_HUMAN="$LCARS_ADMIRAL" \
     bash "/opt/lcars/fleet/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;

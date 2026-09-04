@@ -50,7 +50,7 @@ setup() {
   # `useradd`, qui exige root et n'est pas ce qu'on mesure.
   HEAD="$BATS_TEST_TMPDIR/head.sh"
   # La tete : les portes outil et la garde du siege — tout ce qui precede l'init de l'instance.
-  sed '/^PROVISION=\/opt\/lcars\/deploy\/provision$/,$d' "$SRC" > "$HEAD"
+  sed '/^BOX_INIT=/,$d' "$SRC" > "$HEAD"
 }
 
 seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet

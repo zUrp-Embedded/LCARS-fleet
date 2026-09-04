@@ -16,6 +16,7 @@ l'installeur ; ils sont ici, dans le même dialecte, sur le protocole des module
 | `catalogues.sh` | le matériel des catalogues INSTALLÉS (signés par la forge), sous `PROV_CATALOGUES_DIR` | `PROV_FORGE_URL`, `PROV_TOKENS_DIR`, `PROV_CATALOGUES_DIR`, `PROV_LEGACY_CATALOGUES_DIR` |
 | `ops-branch.sh` | la branche orpheline `tool_request` du dépôt ops — la boîte aux lettres de l'outillage | `PROV_FORGE_URL`, `PROV_SYSTEM_TOKEN_FILE`, `PROV_SYSTEM_ACCOUNT`, `LCARS_OPS_REPO` |
 | `deck-oidc.sh` | le client OAuth2 du deck sur la forge, et `/etc/lcars/deck-oidc.json` | `PROV_FORGE_URL`, `PROV_FORGE_PUBLIC_URL`, `PROV_SYSTEM_TOKEN_FILE`, `PROV_DECK_*`, `PROV_ADVERTISE` |
+| `tokens.sh` | les jetons de rôle (sondes de la forge, modes de l'autorité, roster dérivé du release par `lcars tool roles-tfvars` + catalogues installés + plancher `PROV_ROLES` de l'appelant, mint par `../provision-role-tokens.sh`) | `PROV_FORGE_URL`, `PROV_FORGE_ORG`, `PROV_TOKENS_DIR`, `PROV_MASTER_TOKEN_FILE`, `PROV_FORGE_SEED_FILE`, `PROV_SYSTEM_*`, `PROV_AUTHORITY_USER`, `PROV_CATALOGUES_DIR`, `PROV_ROLES`, `PROV_HUMAN`, `LCARS_CLI` |
 
 ## Le protocole
 
@@ -29,13 +30,7 @@ sur `../lib/module-protocol.sh` et les `PROV_*` que la table ci-dessus nomme (le
 protocole valent pour le reste). Sans `LCARS_MODULE_PROTOCOL`, le geste refuse à la ligne 1 en
 nommant sa cause — un geste nu n'a pas d'hôte.
 
-Les hôtes : `deploy/modules.d/45-catalogues.sh`, `65-ops-branch.sh`, `66-deck-oidc.sh` sur un
-poste (ils passent ce que l'installeur sait de mieux — l'adresse annoncée, par exemple) ; le
-boot de la boîte, à l'init de son instance.
-
-## Ce qui reste dans l'installeur, et pourquoi
-
-`63-forge-tokens` orchestre le mint (sondes de la structure, modes de l'autorité, roster par
-`prov_roles`) et appelle `../provision-role-tokens.sh`, le minteur — lui aussi un geste de forge
-du produit. Il suivra quand les portes outil du release (`roles-tfvars`, `catalogue-root`)
-auront quitté l'entrypoint pour `bin/lcars` : `prov_roles` en dépend.
+Les hôtes : `deploy/modules.d/45-catalogues.sh`, `63-forge-tokens.sh`, `65-ops-branch.sh`,
+`66-deck-oidc.sh` sur un poste (ils passent ce que l'installeur sait de mieux — l'adresse
+annoncée, le plancher de rôles) ; l'entrypoint de la boîte, à chaque boot, dans cet ordre :
+`tokens`, `catalogues`, `ops-branch`, `deck-oidc`.
