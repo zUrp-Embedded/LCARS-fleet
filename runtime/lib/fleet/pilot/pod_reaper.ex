@@ -14,8 +14,8 @@ defmodule Fleet.Pilot.PodReaper do
     * the MERGE — `Fleet.Pilot.MergeAndPromote` reaps the producer it just sealed (it knows the
       role, so it kills one precise id);
     * the SUPERSEDE — `Fleet.MCP`'s delegation retires an issue and calls THIS module through the
-      `:pod_reaper` upward seam (MCP cannot reference `Fleet.Pilot`, cf. the `:forge_client`
-      precedent), because it does NOT know which roles were live on that ticket.
+      `:mcp_pod_reaper` upward seam (MCP cannot reference `Fleet.Pilot` at compile time), because
+      it does NOT know which roles were live on that ticket.
 
   **The registry is the source of truth, never an enumeration of roles.** We kill every live pod
   whose id encodes THIS issue — `Fleet.PodId.parse_ref/2`, the authority that BUILDS the
@@ -66,8 +66,8 @@ defmodule Fleet.Pilot.PodReaper do
         [pod_id]
 
       # A map WITHOUT `pod_id` is a registry entry we cannot identify — we skip it (killing what we
-      # cannot name is worse than not killing) but we SAY it: a silent skip is how the whole defect
-      # above stayed invisible.
+      # cannot name is worse than not killing) but we SAY it: a silent skip is how the defect
+      # above would stay invisible.
       info when is_map(info) ->
         Logger.warning(
           "PodReaper: registry entry without :pod_id (#{inspect(Map.keys(info))}) — skipped, " <>

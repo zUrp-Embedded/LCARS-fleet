@@ -124,9 +124,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # `{:escalated, num}` RESTE VRAI — l'issue existe, son numero le prouve, et c'est ce que
-  # l'appelant a besoin de savoir. Ce qui se disait nulle part, c'est que la GARDE de recurrence,
-  # elle, n'est pas durable : `write_wal` journalise bien son echec, mais sous un libelle generique
-  # qui ne dit pas ce qu'il coute ICI. Une ligne le dit, la ou la consequence se produira.
+  # l'appelant a besoin de savoir. Mais la GARDE de recurrence, elle, n'est pas durable :
+  # `write_wal` journalise son echec sous un libelle generique qui ne dit pas ce qu'il coute ICI.
+  # Cette ligne le dit, la ou la consequence se produira.
   defp warn_if_stamp_lost(:ok, _sig, _num), do: :ok
 
   defp warn_if_stamp_lost({:error, why}, sig, num) do
@@ -140,10 +140,9 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   @doc """
-  The IMMEDIATE-gate facade (longtemps nommee d'apres le rail de severite max — a tort : trois de
-  ses quatre appelants n'en ont jamais ete) : escalates through the registry's cooldown gate while PRESERVING
+  The IMMEDIATE-gate facade: escalates through the registry's cooldown gate while PRESERVING
   "issue on the FIRST occurrence" (no recurrence gate — porte `immediate`, cf. `events.yaml`): only the
-  REPEATS of the same signature within `:incident_escalation_cooldown_ms` are suppressed (each
+  REPEATS of the same signature within `:pilot_incident_escalation_cooldown_ms` are suppressed (each
   suppressed repeat is still NOTED — the timeline stays true). `Escalation` itself stays
   stateless; the memory lives here. If the registry owner is down, we FAIL-OPEN to the
   escalation: l'alarme ne doit pas etre perdue parce que son etrangleur l'est.
@@ -671,7 +670,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
   # Recurrence cooldown of the sysadmin escalation: default 1 h (a durable failure keeps ONE
   # open issue as its alarm instead of one per tick — otherwise ~2 880 issues/day,
   # self-amplified by the webhook kick). Seam `:escalation_cooldown_ms` (tests) overrides the
-  # config knob. Entries without a stamp (pre-cooldown WAL/forge, or escalation never done)
+  # config knob `:pilot_incident_escalation_cooldown_ms`. Entries without a stamp (pre-cooldown WAL/forge, or escalation never done)
   # → nil → the gate lets the escalation through (back-compat = old behavior).
   @escalation_cooldown_ms 3_600_000
 
@@ -700,11 +699,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
   defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 
-  # SINGLE ops-repo authority (`:ops_repo`): the incident REGISTRY (this file, ops branch) and
-  # the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces of
-  # one incident. Two separate keys with two inline defaults would sit one edit away from
-  # a registry on repo A and its issues on repo B, with nothing to catch it. `:incident_registry_repo`
-  # survives as an explicit override for the rare split.
+  # SINGLE ops-repo authority (`:pilot_ops_repo`): the incident REGISTRY (this file, ops branch)
+  # and the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces
+  # of one incident. Two separate keys with two inline defaults would sit one edit away from a
+  # registry on repo A and its issues on repo B, with nothing to catch it.
+  # `:pilot_incident_registry_repo` is an explicit override for the rare split.
   defp repo(opts),
     do:
       opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
@@ -731,7 +730,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   # The registry sync is a commit the RUNTIME makes: no human initiated it, no pod produced it, and
   # no pod could — a pod never holds the forge token. Its identity is therefore the SYSTEM one, like
-  # the other two runtime-generated commits (`Workflow.OpsObject`, `Pilot.ProjectOnboard`), through
+  # the other two runtime-generated commits (`Workflow.OpsObject`, `Fleet.Project.Onboard`), through
   # the single accessor rather than a literal retyped at the caller.
   #
   # Never a ROLE here: `ForgeIdentity` splits the three identities on purpose — author = the human,
