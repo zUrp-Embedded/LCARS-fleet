@@ -75,7 +75,7 @@ defmodule Fleet.TaskQueue.WorkItem do
 
   # (No `retry_count` field. The system-side bounded retry deliberately does NOT live here
   # (it must not be pod-influenceable): the forge-driven rail (`max_rework_rounds`) bounds the
-  # rework. An old `state.json` carrying the key is simply ignored by `from_map`.)
+  # rework.)
 
   # ACTIVE states = a work item still OWNS its pod's slot/lock. The TERMINAL states
   # (`:completed`/`:failed`/`:cleared`) do NOT: a `:completed` item is DELIVERED — its completion
@@ -94,16 +94,12 @@ defmodule Fleet.TaskQueue.WorkItem do
   @spec active?(state()) :: boolean()
   def active?(state), do: state in @active_states
 
-  # PAS DE COUPLE `to_map`/`from_map` ICI : il n'existait que pour une serialisation `state.json`
-  # qui n'a plus de rail (BL-6-113), et une paire de fonctions dont la seule preuve est qu'elles
-  # s'inversent l'une l'autre ne prouve rien du systeme.
-  #
-  # CE QUE LEUR PROSE VALAIT, et qui doit survivre a leur absence : une date optionnelle ILLISIBLE
-  # se REFUSE, elle ne se degrade pas en `nil` — parce que `nil` a un sens ici, *pas d'echeance*, et
-  # qu'une date qu'on n'a pas su lire n'est pas une absence d'echeance. Plier l'une sur l'autre
-  # produit un mandat que la file n'expirera JAMAIS (`deadline_reached?/1` ne conclut rien sur
-  # `nil`). **Un defaut qui absorbe une erreur de lecture fabrique un etat qui ne se repare pas tout
-  # seul.** `new/2`, la seule voie de construction validee, casse pareil sur un attribut mal type.
+  # UNE SEULE VOIE DE CONSTRUCTION, `new/2`, et pas de couple de serialisation : le broker ne
+  # persiste rien (BL-6-113). La regle qui compte : une date optionnelle ILLISIBLE se REFUSE, elle
+  # ne se degrade pas en `nil` — parce que `nil` a un sens ici, *pas d'echeance*, et qu'une date
+  # qu'on n'a pas su lire n'est pas une absence d'echeance. Plier l'une sur l'autre produit un
+  # mandat que la file n'expirera JAMAIS (`deadline_reached?/1` ne conclut rien sur `nil`). **Un
+  # defaut qui absorbe une erreur de lecture fabrique un etat qui ne se repare pas tout seul.**
 
   @doc """
   Builds a pending work item from atom- or string-keyed attributes.

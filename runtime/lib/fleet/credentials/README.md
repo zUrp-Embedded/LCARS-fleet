@@ -33,6 +33,6 @@ Pure library domain — no supervisor.
 ## Config & deps
 - Knob `:lcars_fleet, :credentials_forge_auth` (`%{url_prefix, account}`) — read by `ForgeAuth`, set by `runtime.exs` from the forge env. ⚠ It carries an ACCOUNT NAME, never a token: the credential is asked of the authority service at the instant it is used.
 - Knob `:lcars_fleet, :credentials_authority_socket` — read by `Authority` (default `/run/lcars/authority/roles.sock`), overridable because a witness cannot bind in `/run`.
-- ⚠ `:credentials_role_tokens_dir` has NO runtime reader in the BEAM: it asks `roles.sock`, and the authority service resolves `<dir>/<account>.gitea_token` on its side. The knob steers `runtime.exs` and the test suite's authority double, nothing else.
+- ⚠ `:credentials_role_tokens_dir` — the BEAM opens no token file: it asks `roles.sock`, and the authority service resolves `<dir>/<account>.gitea_token` on its side. The knob's only BEAM reader is `RoleToken.path_for/1`, which NAMES the file for the test suite's fixtures; it otherwise steers `runtime.exs` and the authority double.
 - Knob `:lcars_fleet, :credentials_forge_identity_override` — test seam read by `ForgeIdentity`, set by `test.exs`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/credentials.ex`).

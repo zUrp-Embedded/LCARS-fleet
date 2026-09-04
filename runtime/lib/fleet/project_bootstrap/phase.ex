@@ -426,11 +426,13 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
     Tracked victims are flagged `git update-index --skip-worktree` BEFORE removal, so the pod's
     `git add .` never stages our deletions into its deliverable — the gate's
-    forbidden-path check is the independent second line. Called by BOTH workspace producers
-    (`clone_or_skip` at spawn, `reset_in_place` at every slot-freeze re-brief — `reset --hard`
-    erases the skip-worktree bits and restores tracked victims). Neutralized paths are logged
-    ONCE, warning: the operator of a legitimate repo must see that its `.claude/` does not
-    follow. The empty-workspace path (no repo) has nothing to sanitize and never calls this.
+    forbidden-path check is the independent second line. Called by BOTH workspace producers:
+    `clone_or_skip` at spawn, and `reset_in_place` at every slot-freeze re-brief, where what it
+    catches is material that entered the BASE between two tickets (the skip-worktree bit set at
+    clone survives `reset --hard`, measured; a file that was not there at clone has no bit).
+    Neutralized paths are logged ONCE, warning: the operator of a legitimate repo must see that its
+    `.claude/` does not follow. The empty-workspace path (no repo) has nothing to sanitize and
+    never calls this.
     """
     @spec sanitize_workspace(Path.t()) :: :ok | {:error, {:sanitize_failed, term()}}
     def sanitize_workspace(ws) do
@@ -537,9 +539,9 @@ defmodule Fleet.ProjectBootstrap.Phase do
     @doc """
     The target repo's ORIGINAL root `CLAUDE.md`, read from GIT (`git show HEAD:CLAUDE.md`) —
     never from the working tree, which carries OUR composed file from the first spawn on.
-    `:absent` covers both "not tracked at HEAD" (the nominal case — the project template ships
-    none) and any git failure: no original, no repo-section rail, the composed doc renders its
-    repo zone empty exactly as before (BL-6-16 — the rail's revival point, cf. Scaffold).
+    `:absent` covers both "not tracked at HEAD" (an adopted repo that carries none; a project the
+    fleet onboarded carries the template's) and any git failure: no original, no repo-section
+    rail, the composed doc renders its repo zone empty (BL-6-16, cf. Scaffold).
     """
     @spec read_original_claude_md(Path.t()) :: {:ok, String.t()} | :absent
     def read_original_claude_md(ws) do

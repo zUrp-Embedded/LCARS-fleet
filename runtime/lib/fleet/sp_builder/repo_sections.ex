@@ -143,11 +143,12 @@ defmodule Fleet.SPBuilder.RepoSections do
   # ({:ok, ""} — legitimate, the template renders an empty zone) from "path supplied but unreadable"
   # ({:error, …} — fail-loud). A path that IS readable and yields ZERO sections is otherwise
   # indistinguishable from the first: the pod launches with no repo context at all and nothing says so.
-  # The closed list is a BET on the target repo's headings — LCARS does not impose them (its
-  # `priv/catalogue/project_template` ships no CLAUDE.md), so a repo naming its sections `## Setup` /
-  # `## Architecture` contributes nothing, legitimately and invisibly. Not an error (a repo owes us no
-  # heading), so `{:ok, ""}` stands — but VISIBLY. `extract/1` stays pure: the log lives here,
-  # on the side that already does I/O.
+  # The closed list is a BET on an ADOPTED repo's headings — LCARS does not impose them there, so a
+  # repo naming its sections `## Setup` / `## Architecture` contributes nothing, legitimately and
+  # invisibly. On an ONBOARDED repo the template ships the headings, closed: the same warning then
+  # says they have not been written yet (cf. the moduledoc). Not an error either way (a repo owes
+  # us no heading), so `{:ok, ""}` stands — but VISIBLY. `extract/1` stays pure: the log lives
+  # here, on the side that already does I/O.
   defp warn_if_no_section("", path) do
     Logger.warning(
       "RepoSections: #{path} read but NO section matched #{inspect(@repo_section_names)} — the pod's " <>

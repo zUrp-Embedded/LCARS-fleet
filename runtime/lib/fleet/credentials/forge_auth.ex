@@ -81,10 +81,9 @@ defmodule Fleet.Credentials.ForgeAuth do
       nil ->
         {:ok, [@git_no_prompt]}
 
-      # ⚠ LE JETON N'EST PLUS DANS LA CONFIG — SEULEMENT LE COMPTE. Il y vivait en clair pour toute
-      # la vie du noeud, lu au boot ; il se demande maintenant au service d'autorite AU MOMENT DE
-      # POUSSER. Deux consequences : la revocation mord au geste suivant au lieu du redemarrage, et
-      # l'application env n'a plus de secret a publier si une porte de dump apparaissait un jour.
+      # ⚠ LA CONFIG PORTE LE COMPTE, JAMAIS LE JETON. Le jeton se demande au service d'autorite AU
+      # MOMENT DE POUSSER : la revocation mord au geste suivant, et l'application env ne porte aucun
+      # secret qu'une porte de dump pourrait publier.
       %{url_prefix: prefix, account: account}
       when is_binary(prefix) and is_binary(account) and prefix != "" and account != "" ->
         if safe_prefix?(prefix) do
@@ -103,10 +102,8 @@ defmodule Fleet.Credentials.ForgeAuth do
       _other ->
         # PRESENT but malformed (empty/missing url_prefix or ACCOUNT, wrong shape): typed error, not a
         # silent UNAUTHENTICATED op that masks the broken credential as a later 403/404 (MINE-CRED-01).
-        #
-        # ⚠ « account » ET PLUS « token » : la config ne porte plus de secret. Laisser le mot d'avant
-        # enverrait chercher un jeton dans une config qui n'en contient aucun — un message d'erreur
-        # qui decrit le mecanisme retire est un faux diagnostic, pas une coquille.
+        # The message names `account`, never `token`: the config carries no secret, and a message
+        # that sends the reader to look for one is a false diagnosis.
         Logger.error(
           "ForgeAuth: :forge_auth is PRESENT but malformed (empty/missing url_prefix or account) — REFUSED " <>
             "(auth-required git ops fail loud). Fix the forge config."
