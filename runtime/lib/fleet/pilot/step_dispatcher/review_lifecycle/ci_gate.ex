@@ -357,10 +357,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   @doc """
   La CI attend-elle depuis trop longtemps sur la tête de `pr_number` ?
 
-  `Remediation.reconverge_on_ci/3` lit l'état CI APRÈS un merge refusé, et son `:pending` n'avait
-  aucune borne : un job qu'aucun runner ne réclame y boucle en silence, tick après tick, sans
-  jamais rougir. Ce gate-ci porte déjà la doctrine et le nombre — les exposer évite un second
-  cadran qui dériverait du premier.
+  `Remediation.reconverge_on_ci/3` lit l'état CI APRÈS un merge refusé ; sans borne sur son
+  `:pending`, un job qu'aucun runner ne réclame y boucle en silence, tick après tick, sans jamais
+  rougir. Ce gate-ci porte déjà la doctrine et le nombre — les exposer évite un second cadran qui
+  dériverait du premier.
 
   Même horloge : `updated_at` de la PR, qui bouge à chaque push, donc per-sha et sans état à
   retenir. `:unknown` quand la date est illisible — on attend plutôt que d'escalader sur ce qu'on

@@ -55,8 +55,8 @@ tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 #
 # UN SEUL REPERTOIRE, et le second n'est pas parti par simplification. `catalogues_shipped_dir/0`
 # porte les GRAINES de l'image — deposees sur la forge a chaque apply, installees par personne. L'y
-# lister faisait de `web-demo` un catalogue installe du seul fait que l'image le transportait, ce
-# qui contredit exactement ce qu'il existe pour demontrer.
+# lister ferait de `web-demo` un catalogue installe du seul fait que l'image le transporte, ce qui
+# contredit exactement ce qu'il existe pour demontrer.
 #
 # Pas de variable d'env : ce qui tourne est ce que la forge porte, et un chemin de cache ne se
 # choisit pas. Repertoire absent ou vide = le catalogue metier livre dans le release, seul.
@@ -116,52 +116,49 @@ if forge_opts != [] do
   config :lcars_fleet, :pilot_forge, forge_opts
 end
 
-# ⚠ HORS DU GARDE `tool_mode?`, ET POUR LA MEME RAISON QUE LE BLOC CI-DESSUS. Il vivait dedans, donc
+# ⚠ HORS DU GARDE `tool_mode?`, ET POUR LA MEME RAISON QUE LE BLOC CI-DESSUS. Dedans,
 # `LCARS_TOOL_EVAL=1` le sauterait — et toute porte `eval` qui POUSSE se retrouverait sans
-# credential : « fatal: could not read Username for 'http://…': terminal prompts disabled ». Mesure,
-# en creant un projet depuis une porte outil sur un banc entierement cable.
+# credential : « fatal: could not read Username for 'http://…': terminal prompts disabled » (mesure,
+# en creant un projet depuis une porte outil sur un banc entierement cable).
 #
-# Le defaut ne se voyait pas depuis `eval_reconcile`, qui l'a pourtant sous la main : sur un projet
-# dont les branches d'ecriture existent DEJA, `ensure_face` CLONE et ne pousse jamais. Il fallait un
+# Le defaut ne se voit pas depuis `eval_reconcile`, qui l'a pourtant sous la main : sur un projet
+# dont les branches d'ecriture existent DEJA, `ensure_face` CLONE et ne pousse jamais. Il faut un
 # projet neuf pour qu'un push ait lieu. Un chemin qu'aucun appelant ne prend n'est pas couvert.
 #
 # Ce bloc respecte le critere que ce fichier s'est donne ligne 49 : il n'ouvre aucun port et ne
 # demarre rien. Il dit seulement avec quoi git s'authentifie — un fait de lecture, dont toute porte
 # qui ecrit sur la forge a besoin.
 # Runtime push auth (`Fleet.Credentials.ForgeAuth.git_env` → extraheader via env, token
-# OUTSIDE argv AND OUTSIDE .git/config). System token (system_starfleet, write:repository).
-# FORGE_PUSH_TOKEN takes precedence over FORGE_TOKEN (the push requires write:repository, ≠ the read poller token).
+# OUTSIDE argv AND OUTSIDE .git/config). System account (system_starfleet, write:repository).
 #
-# ⚠ LE JETON NE VIT PLUS DANS L'APPLICATION ENV, ET CE N'EST PAS UN DEPLACEMENT — C'EST UN RETRAIT.
+# ⚠ LE JETON NE VIT PAS DANS L'APPLICATION ENV : ce qui est pose ici est un NOM DE COMPTE, pas un
+# secret. `ForgeAuth` demande le jeton au service d'autorite au moment de s'en servir — donc la
+# revocation mord au geste suivant, et il n'y a rien a voler dans l'application env.
 #
-# Il y vivait EN CLAIR POUR TOUTE LA VIE DU NOEUD, lu au BOOT depuis un fichier. Deux consequences
-# que ce bloc portait, et qui disparaissent avec lui :
+# Un jeton lu au BOOT depuis un fichier et garde EN CLAIR POUR TOUTE LA VIE DU NOEUD aurait deux
+# consequences :
 #
-#   1. UNE PANNE MUETTE. Sur echec de lecture, une branche `_ -> nil` ne pose JAMAIS
-#      `:credentials_forge_auth`, donc `git_env` rend des credentials vides. Le noeud demarre VERT
-#      et TOUS les push meurent au premier essai sur une auth vide —
-#      onboarding, completion de step, merge. Un boot vert et un produit mort.
-#   2. UNE PEREMPTION INFINIE. Un jeton revoque sur la forge restait en memoire jusqu'au
-#      redemarrage du noeud ; rien dans la boite ne l'apprenait.
+#   1. UNE PANNE MUETTE. Sur echec de lecture, une branche `_ -> nil` ne poserait JAMAIS
+#      `:credentials_forge_auth`, donc `git_env` rendrait des credentials vides. Le noeud demarre
+#      VERT et TOUS les push meurent au premier essai sur une auth vide — onboarding, completion de
+#      step, merge. Un boot vert et un produit mort.
+#   2. UNE PEREMPTION INFINIE. Un jeton revoque sur la forge resterait en memoire jusqu'au
+#      redemarrage du noeud ; rien dans la boite ne l'apprendrait.
 #
-# Ce qui est pose ici est un NOM DE COMPTE, pas un secret. `ForgeAuth` demande le jeton au service
-# d'autorite au moment de s'en servir — donc la revocation mord au geste suivant, et il n'y a rien a
-# voler dans l'application env.
-#
-# LA PROPRIETE DE SURFACE QUI RENDAIT L'ANCIEN ETAT ACCEPTABLE N'A PLUS D'OBJET ICI, mais elle reste
-# vraie et vaut d'etre sue : rien dans le runtime ne lit l'application env EN BLOC, et la surface MCP
+# LA PROPRIETE DE SURFACE QUI RENDRAIT UN SECRET EN ENV TOLERABLE N'A PAS D'OBJET ICI, mais elle
+# reste vraie et vaut d'etre sue : rien dans le runtime ne lit l'application env EN BLOC, et la surface MCP
 # des pods est une liste fermee de verbes metier. Une porte qui viderait la config (`/api/config`,
 # un doctor qui imprime l'env, un rapporteur de crash qui l'inspecte) publierait ce qui s'y trouve —
 # et elle ne ressemblera pas a un changement de credentials le jour ou quelqu'un l'ecrira.
 forge_base = System.get_env("FORGE_BASE_URL")
 
-# ⚠ IL Y AVAIT ICI UNE LECTURE DE FICHIER AU BOOT, ET SON REPLI ETAIT LE DEFAUT. Le jeton se
-# cherchait dans `FORGE_PUSH_TOKEN`, puis `FORGE_TOKEN`, puis `FORGE_TOKEN_FILE`, puis
-# `~/.gitea_token` — quatre sources, et la derniere resolvait sous le HOME de qui lance. Le repli
-# existait parce qu'un deploiement qui ne posait que le fichier poussait sans auth.
+# ⚠ AUCUNE LECTURE DE FICHIER DE JETON AU BOOT, ET AUCUNE VARIABLE DE JETON. Une chaine de sources
+# (`FORGE_PUSH_TOKEN`, puis `FORGE_TOKEN`, puis `FORGE_TOKEN_FILE`, puis `~/.gitea_token`) fait
+# resoudre la derniere sous le HOME de qui lance, et son repli existe pour qu'un deploiement qui ne
+# pose que le fichier pousse quand meme — un jeton par defaut.
 #
-# Plus rien a lire : on pose un NOM DE COMPTE, et le jeton se demande au moment de pousser. Les
-# quatre sources deviennent une seule question, et le repli qui les rattrapait n'a plus d'objet.
+# Rien a lire : on pose un NOM DE COMPTE, et le jeton se demande au moment de pousser. Quatre
+# sources deviennent une seule question, et aucun repli ne les rattrape.
 
 # `config_env() != :test` COMME LES DEUX BLOCS AU-DESSUS : la regle de ce fichier est que toute
 # config runtime reste hors de `:test`, et sortir du garde `tool_mode?` ne dispense pas de celui-la.
@@ -495,10 +492,10 @@ if config_env() != :test and not tool_mode? do
   # `bin/fleet_v2`) est faux — le Poller sonde l'ORG, partagee, et ne
   # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE : un port
   # par humain demanderait a la forge de notifier N adresses du meme evenement. Le lanceur ne pose
-  # plus ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
+  # pas ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
   #
-  # Mesure du meme jour : aucun code de ce depot ne DECLARE de webhook sur la forge (`POST /hooks`
-  # absent), et une forge de banc n'en portait aucun. Ce rail n'a jamais ete branche des deux bouts.
+  # Mesure : aucun code de ce depot ne DECLARE de webhook sur la forge (`POST /hooks` absent), et
+  # une forge de banc n'en porte aucun. Ce rail n'est branche d'aucun bout.
   #
   # SI IL REVIENT UN JOUR, pour une raison qui n'est PAS la latence : une seule URL, un port de
   # boite, hors des blocs. Pas `base+3`.
@@ -725,10 +722,10 @@ if config_env() != :test and not tool_mode? do
   # Listener started in prod/dev (the hermetic `start_listener: false` of
   # test.exs is not reached here: runtime.exs is guarded out of :test).
   #
-  # ⚠ `LCARS_OBSERVATION_PORT` EST RETIREE, PAS RENDUE OPTIONNELLE (6-072/6-098). Un bloc qui LEVE
-  # quand elle manque est une exigence dure pour une valeur que plus rien ne bind : le deck ecoute
-  # sur `/run/lcars/console/<humain>/deck.sock`. Une variable obligatoire dont la valeur ne sert a
-  # rien est le pire des deux mondes : elle bloque un demarrage ET elle ne configure rien.
+  # ⚠ AUCUNE VARIABLE DE PORT, MEME OPTIONNELLE (6-072/6-098) : le deck ecoute sur
+  # `/run/lcars/console/<humain>/deck.sock`, rien ne bind un port. Une variable obligatoire dont la
+  # valeur ne sert a rien serait le pire des deux mondes : elle bloque un demarrage ET elle ne
+  # configure rien.
   #
   # Le chemin de la socket ne se declare pas ici : il se DERIVE de l'humain qui lance le BEAM
   # (`Fleet.Observation.Application.deck_socket/0`). Une molette ici permettrait de poser la socket

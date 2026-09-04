@@ -216,8 +216,8 @@ defmodule Fleet.Forge.Client.Actions do
   end
 
   # ⚠ LE DECLENCHEUR NE SUFFIT PAS A NOMMER UNE SONDE. `event: workflow_dispatch` couvre AUSSI le
-  # geste d'un operateur qui relance un workflow quelconque depuis l'UI Gitea sur la meme tete : ce
-  # run faisait disparaitre l'annotation « aucune sonde n'a tourne », alors que personne n'avait
+  # geste d'un operateur qui relance un workflow quelconque depuis l'UI Gitea sur la meme tete : un
+  # tel run ferait disparaitre l'annotation « aucune sonde n'a tourne », alors que personne n'a
   # mesure.
   #
   # Le nom du fichier est ce qui distingue — meme prefixe que la garde de nommage du template, et

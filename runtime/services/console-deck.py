@@ -85,8 +85,8 @@ DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
 # en ligne ni une copie a resynchroniser.
 #
 # ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON : il largue ses privileges vers son
-# compte de service, qui ne peut ni traverser ni ouvrir le prefixe RO. Chaque `open()` levait, et
-# `/doc/` rendait 404 sur des fichiers parfaitement presents.
+# compte de service, qui ne peut ni traverser ni ouvrir le prefixe RO. Sous le prefixe, chaque
+# `open()` leverait et `/doc/` rendrait 404 sur des fichiers parfaitement presents.
 DECK_DOC = os.environ.get("LCARS_DECK_DOC", "/opt/lcars/share/doc")
 # ⚠ L'onglet du navigateur prend l'icone du document du HAUT, jamais celle de l'iframe : sans cette
 # declaration, onglet muet meme quand la doc, elle, en a un.
@@ -743,9 +743,7 @@ PAGE = r"""<!doctype html>
     .tab { padding:6px 10px; font-size:12px }
     .tab .meta { display:none }
   }
-  /* LA SCENE : position:relative + panneaux en inset:0 absolu. Le motif d'origine etait un piege
-     d'iframe (hauteur ambigue en flex, repli sur 150px) ; les iframes sont partis avec la seconde
-     origine, la forme reste, et pour une raison qui la remplace exactement : xterm.js MESURE son
+  /* LA SCENE : position:relative + panneaux en inset:0 absolu, parce que xterm.js MESURE son
      conteneur pour calculer colonnes et lignes. Un panneau sans taille propre lui ferait proposer
      une geometrie fausse, que le shell croirait. En absolu dans une scene qui a une taille, la
      question ne se pose ni pour l'un ni pour l'autre. */
@@ -764,16 +762,14 @@ PAGE = r"""<!doctype html>
   <div id="rail"></div>
 </nav>
 <main>
-  <!-- « ouvrir dans une fenetre » A ETE RETIRE, pas cache : il n'y a plus d'URL a ouvrir. Chaque
-       cible vivait sur son propre port, donc chaque onglet avait une adresse — c'est exactement ce
-       que ce lot a supprime. Un lien qui pointerait encore quelque part serait la seconde origine
-       qu'on vient de fermer. -->
+  <!-- PAS DE « ouvrir dans une fenetre » : il n'y a aucune URL a ouvrir. Une cible sur son propre
+       port donnerait une adresse a chaque onglet — la seconde origine que cette page refuse. -->
   <header><b id="crumb">STATUT</b><span id="hint"></span><span id="size"></span><span id="who">%(who)s</span><a href="/auth/logout">sortir</a></header>
   <div id="stage"><div id="panel"></div></div>
 </main>
 <script>
-// `HOST` A ETE RETIRE : plus une seule cible n'a d'adresse. Il servait a fabriquer
-// `http://<hote>:<port>` pour chaque onglet — la seconde origine, en une ligne.
+// PAS DE `HOST` : aucune cible n'a d'adresse. Un `http://<hote>:<port>` par onglet serait la
+// seconde origine, en une ligne.
 let current = null;
 
 // ⚠ `stage` ET `panel` SONT AU SCOPE DU MODULE, JAMAIS DANS `show()`. `termPane()`, defini au meme
@@ -795,11 +791,8 @@ function show(tab) {
   document.getElementById('crumb').textContent = tab.crumb;
   document.getElementById('hint').textContent = tab.hint || '';
 
-  // UN PANNEAU PAR ONGLET, CREE UNE FOIS ET JAMAIS RECONSTRUIT. La raison a change de nature mais
-  // pas de forme : au temps des iframes, reecrire un `src` DECHARGEAIT la page et ttyd posait un
-  // `beforeunload` — changer d'onglet faisait surgir un « voulez-vous quitter ? », et le terminal se
-  // reconnectait en perdant son ecran. Aujourd'hui le terminal est un objet de CETTE page : le
-  // recreer fermerait sa socket et rouvrirait une session. Montrer/cacher ne detruit rien.
+  // UN PANNEAU PAR ONGLET, CREE UNE FOIS ET JAMAIS RECONSTRUIT : le terminal est un objet de CETTE
+  // page, le recreer fermerait sa socket et rouvrirait une session. Montrer/cacher ne detruit rien.
   // On ne masque JAMAIS le panneau qu'on s'apprete a montrer. `hidden` vaut `display:none` : un
   // aller-retour, meme d'un seul tick, RETIRE le contenu de la chaine de focus et le demasquage ne
   // le rend pas. Or `build()` rejoue `show()` sur CHAQUE changement de signature (une transition de
@@ -820,10 +813,8 @@ function show(tab) {
     t.fit.fit();
     t.term.focus();
   } else if (tab.frame) {
-    // ⚠ UN CADRE, ICI, ET C'EST COMPATIBLE AVEC CE QUI L'A RETIRE AILLEURS. Ce qu'on a fermé plus
-    // haut n'est pas l'iframe : c'est la SECONDE ORIGINE qu'elle recousait (un ttyd sur son propre
-    // port). `/doc/` est une route de CE serveur, derriere CETTE session — il n'y a rien a
-    // recoudre. Et le contenu est un document, pas un terminal : il n'a ni socket a perdre ni
+    // ⚠ UN CADRE, ICI, ET CE N'EST PAS UNE SECONDE ORIGINE : `/doc/` est une route de CE serveur,
+    // derriere CETTE session — rien a recoudre, contrairement a un ttyd sur son propre port. Et le contenu est un document, pas un terminal : il n'a ni socket a perdre ni
     // geometrie a ajuster.
     //
     // Cree UNE fois, comme les terminaux : recharger l'iframe a chaque clic reperdrait la page ou
@@ -1183,9 +1174,9 @@ function build(s) {
     // sans projet est fleet-level, il a son propre groupe au lieu d'etre range de force.
     //
     // FLEET EN TETE, ET SANS LE MOT « PROJET ». Le groupe fleet-level est FIXE — il existe a
-    // chaque boot, avant tout projet, et il n'en est pas un. Le trier alphabetiquement le faisait
-    // apparaitre au milieu des projets, a une place qui changeait avec eux ; l'appeler « projet
-    // fleet » le rangeait dans une categorie a laquelle il n'appartient pas.
+    // chaque boot, avant tout projet, et il n'en est pas un. Le trier alphabetiquement le ferait
+    // apparaitre au milieu des projets, a une place qui changerait avec eux ; l'appeler « projet
+    // fleet » le rangerait dans une categorie a laquelle il n'appartient pas.
     const FLEET = 'Fleet';
     const byProject = {};
     for (const p of h.pods) (byProject[p.project || FLEET] ||= []).push(p);
@@ -1199,9 +1190,8 @@ function build(s) {
             { key: 'pod-' + p.pod_id, crumb: p.role.toUpperCase() + ' — ' + proj,
               hint: p.pod_id,
               // `?arg=` reste : c'est `--url-arg` de ttyd, et `console-pod.sh` le valide encore
-              // (forme, unicite, socket existante). Ce qui a change, c'est qu'il ne suffit plus.
-              // La socket atteinte est celle de CET humain — l'appelant est etabli AVANT que
-              // l'argument n'arrive, ce qui est exactement ce qui manquait a 6-098.
+              // (forme, unicite, socket existante), et il ne suffit pas : la socket atteinte est
+              // celle de CET humain — l'appelant est etabli AVANT que l'argument n'arrive (6-098).
               term: `/pod/${encodeURIComponent(h.human)}/ws?arg=${encodeURIComponent(p.pod_id)}` });
         first = false;
       }

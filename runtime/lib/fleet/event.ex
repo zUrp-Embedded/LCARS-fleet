@@ -18,10 +18,6 @@ defmodule Fleet.Event do
           | :project
           | :admiral
           | :event_router
-          | :credentials
-          | :capprofile
-          | :spbuilder
-          | :doctrine
           | :api
 
   @type t :: %__MODULE__{
@@ -36,7 +32,10 @@ defmodule Fleet.Event do
   @enforce_keys [:source, :type, :timestamp]
   defstruct [:source, :type, :timestamp, :pod_id, :correlation_id, payload: %{}]
 
-  @canonical_sources ~w(spawner task_queue mcp workflow pilot project admiral event_router credentials capprofile spbuilder doctrine api)a
+  # Every source here has at least one emitter under `lib/` (a `Fleet.Event.new(:<source>, …)` or a
+  # routed source in `events.yaml`). A source no producer emits is a ghost in the closed enum —
+  # removed when its last emitter goes, never kept "in case".
+  @canonical_sources ~w(spawner task_queue mcp workflow pilot project admiral event_router api)a
 
   @doc "True if the source belongs to the canonical closed enum."
   @spec valid_source?(atom()) :: boolean()

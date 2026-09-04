@@ -203,7 +203,7 @@ defmodule Fleet.Workflow.Deliverable do
 
   # The completer creates the target branch before publication.
   # Le refspec du livrable se construit ICI et pas plus haut : sans push, il n'y a pas de
-  # `target_branch` a lire (mode local, cf. `check_push_keys`) — le calculer d'avance faisait lever
+  # `target_branch` a lire (mode local, cf. `check_push_keys`) — le calculer d'avance ferait lever
   # une `KeyError` sur un chemin qui ne pousse rien. Les refs d'attestation, elles, sont deja
   # ecrites localement : elles accompagnent le push quand il y en a un.
   defp push_deliverable(opts, extra_refspecs) do

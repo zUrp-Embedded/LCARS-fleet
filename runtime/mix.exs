@@ -140,8 +140,8 @@ defmodule LcarsFleet.MixProject do
   # prouve pas.
   #
   # `mix credo` rend exit 30. La MESURE se relance (`mix credo --format oneline | cut -d\' \' -f2`),
-  # elle ne se recopie pas ici : un compte grave dans un commentaire est faux au commit suivant, et
-  # celui qui etait ecrit a cette place l'etait de 53 signalements.
+  # elle ne se recopie pas ici : un compte grave dans un commentaire est faux au commit suivant
+  # (mesure : un ecart de 53 signalements sur un compte ecrit ici).
   #
   # CE QUE CREDO TIENT, PAR CLASSE — ca, ca ne derive pas : des pistes de REFACTORING (imbrication,
   # complexite cyclomatique, arite), des points de LISIBILITE (ordre des alias, modules imbriques

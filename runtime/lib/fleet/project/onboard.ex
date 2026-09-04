@@ -217,9 +217,10 @@ defmodule Fleet.Project.Onboard do
   # ─── L'ADMISSION, UNE FOIS, POUR LES CINQ VERBES QUI FONT ENTRER UN PROJET ─────────────────────
   #
   # ⚠ DES RAILS PARALLELES NE DIVERGENT PAS D'UN COUP, ILS DIVERGENT D'UNE LIGNE — et la ligne
-  # manquante ne ressemble a rien. Les cinq preambules posaient les memes questions chacun a sa
-  # facon, et UN SEUL ne verifiait pas que la carte est declarable : un depot importe avec une carte
-  # d'atelier ou une faute de frappe y passait, la ou les quatre autres refusaient.
+  # manquante ne ressemble a rien. Cinq preambules qui posent les memes questions chacun a sa facon
+  # finissent avec UN SEUL qui ne verifie pas que la carte est declarable : un depot importe avec
+  # une carte d'atelier ou une faute de frappe y passe, la ou les quatre autres refusent. D'ou un
+  # preambule partage.
   #
   # L'ORG N'EST PAS DANS LE FILTRE, seule chose qui differe legitimement : certains verbes la
   # RECOIVENT declaree — creer une chose neuve n'a pas de source d'ou la tirer — et d'autres la
@@ -425,9 +426,9 @@ defmodule Fleet.Project.Onboard do
   # 6-079 — LA CHARTE EST UNE VALEUR, PLUS UN LITTERAL RECOPIE. Toute la non-collision de l'espace
   # projet sur disque repose sur elle : `Fleet.Layout.project_slug/1` n'est pas injective, et ce qui
   # rend la collision inatteignable est que cette charte est STRICTEMENT INCLUSE dans ce que le slug
-  # preserve. `Fleet.LayoutTest` epinglait cette inclusion — contre SA PROPRE COPIE du motif, donc
-  # sans rien tenir : elargir la charte ici ne le faisait pas rougir, alors que son commentaire
-  # l'affirmait. Une source, lue des deux cotes.
+  # preserve. Un temoin qui epinglerait cette inclusion contre SA PROPRE COPIE du motif ne tiendrait
+  # rien : elargir la charte ici ne le ferait pas rougir. Une source, lue des deux cotes —
+  # `Fleet.LayoutTest` lit celle-ci.
   @name_re ~r/^[a-z0-9][a-z0-9-]*[a-z0-9]$/
 
   @doc false

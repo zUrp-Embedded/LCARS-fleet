@@ -248,7 +248,7 @@ defmodule Fleet.Credentials.Shell do
   @run_opts [:timeout_ms, :max_output_bytes, :env, :cd]
 
   # Parse-don't-validate at the boundary: `run/3` promises `result()` for ANY caller, so bad opts become a
-  # typed `{:error, {:bad_opt, _}}`, never a raise (a non-integer `timeout_ms` used to blow up on the
+  # typed `{:error, {:bad_opt, _}}`, never a raise (a non-integer `timeout_ms` would blow up on the
   # deadline `+`, a malformed `env`/`cd` in the charlist conversion). Prod callers (`git/2`) always pass
   # valid opts; this guards a direct/buggy caller so the contract holds.
   #

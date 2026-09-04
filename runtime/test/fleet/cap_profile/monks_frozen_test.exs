@@ -4,7 +4,7 @@ defmodule Fleet.CapProfile.MonksFrozenTest do
 
   # FROZEN (BL — Memory-X frozen): tests that `list/load` scan `cap-profiles/monks/`,
   # now ARCHIVED (`priv/catalogue/cap_profile/canon/_frozen-monks/`, out of the boot loop). Re-enable when Memory-X
-  # is re-homed (per-project + system-wide under lcars). cf. work/backlog.md.
+  # is re-homed (per-project + system-wide under lcars).
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at per-project re-home"
 

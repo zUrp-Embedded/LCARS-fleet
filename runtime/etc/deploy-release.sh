@@ -234,12 +234,11 @@ done < "$MANIFEST"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 # ⚠ `mix` N'EST EXIGE QUE POUR CONSTRUIRE, ET CE SCRIPT NE CONSTRUIT PAS TOUJOURS. `build_release()`
-# sait deja lire le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » —
-# mais ce garde s'executait AVANT, et refusait donc la seule livraison qui n'a rien a compiler.
-#
-# MESURE DU 2026-09-01, banc 2006 : `install: ERREUR — mix introuvable`, sur une machine dont le
-# paquet portait la release COMPLETE, prete a poser. Le script mourait dix lignes avant la fonction
-# qui aurait dit « rien a batir ».
+# lit le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » — et ce garde
+# le lit AUSSI : un garde inconditionnel refuserait la seule livraison qui n'a rien a compiler
+# (mesure du 2026-09-01, banc 2006 : `install: ERREUR — mix introuvable` sur une machine dont le
+# paquet portait la release COMPLETE, prete a poser — dix lignes avant la fonction qui aurait dit
+# « rien a batir »).
 #
 # ⚠ ET LE TAMPON EST LU ICI COMME AILLEURS, PAS DEDUIT. Ce script est autonome — il ne source pas la
 # lib du rail, c'est ecrit plus bas — donc il refait le meme test que `prov_delivery` au lieu de

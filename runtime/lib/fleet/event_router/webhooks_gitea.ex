@@ -168,7 +168,7 @@ defmodule Fleet.EventRouter.WebhooksGitea do
             conn |> send_resp(401, Jason.encode!(%{error: reason})) |> halt()
         end
 
-      # OVER THE CAP: refused with the SAME exception `Plug.Parsers` used to raise here, and for the
+      # OVER THE CAP: refused with the SAME exception `Plug.Parsers` raises for this case, and for the
       # same reason — an explicit bound beats a 401 computed on a truncated body, which would blame
       # the signature for a size problem. The check never runs on a partial read.
       {:more, _partial, _conn} ->

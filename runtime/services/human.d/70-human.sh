@@ -140,11 +140,10 @@ check() {
   [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $PROV_HUMAN introuvable"; verdict_check; }
 
   local d
-  # ⚠ `.lcars/log` EST DANS LA BOUCLE, et son absence y etait un angle mort DOUBLE. L'apply le cree
-  # par `mkdir -p` puis chmode `.lcars` et `pods` — pas lui : il naissait au umask (0755 mesure chez
-  # les deux humains de la machine), alors que la table affirme 0700. Et ce check ne le regardait pas
-  # non plus : le doctor serait donc reste aveugle APRES le correctif, sur un repertoire qui porte les
-  # journaux d'un humain.
+  # ⚠ `.lcars/log` EST DANS LA BOUCLE, sinon l'angle mort est DOUBLE : cree par `mkdir -p` sans chmod
+  # propre, il nait au umask (0755 mesure chez les deux humains de la machine) alors que la table
+  # affirme 0700 — et un check qui ne le regarderait pas laisserait le doctor aveugle sur un
+  # repertoire qui porte les journaux d'un humain.
   for d in "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods"; do
     if [[ -d "$d" && "$(stat -c '%a %U' "$d")" == "700 $PROV_HUMAN" ]]; then
       p_ok "$d (0700 $PROV_HUMAN)"

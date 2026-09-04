@@ -128,7 +128,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # Etats, et qui les dit :
   #   * fichier present, non vide  -> l'assignee projete ;
   #   * store present, fichier ABSENT ou VIDE -> nil + WARNING a chaque escalade (le provisioning
-  #     n'est pas passe, ou LCARS_ADMIRAL n'etait pas pose — panne dite, patron `egress.ex`) ;
+  #     n'est pas passe, ou LCARS_ADMIRAL n'est pas pose — panne dite, patron `egress.ex`) ;
   #     ⚠ VIDE = ABSENT, jamais `""` : un `assignees: [""]` partirait sur la forge, echouerait,
   #     et le retry de `create_system_issue/5` rattraperait en brulant un appel — panne invisible ;
   #   * store absent (pas de LCARS_STORE_ROOT) -> nil, silencieux : le nominal d'une boite sans
@@ -173,7 +173,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
     Logger.warning(
       "Escalation: magasin present mais la projection du siege est #{why} (#{path}) — issue " <>
         "ouverte SANS assignee. Le provisioning (45-sudoers-toolchain) la pose a chaque boot ; " <>
-        "si elle manque, LCARS_ADMIRAL n'etait pas pose ou le module n'a pas tourne."
+        "si elle manque, LCARS_ADMIRAL n'est pas pose ou le module n'a pas tourne."
     )
   end
 

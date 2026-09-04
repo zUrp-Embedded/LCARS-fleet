@@ -213,7 +213,7 @@ defmodule Fleet.Forge.Client.Transport do
   # `forge_client_pagination_test.exs` tiennent les deux gardes.
   #
   # PAS de deadline murale sur la boucle, et c'est un choix : elle transformerait une lecture LENTE
-  # mais correcte en echec, alors que le mal a corriger etait une lecture qui ne finissait pas.
+  # mais correcte en echec, alors que le mal a eviter est une lecture qui ne finit pas.
   @page_limit 50
   @max_pages 200
 
@@ -245,7 +245,7 @@ defmodule Fleet.Forge.Client.Transport do
   #
   # `X-Total-Count` est annonce sur les endpoints de liste, y compris sur celui dont `page` et
   # `limit` sont IGNORES (mesure 1.26.1 : 7 commentaires -> `X-Total-Count: 7`). Sans lui, le seul
-  # signal disponible etait `length(items) < @page_limit`, et cette heuristique ment de deux facons :
+  # signal disponible serait `length(items) < @page_limit`, et cette heuristique ment de deux facons :
   #
   #   * un endpoint qui ignore `page` rend TOUT a chaque tour — sous le plafond elle conclut juste
   #     par accident, au-dessus elle boucle jusqu'au budget sur des pages identiques ;

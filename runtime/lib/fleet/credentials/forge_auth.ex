@@ -151,9 +151,9 @@ defmodule Fleet.Credentials.ForgeAuth do
   pendant toute la duree de l'operation — et ressort dans les messages d'erreur de git, qui citent
   l'URL.
 
-  Extraite ici parce qu'elle avait DEUX utilisateurs et une seule implementation : la forge interne
+  Ici parce qu'elle a DEUX utilisateurs et une seule implementation : la forge interne
   (`git_env_result/0`, juste au-dessus) et l'import d'un depot externe prive
-  (`Fleet.Project.Onboard`), qui lui posait le token en userinfo. Un mecanisme de credential
+  (`Fleet.Project.Onboard`), qui lui pose le token en userinfo. Un mecanisme de credential
   duplique est un mecanisme dont une copie finit par diverger.
 
   `credential` est la valeur d'en-tete complete (`"token abc"`, `"Basic <b64>"`) : cette fonction ne

@@ -91,13 +91,13 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # wake was lost) owns nothing, on either side.
   @pulled_states [:assigned]
 
-  # CE QUE CETTE LISTE PORTE POUR LES AUTRES — et c'est une nature de couture sans precedent dans ce
-  # depot : le FOURNISSEUR ignorait qu'il portait une garantie. Trois modules lisent la propriete de
-  # verrou sur cette regle, aucun ne l'appelle : ils la CITENT en commentaire et raisonnent dessus.
-  # Changer `@pulled_states` sans les relire casse leur raisonnement en silence — aucun test ne les
-  # relie, aucun appel ne les traverse.
+  # CE QUE CETTE LISTE PORTE POUR LES AUTRES — et c'est une nature de couture sans equivalent dans
+  # ce depot : un FOURNISSEUR qui porte une garantie sans appel pour la lui rappeler. Trois modules
+  # lisent la propriete de verrou sur cette regle, aucun ne l'appelle : ils la CITENT en commentaire
+  # et raisonnent dessus. Changer `@pulled_states` sans les relire casse leur raisonnement en
+  # silence — aucun test ne les relie, aucun appel ne les traverse.
   #
-  # La declaration ci-dessous est ce qui manquait : le fournisseur nomme ses dependants, et le mur
+  # La declaration ci-dessous ferme ce trou : le fournisseur nomme ses dependants, et le mur
   # `reconciliation.pulled_states_declared` la garde vraie DANS LES DEUX SENS — un dependant qui
   # cesse de dependre sort de la liste, un nouveau qui apparait doit y entrer.
   @pulled_states_dependents [

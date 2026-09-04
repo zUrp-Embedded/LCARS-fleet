@@ -16,7 +16,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
   vanilla repo + its plugins.
 
   Clone is the ONLY bootstrap phase: the other pod-provisioning concerns live
-  elsewhere — the pod `CLAUDE.md` is composed by `do_project` (pod.ex side),
+  elsewhere — the pod `CLAUDE.md` is composed in the pod's `:projecting` state (pod.ex side),
   mounts/credentials by `bwrap_launch.sh`.
   """
 

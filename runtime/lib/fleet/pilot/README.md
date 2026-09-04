@@ -20,12 +20,12 @@ restated, only pointed at.
 **Reactor & dispatch**
 - `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / per-repo admission ceiling (`max_fan`, ENGAGED/QUEUED) / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
 - `Fleet.Pilot.PollerTelemetry` — the poller's telemetry, attached (BL-6-40).
-- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
+- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .Ctx, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `Ctx` = the review context struct built once in `dispatch_review/2`; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
 - `Fleet.Pilot.BriefBuilder` — the authority on brief FORMAT (worker / judge / rework / conflict).
 - `Fleet.Pilot.PodReaper` — reaps the pods bound to a DEAD ticket (the `:mcp_pod_reaper` seam MCP injects).
 
 **Step-run completion**
-- `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, StepRunBuild, VerdictCorrection}` (`VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
+- `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, TerminalEscalation.Seams, StepRunBuild, VerdictCorrection}` (`Seams` = the completer and notification dependencies an escalation carries; `VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
 - `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
 - `Fleet.Pilot.CompletionOutbox` — durable journal of the step_run completions still owed to the forge (6-127).
 - `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/6`), shared by both merge points.

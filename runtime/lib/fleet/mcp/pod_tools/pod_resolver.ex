@@ -37,8 +37,8 @@ defmodule Fleet.MCP.PodTools.PodResolver do
   @doc """
   Le contrat que doit tenir toute implantation injectee.
 
-  Declare, la ou il n'y avait qu'une fonction nue : un test pouvait injecter n'importe quoi, et
-  seule la forme du `case` cote appelant disait ce qui etait attendu.
+  Declare : sans behaviour, un test peut injecter n'importe quoi, et seule la forme du `case` cote
+  appelant dit ce qui est attendu.
   """
   @callback resolve(pod_id :: String.t()) :: {:ok, identity()} | {:error, term()}
 

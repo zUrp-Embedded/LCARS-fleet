@@ -46,17 +46,17 @@ CHECK_ONLY=0
 # Mapping compte→fichier (DONNÉE, pas cas spécial) : les rôles portent leur avatar de charte, et
 # le compte système porte celui de STARFLEET — parce que c'est sa main : `starfleet` est le seul
 # rôle canon (avec `admiral`) à porter `forge_identity: false`, et le catalogue dit pourquoi —
-# toutes ses écritures passent par le compte système. Il portait le favicon du produit, faute
-# d'un porteur nommé ; il a le sien depuis que ce compte s'appelle `system_starfleet`.
+# toutes ses écritures passent par le compte système, qui porte donc l'insigne de starfleet — pas
+# le favicon du produit, qui est celui de l'org.
 # L'org `fleet` porte AUSSI le favicon (posée à part, endpoint distinct). L'humain n'est PAS listé : il
 # pose son propre avatar (compte daily), on ne le décide pas pour lui.
 #
 # ⚠ CETTE LISTE N'EST PAS UN ROSTER, et ne doit pas le devenir. Elle porte un mapping compte→IMAGE :
 # chaque entrée existe parce qu'un PNG de charte existe pour elle. La dériver du catalogue produirait
 # une boucle qui échoue sur chaque rôle tiers — un rôle qu'on n'a pas dessiné n'a pas d'avatar, et
-# c'est normal. C'est l'inverse qui devait bouger : un compte de CETTE liste absent de la forge visée
-# n'est plus un échec (mesuré sur le catalogue web — six 404 d'affilée, un provisionnement correct
-# rendu rouge par des comptes qui n'avaient aucune raison d'exister).
+# c'est normal. Et un compte de CETTE liste absent de la forge visée n'est PAS un échec (mesuré sur le
+# catalogue web — six 404 d'affilée sur un provisionnement correct, pour des comptes qui n'ont aucune
+# raison d'y exister).
 #
 # DEUX PAIRES, ET ELLES SE LISENT DANS LES COULEURS. Une paire partage sa couleur et RIEN d'autre :
 # le glyphe reste propre a chaque role, parce que c'est lui qui dit la fonction.
@@ -77,12 +77,12 @@ declare -a ENTRIES=(
   "fleet_vulcan:vulcan.png"
   # Cote COMPTE : le LOGIN (`<catalogue>_<role>`). Cote IMAGE : le ROLE — une charte pointe des
   # FICHIERS, et un PNG ne se derive pas d'un nom. C'est pourquoi cette table reste tenue a la main
-  # la ou les trois autres listes de roles sont desormais derivees du catalogue.
+  # la ou les trois autres listes de roles sont derivees du catalogue.
   "system_starfleet:starfleet.png"
 )
-# ⚠ `starfleet.png` EST DANS CETTE TABLE DEPUIS QUE SON PORTEUR A UN NOM. Le role `starfleet` n'a
-# toujours PAS de compte a lui (`forge_identity: false` au canon) — mais le compte SYSTEME est sa
-# main, le catalogue l'ecrit, et il s'appelle desormais `system_starfleet`. L'insigne (l'escadre,
+# ⚠ `starfleet.png` EST DANS CETTE TABLE SOUS LE COMPTE SYSTEME. Le role `starfleet` n'a PAS de
+# compte a lui (`forge_identity: false` au canon) — mais le compte SYSTEME est sa main, le catalogue
+# l'ecrit, et il s'appelle `system_starfleet`. L'insigne (l'escadre,
 # trois deltas) va donc sur le compte qui pose ses gestes. Un dessin appartient au ROLE, une entree
 # de cette table a un COMPTE : ici les deux se rejoignent, ailleurs non.
 # (Le delta simple, l'ancien insigne de starfleet, est devenu `admiral.png` : le siege garde le
@@ -140,13 +140,14 @@ command -v jq   >/dev/null || { echo "provision-forge-charte: jq requis" >&2; ex
 command -v base64 >/dev/null || { echo "provision-forge-charte: base64 requis" >&2; exit 1; }
 [[ -n "$FORGE" ]] || { echo "provision-forge-charte: --forge URL (ou FORGE_BASE_URL) requis" >&2; exit 1; }
 FORGE="${FORGE%/}"
-# ⚠ LE DEFAUT EST LE CHEMIN INSTALLE, PLUS UN VOISIN DU SCRIPT. Ce script portait son propre jeu de
-# png dans `deps/avatars/` — un TROISIEME exemplaire des memes avatars, a cote de la marque
-# (`assets/avatars/`) et du deck d'observation. Mesure du 2026-08-20 : sept des neuf roles communs
-# avaient DERIVE entre ces copies, parce qu'une mise a jour touchait un dossier et pas les autres.
+# ⚠ LE DEFAUT EST LE CHEMIN INSTALLE, PAS UN VOISIN DU SCRIPT. Un jeu de png propre au script
+# (`deps/avatars/`) serait un TROISIEME exemplaire des memes avatars, a cote de la marque
+# (`assets/avatars/`) et du deck d'observation — et des copies derivent (mesure du 2026-08-20 : sept
+# des neuf roles communs divergeaient entre trois copies, une mise a jour touchant un dossier et pas
+# les autres).
 #
-# `assets/` est desormais la source, et l'installation la pose en `/opt/lcars/share/avatars` a cote
-# de la doc. Ce script lit donc ce que la boite a INSTALLE, pas ce qui traine a cote de lui.
+# `assets/` est la source, et l'installation la pose en `/opt/lcars/share/avatars` a cote de la doc.
+# Ce script lit donc ce que la boite a INSTALLE, pas ce qui traine a cote de lui.
 : "${LCARS_MEDIA_ROOT:=/opt/lcars/share}"
 [[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$LCARS_MEDIA_ROOT/avatars"
 # AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
@@ -363,7 +364,7 @@ note=""
 #
 # La table N'EST PAS un roster et ne doit pas le devenir (voir son propre commentaire, plus haut :
 # la deriver echouerait sur chaque role tiers qu'on n'a pas dessine). Ce qui se corrige n'est donc
-# pas la table, c'est la PORTEE de la phrase : elle dit desormais SUR QUOI elle porte, et combien.
+# pas la table, c'est la PORTEE de la phrase : elle dit SUR QUOI elle porte, et combien.
 # Un compte sans entree de charte reste invisible d'ici — mais plus personne ne lit « tous ».
 couvert="${#ENTRIES[@]}"
 

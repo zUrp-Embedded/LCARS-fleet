@@ -156,7 +156,7 @@ defmodule Fleet.Project.Onboard.Faces do
   Les contextes de statut EXIGÉS sur `main` d'un projet — l'autorité, et la seule.
 
   Extrait de la règle ci-dessous parce qu'un SECOND lecteur la lit : le template
-  livre désormais des workflows de SONDE (`probe-*`), dont toute la protection tient à ce que leur
+  livre des workflows de SONDE (`probe-*`), dont toute la protection tient à ce que leur
   contexte ne matche PAS ce glob. Une sonde renommée `CI-…` deviendrait un statut requis et son
   rouge bloquerait le merge — on aurait retiré le CI de la boucle en croyant l'augmenter.
 

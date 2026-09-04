@@ -5,7 +5,7 @@ defmodule Fleet.Project.Onboard.Repo do
 
   Tout est `@doc false` : c'est le vocabulaire forge de la famille onboarding, public seulement
   parce que les gestes vivent dans des modules voisins. La seule exception est
-  `classify_create_repo/3`, qui etait deja publique et testee directement — une decision PURE sur
+  `classify_create_repo/3`, publique et testee directement — une decision PURE sur
   le resultat d'une creation, sans forge en face.
 
   Les trois modules de seam (`repo_mod/1`, `files_mod/1`, et le seeder de labels) se lisent des
@@ -106,8 +106,8 @@ defmodule Fleet.Project.Onboard.Repo do
   #
   # ⚠ `org_exists?/2` ET PAS UNE SONDE SUR LES COMPTES : dans Gitea une org est une ligne de la MEME
   # table `user`, donc un compte PERSONNEL nomme comme le catalogue fait repondre 200 a
-  # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test rendait
-  # `true` et le seul message qui nomme le geste manquant retombait en erreur brute.
+  # `/users/<nom>` sans qu'aucune org ne porte ses projets. Demande sur les comptes, le test rendrait
+  # `true` et le seul message qui nomme le geste manquant retomberait en erreur brute.
   @doc false
   @spec ensure_catalogue_org_on_forge(String.t(), keyword()) :: :ok | {:error, term()}
   def ensure_catalogue_org_on_forge(org, opts) do
