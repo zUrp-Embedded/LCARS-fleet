@@ -33,7 +33,10 @@ set -euo pipefail
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
 
-readonly OPS_BRANCH="tool_request"
+# Nue, pas `readonly` : les temoins sourcent la tete d'un module pour epingler une fonction, et un
+# second `source` dans le meme shell mourrait en « readonly variable ». Le gel du nom est tenu par
+# le contrat `toolchain.branch_single_source` et par ops-branch.bats, pas par l'attribut.
+OPS_BRANCH="tool_request"
 : "${LCARS_OPS_REPO:=fleet/lcars}"
 
 forge_repo_code() {
