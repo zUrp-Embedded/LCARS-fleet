@@ -62,7 +62,7 @@ PROV_DOCKER_SOCK=""
 # opposes — « ajoute-toi au groupe » a quelqu'un qui y est deja l'envoie refaire ce qui est fait, et
 # chercher la panne ailleurs.
 #
-# MESURE DU 2026-08-31, SUR CE DEPOT MEME : ce cas exact s'est presente. `getent group docker`
+# CE CAS EXACT S'EST PRESENTE SUR CE DEPOT MEME. `getent group docker`
 # listait bien le compte, `id -nG` non, et le message d'alors ne distinguait pas les deux — il a
 # fallu le trouver a la main.
 docker_denied_geste() { # docker_denied_geste <socket>
@@ -142,9 +142,9 @@ _docker_sockets() {
   # clic dans Docker Desktop ; offrir un contournement à `sudo` là où un clic suffit apprend le
   # mauvais réflexe, et contredit le canon de la boîte (« elle ne demande jamais sudo »).
   #
-  # ⚠ ET IL A COÛTÉ DEUX FOIS. Le 2026-08-30, le refus accusait la proxy au lieu de
+  # ⚠ ET IL A COÛTÉ DEUX FOIS. D'abord le refus accusait la proxy au lieu de
   # `/var/run/docker.sock` et envoyait chercher des droits qui ne bloquaient personne — correctif
-  # « la PREMIÈRE socket refusée » plus bas. Le 2026-08-31, il m'a fait bâtir un diagnostic entier
+  # « la PREMIÈRE socket refusée » plus bas. Puis il a fait bâtir un diagnostic entier
   # sur une socket hors sujet pendant que celle qui comptait répondait.
   #
   # L'intégration WSL est donc un PRÉ-REQUIS, pas une commodité : elle expose
@@ -195,7 +195,7 @@ docker_endpoint() {
   # pourtant PARFAITEMENT NU. On fabriquait donc un `DOCKER_CONFIG` inutile, et il n'est pas neutre :
   # il remplace le config de l'humain, donc ses CONTEXTS.
   #
-  # Mesure du 2026-08-30, banc WSL a integration activee, avant/apres un simple appel a cette
+  # Vu sur un banc WSL a integration activee, avant/apres un simple appel a cette
   # fonction :
   #     contexts AVANT : default desktop-linux
   #     contexts APRES : default          ← `desktop-linux` disparu
@@ -228,7 +228,7 @@ docker_endpoint() {
   fi
   # ⚠ ET ON LIT LE DROIT SUR LA SOCKET, JAMAIS UN MESSAGE. Un libelle d'erreur est une convention de
   # version, et le code de sortie ne discrimine pas : `docker version` rend 1 aussi bien sur une
-  # socket qui refuse que sur un daemon absent (mesure du 2026-08-19). `-w` repond a la question
+  # socket qui refuse que sur un daemon absent. `-w` repond a la question
   # exacte — « puis-je m'en servir » — sans dependre de qui la formule.
   while read -r sock; do
     [[ -S "$sock" ]] || continue
@@ -245,7 +245,7 @@ docker_endpoint() {
     # celui qui porte la cause ; les suivants sont des replis.
     #
     # Un diagnostic qui accuse le mauvais objet coute plus cher qu'un diagnostic absent : il fait
-    # chercher la panne la ou elle n'est pas. Mesure d'un banc WSL a integration activee, 2026-08-30.
+    # chercher la panne la ou elle n'est pas.
     [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }
   done < <(_docker_sockets)
 

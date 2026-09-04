@@ -36,7 +36,7 @@ command -v curl >/dev/null || { echo "bench-degrade: curl absent" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "bench-degrade: python3 absent" >&2; exit 1; }
 
 # Gitea REFUSE un mot de passe de moins de 8 caracteres (« password must be at least 8
-# characters », mesure du 2026-08-02). Le defaut le respecte pour que le geste ne casse pas sur
+# characters »). Le defaut le respecte pour que le geste ne casse pas sur
 # une regle de la forge plutot que sur une intention.
 : "${PASSWORD:=toto32toto32}"
 

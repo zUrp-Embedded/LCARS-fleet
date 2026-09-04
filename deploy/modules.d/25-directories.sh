@@ -49,7 +49,7 @@ prov_dirs() {
   # ⚠ INVISIBLE TANT QU'ON NE DESINSTALLE PAS, et c'est le cycle du rang D qui l'a trouve : sur une
   # machine ou le repertoire existe deja — pose une fois, correctement, par un geste ancien —
   # `mkdir -p` ne touche pas a ses droits. Il faut l'avoir RETIRE pour le voir renaitre en
-  # `bob:fleet` : mesure du 2026-09-01, banc 2001, apres `uninstall --yes` puis re-apply.
+  # `bob:fleet` : vu apres `uninstall --yes` puis re-apply.
   #
   # Une install qui reussit ne prouve rien de ce qu'elle laisse.
   printf '%s\n' \

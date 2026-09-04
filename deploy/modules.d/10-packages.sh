@@ -198,8 +198,8 @@ check() {
   if [[ "$pkg_absent" -eq 0 ]]; then
     # ⚠ LA SONDE bwrap MESURE LE NOYAU, PAS L'IMAGE. Dans le stage `verify` du Dockerfile (le doctor
     # joué au BUILD sur le système de fichiers de l'image), le noyau est celui de BuildKit, sans
-    # userns : la sonde échoue là où la boîte, une fois bootée, réussit. Mesure du 2026-09-04, premier
-    # build avec verify. `PROV_KERNEL_PROBES=0` dit « pas de vérité ici » ; le check le DIT au lieu
+    # userns : la sonde échoue là où la boîte, une fois bootée, réussit. Vu au premier build avec verify.
+    # `PROV_KERNEL_PROBES=0` dit « pas de vérité ici » ; le check le DIT au lieu
     # de rendre un drift qui n'en est pas un — et au boot, sans la variable, la sonde se joue.
     if [[ "${PROV_KERNEL_PROBES:-1}" == "0" ]]; then
       p_warn "sonde bwrap NON jouée (PROV_KERNEL_PROBES=0 : ce noyau n'est pas celui de la cible) — elle se joue au boot"

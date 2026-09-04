@@ -100,7 +100,7 @@ uninstall_run() {
   # Deux modules `NEEDS: root` posent sous /home par des primitives qui JOURNALISENT (`30-wsl` :
   # `$home/.config` et un lien ; `45-sudoers-toolchain` : `$home/.claude/skills/system-issues`),
   # donc ces chemins entraient dans le `rm -rf` pendant que le bilan imprimait, deux ecrans plus
-  # haut, « JAMAIS retires, par aucun drapeau ». Mesure du 2026-09-01 : plan vierge = 0 fichier /
+  # haut, « JAMAIS retires, par aucun drapeau ». Vu : plan vierge = 0 fichier /
   # 2 dirs ; les trois memes entrees ajoutees au journal = 1 fichier / 4 dirs.
   #
   # Une garde qui vit a UN endroit du plan n'est pas une garde : elle est une propriete du chemin
@@ -300,7 +300,7 @@ uninstall_run() {
   # Un `for h in /home/*` + `rm -rf` vivait a cet endroit, sous `--humans`. Il portait sa propre
   # mise en garde — « rien ne garantit que ce soit un home d'humain, une racine de travail partagee
   # y vit aussi » — et il gardait le geste quand meme, avec `preserved` pour filet. Un commentaire
-  # qui decrit un danger sans le fermer ne ferme rien : mesure du 2026-08-31, ce bloc detruisait les
+  # qui decrit un danger sans le fermer ne ferme rien : vu, ce bloc detruisait les
   # `.lcars` et les `pods` de cinq personnes, plus tout ce que la table ne pensait pas a preserver.
   #
   # LA REGLE EST MAINTENANT LA MEME POUR TOUS LES BINAIRES : ni `rm`, ni `userdel -r`. Elle ne se
@@ -422,7 +422,7 @@ uninstall_run() {
   # ⚠ LE JOURNAL N'EXISTE PLUS QUAND CETTE LIGNE S'IMPRIME, et c'est pourquoi la question se pose
   # PLUS HAUT. Il vit sous la racine d'install, que la boucle `dirs` vient d'emporter au `rm -rf` :
   # un `-r "$JOURNAL_FILE"` teste ici l'absence que le script vient lui-meme de creer, et tombe
-  # toujours dans la branche « la machine portait deja ». Mesure du 2026-09-01, banc 2001. C'est la
+  # toujours dans la branche « la machine portait deja ». C'est la
   # meme cicatrice d'ordre que « les paquets d'abord » — ce fichier meurt en cours de route, donc
   # tout ce qu'on veut en dire se lit AVANT.
   if [[ "${#journal_pkgs[@]}" -eq 0 && "$_journal_lisible" -eq 1 ]]; then
@@ -432,7 +432,7 @@ uninstall_run() {
   else
     echo "  ${_PC}paquets apt${_PN}          ${_PA}aucun retiré — le journal était illisible ou absent : impossible de distinguer ce que LCARS a posé de ce qui était déjà là${_PN}"
   fi
-  # Le cache des catalogues a demenage sous le prefixe le 2026-09-01 ; ce qui reste a l'ancienne
+  # Le cache des catalogues a demenage sous le prefixe ; ce qui reste a l'ancienne
   # adresse est sous /home, donc hors de portee de ce script — et invisible si personne ne le dit.
   [[ -d "$PROV_LEGACY_CATALOGUES_DIR" ]] \
     && echo "  ${_PA}reliquat${_PN}             $PROV_LEGACY_CATALOGUES_DIR (cache d'avant le 2026-09-01) — « rm -rf $PROV_LEGACY_CATALOGUES_DIR » si tu n'en veux plus"

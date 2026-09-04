@@ -52,7 +52,7 @@ STARTERS=(
 # boite, le check depassait sa propre porte de sortie, ne trouvait aucune unite, rendait un drift —
 # et `apply:check:*` le convertissait en ECHEC que nul `apply` ne pouvait reparer.
 # `/run/systemd/system` est le test canonique (sd_booted(3)) : il n'existe QUE si systemd est
-# l'init. Mesure du 2026-08-30 dans lcars3-lcars-1 : systemctl PRESENT, /etc/systemd/system PRESENT,
+# l'init. Dans la boite : systemctl PRESENT, /etc/systemd/system PRESENT,
 # /run/systemd/system absent, PID 1 = tini.
 have_systemd() { [[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
 
@@ -134,7 +134,7 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
 #
 # ⚠ ET IL Y AVAIT DEJA `loop_hint`, MAIS SUR UNE SEULE BRANCHE. Un service qui a epuise son plafond
 # de redemarrages n'est plus `is-active` ET son compteur ne monte plus : ni « boucle » ni « debout ».
-# Il tombait donc dans la branche muette. Mesure du banc 2004 (2026-08-31) : le landing ne montait
+# Il tombait donc dans la branche muette. Cas vu : le landing ne montait
 # pas, cause reelle « Address already in use » sur le port du deck — que `loop_hint` savait nommer,
 # et que personne ne lui demandait.
 unit_cause() { # unit_cause <unite> -> " — <cause>", vide si on ne sait rien dire
@@ -242,8 +242,8 @@ WantedBy=multi-user.target
 EOF
       ;;
     lcars-privileged)
-      # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (mesure du
-      # 2026-08-25 : `/branches/tool_request` et `/contents/ops` repondent 200 en anonyme), et un
+      # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (`/branches/tool_request` et
+      # `/contents/ops` repondent 200 en anonyme), et un
       # service qui saurait ou trouver un secret aurait le droit de le lire. Une boite dont la forge
       # exige une session en lecture l'ajoute a `$SERVICES_ENV`, explicitement.
       cat <<EOF
@@ -285,7 +285,7 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
 # module hors-substrat, `apply:check`), ce qui rendait toute boite non convergee a son premier boot
 # et, sur une boite de production ou personne ne s'est encore inscrit, DEFINITIVEMENT. Le meme
 # entrypoint publiait alors `provision.rc=1` a cote de `humans.rc=0` — deux verdicts contradictoires
-# sur le meme fait, ecrits au meme instant (mesure .63, 2026-08-30).
+# sur le meme fait, ecrits au meme instant.
 #
 # Ce que la sonde doit continuer de faire, et qui est son unique raison d'exister : le DIRE. En
 # docker, `22-fleet-human` et `48-forge-host` ne sont meme pas selectionnes (`CHECK-ON: wsl linux`) ;
@@ -296,7 +296,7 @@ probe_fleet_humans() {
   # LE FAIT, pour qui doit decider : l'entrypoint de la boite publie « quelqu'un peut lancer une
   # fleet » et lisait pour cela le CODE DE RETOUR de ce module — qui vaut 0 sur une boite conforme
   # SANS humain, puisque l'absence est un WARN. « humain(s) present(s) » etait donc toujours vrai.
-  # Mesure du 2026-09-04, banc bob_2 : seul le siege existait. Meme canal que `00-preflight`.
+  # Une boite ou seul le siege existe rendait « present(s) ». Meme canal que `00-preflight`.
   p_fact fleet_humans "$found"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
@@ -316,7 +316,7 @@ probe_seat_uid() {
     # ⚠ « AUCUN » A DEUX CAUSES, ET UNE SEULE EST UN DRIFT. `services.env` est `0640 root:fleet` :
     # un compte hors du groupe rend un champ vide sans avoir lu une ligne du fichier. Le declarer
     # « aucun LCARS_SYSADMIN_UID » est alors un fait sur le LECTEUR, pas sur la machine — et il
-    # disparait sous sudo, sur la meme machine a la meme seconde (mesure du 2026-09-01, banc 2007).
+    # disparait sous sudo, sur la meme machine a la meme seconde.
     local _st; _st="$(prov_file_state "$SERVICES_ENV")"
     if [[ "$_st" != "present" && "$_st" != "absent" ]]; then
       p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
@@ -375,7 +375,7 @@ check() {
   probe_fleet_humans
 
   # ⚠ LE SUBSTRAT CHOISIT LA MECANIQUE, `have_systemd` DIT SEULEMENT SI ELLE EST UTILISABLE. Ces
-  # deux questions ont ete confondues le 2026-08-30 et ca visait le rail WSL en plein : `30-wsl`
+  # deux questions se confondent facilement, et la confusion vise le rail WSL en plein : `30-wsl`
   # pose `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown`. Au
   # PREMIER apply d'un WSL vierge, `/run/systemd/system` n'existe donc pas — et une branche
   # conditionnee a la seule absence de systemd aurait fait chercher `supervise.sh` sur un poste,
@@ -486,7 +486,7 @@ apply() {
       # ⚠ LE VERDICT PORTE LA CAUSE, IL NE DÉLÈGUE PAS SA LECTURE. « status dit pourquoi » est un
       # diagnostic juste dont l'action demande un SECOND geste — et sur un rail joué en fond, ou
       # depuis un log qu'on relit le lendemain, ce second geste n'est plus possible : le journal a
-      # tourné. Mesure du banc 2004 (2026-08-31) : le landing ne montait pas, cause réelle
+      # tourné. Cas vu : le landing ne montait pas, cause réelle
       # « Address already in use » sur le port du deck, invisible dans la ligne du rail.
       #
       # C'est le motif que ce rail combat partout ailleurs — un remède nommé qu'on ne peut pas jouer

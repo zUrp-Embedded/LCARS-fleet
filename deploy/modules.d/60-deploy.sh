@@ -34,9 +34,8 @@ check() {
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
   # « absente » de tout ce qui s'y trouve, y compris d'une release parfaitement posee.
   #
-  # MESURE DU 2026-09-01, banc 2007 : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
-  # meme machine et a la meme seconde. Le banc 2001 ne le montrait pas — le groupe y etait deja
-  # effectif. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
+  # VU : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
+  # meme machine et a la meme seconde ; un poste ou le groupe est deja effectif ne le montre pas. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
@@ -93,7 +92,7 @@ apply() {
   # Le bloc `mix` ci-dessous lit la LIVRAISON ; celui-ci demande « suis-je dans l'arbre de travail,
   # ou dans la copie que le rail a lui-meme posee ? ».
   #
-  # MESURE DU 2026-09-02, BANCS 2006 ET 2007 : un apply rejoue depuis
+  # VU : un apply rejoue depuis
   # `/opt/lcars/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
   # source runtime introuvable: /opt/lcars/fleet ». Sur les DEUX, en livraison binaire comme en
   # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
@@ -113,7 +112,7 @@ apply() {
   # discriminant. Exiger `mix` avant de le lire renvoyait vers `15-toolchain`, dont l'etat-cible en
   # binaire est justement de ne rien poser : le rail s'envoyait une instruction impossible.
   #
-  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : `FAIL 60-deploy: mix absent
+  # VU sur une premiere install binaire : `FAIL 60-deploy: mix absent
   # — lance d'abord 15-toolchain`, sur une machine ou la release etait deja dans le paquet.
   if ! prov_delivery_is_binary; then
     command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
@@ -155,7 +154,7 @@ apply() {
   # n'existe qu'ici, à la minute du build » — et il vaut a fortiori pour `hex` et `rebar` : la
   # release est faite, `deploy-release.sh` la voit et ne compile pas.
   #
-  # MESURE DU 2026-09-01, banc 2006 : `FAIL 60-deploy: commande en échec (rc=127) : … mix
+  # VU sur une cible binaire : `FAIL 60-deploy: commande en échec (rc=127) : … mix
   # local.hex` — `mix` n'existe pas sur une cible binaire, c'est le geste R5 qui le veut. Le module
   # mourait ici, donc `deploy-release.sh` n'était jamais appelé, donc la release du PAQUET n'était
   # jamais posée. Un paquet complet, refusé par un outil de compilation absent.
@@ -173,7 +172,7 @@ apply() {
 
   fi
 
-  # Q3 (2026-09-04) : le script est de l'installeur, il vit a cote de la lib ; l'arbre source du
+  # Q3 : le script est de l'installeur, il vit a cote de la lib ; l'arbre source du
   # runtime lui est DONNE, il ne le devine plus a sa position.
   run_step --ok 3 "build de la release" -- \
     as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \

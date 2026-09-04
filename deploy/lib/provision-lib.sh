@@ -62,8 +62,8 @@ PROVISION_LIB_LOADED=1
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 : "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
-# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache vivait
-# sous `/home` jusqu'au 2026-09-01 ; deux gestes la nomment encore — `45-catalogues` pour DIRE que le
+# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache a vecu
+# sous `/home` ; deux gestes nomment encore cette adresse — `45-catalogues` pour DIRE que le
 # reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
 # (`${VAR:-/home/catalogues}`) auraient fait deux sources d'un meme fait, ce que le mur des racines
 # refuse a juste titre : celle qu'on lit n'est jamais celle qu'on a corrigee.
@@ -506,7 +506,7 @@ write_atomic() {
   # (chmod, chown, mv) REUSSISSENT tous sur un tampon tronque : le fichier bascule, PROV_CHANGED
   # s'incremente, et `p_chg` imprime POSE. Un echec d'ecriture ressortait donc en SUCCES.
   #
-  # MESURE DU 2026-09-01 : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
+  # VU : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
   # « POSE », rc 0, et un fichier de ZERO octet. Tout ce que le rail pose sous /etc passe par ici —
   # `seat.uid` vide fait refuser tout `fleet_v2 start` par le GUARD B ; `services.env` vide demarre
   # les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide laisse l'interop Windows OUVERTE sur
@@ -548,7 +548,7 @@ ensure_mode() {
     # de sa source (tout checkout pose dans un arbre `fleet` setgid). Le `chmod 0755` passait, la
     # relecture lisait 2755, et la primitive rendait « mode 2755 ≠ 755 après chmod » : le module
     # echouait sur un etat qu'il venait de poser, et le rail cessait d'etre rejouable.
-    # Mesure du 2026-09-04, banc bob_1, second apply de `44-media` sur `/opt/lcars/share/avatars`.
+    # Cas vu : un second apply de `44-media` sur `/opt/lcars/share/avatars`.
     # On efface d'abord les bits speciaux ; le mode numerique REPOSE ensuite ceux qu'il demande
     # (2775 remet son setgid), donc rien n'est perdu pour un objet qui les veut.
     chmod u-s,g-s,o-t "$path" 2>/dev/null || true
@@ -812,7 +812,7 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
 # ─── apt_ensure <pkg…> — install par liste des MANQUANTS, verdict réel paquet par paquet ─────────
 # ⚠ `dpkg -s` REUSSIT SUR UN PAQUET RETIRE. Un `apt-get remove` laisse le paquet en etat `rc`
 # (removed, config-files) : sa base de donnees existe toujours, donc `dpkg -s` sort 0 et une sonde
-# batie dessus le croit pose. Mesure du 2026-08-30, banc .63 : apres `provision uninstall --yes`,
+# batie dessus le croit pose. Vu : apres `provision uninstall --yes`,
 # l'`apply` suivant n'a REINSTALLE ni `docker-ce` ni `ttyd` — les deux etaient en `rc` — et trois
 # modules sont tombes en cascade (la forge non montee, la console sans serveur, quatre unites
 # mortes). Le rail ne savait pas reinstaller ce qu'il venait de desinstaller.
@@ -1102,7 +1102,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   p_warn   ON NE SAIT PAS, ou la question est HORS DU PERIMETRE du rail. Un objet qu'on ne peut pas
 #            lire d'ici ; une adhesion d'org qu'une personne pose elle-meme sur la forge.
 #
-# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS, le 2026-09-01. D'abord en laissant
+# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS. D'abord en laissant
 # `p_drift` sur des sondes qui DISAIENT ne pas savoir — « non mesurable », « NON SONDABLE »,
 # « illisible » — ce qui produisait cinq drifts sans sudo qui disparaissaient avec, sur une machine
 # identique. Puis, en corrigeant, en passant a `p_warn` une forge muette et un manifeste illisible :
@@ -1119,8 +1119,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   absent        il n'est pas la, et on est en position de l'affirmer
 #   unmeasurable  on ne peut meme pas conclure : un ancetre n'est pas traversable d'ici
 #
-# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Mesure du 2026-09-01 sur le banc
-# 2004 : `66-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
+# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Vu : `66-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
 # parfaitement present — `0640 root:lcars-system`, que l'appelant ne peut pas OUVRIR mais peut
 # parfaitement CONSTATER. Le test de lisibilite tenait lieu de test d'existence, et le doctor
 # declarait non conforme une machine qui l'etait.
@@ -1339,9 +1338,8 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # son geste en fait, et les deux appelants n'en font pas la meme chose.
 # ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
 #
-# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Mesure du
-# 2026-09-02, bancs 2006 ET 2007, sur un apply rejoué depuis `/opt/lcars/deploy/provision` —
-# le geste NOMINAL du convergeur :
+# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Vu sur un apply rejoué depuis
+# `/opt/lcars/deploy/provision` — le geste NOMINAL du convergeur :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
 #   FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
@@ -1375,7 +1373,7 @@ prov_roles() {
   # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
   # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
   # copie posee est 0644.
-  # Lot 6 (2026-09-04) : la porte outil est « lcars tool roles-tfvars », dans la CLI du PRODUIT —
+  # La porte outil est « lcars tool roles-tfvars », dans la CLI du PRODUIT —
   # elle vivait dans l'entrypoint de l'image, que ce fichier devinait a deux adresses. La CLI est
   # posee par 60 (`$PROV_LINK_DIR/lcars`) ; avant, ou depuis une copie, celle de l'arbre.
   local entry="${PROV_LCARS_CLI:-}" c

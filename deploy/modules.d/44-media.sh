@@ -84,7 +84,7 @@ build_doc() {
   # `npm ci` dans `/opt/lcars/assets/github.io` — que `62-runtime-helpers` embarque justement SANS
   # `node_modules` — puis mourait sur `npm run build`.
   #
-  # MESURE DU 2026-09-02, BANC 2007 : `FAIL 44-media: build du site en échec`, et
+  # VU : `FAIL 44-media: build du site en échec`, et
   # `/opt/lcars/assets` pesant 176 Mo au relevé suivant. L'échec était visible ; la pollution, non.
   #
   # Le `dist/` embarqué EST la doc de cette machine. S'il manque, c'est un drift à nommer — pas un

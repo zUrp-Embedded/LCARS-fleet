@@ -152,7 +152,7 @@ build_release() {
 refuse_root() {
   # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
   # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
-  # this file runs. The line read `${1:-${EUID:-$(id -u)}}` until 2026-08-27: the `$(id -u)` was
+  # this file runs. The line once read `${1:-${EUID:-$(id -u)}}`: the `$(id -u)` was
   # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED
   # the effective uid can be missing, which the next reader copies into their own guard.
   local uid="${1:-$EUID}"
@@ -251,7 +251,7 @@ done < "$MANIFEST"
 # sait deja lire le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » —
 # mais ce garde s'executait AVANT, et refusait donc la seule livraison qui n'a rien a compiler.
 #
-# MESURE DU 2026-09-01, banc 2006 : `install: ERREUR — mix introuvable`, sur une machine dont le
+# VU : `install: ERREUR — mix introuvable`, sur une machine dont le
 # paquet portait la release COMPLETE, prete a poser. Le script mourait dix lignes avant la fonction
 # qui aurait dit « rien a batir ».
 #

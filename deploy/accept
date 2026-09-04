@@ -76,7 +76,7 @@ check_ci() {
   # ⚠ « AUCUN RUNNER » EST UN FAIT, PAS UN DEFAUT DE MESURE — ET LES DEUX SORTAIENT PAR LA MEME
   # PORTE. Le sondage etait `curl -s` sans `-f` et sans code HTTP, suivi de `jq '.total_count // 0'`
   # avec `|| echo 0` : les QUATRE echecs possibles tombaient dans la branche « AUCUN runner
-  # enregistre ». Mesure du 2026-09-01 sur les quatre corps reels — corps vide (reseau coupe,
+  # enregistre ». Les quatre corps reels — corps vide (reseau coupe,
   # curl 6/7/28), `<html>404…` (jq echoue), `{"message":"token does not have … required scope(s)"}`
   # (403), `{"message":"user should be the site admin"}` — tous rendaient n=0.
   #

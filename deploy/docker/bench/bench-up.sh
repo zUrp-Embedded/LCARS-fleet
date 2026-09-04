@@ -31,7 +31,7 @@
 #    fort, pas a une copie cachee de le masquer.
 # 4. UN BANC NE DOIT JAMAIS COGNER LE BANC D'A COTE. Projet compose, port de forge et adresse de
 #    bind sont TOUS parametres et defaultent sur des valeurs libres. `--bind` couvre la boite ET la
-#    forge depuis le 2026-08-07 : jusque-la il n'etait passe qu'a la boite, la forge retombait sur
+#    forge : avant, il n'etait passe qu'a la boite, la forge retombait sur
 #    le defaut `127.0.0.1` du compose, et cet en-tete l'affirmait deja couverte. La separation
 #    tenait quand meme — par unicite du PORT — mais un `--bind 127.0.0.7` rendait une forge sur .1. Le geste destructeur (`down -v`)
 #    n'est pas ici : il est dans `bench-down.sh`, separement, pour qu'aucune faute de frappe sur ce
@@ -80,8 +80,7 @@ WITH_RUNNER=1
 CREDS_FROM="$HOME/.claude/.credentials.json"
 WITH_CREDS=1
 HUMAN="lcars"
-# LE BANC PROMEUT L'HUMAIN SITE-ADMIN, ET IL LE DEMANDE — il ne l'herite plus. Depuis le
-# 2026-08-07 le bootstrap defaute au modele de prod (non-admin) : la propriete de banc est donc
+# LE BANC PROMEUT L'HUMAIN SITE-ADMIN, ET IL LE DEMANDE — il ne l'herite plus. Le bootstrap defaute au modele de prod (non-admin) : la propriete de banc est donc
 # posee ICI, visible au point d'appel, et `--no-human-admin` la retire. Raison + cout : etape
 # 6-bis du bootstrap.
 BOOTSTRAP_EXTRA=(--human-admin)
@@ -120,7 +119,7 @@ done
 # TROIS CYCLES DE VIE, ET C'EST VOULU. La forge garde SON projet : elle coute deux passes
 # d'amorcage quand la boite ne coute qu'un build, et `bench-swap-image.sh` existe pour exploiter
 # cette asymetrie. Une fusion des projets rendait un `down -v` capable d'emporter la forge semee
-# avec la boite — mesure et corrigee le 2026-08-07.
+# avec la boite — vu et corrige.
 # ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
 # est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
 # le poste (48/49) et le banc derivent les memes noms de la meme base.
@@ -167,7 +166,7 @@ FORGE_LOCAL_URL="http://${PROBE_HOST}:${FORGE_PORT}"
 # ⚠ LA TROISIEME ADRESSE DEPEND DU SUBSTRAT, ET CE SCRIPT N'EN CONNAISSAIT QU'UNE.
 # Ce n'est ni le bind, ni l'adresse ANNONCEE : c'est celle par laquelle un CONTENEUR atteint cette
 # machine. Sur linux natif, c'est l'adresse de sortie — le daemon tourne sur l'hote, ses conteneurs
-# voient son IP (mesure du 2026-08-18 sur .63). Sous Docker Desktop, le daemon vit dans une AUTRE VM :
+# voient son IP. Sous Docker Desktop, le daemon vit dans une AUTRE VM :
 # l'IP de la distro WSL ne lui est pas routee, et c'est `host.docker.internal` qui designe l'hote.
 if [[ "$(detect_substrate)" == "wsl" ]]; then
   JOB_HOST="host.docker.internal"
@@ -191,7 +190,7 @@ die() { printf '[bench-up] %s\n' "$*" >&2; exit "${2:-1}"; }
 #   b) le relais systemd du groupe fleet, /run/docker-fleet.sock (systemd-socket-proxyd,
 #      outillage/install-docker-relay.sh) — lisible par tout le groupe, et **AMPUTE**.
 #
-# CE QUE LE RELAIS FAIT DE PIRE (mesure du 2026-08-04) : il repond parfaitement aux commandes qui
+# CE QUE LE RELAIS FAIT DE PIRE : il repond parfaitement aux commandes qui
 # lisent (`version`, `ps`, `inspect`, `images`) et rend ZERO OCTET, EXIT 0, sur toute commande a
 # flux attache — `exec`, `cp`, `run`, `attach`. Un `docker exec ... gitea --version` ne dit rien et
 # reussit. Consequence pour ce script : chaque valeur capturee par un exec (master token, token
@@ -253,7 +252,7 @@ fi
 # distincts (`127.0.0.5`, `.6`, `.7`) plusieurs bancs cohabitaient sur les memes numeros. Sur
 # `0.0.0.0`, il n'y en a plus qu'UN par port — et docker le refuse en nommant l'adresse de l'AUTRE :
 # « Bind for 127.0.0.6:2222 failed: port is already allocated », sur un banc ou personne n'a jamais
-# tape `127.0.0.6`. Mesure du 2026-08-18. Le script mourait la-dessus en « la boite ne demarre pas ».
+# tape `127.0.0.6`. Le script mourait la-dessus en « la boite ne demarre pas ».
 #
 # On demande donc AVANT, et on nomme le detenteur. Deux sorties, pas une : detruire l'autre banc, ou
 # deplacer les ports de celui-ci.
@@ -312,7 +311,7 @@ say "boite : projet $BOX_PROJECT, image $IMAGE, bind $BIND"
 # donne ; b01fe3164 a renomme le service et les URL internes sont restees sur l'ancien. Le
 # renommage ne se voit QUE sur une forge fraiche — le rail ne reapplique pas un compose a une forge
 # debout — d'ou quinze jours sans rien casser, puis un runner qui boucle sur « lookup forge : no
-# such host » a la premiere install neuve (mesure du 2026-08-28, banc).
+# such host » a la premiere install neuve.
 #
 # ⚠ ET NE PAS COMMENTER A L'INTERIEUR DE LA COMMANDE : elle est continuee par des « \ », et un
 # commentaire nu y coupe la continuation. Ce fichier a son idiome pour ca (une substitution qui ne
@@ -336,7 +335,7 @@ env LCARS_IMAGE="$IMAGE" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
   || die "la boite ne se cree pas (le reseau $FORGE_NET existe-t-il ? les volumes du magasin ?)" 3
 
-# ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS (2026-08-17). NE PAS LE REMETTRE.
+# ⚠ LE SEMIS DU BINAIRE VENDOR A VECU ICI ET N'EXISTE PLUS. NE PAS LE REMETTRE.
 "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" start lcars || die "la boite ne demarre pas" 3
 
 for _ in $(seq 1 90); do
@@ -367,7 +366,7 @@ say "amorcage passe 1 (structure — le semis sera saute, c'est attendu)"
 # ⚠ LE CODE DU SOUS-SCRIPT EST RENDU, PAS REMPLACE PAR 4. `bench-forge-bootstrap.sh` distingue
 # SEPT sorties (2 la forge muette · 3 admiral/token · 4 la structure · 5 le seed · 6 le verdict ·
 # 7 le semis) et ce site les ecrasait toutes sous « amorcage passe 1 en echec 4 » — un chiffre qui
-# nomme la passe et pas la cause. Mesure du 2026-08-18 : deux diagnostics a l'aveugle sur cette
+# nomme la passe et pas la cause. Vu : deux diagnostics a l'aveugle sur cette
 # ligne exacte, sur une machine distante, ou relire le sous-script coute un aller-retour.
 BOOT_RC=0
 DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
@@ -375,7 +374,7 @@ DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
 [[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 1 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
-say "relance de la boite pour que 63-forge-tokens minte les role-tokens"
+say "relance de la boite pour que le boot minte les role-tokens (forge.d/tokens, sur le token systeme)"
 "$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
 for _ in $(seq 1 90); do
   [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] && break
@@ -463,7 +462,7 @@ esac
 RUNNER_STATE="non demarre"
 # L'AUTORITE SE LIT DANS LA BOITE, plus dans un fichier que ce banc aurait persiste. Elle y est
 # posee par le geste generique (`forge-gestures.sh config-token`), 0600 root, et elle y RESTE —
-# c'est l'arbitrage du 2026-08-16. Le banc n'a donc plus de credential a lui a faire survivre.
+# c'est l'arbitrage. Le banc n'a donc plus de credential a lui a faire survivre.
 MASTER_TOKEN="$("$DOCKER_BIN" exec -u root "$BOX" cat /opt/lcars/var/tokens/forge-master.token 2>/dev/null | tr -d '\r\n' || true)"
 
 # `RUNNER_SERT` porte la seule question qui compte : un runner sert-il le label demande, VU PAR LA
