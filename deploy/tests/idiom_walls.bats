@@ -170,7 +170,7 @@ I3_AWK='
   [ "$bad" -eq 0 ]
 }
 
-@test "MUR I18: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
+@test "MUR I19: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
   # `prov_uid_bounds` lit `/etc/login.defs` ; `is_fleet_human` et `fleet_humans` en dependent, et
   # `64-services` les joue a chaque check (`probe_fleet_humans`). Un decor qui pose un /etc/passwd
   # sans poser ses bornes decrit une machine a moitie : sur un poste dont UID_MIN vaut 5000, ou dont
