@@ -63,7 +63,12 @@
 prefix    /opt/lcars/runtime                              0750  root:fleet          wsl+linux
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
-dir       /opt/lcars                                   0755  root:root           wsl+linux
+# ⚠ `any` DEPUIS LE LOT 14 (2026-09-05) : l'image le POSE (`install -d 0755 root:root`, stage
+# runtime), la ou le premier `COPY` le creait « en passant » au mode que BuildKit choisit. Le stage
+# `verify` le mesure au build par `25-directories`, qui lit CETTE colonne pour savoir ou une entree
+# de sa table se mesure : `wsl+linux` ici, c'etait « n'existe pas sur docker » d'un repertoire que
+# l'image livre — et une mesure de moins au build.
+dir       /opt/lcars                                   0755  root:root           any
 # ⚠ COUVERTS PAR LEUR ANCETRE, ET DECLARES QUAND MEME. La regle « un chemin est couvert par ses
 # ancetres » evite une table de cent lignes ; elle n'a jamais dit qu'un objet FONCTIONNEL devait
 # rester anonyme. Un objet dont depend ce que la machine PORTE se nomme dans la table qui dit ce
@@ -82,14 +87,18 @@ dir       /opt/lcars                                   0755  root:root          
 # est ici sur les deux rails, et il dit vrai dans les deux sens.
 anchor:cond /opt/lcars/.source-revision                0644  root:root           any
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
-# Le tampon du stage `verify` de l'image : la revision dont le doctor a mesure le systeme de
-# fichiers AU BUILD. Docker seul — un poste ne bâtit pas d'image, son doctor se joue sur lui.
-dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
-dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
-dir       /opt/lcars/share                                  0755  root:root           wsl+linux
-dir       /opt/lcars/share/avatars                     0755  root:root           wsl+linux
-dir       /opt/lcars/share/favicon                     0755  root:root           wsl+linux
-dir       /opt/lcars/share/doc                         0755  root:root           wsl+linux
+# ⚠ POSES PAR L'IMAGE, DONC VRAIS SUR DOCKER — `any`, et c'etait `wsl+linux` (lot 14, 2026-09-05).
+# Le stage runtime du Dockerfile pose `tofu/providers` (`mkdir -p`, puis `chmod -R a+rX`) et les
+# quatre `share/*` (`COPY`, puis `chmod -R a+rX`) : la table disait « n'existe pas sur docker » de
+# six repertoires que l'image LIVRE, et l'audit comme l'uninstall lisaient ce mensonge.
+# `image_layout.bats` tient la liste de ce que l'image pose ET que cette table connait : chaque
+# ligne en est declaree pour docker.
+dir       /opt/lcars/tofu                              0755  root:root           any
+dir       /opt/lcars/tofu/providers                    0755  root:root           any
+dir       /opt/lcars/share                                  0755  root:root           any
+dir       /opt/lcars/share/avatars                     0755  root:root           any
+dir       /opt/lcars/share/favicon                     0755  root:root           any
+dir       /opt/lcars/share/doc                         0755  root:root           any
 # ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
 # HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
 # du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la
@@ -129,12 +138,16 @@ dir       /var/lib/lcars                               0755  root:root          
 # execution sont deux gestes separes sur un chemin dont le proprietaire du parent decide. Declares
 # ici, le rail les POSE et `ensure_mode` re-stat leur proprietaire a chaque passe : la fenetre se
 # ferme au provisionnement, et le doctor la rouvrirait a voix haute.
+# ⚠ ET L'IMAGE LES POSE AUSSI, depuis le lot 14 : declares `any` (voir TRAVAIL dans
+# `system_manifest.bats`), ils n'etaient crees dans la boite que par l'init de l'instance, au boot.
+# Mesures au build par `25-directories` sous `verify`, ils y auraient rendu trois absents.
 dir       /var/tmp/lcars                               0755  root:root           any
 dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
 
 dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
-dir       /etc/lcars                                   0755  root:root           wsl+linux
+# ⚠ `any` : pose par l'image (`install -d 0755 root:root`, lot 13b) — mesure au build depuis le lot 14.
+dir       /etc/lcars                                   0755  root:root           any
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
 dir       /opt/node-<version>                          0755  root:root           wsl+linux

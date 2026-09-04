@@ -10,7 +10,9 @@
 # du fichier. Un `/etc/lcars` non traversable rend `seat.uid` (GUARD B) et le bashrc invisibles a
 # tout non-root ; l'init le reparait AVANT que quiconque n'entre, donc ca marchait — mais la doctrine
 # du lot 5 (« l'image ne derive pas, sa conformite est le build ») etait fausse ici, et le stage
-# `verify` ne pouvait pas le voir : root traverse un repertoire sans bit x.
+# `verify` ne le voyait pas — non parce que root traverse un repertoire sans bit x (un `stat`
+# rend le mode declare, quel que soit le lecteur), mais parce qu'il ne DEMANDAIT pas
+# `25-directories`. Lot 14 : il le demande, et la table dit `any` de ce que l'image pose.
 #
 # ⚠ CES TEMOINS NE BATISSENT AUCUNE IMAGE. Ils lisent le Dockerfile : le repertoire est pose par un
 # `install -d` AVANT le premier `COPY` qui y ecrit, et son mode est celui que l'init de l'instance
@@ -55,4 +57,59 @@ setup() {
     [ -n "$l" ] || continue
     [ "$l" -gt "$l_dir" ] || { echo "COPY vers /etc/lcars/ a la ligne $l du stage, avant l'install -d ($l_dir)" >&2; return 1; }
   done < <(grep -nE '^COPY .* /etc/lcars/' <<<"$RUNTIME" | cut -d: -f1)
+}
+
+# ─── LOT 14 : LE MANIFESTE DIT VRAI SUR L'IMAGE ─────────────────────────────────────────────────
+#
+# ⚖ user 2026-09-04 (17-DEUX-OUVERTS, solution A). Sept lignes de `deploy/system.manifest` disaient
+# `wsl+linux` — « n'existe pas sur docker » — de repertoires que le stage runtime POSE (`/etc/lcars`,
+# `share/*`, `tofu/*`). `25-directories` lit desormais cette colonne pour savoir ou une entree de sa
+# table se mesure : une colonne fausse ici est une mesure de moins au build, en silence.
+#
+# La liste est EXPLICITE, et c'est le point : ce sont les repertoires que l'image pose ET que la
+# table connait. Un chemin qui entre dans la table demain et que l'image pose aussi s'ajoute ici.
+
+image_declared_dirs() {
+  printf '%s\n' /opt/lcars /etc/lcars /var/lib/lcars /var/tmp/lcars /var/tmp/lcars/toolchain-work \
+    /opt/lcars/tofu /opt/lcars/tofu/providers \
+    /opt/lcars/share /opt/lcars/share/avatars /opt/lcars/share/favicon /opt/lcars/share/doc
+}
+
+@test "ce que l'image POSE et que la table connait est declare pour docker — le manifeste dit vrai sur l'image" {
+  local p col bad=0 n=0
+  while read -r p; do
+    # (a) le stage runtime le nomme hors commentaire : un chemin absent d'ici sort de cette liste,
+    #     il ne se declare pas `any` sur la foi d'un temoin
+    grep -qF -- "$p" <<<"$RUNTIME" \
+      || { echo "$p : le stage runtime ne le nomme pas — l'image ne le pose pas, retire-le de cette liste" >&2; bad=1; continue; }
+    # (b) la table le connait, et pour docker
+    col="$(awk -v p="$p" '{c=$1;sub(/:.*/,"",c)} (c=="dir"||c=="prefix") && $2==p {print $5; exit}' "$MANIFEST")"
+    [ -n "$col" ] || { echo "$p : inconnu de la table (dir|prefix)" >&2; bad=1; continue; }
+    n=$((n + 1))
+    [[ "$col" == any || "+$col+" == *"+docker+"* ]] \
+      || { echo "$p : l'image le pose, la table dit « $col » — 25-directories ne le mesurera pas au build" >&2; bad=1; }
+  done < <(image_declared_dirs)
+  [ "$n" -ge 11 ] || { echo "seulement $n repertoires compares — l'instrument ne lit plus la liste" >&2; return 1; }
+  [ "$bad" -eq 0 ]
+}
+
+@test "chaque install -d du stage runtime pose le MODE et le PROPRIETAIRE que la table declare" {
+  # La generalisation du temoin `/etc/lcars` ci-dessus : un `install -d -m M -o U -g G <chemins>` du
+  # stage runtime, sur un chemin que la table declare, porte le mode et le proprietaire de la table.
+  # Deux ecritures, une valeur — et c'est ce que `25-directories` mesurera au build par `stat`.
+  local spec mode u g p row n=0 bad=0
+  while read -r spec; do
+    [ -n "$spec" ] || continue
+    read -r _ _ _ mode _ u _ g _ <<<"$spec"
+    for p in $(sed -E 's/^install -d -m [0-7]{4} -o [a-z-]+ -g [a-z-]+//' <<<"$spec"); do
+      row="$(awk -v p="$p" '{c=$1;sub(/:.*/,"",c)} (c=="dir"||c=="prefix") && $2==p {print $3, $4; exit}' "$MANIFEST")"
+      [ -n "$row" ] || continue   # couvert par un ancetre : la table ne le nomme pas, rien a comparer
+      n=$((n + 1))
+      [ "$row" = "$mode $u:$g" ] \
+        || { echo "$p : l'image pose « $mode $u:$g », la table declare « $row »" >&2; bad=1; }
+    done
+  done < <(grep -oE 'install -d -m [0-7]{4} -o [a-z-]+ -g [a-z-]+( /[^ \\"]+)+' <<<"$RUNTIME")
+  # ⚠ GARDE DE POPULATION : cinq repertoires sont poses ainsi et declares (lot 13b + lot 14).
+  [ "$n" -ge 5 ] || { echo "seulement $n install -d compares a la table — l'extraction ne lit plus le stage" >&2; return 1; }
+  [ "$bad" -eq 0 ]
 }
