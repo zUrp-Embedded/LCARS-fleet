@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/lib/provision-role-tokens.sh
+# SOURCE: fleet/services/provision-role-tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — pose idempotente des role-tokens forge (A4) : mint + ecriture <dir>/<role>.gitea_token + sonde

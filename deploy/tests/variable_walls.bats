@@ -404,7 +404,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # derive — et c'est exactement le defaut que ce chantier poursuit.
   #
   # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `deploy/lib/provision-role-tokens.sh`
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `fleet/services/provision-role-tokens.sh`
   # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
   # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
   # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).

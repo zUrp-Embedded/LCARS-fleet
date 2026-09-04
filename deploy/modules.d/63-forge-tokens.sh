@@ -13,9 +13,11 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 : "${PROV_PASSWORDS_FILE:=$PROV_TOKENS_DIR/forge-role-passwords.json}"
-# Q3 (2026-09-04) : le minteur est de l'installeur (joue a l'install et par cette sonde), il vit a
-# cote de la lib — plus de chemin inter-arbre.
-A4_SCRIPT="$(dirname "$PROVISION_LIB")/provision-role-tokens.sh"
+# Lot 6 (2026-09-04) — CORRECTION au lot 1 : le minteur n'est PAS « install seulement ». Le poste le
+# joue ici, a l'install ; la BOITE le joue a l'init de son instance, qui est du PRODUIT (Q1). Un
+# geste joue en prod est du produit : il vit avec les gestes de forge, et l'installeur l'APPELLE —
+# le sens permis (60 appelle deploy-release, 61 appelle forge-gestures).
+A4_SCRIPT="$(repo_root)/fleet/services/provision-role-tokens.sh"
 # LE ROSTER EST DERIVE, PAS DECLARE — `prov_roles` (provision-lib) lit ce que les catalogues
 # INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur

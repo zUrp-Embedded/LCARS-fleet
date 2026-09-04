@@ -528,7 +528,7 @@ RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/deploy/provision \
                /opt/lcars/deploy/modules.d/*.sh \
-               /opt/lcars/deploy/lib/provision-role-tokens.sh \
+               /opt/lcars/fleet/services/provision-role-tokens.sh \
                /opt/lcars/deploy/lib/enroll-catalogue.sh \
                /opt/lcars/deploy/lib/deploy-release.sh
 

@@ -445,7 +445,7 @@ defmodule Fleet.Pilot.Application do
   defp signer_verdict!(role, {:error, cause}) when cause in @signer_causes_fatales do
     raise "pilot: no role token for merge signer #{inspect(role)} (#{inspect(cause)}) — the seal " <>
             "signs merges fail-closed as this role and would refuse every merge on its path. " <>
-            "Provision the token (deploy/lib/provision-role-tokens.sh) before booting the rail."
+            "Provision the token (fleet/services/provision-role-tokens.sh) before booting the rail."
   end
 
   defp signer_verdict!(role, {:error, cause}) do
