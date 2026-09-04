@@ -27,8 +27,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # its forge account exactly as much as a producer does — so scanning the business tree alone
     # would declare four roles "extra" in every list and turn a correct deployment red.
     [
-      "priv/catalogue/cap_profile/canon/cap-profiles/*.yaml",
-      "priv/catalogue-system/cap_profile/canon/cap-profiles/*.yaml"
+      "priv/catalogue/cap_profile/cap-profiles/*.yaml",
+      "priv/catalogue-system/cap_profile/cap-profiles/*.yaml"
     ]
     |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
     |> Enum.reject(&String.starts_with?(Path.basename(&1), "_"))
@@ -266,7 +266,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     bundle =
       Path.join(
         root,
-        "priv/catalogue-system/cap_profile/canon/modop-bundles/#{@adresser_bundle}/sp.md"
+        "priv/catalogue-system/cap_profile/modop-bundles/#{@adresser_bundle}/sp.md"
       )
 
     cond do
@@ -525,7 +525,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
   # The canon catalogue read ONCE for both role checks: name (metadata.name, basename fallback),
   # kind, forge_identity (absent = true), role_index. Underscore basenames = overlay fragments
-  # (the `_frozen-monks` convention), excluded like name_index does; undecodable yaml = entry
+  # (a `_` basename is not a role), excluded like name_index does; undecodable yaml = entry
   # dropped HERE (the boot's name_index fail-louds on it — this check only counts names).
   # Rendue muette quand le catalogue bundle n'est pas la (etape BUILD de l'image, fixture de test) :
   # meme regle que les listes de l'arbre frere — l'absence d'un arbre est hors-perimetre, jamais un
@@ -589,7 +589,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
   defp system_role_names(root) do
     root
-    |> Path.join("priv/catalogue-system/cap_profile/canon/cap-profiles/*.yaml")
+    |> Path.join("priv/catalogue-system/cap_profile/cap-profiles/*.yaml")
     |> Path.wildcard()
     |> Enum.reject(&String.starts_with?(Path.basename(&1), "_"))
     |> Enum.flat_map(fn path ->

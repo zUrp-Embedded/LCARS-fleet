@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapabilitiesExercisableCheckTest do
 
   @tools_rel "lib/fleet/mcp/pod_tools.ex"
   @deleg_rel "lib/fleet/mcp/pod_tools/delegation.ex"
-  @roles_rel "priv/catalogue/cap_profile/canon/cap-profiles"
+  @roles_rel "priv/catalogue/cap_profile/cap-profiles"
 
   # Two gates, each asking about ONE capability — the shape the derivation reads. `gates` lets a
   # test shrink that to one, which is the instrument floor rather than a real defect.

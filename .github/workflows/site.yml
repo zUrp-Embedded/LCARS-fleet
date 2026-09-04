@@ -40,7 +40,7 @@ on:
       - 'runtime/lib/fleet/catalogue.ex'
       - 'runtime/lib/fleet/layout.ex'
       # catalogue.js + tools.js — les cap-profiles SYSTEME (le compte des sieges livres par defaut).
-      - 'runtime/priv/catalogue-system/cap_profile/canon/cap-profiles/**'
+      - 'runtime/priv/catalogue-system/cap_profile/cap-profiles/**'
       # cli.js + catalogue.js + tools.js — les launchers dont il extrait verbes et env vars.
       # ⚠ LE REPERTOIRE ENTIER, ET C'EST LE SEUL DES SIX QUI LE SOIT. `cli.js` lit `join(BIN, name)`
       # avec un nom DYNAMIQUE : les trois fichiers d'aujourd'hui ne sont pas une liste close, et un

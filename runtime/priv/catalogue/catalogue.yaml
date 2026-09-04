@@ -7,12 +7,12 @@
 # elsewhere, published on its own cadence, meeting a runtime it was not built against.
 #
 # A root must carry, relative to this file (the literals live in Fleet.Catalogue, one each):
-#   cap_profile/canon/cap-profiles          cap-profile YAMLs (+ monks/ registries)
-#   cap_profile/canon/modop-bundles         modop SP fragments
-#   cap_profile/canon/subagent-templates    subagent templates
+#   cap_profile/cap-profiles          cap-profile YAMLs (+ monks/ registries)
+#   cap_profile/modop-bundles         modop SP fragments
+#   cap_profile/subagent-templates    subagent templates
 #   sp_builder/sp_drafts                    generated role drafts + the worker protocol
 #   sp_builder/templates                    EEx templates shaping every emitted prompt
-#   workflow/canon/workflow_maps            pipeline maps
+#   workflow/workflow_maps            pipeline maps
 #   workflow/brief_templates                brief templates rendered into forge tickets
 #   project_template/<face>                 scaffolding for a freshly onboarded project
 #
@@ -20,7 +20,7 @@
 #   priv/*/schema/                 the contract a catalogue is validated against
 #   priv/cap_profile/baseline/     floors a catalogue may not lower (universal git denylist)
 # Both resolve without passing through this root. A copy shipped inside a catalogue is read by
-# nobody — the layout is what makes that true, so neither may move under canon/. The bundled root
+# nobody — the layout is what makes that true, so neither may move into a catalogue. The bundled root
 # is priv/ itself, so they sit next to it: a root declares what it CONTAINS, never that it contains
 # nothing else.
 

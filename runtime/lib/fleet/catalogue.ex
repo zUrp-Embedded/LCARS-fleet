@@ -13,16 +13,18 @@ defmodule Fleet.Catalogue do
   ## Runtime vs catalogue
 
   The runtime is the machine that runs agents; the catalogue is the business it runs. The
-  discriminator is mechanical and holds everywhere in `priv/`: `canon/`, `config/` and `templates/`
-  hold the business material an operator legitimately replaces, and ONLY those resolve through this
-  module. Everything else under `priv/` is runtime, resolved by `:code.priv_dir` with no knob —
-  `schema/` (the contract a catalogue is validated against) and `baseline/` (a floor a catalogue may
-  not lower, e.g. the universal git denylist). Both by the same rule: **what an operator must not be
-  able to replace is a contract, and a contract an operator can swap does not constrain.**
+  discriminator is mechanical and it is a DIRECTORY: everything under a catalogue root
+  (`priv/catalogue/`, `priv/catalogue-system/`, or the root an operator brings) is business material
+  an operator legitimately replaces, and ONLY that resolves through this module. Everything else
+  under `priv/` is runtime, resolved by `:code.priv_dir` with no knob — `schema/` (the contract a
+  catalogue is validated against) and `baseline/` (a floor a catalogue may not lower, e.g. the
+  universal git denylist). Both by the same rule: **what an operator must not be able to replace is
+  a contract, and a contract an operator can swap does not constrain.**
 
-  Corollary for anything added later: a floor or a contract placed under `canon/` would be exported
-  with a catalogue and edited by its author to no effect — a lie told by the layout rather than by
-  a comment.
+  Corollary for anything added later: a floor or a contract placed inside a catalogue would be
+  exported with it and edited by its author to no effect — a lie told by the layout rather than by
+  a comment. No intermediate level (`canon/`) inside a catalogue carries that discriminator: the
+  root does.
 
   ## Why ONE root and not one variable per tree
 
@@ -46,7 +48,7 @@ defmodule Fleet.Catalogue do
   day a tree is added, and `rel/1` is the place that has to be right.)
 
   What the directory buys beyond tidiness: **exporting a catalogue is copying one directory**. The
-  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/canon/` (frozen legacy) —
+  runtime material — `priv/*/schema/`, `priv/cap_profile/baseline/`, `priv/memory-x/` (a frozen feature) —
   sits OUTSIDE it, so no export can carry a contract an author would edit to no effect.
 
   ⚠ `sp_builder/sp_blocks/` lives INSIDE both catalogues (`core/` is a shipped default an author
@@ -99,17 +101,17 @@ defmodule Fleet.Catalogue do
 
   # ── the trees ─────────────────────────────────────────────────────────────
   # Root-relative, ONE literal each.
-  @rel_cap_profiles "cap_profile/canon/cap-profiles"
-  @rel_modops "cap_profile/canon/modop-bundles"
-  @rel_subagent_templates "cap_profile/canon/subagent-templates"
-  @rel_monk_registry "cap_profile/canon/cap-profiles/monks"
+  @rel_cap_profiles "cap_profile/cap-profiles"
+  @rel_modops "cap_profile/modop-bundles"
+  @rel_subagent_templates "cap_profile/subagent-templates"
+  @rel_monk_registry "cap_profile/cap-profiles/monks"
   @rel_sp_drafts "sp_builder/sp_drafts"
   @rel_sp_blocks "sp_builder/sp_blocks"
   @rel_sp_templates "sp_builder/templates"
-  @rel_workflow_maps "workflow/canon/workflow_maps"
+  @rel_workflow_maps "workflow/workflow_maps"
   @rel_brief_templates "workflow/brief_templates"
   @rel_project_template "project_template"
-  @rel_skills "skills/canon"
+  @rel_skills "skills"
 
   # LES AVATARS, nommes par le ROLE et non par le compte. La recette porte une table
   # `<compte>:<image>` tenue a la main, donc elle doit connaitre les roles d'un catalogue tiers —

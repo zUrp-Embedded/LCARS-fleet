@@ -1,6 +1,6 @@
 defmodule Fleet.CapProfile.DeclarationSchemaTest do
   @moduledoc """
-  Proves that the canon template `priv/catalogue/cap_profile/canon/config/declaration-template.json`
+  Proves that the canon template `priv/catalogue/cap_profile/config/declaration-template.json`
   validates against `priv/schema/declaration-v1.json`, and that an invalid config is rejected.
   """
   use ExUnit.Case, async: true
@@ -23,7 +23,6 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
                 "priv",
                 "catalogue",
                 "cap_profile",
-                "canon",
                 "config",
                 "declaration-template.json"
               ])

@@ -27,6 +27,6 @@ Related, NOT this domain: `Fleet.Slug` and `Fleet.Layout` (own foundation bounda
 `lib/fleet/slug.ex` / `lib/fleet/layout.ex`, reachable from any domain).
 
 ## Config & deps
-- Knob `:lcars_fleet, :cap_profile_root_dir` — read by `Catalog`; default = bundled `priv/catalogue/cap_profile/canon/cap-profiles`.
+- Knob `:lcars_fleet, :cap_profile_root_dir` — read by `Catalog`; default = bundled `priv/catalogue/cap_profile/cap-profiles`.
 - Knob `:lcars_fleet, :cap_profile_schema_dir` — read by `Schema`; default = bundled `priv/cap_profile/schema`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/cap_profile.ex`).

@@ -24,7 +24,7 @@ const readYaml = (p) => yaml.load(readFileSync(p, 'utf8'));
 
 /** Les cartes, avec la `presentation:` que le catalogue ecrit DEJA pour un humain. */
 export function cards() {
-  const dir = join(CANON, 'workflow', 'canon', 'workflow_maps');
+  const dir = join(CANON, 'workflow', 'workflow_maps');
   return readdirSync(dir).filter((f) => f.endsWith('.yaml'))
     .map((f) => ({ f, d: readYaml(join(dir, f)) }))
     // MEME filtre que l'autorite interne (`status == "canon"` apres normalisation, ou le loader
@@ -74,7 +74,7 @@ export function seats() {
   const out = [];
   const naked = [];
   for (const [catalogue, root] of SEAT_CATALOGUES) {
-    const dir = join(root, 'cap_profile', 'canon', 'cap-profiles');
+    const dir = join(root, 'cap_profile', 'cap-profiles');
     if (!existsSync(dir)) throw new Error(`catalogue.js: cap-profiles introuvables (${catalogue})`);
     for (const f of readdirSync(dir).filter((f) => f.endsWith('.yaml'))) {
       const path = join(dir, f);
@@ -196,7 +196,7 @@ export function paths() {
 
 /** Combien de roles porte le catalogue SYSTEME — la mecanique, jamais le metier. */
 export function systemRoleCount() {
-  const dir = join(PRIV, 'catalogue-system', 'cap_profile', 'canon', 'cap-profiles');
+  const dir = join(PRIV, 'catalogue-system', 'cap_profile', 'cap-profiles');
   if (!existsSync(dir)) throw new Error('catalogue.js: catalogue-system introuvable');
   return readdirSync(dir).filter((f) => f.endsWith('.yaml')).length;
 }

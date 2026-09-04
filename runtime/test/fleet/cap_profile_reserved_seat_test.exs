@@ -29,7 +29,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
     real =
       Application.app_dir(
         :lcars_fleet,
-        "priv/catalogue/cap_profile/canon/cap-profiles/engineer.yaml"
+        "priv/catalogue/cap_profile/cap-profiles/engineer.yaml"
       )
       |> File.read!()
 
@@ -58,7 +58,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
     test "the SHIPPED vulcan.yaml conforms to the seat schema" do
       {:ok, raw} =
         :lcars_fleet
-        |> Application.app_dir("priv/catalogue/cap_profile/canon/cap-profiles/vulcan.yaml")
+        |> Application.app_dir("priv/catalogue/cap_profile/cap-profiles/vulcan.yaml")
         |> YamlElixir.read_from_file()
 
       assert :ok = Schema.validate(raw, :reserved_seat)

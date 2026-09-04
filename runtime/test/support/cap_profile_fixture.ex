@@ -4,7 +4,7 @@ defmodule Fleet.Support.CapProfileFixture do
   (BND-001): a NOMINAL fixture crosses the SAME schema boundary as prod, instead of forging a partial
   `%CapProfile{spec: …}` that short-circuits the schema (the invalid state made representable again).
 
-  `build/2` starts from a real CANON profile (the YAML of `priv/catalogue/cap_profile/canon/cap-profiles/` read
+  `build/2` starts from a real CANON profile (the YAML of `priv/catalogue/cap_profile/cap-profiles/` read
   DIRECTLY — single source = the canon, not a 2nd hardcoded copy of the schema; read by priv path,
   independent of the global `:root_dir` other tests mutate), deep-merges the `overrides` (stringified
   keys), and RE-VALIDATES the whole. An override breaking the schema raises at construction: the
@@ -18,7 +18,7 @@ defmodule Fleet.Support.CapProfileFixture do
 
   alias Fleet.CapProfile
 
-  @canon_rel Path.join(["catalogue", "cap_profile", "canon", "cap-profiles"])
+  @canon_rel Path.join(["catalogue", "cap_profile", "cap-profiles"])
 
   @doc """
   Canon profile `base_role` (default `"engineer"`) deep-merged with `overrides` (stringified keys) then

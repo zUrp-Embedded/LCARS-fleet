@@ -93,7 +93,7 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
     # Same computation as the consumption test: activable = union of every canon cap-profile's
     # modop_set default ∪ optional. Orphans (nothing can activate them) are out of scope here.
     test "no retired dialect in any ACTIVE bundle's sp.md" do
-      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
+      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile")
 
       referenced =
         Path.join([canon, "cap-profiles", "*.yaml"])
@@ -143,9 +143,7 @@ defmodule Fleet.SPBuilder.SpImageInvariantsTest do
 
       both_roles =
         roots
-        |> Enum.flat_map(
-          &Path.wildcard(Path.join([&1, "cap_profile/canon/cap-profiles", "*.yaml"]))
-        )
+        |> Enum.flat_map(&Path.wildcard(Path.join([&1, "cap_profile/cap-profiles", "*.yaml"])))
         |> Enum.filter(fn f ->
           case YamlElixir.read_from_file(f) do
             {:ok, %{"spec" => %{"interlocutor" => "both"}}} -> true

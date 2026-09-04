@@ -549,7 +549,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   @doc false
   @spec check_gatekeeper_not_a_step(String.t()) :: Support.result()
   def check_gatekeeper_not_a_step(root) do
-    dir = "priv/catalogue/workflow/canon/workflow_maps"
+    dir = "priv/catalogue/workflow/workflow_maps"
     abs = Path.join(root, dir)
 
     # Anti-hollow-green (mirror of `check_verdict_envelope_unwrapped`): an ABSENT/empty workflow-map

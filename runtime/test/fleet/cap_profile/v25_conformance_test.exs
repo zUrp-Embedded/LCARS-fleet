@@ -1,6 +1,6 @@
 defmodule Fleet.CapProfile.V25ConformanceTest do
   @moduledoc """
-  Conformance of the 7 canon cap-profiles `priv/catalogue/cap_profile/canon/cap-profiles/` against the
+  Conformance of the 7 canon cap-profiles `priv/catalogue/cap_profile/cap-profiles/` against the
   schema `priv/schema/cap-profile-v2.5.json`. Pattern (PROVEN): canon YAML →
   ex_json_schema validate. `async: true`.
 
@@ -34,7 +34,6 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       "priv",
       "catalogue-system",
       "cap_profile",
-      "canon",
       "cap-profiles"
     ]),
     Path.join([
@@ -45,7 +44,6 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
       "priv",
       "catalogue",
       "cap_profile",
-      "canon",
       "cap-profiles"
     ])
   ]
@@ -274,7 +272,6 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
           "priv",
           "catalogue",
           "cap_profile",
-          "canon",
           "modop-bundles",
           name,
           "sp.md"
@@ -316,7 +313,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
     raw =
       Application.app_dir(
         :lcars_fleet,
-        "priv/catalogue-system/cap_profile/canon/cap-profiles/architect.yaml"
+        "priv/catalogue-system/cap_profile/cap-profiles/architect.yaml"
       )
       |> YamlElixir.read_from_file!()
 

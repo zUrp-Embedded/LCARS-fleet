@@ -371,7 +371,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     defp canon_loader do
-      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/canon/workflow_maps")
+      canon = Application.app_dir(:lcars_fleet, "priv/catalogue/workflow/workflow_maps")
       fn name -> Fleet.Workflow.Loader.load!(name, workflow_maps_root: canon) end
     end
 

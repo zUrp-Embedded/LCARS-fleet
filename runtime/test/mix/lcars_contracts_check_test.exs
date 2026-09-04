@@ -730,8 +730,8 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       # `fail-closed` sur une recette hors perimetre, puis un `[]` nu la ou un tuple etait attendu.
       # Ce test amene ce chemin sur l'hote.
       root = Path.join(tmp, "sans-deploy")
-      File.mkdir_p!(Path.join(root, "priv/catalogue/cap_profile/canon/cap-profiles"))
-      File.mkdir_p!(Path.join(root, "priv/catalogue-system/cap_profile/canon/cap-profiles"))
+      File.mkdir_p!(Path.join(root, "priv/catalogue/cap_profile/cap-profiles"))
+      File.mkdir_p!(Path.join(root, "priv/catalogue-system/cap_profile/cap-profiles"))
 
       File.write!(
         Path.join(root, "priv/catalogue/catalogue.yaml"),

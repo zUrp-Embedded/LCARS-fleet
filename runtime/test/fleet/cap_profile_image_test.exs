@@ -18,7 +18,7 @@ defmodule Fleet.CapProfileImageTest do
     real =
       Application.app_dir(
         :lcars_fleet,
-        "priv/catalogue/cap_profile/canon/cap-profiles/engineer.yaml"
+        "priv/catalogue/cap_profile/cap-profiles/engineer.yaml"
       )
       |> File.read!()
 
