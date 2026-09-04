@@ -57,8 +57,8 @@ OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC", "/etc/lcars/deck-oidc.json")
 # et une paire chez le convergeur, c'est un renommage d'org qui casse en SILENCE et dans UN SEUL
 # sens : la forge emet `<org>:humans`, cette page compare a `fleet:humans` et REFUSE tout humain non
 # admin, pendant que le convergeur continue de creer leurs comptes.
-FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
-HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("PROV_HUMANS_TEAM", "humans"))
+FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
+HUMANS_TEAM = "%s:%s" % (FORGE_ORG, os.environ.get("LCARS_HUMANS_TEAM", "humans"))
 SESSION_COOKIE = "lcars_deck"
 SESSION_TTL = 12 * 3600
 PENDING_TTL = 600

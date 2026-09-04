@@ -56,7 +56,7 @@ STORE_QUERY="catalogue"
 forge_installed() {
   local hdr body total count
   hdr="$(mktemp)"
-  body="$(curl -fsS -m 20 -D "$hdr" "$PROV_FORGE_URL/api/v1/repos/search?q=$STORE_QUERY&limit=50" 2>/dev/null)" \
+  body="$(curl -fsS -m 20 -D "$hdr" "$FORGE_BASE_URL/api/v1/repos/search?q=$STORE_QUERY&limit=50" 2>/dev/null)" \
     || { rm -f "$hdr"; return 1; }
   total="$(tr -d '\r' < "$hdr" | awk -F': ' 'tolower($1)=="x-total-count"{print $2}')"
   rm -f "$hdr"
@@ -85,7 +85,7 @@ forge_installed() {
       continue
     fi
 
-    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/orgs/$name" 2>/dev/null)" || code=000
     case "$code" in
       200) printf 'OK %s %s\n' "$name" "$url" ;;
       404) : ;;
@@ -110,7 +110,7 @@ forge_installed() {
 #
 declared_name() {
   local raw code body
-  raw="$(curl -sS -m 10 -w '\n%{http_code}' "$PROV_FORGE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
+  raw="$(curl -sS -m 10 -w '\n%{http_code}' "$FORGE_BASE_URL/api/v1/repos/$1/raw/$MANIFEST" 2>/dev/null)" \
     || raw=$'\n000'
   code="${raw##*$'\n'}"
   body="${raw%$'\n'*}"
@@ -126,8 +126,8 @@ declared_name() {
 
 local_installed() {
   local d
-  [[ -d "$PROV_CATALOGUES_DIR" ]] || return 0
-  for d in "$PROV_CATALOGUES_DIR"/*/; do
+  [[ -d "$LCARS_CATALOGUES_DIR" ]] || return 0
+  for d in "$LCARS_CATALOGUES_DIR"/*/; do
     [[ -f "${d}catalogue.yaml" ]] || continue
     basename "$d"
   done
@@ -144,18 +144,18 @@ local_head()  { git -C "$1" rev-parse HEAD 2>/dev/null || true; }
 # perimetre entier, donc aucun geste du rail n'y touchera plus. Se taire laisserait un arbre orphelin
 # de plusieurs centaines de mega sur une machine dont l'operateur croit que le produit gere ses
 # chemins. Ce n'est PAS un drift : un drift promet qu'`apply` converge, et `apply` ne le fera jamais.
-LEGACY_CATALOGUES_DIR="$PROV_LEGACY_CATALOGUES_DIR"
+LEGACY_CATALOGUES_DIR="$LCARS_LEGACY_CATALOGUES_DIR"
 
 say_leftover() {
   [[ -d "$LEGACY_CATALOGUES_DIR" ]] || return 0
-  [[ "$LEGACY_CATALOGUES_DIR" != "$PROV_CATALOGUES_DIR" ]] || return 0
-  p_warn "$LEGACY_CATALOGUES_DIR subsiste — le cache des catalogues a déménagé sous $PROV_CATALOGUES_DIR. Rien sous /home n'est retiré par LCARS : à supprimer à la main si vous n'en voulez plus (« rm -rf $LEGACY_CATALOGUES_DIR »), le matériel se reclone depuis la forge"
+  [[ "$LEGACY_CATALOGUES_DIR" != "$LCARS_CATALOGUES_DIR" ]] || return 0
+  p_warn "$LEGACY_CATALOGUES_DIR subsiste — le cache des catalogues a déménagé sous $LCARS_CATALOGUES_DIR. Rien sous /home n'est retiré par LCARS : à supprimer à la main si vous n'en voulez plus (« rm -rf $LEGACY_CATALOGUES_DIR »), le matériel se reclone depuis la forge"
 }
 
 # ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE DEJA ───────────────────────────
 #
-# ⚠ LA CAUSE EST UNE INVERSION DE RANG QUI NE PEUT PAS SE DECLARER. `PROV_FORGE_URL` se derive de
-# `FORGE_BASE_URL` ou de `$PROV_TOKENS_DIR/forge.url` (`lib/provision-lib.sh:79`), et ce fichier n'a
+# ⚠ LA CAUSE EST UNE INVERSION DE RANG QUI NE PEUT PAS SE DECLARER. `FORGE_BASE_URL` se derive de
+# `FORGE_BASE_URL` ou de `$LCARS_PRIVATE_DIR/forge.url` (`lib/provision-lib.sh:79`), et ce fichier n'a
 # QU'UN poseur : `48-forge-host.sh:312`, TROIS RANGS PLUS LOIN. `provision:315` ordonne les modules
 # par leur rang et `provision:327` refuse un `AFTER` qui ne precede pas — la dependance est REELLE
 # et non declarable. La nommer ici est tout ce qu'on peut en faire.
@@ -167,13 +167,13 @@ say_leftover() {
 # Elle mord sur une RE-PROVISION dont les jetons ont disparu alors que le volume de la forge a
 # survecu : il y a du materiel LOCAL, et plus d'autorite a qui le comparer. Le premier cas est un
 # WARN (on ne sait pas, et ca ne coute rien) ; le second un DRIFT (un etat-cible cesse d'etre tenu,
-# et `p_warn` n'incremente ni PROV_DRIFT ni PROV_FAILED — le bilan resterait vert).
+# et `p_warn` n'incremente ni LCARS_DRIFT ni LCARS_FAILED — le bilan resterait vert).
 forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, selon ce qui est deja la
   local n=0
-  [[ -d "$PROV_CATALOGUES_DIR" ]] \
-    && n="$(find "$PROV_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+  [[ -d "$LCARS_CATALOGUES_DIR" ]] \
+    && n="$(find "$LCARS_CATALOGUES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
   if [[ "$n" -gt 0 ]]; then
-    p_drift "adresse de forge inconnue alors que $n catalogue(s) sont deja installes ici ($PROV_CATALOGUES_DIR) — leur autorite est injoignable, rien ne peut etre compare ni converge. Pose FORGE_BASE_URL, ou rejoue « 48-forge-host » qui ecrit $PROV_TOKENS_DIR/forge.url"
+    p_drift "adresse de forge inconnue alors que $n catalogue(s) sont deja installes ici ($LCARS_CATALOGUES_DIR) — leur autorite est injoignable, rien ne peut etre compare ni converge. Pose FORGE_BASE_URL, ou rejoue « 48-forge-host » qui ecrit $LCARS_PRIVATE_DIR/forge.url"
   else
     p_warn "adresse de forge inconnue, et AUCUN catalogue installe ici — rien a comparer. Sur une premiere passe c'est l'ordre normal : « 48-forge-host » ecrit cette adresse trois rangs plus loin"
   fi
@@ -181,7 +181,7 @@ forge_inconnue() { # forge_inconnue <verbe: check|apply> — dit le bon mot, sel
 
 check() {
   say_leftover
-  if [[ -z "$PROV_FORGE_URL" ]]; then
+  if [[ -z "$FORGE_BASE_URL" ]]; then
     forge_inconnue check
     verdict_check
   fi
@@ -192,7 +192,7 @@ check() {
     p_drift "liste des catalogues TRONQUEE par la forge — rien n'est conclu sur une liste partielle"
     verdict_check
   elif [[ "$rc" -ne 0 ]]; then
-    p_drift "forge injoignable ($PROV_FORGE_URL) — l'etat installe des catalogues n'a pas pu etre lu"
+    p_drift "forge injoignable ($FORGE_BASE_URL) — l'etat installe des catalogues n'a pas pu etre lu"
     verdict_check
   fi
 
@@ -206,7 +206,7 @@ check() {
     fi
     url="$arg"
 
-    local dir="$PROV_CATALOGUES_DIR/$name"
+    local dir="$LCARS_CATALOGUES_DIR/$name"
     if [[ ! -d "$dir/.git" ]]; then
       p_drift "catalogue $name installe sur la forge, materiel absent ici ($dir)"
     elif [[ "$(local_head "$dir")" != "$(remote_head "$url")" ]]; then
@@ -229,7 +229,7 @@ apply() {
   # Dit AUSSI a l'apply : c'est le geste que l'operateur lance apres une mise a jour, donc celui ou
   # le demenagement vient d'avoir lieu. Le taire ici le reserverait a qui pense a jouer un doctor.
   say_leftover
-  [[ -n "$PROV_FORGE_URL" ]] || { forge_inconnue apply; verdict_apply; }
+  [[ -n "$FORGE_BASE_URL" ]] || { forge_inconnue apply; verdict_apply; }
 
   local signed rc=0
   signed="$(forge_installed)" || rc=$?
@@ -237,14 +237,14 @@ apply() {
     p_drift "liste des catalogues TRONQUEE par la forge — materiel laisse EN L'ETAT, rien n'est supprime"
     verdict_apply
   elif [[ "$rc" -ne 0 ]]; then
-    p_drift "forge injoignable ($PROV_FORGE_URL) — materiel laisse EN L'ETAT, rien n'est supprime"
+    p_drift "forge injoignable ($FORGE_BASE_URL) — materiel laisse EN L'ETAT, rien n'est supprime"
     verdict_apply
   fi
 
   # `mkdir -p` et pas `install -d -o root -g root` : la PROPRIETE de ce repertoire appartient a
   # `25-directories`, dont c'est tout le metier, et deux modules qui posent le meme owner finissent
   # par ne plus etre d'accord. Ici on garantit seulement qu'il existe avant d'y ecrire.
-  mkdir -p "$PROV_CATALOGUES_DIR"
+  mkdir -p "$LCARS_CATALOGUES_DIR"
 
   local status name arg url dir seen=" "
   while read -r status name arg; do
@@ -258,7 +258,7 @@ apply() {
     fi
     url="$arg"
 
-    dir="$PROV_CATALOGUES_DIR/$name"
+    dir="$LCARS_CATALOGUES_DIR/$name"
 
     if [[ -d "$dir/.git" ]]; then
       # `fetch` + `reset --hard` et PAS `pull` : le cache n'a pas d'historique a preserver, et un
@@ -291,7 +291,7 @@ apply() {
   while read -r have; do
     [[ -n "$have" ]] || continue
     if [[ "$seen" != *" $have "* ]]; then
-      rm -rf "${PROV_CATALOGUES_DIR:?}/$have"
+      rm -rf "${LCARS_CATALOGUES_DIR:?}/$have"
       p_ok "materiel de $have retire (la forge ne l'installe plus)"
     fi
   done < <(local_installed)

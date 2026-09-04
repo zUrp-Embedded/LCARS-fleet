@@ -73,7 +73,7 @@ end
 #
 # ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
 # `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet_v2.env`,
-# derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
+# derivees toutes deux de `$LCARS_SYSTEM_ACCOUNT`. Mais `LCARS_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
 # BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
 # en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte un

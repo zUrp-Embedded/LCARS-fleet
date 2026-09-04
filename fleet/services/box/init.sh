@@ -35,14 +35,14 @@
 # rend 3 quand la boite n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
-: "${PROV_MODULE_TAG:=box-init}"
+: "${LCARS_MODULE_TAG:=box-init}"
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/module-protocol.sh}"
 
 LCARS_UID="${LCARS_UID:-1000}"
 SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$PROV_TOKENS_DIR/forge-uid.map}"
+UID_MAP_FILE="${LCARS_UID_MAP_FILE:-$LCARS_PRIVATE_DIR/forge-uid.map}"
 HOST_KEYS_DIR="${LCARS_HOST_KEYS_DIR:-/home/.lcars-container/ssh}"
 STORE_ROOT="${LCARS_STORE_ROOT:-}"
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/admiral/skills}"
@@ -53,8 +53,8 @@ seat_from_map() { # le login du siege enregistre, ou vide
   awk -F'\t' '$1 == 1 { print $3; exit }' "$UID_MAP_FILE" 2>/dev/null
 }
 seat_from_forge() { # le #1 de la forge, par le jeton master, ou vide
-  [[ -s "$PROV_MASTER_TOKEN_FILE" && -n "${PROV_FORGE_URL:-}" ]] || return 0
-  forge_curl "$PROV_MASTER_TOKEN_FILE" -sS -m 15 "${PROV_FORGE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
+  [[ -s "$LCARS_MASTER_TOKEN_FILE" && -n "${FORGE_BASE_URL:-}" ]] || return 0
+  forge_curl "$LCARS_MASTER_TOKEN_FILE" -sS -m 15 "${FORGE_BASE_URL%/}/api/v1/admin/users?limit=50" 2>/dev/null \
     | jq -r 'map(select(.id == 1)) | .[0].login // empty' 2>/dev/null || true
 }
 seat_record() { # seat_record <login> <uid>
@@ -82,8 +82,8 @@ seat_resolve() { # -> SEAT_LOGIN pose ; rc 0 resolu · 3 indeterminable · 1 div
     SEAT_LOGIN="$candidat"
     p_ok "siege : « $SEAT_LOGIN » seme par l'appelant (LCARS_ADMIRAL) — cas from-scratch"
   else
-    local pourquoi="jeton master illisible : $PROV_MASTER_TOKEN_FILE"
-    [[ -s "$PROV_MASTER_TOKEN_FILE" ]] && pourquoi="forge muette (${PROV_FORGE_URL:-FORGE_BASE_URL absente})"
+    local pourquoi="jeton master illisible : $LCARS_MASTER_TOKEN_FILE"
+    [[ -s "$LCARS_MASTER_TOKEN_FILE" ]] && pourquoi="forge muette (${FORGE_BASE_URL:-FORGE_BASE_URL absente})"
     p_warn "siege : IMPOSSIBLE a determiner — ni semence (LCARS_ADMIRAL), ni ligne forge_id=1 dans $UID_MAP_FILE, ni #1 lisible ($pourquoi)"
     return 3
   fi
@@ -103,13 +103,13 @@ seat_uid_file() {
 seat_create() {
   if ! getent passwd "$SEAT_LOGIN" >/dev/null; then
     useradd -m -u "$LCARS_UID" -s /bin/bash "$SEAT_LOGIN" || { p_fail "siege : useradd $SEAT_LOGIN (uid $LCARS_UID) refuse"; return 1; }
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "sysadmin $SEAT_LOGIN cree (uid $LCARS_UID)"
+    LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "sysadmin $SEAT_LOGIN cree (uid $LCARS_UID)"
   fi
   if getent group sudo >/dev/null 2>&1 && ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx sudo; then
     usermod -aG sudo "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ sudo" || p_warn "« $SEAT_LOGIN » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
   fi
-  if ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
-    usermod -aG "$PROV_FLEET_GROUP" "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ $PROV_FLEET_GROUP" || p_fail "$SEAT_LOGIN ∉ $PROV_FLEET_GROUP"
+  if ! id -nG "$SEAT_LOGIN" | tr ' ' '\n' | grep -qx "$LCARS_FLEET_GROUP"; then
+    usermod -aG "$LCARS_FLEET_GROUP" "$SEAT_LOGIN" && p_chg "$SEAT_LOGIN ∈ $LCARS_FLEET_GROUP" || p_fail "$SEAT_LOGIN ∉ $LCARS_FLEET_GROUP"
   fi
   local home; home="$(getent passwd "$SEAT_LOGIN" | cut -d: -f6)"
   if [[ -n "${LCARS_SSH_AUTHORIZED_KEYS:-}" ]]; then
@@ -142,7 +142,7 @@ source_trees() {
     local -a args=(--depth 1); [[ -n "$ref" ]] && args+=(--branch "$ref")
     rm -rf "${src}.part"
     if git clone "${args[@]}" "$remote" "${src}.part" 2>&1 | sed 's/^/[git] /' && mv "${src}.part" "$src"; then
-      chown -R "$SEAT_LOGIN:$PROV_FLEET_GROUP" "$src"; p_chg "source clonee : $remote${ref:+ ($ref)} → $src"
+      chown -R "$SEAT_LOGIN:$LCARS_FLEET_GROUP" "$src"; p_chg "source clonee : $remote${ref:+ ($ref)} → $src"
     else
       rm -rf "${src}.part"; p_drift "CLONAGE ECHOUE ($remote) — la boite demarre sans source (la fleet ne pourra pas se maintenir)"
     fi
@@ -152,7 +152,7 @@ source_trees() {
     if git ls-remote --exit-code --heads "$remote" ops >/dev/null 2>&1; then
       rm -rf "${work}.part"
       if git clone --depth 1 --branch ops "$remote" "${work}.part" 2>&1 | sed 's/^/[git] /' && mv "${work}.part" "$work"; then
-        chown -R "$SEAT_LOGIN:$PROV_FLEET_GROUP" "$work"; p_chg "corpus ops pose → $work"
+        chown -R "$SEAT_LOGIN:$LCARS_FLEET_GROUP" "$work"; p_chg "corpus ops pose → $work"
       else
         rm -rf "${work}.part"; p_warn "CLONAGE ops ECHOUE — dual-dir absent (adoptable plus tard, rien de fatal)"
       fi
@@ -179,7 +179,7 @@ host_keys() {
   else
     ssh-keygen -A >/dev/null
     cp /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$HOST_KEYS_DIR/" && chmod 0600 "$HOST_KEYS_DIR"/ssh_host_*_key
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "cles d'hote SSH generees → $HOST_KEYS_DIR (persistantes)"
+    LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "cles d'hote SSH generees → $HOST_KEYS_DIR (persistantes)"
   fi
 }
 
@@ -188,24 +188,24 @@ host_keys() {
 # ou `docker` — c'est le contrat entre les deux rails ; `verify` le mesure au build de l'image.
 layout() {
   ensure_dir /opt/lcars/var                     0755 root:root || true
-  ensure_dir "$PROV_TOKENS_DIR"                 0710 "$PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" || true
-  ensure_dir "$PROV_CATALOGUES_DIR"             0750 "root:$PROV_FLEET_GROUP" || true
-  ensure_dir "${PROV_CATALOGUES_WORK:-/opt/lcars/var/tofu}" 0700 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" || true
+  ensure_dir "$LCARS_PRIVATE_DIR"                 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
+  ensure_dir "$LCARS_CATALOGUES_DIR"             0750 "root:$LCARS_FLEET_GROUP" || true
+  ensure_dir "${LCARS_CATALOGUES_WORK:-/opt/lcars/var/tofu}" 0700 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" || true
   ensure_dir /var/lib/lcars                     0755 root:root || true
   ensure_dir /var/tmp/lcars                     0755 root:root || true
   ensure_dir /var/tmp/lcars/toolchain-work      0700 root:root || true
   ensure_dir /etc/lcars                         0755 root:root || true
   ensure_dir /run/lcars                         0755 root:root || true
-  ensure_dir /run/lcars/toolchain               2775 "root:$PROV_FLEET_GROUP" || true
-  ensure_dir /run/lcars/authority               0750 "$PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" || true
-  ensure_dir /run/lcars/privileged              0750 "root:$PROV_FLEET_GROUP" || true
+  ensure_dir /run/lcars/toolchain               2775 "root:$LCARS_FLEET_GROUP" || true
+  ensure_dir /run/lcars/authority               0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
+  ensure_dir /run/lcars/privileged              0750 "root:$LCARS_FLEET_GROUP" || true
   ensure_dir /run/lock/lcars                    0700 root:root || true
   if [[ -n "$STORE_ROOT" ]]; then
     [[ -d "$STORE_ROOT" ]] || { p_drift "magasin $STORE_ROOT absent — volumes non montes ?"; return 0; }
-    ensure_dir "$STORE_ROOT/cache"      2775 "root:$PROV_FLEET_GROUP" || true
+    ensure_dir "$STORE_ROOT/cache"      2775 "root:$LCARS_FLEET_GROUP" || true
     ensure_dir "$STORE_ROOT/toolchains" 0755 root:root || true
     ensure_dir "$STORE_ROOT/sysroots"   0755 root:root || true
-    ensure_dir "$STORE_ROOT/state"      2775 "root:$PROV_FLEET_GROUP" || true
+    ensure_dir "$STORE_ROOT/state"      2775 "root:$LCARS_FLEET_GROUP" || true
   else
     p_warn "LCARS_STORE_ROOT absent — le compose ne l'a pas pose, le magasin n'est pas converge"
   fi
@@ -241,13 +241,13 @@ cmd_seat() {
 # `config-token` dans la boite) reste jouable, et le drift se dit plus loin (tokens, seat).
 secrets_import() {
   local dir="${LCARS_SECRETS_DIR:-/run/secrets}" pair src dst name
-  for pair in "forge_master_token:$PROV_MASTER_TOKEN_FILE" "forge_seed_password:$PROV_FORGE_SEED_FILE"; do
+  for pair in "forge_master_token:$LCARS_MASTER_TOKEN_FILE" "forge_seed_password:$LCARS_FORGE_SEED_FILE"; do
     name="${pair%%:*}"; src="$dir/$name"; dst="${pair#*:}"
     [[ -s "$src" ]] || continue
     if [[ -s "$dst" ]] && cmp -s "$src" "$dst"; then p_ok "secret $name : deja en place ($dst)"; continue; fi
-    ensure_dir "$PROV_TOKENS_DIR" 0710 "$PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" || true
-    write_atomic "$dst" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" < "$src" \
-      && p_chg "secret $name importe du compose → $dst ($PROV_AUTHORITY_USER seul)" \
+    ensure_dir "$LCARS_PRIVATE_DIR" 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
+    write_atomic "$dst" 0600 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" < "$src" \
+      && p_chg "secret $name importe du compose → $dst ($LCARS_AUTHORITY_USER seul)" \
       || p_fail "secret $name : import impossible → $dst"
   done
 }

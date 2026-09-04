@@ -53,20 +53,20 @@
 set -euo pipefail
 
 FORGE="${FORGE_BASE_URL:-}"
-# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `PROV_TOKENS_DIR` est la SSoT
+# ⚠ LA RACINE SE DEMANDE, ELLE NE SE RECOPIE PAS. `LCARS_PRIVATE_DIR` est la SSoT
 # (`provision-lib.sh`) ; un litteral ici serait un SECOND endroit qui decide ou vivent les jetons,
 # et celui qui derive est toujours celui qu'on ne relit pas. Le defaut reste, pour un script qu'un
 # operateur lance a la main hors du rail.
-TOKENS_DIR="${PROV_TOKENS_DIR:-/opt/lcars/var/tokens}"
+TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
-# catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
+# catalogue == forge.tf local.roles == this ROLES == provision-lib.sh LCARS_ROLES) — a partial
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
-OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
-DIR_GROUP="${PROV_FLEET_GROUP:-fleet}"
+OWNER="${LCARS_AUTHORITY_USER:-lcars-authority}"
+DIR_GROUP="${LCARS_FLEET_GROUP:-fleet}"
 TOKEN_NAME="lcars-fleet"
 SCOPES="write:repository,write:issue"
 # ⚠ THE SYSTEM ACCOUNT'S SCOPES ARE WIDER THAN A ROLE'S, AND EACH ADDITION IS MEASURED:

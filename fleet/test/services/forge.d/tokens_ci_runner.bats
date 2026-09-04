@@ -30,15 +30,15 @@ setup() {
   mkdir -p "$BIN" "$BATS_TEST_TMPDIR/tokens"
 
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export PROV_MODULE_TAG=63-forge-tokens
+  export LCARS_MODULE_TAG=63-forge-tokens
   # le roster vient du release par « lcars tool » : ici, une CLI de doublure qui rend un roster fixe
   mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_HUMAN="zoe"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
-  export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/nocat"
-  export PROV_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tokens/master"
-  printf 'MASTERTOK' > "$PROV_MASTER_TOKEN_FILE"
+  export FORGE_BASE_URL="http://forge.test"
+  export LCARS_LOGIN="zoe"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/nocat"
+  export LCARS_MASTER_TOKEN_FILE="$BATS_TEST_TMPDIR/tokens/master"
+  printf 'MASTERTOK' > "$LCARS_MASTER_TOKEN_FILE"
   export PATH="$BIN:$PATH"
 }
 
@@ -69,7 +69,7 @@ EOF
   # Le runner est un etat-cible sur TOUS les rails : le banc monte le sien, `49-forge-runner` monte
   # celui du poste. Le verdict est donc le meme partout, et le substrat n'y entre pas.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=docker bash "$MODULE" check
+  run bash "$MODULE" check
 
   [[ "$output" == *"AUCUN runner CI"* ]]
   [[ "$output" == *"DRIFT"* ]]
@@ -99,7 +99,7 @@ EOF
   # Degrader le mot la ou le rail ne convergeait pas rendait le seul voyant fiable muet, et laissait
   # livrer une forge que rien ne peut servir. Le rail converge : le mot ne bouge plus.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=wsl bash "$MODULE" check
+  run bash "$MODULE" check
 
   local line; line="$(grep -i 'runner CI' <<<"$output" | head -1)"
   [ -n "$line" ]
@@ -137,7 +137,7 @@ EOF
   # Une boite sans ce jeton FONCTIONNE — c'est deja la nuance que porte `check_master_authority`
   # (`p_warn` et pas `p_drift`). Une sonde qui exigerait le jeton transformerait un deploiement
   # legitime en drift permanent.
-  rm -f "$PROV_MASTER_TOKEN_FILE"
+  rm -f "$LCARS_MASTER_TOKEN_FILE"
   stub_curl '{"runners":[],"total_count":0}'
   run bash "$MODULE" check
 
@@ -151,7 +151,7 @@ EOF
   # c'est-a-dire au seul moment ou l'operateur peut encore enroler un runner AVANT que la fleet ne
   # depense un producteur sur un rail mort.
   stub_curl '{"runners":[],"total_count":0}'
-  run env PROV_SUBSTRATE=docker bash "$MODULE" apply
+  run bash "$MODULE" apply
 
   [[ "$output" == *"AUCUN runner CI"* ]]
 }

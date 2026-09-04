@@ -35,10 +35,10 @@ setup() {
   MODULE="$BATS_TEST_DIRNAME/../../../services/forge.d/ops-branch.sh"
   [ -f "$MODULE" ]
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export PROV_MODULE_TAG=65-ops-branch
+  export LCARS_MODULE_TAG=65-ops-branch
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$PROV_TOKENS_DIR"
+  export FORGE_BASE_URL="http://forge.test"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$LCARS_PRIVATE_DIR"
 }
 
 # $1 = code HTTP de la BRANCHE (200 presente · 404 absente) · $2 = code HTTP du DEPOT (defaut 200)
@@ -62,7 +62,7 @@ EOF
 
 @test "jeton PAS ENCORE la : drift (rc 2), jamais un echec — une boite neuve n'est pas en panne" {
   stub_curl 404
-  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/absent.gitea_token"
+  export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/absent.gitea_token"
   run bash "$MODULE" apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"DRIFT"* ]]
@@ -79,8 +79,8 @@ EOF
   # poussait dans le vide et la forge repondait « Push to create is not enabled for organizations »
   # en 403 — un message qui envoie chercher un reglage de forge pour un depot qui n'est pas ne.
   stub_curl 404 404
-  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
-  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/x.gitea_token"
+  printf 'TOK\n' > "$LCARS_SYSTEM_TOKEN_FILE"
   run bash "$MODULE" apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"DRIFT"* ]]
@@ -96,8 +96,8 @@ EOF
   # 404 dit « il n'est pas ne » ; 500 ou une reponse vide ne disent rien. Degrader le second en drift
   # rendrait muet un depot supprime ou une forge a moitie morte.
   stub_curl 404 500
-  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
-  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/x.gitea_token"
+  printf 'TOK\n' > "$LCARS_SYSTEM_TOKEN_FILE"
   run bash "$MODULE" apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"ne dit pas s'il existe"* ]]
@@ -105,8 +105,8 @@ EOF
 
 @test "branche DEJA presente : rien n'est touche — elle porte des signatures humaines" {
   stub_curl 200
-  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
-  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/x.gitea_token"
+  printf 'TOK\n' > "$LCARS_SYSTEM_TOKEN_FILE"
   run bash "$MODULE" apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"déjà présente"* ]]
@@ -139,8 +139,8 @@ EOF
 exit 7
 EOF
   chmod +x "$BIN/curl"
-  export PROV_SYSTEM_TOKEN_FILE="$PROV_TOKENS_DIR/x.gitea_token"
-  printf 'TOK\n' > "$PROV_SYSTEM_TOKEN_FILE"
+  export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/x.gitea_token"
+  printf 'TOK\n' > "$LCARS_SYSTEM_TOKEN_FILE"
   run bash "$MODULE" apply
   # LE CODE EXACT, PAS « NON NUL » : 2 = applique avec drift residuel, 1 = echec. C'est toute la
   # difference entre « il manque un geste » et « quelque chose est casse », et c'est elle que ce

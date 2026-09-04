@@ -5,7 +5,7 @@
 # STATUS: bats tests for 40-claude-bin — UNE seule source, l'installeur officiel
 #
 # ⚠ CE FICHIER REMPLACE `claude_bin_seed.bats`, ET IL EPINGLE L'INVERSE DE CE QUE CELUI-LA PROUVAIT.
-# L'ancien tenait qu'une GRAINE (`$PROV_CLAUDE_SEED`, un binaire pose sur la machine par un geste
+# L'ancien tenait qu'une GRAINE (`$LCARS_CLAUDE_SEED`, un binaire pose sur la machine par un geste
 # exterieur) court-circuitait le reseau ; son stub `curl` echouait si le reseau etait appele.
 #
 # ⚖ ARBITRAGE USER 2026-08-17 : « on ne cache pas un binaire anthropic, on fait UNIQUEMENT l'install
@@ -49,8 +49,8 @@ EOF
   : > "$CURL_LOG"
 
   export LCARS_HUMAN_PROTOCOL="$SANDBOX/lib/human-protocol.sh"
-  export PROV_HUMAN
-  PROV_HUMAN="$(id -un)"
+  export LCARS_LOGIN
+  LCARS_LOGIN="$(id -un)"
   export PATH="$BINDIR:$PATH"
 
   # ⚠ `HOME` EST DU DECOR ICI, ET SON ABSENCE COUTE LE BINAIRE DU DEVELOPPEUR. Le module ne
@@ -147,6 +147,6 @@ EOF
 @test "aucune SOURCE alternative ne subsiste dans le module" {
   # Epingle la FORME, pas le comportement : ce qui a produit le defaut est une seconde source
   # preferee au reseau. Qu'elle ne puisse pas revenir par une variable oubliee se verifie ici.
-  run grep -c "PROV_CLAUDE_SEED" "$MOD"
+  run grep -c "LCARS_CLAUDE_SEED" "$MOD"
   [ "$output" -eq 1 ]   # la seule occurrence restante est l'avertissement « ne pas la remettre »
 }

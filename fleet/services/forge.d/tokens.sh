@@ -14,9 +14,9 @@ set -euo pipefail
 # de son instance et par l'installeur a l'install (63-forge-tokens, un appelant mince).
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
-: "${PROV_HUMAN:=}"
+: "${LCARS_LOGIN:=}"
 
-: "${PROV_PASSWORDS_FILE:=$PROV_TOKENS_DIR/forge-role-passwords.json}"
+: "${LCARS_PASSWORDS_FILE:=$LCARS_PRIVATE_DIR/forge-role-passwords.json}"
 # Lot 6 (2026-09-04) — CORRECTION au lot 1 : le minteur n'est PAS « install seulement ». Le poste le
 # joue ici, a l'install ; la BOITE le joue a l'init de son instance, qui est du PRODUIT (Q1). Un
 # geste joue en prod est du produit : il vit avec les gestes de forge, et l'installeur l'APPELLE —
@@ -25,7 +25,7 @@ set -euo pipefail
 A4_SCRIPT="${LCARS_ROLE_TOKENS_SCRIPT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/provision-role-tokens.sh}"
 # LE ROSTER DU MINT SE DERIVE DU RELEASE, PAS D'UNE LISTE ECRITE ICI : les roles du catalogue
 # embarque (« lcars tool roles-tfvars » sans argument), plus ceux de chaque catalogue installe, plus
-# le plancher que l'appelant apporte (`PROV_ROLES` — l'installeur en a un ; la boite n'en a pas
+# le plancher que l'appelant apporte (`LCARS_ROLES` — l'installeur en a un ; la boite n'en a pas
 # besoin, la release porte le sien). C'etait `prov_roles` dans la lib de l'installeur.
 _lcars_cli() {
   [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
@@ -33,12 +33,12 @@ _lcars_cli() {
   printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/lcars"
 }
 roles_of_machine() {
-  local out="${PROV_ROLES:-}" cli root
+  local out="${LCARS_ROLES:-}" cli root
   cli="$(_lcars_cli)"
   if [[ -r "$cli" ]] && command -v jq >/dev/null; then
     out="$out $(bash "$cli" tool roles-tfvars 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
-    if [[ -d "$PROV_CATALOGUES_DIR" ]]; then
-      for root in "$PROV_CATALOGUES_DIR"/*/; do
+    if [[ -d "$LCARS_CATALOGUES_DIR" ]]; then
+      for root in "$LCARS_CATALOGUES_DIR"/*/; do
         [[ -f "${root}catalogue.yaml" ]] || continue
         out="$out $(bash "$cli" tool roles-tfvars "${root%/}" 2>/dev/null | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
       done
@@ -51,14 +51,14 @@ roles_of_machine() {
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur
 # deux ensembles differents et le rapport parle d'un etat que personne n'a converge.
 ROLES="$(roles_of_machine)"
-ACCOUNTS="$ROLES $PROV_SYSTEM_ACCOUNT"
+ACCOUNTS="$ROLES $LCARS_SYSTEM_ACCOUNT"
 
 # La forme se teste ICI, pas chez l'appelant : `curl` accepte un « host:port » nu et lui prefixe
 # `http://`, alors que le runtime concatene `base_url` verbatim (Fleet.Forge.Client.Transport) et
 # refuse. Une sonde plus tolerante que son consommateur rend un vert faux.
 forge_reachable() {   # 0 joignable · 1 forme invalide · 2 injoignable
-  [[ "$PROV_FORGE_URL" == http://* || "$PROV_FORGE_URL" == https://* ]] || return 1
-  curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null || return 2
+  [[ "$FORGE_BASE_URL" == http://* || "$FORGE_BASE_URL" == https://* ]] || return 1
+  curl -fsS -m 10 -o /dev/null "$FORGE_BASE_URL/api/v1/version" 2>/dev/null || return 2
 }
 
 # ⚠ LE CODE HTTP NE DISCRIMINE RIEN — mesuré le 2026-08-12 sur Gitea 1.26.1, les deux états rendent
@@ -69,9 +69,9 @@ forge_reachable() {   # 0 joignable · 1 forme invalide · 2 injoignable
 # ne laisse pas de trace derrière elle.)
 probe_registration() {
   local page
-  page="$(curl -fsS -m 10 "$PROV_FORGE_URL/user/sign_up" 2>/dev/null || true)"
+  page="$(curl -fsS -m 10 "$FORGE_BASE_URL/user/sign_up" 2>/dev/null || true)"
   if [[ -z "$page" ]]; then
-    p_warn "page d'inscription non lisible ($PROV_FORGE_URL/user/sign_up) — l'ouverture de l'inscription N'EST PAS mesurée"
+    p_warn "page d'inscription non lisible ($FORGE_BASE_URL/user/sign_up) — l'ouverture de l'inscription N'EST PAS mesurée"
   elif [[ "$page" == *'name="user_name"'* ]]; then
     p_ok "inscription OUVERTE — une personne peut créer son compte, puis un propriétaire d'org l'ajoute à « humans »"
   else
@@ -84,19 +84,19 @@ probe_registration() {
 probe_restricted() { # $1=login à sonder
   local login="$1" body
   [[ -n "$login" ]] || return 0
-  body="$(curl -fsS -m 10 "$PROV_FORGE_URL/api/v1/users/$login" 2>/dev/null || true)"
+  body="$(curl -fsS -m 10 "$FORGE_BASE_URL/api/v1/users/$login" 2>/dev/null || true)"
   # ⚠ `has()` ET PAS `//` : l'opérateur `//` de jq traite `false` comme absent, donc un compte
   # correctement NON restreint serait lu « non mesurable » et la sonde se tairait là où elle doit
   # dire OK. Même piège que `forge_is_admin` dans human-converger.sh, même correctif.
   case "$(printf '%s' "$body" | jq -r 'if has("restricted") then .restricted else "?" end' 2>/dev/null)" in
     false) p_ok "compte $login non restreint — il voit les orgs des catalogues installés" ;;
     true)  p_drift "compte $login RESTREINT sur la forge — il ne verra AUCUNE org de catalogue dont il n'est pas membre (404 connecté, 200 en anonyme). C'est un réglage d'instance (DEFAULT_USER_IS_RESTRICTED dans app.ini) + le drapeau du compte : geste admin « Site Administration → Users → $login → décocher Restricted »" ;;
-    *)     p_warn "drapeau restricted de $login non lisible ($PROV_FORGE_URL/api/v1/users/$login) — la visibilité des catalogues N'EST PAS mesurée" ;;
+    *)     p_warn "drapeau restricted de $login non lisible ($FORGE_BASE_URL/api/v1/users/$login) — la visibilité des catalogues N'EST PAS mesurée" ;;
   esac
 }
 
 account_exists() { # $1=login — endpoint public en lecture (pas besoin d'admin pour SONDER)
-  curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/users/$1" 2>/dev/null
+  curl -fsS -m 10 -o /dev/null "$FORGE_BASE_URL/api/v1/users/$1" 2>/dev/null
 }
 
 missing_accounts() { # → la liste des comptes absents (vide = structure complète)
@@ -108,31 +108,31 @@ missing_accounts() { # → la liste des comptes absents (vide = structure compl�
 }
 
 check_master_authority() {
-  if [[ -r "$PROV_MASTER_TOKEN_FILE" ]]; then
-    p_ok "autorité de création présente ($PROV_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
+  if [[ -r "$LCARS_MASTER_TOKEN_FILE" ]]; then
+    p_ok "autorité de création présente ($LCARS_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
   else
-    p_warn "pas d'autorité de création ($PROV_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/box config » la pose"
+    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/box config » la pose"
   fi
 }
 
 converge_authority_modes() {
-  local f cur want="$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER"
+  local f cur want="$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER"
 
-  for f in "$PROV_MASTER_TOKEN_FILE" "$PROV_FORGE_SEED_FILE"; do
+  for f in "$LCARS_MASTER_TOKEN_FILE" "$LCARS_FORGE_SEED_FILE"; do
     [[ -f "$f" ]] || continue
     cur="$(stat -c '%a %U:%G' "$f")"
     if [[ "$cur" != "600 $want" ]]; then
-      if [[ "$PROV_MODE" == "check" ]]; then
+      if [[ "$LCARS_MODULE_MODE" == "check" ]]; then
         p_drift "$f est $cur — attendu 600 $want (aucun process d'humain ne doit pouvoir le lire)"
       else
-        if chown "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" "$f" && chmod 0600 "$f"; then
+        if chown "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" "$f" && chmod 0600 "$f"; then
           p_chg "$f -> 0600 $want (seul le service d'autorite l'ouvre)"
         else
           p_fail "$f : mode non convergé"
         fi
       fi
     else
-      [[ "$PROV_MODE" == "check" ]] && p_ok "$f (0600 $want)"
+      [[ "$LCARS_MODULE_MODE" == "check" ]] && p_ok "$f (0600 $want)"
     fi
   done
 
@@ -144,15 +144,15 @@ converge_authority_modes() {
 # c'est donc la seule chose dont son echec puisse temoigner.
 tokens_lisibles_ici() {
   local r
-  for r in $ROLES "$PROV_SYSTEM_ACCOUNT"; do
-    [[ -r "$PROV_TOKENS_DIR/$r.gitea_token" ]] && return 0
+  for r in $ROLES "$LCARS_SYSTEM_ACCOUNT"; do
+    [[ -r "$LCARS_PRIVATE_DIR/$r.gitea_token" ]] && return 0
   done
   return 1
 }
 
 a4_check() {
-  "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-    --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")" --check >/dev/null 2>&1
+  "$A4_SCRIPT" --forge "$FORGE_BASE_URL" --tokens-dir "$LCARS_PRIVATE_DIR" \
+    --roles "$ROLES" --extra-token "$LCARS_SYSTEM_ACCOUNT:$(basename "$LCARS_SYSTEM_TOKEN_FILE")" --check >/dev/null 2>&1
 }
 
 # Le handoff tofu→A4, convergent PAR ENTRÉE : chaque compte de $ACCOUNTS a son entrée dans le
@@ -163,24 +163,24 @@ a4_check() {
 ensure_passwords_entries() {
   local acct absents=()
   for acct in $ACCOUNTS; do
-    if ! { [[ -r "$PROV_PASSWORDS_FILE" ]] && jq -e --arg a "$acct" 'has($a)' "$PROV_PASSWORDS_FILE" >/dev/null 2>&1; }; then
+    if ! { [[ -r "$LCARS_PASSWORDS_FILE" ]] && jq -e --arg a "$acct" 'has($a)' "$LCARS_PASSWORDS_FILE" >/dev/null 2>&1; }; then
       absents+=("$acct")
     fi
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
-  if [[ ! -r "$PROV_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($PROV_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/box config » le pose (ou complète $PROV_PASSWORDS_FILE), puis relance"
+  if [[ ! -r "$LCARS_FORGE_SEED_FILE" ]]; then
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/box config » le pose (ou complète $LCARS_PASSWORDS_FILE), puis relance"
     return 1
   fi
   local seed tmp rc=0
-  seed="$(read_token "$PROV_FORGE_SEED_FILE")"
-  [[ -n "$seed" ]] || { p_fail "seed vide : $PROV_FORGE_SEED_FILE"; return 1; }
+  seed="$(read_token "$LCARS_FORGE_SEED_FILE")"
+  [[ -n "$seed" ]] || { p_fail "seed vide : $LCARS_FORGE_SEED_FILE"; return 1; }
   tmp="$(mktemp "${TMPDIR:-/tmp}/prov-pwd.XXXXXX")" || { p_fail "tmp passwords-file"; return 1; }
-  if ! { if [[ -r "$PROV_PASSWORDS_FILE" ]]; then cat "$PROV_PASSWORDS_FILE"; else printf '{}'; fi; } \
+  if ! { if [[ -r "$LCARS_PASSWORDS_FILE" ]]; then cat "$LCARS_PASSWORDS_FILE"; else printf '{}'; fi; } \
       | jq --arg s "$seed" '. + ($ARGS.positional | map({(.): $s}) | add)' --args "${absents[@]}" > "$tmp"; then
     rm -f "$tmp"; p_fail "complétion jq du passwords-file"; return 1
   fi
-  write_atomic "$PROV_PASSWORDS_FILE" 0600 root:root < "$tmp" || rc=1
+  write_atomic "$LCARS_PASSWORDS_FILE" 0600 root:root < "$tmp" || rc=1
   rm -f "$tmp"
   [[ "$rc" -eq 0 ]] || return 1
   p_ok "passwords-file complété depuis le seed (entrées : ${absents[*]})"
@@ -191,8 +191,8 @@ ensure_passwords_entries() {
 # (write:repository,write:issue) répond 403 même sur soi. La seule voie est donc la basic-auth DU
 # COMPTE — c'est pourquoi le geste vit là où le seed est en main, pas ici.
 forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il existe
-  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
-        "$PROV_FORGE_URL/api/v1$1" 2>/dev/null || true
+  forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
+        "$FORGE_BASE_URL/api/v1$1" 2>/dev/null || true
 }
 
 # TROIS états, pas deux — et c'est tout le correctif. `public_members/<u>` rend 404 aussi bien pour
@@ -202,9 +202,9 @@ forge_code() { # $1=chemin d'API → code HTTP, sous le jeton système s'il exis
 # team, qui est exactement ce que `chief` a été jusqu'au 2026-08-10. `members/<u>` les sépare (204
 # membre / 404 non-membre) et c'est la sonde qui manquait.
 member_state() { # $1=compte → visible | hidden | absent | unknown
-  [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
-  [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
-  if [[ "$(forge_code "/orgs/$PROV_FORGE_ORG/public_members/$1")" == "204" ]]; then
+  [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || { printf 'unknown'; return; }
+  [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/members/$1")" == "204" ]] || { printf 'absent'; return; }
+  if [[ "$(forge_code "/orgs/$LCARS_FORGE_ORG/public_members/$1")" == "204" ]]; then
     printf 'visible'
   else
     printf 'hidden'
@@ -219,20 +219,20 @@ members_in_state() { # $1=état recherché, $2=liste → sous-liste
 
 members_hidden() { members_in_state hidden "$1"; }
 
-# Elle sonde donc le ROSTER SYSTÈME seul : `$PROV_ROLES` est le plancher (avant que `prov_roles` n'y
+# Elle sonde donc le ROSTER SYSTÈME seul : `$LCARS_ROLES` est le plancher (avant que `prov_roles` n'y
 # ajoute les catalogues), et c'est exactement la population de l'org système. La visibilité d'une org
 # de catalogue est posée par `catalogue install`, dans le geste qui crée ses comptes.
 check_members_visible() {
-  local hidden absent unknown org_accounts="$ROLES $PROV_SYSTEM_ACCOUNT"
+  local hidden absent unknown org_accounts="$ROLES $LCARS_SYSTEM_ACCOUNT"
   unknown="$(members_in_state unknown "$org_accounts")"
   if [[ -n "$unknown" ]]; then
     # ⚠ DEUX CAUSES SOUS UN SEUL MESSAGE, ET ELLES N'APPELLENT PAS LE MEME VERDICT. Jeton ABSENT :
     # l'apply le minte, c'est un drift. Jeton PRESENT mais illisible par CE compte : rien n'a été
     # mesuré, donc rien n'est à converger — et le dire « drift » produisait un écart qui apparaît
     # sans sudo et disparaît avec, sur une machine identique.
-    case "$(prov_file_state "$PROV_SYSTEM_TOKEN_FILE")" in
-      absent) p_drift "adhésions org non sondables — jeton système ABSENT ($PROV_SYSTEM_TOKEN_FILE) ; l'apply le minte dès que le seed est posé" ;;
-      *)      p_warn  "adhésions org NON SONDABLES — jeton système $(prov_state_why "$(prov_file_state "$PROV_SYSTEM_TOKEN_FILE")" "$PROV_SYSTEM_TOKEN_FILE"). Rien n'est conclu sur les comptes" ;;
+    case "$(prov_file_state "$LCARS_SYSTEM_TOKEN_FILE")" in
+      absent) p_drift "adhésions org non sondables — jeton système ABSENT ($LCARS_SYSTEM_TOKEN_FILE) ; l'apply le minte dès que le seed est posé" ;;
+      *)      p_warn  "adhésions org NON SONDABLES — jeton système $(prov_state_why "$(prov_file_state "$LCARS_SYSTEM_TOKEN_FILE")" "$LCARS_SYSTEM_TOKEN_FILE"). Rien n'est conclu sur les comptes" ;;
     esac
     return 0
   fi
@@ -263,10 +263,10 @@ check_members_visible() {
   #
   # Le motif est celui de `64-services` : on RECOPIE la cause et le geste qui la lève, on ne délègue
   # pas le verdict à un état qu'on ne contrôle pas.
-  if [[ -n "$PROV_HUMAN" ]] && account_exists "$PROV_HUMAN"; then
-    case "$(member_state "$PROV_HUMAN")" in
-      hidden) p_warn "adhésion org de $PROV_HUMAN privée — geste UTILISATEUR, hors de portée du rail : profil forge → Organizations → $PROV_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
-      absent) p_warn "$PROV_HUMAN n'est membre d'aucune team de $PROV_FORGE_ORG — état normal tant qu'un propriétaire d'org ne l'a pas ajouté (team humans, lecture). Le rail pose les autorités, pas les personnes" ;;
+  if [[ -n "$LCARS_LOGIN" ]] && account_exists "$LCARS_LOGIN"; then
+    case "$(member_state "$LCARS_LOGIN")" in
+      hidden) p_warn "adhésion org de $LCARS_LOGIN privée — geste UTILISATEUR, hors de portée du rail : profil forge → Organizations → $LCARS_FORGE_ORG → visible (ou PUT public_members avec SES credentials)" ;;
+      absent) p_warn "$LCARS_LOGIN n'est membre d'aucune team de $LCARS_FORGE_ORG — état normal tant qu'un propriétaire d'org ne l'a pas ajouté (team humans, lecture). Le rail pose les autorités, pas les personnes" ;;
     esac
   fi
 }
@@ -280,11 +280,11 @@ check_members_visible() {
 # `forge-runner.sh` aussi — et c'est exactement la forme qui derive.
 check_ci_runner() {
   local body n labels
-  [[ -r "$PROV_MASTER_TOKEN_FILE" ]] || {
-    p_warn "runners CI non sondables (jeton master absent : $PROV_MASTER_TOKEN_FILE) — rien n'est conclu"
+  [[ -r "$LCARS_MASTER_TOKEN_FILE" ]] || {
+    p_warn "runners CI non sondables (jeton master absent : $LCARS_MASTER_TOKEN_FILE) — rien n'est conclu"
     return 0
   }
-  body="$(forge_curl "$PROV_MASTER_TOKEN_FILE" -fsS -m 10 "$PROV_FORGE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
+  body="$(forge_curl "$LCARS_MASTER_TOKEN_FILE" -fsS -m 10 "$FORGE_BASE_URL/api/v1/admin/actions/runners" 2>/dev/null || true)"
 
   [[ -n "$body" ]] || {
     p_warn "runners CI non sondables (l'API admin n'a pas repondu — portee du jeton master ?) — rien n'est conclu"
@@ -302,23 +302,23 @@ check_ci_runner() {
 }
 
 check() {
-  if [[ -z "$PROV_FORGE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
+  if [[ -z "$FORGE_BASE_URL" ]]; then
+    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
     verdict_check
   fi
   _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu
   case "$_rc" in
-    1) p_drift "FORGE_BASE_URL=« $PROV_FORGE_URL » sans schéma — attendu : http://<hôte>:<port>"
+    1) p_drift "FORGE_BASE_URL=« $FORGE_BASE_URL » sans schéma — attendu : http://<hôte>:<port>"
        verdict_check ;;
-    2) p_drift "forge injoignable : $PROV_FORGE_URL/api/v1/version"
+    2) p_drift "forge injoignable : $FORGE_BASE_URL/api/v1/version"
        verdict_check ;;
   esac
-  p_ok "forge joignable ($PROV_FORGE_URL)"
+  p_ok "forge joignable ($FORGE_BASE_URL)"
   check_ci_runner
   probe_registration
-  [[ -n "$PROV_HUMAN" ]] && probe_restricted "$PROV_HUMAN"
+  [[ -n "$LCARS_LOGIN" ]] && probe_restricted "$LCARS_LOGIN"
   check_master_authority
-  PROV_MODE=check converge_authority_modes
+  LCARS_MODULE_MODE=check converge_authority_modes
 
   local miss acct
   miss="$(missing_accounts)"
@@ -342,7 +342,7 @@ check() {
       # « tokens absents/invalides » : le drift apparaissait sans sudo et disparaissait avec, sur des
       # jetons parfaitement valides. Une sonde qui ne peut pas ouvrir ce qu'elle mesure ne mesure
       # rien — elle se mesure elle-meme.
-      p_warn "role-tokens NON SONDABLES — aucun jeton de $PROV_TOKENS_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $PROV_AUTHORITY_USER) ; relance sous sudo pour conclure"
+      p_warn "role-tokens NON SONDABLES — aucun jeton de $LCARS_PRIVATE_DIR n'est lisible par $(id -un 2>/dev/null || echo "ce compte") (ils sont à $LCARS_AUTHORITY_USER) ; relance sous sudo pour conclure"
     else
       p_drift "role-tokens absents/invalides (sonde A4 --check) — l'apply les re-mint"
     fi
@@ -362,43 +362,43 @@ check() {
 # /teams/<id>/members/<u>` est 403 pour lui — Gitea réserve la lecture d'une team à ses membres
 # et aux owners, et le système n'est NI l'un NI l'autre (choix forge.tf, blast-radius borné).
 check_human_onboardable() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" code
-  [[ -n "$PROV_HUMAN" ]] || { p_ok "aucun humain nomme (PROV_HUMAN) — l'onboardabilite ne se sonde pas ici"; return 0; }
-  if ! account_exists "$PROV_HUMAN"; then
-    p_drift "compte forge absent pour l'humain « $PROV_HUMAN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$PROV_HUMAN … « deploy/box forge-apply »"
+  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
+  [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
+  if ! account_exists "$LCARS_LOGIN"; then
+    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$LCARS_LOGIN … « deploy/box forge-apply »"
     return 0
   fi
-  p_ok "compte forge de l'humain ($PROV_HUMAN)"
+  p_ok "compte forge de l'humain ($LCARS_LOGIN)"
   # Même partage qu'au-dessus : un jeton absent se converge, un jeton qu'on ne peut pas ouvrir se
   # dit. Les deux menaient au même `p_drift`, donc au même faux écart entre un doctor et un sudo.
   case "$(prov_file_state "$tokfile")" in
     present) ;;
-    absent)  p_drift "token système ABSENT ($tokfile) — l'apply le minte ; appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable en attendant"; return 0 ;;
-    *)       p_warn  "token système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG non sondable"; return 0 ;;
+    absent)  p_drift "token système ABSENT ($tokfile) — l'apply le minte ; appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable en attendant"; return 0 ;;
+    *)       p_warn  "token système $(prov_state_why "$(prov_file_state "$tokfile")" "$tokfile") — appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG non sondable"; return 0 ;;
   esac
-  code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/orgs/$PROV_FORGE_ORG/members/$PROV_HUMAN" 2>/dev/null || true)"
+  code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/orgs/$LCARS_FORGE_ORG/members/$LCARS_LOGIN" 2>/dev/null || true)"
   case "$code" in
-    204) p_ok "$PROV_HUMAN membre de l'org $PROV_FORGE_ORG (sonde du token système)" ;;
+    204) p_ok "$LCARS_LOGIN membre de l'org $LCARS_FORGE_ORG (sonde du token système)" ;;
     # ⚠ LE SECOND SITE DU CANON DU 2026-08-30, ET JE L'AVAIS MANQUE en ne corrigeant que
     # `member_state`. Mesure du 2026-09-01, banc 2001 : `doctor` SOUS SUDO rendait « bob N'EST PAS
     # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
     # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
     # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
-    404) p_warn "$PROV_HUMAN n'est pas membre de l'org $PROV_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/box forge-apply »). L'onboarding projet le refusera d'ici là" ;;
-    *)   p_warn "appartenance de $PROV_HUMAN à l'org $PROV_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
+    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/box forge-apply »). L'onboarding projet le refusera d'ici là" ;;
+    *)   p_warn "appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
   esac
 }
 
 apply() {
-  if [[ -z "$PROV_FORGE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
+  if [[ -z "$FORGE_BASE_URL" ]]; then
+    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
     verdict_apply
   fi
   _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu
   case "$_rc" in
-    1) p_drift "FORGE_BASE_URL=« $PROV_FORGE_URL » sans schéma — attendu : http://<hôte>:<port> ; tokens non convergés"
+    1) p_drift "FORGE_BASE_URL=« $FORGE_BASE_URL » sans schéma — attendu : http://<hôte>:<port> ; tokens non convergés"
        verdict_apply ;;
-    2) p_drift "forge injoignable : $PROV_FORGE_URL — tokens non convergés (relance quand elle répond)"
+    2) p_drift "forge injoignable : $FORGE_BASE_URL — tokens non convergés (relance quand elle répond)"
        verdict_apply ;;
   esac
 
@@ -413,7 +413,7 @@ apply() {
   check_ci_runner
   [[ -x "$A4_SCRIPT" ]] || { p_fail "script A4 introuvable : $A4_SCRIPT"; verdict_apply; }
   check_master_authority
-  PROV_MODE=apply converge_authority_modes
+  LCARS_MODULE_MODE=apply converge_authority_modes
 
   local miss
   miss="$(missing_accounts)"
@@ -423,16 +423,16 @@ apply() {
   fi
 
   if a4_check; then
-    p_ok "role-tokens déjà valides ($PROV_TOKENS_DIR)"
+    p_ok "role-tokens déjà valides ($LCARS_PRIVATE_DIR)"
     verdict_apply
   fi
   ensure_passwords_entries || verdict_apply
-  if "$A4_SCRIPT" --forge "$PROV_FORGE_URL" --tokens-dir "$PROV_TOKENS_DIR" \
-      --passwords-file "$PROV_PASSWORDS_FILE" --owner "$PROV_AUTHORITY_USER" \
-      ${PROV_MASTER_TOKEN_FILE:+--master-token-file "$PROV_MASTER_TOKEN_FILE"} \
-      --roles "$ROLES" --extra-token "$PROV_SYSTEM_ACCOUNT:$(basename "$PROV_SYSTEM_TOKEN_FILE")"; then
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "tokens A4 posés ($PROV_TOKENS_DIR)"
+  if "$A4_SCRIPT" --forge "$FORGE_BASE_URL" --tokens-dir "$LCARS_PRIVATE_DIR" \
+      --passwords-file "$LCARS_PASSWORDS_FILE" --owner "$LCARS_AUTHORITY_USER" \
+      ${LCARS_MASTER_TOKEN_FILE:+--master-token-file "$LCARS_MASTER_TOKEN_FILE"} \
+      --roles "$ROLES" --extra-token "$LCARS_SYSTEM_ACCOUNT:$(basename "$LCARS_SYSTEM_TOKEN_FILE")"; then
+    LCARS_CHANGED=$((LCARS_CHANGED + 1))
+    p_chg "tokens A4 posés ($LCARS_PRIVATE_DIR)"
   else
     p_fail "provision-role-tokens.sh en échec (son verdict est au-dessus)"
   fi

@@ -405,9 +405,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the acceptance gate's default"},
       # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
       # entrypoint as literals; they are now DERIVED from the product module protocol's
-      # `PROV_TOKENS_DIR` (box/init.sh composes `$PROV_TOKENS_DIR/forge-uid.map`). That default is
+      # `LCARS_PRIVATE_DIR` (box/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
       # the holder that counts on the product side — the same shape as the provisioning default.
-      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
        "the product module protocol's default"}
     ]
 
@@ -626,11 +626,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the avatar map key"},
         {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the human converger's fallback"},
-        {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/forge-gestures.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the forge gesture's fallback"},
         {"services/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
-        {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},
         {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
         {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,

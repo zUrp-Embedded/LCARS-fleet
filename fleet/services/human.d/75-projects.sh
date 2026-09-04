@@ -7,7 +7,7 @@
 # CHECK-ON: any
 # NEEDS: human
 # AFTER: 45-catalogues 63-forge-tokens 70-human
-# JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$PROV_HUMAN`, groupe `fleet`), et un
+# JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$LCARS_LOGIN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
 # C'est aussi son `~/.lcars/fleet_v2.env` qui porte l'adresse de la forge et le jeton.
 
@@ -18,7 +18,7 @@ set -euo pipefail
 # shellcheck source=../lib/human-protocol.sh
 . "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 
-LCARS_CLI="$PROV_LINK_DIR/lcars"
+LCARS_CLI="$LCARS_LINK_DIR/lcars"
 
 #
 # Sortie : les lignes de verdict sur stdout, la sortie brute du release sur stderr. Les deux sont
@@ -72,10 +72,10 @@ usable() {
   # shellcheck disable=SC2119 # argument OPTIONNEL : sans lui la fonction sonde l'uid COURANT,
   # ce qui est exactement la question posee ici.
   if ! is_fleet_human; then
-    p_ok "$PROV_HUMAN n'est pas un humain de fleet (compte systeme ou sysadmin) — les projets sont converges par les humains, pas par ce cycle"
+    p_ok "$LCARS_LOGIN n'est pas un humain de fleet (compte systeme ou sysadmin) — les projets sont converges par les humains, pas par ce cycle"
     return 1
   fi
-  if [[ -z "$PROV_FORGE_URL" ]]; then
+  if [[ -z "$FORGE_BASE_URL" ]]; then
     p_warn "FORGE_BASE_URL non posé — les projets de cette boite n'ont pas d'autorite a suivre"
     return 1
   fi

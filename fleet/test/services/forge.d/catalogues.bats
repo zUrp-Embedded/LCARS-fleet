@@ -30,10 +30,10 @@ setup() {
   # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
   [ -f "$MOD" ]
   export LCARS_MODULE_PROTOCOL="$LIB"
-  export PROV_MODULE_TAG=45-catalogues
-  export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
-  export PROV_FORGE_URL="http://forge.invalid"
-  mkdir -p "$PROV_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"
+  export LCARS_MODULE_TAG=45-catalogues
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
+  export FORGE_BASE_URL="http://forge.invalid"
+  mkdir -p "$LCARS_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
@@ -121,8 +121,8 @@ SH
 
 # Du materiel deja pose, avec son manifeste — ce qui le rend visible du module.
 seed_local() {
-  mkdir -p "$PROV_CATALOGUES_DIR/$1/.git"
-  printf 'api_version: 1\nname: %s\n' "$1" > "$PROV_CATALOGUES_DIR/$1/catalogue.yaml"
+  mkdir -p "$LCARS_CATALOGUES_DIR/$1/.git"
+  printf 'api_version: 1\nname: %s\n' "$1" > "$LCARS_CATALOGUES_DIR/$1/catalogue.yaml"
 }
 
 # `full_name` est porte parce que le module en a besoin pour ALLER LIRE le manifeste : l'adresse du
@@ -143,7 +143,7 @@ json_one() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"materiel laisse EN L'ETAT"* ]]
   # LE TEMOIN CENTRAL DE CE FICHIER : le materiel a survecu a une forge muette.
-  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "forge DOWN au check : DRIFT, jamais « rien n'est installe »" {
@@ -162,7 +162,7 @@ json_one() {
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"la forge ne l'installe plus"* ]]
-  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 # ─── CE QUI COMPTE COMME CATALOGUE ──────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ json_one() {
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ ! -d "$PROV_CATALOGUES_DIR/alice" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/alice" ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
 
@@ -185,7 +185,7 @@ json_one() {
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "un repertoire local SANS manifeste n'est pas un catalogue — ni compte, ni supprime" {
@@ -193,11 +193,11 @@ json_one() {
   # ferait de ce module le nettoyeur d'un repertoire dont il ne sait rien.
   fake_forge '{"data":[]}'
   fake_git
-  mkdir -p "$PROV_CATALOGUES_DIR/moitie-de-clone"
+  mkdir -p "$LCARS_CATALOGUES_DIR/moitie-de-clone"
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ -d "$PROV_CATALOGUES_DIR/moitie-de-clone" ]
+  [ -d "$LCARS_CATALOGUES_DIR/moitie-de-clone" ]
 }
 
 # ─── LA CONVERGENCE ELLE-MEME ───────────────────────────────────────────────────────────────────
@@ -211,9 +211,9 @@ json_one() {
 
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
-  [ -d "$PROV_CATALOGUES_DIR/web" ]
-  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/_catalogue.git $PROV_CATALOGUES_DIR/web.tmp"* ]]
-  [ ! -e "$PROV_CATALOGUES_DIR/web.tmp" ]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
+  [[ "$(cat "$GIT_TRACE_FILE")" == *"clone --quiet --depth 1 http://forge.invalid/web/_catalogue.git $LCARS_CATALOGUES_DIR/web.tmp"* ]]
+  [ ! -e "$LCARS_CATALOGUES_DIR/web.tmp" ]
 }
 
 @test "materiel present : fetch + reset --hard, JAMAIS pull" {
@@ -258,7 +258,7 @@ json_one() {
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$PROV_CATALOGUES_DIR/alice" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/alice" ]
 }
 
 @test "D1: type du proprietaire ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
@@ -275,7 +275,7 @@ json_one() {
   # de ne pas savoir sous un seul message enverraient l'operateur regarder le mauvais objet.
   [[ "$output" == *"proprietaire illisible"* ]]
   [[ "$output" != *"manifeste illisible"* ]]
-  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
 
@@ -299,7 +299,7 @@ json_one() {
   # Non signe = non vu : le materiel local part au balayage, comme pour tout catalogue desinstalle.
   # Et ca SE DIT — ce module supprime, il ne le fait pas en silence.
   [[ "$output" == *"se declare"* ]]
-  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "IDENTITE: un depot SANS manifeste ne signe rien — 404 est une reponse" {
@@ -314,7 +314,7 @@ json_one() {
   run bash "$MOD" apply
   [ "$status" -eq 0 ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "IDENTITE: un 200 qui ne declare RIEN en colonne zero ne signe pas, et le DIT" {
@@ -331,7 +331,7 @@ json_one() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"COLONNE ZERO"* ]]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
-  [ ! -d "$PROV_CATALOGUES_DIR/web" ]
+  [ ! -d "$LCARS_CATALOGUES_DIR/web" ]
 }
 
 @test "IDENTITE: manifeste ILLISIBLE — ni converge, ni supprime, et c'est DIT" {
@@ -348,7 +348,7 @@ json_one() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"manifeste illisible"* ]]
   [[ "$output" != *"proprietaire illisible"* ]]
-  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
 
@@ -364,21 +364,21 @@ json_one() {
   run bash "$MOD" apply
   [ "$status" -ne 0 ]
   [[ "$output" == *"TRONQUEE"* ]]
-  [ -d "$PROV_CATALOGUES_DIR/web" ]
+  [ -d "$LCARS_CATALOGUES_DIR/web" ]
   [[ "$(cat "$GIT_TRACE_FILE")" != *clone* ]]
 }
 
 # ─── LE ROSTER DERIVE ───────────────────────────────────────────────────────────────────────────
 
 @test "FORGE INCONNUE : sans catalogue installe, c est un WARN — l ordre des rangs est normal" {
-  PROV_FORGE_URL="" run bash "$MOD" check
+  FORGE_BASE_URL="" run bash "$MOD" check
   [ "$status" -eq 0 ] || { echo "un WARN ne doit pas colorer le verdict : $output"; return 1; }
   [[ "$output" == *"AUCUN catalogue installe"* ]]
 }
 
 @test "FORGE INCONNUE : avec du materiel LOCAL, c est un DRIFT — un etat-cible cesse d etre tenu" {
-  mkdir -p "$PROV_CATALOGUES_DIR/web-demo"
-  PROV_FORGE_URL="" run bash "$MOD" check
+  mkdir -p "$LCARS_CATALOGUES_DIR/web-demo"
+  FORGE_BASE_URL="" run bash "$MOD" check
   # ⚠ 1, PAS 2 : les deux verbes n ont pas le meme bareme. `verdict_check` rend 1 sur drift et 2 sur
   # echec ; `verdict_apply` l inverse — un apply qui n a pas converge est un ECHEC, un check qui
   # constate un ecart ne l est pas. Les deux temoins voisins le montrent en s opposant.
@@ -389,8 +389,8 @@ json_one() {
 }
 
 @test "FORGE INCONNUE : l apply distingue les deux cas comme le check — meme fonction" {
-  mkdir -p "$PROV_CATALOGUES_DIR/web-demo"
-  PROV_FORGE_URL="" run bash "$MOD" apply
+  mkdir -p "$LCARS_CATALOGUES_DIR/web-demo"
+  FORGE_BASE_URL="" run bash "$MOD" apply
   [ "$status" -eq 2 ]
   [[ "$output" == *"deja installes"* ]]
 }

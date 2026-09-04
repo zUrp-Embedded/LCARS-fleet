@@ -92,13 +92,13 @@ LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
 # Les quatre gestes du produit (`forge.d/`) : jetons de role, cache des catalogues, branche ops,
 # client OAuth2 du deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
-PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
+RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
 # Les jetons de role d'abord (le geste `tokens` lit le siege pour sonder son onboardabilite), puis
 # les trois autres. Plus AUCUN module de l'installeur au boot : `deploy/` n'y est plus pour rien.
 for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
-  LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" PROV_MODULE_TAG="$gesture" PROV_HUMAN="$LCARS_ADMIRAL" \
+  LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
     bash "/opt/lcars/fleet/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
@@ -119,8 +119,8 @@ publier_verdicts() {
     printf '%s\n' "$humans_rc" > "$HUMANS_RC_FILE" 2>/dev/null || true
     chmod 0644 "$HUMANS_RC_FILE" 2>/dev/null || true
   }
-  printf '%s\n' "$prov_rc" > "$PROV_RC_FILE" 2>/dev/null || true
-  chmod 0644 "$PROV_RC_FILE" 2>/dev/null || true
+  printf '%s\n' "$prov_rc" > "$RC_FILE" 2>/dev/null || true
+  chmod 0644 "$RC_FILE" 2>/dev/null || true
 }
 
 # ─── LANCER UN SERVICE PERSISTANT — CE QUE `Restart=` FAIT SUR L'AUTRE RAIL ─────────────────────
@@ -198,7 +198,7 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
     [[ -n "$_m" ]] || continue
     _u="$(id -u -- "$_m" 2>/dev/null || true)"
     [[ "$_u" =~ ^[0-9]+$ ]] && (( _u >= 1000 )) && [[ "$_u" != "$LCARS_UID" ]] && { humans_rc=0; break; }
-  done < <(getent group "${PROV_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+  done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet_v2 start » a quelqu'un pour le lancer"
   else
@@ -239,11 +239,11 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
   # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
-    # `redirect_uris` OAuth2 avec `PROV_DECK_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
-    # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$PROV_DECK_PORT` dans `services.env`,
+    # `redirect_uris` OAuth2 avec `LCARS_LANDING_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
+    # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$LCARS_LANDING_PORT` dans `services.env`,
     # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
     # que parce que leurs deux défauts indépendants valent tous les deux 20999.
-    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-${PROV_DECK_PORT:-20999}}"
+    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-${LCARS_LANDING_PORT:-20999}}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"
@@ -280,7 +280,7 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
   # ⚠ ICI ET NULLE PART AILLEURS : sur docker, `prov_runtime_dirs` ne declare AUCUN dossier de
   # `/run/lcars`, precisement pour qu'il n'y ait jamais deux createurs. `install -d` ne repose pas
   # le mode d'un dossier existant, donc un desaccord entre deux poseurs serait SILENCIEUX.
-  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "${PROV_FLEET_GROUP:-fleet}" /run/lcars/authority \
+  install -d -m 0750 -o "$LCARS_AUTHORITY_USER" -g "${LCARS_FLEET_GROUP:-fleet}" /run/lcars/authority \
     || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \

@@ -46,13 +46,13 @@ SH
   chmod +x "$BIN/curl"
 
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export PROV_MODULE_TAG=66-deck-oidc
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
-  echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_FORGE_PUBLIC_URL="http://10.0.0.5:21000"
-  export PROV_DECK_PORT=20999
-  export PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json"
+  export LCARS_MODULE_TAG=66-deck-oidc
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$LCARS_PRIVATE_DIR"
+  echo "tok" > "$LCARS_PRIVATE_DIR/system_starfleet.gitea_token"
+  export FORGE_BASE_URL="http://forge.test"
+  export FORGE_PUBLIC_URL="http://10.0.0.5:21000"
+  export LCARS_LANDING_PORT=20999
+  export LCARS_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   # ⚠ LE BIND S'EPINGLE, SINON CES TEMOINS MESURENT LE RESEAU DE LA MACHINE. Sans cette ligne le
   # module appelle `advertise_addr 0.0.0.0`, qui DERIVE : sous WSL en NAT il rend `localhost` avec
@@ -66,15 +66,15 @@ SH
   # `127.0.0.1` est choisi parce qu'un bind PRECIS est l'adresse (pas de derivation), et que l'URI
   # qui en decoule est DEJA voulue : la liste reste la meme sur tout substrat. Les temoins qui
   # exercent l'annonce, eux, posent leur propre bind.
-  export PROV_DECK_BIND=127.0.0.1
+  export LCARS_DECK_BIND=127.0.0.1
   # L'entree ANNONCEE. Les deux ecritures de la loopback sont semees par le module lui-meme.
-  export PROV_DECK_ORIGINS="http://10.0.0.5:20999"
+  export LCARS_DECK_ORIGINS="http://10.0.0.5:20999"
   # ⚠ LA FIXTURE PORTE L'ÉTAT-CIBLE COMPLET, PAS SEULEMENT LE `client_id`. Ce module écrit AUSSI les
   # deux adresses dans ce fichier, et tant qu'elles n'y étaient pas, ces témoins mesuraient une
   # convergence partielle — celle-là même que la sonde du module oubliait (2026-08-21 : `public_url`
   # resté sur la loopback alors que l'apply répondait « déjà posé et vivant »).
   printf '{"client_id":"CID","public_url":"%s","internal_url":"%s"}\n' \
-    "$PROV_FORGE_PUBLIC_URL" "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
+    "$FORGE_PUBLIC_URL" "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
 }
 
 # Les retours que le module DOIT vouloir : la loopback dans ses DEUX ecritures, plus l'annoncee.
@@ -114,7 +114,7 @@ apps_with() { # apps_with <uris...>
   grep -q "DELETE http://forge.test/api/v1/user/applications/oauth2/7" "$TRACE"
   grep -q "POST http://forge.test/api/v1/user/applications/oauth2" "$TRACE"
   # et le fichier repose est celui du client neuf, avec la liste complete
-  run jq -r '.client_id, (.redirect_uris|join(" "))' "$PROV_DECK_OIDC_FILE"
+  run jq -r '.client_id, (.redirect_uris|join(" "))' "$LCARS_DECK_OIDC_FILE"
   [[ "$output" == *"NEWCID"* ]]
   [[ "$output" == *"http://localhost:20999/auth/callback"* ]]
   [[ "$output" == *"http://10.0.0.5:20999/auth/callback"* ]]
@@ -148,12 +148,12 @@ apps_with() { # apps_with <uris...>
 # Mesure du 2026-08-21, poste natif installe a froid, operateur venant d'une autre machine :
 #   « CETTE ENTREE N'EST PAS DECLAREE — tu es arrive par http://10.42.0.63:20999/auth/callback.
 #     Entrees declarees : http://127.0.0.1:20999/…, http://localhost:20999/… »
-# Le levier existait (`PROV_DECK_ORIGINS`) ; c'est le DEFAUT qui etait faux.
+# Le levier existait (`LCARS_DECK_ORIGINS`) ; c'est le DEFAUT qui etait faux.
 
 head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
   local head="$BATS_TEST_TMPDIR/deck-head.sh"
   sed '/^check() {/,$d' "$SUT" > "$head"
-  PROV_DECK_BIND="$1" PROV_DECK_ORIGINS="" PROV_DECK_PORT=20999 \
+  LCARS_DECK_BIND="$1" LCARS_DECK_ORIGINS="" LCARS_LANDING_PORT=20999 \
     bash -c "set -euo pipefail; source '$head' >/dev/null 2>&1; callback_uris"
 }
 
@@ -171,8 +171,8 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
 @test "une adresse qui ne vaut RIEN n'est pas declaree — la lib dit ce qu'elle rend" {
   # Sous WSL en NAT, `advertise_addr` rend `localhost` AVEC un motif : la VM n'est routee depuis
   # aucune autre machine. Declarer une entree la-dessus ajouterait une chaine que personne ne peut
-  # taper. Le temoin epingle que le module LIT `PROV_ADVERTISE_WHY` au lieu de l'ignorer.
-  grep -q 'PROV_ADVERTISE_WHY' "$SUT"
+  # taper. Le temoin epingle que le module LIT `LCARS_ADVERTISE_WHY` au lieu de l'ignorer.
+  grep -q 'LCARS_ADVERTISE_WHY' "$SUT"
   run head_uris "127.0.0.1"
   [ "$status" -eq 0 ]
   # bind loopback : rien d'autre que les deux ecritures de la loopback
@@ -183,8 +183,8 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
   local head="$BATS_TEST_TMPDIR/deck-head2.sh"
   sed '/^check() {/,$d' "$SUT" > "$head"
   run bash -c "set -euo pipefail
-    PROV_DECK_BIND=192.0.2.7 PROV_DECK_PORT=20999 PROV_DECK_ORIGINS='http://192.0.2.7:20999'
-    export PROV_DECK_BIND PROV_DECK_PORT PROV_DECK_ORIGINS
+    LCARS_DECK_BIND=192.0.2.7 LCARS_LANDING_PORT=20999 LCARS_DECK_ORIGINS='http://192.0.2.7:20999'
+    export LCARS_DECK_BIND LCARS_LANDING_PORT LCARS_DECK_ORIGINS
     source '$head' >/dev/null 2>&1; callback_uris"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | tr ' ' '\n' | grep -c '192.0.2.7')" -eq 1 ]
@@ -196,7 +196,7 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
 # module POSE dans le meme fichier n'etaient regardees par personne : une adresse publique qui change
 # ne convergeait jamais, et l'apply repondait « deja pose et vivant » sur un fichier devenu faux.
 #
-# Mesure du 2026-08-21 : `forge.public.url` arrive, `PROV_FORGE_PUBLIC_URL` devient
+# Mesure du 2026-08-21 : `forge.public.url` arrive, `FORGE_PUBLIC_URL` devient
 # `http://10.42.0.63:3000`, apply rejoue → « deja pose et vivant », et `deck-oidc.json` porte toujours
 # `public_url: http://127.0.0.1:3000`. Le bouton d'identification envoyait le visiteur sur SA
 # loopback. C'est la sonde qui repondait a une question voisine : l'enregistrement chez Gitea — vrai —
@@ -205,7 +205,7 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
 @test "check : une adresse PUBLIQUE perimee dans le fichier est un DRIFT" {
   apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
   printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
-    "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
+    "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
 
   run bash "$SUT" check
   [ "$status" -eq 1 ]
@@ -218,11 +218,11 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
 @test "apply : une adresse perimee REPOSE le client, meme si les retours sont convergés" {
   apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
   printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
-    "$PROV_FORGE_URL" > "$PROV_DECK_OIDC_FILE"
+    "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
 
   run bash "$SUT" apply
   [ "$status" -eq 0 ]
   [[ "$output" != *"déjà posé et vivant"* ]]
-  run jq -r '.public_url' "$PROV_DECK_OIDC_FILE"
+  run jq -r '.public_url' "$LCARS_DECK_OIDC_FILE"
   [ "$output" = "http://10.0.0.5:21000" ]
 }

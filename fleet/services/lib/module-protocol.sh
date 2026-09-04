@@ -8,7 +8,7 @@
 # a l'install, ou utilise en prod ? ». Les gestes de forge — le cache des catalogues, la branche
 # ops, le client OAuth2 du deck — sont joues par la BOITE a l'init de son instance et a chaque boot
 # pour reconverger, donc en prod ; le poste les joue a l'install. Ils etaient des modules de
-# l'installeur, ecrits dans son dialecte (`p_*`, `verdict_*`, `PROV_*`) et sources sur sa lib. Ils
+# l'installeur, ecrits dans son dialecte (`p_*`, `verdict_*`, `PROV_*` — devenus `LCARS_*` au lot 8 : un seul vocabulaire cote produit, l'installeur traduit) et sources sur sa lib. Ils
 # sont ici, dans le meme dialecte, sur CE protocole — et l'installeur les APPELLE (le sens permis).
 #
 # CE FICHIER EST LE VOCABULAIRE QUE CES MODULES ATTENDENT, ET RIEN D'AUTRE : les sept fonctions
@@ -22,54 +22,54 @@
 # ⚠ SOURCE, JAMAIS EXECUTE : aucun `set -e` ici, aucune sortie. Les modules font leur
 # `set -euo pipefail` eux-memes, avant de le charger.
 
-: "${PROV_MODULE_TAG:=module}"
-PROV_DRIFT=0
-PROV_FAILED=0
+: "${LCARS_MODULE_TAG:=module}"
+LCARS_DRIFT=0
+LCARS_FAILED=0
 # shellcheck disable=SC2034  # les modules le comptent (un geste pose) ; le verdict ne le lit pas
-PROV_CHANGED=0
-: "${PROV_DUMP_LINES:=40}"
-: "${PROV_MODE:=apply}"
+LCARS_CHANGED=0
+: "${LCARS_DUMP_LINES:=40}"
+: "${LCARS_MODULE_MODE:=apply}"
 
 # ─── Les defauts que les modules lisent ────────────────────────────────────────────────────────
-: "${PROV_PREFIX:=/opt/lcars/runtime}"
-: "${PROV_LINK_DIR:=/usr/local/bin}"
-: "${PROV_FLEET_GROUP:=fleet}"
-: "${PROV_TOKENS_DIR:=/opt/lcars/var/tokens}"
-: "${PROV_AUTHORITY_USER:=lcars-authority}"
-: "${PROV_SYSTEM_USER:=lcars-system}"
-: "${PROV_SYSTEM_GROUP:=$PROV_SYSTEM_USER}"
-: "${PROV_SYSTEM_ACCOUNT:=${LCARS_SYSTEM_ACCOUNT:-system_starfleet}}"
-: "${PROV_SYSTEM_TOKEN_FILE:=$PROV_TOKENS_DIR/$PROV_SYSTEM_ACCOUNT.gitea_token}"
-: "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"
-: "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"
-: "${PROV_FORGE_ORG:=fleet}"
-: "${PROV_HUMANS_TEAM:=humans}"
-: "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
-: "${PROV_LEGACY_CATALOGUES_DIR:=/home/catalogues}"
+: "${LCARS_PREFIX:=/opt/lcars/runtime}"
+: "${LCARS_LINK_DIR:=/usr/local/bin}"
+: "${LCARS_FLEET_GROUP:=fleet}"
+: "${LCARS_PRIVATE_DIR:=/opt/lcars/var/tokens}"
+: "${LCARS_AUTHORITY_USER:=lcars-authority}"
+: "${LCARS_SYSTEM_USER:=lcars-system}"
+: "${LCARS_SYSTEM_GROUP:=$LCARS_SYSTEM_USER}"
+: "${LCARS_SYSTEM_ACCOUNT:=system_starfleet}"
+: "${LCARS_SYSTEM_TOKEN_FILE:=$LCARS_PRIVATE_DIR/$LCARS_SYSTEM_ACCOUNT.gitea_token}"
+: "${LCARS_MASTER_TOKEN_FILE:=$LCARS_PRIVATE_DIR/forge-master.token}"
+: "${LCARS_FORGE_SEED_FILE:=$LCARS_PRIVATE_DIR/forge-seed.pass}"
+: "${LCARS_FORGE_ORG:=fleet}"
+: "${LCARS_HUMANS_TEAM:=humans}"
+: "${LCARS_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
+: "${LCARS_LEGACY_CATALOGUES_DIR:=/home/catalogues}"
 # L'adresse de la forge : celle de l'hote (`FORGE_BASE_URL`), sinon celle que l'install a gravee.
 # Vide reste vide — les modules lisent « pas de forge » et le disent, ils n'inventent pas.
-: "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
-: "${PROV_FORGE_PUBLIC_URL:=${FORGE_PUBLIC_URL:-$(cat "$PROV_TOKENS_DIR/forge.public.url" 2>/dev/null || true)}}"
-: "${PROV_FORGE_PUBLIC_URL:=$PROV_FORGE_URL}"
-: "${PROV_DECK_PORT:=${LCARS_LANDING_PORT:-20999}}"
-: "${PROV_DECK_BIND:=0.0.0.0}"
-: "${PROV_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
-: "${PROV_DECK_ORIGINS:=${LCARS_DECK_ORIGINS:-}}"
+: "${FORGE_BASE_URL:=$(cat "$LCARS_PRIVATE_DIR/forge.url" 2>/dev/null || true)}"
+: "${FORGE_PUBLIC_URL:=$(cat "$LCARS_PRIVATE_DIR/forge.public.url" 2>/dev/null || true)}"
+: "${FORGE_PUBLIC_URL:=$FORGE_BASE_URL}"
+: "${LCARS_LANDING_PORT:=20999}"
+: "${LCARS_DECK_BIND:=0.0.0.0}"
+: "${LCARS_DECK_OIDC_FILE:=/etc/lcars/deck-oidc.json}"
+: "${LCARS_DECK_ORIGINS:=}"
 
 # ─── Le vocabulaire ────────────────────────────────────────────────────────────────────────────
-p_step() { printf '>>    %s: %s\n' "$PROV_MODULE_TAG" "$*"; }
-p_ok()   { printf 'OK    %s: %s\n' "$PROV_MODULE_TAG" "$*"; return 0; }
-p_chg()  { printf 'POSÉ  %s: %s\n' "$PROV_MODULE_TAG" "$*"; return 0; }
-p_drift(){ printf 'DRIFT %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_DRIFT=$((PROV_DRIFT + 1)); }
-p_warn() { printf 'WARN  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; }
-p_fail() { printf 'FAIL  %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; PROV_FAILED=$((PROV_FAILED + 1)); }
-p_die()  { printf 'FATAL %s: %s\n' "$PROV_MODULE_TAG" "$*" >&2; exit 1; }
+p_step() { printf '>>    %s: %s\n' "$LCARS_MODULE_TAG" "$*"; }
+p_ok()   { printf 'OK    %s: %s\n' "$LCARS_MODULE_TAG" "$*"; return 0; }
+p_chg()  { printf 'POSÉ  %s: %s\n' "$LCARS_MODULE_TAG" "$*"; return 0; }
+p_drift(){ printf 'DRIFT %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; LCARS_DRIFT=$((LCARS_DRIFT + 1)); }
+p_warn() { printf 'WARN  %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; }
+p_fail() { printf 'FAIL  %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; LCARS_FAILED=$((LCARS_FAILED + 1)); }
+p_die()  { printf 'FATAL %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; exit 1; }
 
 # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel (un geste manque, pas
 # une panne). `check` rend 2 sur un echec et 1 sur un drift — le code du doctor, lu comme tel par
 # celui qui appelle (l'installeur, ou le boot de la boite).
-verdict_apply() { [[ "$PROV_FAILED" -gt 0 ]] && exit 1; [[ "$PROV_DRIFT" -gt 0 ]] && exit 2; exit 0; }
-verdict_check() { [[ "$PROV_FAILED" -gt 0 ]] && exit 2; [[ "$PROV_DRIFT" -gt 0 ]] && exit 1; exit 0; }
+verdict_apply() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 1; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 2; exit 0; }
+verdict_check() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 2; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 1; exit 0; }
 
 # ─── Les lectures ──────────────────────────────────────────────────────────────────────────────
 # Un champ d'un fichier d'environnement (`CLE=valeur`, la derniere occurrence gagne) — jamais un
@@ -154,7 +154,7 @@ ensure_mode() { # ensure_mode <chemin> <mode> [proprietaire]
     fi
   fi
   [[ "$(stat -c '%a' "$path")" == "$want_mode" ]] || { p_fail "ensure_mode: mode ≠ $want_mode après chmod: $path"; return 1; }
-  if [[ "$changed" -eq 1 ]]; then PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
+  if [[ "$changed" -eq 1 ]]; then LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "perms $mode ${owner:+$owner }$path"; fi
   return 0
 }
 ensure_dir() { # ensure_dir <chemin> <mode> [proprietaire]
@@ -162,7 +162,7 @@ ensure_dir() { # ensure_dir <chemin> <mode> [proprietaire]
   prov_refuse_symlink_path "$path" || return 1
   if [[ ! -d "$path" ]]; then
     mkdir -p "$path" || { p_fail "ensure_dir: mkdir refusé: $path"; return 1; }
-    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "dir $path"
+    LCARS_CHANGED=$((LCARS_CHANGED + 1)); p_chg "dir $path"
   fi
   ensure_mode "$path" "$mode" "$owner"
 }
@@ -186,30 +186,30 @@ write_atomic() { # write_atomic <dest> <mode> [proprietaire]  < contenu
     chown "$owner" "$tmp" || { rm -f "$tmp"; p_fail "write_atomic: chown $owner: $dest"; return 1; }
   fi
   mv -f "$tmp" "$dest" || { rm -f "$tmp"; p_fail "write_atomic: mv final: $dest"; return 1; }
-  PROV_CHANGED=$((PROV_CHANGED + 1))
+  LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "$dest"
 }
 
 # ─── L'adresse annoncee ────────────────────────────────────────────────────────────────────────
 # L'adresse que les liens et les retours OAuth doivent porter : celle du bind s'il en nomme une,
 # sinon l'adresse de sortie de la machine. L'appelant qui en sait plus (l'installeur, qui connait
-# WSL et son mode NAT) la POSE dans `PROV_ADVERTISE` avant d'appeler : ici on ne la recalcule pas.
+# WSL et son mode NAT) la POSE dans `LCARS_ADVERTISE` avant d'appeler : ici on ne la recalcule pas.
 lan_addr() { ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1 || true; }
 advertise_addr() { # advertise_addr <bind>
   local bind="${1:-0.0.0.0}"
-  if [[ -n "${PROV_ADVERTISE:-}" ]]; then
-    : "${PROV_ADVERTISE_WHY:=}"
+  if [[ -n "${LCARS_ADVERTISE:-}" ]]; then
+    : "${LCARS_ADVERTISE_WHY:=}"
     return 0
   fi
-  PROV_ADVERTISE=""; PROV_ADVERTISE_WHY=""
+  LCARS_ADVERTISE=""; LCARS_ADVERTISE_WHY=""
   case "$bind" in
     0.0.0.0|::|"*") ;;
-    *) PROV_ADVERTISE="$bind"; return 0 ;;
+    *) LCARS_ADVERTISE="$bind"; return 0 ;;
   esac
-  PROV_ADVERTISE="$(lan_addr)"
-  if [[ -z "$PROV_ADVERTISE" ]]; then
-    PROV_ADVERTISE="127.0.0.1"
-    PROV_ADVERTISE_WHY="aucune adresse de sortie détectée — les liens ne valent que sur cette machine"
+  LCARS_ADVERTISE="$(lan_addr)"
+  if [[ -z "$LCARS_ADVERTISE" ]]; then
+    LCARS_ADVERTISE="127.0.0.1"
+    LCARS_ADVERTISE_WHY="aucune adresse de sortie détectée — les liens ne valent que sur cette machine"
   fi
   return 0
 }

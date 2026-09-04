@@ -29,7 +29,7 @@ setup() {
 }
 
 @test "cache est au groupe fleet en setgid (les pods y ecrivent), les autres a root" {
-  grep -qE 'ensure_dir "\$STORE_ROOT/cache" +2775 "root:\$PROV_FLEET_GROUP"' "$SUT"
+  grep -qE 'ensure_dir "\$STORE_ROOT/cache" +2775 "root:\$LCARS_FLEET_GROUP"' "$SUT"
   grep -qE 'ensure_dir "\$STORE_ROOT/toolchains" +0755 root:root' "$SUT"
   grep -qE 'ensure_dir "\$STORE_ROOT/sysroots" +0755 root:root' "$SUT"
 }

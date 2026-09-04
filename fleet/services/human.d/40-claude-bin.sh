@@ -14,7 +14,7 @@
 # meilleure : ils en fabriquent une seconde version, plus faible, qui vieillit toute seule.
 # Notre seule sonde est FONCTIONNELLE et reste à nous : le binaire répond --version.
 #
-# ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$PROV_CLAUDE_SEED`, un binaire
+# ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$LCARS_CLAUDE_SEED`, un binaire
 # déjà posé sur la machine par un geste extérieur — un semis de banc — que ce module préférait au
 # réseau. NE PAS LA RÉINTRODUIRE.
 
@@ -43,7 +43,7 @@ check() {
   elif [[ -e "$bin" ]]; then
     p_drift "$bin présent mais ne répond pas à --version (binaire cassé ?)"
   else
-    p_drift "claude absent pour $PROV_HUMAN ($bin)"
+    p_drift "claude absent pour $LCARS_LOGIN ($bin)"
   fi
   verdict_check
 }
@@ -76,8 +76,8 @@ apply() {
   rm -rf "$tmp"
 
   if claude_ok; then
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "claude posé pour $PROV_HUMAN ($(human_bin), version $("$(human_bin)" --version 2>/dev/null | head -1))"
+    LCARS_CHANGED=$((LCARS_CHANGED + 1))
+    p_chg "claude posé pour $LCARS_LOGIN ($(human_bin), version $("$(human_bin)" --version 2>/dev/null | head -1))"
   else
     p_fail "l'installeur a rendu 0 mais $(human_bin) ne répond pas à --version"
   fi

@@ -126,7 +126,7 @@ os.environ.update(
     FORGE_BASE_URL="http://127.0.0.1:%d" % forge.server_port,
     # Un groupe qui n'existe pas : le banc n'est pas root, et l'executeur doit RESSERRER plutot que
     # d'ouvrir a un groupe qu'il n'a pas pu nommer.
-    PROV_FLEET_GROUP="lcars-banc-groupe-absent",
+    LCARS_FLEET_GROUP="lcars-banc-groupe-absent",
 )
 
 spec = importlib.util.spec_from_file_location("catexec", SRC)

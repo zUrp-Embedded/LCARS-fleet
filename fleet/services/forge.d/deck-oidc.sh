@@ -16,8 +16,8 @@ set -euo pipefail
 . "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
 
 APP_NAME="lcars-deck"
-TOKEN_FILE="$PROV_SYSTEM_TOKEN_FILE"
-OIDC_GROUP="${PROV_SYSTEM_GROUP:-${PROV_SYSTEM_USER:-lcars-system}}"
+TOKEN_FILE="$LCARS_SYSTEM_TOKEN_FILE"
+OIDC_GROUP="${LCARS_SYSTEM_GROUP:-${LCARS_SYSTEM_USER:-lcars-system}}"
 
 callback_uris() {
   # DEUX ECRITURES DE LA LOOPBACK, PARCE QU'OAUTH2 COMPARE DES CHAINES. `localhost` et `127.0.0.1`
@@ -25,15 +25,15 @@ callback_uris() {
   # `redirect_uri` — or `localhost` est ce qu'un humain tape, et sous WSL c'est la seule adresse qui
   # marche depuis le navigateur de l'hote. N'en declarer qu'une, c'est fermer la porte a celui qui
   # entre par l'autre, APRES son identification (mesure du 2026-08-18).
-  local out="http://127.0.0.1:$PROV_DECK_PORT/auth/callback http://localhost:$PROV_DECK_PORT/auth/callback" o u
+  local out="http://127.0.0.1:$LCARS_LANDING_PORT/auth/callback http://localhost:$LCARS_LANDING_PORT/auth/callback" o u
 
-  advertise_addr "${PROV_DECK_BIND:-0.0.0.0}"
-  if [[ -z "$PROV_ADVERTISE_WHY" && -n "$PROV_ADVERTISE" ]]; then
-    u="http://$PROV_ADVERTISE:$PROV_DECK_PORT/auth/callback"
+  advertise_addr "${LCARS_DECK_BIND:-0.0.0.0}"
+  if [[ -z "$LCARS_ADVERTISE_WHY" && -n "$LCARS_ADVERTISE" ]]; then
+    u="http://$LCARS_ADVERTISE:$LCARS_LANDING_PORT/auth/callback"
     case " $out " in *" $u "*) ;; *) out="$out $u" ;; esac
   fi
 
-  IFS=',' read -ra _origins <<<"${PROV_DECK_ORIGINS:-}"
+  IFS=',' read -ra _origins <<<"${LCARS_DECK_ORIGINS:-}"
   for o in "${_origins[@]:-}"; do
     o="$(echo "$o" | tr -d '[:space:]')"; [[ -n "$o" ]] || continue
     u="${o%/}/auth/callback"
@@ -53,18 +53,18 @@ browser_unreachable() {   # 0 si l'hôte de $1 ne peut pas être résolu par un 
 
 addrs_converged() { # 0 si le fichier porte déjà les deux adresses voulues
   local cur_pub cur_int
-  cur_pub="$(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
-  cur_int="$(jq -r '.internal_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true)"
-  [[ "$cur_pub" == "${PROV_FORGE_PUBLIC_URL%/}" && "$cur_int" == "${PROV_FORGE_URL%/}" ]]
+  cur_pub="$(jq -r '.public_url // ""' "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true)"
+  cur_int="$(jq -r '.internal_url // ""' "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true)"
+  [[ "$cur_pub" == "${FORGE_PUBLIC_URL%/}" && "$cur_int" == "${FORGE_BASE_URL%/}" ]]
 }
 
 forge_api() { # forge_api <METHOD> <path> [json-body]
   forge_curl "$TOKEN_FILE" -s -m 15 \
        ${3:+-H "Content-Type: application/json" -d "$3"} \
-       -X "$1" "$PROV_FORGE_URL/api/v1$2" 2>/dev/null || true
+       -X "$1" "$FORGE_BASE_URL/api/v1$2" 2>/dev/null || true
 }
 
-forge_up() { curl -fsS -m 10 -o /dev/null "$PROV_FORGE_URL/api/v1/version" 2>/dev/null; }
+forge_up() { curl -fsS -m 10 -o /dev/null "$FORGE_BASE_URL/api/v1/version" 2>/dev/null; }
 
 # L'app QUI EST LA NOTRE — et le nom ne suffit pas a le prouver. Mesure du 2026-08-12 : Gitea
 # accepte DEUX applications du meme nom sous le meme compte (201). Or le compte systeme est partage
@@ -109,7 +109,7 @@ config_live() {
 # Le client QUI EST LE NOTRE : celui que NOTRE fichier nomme. C'est le seul ancrage qui ne se
 # devine pas — le nom est partage sur une forge commune, et les `redirect_uris` sont precisement ce
 # qu'on veut pouvoir CHANGER (donc ils ne peuvent pas servir a s'identifier soi-meme).
-our_client_id() { jq -r '.client_id // empty' "$PROV_DECK_OIDC_FILE" 2>/dev/null || true; }
+our_client_id() { jq -r '.client_id // empty' "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true; }
 
 registered_uris() {
   local cid; cid="$(our_client_id)"
@@ -129,8 +129,8 @@ uris_converged() { # uris_converged <uris-voulues, separees par espace>
 }
 
 check() {
-  if [[ -z "$PROV_FORGE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — client OAuth2 du deck non convergé (le deck refusera de servir)"
+  if [[ -z "$FORGE_BASE_URL" ]]; then
+    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — client OAuth2 du deck non convergé (le deck refusera de servir)"
     verdict_check
   fi
   # ⚠ TROIS ETATS, ET LA VERSION PRECEDENTE N'EN CONNAISSAIT QUE DEUX. `[[ ! -r ]]` puis « absent » :
@@ -138,41 +138,41 @@ check() {
   # parfaitement present. Il est en `0640 root:lcars-system` — un doctor lance sans sudo ne peut pas
   # l'OUVRIR, il peut parfaitement CONSTATER qu'il est la. Le test de lisibilite tenait lieu de test
   # d'existence, et envoyait converger un objet deja pose.
-  local _st; _st="$(prov_file_state "$PROV_DECK_OIDC_FILE")"
+  local _st; _st="$(prov_file_state "$LCARS_DECK_OIDC_FILE")"
   if [[ "$_st" == "absent" ]]; then
-    p_drift "$PROV_DECK_OIDC_FILE absent — le deck (port $PROV_DECK_PORT) sert 503 tant qu'il n'est pas posé"
+    p_drift "$LCARS_DECK_OIDC_FILE absent — le deck (port $LCARS_LANDING_PORT) sert 503 tant qu'il n'est pas posé"
   elif [[ "$_st" != "present" ]]; then
     # PAS un drift : un drift promet qu'`apply` converge, et on ne sait meme pas s'il y a quelque
     # chose a converger. Ce qui manque est une MESURE, et le rapport doit dire laquelle.
-    p_warn "$PROV_DECK_OIDC_FILE $(prov_state_why "$_st" "$PROV_DECK_OIDC_FILE")"
+    p_warn "$LCARS_DECK_OIDC_FILE $(prov_state_why "$_st" "$LCARS_DECK_OIDC_FILE")"
   elif ! forge_up; then
-    p_ok "$PROV_DECK_OIDC_FILE présent (forge injoignable : client non re-vérifié)"
+    p_ok "$LCARS_DECK_OIDC_FILE présent (forge injoignable : client non re-vérifié)"
   elif config_live; then
     local _want; _want="$(callback_uris)"
     if uris_converged "$_want"; then
-      p_ok "client OAuth2 du deck posé et connu de la forge ($PROV_DECK_OIDC_FILE)"
+      p_ok "client OAuth2 du deck posé et connu de la forge ($LCARS_DECK_OIDC_FILE)"
     else
       p_drift "entrées du deck non convergées — enregistrées : « $(registered_uris) » / voulues : « $_want » (apply les repose)"
     fi
   else
-    p_drift "$PROV_DECK_OIDC_FILE nomme un client que la forge ne connaît plus — à re-poser"
+    p_drift "$LCARS_DECK_OIDC_FILE nomme un client que la forge ne connaît plus — à re-poser"
   fi
-  if [[ -n "$PROV_FORGE_PUBLIC_URL" ]] && browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
-    p_drift "PROV_FORGE_PUBLIC_URL=$PROV_FORGE_PUBLIC_URL — nom local au daemon docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
+  if [[ -n "$FORGE_PUBLIC_URL" ]] && browser_unreachable "$FORGE_PUBLIC_URL"; then
+    p_drift "FORGE_PUBLIC_URL=$FORGE_PUBLIC_URL — nom local au daemon docker : AUCUN navigateur ne le résout (pose FORGE_PUBLIC_URL)"
   fi
-  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && ! addrs_converged; then
-    p_drift "adresses du deck non convergées — fichier : navigateur « $(jq -r '.public_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null)  » / serveur « $(jq -r '.internal_url // ""' "$PROV_DECK_OIDC_FILE" 2>/dev/null) » ; voulues : « ${PROV_FORGE_PUBLIC_URL%/} » / « ${PROV_FORGE_URL%/} » (apply les repose)"
+  if [[ -r "$LCARS_DECK_OIDC_FILE" ]] && ! addrs_converged; then
+    p_drift "adresses du deck non convergées — fichier : navigateur « $(jq -r '.public_url // ""' "$LCARS_DECK_OIDC_FILE" 2>/dev/null)  » / serveur « $(jq -r '.internal_url // ""' "$LCARS_DECK_OIDC_FILE" 2>/dev/null) » ; voulues : « ${FORGE_PUBLIC_URL%/} » / « ${FORGE_BASE_URL%/} » (apply les repose)"
   fi
   verdict_check
 }
 
 apply() {
-  if [[ -z "$PROV_FORGE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/PROV_FORGE_URL non posé — client OAuth2 du deck NON posé"
+  if [[ -z "$FORGE_BASE_URL" ]]; then
+    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — client OAuth2 du deck NON posé"
     verdict_apply
   fi
   if ! forge_up; then
-    p_drift "forge injoignable : $PROV_FORGE_URL — client OAuth2 du deck NON posé (relance quand elle répond)"
+    p_drift "forge injoignable : $FORGE_BASE_URL — client OAuth2 du deck NON posé (relance quand elle répond)"
     verdict_apply
   fi
   if [[ ! -r "$TOKEN_FILE" ]]; then
@@ -183,12 +183,12 @@ apply() {
   local uris body resp cid csec
   uris="$(callback_uris)"
 
-  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris" && addrs_converged; then
+  if [[ -r "$LCARS_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris" && addrs_converged; then
     p_ok "client OAuth2 du deck déjà posé et vivant"
     verdict_apply
   fi
 
-  if [[ -r "$PROV_DECK_OIDC_FILE" ]] && config_live; then
+  if [[ -r "$LCARS_DECK_OIDC_FILE" ]] && config_live; then
     local ours; ours="$(our_client_id)"
     local oid
     oid="$(forge_api GET "/user/applications/oauth2" \
@@ -208,7 +208,7 @@ apply() {
   if [[ -n "$id" ]]; then
     forge_api DELETE "/user/applications/oauth2/$id" >/dev/null
     p_chg "ancien client OAuth2 « $APP_NAME » (id $id) retiré — son secret n'était plus récupérable"
-    PROV_CHANGED=$((PROV_CHANGED + 1))
+    LCARS_CHANGED=$((LCARS_CHANGED + 1))
   fi
   local foreign
   foreign="$(foreign_apps "$uris")"
@@ -225,21 +225,21 @@ apply() {
     verdict_apply
   fi
 
-  ensure_dir "$(dirname "$PROV_DECK_OIDC_FILE")" 0755 \
-    || { p_fail "répertoire de la config OIDC non convergé ($(dirname "$PROV_DECK_OIDC_FILE"))"; verdict_apply; }
-  local tmp; tmp="$(mktemp "${PROV_DECK_OIDC_FILE}.XXXXXX")"
+  ensure_dir "$(dirname "$LCARS_DECK_OIDC_FILE")" 0755 \
+    || { p_fail "répertoire de la config OIDC non convergé ($(dirname "$LCARS_DECK_OIDC_FILE"))"; verdict_apply; }
+  local tmp; tmp="$(mktemp "${LCARS_DECK_OIDC_FILE}.XXXXXX")"
   jq -n --arg ci "$cid" --arg cs "$csec" \
-        --arg pub "${PROV_FORGE_PUBLIC_URL%/}" --arg int "${PROV_FORGE_URL%/}" --arg uris "$uris" \
+        --arg pub "${FORGE_PUBLIC_URL%/}" --arg int "${FORGE_BASE_URL%/}" --arg uris "$uris" \
         '{client_id:$ci, client_secret:$cs, public_url:$pub, internal_url:$int,
           redirect_uris:($uris|split(" "))}' > "$tmp"
   chmod 0640 "$tmp"
-  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $PROV_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte ; « provision apply --only 21-service-accounts » le pose)"
-  mv -f "$tmp" "$PROV_DECK_OIDC_FILE"
-  PROV_CHANGED=$((PROV_CHANGED + 1))
-  p_chg "client OAuth2 « $APP_NAME » posé → $PROV_DECK_OIDC_FILE (retours : $uris)"
+  chgrp "$OIDC_GROUP" "$tmp" 2>/dev/null || p_warn "groupe $OIDC_GROUP inconnu — $LCARS_DECK_OIDC_FILE restera illisible par le deck (il tourne sous ce compte ; « provision apply --only 21-service-accounts » le pose)"
+  mv -f "$tmp" "$LCARS_DECK_OIDC_FILE"
+  LCARS_CHANGED=$((LCARS_CHANGED + 1))
+  p_chg "client OAuth2 « $APP_NAME » posé → $LCARS_DECK_OIDC_FILE (retours : $uris)"
 
-  if browser_unreachable "$PROV_FORGE_PUBLIC_URL"; then
-    p_warn "public_url=$PROV_FORGE_PUBLIC_URL est local au daemon docker — le navigateur ne le résoudra pas ; pose FORGE_PUBLIC_URL sur l'adresse réelle de la forge"
+  if browser_unreachable "$FORGE_PUBLIC_URL"; then
+    p_warn "public_url=$FORGE_PUBLIC_URL est local au daemon docker — le navigateur ne le résoudra pas ; pose FORGE_PUBLIC_URL sur l'adresse réelle de la forge"
   fi
   verdict_apply
 }

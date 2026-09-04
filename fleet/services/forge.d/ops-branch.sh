@@ -37,19 +37,19 @@ readonly OPS_BRANCH="tool_request"
 : "${LCARS_OPS_REPO:=fleet/lcars}"
 
 forge_repo_code() {
-  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
-       "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO" 2>/dev/null || true
+  forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
+       "${FORGE_BASE_URL%/}/api/v1/repos/$LCARS_OPS_REPO" 2>/dev/null || true
 }
 
 forge_branch_code() {
-  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
-       "${PROV_FORGE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branches/$OPS_BRANCH" \
+  forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -o /dev/null -w '%{http_code}' -m 10 \
+       "${FORGE_BASE_URL%/}/api/v1/repos/$LCARS_OPS_REPO/branches/$OPS_BRANCH" \
        2>/dev/null || true
 }
 
 probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
-  [[ -n "${PROV_FORGE_URL:-}" ]] || return 2
-  curl -fsS -m 10 -o /dev/null "${PROV_FORGE_URL%/}/api/v1/version" 2>/dev/null || return 2
+  [[ -n "${FORGE_BASE_URL:-}" ]] || return 2
+  curl -fsS -m 10 -o /dev/null "${FORGE_BASE_URL%/}/api/v1/version" 2>/dev/null || return 2
   case "$(forge_branch_code)" in
     200) return 0 ;;
     404) return 1 ;;
@@ -62,7 +62,7 @@ probe() { # → 0 presente · 1 absente · 2 pas de forge joignable
 # le rail — et JAMAIS dans l'URL du remote, qui finirait dans `.git/config` du jetable puis dans
 # n'importe quelle sortie de debug.
 create_branch() {
-  local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok
+  local tokfile="$LCARS_SYSTEM_TOKEN_FILE" tok
   tok="$(read_token "$tokfile")"
   [[ -n "$tok" ]] || {
     p_drift "jeton systeme pas encore la ($tokfile) — 63-forge-tokens le minte quand la forge est semee ; la branche se posera a la convergence suivante"
@@ -106,7 +106,7 @@ SEED
 
   # `git init` + premier commit = un commit SANS PARENT, donc une branche orpheline par
   # construction. Aucun `--orphan`, donc aucun plancher de version git.
-  local ident_n="$PROV_SYSTEM_ACCOUNT"
+  local ident_n="$LCARS_SYSTEM_ACCOUNT"
   (
     cd "$tmp"
     git init -q -b "$OPS_BRANCH" .
@@ -115,9 +115,9 @@ SEED
     GIT_COMMITTER_NAME="$ident_n" GIT_COMMITTER_EMAIL="$ident_n@noreply.localhost" \
       git commit -q -m "ops(toolchain): la boite aux lettres des demandes d'outillage"
     GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="http.${PROV_FORGE_URL%/}.extraheader" \
+    GIT_CONFIG_KEY_0="http.${FORGE_BASE_URL%/}.extraheader" \
     GIT_CONFIG_VALUE_0="Authorization: token $tok" \
-      git push -q "${PROV_FORGE_URL%/}/$LCARS_OPS_REPO.git" \
+      git push -q "${FORGE_BASE_URL%/}/$LCARS_OPS_REPO.git" \
         "HEAD:refs/heads/$OPS_BRANCH"
   ) || { p_fail "création de $LCARS_OPS_REPO:$OPS_BRANCH refusée"; return 1; }
 
@@ -129,7 +129,7 @@ SEED
     1) p_fail "après push, $OPS_BRANCH est toujours absente de $LCARS_OPS_REPO"; return 1 ;;
     *) p_fail "après push, la forge ne répond plus — l'état de $OPS_BRANCH est INCONNU, ni confirmé ni infirmé"; return 1 ;;
   esac
-  PROV_CHANGED=$((PROV_CHANGED + 1))
+  LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "branche orpheline $LCARS_OPS_REPO:$OPS_BRANCH créée (ops/toolchains.d/ + README de signature)"
 }
 

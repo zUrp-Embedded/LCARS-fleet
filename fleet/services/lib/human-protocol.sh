@@ -19,16 +19,16 @@
 # ⚠ SOURCE, JAMAIS EXECUTE : aucun `set -e` ici, aucune sortie.
 
 # ─── Le sujet ──────────────────────────────────────────────────────────────────────────────────
-# `PROV_HUMAN` est pose par l'hote (le convergeur : le login qu'il converge). Sans lui, un module
+# `LCARS_LOGIN` est pose par l'hote (le convergeur : le login qu'il converge). Sans lui, un module
 # agirait sur l'utilisateur courant — root, sous le convergeur. On ne devine pas : on refuse.
-: "${PROV_HUMAN:?PROV_HUMAN non pose — le convergeur nomme le login converge}"
-: "${PROV_MODULE_TAG:=human}"
+: "${LCARS_LOGIN:?LCARS_LOGIN non pose — le convergeur nomme le login converge}"
+: "${LCARS_MODULE_TAG:=human}"
 
 # shellcheck source=module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/module-protocol.sh}"
 
 # ─── Les lectures de la personne ───────────────────────────────────────────────────────────────
-human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
+human_home() { getent passwd "$LCARS_LOGIN" | cut -d: -f6 || true; }
 
 # Le plancher se lit dans `login.defs` (`PASSWD_DEFS`, le meme nom que le convergeur) ; le siege
 # dans son fichier (`LCARS_SEAT_UID_FILE`), sinon dans `LCARS_SYSADMIN_UID` — la meme lecture, dans
@@ -46,8 +46,8 @@ seat_uid() { # rend l'uid du siege, ou rien
 }
 # Un humain de fleet : un uid au-dessus du plancher des humains de la machine, et qui n'est pas le
 # SIEGE — le siege est le sysadmin, converge par l'installeur, jamais par ces modules.
-is_fleet_human() { # [login] (defaut : PROV_HUMAN) — 0 si oui
-  local login="${1:-$PROV_HUMAN}" uid uid_min seat
+is_fleet_human() { # [login] (defaut : LCARS_LOGIN) — 0 si oui
+  local login="${1:-$LCARS_LOGIN}" uid uid_min seat
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
   uid_min="$(awk '/^UID_MIN/{print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
