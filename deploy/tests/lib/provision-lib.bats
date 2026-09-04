@@ -1554,6 +1554,12 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
 @test "uid: LA REGLE EST CELLE DU PROTOCOLE DU PRODUIT — meme matrice, memes verdicts, meme phrase" {
   # Le temoin d'egalite des deux corps. Quatre fichiers login.defs (lisible ; absent ; sans UID_MAX ;
   # plancher a 2000) × quatre logins : la lib et le protocole doivent repondre pareil, remede compris.
+  #
+  # LECTURE A TRAVERS LA COUTURE deploy→runtime, ASSUMEE (lot 15). Ce temoin compare DEUX CORPS par
+  # nature — la copie de la lib et sa source, `runtime/services/lib/human-protocol.sh` — donc il ne
+  # peut pas vivre d'un seul cote. C'est une LECTURE au sens de la grille du chantier
+  # deploy-independance (jamais un `source`, jamais un appel : la lib ne charge rien du produit), et
+  # c'est la seule qui reste ici : les murs I18 sont scindes, chaque cote grep ses propres fichiers.
   # Hors matrice, deliberement : le siege INCONNU — la lib repond non a tout le monde, le protocole
   # ne garde pas ce cas ; c'est un ecart connu, nomme au rapport du lot 14, pas mesure ici.
   uid_rule_decor

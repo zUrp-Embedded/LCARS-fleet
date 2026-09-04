@@ -42,7 +42,14 @@ code() { grep -vE '^\s*#' "$1"; }
 # `login.defs` declare, et elle est FAIL-CLOSED — le BEAM refuse de booter sans elle (runtime.exs,
 # R-no-uid-min), `console-humans.sh` ne rend aucune liste, le protocole (`uid_bounds`) rend non a
 # tout le monde. Quatre lecteurs shell devinaient 1000 (et 60000) : ce mur est le temoin du temoin —
-# il prouve que le repli n'est plus ECRIT nulle part, dans les cinq fichiers qui lisent la borne.
+# il prouve que le repli n'est plus ECRIT nulle part, dans les quatre fichiers du PRODUIT qui
+# lisent la borne.
+#
+# UN MUR PAR COTE (lot 15). Le cinquieme lecteur, `deploy/lib/provision-lib.sh`, est l'affaire de
+# son propre logiciel : son JUMEAU vit dans `deploy/tests/idiom_walls.bats` (MUR I18, meme motif,
+# population 1). Chaque cote grep SES fichiers ; aucun mur ne traverse la couture runtime↔deploy.
+# Ce que les deux corps ont en commun — la regle — est tenu par un temoin d'EGALITE
+# (`deploy/tests/lib/provision-lib.bats`, 4 login.defs × 4 logins), qui lit les deux par nature.
 #
 # La forme mordue : une ligne de CODE qui porte le nombre 1000 ou 60000 ET parle d'uid. Hors mur,
 # et c'est dit ici pour que personne ne l'y ajoute : `LCARS_UID="${LCARS_UID:-1000}"` dans `box/
@@ -50,32 +57,33 @@ code() { grep -vE '^\s*#' "$1"; }
 # de la frontiere ; et `… / 1000` dans `bin/fleet` convertit des millisecondes.
 I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 
-@test "MUR I18 (produit + lib de l'installeur) : aucun litteral 1000/60000 comme repli de borne d'uid dans les cinq lecteurs" {
-  local root f hits=0 pop=0
+@test "MUR I18 (produit) : aucun litteral 1000/60000 comme repli de borne d'uid dans les quatre lecteurs du produit" {
+  local root f hits=0 pop=0 trouve
   root="$(cd "$SERVICES/../.." && pwd)"
-  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : les cinq lecteurs de la borne, cote produit et la
-  # lib de l'installeur (une lecture a travers la couture, toleree — le mur du produit tient la
-  # regle du produit, et la lib en porte une copie sous temoin d'egalite dans provision-lib.bats).
+  # LA POPULATION EST NOMMEE, PAS DECOUVERTE : les quatre lecteurs de la borne cote produit — le
+  # protocole (la regle), le convergeur et la console (ses appelants), le lanceur (sa copie de cinq
+  # lignes, sous temoin d'egalite dans bin/fleet.bats). Aucun chemin de deploy/ ici : le jumeau.
   for f in "$SERVICES/lib/human-protocol.sh" "$SERVICES/human-converger.sh" "$SERVICES/console-humans.sh" \
-           "$root/runtime/bin/fleet" "$root/deploy/lib/provision-lib.sh"; do
-    [ -f "$f" ] || { echo "lecteur absent : $f — la population du mur n'est plus de cinq" >&2; return 1; }
+           "$root/runtime/bin/fleet"; do
+    [ -f "$f" ] || { echo "lecteur absent : $f — la population du mur n'est plus de quatre" >&2; return 1; }
+    case "$f" in "$root"/deploy/*) echo "MUR I18 (produit) lit deploy/ : $f — c'est l'affaire du jumeau" >&2; return 1 ;; esac
     pop=$((pop + 1))
-    if code "$f" | grep -E "$I18_RE" | grep -qiE 'uid'; then
+    trouve="$(code "$f" | grep -nE "$I18_RE" | grep -iE 'uid' || true)"
+    if [ -n "$trouve" ]; then
       echo "MUR I18 rompu — ${f#"$root"/} :" >&2
-      code "$f" | grep -nE "$I18_RE" | grep -iE 'uid' >&2
+      printf '%s\n' "$trouve" >&2
       hits=$((hits + 1))
     fi
   done
   [ "$hits" -eq 0 ]
-  # GARDE D'INSTRUMENT : cinq lecteurs, pas un de moins.
-  [ "$pop" -eq 5 ]
-  # Le mur mord : les quatre formes qui vivaient dans le depot, presentees au meme grep, sont vues…
+  # GARDE D'INSTRUMENT : quatre lecteurs, pas un de moins.
+  [ "$pop" -eq 4 ]
+  # Le mur mord : les trois formes qui vivaient cote produit, presentees au meme grep, sont vues…
   local forme
   for forme in '  [[ "$_uid_min" =~ ^[0-9]+$ ]] || _uid_min=1000' \
                'uid_min() { awk '"'"'/^UID_MIN/ {print $2}'"'"' "$f" 2>/dev/null | head -n1 || echo 1000; }' \
-               '  min="$(uid_min)"; min="${min:-1000}"' \
-               '  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \'; do
-    grep -E "$I18_RE" <<<"$forme" | grep -qiE 'uid' || { echo "le mur ne mord pas : $forme" >&2; return 1; }
+               '  min="$(uid_min)"; min="${min:-1000}"'; do
+    [ -n "$(grep -E "$I18_RE" <<<"$forme" | grep -iE 'uid')" ] || { echo "le mur ne mord pas : $forme" >&2; return 1; }
   done
   # … et les deux hors-mur ne le sont pas : une conversion de millisecondes, un uid a cinq chiffres.
   refute grep -qiE 'uid' <<<"$(grep -E "$I18_RE" <<<'    local _grace_s=$(( ${LCARS_SHUTDOWN_GRACE_MS:-45000} / 1000 ))')"
