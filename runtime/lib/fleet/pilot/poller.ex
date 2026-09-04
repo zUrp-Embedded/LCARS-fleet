@@ -1,20 +1,23 @@
 defmodule Fleet.Pilot.Poller do
   @moduledoc """
   Reactor of the forge-state-machine rail (**STEP mode only**), **multi-project**: at each
-  tick it DISCOVERS the fleet-org repos via `list_org_repos` (every repo of the fleet org IS a
-  fleet project), then delegates the open issues + PRs to role spawning via `StepDispatcher`.
+  tick it DISCOVERS the repos of every catalogue org via `list_org_repos` (one org per installed
+  catalogue; every repo of such an org IS a fleet project), then delegates the open issues + PRs
+  to role spawning via `StepDispatcher`.
 
   ## Role
 
   The forge IS the state machine; this poller is its reactor. At each tick, for EVERY repo
-  of the fleet org, it lists the open **issues** + **PRs** and delegates:
+  of the catalogue orgs, it lists the open **issues** + **PRs** and delegates:
 
-    * **assigned issue** (assignee=human owner), unlocked, without an open PR → spawn the
-      **producer** role (`StepDispatcher.dispatch_issue`; role = `:producer_role`, default engineer).
+    * **assigned issue** (assignee=human owner), unlocked, without an open PR → spawn the role
+      the engraved route names (`StepDispatcher.dispatch_issue`; the workflow_map step decides,
+      never a default producer).
     * **PR** with a requested reviewer → spawn the **judge**; PR `REQUEST_CHANGES` without a reviewer → re-spawn
       the **producer** for the rework (`StepDispatcher.dispatch_review`).
-    * `lcars-in-flight` lock → skip (a pod is already working the brick). **Repo-serialized lease**:
-      at most one active workflow_run per repo (sequential feature-branches → clean rebase merge, linear history; FF NOT guaranteed — cf. `ForgeClient.merge_pr`).
+    * `lcars-in-flight` lock → skip (a pod is already working the brick). **Per-repo ceiling**
+      (`Lease` + `Admission.max_fan/2`): at most `max_fan` active workflow_runs per repo — the
+      project's declaration, else the fleet default (5); a declaration of 1 is the serial project.
 
   ## Robustness
 
@@ -27,8 +30,8 @@ defmodule Fleet.Pilot.Poller do
 
     * `Backoff` — PURE computation of the delay (jitter + exponential backoff); the GenServer keeps
       the effect (`schedule/1`) and the rescue (`safe_poll`).
-    * `Lease` — repo-serialized lease (ENGAGED/QUEUED classification + dispatch under lease,
-      issues path); hardened boundary `Lease.Seams`, tally vocabulary.
+    * `Lease` — per-repo admission ceiling (ENGAGED/QUEUED classification + dispatch under
+      `max_fan`, issues path); hardened boundary `Lease.Seams`, tally vocabulary.
     * `Reconciliation` — reclaiming of orphaned `lcars-in-flight` locks (the 2-tick
       grace — cross-tick state — stays HERE, `orphan_lock_suspects`).
 
@@ -63,9 +66,10 @@ defmodule Fleet.Pilot.Poller do
   # the EFFECT (`schedule/1` = Process.send_after) and the rescue (`safe_poll`), Backoff yields the delay.
   alias Fleet.Pilot.Poller.Backoff
 
-  # Repo-serialized lease (ENGAGED/QUEUED classification + dispatch under lease) — the business CORE of
-  # the issues path, extracted. Hardened boundary: reads a narrow `Lease.Seams` (`lease_seams/1`), prod
-  # defaults resolved HERE. Also owns the tally vocabulary (`zero_tally/merge_tally`).
+  # Per-repo admission ceiling (ENGAGED/QUEUED classification + dispatch under `max_fan`) — the
+  # business CORE of the issues path. Hardened boundary: reads a narrow `Lease.Seams`
+  # (`lease_seams/1`), prod defaults resolved HERE. Also owns the tally vocabulary
+  # (`zero_tally/merge_tally`).
   alias Fleet.Pilot.Poller.Lease
 
   # THE passage point of the two dispatch rails. Every TRANSVERSE rule (accounting, wait
@@ -133,7 +137,7 @@ defmodule Fleet.Pilot.Poller do
     # would drown the trace it exists to raise. Starts `true` — the first failure IS a transition.
     pods_snapshot_ok?: true,
     # Desired-state pass of the main branch-protection (default nil →
-    # `ProjectOnboard.reconcile_main_protection/2`) — seam for tests (zero forge).
+    # `Fleet.Project.Onboard.reconcile_main_protection/2`) — seam for tests (zero forge).
     protection_reconciler: nil,
     # Keeper of the per-project architect (default nil → `Project.Architect.ensure_alive/2`) —
     # seam for tests (zero forge, zero tmux).
@@ -208,7 +212,7 @@ defmodule Fleet.Pilot.Poller do
   @impl GenServer
   def init(opts) do
     # Multi-project: no mandatory `:repo` — the poller DISCOVERS its projects by ORG-MEMBERSHIP
-    # (`list_org_repos(org)` — every repo of the fleet org IS a fleet project). `:repo` stays accepted
+    # (`list_org_repos(org)` per catalogue org — every repo of such an org IS a fleet project). `:repo` stays accepted
     # (tests/seam) but is NOT the source (do_poll overwrites it per iteration). `my_human` = the REAL
     # required source of SCOPING (`Human.current!()` fail-loud — a poller that does not know WHO it is cannot
     # scope its issues via `assigned_by`).
@@ -812,12 +816,12 @@ defmodule Fleet.Pilot.Poller do
   defp step_do_poll_onboarded(state, mode, pods, started, forge) do
     repo_prior = repo_scoped_suspects(state)
 
-    # Repo-serialized lease: we list ALL open items (in-flight included) to count the active
+    # Per-repo ceiling: we list ALL open items (in-flight included) to count the active
     # workflow_runs. We ALSO list the open PRs → the JUDGES are dispatched
     # via the PR's requested_reviewers (plus the issue assignee). decide skips the in-flight ones.
     # FORGE-SIDE multi-user scoping: SAME `assigned_by` filter for issues AND PRs (both go
     # through /issues?type=… on the ForgeClient side). The poller sees ONLY the items of ITS human → scoping lives in
-    # ONE place (the list), decide/dispatch_review do not re-check ownership. Per-human lease.
+    # ONE place (the list), decide/dispatch_review do not re-check ownership. Per-human ceiling.
     scoped_opts = Keyword.put(state.forge_opts, :assigned_by, state.my_human)
 
     with {:ok, issues} <- forge.list_open_issues(state.repo, scoped_opts),
@@ -865,8 +869,7 @@ defmodule Fleet.Pilot.Poller do
     {Lease.zero_tally(), repo_prior, MapSet.new()}
   end
 
-  # The LIVE per-repo pass (not parked) — the body step_do_poll always ran; extracted verbatim
-  # when the parked guard landed (BL-6-30).
+  # The LIVE per-repo pass (not parked).
   defp step_do_poll_live(state, mode, started, issues, pulls, repo_prior, pods) do
     forge = step_forge_client(state)
 
@@ -1103,7 +1106,7 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Hardened boundary to `Lease` (repo-serialized lease): the 5 authorized reads, prod defaults
+  # Hardened boundary to `Lease` (per-repo ceiling): the 5 authorized reads, prod defaults
   # resolved HERE (same rule as `Reconciliation.Seams`: we resolve at the construction site).
   defp lease_seams(state) do
     %Lease.Seams{

@@ -18,11 +18,11 @@ restated, only pointed at.
 ## Modules
 
 **Reactor & dispatch**
-- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / repo-serialized lease / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
+- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / per-repo admission ceiling (`max_fan`, ENGAGED/QUEUED) / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
 - `Fleet.Pilot.PollerTelemetry` — the poller's telemetry, attached (BL-6-40).
 - `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
 - `Fleet.Pilot.BriefBuilder` — the authority on brief FORMAT (worker / judge / rework / conflict).
-- `Fleet.Pilot.PodReaper` — reaps the pods bound to a DEAD ticket (the `:pod_reaper` seam MCP injects).
+- `Fleet.Pilot.PodReaper` — reaps the pods bound to a DEAD ticket (the `:mcp_pod_reaper` seam MCP injects).
 
 **Step-run completion**
 - `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, StepRunBuild, VerdictCorrection}` (`VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
@@ -31,28 +31,26 @@ restated, only pointed at.
 - `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/6`), shared by both merge points.
 - `Fleet.Pilot.ConflictProbe` / `ConflictApply` / `ConflictReport` — the tier-0 conflict rail: impure probe preserving raw blob bytes, write path re-checking every file in an isolated worktree, and the diagnosis rendered for a human on the PR.
 
-**Forge — NOT here any more**
-- The client and the wire protocol are their own domain: `Fleet.Forge` (`lib/fleet/forge/`, own map). The pilot DRIVES it and declares it as a dep; it does not contain it. What made the move necessary: `Req`/`Req.Response` were deps of THIS boundary, so "one HTTP exit" was a convention any new call could break — it is compiled over there now.
+**Forge and project — other domains, driven from here**
+- `Fleet.Forge` (`lib/fleet/forge/`, own card): the client and the wire protocol. The pilot DRIVES it and declares it as a dep; `Req` lives only there, so "one HTTP exit" is compiled, not a convention.
+- `Fleet.Project` (`lib/fleet/project/`, own card): onboarding, card, roles, declaration, architect, worktrees. Imperative and called on demand — the opposite nature of this reactive rail.
 - `Fleet.Pilot.MergeOutcome` — pure structural classification of a merge failure. Stays: it reads a forge failure to decide what the PILOT does next.
 
-**Incidents & onboarding**
+**Incidents & wake**
 - `Fleet.Pilot.IncidentConsumer` — Bus consumer of pod-failure events (`pod.failed` / `wake.failed`) → `IncidentRegistry`.
 - `Fleet.Pilot.IncidentRegistry` — persistent cross-session incident memory (GenServer + WAL + forge sync). Sub-module `Escalation` (the sysadmin issue).
 - `Fleet.Pilot.ArchWake` — SINGLE authority for waking a project's architect on an `lcars-awaits-arch` escalation: the ordered offer-then-wake pair, shared by both rails.
 - `Fleet.Pilot.ArchFeed` — Bus consumer appending one short line per fleet milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`).
 - `Fleet.Pilot.PodFeed` — the feed FILE primitive shared by both (name, `HH:MM` stamp, 200-line bound). The format has one owner; the log prefix stays with each facade's rail.
 - `Fleet.Pilot.WakeRecovery` — hardening of `Spawner.wake_pod/1` (re-roll / escalate).
-- `Fleet.Project.Architect` — the PER-PROJECT architect: pod-id authority + idempotent `ensure/2` (one architect per repo, project-bound identity).
-- `Fleet.Project.Declaration` — single owner of the per-project criticality declaration (`<project>/.lcars.json`, schema `declaration-v1`): written at onboarding, read at the workflow-map burn.
-- `Fleet.Project.Onboard` — `onboard/2` / `import/2`: mechanically create/import a dual-dir project. Sub-module `Scaffold` (pure templates).
 
 **Primitives (single-authority utils)**
 - `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
 - `Fleet.PodId` — FOUNDATION, not this domain: the pod_id format is read by Spawner and Project, which sit below Pilot
-- `Fleet.Project.Roles` / `Opts` / `Offload` / `IssueId` / `WorkflowMapNav` / `WorktreeSync` / `GitOps` / `WriteSpacing` — roles accessor, opt idioms, supervised Bus offload, id formats, workflow-map nav, post-merge projection, bounded git, inter-write spacing.
+- `Fleet.Pilot.Offload` / `IssueId` / `WorkflowMapNav` / `WriteSpacing` — supervised Bus offload, id formats, workflow-map nav, inter-write spacing. `Fleet.Opts` (foundation) — the opt idioms.
 
 ## Config & deps
 
-- Boot: `:step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet_v2.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
-- Deps (all descending): the truth is the `use Boundary` of `lib/fleet/pilot.ex` — notably workflow (workflow-map nav + gate briefs), spawner, credentials, cap_profile, task_queue, event_router. Upward runtime seams (config-injected, NOT compile deps): `:pod_reaper` (mcp → `Fleet.Pilot.PodReaper`), and readiness probed by api. `:forge_client` / `:project_onboard` are not upward: their targets `Fleet.Forge` and `Fleet.Project` sit below mcp (`CLAUDE.md`, "Seams runtime").
+- Boot: `:pilot_step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet_v2.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
+- Deps (all descending): the truth is the `use Boundary` of `lib/fleet/pilot.ex` — notably workflow (workflow-map nav + gate briefs), spawner, credentials, cap_profile, task_queue, event_router. Upward runtime seams (config-injected, NOT compile deps): `:mcp_pod_reaper` (mcp → `Fleet.Pilot.PodReaper`), and readiness probed by api. `:mcp_forge_client` / `:mcp_project_onboard` are not upward: their targets `Fleet.Forge` and `Fleet.Project` sit below mcp.
 - Not core: the core can be driven manually OR by pilot afterwards — decoupled by design.

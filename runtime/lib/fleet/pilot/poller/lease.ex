@@ -123,11 +123,11 @@ defmodule Fleet.Pilot.Poller.Lease do
   def process_issues(issues, pr_issue_ids, dispatch_opts, %Seams{} = seams) do
     # Coherence: the routing lives in SCOPED LABELS (`wfmap/*` + `stage/*`, engraved by `post_route`) —
     # a forge-side state-machine, not a comment. We read the route → dispatch (workflow_map_role). The
-    # lease "1 active workflow_run/repo" also reads on the same route (a durable forge fact). We classify each issue ONCE:
+    # ceiling reads on the same route (a durable forge fact). We classify each issue ONCE:
     #   - ENGAGED (in-flight, or route advanced beyond the 1st step = workflow_run started) → holds the lease;
     #     we dispatch its current step (continues the step_run, or skips if in-flight).
     #   - QUEUED (routed at the 1st step, or routeless to be onboarded, not yet dispatched) → starts only
-    #     if the lease is free; otherwise waits (serialization → sequential feature-branches → rebase merge, cf. `ForgeClient.merge_pr`).
+    #     if a seat is free under `max_fan`; otherwise waits (`wait/at_capacity`, next tick).
     # `classify_issue` reads the route (+ loads the workflow_map) ONCE and THREADS it to the dispatch via
     # `prefetch` (merged into the opts) → the lease classification and the dispatch read the SAME
     # data without a second get_route / workflow_map load.

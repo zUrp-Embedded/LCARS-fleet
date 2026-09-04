@@ -18,10 +18,9 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   ## Family
 
-  One of FOUR escalation exits. The family register — the four exits, the overlap under watch and
-  its COUNT — lives once, in `Fleet.Pilot`'s moduledoc. Read it before adding a fifth: the standing
-  decision is to merge the two overlapping ones when a fifth appears, and that threshold only works
-  if the count is kept in one place.
+  One link of the escalation FAMILY. The register — the links ordered by the DEPTH they reach —
+  lives once, in `Fleet.Pilot`'s moduledoc; a new link is placed there by depth, never counted
+  (no count-based merge threshold).
 
   ## Boundary: explicit seams struct (not the whole `ctx`)
 
@@ -228,11 +227,10 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
     # Signé par le rail DÉCISION, et il le reste sur les DEUX rails : une escalade est un jugement,
     # pas une résolution — le chief ne signe que là où il a agi.
     #
-    # ⚠ L'APPEL PASSE DÉSORMAIS PAR `Forge.Client.as_role/2` DIRECTEMENT. Il transitait par un
-    # PAS d'`as_gatekeeper/1` emprunte au module du sceau : un adaptateur de credential loge dans
-    # le module de SORTIE du pipeline n'a de sens que si le nom de ce module le suggere, ce qui fait
-    # dependre une resolution d'identite d'un choix de nommage. `as_role/2` est l'autorite unique —
-    # on l'appelle, on ne la relaie pas.
+    # ⚠ `Forge.Client.as_role/2` DIRECTEMENT, jamais via un adaptateur de credential loge dans le
+    # module du sceau : un tel adaptateur n'a de sens que si le nom de ce module le suggere, ce qui
+    # fait dependre une resolution d'identite d'un choix de nommage. `as_role/2` est l'autorite
+    # unique — on l'appelle, on ne la relaie pas.
     #
     # Fail-CLOSED sur le jeton : indisponible → on SAUTE le commentaire (jamais sous le compte
     # système) mais on pose quand même le label porteur `lcars-awaits-arch` (système, le throttle du

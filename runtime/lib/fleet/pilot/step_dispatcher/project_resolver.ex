@@ -22,7 +22,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
 
   `nil` when no forge is configured (the pod works without a project). RAISES when `:base_branch` is
   missing rather than defaulting: the face decision is made once at the dispatch entry and threaded,
-  and a substituting default here silently pinned the CODE face for an ops deliverable.
+  and a substituting default here would silently pin the CODE face for an ops deliverable.
 
   `gate_base_sha` is pinned SEPARATELY from `base_sha` only when the two refs diverge — a rebase
   resolution clones the feature and must descend from the target. On the forward path the read is

@@ -81,8 +81,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   require Logger
 
   # workflow_run lock: single source `Fleet.Labels` (compile-time constant). SAME source as
-  # the `@in_flight` of the core `Poller` (which keeps its own for the fast-path `classify_issue`) — not a
-  # fork of a literal, the authority stays `Labels.in_flight/0`.
+  # `Lease`'s `@in_flight` (kept there for the fast-path `classify_issue`) — not a fork of a
+  # literal, the authority stays `Labels.in_flight/0`.
   @in_flight Fleet.Labels.in_flight()
 
   # The PULLED work-item states — the durable proof an executor ACTIVATED (get_work_item transitions
@@ -165,9 +165,9 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # `%Seams{}`, whose contract is "the 5 seams reconcile/5 READS" and not "what it has read".
     # Adding it there would have made the struct carry a cache.
     #
-    # The fail-safe MOVES here without changing meaning: an impossible enumeration yields `:error`
-    # and the whole pass reclaims nothing — exactly what `live_owned_refs` answers on its own, with
-    # the three consumers covered by the same read.
+    # The fail-safe lives here: an impossible enumeration yields `:error` and the whole pass
+    # reclaims nothing — exactly what `live_owned_refs` answers on its own, with the three
+    # consumers covered by the same read.
     case pods do
       {:error, _reason} ->
         prior_suspects
@@ -502,11 +502,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # a single server shared by every pod, so a restart or a load spike lands here. Folding both into
   # `false` would reap a possibly-WORKING pod for a hiccup that is not its own.
   #
-  # The repo already decided this exact question, one module over, and wrote the reasoning that was
-  # missing here — `spawn.ex`, F-C059: *"aliveness UNKNOWN: fail-CLOSED -> DEFER, NEVER :dead.
-  # Classing an uncertain pod dead -> reap of a maybe-LIVING pipe. A transient failure self-corrects
-  # next tick; a persistent one defers visibly rather than acting destructively."* Two answers to
-  # one question in one domain; this is the side that had the destructive path.
+  # Same rule as `Spawn.pipe_rebrief_state/2` (F-C059): *"aliveness UNKNOWN: fail-CLOSED -> DEFER,
+  # NEVER :dead. Classing an uncertain pod dead -> reap of a maybe-LIVING pipe. A transient failure
+  # self-corrects next tick; a persistent one defers visibly rather than acting destructively."*
+  # One answer to one question in one domain; this is the side with the destructive path.
   #
   # Deferring costs a tick, and it does NOT mask an orphan: an established idle still reaps, and an
   # unreachable queue means the fleet has a bigger problem than one uncollected pod.
@@ -536,8 +535,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # freshly-briefed `:pending` pod is re-dispatched (via the lock reclaim), never REAPED.
   # THREE ANSWERS, because there are three facts. `:pulled` / `:not_pulled` are both MEASURED; a
   # broker that cannot answer is `:unknown`, and `live_owned_refs/2` turns that into `:error` for the
-  # whole cycle. The old boolean folded the third onto `false` — "this pod has not pulled" — which is
-  # precisely the reading that made a live pod's lock look orphaned during a TaskQueue restart.
+  # whole cycle. A boolean would fold the third onto `false` — "this pod has not pulled" — which is
+  # precisely the reading that makes a live pod's lock look orphaned during a TaskQueue restart.
   #
   # A non-binary pod_id stays `:not_pulled`: that is a malformed entry in the Spawner snapshot, a
   # measured fact about the pod, not an unavailable broker.
@@ -578,9 +577,8 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # deliberate parked-pod repair of the moduledoc). Asserting "pod dead without completion" here
   # would say it over pods that are demonstrably ALIVE — measured on the faceproof bench, the pipe
   # idling between two rework rounds while the log declares it dead every tick: a diagnosis the code
-  # never made, quoted as one. Same discipline as the arch-onboard log: report what was measured,
-  # and
-  # when the enumeration itself fails, say UNKNOWN rather than guess.
+  # never made, quoted as one. Report what was measured, and when the enumeration itself fails, say
+  # UNKNOWN rather than guess.
   defp lock_diagnosis(%Seams{repo: repo}, number, pods) do
     live_for_ref =
       pods
