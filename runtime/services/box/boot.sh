@@ -212,21 +212,31 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # pour un module, pas pour le PID 1 — rien n'en fuit ici. Sans protocole, la population n'est
   # PAS mesuree, et ca se dit : un 1 invente serait aussi faux que le 0 d'avant.
   HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
-  humans_rc=1
+  # TROIS REPONSES, PAS DEUX : 0 quelqu'un, 1 personne, 2 la population n'est PAS mesuree — la
+  # frontiere systeme/humain n'est pas etablie (login.defs illisible ; le protocole dit le remede,
+  # une fois, sur cette sortie). Un 1 la-dessus enverrait l'operateur enroler quelqu'un sur la
+  # forge alors que c'est le fichier qu'il faut reparer ; un 0 dirait « present » sans mesure —
+  # c'est ce que 1000 devine faisait (fail-closed partout, ⚖ user 2026-09-05).
+  humans_rc=1 pop_rc=1
   if [[ ! -r "$HUMAN_PROTOCOL" ]]; then
     say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
-  elif ( export LCARS_LOGIN="$LCARS_ADMIRAL" LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
-         # shellcheck source=../lib/human-protocol.sh
-         . "$HUMAN_PROTOCOL"
-         while IFS= read -r _m; do
-           [[ -n "$_m" ]] || continue
-           is_fleet_human "$_m" && exit 0
-         done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
-         exit 1 ); then
-    humans_rc=0
+  else
+    pop_rc=0
+    ( export LCARS_LOGIN="$LCARS_ADMIRAL" LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
+      # shellcheck source=../lib/human-protocol.sh
+      . "$HUMAN_PROTOCOL"
+      uid_bounds || exit 2
+      while IFS= read -r _m; do
+        [[ -n "$_m" ]] || continue
+        is_fleet_human "$_m" && exit 0
+      done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+      exit 1 ) || pop_rc=$?
+    if [[ "$pop_rc" -eq 0 ]]; then humans_rc=0; fi
   fi
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
+  elif [[ "$pop_rc" -eq 2 ]]; then
+    say "population des humains NON mesuree — la frontiere systeme/humain n'est pas etablie (bornes d'uid illisibles dans ${PASSWD_DEFS:-/etc/login.defs}, le remede est ci-dessus) : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
   else
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi

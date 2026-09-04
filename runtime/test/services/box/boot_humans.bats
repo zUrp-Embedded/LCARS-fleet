@@ -259,6 +259,25 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'présent' "$JOURNAL"
 }
 
+@test "bornes d'uid ILLISIBLES : la population n'est PAS mesuree — humans.rc dit 1, le bloc ne dit ni « present » ni « AUCUN humain », et le remede nomme le fichier" {
+  # Fail-closed, herite du protocole (⚖ user 2026-09-05). zoe est dans le groupe : avec 1000 devine
+  # elle serait « presente » ; sans frontiere etablie, personne ne l'est — et ce n'est PAS « AUCUN
+  # humain, enrole quelqu'un » : c'est le fichier qu'il faut reparer, et le bloc le dit.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  bloc 0 0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  grep -q 'NON mesuree' "$JOURNAL"
+  grep -q "nulle-part/login.defs" "$JOURNAL"
+  refute grep -q 'présent' "$JOURNAL"
+  refute grep -q 'AUCUN humain' "$JOURNAL"
+  # Le remede du protocole passe sur la sortie du boot, une fois.
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
+  # Et la boucle part quand meme : reparer login.defs ne demande pas un redemarrage du convergeur.
+  grep -q 'convergence des humains ACTIF' "$JOURNAL"
+}
+
 @test "le bloc APPELLE le predicat du protocole — il ne porte aucune copie de la regle d'uid" {
   # Le mur de S4 : `is_fleet_human` est la seule definition. Un plancher numerique dans ce bloc est
   # un troisieme exemplaire, celui qu'on ne relit pas.
