@@ -30,19 +30,18 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # EVERY test corpus in the repo — bats AND python — and what happens to it. `:gated` = shell_gate discovers it;
   # `{:out, why}` = deliberately outside, ON RECORD. A corpus absent from this map fails the check.
   #
-  # WHY THIS EXISTS, and it is worth three findings in one evening: nothing in this repo
-  # answered "which test corpora exist, and which ones do we run". `deploy/tests` (alors sous `runtime/`)
-  # and `runtime/git-hooks/tests` had never been run by any gate, and `runtime/tests/unit/v1` had been
+  # WHY THIS EXISTS: nothing else in this repo answers "which test corpora exist, and which ones do
+  # we run". Measured 2026-08-05: two bats corpora that no gate had ever run, and a unit corpus
   # failing at `setup` on all 447 of its cases since a tidying commit moved the paths out from under
-  # it. All three were found by a `find` run out of curiosity. A corpus nobody runs does not rot
-  # loudly — it rots while reporting a coverage it does not provide, which is the most expensive
-  # silence a test can keep.
+  # it — all three found by a `find` run out of curiosity. A corpus nobody runs does not rot loudly
+  # — it rots while reporting a coverage it does not provide, which is the most expensive silence a
+  # test can keep.
   @test_corpora [
     {"runtime/test", :gated},
     {".claude/skills", :gated},
     # ⚠ CE CORPUS N EST PAS JOUE PAR LA MEME PORTE QUE LES AUTRES, ET LE DIRE `:gated` MENTIRAIT.
     # `deploy/` est sorti de `runtime/` : c est un logiciel a part, avec sa propre porte. Le declarer
-    # `:gated` affirmerait que `runtime/test/shell_gate.sh` le joue — il ne le decouvre plus — et
+    # `:gated` affirmerait que `runtime/test/shell_gate.sh` le joue — il ne le decouvre pas — et
     # `{:out, why}` serait pire encore : ces temoins SONT joues, par `deploy/gate.sh`. Un corpus
     # gate ailleurs a besoin d un troisieme mot, sinon le seul choix honnete est un mensonge.
     {"deploy/tests", {:gated_by, "deploy/gate.sh"}},
@@ -189,10 +188,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # l appelant (`check_test_dirs_mirror_source(root)`, `root = File.cwd!()`), celle-la dans le sien
   # (`repo = Path.expand("..", root)`).
   #
-  # Depuis que `deploy/` est sorti de `runtime/`, il est un arbre FRERE : `deploy/tests` resolu depuis
-  # `runtime/` ne designe plus rien. Ecrit ainsi, `Path.wildcard` rendait une liste VIDE, `strays`
-  # restait vide, et le mur passait au vert en n ayant pas lu un seul temoin de l installeur — la
-  # panne la plus chere, celle qui se presente comme un succes.
+  # `deploy/` est un arbre FRERE de `runtime/` : `deploy/tests` resolu depuis `runtime/` ne designe
+  # rien. Ecrit ainsi, `Path.wildcard` rend une liste VIDE, `strays` reste vide, et le mur passe au
+  # vert sans avoir lu un seul temoin de l installeur — la panne la plus chere, celle qui se
+  # presente comme un succes.
   @test_source_roots %{"test" => ["lib", "."], "../deploy/tests" => ["../deploy"]}
 
   @doc false
@@ -294,8 +293,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # ⚠ ET LE COUT EST ASYMETRIQUE, ce qui justifie un mur plutot qu'une relecture. Un `.exs` mal
   # nomme n'est pas ramasse par `mix test` (`test_pattern`, defaut `*_test.exs`) et il ne le DIT
   # pas : la faute est une lettre, la consequence est une suite entiere qui figure dans l'arbre et
-  # n'a jamais tourne. Ce mur remplace `tests.exs_are_discoverable`, qui ne voyait que l'Elixir —
-  # deux murs qui se recouvrent apprennent a leur lecteur qu'aucun ne fait autorite.
+  # n'a jamais tourne. UN mur pour les trois langages, pas un `tests.exs_are_discoverable` a cote qui
+  # ne verrait que l'Elixir — deux murs qui se recouvrent apprennent a leur lecteur qu'aucun ne fait
+  # autorite.
   @spec check_witness_naming(String.t()) :: Support.result()
   def check_witness_naming(root) do
     service = ~w(README.md test_helper.exs shell_gate.sh refute.bash)
@@ -308,9 +308,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         # ⚠ CE QUE `git` IGNORE N EST PAS UN TEMOIN MAL NOMME. `__pycache__/` est dans le
         # `.gitignore` du depot : ses `.pyc` sont les artefacts que l interpreteur pose en JOUANT
         # les temoins python, et ils portent des noms que cette regle ne peut pas satisfaire
-        # (`x_test.cpython-314-pytest-9.0.2.pyc`). Ce mur etait donc VERT sur une machine qui n a
-        # jamais lance la suite python et ROUGE sur celle qui vient de la jouer — quatre
-        # accusations, aucune portant sur un fichier du depot.
+        # (`x_test.cpython-314-pytest-9.0.2.pyc`). Sans cette exclusion le mur est VERT sur une
+        # machine qui n a jamais lance la suite python et ROUGE sur celle qui vient de la jouer
+        # (mesure : quatre accusations, aucune portant sur un fichier du depot).
         # Un mur dont le verdict depend de ce que l operateur a lance la veille ne mesure pas le
         # depot : il mesure la machine.
         |> Enum.reject(&(&1 =~ ~r"/__pycache__/"))
@@ -369,10 +369,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # bloc `@test`, ou si un `||` rattrape son echec. Partout ailleurs elle est verte au moment PRECIS
   # ou ce qu'elle interdit arrive.
   #
-  # ⚠ UN MUR SE POSE VERT, JAMAIS ROUGE : pose sur les 30 sites qu'il aurait signales, il aurait
-  # appris a lire « rouge » comme « normal » — ce que le depot a deja paye avec shellcheck. Les 30
-  # sont convertis et la mesure est a zero, donc il nait vert : c'est la seule position depuis
-  # laquelle un mur protege quelque chose.
+  # ⚠ UN MUR SE POSE VERT, JAMAIS ROUGE : pose sur 30 sites signales, il apprendrait a lire « rouge »
+  # comme « normal » — ce que le depot a paye avec shellcheck. Il nait a zero (les 30 sites de la
+  # pose convertis d'abord) : c'est la seule position depuis laquelle un mur protege quelque chose.
   #
   # CE QU'IL EMPECHE DE REVENIR, mesure et non suppose. Deux temoins de securite ont menti des
   # semaines sous cette forme : un jeton de forge qui ne devait pas passer par `argv` (lisible de
@@ -402,9 +401,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
         |> test_blocks()
         |> Enum.flat_map(fn {a, b} ->
           # ⚠ `a..b` AVEC UN PAS EXPLICITE. Un `@test` a corps VIDE rend `b == a - 1`, et un
-          # `first..last` decroissant prend en Elixir un pas de -1 : le bloc etait parcouru A
-          # L'ENVERS, donc `List.last(code)` designait la PREMIERE ligne et l'exemption « negation
-          # terminale » tombait sur la mauvaise. Le warning d'Elixir le disait a chaque passe.
+          # `first..last` decroissant prend en Elixir un pas de -1 : sans pas explicite le bloc est
+          # parcouru A L'ENVERS, `List.last(code)` designe la PREMIERE ligne et l'exemption
+          # « negation terminale » tombe sur la mauvaise (le warning d'Elixir le dit).
           code =
             if(b < a, do: [], else: Enum.to_list(a..b//1))
             |> Enum.filter(fn n ->
@@ -553,9 +552,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   def check_test_corpora_on_record(root) do
     repo = Path.expand("..", root)
 
-    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (the vendored bats-core lived in
-    # one until the v1 excommunication), and
-    # without it the scan reports a corpus that is a folder.
+    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (a vendored bats-core lives in
+    # one), and without it the scan reports a corpus that is a folder.
     found =
       case System.cmd(
              "find",
@@ -633,11 +631,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
     gated = Enum.count(@test_corpora, fn {_, v} -> v == :gated end)
     gated_by = Enum.count(@test_corpora, fn {_, v} -> match?({:gated_by, _}, v) end)
 
-    # ⚠ `:gated` ETAIT UN MOT, PAS UNE MESURE. Rien ne confrontait cette declaration a ce que la
-    # porte JOUE reellement : un corpus pouvait etre marque « gate » ici pendant que la porte avait
-    # cesse de le decouvrir, et ce mur — dont le sujet est precisement « un corpus que personne ne
-    # joue » — l aurait certifie couvert. On DEMANDE donc a chaque porte la liste de ce qu elle
-    # joue (`--list-corpora`), au lieu de la deduire de notre propre table.
+    # ⚠ `:gated` EST UNE INTENTION, PAS UNE MESURE. Sans confrontation a ce que la porte JOUE
+    # reellement, un corpus marque « gate » ici pendant que la porte a cesse de le decouvrir serait
+    # certifie couvert par ce mur — dont le sujet est precisement « un corpus que personne ne
+    # joue ». On DEMANDE donc a chaque porte la liste de ce qu elle joue (`--list-corpora`), au
+    # lieu de la deduire de notre propre table.
     porte_liste = fn script ->
       chemin = Path.join(repo, script)
 
@@ -697,7 +695,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
 
   # Confronte un corpus a ce que SA porte annonce jouer. Le mot `:gated` de la table dit une
   # intention ; cette fonction lit la reponse de la porte. L ecart entre les deux est exactement le
-  # defaut que `tests.corpora_on_record` existe pour attraper, et il etait hors de sa portee.
+  # defaut que `tests.corpora_on_record` existe pour attraper.
   defp verifie_porte(corpus, script, listings) do
     case Map.get(listings, script) do
       :error ->

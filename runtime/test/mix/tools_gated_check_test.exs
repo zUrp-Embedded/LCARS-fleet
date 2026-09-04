@@ -166,9 +166,9 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolsGatedCheckTest do
 
   # JG-134 — RECEVOIR L'IDENTITE N'EST PAS S'EN SERVIR. `PodSocketAcceptor` construit
   # `%{pod_id: pod_id}` pour CHAQUE `tools/call`, a l'identique et sans condition : la presence de
-  # cette cle dans une tete de clause ne dit donc rien de l'autorisation. Le predicat cherchait
-  # `\bpod_id:` et acceptait `%{pod_id: _}` — une clause qui filtre l'identite, la jette, puis agit
-  # globalement etait rapportee comme gardee. Le mur faisait la largeur d'un underscore.
+  # cette cle dans une tete de clause ne dit donc rien de l'autorisation. Un predicat qui chercherait
+  # `\bpod_id:` accepterait `%{pod_id: _}` — une clause qui filtre l'identite, la jette, puis agit
+  # globalement serait rapportee comme gardee. Un mur de la largeur d'un underscore.
   #
   # Mesure avant de resserrer, parce qu'un mur ne peut naitre que vert : 23 des 25 outils sont
   # ROLE-gardes (`require_architect`/`require_onboarder`), tous les mutateurs parmi eux, et les deux

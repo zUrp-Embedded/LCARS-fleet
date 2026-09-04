@@ -45,10 +45,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
       Types         les jumeaux `@spec` et `@doc` sur les fonctions publiques
       Boot          le verrou de topologie : l'ORDRE du demarrage
 
-  ⚠ CE FICHIER FAISAIT 7134 LIGNES. Le decoupage n'a rien change au comportement — le MEME nombre
-  de murs avant et apres, verifie par la tache et non de memoire — mais il a change ce qu'un lecteur
-  doit tenir en tete pour en ouvrir un seul. Le nombre du jour ne se recopie pas ici : la tache le
-  rend (`mix lcars.contracts.check --quiet`), et des murs ont ete ajoutes depuis.
+  ⚠ CE FICHIER NE PORTE AUCUN MUR, ET C'EST CE QUI LE GARDE COURT : un lecteur ouvre une famille sans
+  tenir les autres en tete. Le nombre de murs du jour ne se recopie pas ici : la tache le rend
+  (`mix lcars.contracts.check --quiet`).
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Artifact
@@ -71,9 +70,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
   @recursive false
 
   # Each check: %{id, remediation, status: :pass|:fail, evidence: [..], note}
-  # (The `@pending_checks` machinery — a list that was ALWAYS empty, a counter that always
-  # printed "0 pending" — was inert ceremony, removed acte4 A-16. Reintroduce a pending tier
-  # only the day a real declared-but-not-yet-executable check exists.)
+  # (No pending tier: a declared-but-not-executable check is not listed, cf. the moduledoc. A
+  # `@pending_checks` list that is always empty and a counter that always prints "0 pending"
+  # would be inert ceremony — reintroduce the tier only the day such a check really exists.)
 
   @impl Mix.Task
   def run(args) do

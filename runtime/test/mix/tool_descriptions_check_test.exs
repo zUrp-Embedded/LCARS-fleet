@@ -113,10 +113,10 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolDescriptionsCheckTest do
 
   describe "ce que le mur NE VOIT PAS, et c'est ecrit" do
     test "un nom INVENTE qui n'est pas une reordination passe — angle mort assume" do
-      # ⚠ CE TEMOIN GRAVE UNE LIMITE, PAS UN SUCCES. Le mur s'appelait
-      # `mcp.tool_descriptions_name_real_tools` et s'ouvrait sur « aucune description ne peut nommer
-      # un outil qui n'existe pas » — une promesse plus large que le code, relevee par relecture
-      # independante le 2026-08-22. Elargir demanderait une liste blanche tenue a la main des jetons
+      # ⚠ CE TEMOIN GRAVE UNE LIMITE, PAS UN SUCCES. Le mur ne promet que les PERMUTATIONS :
+      # « aucune description ne peut nommer un outil qui n'existe pas » serait une promesse plus
+      # large que le code (relevee par relecture independante le 2026-08-22), et son nom le dit.
+      # Elargir demanderait une liste blanche tenue a la main des jetons
       # snake_case legitimes (`workflow_map`, `full_name`, `default_branch`), et une liste tenue a la
       # main est ce que ce fichier existe pour eviter.
       #

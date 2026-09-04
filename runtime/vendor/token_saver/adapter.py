@@ -82,11 +82,11 @@ _LCARS_CONFIG = {
 
 # ─── Ce qui reste réglable à chaud, et ce qui ne l'est jamais ─────────────────
 #
-# Figer la configuration pour fermer F4 avait un effet de bord : plus AUCUN
-# override d'environnement n'était appliqué. Sur une flotte, cela veut dire
+# Figer la configuration pour fermer F4 a un effet de bord : plus AUCUN
+# override d'environnement ne s'applique. Sur une flotte, cela veut dire
 # qu'on ne peut pas couper l'outil sans reconstruire l'image — inacceptable.
 #
-# On rouvre donc l'environnement, mais par LISTE BLANCHE. La distinction n'est
+# L'environnement est donc rouvert, mais par LISTE BLANCHE. La distinction n'est
 # pas cosmétique :
 #
 #   * les FICHIERS (`.token-saver.json`, global ou projet) ne sont jamais lus —
@@ -369,10 +369,10 @@ def is_enabled() -> bool:
         return False
 
     if value and value not in _ON_VALUES:
-        # UN MOT INCONNU COUPE, ET LE DIT. Le vocabulaire « off » etait ferme et tout le reste
-        # valait ON en silence : `LCARS_TOKEN_SAVER=disabled` compressait, et l'operateur qui
-        # l'avait ecrit croyait avoir coupe. Sur un outil dont la doctrine assumee est « toute perte
-        # est silencieuse par construction », c'est la pire valeur par defaut possible.
+        # UN MOT INCONNU COUPE, ET LE DIT. Un vocabulaire « off » ferme avec tout le reste valant ON
+        # en silence ferait compresser sur `LCARS_TOKEN_SAVER=disabled`, l'operateur croyant avoir
+        # coupe. Sur un outil dont la doctrine assumee est « toute perte est silencieuse par
+        # construction », c'est la pire valeur par defaut possible.
         #
         # Le sens du repli n'est pas arbitraire : la compression PERD de l'information, donc le
         # doute va vers MOINS de compression — la meme monotonie que

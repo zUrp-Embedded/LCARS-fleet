@@ -4,11 +4,11 @@
 # STARDATE: 2026-08-14
 # STATUS: bats tests for pre-commit GO-7 exemptions — aucune clause d'exemption ne survit a son sujet
 #
-# CE QUE CE MUR FAISAIT. `is_ipc_exception` porte les clauses qui exemptent un fichier de l'en-tete
+# CE QUE CE MUR GARDE. `is_ipc_exception` porte les clauses qui exemptent un fichier de l'en-tete
 # GO-7. Une clause qui ne matche AUCUN fichier suivi n'exempte rien : elle se lit comme couvrant une
 # classe que le mur refuse en fait, et elle pourrit SANS BRUIT — rien n'echoue quand son sujet
-# demenage ou disparait. Le hook portait deja deux cicatrices de ce genre, reparees a la main apres
-# coup, chacune ayant refuse pendant des semaines ce qu'elle avait ete ecrite pour laisser passer.
+# demenage ou disparait (mesure : deux clauses de ce genre, reparees a la main, ont chacune refuse
+# pendant des semaines ce qu'elles etaient ecrites pour laisser passer).
 #
 # C'est la garde `measured_nothing?` des contrats, transposee : une population vide n'est pas un
 # vert, c'est un instrument qui a cesse de voir son sujet.
@@ -20,9 +20,9 @@
 # ⚠ CE MUR JOUE LES CLAUSES CONTRE `git ls-files` : SANS DEPOT, LA POPULATION EST VIDE. Et une
 # population vide, ce fichier le dit lui-meme quinze lignes plus haut, n'est pas un vert — c'est un
 # instrument qui a cesse de voir son sujet. Un tarball n'emporte pas `.git` (`git archive` n'en
-# produit jamais), donc chaque clause y paraitrait morte et les quatre temoins rougissaient sur un
-# hook parfaitement sain. Mesure du 2026-08-22 : ils faisaient partie des douze qui tuaient
-# `60-deploy` sur toute install depuis un tarball.
+# produit jamais), donc chaque clause y paraitrait morte et les quatre temoins rougiraient sur un
+# hook parfaitement sain (mesure du 2026-08-22 : douze temoins de ce genre tuant `60-deploy` sur
+# toute install depuis un tarball).
 need_git_checkout() {
   git -C "$BATS_TEST_DIRNAME" rev-parse --git-dir >/dev/null 2>&1 \
     || skip "pas de checkout git (arbre livre par tarball) — ce temoin mesure un depot"
@@ -120,19 +120,17 @@ EOF
   printf '%s\n' "$output" | grep -qxF "path	*aucun-repertoire-de-ce-nom/*"
   # ...et les clauses vivantes du meme fichier ne sont PAS signalees : un detecteur qui accuse tout
   # ne mesure rien.
-  # `scratchpad.md` et pas `*-handoff.md` : ce dernier a quitte le vrai hook le 2026-08-20
-  # (ccbd45540, « les textes qui presentaient des objets supprimes comme cables ») et le depot ne
-  # porte AUCUN fichier `*-handoff.md`. La fixture le donnait encore en exemple de clause VIVANTE :
-  # le detecteur avait raison de le signaler, et cette ligne l'accusait a tort. Elle n'a jamais
-  # rougi parce que `! …` etait inerte — la purge de 2026-08-20 a rate cette occurrence pour
-  # exactement cette raison. `scratchpad.md` est ce que le hook porte aujourd'hui, et il vit (2 fichiers).
+  # `scratchpad.md`, une clause que le hook porte et qui VIT (2 fichiers) — pas `*-handoff.md`, dont
+  # le depot ne porte AUCUN fichier : une fixture qui le donnerait en exemple de clause vivante
+  # accuserait a tort un detecteur qui a raison de le signaler, et une negation `! …` non terminale
+  # la laisserait passer verte.
   printf '%s\n' "$output" | refute_out 'scratchpad'
   printf '%s\n' "$output" | refute_out 'SKILL\.md'
 }
 
 @test "une clause a deux branches ||  est lue comme DEUX clauses" {
-  # La forme `[[ A || B ]]` a existe dans ce hook et les deux branches etaient mortes. Lire la ligne
-  # comme un seul motif aurait laisse passer la branche non testee.
+  # Une forme `[[ A || B ]]` peut porter deux branches mortes. Lire la ligne comme un seul motif
+  # laisserait passer la branche non testee.
   local fake="$BATS_TEST_TMPDIR/pre-commit-or"
   cat > "$fake" <<'EOF'
 is_ipc_exception() {

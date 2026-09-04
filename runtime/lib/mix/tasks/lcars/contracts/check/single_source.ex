@@ -10,8 +10,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   le DECLARE, le shell, le python et le terraform le RECOPIENT — et une copie que personne ne
   verifie n'est pas une source unique de verite, c'est une coincidence qui a tenu jusqu'ici.
 
-  ⚠ LA FORME DANGEREUSE EST LE VERROU PARTIEL, et ce fichier en a porte un pendant huit jours : il
-  tenait quatre copies sur cinq et sa note annoncait « plus rien de reglable ». Un verrou qui couvre
+  ⚠ LA FORME DANGEREUSE EST LE VERROU PARTIEL (mesure : un verrou tenant quatre copies sur cinq,
+  huit jours, sa note annoncant « plus rien de reglable »). Un verrou qui couvre
   une fraction de son fait reste vert pendant que le reste derive, et il SE LIT comme une garantie —
   strictement pire que pas de verrou, qui au moins pousse quelqu'un a aller voir. Quand un lecteur
   d'un de ces faits apparait, il entre dans la liste `mirrors` du meme geste.
@@ -39,8 +39,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   was created and protected under one name while the reconciler polled another — manifests landing
   where nobody looks, no message, a rail that looks calm.
 
-  ⚠ A PARTIAL LOCK IS THE DANGEROUS SHAPE, AND THIS ONE WAS PARTIAL FOR EIGHT DAYS. It held four
-  of five copies and its own note said "no tunable left". A lock that covers a fraction of its
+  ⚠ A PARTIAL LOCK IS THE DANGEROUS SHAPE (measured: four of five copies held for eight days, the
+  note saying "no tunable left"). A lock that covers a fraction of its
   fact is green while the rest drifts, and it reads like a guarantee — strictly worse than no lock
   at all, which at least prompts someone to look. When a reader of this fact is added, it is added
   to `mirrors` in the same gesture, or this doc is a lie again.
@@ -57,19 +57,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       "bin/lcars-toolchain-converge",
       # FIFTH MIRROR, and it is the OTHER half of that security bound. The converger refuses any
       # SHA that is not the head of the branch IT names; the root executor ASKS the forge for the
-      # head of the branch IT names. The bound only holds while both names agree — and until
+      # head of the branch IT names. The bound only holds while both names agree.
       # Watching the second and not the first is the easy miss. Measured: renaming the literal
       # here alone left the check green, with the only root process on this machine converging on
       # a branch nobody else writes to.
       "services/privileged-executor.py"
     ]
 
-    # ⚠ SCOPE IS DECIDED PER MIRROR, NEVER BY ONE TREE FOR ALL FIVE. The guard
-    # asked `is deploy/ here?` and, on a miss, declared the whole check "NOT CHECKED" — including
-    # `services/` and `bin/`, which the image's build stage DOES carry (it excludes only `deploy`,
-    # `git-hooks`, `system-prompt`). So in the artifact where this gate runs most often, three
-    # readable mirrors went unread and the check reported a clean skip. A blanket scope is a
-    # coverage hole that answers "not my business" on files it is holding.
+    # ⚠ SCOPE IS DECIDED PER MIRROR, NEVER BY ONE TREE FOR ALL FIVE. A guard asking `is deploy/
+    # here?` and declaring the whole check "NOT CHECKED" on a miss would leave `services/` and
+    # `bin/` unread — trees the image's build stage DOES carry (it excludes only `deploy`,
+    # `git-hooks`, `system-prompt`) — in the artifact where this gate runs most often, and report a
+    # clean skip. A blanket scope is a coverage hole that answers "not my business" on files it is
+    # holding.
     {checked, skipped} =
       Enum.split_with(mirrors, fn rel ->
         tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
@@ -85,12 +85,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     expected =
       case File.read(Path.expand("lib/fleet/toolchain.ex", root)) do
         {:ok, src} ->
-          # ⚠ ANCRE EN FIN DE LIGNE, ET SANS CA LE FAIL-CLOSED ETAIT UN FAUX. Sans `\s*$`, la regex
+          # ⚠ ANCRE EN FIN DE LIGNE, ET SANS CA LE FAIL-CLOSED EST UN FAUX. Sans `\s*$`, la regex
           # accepte un PREFIXE : `do: "tool_" <> "request"` se lit `"tool_"`, et le check compare
           # alors les miroirs a une valeur TRONQUEE au lieu de declarer l'autorite illisible. Il
           # rougit — donc le defaut ne passe pas — mais il rougit en accusant dix fichiers sains
-          # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure du
-          # Mesure sur le jumeau `forge.system_account_single_source`, en jouant la mutation.
+          # d'un ecart qu'ils n'ont pas, et le lecteur cherche au mauvais endroit. Mesure sur le
+          # jumeau `forge.system_account_single_source`, en jouant la mutation.
           case Regex.run(~r/def\s+branch,\s*do:\s*"([^"]+)"\s*$/m, src) do
             [_, name] -> name
             _ -> nil
@@ -180,9 +180,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   # Ce qui, dans UN miroir, casse le gel du nom de branche.
   #
-  # ⚠ LA FORME, PAS UN NOM. La premiere clause a epingle le litteral `LCARS_SYSADMIN_BRANCH` — donc
-  # un quatrieme lecteur qui a nomme sa variable AUTREMENT est passe au vert en rendant la borne
-  # reglable. Un mur qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse est qu'un nom de
+  # ⚠ LA FORME, PAS UN NOM. Une clause qui epinglerait le litteral `LCARS_SYSADMIN_BRANCH` laisserait
+  # passer au vert un lecteur qui nomme sa variable AUTREMENT en rendant la borne reglable. Un mur
+  # qui refuse UN nom n'interdit pas le GESTE : ce qui se refuse est qu'un nom de
   # branche vienne d'une expansion, quel que soit son nom.
   #
   # ⚠ LE MEME REFUS, ECRIT DANS L'AUTRE LANGAGE DE CETTE LISTE. Un miroir python ne peut pas
@@ -238,12 +238,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   the shipped tree, the manifest creates the installed one, and five shell/CLI readers copy them.
   They cannot share a literal across the language boundary, so `Layout` DECLARES and the rest copy.
 
-  ⚠ `bin/lcars` ALREADY NAMED THIS LOCK, AND THE LOCK DID NOT EXIST. Its comment reads: *"C'est un
-  fait ecrit deux fois, dans deux langages qui ne peuvent pas s'appeler — la meme forme que les
-  listes de roles verrouillees par `mix lcars.contracts.check`"*. It named the pattern, named the
-  tool, and nothing held it. Naming a cost is not paying it.
+  ⚠ `bin/lcars` NAMES THIS LOCK in its comment: *"C'est un fait ecrit deux fois, dans deux langages
+  qui ne peuvent pas s'appeler — la meme forme que les listes de roles verrouillees par `mix
+  lcars.contracts.check`"*. Naming a cost is not paying it; this check pays it.
 
-  ⚠ AND TWO WITNESSES PINNED THE LITERAL WITHOUT KNOWING THE AUTHORITY.
+  ⚠ TWO WITNESSES PIN THE LITERAL WITHOUT KNOWING THE AUTHORITY.
   `forge_host_reach.bats` asserts the exact strings `/opt/lcars/catalogues/web-demo` and
   `COPY catalogues /opt/lcars/catalogues`. Move `@platform_root` and both stay GREEN on the old
   value — a witness that pins a literal defends the literal, not the agreement.
@@ -319,8 +318,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       # ⚠ LE PERIMETRE SE DIT PAR MIROIR. `bin/` et `services/` partent avec l'image, `deploy/` non
       # (le stage `build` l'exclut explicitement). Un perimetre decide sur un seul arbre declarerait
-      # « NOT CHECKED » sur quatre fichiers presents — la faute corrigee le meme jour sur les deux
-      # verrous voisins.
+      # « NOT CHECKED » sur quatre fichiers presents — meme regle que les deux verrous voisins.
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _rx, _what} ->
           tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
@@ -552,25 +550,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   role, which carries `forge_identity: false` in the canon precisely because every write of its own
   goes through this account.
 
-  THREE INDEPENDENT DECLARATIONS EXISTED and none was designated: `@system_name` here,
-  `PROV_SYSTEM_ACCOUNT` in `provision-lib.sh`, and — the sharpest — `variable "system_account"` in
-  `forge.tf`, whose default is what actually CREATES the account and which nothing derives and
-  nothing compared. `roles.provisioning_locked` holds `roles`/`system_roles`/`writers`/`judges`/
-  `externals`; this name is in none of those lists, so the account that owns the org was created
-  from a literal outside every lock.
+  THE AUTHORITY IS DESIGNATED, and the designation is what this check enforces. Left undesignated,
+  three declarations coexist: `@system_name` here, `PROV_SYSTEM_ACCOUNT` in `provision-lib.sh`, and
+  — the sharpest — a `default` on `variable "system_account"` in `forge.tf`, which is what CREATES
+  the account. `roles.provisioning_locked` holds `roles`/`system_roles`/`writers`/`judges`/
+  `externals`; this name is in none of those lists, so without this check the account that owns
+  the org is created from a literal outside every lock.
 
   ⚖ user : the BEAM declaration prevails. The reason is structural, not a preference —
   the account's IDENTITY derives from this literal (`@system_email`, `allowed_emails/2`,
   `system_identity/0`) and cannot be moved without moving what the fleet signs as.
 
-  ## Why the value is not plumbed through to tofu
+  ## How the value reaches tofu
 
-  The obvious follow-up — emit `system_account` in `Fleet.Roster.tfvars/1` so tofu consumes it
-  instead of holding a literal — would make `Fleet.Application` reference `Fleet.Credentials`,
-  which is NOT in the root boundary's deps. That is an API change of a domain, a decision to be
-  argued on its own, not a side effect of writing a wall. So this check does what
-  `toolchain.branch_single_source` does for the branch name: one side DECLARES, the others copy,
-  and the copies are verified. Fewer copies would be better; copies nobody compares are the defect.
+  `forge.tf` carries NO default for `system_account`: the value arrives through
+  `roles.auto.tfvars.json`, projected from `Fleet.Credentials.ForgeIdentity` (⚖ user 2026-08-27),
+  and the mirror below guards the ABSENCE of a default rather than a copy. The shell and python
+  readers still copy the literal — they cannot call the BEAM — and those copies are verified here,
+  as `toolchain.branch_single_source` does for the branch name. Fewer copies would be better;
+  copies nobody compares are the defect.
   """
   @spec check_system_account_single_source(String.t()) :: Support.result()
   def check_system_account_single_source(root) do
@@ -609,14 +607,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # `MUR 4 bis` d'`adminite_walls` porte exactement la meme lecon : il se laisse satisfaire par
       # `lcars-authority-ask`, puis par un commentaire.
       mirrors = [
-        # ⚠ LE CREATEUR. Ce defaut est ce qui fait naitre le compte sur la forge, et rien ne
-        # l'alimente : aucun `.tfvars` ne pose `system_account`. C'est le miroir qui compte le plus.
-        # ⚠ CE MIROIR NE GARDE PAS UNE COPIE, IL GARDE SON ABSENCE. `forge.tf` ne porte pas le
-        # litteral : il RECOIT la valeur par `roles.auto.tfvars.json`, projetee depuis l'autorite.
-        # Ce qui se garde ici n'est donc pas « la copie s'accorde » mais « il n'y a PAS de copie » —
-        # un `default =` rendrait a tofu le pouvoir
-        # de creer le compte sous un nom que personne n'a choisi, en silence, et c'est exactement
-        # ce que la suppression a ferme.
+        # ⚠ LE CREATEUR, ET CE MIROIR NE GARDE PAS UNE COPIE, IL GARDE SON ABSENCE. `forge.tf` ne
+        # porte pas le litteral : il RECOIT la valeur par `roles.auto.tfvars.json`, projetee depuis
+        # l'autorite. Ce qui se garde ici n'est donc pas « la copie s'accorde » mais « il n'y a PAS
+        # de copie » — un `default =` rendrait a tofu le pouvoir de creer le compte sous un nom que
+        # personne n'a choisi, en silence. C'est le miroir qui compte le plus.
         {"services/forge-recipe/forge.tf",
          ~r/variable\s+"system_account"\s*\{(?:(?!\}).)*?default\s*=/s,
          "carries a `default =` again — the name must arrive from roles.auto.tfvars.json, not from the recipe",
@@ -1231,8 +1226,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   # UNE AUTORITE ILLISIBLE N'EST PAS « RIEN A COMPARER » — c'est le seul cas ou chaque copie
   # passerait par DEFAUT, donc le seul ou un verrou vert serait un mensonge complet. Cinq des huit
-  # verrous rendent ce verdict, et ils recopiaient la meme phrase cinq fois : une situation, une
-  # phrase, et le fail-closed enonce a un seul endroit.
+  # verrous rendent ce verdict : une situation, une phrase, et le fail-closed enonce a un seul
+  # endroit plutot que recopie cinq fois.
   @spec unreadable_authority(String.t(), String.t(), String.t(), String.t(), String.t()) ::
           Support.result()
   defp unreadable_authority(id, remediation, source, autorite, forme \\ "literal") do
@@ -1251,10 +1246,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   # mesure, et dont la note NOMME ce qu'il n'a pas vu — la seule forme de vert que ce depot accepte
   # sur une population absente.
   #
-  # ⚠ QUATRE VERROUS LE RENDAIENT, AVEC TROIS FORMULATIONS POUR UNE SEULE SITUATION. Trois
-  # contournaient de surcroit l'assemblage de la liste, chacun avec son propre `Enum.join`. Une
-  # situation, une phrase : le SUJET reste une donnee (un arbre miroir, une copie, deux
-  # declarations), la phrase ne se recopie plus.
+  # ⚠ QUATRE VERROUS LE RENDENT, ET UNE SEULE FORMULATION : le SUJET reste une donnee (un arbre
+  # miroir, une copie, deux declarations), la phrase ne se recopie pas — trois formulations et
+  # trois `Enum.join` pour une seule situation seraient trois derives possibles.
   @spec out_of_scope(String.t(), String.t(), [String.t()]) :: Support.result()
   defp out_of_scope(id, sujet, absents) do
     %{
@@ -1270,10 +1264,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   # LA FORME D'UNE REPONSE DE LA FORGE EST CONNUE D'UN SEUL DOMAINE.
   #
-  # `Fleet.Forge.Client` rend les reponses Gitea telles quelles. A la pose : quatorze modules de
-  # `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string. La forme
-  # de l'API d'un TIERS etait donc connue hors du domaine qui la parle — une montee de version se
-  # traitait au `grep`, et rien ne repondait a « de quels champs dependons-nous ».
+  # `Fleet.Forge.Client` rend les reponses Gitea telles quelles. Mesure a la pose : quatorze
+  # modules de `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string — la forme
+  # de l'API d'un TIERS connue hors du domaine qui la parle, une montee de version traitee au
+  # `grep`, et rien pour repondre a « de quels champs dependons-nous ».
   #
   # `Fleet.Forge.Payload` ferme ca : un chemin par fait, declare une fois. Ce mur empeche la
   # reouverture.
@@ -1330,8 +1324,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     end
   end
 
-  # SUR L'AST, PAS SUR LES LIGNES. Une premiere version greppait le texte et a signale une ligne de
-  # PROSE dans un `@moduledoc` — la faute exacte que ce depot corrige ailleurs par `code_of/1`, et
+  # SUR L'AST, PAS SUR LES LIGNES. Un grep du texte signalerait une ligne de PROSE dans un
+  # `@moduledoc` — la faute exacte que ce depot corrige ailleurs par `code_of/1`, et
   # qu'un `@moduledoc` rend pire encore : son contenu n'est pas un commentaire `#`, donc aucun
   # decapage de commentaire ne l'aurait retire. L'AST ne voit que du code, et il ignore aussi les
   # MOTIFS par construction — un motif ne peut pas contenir d'appel.
@@ -1346,11 +1340,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
         if Enum.any?(chemin, &(is_binary(&1) and String.to_atom(&1) in @forge_response_keys)),
           do: {rel, meta[:line]}
 
-      # ⚠ `Map.get/2,3` ET `Map.fetch/2` SONT DES LECTURES, et la premiere version du mur ne
-      # cherchait que `Access.get` (`x["k"]`) et `get_in/2`. Quatre lectures reelles lui
-      # echappaient — `draft` deux fois, `updated_at`, `created_at` — trouvees en migrant les
-      # temoins, pas par le mur. Un mur qui ne connait qu'une des trois portes d'entree garde une
-      # porte, pas une frontiere.
+      # ⚠ `Map.get/2,3` ET `Map.fetch/2` SONT DES LECTURES. Un mur qui ne chercherait que
+      # `Access.get` (`x["k"]`) et `get_in/2` laisserait echapper des lectures reelles (mesure :
+      # quatre — `draft` deux fois, `updated_at`, `created_at` — trouvees en migrant les temoins).
+      # Un mur qui ne connait qu'une des trois portes d'entree garde une porte, pas une frontiere.
       {{:., meta, [{:__aliases__, _, [:Map]}, f]}, _, [_, clef | _]}
       when f in [:get, :fetch, :fetch!] and is_binary(clef) ->
         if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}
@@ -1358,8 +1351,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # ⚠ QUATRIEME PORTE, ET ELLE NE RESSEMBLE PAS AUX AUTRES DANS L'AST. `x["k"]` est du SUCRE :
       # le compilateur l'expanse en `{{:., _, [Access, :get]}, _, _}` ou `Access` est un ATOME. Ecrit
       # a la main, `Access.fetch(x, "k")` produit un noeud `{:__aliases__, _, [:Access]}` — une
-      # forme que ni la clause du sucre ni celle de `Map` ne reconnait. Le mur laissait donc passer
-      # la seule ecriture qui NOMME explicitement l'acces.
+      # forme que ni la clause du sucre ni celle de `Map` ne reconnait. Sans cette clause le mur
+      # laisse passer la seule ecriture qui NOMME explicitement l'acces.
       {{:., meta, [{:__aliases__, _, [:Access]}, f]}, _, [_, clef | _]}
       when f in [:get, :fetch] and is_binary(clef) ->
         if String.to_atom(clef) in @forge_response_keys, do: {rel, meta[:line]}

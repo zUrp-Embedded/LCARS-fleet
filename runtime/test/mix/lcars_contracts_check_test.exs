@@ -10,9 +10,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
   NB: testing the fail-on-absent paths through `run_checks/0` would require it to take a root — a
   test-infra refactor, not done here. It is NOT what stands between this suite and those paths:
   every check is a `check_*(root)` of its own, so a fixture tree reaches them one by one, and the
-  describes below do exactly that. The sentence that used to sit here said the refactor was
-  required, and that reading is what kept the fail-on-absent branches untested for as long as it
-  stood.
+  describes below do exactly that.
   """
   use ExUnit.Case, async: true
 
@@ -551,19 +549,14 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     # SAME derivation as the check: the runtime root, then its SIBLING tree
     # (test/mix -> la racine Mix = `runtime/`, puis `../deploy`).
     #
-    # ⚠ CETTE LIGNE A PORTE L AFFIRMATION INVERSE, ET C EST CE QUI A AVEUGLE LE TEMOIN. Elle disait
-    # « depuis le demenagement `deploy/` est un ENFANT de la racine, plus un frere ». C etait vrai
-    # de l etape ou l installeur vivait sous le runtime ; depuis la separation des deux logiciels il
-    # est redevenu un FRERE. Le temoin derivait donc `fleet/deploy`, ne le trouvait pas, et exigeait
-    # le `NOT CHECKED` que le mur rendait pour la meme raison : les deux se sont accordes sur une
-    # topologie que ni l un ni l autre n avait verifiee. Un temoin et son sujet qui derivent le meme
+    # ⚠ `deploy/` EST UN FRERE DE `runtime/`, PAS UN ENFANT, ET LE TEMOIN DOIT LE DERIVER COMME LE
+    # MUR. Un temoin qui deriverait `runtime/deploy` ne le trouverait pas et exigerait le
+    # `NOT CHECKED` que le mur rendrait pour la meme raison : les deux s accorderaient sur une
+    # topologie que ni l un ni l autre n a verifiee. Un temoin et son sujet qui derivent le meme
     # chemin faux sont VERTS ensemble, et c est le seul cas ou un miroir ne reflete rien.
     #
-    # `deploy`, not `provisioning` (2026-08-05): the tofu recipe moved there with the rest
-    # of the live provisioning. The old condition kept PASSING after the move — the v1 tree still
-    # exists — while the check it mirrors had changed trees. It would have diverged for real the day
-    # someone cleaned up `fleet/provisioning/`, which its own README now says is safe. A condition
-    # that agrees by coincidence is the same defect as a comment that is true by accident.
+    # `deploy`, not another tree name: a condition that keeps PASSING because a stale tree still
+    # exists agrees by coincidence, which is the same defect as a comment that is true by accident.
     runtime_root = Path.expand("../..", __DIR__)
 
     if File.dir?(Path.expand("../deploy", runtime_root)) do

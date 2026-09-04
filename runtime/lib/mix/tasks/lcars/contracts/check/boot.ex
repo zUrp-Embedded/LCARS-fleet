@@ -137,7 +137,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Boot do
   #
   # MEASURED, because the register's fiche asks for the opposite and the number decides: flipping
   # `@permit_empty_default` to `false` yields **101 failures out of 2698**. The permissive default
-  # is load-bearing. What was missing was never the fail-closed posture — it was this lock.
+  # is load-bearing. The fail-closed posture is not what is needed — this lock is.
   @doc false
   @spec check_event_registry_loaded_before_children(String.t()) :: Support.result()
   def check_event_registry_loaded_before_children(root) do

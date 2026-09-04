@@ -15,11 +15,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   `@impl` est EXCLU des deux cotes, pour le meme motif : le contrat d'un callback vit dans son
   behaviour, et le restater par implementation est la duplication que ce depot refuse ailleurs.
 
-  ⚠ LES DEUX MURS LISENT L'AST, ET C'EST UNE RECRITURE PAYEE. La premiere version du mur `@spec`
-  lisait ligne a ligne avec une machine a phases dont la bascule de heredoc ne basculait pas sur
-  `@moduledoc \"\"\"` — cette ligne ne COMMENCE pas par les trois guillemets. Tout ce qui suivait un
-  moduledoc etait invisible, et le mur annoncait 100 % sur une fraction du reel. Un compteur qui se
-  trompe de phase ne se rapiece pas : il se refait sur la seule structure qui ne ment pas.
+  ⚠ LES DEUX MURS LISENT L'AST, PAS LES LIGNES. Une machine a phases ligne a ligne dont la bascule
+  de heredoc ne bascule pas sur `@moduledoc \"\"\"` — cette ligne ne COMMENCE pas par les trois
+  guillemets — rend invisible tout ce qui suit un moduledoc, et annonce 100 % sur une fraction du
+  reel. Un compteur qui se trompe de phase ne se rapiece pas : il se refait sur la seule structure
+  qui ne ment pas.
   """
 
   alias Mix.Tasks.Lcars.Contracts.Check.Support
@@ -31,8 +31,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
   # est hors de portee de l'instrument le plus severe du gate — tout en le faisant passer.
   #
   # ⚖ Arbitrage user : « on ne laisse pas le boulot a 90 %, c'est pas un plafond, c'est le dernier
-  # kilometre ». La fuite s'ELARGISSAIT toute seule : chaque check ajoute ici ajoutait une fonction
-  # publique sans spec.
+  # kilometre ». Sans ce mur la fuite s'ELARGIT toute seule : chaque check ajoute ici ajoute une
+  # fonction publique sans spec.
   #
   # `@impl` EXCLU : le contrat d'un callback vit dans son behaviour, et le restater par
   # implementation est la duplication que ce depot refuse ailleurs. Les callbacks OTP NOMMES ne sont
@@ -90,20 +90,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
 
   # Les unites publiques d'UN fichier qui n'ont pas de `@spec`, par NOM ET ARITE.
   #
-  # ⚠ RECRITURE SUR L'AST, et le motif de la reecriture est le defaut qu'elle repare :
-  # la premiere version lisait ligne a ligne avec une machine a phases, et sa bascule de heredoc
-  # (`String.starts_with?(trimmed, ~s("""))`) ne basculait PAS sur `@moduledoc """` — cette ligne ne
-  # COMMENCE pas par les trois guillemets. Seule la fermeture basculait, donc tout ce qui suivait un
-  # moduledoc est invisible : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de plus de la
-  # moitie, et onze fichiers vus a ZERO. Le mur annonce alors 100 % sur 92,8 % de reel. Un compteur
-  # qui se trompe
-  # de phase ne se rapiece pas, il se refait sur la seule structure qui ne ment pas.
+  # ⚠ LECTURE SUR L'AST, PAS LIGNE A LIGNE, et la mesure dit pourquoi : une machine a phases dont la
+  # bascule de heredoc (`String.starts_with?(trimmed, ~s("""))`) ne bascule PAS sur `@moduledoc """`
+  # — cette ligne ne COMMENCE pas par les trois guillemets, seule la fermeture bascule — rend
+  # invisible tout ce qui suit un moduledoc : 547 noms vus sur 1237, 88 fichiers sur 246 amputes de
+  # plus de la moitie, onze fichiers vus a ZERO, et un mur qui annonce 100 % sur 92,8 % de reel. Un
+  # compteur qui se trompe de phase ne se rapiece pas, il se refait sur la seule structure qui ne
+  # ment pas.
   #
-  # TROIS choses que la version ligne a ligne ne pouvait pas faire :
+  # TROIS choses qu'une lecture ligne a ligne ne peut pas faire :
   #   * `defdelegate` — la regex `^def\s+` ne le matche pas (pas d'espace) ; 22 delegations
-  #     publiques etaient hors de portee, dont `Pilot.onboard` et `IncidentRegistry.escalate` ;
-  #   * l'ARITE — les `@spec` etaient indexes par nom seul, donc un `in_flight/1` ajoute a cote d'un
-  #     `in_flight/0` spec'e passait au vert ;
+  #     publiques hors de portee, dont `Pilot.onboard` et `IncidentRegistry.escalate` ;
+  #   * l'ARITE — des `@spec` indexes par nom seul laissent passer au vert un `in_flight/1` ajoute a
+  #     cote d'un `in_flight/0` spec'e ;
   #   * les ARGS PAR DEFAUT — `def f(a, b \\ 1)` definit deux arites et un seul `@spec` les couvre.
   #     Une unite porte donc son intervalle, et un spec dedans suffit.
   defp unspecced_public_units(src) do
@@ -115,11 +114,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     |> Enum.sort()
   end
 
-  # Les corps de module, UN PAR MODULE. Deux corrections mesurees a la pose :
-  #   * un corps a UN SEUL statement n'est pas un `__block__` — un module d'une fonction etait
-  #     entierement invisible ;
+  # Les corps de module, UN PAR MODULE. Deux pieges mesures a la pose :
+  #   * un corps a UN SEUL statement n'est pas un `__block__` — sans cette clause, un module d'une
+  #     fonction est entierement invisible ;
   #   * les statements d'un module IMBRIQUE sont aussi des statements du parent. Melanger les deux
-  #     faisait fuir les `@spec` et les `@impl` d'un module vers son voisin du meme fichier :
+  #     fait fuir les `@spec` et les `@impl` d'un module vers son voisin du meme fichier :
   #     quatre modules dans `conflict/types.ex`, quatre dans `admiral/shutdown.ex`, et le spec de
   #     l'un couvrait la fonction homonyme de l'autre. Chaque module est donc son propre monde.
   defp module_bodies(ast) do
@@ -250,10 +249,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Types do
     }
   end
 
-  # NESTING IS THE POPULATION, NOT A DETAIL OF IT. These matched `^  def` — EXACTLY two spaces, the
-  # indentation of a `def` sitting directly under a top-level `defmodule`. A nested module indents
-  # its functions by four, so its public functions were not judged undocumented: they were never
-  # looked at. The blind spot measured five `def` clauses over two files, and one of them is
+  # NESTING IS THE POPULATION, NOT A DETAIL OF IT. Matching `^  def` — EXACTLY two spaces, the
+  # indentation of a `def` sitting directly under a top-level `defmodule` — never looks at a nested
+  # module's functions (indented by four): they are not judged undocumented, they are unseen. The
+  # blind spot measured five `def` clauses over two files, and one of them is
   # `ProjectBootstrap.Phase.Clone.clone_or_skip/3` — the system-side git entry point, i.e. the
   # module that carried the sandbox escape this repo fixed by composing `git_safe_config_args/0`.
   # A wall that starts green because its subject is out of frame is the failure class this whole
