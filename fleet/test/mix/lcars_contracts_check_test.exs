@@ -576,6 +576,44 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
   end
 
+  # DI-09 (lot 11, chantier deploy-independance) — LA BRANCHE « SANS deploy/ » SE JOUE ICI, PAS
+  # SEULEMENT DANS L'IMAGE. Le temoin ci-dessus ne l'exerce que si le checkout n'a pas de `deploy/`,
+  # donc jamais sur un poste de dev : la branche qui protege le build de l'image restait une
+  # promesse. Le decor : un faux parent qui porte `fleet` (un lien vers le vrai runtime — les
+  # fichiers lus sont les vrais) et AUCUN `deploy` a cote. Chaque contrat a portee `../deploy`
+  # doit alors PASSER en NOMMANT ce qu'il n'a pas vu, jamais rougir, jamais passer en silence.
+  describe "tree_scope — un arbre SANS deploy/ passe en NOMMANT ce qu'il ne verifie pas (DI-09)" do
+    setup do
+      base = Fleet.TestEnv.tmp_path("di09-sans-deploy")
+      File.rm_rf(base)
+      File.mkdir_p!(base)
+      root = Path.join(base, "fleet")
+      File.ln_s!(Path.expand("../..", __DIR__), root)
+      on_exit(fn -> File.rm_rf(base) end)
+      refute File.dir?(Path.join(base, "deploy"))
+      {:ok, root: root}
+    end
+
+    test "roles.provisioning_locked : pass, et la note nomme la liste non lue", %{root: root} do
+      r = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_roles_provisioning_locked(root)
+      assert r.status == :pass, "status=#{r.status} note=#{inspect(r.note)}"
+      assert to_string(r.note) =~ "NOT CHECKED"
+    end
+
+    test "layout.face_roots_provisioned : pass, et la note dit que deploy/ est absent", %{root: root} do
+      r = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
+      assert r.status == :pass, "status=#{r.status} note=#{inspect(r.note)}"
+      assert to_string(r.note) =~ "NOT CHECKED"
+    end
+
+    test "layout.private_dir_single_source et catalogue roots : pass sans le miroir installeur", %{root: root} do
+      for fun <- [:check_private_dir_single_source, :check_catalogue_roots_single_source] do
+        r = apply(Mix.Tasks.Lcars.Contracts.Check.SingleSource, fun, [root])
+        assert r.status == :pass, "#{fun}: status=#{r.status} note=#{inspect(r.note)} evidence=#{inspect(r.evidence)}"
+      end
+    end
+  end
+
   describe "code_match?/4 — anti-hollow-green: a marker in PROSE does not count (BND-111)" do
     @tag :tmp_dir
     test "a marker present ONLY in a @moduledoc/@doc → false (no false-green)", %{

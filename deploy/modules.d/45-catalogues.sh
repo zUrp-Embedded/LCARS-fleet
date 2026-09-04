@@ -16,9 +16,9 @@ set -euo pipefail
 # du PRODUIT ; ce module l'appelle avec l'adresse de la forge et les deux racines du cache.
 exec env \
   LCARS_MODULE_PROTOCOL="$(repo_root)/fleet/services/lib/module-protocol.sh" \
-  LCARS_MODULE_TAG="$PROV_MODULE_TAG" \
-  FORGE_BASE_URL="$PROV_FORGE_URL" \
-  LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
-  LCARS_CATALOGUES_DIR="$PROV_CATALOGUES_DIR" \
-  LCARS_LEGACY_CATALOGUES_DIR="$PROV_LEGACY_CATALOGUES_DIR" \
+  LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \
+  FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
+  LCARS_PRIVATE_DIR="${PROV_TOKENS_DIR:-}" \
+  LCARS_CATALOGUES_DIR="${PROV_CATALOGUES_DIR:-}" \
+  LCARS_LEGACY_CATALOGUES_DIR="${PROV_LEGACY_CATALOGUES_DIR:-}" \
   bash "$(repo_root)/fleet/services/forge.d/catalogues.sh" "${1:?usage: 45-catalogues.sh <check|apply>}"

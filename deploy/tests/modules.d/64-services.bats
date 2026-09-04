@@ -835,3 +835,19 @@ box_services_present() {
   # sans systemd persistant. La lecture ne doit pas pouvoir tuer le verdict qu'elle decrit.
   grep -q '|| true' <<<"$corps"
 }
+
+# ─── DI-09 (lot 11) : le siege se GRAVE meme sans systemd ─────────────────────────────────────
+# `seat.uid` et `services.env` sont des FAITS de la machine (qui est le siege, ce que les daemons
+# lisent) ; les unites systemd sont une MECANIQUE. Sans init, la mecanique s'abstient et le dit —
+# les faits se posent quand meme, sinon GUARD B refuse tout lancement sur une machine sans systemd
+# pour une raison qui n'a rien a voir avec systemd.
+@test "sans systemd, seat.uid et services.env sont POSES quand meme — seules les unites s'abstiennent" {
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pas de systemd"* ]]
+  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
+  grep -q '^LCARS_SYSADMIN_UID=1007$' "$LCARS_SERVICES_ENV"
+  [ ! -e "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
+}
