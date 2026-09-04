@@ -23,8 +23,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   JSON-RPC newline-framed (`{:packet, :line}`), one message = one line.
   `tools/call` AND `tools/list` are both served here (`tools/list` per F-C138 — the
   `deftool` schemas filtered to this pod's role-gated surface, see `list_tools/1`); only
-  `initialize` is answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). The
-  response frame reuses `PodTools.handle_tool_call/3`:
+  `initialize` is answered locally by the stdio bridge (`bin/fleet_mcp_stdio_bridge.py`). A
+  `tools/call` crosses two checks before dispatch: the pod's declared surface (`authorized?/2`,
+  JG-099) and the tool's own `inputSchema` (`validate_arguments/2`, 2026-09-05 — the schema served
+  by `tools/list` is the one enforced, not a promise). The response frame reuses
+  `PodTools.handle_tool_call/3`:
 
     * `{:ok, content, _}`  → `result` = that `content` (already in MCP format);
     * `{:error, reason, _}` → `result` = `%{"content" => [text], "isError" => true}`
@@ -338,7 +341,25 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     tool_args = params["arguments"] || %{}
 
     if authorized?(tool, threaded) do
-      dispatch_tool(tool, tool_args, pod_id)
+      case validate_arguments(tool, tool_args) do
+        :ok ->
+          dispatch_tool(tool, tool_args, pod_id)
+
+        {:error, violations} ->
+          Logger.warning(
+            "PodSocketAcceptor: pod=#{pod_id} tools/call #{tool} REFUSED — arguments do not " <>
+              "match the tool's inputSchema (#{violations})"
+          )
+
+          mark_activity(pod_id)
+
+          %{
+            "content" => [
+              %{"type" => "text", "text" => error_text({:invalid_arguments, tool, violations})}
+            ],
+            "isError" => true
+          }
+      end
     else
       Logger.warning(
         "PodSocketAcceptor: pod=#{pod_id} tools/call #{inspect(tool)} REFUSED — outside this " <>
@@ -360,6 +381,41 @@ defmodule Fleet.MCP.PodSocketAcceptor do
     do: tool in PodTools.base_tool_names() or tool in threaded
 
   defp authorized?(_tool, _threaded), do: false
+
+  # THE SCHEMA IS ENFORCED WHERE IT IS SERVED. `tools/list` hands each `deftool`'s `inputSchema`
+  # to the CLI, and until 2026-09-05 nobody on this side read it back: the handlers pick their keys
+  # by hand, ExMCP validates prompt arguments only. So `required` and every `type` were a promise
+  # to the agent with no one holding the rail to it — a half-done rename (the property moved, the
+  # list did not) or a number sent as a string reached a handler that answered with a crash or a
+  # `nil`. Validated AFTER the surface check (an off-profile tool is refused as such, its arguments
+  # unread) and BEFORE dispatch, so a handler only ever sees what its schema describes. The
+  # resolved schema is cached per tool (`Fleet.SchemaCache`, persistent_term): 32 tiny schemas,
+  # resolved once. A tool without a schema (none today) validates nothing rather than refusing —
+  # the wall `mcp.tools_gated` already refuses a dispatched tool without a `deftool`.
+  defp validate_arguments(tool, tool_args) do
+    case PodTools.get_tools()[tool] do
+      %{input_schema: schema} when is_map(schema) ->
+        resolved =
+          Fleet.SchemaCache.cached({__MODULE__, :input_schema, tool}, fn ->
+            ExJsonSchema.Schema.resolve(schema)
+          end)
+
+        case ExJsonSchema.Validator.validate(resolved, tool_args) do
+          :ok ->
+            :ok
+
+          {:error, errors} ->
+            {:error,
+             Enum.map_join(errors, " · ", fn
+               {msg, path} -> "#{path} : #{msg}"
+               other -> inspect(other)
+             end)}
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp dispatch_tool(tool, tool_args, pod_id) do
     {us, resp} =

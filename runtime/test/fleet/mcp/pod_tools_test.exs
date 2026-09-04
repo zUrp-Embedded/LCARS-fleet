@@ -2905,8 +2905,6 @@ defmodule Fleet.MCP.PodToolsTest do
        )}
     end
 
-    def get_route(_r, _n, _o), do: :none
-
     def get_issue(_repo, _n, _opts), do: {:error, :not_found}
 
     def list_comments("fleet/alpha", 5, _opts) do
