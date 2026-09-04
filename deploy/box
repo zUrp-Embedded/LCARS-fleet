@@ -49,7 +49,6 @@
 #   LCARS_UID                  uid de l'humain (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
 #   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)
-#   LCARS_CONSOLE_PORT         bind de la console web (défaut 127.0.0.1:21004)
 #   LCARS_HOSTNAME             hostname du conteneur (défaut bridge)
 #   FORGE_BASE_URL             URL de TA forge VUE DU CONTENEUR (Docker Desktop :
 #                              http://host.docker.internal:3300 · docker natif : le nom de service
