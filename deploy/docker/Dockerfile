@@ -83,7 +83,7 @@ WORKDIR /src/runtime
 # les payait en entier pour rien. La correction (inclure par defaut) est conservee, son cout
 # d'iteration ne l'est pas.
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
-     fleet /src/runtime
+     runtime /src/runtime
 # L'outil qui pose la release est de l'INSTALLEUR (Q3, 2026-09-04) : `deploy/` reste exclu de ce
 # stage, seul ce script entre — et HORS de `/src/deploy` : les contrats lisent la presence de cet
 # arbre comme « deploy/ est la, ses miroirs sont exigibles » (`tree_scope`), et un arbre reduit a

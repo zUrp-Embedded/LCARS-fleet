@@ -240,6 +240,12 @@ check() {
   else
     p_drift "provisionnement embarqué absent ($HELPERS_DIR/deploy/provision) — le convergeur ne pourra pas converger un humain"
   fi
+  # MIGRATION : l'arbre embarque a vecu sous `$HELPERS_DIR/fleet/` (quand le runtime s'appelait
+  # `fleet/`) ; il vit a plat. Un vieil arbre qui reste est une seconde copie que personne ne lit —
+  # sauf un script qui y retomberait par un vieux defaut : il se dit, et l'apply le retire.
+  if [[ -d "$HELPERS_DIR/fleet" ]]; then
+    p_drift "ancien arbre embarqué présent ($HELPERS_DIR/fleet) — les arbres vivent à plat sous $HELPERS_DIR ; l'apply le retire"
+  fi
 
   # ⚠ LA SECONDE LISTE SE SONDE AUSSI, SINON LE CORRECTIF EST INVISIBLE AU DOCTOR. C'est l'angle
   # mort double deja rencontre sur `~/.lcars/log` (C2) : corriger l'apply sans toucher au check
@@ -361,6 +367,10 @@ BLOC
   # `EMBEDDED_ROOT` et s annonce plus bas. Un geste qui annonce ce qu il ne fait pas est la moitie
   # d une trace fausse — l autre moitie etant le mur qui la lit.
   p_chg "arbres du runtime embarqués ($HELPERS_DIR/{${EMBEDDED[*]}})"
+  if [[ -d "$HELPERS_DIR/fleet" ]]; then
+    rm -rf "${HELPERS_DIR:?}/fleet" && p_chg "ancien arbre embarqué retiré ($HELPERS_DIR/fleet) — les arbres vivent à plat" \
+      || p_fail "ancien arbre embarqué NON retiré ($HELPERS_DIR/fleet)"
+  fi
 
   # ─── CE QUI VIT A LA RACINE DU DEPOT, ET QUE `EMBEDDED` NE POUVAIT PAS ATTEINDRE ──────────────
   #

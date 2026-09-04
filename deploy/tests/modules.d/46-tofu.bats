@@ -176,7 +176,7 @@ mod() { run bash "$MOD" "$1"; }
 @test "la liste des modules de recette se DERIVE de l'arbre, pas d'un tableau en dur" {
   # C'est la recette que la machine jouera qui decide quels providers il lui faut. Un tableau en dur
   # ici serait un second exemplaire de ce que le Dockerfile enumere.
-  grep -q 'repo_root)/runtime/services/forge-recipe' "$MOD"
+  grep -q 'product_tree)/services/forge-recipe' "$MOD"
 }
 
 @test "la SONDE hors-ligne ne passe pas par run_quiet — son echec est ATTENDU" {

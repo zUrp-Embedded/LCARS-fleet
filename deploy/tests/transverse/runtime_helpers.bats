@@ -633,3 +633,21 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   [ ! -e "$SRC_DIR/skel.bashrc" ] \
     || { echo "runtime/services/skel.bashrc est revenu — la copie de 117 lignes avec lui"; return 1; }
 }
+
+# ─── MIGRATION : l'ancien arbre embarque (`fleet/`) se dit et se retire ────────────────────────
+# Le runtime s'appelait `fleet/` et l'arbre embarque vivait sous `$HELPERS_DIR/fleet/` ; il vit a
+# plat. Un poste deja pose garde l'ancien arbre : une seconde copie que personne ne lit, sauf un
+# vieux defaut qui y retomberait.
+@test "MIGRATION : un ancien arbre embarque sous fleet/ est un DRIFT au check et se RETIRE a l'apply" {
+  need_git_checkout
+  stub_curl "peu importe"
+  mkdir -p "$LCARS_HELPERS_DIR/fleet/services/lib"; echo x > "$LCARS_HELPERS_DIR/fleet/services/lib/human-protocol.sh"
+  mod check
+  [[ "$output" == *"ancien arbre embarqué présent"* ]]
+  mod apply   # le rc porte aussi les telechargements (xterm) que ce decor ne sert pas : on lit la ligne
+  [[ "$output" == *"ancien arbre embarqué retiré"* ]] || { echo "$output"; return 1; }
+  [ ! -e "$LCARS_HELPERS_DIR/fleet" ]
+  [ -d "$LCARS_HELPERS_DIR/services" ]
+  mod check
+  [[ "$output" != *"ancien arbre"* ]]
+}

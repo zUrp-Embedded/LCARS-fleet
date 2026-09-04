@@ -77,7 +77,7 @@ done
 
 # Le depot par defaut : ce script vit dans deploy/lib/ (Q3 : joue a l'install
 # seulement), donc le runtime source est le fleet/ a cote de deploy/ dans un checkout.
-[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../fleet" && pwd)"
+[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../runtime" && pwd)"
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
 # Une seule autorite de lecture des deux cotes : `Fleet.Roster.tfvars/1`. Le

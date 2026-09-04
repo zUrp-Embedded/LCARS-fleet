@@ -22,7 +22,7 @@
 # shellcheck disable=SC2005
 
 setup() {
-  FLEET_DIR="$BATS_TEST_DIRNAME/../../fleet"
+  FLEET_DIR="$BATS_TEST_DIRNAME/../../runtime"
   command -v mix >/dev/null 2>&1 || skip "mix absent de ce poste"
   # ⚠ LA COUTURE EST LE CHEMIN, PAS LA VALEUR — ET SANS ELLE CES TEMOINS MESURERAIENT LA MACHINE.
   # GUARD B lit `/etc/lcars/seat.uid` et n'a AUCUN repli : le fichier est la seule source. Chaque

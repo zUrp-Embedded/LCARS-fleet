@@ -201,7 +201,7 @@ SELF="$(readlink -f "$0")"
 # build de l'image) : il vit dans deploy/lib/, et l'arbre source du runtime lui est DONNE —
 # `LCARS_RUNTIME_DIR`, sinon le `fleet/` a cote de `deploy/` dans un checkout. Il ne le deduit plus
 # de sa propre position : un script qui devine son sujet a sa position ne se deplace pas.
-RUNTIME_DIR="${LCARS_RUNTIME_DIR:-$(readlink -f "$(dirname "$SELF")/../../fleet")}"
+RUNTIME_DIR="${LCARS_RUNTIME_DIR:-$(readlink -f "$(dirname "$SELF")/../../runtime")}"
 ETC_DIR="$RUNTIME_DIR/etc"
 SRC_BIN="$RUNTIME_DIR/bin"
 

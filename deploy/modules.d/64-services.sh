@@ -341,7 +341,7 @@ probe_seat_uid() {
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
-    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $PROV_LINK_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
     return 0
   fi
   v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
