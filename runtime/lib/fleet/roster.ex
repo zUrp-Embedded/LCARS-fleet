@@ -65,9 +65,12 @@ defmodule Fleet.Roster do
   end
 
   @doc """
-  The four lists the forge recipe takes as input, derived from the catalogue at `root`.
+  What the forge recipe takes as input, derived from the catalogue at `root`: five lists of
+  logins, one map, and two names.
 
-      %{"roles" => [...], "writers" => [...], "judges" => [...], "externals" => [...]}
+      %{"roles" => [...], "system_roles" => [...],
+        "writers" => [...], "judges" => [...], "externals" => [...],
+        "role_names" => %{login => role}, "org" => name, "system_account" => login}
 
   The grouping rule, and it lives HERE rather than in a shell so it can be tested:
 
@@ -76,7 +79,10 @@ defmodule Fleet.Roster do
       nothing in the repository.
     * `writers` — everything else: the producers, the delegate, the signer.
 
-  `roles` is the union, and it is the account roster — a role in no team still needs its account.
+  `roles` and `system_roles` together are the account roster — a role in no team still needs its
+  account; the split between the two is by LIFETIME, and the body says why. `role_names` maps a
+  login back to its role for the account's `full_name`; `org` is the catalogue's name; and
+  `system_account` is received from `ForgeIdentity`, never restated.
 
   This is the shape tofu reads natively from a `*.auto.tfvars.json`, which is why it is emitted as
   data and not as a recipe: the recipe declares what an account is ALLOWED to be (no org creation,
@@ -163,7 +169,7 @@ defmodule Fleet.Roster do
              login
 
            {:error, reason} ->
-             raise "CatalogueRoles: no forge login for #{role}: #{inspect(reason)}"
+             raise "Fleet.Roster: no forge login for #{role}: #{inspect(reason)}"
          end
        end}
     end
