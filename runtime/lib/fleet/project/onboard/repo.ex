@@ -133,8 +133,6 @@ defmodule Fleet.Project.Onboard.Repo do
     end
   end
 
-  # UNE SEULE FORME RESTE, donc plus d'atome de tag ni d'argument ignore : elles etaient la
-  # forme d'une famille (`:account`, `:team`, `:team_read`) morte avec le preflight humain.
   @doc false
   @spec half_install_gesture(String.t()) :: String.t()
   def half_install_gesture(org) do
@@ -147,10 +145,8 @@ defmodule Fleet.Project.Onboard.Repo do
 
   # BL-6-33
   #
-  # ⚠ LES LABELS CHANGENT DE SOURCE AVEC LE RETRAIT DU TEMPLATE, et c'est voulu. La branche
-  # `:generated` ne faisait RIEN parce que Gitea recopiait les labels avec le depot (`labels: true`).
-  # Ils viennent desormais du CODE, par le seul chemin qui existe — ce qui est le point de tout le
-  # lot : une source, pas une copie.
+  # ⚠ LES LABELS VIENNENT DU CODE, par le seul chemin qui existe — jamais recopies d'un depot
+  # template par la forge (`labels: true` de `generate_repo`) : une source, pas une copie.
   @doc false
   @spec seed_protocol_labels(String.t(), keyword()) :: :ok | {:error, term()}
   def seed_protocol_labels(full_name, opts) do

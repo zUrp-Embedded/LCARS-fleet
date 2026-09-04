@@ -1,17 +1,17 @@
 defmodule Fleet.Project.Incidents do
   @moduledoc """
-  Producer of the project incident EVENTS — the downward replacement of an upward seam (BL-6-114).
+  Producer of the project incident EVENTS — downward, on the bus, never through an upward seam
+  (BL-6-114).
 
-  Calling `Fleet.Pilot.IncidentRegistry` from here through an app-env seam passes the module across
-  the boundary AS A VALUE, in the direction the stratification exists to forbid (`work` →
+  Calling `Fleet.Pilot.IncidentRegistry` from here through an app-env seam would pass the module
+  across the boundary AS A VALUE, in the direction the stratification exists to forbid (`work` →
   `steering`), where boundary cannot see it. And the registry is a COUNTER-AND-TICKET desk, nothing
   of the piloting layer: such a dependency buys NO SEMANTICS, only a private door.
 
-  This module is the door's replacement: it PUBLISHES on the bus (`Fleet.EventRouter`, a declared
-  dep, downward), and the conversion to a durable incident happens where it belongs — the
-  `incident` routes of `events.yaml` (`gate: immediate`), consumed by `Pilot.IncidentConsumer`,
-  which subscribes on its own floor. Same destination as before (registry → `error_system` issue
-  in admiral's inbox), one path instead of two.
+  So this module PUBLISHES on the bus (`Fleet.EventRouter`, a declared dep, downward), and the
+  conversion to a durable incident happens where it belongs — the `incident` routes of
+  `events.yaml` (`gate: immediate`), consumed by `Pilot.IncidentConsumer`, which subscribes on its
+  own floor. One destination (registry → `error_system` issue in admiral's inbox), one path.
 
   ## What a lost event means here, and what it does NOT mean
 
@@ -25,8 +25,8 @@ defmodule Fleet.Project.Incidents do
 
   alias Fleet.EventRouter.Bus
 
-  # op → event type: the SAME two ops the old seam carried, so the registry's dedup namespaces
-  # (`card:`/`declaration:` signatures) survive the path change.
+  # op → event type: the two ops are the registry's dedup namespaces (`card:`/`declaration:`
+  # signatures).
   @events %{"card" => :"project.card_failed", "declaration" => :"project.declaration_invalid"}
 
   @doc """

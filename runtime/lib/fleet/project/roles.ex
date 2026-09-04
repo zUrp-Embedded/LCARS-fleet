@@ -113,8 +113,8 @@ defmodule Fleet.Project.Roles do
     * `conflict_resolver` — **exactly one**. A tier-2 conflict is handed to a role, not broadcast.
     * `project_delegate` — **exactly one**, and it is the easiest of the three to leave out. Unlike
       the
-      producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. So a
-      catalogue carrying two of them booted green and broke at the first `project_create`
+      producer, nothing SELECTS a delegate: it is ensured per repo and no card names it. Unchecked
+      here, a catalogue carrying two of them boots green and breaks at the first `project_create`
       (`Fleet.Project.Architect`) or the first escalation (`Fleet.Pilot.ArchWake`) — hours after the
       deploy, on the operator's first real run, which is exactly the distance this module exists to
       remove.
@@ -155,9 +155,8 @@ defmodule Fleet.Project.Roles do
 
   # The `why` is the SINGLETON's own reason, passed in by the caller rather than written once here:
   # the three roles are unique for three different reasons, and a single sentence covering them
-  # could only be true of one. It said "single writer of the signed merge" for all three — accurate
-  # for the gatekeeper, false for the two others, and it is the sentence an operator reads when the
-  # boot refuses their catalogue.
+  # could only be true of one ("single writer of the signed merge" fits the gatekeeper alone) — and
+  # it is the sentence an operator reads when the boot refuses their catalogue.
   defp resolve_structural!(capability, label, why) do
     case Fleet.CapProfile.roles_with_capability(capability) do
       {:ok, [role]} ->

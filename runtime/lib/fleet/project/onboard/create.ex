@@ -21,7 +21,7 @@ defmodule Fleet.Project.Onboard.Create do
   @doc """
   Onboard the project `name` (kebab-case slug). `opts`:
 
-    * `:org`           — forge org (default `"fleet"`)
+    * `:org`           — forge org = the catalogue's name (REQUIRED, cf. `Onboard.required_org/1`)
     * `:description`   — repo description (default `""`)
     * `:pitch`         — pitch phrase (README/spec scaffold; default = description)
     * `:code_root` / `:ops_root` / `:workshop_root` — FS roots, one per face (defaults:
@@ -31,8 +31,7 @@ defmodule Fleet.Project.Onboard.Create do
   Returns `{:ok, %{repo, project_dir, work_dir, doc_dir}}` or `{:error, term()}` (fail-fast) —
   one key per face. On an error return AND on an exception the sequence compensates automatically:
   the forge repo and all three local dirs are removed so a clean retry is possible (see
-  `compensate_onboard/5` and `guarded_finish/5`; the two exits are covered because only one used
-  to be, and the uncovered one left a repo on the forge with two of its faces built).
+  `compensate_onboard/5` and `guarded_finish/5` — both exits, the error return AND the raise).
 
   What still skips the unwind is a BEAM crash — the process dies with the `catch`, not through it.
   Its residue is recoverable agent-side via `delete_project(force: true)`: the dirs it can leave are
@@ -66,15 +65,14 @@ defmodule Fleet.Project.Onboard.Create do
     end
   end
 
-  # `finish_onboard` has TWO ways out and compensation covered ONE. An exception — a face root that
-  # cannot be created, a git binary gone, a full disk — walks straight past the `case` above, and
-  # what it leaves is a repo on the forge plus however many face trees were already built.
+  # `finish_onboard` has TWO ways out and compensation must cover BOTH. An exception — a face root
+  # that cannot be created, a git binary gone, a full disk — walks straight past the `case` above,
+  # and what it leaves is a repo on the forge plus however many face trees were already built.
   #
-  # Measured on a fresh bench, and it is the shape of the whole failure: `/home/projects.doc` does
-  # not exist, `mkdir_p!` raises, and the forge repo, the cloned-and-committed code face and the
-  # initialised ops face ALL survive. The caller gets `tool_crashed` and no way to know a cleanup
-  # is owed; the next attempt then meets the 409/refute_existing walls this compensation exists to
-  # prevent.
+  # Measured on a fresh bench, the shape of that failure: `/home/projects.workshop` does not exist,
+  # `mkdir_p!` raises, and the forge repo, the cloned-and-committed code face and the initialised
+  # ops face ALL survive. The caller gets `tool_crashed` and no way to know a cleanup is owed; the
+  # next attempt then meets the 409/refute_existing walls this compensation exists to prevent.
   #
   # RE-RAISED, NOT SWALLOWED. The crash stays a crash, with its kind and its stacktrace — only the
   # machine is left clean. Converting it to `{:error, _}` here would dress an unforeseen failure as
@@ -286,19 +284,18 @@ defmodule Fleet.Project.Onboard.Create do
 
   # ─── UNE SEULE SOURCE : LE CATALOGUE SUR DISQUE ─────────────────────────────────────────────────
   #
-  # ⚖ user. Ce chemin passait par `generate_repo` — la fonction « template » de Gitea,
-  # qui recopie un depot `<catalogue>/project-template` que la boite avait pousse. Ce depot etait une
-  # COPIE du catalogue, et une copie derive : mesure, un banc portait un workflow sur les deux, sans
-  # que rien ne le dise, parce que le `sync` n'est joue qu'a la naissance de la boite.
+  # ⚖ user. PAS de `generate_repo` — la fonction « template » de Gitea, qui recopie un depot
+  # `<catalogue>/project-template` pousse par la boite. Un tel depot est une COPIE du catalogue, et
+  # une copie derive : mesure, un banc portait un workflow sur les deux, sans que rien ne le dise,
+  # parce qu'un `sync` ne se joue qu'a la naissance de la boite.
   #
   # POURQUOI PAS « GARDER GITEA ET NE COPIER QU'UNE PARTIE » : `GenerateRepoOption` (swagger de la
   # forge, mesure) n'a AUCUN champ de chemin — `git_content` est un booleen, tout ou rien. Gitea ne
-  # sait pas peupler depuis un sous-repertoire, donc le depot template devait porter exactement le
-  # squelette, donc il faisait doublon avec le catalogue qui le porte deja.
+  # sait pas peupler depuis un sous-repertoire, donc le depot template devrait porter exactement le
+  # squelette, donc faire doublon avec le catalogue qui le porte deja.
   #
-  # Ce qui reste est le chemin qui existait deja comme REPLI, et qui tournait : creation nue, puis
-  # `Scaffold.main` depuis le catalogue installe. Une source, pas deux, donc plus rien a synchroniser
-  # ni a comparer.
+  # Le chemin est donc : creation nue, puis `Scaffold.main` depuis le catalogue installe. Une
+  # source, pas deux, donc rien a synchroniser ni a comparer.
   defp create_repo(name, org, opts) do
     desc = Keyword.get(opts, :description, "")
 

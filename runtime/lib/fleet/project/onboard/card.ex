@@ -159,10 +159,10 @@ defmodule Fleet.Project.Onboard.Card do
     end
   end
 
-  # LA REGLE A DEMENAGE CHEZ `Fleet.Project.Declaration` — l'ecrivain de la declaration — et elle ne
-  # gardait ici que la REVISION. Le verbe qui CHANGE la carte d'un projet refusait donc une faute
-  # de frappe pendant que les verbes qui la DECLARENT en acceptaient une, et rien ne disait que les
-  # deux portes repondaient differemment a la meme question (6-125).
+  # LA REGLE VIT CHEZ `Fleet.Project.Declaration` — l'ecrivain de la declaration — et pas ici : tenue
+  # par la seule REVISION, le verbe qui CHANGE la carte d'un projet refuserait une faute de frappe
+  # pendant que les verbes qui la DECLARENT en accepteraient une, et rien ne dirait que les deux
+  # portes repondent differemment a la meme question (6-125).
   #
   # Ce qui reste ici est ce qui appartient a CE verbe : pour une revision la carte est REQUISE,
   # alors qu'a la creation son absence vaut « le defaut du catalogue ».
@@ -188,7 +188,7 @@ defmodule Fleet.Project.Onboard.Card do
   end
 
   # A REVISION REWRITES THE WHOLE DECLARATION, SO IT MUST NOT REWRITE IT FROM THE OPTS ALONE.
-  # `ProjectDeclaration.compose/1` is a pure function of its opts — correct for an ONBOARD, where
+  # `Declaration.compose/1` is a pure function of its opts — correct for an ONBOARD, where
   # "absent" means "the human declared nothing". At a REVISION "absent" means "the reviser did not
   # mention it", and composing from the opts alone makes the two indistinguishable: a revision
   # naming only the card DELETES `max_fan` — the throughput the human chose — while `declared_by`
@@ -196,8 +196,8 @@ defmodule Fleet.Project.Onboard.Card do
   #
   # So the carry-forward lives HERE, at the revision's edge, and `compose/1` stays a pure function
   # of what it is handed. What the revision states wins; what it does not state survives.
-  # (`level`/`nature` were retired with the criticality level — crit_quarantine — so `max_fan` is
-  # the only framing field left to carry forward.)
+  # (The schema carries no `level`/`nature` field — criticality IS the card — so `max_fan` is the
+  # only framing field to carry forward.)
   #
   # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a
   # `max_fan` a human chose and this revision merely carried. It names the last writer, not the

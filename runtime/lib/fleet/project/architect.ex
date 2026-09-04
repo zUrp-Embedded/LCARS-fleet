@@ -36,7 +36,7 @@ defmodule Fleet.Project.Architect do
 
   `ensure/2` is the SINGLE entry for "this project must have its architect": deterministic
   `pod_id` (`<delegate-role>-<name>`) → alive = `{:already_started}` no-op; dead/never = fresh spawn
-  (context back via the slot sidecar). Callers: `ProjectOnboard` (on-open, best-effort),
+  (context back via the slot sidecar). Callers: `Fleet.Project.Onboard` (on-open, best-effort),
   `ArchWake` (on-demand when an escalation arrives), the `project_open` tool (human-driven
   relaunch). A project NOT on the machine (`/home/projects/<name>` absent) is REFUSED
   (`:not_onboarded`) — an architect without its project world would be an empty box.
@@ -47,7 +47,7 @@ defmodule Fleet.Project.Architect do
     * `:forge_client` — default `Fleet.Forge.Client` (numeric repo id for the UUID).
     * `:loader` — default `Fleet.CapProfile` (load + compose with default modops).
     * `:code_root` / `:ops_root` / `:workshop_root` — FS roots (defaults `Fleet.Layout`), same
-      keys as `ProjectOnboard` (the onboard opts thread through unchanged).
+      keys as `Fleet.Project.Onboard` (the onboard opts thread through unchanged).
   """
 
   require Logger
@@ -89,10 +89,10 @@ defmodule Fleet.Project.Architect do
   question first — does its tmux session exist — and only pays the rest when the answer is no.
 
   WHY A KEEPER AT ALL, AND IT IS NOT AN OPTIMISATION. The architect declares `lifetime_scope:
-  forever`, and nothing enforced that: it was ensured on project-open and before an escalation
-  wake, so a fleet restart or a crash left the project with no architect until something happened
-  to need one. A human who opens their project's terminal in between finds nothing there — and
-  the human is the one interlocutor that cannot be scheduled. `forever` has to be someone's job.
+  forever`, and the two other ensure sites (project-open, escalation wake) cannot hold it: a fleet
+  restart or a crash would leave the project with no architect until something happens to need
+  one. A human who opens their project's terminal in between finds nothing there — and the human is
+  the one interlocutor that cannot be scheduled. `forever` has to be someone's job.
 
   The liveness read is the TMUX SESSION, not the Registry: a registered pod whose session is gone is
   a corpse the Registry still answers for, and the fleet then re-briefs nothing for as long as
@@ -200,7 +200,7 @@ defmodule Fleet.Project.Architect do
               rc_name: Layout.pod_label(name, "architect"),
               project_slug: name,
               # The arch's world (moduledoc): live host dirs, not a frozen clone. ONE writable
-              # face and it is `doc` — the face it produces on. `ops` is the record it is judged
+              # face and it is `workshop` — the face it produces on. `ops` is the record it is judged
               # against, so it reads it and cannot touch it; `code` goes through the pipeline like
               # everyone else's.
               #

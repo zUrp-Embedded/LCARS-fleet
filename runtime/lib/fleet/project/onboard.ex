@@ -28,7 +28,7 @@ defmodule Fleet.Project.Onboard do
   scaffold over a pre-existing `main`; `import/2` is the safe adopt-an-existing-repo path — and fails
   clearly if the local folder already exists):
 
-    1. `ForgeClient.create_repo` (org `fleet`, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
+    1. `Fleet.Forge.Client.Repo.create_repo` (the catalogue's org, `auto_init` → `main` cloneable) — 409 ⇒ `{:error, {:repo_already_exists, _}}`
     2. `git clone --branch main` → `/home/projects/<name>`
     3. scaffold `main` (README, CLAUDE.md, .gitignore, .editorconfig, CI) — PAS de spec : la matiere de
        cadrage vit sur `workshop`, la seule face dont l architecte ait la plume avant la 1re livraison
@@ -41,9 +41,8 @@ defmodule Fleet.Project.Onboard do
          scratchpad.md, plans/), the material the project is built FROM and that never ships with it
 
   THREE faces, not two, and the third is not a variation on the second: `ops` is written by the
-  runtime and `workshop` by a producer. Reading the planning material as living on the ops face —
-  as this list did until the split caught up with it — puts a pod's workspace on the tree that
-  records how that pod was judged.
+  runtime and `workshop` by a producer. Reading the planning material as living on the ops face
+  puts a pod's workspace on the tree that records how that pod was judged.
 
   Identity (onboarding is an act of system INFRA, not creative work):
   `author=system_starfleet` (the SYSTEM generates the scaffold from templates; the arch writes no file,
@@ -52,10 +51,10 @@ defmodule Fleet.Project.Onboard do
   `pusher`=`system_starfleet` (`ForgeAuth.git_env`, fleet-wide owner). All avatared (emails → Gitea accounts).
   No GenServer (Iron Law — I/O orchestration without shared state).
 
-  ⚠ CROSS CONTRACT (seam `fleet_mcp`): `onboard/2` is the REAL impl (default) of the behaviour
+  ⚠ CROSS CONTRACT (`Fleet.MCP` seam): `onboard/2` is the REAL impl (default) of the behaviour
   `Fleet.MCP.PodTools.Delegation.ProjectOnboard`. It CANNOT be adopted as `@behaviour`:
-  `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference would be a Boundary
-  violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps → compile error).
+  `Fleet.Project` does not depend on `Fleet.MCP` (MCP sits above it) and the compile reference
+  would be a Boundary violation.
   Duck-typed impl — any evolution of the signature/of the
   `result()` shape MUST be reflected on the behaviour's `@callback` (and vice-versa).
   """
@@ -149,11 +148,10 @@ defmodule Fleet.Project.Onboard do
 
   # ⚠ RE-EXPORTEES PARCE QU'UN SCRIPT LES NOMME. `bin/lcars project migrate` et
   # `lcars project reconcile` executent `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"` :
-  # une chaine de SHELL, que ni le compilateur ni dialyzer ne lisent. Le decoupage les a descendues
-  # dans `Onboard.Migration` sans les re-exporter, les deux verbes du CLI levaient un
-  # `UndefinedFunctionError`, et le provisioning d'une machine fraiche echouait a l'etape
-  # `lcars project reconcile` — huit etapes de gate, zero signal. C'est ce que `runtime.eval_doors_resolve`
-  # tient desormais.
+  # une chaine de SHELL, que ni le compilateur ni dialyzer ne lisent. Descendues dans
+  # `Onboard.Migration` sans re-export, les deux verbes du CLI levent un `UndefinedFunctionError`
+  # et le provisioning d'une machine fraiche echoue a l'etape `lcars project reconcile` — huit
+  # etapes de gate, zero signal. C'est le mur `runtime.eval_doors_resolve` qui le tient.
   @spec eval_migrate(String.t(), String.t()) :: no_return()
   defdelegate eval_migrate(full_name, catalogue), to: Fleet.Project.Onboard.Migration
 

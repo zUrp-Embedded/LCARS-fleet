@@ -1,9 +1,9 @@
 defmodule Fleet.Project.WorktreeSync do
   @moduledoc """
   Serializes post-merge projection onto the local face clones. The code face is a MIRROR — nobody
-  writes it locally — so it resets hard to the forge. The two WRITER faces, `ops` and `doc`, rebase
-  with autostash: something holds a live pen on them (the runtime on `ops`, the architect and the
-  human on `doc`), and a reset would erase work that exists nowhere else. Async requests converge on
+  writes it locally — so it resets hard to the forge. The two WRITER faces, `ops` and `workshop`,
+  rebase with autostash: something holds a live pen on them (the runtime on `ops`, the architect and
+  the human on `workshop`), and a reset would erase work that exists nowhere else. Async requests converge on
   the latest remote state and failures remain retryable.
   """
 
@@ -182,10 +182,10 @@ defmodule Fleet.Project.WorktreeSync do
     end
   end
 
-  # WRITER faces (`ops` and `doc`): the clone is a WRITER — rebase local commits on top of the
+  # WRITER faces (`ops` and `workshop`): the clone is a WRITER — rebase local commits on top of the
   # merged remote tip, never reset (§C). The two share this because they share the property that
   # decides it: something holds a live pen on that clone — the runtime on `ops`, the architect and
-  # the human on `doc` — so a reset would erase work that exists nowhere else. `code` is the only
+  # the human on `workshop` — so a reset would erase work that exists nowhere else. `code` is the only
   # face where nobody writes locally, which is why it is the only one that may reset.
   #
   # `FETCH_HEAD` (not `origin/<branch>`): a `--single-branch` clone's refspec may not maintain the
