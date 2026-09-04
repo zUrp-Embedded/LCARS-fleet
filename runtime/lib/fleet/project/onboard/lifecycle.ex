@@ -237,7 +237,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   best-effort (`:stopped` / `:none` / `:error` — a spawner hiccup never fails the close: the
   MARKER is the state, and it is already posted).
   """
-  @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec close_project(String.t(), keyword()) :: {:ok, Onboard.close_result()} | {:error, term()}
   def close_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
     proj_dir = Path.join(Faces.code_root(opts), name)

@@ -198,9 +198,19 @@ defmodule Fleet.MCP.PodTools do
               "projet de peser ton verdict au lieu de seulement le compter. L'omettre ne casse rien " <>
               "et ne perd que ça — mais elle est perdue pour de bon."
         },
-        "work_item_id" => %{"type" => "string"}
+        "work_item_id" => %{
+          "type" => "string",
+          "description" =>
+            "OBLIGATOIRE : l'identifiant reçu de get_work_item, rappelé ICI, au premier niveau."
+        }
       },
-      "required" => ["payload", "work_item_id"]
+      # `work_item_id` is NOT in `required` although it is mandatory: the handler reads it top-level
+      # OR inside `payload` (measured on a qualifier retrying `payload:{decision, work_item_id}`
+      # forever — `WorkItems.effective_work_item_id/2`), and refuses with the typed
+      # `:work_item_id_required` when it is in neither. Since 2026-09-05 the socket ENFORCES this
+      # schema before dispatch: a `required` stricter than the handler would refuse on the wire a
+      # call the rail accepts. The schema says what is enforced; the description says what is asked.
+      "required" => ["payload"]
     })
   end
 

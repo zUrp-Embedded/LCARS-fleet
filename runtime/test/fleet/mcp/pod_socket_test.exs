@@ -196,11 +196,43 @@ defmodule Fleet.MCP.PodSocketTest do
       {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create"])
       on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
 
+      # Schema-valid arguments (`title` + `brief`), so the refusal measured is the ROLE gate's and
+      # not the schema's — the point is to reach the handler.
       assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
-               call(path, 1, "issue_create", %{"repo" => "fleet/x", "title" => "t"})
+               call(path, 1, "issue_create", %{"title" => "t", "brief" => "b"})
 
       refute text =~ "tool_not_in_profile",
              "declare, l'outil doit passer la surface et se faire juger PLUS LOIN"
+
+      refute text =~ "invalid_arguments", "valid arguments must not be refused by the schema"
+    end
+
+    test "TEMOIN — des arguments hors schema sont refuses AVANT le handler, en nommant la violation" do
+      # The inputSchema served by tools/list is ENFORCED by tools/call (2026-09-05): a required key
+      # missing or a wrong type never reaches a handler. The refusal names the tool and the path.
+      pod = uniq("arch")
+      {:ok, path} = PodSocketSupervisor.ensure_pod_socket(pod, ["issue_create", "issue_get"])
+      on_exit(fn -> PodSocketSupervisor.release_pod_socket(pod) end)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 1, "issue_create", %{"title" => "t"})
+
+      assert text =~ "invalid_arguments"
+      assert text =~ "brief"
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 2, "issue_get", %{"number" => "7"})
+
+      assert text =~ "invalid_arguments"
+      assert text =~ "number"
+
+      # And the schema is not stricter than the rail: `submit_result` without a top-level
+      # `work_item_id` crosses the schema and is refused by the HANDLER's typed guard, because the
+      # handler also reads the id inside `payload` (measured, `WorkItems.effective_work_item_id/2`).
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               call(path, 3, "submit_result", %{"payload" => %{"x" => 1}})
+
+      refute text =~ "invalid_arguments"
     end
 
     test "TEMOIN — les deux outils universels marchent sans rien declarer" do
