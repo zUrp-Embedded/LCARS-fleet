@@ -195,6 +195,28 @@ go7_shape() { # go7_shape <fichier> <fonction> — la FORME d'un predicat : fene
   [[ "$output" == *"shellcheck absent"* ]] || { echo "rc=$status : $output"; return 1; }
 }
 
+@test "decor sans AUCUN fichier shell = ECHEC nomme — la decouverte est cassee, pas l'installeur (B1, quatrieme cas)" {
+  # Les trois autres refus (shellcheck absent, plancher, GO-7) supposent qu'il y a quelque chose a
+  # auditer. Zero fichier shell sous la porte n'est pas « rien a redire » : c'est le `find`, ou la
+  # reconnaissance par shebang, qui ne rend plus rien — et un plancher joue sur une liste vide
+  # rendrait un verdict (shellcheck sans fichier sort en usage) qui parlerait d'autre chose.
+  # ⚠ LA COPIE DE LA PORTE EST ELLE-MEME UN FICHIER SHELL par les regles de sa decouverte (`.sh`, ou
+  # un shebang bash) : pour un decor SANS fichier shell, la copie perd les deux. Elle se joue par
+  # `bash <fichier>`, le shebang ne decide de rien ici — on mesure la garde, pas le shebang.
+  stub_bats 0
+  printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"   # un cas sans shebang : un corpus, pas un shell
+  tail -n +2 "$PORTE_SRC" > "$DECOR/porte"; chmod 0755 "$DECOR/porte"
+  rm -f "$DECOR/gate.sh"
+  # TEMOIN DU TEMOIN : le decor ne porte bien AUCUN fichier shell au sens de la porte
+  refute grep -qE '^#!' "$DECOR/porte"
+  run bash "$DECOR/porte"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aucun fichier shell"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"decouverte est cassee"* ]]
+  [[ "$output" != *"BATS APPELE"* ]] || { echo "bats a ete lance sur un corpus que la porte n'a pas pu auditer"; return 1; }
+  [[ "$output" != *"shellcheck plancher"* ]] || { echo "le plancher a ete joue sur une liste vide"; return 1; }
+}
+
 @test "le plancher shellcheck REFUSE un avertissement dans un script du corpus" {
   stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
   printf '%s\n' '#!/usr/bin/env bash' '# SOURCE: deploy/tests/warn.sh' 'echo $(ls)' > "$DECOR/tests/warn.sh"
