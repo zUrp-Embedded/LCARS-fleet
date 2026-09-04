@@ -209,7 +209,7 @@ build_env() {
 # arrive par DEUX gestes explicites et par eux seuls : « build » (dev) ou « pull » (prod). Un « up »
 # ne fabrique ni ne tire rien — il refuse en nommant les deux.
 cmd_pull() {
-  local img="${LCARS_IMAGE:-lcars-fleet:2}"
+  local img="$LCARS_IMAGE"
   "$DOCKER" pull "$img" || fail "pull: « $img » n'a pas pu être tirée" "LCARS_IMAGE=<registre/image:tag> deploy/box pull — ou « deploy/box build » sur un poste de dev"
   local rev; rev="$("$DOCKER" image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$img" 2>/dev/null || true)"
   echo "box pull: « $img » tirée (révision ${rev:-inconnue}). Puis :  deploy/box up   (conteneur recréé sur le même volume)"
@@ -222,8 +222,7 @@ cmd_build() {
   # `docker build` et non `compose build` : compose ne construit que les services declares, et le
   # stage `build` n'en est pas un. Le TAG derive de celui du runtime — c'est la regle que
   # `bench-up.sh` applique pour trouver son jumeau (`lcars-fleet:v4` -> `lcars-build:v4`).
-  local tag="${LCARS_IMAGE:-lcars-fleet:2}"
-  tag="lcars-build:${tag##*:}"
+  local tag="lcars-build:${LCARS_IMAGE##*:}"
   echo "box: étiquetage du jumeau de build ($tag — le toolchain que le runner CI sert)"
   "$DOCKER" build --target build -t "$tag" \
     --build-arg "GIT_SHA=$LCARS_GIT_SHA" --build-arg "BUILD_DATE=$LCARS_BUILD_DATE" \
@@ -247,7 +246,7 @@ cmd_up() {
   # ⚠ ET LE REFUS NOMME LES DEUX VOIES. `compose up --no-build` echoue sur une image absente, mais
   # avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
   # `box build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat.
-  local img="${LCARS_IMAGE:-lcars-fleet:2}"
+  local img="$LCARS_IMAGE"
   if ! $DOCKER image inspect "$img" >/dev/null 2>&1; then
     echo "box: image « $img » absente — un up ne la fabrique pas." >&2
     echo "   en DEV   : deploy/box build      (plusieurs minutes, une fois)" >&2
@@ -352,7 +351,7 @@ cmd_config() {
     { echo ""
       echo "  Pose ce que LCARS ne peut pas deviner, en variables d'env de CETTE commande :"
       echo "    FORGE_BASE_URL=<url vue du conteneur>  FORGE_PUBLIC_URL=<url vue du navigateur>"
-      echo "    LCARS_ADMIRAL=<login du siège>  LCARS_UID=<uid>  LCARS_SSH_PORT=127.0.0.1:2222 …"
+      echo "    LCARS_ADMIRAL=<login du siège>  LCARS_UID=<uid>  LCARS_SSH_PORT=$LCARS_SSH_PORT …"
       echo "    FORGE_ADMIN_TOKEN=<token master site-admin>   l'autorité qui CRÉE sur ta forge"
       echo "       Dans Gitea : Settings → Applications → Generate New Token, scope « all »."
       echo "    FORGE_SEED_PASSWORD=<mot de passe>            posé sur les comptes À LEUR CRÉATION"
@@ -619,7 +618,14 @@ BESOIN D'UNE FORGE JETABLE POUR DÉVELOPPER ?
 EOF
 }
 
+# ─── LES DEFAUTS DE L'INSTANCE — UNE DECLARATION, ET LE COMPOSE LA LIT ─────────────────────────
+# Le port SSH publie et l'image ont chacun UN defaut, ici, APRES la lecture de la conf du projet
+# (un `:=` pose avant `load_conf` masquerait le fichier). Le compose que ce script pilote les lit
+# SANS repli (`${…:?}`) : deux defauts independants qui s'accordent par coincidence sont ce qui a
+# produit B1 (relecture hostile 2026-09-04, M12). Exportes : compose est un processus fils.
 : "${LCARS_SSH_PORT:=127.0.0.1:2222}"
+: "${LCARS_IMAGE:=lcars-fleet:2}"
+export LCARS_SSH_PORT LCARS_IMAGE
 : "${LCARS_FORGE_PORT:=127.0.0.1:3300}"
 
 case "${1:-help}" in

@@ -74,7 +74,11 @@ services:
     # d'installation, lui, la lisait deja — la dissymetrie etait le piege.
     #
     # Pour construire A COTE d'un banc qui travaille : `LCARS_IMAGE=lcars-fleet:<nom> docker compose build`.
-    image: "${LCARS_IMAGE:-lcars-fleet:2}"
+    #
+    # SANS REPLI : le defaut a UNE declaration, dans `deploy/box`, qui pilote ce fichier et exporte
+    # la variable. Un second defaut ici s'accorderait avec le sien par coincidence — jusqu'au jour
+    # ou il ne s'accorde plus, en silence (M12). Lance a la main, ce compose exige la variable.
+    image: "${LCARS_IMAGE:?LCARS_IMAGE non posée — deploy/box la pose ; à la main : LCARS_IMAGE=lcars-fleet:<nom> docker compose …}"
     # `bridge` : c'est la passerelle — le poste depuis lequel on pilote, pas la machine.
     hostname: "${LCARS_HOSTNAME:-bridge}"
     environment:
@@ -110,7 +114,8 @@ services:
     ports:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
-      - "${LCARS_SSH_PORT:-127.0.0.1:2222}:22"
+      # Meme regle que l'image : le defaut vit dans `deploy/box`, ce fichier lit sans repli.
+      - "${LCARS_SSH_PORT:?LCARS_SSH_PORT non posé — deploy/box le pose ; à la main : LCARS_SSH_PORT=127.0.0.1:<port> docker compose …}:22"
       # ⚠ PLUS AUCUN PORT DE BLOC N'EST PUBLIÉ, ET C'EST LA FIN D'UN GESTE COMMENCÉ À MOITIÉ.
       #
       # POURQUOI CE N'EST PAS NEUTRE : les listeners bindent `0.0.0.0` DANS le conteneur — c'est
