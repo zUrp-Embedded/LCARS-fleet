@@ -888,7 +888,7 @@ SPY
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bilan"* ]]
   [[ "$output" == *"workstation doctor"* ]]
-  [[ "$output" == *"box doctor"* ]]
+  [[ "$output" == *"box status"* ]]
 }
 
 @test "PIPEE : la porte fait sa SOURCE elle-meme, sous l humain, sans sudo" {

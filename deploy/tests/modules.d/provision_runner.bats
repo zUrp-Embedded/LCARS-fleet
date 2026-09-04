@@ -108,24 +108,40 @@ EOF
   grep -q "10-pkgstub:check" "$RUN_LOG"
 }
 
-@test "D6: apply on docker runs CHECK (not apply) for an image-built module" {
+@test "docker n'est PAS un rail : apply y est REFUSE en nommant le build, verify et l'init produit" {
+  # ⚖ user 2026-09-04 (Q1, lot 7). La doctrine D6 (« apply sur docker = check ») est morte avec le
+  # boot qui rejouait l'installeur : rien ne se converge dans une image, elle se BATIT.
   stub_module 60-deploystub "wsl linux" any human
   run "$SANDBOX/provision" apply --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker n'est pas un rail"* ]]
+  [[ "$output" == *"Dockerfile"* ]]
+  [[ "$output" == *"verify"* ]]
+  [[ "$output" == *"box/init.sh"* ]]
+  refute grep -q "60-deploystub" "$RUN_LOG"
+}
+@test "docker n'est PAS un rail : uninstall y est refuse aussi — doctor et list restent" {
+  stub_module 60-deploystub "wsl linux" any human
+  run "$SANDBOX/provision" uninstall --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker n'est pas un rail"* ]]
+  run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-deploystub:check" "$RUN_LOG"
-  refute grep -q "60-deploystub:apply" "$RUN_LOG"
-  [[ "$output" == *"APPLY-ON=wsl linux"* ]]
+  run "$SANDBOX/provision" list --substrate docker
+  [ "$status" -eq 0 ]
 }
-
-@test "D6: image-built module DRIFT during apply is a FAILURE, not a silent skip" {
+@test "D6: image-built module DRIFT during DOCTOR on docker is a FAILURE, not a silent skip" {
   stub_module 60-deploystub "wsl linux" any human STUB_RC_DRIFT
   export STUB_RC_DRIFT=1
-  run "$SANDBOX/provision" apply --substrate docker
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"inapplicable"* ]]
-  [[ "$output" == *"rebuild"* ]]
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 1 ] || { echo "status=$status"; echo "$output"; false; }
+  [[ "$output" == *"drift: 1"* ]]
+  # le remede n'est PAS « provision apply » (refuse sur docker) : c'est le rebuild de l'image
+  [[ "$output" == *"box build"* ]] || { echo "$output"; false; }
+  refute grep -q 'converger : sudo' <<<"$output"
+  grep -q "60-deploystub:check" "$RUN_LOG"
 }
-
 @test "D6: apply on a matching substrate runs the real apply" {
   stub_module 60-deploystub "wsl linux" any human
   run "$SANDBOX/provision" apply --substrate wsl
@@ -161,14 +177,13 @@ EOF
   [[ "$output" == *"hors de CHECK-ON"* ]]
 }
 
-@test "D6: non-root apply is allowed when every NEEDS:root module is check-only here" {
+@test "D6: non-root DOCTOR is allowed when every NEEDS:root module is check-only here" {
   [ "$(id -u)" -ne 0 ] || skip "must run unprivileged"
   stub_module 60-rootstub "wsl linux" any root
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-rootstub:check" "$RUN_LOG"
 }
-
 @test "D6: non-root apply still dies when a NEEDS:root module would really apply" {
   [ "$(id -u)" -ne 0 ] || skip "must run unprivileged"
   stub_module 60-rootstub "wsl linux" any root
@@ -231,7 +246,7 @@ EOF
 
 @test "6-101: un DRIFT dans l'apply rend 2 — plus jamais « tout convergé »" {
   lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"drift: 1"* ]]
@@ -243,7 +258,7 @@ EOF
   # qui lisait « conformes/convergés: 1 · drift: 0 » n'avait aucune raison d'aller chercher la ligne
   # DRIFT au-dessus.
   lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [[ "$output" == *"conformes/convergés: 0"* ]]
   [[ "$output" != *"drift: 0"* ]]
@@ -253,7 +268,7 @@ EOF
   # Confondre les deux serait l'autre facon de mentir : « j'ai casse » et « je n'ai pas pu
   # converger » demandent des gestes opposes de l'operateur.
   lib_module 50-forgestub 'p_drift "forge injoignable"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -ne 1 ]
   [[ "$output" == *"échecs: 0"* ]]
@@ -261,7 +276,7 @@ EOF
 
 @test "6-101: un p_fail rend toujours 1, le drift ne l'ecrase pas" {
   lib_module 50-forgestub 'p_fail "chown refuse"; p_drift "et un drift par-dessus"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"échecs: 1"* ]]
@@ -357,7 +372,7 @@ stub_impersonation() {
   # derniere ligne lue est celle qui reste.
   lib_module 40-failstub  'p_fail "quelque chose est casse"'
   lib_module 50-driftstub 'p_drift "et un geste manque"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"échecs: 1"* ]]
@@ -370,7 +385,7 @@ stub_impersonation() {
   # Sans ce pendant, un correctif qui supprimerait la phrase en toutes circonstances passerait le
   # temoin ci-dessus (P-40), et un drift pur perdrait le seul message qui dit ce qu'il faut faire.
   lib_module 50-driftstub 'p_drift "un geste manque"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"Rien n'est cassé"* ]]
@@ -381,7 +396,7 @@ stub_impersonation() {
   # Sans lui, un runner qui rendrait 2 en toutes circonstances passerait les tests ci-dessus, et
   # chaque boot de conteneur annoncerait un drift qui n'existe pas.
   lib_module 20-okstub 'p_ok "converge"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"conformes/convergés: 1"* ]]
@@ -436,7 +451,7 @@ mort_module() { # mort_module <NN-nom> <source-la-lib: 0|1>
 
 @test "apply : un module mort n'est PAS un drift residuel — le message rassurant serait faux" {
   mort_module 91-mort 1
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 1 ]
   [[ "$output" == *"ERREUR 91-mort"* ]]
   [[ "$output" != *"Rien n'est cassé"* ]]
@@ -478,7 +493,7 @@ echo "PETIT-FILS-RC=\$rc"
 p_ok "le module, lui, rend bien son verdict"
 verdict_apply
 EOF
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 0 ]
   [[ "$output" == *"PETIT-FILS-OK"* ]]
   [[ "$output" == *"PETIT-FILS-RC=0"* ]]

@@ -425,7 +425,7 @@ else
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box doctor"
+    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box status"
     exit 0
   fi
   ans=""

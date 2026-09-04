@@ -60,10 +60,14 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   [ "$(code | grep -E '^FROM ' | tail -n1)" = "FROM runtime AS final" ]
 }
 
-@test "le marqueur est DECLARE a la table, substrat docker seul" {
-  grep -qE '^anchor +/opt/lcars/\.verified +0644 +root:root +docker$' "$MANIFEST"
+@test "le marqueur est un objet du PRODUIT — hors de la table de l'installeur, nomme par box/README" {
+  # ⚖ user 2026-09-04 (Q1, lot 7) : la table n'a plus de colonne docker. Le tampon est pose par le
+  # Dockerfile (stage final), lu par « box status » : l'installeur ne le pose, ne le sonde, ni ne le
+  # desinstalle.
+  refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
+  refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"
+  grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../fleet/services/box/README.md"
 }
-
 @test "la CI bâtit l'image sur dood, et se declenche sur deploy/ et install.sh (DI-08)" {
   [ -f "$WF" ]
   grep -qE "^\s+- 'deploy/\*\*'$" "$WF"
@@ -75,4 +79,12 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   grep -qE '/opt/lcars/\.verified' <<<"$job"
   # le job ne pousse RIEN : bâtir n'est pas publier (publish.yml le fait, sur un tag)
   refute grep -qE 'docker push|docker login' <<<"$job"
+}
+
+@test "le stage RUNTIME ne porte plus deploy/ — seul verify le copie, et final repart de runtime" {
+  # ⚖ user 2026-09-04 (Q1, lot 7) : rien dans la boite ne lit /opt/lcars/deploy.
+  local r; r="$(sed -n '/^FROM .* AS runtime$/,/^FROM runtime AS verify$/p' "$DF" | grep -vE '^\s*#|`#')"
+  refute grep -qE '^COPY deploy ' <<<"$r"
+  refute grep -q '/opt/lcars/deploy' <<<"$r"
+  code | grep -qE '^FROM runtime AS final$'
 }

@@ -26,7 +26,6 @@ prov_console_human() {
 }
 
 prov_runtime_dirs() {
-  [[ "${PROV_SUBSTRATE:-}" == "docker" ]] && return 0
   local h; h="$(prov_console_human)"
   printf '%s\n' \
     "/run/lcars 0755 root:root" \

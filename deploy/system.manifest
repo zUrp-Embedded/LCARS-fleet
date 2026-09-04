@@ -84,7 +84,6 @@ anchor:cond /opt/lcars/.source-revision                0644  root:root          
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
 # Le tampon du stage `verify` de l'image : la revision dont le doctor a mesure le systeme de
 # fichiers AU BUILD. Docker seul — un poste ne bâtit pas d'image, son doctor se joue sur lui.
-anchor    /opt/lcars/.verified                         0644  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
 dir       /opt/lcars/share                                  0755  root:root           wsl+linux
@@ -222,13 +221,11 @@ runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fle
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any
-# L'etat du boot de la BOITE, ecrit par le boot (`fleet/services/box/boot.sh` : `ready`, `awaiting-config`) : c'est ce que
-# `box up` lit pour sortir tout de suite sur une boite qui attend `box config`, au lieu d'attendre
-# un verdict qui ne viendra pas.
-runtime   /run/lcars-boot.state                        0644  root:root           docker
-# Le login du siege, ecrit par l'init de l'instance (box/init.sh) et lu par le boot — l'init est un
-# processus, le boot un autre : le fait traverse par un fichier, pas par l'environnement.
-runtime   /run/lcars-seat.login                        0644  root:root           docker
+# ⚖ user 2026-09-04 (Q1, lot 7) : cette table N'A PLUS DE COLONNE `docker`. Les fichiers de boot de
+# la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
+# `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
+# `fleet/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `fleet/services/box/README.md`.
+# L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas.
 
 runtime   /run/lock/lcars                              0700  root:root           any
 
@@ -237,8 +234,6 @@ runtime   /run/lock/lcars                              0700  root:root          
 # l'uninstall, et dans aucune liste — ni la mienne, ni celle du plan. C'est le cas « pose par un
 # tiers » : on le declare parce qu'on le PROVOQUE, pas parce qu'on l'ecrit.
 dir       /root/.terraform.d                           0755  root:root           wsl+linux
-runtime   /run/lcars-provision.rc                      0644  root:root           docker
-runtime   /run/lcars-humans.rc                         0644  root:root           docker
 
 # ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
 human     /home/<human>/.lcars                         0700  <human>:-           any

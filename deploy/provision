@@ -221,6 +221,16 @@ _journal_params
 
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
+# ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
+# bâtit par le Dockerfile, l'instance s'initialise côté produit (fleet/services/box/), et rien ne
+# se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
+# l'image (doctor au build) et de `list` — jamais un substrat qu'on converge ou qu'on désinstalle.
+case "$CMD" in
+  apply|uninstall) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
+  L'image se bâtit (deploy/docker/Dockerfile, « deploy/box build »), se vérifie au build (stage verify,
+  « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
+  (fleet/services/box/init.sh). Pour l'instance : « deploy/box status » · « deploy/box down »." ;;
+esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
 # ─── L'UID DU SIÈGE — DÉRIVÉ ICI, UNE FOIS, ET SURTOUT PAS DEPUIS `PROV_HUMAN` ──────────────────
@@ -1057,7 +1067,13 @@ else
     "$(_tint "$_PA" "drift" "$drift")" \
     "$(_tint "$_PR" "échecs" "$failed")"
   if [[ "$CMD" == "doctor" && "$drift" -gt 0 ]]; then
-    echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
+    if [[ "$SUBSTRATE" == "docker" ]]; then
+      # docker n'est pas un rail : un drift ici est une IMAGE non conforme a son build, pas un
+      # etat a converger — le geste est le rebuild (le stage verify le refuse au build).
+      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/box build) — un drift ici est une image non conforme"
+    else
+      echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
+    fi
   fi
   # ⚠ L'ÉCHEC PASSE DEVANT, ET L'`elif` EST LOAD-BEARING : en deux `if` separes, « Rien n'est cassé »
   # sortirait APRÈS « EN ÉCHEC sur 3 module(s) », et ce serait la derniere ligne que l'opérateur lit.
