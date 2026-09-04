@@ -77,6 +77,8 @@ setup() {
 # `say` journalise, `setsid` ne detache RIEN (sinon un daemon survit au temoin), et `$PROVISION`
 # est une doublure dont on pilote le verdict.
 bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = personne, 2 = le siege seul (admiral, 1000)>
+  # `ADMIRAL_DECOR` (defaut : admiral) est le login du siege que le bloc voit — un temoin le VIDE
+  # pour prouver que le siege n'est pas le sujet de la mesure (lot 15).
   # ⚠ LE FAIT SE LIT SUR LA MACHINE (lot 6, 2026-09-04) : un humain de fleet est un membre du groupe
   # `fleet` dont l'uid est au-dessus du plancher et qui n'est pas le siege. Le bloc lisait le fait
   # `fleet_humans=` depose par le doctor de l'INSTALLEUR ; l'installeur ne joue plus au boot. Le
@@ -97,7 +99,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     LCARS_UID=1000
-    LCARS_ADMIRAL=admiral
+    LCARS_ADMIRAL='${ADMIRAL_DECOR-admiral}'
     MODULE_PROTOCOL='$LCARS_MODULE_PROTOCOL'
     RC_FILE='$LCARS_PROV_RC_FILE'
     prov_rc=0
@@ -284,6 +286,26 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'is_fleet_human' "$BLOC"
   grep -q 'human-protocol.sh' "$BLOC"
   refute grep -qE '(>=|-ge) *[0-9]{3,}' "$BLOC"
+}
+
+@test "le boot est l'HOTE du protocole (LCARS_HUMAN_PROTOCOL_HOST=1) — il ne pose plus LCARS_LOGIN pour cette mesure" {
+  # Lot 15. Le bloc empruntait le login du siege comme sujet (`LCARS_LOGIN=$LCARS_ADMIRAL`) pour
+  # passer la garde de sourcing du protocole. Un hote n'a pas UN sujet : il en nomme un a chaque
+  # appel, et il se declare comme le convergeur — posee, jamais exportee, retiree apres. Deux
+  # lectures : le texte du bloc (le mecanisme), et son comportement.
+  grep -q 'LCARS_HUMAN_PROTOCOL_HOST=1' "$BLOC"
+  grep -q 'unset LCARS_HUMAN_PROTOCOL_HOST' "$BLOC"
+  refute grep -qE '^[^#]*LCARS_LOGIN=' "$BLOC"
+  refute grep -qE '^[^#]*export[^#]*LCARS_HUMAN_PROTOCOL_HOST' "$BLOC"
+  # Comportement : zoe est dans le groupe et le login du siege est VIDE. Avec un sujet d'emprunt,
+  # le protocole mourrait a la source (« LCARS_LOGIN non pose »), le sous-shell rendrait 1 et le
+  # bloc dirait « AUCUN humain » alors que zoe est la ; en hote, la population est mesuree.
+  ADMIRAL_DECOR='' bloc 0 0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 0 ]
+  grep -q 'présent' "$JOURNAL"
+  refute grep -q 'AUCUN humain' "$JOURNAL"
+  refute grep -q 'LCARS_LOGIN non pose' <<<"$output"
 }
 
 @test "protocole ABSENT : la population n'est PAS mesuree, humans.rc dit 1, et le bloc nomme le fichier" {

@@ -222,9 +222,16 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
     say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
   else
     pop_rc=0
-    ( export LCARS_LOGIN="$LCARS_ADMIRAL" LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
+    # L'HOTE, PAS UN MODULE (lot 15) : ce bloc n'a pas UN sujet, il en nomme un a chaque appel
+    # (`is_fleet_human "$_m"`). Il se declare comme le convergeur — `LCARS_HUMAN_PROTOCOL_HOST=1`,
+    # jamais exporte, retire des le protocole charge — au lieu d'emprunter le login du siege comme
+    # sujet : le siege n'est pas ce que cette mesure regarde, et un sujet d'emprunt ferait de toute
+    # lecture « de la personne » (`human_home`) celle d'admiral.
+    ( export LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
+      LCARS_HUMAN_PROTOCOL_HOST=1
       # shellcheck source=../lib/human-protocol.sh
       . "$HUMAN_PROTOCOL"
+      unset LCARS_HUMAN_PROTOCOL_HOST
       uid_bounds || exit 2
       while IFS= read -r _m; do
         [[ -n "$_m" ]] || continue

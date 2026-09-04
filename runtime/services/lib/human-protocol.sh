@@ -23,10 +23,14 @@
 # agirait sur l'utilisateur courant — root, sous le convergeur. On ne devine pas : on refuse.
 #
 # L'HOTE, lui, source ce fichier pour la REGLE — `uid_bounds`, `is_fleet_human <login>` — pas pour
-# agir sur une personne : il n'a pas UN sujet, il en nomme un a chaque appel. Il le declare
-# (`LCARS_HUMAN_PROTOCOL_HOST=1`, et il ne l'EXPORTE pas : un module qu'il lance ne l'herite pas
-# et garde sa garde). Sans sujet nomme, les lectures de la personne rendent « rien » ou « non » —
-# jamais l'utilisateur courant.
+# agir sur une personne : il n'a pas UN sujet, il en nomme un a chaque appel. Il le declare par
+# `LCARS_HUMAN_PROTOCOL_HOST=1` — LE CONTRAT DE LA VARIABLE : posee (jamais exportee) juste avant
+# le `source`, retiree (`unset`) juste apres. Un module que l'hote lance ne l'herite donc pas et
+# garde sa garde ; un hote qui l'exporterait, ou qui poserait un `LCARS_LOGIN` d'emprunt a la
+# place, ferait de toute lecture « de la personne » (`human_home`) celle de ce login. Deux hotes
+# (lot 15) : `human-converger.sh` (la boucle) et `box/boot.sh` (la mesure de population au boot) ;
+# les temoins qui sourcent pour la regle la posent de la meme facon. Sans sujet nomme, les
+# lectures de la personne rendent « rien » ou « non » — jamais l'utilisateur courant.
 if [[ -z "${LCARS_HUMAN_PROTOCOL_HOST:-}" ]]; then
   : "${LCARS_LOGIN:?LCARS_LOGIN non pose — le convergeur nomme le login converge}"
 fi

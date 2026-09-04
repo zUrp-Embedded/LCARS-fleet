@@ -68,6 +68,15 @@ la frontière. Chaque dossier porte son README, qui instruit le protocole `<modu
 Une machine posée (poste ou boîte) porte cet arbre à `/opt/lcars/services/` ; un checkout, à
 `runtime/services/`.
 
+Le protocole des humains (`lib/human-protocol.sh`) se charge de deux façons, et une variable les
+distingue. Un **module** (`human.d/`) le source avec un sujet — `LCARS_LOGIN`, posé par le
+convergeur — et refuse sans lui : jamais l'utilisateur courant. Un **hôte** (`human-converger.sh`,
+`box/boot.sh`) le source pour la règle seule (`uid_bounds`, `is_fleet_human <login>`) et se déclare
+par `LCARS_HUMAN_PROTOCOL_HOST=1` — posée sans `export` juste avant le `source`, `unset` juste
+après, pour qu'aucun module lancé ensuite n'en hérite. Un hôte n'emprunte jamais un login comme
+sujet. Les bornes (`PASSWD_DEFS` → `login.defs`) et le siège (`LCARS_SEAT_UID_FILE`, puis
+`LCARS_SYSADMIN_UID`) sont des faits de machine que le protocole lit ; il ne les reçoit de personne.
+
 ⚠ **CE RÉPERTOIRE NE PORTE QUE DES SERVICES ET LES MODULES QUE CES SERVICES JOUENT**, c'est-à-dire
 ce que systemd, le convergeur ou le boot de la boîte démarre ou joue. Un binaire que le BEAM ou `runtime/bin/lcars` INVOQUE (`lcars-toolchain-converge`,
 `lcars-authority-ask`) vit sous `runtime/bin/`, sous son nom définitif, comme `lcars` et
