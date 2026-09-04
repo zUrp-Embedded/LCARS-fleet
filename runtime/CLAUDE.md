@@ -28,7 +28,7 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `lib/fleet/*.ex` sans dossier | les modules **foundation** : vocabulaire et validation purs, `deps: []` |
 | `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (73 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` |
 | `bin/` | les launchers N0/N1 des pods, `fleet` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
-| `etc/` | lancement et release : `fleet.env.template` (catalogue des env vars), `release.manifest`, `deploy-release.sh` |
+| `etc/` | lancement et release : `fleet.env.template` (catalogue des env vars), `release.manifest` — les outils d'install (`deploy-release.sh`, `enroll-catalogue.sh`) vivent dans `deploy/lib/` |
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |

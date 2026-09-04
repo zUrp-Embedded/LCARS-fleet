@@ -1413,3 +1413,28 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   [ "$status" -eq 0 ]
   [ "$(stat -c %a "$d/enfant")" = 2775 ]
 }
+
+# ─── product_tree : l'arbre du produit, lisible par TOUT LE MONDE (relecture hostile 2026-09-04) ─
+# Un checkout porte `runtime/` et rien nomme `services/` a sa racine ; une machine posee porte
+# `services/` a plat (et `runtime/` est le PREFIX de la release, 0750 root:fleet). Le discriminant
+# se lit par un stat sur un ENFANT DIRECT de la racine, jamais en descendant dans `runtime/`, qu'un
+# daemon hors du groupe fleet ne peut pas ouvrir.
+pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee sous <racine>/deploy/lib
+  mkdir -p "$1/deploy/lib"; cp "$LIB" "$1/deploy/lib/provision-lib.sh"; cp "$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh" "$1/deploy/lib/"
+  PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; product_tree'
+}
+@test "product_tree : un checkout (runtime/ present, pas de services/ a la racine) → runtime/" {
+  local r="$BATS_TEST_TMPDIR/co"; mkdir -p "$r/runtime/etc"
+  [ "$(pt_root "$r")" = "$r/runtime" ]
+}
+@test "product_tree : une machine posee (services/ a plat, runtime/ = la release) → la racine" {
+  local r="$BATS_TEST_TMPDIR/posee"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d" "$r/etc"
+  [ "$(pt_root "$r")" = "$r" ]
+}
+@test "product_tree : la release ILLISIBLE (0750 root:fleet, lecteur hors du groupe) ne change pas la reponse" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout"
+  local r="$BATS_TEST_TMPDIR/posee2"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d"
+  chmod 0000 "$r/runtime"
+  local got; got="$(pt_root "$r")"; chmod 0755 "$r/runtime"
+  [ "$got" = "$r" ]
+}

@@ -22,6 +22,7 @@ case "\$1 \$2" in
   "compose version") exit 0 ;;
 esac
 if [[ "\$*" == *" ps -q lcars"* ]]; then printf '%s' "\${STUB_IDS:-}"; [[ -n "\${STUB_IDS:-}" ]] && echo; exit 0; fi
+if [[ "\$*" == *" up -d"* ]]; then printf '%s\n' "\${LCARS_DECK_ORIGINS-<absent>}" > "$BATS_TEST_TMPDIR/origins.seen"; exit 0; fi
 if [[ "\$1" == inspect ]]; then
   case "\$3" in
     *State.Status*)   echo "\${STUB_STATE:-running}" ;;
@@ -38,10 +39,12 @@ if [[ "\$all" == *"forge-gestures.sh config-"* ]]; then cat > "$BATS_TEST_TMPDIR
 exit 0
 EOS
   chmod 0755 "$BINDIR/docker"
+  # curl (la sonde du deck de « status ») : STUB_DECK_HTTP, 000 par defaut
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s" "${STUB_DECK_HTTP:-000}"' > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"
   export PATH="$BINDIR:$PATH"
   export DOCKER_HOST="unix:///dev/null" PROV_DOCKER_BIN="$BINDIR/docker"
   export LCARS_BOX_CONF_DIR="$BATS_TEST_TMPDIR/conf"
-  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_HUM STUB_TAMPON
+  unset LCARS_PROJECT STUB_IDS STUB_STATE STUB_HEALTH STUB_REV STUB_BOOT STUB_PROV STUB_HUM STUB_TAMPON STUB_DECK_HTTP LCARS_DECK_ORIGINS LCARS_LANDING_PORT_BIND
   unset FORGE_BASE_URL FORGE_PUBLIC_URL LCARS_ADMIRAL LCARS_UID FORGE_ADMIN_TOKEN FORGE_SEED_PASSWORD
   ENV_FILE="$LCARS_BOX_CONF_DIR/lcars-fleet.env"
   SECRETS="$LCARS_BOX_CONF_DIR/lcars-fleet.secrets"
@@ -132,7 +135,7 @@ EOS
 }
 
 @test "status : sain — tout converge, le tampon est la revision qui tourne, rc 0" {
-  export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_TAMPON=436f94cd STUB_REV=436f94cd
+  export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_TAMPON=436f94cd STUB_REV=436f94cd STUB_DECK_HTTP=302
   run bash "$SRC" status
   [ "$status" -eq 0 ]
   [[ "$output" == *"running"*"healthy"* ]]
@@ -182,4 +185,22 @@ EOS
   [[ "$output" == *"box build"* ]]
   [[ "$output" == *"box pull"* ]]
   refute grep -q ' pull ' "$CALLS"
+}
+
+@test "up : le port PUBLIE entre dans les origines du deck — sinon 409 sur le chemin nominal" {
+  LCARS_LANDING_PORT_BIND=127.0.0.1:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:22021,http://localhost:22021" ]
+  # un bind sur toutes les interfaces devient la loopback pour le navigateur local
+  LCARS_LANDING_PORT_BIND=0.0.0.0:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://127.0.0.1:22021,http://localhost:22021" ]
+  # l'operateur qui pose LCARS_DECK_ORIGINS garde la main
+  LCARS_DECK_ORIGINS=http://deck.example LCARS_LANDING_PORT_BIND=127.0.0.1:22021 LCARS_UP_VERDICT_TIMEOUT=0 run bash "$SRC" up
+  [ "$(cat "$BATS_TEST_TMPDIR/origins.seen")" = "http://deck.example" ]
+}
+
+@test "status : un deck qui rend 409 (entree non declaree) est DEGRADE, pas vert" {
+  export STUB_IDS=c0ffee STUB_PROV=0 STUB_HUM=0 STUB_TAMPON=436f94cd STUB_REV=436f94cd STUB_DECK_HTTP=409
+  run bash "$SRC" status
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"409"*"NON DÉCLARÉE"* ]]
 }

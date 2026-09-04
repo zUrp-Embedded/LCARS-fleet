@@ -1033,10 +1033,13 @@ repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
 # L'ARBRE DU PRODUIT — `runtime/` dans un checkout, la racine `/opt/lcars` une fois pose. Le
 # ponçage d'alice a renomme `fleet/` en `runtime/`, et `/opt/lcars/runtime` est deja le PREFIX de
 # la release : l'arbre embarque (services, etc, bin) vit donc A PLAT sous `/opt/lcars/`, comme le
-# convergeur du produit le suppose (`/opt/lcars/services/human.d`). Le discriminant est la RELEASE :
-# `<racine>/runtime/rel` n'existe que sous le PREFIX pose (`rel/lcars_fleet`), jamais dans un arbre
-# source ; tout lecteur d'un fichier du produit passe par ici, jamais par `$(repo_root)/runtime/…`.
-product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -d "$r/runtime/rel" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
+# convergeur du produit le suppose (`/opt/lcars/services/human.d`). Le discriminant est l'arbre A PLAT
+# lui-meme : une racine posee porte `services/` ; un checkout ne porte `services/` nulle part a sa
+# racine. Il se lit par un `stat` sur un ENFANT DIRECT de la racine — jamais en descendant dans
+# `runtime/` : le PREFIX de la release y est `0750 root:fleet`, et un lecteur hors du groupe
+# (un daemon) verrait « pas de rel/ » et prendrait la release pour l'arbre source (relecture
+# hostile du 2026-09-04 : `FAIL 60-deploy: manifest introuvable: /opt/lcars/runtime/etc/…`).
+product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
 PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"

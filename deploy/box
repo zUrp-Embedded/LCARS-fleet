@@ -257,6 +257,16 @@ cmd_up() {
   fi
   # --no-build : un `up` qui builde implicitement masque un build rate en repartant du cache de
   # layers. Un build rend SON verdict ; image absente → up echoue en le disant.
+  # ⚖ user 2026-09-04 (Q1) — LE PORT PUBLIE EST UNE ENTREE DU DECK. Le client OAuth2 n'enregistre que
+  # les retours qu'on lui declare, et le conteneur ne connait que son port interne (20999) : sans
+  # cette ligne, un deck publie sur 127.0.0.1:22021 rend 409 « entree non declaree » sur le chemin
+  # NOMINAL de deploy/box (le banc, lui, passait LCARS_DECK_ORIGINS a la main). L'operateur qui
+  # pose LCARS_DECK_ORIGINS garde la main ; sinon le bind publie devient l'origine.
+  if [[ -z "${LCARS_DECK_ORIGINS:-}" ]]; then
+    local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" _h _p
+    _p="${_bind##*:}"; _h="${_bind%:*}"; [[ "$_h" == "0.0.0.0" || "$_h" == "$_bind" ]] && _h=127.0.0.1
+    export LCARS_DECK_ORIGINS="http://$_h:$_p,http://localhost:$_p"
+  fi
   compose up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up (projet $PROJECT). Accès :"
@@ -444,6 +454,16 @@ cmd_status() {
     "") : ;;
     *) echo "  humains     : AUCUN humain de fleet — enrôle sur la forge, team « humans »" ;;
   esac
+  # le deck REPOND-il par la porte publiee ? 200/302 = oui ; 409 = entree non declaree (les
+  # origines OAuth2 ne portent pas ce port) ; 000 = rien n'ecoute.
+  local _bind="${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}" deck_http
+  deck_http="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${_bind/0.0.0.0/127.0.0.1}/auth/login" 2>/dev/null || echo 000)"
+  case "$deck_http" in
+    2*|3*) echo "  deck        : répond sur http://$_bind (HTTP $deck_http)" ;;
+    409)   echo "  deck        : http://$_bind rend 409 — entrée NON DÉCLARÉE au client OAuth2 (LCARS_DECK_ORIGINS) ; relance « deploy/box up »" ;;
+    000)   echo "  deck        : rien ne répond sur http://$_bind" ;;
+    *)     echo "  deck        : http://$_bind rend HTTP $deck_http" ;;
+  esac
   if [[ -n "$tampon" ]]; then
     if [[ -n "$rev" && ( "$rev" == "$tampon"* || "$tampon" == "$rev"* ) ]]; then
       echo "  image       : vérifiée ($tampon) — la révision qui tourne est celle du build"
@@ -459,6 +479,7 @@ cmd_status() {
     [[ "$boot" == awaiting-config || "$prov" == 2 || "$health" == starting ]] && rc=1
     [[ -n "$prov" && "$prov" != 0 && "$prov" != 2 ]] && rc=2
     [[ -n "$hum" && "$hum" != 0 ]] && rc=1
+    [[ "$deck_http" == 409 || "$deck_http" == 000 ]] && rc=1
   fi
   return "$rc"
 }

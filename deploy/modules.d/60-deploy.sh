@@ -125,8 +125,8 @@ apply() {
   src_sha="$(git -C "$(repo_root)" rev-parse --short HEAD 2>/dev/null || true)"
   deployed_sha="$(build_sha)"
   if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
-      && git -C "$(repo_root)" diff --quiet HEAD -- fleet 2>/dev/null && release_present; then
-    p_ok "build déployé $deployed_sha == HEAD source (fleet propre) — rien à bâtir"
+      && git -C "$(repo_root)" diff --quiet HEAD -- runtime 2>/dev/null && release_present; then
+    p_ok "build déployé $deployed_sha == HEAD source (runtime/ propre) — rien à bâtir"
     local name _mode is_link
     while read -r name _mode is_link; do
       [[ "$is_link" -eq 1 ]] || continue

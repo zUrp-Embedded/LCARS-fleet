@@ -245,9 +245,10 @@ command -v jq   >/dev/null || { err "jq absent de l'image"; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || { err "doit tourner en root (c'est lui qui cree les users)"; exit 1; }
 
-api() { # api <path>
-  curl -s -m 15 -H "Authorization: token $(tr -d '[:space:]' < "$TOKEN_FILE")" \
-       "$FORGE/api/v1$1" 2>/dev/null || true
+api() { # api <path> — le jeton passe par un fichier de config sur STDIN, jamais en argv :
+  # `/proc/<pid>/cmdline` est lisible par tout compte de la boite, toutes les 30 s, a vie.
+  printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$TOKEN_FILE")" \
+    | curl -s -m 15 -K - "$FORGE/api/v1$1" 2>/dev/null || true
 }
 
 team_id() {

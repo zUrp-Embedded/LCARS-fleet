@@ -60,8 +60,8 @@ TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh LCARS_ROLES) — a partial
-# role rename or a dropped role goes RED at the gate with the delta named (the old
-# one-direction subset check missed exactly that, twice).
+# role rename or a dropped role goes RED at the gate with the delta named (a one-direction subset
+# check misses exactly that).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
 OWNER="${LCARS_AUTHORITY_USER:-lcars-authority}"

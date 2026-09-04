@@ -149,6 +149,11 @@ read_stdin_secret() {
   printf '%s' "$v"
 }
 
+# ─── hcurl <jeton> <args curl…> — le jeton passe par stdin (-K -), JAMAIS en argv ─────────────
+# `/proc/<pid>/cmdline` est lisible par tout compte de la boite ; un `-H "Authorization: token …"`
+# y expose le jeton le temps de l'appel. MUR I2 (idiom_walls, cote installeur ET cote produit).
+hcurl() { local tok="$1"; shift; printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" | curl -K - "$@"; }
+
 cmd_config_token() {
   need_forge_url
   local tok; tok="$(read_stdin_secret)"
@@ -234,7 +239,7 @@ ensure_ops_repo() { # $1=org  $2=jeton master
 publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
   local org="$1" tok="$2" seed="$3" acct code posed=0 skipped=0
   local -a members=()
-  mapfile -t members < <(curl -sS -m 15 -H "Authorization: token $tok" \
+  mapfile -t members < <(hcurl "$tok" -sS -m 15 \
       "${FORGE_BASE_URL%/}/api/v1/orgs/$org/members" 2>/dev/null \
     | jq -r 'if type=="array" then .[].login else empty end' 2>/dev/null || true)
 
@@ -243,7 +248,7 @@ publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
   for acct in "${members[@]}"; do
     [[ -n "$acct" ]] || continue
     # DEJA PUBLIC : on ne rejoue pas un PUT pour le plaisir d'un 204. 204 = public, 404 = prive.
-    [[ "$(curl -sS -o /dev/null -w '%{http_code}' -m 10 -H "Authorization: token $tok" \
+    [[ "$(hcurl "$tok" -sS -o /dev/null -w '%{http_code}' -m 10 \
           "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null)" == "204" ]] && continue
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 -X PUT -u "$acct:$seed" \
             "${FORGE_BASE_URL%/}/api/v1/orgs/$org/public_members/$acct" 2>/dev/null || true)"
@@ -269,11 +274,11 @@ publicize_org_members() { # $1=org  $2=jeton de lecture  $3=seed
 # proprietaire — irreparable sans site-admin.
 demote_creator_from_owners() { # $1=org  $2=jeton master
   local org="$1" tok="$2" api="${FORGE_BASE_URL%/}/api/v1" tid owners
-  tid="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/orgs/$org/teams" 2>/dev/null \
+  tid="$(hcurl "$tok" -sS -m 15 "$api/orgs/$org/teams" 2>/dev/null \
         | python3 -c 'import json,sys;print(next((t["id"] for t in json.load(sys.stdin) if t["name"]=="Owners"),""))' 2>/dev/null || true)"
   [[ -n "$tid" ]] || { echo "forge-gestures: equipe Owners de $org introuvable — le master y reste (rien n'est retire a l'aveugle)" >&2; return 0; }
 
-  owners="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/teams/$tid/members" 2>/dev/null \
+  owners="$(hcurl "$tok" -sS -m 15 "$api/teams/$tid/members" 2>/dev/null \
            | python3 -c 'import json,sys;print(" ".join(m["login"] for m in json.load(sys.stdin)))' 2>/dev/null || true)"
 
   [[ " $owners " == *" $SYSTEM_ACCOUNT "* ]] || {
@@ -282,12 +287,12 @@ demote_creator_from_owners() { # $1=org  $2=jeton master
 
   # Le login du master est VARIABLE : on le demande a la forge plutot que de le deviner.
   local master
-  master="$(curl -sS -m 15 -H "Authorization: token $tok" "$api/user" 2>/dev/null \
+  master="$(hcurl "$tok" -sS -m 15 "$api/user" 2>/dev/null \
            | python3 -c 'import json,sys;print(json.load(sys.stdin).get("login",""))' 2>/dev/null || true)"
   [[ -n "$master" ]] || return 0
   [[ " $owners " == *" $master "* ]] || return 0   # deja retire : rien a dire
 
-  if curl -sS -m 15 -o /dev/null -w '%{http_code}' -H "Authorization: token $tok" \
+  if hcurl "$tok" -sS -m 15 -o /dev/null -w '%{http_code}' \
        -X DELETE "$api/teams/$tid/members/$master" 2>/dev/null | grep -q '^204$'; then
     echo "forge-gestures: $master retire des Owners de $org — il l'etait par creation, pas par decision ($SYSTEM_ACCOUNT reste proprietaire ; le site-admin est intact)"
   else
@@ -457,10 +462,10 @@ cmd_toolchain_protection() { # toolchain-protection <login-du-siege> [autres-app
   local repo="${LCARS_OPS_REPO:-fleet/lcars}" branch="tool_request"
   local approvers; approvers="$(printf '"%s",' "$@")"; approvers="[${approvers%,}]"
 
-  curl -sS -m 15 -o /dev/null     -H "Authorization: token $tok" -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
+  hcurl "$tok" -sS -m 15 -o /dev/null -H 'Content-Type: application/json'     -X POST "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections"     -d "{\"branch_name\":\"$branch\",\"required_approvals\":1,\"enable_approvals_whitelist\":true,\"approvals_whitelist_username\":$approvers,\"dismiss_stale_approvals\":true}" || true
 
   local got
-  got="$(curl -sS -m 15 -H "Authorization: token $tok"     "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections/$branch" 2>/dev/null || true)"
+  got="$(hcurl "$tok" -sS -m 15     "${FORGE_BASE_URL%/}/api/v1/repos/$repo/branch_protections/$branch" 2>/dev/null || true)"
 
   local ra ds
   ra="$(jq -r '.required_approvals // empty' <<< "$got" 2>/dev/null || true)"

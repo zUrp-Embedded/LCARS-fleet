@@ -45,9 +45,9 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 |---|---|
 | `fleet.env.template` | le catalogue des env vars de la boîte, à copier en `~/.lcars/fleet.env` |
 | `release.manifest` | ce qui part de `bin/` dans l'install (fichier, exec/noexec, `link`) — des données, pas du code |
-| `deploy-release.sh` | gate → `mix release` → pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
-| `enroll-catalogue.sh` | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |
-| `provision-role-tokens.sh` | mint idempotent des jetons de rôle sur une forge, détenus par le service d'autorité |
+| `deploy-release.sh` (vit dans `deploy/lib/`) | gate → `mix release` → pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
+| `enroll-catalogue.sh` (vit dans `deploy/lib/`) | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |
+| `provision-role-tokens.sh` (vit dans `services/`) | mint idempotent des jetons de rôle sur une forge, détenus par le service d'autorité |
 
 ## Install et deploy : `/opt/lcars/runtime`
 
@@ -57,7 +57,7 @@ launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/us
 (`fleet`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc
 le même endroit.
 
-`etc/deploy-release.sh` fait la procédure entière et s'arrête sur un gate rouge : `mix gate` sur
+`deploy/lib/deploy-release.sh` fait la procédure entière et s'arrête sur un gate rouge : `mix gate` sur
 l'arbre source, `MIX_ENV=prod mix release`, swap atomique de `rel/` (la génération précédente reste
 en `.prev`), copie atomique de chaque entrée du manifest, template d'env, perms, symlinks. Il refuse
 de tourner en root (seule la pose demande des droits ; `deploy/modules.d/60-deploy.sh` le joue
@@ -75,7 +75,7 @@ Les comptes de rôle postent en leur nom. Leurs jetons sont mintés par `provisi
 (`lcars-authority`), seul lecteur. Le runtime ne lit aucun fichier de jeton : il **demande** le
 jeton d'un compte au service (`bin/lcars-authority-ask`, socket `roles.sock`) au moment de pousser.
 Minter exige la basic auth du compte : Gitea refuse la création de jeton par en-tête, même
-site-admin (mesuré 2026-07-05). `--check` sonde sans écrire. Témoins : `test/etc/` (bats, dans le
+site-admin (mesuré 2026-07-05). `--check` sonde sans écrire. Témoins : `deploy/tests/lib/` (bats, joués par `deploy/gate.sh`) et `runtime/test/services/provision-role-tokens.bats` (joué par
 gate).
 
 ## Tests d'intégration et sondes manuelles (hors `mix gate`)

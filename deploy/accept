@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ─── LE NOM DE L'HUMAIN DE FLEET SE DEMANDE, IL NE SE RECOIT PAS ────────────────────────────────
-FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+FLEET_HUMAN="$(bash "$(dirname "${BASH_SOURCE[0]}")/../runtime/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
 
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 [[ -n "$FORGE_URL" ]] || FORGE_URL="$(cat "$PRIVATE_DIR/forge.url" 2>/dev/null || true)"
@@ -111,7 +111,8 @@ check_ci() {
 
   served="$(printf '%s' "$body" | jq -r '[.runners[]?.labels[]?.name] | unique | join(" ")' 2>/dev/null || true)"
   # Les `runs-on` du depot font autorite : les recopier ici en ferait une seconde liste.
-  want="$(grep -rhoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "$(dirname "${BASH_SOURCE[0]}")/../../.gitea/workflows" 2>/dev/null | sort -u || true)"
+  want="$(grep -rhoP '^\s*runs-on:\s*\K[a-z0-9._-]+' "$(dirname "${BASH_SOURCE[0]}")/../.gitea/workflows" 2>/dev/null | sort -u || true)"
+  [[ -n "$want" ]] || { no "CI : aucun « runs-on » lu dans .gitea/workflows — le contrôle des labels serait vide, donc faux"; return; }
   local w
   for w in $want; do
     [[ " $served " == *" $w "* ]] || missing="$missing $w"

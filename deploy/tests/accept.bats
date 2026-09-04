@@ -44,15 +44,15 @@ setup() {
   # sa propre position (`$(dirname "$BASH_SOURCE")/../services/forge-gestures.sh`). Le decor doit
   # donc porter la meme forme d'arbre, sinon on mesure un repli au lieu du chemin nominal.
   SANDBOX="$BATS_TEST_TMPDIR/tree"
-  mkdir -p "$SANDBOX/deploy" "$SANDBOX/services"
+  mkdir -p "$SANDBOX/deploy" "$SANDBOX/runtime/services"   # deploy/ est le FRERE de runtime/ (accept lit ../runtime/services)
 
   # Le corps SANS son execution finale : on appelle ses fonctions, on ne le lance pas.
   MOD="$SANDBOX/deploy/accept"
   sed "/^printf '\\\\n  %sACCEPTATION/,\$d" "$SRC" > "$MOD"
 
   printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${LCARS_BUILTIN_HUMAN:-lcars}"' \
-    > "$SANDBOX/services/forge-gestures.sh"
-  chmod 0755 "$SANDBOX/services/forge-gestures.sh"
+    > "$SANDBOX/runtime/services/forge-gestures.sh"
+  chmod 0755 "$SANDBOX/runtime/services/forge-gestures.sh"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   HOME_DIR="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME_DIR"
@@ -148,8 +148,8 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
   printf 'jeton-de-decor\n' > "$priv/forge-master.token"
   # Le decor porte ses propres workflows : `check_ci` derive les labels attendus de l'arbre, et
   # lire ceux du VRAI depot ferait dependre le temoin de la CI du jour.
-  mkdir -p "$BATS_TEST_TMPDIR/.gitea/workflows"
-  printf 'jobs:\n  a:\n    runs-on: shell\n' > "$BATS_TEST_TMPDIR/.gitea/workflows/gate.yml"
+  mkdir -p "$SANDBOX/.gitea/workflows"   # accept lit ../.gitea/workflows depuis deploy/
+  printf 'jobs:\n  a:\n    runs-on: shell\n' > "$SANDBOX/.gitea/workflows/gate.yml"
   # ⚠ `--forge-url`, PAS UNE VARIABLE D ENVIRONNEMENT : `accept` pose `FORGE_URL=""` en dur avant de
   # parser ses arguments (l. 11), donc un export est ECRASE. Le decor passe par la porte du script,
   # comme un operateur — premiere version ecrite avec `env FORGE_URL=…`, les sept temoins rougissaient
@@ -320,7 +320,7 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
 @test "autorite MUETTE : on saute en le DISANT, on n'invente pas de nom" {
   # « je ne peux pas mesurer » et « il n'y a personne » appellent deux gestes opposes.
   fleet_stub vivant
-  rm -f "$SANDBOX/services/forge-gestures.sh"
+  rm -f "$SANDBOX/runtime/services/forge-gestures.sh"
   joue
   [[ "$output" == *"indeterminable"* ]] || [[ "$output" == *"indéterminable"* ]]
   [[ "$output" != *"« lcars »"* ]]
@@ -335,4 +335,15 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
   [ -n "$ligne" ]
   [[ "$ligne" == *'/usr/bin:/bin'* ]]
   [[ "$ligne" != *':$PATH'* ]]
+}
+
+# ─── deploy/ est sorti de fleet/ : les deux chemins qui ne l'avaient pas suivi (relecture 2026-09-04)
+@test "STRUCTURE : accept trouve forge-gestures et les workflows depuis deploy/ — pas depuis l'ancien emplacement" {
+  local a="$BATS_TEST_DIRNAME/../accept"
+  grep -q '"$(dirname "${BASH_SOURCE\[0\]}")/../runtime/services/forge-gestures.sh"' "$a"
+  grep -q '"$(dirname "${BASH_SOURCE\[0\]}")/../.gitea/workflows"' "$a"
+  [ -f "$BATS_TEST_DIRNAME/../../runtime/services/forge-gestures.sh" ]
+  [ -d "$BATS_TEST_DIRNAME/../../.gitea/workflows" ]
+  # un controle des labels sur une liste VIDE est un vert creux : accept le refuse
+  grep -q 'aucun « runs-on » lu' "$a"
 }

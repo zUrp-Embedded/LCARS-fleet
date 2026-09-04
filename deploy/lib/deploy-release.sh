@@ -143,9 +143,9 @@ build_release() {
 refuse_root() {
   # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
   # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
-  # this file runs. The line once read `${1:-${EUID:-$(id -u)}}`: the `$(id -u)` was
-  # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED
-  # the effective uid can be missing, which the next reader copies into their own guard.
+  # this file runs. A `${EUID:-$(id -u)}` here would be unreachable code, and its cost is not the
+  # fork nobody saves -- it is that the line would ASSERT the effective uid can be missing, which
+  # the next reader copies into their own guard.
   local uid="${1:-$EUID}"
   [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
 }
@@ -199,7 +199,7 @@ SELF="$(readlink -f "$0")"
 # ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontiere, c'est : joue uniquement
 # a l'install, ou utilise en prod ? ». Ce script n'est joue qu'a l'install (60-deploy, le stage
 # build de l'image) : il vit dans deploy/lib/, et l'arbre source du runtime lui est DONNE —
-# `LCARS_RUNTIME_DIR`, sinon le `fleet/` a cote de `deploy/` dans un checkout. Il ne le deduit plus
+# `LCARS_RUNTIME_DIR`, sinon le `runtime/` a cote de `deploy/` dans un checkout. Il ne le deduit plus
 # de sa propre position : un script qui devine son sujet a sa position ne se deplace pas.
 RUNTIME_DIR="${LCARS_RUNTIME_DIR:-$(readlink -f "$(dirname "$SELF")/../../runtime")}"
 ETC_DIR="$RUNTIME_DIR/etc"
@@ -239,12 +239,10 @@ done < "$MANIFEST"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 # ⚠ `mix` N'EST EXIGE QUE POUR CONSTRUIRE, ET CE SCRIPT NE CONSTRUIT PAS TOUJOURS. `build_release()`
-# sait deja lire le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » —
-# mais ce garde s'executait AVANT, et refusait donc la seule livraison qui n'a rien a compiler.
-#
-# VU : `install: ERREUR — mix introuvable`, sur une machine dont le
-# paquet portait la release COMPLETE, prete a poser. Le script mourait dix lignes avant la fonction
-# qui aurait dit « rien a batir ».
+# lit le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » — et ce garde
+# le lit AUSSI : un garde inconditionnel refuserait la seule livraison qui n'a rien a compiler
+# (vu : `install: ERREUR — mix introuvable` sur une machine dont le paquet portait la release
+# COMPLETE, prete a poser — dix lignes avant la fonction qui aurait dit « rien a batir »).
 #
 # ⚠ ET LE TAMPON EST LU ICI COMME AILLEURS, PAS DEDUIT. Ce script est autonome — il ne source pas la
 # lib du rail, c'est ecrit plus bas — donc il refait le meme test que `prov_delivery` au lieu de

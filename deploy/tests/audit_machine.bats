@@ -151,3 +151,17 @@ STUB
 @test "le verbe est DECLARE dans le dispatch, sinon il n'existe pas" {
   grep -qE 'case "\$CMD" in apply\|doctor\|update\|list\|uninstall\|audit\)' "$RUNNER"
 }
+
+# ─── relecture hostile 2026-09-04 : un joker EN TETE couvrait l'univers ─────────────────────────
+# `person <human>` est une ligne de la vraie table ; son objet commence par `<`, son prefixe est
+# vide, et `[[ "$p" == ""* ]]` est vrai de tout chemin : l'audit rendait « ne porte rien » sur
+# n'importe quoi. Ce temoin joue la table AVEC cette ligne, et deux chemins bidon.
+@test "un joker en TETE (person <human>) ne couvre PAS l'univers — deux chemins bidon sortent" {
+  printf 'person    <human>   -   -   any\n' >> "$LCARS_SYSTEM_MANIFEST"
+  snap /etc/pwned-by-lcars /srv/nimportequoi
+  audit
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"/etc/pwned-by-lcars"* ]]
+  [[ "$output" == *"/srv/nimportequoi"* ]]
+  [[ "$output" != *"ne porte rien"* ]]
+}

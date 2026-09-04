@@ -45,6 +45,9 @@ cd "$(dirname "$(readlink -f "$0")")"
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
+say() { echo "pack: $*" >&2; }
+die() { echo "pack: ERREUR — $*" >&2; exit 1; }
+
 # ─── L'ARBRE DOIT ÊTRE PROPRE, ET CE REFUS A ÉTÉ PAYÉ ───────────────────────────────────────────
 #
 # ⚠ CE SCRIPT S'EXÉCUTE DEPUIS L'ARBRE DE TRAVAIL ET ARCHIVE `HEAD`. Les deux divergent dès qu'une
@@ -65,8 +68,6 @@ PUSH=1
 # reproductible depuis un commit. « Mieux vaut un echec explicite qu'un succes ambigu. »
 git diff --quiet HEAD -- 2>/dev/null || die "arbre modifie — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes differents dans un meme paquet. Commite (ou remise) d'abord."
 
-say() { echo "pack: $*" >&2; }
-die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 
 # ─── LA VERSION ─────────────────────────────────────────────────────────────────────────────────
 # ⚖ USER : un timestamp `MM-DD_HH-MM`. Il ordonne, il se lit, et il ne prétend rien sur le contenu —

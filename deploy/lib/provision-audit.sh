@@ -24,8 +24,12 @@ audit_run() {
   couvert() {
     local p="$1" d
     for d in "${declares[@]}"; do
+      # ⚠ UN JOKER EN TETE (`person <human>`) N'EST PAS UN CHEMIN, ET SON PREFIXE VIDE COUVRAIT
+      # L'UNIVERS : `[[ "$p" == ""* ]]` est vrai de tout. Relecture hostile du 2026-09-04 : deux
+      # chemins bidon rendaient « la machine ne porte rien que la table ne declare ».
+      [[ "$d" == /* ]] || continue
       case "$d" in
-        *"<"*) d="${d%%<*}"; [[ "$p" == "$d"* ]] && return 0 ;;
+        *"<"*) d="${d%%<*}"; [[ -n "$d" && "$p" == "$d"* ]] && return 0 ;;
         *)     [[ "$p" == "$d" || "$p" == "$d"/* ]] && return 0 ;;
       esac
     done

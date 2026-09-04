@@ -651,3 +651,17 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   mod check
   [[ "$output" != *"ancien arbre"* ]]
 }
+
+# ─── la copie appartient a HELPERS_OWNER, sans setgid ni ecriture groupe (relecture 2026-09-04) ──
+# `tar -xf` en root restaure proprietaire et mode de la SOURCE (le clone de l'humain, 2775) ; root
+# executerait ensuite un arbre que l'humain peut modifier. Le decor n'est pas root : on mesure les
+# MODES, que le module pose quel que soit l'appelant.
+@test "EMBEDDED : aucun fichier ni repertoire pose n'est setgid ni inscriptible par le groupe/autres" {
+  need_git_checkout
+  stub_curl "peu importe"
+  mkdir -p "$LCARS_HELPERS_DIR"
+  local sgid="$BATS_TEST_TMPDIR/src-sgid"; mkdir -p "$sgid"
+  mod apply
+  [ -d "$LCARS_HELPERS_DIR/services" ]
+  [ "$(find "$LCARS_HELPERS_DIR/services" "$LCARS_HELPERS_DIR/deploy" -perm /2022 2>/dev/null | wc -l)" -eq 0 ]
+}

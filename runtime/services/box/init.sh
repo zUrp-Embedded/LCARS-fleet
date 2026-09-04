@@ -243,12 +243,23 @@ secrets_import() {
   local dir="${LCARS_SECRETS_DIR:-/run/secrets}" pair src dst name
   for pair in "forge_master_token:$LCARS_MASTER_TOKEN_FILE" "forge_seed_password:$LCARS_FORGE_SEED_FILE"; do
     name="${pair%%:*}"; src="$dir/$name"; dst="${pair#*:}"
+    [[ -e "$src" ]] || continue
+    # Le montage arrive avec l'uid et le mode de l'HOTE (l'operateur, uid 1000 = souvent le siege) :
+    # une fois importe dans le prive (0600 autorite), il se FERME (0000) — root le relit au boot
+    # suivant, le siege ne le lit plus (relecture hostile du 2026-09-04 : LISIBLE sous le siege).
+    if [[ ! -r "$src" ]]; then p_ok "secret $name : montage ferme, deja importe"; continue; fi
     [[ -s "$src" ]] || continue
-    if [[ -s "$dst" ]] && cmp -s "$src" "$dst"; then p_ok "secret $name : deja en place ($dst)"; continue; fi
+    if [[ -s "$dst" ]] && cmp -s "$src" "$dst"; then
+      chmod 0000 "$src" 2>/dev/null || true
+      p_ok "secret $name : deja en place ($dst) — montage ferme"; continue
+    fi
     ensure_dir "$LCARS_PRIVATE_DIR" 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
-    write_atomic "$dst" 0600 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" < "$src" \
-      && p_chg "secret $name importe du compose → $dst ($LCARS_AUTHORITY_USER seul)" \
-      || p_fail "secret $name : import impossible → $dst"
+    if write_atomic "$dst" 0600 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" < "$src"; then
+      chmod 0000 "$src" 2>/dev/null || true
+      p_chg "secret $name importe du compose → $dst ($LCARS_AUTHORITY_USER seul) — montage ferme"
+    else
+      p_fail "secret $name : import impossible → $dst"
+    fi
   done
 }
 

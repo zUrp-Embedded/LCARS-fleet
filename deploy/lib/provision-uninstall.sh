@@ -161,7 +161,7 @@ uninstall_run() {
       preserved "$_o" && continue
       # `preserved` N'EST PAS UN PERIMETRE : il protege ce qu'on a pense a y ecrire. Voir `sous_home`.
       sous_home "$_o" && { refuses_home_j+=("$_o"); continue; }
-      _known=0
+      local _k; _known=0
       for _k in ${files[@]+"${files[@]}"} ${dirs[@]+"${dirs[@]}"}; do
         [[ "$_o" == "$_k" || "$_o" == "$_k"/* ]] && { _known=1; break; }
       done

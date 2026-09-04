@@ -41,7 +41,7 @@ ci-dessous. Il n'y a pas de troisième cas — et la racine de `test/` ne porte 
 | chemin | contenu | joué par |
 |---|---|---|
 | `test/fleet/**`, `test/mix/**` | ExUnit, miroir de `lib/` | `mix test` |
-| `test/bin/`, `test/etc/`, `test/services/` | bats et python des scripts de `runtime/bin`, `runtime/etc`, `runtime/services` | `shell_gate` |
+| `test/bin/`, `test/services/` | bats et python des scripts de `runtime/bin`, `runtime/services` (`etc/` ne porte plus de script : ses outils vivent dans `deploy/lib/`, testés par `deploy/tests/lib/`` | `shell_gate` |
 | `test/crosscutting/` | témoins sans cible unique (scan du dépôt entier) | `shell_gate` |
 | `test/integration/` | multi-cible, hors-mix | manuel |
 | `test/probes/` | sondes manuelles (`gate-r*.sh`), hors `mix gate` — leurs en-têtes le disent | manuel |

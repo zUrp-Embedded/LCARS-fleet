@@ -43,9 +43,11 @@ setup() {
   bash "$SUT" secrets >/dev/null
   run bash "$SUT" secrets
   [ "$status" -eq 0 ]
-  [[ "$output" == *"deja en place"* ]]
+  # le montage a ete FERME au premier import : le second passage le dit, sans rien relire ni reposer
+  [[ "$output" == *"deja en place"* || "$output" == *"montage ferme, deja importe"* ]]
   [[ "$output" != *"POSÉ"* ]]
-  printf 'tok-2\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  # une rotation cote hote est un NOUVEAU fichier (mv), pas une ecriture dans l'ancien — que l'init a ferme
+  rm -f "$LCARS_SECRETS_DIR/forge_master_token"; printf 'tok-2\n' > "$LCARS_SECRETS_DIR/forge_master_token"
   run bash "$SUT" secrets
   [ "$(cat "$LCARS_PRIVATE_DIR/forge-master.token")" = tok-2 ]
   [[ "$output" == *"POSÉ"* ]]
@@ -55,4 +57,18 @@ setup() {
   grep -qE '^\s*secrets_import\s*$' <(sed -n '/^cmd_apply()/,/^}/p' "$SUT")
   local order; order="$(sed -n '/^cmd_apply()/,/^}/p' "$SUT" | grep -nE 'secrets_import|seat_resolve' | cut -d: -f1 | tr '\n' ' ')"
   [[ "$order" =~ ^([0-9]+)\ ([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -lt "${BASH_REMATCH[2]}" ]
+}
+
+@test "secrets : une fois importe, le MONTAGE se ferme (0000) — le siege, uid de l hote, ne le lit plus" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout : la fermeture ne se mesure que sans privilege"
+  printf 'tok-master\n' > "$LCARS_SECRETS_DIR/forge_master_token"
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$LCARS_SECRETS_DIR/forge_master_token")" = 0 ]
+  [[ "$output" == *"montage ferme"* ]]
+  # un second passage ne se plaint pas et ne rouvre rien
+  run bash "$SUT" secrets
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"montage ferme, deja importe"* ]]
+  [ "$(cat "$LCARS_PRIVATE_DIR/forge-master.token")" = tok-master ]
 }

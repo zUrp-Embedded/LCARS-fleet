@@ -76,7 +76,7 @@ done
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
 # Le depot par defaut : ce script vit dans deploy/lib/ (Q3 : joue a l'install
-# seulement), donc le runtime source est le fleet/ a cote de deploy/ dans un checkout.
+# seulement), donc le runtime source est le runtime/ a cote de deploy/ dans un checkout.
 [[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../runtime" && pwd)"
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
@@ -100,11 +100,7 @@ elif [[ -n "$RELEASE" ]]; then
   # POURQUOI ELLE EXISTE : les deux autres portes couvrent la boite (`--image`, docker) et le
   # poste en livraison SOURCE (`--repo`, mix). Un poste en livraison BINAIRE n'a ni l'un ni
   # l'autre — pas de mix, c'est le geste R5 qui le veut ; pas d'image, c'est un poste. Il a la
-  # release, et personne ne savait la lire.
-  #
-  # Le mur etait connu et ecrit plus haut : « le banc est mort dessus sur la premiere machine
-  # neuve (`mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
-  # ne vaut que pour qui a docker.
+  # release (vu : `mix: ABSENT` sur une machine neuve).
   #
   # ⚠ MEME FONCTION, MEME AUTORITE : `Fleet.Roster.eval_tfvars`. La regle de placement (siege /
   # juge / ecrivain) reste en Elixir, testee — elle n'est reecrite ni ici, ni en jq, ni ailleurs.

@@ -358,6 +358,11 @@ BLOC
     ( cd "$(product_tree)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
       | ( cd "$EMBEDDED_FLEET/$n.new" && tar -xf - ) \
       || { p_fail "copie ratée: $n"; verdict_apply; }
+    # ⚠ `tar -xf` EN ROOT RESTAURE LE PROPRIETAIRE ET LE MODE DE LA SOURCE (le clone de l'humain :
+    # `bob:bob 2775`), et root execute ensuite ce contenu (convergeur, appelants minces, provision).
+    # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
+    chown -R "$HELPERS_OWNER" "$EMBEDDED_FLEET/$n.new" 2>/dev/null || true
+    chmod -R g-s,go-w "$EMBEDDED_FLEET/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n"
     mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }
@@ -407,6 +412,11 @@ BLOC
     ( cd "$(repo_root)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "${_only[@]}" . ) \
       | ( cd "$HELPERS_DIR/$n.new" && tar -xf - ) \
       || { p_fail "copie ratée: $n"; verdict_apply; }
+    # ⚠ `tar -xf` EN ROOT RESTAURE LE PROPRIETAIRE ET LE MODE DE LA SOURCE (le clone de l'humain :
+    # `bob:bob 2775`), et root execute ensuite ce contenu (convergeur, appelants minces, provision).
+    # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
+    chown -R "$HELPERS_OWNER" "$HELPERS_DIR/$n.new" 2>/dev/null || true
+    chmod -R g-s,go-w "$HELPERS_DIR/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n"
     mv "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }

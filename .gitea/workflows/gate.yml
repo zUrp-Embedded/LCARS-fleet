@@ -178,6 +178,7 @@ jobs:
       # La même borne, pour la même raison : un gate sans fin ne rend pas un verdict tardif, il n'en
       # rend aucun. Mesure du 2026-09-03 sur ce poste : 1302 cas en ~7 min.
       - name: Gate de l'installeur (la chaîne d'install, bats)
+        working-directory: .
         run: timeout --signal=TERM --kill-after=60s 20m bash deploy/gate.sh
   # ─── L'IMAGE ET LA DOC SE BÂTISSENT EN CI (DI-08, ⚖ user 2026-09-04) ────────────────────────
   #

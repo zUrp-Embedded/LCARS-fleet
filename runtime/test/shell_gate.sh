@@ -235,7 +235,12 @@ if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
       # 238 portent un @moduledoc, donc tout marqueur de presence serait vert par construction. Le
       # motif complet est dans l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
-  done < <(git -C "$REPO_ROOT" ls-files fleet)
+  done < <(git -C "$REPO_ROOT" ls-files runtime)
+  # ⚠ LA POPULATION FAIT PARTIE DE L INSTRUMENT. `ls-files fleet` a rendu VIDE le jour ou l arbre est
+  # devenu runtime/, et le pas imprimait « OK » apres avoir lu zero fichier (relecture hostile,
+  # 2026-09-04). Un pas qui n a rien lu n a rien mesure.
+  [[ "$(git -C "$REPO_ROOT" ls-files runtime | grep -cE '\.(sh|py)$')" -ge 50 ]] \
+    || { echo "ECHEC: GO-7 — moins de 50 fichiers shell/python lus sous runtime/ : l instrument est casse" >&2; exit 1; }
 
   if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
     echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous runtime/ :" >&2
