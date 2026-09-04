@@ -140,16 +140,17 @@ stub_bats() { # stub_bats <rc rendu>
 }
 
 go7_shape() { # go7_shape <fichier> <fonction> — la FORME d'un predicat : fenetre lue, drapeaux, motifs
-  # `echo "$h" | grep` et `grep <<<"$h"` sont une ecriture, pas un sens : on ne garde que ce qui
-  # decide — chaque `head -N` et chaque `grep -q<drapeaux> <motif>`, drapeaux tries.
+  # `echo "$h" | grep`, `grep <<<"$h"` et `[[ -n "$(… | grep …)" ]]` (capture puis test, DI-13)
+  # sont une ecriture, pas un sens : on ne garde que ce qui decide — chaque `head -N` et chaque
+  # `grep -<drapeaux> <motif>`, drapeaux tries, `q` retire (c est la forme du test, pas le motif).
   local line flags pat
   sed -n "/^$2()/,/^}/p" "$1" \
-    | grep -oE "head -[0-9]+|grep -q[A-Za-z]*[[:space:]]+('[^']*'|\"[^\"]*\")" \
+    | grep -oE "head -[0-9]+|grep -[A-Za-z]+[[:space:]]+('[^']*'|\"[^\"]*\")" \
     | while IFS= read -r line; do
         case "$line" in
           head*) printf '%s\n' "$line" ;;
-          *) flags="${line#grep -}"; flags="${flags%%[[:space:]]*}"
-             pat="${line#grep -"$flags"}"; pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat:1:${#pat}-2}"
+          *) flags="${line#grep -}"; flags="${flags%%[[:space:]]*}"; flags="${flags//q/}"
+             pat="${line#grep -*[[:space:]]}"; pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat:1:${#pat}-2}"
              printf 'grep -%s %s\n' "$(printf '%s' "$flags" | fold -w1 | sort | tr -d '\n')" "$pat" ;;
         esac
       done
