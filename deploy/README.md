@@ -18,7 +18,9 @@ FERMÉS et épinglés :
 - *`runuser` absent en Docker* — le Dockerfile installe `util-linux-extra` en nommant la panne :
   « sans ce paquet l'entrypoint casse au premier module humain ».
 
-Et `deploy/tests/*.bats` (13 suites) sont jouées par `shell_gate`, donc par `mix gate`.
+Et `deploy/tests/*.bats` sont joués par `deploy/gate.sh`, la porte de l'installeur — qui tient aussi
+son plancher shellcheck et ses en-têtes déclaratifs. `mix gate` ne lit plus `deploy/` (⚖ user
+2026-09-04 : « chacun joue son gate, on les split »).
 **Référencé par** : `install.sh` (racine)
 
 ## Ce que cette couche porte, et ce qu'elle ne porte plus
