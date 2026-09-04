@@ -31,20 +31,18 @@ set -euo pipefail
 # temoin doit pouvoir exercer ce script sans etre root ni ecrire dans /opt/lcars/var/tokens. Les defauts
 # sont les chemins reels ; aucun appelant de production ne les passe.
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
-# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER. Son nom etait ecrit en dur dans les deux
-# projections de catalogue (`git -c user.name=...`), donc le renommer demandait de les retrouver.
-# Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
+# LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER (les deux projections de catalogue le lisent
+# ici, jamais en dur). Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
 # chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
 # une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
 # Le compte integre, resolu UNE fois : le `TF_VAR_builtin_human` plus bas et le verbe
 # `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-…}` dans le meme fichier seraient
 # trois autorites pour un nom, et c'est celle qu'on ne relit pas qui gagne.
 #
-# ⚠ VIDE PAR DEFAUT, ET C'EST LE CANON (⚖ user 2026-08-30). Il valait `lcars` : tout deploiement
-# semait donc un compte humain, avec un mot de passe pose et ANNONCE. Or aucun deploiement de
+# ⚠ VIDE PAR DEFAUT, ET C'EST LE CANON (⚖ user 2026-08-30). Un defaut nomme semerait un compte
+# humain sur tout deploiement, avec un mot de passe pose et ANNONCE. Or aucun deploiement de
 # TRAVAIL ne fabrique d'humain — le rail pose les autorites (le siege, l'admin de forge, le master
-# token) et les personnes s'enrolent par la page d'inscription, sous leur nom. Le commentaire
-# ci-dessous le disait deja sans en tirer la consequence : « le siege BUILT-IN de DEMONSTRATION ».
+# token) et les personnes s'enrolent par la page d'inscription, sous leur nom.
 #
 # Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
 # ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
@@ -53,7 +51,7 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # un appelant qui sait que son deploiement est jetable — `--disposable` sur la porte, le drapeau
 # traverse jusqu'a `48-forge-host` — demande les annexes de demonstration sans avoir a decider QUI
 # elles sont. Ce fichier reste le seul declarant du nom ; deux temoins de `forge_host_reach.bats` le
-# gardent, et ils ont attrape une premiere version qui ecrivait ce defaut dans le module appelant.
+# gardent contre un second defaut ecrit dans le module appelant.
 #
 # L'ORDRE EST LOAD-BEARING : un nom EXPLICITE l'emporte toujours sur le defaut de la destination.
 # L'inverse ferait ignorer en silence ce que l'operateur a tape.
@@ -497,7 +495,7 @@ cmd_runner_token() {
 }
 
 # ─── INSTALLER UN CATALOGUE ─────────────────────────────────────────────────────────────────────
-# ⚠ CE FICHIER NE GATE PLUS RIEN, ET IL NE DOIT PAS ESSAYER : l'autorisation est prise EN AMONT, par
+# ⚠ CE FICHIER NE GATE RIEN, ET IL NE DOIT PAS ESSAYER : l'autorisation est prise EN AMONT, par
 # le service qui l'appelle. Un second gate ici serait une seconde verite sur la meme question.
 #
 # ⚠ ET CE SERVICE N'EST PAS ROOT. Il tourne sous `lcars-authority` — assez pour ouvrir les secrets
@@ -525,8 +523,8 @@ cmd_install() {
   #
   #    ⚠ LE JETON SYSTEME, PAS LE MASTER, ET CE N'EST PAS UNE PREFERENCE : la porte tourne en
   #    `nobody` parce que c'est une LECTURE, et le jeton master lui est illisible. Le refus de
-  #    permission remontait alors en « pas de source installable » — le mauvais diagnostic pour le
-  #    mauvais probleme. Un depot de catalogue est public, donc le jeton systeme suffit ; donner le
+  #    permission remonterait alors en « pas de source installable » — le mauvais diagnostic pour
+  #    le mauvais probleme. Un depot de catalogue est public, donc le jeton systeme suffit ; donner le
   #    site-admin a une lecture lui accorderait un pouvoir sans usage.
   #
   # ⚠ LA VALEUR PART PAR L'ENVIRONNEMENT : `/proc/<pid>/environ` n'est lisible que par le

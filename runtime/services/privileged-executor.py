@@ -4,9 +4,9 @@
 # STARDATE: 2026-08-25
 # STATUS: PROTO-V2 — l'UNIQUE process root de cette machine, et il ne detient RIEN
 #
-# Il remplace un `%fleet ALL=(root) NOPASSWD:` — un chemin `groupe -> root` direct, sur un groupe que
-# `human-converger` remplit depuis la forge toutes les trente secondes. Le droit d'executer du code
-# en root avait donc la peremption d'un cache, et le retirer demandait un `pkill`.
+# PAS DE `%fleet ALL=(root) NOPASSWD:` : un chemin `groupe -> root` direct, sur un groupe que
+# `human-converger` remplit depuis la forge toutes les trente secondes, donne au droit d'executer du
+# code en root la peremption d'un cache, et le retirer demande un `pkill`.
 #
 # Ce service ouvre ZERO fichier de secret, et `MUR P1` le tient.
 #

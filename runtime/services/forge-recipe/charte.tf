@@ -34,7 +34,7 @@ resource "terraform_data" "charte" {
   # NOM, puisqu'ils vivent dans un autre etat. La pose reste correcte sans l'arete : le script
   # re-asserte la charte a chaque passe et compte un compte absent comme hors-perimetre, pas comme
   # un echec — un catalogue tiers n'a aucune raison d'avoir les comptes qu'on a dessines.
-  # ⚠ `admiral_username` A DISPARU DE CETTE LISTE, ET DU SCRIPT. Le login du master ne se PARAMETRE
+  # ⚠ PAS DE `admiral_username` DANS CETTE LISTE, NI DANS LE SCRIPT. Le login du master ne se PARAMETRE
   # pas : une instance Gitea a toujours un premier compte, `id = 1`, site-admin par construction —
   # le script le resout lui-meme, pour le badge ET pour le nom du siege, d'une seule resolution
   # (⚖ arbitrage 2026-08-16 : « le compte master se DERIVE »).

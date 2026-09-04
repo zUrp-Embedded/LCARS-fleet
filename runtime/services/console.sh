@@ -49,10 +49,10 @@ say() { echo "[lcars-console] $*"; }
 
 command -v ttyd >/dev/null || { echo "console.sh: ttyd absent de l'image" >&2; exit 1; }
 
-# ⚠ PLUS AUCUN PORT, ET CE N'EST PAS UN DURCISSEMENT MAIS UN CHANGEMENT DE TOPOLOGIE. Tant que ttyd
-# ecoutait sur `-p <port> -i 0.0.0.0`, il existait une SECONDE ORIGINE : quiconque atteignait la
-# loopback de l'hote obtenait un shell inscriptible sous l'identite de l'humain, dans un conteneur
-# qui porte SYS_ADMIN. Republier un port ici recreerait ce chemin, que personne ne garde.
+# ⚠ AUCUN PORT, ET CE N'EST PAS UN DURCISSEMENT MAIS UNE TOPOLOGIE. Un ttyd sur `-p <port>
+# -i 0.0.0.0` serait une SECONDE ORIGINE : quiconque atteint la loopback de l'hote obtiendrait un
+# shell inscriptible sous l'identite de l'humain, dans un conteneur qui porte SYS_ADMIN. Publier un
+# port ici creerait ce chemin, que personne ne garde.
 #
 # LA GARDE EST LE REPERTOIRE, PAS LE FICHIER : `connect(2)` exige de traverser CHAQUE repertoire du
 # chemin, ce qui est plus sur que de courir apres le mode d'un fichier que ttyd recree a chaque
@@ -351,8 +351,9 @@ if [[ "$ALL" -eq 1 ]]; then
   # eu sa console doit laisser une trace avec son motif ; un silence ferait croire a un oubli.
   while read -r login _uid _home; do
     [[ -n "$login" ]] || continue
-    # `n=$(( … ))` rend toujours 0, donc le `||` ne se declenche que sur `launch_one` — mais la
-    # forme est celle qui a fait mentir `p_ok` et `say_ok` dans ce meme lot. On la retire partout.
+    # `if … then … else … fi`, pas `launch_one && n=$(( … )) || say` : `n=$(( … ))` rend toujours
+    # 0, donc un `||` derriere ne se declencherait que sur `launch_one` — une forme qui fait mentir
+    # le compteur le jour ou l'incrementation change.
     if launch_one "$login"; then n=$(( n + 1 )); else say "console de $login NON lancee"; fi
   done < <("$HUMANS_SH" --verbose)
 

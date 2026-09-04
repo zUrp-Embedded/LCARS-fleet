@@ -2,14 +2,14 @@
 # SOURCE: runtime/services/admiral/skills/system-issues/list.sh
 # AUTHOR: bob
 # STARDATE: 2026-08-19
-# STATUS: PROTO-V2 — la boite de reception d'admiral (05 §7, chantier admiral)
+# STATUS: PROTO-V2 — la boite de reception d'admiral
 #
 # DEUX LECTURES, RIEN D'AUTRE : les issues error_system du depot ops, et les PR ouvertes vers la
 # branche protegee. Ce script LISTE — il n'approuve rien, ne ferme rien, ne pose aucun label.
 # La signature d'une PR d'outillage est un clic d'admin sur la forge, jamais un geste d'agent.
 #
 # ⚠ PAS de filtre `lcars-awaits-toolchain` ici : ce verrou vit sur les issues des WORK-ITEMS,
-# dans les depots PROJET — le chercher sur le depot ops rendrait toujours rien (05 §7, corrige).
+# dans les depots PROJET — le chercher sur le depot ops rendrait toujours rien.
 
 set -euo pipefail
 
@@ -19,21 +19,17 @@ FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || 
 # `private=false, internal=false`, et ses deux points d'entree (`issues`, `pulls`) repondent 200 en
 # ANONYME. Aucune de ces lectures n'est site-admin.
 #
-# Il tenait le master parce qu'il etait la, pas parce que son geste l'exige — et le tenir imposait
-# que le fichier reste lisible par un humain, ce qui est exactement l'ACL qu'on retire. Le compte
-# systeme est l'identite juste : c'est avec lui que la boite lit sa forge. Donner un site-admin a
-# une lecture serait lui accorder un pouvoir dont elle n'a aucun usage — meme argument, et meme
-# formulation, que `cmd_install` dans `forge-gestures.sh`.
+# Tenir le master parce qu'il est la imposerait que son fichier reste lisible par un humain — l'ACL
+# que la boite refuse. Le compte systeme est l'identite juste : c'est avec lui que la boite lit sa
+# forge. Donner un site-admin a une lecture serait lui accorder un pouvoir dont elle n'a aucun usage
+# — meme argument, et meme formulation, que `cmd_install` dans `forge-gestures.sh`.
 #
-# ─── ET IL NE LE LIT PLUS : IL LE DEMANDE ───────────────────────────────────────────────────────
+# ─── ET IL NE LIT PAS LE JETON : IL LE DEMANDE ──────────────────────────────────────────────────
 #
-# Le chantier precedent avait rattache ce script au jeton systeme et s'etait arrete la : le fichier
-# etait `0640 root:fleet`, et l'humain du siege le lisait parce que le convergeur l'avait mis dans le
-# groupe. L'ACL etait donc encore une PROJECTION de l'equipe `humans` de la forge, avec trente
-# secondes de peremption. Le refus, lui, disait « il est lisible par le groupe fleet » — une phrase
-# qui a cesse d'etre vraie avec ce chantier-ci, et qui aurait envoye chercher une adhesion.
-#
-# La question se pose maintenant a `roles.sock`. Le service la porte a la forge A L'INSTANT du geste.
+# Un fichier `0640 root:fleet` que le siege lirait par le groupe serait encore une PROJECTION de
+# l'equipe `humans` de la forge, avec trente secondes de peremption — et un refus qui dirait « il
+# est lisible par le groupe fleet » enverrait chercher une adhesion. La question se pose a
+# `roles.sock` : le service la porte a la forge A L'INSTANT du geste.
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
@@ -52,11 +48,10 @@ TOKEN="$("$AUTHORITY_ASK" "$SYSTEM_ACCOUNT")" \
 
 api="$FORGE_URL/api/v1"
 
-# ⚠ `-K -` ET PAS `-H`, ET C'EST UNE CORRECTION AU PASSAGE. L'en-tete etait construit dans un
-# tableau passe a `curl` en ARGV : le jeton systeme etait donc lisible dans `/proc/<pid>/cmdline`
-# par n'importe quel process de la boite, pendant toute la duree de l'appel. Ce chantier ferme un
-# fichier `0640` pour que le jeton ne traine pas ; le laisser dans une ligne de commande annulerait
-# le geste au moment meme ou il s'exerce.
+# ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV met le jeton systeme dans
+# `/proc/<pid>/cmdline`, lisible par n'importe quel process de la boite pendant toute la duree de
+# l'appel — demander le jeton a un service pour le laisser ensuite dans une ligne de commande
+# annulerait le geste au moment meme ou il s'exerce.
 #
 # `-K -` lit la configuration sur stdin — le secret passe par un tube, jamais par argv ni par un
 # fichier. La sortie de `curl` reste sur stdout, donc les `| jq` en aval ne changent pas.
