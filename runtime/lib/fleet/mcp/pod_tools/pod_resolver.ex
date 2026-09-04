@@ -6,11 +6,10 @@ defmodule Fleet.MCP.PodTools.PodResolver do
   et la reponse doit etre la meme. Le commentaire de `Probe` l'ecrivait deja : « deux resolveurs de
   la meme identite de canal donneraient deux avis sur *a quel depot ce pod est lie* ».
 
-  ⚠ ET LES DEUX MODULES PORTAIENT POURTANT CHACUN SA COPIE. Meme clef de configuration
-  (`:mcp_pod_resolver`), mais deux fonctions de repli distinctes — `default_pod_resolver/1` et
-  `default_resolver/1` — aux corps identiques au nom pres. Chacune etait juste ; changer l'une sans
-  l'autre aurait laisse la seconde repondre a l'ancienne facon, EN SILENCE, puisque le defaut ne
-  s'exerce que lorsque la configuration est absente : jamais en test, toujours en production.
+  ⚠ UNE SEULE FONCTION DE REPLI, ICI. Deux copies du defaut chez les deux lecteurs, sous une meme
+  clef (`:mcp_pod_resolver`), laisseraient l'une repondre a l'ancienne facon quand l'autre change,
+  EN SILENCE, puisque le defaut ne s'exerce que lorsque la configuration est absente : jamais en
+  test, toujours en production.
 
   Meme forme que `Delegation.ForgeClient` : le module qui declare le contrat est celui qui porte le
   defaut, et les appelants ne connaissent que `resolved/0`.
@@ -24,11 +23,10 @@ defmodule Fleet.MCP.PodTools.PodResolver do
   information pour dialyzer. Les clefs ci-dessous sont celles dont les appelants de cette couture
   DEPENDENT reellement ; les enumerer ici est ce qui donne prise a `:pattern_match`.
 
-  ⚠ ET LA PREMIERE REDACTION DE CE TYPE OMETTAIT `:repo_id`. Dialyzer a immediatement nomme la
-  clause devenue inatteignable dans `Probe.identity/2` — celle qui traduit un identifiant numerique
-  en nom complet via la forge, pour les roles dont le pod porte `repo_id` et pas `repo`. Les deux
-  consommateurs de cette couture n'attendaient donc PAS la meme forme : `Delegation` lit
-  `:role`/`:repo`, `Probe` lit `:repo`/`:repo_id`. Declarer le contrat est ce qui l'a montre.
+  ⚠ `:repo_id` EST DANS LE TYPE, et il y reste : sans lui dialyzer declare inatteignable la clause
+  de `Probe.identity/2` qui traduit un identifiant numerique en nom complet via la forge — le cas
+  des roles dont le pod porte `repo_id` et pas `repo`. Les deux consommateurs de cette couture
+  n'attendent PAS la meme forme : `Delegation` lit `:role`/`:repo`, `Probe` lit `:repo`/`:repo_id`.
   """
   @type identity :: %{
           optional(:role) => String.t(),

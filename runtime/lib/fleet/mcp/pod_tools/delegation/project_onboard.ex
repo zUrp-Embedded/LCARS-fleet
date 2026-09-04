@@ -4,21 +4,19 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   `:project_onboard` runtime seam, consumed by `Fleet.MCP.PodTools.Delegation`
   (ONBOARDING channel, tool `project_create`).
 
-  ## Why a RUNTIME seam (and not a compile dep)
+  ## Why a seam at all
 
-  `fleet_pilot` sits ABOVE `fleet_mcp` in the boundary ladder: a compile dep
-  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden (the boundary compiler
-  would reject it). The module is resolved at
-  RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
-  dep, no cycle). Assumed UPWARD runtime seam (mcp → pilot).
+  `Fleet.Project` is a compile dep of this domain (`lib/fleet/mcp.ex`); the module is still
+  resolved at RUNTIME (`resolved/0`: app-env + default) so a test injects a stub, and
+  `Gate.conforming/2` refuses a stub that lies about the contract.
 
   ## Implementations
 
-    * `Fleet.Project.Onboard` — the REAL impl (canonical default: forge repo +
-      three faces `main`/`ops`/`workshop` + scaffold + push). It lives in
-      `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt this
-      behaviour and stays DUCK-TYPED with a cross-reference comment; the callback
-      type is aligned on its `@spec onboard/2` (`result()`).
+    * `Fleet.Project.Onboard` — the REAL impl (canonical default: forge repo + three faces
+      `main`/`ops`/`workshop` + scaffold + push). It lives in `Fleet.Project`, which sits BELOW
+      `Fleet.MCP` and does not depend on it: it CANNOT adopt this behaviour and stays DUCK-TYPED
+      with a cross-reference comment; the callback type is aligned on its `@spec onboard/2`
+      (`result()`).
     * Test stub `Fleet.MCP.PodToolsTest.StubOnboard` — same app → adopts the
       behaviour (the compiler checks conformance).
   """
@@ -26,10 +24,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @doc """
   Onboards the project `name` (kebab-case slug). `opts` consumed by the real default:
   `:org`, `:description`, `:pitch` (cf. `Fleet.Project.Onboard.onboard/2`).
-  The result MUST carry the 4 keys — `Delegation.do_create_project/2` pattern-matches
-  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE, and the fourth
-  was missing while the runtime already produced it: the wire announced two of the three trees it
-  had just created, so a caller could not name the doc face at all.
+  The result MUST carry the 4 keys — `Portfolio` pattern-matches
+  `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly. ONE KEY PER FACE: a wire that
+  announces two of the three trees it just created leaves a caller unable to name the third.
   """
   @callback onboard(name :: String.t(), opts :: keyword()) ::
               {:ok,
@@ -44,7 +41,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @doc """
   Imports an EXISTING repo `full_name` (`"owner/name"`) into the agent machine — WITHOUT creating
   nor scaffolding `main` (content intact). Same 4 return keys as `onboard/2`:
-  `Delegation.do_import_project/2` pattern-matches
+  `Portfolio` pattern-matches
   `%{repo: _, project_dir: _, work_dir: _, doc_dir: _}` strictly, identical to the onboarding
   channel.
   """
@@ -59,8 +56,8 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               | {:error, term()}
 
   @doc """
-  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb (reorg
-  2026-07-19): no forge/disk write, ensures the project's per-project architect. Same 4 return
+  OPENS (relaunches) a project ALREADY on the machine — the third portfolio verb: no forge/disk
+  write, ensures the project's per-project architect. Same 4 return
   keys as `onboard/2` (+ `architect`, the ensure outcome). Dirs absent →
   `{:error, {:not_on_machine, _}}` (open never creates — that is `create`/`import`'s job).
   """
@@ -77,17 +74,17 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @doc """
   DELETES a project — general teardown (architect pod + forge repo + the three faces). `opts[:force]` bypasses
   the anti-work safety guard (a DELIBERATE end-of-life delete). Result carries `repo` (+ `forge`/
-  `architect` status keys); `Delegation.do_delete_project/2` reads `%{repo: _}`.
+  `architect` status keys and `local`, one verdict per face); `Portfolio` reads `%{repo: _}`.
   """
   @callback delete_project(full_name :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
   @doc """
   ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:
-  publishes the existing local pair (empty org repo, labels seeded, origin set, main + ops
-  pushed, protection, architect). `name` = the dirs' basename; `opts` may relay the criticality
-  declaration (same keys as `onboard/2`). The local content is never scaffolded over. Same 3
-  return keys as `onboard/2` (+ `architect`).
+  publishes the existing local faces (empty org repo, labels seeded, origin set, main and the
+  writer faces pushed, protection, architect). `name` = the dirs' basename; `opts` carries `:org`
+  (the catalogue, required) and may relay the criticality declaration (same keys as `onboard/2`).
+  The local content is never scaffolded over. Same 4 return keys as `onboard/2` (+ `architect`).
   """
   @callback adopt_project(name :: String.t(), opts :: keyword()) ::
               {:ok,
@@ -104,7 +101,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   history into a system scratch, runs the ADOPTION GATE (foreign `.claude/` refused en bloc,
   every `CLAUDE.md` through the reception filter), normalizes the default branch to `main`
   (half-migrated master+main → named refusal), creates the org repo and hands over to the
-  standard import leg. One-way — the external origin is left behind. Same 3 return keys as
+  standard import leg. One-way — the external origin is left behind. Same 4 return keys as
   `onboard/2` (+ `architect`).
   """
   @callback import_external(url :: String.t(), name :: String.t(), opts :: keyword()) ::
@@ -195,8 +192,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   @callback reset_ci_rail(full_name :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, term()}
 
-  # Canonical default: the real onboarding sequence on the fleet_pilot side. Literal atom
-  # (not a literal remote call) → no compile-time dep. Set HERE once.
+  # Canonical default: the real onboarding sequence, `Fleet.Project` side. Set HERE once.
   @default_onboard Fleet.Project.Onboard
 
   @doc """

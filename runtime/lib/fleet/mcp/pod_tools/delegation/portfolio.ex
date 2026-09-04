@@ -53,8 +53,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   #
   # `force: true` already made the gesture deliberate, and deliberate is not the same as available.
   # This is the only irreversible act in the whole tool surface — it destroys the forge repo AND
-  # both worktrees — and it was permanently reachable by any onboarder pod, on a target that is a
-  # free argument. Nothing in the fleet's normal life needs it: end-of-life teardown is an operator
+  # the three local faces — reachable by any onboarder pod, on a target that is a free argument. Nothing in the fleet's normal life needs it: end-of-life teardown is an operator
   # decision, not an agent one.
   #
   # Same shape as the bench's `--human-admin`: a real power, off by default, whose cost is written
@@ -89,10 +88,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   @doc """
   Lists the projects on this box (pure read).
 
-  The onboarder could create, open, import, adopt, close, revise AND DELETE a project, and had no
-  way to enumerate them: the most destructive surface in the fleet, aimed by a name it could only
-  have been told. Zero occurrences of any listing — not a filter to widen, a half that was never
-  built.
+  The onboarder can create, open, import, adopt, close, revise AND DELETE a project; without a
+  listing, the most destructive surface in the fleet is aimed by a name it can only have been told.
 
   Straight pass-through to the onboard seam, which owns both the disk layout and the parked-marker
   read. Nothing is derived here: re-deriving "which projects exist" MCP-side would be a second
@@ -340,13 +337,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   defp do_create_project(name, args, onboarder_role) do
     with {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, org} <- Gate.resolve_org(args) do
-      # SAME config key as the poller's discovery org (`:lcars_fleet, :pilot_fleet_org`) — a project
-      # onboarded into an org the poller never scans is a DEAD RAIL, silently: nothing would ever
-      # dispatch it. Two knobs with two inline defaults were one edit away from diverging with no
-      # gate to catch it. Reading another domain's config ATOM creates no module edge (the boundary
-      # stays intact; the config lives under `:lcars_fleet` with a `mcp_` prefix, BL-6-05) — the config IS the shared
-      # authority here. `:delegation_org` survives as an explicit OVERRIDE for the rare case where
-      # onboarding must target another org than the one being polled.
+      # The org is the CATALOGUE the caller declares (`Gate.resolve_org/1`), and it must be
+      # installed here: the poller only discovers on installed catalogue orgs, so a project onboarded
+      # anywhere else is a DEAD RAIL, silently — nothing would ever dispatch it. No knob overrides
+      # it: a permanent decision is stated, never defaulted.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 
       # ⚠ AUCUNE GARDE D'ADHESION ICI, ET CE N'EST PAS UN OUBLI. Exiger que le jeton runtime PROUVE
@@ -458,9 +452,13 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
              "forge" => to_string(Map.get(result, :forge, "")),
              "architect" => to_string(Map.get(result, :architect, "")),
              "binding" => to_string(binding),
+             # The seam returns `%{project:, ops:, workshop:}` (`Lifecycle.delete_project/2`). The
+             # wire keeps `work` for the ops face and adds `workshop`: a verdict the runtime
+             # produces and the wire drops is a removal nobody can audit.
              "local" => %{
                "project" => to_string(Map.get(local, :project, :absent)),
-               "work" => to_string(Map.get(local, :work, :absent))
+               "work" => to_string(Map.get(local, :ops, :absent)),
+               "workshop" => to_string(Map.get(local, :workshop, :absent))
              }
            }}
 
@@ -539,7 +537,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
   defp do_import_external(url, name, args, role) do
     # Meme porte que les deux autres creations : importer un depot EXTERNE cree un depot sur NOTRE
-    # forge, donc l'org est une declaration. Elle tombait sur le premier catalogue installe.
+    # forge, donc l'org est une declaration, jamais le premier catalogue installe.
     with {:ok, onboard} <- Gate.conforming_onboard(),
          {:ok, org} <- Gate.resolve_org(args) do
       opts = [

@@ -3,35 +3,32 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   Forge-client behaviour — the CONTRACT of the `:forge_client` runtime seam, consumed
   by `Fleet.MCP.PodTools.Delegation` (DELEGATION / TRACKING channels).
 
-  The contract belongs to the CONSUMER: the callbacks are EXACTLY the
-  functions that `Delegation` calls (create_issue, add_label, get_issue,
-  list_pulls, list_open_issues, parse_feature_branch, pr_review_state,
-  post_comment, close_issue, merged_pr_of_issue, get_route) — not the full surface of the
-  pilot's forge client.
+  The contract belongs to the CONSUMER: the 13 callbacks are EXACTLY the functions that
+  `Delegation` calls (create_issue, add_label, repo_label_id, get_issue, list_pulls,
+  list_open_issues, parse_feature_branch, pr_review_state, get_route, post_comment, close_issue,
+  close_pr, merged_pr_of_issue) — not the full surface of `Fleet.Forge.Client`.
 
-  `get_route/3` a rejoint la liste avec C2, et l'ajouter au CONTRAT plutôt que l'appeler en
-  douce est le fond de l'affaire : la surface arch doit résoudre la politique de verdict d'une PR
-  par la MÊME fonction que le gate (`Roles.verdict_policy_for/4`), sinon elle affiche « approuvé »
-  pendant que le rail renvoie en rework. Cette résolution lit la carte gravée sur l'issue, donc
-  elle a besoin de la route — et une dépendance qu'un implémenteur découvre par un
-  `UndefinedFunctionError` en production n'est pas un contrat, c'est un piège.
+  `get_route/3` est au CONTRAT (C2), et l'y déclarer plutôt que l'appeler en douce est le fond de
+  l'affaire : la surface arch doit résoudre la politique de verdict d'une PR par la MÊME fonction
+  que le gate (`Roles.verdict_policy_for/4`), sinon elle affiche « approuvé » pendant que le rail
+  renvoie en rework. Cette résolution lit la carte gravée sur l'issue, donc elle a besoin de la
+  route — et une dépendance qu'un implémenteur découvre par un `UndefinedFunctionError` en
+  production n'est pas un contrat, c'est un piège.
 
-  ## Why a RUNTIME seam (and not a compile dep)
+  ## Why a seam at all
 
-  `fleet_pilot` sits ABOVE `fleet_mcp` in the boundary ladder: a compile dep
-  `fleet_mcp → fleet_pilot` would be UPWARD, forbidden (the boundary compiler would reject it). The module is resolved at
-  RUNTIME (`resolved/0`: app-env + default as a literal atom → no compile-time
-  dep, no cycle). Assumed UPWARD runtime seam (mcp → pilot).
+  `Fleet.Forge` is a compile dep of this domain (`lib/fleet/mcp.ex`); the module is still resolved
+  at RUNTIME (`resolved/0`: app-env + default) so a test injects a stub, and `Gate.conforming/2`
+  refuses a stub that lies about the contract.
 
   ## Implementations
 
-    * `Fleet.Forge.Client` — the REAL impl (canonical default). It lives in
-      `fleet_pilot`, which does NOT depend on `fleet_mcp`: it CANNOT adopt
-      this behaviour (`@behaviour` = a compile reference, would create a new edge)
-      and stays DUCK-TYPED with a cross-reference comment. This module is the source
-      of truth of the contract as seen by the consumer; the callback types are
-      aligned on the pilot's real `@spec`s (`ForgeClient`, `ForgeClient.Jury`,
-      `ForgeProtocol`).
+    * `Fleet.Forge.Client` — the REAL impl (canonical default). It lives in `Fleet.Forge`, which
+      sits BELOW `Fleet.MCP` and does not depend on it: it CANNOT adopt this behaviour
+      (`@behaviour` = a compile reference, an upward edge) and stays DUCK-TYPED with a
+      cross-reference comment. This module is the source of truth of the contract as seen by the
+      consumer; the callback types are aligned on the client's real `@spec`s (`Fleet.Forge.Client`,
+      `Fleet.Forge.Client.Jury`, `Fleet.Forge.Protocol`).
     * Test stubs `Fleet.MCP.PodToolsTest.{StubForge, RecordingForge}` — same app →
       adopt the behaviour (the compiler checks conformance, anti lying-stub).
   """
@@ -63,11 +60,10 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   CREATE call as an id, and the destination label MUST ride it (a post-create add leaves a window where
   a poller tick burns the project card on a documentary ticket).
 
-  Declared here after the fact, and the omission is the reason the destination path had no test
-  (2026-08-03): the seam is duck-typed, so an undeclared call compiles fine against the real
-  module and raises `UndefinedFunctionError` against every stub — which made the ops branch of
-  `do_create_issue` the one branch that could not be exercised. A contract with a hole does not
-  merely fail to check that branch, it FORBIDS testing it.
+  Declared, like every call the seam carries: the seam is duck-typed, so an undeclared call
+  compiles fine against the real module and raises `UndefinedFunctionError` against every stub —
+  the branch that calls it then cannot be exercised at all. A contract with a hole does not merely
+  fail to check that branch, it FORBIDS testing it.
   """
   @callback repo_label_id(repo :: String.t(), name :: String.t(), opts :: keyword()) ::
               {:ok, integer()} | {:error, term()}
@@ -171,7 +167,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
 
   @default_client Fleet.Forge.Client
 
-  @doc "Returns the configured forge client or the canonical Pilot implementation."
+  @doc "Returns the configured forge client or the canonical `Fleet.Forge.Client`."
   @spec resolved() :: module()
   def resolved, do: Application.get_env(:lcars_fleet, :mcp_forge_client, @default_client)
 end

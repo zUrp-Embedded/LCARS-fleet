@@ -645,7 +645,7 @@ defmodule Fleet.MCP.PodToolsTest do
          repo: full_name,
          forge: :deleted,
          architect: :stopped,
-         local: %{project: :removed, work: :removed},
+         local: %{project: :removed, ops: :removed, workshop: :removed},
          project_dir: "/tmp/projects/#{name}",
          work_dir: "/tmp/projects.work/#{name}",
          forced: Keyword.get(opts, :force, false)
@@ -2257,7 +2257,9 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert {:ok, result} = Jason.decode(txt)
       assert result["status"] == "deleted"
-      assert %{"project" => "removed", "work" => "removed"} = result["local"]
+
+      assert %{"project" => "removed", "work" => "removed", "workshop" => "removed"} =
+               result["local"]
     end
 
     test "DPF-05: delete_project removes the project's publish binding (no orphan)" do

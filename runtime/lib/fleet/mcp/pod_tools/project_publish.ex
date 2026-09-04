@@ -263,10 +263,9 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
     ]
   end
 
-  # publish-rail.sh is co-located with the launchers (moved to bin/, install manifest). The bin dir is
-  # the one already resolved for the launcher; reading its config keeps a single source of the bin
-  # location without an MCP->Spawner call (config read, not a boundary edge). Namespace is the post-D-07
-  # `:lcars_fleet` app with a domain-prefixed key; the pre-migration spawner atom is dead.
+  # publish-rail.sh is co-located with the launchers in bin/ (install manifest). The bin dir is the
+  # one already resolved for the launcher; reading its config keeps a single source of the bin
+  # location without an MCP->Spawner call (config read, not a boundary edge).
   defp rail_path do
     launcher =
       Application.get_env(
@@ -280,7 +279,7 @@ defmodule Fleet.MCP.PodTools.ProjectPublish do
 
   # Le repertoire PORTEUR d'un run, unique. Le clone est `<base>/clone` et le jeton `<base>/.forge-token`.
   #
-  # ⚠ CE N'EST PLUS `--work` LUI-MEME, ET LA DISTINCTION COMPTE : le rail REFUSE un `--work` qui
+  # ⚠ CE N'EST PAS `--work` LUI-MEME, ET LA DISTINCTION COMPTE : le rail REFUSE un `--work` qui
   # existe deja. Rendre ce chemin directement au rail ET y ecrire le jeton avant de l'appeler
   # ferait echouer chaque publication sur « --work doit etre un chemin neuf ». D'ou le niveau
   # intermediaire : le repertoire est a nous, le chemin que le rail recoit reste vierge.

@@ -69,8 +69,8 @@ defmodule Fleet.MCP.Supervisor do
       # de statut : c'est celui qu'on croit parce qu'il est plus facile a lire.
       #
       # ⚠ LES DEUX LECTURES PEUVENT ECHOUER, ET AUCUNE NE REND UN CHIFFRE PLAUSIBLE QUAND ELLE
-      # ECHOUE. C'est le contrat annonce par le `@moduledoc` de cette fonction — « scan failure is
-      # `:unknown`, never a hollow operational state » — et il ne tenait que pour l'une des deux.
+      # ECHOUE. C'est le contrat annonce par le `@doc` de cette fonction — « scan failure is
+      # `:unknown`, never a hollow operational state » — et il vaut pour les deux operandes.
       with {:ok, sockets} <- active_sockets(),
            {:ok, deaf} <- deaf_pods() do
         orphaned = length(deaf)
@@ -122,20 +122,16 @@ defmodule Fleet.MCP.Supervisor do
     end
   end
 
-  # ⚠ CETTE FONCTION RENDAIT `[]` SUR ECHEC, ET C'ETAIT L'INVARIANT DU `@doc` CI-DESSUS APPLIQUE A
-  # UNE SEULE MOITIE. Il dit : « an unreadable directory is NOT an empty one, and answering `[]`
-  # there would clear pods this function cannot see ». La meme phrase vaut pour l'autre operande, en
-  # sens inverse : un superviseur injoignable n'est pas un superviseur SANS acceptor, et repondre
-  # `[]` ici declare SOURDS tous les pods du disque — `difference(on_disk, [])` vaut `on_disk`.
+  # ⚠ JAMAIS `[]` SUR ECHEC : l'invariant du `@doc` ci-dessus vaut pour CET operande aussi, en sens
+  # inverse. « An unreadable directory is NOT an empty one » ; et un superviseur injoignable n'est
+  # pas un superviseur SANS acceptor — repondre `[]` ici declarerait SOURDS tous les pods du disque
+  # (`difference(on_disk, [])` vaut `on_disk`).
   #
   # Le warden ne tue pas un pod sourd (il refuse de reparer, deliberement), mais il ouvre un
   # incident `pod.deaf` par pod apres confirmation sur deux ticks, avec issue sysadmin a la
-  # recurrence. Une panne du superviseur d'acceptors produisait donc une alarme de masse, au moment
-  # precis ou le signal reel comptait le plus.
-  #
-  # Le chemin d'erreur EXISTAIT DEJA : le `@spec` autorise `{:error, term()}`, et
-  # `SocketWarden.report_deaf_pods/1` traite `:error` par « on ne blanchit personne ». Seul cet
-  # operande ne s'en servait pas.
+  # recurrence. Une panne du superviseur d'acceptors produirait donc une alarme de masse, au moment
+  # precis ou le signal reel compte le plus. `SocketWarden.report_deaf_pods/1` traite `:error` par
+  # « on ne blanchit personne » : c'est ce chemin que cet operande emprunte.
   defp live_acceptor_ids do
     {:ok, PodSocketSupervisor.live_pod_ids()}
   rescue

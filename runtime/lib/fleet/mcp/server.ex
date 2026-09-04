@@ -1,8 +1,8 @@
 defmodule Fleet.MCP.Server do
   @moduledoc """
-  Boot guard of `fleet_mcp`: the MCP server is system-side, outside bwrap.
+  Boot guard of `Fleet.MCP`: the MCP server is system-side, outside bwrap.
 
-  **Containment invariant**: `fleet_mcp` must NEVER start on the pod side (the pod
+  **Containment invariant**: the MCP server must NEVER start on the pod side (the pod
   is a CLIENT of the server, not its host). This process, supervised by `Fleet.MCP.Supervisor`,
   carries the guard: `start_link/1` reads `:boot_environment` (priority opts > app env >
   default **`:pod`**, FAIL-CLOSED) and refuses (`{:error, :forbidden_in_pod}`) on `:pod` → the child

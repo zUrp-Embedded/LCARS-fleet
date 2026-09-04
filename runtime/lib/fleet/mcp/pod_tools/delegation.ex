@@ -6,7 +6,7 @@ defmodule Fleet.MCP.PodTools.Delegation do
   `delegation_target`): these tools form the channel through which the architect delegates work to
   the fleet and tracks it.
 
-  CE MODULE NE PORTE PLUS DE FONCTION : il porte le contrat de la famille — les deux gates, les
+  CE MODULE NE PORTE AUCUNE FONCTION : il porte le contrat de la famille — les deux gates, les
   seams, et la carte des canaux ci-dessous.
 
   ⚠ NO TOOL LIST HERE, for the reason `Fleet.MCP.PodTools` states about its own: the authority is
@@ -57,26 +57,31 @@ defmodule Fleet.MCP.PodTools.Delegation do
   a declaration reads as a granted permission and grants nothing.
 
   A pod whose role carries neither, a nil/unknown role, or a pod absent from the registry → REFUSAL on
-  both. Fail-closed end to end: no case falls back onto an authorized access. (The tool-visibility filter
-  now lives SERVER-side — the acceptor's `tools/list` lists only this role's tools, F-C138; the bridge
-  forwards blindly. A UX convenience, but the authorization has always lived HERE.)
+  both. Fail-closed end to end: no case falls back onto an authorized access. (The tool-visibility
+  filter is SERVER-side too — the acceptor's `tools/list` lists only this role's tools, F-C138; the
+  bridge forwards blindly. That filter is a second barrier; the authorization lives HERE.)
 
   Every function takes the MCP `state` as its last argument and reads ONLY `pod_id` from it (the gate) —
   never an identity from the wire arguments.
 
-  ## Seams (app-env `:lcars_fleet`, keys prefixed `mcp_*`)
+  ## Seams (app-env `:lcars_fleet`, keys prefixed `mcp_*`) — test injection, not boundary crossings
 
-    * `:forge_client` (default `Fleet.Forge.Client`) — forge client, runtime
-      dispatch (no compile-time dep on fleet_pilot). TWO declared behaviours over the SAME seam module
-      (DR-012): `Delegation.ForgeClient` (DELEGATION/TRACKING surface: create_issue/add_label/get_issue/…)
-      and `Delegation.EscalationForge` (ESCALATION surface: list_org_repos/list_open_issues/list_comments/
-      post_comment) — each an inspectable contract with its own `resolved/0`, no hidden ad-hoc op list.
-    * `:project_onboard` (default `Fleet.Project.Onboard`) — onboarding
-      sequence. CONTRACT = behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
-    * `:pod_resolver` (default runtime dispatch `Fleet.Spawner.pod_info/1`) — resolution
-      of the pod's role.
-    * `:delegation_org` — forge org of onboarded projects. OPTIONAL override: by default the org
-      is the one the poller DISCOVERS on (`:lcars_fleet, :pilot_fleet_org`, default `"fleet"`), because
-      onboarding into an org nobody scans is a silently dead rail.
+  `Fleet.Forge` and `Fleet.Project` are compile deps of this domain (`lib/fleet/mcp.ex`); the seams
+  exist so a test injects a stub, and each behaviour's `Gate.conforming/2` keeps a stub honest.
+
+    * `:mcp_forge_client` (default `Fleet.Forge.Client`). FOUR declared behaviours over the SAME
+      seam module (DR-012): `Delegation.ForgeClient` (DELEGATION/TRACKING surface),
+      `Delegation.EscalationForge` (ESCALATION surface), `Delegation.DependencyForge` (the edges)
+      and `Delegation.ForgeWriter` (branch/file/PR) — each an inspectable contract, resolved
+      through `ForgeClient.resolved/0`.
+    * `:mcp_project_onboard` (default `Fleet.Project.Onboard`) — onboarding sequence. CONTRACT =
+      behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard`.
+    * `:mcp_pod_resolver` (default `PodResolver.default/1` over `Fleet.Spawner.pod_info/1`) —
+      resolution of the pod's role and repo binding.
+    * `:mcp_pod_reaper` (default `Fleet.Pilot.PodReaper`) — the one UPWARD seam: MCP may not
+      reference Pilot.
+
+  The forge org of an onboarded project is the `catalogue` argument (`Gate.resolve_org/1`),
+  required and never inferred: the poller discovers on installed catalogue orgs only.
   """
 end

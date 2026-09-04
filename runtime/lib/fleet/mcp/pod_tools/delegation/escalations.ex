@@ -66,11 +66,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Escalations do
 
   defp latest_verdict(_forge, _repo, number) when not is_integer(number), do: nil
 
-  # LE DERNIER COMMENTAIRE N'EST PAS UN VERDICT. Cette fonction rendait le dernier corps non vide du
-  # fil, sans filtre : des que l'arch avait repondu a une escalade, l'inbox lui renvoyait SA PROPRE
-  # REPONSE comme etant la question a trancher — sous une description d'outil qui promet « the
-  # worker's escalation comment — the reasoning ». On cherche donc le marqueur d'escalade, pas la
-  # recence.
+  # LE DERNIER COMMENTAIRE N'EST PAS UN VERDICT. Rendre le dernier corps non vide du fil, sans
+  # filtre, renvoie a l'arch SA PROPRE REPONSE comme etant la question a trancher des qu'il a
+  # repondu a une escalade — sous une description d'outil qui promet « the worker's escalation
+  # comment — the reasoning ». On cherche donc le marqueur d'escalade, pas la recence.
   #
   # `nil` quand aucun commentaire n'en porte, et c'est un resultat : le frein sur recurrence
   # (`IncidentConsumer.default_brake/3`) pose le label SANS commentaire, donc il n'y a rien a

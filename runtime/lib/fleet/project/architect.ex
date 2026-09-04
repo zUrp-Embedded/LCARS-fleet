@@ -18,8 +18,9 @@ defmodule Fleet.Project.Architect do
       here, with the human, at the terminal — which is the bulk of what actually happens — and a
       scribe enriches it through the ordinary pipeline.
 
-      A DRAFT SPACE, AND DELIBERATELY SO (user arbitration): nothing pushes this face on its own,
-      and nothing written here enters the project as-is. What the human and the arch produce
+      A DRAFT SPACE, AND DELIBERATELY SO (user arbitration): only the `scratch` tool pushes this
+      face (notes, an orphan branch that ships nothing), and nothing written here enters the
+      project as-is. What the human and the arch produce
       together is MATTER, not a deliverable — a scribe ticket carries it through the ordinary
       pipeline, judged and sealed like any other, even when the pass is only an eval. The pod is
       told this in its own words, because a pod that believes it published fills the gap the same

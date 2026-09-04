@@ -145,10 +145,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Toolchain do
 
   # LE CHEMIN SANS TICKET — L'ANTICIPATION, et c'est l'usage au nom duquel l'architecte a reçu ce
   # grant : « l'arch peut demander un outillage AVANT que les producers butent dessus »
-  # (`architect.yaml`). La garde `active_work_item/1` le refusait en `:no_active_work_item`, donc la
-  # capacité était MORTE pour sa seule raison d'être — le grant et la garde avaient été écrits sur
-  # des hypothèses opposées, et rien ne les confrontait. Le mur `toolchain.grant_reachable` le fait
-  # désormais (`lcars.contracts.check`).
+  # (`architect.yaml`). Refuser ici sur `:no_active_work_item` rendrait la capacité MORTE pour sa
+  # seule raison d'être — un grant et une garde écrits sur des hypothèses opposées. Le mur
+  # `toolchain.grant_reachable` (`lcars.contracts.check`) les confronte.
   #
   # CE QUI TOMBE ICI, ET POURQUOI CE N'EST PAS UNE PERTE : il n'y a AUCUN ticket à verrouiller ni à
   # re-dispatcher. Pas de `lcars-awaits-toolchain`, pas de commentaire de lien, pas de
