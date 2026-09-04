@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Lcars.Topology do
   The price is one function: `Boundary.Mix.View.build/0` is `@moduledoc false`, a private entry point
   of the dependency (everything after it — `Boundary.all/1`, the `%Boundary{}` fields — is public and
   specified). If a boundary upgrade moves it, this task raises at gate time. That is the GOOD failure:
-  loud, immediate, and it sends someone to look. The alternative was a hand-rolled parser that fails
+  loud, immediate, and it sends someone to look. The alternative is a hand-rolled parser that fails
   silently and stays green — which is the defect this project exists to remove. We already depend on
   boundary totally: `mix compile --warnings-as-errors` refuses the build on a violation. Reading its
   graph adds no dependency, it stops re-deriving one by hand.
@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Topology do
   @layers %{
     "Fleet.Slug" => "foundation",
     "Fleet.EnvParse" => "foundation",
-    # A1 (chantier rails) — box-wide admin settings reader (/etc/lcars/fleet.json), pure like its
+    # A1 — box-wide admin settings reader (/etc/lcars/fleet.json), pure like its
     # neighbour EnvParse: deps [], read once by runtime.exs at boot.
     "Fleet.SystemConfig" => "foundation",
     "Fleet.GitRef" => "foundation",
@@ -91,7 +91,7 @@ defmodule Mix.Tasks.Lcars.Topology do
     "Fleet.Labels" => "foundation",
     "Fleet.Toolchain" => "foundation",
     "Fleet.Conflict" => "foundation",
-    # C2 (chantier rails) — the judge's machine verdict on the wire (render into a review body,
+    # C2 — the judge's machine verdict on the wire (render into a review body,
     # read it back). Pure text <-> map like Conflict, and foundation for the same reason: its two
     # ends are Fleet.Pilot (writes) and Fleet.Forge (reads), which cannot see each other.
     "Fleet.FindingsWire" => "foundation",

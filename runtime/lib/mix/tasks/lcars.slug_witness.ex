@@ -43,9 +43,9 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
       [root]
       # `match_dot: true` OU AUCUN TEMOIN, JAMAIS. Sans lui, `Path.wildcard/2` refuse de traverser
       # un segment commencant par un point — et le chemin cherche en contient un (`.claude`). Mesure
-      # sur un vrai arbre : 0 avec le defaut, 8 avec. Cette tache a donc rendu un VERT SUR RIEN a
-      # chaque execution depuis qu'elle existe, en disant « rien ne contredit le miroir » — la
-      # promesse creuse contre laquelle son propre @moduledoc met en garde.
+      # sur un vrai arbre : 0 avec le defaut, 8 avec. Sans ce drapeau la tache rend un VERT SUR RIEN
+      # a chaque execution, en disant « rien ne contredit le miroir » — la promesse creuse contre
+      # laquelle son propre @moduledoc met en garde.
       |> Enum.flat_map(
         &Path.wildcard(Path.join([&1, "**", ".claude", "projects", "*"]), match_dot: true)
       )

@@ -164,12 +164,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
         # contract is no longer verified. A residue target the check cannot read is therefore a
         # FAILURE, not a silent green.
         #
-        # ONE read, and it decides both. `File.exists?/1` answered only the ABSENT half: it is TRUE
-        # for a file present and unreadable (permissions, I/O error, a path that became a
-        # directory), which sent the flow into the reading branch where the swallowed error became
-        # zero lines, i.e. compliance. The half that was guarded is the half a moved file trips; the
-        # half that was not is the one a chmod trips, and nothing in the output told them apart.
-        # Reading once also removes the window between the test and the read.
+        # ONE read, and it decides both. `File.exists?/1` alone answers only the ABSENT half: it is
+        # TRUE for a file present and unreadable (permissions, I/O error, a path that became a
+        # directory), which sends the flow into the reading branch where a swallowed error becomes
+        # zero lines, i.e. compliance. A moved file trips the first half; a chmod trips the second,
+        # and nothing in the output tells them apart. Reading once also removes the window between
+        # the test and the read.
         case File.read(abs) do
           {:ok, content} ->
             content
@@ -242,15 +242,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     |> List.to_string()
   end
 
-  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE, AND FOUR OF THEM WERE. The `*_single_source`
-  # locks read the RAW body of each mirror and ask `Regex.match?`. A file whose CODE carries the
-  # wrong value stays green as long as the right one appears in a COMMENT — and the context that
-  # makes it likely is the ordinary one: `# Note: was <old value>` on the very line a migration
-  # touches. Measured on three of them: code mutated + the pattern quoted in a comment
-  # → `status: pass`.
+  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read each mirror
+  # STRIPPED of its comments: on the RAW body, a file whose CODE carries the wrong value stays green
+  # as long as the right one appears in a COMMENT — and the context that makes it likely is the
+  # ordinary one: `# Note: was <old value>` on the very line a migration touches. Measured on three
+  # of them: code mutated + the pattern quoted in a comment → `status: pass` without the strip.
   #
   # `variable_walls.bats` carries the rule in capitals — « ON MESURE LE CODE, PAS LA PROSE » — and
-  # strips comments on every sweep. This side never did. Same doctrine, one language short.
+  # strips comments on every sweep. Same doctrine here, in the other language.
   #
   # `#` opens a comment in every file type these locks read (sh, ex, tf, yml), so ONE stripper
   # serves them all; `strip_comment/1` below already honours `"` so an interpolation `#{}` or a `#`
@@ -282,9 +281,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # of the SUBJECT, it is a fault of the INSTRUMENT — there is no true answer to give about a file
   # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
   # a path that became a directory, on a permission the runner lost; never in nominal operation,
-  # which is exactly why it was never noticed swallowing three absence-of-violation walls
-  # (`gates.no_runtime_seam`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
-  # which globs REAL files and would have reported compliance about one it could not open.
+  # which is exactly why a swallowing `_ -> []` goes unnoticed under three absence-of-violation
+  # walls (`gates.no_runtime_seam`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
+  # which globs REAL files and would report compliance about one it could not open.
   @doc false
   @spec grep_lines(String.t(), Regex.t()) :: [{pos_integer(), String.t()}]
   def grep_lines(path, regex) do
@@ -416,12 +415,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # UN MUR QUI GREPPE UN MOTIF LE CONTIENT, PAR CONSTRUCTION. Trois murs cherchent dans `lib/` une
   # chose qui ne doit pas s'y trouver — un namespace de config mort, un mot a prior dominant, la
   # citation d'une regle de propriete — et leur propre source porte ce qu'ils cherchent : ils se
-  # comptent eux-memes comme fautifs. Ils s'exemptaient par un CHEMIN EN DUR vers la tache.
+  # compteraient eux-memes comme fautifs.
   #
-  # ⚠ UN DECOUPAGE A FAIT ROUGIR LES TROIS D'UN COUP : les murs avaient demenage, les
-  # exemptions pointaient l'ancienne adresse. Une liste de chemins en dur grossit a chaque coupe,
-  # rougit la fois ou on l'oublie, et — plus grave — peut exempter DE TRAVERS apres un renommage :
-  # un fichier reel prendrait la place de l'ancien nom et passerait exempt sans un mot.
+  # ⚠ PAS D'EXEMPTION PAR CHEMIN EN DUR VERS LA TACHE : une liste de chemins en dur grossit a chaque
+  # coupe, rougit la fois ou on l'oublie (un decoupage fait rougir les trois murs d'un coup), et —
+  # plus grave — peut exempter DE TRAVERS apres un renommage : un fichier reel prendrait la place de
+  # l'ancien nom et passerait exempt sans un mot.
   #
   # La regle remplace la liste : ce qui vit dans l'arbre du verificateur LIT ce qu'il cherche, il
   # n'en est jamais un exemplaire. Aucune maintenance, aucune adresse a tenir a jour.

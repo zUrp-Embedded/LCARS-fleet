@@ -132,13 +132,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   `roles.capabilities_exercisable` does NOT cover this. It fails only when a role carries NONE of a
   capability's tools, so the architect — who holds four delegation tools — stays green after losing
-  one. Measured by renaming three ids granted by name: the wall would not have
-  moved.
+  one. Measured by renaming three ids granted by name: that wall does not move.
 
-  The alignment was verified BY HAND that day. A hand check protects the rename that prompted it and
-  nothing after — which is the third time this file's history records a rename missing a copy in
-  silence. The other two answers were mechanical (`@tool_effects` by AST,
-  `mcp.tool_descriptions_name_real_tools`); this is the same answer for the same shape.
+  A hand check protects the rename that prompted it and nothing after — a rename missing a copy
+  in silence is a recurring shape in this file. The mechanical answer (`@tool_effects` by AST,
+  `mcp.tool_descriptions_no_permuted_names`) is the same answer for the same shape.
 
   Derived from the authority, so there is nothing to maintain: `deftool` declares, cap-profiles copy,
   and a tool added or renamed tomorrow moves the wall by itself.
@@ -207,11 +205,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   ## The same rename, missing the same way, twice
 
-  Tool names are object-first (`create_project` → `project_create`). Such a rename moves
-  the `deftool` names and the `mcp__fleet__` citations. It did NOT move the bare names written INSIDE
-  the description strings — and those strings are the tool catalogue an agent reads. Measured
-  Measured: THIRTEEN occurrences across six descriptions, naming four tools that do not exist.
-  `project_import` even referred to itself by its old name.
+  Tool names are object-first (`create_project` → `project_create`). A rename of that shape moves
+  the `deftool` names and the `mcp__fleet__` citations, and NOT the bare names written INSIDE the
+  description strings — and those strings are the tool catalogue an agent reads. Measured
+  (2026-08-21): THIRTEEN occurrences across six descriptions, naming four tools that do not exist;
+  `project_import` referring to itself by its old name.
 
   This is worse than a stale comment. A comment misleads a human who can check; a description is an
   INSTRUCTION to an agent, delivered at the moment it chooses what to call. `card_list`
@@ -234,8 +232,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   ## What it does NOT catch, and why the name says so
 
-  It was first written as `mcp.tool_descriptions_name_real_tools`, opening on *"no description may
-  name a tool that does not exist"* — a claim wider than the code, caught by independent review on
+  Its name says PERMUTED, not "real tools": *"no description may name a tool that does not exist"*
+  would be a claim wider than the code.
   An INVENTED name that is not a reordering passes: `project_import_external`,
   `issue_open`, `project_list_all`. A guard whose name promises more than it measures is green
   exactly where a reader trusts it most, which is this repo's own definition of a bad wall.
@@ -273,8 +271,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       # ⚠ L'INDEXATION PAR FORME EST NON-INJECTIVE, ET ELLE SE TAIT. Deux outils de meme forme (meme
       # multiset de segments normalises) s'ecrasent dans la map : le survivant garde sa couverture,
       # le perdant n'est plus jamais mesure, et rien dans la sortie ne le dit. Les autres gardes de
-      # ce fichier comptent leur population ; celui-ci ne verifiait pas qu'elle survit a
-      # l'indexation.
+      # ce fichier comptent leur population ; celui-ci verifie aussi qu'elle survit a l'indexation.
       length(Enum.uniq(shapes)) != length(shapes) ->
         broken_result(
           id,
@@ -335,8 +332,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # chain is a single instruction to the agent, and reading it line by line is what hid thirteen of
   # them.
   #
-  # ⚠ BORNE AU BLOC `deftool`, ET PAS AU FICHIER. La premiere version ramassait tout appel
-  # `description/1` de l'AST. Ca tient tant que `pod_tools.ex` n'est fait que de `deftool` — donc
+  # ⚠ BORNE AU BLOC `deftool`, ET PAS AU FICHIER. Ramasser tout appel `description/1` de l'AST
+  # tiendrait tant que `pod_tools.ex` n'est fait que de `deftool` — donc
   # tant que personne n'y ecrit une fonction d'aide du meme nom, ou n'importe un `description/1`
   # etranger. Le jour ou ca arrive, le mur mesure une population qu'il ne pretend pas mesurer, dans
   # un sens comme dans l'autre.
@@ -502,10 +499,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   # 6-106 — L'EXHAUSTIVITE DE LA CLASSIFICATION DES OUTILS, MECANIQUE OU RIEN.
   #
-  # L'acceptor protegeait cinq outils sur ~17 contre le double effet, depuis une liste de mots nus
-  # posee LOIN des definitions. Deplacer cette liste a cote des `deftool` la rend traversable par un
-  # renommage, mais pas l'oubli : rien n'oblige
-  # celui qui ajoute un `deftool` a le classer.
+  # Une liste de mots nus posee LOIN des definitions (mesure a la pose : cinq outils proteges sur
+  # ~17 contre le double effet) se rate a chaque renommage. `@tool_effects` a cote des `deftool` est
+  # traversable par un renommage, mais pas par l'oubli : rien n'oblige celui qui ajoute un `deftool`
+  # a le classer.
   #
   # Ce check est ce qui l'oblige, et il porte dans les DEUX sens :
   #   * un outil declare sans effet → le prochain mutateur ajoute est protege par defaut
@@ -571,12 +568,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # saute PAS, il PROMPTE (« Do you want to… 1. Yes 2. Yes, allow all 3. No ») — et un pod n'a
   # personne pour repondre. Il reste vivant, tient son creneau et le verrou `lcars-in-flight` du
   # ticket, et ne produit rien ; la chaine de reprise redispatche alors un pod qui se bloque au meme
-  # endroit. Le bundle `brainstorming` ordonnait un `TodoWrite` que ni `architect` ni `starfleet`
-  # ne declaraient, et les deux l'activent.
+  # endroit (mesure : le bundle `brainstorming` ordonnant un `TodoWrite` que ni `architect` ni
+  # `starfleet` ne declarent, les deux l'activant).
   #
-  # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Le premier jet bornait
-  # le vocabulaire aux noms deja declares par un cap-profile — exact, sans faux positif… et MUET sur
-  # le defaut qui le motive : un outil declare NULLE PART n'est reconnu comme outil par personne. Un
+  # LA CHARGE DE LA PREUVE EST RENVERSEE, ET C'EST CE QUI FAIT TENIR LE MUR. Borner le vocabulaire
+  # aux noms deja declares par un cap-profile serait exact, sans faux positif… et MUET sur le defaut
+  # qui motive le mur : un outil declare NULLE PART n'est reconnu comme outil par personne. Un
   # mur qu'on desarme en retirant la derniere declaration ne protege rien.
   #
   # Donc : tout nom EN FORME D'OUTIL cite par un bundle doit etre accorde par chacun de ses
@@ -873,11 +870,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # asking about several capabilities is skipped rather than guessed: there would be no single
   # answer to "which tools does this capability open".
   #
-  # ⚠ `def` AUTANT QUE `defp`, et c'est le decoupage qui l'a impose : les deux gates sont sorties
-  # dans `Delegation.Gate`, donc publiques (`@doc false`) pour que les canaux les appellent. La
-  # version qui ne lisait que `defp` a rendu INSTRUMENT BROKEN au premier deplacement — le
-  # plancher a tenu, mais une derivation attachee a la VISIBILITE d'une fonction mesure son
-  # rangement, pas son role.
+  # ⚠ `def` AUTANT QUE `defp` : les gates vivent dans `Delegation.Gate`, publiques (`@doc false`)
+  # pour que les canaux les appellent. Une lecture des seuls `defp` rend INSTRUMENT BROKEN (le
+  # plancher tient) — une derivation attachee a la VISIBILITE d'une fonction mesure son rangement,
+  # pas son role.
   defp capability_gates(ast) do
     ast
     |> collect(fn
@@ -929,9 +925,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # Les capabilities qu'une clause de dispatch atteint.
   #
   # LA FAMILLE, pas le dernier segment : un canal extrait s'appelle
-  # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesse de le voir au premier
-  # decoupage — le mur a rougi sur « ungated tools [escalation_list, scratch] » le jour ou les
-  # canaux sont sortis.
+  # `Delegation.Scratchpad.scratch(...)`, et un test sur `List.last/1` cesserait de le voir — un mur
+  # rouge sur « ungated tools [escalation_list, scratch] » pour des canaux pourtant gardes.
   defp capabilities_of_clause(%{body: body}, gated_delegations, table) do
     collect(body, fn
       {{:., _, [{:__aliases__, _, aliases}, fun]}, _, _} ->
@@ -962,9 +957,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # The `conforming/2` guard turns a misconfigured seam into a named error instead of an
   # UndefinedFunctionError raised deep inside a half-finished gesture. It can only see what a
   # behaviour DECLARES — so a seam op nobody wrote down is a call the guard vouches for without
-  # having checked it. Every seam call must be covered by a @callback of the behaviour on its path; the three
-  # dependency ops ran inside the supersede retirement, past the point where the live PR is already
-  # closed, guarded by nothing.
+  # having checked it. Every seam call must be covered by a @callback of the behaviour on its path
+  # (measured 2026-08-04: three dependency ops running inside the supersede retirement, past the
+  # point where the live PR is already closed, guarded by nothing).
   #
   # `Delegation` reaches its seams ONLY through a variable holding a resolved module (the guard
   # hands it over). So every remote call on a variable in that file is a seam call and must be
@@ -1128,16 +1123,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   end
 
   # ── Forge mutations: which have a door, and for whom ─────────────────
-  # PROBE N°4 of the pattern hunt — "a gesture with no door". The family that produced the tools of
-  # lot 1: `issue_retire`, `project_list`, `emergency_stop` all existed as CAPABILITIES the runtime
-  # could already execute, and had to be disguised as something else (or were simply unreachable)
-  # for want of a tool exposing them. An absence raises no error, which is why it survives: nothing
-  # fails, the gesture is just performed sideways.
+  # PROBE N°4 of the pattern hunt — "a gesture with no door". A CAPABILITY the runtime can execute
+  # with no tool exposing it (`issue_retire`, `project_list`, `emergency_stop` were the measured
+  # cases) gets disguised as something else, or stays unreachable. An absence raises no error, which
+  # is why it survives: nothing fails, the gesture is just performed sideways.
   #
-  # THE SYMMETRIC FAULT COST ONE OF THAT LOT ITS LIFE: `publish_doc` was a door built for a gesture
-  # that then reached no one — no canon cap-profile ever granted it — into the one tree that must
-  # stay read-only for every agent. A door nobody holds the key to is not harmless: it is an opening
-  # that reads as a decision. Removed with the `notes/` subtree it served.
+  # THE SYMMETRIC FAULT: a door nobody holds the key to (a `publish_doc` that no canon cap-profile
+  # grants, into the one tree that must stay read-only for every agent) is not harmless — it is an
+  # opening that reads as a decision. Such a door is removed, not kept.
   #
   # Mechanised as a two-column table the gate holds: every mutating op of the forge client is either
   # REACHED from a delegation tool, or listed here with why it is runtime-only. The runtime-only
@@ -1172,10 +1165,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @doc false
   @spec check_forge_mutations_exposed(String.t()) :: Support.result()
   def check_forge_mutations_exposed(root) do
-    # ⚠ LE `File.exists?` A DISPARU AVEC LE CHEMIN EN DUR, ET C'EST UN GAIN. Il rendait un ensemble
-    # VIDE sur un fichier absent — donc `undecided` valait toutes les mutations, un rouge bruyant
-    # plutot qu'un vert muet, mais un rouge qui ne disait pas la vraie cause. `quoted!/2` leve : une
-    # source illisible est nommee pour ce qu'elle est.
+    # ⚠ PAS DE `File.exists?` ICI : il rendrait un ensemble VIDE sur un fichier absent — donc
+    # `undecided` vaudrait toutes les mutations, un rouge bruyant plutot qu'un vert muet, mais un
+    # rouge qui ne dit pas la vraie cause. `quoted!/2` leve : une source illisible est nommee pour
+    # ce qu'elle est.
     called =
       root
       |> delegation_asts()
@@ -1222,10 +1215,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # question is "does anything in this code touch that name", and a stricter parse would answer a
   # narrower one.
   #
-  # THE EXCLUSION IS THE LOAD-BEARING PART, and the first run proved it: the allowlist below LIVES in
-  # this file, so `"closed_at" =>` counted as a reader and all three deliberately-unread fields
-  # reported themselves as read. The instrument was measuring its own declaration — the exact defect
-  # class this check exists to catch, arriving first in the check itself.
+  # THE EXCLUSION IS THE LOAD-BEARING PART: the allowlist below LIVES in this file, so without it
+  # `"closed_at" =>` counts as a reader and all three deliberately-unread fields report themselves
+  # as read (measured on the first run). The instrument measuring its own declaration is the exact
+  # defect class this check exists to catch, arriving first in the check itself.
   #
   # Gate tooling is excluded on its own merit too: a field named in a mix task is named by the
   # machinery that audits the product, not by the product answering a question with it.
@@ -1250,12 +1243,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   # `def handle_tool_call("name", args, state)` clauses, grouped by tool name. The catch-all
   # (`handle_tool_call(_unknown, …)`) has no literal name and is skipped: it refuses by definition.
-  # ⚠ ON RESOUT L'ALIAS, ON NE COMPARE PAS UNE ORTHOGRAPHE. Les deux lecteurs de dispatch
-  # cherchaient le segment `:Delegation` dans le nom TEL QU'ECRIT. Ca marche tant que
-  # `pod_tools.ex` ecrit `Delegation.Issues.create_issue(...)`. Le jour ou quelqu'un pose
-  # `alias Fleet.MCP.PodTools.Delegation.Issues` et appelle `Issues.create_issue(...)` — la forme
-  # idiomatique — le segment disparait, les murs cessent de voir un outil pourtant garde, et
-  # rougissent sur du code CORRECT. Un mur faux-positif est un mur qu'on desarme.
+  # ⚠ ON RESOUT L'ALIAS, ON NE COMPARE PAS UNE ORTHOGRAPHE. Chercher le segment `:Delegation` dans
+  # le nom TEL QU'ECRIT tient tant que `pod_tools.ex` ecrit `Delegation.Issues.create_issue(...)`.
+  # Le jour ou quelqu'un pose `alias Fleet.MCP.PodTools.Delegation.Issues` et appelle
+  # `Issues.create_issue(...)` — la forme idiomatique — le segment disparait, les murs cesseraient
+  # de voir un outil pourtant garde, et rougiraient sur du code CORRECT. Un mur faux-positif est un
+  # mur qu'on desarme.
   #
   # La table d'alias du fichier donne le module REEL ; c'est lui qu'on interroge.
   defp alias_table(ast) do
@@ -1347,10 +1340,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   # POD-SCOPED = THE CLAUSE USES THE CHANNEL IDENTITY, not merely receives it. `PodSocketAcceptor`
   # builds `%{pod_id: pod_id}` for EVERY `tools/call`, unconditionally and identically for every
   # tool — so the presence of that key in a clause head says nothing about authorization. Matching
-  # `\bpod_id:` alone accepted `%{pod_id: _}`: a clause that pattern-matches the identity and throws
-  # it away, then acts globally, was reported as gated. The wall was one underscore wide.
+  # `\bpod_id:` alone would accept `%{pod_id: _}`: a clause that pattern-matches the identity and
+  # throws it away, then acts globally, reported as gated — a wall one underscore wide.
   #
-  # Two conditions now, and the second is the one that carries the meaning: the head must BIND the
+  # Two conditions, and the second is the one that carries the meaning: the head must BIND the
   # identity to a real variable (`_` and `_pod_id` are discards, and a discard is the tell), and the
   # BODY must mention that variable — the tool's subject is then derived from the channel rather
   # than from the wire, which is the whole property.
@@ -1384,14 +1377,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
 
   # LA FAMILLE DE LA DELEGATION, ET NON UN CHEMIN.
   #
-  # Quatre murs derivaient leur population de `pod_tools/delegation.ex` NOMME EN DUR. Un mur attache
-  # a une ADRESSE cesse de voir ce qui demenage : le garde d'enumeration des contrats l'a demontre
-  # — au premier decoupage il a cesse de voir huit murs, sa population a retreci, et le gate est
-  # reste VERT.
+  # Un mur attache a une ADRESSE (`pod_tools/delegation.ex` nomme en dur) cesse de voir ce qui
+  # demenage : mesure sur le garde d'enumeration des contrats, qui a cesse de voir huit murs au
+  # premier decoupage pendant que le gate restait VERT.
   #
-  # `delegation.ex` fait plus de trois mille lignes et sera decoupe ; ses sous-modules existent
-  # deja (`delegation/forge_client.ex` et cinq autres). Lire la famille rend ces murs indifferents
-  # au decoupage, AVANT qu'il ait lieu — l'ordre inverse aurait coute quatre gardes muets.
+  # La famille est lue en entier — `delegation.ex` et tout `delegation/**/*.ex` — donc ces quatre
+  # murs sont indifferents a son decoupage, present et futur.
   @doc false
   @spec delegation_sources(String.t()) :: [String.t()]
   def delegation_sources(root) do
@@ -1409,11 +1400,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
       |> Enum.map(&Path.relative_to(&1, root))
       |> Enum.sort()
 
-    # ⚠ SEULES LES SOURCES QUI EXISTENT, et c'est un temoin qui l'a impose. `probe n°4` de
-    # `forge_fields_check_test` exige qu'une delegation absente rende un INSTRUMENT CASSE NOMME, pas
-    # une exception : un mur doit rendre un verdict lisible, pas tuer la tache qui l'appelle. La
-    # premiere version de ce helper laissait `quoted!/2` lever, et j'avais annonce ce retrait comme
-    # un gain — il l'etait pour la lisibilite, pas pour le contrat.
+    # ⚠ SEULES LES SOURCES QUI EXISTENT. `probe n°4` de `forge_fields_check_test` exige qu'une
+    # delegation absente rende un INSTRUMENT CASSE NOMME, pas une exception : un mur doit rendre un
+    # verdict lisible, pas tuer la tache qui l'appelle. Laisser `quoted!/2` lever ici serait un gain
+    # de lisibilite, pas de contrat.
     Enum.filter([racine | sous], &File.exists?(Path.join(root, &1)))
   end
 

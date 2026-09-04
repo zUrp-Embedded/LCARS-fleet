@@ -6,7 +6,7 @@
 
 Ne teste PAS le moteur vendoré (couvert par `tests/`, 797 verts) mais les
 garanties que LCARS ajoute par-dessus, chacune adossée à un finding du reverse
-(voir `#3_ponce-reverse/token-saver/`).
+(F3 à F10, cf. `VENDOR.md`).
 """
 
 from __future__ import annotations
@@ -355,10 +355,10 @@ class TestBoutEnBout:
 
 # ── Le switch : vocabulaire FERME des deux cotes ────────────────────────────────────────────────
 #
-# Ajoute le 2026-08-06. Le vocabulaire « off » etait ferme et tout le reste valait ON en SILENCE :
-# `LCARS_TOKEN_SAVER=disabled` compressait, et l'operateur qui l'avait ecrit croyait avoir coupe.
-# Sur un outil dont la doctrine assumee est « toute perte est silencieuse par construction »,
-# c'etait la pire valeur par defaut possible.
+# Le vocabulaire est FERME des deux cotes (2026-08-06) : un « off » ferme avec tout le reste valant
+# ON en SILENCE ferait compresser sur `LCARS_TOKEN_SAVER=disabled`, l'operateur croyant avoir coupe.
+# Sur un outil dont la doctrine assumee est « toute perte est silencieuse par construction », c'est
+# la pire valeur par defaut possible.
 
 
 def _enabled(monkeypatch, value):

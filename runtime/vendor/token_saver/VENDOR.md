@@ -7,18 +7,17 @@
 
 **Dérivé de** : [`ppgranger/token-saver`](https://github.com/ppgranger/token-saver) @ `098873e04c6c49cbdc25c1c5f795986f5f170f16` — **Apache-2.0**
 
-⚠ **Le sha fait foi, PAS une étiquette de version.** Cette ligne a annoncé « v2.6.3 » pendant cinq
-jours : faux. `git describe` sur ce sha rend **`v1.3.1-84-g098873e`**, et le tag `v2.6.3`
-(`0767a57`) est **16 commits PLUS LOIN** — même date (2026-06-02), ce qui explique la confusion et
-la rend indétectable à l'œil. Un lecteur qui cherchait « ce qu'on a vendoré » lisait un numéro de
-version qui ne désigne pas notre code, et un update « vers v2.6.3 » aurait embarqué 16 commits en
-croyant n'en embarquer aucun.
+⚠ **Le sha fait foi, PAS une étiquette de version.** `git describe` sur ce sha rend
+**`v1.3.1-84-g098873e`**, et le tag `v2.6.3` (`0767a57`) est **16 commits PLUS LOIN** — même date
+(2026-06-02), ce qui rend la confusion indétectable à l'œil. Une étiquette « v2.6.3 » ici désignerait
+un code qui n'est pas le nôtre, et un update « vers v2.6.3 » embarquerait 16 commits en croyant n'en
+embarquer aucun.
 
-Ce que la vérification a établi le 2026-08-09 : le sous-arbre `src/`, `scripts/`, `tests/` est
-**identique** à ce sha, au seul marqueur `.go7-exempt` près (posé par nous). `./update_vendor.sh
---verify` rejoue cette mesure — elle n'est plus une phrase.
+Ce que `./update_vendor.sh --verify` établit (mesuré le 2026-08-09, rejoué à chaque appel) : le
+sous-arbre `src/`, `scripts/`, `tests/` est **identique** à ce sha, au seul marqueur `.go7-exempt`
+près (posé par nous).
 **Forme d'emprunt** : `import` (vendoring de `src/` + `scripts/` + `tests/`)
-**Analyse** : reverse complet → `#3_ponce-reverse/token-saver/` (specs, architecture, harnais de mesure)
+**Analyse** : reverse complet — les findings F3 à F10 ci-dessous, mesurés par le harnais `tools/probe_loss.py`
 **Vendoré le** : 2026-08-04
 
 ---
@@ -44,7 +43,7 @@ Compression d'output de commandes CLI **avant** son entrée dans le contexte de 
 
 Le précédent GitWand (`recode` en Elixir pur, décision « ni fork, ni dep npm — pas de pile Node ») ne s'applique pas : GitWand devait tourner **dans le BEAM**. token-saver s'exécute **dans le pod**, en sous-processus du hook Claude Code, exactement comme le bridge MCP stdio. Aucune pile nouvelle n'entre dans le runtime Elixir.
 
-Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, et **un pod ne peut pas exécuter de hook** : le sanctuaire ne monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le `.claude` humain est délibérément exclu *à cause* de ses hooks. `fleet/v1/hooks.yaml` visait `~/.claude/hooks/`, le tier `user` que `--setting-sources` exclut sans condition — il n'aurait jamais tiré dans un pod (mesuré 2026-08-07).
+Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus : il voyage par `LCARS_SKILLS_PLUGINS`, qui transporte des **skills**. token-saver n'expose aucune skill — il expose un **hook**, et **un pod ne peut pas exécuter de hook** : le sanctuaire ne monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le `.claude` humain est délibérément exclu *à cause* de ses hooks. Le tier `user` (`~/.claude/hooks/`) est exclu sans condition par `--setting-sources` — un hook déployé là ne tirerait jamais dans un pod (mesuré 2026-08-07).
 
 ## Découpage retenu
 
@@ -58,7 +57,7 @@ Le précédent superpowers (`dep` + pin de version) ne s'applique pas non plus :
 
 Arborescence identique à l'amont : le merge se fait par re-copie, sans renommage ni rejeu de patch.
 
-Intention initiale révisée en cours de route : `scripts/` devait être réécrit « sous notre I-CBC ». À la lecture, la logique de décision amont s'est révélée meilleure que ce qu'on aurait produit — 460 lignes d'exclusions construites **par danger** (streaming, `sudo`, REPL, redirections, récursion), parseurs quote-aware écrits à la main, fail-open systématique. Elle est vendorée et couverte par `test_hooks.py` (récupéré du même coup). Ce que LCARS ajoute vit au-dessus, dans l'adapter.
+`scripts/` n'est PAS réécrit « sous notre I-CBC » : la logique de décision amont est meilleure que ce qu'on produirait — 460 lignes d'exclusions construites **par danger** (streaming, `sudo`, REPL, redirections, récursion), parseurs quote-aware écrits à la main, fail-open systématique. Elle est vendorée et couverte par `test_hooks.py`. Ce que LCARS ajoute vit au-dessus, dans l'adapter.
 
 Vérifié au reverse : `src/` s'importe seul, `core.compress()` fonctionne sans `scripts/`. Les deux seuls couplages `src → scripts` sont des imports **différés** (`should_compress()`, `explain_decision()`).
 
@@ -112,27 +111,24 @@ Sans garde-fou, une mise à jour romprait ces ancrages **en silence** : `adapter
 ```
 <aucun vehicule ne peut>      → PreToolUse / Bash → $HOME/.claude/hooks/token-saver-hook.sh
 (un pod ne charge ni hooks/ ni le tier user ; l'hote n'en cable aucun dans ses trois tiers)
-(fleet/v1/hooks.yaml jouait ce role et est parti avec la v1)
 .claude/hooks/token-saver-hook.sh   shim : coupe, résout la brique, passe stdin
     └→ lcars_hook.py          switch, décision de routage, réécriture de commande
          └→ lcars_wrap.py     importe `adapter` (bootstrap) puis délègue à scripts/wrap.py
 ```
 
-Le shim existe parce que les hooks sont déployés dans `~/.claude/hooks/` alors que la brique vit dans l'arbre : `$LCARS_ROOT` **n'est pas** dans l'environnement au runtime (vérifié — il n'est défini que dans des scripts v1). Le shim résout la brique parmi une liste de candidats, `LCARS_TOKEN_SAVER_HOME` en tête.
+Le shim existe parce que les hooks sont déployés dans `~/.claude/hooks/` alors que la brique vit dans l'arbre : `$LCARS_ROOT` **n'est pas** dans l'environnement au runtime (vérifié). Le shim résout la brique parmi une liste de candidats, `LCARS_TOKEN_SAVER_HOME` en tête.
 
 **Fail-open à chaque étage** : switch coupé, `python3` absent, brique introuvable, JSON invalide, moteur en erreur — la commande passe intacte. Une compression manquée coûte des tokens ; une commande bloquée coûte un pod.
 
-> ⚠ **CETTE PHRASE DISAIT « le Dockerfile ne copie pas encore `vendor/` » ET C'EST FAUX DEPUIS.** Le
-> `COPY runtime/vendor/token_saver /opt/lcars/vendor/token_saver` **existe** (`deploy/docker/Dockerfile`),
-> avec sa propre cicatrice au-dessus. La brique EST dans l'image. Corrigé le 2026-08-14 : un lecteur
-> qui arrivait ici en repartait avec l'idée qu'il restait un `COPY` à ajouter — un travail déjà fait.
+> ⚠ **LA BRIQUE EST DANS L'IMAGE** : `COPY runtime/vendor/token_saver /opt/lcars/vendor/token_saver`
+> (`deploy/docker/Dockerfile`). Il ne reste aucun `COPY` à ajouter.
 >
-> ⚠ **CE QUI MANQUE N'EST PAS LE COPY, C'EST LE VÉHICULE — ET IL N'A JAMAIS EXISTÉ.** La section
-> « Pourquoi `import` et non `recode` » plus haut est plus dure que « le porteur est parti avec la
-> v1 » : *un pod ne peut pas exécuter de hook*, le sanctuaire ne monte que `plugins/` et `skills/`,
-> `pod_settings_json/1` n'écrit aucune clé `hooks`, et le `.claude` humain est exclu **à cause** de
-> ses hooks. `fleet/v1/hooks.yaml` visait le tier `user`, que `--setting-sources` exclut sans
-> condition : **il n'aurait jamais tiré dans un pod** (mesuré 2026-08-07). Donc la brique est présente,
+> ⚠ **CE QUI MANQUE N'EST PAS LE COPY, C'EST LE VÉHICULE — ET IL N'EXISTE PAS.** La section
+> « Pourquoi `import` et non `recode` » plus haut le dit : *un pod ne peut pas exécuter de hook*, le
+> sanctuaire ne monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`,
+> et le `.claude` humain est exclu **à cause** de ses hooks. Le tier `user` (`~/.claude/hooks/`) est
+> exclu sans condition par `--setting-sources` : **un hook déployé là ne tirerait jamais dans un pod**
+> (mesuré 2026-08-07). Donc la brique est présente,
 > testée (`lcars_tests`, jouée par `shell_gate.sh`), déclarée au schéma cap-profile
 > (`spec.invocation.output_compression`) — et **aucun chemin ne l'active**. Le fail-open fait le
 > reste : aucun symptôme, la compression annoncée ne tourne simplement jamais.
@@ -153,7 +149,7 @@ LCARS_TOKEN_SAVER=off     # alias LCARS — off | 0 | false | no
 
 ### Ce qui est réglable à chaud, et ce qui ne l'est jamais
 
-Figer la configuration pour fermer F4 avait un effet de bord : plus aucun override d'environnement n'était appliqué — donc impossible de couper l'outil sans reconstruire l'image. L'environnement est rouvert, mais par **liste blanche** (`_ENV_ALLOWED`, 20 clés : seuils, fenêtres, `disabled_processors`, `debug`, le switch).
+Figer la configuration pour fermer F4 a un effet de bord : plus aucun override d'environnement ne s'applique — donc impossible de couper l'outil sans reconstruire l'image. L'environnement est donc rouvert, mais par **liste blanche** (`_ENV_ALLOWED`, 20 clés : seuils, fenêtres, `disabled_processors`, `debug`, le switch).
 
 La distinction tient à la provenance :
 

@@ -40,22 +40,18 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # in the artifact, and the check fails loudly when that literal becomes unreadable. A copy that is
   # not in the tree has nothing to judge. Same shape, same cause, same answer.
   #
-  # ⚠ ITS EXEMPTION IS NARROWER SINCE 2026-08-27, AND THIS COMMENT IS WHAT WAS WRONG. It read "what
-  # it cannot see is the THREE SHELL COPIES" — the check held four copies then, two of which
-  # (`services/`, `bin/`) the image's build stage DOES carry, since it excludes only `deploy`,
-  # `git-hooks` and `system-prompt`. The check now scopes PER MIRROR, so this entry earns the
-  # exemption only on a root with no mirror tree at all — an empty one, which is exactly what this
-  # test builds. A count written in prose is a claim, and this one had drifted by one and by kind.
-  # ⚠ DEUX ENTREES AJOUTEES LE 2026-08-27, ET ELLES N'ONT PAS CHANGE DE COMPORTEMENT — ELLES SONT
-  # DEVENUES VISIBLES. `bats.descriptions_inert` et `site.build_inputs` etaient `defp`, donc hors de
-  # la reflexion, donc hors de la garantie que ce fichier annonce. Les deux declaraient DEJA leur
-  # abstention par ecrit (« HORS PERIMETRE — pas de suite bats ici », « HORS PERIMETRE —
-  # assets/github.io absent de cet arbre »), et leur cause est la meme que les trois du dessus : un
-  # arbre voisin que le stage `build` de l'image ne copie pas. Le troisieme invisible,
-  # `template.gitea_expansion`, N'EST PAS ICI : il ne declarait rien, il est passe fail-closed.
-  # ⚠ `layout.private_dir_single_source` A ETE ATTRAPE PAR CE FICHIER LE JOUR DE SON ECRITURE, et
-  # c'est le garde renforce le matin meme qui l'a vu. Son exemption est pesee ici, comme ce
-  # commentaire l'exige, et elle n'a PAS la meme cause que les cinq du dessus.
+  # ⚠ ITS EXEMPTION IS NARROW: the check scopes PER MIRROR (`services/` and `bin/` ship in the
+  # image, whose build stage excludes only `deploy`, `git-hooks` and `system-prompt`), so this entry
+  # earns the exemption only on a root with no mirror tree at all — an empty one, which is exactly
+  # what this test builds. A count written in prose is a claim, and one here has drifted before.
+  # ⚠ `bats.descriptions_inert` ET `site.build_inputs` SONT `def`, PAS `defp` — sinon hors de la
+  # reflexion, donc hors de la garantie que ce fichier annonce. Les deux declarent leur abstention
+  # par ecrit (« HORS PERIMETRE — pas de suite bats ici », « HORS PERIMETRE — assets/github.io
+  # absent de cet arbre »), et leur cause est la meme que les trois du dessus : un arbre voisin que
+  # le stage `build` de l'image ne copie pas. `template.gitea_expansion` N'EST PAS ICI : il ne
+  # declare rien, il passe fail-closed.
+  # ⚠ `layout.private_dir_single_source` : son exemption est pesee ici, comme ce commentaire
+  # l'exige, et elle n'a PAS la meme cause que les cinq du dessus.
   #
   # Ce check ne compare pas des copies a une autorite : il verifie que N declarations d'un meme
   # repertoire s'ACCORDENT — aucune n'a ete designee comme faisant foi. En dessous de DEUX
@@ -131,14 +127,14 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
     # it exists to catch, arriving inside it.
     found = check_functions()
 
-    # ⚠ CE GARDE ETAIT UN PLANCHER A 25 PENDANT QUE LA TACHE EN JOUAIT 58, ET C'EST CE QUI A LAISSE
-    # PASSER LE TROU. `__info__(:functions)` ne voit que les fonctions PUBLIQUES : trois checks
-    # d'arite 1 etaient `defp`, donc invisibles a la reflexion — la garantie « aucun check ne passe
-    # sur rien » ne couvrait que 55 des 58, et l'un des trois (`template.gitea_expansion`) rendait
-    # bel et bien un vert muet sur un repertoire renomme. Un plancher a 25 ne pouvait pas le voir :
-    # 55 >= 25.
+    # ⚠ LE GARDE COMPTE CE QUE LA TACHE APPELLE, PAS UN PLANCHER. `__info__(:functions)` ne voit que
+    # les fonctions PUBLIQUES : un plancher (mesure : 25, pendant que la tache jouait 58 checks) ne
+    # voit pas trois checks `defp` invisibles a la reflexion — la garantie « aucun check ne passe
+    # sur rien » ne couvre alors que 55 des 58, et l'un des trois (`template.gitea_expansion`)
+    # rendait bel et bien un vert muet sur un repertoire renomme. 55 >= 25 : un plancher ne le voit
+    # pas.
     #
-    # Le garde COMPTE DESORMAIS CE QUE LA TACHE APPELLE, dans sa propre source. Un check ajoute a
+    # Le garde compte donc dans la source de la tache elle-meme. Un check ajoute a
     # `run_checks` sans etre joignable par reflexion — parce qu'il est prive — rougit ici, au lieu
     # d'echapper en silence a la garantie que ce fichier annonce.
     called = called_checks()
@@ -178,12 +174,11 @@ defmodule Mix.Tasks.Lcars.Contracts.NoCheckPassesOnNothingTest do
   # est la seule autorite sur « ce que le gate joue », et la recopier ici en ferait une seconde qui
   # derive.
   #
-  # ⚠ LE PREFIXE DE FAMILLE EST LU, PAS SUPPOSE ABSENT — ET C'EST UNE LECON PAYEE. Depuis le
-  # decoupage du 2026-09-02 un mur vit dans `Check`, `Check.SingleSource` ou `Check.Tests`. Le motif
-  # precedent n'acceptait que l'appel NU : au premier deplacement il a cesse de voir huit murs, la
-  # liste `called` a retreci, l'inclusion `called ⊆ found` est restee vraie et le gate est reste
-  # VERT. Un garde qui retrecit en silence est la panne exacte que ce fichier existe pour empecher,
-  # arrivee a l'interieur de lui.
+  # ⚠ LE PREFIXE DE FAMILLE EST LU, PAS SUPPOSE ABSENT. Un mur vit dans `Check`, `Check.SingleSource`
+  # ou `Check.Tests` ; un motif qui n'accepterait que l'appel NU cesserait de voir huit murs au
+  # premier deplacement, la liste `called` retrecirait, l'inclusion `called ⊆ found` resterait vraie
+  # et le gate resterait VERT (mesure au decoupage du 2026-09-02). Un garde qui retrecit en silence
+  # est la panne exacte que ce fichier existe pour empecher, arrivee a l'interieur de lui.
   # Le meme corps, compte par un motif qui ne suppose RIEN du prefixe. Sert uniquement de temoin de
   # completude a `called_checks/0` — il ne dit pas dans quel module vit le mur, seulement qu'il est
   # appele.

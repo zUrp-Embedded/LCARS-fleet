@@ -72,9 +72,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # UN SEAM D'EXECUTION, LU SUR L'AST ET NON SUR LE TEXTE. La version grep ne nommait que
-  # `Application.get_env`/`fetch_env` et `apply(` — trois contournements passaient au vert en
-  # faisant exactement la meme chose : `Application.get_all_env`, `Application.compile_env`, et le
+  # UN SEAM D'EXECUTION, LU SUR L'AST ET NON SUR LE TEXTE. Un grep qui ne nommerait que
+  # `Application.get_env`/`fetch_env` et `apply(` laisserait passer au vert trois contournements
+  # qui font exactement la meme chose : `Application.get_all_env`, `Application.compile_env`, et le
   # dispatch par cible non statique (`mod().f()`, `fun.()`), qui est la forme la plus pure de
   # l'injection de module qu'on refuse ici.
   defp runtime_seam({{:., _, [{:__aliases__, _, [:Application]}, f]}, _, _}),
@@ -136,8 +136,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       id: "capprofile.modop_incompatible_path",
       remediation:
         "keep the modop-incompatibility guard (check_modop_incompatible) in cap_profile.ex / invariants.ex",
-      # The guarded function (check_modop_incompatible) was EXTRACTED to invariants.ex — the rail
-      # watches BOTH (the wrong path can come back in either one).
+      # The guarded function (check_modop_incompatible) lives in invariants.ex — the rail watches
+      # BOTH files (the wrong path can come back in either one).
       files: [
         "lib/fleet/cap_profile.ex",
         "lib/fleet/cap_profile/invariants.ex"
@@ -182,9 +182,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   # A REAL backend without `mcp_server_spec` must be refused (fail-loud) — a real pod
-  # speaks MCP, without MCP it starts broken (silent timeout). MCP provisioning was
-  # extracted from pod.ex into its own module; this check guards the guard at TWO levels,
-  # both required (otherwise fail):
+  # speaks MCP, without MCP it starts broken (silent timeout). MCP provisioning lives in its own
+  # module (`mcp_provision.ex`); this check guards the guard at TWO levels, both required
+  # (otherwise fail):
   #   level 1 (wiring) — pod.ex CALLS `McpProvision.maybe_provision_mcp_config(` in
   #     its provisioning with-chain (without this call, the guard, even present in
   #     the dedicated module, would never run on the spawn path);
@@ -227,9 +227,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     )
   end
 
-  # `Fleet.Spawner.spawn_pod/3` must enforce the one-shot-brief REAL invariant, not merely NAME it (DR-030): the
-  # earlier marker-only `:brief_required` presence passed on the @doc prose alone. We now assert the
-  # EXECUTABLE clauses (doc blocks excluded by `code_match?`, BND-111):
+  # `Fleet.Spawner.spawn_pod/3` must enforce the one-shot-brief REAL invariant, not merely NAME it
+  # (DR-030): a marker-only `:brief_required` presence would pass on the @doc prose alone. The
+  # EXECUTABLE clauses are asserted (doc blocks excluded by `code_match?`, BND-111):
   #   1. one-shot without brief → refused: the executable tuple `{:error, :brief_required}` on its line.
   #   2. a cap-profile WITHOUT `lifetime_scope` is not a spawnable state (DR-019): spawn_pod gates on
   #      `CapProfile.fetch_lifetime_scope/1` and refuses `{:error, :cap_profile_no_lifetime_scope}` — so
@@ -278,12 +278,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   @doc """
   Every site that SETS `awaits-arch` must CLEAR `in-flight` in the same file.
 
-  The invariant was stated in three places and guarded in none, so two writers honoured it and the
-  third did not — and the registry that was supposed to record which is which had itself gone
-  stale. A wall makes the registry's accuracy irrelevant: the property holds whether or not anyone
-  remembered to write it down.
+  An invariant stated in prose and guarded by nothing is honoured by some writers and not by
+  others — and a registry meant to record which is which goes stale itself. A wall makes the
+  registry's accuracy irrelevant: the property holds whether or not anyone remembered to write it
+  down.
 
-  What the third writer cost, observed on the bench: `awaits-arch` takes a ticket out of dispatch
+  What a writer that clears nothing costs, observed on the bench: `awaits-arch` takes a ticket out of dispatch
   but the in-flight lock stays. Reconciliation then finds that lock orphaned (no live pod),
   reclaims it, re-dispatches — and a fresh pod goes to block in the same place, every tick, until a
   human closes the ticket. The brake was on and the wheel kept turning.
@@ -341,10 +341,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     end
   end
 
-  # ANCHORED ON THE CALL, not on the file. The first version asked "does this file mention
-  # add_label AND the awaits-arch label?" and flagged `pod_tools/delegation.ex`, which READS the
-  # label to list the arch's escalation inbox and adds an unrelated one. A file-level co-occurrence
-  # answers a neighbouring question, and the answer looks like a finding.
+  # ANCHORED ON THE CALL, not on the file. Asking "does this file mention add_label AND the
+  # awaits-arch label?" flags `pod_tools/delegation.ex`, which READS the label to list the arch's
+  # escalation inbox and adds an unrelated one. A file-level co-occurrence answers a neighbouring
+  # question, and the answer looks like a finding.
   #
   # The label may arrive as `@attr` or as the accessor call, so the argument span has to tolerate
   # ONE level of nesting (`Fleet.Labels.awaits_arch()` carries its own parens) — a plain `[^)]*`
@@ -367,10 +367,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     match_source?(path, Regex.compile!("#{fun}\\(#{@label_arg_span}(#{label_alt})", "s"))
   end
 
-  # ⚠ ON MESURE LE CODE, PAS LA PROSE. La version precedente cherchait le motif dans la source
-  # BRUTE : un `# was: unlock(...)` laisse par un auteur qui venait justement de RETIRER l'appel
-  # satisfaisait le mur. Le commentaire qui explique la suppression tenait lieu de la chose
-  # supprimee. `code_of/1` retire les commentaires ligne a ligne — il existe pour ca.
+  # ⚠ ON MESURE LE CODE, PAS LA PROSE. Sur la source BRUTE, un `# was: unlock(...)` laisse par
+  # l'auteur qui vient justement de RETIRER l'appel satisferait le mur : le commentaire qui explique
+  # la suppression tiendrait lieu de la chose supprimee. `code_of/1` retire les commentaires ligne
+  # a ligne — il existe pour ca.
   defp match_source?(path, re) do
     case File.read(path) do
       {:ok, src} -> Regex.match?(re, code_of(src))
@@ -432,9 +432,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # (contracts_gate), red build, immediate fix.
 
   # The `:result_deadline` timer must be CANCELLED when the result arrives (otherwise it
-  # kills the long-lived forever/pipe/run pods at cycle 2). Since the `Pod` →
-  # `gen_statem` migration, the cancellation is not a home-made impl (`Process.cancel_timer`) but
-  # NATIVE: `:result_deadline` is a **state_timeout of the `:monitoring` state**, and the
+  # kills the long-lived forever/pipe/run pods at cycle 2). The cancellation is not a home-made
+  # impl (`Process.cancel_timer`) but NATIVE to `gen_statem`: `:result_deadline` is a **state_timeout of the `:monitoring` state**, and the
   # `:monitoring → :extracting` transition (triggered by the result arriving,
   # `work_item.completed`) AUTOMATICALLY cancels this state_timeout (a state_timeout is
   # cancelled at the state change). So this check verifies the TWO pillars of this
@@ -498,7 +497,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # NOT test-only, otherwise they are HOLLOW containment/credentials gates (called
   # in test but never in prod — the "hollow-gate" failure mode this checker
   # exists to block). The containment gate stays direct in pod.ex; the credentials
-  # gate (login-validity — the scope/plan sub-gates are gone as vendor-redundant)
+  # gate (login-validity; no scope/plan sub-gates, those are vendor-redundant)
   # lives behind Fleet.Credentials.Gate, reached through Pod.LaunchEnv. 3 checks (all required):
   #     (1) CapProfile.validate — containment gate (refusal of native server-tools), at do_allocate;
   #     (2) pod.ex calls LaunchEnv.build — do_launch chains the env + credentials gates;
@@ -509,10 +508,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   def check_spawn_gates_wired(root) do
     pod = "lib/fleet/spawner/pod.ex"
 
-    # The env construction + the credentials gate live in Pod.LaunchEnv (the env/creds cluster extracted
-    # from do_launch). do_launch (pod.ex) calls LaunchEnv.build, which wires Gate.validate. The gate is
-    # thus wired to the spawn by TWO conjoint facts: pod.ex calls LaunchEnv.build AND LaunchEnv.build
-    # contains Gate.validate (stronger than the old single-file check where everything was inline in pod.ex).
+    # The env construction + the credentials gate live in Pod.LaunchEnv. do_launch (pod.ex) calls
+    # LaunchEnv.build, which wires Gate.validate. The gate is thus wired to the spawn by TWO conjoint
+    # facts: pod.ex calls LaunchEnv.build AND LaunchEnv.build contains Gate.validate — a single-file
+    # check would hold neither half once the code is split.
     launch_env = "lib/fleet/spawner/pod/launch_env.ex"
 
     # Each check = {relative_file, regex, label}. The label names the expected file.
@@ -718,13 +717,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     }
   end
 
-  # LE VERIFICATEUR AUTONOME AFFIRMAIT COUVRIR LE BOOT, ET L'EQUIVALENCE N'ETAIT TENUE PAR RIEN
-  # (6-008). `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
+  # LE VERIFICATEUR AUTONOME DOIT COUVRIR LE BOOT, ET SEUL CE MUR TIENT L'EQUIVALENCE (6-008).
+  # `CatalogueVerify` imprime « catalogue OK — every check the boot runs passed. » et
   # `Pilot.Application.verify_cards_and_roles!/1` documente « Runs EXACTLY what start_link/1 runs at
-  # rail boot ». Mesure : le boot en jouait SIX, le verificateur QUATRE —
-  # `validate_workshop_card!` et `validate_default_card_loads!` (alors `validate_default_card_matrix!`)
-  # manquaient. Un verificateur VERT
-  # pouvait preceder un boot ROUGE, ce qui est le contraire de son objet.
+  # rail boot ». Mesure a la pose : six gardes au boot, quatre au verificateur
+  # (`validate_workshop_card!` et `validate_default_card_loads!` manquaient) — un verificateur VERT
+  # precedait un boot ROUGE, le contraire de son objet.
   #
   # Les deux sequences sont lues A L'AST, pas au grep : une garde citee dans un commentaire ne doit
   # pas pouvoir verdir ce mur, et une garde ajoutee au boot ne doit pas pouvoir s'y cacher. On
@@ -796,16 +794,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   @doc """
   Toute fonction nommee dans une porte `eval` d'un script est EXPORTEE par le module qu'elle nomme.
 
-  ## Le defaut qui a pose ce mur
+  ## Le defaut que ce mur ferme
 
   `bin/lcars project migrate` execute
-  `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"`. Le decoupage d'`onboard.ex` a descendu
-  `eval_migrate/2` et `eval_reconcile/1` dans `Onboard.Migration` SANS les re-exporter. Les deux
-  verbes du CLI levaient un `UndefinedFunctionError`, et le provisioning d'une machine fraiche
-  echouait a l'etape `lcars project reconcile`.
+  `"$bin" eval "Fleet.Project.Onboard.eval_migrate(...)"`. Un decoupage qui descend `eval_migrate/2`
+  et `eval_reconcile/1` dans `Onboard.Migration` SANS les re-exporter leve un `UndefinedFunctionError`
+  sur les deux verbes du CLI, et le provisioning d'une machine fraiche echoue a l'etape
+  `lcars project reconcile` (mesure).
 
-  RIEN NE POUVAIT LE VOIR. Le CLI est du SHELL : le compilateur ne lit pas cette chaine, dialyzer
-  non plus, et les temoins de la fonction avaient ete rebranches sur le sous-module — donc verts.
+  RIEN D'AUTRE NE PEUT LE VOIR. Le CLI est du SHELL : le compilateur ne lit pas cette chaine,
+  dialyzer non plus, et les temoins de la fonction, rebranches sur le sous-module, restent verts.
   Huit etapes de gate, zero signal. C'est la definition d'une couture non tenue : un appel qui
   traverse une frontiere de langage n'est verifie par personne, sauf par un mur qui la traverse
   aussi.
@@ -891,19 +889,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       forge-gestures: web-demo <-  (@)
       fatal: repository 'http://127.0.0.1:21000/.git/' not found
 
-  La porte avait imprime une ligne vide, puis un `Logger.info`, puis sa reponse. `read -r repo
-  branch sha` a lu la premiere ligne. L'URL a ete construite sur du vide et git s'est fait accuser.
+  La porte imprime une ligne vide, puis un `Logger.info`, puis sa reponse ; `read -r repo branch
+  sha` lit la premiere ligne, l'URL est construite sur du vide et git se fait accuser.
 
-  Le `@doc` de cette porte ENONCAIT la regle depuis toujours — « and nothing else: the caller feeds
-  it to `git clone`, so a line of politeness would become part of a URL » — et rien ne la tenait.
-  Le defaut a dormi tant qu'aucun log ne sortait sur ce chemin ; il s'est reveille quand la fleet a
-  commence a publier son catalogue de reference, dont l'ecartement est DIT.
+  Le `@doc` de cette porte ENONCE la regle — « and nothing else: the caller feeds it to `git
+  clone`, so a line of politeness would become part of a URL » — et seul ce mur la tient : le
+  defaut dort tant qu'aucun log ne sort sur ce chemin, et se reveille quand la fleet publie son
+  catalogue de reference, dont l'ecartement est DIT.
 
   ## Pourquoi un mur et pas une relecture
 
-  Quatre portes sur sept le faisaient, trois ne le faisaient pas — dont deux que personne n'avait
-  regardees (`Fleet.Roster.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail, une
-  etape plus loin). Une regle tenue par quatre sites sur sept est une regle que le huitieme rate.
+  Mesure a la pose : quatre portes sur sept reclamaient stdout, trois non — dont deux que personne
+  n'avait regardees (`Fleet.Roster.eval_main/1` et `eval_tfvars/1`, toutes deux sur le meme rail,
+  une etape plus loin). Une regle tenue par quatre sites sur sept est une regle que le huitieme rate.
 
   Derive de l'AST, donc rien a maintenir : une porte ajoutee demain est mesuree par construction.
 
@@ -926,8 +924,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
 
     # INSTRUMENT GUARD. Chaque finding est une ABSENCE, et un parseur casse en produit autant. La
     # forme `def f(x) when g` est le piege : la tete est enveloppee dans un `:when`, donc une sonde
-    # naive ne scanne aucun corps — et rend un vert parfait sur un
-    # arbre qui portait TROIS portes nues. Le plancher est pose sous l'etat du jour, pas dessus.
+    # naive ne scanne aucun corps — et rendrait un vert parfait sur un arbre qui porte TROIS portes
+    # nues. Le plancher est pose sous l'etat du jour, pas dessus.
     broken =
       cond do
         length(doors) < 6 -> "only #{length(doors)} `eval*` function(s) found (expected 6+)"
@@ -948,8 +946,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
           naked != [] -> Enum.sort(naked)
           true -> []
         end,
-      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR. Elle disait « all claiming it » sans condition, donc
-      # elle affirmait la conformite dans le rapport meme d'un echec.
+      # ⚠ LA NOTE DECRIT L'ETAT, PAS L'ESPOIR : un « all claiming it » sans condition affirmerait la
+      # conformite dans le rapport meme d'un echec.
       note:
         "#{length(doors)} `eval*` door(s), #{length(writers)} writing to stdout, " <>
           if(naked == [], do: "all claiming it", else: "#{length(naked)} NOT claiming it")
@@ -957,8 +955,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   end
 
   # ⚠ `def_name/1` (plus bas) DEPLIE le `:when` : la tete d'un `def f(x) when g` y est enveloppee,
-  # et sans ce depliage aucun corps n'est atteint. Ma premiere ecriture en avait un doublon local —
-  # le meme code, deux maisons, exactement ce que ce fichier refuse partout ailleurs.
+  # et sans ce depliage aucun corps n'est atteint. Pas de doublon local de ce depliage : le meme
+  # code, deux maisons, est exactement ce que ce fichier refuse partout ailleurs.
   defp eval_doors_in(path) do
     {_, found} =
       quoted!(Path.dirname(path), Path.basename(path))
@@ -1002,12 +1000,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # Finch pool is supervised by the app, so it does not exist, and the first forge call dies on
   # `** (ArgumentError) unknown registry: Fleet.Forge.Finch`.
   #
-  # ⚠ THIS HAS NOW BEEN FOUND TWICE, ON TWO DIFFERENT DOORS, WITH THE SAME MESSAGE. `eval_migrate`
-  # carries the scar and its fix inline; `CatalogueLifecycle`'s two doors were written afterwards
-  # and reintroduced it, measured on a bench — `lcars catalogue list` prints the
-  # ArgumentError under its own "the forge did not answer" line, i.e. a network diagnostic for a
-  # startup failure. Unit tests cannot catch it: they inject forge doubles, so the path that needs
-  # the pool is taken by nobody.
+  # ⚠ THE SAME FAULT SURFACES ON EVERY NEW DOOR, WITH THE SAME MESSAGE (found twice, on two
+  # doors, measured on a bench): `lcars catalogue list` prints the ArgumentError under its own
+  # "the forge did not answer" line, i.e. a network diagnostic for a startup failure. Unit tests
+  # cannot catch it: they inject forge doubles, so the path that needs the pool is taken by nobody.
   #
   # THE RULE IS FILE-LEVEL AND THAT IS DELIBERATE. Deciding per function whether a door "reaches"
   # the forge means following calls across modules — fragile, and wrong the day an indirection is
@@ -1054,9 +1050,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   # Elixir fait d'un `__aliases__` un ATOME, toujours : `DependencyForge` non alias devient
   # `Elixir.DependencyForge`, un atome parfaitement valide. Quand ce nom est APPELE, le
   # compilateur avertit (« module is not available ») ; quand il est passe comme VALEUR —
-  # `Gate.conforming(DependencyForge, forge)` — il n'avertit RIEN. Le decoupage de `Delegation` a
-  # produit exactement ca : 34 temoins sont tombes au runtime, et rien d'autre ne l'avait vu, ni
-  # `--warnings-as-errors`, ni les 71 murs.
+  # `Gate.conforming(DependencyForge, forge)` — il n'avertit RIEN. Mesure au decoupage de
+  # `Delegation` : 34 temoins tombes au runtime, et rien d'autre ne l'avait vu, ni
+  # `--warnings-as-errors`, ni les 71 murs d'alors.
   #
   # DEUX RESTRICTIONS, chacune parce qu'elle separe le defaut d'un usage legitime :
   #   · UN SEUL SEGMENT. Un nom de processus enregistre (`Fleet.PubSub`, `Fleet.MCP.PodSocketRegistry`)

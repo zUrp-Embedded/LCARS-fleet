@@ -20,7 +20,7 @@ Cet import n'est pas décoratif — il fait tout le travail :
 
 `scripts/wrap.py` fait ensuite son travail inchangé : exécution du processus
 fils, gestion des signaux, découpage des chaînes par marqueurs, propagation du
-code de retour. Rien de tout cela n'avait besoin d'être réécrit.
+code de retour. Rien de tout cela n'a besoin d'être réécrit.
 
 Usage (posé par le hook, jamais tapé à la main) :
     python3 lcars_wrap.py '<commande>'

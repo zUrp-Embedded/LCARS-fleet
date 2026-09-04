@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SOURCE: test/shell_gate.sh
 # AUTHOR: starfleet
-# STARDATE: 2026.239
+# STARDATE: 2026.247
 # STATUS: filet des tests HORS-mix (python + bats des launchers) — le trou que `mix gate` ne voit pas.
 #
 # RAISON D'ETRE : `mix gate` = compile + `mix test` (ExUnit) + contracts.check. Il ne lance AUCUN
@@ -13,13 +13,15 @@
 #   - python3 ABSENT               → ECHEC EXPLICITE (jamais un skip silencieux : c'est la lecon du bug).
 #   - 0 test compte OU FAIL>0      → exit != 0 (jamais vert sans compteur positif — la « coquille vide »
 #                                     qui passe est l'anti-pattern precis a tuer).
-#   - shellcheck                   → HORS GATE depuis le 2026-08-29 (⚖ USER). Le pas est arrive
-#                                     rouge et ne l'a jamais quitte ; un gate qu'on sait toujours
-#                                     rouge apprend a lire « rouge » comme « normal ». Le code vit
-#                                     toujours au §5, sous `LCARS_SHELL_LINT=1`, et son absence est
-#                                     ANNONCEE a chaque passage. Contrat d'origine, a restaurer le
-#                                     jour ou le compte est a zero : absent ou un seul signalement
-#                                     = exit != 0, meme barreau que `--warnings-as-errors`.
+#   - shellcheck ABSENT            → ECHEC (meme regle que python3 : un plancher qu'on peut sauter
+#                                     en silence n'est pas un plancher).
+#   - shellcheck plancher          → `-S warning` sur TOUT le shell suivi, deploy/ compris : un
+#                                     signalement de severite >= warning = exit != 0, meme barreau
+#                                     que `--warnings-as-errors`. Le plancher est a ZERO (mesure du
+#                                     2026-09-01) et mord au premier warning. L'audit complet, toutes
+#                                     severites, est opt-in (`LCARS_SHELL_LINT=1`, informatif) — un
+#                                     pas qu'on sait toujours rouge apprend a lire « rouge » comme
+#                                     « normal » (⚖ USER 2026-08-29), cf. §5.
 #   - bats PRESENT + rouge         → exit != 0.
 #   - bats ABSENT                  → PAS d'echec ICI (warning + compte MANQUE). Choix delibere : ce filet
 #                                     est cable dans `mix gate`, l'absence de bats sur une machine sans
@@ -30,12 +32,10 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ⚠ `REPO_ROOT` EST DEFINI EN TETE, ET IL L'A ETE DEUX FOIS PLUS BAS. Il vivait au §1ter, avec ce
-# motif : « la premiere version de ce pas le lisait avant sa definition, donc `$GO7_HOOK` valait
-# "/fleet/git-hooks/pre-commit", le `-f` echouait, et le pas entier se sautait EN SILENCE ». Le
-# motif reste vrai et il vaut a fortiori ici : `--list-corpora` doit repondre AVANT le premier pas,
-# donc avant que quoi que ce soit ne tourne. Une seule definition, au plus haut, pour tout le
-# fichier.
+# ⚠ `REPO_ROOT` EST DEFINI EN TETE, UNE SEULE FOIS. Lu avant sa definition, `$GO7_HOOK` vaudrait
+# "/fleet/git-hooks/pre-commit", le `-f` echouerait, et le pas GO-7 entier se sauterait EN SILENCE ;
+# et `--list-corpora` doit repondre AVANT le premier pas, donc avant que quoi que ce soit ne tourne.
+# Une seule definition, au plus haut, pour tout le fichier.
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 
 # ─── LES CORPUS QUE CETTE PORTE JOUE — DEFINIS ICI, IMPRIMES A LA DEMANDE ───────────────────────
@@ -47,16 +47,14 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # porte qui MENT sur ce qu'elle joue est ce meme defaut, d'un cran plus haut.
 #
 # ⚠ IL REPOND ET SORT AVANT TOUT PAS : le registre l'interroge, il ne veut pas jouer 205 tests
-# python pour obtenir quatre lignes. Ma premiere ecriture le posait apres le §1 et faisait
-# exactement cela.
+# python pour obtenir quatre lignes.
 #
-# ⚠ ET LES CHEMINS SORTENT CANONIQUES. `$HERE/../vendor/...` rendait « runtime/test/../vendor/… »,
+# ⚠ ET LES CHEMINS SORTENT CANONIQUES. `$HERE/../vendor/...` rendrait « runtime/test/../vendor/… »,
 # que le registre compare a « runtime/vendor/… » : deux ecritures du meme repertoire, et une
 # comparaison de chaines qui echoue sur une egalite vraie.
 #
-# ⚠ ET `deploy/tests` N'EST PLUS LA. Ses 1294 cas — 73 % de tout le corpus bats que cette
-# porte jouait — sont ceux de L'INSTALLEUR, et ils ont desormais la leur : `deploy/gate.sh`.
-# Le detachement n'est pas declaratif : `pack.sh` joue les deux portes avant d'empaqueter, et
+# ⚠ ET `deploy/tests` N'EST PAS ICI : ses cas sont ceux de L'INSTALLEUR, qui a sa propre porte,
+# `deploy/gate.sh`. Le detachement n'est pas declaratif : `pack.sh` joue les deux portes avant d'empaqueter, et
 # `tests.corpora_on_record` DEMANDE a chaque porte ce qu'elle joue au lieu de croire un mot-cle.
 SKILLS_TESTS="$REPO_ROOT/.claude/skills"
 HOOK_TESTS="$REPO_ROOT/runtime/git-hooks/tests"
@@ -229,11 +227,10 @@ if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
     case "${_f##*.}" in
       md) check_md_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
       sh|py) check_source_header "$REPO_ROOT/$_f" || GO7_BAD+=("$_f") ;;
-      # Pas de branche `ex)` : la clause GO-7 sur les .ex est retiree (2026-08-06). Elle exigeait
-      # un tampon `**Last revised**` que la passe 1 du hook ECRIVAIT elle-meme — un mur qui
-      # verifiait sa propre peinture. Rien ne la remplace : 238 .ex sur 238 portent un @moduledoc,
-      # donc tout marqueur de presence serait vert par construction. Le motif complet est dans
-      # l'en-tete du hook, qui reste l'autorite de cette regle.
+      # Pas de branche `ex)` : aucune clause GO-7 sur les .ex. Un tampon `**Last revised**` que la
+      # passe 1 du hook ECRIT elle-meme serait un mur qui verifie sa propre peinture, et 238 .ex sur
+      # 238 portent un @moduledoc, donc tout marqueur de presence serait vert par construction. Le
+      # motif complet est dans l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
   done < <(git -C "$REPO_ROOT" ls-files fleet deploy)
 
@@ -294,24 +291,16 @@ fi
 #    tout le depot, y compris a lui-meme, et il n'avait aucun test — un mur non teste ne se
 #    distingue d'un mur absent que le jour ou on le contourne.
 #
-#    `deploy/tests/` : ajoute le 2026-08-05. Ces suites existaient depuis le
-#    2026-07-30 et AUCUN gate ne les jouait — un test que personne ne lance est un test qui
-#    pourrit, et il donne la couverture sans la donner. Meme raison que les skills : le
-#    provisioning est ce qui fabrique la machine sur laquelle tout le reste tourne. Absence du
-#    repertoire = pas une erreur (meme regle que les skills).
+#    `deploy/tests/` : PAS ICI. Ce sont les temoins de l'installeur — ils mesurent la chaine
+#    d'install, pas le runtime — et `deploy/gate.sh` est leur porte (cf. §0). Une porte qui les
+#    compterait annoncerait une couverture que l'autre fournit.
 # ---------------------------------------------------------------------------
-# ⚠ `REPO_ROOT` N'EST PAS REDEFINI ICI, ET IL L'ETAIT. La meme derivation vivait deux fois dans ce
-# fichier, a l'identique. Sans consequence tant que les deux disent la meme chose — et c'est
-# exactement ce qui rend la seconde dangereuse : le jour ou l'une des deux bouge, celle qu'on ne
-# relit pas gagne pour la moitie du gate. La definition d'en haut (avec le motif de sa position)
-# fait autorite pour tout le fichier.
-# ⚠ `SKILLS_TESTS` ET `HOOK_TESTS` SONT DEFINIS EN TETE, avec les autres corpus et le mode
-# `--list-corpora` qui les imprime. Ils vivaient ICI en second exemplaire — la faute exacte que le
-# commentaire ci-dessus reproche a `REPO_ROOT`, trois lignes plus haut, dans le meme fichier.
-#
-# ⚠ ET `PROVISION_TESTS` N'EST PLUS DECOUVERT — c'est le detachement de l'installeur. Ses 69
-# fichiers / 1294 cas etaient 73 % de tout ce que cette boucle jouait, et ils ne mesurent pas le
-# runtime : ils mesurent la chaine d'install. `deploy/gate.sh` est leur porte.
+# ⚠ `REPO_ROOT`, `SKILLS_TESTS` ET `HOOK_TESTS` NE SONT PAS REDEFINIS ICI : ils sont definis en
+# tete, avec les autres corpus et le mode `--list-corpora` qui les imprime. Une meme derivation
+# ecrite deux fois dans ce fichier serait sans consequence tant que les deux disent la meme chose —
+# et c'est exactement ce qui rend la seconde dangereuse : le jour ou l'une bouge, celle qu'on ne
+# relit pas gagne pour la moitie du gate. La definition d'en haut fait autorite pour tout le
+# fichier.
 mapfile -t BATS_FILES < <(
   find "$HERE" -type f -name '*.bats'
   [[ -d "$SKILLS_TESTS" ]] && find "$SKILLS_TESTS" -type f -path '*/tests/*.bats'
@@ -322,12 +311,11 @@ mapfile -t BATS_FILES < <(printf '%s\n' "${BATS_FILES[@]}" | sort -u)
 BATS_FILE_COUNT="${#BATS_FILES[@]}"
 # Nombre de cas @test (info plus fine que le nb de fichiers pour l'avertissement « N tests manques »).
 if [[ "$BATS_FILE_COUNT" -gt 0 ]]; then
-  # ⚠ `|| true` LOAD-BEARING (mur I3), et le defaut etait LATENT ici. `grep -c` rend 1 quand il ne
-  # trouve rien, et sous `set -euo pipefail` ce 1 traverse le tube et tue le script. Le cas ne se
-  # produit que si AUCUN fichier `.bats` decouvert ne porte de `@test` — une suite videe par un
-  # refactor, c'est-a-dire exactement ce qu'un gate doit voir. Trouve dans la porte jumelle
-  # (`deploy/gate.sh`) par son propre temoin ; corrige des deux cotes, la meme forme ayant le meme
-  # mode de mort.
+  # ⚠ `|| true` LOAD-BEARING (mur I3). `grep -c` rend 1 quand il ne trouve rien, et sous
+  # `set -euo pipefail` ce 1 traverse le tube et tue le script. Le cas ne se produit que si AUCUN
+  # fichier `.bats` decouvert ne porte de `@test` — une suite videe par un refactor, c'est-a-dire
+  # exactement ce qu'un gate doit voir. Meme forme, meme mode de mort dans la porte jumelle
+  # (`deploy/gate.sh`), dont le temoin l'a trouve.
   BATS_TEST_COUNT="$( { grep -hcE '^@test' "${BATS_FILES[@]}" 2>/dev/null || true; } | awk '{s+=$1} END {print s+0}')"
 else
   BATS_TEST_COUNT=0
@@ -390,11 +378,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5) shellcheck sur tout le shell SUIVI. AUCUN filtre de severite.
+# 5) shellcheck sur tout le shell SUIVI : un PLANCHER (`-S warning`) qui mord, et un AUDIT complet
+#    opt-in (`LCARS_SHELL_LINT=1`, toutes severites, informatif).
 #
 # Le shell entre au meme barreau que l'Elixir, qui compile en `--warnings-as-errors` : un
-# signalement, quelle que soit sa severite, est rouge. Un seuil (« sous N erreurs ca passe »)
-# fabrique une zone ou l'outil parle et ou personne n'ecoute.
+# signalement de severite >= warning est rouge. Un seuil en NOMBRE (« sous N erreurs ca passe »)
+# fabriquerait une zone ou l'outil parle et ou personne n'ecoute ; un seuil de SEVERITE dit ce qu'il
+# ne mesure pas, et le reste se lit a la demande.
 #
 # LA LISTE EST CELLE DE GIT, PAS D'UN `find`, et ce n'est pas une commodite : les entrees sans
 # extension (`deploy/provision`, `deploy/box`, `bin/lcars`, les hooks) ne se reconnaissent qu'a
@@ -415,19 +405,18 @@ mapfile -t SHELL_FILES < <(
   done
 )
 SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
-# ⚠ PAS D UNE SEULE AFFECTATION : `SC_VERSION="$(command -v shellcheck … && …)"` sous `set -e` TUAIT le script
-# quand shellcheck manque — la substitution rend non-zero, l affectation herite du statut, et le gate
-# mourait apres « bats : OK » sans une ligne, avant meme d annoncer « HORS GATE ». Mesure sur un
-# Ubuntu neuf (banc .63, 2026-08-30) : trois runs rouges de 60-deploy, tests tous verts. La premiere
-# commande d une liste `&&` n est pas soumise a errexit ; c est cette forme-la qui survit.
+# ⚠ PAS D UNE SEULE AFFECTATION : `SC_VERSION="$(command -v shellcheck … && …)"` sous `set -e` TUE le
+# script quand shellcheck manque — la substitution rend non-zero, l affectation herite du statut, et
+# le gate meurt apres « bats : OK » sans une ligne (mesure sur un Ubuntu neuf, banc .63, 2026-08-30 :
+# trois runs rouges de 60-deploy, tests tous verts). La premiere commande d une liste `&&` n est pas
+# soumise a errexit ; c est cette forme-la qui survit.
 SC_VERSION=""
 command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | sed -n 's/^version: //p')"
 
-# LE PLANCHER PORTE SUR TOUT LE SHELL SUIVI, deploy/ COMPRIS. Une exclusion nommee vivait ici : elle
-# soustrayait deploy/ au plancher parce que l installeur etait « en chantier ailleurs », et elle
-# ecrivait elle-meme sa condition de sortie — la fermeture de ce chantier. Il est ferme.
+# LE PLANCHER PORTE SUR TOUT LE SHELL SUIVI, deploy/ COMPRIS, sans exclusion nommee : une exclusion
+# « le temps d un chantier » ecrit elle-meme sa condition de sortie et lui survit.
 #
-# La mesure qui l accompagnait tient encore, prise avec l INSTRUMENT DU GATE et non un shellcheck nu :
+# La mesure tient, prise avec l INSTRUMENT DU GATE et non un shellcheck nu :
 # `-x --source-path=SCRIPTDIR` suit les `source`, donc il voit les lectures qu un shellcheck seul ne
 # relie pas — sans `-x`, trois SC2034 apparaissent dans docker/entrypoint.sh sur des PROV_* que
 # provision-lib lit apres le `.`, et ces trois-la n existent pas. Avec l instrument juste : 36
@@ -438,34 +427,19 @@ command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | se
 SHELL_FILES_FLOOR=("${SHELL_FILES[@]}")
 FLOOR_COUNT="${#SHELL_FILES_FLOOR[@]}"
 
-# ─── LE PAS EST HORS GATE PAR DEFAUT ────────────────────────────────────────────────────────────
+# ─── LE PLANCHER : `-S warning`, DANS LE GATE ; L'AUDIT COMPLET : OPT-IN ─────────────────────────
 #
-# ⚖ USER 2026-08-29 : « on ne teste pas un truc qui n'est pas testable ».
-#
-# Le pas est ARRIVE ROUGE et n'a jamais ete vert : `b4afe7055` l'a cable en annoncant lui-meme sa
-# mesure d'atterrissage — 1251 signalements, « la remediation n'est pas dans ce commit ». Un gate
-# qu'on sait rouge en permanence ne mesure plus rien : il apprend a lire « rouge » comme « normal »,
-# et c'est ainsi qu'un VRAI rouge passe inapercu. Le desactiver est plus honnete que de le laisser
-# hurler dans le vide, et plus honnete encore qu'un seuil — un seuil fabriquerait la zone ou l'outil
-# parle et ou personne n'ecoute, ce que le commentaire du haut de ce bloc refuse deja.
-#
-# ⚠ DESACTIVE, PAS SUPPRIME, ET IL LE DIT. Le code reste joue par `LCARS_SHELL_LINT=1` — c'est ce
-# que tapera l'agent qui prendra la remediation, fichier par fichier, pour mesurer son avancement.
-# Et le pas ANNONCE son absence a chaque passage : un audit qui disparait en silence est un audit
-# dont plus personne ne se souvient qu'il a existe.
-#
-# POUR LE RALLUMER POUR DE BON : remettre `[[ -n "${LCARS_SHELL_LINT:-}" ]] ||` en commentaire ici,
-# le jour ou le compte est a zero. Rien d'autre ne bouge.
-# ---------------------------------------------------------------------------
-# LE PLANCHER, ET IL TOURNE TOUJOURS. Rallume le 2026-09-01, au seuil `warning` — le contrat que
-# l'en-tete de ce fichier annoncait « a restaurer le jour ou le compte est a zero ». Il l'est.
+# ⚖ USER 2026-08-29 : « on ne teste pas un truc qui n'est pas testable ». Un pas qu'on sait rouge en
+# permanence ne mesure plus rien : il apprend a lire « rouge » comme « normal », et c'est ainsi
+# qu'un VRAI rouge passe inapercu (mesure a l'arrivee du pas : 1251 signalements toutes severites).
+# Le desactiver est plus honnete que de le laisser hurler dans le vide, et plus honnete qu'un seuil
+# en nombre — qui fabriquerait la zone ou l'outil parle et ou personne n'ecoute.
 #
 # ⚠ POURQUOI `-S warning` ET PAS LE DEFAUT, et c'est une MESURE, pas un gout. Au defaut (`style`),
 # la commande ci-dessous rend 170 signalements sur 21 fichiers, TOUS de severite `note` : entrer la
-# rendrait la chaine rouge en permanence, et un gate qu'on sait toujours rouge apprend a lire
-# « rouge » comme « normal » — c'est exactement ce qui a coute a shellcheck sa place le 2026-08-29.
-# Au seuil `warning` : 0 error, 0 warning au 2026-09-01. Le plancher est donc VERT aujourd'hui et
-# mord au premier warning introduit. Meme forme que `sobelow --exit High` dans `mix.exs`.
+# rendrait la chaine rouge en permanence. Au seuil `warning` : 0 error, 0 warning au 2026-09-01.
+# Le plancher est donc VERT et mord au premier warning introduit. Meme forme que
+# `sobelow --exit High` dans `mix.exs`.
 #
 # Les 170 notes ne sont pas absoutes : elles sont HORS de ce plancher-ci, et se lisent avec
 # `LCARS_SHELL_LINT=1` (audit complet, toutes severites, deploy compris).
@@ -475,7 +449,7 @@ if [[ -z "$SC_VERSION" ]]; then
   GATE_FAIL=1
 elif [[ "$FLOOR_COUNT" -eq 0 ]]; then
   # Zero fichier n'est pas un depot sans shell : c'est une decouverte cassee, et elle rendrait vert.
-  echo "ECHEC: aucun fichier shell suivi hors deploy/ — la decouverte est cassee, pas le depot." >&2
+  echo "ECHEC: aucun fichier shell suivi — la decouverte est cassee, pas le depot." >&2
   GATE_FAIL=1
 else
   set +e
@@ -498,8 +472,8 @@ fi
 #
 # ⚠ `E9,F` ET RIEN D'AUTRE, et c'est une mesure. Au 2026-09-01 : E9=0, F=0 (les 16 F821 du callback
 # git-filter-repo portent leur `noqa` motive, cf. `bin/publish-transform-attribution.py`), mais
-# UP=113, S=31, E/W=160. Entrer plus haut rendrait la chaine rouge en permanence — c'est la
-# lecon de l'outil shell, retiré du gate le 2026-08-29 pour exactement ca. Le reste se mesure a la demande :
+# UP=113, S=31, E/W=160. Entrer plus haut rendrait la chaine rouge en permanence — la lecon du
+# plancher shell ci-dessus. Le reste se mesure a la demande :
 # `ruff check --select UP,S`. Le perimetre et la config vivent dans `pyproject.toml` a la racine.
 #
 # RUFF ABSENT = ECHEC, jamais un avertissement : meme regle que python3 et shellcheck ci-dessus. Un

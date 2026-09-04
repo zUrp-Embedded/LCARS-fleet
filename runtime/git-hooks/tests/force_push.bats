@@ -4,8 +4,8 @@
 # STARDATE: 2026-08-14
 # STATUS: bats tests for pre-push — 6-073, la face OPS n'etait pas protegee du force-push
 #
-# CE QUE CE MUR NE COUVRAIT PAS. `PROTECTED_BRANCH="main"` — une valeur unique, et la boucle
-# `continue` sur tout le reste AVANT meme le test d'ancestralite.
+# CE QUE CE MUR DOIT COUVRIR (6-073). Un `PROTECTED_BRANCH="main"` unique, avec `continue` sur tout
+# le reste AVANT meme le test d'ancestralite, laisserait la face OPS nue.
 #
 # `work/ops` n'est pas une branche de travail ordinaire dans ce systeme : c'est le support de
 # l'AUDITABILITE. Y vivent les briefs materialises et epingles, les attestations de provenance

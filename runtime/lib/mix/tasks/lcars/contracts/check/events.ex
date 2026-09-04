@@ -28,18 +28,16 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   # dead against the canonical struct (it matches nothing anymore) and the drift is silent.
   # This check measures the real CODE of the targets below and flags any residual
   # `"event_type" =>` read.
-  # 9th instance of the B family (residue_check), migrated in the shared-combinator factorization. The `confirm` = the
-  # pattern itself post-strip: an `"event_type" =>` mention in a COMMENT (doc of the legacy-tuple
+  # An instance of the B family (residue_check). The `confirm` = the pattern itself post-strip: an `"event_type" =>` mention in a COMMENT (doc of the legacy-tuple
   # removal) does not count as a violation (otherwise the gate would flag its own documentation).
   # SCOPE: a GLOBAL residue sweep over lib/ — the id's "canon" covers every consumer, matching
-  # what the name claims (it long scanned only api/ws.ex, the last migrant).
+  # what the name claims.
   @doc false
   @spec check_event_consumers_canon(String.t()) :: Support.result()
   def check_event_consumers_canon(root) do
-    # The check's NAME claims the canon for ALL consumers; it long grepped ws.ex alone (the last
-    # migrant), leaving the guarantee narrower than its label. The residue scan now covers
-    # every source under lib/ — a legacy `"event_type"` tuple REINTRODUCED anywhere fails the gate,
-    # not just in the one file that once carried it.
+    # The check's NAME claims the canon for ALL consumers, so the residue scan covers every source
+    # under lib/ — a legacy `"event_type"` tuple REINTRODUCED anywhere fails the gate. A sweep of
+    # `api/ws.ex` alone (the last migrant) would leave the guarantee narrower than its label.
     residue_check(root, %{
       id: "event.consumers.canon",
       remediation:
@@ -183,10 +181,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
       # Le fournisseur lui-meme, et L'ARBRE DU VERIFICATEUR : le gate LIT la regle, il n'en depend
       # pas. S'auto-compter ferait rougir le mur sur sa propre pose — mesure a la pose.
       #
-      # ⚠ C'ETAIT UN CHEMIN EN DUR vers `lcars.contracts.check.ex`, et un decoupage a fait rougir
-      # ce mur : il avait demenage, et son exemption pointait son ancienne adresse. Une
-      # liste de chemins en dur grossit a chaque coupe et rougit la fois ou on l'oublie — la REGLE
-      # la remplace : ce qui vit dans l'arbre du verificateur LIT la regle, il n'en depend jamais.
+      # ⚠ PAS DE CHEMIN EN DUR vers la tache : une liste de chemins en dur grossit a chaque coupe et
+      # rougit la fois ou on l'oublie (un decoupage du verificateur ferait rougir ce mur sur sa
+      # propre exemption) — la REGLE la remplace : ce qui vit dans l'arbre du verificateur LIT la
+      # regle, il n'en depend jamais.
       |> Enum.reject(&(&1 == rel or checker_source?(&1)))
       |> MapSet.new()
 
@@ -232,7 +230,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   # (a) Ajouter `"blocker"` a `severities/0` sans toucher le schema -> ECHEC, la severite est
   #     nommee absente des DEUX enums.
   # (b) Remplacer `"important"` par `"zzz"` dans le seul enum `severity_max` -> ECHEC, une absence
-  #     et un surnombre nommes. La version qui ne lisait que l'enum par-finding restait verte.
+  #     et un surnombre nommes. Une lecture du seul enum par-finding reste verte dessus.
   # Angle mort declare : `"none"` est ecrit ici, pas derive — aucun code Elixir ne le produit, il
   # naît du juge et ne vit que dans le schema. Un second sentinelle du meme genre serait invisible.
   # La valeur que le juge rend quand la mesure est faite et vide. Elle n'existe QUE dans le
@@ -277,8 +275,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
     # LE SECOND ENUM, ET CELUI OU L'INCIDENT A EU LIEU. `severity_max` n'est pas une redite de
     # `severity` : c'est l'operande que `Gates.Predicate` compare (`"severity_max != critical"`),
     # donc le seul des deux qu'une porte lise. Il porte une valeur de plus, `"none"` — la mesure
-    # faite dont le resultat est vide, refusee au fil quand elle manquait. Le mur ne lisait que
-    # l'enum par-finding : une severite ajoutee ici et pas la, ou l'inverse, passait au vert.
+    # faite dont le resultat est vide, refusee au fil si elle manque. Un mur qui ne lirait que
+    # l'enum par-finding laisserait passer au vert une severite ajoutee ici et pas la, ou l'inverse.
     max_expected = MapSet.put(from_code, @severity_max_empty)
     from_max = enum.(["properties", "severity_max", "enum"])
 
@@ -377,9 +375,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
     from_yaml =
       case File.read(Path.join(root, "priv/event_router/events.yaml")) do
         {:ok, y} ->
-          # Les commentaires tombent AVANT la lecture : la version brute lisait le texte entier,
-          # donc `# historique: on avait un jour escalate_kind: zzz_dead` suffisait a garder
-          # vivante une clause que plus personne ne produit. Un mur qui lit un commentaire mesure
+          # Les commentaires tombent AVANT la lecture : sur le texte brut, un
+          # `# historique: on avait un jour escalate_kind: zzz_dead` suffit a garder vivante une
+          # clause que plus personne ne produit. Un mur qui lit un commentaire mesure
           # ce que quelqu'un a ECRIT, pas ce que le systeme EMET.
           ~r/escalate_kind:\s*([a-z_]+)/
           |> Regex.scan(y |> String.split("\n") |> Enum.map_join("\n", &strip_comment/1))
@@ -428,11 +426,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         if n && String.contains?(Atom.to_string(n), "escalate"), do: k, else: nil
 
       # (2) `escalate_kind: :foo` dans n'importe quelle liste a mots-cles. C'EST LA VOIE
-      #     CANONIQUE, et la version (1) seule la manquait entierement : l'API publique est
+      #     CANONIQUE, et la forme (1) seule la manque entierement : l'API publique est
       #     `record_or_escalate/4`, qui ne prend PAS le kind en argument — il voyage dans ses
-      #     `opts` jusqu'a `escalate/5` (`incident_registry.ex:84`). Un `escalate_kind: :disk_full`
-      #     ecrit chez un appelant passait donc au vert et levait un `FunctionClauseError` a
-      #     l'execution, exactement le crash que cette table close est censee rendre impossible.
+      #     `opts` jusqu'a `escalate/5` (`incident_registry.ex`). Sans cette lecture, un
+      #     `escalate_kind: :disk_full` ecrit chez un appelant passe au vert et leve un
+      #     `FunctionClauseError` a l'execution, exactement le crash que cette table close est
+      #     censee rendre impossible.
       {:escalate_kind, k} when is_atom(k) and k not in [nil, true, false] ->
         k
 
@@ -464,8 +463,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   #     `@destinations` -> ECHEC, 3 clauses annoncees pour 2 destinations.
   # (b) Rendre `visual_types/0` a sa forme d'avant — `do: ["type:feature", "type:doc"]`, la recopie
   #     exacte qui a diverge seize jours -> ECHEC, la derivation manquante ET les deux litteraux
-  #     nommes. La version qui comptait seulement clauses contre destinations restait verte : elle
-  #     ne lisait jamais la fonction dont elle porte le nom.
+  #     nommes. Un mur qui compterait seulement clauses contre destinations resterait vert : il ne
+  #     lirait jamais la fonction dont il porte le nom.
   # Son angle mort, declare : il compte, il ne resout pas — deux clauses rendant le MEME type
   # passeraient pour deux destinations manquantes si l'une n'etait pas listee. Le cas ne se presente
   # pas, et un compteur exact vaut mieux qu'un resolveur qui devine.
@@ -487,11 +486,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
         _ -> nil
       end)
 
-    # LE CORPS DE `visual_types/0`, ET C'EST LE POINT QUI MANQUAIT. Le mur comptait des clauses
-    # contre des destinations et ne lisait JAMAIS la fonction dont il porte le nom : reecrire
+    # LE CORPS DE `visual_types/0`, ET C'EST LE POINT. Compter des clauses contre des destinations
+    # sans lire la fonction dont le mur porte le nom laisserait au vert
     # `def visual_types, do: ["type:feature", "type:doc"]` — la recopie exacte qui a diverge
-    # pendant seize jours — le laissait au vert. Un mur qui garde une DERIVATION doit constater
-    # la derivation, pas ses deux operandes.
+    # pendant seize jours. Un mur qui garde une DERIVATION doit constater la derivation, pas ses
+    # deux operandes.
     body =
       collect(ast, fn
         {:def, _, [{:visual_types, _, a}, [do: b]]} when a in [nil, []] -> b

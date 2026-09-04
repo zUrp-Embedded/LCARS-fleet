@@ -110,9 +110,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
     sh_path = Path.join(root, "etc/provision-role-tokens.sh")
 
-    # `deploy/deps/`: the tofu recipe is the LAST live leg of the
-    # v1 tree, and this check reading it across trees is what caught the move — the wall working on
-    # the gesture that touched it.
+    # The tofu recipe lives under `services/forge-recipe/`, the provisioning lib in the SIBLING
+    # tree `deploy/` — this check reads across trees, so a move of either is what it catches first.
     tf_path = Path.expand("services/forge-recipe/forge.tf", root)
     lib_path = Path.expand("../deploy/lib/provision-lib.sh", root)
 
@@ -128,9 +127,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         {"provision-role-tokens.sh ROLES", :required,
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
-        # `variable "roles"` since the enroll derivation: the roster moved from a
-        # `local` to a VARIABLE so a deployment can supply the roster of the catalogue it brings.
-        # The DEFAULT is what this check measures, and that is the right target — it is the value
+        # `variable "roles"`, not a `local`: a VARIABLE lets a deployment supply the roster of the
+        # catalogue it brings. The DEFAULT is what this check measures, and that is the right target — it is the value
         # a deployment gets when it supplies nothing, so it is the one that must equal the canon.
         # Anchored on the variable NAME, not on a bare `default = [...]`: the recipe has other
         # list variables now, and an unanchored pattern would lock the canon against whichever
@@ -176,11 +174,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
         end
       end)
 
-    # LES TROIS LISTES DE PLACEMENT etaient hors du verrou, et c'est le meme defaut d'un cran plus
-    # bas : `writers`/`judges`/`externals` sont des defauts tenus A LA MAIN pendant que la derivation
-    # (`Fleet.Roster.tfvars/1`) produit deja la reponse. Rien ne les comparait, donc rien
-    # n'empechait la divergence qui a coute `chief` — present dans `roles`, absent de `writers`,
-    # compte sans droit d'ecriture, trouve a l'oeil sur une forge.
+    # LES TROIS LISTES DE PLACEMENT SONT DANS LE VERROU, meme defaut un cran plus bas que les quatre
+    # listes : `writers`/`judges`/`externals` sont des defauts tenus A LA MAIN pendant que la
+    # derivation (`Fleet.Roster.tfvars/1`) produit deja la reponse. Sans comparaison, rien n'empeche
+    # la divergence qui a coute `chief` — present dans `roles`, absent de `writers`, compte sans
+    # droit d'ecriture, trouve a l'oeil sur une forge.
     #
     # La comparaison consomme la DERIVATION, pas une seconde implementation de la regle de placement
     # (siege -> externals, juge sans capacite -> judges, le reste -> writers) : la redire ici serait
@@ -341,11 +339,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # each a hand-written mirror of `Fleet.Layout.face_root/1` in another language — the exact shape
   # that drifts without a word.
   #
-  # TWO SITES, AND THE NARROWER ONE IS THE EASY MISS. Reading only
-  # docker entrypoint alone, so it was green on a rail that recognises THREE substrates
-  # (`docker`, `wsl`, `linux`) while creating the zones on one. On `wsl` they existed "by history of
-  # the substrate" — by hand, one day, on the author's machine — and on a native `linux`, not at
-  # all. Same failure as the `doc` face below, on the path the check did not cover.
+  # TWO SITES, AND THE NARROWER ONE IS THE EASY MISS. Reading the docker entrypoint alone is green
+  # on a rail that recognises THREE substrates (`docker`, `wsl`, `linux`) while creating the zones
+  # on one. On `wsl` the zones would exist "by history of the substrate" — by hand, one day, on the
+  # author's machine — and on a native `linux`, not at all. Same failure as the `doc` face below,
+  # on the path a single-site check does not cover.
   #
   # Measured on a fresh bench: the `doc` face was in the code AND in the image's `build`
   # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
@@ -439,9 +437,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # `face_root/1` has one clause per face; the body is an attribute (today) or could be the literal
   # itself. BOTH are read, and a body that is NEITHER makes the whole read nil.
   #
-  # That last part is the point, and it cost a surviving mutation to find. The first version matched
-  # only `do: @attr`; inlining one clause's literal made that clause invisible, and the check then
-  # declared a 2-face population fully provisioned — green, with a smaller subject than it names.
+  # That last part is the point, found by a surviving mutation: a reader matching only `do: @attr`
+  # makes an inlined clause literal invisible, and the check then declares a 2-face population
+  # fully provisioned — green, with a smaller subject than it names.
   # The mutation was semantically harmless, the READER was not: any face whose body it cannot parse
   # would vanish the same way, including one whose root is genuinely missing from the machine.
   # A guard that silently narrows its population is the exact defect this check exists to close.
@@ -492,8 +490,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # long BEFORE it calls `provision apply`, so the zones must exist earlier than the module runs.
   # Boot ordering is the reason for the second mirror. What must never happen is the two drifting
   # from `Fleet.Layout`, or from each other — so the check compares BOTH against the code, and its
-  # evidence says which mirror is short. A wall that held one of two mirrors was green on a fleet
-  # whose `wsl` and `linux` substrates created no zone at all.
+  # evidence says which mirror is short. A wall holding one of two mirrors is green on a fleet
+  # whose `wsl` and `linux` substrates create no zone at all.
   defp read_provision_zone_paths(path) do
     case File.read(path) do
       {:ok, content} ->
@@ -542,10 +540,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     catalogue = Path.join(root, "priv/catalogue")
 
     # HORS-PERIMETRE quand l'arbre `deploy/` n'est pas la — MEME regle que les listes de l'arbre
-    # frere juste au-dessus, et je l'avais oubliee. L'etage BUILD de l'image copie `runtime/` SANS
-    # `deploy/` (COPY explicite, par choix), donc la recette n'y est pas : les listes existantes se
-    # skippaient proprement pendant que celle-ci rendait « not readable — fail-closed ». Un gate vert
-    # sur l'hote et rouge dans l'image, sur un artefact qui n'a jamais fait partie du perimetre.
+    # frere juste au-dessus. L'etage BUILD de l'image copie `runtime/` SANS `deploy/` (COPY
+    # explicite, par choix) : un fail-closed ici rendrait « not readable » dans l'image pendant que
+    # les autres listes se skippent proprement — un gate vert sur l'hote et rouge dans l'image, sur
+    # un artefact qui n'a jamais fait partie du perimetre.
     if File.dir?(Path.expand("../deploy", root)) and File.dir?(catalogue) do
       case Fleet.Roster.tfvars(catalogue) do
         {:ok, derived} ->

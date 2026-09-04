@@ -16,7 +16,7 @@
 #     | [ LCARS FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
 #     +-----------------------------------------------------------+
 #     | MODULE: PRE-COMMIT        | SUBSYSTEM: GIT-HOOKS / QA     |
-#     | LICENSE: AGPL-3           | STARDATE: 2026.232             |
+#     | LICENSE: AGPL-3           | STARDATE: 2026.247             |
 #     +-------------------------+---------------------------------+
 #
 # pre-commit — date auto-update + GO-7 header enforcement
@@ -32,16 +32,15 @@
 #         regimes by path: runtime code paths (runtime/{lib,test,bin,etc}) use EN
 #         labels (**Last revised**); everything else keeps FR labels.
 #
-# NO RULE FOR `.ex` — RETIRED 2026-08-06, and the reason belongs here. The clause required a
-# `**Last revised**: <date>` footer in every @moduledoc, and PASS 1 ABOVE WROTE THAT VERY LINE:
-# a wall checking for a mark the wall itself painted. Measured before removing: 235 of 235 stamps
-# equalled `git log -1 --format=%cs` for their file — tautologically, since pass 1 rewrote them to
-# $TODAY on the commit that landed them. Nothing else read the line. It declared not a property of
-# the file but the fact that this hook had run.
+# NO RULE FOR `.ex`, and the reason belongs here. A `**Last revised**: <date>` footer required in
+# every @moduledoc would be a mark PASS 1 ABOVE PAINTS ITSELF: a wall checking for its own paint.
+# Measured (2026-08-06): 235 of 235 stamps equalled `git log -1 --format=%cs` for their file —
+# tautologically, since pass 1 rewrites them to $TODAY on the commit that lands them. Nothing else
+# reads the line; it declares not a property of the file but the fact that this hook ran.
 # It is NOT replaced: all 238 `.ex` under lib/ carry a @moduledoc, so any presence marker would be
 # green by construction — the wall `no_check_passes_on_nothing_test` exists to forbid. The Elixir
 # contract is held elsewhere and better: @moduledoc as SSoT, boundary compiling the architecture,
-# `mix lcars.topology` refusing map divergence, 30 contract checks.
+# `mix lcars.topology` refusing map divergence, the contract checks.
 #
 # Install: bash runtime/git-hooks/install-hooks.sh
 
@@ -88,12 +87,12 @@ fi
 
 # --- Pass 1: Date bookkeeping (metadata update, not a fix) ---
 #
-# ⚠ CE PASSAGE EMBARQUAIT LE TRAVAIL QUE L'HUMAIN AVAIT DELIBEREMENT LAISSE HORS DE L'INDEX.
-# Il faisait `sed -i` sur le fichier de l'ARBRE DE TRAVAIL puis `git add "$file"` — et `git add`
-# ne restage pas la ligne de date, il remplace l'entree d'index par TOUT le contenu courant. Un
-# fichier partiellement stage qui portait aussi des modifications non stagees voyait donc ces
-# modifications partir dans le commit, en silence. Le hook alterait la selection explicite de
-# l'humain : c'est publier du travail incomplet en croyant tamponner une date.
+# ⚠ CE PASSAGE N'EMBARQUE PAS LE TRAVAIL QUE L'HUMAIN A DELIBEREMENT LAISSE HORS DE L'INDEX.
+# Un `sed -i` sur le fichier de l'ARBRE DE TRAVAIL puis `git add "$file"` le ferait — `git add`
+# ne restage pas la ligne de date, il remplace l'entree d'index par TOUT le contenu courant, et un
+# fichier partiellement stage qui porte aussi des modifications non stagees les verrait partir
+# dans le commit, en silence. Ce serait alterer la selection explicite de l'humain : publier du
+# travail incomplet en croyant tamponner une date (6-116).
 #
 # ON TRANSFORME LE BLOB DE L'INDEX, jamais l'arbre de travail :
 #   `git show :<file>` → sed → `git hash-object -w` → `git update-index --cacheinfo`.
@@ -153,11 +152,10 @@ else
         case "$ext" in
             md)
                 # Les deux en-tetes sont exclusifs dans les faits ; les appliquer tous deux est
-                # sans effet sur un fichier qui n'en porte qu'un, et le `cmp` decide. Le test
-                # « quelle date porte-t-il » a disparu : il lisait l'ARBRE DE TRAVAIL, donc un
-                # fichier dont l'index portait une vieille date mais l'arbre la bonne n'etait
-                # jamais mis a jour. La comparaison des BLOBS repond a la meme question, sur le
-                # bon objet.
+                # sans effet sur un fichier qui n'en porte qu'un, et le `cmp` decide. Pas de test
+                # « quelle date porte-t-il » sur l'ARBRE DE TRAVAIL : un fichier dont l'index porte
+                # une vieille date mais l'arbre la bonne ne serait jamais mis a jour. La comparaison
+                # des BLOBS repond a la meme question, sur le bon objet.
                 restage_dated_blob "$file" \
                     "s/^\(\*\*Dernière révision\*\* : \)[0-9-]*/\1${TODAY}/; s/^\(\*\*Last revised\*\*: \)[0-9-]*/\1${TODAY}/"
                 ;;
@@ -171,7 +169,7 @@ FAILED=()
 # GO-7 exemptions. EVERY clause below must match at least one tracked file. A clause that matches
 # nothing does not exempt anything — it MISLEADS: it reads as covering a class that the wall in fact
 # refuses, and it rots without a sound, because nothing fails when its subject moves or disappears.
-# Two deaths, two remedies: the subject MOVED (correct the pattern — the two scars below), or the
+# Two deaths, two remedies: the subject MOVED (correct the pattern), or the
 # subject was REMOVED (delete the clause; an exemption never outlives its subject).
 # For a tree that does not exist yet, the mechanism is the `.go7-exempt` MARKER above, which sits
 # next to what it exempts: a path list cannot be written ahead of the campaign it will exempt.
@@ -183,10 +181,10 @@ is_ipc_exception() {
         scratchpad.md) return 0 ;;
     esac
     [[ "$1" == *"/skills/"*"/SKILL.md" ]] && return 0
-    # Graines de projet genere, pas du lignage doc LCARS. Motif ELARGI le 2026-08-06 : il etait ecrit
-    # `priv/project_template/` et l'arbre porte `priv/catalogue/project_template/` depuis le
-    # demenagement du catalogue. L'exemption avait donc cesse de matcher EN SILENCE, et le mur
-    # refusait ce qu'il avait ete ecrit pour laisser passer.
+    # Graines de projet genere, pas du lignage doc LCARS. Le motif suit l'arbre
+    # (`priv/catalogue/project_template/`) : une exemption qui cesse de matcher le fait EN SILENCE,
+    # et le mur refuse alors ce qu'elle est ecrite pour laisser passer —
+    # `tests/go7_exemptions_alive.bats` le tient.
     [[ "$1" == *"project_template/"* ]] && return 0
     # LE PACKAGE SP — hors perimetre par doctrine (`runtime/CLAUDE.md`, §Langue) : « ce n'est ni
     # du code ni de la sortie, c'est un package de configuration [...] il ne se traduit pas, il se

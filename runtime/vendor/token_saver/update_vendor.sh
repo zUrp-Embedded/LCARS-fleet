@@ -14,7 +14,7 @@
 #
 #     +-----------------------------------------------------------+
 #     | MODULE: TOKEN-SAVER     | SUBSYSTEM: RUNTIME / VENDOR      |
-#     | LICENSE: AGPL-3         | STARDATE: 2026.216               |
+#     | LICENSE: AGPL-3         | STARDATE: 2026.247               |
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  Suit l'amont ppgranger/token-saver.                      |
@@ -62,13 +62,12 @@ TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 # ─── MODE --verify : le pin est-il un FAIT, ou seulement une phrase ? ───────────────────────────
-# Ce script comparait l'amont au pin DECLARE dans VENDOR.md, sans jamais verifier que notre
-# sous-arbre corresponde a ce pin. Deux choses pouvaient donc diverger en silence : le sha lui-meme
-# (l'etape 5 dit a l'humain de le recopier a la main, et une main oublie) et l'ETIQUETTE posee a
-# cote. Mesure du 2026-08-09 : le sha etait juste, l'etiquette annonçait « v2.6.3 » alors que
-# `git describe` rend `v1.3.1-84-g098873e` et que ce tag est 16 commits plus loin — meme date, donc
-# invisible a l'oeil. Un update « vers v2.6.3 » aurait embarque 16 commits en croyant n'en embarquer
-# aucun.
+# Comparer l'amont au pin DECLARE dans VENDOR.md ne dit pas que notre sous-arbre corresponde a ce
+# pin : deux choses divergent alors en silence, le sha lui-meme (l'etape 5 dit a l'humain de le
+# recopier a la main, et une main oublie) et l'ETIQUETTE posee a cote. Mesure du 2026-08-09 : sha
+# juste, etiquette « v2.6.3 » alors que `git describe` rend `v1.3.1-84-g098873e` et que ce tag est
+# 16 commits plus loin — meme date, donc invisible a l'oeil. Un update « vers v2.6.3 » embarquerait
+# 16 commits en croyant n'en embarquer aucun.
 #
 # Ce mode rejoue la mesure : archive de l'amont AU PIN, diff contre notre sous-arbre. `.go7-exempt`
 # est le seul ecart admis — c'est notre marqueur, pas du code amont.

@@ -38,10 +38,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   @doc false
   @spec check_bats_descriptions_inert(String.t()) :: Support.result()
   def check_bats_descriptions_inert(root) do
-    # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Ce check a d'abord nomme `test/` et `deploy/tests/` :
-    # il ratait les six suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement
-    # les repertoires qu'on oublie. Un mur qui enumere ses arbres ne protege que ceux qu'on avait
-    # deja en tete le jour ou on l'a ecrit — et le suivant qu'on cree n'est protege par rien.
+    # ⚠ L'ARBRE SE BALAYE, IL NE SE LISTE PAS. Un check qui nommerait `test/` et `deploy/tests/`
+    # raterait les suites de `git-hooks/tests/` et de `.claude/skills/`, c'est-a-dire justement les
+    # repertoires qu'on oublie. Un mur qui enumere ses arbres ne protege que ceux qu'on a en tete le
+    # jour ou on l'ecrit — et le suivant qu'on cree n'est protege par rien.
     #
     # `_build`, `deps` et `tmp` sont exclus : ce sont des COPIES ou des artefacts, et un doublon
     # signale la ligne deux fois sous un chemin que personne ne peut editer.
@@ -141,8 +141,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
     # ⚠ L'ARBRE `assets/` EST UN VOISIN, ET UN CONTEXTE LEGITIME NE LE PORTE PAS. Le stage `build`
     # de l'image copie `fleet` SEUL puis joue ce gate : un artefact runtime ne peut rien prouver sur
-    # une plaquette qu'il n'embarque pas. Ce check a d'abord rendu FAIL la — 0 entree derivee, mon
-    # fail-closed — et il a fait echouer la construction de l'image sur une plaquette absente.
+    # une plaquette qu'il n'embarque pas. Un fail-closed sur « 0 entree derivee » rend FAIL la, et
+    # fait echouer la construction de l'image sur une plaquette absente (mesure).
     #
     # L'absence se lit au niveau de L'ARBRE, comme pour les listes de provisioning : pas d'arbre du
     # tout = hors perimetre, on passe EN LE DISANT (jamais un vert muet sur du terrain non mesure).
@@ -168,9 +168,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     listed =
       case File.read(wf) do
         {:ok, y} ->
-          # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Ce motif ne
-          # ne prendrait que l'apostrophe simple. Le workflow n'emploie qu'elle, donc le mur reste
-          # vert — mais passer une entree en double-quote ou en nu la rend invisible a `listed`,
+          # ⚠ LES TROIS FORMES YAML, PAS SEULEMENT CELLE QU'ON ECRIT AUJOURD'HUI. Un motif borne a
+          # l'apostrophe simple tiendrait tant que le workflow n'emploie qu'elle — mais passer une
+          # entree en double-quote ou en nu la rendrait invisible a `listed`,
           # donc tous les chemins qu'elle couvre sont declares NON couverts. Un FAUX ROUGE sur un
           # filtre correct, et l'operateur cherche le defaut dans le filtre. Un
           # instrument couple a la forme de ce qu'il mesure ne mesure plus, il devine.
@@ -225,19 +225,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # dit pas quel fichier, donc `runtime/bin` est bien l'entree, meme si un autre site en lit un fichier
   # nomme. Un prefixe rendu par une lecture dynamique reste une entree ; le meme prefixe rendu par
   # une definition de constante disparait.
-  # ⚠ `src/lib/*.js` N'EST PAS TOUT CE QUI LIT L'ARBRE, ET LE CONTRAT A RENDU UN FAUX VERT DESSUS.
-  # `src/components/Seat.astro:14` fait `existsSync(join(here, '..','..','..','avatars', …))` — une
-  # lecture de `assets/avatars/` AU BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Les deux
-  # etaient invisibles ici.
+  # ⚠ `src/lib/*.js` N'EST PAS TOUT CE QUI LIT L'ARBRE. `src/components/Seat.astro:14` fait
+  # `existsSync(join(here, '..','..','..','avatars', …))` — une lecture de `assets/avatars/` AU
+  # BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Un scan borne a `src/lib` rend un FAUX
+  # VERT : mesure, restreindre `paths:` de `assets/**` a `assets/github.io/**` laisse le contrat
+  # repondre `pass` alors qu'ajouter un avatar de role ne rebatit plus la vitrine qui l'affiche —
+  # exactement le mode de panne MUET que ce contrat existe pour fermer.
   #
-  # Mesure : on a restreint `paths:` de `assets/**` a `assets/github.io/**` et le
-  # contrat a repondu `pass`. Avec ce filtre, ajouter un avatar de role ne rebatit plus la vitrine
-  # qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer, et il le
-  # laissait passer parce qu'il ne regardait qu'un tiers des fichiers.
-  #
-  # ⚠ CE SERAIT UNE FAUTE DE PERIMETRE, PAS DE REGLE. La regle est juste ; c'est l'instrument qui
-  # lit a cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais
-  # pas », il
+  # ⚠ UNE FAUTE DE PERIMETRE, PAS DE REGLE : la regle est juste, c'est l'instrument qui lirait a
+  # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
   # dit « pass ».
   @site_sources [
     "src/lib/*.js",
@@ -267,7 +263,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
     # LE REPERTOIRE DU FICHIER, RELATIF A LA RACINE. C'est de LUI que les `..` remontent — pas d'une
     # profondeur supposee. Deux fichiers a la meme profondeur peuvent ecrire un nombre DIFFERENT de
-    # `..`, et c'est exactement ce qui rendait `avatars` la ou la cible est `assets/avatars`.
+    # `..`, et une profondeur supposee rendrait `avatars` la ou la cible est `assets/avatars`.
     here_dir = file |> Path.dirname() |> Path.relative_to(repo)
 
     # 1. Les constantes : `const NAME = join(<base>, 'a', 'b')`.
@@ -316,11 +312,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   end
 
   # base + segments -> chemin repo-relatif. `here` = racine (les quatre `..` l'y ramenent).
-  # ⚠ LES `..` SE COMPTENT, ILS NE « S'ANNULENT » PAS. Cette fonction supposait que `here` valait la
-  # RACINE du depot et que les `..` disparaissaient — vrai par coincidence pour `src/lib/*.js`, qui
-  # est a quatre crans et n'ecrit jamais que quatre `..`. `src/components/Seat.astro` en ecrit TROIS
-  # depuis la meme profondeur : la vraie cible est `assets/avatars`, et l'ancienne regle rendait
-  # `avatars` — un chemin qui n'existe pas, donc jamais couvert, donc un `fail` inexplicable.
+  # ⚠ LES `..` SE COMPTENT, ILS NE « S'ANNULENT » PAS. Supposer que `here` vaut la RACINE du depot et
+  # que les `..` disparaissent est vrai par coincidence pour `src/lib/*.js`, qui est a quatre crans
+  # et n'ecrit jamais que quatre `..`. `src/components/Seat.astro` en ecrit TROIS depuis la meme
+  # profondeur : la vraie cible est `assets/avatars`, et cette regle rendrait `avatars` — un chemin
+  # qui n'existe pas, donc jamais couvert, donc un `fail` inexplicable.
   #
   # On resout donc pour de vrai : depuis le repertoire du FICHIER, `..` par `..`, puis on rend le
   # chemin relatif a la racine. `here_depth` est le nombre de crans du fichier sous la racine.
@@ -403,17 +399,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
           MapSet.new()
       end
 
-    # ⚠ GARDE D'INSTRUMENT, ET IL MANQUAIT. `bearing` vient d'un `Path.wildcard` — repertoire absent
-    # rend l'ensemble VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les
-    # deux vides rendent les deux differences vides, donc `:pass`. Prouve par mutation le
-    # renommer `priv/catalogue/project_template/main/` en `main_mv/` rendait
-    # `pass — 0 fail, 58 pass`. Cinq autres contrats passent aussi sur perimetre vide, mais ILS LE
-    # DISENT ; celui-ci doit le dire aussi.
+    # ⚠ GARDE D'INSTRUMENT. `bearing` vient d'un `Path.wildcard` — repertoire absent rend l'ensemble
+    # VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les deux vides
+    # rendent les deux differences vides, donc `:pass`. Prouve par mutation : sans ce garde, renommer
+    # `priv/catalogue/project_template/main/` en `main_mv/` rend `pass — 0 fail, 58 pass`. Cinq
+    # autres contrats passent aussi sur perimetre vide, mais ILS LE DISENT ; celui-ci le dit aussi.
     #
-    # ⚠ ET IL ECHAPPAIT AU FILET QUI EXISTE POUR CA. `no_check_passes_on_nothing_test` enumere les
-    # checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` y echappe, et
-    # la garantie « aucun check ne passe sur rien » ne couvre alors que ce qui est deja visible. Les
-    # checks de ce fichier sont `def` pour cette raison.
+    # ⚠ LES CHECKS DE CE FICHIER SONT `def`, PAS `defp`. `no_check_passes_on_nothing_test` enumere
+    # les checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` echappe a
+    # la garantie « aucun check ne passe sur rien », qui ne couvre alors que ce qui est visible.
     #
     # ICI ON ECHOUE, on ne declare pas « hors perimetre » : `priv/catalogue` part avec CHAQUE
     # artefact — le stage `build` de l'image copie `fleet` en entier moins `deploy`, `git-hooks` et
@@ -608,14 +602,13 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # calibration belongs to its author — the finding is on record, the edit is not this wall's to
   # make.
   #
-  # A WHITELIST ENTRY THAT PROTECTS NOTHING IS A PRE-AUTHORIZED SLOT. `lib/fleet/spawner/pod/
-  # launch_spec.ex` sat here after the word had left it: the exemption survived its subject, and the
-  # day the word came back that file would have carried it exempt and unremarked. An allowlist is
-  # audited by re-measuring, never by reading it.
-  # ⚠ L'ARBRE DU VERIFICATEUR N'EST PLUS DANS CETTE LISTE, il est exclu par `checker_source?/1`.
-  # Il y figurait par son chemin, et un decoupage a fait rougir ce mur : il avait demenage. Une entree en dur ici est pire qu'ailleurs — cette liste est une ALLOWLIST, et une
-  # entree qui survit a son sujet devient un creneau pre-autorise, exactement ce que le paragraphe
-  # ci-dessus reproche a `launch_spec.ex`.
+  # A WHITELIST ENTRY THAT PROTECTS NOTHING IS A PRE-AUTHORIZED SLOT. An entry that outlives its
+  # subject (a file the word has left) would carry the word exempt and unremarked the day it comes
+  # back. An allowlist is audited by re-measuring, never by reading it.
+  # ⚠ L'ARBRE DU VERIFICATEUR N'EST PAS DANS CETTE LISTE, il est exclu par `checker_source?/1`. Une
+  # entree en dur ici rougit au premier demenagement du verificateur, et elle est pire qu'ailleurs
+  # — cette liste est une ALLOWLIST, et une entree qui survit a son sujet devient un creneau
+  # pre-autorise, exactement ce que le paragraphe ci-dessus refuse.
   @sanctuary_allowed ~w(
     bin/bwrap_launch.sh
     lib/fleet/cap_profile/invariants.ex
@@ -676,25 +669,23 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
   # `[object Object]`).
   #
-  # Measured: all 11 sourcers set `-euo pipefail`. Nothing held it, so the 12th could
-  # omit it and no one would learn until a provisioning run did the wrong thing quietly. This is
-  # that hold. Named-file evidence, so a failure says WHICH sourcer, not "some file".
+  # Measured: all 11 sourcers set `-euo pipefail`. Without this hold the 12th could omit it and no
+  # one would learn until a provisioning run did the wrong thing quietly. Named-file evidence, so a
+  # failure says WHICH sourcer, not "some file".
   @doc false
   @spec check_sourcers_set_strict(String.t()) :: Support.result()
   def check_sourcers_set_strict(root) do
     # `root` IS fleet (project_root/0) — the sibling trees hang off `..`, exactly as the
     # four-list check resolves them. Getting this wrong makes the check silently SKIP instead of
     # run, which is the worst of the three outcomes: a green that checked nothing.
-    # ⚠ LE PERIMETRE SE DISAIT SUR `deploy/` SEUL, POUR UNE POPULATION QUI VIT SOUS DEUX RACINES.
-    # Le commentaire du calcul plus bas nommait deja l'asymetrie — « these are TWO roots, only one
-    # of them is scoped » — et l'a portee au garde de POPULATION sans la porter au garde de
-    # PERIMETRE. Consequence mesuree : `etc/` porte DEUX sourcers
-    # (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY runtime/etc`,
-    # et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Dans l'artefact, ce
-    # check declarait « NOT CHECKED » sur deux fichiers qu'il tenait dans la main.
+    # ⚠ LE PERIMETRE SE DIT PAR RACINE, POUR UNE POPULATION QUI VIT SOUS DEUX. `etc/` porte DEUX
+    # sourcers (`enroll-catalogue.sh`, `provision-role-tokens.sh`) et l'image LES EMBARQUE (`COPY
+    # runtime/etc`, et le stage `build` n'exclut que `deploy`, `git-hooks`, `system-prompt`). Un
+    # perimetre decide sur `deploy/` seul declarerait « NOT CHECKED » dans l'artefact sur deux
+    # fichiers qu'il tient dans la main.
     #
-    # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
-    # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
+    # Meme geste que `toolchain.branch_single_source` : on mesure ce qui est la, et on NOMME ce
+    # qu'on ne voit pas.
     roots = [
       {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")},
       {"etc", Path.join(root, "etc")}
@@ -717,15 +708,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
 
       _ ->
         # THE POPULATION IS COMPUTED FIRST, AND ITS EMPTINESS IS A FAILURE (BL-6-70). `tree_scope/1`
-        # guards the PERIMETER — is `deploy/` part of this artifact — and it was doing that job
-        # alone. The population is a different question: these are TWO roots, only one of them is
-        # scoped, and `Path.wildcard` on a path that does not exist returns `[]` in silence. A
-        # `deploy/` present with an empty or moved `modules.d/` therefore yielded `offenders == []`
-        # and a `:pass` that had not opened a single file — indistinguishable, in the output, from a
-        # green earned on eleven conforming sourcers.
-        #
-        # The comment above this function already named the risk: "a green that checked nothing".
-        # It guarded the scope and not the population, which is exactly the half that was missing.
+        # guards the PERIMETER — is `deploy/` part of this artifact. The population is a different
+        # question: these are TWO roots, only one of them is scoped, and `Path.wildcard` on a path
+        # that does not exist returns `[]` in silence. A `deploy/` present with an empty or moved
+        # `modules.d/` would yield `offenders == []` and a `:pass` that had not opened a single file
+        # — indistinguishable, in the output, from a green earned on eleven conforming sourcers.
+        # Guarding the scope and not the population is "a green that checked nothing".
         sourcers =
           present
           |> Enum.flat_map(fn {_label, d} -> Path.wildcard(Path.join(d, "*.sh")) end)

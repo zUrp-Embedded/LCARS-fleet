@@ -67,7 +67,7 @@ class TestAncrageConfiguration:
         assert not manquantes, "clés absentes de l'amont : %s" % manquantes
 
     def test_reload_ne_rouvre_pas_f4(self):
-        """Le cas qui avait échappé au premier jet de l'adapter."""
+        """Le cas le plus facile à rater : un `reload()` qui relirait le disque rouvrirait F4."""
         from src import config
 
         config.reload()

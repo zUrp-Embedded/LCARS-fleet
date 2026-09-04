@@ -19,10 +19,9 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     root = Fleet.TestEnv.tmp_path("batscorp")
     on_exit(fn -> File.rm_rf!(root) end)
 
-    # The check derives the repo root as `..` from the Mix root it is handed. It was `../..` while
-    # the Mix root was `fleet/runtime`; the 2026-08-07 move made `runtime/` itself the root, and a
-    # fixture that keeps building the old shape makes the check's INSTRUMENT GUARD fire — which is
-    # what it did, loudly, instead of measuring an empty tree and reporting a pass.
+    # The check derives the repo root as `..` from the Mix root it is handed. A fixture building
+    # another shape (a `fleet/runtime` nesting, say) makes the check's INSTRUMENT GUARD fire —
+    # loudly, instead of measuring an empty tree and reporting a pass.
     runtime = Path.join(root, "runtime")
     File.mkdir_p!(Path.join(runtime, "test"))
 
@@ -33,7 +32,7 @@ defmodule Mix.Tasks.Lcars.Contracts.TestCorporaCheckTest do
     end)
 
     # ⚠ UN DECOR QUI PREND LA PLACE D'UN DEPOT DOIT PORTER SES PORTES. Depuis le detachement de
-    # l'installeur, le registre ne CROIT plus le mot `:gated` : il demande a chaque porte, par
+    # l'installeur, le registre ne CROIT pas le mot `:gated` : il demande a chaque porte, par
     # `--list-corpora`, ce qu'elle joue reellement. Un decor sans portes fait donc echouer le check
     # pour une raison qui n'est pas celle que ces temoins mesurent — et un decor qui fait rougir
     # autre chose que son sujet deplace le diagnostic au lieu de le donner.
