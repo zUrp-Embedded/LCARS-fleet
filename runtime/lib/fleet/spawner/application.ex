@@ -1,25 +1,19 @@
 defmodule Fleet.Spawner.Application do
   @moduledoc """
-  Spawner domain supervisor ("Application" is a historical name, kept to avoid
-  reference churn — this is a plain Supervisor, not an OTP app callback).
+  Spawner domain supervisor — a plain Supervisor named `Application` like every domain's root,
+  not an OTP app callback (the only one is `Fleet.Application`).
 
   ## Permanent pod boot: SOLE authority = BootOrchestrator
 
-  The boot of permanent pods (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/0`)
-  is orchestrated **only** by `Fleet.Admiral.BootOrchestrator` (post-readiness,
-  guarded by `:lcars_fleet, :admiral_start_boot_orchestrator`). This app does **NOT**
-  boot the permanent pods: a second boot path here (an auto-invoke hook guarded
-  by `:boot_permanent_at_start`) would double-boot — if `:boot_permanent_at_start`
-  were enabled in prod (the documented path), it would boot the permanent pods IN
-  ADDITION to BootOrchestrator. A single boot authority, period.
+  The boot of permanent pods (`Fleet.Spawner.PermanentBoot.boot_permanent_pods/1`) is
+  orchestrated **only** by `Fleet.Admiral.BootOrchestrator` (post-readiness, guarded by
+  `:lcars_fleet, :admiral_start_boot_orchestrator`). This supervisor boots no permanent pod: a
+  second boot path would double-boot. A single boot authority, period.
 
-  The prod control surface: `BootOrchestrator`
-  **gates** the boot of permanent pods on `:boot_permanent_at_start` (via
-  `PermanentBoot.auto_boot_enabled?/0`, **default true**);
-  `LCARS_BOOT_PERMANENT_AT_START=false` disables it (boot_complete emitted, 0 pod spawned).
-  Two distinct knobs: `:start_boot_orchestrator` (is the orchestrator running?)
-  + `:boot_permanent_at_start` (does it boot the permanent pods?). This app, for its
-  part, never boots a permanent pod (no boot hook here).
+  Two distinct knobs: `:admiral_start_boot_orchestrator` (is the orchestrator running?) and
+  `:spawner_boot_permanent_at_start` (does it boot the permanent pods? read through
+  `PermanentBoot.auto_boot_enabled?/0`, **default true**; `LCARS_BOOT_PERMANENT_AT_START=false`
+  disables it — boot_complete emitted, 0 pod spawned).
   """
 
   use Supervisor

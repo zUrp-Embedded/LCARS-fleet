@@ -420,7 +420,7 @@ defmodule Fleet.Spawner.PodTest do
       assert File.exists?(Path.join(info.pod_dir, ".cap-profile.json"))
 
       # P1/C9 — pod-owned `.claude/`: target of the creds-only bind (bwrap binds ONLY
-      # .credentials.json inside it, not the whole human dir). Must exist, created by do_project.
+      # .credentials.json inside it, not the whole human dir). Must exist, created in `:projecting`.
       assert File.dir?(Path.join(info.pod_dir, ".claude")),
              "pod_dir/.claude must exist (pod-owned target of the .credentials.json bind)"
 
@@ -2181,7 +2181,7 @@ defmodule Fleet.Spawner.PodTest do
   describe "R14 — mcp_server_spec mandatory for a real backend" do
     test "real backend + nil mcp_server_spec → spawn refused (fail-loud, no broken pod)" do
       # Real backend (non-Stub) without an MCP spec: the real pod speaks MCP → clean refusal
-      # at do_project (maybe_provision_mcp_config) BEFORE any launch. We do NOT actually
+      # in `:projecting` (maybe_provision_mcp_config) BEFORE any launch. We do NOT actually
       # launch bwrap (the failure is at provisioning).
       Application.put_env(
         :lcars_fleet,
@@ -2204,7 +2204,7 @@ defmodule Fleet.Spawner.PodTest do
                       {:shutdown, {:project_failed, {:mcp_server_spec_required, _backend}}}},
                      2_000
 
-      # The refusal is at do_project (provisioning) BEFORE do_launch → never a launch.
+      # The refusal is in `:projecting` (provisioning) BEFORE `:launching` → never a launch.
       refute_received {:launch_called, _args, _env}
     end
 

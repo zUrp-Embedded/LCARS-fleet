@@ -78,8 +78,8 @@ defmodule Fleet.Spawner.Pod.TaskProbe do
   def repl_up?(_), do: false
 
   # pod_status guard: a broker hiccup (down/restart, GenServer.call that EXITs) yields `:error`
-  # instead of crashing — since `:error` matches no `{:ok, _}`, each probe falls back to `false`
-  # (same truth table as the former inline rescue/catch). Single source of the 3 pod_status probes
+  # instead of crashing — since `:error` matches no `{:ok, _}`, each probe falls back to `false`.
+  # Single source of the 3 pod_status probes
   # below; `polled?` does NOT use this helper (it reads `last_poll`, with its own guard).
   defp safe_pod_status(pod_id) do
     Fleet.TaskQueue.pod_status(pod_id)

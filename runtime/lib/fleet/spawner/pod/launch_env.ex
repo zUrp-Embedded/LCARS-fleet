@@ -104,7 +104,7 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
           # alone (permanent / project-less pods). claude_launch passes it as
           # `--remote-control "<name>"` EXACT (zero auto suffix → no "random names piling up").
           # Per-user RC sessions (the human sees ONLY their own). NB: the VALUE is the EXACT name,
-          # not a prefix — the legacy env name (`_NAME_PREFIX`) is kept (less churn).
+          # not a prefix, whatever the env name (`_NAME_PREFIX`) suggests.
           |> Map.put("LCARS_POD_SESSION_NAME_PREFIX", Keyword.get(state.opts, :rc_name, role))
           # Desktop VISIBILITY, decided here and obeyed there. Re-deriving it launcher-side from the
           # cap-profile with a jq read gives two derivations of one fact, which agree only until
@@ -208,15 +208,14 @@ defmodule Fleet.Spawner.Pod.LaunchEnv do
     end
   end
 
-  # NO TOKEN IS PUT ANYWHERE, and the old name said otherwise. `maybe_put_auth_token/2` ignored its
-  # `human` argument, wrapped a single unconditional `Map.put` in `{:ok, _}`, and sat in a `with`
-  # chain — a shape that announces a failure it cannot have. A reader auditing how a pod receives
-  # its credentials followed that name and found nothing, because the answer is elsewhere: the
-  # authentication is the BIND of the human's `.claude` directory (`CLAUDE_DIR` above), and `bind`
-  # is the single value naming it — `bwrap_launch.sh` refuses any other.
+  # NO TOKEN IS PUT ANYWHERE, and the name says so. A reader auditing how a pod receives its
+  # credentials finds the answer elsewhere: the authentication is the BIND of the human's `.claude`
+  # directory (`CLAUDE_DIR` above), and `bind` is the single value naming it — `bwrap_launch.sh`
+  # refuses any other.
   #
-  # Total, unconditional, single-valued: a plain map transform, called inline. The `with` keeps
-  # exactly the steps that can actually fail.
+  # Total, unconditional, single-valued: a plain map transform, called inline, never a `{:ok, _}`
+  # step in the `with` — that shape announces a failure it cannot have. The `with` keeps exactly
+  # the steps that can actually fail.
   defp put_auth_mode(env), do: Map.put(env, "LCARS_AUTH_MODE", "bind")
 
   defp maybe_put_vendor_bin(env, human) do

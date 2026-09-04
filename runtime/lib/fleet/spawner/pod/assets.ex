@@ -17,7 +17,7 @@ defmodule Fleet.Spawner.Pod.Assets do
 
   ## Contract (called by `Pod`, `:projecting` state)
 
-  - `pod_settings_json/0`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
+  - `pod_settings_json/1`, `read_agent_draft/1`, `read_protocole_user/1`, `maybe_path/1`,
     `maybe_filter_skills/2`, `provision_monitor_watch/1` — steps of the `:projecting` `with`.
   """
 
@@ -26,13 +26,11 @@ defmodule Fleet.Spawner.Pod.Assets do
   alias Fleet.SPBuilder
 
   @doc """
-  The pod REPL's `settings.json` — COMPLETE, single-owner (written to `.lcars/` by the
-  `:projecting` state; BL-6-07: the launcher no longer composes or merges anything, it only
-  passes the file through `--settings`). Before this, TWO tiers wrote the same file with TWO
-  policies: this module put `skipDangerousModePermissionPrompt: true` unconditionally
-  (pre-kill-yolo), while `claude_launch.sh` jq-merged its own keys and reserved the skip-dialog
-  to bypass — and the unconditional side WON the merge, shipping every restricted pod a
-  pre-accepted danger dialog. One owner now, and the kill-yolo policy is the one that holds:
+  The pod REPL's `settings.json` — COMPLETE, single-owner: written to `.lcars/` by the
+  `:projecting` state, and `claude_launch.sh` only passes the file through `--settings`, it
+  composes and merges nothing (BL-6-07). Two writers of one file with two policies is how a
+  restricted pod ships with a pre-accepted danger dialog: the unconditional side wins the merge.
+  One owner, and the kill-yolo policy is the one that holds:
 
   `skipDangerousModePermissionPrompt: true` ONLY under `permission_mode == "bypassPermissions"`
   (`LaunchSpec.permission_mode/1`, the same authority that exports `LCARS_PERMISSION_MODE`) —
@@ -40,7 +38,7 @@ defmodule Fleet.Spawner.Pod.Assets do
   pod; a default/restricted pod gets NO pre-acceptance.
   `hasCompletedOnboarding: true` skips onboarding (the legacy `.claude.json` — the host user's
   global config — is not meant to be touched here).
-  `autoMemoryEnabled: false` (F-POD-AUTOMEM, moved from the launcher): the pod's claude
+  `autoMemoryEnabled: false` (F-POD-AUTOMEM): the pod's claude
   auto-memory is siloed, useless to the fleet, and doctrine pollution (BUG-3) — off for every
   permission mode.
   ⚠ PAS DE `extensions.marketplace.autoInstall: false` ICI : IL N'Y FAIT RIEN. The problem is real
@@ -84,8 +82,8 @@ defmodule Fleet.Spawner.Pod.Assets do
   ## `spec.systemPrompt` — DECLARED reuse, and the only alternative
 
   A cap-profile grants PERMISSIONS; its SP decides BEHAVIOUR. So a role with no prompt of its own
-  behaves like whoever's prompt it ends up with, and its name lies — which is why the generic
-  `agent-worker-base.md` fallback was removed (no SP, no pod). The single legitimate case is
+  behaves like whoever's prompt it ends up with, and its name lies — so there is no generic
+  `agent-worker-base.md` fallback: no SP, no pod. The single legitimate case is
   RENAMING: a catalogue that renames a role into its own language would otherwise copy two hundred
   lines that then drift, the substrate defect one floor up.
 
@@ -138,7 +136,7 @@ defmodule Fleet.Spawner.Pod.Assets do
           {:ok, String.t()} | {:error, {atom(), Path.t(), File.posix()}}
   def read_protocole_user(%CapProfile{} = cap) do
     # La racine vient du PROFIL : le protocole qu'un pod recoit appartient au catalogue qui declare
-    # son role. Sans ca, un role du second catalogue recevait le protocole du premier — un contrat de
+    # son role. Sans ca, un role du second catalogue recoit le protocole du premier — un contrat de
     # conversation ecrit pour d'autres gens.
     root = cap.catalogue_root
 
@@ -173,10 +171,10 @@ defmodule Fleet.Spawner.Pod.Assets do
         # The SCOPE, not the search path — the pod's own catalogue plus the system one, the same
         # pair its image is frozen from. The scope is a pair and never the business root alone: the
         # human protocol follows the roles that need it, and the only `interlocutor: both` roles
-        # live in the system catalogue — reading one root demanded this file from catalogues whose
+        # live in the system catalogue — reading one root demands this file from catalogues whose
         # every role is `interlocutor: fleet` (W-13). And never the FLATTENED path either
-        # (`find(:sp_drafts, …)` walked every installed catalogue): a `mobile` pod would have read
-        # `web-demo`'s protocol on disk while its image raised — a conversation contract written
+        # (`find(:sp_drafts, …)` walks every installed catalogue): a `mobile` pod would read
+        # `web-demo`'s protocol on disk while its image raises — a conversation contract written
         # for other people, served on exactly the regime hermetic tests measure.
         protocol_from_disk(root, "protocole-user-human.md", :protocole_user_human_missing)
     end

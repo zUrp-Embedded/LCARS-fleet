@@ -16,9 +16,8 @@ defmodule Fleet.Spawner.PoolSlot do
 
   Reserving 0 rather than 0xF is not cosmetic. `SessionMint` already mints `pool: 0` for every
   caller that does not allocate, so the reserved value is the one the un-allocated ALREADY carry:
-  the reservation needs no new default, and every session_id minted before this module existed
-  (the nibble is measured never-allocated, so all of them) reads retroactively as what it is —
-  a pod outside the managed fan-out. Reserving the top value instead would require changing that
+  the reservation needs no new default, and every session_id minted by a caller that does not
+  allocate reads as what it is — a pod outside the managed fan-out. Reserving the top value instead would require changing that
   default AND leave the whole history claiming a slot it never held.
 
   The seat is for a pod that is deliberately NOT a fan-out member — a producer held for the life
@@ -35,8 +34,8 @@ defmodule Fleet.Spawner.PoolSlot do
   ## Where the truth lives
 
   The **Registry value**, not a GenServer call. Each pod registers `%{role, repo, pool}` at
-  start-up, so the allocation reads live state without talking to a single pod — a hung pod can
-  no longer block the spawn of another. It is also why the pool is decided at the SPAWN site and
+  start-up, so the allocation reads live state without talking to a single pod — a hung pod
+  cannot block the spawn of another. It is also why the pool is decided at the SPAWN site and
   passed in: the value must be known before the process registers.
   """
 

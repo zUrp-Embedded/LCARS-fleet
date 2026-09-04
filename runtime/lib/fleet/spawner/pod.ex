@@ -425,22 +425,16 @@ defmodule Fleet.Spawner.Pod do
            ),
          :ok <- Assets.provision_monitor_watch(data),
          :ok <- Scaffold.maybe_bootstrap_project_workspace(data),
-         # Recall deliberate : la graine est restauree AVANT le lancement. C'est la seule moitie
-         # de cette phrase qui soit vraie, et elle l'est par position dans le `with`.
-         #
-         # ⚠ NE PAS ECRIRE ICI « (after workspace = cwd set) » : ce serait affirmer une DEPENDANCE
-         # qui n'existe pas. Mesure : `LaunchSpec.pod_cwd/3` et ses deux helpers ne
-         # lisent PAS le disque (le cwd est CALCULE depuis opts/cap_profile/pod_dir, pas pose par le
-         # bootstrap) ; `SeedStore.restore/4` fait son propre `mkdir_p!` ; et le seul geste
-         # destructeur du bootstrap (`morgue_residual_workspace/1`) vise `ws`, jamais
-         # `pod_dir/.claude/projects/`. Les deux gestes sont INDEPENDANTS, et intervertir les deux
-         # lignes laisse la suite entiere verte — non pas par trou de couverture, mais parce qu'il
-         # n'y a rien a observer.
-         #
-         # L'ordre est garde tel quel : rien de mesure ne demande d'en changer.
+         # Recall deliberate : la graine est restauree AVANT le lancement, par position dans le
+         # `with`. Elle ne depend PAS du bootstrap du workspace juste au-dessus, mesure :
+         # `LaunchSpec.pod_cwd/3` calcule le cwd depuis opts/cap_profile/pod_dir sans lire le
+         # disque, `SeedStore.restore/4` fait son propre `mkdir_p!`, et le seul geste destructeur
+         # du bootstrap (`morgue_residual_workspace/1`) vise `ws`, jamais
+         # `pod_dir/.claude/projects/`. Intervertir les deux lignes laisse la suite verte parce
+         # qu'il n'y a rien a observer, pas par trou de couverture.
          :ok <- Scaffold.maybe_recall_restore(data) do
-      # SP no longer stored in data (no longer in argv): the SOURCE = .lcars/system-prompt.md (written above),
-      # read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
+      # The SP is not kept in data and never travels in argv: its SOURCE is .lcars/system-prompt.md
+      # (written above), read by claude_launch via --system-prompt-file. The FILTERED skill paths ride the data to
       # :launching (BL-6-22 — validating them and then throwing them away is the half-fix; the
       # delivery half is `LaunchSpec.skills_paths_env/1` consuming them from here).
       # The socket path is RETAINED, not just used: `Pod.Liveness` derives the MCP activity marker
@@ -539,23 +533,14 @@ defmodule Fleet.Spawner.Pod do
       issue_id: data.issue_id,
       role: cap_profile_name(data.cap_profile),
       repo: Keyword.get(data.opts, :repo),
-      # THE PROJECT A POD BELONGS TO, and `:repo` is not it for a dispatched pod. The dispatch
-      # threads `:repo_id` and NOT `:repo` on purpose (`Fleet.Spawner`: the owner/name string never
-      # enters the spawn opts), so this map answered `nil` for every producer and every judge — and
-      # the only reader able to tell a project apart fell back to scanning `/proc` for an ops mount
-      # that `pod_mounts_env` had deliberately removed. Three layers agreeing on a wrong answer.
-      #
-      # `:project_slug` is already threaded by BOTH dispatch sites and by the architect's spawn, so
-      # publishing it costs no dispatcher change — and leaves the `/proc` scan nothing to justify
-      # it.
+      # THE PROJECT A POD BELONGS TO is PUBLISHED here, never inferred by a reader (no `/proc` scan
+      # for an ops mount that `pod_mounts_env` deliberately withholds). `:repo` is `nil` for every
+      # dispatched producer and judge, by design: the dispatch threads `:repo_id` and NEVER the
+      # `owner/name` string, because the `slot_key` depends on it (cf. `Fleet.Spawner`). Both
+      # `:project_slug` and `:repo_id` are threaded by the two dispatch sites and by the architect's
+      # spawn; `:repo_id` is the designation `SessionMint` requires and the `<REPO4>` of the
+      # session_id encodes.
       project_slug: Keyword.get(data.opts, :project_slug),
-      # LE MEME DEFAUT QUE `:project_slug` JUSTE AU-DESSUS, ET LE MEME REMEDE : deja filete par les
-      # deux sites de dispatch, jamais publie. `:repo` est `nil` pour tout producteur et tout juge —
-      # le dispatch ne met JAMAIS la chaine `owner/name` dans les spawn_opts, parce que le
-      # `slot_key` en depend (cf. `Fleet.Spawner`) — donc un lecteur ayant besoin du DEPOT n'avait
-      # rien a lire. `:repo_id` est la designation qui existe pour ces pods : celle que
-      # `SessionMint` exige et que le `<REPO4>` du session_id encode. On la publie ; on ne file rien
-      # de nouveau, et le `slot_key` ne bouge pas.
       repo_id: Keyword.get(data.opts, :repo_id),
       phase: state,
       conditions: MapSet.to_list(data.conditions),
@@ -953,14 +938,14 @@ defmodule Fleet.Spawner.Pod do
     if MapSet.member?(data.conditions, :output_extracted) do
       {:stop, :normal, data}
     else
-      # LA MEMOIRE SE SAUVE SURTOUT QUAND LA MORT N'ETAIT PAS VOULUE. Le checkpoint ne vivait que
-      # sur `:releasing` et `:kill`. Les DEUX morts subies tardives — cet exit du Port avant
-      # resultat, et le `:result_timeout` via `transition_failed/2` — n'y passaient pas : un agent
-      # qui meurt seul, ou qui se tait, perdait sa graine alors que c'est exactement de la qu'on
-      # veut reprendre le fil. Ici comme la-bas, avant tout demontage, tant que le JSONL est lisible.
+      # LA MEMOIRE SE SAUVE SURTOUT QUAND LA MORT N'ETAIT PAS VOULUE. Le checkpoint precede TOUT
+      # demontage, tant que le JSONL est lisible : `:releasing`, `:kill`, et les deux morts subies
+      # tardives — cet exit du Port avant resultat, et le `:result_timeout` via
+      # `transition_failed/2`. Un agent qui meurt seul, ou qui se tait, est exactement celui dont on
+      # veut reprendre le fil.
       #
-      # NON concerne, et il faut le dire pour que personne ne le "corrige" en double : le kill du
-      # watchdog de vivacite passe par `Spawner.kill_pod/1` -> `:kill`, qui checkpointait deja.
+      # Pas de doublon a ajouter : le kill du watchdog de vivacite passe par `Spawner.kill_pod/1`
+      # -> `:kill`, qui checkpointe deja.
       maybe_checkpoint_seed(data)
       clear_pod_task(data.pod_id)
 

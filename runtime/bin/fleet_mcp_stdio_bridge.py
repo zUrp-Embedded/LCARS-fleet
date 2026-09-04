@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SOURCE: bin/fleet_mcp_stdio_bridge.py
 # AUTHOR: starfleet (consolidation salvage cow-boy)
-# STARDATE: 2026.146
+# STARDATE: 2026.247
 # STATUS: salvage v2-functional
 # fleet_mcp_stdio_bridge.py — MCP bridge, stdio→AF_UNIX socket (pod ↔ central transport).
 #
@@ -54,8 +54,8 @@ def central_call(method, params):
     #
     # ⚠ READ_TIMEOUT DOIT EXCEDER LE PIRE CAS COMPOSE DE CENTRAL, jamais l'inverse : sous la borne
     # reelle, une mutation lente rend une ERREUR a l'agent pendant que son effet s'acheve, et le
-    # re-envoi de l'agent cree un DOUBLON. L'ancien timeout unique de 30 s etait sous la borne — le
-    # seul chemin publish a ete mesure a 165 s.
+    # re-envoi de l'agent cree un DOUBLON. Le chemin publish seul est mesure a 165 s : une borne
+    # unique de 30 s serait dessous.
     _req_id[0] += 1
     rpc = {"jsonrpc": "2.0", "id": _req_id[0], "method": method, "params": params}
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

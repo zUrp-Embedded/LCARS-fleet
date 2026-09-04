@@ -363,9 +363,8 @@ defmodule Fleet.Spawner.SeedStore do
   # collapsing them costs data rather than a wrong reading. Its single caller does
   # `Map.merge(existing_seed_records(...), live)` then WRITES the result over the sidecar: a `%{}`
   # returned for a file that exists but could not be parsed does not mean "nothing was there", it
-  # silently TRUNCATES the sidecar down to `live`. The register's fiche describes the opposite
-  # consequence — a pod restarting cold — because it read this as a resume-path reader; measured, it
-  # has exactly one caller and it is the slot-bridge CAPTURE.
+  # silently TRUNCATES the sidecar down to `live`. It has exactly one caller, and it is the
+  # slot-bridge CAPTURE, not a resume-path reader.
   #
   # Absent stays `%{}`: there is genuinely nothing to merge, and the caller is creating the file.
   # Unreadable raises, so the write never happens and the existing sidecar survives intact —

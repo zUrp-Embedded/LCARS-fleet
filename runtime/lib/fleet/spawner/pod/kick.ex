@@ -6,8 +6,10 @@ defmodule Fleet.Spawner.Pod.Kick do
   re-triggers a pull of a brief left pending (fallback keyword `wake`), until the agent
   ACKs (it reached out via get_work_item). This module carries the THREE stateless pieces of the tick:
 
-  - **the bounds/cadences** (`kick_first_delay_ms`, `kick_retry_ms`, `kick_max_attempts`,
-    `spawner_kick_bootstrap_max`, `spawner_kick_bootstrap_retry_ms`): `:lcars_fleet` config read on every tick;
+  - **the bounds/cadences** (`:spawner_kick_first_delay_ms`, `:spawner_kick_retry_ms`,
+    `:spawner_kick_max_attempts`, `:spawner_kick_bootstrap_max`, `:spawner_kick_bootstrap_retry_ms`,
+    and the wake pair `:spawner_wake_first_delay_ms`, `:spawner_wake_retry_ms`): `:lcars_fleet`
+    config read on every tick;
   - **the PURE decisions** (`acked?/3`, `kick_keyword/3`): should the loop stop (ACK) and,
     otherwise, which keyword to send (`engage`/`wake`/nothing) — testable outside the process;
   - **the send I/O** (`kick_send/2` → `do_send_keys/2`): pushes the keyword into the pod's tmux.
@@ -55,14 +57,14 @@ defmodule Fleet.Spawner.Pod.Kick do
   # (task ≠ pending) or at the cap. Non-blocking (generic timeout `:kick`), the pod moves to
   # :monitoring in the meantime. Intervals configurable (test: ~ms values).
 
-  @doc "Delay (ms) of the 1st kick tick at LAUNCH (bootstrap arming). Config `:kick_first_delay_ms`, default 2000 — the REPL warm-up needs an early first probe (often a no-op while tmux is not up)."
+  @doc "Delay (ms) of the 1st kick tick at LAUNCH (bootstrap arming). Config `:spawner_kick_first_delay_ms`, default 2000 — the REPL warm-up needs an early first probe (often a no-op while tmux is not up)."
   @spec kick_first_delay_ms() :: non_neg_integer()
   def kick_first_delay_ms,
     do: Application.get_env(:lcars_fleet, :spawner_kick_first_delay_ms, 2_000)
 
   @doc """
   Delay (ms) of the 1st kick tick after a WAKE (`:arm_kick`, armed by `wake_pod`). Config
-  `:wake_first_delay_ms`, default 15000. MUST outwait the carrier's honest delivery window
+  `:spawner_wake_first_delay_ms`, default 15000. MUST outwait the carrier's honest delivery window
   (flag poll 1s + Monitor batching + agent turn start + `get_work_item` round-trip = several
   seconds): armed at 2s it fires DURING nominal delivery on a WORKING Monitor rail — the fallback
   types `wake` into the session while `get_work_item` is in flight. A fallback that outruns its
@@ -74,7 +76,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
   @doc """
   Retry cadence (ms) of the WAKE-branch bootstrap case (brief pending, agent NEVER polled —
-  `engage` until the pull). Config `:kick_retry_ms`, default 2500.
+  `engage` until the pull). Config `:spawner_kick_retry_ms`, default 2500.
 
   The frequency is for the window AFTER the REPL is up, where a kick can actually be consumed.
   Running it through the cold start too buys nothing and costs one spurious turn per tick: no ACK
@@ -86,11 +88,11 @@ defmodule Fleet.Spawner.Pod.Kick do
   @spec kick_retry_ms() :: non_neg_integer()
   def kick_retry_ms, do: Application.get_env(:lcars_fleet, :spawner_kick_retry_ms, 2_500)
 
-  @doc "Retry cadence (ms) of the WAKE fallback on a RUNNING pod (already polled — keyword `wake`). Config `:wake_retry_ms`, default 10000 — same rationale as `wake_first_delay_ms/0`: the net paces itself BEHIND the carrier, never against it."
+  @doc "Retry cadence (ms) of the WAKE fallback on a RUNNING pod (already polled — keyword `wake`). Config `:spawner_wake_retry_ms`, default 10000 — same rationale as `wake_first_delay_ms/0`: the net paces itself BEHIND the carrier, never against it."
   @spec wake_retry_ms() :: non_neg_integer()
   def wake_retry_ms, do: Application.get_env(:lcars_fleet, :spawner_wake_retry_ms, 10_000)
 
-  @doc "Attempts cap of the WAKE branch — beyond it, escalation `wake.failed`. Config `:kick_max_attempts`, default 12."
+  @doc "Attempts cap of the WAKE branch — beyond it, escalation `wake.failed`. Config `:spawner_kick_max_attempts`, default 12."
   @spec kick_max_attempts() :: non_neg_integer()
   def kick_max_attempts, do: Application.get_env(:lcars_fleet, :spawner_kick_max_attempts, 12)
 
@@ -100,12 +102,12 @@ defmodule Fleet.Spawner.Pod.Kick do
   COLD-START under bwrap (~238 MB binary, cold caches, multi-fleet contention): a default too
   short (≈32s, tuned for a ~15s boot) would see all the kicks fall before the REPL is ready → pod
   never onboarded. Hence 30×8s ≈ 4 min; the resulting deadline RE-ARMS on activity. Once
-  acked, wake-by-flag takes over. Config `:kick_bootstrap_max`, default 30.
+  acked, wake-by-flag takes over. Config `:spawner_kick_bootstrap_max`, default 30.
   """
   @spec kick_bootstrap_max() :: non_neg_integer()
   def kick_bootstrap_max, do: Application.get_env(:lcars_fleet, :spawner_kick_bootstrap_max, 30)
 
-  @doc "Retry cadence (ms) of the BOOTSTRAP branch (cf. `kick_bootstrap_max/0`). Config `:kick_bootstrap_retry_ms`, default 8000."
+  @doc "Retry cadence (ms) of the BOOTSTRAP branch (cf. `kick_bootstrap_max/0`). Config `:spawner_kick_bootstrap_retry_ms`, default 8000."
   @spec kick_bootstrap_retry_ms() :: non_neg_integer()
   def kick_bootstrap_retry_ms,
     do: Application.get_env(:lcars_fleet, :spawner_kick_bootstrap_retry_ms, 8_000)
@@ -123,7 +125,7 @@ defmodule Fleet.Spawner.Pod.Kick do
 
     - not yet polled → `"engage"` : bootstrap-arm, IRREDUCIBLE (the only way to start/arm the agent);
     - already polled (pod running) → `"wake"` : FALLBACK (the carrier/flag should have delivered), GATED by
-      the global knob `:wake_send_keys` (off ⇒ flag-only: we validate the Monitor in isolation, no fallback)
+      the global knob `:spawner_wake_send_keys` (off ⇒ flag-only: we validate the Monitor in isolation, no fallback)
       AND by the pod's cap-profile (`invocation.wake_send_keys: false` ⇒ flag-only for THIS pod —
       set on the ARCHITECT: its terminal is the HUMAN's interactive session, a fallback `wake`
       lands in the human's prompt and costs a spurious turn, measured live; the no-ACK
@@ -146,7 +148,7 @@ defmodule Fleet.Spawner.Pod.Kick do
     #    turn (live: a RESUMED starfleet took the bootstrap engage drizzle for ~3 min to the cap,
     #    because `polled?` is broker RAM, wiped at fleet restart). Arming comes from the
     #    human/bridge side; briefs ride the Monitor flag rail.
-    #  - GLOBAL (knob `:wake_send_keys`): gates the `wake` FALLBACK only (Monitor-rail
+    #  - GLOBAL (knob `:spawner_wake_send_keys`): gates the `wake` FALLBACK only (Monitor-rail
     #    validation in isolation) — NEVER the engage: muting the bootstrap globally would leave
     #    every fresh worker unarmed (nobody types in a fresh worker tmux → dead fleet).
     fallback_on? = Application.get_env(:lcars_fleet, :spawner_wake_send_keys, true)
@@ -165,26 +167,20 @@ defmodule Fleet.Spawner.Pod.Kick do
     do: Fleet.CapProfile.wake_send_keys?(Map.get(state, :cap_profile))
 
   @doc false
-  # ⚠ A `resume?` GATE LIVED HERE AND DEADLOCKED EVERY RESUMED POD. It read
-  # `not polled and resume? -> nil`, on the premise that "a resumed pod self-continues and re-arms
-  # its Monitor on its own". The premise contradicted the code sitting next to it: `TurnFlag.reset/1`
-  # DELETES `turn.flag.seen` at every launch, resumed pods INCLUDED and by design ("so a resumed
-  # pod's STALE `.seen` cannot false-signal armed before its new Monitor"). A resumed pod is
-  # therefore UNARMED by construction, and something has to arm it.
+  # NO `resume?` GATE, and none may be added: a resumed pod is UNARMED by construction —
+  # `TurnFlag.reset/1` deletes `turn.flag.seen` at every launch, resumed pods included, so its stale
+  # `.seen` cannot false-signal armed before its new Monitor — and something has to arm it. A clause
+  # `not polled and resume? -> nil` can only fire on an unarmed pod (the handler's
+  # `not polled and monitor_armed?` clause cancels the loop before `kick_send` runs), i.e. exactly
+  # where `engage` is required. The bench shape of that deadlock: `turn.flag` present, `.seen`
+  # absent, `kick (wake) abandoned after 12 attempts`, a hand-typed `engage` starting the agent
+  # instantly, and the pod holding a `max_fan` seat while unrelated tickets queue in silent
+  # `wait/capacity`.
   #
-  # The shape on a bench: `turn.flag` present, `.seen` absent, `LCARS_POD_RESUME 1` on every pod
-  # process, `kick (wake) abandoned after 12 attempts`, and a hand-typed `engage` starting the agent
-  # INSTANTLY. The pod then holds a `max_fan` seat forever while unrelated tickets queue in silent
-  # `wait/capacity`; `kill_pod` respawns it into the same state.
-  #
-  # The gate could only ever fire on an UNARMED pod — i.e. exactly where engage is required — because
-  # the handler's `not polled and monitor_armed?` clause cancels the loop BEFORE `kick_send` runs.
-  # It is dead where it is right, and harmful where it fires.
-  #
-  # What still holds the ORIGINAL scar (a resumed starfleet taking the engage drizzle for ~3 min,
-  # because `polled?` is broker RAM wiped at fleet restart): the PER-POD profile gate, not this one.
-  # `starfleet.yaml` carries `wake_send_keys: false`, so `profile_allows?` is false and nothing is
-  # ever typed into it. The human-terminal class is defined by that field — never by resume.
+  # What keeps a resumed human terminal quiet (a resumed starfleet would otherwise take the engage
+  # drizzle for ~3 min, since `polled?` is broker RAM wiped at fleet restart) is the PER-POD profile
+  # gate: `starfleet.yaml` carries `wake_send_keys: false`, so `profile_allows?` is false and
+  # nothing is ever typed into it. The human-terminal class is defined by that field, never by resume.
   @spec kick_keyword(boolean(), boolean(), boolean()) :: String.t() | nil
   def kick_keyword(polled, fallback_on?, profile_allows?) do
     cond do
