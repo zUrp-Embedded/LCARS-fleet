@@ -32,10 +32,10 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |
-| `priv/memory-x/` | Memory-X, feature gelée (prototype d'origine + profils au schéma courant), lue par rien |
+| `priv/memory-x/` | Memory-X, feature gelée (prototype d'origine + profils v2.5, dont la conformité n'est tenue que par des témoins `skip`), lue par rien |
 | `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
 | `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
-| `test/` | ExUnit (284 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
+| `test/` | ExUnit (285 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
 | `git-hooks/` | pre-commit (stardate, en-têtes GO-7) et pre-push (pas de force-push sur les faces publiées) ; à installer par `install-hooks.sh` |
 
 ## Build, test, gate
@@ -80,7 +80,9 @@ sommet : un domaine qui meurt tue le nœud. Les pods permanents sont lancés apr
 
 **Seams montants.** Quatre injections de module par config, là où l'appel direct ferait un cycle :
 `:spawner_launch_backend`, `:spawner_mcp_socket_provisioner`, `:mcp_pod_reaper`,
-`:admiral_completion_inflight_fun`. Un seam est un point d'injection pour les tests et le seul
+`:admiral_completion_inflight_fun`. Les autres injections (`:mcp_forge_client`,
+`:mcp_project_onboard`, `:mcp_pod_resolver`…) remplacent une dep DÉCLARÉE par un double de test :
+elles ne montent pas. Un seam montant est un point d'injection pour les tests et le seul
 chemin légal vers la couche du dessus. ⚠ Boundary ne voit que les appels littéraux : un module
 posé dans un attribut et appelé via une variable lui est invisible. Déclarer la dep achète
 l'honnêteté du graphe, pas une vérification du défaut de seam.

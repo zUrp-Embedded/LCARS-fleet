@@ -31,7 +31,7 @@ defmodule Fleet.Project do
   lives. `Roles`/`Declaration` calling each other is fine INSIDE one boundary — it is only a problem
   with a line drawn between them.
 
-  ## The `:project_onboard` seam is a TEST seam
+  ## The `:mcp_project_onboard` seam is a TEST seam
 
   `Fleet.MCP` declares `Fleet.Project` in its boundary deps (`lib/fleet/mcp.ex`), so the call is
   an ordinary compile-checked edge. The seam stays because it is how a test injects a stub: the

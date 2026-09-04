@@ -36,7 +36,7 @@ defmodule Fleet.Workflow.OpsObjectSync do
 
   ## Always-on in prod + `Process.whereis` fallback (hermetic in test)
 
-  Supervised by `Fleet.Pilot.Application`, NOT gated on `:step_dispatch?`: MCP `issue_create`
+  Supervised by `Fleet.Pilot.Application`, NOT gated on `:pilot_step_dispatch?`: MCP `issue_create`
   materializes briefs OUTSIDE the step rail, so the gate must exist as soon as the node boots. When
   the process is up, every writer funnels through it. When it is NOT registered, `commit_object/4`
   falls back to a DIRECT `OpsObject` call: the LOCAL transaction is identical, only the cross-writer

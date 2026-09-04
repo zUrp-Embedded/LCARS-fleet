@@ -8,7 +8,7 @@
 # attend en entree.
 #
 # CE QU'IL PRODUIT
-#   1. <tofu-dir>/roles.auto.tfvars.json   les quatre listes (roles, writers, judges, externals).
+#   1. <tofu-dir>/roles.auto.tfvars.json   les cinq listes (roles, system_roles, writers, judges, externals).
 #                                          tofu lit les *.auto.tfvars.json nativement.
 #   2. sur stdout                          la ligne PROV_ROLES a exporter avant le mint des tokens.
 #

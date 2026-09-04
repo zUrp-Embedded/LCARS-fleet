@@ -331,7 +331,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
           message:
             "StepRunCompleter.complete_pr: step_run ##{n} (role #{inspect(role)}) carries no " <>
               "base_branch — the face is decided at dispatch and threaded, never re-defaulted " <>
-              "here (single-default-site doctrine, chantier face-projet)."
+              "here (single-default-site doctrine, face-projet)."
         )
 
     head = Map.fetch!(Map.fetch!(step_run, :deliverable_opts), :target_branch)
@@ -748,7 +748,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     raise ArgumentError,
           "StepRunCompleter.resolve_pr: PR lookup for #{inspect(repo)} head #{inspect(head)} " <>
             "carries no base_branch — the face is decided at dispatch and threaded, never " <>
-            "re-defaulted here (chantier face-projet)."
+            "re-defaulted here (face-projet)."
   end
 
   defp resolve_pr(forge, repo, head, base, forge_opts) do

@@ -3,25 +3,26 @@
 **Date** : 2026-06-19
 **Dernière révision** : 2026-07-04
 **Statut** : ARCHIVÉ / gelé — hors scan cap-profiles, hors boot permanent
-**Référencé par** : work/backlog.md (LCARS), #5.2/JOURNAL-session
+**Référencé par** : `priv/memory-x/README.md`
 
 ## Pourquoi ici
 
-Ces cap-profiles (`archivist` + monks `alpha`/`beta`/`monk-*`, le sous-système **Memory-X V1**) étaient
-dans `cap-profiles/monks/`, donc scannés par `Fleet.CapProfile` (`name_index` globbe `monks/`) et
-sélectionnés au boot permanent (`boot_at_start: true`). Résultat : `fleet start` **tentait de booter
-~17 pods permanents** (1 arch + 16 monks/archivist), pas juste l'arch.
+Ces cap-profiles (`archivist` + monks `alpha`/`beta`/`monk-*`, le sous-système **Memory-X**) ne
+vivent PAS dans `cap-profiles/monks/` d'un catalogue : `Fleet.CapProfile.Catalog.name_index/1` ne
+scanne pas `monks/` (le registre est lu à part, par `Fleet.SPBuilder.Monk`), et un profil
+`boot_at_start: true` dans le catalogue ferait booter **~17 pods permanents** (1 arch + 16
+monks/archivist) à chaque `fleet start`, pas juste l'arch.
 
 **Décision (2026-06-19)** : Memory-X doit être **per-project ET system-wide, sous `lcars` côté OS — PAS
 per-fleet/user**. Sinon on spawne la flotte de monks ×(nb de fleets) sur le même corpus. Gelé ici en
-attendant le re-home propre. cf. `work/backlog.md`.
+attendant le re-home propre.
 
 ## Effet
 
-Déplacé hors de `cap-profiles/` → plus scanné → ne boote plus. Seul `architect` reste `boot_at_start`
-(le gatekeeper boote via fleet_workflow). Le **code** d'injection monk (`SPBuilder.resolve_monk_injection`)
-reste en place, juste non sollicité. Tests monk gelés (`@moduletag skip`) : `sp_builder_monk_test`,
-`cap_profile_monks_f041_test`, `monks_v25_conformance_test`.
+Hors de `cap-profiles/` → pas scanné → ne boote pas. Seul `architect` est `boot_at_start` (le
+gatekeeper boote via la workflow-map). Le **code** d'injection monk (`SPBuilder.resolve_monk_injection`)
+reste en place, juste non sollicité. Témoins gelés (`@moduletag skip`) : `test/fleet/sp_builder_monk_test.exs`,
+`test/fleet/cap_profile/monks_frozen_test.exs`, `test/fleet/cap_profile/monks_conformance_test.exs`.
 
 ## Restaurer (au re-home)
 

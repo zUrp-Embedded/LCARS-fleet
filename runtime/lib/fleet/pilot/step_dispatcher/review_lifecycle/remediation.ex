@@ -494,7 +494,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp diagnosis_enabled?,
     do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnosis?, false)
 
-  # The FACE of the conflict (chantier face-projet, inventory #7/#8): called with `[]`, the
+  # The FACE of the conflict (face-projet, inventory #7/#8): called with `[]`, the
   # probe/apply helpers fall back to their `origin/main` default IN the code-face worktree — on an
   # ops PR that would resolve a conflict by merging the CODE face into a doc branch, silently, and
   # report `{:ok, :auto_resolved}`. The PR's own base (stamped at dispatch_review) names both

@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   defp runtime_seam(_), do: nil
 
   # `compose_claude_md/3` must read `spec.invocation.lifetime_scope` (the canonical
-  # schema), not `spec.lifetime_scope` (the flat form) — otherwise the pod's CLAUDE.md
+  # schema), not `spec.lifetime_scope` (a path the schema does not define) — otherwise the pod's CLAUDE.md
   # always shows "unknown". The twin `check_lifetime_scope/1` (cap_profile.ex)
   # already reads the right path.
   # The pattern covers get_in (list form `spec, ["lifetime_scope"]`) AND Map.get
@@ -115,11 +115,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
       remediation:
-        "read spec.invocation.lifetime_scope, not the flat spec.lifetime_scope, in compose_claude_md",
+        "read spec.invocation.lifetime_scope, not spec.lifetime_scope, in compose_claude_md",
       files: ["lib/fleet/sp_builder.ex"],
       pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
-        "compose_claude_md reads the flat spec.lifetime_scope instead of spec.invocation.lifetime_scope"
+        "compose_claude_md reads spec.lifetime_scope instead of spec.invocation.lifetime_scope"
     })
   end
 

@@ -33,7 +33,6 @@ metadata:
   name: standard
   description: "Revue de la demande avant le travail, revue du code apres, integration continue exigee."
   presentation: "Le chemin serieux : la demande est relue avant qu'on code (une demande ambigue remonte au responsable au lieu de partir en devinettes), le developpeur livre, puis le code est relu et l'integration continue doit etre verte avant la fusion. Pour tout ce qui vit plus d'une semaine."
-  applicable_intensity: [C1, C2, C3, C4]
 
 spec:
   # LE JURY — la liste des roles qui jugent le livrable une fois la proposition de

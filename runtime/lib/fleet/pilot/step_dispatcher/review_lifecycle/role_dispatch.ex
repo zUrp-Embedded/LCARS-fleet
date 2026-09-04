@@ -98,7 +98,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   defp load_role_or_skip(%Ctx{} = ctx, role) do
     # `resolve` (not bare `load`): composes the role's modops so the structural overlay is applied
-    # on the review/rework pod like every other launch site (catalogue chantier L1a — no divergence).
+    # on the review/rework pod like every other launch site (catalogue L1a — no divergence).
     case Fleet.CapProfile.resolve(ctx.loader, role) do
       {:ok, _} = ok ->
         ok
@@ -197,7 +197,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
            ),
          :ok <- Spawn.gate_scope_decision(decision),
          {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
-         # The PR's own base rides the project map to `pod.completed` (chantier face-projet): a
+         # The PR's own base rides the project map to `pod.completed` (face-projet): a
          # review/rework pod clones the FEATURE branch, so its `base_branch` cannot say which face
          # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
          # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).

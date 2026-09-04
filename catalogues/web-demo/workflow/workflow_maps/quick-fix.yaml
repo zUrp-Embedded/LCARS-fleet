@@ -29,7 +29,6 @@ metadata:
   # Les niveaux de criticite auxquels cette carte est proposee. C0 = jetable,
   # C4 = un echec a des consequences reelles. Un projet declare son niveau ; les
   # cartes qui ne le couvrent pas ne lui sont pas proposees.
-  applicable_intensity: [C0]
 
 spec:
   # JURY VIDE, et c'est une DECISION, pas un oubli.

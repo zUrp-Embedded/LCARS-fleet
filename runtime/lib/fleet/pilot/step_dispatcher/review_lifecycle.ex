@@ -381,7 +381,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              producer,
              ctx.forge_opts,
              head_branch: head,
-             # The PR's own base, read at the dispatch_review single site (chantier face-projet):
+             # The PR's own base, read at the dispatch_review single site (face-projet):
              # the seal aligns the FACE worktree the merge landed on.
              base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
            ) do

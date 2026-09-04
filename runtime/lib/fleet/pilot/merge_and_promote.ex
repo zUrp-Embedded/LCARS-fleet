@@ -98,7 +98,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
           :ok
           | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
   def merge_and_promote(forge, repo, pr_number, issue_n, producer, forge_opts, opts \\ []) do
-    # A0 (chantier rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
+    # A0 (rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
     # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
     # and Gitea's `Do: rebase` DROPS merge commits: the resolution vanishes, the conflict
     # resurfaces mid-replay — measured on a live Gitea 1.26.1 (409, EMPTY body, and the

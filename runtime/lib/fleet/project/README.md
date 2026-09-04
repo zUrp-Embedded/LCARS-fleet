@@ -15,7 +15,7 @@ read those (`h Fleet.Project.Onboard` in IEx, or `lib/`). Nothing here is restat
 ## Modules
 
 - `Fleet.Project` — facade, boundary anchor; explains why the cluster is one domain and why the
-  `:project_onboard` seam is a TEST seam (`Fleet.MCP` has the compile dep)
+  `:mcp_project_onboard` seam is a TEST seam (`Fleet.MCP` has the compile dep)
 - `Fleet.Project.Onboard` — the seam surface: re-exports the 13 verbs the
   `Delegation.ProjectOnboard` behaviour names plus the `eval_*` doors a shell script names; the
   common admission (`admit/3`, `required_org/1`, `catalogue_not_installed/1`)

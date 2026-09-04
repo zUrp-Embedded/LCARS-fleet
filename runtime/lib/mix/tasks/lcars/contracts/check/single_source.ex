@@ -565,8 +565,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
   `forge.tf` carries NO default for `system_account`: the value arrives through
   `roles.auto.tfvars.json`, projected from `Fleet.Credentials.ForgeIdentity` (⚖ user 2026-08-27),
-  and the mirror below guards the ABSENCE of a default rather than a copy. The shell and python
-  readers still copy the literal — they cannot call the BEAM — and those copies are verified here,
+  and the mirror below guards the ABSENCE of a default rather than a copy. The shell readers
+  still copy the literal — they cannot call the BEAM — and those copies are verified here,
   as `toolchain.branch_single_source` does for the branch name. Fewer copies would be better;
   copies nobody compares are the defect.
   """

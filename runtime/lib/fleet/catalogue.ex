@@ -790,7 +790,7 @@ defmodule Fleet.Catalogue do
 
   It exists because the dispatch rail knows a project by its forge repo, and a project lives in the
   org of its catalogue: the `owner` of `owner/name` IS the catalogue name (lot 4 of the org-par-
-  catalogue chantier). So a step run carries, for free, the catalogue that must resolve its roles —
+  catalogue). So a step run carries, for free, the catalogue that must resolve its roles —
   and this is the function that spends it.
 
   `nil` for a name no installed catalogue answers to. That is not a defect to guard against: the

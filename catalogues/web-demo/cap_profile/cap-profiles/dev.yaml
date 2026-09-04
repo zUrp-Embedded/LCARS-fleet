@@ -9,14 +9,14 @@
 #
 #   Le ROLE dit ce qu'un agent a le DROIT de faire, ce qu'il RECOIT, ce qu'il REND,
 #   et combien de temps il VIT.
-#   La CARTE (workflow/canon/workflow_maps/) dit QUI fait quoi, DANS QUEL ORDRE,
+#   La CARTE (workflow/workflow_maps/) dit QUI fait quoi, DANS QUEL ORDRE,
 #   SUR QUELLE BRANCHE, et QUI JUGE QUOI.
 #
 # Donc : ne cherchez pas ici sur quelle branche le dev travaille, ni a quelle etape
 # du pipeline il intervient. Ce n'est pas une omission — ces deux questions se
 # repondent par ticket, dans la carte, et le meme role sert plusieurs pipelines.
 #
-# Le contrat complet du fichier : cap-profile-v2.5.json (cote runtime). Les objets
+# Le contrat complet du fichier : cap-profile.json (cote runtime). Les objets
 # y sont FERMES : une cle inventee n'est pas ignoree, elle refuse le demarrage.
 # -----------------------------------------------------------------------------
 
@@ -125,7 +125,7 @@ spec:
 
   # --- Ce que l'agent sait --------------------------------------------------
   knowledge:
-    # Les skills (skills/canon/) montees dans ce pod. Liste blanche : [] = aucune.
+    # Les skills (skills/) montees dans ce pod. Liste blanche : [] = aucune.
     skills: []
     # Deux mecanismes de memoire longue, non utilises par ce catalogue.
     monk_registry: null

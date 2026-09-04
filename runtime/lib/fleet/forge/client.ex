@@ -1274,7 +1274,7 @@ defmodule Fleet.Forge.Client do
         [
           Fleet.Labels.in_flight(),
           Fleet.Labels.awaits_arch(),
-          # Genre marker (chantier face-projet): the arch poses it at create_issue, the burn reads
+          # Genre marker (face-projet): the arch poses it at create_issue, the burn reads
           # it — it must exist on every fleet repo or add_label fails the ticket's genre silently.
           Fleet.Labels.destination_workshop(),
           # `brief-review` and `build` stay LITERAL, and that is not an oversight: they are step

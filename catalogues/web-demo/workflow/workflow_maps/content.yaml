@@ -56,7 +56,6 @@ metadata:
 
   # Toutes les criticites : l'atelier n'est pas un niveau d'exigence, c'est une
   # DESTINATION. Un projet critique a autant besoin de brouillons qu'un jetable.
-  applicable_intensity: [C0, C1, C2, C3, C4]
 
 spec:
   # JURY VIDE, et le motif n'est PAS celui de `quick-fix`.

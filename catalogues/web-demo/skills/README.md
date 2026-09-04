@@ -1,4 +1,4 @@
-# skills/canon — les procédures montées dans les pods
+# skills — les procédures montées dans les pods
 
 **Date** : 2026-08-10
 **Statut** : actif — arbre vide dans ce catalogue, et c'est délibéré

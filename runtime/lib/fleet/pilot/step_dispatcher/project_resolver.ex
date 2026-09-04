@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
   def default_project_resolver(repo, opts) do
     forge_opts = Keyword.get(opts, :forge_opts, [])
 
-    # REQUIRED, never defaulted (chantier face-projet, inventory §D): the face decision is made
+    # REQUIRED, never defaulted (face-projet, inventory §D): the face decision is made
     # ONCE at the dispatch entry (issue flow: the card step's `face`; review flow: the PR head).
     # NOT `Keyword.get(opts, :base_branch, "main")` — a SUBSTITUTING default that looks like a
     # seam: when the value does not arrive, the resolver silently pins the CODE face instead of
@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.StepDispatcher.ProjectResolver do
           ArgumentError,
           "default_project_resolver: :base_branch missing for #{inspect(repo)} — the FACE " <>
             "decision is made once at the dispatch entry and threaded, never re-defaulted here " <>
-            "(single-default-site doctrine, chantier face-projet)."
+            "(single-default-site doctrine, face-projet)."
         )
 
     # Rebase resolution may need a distinct gate base from clone base.

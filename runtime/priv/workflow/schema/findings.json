@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Judge findings (details.findings)",
-  "description": "Charge machine OPTIONNELLE d'un verdict de juge, sous la clé versionnée `findings` du `details` de l'enveloppe gate-decision — l'enveloppe reste INTACTE, un juge legacy sans cette clé passe inchangé. Réconciliation des DEUX vocabulaires en production, jamais un troisième : subagent-spec-reviewer (verdict proven|partial|fail, severity critical|important|minor, category missing|extra|divergent) et la grille moon-shot §11.2-G (score 0-10 mécanique depuis le triplet critique≡critical / majeur≡important / mineur≡minor). Chaque champ qu'un seul des deux possède est optionnel.",
+  "description": "Charge machine OPTIONNELLE d'un verdict de juge, sous la clé `findings` du `details` de l'enveloppe gate-decision — l'enveloppe reste INTACTE, un juge legacy sans cette clé passe inchangé. Réconciliation des DEUX vocabulaires en production, jamais un troisième : subagent-spec-reviewer (verdict proven|partial|fail, severity critical|important|minor, category missing|extra|divergent) et la grille moon-shot §11.2-G (score 0-10 mécanique depuis le triplet critique≡critical / majeur≡important / mineur≡minor). Chaque champ qu'un seul des deux possède est optionnel.",
   "type": "object",
   "required": [
     "findings"
