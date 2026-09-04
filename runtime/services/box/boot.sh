@@ -266,10 +266,11 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
   # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
-    # `redirect_uris` OAuth2 avec `LCARS_LANDING_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
-    # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$LCARS_LANDING_PORT` dans `services.env`,
-    # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
-    # que parce que leurs deux défauts indépendants valent tous les deux 20999.
+    # Le port du deck a UNE déclaration (`PROV_DECK_PORT`, MUR 4 de variable_walls) et ses copies la
+    # suivent : ici le défaut que le daemon lit, EXPORTÉ pour que le geste `deck-oidc` (les
+    # `redirect_uris` OAuth2) et le deck lisent la même valeur dans cette boîte. L'ENTRÉE publiée
+    # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « box up » la traduit en
+    # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
     export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
