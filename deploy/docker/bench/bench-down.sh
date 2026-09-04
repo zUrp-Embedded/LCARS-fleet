@@ -46,13 +46,17 @@ done
 # magasin `${LCARS_STORE_PREFIX}-<nature>` avec un `:?` : sans la variable, il REFUSE de parser le
 # fichier, et le `down -v` ci-dessous echouerait sur un banc parfaitement destructible. C'est aussi
 # la variable dont `store_destroy_volumes` derive ce qu'il efface.
-export LCARS_STORE_PREFIX="$PROJECT"
+# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
+# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# le poste (48/49) et le banc derivent les memes noms de la meme base.
+BOX_PROJECT="${PROJECT}-fleet"
+export LCARS_STORE_PREFIX="$BOX_PROJECT"
 # shellcheck source=../../lib/store.sh
 source "$DOCKER_DIR/../lib/store.sh"
 
-FORGE_PROJECT="${PROJECT}forge"
+FORGE_PROJECT="${PROJECT}-forge"
 RUNNER_PROJECT="${PROJECT}-runner"
-BOX="${PROJECT}-lcars-1"
+BOX="${BOX_PROJECT}-lcars-1"
 RUNNER="${RUNNER_PROJECT}-act-1"
 FORGE="${FORGE_PROJECT}-gitea-1"
 
@@ -62,7 +66,7 @@ FORGE="${FORGE_PROJECT}-gitea-1"
 # emporte meme quand plus aucun conteneur ne les monte.
 RESIDU_C="$("$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -cxE "$BOX|$RUNNER|$FORGE" || true)"
 RESIDU_V="$("$DOCKER_BIN" volume ls --format '{{.Name}}' \
-  | grep -cE "^(${PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" || true)"
+  | grep -cE "^(${BOX_PROJECT}|${FORGE_PROJECT}|${RUNNER_PROJECT})_" || true)"
 
 [[ "$RESIDU_C" -gt 0 || "$RESIDU_V" -gt 0 ]] \
   || { echo "bench-down: aucun conteneur ni volume de '$PROJECT' (ni $BOX, $RUNNER, $FORGE) — rien a detruire" >&2; exit 2; }
@@ -84,8 +88,8 @@ printf 'LCARS_FORGE_URL=%s\nLCARS_RUNNER_TOKEN=%s\n' "http://gitea:3000" " " > "
   down -v --remove-orphans || true
 rm -f "$RUNNER_ENV_DOWN"
 
-echo "[bench-down] destruction de la boite ($PROJECT) — volumes compris"
-"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" down -v --remove-orphans || true
+echo "[bench-down] destruction de la boite ($BOX_PROJECT) — volumes compris"
+"$DOCKER_BIN" compose -f "$DOCKER_DIR/docker-compose.install.yml" -p "$BOX_PROJECT" down -v --remove-orphans || true
 
 echo "[bench-down] destruction de la forge ($FORGE_PROJECT) — volumes compris"
 "$DOCKER_BIN" compose -f "$DOCKER_DIR/forge-compose.yml" -p "$FORGE_PROJECT" down -v --remove-orphans || true

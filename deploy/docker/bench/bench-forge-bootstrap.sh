@@ -256,26 +256,30 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
     LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
-    # ⚠ `--force`, ET C'EST L'INTENTION, PAS UNE COMMODITE : la BOITE a deja pose ce depot a son
-    # boot — un « Initial commit » et une branche `tool_request` — et cet historique n'a AUCUN
-    # ancetre commun avec celui qu'on seme. Un push ordinaire est donc rejete « fetch first » sur
-    # une forge PARFAITEMENT NEUVE, ce qui se lit comme un accident et n'en est pas un : deux gestes
-    # du meme rail ecrivent le meme ref. Ce script amorce une forge DE BANC, jetable par
-    # construction, et n'ecrase que `main` — `tool_request` n'est pas touchee.
-    #
-    # ⚠ ET STDERR SE CAPTURE AU LIEU DE DISPARAITRE. La cause du rejet est dans le message de git,
-    # jamais dans le notre : un `2>/dev/null` ici a coute trois rejeux pour relire une ligne que git
-    # disait des la premiere. Il se REDACTE avant d'etre rendu — l'URL porte le jeton, et un
-    # diagnostic n'a pas le droit de le publier.
-    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" main:main 2>&1)" \
+    # ⚖ user 2026-09-04 (DI-06, lot 9) : la forge du banc porte LE CODE DE LA BOITE, pas celui de la
+    # machine. Ce qui se seme est la REVISION DE L'IMAGE (label OCI), poussee depuis le clone qui
+    # l'a batie — jamais le HEAD du clone hote, qui peut avoir avance (ou recule) depuis le build.
+    # Une revision absente du clone se REFUSE : semer autre chose, c'est un banc qui teste un code
+    # que la boite ne fait pas tourner.
+    BOX_REV="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BOX_IMAGE" 2>/dev/null || true)"
+    [[ -n "$BOX_REV" && "$BOX_REV" != "unknown" ]] \
+      || die "fleet/lcars : l'image $BOX_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/box build la pose)" 7
+    git -C "$REPO_ROOT" rev-parse -q --verify "${BOX_REV}^{commit}" >/dev/null 2>&1 \
+      || die "fleet/lcars : la revision de l'image ($BOX_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code de la BOITE ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
+    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${BOX_REV}:refs/heads/main" 2>&1)" \
       || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code
   git a dit : ${PUSH_ERR//"$SYS_TOKEN"/<JETON>}" 7
-    say "fleet/lcars : main pousse"
-
-    WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
-    [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
-      && _ops_ok=1 || _ops_ok=0
-    if [[ "$_ops_ok" -eq 1 ]]; then say "fleet/lcars : ops pousse"; else say "fleet/lcars : ops NON pousse"; fi ; }
+    say "fleet/lcars : main pousse (revision de l'image : $BOX_REV)"
+    # Le corpus ops est un CHOIX de l'operateur, pas un chemin de cette machine : sans LCARS_WORK_TREE,
+    # rien n'est pousse et le recapitulatif le dit (⚖ user 2026-09-04, point 9 : l'atelier hors des defauts).
+    WORK_TREE="${LCARS_WORK_TREE:-}"
+    if [[ -z "$WORK_TREE" ]]; then
+      say "fleet/lcars : ops NON pousse (LCARS_WORK_TREE non pose — donne le clone qui porte la branche ops si le banc doit l'avoir)"
+    elif [[ -d "$WORK_TREE/.git" ]]; then
+      if git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null; then say "fleet/lcars : ops pousse"; else say "fleet/lcars : ops NON pousse (push refuse depuis $WORK_TREE)"; fi
+    else
+      say "fleet/lcars : ops NON pousse (LCARS_WORK_TREE=$WORK_TREE n'est pas un clone)"
+    fi
 
   fi
 fi

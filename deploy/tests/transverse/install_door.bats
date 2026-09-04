@@ -655,11 +655,12 @@ SPY
   local fake; fake="$(_fake_tree 0 0)"
   cat > "$fake/deploy/box" <<'SPY'
 #!/usr/bin/env bash
-echo "DOCKERSH:$* LCARS_PROJECT=${LCARS_PROJECT:-<vide>}"
+echo "DOCKERSH:$* LCARS_BASE=${LCARS_BASE:-<vide>}"
 SPY
   chmod 0755 "$fake/deploy/box"
   run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --forge-project alice4 < /dev/null
-  [[ "$output" == *"LCARS_PROJECT=alice4"* ]]
+  # lot 9 (DI-05) : N est la BASE — deploy/box en fait <N>-fleet
+  [[ "$output" == *"LCARS_BASE=alice4"* ]]
 }
 
 @test "REFUS : un port sans banc est REFUSE, il n'est pas avale" {

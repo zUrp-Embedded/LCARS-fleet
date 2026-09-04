@@ -38,8 +38,9 @@
 #       --port-ssh N    le port SSH du banc (défaut 2222) — avec --bench uniquement.
 #                       Les trois sont les ports que « bench-up » publie : un banc par port, et
 #                       les WSL d une même machine partagent un daemon docker.
-#       --forge-project N  nomme l'instance de forge (défaut lcars-forge) —
-#                       conteneur, réseau, volumes et runner en dérivent. C'est
+#       --forge-project N  la BASE des projets compose (défaut lcars) : <N>-forge,
+#                       <N>-runner sur le poste, <N>-fleet pour la boîte, et le banc
+#                       en dérive les trois. UN sens (DI-05). C'est
 #                       le geste qui en monte une SECONDE au lieu de déplacer
 #                       celle qui tourne.
 #
@@ -659,7 +660,7 @@ if [[ "$RAIL" == "box" ]]; then
           # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          export LCARS_PROJECT="${PASSTHRU[$((_i + 1))]}"
+          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # la boite s'appelle <N>-fleet (deploy/box)
         fi ;;
       # ⚠ TROIS PORTS, PAS DEUX, ET LE TROISIEME MANQUAIT. `bench-up.sh` en publie trois — forge,
       # deck et SSH — et refuse net si l'un d'eux est tenu. La porte n'en traduisait que deux : un
