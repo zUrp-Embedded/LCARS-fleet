@@ -31,7 +31,7 @@ SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 # deploy/admiral/skills` — parce que l'image posait le skill A UN CHEMIN et le depot le portait A UN
 # AUTRE. Le repli ne corrigeait pas cette divergence, il la contournait : sur le rail poste le module
 # derivait en accusant l'image (« image sans les sources admiral ? ») sur une machine qui n'est pas
-# une image, et le siege n'y recevait jamais son skill (mesure du 2026-08-21, install a froid).
+# une image, et le siege n'y recevait jamais son skill (vu a une install a froid).
 #
 # Le skill vit desormais dans `fleet/services/admiral/skills`, et l'image l'y pose AUSSI — c'est
 # exactement ce que `EMBEDDED` copie sous `/opt/lcars/fleet/services`. Les deux rails nomment donc le

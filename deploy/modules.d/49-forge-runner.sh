@@ -41,7 +41,7 @@ converge_ci_runner() {
   # ⚠ LA SONDE SE JOUE ICI, ET SON ABSENCE PASSAIT UNE CLI VIDE. `PROV_DOCKER_BIN` naît vide et
   # chaque module est un processus a lui : celle de `48-forge-host` ne traverse pas. Sans cette
   # ligne, le delegue retombait sur un `docker` nu — introuvable dans une VM WSL — et refusait
-  # trois images PRESENTES sur le daemon (banc WSL, 2026-08-30). Sur un Linux natif le PATH le
+  # trois images PRESENTES sur le daemon (vu sous WSL). Sur un Linux natif le PATH le
   # portait : le defaut n'y etait pas visible.
   if ! docker_endpoint; then
     p_warn "runner CI non enrolable : $PROV_DOCKER_WHY"
@@ -92,8 +92,8 @@ check() {
     # ⚠ CE VERDICT DISAIT LUI-MEME QU'IL NE SAVAIT PAS, ET IL ETAIT CLASSE DRIFT. Le bon motif est
     # dix lignes plus haut, dans ce meme fichier : « forge éteinte — le runner n'est pas mesurable,
     # et son absence n'est pas une dérive ». Un drift promet qu'`apply` converge ; ici on n'a MEME
-    # PAS mesuré, donc il n'y a rien a converger — mesure du 2026-09-01 sur le banc 2001, ou ce
-    # drift apparaissait sans sudo et disparaissait avec.
+    # PAS mesuré, donc il n'y a rien a converger — vu : ce drift apparaissait sans sudo
+    # et disparaissait avec.
     p_warn "runner CI non mesurable (jeton master illisible ou API muette) — la CI peut être sans machine ; relance sous sudo pour conclure"
   elif [[ "$n" -gt 0 ]]; then
     p_ok "$n runner(s) CI enregistré(s) — la CI de cette forge a une machine"

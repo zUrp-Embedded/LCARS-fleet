@@ -115,8 +115,7 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # seme plus sur `admiral` : c'est le siege machine, il ne commite jamais, et lui donner l'adresse
 # faisait signer les commits des humains par un compte fantome que la forge ne relie a personne.
 # L'adresse qui compte est celle du compte forge de l'humain, posee par le convergeur.
-# ⚠ PAR --env-file, PLUS JAMAIS PAR L'ENVIRONNEMENT (mesuré 2026-08-18, trois morsures le meme
-# jour) : la substitution `${VAR}` d'un compose file se fait dans le PROCESS compose — et quand
+# ⚠ PAR --env-file, PLUS JAMAIS PAR L'ENVIRONNEMENT (trois morsures en un jour) : la substitution `${VAR}` d'un compose file se fait dans le PROCESS compose — et quand
 # `DOCKER_BIN` est un wrapper qui s'escalade (sudo interne, env remis a zero), les variables
 # prefixees ici n'existent plus de l'autre cote. Consequences mesurees : l'image DEFAUTAIT (le tag
 # de la liste rouge a ete ecrase, puis un pull du registre NAS), le port ssh DEFAUTAIT (bind sur le
@@ -126,7 +125,7 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # ⚠ PAS DE FICHIER TEMPORAIRE ANONYME, ET PAS DANS `/tmp` — le temoin `bench_swap_creds.bats`
 # l'interdit, pour une raison mesuree : sur un poste ou le daemon passe par sudo, `docker cp` ecrit
 # en ROOT, `/tmp` est sticky, donc celui qui a cree le fichier ne peut plus l'effacer. Deux copies
-# de credentials VIVANTS y etaient restees le 2026-08-18, pendant que le script se croyait propre.
+# de credentials VIVANTS y sont restees, pendant que le script se croyait propre.
 # Ce fichier-ci ne porte que de la CONFIGURATION (image, ports, URLs — le mot de passe admiral part
 # par un tube vers `chpasswd`, jamais par ici), mais le piege de propriete est le meme.
 #

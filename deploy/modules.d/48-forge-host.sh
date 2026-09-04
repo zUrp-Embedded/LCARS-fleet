@@ -175,8 +175,8 @@ seat_binding_report() { # seat_binding_report <check|apply>
 
   # ⚠ « NON ENREGISTRE » SE DIT D'UNE CARTE QU'ON A PU LIRE. `prov_seat_from_map` rend vide dans DEUX
   # cas — le siège n'y est pas, ou le fichier n'est pas lisible d'ici — et les deux tombaient sur le
-  # même drift. Mesure du 2026-09-01, banc 2001 : ce drift apparaissait sans sudo et disparaissait
-  # avec, sur une carte parfaitement en place.
+  # même drift. Vu : ce drift apparaissait sans sudo et disparaissait avec, sur une
+  # carte parfaitement en place.
   local _carte; _carte="$(prov_file_state "$PROV_UID_MAP_FILE")"
   if [[ -n "$(prov_seat_from_map)" ]]; then
     p_ok "siège : « $PROV_SEAT_LOGIN » enregistré ($PROV_UID_MAP_FILE, forge_id 1)"
@@ -371,7 +371,7 @@ apply() {
   esac
 
   # 3. LE SEED. Il ne se REGÉNÈRE pas : le provider n'écrit pas le password d'un compte existant
-  #    (mesure 2026-08-16), donc un seed neuf donnerait un fichier qui ne correspond plus aux
+  #    (vu), donc un seed neuf donnerait un fichier qui ne correspond plus aux
   #    comptes et le mint des jetons de rôle partirait en 401.
   if [[ ! -s "$SEED_FILE" ]]; then
     local seed; seed="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"

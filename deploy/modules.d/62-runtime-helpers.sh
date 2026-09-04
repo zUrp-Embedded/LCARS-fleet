@@ -89,14 +89,14 @@ deck_static_table() {
 # ⚠ `services` MANQUAIT, ET LE MEME MODULE EN DEPENDAIT. Il pose onze auxiliaires depuis
 # `$(repo_root)/fleet/services` (`SRC_DIR`) et n'emportait pas ce repertoire dans la copie : sur une
 # machine provisionnee, `repo_root()` resout `/opt/lcars`, et le comparateur n'avait donc JAMAIS sa
-# source. Mesure du 2026-09-01 sur le banc 2004 : `/opt/lcars/fleet/services` n'existe pas, et le
-# doctor rendait onze drifts « diverge de la source » a chaque passage — tous faux.
+# source. Sans lui, `/opt/lcars/fleet/services` n'existe pas, et le doctor rend onze drifts
+# « diverge de la source » a chaque passage — tous faux.
 #
 # Second lecteur, plus discret : `25-directories` invoque
 # `$(repo_root)/fleet/services/forge-gestures.sh builtin-human` pour connaitre l'humain integre. Sans
 # l'arbre, la sonde echoue derriere un `|| true` et rend une chaine vide — le repertoire de console
 # de cet humain n'etait simplement pas pose, sans un mot.
-# ⚠ `bin` A ETE AJOUTE LE 2026-09-02, ET SON ABSENCE ETAIT LE MEME DEFAUT QUE C6, SUR UN QUATRIEME
+# ⚠ `bin` EST DU MEME LOT, ET SON ABSENCE ETAIT LE MEME DEFAUT QUE C6, SUR UN QUATRIEME
 # REPERTOIRE. `BIN_SRC_DIR="$(repo_root)/fleet/bin"` (l. 18) est lu par ce module meme pour poser
 # `lcars-toolchain-converge` et `lcars-authority-ask` — mais `bin` ne figurait pas dans cette liste.
 # Au rejeu depuis la copie, `repo_root()` rend `/opt/lcars`, `BIN_SRC_DIR` pointe donc sur un
@@ -115,8 +115,8 @@ EMBEDDED_ROOT=(assets catalogues deploy)
 
 # ─── CE QUE LA COPIE N'EMPORTE PAS — UNE SEULE LISTE, POUR LES DEUX BOUCLES ──────────────────────
 #
-# ⚠ `cp -a` EMPORTAIT 73 Mo QUE `git` NE VOIT MEME PAS. Mesure du 2026-09-02, arbre de travail :
-# `deploy` pese 2,4 Mo dans git et 76 Mo sur disque. L'ecart ENTIER est `deps/.terraform` +
+# ⚠ `cp -a` EMPORTAIT 73 Mo QUE `git` NE VOIT MEME PAS. Un arbre de travail :
+# `deploy` pese quelques Mo dans git et des dizaines sur disque. L'ecart ENTIER est `deps/.terraform` +
 # `deps/instance/.terraform` — le cache de providers tofu, gitignore, recopie sous `/opt/lcars` a
 # chaque apply. Les deux AUTRES copieurs de cette recette (`46-tofu`, `48-forge-host`) faisaient
 # deja `rm -rf "$work/.terraform"` juste apres leur `cp -a` ; cette boucle-ci ne retirait rien.
@@ -182,7 +182,7 @@ check() {
   # ⚠ « PAS EXECUTABLE » N'EST PAS « ABSENT », et confondre les deux envoie chercher un fichier qui
   # est la. L'apply pose tout en `install -m 0755` ; une IMAGE, elle, copie le mode de la source —
   # `lcars_socket.py` est 100644 dans git et arrivait donc non executable. Le module rendait
-  # « absent », mesure du 2026-08-30, sur un fichier de 5130 octets parfaitement present.
+  # « absent » sur un fichier parfaitement present.
   for n in "${HELPERS[@]}"; do
     if [[ ! -e "$HELPERS_DIR/$n" ]]; then
       p_drift "$HELPERS_DIR/$n absent"
@@ -193,8 +193,7 @@ check() {
     elif [[ ! -r "$SRC_DIR/$n" ]]; then
       # ⚠ « DIVERGE » EST UNE CONCLUSION, ET ELLE EXIGE DEUX COTES. `helper_current` est un `cmp -s
       # src dst` : source absente, `cmp` echoue, et l'appelant lisait cet echec comme une
-      # divergence. Mesure du 2026-09-01 sur le banc 2004 : ONZE drifts « diverge de la source »
-      # alors que `/opt/lcars/fleet/services` n'existait pas du tout. Onze verdicts faux par
+      # divergence. Vu : ONZE drifts « diverge de la source » alors que `/opt/lcars/fleet/services` n'existait pas du tout. Onze verdicts faux par
       # passage, dont aucun ne portait sur l'auxiliaire qu'il nommait.
       p_warn "$HELPERS_DIR/$n : rien n'est conclu — la SOURCE est absente ou illisible ici ($SRC_DIR/$n). « diverge » demande deux côtés"
     elif ! helper_current "$n"; then
@@ -235,7 +234,7 @@ check() {
   # ⚠ ET LA BOUCLE SUR `EMBEDDED` N'AVAIT PLUS D'OBJET : elle iterait sur les arbres de `fleet/` pour
   # juger un binaire de l'installeur, qui n'en fait plus partie — d'ou un message qui nommait
   # `/opt/lcars/fleet/etc` pour se plaindre d'un `provision` absent. Le sujet est UN fichier, il se
-  # nomme une fois. Trouve sur le banc 2010, par le doctor lui-meme.
+  # nomme une fois.
   if [[ -x "$HELPERS_DIR/deploy/provision" ]]; then
     p_ok "provisionnement embarqué posé ($HELPERS_DIR/deploy/provision)"
   else
@@ -370,7 +369,7 @@ BLOC
   # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus part de `$(repo_root)/fleet/$n` :
   # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
   #
-  # MESURE DU 2026-09-01, banc 2007 : un apply rejoue depuis `/opt/lcars/deploy/provision` —
+  # VU : un apply rejoue depuis `/opt/lcars/deploy/provision` —
   # LE GESTE NOMINAL DU CONVERGEUR, celui que l'en-tete de ce module decrit — echouait sur trois
   # modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
   # /opt/lcars/fleet ». Le rail pose ne pouvait pas se rejouer entierement.

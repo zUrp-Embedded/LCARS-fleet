@@ -104,8 +104,7 @@ fi
 # ce qu'il exerce est ce que l'admin jouera.
 [[ "$WITH_BOX" -eq 1 ]] || die "--no-box n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
 
-# LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (mesure
-# 2026-08-16 sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
+# LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (vu sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
 # correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
 # manque. On relit celui que la boite garde ; on n'en fabrique un que s'il n'y en a pas.
 SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
@@ -121,8 +120,7 @@ BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || 
 [[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
 # ⚠ AUCUN `--catalogue`, ET C'EST LE POINT. Nommer l'arbre de l'HOTE le fait monter dans le
 # conteneur, ou la porte tourne en `nobody` : un parent en `drwxrws---` ou un `/home/<user>` en 0700
-# lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Mesure du
-# 2026-08-18 : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
+# lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Vu : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
 # L'image PORTE son catalogue ; c'est aussi le plus juste, les comptes doivent correspondre a ce que
 # la boite SERVIRA — l'arbre de l'hote peut avoir bouge depuis le build.
 ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" \
@@ -186,8 +184,7 @@ fi
 # Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
 # qu'on vient de poser. `read:organization` est LOAD-BEARING et non evident : sans lui le token
 # rend 403 sur /orgs/.../members ET /teams/... — donc la sonde d'appartenance humaine (le
-# prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Mesure
-# le 2026-08-02 : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
+# prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Vu : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
 # que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
 # Un nom horodate, comme le master token, pour la meme raison : un token survivant d'une passe
 # precedente n'est plus une hypothese a formuler, c'est un cas qu'on ne peut plus rencontrer.
@@ -209,7 +206,7 @@ except Exception: print("")' 2>/dev/null || true)"
   # l'entrypoint materialise `admiral` (uid 1000) et RIEN d'autre : `$HUMAN` vient de la FORGE, et le
   # convergeur ne le fabrique qu'au boot SUIVANT le seed — precisement la relance que cette passe
   # demande deux lignes plus haut. Un `die` ici tuait l'amorcage sur un ordre qui ne peut pas etre
-  # autre : mesure du 2026-08-15, `unable to find user lcars` en sortie de passe 1.
+  # autre : vu, `unable to find user lcars` en sortie de passe 1.
   # Meme forme que le semis : on saute en le DISANT, la passe 2 pose. Ce qui garde l'oubli impossible
   # n'est pas ce message, c'est le verdict de `bench-up.sh`, qui EXIGE ce fichier apres deux passes.
   if ! "$DOCKER_BIN" exec "$BOX" id -u "$HUMAN" >/dev/null 2>&1; then

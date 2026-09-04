@@ -75,7 +75,7 @@ done
 # sur l'hote, c'est le seul cas ou ce chemin n'est pas un chemin d'hote.
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
-# Le depot par defaut : ce script vit dans deploy/lib/ (Q3, 2026-09-04 : joue a l'install
+# Le depot par defaut : ce script vit dans deploy/lib/ (Q3 : joue a l'install
 # seulement), donc le runtime source est le fleet/ a cote de deploy/ dans un checkout.
 [[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../fleet" && pwd)"
 
@@ -103,7 +103,7 @@ elif [[ -n "$RELEASE" ]]; then
   # release, et personne ne savait la lire.
   #
   # Le mur etait connu et ecrit plus haut : « le banc est mort dessus sur la premiere machine
-  # neuve (2026-08-18, `mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
+  # neuve (`mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
   # ne vaut que pour qui a docker.
   #
   # ⚠ MEME FONCTION, MEME AUTORITE : `Fleet.Roster.eval_tfvars`. La regle de placement (siege /

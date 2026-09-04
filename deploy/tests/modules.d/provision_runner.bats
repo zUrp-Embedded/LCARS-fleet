@@ -60,6 +60,8 @@ setup() {
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
+  # lot 10 : uninstall et audit vivent a cote du runner, sources par lui
+  cp "$SRC/lib/provision-uninstall.sh" "$SRC/lib/provision-audit.sh" "$SANDBOX/lib/"
   cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"

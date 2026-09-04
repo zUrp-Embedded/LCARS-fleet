@@ -88,7 +88,7 @@ fi
 #
 # ⚠ ET LE REFUS DE STDIN A DISPARU (⚖ user 2026-08-31 : « c'est une question technique, pas un choix
 # dogmatique »). Il n'achetait que deux des cinq griefs du pipe, et les deux ont un meilleur remède :
-# la troncature par `{ main "$@"; }` en dernière ligne — mesuré, 0 fuite sur 162 troncatures contre
+# la troncature par `{ main "$@"; }` en dernière ligne — au banc de troncature, 0 fuite sur 162 contre
 # 67 pour la forme sans `main` — et la localisation par cette branche-ci.
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -353,8 +353,7 @@ elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
   :
 elif [[ "$SUBSTRATE" == "linux" ]]; then
   # ⚠ « N'A PAS DE DESINSTALLEUR » ETAIT FAUX, ET LE MEME FICHIER DISAIT L'INVERSE 98 LIGNES PLUS
-  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe depuis le
-  # 2026-08-22, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
+  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
   #
   # Ce que ce refus doit dire est plus precis, et c'est ce qui aide a decider : le rail POSSEDE la
   # machine, il sait REPRENDRE ce qu'il a pose, et il ne sait pas RESTAURER ce qu'il a modifie
@@ -586,12 +585,6 @@ else
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
     "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
   )
-  if [[ -n "${PROV_DOCKER_SUDO:-}" ]]; then
-    _banner_body+=(
-      "  ${W}⚠ sudo sera demandé pour PARLER au daemon docker —${N}"
-      "    sa socket appartient à root. Aucune modification."
-    )
-  fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
   else
@@ -634,7 +627,7 @@ if [[ "$RAIL" == "box" ]]; then
   # ⚠ CETTE BOUCLE AVANÇAIT DE DEUX EN DEUX, ET UN DRAPEAU DE `PASSTHRU` PEUT ÊTRE IMPAIR. Un
   # drapeau solo poussé dans `PASSTHRU` décale d'un cran tout ce qui le suit, et AUCUN `case` ne
   # le voit : les valeurs partent sur les défauts, et un drapeau du rail POSTE qui devrait être
-  # REFUSÉ est avalé sans un mot (mesuré le 2026-09-01 avec le drapeau solo d'alors, retiré depuis).
+  # REFUSÉ est avalé sans un mot (vu avec un drapeau solo, retiré depuis).
   #
   # ⚠ L'ARITÉ EST DÉCLARÉE, ET UN DRAPEAU INCONNU EST REFUSÉ. Deviner « c'est sûrement une paire »
   # est exactement ce qui a produit le défaut : le prochain drapeau solo ajouté à `PASSTHRU` le
@@ -667,7 +660,7 @@ if [[ "$RAIL" == "box" ]]; then
       # operateur pouvait donc deplacer la forge et le deck, et se faire refuser sur un port SSH
       # qu'aucun drapeau ne savait bouger.
       #
-      # MESURE DU 2026-09-01, banc 2008 : « REFUS : un autre conteneur tient deja un des ports de ce
+      # VU : « REFUS : un autre conteneur tient deja un des ports de ce
       # banc · 2222 -> lcars-nuit-lcars-1 ». Le refus est JUSTE — les bancs WSL partagent un meme
       # daemon docker, donc un seul banc par port — mais la sortie qu'il propose (« --ssh-port »)
       # n'existait pas a l'entree. Un refus qui nomme un geste que la porte ne sait pas passer
@@ -780,7 +773,7 @@ exec "$WORKSTATION" up "${PASSTHRU[@]}"
 # arguments, et il APPELLE la fonction. Deux octets, et tout s'execute.
 #
 # L'accolade ferme ce reste : `{ main` non fermee est une erreur de syntaxe, jamais une commande.
-# Banc a toutes les troncatures possibles (`work/…/chantier-porte-install-2026-08-30/bancs/`) :
+# Banc a toutes les troncatures possibles (joue hors du depot, non embarque) :
 #
 #     sans main()      41 fuites / 97
 #     main "$@"         2 vraies / 118

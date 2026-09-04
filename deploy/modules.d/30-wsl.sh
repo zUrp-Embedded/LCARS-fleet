@@ -114,7 +114,7 @@ apply() {
   # `/usr/bin/docker-credential-desktop.exe` est un LIEN vers un binaire Windows. Un `.exe` ne
   # s'exécute sous WSL que par l'interop (binfmt) — celle que `wsl.conf` coupe deux blocs plus bas.
   #
-  # LA CHAÎNE, MESURÉE LE 2026-09-02 SUR LE BANC 2010 (vierge, non redémarré) :
+  # LA CHAÎNE, SUR UN WSL VIERGE NON REDÉMARRÉ :
   #   /usr/bin/docker-credential-desktop.exe  ->  lien vers /Docker/host/bin/…exe
   #   /proc/sys/fs/binfmt_misc/WSLInterop     ->  enabled
   #   le helper interrogé                     ->  rc=0, il rend les identifiants

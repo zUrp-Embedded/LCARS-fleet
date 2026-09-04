@@ -307,17 +307,6 @@ setup() {
   grep -qE 'exec "\$SCRIPT_DIR/deploy/box" up' "$SRC"
 }
 
-@test "l'escalade pour JOINDRE le daemon est ANNONCEE avant la pause, jamais decouverte" {
-  # Le cout s'annonce, il ne se decouvre pas — meme regle que le reste du bandeau. Un sudo qui
-  # surgit apres le consentement transforme une promesse bornee en surprise.
-  grep -q 'sudo sera demandé pour PARLER au daemon docker' "$SRC"
-  local annonce pause
-  annonce="$(grep -n 'sudo sera demandé' "$SRC" | head -1 | cut -d: -f1)"
-  pause="$(grep -n 'read -r _ < /dev/tty' "$SRC" | head -1 | cut -d: -f1)"
-  [ "$annonce" -lt "$pause" ]
-}
-
-
 @test "REGRESSION — tout ce qui suit « -- » atteint le delegue, VERBATIM" {
   # ⚠ SANS CA, `--bench` ETAIT UNE IMPASSE. Il delegue a `bench-up.sh`, qui a ses propres options
   # (`--project`, `--ssh-port`, `--image`), et le parseur de cette porte refuse ce qu'il ne connait

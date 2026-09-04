@@ -173,7 +173,7 @@ apply() {
   # se contredisait en trois lignes, et l'apply mourait sur une machine dont l'etat etait
   # exactement celui qu'il venait de declarer correct.
   #
-  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006, sans erlang) : `OK` puis
+  # VU sur une premiere install binaire, sans erlang : `OK` puis
   # `FAIL` puis `ERREUR ... apply en echec (rc=1)`. La release embarque son ERTS : le plancher OTP
   # de la MACHINE ne decide de rien quand personne ne compile dessus.
   if rien_a_batir; then

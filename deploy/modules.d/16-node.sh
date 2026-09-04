@@ -33,7 +33,7 @@ node_arch() { arch_tag node; }
 #
 # ⚠ ET CE MODULE EST « APPLY-ON: wsl linux · CHECK-ON: any » : il VERIFIE sur un substrat ou il ne
 # POSE jamais. Dans la boite, node n'est donc jamais la — l'etat nominal du check y est l'absence.
-# Mesure du 2026-08-30 : « ERREUR 16-node: MORT avant de rendre son verdict (rc=127) », seul echec
+# Vu : « ERREUR 16-node: MORT avant de rendre son verdict (rc=127) », seul echec
 # des 20 modules, et il suffisait a rendre la boite non convergee.
 node_version_posee() {
   [[ -x "$NODE_LINK_DIR/node" ]] || return 0
