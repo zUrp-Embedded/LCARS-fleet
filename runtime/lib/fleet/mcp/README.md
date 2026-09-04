@@ -1,7 +1,7 @@
 # Fleet.MCP — domain card
 
 **Date**: 2026-07-13
-**Last revised**: 2026-09-04
+**Last revised**: 2026-09-05
 **Status**: active — pod-facing MCP server, per-pod AF_UNIX socket (vendor boundary)
 **Referenced by**: —
 
@@ -34,7 +34,7 @@ restated, only pointed at.
     - `Delegation.Render` — what the channels put in the map they hand back to the pod
     - `Delegation.ForgeClient` / `ProjectOnboard` — behaviours = contracts of the `:mcp_forge_client` / `:mcp_project_onboard` seams (defaults `Fleet.Forge.Client` / `Fleet.Project.Onboard`, both compile deps of mcp; the seam is an injection point for tests)
 - `Fleet.MCP.Idempotency` — single-flight coordinator for MCP mutations: concurrent calls with one logical key collapse into one execution
-- `Fleet.MCP.PodSocketAcceptor` — one AF_UNIX socket acceptor per pod (identity IS the channel; each connection served in its own Task)
+- `Fleet.MCP.PodSocketAcceptor` — one AF_UNIX socket acceptor per pod (identity IS the channel; each connection served in its own Task); a `tools/call` is refused before dispatch when the tool is off the pod's surface or its arguments violate the `deftool` `inputSchema`
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor of the acceptors + the spawner-facing seam API (`ensure_pod_socket` / `release_pod_socket`, paths)
 - `Fleet.MCP.SocketWarden` — periodic reconciler of the per-pod socket footprints (acceptor/listener/Registry/file) against the live pods (2-tick grace)
 - `Fleet.MCP.Server` — boot guard: refuses `start_link` on the pod side (`:forbidden_in_pod`)

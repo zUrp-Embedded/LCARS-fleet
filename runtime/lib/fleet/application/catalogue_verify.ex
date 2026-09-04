@@ -82,7 +82,8 @@ defmodule Fleet.Application.CatalogueVerify do
 
     assumptions = [
       "root read: #{root}",
-      "fine per-tree overrides (LCARS_CAPPROFILES_ROOT etc.) are IGNORED — this proves the root taken whole"
+      "fine per-tree overrides (LCARS_CAPPROFILES_ROOT etc.) are IGNORED — this proves the root taken whole",
+      cap_profiles_assumption(root)
     ]
 
     try do
@@ -96,6 +97,21 @@ defmodule Fleet.Application.CatalogueVerify do
     after
       restore(prev)
     end
+  end
+
+  # THREE STATES USED TO SHARE ONE SILENCE: a catalogue that brings no role on purpose, a
+  # `cap-profiles` directory mislaid (a typo, or the pre-0.9 `canon/` level), and a directory that
+  # is there. The first is legal (`Fleet.Workflow.CardRoles`: a catalogue with no profiles of its
+  # own is fine as long as its cards only name system roles) and the second is the dangerous one —
+  # zero role published, every stage green. Refusing would set a policy this verifier has no mandate
+  # for; so the state is NAMED in the assumptions the operator reads, and a mislaid directory reads
+  # as « none of its own » where they expected their roles (2026-09-04).
+  defp cap_profiles_assumption(root) do
+    dir = Path.join(root, Fleet.Catalogue.rel(:cap_profiles))
+
+    if File.dir?(dir),
+      do: "cap-profiles: read from #{dir}",
+      else: "cap-profiles: NONE of its own (#{dir} absent) — its cards can only name system roles"
   end
 
   # Tier 1 — the manifest. Without a readable root and a supported api_version, nothing below can be
@@ -175,6 +191,8 @@ defmodule Fleet.Application.CatalogueVerify do
     cap_root = Path.join(root, "cap_profile/cap-profiles")
 
     case Fleet.CapProfile.index_of(cap_root) do
+      # Legal, and already NAMED to the operator by `cap_profiles_assumption/1` — the advice stage
+      # has nothing to judge alone when there is nothing of its own.
       {:error, :enoent} ->
         :ok
 

@@ -645,9 +645,11 @@ defmodule Fleet.MCP.PodToolsTest do
          repo: full_name,
          forge: :deleted,
          architect: :stopped,
+         workers_killed: 2,
          local: %{project: :removed, ops: :removed, workshop: :removed},
          project_dir: "/tmp/projects/#{name}",
          work_dir: "/tmp/projects.work/#{name}",
+         doc_dir: "/tmp/projects.workshop/#{name}",
          forced: Keyword.get(opts, :force, false)
        }}
     end
@@ -2260,6 +2262,10 @@ defmodule Fleet.MCP.PodToolsTest do
 
       assert %{"project" => "removed", "work" => "removed", "workshop" => "removed"} =
                result["local"]
+
+      # The swept-worker count crosses too: the seam reports it so a human learns the deletion
+      # cost work in flight. It was computed and tested on the seam side, and dropped here.
+      assert result["workers_killed"] == 2
     end
 
     test "DPF-05: delete_project removes the project's publish binding (no orphan)" do
@@ -2898,8 +2904,6 @@ defmodule Fleet.MCP.PodToolsTest do
          label_names: ["type:workshop", "destination/workshop"]
        )}
     end
-
-    def get_route(_r, _n, _o), do: :none
 
     def get_issue(_repo, _n, _opts), do: {:error, :not_found}
 

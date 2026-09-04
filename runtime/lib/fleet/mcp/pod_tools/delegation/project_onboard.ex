@@ -73,11 +73,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   @doc """
   DELETES a project — general teardown (architect pod + forge repo + the three faces). `opts[:force]` bypasses
-  the anti-work safety guard (a DELIBERATE end-of-life delete). Result carries `repo` (+ `forge`/
-  `architect` status keys and `local`, one verdict per face); `Portfolio` reads `%{repo: _}`.
+  the anti-work safety guard (a DELIBERATE end-of-life delete). The result shape is
+  `Fleet.Project.Onboard.delete_result/0` — declared ONCE on the default implementation's side, so
+  the `@spec` there and this `@callback` cannot drift apart. `Portfolio` relays `repo`, `forge`,
+  `architect`, `workers_killed` and `local` on the wire.
   """
   @callback delete_project(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.delete_result()} | {:error, term()}
 
   @doc """
   ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:
@@ -141,18 +143,18 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   NOT consumed — the import takes a copy and leaves the original with its owner.
   """
   @callback import_deposit(source :: String.t(), catalogue :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.result()} | {:error, term()}
 
   @doc """
   CLOSES a project (BL-6-30) — stops the fleet ON it, disk and forge intact (≠ delete: nothing
   destroyed). The closed state is a forge object (open `[lcars-parked]` marker issue) the poller
   respects; the running brick finishes, the next one never starts; the architect stops
   (best-effort). Reopen via `open/2` (which also clears the marker) or the human closing the
-  marker in the UI. Result carries `repo`/`outcome` (`:closed` | `:already_closed`) +
-  `marker_issue`/`architect`.
+  marker in the UI. Result: `Fleet.Project.Onboard.close_result/0` (`repo`/`outcome`
+  (`:closed` | `:already_closed`)/`architect`, + `marker_issue` when this call posted it).
   """
   @callback close_project(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.close_result()} | {:error, term()}
 
   @doc """
   LISTS the projects on this box (pure read). Per project: name, repo, the DECLARED card and level
@@ -177,20 +179,22 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
   `.lcars.json` on `main` through a scoped protection lift, protection re-sized on the new
   card's jury. `opts`: `:workflow_map` (required), `:justification` (required — the revision's
   WHY, committed), `:max_fan` (optional), `:revised_by` (the acting role).
-  Result carries `repo`/`card`/`previous_card`/`outcome` (`:revised` | `:unchanged`).
+  Result: `Fleet.Project.Onboard.revise_result/0` (`repo`/`card`/`previous_card`/`outcome`
+  (`:revised` | `:unchanged`), + `jury_delta`/`protection` when pushed).
   """
   @callback revise_card(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.revise_result()} | {:error, term()}
 
   @doc """
   RÉÉCRIT le rail CI d'un projet sur `main` depuis le template livré — la sortie de secours quand
   un `ci.yml` cassé empêche toute PR de fusionner (le plancher `CI / *` de `protect_main` exige un
   statut que le rail ne produit plus, et les humains sont en `read` sur la forge). `opts` :
-  `:justification` (requise), `:reset_by` (le rôle qui agit). Résultat : `repo`/`outcome`
-  (`:reset` | `:unchanged`)/`files`.
+  `:justification` (requise), `:reset_by` (le rôle qui agit). Résultat :
+  `Fleet.Project.Onboard.reset_ci_result/0` (`repo`/`outcome` (`:reset` | `:unchanged`)/`files`,
+  + `protection` quand le rail a été poussé).
   """
   @callback reset_ci_rail(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.reset_ci_result()} | {:error, term()}
 
   # Canonical default: the real onboarding sequence, `Fleet.Project` side. Set HERE once.
   @default_onboard Fleet.Project.Onboard

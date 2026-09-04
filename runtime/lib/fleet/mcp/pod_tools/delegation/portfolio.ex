@@ -452,6 +452,11 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
              "repo" => repo,
              "forge" => to_string(Map.get(result, :forge, "")),
              "architect" => to_string(Map.get(result, :architect, "")),
+             # A deletion that cost work in flight must not read as free: the seam counts the
+             # workers it swept, and the wire carries the count to the human who may not have known
+             # anything was running. Dropped between 2026-08 and 2026-09-04 — `Lifecycle` computed
+             # and tested it, this map never named it.
+             "workers_killed" => Map.get(result, :workers_killed, 0),
              "binding" => to_string(binding),
              # The seam returns `%{project:, ops:, workshop:}` (`Lifecycle.delete_project/2`). The
              # wire keeps `work` for the ops face and adds `workshop`: a verdict the runtime

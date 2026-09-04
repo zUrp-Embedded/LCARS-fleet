@@ -195,7 +195,54 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
     end
   end
 
+  # THE KEY THAT ALMOST MATCHES. A judge writing `findings_v1`, `Findings` or `machine_findings`
+  # has measured and is trying to hand it over; the exact-key clause above cannot see it, and the
+  # completer would then say « submitted NO details.findings » — a judge accused of a silence it
+  # did not commit, which sends whoever reads the log to fix the wrong end (the very trap the
+  # two-sentence log in `StepRunCompleter.maybe_engrave_findings/3` exists for). So the near miss
+  # is NAMED here, once, with the key it used. Nothing is extracted and nothing is aliased: the
+  # payload stays where it is (it reaches the review body as prose), the verdict stands, and
+  # `findings_offered?/1` lets the completer say « sent, refused » instead of « silent ».
+  def take_findings(%{"details" => details} = result) when is_map(details) do
+    case near_miss_key(details) do
+      nil ->
+        :ok
+
+      key ->
+        Logger.warning(
+          "StepRunConsumer: details.#{key} ignored — the machine payload key is " <>
+            "`#{@findings_key}` (#{@findings_schema_file}); the verdict stands, nothing is extracted"
+        )
+    end
+
+    {nil, result}
+  end
+
   def take_findings(result), do: {nil, result}
+
+  @doc false
+  # « Ce juge a TENTÉ de remettre une charge machine » : la clé exacte (que le schéma a pu refuser)
+  # OU une clé voisine (que `take_findings/1` a nommée). Lu par le bâtisseur de step_run pour poser
+  # `:review_findings_refused`, donc pour que le completer accuse la bonne panne.
+  @spec findings_offered?(term()) :: boolean()
+  def findings_offered?(%{"details" => details}) when is_map(details),
+    do: Map.has_key?(details, @findings_key) or near_miss_key(details) != nil
+
+  def findings_offered?(_), do: false
+
+  # A key that CONTAINS `finding` (any case: `findings_v1`, `Findings`, `machine_findings`) and is
+  # not THE key — only when the exact key is absent, so a judge that sends both is judged on the
+  # right one and not warned about the other.
+  defp near_miss_key(details) do
+    if Map.has_key?(details, @findings_key) do
+      nil
+    else
+      Enum.find(Map.keys(details), fn
+        k when is_binary(k) -> k |> String.downcase() |> String.contains?("finding")
+        _ -> false
+      end)
+    end
+  end
 
   defp decode_if_string(findings) when is_binary(findings) do
     case Jason.decode(findings) do
