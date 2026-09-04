@@ -125,7 +125,7 @@ BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || 
 # 2026-08-18 : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
 # L'image PORTE son catalogue ; c'est aussi le plus juste, les comptes doivent correspondre a ce que
 # la boite SERVIRA — l'arbre de l'hote peut avoir bouge depuis le build.
-ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
+ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" \
                 --tofu-dir "$ENROLL_DIR" \
                 --image "$BOX_IMAGE" 2>/dev/null)" \
   || die "derivation du roster en echec (enroll-catalogue.sh, image $BOX_IMAGE) -- recette non enrolee" 4

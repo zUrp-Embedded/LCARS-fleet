@@ -61,7 +61,8 @@ code_of() { sed 's/#.*//' "$1"; }
   # les cinq arbres stables, un par voie d'entree du bash dans ce depot : recette, temoins,
   # programmes de PATH, demons, outils d'install. Perdre l'un d'eux se voit ici.
   local t
-  for t in deploy fleet/test fleet/bin fleet/services fleet/etc; do
+  # `fleet/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
+  for t in deploy fleet/test fleet/bin fleet/services; do
     printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
       echo "MUR 0 rompu — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre" >&2
       return 1
@@ -70,7 +71,7 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "${#BASH_CODE[@]}" -ge 85 ]
   # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
   # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/etc/deploy-release.sh$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/deploy-release.sh$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet_v2$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/provision-lib.sh$'
 }
@@ -403,7 +404,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # derive — et c'est exactement le defaut que ce chantier poursuit.
   #
   # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `etc/provision-role-tokens.sh`
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `deploy/lib/provision-role-tokens.sh`
   # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
   # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
   # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
@@ -603,7 +604,7 @@ PYX
 }
 
 @test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
-  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `etc/deploy-release.sh` et `provision-lib.sh`
+  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `deploy/lib/deploy-release.sh` et `provision-lib.sh`
   # declarent le prefixe chacun de leur cote ; `.claude/hooks/runtime-guard.sh` REFUSE les ecritures
   # dans l'arbre d'install, en le nommant. Si le prefixe bougeait sans que le hook suive, la garde
   # cesserait de proteger l'install reelle — sans un mot, et c'est le pire mode : elle continuerait
@@ -613,7 +614,7 @@ PYX
   # `install.sh`, donc `provision-lib` est en amont — mais `install.sh` joue aussi SEUL, avec son
   # propre repli. Ce qui se verifie est donc l'ACCORD, comme pour `/home/private`. Une designation
   # pourra s'ajouter ; l'inventer ici serait une decision que personne n'a prise.
-  local inst="$REPO/fleet/etc/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  local inst="$REPO/deploy/lib/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
   local guard="$REPO/../.claude/hooks/runtime-guard.sh"
   [ -r "$inst" ] && [ -r "$lib" ] || { echo "MUR 10 — install.sh ou provision-lib.sh illisible" >&2; return 1; }
 

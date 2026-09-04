@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: etc/deploy-release.sh
+# SOURCE: deploy/lib/deploy-release.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
 # STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
@@ -40,9 +40,9 @@
 # `<name>.prev`. A `rm -rf` followed by a multi-second `cp -a` loses the last good build on an error
 # mid-copy, and shows a mixed assembly to anyone reading meanwhile.
 #
-# Usage: etc/deploy-release.sh                        # → /opt/lcars/runtime
-#        LCARS_INSTALL_PREFIX=/x etc/deploy-release.sh
-#        LCARS_INSTALL_LINK_DIR=~/bin etc/deploy-release.sh
+# Usage: deploy/lib/deploy-release.sh                        # → /opt/lcars/runtime
+#        LCARS_INSTALL_PREFIX=/x deploy/lib/deploy-release.sh
+#        LCARS_INSTALL_LINK_DIR=~/bin deploy/lib/deploy-release.sh
 set -euo pipefail
 
 say() { echo "install: $*" >&2; }
@@ -205,8 +205,13 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 PREFIX="${LCARS_INSTALL_PREFIX:-/opt/lcars/runtime}"
 
 SELF="$(readlink -f "$0")"
-ETC_DIR="$(dirname "$SELF")"
-RUNTIME_DIR="$(dirname "$ETC_DIR")"          # etc/.. = the source runtime root
+# ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontiere, c'est : joue uniquement
+# a l'install, ou utilise en prod ? ». Ce script n'est joue qu'a l'install (60-deploy, le stage
+# build de l'image) : il vit dans deploy/lib/, et l'arbre source du runtime lui est DONNE —
+# `LCARS_RUNTIME_DIR`, sinon le `fleet/` a cote de `deploy/` dans un checkout. Il ne le deduit plus
+# de sa propre position : un script qui devine son sujet a sa position ne se deplace pas.
+RUNTIME_DIR="${LCARS_RUNTIME_DIR:-$(readlink -f "$(dirname "$SELF")/../../fleet")}"
+ETC_DIR="$RUNTIME_DIR/etc"
 SRC_BIN="$RUNTIME_DIR/bin"
 
 # --- 0. Config guards FIRST (fail on bad config before any environment check or build) ------------

@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
   # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
   # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
-  # etc/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
+  # deploy/lib/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
   # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
   # a fresh deploy; measured: eng_doc missing there while present in the three others = the
   # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
@@ -108,7 +108,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       |> Enum.map(&role_login(root, &1.name))
       |> Enum.sort()
 
-    sh_path = Path.join(root, "etc/provision-role-tokens.sh")
+    # Q3 (2026-09-04) : the minter is an INSTALL-time tool, it lives in `deploy/lib` — a sibling
+    # tree, scoped like the other two lists below.
+    sh_path = Path.expand("../deploy/lib/provision-role-tokens.sh", root)
 
     # `deploy/deps/`: the tofu recipe is the LAST live leg of the
     # v1 tree, and this check reading it across trees is what caught the move — the wall working on
@@ -122,10 +124,10 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # ship. So absence is read at the TREE level: no sibling tree at all = out of scope, SKIPPED
     # and named in the note (never a silent pass on unmeasured ground); tree present but file or
     # pattern unreadable = the real defect (partial checkout, renamed variable) = FAIL. The
-    # `.sh` lives inside `etc/` and is always present.
+    # `.sh` is a sibling-tree list too since Q3 (2026-09-04) — all three are scoped the same way.
     lists =
       [
-        {"provision-role-tokens.sh ROLES", :required,
+        {"provision-role-tokens.sh ROLES", tree_scope(Path.expand("../deploy", root)),
          read_list(sh_path, ~r/^ROLES="([^"]*)"/m, :plain),
          "add/remove the role in ROLES=\"…\" (token mint default)"},
         # `variable "roles"` since the enroll derivation: the roster moved from a

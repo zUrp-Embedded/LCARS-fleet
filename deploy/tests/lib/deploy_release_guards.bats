@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/etc/install_guards.bats
+# SOURCE: deploy/tests/lib/deploy_release_guards.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
-# STATUS: bats tests for etc/deploy-release.sh config guards — prefix depth + manifest validation
+# STATUS: bats tests for deploy/lib/deploy-release.sh config guards — prefix depth + manifest validation
 #
 # Scope: ONLY the section-0 guards (they run before any environment check or build, so a
 # sandboxed copy of etc/ is enough — no mix, no runtime tree). The build/pose path has its
@@ -15,8 +15,11 @@
 setup() {
   SANDBOX="$BATS_TEST_TMPDIR/rt"
   mkdir -p "$SANDBOX/etc"
-  cp "$BATS_TEST_DIRNAME/../../etc/deploy-release.sh" "$SANDBOX/etc/deploy-release.sh"
-  cp "$BATS_TEST_DIRNAME/../../etc/release.manifest" "$SANDBOX/etc/release.manifest"
+  cp "$BATS_TEST_DIRNAME/../../lib/deploy-release.sh" "$SANDBOX/etc/deploy-release.sh"
+  cp "$BATS_TEST_DIRNAME/../../../fleet/etc/release.manifest" "$SANDBOX/etc/release.manifest"
+  # Q3 (2026-09-04) : le script ne deduit plus l'arbre du runtime de sa position, on le lui DONNE —
+  # le decor est cet arbre (son `etc/release.manifest` est ce que les temoins mutilent).
+  export LCARS_RUNTIME_DIR="$SANDBOX"
 }
 
 @test "guard: PREFIX=/ dies before anything else" {

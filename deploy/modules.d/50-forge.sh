@@ -13,7 +13,9 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 : "${PROV_PASSWORDS_FILE:=$PROV_TOKENS_DIR/forge-role-passwords.json}"
-A4_SCRIPT="$(repo_root)/fleet/etc/provision-role-tokens.sh"
+# Q3 (2026-09-04) : le minteur est de l'installeur (joue a l'install et par cette sonde), il vit a
+# cote de la lib — plus de chemin inter-arbre.
+A4_SCRIPT="$(dirname "$PROVISION_LIB")/provision-role-tokens.sh"
 # LE ROSTER EST DERIVE, PAS DECLARE — `prov_roles` (provision-lib) lit ce que les catalogues
 # INSTALLES declarent, plus le plancher systeme. Resolu UNE fois ici et non a chaque usage : entre
 # deux appels d'un meme cycle la liste ne doit pas bouger, sinon la sonde et le mint travaillent sur

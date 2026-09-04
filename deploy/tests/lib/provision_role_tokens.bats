@@ -1,17 +1,17 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/etc/provision-role-tokens.bats
+# SOURCE: deploy/tests/lib/provision_role_tokens.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: bats tests for etc/provision-role-tokens.sh (A4) — usage, check, idempotent provisioning, failures
+# STATUS: bats tests for deploy/lib/provision-role-tokens.sh (A4) — usage, check, idempotent provisioning, failures
 #
 # The forge is stubbed by a curl SHIM (prepended to PATH): the validity probe (`-w %{http_code}`) reads
 # $MOCK/probe_code; the mint POST returns $MOCK/post_response and is COUNTED in $MOCK/calls.log — so
 # idempotence is asserted on "zero POST on the second run", not on a printed line. jq is the real one.
 
-load ../support/refute
+load ../refute
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/provision-role-tokens.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../lib/provision-role-tokens.sh"
   TMP="$(mktemp -d)"
   MOCK="$TMP/mock"; mkdir -p "$MOCK"
   TOKDIR="$TMP/tokens"; mkdir -p "$TOKDIR"
@@ -49,7 +49,7 @@ SHIM
 teardown() { rm -rf "$TMP"; }
 
 @test "LCARS header present (SOURCE/AUTHOR/STARDATE/STATUS)" {
-  head -5 "$SCRIPT" | grep -q "SOURCE: etc/provision-role-tokens.sh"
+  head -5 "$SCRIPT" | grep -q "SOURCE: deploy/lib/provision-role-tokens.sh"
   head -5 "$SCRIPT" | grep -q "STATUS:"
 }
 

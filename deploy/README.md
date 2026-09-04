@@ -111,7 +111,7 @@ Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=err
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
-`PROV_PREFIX` (/opt/lcars/runtime — le défaut d'etc/deploy-release.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
+`PROV_PREFIX` (/opt/lcars/runtime — le défaut d'deploy/lib/deploy-release.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
 `PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
 planchers toolchain (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN` — la distro sert, le rail vérifie).
@@ -146,10 +146,10 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 46-tofu | wsl linux | any | OpenTofu + son miroir de providers SUR LA MACHINE — la structure de forge n'a plus besoin d'une image (1,18 Go et dix minutes bâtis pour 124 Mo d'outil jamais démarré) |
 | 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 50-forge et 55-deck-oidc restent en dérive et leurs consignes nomment la boîte |
 | 49-forge-runner | wsl linux | wsl linux | **le runner CI de la forge du poste** : enrôle un runner sur le réseau de la forge via `docker/forge-runner.sh`. Sorti de 48 le 2026-08-27 — son état était noyé dans le verdict de la forge, et « ma CI a-t-elle une machine ? » n'avait pas de réponse propre. Une forge sans lui accepte un ticket, dépense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas |
-| 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`etc/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
+| 50-forge | any | any | SONDE de la structure (comptes — territoire OpenTofu, instruct-only) + tokens A4 (`deploy/lib/provision-role-tokens.sh`), passwords-file dérivé du seed bootstrap |
 | 52-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul — jamais sur un dépôt de projet |
 | 55-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json`. Les ENTRÉES (`PROV_DECK_ORIGINS`) convergent : la loopback y est semée dans ses **deux** écritures (`127.0.0.1` ET `localhost` — deux origines pour un même point d'écoute), et une liste changée repose le client |
-| 60-deploy | wsl linux | any | orchestre `fleet/etc/deploy-release.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
+| 60-deploy | wsl linux | any | orchestre `deploy/lib/deploy-release.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
 | 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte l'entrypoint les lance et `tini` les tient ; nativement, c'est systemd |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |

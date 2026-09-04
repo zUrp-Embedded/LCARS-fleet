@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/etc/install_release_reuse.bats
+# SOURCE: deploy/tests/lib/deploy_release_reuse.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for etc/deploy-release.sh — une release n'est reutilisee que si elle ATTESTE la source
+# STATUS: bats tests for deploy/lib/deploy-release.sh — une release n'est reutilisee que si elle ATTESTE la source
 #
 # ⚠ CE QUE CE FICHIER GARDE, ET POURQUOI SON ABSENCE COUTAIT CHER. `build_release` sautait le gate
 # ET la compilation sur une seule condition : « un binaire existe sous `_build/prod/rel` ». Le
@@ -20,7 +20,7 @@
 # `mix` reellement lance — on n'a pas de toolchain ici, et un temoin qui compile ne mesure plus rien.
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
+  SUT="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
   [ -f "$SUT" ]
   RT="$BATS_TEST_TMPDIR/repo/fleet"          # `runtime_dir` = le fleet/ d'un arbre
   REL="$RT/_build/prod/rel/lcars_fleet"
