@@ -82,6 +82,9 @@ dir       /opt/lcars                                   0755  root:root          
 # est ici sur les deux rails, et il dit vrai dans les deux sens.
 anchor:cond /opt/lcars/.source-revision                0644  root:root           any
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
+# Le tampon du stage `verify` de l'image : la revision dont le doctor a mesure le systeme de
+# fichiers AU BUILD. Docker seul — un poste ne bâtit pas d'image, son doctor se joue sur lui.
+anchor    /opt/lcars/.verified                         0644  root:root           docker
 dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
 dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
 dir       /opt/lcars/share                                  0755  root:root           wsl+linux
