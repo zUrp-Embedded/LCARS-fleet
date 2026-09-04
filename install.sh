@@ -586,12 +586,6 @@ else
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
     "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
   )
-  if [[ -n "${PROV_DOCKER_SUDO:-}" ]]; then
-    _banner_body+=(
-      "  ${W}⚠ sudo sera demandé pour PARLER au daemon docker —${N}"
-      "    sa socket appartient à root. Aucune modification."
-    )
-  fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
   else

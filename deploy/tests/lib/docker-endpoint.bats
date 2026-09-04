@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/docker_endpoint_shim.bats
+# SOURCE: deploy/tests/lib/docker-endpoint.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
 # STATUS: bats tests for the escalation shim — ce qui traverse sudo, et ce qui ne doit JAMAIS traverser
@@ -25,50 +25,11 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
-load refute
+load ../refute
 
 setup() {
-  LIB="$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh"
+  LIB="$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh"
   [ -f "$LIB" ]
-}
-
-@test "le shim FILTRE par nom, et la classe des secrets est refusee" {
-  # Large volontairement : un faux positif coute une variable non transmise, un faux negatif coute
-  # un secret dans une ligne de commande.
-  for motif in 'TOKEN' 'PASSWORD' 'SECRET' 'CREDENTIAL' 'PASSWD'; do
-    # ⚠ PAS DE PARENTHESE DANS LE MOTIF : les alternatives d'un `case` sont separees par `|`, donc
-    # une seule des cinq porte le `)` fermant. Chercher `*TOKEN*)` ne trouvait que la derniere.
-    grep -q "\*${motif}\*" "$LIB" || { echo "classe de secret NON refusee : $motif"; return 1; }
-  done
-  # Et le refus vient AVANT la selection : un `case` teste ses motifs dans l'ordre.
-  local ligne_secret ligne_garde
-  ligne_secret="$(grep -n '\*TOKEN\*' "$LIB" | head -1 | cut -d: -f1)"
-  ligne_garde="$(grep -n 'LCARS_\*|FORGE_\*' "$LIB" | head -1 | cut -d: -f1)"
-  [ "$ligne_secret" -lt "$ligne_garde" ]
-}
-
-@test "le shim fait traverser ce qui PILOTE compose — sinon il casse ce qu'il escalade" {
-  # Le temoin d'attaque va par paire avec sa preuve (P-40) : « aucun secret ne passe » serait
-  # satisfait par un shim qui ne passe RIEN, et qui casserait alors tout le rail en silence.
-  grep -q 'LCARS_\*|FORGE_\*|COMPOSE_\*|PROV_\*' "$LIB"
-}
-
-@test "une valeur a saut de ligne est SAUTEE, jamais tronquee" {
-  # `sudo VAR=val` ne sait pas representer un saut de ligne. La transmettre tronquee serait pire que
-  # ne pas la transmettre : le lecteur croirait tenir la valeur.
-  grep -q "v\" == \*\$'\\\\n'\*" "$LIB" || grep -q 'saut de ligne est SAUTEE' "$LIB"
-}
-
-@test "le shim porte le chemin des plugins — sans quoi « docker compose » n'existe pas sous sudo" {
-  # `compose` est un PLUGIN, cherche dans `~/.docker/cli-plugins` : sous sudo, HOME devient celui de
-  # root. Mesure : `version` repond et `compose -f …` echoue sur « unknown shorthand flag: 'f' ».
-  grep -q 'DOCKER_CONFIG=' "$LIB"
-  grep -q 'cliPluginsExtraDirs' "$LIB"
-}
-
-@test "la sonde REFUSE une paire incomplete — repondre a moitie est pire qu'etre absent" {
-  grep -q 'compose version' "$LIB"
-  grep -q 'reste introuvable' "$LIB"
 }
 
 # ─── docker_compose_cmd — UNE SEULE REPONSE A « QUEL COMPOSE » ──────────────────────────────────
@@ -114,12 +75,12 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   # rien ne soit casse. Ce qui se tient est la REGLE : celui qui sonde pose `PROV_COMPOSE_CMD`, et
   # celui qui lance compose le LIT — sans repli, parce qu'un repli est la seconde reponse qu'on
   # vient de supprimer.
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../../box"
   grep -q 'docker_compose_cmd || fail' "$box"
   grep -q 'COMPOSE=(\$PROV_COMPOSE_CMD)' "$box"
   refute grep -q 'LCARS_COMPOSE_CMD:-' "$box"
   # Et personne ne redecouvre : une seconde detection dans l'arbre rendrait deux verdicts possibles.
-  [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../.." --include='*.sh' --include=box --include=provision 2>/dev/null | wc -l)" -le 1 ]
+  [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../../.." --include='*.sh' --include=box --include=provision 2>/dev/null | wc -l)" -le 1 ]
 }
 
 # ─── LE REFUS ACCUSE LA PREMIERE SOCKET, PAS LA DERNIERE ────────────────────────────────────────

@@ -62,7 +62,7 @@ carte() { printf '%s\n' "$@" > "$PROV_UID_MAP_FILE"; }
 
 journal() { printf 'apt_installed %s\n' "$*" > "$LCARS_JOURNAL_FILE"; }
 plan()    { run bash "$RUNNER" uninstall; }
-code()    { grep -vE '^\s*#' "$RUNNER"; }
+code()    { grep -vhE '^\s*#' "$RUNNER" "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh"; }
 
 @test "AUCUNE LISTE dans le code — il lit les tables, il ne les recopie pas" {
   # La regle de `etc/release.manifest`, etendue a la machine. Une liste en dur ici serait un SECOND

@@ -153,7 +153,7 @@ check_fleet_start() {
   }
 
   if fleet_up; then
-    ok "fleet : deja demarree sous « $login » (laissee telle quelle)"
+    skip "fleet : deja demarree sous « $login » (laissee telle quelle) — « elle demarre » n'est PAS etabli par cette passe : ce verdict ne se mesure que fleet arretee, donc sur un deploiement jetable (P4) ou apres un « fleet_v2 stop » volontaire"
     return
   fi
 
@@ -168,7 +168,7 @@ check_fleet_start() {
   done
   "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true
   if [[ "$alive" -eq 1 ]]; then
-    ok "fleet : demarre et vivante sous « $login » (arretee apres mesure)"
+    ok "fleet : demarre et vivante sous « $login » (arretee apres mesure) — verdict de DEMARRAGE etabli sur cette installation (P4 : il vaut pour elle telle qu'elle est, jetable ou non)"
   else
     no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet_v2 status » sous « $login »"
   fi

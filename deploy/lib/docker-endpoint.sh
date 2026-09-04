@@ -28,7 +28,6 @@ detect_substrate() {
 #   PROV_DOCKER_HOST    l'endpoint retenu, vide s'il vient déjà de l'environnement
 #   PROV_DOCKER_WHY     vide si docker répond ; sinon la phrase qui dit ce qui manque
 #   PROV_DOCKER_DENIED  1 quand le daemon répond mais REFUSE cet utilisateur
-#   PROV_DOCKER_SUDO    le préfixe d'escalade retenu, vide s'il n'en a pas fallu
 #   PROV_DOCKER_SOCK    la PREMIÈRE socket qui a refusé — interne au diagnostic
 # Rend 0 si un daemon a répondu, 1 sinon.
 # ⚠ ELLE MUTE AUSSI L'ENVIRONNEMENT DE L'APPELANT, ce qu'aucune globale ci-dessus ne dit : `unset
@@ -50,9 +49,6 @@ PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
 PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
-# ⚠ L'ESCALADE EST PAR COMMANDE, JAMAIS UN RE-EXEC GLOBAL : celui-ci ferait tourner `git` en root
-# sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
-PROV_DOCKER_SUDO=""
 
 # ─── docker_denied_geste <socket> — LE GESTE, PAS SEULEMENT LE CONSTAT ──────────────────────────
 #
@@ -160,7 +156,6 @@ _docker_sockets() {
 docker_endpoint() {
   local want="${PROV_DOCKER_BIN:-}"
   PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_SOCK=""
-  PROV_DOCKER_SUDO=""
   local cli sock
 
   # 1. La CLI.
@@ -255,57 +250,12 @@ docker_endpoint() {
   done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    # ⚠ `sudo -n` : une sonde ne bloque JAMAIS sur une invite de mot de passe. Sans NOPASSWD, on
-    # rend le fait tel quel et l'appelant decide d'escalader lui-meme.
-    # ⚠ CHEMIN ABSOLU : `sudo` impose `secure_path`, ou une CLI hors des repertoires systeme — celle
-    # du montage Docker Desktop, par exemple — devient introuvable.
+    # ⚖ lot 10 (point 10) : PLUS D'ESCALADE. Le shim sudo (une CLI fabriquee qui passait chaque
+    # commande sous sudo avec un environnement filtre) couvrait le poste ou la socket appartient a
+    # root:docker sans que l'humain soit du groupe — un cas que l'integration WSL obligatoire et la
+    # loi 5 (docker_denied_geste : le geste, pas seulement le constat) ont rendu marginal, pour trente
+    # lignes qui faisaient tourner compose en root sur le clone de l'humain. Le refus nomme le geste.
     local abs; abs="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
-    if [[ "$EUID" -ne 0 ]] && command -v sudo >/dev/null 2>&1 \
-       && sudo -n DOCKER_HOST="unix://$PROV_DOCKER_SOCK" "$abs" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
-      PROV_DOCKER_HOST="unix://$PROV_DOCKER_SOCK"
-      PROV_DOCKER_SUDO="sudo DOCKER_HOST=unix://$PROV_DOCKER_SOCK"
-      # L'ESCALADE PREND LA FORME D'UN SHIM, ET C'EST CE QUI PRESERVE TOUS LES CONTRATS : les
-      # appelants recoivent un BINAIRE et composent `"$DOCKER_BIN" <verbe>`. Rendre ici une LIGNE DE
-      # COMMANDE ferait chercher un executable dont le nom contient des espaces, avec un diagnostic
-      # qui accuserait docker. Le shim est un fichier, et tout le rail ne manipule qu'un chemin.
-      local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
-      chmod 0700 "$shim_dir"
-
-      # ET LE SHIM PORTE SON PROPRE `DOCKER_CONFIG` — cf. `_docker_plugin_config`. Sous `sudo`,
-      # `HOME` devient celui de root : meme les plugins ranges chez l'humain cessent d'etre
-      # regardes, et `docker compose` n'existe plus.
-      local cfg; cfg="$(_docker_plugin_config "$shim_dir/config")" || cfg="$shim_dir/config"
-
-      # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO, et le rail conduit compose PAR DES VARIABLES : un
-      # port demande en tete de commande se perd, le compose monte son DEFAUT, et le banc meurt en
-      # accusant la forge. `-E` exigerait un `SETENV` que personne n'a pose dans le sudoers.
-      #
-      # ⚠ JAMAIS UN SECRET : `sudo VAR=valeur` vit dans la LIGNE DE COMMANDE, que
-      # `/proc/<pid>/cmdline` expose a tout l'hote pendant l'appel — cicatrice 6-141. Denylist large
-      # a dessein : un faux positif coute une variable, un faux negatif un secret. Valeur a saut de
-      # ligne SAUTEE — `sudo VAR=val` ne sait pas la representer.
-      cat > "$shim_dir/docker" <<'SHIM'
-#!/usr/bin/env bash
-declare -a keep=()
-while IFS= read -r -d '' kv; do
-  k="${kv%%=*}"; v="${kv#*=}"
-  case "$k" in
-    *TOKEN*|*PASSWORD*|*SECRET*|*CREDENTIAL*|*PASSWD*|*_PW|*_KEY|*_AUTH) continue ;;
-    LCARS_*|FORGE_*|COMPOSE_*|PROV_*) [[ "$v" == *$'\n'* ]] || keep+=("$k=$v") ;;
-  esac
-done < <(env -0)
-exec sudo "${keep[@]+"${keep[@]}"}" DOCKER_HOST=__SOCK__ DOCKER_CONFIG=__CFG__ __CLI__ "$@"
-SHIM
-      sed -i "s|__SOCK__|unix://$PROV_DOCKER_SOCK|; s|__CFG__|$cfg|; s|__CLI__|$abs|" "$shim_dir/docker"
-      chmod 0700 "$shim_dir/docker"
-      PROV_DOCKER_BIN="$shim_dir/docker"
-
-      if ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
-        PROV_DOCKER_WHY="le daemon repond via sudo, mais « docker compose » reste introuvable (plugins cherches dans $(_docker_mount_plugins))"
-        return 1
-      fi
-      return 0
-    fi
     PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · $(docker_denied_geste "$PROV_DOCKER_SOCK") · CLI retenue : $abs"
     return 1
   fi
