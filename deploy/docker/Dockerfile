@@ -609,6 +609,12 @@ ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/box/boot.sh"]
 # ÉCHOUER LE BUILD sur tout drift (`doctor` rend 1 sur un drift, 2 sur un échec). Il ne mesure que
 # ce que l'image POSE : ce qui dépend d'un volume (l'init de l'instance), d'une forge (`63`, `65`, `66`) ou
 # d'un boot n'a pas de vérité ici et n'y est pas demandé.
+# ⚠ `25-directories` MESURE LES MODES (lot 14, ⚖ user 2026-09-04) : un `stat` par répertoire que
+# l'image pose — `/opt/lcars`, `/etc/lcars`, `/var/lib/lcars`, `/var/tmp/lcars{,/toolchain-work}` —
+# aux modes que `deploy/system.manifest` déclare pour docker. Sa table est filtrée par le substrat
+# du manifeste ; ce qui vit sur un volume (`/home`, `/opt/lcars/var`) ou sous `/run` n'y est pas
+# mesuré, et le module le dit. Les autres modules de ce stage mesurent présence et version : sans
+# lui, un `COPY --chmod` qui crée un parent « en passant » ressortait de l'image sans un mot (S5).
 #
 # ⚠ `deploy/` ENTRE DANS CE STAGE, ET DANS CE STAGE SEULEMENT (⚖ user 2026-09-04, Q1 : l'installeur
 # n'a rien à faire dans le conteneur livré). Il est copié à la place que le doctor connaît, puis
@@ -625,7 +631,7 @@ COPY deploy /opt/lcars/deploy
 # du SIÈGE à `fleet`, et le siège n'existe qu'au boot — il n'est pas demandé (les GID de l'image,
 # eux, sont tenus par la table et son témoin).
 RUN PROV_SOURCE_REV="${GIT_SHA}" PROV_KERNEL_PROBES=0 /opt/lcars/deploy/provision doctor --substrate docker \
-      --only 10-packages --only 16-node --only 21-service-accounts \
+      --only 10-packages --only 16-node --only 21-service-accounts --only 25-directories \
       --only 44-media --only 46-tofu --only 60-deploy --only 62-runtime-helpers --only 64-services \
     && printf '%s\n' "${GIT_SHA}" > /verified
 

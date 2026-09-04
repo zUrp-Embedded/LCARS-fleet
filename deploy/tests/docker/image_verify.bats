@@ -35,7 +35,10 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
 @test "verify ne demande QUE ce que l'image pose — ni volume, ni forge, ni boot" {
   local v; v="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
   local m
-  for m in 10-packages 16-node 21-service-accounts 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services; do
+  # 25-directories est dans la liste depuis le lot 14 : c'est le seul module du stage qui mesure un
+  # MODE (`stat`). Sa table melange volumes et /run, mais il les ecarte lui-meme sur docker, par le
+  # substrat du manifeste et les VOLUME du Dockerfile (25-directories.bats, « docker : »).
+  for m in 10-packages 16-node 21-service-accounts 25-directories 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services; do
     grep -q -- "--only $m" <<<"$v" || { echo "verify ne demande pas $m" >&2; return 1; }
   done
   # 20-groups mesure l'appartenance du SIEGE, qui n'existe qu'au boot ; la sonde bwrap de 10-packages
@@ -45,7 +48,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   # noire de sept noms laissait huit modules dans aucune des deux listes : un `--only 49-forge-runner`
   # ajoute au stage — il parle a une forge — passait vert. Ici : tout `--only` du stage est dans la
   # liste blanche, et tout module de modules.d/ hors liste blanche est absent du stage.
-  local blanche=" 10-packages 16-node 21-service-accounts 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services "
+  local blanche=" 10-packages 16-node 21-service-accounts 25-directories 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services "
   local demande
   while read -r demande; do
     [ -n "$demande" ] || continue
