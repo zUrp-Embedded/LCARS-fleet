@@ -150,3 +150,52 @@ image_declared_anchors_links() {
   [ "$n" -ge 5 ] || { echo "seulement $n install -d compares a la table — l'extraction ne lit plus le stage" >&2; return 1; }
   [ "$bad" -eq 0 ]
 }
+
+# ─── LOT 15 : CE QUE 62 RELIT AU BUILD SORT DE L'IMAGE COMME L'APPLY LE POSE ────────────────────
+#
+# `62 check` relit les arbres qu'il embarque (`EMBEDDED`, `EMBEDDED_ROOT`) — root:root, ni setgid ni
+# ecriture groupe/autres — et ses donnees (`DATA`, 0644). Un COPY PRESERVE les modes du contexte de
+# build : un clone a umask 002 est en 2775/664, et verify rougirait sur un contexte ordinaire — ou,
+# pire, ne rougirait que sur celui de quelqu'un d'autre. Deux ecritures, une valeur.
+
+embedded_trees() { # les deux listes de 62, telles qu'il les porte
+  grep -oE '^EMBEDDED(_ROOT)?=\([^)]*\)' "$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh" \
+    | sed -E 's/^[A-Z_]+=\(//; s/\)$//' | tr ' ' '\n' | grep -v '^$'
+}
+
+@test "les arbres que 62 relit sont NORMALISES par l'image (chmod -R g-s,go-w) APRES la derniere ecriture dedans" {
+  local verify; verify="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
+  local t stage txt l_norm after n=0
+  while read -r t; do
+    [ -n "$t" ] || continue
+    for stage in runtime verify; do
+      if [ "$stage" = runtime ]; then txt="$RUNTIME"; else txt="$verify"; fi
+      # ce stage pose-t-il cet arbre ? (un COPY qui y vise)
+      grep -qE "^(COPY|ADD) .* /opt/lcars/$t(/|$)" <<<"$txt" || continue
+      n=$((n + 1))
+      l_norm="$(grep -nE "chmod -R g-s,go-w( /opt/lcars/[a-z]+)* /opt/lcars/$t( |$)" <<<"$txt" | tail -1 | cut -d: -f1)"
+      [ -n "$l_norm" ] || { echo "$stage : /opt/lcars/$t est pose mais pas normalise (chmod -R g-s,go-w)" >&2; return 1; }
+      # ce qui ECRIT dedans vient AVANT : un COPY qui y vise, ou tofu (init/mirror) qui y pose .terraform
+      after="$(tail -n "+$((l_norm + 1))" <<<"$txt")"
+      refute grep -qE "^(COPY|ADD) .* /opt/lcars/$t(/|$)" <<<"$after"
+      refute grep -qE 'tofu (init|providers mirror)' <<<"$after"
+    done
+  done < <(embedded_trees)
+  # ⚠ GARDE DE POPULATION : etc, services, assets, catalogues (runtime) et deploy (verify).
+  [ "$n" -ge 5 ] || { echo "seulement $n arbre(s) vus dans les stages — l'extraction ne lit plus 62 ou le Dockerfile" >&2; return 1; }
+}
+
+@test "les DONNEES de 62 sortent de l'image a leur mode — COPY --chmod ou chmod explicite, jamais le mode du contexte" {
+  local mod="$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh" spec _src dst mode n=0
+  while read -r spec; do
+    [ -n "$spec" ] || continue
+    read -r _src dst mode <<<"$spec"
+    # la destination telle que l'image la pose : le defaut du module, sans decor
+    dst="${dst//\$HELPERS_DIR//opt/lcars}"; dst="${dst//\$LCARS_BASHRC//etc/lcars/lcars.bashrc}"
+    n=$((n + 1))
+    grep -qE "^COPY --chmod=$mode .* $dst\$" <<<"$RUNTIME" \
+      || grep -qE "chmod $mode( [^ \\\\]+)* $dst( |\\\\|$)" <<<"$RUNTIME" \
+      || { echo "$dst : l'image ne fixe pas son mode ($mode) — un COPY nu garde le mode du contexte (664 sous umask 002)" >&2; return 1; }
+  done < <(sed -n '/^DATA=(/,/^)/p' "$mod" | sed '1d;$d;s/#.*//' | tr -d '"' | awk 'NF')
+  [ "$n" -ge 2 ] || { echo "seulement $n donnee(s) lue(s) dans DATA — l'extraction ne lit plus 62" >&2; return 1; }
+}

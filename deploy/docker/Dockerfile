@@ -550,10 +550,20 @@ RUN printf '%s\n' \
 # Le glob supprime la possibilite meme de la divergence : tout auxiliaire depose a la racine de
 # `/opt/lcars` est executable, qu'on ait pense a l'ajouter ou non. Ajouter un helper redevient un
 # seul geste — le `COPY` — au lieu de deux dont le second ne se signale jamais.
+#
+# ⚠ ET LES ARBRES SE NORMALISENT COMME 62 LES POSE (lot 15) : `62 check` relit au build les arbres
+# qu'il embarque sur un poste (`EMBEDDED`, `EMBEDDED_ROOT`) — proprietaire root:root, ni setgid
+# ni ecriture groupe/autres, exactement le `chown -R` + `chmod -R g-s,go-w` de son apply. Un `COPY`
+# PRESERVE les modes du contexte de build : un clone a umask 002 est en 2775/664, et root execute
+# ensuite ce contenu. Meme raison pour `console.tmux.conf` : une DONNEE de 62 (`write_atomic 0644`)
+# que le `COPY` nu laissait au mode du contexte. Apres la derniere ecriture dans ces arbres (le
+# `tofu init` de la recette compris) — `image_layout.bats` tient l'ordre.
 RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
-               /opt/lcars/services/provision-role-tokens.sh
+               /opt/lcars/services/provision-role-tokens.sh \
+    && chmod 0644 /opt/lcars/console.tmux.conf \
+    && chmod -R g-s,go-w /opt/lcars/etc /opt/lcars/services /opt/lcars/assets /opt/lcars/catalogues
 
 # L'ESTAMPILLE DES AUXILIAIRES POSES — le pendant de ce que `62-runtime-helpers` ecrit sur un poste
 # apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que
@@ -629,6 +639,10 @@ ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/box/boot.sh"]
 FROM runtime AS verify
 ARG GIT_SHA=unknown
 COPY deploy /opt/lcars/deploy
+# Meme normalisation que les arbres du stage runtime (lot 15) : `62 check` relit /opt/lcars/deploy
+# comme l'apply le pose (root:root, ni setgid ni ecriture groupe/autres), et un COPY garde les
+# modes du contexte — sans cette ligne, verify rougit sur tout clone a umask 002.
+RUN chmod -R g-s,go-w /opt/lcars/deploy
 # ⚠ DEUX MESURES N'ONT PAS DE VÉRITÉ AU BUILD, ET LE PREMIER BUILD LES A NOMMÉES (2026-09-04) :
 # la sonde bwrap de `10-packages` mesure le NOYAU (celui de BuildKit, sans userns — pas celui de la
 # boîte), `PROV_KERNEL_PROBES=0` la fait dire « non jouée ici » ; `20-groups` mesure l'appartenance
