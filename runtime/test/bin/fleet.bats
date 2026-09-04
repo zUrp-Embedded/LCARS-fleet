@@ -194,14 +194,37 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   [[ "$output" == *"credentials claude absentes"* ]]   # on a bien atteint la porte suivante
 }
 
-@test "GUARD B: un login.defs illisible retombe sur 1000, il ne desarme pas le garde" {
-  # Fail-closed : `awk` sur un fichier absent rend une chaine vide, et `(( _uid < "" ))` aurait
-  # laisse passer tout le monde en silence. Le defaut est repose explicitement.
-  # Le siege vient du FICHIER : ce temoin mesure le plancher UID_MIN, pas la source du siege.
-  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
-  run bash -c "export PASSWD_DEFS='/nulle/part/login.defs'; source '$SCRIPT'; cmd_start"
-  [[ "$output" == *"admiral/sysadmin"* ]]
+@test "GUARD B: un login.defs illisible REFUSE — la frontiere n'est pas etablie, et le lanceur le dit avec le mot du BEAM" {
+  # ⚠ CE TEMOIN AFFIRMAIT L'INVERSE (« retombe sur 1000 ») jusqu'au 2026-09-05. Un defaut repond par
+  # un NOMBRE la ou le garde a besoin d'un FAIT : un UID_MIN reel a 2000 devine a 1000 laisse lancer
+  # une fleet — donc des pods — a tout ce qui vit entre les deux. Le BEAM refuse de booter dans ce
+  # cas (R-no-uid-min) ; le lanceur refuse AVANT lui, avec la meme phrase, et nomme le fichier.
+  local defs="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"UID_MIN illisible dans $defs"* ]]
+  [[ "$output" == *"repare $defs"* ]]
+  [[ "$output" != *"1000"* ]]
+  [[ "$output" != *"reached-launch"* ]]
+  [[ "$output" != *"credentials claude absentes"* ]]   # la porte suivante n'est PAS atteinte
+}
+
+@test "GUARD B: la phrase du refus est CELLE du protocole des humains — un temoin tient l'egalite, pas un commentaire" {
+  # `bin/fleet` ne source pas `lib/human-protocol.sh` (un vocabulaire de module, pas de lanceur) :
+  # il en porte trois lignes. Ce qui garantit que les deux disent la MEME chose au meme moment est
+  # ce temoin : le remede du protocole (`UID_BOUNDS_WHY`), sur le meme fichier absent, doit se lire
+  # tel quel dans le refus du lanceur.
+  local defs="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  local lib="$BATS_TEST_DIRNAME/../../services/lib"
+  local expected
+  expected="$(LCARS_HUMAN_PROTOCOL_HOST=1 LCARS_MODULE_PROTOCOL="$lib/module-protocol.sh" \
+    LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" PASSWD_DEFS="$defs" \
+    bash -c '. "$1"; uid_bounds 2>/dev/null || true; printf "%s" "$UID_BOUNDS_WHY"' _ "$lib/human-protocol.sh")"
+  [ -n "$expected" ] || { echo "le protocole n'a pas rendu de remede — instrument casse" >&2; return 1; }
+  run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$expected"* ]] || { echo "lanceur : $output"; echo "protocole : $expected"; return 1; }
 }
 
 # --- option parsing ---
