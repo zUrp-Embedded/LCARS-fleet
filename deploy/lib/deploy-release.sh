@@ -186,14 +186,50 @@ wire_path_links() {
   return "$link_fail"
 }
 
+# ⚠ LE MANIFESTE SE JOUE DANS LES DEUX SENS (S4, relecture hostile du 2026-09-04). La pose iterait
+# sur ses entrees et n'enlevait RIEN : au banc, apres le renommage `fleet_v2` -> `fleet`, l'ancien
+# lanceur survivait sous `$PREFIX/bin` avec son symlink dans le PATH, et `doctor` disait OK — un
+# humain qui tapait `fleet_v2` obtenait la version d'avant sur une machine declaree conforme. Un
+# manifeste « data, pas code » ne vaut que si ce qui n'y est pas s'en va.
+#
+# Lit les globales du corps principal (`MF_FILES`, `PREFIX`, `LINK_DIR`), UNE LIGNE PAR RETRAIT.
+# Le symlink du PATH n'est retire que s'il pointait sur l'intrus : un lien qui vise ailleurs n'est
+# pas a nous. Un retrait de lien refuse (droits : ce script tourne en humain) se DIT et ne fait pas
+# echouer la pose — `60-deploy` refait ce retrait en root juste apres, comme pour `wire_path_links`.
+prune_bin_dir() {
+  local e f m known
+  for e in "$PREFIX"/bin/*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    f="${e##*/}"
+    known=0
+    for m in "${MF_FILES[@]}"; do [[ "$m" == "$f" ]] && { known=1; break; }; done
+    [[ "$known" -eq 0 ]] || continue
+    if rm -rf -- "$e"; then
+      say "retire $e (absent du manifest)"
+    else
+      say "retrait KO : $e (absent du manifest, droits ?) — manuel : sudo rm -rf $e"
+    fi
+    if [[ -L "$LINK_DIR/$f" && "$(readlink "$LINK_DIR/$f")" == "$PREFIX/bin/$f" ]]; then
+      if rm -f -- "$LINK_DIR/$f" 2>/dev/null; then
+        say "retire symlink $LINK_DIR/$f (pointait sur l'intrus $e)"
+      else
+        say "symlink $LINK_DIR/$f KO (droits ?) — il pointe sur un fichier RETIRE ; 60-deploy le retire en root, ou : sudo rm $LINK_DIR/$f"
+      fi
+    fi
+  done
+  return 0
+}
+
 # Source guard (standard idiom): sourcing loads the functions WITHOUT running the deploy — the bats
-# suite drives atomic_swap_dir / atomic_swap_file / wire_path_links directly, without a mix build.
+# suite drives atomic_swap_dir / atomic_swap_file / wire_path_links / prune_bin_dir directly,
+# without a mix build.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
 
 # ⚠ LITTERAL, ET IL LE RESTE. Ce script est AUTONOME — il s'installe sans le rail de
 # provisionnement et ne source pas sa lib : il ne peut pas deriver de `PROV_ROOT`. L'accord des deux
 # defauts est tenu par `deploy/tests/racine_prefixe.bats`, pas par un partage de variable.
 PREFIX="${LCARS_INSTALL_PREFIX:-/opt/lcars/runtime}"
+LINK_DIR="${LCARS_INSTALL_LINK_DIR:-/usr/local/bin}"   # lu par la pose (elagage) ET par le cablage
 
 SELF="$(readlink -f "$0")"
 # ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontiere, c'est : joue uniquement
@@ -286,6 +322,8 @@ for i in "${!MF_FILES[@]}"; do
     chmod +x "$PREFIX/bin/$f" || die "chmod +x refuse : $PREFIX/bin/$f"
   fi
 done
+# Le sens inverse : ce que `$PREFIX/bin` porte et que le manifest ne nomme pas s'en va, ligne par ligne.
+prune_bin_dir
 
 # Template d'env humain (swap atomique aussi — un lecteur ne voit jamais un template tronque).
 atomic_swap_file "$RUNTIME_DIR/etc/fleet.env.template" "$PREFIX/etc/fleet.env.template"
@@ -308,7 +346,7 @@ else
 fi
 
 # --- 4. PATH symlinks (launch from anywhere) — POINTERS, not copies; `link` manifest entries ------
-LINK_DIR="${LCARS_INSTALL_LINK_DIR:-/usr/local/bin}"
+#        (`LINK_DIR` est pose avec `PREFIX`, en tete : l'elagage de l'etape 2 le lit aussi)
 wire_path_links || true
 
 # La release POSEE reste posee : elle est valide, c'est le cablage qui manque, et la detruire

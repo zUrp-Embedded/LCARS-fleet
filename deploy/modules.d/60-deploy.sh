@@ -18,8 +18,59 @@ mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
 }
 
+mf_names_has() { # mf_names_has <nom> -> 0 si le manifeste nomme ce fichier
+  local n
+  while read -r n _ _; do [[ "$n" == "$1" ]] && return 0; done < <(mf_entries)
+  return 1
+}
+
 release_present() { [[ -x "$PREFIX_REL/bin/lcars_fleet" ]]; }
 PREFIX_REL="$PROV_PREFIX/rel/lcars_fleet"
+
+# ─── LE SENS INVERSE DU MANIFESTE (S4, relecture hostile du 2026-09-04) ─────────────────────────
+#
+# ⚠ LA POSE ET LA SONDE ITERAIENT TOUTES DEUX SUR LES ENTREES DU MANIFESTE, donc ni l'une ni
+# l'autre ne voyait ce qui est la EN TROP. Mesure au banc apres le renommage `fleet_v2` -> `fleet` :
+# `/opt/lcars/runtime/bin/fleet_v2` et `/usr/local/bin/fleet_v2` toujours en place, et
+# `60-deploy=OK`. Un humain qui tape `fleet_v2` obtient le lanceur d'avant sur une machine que le
+# doctor declare conforme. `deploy-release.sh` elague desormais `$PREFIX/bin` a la pose ; ce
+# module elague le PATH en root (le script de pose tourne en humain et ne peut pas y ecrire), et
+# le doctor rend un drift par intrus, des deux cotes.
+#
+# Un symlink du PATH n'est un intrus que s'il pointe DANS `$PROV_PREFIX/bin` sur un nom que le
+# manifeste ne porte pas : un lien qui vise ailleurs appartient a quelqu'un d'autre.
+intrus_bin() { # intrus_bin -> les entrees de $PROV_PREFIX/bin que le manifeste ne nomme pas
+  local e
+  [[ -d "$PROV_PREFIX/bin" && -x "$PROV_PREFIX/bin" ]] || return 0
+  for e in "$PROV_PREFIX"/bin/*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    mf_names_has "${e##*/}" || printf '%s\n' "$e"
+  done
+}
+intrus_links() { # intrus_links -> les symlinks de $PROV_LINK_DIR qui visent un intrus de $PROV_PREFIX/bin
+  local e t
+  [[ -d "$PROV_LINK_DIR" && -x "$PROV_LINK_DIR" ]] || return 0
+  for e in "$PROV_LINK_DIR"/*; do
+    [[ -L "$e" ]] || continue
+    t="$(readlink "$e")"
+    [[ "$t" == "$PROV_PREFIX/bin/"* ]] || continue
+    mf_names_has "${t##*/}" || printf '%s\n' "$e"
+  done
+}
+prune_intrus() { # prune_intrus — retire les intrus (root), une ligne par retrait
+  local e
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    rm -rf -- "$e" || { p_fail "intrus non retiré : $e"; return 1; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "retiré $e (absent de release.manifest)"
+  done < <(intrus_bin)
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    rm -f -- "$e" || { p_fail "symlink intrus non retiré : $e"; return 1; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "retiré symlink $e (sa cible n'est pas dans release.manifest)"
+  done < <(intrus_links)
+  return 0
+}
 
 build_sha() {
   local matches=("$PREFIX_REL"/lib/lcars_fleet-*/priv/api/build_info.txt)
@@ -81,6 +132,24 @@ check() {
       [[ -f "$PROV_LINK_DIR/$name" ]] && p_warn "copie morte $PROV_LINK_DIR/$name (invention D3, plus aucun lecteur) — nettoyage manuel : sudo rm $PROV_LINK_DIR/$name"
     fi
   done < <(mf_entries)
+
+  # Le sens inverse : un drift par intrus, des deux cotes (S4).
+  local e
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    p_drift "intrus $e — absent de release.manifest : l'apply le retire"
+  done < <(intrus_bin)
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    p_drift "symlink intrus $e → $(readlink "$e") — sa cible n'est pas dans release.manifest : l'apply le retire"
+  done < <(intrus_links)
+
+  # ⚠ LA GENERATION PRECEDENTE SE NOMME, AVEC SA TAILLE. `atomic_swap_dir` garde `<rel>.prev` comme
+  # creneau de rollback — 31 Mo mesures au banc, permanents, declares nulle part : un doctor qui ne
+  # les nomme pas laisse l'operateur decouvrir l'espace disque a la main.
+  if [[ -d "$PREFIX_REL.prev" ]]; then
+    p_ok "génération précédente gardée : $PREFIX_REL.prev ($(du -sh "$PREFIX_REL.prev" 2>/dev/null | cut -f1 || echo '?')) — rollback de deploy-release.sh ; « sudo rm -rf $PREFIX_REL.prev » si tu n'en veux plus"
+  fi
   verdict_check
 }
 
@@ -132,6 +201,7 @@ apply() {
       [[ "$is_link" -eq 1 ]] || continue
       ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
     done < <(mf_entries)
+    prune_intrus || verdict_apply   # le raccourci ne rejoue pas la pose : l'elagage se fait ici
     verdict_apply
   fi
 
@@ -192,6 +262,7 @@ apply() {
     [[ "$is_link" -eq 1 ]] || continue
     ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
   done < <(mf_entries)
+  prune_intrus || verdict_apply   # en root : le symlink du PATH que la pose (humaine) n'a pas pu retirer
 
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + /usr/local/bin câblé"
