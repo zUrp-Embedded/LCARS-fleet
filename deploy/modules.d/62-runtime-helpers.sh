@@ -382,13 +382,19 @@ BLOC
   # et 904 Ko dans git — tout le reste est l'arbre npm de la doc, un artefact local que `cp -a`
   # aurait recopie sous `/opt/lcars` a chaque apply. `dist/` (476 Ko) RESTE : en livraison binaire
   # c'est lui que `44-media` pose, puisque rien ne le batit sur la cible.
+  # ⚖ user 2026-09-04 (Q2 du chantier deploy-independance) : « on copie deploy, sans les tests ».
+  # La copie sert au doctor et a l'uninstall — 1188 cas bats n'y servent a rien, et `.dockerignore`
+  # tient le meme dossier hors de l'image. Exclusion BORNEE a `deploy` : un `tests/` a la racine
+  # d'un autre arbre embarque n'est pas le sujet de ce trait.
+  local -a _only
   for n in "${EMBEDDED_ROOT[@]}"; do
     [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n.new"
     ensure_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc on ne copie jamais les 179 Mo qu'il
     # faudrait ensuite retirer. Meme outil que celui qui pose node, deja un pre-requis du rail.
-    ( cd "$(repo_root)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
+    _only=(); [[ "$n" == deploy ]] && _only=(--exclude=./tests)
+    ( cd "$(repo_root)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" "${_only[@]}" . ) \
       | ( cd "$HELPERS_DIR/$n.new" && tar -xf - ) \
       || { p_fail "copie ratée: $n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n"
