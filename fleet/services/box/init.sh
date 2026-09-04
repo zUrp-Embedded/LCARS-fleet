@@ -234,7 +234,26 @@ cmd_seat() {
   [[ "$rc" -eq 0 ]] && seat_uid_file
   exit "$rc"
 }
+# ⚖ user 2026-09-04 (Q1) : « box config » pose les secrets COTE HOTE ; le compose les monte sous
+# /run/secrets ; l'instance les IMPORTE dans son repertoire prive au boot — une fois, et a nouveau
+# seulement s'ils changent (rotation). Le siege se derive ensuite du jeton master, donc l'import
+# precede tout. Un secret absent du montage n'est pas une faute : la voie d'avant (le geste
+# `config-token` dans la boite) reste jouable, et le drift se dit plus loin (tokens, seat).
+secrets_import() {
+  local dir="${LCARS_SECRETS_DIR:-/run/secrets}" pair src dst name
+  for pair in "forge_master_token:$PROV_MASTER_TOKEN_FILE" "forge_seed_password:$PROV_FORGE_SEED_FILE"; do
+    name="${pair%%:*}"; src="$dir/$name"; dst="${pair#*:}"
+    [[ -s "$src" ]] || continue
+    if [[ -s "$dst" ]] && cmp -s "$src" "$dst"; then p_ok "secret $name : deja en place ($dst)"; continue; fi
+    ensure_dir "$PROV_TOKENS_DIR" 0710 "$PROV_AUTHORITY_USER:$PROV_FLEET_GROUP" || true
+    write_atomic "$dst" 0600 "$PROV_AUTHORITY_USER:$PROV_AUTHORITY_USER" < "$src" \
+      && p_chg "secret $name importe du compose → $dst ($PROV_AUTHORITY_USER seul)" \
+      || p_fail "secret $name : import impossible → $dst"
+  done
+}
+
 cmd_apply() {
+  secrets_import
   local rc=0; seat_resolve || rc=$?
   case "$rc" in
     0) : ;;
@@ -251,8 +270,9 @@ cmd_apply() {
   verdict_apply
 }
 
-case "${1:?usage: init.sh <seat|apply>}" in
-  seat)  cmd_seat ;;
+case "${1:?usage: init.sh <seat|secrets|apply>}" in
+  seat)    cmd_seat ;;
+  secrets) secrets_import; verdict_apply ;;
   apply) cmd_apply ;;
-  *) p_die "mode inconnu: $1 (seat|apply)" ;;
+  *) p_die "mode inconnu: $1 (seat|secrets|apply)" ;;
 esac

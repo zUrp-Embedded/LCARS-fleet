@@ -17,15 +17,18 @@ d'elle-même, sans l'installeur.
 
 ## Le protocole
 
-`init.sh` répond à deux verbes — `<module> seat|apply` — sur le protocole des modules du produit
+`init.sh` répond à trois verbes — `<module> seat|secrets|apply` — sur le protocole des modules du produit
 (`../lib/module-protocol.sh`).
 
+- `init.sh secrets` : importe dans le répertoire privé de la boîte ce que le compose monte sous
+  `/run/secrets` (`forge_master_token`, `forge_seed_password` — posés côté hôte par `box config`).
+  Une fois, puis seulement si le secret change (rotation). Un montage vide n'est pas une faute.
 - `init.sh seat` : résout le siège (table `forge-uid.map`, sinon le #1 de la forge par le jeton
   master, sinon la semence `LCARS_ADMIRAL`), l'enregistre, écrit `/etc/lcars/seat.uid` et
   `/run/lcars-seat.login`. Rend `0` résolu, `1` divergence (la semence contredit une source
   durable — on ne renomme pas un home en silence), `3` indéterminable : c'est l'état « en attente
   de configuration », la boîte reste debout pour que `box config` soit jouable.
-- `init.sh apply` : `seat`, puis tout le reste. Rend `0` convergé, `2` drift résiduel, `1` échec,
+- `init.sh apply` : `secrets`, `seat`, puis tout le reste. Rend `0` convergé, `2` drift résiduel, `1` échec,
   `3` en attente de configuration.
 
 Ce qu'il lit : `LCARS_UID`, `LCARS_ADMIRAL`, `LCARS_SSH_AUTHORIZED_KEYS`, `FORGE_BASE_URL`,

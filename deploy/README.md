@@ -41,7 +41,9 @@ frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxi
 fichier de `services/` est pose quelque part.
 
 Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
-est le boot du produit, `fleet/services/box/boot.sh`), les cinq compose, le seccomp, `forge-runner.sh`
+est le boot du produit, `fleet/services/box/boot.sh`), les cinq compose et l'override des
+secrets (`docker-compose.secrets.yml`, que `box` ajoute à chaque appel : les secrets posés par
+`box config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
 
 un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
