@@ -133,9 +133,18 @@ publier_verdicts() {
 # shell est REMPLACÉ, donc toute boucle qu'il porterait disparaîtrait à cet instant. D'où un
 # processus à part, lancé en `setsid` exactement comme les services l'étaient.
 SUPERVISE="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}"
-launch() { # launch <nom> <log> -- <cmd...>
+launch() { # launch <nom> <log> -- <cmd...> — rend 1 si la commande n'est pas lancable, et le dit
   local name="$1" log="$2"; shift 2
   [[ "${1:-}" == "--" ]] && shift
+  # ⚠ L'ECHEC SE MESURE ICI OU NULLE PART. `setsid … &` rend la main sans savoir si la commande a pu
+  # s'executer : un `|| say` derriere `launch` etait une branche inatteignable, et le message qu'elle
+  # portait (« AUCUNE console n'est joignable ») n'etait jamais dit (relecture hostile 2026-09-04, M7).
+  # Ce qui SE mesure avant de lancer : que la commande existe et soit executable. Ce qui meurt APRES
+  # est l'affaire du superviseur, qui le journalise et borne la relance.
+  if [[ -z "${1:-}" ]] || ! command -v -- "$1" >/dev/null 2>&1; then
+    say "$name NON lancé — commande introuvable ou non exécutable : ${1:-<vide>}"
+    return 1
+  fi
   if [[ -x "$SUPERVISE" ]]; then
     # SC2094 : `--log "$log"` et `>>"$log"` visent bien le meme fichier, et c'est voulu — les deux
     # AJOUTENT (`O_APPEND`), pour que les messages du superviseur et la sortie du service tiennent
@@ -162,11 +171,13 @@ CONVERGER_LOG="${LCARS_CONVERGER_LOG:-/var/log/lcars-converger.log}"
 if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # ─── UN PREMIER TOUR SYNCHRONE, PUIS LA BOUCLE ────────────────────────────────────────────────
   #
-  # ⚠ ET LA VÉRIFICATION N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. `64-services` porte déjà la
-  # sonde (`probe_fleet_humans`), et ce module est `CHECK-ON: any` : il tourne donc en docker. Un
-  # `doctor --only` rejoue LA MÊME sonde que le poste, sur le même code. Recopier la règle d'uid ici
-  # en aurait fait un troisième exemplaire — après `fleet_humans` et `converged_humans` du
-  # convergeur — et c'est toujours celui qu'on ne relit pas qui ment.
+  # ⚠ ET LA RÈGLE D'UID N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. Le dispositif que ce
+  # commentaire décrivait (`64-services`, `probe_fleet_humans`, un `doctor --only` au boot) est mort
+  # au lot 6 : l'installeur ne joue plus dans la boîte. Ce qui reste est le PRÉDICAT du protocole,
+  # `is_fleet_human` (`lib/human-protocol.sh`) — celui du convergeur et des modules per-humain — et
+  # c'est lui que le verdict ci-dessous appelle. Recopier la règle ici en ferait un troisième
+  # exemplaire, et c'est toujours celui qu'on ne relit pas qui ment (relecture hostile 2026-09-04 :
+  # ce bloc en portait un, plancher 1000 en dur, sous ce même commentaire).
   #
   # `timeout` : ce premier tour parle à la forge et provisionne chaque humain. Il est BORNÉ parce
   # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que la boîte doit rester
@@ -190,26 +201,38 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rend 0 sur une boite conforme SANS
+  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur une boite conforme SANS
   # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
   # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
   # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et la boite l'annoncait.
-  # Le module DEPOSE le fait (`p_fact fleet_humans`), on le relit — le canal de la porte.
-  # LE FAIT SE LIT SUR LA MACHINE, PAS PAR LE DOCTOR DE L'INSTALLEUR : un humain de fleet est un
-  # membre du groupe `fleet` dont l'uid est au-dessus du plancher et qui n'est pas le siege.
+  # LE FAIT SE LIT SUR LA MACHINE, PAR LE PREDICAT DU PROTOCOLE : un humain de fleet est un membre
+  # du groupe `fleet` que `is_fleet_human` reconnait — uid au-dessus du plancher de la machine
+  # (`UID_MIN` de login.defs, la meme lecture que le convergeur et `console-humans.sh`), et pas le
+  # siege. Le protocole est source dans un SOUS-SHELL : il pose des defauts et un vocabulaire faits
+  # pour un module, pas pour le PID 1 — rien n'en fuit ici. Sans protocole, la population n'est
+  # PAS mesuree, et ca se dit : un 1 invente serait aussi faux que le 0 d'avant.
+  HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
   humans_rc=1
-  while IFS= read -r _m; do
-    [[ -n "$_m" ]] || continue
-    _u="$(id -u -- "$_m" 2>/dev/null || true)"
-    [[ "$_u" =~ ^[0-9]+$ ]] && (( _u >= 1000 )) && [[ "$_u" != "$LCARS_UID" ]] && { humans_rc=0; break; }
-  done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+  if [[ ! -r "$HUMAN_PROTOCOL" ]]; then
+    say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
+  elif ( export LCARS_LOGIN="$LCARS_ADMIRAL" LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
+         # shellcheck source=../lib/human-protocol.sh
+         . "$HUMAN_PROTOCOL"
+         while IFS= read -r _m; do
+           [[ -n "$_m" ]] || continue
+           is_fleet_human "$_m" && exit 0
+         done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+         exit 1 ); then
+    humans_rc=0
+  fi
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   else
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
 
-  launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN"
+  launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN" \
+    || say "convergence des humains NON lancée — la boîte reste joignable, mais personne ne sera matérialisé sans redémarrage"
   say "un ajout à la team « humans » suffit désormais, sans redémarrage"
 else
   say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
@@ -243,10 +266,11 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # C'est exactement la forme que l'unité systemd du rail poste met dans son `ExecStart`
   # (`64-services.sh`) : un seul mécanisme de démarrage pour les deux rails, pas deux.
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
-    # `redirect_uris` OAuth2 avec `LCARS_LANDING_PORT` ; le daemon, lui, lit `LCARS_LANDING_PORT`. Au
-    # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$LCARS_LANDING_PORT` dans `services.env`,
-    # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
-    # que parce que leurs deux défauts indépendants valent tous les deux 20999.
+    # Le port du deck a UNE déclaration (`PROV_DECK_PORT`, MUR 4 de variable_walls) et ses copies la
+    # suivent : ici le défaut que le daemon lit, EXPORTÉ pour que le geste `deck-oidc` (les
+    # `redirect_uris` OAuth2) et le deck lisent la même valeur dans cette boîte. L'ENTRÉE publiée
+    # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « box up » la traduit en
+    # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
     export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
@@ -288,7 +312,8 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
     || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \
-    python3 /opt/lcars/catalogue-executor.py
+    python3 /opt/lcars/catalogue-executor.py \
+    || say "executeur de catalogue NON lancé — « lcars catalogue install » refusera, en nommant ce service"
   say "« lcars catalogue install » passe par lui"
 else
   say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"
@@ -305,7 +330,8 @@ fi
 # geste privilégié) et ne détient rien. Les deux règles sont la même règle, lue des deux côtés.
 if [[ "${LCARS_PRIVILEGED_EXECUTOR:-1}" == "1" && -r /opt/lcars/privileged-executor.py ]]; then
   launch "service privilégié" /var/log/lcars-privileged.log -- \
-    python3 /opt/lcars/privileged-executor.py
+    python3 /opt/lcars/privileged-executor.py \
+    || say "service privilégié NON lancé — la convergence d'outillage refusera, en nommant sa socket"
   say "la convergence d'outillage passe par sa socket, plus par sudo"
 else
   say "service privilégié ABSENT — la convergence d'outillage refusera, en nommant sa socket"

@@ -18,7 +18,11 @@
 # `provision doctor --only 64-services` pour lire le fait `fleet_humans=` — l'installeur ne joue plus
 # au boot (⚖ user, Q1 : l'image est le produit, le conteneur une instance). La regle est celle de
 # `is_fleet_human` du protocole des modules : membre de `fleet`, uid au-dessus du plancher, pas le
-# siege — et le bloc la lit lui-meme sur `getent group`.
+# siege — et le bloc APPELLE ce predicat (dans un sous-shell qui source `human-protocol.sh`), il ne
+# le recopie pas. Relecture hostile 2026-09-04 (S4) : il en portait une copie, plancher 1000 en
+# dur, la ou le protocole lit `UID_MIN` dans login.defs — deux reponses a la meme question des que
+# la machine pose un autre plancher. Le decor pose donc un `login.defs` (`PASSWD_DEFS`), et un
+# temoin le fait varier.
 #
 # ⚠ CES TEMOINS EXECUTENT LE BLOC REEL, extrait du fichier. Un temoin de texte epinglerait
 # l'orthographe d'un appel ; ce qui compte est ce que le bloc FAIT quand le convergeur echoue,
@@ -47,6 +51,15 @@ setup() {
 
   export LCARS_PROV_RC_FILE="$BATS_TEST_TMPDIR/provision.rc"
 
+  # Le predicat du protocole, et ce qu'il lit : le plancher de la machine (`login.defs` de decor,
+  # 1000 par defaut — un temoin le change) et le siege (`LCARS_SYSADMIN_UID`, le fichier est absent).
+  export LCARS_HUMAN_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh"
+  export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
+  [ -f "$LCARS_HUMAN_PROTOCOL" ] && [ -f "$LCARS_MODULE_PROTOCOL" ]
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
+  export LCARS_SYSADMIN_UID=1000
+
   # ⚠ DEUX MORCEAUX REELS, ET C'EST LEUR CONTRAT QU'ON MESURE. Le bloc de convergence POSE
   # `humans_rc` ; `publier_verdicts` l'ECRIT. Les deux vivaient ensemble jusqu'au 2026-08-26, ou la
   # publication est descendue apres le bloc pour fermer une course avec `box up`. Extraire le seul
@@ -63,13 +76,13 @@ setup() {
 
 # `say` journalise, `setsid` ne detache RIEN (sinon un daemon survit au temoin), et `$PROVISION`
 # est une doublure dont on pilote le verdict.
-bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
+bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = personne, 2 = le siege seul (admiral, 1000)>
   # ⚠ LE FAIT SE LIT SUR LA MACHINE (lot 6, 2026-09-04) : un humain de fleet est un membre du groupe
   # `fleet` dont l'uid est au-dessus du plancher et qui n'est pas le siege. Le bloc lisait le fait
   # `fleet_humans=` depose par le doctor de l'INSTALLEUR ; l'installeur ne joue plus au boot. Le
   # decor double donc `getent` (le groupe et ses membres) et `id` (leurs uid) — c'est la mesure.
   local conv_rc="$1" sonde="$2" members="zoe"
-  [ "$sonde" -eq 0 ] || members=""
+  case "$sonde" in 1) members="" ;; 2) members="admiral" ;; esac
   printf '%s\n' '#!/usr/bin/env bash' "exit $conv_rc" > "$LCARS_HUMAN_CONVERGER"
   chmod 0755 "$LCARS_HUMAN_CONVERGER"
   printf '%s\n' '#!/usr/bin/env bash' \
@@ -84,6 +97,8 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     LCARS_UID=1000
+    LCARS_ADMIRAL=admiral
+    MODULE_PROTOCOL='$LCARS_MODULE_PROTOCOL'
     RC_FILE='$LCARS_PROV_RC_FILE'
     prov_rc=0
     source '$BLOC'"
@@ -223,4 +238,52 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
   grep -q "AUCUN humain" "$JOURNAL"
+}
+
+@test "le plancher est celui de la MACHINE (UID_MIN de login.defs), pas un 1000 en dur" {
+  # S4 (relecture hostile 2026-09-04). zoe est a l'uid 1001 : humaine de fleet sur une machine dont
+  # login.defs pose UID_MIN 1000, compte SYSTEME sur une machine qui pose 2000. Le bloc recopiait
+  # `>= 1000` ; le convergeur lisait login.defs — et les deux repondaient differemment. Ce temoin
+  # rougit sur la copie : avec 1000 en dur, zoe passe quel que soit login.defs.
+  printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
+  bloc 0 0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  grep -q 'AUCUN humain de fleet' "$JOURNAL"
+  # Et l'inverse, pour que le temoin ne mesure pas un predicat qui refuse tout : a 1001, zoe passe.
+  printf 'UID_MIN\t1001\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
+  rm -f "$JOURNAL" "$LCARS_HUMANS_RC_FILE"
+  bloc 0 0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 0 ]
+  grep -q 'présent' "$JOURNAL"
+}
+
+@test "le bloc APPELLE le predicat du protocole — il ne porte aucune copie de la regle d'uid" {
+  # Le mur de S4 : `is_fleet_human` est la seule definition. Un plancher numerique dans ce bloc est
+  # un troisieme exemplaire, celui qu'on ne relit pas.
+  grep -q 'is_fleet_human' "$BLOC"
+  grep -q 'human-protocol.sh' "$BLOC"
+  refute grep -qE '(>=|-ge) *[0-9]{3,}' "$BLOC"
+}
+
+@test "protocole ABSENT : la population n'est PAS mesuree, humans.rc dit 1, et le bloc nomme le fichier" {
+  # Un 0 invente dirait « quelqu'un peut lancer une fleet » sans avoir regarde ; un 1 muet ferait
+  # chercher un humain manquant la ou c'est l'image qui est incomplete.
+  export LCARS_HUMAN_PROTOCOL="$BATS_TEST_TMPDIR/absent/human-protocol.sh"
+  bloc 0 0
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  grep -q 'protocole des humains introuvable' "$JOURNAL"
+}
+
+@test "console-humans.sh, le convergeur et le protocole lisent la MEME source pour le plancher (PASSWD_DEFS → login.defs)" {
+  # Trois lecteurs, une source : `console-humans.sh` decide qui recoit une console, le protocole qui
+  # est humain de fleet, le convergeur qui il cree. Chacun garde sa politique (la console refuse
+  # sans bornes lisibles, les deux autres retombent sur 1000), mais le fichier lu — et le nom qui
+  # le deplace — est le meme.
+  local services="$BATS_TEST_DIRNAME/../../../services"
+  grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/console-humans.sh"
+  grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/lib/human-protocol.sh"
+  grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/human-converger.sh"
 }

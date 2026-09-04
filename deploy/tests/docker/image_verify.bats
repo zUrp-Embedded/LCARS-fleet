@@ -41,9 +41,23 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   # 20-groups mesure l'appartenance du SIEGE, qui n'existe qu'au boot ; la sonde bwrap de 10-packages
   # mesure le noyau — verify la debranche (`PROV_KERNEL_PROBES=0`), elle se joue au boot.
   grep -q 'PROV_KERNEL_PROBES=0' <<<"$v"
-  for m in 20-groups 63-forge-tokens 65-ops-branch 66-deck-oidc 00-preflight 25-directories; do
+  # ⚠ « NE DEMANDE QUE » SE MESURE PAR LE COMPLEMENT (relecture hostile 2026-09-04, M10). Une liste
+  # noire de sept noms laissait huit modules dans aucune des deux listes : un `--only 49-forge-runner`
+  # ajoute au stage — il parle a une forge — passait vert. Ici : tout `--only` du stage est dans la
+  # liste blanche, et tout module de modules.d/ hors liste blanche est absent du stage.
+  local blanche=" 10-packages 16-node 21-service-accounts 44-media 46-tofu 60-deploy 62-runtime-helpers 64-services "
+  local demande
+  while read -r demande; do
+    [ -n "$demande" ] || continue
+    [[ "$blanche" == *" $demande "* ]] || { echo "verify demande $demande, qui n'est pas dans la liste de ce que l'image POSE" >&2; return 1; }
+  done < <(grep -oE -- '--only [0-9]{2}-[a-z-]+' <<<"$v" | sed 's/^--only //')
+  local f n=0
+  for f in "$BATS_TEST_DIRNAME"/../../modules.d/[0-9][0-9]-*.sh; do
+    m="$(basename "$f" .sh)"; n=$((n + 1))
+    [[ "$blanche" == *" $m "* ]] && continue
     refute grep -q -- "--only $m" <<<"$v"
   done
+  [ "$n" -ge 20 ] || { echo "seulement $n modules lus dans modules.d — l'instrument ne lit plus le repertoire" >&2; return 1; }
 }
 
 @test "deploy/ entre dans verify, a la place que le doctor connait — et c'est LA que 62 le retrouvera quand runtime ne l'aura plus" {

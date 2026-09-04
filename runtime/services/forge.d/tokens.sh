@@ -115,27 +115,38 @@ check_master_authority() {
   fi
 }
 
+# ⚠ DEUX REGIMES DE PROPRIETE DANS LE REPERTOIRE PRIVE, ET LES DEUX SE MESURENT. Le jeton master et
+# le seed sont OUVERTS par le service d'autorite (l'executeur de catalogue tourne sous
+# `lcars-authority`) : 0600 a lui. Le passwords-file porte le SEED EN CLAIR pour chaque compte de
+# role ; seul le minteur le lit, joue par root — au boot de la boite, a l'install du poste — :
+# 0600 root:root, et rien ne le mesurait (relecture hostile 2026-09-04, M13). Un fichier qui ne
+# suit aucune des deux regles est celui qu'on ne relit pas.
 converge_authority_modes() {
-  local f cur want="$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER"
-
-  for f in "$LCARS_MASTER_TOKEN_FILE" "$LCARS_FORGE_SEED_FILE"; do
-    [[ -f "$f" ]] || continue
-    cur="$(stat -c '%a %U:%G' "$f")"
-    if [[ "$cur" != "600 $want" ]]; then
-      if [[ "$LCARS_MODULE_MODE" == "check" ]]; then
-        p_drift "$f est $cur — attendu 600 $want (aucun process d'humain ne doit pouvoir le lire)"
-      else
-        if chown "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" "$f" && chmod 0600 "$f"; then
-          p_chg "$f -> 0600 $want (seul le service d'autorite l'ouvre)"
-        else
-          p_fail "$f : mode non convergé"
-        fi
-      fi
+  local authority="$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER"
+  converge_secret_mode "$LCARS_MASTER_TOKEN_FILE" "$authority" "seul le service d'autorite l'ouvre"
+  converge_secret_mode "$LCARS_FORGE_SEED_FILE"   "$authority" "seul le service d'autorite l'ouvre"
+  converge_secret_mode "$LCARS_PASSWORDS_FILE"    "root:root"  "seul le minteur, sous root, l'ouvre"
+  return 0
+}
+converge_secret_mode() { # <fichier> <owner:group> <pourquoi> — 0600, au proprietaire nomme ; absent = rien
+  local f="$1" want="$2" why="$3" cur
+  [[ -f "$f" ]] || return 0
+  cur="$(stat -c '%a %U:%G' "$f")"
+  if [[ "$cur" != "600 $want" ]]; then
+    if [[ "$LCARS_MODULE_MODE" == "check" ]]; then
+      p_drift "$f est $cur — attendu 600 $want (aucun process d'humain ne doit pouvoir le lire)"
     else
-      [[ "$LCARS_MODULE_MODE" == "check" ]] && p_ok "$f (0600 $want)"
+      if chown "$want" "$f" && chmod 0600 "$f"; then
+        p_chg "$f -> 0600 $want ($why)"
+      else
+        p_fail "$f : mode non convergé"
+      fi
     fi
-  done
-
+  else
+    [[ "$LCARS_MODULE_MODE" == "check" ]] && p_ok "$f (0600 $want)"
+  fi
+  # ⚠ `return 0` EXPLICITE : la ligne d'au-dessus est FAUSSE en apply, et sous `set -e` c'est le
+  # module entier qui mourait (2026-08-17, tokens_probes.bats).
   return 0
 }
 
@@ -427,9 +438,15 @@ apply() {
     verdict_apply
   fi
   ensure_passwords_entries || verdict_apply
+  # Le jeton master est OPTIONNEL pour le mint (la voie FORCE ; sans lui, le minteur lit le
+  # passwords-file) : le drapeau ne part que si le fichier est LISIBLE. `${VAR:+…}` ne le mesurait
+  # pas — le protocole pose toujours le NOM, l'expansion etait donc toujours vraie, fichier absent
+  # compris (relecture hostile 2026-09-04, M8).
+  local -a master_opt=()
+  [[ -r "$LCARS_MASTER_TOKEN_FILE" ]] && master_opt=(--master-token-file "$LCARS_MASTER_TOKEN_FILE")
   if "$A4_SCRIPT" --forge "$FORGE_BASE_URL" --tokens-dir "$LCARS_PRIVATE_DIR" \
       --passwords-file "$LCARS_PASSWORDS_FILE" --owner "$LCARS_AUTHORITY_USER" \
-      ${LCARS_MASTER_TOKEN_FILE:+--master-token-file "$LCARS_MASTER_TOKEN_FILE"} \
+      "${master_opt[@]}" \
       --roles "$ROLES" --extra-token "$LCARS_SYSTEM_ACCOUNT:$(basename "$LCARS_SYSTEM_TOKEN_FILE")"; then
     LCARS_CHANGED=$((LCARS_CHANGED + 1))
     p_chg "tokens A4 posés ($LCARS_PRIVATE_DIR)"

@@ -204,3 +204,21 @@ EOS
   [ "$status" -eq 1 ]
   [[ "$output" == *"409"*"NON DÉCLARÉE"* ]]
 }
+
+@test "aide : chaque variable d'env ANNONCEE est LUE — par box, par un compose qu'il pilote, ou par une lib qu'il source" {
+  # Relecture hostile 2026-09-04 (M6) : `LCARS_CONSOLE_PORT` etait documentee dans l'aide et lue
+  # nulle part — une piste morte pour l'operateur qui cherche pourquoi son port ne bouge pas, dans
+  # le fichier qu'il lit en premier. L'aide est un contrat : un nom qu'elle annonce a un lecteur.
+  local names
+  names="$(sed -n '/^# ENV (tous optionnels)/,/^# EXIT :/p' "$SRC" | grep -oE '^#   [A-Z][A-Z0-9_]+' | sed 's/^#   //')"
+  [ "$(grep -c . <<<"$names")" -ge 8 ] || { echo "moins de 8 variables lues dans l'aide — l'instrument ne lit plus le bloc ENV" >&2; return 1; }
+  local code
+  code="$(cat "$SRC" "$REPO/deploy/docker/docker-compose.yml" "$REPO/deploy/docker/docker-compose.secrets.yml" \
+              "$REPO/deploy/lib/store.sh" "$REPO/deploy/lib/docker-endpoint.sh" | grep -vE '^\s*#')"
+  local n bad=0
+  while read -r n; do
+    [ -n "$n" ] || continue
+    grep -qE "(^|[^A-Z0-9_])$n([^A-Z0-9_]|$)" <<<"$code" || { echo "$n : annoncee par l'aide de box, lue nulle part" >&2; bad=1; }
+  done <<<"$names"
+  [ "$bad" -eq 0 ]
+}

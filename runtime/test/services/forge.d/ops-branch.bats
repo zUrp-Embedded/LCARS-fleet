@@ -166,8 +166,22 @@ EOF
   # Son autorite est `Fleet.Toolchain.branch/0`, et le contrat `toolchain.branch_single_source` du
   # gate tient la recopie. Ce temoin-ci garde l'autre moitie : que ce fichier ne rouvre pas une
   # molette locale, ce qui redonnerait au nom deux sources dont une seule serait verifiee.
-  grep -qE '^readonly OPS_BRANCH="tool_request"' "$MODULE"
+  grep -qE '^OPS_BRANCH="tool_request"$' "$MODULE"
   refute grep -q 'LCARS_SYSADMIN_BRANCH' "$MODULE"
+}
+
+@test "la tete du module se SOURCE deux fois dans un meme shell — aucune constante readonly (M11)" {
+  # deck-oidc.bats et consorts sourcent la tete d'un module pour epingler une fonction ; un second
+  # `source` sur un `readonly` meurt en « readonly variable ». Le voisin catalogues.sh declare ses
+  # constantes nues : une convention, une forme. Le gel du nom est mesure par le temoin d'au-dessus
+  # et par le contrat du gate, pas par l'attribut.
+  local head="$BATS_TEST_TMPDIR/head.sh"
+  sed '/^case "\${1:?usage/,$d' "$MODULE" > "$head"
+  grep -q 'OPS_BRANCH=' "$head"
+  run bash -c "set -euo pipefail; source '$head' >/dev/null 2>&1; source '$head' >/dev/null 2>&1; printf '%s' \"\$OPS_BRANCH\""
+  [ "$status" -eq 0 ]
+  [ "$output" = "tool_request" ]
+  refute grep -qE '^readonly ' "$MODULE"
 }
 
 @test "le depot ops est CREE par l'amorcage — il etait lu par trois domaines et cree par aucun" {
