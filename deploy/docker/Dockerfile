@@ -488,6 +488,15 @@ COPY runtime/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # L image ecrasait `/etc/skel/.bashrc` par une copie de 117 lignes de la distribution dont trois
 # etaient a nous. Elle pose desormais le seul reglage LCARS, et raccorde le squelette de la
 # distribution par un bloc qui teste avant de sourcer.
+#
+# ⚠ LE PARENT SE POSE AVANT LA COPIE, AVEC SON MODE. BuildKit cree les repertoires manquants d'un
+# `COPY --chmod` avec ce meme `--chmod` : `/etc/lcars` sortait de l'image en 0644 — non traversable
+# par tout non-root, donc `seat.uid` et ce bashrc invisibles a l'humain — et `init.sh` le reparait a
+# chaque instance (journal du banc bob_2, 2026-09-04 : « POSÉ perms 0755 root:root /etc/lcars »).
+# Le stage `verify` ne peut pas le voir : root traverse un repertoire sans bit x. Le mode et le
+# proprietaire sont ceux que `init.sh` (layout) et la table de l'installeur declarent ; le temoin
+# `image_layout.bats` tient les trois d'accord et l'ordre de ces deux lignes.
+RUN install -d -m 0755 -o root -g root /etc/lcars
 COPY --chmod=0644 runtime/services/lcars.bashrc /etc/lcars/lcars.bashrc
 RUN printf "%s\n%s\n%s\n" \
       "# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)" \
