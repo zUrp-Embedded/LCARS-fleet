@@ -22,6 +22,8 @@
 # (`forge_charte.bats`), et il mesure la chaine reelle module -> lib -> sortie plutot qu'une
 # fonction isolee de son cablage.
 
+load ../../support/refute
+
 setup() {
   MODULE="$BATS_TEST_DIRNAME/../../../services/forge.d/tokens.sh"
   [ -f "$MODULE" ]
@@ -190,4 +192,102 @@ EOF2
   run bash "$MODULE" apply
 
   [[ "$output" == *"structure absente"* ]]
+}
+
+# ─── LES DEUX REGIMES DE PROPRIETE DU REPERTOIRE PRIVE (M13) ET LE DRAPEAU DU JETON MASTER (M8) ────
+#
+# Relecture hostile 2026-09-04. Sur le banc : master et seed en 0600 lcars-authority (le service
+# d'autorite les ouvre), et `forge-role-passwords.json` — le SEED EN CLAIR pour chaque compte de
+# role — en 0600 root:root, sans que rien ne mesure son mode : `converge_authority_modes` ne le
+# portait pas. Et le drapeau `--master-token-file` partait TOUJOURS vers le minteur : le protocole
+# pose toujours le NOM du fichier, donc `${VAR:+…}` etait toujours vrai, fichier absent compris.
+#
+# `stat` est double PAR FICHIER : un stub qui rend la meme chose a tous ferait passer le mode du
+# passwords-file pour celui du jeton master, et le temoin mesurerait sa propre mise en scene.
+stub_stat_per_file() { # <mode du passwords-file> <mode des fichiers d'autorite>
+  cat > "$BIN/stat" <<EOF2
+#!/usr/bin/env bash
+f="\${@: -1}"
+case "\$f" in
+  *forge-role-passwords.json) printf '%s' '$1' ;;
+  *)                          printf '%s' '$2' ;;
+esac
+EOF2
+  chmod +x "$BIN/stat"
+}
+
+@test "check : le passwords-file (seed en clair par compte) est MESURE — 600 root:root, sinon DRIFT qui le nomme (M13)" {
+  stub_curl '{"login":"zoe","restricted":false}'
+  stub_stat_per_file "644 root:root" "600 lcars-authority:lcars-authority"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-seed.pass"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-role-passwords.json"
+  run bash "$MODULE" check
+  [[ "$output" == *"forge-role-passwords.json est 644 root:root"* ]]
+  [[ "$output" == *"attendu 600 root:root"* ]]
+  # et les fichiers d'autorite, eux, sont a leur cible : OK, pas drift
+  [[ "$output" == *"forge-master.token (0600 lcars-authority:lcars-authority)"* ]]
+}
+
+@test "check : les deux regimes sont DISTINCTS — un passwords-file a lcars-authority est un drift, pas une cible (M13)" {
+  # Le minteur seul le lit, sous root ; le donner au service d'autorite elargirait qui peut lire
+  # le seed en clair. La regle n'est pas « 0600 a quelqu'un », c'est « 0600 a root ».
+  stub_curl '{"login":"zoe","restricted":false}'
+  stub_stat_per_file "600 lcars-authority:lcars-authority" "600 lcars-authority:lcars-authority"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  : > "$BATS_TEST_TMPDIR/tokens/forge-role-passwords.json"
+  run bash "$MODULE" check
+  [[ "$output" == *"forge-role-passwords.json est 600 lcars-authority:lcars-authority"* ]]
+  [[ "$output" == *"attendu 600 root:root"* ]]
+}
+
+# Le decor qui mene l'apply JUSQU'AU MINT : forge joignable, comptes presents, sonde A4 en echec,
+# passwords-file complet (aucun seed necessaire), et un minteur double qui note son argv.
+apply_jusquau_mint() {
+  cat > "$BIN/getent" <<'EOF2'
+#!/usr/bin/env bash
+[[ "$1" == "group" ]] && { printf 'lcars-admin:x:3000:\n'; exit 0; }
+exit 2
+EOF2
+  cat > "$BIN/curl" <<'EOF2'
+#!/usr/bin/env bash
+url=""
+for a in "$@"; do case "$a" in http*) url="$a" ;; esac; done
+case "$url" in
+  */api/v1/version)   printf '{"version":"1.26.1"}'; exit 0 ;;
+  */user/sign_up)     printf '<form><input name="user_name"></form>'; exit 0 ;;
+  */api/v1/users/*)   exit 0 ;;   # `-o /dev/null` chez l'appelant : rien sur stdout, sinon le corps pollue `missing_accounts`
+  *)                  exit 22 ;;
+esac
+EOF2
+  chmod +x "$BIN/getent" "$BIN/curl"
+  stub_stat_per_file "600 root:root" "600 lcars-authority:lcars-authority"
+  printf '{"fleet_engineer":"s","system_architect":"s","system_starfleet":"s"}\n' > "$BATS_TEST_TMPDIR/tokens/forge-role-passwords.json"
+  ARGV="$BATS_TEST_TMPDIR/a4.argv"
+  export LCARS_ROLE_TOKENS_SCRIPT="$BATS_TEST_TMPDIR/a4.sh"
+  cat > "$LCARS_ROLE_TOKENS_SCRIPT" <<EOF2
+#!/usr/bin/env bash
+for a in "\$@"; do [[ "\$a" == --check ]] && exit 1; done
+printf '%s\n' "\$@" > '$ARGV'
+exit 0
+EOF2
+  chmod +x "$LCARS_ROLE_TOKENS_SCRIPT"
+}
+
+@test "apply : sans jeton master LISIBLE, --master-token-file ne part PAS vers le minteur (M8)" {
+  apply_jusquau_mint
+  rm -f "$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  run bash "$MODULE" apply
+  [ -f "$ARGV" ] || { echo "le minteur n'a pas ete atteint :"; echo "$output"; return 1; } >&2
+  refute grep -q -- '--master-token-file' "$ARGV"
+  grep -q -- '--passwords-file' "$ARGV"
+}
+
+@test "apply : avec un jeton master lisible, --master-token-file part, et il nomme le fichier (M8)" {
+  apply_jusquau_mint
+  : > "$BATS_TEST_TMPDIR/tokens/forge-master.token"
+  run bash "$MODULE" apply
+  [ -f "$ARGV" ] || { echo "le minteur n'a pas ete atteint :"; echo "$output"; return 1; } >&2
+  grep -qx -- '--master-token-file' "$ARGV"
+  grep -qx -- "$BATS_TEST_TMPDIR/tokens/forge-master.token" "$ARGV"
 }
