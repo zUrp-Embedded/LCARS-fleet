@@ -23,11 +23,18 @@ set -euo pipefail
 # (`usermod -aG "$GROUP"`, deux sites dans human-converger.sh). Le `usermod` qui vivait ici doublait ce geste.
 #
 # CE QUI LUI RESTE EN PROPRE, et que personne d'autre ne verifie : L'APPARTENANCE AU GROUPE.
-# `is_fleet_human` ne juge que l'uid (>= UID_MIN, pas le siege) ; un humain hors de `fleet` passe
-# donc cette borne et ne lira pourtant ni les jetons ni les zones de face. `64-services` compte les
-# humains, celui-ci regarde s'ils peuvent travailler.
+# `is_fleet_human` ne juge que l'uid (dans [UID_MIN, UID_MAX], pas le siege) ; un humain hors de
+# `fleet` passe donc cette borne et ne lira pourtant ni les jetons ni les zones de face.
+# `64-services` compte les humains, celui-ci regarde s'ils peuvent travailler.
 observe() {
   local h found=0
+  # LA FRONTIERE D'ABORD. Sans bornes lisibles, `fleet_humans` ne rend personne — et « personne »
+  # aurait ici le sens d'une machine neuve, ce qui serait faux : la machine ne SAIT PAS qui est
+  # humain. C'est une derive, et son remede est le fichier que la lib vient de nommer.
+  prov_uid_bounds || {
+    p_drift "la frontiere systeme/humain n'est pas etablie — cette machine ne peut reconnaitre aucun humain de fleet (le remede est ci-dessus)"
+    return 0
+  }
   while read -r h; do
     [[ -n "$h" ]] || continue
     found=1
@@ -59,14 +66,19 @@ apply() {
   # arrive ici, c'est un compte cree A LA MAIN, ou un groupe perdu — l'apply le repose plutot que de
   # renvoyer l'operateur a un `usermod` qu'il devra ecrire lui-meme.
   local h
-  while read -r h; do
-    [[ -n "$h" ]] || continue
-    prov_in_group "$h" "$PROV_FLEET_GROUP" && continue
-    if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
-      PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"
-    fi
-  done < <(fleet_humans)
+  # Meme garde que `observe`, ICI plutot que dans la substitution : `fleet_humans` y tourne dans un
+  # sous-shell, qui dirait le remede une seconde fois. Sur une frontiere illisible, aucun usermod ;
+  # `observe` dit la derive.
+  if prov_uid_bounds; then
+    while read -r h; do
+      [[ -n "$h" ]] || continue
+      prov_in_group "$h" "$PROV_FLEET_GROUP" && continue
+      if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
+        PROV_CHANGED=$((PROV_CHANGED + 1))
+        p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"
+      fi
+    done < <(fleet_humans)
+  fi
 
   observe
   verdict_apply

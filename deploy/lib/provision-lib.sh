@@ -1011,25 +1011,50 @@ as_human() {
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
-# DEUX CONDITIONS, PARCE QU'IL Y A DEUX RÈGLES, et c'est le même couple que le GUARD B de
-# `bin/fleet` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
-#   1. `uid >= UID_MIN` — la frontière système/humain. Elle n'est pas à inventer : `/etc/login.defs`
-#      la déclare et `useradd` la lit.
-#   2. `uid != SYSADMIN_UID` — la réservation du siège, que `login.defs` ne peut PAS exprimer :
-#      UID_MIN vaut 1000 et le sysadmin EST 1000, donc le système le classe utilisateur régulier.
+# DEUX CONDITIONS, PARCE QU'IL Y A DEUX REGLES, et c'est le meme couple que le GUARD B de
+# `bin/fleet` (le BEAM herite de l'uid de son lanceur, ses pods avec) :
+#   1. `UID_MIN <= uid <= UID_MAX` — la frontiere systeme/humain. Elle n'est pas a inventer :
+#      `/etc/login.defs` la declare et `useradd` la lit. Les comptes systeme sont en dessous,
+#      `nobody` (65534, sur toute machine) au-dessus.
+#   2. `uid != SYSADMIN_UID` — la reservation du siege, que `login.defs` ne peut PAS exprimer :
+#      le sysadmin est souvent le premier uid humain, donc le systeme le classe utilisateur regulier.
 #
-# La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet` parce que le provisioning ne peut
-# pas dépendre de l'artefact qu'il INSTALLE : une machine vierge n'a pas ce binaire quand le cycle
-# démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
+# LA REGLE EST CELLE DE `runtime/services/lib/human-protocol.sh` (`uid_bounds`, `is_fleet_human`),
+# la seule ecriture cote produit. Elle est RE-ECRITE ici plutot qu'appelee : l'installeur ne source
+# pas de code du produit (PLAYBOOK, grille de nature : un partage est interdit dans les deux sens),
+# le protocole exige un sujet de module et pose un vocabulaire fait pour lui, et `22-fleet-human`
+# joue AVANT `62-runtime-helpers` — la decision d'installer ne peut pas dependre d'un fichier que
+# l'install pose. Le nombre, lui, n'est pas recopie — il vient de login.defs. Ce qui tient les deux
+# corps d'accord est un temoin (`provision-lib.bats`, « meme matrice, memes verdicts, meme phrase »),
+# pas ce commentaire.
 #
-# ⚠ ARITHMÉTIQUE, jamais des chaînes : en comparaison lexicographique `"999" < "1000"` est FAUX, et
-# un compte système à uid 999 passerait la garde.
-# Les bornes se LISENT dans login.defs, elles ne s'écrivent pas ici. `|| true` LOAD-BEARING : sous
-# `set -euo pipefail`, un login.defs absent tuerait le module AVANT la garde, et une garde qui
-# s'évanouit sur une lecture ratée est pire que pas de garde.
-_uid_bound() { # <UID_MIN|UID_MAX> <défaut>
-  local v; v="$(awk -v k="^$1" '$0 ~ k {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
-  if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '%s' "$2"; fi
+# ⚠ AUCUN REPLI SUR 1000 NI 60000, et c'est delibere (⚖ user 2026-09-05, solution A) — la politique
+# que le BEAM applique a son boot (runtime.exs, R-no-uid-min) et `console-humans.sh` a sa liste.
+# Un login.defs illisible n'est pas « la frontiere est a 1000 », c'est « la frontiere n'est pas
+# etablie » : `is_fleet_human` rend non pour tout le monde, `fleet_humans` ne rend personne, et le
+# remede — le fichier — est dit UNE FOIS par processus (un `$( )` herite de la trace ; dit D'ABORD
+# dans un `$( )`, elle ne remonte pas, et le processus le redira une fois — jamais plus).
+#
+# ⚠ ARITHMETIQUE, jamais des chaines : en comparaison lexicographique `"999" < "1000"` est FAUX, et
+# un compte systeme a uid 999 passerait la garde. `|| true` LOAD-BEARING : sous `set -euo pipefail`,
+# un login.defs absent tuerait le module AVANT la garde, et une garde qui s'evanouit sur une
+# lecture ratee est pire que pas de garde.
+PROV_UID_MIN="" PROV_UID_MAX="" PROV_UID_BOUNDS_WHY=""
+_PROV_UID_BOUNDS_SAID=""
+prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 si les deux se lisent ; 1 sinon, remede dans PROV_UID_BOUNDS_WHY, dit une fois
+  local defs="${PASSWD_DEFS:-/etc/login.defs}" manque=""
+  PROV_UID_MIN="$(awk '$1 == "UID_MIN" {print $2; exit}' "$defs" 2>/dev/null || true)"
+  PROV_UID_MAX="$(awk '$1 == "UID_MAX" {print $2; exit}' "$defs" 2>/dev/null || true)"
+  [[ "$PROV_UID_MIN" =~ ^[0-9]+$ ]] || manque=UID_MIN
+  [[ -n "$manque" || "$PROV_UID_MAX" =~ ^[0-9]+$ ]] || manque=UID_MAX
+  if [[ -z "$manque" ]]; then PROV_UID_BOUNDS_WHY=""; return 0; fi
+  PROV_UID_MIN="" PROV_UID_MAX=""
+  PROV_UID_BOUNDS_WHY="la frontiere systeme/humain n'est pas etablie ($manque illisible dans $defs) — la borne est declaree par le systeme, pas par ce processus : repare $defs"
+  if [[ -z "$_PROV_UID_BOUNDS_SAID" ]]; then
+    _PROV_UID_BOUNDS_SAID=1
+    p_warn "$PROV_UID_BOUNDS_WHY"
+  fi
+  return 1
 }
 
 # ─── LE SIÈGE EST UN FAIT, ET IL N'A PAS DE DÉFAUT ──────────────────────────────────────────────
@@ -1055,12 +1080,12 @@ prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
 # pas 1000 — donc au siège lui-même dès qu'il est ailleurs, c'est-à-dire exactement le compte que
 # cette fonction existe pour écarter. Se fermer est la seule direction sûre quand la borne manque.
 is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
-  local login="${1:-$PROV_HUMAN}" uid uid_min seat
+  local login="${1:-$PROV_HUMAN}" uid seat
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
   seat="$(prov_seat_uid)" || return 1
-  uid_min="$(_uid_bound UID_MIN 1000)"
-  (( uid >= uid_min )) && (( uid != seat ))
+  prov_uid_bounds || return 1
+  (( uid >= PROV_UID_MIN && uid <= PROV_UID_MAX )) && (( uid != seat ))
 }
 
 # ─── fleet_humans — CEUX QUI EXISTENT DÉJÀ SUR CETTE MACHINE ────────────────────────────────────
@@ -1075,8 +1100,10 @@ fleet_humans() {
     echo "fleet_humans: siège non établi (ni ${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
     return 1
   }
-  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \
-      -v s="$seat" \
+  # Bornes illisibles : PERSONNE — une population devinee compterait `nobody` ou des comptes
+  # systeme, et `64-services` l'annoncerait comme des humains de fleet.
+  prov_uid_bounds || return 1
+  awk -F: -v m="$PROV_UID_MIN" -v M="$PROV_UID_MAX" -v s="$seat" \
       '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
 }
 

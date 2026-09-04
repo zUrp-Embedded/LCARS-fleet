@@ -56,6 +56,11 @@ setup() {
   # `.63` (Linux natif) sur du code identique. Le decor POSSEDE ces deux valeurs ; un test qui en
   # veut une la pose lui-meme, sur la ligne qui la concerne.
   unset PROV_SUBSTRATE LCARS_WSL_NETWORKING_MODE
+
+  # ⚠ LE SIEGE SE LIT DANS UN FICHIER AVANT LA VARIABLE (`prov_seat_uid`), et ce fichier existe sur
+  # toute machine provisionnee (MUR I9) : les temoins de la regle d'uid, en bas de ce fichier, posent
+  # leur siege par la variable — le canal fichier est ferme ici pour que leur declaration s'applique.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
 }
 
 # Helper: run a module-like snippet (fresh bash, module shell options, lib sourced).
@@ -1471,4 +1476,104 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   [[ "$output" == *"PAS-VU"* ]]
   run bash -c "pgrep -f 'zorglub-$$' >/dev/null && echo VU || echo PAS-VU"
   [[ "$output" == "VU" ]]
+}
+
+# ─── LA FRONTIERE SYSTEME/HUMAIN : FAIL-CLOSED, ET LA MEME REGLE QUE LE PROTOCOLE DU PRODUIT ────
+#
+# ⚖ user 2026-09-05 (lot 14, solution A + C + E de `17-DEUX-OUVERTS.md`). La lib devinait
+# `1000`/`60000` (`_uid_bound … <defaut>`) quand login.defs etait illisible ; le BEAM refuse de
+# booter dans ce cas, et `console-humans.sh` ne rend aucune liste. La regle est desormais celle de
+# `runtime/services/lib/human-protocol.sh` — RE-ECRITE ici (la lib ne source pas de code du produit,
+# et 22 joue avant 62), donc tenue egale par CE temoin : meme matrice, memes verdicts, meme phrase.
+#
+# Un `id` de decor (zoe 1001, admiral 1000 = le siege, svc 999, nobody 65534) : aucun compte de la
+# machine n'est lu. Le siege est pose par la variable, le fichier est absent (MUR I9).
+uid_rule_decor() {
+  export LCARS_SYSADMIN_UID=1000
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
+  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  printf '%s\n' 'root:x:0:0:root:/root:/bin/bash' 'svc:x:999:999::/nonexistent:/usr/sbin/nologin' \
+    'admiral:x:1000:1000::/home/admiral:/bin/bash' 'zoe:x:1001:1001::/home/zoe:/bin/bash' \
+    'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin' > "$PASSWD_FILE"
+  UBIN="$BATS_TEST_TMPDIR/ubin"; mkdir -p "$UBIN"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'case "$*" in *zoe*) echo 1001 ;; *admiral*) echo 1000 ;; *svc*) echo 999 ;; *nobody*) echo 65534 ;; *) exit 1 ;; esac' \
+    > "$UBIN/id"
+  chmod 0755 "$UBIN/id"
+  PROTO="$BATS_TEST_DIRNAME/../../../runtime/services/lib/human-protocol.sh"
+  [ -f "$PROTO" ] || { echo "protocole du produit introuvable : $PROTO" >&2; return 1; }
+}
+
+lib_verdict() { # lib_verdict <login> -> "rc|remede" selon la lib de l'installeur
+  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
+    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$PROV_UID_BOUNDS_WHY\""
+}
+
+proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du produit
+  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' LCARS_HUMAN_PROTOCOL_HOST=1
+    export LCARS_MODULE_PROTOCOL='$(dirname "$PROTO")/module-protocol.sh' LCARS_PRIVATE_DIR='$BATS_TEST_TMPDIR'
+    . '$PROTO'
+    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$UID_BOUNDS_WHY\""
+}
+
+@test "uid: zoe est un humain ; svc (sous UID_MIN), nobody (au-dessus de UID_MAX) et le siege ne le sont pas" {
+  uid_rule_decor
+  [ "$(lib_verdict zoe)" = "0|" ]
+  [ "$(lib_verdict svc)" = "1|" ]
+  [ "$(lib_verdict nobody)" = "1|" ]
+  [ "$(lib_verdict admiral)" = "1|" ]
+}
+
+@test "uid: bornes ILLISIBLES — is_fleet_human rend non a tout le monde, fleet_humans ne rend personne, le remede est dit UNE FOIS" {
+  uid_rule_decor
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  run bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
+    is_fleet_human zoe && echo ZOE_OUI
+    echo \"pop=[\$(fleet_humans | paste -sd, -)]\"
+    fleet_humans; fleet_humans
+    echo FIN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ZOE_OUI"* ]]
+  [[ "$output" == *"pop=[]"* ]]
+  [[ "$output" == *"FIN"* ]]
+  [[ "$output" == *"UID_MIN illisible dans $PASSWD_DEFS"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  # UNE fois : dit par `is_fleet_human` dans le processus, la trace est heritee par le `$( )` de
+  # `pop=` comme par les deux appels suivants — quatre lectures, un remede.
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
+  refute grep -qE '(^|[^0-9])1000([^0-9]|$)' <<<"$output"
+}
+
+@test "uid: UID_MAX absent du fichier n'etablit pas la frontiere non plus — nobody ne passe jamais par un defaut" {
+  uid_rule_decor
+  printf 'UID_MIN\t1000\n' > "$PASSWD_DEFS"
+  [ "$(lib_verdict nobody)" = "1|la frontiere systeme/humain n'est pas etablie (UID_MAX illisible dans $PASSWD_DEFS) — la borne est declaree par le systeme, pas par ce processus : repare $PASSWD_DEFS" ]
+}
+
+@test "uid: LA REGLE EST CELLE DU PROTOCOLE DU PRODUIT — meme matrice, memes verdicts, meme phrase" {
+  # Le temoin d'egalite des deux corps. Quatre fichiers login.defs (lisible ; absent ; sans UID_MAX ;
+  # plancher a 2000) × quatre logins : la lib et le protocole doivent repondre pareil, remede compris.
+  # Hors matrice, deliberement : le siege INCONNU — la lib repond non a tout le monde, le protocole
+  # ne garde pas ce cas ; c'est un ecart connu, nomme au rapport du lot 14, pas mesure ici.
+  uid_rule_decor
+  local variant login lib proto bad=0
+  for variant in lisible absent sans-max plancher-2000; do
+    case "$variant" in
+      lisible)       printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+      absent)        export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs" ;;
+      sans-max)      printf 'UID_MIN\t1000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+      plancher-2000) printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+    esac
+    for login in zoe svc nobody admiral; do
+      lib="$(lib_verdict "$login")"; proto="$(proto_verdict "$login")"
+      [ "$lib" = "$proto" ] || { echo "$variant/$login : lib=« $lib » protocole=« $proto »" >&2; bad=1; }
+    done
+  done
+  [ "$bad" -eq 0 ]
+  # GARDE D'INSTRUMENT : la matrice a bien parle — le cas absent porte un remede, le cas lisible aucun.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  [[ "$(lib_verdict zoe)" == "1|la frontiere"* ]]
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  [ "$(lib_verdict zoe)" = "0|" ]
 }
