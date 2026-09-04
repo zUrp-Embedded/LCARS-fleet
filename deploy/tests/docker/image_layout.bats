@@ -93,6 +93,43 @@ image_declared_dirs() {
   [ "$bad" -eq 0 ]
 }
 
+# ─── LOT 15 : LES ANCRES ET LES LIENS AUSSI ─────────────────────────────────────────────────────
+#
+# `anchor /usr/local/bin/tofu` et `link /usr/local/bin/{fleet,lcars}` disaient `wsl+linux` alors que
+# le stage runtime les pose (`install -m 0755`, `ln -sf`) et que `verify` les relit deja (46 par
+# stat, 60 par `readlink` contre release.manifest). Meme regle que les repertoires : ce que l'image
+# pose et que la table connait se declare pour docker. `node`/`npm`/`npx` n'y sont pas — l'image
+# n'a pas de node.
+
+image_declared_anchors_links() {
+  printf '%s\n' /usr/local/bin/tofu /usr/local/bin/fleet /usr/local/bin/lcars \
+    /usr/local/bin/lcars-toolchain-converge /usr/local/bin/lcars-authority-ask \
+    /etc/lcars/lcars.bashrc /opt/lcars/.helpers-revision /opt/lcars/.source-revision
+}
+
+@test "les ANCRES et les LIENS que l'image pose et que la table connait sont declares pour docker — 46 et 60 les relisent au build" {
+  local p col bad=0 n=0
+  while read -r p; do
+    # (a) le stage runtime le nomme hors commentaire : sinon il sort de cette liste
+    grep -qF -- "$p" <<<"$RUNTIME" \
+      || { echo "$p : le stage runtime ne le nomme pas — l'image ne le pose pas, retire-le de cette liste" >&2; bad=1; continue; }
+    # (b) la table le connait, en ancre ou en lien, et pour docker
+    col="$(awk -v p="$p" '{c=$1;sub(/:.*/,"",c)} (c=="anchor"||c=="link") && $2==p {print $5; exit}' "$MANIFEST")"
+    [ -n "$col" ] || { echo "$p : inconnu de la table (anchor|link)" >&2; bad=1; continue; }
+    n=$((n + 1))
+    [[ "$col" == any || "+$col+" == *"+docker+"* ]] \
+      || { echo "$p : l'image le pose, la table dit « $col » — le manifeste ment sur l'image" >&2; bad=1; }
+  done < <(image_declared_anchors_links)
+  [ "$n" -ge 8 ] || { echo "seulement $n ancres/liens compares — l'instrument ne lit plus la liste" >&2; return 1; }
+  [ "$bad" -eq 0 ]
+  # et le complement : ce que la table declare `wsl+linux` sous /usr/local/bin, l'image ne le pose PAS
+  local reste
+  while read -r reste; do
+    [ -n "$reste" ] || continue
+    refute grep -qE -- "(ln -sf|install -m [0-7]+)[^\\]* $reste( |\\\\|$)" <<<"$RUNTIME"
+  done < <(awk '{c=$1;sub(/:.*/,"",c)} (c=="anchor"||c=="link") && $2 ~ /^\/usr\/local\/bin\// && $5!="any" {print $2}' "$MANIFEST")
+}
+
 @test "chaque install -d du stage runtime pose le MODE et le PROPRIETAIRE que la table declare" {
   # La generalisation du temoin `/etc/lcars` ci-dessus : un `install -d -m M -o U -g G <chemins>` du
   # stage runtime, sur un chemin que la table declare, porte le mode et le proprietaire de la table.
@@ -112,4 +149,53 @@ image_declared_dirs() {
   # ⚠ GARDE DE POPULATION : cinq repertoires sont poses ainsi et declares (lot 13b + lot 14).
   [ "$n" -ge 5 ] || { echo "seulement $n install -d compares a la table — l'extraction ne lit plus le stage" >&2; return 1; }
   [ "$bad" -eq 0 ]
+}
+
+# ─── LOT 15 : CE QUE 62 RELIT AU BUILD SORT DE L'IMAGE COMME L'APPLY LE POSE ────────────────────
+#
+# `62 check` relit les arbres qu'il embarque (`EMBEDDED`, `EMBEDDED_ROOT`) — root:root, ni setgid ni
+# ecriture groupe/autres — et ses donnees (`DATA`, 0644). Un COPY PRESERVE les modes du contexte de
+# build : un clone a umask 002 est en 2775/664, et verify rougirait sur un contexte ordinaire — ou,
+# pire, ne rougirait que sur celui de quelqu'un d'autre. Deux ecritures, une valeur.
+
+embedded_trees() { # les deux listes de 62, telles qu'il les porte
+  grep -oE '^EMBEDDED(_ROOT)?=\([^)]*\)' "$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh" \
+    | sed -E 's/^[A-Z_]+=\(//; s/\)$//' | tr ' ' '\n' | grep -v '^$'
+}
+
+@test "les arbres que 62 relit sont NORMALISES par l'image (chmod -R g-s,go-w) APRES la derniere ecriture dedans" {
+  local verify; verify="$(sed -n '/^FROM runtime AS verify$/,/^FROM /p' "$DF" | grep -vE '^\s*#')"
+  local t stage txt l_norm after n=0
+  while read -r t; do
+    [ -n "$t" ] || continue
+    for stage in runtime verify; do
+      if [ "$stage" = runtime ]; then txt="$RUNTIME"; else txt="$verify"; fi
+      # ce stage pose-t-il cet arbre ? (un COPY qui y vise)
+      grep -qE "^(COPY|ADD) .* /opt/lcars/$t(/|$)" <<<"$txt" || continue
+      n=$((n + 1))
+      l_norm="$(grep -nE "chmod -R g-s,go-w( /opt/lcars/[a-z]+)* /opt/lcars/$t( |$)" <<<"$txt" | tail -1 | cut -d: -f1)"
+      [ -n "$l_norm" ] || { echo "$stage : /opt/lcars/$t est pose mais pas normalise (chmod -R g-s,go-w)" >&2; return 1; }
+      # ce qui ECRIT dedans vient AVANT : un COPY qui y vise, ou tofu (init/mirror) qui y pose .terraform
+      after="$(tail -n "+$((l_norm + 1))" <<<"$txt")"
+      refute grep -qE "^(COPY|ADD) .* /opt/lcars/$t(/|$)" <<<"$after"
+      refute grep -qE 'tofu (init|providers mirror)' <<<"$after"
+    done
+  done < <(embedded_trees)
+  # ⚠ GARDE DE POPULATION : etc, services, assets, catalogues (runtime) et deploy (verify).
+  [ "$n" -ge 5 ] || { echo "seulement $n arbre(s) vus dans les stages — l'extraction ne lit plus 62 ou le Dockerfile" >&2; return 1; }
+}
+
+@test "les DONNEES de 62 sortent de l'image a leur mode — COPY --chmod ou chmod explicite, jamais le mode du contexte" {
+  local mod="$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh" spec _src dst mode n=0
+  while read -r spec; do
+    [ -n "$spec" ] || continue
+    read -r _src dst mode <<<"$spec"
+    # la destination telle que l'image la pose : le defaut du module, sans decor
+    dst="${dst//\$HELPERS_DIR//opt/lcars}"; dst="${dst//\$LCARS_BASHRC//etc/lcars/lcars.bashrc}"
+    n=$((n + 1))
+    grep -qE "^COPY --chmod=$mode .* $dst\$" <<<"$RUNTIME" \
+      || grep -qE "chmod $mode( [^ \\\\]+)* $dst( |\\\\|$)" <<<"$RUNTIME" \
+      || { echo "$dst : l'image ne fixe pas son mode ($mode) — un COPY nu garde le mode du contexte (664 sous umask 002)" >&2; return 1; }
+  done < <(sed -n '/^DATA=(/,/^)/p' "$mod" | sed '1d;$d;s/#.*//' | tr -d '"' | awk 'NF')
+  [ "$n" -ge 2 ] || { echo "seulement $n donnee(s) lue(s) dans DATA — l'extraction ne lit plus 62" >&2; return 1; }
 }

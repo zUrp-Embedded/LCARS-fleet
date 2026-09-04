@@ -157,7 +157,8 @@ mod() { run bash "$MOD" "$1"; }
   # sert des avatars que personne ne regarde.
   grep -q 'LCARS_MEDIA_ROOT", "/opt/lcars/share"' "$rt"
   grep -q ':media_root, "/opt/lcars/share"' "$deck"
-  grep -vE '^\s*#' "$MOD" | grep -q 'LCARS_MEDIA_ROOT:-\$PROV_ROOT/share'
+  grep -vE '^\s*#' "$MOD" | grep -q 'MEDIA_ROOT_CANON="\$PROV_ROOT/share"'
+  grep -vE '^\s*#' "$MOD" | grep -q 'LCARS_MEDIA_ROOT:-\$MEDIA_ROOT_CANON'
 }
 
 @test "absent : DRIFT qui nomme les DEUX consequences" {
@@ -213,4 +214,69 @@ mod() { run bash "$MOD" "$1"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"source absente"* ]]
   [ ! -d "$LCARS_MEDIA_ROOT/avatars" ]
+}
+
+# ─── LOT 15 : LES MODES DE share/* SONT MESURES PAR LEUR POSEUR ─────────────────────────────────
+#
+# La table declare `share`, `share/avatars`, `share/favicon`, `share/doc` en `0755 root:root`, et
+# AUCUN module ne les mesurait : ce module les posait sans `stat`, et les ajouter a la table de
+# `25-directories` en aurait fait un second poseur (mur POSEUR). Un `avatars` en 0700 — ou en 2775,
+# setgid herite d'un checkout ou d'un COPY depuis un contexte a umask 002 — passait un doctor vert,
+# et le stage `verify` de l'image ne le voyait pas davantage.
+
+@test "MODE : un sous-arbre au mauvais mode est un DRIFT NOMME contre la table, et l'apply le ramene par ensure_mode" {
+  local me; me="$(id -un):$(id -gn)"
+  mod apply
+  [ "$status" -eq 0 ]
+  chmod 0700 "$LCARS_MEDIA_ROOT/avatars"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars : 700 $me ≠ 755 $me"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"system.manifest"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT/avatars")" = "755" ]
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars 755 $me (table)"* ]]
+}
+
+@test "MODE : la racine share et doc se relisent aussi — quatre lignes de la table, quatre mesures, et le setgid part" {
+  local me; me="$(id -un):$(id -gn)"
+  mod apply
+  chmod 0750 "$LCARS_MEDIA_ROOT"; chmod 2755 "$LCARS_MEDIA_ROOT/doc"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT : 750 $me ≠ 755 $me"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/doc : 2755 $me ≠ 755 $me"* ]]
+  mod apply
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT")" = "755" ]
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT/doc")" = "755" ]
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "MODE : la valeur attendue vient de la TABLE — un manifeste de decor a 0750 est lu tel quel, au check ET a l'apply" {
+  # Une source : le module ne porte plus de litteral. Ce qui n'est pas declare retombe sur 0755.
+  local me; me="$(id -un):$(id -gn)"
+  export LCARS_SYSTEM_MANIFEST="$BATS_TEST_TMPDIR/system.manifest"
+  printf 'dir  /opt/lcars/share/avatars  0750  root:root  any\n' > "$LCARS_SYSTEM_MANIFEST"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT/avatars")" = "750" ]
+  [ "$(stat -c '%a' "$LCARS_MEDIA_ROOT/favicon")" = "755" ]
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  chmod 0755 "$LCARS_MEDIA_ROOT/avatars"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars : 755 $me ≠ 750 $me"* ]] || { echo "$output"; return 1; }
+}
+
+@test "MODE : l'image normalise share/ comme l'apply (ni setgid ni ecriture groupe) — ce que 44 relit au build en sort au mode de la table" {
+  # Un COPY PRESERVE les modes du contexte de build : un clone a umask 002 est en 2775/664, et
+  # `a+rX` seul les laissait. Au build, `44 check` compare a `0755 root:root` (table) : sans cette
+  # ligne, `verify` rougirait sur un contexte ordinaire — ou ne rougirait que sur celui d'un autre.
+  grep -qE '^RUN chmod -R a\+rX,g-s,go-w /opt/lcars/share$' "$DOCKERFILE"
 }

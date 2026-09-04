@@ -162,7 +162,10 @@ anchor    /etc/lcars/host-consent                      0644  root:root          
 anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any
 anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
-anchor    /usr/local/bin/tofu                          0755  root:root           wsl+linux
+# ⚠ POSEE PAR L'IMAGE (stage runtime, `install -m 0755 … /usr/local/bin/tofu`) et RELUE au build par
+# `46-tofu` sous `verify` : `any`, et c'etait `wsl+linux` (lot 15). `image_layout.bats` tient la
+# liste des ancres et liens que l'image pose ET que cette table connait.
+anchor    /usr/local/bin/tofu                          0755  root:root           any
 anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
 anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
 
@@ -179,8 +182,11 @@ link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   
 link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
 link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
 
-link      /usr/local/bin/fleet                      -     -                   wsl+linux
-link      /usr/local/bin/lcars                         -     -                   wsl+linux
+# ⚠ POSES PAR L'IMAGE (`ln -sf`, stage runtime) et RELUS au build par `60-deploy` (release.manifest)
+# sous `verify` : `any`, et c'etait `wsl+linux` (lot 15). `node`/`npm`/`npx` restent `wsl+linux` :
+# l'image n'a pas de node (le stage `site` batit la doc et meurt).
+link      /usr/local/bin/fleet                      -     -                   any
+link      /usr/local/bin/lcars                         -     -                   any
 link      /usr/local/bin/node                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
 link      /usr/local/bin/npx                           -     -                   wsl+linux
@@ -238,7 +244,11 @@ runtime   /run/lcars-converger.refused                 0644  root:root          
 # la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
 # `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
 # `runtime/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/box/README.md`.
-# L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas.
+# L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas. `/run/sshd` (le repertoire
+# de separation de privileges d'openssh, `mkdir -p` du Dockerfile) est du meme cote : un objet du
+# PRODUIT dans l'image, qu'aucun rail de l'installeur ne pose — une ligne `docker` ici rouvrirait la
+# colonne que cette decision a fermee, et `25` ne le mesurerait au build qu'en le declarant hors
+# substrat sur chaque poste (lot 15).
 
 runtime   /run/lock/lcars                              0700  root:root           any
 

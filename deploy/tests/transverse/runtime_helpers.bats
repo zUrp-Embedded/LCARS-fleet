@@ -508,9 +508,13 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
 @test "EMBEDDED et EMBEDDED_ROOT partagent UNE liste d'exclusions — deux copies derivent" {
   # Le defaut d'origine EST une seconde liste : la boucle de la racine excluait `node_modules`, la
   # boucle de `fleet/` n'excluait rien, et le commentaire qui justifiait l'exclusion vivait a cote
-  # de celle qui l'appliquait. Une seule declaration, deux usages.
-  [ "$(grep -c -- '"${EMBEDDED_EXCLUDE\[@\]}"' "$MOD")" -eq 2 ] \
+  # de celle qui l'appliquait. Une seule declaration, deux copieurs — et, depuis le lot 15, le
+  # check qui relit les arbres : ce que la copie n'emporte pas, il ne le juge pas. Ce temoin
+  # comptait « exactement deux » usages de la liste, un inventaire relu comme une regle.
+  [ "$(grep -c -- 'tar -cf - "${EMBEDDED_EXCLUDE\[@\]}"' "$MOD")" -eq 2 ] \
     || { echo "les deux boucles ne partagent pas la meme liste d'exclusions"; return 1; }
+  grep -q 'for x in "${EMBEDDED_EXCLUDE\[@\]}"' "$MOD" \
+    || { echo "le check ne relit pas la liste d'exclusions : il jugerait ce que la copie n'emporte pas"; return 1; }
   grep -qE '^\s*--exclude=\.terraform$' "$MOD"
   grep -qE '^\s*--exclude=node_modules$' "$MOD"
   # ⚠ ET PLUS AUCUN `cp -a` DANS LA POSE : c'est lui qui ne pouvait pas exclure a la source.
@@ -664,4 +668,65 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   mod apply
   [ -d "$LCARS_HELPERS_DIR/services" ]
   [ "$(find "$LCARS_HELPERS_DIR/services" "$LCARS_HELPERS_DIR/deploy" -perm /2022 2>/dev/null | wc -l)" -eq 0 ]
+}
+
+# ─── LOT 15 : LES MODES DE CE QUE 62 POSE SE RELISENT ───────────────────────────────────────────
+#
+# L'apply affirme un mode et un proprietaire sur tout ce qu'il pose (`install -m 0755 -o -g`,
+# `write_atomic 0644`, `chown -R` + `chmod -R g-s,go-w` sur les arbres) ; le check ne relisait que
+# `-x` et `-d`. Au build de l'image, verify est la seule mesure — et un COPY garde les modes du
+# contexte (2775/664 sous umask 002). Ces temoins jouent le doctor pour de vrai, dans le decor ;
+# `apply` y rend 1 (le client de terminal du stub ne passe pas son pin), ce qui n'est pas le sujet.
+
+@test "MODES : un auxiliaire executable mais g+w est un DRIFT NOMME au check, et l'apply le ramene a 0755 sans le re-poser" {
+  stub_curl "peu importe"
+  mod apply
+  local me; me="$(id -un):$(id -gn)"
+  chmod 0775 "$LCARS_HELPERS_DIR/console.sh"
+  mod check
+  [[ "$output" == *"$LCARS_HELPERS_DIR/console.sh : 775 $me ≠ 755 $me"* ]] || { echo "$output"; return 1; }
+  refute grep -q 'console.sh présent mais PAS exécutable' <<<"$output"
+  local before; before="$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")"
+  mod apply
+  [ "$(stat -c '%a' "$LCARS_HELPERS_DIR/console.sh")" = "755" ]
+  [ "$(stat -c %Y "$LCARS_HELPERS_DIR/console.sh")" = "$before" ]   # converge par ensure_mode, pas par install
+  mod check
+  refute grep -qF "$LCARS_HELPERS_DIR/console.sh : " <<<"$output"
+  [[ "$output" == *"modes et propriétaires relus"* ]]
+}
+
+@test "MODES : une donnee (console.tmux.conf) en 0664 est un DRIFT NOMME, et l'apply la ramene" {
+  stub_curl "peu importe"
+  mod apply
+  local me; me="$(id -un):$(id -gn)"
+  chmod 0664 "$LCARS_HELPERS_DIR/console.tmux.conf"
+  mod check
+  [[ "$output" == *"$LCARS_HELPERS_DIR/console.tmux.conf : 664 $me ≠ 644 $me"* ]] || { echo "$output"; return 1; }
+  mod apply
+  [ "$(stat -c '%a' "$LCARS_HELPERS_DIR/console.tmux.conf")" = "644" ]
+}
+
+@test "MODES : un arbre embarque portant un objet g+w, setgid ou d'un autre proprietaire est un DRIFT NOMME (compte, premier coupable), et l'apply repose l'arbre" {
+  need_git_checkout
+  stub_curl "peu importe"
+  mkdir -p "$LCARS_HELPERS_DIR"
+  mod apply
+  [ -d "$LCARS_HELPERS_DIR/services" ]
+  chmod g+w "$LCARS_HELPERS_DIR/services/console.sh"
+  mod check
+  [[ "$output" == *"$LCARS_HELPERS_DIR/services : 1 objet(s) hors contrat (premier : $LCARS_HELPERS_DIR/services/console.sh, "* ]] \
+    || { echo "$output"; return 1; }
+  mod apply
+  mod check
+  refute grep -qF "$LCARS_HELPERS_DIR/services : " <<<"$output"
+  # le compte est un compte, et un setgid sur un repertoire compte aussi
+  chmod g+s "$LCARS_HELPERS_DIR/services/human.d"; chmod o+w "$LCARS_HELPERS_DIR/services/console.sh"
+  mod check
+  [[ "$output" == *"$LCARS_HELPERS_DIR/services : 2 objet(s) hors contrat"* ]] || { echo "$output"; return 1; }
+  # et ce que la copie n'emporte pas n'est pas juge : un `.terraform` de lien, un `node_modules` g+w
+  mkdir -p "$LCARS_HELPERS_DIR/deploy/.terraform" "$LCARS_HELPERS_DIR/assets/node_modules"
+  ln -s /nulle/part "$LCARS_HELPERS_DIR/deploy/.terraform/lien"; chmod 0777 "$LCARS_HELPERS_DIR/assets/node_modules"
+  mod check
+  refute grep -qF "$LCARS_HELPERS_DIR/deploy : " <<<"$output"
+  refute grep -qF "$LCARS_HELPERS_DIR/assets : " <<<"$output"
 }

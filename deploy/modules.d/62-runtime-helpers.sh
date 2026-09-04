@@ -147,6 +147,58 @@ helper_current() { # <nom> — 0 si la copie posée est IDENTIQUE à la source
 
 sha_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 
+# ─── LES MODES SE RELISENT, PAS SEULEMENT LA PRESENCE (lot 15) ──────────────────────────────────
+#
+# ⚠ L'APPLY AFFIRME UN MODE ET UN PROPRIETAIRE SUR TOUT CE QU'IL POSE — `install -m 0755 -o -g`,
+# `write_atomic 0644`, `chown -R` + `chmod -R g-s,go-w` sur les arbres — et le check ne relisait
+# que `-x` et `-d`. Sur docker, le stage `verify` est la seule mesure de l'image, et un `COPY`
+# PRESERVE les modes du contexte de build : un arbre copie depuis un clone a umask 002 en sort en
+# 2775/664, root l'execute ensuite, et personne ne le disait. Un objet ABSENT n'est pas juge ici :
+# son absence se dit plus haut, une fois, avec sa consequence.
+_PERMS_OK=0
+perm_of() { stat -c '%a %U:%G' "$1" 2>/dev/null || echo '?'; }
+check_perm() { # check_perm <chemin> <mode> [owner] — relit ce qui est la, contre ce que l'apply affirme
+  local path="$1" want="${2#0}" owner="${3:-}" cur
+  [[ -e "$path" ]] || return 0
+  cur="$(perm_of "$path")"
+  if [[ -n "$owner" ]]; then want="$want $owner"; else cur="${cur%% *}"; fi
+  if [[ "$cur" == "$want" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
+  p_drift "$path : $cur ≠ $want — l'apply le repose"
+}
+check_tree_perms() { # check_tree_perms <racine> — HELPERS_OWNER partout, ni setgid ni ecriture groupe/autres
+  local root="$1" bad n first x
+  [[ -d "$root" ]] || return 0
+  # Ce que la copie N'EMPORTE PAS (EMBEDDED_EXCLUDE), le check ne le juge pas ; ni les liens, dont le
+  # mode ne dit rien (tofu init pose des liens vers le miroir sous forge-recipe/.terraform, dans
+  # l'image). `-print` capture en entier puis compte : aucun lecteur ne ferme le tuyau (DI-12).
+  local -a skip=()
+  for x in "${EMBEDDED_EXCLUDE[@]}"; do skip+=(-name "${x#--exclude=}" -o); done
+  bad="$(find "$root" \( "${skip[@]}" -type l \) -prune -o \
+             \( ! -user "${HELPERS_OWNER%%:*}" -o ! -group "${HELPERS_OWNER##*:}" -o -perm /2022 \) -print 2>/dev/null || true)"
+  if [[ -z "$bad" ]]; then _PERMS_OK=$((_PERMS_OK + 1)); return 0; fi
+  n="$(wc -l <<<"$bad")"; first="${bad%%$'\n'*}"
+  p_drift "$root : $n objet(s) hors contrat (premier : $first, $(perm_of "$first")) — proprietaire $HELPERS_OWNER, ni setgid ni ecriture groupe/autres ; l'apply repose l'arbre"
+}
+check_perms() {
+  local n spec d_src d_dst d_mode name _u _s _r
+  _PERMS_OK=0
+  for n in "${HELPERS[@]}"; do check_perm "$HELPERS_DIR/$n" 0755 "$HELPERS_OWNER"; done
+  for spec in "${DATA[@]}"; do
+    read -r d_src d_dst d_mode <<<"$spec"
+    check_perm "$d_dst" "$d_mode" "$HELPERS_OWNER"
+  done
+  check_perm "$TOOLCHAIN_BIN" 0755 "$HELPERS_OWNER"
+  check_perm "$AUTHORITY_ASK_BIN" 0755 "$HELPERS_OWNER"
+  check_perm "$(helpers_stamp)" 0644 "$HELPERS_OWNER"
+  check_perm "$(copie_delivery_stamp)" 0644 "$HELPERS_OWNER"
+  check_perm "$(deck_static_dir)" 0755 "$HELPERS_OWNER"
+  while IFS=$'\t' read -r name _u _s; do check_perm "$(deck_static_dir)/$name" 0644 "$HELPERS_OWNER"; done < <(deck_static_table)
+  for _r in "${EMBEDDED[@]}"; do check_tree_perms "$EMBEDDED_FLEET/$_r"; done
+  for _r in "${EMBEDDED_ROOT[@]}"; do check_tree_perms "$HELPERS_DIR/$_r"; done
+  [[ "$_PERMS_OK" -eq 0 ]] || p_ok "modes et propriétaires relus : $_PERMS_OK objet(s)/arbre(s) conformes à ce que l'apply pose"
+  return 0
+}
+
 check() {
   local n f name url sha stale=0
 
@@ -273,6 +325,7 @@ check() {
     p_drift "la copie de $HELPERS_DIR se déclare « $_a » alors que cette source est « $_veut » — un apply rejoué depuis $HELPERS_DIR/deploy/provision poserait (ou refuserait) un toolchain sur la mauvaise décision"
   fi
 
+  check_perms
   verdict_check
 }
 
@@ -299,7 +352,12 @@ apply() {
   ensure_dir "$HELPERS_DIR" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${HELPERS[@]}"; do
     [[ -f "$SRC_DIR/$n" ]] || { p_fail "source absente: $SRC_DIR/$n (arbre incomplet)"; verdict_apply; }
-    helper_current "$n" && continue
+    if helper_current "$n"; then
+      # identique : rien a re-poser, mais le mode converge a part — comme `write_atomic` le fait
+      # pour les donnees. Sans ca, un auxiliaire passe en 0775 restait 0775 a chaque apply.
+      ensure_mode "$HELPERS_DIR/$n" 0755 "$HELPERS_OWNER" || verdict_apply
+      continue
+    fi
     install -m 0755 "${own[@]}" "$SRC_DIR/$n" "$HELPERS_DIR/$n" \
       || { p_fail "pose ratée: $HELPERS_DIR/$n"; verdict_apply; }
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "$HELPERS_DIR/$n"
@@ -457,7 +515,10 @@ BLOC
   ensure_dir "$(deck_static_dir)" 0755 "$HELPERS_OWNER" || verdict_apply
   while IFS=$'\t' read -r name url sha; do
     f="$(deck_static_dir)/$name"
-    [[ -s "$f" && "$(sha_of "$f")" == "$sha" ]] && continue
+    if [[ -s "$f" && "$(sha_of "$f")" == "$sha" ]]; then
+      ensure_mode "$f" 0644 "$HELPERS_OWNER" || verdict_apply   # conforme au pin : le mode converge a part
+      continue
+    fi
     fetch_verify "$url" "$sha" "$f" 0644 || verdict_apply
   done < <(deck_static_table)
 
