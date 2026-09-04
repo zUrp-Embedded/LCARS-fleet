@@ -162,11 +162,13 @@ CONVERGER_LOG="${LCARS_CONVERGER_LOG:-/var/log/lcars-converger.log}"
 if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # ─── UN PREMIER TOUR SYNCHRONE, PUIS LA BOUCLE ────────────────────────────────────────────────
   #
-  # ⚠ ET LA VÉRIFICATION N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. `64-services` porte déjà la
-  # sonde (`probe_fleet_humans`), et ce module est `CHECK-ON: any` : il tourne donc en docker. Un
-  # `doctor --only` rejoue LA MÊME sonde que le poste, sur le même code. Recopier la règle d'uid ici
-  # en aurait fait un troisième exemplaire — après `fleet_humans` et `converged_humans` du
-  # convergeur — et c'est toujours celui qu'on ne relit pas qui ment.
+  # ⚠ ET LA RÈGLE D'UID N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. Le dispositif que ce
+  # commentaire décrivait (`64-services`, `probe_fleet_humans`, un `doctor --only` au boot) est mort
+  # au lot 6 : l'installeur ne joue plus dans la boîte. Ce qui reste est le PRÉDICAT du protocole,
+  # `is_fleet_human` (`lib/human-protocol.sh`) — celui du convergeur et des modules per-humain — et
+  # c'est lui que le verdict ci-dessous appelle. Recopier la règle ici en ferait un troisième
+  # exemplaire, et c'est toujours celui qu'on ne relit pas qui ment (relecture hostile 2026-09-04 :
+  # ce bloc en portait un, plancher 1000 en dur, sous ce même commentaire).
   #
   # `timeout` : ce premier tour parle à la forge et provisionne chaque humain. Il est BORNÉ parce
   # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que la boîte doit rester
@@ -190,19 +192,30 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rend 0 sur une boite conforme SANS
+  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur une boite conforme SANS
   # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
   # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
   # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et la boite l'annoncait.
-  # Le module DEPOSE le fait (`p_fact fleet_humans`), on le relit — le canal de la porte.
-  # LE FAIT SE LIT SUR LA MACHINE, PAS PAR LE DOCTOR DE L'INSTALLEUR : un humain de fleet est un
-  # membre du groupe `fleet` dont l'uid est au-dessus du plancher et qui n'est pas le siege.
+  # LE FAIT SE LIT SUR LA MACHINE, PAR LE PREDICAT DU PROTOCOLE : un humain de fleet est un membre
+  # du groupe `fleet` que `is_fleet_human` reconnait — uid au-dessus du plancher de la machine
+  # (`UID_MIN` de login.defs, la meme lecture que le convergeur et `console-humans.sh`), et pas le
+  # siege. Le protocole est source dans un SOUS-SHELL : il pose des defauts et un vocabulaire faits
+  # pour un module, pas pour le PID 1 — rien n'en fuit ici. Sans protocole, la population n'est
+  # PAS mesuree, et ca se dit : un 1 invente serait aussi faux que le 0 d'avant.
+  HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
   humans_rc=1
-  while IFS= read -r _m; do
-    [[ -n "$_m" ]] || continue
-    _u="$(id -u -- "$_m" 2>/dev/null || true)"
-    [[ "$_u" =~ ^[0-9]+$ ]] && (( _u >= 1000 )) && [[ "$_u" != "$LCARS_UID" ]] && { humans_rc=0; break; }
-  done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+  if [[ ! -r "$HUMAN_PROTOCOL" ]]; then
+    say "protocole des humains introuvable ($HUMAN_PROTOCOL) — la population n'est PAS mesuree, cette image n'est pas complete"
+  elif ( export LCARS_LOGIN="$LCARS_ADMIRAL" LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL"
+         # shellcheck source=../lib/human-protocol.sh
+         . "$HUMAN_PROTOCOL"
+         while IFS= read -r _m; do
+           [[ -n "$_m" ]] || continue
+           is_fleet_human "$_m" && exit 0
+         done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
+         exit 1 ); then
+    humans_rc=0
+  fi
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   else
