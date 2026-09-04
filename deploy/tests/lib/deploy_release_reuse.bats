@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
+<<<<<<<< HEAD:deploy/tests/lib/deploy_release_reuse.bats
 # SOURCE: deploy/tests/lib/deploy_release_reuse.bats
+========
+# SOURCE: runtime/test/etc/install_release_reuse.bats
+>>>>>>>> origin/main:runtime/test/etc/install_release_reuse.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for deploy/lib/deploy-release.sh — une release n'est reutilisee que si elle ATTESTE la source
@@ -22,7 +26,7 @@
 setup() {
   SUT="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
   [ -f "$SUT" ]
-  RT="$BATS_TEST_TMPDIR/repo/fleet"          # `runtime_dir` = le fleet/ d'un arbre
+  RT="$BATS_TEST_TMPDIR/repo/runtime"        # `runtime_dir` = le runtime/ d un arbre
   REL="$RT/_build/prod/rel/lcars_fleet"
   mkdir -p "$REL/bin" "$REL/lib/lcars_fleet-1.0.0/priv/api"
   printf '#!/bin/sh\nexit 0\n' > "$REL/bin/lcars_fleet"; chmod +x "$REL/bin/lcars_fleet"

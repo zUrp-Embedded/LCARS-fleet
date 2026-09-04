@@ -1,8 +1,15 @@
 #!/usr/bin/env bats
+<<<<<<<< HEAD:deploy/tests/lib/deploy_release.bats
 # SOURCE: deploy/tests/lib/deploy_release.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
 # STATUS: bats tests for deploy/lib/deploy-release.sh atomic-swap helpers (crash-safe deploy)
+========
+# SOURCE: runtime/test/etc/install.bats
+# AUTHOR: consultant (remediation agent, off-fleet session)
+# STARDATE: 2026.247
+# STATUS: bats tests for etc/deploy-release.sh atomic-swap helpers (crash-safe deploy)
+>>>>>>>> origin/main:runtime/test/etc/install.bats
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
 # a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the
@@ -186,7 +193,7 @@ MIX
 @test "6-110: un lien requis qui echoue rend NON-ZERO — le compteur est enfin lu" {
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
-  MF_FILES=(fleet_v2)
+  MF_FILES=(fleet)
   MF_LINKS=(1)
   mkdir -p "$PREFIX/bin" "$LINK_DIR"
   chmod 500 "$LINK_DIR"
@@ -195,7 +202,7 @@ MIX
   chmod 700 "$LINK_DIR"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"symlink $LINK_DIR/fleet_v2 KO"* ]]
+  [[ "$output" == *"symlink $LINK_DIR/fleet KO"* ]]
 }
 
 @test "6-110: TEMOIN — un lien qui passe rend ZERO et annonce les liens poses" {
@@ -203,14 +210,14 @@ MIX
   # ne dirait plus jamais OK.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/bin"
-  MF_FILES=(fleet_v2)
+  MF_FILES=(fleet)
   MF_LINKS=(1)
   mkdir -p "$PREFIX/bin" "$LINK_DIR"
 
   run wire_path_links
   [ "$status" -eq 0 ]
-  [[ "$output" == *"symlinks $LINK_DIR/{fleet_v2}"* ]]
-  [ -L "$LINK_DIR/fleet_v2" ]
+  [[ "$output" == *"symlinks $LINK_DIR/{fleet}"* ]]
+  [ -L "$LINK_DIR/fleet" ]
 }
 
 @test "6-110: une entree NON-link ne compte pas — seul le cablage requis decide" {
@@ -218,7 +225,7 @@ MIX
   # fichier qu'on n'a jamais promis de lier serait un mur invente.
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
-  MF_FILES=(fleet_v2 pas_un_lien)
+  MF_FILES=(fleet pas_un_lien)
   MF_LINKS=(0 0)
   mkdir -p "$PREFIX/bin" "$LINK_DIR"
   chmod 500 "$LINK_DIR"
@@ -236,16 +243,16 @@ MIX
   PREFIX="$TMP/prefix"
   LINK_DIR="$TMP/ro"
   # shellcheck disable=SC2034  # entrees de `wire_path_links`, la fonction sous test
-  MF_FILES=(fleet_v2)
+  MF_FILES=(fleet)
   # shellcheck disable=SC2034
   MF_LINKS=(1)
   mkdir -p "$PREFIX/bin" "$LINK_DIR" "$TMP/ancienne/bin"
-  ln -s "$TMP/ancienne/bin/fleet_v2" "$LINK_DIR/fleet_v2"
+  ln -s "$TMP/ancienne/bin/fleet" "$LINK_DIR/fleet"
   chmod 500 "$LINK_DIR"
 
   run wire_path_links
   chmod 700 "$LINK_DIR"
 
   [ "$status" -ne 0 ]
-  [ "$(readlink "$LINK_DIR/fleet_v2")" = "$TMP/ancienne/bin/fleet_v2" ]
+  [ "$(readlink "$LINK_DIR/fleet")" = "$TMP/ancienne/bin/fleet" ]
 }

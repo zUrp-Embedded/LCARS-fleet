@@ -1,0 +1,16 @@
+# SOURCE: bin/claude_launch.identity
+# STATUS: PROD — vendor identity of the co-located N1 launcher (claude_launch.sh)
+#
+# Pure vendor fact: the name + email used for the git CO-AUTHOR attribution when publishing to GitHub.
+# Never read by the pod: `bin/publish-transform.sh` sources it, run host-side by the runtime's
+# publish rail (MCP `project_publish`) or by the operator. The co-author IS THE VENDOR, never hardcoded in the publication
+# logic: each vendor carries ITS OWN identity, co-located with ITS launcher, the same discipline as the
+# N0/N1 frontier ("new vendor → new bin/<vendor>_launch.sh" — here: "→ co-locate
+# bin/<vendor>_launch.identity").
+#
+# On the work forge the real role is the `Co-authored-by: LCARS-<role>` trailer (Fleet.Credentials.
+# ForgeIdentity, commit gate). THIS file concerns ONLY the rewrite at GitHub publish time: the internal
+# role disappears and only the vendor that did the work stays credited (with the human as author).
+
+NAME="Claude"
+EMAIL="noreply@anthropic.com"

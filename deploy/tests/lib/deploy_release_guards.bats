@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
+<<<<<<<< HEAD:deploy/tests/lib/deploy_release_guards.bats
 # SOURCE: deploy/tests/lib/deploy_release_guards.bats
+========
+# SOURCE: runtime/test/etc/install_guards.bats
+>>>>>>>> origin/main:runtime/test/etc/install_guards.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for deploy/lib/deploy-release.sh config guards — prefix depth + manifest validation

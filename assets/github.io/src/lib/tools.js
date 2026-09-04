@@ -18,15 +18,15 @@ import yaml from 'js-yaml';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..', '..', '..', '..');
-const MCP = join(ROOT, 'fleet', 'lib', 'fleet', 'mcp');
-const PRIV = join(ROOT, 'fleet', 'priv');
+const MCP = join(ROOT, 'runtime', 'lib', 'fleet', 'mcp');
+const PRIV = join(ROOT, 'runtime', 'priv');
 
 // Les cap-profiles vivent dans les catalogues. On lit les DEUX — le systeme porte la mecanique,
 // le metier porte les roles du produit — parce que la question « qui peut appeler quoi » n'a de
 // reponse qu'en regardant l'ensemble de ce que la boite embarque.
 const PROFILE_DIRS = [
-  ['système', join(PRIV, 'catalogue-system', 'cap_profile', 'canon', 'cap-profiles')],
-  ['métier', join(PRIV, 'catalogue', 'cap_profile', 'canon', 'cap-profiles')]
+  ['système', join(PRIV, 'catalogue-system', 'cap_profile', 'cap-profiles')],
+  ['métier', join(PRIV, 'catalogue', 'cap_profile', 'cap-profiles')]
 ];
 
 /** Les outils declares, dans l'ordre du fichier — nom, description agent, schema d'entree. */
@@ -161,7 +161,7 @@ export function roles() {
  * recopiee ici divergerait le jour ou il en ajoute un troisieme.
  */
 export function universalTools() {
-  const src = readFileSync(join(ROOT, 'fleet', 'bin', 'claude_launch.sh'), 'utf8');
+  const src = readFileSync(join(ROOT, 'runtime', 'bin', 'claude_launch.sh'), 'utf8');
   const m = src.match(/ALLOWED_TOOLS="\$\{ALLOWED_TOOLS[^"]*?\}((?:mcp__fleet__[a-z_]+,?)+)"/);
   if (!m) throw new Error('tools.js: la liste universelle n’est plus lisible dans claude_launch.sh');
   return m[1].split(',').filter(Boolean).map((t) => t.replace('mcp__fleet__', ''));
@@ -177,7 +177,9 @@ export function universalTools() {
 function routing() {
   const src = readFileSync(join(MCP, 'pod_tools.ex'), 'utf8');
   const out = new Map();
-  for (const m of src.matchAll(/handle_tool_call\(\s*"([a-z_]+)"[\s\S]{0,700}?Delegation\.([a-z_]+[?!]?)\(/g)) {
+  // `Delegation.Issues.create_issue(` : la famille est decoupee en sous-modules, le nom de la
+  // fonction est le dernier segment.
+  for (const m of src.matchAll(/handle_tool_call\(\s*"([a-z_]+)"[\s\S]{0,700}?Delegation\.(?:[A-Z][A-Za-z]*\.)*([a-z_]+[?!]?)\(/g)) {
     if (!out.has(m[1])) out.set(m[1], m[2]);
   }
   return out;
@@ -210,6 +212,19 @@ function delegationSources() {
  * dans la branche qui suit le test de desarmement. Meme son porteur legitime est refuse tant que
  * le reglage n'est pas pose.
  */
+/**
+ * La FAMILLE delegation, pas une adresse : `delegation.ex` est une facade et les verbes vivent
+ * dans `delegation/**`. Lire le seul fichier de tete rendait zero gate, zero route et « delete
+ * arme » — trois reponses fausses sur la page qui dit qui peut appeler quoi.
+ */
+function delegationSources() {
+  const dir = join(MCP, 'pod_tools', 'delegation');
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.ex') ? [join(d, e.name)] : []);
+  return [join(MCP, 'pod_tools', 'delegation.ex'), ...walk(dir).sort()]
+    .map((f) => readFileSync(f, 'utf8')).join('\n');
+}
+
 export function deleteDisarmed() {
   const src = delegationSources();
   return /defp delete_armed\?, do: Application\.get_env\([^)]*,\s*false\)/.test(src);
@@ -243,7 +258,7 @@ export function gates() {
     const head = body.match(/^  (defp?) ([a-z_]+[?!]?)/);
     if (!head || head[1] !== 'def') return;
 
-    const g = body.match(/require_(architect|onboarder)\(/);
+    const g = body.match(/(?:Gate\.)?require_(architect|onboarder)\(/);
     if (!g) return;
     const cap = g[1] === 'architect' ? 'project_delegate' : 'onboarder';
     // Plusieurs clauses : la premiere qui porte un gate fait foi, et une divergence entre

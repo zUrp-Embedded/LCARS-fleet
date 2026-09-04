@@ -2,7 +2,7 @@
 # SOURCE: deploy/lib/deploy-release.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
-# STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
+# STATUS: deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
 #         /opt/lcars/runtime). Self-contained: the runtime runs WITHOUT the repo (bundled priv, embedded
 #         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
@@ -20,20 +20,11 @@
 # It is a FACT, not a verdict — a caller that wires the links itself is right to accept it, and
 # `deploy/modules.d/60-deploy.sh` does exactly that: it runs this script AS THE HUMAN (who cannot
 # write /usr/local/bin) and re-posts the symlinks as root right after. Standalone, 3 is a refusal.
-# Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
-# app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
-# etc/release.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
-# content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
-# etc/README.md — and the copies had started to drift.)
 #
-# ⚠ THE 3 IS A FACT, NOT A VERDICT. Without it the script answered `OK` and returned 0 while its
-# PATH commands were absent or still pointed at a PREVIOUS version — `ln -sf` had failed, the old
-# link survived, and the operator ran a release he believed was new. A caller that wires the links
-# itself is right to accept a 3; standalone, it is a refusal.
-#
-# WHAT ships into bin/ is NOT code: the list lives in etc/install.manifest (file, exec/noexec,
-# optional `link`), and the installer is blind to its content. Deliberately hardcoded, in contrast:
-# the `fleet` group and the `lcars_fleet` release name.
+# WHAT ships into bin/ is NOT code: the list lives in etc/release.manifest (data — file,
+# exec/noexec, optional `link`), and the installer is blind to its content; add or remove a
+# shipped file THERE. Deliberately hardcoded, in contrast: the `fleet` group and the `lcars_fleet`
+# release name (cf. mix.exs).
 #
 # ATOMICITY: every replacement stages a sibling on the SAME filesystem, verifies it, then `mv`s it
 # into place — an atomic rename at the directory-entry level, keeping the previous generation as
@@ -152,9 +143,15 @@ build_release() {
 refuse_root() {
   # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
   # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
+<<<<<<<< HEAD:deploy/lib/deploy-release.sh
   # this file runs. The line once read `${1:-${EUID:-$(id -u)}}`: the `$(id -u)` was
   # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED
   # the effective uid can be missing, which the next reader copies into their own guard.
+========
+  # this file runs. A `${EUID:-$(id -u)}` here would be unreachable code, and its cost is not the
+  # fork nobody saves -- it is that the line would ASSERT the effective uid can be missing, which
+  # the next reader copies into their own guard.
+>>>>>>>> origin/main:runtime/etc/deploy-release.sh
   local uid="${1:-$EUID}"
   [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
 }
@@ -248,12 +245,20 @@ done < "$MANIFEST"
 
 [[ -f "$RUNTIME_DIR/mix.exs" ]] || die "pas la racine du runtime source ($RUNTIME_DIR/mix.exs absent)"
 # ⚠ `mix` N'EST EXIGE QUE POUR CONSTRUIRE, ET CE SCRIPT NE CONSTRUIT PAS TOUJOURS. `build_release()`
+<<<<<<<< HEAD:deploy/lib/deploy-release.sh
 # sait deja lire le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » —
 # mais ce garde s'executait AVANT, et refusait donc la seule livraison qui n'a rien a compiler.
 #
 # VU : `install: ERREUR — mix introuvable`, sur une machine dont le
 # paquet portait la release COMPLETE, prete a poser. Le script mourait dix lignes avant la fonction
 # qui aurait dit « rien a batir ».
+========
+# lit le discriminant — « paquet : release batie par pack.sh, ni gate ni compilation » — et ce garde
+# le lit AUSSI : un garde inconditionnel refuserait la seule livraison qui n'a rien a compiler
+# (mesure du 2026-09-01, banc 2006 : `install: ERREUR — mix introuvable` sur une machine dont le
+# paquet portait la release COMPLETE, prete a poser — dix lignes avant la fonction qui aurait dit
+# « rien a batir »).
+>>>>>>>> origin/main:runtime/etc/deploy-release.sh
 #
 # ⚠ ET LE TAMPON EST LU ICI COMME AILLEURS, PAS DEDUIT. Ce script est autonome — il ne source pas la
 # lib du rail, c'est ecrit plus bas — donc il refait le meme test que `prov_delivery` au lieu de
@@ -299,10 +304,10 @@ for i in "${!MF_FILES[@]}"; do
 done
 
 # Template d'env humain (swap atomique aussi — un lecteur ne voit jamais un template tronque).
-atomic_swap_file "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/fleet_v2.env.template"
+atomic_swap_file "$RUNTIME_DIR/etc/fleet.env.template" "$PREFIX/etc/fleet.env.template"
 
 # --- 3. Perms: RO for humans (group fleet r-x), owner = the installer (system) ----------------------
-# The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet_v2), so the install stays RO.
+# The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet), so the install stays RO.
 #
 # ⚠ L'ADDITIF COMPTE AUTANT QUE LE SOUSTRACTIF : `g-w,o-rwx` seul RETIRE, il n'ACCORDE jamais le
 # read ni la traversee au groupe — le « group fleet r-x » annonce serait alors vrai par accident de
@@ -333,4 +338,4 @@ if [[ "$link_fail" -ne 0 ]]; then
 fi
 
 say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
-say "Lancer : fleet_v2 start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."
+say "Lancer : fleet start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."

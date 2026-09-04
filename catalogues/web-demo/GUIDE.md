@@ -177,7 +177,7 @@ trois autres — chacun ne commente que ce qui change chez lui.
 
 Chaque rôle a deux fichiers, et la distinction compte :
 
-- `cap_profile/canon/cap-profiles/<rôle>.yaml` — ses **permissions** et son cycle de vie ;
+- `cap_profile/cap-profiles/<rôle>.yaml` — ses **permissions** et son cycle de vie ;
 - `sp_builder/sp_drafts/agent-<rôle>-base.md` — sa **compétence**, en français, adressée à lui.
 
 `dev` et `writer` ont des permissions presque identiques. Ce qui en fait deux métiers, c'est le
@@ -296,8 +296,8 @@ jury: [code-reviewer, securite]
 (`agent-<nom>-base.md`), et les cartes qui le nomment. Puis `verify`.
 
 **Ajouter un mode opératoire** — deux fichiers, aucun code :
-`cap_profile/canon/cap-profiles/modop/<nom>/profile.yaml` (contenant `{}`) et
-`cap_profile/canon/modop-bundles/<nom>/sp.md` (le texte). Puis listez-le dans le `modop_set.optional`
+`cap_profile/cap-profiles/modop/<nom>/profile.yaml` (contenant `{}`) et
+`cap_profile/modop-bundles/<nom>/sp.md` (le texte). Puis listez-le dans le `modop_set.optional`
 d'un rôle, et demandez-le par étape dans une carte (`modops: [<nom>]`).
 
 **Changer le modèle ou l'effort d'un rôle** — `invocation.model` et `invocation.effort`. Ce sont les
@@ -439,19 +439,19 @@ Vérifiez la ligne `Catalogue: verified (root=…)` dans les journaux de démarr
 
 ```
 catalogue.yaml                              le manifeste (version de contrat)
-cap_profile/canon/cap-profiles/             vos quatre rôles
-cap_profile/canon/cap-profiles/modop/       les modes opératoires (déclaration)
-cap_profile/canon/modop-bundles/            les modes opératoires (le texte)
-cap_profile/canon/subagent-templates/       les sous-agents
-cap_profile/canon/config/                   le gabarit de criticité d'un projet
+cap_profile/cap-profiles/             vos quatre rôles
+cap_profile/cap-profiles/modop/       les modes opératoires (déclaration)
+cap_profile/modop-bundles/            les modes opératoires (le texte)
+cap_profile/subagent-templates/       les sous-agents
+cap_profile/config/                   le gabarit de criticité d'un projet
 sp_builder/sp_drafts/                       vos prompts, un par rôle, + les protocoles
 sp_builder/sp_blocks/                       (facultatif) les blocs, si vous composez — cf. §9
 sp_builder/templates/                       les deux gabarits qui assemblent tout prompt
-workflow/canon/workflow_maps/               les trois cartes
+workflow/workflow_maps/               les trois cartes
 workflow/brief_templates/                   ce qu'on remet aux agents et aux juges
 coord/config/coord-policies.yaml            que faire quand ça se passe mal
 project_template/{main,workshop,ops}        le squelette d'un projet accueilli
-skills/canon/                               les procédures montées à la demande (vide ici)
+skills/                               les procédures montées à la demande (vide ici)
 ```
 
 Et ce qui n'est **pas** ici, parce que ce n'est pas à vous — les quatre rôles de la mécanique, leurs

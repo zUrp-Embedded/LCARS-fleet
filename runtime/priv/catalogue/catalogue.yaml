@@ -1,0 +1,42 @@
+# Catalogue manifest — declares this directory as an LCARS catalogue root.
+# Contract: Fleet.Catalogue (@moduledoc, SSoT). Read at boot by Fleet.Catalogue.verify!/0.
+#
+# `api_version` is the contract between THIS catalogue and the runtime that consumes it. It is not a
+# per-file version: a cap-profile still carries no apiVersion, and the schema validating it is still
+# chosen by the code. This field exists for the case that rule does not cover — a catalogue authored
+# elsewhere, published on its own cadence, meeting a runtime it was not built against.
+#
+# A root must carry, relative to this file (the literals live in Fleet.Catalogue, one each):
+#   cap_profile/cap-profiles          cap-profile YAMLs (+ monks/ registries)
+#   cap_profile/modop-bundles         modop SP fragments
+#   cap_profile/subagent-templates    subagent templates
+#   sp_builder/sp_drafts                    generated role drafts + the worker protocol
+#   sp_builder/templates                    EEx templates shaping every emitted prompt
+#   workflow/workflow_maps            pipeline maps
+#   workflow/brief_templates                brief templates rendered into forge tickets
+#   project_template/<face>                 scaffolding for a freshly onboarded project
+#
+# NOT part of the catalogue, and deliberately outside every tree above:
+#   priv/*/schema/                 the contract a catalogue is validated against
+#   priv/cap_profile/baseline/     floors a catalogue may not lower (universal git denylist)
+# Both resolve without passing through this root. A copy shipped inside a catalogue is read by
+# nobody — the layout is what makes that true, so neither may move into a catalogue. The bundled root
+# is priv/ itself, so they sit next to it: a root declares what it CONTAINS, never that it contains
+# nothing else.
+
+api_version: 1
+
+# `name` is the catalogue's IDENTITY, and it is the catalogue that carries it — not the directory it
+# was unpacked into. It addresses the catalogue outside this box (the forge org that will carry its
+# projects), so a name assigned at install time would differ between two boxes holding this same
+# catalogue. Kebab-case, no `_`: the underscore separates the halves of a role login.
+#
+# `fleet` and not `lcars`: on the forge, `lcars` is taken by LCARS's own repository, and an org
+# `lcars` holding a repo `lcars` reads as a mistake. `fleet/lcars` is what the forge already shows.
+name: fleet
+
+# La carte qu'un projet prend quand il n'en declare aucune. Aucune propriete ne la distingue de ses
+# soeurs — contrairement au rail doc, qui se reconnait a son producteur `face: workshop` — donc
+# c'est un CHOIX, et un choix se declare. Le boot refuse un catalogue qui livre des cartes sans dire
+# laquelle est son defaut.
+default_card: brief-gate

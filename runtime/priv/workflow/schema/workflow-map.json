@@ -1,0 +1,240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:lcars:workflow-map",
+  "title": "LCARS Workflow Map (enveloppe kind/metadata/spec)",
+  "description": "Structural schema dérivé du canon réel des workflow_maps (standard-qa, audit-only). Enveloppe unique kind/metadata/spec ; pas de champ apiVersion (le versioning vit dans le code, pas dans le YAML).",
+  "type": "object",
+  "required": [
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "WorkflowMap"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "presentation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "User-facing FR header — the card as shown to the HUMAN during project framing (via the card_list tool). States the card's positioning (what it is for, judges, what it verifies) in the human's language. Rendered verbatim: this is calibration data, not code."
+        },
+        "scope": {
+          "enum": [
+            "project",
+            "ticket"
+          ],
+          "description": "WHERE this card is DECLARED, which is not the same axis as `status`. `ticket` = the card is chosen per TICKET by its genre (a workshop card, reached through `destination/workshop`), and a project can never declare it - offering it in the framing catalogue would present a choice that does not exist at that scope. OPTIONAL, and DERIVED when absent: a card carrying a `face: workshop` producer IS its catalogue's doc rail (the publish refuses two), so it is ticket-scoped by construction; everything else is `project`. Held by hand it was forgotten on a shipped workshop card, which a project could then declare - routing every ticket through a jury-less direct seal. Writing it explicitly is allowed and checked: `scope: project` on a workshop card is refused at publish."
+        },
+        "status": {
+          "enum": [
+            "canon",
+            "smoke",
+            "demo"
+          ],
+          "description": "Card class. Absent = canon (a production card, offered to the architect via card_list). smoke/demo = TECHNICAL cards (chain validation, demos): loadable by name for dispatch/tests, NEVER offered in the framing catalogue - the mechanical half of the honest 'Carte TECHNIQUE' presentations."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "steps",
+        "max_rework_rounds",
+        "jury",
+        "ci"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "max_rework_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Budget anti-emballement du pipeline : nb de restarts complets du workflow tolérés avant escalade humaine (budget total de step-runs = nb_steps × (max_rework_rounds + 1)). OBLIGATOIRE — pas de défaut caché en code : l'auteur du map déclare sa policy de churn (donnée, pas mécanisme figé)."
+        },
+        "steps": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-zA-Z0-9_-]+$": {
+              "type": "object",
+              "required": [
+                "role"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "modops": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": "OPTIONAL step-modops (B-01, catalogue chantier 2026-07-20): activates modops the step's ROLE declares in its cap-profile `modop_set.optional` (e.g. `modops: [tdd]` on a `role: engineer` step = an engineer in tdd mode). NEVER loads another role's profile (killed as incoherent). Validated at dispatch by `CapProfile.resolve` (⊆ optional, no incompatible pair) — an out-of-optional modop is refused. Absent = the role's default modops only."
+                },
+                "brief_kind": {
+                  "enum": [
+                    "worker",
+                    "judge"
+                  ]
+                },
+                "judge_target": {
+                  "enum": [
+                    "brief",
+                    "deliverable"
+                  ]
+                },
+                "needs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true,
+                  "description": "prédécesseurs (noms de steps), SANS doublon : un `needs` répété (copier-coller) posait deux fois la même arête → le graphe partait en rejet :fan_out avec un diagnostic MENTEUR (« 2 successeurs [b, b] » sur une chaîne linéaire). Le rejet vit ICI, en amont, avec le vrai motif."
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "DOCUMENTAIRE — aucun lecteur runtime (mesure 2026-08-08 : zero occurrence de step[\"inputs\"] dans lib/ et test/). Declare a un humain d'ou l'etape tire sa matiere (ticket.body, un livrable precedent, un chemin). Le systeme ne verifie PAS ces sources et n'en resout aucune : ce qu'une etape recoit vient de son work-item et de son brief, jamais de ce champ. ⚠ Son jumeau `outputs` N'EST PLUS documentaire depuis BL-6-59 (2026-08-13) — la symetrie des deux champs est rompue, et c'est deliberate : ce que l'etape PRODUIT est verifiable dans son workspace, ce dont elle part ne l'est pas (une source peut etre un ticket, un livrable d'une autre face, un depot distant). Ne pas conclure de l'un a l'autre."
+                },
+                "outputs": {
+                  "description": "LU PAR LE MOTEUR depuis BL-6-59 (2026-08-13). Declare ce que l'etape doit produire, en chemins RELATIFS au workspace du pod. `Fleet.Workflow.StepOutputs` en derive deux faits systeme, `outputs_exist` et `outputs_non_empty`, verifies dans le workspace que le runtime a cree lui-meme : une porte qui veut attester une production ecrit ces cles dans ses `rules` au lieu de croire un fait auto-declare par le pod. Les faits systeme ECRASENT toute cle de meme nom venue du resultat du pod. Resolution des gabarits : tout segment `{...}` devient un GLOB `*` — le systeme ne resout aucune date, parce qu'aucune carte n'en declare le format et qu'exiger une correspondance exacte refuserait une production legitime ecrite dans une autre graphie. Un chemin absolu ou traversant `..` est refuse (les deux faits tombent a false, LOUD). Une etape SANS `outputs` ne produit aucun des deux faits : une regle qui les cite quand meme echoue fail-closed, ce qui est le bon refus pour une carte qui interroge une declaration qu'elle n'a pas faite.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "gate": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "hard",
+                            "soft",
+                            "terminal"
+                          ]
+                        },
+                        "rules": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "human_approval_required": {
+                          "type": "boolean"
+                        },
+                        "approval_prompt": {
+                          "type": "string"
+                        }
+                      },
+                      "$comment": "F-C110 : les ex-knobs fallback_invoke_gatekeeper / on_blocking_severity / on_revision_severity ont été RETIRÉS — acceptés au schéma + présents au canon mais AUCUN code ne les consommait (couche d'orchestration de sévérité jamais construite). L'escalade gatekeeper vient du `type` (soft/terminal → StepRunConsumer {:dispatch_gatekeeper}) ; le gating par sévérité vit dans `rules` (opérande `severity_max` évalué par Gates.Predicate). additionalProperties:false → un map qui les re-déclare est désormais rejeté au load.",
+                      "allOf": [
+                        {
+                          "$comment": "soft-default #4 : une hard-gate DOIT porter ≥1 règle — sinon Enum.all?([]) la fait passer à vide (fail-open, gate qui n'applique rien). rules REQUIS + minItems 1 pour type=hard ; terminal garde rules optionnel/vide (la gate `finish` est terminal + human_approval sans règle).",
+                          "if": {
+                            "properties": {
+                              "type": {
+                                "const": "hard"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ]
+                          },
+                          "then": {
+                            "required": [
+                              "rules"
+                            ],
+                            "properties": {
+                              "rules": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "minItems": 1
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "face": {
+                  "type": "string",
+                  "enum": [
+                    "code",
+                    "workshop"
+                  ],
+                  "description": "OPTIONAL project face the step's PRODUCER works ON. `code` (default when absent) = the `main` branch: workspace clone base, PR target and post-merge realignment all follow it, and the other face is the read-only reference. `doc` = the `workshop` branch: same mechanics, faces swapped — the deliverable is committed on a branch off workshop and merges back into it. One knob, threaded once (dispatch -> resolver -> project map); downstream consumers assert its presence rather than re-defaulting (single-default-site doctrine). A face on a JUDGE step is meaningless and ignored: judges clone the producer's branch (`base_branch: head`), whatever face it lives on. `ops` IS ABSENT FROM THIS ENUM ON PURPOSE, and its absence is the enforcement. A project HAS three branches (`Fleet.Layout.@face_branches`) but a producer may work only two of them: `ops` is the record the runtime keeps — what was asked, what was judged, what was proven — and an actor able to author there could rewrite, after the fact, the account of what it was told to do and what it was found to have done. Naming it here would give some pod a workspace on it. There is no rule to check and no exception to audit, because `additionalProperties: false` plus this enum make the state unwritable."
+                }
+              }
+            }
+          }
+        },
+        "jury": {
+          "type": "array",
+          "description": "PR-deliverable jury: the roles whose review is requested on a producer's PR and whose approvals gate the seal. THE card is the single source (no engine config) — an empty array is a deliberate zero-judge card (the mechanical floor still holds).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ci": {
+          "type": "string",
+          "enum": [
+            "required",
+            "ignore"
+          ],
+          "description": "REQUIRED (`spec.required`), NEVER defaulted — exact twin of `jury`, and for the same reason. `required`: the gate READS the runner's verdict on the head sha BEFORE summoning the jury — red = producer rework with no judge spent, pending/absent = BOUNDED wait then escalation, green = the jury is summoned AND receives the fact in its brief. `ignore`: the pre-gate rail. The policy lives in the CARD, never in the engine (F-C061, same rule as the jury). WHY MANDATORY: while a default existed, a card that FORGOT to declare was indistinguishable from a card that DECIDED against — and the silent branch was the permissive one, so the omission read as green. Making the field mandatory does not pick a side; it makes the un-declared card unrepresentable, which is the only state that cannot be audited. CONSULTED WHENEVER A REVIEW IS PENDING, jury or not: `requested` is the union of the card's stable jury and the forge's volatile `requested_reviewers`, so a human asking for a review on a zero-jury card reaches this gate. `ignore` on `jury: []` is therefore a live declaration, not a decorative one."
+        },
+        "verdict_policy": {
+          "description": "C2 — la COURBE DE TOLÉRANCE de cette carte : à partir de quelle sévérité un finding mesuré par un juge refuse la PR alors même que ce juge l'a approuvée. OPTIONNEL : une carte qui n'en déclare pas garde l'agrégation booléenne (tout approuvé → promote, un refus → rework), byte-for-byte. Une carte ne peut être que PLUS stricte : elle N'ANNULE JAMAIS le refus explicite d'un juge (même règle que `ci` — la carte ne peut pas abroger un plancher). La clémence d'un niveau bas ne s'écrit pas ici mais dans `jury` : c0-poc n'a pas de juge du tout.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "block_at"
+          ],
+          "properties": {
+            "block_at": {
+              "description": "Sévérité PLANCHER qui bloque (échelle findings : minor < important < critical). `critical` ne refuse que sur un finding critique ; `minor` refuse sur le moindre finding mesuré — c'est la posture d'un livrable qui peut blesser.",
+              "enum": [
+                "critical",
+                "important",
+                "minor"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

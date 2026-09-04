@@ -79,9 +79,10 @@ const sections = [
 
   <section id="these">
     <SectionHead id="these" title="Machine et métier" cap="le discriminant est un chemin, pas un avis" />
-    <p class="intro">Trois répertoires — <code>canon/</code>, <code>config/</code>,
-    <code>templates/</code> — portent le matériel qu'un opérateur remplace légitimement. <b>Eux
-    seuls passent par la résolution de catalogue.</b> Le reste est résolu sans aucun réglage.</p>
+    <p class="intro">Une racine de catalogue — <code>priv/catalogue/</code>,
+    <code>priv/catalogue-system/</code>, ou celle qu'un opérateur apporte — porte le matériel qu'un
+    opérateur remplace légitimement. <b>Elle seule passe par la résolution de catalogue.</b> Le
+    reste de <code>priv/</code> est résolu sans aucun réglage.</p>
     <p class="intro">Le corollaire est ce qui rend la règle utile : poser un contrat à l'intérieur
     d'un catalogue le ferait <b>partir avec l'export</b>, son auteur l'éditerait — et rien ne
     changerait. Un mensonge dit par le rangement, que ni le build ni la relecture n'attrapent.</p>

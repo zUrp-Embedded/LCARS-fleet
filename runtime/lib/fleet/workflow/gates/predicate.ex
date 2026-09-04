@@ -1,0 +1,170 @@
+defmodule Fleet.Workflow.Gates.Predicate do
+  @moduledoc """
+  Pure fail-closed evaluator for rule-string predicates over pod outputs.
+
+  ## Grammar (bounded to the canon corpus `standard-qa` / `audit-only`)
+
+      rule       := conjunct ( "AND" conjunct )*
+      conjunct   := comparison | atom
+      comparison := identifier op operand
+      op         := ">=" | "<=" | "==" | "!=" | ">" | "<"
+      operand    := number | bareword
+      atom       := identifier
+
+  - `identifier` is resolved in `outputs[identifier]` (facts self-reported
+    by the pod, e.g. `%{"severity_max" => "important", "tasks_count" => 3,
+    "spec_doc_exists" => true}`).
+  - **atom** (bare identifier) = true iff `outputs[id] == true` (strict
+    boolean, the pod reports an explicit fact — no lax truthiness).
+  - **comparison**: `outputs[lhs] op operand`. Numbers for `>=/>/<=/<`;
+    `==/!=` compare value ↔ operand (bareword → string, e.g. `critical`).
+    A multi-word RHS is captured as ONE bareword and compared whole:
+    `severity_max != very critical` tests against the entire string.
+  - **conjunction**: `AND` only (the corpus uses neither `OR` nor
+    parentheses nor negation beyond `!=`). A rule = conjunction of all its
+    terms.
+
+  ## The two grammar limits
+
+  1. **`AND` inside an operand splits the rule.** The conjunction is cut BEFORE any parsing, so
+     `severity_max != very AND critical` becomes two terms: `severity_max != very` (true for
+     `"important"`) and the atom `critical` (false) → the rule answers **false where true is
+     correct**. Fixing it needs quoting in the grammar; the canon corpus has no such operand, so it
+     is named here rather than built. A workflow introducing one gets a wrong answer, not an error.
+
+  2. **A malformed comparison must never degrade to an atom.** `tasks count >= 1` (a space in the
+     identifier) does not match the comparison regex; falling through to `{:atom, term}` would make
+     it a lookup of the literal key `"tasks count >= 1"` — absent, therefore false, forever, with no
+     signal, and the gate would reject every delivery while merely looking strict. Fail-closed is
+     right for missing EVIDENCE, never for a broken RULE: a term that carries an operator and fails
+     to parse is logged LOUD (see `parse/1`).
+
+  ## Fail-closed
+
+  A referenced fact **absent** from the outputs, or an incompatible type (e.g. `>=`
+  on a non-number), renders the predicate **false** — never a silent pass on
+  missing evidence. The engine is mechanical: it fetches nothing, it reads `outputs`.
+
+  ## Out-of-scope (not decided here)
+
+  The gate's adjacent orchestration (`human_approval_required`)
+  is NOT carried by this evaluator — it does ONLY `rule_string → bool`.
+  The mapping to `:pass`/`:fail`/`:human_approval`/`:dispatch_gatekeeper` (including the
+  refusal to auto-approve a `human_approval_required` gate) is in `Fleet.Workflow.Gates`.
+  """
+
+  require Logger
+
+  @ops ~w(>= <= == != > <)
+
+  @doc """
+  Evaluates a rule-string (conjunction of `AND` terms) against `outputs`.
+  Returns `true` iff all terms are satisfied.
+
+  ## Examples
+
+      iex> alias Fleet.Workflow.Gates.Predicate
+      iex> Predicate.eval?("spec_doc_exists AND spec_doc_non_empty",
+      ...>   %{"spec_doc_exists" => true, "spec_doc_non_empty" => true})
+      true
+
+      iex> Fleet.Workflow.Gates.Predicate.eval?("severity_max != critical",
+      ...>   %{"severity_max" => "important"})
+      true
+
+      iex> Fleet.Workflow.Gates.Predicate.eval?("tasks_count >= 1", %{"tasks_count" => 0})
+      false
+
+      iex> Fleet.Workflow.Gates.Predicate.eval?("all_tests_pass", %{})
+      false
+  """
+  @spec eval?(term(), term()) :: boolean()
+  def eval?(rule, outputs) when is_binary(rule) and is_map(outputs) do
+    rule
+    |> String.split(~r/\s+AND\s+/)
+    |> Enum.all?(&eval_term(String.trim(&1), outputs))
+  end
+
+  # TOTAL fail-closed clause, and it is a NET rather than the only guard. Both gate branches reject
+  # the shape BY NAME before evaluating; handing every item of `rules` here unchecked instead makes
+  # the hard path answer "unsatisfied rule(s)" for a malformed CARD. This clause stays for what
+  # reaches it anyway.
+  # A non-string `rule` (an UNSCHEMATIZED override — an in-memory workflow_map that bypassed the
+  # loader's schema; there is no flat input, an envelope-less YAML fails the schema before normalize)
+  # — or non-map `outputs` — renders `false`:
+  # the hard gate FAILS (`Enum.all?` becomes false → `{:fail, …}` in Gates), NEVER a
+  # FunctionClauseError that would bubble up and crash the StepRunConsumer (singleton). The eval
+  # is made TOTAL, symmetric with the terminal's fail-closed catch-all.
+  def eval?(_rule, _outputs), do: false
+
+  defp eval_term(term, outputs) do
+    case parse(term) do
+      {:cmp, lhs, op, operand} -> compare(Map.get(outputs, lhs, :__absent__), op, operand)
+      {:atom, id} -> Map.get(outputs, id) == true
+    end
+  end
+
+  # "identifier op operand" → {:cmp, ...} ; otherwise bare identifier → {:atom, id}.
+  #
+  # The atom fallback is TOTAL, and left alone it swallows malformed comparisons. A term carrying an
+  # operator that does not parse (`tasks count >= 1`, a space in the identifier) becomes a lookup of
+  # the literal key — absent, false, forever, silent. The gate then rejects every delivery while
+  # looking strict, which is the worst shape a configuration error can take: it does not fail, it
+  # succeeds at being wrong.
+  #
+  # Fail-closed either way (the return is `false`); what the named refusal buys is SAYING SO. Missing
+  # evidence is a legitimate false; a rule the evaluator cannot read is not a verdict, it is a
+  # broken instrument answering anyway.
+  defp parse(term) do
+    case Regex.run(~r/^(\w+)\s*(>=|<=|==|!=|>|<)\s*(.+)$/, term) do
+      [_, lhs, op, rhs] when op in @ops ->
+        {:cmp, lhs, op, operand(String.trim(rhs))}
+
+      _ ->
+        if malformed_comparison?(term) do
+          Logger.warning(
+            "Gates.Predicate: rule term #{inspect(term)} carries an operator but does not parse " <>
+              "as `identifier op operand` — evaluated as a (false) atom. The gate will reject " <>
+              "EVERY delivery until the rule is fixed."
+          )
+        end
+
+        {:atom, term}
+    end
+  end
+
+  # An operator with whitespace around it, or at a word boundary — enough to tell "this meant to be
+  # a comparison" from an identifier that merely contains `<` (none do, but the test is cheap and
+  # a false positive costs one log line, never a verdict).
+  defp malformed_comparison?(term), do: Regex.match?(~r/(^|\s)(>=|<=|==|!=|>|<)(\s|$)/, term)
+
+  defp operand(rhs) do
+    case Integer.parse(rhs) do
+      {n, ""} ->
+        n
+
+      _ ->
+        case Float.parse(rhs) do
+          {f, ""} -> f
+          _ -> rhs
+        end
+    end
+  end
+
+  # `nil` is absent: it cannot make `!=` pass.
+  defp compare(:__absent__, _op, _operand), do: false
+  defp compare(nil, _op, _operand), do: false
+  defp compare(lhs, "==", operand), do: lhs == operand
+  defp compare(lhs, "!=", operand), do: lhs != operand
+
+  defp compare(lhs, op, operand) when is_number(lhs) and is_number(operand) do
+    case op do
+      ">=" -> lhs >= operand
+      "<=" -> lhs <= operand
+      ">" -> lhs > operand
+      "<" -> lhs < operand
+    end
+  end
+
+  defp compare(_lhs, _op, _operand), do: false
+end

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
+<<<<<<<< HEAD:deploy/lib/enroll-catalogue.sh
 # SOURCE: deploy/lib/enroll-catalogue.sh
+========
+# SOURCE: runtime/etc/enroll-catalogue.sh
+>>>>>>>> origin/main:runtime/etc/enroll-catalogue.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-10
 # STATUS: actif — derive les entrees de la recette forge depuis un catalogue
@@ -8,7 +12,7 @@
 # attend en entree.
 #
 # CE QU'IL PRODUIT
-#   1. <tofu-dir>/roles.auto.tfvars.json   les quatre listes (roles, writers, judges, externals).
+#   1. <tofu-dir>/roles.auto.tfvars.json   les cinq listes (roles, system_roles, writers, judges, externals).
 #                                          tofu lit les *.auto.tfvars.json nativement.
 #   2. sur stdout                          la ligne PROV_ROLES a exporter avant le mint des tokens.
 #
@@ -75,9 +79,14 @@ done
 # sur l'hote, c'est le seul cas ou ce chemin n'est pas un chemin d'hote.
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
+<<<<<<<< HEAD:deploy/lib/enroll-catalogue.sh
 # Le depot par defaut : ce script vit dans deploy/lib/ (Q3 : joue a l'install
 # seulement), donc le runtime source est le fleet/ a cote de deploy/ dans un checkout.
 [[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../fleet" && pwd)"
+========
+# Le depot par defaut : ce script vit dans runtime/etc/, donc runtime/ est un cran au-dessus.
+[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/.." && pwd)"
+>>>>>>>> origin/main:runtime/etc/enroll-catalogue.sh
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
 # Une seule autorite de lecture des deux cotes : `Fleet.Roster.tfvars/1`. Le
@@ -97,14 +106,18 @@ elif [[ -n "$RELEASE" ]]; then
   # `"$RELEASE_BIN" eval "Fleet.Roster.eval_tfvars(...)"`. Docker n'y sert qu'a transporter la
   # release. Quand la release est DEJA POSEE sur la machine, le detour n'a plus d'objet.
   #
-  # POURQUOI IL MANQUAIT : les deux portes existantes couvrent la boite (`--image`, docker) et le
+  # POURQUOI ELLE EXISTE : les deux autres portes couvrent la boite (`--image`, docker) et le
   # poste en livraison SOURCE (`--repo`, mix). Un poste en livraison BINAIRE n'a ni l'un ni
   # l'autre — pas de mix, c'est le geste R5 qui le veut ; pas d'image, c'est un poste. Il a la
+<<<<<<<< HEAD:deploy/lib/enroll-catalogue.sh
   # release, et personne ne savait la lire.
   #
   # Le mur etait connu et ecrit plus haut : « le banc est mort dessus sur la premiere machine
   # neuve (`mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
   # ne vaut que pour qui a docker.
+========
+  # release (mesure 2026-08-18 : `mix: ABSENT` sur une machine neuve).
+>>>>>>>> origin/main:runtime/etc/enroll-catalogue.sh
   #
   # ⚠ MEME FONCTION, MEME AUTORITE : `Fleet.Roster.eval_tfvars`. La regle de placement (siege /
   # juge / ecrivain) reste en Elixir, testee — elle n'est reecrite ni ici, ni en jq, ni ailleurs.
@@ -177,8 +190,8 @@ say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""
 
-# ⚠ « celui de l image » ETAIT VRAI QUAND IL N'Y AVAIT QUE DEUX PORTES. Une release posee porte le
-# sien tout autant, et nommer le mauvais porteur envoie chercher un objet qui n'existe pas ici.
+# ⚠ « celui de la livraison », pas « de l'image » : une release posee porte le sien tout autant,
+# et nommer le mauvais porteur envoie chercher un objet qui n'existe pas ici.
 say "catalogue : ${CATALOGUE:-<celui de la livraison>} (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"

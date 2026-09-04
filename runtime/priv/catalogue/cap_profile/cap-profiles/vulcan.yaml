@@ -1,0 +1,30 @@
+# Reserved seat: vulcan — the box is closed, the seat is kept (user arbitrage 2026-08-02:
+# "il sortira quand on ouvrira sa boite").
+# Contract: this file + Fleet.CapProfile (@moduledoc). Schema: ../../schema/reserved-seat.json
+#
+# A seat claims the PROVISIONING identity — the forge account (forge.tf local.roles) and the
+# role token (provision-role-tokens.sh ROLES + provision-lib.sh PROV_ROLES), both inert until
+# the box opens — and its role_index slot in the hexspeak UUID. It is NOT spawnable: the kind
+# discriminates at every consumer (Image validates against the seat schema, list() filters it
+# out, an explicit load answers {:error, {:role_reserved, "vulcan"}}). Opening the box =
+# replacing this file with a full CapabilityProfile (+ SP blocks, sp-map entry, draft) — the
+# four-list equality check keeps holding, unchanged, through that transition.
+#
+# Why a seat and not a hollow profile: what makes a role SPAWNABLE is its `spec` — the surface, the
+# containment, the lifetime. A seat withholds exactly that, and nothing else. The reservation is
+# ~10 honest lines expressed IN the source of truth (the catalogue), never as an exception a
+# control has to learn (BL-6-45).
+#
+# ⚠ This said "a spawnable vulcan would need a spec, an SP block and a generated draft — three
+# invented objects for a closed box". Two of the three ARE here: `sp_blocks/role/vulcan.md` and its
+# entry in `sp-map.yaml`, hence the generated `agent-vulcan-base.md`. Whoever wrote the role prose
+# wrote it early, deliberately, and nothing is wrong with that — what was wrong is a comment
+# describing an INVENTORY of other files, which stops being true the day one of them moves. State
+# the rule (no spec, no spawn), never the census.
+kind: ReservedSeat
+metadata:
+  name: vulcan
+  # vitrine: Le siège réservé | Vide aujourd'hui. Il attend un auditeur externe, tournant sous un autre modèle que le reste de la flotte — un regard qui ne partage pas nos angles morts.
+  # 0..7 taken (starfleet 0, architect 1, gatekeeper 2, engineer 3, qualifier 4, reviewer 5,
+  # scoper 6, scribe 7). Uniqueness is enforced by the contracts check (role_index scan).
+  role_index: 8
