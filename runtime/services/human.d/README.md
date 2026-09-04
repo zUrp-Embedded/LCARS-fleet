@@ -11,7 +11,7 @@
 Ce qu'il faut poser **dans le home d'un humain** pour qu'il puisse travailler : son binaire
 `claude`, son identité git, ses projets. Un module par sujet, numéroté, idempotent.
 
-Ils ont vécu dans `deploy/modules.d/` et n'y avaient pas leur place. Le critère est le **moment
+Ils ne sont pas dans `deploy/modules.d/`, malgré la forme commune. Le critère est le **moment
 d'exécution**, pas la ressemblance de forme : un module de `deploy/` converge la MACHINE une fois,
 depuis le checkout, et le checkout peut disparaître ensuite. Ceux-ci convergent un HUMAIN — à
 chaque nouveau login, longtemps après l'install, sans checkout. Ils doivent donc partir avec la

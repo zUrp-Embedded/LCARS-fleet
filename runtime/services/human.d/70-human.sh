@@ -24,10 +24,9 @@ TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
 # La source vit dans le provisionnement lui-même — pas sous `$PROV_PREFIX/etc` comme le template
 # d'env : celui-là dépend de `60-deploy`, et un garde-fou qui n'existe que si un autre module a
 # réussi avant lui est absent précisément les jours où il compte.
-# ⚠ RELATIF AU MODULE, PLUS `repo_root()`. Ce fichier a suivi le module hors de l installeur : il
-# vit desormais en frere (`../agent/`). Le deriver de `repo_root()` demandait une racine — donc un
-# contrat avec qui joue le module — la ou un chemin relatif au fichier dit la meme chose sans rien
-# supposer de son lanceur.
+# ⚠ RELATIF AU MODULE, PAS `repo_root()` : le fichier vit en frere du module (`../agent/`), et un
+# chemin relatif au fichier dit ou il est sans rien supposer de qui joue le module — `repo_root()`
+# demanderait une racine, donc un contrat avec le lanceur.
 AUTOMODE_SRC="${LCARS_AUTOMODE_SRC:-$(dirname "${BASH_SOURCE[0]}")/../agent/claude-automode.json}"
 CLAUDE_SETTINGS="$HOME_DIR/.claude/settings.json"
 
@@ -122,7 +121,7 @@ probe_identity() {
   local tokfile code
   tokfile="$(env_field "$ENV_FILE" FORGE_TOKEN_FILE)"
   if [[ -z "$tokfile" ]]; then
-    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (50-forge puis re-apply)"
+    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — le câblage du compte système (FORGE_BOT_LOGIN) manque avec lui ; c'est 50-forge puis un re-apply qui le pose"
   elif [[ ! -r "$tokfile" ]]; then
     p_warn "FORGE_TOKEN_FILE=$tokfile illisible par $PROV_HUMAN — la fleet ne pourra pas parler à la forge (groupe $PROV_FLEET_GROUP ?)"
   elif [[ -z "$PROV_FORGE_URL" ]]; then

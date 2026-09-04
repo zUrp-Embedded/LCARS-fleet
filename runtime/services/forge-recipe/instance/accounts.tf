@@ -38,10 +38,10 @@ variable "role_names" {
   }
 }
 
-# VARIABLE et non plus litteral : le login etait ecrit ici et une seconde fois dans le module
-# catalogue (`var.system_account`, qui le NOMME pour ses adhesions). Deux ecritures d'un meme fait
-# derivent, et la sonde d'existence a besoin de celui-ci — un nom faux ne rend pas d'erreur, il rend
-# « absent », et tofu retente alors une creation qui echoue en 409.
+# VARIABLE, pas litteral : le module catalogue NOMME le meme login (`var.system_account`, pour ses
+# adhesions), et deux ecritures d'un meme fait derivent. La sonde d'existence a besoin de celui-ci —
+# un nom faux ne rend pas d'erreur, il rend « absent », et tofu retente alors une creation qui
+# echoue en 409.
 variable "system_account" {
   type        = string
   default     = "system_starfleet"
@@ -88,41 +88,33 @@ resource "gitea_user" "system_role" {
   allow_import_local        = false
 }
 
-# ⚠ LE COMPTE `starfleet` A ETE RETIRE (2026-08-15), et son absence est une DECISION.
+# ⚠ AUCUN COMPTE `starfleet` SUR LA FORGE, et son absence est une DECISION (2026-08-15).
 #
-# Il datait de l'epoque ou starfleet etait le role sysadmin et recevait les tickets systeme. Depuis
-# le reorg du 2026-07-19 il est chef de PORTEFEUILLE : il ne met jamais la main dans un projet, et
-# surtout pas en ecriture. Le canon le declarait deja — `cap-profiles/starfleet.yaml` :
-# « NO forge identity : starfleet holds no forge account and no role token — every forge write it
-# causes goes through the SYSTEM ». Cette ressource creait donc, en SITE-ADMIN, le compte que la
-# donnee disait ne pas exister.
+# starfleet est chef de PORTEFEUILLE : il ne met jamais la main dans un projet, et surtout pas en
+# ecriture. Le canon le declare — `cap-profiles/starfleet.yaml` : « NO forge identity : starfleet
+# holds no forge account and no role token — every forge write it causes goes through the SYSTEM ».
+# Une ressource `gitea_user` pour lui creerait, en SITE-ADMIN, le compte que la donnee dit ne pas
+# exister — et aucun gate ne l'attraperait : le verrou a quatre listes (`roles.provisioning_locked`)
+# impose canon == forge.tf == ROLES == PROV_ROLES mais EXCLUT starfleet sur `forge_identity`
+# (l'asymetrie vit dans la donnee, volontairement), et les ressources AUTONOMES de ce fichier
+# (`system`, `human`) sont hors de la boucle des roles.
 #
-# MESURE DU 2026-08-15 (banc), avant retrait : zero site `as_role("starfleet")` dans tout `runtime/`
-# (marcheur independant, pas un grep) · aucun `starfleet.gitea_token` dans `/opt/lcars/var/tokens` (dix
-# tokens, aucun pour lui) · absent du `forge-role-passwords.json` · absent de la liste `ROLES` de
-# `provision-role-tokens.sh` · aucune org, aucun depot. Aucun secret ne vivait nulle part pour ce
-# compte : rien ne pouvait s'authentifier sous lui, et il etait site-admin.
+# MESURE DU 2026-08-15 (banc) : zero site `as_role("starfleet")` dans tout `runtime/` (marcheur
+# independant, pas un grep) · aucun `starfleet.gitea_token` dans `/opt/lcars/var/tokens` · absent du
+# `forge-role-passwords.json` et de la liste `ROLES` de `provision-role-tokens.sh` · aucune org,
+# aucun depot. Rien ne peut s'authentifier sous lui.
 #
-# POURQUOI IL A SURVECU SI LONGTEMPS. Le verrou a quatre listes (`roles.provisioning_locked`) impose
-# l'egalite canon == forge.tf == ROLES == PROV_ROLES, et il EXCLUT starfleet sur `forge_identity`
-# — l'asymetrie vit dans la donnee, volontairement. Mais cette ressource-ci etait AUTONOME, hors de
-# la boucle des roles, comme `system` et `human` : elle echappait donc au verrou. Le canon pouvait
-# dire « pas de compte forge » pendant que le provisionnement en creait un, indefiniment, sans
-# qu'aucun gate ne les confronte.
-#
-# Son motif ecrit etait « site-admin : l'identite d'ONBOARDING (creer des users = op site-admin) ».
-# Ce role appartient desormais au MASTER (l'installeur, materialise en `admiral` au banc), qui porte
-# le compte admin de la forge et le master-token que tofu consomme. Le break-glass est le compte de
-# l'installeur — `gitea_user "human"` ci-dessous le dit deja dans son propre commentaire.
-#
-# Son BADGE, lui, ne disparait pas : `provision-forge-charte.sh` le pose sur le master (option
-# `--admiral`). Le nom quitte la forge, la charte reste.
+# L'ONBOARDING (creer des users = op site-admin) appartient au MASTER (l'installeur, materialise en
+# `admiral` au banc), qui porte le compte admin de la forge et le master-token que tofu consomme. Le
+# break-glass est le compte de l'installeur — `gitea_user "human"` ci-dessous le dit dans son propre
+# commentaire. Le BADGE de starfleet, lui, est pose par `provision-forge-charte.sh` sur le master
+# (option `--admiral`) : le nom n'est pas sur la forge, la charte y est.
 
-# ⚠ `count`, ET C'EST LA CONSEQUENCE DU COMMENTAIRE CI-DESSUS (⚖ user 2026-08-30). Il disait deja
-# « CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
-# creer a son installation […] les vraies personnes ont des comptes a leur nom » — mais la ressource
-# etait inconditionnelle, donc TOUT deploiement le semait. `builtin_human` vide (le defaut) = aucun
-# compte : un deploiement de travail pose les autorites, pas les humains.
+# ⚠ `count`, ET C'EST LA CONSEQUENCE DU COMMENTAIRE CI-DESSOUS (⚖ user 2026-08-30) : « CE COMPTE
+# N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait creer a son
+# installation […] les vraies personnes ont des comptes a leur nom ». Une ressource inconditionnelle
+# semerait ce compte sur TOUT deploiement. `builtin_human` vide (le defaut) = aucun compte : un
+# deploiement de travail pose les autorites, pas les humains.
 resource "gitea_user" "human" {
   count                = var.builtin_human == "" ? 0 : 1
   username             = var.builtin_human
@@ -130,15 +122,15 @@ resource "gitea_user" "human" {
   email                = var.builtin_email
   password             = var.seed_password
 
-  # `false`, et c'est un CORRECTIF (⚖ arbitrage user 2026-08-11). Ce compte portait
-  # `must_change_password = true` au motif que « l'humain pose son propre secret au 1er login ».
+  # `false`, et c'est un CORRECTIF (⚖ arbitrage user 2026-08-11) : pas de `must_change_password =
+  # true` au motif que « l'humain pose son propre secret au 1er login ».
   #
   # CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
   # créer À SON INSTALLATION — celui que l'opérateur pose quand il prépare la forge qu'on lui
   # demande. Les vraies personnes ont des comptes à leur nom, et elles n'existent pas encore
-  # (chantier enrollment). Le réglage attendait donc un premier login que personne ne fait, et il
-  # n'est pas inerte : il ferme le compte en attendant. Les DEUX chemins le contredisaient — le banc
-  # le levait à chaque nuke, une installation réelle l'aurait simplement oublié.
+  # (chantier enrollment). Le réglage attendrait donc un premier login que personne ne fait, et il
+  # n'est pas inerte : il ferme le compte en attendant — le banc devrait le lever à chaque nuke, une
+  # installation réelle l'oublierait simplement.
   must_change_password = false
 
   admin                = false # NON site-admin : ce compte opère VIA la fleet, pas par gestes forge manuels

@@ -6,10 +6,10 @@ variable "gitea_url" {
 variable "gitea_token" {
   type        = string
   sensitive   = true
-  # Le qualificatif « ÉPHÉMÈRE : révoqué après apply » vivait ici et il est FAUX depuis l'arbitrage
-  # du 2026-08-16 : toute évolution de structure — un catalogue de plus, un rôle de plus — a besoin
-  # de cette même autorité, au jour 400 comme au premier jour. Rien ne le POSE durablement encore ;
-  # cette ligne dit donc ce qu'il est, pas une durée de vie que personne ne tient.
+  # PAS « ÉPHÉMÈRE : révoqué après apply » — ce serait FAUX (arbitrage du 2026-08-16) : toute
+  # évolution de structure — un catalogue de plus, un rôle de plus — a besoin de cette même autorité,
+  # au jour 400 comme au premier jour. Rien ne le POSE durablement encore ; cette ligne dit donc ce
+  # qu'il est, pas une durée de vie que personne ne tient.
   description = "Master/admin-token site-admin : la seule autorité qui CRÉE. Passé via TF_VAR_gitea_token (jamais sur disque/git)."
 }
 

@@ -110,9 +110,9 @@ STATIC_FILES = {
     "xterm.css": "text/css; charset=utf-8",
     "addon-fit.js": "application/javascript; charset=utf-8",
 }
-# L'ADMINITE EST UNE NOTION DE LA FORGE, ET ELLE N'EN A QU'UNE. Ce tier a d'abord ete une equipe
-# (`fleet:admins`) lue dans les `groups` deja en main : gratuit, mais c'etait une SECONDE source de
-# verite pour un fait que la forge sait dire elle-meme. Deux sources sur le meme fait ne restent
+# L'ADMINITE EST UNE NOTION DE LA FORGE, ET ELLE N'EN A QU'UNE. Une equipe (`<org>:admins`) lue
+# dans les `groups` deja en main serait gratuite, et une SECONDE source de verite pour un fait que
+# la forge sait dire elle-meme. Deux sources sur le meme fait ne restent
 # d'accord que tant que personne ne touche a l'une des deux, et celle qui derive est toujours celle
 # qu'on ne relit pas.
 #
@@ -334,21 +334,17 @@ def session_of(cookie_header):
         s = _sessions.get(sid)
         return dict(s, sid=sid) if s else None
 
-# ⚠ LA FORMULE DU BLOC DE PORTS A ETE RETIREE D'ICI, PAS COMMENTEE : une constante gardee « au cas
-# ou » est une invitation a la reutiliser, et le prochain qui voudra un port republierait une
-# origine. Elle n'existe plus nulle part dans la boite.
+# ⚠ AUCUNE FORMULE DE BLOC DE PORTS ICI, MEME EN COMMENTAIRE : une constante gardee « au cas ou »
+# est une invitation a la reutiliser, et le prochain qui voudrait un port republierait une origine.
 
 POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def block(uid):
     """
-    ⚠ NE REND PLUS AUCUN PORT, ET C'EST UNE REPONSE, PAS UN MANQUE.
-
-    Cette fonction a rendu quatre ports (api, deck, console, pod), puis un seul, puis zero. Le
-    dernier — `api` — est parti le 2026-08-14 avec la surface TCP du domaine API : elle n'avait
-    aucune capacite propre et personne ne l'appelait. Publier son numero ici aurait envoye un
-    consommateur frapper a une porte supprimee le jour meme.
+    ⚠ NE REND AUCUN PORT, ET C'EST UNE REPONSE, PAS UN MANQUE : plus une cible de la boite n'a
+    d'adresse (API, deck, console, pod — toutes sur socket). Publier un numero ici enverrait un
+    consommateur frapper a une porte qui n'existe pas.
 
     ELLE RESTE parce que `humans()` pose la cle `ports` dans `/api/state`, et qu'un champ qui
     DISPARAIT d'une reponse est un changement de contrat plus brutal qu'un champ qui devient vide.
@@ -362,13 +358,12 @@ def humans():
     """
     Les humains servis par cette boite, DEMANDES a `console-humans.sh`.
 
-    ⚠ CETTE FONCTION PORTAIT SA PROPRE REGLE, ET C'ETAIT UNE SECONDE AUTORITE. Elle filtrait
-    `/etc/passwd` sur `uid >= 1000 and uid < 65000` + un shell en `bash|sh|zsh`, en affirmant dans
-    son docstring servir « la meme population que console.sh ». C'etait faux sur trois bornes, et
-    l'ecart qui mordait est le home : le script REFUSE un compte sans home (« une console sans home
-    s'ouvre sur / et ment »), cette fonction l'acceptait. Le deck listait donc un siege dont
-    `console.sh --all` n'avait jamais demarre la console, et la page rendait « cette console ne
-    fonctionne pas » a quelqu'un dont le compte allait tres bien.
+    ⚠ PAS DE REGLE PROPRE ICI — CE SERAIT UNE SECONDE AUTORITE. Un filtre local sur `/etc/passwd`
+    (`uid >= 1000 and uid < 65000`, un shell en `bash|sh|zsh`) divergerait de `console-humans.sh`
+    sur ses bornes, et l'ecart qui mord est le home : le script REFUSE un compte sans home (« une
+    console sans home s'ouvre sur / et ment ») ; une copie qui l'accepterait ferait lister un siege
+    dont `console.sh --all` n'a jamais demarre la console, et la page rendrait « cette console ne
+    fonctionne pas » a quelqu'un dont le compte va tres bien.
 
     La liste des humains est portee par la FORGE et derivee par le convergeur ; `console-humans.sh`
     derive a son tour qui peut recevoir une console ici. Ce fichier est un LECTEUR : il ne refait
@@ -402,17 +397,16 @@ def humans():
 
 def fleet_pods(human):
     """
-    Pods vivants d'un humain, vus par SA fleet (le deck d'observation, base+1).
+    Pods vivants d'un humain, vus par SA fleet (le deck d'observation, sur sa socket).
 
     Source unique volontaire : le runtime sait ce qu'il a spawne (role, phase), la ou une
     enumeration de sockets ne rend que des noms.
 
     TROIS ETATS, PAS DEUX. Une fleet eteinte est un etat NOMINAL ; un deck qu'on n'a pas pu
-    joindre est une mesure RATEE, et les deux ne se disent pas de la meme facon. Le code rendait
-    `None` sur n'importe quelle exception et l'appelant en faisait `fleet=False` : un timeout de
-    2 s s'affichait « fleet eteinte », c'est-a-dire une assertion d'extinction tiree d'une absence
-    de reponse. C'est le piege exact que le read-model du runtime a ferme par
-    `:live | :deaf | :unavailable`, refait ici a deux cents lignes de la.
+    joindre est une mesure RATEE, et les deux ne se disent pas de la meme facon. Rendre `None` sur
+    n'importe quelle exception, traduit `fleet=False` par l'appelant, afficherait un timeout de 2 s
+    en « fleet eteinte » — une assertion d'extinction tiree d'une absence de reponse. C'est le piege
+    que le read-model du runtime ferme par `:live | :deaf | :unavailable`.
 
     Le discriminant est la CAUSE, pas l'echec : connexion refusee = personne n'ecoute = eteinte
     (on a mesure) ; timeout, reset, DNS = on n'a pas mesure.
@@ -452,9 +446,9 @@ def fleet_projection(human):
     """
     La projection du read-model de cet humain : `(status, projection)`.
 
-    ⚠ SECONDE SOURCE, ET ELLE MANQUAIT. Le deck d'observation alimente SIX de ses sept panneaux avec
-    `/api/projection` ; le landing n'appelait que `/api/pods`. Rendre l'onglet observation depuis les
-    seuls pods aurait perdu ces six panneaux en silence, tout en ayant l'air de l'avoir embarque.
+    ⚠ SECONDE SOURCE, ET ELLE EST NECESSAIRE. Le deck d'observation alimente SIX de ses sept
+    panneaux avec `/api/projection` ; un landing qui n'appellerait que `/api/pods` perdrait ces six
+    panneaux en silence, tout en ayant l'air d'avoir embarque le deck.
 
     ⚠ ET LA CICATRICE DE LA PAGE DU DECK SE GARDE : une projection `deaf`/`unavailable` est un FLUX
     FIGE, pas une flotte calme. La rendre comme un tableau vide serait exactement le mensonge que
@@ -782,15 +776,14 @@ PAGE = r"""<!doctype html>
 // `http://<hote>:<port>` pour chaque onglet — la seconde origine, en une ligne.
 let current = null;
 
-// ⚠ `stage` ET `panel` SONT AU SCOPE DU MODULE, ET C'ETAIT UN BUG FATAL DE LES AVOIR EU AILLEURS.
-// Ils etaient declares en `const` DANS `show()`. `termPane()`, defini au meme niveau que `show()`,
-// les utilise (`stage.appendChild(host)`) — et JavaScript resout les noms LEXICALEMENT, pas depuis
-// l'appelant : dans `termPane` le nom se resolvait au global, ou il n'existait pas.
-// `ReferenceError: stage is not defined` AU PREMIER CLIC sur un terminal, c'est-a-dire sur la
-// fonctionnalite entiere de ce lot.
+// ⚠ `stage` ET `panel` SONT AU SCOPE DU MODULE, JAMAIS DANS `show()`. `termPane()`, defini au meme
+// niveau que `show()`, les utilise (`stage.appendChild(host)`) — et JavaScript resout les noms
+// LEXICALEMENT, pas depuis l'appelant : declares en `const` dans `show()`, le nom se resoudrait au
+// global dans `termPane`, ou il n'existe pas — `ReferenceError: stage is not defined` AU PREMIER
+// CLIC sur un terminal, c'est-a-dire sur la fonctionnalite entiere.
 //
-// Et rien ne pouvait l'attraper : ce n'est pas une erreur de SYNTAXE, donc `node --check` la voit
-// passer, et aucun test n'executait ce client. C'est le cout exact de « jamais execute ».
+// Et rien ne l'attraperait : ce n'est pas une erreur de SYNTAXE, donc `node --check` la voit
+// passer, et aucun test n'execute ce client. C'est le cout exact de « jamais execute ».
 const stage = document.getElementById('stage');
 const panel = document.getElementById('panel');
 
@@ -900,15 +893,15 @@ function termPane(tab) {
   term.open(host);
   fit.fit();
 
-  // LE COPIER AUTOMATIQUE SUR SELECTION — perdu au passage de l'iframe au client maison.
+  // LE COPIER AUTOMATIQUE SUR SELECTION, PORTE PAR CE CLIENT.
   //
-  // Ce comportement n'a JAMAIS ete celui de xterm.js : il vivait dans le frontend applicatif de
-  // ttyd, celui que l'iframe servait. Mesure du 2026-08-15 sur le ttyd 1.7.7 pinne de l'image
-  // (frontend recupere sur sa socket, il est gzippe dans le binaire et invisible a un `strings`) :
+  // Ce comportement n'est PAS celui de xterm.js : il vit dans le frontend applicatif de ttyd.
+  // Mesure du 2026-08-15 sur le ttyd 1.7.7 pinne de l'image (frontend recupere sur sa socket, il
+  // est gzippe dans le binaire et invisible a un `strings`) :
   //   term.onSelectionChange(() => { if (getSelection() !== '') { execCommand('copy'); overlay('✂') } })
-  // En remplacant l'iframe par ce client, on a reporte le protocole ttyd (trames '0'/'1'/'2', init,
-  // sous-protocole) et pas son comportement. Le terminal SELECTIONNE toujours ; c'est la copie qui
-  // etait partie, donc le geste echouait a la derniere marche et rien ne le disait.
+  // Un client maison qui reporte le protocole ttyd (trames '0'/'1'/'2', init, sous-protocole) sans
+  // ce comportement SELECTIONNE toujours ; c'est la copie qui manque, le geste echoue a la derniere
+  // marche et rien ne le dit.
   //
   // POURQUOI SHIFT EST DANS LE GESTE (cf. console.tmux.conf) : `mouse on` donne le drag a tmux, et
   // relacher efface la selection. Shift contourne la capture — xterm.js reprend la souris et fait sa
@@ -1034,10 +1027,9 @@ function claudeLabel(h) {
 // PAS DE CADRE, PAS DE SECONDE ORIGINE. Le deck d'observation n'a plus de port : ses deux routes
 // sont lues par le serveur sur la socket de l'humain, et cette fonction rend ce qu'elles disent.
 //
-// ⚠ IL FALLAIT LES DEUX ROUTES, ET C'EST LA TROUVAILLE QUI A CORRIGE LE DEVIS. `/api/pods` alimente
-// UN panneau ; les six autres viennent de `/api/projection`, que ce landing n'appelait pas. Rendre
-// depuis les seuls pods aurait perdu six panneaux en silence tout en ayant l'air d'avoir embarque
-// le deck.
+// ⚠ IL FAUT LES DEUX ROUTES. `/api/pods` alimente UN panneau ; les six autres viennent de
+// `/api/projection`. Rendre depuis les seuls pods perdrait six panneaux en silence tout en ayant
+// l'air d'avoir embarque le deck.
 //
 // ⚠ ET LA CICATRICE DU DECK SE GARDE : une projection `deaf`/`unavailable` est un FLUX FIGE, pas
 // une flotte calme. Un read-model mort rend `total:0` et des listes vides — exactement ce que rend
@@ -1160,11 +1152,10 @@ function build(s) {
   // decrit la derniere version publiee, celle-ci decrit la boite qu'on regarde. Meme origine, meme
   // porte — le cadre charge une route du deck, derriere la session deja verifiee.
   //
-  // INCONDITIONNEL. Cet onglet a porte un `if (s.doc)` pendant une heure, au motif qu'une image
-  // batie avant le stage `site` n'aurait rien a servir. Cette image N'EXISTE PAS : rien n'est
-  // deploye, les bancs se rebatissent entiers, et le Dockerfile pose la doc au meme titre que le
-  // runtime. Le garde ne gardait donc rien — et il aurait CACHE une image cassee au lieu de la
-  // montrer. Doc absente = image ratee : l'onglet s'ouvre, la route rend 404, ca se voit.
+  // INCONDITIONNEL. Un `if (s.doc)` au motif qu'une image batie avant le stage `site` n'aurait rien
+  // a servir ne garderait rien : cette image N'EXISTE PAS (les bancs se rebatissent entiers, et le
+  // Dockerfile pose la doc au meme titre que le runtime) — et il CACHERAIT une image cassee au lieu
+  // de la montrer. Doc absente = image ratee : l'onglet s'ouvre, la route rend 404, ca se voit.
   add(null, 'Doc', 'cette version', { key: 'doc', crumb: 'DOC', frame: '/doc/' });
   // Cache l'ONGLET, pas le pouvoir : le serveur re-tranche sur la session a chaque cible. Retirer ce
   // `if` depuis la console du navigateur ne ferait apparaitre qu'un onglet — et 404 sur ce qu'il
@@ -1225,8 +1216,8 @@ function build(s) {
 async function tick() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
-    // UNE SESSION MORTE NE SE GARDE PAS A L'ECRAN. Sans ce test, un 401 tombait dans le `catch`
-    // avec le reste et la page continuait d'afficher son dernier etat : un deck d'apparence
+    // UNE SESSION MORTE NE SE GARDE PAS A L'ECRAN. Sans ce test, un 401 tomberait dans le `catch`
+    // avec le reste et la page continuerait d'afficher son dernier etat : un deck d'apparence
     // vivante pour quelqu'un qui n'est plus identifie. La porte tranche, pas le cadre — on
     // recharge et c'est le serveur qui dit ce qu'on a le droit de voir.
     if (!r.ok) { location.reload(); return; }
@@ -1389,13 +1380,13 @@ class Deck(BaseHTTPRequestHandler):
 
     def _auth_logout(self, cfg):
         """
-        SE DECONNECTER DOIT DECONNECTER, et ne le faisait pas.
+        SE DECONNECTER DOIT DECONNECTER — LES DEUX SESSIONS.
 
-        On ne fermait que NOTRE session. La session de la forge, elle, survivait — et comme
-        l'application est deja autorisee, le `/auth/login` suivant traverse sans une seule question
-        et remet la personne dedans. Vu du dehors ce n'est pas une deconnexion, c'est un aller-retour
-        avec des etapes en plus. Pire, la boucle se referme : le deck ne montrait aucun lien vers la
-        forge, donc sans connaitre son URL on ne pouvait meme pas aller s'y deconnecter.
+        Fermer NOTRE session seule laisse celle de la forge — et comme l'application est deja
+        autorisee, le `/auth/login` suivant traverse sans une seule question et remet la personne
+        dedans. Vu du dehors ce n'est pas une deconnexion, c'est un aller-retour avec des etapes en
+        plus. Et sans lien vers la forge sur la page de login, on ne pourrait meme pas aller s'y
+        deconnecter sans connaitre son URL.
 
         Gitea n'expose PAS d'`end_session_endpoint` (verifie dans sa decouverte OIDC), donc pas de
         deconnexion RP-initiee standard. Mais `GET /user/logout` marche comme un simple lien et tue
@@ -1575,8 +1566,8 @@ class Deck(BaseHTTPRequestHandler):
         if target:
             # ⚠ LA QUERY EST RECOLLEE ICI, ET SON ABSENCE EST UNE PANNE MUETTE. `do_GET` a coupe sur
             # `?` des la premiere ligne — donc sans ce recollage, `/pod/<login>/ws?arg=<pod_id>`
-            # arrivait a ttyd sans son argument. `--url-arg` est precisement ce qui laisse le client
-            # nommer le pod : l'onglet se serait ouvert sur un terminal sans cible, sans erreur.
+            # arriverait a ttyd sans son argument. `--url-arg` est precisement ce qui laisse le client
+            # nommer le pod : l'onglet s'ouvrirait sur un terminal sans cible, sans erreur.
             # Elle ne participe PAS a l'autorisation : `authorize` ne regarde que la nature et le
             # login, jamais ce que le client a mis apres le `?`.
             if query:

@@ -258,17 +258,15 @@ team_id() {
 
 # L'ETAT PER-HUMAIN, convergé — appelé A LA CREATION *et* a chaque reconciliation.
 #
-# ⚠ CE SERVICE NE PASSE PLUS PAR L'INSTALLEUR, ET C'EST TOUT L'OBJET DE LA SEPARATION. Il appelait
-# `deploy/provision apply --human <login> --only …`, donc ce daemon — qui TOURNE, toutes les trente
-# secondes, sur une machine installee — dependait de l'arbre d'install. Le critere est ⚖ user :
-# « une fois installe, si on supprime deploy/, il doit rien se passer ». Un convergeur qui crie
-# toutes les trente secondes, c'est le contraire de rien.
+# ⚠ CE SERVICE NE PASSE PAS PAR L'INSTALLEUR, ET C'EST TOUT L'OBJET DE LA SEPARATION : ce daemon
+# TOURNE, toutes les trente secondes, sur une machine installee, et le critere est ⚖ user : « une
+# fois installe, si on supprime deploy/, il doit rien se passer ». Un convergeur qui crierait
+# toutes les trente secondes apres `deploy/provision`, c'est le contraire de rien.
 #
-# ⚠ ET IL Y AVAIT DEUX CHEMINS VERS LE MEME ETAT : l'installeur convergeait le premier humain a
-# l'apply, ce service convergeait tous les suivants. Deux chemins vers un etat, c'est celui qu'on
-# ne relit pas qui derive. Il n'y en a plus qu'un — celui-ci — et l'installeur ne joue plus AUCUN
-# module `NEEDS: human` : il n'en porte plus. ⚖ user : « pas besoin d'avoir du code en + pour faire
-# ce que le service qu'on pose fait a son premier tour ».
+# ⚠ UN SEUL CHEMIN VERS L'ETAT PER-HUMAIN : celui-ci. L'installeur ne joue AUCUN module
+# `NEEDS: human` — deux chemins vers un etat (le premier humain a l'apply, les suivants ici), c'est
+# celui qu'on ne relit pas qui derive. ⚖ user : « pas besoin d'avoir du code en + pour faire ce que
+# le service qu'on pose fait a son premier tour ».
 #
 # LE PRIX ASSUME : a la seconde ou l'apply se termine, le siege n'a pas encore son `~/.lcars`. Il
 # l'a au premier tour de ce service, trente secondes plus tard. Une install qui se dit finie avant

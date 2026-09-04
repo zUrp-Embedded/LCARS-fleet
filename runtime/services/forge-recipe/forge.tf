@@ -41,7 +41,7 @@ provider "gitea" {
 # au catalogue SANS son compte boucle en `role_token_unavailable` — le compte naît ICI, avec le
 # rôle. C'est la cause racine de BL-6-34, payée deux fois.
 #
-# VARIABLE et non plus `local` : le roster appartient au CATALOGUE en service, pas à cette recette.
+# VARIABLE et pas `local` : le roster appartient au CATALOGUE en service, pas à cette recette.
 # Le défaut ci-dessous est celui du catalogue de référence, et il reste la valeur sans laquelle rien
 # ne change pour un déploiement qui n'apporte pas le sien.
 #
@@ -74,13 +74,13 @@ variable "system_roles" {
   default     = ["system_architect", "system_chief", "system_gatekeeper"]
 }
 
-# ⚠ AUCUN DEFAUT, ET C'EST LE POINT. Cette variable portait `default = "system_starfleet"` — un
-# litteral qu'aucun `.tfvars` n'alimentait et qu'aucun verrou ne comparait, alors que ce compte est
-# dans la team `Owners` de l'org (il possede tous les depots projet), que son email passe le gate
-# d'identite de commit, et qu'il est le `forge_push_account` par defaut. Le compte qui POSSEDE l'org
-# naissait d'un nom que personne ne tenait.
+# ⚠ AUCUN DEFAUT, ET C'EST LE POINT. Un `default = "system_starfleet"` serait un litteral qu'aucun
+# `.tfvars` n'alimente et qu'aucun verrou ne compare, alors que ce compte est dans la team `Owners`
+# de l'org (il possede tous les depots projet), que son email passe le gate d'identite de commit, et
+# qu'il est le `forge_push_account` par defaut. Le compte qui POSSEDE l'org naitrait d'un nom que
+# personne ne tient.
 #
-# Il arrive desormais par `roles.auto.tfvars.json`, comme l'org et les quatre listes, projete depuis
+# Il arrive par `roles.auto.tfvars.json`, comme l'org et les quatre listes, projete depuis
 # `Fleet.Credentials.ForgeIdentity` — l'autorite designee (arbitrage user, 2026-08-27), parce que
 # l'identite du compte (email, signature, `allowed_emails/2`) en derive et ne peut pas s'en detacher.
 #
@@ -146,8 +146,8 @@ resource "gitea_user" "role" {
 # l'est pas.
 # ── Org + teams ────────────────────────────────────────────────────────────
 # L'ORG PORTE LE NOM DU CATALOGUE — c'est la reponse a « quel metier traite ce projet », gravee la
-# ou la verite vit deja. Elle etait le litteral `fleet` ; elle est desormais derivee, et le defaut
-# vaut le nom du catalogue de reference, donc rien ne bouge pour un deploiement qui n'apporte rien.
+# ou la verite vit deja. Elle est DERIVEE, pas un litteral, et le defaut vaut le nom du catalogue
+# de reference, donc rien ne bouge pour un deploiement qui n'apporte rien.
 #
 # `public` et non `private` (arbitrage user 2026-08-10) : la forge est INTERNE et locale, elle n'est
 # pas vouee a partir sur GitHub — c'est aussi pourquoi les deux sont separees. Mesure : en `private`,
@@ -211,18 +211,18 @@ resource "gitea_org" "fleet" {
 #
 # ⚖ TRANCHÉ (user, 2026-08-11) : c'est `system_starfleet` qui possède les orgs — c'est déjà le seul
 # compte qui y crée des dépôts. L'adhésion se pose dans la FENÊTRE DU MASTER TOKEN, celle qui lance
-# cet apply. Elle EST posée par cette recette depuis le 2026-08-16 (`gitea_team_membership.owner`,
-# plus bas) : elle vivait à l'étape 4-bis du banc, et n'existait donc PAS en production.
+# cet apply. Elle EST posée par cette recette (`gitea_team_membership.owner`, plus bas), pas par un
+# banc : un geste qui ne vivrait qu'au banc n'existerait PAS en production.
 #
 # La team `system` ci-dessous reste donc au moindre privilège pour ce qu'elle sert (créer et pousser)
 # ; la propriété de l'org est un fait SÉPARÉ, posé ailleurs, et écrit ici pour qu'on ne relise pas
 # « PAS admin/owner » comme « ce compte n'a aucun pouvoir d'org ». Il en a un, et il est nommé.
 
 # LES CINQ TEAMS SONT UNE SEULE RESSOURCE INDEXÉE, et la table ci-dessous est la SEULE liste de
-# leurs noms. Elles étaient cinq ressources nommées ; le bloc `import` qui les fait rejoindre l'état
-# sur une forge existante a besoin de cette liste, et l'écrire une seconde fois dans `existing.tf`
-# aurait produit exactement la classe de dérive qui a déjà mordu ici (`chief` dans `roles` et pas
-# dans `writers` : un compte, un token, aucun droit — trouvé en lisant une org, par aucun check).
+# leurs noms. Le bloc `import` qui les fait rejoindre l'état sur une forge existante a besoin de
+# cette liste, et l'écrire une seconde fois dans `existing.tf` produirait exactement la classe de
+# dérive qui a déjà mordu ici (`chief` dans `roles` et pas dans `writers` : un compte, un token,
+# aucun droit — trouvé en lisant une org, par aucun check).
 locals {
   base_teams = {
     # SEULE à créer des repos d'org (création réservée au système) + write dessus (push, topics de
@@ -284,12 +284,12 @@ variable "system_org" {
   default     = "fleet"
 }
 
-# ⚠ IL N'Y A PLUS DE `ignore_changes = [permission]` ICI, ET SON RETRAIT EST UN CORRECTIF.
-# Il portait ceci, qui reste vrai : Gitea 1.26 stocke l'accès en units_map et relit le champ
+# ⚠ PAS DE `ignore_changes = [permission]` ICI, ET C'EST UN CORRECTIF.
+# Le motif qu'il aurait, et qui reste vrai : Gitea 1.26 stocke l'accès en units_map et relit le champ
 # `permission` top-level en « none » (déprécié), donc le provider voit un drift perpétuel
 # write→none. Mais sur une team IMPORTÉE, la valeur planifiée d'un attribut ignoré est celle de
 # l'ÉTAT, soit « none » — et l'update part avec, ce que Gitea refuse : `permission mode invalid`,
-# les cinq teams d'un coup (mesuré 2026-08-16). Un garde-fou cosmétique transformait l'import en
+# les cinq teams d'un coup (mesuré 2026-08-16). Un garde-fou cosmétique transformerait l'import en
 # panne dure.
 # Le prix, mesuré et assumé : `permission` et `units` ne convergent jamais en lecture, donc chaque
 # apply annonce et rejoue un update par team. Il réussit, l'apply rend 0 — mais un plan VIDE est
@@ -390,16 +390,15 @@ resource "gitea_team_membership" "human" {
 # système dans `Owners`, et depuis ce siège il lit les membres de n'importe quelle team de l'org.
 # Mesuré le 2026-08-17 : 200 sur `judges`, `writers` et `externals`, membre d'aucune.
 
-# ─── LA PROPRIÉTÉ DE L'ORG — rapatriée du banc le 2026-08-16 ─────────────────────────────────────
-# CE GESTE N'EXISTAIT QU'AU BANC, donc PAS en production. Il vivait à l'étape 4-bis de
-# `bench-forge-bootstrap.sh`, dont le commentaire annonçait « et l'admin de l'opérateur en
-# production » — sans qu'aucun code ne le fasse jamais nulle part ailleurs. Une forge d'opérateur
-# rendait donc 403 au premier `lcars project migrate`, avec « user should be the owner of the repo »
-# et rien pour dire pourquoi.
+# ─── LA PROPRIÉTÉ DE L'ORG — posée ICI, par la recette, pas par un banc ──────────────────────────
+# CE GESTE APPARTIENT À LA RECETTE : un banc qui le ferait pour lui-même (« et l'admin de l'opérateur
+# en production », sans code nulle part ailleurs) laisserait une forge d'opérateur rendre 403 au
+# premier `lcars project migrate`, avec « user should be the owner of the repo » et rien pour dire
+# pourquoi (mesuré 2026-08-16).
 #
-# CE QUI L'EMPÊCHAIT EST TOMBÉ AVEC LE PROVIDER 0.8 : la team `Owners` est créée par Gitea avec
-# l'org, la recette ne la déclare pas, et son id était introuvable. `data.gitea_teams` (0.8) rend
-# la liste des teams d'une org — c'est par là qu'on retrouve son id, et par nulle part ailleurs :
+# PROVIDER ≥ 0.8 : la team `Owners` est créée par Gitea avec l'org, la recette ne la déclare pas, et
+# son id ne se lit que par `data.gitea_teams` (0.8), qui rend la liste des teams d'une org — par là
+# et par nulle part ailleurs :
 # `data.gitea_team` prend un id NUMÉRIQUE en entrée, il ne cherche pas par nom (mesuré, il rend
 # « The argument "id" is required »).
 #

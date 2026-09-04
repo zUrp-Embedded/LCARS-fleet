@@ -14,9 +14,10 @@
 # meilleure : ils en fabriquent une seconde version, plus faible, qui vieillit toute seule.
 # Notre seule sonde est FONCTIONNELLE et reste à nous : le binaire répond --version.
 #
-# ⚠ UNE SECONDE SOURCE A VÉCU ICI ET N'EXISTE PLUS (2026-08-17) : `$PROV_CLAUDE_SEED`, un binaire
-# déjà posé sur la machine par un geste extérieur — un semis de banc — que ce module préférait au
-# réseau. NE PAS LA RÉINTRODUIRE.
+# ⚠ UNE SEULE SOURCE, L'INSTALLEUR OFFICIEL. Pas de seconde source — un `$PROV_CLAUDE_SEED`, binaire
+# déjà posé sur la machine par un geste extérieur (un semis de banc) que ce module préférerait au
+# réseau : elle vieillirait seule, et le module devrait alors choisir entre deux vérités.
+# `claude_bin.bats` tient cette occurrence-ci pour la seule.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

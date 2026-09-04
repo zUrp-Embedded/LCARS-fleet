@@ -3,9 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-06
 # STATUS: PROTO-V2 — pose la CHARTE sur la forge : avatars des comptes + org, et le nom du siège master
-#         (frère cosmétique de forge.tf). Il s'appelait `provision-forge-charte.sh` ; le nom est devenu
-#         faux le jour où il a aussi posé un `full_name`, et un nom faux se corrige (cf. le release
-#         `fleet_umbrella`, renommé pour cette raison exacte).
+#         (frère cosmétique de forge.tf). « Charte » couvre les deux : l'image ET le `full_name` du
+#         siège sont des faits de présentation, pas de structure.
 #
 # POURQUOI CE SCRIPT (et pas du .tf) : le provider go-gitea/gitea n'expose AUCUN attribut avatar
 # settable (juste org.avatar_url en lecture). L'avatar n'est pas de l'état convergent qu'on déclare —
@@ -64,8 +63,8 @@ CHECK_ONLY=0
 #   · producer  — `engineer` (engrenage) ↔ `scribe` (document)        : orange #FF9900
 #   · system    — `chief` (confluence de merge) ↔ `gatekeeper` (portail) : cyan   #33BBCC
 # Deux entrees de meme teinte ne sont donc PAS un doublon a corriger. C'est aussi pourquoi `chief`
-# a rejoint cette table (2026-08-15) : il avait un compte et un jeton depuis toujours, aucun dessin,
-# donc aucun avatar — le trou que le verdict de ce script nommait deja (6-115).
+# est dans cette table : un role qui a un compte et un jeton mais aucun dessin n'a aucun avatar, et
+# le verdict de ce script nomme ce trou (6-115).
 declare -a ENTRIES=(
   "system_architect:architect.png"
   "fleet_engineer:engineer.png"
@@ -165,11 +164,11 @@ if [[ "$CHECK_ONLY" -eq 0 && -z "$ADMIN_TOKEN" ]]; then
   exit 1
 fi
 
-# ⚠ LE JETON ADMIN NE PASSE PLUS PAR argv, ET C'EST UNE PROPRIETE QUE L'APPELANT PAYAIT DEJA.
+# ⚠ LE JETON ADMIN NE PASSE PAS PAR argv, ET C'EST UNE PROPRIETE QUE L'APPELANT PAIE DEJA.
 # `charte.tf` la declare noir sur blanc : « le master-token passe par l'ENVIRONNEMENT, jamais par la
-# ligne de commande : un argument est visible dans la table des processus ». Ce script la defaisait a
-# son premier `curl` — `AUTH=(-H "Authorization: token $ADMIN_TOKEN")` met le jeton dans
-# `/proc/<pid>/cmdline`, lisible par tout le monde pendant la requete. Et ce jeton-la est un
+# ligne de commande : un argument est visible dans la table des processus ». Un
+# `AUTH=(-H "Authorization: token $ADMIN_TOKEN")` la deferait au premier `curl` : il met le jeton
+# dans `/proc/<pid>/cmdline`, lisible par tout le monde pendant la requete. Et ce jeton-la est un
 # SITE-ADMIN : avec `Sudo:`, il agit au nom de n'importe quel compte.
 #
 # `curl -K -` lit sa configuration sur STDIN : ni argv, ni fichier a creer/chmoder/supprimer. Meme
@@ -189,12 +188,11 @@ AUTH_CFG="header = \"Authorization: token $(curl_cfg_escape "$ADMIN_TOKEN")\""
 forge_curl() { printf '%s\n' "$AUTH_CFG" | curl -K - "$@"; }
 
 # ─── QUI EST LE MASTER — RESOLU UNE FOIS, POUR LES DEUX FAITS QU'IL PORTE ────────────────────────
-# ⚠ CETTE RESOLUTION ETAIT FAITE DEUX FOIS, DE DEUX FACONS, ET LE BADGE PERDAIT. Le nom du siege se
-# repliait sur `id=1` quand `--admiral` manquait ; le BADGE, lui, entrait dans la table au PARSING,
-# donc seulement si l'option etait la. Le jour ou l'appelant a cesse de nommer le master — parce que
-# ce login se DERIVE et ne se parametre pas (arbitrage 2026-08-16) — le siege a garde son nom et
-# l'avatar du master a disparu, EN SILENCE. La sonde du banc l'a dit : « FAIL admiral — pas d'avatar
-# custom » a cote de « OK admiral — nom du siege ». Un fait, une resolution.
+# ⚠ UNE RESOLUTION, PAS DEUX. Le login du master se DERIVE et ne se parametre pas (arbitrage
+# 2026-08-16), donc l'appelant ne le nomme en general pas. Si le nom du siege se repliait sur `id=1`
+# quand `--admiral` manque mais que le BADGE n'entrait dans la table qu'au PARSING de l'option, le
+# siege garderait son nom et l'avatar du master disparaitrait, EN SILENCE — la sonde dirait « FAIL
+# admiral — pas d'avatar custom » a cote de « OK admiral — nom du siege ». Un fait, une resolution.
 #
 # `/admin/users` EXIGE l'autorite : en `--check` (aucun jeton d'admin garanti) on ne resout pas, on
 # se contente de ce que l'appelant a nomme. Une sonde qui devinerait le master rendrait un verdict
@@ -336,10 +334,9 @@ fi
 
 # L'ORG (endpoint distinct, sans Sudo — l'admin édite l'org). --org "" pour sauter.
 if [[ -n "$ORG" ]]; then
-  # ⚠ LE FAVICON N'EST PAS UN AVATAR DE ROLE, et il vivait quand meme dans le dossier des avatars.
-  # `deps/avatars/favicon.png` etait l'octet pour octet `assets/favicon/favicon-512.png` (md5
-  # identique) sous un autre nom : un doublon dont rien ne disait qu'il en etait un. Il se lit
-  # maintenant dans l'arbre favicon installe, qui est sa seule maison.
+  # ⚠ LE FAVICON N'EST PAS UN AVATAR DE ROLE : il se lit dans l'arbre favicon installe, sa seule
+  # maison. Une copie sous `avatars/` serait l'octet pour octet `assets/favicon/favicon-512.png`
+  # sous un autre nom — un doublon dont rien ne dirait qu'il en est un.
   org_file="$LCARS_MEDIA_ROOT/favicon/favicon-512.png"
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
     url="$(forge_curl -s -m 10 "$FORGE/api/v1/orgs/$ORG" | jq -r '.avatar_url // ""')"

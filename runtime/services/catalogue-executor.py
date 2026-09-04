@@ -6,10 +6,11 @@
 #
 # ─── WHY THIS PROCESS EXISTS ────────────────────────────────────────────────────────────────────
 #
-# WHEN THE CALLER'S SHELL HELD THE TOKEN, HOLDING IT WAS THE PROOF -- so the token's mode became the
-# gate, so a unix group had to carry `is_admin`, so a converger had to project it, so a poll had to
-# refresh it, so a drift repair had to fix consoles born before the projection. Split proving from
-# executing and the whole chain is unnecessary: the caller holds nothing and proves nothing.
+# IF THE CALLER'S SHELL HELD THE TOKEN, HOLDING IT WOULD BE THE PROOF -- so the token's mode would
+# become the gate, so a unix group would have to carry `is_admin`, so a converger would have to
+# project it, so a poll would have to refresh it, so a drift repair would have to fix consoles born
+# before the projection. Split proving from executing and the whole chain is unnecessary: the
+# caller holds nothing and proves nothing.
 #
 # NO SEAT IS PRIVILEGED -- not a name, not a uid, not a group. A path that skipped the question
 # "because it is the seat" would be a second gate, therefore a second truth, therefore the drift
@@ -116,11 +117,11 @@ class NoAuthority(Exception):
     """
     This box has no usable site-admin credential.
 
-    ⚠ IT IS A CAUSE OF ITS OWN, AND MERGING IT WAS A MEASURED DEFECT. `master_token()` used a bare
-    `open()`, and its caller caught `OSError` -- which `FileNotFoundError` and `PermissionError`
-    both inherit from. An absent, unreadable, empty or REVOKED token therefore came out as
-    `forge_unreachable`, and the operator was told "the forge is perhaps restarting, retry" about a
-    forge in perfect health. Measured 2026-08-24, all four cases.
+    ⚠ IT IS A CAUSE OF ITS OWN, NEVER MERGED INTO `OSError`. A bare `open()` whose caller catches
+    `OSError` -- which `FileNotFoundError` and `PermissionError` both inherit from -- turns an
+    absent, unreadable, empty or REVOKED token into `forge_unreachable`, and tells the operator
+    "the forge is perhaps restarting, retry" about a forge in perfect health (measured 2026-08-24,
+    all four cases).
 
     The two remedies are OPPOSITE, which is what makes the merge expensive: a mute forge is retried,
     a missing authority is RE-POSED by an admin. Nothing the operator can do fixes the first, and
@@ -143,7 +144,7 @@ def master_token():
         raise NoAuthority(f"{MASTER_TOKEN_FILE} illisible ({exc.strerror})") from exc
     # ⚠ VIDE N'EST PAS ABSENT, ET C'EST LE MEME MANQUE. Un fichier vide part sur le fil comme un
     # en-tete sans jeton, la forge rend 401, et sans ce garde la cause devient « forge muette ».
-    # `forge-gestures.sh cmd_install` fait ce controle depuis toujours ; ce process l'avait perdu.
+    # `forge-gestures.sh cmd_install` fait le meme controle de son cote.
     if not token:
         raise NoAuthority(f"{MASTER_TOKEN_FILE} est VIDE")
     return token
@@ -182,10 +183,9 @@ def is_fleet_human(login):
     """
     Does the forge say this login is a member of the org's `humans` team?
 
-    ⚠ THIS IS THE QUESTION THE UNIX GROUP WAS ANSWERING, and answering STALE. `fleet` was populated
-    from this very team by the converger, every 30s, and a role token was readable by anyone the
-    projection had reached — including someone the forge had since removed, until the next tick and
-    until every one of their live processes died.
+    ⚠ A UNIX GROUP WOULD ANSWER THIS QUESTION STALE: `fleet` is populated from this very team by
+    the converger, every 30s, so a role token readable by the group stays readable by someone the
+    forge has since removed, until the next tick and until every one of their live processes dies.
 
     Asked here, at the instant of the gesture, it has no staleness to carry: a removal bites on the
     next request. Raises on any non-answer -- fail-closed, like every other authority question in
@@ -415,10 +415,10 @@ def bind(path=None):
     """
     The listening socket — the lifecycle lives in `lcars_socket`, written once.
 
-    ⚠ CE CORPS PORTAIT CINQ GESTES ET UN PIEGE (une socket residuelle -> EADDRINUSE, muet). Il y en
-    a maintenant DEUX dans ce process, et il y en aura un troisieme dans `lcars-privileged` : le
-    cycle de vie se partage par un MODULE, jamais en recopiant. Ce qui ne se partage PAS est le
-    process — un seul process pour tout retomberait sur une seule classe de confiance.
+    ⚠ CINQ GESTES ET UN PIEGE (une socket residuelle -> EADDRINUSE, muet), ecrits UNE fois : deux
+    sockets dans ce process, une troisieme dans `lcars-privileged`, et le cycle de vie se partage par
+    un MODULE, jamais en recopiant. Ce qui ne se partage PAS est le process — un seul process pour
+    tout retomberait sur une seule classe de confiance.
     """
     return lcars_socket.bind(path or SOCKET_PATH, SOCKET_GROUP, SOCKET_MODE, prefix="lcars-catalogue")
 
