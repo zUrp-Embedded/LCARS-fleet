@@ -4,6 +4,15 @@
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — entrypoint conteneur : converge le volume d'état puis exec sshd (login-manager)
 #
+# USAGE — les portes de l'image (« docker run --rm IMAGE <porte> … »), deleguees a « lcars tool » :
+#   entrypoint.sh verify <root>
+#   entrypoint.sh roles [root]
+#   entrypoint.sh roles-tfvars [root]
+#   entrypoint.sh catalogue-root
+#   entrypoint.sh catalogue-source <nom>
+#   entrypoint.sh forge-apply              (root : joue forge-gestures apply DANS la boite)
+# Sans porte : le boot de la boite (PID 1 sous tini).
+#
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
 # login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet_v2 start`. Ce
 # script est la transposition Docker du « re-run convergent » : l'image est immutable (build),

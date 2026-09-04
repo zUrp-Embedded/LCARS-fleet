@@ -290,7 +290,9 @@ secret_writers() {
   # GARDE D'INSTRUMENT du mur 3 : il interdit de passer un CHEMIN. Ce qui rend le geste possible est
   # que la valeur, elle, traverse. `env` ne propage que ce qu'on lui NOMME : la variable oubliee ici
   # rendrait une porte sans credential, et son echec accuserait la source du catalogue.
-  grep -qE 'FORGE_TOKEN="\$\{FORGE_TOKEN:-\}"' "$REPO/deploy/docker/entrypoint.sh"
+  # Lot 6 (2026-09-04) : la porte est « lcars tool catalogue-source » (bin/lcars) — l'entrypoint ne
+  # fait plus que deleguer. C'est la CLI qui doit relayer la VALEUR.
+  grep -qE 'FORGE_TOKEN="\$\{FORGE_TOKEN:-\}"' "$REPO/fleet/bin/lcars"
   grep -qE 'FORGE_TOKEN="\$sys_tok_value"' "$REPO/fleet/services/forge-gestures.sh"
 }
 

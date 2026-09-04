@@ -99,6 +99,12 @@ const LCARS = {
                         côté pod, exposé ici pour pouvoir le rejouer et diagnostiquer. Une sortie 6
                         dit que la réécriture a cessé d'être déterministe : le clone est CONSERVÉ et
                         son chemin imprimé, parce qu'à ce moment-là c'est la seule pièce à charge.`,
+  'lcars tool': `Les portes outil du release, en un seul endroit : ce qu'un service de la boîte, un
+                 module de l'installeur ou l'image elle-même (« docker run IMAGE roles-tfvars »)
+                 demande au release sans monter de fleet. Elles vivaient dans l'entrypoint du
+                 conteneur ; un geste du produit qui exécute le PID 1 de l'image pour évaluer une
+                 fonction n'avait pas sa porte au bon endroit. Sous root, l'évaluation tombe en
+                 « nobody:fleet » : du code de catalogue ne s'exécute pas avec les pouvoirs du boot.`,
   'lcars help': null
 };
 
