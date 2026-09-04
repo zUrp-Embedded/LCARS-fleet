@@ -2,8 +2,8 @@ defmodule Fleet.Pilot.PodFeed do
   @moduledoc """
   The pod-visible feed FILE: one stamped line appended, bounded, never raising.
 
-  Extracted from `ArchFeed`, and it stays extracted even with a single client: a format does not
-  belong to its only reader. What is shared is not the editorial line — the two feeds watch opposite things and follow opposite axioms — it is the
+  Separate from `ArchFeed` even with a single client: a format does not belong to its only
+  reader. What is shared is not the editorial line — the two feeds watch opposite things and follow opposite axioms — it is the
   FORMAT: the file name the pod reads at `~/fleet.feed`, the `HH:MM` stamp, the 200-line bound. A
   format owned twice is a format that drifts, and the reader that would notice is an agent looking
   at a file that stopped looking like the one its instructions describe.

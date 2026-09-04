@@ -25,7 +25,7 @@ defmodule Fleet.Pilot.WakeRecovery do
       :ok ->
         :ok
 
-      # UNREACHABLE (the pod's info call timed out) is not a dead pod: re-rolling here was
+      # UNREACHABLE (the pod's info call timed out) is not a dead pod: re-rolling here would be
       # the destructive path — a fresh spawn on the deterministic id, then the reap of a
       # maybe-LIVING agent mid-work. DEFER: a slow pod self-corrects at the next tick, and
       # a truly stuck one is the response-deadline's job, never a blind respawn.

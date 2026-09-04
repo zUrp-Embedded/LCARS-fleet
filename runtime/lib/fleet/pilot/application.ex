@@ -6,16 +6,16 @@ defmodule Fleet.Pilot.Application do
   alias Fleet.Workflow.Loader
 
   @moduledoc """
-  Domain supervisor (the module keeps the historical `Application` name — zero reference churn).
+  Domain supervisor (`Application`, the name every domain gives its supervisor module).
 
   Supervisor for the pilot domain — **STEP mode only** (the forge IS the state machine).
 
-  Starts, if `:step_dispatch?` is configured (`config/runtime.exs` from the env) and the forge
+  Starts, if `:pilot_step_dispatch?` is configured (`config/runtime.exs` from the env) and the forge
   `base_url` resolves, the processes of the forge-state-machine rail:
 
-    * `Fleet.Pilot.Poller` (step mode) — **MULTI-PROJECT**: DISCOVERS the fleet-org repos by
-      org-membership (`list_org_repos`, WS3 — no hard-coded `:poll_repo`), dispatches the
-      **assigned issues** (assignee=human) to the spawn of the **producer** role (`StepDispatcher`).
+    * `Fleet.Pilot.Poller` (step mode) — **MULTI-PROJECT**: DISCOVERS the repos of every catalogue
+      org by org-membership (`list_org_repos`, no hard-coded repo), dispatches the **assigned
+      issues** (assignee=human) to the spawn of the route's role (`StepDispatcher`).
     * `Fleet.Pilot.StepRunConsumer` — Bus consumer: on `pod.completed`, runs the **end-of-step-run**
       (publish of the git-native deliverable → system push → PR open → merge). Without it, the chain
       does not advance past the producer spawn.
@@ -25,8 +25,8 @@ defmodule Fleet.Pilot.Application do
       events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
     * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:lcars_fleet, :pilot_poller, :poll]`. First child
-      of the rail because it measures the rail: the poller emitted those three sites since it was
-      written and nothing ever attached, so every duration was computed and dropped (BL-6-40 Ph. 0).
+      of the rail because it measures the rail: without it every duration the poller emits is
+      computed and dropped (BL-6-40 Ph. 0).
   """
 
   use Supervisor
@@ -80,7 +80,7 @@ defmodule Fleet.Pilot.Application do
   owns the rail topology → it is the one that knows whether the singletons are alive (fleet_api only
   asks, no MCP process name leaks into the surface).
 
-    * `{:inactive, _}`    — `:step_dispatch?` off (rail deliberately absent, expected outside prod-step).
+    * `{:inactive, _}`    — `:pilot_step_dispatch?` off (rail deliberately absent, expected outside prod-step).
     * `{:operational, _}` — Poller + StepRunConsumer alive.
     * `{:degraded, _}`    — step enabled and EITHER ≥1 singleton dead, OR every poll of the observed
       window failed → **hollow-green caught** (the daemon runs but the forge rail no longer
@@ -120,9 +120,9 @@ defmodule Fleet.Pilot.Application do
       # debout mais dont les passes prennent quarante secondes est « operationnel » et ne va pas bien.
       #
       # ⚠ LA CLE S'APPELLE `repo_poll` ET PAS `tick`, parce que la mesure porte sur UN DEPOT et pas
-      # sur un cycle : l'evenement est emis une fois PAR DEPOT. Le nom precedent affirmait une portee
-      # que le mecanisme n'a pas, et une mesure a ete lue de travers dessus. Le cout d'un CYCLE n'est
-      # pas mesure ici, et aucun nom ne doit le suggerer.
+      # sur un cycle : l'evenement est emis une fois PAR DEPOT. Un nom comme `tick` affirmerait une
+      # portee que le mecanisme n'a pas, et une mesure se lit de travers dessus (mesure). Le cout
+      # d'un CYCLE n'est pas mesure ici, et aucun nom ne doit le suggerer.
       #
       # Deux echelles, deux cles, JAMAIS une moyenne des deux : `poll_cycle` est celle a lire pour
       # savoir si une valeur figee en debut de passe peut se perimer avant la fin — `repo_poll` ne
@@ -230,10 +230,10 @@ defmodule Fleet.Pilot.Application do
     ]
   end
 
-  # Processes of the STEP rail (the forge IS the state machine). Started iff `:step_dispatch?` is
-  # true. `[]` if `:step_dispatch?` absent/false (deliberately inert app — test hermeticity).
+  # Processes of the STEP rail (the forge IS the state machine). Started iff `:pilot_step_dispatch?` is
+  # true. `[]` if `:pilot_step_dispatch?` absent/false (deliberately inert app — test hermeticity).
   #
-  # If `:step_dispatch?` is TRUE but the essential config does not resolve, we do NOT silently fall back
+  # If `:pilot_step_dispatch?` is TRUE but the essential config does not resolve, we do NOT silently fall back
   # to `[]` (that would start the app "green" without Poller/StepRunConsumer → forge rail dead, zero
   # crash, zero log). The operator ASKED for step mode → incomplete config = broken deploy →
   # fail-loud at boot.
@@ -251,8 +251,8 @@ defmodule Fleet.Pilot.Application do
   @spec step_children_for_test() :: list()
   def step_children_for_test, do: step_children()
 
-  # MULTI-PROJECT: no mandatory `:poll_repo` nor remote frozen at boot — the Poller DISCOVERS its
-  # repos by org-membership (`list_org_repos`, WS3) and the StepRunConsumer derives the repo+remote
+  # MULTI-PROJECT: no mandatory repo nor remote frozen at boot — the Poller DISCOVERS its repos
+  # by org-membership (`list_org_repos` on every catalogue org) and the StepRunConsumer derives the repo+remote
   # PER-STEP-RUN from the event. The essential config that remains = the forge `base_url`: without it, neither
   # discovery (`list_org_repos`) nor push (per-step-run remote) work → dead rail. This is the
   # fail-loud guard, aimed at the real thing.
@@ -306,8 +306,8 @@ defmodule Fleet.Pilot.Application do
       # the StepRunConsumer: distinct concern, the failure burst does not share the completion's mailbox.
       {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 16},
       {IncidentConsumer, runner: &IncidentConsumer.offload_async/1},
-      # Serializer that aligns the local clone after merge: projects the deliverable (`origin/main`) onto
-      # `/home/projects/<name>`. Started BEFORE Poller + StepRunConsumer — its two merge triggers
+      # Serializer that aligns the local clone after merge: projects the merged branch onto the
+      # FACE's worktree (`main` → code face, `ops` → ops face). Started BEFORE Poller + StepRunConsumer — its two merge triggers
       # (`promote_pr` / `StepRunCompleter.promote`) — so it serializes their potentially concurrent
       # alignments (one `git` at a time per worktree, against index corruption).
       Fleet.Project.WorktreeSync,
@@ -546,10 +546,9 @@ defmodule Fleet.Pilot.Application do
   # reach readiness GREEN and die at the first undeclared project's dispatch, far from the deploy
   # fault. We load it HERE, fail-loud, same dead-man's-switch as the card guards above.
   #
-  # It USED to also assert the default card's `applicable_intensity` covered the level an undeclared
-  # project takes. That level is gone (crit_quarantine): the card alone carries the gate, a project
-  # declares its criticality BY naming a card, and a card that loads is a card that can serve. What
-  # remains is the load itself — the guarantee `Catalogue.verify!` never gave.
+  # No intensity level to cover: the card alone carries the gate, a project declares its criticality
+  # BY naming a card, and a card that loads is a card that can serve. What is proved is the load
+  # itself — the guarantee `Catalogue.verify!` does not give.
   @spec validate_default_card_loads!(keyword()) :: :ok
   def validate_default_card_loads!(opts \\ []) do
     for {scope, root} <- default_card_scopes(opts),

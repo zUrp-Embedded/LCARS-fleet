@@ -244,10 +244,10 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # La phrase que le doublon eventuel portera, dans le CORPS de l'issue — pas seulement dans un log
   # que personne ne relit en face d'un tableau ops.
   #
-  # ⚠ UNE SEULE CLAUSE, ET C'EST DIALYZER QUI L'A DIT. J'avais ajoute un `dedup_warning(_none)`
-  # rendant `""` « au cas ou » : `pattern_match_cov`, il ne peut jamais matcher, cette fonction
-  # n'etant appelee que depuis la branche `{:unverified, _}`. Le « present = doute, absent =
-  # mesure » vit dans le CHOIX DE BRANCHE de l'appelant, pas dans un repli ici.
+  # ⚠ UNE SEULE CLAUSE : un `dedup_warning(_none)` rendant `""` « au cas ou » ne peut jamais
+  # matcher (dialyzer, `pattern_match_cov`), cette fonction n'etant appelee que depuis la branche
+  # `{:unverified, _}`. Le « present = doute, absent = mesure » vit dans le CHOIX DE BRANCHE de
+  # l'appelant, pas dans un repli ici.
   defp dedup_warning({:unverified, why}) do
     """
 
@@ -263,7 +263,8 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   Two things land there and must never drift apart: the incident REGISTRY file (branch `ops`,
   `IncidentRegistry`) and the sysadmin ISSUES opened from it (here). They are two faces of one
   incident — a registry on repo A whose issues open on repo B is an alarm nobody finds. The two
-  specific knobs (`:incident_registry_repo` / `:system_issue_repo`) remain as explicit overrides.
+  specific knobs (`:pilot_incident_registry_repo` / `:pilot_system_issue_repo`) remain as explicit
+  overrides.
   """
   @spec ops_repo() :: String.t()
   def ops_repo, do: Application.get_env(:lcars_fleet, :pilot_ops_repo, "fleet/lcars")
