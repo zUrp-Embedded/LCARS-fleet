@@ -30,7 +30,11 @@ setup() {
 @test "chaque COPY du Dockerfile designe un chemin qui EXISTE sous ce contexte (sauf --from, qui lit un stage)" {
   local src bad=0
   while read -r src; do
-    [[ "$src" == *\[* ]] && continue   # un motif optionnel (`.source-revisio[n]`) n'exige rien
+    # Un motif OPTIONNEL — UN caractere entre crochets en FIN de nom (`.source-revisio[n]`, cf.
+    # eb388ef5d) — n'exige rien. Tout autre crochet est un chemin comme un autre et se verifie :
+    # ecarter `*[*` laissait passer n'importe quel COPY fautif portant un crochet (relecture
+    # hostile 2026-09-04, M3).
+    case "$src" in *\[?\]) continue ;; esac
     [[ -e "$ROOT/$src" ]] || { echo "COPY $src : absent sous $ROOT" >&2; bad=1; }
   done < <(grep -vE '^\s*#' "$DOCKER/Dockerfile" | grep -E '^COPY ' | grep -v -- '--from=' \
            | sed -E 's/^COPY\s+//; s/--[a-z-]+(=\S+)?\s+//g' | awk '{ for (i = 1; i < NF; i++) print $i }' \
