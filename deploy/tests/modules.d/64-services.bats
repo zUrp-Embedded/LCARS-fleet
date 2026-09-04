@@ -147,8 +147,10 @@ mod() { run bash "$MOD" "$1"; }
   # Un service n'a ni le shell de l'operateur ni les PROV_* que `provision` exporte le temps d'un
   # apply. Le convergeur lit ces noms-la : s'ils manquent, il converge une autre org, en silence.
   mod apply
-  grep -q "^PROV_FORGE_ORG=" "$LCARS_SERVICES_ENV"
-  grep -q "^PROV_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
+  # lot 8 : les daemons sont le PRODUIT, leur env parle LCARS_*
+  grep -q "^LCARS_FORGE_ORG=" "$LCARS_SERVICES_ENV"
+  grep -q "^LCARS_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
+  refute grep -q "^PROV_" "$LCARS_SERVICES_ENV"
 }
 
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
@@ -320,9 +322,9 @@ mod() { run bash "$MOD" "$1"; }
   # Mutation du 2026-08-26 : un `PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}` reinjecte laissait ce
   # temoin VERT — les deux `!` s'executaient, echouaient, et bash les exempte d'`errexit`. Seule la
   # ligne `grep -q 'echo …'` comptait, et elle ne verifie pas ce que le titre promet.
-  refute grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
-  refute grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
-  grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
+  refute grep -qE 'LCARS_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
+  refute grep -qE 'LCARS_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
+  grep -q 'echo "LCARS_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
 }
 
 # ─── LE PORT DU DECK — une valeur, les deux bouts ───────────────────────────────────────────────
@@ -539,7 +541,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   mod apply
   [ "$status" -eq 0 ]
   # CE QUI VIENT DU FICHIER — donc ce que le daemon aura aussi.
-  grep -q '^PROV_HUMANS_TEAM=' "$CONV_ENV"
+  grep -q '^LCARS_HUMANS_TEAM=' "$CONV_ENV"
   grep -q '^FORGE_BASE_URL=http://127.0.0.1:3000$' "$CONV_ENV"
   # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
   # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.

@@ -279,7 +279,8 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   check fleet/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
   check fleet/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check fleet/services/box/boot.sh    "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
+  check fleet/services/box/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail boite"
+  check fleet/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
