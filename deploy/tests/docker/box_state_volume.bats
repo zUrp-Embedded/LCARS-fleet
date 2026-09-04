@@ -18,7 +18,7 @@ setup() {
 }
 env_of() { sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1; }
 mounts_of() { sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+).*$/\1/p'; }
-under_mount() { local f; while read -r m; do [[ "$1" == "$m"/* ]] && return 0; done < <(mounts_of "$2"); return 1; }
+under_mount() { local m; while read -r m; do [[ "$1" == "$m"/* ]] && return 0; done < <(mounts_of "$2"); return 1; }
 
 @test "le client OAuth2 du deck est sous un volume, dans les deux composes, au MEME chemin" {
   local dev pull
