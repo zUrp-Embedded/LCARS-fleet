@@ -30,6 +30,7 @@ HELPERS=(
   console-pod.sh
   human-converger.sh
   forge-gestures.sh
+  provision-role-tokens.sh
   catalogue-executor.py
   lcars_socket.py
   privileged-executor.py
