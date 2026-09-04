@@ -13,9 +13,8 @@ defmodule Fleet.API.Application do
       fichier (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet eteinte ;
     * les ecritures n'y transitent pas : elles vivent sur le socket de controle ci-dessous.
 
-  Et personne ne l'appellerait : ni `bin/lcars` (dont le propre commentaire dit que `$API_URL` n'est
-  lu nulle part), ni le BEAM, ni le healthcheck du conteneur, et les tests appellent le plug
-  directement, sans reseau.
+  Et personne ne l'appellerait : ni `bin/lcars` (qui ne parle qu'a la socket de controle), ni le
+  BEAM, ni le healthcheck du conteneur, et les tests appellent le plug directement, sans reseau.
 
   ⚠ LE SOCKET DE CONTROLE N'EST PAS DERRIERE UN DRAPEAU DE LISTENER TCP. Imbrique dans un
   `if api_start_listener`, le chemin d'ECRITURE dependrait d'un commutateur nomme d'apres une
@@ -63,7 +62,7 @@ defmodule Fleet.API.Application do
 
   ## L'absence de configuration EST l'interrupteur
 
-  Il n'y a plus de drapeau `:api_start_listener`. L'hermetisme des tests ne vient plus d'un
+  Il n'y a pas de drapeau `:api_start_listener`. L'hermetisme des tests ne vient pas d'un
   commutateur a poser mais du fait que `config/test.exs` ne declare aucun socket de controle : rien
   a eteindre, donc rien a oublier d'eteindre. Un drapeau qui doit valoir `false` en test est une
   chose de plus qui peut valoir `true` par accident.

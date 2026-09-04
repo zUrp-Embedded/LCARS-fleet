@@ -180,7 +180,7 @@ echo "publish-transform: passe filter-repo — toute identite interne (@lcars.lo
 fi
 
 # ⚠ PAS COSMETIQUE : `--partial` laisse `refs/remotes/origin/*` sur l'histoire d'avant, et la
-# certification lit `git log --all` — elle refusait une passe propre sur des refs NON PUBLIEES.
+# certification lit `git log --all` — elle refuserait une passe propre sur des refs NON PUBLIEES.
 git -C "$OUT_DIR" remote remove origin 2>/dev/null || true
 
 if [[ -n "$LINEARIZE" ]]; then

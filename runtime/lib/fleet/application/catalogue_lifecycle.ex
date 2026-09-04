@@ -69,18 +69,17 @@ defmodule Fleet.Application.CatalogueLifecycle do
     with {:ok, repos} <- repo_mod.search_repos(opts),
          {:ok, deposits, candidates} <- CatalogueDeposits.split(repos, opts) do
       # `candidates` EST la liste des magasins : `split/2` tranche l'identite ET le type du
-      # proprietaire, donc il n'y a plus de second jugement a rendre ici. Il y en avait un
-      # (`stores/3`), et le candidat qu'il recalait tombait dans un trou — cf. `split/2`.
+      # proprietaire, donc aucun second jugement ici — un candidat recale par un second lecteur
+      # tomberait dans un trou (cf. `split/2`).
       stores = candidates
 
       names =
         [@bundled | Map.keys(deposits) ++ Map.keys(stores)] |> Enum.uniq() |> Enum.sort()
 
-      # ⚠ `entry/5` NE PEUT PAS ECHOUER, et le compilateur l'a dit avant moi : j'avais ecrit une
-      # branche d'erreur qu'aucune clause ne produit. C'est deliberé et ca merite d'etre lu comme
-      # tel — une lecture de tete de store qui echoue rend « installe, fraicheur inconnue », parce
-      # qu'un store illisible n'est pas un catalogue non installe. Ce qui peut echouer est en amont
-      # (la forge, le doublon), et ces deux-la remontent.
+      # ⚠ `entry/5` NE PEUT PAS ECHOUER (une branche d'erreur ici serait morte, le compilateur le
+      # dit), et c'est delibere : une lecture de tete de store qui echoue rend « installe, fraicheur
+      # inconnue », parce qu'un store illisible n'est pas un catalogue non installe. Ce qui peut
+      # echouer est en amont (la forge, le doublon), et ces deux-la remontent.
       {:ok, Map.new(names, &{&1, entry(&1, deposits[&1], stores[&1], repo_mod, opts)})}
     end
   end
@@ -163,14 +162,14 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ⚠ ET RIEN NE TIENT CETTE PHRASE SANS `claim_stdout!/0`, qui renvoie le handler Logger vers
   stderr. Ses quatre soeurs l'appellent (`eval_main/0` juste au-dessus, les deux portes d'`Onboard`,
-  `CatalogueVerify`) ; l'oublier ici dort tant qu'aucun log ne sort sur ce chemin, et se reveille au
+  `CatalogueVerify`) ; son absence dort tant qu'aucun log ne sort sur ce chemin, et se reveille au
   premier — par exemple une candidature de depot ecartee, que `CatalogueDeposits` DIT deliberement
   plutot que d'ecarter en silence.
 
-  Ce que ca coute : la porte rend une ligne vide, puis le log, puis la reponse. `read -r repo branch
-  sha` lit la PREMIERE ligne, les trois champs sortent VIDES, l'URL est construite sur du neant, et
-  git repond `fatal: repository 'http://.../.git/' not found` — l'outil a qui on vient de passer du
-  vide se fait accuser. La bonne ligne etait la troisieme.
+  Ce que ca coute (mesure) : la porte rend une ligne vide, puis le log, puis la reponse. `read -r
+  repo branch sha` lit la PREMIERE ligne, les trois champs sortent VIDES, l'URL est construite sur
+  du neant, et git repond `fatal: repository 'http://.../.git/' not found` — l'outil a qui on vient
+  de passer du vide se fait accuser.
 
   The three refusals it owes the caller, each with its own exit code, because they call for three
   different gestures:
@@ -194,10 +193,10 @@ defmodule Fleet.Application.CatalogueLifecycle do
     System.halt(4)
   end
 
-  # ⚠ DEUX CLAUSES, PAS UN `cond` AVEC UN HELPER PRIVE. Dialyzer refusait le second : toutes ses
+  # ⚠ DEUX CLAUSES, PAS UN `cond` AVEC UN HELPER PRIVE. Dialyzer refuse le second : toutes ses
   # branches appellent `System.halt`, donc il n'a pas de retour local, et un `@spec no_return()` sur
-  # un prive aurait ete une annotation pour taire un outil. La forme a deux clauses dit la meme
-  # chose sans rien annoter.
+  # un prive serait une annotation pour taire un outil. La forme a deux clauses dit la meme chose
+  # sans rien annoter.
   def eval_source(name) when is_binary(name) do
     # AVANT TOUT APPEL QUI PEUT LOGGUER — `list/1` en emet au moins deux (le depot du catalogue
     # livre, un manifeste illisible), et un log emis avant ce geste part sur stdout.
@@ -256,8 +255,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   It exists to be witnessed. `eval_main/0` ends in `System.halt/1`, so nothing can assert on what it
   printed from inside the VM that runs the assertion; a private formatter would then be covered only
-  by a bench run, which is where the deposit-of-an-installed-catalogue defect lived until an
-  operator read the column.
+  by a bench run — and a column an operator reads is not a place to discover a rendering defect.
   """
   @spec lines(%{String.t() => entry()}) :: [String.t()]
   def lines(entries), do: Enum.map(entries, fn {name, e} -> line(name, e) end)

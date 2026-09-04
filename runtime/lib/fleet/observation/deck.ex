@@ -149,9 +149,9 @@ defmodule Fleet.Observation.Deck do
   end
 
   # THE READ-DIAGNOSTIC PLANE LIVES ON THE READ SOCKET. The aggregator modules stay in `Fleet.API`
-  # (they already hold the cross-domain deps); the read plane serves them, because the operator's
-  # `state_of_the_fleet` skill curls this socket and gates on `readiness/deep` ("red -> do not
-  # undertake work"). Serving them anywhere else leaves that skill blind.
+  # (they already hold the cross-domain deps); the read plane serves them, because an operator
+  # gating on `readiness/deep` ("red -> do not undertake work") curls THIS socket, the only one a
+  # reader has. Serving them anywhere else leaves that reader blind.
   get "/api/readiness/deep" do
     json(conn, 200, Fleet.API.Readiness.deep())
   end
