@@ -14,7 +14,8 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   On `:engage`: resolves project + route, then:
     * **route absent** (routeless issue — create_issue does not write it, or a raw human issue) →
-      `ensure_workflow_map_or_onboard` writes the **default workflow_map** (brief-gate) → `{:skipped, :onboarded}`
+      `ensure_workflow_map_or_onboard` engraves the project's **declared workflow_map** (or the
+      workshop rail's for a `destination/workshop` ticket) → `{:skipped, :onboarded}`
       (we defer; the next tick sees it routed). This is the system ENTRY: create_issue creates, the poller routes.
     * **route present** → `workflow_map_role` derives `{role, profile, step_spec}` from the workflow_map POSITION (NO
       hardcoded producer — the route decides; route absent at this point = anomaly → fail-loud, never the eng
@@ -49,7 +50,7 @@ defmodule Fleet.Pilot.StepDispatcher do
   # `Spawn.spawn_step/9` (order lock→pod→enqueue→wake + compensation + `wake_unreached` contract),
   # `Spawn.pod_id_for_scope/4` (pod identity) and the scope gate (`project_scope_decision/4` +
   # `gate_scope_decision/1` + `maybe_reprovision/5`) — one copy each, never a fork. The core
-  # DECIDES (route/role/verdict), Spawn EXECUTES (its naming helpers — rc_name / feature_slug /
+  # DECIDES (route/role/verdict), Spawn EXECUTES (its naming helpers — feature_slug /
   # maybe_put_route / resolve_repo_id — are shared with the review flow, one copy).
   alias Fleet.Pilot.StepDispatcher.Spawn
 
@@ -524,8 +525,8 @@ defmodule Fleet.Pilot.StepDispatcher do
   end
 
   # System onboarding. Route present → passthrough `{:ok, route}`. Route nil (routeless issue:
-  # create_issue does not write the workflow_map; or a raw human issue) → writes the default workflow_map (brief-gate)
-  # = it ENTERS the gate → `{:onboarded, step}` (dispatch_issue defers: skip this tick, the next one
+  # create_issue does not write the workflow_map; or a raw human issue) → engraves the project's
+  # declared card (or the workshop rail's) at its first step → `{:onboarded, step}` (dispatch_issue defers: skip this tick, the next one
   # sees it routed). Route posted by the SYSTEM (system forge token). Failure → `{:error, {:onboard, _}}`.
   defp ensure_workflow_map_or_onboard(
          _forge,
@@ -691,8 +692,6 @@ defmodule Fleet.Pilot.StepDispatcher do
       resolved -> {:error, {:lot_moved, {ref, sha, resolved}}}
     end
   end
-
-  # Default onboarding workflow_map (every routeless assigned issue enters it; default brief-gate: the
 
   # Delegated to the single authority (WorkflowMapNav.safe_load — same tag; the rescue lives there).
   # THE REPO NAMES THE CATALOGUE, and an engraved route is a bare name. Two catalogues may each

@@ -247,8 +247,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
                     tier 0 (deterministic diagnosis + auto-resolution of an all-trivial conflict,
                     runtime, no pod), tier 1 (BOUNDED producer conflict-rework: local resolution on
                     the same PR — needs no forge credentials), tier 2 (ONE outsider pass, the
-                    `conflict_resolver` role), tier 3 (honest arch escalation). Flag off → tier 1 → tier 3,
-                    byte-for-byte the legacy path.
+                    `conflict_resolver` role, gated by its OWN flag `:pilot_conflict_exception_pass?`),
+                    tier 3 (honest arch escalation). Flag off → tiers 1, 2, 3 without the engine.
     * `:unknown`  → not classifiable → HONEST arch escalation (we don't guess).
   """
   @spec route_merge_failure(integer(), String.t(), term(), Ctx.t()) ::
@@ -299,8 +299,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # sur preuve ; il n'y en a AUCUNE sur l'echelon suivant, qu'il ne faut donc pas sauter — sans quoi
   # on va droit a un humain.
   #
-  # ⚠ UNE SEULE NUMEROTATION, ET LES ECHELONS SONT NOMMES : une variante decalee d'un cran a cohabite
-  # dans ces commentaires, et un echelon mal compte route vers le MAUVAIS acteur.
+  # ⚠ UNE SEULE NUMEROTATION, ET LES ECHELONS SONT NOMMES : un echelon mal compte route vers le
+  # MAUVAIS acteur.
   defp conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     if diagnosis_enabled?() do
       case tier0_conflict_route(pr_number, head, reason, ctx) do
@@ -432,8 +432,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # Skipping the CHIEF is not. Composing two intentions that both passed their jury, on a branch
   # the outsider did not write, IS the chief's case — it is what the exception pass exists for. The
   # ladder is tier 0 engine → tier 1 producer → tier 2 chief → tier 3 arch, and tier 0 may skip the
-  # PRODUCER on evidence; it has none about the CHIEF. The atom is renamed with the routing so the name cannot outlive the
-  # behaviour (`:escalate` would now describe a hand-off that escalates nothing).
+  # PRODUCER on evidence; it has none about the CHIEF. `:chief` names the routing; `:escalate`
+  # would describe a hand-off that escalates nothing.
   @spec tier0_decision(map()) :: :chief | :apply | :fall_through
   def tier0_decision(%{totals: %{none_trivial?: true}}), do: :chief
 
@@ -494,10 +494,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   defp diagnosis_enabled?,
     do: Application.get_env(:lcars_fleet, :pilot_conflict_diagnosis?, false)
 
-  # The FACE of the conflict (chantier face-projet, inventory #7/#8): the probe/apply helpers used
-  # to be called with `[]` and fall back to their `origin/main` default IN the code-face worktree —
-  # on an ops PR that would resolve a conflict by merging the CODE face into a doc branch, silently,
-  # and report `{:ok, :auto_resolved}`. The PR's own base (stamped at dispatch_review) names both
+  # The FACE of the conflict (chantier face-projet, inventory #7/#8): called with `[]`, the
+  # probe/apply helpers fall back to their `origin/main` default IN the code-face worktree — on an
+  # ops PR that would resolve a conflict by merging the CODE face into a doc branch, silently, and
+  # report `{:ok, :auto_resolved}`. The PR's own base (stamped at dispatch_review) names both
   # the merge target and the worktree the resolution runs in.
   defp conflict_face_opts(%Ctx{} = ctx) do
     base = Keyword.fetch!(ctx.opts, :pr_base_branch)
@@ -535,8 +535,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # `pilot_conflict_diagnosis?` est le coupe-circuit de l'ADMIN pour un moteur d'origine externe
   # (tier 0), tandis que la passe du chief est un barreau de l'echelle d'escalade de la FLOTTE. Un
   # commutateur, deux proprietaires — le choix GitWand de l'admin retirerait en silence un barreau
-  # qui n'a rien a voir avec GitWand (la passe ne consomme ni
-  # probe nor applier: it counts forge markers and dispatches a pod).
+  # qui n'a rien a voir avec GitWand (la passe ne consomme ni probe ni applier : elle compte des
+  # marqueurs forge et dispatche un pod).
   defp producer_exhausted(pr_number, head, reason, %Ctx{} = ctx, producer_rounds) do
     exception_stage(pr_number, head, reason, ctx, producer_rounds)
   end
@@ -616,16 +616,14 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   #
   # ⚠ CE MARQUEUR EST FORGE-VISIBLE ET PORTANT (`count_comments_marked` le lit pour borner la passe
   # a une), donc le RENOMMER est une migration : une PR portant deja l'ancien compterait 0 et
-  # obtiendrait une SECONDE passe. Le renommage `[conflict-gatekeeper:pr-N` -> `[conflict-chief:pr-N`
-  # a ete fait sans migration parce que ce tier n'a jamais tire en production (⚖ user) — enonce
-  # comme la raison, pas mesure ici. Le geste sur un tier qui tire : compter les deux prefixes
+  # obtiendrait une SECONDE passe. Le geste sur un tier qui tire : compter les deux prefixes
   # pendant un cycle.
   defp dispatch_exception_rework(pr_number, head, %Ctx{} = ctx) do
     signature = "[conflict-chief:pr-#{pr_number}:round-1]"
 
-    # La BASE REELLE, pas `main` : ce commentaire est lu par un humain sur la PR, et il decrivait une
-    # commande inexecutable des que la PR ne visait pas la face code. Meme valeur validee que celle
-    # qui choisit le worktree vingt lignes plus haut.
+    # La BASE REELLE, pas `main` : ce commentaire est lu par un humain sur la PR, et `main` y decrit
+    # une commande inexecutable des que la PR ne vise pas la face code. Meme valeur validee que celle
+    # qui choisit le worktree (`conflict_face_opts/1`).
     base = Keyword.fetch!(ctx.opts, :pr_base_branch)
 
     body =
@@ -677,10 +675,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
   # the workspace, the brief unchanged, and the review budget; the judges then re-review the new
   # head (commit-scoped verdicts). Bounded by the SAME `max_rework_rounds` policy as the judge
   # rework, counted via the `[conflict-rework:pr-N` markers this path posts (round-numbered →
-  # dedup makes the count replay-safe). Beyond budget, or any unreadable read → tier 3, the
-  # honest arch escalation (never a blind loop). Tier 2 (ONE outsider pass before the arch) is
-  # CÂBLÉ since the conflict-engine increment: budget-exhausted goes through `exception_stage_decision`
-  # and one pass, then the arch — gated by `:conflict_diagnosis?` like tier 0.
+  # dedup makes the count replay-safe). Any unreadable read → tier 3, the honest arch escalation
+  # (never a blind loop). Budget exhausted → tier 2 (ONE outsider pass, `exception_stage/5`, gated
+  # by its OWN flag `:pilot_conflict_exception_pass?` — never by `:pilot_conflict_diagnosis?`),
+  # then the arch.
   defp legacy_conflict_rework(pr_number, head, reason, %Ctx{} = ctx) do
     marker_prefix = "[conflict-rework:pr-#{pr_number}"
 
@@ -883,12 +881,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
     end
   end
 
-  # `:policy` = git-mergeable but the forge refuses. NOMINAL cause (CI off in dev): a human RE-REQUEST
-  # reset the branch-protection approval counter. We read the timeline (`pr_rerequested_reviewers`)
-  # → the re-requested judge(s) → we re-dispatch the first (spawn re-review, serialized by the PR lock;
+  # `:policy` = git-mergeable but the forge refuses. The CI is read FIRST (`reconverge_on_ci/3`:
+  # red → producer, pending → bounded wait); then the human cause: a RE-REQUEST reset the
+  # branch-protection approval counter. We read the timeline (`pr_rerequested_reviewers`) → the
+  # re-requested judge(s) → we re-dispatch the first (spawn re-review, serialized by the PR lock;
   # the rest on the next tick). It's the "re-request a judgment" button doing its job. No
-  # re-requested = policy block not mechanically liftable (signed commits required, or — if ever enabled —
-  # CI not green, to be gated by a status read before escalating) → honest escalation rather than a silent wedge.
+  # re-requested = policy block not mechanically liftable (signed commits required) → honest
+  # escalation rather than a silent wedge.
   # ⚠ UN BLOCAGE POLICY A DEUX CAUSES, ET ELLES NE VONT PAS AU MEME ENDROIT. N'en connaitre qu'une —
   # la re-demande humaine — fait tomber l'autre dans un fourre-tout qui convoque un humain en nommant
   # l'ABSENCE de re-demande plutot que la cause reelle.

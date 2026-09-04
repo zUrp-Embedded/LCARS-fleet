@@ -15,8 +15,8 @@ defmodule Fleet.Pilot do
 
   **A — Detection** (`Poller`, tick ~30 s): discovers repos by org-membership,
   lists issues+PRs, reconciles the 3 encodings of "in flight" (label `lcars-in-flight` /
-  live pod / TaskQueue mandate — `Poller.Reconciliation`, 2-tick grace), takes the
-  per-repo lease (`Poller.Lease`) and delegates.
+  live pod / TaskQueue mandate — `Poller.Reconciliation`, 2-tick grace), admits under the
+  per-repo ceiling (`Poller.Lease`, `max_fan`) and delegates.
 
   **B — Dispatch** (`StepDispatcher`): `decide/1` (PURE gate over the labels) →
   project/route resolution (the `stage/*` label carries the workflow_map position) →
@@ -39,9 +39,7 @@ defmodule Fleet.Pilot do
 
   Transverse rail: failures (`pod.failed`/`wake.failed`) go to
   `IncidentConsumer`→`IncidentRegistry` (WAL + forge sync), blast-radius isolated
-  from the completion rail. SINGLE forge HTTP exit: `ForgeClient` (+`Transport`).
-
-  ## Operator entries (delegated here — the facade is the contract)
+  from the completion rail. SINGLE forge HTTP exit: `Fleet.Forge.Client` (+ `Transport`).
 
   ## The escalation FAMILY — links of ONE chain, ordered by the DEPTH they reach
 

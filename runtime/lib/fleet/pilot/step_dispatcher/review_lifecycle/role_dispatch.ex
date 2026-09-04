@@ -39,7 +39,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
   alias Fleet.Opts
 
   # SINGLE-AUTHORITY spawn leaf (order lock→pod→enqueue→wake + compensation); its naming
-  # helpers (rc_name / maybe_put_route / resolve_repo_id) are shared with the issue flow.
+  # helpers (maybe_put_route / resolve_repo_id) are shared with the issue flow.
   alias Fleet.Pilot.StepDispatcher.Spawn
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx

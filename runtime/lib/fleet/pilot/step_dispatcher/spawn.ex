@@ -187,10 +187,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
     # `:ops_root` — SEAM of the ops root, the exact twin of `StepRunCompleter`'s and for the
     # same reason: the real root is a hardcoded global path, so without injecting it NO dispatcher
-    # test can walk the materialized branch. Measured before adding it: zero test in
-    # `step_dispatcher_test.exs` materializes a brief — all of them run with the work_dir absent,
-    # i.e. on the DEGRADED rail. The nominal path of the order delivery had no coverage at all,
-    # which is how it could carry a self-referential instruction for a whole chantier.
+    # test can walk the materialized branch — the hermetic suite runs with the work_dir absent,
+    # i.e. on the DEGRADED rail, and the nominal order delivery is then untested.
     ops_root = Keyword.get(spawn_opts, :ops_root)
 
     case materialize_order(brief, repo, issue_number, role, brief_kind, ops_root) do
@@ -273,11 +271,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # EXACTEMENT `brief` a `sha` : le contenu pinne est celui qu'on tient deja, aucune relecture
         # git n'y ajoute quoi que ce soit. L'adresse voyage a cote (`brief_ref`/`brief_sha`) : le
         # RUNTIME la grave en provenance a la completion (`put_runtime_brief`), et un tiers rejoue
-        # depuis la forge. Le pod ne la cite plus (F-15 retire).
-        #
-        # Ce que ca ferme : le pointeur envoyait le pod lire `$LCARS_PROJECT_OPS/<ref>`, donc
-        # exigeait de monter l'arbre d'operations ENTIER — tous les briefs, tous les verdicts — pour
-        # qu'il lise UN objet. Le pod n'a plus de chemin vers ops, donc plus de mauvais chemin.
+        # depuis la forge. Le pod ne la cite pas, et ne monte pas l'arbre ops : un pointeur vers
+        # `$LCARS_PROJECT_OPS/<ref>` exigerait de monter l'arbre d'operations ENTIER — tous les
+        # briefs, tous les verdicts — pour qu'il lise UN objet.
         {:ok, brief, [brief_sha: sha, brief_ref: ref]}
 
       # The only genuinely transient cause, and the only one that still degrades. But the ARTIFACT
@@ -296,8 +292,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       # (`:require_onboarded`), not by a second one: both enforce the one policy "a project this
       # fleet serves exists on disk", at two depths. The hermetic test baseline turns it off
       # because the suite drives fictional repos — and there it degrades to the plain inline brief,
-      # the behaviour that predates this item, so a test asserting a dispatch is asserting a
-      # dispatch and not this gate. Two keys for one policy would diverge at the first change.
+      # so a test asserting a dispatch is asserting a dispatch and not this gate. Two keys for one policy would diverge at the first change.
       {:error, {:work_dir_missing, _} = cause} ->
         if require_onboarded?() do
           refuse_order(repo, issue_number, role, cause)
@@ -538,12 +533,11 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   PUBLIC because shared with the core: `spawn_step/9` (compensation) AND `ReviewLifecycle.promote_pr`
   (die-on-promote of the eng). One copy, no fork.
   """
-  # LE SILENCE RESTE, LE FAIT CESSE D'ETRE FABRIQUE. Cette fonction avale toujours l'echec — c'est
+  # LE SILENCE RESTE, LE FAIT N'EST PAS FABRIQUE. Cette fonction avale toujours l'echec — c'est
   # l'arbitrage, ecrit chez ses trois appelants : un kill rate ne bloque rien, le tick suivant
-  # re-suspecte et retente. Mais elle rendait `:ok` dans QUATRE situations differentes : kill
-  # reussi, pod deja absent, `kill_pod/1` non exporte (doublure de test), et exception. Un appelant
-  # qui voulait dire ce qui s'est passe ne le pouvait pas — et l'un d'eux annoncait « reaped » sur
-  # cette base (JG-120).
+  # re-suspecte et retente. Mais un `:ok` unique pour QUATRE situations differentes — kill reussi,
+  # pod deja absent, `kill_pod/1` non exporte (doublure de test), exception — interdit a l'appelant
+  # de dire ce qui s'est passe, et l'un d'eux annoncerait « reaped » sur cette base (JG-120).
   #
   # Le retour est donc CLASSE : les trois sites l'ignorent, personne ne branche dessus, mais un
   # `@spec … :: any()` dirait qu'il n'est pas defini — et ce qui n'est pas defini ne peut pas etre
@@ -598,7 +592,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   # Idempotent dispatch. An already-ALIVE pod (stable deterministic id) = the long-lived pipe eng
-  # → we RE-BRIEF it (enqueue + wake, keeps its context), no re-spawn (no more leak/orphan).
+  # → we RE-BRIEF it (enqueue + wake, keeps its context), no re-spawn (no leak, no orphan).
   # `pod_alive?` defaults to `false` if the spawner does not expose `pod_info/1` (test stubs) → spawn
   # path unchanged.
   defp pod_alive?(spawner, pod_id) do

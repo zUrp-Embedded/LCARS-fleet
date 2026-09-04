@@ -2,8 +2,9 @@ defmodule Fleet.Pilot.BriefBuilder do
   @moduledoc """
   Authority over the FORMAT of briefs: worker / judge / brief-review / rework, plus the
   eng voice instructions. `StepDispatcher` CALLS (it chooses WHICH brief based on the forge state),
-  it does not FORM the brief itself. (No conflict-resolution brief — merge conflicts are
-  ESCALATED to the architect; the forge-blind pod cannot rebase.)
+  it does not FORM the brief itself. Conflict sections ride the rework brief (`opts[:conflict]`,
+  owner or outsider voice): the pod resolves LOCALLY against `lcars/base` and the system pushes —
+  it cannot fetch.
 
   Judge-ness (and a judge's target) is a SECURITY property: it is NEVER inferred by
   omission of a clause. `build_brief/9` is a TOTAL sum and fail-loud on out-of-vocab `brief_kind`/`judge_target`
@@ -687,10 +688,10 @@ defmodule Fleet.Pilot.BriefBuilder do
   # clones the feature-branch + has `Bash(git diff/log/show)` → we POINT it at its workspace instead
   # of giving it `{}` (on which it would fail-close `halt_wait_input`). Otherwise it judges emptiness
   # → infinite rework (the Reviewer can NEVER say `continue` on `{}`).
-  # ⚠ CINQUIEME PORTEUR DE LA MEME INSTRUCTION, et le seul qui vive dans `lib/` — les quatre autres
-  # sont le bloc SP et ses copies. Elle nommait `origin/main`, qui N'EST PAS dans le workspace d'un
-  # juge : `RoleDispatch` pose `base_branch: head`, donc le clone est `--branch <head>
-  # --single-branch`. Les deux commandes prescrites echouaient sur une revision inconnue (6-135).
+  # ⚠ JAMAIS `origin/main` ICI : il N'EST PAS dans le workspace d'un juge — `RoleDispatch` pose
+  # `base_branch: head`, donc le clone est `--branch <head> --single-branch`, et une commande qui
+  # le nomme echoue sur une revision inconnue (6-135). Le bloc SP et ses copies portent la meme
+  # instruction ; celle-ci est la seule dans `lib/`.
   # `refs/lcars/base` est pose par le bootstrap sur la base REELLE, et il est le meme nom pour tous
   # les pods — c'est la condition pour qu'une instruction puisse le nommer sans dire « selon les cas ».
   defp git_native_outputs do

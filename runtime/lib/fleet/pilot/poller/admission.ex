@@ -81,10 +81,10 @@ defmodule Fleet.Pilot.Poller.Admission do
   qui n'existe pas. Ce qui borne le DEPOT est ailleurs et se nomme : les sieges de
   pool par `(role, repo)`, et le fusible `Spawner.max_pods` (128) en dernier ressort.
 
-  **Serial is this ceiling at 1**, not another mechanism. The boolean it replaces
-  (`:repo_serialized_lease`) and this counter are the same parameter at two resolutions, which is
-  why such a boolean can only ever say "one" or "as many as there are" — and "as many as there are"
-  is genuinely UNBOUNDED: a repo with forty queued tickets starts forty runs.
+  **Serial is this ceiling at 1**, not another mechanism. A "serialized?" boolean and this counter
+  are the same parameter at two resolutions, which is why such a boolean can only ever say "one"
+  or "as many as there are" — and "as many as there are" is genuinely UNBOUNDED: a repo with forty
+  queued tickets starts forty runs.
 
   Clamped rather than refused HERE because this is read on every dispatch decision (a tick, then a
   ticket): a value that fails must fail at a DOOR, once — `runtime.exs` for the env, the flag parser
@@ -107,7 +107,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   Per PROJECT, because the counter is: a per-box knob would make `--max-fan 1`, used to watch one
   pipeline end to end, serialize every other project in the fleet — a brake laid on unrelated work.
   The declaration lives in `<project>/.lcars.json` (see
-  `ProjectDeclaration`) because a project can route its tickets through several cards, and a
+  `Fleet.Project.Declaration`) because a project can route its tickets through several cards, and a
   per-card ceiling cannot bound something that spans them.
 
   Clamped HERE and only here: `max_fan/0` and this share one authority for `1..#{@max_max_fan}`,
@@ -126,8 +126,8 @@ defmodule Fleet.Pilot.Poller.Admission do
   def max_fan_ceiling, do: @max_max_fan
 
   @doc """
-  Accounts for an item the rail refuses WITHOUT dispatching it — the lease branches, and tomorrow
-  the `max_fan` ceiling.
+  Accounts for an item the rail refuses WITHOUT dispatching it — the PR-open, ceiling and
+  dependency branches of `Lease.process_issues/4`.
 
   Same funnel as `admit/5`, and that is the point: a refusal is a decision about a ticket, so it
   owes that ticket the same wait vocabulary a dispatched skip does. Left out of the convergence,
@@ -178,7 +178,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   The PURE rule of the wait label: `current` (on the ticket) + `desired` (from the dispatch) ->
   `:noop | {:add, label} | {:remove, label}`.
 
-  Extracted with no I/O for the same reason `ForgeClient.route_from_labels/1` was: a decision buried
+  PURE for the same reason `Fleet.Forge.Client.route_from_labels/1` is: a decision buried
   under a forge call is a decision nobody can exercise. Every branch below is reachable from a test
   without a network.
 

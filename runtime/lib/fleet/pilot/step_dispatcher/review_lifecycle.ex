@@ -150,9 +150,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         # THE BRANCH IS PARSED BEFORE THE GATE, and the order carries weight. A PR whose head is
         # not a fleet feature branch can never receive a judge — `RoleDispatch.dispatch` refuses it
         # on this very parse — so paying two forge reads, and possibly a bounded CI wait ending in
-        # an escalation, to reach a conclusion already in hand is pure spend. The cost stayed
-        # invisible while an unparseable head made `issue_card_ci/2` answer `:ignore`: the gate
-        # short-circuited for the wrong reason, and the wrong reason paid the bill.
+        # an escalation, to reach a conclusion already in hand is pure spend — and an unparseable
+        # head would otherwise make `issue_card_ci/2` answer `:ignore`, short-circuiting the gate
+        # for the wrong reason.
         with {:ok, _} <- RoleDispatch.parse_feature_branch_or_skip(head) do
           gate_then_dispatch(pr_number, head, next, ctx)
         end
@@ -162,8 +162,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
         # directly; judged card → orphan PR, lay the card's jury (adoption). The arbitrating card
         # is THE ISSUE'S ENGRAVED one when a route exists (`wfmap/*` — an workshop-direct issue's
         # zero-judge choice is deliberate); the project's declared card only for a true orphan
-        # (no route). Reading the project card unconditionally re-adopted brief-gate's judges
-        # onto an ops PR every tick (faceproof bench).
+        # (no route). Reading the project card unconditionally re-adopts its judges onto an ops PR
+        # every tick (measured, faceproof bench).
         case issue_card_jury(head, ctx) do
           [] -> promote_or_route(pr_number, head, ctx)
           card_jury -> adopt_orphan_pr(pr_number, card_jury, ctx)
@@ -441,14 +441,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
                   "opened on the forge, and the cleanup is MANUAL: no rail reclaims it"
               )
 
-              # « warden/manual cleanup » DESIGNE UN RAIL QUI N'EXISTE PAS, verifie : les deux
-              # `warden` du depot portent sur les PODS, aucun ne retire d'etiquette de forge ; et le
-              # poller ne lit que `list_open_issues/2`, donc cette issue fermee n'est plus jamais vue.
-              # La phrase decrivait donc un rattrapage automatique imaginaire, et « manual » suppose
-              # qu'un humain lise ce log — ce que la doctrine D1 refuse pour tout ce qui est
-              # load-bearing.
+              # AUCUN RAIL NE RECLAME CE VERROU : les deux `warden` du depot portent sur les PODS,
+              # aucun ne retire d'etiquette de forge ; et le poller ne lit que `list_open_issues/2`,
+              # donc cette issue fermee n'est plus jamais vue. Un log qui promettrait un rattrapage
+              # automatique mentirait, et « manual » suppose qu'un humain le lise — ce que la
+              # doctrine D1 refuse pour tout ce qui est load-bearing.
               #
-              # L'incident est le seul canal DURABLE qui existe aujourd'hui : une issue sur la forge,
+              # L'incident est le seul canal DURABLE qui existe : une issue sur la forge,
               # que l'operateur voit sans avoir a fouiller les journaux du BEAM. Il ne converge pas
               # tout seul — c'est un appel a la main, et il le dit.
               escalate =

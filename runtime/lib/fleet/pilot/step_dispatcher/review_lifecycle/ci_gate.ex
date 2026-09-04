@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # LES CONTEXTES VOYAGENT AVEC LE VERT, et c'est tout ce que 6-140 pouvait fermer honnetement. Le
+  # LES CONTEXTES VOYAGENT AVEC LE VERT, et c'est tout ce qui se ferme honnetement ici. Le
   # gate ne peut pas savoir ce qu'il FAUDRAIT avoir execute : rien ne declare le harnais d'un projet
   # (le template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est). Il peut en
   # revanche dire ce qui a REELLEMENT tourne, et laisser le juge en tirer la conclusion — un vert
@@ -283,7 +283,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   defp workflow_file?(_), do: false
 
-  # « ON ATTEND » ET « ON ATTEND DEPUIS TOUJOURS » NE RENDENT PLUS LE MEME MOTIF. Sans date, le
+  # « ON ATTEND » ET « ON ATTEND DEPUIS TOUJOURS » NE RENDENT PAS LE MEME MOTIF. Sans date, le
   # calcul d'age vaut 0, donc `0 > 2700` est faux A JAMAIS : le ticket n'escalade pas, ne progresse
   # pas, et sans motif distinct il porte le meme que celui d'une CI qui tourne depuis dix secondes.
   #
@@ -310,12 +310,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # the PR object carries the head sha, and the commit carries its own date. `head` (the branch ref)
   # is the fallback for the sha only — a ref Gitea also resolves.
   #
-  # ⚠ CETTE PHRASE DISAIT L'INVERSE DU CODE, douze lignes au-dessus de lui : « an unreadable date
-  # makes the wait UNBOUNDED, which is exactly what this gate refuses, SO IT COUNTS AS UNREADABLE ».
-  # Seul le SHA illisible rend une erreur ; la date, elle, tombe a `nil` et le voisin juste en
-  # dessous assume ce choix (« treated as just now, we wait rather than escalate on a date we could
-  # not read »). Deux commentaires opposes dans le meme fichier, et c'est celui qui promettait le
-  # refus qu'un lecteur croyait.
+  # ⚠ SEUL LE SHA ILLISIBLE REND UNE ERREUR. La date, elle, tombe a `nil` (`pull_updated_at/1`) et
+  # `stalled_or_wait/4` rend alors `{:ci_deadline_unreachable, :no_pull_date}` — une attente qui se
+  # dit, jamais une escalade sur une date qu'on n'a pas lue.
   #
   # L'attente reste NON BORNEE — la borner exigerait un `first_seen_at` persiste, et les seuls
   # porteurs sont l'outbox durable (arbitrage ouvert) ou un commentaire-marqueur ecrit a CHAQUE tick
