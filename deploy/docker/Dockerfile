@@ -298,6 +298,15 @@ RUN apt-get update -qq \
 # owner root (personne ne remplace un runtime déployé), groupe fleet r-x, autres rien.
 # /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
 # $PREFIX/bin, fleet pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
+# ⚠ LES RACINES DURABLES SE POSENT AVANT LE PREMIER COPY QUI ECRIT DESSOUS, AVEC LEUR MODE — la
+# lecon de `/etc/lcars` (plus bas, lot 13b) etendue a ce que la table declare `any` (lot 14).
+# BuildKit cree un parent manquant « en passant », au mode qu'il choisit : `/opt/lcars` naissait du
+# `COPY --from=build` ci-dessous. Et `/var/lib/lcars`, `/var/tmp/lcars` n'etaient poses par PERSONNE
+# dans l'image — l'init de l'instance les creait au boot, dans la couche d'ecriture. Le stage
+# `verify` mesure ces cinq repertoires (`25-directories`, un `stat` par entree) aux modes que
+# `deploy/system.manifest` declare ; `image_layout.bats` tient les deux ecritures d'accord.
+RUN install -d -m 0755 -o root -g root /opt/lcars /var/lib/lcars /var/tmp/lcars \
+    && install -d -m 0700 -o root -g root /var/tmp/lcars/toolchain-work
 COPY --from=build /opt/lcars/runtime /opt/lcars/runtime
 RUN chown -R root:fleet /opt/lcars/runtime \
     && chmod -R u=rwX,g=rX,o= /opt/lcars/runtime \
@@ -493,9 +502,11 @@ COPY runtime/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # `COPY --chmod` avec ce meme `--chmod` : `/etc/lcars` sortait de l'image en 0644 — non traversable
 # par tout non-root, donc `seat.uid` et ce bashrc invisibles a l'humain — et `init.sh` le reparait a
 # chaque instance (journal du banc bob_2, 2026-09-04 : « POSÉ perms 0755 root:root /etc/lcars »).
-# Le stage `verify` ne peut pas le voir : root traverse un repertoire sans bit x. Le mode et le
-# proprietaire sont ceux que `init.sh` (layout) et la table de l'installeur declarent ; le temoin
-# `image_layout.bats` tient les trois d'accord et l'ordre de ces deux lignes.
+# Le stage `verify` le VOIT depuis le lot 14 : `25-directories` fait un `stat -c '%a %U:%G'`, qui
+# rend le mode declare quel que soit le lecteur — root traverse un repertoire sans bit x, mais un
+# `stat` ne traverse pas, il lit. Le mode et le proprietaire sont ceux que `init.sh` (layout) et la
+# table de l'installeur declarent ; le temoin `image_layout.bats` tient les trois d'accord et
+# l'ORDRE de ces deux lignes — un fait de Dockerfile que `stat` ne dit pas.
 RUN install -d -m 0755 -o root -g root /etc/lcars
 COPY --chmod=0644 runtime/services/lcars.bashrc /etc/lcars/lcars.bashrc
 RUN printf "%s\n%s\n%s\n" \
