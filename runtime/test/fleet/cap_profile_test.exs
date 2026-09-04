@@ -38,7 +38,7 @@ defmodule Fleet.CapProfileTest do
 
   defp valid_profile_yaml do
     # NB: no `apiVersion` — the field was REMOVED from the model (versioning lives in the code, R0.8-brick3);
-    # the strict v2.5 schema (additionalProperties:false) rejects it as an unknown field.
+    # the strict schema (additionalProperties:false) rejects it as an unknown field.
     """
     kind: CapabilityProfile
     metadata:
@@ -251,8 +251,7 @@ defmodule Fleet.CapProfileTest do
         Application.put_env(:lcars_fleet, :cap_profile_schema_dir, prev)
 
         :persistent_term.erase(
-          {Fleet.CapProfile.Schema, :schema_error_logged,
-           Path.join(empty, "cap-profile-v2.5.json")}
+          {Fleet.CapProfile.Schema, :schema_error_logged, Path.join(empty, "cap-profile.json")}
         )
       end)
 
@@ -283,7 +282,7 @@ defmodule Fleet.CapProfileTest do
       assert {:error, :schema_unavailable} = Fleet.CapProfile.load("engineer")
 
       # Le schema redevient lisible : c'est CE cas que le non-memorisation de l'echec protege.
-      for name <- ~w(cap-profile-v2.5.json modop-profile.json reserved-seat-v1.json) do
+      for name <- ~w(cap-profile.json modop-profile.json reserved-seat.json) do
         src = Path.join([to_string(:code.priv_dir(:lcars_fleet)), "cap_profile/schema", name])
         if File.exists?(src), do: File.cp!(src, Path.join(empty, name))
       end
@@ -429,7 +428,7 @@ defmodule Fleet.CapProfileTest do
 
       # A VALID free field (`spec.invocation.model`) demonstrates deep-merge precedence: the old
       # `spec.lifetime_scope` sat at the WRONG level (the real field is `spec.invocation.lifetime_scope`),
-      # tolerated by the permissive schema — the strict v2.5 rejects it.
+      # tolerated by the permissive schema — the strict schema rejects it.
       write_modop(tmp_dir, "m1", "spec:\n  invocation:\n    model: model-a\n")
       write_modop(tmp_dir, "m2", "spec:\n  invocation:\n    model: model-b\n")
 
@@ -481,7 +480,7 @@ defmodule Fleet.CapProfileTest do
     end
 
     # R0.8-brick3: G24-2 (check_api_version) removed — apiVersion no longer
-    # exists in the struct or the schema (versioning lives in the v2 code).
+    # exists in the struct or the schema (versioning lives in the code).
     test "G24-3 fails when kind is wrong" do
       profile = %{valid_struct() | kind: "Pod"}
       assert {:error, codes} = Fleet.CapProfile.validate(profile)
@@ -500,7 +499,7 @@ defmodule Fleet.CapProfileTest do
     # `baseline/git-denied.yaml` + `with_resolved_disallowed_tools/1`
     # replaces it: forbids destructive patterns without blocking push.
 
-    # R13: canonical v2.5 structure — `modop_set` is a MAP
+    # R13: canonical structure — `modop_set` is a MAP
     # (default/optional/incompatible); the invariant reads the ACTIVE set
     # (`active_modops/1`: the resolve decision, declared defaults as fallback).
     test "G24-6 fails when both modops in incompatible pair are active" do
@@ -590,13 +589,13 @@ defmodule Fleet.CapProfileTest do
   end
 
   # ============================================================
-  # validate/1 — v2.5 extensions G24-10..14 (BL-022)
+  # validate/1 — extensions G24-10..14 (BL-022)
   # Reconciled DN↔actual: string keys, G24-12 without system_user,
   # G24-13 (liveness) outside pure validate/1, G24-14 structural only.
   # ============================================================
 
-  describe "validate/1 — G24-10..14 (v2.5)" do
-    test "valid_struct (without v2.5 fields) passes — back-compat defaults" do
+  describe "validate/1 — G24-10..14" do
+    test "valid_struct (without the G24 fields) passes — back-compat defaults" do
       # No boot_at_start/subagent_template/host_native/monk_* → all :ok.
       assert :ok = Fleet.CapProfile.validate(valid_struct())
     end

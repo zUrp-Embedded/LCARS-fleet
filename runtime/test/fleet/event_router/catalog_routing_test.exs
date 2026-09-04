@@ -152,7 +152,7 @@ defmodule Fleet.EventRouter.CatalogRoutingTest do
     Application.put_env(:lcars_fleet, :event_router_load_event_registry, true)
     on_exit(fn -> Application.put_env(:lcars_fleet, :event_router_load_event_registry, false) end)
 
-    assert_raise RuntimeError, ~r/INVALID against events-v1/, fn ->
+    assert_raise RuntimeError, ~r/INVALID against events/, fn ->
       Fleet.EventRouter.Catalog.load!()
     end
   end

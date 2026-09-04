@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
     checks =
       [
         Events.check_event_consumers_canon(root),
-        Events.check_pipeline_v25_normalized(root),
+        Events.check_pipeline_envelope_normalized(root),
         Events.check_events_handlers_exist(root),
         Runtime.check_gates_no_runtime_seam(root),
         Events.check_visual_types_derived(root),

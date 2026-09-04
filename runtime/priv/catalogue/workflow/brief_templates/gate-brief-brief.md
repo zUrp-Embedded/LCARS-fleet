@@ -21,20 +21,20 @@ The brief `{{step}}` was written by the architect and has NOT been executed yet.
 {{gate_rules}}
 ```
 
-## Expected decision — strict JSON (`gate-decision-v1.json`)
+## Expected decision — strict JSON (`gate-decision.json`)
 `{"decision": "<...>", "reason": "<structured rationale>", "details": {...}, "chain": [...]}`
 
 The envelope is schema-VALIDATED and fail-closed: a mistyped field halts the step run, it is not
 coerced. `decision` and `reason` are required; the two optional fields have an enforced shape.
 
 - `details` — un objet de scalaires (une ligne `- **clé** : valeur` chacun), **PLUS la clé
-  versionnée `findings_v1`, qui est un OBJET et la seule exception à la platitude — quel que soit
+  versionnée `findings`, qui est un OBJET et la seule exception à la platitude — quel que soit
   ce que tu juges** :
 
   ```json
   "details": {
     "gate_rule": "R-coverage",
-    "findings_v1": {
+    "findings": {
       "findings": [
         {"severity": "minor", "category": "divergent",
          "description": "nommage incohérent avec le reste du module", "refs": ["lib/x.sh:12"]}
@@ -63,6 +63,6 @@ coerced. `decision` and `reason` are required; the two optional fields have an e
 
 ## How to return your decision
 Call `mcp__fleet__submit_result` with, as the **result**, the JSON object
-gate-decision-v1.json above. The `decision` field is MANDATORY and must
+gate-decision.json above. The `decision` field is MANDATORY and must
 be one of the listed values — without it, the runtime escalates to a human
 (fail-closed). Minimal example: `{"decision": "continue", "reason": "..."}`.

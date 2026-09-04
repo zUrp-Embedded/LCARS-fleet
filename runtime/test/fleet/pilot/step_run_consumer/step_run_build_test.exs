@@ -75,10 +75,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
   defp reviewed_route, do: %{intent: :reviewed, next_assignee: nil, next_step: nil}
 
   # C1 2026-08-18 — the machine payload leaves the prose at the FLATTENING POINT
-  # (maybe_put_review_event): a valid `details.findings_v1` rides the step_run as
+  # (maybe_put_review_event): a valid `details.findings` rides the step_run as
   # `:review_findings` for the completer to engrave, and never inspect-dumps into the review body.
   describe "review_findings — the machine payload at the flattening point" do
-    test "valid findings_v1 → :review_findings on the step_run, and OUT of the prose body" do
+    test "valid findings → :review_findings on the step_run, and OUT of the prose body" do
       findings = %{
         "findings" => [%{"severity" => "minor", "description" => "naming"}],
         "score" => 9
@@ -86,7 +86,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
 
       step_run =
         StepRunBuild.build(
-          reviewed_payload(%{"critere" => "ok", "findings_v1" => findings}),
+          reviewed_payload(%{"critere" => "ok", "findings" => findings}),
           9,
           "reviewer",
           reviewed_route(),
@@ -97,7 +97,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
       assert step_run.review_event == :approve
       # The prose details survive; the machine object does not leak into them as an inspect dump.
       assert step_run.review_body =~ "critere"
-      refute step_run.review_body =~ "findings_v1"
+      refute step_run.review_body =~ "findings"
     end
 
     test "absent → no :review_findings key: the legacy judge walks today's path byte-for-byte" do
@@ -114,11 +114,11 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
       assert step_run.review_event == :approve
     end
 
-    test "INVALID findings_v1 → no key, LOUD log, the dump STAYS in the prose (noisy, never silently dropped), verdict untouched" do
+    test "INVALID findings → no key, LOUD log, the dump STAYS in the prose (noisy, never silently dropped), verdict untouched" do
       {step_run, log} =
         ExUnit.CaptureLog.with_log(fn ->
           StepRunBuild.build(
-            reviewed_payload(%{"findings_v1" => %{"findings" => "oops"}}),
+            reviewed_payload(%{"findings" => %{"findings" => "oops"}}),
             9,
             "reviewer",
             reviewed_route(),
@@ -127,10 +127,10 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuildTest do
         end)
 
       refute Map.has_key?(step_run, :review_findings)
-      assert log =~ "findings_v1 refused"
+      assert log =~ "findings refused"
       # The broken payload is NOT stripped: it reaches the review body as a visible dump —
       # unreadable but present, which is the honest direction for a payload we refuse to persist.
-      assert step_run.review_body =~ "findings_v1"
+      assert step_run.review_body =~ "findings"
       # And the DECISION is what the envelope says — an invalid optional payload never flips it.
       assert step_run.review_event == :approve
     end

@@ -1008,7 +1008,7 @@ defmodule Fleet.Spawner.PodTest do
       pod_id = "pod-gc-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)
 
-      # the pod's deterministic v2 uuid (class from fixture, uid injected, ITS repo) — the GC targets THIS name.
+      # the pod's deterministic uuid (class from fixture, uid injected, ITS repo) — the GC targets THIS name.
       uuid =
         Fleet.Spawner.SessionId.encode(2, Fleet.CapProfile.kill_class(args.cap_profile), 4242, 7)
 

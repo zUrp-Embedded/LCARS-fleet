@@ -1,6 +1,6 @@
 # Cap-profile: qualifier
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
-# Schema: ../../schema/cap-profile-v2.5.json
+# Schema: ../../schema/cap-profile.json
 kind: CapabilityProfile
 metadata:
   name: qualifier
@@ -88,7 +88,7 @@ spec:
     #   3. IL PORTAIT UN SECOND CONTRAT DE SORTIE SANS DESTINATION : « Genère JSON output » (forme
     #      `verdict`/`severity_max`/`issues`) suivi de « Meurs » — aucun `submit_result`, aucun
     #      payload. Le juge tenait donc DEUX contrats pour la même matière, dont un aboutissant au
-    #      vide, pendant que le rail réclamait `details.findings_v1` et le mesurait absent.
+    #      vide, pendant que le rail réclamait `details.findings` et le mesurait absent.
     # Ce qui était à NOUS dans ce fragment n'est pas perdu : le plancher mécanique conditionnel
     # (lot B) et la grille de sévérité sont rapatriés dans les blocs du catalogue (method/… et
     # core/judge-verdict), où ils sont composés par sp-map et régénérés par `mix lcars.sp.gen`.

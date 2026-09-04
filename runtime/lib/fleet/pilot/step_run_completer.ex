@@ -392,7 +392,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   `step_run`: `:repo`, `:issue_number`, `:pr_number`, `:role`, `:review_event` (`:approve` |
   `:request_changes` | `:comment`), `:review_body` (optional, default generated from role + verdict),
-  `:review_findings` (optional — the schema-valid `details.findings_v1` machine payload, engraved
+  `:review_findings` (optional — the schema-valid `details.findings` machine payload, engraved
   as `verdicts/issue-<n>-<role>.json` next to the prose pin, best-effort).
   Returns `{:ok, :reviewed}` | `{:error, {:review, reason}}`.
 
@@ -412,7 +412,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     role = Map.get(step_run, :role, "juge")
     work_dir = verdict_work_dir(repo, opts)
 
-    # C1: the MACHINE verdict (`details.findings_v1`, validated at build) is engraved
+    # C1: the MACHINE verdict (`details.findings`, validated at build) is engraved
     # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
     # same reason (OpsObject's idempotent content probe: a re-run re-finds the commit, never forks
     # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
@@ -547,7 +547,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp maybe_engrave_findings(step_run, work_dir, role) do
     case {Map.get(step_run, :review_findings), work_dir} do
       # SILENCE HERE READS "no key = a legacy judge, today's path", and that is only true while
-      # `findings_v1` is new and no SP names it. Every judge's composed SP names it, so an absence
+      # `findings` is new and no SP names it. Every judge's composed SP names it, so an absence
       # is NOT a judge that never heard of the key: it is a judge that was told and did not.
       # MEASURED on the bench: a qualifier returns an excellent verdict — it names the planted
       # faux-vert structurally — and NO machine payload at all, with nothing anywhere saying so.
@@ -564,7 +564,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
         # rail muet.
         if Map.get(step_run, :review_findings_refused) do
           Logger.warning(
-            "StepRunCompleter: judge #{role} DID submit details.findings_v1 on " <>
+            "StepRunCompleter: judge #{role} DID submit details.findings on " <>
               "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)}, and it was " <>
               "REFUSED upstream (see the schema error logged by StepRunConsumer just above). " <>
               "Its measure is lost to the rail — but the judge did its part: fix the form, not " <>
@@ -572,7 +572,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
           )
         else
           Logger.warning(
-            "StepRunCompleter: judge #{role} submitted NO details.findings_v1 on " <>
+            "StepRunCompleter: judge #{role} submitted NO details.findings on " <>
               "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
               "survives as prose only. The SP asks every judge for the machine payload; without " <>
               "it no aggregation can weigh this verdict, it can only count it."
@@ -583,7 +583,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
       {findings, nil} ->
         Logger.warning(
-          "StepRunCompleter: findings_v1 NOT engraved (#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} " <>
+          "StepRunCompleter: findings NOT engraved (#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} " <>
             "role=#{role}): the project has no ops face — the judge's machine verdict " <>
             "(#{length(Map.get(findings, "findings", []))} finding(s)) survives only as prose"
         )
@@ -605,7 +605,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
           {:error, reason} ->
             Logger.warning(
-              "StepRunCompleter: findings_v1 NOT engraved at #{ref} (#{inspect(reason)}) — " <>
+              "StepRunCompleter: findings NOT engraved at #{ref} (#{inspect(reason)}) — " <>
                 "the review posts anyway; the machine verdict survives only as prose"
             )
 

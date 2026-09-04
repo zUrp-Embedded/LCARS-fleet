@@ -341,7 +341,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
 
   # LA JOINTURE, ET ELLE N'ETAIT TENUE PAR PERSONNE. Les tests ci-dessus bouchent la policy
   # (`fn -> :required end`) : ils prouvent que la porte GATE sur `:required`, pas qu'une carte le
-  # produise. `LoaderV25Test` prouve l'autre bout — `spec.ci` traverse `normalize/1`. Entre les
+  # produise. `LoaderEnvelopeTest` prouve l'autre bout — `spec.ci` traverse `normalize/1`. Entre les
   # deux, `issue_card_ci/2` compare a un LITTERAL, et remplacer `"required"` par `"requis"` laissait
   # les 2443 tests verts (mesure 2026-08-08).
   #

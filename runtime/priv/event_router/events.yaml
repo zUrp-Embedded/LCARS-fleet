@@ -18,7 +18,7 @@
 #
 # VALUES are `[]` (unrouted — direct subscribers only) OR a ROUTING object
 # `{source, action, incident?}`: the declarative `event + source -> action` table. `Catalog.load!`
-# validates the WHOLE file against `schema/events-v1.json` at boot, fail-loud. Adding an incident
+# validates the WHOLE file against `schema/events.json` at boot, fail-loud. Adding an incident
 # class is a YAML edit here, not code.
 #
 # LA DOCTRINE DU RAIL D'INCIDENTS tient en trois lignes : le systeme DETECTE, LOGGE et TICKETTE

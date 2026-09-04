@@ -23,7 +23,7 @@ neuf, pas un défaut.
 
 ## Ce qu'aucun agent n'y écrit — et pourquoi ce n'est pas une règle mais une impossibilité
 
-Aucune carte de workflow ne peut déclarer `face: ops` : l'enum du schéma v2.5 n'accepte que `code`
+Aucune carte de workflow ne peut déclarer `face: ops` : l'enum du schéma n'accepte que `code`
 et `workshop`. Donc aucun producteur n'a jamais de workspace sur cette branche, et l'accès en lecture
 seule n'a aucune exception à faire respecter — l'état contraire ne peut pas s'écrire.
 

@@ -1,10 +1,10 @@
-defmodule Fleet.Workflow.LoaderV25Test do
+defmodule Fleet.Workflow.LoaderEnvelopeTest do
   @moduledoc """
-  Loader — V2.5 pipeline envelope (`kind/metadata/spec`), the only accepted form.
+  Loader — the pipeline envelope (`kind/metadata/spec`), the only accepted form.
 
   `Loader.load!` NORMALIZES the result to the single internal form
-  `%{"name", "steps"}`: the v2.5 envelope is unwrapped at load (tests assert
-  the normalized form, not the raw YAML), then the `workflow-map-v2.5.json`
+  `%{"name", "steps"}`: the envelope is unwrapped at load (tests assert
+  the normalized form, not the raw YAML), then the `workflow-map.json`
   schema validates the structure (fail-loud).
 
   `async: true`: `:workflow_maps_root` is passed via opts to `Loader.load!/2`
@@ -20,7 +20,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
                      "priv/catalogue/workflow/workflow_maps"
                    )
 
-  test "canon standard-qa.yaml (V2.5) normalized → DISPATCHABLE steps only (brief-review gate + build)" do
+  test "canon standard-qa.yaml normalized → DISPATCHABLE steps only (brief-review gate + build)" do
     # rev3 rehabilitation: the old architect/starfleet steps were NOT servable by the
     # dispatch (live runaway 2026-07-18) — the card now carries only what the engine runs.
     pipe = Loader.load!("standard-qa", workflow_maps_root: @canon_pipelines)
@@ -39,7 +39,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     refute Map.has_key?(pipe, "spec")
   end
 
-  test "canon audit-only.yaml (V2.5) normalized → name + steps top-level" do
+  test "canon audit-only.yaml normalized → name + steps top-level" do
     pipe = Loader.load!("audit-only", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "audit-only"
     assert is_map(pipe["steps"])
@@ -49,7 +49,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   # F-C160: brief-gate IS the DEFAULT workflow_map of the prod dispatch (StepDispatcher) → it must be
   # covered by canon conformance like standard-qa + audit-only: it must normalize cleanly + carry its
   # load-bearing shape (scoper brief gate BEFORE the engineer).
-  test "canon brief-gate.yaml (V2.5, prod DEFAULT map) normalized → brief-review(judge) gate build" do
+  test "canon brief-gate.yaml (prod DEFAULT map) normalized → brief-review(judge) gate build" do
     pipe = Loader.load!("brief-gate", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "brief-gate"
     assert is_map(pipe["steps"])
@@ -64,7 +64,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
   # The two production TYPE cards of the criticality catalogue: the card IS the judgment-layer
   # choice — the engine reads `jury` as data (`Roles.project_jury`), never hardcodes a panel.
-  test "canon c0-poc.yaml (V2.5) normalized → single build step + DELIBERATE zero-judge jury" do
+  test "canon c0-poc.yaml normalized → single build step + DELIBERATE zero-judge jury" do
     pipe = Loader.load!("c0-poc", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "c0-poc"
     assert pipe["jury"] == []
@@ -75,7 +75,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     assert is_binary(pipe["description"]) and pipe["description"] != ""
   end
 
-  test "canon c1-light.yaml (V2.5) normalized → single build step + qualifier-only jury" do
+  test "canon c1-light.yaml normalized → single build step + qualifier-only jury" do
     pipe = Loader.load!("c1-light", workflow_maps_root: @canon_pipelines)
     assert pipe["name"] == "c1-light"
     assert pipe["jury"] == ["qualifier"]
@@ -122,7 +122,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
   end
 
   test "a card that OMITS ci is refused by the loader — the silent card is unrepresentable" do
-    # THE MUTATION TARGET. Drop `"ci"` from `spec.required` in workflow-map-v2.5.json and this test
+    # THE MUTATION TARGET. Drop `"ci"` from `spec.required` in workflow-map.json and this test
     # is the one that goes red. Without it, the mandatory field is enforced only by the canon cards
     # happening to carry it — which is a convention, not a wall, and conventions do not survive the
     # next card someone writes in a hurry.
@@ -172,7 +172,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     # dans le workspace du pod, `inputs` ne l'est pas (une source peut etre un ticket, une autre
     # face, un depot distant).
     schema =
-      Path.join([:code.priv_dir(:lcars_fleet), "workflow", "schema", "workflow-map-v2.5.json"])
+      Path.join([:code.priv_dir(:lcars_fleet), "workflow", "schema", "workflow-map.json"])
       |> File.read!()
       |> JSON.decode!()
 
@@ -227,13 +227,13 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "inert-key.yaml"), yaml)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map\.json invalid/, fn ->
       Loader.load!("inert-key", workflow_maps_root: dir)
     end
   end
 
   @tag :tmp_dir
-  test "V2.5 needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
+  test "needs with a DUPLICATE → SCHEMA rejection (no lying :fan_out diagnostic)", %{
     tmp_dir: dir
   } do
     # `needs: [a, a]` (copy-paste) would pass the schema, the edge got laid TWICE, and the
@@ -258,13 +258,13 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "dup-needs.yaml"), yaml)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map\.json invalid/, fn ->
       Loader.load!("dup-needs", workflow_maps_root: dir)
     end
   end
 
   @tag :tmp_dir
-  test "structurally invalid V2.5 → raise schema workflow-map-v2.5", %{tmp_dir: dir} do
+  test "structurally invalid envelope → raise schema workflow-map", %{tmp_dir: dir} do
     bad = """
     kind: WorkflowMap
     metadata:
@@ -278,7 +278,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "bad.yaml"), bad)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map\.json invalid/, fn ->
       Loader.load!("bad", workflow_maps_root: dir)
     end
   end
@@ -309,7 +309,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
 
     File.write!(Path.join(dir, "empty-hard.yaml"), bad)
 
-    assert_raise RuntimeError, ~r/workflow-map-v2\.5\.json invalid/, fn ->
+    assert_raise RuntimeError, ~r/workflow-map\.json invalid/, fn ->
       Loader.load!("empty-hard", workflow_maps_root: dir)
     end
   end
@@ -351,7 +351,7 @@ defmodule Fleet.Workflow.LoaderV25Test do
     real =
       :code.priv_dir(:lcars_fleet)
       |> to_string()
-      |> Path.join("workflow/schema/workflow-map-v2.5.json")
+      |> Path.join("workflow/schema/workflow-map.json")
       |> File.read!()
       |> Jason.decode!()
 

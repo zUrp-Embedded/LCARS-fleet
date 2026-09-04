@@ -1,4 +1,4 @@
-<!-- Date: 2026-07-08 — bloc SP v2 (composé dans le SP LLM ; le générateur retire ce header à la composition). -->
+<!-- Date: 2026-07-08 — bloc SP (composé dans le SP LLM ; le générateur retire ce header à la composition). -->
 
 ## La boucle
 

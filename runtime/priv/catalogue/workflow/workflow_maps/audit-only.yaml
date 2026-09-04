@@ -3,16 +3,15 @@
 # Date: 2026-05-18 (rev1) — 2026-05-18 rev2 — 2026-06-10 rev3 (gatekeeper pattern B)
 # Statut: actif — pipeline canonique V2 compatible Fleet.Workflow.Loader chantier 12 PROMOTED
 # Dérivé de: design-notes/ring2/pipelines.md (audit-only existant) + format Loader chantier 12
-# Référencé par: 06_modops/docs/cascade-mix-v2-rationale.md
 # Consommé par: Fleet.Workflow.Loader → rail forge-driven (le moteur RAM Executor est supprimé).
 #
 # rev3 (B / §L441) : le step `gatekeeper-decision` (role: gatekeeper) est RETIRÉ.
 #   Le gatekeeper est un juge d'EXCEPTION dispatché par une gate non-tranchable, JAMAIS
 #   un step d'ordonnancement (§L441 ; GATE-D1). ⚠ SIGNAL (auditeur) : l'escalade
-#   "si non-mécanique" n'est PLUS exprimée — en v2.5 les `rules` de gate sont
+#   "si non-mécanique" n'est PLUS exprimée — les `rules` de gate sont
 #   string-only (schema `additionalProperties:false`, `items:string`) et le chemin
 #   terminal-string (`Gates.eval_terminal_string`) n'a PAS de branche `:nontranchable`.
-#   Le SEUL véhicule d'escalade v2.5 est une gate `soft` (toujours dispatch). Re-encoder
+#   Le SEUL véhicule d'escalade est une gate `soft` (toujours dispatch). Re-encoder
 #   l'escalade conditionnelle de l'audit en B = décision DIFFÉRÉE (soft trop large, ou
 #   étendre schema+predicate string pour une bande-milieu). cf. JOURNAL re-analyse-2026-06-09.
 

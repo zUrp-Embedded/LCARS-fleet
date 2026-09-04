@@ -266,7 +266,7 @@ defmodule Fleet.LayoutTest do
       enum =
         :code.priv_dir(:lcars_fleet)
         |> to_string()
-        |> Path.join("workflow/schema/workflow-map-v2.5.json")
+        |> Path.join("workflow/schema/workflow-map.json")
         |> File.read!()
         |> Jason.decode!()
         |> get_in([

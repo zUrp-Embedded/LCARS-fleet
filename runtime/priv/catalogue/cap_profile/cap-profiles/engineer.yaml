@@ -1,6 +1,6 @@
 # Cap-profile: engineer
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
-# Schema: ../../schema/cap-profile-v2.5.json
+# Schema: ../../schema/cap-profile.json
 kind: CapabilityProfile
 metadata:
   name: engineer

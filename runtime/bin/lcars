@@ -24,7 +24,7 @@ die() { echo "lcars: $*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<EOF
-$PROG — CLI fleet LCARS v2
+$PROG — CLI fleet LCARS
 
 USAGE
   $PROG spawn <role> [--issue <id>] [--brief <texte>]

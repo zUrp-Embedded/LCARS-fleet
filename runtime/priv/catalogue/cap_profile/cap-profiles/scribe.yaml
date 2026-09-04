@@ -1,6 +1,6 @@
 # Cap-profile: scribe
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
-# Schema: ../../schema/cap-profile-v2.5.json
+# Schema: ../../schema/cap-profile.json
 #
 # The DOCUMENTARY producer (chantier face-projet 2026-08-02): same delivery mechanics as the
 # engineer — git-native commits, forge-blind, the system verifies and pushes — on the OTHER face

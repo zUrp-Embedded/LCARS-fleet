@@ -2,10 +2,10 @@
 # SOURCE: runtime/test/bin/bwrap_launch.bats
 # AUTHOR: engineer
 # STARDATE: 2026-06-01
-# STATUS: bats tests for bin/bwrap_launch.sh v2 (ADR-G sanctuary)
+# STATUS: bats tests for bin/bwrap_launch.sh (ADR-G sanctuary)
 #
-# The v2 model is ASYNC and detached (bwrap → tmux new-session -d → command; bwrap returns 0, the exit
-# code is not propagated). So we stub bwrap (echoing its invocation) and assert the ASSEMBLY of the v2
+# The model is ASYNC and detached (bwrap → tmux new-session -d → command; bwrap returns 0, the exit
+# code is not propagated). So we stub bwrap (echoing its invocation) and assert the ASSEMBLY of the
 # flags. The real sanctuary isolation (/ RO, /home tmpfs, closed env) is NOT tested here: its e2e proof
 # is test/probes/gate-r0.1-bwrap.sh (an INSIDE probe against a real bwrap+tmux+vendor — manual/opt-in, it needs
 # the bwrap syscalls). What IS covered here: args, the `:?` session guards, setup checks, assembly
@@ -296,7 +296,7 @@ teardown() { rm -rf "$TMP_BASE"; }
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$status" -eq 1 ]]; [[ "$output" == *"dir socket MCP"* ]]
 }
 
-# ============== bwrap assembly (stub echo) — v2 ==============
+# ============== bwrap assembly (stub echo) ==============
 
 @test "asm: --clearenv (closed env)" {
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true; [[ "$output" == *"--clearenv"* ]]

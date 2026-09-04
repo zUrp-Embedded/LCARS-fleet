@@ -29,7 +29,7 @@ defmodule Fleet.Workflow.Provenance do
   # git transaction at a time; `OpsObject` stays the engine (reached only via the gate).
   alias Fleet.Workflow.OpsObjectSync
 
-  @build_type "lcars-fleet-pipeline-v2"
+  @build_type "lcars-fleet-pipeline"
 
   @type attrs :: %{
           required(:livrable_sha) => String.t(),

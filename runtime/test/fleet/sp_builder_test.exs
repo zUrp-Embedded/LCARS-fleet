@@ -34,11 +34,11 @@ defmodule Fleet.SPBuilderTest do
             "git_ops_denied" => ["push"]
           },
           "knowledge" => %{"skills" => ["memory-query", "loop"]},
-          # R12: lifetime_scope nested under invocation (v2.5 schema).
+          # R12: lifetime_scope nested under invocation (cap-profile schema).
           "invocation" => %{"lifetime_scope" => "one-shot"},
           "injects" => %{},
           "budget" => %{"maxUsd" => 1.0, "maxDurationSec" => 600},
-          # modop_set = MAP (v2.5 schema: default/optional/incompatible).
+          # modop_set = MAP (schema: default/optional/incompatible).
           "modop_set" => %{"default" => []}
         },
         extra_spec
@@ -276,7 +276,7 @@ defmodule Fleet.SPBuilderTest do
       refute claude_md =~ "Repo conventions"
     end
 
-    # R12: compose_claude_md reads lifetime_scope under spec.invocation (v2.5).
+    # R12: compose_claude_md reads lifetime_scope under spec.invocation.
     # Reading spec.lifetime_scope instead would always render "unknown".
     test "surfaces lifetime_scope from spec.invocation (not 'unknown')" do
       profile =
@@ -387,10 +387,10 @@ defmodule Fleet.SPBuilderTest do
     end
 
     # C1 2026-08-18 — the machine key is a CONSIGNE, not a guessed convention: the block that
-    # defines a judge's output NAMES `details.findings_v1` and its shape. Same resolver as the
+    # defines a judge's output NAMES `details.findings` and its shape. Same resolver as the
     # composer (`Catalogue.find`), same reason as the D1 test above: a hardcoded path here would
     # measure a file the fleet does not read.
-    test "the judge is told the machine key and its shape (details.findings_v1)" do
+    test "the judge is told the machine key and its shape (details.findings)" do
       judge_verdict =
         Fleet.Catalogue.find(
           Fleet.Catalogue.root(),
@@ -399,7 +399,7 @@ defmodule Fleet.SPBuilderTest do
         )
         |> File.read!()
 
-      assert judge_verdict =~ "details.findings_v1"
+      assert judge_verdict =~ "details.findings"
       # The TWO reconciled production vocabularies, named — never a third (spec-reviewer's
       # severity/category/verdict triples + the moon-shot 0-10 mechanical score).
       assert judge_verdict =~ "critical|important|minor"

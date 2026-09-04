@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SOURCE: runtime/test/probes/gate-r-core-comm-inc3b1.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
-# STARDATE: 2026.146
-# STATUS: MANUAL PROBE v2 — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
+# STARDATE: 2026.247
+# STATUS: MANUAL PROBE — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
 #         mix.exs (alias `gate:`); do not re-list it here, it drifts.
 # gate-r-core-comm-inc3b1.sh — R-CORE.comm inc3b.1 (the MCP tool layer, pure Elixir). exit 0 iff
 # Fleet.MCP.PodTools (use ExMCP.Server + deftool get_work_item/submit_result) round-trips against the

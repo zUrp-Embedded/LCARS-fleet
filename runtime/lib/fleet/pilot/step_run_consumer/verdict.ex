@@ -1,6 +1,6 @@
 defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @moduledoc """
-  PURE step-run verdict cluster: **decoding** (reading the gate-decision-v1 decision
+  PURE step-run verdict cluster: **decoding** (reading the gate-decision decision
   buried in the TaskQueue/worker envelopes) + **text rendering** (readable verdict trace,
   review body, eng voice) of `Fleet.Pilot.StepRunConsumer`.
 
@@ -27,7 +27,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   ## The wire schema is EXECUTED at this frontier
 
-  The GateBrief demands the strict JSON of `gate-decision-v1.json`; `gate_decision/1`
+  The GateBrief demands the strict JSON of `gate-decision.json`; `gate_decision/1`
   validates the FULL envelope against it (resolved once via `Fleet.SchemaCache`,
   boot-loaded by the rail through `load_schema!/0`). A schema-invalid verdict — e.g. a
   mistyped `details`/`chain` — fail-closes to `halt_invalid` (refusal logged) instead of
@@ -36,13 +36,13 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   (equality pinned by `GateDecisionTest`). The only side effects in this module are the
   two refusal warnings (envelope, findings) — no state is carried.
 
-  ## The optional machine payload (`details.findings_v1`)
+  ## The optional machine payload (`details.findings`)
 
   A judge MAY carry its findings machine-readable under the VERSIONED key
-  `details.findings_v1` (`findings-v1.json`, C1). The envelope stays intact:
+  `details.findings` (`findings.json`, C1). The envelope stays intact:
   a legacy judge without the key crosses exactly as before. `take_findings/1` validates
   the payload and the failure direction is the opposite of the envelope's, on purpose:
-  an INVALID `findings_v1` never flips the decision — the envelope was already validated,
+  an INVALID `findings` never flips the decision — the envelope was already validated,
   and a broken OPTIONAL payload must not kill a valid verdict (absence is recorded, never
   fabricated). Invalid → loud warning, no machine object, the raw payload stays in the
   prose details rendering (noisy rather than silently discarded). Valid → stripped from
@@ -57,12 +57,12 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @gate_decisions Fleet.Workflow.GateDecision.decisions()
 
   # Wire contract of the judge verdict — validated integrally on ingest (see moduledoc).
-  @schema_file "gate-decision-v1.json"
+  @schema_file "gate-decision.json"
 
   # OPTIONAL machine payload under `details` — its own versioned key + schema so the
-  # gate-decision-v1 envelope never moves (a legacy judge stays valid byte-for-byte).
-  @findings_key "findings_v1"
-  @findings_schema_file "findings-v1.json"
+  # gate-decision envelope never moves (a legacy judge stays valid byte-for-byte).
+  @findings_key "findings"
+  @findings_schema_file "findings.json"
 
   # ============================================================
   # Decoding — reading the decision buried in the envelopes
@@ -159,11 +159,11 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @doc false
   # C1 — the OPTIONAL machine payload, extracted AND validated in one gesture.
   #
-  # Returns `{findings, result}` where `findings` is the valid `details.findings_v1` map or `nil`,
+  # Returns `{findings, result}` where `findings` is the valid `details.findings` map or `nil`,
   # and `result` is the envelope WITHOUT the key when findings are valid (the prose rendering must
   # not inspect-dump a machine object into a human review — its human matter already lives in
   # `reason`, the SP demands it) and UNTOUCHED otherwise. The failure direction is deliberate and
-  # opposite to `gate_decision/1`'s: an invalid `findings_v1` NEVER flips the verdict — the
+  # opposite to `gate_decision/1`'s: an invalid `findings` NEVER flips the verdict — the
   # envelope was already validated, and a broken optional payload must not kill a valid verdict.
   # Invalid → loud warning + `nil` + the raw payload LEFT in `details` (it reaches the review body
   # as an inspect dump: noisy rather than silently discarded). Independent of the envelope's own
@@ -172,7 +172,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   @spec take_findings(term()) :: {map() | nil, term()}
   def take_findings(%{"details" => %{@findings_key => findings} = details} = result) do
     # ON DÉCODE UNE CHAÎNE AVANT DE JUGER. Un agent qui produit du JSON dans un champ hésite
-    # naturellement entre l'objet et sa sérialisation : un `findings_v1` rendu en JSON SÉRIALISÉ
+    # naturellement entre l'objet et sa sérialisation : un `findings` rendu en JSON SÉRIALISÉ
     # (`"{\"findings\":[]}"`) est refusé par le schéma en « Expected Object but got String » —
     # mesure juste, encodage faux, et le rail jette tout. Refuser la seconde forme ne défend RIEN
     # (le contenu est identique une fois décodé) et coûte la mesure entière.

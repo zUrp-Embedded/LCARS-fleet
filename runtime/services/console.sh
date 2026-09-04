@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-# Pas de defaut : identite-v2 a retire « l'humain » unique (`LCARS_HUMAN`). Une console vise un login
+# Pas de defaut : il n'y a pas d'humain unique (`LCARS_HUMAN`). Une console vise un login
 # EXPLICITE (`--human`) ou toute la liste (`--all`) ; une invocation nue se refuse au lieu de deviner.
 HUMAN=""
 FOREGROUND=0

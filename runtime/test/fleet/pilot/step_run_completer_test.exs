@@ -766,7 +766,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
     end
 
-    # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings_v1` rides the
+    # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings` rides the
     # step_run as `:review_findings` and lands as `verdicts/issue-<n>-<role>.json`, committed in
     # the ops worktree next to the prose pin. Best-effort like the provenance triplet: every
     # degradation below posts the review anyway and RECORDS the absence loud.
@@ -850,7 +850,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
     test "un juge dont le payload a été REFUSÉ n'est pas accusé de s'être tu" do
       # MESURÉ AU BANC (2026-08-19, probe-rails#47) : sur trois émissions, DEUX refusées par le
-      # schéma — un `findings_v1` sérialisé en chaîne, un `severity_max: "none"` hors énumération.
+      # schéma — un `findings` sérialisé en chaîne, un `severity_max: "none"` hors énumération.
       # Le log d'absence les rangeait toutes deux en « ce juge n'a rien envoyé », et cette phrase
       # m'a envoyé chercher pendant des heures pourquoi les juges se taisaient — alors qu'ils
       # parlaient. Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un rail muet.
@@ -870,10 +870,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                    StepRunCompleter.record_review(step_run, forge_client: PrForge, forge_opts: [])
         end)
 
-      assert log =~ "DID submit details.findings_v1"
+      assert log =~ "DID submit details.findings"
       assert log =~ "REFUSED upstream"
 
-      refute log =~ "submitted NO details.findings_v1",
+      refute log =~ "submitted NO details.findings",
              "le juge a émis : l'accuser de silence envoie corriger le mauvais bout"
     end
 
@@ -900,7 +900,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :approve, body}
       assert body == "Rien à redire.", "aucun octet ajouté quand il n'y a rien à transporter"
-      assert log =~ "NO details.findings_v1"
+      assert log =~ "NO details.findings"
       assert log =~ "qualifier"
     end
 
@@ -929,7 +929,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :approve, _body}
       # Same doctrine as the provenance {:work_dir_missing, _}: the missing record says so.
-      assert log =~ "findings_v1 NOT engraved"
+      assert log =~ "findings NOT engraved"
       refute File.exists?(Path.join([tmp, "proj", "verdicts"]))
     end
 
@@ -962,12 +962,12 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
         end)
 
       assert_received {:review, 7, :approve, _body}
-      assert log =~ "findings_v1 NOT engraved"
+      assert log =~ "findings NOT engraved"
     end
 
     # ⚠ CE TEST A CHANGÉ DE VERDICT LE 2026-08-19, ET C'EST UN RENVERSEMENT ASSUMÉ. Il s'appelait
     # « no machine file and NO noise (the legacy judge is nominal) » et épinglait le silence : au
-    # 18 août, `findings_v1` venait de naître, aucun SP ne le nommait, et un juge qui n'en émettait
+    # 18 août, `findings` venait de naître, aucun SP ne le nommait, et un juge qui n'en émettait
     # pas était un juge legacy — un cas NOMINAL, que rien ne devait accuser.
     #
     # Ce qui a changé n'est pas l'avis, c'est le monde : tous les SP de juge composent désormais la
@@ -1004,7 +1004,7 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       refute File.exists?(Path.join(work_dir, "verdicts/issue-42-qualifier.json")),
              "rien à graver : c'est l'ABSENCE de payload, pas un échec de gravure"
 
-      assert log =~ "NO details.findings_v1"
+      assert log =~ "NO details.findings"
 
       refute log =~ "NOT engraved",
              "et surtout PAS le message d'échec de gravure : ne rien avoir à écrire n'est pas " <>

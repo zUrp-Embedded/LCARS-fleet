@@ -36,7 +36,7 @@ on:
       # catalogue.js — le catalogue metier, le schema de verdict, et les DEUX sources Elixir dont il
       # tire le layout et les regles d'un catalogue.
       - 'runtime/priv/catalogue/**'
-      - 'runtime/priv/workflow/schema/gate-decision-v1.json'
+      - 'runtime/priv/workflow/schema/gate-decision.json'
       - 'runtime/lib/fleet/catalogue.ex'
       - 'runtime/lib/fleet/layout.ex'
       # catalogue.js + tools.js — les cap-profiles SYSTEME (le compte des sieges livres par defaut).

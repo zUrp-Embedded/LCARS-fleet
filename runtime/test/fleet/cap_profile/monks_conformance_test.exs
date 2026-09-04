@@ -1,7 +1,7 @@
-defmodule Fleet.CapProfile.MonksV25ConformanceTest do
+defmodule Fleet.CapProfile.MonksConformanceTest do
   @moduledoc """
   Conformance of the 15 monks + archivist (Memory-X V1) to the schema
-  `cap-profile-v2.5.json` + sanity of the `alpha.yaml`/`beta.yaml` registries.
+  `cap-profile.json` + sanity of the `alpha.yaml`/`beta.yaml` registries.
   Same pattern as the canon cap-profile conformance suite (PROVEN).
 
   ## G24-11 / ADR #565
@@ -13,7 +13,7 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
   """
   use ExUnit.Case, async: true
 
-  # FROZEN (BL — Memory-X frozen): v2.5 conformance of the monk cap-profiles, now ARCHIVED
+  # FROZEN (BL — Memory-X frozen): schema conformance of the monk cap-profiles, now ARCHIVED
   # (`priv/memory-x/monks/`, out of the boot loop). Re-enable when Memory-X is re-homed
   # (per-project + system-wide under lcars).
   @moduletag skip:
@@ -27,7 +27,7 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
                  "priv",
                  "cap_profile",
                  "schema",
-                 "cap-profile-v2.5.json"
+                 "cap-profile.json"
                ])
   @monks_dir Path.join([
                __DIR__,
@@ -56,7 +56,7 @@ defmodule Fleet.CapProfile.MonksV25ConformanceTest do
     assert File.exists?(Path.join(@monks_dir, "beta.yaml"))
   end
 
-  test "monks/archivist: FULLY conformant v2.5 (post ADR #565 verdict B)",
+  test "monks/archivist: FULLY conformant (post ADR #565 verdict B)",
        %{schema: schema} do
     # ADR #565 verdict B: monks use `spec.knowledge.sp_template` (permanent pod),
     # NOT `spec.invocation.subagent_template` (one-shot dispatch, G24-11).

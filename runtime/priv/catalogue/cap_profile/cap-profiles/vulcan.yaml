@@ -1,6 +1,6 @@
 # Reserved seat: vulcan — the box is closed, the seat is kept (user arbitrage 2026-08-02:
 # "il sortira quand on ouvrira sa boite").
-# Contract: this file + Fleet.CapProfile (@moduledoc). Schema: ../../schema/reserved-seat-v1.json
+# Contract: this file + Fleet.CapProfile (@moduledoc). Schema: ../../schema/reserved-seat.json
 #
 # A seat claims the PROVISIONING identity — the forge account (forge.tf local.roles) and the
 # role token (provision-role-tokens.sh ROLES + provision-lib.sh PROV_ROLES), both inert until

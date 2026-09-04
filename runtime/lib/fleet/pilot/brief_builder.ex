@@ -460,7 +460,7 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   # A **judge** pod must know WHAT
   # to judge AND how to render its verdict. We reuse the canonical brief `Fleet.Workflow.GateBrief`
-  # (context + deliverable + question + **`gate-decision-v1.json` contract + canonical
+  # (context + deliverable + question + **`gate-decision.json` contract + canonical
   # options**). The `result_K` to judge is read from the previous step_run's comment (engraved by
   # StepRunCompleter); the pod stays forge-blind (the runtime reads the comment, no
   # clone).
@@ -785,7 +785,7 @@ defmodule Fleet.Pilot.BriefBuilder do
 
   # Brief of a BRIEF judge (brief-review, judge_target:brief). The scoper judges the BRIEF
   # (issue.body written by the arch) BEFORE the engineer sets off: executable without a new question? We
-  # reuse the SAME GateBrief (gate-decision-v1 contract + canonical options) as the other judges — only
+  # reuse the SAME GateBrief (gate-decision contract + canonical options) as the other judges — only
   # `subject: :brief` reframes the "thing to judge". The BRIEF goes into `outputs` (the thing TO JUDGE; ≠
   # build_judge_brief where outputs = the deliverable/code); no `request` (the executability criterion is
   # carried by the :brief framing). The judge is PRE-PR (no clone, no deliverable) → N0-consistent.

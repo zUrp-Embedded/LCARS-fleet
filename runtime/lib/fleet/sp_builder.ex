@@ -16,7 +16,7 @@ defmodule Fleet.SPBuilder do
     exports: []
 
   @moduledoc """
-  System Prompt builder/composer (LCARS schema v2.5).
+  System Prompt builder/composer (LCARS cap-profile schema).
 
   Pure data transformer: composed `%Fleet.CapProfile{}` + modop bundles
   (sp.md fragments) + pod identifiers → composed `system-prompt.md`,

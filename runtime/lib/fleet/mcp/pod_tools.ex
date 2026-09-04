@@ -175,7 +175,7 @@ defmodule Fleet.MCP.PodTools do
 
     # ⚠ UN `object` NU ICI, ET LA CHARGE MACHINE DES JUGES SE PERD. Mesuré au banc sur deux juges
     # indépendants (probe-rails PR#34 puis PR#37) : trois verdicts rendus, trois gravures en prose,
-    # ZÉRO `details.findings_v1`. La consigne existe pourtant — `core/judge-verdict` la compose
+    # ZÉRO `details.findings`. La consigne existe pourtant — `core/judge-verdict` la compose
     # dans le SP de chaque juge — mais elle vit dans un bloc de prose lu au démarrage, à des
     # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en
     # agissant, c'est ce schéma : un `object` nu dit « un objet », et un objet est tout ce qu'il rend.
@@ -191,7 +191,7 @@ defmodule Fleet.MCP.PodTools do
           "type" => "object",
           "description" =>
             "Le résultat structuré de ta tâche. SI TU ES UN JUGE : l'enveloppe de verdict " <>
-              "(`decision`, `reason`, …) ET, sous `details.findings_v1`, la charge MACHINE de tes " <>
+              "(`decision`, `reason`, …) ET, sous `details.findings`, la charge MACHINE de tes " <>
               "findings — `%{\"findings\" => [%{\"severity\" => \"critical\"|\"important\"|" <>
               "\"minor\", \"category\" => …, \"description\" => …}, …]}`. Ta prose est lue par " <>
               "des humains ; cette charge est lue par le RAIL : c'est elle qui permet à la carte du " <>

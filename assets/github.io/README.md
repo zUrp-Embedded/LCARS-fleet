@@ -30,7 +30,7 @@ tenir, pas de snapshot à resynchroniser, pas d'affichage de fraîcheur à maint
 | `runtime/priv/catalogue/workflow/workflow_maps/` | les cartes, avec la `presentation:` que le catalogue écrit déjà pour un humain |
 | `runtime/priv/catalogue/cap_profile/cap-profiles/` | les sièges — champs **structurels** seulement |
 | `runtime/priv/catalogue-system/cap_profile/cap-profiles/` | les rôles de mécanique, comptés |
-| `runtime/priv/workflow/schema/gate-decision-v1.json` | les verdicts, lus dans l'`enum` |
+| `runtime/priv/workflow/schema/gate-decision.json` | les verdicts, lus dans l'`enum` |
 | `runtime/lib/fleet/catalogue.ex` | les 13 arbres d'un catalogue, les générations d'API, le nom réservé, les surcharges fines |
 | `runtime/lib/fleet/layout.ex` | où vivent les catalogues |
 | `runtime/bin/lcars`, `runtime/bin/fleet_v2` | les verbes de la console, et les trois états d'un catalogue |

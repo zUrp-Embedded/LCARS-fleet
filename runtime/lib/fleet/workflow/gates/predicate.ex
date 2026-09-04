@@ -1,6 +1,6 @@
 defmodule Fleet.Workflow.Gates.Predicate do
   @moduledoc """
-  Pure fail-closed evaluator for v2.5 string predicates over pod outputs.
+  Pure fail-closed evaluator for rule-string predicates over pod outputs.
 
   ## Grammar (bounded to the canon corpus `standard-qa` / `audit-only`)
 
@@ -90,7 +90,7 @@ defmodule Fleet.Workflow.Gates.Predicate do
   # the hard path answer "unsatisfied rule(s)" for a malformed CARD. This clause stays for what
   # reaches it anyway.
   # A non-string `rule` (an UNSCHEMATIZED override — an in-memory workflow_map that bypassed the
-  # loader's schema; there is NO v1 input, a v1 YAML fails the v2.5 schema before normalize)
+  # loader's schema; there is no flat input, an envelope-less YAML fails the schema before normalize)
   # — or non-map `outputs` — renders `false`:
   # the hard gate FAILS (`Enum.all?` becomes false → `{:fail, …}` in Gates), NEVER a
   # FunctionClauseError that would bubble up and crash the StepRunConsumer (singleton). The eval

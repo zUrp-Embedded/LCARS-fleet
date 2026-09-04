@@ -103,7 +103,7 @@ defmodule Fleet.EventRouter.Catalog do
     # the tests rewrite under it; the SCHEMA is immutable `priv/` resolved through `:code.priv_dir`,
     # with no knob and nothing to swap.
     path =
-      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events-v1.json")
+      Path.join(to_string(:code.priv_dir(:lcars_fleet)), "event_router/schema/events.json")
 
     schema = Fleet.SchemaCache.resolve_json_schema!({__MODULE__, :schema, path}, path)
 
@@ -112,7 +112,7 @@ defmodule Fleet.EventRouter.Catalog do
         :ok
 
       {:error, errors} ->
-        raise "Catalog: events.yaml INVALID against events-v1.json: #{inspect(errors)} — " <>
+        raise "Catalog: events.yaml INVALID against events.json: #{inspect(errors)} — " <>
                 "the registry carries the routing table (load-bearing); fail-loud at boot."
     end
   end

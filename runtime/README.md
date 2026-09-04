@@ -2,7 +2,7 @@
 
 **Date** : 2026-05-09
 **Dernière révision** : 2026-08-11
-**Statut** : runtime v2 — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
+**Statut** : runtime — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
 **Référencé par** : `lib/fleet/README.md` (la carte racine renvoie ici pour le diagramme)
 
 Plan de contrôle OTP pour une flotte d'agents LLM faillibles. Le runtime *spawn*, surveille et

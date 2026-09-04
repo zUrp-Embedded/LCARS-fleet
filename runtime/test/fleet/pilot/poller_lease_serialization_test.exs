@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
         Jason.encode!(
           Map.merge(
             %{
-              "_schema" => "lcars/declaration-v1",
+              "_schema" => "lcars/declaration",
               "declared_at" => "2026-08-05",
               "declared_by" => "architect",
               "justification" => "banc",

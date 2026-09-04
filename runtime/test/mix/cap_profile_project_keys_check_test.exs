@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CapProfileProjectKeysCheckTest do
 
   alias Mix.Tasks.Lcars.Contracts.Check.Tools
 
-  @schema_rel "priv/cap_profile/schema/cap-profile-v2.5.json"
+  @schema_rel "priv/cap_profile/schema/cap-profile.json"
   @resolver_rel "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
 
   defp schema(props) do

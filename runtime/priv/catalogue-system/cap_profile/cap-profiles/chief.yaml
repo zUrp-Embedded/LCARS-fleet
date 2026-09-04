@@ -1,6 +1,6 @@
 # Cap-profile: chief
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
-# Schema: ../../schema/cap-profile-v2.5.json
+# Schema: ../../schema/cap-profile.json
 #
 # THE MERGE RAIL — the producer half that used to be worn by the gatekeeper.
 #

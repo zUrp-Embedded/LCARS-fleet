@@ -1,7 +1,7 @@
 defmodule Fleet.CapProfile.Invariants do
   @moduledoc """
   The **pure** G24 business invariants of a composed `%CapProfile{}`
-  (cap-profile canon v2.5 + containment gate).
+  (cap-profile canon + containment gate).
 
   Pure validation cluster extracted from `Fleet.CapProfile`: one function per
   check, aggregated by `violations/1`. Pure — no process read, no FS read

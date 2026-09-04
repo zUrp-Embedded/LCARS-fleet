@@ -1,6 +1,6 @@
 {
-  "_comment": "Per-project .lcars.json template — copy to <project_root>/.lcars.json and adapt. Schema: ../../schema/declaration-v1.json. NAMING A CARD (pipeline_default) IS THE HUMAN'S DECLARATION: the card carries the whole gate (judges, CI, verdict policy). It is elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
-  "_schema": "lcars/declaration-v1",
+  "_comment": "Per-project .lcars.json template — copy to <project_root>/.lcars.json and adapt. Schema: ../../schema/declaration.json. NAMING A CARD (pipeline_default) IS THE HUMAN'S DECLARATION: the card carries the whole gate (judges, CI, verdict policy). It is elicited by the framing interview (what happens if this deliverable is WRONG? how long will it live?) and RELAYED by the architect — an agent never self-assesses criticality (agents rationalize down). The justification carries the why in prose.",
+  "_schema": "lcars/declaration",
   "declared_at": "2026-07-18",
   "declared_by": "architect",
   "justification": "NON DÉCLARÉ — défaut système. Remplacer par la déclaration de l'humain (choix de carte + pourquoi).",

@@ -438,7 +438,7 @@ defmodule Fleet.Layout do
       )
 
   @doc """
-  ops-relative ref of a committed MACHINE verdict (`details.findings_v1`): `verdicts/issue-<n>-<role>.json`.
+  ops-relative ref of a committed MACHINE verdict (`details.findings`): `verdicts/issue-<n>-<role>.json`.
 
   Same tree and same basename as `verdict_ref/2`, deliberately — the extension is the only
   difference: prose and machine are two RENDERINGS of the same act (this judge, this delivery),

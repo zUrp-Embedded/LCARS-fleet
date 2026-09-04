@@ -1,4 +1,4 @@
-# monks — les profils v2.5 de Memory-X (feature gelée, hors de la boucle de boot)
+# monks — les profils de Memory-X au schéma courant (feature gelée, hors de la boucle de boot)
 
 **Date** : 2026-06-19
 **Dernière révision** : 2026-07-04

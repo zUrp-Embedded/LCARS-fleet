@@ -32,7 +32,7 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |
-| `priv/memory-x/` | Memory-X, feature gelée (prototype v1.5 + profils v2.5), lue par rien |
+| `priv/memory-x/` | Memory-X, feature gelée (prototype d'origine + profils au schéma courant), lue par rien |
 | `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
 | `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
 | `test/` | ExUnit (284 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |

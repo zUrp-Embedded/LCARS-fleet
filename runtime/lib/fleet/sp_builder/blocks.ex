@@ -27,7 +27,7 @@ defmodule Fleet.SPBuilder.Blocks do
   # markdown header. STATIC date (not `Date.utc_today`): generation must stay deterministic (the no-drift
   # test compares the committed flat to a regeneration — a dynamic date would break it the next day). The
   # header text stays FR: it is SP-file content (pod-facing convention).
-  @header "<!-- Date: 2026-07-08 — SP v2 : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis sp_builder/sp_blocks/. " <>
+  @header "<!-- Date: 2026-07-08 — SP : fichier GÉNÉRÉ par `mix lcars.sp.gen` depuis sp_builder/sp_blocks/. " <>
             "NE PAS ÉDITER (édite les blocs). Bloc ou rôle manquant → échec dur (no-fallback, cf. no-sp-no-pod-no-fleet). -->"
 
   @doc """

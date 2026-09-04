@@ -698,7 +698,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @spec check_cap_profile_project_keys(String.t()) :: Support.result()
   def check_cap_profile_project_keys(root) do
     resolver_rel = "lib/fleet/pilot/step_dispatcher/project_resolver.ex"
-    schema_rel = "priv/cap_profile/schema/cap-profile-v2.5.json"
+    schema_rel = "priv/cap_profile/schema/cap-profile.json"
 
     schema_keys = schema_project_keys(root, schema_rel)
     runtime_keys = MapSet.new(Fleet.CapProfile.runtime_project_keys())

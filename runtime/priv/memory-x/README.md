@@ -1,6 +1,6 @@
 # priv/memory-x/ — Memory-X, une feature GELÉE (à reprendre un jour de pluie)
 
-**Date** : 2026-05-22 (prototype v1.5) · **Dernière révision** : 2026-09-04
+**Date** : 2026-05-22 (prototype d'origine) · **Dernière révision** : 2026-09-04
 **Statut** : GELÉ — feature complète et qui a tourné, gardée telle quelle, lue par aucun code
 **Référencé par** : `runtime/CLAUDE.md` (table de `priv/`), `Fleet.Catalogue` (@moduledoc), `test/fleet/sp_builder_monk_test.exs`, `test/fleet/cap_profile/monks_*_test.exs`
 
@@ -11,21 +11,21 @@ tranche d'un corpus documentaire et répond en JSON strict aux questions des aut
 socket exposée par l'archiviste. Aucun agent ne charge le corpus dans son contexte : il pose une
 question à Memory-X.
 
-Ça a tourné (v1.5, instances `alpha` et `beta`, test live du 2026-05-17 PASS, cf. les commentaires de
-`v1.5/fleets/`). Ce n'est pas nécessaire pour livrer le projet, c'est un accessoire : il reste ici
+Ça a tourné (instances `alpha` et `beta`, test live du 2026-05-17 PASS, cf. les commentaires de
+`prototype/fleets/`). Ce n'est pas nécessaire pour livrer le projet, c'est un accessoire : il reste ici
 en entier, pour être repris sans réinventer.
 
 ## Contenu
 
 | dossier | forme | contenu |
 |---|---|---|
-| `v1.5/cap-profiles/` | profils **pré-v2.5** (pas de `lifetime_scope`, pas d'`interlocutor`) | `archivist.yaml`, `monk.yaml` |
-| `v1.5/fleets/` | `kind: MemoryInstance`, un type qu'aucun schéma courant ne connaît | `memory-alpha.yaml` (corpus moon-shot, 5 monks), `memory-beta.yaml` (corpus beyond, 10 monks) |
-| `v1.5/sp/` | system prompts | `archivist.md`, `monk.md`, et leur README |
-| `monks/` | profils **v2.5**, conformes au schéma courant | `alpha.yaml`, `beta.yaml`, `archivist.yaml`, cinq `monk-alpha-*.yaml`, et son README |
+| `prototype/cap-profiles/` | profils dans la forme d'origine (pas de `lifetime_scope`, pas d'`interlocutor`) | `archivist.yaml`, `monk.yaml` |
+| `prototype/fleets/` | `kind: MemoryInstance`, un type qu'aucun schéma courant ne connaît | `memory-alpha.yaml` (corpus moon-shot, 5 monks), `memory-beta.yaml` (corpus beyond, 10 monks) |
+| `prototype/sp/` | system prompts | `archivist.md`, `monk.md`, et leur README |
+| `monks/` | profils conformes au schéma courant | `alpha.yaml`, `beta.yaml`, `archivist.yaml`, cinq `monk-alpha-*.yaml`, et son README |
 
 Les deux jeux décrivent la même feature à deux époques ; leurs rosters divergent (F-C157) et c'est
-attendu. `monks/` est le point de départ d'un dégel, `v1.5/` la référence de ce qui a fonctionné.
+attendu. `monks/` est le point de départ d'un dégel, `prototype/` la référence de ce qui a fonctionné.
 
 ## Ce qui reste câblé dans le runtime
 
@@ -33,7 +33,7 @@ attendu. `monks/` est le point de départ d'un dégel, `v1.5/` la référence de
   catalogue (`Fleet.Catalogue.monk_registry_root/0`). Ce registre est ABSENT des catalogues
   embarqués : absent = monks gelés, chemin dormant par design.
 - Les témoins `sp_builder_monk_test.exs`, `cap_profile/monks_frozen_test.exs`,
-  `cap_profile/monks_v25_conformance_test.exs` sont `@moduletag skip` avec le motif « Memory-X
+  `cap_profile/monks_conformance_test.exs` sont `@moduletag skip` avec le motif « Memory-X
   frozen » et leurs fixtures pointent ici.
 
 ## Pour dégeler
@@ -42,6 +42,6 @@ attendu. `monks/` est le point de départ d'un dégel, `v1.5/` la référence de
    qui a gelé la feature (BL), pas un défaut technique.
 2. Déplacer `monks/` dans le registre du catalogue choisi (`cap_profile/cap-profiles/monks/`), re-pointer
    les fixtures des trois témoins, retirer leurs `@moduletag skip`.
-3. Décider du sort de `v1.5/` : les SP y sont plus complets que les profils v2.5 (mandat par
+3. Décider du sort de `prototype/` : les SP y sont plus complets que les profils de `monks/` (mandat par
    variables d'environnement, cycle boot/questions) ; ils se reportent dans les blocs SP du
    catalogue, ils ne se chargent pas tels quels.

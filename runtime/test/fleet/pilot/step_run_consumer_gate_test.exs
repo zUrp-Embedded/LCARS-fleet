@@ -630,7 +630,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   test "F-C161: valid verdict WITHOUT a non-empty reason → halt_invalid (fail-closed, no approval without justification)" do
-    # gate-decision-v1.json requires `reason` (minLength 1); the decoder now ENFORCES it (not just
+    # gate-decision.json requires `reason` (minLength 1); the decoder now ENFORCES it (not just
     # the decision enum). A `continue` without a motive = approval without a durable trace (what
     # sank v1) → refused: halt_invalid → human escalation. The decision stays valid, but the
     # verdict is malformed.
@@ -662,7 +662,7 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   test "wire envelope EXECUTED at the frontier: mistyped details/chain → halt_invalid, logged" do
-    # gate-decision-v1.json types `details: object` and `chain: array[string]`. The decoder used
+    # gate-decision.json types `details: object` and `chain: array[string]`. The decoder used
     # to check only enum+reason: a schema-invalid approval crossed and its rich trace was silently
     # dropped at rendering. The full envelope now validates on ingest, fail-closed.
     log =

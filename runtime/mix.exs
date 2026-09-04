@@ -13,7 +13,7 @@ defmodule LcarsFleet.MixProject do
   def project do
     [
       app: :lcars_fleet,
-      version: "0.1.0",
+      version: "0.9.0",
       elixir: "~> 1.18",
       # boundary = the compiled guardian of the architecture (inter-domain deps
       # + façade exports).

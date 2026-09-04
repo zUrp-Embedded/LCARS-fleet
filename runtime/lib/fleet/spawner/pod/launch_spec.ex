@@ -231,7 +231,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   cap-profile. **Ce qui manque est le VÉHICULE, et il n'a jamais existé** : la compression passe par
   un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
   monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
-  `.claude` humain est exclu À CAUSE de ses hooks. Le porteur v1 visait le tier `user`, que
+  `.claude` humain est exclu À CAUSE de ses hooks. Un porteur dans le tier `user`, que
   `--setting-sources` exclut sans condition : il ne tirerait pas davantage (cf.
   `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
 

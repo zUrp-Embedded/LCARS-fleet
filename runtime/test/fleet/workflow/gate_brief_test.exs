@@ -26,7 +26,7 @@ defmodule Fleet.Workflow.GateBriefTest do
     end
 
     # Output contract
-    assert brief =~ "gate-decision-v1.json"
+    assert brief =~ "gate-decision.json"
     assert brief =~ "Question to decide"
   end
 

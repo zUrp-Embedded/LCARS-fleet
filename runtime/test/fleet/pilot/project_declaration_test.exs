@@ -98,7 +98,7 @@ defmodule Fleet.Project.DeclarationTest do
         to_string(:code.priv_dir(:lcars_fleet)),
         "cap_profile",
         "schema",
-        "declaration-v1.json"
+        "declaration.json"
       ])
 
     key = {ProjectDeclaration, :schema, path}

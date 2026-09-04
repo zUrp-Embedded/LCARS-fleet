@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "LCARS Capability Profile v2.5",
+  "title": "LCARS Capability Profile",
   "description": "Structural schema for a composed Capability Profile. Semantic invariants (enums, value constraints) are checked by Fleet.CapProfile.validate/1 (G24). STRICT: additionalProperties:false at every object level — an unknown/typo'd field (e.g. `containmnet`) is REJECTED, not silently ignored (R0-CAP-001). As the COMPOSED profile (base + modops) is validated here, this also catches junk fields introduced by a modop fragment (R0-CAP-009 backstop).",
   "type": "object",
   "required": [

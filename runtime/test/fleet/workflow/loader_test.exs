@@ -36,7 +36,7 @@ defmodule Fleet.Workflow.LoaderTest do
     end
 
     test "invalid schema (missing steps field) → raise", %{tmp_dir: tmp_dir} do
-      # Valid v2.5 envelope but `spec.steps` absent → `spec` requires `steps`.
+      # Valid envelope but `spec.steps` absent → `spec` requires `steps`.
       File.write!(Path.join(tmp_dir, "invalid.yaml"), """
       kind: WorkflowMap
       metadata:

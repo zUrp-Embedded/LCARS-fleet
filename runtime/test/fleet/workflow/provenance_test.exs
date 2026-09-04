@@ -33,7 +33,7 @@ defmodule Fleet.Workflow.ProvenanceTest do
     assert get_in(s, ["predicate", "invocation", "configSource", "uri"]) == "briefs/BSHA.md"
     assert get_in(s, ["predicate", "buildConfig", "input_sha"]) == "ISHA"
     assert get_in(s, ["predicate", "buildConfig", "pod_id"]) == "p1"
-    assert s["predicate"]["buildType"] == "lcars-fleet-pipeline-v2"
+    assert s["predicate"]["buildType"] == "lcars-fleet-pipeline"
   end
 
   test "DEGRADED statement: absent brief_sha → configSource WITHOUT digest (never an invented brief_sha)" do

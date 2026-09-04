@@ -863,7 +863,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
           role,
           # Repli, jamais le cas nominal : les deux chemins qui atteignent ce point posent
           # `:invalid_reason`. Il couvre un ctx construit ailleurs un jour.
-          Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision-v1.json` invalide",
+          Map.get(ctx, :invalid_reason) || "enveloppe `gate-decision.json` invalide",
           trace,
           %VerdictCorrection.Seams{
             repo: state.repo,

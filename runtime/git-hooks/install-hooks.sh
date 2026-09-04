@@ -5,8 +5,8 @@
 #     |   ________   __________________________________________\
 #     |  |  2026  |  | SOURCE: install-hooks.sh
 #     |  |________|  | AUTHOR: LORDZURP
-#     |   ________   | SYSTEM: LCARS-FLEET v5.4
-#     |  |  v5.4  |  | STATUS: OPERATIONAL
+#     |   ________   | SYSTEM: LCARS-FLEET v0.9
+#     |  |  v0.9  |  | STATUS: OPERATIONAL
 #     |  |________|  |__________________________________________
 #     |              \__________________________________________\
 #      \    "To boldly go where no code has gone before..."     /
@@ -16,7 +16,7 @@
 #     | [ LCARS-FLEET ] COMMAND INTERFACE    [ ACCESS GRANTED ]   |
 #     +-----------------------------------------------------------+
 #     | MODULE: INSTALL-HOOKS   | SUBSYSTEM: GIT-HOOKS / SETUP    |
-#     | LICENSE: AGPL-3         | STARDATE: 2026.087              |
+#     | LICENSE: AGPL-3         | STARDATE: 2026.247              |
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  Installs fleet git hooks into .git/hooks/.               |

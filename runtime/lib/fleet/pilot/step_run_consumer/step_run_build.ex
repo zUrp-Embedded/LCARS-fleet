@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     step_run = Map.put(step_run, :review_event, event)
 
     # C1: the machine payload leaves the prose HERE, at the flattening point.
-    # `take_findings` validates `details.findings_v1` and, when valid, hands the object over
+    # `take_findings` validates `details.findings` and, when valid, hands the object over
     # (`:review_findings` → engraved by `StepRunCompleter.record_review` next to the prose pin)
     # while stripping it from `result` so `judge_review_body` never inspect-dumps a machine map
     # into a human review. Invalid or absent → `result` untouched, no key: a legacy judge walks
@@ -203,7 +203,7 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     step_run = put_unless_nil(step_run, :review_findings, findings)
 
     # DISTINGUER « rien envoyé » DE « envoyé et refusé », PARCE QUE LE COMPLETER ACCUSE. Son log
-    # d'absence dit « judge X submitted NO details.findings_v1 » — vrai quand le juge s'est tu,
+    # d'absence dit « judge X submitted NO details.findings » — vrai quand le juge s'est tu,
     # FAUX quand il a émis un payload que le schéma a écarté, et ce second cas est le plus frequent
     # des deux (un JSON sérialisé, un `severity_max` hors énumération). Accuser un juge d'un silence
     # qu'il n'a pas commis envoie corriger le mauvais bout : on cherche pourquoi il n'émet pas alors

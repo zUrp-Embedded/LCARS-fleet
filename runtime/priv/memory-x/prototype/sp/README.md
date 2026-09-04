@@ -1,4 +1,4 @@
-# priv/memory-x/v1.5/sp/ — system prompts du prototype v1.5 (Memory-X, feature gelée)
+# priv/memory-x/prototype/sp/ — system prompts du prototype d'origine (Memory-X, feature gelée)
 
 **Date** : 2026-05-22 (bascule run #4)
 **Statut** : copie versionnée des SPs cap-profile archivist/monk — **GELÉS (F-C153), non chargés par le runtime** (les profils archivist/monk sont hors catalogue actif).
@@ -12,7 +12,7 @@
 
 Ces fichiers sont la **copie canonique versionnée** depuis le filesystem `/local/LCARS-v1.5/sp/` au moment de la bascule run #4.
 
-Les cap-profiles YAML (`priv/memory-x/v1.5/cap-profiles/{archivist,monk}.yaml`) référencent encore le path historique `/local/LCARS-v1.5/sp/archivist.md`. À la migration vers résolution relative (via `:code.priv_dir(:fleet_cap_profile)` ou env var `LCARS_CANON_ROOT`), ces fichiers `priv/memory-x/sp/` deviendront la source de vérité au runtime.
+Les cap-profiles YAML (`priv/memory-x/prototype/cap-profiles/{archivist,monk}.yaml`) référencent encore le path historique `/local/LCARS-v1.5/sp/archivist.md`. À la migration vers résolution relative (via `:code.priv_dir(:fleet_cap_profile)` ou env var `LCARS_CANON_ROOT`), ces fichiers `priv/memory-x/sp/` deviendront la source de vérité au runtime.
 
 ## Dette ouverte
 

@@ -27,7 +27,7 @@ defmodule Fleet.Spawner do
     exports: [Application, PermanentBoot, PodTmux, Pod.McpProvision, LaunchBackend]
 
   @moduledoc """
-  Drives the LCARS v2 pod lifecycle (pod-composition layer).
+  Drives the LCARS pod lifecycle (pod-composition layer).
 
   Spawns, watches and terminates ephemeral agent pods. Each pod is a
   `Fleet.Spawner.Pod` (`gen_statem`) supervised by `Fleet.Spawner.Supervisor`:

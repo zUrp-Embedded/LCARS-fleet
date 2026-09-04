@@ -2,7 +2,7 @@
 # SOURCE: etc/deploy-release.sh
 # AUTHOR: starfleet
 # STARDATE: 2026-06-22
-# STATUS: v2 deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
+# STATUS: deployment — builds the prod release and puts EVERYTHING under $PREFIX (default
 #         /opt/lcars/runtime). Self-contained: the runtime runs WITHOUT the repo (bundled priv, embedded
 #         ERTS). Idempotent, and CRASH-SAFE: a build or copy failure never destroys the live install.
 #
