@@ -360,12 +360,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("../deploy/docker/entrypoint.sh", root)
+    # Lot 6 (2026-09-04) : the box creates its zones in `box/init.sh` (the product's instance init),
+    # no longer in the docker entrypoint — the anchor line kept its exact shape.
+    entrypoint = Path.expand("services/box/init.sh", root)
     module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
-      "add the face root to the `install -d` line of deploy/docker/entrypoint.sh — a face declared " <>
+      "add the face root to the `install -d` line of fleet/services/box/init.sh — a face declared " <>
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
@@ -412,7 +414,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
           {expected, at_boot, on_every_substrate} ->
             missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de l'entrypoint docker") ++
+              Enum.map(expected -- at_boot, &"#{&1}: absent de box/init.sh (la boite)") ++
                 Enum.map(
                   expected -- on_every_substrate,
                   &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
@@ -478,7 +480,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # indistinguishable from a changed mode.
   defp read_install_zone_paths(path) do
     with {:ok, content} <- File.read(path),
-         [_, tail] <- Regex.run(~r/^install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
+         [_, tail] <- Regex.run(~r/^\s*install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
       tail |> String.split() |> Enum.filter(&String.starts_with?(&1, "/"))
     else
       _ -> nil

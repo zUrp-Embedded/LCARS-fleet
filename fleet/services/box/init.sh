@@ -128,11 +128,13 @@ seat_create() {
 }
 
 # ─── LES ZONES DE FACE, LA SOURCE, LES CLES D'HOTE ─────────────────────────────────────────────
+# ⚠ UNE SEULE LIGNE, ET C'EST UNE ANCRE : le contrat `layout.face_roots_provisioned` la lit telle
+# quelle (`install -d -m 2775 -g fleet <zones>`) et la compare aux faces que `Fleet.Layout` declare.
+# Une face declaree sans zone sur la machine tue le premier onboard qui en a besoin.
 faces() {
-  local z
-  for z in /home/projects /home/projects.ops /home/projects.workshop; do
-    ensure_dir "$z" 2775 "root:$PROV_FLEET_GROUP" || true
-  done
+  install -d -m 2775 -g fleet /home/projects /home/projects.ops /home/projects.workshop \
+    && p_ok "zones de face : /home/projects /home/projects.ops /home/projects.workshop (2775 root:fleet)" \
+    || p_fail "zones de face NON posees"
 }
 source_trees() {
   local src="${LCARS_SOURCE_DIR:-/home/projects/LCARS}" remote="${LCARS_SOURCE_REMOTE:-}" ref="${LCARS_SOURCE_REF:-}"

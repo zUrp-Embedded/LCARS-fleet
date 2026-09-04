@@ -1,0 +1,43 @@
+# box — le boot de la boîte, côté produit
+
+**Date** : 2026-09-04
+**Statut** : actif — lot 6 du chantier deploy-independance
+**Référencé par** : `fleet/services/README.md`, `deploy/docker/entrypoint.sh`
+
+⚖ user 2026-09-04 (Q1) : « pour docker, pourquoi on pourrait pas build l'image, et qu'elle reste
+alive entre 2 démarrages ? … dans docker, le deploy semble n'avoir aucun intérêt à partir dans le
+container ». Le modèle est celui de Docker : l'image est le produit, le conteneur une instance,
+l'état dans le volume, l'entrypoint démarre le service. Ce dossier porte ce que la boîte fait
+d'elle-même, sans l'installeur.
+
+| geste | ce qu'il fait |
+|---|---|
+| `init.sh` | l'init de l'INSTANCE : le siège (résolu puis créé), les zones de face, la source et le corpus ops, les clés d'hôte SSH, le layout du volume et du magasin, la skill du siège, `pilot.assignee` — idempotent, ce qu'une instance neuve doit avoir sur son volume |
+
+## Le protocole
+
+`init.sh` répond à deux verbes — `<module> seat|apply` — sur le protocole des modules du produit
+(`../lib/module-protocol.sh`).
+
+- `init.sh seat` : résout le siège (table `forge-uid.map`, sinon le #1 de la forge par le jeton
+  master, sinon la semence `LCARS_ADMIRAL`), l'enregistre, écrit `/etc/lcars/seat.uid` et
+  `/run/lcars-seat.login`. Rend `0` résolu, `1` divergence (la semence contredit une source
+  durable — on ne renomme pas un home en silence), `3` indéterminable : c'est l'état « en attente
+  de configuration », la boîte reste debout pour que `box config` soit jouable.
+- `init.sh apply` : `seat`, puis tout le reste. Rend `0` convergé, `2` drift résiduel, `1` échec,
+  `3` en attente de configuration.
+
+Ce qu'il lit : `LCARS_UID`, `LCARS_ADMIRAL`, `LCARS_SSH_AUTHORIZED_KEYS`, `FORGE_BASE_URL`,
+`LCARS_STORE_ROOT`, `LCARS_SOURCE_DIR`/`LCARS_SOURCE_REMOTE`/`LCARS_SOURCE_REF` — ce que le
+compose donne au conteneur — et les défauts du protocole pour le reste.
+
+Ce qu'il ne fait pas : les gestes de forge (`../forge.d/`, le minteur `../provision-role-tokens.sh`),
+joués par l'entrypoint après lui ; les humains (le convergeur) ; les services (l'entrypoint).
+
+## Ce qui reste à l'entrypoint, et pour combien de temps
+
+`deploy/docker/entrypoint.sh` appelle `init.sh apply`, puis `provision --only 63-forge-tokens`
+(le dernier module de l'installeur joué au boot : il dépend de `prov_roles`, donc des portes outil
+du release), puis les gestes de `forge.d`, puis démarre les services et sshd. Quand les portes
+outil vivront dans `bin/lcars` et le mint côté produit, le boot entier sera ici (`boot.sh`) et
+`deploy/` quittera l'image.

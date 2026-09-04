@@ -403,13 +403,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the provisioning default"},
       {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
-      # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
-      # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
-      # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's uid-map path"},
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's master-token path"}
+      # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
+      # entrypoint as literals; they are now DERIVED from the product module protocol's
+      # `PROV_TOKENS_DIR` (box/init.sh composes `$PROV_TOKENS_DIR/forge-uid.map`). That default is
+      # the holder that counts on the product side — the same shape as the provisioning default.
+      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+       "the product module protocol's default"}
     ]
 
     # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
