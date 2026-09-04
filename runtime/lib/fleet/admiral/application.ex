@@ -13,7 +13,7 @@ defmodule Fleet.Admiral.Application do
   that needs one starts it with `start_supervised/1`). The list is the code below, and the domain's
   map names what each child is for.
 
-  ⚠ `Shutdown` is one of them, and its absence is not inert: `bin/fleet_v2 stop` RPCs
+  ⚠ `Shutdown` is one of them, and its absence is not inert: `bin/fleet stop` RPCs
   `Shutdown.begin` before `:init.stop()`, so a box that disabled it stops WITHOUT draining.
 
   `BootOrchestrator` is NOT a child here: as a mid-boot Task it could

@@ -9,7 +9,7 @@
 
 Ces cap-profiles (`archivist` + monks `alpha`/`beta`/`monk-*`, le sous-système **Memory-X V1**) étaient
 dans `cap-profiles/monks/`, donc scannés par `Fleet.CapProfile` (`name_index` globbe `monks/`) et
-sélectionnés au boot permanent (`boot_at_start: true`). Résultat : `fleet_v2 start` **tentait de booter
+sélectionnés au boot permanent (`boot_at_start: true`). Résultat : `fleet start` **tentait de booter
 ~17 pods permanents** (1 arch + 16 monks/archivist), pas juste l'arch.
 
 **Décision (2026-06-19)** : Memory-X doit être **per-project ET system-wide, sous `lcars` côté OS — PAS

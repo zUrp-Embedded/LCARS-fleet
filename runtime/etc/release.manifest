@@ -19,7 +19,7 @@
 # script sources the co-located identity for co-author attribution — the runtime invocation makes
 # it a dependency (cf. etc/README.md). Same reason for the publish scripts: they live in bin/ so
 # the manifest can carry them.
-fleet_v2                   exec   link
+fleet                   exec   link
 lcars                      exec   link
 bwrap_launch.sh            exec
 host_launch.sh             exec

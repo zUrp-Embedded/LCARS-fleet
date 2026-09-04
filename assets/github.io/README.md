@@ -33,7 +33,7 @@ tenir, pas de snapshot à resynchroniser, pas d'affichage de fraîcheur à maint
 | `runtime/priv/workflow/schema/gate-decision.json` | les verdicts, lus dans l'`enum` |
 | `runtime/lib/fleet/catalogue.ex` | les 13 arbres d'un catalogue, les générations d'API, le nom réservé, les surcharges fines |
 | `runtime/lib/fleet/layout.ex` | où vivent les catalogues |
-| `runtime/bin/lcars`, `runtime/bin/fleet_v2` | les verbes de la console, et les trois états d'un catalogue |
+| `runtime/bin/lcars`, `runtime/bin/fleet` | les verbes de la console, et les trois états d'un catalogue |
 | `runtime/lib/fleet/mcp/pod_tools*.ex` | les outils, par porteur |
 | `runtime/bin/claude_launch.sh` | la frontière vendor |
 

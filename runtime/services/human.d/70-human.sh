@@ -13,11 +13,11 @@ set -euo pipefail
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
 HOME_DIR="$(human_home)"
-ENV_FILE="$HOME_DIR/.lcars/fleet_v2.env"
-TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
+ENV_FILE="$HOME_DIR/.lcars/fleet.env"
+TEMPLATE="$PROV_PREFIX/etc/fleet.env.template"
 
 #
-# ⚠ ET IL CONVERGE, il ne se seed PAS une fois. C'est l'inverse de `fleet_v2.env` juste en dessous,
+# ⚠ ET IL CONVERGE, il ne se seed PAS une fois. C'est l'inverse de `fleet.env` juste en dessous,
 # et la différence est le SUJET : l'env est la configuration d'un humain, ce bloc est une limite
 # posée sur ce qu'un agent a le droit de faire. Une limite qu'un premier passage pose et qu'aucun
 # suivant ne rétablit n'est pas une limite.
@@ -154,15 +154,15 @@ check() {
 
   if [[ -f "$ENV_FILE" ]]; then
     if grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
-      p_ok "fleet_v2.env présent (FORGE_BASE_URL posé)"
+      p_ok "fleet.env présent (FORGE_BASE_URL posé)"
     else
-      p_drift "fleet_v2.env présent mais FORGE_BASE_URL manquant — fleet_v2 start refusera ; édite $ENV_FILE"
+      p_drift "fleet.env présent mais FORGE_BASE_URL manquant — fleet start refusera ; édite $ENV_FILE"
     fi
     if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
-      p_drift "token système minté mais non câblé dans $ENV_FILE — l'apply le câble (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN), puis « fleet_v2 stop && start »"
+      p_drift "token système minté mais non câblé dans $ENV_FILE — l'apply le câble (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN), puis « fleet stop && start »"
     fi
   else
-    p_drift "fleet_v2.env absent ($ENV_FILE)"
+    p_drift "fleet.env absent ($ENV_FILE)"
   fi
 
   if [[ ! -r "$AUTOMODE_SRC" ]]; then
@@ -201,7 +201,7 @@ apply() {
       # L'exposition des listeners est une propriété du DÉPLOIEMENT, pas de l'humain : le runtime
       # lie en loopback par défaut, ce qui dans un conteneur rend le deck injoignable depuis un
       # navigateur (la loopback est celle du conteneur). Elle voyage donc par l'environnement du
-      # substrat — et doit atterrir ICI, parce que `fleet_v2` lit ce fichier et non l'environnement
+      # substrat — et doit atterrir ICI, parce que `fleet` lit ce fichier et non l'environnement
       # du conteneur : un `su - <humain>` repart d'un environnement vierge.
       if [[ -n "${LCARS_BIND_HOST:-}" ]]; then
         { echo ""; echo "LCARS_BIND_HOST=$LCARS_BIND_HOST"; } >> "$tmp"
@@ -217,7 +217,7 @@ apply() {
       chmod 0600 "$tmp"
       mv -f "$tmp" "$ENV_FILE"
       PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "fleet_v2.env seedé depuis le template${PROV_FORGE_URL:+ (FORGE_BASE_URL=$PROV_FORGE_URL)} — désormais À L'HUMAIN, plus jamais réécrit ici"
+      p_chg "fleet.env seedé depuis le template${PROV_FORGE_URL:+ (FORGE_BASE_URL=$PROV_FORGE_URL)} — désormais À L'HUMAIN, plus jamais réécrit ici"
     else
       p_fail "template absent ($TEMPLATE) — lance d'abord 60-deploy"
     fi
@@ -238,7 +238,7 @@ apply() {
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$PROV_FORGE_URL)"
   elif [[ -f "$ENV_FILE" ]] && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
-    p_drift "fleet_v2.env sans FORGE_BASE_URL et aucune forge connue — fleet_v2 start refusera ; monte la forge (48-forge-host) ou édite $ENV_FILE"
+    p_drift "fleet.env sans FORGE_BASE_URL et aucune forge connue — fleet start refusera ; monte la forge (48-forge-host) ou édite $ENV_FILE"
   fi
 
   # POURQUOI CE N'EST PAS « RÉÉCRIRE LE FICHIER DE L'HUMAIN ». Une clé ABSENTE n'est pas un choix :
@@ -260,7 +260,7 @@ apply() {
     chmod 0600 "$tmp2"
     mv -f "$tmp2" "$ENV_FILE"
     PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet_v2 stop && start » pour l'appliquer"
+    p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet stop && start » pour l'appliquer"
   fi
 
   apply_git_identity

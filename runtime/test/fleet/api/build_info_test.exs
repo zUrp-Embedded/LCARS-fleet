@@ -4,7 +4,7 @@ defmodule Fleet.API.BuildInfoTest do
 
   A container build stage has no `.git` by construction, so `git rev-parse` fails there and the
   release used to be stamped `sha: "unknown"` — measured 2026-08-07 from inside a bench box, whose
-  `fleet_v2 status` reported "build unknown ref= (source=release)". The fallback exists for that one
+  `fleet status` reported "build unknown ref= (source=release)". The fallback exists for that one
   path, and it is the ONLY way an image learns which code it runs.
 
   What these cases pin is the refusal side. `LCARS_GIT_SHA` is passed by a build ARG that DEFAULTS

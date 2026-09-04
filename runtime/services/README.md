@@ -49,7 +49,7 @@ miroir entre les deux est tenu dans les deux sens par `deploy/tests/runtime_help
 ⚠ **CE RÉPERTOIRE NE PORTE QUE DES SERVICES**, c'est-à-dire ce que systemd ou le convergeur
 démarre. Un binaire que le BEAM ou `runtime/bin/lcars` INVOQUE (`lcars-toolchain-converge`,
 `lcars-authority-ask`) vit sous `runtime/bin/`, sous son nom définitif, comme `lcars` et
-`fleet_v2` : rien ne le démarre, il n'est dans aucune unité ni aucun `STARTERS`, et la convention
+`fleet` : rien ne le démarre, il n'est dans aucune unité ni aucun `STARTERS`, et la convention
 d'ici (`*.sh`/`*.py`) lui donnerait sur le `PATH` un autre nom que le sien.
 
 ## La règle, et le témoin qui la tient

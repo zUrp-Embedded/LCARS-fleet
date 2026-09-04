@@ -741,7 +741,7 @@ defmodule Fleet.Pilot.Poller do
   # fictional repos that have no project directory anywhere, so `config/test.exs` turns the gate
   # off in the same breath as `start_listener: false` and the stub launch backend. The dedicated
   # test turns it back on to pin the behaviour. In prod it is absent ⟹ true, and nothing in
-  # `etc/fleet_v2.env.template` offers it — a door that only the hermetic baseline opens.
+  # `etc/fleet.env.template` offers it — a door that only the hermetic baseline opens.
   defp onboarded?(repo) do
     if Application.get_env(:lcars_fleet, :pilot_require_onboarded, true),
       do: File.dir?(project_work_dir(repo)),

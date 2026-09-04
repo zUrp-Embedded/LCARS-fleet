@@ -69,7 +69,7 @@ fi
 [[ -x "$TMUX_BIN" ]] || { echo "ERR: tmux missing/not-x: $TMUX_BIN (N0 PTY host)" >&2; exit 2; }
 [[ -d "$POD_DIR"  ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 [[ -d "$WORKDIR"  ]] || { echo "ERR: workdir $WORKDIR inaccessible" >&2; exit 1; }
-[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (fleet started via fleet_v2? LCARS_TMUX_SOCK_BASE correct?)" >&2; exit 1; }
+[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (fleet started via fleet? LCARS_TMUX_SOCK_BASE correct?)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 
 cleanup() {

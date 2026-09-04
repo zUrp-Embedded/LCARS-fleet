@@ -111,7 +111,7 @@ MIRROR_BIND_ARGS=()
 [[ -n "$GIT_MIRROR" && -d "$GIT_MIRROR" ]] && MIRROR_BIND_ARGS=(--ro-bind "$GIT_MIRROR" "$GIT_MIRROR")
 [[ -d "$POD_DIR"     ]] || { echo "ERR: pod_dir $POD_DIR missing (caller responsibility)" >&2; exit 1; }
 
-[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (set by bin/fleet_v2 at start; override LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
+[[ -d "$SOCK_PARENT" ]] || { echo "ERR: sock parent $SOCK_PARENT missing (set by bin/fleet at start; override LCARS_TMUX_SOCK_BASE)" >&2; exit 1; }
 install -d -m 0700 "$POD_SOCK_DIR"
 install -d -m 0755 "$POD_DIR/.local/bin"
 

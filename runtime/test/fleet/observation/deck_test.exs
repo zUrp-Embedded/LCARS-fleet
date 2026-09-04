@@ -48,7 +48,7 @@ defmodule Fleet.Observation.DeckTest do
     assert Map.has_key?(body, "subsystems")
   end
 
-  test "GET /api/version → 200 JSON build info (read-socket twin of `fleet_v2 version`)" do
+  test "GET /api/version → 200 JSON build info (read-socket twin of `fleet version`)" do
     conn = call(:get, "/api/version")
     assert %Plug.Conn{status: 200} = conn
     assert is_map(Jason.decode!(conn.resp_body))

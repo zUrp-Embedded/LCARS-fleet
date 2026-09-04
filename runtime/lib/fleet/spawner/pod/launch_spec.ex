@@ -191,7 +191,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it (its own `jq` read of the field
   runs only when the variable is absent, i.e. a launch outside the spawner).
 
-  The declaration is the FLOOR; the fleet's debug mode (`fleet_v2 start --debug` →
+  The declaration is the FLOOR; the fleet's debug mode (`fleet start --debug` →
   `:debug_visibility`) is the only thing above it, and it is MONOTONE by construction — an `or`,
   never a replacement. A mode that could also CLOSE would let an operator ask for observability and
   lose a pod they had; and a mode that lies in either direction is worse than no mode, because the

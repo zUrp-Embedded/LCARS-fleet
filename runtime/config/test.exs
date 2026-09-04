@@ -132,7 +132,7 @@ config :lcars_fleet, pilot_start_ops_object_sync: false
 # la suite pilote des dépôts fictifs (`fleet/p`, `owner/repo`…) qui n'existent nulle part sur
 # disque, et la porte les sauterait tous. Même famille que `start_listener: false` — un levier
 # d'hermétisme, jamais un réglage d'opérateur : absent en prod ⟹ la porte est FERMÉE, et rien
-# dans `etc/fleet_v2.env.template` ne l'offre. `PollerTest` le rallume pour épingler la porte.
+# dans `etc/fleet.env.template` ne l'offre. `PollerTest` le rallume pour épingler la porte.
 config :lcars_fleet, pilot_require_onboarded: false
 
 # (Gatekeeper : pas d'autoboot — c'est un juge one-shot par projet, spawné par éval de gate ; les

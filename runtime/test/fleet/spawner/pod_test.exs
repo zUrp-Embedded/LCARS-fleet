@@ -912,7 +912,7 @@ defmodule Fleet.Spawner.PodTest do
 
     test "boot-epoch: a snapshot from a PREVIOUS fleet life + seed → RESUME (not a crash recovery)",
          %{tmp_dir: tmp_dir} do
-      # Live scar 2026-07-19: a clean `fleet_v2 stop` leaves a non-terminal state.json — without the
+      # Live scar 2026-07-19: a clean `fleet stop` leaves a non-terminal state.json — without the
       # epoch discriminator every reboot fell into :recreate and the slot never came back.
       pod_id = "pod-epoch-#{System.unique_integer([:positive])}"
       args = gatekeeper_args(pod_id, uid: 4242, repo_id: 7)

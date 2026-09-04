@@ -625,7 +625,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Is the fleet running in DEBUG VISIBILITY mode (`fleet_v2 start --debug`)? — the SINGLE reader of
+  Is the fleet running in DEBUG VISIBILITY mode (`fleet start --debug`)? — the SINGLE reader of
   `:lcars_fleet, :spawner_debug_visibility`.
 
   One value for a whole fleet life, fixed at start: nothing toggles it, nothing persists it,

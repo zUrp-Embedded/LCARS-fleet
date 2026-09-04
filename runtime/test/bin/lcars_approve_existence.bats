@@ -36,8 +36,8 @@ setup() {
   # projection de l'equipe `humans` de la forge. `approve` le DEMANDE maintenant au service
   # d'autorite. Ce que la boite ecrit encore ici est le nom du COMPTE, pas un chemin vers un secret.
   printf 'FORGE_BASE_URL=file://%s/forge\nFORGE_BOT_LOGIN=system_starfleet\n' "$HOMEDIR" \
-    > "$HOMEDIR/fleet_v2.env"
-  export LCARS_FLEET_V2_ENV="$HOMEDIR/fleet_v2.env"
+    > "$HOMEDIR/fleet.env"
+  export LCARS_FLEET_ENV="$HOMEDIR/fleet.env"
 
   # La doublure du client d'autorite : elle rend un jeton, comme le vrai quand la forge dit oui.
   export LCARS_AUTHORITY_ASK_BIN="$BATS_TEST_TMPDIR/ask"

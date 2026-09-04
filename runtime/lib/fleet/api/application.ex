@@ -9,7 +9,7 @@ defmodule Fleet.API.Application do
 
     * les lectures d'etat (`pods`, `issues`, `workflow_runs`) ne sont pas l'autorite de ce domaine —
       elles rendraient **501** en renvoyant vers `Fleet.Observation`, qui vit sur socket ;
-    * `health` / `readiness` / `version` ont un **jumeau CLI** — `fleet_v2 version` lit le MEME
+    * `health` / `readiness` / `version` ont un **jumeau CLI** — `fleet version` lit le MEME
       fichier (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet eteinte ;
     * les ecritures n'y transitent pas : elles vivent sur le socket de controle ci-dessous.
 

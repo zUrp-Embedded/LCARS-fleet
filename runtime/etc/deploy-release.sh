@@ -284,10 +284,10 @@ for i in "${!MF_FILES[@]}"; do
 done
 
 # Template d'env humain (swap atomique aussi — un lecteur ne voit jamais un template tronque).
-atomic_swap_file "$RUNTIME_DIR/etc/fleet_v2.env.template" "$PREFIX/etc/fleet_v2.env.template"
+atomic_swap_file "$RUNTIME_DIR/etc/fleet.env.template" "$PREFIX/etc/fleet.env.template"
 
 # --- 3. Perms: RO for humans (group fleet r-x), owner = the installer (system) ----------------------
-# The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet_v2), so the install stays RO.
+# The BEAM writes its tmp/state into ~/.lcars (RELEASE_TMP, set by fleet), so the install stays RO.
 #
 # ⚠ L'ADDITIF COMPTE AUTANT QUE LE SOUSTRACTIF : `g-w,o-rwx` seul RETIRE, il n'ACCORDE jamais le
 # read ni la traversee au groupe — le « group fleet r-x » annonce serait alors vrai par accident de
@@ -318,4 +318,4 @@ if [[ "$link_fail" -ne 0 ]]; then
 fi
 
 say "OK — install en place sous $PREFIX (release : $(cat "$PREFIX/rel/lcars_fleet/releases/start_erl.data" 2>/dev/null || echo '?'))."
-say "Lancer : fleet_v2 start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."
+say "Lancer : fleet start   (tout le per-humain vit en ~/.lcars/* ; le repo n'est PAS requis au runtime)."

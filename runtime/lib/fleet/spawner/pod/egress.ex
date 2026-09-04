@@ -86,7 +86,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   def provision(pod_id, cap_profile, launcher_path) do
     path = socket_path(pod_id)
 
-    # THE BASE MUST EXIST AND BE OURS TO WRITE. `bin/fleet_v2` creates it at start; if it is not
+    # THE BASE MUST EXIST AND BE OURS TO WRITE. `bin/fleet` creates it at start; if it is not
     # there, this fleet was not launched through its own launcher and there is nothing to
     # provision into. Declining QUIETLY is the difference between "no egress here" and an error
     # logged once per pod for a condition that is not a failure — a rail that shouts on a

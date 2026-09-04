@@ -27,8 +27,8 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `lib/fleet/<dom>/` | un domaine par dossier, sa façade `lib/fleet/<dom>.ex`, sa carte `README.md` |
 | `lib/fleet/*.ex` sans dossier | les modules **foundation** : vocabulaire et validation purs, `deps: []` |
 | `lib/mix/tasks/lcars.*` | les outils du gate : `contracts.check` (73 murs), `topology`, `catalogue.verify`, `provenance.verify`, `sp.gen` |
-| `bin/` | les launchers N0/N1 des pods, `fleet_v2` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
-| `etc/` | lancement et release : `fleet_v2.env.template` (catalogue des env vars), `release.manifest`, `deploy-release.sh` |
+| `bin/` | les launchers N0/N1 des pods, `fleet` (lancer la fleet), `lcars` (console opérateur), le rail de publication |
+| `etc/` | lancement et release : `fleet.env.template` (catalogue des env vars), `release.manifest`, `deploy-release.sh` |
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |
@@ -133,7 +133,7 @@ pod → pilot enrichi, est un relais fonctionnel : ne pas le « simplifier ».
 ## Configuration
 
 Trois fichiers, dans cet ordre : `config/config.exs`, `config/<env>.exs`, `config/runtime.exs`.
-`runtime.exs` lit les env vars de l'humain (`~/.lcars/fleet_v2.env`) et **tout son corps est sous
+`runtime.exs` lit les env vars de l'humain (`~/.lcars/fleet.env`) et **tout son corps est sous
 `if config_env() != :test`** : hors de ce garde, `mix test` ouvrirait un port et le boot casserait.
 Toute config runtime nouvelle reste dans le garde.
 

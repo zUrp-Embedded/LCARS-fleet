@@ -32,7 +32,7 @@ Un listener TCP ici n'aurait **aucune capacité propre** (mesuré, 2026-08-14) :
   servie sur socket — une route ici ne pourrait que renvoyer vers elle ;
 - un flux d'événements sur le réseau serait **complet et sans authentification**, capture d'écran
   tmux d'un pod comprise ;
-- `health` / `readiness` / `version` ont un **jumeau CLI** : `fleet_v2 version` lit le MÊME fichier
+- `health` / `readiness` / `version` ont un **jumeau CLI** : `fleet version` lit le MÊME fichier
   (`priv/api/build_info.txt`), sans HTTP, et fonctionne fleet éteinte ;
 - **aucun client n'en a besoin** : ni `bin/lcars`, ni le BEAM, ni le healthcheck du conteneur (qui
   teste le port 22) ; les tests appellent le plug directement.
@@ -45,7 +45,7 @@ surface de LECTURE. Le remettre sous un `if api_start_listener` recréerait ce c
 - `Fleet.API` — domain overview + vendor frontier (context module, no code)
 - `Fleet.API.ControlRouter` — the admin write door, on the AF_UNIX socket. **La seule surface.**
 - `Fleet.API.SpawnAdmission` — the spawn-admission pipeline (pure functions)
-- `Fleet.API.BuildInfo` — observable build stamp (lu par le log de boot et par `fleet_v2 version`)
+- `Fleet.API.BuildInfo` — observable build stamp (lu par le log de boot et par `fleet version`)
 - `Fleet.API.Readiness` — live operational read-model: MCP pod-facing status, pilot rail liveness (served by the observation deck's `/api/readiness/deep`; this domain has no route for it)
 - `Fleet.API.Application` — the domain supervisor + control-listener wiring
 

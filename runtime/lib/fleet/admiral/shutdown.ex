@@ -168,7 +168,7 @@ end
 
 defmodule Fleet.Admiral.Shutdown do
   @moduledoc """
-  Coordinated shutdown server. `fleet_v2 stop` sends SIGTERM; OTP invokes
+  Coordinated shutdown server. `fleet stop` sends SIGTERM; OTP invokes
   `Fleet.Application.prep_stop/1`, which calls `begin/1` before supervisors stop.
 
   `begin/1` refuses new jobs, then synchronously polls the configured dispatcher
@@ -176,7 +176,7 @@ defmodule Fleet.Admiral.Shutdown do
   deadline. Synchronous handling is required so teardown cannot proceed before the
   drain replies.
 
-  ⚠ THE LAUNCHER'S OUTER FALLBACK IS DERIVED FROM THIS DEADLINE, NOT SET BESIDE IT: `bin/fleet_v2`
+  ⚠ THE LAUNCHER'S OUTER FALLBACK IS DERIVED FROM THIS DEADLINE, NOT SET BESIDE IT: `bin/fleet`
   waits `grace + margin`, so it cannot hand back on a fleet that is still draining. An independent
   literal there would be a second number for one fact — cf. `grace_ms/0`.
 
@@ -188,13 +188,13 @@ defmodule Fleet.Admiral.Shutdown do
   use GenServer
   require Logger
 
-  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE (BL-6-52) : le BEAM possede la deadline, `bin/fleet_v2`
+  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE (BL-6-52) : le BEAM possede la deadline, `bin/fleet`
   # la LIT (`LCARS_SHUTDOWN_GRACE_MS`, meme defaut) et y ajoute sa marge. Un litteral pose la-bas
   # ferait deux nombres pour un seul fait : le drain passe a 120 s, le launcher rend la main a 90,
   # et l'operateur voit un stop « fini » sur une fleet qui draine encore.
   @default_grace_ms 45_000
 
-  @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet_v2`."
+  @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet`."
   @spec grace_ms() :: pos_integer()
   def grace_ms,
     do: Application.get_env(:lcars_fleet, :admiral_shutdown_grace_ms, @default_grace_ms)
@@ -283,7 +283,7 @@ defmodule Fleet.Admiral.Shutdown do
       else: {:error, {:shutdown_dispatcher_misconfigured, mod, manquants}}
   end
 
-  @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet_v2 stop)."
+  @doc "Refuse new jobs + drain to 0 or grace_ms — the SOLE prod shutdown entry (bin/fleet stop)."
   @spec begin(keyword()) :: :ok
   def begin(opts \\ []) do
     grace_ms = Keyword.get(opts, :grace_ms, grace_ms())

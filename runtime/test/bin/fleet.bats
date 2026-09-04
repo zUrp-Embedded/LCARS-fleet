@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/bin/fleet_v2.bats
+# SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
-# STATUS: bats tests for bin/fleet_v2 env semantics (maintenance override)
+# STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
 # export: an operator booting in maintenance (=false) got the permanent pods anyway
@@ -10,7 +10,7 @@
 # asymmetry with LCARS_PILOT_STEP (already override-preserving) was the tell.
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../bin/fleet_v2"
+  SCRIPT="$BATS_TEST_DIRNAME/../../bin/fleet"
   TMP_BASE="$(mktemp -d)"
   export HOME="$TMP_BASE"
   mkdir -p "$HOME/.lcars"
@@ -55,8 +55,8 @@ teardown() {
   [[ "$output" == *"flag=true"* ]]
 }
 
-@test "the env file's own false is honoured too (operator intent from fleet_v2.env)" {
-  echo 'LCARS_BOOT_PERMANENT_AT_START=false' > "$HOME/.lcars/fleet_v2.env"
+@test "the env file's own false is honoured too (operator intent from fleet.env)" {
+  echo 'LCARS_BOOT_PERMANENT_AT_START=false' > "$HOME/.lcars/fleet.env"
   run bash -c "source '$SCRIPT'; setup_env; echo \"flag=\$LCARS_BOOT_PERMANENT_AT_START\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"flag=false"* ]]
@@ -111,7 +111,7 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 # On simule l'uid via `LCARS_SYSADMIN_UID` (la valeur de comparaison), pas en changeant d'uid reel.
 
 @test "GUARD B: le FICHIER gagne sur la variable — la dispense ne se pose plus en prefixe" {
-  # ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait cette garde. Elle
+  # ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet start` desarmait cette garde. Elle
   # lisait sa politique dans l'environnement du processus qu'elle garde. Le fichier `root:root` la
   # lui retire — a condition de GAGNER, sinon il suffit de reposer la variable.
   echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
@@ -167,7 +167,7 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 # --- GUARD B, second volet : le PLANCHER systeme (root compris) ---
 # Le garde a laisse passer root pendant une journee : il testait une EGALITE avec l'uid du sysadmin,
 # vraie pour admiral et fausse pour uid 0. Mesure du 2026-08-15 sur banc — `sudo su` puis
-# `fleet_v2 start` franchissait le garde ; ce qui arretait root etait l'ABSENCE de son fleet_v2.env,
+# `fleet start` franchissait le garde ; ce qui arretait root etait l'ABSENCE de son fleet.env,
 # un accident de provisioning, pas une regle. La frontiere systeme/humain n'est pas a inventer :
 # `/etc/login.defs` la declare et `human-converger.sh` la lit deja. On la simule par `PASSWD_DEFS`,
 # le meme seam que le convergeur, sans changer d'uid reel.
@@ -258,17 +258,17 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 @test "--max-fan reaches the BEAM as LCARS_MAX_FAN, applied after the env file" {
   # Same rule as --debug: the parser sets a marker, `apply_start_flags` posts the variable AFTER
   # `load_env` sources the human file — so a file naming LCARS_MAX_FAN cannot silence the flag.
-  local env_file="$BATS_TEST_TMPDIR/fleet_v2.env"
+  local env_file="$BATS_TEST_TMPDIR/fleet.env"
   echo 'LCARS_MAX_FAN=9' > "$env_file"
 
-  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+  run env LCARS_FLEET_ENV="$env_file" bash -c \
     "source '$SCRIPT'; parse_start_opts --max-fan 2; load_env; apply_start_flags; \
      echo \"fan=[\${LCARS_MAX_FAN:-}]\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"fan=[2]"* ]]
 
   # No flag → the file stands: the flag adds, it does not clobber.
-  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+  run env LCARS_FLEET_ENV="$env_file" bash -c \
     "source '$SCRIPT'; parse_start_opts; load_env; apply_start_flags; \
      echo \"fan=[\${LCARS_MAX_FAN:-}]\""
   [ "$status" -eq 0 ]
@@ -279,17 +279,17 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   # `setup_env` sources the human env file with `set -a`. A variable assigned by the parser BEFORE
   # that sourcing is overwritten by the file: the operator types --debug, the fleet comes up green,
   # and the mode is off. The marker is applied after, and only ever ADDS.
-  local env_file="$BATS_TEST_TMPDIR/fleet_v2.env"
+  local env_file="$BATS_TEST_TMPDIR/fleet.env"
   echo 'LCARS_DEBUG_VISIBILITY=false' > "$env_file"
 
-  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+  run env LCARS_FLEET_ENV="$env_file" bash -c \
     "source '$SCRIPT'; parse_start_opts --debug; load_env; apply_start_flags; \
      echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
   [ "$status" -eq 0 ]
   [[ "$output" == *"dbg=[1]"* ]]
 
   # And with no flag, the file is honoured — the flag adds, it does not clobber.
-  run env LCARS_FLEET_V2_ENV="$env_file" bash -c \
+  run env LCARS_FLEET_ENV="$env_file" bash -c \
     "source '$SCRIPT'; parse_start_opts; load_env; apply_start_flags; \
      echo \"dbg=[\${LCARS_DEBUG_VISIBILITY:-}]\""
   [ "$status" -eq 0 ]
@@ -378,7 +378,7 @@ start_fake_beam() {
 
   start_fake_beam "sleep 300"
 
-  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=5; source '$SCRIPT'; cmd_stop"
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_STOP_WAIT=5; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
   [[ "$output" == *"proprement"* ]]
   [ ! -f "$STUB_STATE/kill-server-called" ]
@@ -390,7 +390,7 @@ start_fake_beam() {
 
   start_fake_beam "bash -c 'trap \\\"\\\" TERM; sleep 300'"
 
-  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_V2_STOP_WAIT=1; source '$SCRIPT'; cmd_stop"
+  run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_STOP_WAIT=1; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
   [[ "$output" == *"fallback kill"* ]]
   [ -f "$STUB_STATE/kill-server-called" ]
@@ -436,7 +436,7 @@ start_fake_beam() {
   [[ "$output" == *"indeterminee"* ]]
 }
 
-# `fleet_v2 status` imprimait `ref=` suivi de RIEN. Un champ vide n'est pas une valeur : le lecteur
+# `fleet status` imprimait `ref=` suivi de RIEN. Un champ vide n'est pas une valeur : le lecteur
 # devait choisir seul entre « la branche s'appelle vide », « le champ n'a pas ete rempli » et « il n'y
 # a pas de branche ». Les deux causes reelles sont distinctes et se disent maintenant differemment —
 # une release est batie depuis un commit (`BuildInfo.env_facts/0` rend `ref: nil` a dessein), un arbre

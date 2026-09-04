@@ -184,9 +184,9 @@ mix test
 MIX_ENV=prod mix release        # → _build/prod/rel/lcars_fleet (self-contained, ERTS bundlé)
 ```
 
-Le runtime est lancé **par un humain** via `bin/fleet_v2` (pas de `systemd User=lcars` : l'humain
+Le runtime est lancé **par un humain** via `bin/fleet` (pas de `systemd User=lcars` : l'humain
 lance sa flotte, les pods héritent son UID). La procédure deploy/run et le catalogue d'env vars sont
-dans `etc/README.md` + `etc/fleet_v2.env.template`.
+dans `etc/README.md` + `etc/fleet.env.template`.
 
 ## Où lire la suite
 

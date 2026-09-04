@@ -8,7 +8,7 @@ defmodule Fleet.Credentials.ForgeIdentity do
   ## Where the human comes from
 
   The human of the brief = **the user of the runtime process** (`id -un`): the ENTIRE
-  fleet runs under the OS user of the human who launches it (the human runs `bin/fleet_v2`,
+  fleet runs under the OS user of the human who launches it (the human runs `bin/fleet`,
   the BEAM inherits their UID — no systemd `User=` directive) — each human = their fleet
   under their user, OS isolation by construction; the pod (BEAM Port) inherits this UID.
   So the current user IS the human. No literal default (it would mask a wiring hole):

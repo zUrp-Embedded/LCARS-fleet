@@ -46,7 +46,7 @@ Boot / respawn / seams:
 ## Config & deps
 - Knobs `:lcars_fleet, :spawner_*` — each is read by its OWNING module, and that `@moduledoc` is the authority for the knob's meaning and its default.
   **This card does not list them**: an inventory in a card expires by construction — a map is the one artifact neither the gate nor a review filters, so a renamed key goes stale here without anything turning red. The rule below does not expire.
-  **Only a SUBSET is operator-tunable**, through an `LCARS_*` variable read in `config/runtime.exs` — which is the source of truth for env vars — and `etc/fleet_v2.env.template` is the catalogue of exactly those. Everything else is an app-env default from `config/*.exs` or a module default, with no variable and by decision (`:spawner_pod_dir_root` deliberately has none). To know whether a given knob is tunable, read `runtime.exs`; to know what it means, read its owner.
+  **Only a SUBSET is operator-tunable**, through an `LCARS_*` variable read in `config/runtime.exs` — which is the source of truth for env vars — and `etc/fleet.env.template` is the catalogue of exactly those. Everything else is an app-env default from `config/*.exs` or a module default, with no variable and by decision (`:spawner_pod_dir_root` deliberately has none). To know whether a given knob is tunable, read `runtime.exs`; to know what it means, read its owner.
 - Auth is NOT a knob — `LCARS_AUTH_MODE=bind` is hard-set by `Pod.LaunchEnv` (see its `@moduledoc`).
 - N0 launchers (`bin/{bwrap,host,claude}_launch.sh`) are the containment/vendor boundary, selected by `metadata.containment` — not app code (see `Pod.Backend` + the script headers).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/spawner.ex`).

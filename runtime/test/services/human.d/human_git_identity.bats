@@ -144,7 +144,7 @@ account() { # account <full_name> <email>
 
 # ─── L'ADRESSE DE LA FORGE CONVERGE, ELLE NE S'INSTRUIT PLUS ────────────────────────────────────
 #
-# Mesure du 2026-08-22, WSL neuve. Le seed de `fleet_v2.env` est SEED-ONCE : la premiere install de
+# Mesure du 2026-08-22, WSL neuve. Le seed de `fleet.env` est SEED-ONCE : la premiere install de
 # cette machine l'a seme pendant que `48-forge-host` echouait, donc SANS `FORGE_BASE_URL`. Aux
 # passages suivants la forge existait et l'URL etait connue — le fichier n'etait jamais complete.
 #
@@ -172,10 +172,10 @@ account() { # account <full_name> <email>
 
 @test "URL inconnue ET cle absente = DRIFT, jamais un warn qui laisse le verdict vert" {
   # C'est ce qui a coute : `p_warn` ne pese sur rien, donc l'apply rendait vert sur un etat ou
-  # `fleet_v2 start` refuse, et le module suivant tombait sans nommer la cause.
+  # `fleet start` refuse, et le module suivant tombait sans nommer la cause.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  grep -q 'p_drift "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
-  refute grep -q 'p_warn "fleet_v2.env sans FORGE_BASE_URL' <<<"$code"
+  grep -q 'p_drift "fleet.env sans FORGE_BASE_URL' <<<"$code"
+  refute grep -q 'p_warn "fleet.env sans FORGE_BASE_URL' <<<"$code"
 }
 
 @test "les deux cles derivees suivent la MEME regle — jeton et adresse" {
