@@ -494,11 +494,9 @@ apply() {
     `# le service refuserait de démarrer sur un fichier que la boîte vient d'écrire.` \
     LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
     FORGE_BASE_URL="$FORGE_URL" \
-    `# ⚠ LA DESTINATION VOYAGE, LE NOM NON. Ce module dit « ce déploiement est jetable » ; QUEL` \
-    `# humain de démonstration cela pose est la décision de « forge-gestures.sh », seul déclarant du` \
-    `# nom (deux témoins de ce fichier le gardent, et ils ont attrapé la première version de cette` \
-    `# ligne — elle écrivait un défaut « lcars » ici, donc une seconde autorité).` \
-    ${PROV_DISPOSABLE:+LCARS_DISPOSABLE=1} \
+    `# ⚠ CE MODULE NE NOMME AUCUN HUMAIN, ET NE DIT PLUS RIEN D'UNE « DESTINATION » : un poste ne` \
+    `# sème personne, le banc de la boîte nomme le sien. Le seul déclarant du nom est` \
+    `# « forge-gestures.sh » — deux témoins de ce fichier le gardent.` \
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
     LCARS_REFERENCE_CATALOGUE="$ref_catalogue" \

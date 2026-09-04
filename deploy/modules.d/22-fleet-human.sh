@@ -43,11 +43,13 @@ observe() {
   # personne dont verifier le groupe.
   #
   # ⚠ ET LE GESTE RESTE PROPOSE (P-40) : le rail est le chemin, mais celui pour qui il n'a pas
-  # abouti doit avoir quelque chose a taper. La cible a change avec le canon — ce n'est plus « creer
-  # le compte integre », c'est « s'enroler », et `useradd` n'est plus que le dernier recours.
+  # abouti doit avoir quelque chose a taper. Ce n'est PAS un `useradd` (⚖ user 2026-09-04, DI-02 :
+  # UN SEUL createur d'humains, le convergeur) — un compte fait a la main n'a ni son uid derive de
+  # la forge, ni ses modules per-humain, et le convergeur le verra comme un inconnu. Ce qu'on
+  # regarde quand le rail n'aboutit pas, c'est le convergeur lui-meme.
   [[ "$found" -eq 1 ]] || p_warn "aucun humain de fleet sur cette machine — rien a vérifier ici tant que personne ne s'est enrolé.
      Le chemin : la page d'inscription de la forge, puis la team « $PROV_HUMANS_TEAM » — le convergeur matérialise au tour suivant.
-     Si le rail n'a pas abouti, le geste à la main : « useradd -m -G $PROV_FLEET_GROUP <login> »"
+     S'il ne matérialise pas : « journalctl -u lcars-converger » dit pourquoi (forge, jeton, team)."
 }
 
 check() { observe; verdict_check; }

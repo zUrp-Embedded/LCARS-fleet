@@ -141,14 +141,10 @@ while [[ $# -gt 0 ]]; do
     # ─── L'AXE DESTINATION (40-RAILS.md § 13) ────────────────────────────────
     #
     # ⚠ TROIS AXES, PAS DEUX : substrat (`--substrate`), forge (montée / fournie par
-    # `FORGE_BASE_URL`), et DESTINATION — travail ou jetable. Le troisième n'avait aucun porteur, et
-    # c'est ce qui produisait la confusion : `--bench` en faisait DEUX, monter la forge ET poser les
-    # annexes de démonstration, parce que sur la boîte les deux coïncidaient.
-    #
-    # Ils ne coïncident pas en général. Le contre-exemple est le rail poste lui-même — forge montée,
-    # destination TRAVAIL — et c'est lui qui interdit de semer un humain de démonstration au seul
-    # motif qu'on monte une forge.
-    --disposable) export PROV_DISPOSABLE=1; shift ;;
+    # `FORGE_BASE_URL`). Il n'y a PAS d'axe destination (⚖ user 2026-09-04) : `--disposable`
+    # portait jusqu'à `forge-gestures.sh` un nom d'humain de démonstration par défaut que plus
+    # personne ne demandait — seul le banc sème un humain, et il le NOMME. Un déploiement de
+    # travail n'en fabrique aucun : les personnes s'inscrivent sur la forge.
     --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
     # ⚠ IL N'Y A PAS DE `--fleet-human`, ET IL NE SE RÉINTRODUIT PAS : le nom de l'humain de fleet a
