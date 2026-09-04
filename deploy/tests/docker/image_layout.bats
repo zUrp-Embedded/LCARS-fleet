@@ -93,6 +93,43 @@ image_declared_dirs() {
   [ "$bad" -eq 0 ]
 }
 
+# ─── LOT 15 : LES ANCRES ET LES LIENS AUSSI ─────────────────────────────────────────────────────
+#
+# `anchor /usr/local/bin/tofu` et `link /usr/local/bin/{fleet,lcars}` disaient `wsl+linux` alors que
+# le stage runtime les pose (`install -m 0755`, `ln -sf`) et que `verify` les relit deja (46 par
+# stat, 60 par `readlink` contre release.manifest). Meme regle que les repertoires : ce que l'image
+# pose et que la table connait se declare pour docker. `node`/`npm`/`npx` n'y sont pas — l'image
+# n'a pas de node.
+
+image_declared_anchors_links() {
+  printf '%s\n' /usr/local/bin/tofu /usr/local/bin/fleet /usr/local/bin/lcars \
+    /usr/local/bin/lcars-toolchain-converge /usr/local/bin/lcars-authority-ask \
+    /etc/lcars/lcars.bashrc /opt/lcars/.helpers-revision /opt/lcars/.source-revision
+}
+
+@test "les ANCRES et les LIENS que l'image pose et que la table connait sont declares pour docker — 46 et 60 les relisent au build" {
+  local p col bad=0 n=0
+  while read -r p; do
+    # (a) le stage runtime le nomme hors commentaire : sinon il sort de cette liste
+    grep -qF -- "$p" <<<"$RUNTIME" \
+      || { echo "$p : le stage runtime ne le nomme pas — l'image ne le pose pas, retire-le de cette liste" >&2; bad=1; continue; }
+    # (b) la table le connait, en ancre ou en lien, et pour docker
+    col="$(awk -v p="$p" '{c=$1;sub(/:.*/,"",c)} (c=="anchor"||c=="link") && $2==p {print $5; exit}' "$MANIFEST")"
+    [ -n "$col" ] || { echo "$p : inconnu de la table (anchor|link)" >&2; bad=1; continue; }
+    n=$((n + 1))
+    [[ "$col" == any || "+$col+" == *"+docker+"* ]] \
+      || { echo "$p : l'image le pose, la table dit « $col » — le manifeste ment sur l'image" >&2; bad=1; }
+  done < <(image_declared_anchors_links)
+  [ "$n" -ge 8 ] || { echo "seulement $n ancres/liens compares — l'instrument ne lit plus la liste" >&2; return 1; }
+  [ "$bad" -eq 0 ]
+  # et le complement : ce que la table declare `wsl+linux` sous /usr/local/bin, l'image ne le pose PAS
+  local reste
+  while read -r reste; do
+    [ -n "$reste" ] || continue
+    refute grep -qE -- "(ln -sf|install -m [0-7]+)[^\\]* $reste( |\\\\|$)" <<<"$RUNTIME"
+  done < <(awk '{c=$1;sub(/:.*/,"",c)} (c=="anchor"||c=="link") && $2 ~ /^\/usr\/local\/bin\// && $5!="any" {print $2}' "$MANIFEST")
+}
+
 @test "chaque install -d du stage runtime pose le MODE et le PROPRIETAIRE que la table declare" {
   # La generalisation du temoin `/etc/lcars` ci-dessus : un `install -d -m M -o U -g G <chemins>` du
   # stage runtime, sur un chemin que la table declare, porte le mode et le proprietaire de la table.
