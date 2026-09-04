@@ -475,6 +475,9 @@ cmd_status() {
   fi
   [[ "$state" == running ]] || rc=2
   [[ "$boot" == init-failed || "$health" == unhealthy ]] && rc=2
+  # en attente de configuration : la boite est DEBOUT pour etre configuree, son healthcheck echoue
+  # par construction (rien n'ecoute) — c'est un etat degrade (1), pas une panne (2)
+  [[ "$boot" == awaiting-config && "$state" == running ]] && rc=1
   if [[ "$rc" -eq 0 ]]; then
     [[ "$boot" == awaiting-config || "$prov" == 2 || "$health" == starting ]] && rc=1
     [[ -n "$prov" && "$prov" != 0 && "$prov" != 2 ]] && rc=2

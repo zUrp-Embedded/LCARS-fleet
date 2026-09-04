@@ -25,7 +25,7 @@ setup() {
   TOKF="$BATS_TEST_TMPDIR/forge-master.token"; export LCARS_MASTER_TOKEN_FILE="$TOKF"
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
   export LCARS_SEAT_LOGIN_FILE="$BATS_TEST_TMPDIR/run/lcars-seat.login"
-  unset LCARS_ADMIRAL FORGE_BASE_URL FORGE_BASE_URL LCARS_UID
+  unset LCARS_ADMIRAL FORGE_BASE_URL LCARS_UID
   # curl par defaut : un appel est une FAUTE, il se voit
   printf '%s\n' '#!/usr/bin/env bash' 'echo "CURL NE DOIT PAS ETRE APPELE" >&2; exit 99' > "$BIN/curl"
   chmod 0755 "$BIN/curl"

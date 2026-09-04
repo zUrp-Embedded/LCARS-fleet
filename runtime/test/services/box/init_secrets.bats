@@ -65,7 +65,7 @@ setup() {
   run bash "$SUT" secrets
   [ "$status" -eq 0 ]
   [ "$(stat -c %a "$LCARS_SECRETS_DIR/forge_master_token")" = 0 ]
-  [[ "$output" == *"montage ferme"* ]]
+  [[ "$output" == *"montage retire"* ]]
   # un second passage ne se plaint pas et ne rouvre rien
   run bash "$SUT" secrets
   [ "$status" -eq 0 ]

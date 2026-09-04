@@ -303,7 +303,7 @@ check_ci_runner() {
 
 check() {
   if [[ -z "$FORGE_BASE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
+    p_drift "FORGE_BASE_URL non posé — l'état-cible inclut une forge (pose-le via --env ou l'environnement)"
     verdict_check
   fi
   _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu
@@ -391,7 +391,7 @@ check_human_onboardable() {
 
 apply() {
   if [[ -z "$FORGE_BASE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
+    p_drift "FORGE_BASE_URL non posé — comptes/tokens forge non convergés (pose-le et relance)"
     verdict_apply
   fi
   _rc=0; forge_reachable || _rc=$?   # errexit : le code se recolte par `||`, jamais en nu

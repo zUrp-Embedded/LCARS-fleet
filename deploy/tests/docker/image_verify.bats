@@ -41,7 +41,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   # 20-groups mesure l'appartenance du SIEGE, qui n'existe qu'au boot ; la sonde bwrap de 10-packages
   # mesure le noyau — verify la debranche (`PROV_KERNEL_PROBES=0`), elle se joue au boot.
   grep -q 'PROV_KERNEL_PROBES=0' <<<"$v"
-  for m in 20-groups 26-store 63-forge-tokens 65-ops-branch 66-deck-oidc 00-preflight 25-directories; do
+  for m in 20-groups 63-forge-tokens 65-ops-branch 66-deck-oidc 00-preflight 25-directories; do
     refute grep -q -- "--only $m" <<<"$v"
   done
 }

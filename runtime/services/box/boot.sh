@@ -67,6 +67,10 @@ export LCARS_SYSADMIN_UID="$LCARS_UID"
 BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/services/box/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
+# ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot
+# precedent, et « box status » lirait un `awaiting-config` ou un `provision.rc` d'hier comme
+# l'etat de maintenant (relecture hostile 2026-09-04). Chaque boot part d'un /run vide de ses verdicts.
+rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
 say() { echo "[box-boot] $*"; }
 [[ -r "$BOX_INIT" && -r "$MODULE_PROTOCOL" ]] || {
   echo "[box-boot] init de l'instance introuvable ($BOX_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
@@ -243,7 +247,7 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
     # poste, `64-services` fait le pont (`LCARS_LANDING_PORT=$LCARS_LANDING_PORT` dans `services.env`,
     # gardé par `services_units.bats`). Ici, RIEN ne le faisait : les deux valeurs ne s'accordaient
     # que parce que leurs deux défauts indépendants valent tous les deux 20999.
-    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-${LCARS_LANDING_PORT:-20999}}"
+    export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"

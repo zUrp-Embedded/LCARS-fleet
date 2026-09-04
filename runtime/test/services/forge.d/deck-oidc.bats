@@ -75,6 +75,7 @@ SH
   # resté sur la loopback alors que l'apply répondait « déjà posé et vivant »).
   printf '{"client_id":"CID","public_url":"%s","internal_url":"%s"}\n' \
     "$FORGE_PUBLIC_URL" "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
+  chmod 0640 "$LCARS_DECK_OIDC_FILE"
 }
 
 # Les retours que le module DOIT vouloir : la loopback dans ses DEUX ecritures, plus l'annoncee.
@@ -206,6 +207,7 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
   apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
   printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
     "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
+  chmod 0640 "$LCARS_DECK_OIDC_FILE"
 
   run bash "$SUT" check
   [ "$status" -eq 1 ]
@@ -219,6 +221,7 @@ head_uris() { # <bind> — les URIs derivees, l'en-tete du module seule
   apps_with "http://127.0.0.1:20999/auth/callback" "http://localhost:20999/auth/callback" "http://10.0.0.5:20999/auth/callback"
   printf '{"client_id":"CID","public_url":"http://127.0.0.1:3000","internal_url":"%s"}\n' \
     "$FORGE_BASE_URL" > "$LCARS_DECK_OIDC_FILE"
+  chmod 0640 "$LCARS_DECK_OIDC_FILE"
 
   run bash "$SUT" apply
   [ "$status" -eq 0 ]

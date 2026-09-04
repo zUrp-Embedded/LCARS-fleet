@@ -235,8 +235,15 @@ I3_AWK='
   # devenu `Fleet.Roster` et le rail boite mourait a l'amorcage de la forge, sans nommer la cause.
   local lib f ref mod bad=0
   lib="$(cd "$BATS_TEST_DIRNAME/../../runtime/lib" && pwd)"
-  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../../runtime/etc/*.sh; do
+  # LE CORPUS : tout script livre qui peut nommer un module Elixir — l'installeur, les portes outil
+  # de la CLI (`lcars tool …`, lot 6), les services du produit. `runtime/etc/*.sh` n'existe plus (Q3)
+  # et ce mur balayait un corpus vide (relecture hostile 2026-09-04).
+  local refs=0
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../lib/*.sh "$BATS_TEST_DIRNAME"/../modules.d/*.sh \
+           "$BATS_TEST_DIRNAME"/../../runtime/bin/lcars "$BATS_TEST_DIRNAME"/../../runtime/services/*.sh \
+           "$BATS_TEST_DIRNAME"/../../runtime/services/*/*.sh; do
     [[ -f "$f" ]] || continue
+    refs=$((refs + $(grep -vE '^\s*#' "$f" | grep -cE 'Fleet\.[A-Z][A-Za-z.]*\.[a-z_]+' || true)))
     while read -r ref; do
       mod="${ref%.*}"                       # le dernier segment est la fonction (snake_case)
       [[ "$mod" == *.* ]] || continue       # `Fleet.chose` : pas un appel de module qualifie
@@ -245,6 +252,7 @@ I3_AWK='
     done < <(code "$f" | grep -oE 'Fleet(\.[A-Z][A-Za-z0-9]*)+\.[a-z_][a-z0-9_]*' | sort -u)
   done
   [ "$bad" -eq 0 ]
+  [ "$refs" -ge 3 ] || { echo "MUR I13 — $refs reference(s) Elixir lue(s) dans le corpus : l instrument est casse"; return 1; }
 }
 
 # ─── MUR I14 : UNE ASSERTION QUI LIT STDIN DOIT ETRE ALIMENTEE ──────────────────────────────────

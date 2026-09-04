@@ -108,7 +108,7 @@ def candidate_files():
                 p = os.path.join(dirpath, fn)
                 if p in seen:
                     continue
-                if not (fn.endswith(".sh") or fn in ("fleet", "lcars")):
+                if not (fn.endswith(".sh") or fn in ("fleet", "lcars", "box", "provision", "accept", "workstation")):
                     continue
                 seen.add(p)
                 yield p

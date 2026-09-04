@@ -398,100 +398,53 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
 }
 
-@test "MUR 7: tout LCARS_*/FORGE_* qu'un daemon lit SANS defaut figure dans la table de transport" {
-  # ⚠ CE MUR SE CONSTRUIT DEPUIS LES DEUX LISTES ET N'EN RECOPIE AUCUNE. La table de transport est
-  # `services_env_body` de `64-services.sh` ; la population des daemons se lit dans les `ExecStart`
-  # des unites que ce meme fichier ecrit. Recopier l'une ou l'autre ici en ferait une troisieme, qui
-  # derive — et c'est exactement le defaut que ce chantier poursuit.
-  #
-  # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `runtime/services/provision-role-tokens.sh`
-  # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
-  # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
-  # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
-  # Les inclure ferait rougir ce mur pour des noms que la table ne peut pas leur transmettre.
-  local svc="$REPO/deploy/modules.d/64-services.sh"
-  [ -r "$svc" ] || { echo "MUR 7 — 64-services.sh illisible" >&2; return 1; }
-
-  # (1) La TABLE : ce que `services_env_body` ecrit.
+@test "MUR 7: ce que l'installeur DECIDE et qu'un daemon lit voyage par la table de transport" {
+  # ⚠ LE FAIT : un daemon (ExecStart de 64-services) n'herite d'aucun shell ; ce qu'il lit n'existe
+  # que si `services.env` le porte. Depuis le lot 8 le produit ne parle que LCARS_*/FORGE_* — un nom
+  # ne dit plus s'il vient de l'installeur. La regle qui survit : une variable que le daemon LIT et
+  # que provision-lib DECLARE (son jumeau PROV_*) doit etre dans la table ; un reglage du produit
+  # sans jumeau n'a rien a transporter. Relecture hostile 2026-09-04 : la version « lue sans defaut »
+  # mesurait l'ensemble vide et restait verte sur une table amputee.
+  local svc="$REPO/deploy/modules.d/64-services.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  [ -r "$svc" ] && [ -r "$lib" ] || { echo "MUR 7 — 64-services ou provision-lib illisible" >&2; return 1; }
   local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
                         | sed -nE 's/.*echo "((LCARS|FORGE)_[A-Z_]+)=.*/\1/p' | sort -u)"
   [ -n "$table" ] || { echo "MUR 7 — la table de transport ne se lit plus dans services_env_body" >&2; return 1; }
-
-  # (2) LES DAEMONS : les fichiers que les `ExecStart` des unites lancent.
   local daemons; daemons="$(sed 's/#.*//' "$svc" \
                             | sed -nE 's;.*ExecStart=.*/([a-z0-9-]+\.(sh|py)).*;\1;p' | sort -u)"
   [ "$(printf '%s\n' "$daemons" | grep -c .)" -ge 3 ] || {
     echo "MUR 7 — seulement $(printf '%s\n' "$daemons" | grep -c .) daemon(s) lus dans les ExecStart : l'instrument est casse" >&2
     return 1
   }
-
-  # (3) Ce que ces daemons LISENT, formes shell et python.
-  # ⚠ MENTIONNER N'EST PAS LIRE, ET L'ECART EST TOUT LE SUJET DE CE MUR. Un daemon qui POSE
-  # lui-meme un `PROV_*` avant de s'en servir ne l'attend pas de la table : c'est une variable de
-  # SON protocole, pas de la config du provisionnement. Un convergeur pose `PROV_HUMAN` a chaque
-  # humain qu'il parcourt — le transporter figerait dans `services.env` UN humain choisi a
-  # l'install, pour une boucle qui les visite tous. Exiger ces noms dans la table ferait ecrire
-  # une ligne fausse a seule fin de taire un mur : le mur aurait cause l'erreur qu'il cherche.
-  #
-  # Le critere est mecanique et ne se negocie pas au cas par cas. Lot 8 : le produit ne parle plus
-  # qu'un vocabulaire (`LCARS_*`, `FORGE_*`), le sien — un nom ne dit donc plus s'il vient de
-  # l'installeur. Ce qui survit est la regle de transport elle-meme : une variable qu'un daemon lit
-  # SANS DEFAUT (`$X`, `${X}`, `${X:?}`) n'a que `services.env` pour exister sous systemd, donc elle
-  # doit y etre. Une lecture A DEFAUT (`${X:-d}`, `${X:=d}`) est un reglage du produit : il vit sans
-  # transport. Une variable que le daemon POSE lui-meme (assignation dont la droite ne le relit pas)
-  # n'est pas une lecture.
-  local d lus="" f src v
+  # le jumeau installeur d'un nom produit : LCARS_X -> PROV_X, sauf les quatre noms que le lot 8 a
+  # rapproches d'un nom que le produit possedait deja
+  jumeau() { case "$1" in
+    FORGE_BASE_URL) echo PROV_FORGE_URL ;; FORGE_PUBLIC_URL) echo PROV_FORGE_PUBLIC_URL ;;
+    LCARS_LANDING_PORT) echo PROV_DECK_PORT ;; LCARS_PRIVATE_DIR) echo PROV_TOKENS_DIR ;;
+    LCARS_*) echo "PROV_${1#LCARS_}" ;; *) echo "" ;; esac; }
+  local d f src v j decidees="" lus=""
   for d in $daemons; do
     f="$REPO/runtime/services/$d"
     [ -r "$f" ] || { echo "MUR 7 — daemon introuvable : services/$d" >&2; return 1; }
     src="$(sed 's/#.*//' "$f")"
     for v in $(grep -oE '(LCARS|FORGE)_[A-Z_]+' <<<"$src" | sort -u); do
-      # `… | grep -q … && continue` rendrait le rc du grep en fin de corps : la forme `if` est
-      # obligatoire ici, c'est ce que MUR I3 de idiom_walls mesure sur le code de production.
-      if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" \
-           | sed "s/.*$v=//" | grep -qv "$v"; then
-        continue
-      fi
-      # lue quelque part SANS defaut ? (`$V`, `${V}`, `${V:?…}` — jamais `${V:-…}` ni `${V:=…}`)
-      if ! grep -qE "\\\$$v([^A-Z_]|\$)|\\\$\\{$v(\\}|:\\?)" <<<"$src"; then
-        continue
-      fi
-      lus="$lus$v
-"
+      # posee par le daemon lui-meme (assignation dont la droite ne se relit pas) : pas une lecture
+      if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" | sed "s/.*$v=//" | grep -qv "$v"; then continue; fi
+      j="$(jumeau "$v")"; [ -n "$j" ] || continue
+      grep -qE "^[[:space:]]*:[[:space:]]*\"\\\$\{$j:=" "$lib" || continue   # pas decidee par l'installeur
+      decidees="$decidees$v\n"
+      printf '%s\n' "$table" | grep -qx "$v" || lus="$lus$v (daemon $d)\n"
     done
   done
-  lus="$(printf '%s\n' "$lus" | grep . | sort -u)"
-
-  # TEMOIN APPARIE DU FILTRE CI-DESSUS. Un filtre qui ecarte trop rend ce mur vert par cecite, et
-  # c'est la panne la plus chere : elle se lit comme un succes. Les trois formes sur une sonde
-  # synthetique — la POSEE doit sortir, la LUE et celle A DEFAUT doivent rester.
-  local probe="$BATS_TEST_TMPDIR/prov_probe.sh" retenus=""
-  printf '%s\n' 'LCARS_POSEE=1' 'echo "$LCARS_POSEE $LCARS_LUE ${LCARS_EXIGEE:?}"' 'LCARS_DEFAUT="${LCARS_DEFAUT:-x}"' > "$probe"
-  local psrc; psrc="$(cat "$probe")"
-  for v in $(grep -oE '(LCARS|FORGE)_[A-Z_]+' "$probe" | sort -u); do
-    if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" "$probe" \
-         | sed "s/.*$v=//" | grep -qv "$v"; then
-      continue
-    fi
-    if ! grep -qE "\\\$$v([^A-Z_]|\$)|\\\$\\{$v(\\}|:\\?)" <<<"$psrc"; then
-      continue
-    fi
-    retenus="$retenus $v"
-  done
-  [ "$retenus" = " LCARS_EXIGEE LCARS_LUE" ] || {
-    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$retenus », attendu « LCARS_EXIGEE LCARS_LUE »" >&2
+  decidees="$(printf '%b' "$decidees" | grep . | sort -u)"
+  [ "$(printf '%s\n' "$decidees" | grep -c .)" -ge 3 ] || {
+    echo "MUR 7 — $(printf '%s\n' "$decidees" | grep -c .) variable(s) decidee(s) par l'installeur lue(s) par un daemon : l'instrument est casse" >&2
     return 1
   }
-
-  local manquants; manquants="$(comm -23 <(printf '%s\n' "$lus") <(printf '%s\n' "$table"))"
-  [ -z "$manquants" ] || {
-    echo "MUR 7 rompu — des daemons lisent des PROV_* que la table ne transporte pas :" >&2
-    printf '     %s\n' $manquants >&2
-    echo "   Sans transport, le daemon retombe sur SON defaut : la valeur choisie au provisionnement" >&2
-    echo "   ne l'atteint jamais, et rien ne le dit." >&2
-    return 1
-  }
+  [ -z "$(printf '%b' "$lus")" ] || { echo "MUR 7 rompu — lues par un daemon, decidees par l'installeur, ABSENTES de services.env :" >&2; printf '%b' "$lus" >&2; return 1; }
+  # TEMOIN APPARIE : une entree retiree de la table doit rougir — la premiere decidee sert de sonde
+  local sonde; sonde="$(printf '%s\n' "$decidees" | head -1)"
+  printf '%s\n' "$table" | grep -qx "$sonde"
 }
 
 @test "MUR 8: l'override genere nomme le service que la base DEFINIT, et sa prose ne s'execute pas" {

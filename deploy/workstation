@@ -4,7 +4,7 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
 #
-#     deploy/workstation  up | doctor
+#     deploy/workstation {up|doctor}
 #
 # Jumeau de `deploy/box` : celui-là pilote une BOÎTE, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron

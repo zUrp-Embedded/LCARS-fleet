@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/docker/entrypoint_humans.bats
+# SOURCE: runtime/test/services/box/boot_humans.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population
@@ -214,4 +214,13 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
   [ "$status" -eq 0 ]
   [ ! -e "$LCARS_HUMANS_RC_FILE" ]
   grep -q 'DÉSACTIVÉE' "$JOURNAL"
+}
+
+@test "le SIEGE seul dans le groupe fleet n'est PAS un humain de fleet — humans.rc=1, et le bloc le dit" {
+  # Relecture hostile 2026-09-04 : la clause `_u != LCARS_UID` (le correctif d'un defaut mesure sur
+  # le banc) n'etait atteinte par aucun cas — la retirer laissait ce fichier vert.
+  bloc 0 2
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_HUMANS_RC_FILE")" = 1 ]
+  grep -q "AUCUN humain" "$JOURNAL"
 }

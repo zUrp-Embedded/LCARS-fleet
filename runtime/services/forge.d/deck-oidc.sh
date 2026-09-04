@@ -130,7 +130,7 @@ uris_converged() { # uris_converged <uris-voulues, separees par espace>
 
 check() {
   if [[ -z "$FORGE_BASE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — client OAuth2 du deck non convergé (le deck refusera de servir)"
+    p_drift "FORGE_BASE_URL non posé — client OAuth2 du deck non convergé (le deck refusera de servir)"
     verdict_check
   fi
   # ⚠ TROIS ETATS, ET LA VERSION PRECEDENTE N'EN CONNAISSAIT QUE DEUX. `[[ ! -r ]]` puis « absent » :
@@ -138,6 +138,15 @@ check() {
   # parfaitement present. Il est en `0640 root:lcars-system` — un doctor lance sans sudo ne peut pas
   # l'OUVRIR, il peut parfaitement CONSTATER qu'il est la. Le test de lisibilite tenait lieu de test
   # d'existence, et envoyait converger un objet deja pose.
+  # le fichier porte un client_secret : 0640, groupe du deck — un mode plus large se dit (relecture
+  # hostile 2026-09-04 : ni mesure ni converge)
+  if [[ -e "$LCARS_DECK_OIDC_FILE" ]]; then
+    local _mode _grp; _mode="$(stat -c '%a' "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true)"; _grp="$(stat -c '%G' "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true)"
+    [[ "$_mode" == 640 ]] || p_drift "$LCARS_DECK_OIDC_FILE : mode $_mode ≠ 640 — le secret du client est plus large que le deck"
+    if getent group "$OIDC_GROUP" >/dev/null 2>&1; then
+      [[ "$_grp" == "$OIDC_GROUP" ]] || p_drift "$LCARS_DECK_OIDC_FILE : groupe $_grp ≠ $OIDC_GROUP — le deck ne le lira pas"
+    fi
+  fi
   local _st; _st="$(prov_file_state "$LCARS_DECK_OIDC_FILE")"
   if [[ "$_st" == "absent" ]]; then
     p_drift "$LCARS_DECK_OIDC_FILE absent — le deck (port $LCARS_LANDING_PORT) sert 503 tant qu'il n'est pas posé"
@@ -168,7 +177,7 @@ check() {
 
 apply() {
   if [[ -z "$FORGE_BASE_URL" ]]; then
-    p_drift "FORGE_BASE_URL/FORGE_BASE_URL non posé — client OAuth2 du deck NON posé"
+    p_drift "FORGE_BASE_URL non posé — client OAuth2 du deck NON posé"
     verdict_apply
   fi
   if ! forge_up; then
@@ -183,6 +192,10 @@ apply() {
   local uris body resp cid csec
   uris="$(callback_uris)"
 
+  if [[ -e "$LCARS_DECK_OIDC_FILE" ]]; then
+    chmod 0640 "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true
+    chgrp "$OIDC_GROUP" "$LCARS_DECK_OIDC_FILE" 2>/dev/null || true
+  fi
   if [[ -r "$LCARS_DECK_OIDC_FILE" ]] && config_live && uris_converged "$uris" && addrs_converged; then
     p_ok "client OAuth2 du deck déjà posé et vivant"
     verdict_apply

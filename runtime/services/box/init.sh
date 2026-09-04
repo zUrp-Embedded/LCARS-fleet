@@ -239,6 +239,11 @@ cmd_seat() {
 # seulement s'ils changent (rotation). Le siege se derive ensuite du jeton master, donc l'import
 # precede tout. Un secret absent du montage n'est pas une faute : la voie d'avant (le geste
 # `config-token` dans la boite) reste jouable, et le drift se dit plus loin (tokens, seat).
+# Le montage compose est en LECTURE SEULE (chmod y echoue) et arrive avec l'uid de l'hote — souvent
+# celui du siege. Une fois importe, on le DEMONTE (la boite a SYS_ADMIN pour bwrap) : il ne reste
+# qu'un fichier vide ; hors conteneur (les temoins), on le ferme par le mode.
+close_secret_mount() { umount "$1" 2>/dev/null || chmod 0000 "$1" 2>/dev/null || true; }
+
 secrets_import() {
   local dir="${LCARS_SECRETS_DIR:-/run/secrets}" pair src dst name
   for pair in "forge_master_token:$LCARS_MASTER_TOKEN_FILE" "forge_seed_password:$LCARS_FORGE_SEED_FILE"; do
@@ -248,15 +253,15 @@ secrets_import() {
     # une fois importe dans le prive (0600 autorite), il se FERME (0000) — root le relit au boot
     # suivant, le siege ne le lit plus (relecture hostile du 2026-09-04 : LISIBLE sous le siege).
     if [[ ! -r "$src" ]]; then p_ok "secret $name : montage ferme, deja importe"; continue; fi
-    [[ -s "$src" ]] || continue
+    if [[ ! -s "$src" ]]; then p_ok "secret $name : montage vide (retire a un boot precedent, ou aucun secret pose)"; continue; fi
     if [[ -s "$dst" ]] && cmp -s "$src" "$dst"; then
-      chmod 0000 "$src" 2>/dev/null || true
-      p_ok "secret $name : deja en place ($dst) — montage ferme"; continue
+      close_secret_mount "$src"
+      p_ok "secret $name : deja en place ($dst) — montage retire"; continue
     fi
     ensure_dir "$LCARS_PRIVATE_DIR" 0710 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
     if write_atomic "$dst" 0600 "$LCARS_AUTHORITY_USER:$LCARS_AUTHORITY_USER" < "$src"; then
-      chmod 0000 "$src" 2>/dev/null || true
-      p_chg "secret $name importe du compose → $dst ($LCARS_AUTHORITY_USER seul) — montage ferme"
+      close_secret_mount "$src"
+      p_chg "secret $name importe du compose → $dst ($LCARS_AUTHORITY_USER seul) — montage retire"
     else
       p_fail "secret $name : import impossible → $dst"
     fi

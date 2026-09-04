@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/modules.d/50-forge_probes.bats
+# SOURCE: runtime/test/services/forge.d/tokens_probes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
 # STATUS: bats tests for 63-forge-tokens — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat

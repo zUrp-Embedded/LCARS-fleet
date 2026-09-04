@@ -138,3 +138,35 @@ stub_bats() { # stub_bats <rc rendu>
   [ -n "$b" ] || { echo "motif de neutralisation introuvable dans shell_gate.sh"; return 1; }
   [ "$a" = "$b" ] || { echo "les deux copies ont DERIVE : porte=$a  shell_gate=$b"; return 1; }
 }
+
+# ─── LES DEUX MOITIES AJOUTEES PAR Q4 (plancher shellcheck, en-tetes GO-7) — relecture 2026-09-04 ──
+# La porte de l'installeur est le SEUL porteur de ces deux proprietes pour deploy/ (shell_gate.sh
+# exclut deploy/). Sans ces temoins, les neutraliser laissait ce fichier vert sur ses huit cas.
+@test "shellcheck ABSENT = ECHEC nomme — la porte ne joue pas un plancher qu'elle ne peut pas mesurer" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  local nosc="$BATS_TEST_TMPDIR/nosc"; mkdir -p "$nosc"
+  local d f n; local -a dirs; IFS=: read -ra dirs <<< "$PATH"
+  for d in "${dirs[@]}"; do [ -d "$d" ] || continue; for f in "$d"/*; do [ -x "$f" ] || continue; n="$(basename "$f")"; [ "$n" = shellcheck ] && continue; [ -e "$nosc/$n" ] || ln -sf "$f" "$nosc/$n"; done; done
+  [ ! -e "$nosc/shellcheck" ]
+  run env PATH="$nosc" "$nosc/bash" "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shellcheck absent"* ]] || { echo "rc=$status : $output"; return 1; }
+}
+
+@test "le plancher shellcheck REFUSE un avertissement dans un script du corpus" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  printf '%s\n' '#!/usr/bin/env bash' '# SOURCE: deploy/tests/warn.sh' 'echo $(ls)' > "$DECOR/tests/warn.sh"
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shellcheck plancher"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"warn.sh"* ]]
+}
+
+@test "GO-7 REFUSE un script sans en-tete declaratif, et le nomme" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo ok' > "$DECOR/tests/nohead.sh"
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GO-7"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"nohead.sh"* ]]
+}
