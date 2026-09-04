@@ -231,7 +231,11 @@ joue_ci() { # joue_ci <code http> <corps> [rc de curl]
   joue
   [ "$status" -eq 0 ]
   [[ "$output" == *"deja demarree"* ]]
-  [[ "$output" == *"OUI"* ]]
+  # lot 10 (point 10) : une fleet deja vivante ne PROUVE pas qu'elle demarre — c'est un skip nomme
+  # (P4 : le verdict ne se mesure que fleet arretee), plus un OUI.
+  [[ "$output" == *"---"*"deja demarree"* ]]
+  [[ "$output" == *"n'est PAS etabli"* ]]
+  [[ "$output" != *"OUI"*"deja demarree"* ]]
 }
 
 @test "TEMOIN DU TEMOIN : la doublure REPRODUIT bien la condition qui tue le producteur" {

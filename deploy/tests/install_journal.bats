@@ -336,7 +336,8 @@ SH
 @test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
-  local body; body="$(code "$RUNNER")"
+  # lot 10 : la desinstallation vit dans lib/provision-uninstall.sh, sourcee par le runner
+  local body; body="$(code "$RUNNER"; code "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh")"
   # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
   # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
   # ⚠ LA LISTE DES CLEFS CUMULATIVES GRANDIT, ET LE MOTIF DOIT SUIVRE SANS SE RELACHER.
