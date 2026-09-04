@@ -18,8 +18,6 @@
 #                    CI en un geste. Sans ça, apporte la tienne (FORGE_BASE_URL + un token master)
 #   status           l'état de l'INSTANCE vu de l'hôte : conteneur, santé, verdicts du boot et des
 #                    gestes de forge, humains, tampon de l'image. Sortie 0 sain · 1 dégradé · 2 panne
-#   doctor           sonde l'état DANS le conteneur par l'installeur embarqué — part au lot 7 du
-#                    chantier deploy-independance (l'image ne dérive pas : `status` suffit)
 #   shell            shell dans le conteneur, en tant qu'un WORKER (LCARS_HUMAN, defaut lcars)
 #   logs             logs du conteneur (suivi)
 #   down             arrête et retire lcars (les volumes restent)
@@ -46,7 +44,7 @@
 # ENV (tous optionnels) :
 #   LCARS_PROJECT              projet compose visé (défaut lcars) — équivalent de -p
 #   LCARS_BOX_CONF_DIR         où vit la conf par projet (défaut ~/.lcars/box) — cf. « config »
-#   LCARS_HUMAN                login WORKER cible par shell/doctor/hint (defaut lcars) — PAS le
+#   LCARS_HUMAN                login WORKER cible par shell/hint (defaut lcars) — PAS le
 #                              sysadmin de la boite (celui-la est `admiral`, cf. LCARS_ADMIRAL, entrypoint)
 #   LCARS_UID                  uid de l'humain (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
@@ -263,7 +261,7 @@ cmd_up() {
   echo ""
   echo "LCARS fleet up (projet $PROJECT). Accès :"
   echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
-  echo "  deploy/box doctor                                   # état provisionné ?"
+  echo "  deploy/box status                                   # l'état de l'instance, vu de l'hôte"
   await_provision_verdict
 }
 
@@ -292,15 +290,15 @@ await_provision_verdict() {
   case "$rc" in
     "")
       echo "box up: verdict de provisionnement NON LU après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
-      echo "              La boîte tourne ; son état n'est PAS mesuré. « deploy/box doctor »." ;;
+      echo "              La boîte tourne ; son état n'est PAS mesuré. « deploy/box status »." ;;
     0)
       echo "box up: provisionnement CONVERGÉ." ;;
     2)
       echo "box up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
-      echo "              « deploy/box doctor » nomme lequel." ;;
+      echo "              « deploy/box status » le dit ; « deploy/box logs » nomme lequel." ;;
     *)
       echo "box up: provisionnement EN ÉCHEC (rc=$rc) — la boîte tourne et ne produira RIEN."
-      echo "              « deploy/box doctor » nomme ce qui manque." >&2
+      echo "              « deploy/box logs » nomme ce qui manque." >&2
       return 1 ;;
   esac
 
@@ -314,13 +312,6 @@ await_provision_verdict() {
         echo "              Enrôle quelqu'un sur la forge, ajoute-le à la team « humans » :"
         echo "              le convergeur le matérialise au tour suivant (30 s)." ;;
   esac
-}
-
-cmd_doctor() {
-  # -T (B8) : pas d'allocation TTY — le doctor doit tourner depuis un script/CI/cron, pas
-  # seulement depuis un terminal interactif.
-  compose exec -T lcars /opt/lcars/deploy/provision doctor --substrate docker \
-    --human "${LCARS_HUMAN:-lcars}" "$@"
 }
 
 cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
@@ -412,7 +403,7 @@ cmd_forge_apply() {
     || { echo "box forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
   echo ""
   echo "box forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
-  echo "  deploy/box doctor    # ce que la boîte voit de sa forge maintenant"
+  echo "  deploy/box forge-check    # ce que la boîte voit de sa forge maintenant"
 }
 
 cmd_runner_token() {
@@ -532,7 +523,7 @@ cmd_source_push() {
     git config --system --replace-all safe.directory /home/projects/LCARS
     test -d /home/projects/LCARS/.git
     git -C /home/projects/LCARS rev-parse --short HEAD"
-  echo "box: source posée. « deploy/box doctor » la sonde ; la fleet peut se maintenir."
+  echo "box: source posée (/home/projects/LCARS dans la boîte) ; la fleet peut se maintenir."
 }
 
 cmd_forge_check() {
@@ -594,7 +585,7 @@ dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
            <url>/api/v1/admin/users/<compte>
 
 CE QUE LCARS VÉRIFIE (il ne répare pas ce qui ne lui appartient pas) :
-      deploy/box doctor      → forge joignable ? org présente ? comptes de rôle ? tokens
+      deploy/box forge-check → forge joignable ? org présente ? comptes de rôle ? tokens
                                 valides ? l'humain est-il membre de l'org ? Chaque manque est
                                 dit avec le geste exact pour le combler.
 
@@ -612,7 +603,6 @@ case "${1:-help}" in
   build)  shift; cmd_build "$@" ;;
   up)     shift; cmd_up "$@" ;;
   pull)   cmd_pull ;;
-  doctor) shift; cmd_doctor "$@" ;;
   status) cmd_status ;;
   shell)  cmd_shell ;;
   logs)   shift; cmd_logs "$@" ;;

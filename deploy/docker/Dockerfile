@@ -348,10 +348,11 @@ RUN set -eu; \
     chmod 0644 "$d"/*; \
     ls -l "$d"
 
-# Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
-# les chemins inter-arbre. `fleet/etc` ne porte plus que des DONNÉES du produit (le manifeste de
-# la release, le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
-COPY deploy /opt/lcars/deploy
+# ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans la boîte ne
+# le lit — le boot est le produit (fleet/services/box/), la sonde de l'instance est « box status »
+# côté hôte. Le stage `verify` plus bas le copie POUR LUI SEUL, joue le doctor, et meurt : `final`
+# repart de `runtime`. `fleet/etc` ne porte que des DONNÉES du produit (le manifeste de la release,
+# le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
 COPY fleet/etc     /opt/lcars/fleet/etc
 # ⚠ LA RECETTE ARRIVE ICI, ET PAS AVEC LE RESTE DE `fleet/services` — parce que le bloc `tofu` juste
 # en dessous JOUE dedans (`providers mirror` puis `init`), et que `COPY fleet/services` vit 70 lignes
@@ -528,11 +529,7 @@ RUN printf '%s\n' \
 RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
-               /opt/lcars/deploy/provision \
-               /opt/lcars/deploy/modules.d/*.sh \
-               /opt/lcars/fleet/services/provision-role-tokens.sh \
-               /opt/lcars/deploy/lib/enroll-catalogue.sh \
-               /opt/lcars/deploy/lib/deploy-release.sh
+               /opt/lcars/fleet/services/provision-role-tokens.sh
 
 # L'ESTAMPILLE DES AUXILIAIRES POSES — le pendant de ce que `62-runtime-helpers` ecrit sur un poste
 # apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que
@@ -590,7 +587,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/fleet/services/box/boot.s
 #
 # Ce stage joue le doctor sur le système de fichiers que `runtime` vient de produire, et fait
 # ÉCHOUER LE BUILD sur tout drift (`doctor` rend 1 sur un drift, 2 sur un échec). Il ne mesure que
-# ce que l'image POSE : ce qui dépend d'un volume (`26-store`), d'une forge (`63`, `65`, `66`) ou
+# ce que l'image POSE : ce qui dépend d'un volume (l'init de l'instance), d'une forge (`63`, `65`, `66`) ou
 # d'un boot n'a pas de vérité ici et n'y est pas demandé.
 #
 # ⚠ `deploy/` ENTRE DANS CE STAGE, ET DANS CE STAGE SEULEMENT (⚖ user 2026-09-04, Q1 : l'installeur
