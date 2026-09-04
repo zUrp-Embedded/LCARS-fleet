@@ -91,6 +91,29 @@ defmodule Fleet.Project.Onboard do
           optional(:idempotent) => true
         }
 
+  # The shape `delete_project/2` returns — ONE declaration, read by `Lifecycle`'s `@spec` AND by the
+  # MCP behaviour's `@callback` (`Fleet.MCP.PodTools.Delegation.ProjectOnboard`). It lives HERE and
+  # not on the behaviour because this module cannot depend on `Fleet.MCP` (Boundary, MCP sits
+  # above), while MCP already names this module as its default. `{:ok, map()}` on both sides let
+  # `workers_killed` be computed, tested, and never relayed on the wire (2026-09-04): a key the
+  # type does not name is a key the readers cannot be held to.
+  @type delete_result :: %{
+          :repo => String.t(),
+          # `:deleted` | `:absent` (the forge had no such repo — the local proof still runs).
+          :forge => :deleted | :absent,
+          # `:stopped` | `:none` | `:error` | `:skipped_identity` (no local face was proven ours).
+          :architect => :stopped | :none | :error | :skipped_identity,
+          # Workers swept BEFORE the faces go — reported, because a deletion that cost work in
+          # flight must not read as free.
+          :workers_killed => non_neg_integer(),
+          :project_dir => Path.t(),
+          :work_dir => Path.t(),
+          :doc_dir => Path.t(),
+          # One verdict per face: `:removed` | `:absent` | `:kept_identity_unproven` |
+          # `:removal_incomplete`.
+          :local => %{project: atom(), ops: atom(), workshop: atom()}
+        }
+
   # ── LA SURFACE DU SEAM, RE-EXPORTEE ─────────────────────────────────
   # ⚠ CES TREIZE VERBES SONT LE CONTRAT, PAS DU CONFORT. Le behaviour
   # `Fleet.MCP.PodTools.Delegation.ProjectOnboard` designe CE module comme son implementation par
@@ -131,7 +154,7 @@ defmodule Fleet.Project.Onboard do
   @spec close_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   defdelegate close_project(full_name, opts \\ []), to: Lifecycle
 
-  @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec delete_project(String.t(), keyword()) :: {:ok, delete_result()} | {:error, term()}
   defdelegate delete_project(full_name, opts \\ []), to: Lifecycle
 
   @spec adopt_project(String.t(), keyword()) :: {:ok, result()} | {:error, term()}

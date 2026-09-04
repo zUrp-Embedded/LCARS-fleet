@@ -73,11 +73,13 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
 
   @doc """
   DELETES a project — general teardown (architect pod + forge repo + the three faces). `opts[:force]` bypasses
-  the anti-work safety guard (a DELIBERATE end-of-life delete). Result carries `repo` (+ `forge`/
-  `architect` status keys and `local`, one verdict per face); `Portfolio` reads `%{repo: _}`.
+  the anti-work safety guard (a DELIBERATE end-of-life delete). The result shape is
+  `Fleet.Project.Onboard.delete_result/0` — declared ONCE on the default implementation's side, so
+  the `@spec` there and this `@callback` cannot drift apart. `Portfolio` relays `repo`, `forge`,
+  `architect`, `workers_killed` and `local` on the wire.
   """
   @callback delete_project(full_name :: String.t(), opts :: keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, Fleet.Project.Onboard.delete_result()} | {:error, term()}
 
   @doc """
   ADOPTS a project living on DISK but not on the forge (BL-6-32) — the inverse of `import/2`:

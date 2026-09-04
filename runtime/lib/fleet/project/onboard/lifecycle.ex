@@ -311,7 +311,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   is proven. Local removal and architect-stop failures are reported but do not reverse a decided forge
   deletion.
   """
-  @spec delete_project(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec delete_project(String.t(), keyword()) :: {:ok, Onboard.delete_result()} | {:error, term()}
   def delete_project(full_name, opts \\ []) when is_binary(full_name) do
     name = Fleet.Layout.project_name(full_name)
     dirs = Faces.face_dirs(name, opts)
