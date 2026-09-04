@@ -360,7 +360,7 @@ need_git_checkout() {
 # ⚠ CE FICHIER EPINGLAIT LA CAUSE. Le temoin ci-dessus exigeait que le tampon tombe exactement sur
 # le `repo_root()` de la copie — ce qui est juste — mais ce tampon s appelait `.source-revision`,
 # c est-a-dire le nom que `prov_delivery` cherche a la racine d un arbre pour dire BINAIRE ou
-# SOURCE. Rejouer `/opt/lcars/deploy/provision`, LE GESTE NOMINAL DU CONVERGEUR, faisait donc
+# SOURCE. Rejouer `/opt/lcars/deploy/provision` (la copie posee, sur un poste sans checkout) faisait donc
 # lire le tampon des auxiliaires comme « ce repertoire est un paquet » : un poste installe depuis un
 # clone se declarait BINAIRE, `15-toolchain` rendait « toolchain non requise » sans jamais evaluer
 # son plancher OTP, et `16-node` ne mesurait plus rien.

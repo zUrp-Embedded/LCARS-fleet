@@ -207,3 +207,77 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   [[ "$out" == *"illisible"* ]]
   refute grep -q 'usermod' <<<"$out"
 }
+
+# ─── M2 : « REFUSE » N'EST PAS « REPOND » — L'ECOUTE S'ETABLIT AVANT D'ACCUSER LE GROUPE ─────────
+#
+# ⚠ RELECTURE HOSTILE DU 2026-09-04. `PROV_DOCKER_DENIED=1` se posait des que la socket existait
+# sans etre inscriptible, quelle que soit la raison de l'echec de `docker version`. Sur une socket
+# ORPHELINE (daemon crashe, fichier survivant) lue par un compte hors du groupe, le message disait
+# « le daemon docker REPOND, mais pas a « X » » et envoyait chercher un probleme de groupe.
+#
+# ⚠ CES TEMOINS JOUENT LA FONCTION, pas sa forme : une vraie socket unix, posee par python3 dans le
+# bac a sable, avec ou sans processus qui ecoute derriere. La CLI est une doublure qui ne repond
+# jamais ; le balayage ne voit que la socket du decor (LCARS_DOCKER_SOCKETS). Sous root `-w` est
+# toujours vrai et le cas « refuse » n'existe pas : on saute, on ne simule pas.
+
+ecouteur() { # ecouteur <socket> — un processus qui ecoute sur cette socket, mode 000 ; pose ECOUTEUR_PID
+  python3 - "$1" <<'PY' &
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); os.chmod(sys.argv[1], 0)
+time.sleep(30)
+PY
+  ECOUTEUR_PID=$!
+  local _i; for _i in 1 2 3 4 5 6 7 8 9 10; do [[ -S "$1" ]] && break; sleep 0.2; done
+  [[ -S "$1" ]]
+}
+orpheline() { # orpheline <socket> — le fichier d'une socket dont le processus est mort, mode 000
+  python3 - "$1" <<'PY'
+import os, socket, sys
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(1); os.chmod(sys.argv[1], 0); s.close()
+PY
+  [[ -S "$1" ]]
+}
+teardown() { [[ -n "${ECOUTEUR_PID:-}" ]] && kill "$ECOUTEUR_PID" 2>/dev/null; return 0; }
+
+sonde() { # sonde <socket> — joue docker_endpoint avec une CLI muette ; rend DENIED et WHY
+  local cli="$BATS_TEST_TMPDIR/cli-muette"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$cli"; chmod +x "$cli"
+  run env -u DOCKER_HOST LCARS_DOCKER_SOCKETS="$1" PROV_DOCKER_BIN="$cli" DOCKER_CONFIG="$BATS_TEST_TMPDIR/dc" \
+    bash -c '. "$1"; docker_endpoint; echo "rc=$? denied=$PROV_DOCKER_DENIED"; echo "$PROV_DOCKER_WHY"' _ "$LIB"
+}
+
+@test "M2 : un processus ECOUTE et la socket refuse → « REPOND, mais pas a » (le groupe est la question)" {
+  [ "$EUID" -ne 0 ] || skip "root ecrit sur toute socket : le cas « refuse » n'existe pas ici"
+  command -v python3 >/dev/null || skip "python3 absent : pas de socket de decor"
+  [ -r /proc/net/unix ] || skip "pas de /proc/net/unix : l ecoute n est pas mesurable ici"
+  local sock="$BATS_TEST_TMPDIR/vivante.sock"
+  ecouteur "$sock"
+  sonde "$sock"
+  [[ "$output" == *"rc=1 denied=1"* ]]
+  [[ "$output" == *"REPOND, mais pas a"* ]]
+  refute grep -q 'NON etabli' <<<"$output"
+}
+
+@test "M2 : socket ORPHELINE (personne n'ecoute) → daemon vivant NON etabli, et le groupe n'est PAS accuse" {
+  [ "$EUID" -ne 0 ] || skip "root ecrit sur toute socket : le cas « refuse » n'existe pas ici"
+  command -v python3 >/dev/null || skip "python3 absent : pas de socket de decor"
+  [ -r /proc/net/unix ] || skip "pas de /proc/net/unix : l ecoute n est pas mesurable ici"
+  local sock="$BATS_TEST_TMPDIR/morte.sock"
+  orpheline "$sock"
+  sonde "$sock"
+  [[ "$output" == *"rc=1 denied=0"* ]]
+  [[ "$output" == *"aucun daemon docker joignable"* ]]
+  [[ "$output" == *"aucun processus n'y ecoute"* ]]
+  [[ "$output" == *"NON etabli"* ]]
+  refute grep -q 'REPOND, mais pas a' <<<"$output"
+  refute grep -q 'usermod' <<<"$output"
+}
+
+@test "M2 : TEMOIN DU TEMOIN — _docker_sock_listening distingue les deux sockets, et dit quand il ne peut pas" {
+  command -v python3 >/dev/null || skip "python3 absent : pas de socket de decor"
+  [ -r /proc/net/unix ] || skip "pas de /proc/net/unix"
+  ecouteur "$BATS_TEST_TMPDIR/v.sock"; orpheline "$BATS_TEST_TMPDIR/m.sock"
+  run bash -c '. "$1"; _docker_sock_listening "$2"; echo "v=$?"; _docker_sock_listening "$3"; echo "m=$?"' _ "$LIB" "$BATS_TEST_TMPDIR/v.sock" "$BATS_TEST_TMPDIR/m.sock"
+  [[ "$output" == *"v=0"* ]]
+  [[ "$output" == *"m=1"* ]]
+}

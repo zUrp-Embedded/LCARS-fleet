@@ -149,7 +149,7 @@ setup() {
 # ─── C6, LA SUITE : LE RAIL POSE DOIT POUVOIR SE REJOUER ────────────────────────────────────────
 #
 # ⚠ MESURE DU 2026-09-01, BANC 2007. Un apply rejoue depuis `/opt/lcars/deploy/provision` —
-# LE GESTE NOMINAL DU CONVERGEUR, celui que l en-tete de `62-runtime-helpers` decrit — echouait sur
+# le rejeu depuis la copie posee, sur un poste sans checkout — echouait sur
 # trois modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
 # /opt/lcars/services ». Le rail pose ne pouvait pas se rejouer entierement.
 #

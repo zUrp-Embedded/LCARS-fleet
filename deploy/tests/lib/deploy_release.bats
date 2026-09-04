@@ -249,3 +249,65 @@ MIX
   [ "$status" -ne 0 ]
   [ "$(readlink "$LINK_DIR/fleet")" = "$TMP/ancienne/bin/fleet" ]
 }
+
+# ─── S4 : LE MANIFESTE SE JOUE DANS LES DEUX SENS — CE QU'IL NE NOMME PAS S'EN VA ──────────────
+#
+# ⚠ RELECTURE HOSTILE DU 2026-09-04, MESURE AU BANC apres le renommage `fleet_v2` -> `fleet` :
+# `/opt/lcars/runtime/bin/fleet_v2` et `/usr/local/bin/fleet_v2 -> …/bin/fleet_v2` toujours en
+# place, `60-deploy=OK`. La pose iterait sur les entrees du manifest et n'enlevait rien. Un humain
+# qui tapait `fleet_v2` obtenait le lanceur d'AVANT sur une machine declaree conforme.
+# Meme forme que `wire_path_links` : la boucle est une fonction, jouee sans `mix release`.
+
+@test "S4 : un intrus de \$PREFIX/bin est retire, ET son symlink du PATH, une ligne par retrait" {
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/bin"
+  MF_FILES=(fleet lcars)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR"
+  : > "$PREFIX/bin/fleet"; : > "$PREFIX/bin/lcars"; : > "$PREFIX/bin/fleet_v2"
+  ln -s "$PREFIX/bin/fleet_v2" "$LINK_DIR/fleet_v2"
+  ln -s "$PREFIX/bin/fleet" "$LINK_DIR/fleet"
+
+  run prune_bin_dir
+  [ "$status" -eq 0 ]
+  [ ! -e "$PREFIX/bin/fleet_v2" ]
+  [ ! -L "$LINK_DIR/fleet_v2" ]
+  [[ "$output" == *"retire $PREFIX/bin/fleet_v2 (absent du manifest)"* ]]
+  [[ "$output" == *"retire symlink $LINK_DIR/fleet_v2"* ]]
+  # ce que le manifest nomme reste, lien compris
+  [ -e "$PREFIX/bin/fleet" ] && [ -e "$PREFIX/bin/lcars" ] && [ -L "$LINK_DIR/fleet" ]
+}
+
+@test "S4 : un lien du PATH qui vise AILLEURS n'est pas a nous — il reste, meme homonyme" {
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/bin"
+  MF_FILES=(fleet)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR" "$TMP/autre"
+  : > "$PREFIX/bin/fleet"; : > "$PREFIX/bin/vieux"; : > "$TMP/autre/vieux"
+  ln -s "$TMP/autre/vieux" "$LINK_DIR/vieux"
+
+  run prune_bin_dir
+  [ "$status" -eq 0 ]
+  [ ! -e "$PREFIX/bin/vieux" ]
+  [ -L "$LINK_DIR/vieux" ]
+  [ "$(readlink "$LINK_DIR/vieux")" = "$TMP/autre/vieux" ]
+  refute grep -q 'retire symlink' <<<"$output"
+}
+
+@test "S4 : un symlink que l'humain ne peut pas retirer se DIT et ne fait pas echouer la pose" {
+  # Le script tourne en humain ; `/usr/local/bin` est a root. Le lien pointe sur un fichier que
+  # l'on vient de retirer : le dire est la moitie du geste, 60-deploy fait l'autre en root.
+  PREFIX="$TMP/prefix"
+  LINK_DIR="$TMP/ro"
+  MF_FILES=(fleet)
+  mkdir -p "$PREFIX/bin" "$LINK_DIR"
+  : > "$PREFIX/bin/fleet"; : > "$PREFIX/bin/fleet_v2"
+  ln -s "$PREFIX/bin/fleet_v2" "$LINK_DIR/fleet_v2"
+  chmod 500 "$LINK_DIR"
+
+  run prune_bin_dir
+  chmod 700 "$LINK_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -e "$PREFIX/bin/fleet_v2" ]
+  [[ "$output" == *"symlink $LINK_DIR/fleet_v2 KO"* ]]
+  [[ "$output" == *"60-deploy"* ]]
+}

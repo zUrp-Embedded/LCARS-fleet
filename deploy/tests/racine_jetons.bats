@@ -24,7 +24,7 @@
 load refute
 
 setup() {
-  R="$BATS_TEST_DIRNAME/../.."          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  R="$BATS_TEST_DIRNAME/../.."          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   LIB="$R/deploy/lib/provision-lib.sh"
   [ -f "$LIB" ]
   # LA SOURCE : ce que la lib RESOUT, et rien d'autre ne decide.

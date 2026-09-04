@@ -20,7 +20,7 @@ set -euo pipefail
 # cree — une derive permanente des que le premier inscrit s'appelle autrement.
 #
 # ⚠ ET IL NE POSE PLUS RIEN : le convergeur cree le compte (`useradd -m`) ET l'ajoute au groupe
-# (`usermod -aG`, human-converger.sh:722 et :727). Le `usermod` qui vivait ici doublait ce geste.
+# (`usermod -aG "$GROUP"`, deux sites dans human-converger.sh). Le `usermod` qui vivait ici doublait ce geste.
 #
 # CE QUI LUI RESTE EN PROPRE, et que personne d'autre ne verifie : L'APPARTENANCE AU GROUPE.
 # `is_fleet_human` ne juge que l'uid (>= UID_MIN, pas le siege) ; un humain hors de `fleet` passe
@@ -31,7 +31,7 @@ observe() {
   while read -r h; do
     [[ -n "$h" ]] || continue
     found=1
-    if id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+    if prov_in_group "$h" "$PROV_FLEET_GROUP"; then
       p_ok "« $h » (uid $(id -u -- "$h")) ∈ $PROV_FLEET_GROUP — il peut lancer la fleet"
     else
       p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
@@ -61,7 +61,7 @@ apply() {
   local h
   while read -r h; do
     [[ -n "$h" ]] || continue
-    id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP" && continue
+    prov_in_group "$h" "$PROV_FLEET_GROUP" && continue
     if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"

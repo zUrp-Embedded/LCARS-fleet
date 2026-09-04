@@ -32,7 +32,7 @@ setup() {
   # garde `deploy/tests/` dans la chaine, donc l'exclusion `-not -path '*/tests/*'` plus bas
   # eliminait TOUT le perimetre — les quatre murs passaient au vert sur une liste vide. C'est le
   # garde d'instrument juste en dessous qui l'a attrape, pas la relecture.
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   # Le perimetre : ce qui S'EXECUTE. Les temoins (`deploy/tests`, `test/`) nomment legitimement ce
   # qu'ils epinglent, et les documents de chantier ne tournent nulle part.
   # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, ET C'EST CE QUI REND LE GARDE DERIVABLE. Ecrite en

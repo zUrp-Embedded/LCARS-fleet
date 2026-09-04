@@ -66,7 +66,7 @@ check() {
   fi
 
   if account_exists "$AUTHORITY_USER" \
-     && id -nG "$AUTHORITY_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+     && prov_in_group "$AUTHORITY_USER" "$PROV_FLEET_GROUP"; then
     p_ok "$AUTHORITY_USER ∈ $PROV_FLEET_GROUP (traversée de l'install RO)"
   elif account_exists "$AUTHORITY_USER"; then
     p_drift "$AUTHORITY_USER ∉ $PROV_FLEET_GROUP — il ne pourra pas traverser /opt/lcars/runtime, et « catalogue install » échouera sur un refus qui accuse le catalogue"

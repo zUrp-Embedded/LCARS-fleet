@@ -120,13 +120,12 @@ apply() {
 
   # Un crash au milieu ne laisse jamais un NODE_HOME à moitié écrit qui répondrait à `--version`.
   rm -rf "${NODE_HOME}.partial"
-  ensure_dir "${NODE_HOME}.partial" 0755 root:root || verdict_apply
+  prov_scaffold_dir "${NODE_HOME}.partial" 0755 root:root || verdict_apply   # hors journal (M8)
   p_step "node $NODE_VERSION — décompression du précompilé officiel"
   if ! run_quiet tar -xJf "$tgz" -C "${NODE_HOME}.partial" --strip-components=1; then
     rm -rf "${NODE_HOME}.partial" "$tgz"; p_fail "extraction du précompilé node"; verdict_apply
   fi
-  rm -rf "$NODE_HOME"
-  mv "${NODE_HOME}.partial" "$NODE_HOME"
+  prov_promote_dir "${NODE_HOME}.partial" "$NODE_HOME" || verdict_apply   # journalise le nom FINAL
   rm -f "$tgz"
 
   local b

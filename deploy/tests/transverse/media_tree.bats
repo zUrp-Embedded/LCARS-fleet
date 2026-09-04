@@ -136,7 +136,8 @@ mod() { run bash "$MOD" "$1"; }
 @test "la doc se pose ATOMIQUEMENT — un demi-repertoire se sert en 404 silencieux" {
   code() { grep -vE '^\s*#' "$MOD"; }
   code | grep -q 'partial="\$(doc_dir).partial"'
-  code | grep -q 'mv "\$partial" "\$(doc_dir)"'
+  # M8 : la bascule passe par la primitive de la lib, qui journalise le nom FINAL et jamais le `.partial`
+  code | grep -q 'prov_promote_dir "\$partial" "\$(doc_dir)"'
 }
 
 @test "le check sonde index.html, pas le repertoire" {

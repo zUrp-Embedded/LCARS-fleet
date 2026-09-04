@@ -65,7 +65,8 @@ EMBEDDED_FLEET="$HELPERS_DIR"   # a plat : /opt/lcars/{etc,services,bin} — cf.
 # ⚠ ET CE TAMPON A PORTÉ LE NOM D'UN AUTRE FAIT. Il valait `$PROV_SOURCE_STAMP`, c'est-à-dire le
 # discriminant que `prov_delivery` lit à la racine d'un arbre pour dire BINAIRE ou SOURCE. Comme la
 # coïncidence arithmétique ci-dessus fait tomber les deux sur `/opt/lcars`, un apply rejoué depuis
-# la copie — LE GESTE NOMINAL DU CONVERGEUR — lisait ce tampon comme « paquet ». La SSoT des deux
+# la copie — le rejeu depuis la copie posee, sur un poste sans checkout — lisait ce tampon comme
+# « paquet ». La SSoT des deux
 # noms vit dans la lib, avec le récit complet.
 helpers_stamp() { echo "$EMBEDDED_FLEET/${PROV_HELPERS_STAMP:-.helpers-revision}"; }   # a plat : le tampon est A LA RACINE posee, avec les arbres
 # Le discriminant de livraison, tel qu'il doit exister DANS la copie — voir `propage_livraison`.
@@ -256,13 +257,13 @@ check() {
     if [[ -d "$HELPERS_DIR/$_r" ]]; then
       p_ok "arbre embarqué $HELPERS_DIR/$_r"
     else
-      p_drift "arbre embarqué ABSENT ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/deploy/provision échouera : c'est le geste du convergeur"
+      p_drift "arbre embarqué ABSENT ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/deploy/provision échouera : c'est le rejeu sur un poste sans checkout"
     fi
   done
 
   # ⚠ LA FORME DE LA LIVRAISON DANS LA COPIE SE SONDE, PARCE QUE PERSONNE D'AUTRE NE LA VOIT. Ce
-  # discriminant ne se lit QUE depuis `$HELPERS_DIR/deploy/provision` — le geste du
-  # convergeur. Un doctor lancé depuis l'arbre de travail, lui, lit celui de l'arbre de travail :
+  # discriminant ne se lit QUE depuis `$HELPERS_DIR/deploy/provision` — le rejeu depuis la
+  # copie posée. Un doctor lancé depuis l'arbre de travail, lui, lit celui de l'arbre de travail :
   # il peut donc être vert sur une machine dont la copie ment sur ce qu'elle est.
   local _veut _a
   _veut="$(prov_delivery)"; _a="source"; [[ -f "$(copie_delivery_stamp)" ]] && _a="binary"
@@ -352,7 +353,7 @@ BLOC
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente: $(product_tree)/$n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n.new"
-    ensure_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    prov_scaffold_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply   # hors journal (M8)
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc les 73 Mo de cache tofu ne sont jamais
     # ecrits — pas ecrits puis retires, JAMAIS ecrits. Meme forme que la boucle de la racine.
     ( cd "$(product_tree)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
@@ -363,8 +364,7 @@ BLOC
     # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
     chown -R "$HELPERS_OWNER" "$EMBEDDED_FLEET/$n.new" 2>/dev/null || true
     chmod -R g-s,go-w "$EMBEDDED_FLEET/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
-    rm -rf "${EMBEDDED_FLEET:?}/$n"
-    mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
+    prov_promote_dir "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }
   done
   # ⚠ CE MESSAGE DISAIT « provisionnement embarque », ET IL NE POSE PLUS LE PROVISIONNEMENT. Depuis
@@ -385,7 +385,7 @@ BLOC
   # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
   #
   # VU : un apply rejoue depuis `/opt/lcars/deploy/provision` —
-  # LE GESTE NOMINAL DU CONVERGEUR, celui que l'en-tete de ce module decrit — echouait sur trois
+  # le rejeu depuis la copie posee (un poste sans checkout) — echouait sur trois
   # modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
   # /opt/lcars/services ». Le rail pose ne pouvait pas se rejouer entierement.
   #
@@ -405,7 +405,7 @@ BLOC
   for n in "${EMBEDDED_ROOT[@]}"; do
     [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n.new"
-    ensure_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    prov_scaffold_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply   # hors journal (M8)
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc on ne copie jamais les 179 Mo qu'il
     # faudrait ensuite retirer. Meme outil que celui qui pose node, deja un pre-requis du rail.
     _only=(); [[ "$n" == deploy ]] && _only=(--exclude=./tests)
@@ -417,8 +417,7 @@ BLOC
     # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
     chown -R "$HELPERS_OWNER" "$HELPERS_DIR/$n.new" 2>/dev/null || true
     chmod -R g-s,go-w "$HELPERS_DIR/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
-    rm -rf "${HELPERS_DIR:?}/$n"
-    mv "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
+    prov_promote_dir "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }
   done
   p_chg "arbres de la racine embarqués ($HELPERS_DIR/{${EMBEDDED_ROOT[*]}}, sans node_modules)"

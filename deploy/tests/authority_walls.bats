@@ -32,7 +32,7 @@ setup() {
   # ⚠ LE CHEMIN EST RESOLU. `$BATS_TEST_DIRNAME/../..` garderait `deploy/tests/` dans la chaine, et
   # l'exclusion `-not -path '*/tests/*'` viderait alors TOUT le perimetre — les murs passeraient au
   # vert sur une liste vide. Le voisin a paye exactement ce defaut ; on ne le rejoue pas.
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, pour que le garde du perimetre la CONSOMME au lieu de
   # la recopier. Deux listes a maintenir, c'est une liste qui derive et un garde qui ne garde plus.
   # ⚠ `runtime/etc` N'EST PLUS UN ARBRE DE CODE (Q3, 2026-09-04) : ses trois outils d'install vivent

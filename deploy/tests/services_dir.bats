@@ -18,7 +18,7 @@
 # shellcheck disable=SC2012
 
 setup() {
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   MOD="$REPO/deploy/modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$REPO/deploy/docker/Dockerfile"
   SERVICES="$REPO/runtime/services"

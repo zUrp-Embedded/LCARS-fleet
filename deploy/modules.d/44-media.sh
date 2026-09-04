@@ -125,11 +125,10 @@ poser_doc() {
   # Pose atomique : un `doc/` à moitié recopié se sert en 404 silencieux.
   local partial; partial="$(doc_dir).partial"
   rm -rf "$partial"
-  ensure_dir "$partial" 0755 "$MEDIA_OWNER" || verdict_apply
+  prov_scaffold_dir "$partial" 0755 "$MEDIA_OWNER" || verdict_apply   # hors journal (M8)
   cp -a "$SITE_SRC/dist/." "$partial/" \
     || { p_fail "doc non copiable ($SITE_SRC/dist → $(doc_dir))"; rm -rf "$partial"; verdict_apply; }
-  rm -rf "$(doc_dir)"
-  mv "$partial" "$(doc_dir)"
+  prov_promote_dir "$partial" "$(doc_dir)" || verdict_apply   # journalise le nom FINAL
   p_chg "doc du deck posée ($(doc_dir), base $SITE_BASE)"
 }
 

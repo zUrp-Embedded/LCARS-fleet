@@ -331,23 +331,61 @@ uninstall_run() {
   # ⚠ AUCUNE GARDE ICI, ET C'EST VOULU : la liste est deja vide quand `--annexes` n'est pas demande.
   # Une seconde garde a cet endroit serait redondante ET nuisible — elle ferait croire que la
   # decision se prend a l'execution, alors qu'elle se prend a la lecture, comme celle de `/home`.
-  local proj cid vol
+  # ⚠ LA PORTE EST LA SONDE, PAS `command -v docker` (S3, relecture hostile du 2026-09-04). La lib le
+  # dit elle-meme : ce predicat se trompe DANS LES DEUX SENS — sous WSL la CLI vit dans un montage
+  # hors PATH, et une CLI presente ne prouve pas qu'un daemon reponde. Ce bloc en faisait sa porte,
+  # sans jamais poser DOCKER_HOST : « docker absent » sur un daemon qui repondait, et un `docker ps`
+  # muet (`2>/dev/null`) sur un endpoint non resolu. Le plan annoncait « DETRUITS », l'execution ne
+  # detruisait rien, et le bilan ne le disait pas.
+  #
+  # ⚠ ET LE REFUS SE PRONONCE UNE FOIS, POUR TOUS LES PROJETS, EN LES NOMMANT. Un `break` au premier
+  # projet abandonnait les suivants sans un mot ; ce qui n'est pas retire se COMPTE (`kept`), pour que
+  # la ligne « refus » du bilan le porte. `PROV_DOCKER_WHY` nomme le geste (M3) : c'est
+  # `docker_denied_geste` qui parle quand la socket refuse cet utilisateur.
+  local proj cid vol ids n_ctr n_rm
   kept=$((kept + ${#annexes_gardees[@]}))
+  if [[ "${#docker_projects[@]}" -gt 0 ]] && ! docker_endpoint; then
+    echo "  ${_PA}docker injoignable — ${#docker_projects[@]} projet(s) laissé(s) entier(s) : ${docker_projects[*]}${_PN}"
+    echo "  ${_PA}  $PROV_DOCKER_WHY${_PN}"
+    kept=$((kept + ${#docker_projects[@]}))
+    docker_projects=()
+  fi
   for proj in ${docker_projects[@]+"${docker_projects[@]}"}; do
-    command -v docker >/dev/null 2>&1 || { echo "  ${_PA}docker absent — projet « $proj » laissé entier${_PN}"; break; }
+    # Capturer puis tester : un `docker ps` qui REFUSE (endpoint, droits) n'est pas un projet vide.
+    if ! ids="$("$PROV_DOCKER_BIN" ps -aq --filter "label=com.docker.compose.project=$proj" 2>&1)"; then
+      echo "  ${_PA}« docker ps » refuse pour « $proj » — projet laissé entier : ${ids:-sans message}${_PN}"
+      kept=$((kept + 1))
+      continue
+    fi
+    n_ctr=0; n_rm=0
     while read -r cid; do
       [[ -n "$cid" ]] || continue
-      docker rm -f "$cid" >/dev/null 2>&1 && removed=$((removed + 1)) \
-        || echo "  ${_PA}conteneur non retiré : $cid${_PN}"
-    done < <(docker ps -aq --filter "label=com.docker.compose.project=$proj" 2>/dev/null)
-    if docker network rm "${proj}_default" >/dev/null 2>&1; then
-      removed=$((removed + 1))
+      n_ctr=$((n_ctr + 1))
+      if "$PROV_DOCKER_BIN" rm -f "$cid" >/dev/null 2>&1; then
+        removed=$((removed + 1)); n_rm=$((n_rm + 1))
+      else
+        kept=$((kept + 1)); echo "  ${_PA}conteneur non retiré : $cid (projet « $proj »)${_PN}"
+      fi
+    done <<<"$ids"
+    if [[ "$n_ctr" -eq 0 ]]; then
+      echo "  0 conteneur trouvé pour « $proj » — rien à retirer de ce côté"
+    else
+      echo "  projet « $proj » : $n_rm/$n_ctr conteneur(s) retiré(s)"
+    fi
+    if "$PROV_DOCKER_BIN" network inspect "${proj}_default" >/dev/null 2>&1; then
+      if "$PROV_DOCKER_BIN" network rm "${proj}_default" >/dev/null 2>&1; then
+        removed=$((removed + 1)); echo "  réseau ${proj}_default retiré"
+      else
+        kept=$((kept + 1)); echo "  ${_PA}réseau ${proj}_default non retiré (un conteneur y est encore attaché ?)${_PN}"
+      fi
+    else
+      echo "  réseau ${proj}_default absent"
     fi
     while read -r vol; do
       [[ -n "$vol" ]] || continue
       kept=$((kept + 1))
       echo "  ${_PC}volume $vol GARDÉ — il porte du travail (les dépôts de la forge). « docker volume rm $vol » si tu en es sûr.${_PN}"
-    done < <(docker volume ls -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null)
+    done < <("$PROV_DOCKER_BIN" volume ls -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null || true)
   done
 
   # ─── LES COMPTES D'HUMAINS — SOUS `--humans`, ET JAMAIS AUTREMENT ─────────────────────────────

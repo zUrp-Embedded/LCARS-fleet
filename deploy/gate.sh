@@ -76,11 +76,11 @@ fi
 # ─── LA FORME ET LE PLANCHER DU SHELL DE L'INSTALLEUR SE JOUENT ICI ───────────────────────────
 # ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « l'installeur est independant, chacun
 # joue son gate, on les split ». Jusque-la `runtime/test/shell_gate.sh` tenait le plancher shellcheck
-# et les en-tetes declaratifs (GO-7) de deploy/ ; il ne lit plus que fleet/. Un arbre qui a sa
+# et les en-tetes declaratifs (GO-7) de deploy/ ; il ne lit plus que runtime/. Un arbre qui a sa
 # porte et dont la forme est tenue par la porte d'un autre arbre n'est pas independant.
 #
 # Meme regle que le bloc BATS_ENV plus bas : les deux predicats d'en-tete sont une COPIE ASSUMEE de
-# ceux du hook `fleet/git-hooks/pre-commit`. Cette porte ne source rien hors de deploy/ — c'est
+# ceux du hook `runtime/git-hooks/pre-commit`. Cette porte ne source rien hors de deploy/ — c'est
 # precisement ce qu'elle garantit — donc elle ne peut pas les lui emprunter.
 #
 # La liste vient d'un `find`, pas de git : cette porte doit jouer sur un kit detare sans `.git`.
@@ -132,8 +132,8 @@ go7_md_header() { # copie de check_md_header (pre-commit)
   grep -qE '<!--\s*Date\s*:' <<<"$h" && return 0
   return 1
 }
-go7_source_header() { # copie de check_source_header (pre-commit)
-  head -20 "$1" 2>/dev/null | grep -qEi 'SOURCE:|AUTHOR:|STARDATE:'
+go7_source_header() { # copie de check_source_header (pre-commit) — capture puis test (DI-13)
+  [[ -n "$(head -20 "$1" 2>/dev/null | grep -Ei 'SOURCE:|AUTHOR:|STARDATE:')" ]]
 }
 GO7_BAD=()
 GO7_N=0

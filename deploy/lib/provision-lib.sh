@@ -593,6 +593,38 @@ ensure_dir() {
   ensure_mode "$path" "$mode" "$owner"
 }
 
+# ─── prov_scaffold_dir / prov_promote_dir — L'ECHAFAUDAGE NE SE JOURNALISE PAS (M8) ─────────────
+#
+# ⚠ LE JOURNAL ACCUMULAIT DES CHEMINS D'ECHAFAUDAGE (relecture hostile du 2026-09-04). Les poseurs
+# atomiques (`16-node`, `44-media`, `62-runtime-helpers`) creaient leur `.partial` / `.new` par
+# `ensure_dir`, qui note `posed_dir` : le journal du banc portait `/opt/node-24.20.0.partial`,
+# `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin,…}.new` — des repertoires qui
+# n'existent plus une seconde apres la bascule. Ceux qu'aucun ancetre declare n'absorbe remontent
+# dans la ligne « hors table » du plan d'uninstall : du bruit sur la seule ligne dont tout
+# l'interet est que l'operateur ne peut PAS en deviner le contenu.
+#
+# Un repertoire d'echafaudage se note APRES la bascule, SOUS SON NOM FINAL — et c'est la primitive
+# qui bascule qui le note, pour que « ce qu'une primitive pose, elle le note » reste vrai (le
+# temoin du journal interdit `prov_journal_note posed_dir` dans un module). Ni compteur ni « POSÉ »
+# ici : la bascule est le geste que le module annonce lui-meme.
+prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
+  local path="$1" mode="$2" owner="${3:-}"
+  prov_refuse_symlink_path "$path" || return 1
+  [[ -d "$path" ]] || mkdir -p "$path" || { p_fail "prov_scaffold_dir: mkdir refusé: $path"; return 1; }
+  chmod "$mode" "$path" || { p_fail "prov_scaffold_dir: chmod $mode refusé: $path"; return 1; }
+  [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
+  return 0
+}
+prov_promote_dir() { # prov_promote_dir <echafaudage> <final> — bascule (rm -rf du final, mv), puis note le nom FINAL
+  local from="$1" to="$2"
+  [[ -d "$from" ]] || { p_fail "prov_promote_dir: échafaudage absent: $from"; return 1; }
+  [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir: destination vide ou racine"; return 1; }
+  rm -rf -- "$to"
+  mv -- "$from" "$to" || { p_fail "prov_promote_dir: bascule refusée: $from → $to"; return 1; }
+  prov_journal_note posed_dir "$to"
+  return 0
+}
+
 # ─── ensure_group / ensure_member — création idempotente ─────────────────────────────────────────
 # prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
 # `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le
@@ -637,12 +669,23 @@ ensure_group() {
 }
 
 
+# ─── prov_in_group <user> <groupe> — l'appartenance EFFECTIVE, capturee puis testee ─────────────
+# ⚠ PAS `id -nG | tr | grep -qx` (DI-13, la classe de DI-12). Sous `pipefail`, `grep -q` sort au
+# premier match et ferme le tuyau ; un producteur qui ecrit encore prend SIGPIPE et le pipeline
+# rend 141 — « pas membre » alors qu'il l'est, une fois sur dix sous charge. Six sites portaient la
+# forme (20, 21, 22 x2, cette lib x2). Capturer, puis tester la capture : aucun lecteur ne ferme
+# rien avant la fin. MUR I16 (idiom_walls) interdit le retour de la forme.
+prov_in_group() { # prov_in_group <user> <groupe> -> 0 si <user> est membre de <groupe> (session : id -nG)
+  local groups; groups="$(id -nG "$1" 2>/dev/null)" || return 1
+  [[ " $groups " == *" $2 "* ]]
+}
+
 ensure_member() {
   local user="$1" grp="$2"
   id "$user" >/dev/null 2>&1 || { p_fail "ensure_member: user inconnu: $user"; return 1; }
-  if ! id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
+  if ! prov_in_group "$user" "$grp"; then
     run_quiet usermod -aG "$grp" "$user" || return 1
-    id -nG "$user" | tr ' ' '\n' | grep -qx "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
+    prov_in_group "$user" "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi
@@ -1055,8 +1098,9 @@ PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 #
 # LA COLLISION : `62-runtime-helpers` écrivait le SECOND sous le nom du PREMIER, en `/opt/lcars/
 # .source-revision`. Or `repo_root()` remonte trois crans depuis `<racine>/deploy/lib` — donc
-# rejouer `/opt/lcars/deploy/provision`, qui EST le geste nominal du convergeur
-# (`runtime/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
+# rejouer `/opt/lcars/deploy/provision` — la copie posée, sur un poste sans checkout ; le
+# convergeur, lui, ne rejoue plus `provision`, il source `services/human.d/*.sh` — rend
+# `root == /opt/lcars` : le tampon des auxiliaires
 # devenait le discriminant de livraison. Un poste installé depuis un clone se déclarait BINAIRE au
 # rejeu, `15-toolchain` rendait « toolchain non requise » sans jamais évaluer son plancher OTP, et
 # `16-node` ne mesurait plus rien. Sur une machine qui COMPILE, le doctor rendait vert sur des
@@ -1349,7 +1393,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
 #
 # ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Vu sur un apply rejoué depuis
-# `/opt/lcars/deploy/provision` — le geste NOMINAL du convergeur :
+# `/opt/lcars/deploy/provision` — le rejeu depuis la copie posée, sur un poste sans checkout :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
 #   FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
@@ -1365,7 +1409,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # poste en livraison SOURCE rejoué depuis la copie n'a ni `mix.exs` ni `node_modules`, et il n'en a
 # pas besoin — la release et le `dist/` sont déjà posés.
 #
-# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# `62-runtime-helpers` embarque `{deploy,etc,services,bin}` a plat et `{assets,catalogues}` pour que
 # le rail puisse se REJOUER, pas pour qu'il puisse se RECONSTRUIRE. La distinction est le contrat
 # de cette copie.
 prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la copie posée
