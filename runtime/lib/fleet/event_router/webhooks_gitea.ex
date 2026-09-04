@@ -1,6 +1,7 @@
 defmodule Fleet.EventRouter.WebhooksGitea do
   @moduledoc """
-  Webhooks Gitea HTTP endpoint (Plug.Router + Plug.Cowboy, port `:webhook_port`, default 8081).
+  Webhooks Gitea HTTP endpoint (Plug.Router + Plug.Cowboy, port `:event_router_webhook_port`,
+  default 8081; off unless `:event_router_start_webhooks`).
 
   Mandatory HMAC SHA256 verification with the secret
   `/etc/fleet/webhook-secret` (root:lcars 600 ro, not mounted into

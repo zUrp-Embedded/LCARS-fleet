@@ -281,6 +281,9 @@ defmodule Fleet.CapProfile.Catalog do
   # `:invalid_schema` (role corrupt), and `list/1` (enumerated by PermanentBoot) would amputate it
   # from boot silently → a "green" but incomplete deploy). A corrupt file = a broken deploy artifact →
   # we propagate `{:error, {:invalid_yaml, path}}` (fail-loud). Assumed consequence: a single
+  # unreadable file poisons the whole index (corrupt catalogue = we load NONE of it) — consistent
+  # with "we do not save a wounded thing".
+  #
   # Un role sans `metadata.name` est SAUTE, pas refuse — un fragment prefixe `_` est deliberement
   # sans nom. Une COLLISION, elle, arrete tout : deux fichiers qui revendiquent le meme role
   # rendraient l'index dependant de l'ordre du glob.
@@ -306,8 +309,6 @@ defmodule Fleet.CapProfile.Catalog do
     {:cont, {:ok, acc}}
   end
 
-  # unreadable file poisons the whole index (corrupt catalogue = we load NONE of it) — consistent with
-  # "we do not save a wounded thing".
   defp name_index(dir) do
     files =
       Path.wildcard(Path.join(dir, "*.yaml")) ++
