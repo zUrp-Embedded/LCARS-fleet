@@ -2,7 +2,7 @@
 #
 # RUNTIME SIDE, not catalogue — and that is the point of this directory. A catalogue an operator
 # brings may name its own roles and widen their tools; it may not lower this floor. The file sits
-# outside `canon/` for the same reason the schemas do: what an operator must not be able to replace
+# outside the catalogue for the same reason the schemas do: what an operator must not be able to replace
 # is a contract. It is resolved from the BUNDLED priv (`:code.priv_dir`), never through
 # `Fleet.Catalogue` — a copy of this file inside someone's catalogue is read by nobody.
 #

@@ -97,7 +97,7 @@ defmodule Fleet.Forge.Client.Transport do
 
       is_binary(account = Keyword.get(opts, :account)) and account != "" ->
         # ⚠ DEMANDE A CHAQUE APPEL, ET C'EST LA PROPRIETE ACHETEE, PAS UN OUBLI D'OPTIMISATION. Un
-        # jeton mis en cache ici reprendrait exactement la peremption infinie que ce chantier retire.
+        # jeton mis en cache ici reprendrait exactement la peremption infinie que cette regle retire.
         # Le cout est un aller-retour sur socket unix LOCALE devant un appel HTTP a la forge — du
         # bruit. Le jour ou une mesure reclame un cache, ce sera un parametre de DEBIT, et il faudra
         # le dire ailleurs que dans un `defp`.

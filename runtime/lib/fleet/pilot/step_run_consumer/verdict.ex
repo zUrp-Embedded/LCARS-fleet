@@ -38,7 +38,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
 
   ## The optional machine payload (`details.findings`)
 
-  A judge MAY carry its findings machine-readable under the VERSIONED key
+  A judge MAY carry its findings machine-readable under the key
   `details.findings` (`findings.json`, C1). The envelope stays intact:
   a legacy judge without the key crosses exactly as before. `take_findings/1` validates
   the payload and the failure direction is the opposite of the envelope's, on purpose:
@@ -59,7 +59,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   # Wire contract of the judge verdict — validated integrally on ingest (see moduledoc).
   @schema_file "gate-decision.json"
 
-  # OPTIONAL machine payload under `details` — its own versioned key + schema so the
+  # OPTIONAL machine payload under `details` — its own key + schema so the
   # gate-decision envelope never moves (a legacy judge stays valid byte-for-byte).
   @findings_key "findings"
   @findings_schema_file "findings.json"

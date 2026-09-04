@@ -124,7 +124,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
 
     # Le meme defaut vivait dans `grep_lines/2`, donc sous TOUS ses appelants — dont trois murs
     # d'absence-de-violation qui globbent des fichiers REELS (`gates.no_runtime_seam`,
-    # `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`). Un fichier illisible y produisait zero
+    # `listener.no_cowboy_bypass`, `gatekeeper.not_an_ordering_step`). Un fichier illisible y produisait zero
     # preuve, c'est-a-dire la conformite. Il n'y a pas de reponse vraie a donner sur un fichier
     # qu'on n'a pas ouvert : l'instrument s'arrete. `code_match?/4` est la porte publique qui passe
     # par `grep_lines/2`.

@@ -722,7 +722,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
       )
 
   # A project lives in the org of ITS catalogue, so the repo names the catalogue (lot 4 of the
-  # org-par-catalogue chantier). This rail is a SINGLETON serving every project of every installed
+  # org-par-catalogue). This rail is a SINGLETON serving every project of every installed
   # catalogue: the root cannot be bound at init, and it does not need to be — the work item already
   # carries the repo, so it carries the catalogue. The split itself lives in `Fleet.Catalogue`.
   defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))

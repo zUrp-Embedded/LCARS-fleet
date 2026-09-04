@@ -552,8 +552,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   def check_test_corpora_on_record(root) do
     repo = Path.expand("..", root)
 
-    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (a vendored bats-core lives in
-    # one), and without it the scan reports a corpus that is a folder.
+    # `-type f` is load-bearing: a DIRECTORY can be named `*.bats` (a test framework checked out
+    # in-tree would be one), and without it the scan reports a corpus that is a folder.
     found =
       case System.cmd(
              "find",

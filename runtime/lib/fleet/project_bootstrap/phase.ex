@@ -182,7 +182,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
 
           ref = project["reference_repo_path"]
 
-          # ASSERTED, never defaulted (chantier face-projet): the resolver ALWAYS engraves
+          # ASSERTED, never defaulted (face-projet): the resolver ALWAYS engraves
           # `base_branch` in the project map — the face decision made once at dispatch. The old
           # `|| "main"` would be dead code on the live path and a substituting default on any
           # other: a project map without a base_branch has skipped the face decision, and cloning
@@ -193,7 +193,7 @@ defmodule Fleet.ProjectBootstrap.Phase do
                 message:
                   "Phase.Clone: project map for #{inspect(project["repo"])} carries no " <>
                     "\"base_branch\" — the face is decided at dispatch and threaded, never " <>
-                    "re-defaulted here (single-default-site doctrine, chantier face-projet)."
+                    "re-defaulted here (single-default-site doctrine, face-projet)."
               )
 
           # Clean world: branch = `feature/<slug>` WITHOUT the pod_id (the agent must not re-read its

@@ -1165,9 +1165,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   @doc false
   @spec check_forge_mutations_exposed(String.t()) :: Support.result()
   def check_forge_mutations_exposed(root) do
-    # ⚠ PAS DE `File.exists?` ICI : il rendrait un ensemble VIDE sur un fichier absent — donc
-    # `undecided` vaudrait toutes les mutations, un rouge bruyant plutot qu'un vert muet, mais un
-    # rouge qui ne dit pas la vraie cause. `quoted!/2` leve : une source illisible est nommee pour
+    # ⚠ PAS DE `File.exists?` SUR LA SOURCE DES MUTATIONS : il rendrait un ensemble VIDE sur un
+    # fichier absent — donc `undecided` vaudrait toutes les mutations, un rouge bruyant plutot qu'un
+    # vert muet, mais un rouge qui ne dit pas la vraie cause. `quoted!/2` leve : une source illisible est nommee pour
     # ce qu'elle est.
     called =
       root

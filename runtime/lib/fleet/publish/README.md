@@ -3,7 +3,7 @@
 **Date**: 2026-09-04
 **Last revised**: 2026-09-04
 **Status**: active — one zero-dependency fact: "this pod has a publish in flight"
-**Referenced by**: `Fleet.Spawner.Pod.Publishing` (marks), the deadline recovery (reads)
+**Referenced by**: `Fleet.Pilot.StepRunCompleter` (marks, `while_publishing/2`), `Fleet.Spawner.Pod` (reads, `in_flight?/1` on the publish deadline)
 
 **This file is a map, not the contract.** The module owns its contract in its `@moduledoc`
 (`h Fleet.Publish.InFlight`). Nothing here is restated, only pointed at.

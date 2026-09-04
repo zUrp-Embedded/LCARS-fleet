@@ -177,7 +177,9 @@ export function universalTools() {
 function routing() {
   const src = readFileSync(join(MCP, 'pod_tools.ex'), 'utf8');
   const out = new Map();
-  for (const m of src.matchAll(/handle_tool_call\(\s*"([a-z_]+)"[\s\S]{0,700}?Delegation\.([a-z_]+[?!]?)\(/g)) {
+  // `Delegation.Issues.create_issue(` : la famille est decoupee en sous-modules, le nom de la
+  // fonction est le dernier segment.
+  for (const m of src.matchAll(/handle_tool_call\(\s*"([a-z_]+)"[\s\S]{0,700}?Delegation\.(?:[A-Z][A-Za-z]*\.)*([a-z_]+[?!]?)\(/g)) {
     if (!out.has(m[1])) out.set(m[1], m[2]);
   }
   return out;
@@ -190,8 +192,21 @@ function routing() {
  * dans la branche qui suit le test de desarmement. Meme son porteur legitime est refuse tant que
  * le reglage n'est pas pose.
  */
+/**
+ * La FAMILLE delegation, pas une adresse : `delegation.ex` est une facade et les verbes vivent
+ * dans `delegation/**`. Lire le seul fichier de tete rendait zero gate, zero route et « delete
+ * arme » — trois reponses fausses sur la page qui dit qui peut appeler quoi.
+ */
+function delegationSources() {
+  const dir = join(MCP, 'pod_tools', 'delegation');
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.ex') ? [join(d, e.name)] : []);
+  return [join(MCP, 'pod_tools', 'delegation.ex'), ...walk(dir).sort()]
+    .map((f) => readFileSync(f, 'utf8')).join('\n');
+}
+
 export function deleteDisarmed() {
-  const src = readFileSync(join(MCP, 'pod_tools', 'delegation.ex'), 'utf8');
+  const src = delegationSources();
   return /defp delete_armed\?, do: Application\.get_env\([^)]*,\s*false\)/.test(src);
 }
 
@@ -200,7 +215,7 @@ export function deleteDisarmed() {
  * l'allowlist evite une demande de confirmation). Lu dans la fonction de chaque verbe.
  */
 export function gates() {
-  const src = readFileSync(join(MCP, 'pod_tools', 'delegation.ex'), 'utf8');
+  const src = delegationSources();
   const out = new Map();
 
   // Decoupe par TETE de fonction publique, chacune jusqu'a la suivante : une fenetre de taille
@@ -223,7 +238,7 @@ export function gates() {
     const head = body.match(/^  (defp?) ([a-z_]+[?!]?)/);
     if (!head || head[1] !== 'def') return;
 
-    const g = body.match(/require_(architect|onboarder)\(/);
+    const g = body.match(/(?:Gate\.)?require_(architect|onboarder)\(/);
     if (!g) return;
     const cap = g[1] === 'architect' ? 'project_delegate' : 'onboarder';
     // Plusieurs clauses : la premiere qui porte un gate fait foi, et une divergence entre
@@ -231,7 +246,7 @@ export function gates() {
     if (!out.has(head[2])) out.set(head[2], cap);
   });
 
-  if (out.size === 0) throw new Error('tools.js: aucun gate `require_*` lu dans delegation.ex');
+  if (out.size === 0) throw new Error('tools.js: aucun gate `require_*` lu dans la famille delegation');
   return out;
 }
 

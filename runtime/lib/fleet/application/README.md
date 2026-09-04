@@ -23,8 +23,9 @@ restated, only pointed at.
   (`available`, `installed`, `updatable`) and the release doors `lcars catalogue …` read.
 - `Fleet.Application.CatalogueVerify` — standalone proof of one catalogue root with the daemon's
   own boot checks, without starting a fleet (`mix lcars.catalogue.verify`).
-- `Fleet.Roster` (`lib/fleet/roster.ex`, classified into this boundary) — the forge roster a
-  catalogue implies: role logins and the four provisioning lists tofu reads (`tfvars/1`).
+- `Fleet.Roster` (`lib/fleet/roster.ex`, its own boundary, a dep of the root — not boot code) —
+  the forge roster a catalogue implies: role logins and the five provisioning lists tofu reads
+  (`tfvars/1`).
 
 ## Config & deps
 

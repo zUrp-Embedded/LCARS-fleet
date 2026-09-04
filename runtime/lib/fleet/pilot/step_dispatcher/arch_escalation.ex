@@ -106,7 +106,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   end
 
   @doc """
-  Publish brake tripped (chantier frein-publish): the producer's deliverable REPEATEDLY failed to
+  Publish brake tripped (frein-publish): the producer's deliverable REPEATEDLY failed to
   publish on the same gate base — the work never reaches the forge, the judges never re-judge, and
   without this brake the rework loop burns a real producer session per tick with `max_rework_rounds`
   frozen (it counts VERDICTS, and a failed publish produces none — measured on the faceproof

@@ -94,7 +94,7 @@ config :lcars_fleet,
 # tests async ; les tests dédiés démarrent manuellement avec opts isolés.
 config :lcars_fleet, admiral_start_audit_consumer: false
 config :lcars_fleet, admiral_start_boot_orchestrator: false
-# BL-021 chantier 8 — Extension V2 off par défaut en test (hermétisme : MCPMonitor fait
+# BL-021 — Extension V2 off par défaut en test (hermétisme : MCPMonitor fait
 # Process.whereis + un timer qui broadcast sur le Bus, ce qui pollue les tests async). Les tests
 # dédiés instancient avec opts. (Pas de `start_mcp_watcher` : la veille amont est en CI, et une
 # clef de config sans lecteur est une promesse morte.)
@@ -107,14 +107,14 @@ config :lcars_fleet, admiral_start_toolchain_reconciler: false
 config :lcars_fleet, admiral_start_shutdown: false
 config :lcars_fleet, spawner_start_publish_consumer: false
 
-# (ArchFeed vit côté pilot, démarré par le rail step — `:step_dispatch?` off en test le coupe.)
+# (ArchFeed vit côté pilot, démarré par le rail step — `:pilot_step_dispatch?` off en test le coupe.)
 # BL-036b : pas de reaper orphelins en test (pas de vrais pods/socks ; éviterait des `pkill`).
 config :lcars_fleet, spawner_start_pod_warden: false
 # G5 : pas de respawn de permanents en test (pas de vrais permanents ; un test qui en a besoin
 # start_supervised le PermanentWarden avec des seams explicites — cf. Test hermeticity CLAUDE.md).
 config :lcars_fleet, spawner_start_permanent_warden: false
 
-# fleet_pilot hermétisme test : le mode step est OFF par défaut (`:step_dispatch?` absent →
+# fleet_pilot hermétisme test : le mode step est OFF par défaut (`:pilot_step_dispatch?` absent →
 # `step_children` = [] → app inerte, pas de Poller/StepRunConsumer parasite).
 
 # F-E7 — pas de gap inter-écritures en test (le défaut prod = 2000ms ; Fleet.Pilot.WriteSpacing.gap →

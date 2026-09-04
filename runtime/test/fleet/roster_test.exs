@@ -68,12 +68,15 @@ defmodule Fleet.RosterTest do
     assert tf["system_roles"] != []
   end
 
-  test "role_names maps every login back to its role; org and system_account are received, not restated",
-       %{tf: tf} do
-    assert tf["role_names"] |> Map.keys() |> Enum.sort() ==
-             Enum.sort(tf["roles"] ++ tf["system_roles"])
+  test "role_names maps every login back to ITS role; org is the catalogue's declared name; system_account is received, not restated",
+       %{tf: tf, roster: roster, login: login} do
+    expected = Map.new(roster, fn r -> {login.(r.name), r.name} end)
+    assert tf["role_names"] == expected
 
-    assert is_binary(tf["org"]) and tf["org"] != ""
+    {:ok, manifest} =
+      YamlElixir.read_from_file(Path.join(Fleet.Catalogue.root(), "catalogue.yaml"))
+
+    assert tf["org"] == manifest["name"]
     assert tf["system_account"] == Fleet.Credentials.ForgeIdentity.system_identity().name
   end
 end

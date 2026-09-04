@@ -83,7 +83,7 @@ defmodule Fleet.Project.Onboard.Refute do
   window is precisely the one it does not see: the org exists, its catalogue is NOT installed yet,
   nothing occupies the name, and the collision arrives later.
 
-  Checking a name here is not the defect this chantier closed. That one answered "what IS this repo"
+  Checking a name here is not the defect this rule closed. That one answered "what IS this repo"
   with a name; this one answers "may I WRITE here", which is what an address is for. Cf.
   `Fleet.Catalogue.store_repo/0`, which says it and says why in the same breath.
   """

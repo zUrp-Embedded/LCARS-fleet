@@ -60,7 +60,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeClient do
   CREATE call as an id, and the destination label MUST ride it (a post-create add leaves a window where
   a poller tick burns the project card on a documentary ticket).
 
-  Declared, like every call the seam carries: the seam is duck-typed, so an undeclared call
+  Declared, like every call the seam carries (measured 2026-08-03): the seam is duck-typed, so an undeclared call
   compiles fine against the real module and raises `UndefinedFunctionError` against every stub —
   the branch that calls it then cannot be exercised at all. A contract with a hole does not merely
   fail to check that branch, it FORBIDS testing it.

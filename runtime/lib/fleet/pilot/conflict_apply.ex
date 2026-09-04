@@ -21,7 +21,7 @@ defmodule Fleet.Pilot.ConflictApply do
   """
   @spec apply(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
   def apply(_repo, feature_ref, opts \\ []) do
-    # REQUIRED (chantier face-projet): the face worktree — an ops PR resolves in the OPS worktree,
+    # REQUIRED (face-projet): the face worktree — an ops PR resolves in the OPS worktree,
     # and a defaulted code-face dir here would silently operate on the wrong repository.
     dir = Keyword.fetch!(opts, :dir)
 
@@ -35,7 +35,7 @@ defmodule Fleet.Pilot.ConflictApply do
   @doc "Core flow against an explicit clone `dir` (isolated for testing with a local remote)."
   @spec apply_in(String.t(), String.t(), keyword()) :: {:ok, :auto_resolved} | {:error, term()}
   def apply_in(dir, feature_ref, opts \\ []) do
-    # REQUIRED (chantier face-projet): the merge target is the PR's own base — a defaulted
+    # REQUIRED (face-projet): the merge target is the PR's own base — a defaulted
     # `origin/main` would merge the CODE face into an ops branch and report :auto_resolved.
     base_branch = Keyword.fetch!(opts, :base_branch)
     auth = Keyword.get(opts, :auth, true)

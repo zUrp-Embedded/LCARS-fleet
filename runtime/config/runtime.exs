@@ -72,7 +72,7 @@ end
 # celle du systeme ; sans lui, c'est le compte systeme de la boite.
 #
 # ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
-# `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet.env`,
+# `services/human.d/70-human.sh` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet.env`,
 # derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
 # BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
@@ -96,7 +96,7 @@ forge_push_account =
 # `:pilot_forge[:token_file]` -> `Transport.resolve_token/1`, lu A CHAQUE VERBE de forge du runtime,
 # sous l'uid du BEAM, donc sous l'uid d'un humain. Une trentaine de sites dans `client/repo.ex`.
 # Inventorier la chaine et pas ses consommateurs, c'est mesurer le mecanisme au lieu de l'exigence —
-# la classe de defaut que ce chantier repare, commise dans son propre inventaire.
+# la classe de defaut que cette regle repare, commise dans son propre inventaire.
 #
 # `account:` le remplace : le jeton se demande au service d'autorite a l'appel. `FORGE_TOKEN` reste,
 # parce qu'un jeton fourni EXPLICITEMENT par l'operateur n'est pas un repli silencieux.
@@ -152,10 +152,11 @@ end
 # et elle ne ressemblera pas a un changement de credentials le jour ou quelqu'un l'ecrira.
 forge_base = System.get_env("FORGE_BASE_URL")
 
-# ⚠ AUCUNE LECTURE DE FICHIER DE JETON AU BOOT, ET AUCUNE VARIABLE DE JETON. Une chaine de sources
-# (`FORGE_PUSH_TOKEN`, puis `FORGE_TOKEN`, puis `FORGE_TOKEN_FILE`, puis `~/.gitea_token`) fait
-# resoudre la derniere sous le HOME de qui lance, et son repli existe pour qu'un deploiement qui ne
-# pose que le fichier pousse quand meme — un jeton par defaut.
+# ⚠ AUCUNE LECTURE DE FICHIER DE JETON AU BOOT, ICI NI AILLEURS. `FORGE_TOKEN` (plus haut, dans
+# `forge_opts`) est la seule variable de jeton, et c'est un jeton EXPLICITE de l'operateur. Une
+# chaine de sources (`FORGE_PUSH_TOKEN`, puis `FORGE_TOKEN`, puis `FORGE_TOKEN_FILE`, puis
+# `~/.gitea_token`) ferait resoudre la derniere sous le HOME de qui lance, et son repli existerait
+# pour qu'un deploiement qui ne pose que le fichier pousse quand meme — un jeton par defaut.
 #
 # Rien a lire : on pose un NOM DE COMPTE, et le jeton se demande au moment de pousser. Quatre
 # sources deviennent une seule question, et aucun repli ne les rattrape.
@@ -179,7 +180,7 @@ if config_env() != :test and not tool_mode? do
   # catches dev/manual launches as root, where `~/.gitea_token` resolves to `/root/.gitea_token` =
   # the admin token). Hygiene, not an anti-adversary defense (cooperative threat model).
   #
-  # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet:363`)
+  # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet`, le bloc `seat_uid`/`UID_MIN`)
   # refuse une fleet sous l'uid du sysadmin — le BEAM herite de l'uid de son lanceur, ses pods
   # avec : une fleet sous le siege donnerait des pods sudo-capables, l'exact inverse de la
   # sandbox. Mais la release elle-meme (`rel/.../lcars_fleet start`) est sur le PATH d'admiral, et
@@ -495,7 +496,8 @@ if config_env() != :test and not tool_mode? do
   # pas ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
   #
   # Mesure : aucun code de ce depot ne DECLARE de webhook sur la forge (`POST /hooks` absent), et
-  # une forge de banc n'en porte aucun. Ce rail n'est branche d'aucun bout.
+  # une forge de banc n'en porte aucun. Le rail n'est branche que d'un bout : le recepteur existe
+  # (`Fleet.EventRouter.WebhooksGitea`, demarre sous `LCARS_FLEET_WEBHOOKS`), rien ne l'alimente.
   #
   # SI IL REVIENT UN JOUR, pour une raison qui n'est PAS la latence : une seule URL, un port de
   # boite, hors des blocs. Pas `base+3`.
@@ -774,9 +776,8 @@ if config_env() != :test and not tool_mode? do
   # Multi-forge by config (one forge per boot, chosen by env profile). The ROLE tokens
   # (`Fleet.Credentials.RoleToken`) are read from `<role_tokens_dir>/<role>.gitea_token`;
   # default `/opt/lcars/var/tokens` (primary forge). To target a 2nd forge (e.g. backup :3000), a
-  # distinct env profile sets FORGE_BASE_URL + FORGE_TOKEN_FILE + this dir → a token set
-  # ISOLATED per forge (no clobber). The system token is already per-forge via
-  # FORGE_TOKEN_FILE. Absent = default (strict backward-compat). No SIMULTANEOUS multi-forge
+  # distinct env profile sets FORGE_BASE_URL + this dir → a token set ISOLATED per forge (no
+  # clobber); the system token is asked from the authority service, per forge. Absent = default. No SIMULTANEOUS multi-forge
   # (per-project registry/routing): out-of-scope, that would be another model.
   if role_tokens_dir = System.get_env("FORGE_ROLE_TOKENS_DIR") do
     config :lcars_fleet,
@@ -844,7 +845,7 @@ if config_env() != :test and not tool_mode? do
   # (`Fleet.Credentials.ForgeAuth.git_env` → token via env, never in the URL).
 
   # NB catalogue trees: covered by `LCARS_CATALOGUE_ROOT` (coarse, all of them) and the three fine
-  # keys above — `LCARS_CAPPROFILES_ROOT`, `LCARS_WORKFLOW_MAPS_ROOT`, `LCARS_COORD_POLICIES_PATH`.
+  # keys above — `LCARS_CAPPROFILES_ROOT`, `LCARS_WORKFLOW_MAPS_ROOT`.
   # No duplicated knob here (one source per config).
 
   # (No `LCARS_POD_HUMAN` knob: the human = the runtime process user, derived in-code, never

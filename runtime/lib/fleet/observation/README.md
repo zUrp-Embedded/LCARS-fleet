@@ -6,7 +6,7 @@
 **Referenced by**: —
 
 Read / observability frontier (surface): serves an LCARS observation deck on a per-human
-port. Read-only, no-auth, intra-release — it observes the fleet, mutates nothing (it depends
+unix socket. Read-only, no-auth, intra-release — it observes the fleet, mutates nothing (it depends
 DOWN on the core; nothing in the core depends on it, and it never touches the admiral domain).
 
 **This file is a map, not the contract.** Each module owns its contract in its own
@@ -18,7 +18,7 @@ restated, only pointed at.
 - `Fleet.Observation.Deck` — `Plug.Router` CONTROLLER: routing + role-catalogue derivation + live snapshots; hands the data to the view
 - `Fleet.Observation.Deck.View` — PURE HTML rendering (inline HTML/CSS/JS template); reads no source itself
 - `Fleet.Observation.ReadModel` — GenServer + ETS, the single Bus subscriber; projects the `%Fleet.Event{}` stream, read via `projection/0` (direct ETS, never a third party's GenServer state)
-- `Fleet.Observation.Application` — supervisor + Cowboy listener (per-human port, fail-loud if absent; gated in `:test`)
+- `Fleet.Observation.Application` — supervisor + the deck's unix-socket listener (`Fleet.EventRouter.UnixListener` on `deck_socket/0`; gated in `:test`)
 
 ## Config & deps
 

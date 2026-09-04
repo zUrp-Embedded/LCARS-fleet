@@ -32,7 +32,7 @@ restated, only pointed at.
     - `Delegation.Toolchain` — a pod asks for a change to the fleet's own tooling, from inside the work
     - `Delegation.ForgeWriter` — the surface that writes CONTENT on the forge: branch, file, pull request
     - `Delegation.Render` — what the channels put in the map they hand back to the pod
-    - `Delegation.ForgeClient` / `ProjectOnboard` — behaviours = contracts of the `:forge_client` / `:project_onboard` seams (defaults `Fleet.Forge.Client` / `Fleet.Project.Onboard`, both compile deps of mcp; the seam is an injection point for tests)
+    - `Delegation.ForgeClient` / `ProjectOnboard` — behaviours = contracts of the `:mcp_forge_client` / `:mcp_project_onboard` seams (defaults `Fleet.Forge.Client` / `Fleet.Project.Onboard`, both compile deps of mcp; the seam is an injection point for tests)
 - `Fleet.MCP.Idempotency` — single-flight coordinator for MCP mutations: concurrent calls with one logical key collapse into one execution
 - `Fleet.MCP.PodSocketAcceptor` — one AF_UNIX socket acceptor per pod (identity IS the channel; each connection served in its own Task)
 - `Fleet.MCP.PodSocketSupervisor` — DynamicSupervisor of the acceptors + the spawner-facing seam API (`ensure_pod_socket` / `release_pod_socket`, paths)

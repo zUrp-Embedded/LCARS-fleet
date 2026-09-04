@@ -17,8 +17,7 @@ Le `@moduledoc` de `test/support/pilot/forge_stubs.ex` raconte cette panne, véc
 
 Ces trois captures sont la seule source **non circulaire** pour savoir à quoi ressemble une réponse.
 Elles ne sont pas des fixtures de test : ce sont la RÉFÉRENCE contre laquelle les fixtures se
-calibrent, et le `Fleet.Forge.Payload` à venir (plan `beyond_#6/frontiere_forge.md`) en tirera ses
-valeurs par défaut plutôt que de les inventer.
+calibrent, et `Fleet.Forge.Payload` en tire ses valeurs par défaut plutôt que de les inventer.
 
 ## Ce que la capture porte
 

@@ -35,16 +35,16 @@ Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
 |---|---|---|
 | `catalogue-executor.py` (+ `lcars_socket.py`) | `/opt/lcars/` | systemd `lcars-catalogue` (compte `lcars-authority`) |
 | `privileged-executor.py` (+ `lcars_socket.py`) | `/opt/lcars/` | systemd `lcars-privileged` (root) |
-| `human-converger.sh` · `human.d/` · `agent/` | `/opt/lcars/`, `/opt/lcars/services/` | systemd `lcars-converger` |
+| `human-converger.sh` · `human.d/` · `agent/` | `/opt/lcars/` ; les sous-arbres à côté (cible `/opt/lcars/services/`, le rail pose encore `/opt/lcars/fleet/services/`) | systemd `lcars-converger` |
 | `console-landing.sh` + `console-deck.py` | `/opt/lcars/` | systemd `lcars-landing` |
 | `console.sh` · `console-humans.sh` · `console-status.sh` · `console-pod.sh` | `/opt/lcars/` | piloté par `lcars-converger` |
-| `forge-gestures.sh` · `forge-recipe/` | `/opt/lcars/`, `/opt/lcars/services/` | l'entrypoint **et** l'exécuteur |
-| `supervise.sh` | `/opt/lcars/` | le rail poste, à la place de `Restart=` |
+| `forge-gestures.sh` · `forge-recipe/` | `/opt/lcars/` ; la recette à côté (même cible que ci-dessus) | l'entrypoint **et** l'exécuteur |
+| `supervise.sh` | `/opt/lcars/` | la BOÎTE (`docker/entrypoint.sh`), à la place du `Restart=` que le poste laisse à systemd |
 | `admiral/skills/` | le `~/.claude` du siège | le provisioning |
 | `console.tmux.conf` · `lcars.bashrc` | données du même rail | — |
 
 Deux rails, une source : le `COPY` du Dockerfile côté boîte, `62-runtime-helpers` côté poste. Le
-miroir entre les deux est tenu dans les deux sens par `deploy/tests/runtime_helpers.bats`.
+miroir entre les deux est tenu dans les deux sens par `deploy/tests/transverse/runtime_helpers.bats`.
 
 ⚠ **CE RÉPERTOIRE NE PORTE QUE DES SERVICES**, c'est-à-dire ce que systemd ou le convergeur
 démarre. Un binaire que le BEAM ou `runtime/bin/lcars` INVOQUE (`lcars-toolchain-converge`,

@@ -135,7 +135,7 @@ defmodule Fleet.Roster do
            #
            # ⚖ Arbitrage user : l'autorite est `ForgeIdentity` — l'identite du compte (email,
            # signature, `allowed_emails/2`) en derive et ne peut pas s'en detacher. La recette le
-           # RECOIT donc, comme elle recoit deja l'org et les quatre listes.
+           # RECOIT donc, comme elle recoit deja l'org et les cinq listes.
            "system_account" => Fleet.Credentials.ForgeIdentity.system_identity().name
          }}
       end

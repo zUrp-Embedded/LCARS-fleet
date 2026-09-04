@@ -25,8 +25,8 @@ and every verdict carries a DecisionTrace that says WHY.
   not settle.
 - `Fleet.Conflict.Diff` — LCS and three-way non-overlapping merge primitives.
 - `Fleet.Conflict.Score` — the single authority for composite confidence and its label.
-- `Fleet.Conflict.ConfidenceScore` / `Report` and the other structs of `conflict/types.ex` —
-  the wire shapes (`Report.stats` carries `writable`).
+- `Fleet.Conflict.ConfidenceScore` / `Report` / `Hunk` / `DecisionTrace` (`conflict/types.ex`) —
+  the wire shapes (`Report.stats` carries `writable`; `DecisionTrace` records WHY, for every hunk).
 
 **Patterns** (`Fleet.Conflict.Pattern` is the behaviour; `Patterns.Utils` the shared helpers)
 - `Patterns.SameChange`, `OneSideChange`, `DeleteNoChange`, `NonOverlapping`,

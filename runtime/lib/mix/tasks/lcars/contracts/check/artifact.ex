@@ -228,9 +228,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # ⚠ `src/lib/*.js` N'EST PAS TOUT CE QUI LIT L'ARBRE. `src/components/Seat.astro:14` fait
   # `existsSync(join(here, '..','..','..','avatars', …))` — une lecture de `assets/avatars/` AU
   # BUILD — et `src/layouts/Site.astro` sert `/favicon/`. Un scan borne a `src/lib` rend un FAUX
-  # VERT : mesure, restreindre `paths:` de `assets/**` a `assets/github.io/**` laisse le contrat
-  # repondre `pass` alors qu'ajouter un avatar de role ne rebatit plus la vitrine qui l'affiche —
-  # exactement le mode de panne MUET que ce contrat existe pour fermer.
+  # VERT : mesure a la pose, restreindre `paths:` de `assets/**` a `assets/github.io/**` laissait
+  # un contrat borne a `src/lib` repondre `pass` alors qu'ajouter un avatar de role ne rebatit plus
+  # la vitrine qui l'affiche — exactement le mode de panne MUET que ce contrat existe pour fermer.
   #
   # ⚠ UNE FAUTE DE PERIMETRE, PAS DE REGLE : la regle est juste, c'est l'instrument qui lirait a
   # cote. Un contrat qui scanne moins que ce qu'il pretend couvrir ne dit pas « je ne sais pas », il
@@ -403,7 +403,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # VIDE ; `listed` vient d'un `File.read` dont l'echec rend `MapSet.new()`. Les deux vides
     # rendent les deux differences vides, donc `:pass`. Prouve par mutation : sans ce garde, renommer
     # `priv/catalogue/project_template/main/` en `main_mv/` rend `pass — 0 fail, 58 pass`. Cinq
-    # autres contrats passent aussi sur perimetre vide, mais ILS LE DISENT ; celui-ci le dit aussi.
+    # autres contrats passent sur perimetre vide EN LE DISANT ; celui-ci ECHOUE (voir plus bas).
     #
     # ⚠ LES CHECKS DE CE FICHIER SONT `def`, PAS `defp`. `no_check_passes_on_nothing_test` enumere
     # les checks par `__info__(:functions)`, qui ne voit que le PUBLIC : un check `defp` echappe a
@@ -669,8 +669,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
   # silently provisions the wrong thing (BL-6-36, the "silent coercion" class — bash's dialect of
   # `[object Object]`).
   #
-  # Measured: all 11 sourcers set `-euo pipefail`. Without this hold the 12th could omit it and no
-  # one would learn until a provisioning run did the wrong thing quietly. Named-file evidence, so a
+  # Measured (2026-09-04): all 24 sourcers set `-euo pipefail`. Without this hold the next one could
+  # omit it and no one would learn until a provisioning run did the wrong thing quietly. Named-file evidence, so a
   # failure says WHICH sourcer, not "some file".
   @doc false
   @spec check_sourcers_set_strict(String.t()) :: Support.result()
@@ -712,7 +712,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
         # question: these are TWO roots, only one of them is scoped, and `Path.wildcard` on a path
         # that does not exist returns `[]` in silence. A `deploy/` present with an empty or moved
         # `modules.d/` would yield `offenders == []` and a `:pass` that had not opened a single file
-        # — indistinguishable, in the output, from a green earned on eleven conforming sourcers.
+        # — indistinguishable, in the output, from a green earned on conforming sourcers.
         # Guarding the scope and not the population is "a green that checked nothing".
         sourcers =
           present

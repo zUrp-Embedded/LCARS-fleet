@@ -41,7 +41,7 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 
 ## Install et deploy : `/opt/lcars/runtime`
 
-Une install partagée entre humains, en lecture seule (`root`, groupe `fleet` r-x) : `rel/` (la
+Une install partagée entre humains, en lecture seule (propriétaire = qui déploie, jamais root ; le rail de provisioning la passe ensuite en `root`, groupe `fleet` r-x) : `rel/` (la
 release, ERTS embarqué) **et** `bin/` (les launchers N0/N1 des pods) côte à côte. Le BEAM résout ses
 launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/usr/local/bin`
 (`fleet`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc

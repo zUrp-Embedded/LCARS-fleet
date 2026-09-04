@@ -29,7 +29,7 @@ defmodule Fleet.Forge.Payload do
 
   ⚠ CE MODULE NE FABRIQUE PAS DE CHARGE, et c'est deliberе : la production n'en construit jamais.
   La co-location build/parse de `Protocol` n'a donc pas de sens litteral ici. Ce qui la remplace est
-  mecanique : `forge_payload_test.exs` applique CHAQUE lecteur a la capture REELLE et exige une
+  mecanique : `forge/payload_test.exs` applique CHAQUE lecteur a la capture REELLE et exige une
   valeur. Un chemin qui derive ne se lit pas dans une relecture — il rougit.
   """
 

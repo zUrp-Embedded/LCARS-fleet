@@ -242,8 +242,8 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
     |> List.to_string()
   end
 
-  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read each mirror
-  # STRIPPED of its comments: on the RAW body, a file whose CODE carries the wrong value stays green
+  # ⚠ A WALL THAT READS PROSE IS SATISFIED BY PROSE. The `*_single_source` locks read a mirror
+  # through `code_of/1` wherever a comment could carry the value: on the RAW body, a file whose CODE carries the wrong value stays green
   # as long as the right one appears in a COMMENT — and the context that makes it likely is the
   # ordinary one: `# Note: was <old value>` on the very line a migration touches. Measured on three
   # of them: code mutated + the pattern quoted in a comment → `status: pass` without the strip.
@@ -282,7 +282,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # that could not be opened, so the only non-lying option is to stop. It fires on an I/O error, on
   # a path that became a directory, on a permission the runner lost; never in nominal operation,
   # which is exactly why a swallowing `_ -> []` goes unnoticed under three absence-of-violation
-  # walls (`gates.no_runtime_seam`, `cowboy.no_bypass`, `gatekeeper.not_an_ordering_step`), each of
+  # walls (`gates.no_runtime_seam`, `listener.no_cowboy_bypass`, `gatekeeper.not_an_ordering_step`), each of
   # which globs REAL files and would report compliance about one it could not open.
   @doc false
   @spec grep_lines(String.t(), Regex.t()) :: [{pos_integer(), String.t()}]

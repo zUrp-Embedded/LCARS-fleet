@@ -42,7 +42,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   end
 
   @doc """
-  DELETES a project `full_name` (`"owner/name"`) — general teardown via the `:project_onboard` seam,
+  DELETES a project `full_name` (`"owner/name"`) — general teardown via the `:mcp_project_onboard` seam,
   in order: forge repo first, then the face dirs, then the architect pod (stopped LAST, and only once a
   dir is proven to BE `full_name` — a homonym owned by someone else is never touched). Onboarder gate
   (starfleet/architect), same as create/import. FAIL-CLOSED: `args["force"]` MUST be the boolean `true` to act — without it the seam
@@ -53,7 +53,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   #
   # `force: true` already made the gesture deliberate, and deliberate is not the same as available.
   # This is the only irreversible act in the whole tool surface — it destroys the forge repo AND
-  # the three local faces — reachable by any onboarder pod, on a target that is a free argument. Nothing in the fleet's normal life needs it: end-of-life teardown is an operator
+  # the three local faces — reachable by any onboarder pod, on a target that is a free argument.
+  # Nothing in the fleet's normal life needs it: end-of-life teardown is an operator
   # decision, not an agent one.
   #
   # Same shape as the bench's `--human-admin`: a real power, off by default, whose cost is written
@@ -339,7 +340,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
          {:ok, org} <- Gate.resolve_org(args) do
       # The org is the CATALOGUE the caller declares (`Gate.resolve_org/1`), and it must be
       # installed here: the poller only discovers on installed catalogue orgs, so a project onboarded
-      # anywhere else is a DEAD RAIL, silently — nothing would ever dispatch it. No knob overrides
+      # anywhere else is a DEAD RAIL, silently — nothing would ever dispatch it (BL-6-05). No knob overrides
       # it: a permanent decision is stated, never defaulted.
       pitch = Map.get(args, "pitch") || Map.get(args, "description", "")
 

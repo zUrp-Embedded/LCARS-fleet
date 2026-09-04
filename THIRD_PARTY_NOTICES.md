@@ -86,7 +86,7 @@ Le module porte la mention de sa filiation dans son `@moduledoc`. Le travail dé
 
 **L'étude elle-même vit HORS de ce dépôt, et y reste délibérément** : c'est du reverse-engineering du produit de quelqu'un d'autre, reproductible par qui refait le même travail. On crédite l'origine ; on ne publie pas quatre mois d'exploration du code d'un tiers. Aucun texte de licence n'est reproduit ici puisque aucune ligne de GitWand n'est présente — cette entrée est une attribution d'**ORIGINE**, pas une obligation de licence qu'on acquitte, et c'est écrit parce que la distinction cesse d'être évidente dès que la prose qui la portait a bougé.
 
-La chaîne complète — audit, ce qui a été gardé, ce qui a été refusé et pourquoi — est dans `fleet/CONFLICT-ENGINE-handoff.md`.
+La chaîne complète — audit, ce qui a été gardé, ce qui a été refusé et pourquoi — est dans le `@moduledoc` de `Fleet.Conflict` (`runtime/lib/fleet/conflict.ex`) et dans l'historique git du portage.
 
 ---
 
@@ -105,7 +105,7 @@ vérifiable après coup. Ce qui suit décrit ce qui a été emprunté, et ce qu'
 pairs, développement piloté par les tests, idéation, développement par sous-agents) avait été
 réécrite pour LCARS, sans copie de prose, sous la convention interne `**Dérivé de**` (`ADAPT` /
 `ADOPT`). Le matériel vivait dans huit fichiers markdown de
-`runtime/priv/catalogue*/cap_profile/canon/` — cinq modop-bundles et trois subagent-templates. La
+`runtime/priv/catalogue*/cap_profile/` — cinq modop-bundles et trois subagent-templates. La
 version précédente de cette notice en annonçait neuf : le compte avait déjà dérivé.
 
 **Ce qui avait été emprunté — forme `dep`.** Le plugin `superpowers` pouvait être chargé au

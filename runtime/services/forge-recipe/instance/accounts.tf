@@ -128,7 +128,7 @@ resource "gitea_user" "human" {
   # CE COMPTE N'EST PAS UNE PERSONNE. Sur un banc, il tient la place du compte admin que Gitea fait
   # créer À SON INSTALLATION — celui que l'opérateur pose quand il prépare la forge qu'on lui
   # demande. Les vraies personnes ont des comptes à leur nom, et elles n'existent pas encore
-  # (chantier enrollment). Le réglage attendrait donc un premier login que personne ne fait, et il
+  # (enrollment). Le réglage attendrait donc un premier login que personne ne fait, et il
   # n'est pas inerte : il ferme le compte en attendant — le banc devrait le lever à chaque nuke, une
   # installation réelle l'oublierait simplement.
   must_change_password = false

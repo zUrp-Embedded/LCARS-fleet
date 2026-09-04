@@ -133,7 +133,7 @@ jobs:
         run: mix deps.get
 
       # `MIX_ENV=test` N'EST PAS UN DETAIL D'ENVIRONNEMENT : `config/runtime.exs` est un fichier de
-      # BOOT, et hors test il exige les ports que `bin/fleet_v2` calcule par humain — d'ou
+      # BOOT, et hors test il exige les ports que `bin/fleet` calcule par humain — d'ou
       # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien. C'est
       # exactement la ligne que joue `etc/deploy-release.sh` avant de poser la release : le gate de la CI
       # et le gate du build ne doivent pas etre deux gates.

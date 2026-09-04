@@ -5,7 +5,7 @@
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
-Self-orchestration of Gitea issues (forge driver, `:step_dispatch?` off by default).
+Self-orchestration of Gitea issues (forge driver, `:pilot_step_dispatch?` off by default).
 A **client of the core**, not the core: the forge IS the state machine (the route label engraved
 on the issue), and this domain reacts to it — it discovers the fleet-org repos (`list_org_repos`, WS3),
 spawns the current step's role, drives the PR review lifecycle, and escalates to the human
@@ -28,7 +28,7 @@ restated, only pointed at.
 - `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, TerminalEscalation.Seams, StepRunBuild, VerdictCorrection}` (`Seams` = the completer and notification dependencies an escalation carries; `VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
 - `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
 - `Fleet.Pilot.CompletionOutbox` — durable journal of the step_run completions still owed to the forge (6-127).
-- `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/6`), shared by both merge points.
+- `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/7`), shared by both merge points.
 - `Fleet.Pilot.ConflictProbe` / `ConflictApply` / `ConflictReport` — the tier-0 conflict rail: impure probe preserving raw blob bytes, write path re-checking every file in an isolated worktree, and the diagnosis rendered for a human on the PR.
 
 **Forge and project — other domains, driven from here**
@@ -47,7 +47,7 @@ restated, only pointed at.
 **Primitives (single-authority utils)**
 - `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
 - `Fleet.PodId` — FOUNDATION, not this domain: the pod_id format is read by Spawner and Project, which sit below Pilot
-- `Fleet.Pilot.Offload` / `IssueId` / `WorkflowMapNav` / `WriteSpacing` — supervised Bus offload, id formats, workflow-map nav, inter-write spacing. `Fleet.Opts` (foundation) — the opt idioms.
+- `Fleet.Pilot.Offload` / `IssueId` / `WorkflowMapNav` — supervised Bus offload, id formats, workflow-map nav (`Fleet.Forge.WriteSpacing`, the inter-write spacing, is the forge's). `Fleet.Opts` (foundation) — the opt idioms.
 
 ## Config & deps
 

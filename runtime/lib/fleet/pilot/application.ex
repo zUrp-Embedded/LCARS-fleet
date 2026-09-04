@@ -409,7 +409,7 @@ defmodule Fleet.Pilot.Application do
   #
   # ⚠ ET CE N'EST PAS « ON LAISSE PASSER » : les deux causes transitoires demarrent BRUYAMMENT. Un
   # boot vert sur une boite structurellement incapable de sceller est precisement le succes muet que
-  # ce chantier retire ailleurs ; on ne l'introduit pas ici.
+  # cette regle retire ailleurs ; on ne l'introduit pas ici.
   @signer_causes_fatales [:no_role_token, :no_forge_login, :bad_role, :not_a_worker]
 
   defp require_signer_tokens! do

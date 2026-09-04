@@ -1,6 +1,6 @@
 # Deliberate empty identity overlay: composing this modop leaves the role's cap-profile
 # unchanged. Its behavioral effect is carried by the matching SP bundle
-# (`canon/modop-bundles/<name>/sp.md`, composed by SPBuilder), not by a cap-profile mutation.
+# (`modop-bundles/<name>/sp.md`, composed by SPBuilder), not by a cap-profile mutation.
 #
 # ⚠ UN MODOP EST UNE PAIRE, et la moitie manquante est FATALE au spawn, pas silencieuse. La prose
 # seule fait echouer la resolution : `Catalog: modop not found ... cap-profiles/modop/<nom>/profile.yaml`,

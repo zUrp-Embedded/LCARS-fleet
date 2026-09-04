@@ -419,7 +419,7 @@ defmodule Fleet.Forge.Client.Jury do
   Returns downcased judges with an unanswered re-request after a prior review.
 
   Read from the TIMELINE, because neither source above answers it: the review-records are not
-  dismissed on re-request (verified live) and `requested_reviewers` is volatile. The paginated
+  dismissed on re-request (verified live) and `requested_reviewers` only shows the current state. The paginated
   timeline is counted rather than timestamp-ordered because forge timestamps have second
   granularity. Removals cancel requests; truncated or malformed timelines fail.
   """

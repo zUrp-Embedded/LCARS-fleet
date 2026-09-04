@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  # LES CONTEXTES VOYAGENT AVEC LE VERT, et c'est tout ce qui se ferme honnetement ici. Le
+  # LES CONTEXTES VOYAGENT AVEC LE VERT, et c'est tout ce qui se ferme honnetement ici (6-140). Le
   # gate ne peut pas savoir ce qu'il FAUDRAIT avoir execute : rien ne declare le harnais d'un projet
   # (le template dit lui-meme que chaque projet le REECRIT quand il sait ce qu'il est). Il peut en
   # revanche dire ce qui a REELLEMENT tourne, et laisser le juge en tirer la conclusion — un vert

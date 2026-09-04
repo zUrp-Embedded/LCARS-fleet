@@ -30,7 +30,7 @@ tmp/
 # write_build_info/1 — JAMAIS dans le source ; le runtime source la dérive de git)
 priv/api/build_info.txt
 
-# Release installée (artefact de build, posée par le deploy ; cf. etc/README + bin/fleet_v2)
+# Release installée (artefact de build, posée par le deploy ; cf. etc/README.md + bin/fleet)
 /rel/
 
 # Généré par `mix boundary.visualize` (graphe de deps régénérable)

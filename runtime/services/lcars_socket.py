@@ -27,7 +27,7 @@ def bind(path, group, mode=0o660, backlog=8, prefix="lcars"):
 
     ⚠ L'ACL DE LA SOCKET NE PORTE AUCUNE AUTORISATION. Elle borne qui peut FRAPPER ; qui a le droit
     se decide par `SO_PEERCRED` puis par une question a la forge. Confondre les deux serait refaire
-    exactement le defaut que ce chantier retire — une decision prise en lisant une projection.
+    exactement le defaut que cette regle retire — une decision prise en lisant une projection.
 
     Le `chown` n'est PAS conditionne sur root : le service POSSEDE la socket qu'il vient de creer,
     et POSIX laisse un proprietaire donner son fichier a un groupe DONT IL EST MEMBRE. Un temoin,

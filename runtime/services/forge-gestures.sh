@@ -592,7 +592,7 @@ cmd_install() {
   # L'ETAT DE CE CATALOGUE-CI SURVIT A LA COPIE, celui du voisin non. `cp -r` ecraserait le premier
   # avec le second : le dossier de recette de reference porte l'etat de `fleet`, et le copier par
   # dessus celui de `web-demo` revient a jeter le sien A CHAQUE passe. Le rejeu re-importerait alors
-  # tout depuis zero — ca converge (l'etat est jetable par construction, chantier « tofu dedans »),
+  # tout depuis zero — ca converge (l'etat est jetable par construction, « tofu dedans »),
   # mais ca ne tient pas la promesse que la CLI affiche : « rien n'a bouge -> il ne touche rien ».
   local keep; keep="$(mktemp -d)"
   for f in terraform.tfstate terraform.tfstate.backup; do

@@ -37,7 +37,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   def check_event_consumers_canon(root) do
     # The check's NAME claims the canon for ALL consumers, so the residue scan covers every source
     # under lib/ — a legacy `"event_type"` tuple REINTRODUCED anywhere fails the gate. A sweep of
-    # `api/ws.ex` alone (the last migrant) would leave the guarantee narrower than its label.
+    # one file would leave the guarantee narrower than its label.
     residue_check(root, %{
       id: "event.consumers.canon",
       remediation:
@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   end
 
   # The Loader must unwrap the ENVELOPE (kind/metadata/spec.steps) into the single internal
-  # FLAT form. There is no flat form: an envelope-less YAML fails the schema before `normalize`.
+  # FLAT form. There is no flat INPUT: an envelope-less YAML fails the schema before `normalize`.
   # "envelope/flat" = external envelope vs internal flat (one contract, two shapes).
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   @doc false
@@ -428,7 +428,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
       # (2) `escalate_kind: :foo` dans n'importe quelle liste a mots-cles. C'EST LA VOIE
       #     CANONIQUE, et la forme (1) seule la manque entierement : l'API publique est
       #     `record_or_escalate/4`, qui ne prend PAS le kind en argument — il voyage dans ses
-      #     `opts` jusqu'a `escalate/5` (`incident_registry.ex`). Sans cette lecture, un
+      #     `opts` jusqu'a `escalate/5` (`incident_registry/escalation.ex`). Sans cette lecture, un
       #     `escalate_kind: :disk_full` ecrit chez un appelant passe au vert et leve un
       #     `FunctionClauseError` a l'execution, exactement le crash que cette table close est
       #     censee rendre impossible.

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:lcars:declaration",
   "title": "LCARS Project Declaration",
-  "description": "Structural schema for a per-project .lcars.json (template: priv/cap_profile/canon/config/declaration-template.json). Naming a validation card (pipeline_default) IS the criticality declaration — the card carries the whole gate (which judges, which CI, which verdict policy); there is no separate level. justification carries the WHY in prose (the framing interview: stakes of failure, lifetime — an agent NEVER self-assesses criticality; the architect relays the human). Underscore-prefixed keys are informational and ignored by the runtime.",
+  "description": "Structural schema for a per-project .lcars.json (template: priv/catalogue/cap_profile/config/declaration-template.json). Naming a validation card (pipeline_default) IS the criticality declaration — the card carries the whole gate (which judges, which CI, which verdict policy); there is no separate level. justification carries the WHY in prose (the framing interview: stakes of failure, lifetime — an agent NEVER self-assesses criticality; the architect relays the human). Underscore-prefixed keys are informational and ignored by the runtime.",
   "type": "object",
   "required": [
     "declared_at",

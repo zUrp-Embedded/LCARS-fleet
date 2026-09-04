@@ -34,7 +34,7 @@ defmodule Fleet.Application do
       # l'endroit ou les deux plans se rencontrent, comme pour les deux gels d'images.
       Fleet.Workflow,
       # DELIBERATE WIDENING, and it must be declared rather than left implicit: the catalogue
-      # lifecycle became a FORGE fact — `available` is "the forge carries a deposit", `installed`
+      # lifecycle is a FORGE fact — `available` is "the forge carries a deposit", `installed`
       # is "the forge signs an org". `CatalogueDeposits` reads it.
       #
       # ⚠ Boundary would NOT have caught this on its own. The forge modules are reached through a
@@ -55,9 +55,11 @@ defmodule Fleet.Application do
   runtime.
 
   Starts the domain supervisors in topological order. The pure-library domains (cap_profile,
-  credentials, sp_builder, workflow, project_bootstrap, among others) have nothing to start: their
-  modules are loaded with the app and their functions run without a process. Only the domains that
-  actually start something appear in the children below.
+  credentials, sp_builder, project_bootstrap, conflict) have nothing to start: their modules are
+  loaded with the app and their functions run without a process. A domain may also hand its
+  process to another's tree — `Fleet.Workflow.OpsObjectSync` and the forge's Finch pool are
+  started by `Fleet.Pilot.Application`. Only the trees that start something appear in the children
+  below.
 
   ## The children ORDER IS the boot invariant (F8 scar)
 

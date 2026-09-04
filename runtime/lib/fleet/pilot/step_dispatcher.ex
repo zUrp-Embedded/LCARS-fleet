@@ -331,7 +331,7 @@ defmodule Fleet.Pilot.StepDispatcher do
           | {:skipped, atom()}
           | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
-    # The PR's OWN base (chantier face-projet): the face the deliverable merges into, read off the
+    # The PR's OWN base (face-projet): the face the deliverable merges into, read off the
     # PR at this single site and threaded via opts → project map → pod.completed → step_run. Every
     # pod dispatched OFF an existing PR (judges, rework, conflict-rework) clones the FEATURE branch,
     # so its clone-base cannot answer "which face does this PR land on" — the PR itself is the only
