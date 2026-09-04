@@ -57,11 +57,13 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   [[ "$ATTENDU" == /* ]]
 }
 
-@test "BASH : les cinq defauts du rail disent ce que la lib declare" {
+@test "BASH : les defauts du rail et du produit disent ce que la lib declare" {
+  # Lot 6 (2026-09-04) : l'entrypoint ne grave plus les deux chemins de la boite — `box/init.sh`
+  # les DERIVE de `PROV_TOKENS_DIR`, dont le defaut vit dans le protocole des modules du produit.
+  # C'est ce defaut-la qui est tenu ici, a la place des deux litteraux.
   local bad=0
   declare -A sites=(
-    ["$R/deploy/docker/entrypoint.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
-    ["$R/deploy/docker/entrypoint.sh|LCARS_MASTER_TOKEN_FILE"]='LCARS_MASTER_TOKEN_FILE:-[^}]*'
+    ["$R/fleet/services/lib/module-protocol.sh|PROV_TOKENS_DIR"]='PROV_TOKENS_DIR:=[^}]*'
     ["$R/fleet/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
     ["$R/fleet/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
     ["$R/fleet/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'

@@ -99,6 +99,7 @@ FAKE
   ENTRY_LOG="$BATS_TEST_TMPDIR/entry.log"
   cat > "$BIN/entrypoint" <<FAKE
 #!/usr/bin/env bash
+[[ "\$1" == tool ]] && shift   # la porte est « lcars tool <verbe> » (lot 6)
 printf '%s\n' "\$*" >> "$ENTRY_LOG"
 case "\$1" in
   catalogue-source)
@@ -112,7 +113,8 @@ esac
 exit 0
 FAKE
   chmod +x "$BIN/entrypoint"
-  export LCARS_ENTRYPOINT="$BIN/entrypoint"
+  # La doublure tient le role de la CLI du produit : « lcars tool <verbe> » (lot 6).
+  export LCARS_CLI="$BIN/entrypoint"
   export ENTRY_LOG
 
   # `git` double : il journalise, et ne touche pas au reseau.
@@ -667,6 +669,7 @@ _fake_entry() { # <chemin> <marqueur> [mode]
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/usr/bin/env bash
+[[ "\$1" == tool ]] && shift
 printf '%s %s\n' "$2" "\$*" >> "$ENTRY_LOG"
 case "\$1" in
   catalogue-source) echo "alice/cat main deadbeef" ;;
@@ -677,63 +680,56 @@ EOF
   chmod "${3:-0755}" "$1"
 }
 
-@test "entrypoint: le VOISIN gagne — la disposition de l'image" {
-  setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat")"
-  _fake_entry "$BATS_TEST_TMPDIR/flat/entrypoint.sh" VOISIN
-  _fake_entry "$BATS_TEST_TMPDIR/flat/deploy/docker/entrypoint.sh" EMBARQUE
+# ─── LA RESOLUTION DE LA CLI DU PRODUIT (lot 6) ─────────────────────────────────────────────────
+#
+# Les portes outil vivaient dans l'entrypoint de l'image, et ce script le devinait a deux adresses
+# (« le voisin », « l'arbre embarque »). Elles sont dans `lcars tool …` : la surcharge `LCARS_CLI`
+# d'abord, la CLI posee sur le PATH ensuite (les deux rails la posent), le voisin `../bin/lcars` de
+# l'arbre a defaut. Le PATH des temoins est TENU : le poste de dev porte un `lcars` reel.
 
-  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+@test "cli: la SURCHARGE LCARS_CLI gagne sur tout" {
+  setup_install
+  _fake_entry "$BATS_TEST_TMPDIR/surcharge/lcars" SURCHARGE
+  _fake_entry "$BIN/lcars" PATH
+  run env LCARS_CLI="$BATS_TEST_TMPDIR/surcharge/lcars" PATH="$BIN:/usr/bin:/bin" \
+      bash -c "'$SCRIPT' install cat < /dev/null"
+  grep -q "^SURCHARGE catalogue-source cat" "$ENTRY_LOG"
+  refute grep -q "^PATH" "$ENTRY_LOG"
+}
+
+@test "cli: la CLI du PATH gagne sur le voisin de l'arbre — la disposition des deux rails" {
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre/services")"
+  _fake_entry "$BATS_TEST_TMPDIR/arbre/bin/lcars" VOISIN
+  _fake_entry "$BIN/lcars" PATH
+  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
+  grep -q "^PATH catalogue-source cat" "$ENTRY_LOG"
+  refute grep -q "^VOISIN" "$ENTRY_LOG"
+}
+
+@test "cli: SANS CLI sur le PATH, le voisin ../bin/lcars de l'arbre repond — le cas d'un checkout" {
+  setup_install
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre2/services")"
+  _fake_entry "$BATS_TEST_TMPDIR/arbre2/bin/lcars" VOISIN
+  rm -f "$BIN/lcars"
+  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
   grep -q "^VOISIN catalogue-source cat" "$ENTRY_LOG"
-  refute grep -q "^EMBARQUE" "$ENTRY_LOG"
 }
 
-@test "entrypoint: SANS voisin, l'arbre EMBARQUE repond — c'est le cas du poste" {
-  # ⚠ LE TEMOIN DU DEFAUT MESURE. Sur un poste, ce script vit a plat dans `/opt/lcars/` et son
-  # voisin `entrypoint.sh` n'existe pas ; l'arbre est deux crans plus bas. C'est exactement cet
-  # etat qui rendait « No such file or directory ».
+@test "cli: AUCUN candidat -> refus A LA PORTE qui nomme la CLI, pas « pas de source »" {
   setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat2")"
-  _fake_entry "$BATS_TEST_TMPDIR/flat2/deploy/docker/entrypoint.sh" EMBARQUE
-
-  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
-  grep -q "^EMBARQUE catalogue-source cat" "$ENTRY_LOG"
-}
-
-@test "entrypoint: un fichier NON EXECUTABLE repond quand meme — le mode du \`cp -a\`" {
-  # ⚠ `entrypoint.sh` est `100644` DANS LE DEPOT ; seule l'image le passe en `0755` (`RUN chmod`).
-  # Le `cp -a` de l'arbre embarque preserve donc un mode non executable, et un garde sur `-x`
-  # rejetterait exactement le fichier qu'il vient de trouver. On resout sur `-r`, on invoque par
-  # `bash` : le mode cesse d'etre une condition.
-  setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat3")"
-  _fake_entry "$BATS_TEST_TMPDIR/flat3/deploy/docker/entrypoint.sh" EMBARQUE 0644
-
-  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
-  grep -q "^EMBARQUE catalogue-source cat" "$ENTRY_LOG"
-}
-
-@test "entrypoint: AUCUN candidat -> refus A LA PORTE qui nomme le chemin, pas « pas de source »" {
-  # Un fichier absent annonce comme un catalogue introuvable envoie l'operateur interroger sa forge
-  # pour un manque qui est celui de sa boite. Le garde est donc a la porte du geste, avant tout le
-  # reste — quatre etapes plus tot que la ou l'absence se manifestait.
-  setup_install
-  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/flat4")"
-
-  run env -u LCARS_ENTRYPOINT bash -c "'$flat' install cat < /dev/null"
+  local flat; flat="$(_flat_copy "$BATS_TEST_TMPDIR/arbre3/services")"
+  rm -f "$BIN/lcars"
+  run env -u LCARS_CLI PATH="$BIN:/usr/bin:/bin" bash -c "'$flat' install cat < /dev/null"
   [ "$status" -ne 0 ]
   [[ "$output" == *"portes outil du release introuvables"* ]]
-  [[ "$output" == *"entrypoint.sh"* ]]
+  [[ "$output" == *"lcars"* ]]
   [[ "$output" != *"pas de source installable"* ]]
 }
 
-@test "entrypoint: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {
-  # La surcharge court-circuite la resolution — c'est son metier — donc elle court-circuite aussi
-  # les deux candidats qui auraient repondu. Le garde doit la traiter comme n'importe quelle
-  # absence : ce qui compte est qu'aucune porte outil ne repond, pas la raison pour laquelle.
+@test "cli: une SURCHARGE qui pointe dans le vide est refusee comme une absence" {
   setup_install
-
-  run env LCARS_ENTRYPOINT="$BATS_TEST_TMPDIR/nulle-part.sh" \
+  run env LCARS_CLI="$BATS_TEST_TMPDIR/nulle-part.sh" \
       bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
   [[ "$output" == *"portes outil du release introuvables"* ]]
@@ -771,6 +767,7 @@ FAKE
   setup_install
   cat > "$BIN/entrypoint" <<'FAKE'
 #!/usr/bin/env bash
+[[ "$1" == tool ]] && shift
 [[ "$1" == catalogue-source ]] && echo "alice/cat"
 exit 0
 FAKE

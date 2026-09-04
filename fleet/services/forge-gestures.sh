@@ -84,23 +84,26 @@ STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 # ⚠ `-r` ET PAS `-x`, ET `bash` PLUTOT QUE L'EXECUTION DIRECTE : `entrypoint.sh` est `100644` dans le
 # depot, seule l'image le passe en `0755`. Un test sur `-x` echouerait APRES avoir trouve le bon
 # chemin — un garde qui rejette exactement ce qu'il cherchait.
-_entrypoint_path() {
-  local here c
+# LES PORTES OUTIL DU RELEASE SONT DANS LA CLI DU PRODUIT (`lcars tool …`, lot 6 — 2026-09-04).
+# Elles vivaient dans le PID 1 de l'image, et ce script devinait le chemin de l'entrypoint pour les
+# atteindre — un geste du produit qui execute l'entrypoint de l'image pour evaluer une fonction du
+# release. `lcars` est pose sur les deux rails (`/usr/local/bin`) ; a defaut, le voisin de ce
+# fichier dans l'arbre (`../bin/lcars`). « LCARS_CLI=<chemin> » force la resolution.
+_lcars_cli() {
+  local here
+  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
+  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for c in "$here/entrypoint.sh" "$here/deploy/docker/entrypoint.sh"; do
-    [[ -r "$c" ]] && { printf '%s' "$c"; return 0; }
-  done
-  # Aucun candidat lisible : on rend le premier quand meme, pour qu'un refus NOMME un chemin.
-  printf '%s' "$here/entrypoint.sh"
+  printf '%s' "$here/../bin/lcars"
 }
-ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"
+LCARS_CLI="$(_lcars_cli)"
+tool() { bash "$LCARS_CLI" tool "$@"; }
 
 need_entrypoint() {
-  [[ -r "$ENTRYPOINT" ]] && return 0
-  die "portes outil du release introuvables ($ENTRYPOINT).
-  Ce script les appelle pour resoudre, verifier et enroler un catalogue. Sur un poste elles vivent
-  dans l'arbre embarque (<prefixe>/deploy/docker/entrypoint.sh), pose par « provision apply ».
-  « LCARS_ENTRYPOINT=<chemin> » force la resolution."
+  [[ -r "$LCARS_CLI" ]] && return 0
+  die "portes outil du release introuvables ($LCARS_CLI).
+  Ce script les appelle pour resoudre, verifier et enroler un catalogue (« lcars tool … »). Sur un
+  poste, 60-deploy pose la CLI ; l'image la porte. « LCARS_CLI=<chemin> » force la resolution."
 }
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
@@ -368,7 +371,7 @@ reference_catalogue_root() {
   [[ -n "$REFERENCE_CATALOGUE" ]] && { printf '%s' "$REFERENCE_CATALOGUE"; return 0; }
 
   local root
-  root="$(bash "$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
+  root="$(tool catalogue-root 2>/dev/null | tail -n1)" || root=""
   if [[ -z "$root" || ! -d "$root" ]]; then
     # Un refus MUET ferait croire a une image sans reference — or elle en porte toujours une.
     echo "forge-gestures: le release ne dit pas ou vit son catalogue de reference — NON depose" >&2
@@ -535,7 +538,7 @@ cmd_install() {
 
   local src rc=0
   src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
-         bash "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
+         tool catalogue-source "$name" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$src" >&2
     die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
@@ -553,8 +556,8 @@ cmd_install() {
   Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
     [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
   Ce n'est pas un refus de la forge : un refus porte un code de sortie et une phrase. Un zero muet
-  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « \$ENTRYPOINT » designe
-  ($ENTRYPOINT) et ce que « bash \"\$ENTRYPOINT\" catalogue-source $name » imprime a la main."
+  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « lcars » designe
+  ($LCARS_CLI) et ce que « lcars tool catalogue-source $name » imprime a la main."
   fi
 
   echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
@@ -580,7 +583,7 @@ cmd_install() {
   # 3. LE MEME CONTROLE QUE LE BOOT, avant de toucher la forge. Un catalogue incoherent refuse ici
   #    coute un message ; installe, il coute un boot qui refuse ou un dispatch qui boucle, loin de
   #    sa cause.
-  bash "$ENTRYPOINT" verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
+  tool verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
 
   # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
   local dir="$CATALOGUE_WORK/$name"
@@ -616,7 +619,7 @@ cmd_install() {
   # tiers. Facultatif : sans eux, les comptes restent en identicon.
   rm -rf "$dir/catalogue-avatars"
   [[ -d "$work/src/avatars" ]] && cp -r "$work/src/avatars" "$dir/catalogue-avatars"
-  bash "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
+  tool roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
     || die "install: roster non derive depuis $name"
 
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une

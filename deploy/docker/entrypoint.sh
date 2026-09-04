@@ -23,118 +23,22 @@
 
 set -euo pipefail
 
-# ─── MODE OUTIL : `verify <racine>` — valider un catalogue SANS booter la boîte ─────────────────
-# ─── `drop_priv` — ABAISSER quand on est root, ne rien faire quand on ne l'est pas ──────────────
+# ─── LES PORTES OUTIL : L'IMAGE GARDE LES MOTS, LA CLI DU PRODUIT PORTE LES GESTES ──────────────
 #
-# Les trois portes de LECTURE ci-dessous tournent en `nobody:fleet` : le runtime REFUSE root
-# (R-no-root-runtime), et une lecture n'a besoin que du gid `fleet` (l'install RO est root:fleet).
-RELEASE_BIN="${LCARS_RELEASE_BIN:-/opt/lcars/runtime/rel/lcars_fleet/bin/lcars_fleet}"
+# `docker run --rm IMAGE roles-tfvars [root]` (et `verify`, `roles`, `catalogue-root`,
+# `catalogue-source`) est l'API de l'image : le banc et `enroll-catalogue.sh --image` s'en servent
+# pour demander a une image son roster sans rien installer. Les quatre evaluations vivaient ICI,
+# dans le PID 1 ; elles sont dans `lcars tool …` (lot 6, 2026-09-04), posees sur les deux rails, et
+# ce fichier ne fait plus que deleguer. `forge-apply` reste : c'est le geste de structure joue
+# DANS la boite par `box forge-apply`, et il exige root (il lit et ecrit `/opt/lcars/var/tokens`).
+case "${1:-}" in
+  verify|roles|roles-tfvars|catalogue-root|catalogue-source)
+    exec /usr/local/bin/lcars tool "$@" ;;
+  forge-apply)
+    [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /opt/lcars/var/tokens — elle exige root dans le conteneur" >&2; exit 1; }
+    exec /opt/lcars/forge-gestures.sh apply ;;
+esac
 
-drop_priv() { # drop_priv <cmd...>
-  if [[ "$(id -u)" -eq 0 ]]; then
-    exec setpriv --reuid 65534 --regid 2000 --clear-groups "$@"
-  else
-    exec "$@"
-  fi
-}
-
-# `docker run --rm -v $PWD:/cat <image> verify /cat` : le code de sortie est le verdict
-# (0 = catalogue OK, 1 = refusé), exploitable en CI ; le rapport s'imprime sur stdout et
-# déclare ses hypothèses (la racine lue, les surcharges fines ignorées). Ne converge rien,
-# ne crée personne : la seule chose exécutée est la release, en eval. Le binaire de release
-# est appelé directement — `fleet_v2`, lui, porte le lancement per-humain (RELEASE_TMP dans
-# ~/.lcars), des hypothèses qu'un mode outil n'a pas le droit d'avoir.
-if [[ "${1:-}" == "verify" ]]; then
-  root="${2:?verify: chemin de racine catalogue requis — usage : docker run --rm -v \$PWD:/cat IMAGE verify /cat}"
-  # LCARS_TOOL_EVAL=1 : `release eval` execute les config providers (runtime.exs ENTIER) avant
-  # l'expression — ce drapeau saute le corps de config deploiement (ports, forge, credentials),
-  # qu'une invocation outil n'a pas a fournir. Sans lui, l'eval exige l'env d'un boot de fleet.
-  drop_priv \
-    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    "$RELEASE_BIN" eval \
-    "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")"
-fi
-
-# `roles` / `roles-tfvars` : le ROSTER FORGE d'un catalogue — les comptes qu'un deploiement doit
-# creer avant que ce catalogue puisse travailler. Meme porte outil que `verify` ci-dessus (meme
-# eval, meme nobody, meme LCARS_TOOL_EVAL), et pour la meme raison : la question se pose a un
-# script de provisionnement, qui se tient DEHORS d'une fleet vivante.
-#   roles        un nom de ROLE par ligne  -> lecture humaine, inventaire d'un catalogue
-#   roles-tfvars le JSON des quatre listes -> roles.auto.tfvars.json (les comptes, cote tofu)
-#                                             ET la derivation de PROV_ROLES (`prov_roles`)
-if [[ "${1:-}" == "roles" || "${1:-}" == "roles-tfvars" ]]; then
-  root="${2:-}"
-  fun="Fleet.Roster.eval_main"
-  [[ "${1}" == "roles-tfvars" ]] && fun="Fleet.Roster.eval_tfvars"
-  if [[ -n "$root" ]]; then arg="\"${root}\""; else arg="Fleet.Catalogue.root()"; fi
-  drop_priv \
-    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    "$RELEASE_BIN" eval \
-    "${fun}(${arg})"
-fi
-
-# `catalogue-root` : OU LE RELEASE PORTE SON CATALOGUE DE REFERENCE. Une ligne, un chemin.
-#
-# Il existe pour que personne ne RECOMPOSE ce chemin. Il vit dans le release, sous un repertoire qui
-# porte la VERSION (`lib/lcars_fleet-<vsn>/priv/catalogue`) : un appelant shell qui le globberait
-# marcherait jusqu'au jour ou la disposition du release change, et casserait alors en silence sur
-# un glob vide. Le release est l'autorite de sa propre disposition, et c'est lui qu'on interroge.
-# ⚠ CE DRAPEAU SAUTE LE CORPS DE CONFIG DE DEPLOIEMENT, donc un `LCARS_CATALOGUE_ROOT` pose par
-# l'operateur n'est PAS lu ici — et c'est ce qu'on veut. Cette porte repond « le catalogue que CE
-# RELEASE porte », pas « celui que cette boite sert ». C'est le premier qu'on publie sur la forge :
-# la reference, celle qu'on forke, pas la variante locale de quelqu'un.
-if [[ "${1:-}" == "catalogue-root" ]]; then
-  drop_priv \
-    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    "$RELEASE_BIN" eval \
-    'IO.puts(Fleet.Catalogue.root())'
-fi
-
-# `forge-apply` : LA STRUCTURE DE LA FORGE, POSEE PAR UN RUN TRANSITOIRE ─────────────────────────
-#
-# Meme geste que `deploy/box forge-apply`, mais SANS boite vivante : `docker run --rm <image>
-# forge-apply`. C'est ce qui permet a un POSTE DE TRAVAIL (rail WSL) d'avoir une forge utilisable
-# sans reconstruire et relancer un LCARS en conteneur alors qu'il vient de l'installer nativement.
-#
-# ⚠ ET L'ETAT DE TOFU N'A PAS BESOIN DE SURVIVRE — c'est le design, pas un pis-aller : la recette
-# reconstruit ce qui existe par ses blocs `import`, donc partir d'un tfstate VIDE est le cas normal.
-# C'est exactement pourquoi `--tofu-dir` est devenu un argument ignore. Un run `--rm` est donc
-# legitime ici, la ou il aurait ete un piege avant ce chantier.
-#
-# L'appelant fournit : `--network <reseau-de-la-forge>`, `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens`,
-# `-e FORGE_BASE_URL=http://gitea:3000`. Le jeton peut aussi arriver sur stdin (jamais en argv).
-if [[ "${1:-}" == "forge-apply" ]]; then
-  [[ "$(id -u)" -eq 0 ]] || { echo "forge-apply: cette porte ecrit et lit /opt/lcars/var/tokens — elle exige root dans le conteneur" >&2; exit 1; }
-  exec /opt/lcars/forge-gestures.sh apply
-fi
-
-# `catalogue-source <nom>` : resout UN nom vers le depot qui le porte, et n'imprime que
-# `<repo> <branche> <sha>`. Le geste d'install le donne a `git clone`, donc une ligne de politesse
-# deviendrait un morceau d'URL.
-#
-# Meme porte `nobody` que `roles` : c'est une LECTURE. Les codes de sortie distinguent trois refus
-# qui appellent trois gestes differents — 2 personne n'a depose, 3 deux depots revendiquent le meme
-# nom (on ne devine pas), 4 c'est le catalogue livre dans le release, il n'y a rien a installer.
-if [[ "${1:-}" == "catalogue-source" ]]; then
-  name="${2:?catalogue-source: nom de catalogue requis}"
-  # ⚠ `FORGE_TOKEN` RELAYE A COTE DE `FORGE_TOKEN_FILE`, ET SANS LUI LE MAILLON CASSE EN SILENCE.
-  # Cette porte tombe en `nobody:fleet` : elle ne peut ouvrir aucun SECRET de `/opt/lcars/var/tokens`.
-  # Ce qui la tient est le mode des FICHIERS (0600), pas celui du dossier. La conclusion n'a pas
-  # bouge, sa raison si — et une raison fausse est ce qui fait relacher le vrai garde un jour. Son
-  # appelant — `forge-gestures.sh cmd_install`, qui EST le service d'autorite — lit donc le jeton
-  # systeme et transmet sa VALEUR. Or `env` ne propage que ce qu'on lui NOMME : oublier cette
-  # variable ici aurait rendu une porte sans credential, dont l'echec accuse la source du catalogue.
-  #
-  # LE CHEMIN RESTE ACCEPTE : un appelant ROOT (le rail poste, un banc) en a un qui lui est lisible,
-  # et `Transport.resolve_token/1` prend le jeton fourni AVANT le chemin. Deux entrees, une seule
-  # resolution, et la plus specifique gagne.
-  drop_priv \
-    env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
-    FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" \
-    FORGE_TOKEN="${FORGE_TOKEN:-}" \
-    "$RELEASE_BIN" eval \
-    "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")"
-fi
 
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une

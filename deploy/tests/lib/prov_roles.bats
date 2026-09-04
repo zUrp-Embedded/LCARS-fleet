@@ -26,7 +26,7 @@ seed_local() {
 @test "prov_roles sans release : le plancher tenu a la main, et rien de plus" {
   # Chemin WSL avant `60-deploy`, ou boite sans release pose. Une boite doit pouvoir minter de quoi
   # demarrer meme quand la derivation est impossible.
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT=/inexistant; source '$LIB'; prov_roles"
+  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_LCARS_CLI=/inexistant; source '$LIB'; prov_roles"
   [ "$status" -eq 0 ]
   [[ "$output" == *"system_architect"* ]]
   [[ "$output" == *"fleet_engineer"* ]]
@@ -42,13 +42,14 @@ seed_local() {
 # des noms de ROLE (`dev`) — et `PROV_ROLES` est une liste de comptes. La doublure REFUSE `roles`
 # pour que le temoin tombe si la derivation y revenait : mesure sur banc du 2026-08-16, branchee sur
 # `roles`, elle faisait entrer `dev` et `writer` dans le roster a minter.
+[[ "$1" == tool ]] && shift   # la porte est « lcars tool roles-tfvars » (lot 6)
 [[ "$1" == "roles-tfvars" ]] || exit 1
 printf '{"roles":["web_dev","web_writer","fleet_engineer"],"system_roles":["system_architect"]}\n'
 SH
   chmod +x "$BATS_TEST_TMPDIR/bin/entrypoint"
   : > "$BATS_TEST_TMPDIR/bin/release"; chmod +x "$BATS_TEST_TMPDIR/bin/release"
 
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
+  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_LCARS_CLI='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
   [ "$status" -eq 0 ]
   [[ "$output" == *"web_dev"* ]]
   [[ "$output" == *"web_writer"* ]]
@@ -64,7 +65,7 @@ SH
   chmod +x "$BATS_TEST_TMPDIR/bin/entrypoint"
   : > "$BATS_TEST_TMPDIR/bin/release"; chmod +x "$BATS_TEST_TMPDIR/bin/release"
 
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
+  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_LCARS_CLI='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet_engineer"* ]]
 }

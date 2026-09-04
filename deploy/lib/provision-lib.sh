@@ -1375,9 +1375,12 @@ prov_roles() {
   # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
   # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
   # copie posee est 0644.
-  local entry="${PROV_ENTRYPOINT:-}" c
+  # Lot 6 (2026-09-04) : la porte outil est « lcars tool roles-tfvars », dans la CLI du PRODUIT —
+  # elle vivait dans l'entrypoint de l'image, que ce fichier devinait a deux adresses. La CLI est
+  # posee par 60 (`$PROV_LINK_DIR/lcars`) ; avant, ou depuis une copie, celle de l'arbre.
+  local entry="${PROV_LCARS_CLI:-}" c
   if [[ -z "$entry" ]]; then
-    for c in /opt/lcars/entrypoint.sh "$(repo_root)/deploy/docker/entrypoint.sh"; do
+    for c in "$PROV_LINK_DIR/lcars" "$(repo_root)/fleet/bin/lcars"; do
       [[ -r "$c" ]] && { entry="$c"; break; }
     done
   fi
@@ -1394,7 +1397,7 @@ prov_roles() {
       [[ -f "${root}catalogue.yaml" ]] || continue
       # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
       # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
-      out="$out $(bash "$entry" roles-tfvars "${root%/}" 2>/dev/null \
+      out="$out $(LCARS_FLEET_BIN="$bin" bash "$entry" tool roles-tfvars "${root%/}" 2>/dev/null \
                   | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     done
   fi
