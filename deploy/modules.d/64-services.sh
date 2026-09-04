@@ -166,9 +166,9 @@ services_env_body() {
   # lit comme une décision et n'en est pas une. Pire, il ferait un cinquième littéral `fleet` pour un
   # nom qui en a déjà quatre — et le jour où l'org est renommée, c'est le nombre de copies qui décide
   # combien de lecteurs suivent.
-  echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
-  echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
-  echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
+  echo "LCARS_FORGE_ORG=$PROV_FORGE_ORG"
+  echo "LCARS_HUMANS_TEAM=$PROV_HUMANS_TEAM"
+  echo "LCARS_FLEET_GROUP=$PROV_FLEET_GROUP"
   echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une

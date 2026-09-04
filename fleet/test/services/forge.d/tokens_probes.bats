@@ -30,13 +30,13 @@ setup() {
   mkdir -p "$BIN" "$BATS_TEST_TMPDIR/tokens"
 
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export PROV_MODULE_TAG=63-forge-tokens
+  export LCARS_MODULE_TAG=63-forge-tokens
   # le roster vient du release par « lcars tool » : ici, une CLI de doublure qui rend un roster fixe
   mkdir -p "$BIN"; printf '%s\n' '#!/usr/bin/env bash' '[[ "$1" == tool ]] && shift' '[[ "$1" == roles-tfvars ]] && echo "{\"roles\":[\"fleet_engineer\"],\"system_roles\":[\"system_architect\"]}"' 'exit 0' > "$BIN/lcars"; chmod +x "$BIN/lcars"; export LCARS_CLI="$BIN/lcars"
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_HUMAN="zoe"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
-  export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/nocat"
+  export FORGE_BASE_URL="http://forge.test"
+  export LCARS_LOGIN="zoe"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
+  export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/nocat"
   export PATH="$BIN:$PATH"
 }
 
@@ -131,7 +131,7 @@ EOF
 # ─── LE MODE APPLY NE DOIT PAS MOURIR SUR UNE BOITE DEJA CONVERGEE ──────────────────────────────
 #
 # ⚠ CE TEMOIN EXISTE PARCE QUE L'ABSENCE D'UN `return 0` A TUE UN BANC ENTIER (2026-08-17).
-# `converge_authority_modes` finissait sur `[[ "$PROV_MODE" == "check" ]] && p_ok …`. En mode APPLY
+# `converge_authority_modes` finissait sur `[[ "$LCARS_MODULE_MODE" == "check" ]] && p_ok …`. En mode APPLY
 # ce test est FAUX, donc la fonction rendait 1, donc `set -e` tuait le module juste apres — sans un
 # mot, en annoncant seulement « echecs: 1 ».
 #

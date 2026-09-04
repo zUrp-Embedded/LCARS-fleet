@@ -112,9 +112,9 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   echo '{}' > "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   chmod 0000 "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
-  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" PROV_MODULE_TAG=66-deck-oidc \
-          PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json" \
-          PROV_FORGE_URL="http://forge.invalid" \
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
+          LCARS_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json" \
+          FORGE_BASE_URL="http://forge.invalid" \
       bash "$mod" check
   chmod 0644 "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   printf '%s\n' "$output" | refute_out 'deck-oidc\.json absent'
@@ -125,9 +125,9 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   # Le sens qui manquait : sans lui, un module qui repondrait « non mesurable » a tout passerait le
   # temoin ci-dessus en ayant cesse de signaler quoi que ce soit.
   local mod="$DEPLOY/../fleet/services/forge.d/deck-oidc.sh"
-  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" PROV_MODULE_TAG=66-deck-oidc \
-          PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/pas-la.json" \
-          PROV_FORGE_URL="http://forge.invalid" \
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
+          LCARS_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/pas-la.json" \
+          FORGE_BASE_URL="http://forge.invalid" \
       bash "$mod" check
   [[ "$output" == *"absent"* ]]
   [[ "$output" == *"DRIFT"* ]]
@@ -216,7 +216,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   # Le mot engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN faire — il n'a pas
   # les credentials de la personne, et les avoir serait le contraire du canon.
   local mod="$BATS_TEST_DIRNAME/../../fleet/services/forge.d/tokens.sh"
-  local bloc; bloc="$(sed -n '/case "\$(member_state "\$PROV_HUMAN")"/,/esac/p' "$mod")"
+  local bloc; bloc="$(sed -n '/case "\$(member_state "\$LCARS_LOGIN")"/,/esac/p' "$mod")"
   [ -n "$bloc" ]
   refute grep -q 'p_drift' <<<"$bloc"
   [ "$(grep -c 'p_warn' <<<"$bloc")" -eq 2 ]

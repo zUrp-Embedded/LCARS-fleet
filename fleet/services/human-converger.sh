@@ -23,8 +23,8 @@ ONCE=0
 FORGE="${FORGE_BASE_URL:-}"
 # Litteraux DUPLIQUES de `provision-lib.sh`, que ce script ne source pas : il tourne en boucle, hors
 # d'un cycle de provisionnement. C'est un temoin qui epingle leur egalite, faute de pouvoir la deriver.
-ORG="${PROV_FORGE_ORG:-fleet}"
-TEAM="${PROV_HUMANS_TEAM:-humans}"
+ORG="${LCARS_FORGE_ORG:-fleet}"
+TEAM="${LCARS_HUMANS_TEAM:-humans}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
@@ -35,7 +35,7 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
 # la console a la source, pour ses deux consommateurs a la fois.
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
-GROUP="${PROV_FLEET_GROUP:-fleet}"
+GROUP="${LCARS_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # GUARD A — L'UID DU SIEGE N'EST JAMAIS CONVERGE NI REVOQUE. Garde keye sur l'UID, PAS sur un login :
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
@@ -330,14 +330,14 @@ converge_human() { # converge_human <login>
     if [[ -n "$home" ]]; then
       ( cd "$home" && runuser -u "$login" -- \
           env HOME="$home" USER="$login" LOGNAME="$login" \
-              PROV_HUMAN="$login" PROV_MODULE_TAG="$tag" \
+              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" \
               LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}" \
               bash -c 'set -euo pipefail; . "$1" apply' _ "$m"
       ) >"${out:-/dev/null}" 2>&1 || rc=$?
     else
       (
         set -euo pipefail
-        export PROV_HUMAN="$login" PROV_MODULE_TAG="$tag"
+        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag"
         export LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}"
         # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
         . "$m" apply

@@ -1237,18 +1237,18 @@ forge_srv.shutdown()
 #
 # La forme negative est la moitie qui compte : sans elle, un `HUMANS_TEAM` reste fige a
 # `fleet:humans` passerait le premier check par pure coincidence de defaut.
-_env_saved = {k: os.environ.get(k) for k in ("PROV_FORGE_ORG", "PROV_HUMANS_TEAM")}
+_env_saved = {k: os.environ.get(k) for k in ("LCARS_FORGE_ORG", "LCARS_HUMANS_TEAM")}
 try:
     for _k in _env_saved:
         os.environ.pop(_k, None)
     check(load_deck().HUMANS_TEAM == "fleet:humans",
           "equipe: sans variable, le defaut vaut celui du convergeur (fleet + humans)")
 
-    os.environ["PROV_FORGE_ORG"] = "starfleet"
+    os.environ["LCARS_FORGE_ORG"] = "starfleet"
     check(load_deck().HUMANS_TEAM == "starfleet:humans",
           "equipe: renommer l'org DEPLACE l'equipe du deck — le litteral est mort")
 
-    os.environ["PROV_HUMANS_TEAM"] = "crew"
+    os.environ["LCARS_HUMANS_TEAM"] = "crew"
     check(load_deck().HUMANS_TEAM == "starfleet:crew",
           "equipe: les deux moities viennent des memes variables que le convergeur")
 finally:

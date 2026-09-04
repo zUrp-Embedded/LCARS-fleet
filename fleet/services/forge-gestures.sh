@@ -53,15 +53,15 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # personne ne demandait. Ce fichier reste le seul declarant du nom ; deux temoins de
 # `forge_host_reach.bats` le gardent.
 BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
 # compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
-AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}"
+AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 # Le groupe qui TRAVERSE `/opt/lcars/var/tokens` — jamais celui qui lit. Meme defaut que partout ailleurs
 # dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
 # et la table diraient deux choses differentes du meme objet.
-FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
+FLEET_GROUP="${LCARS_FLEET_GROUP:-fleet}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 # ⚠ NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des jetons de ROLE
 # (`<login>.gitea_token`, plus bas). Le premier lecteur qui globbera ce repertoire ne doit pas
@@ -332,11 +332,11 @@ cmd_apply() {
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
 
-  ensure_ops_repo "${PROV_FORGE_ORG:-fleet}" "$tok"
+  ensure_ops_repo "${LCARS_FORGE_ORG:-fleet}" "$tok"
 
-  publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
+  publicize_org_members "${LCARS_FORGE_ORG:-fleet}" "$tok" "$seed"
 
-  demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"
+  demote_creator_from_owners "${LCARS_FORGE_ORG:-fleet}" "$tok"
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"

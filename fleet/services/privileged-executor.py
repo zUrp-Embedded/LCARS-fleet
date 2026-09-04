@@ -46,7 +46,7 @@ SOCKET_PATH = os.environ.get(
 )
 # ⚠ CETTE ACL BORNE QUI PEUT FRAPPER, ELLE N'AUTORISE RIEN : un membre du groupe ne gagne pas a
 # frapper ce qu'il n'obtiendrait en attendant le tick suivant du reconciliateur.
-SOCKET_GROUP = os.environ.get("PROV_FLEET_GROUP", "fleet")
+SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
 SOCKET_MODE = 0o660
 
 CONVERGE_BIN = os.environ.get(

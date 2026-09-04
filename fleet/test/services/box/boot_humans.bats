@@ -84,7 +84,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     LCARS_UID=1000
-    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_PROV_RC_FILE'
     prov_rc=0
     source '$BLOC'"
 }
@@ -161,7 +161,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
   local fn; fn="$(sed -n '/^publier_verdicts() {/,/^}/p' "$SRC")"
   local l_h l_p
   l_h="$(grep -n 'HUMANS_RC_FILE' <<<"$fn" | head -1 | cut -d: -f1)"
-  l_p="$(grep -n 'PROV_RC_FILE'   <<<"$fn" | head -1 | cut -d: -f1)"
+  l_p="$(grep -n 'RC_FILE'   <<<"$fn" | head -1 | cut -d: -f1)"
   [ -n "$l_h" ] && [ -n "$l_p" ] || { echo "publier_verdicts n'ecrit plus les deux"; return 1; }
   [ "$l_h" -lt "$l_p" ] || { echo "provision.rc ecrit AVANT humans.rc — la course est rouverte"; return 1; }
 }
@@ -182,7 +182,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION=/bin/true
-    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_PROV_RC_FILE'
     prov_rc=0
     source '$BLOC'"
   [ "$status" -eq 0 ]
@@ -206,7 +206,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
     launch() { local n=\"\$1\"; shift 2; printf '%s ACTIF (double)\n' \"\$n\" >> '$JOURNAL'; }
     setsid() { :; }
     PROVISION=/bin/true
-    PROV_RC_FILE='$LCARS_PROV_RC_FILE'
+    RC_FILE='$LCARS_PROV_RC_FILE'
     prov_rc=0
     source '$BLOC'"
   [ "$status" -eq 0 ]

@@ -44,7 +44,7 @@ miroir entre les deux est tenu dans les deux sens par `deploy/tests/runtime_help
 
 ⚖ user 2026-09-04 (chantier deploy-independance, Q3) : « la frontière, c'est : joué uniquement à
 l'install, ou utilisé en prod ? ». Trois familles de modules sont **utilisées en prod** et vivent
-donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `PROV_*`), sur le protocole de
+donc ici, dans le dialecte des modules (`p_*`, `verdict_*`, `LCARS_*`), sur le protocole de
 `lib/module-protocol.sh` (`lib/human-protocol.sh` y ajoute la personne) :
 
 - `human.d/` — les modules per-humain, joués par `human-converger.sh` à chaque humain que la

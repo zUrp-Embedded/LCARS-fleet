@@ -43,7 +43,7 @@ import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'
 SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
 # THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- it only bounds who may KNOCK. Opening it to the world
 # would grant nobody anything, but it would offer this process to every account on the box for no gain.
-SOCKET_GROUP = os.environ.get("PROV_FLEET_GROUP", "fleet")
+SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
 SOCKET_MODE = 0o660
 # ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL : le service sait quel code lancer par la socket
 # d'ARRIVEE, jamais par un mot lu sur le fil.
@@ -54,8 +54,8 @@ ROLES_SOCKET_PATH = os.environ.get(
 # laissant CE service lire le repertoire de la forge primaire — des gestes vises sur la seconde
 # forge presentant les jetons de la premiere.
 ROLE_TOKENS_DIR = os.environ.get("FORGE_ROLE_TOKENS_DIR", "/opt/lcars/var/tokens")
-FORGE_ORG = os.environ.get("PROV_FORGE_ORG", "fleet")
-HUMANS_TEAM = os.environ.get("PROV_HUMANS_TEAM", "humans")
+FORGE_ORG = os.environ.get("LCARS_FORGE_ORG", "fleet")
+HUMANS_TEAM = os.environ.get("LCARS_HUMANS_TEAM", "humans")
 
 # Un nom de compte de role est un nom de compte forge, et il devient un CHEMIN juste en dessous.
 ROLE_RX = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
