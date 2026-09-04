@@ -4,7 +4,7 @@
 kind: CapabilityProfile
 metadata:
   name: architect
-  # vitrine: Il vous parle | Le seul agent avec qui vous échangez. Il traduit votre intention en brief versionné, ouvre les tickets, et vous rend la main quand la flotte bloque.
+  # vitrine: Il vous parle | Votre interlocuteur une fois le projet ouvert : starfleet tient le portefeuille, lui tient le travail. Il traduit votre intention en brief versionné, ouvre les tickets, et vous rend la main quand la flotte bloque.
   # bwrap: the arch is persistent AND sandboxed. Its real need = seeing every project
   # (via the catalogue mounts below), NOT "being the human's home" (a host_launch side
   # effect — harmful: doctrine contamination through the human's ~/.claude + zero sandbox).
