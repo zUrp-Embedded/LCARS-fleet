@@ -31,8 +31,10 @@ setup() {
   local m line bad=0
   for m in "${CALLERS[@]}"; do
     while IFS= read -r line; do
-      # une valeur brute `"$PROV_X"` sans `:-` est la forme qui tue
-      if [[ "$line" =~ ^[[:space:]]+(LCARS|FORGE)_[A-Z_]+=\"\$PROV_[A-Z_]+\" ]]; then
+      # une valeur brute sans `:-` est la forme qui tue — et elle a DEUX ecritures, `"$PROV_X"` et
+      # `"${PROV_X}"` ; la premiere version de ce cas ne voyait que la premiere (relecture hostile
+      # 2026-09-04, M4 : mutation `"${PROV_CATALOGUES_DIR}"` verte ici, rouge au cas 3 seulement)
+      if [[ "$line" =~ ^[[:space:]]+(LCARS|FORGE)_[A-Z_]+=\"\$\{?PROV_[A-Z_]+\}?\" ]]; then
         echo "$m : transmis sans garde → $line" >&2; bad=1
       fi
     done < <(grep -E '^\s+(LCARS|FORGE)_[A-Z_]+=' "$MODS/$m.sh")
@@ -50,7 +52,8 @@ setup() {
     printf '%s\n' '#!/usr/bin/env bash' 'echo "geste:$(basename "$0") verbe:${1:-} login:${LCARS_LOGIN-<absent>}"' > "$root/runtime/services/forge.d/$g.sh"
   done
   for m in "${CALLERS[@]}"; do
-    run env -i PATH="$PATH" PROVISION_LIB="$lib" PROV_MODULE_TAG="$m" bash "$MODS/$m.sh" check
+    # AUCUN PROV_ pose, PROV_MODULE_TAG compris : sa garde `${PROV_MODULE_TAG:-}` est mesuree aussi
+    run env -i PATH="$PATH" PROVISION_LIB="$lib" bash "$MODS/$m.sh" check
     [ "$status" -eq 0 ] || { echo "$m : rc=$status — $output" >&2; return 1; }
     [[ "$output" == *"geste:"*"verbe:check"* ]] || { echo "$m : $output" >&2; return 1; }
     [[ "$output" != *"unbound"* ]]

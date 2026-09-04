@@ -332,7 +332,7 @@ fi
 if [[ "$BATS_FILE_COUNT" -eq 0 ]]; then
   echo "--- bats : aucun fichier .bats trouve sous $HERE (rien a lancer) ---"
 elif command -v bats >/dev/null 2>&1; then
-  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills+provisioning+hooks — execution ---"
+  echo "--- bats : $BATS_FILE_COUNT fichier(s), $BATS_TEST_COUNT test(s) launchers+skills+hooks — execution ---"
 
   # ─── L'ENVIRONNEMENT DU LANCEUR N'ENTRE PAS DANS LE VERDICT ────────────────────────────────────
   #
@@ -377,8 +377,12 @@ elif command -v bats >/dev/null 2>&1; then
   fi
 else
   # bats ABSENT : on ne saute pas en silence — on COMPTE les tests non joues et on avertit fort.
+  # ⚠ LES CORPUS NOMMES ICI SONT CEUX QUE LA DECOUVERTE CI-DESSUS LIT — trois, pas quatre :
+  # `deploy/tests` a sa propre porte (`deploy/gate.sh`, Q4) et n'entre plus dans ce compte. Un
+  # avertissement qui nomme un corpus qu'il ne joue pas promet plus qu'il ne mesure (relecture
+  # hostile 2026-09-04, M2).
   echo "AVERTISSEMENT: bats absent — $BATS_TEST_COUNT test(s) launchers NON executes" \
-       "($BATS_FILE_COUNT fichier(s) : les quatre corpus bats (deploy, git-hooks, test, skills)). Installer : apt/brew install bats-core." >&2
+       "($BATS_FILE_COUNT fichier(s) : les trois corpus bats (test, git-hooks, skills) — deploy/tests est a deploy/gate.sh). Installer : apt/brew install bats-core." >&2
   if [[ "$BATS_MISSING_FATAL" != "0" ]]; then
     echo "ECHEC: bats absent et BATS_MISSING_FATAL=$BATS_MISSING_FATAL — durcissement actif." >&2
     GATE_FAIL=1

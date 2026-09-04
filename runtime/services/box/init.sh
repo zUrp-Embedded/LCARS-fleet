@@ -30,9 +30,10 @@
 # OAuth2) — ce sont `forge.d/` et le minteur, joues par le boot APRES ce geste ; les humains — c'est
 # le convergeur ; les services — c'est le boot.
 #
-# VERDICT : le protocole des modules. `apply` (le seul verbe, avec `seat`) rend 0 converge, 2 drift
-# residuel, 1 echec. `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et
-# rend 3 quand la boite n'a rien pour le determiner — l'etat « en attente de configuration ».
+# VERDICT : le protocole des modules. `apply` rend 0 converge, 2 drift residuel, 1 echec ; `secrets`
+# et `store` rejouent une seule de ses parts (l'import des secrets, le magasin) avec le meme verdict.
+# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 3 quand la boite
+# n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
 : "${LCARS_MODULE_TAG:=box-init}"
@@ -200,15 +201,32 @@ layout() {
   ensure_dir /run/lcars/authority               0750 "$LCARS_AUTHORITY_USER:$LCARS_FLEET_GROUP" || true
   ensure_dir /run/lcars/privileged              0750 "root:$LCARS_FLEET_GROUP" || true
   ensure_dir /run/lock/lcars                    0700 root:root || true
-  if [[ -n "$STORE_ROOT" ]]; then
-    [[ -d "$STORE_ROOT" ]] || { p_drift "magasin $STORE_ROOT absent — volumes non montes ?"; return 0; }
-    ensure_dir "$STORE_ROOT/cache"      2775 "root:$LCARS_FLEET_GROUP" || true
-    ensure_dir "$STORE_ROOT/toolchains" 0755 root:root || true
-    ensure_dir "$STORE_ROOT/sysroots"   0755 root:root || true
-    ensure_dir "$STORE_ROOT/state"      2775 "root:$LCARS_FLEET_GROUP" || true
-  else
-    p_warn "LCARS_STORE_ROOT absent — le compose ne l'a pas pose, le magasin n'est pas converge"
+  store
+}
+# ─── LE MAGASIN ────────────────────────────────────────────────────────────────────────────────
+# Les quatre arbres sont des VOLUMES que l'hote monte sous `LCARS_STORE_ROOT` (`deploy/lib/store.sh`,
+# `LCARS_STORE_TREES`, la source des volumes externes du compose). Un arbre absent est un volume
+# NON MONTE : il se dit (drift), il ne se fabrique pas — un repertoire du conteneur a sa place se
+# prendrait pour un volume, et l'etat partirait avec l'instance. Ce qui se pose ici est le mode et
+# le proprietaire d'un point de montage PRESENT. Relecture hostile 2026-09-04 (S3) : le bloc faisait
+# `ensure_dir` (fabriquait l'arbre) et disait `p_warn` sans STORE_ROOT (aucun verdict).
+store_tree() { # store_tree <nom> <mode> <proprietaire>
+  local d="$STORE_ROOT/$1"
+  [[ -d "$d" ]] || { p_drift "magasin : arbre « $1 » absent ($d) — volume non monte ?"; return 0; }
+  # un echec de pose est COMPTE par ensure_mode (p_fail) : on continue vers l'arbre suivant, le
+  # verdict final le porte — cf. le temoin « un arbre remplace par un lien » d'init_layout.bats
+  ensure_mode "$d" "$2" "$3" || return 0
+}
+store() {
+  if [[ -z "$STORE_ROOT" ]]; then
+    p_drift "LCARS_STORE_ROOT absent — le compose ne l'a pas pose, le magasin n'est pas converge"
+    return 0
   fi
+  [[ -d "$STORE_ROOT" ]] || { p_drift "magasin $STORE_ROOT absent — volumes non montes ?"; return 0; }
+  store_tree cache      2775 "root:$LCARS_FLEET_GROUP"
+  store_tree toolchains 0755 root:root
+  store_tree sysroots   0755 root:root
+  store_tree state      2775 "root:$LCARS_FLEET_GROUP"
 }
 # La skill du siege et la projection du siege dans le magasin — ce que `45-sudoers-toolchain` posait
 # pour l'uid du sysadmin. `pilot.assignee` : a qui le pilote assigne ce que personne ne prend.
@@ -286,9 +304,10 @@ cmd_apply() {
   verdict_apply
 }
 
-case "${1:?usage: init.sh <seat|secrets|apply>}" in
+case "${1:?usage: init.sh <seat|secrets|store|apply>}" in
   seat)    cmd_seat ;;
   secrets) secrets_import; verdict_apply ;;
-  apply) cmd_apply ;;
-  *) p_die "mode inconnu: $1 (seat|secrets|apply)" ;;
+  store)   store; verdict_apply ;;
+  apply)   cmd_apply ;;
+  *) p_die "mode inconnu: $1 (seat|secrets|store|apply)" ;;
 esac

@@ -17,7 +17,7 @@ d'elle-même, sans l'installeur.
 
 ## Le protocole
 
-`init.sh` répond à trois verbes — `<module> seat|secrets|apply` — sur le protocole des modules du produit
+`init.sh` répond à quatre verbes — `<module> seat|secrets|store|apply` — sur le protocole des modules du produit
 (`../lib/module-protocol.sh`).
 
 - `init.sh secrets` : importe dans le répertoire privé de la boîte ce que le compose monte sous
@@ -28,7 +28,11 @@ d'elle-même, sans l'installeur.
   `/run/lcars-seat.login`. Rend `0` résolu, `1` divergence (la semence contredit une source
   durable — on ne renomme pas un home en silence), `3` indéterminable : c'est l'état « en attente
   de configuration », la boîte reste debout pour que `box config` soit jouable.
-- `init.sh apply` : `secrets`, `seat`, puis tout le reste. Rend `0` convergé, `2` drift résiduel, `1` échec,
+- `init.sh store` : le magasin — les quatre arbres que l'hôte monte sous `LCARS_STORE_ROOT`
+  (`cache`, `toolchains`, `sysroots`, `state`) reçoivent leur mode et leur propriétaire. Un arbre
+  absent est un volume non monté : drift nommé, jamais fabriqué dans le conteneur ; `LCARS_STORE_ROOT`
+  non posé est un drift aussi. Rend `0` convergé, `2` drift, `1` échec.
+- `init.sh apply` : `secrets`, `seat`, puis tout le reste (dont `store`). Rend `0` convergé, `2` drift résiduel, `1` échec,
   `3` en attente de configuration.
 
 Ce qu'il lit : `LCARS_UID`, `LCARS_ADMIRAL`, `LCARS_SSH_AUTHORIZED_KEYS`, `FORGE_BASE_URL`,

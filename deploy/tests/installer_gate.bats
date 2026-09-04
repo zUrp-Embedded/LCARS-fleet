@@ -139,6 +139,47 @@ stub_bats() { # stub_bats <rc rendu>
   [ "$a" = "$b" ] || { echo "les deux copies ont DERIVE : porte=$a  shell_gate=$b"; return 1; }
 }
 
+go7_shape() { # go7_shape <fichier> <fonction> — la FORME d'un predicat : fenetre lue, drapeaux, motifs
+  # `echo "$h" | grep` et `grep <<<"$h"` sont une ecriture, pas un sens : on ne garde que ce qui
+  # decide — chaque `head -N` et chaque `grep -q<drapeaux> <motif>`, drapeaux tries.
+  local line flags pat
+  sed -n "/^$2()/,/^}/p" "$1" \
+    | grep -oE "head -[0-9]+|grep -q[A-Za-z]*[[:space:]]+('[^']*'|\"[^\"]*\")" \
+    | while IFS= read -r line; do
+        case "$line" in
+          head*) printf '%s\n' "$line" ;;
+          *) flags="${line#grep -}"; flags="${flags%%[[:space:]]*}"
+             pat="${line#grep -"$flags"}"; pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat:1:${#pat}-2}"
+             printf 'grep -%s %s\n' "$(printf '%s' "$flags" | fold -w1 | sort | tr -d '\n')" "$pat" ;;
+        esac
+      done
+}
+
+@test "LES DEUX PREDICATS GO-7 S'ACCORDENT avec leurs originaux du pre-commit — deux copies derivent (bis)" {
+  # `go7_md_header` et `go7_source_header` sont des copies de `check_md_header` et
+  # `check_source_header` (`runtime/git-hooks/pre-commit`), commentees comme telles et gardees par
+  # rien (relecture hostile 2026-09-04, S4). Meme motif que le bloc BATS_ENV juste au-dessus : ce
+  # qui doit rester egal est la fenetre lue (`head -15`, `head -20`), les drapeaux (`-F`, `-E`, `-i`)
+  # et chaque motif. Un motif appris d'un seul cote ferait passer au pre-commit un fichier que la
+  # porte refuse, ou l'inverse.
+  local hook="$BATS_TEST_DIRNAME/../../runtime/git-hooks/pre-commit"
+  [ -f "$hook" ] || skip "pre-commit absent de cet arbre (contexte installeur seul)"
+  local pair a b
+  for pair in go7_md_header:check_md_header go7_source_header:check_source_header; do
+    a="$(go7_shape "$PORTE_SRC" "${pair%%:*}")"
+    b="$(go7_shape "$hook" "${pair##*:}")"
+    [ -n "$a" ] || { echo "${pair%%:*} : aucun motif lu dans la porte"; return 1; }
+    [ -n "$b" ] || { echo "${pair##*:} : aucun motif lu dans le hook"; return 1; }
+    [ "$a" = "$b" ] || { echo "les deux copies ont DERIVE (${pair%%:*} / ${pair##*:}) :"; echo "porte: $a"; echo "hook : $b"; return 1; }
+  done
+  # TEMOIN DU TEMOIN : le lecteur voit bien les quatre motifs et les deux fenetres — une extraction
+  # morte des deux cotes rendrait deux vides egaux.
+  a="$(go7_shape "$PORTE_SRC" go7_md_header)"
+  [[ "$a" == *'head -15'* && "$a" == *'**Date**'* && "$a" == *'^\s+date:'* && "$a" == *'<!--\s*Date\s*:'* ]] || { echo "md : $a"; return 1; }
+  a="$(go7_shape "$PORTE_SRC" go7_source_header)"
+  [[ "$a" == *'head -20'* && "$a" == *'SOURCE:|AUTHOR:|STARDATE:'* ]] || { echo "source : $a"; return 1; }
+}
+
 # ─── LES DEUX MOITIES AJOUTEES PAR Q4 (plancher shellcheck, en-tetes GO-7) — relecture 2026-09-04 ──
 # La porte de l'installeur est le SEUL porteur de ces deux proprietes pour deploy/ (shell_gate.sh
 # exclut deploy/). Sans ces temoins, les neutraliser laissait ce fichier vert sur ses huit cas.

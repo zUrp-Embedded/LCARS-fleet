@@ -514,19 +514,39 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
   # ../support/refute` la-bas). Un `cmp` serait donc rouge pour toujours — un mur toujours rouge
   # apprend a lire « rouge » comme « normal ». Ce qui doit etre identique est le COMPORTEMENT : les
   # lignes non-commentaires, et elles seules.
+  #
+  # ⚠ LES DEUX COPIES VIVENT DANS DEUX ARBRES FRERES, ET `root` N'EN VOIT QU'UN. `root` vaut
+  # `runtime/` ; `deploy/tests/refute.bash` est sous `../deploy`. Un `Path.wildcard(root <> "**")`
+  # rendait UNE copie, `distinct` valait 1, `length(distinct) <= 1` etait une tautologie, et le mur
+  # imprimait lui-meme sa preuve : « 1 copie(s) de refute.bash, 1 corps distinct(s) » — vert sur ce
+  # qu'il n'avait pas compare (relecture hostile du 2026-09-04, S1). Les arbres sont donc NOMMES,
+  # relatifs a `root` comme les cles de `@test_source_roots`, et l'arbre frere se SAUTE quand
+  # l'artefact ne le porte pas (le stage `build` de l'image exclut `deploy/`) : hors artefact n'est
+  # pas disparu, cf. `Support.mirror_scope`. Et une seule copie vue alors que les deux arbres sont
+  # la n'est pas un accord, c'est l'instrument qui ne lit qu'un cote.
+  @refute_trees ["test", "../deploy/tests"]
+
   @spec check_refute_copies_agree(String.t()) :: Support.result()
   def check_refute_copies_agree(root) do
+    repo = Path.expand("..", root)
+
+    {trees, skipped} =
+      Enum.split_with(@refute_trees, fn t ->
+        not String.starts_with?(t, "../") or Support.mirror_scope(t, root) == :required
+      end)
+
     copies =
-      Path.join(root, "**/refute.bash")
-      |> Path.wildcard()
+      Enum.flat_map(trees, fn t ->
+        Path.join([root, t, "**", "refute.bash"]) |> Path.expand() |> Path.wildcard()
+      end)
       |> Enum.reject(&(String.contains?(&1, "/deps/") or String.contains?(&1, "/_build/")))
-      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.map(&Path.relative_to(&1, repo))
       |> Enum.sort()
 
     bodies =
       Enum.map(copies, fn f ->
         code =
-          Path.join(root, f)
+          Path.join(repo, f)
           |> File.read!()
           |> String.split("\n")
           |> Enum.map(&String.trim_trailing/1)
@@ -537,18 +557,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
       end)
 
     distinct = bodies |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    short? = length(copies) < length(trees)
 
     %{
       id: "tests.refute_copies_agree",
       remediation:
         "reporter la correction sur TOUTES les copies de refute.bash — une seule mise a jour rend " <>
           "un corpus plus permissif que l'autre sans casser le moindre test",
-      status: if(copies != [] and length(distinct) <= 1, do: :pass, else: :fail),
+      status: if(copies != [] and not short? and length(distinct) <= 1, do: :pass, else: :fail),
       evidence:
         cond do
           copies == [] ->
             [
               "INSTRUMENT CASSE — aucun refute.bash trouve, alors que des temoins font `load refute`"
+            ]
+
+          short? ->
+            [
+              "INSTRUMENT CASSE — #{length(copies)} copie(s) vue(s) pour #{length(trees)} arbre(s) " <>
+                "lu(s) (#{Enum.join(trees, ", ")}) : une copie seule s'accorde toujours avec elle-meme"
             ]
 
           length(distinct) > 1 ->
@@ -557,7 +584,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
           true ->
             []
         end,
-      note: "#{length(copies)} copie(s) de refute.bash, #{length(distinct)} corps distinct(s)"
+      note:
+        "#{length(copies)} copie(s) de refute.bash dans #{length(trees)} arbre(s), " <>
+          "#{length(distinct)} corps distinct(s)" <> Support.skipped_note(skipped)
     }
   end
 

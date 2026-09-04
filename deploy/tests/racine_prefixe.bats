@@ -40,6 +40,13 @@ setup() {
 
 # Tout chemin absolu du fichier qui se termine par le binaire de release.
 bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
+# Tout fichier des deux arbres qui NOMME le binaire de release — hors temoins, doc, et ce que mix
+# ou node deposent. `runtime/tmp` bouge sous les pieds des suites ExUnit, on ne le lit pas.
+porteurs_de_release() {
+  grep -rlE '/rel/lcars_fleet/bin/lcars_fleet' "$R/deploy" "$R/runtime" \
+    --exclude-dir=tests --exclude-dir=test --exclude-dir=_build --exclude-dir=deps \
+    --exclude-dir=node_modules --exclude-dir=tmp --exclude-dir=.git --exclude='*.md' 2>/dev/null | sort
+}
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {
   # `deploy/lib/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
@@ -77,8 +84,12 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # c est-a-dire qu elle y soit AVANT d y etre posee. Le mur classe donc par nature, et compte
   # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
   # comparaison seule ne dirait rien d un huitieme qui apparait.
-  local f n=0 nb=0 b
-  for f in "$R/deploy/lib/provision-lib.sh" "$R/runtime/bin/lcars" "$R/runtime/services/box/boot.sh"; do
+  # ⚠ UN BALAYAGE, PAS UNE LISTE. Ce mur nommait trois fichiers ; un quatrieme porteur d'un chemin
+  # de release pose n'entrait pas dans le compte, et l'assertion « UN chemin » restait vraie sur
+  # ce qu'elle n'avait pas lu (relecture hostile 2026-09-04, M5). On lit tout ce qui POSE ou JOUE
+  # dans les deux arbres — pas les temoins ni la doc, qui racontent — et on nomme le porteur.
+  local f n=0 nb=0 b porteur=""
+  while IFS= read -r f; do
     while read -r b; do
       [ -n "$b" ] || continue
       case "$b" in
@@ -89,15 +100,16 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
           [ "$b" = "/runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
             || { echo "$f : chemin de release BATIE non derive de la racine : « $b »" >&2; return 1; } ;;
         *)
-          n=$(( n + 1 ))
+          n=$(( n + 1 )); porteur="${f#"$R/"}"
           [ "$b" = "$BIN_REL" ] || { echo "$f : « $b » au lieu de « $BIN_REL »" >&2; return 1; } ;;
       esac
     done < <(bins_de "$f")
-  done
+  done < <(porteurs_de_release)
   # Lot 6 (2026-09-04) : l'entrypoint n'evalue plus rien lui-meme — ses portes deleguent a
   # « lcars tool » — donc son RELEASE_BIN est parti avec elles. Reste UN chemin litteral de release
   # posee : `_release_bin` de bin/lcars (la lib DERIVE le sien de $PROV_PREFIX).
   [ "$n" -eq 1 ] || { echo "UN chemin de release POSEE attendu (bin/lcars), $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  [ "$porteur" = runtime/bin/lcars ] || { echo "le chemin de release POSEE vit dans « $porteur », pas dans runtime/bin/lcars" >&2; return 1; }
   # ⚠ ZERO CHEMIN BATI DEPUIS LE 2026-09-04 (lot 4) : `prov_release_bin` est mort avec la coupe de
   # 48 — la structure se derive de la release POSEE (61-forge-structure), plus jamais de celle du
   # paquet. Un chemin `_build/prod/rel` qui reapparaitrait ici serait la devinette qui revient.
