@@ -44,5 +44,7 @@ restated, only pointed at.
 - **COMPILE-TIME** `:lcars_fleet, :mcp_socket_idle_timeout_ms` (300_000) and `:mcp_max_conns_per_pod` (8) — the two protection ceilings of `PodSocketAcceptor`, and the ONLY `Application.compile_env` of the whole `lib/`. Frozen into the compiled module: a runtime `put_env` is ignored, silently. No env var exposes them. Listed here BECAUSE they look like the knobs below and are not — `compile_env` buys the module-attribute use and the release boot check, which is why they stay frozen.
 - Knob `:lcars_fleet, :mcp_sock_base` — read by `PodSocketSupervisor`, set by `runtime.exs` from `LCARS_FLEET_MCP_SOCK_BASE`.
 - Knob `:lcars_fleet, :mcp_boot_environment` — read by `Server` (`:pod` → boot refusal).
-- Knobs `:lcars_fleet, :mcp_pod_resolver` / `:forge_client` / `:project_onboard` / `:delegation_org` — read by `PodTools.Delegation` (runtime-dispatch seams + onboarded forge org).
+- Seams `:lcars_fleet, :mcp_pod_resolver` / `:mcp_forge_client` / `:mcp_project_onboard` / `:mcp_pod_reaper` — read by the `Delegation` family (module injection for tests; the forge and project targets are compile deps). The org of an onboarded project is the `catalogue` argument (`Delegation.Gate.resolve_org/1`), never a knob.
+- Other seams: `:mcp_probe_forge_client` (`Probe`), `:forge_actions` (shared with two pilot modules, unprefixed on purpose — `Probe` says why), `:mcp_tool_handler` (`PodSocketAcceptor`), `:mcp_brief_ops_root`, `:mcp_workshop_root` (delegation roots for tests).
+- Knobs `:mcp_start_socket_warden` (`Supervisor`), `:mcp_allow_delete_project` (`Portfolio`, `=== true` arms the irreversible verb), `:toolchain_auto_merge` (`Toolchain`).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/mcp.ex`).

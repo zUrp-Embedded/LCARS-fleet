@@ -253,7 +253,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # INVALID JSON (truncated/broken line) -> -32700 response + warning: NEVER swallowed
   # silently — swallowing turns every invalid line into a 30 s timeout
   # indistinguishable on the bridge side, zero BEAM trace. Another `method`
-  # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled above) -> -32601.
+  # with an `id` (anomaly: `initialize` is answered by the bridge, `tools/list` is handled here) -> -32601.
   defp handle_line(line, pod_id, tools) do
     # THE POD IS UP, AND THIS IS THE ONLY IN-BAND PROOF THAT EXISTS DURING A COLD START. A line on
     # this socket means the pod's MCP client is connected — which happens at TUI init, before the
@@ -316,11 +316,11 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # Slow-call trace uses channel-owned identity, never a wire argument.
   @slow_tool_warn_ms 5_000
 
-  # THE LIST NOW AUTHORIZES, IT NO LONGER ONLY DISPLAYS (6-099). `tools/list` filtered the surface
-  # while `tools/call` dispatched anything: a pod that knew an off-list name called it, and the only
-  # real barrier was the per-tool role gate. Two consequences, and the second is the one that had no
-  # workaround: an omission in a profile hid a tool from discovery without preventing its use, and
-  # two variants of the SAME role could not be given different MCP surfaces at all.
+  # THE LIST AUTHORIZES, IT DOES NOT ONLY DISPLAY (6-099). A `tools/list` that filters the surface
+  # while `tools/call` dispatches anything lets a pod that knows an off-list name call it, with the
+  # per-tool role gate as the only real barrier — an omission in a profile then hides a tool from
+  # discovery without preventing its use, and two variants of the SAME role cannot be given
+  # different MCP surfaces at all.
   #
   # ⚠ CE N'EST PAS UN RENVERSEMENT DE LA SEMANTIQUE GRAVEE de `scope.allowedTools`. Celle-ci
   # ("allowedTools is an INTENT, disallowedTools is a WALL") est MESUREE sur le CLI vendor, qui est
@@ -383,9 +383,9 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   end
 
   # A COMPLETED tools/call is the only liveness signal that PROVES the pod acted, and the acceptor
-  # was the only one holding it: `:timer.tc` above measured every call and kept none. The mtime of
-  # this marker is that timestamp, made durable for a reader in another domain (`Pod.Liveness`)
-  # that cannot call into MCP.
+  # is the only one holding it (`:timer.tc` above measures every call). The mtime of this marker is
+  # that timestamp, made durable for a reader in another domain (`Pod.Liveness`) that cannot call
+  # into MCP.
   #
   # Marked AFTER the call returns, deliberately: a mark posed on entry would keep re-arming the
   # deadline of a pod stuck INSIDE a tool, which is precisely the death the watchdog exists to
@@ -414,8 +414,8 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # comme les autres est une liste qu'un renommage rate — et posee LOIN des definitions qu'elle
   # pretend couvrir, elle porte l'autre moitie du probleme.
   #
-  # L'effet vit desormais A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate.
-  # Ici on ne fait plus que LIRE une decision prise la-bas.
+  # L'effet vit A COTE de chaque `deftool`, et son exhaustivite est prouvee par le gate. Ici on ne
+  # fait que LIRE une decision prise la-bas.
   #
   # `:unknown` (un outil que `PodTools` ne declare pas) est traite comme une MUTATION : c'est la
   # direction sure — un mutateur non declare est protege en attendant que le gate le dise, plutot

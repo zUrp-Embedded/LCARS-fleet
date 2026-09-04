@@ -142,17 +142,16 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
   # seul arbre qui doit rester en lecture seule pour tout le monde.
   #
   # La MATIERE, elle, a une destination : une note de conception est de la DOC. Elle vit sur la face
-  # `doc`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
+  # `workshop`, que l'architecte monte en RW — il y ecrit directement, sans outil, comme il ecrit le
   # reste de la documentation avec l'humain.
 
   @doc """
   Retires a ticket WITHOUT inventing a replacement.
 
-  Every piece of this gesture already existed — closing the live PR, lifting the pods, `stage/retired`,
-  the comment — as a SIDE EFFECT of `create_issue(supersedes:)`. The cost was measured on the bench:
-  to retire a ticket the architect had to create another one, which then went out to dispatch and
-  landed on a producer with nothing to produce. A real gesture the fleet knows how to execute, that
-  one had to disguise as a ticket for want of a door.
+  Every piece of this gesture — closing the live PR, lifting the pods, `stage/retired`, the
+  comment — also runs as a SIDE EFFECT of `create_issue(supersedes:)`. Without this door the
+  architect retires a ticket by creating another one, which goes out to dispatch and lands on a
+  producer with nothing to produce (measured on the bench).
 
   Where it DIVERGES from the supersede, and why: a supersede moves the edges onto the replacement.
   A retirement has no replacement, so it LIFTS them. Leaving them would be worse than either — a
@@ -169,12 +168,10 @@ defmodule Fleet.MCP.PodTools.Delegation.Retirement do
       edge.
     * the edges are lifted AFTER the close, because the CLOSE is the point of no return.
 
-  ⚠ **CE PARAGRAPHE ENONÇAIT LA REGLE QUE L'ORDRE VIOLAIT.** Il disait — et il dit toujours, deux
-  lignes plus bas — « Any failure ABORTS before the close: closing RELEASES, so a half-executed
-  retirement is worse than none ». Or `release_dependents/4` levait les aretes AVANT ce close. Un
-  echec du commentaire ou de la fermeture abandonnait donc la sequence avec les dependants DEJA
-  liberes et le bloqueur TOUJOURS OUVERT — l'etat exact que cette phrase declare pire que rien,
-  produit un cran plus tot que la ou elle regardait.
+  ⚠ LES ARETES SE LEVENT APRES LE CLOSE, JAMAIS AVANT. Levees avant, un echec du commentaire ou
+  de la fermeture abandonne la sequence avec les dependants DEJA liberes et le bloqueur TOUJOURS
+  OUVERT — l'etat exact que la regle ci-dessous (« a half-executed retirement is worse than none »)
+  declare pire que rien.
 
   MESURE QUI DECIDE DE L'ORDRE : `Lease.open_blockers/2` filtre `state == "open"`. Une arete
   residuelle vers un ticket FERME ne bloque donc rien — c'est le CLOSE qui libere, la levee d'arete

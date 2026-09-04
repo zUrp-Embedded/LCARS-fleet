@@ -94,11 +94,9 @@ defmodule Fleet.MCP.PodTools.WorkItems do
   # object and ships its content — the pod never fetches anything, and it has no path to the tree
   # that object lives in.
   #
-  # This comment claimed the opposite for one commit longer than it was true, and the cost was
-  # measured: it described the field as a short pointer into a mounted ops, which is what the
-  # rail did BEFORE the order was weaned off that mount. A reader — human or agent — meets the
-  # claim before the code, so a stale comment on a payload contract does not sit inert: it sends
-  # the next change to the wrong mechanism.
+  # NEVER a short pointer into a mounted ops tree: the pod mounts no ops. A stale claim on a payload
+  # contract does not sit inert — a reader, human or agent, meets it before the code and sends the
+  # next change to the wrong mechanism.
   #
   # nil `brief_ref`/`brief_sha` means the order was never materialized (transient failure, marked
   # unprovable) or a non-producer mandate: nothing to cite, the text stands alone.

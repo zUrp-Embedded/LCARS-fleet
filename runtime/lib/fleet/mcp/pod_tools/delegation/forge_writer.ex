@@ -97,11 +97,11 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   façons de brancher un test sur des moitiés différentes de la même forge, et un test qui remplace
   l'une sans l'autre verrait ses écritures partir sur la vraie.
 
-  ⚠ CE MODULE PORTAIT SA PROPRE COPIE DU DÉFAUT (`@default_writer Fleet.Forge.Client`). La clef
-  était bien unique — le paragraphe ci-dessus y veillait — mais pas le REPLI : changer
-  l'implantation canonique d'un côté laissait l'autre sur l'ancienne, et seulement en l'absence de
-  configuration, donc jamais en test et toujours en production. La délégation rend l'invariant vrai
-  par construction au lieu de le rendre vrai par relecture. Même forme que `EscalationForge`.
+  ⚠ PAS DE COPIE DU DÉFAUT ICI (un `@default_writer Fleet.Forge.Client` à côté) : une clef unique
+  avec deux REPLIS laisse l'un sur l'ancienne implantation quand l'autre change — et seulement en
+  l'absence de configuration, donc jamais en test et toujours en production. La délégation rend
+  l'invariant vrai par construction au lieu de le rendre vrai par relecture. Même forme que
+  `EscalationForge`.
   """
   @spec resolved() :: module()
   def resolved, do: Fleet.MCP.PodTools.Delegation.ForgeClient.resolved()

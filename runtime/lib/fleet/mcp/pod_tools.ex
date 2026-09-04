@@ -31,8 +31,8 @@ defmodule Fleet.MCP.PodTools do
 
   ## Pourquoi ce fichier est GROS, et pourquoi il le reste
 
-  Mesure du contenu, pas impression : 1031 lignes de `deftool` (32 declarations de schema wire),
-  388 lignes de clauses de `handle_tool_call/3`, et le reste en `@moduledoc` et attributs. Il ne
+  Sa forme, pas une impression : deux tiers de `deftool` (32 declarations de schema wire), le
+  reste en clauses de `handle_tool_call/3` (une soixantaine), `@moduledoc` et attributs. Il ne
   porte que TROIS fonctions publiques et trois privees.
 
   Il n'est donc pas decomposable, et ce n'est pas une preference :
@@ -41,7 +41,7 @@ defmodule Fleet.MCP.PodTools do
       ailleurs les sortirait de la table que cinq murs lisent comme autorite unique
       (`mcp.tools_gated`, `mcp.tool_effects`, `mcp.wire_inputschema`, `mcp.seam_surface_declared`,
       `mcp.required_for_real_backend`) — et cette table EST le contrat du serveur.
-    * les 59 clauses de dispatch sont les clauses d'UNE fonction. Elixir exige qu'elles vivent dans
+    * les clauses de dispatch sont les clauses d'UNE fonction. Elixir exige qu'elles vivent dans
       un seul module ; les repartir n'est pas un arbitrage, c'est impossible.
 
   Chaque clause fait en moyenne sept lignes et delegue : le metier vit dans `Delegation.*` et
@@ -557,6 +557,13 @@ defmodule Fleet.MCP.PodTools do
       "type" => "object",
       "properties" => %{
         "name" => %{"type" => "string"},
+        "catalogue" => %{
+          "type" => "string",
+          "description" =>
+            "The catalogue the project is enrolled INTO — its forge org, fixed for the project's " <>
+              "life. REQUIRED like on project_create: adopting creates a repo, so the org is a " <>
+              "declaration, never inferred."
+        },
         "description" => %{"type" => "string"},
         "justification" => %{"type" => "string"},
         "workflow_map" => %{"type" => "string"}

@@ -41,7 +41,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   POLLER takes over (assigned unlocked issue → spawns the producer role).
   The ROUTING (burning the workflow_map) is NOT here: it is the responsibility of the
   SYSTEM (the poller onboards any assigned routeless issue, cf.
-  `StepDispatcher.ensure_workflow_map_or_onboard` on the fleet_pilot side).
+  `StepDispatcher.ensure_workflow_map_or_onboard`, `Fleet.Pilot` side).
 
   Refusals (fail-closed, nothing is created): non-architect role / unknown pod (gate),
   `:role_token_unavailable` (the role account's token absent = provisioning hole —
@@ -196,7 +196,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
     end
   end
 
-  # Split out of `create_issue/9` so the lot's `with` stays readable: the creation and everything
+  # Split out of `create_issue/10` so the lot's `with` stays readable: the creation and everything
   # the forge owes the ticket afterwards (dependency edges, supersede retirement).
   defp create_and_finish(
          forge,
@@ -506,7 +506,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
             {:ok, number} ->
               # DECOUPLING: create_issue only CREATES (author=arch, assignee=human). The ROUTING
               # (burning the workflow_map) is NOT here: it is the responsibility of the SYSTEM — the POLLER burns
-              # the default workflow_map (brief-gate) on any assigned routeless issue (cf. fleet_pilot).
+              # the default workflow_map on any assigned routeless issue (cf. `Fleet.Pilot`).
               # A single actor creates+assigns; the system routes. (Uniform: a routeless human issue is
               # onboarded the same way.) The visual TYPE is a label for humans — NEVER routing: the
               # result is discarded, nothing mechanical reads it, and its absence is directly
