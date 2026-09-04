@@ -94,14 +94,14 @@ check_box_services() {
   # un etat que ce moment precis ne peut pas avoir — le check se serait refuse lui-meme a chaque
   # boot. Le superviseur vivant est donc le discriminant : absent, on est DANS le boot et l'etat
   # verifiable est « en place » ; present, on est apres, et un programme muet est un vrai drift.
-  pgrep -f "$sup" >/dev/null 2>&1 && sup_vivant=1
+  pgrep -f "$(prov_pgrep_pattern "$sup")" >/dev/null 2>&1 && sup_vivant=1
 
   for e in "${STARTERS[@]}"; do
     IFS=: read -r prog rel unit <<<"$e"
     [[ "$rel" == "unit" ]] || continue
     if [[ ! -x "$dir/$prog" ]]; then
       p_drift "$unit : « $prog » absent ou pas exécutable ($dir/$prog) — $(consequence_of "$unit")"
-    elif pgrep -f "$prog" >/dev/null 2>&1; then
+    elif pgrep -f "$(prov_pgrep_pattern "$prog")" >/dev/null 2>&1; then
       p_ok "$unit : « $prog » tenu par le superviseur"
     elif [[ "$sup_vivant" -eq 1 ]]; then
       p_drift "$unit : « $prog » en place mais MUET alors que le superviseur tourne — $(consequence_of "$unit")"

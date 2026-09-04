@@ -381,3 +381,30 @@ I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
   refute grep -qE "$I16_RE" <<<'  [[ -n "$(head -20 "$1" | grep -Ei "SOURCE:")" ]]'
   refute grep -qE "$I16_RE" <<<'  n="$(printf "%s\n" "${a[@]}" | grep -c x)"'
 }
+
+# ─── MUR I17 : `pgrep -f` / `pkill -f` NE MATCHENT PAS LEUR PORTEUR (playbook : trois fois mordu) ──
+# `pgrep -f "$x"` voit tout argv qui contient `x` — dont le `bash -c`, le `ssh … '…'` ou le temoin
+# qui a lance la mesure. La forme sure passe par `prov_pgrep_pattern` (lib) : `[x]yz` matche `xyz`
+# et jamais la chaine `[x]yz` qui le porte. Perimetre : tout script de `deploy/` hors tests.
+I17_RE='p(grep|kill)[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*f[[:space:]]+"?[^"[:space:]]*"?'
+
+@test "MUR I17: tout pgrep -f / pkill -f de deploy/ passe son motif par prov_pgrep_pattern" {
+  local root f hits=0 pop=0 first
+  root="$(cd "$DEPLOY" && pwd)"
+  while IFS= read -r f; do
+    IFS= read -r first < "$f" || true
+    case "$f" in *.sh) ;; *) [[ "$first" =~ ^#!.*bash ]] || continue ;; esac
+    while IFS= read -r line; do
+      pop=$((pop + 1))
+      [[ "$line" == *'prov_pgrep_pattern'* ]] && continue
+      echo "MUR I17 rompu — ${f#"$root"/} : $line" >&2; hits=$((hits + 1))
+    done < <(code "$f" | grep -E "$I17_RE" | grep -vE '^[[:space:]]*prov_pgrep_pattern\(\)')
+  done < <(find "$root" -type f -not -path '*/tests/*' | sort)
+  [ "$hits" -eq 0 ]
+  # GARDE D INSTRUMENT : les trois sites connus (60, 64 x2) doivent etre vus, sinon le grep est aveugle
+  [ "$pop" -ge 3 ] || { echo "instrument casse : $pop site(s) pgrep/pkill -f vu(s), 3 au moins attendus" >&2; return 1; }
+  # le mur mord et ne mord que la forme nue
+  grep -qE "$I17_RE" <<<'  if pgrep -f "$PREFIX_REL" >/dev/null; then'
+  grep -qE "$I17_RE" <<<'  pkill -TERM -f "$sup"'
+  refute grep -qE "$I17_RE" <<<'  pgrep -x supervise.sh'
+}

@@ -206,7 +206,7 @@ apply() {
     verdict_apply
   fi
 
-  if pgrep -f "$PREFIX_REL" >/dev/null 2>&1; then
+  if pgrep -f "$(prov_pgrep_pattern "$PREFIX_REL")" >/dev/null 2>&1; then
     p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet stop && fleet start » pour prendre le nouveau build"
   fi
 

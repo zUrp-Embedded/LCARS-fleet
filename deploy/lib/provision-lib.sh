@@ -675,6 +675,14 @@ ensure_group() {
 # rend 141 — « pas membre » alors qu'il l'est, une fois sur dix sous charge. Six sites portaient la
 # forme (20, 21, 22 x2, cette lib x2). Capturer, puis tester la capture : aucun lecteur ne ferme
 # rien avant la fin. MUR I16 (idiom_walls) interdit le retour de la forme.
+# `pgrep -f "$x"` VOIT SON PROPRE APPELANT des que l'argv de celui-ci contient `x` (un `bash -c
+# '... pgrep -f x ...'`, un `ssh host 'pgrep -f x'`, un temoin qui cite le chemin) — trois fois
+# mordu dans ce chantier, une fois en tuant la commande qui mesurait. Le motif `[x]yz` matche
+# `xyz` mais pas la chaine `[x]yz` qui le porte : c'est LA forme, et le MUR I17 l'exige partout.
+prov_pgrep_pattern() { # prov_pgrep_pattern <chaine> -> le motif ERE qui ne matche pas son porteur
+  local s="$1"; printf '[%s]%s\n' "${s:0:1}" "${s:1}"
+}
+
 prov_in_group() { # prov_in_group <user> <groupe> -> 0 si <user> est membre de <groupe> (session : id -nG)
   local groups; groups="$(id -nG "$1" 2>/dev/null)" || return 1
   [[ " $groups " == *" $2 "* ]]

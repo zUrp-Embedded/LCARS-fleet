@@ -1461,3 +1461,14 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   module_sh 'if prov_in_group compte-decor-inexistant-di13 fleet; then echo DEDANS; else echo DEHORS; fi'
   [ "$output" = "DEHORS" ]
 }
+
+@test "prov_pgrep_pattern : le motif matche la cible et JAMAIS la commande qui le porte" {
+  local m; m="$(bash -c "source '$LIB' >/dev/null 2>&1; prov_pgrep_pattern zorglub-$$")"
+  [ "$m" = "[z]orglub-$$" ]
+  # le porteur est le `bash -c` lui-meme : son argv contient le motif. Avec le crochet, pgrep ne
+  # le voit pas ; avec la chaine nue, il SE voit — c est le piege que le motif ferme.
+  run bash -c "pgrep -f '$m' >/dev/null && echo VU || echo PAS-VU"
+  [[ "$output" == *"PAS-VU"* ]]
+  run bash -c "pgrep -f 'zorglub-$$' >/dev/null && echo VU || echo PAS-VU"
+  [[ "$output" == "VU" ]]
+}
