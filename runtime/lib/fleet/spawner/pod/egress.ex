@@ -315,10 +315,10 @@ defmodule Fleet.Spawner.Pod.Egress do
   defp refusal_for(_), do: @refuse
 
   # Exact name, or a `*.` prefix that is a SUBDOMAIN rule anchored on the right — never a
-  # `contains`. The first version refused every pattern on the grounds that "a rule reasoning about
-  # where a domain ends will be wrong once"; true of a naive suffix test, and wrong as an argument
-  # against any pattern at all: the vendor's own error reporting needs `*.sentry.io` and
-  # `*.ingest.us.sentry.io`, so a matcher without subdomains cannot express the published list.
+  # `contains`. "A rule reasoning about where a domain ends will be wrong once" is true of a naive
+  # suffix test, and wrong as an argument against any pattern at all: the vendor's own error
+  # reporting needs `*.sentry.io` and `*.ingest.us.sentry.io`, so a matcher without subdomains
+  # cannot express the published list.
   #
   # `*.sentry.io` accepts `x.sentry.io`, and refuses `sentry.io.attacker.net` (the dot anchors the
   # END of the candidate) as well as bare `sentry.io` (declare it too if it is wanted — a wildcard

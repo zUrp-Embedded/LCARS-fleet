@@ -3,7 +3,7 @@ defmodule Fleet.Spawner.Pod.SessionMint do
   MINT of a pod's `session_id` at spawn — decision extracted from `Fleet.Spawner.Pod`.
 
   Decides WHICH session_id a pod receives at its creation: deterministic hexspeak for a catalogued
-  role (encoded by `Fleet.Spawner.SessionId.encode/4`, the PURE encoder), `UUID.uuid4()` for a
+  role (encoded by `Fleet.Spawner.SessionId.encode/5`, the PURE encoder), `UUID.uuid4()` for a
   non-catalogued role, REFUSAL (raise) for a project-bound role without `repo_id`. The separation of
   authorities is deliberate: `SessionId` states "no role refusal: those decisions live at the spawn
   level, not here" — so the decision lives HERE (spawn side), the string arithmetic stays over
@@ -24,7 +24,7 @@ defmodule Fleet.Spawner.Pod.SessionMint do
     * NON-catalogued role — `UUID.uuid4()` is legitimate.
     * fleet-level (arch, gatekeeper) — repo `0000`, no project dimension.
     * project-bound (eng, judges) — the hexspeak identity REQUIRES the repo (`opts[:repo_id]`).
-        - WITH repo → deterministic id (`Fleet.Spawner.SessionId.encode/4`).
+        - WITH repo → deterministic id (`Fleet.Spawner.SessionId.encode/5`).
         - WITHOUT repo → REFUSAL (raise `ArgumentError`): the absence of a repo signals a forge that
           has NOT resolved the id (forge down). We NEVER fabricate a random UUID to mask this
           (false identity, not reconstructible). The raise is caught by the try/rescue of
@@ -41,10 +41,10 @@ defmodule Fleet.Spawner.Pod.SessionMint do
 
     # THE <UID> BOUND IS REFUSED HERE, exactly like its twin <REPO4> ten lines below (DR-020). Both
     # are four decimal digits of the same identity, both are hard-guarded in `SessionId.encode/5`,
-    # and only one of them had a diagnosed refusal on the caller side. The other produced a bare
-    # `FunctionClauseError` — and not on an exotic path: `encode/5` is reached by EVERY catalogued
-    # role, fleet-scope included, so on a host whose human sits above 9999 NO POD CAN BE CREATED AT
-    # ALL, with an error naming neither the uid nor the bound.
+    # and both need a diagnosed refusal on the caller side: left to the encoder's guard, the
+    # failure is a bare `FunctionClauseError` — and not on an exotic path: `encode/5` is reached by
+    # EVERY catalogued role, fleet-scope included, so on a host whose human sits above 9999 NO POD
+    # CAN BE CREATED AT ALL, with an error naming neither the uid nor the bound.
     #
     # 0..9999 is a DEPLOYMENT assumption and the moduledoc of `SessionId` says so: desktop uids fit,
     # container userns/subuid ranges live at 100000+, and `deploy/docker` is precisely where it can

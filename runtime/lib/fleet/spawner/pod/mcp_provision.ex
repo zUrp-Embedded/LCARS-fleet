@@ -7,7 +7,7 @@ defmodule Fleet.Spawner.Pod.McpProvision do
 
   - the **per-pod AF_UNIX SOCKET**: `ensure_pod_socket/1` (creation before launch) /
     `release_pod_socket/1` (release at terminate) via the RUNTIME SEAM
-    `:mcp_socket_provisioner`;
+    `:spawner_mcp_socket_provisioner`;
   - the **`.mcp-fleet.json`** (`alwaysLoad:true`) that claude loads at boot + the copy of the stdio
     bridge (`fleet_mcp_bridge.py`) INTO the pod (`maybe_provision_mcp_config/5`);
   - the pod process's **MCP env vars** (`mcp_channel_env/2`).
@@ -144,8 +144,8 @@ defmodule Fleet.Spawner.Pod.McpProvision do
   # Builds the `fleet` MCP server entry of the `.mcp-fleet.json`, provisioning
   # the stdio bridge INTO the pod_dir.
   #
-  # bwrap projects a CLOSED WORLD for the pod — it mounts only
-  # `/usr`, `/etc`, `/sys`, `$POD_DIR`, `$GIT_MIRROR`, the vendor and the sock-dir.
+  # bwrap projects a CLOSED WORLD for the pod — `/usr`, a few `/etc` files, `/sys`, `$POD_DIR`,
+  # the vendor, the socket dirs and the declared mounts (the list is `bin/bwrap_launch.sh`).
   # `/var/lib/lcars` is NOT mounted there. Launching the bridge via its HOST path
   # (`/var/lib/lcars/bin/...py`) with a log under `/var/lib/lcars/` would fail:
   # INSIDE the sandbox that path does not exist → `bash -c` fails → the `fleet` MCP

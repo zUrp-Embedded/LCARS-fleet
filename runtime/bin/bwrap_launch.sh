@@ -333,12 +333,12 @@ exec env -i "$BWRAP_BIN" \
          "$socat_bin" TCP-LISTEN:"$egress_port",bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:"$egress_sock" &
        fi
        "$tmux_bin" -S "$sock" new-session -d -s "$name" "$@"
-       # THE HOLDER DIES WITH THE AGENT. It used to hold unconditionally, so a pod whose agent had
-       # exited kept its namespace, its Port, and therefore its LIVENESS. Measured 2026-08-11: the
-       # tmux server was gone, `lcars attach` said "no sessions", and the fleet re-briefed that pod
-       # at every tick because its Port was still open; the ticket stayed lcars-in-flight forever.
-       # Teardown was wired one way only (close the Port -> the sleep dies -> tmux and claude fall);
-       # this is the return leg. The Port closing lands on the rail that already exists —
+       # THE HOLDER DIES WITH THE AGENT. A holder that outlives its tmux server keeps the
+       # namespace, the Port, and therefore the LIVENESS of the pod: the fleet re-briefs that pod at
+       # every tick because its Port is still open, and the ticket stays lcars-in-flight forever
+       # (measured 2026-08-11: tmux server gone, `lcars attach` saying "no sessions", Port open).
+       # Teardown is wired both ways: close the Port -> the sleep dies -> tmux and claude fall; and
+       # this return leg. The Port closing lands on the rail that already exists —
        # `Pod.handle_event({:exit_status, _})` -> `pod.failed` / `exited_before_result` -> incident
        # -> reconciliation reclaims the lock -> a real re-dispatch, instead of a brief into a corpse.
        # Poll rather than block: no tmux primitive waits on "this server exited", and 5s of latency

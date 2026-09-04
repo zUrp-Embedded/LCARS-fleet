@@ -20,17 +20,15 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   - `pod_cwd/3` — cwd seen by the agent. Public because also called by recall (`maybe_recall_restore`).
   - `sandbox_home/2` — intra-pod home. Public because also passed to `McpProvision` (`:projecting` state).
   - `maybe_put_pod_cwd/4`, `maybe_put_sandbox_home/3`, `launch_home/3`, `permission_mode/1`,
-    `skills_plugins_env/1`, `pod_mounts_env/2` — env builders, merged by the `:launching` state.
+    `skills_plugins_env/1`, `skills_paths_env/1`, `toolchain_env/0`, `pod_mounts_env/4` — env
+    builders, merged by the `:launching` state (through `LaunchEnv.build/4`).
+  - `output_compression?/1` — the effective compression verdict; see its `@doc`, it reaches no
+    launch today.
+  - `pin_reference_face/2`, `pin_object/4`, `other_face_reference_path/3` — the pinned reference
+    face and the single-object pin; public because the dispatch pins a brief the same way.
   - `remote_control?/1` — EFFECTIVE Desktop visibility, the ONE authority. Public because its three
     consumers sit in three places (slot capture, slot resume, and the vendor launcher through
     `LCARS_POD_REMOTE_CONTROL`); a second derivation is what it exists to prevent.
-  """
-
-  @doc """
-  Pod's EFFECTIVE project: the brief (`opts[:project]`, dynamic) takes precedence over the
-  cap-profile's static `spec["project"]`, default empty map. Drives the placement (project cwd)
-  AND the end-of-step-run payload — hence the public visibility (single source, no re-derivation
-  on the Pod side).
   """
 
   require Logger
@@ -38,6 +36,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   alias Fleet.CapProfile
   alias Fleet.Credentials.Shell
 
+  @doc """
+  Pod's EFFECTIVE project: the brief (`opts[:project]`, dynamic) takes precedence over the
+  cap-profile's static `spec["project"]`, default empty map. Drives the placement (project cwd)
+  AND the end-of-step-run payload — hence the public visibility (single source, no re-derivation
+  on the Pod side).
+  """
   @spec effective_project(keyword() | nil, CapProfile.t()) :: map()
   def effective_project(opts, cap_profile) do
     Keyword.get(opts || [], :project) || get_in(cap_profile.spec, ["project"]) || %{}
@@ -184,7 +188,8 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   "12 archs" bug wearing a new hat.
 
   So this is the single site and the launcher does NOT derive: `LaunchEnv.build/4` exports the
-  answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it.
+  answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it (its own `jq` read of the field
+  runs only when the variable is absent, i.e. a launch outside the spawner).
 
   The declaration is the FLOOR; the fleet's debug mode (`fleet_v2 start --debug` →
   `:debug_visibility`) is the only thing above it, and it is MONOTONE by construction — an `or`,
@@ -287,7 +292,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
 
   @doc """
   `LCARS_SKILLS_PATHS` = the FILTERED plain-skill dirs to bind RO into the pod's
-  `~/.claude/skills/` (BL-6-22 — the delivery half `filter_skills` never had). NEWLINE-delimited
+  `~/.claude/skills/` (BL-6-22 — the delivery half of `filter_skills`). NEWLINE-delimited
   `name:abs_path` entries — the `LCARS_POD_MOUNTS` pattern, NOT the plugins one above: plugins
   carry bare NAMES, these carry PATHS, and a space-separated format would shatter on a skills
   root containing a space. The first `:` separates (a skill name is a `Fleet.Slug`, no `:` in

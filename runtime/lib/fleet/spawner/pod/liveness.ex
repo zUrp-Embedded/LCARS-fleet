@@ -116,8 +116,8 @@ defmodule Fleet.Spawner.Pod.Liveness do
   re-probe next tick), the same benefit-of-the-doubt as the missing baseline; only a sample
   where at least one signal IS readable, and neither grew, is genuine silence.
 
-  The tuple has GROWN over time (2 -> 3 -> 4 signals) and every arity is still answered, because a
-  sample is compared against the PREVIOUS one: a node that adds a signal, or a test that injects a
+  Every arity from 2 to 4 signals is answered, because a sample is compared against the PREVIOUS
+  one: a node that adds a signal, or a test that injects a
   probe of another shape, would otherwise meet a sample pair of mismatched arity. Unanswered, that
   pair raises `FunctionClauseError` and kills the pod inside its own liveness tick — the one place
   where an observation failure must never be fatal. It reads as UNKNOWN, like the all-nil sample.
@@ -128,12 +128,12 @@ defmodule Fleet.Spawner.Pod.Liveness do
   def liveness_moved?(_prev, {nil, nil, nil}), do: true
   def liveness_moved?(_prev, {nil, nil, nil, nil}), do: true
 
-  # 3-tuple (current default probe): the PANE hash is the primary in-generation signal — the
+  # PANE hash (3rd signal): the primary in-generation signal — the
   # claude TUI repaints (spinner + elapsed counter) during a long SINGLE generation, exactly
   # when the jsonl sits between message boundaries and reads as silence (measured kill: a
   # producer writing one large doc for >5 min died mid-work). A pane CHANGE is movement; a nil
   # hash (capture failed) contributes nothing (anti-kill bias, same as the other signals).
-  # 4-tuple (current default probe): the 4th signal is the pod's LAST COMPLETED MCP tool call, and
+  # MCP activity (4th signal, the default probe's full shape): the pod's LAST COMPLETED MCP tool call, and
   # it is the only one of the four that PROVES activity instead of inferring it — a growing jsonl,
   # cpu jiffies and a repainting pane all say "something happened near the pod", an MCP call says
   # "the pod acted". It is also the only one that survives a pod with no readable tmux pane.
@@ -178,12 +178,6 @@ defmodule Fleet.Spawner.Pod.Liveness do
   defp pane_changed?(prev, now) when is_integer(prev) and is_integer(now), do: prev != now
   defp pane_changed?(_, _), do: false
 
-  # Hash of the visible REPL screen — via the SILENT capture (`capture_pane_quiet`): this runs at
-  # tick cadence, and the loud variant's warning (an escalation contract: an empty pane must be
-  # told apart from a blank screen) turned into a per-tick flood for every pod without tmux.
-  # An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive); a generating pod
-  # repaints every second (elapsed counter) -> the signal the jsonl cannot carry mid-message.
-  # Failure/absence -> nil = NO SIGNAL, never silence (anti-kill bias, cf. `liveness_moved?/2`).
   # Posix mtime of the marker the MCP acceptor touches when a tools/call COMPLETES. Reading a
   # timestamp someone else wrote is the whole point: the acceptor holds the proof and lives in a
   # domain this one may not call, so the fact travels as a file — the same shape as `jsonl_size`.
@@ -198,6 +192,12 @@ defmodule Fleet.Spawner.Pod.Liveness do
     end
   end
 
+  # Hash of the visible REPL screen — via the SILENT capture (`capture_pane_quiet`): this runs at
+  # tick cadence, and the loud variant's warning (an escalation contract: an empty pane must be
+  # told apart from a blank screen) would be a per-tick flood for every pod without tmux.
+  # An IDLE pod at prompt is a STATIC screen (stable hash, no false-alive); a generating pod
+  # repaints every second (elapsed counter) -> the signal the jsonl cannot carry mid-message.
+  # Failure/absence -> nil = NO SIGNAL, never silence (anti-kill bias, cf. `liveness_moved?/2`).
   defp pane_hash(state) do
     case Map.get(state, :pod_id) do
       pod_id when is_binary(pod_id) ->

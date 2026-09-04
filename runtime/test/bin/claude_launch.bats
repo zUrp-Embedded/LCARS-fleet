@@ -7,7 +7,7 @@
 # Integration tests for bin/claude_launch.sh (the N1 vendor frontier) against the CURRENT ADR-G
 # contract: 3 positional args <role> <pod_id> <pod_dir>. The SP is NOT an arg any more — it was pulled
 # out of the argv to stop it leaking through /proc/cmdline. The launcher reads it from
-# $POD_DIR/.lcars/system-prompt.md (written by the spawner in do_project) and passes it through
+# $POD_DIR/.lcars/system-prompt.md (written by the spawner in `:projecting`) and passes it through
 # --system-prompt-file (replace + TRUSTED). The pre-allocated session UUID and the RC name prefix travel
 # through the ENV (LCARS_POD_SESSION_ID / _RESUME / _SESSION_NAME_PREFIX). Permissions default to
 # --permission-mode default (#kill-yolo: the lists are ENFORCED, no more --dangerously-skip). It execs
@@ -57,7 +57,7 @@ EOF
   export LCARS_POD_SESSION_NAME_PREFIX="lordzurp_engineer"
 
   # SP OUT of the argv: the launcher reads it from $POD_DIR/.lcars/system-prompt.md through
-  # --system-prompt-file (written by the spawner in do_project). So we provision it LIKE the spawner
+  # --system-prompt-file (written by the spawner in `:projecting`). So we provision it LIKE the spawner
   # does, not as an arg.
   SP_FILE="$POD_DIR/.lcars/system-prompt.md"
   printf '%s\n' "# Engineer test SP" > "$SP_FILE"

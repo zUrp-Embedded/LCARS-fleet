@@ -76,14 +76,10 @@ defmodule Fleet.Spawner.Pod.Scaffold do
   producer's INPUT and a legitimate deliverable, so it stays untouched and stageable. Absent
   (`repo_path` nil) → no-op.
 
-  The OTHER production face is NOT cloned here: it reaches the pod as an RO BIND
-  (`LaunchSpec.other_face_reference_path/3`). A second mechanism cloning it into `<pod_dir>/work`
-  existed and never ran — its trigger field had no writer anywhere in the corpus — so a reader met
-  the dead one first and took it for the live one.
-
-  Being a BIND and not a clone has one consequence worth knowing before assuming otherwise: the pod
-  reads the LIVE worktree, the one the dispatcher commits other tickets' briefs into. Harmless (RO,
-  and git is coherent per file) but not a snapshot — two reads by one pod can see two states.
+  The OTHER production face is NOT cloned here: it reaches the pod as an RO mount of a copy PINNED
+  at the face's head (`LaunchSpec.pin_reference_face/2`, bound at the canonical
+  `<face_root>/<project>`), so the reference does not move under a running pod and survives its
+  source. Only a launch env built without a `pod_dir` falls back to a live RO bind of the worktree.
 
   The pod's commit identity is NOT set here (no mutable, falsifiable `git config`): it is injected in
   the env at launch (`LaunchEnv.build` → `GIT_AUTHOR_*`/`GIT_COMMITTER_*` = the HUMAN, role in the
@@ -103,11 +99,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
 
         case Fleet.ProjectBootstrap.Phase.Clone.clone_or_skip(state.pod_dir, eff_cap, []) do
           {:ok, workspace, branch} ->
-            # Repo-section rail, revived HERE and not at :projecting (BL-6-16): the composer runs
-            # at :projecting, the clone at :launching — the original rail expected
-            # `CLAUDE.md.repo-source` to exist BEFORE composition, an order the state machine
-            # contradicts, which is why its writer never existed and zero repo sections ever
-            # reached a pod. Post-clone is the first moment the original is READABLE (from GIT,
+            # Repo-section rail, HERE and not earlier in the `:projecting` chain (BL-6-16): the
+            # composer runs before the clone, so `CLAUDE.md.repo-source` cannot exist at
+            # composition time. Post-clone is the first moment the original is READABLE (from GIT,
             # never the working tree — from the 2nd spawn on the tree carries OUR composed file):
             # write repo-source, re-compose the CLAUDE.md with it (RepoSections filters each
             # section through Fleet.ReceptionFilter — hostile sections are dropped loud there),
@@ -120,7 +114,7 @@ defmodule Fleet.Spawner.Pod.Scaffold do
             # pod_dir (parent); with cwd=workspace it must be INSIDE the cwd (otherwise the agent codes
             # without its codebase-doc in cwd). Load-bearing → a copy FAILURE is LOUD,
             # not fatal (the pod still launches; the doc-in-cwd is a degradation, not a HALT).
-            # ⚠ ON N'ECRASE PLUS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
+            # ⚠ ON N'ECRASE PAS LE `CLAUDE.md` D'UN DEPOT QUI LE TRACKE. Ce fichier est l'ENTREE de
             # tout producteur (ses sept sections voyagent dans le prompt compose) et il doit rester
             # LIVRABLE : c'est par la que ses conventions se mettent a jour quand la pile change.
             # L'ecraser obligerait a le masquer (`skip-worktree`), donc a rendre `git status` propre
@@ -234,8 +228,9 @@ defmodule Fleet.Spawner.Pod.Scaffold do
     :ok
   end
 
-  # The repo-section revival (BL-6-16 — cf. the call-site comment for WHY here and not at
-  # :projecting). Original absent (nominal: the template ships no CLAUDE.md) → silent no-op,
+  # The repo-section rail (BL-6-16 — cf. the call-site comment for WHY here and not earlier).
+  # Original absent (an adopted repo that tracks none; a template-born repo tracks the
+  # template's) → silent no-op,
   # the :projecting composition stands. Any failure past that point degrades LOUD to the
   # identity-only CLAUDE.md — a pod without repo conventions beats no pod, and beats a pod
   # whose repo doc bypassed the reception filter.

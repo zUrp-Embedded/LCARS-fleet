@@ -48,7 +48,7 @@ SETTING_SOURCES="${SETTING_SOURCES// /}"
 case ",${SETTING_SOURCES}," in
   *,user,*)
     echo "claude_launch: REFUSED — LCARS_SETTING_SOURCES contains 'user' (${SETTING_SOURCES})." >&2
-    echo "claude_launch: 'user' would bleed the human's settings into the pod (forbidden, fleet_spawner v2 §G)." >&2
+    echo "claude_launch: 'user' would bleed the human's settings into the pod (forbidden: the pod loads no human tier)." >&2
     exit 1
     ;;
 esac
@@ -58,7 +58,7 @@ if [[ -z "$ROLE" || -z "$POD_ID" || -z "$POD_DIR" ]]; then
   exit 1
 fi
 if [[ ! -s "$SP_FILE" ]]; then
-  echo "ERR: SP file $SP_FILE missing or empty (written by Fleet.Spawner do_project)" >&2
+  echo "ERR: SP file $SP_FILE missing or empty (written by Fleet.Spawner.Pod in :projecting)" >&2
   exit 1
 fi
 
@@ -75,7 +75,7 @@ fi
 
 CAP_PROFILE_JSON="$POD_DIR/.cap-profile.json"
 if [[ ! -f "$CAP_PROFILE_JSON" ]]; then
-  echo "ERR: cap-profile $CAP_PROFILE_JSON missing (Fleet.Spawner ALLOCATE chantier 6)" >&2
+  echo "ERR: cap-profile $CAP_PROFILE_JSON missing (written by Fleet.Spawner.Pod in :allocating)" >&2
   exit 1
 fi
 
@@ -97,8 +97,8 @@ if [[ -d "$POD_CWD/.git" ]]; then
   SKILL_FLAGS=(--disable-slash-commands)
 fi
 # Read HERE because it GATES remoteControlAtStartup in the .claude.json below.
-# jq TRAP: `.x // true` treats `false` AND null as "empty", so `false // true` = true — the old form
-# SWALLOWED an explicit remote_control:false. Defaulting on null ONLY is what preserves it.
+# jq TRAP: `.x // true` treats `false` AND null as "empty", so `false // true` = true and an
+# explicit remote_control:false is SWALLOWED. Defaulting on null ONLY is what preserves it.
 if [[ -n "${LCARS_POD_REMOTE_CONTROL:-}" ]]; then
   REMOTE_CONTROL="$LCARS_POD_REMOTE_CONTROL"
 else

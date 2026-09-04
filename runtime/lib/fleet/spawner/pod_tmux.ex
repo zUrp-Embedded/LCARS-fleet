@@ -14,7 +14,7 @@ defmodule Fleet.Spawner.PodTmux do
 
   ## The PRIMARY KILL is NOT here (but the orphan fallback is)
 
-  Killing = SIGTERM of the bwrap holder (`Pod.Backend.terminate_pod_port`, pod.ex), NOT `kill-session`:
+  Killing = SIGTERM of the bwrap holder (`Pod.Backend.terminate_pod_port/1`), NOT `kill-session`:
   the holder (`sleep infinity`) holds the namespace and IGNORES `Port.close` alone (stdin EOF) → we
   SIGTERM its os_pid; killing just the tmux session would leave the holder alive → orphan namespace.
   The socket dies with the namespace when the holder falls. **RECOVERY exception**: when there is no

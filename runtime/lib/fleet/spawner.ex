@@ -366,9 +366,10 @@ defmodule Fleet.Spawner do
       # one — not by parsing its label, which is the very habit this guard exists to break.
       #
       # The guard demands "what the label was built FROM", and a permanent's label is built from no
-      # project on purpose. Demanding one here refuses the pod that BOOTS the fleet — and NOTHING IN
-      # THE SUITE SPAWNS A PERMANENT, so the gate stays green through that failure. It shows up on a
-      # bench, as `spawn of permanent … failed (:project_required)` and `permanent_pods=0`.
+      # project on purpose. Demanding one here refuses the pod that BOOTS the fleet: on a bench,
+      # `spawn of permanent … failed (:project_required)` and `permanent_pods=0`. The witness is
+      # `spawner_test.exs` ("the permanent boot's own shape passes"), the one spawn of a permanent
+      # in the suite.
       match?(
         {:ok, _},
         Fleet.Spawner.PermanentBoot.parse_permanent(Keyword.get(opts, :pod_id, ""))
@@ -675,13 +676,11 @@ defmodule Fleet.Spawner do
   a spawn flood through the no-auth loopback, or a rail gone haywire. Hitting it is an anomaly,
   it comes back as `{:error, :max_children}`, and it is meant to be loud.
 
-  Why 24 is the wrong number. It reads as "a wide margin above the real" only while the lease
-  serializes a repo to ONE workflow_run — the real being ~6 permanents plus a handful of step
-  workers. With `max_fan` the nominal peak is computable and 24 sits UNDER it: a project at the
-  default fan of 5, whose heaviest canon jury is 2 (`standard-qa`), peaks around 15 pods, so a
-  two-project fleet crosses 24 while doing exactly what it was configured to do. A fuse that blows
-  at nominal load is not a fuse, it is an unexplained failure — and it would surface as
-  `{:error, :max_children}`, an error, on a fleet that is merely busy.
+  The number must sit ABOVE the computable nominal peak: a project at the default fan of 5, whose
+  heaviest canon jury is 2 (`standard-qa`), peaks around 15 pods, and a fuse sized on "~6
+  permanents plus a handful of step workers" (the one-run-per-repo regime) blows while a two-project
+  fleet does exactly what it was configured to do. A fuse that blows at nominal load is not a fuse,
+  it is an unexplained failure — `{:error, :max_children}`, an error, on a fleet that is merely busy.
 
   128 clears 8 projects at the default fan (8 x 15 = 120) plus the permanents, and a single
   project at the maximum fan of 15 with room to spare. It is a chosen headroom, not a derivation:

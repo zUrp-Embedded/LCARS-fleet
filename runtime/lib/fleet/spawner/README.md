@@ -20,7 +20,7 @@ Core lifecycle:
 - `Fleet.Spawner` — public-API facade (`spawn_pod`/`kill_pod`/`pod_info`/`list_pods`/`count_pods`/`wake_pod`/`recall`/`reprovision_pipe_workspace` + the `valid_pod_id?`/`brief_required?`/`restart_strategy_for` authorities); the domain entry point
 - `Fleet.Spawner.Pod` — the lifecycle `gen_statem` (7 states = the 7 phases; `:publishing` is a FLAG, not a state; boot-chain, `:monitoring` watchdogs, guaranteed `terminate/3` teardown)
 - `Fleet.Spawner.Application` — `:rest_for_one` root supervisor (Registry → Supervisor → gated consumers); boots NO permanent pod
-- `Fleet.Spawner.Supervisor` — DynamicSupervisor ; `:max_pods` y est le FUSIBLE anti-emballement (pas une politique : le fan est borne par `max_fan` et les sieges de pool)
+- `Fleet.Spawner.Supervisor` — DynamicSupervisor ; `:spawner_max_pods` y est le FUSIBLE anti-emballement (pas une politique : le fan est borne par `max_fan` et les sieges de pool)
 - `Fleet.Spawner.PodTmux` — host→pod control-plane over the per-pod tmux socket (kick / `/clear` / has-session; orphan `kill_holder` fallback)
 - `Fleet.Spawner.BootEpoch` — identity of the CURRENT BEAM boot (per-fleet-life nonce): the discriminator that separates a POD-level recovery from a FLEET-level restart.
 - `Fleet.Spawner.PodWarden` — periodic reaper of the substrate (orphan tmux socks + graveyard pod_dir GC, 2-tick grace)
@@ -34,9 +34,9 @@ Boot / respawn / seams:
 - `Fleet.Spawner.SeedStore` — checkpoint/restore of a pod's session jsonl for recall (`--resume`)
 - `Fleet.Spawner.LaunchBackend` (behaviour) + `.LauncherPortBackend` (the real Port/bwrap backend) / `StubBackend` (tests)
 - `Fleet.Spawner.SessionId` — pure hexspeak encoder of the deterministic claude `session_id`
-- `Fleet.Spawner.McpSocketProvisioner` — behaviour of the runtime seam `:mcp_socket_provisioner` (→ `fleet_mcp`, above spawner)
+- `Fleet.Spawner.McpSocketProvisioner` — behaviour of the runtime seam `:spawner_mcp_socket_provisioner` (→ `Fleet.MCP`, above spawner)
 
-- `Fleet.Spawner.Pod.*` — the 21 `gen_statem` lifecycle islands (each stateless: no state/Port/timer of its own — the `Pod` core orchestrates, the islands compute/decide/do the I/O). See each `@moduledoc`; grouped by concern:
+- `Fleet.Spawner.Pod.*` — the 22 `gen_statem` lifecycle islands (each stateless: no state/Port/timer of its own — the `Pod` core orchestrates, the islands compute/decide/do the I/O). See each `@moduledoc`; grouped by concern:
   - placement & launch env: `Pod.Paths`, `Pod.LaunchSpec`, `Pod.LaunchEnv`, `Pod.McpProvision`, `Pod.SessionMint`, `Pod.Egress` (the pod's ONLY way out to the network: a per-pod CONNECT proxy on an AF_UNIX socket; `Pod.Egress.Vendor` = which hosts a vendor needs, declared beside its launcher)
   - projecting the pod_dir: `Pod.Scaffold`, `Pod.Assets`, `Pod.Brief`, `Pod.Fs`, `Pod.SessionFiles`
   - monitoring & wake: `Pod.Liveness`, `Pod.Kick`, `Pod.TaskProbe`, `Pod.TurnFlag`, `Pod.Publishing`

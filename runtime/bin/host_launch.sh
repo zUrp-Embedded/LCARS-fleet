@@ -22,8 +22,8 @@
 #
 # Teardown (the KEY difference vs bwrap): no namespace, so killing the holder does NOT CASCADE onto the
 # tmux server — claude would be orphaned. The holder therefore TRAPS SIGTERM/EXIT and runs `tmux
-# kill-server` on the per-pod socket (self-contained teardown; `Pod.terminate_pod_port` stays a generic
-# SIGTERM). Safety net: `reap_orphan_pod` (pkill -f pod_id + kill-server) catches it on the next relaunch
+# kill-server` on the per-pod socket (self-contained teardown; `Pod.Backend.terminate_pod_port/1` stays a
+# generic SIGTERM). Safety net: `reap_orphan_pod` (pkill -f pod_id + kill-server) catches it on the next relaunch
 # if the trap is missed (hard BEAM crash).
 #
 # Exit codes:
