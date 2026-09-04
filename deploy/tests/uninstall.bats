@@ -555,8 +555,10 @@ code()    { grep -vhE '^\s*#' "$RUNNER" "$BATS_TEST_DIRNAME/../lib/provision-uni
   local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
   local bloc; bloc="$(sed -n '/for proj in /,/^  done/p' <<<"$body")"
   [ -n "$bloc" ]
-  grep -q 'docker rm -f'      <<<"$bloc"
-  grep -q 'docker network rm' <<<"$bloc"
+  # S3 (relecture hostile 2026-09-04) : la CLI est celle de la SONDE, jamais un `docker` nu.
+  grep -q '"$PROV_DOCKER_BIN" rm -f'      <<<"$bloc"
+  grep -q '"$PROV_DOCKER_BIN" network rm' <<<"$bloc"
+  refute grep -qE '(^|[^_A-Z"])docker (rm|ps|network|volume) ' <<<"$(grep -v 'echo ' <<<"$bloc")"
   # ⚠ HORS LIGNES D'AFFICHAGE : le message SUGGERE la commande a l'operateur (« docker volume rm
   # <vol> si tu en es sur »). Un refute qui lit la prose interdirait de nommer le geste qu'on epargne
   # — meme piege que le temoin anti-litteral de `box`, deux commits plus tot.
@@ -835,4 +837,102 @@ code()    { grep -vhE '^\s*#' "$RUNNER" "$BATS_TEST_DIRNAME/../lib/provision-uni
   # drapeau refuse — c est ce que `--bench` avale sur le poste a coute au rang C.
   code | grep -qE '\-\-annexes\)\s+UNINSTALL_ANNEXES=1'
   sed -n '/^# USAGE :/,/^$/p' "$RUNNER" | grep -q -- '--annexes'
+}
+
+# ─── S3 : LES ANNEXES SE DETRUISENT PAR LA SONDE, ET CE QUI NE PART PAS SE DIT ──────────────────
+#
+# ⚠ RELECTURE HOSTILE DU 2026-09-04. Le bloc `--annexes` entrait par `command -v docker` — le
+# predicat que `docker-endpoint.sh` interdit en toutes lettres — et n'appelait jamais
+# `docker_endpoint` : sous WSL (CLI dans un montage hors PATH) il disait « docker absent » a un
+# daemon qui repondait ; avec une CLI dans le PATH mais un endpoint non resolu, `docker ps -aq …
+# 2>/dev/null` rendait vide, `network rm` echouait en silence, et le bilan comptait « N objet(s)
+# retire(s) » sans dire que les annexes annoncees DETRUITES etaient toujours debout.
+#
+# ⚠ ON JOUE L'EXECUTION, SANS ROOT ET SANS MACHINE. `--yes` exige root dans le RUNNER ; la fonction,
+# elle, ne l'exige pas. On la source dans un shell decore (la lib remplacee par des doublures, le
+# manifeste et le journal de `setup`, tout sous BATS_TEST_TMPDIR) avec une CLI docker qui est un
+# JOURNAL D'APPELS. C'est la seule facon de mesurer ce que le bloc FAIT, et pas ce qu'il ecrit.
+
+# La doublure de CLI : elle note chaque appel, et repond ce que le decor lui dicte.
+cli_docker() { # cli_docker -> chemin d'une CLI docker de decor
+  local f="$BATS_TEST_TMPDIR/cli/docker-decor"
+  mkdir -p "$(dirname "$f")"
+  cat > "$f" <<'CLI'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+case "$1" in
+  version|compose) exit "${FAKE_VERSION_RC:-0}" ;;
+  ps)      for c in ${FAKE_CTRS:-}; do echo "$c"; done; exit 0 ;;
+  rm)      exit 0 ;;
+  network) exit "${FAKE_NET_RC:-1}" ;;
+  volume)  for v in ${FAKE_VOLS:-}; do echo "$v"; done; exit 0 ;;
+esac
+exit 0
+CLI
+  chmod +x "$f"; printf '%s' "$f"
+}
+
+# Joue `uninstall_run` en EXECUTION (--yes --annexes) avec la CLI de decor comme sonde.
+executer() {
+  local cli; cli="$(cli_docker)"
+  export FAKE_LOG="$BATS_TEST_TMPDIR/cli.log"; : > "$FAKE_LOG"
+  # L'endpoint : un DOCKER_HOST de decor que la CLI de decor « joint » ; jamais la socket de la
+  # machine (LCARS_DOCKER_SOCKETS la remplace pour le balayage du cas injoignable).
+  export DOCKER_HOST="unix://$BATS_TEST_TMPDIR/decor.sock"
+  export LCARS_DOCKER_SOCKETS="$BATS_TEST_TMPDIR/absent.sock"
+  run bash -c '
+    set -euo pipefail
+    . "$1"
+    die() { echo "die: $*" >&2; exit 1; }
+    run_quiet() { "$@" >/dev/null 2>&1; }
+    prov_seat_from_map() { :; }
+    prov_group_owns_preserved() { return 1; }
+    PROV_LEGACY_CATALOGUES_DIR=/nexistepas
+    _PC="" _PA="" _PN="" SELF=provision SUBSTRATE=linux
+    UNINSTALL_YES=1 UNINSTALL_HUMANS=0 UNINSTALL_ANNEXES=1
+    MANIFEST_FILE="$LCARS_SYSTEM_MANIFEST" JOURNAL_FILE="$LCARS_JOURNAL_FILE"
+    PROV_DOCKER_BIN="$2"
+    . "$3"
+    uninstall_run
+  ' _ "$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh" "$cli" "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh"
+}
+
+@test "S3 : la CLI est celle de la SONDE — un projet sans conteneur est DIT, pas tu" {
+  # Avant : `command -v docker` puis un `docker` nu. La CLI de decor n'est joignable QUE par
+  # `PROV_DOCKER_BIN`, donc un journal d'appels vide = le bloc a parle a un autre docker (ou a
+  # personne), et une ligne « 0 conteneur » absente = le silence d'avant.
+  printf 'posed_docker lcars-essai\n' > "$LCARS_JOURNAL_FILE"
+  executer
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  grep -q 'ps -aq --filter label=com.docker.compose.project=lcars-essai' "$FAKE_LOG" \
+    || { echo "la sonde n a pas ete la porte — journal d appels :" >&2; cat "$FAKE_LOG" >&2; return 1; }
+  [[ "$output" == *"0 conteneur trouvé pour « lcars-essai »"* ]]
+  [[ "$output" == *"réseau lcars-essai_default absent"* ]]
+}
+
+@test "S3 : daemon injoignable — CHAQUE projet est nomme laisse entier, et le bilan les compte en refus" {
+  # Avant : `break` au premier projet, les suivants abandonnes sans un mot, et `kept` inchange —
+  # donc pas de ligne « refus » au bilan pour des annexes que le plan venait d annoncer DETRUITES.
+  printf 'posed_docker lcars-forge lcars-runner\n' > "$LCARS_JOURNAL_FILE"
+  FAKE_VERSION_RC=1 executer
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"docker injoignable"*"2 projet(s) laissé(s) entier(s)"* ]]
+  [[ "$output" == *"lcars-forge"*"lcars-runner"* ]]
+  [[ "$output" == *"aucun daemon docker joignable"* ]]      # PROV_DOCKER_WHY, pas un « docker absent »
+  [[ "$output" == *"refus"*"2 objet(s) que ce script n'a PAS pu retirer"* ]]
+  # et aucun `rm`/`network` n a ete tente sur un endpoint non resolu
+  refute grep -qE '^(rm|network) ' "$FAKE_LOG"
+}
+
+@test "S3 : ce qui est retire se compte, ce qui ne l est pas se nomme — le bilan ne ment plus" {
+  printf 'posed_docker lcars-essai\n' > "$LCARS_JOURNAL_FILE"
+  FAKE_CTRS="c0ffee c0ffe2" FAKE_NET_RC=0 FAKE_VOLS="lcars-essai_data" executer
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"projet « lcars-essai » : 2/2 conteneur(s) retiré(s)"* ]]
+  [[ "$output" == *"réseau lcars-essai_default retiré"* ]]
+  [[ "$output" == *"volume lcars-essai_data GARDÉ"* ]]
+  grep -q '^rm -f c0ffee$' "$FAKE_LOG"
+  grep -q '^rm -f c0ffe2$' "$FAKE_LOG"
+  grep -q '^network rm lcars-essai_default$' "$FAKE_LOG"
+  refute grep -q '^volume rm' "$FAKE_LOG"
 }
