@@ -263,7 +263,7 @@ defmodule Fleet.Forge.Client.Jury do
   end
 
   # C2 — THE MACHINE VERDICT, READ OUT OF THE BODIES THIS FUNCTION ALREADY HOLDS. The judges'
-  # `findings_v1` rides its own review (`Fleet.FindingsWire`), so it arrives commit-scoped for
+  # `findings` rides its own review (`Fleet.FindingsWire`), so it arrives commit-scoped for
   # free: the same `reject_stale_reviews` that decides which VERDICT counts decides which findings
   # count, with no second rule to keep in sync. A judge that emitted nothing simply has no key --
   # absence is a fact the consumer reads, never an error invented here.
@@ -292,7 +292,7 @@ defmodule Fleet.Forge.Client.Jury do
         # The binary verdict stays sovereign either way -- this is a ceiling, the judge is a floor.
         {:error, :undecodable} ->
           Logger.warning(
-            "Jury: #{login}'s review carries a findings-v1 block that does not decode — " <>
+            "Jury: #{login}'s review carries a findings block that does not decode — " <>
               "recorded as UNREADABLE (blocks under a declared floor), the binary verdict stands"
           )
 

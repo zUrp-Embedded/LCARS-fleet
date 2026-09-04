@@ -12,7 +12,7 @@ defmodule Fleet.CapProfile do
     exports: []
 
   @moduledoc """
-  Capability Profile composer/loader/validator (LCARS schema v2.5).
+  Capability Profile composer/loader/validator (LCARS cap-profile schema).
 
   Pure data transformer: YAML on disk → composed `%Fleet.CapProfile{}`
   struct. No process, no state.
@@ -30,9 +30,9 @@ defmodule Fleet.CapProfile do
     * the single-authority accessor surface for a composed profile's properties — each accessor is
       the SOLE reader of its field, so a cross-domain caller never re-derives one.
 
-  The schema version (LCARS v2.5) is pinned by the code and by the bundled schema file's path —
+  The schema is pinned by the code and by the bundled schema file's path —
   never by a field embedded in the YAML. Every profile is matched at load time against
-  `priv/cap_profile/schema/cap-profile-v2.5.json`; modops against
+  `priv/cap_profile/schema/cap-profile.json`; modops against
   `priv/cap_profile/schema/modop-profile.json`, which is STRICT — reserved keys are forbidden, so a
   modop cannot override the base profile's containment/name/kind.
 
@@ -96,7 +96,7 @@ defmodule Fleet.CapProfile do
   defdelegate publish_image!(), to: Fleet.CapProfile.Image, as: :publish!
 
   @doc """
-  Loads a profile by `metadata.name` and validates its structure against the v2.5 schema.
+  Loads a profile by `metadata.name` and validates its structure against the schema.
   Semantic invariants are checked separately by `validate/1` at the spawn boundary.
   """
   @impl Fleet.CapProfile.Loader
@@ -195,7 +195,7 @@ defmodule Fleet.CapProfile do
         #
         # ⚠ ET LA DIVERGENCE EST INATTEIGNABLE AUJOURD'HUI — ce filtre ne repare pas un bug
         # observable, il rend l'accord LOCAL au lieu de l'emprunter. Mesure : le schema
-        # `reserved-seat-v1.json` est `additionalProperties: false` et ne declare AUCUN `spec`,
+        # `reserved-seat.json` est `additionalProperties: false` et ne declare AUCUN `spec`,
         # donc un siege ne peut pas porter de capability ; un fichier qui essaierait ne validerait
         # pas, et `Image.publish!/0` LEVE sur un profil invalide. Ce qui ferme la divergence vit
         # donc dans un schema voisin, pas ici.

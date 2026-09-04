@@ -131,7 +131,7 @@ teardown() { rm -rf "$TMP"; }
 
 @test "approve: authed forge but no forge config -> exit 1 (FORGE_BASE_URL absent), nothing pushed" {
   "$SCRIPT" forge add mine --host github --owner alice >/dev/null
-  # gh stub is authed; no ~/.lcars/fleet_v2.env -> the forge precondition refuses before any clone.
+  # gh stub is authed; no ~/.lcars/fleet.env -> the forge precondition refuses before any clone.
   run "$SCRIPT" approve fleet/demo --forge mine --as Demo
   [ "$status" -eq 1 ]
   [[ "$output" == *"FORGE_BASE_URL absent"* ]]

@@ -29,7 +29,7 @@ defmodule Fleet.Workflow.Provenance do
   # git transaction at a time; `OpsObject` stays the engine (reached only via the gate).
   alias Fleet.Workflow.OpsObjectSync
 
-  @build_type "lcars-fleet-pipeline-v2"
+  @build_type "lcars-fleet-pipeline"
 
   @type attrs :: %{
           required(:livrable_sha) => String.t(),
@@ -154,7 +154,7 @@ defmodule Fleet.Workflow.Provenance do
   end
 
   # `invocation.environment` — builder-controlled inputs that are not build PARAMETERS. Today one
-  # fact: was the fleet running in debug visibility (`fleet_v2 start --debug`) when this deliverable
+  # fact: was the fleet running in debug visibility (`fleet start --debug`) when this deliverable
   # was produced. It belongs in the attestation because a pod a human could attach to and type into
   # is not the same builder as an unattended one, and the triplet's job is to be falsifiable about
   # what actually happened.

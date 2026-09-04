@@ -1,7 +1,7 @@
 defmodule Fleet.Workflow.GateDecisionTest do
   @moduledoc """
   Locks the single AUTHORITY over the gatekeeper vocabulary and its equality with the WIRE
-  contract `priv/schema/gate-decision-v1.json`: if one drifts from the other, this test fails
+  contract `priv/schema/gate-decision.json`: if one drifts from the other, this test fails
   (anti-drift schema ⇔ code). `GateBrief` and `Fleet.Pilot.StepRunConsumer` both consume `decisions/0`.
   """
   use ExUnit.Case, async: true
@@ -13,10 +13,10 @@ defmodule Fleet.Workflow.GateDecisionTest do
              ~w(continue abandon redirect escalate_user halt_wait_input)
   end
 
-  test "the module is the EXACT mirror of the `decision` enum in the gate-decision-v1.json wire schema" do
+  test "the module is the EXACT mirror of the `decision` enum in the gate-decision.json wire schema" do
     schema =
       :lcars_fleet
-      |> Application.app_dir("priv/workflow/schema/gate-decision-v1.json")
+      |> Application.app_dir("priv/workflow/schema/gate-decision.json")
       |> File.read!()
       |> Jason.decode!()
 
@@ -33,10 +33,10 @@ defmodule Fleet.Workflow.GateDecisionTest do
   # This is the meeting: the examples the template hands the judge are validated against the very
   # schema that will refuse them. Prose that instructs is anchored to the mechanism that enforces
   # it, or it is a guess with a nice font.
-  test "every envelope example in the gate-brief templates validates against gate-decision-v1.json" do
+  test "every envelope example in the gate-brief templates validates against gate-decision.json" do
     schema =
       :lcars_fleet
-      |> Application.app_dir("priv/workflow/schema/gate-decision-v1.json")
+      |> Application.app_dir("priv/workflow/schema/gate-decision.json")
       |> File.read!()
       |> Jason.decode!()
       |> ExJsonSchema.Schema.resolve()

@@ -5,8 +5,8 @@ defmodule Fleet.SystemConfig do
   Reader of the box-wide, ADMIN-OWNED settings file (`/etc/lcars/fleet.json`) — a pure, testable
   primitive for `config/runtime.exs`, same family as `Fleet.EnvParse`.
 
-  WHY A FILE AND NOT AN ENV VAR — the env passes through the HUMAN's hands: `fleet_v2` sources
-  `~/.lcars/fleet_v2.env` and any worker can export a variable in their shell. A setting that
+  WHY A FILE AND NOT AN ENV VAR — the env passes through the HUMAN's hands: `fleet` sources
+  `~/.lcars/fleet.env` and any worker can export a variable in their shell. A setting that
   belongs to the box's administrator (admiral) alone must come from a path only root writes —
   same idiom as `/etc/lcars/deck-oidc.json` (posed by provisioning, read by the deck at boot).
   `runtime.exs` runs ONCE at BEAM boot, so the value is frozen for the fleet's lifetime by

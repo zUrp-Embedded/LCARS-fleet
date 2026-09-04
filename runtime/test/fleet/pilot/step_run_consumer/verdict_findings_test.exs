@@ -3,11 +3,11 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
 
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
-  # C1 2026-08-18 — the OPTIONAL machine payload `details.findings_v1` (findings-v1.json).
+  # C1 2026-08-18 — the OPTIONAL machine payload `details.findings` (findings.json).
   # The contract under test has two load-bearing halves:
-  #   1. the gate-decision-v1 ENVELOPE never moves — a legacy judge without the key walks
+  #   1. the gate-decision ENVELOPE never moves — a legacy judge without the key walks
   #      today's path byte-for-byte;
-  #   2. the failure DIRECTION is the opposite of the envelope's — an invalid findings_v1
+  #   2. the failure DIRECTION is the opposite of the envelope's — an invalid findings
   #      never flips a valid verdict (loud log + no machine object, never halt_invalid).
 
   defp envelope(details) do
@@ -47,7 +47,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
 
   test "valid → {findings, stripped}: the key leaves `details`, the rest of the envelope does not move" do
     findings = valid_findings()
-    result = envelope(%{"critere" => "ok", "findings_v1" => findings})
+    result = envelope(%{"critere" => "ok", "findings" => findings})
 
     assert {^findings, stripped} = Verdict.take_findings(result)
     assert stripped["details"] == %{"critere" => "ok"}
@@ -57,12 +57,12 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     # And the prose body built from the stripped envelope carries NO machine dump: the human
     # matter of the findings lives in `reason` (SP contract), not in an inspect() of a map.
     body = Verdict.judge_review_body(:approve, stripped)
-    refute body =~ "findings_v1"
+    refute body =~ "findings"
   end
 
   test "an empty findings list is a legitimate report (nothing to signal, score 10)" do
     findings = %{"findings" => [], "score" => 10}
-    result = envelope(%{"findings_v1" => findings})
+    result = envelope(%{"findings" => findings})
 
     assert {^findings, stripped} = Verdict.take_findings(result)
     assert stripped["details"] == %{}
@@ -83,12 +83,12 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     ]
 
     for bad <- invalid do
-      result = envelope(%{"findings_v1" => bad})
+      result = envelope(%{"findings" => bad})
 
       {took, log} = ExUnit.CaptureLog.with_log(fn -> Verdict.take_findings(result) end)
       assert {nil, ^result} = took
       # The refusal names the schema on the operator rail — same discipline as the envelope's.
-      assert log =~ "findings_v1 refused"
+      assert log =~ "findings refused"
 
       # THE failure direction, pinned: the envelope was already validated, so a broken OPTIONAL
       # payload never turns a valid `continue` into halt_invalid.

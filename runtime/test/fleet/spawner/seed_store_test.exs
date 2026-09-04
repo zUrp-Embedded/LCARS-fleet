@@ -1,5 +1,5 @@
 defmodule Fleet.Spawner.SeedStoreTest do
-  @moduledoc "Seed-store checkpoint (pod-seed v2)."
+  @moduledoc "Seed-store checkpoint."
   # async:false — `seed_store_root` is global config (Application env).
   use ExUnit.Case, async: false
   @moduletag :tmp_dir

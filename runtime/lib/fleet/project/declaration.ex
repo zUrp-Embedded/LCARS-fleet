@@ -1,7 +1,7 @@
 defmodule Fleet.Project.Declaration do
   @moduledoc """
   Single owner of the per-project criticality declaration (`<project>/.lcars.json`,
-  schema `declaration-v1`) — writes it at onboarding, reads it at the workflow-map burn.
+  schema `declaration`) — writes it at onboarding, reads it at the workflow-map burn.
 
   **The CARD is the HUMAN's declaration** (elicited by the framing interview — what happens
   if this deliverable is wrong? how long will it live? — and RELAYED by the architect; an
@@ -54,7 +54,7 @@ defmodule Fleet.Project.Declaration do
 
   # The declaration schema lives in the cap_profile canon (data, not a module frontier —
   # priv paths carry no boundary edge).
-  @schema_rel Path.join(["cap_profile", "schema", "declaration-v1.json"])
+  @schema_rel Path.join(["cap_profile", "schema", "declaration.json"])
 
   @doc """
   Composes, validates and writes `<proj_dir>/.lcars.json` from the onboarding opts
@@ -332,7 +332,7 @@ defmodule Fleet.Project.Declaration do
     onboarded_by = Keyword.get(opts, :onboarded_by) || "unknown"
 
     base = %{
-      "_schema" => "lcars/declaration-v1",
+      "_schema" => "lcars/declaration",
       "declared_at" => Date.to_iso8601(Date.utc_today()),
       "declared_by" => if(declared?, do: onboarded_by, else: "system-default"),
       "justification" => justification || default_justification(card),

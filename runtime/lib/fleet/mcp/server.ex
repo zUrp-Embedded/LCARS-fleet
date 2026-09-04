@@ -11,7 +11,7 @@ defmodule Fleet.MCP.Server do
   `config/test.exs`); a boot that does NOT declare `:host` is refused BY OMISSION, never started
   permissively. Assertable by a conformance test (`Process.whereis(Fleet.MCP.Server) == nil` pod-side).
   ⚠ `runtime.exs` NE DÉCLARE PAS `:host` INCONDITIONNELLEMENT : il le déclare seulement sous
-  `LCARS_HOST_BOOT=1`, que `bin/fleet_v2` exporte au démarrage du daemon. Déclaré sans condition, le
+  `LCARS_HOST_BOOT=1`, que `bin/fleet` exporte au démarrage du daemon. Déclaré sans condition, le
   fichier de config parlerait DE LUI-MÊME, et la doctrine « refusé par omission » décrirait quelque
   chose qui ne peut pas arriver — un pod exécutant le BEAM complet lirait le même fichier et s'y
   verrait déclaré host. A pod's projected environment is

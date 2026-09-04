@@ -2,7 +2,7 @@
 
 **Date** : 2026-05-09
 **Dernière révision** : 2026-08-11
-**Statut** : runtime v2 — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
+**Statut** : runtime — app OTP unique `:lcars_fleet`, frontières vérifiées à la compilation (`boundary`)
 **Référencé par** : `lib/fleet/README.md` (la carte racine renvoie ici pour le diagramme)
 
 Plan de contrôle OTP pour une flotte d'agents LLM faillibles. Le runtime *spawn*, surveille et
@@ -184,9 +184,9 @@ mix test
 MIX_ENV=prod mix release        # → _build/prod/rel/lcars_fleet (self-contained, ERTS bundlé)
 ```
 
-Le runtime est lancé **par un humain** via `bin/fleet_v2` (pas de `systemd User=lcars` : l'humain
+Le runtime est lancé **par un humain** via `bin/fleet` (pas de `systemd User=lcars` : l'humain
 lance sa flotte, les pods héritent son UID). La procédure deploy/run et le catalogue d'env vars sont
-dans `etc/README.md` + `etc/fleet_v2.env.template`.
+dans `etc/README.md` + `etc/fleet.env.template`.
 
 ## Où lire la suite
 

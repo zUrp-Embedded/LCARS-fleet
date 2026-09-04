@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SOURCE: runtime/test/probes/gate-r0.2-otp.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
-# STARDATE: 2026.146
-# STATUS: MANUAL PROBE v2 — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
+# STARDATE: 2026.247
+# STATUS: MANUAL PROBE — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
 #         mix.exs (alias `gate:`); do not re-list it here, it drifts.
 # gate-r0.2-otp.sh — R0.2 (kernel mechanic: OTP supervisor). exit 0 iff the app compiles (a buildable
 # BEAM lifecycle = a buildable supervision tree). There is no "systemd daemon active" check any more:
-# the fleet is launched per-human through bin/fleet_v2 (the human-launches model, ADR-E), not an
+# the fleet is launched per-human through bin/fleet (the human-launches model, ADR-E), not an
 # always-on system service.
 set -uo pipefail          # PAS -e : meme raison — la sonde mesure plusieurs points et rend un
                           # bilan, pas le verdict de sa premiere commande.

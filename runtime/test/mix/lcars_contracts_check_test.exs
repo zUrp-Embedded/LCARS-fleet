@@ -302,12 +302,12 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     test "un lanceur SANS extension est vu aussi", %{root: root} do
-      File.write!(Path.join([root, "bin", "fleet_v2"]), "#!/bin/sh\n# le sanctuaire du pod\n")
+      File.write!(Path.join([root, "bin", "fleet"]), "#!/bin/sh\n# le sanctuaire du pod\n")
 
       result = Mix.Tasks.Lcars.Contracts.Check.Artifact.check_sanctuary_contained(root)
 
       assert result.status == :fail
-      assert result.evidence == ["bin/fleet_v2"]
+      assert result.evidence == ["bin/fleet"]
     end
 
     # Le pyc de `bin/__pycache__` est le cas reel : il vit dans un repertoire balaye et n'est pas de

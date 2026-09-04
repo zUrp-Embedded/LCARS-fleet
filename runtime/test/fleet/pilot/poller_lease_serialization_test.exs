@@ -75,7 +75,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
         Jason.encode!(
           Map.merge(
             %{
-              "_schema" => "lcars/declaration-v1",
+              "_schema" => "lcars/declaration",
               "declared_at" => "2026-08-05",
               "declared_by" => "architect",
               "justification" => "banc",
@@ -189,16 +189,16 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     end
 
     test "the SHELL door and the rail hold the SAME ceiling" do
-      # `bin/fleet_v2 --max-fan` validates at the door and cannot call into the BEAM, so the bound
+      # `bin/fleet --max-fan` validates at the door and cannot call into the BEAM, so the bound
       # is duplicated there. Duplication is fine when it is CHECKED: without this, the door would
       # accept 20 the day the rail moves to 20, or keep refusing 16 the day it drops to 10 — and
       # the operator would meet a flag that argues with the fleet.
       literal =
-        "bin/fleet_v2"
+        "bin/fleet"
         |> File.read!()
         |> then(&Regex.run(~r/^MAX_FAN_CEILING=(\d+)$/m, &1))
 
-      assert literal, "MAX_FAN_CEILING= not found in bin/fleet_v2 — the instrument is broken"
+      assert literal, "MAX_FAN_CEILING= not found in bin/fleet — the instrument is broken"
       [_, n] = literal
 
       assert String.to_integer(n) == Admission.max_fan_ceiling(),

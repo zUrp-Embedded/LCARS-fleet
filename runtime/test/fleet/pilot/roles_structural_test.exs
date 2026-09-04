@@ -147,7 +147,7 @@ defmodule Fleet.Project.RolesStructuralTest do
   # elle balayait l'index brut sans ce filtre.
   #
   # ⚠ MESURE QUI CHANGE LA CONCLUSION : la divergence est INATTEIGNABLE aujourd'hui, et ce n'est pas
-  # `roles_with_capability/1` qui la ferme. Le schema `reserved-seat-v1.json` est
+  # `roles_with_capability/1` qui la ferme. Le schema `reserved-seat.json` est
   # `additionalProperties: false` et ne declare AUCUN `spec` — un siege ne peut donc pas porter de
   # capability, et un fichier qui essaierait ne validerait pas. `Image.publish!/0` LEVE sur un
   # profil invalide (« proven-good image at boot, or do not boot »), donc un tel siege n'entre meme

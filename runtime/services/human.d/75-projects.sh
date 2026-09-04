@@ -9,7 +9,7 @@
 # AFTER: 45-catalogues 50-forge 70-human
 # JOUE COMME L'HUMAIN. Les faces lui appartiennent (owner `$PROV_HUMAN`, groupe `fleet`), et un
 # import joue en root les poserait root:root — un `/home` que le proprietaire ne peut plus ecrire.
-# C'est aussi son `~/.lcars/fleet_v2.env` qui porte l'adresse de la forge et le jeton.
+# C'est aussi son `~/.lcars/fleet.env` qui porte l'adresse de la forge et le jeton.
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh

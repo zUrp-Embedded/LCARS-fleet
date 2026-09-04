@@ -39,7 +39,7 @@ read those (`h Fleet.Project.Onboard` in IEx, or `lib/`). Nothing here is restat
 - `Fleet.Project.Onboard.Refute` — refuses to treat a catalogue's STORE as a project
 - `Fleet.Project.Onboard.Scaffold` — projection of `priv/catalogue/project_template` (own
   catalogue first, bundled fallback announced); CI workflows added or reset
-- `Fleet.Project.Declaration` — single owner of `<project>/.lcars.json` (`declaration-v1`):
+- `Fleet.Project.Declaration` — single owner of `<project>/.lcars.json` (`declaration`):
   written at onboarding, read at the workflow-map burn; `declarable_card/3`
 - `Fleet.Project.Roles` — the structural roles RESOLVED by capability (producer, gatekeeper,
   conflict resolver, project delegate), the card's jury / CI policy / verdict policy

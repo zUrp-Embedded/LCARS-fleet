@@ -2,7 +2,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
   @moduledoc """
   Proves that the in-repo canon `priv/events.yaml` (loaded by the runtime,
   embedded in the release) validates against the derived schema
-  `priv/schema/events-v1.json`, and that a structurally invalid config is
+  `priv/schema/events.json`, and that a structurally invalid config is
   rejected (neither too strict nor too lax).
 
   @canon_path points to the in-repo canon (single-source, the file actually
@@ -19,7 +19,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
                  "priv",
                  "event_router",
                  "schema",
-                 "events-v1.json"
+                 "events.json"
                ])
   @canon_path Path.join([__DIR__, "..", "..", "..", "priv", "event_router", "events.yaml"])
 
@@ -36,7 +36,7 @@ defmodule Fleet.EventRouter.EventsSchemaTest do
     {:ok, schema: schema}
   end
 
-  test "the canon events.yaml validates against events-v1.json", %{schema: schema} do
+  test "the canon events.yaml validates against events.json", %{schema: schema} do
     canon = YamlElixir.read_from_file!(@canon_path)
     assert :ok = ExJsonSchema.Validator.validate(schema, canon)
   end

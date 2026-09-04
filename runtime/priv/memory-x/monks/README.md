@@ -1,4 +1,4 @@
-# monks — les profils v2.5 de Memory-X (feature gelée, hors de la boucle de boot)
+# monks — les profils de Memory-X au schéma courant (feature gelée, hors de la boucle de boot)
 
 **Date** : 2026-06-19
 **Dernière révision** : 2026-07-04
@@ -9,7 +9,7 @@
 
 Ces cap-profiles (`archivist` + monks `alpha`/`beta`/`monk-*`, le sous-système **Memory-X V1**) étaient
 dans `cap-profiles/monks/`, donc scannés par `Fleet.CapProfile` (`name_index` globbe `monks/`) et
-sélectionnés au boot permanent (`boot_at_start: true`). Résultat : `fleet_v2 start` **tentait de booter
+sélectionnés au boot permanent (`boot_at_start: true`). Résultat : `fleet start` **tentait de booter
 ~17 pods permanents** (1 arch + 16 monks/archivist), pas juste l'arch.
 
 **Décision (2026-06-19)** : Memory-X doit être **per-project ET system-wide, sous `lcars` côté OS — PAS

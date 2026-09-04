@@ -130,7 +130,7 @@ defmodule Fleet.Workflow.GatesTest do
       # Asymmetry: the hard gate (`is_list(rules)`) called `Predicate.eval?` on EACH item
       # WITHOUT filtering non-strings (the terminal one filters via
       # `Enum.all?(rules, &is_binary/1)`). A NON-SCHEMATIZED override (in-memory workflow_map
-      # bypassing the loader's schema — there is NO v1 entry point: a v1 YAML fails the v2.5
+      # bypassing the loader's schema — there is no flat entry point: an envelope-less YAML fails the
       # schema before normalize) carrying a hard gate with `rules` = list of maps raised
       # FunctionClauseError inside Predicate → it bubbled up unwrapped to the StepRunConsumer
       # (singleton) → crash. The total `Predicate.eval?/2` net (non-string item → false) makes

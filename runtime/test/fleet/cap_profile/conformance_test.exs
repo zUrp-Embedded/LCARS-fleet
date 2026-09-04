@@ -1,10 +1,10 @@
-defmodule Fleet.CapProfile.V25ConformanceTest do
+defmodule Fleet.CapProfile.ConformanceTest do
   @moduledoc """
   Conformance of the 7 canon cap-profiles `priv/catalogue/cap_profile/cap-profiles/` against the
-  schema `priv/schema/cap-profile-v2.5.json`. Pattern (PROVEN): canon YAML →
+  schema `priv/schema/cap-profile.json`. Pattern (PROVEN): canon YAML →
   ex_json_schema validate. `async: true`.
 
-  This test validates the REAL conformance of the cap-profiles to the canon v2.5
+  This test validates the REAL conformance of the cap-profiles to the canon
   schema, not an invented field (GO-0/#P5). Historical note: `invocation.mode`
   (never added to the schema) was meant to route via `fleet_claude_bridge` — an
   app **removed at the ADR-G pivot** (interactive RC); routing by
@@ -20,7 +20,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
                  "priv",
                  "cap_profile",
                  "schema",
-                 "cap-profile-v2.5.json"
+                 "cap-profile.json"
                ])
   # LES DEUX racines : la mecanique (architect, gatekeeper, starfleet, chief) vit dans le catalogue
   # systeme, le metier dans l'autre. Le schema est le meme pour les deux — c'est precisement ce que
@@ -76,11 +76,11 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
   end
 
   for profile <- @profiles do
-    test "canon cap-profile #{profile}.yaml validates cap-profile-v2.5.json", %{schema: schema} do
+    test "canon cap-profile #{profile}.yaml validates cap-profile.json", %{schema: schema} do
       canon = unquote(profile) |> canon_path() |> YamlElixir.read_from_file!()
 
       assert :ok = ExJsonSchema.Validator.validate(schema, canon),
-             "#{unquote(profile)}.yaml NOT conformant to cap-profile-v2.5.json: " <>
+             "#{unquote(profile)}.yaml NOT conformant to cap-profile.json: " <>
                inspect(ExJsonSchema.Validator.validate(schema, canon))
     end
   end
@@ -124,7 +124,7 @@ defmodule Fleet.CapProfile.V25ConformanceTest do
 
   test "negative — apiVersion (legacy v2.4 field REMOVED) rejected instead of ignored (F-C006)",
        %{schema: schema} do
-    # `apiVersion` was REMOVED from the v2.5 schema (it is neither a property nor required). We test what
+    # `apiVersion` is not in the schema (it is neither a property nor required). We test what
     # is ACTUALLY verifiable and load-bearing: a legacy profile STILL carrying `apiVersion` must be
     # REJECTED (root additionalProperties:false, R0-CAP-001), never silently accepted. We start from a
     # VALID canon profile and ONLY add apiVersion → the only possible rejection cause is that unknown

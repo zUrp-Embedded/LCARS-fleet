@@ -13,7 +13,7 @@ defmodule LcarsFleet.MixProject do
   def project do
     [
       app: :lcars_fleet,
-      version: "0.1.0",
+      version: "0.9.0",
       elixir: "~> 1.18",
       # boundary = the compiled guardian of the architecture (inter-domain deps
       # + façade exports).
@@ -277,7 +277,7 @@ defmodule LcarsFleet.MixProject do
     ]
   end
 
-  # Mix release (per-human launch via bin/fleet_v2). The release is named after the app it
+  # Mix release (per-human launch via bin/fleet). The release is named after the app it
   # contains, `lcars_fleet`, and that is not cosmetic: a release named after a structure the tree no
   # longer has — `fleet_umbrella` — describes the build wrongly to every reader. "Renaming would
   # break the launcher for a cosmetic gain" is a bad trade once the reader is an agent, for which a

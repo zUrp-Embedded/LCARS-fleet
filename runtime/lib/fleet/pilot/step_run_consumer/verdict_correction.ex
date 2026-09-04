@@ -110,7 +110,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
 
     body =
       "⚙ **Enveloppe de verdict refusée** — le `#{role}` a rendu un verdict dont la FORME ne " <>
-        "valide pas (`gate-decision-v1.json`) : #{describe(reason)}.\n\n" <>
+        "valide pas (`gate-decision.json`) : #{describe(reason)}.\n\n" <>
         "Passe de correction unique : le juge est encore en vie, avec sa lecture du livrable, et " <>
         "il lui est demandé de RÉ-EMBALLER son verdict — pas de le refaire. Au-delà de cette " <>
         "passe, le ticket est remis à l'architecte.\n\n" <> signature
@@ -185,8 +185,8 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
     ## Ce qui t'est demandé
 
     Renvoie le MÊME jugement, correctement emballé, via `mcp__fleet__submit_result`. L'enveloppe est
-    `gate-decision-v1.json` : `decision` et `reason` sont obligatoires ; `details` est un objet de
-    scalaires PLUS la clé `findings_v1` qui est un objet ; `chain` est un tableau de chaînes NUES.
+    `gate-decision.json` : `decision` et `reason` sont obligatoires ; `details` est un objet de
+    scalaires PLUS la clé `findings` qui est un objet ; `chain` est un tableau de chaînes NUES.
 
     ⚠ **Ne refais pas ton analyse.** Tu as lu le livrable, ton opinion est la tienne et elle ne
     change pas parce qu'un champ était mal typé. Ce qui est demandé ici est un ré-emballage.

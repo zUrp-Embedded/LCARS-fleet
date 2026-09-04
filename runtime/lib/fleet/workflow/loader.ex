@@ -5,7 +5,7 @@ defmodule Fleet.Workflow.Loader do
   """
 
   # Versioned envelope without a YAML `apiVersion`.
-  @schema_file "workflow-map-v2.5.json"
+  @schema_file "workflow-map.json"
 
   @doc """
   Loads, validates and normalizes a card. No-opts calls use the published image;

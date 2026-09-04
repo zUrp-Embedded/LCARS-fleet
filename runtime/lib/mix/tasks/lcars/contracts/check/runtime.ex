@@ -103,7 +103,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   defp runtime_seam(_), do: nil
 
   # `compose_claude_md/3` must read `spec.invocation.lifetime_scope` (the canonical
-  # v2.5 schema), not `spec.lifetime_scope` (pre-v2.5 form) — otherwise the pod's CLAUDE.md
+  # schema), not `spec.lifetime_scope` (the flat form) — otherwise the pod's CLAUDE.md
   # always shows "unknown". The twin `check_lifetime_scope/1` (cap_profile.ex)
   # already reads the right path.
   # The pattern covers get_in (list form `spec, ["lifetime_scope"]`) AND Map.get
@@ -115,15 +115,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     residue_check(root, %{
       id: "capprofile.lifetime_scope_path",
       remediation:
-        "read spec.invocation.lifetime_scope (v2.5), not the pre-v2.5 spec.lifetime_scope, in compose_claude_md",
+        "read spec.invocation.lifetime_scope, not the flat spec.lifetime_scope, in compose_claude_md",
       files: ["lib/fleet/sp_builder.ex"],
       pattern: ~r/cap_profile\.spec,\s*(\["lifetime_scope"\]|"lifetime_scope")/,
       note:
-        "compose_claude_md reads spec.lifetime_scope (pre-v2.5) instead of spec.invocation.lifetime_scope"
+        "compose_claude_md reads the flat spec.lifetime_scope instead of spec.invocation.lifetime_scope"
     })
   end
 
-  # `check_modop_incompatible/1` must read `spec.modop_set.incompatible` (v2.5
+  # `check_modop_incompatible/1` must read `spec.modop_set.incompatible` (the
   # schema) + compare against the active modops (`default` ++ `optional`), not
   # `spec.modop_incompatible` (nonexistent key) nor `spec.modop_set` treated as
   # a list → otherwise the invariant never fires. Post-strip confirmation looser
@@ -656,14 +656,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
   @doc false
   # ONE FACT, TWO RENDERS — the hard ceiling on a project's in-flight workflow_runs. It is typed in
   # Elixir (`Admission.max_fan_ceiling/0`, itself derived from the pool seats a role actually has)
-  # and AGAIN in `declaration-v1.json`, because a JSON Schema cannot call a function. The declaration
+  # and AGAIN in `declaration.json`, because a JSON Schema cannot call a function. The declaration
   # a human writes is validated by the schema; the value the dispatcher enforces comes from the
   # module. Let those two drift and a project declares a throughput the schema accepts and the
   # engine silently clamps away — a declaration that validates and does not apply, which is the
   # worst of the three possible outcomes.
   @spec check_declaration_max_fan_ceiling(String.t()) :: Support.result()
   def check_declaration_max_fan_ceiling(root) do
-    path = Path.join([root, "priv", "cap_profile", "schema", "declaration-v1.json"])
+    path = Path.join([root, "priv", "cap_profile", "schema", "declaration.json"])
     src = Path.join([root, "lib", "fleet", "pilot", "poller", "admission.ex"])
 
     # Read from the SOURCE, never by calling `Admission.max_fan_ceiling/0`. Two reasons, and the
@@ -698,7 +698,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
     %{
       id: "declaration.max_fan_ceiling",
       remediation:
-        "make properties.max_fan.maximum in declaration-v1.json equal " <>
+        "make properties.max_fan.maximum in declaration.json equal " <>
           "Admission.max_fan_ceiling/0 — the module is the authority, the schema is its render",
       status: if(is_nil(broken) and schema_ceiling == module_ceiling, do: :pass, else: :fail),
       evidence:

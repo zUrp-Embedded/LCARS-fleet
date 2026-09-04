@@ -108,7 +108,7 @@ def candidate_files():
                 p = os.path.join(dirpath, fn)
                 if p in seen:
                     continue
-                if not (fn.endswith(".sh") or fn in ("fleet_v2", "lcars")):
+                if not (fn.endswith(".sh") or fn in ("fleet", "lcars")):
                     continue
                 seen.add(p)
                 yield p
@@ -180,10 +180,10 @@ def readmes(path):
 # Deux formes admises, et rien d'autre :
 #   1. LIGNE DE SYNOPSIS — la commande est le PREMIER token de la ligne (apres un `#`, des espaces,
 #      ou le nom du script / `$PROG` / `$0`). C'est la forme de `box` et de `lcars`.
-#   2. DOS DE CITATION — la commande est dans un `code span`. C'est la forme de `fleet_v2` dans son
-#      bandeau (`` `fleet_v2 forge <n>` ``) et du protocole des modules (`` `<module> check|apply` ``).
+#   2. DOS DE CITATION — la commande est dans un `code span`. C'est la forme de `fleet` dans son
+#      bandeau (`` `fleet forge <n>` ``) et du protocole des modules (`` `<module> check|apply` ``).
 #   3. ALTERNANCE — la commande est un membre d'un `{start|stop|status}`. C'est la forme de l'usage
-#      de `fleet_v2`, et l'oublier faisait ressortir trois de ses six gestes comme non instruits :
+#      de `fleet`, et l'oublier faisait ressortir trois de ses six gestes comme non instruits :
 #      une regle trop stricte accuse un script correct, ce qui est le cout eleve ici.
 #
 # Dans un README, SEULE la forme 2 compte : la prose d'un README n'instruit personne, elle raconte.
@@ -198,7 +198,7 @@ def instructed(cmd, path, text):
     # README comme dans l'aide du script. `` `fleet` `` designe un groupe unix, `` `50-forge` `` un
     # fichier : les accepter laissait passer des sous-commandes `fleet` et `forge` non documentees
     # (mesure : 2 des 4 injectees, puis 1 apres avoir resserre le seul README). Une invocation a un
-    # token DEVANT elle — `` `<module> check|apply` ``, `` `fleet_v2 start` `` — donc la commande ne
+    # token DEVANT elle — `` `<module> check|apply` ``, `` `fleet start` `` — donc la commande ne
     # peut pas etre le premier mot de la citation.
     # Et ce qui precede doit etre le SCRIPT, pas n'importe quel token. `` `chown root:fleet` `` est
     # une invocation parfaitement formee ou `fleet` est un nom de groupe : la derniere sous-commande

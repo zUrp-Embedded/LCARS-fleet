@@ -6,7 +6,7 @@
 #         -> PR base=workshop -> merge scelle
 #         gatekeeper -> worktree arch realigne (rebase). Cf. chantier face-projet, JOURNAL.
 # Dérivé de: 00-PLAN/01-INVENTAIRE du chantier face-projet (work/beyond_#6) — arbitrages user.
-# Consommé par: Fleet.Workflow.Loader (schema v2.5, clé `face` du step).
+# Consommé par: Fleet.Workflow.Loader (clé `face` du step).
 #
 # LE CHEMIN DIRECT, et pourquoi il est direct — deux absences, toutes deux des DÉCISIONS :
 #

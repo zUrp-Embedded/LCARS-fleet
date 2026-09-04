@@ -24,7 +24,7 @@ die() { echo "lcars: $*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<EOF
-$PROG — CLI fleet LCARS v2
+$PROG — CLI fleet LCARS
 
 USAGE
   $PROG spawn <role> [--issue <id>] [--brief <texte>]
@@ -189,7 +189,7 @@ cmd_spawn() {
   body="$(curl -sS -m 10 --unix-socket "$API_SOCK" -X POST "http://localhost/api/admin/spawn" \
             -H 'content-type: application/json' -d "$payload" \
             -w $'\n%{http_code}' 2>/dev/null)" \
-    || die "control socket injoignable ($API_SOCK) — fleet_v2 tourne pour cet utilisateur ?"
+    || die "control socket injoignable ($API_SOCK) — fleet tourne pour cet utilisateur ?"
 
   http="${body##*$'\n'}"; body="${body%$'\n'*}"
   case "$http" in
@@ -258,7 +258,7 @@ cat_dir_of() {
 # Le fichier porte AUSSI des ports d'ecoute : `LCARS_TOOL_EVAL=1`, pose par chaque appelant,
 # neutralise le bloc qui les ouvrirait. Ce CLI ne fait aucun appel forge, il transmet la config.
 _load_box_env() {
-  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
   [[ -f "$env_file" ]] || return 0
   set -a
   # shellcheck disable=SC1090
@@ -787,7 +787,7 @@ cmd_approve() {
   local have_cli
   export GIT_TERMINAL_PROMPT=0
 
-  local env_file="${LCARS_FLEET_V2_ENV:-$HOME/.lcars/fleet_v2.env}"
+  local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
   _load_box_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
 

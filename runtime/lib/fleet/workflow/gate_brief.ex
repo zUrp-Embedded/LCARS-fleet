@@ -2,7 +2,7 @@ defmodule Fleet.Workflow.GateBrief do
   @moduledoc """
   Builds the **eval brief** (the brief text) sent to a judge to decide a workflow gate.
   The judge pulls it via MCP `get_work_item`, judges (rubber-duck modop), and returns a
-  strict JSON decision `gate-decision-v1.json`.
+  strict JSON decision `gate-decision.json`.
 
   The FRAMING prose lives in `priv/catalogue/workflow/brief_templates/gate-brief-{deliverable,brief}.md`
   (F-23: wording is calibration DATA — cf. `Fleet.Workflow.BriefTemplate`); this module
@@ -39,7 +39,7 @@ defmodule Fleet.Workflow.GateBrief do
   `:subject` parametrizes WHAT is judged — `:deliverable` (default: step outputs, rendered
   as JSON in a fence) or `:brief` (the BRIEF written by the architect, judged BEFORE any
   production — rendered as a readable markdown BLOCKQUOTE, never a JSON-escaped blob). The
-  verdict contract (`gate-decision-v1`) and the mechanics are identical — each subject has
+  verdict contract (`gate-decision`) and the mechanics are identical — each subject has
   its own template file carrying its own framing.
   """
   @spec build(map()) :: String.t()

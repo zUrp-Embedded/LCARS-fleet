@@ -191,7 +191,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   answer as `LCARS_POD_REMOTE_CONTROL` and the shell obeys it (its own `jq` read of the field
   runs only when the variable is absent, i.e. a launch outside the spawner).
 
-  The declaration is the FLOOR; the fleet's debug mode (`fleet_v2 start --debug` →
+  The declaration is the FLOOR; the fleet's debug mode (`fleet start --debug` →
   `:debug_visibility`) is the only thing above it, and it is MONOTONE by construction — an `or`,
   never a replacement. A mode that could also CLOSE would let an operator ask for observability and
   lose a pod they had; and a mode that lies in either direction is worse than no mode, because the
@@ -231,7 +231,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
   cap-profile. **Ce qui manque est le VÉHICULE, et il n'a jamais existé** : la compression passe par
   un hook `PreToolUse`, or **un pod ne peut pas exécuter de hook** — le monde qu'on lui projette ne
   monte que `plugins/` et `skills/`, `pod_settings_json/1` n'écrit aucune clé `hooks`, et le
-  `.claude` humain est exclu À CAUSE de ses hooks. Le porteur v1 visait le tier `user`, que
+  `.claude` humain est exclu À CAUSE de ses hooks. Un porteur dans le tier `user`, que
   `--setting-sources` exclut sans condition : il ne tirerait pas davantage (cf.
   `vendor/token_saver/VENDOR.md`, qui porte le mot et son anticorps).
 

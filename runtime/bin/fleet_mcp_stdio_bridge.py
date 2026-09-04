@@ -2,7 +2,7 @@
 # SOURCE: bin/fleet_mcp_stdio_bridge.py
 # AUTHOR: starfleet (consolidation salvage cow-boy)
 # STARDATE: 2026.247
-# STATUS: salvage v2-functional
+# STATUS: functional
 # fleet_mcp_stdio_bridge.py — MCP bridge, stdio→AF_UNIX socket (pod ↔ central transport).
 #
 # WHY IT EXISTS (measured, not assumed): a one-shot claude pod CANNOT connect straight to a networked

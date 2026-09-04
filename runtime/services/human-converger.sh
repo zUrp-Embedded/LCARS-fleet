@@ -331,7 +331,7 @@ revoke_human() { # revoke_human <login>
   local login=$1
   gpasswd -d "$login" "$GROUP" >/dev/null 2>&1 || true
   # TERM puis KILL : le serveur tmux, ttyd, le BEAM et les pods vivent sur des sockets tmux
-  # DIFFERENTS (`~/.lcars/run/fleet_v2.sock`, `~/.lcars/run/tmux-sock/<pod>/pod.sock`), donc aucun
+  # DIFFERENTS (`~/.lcars/run/fleet.sock`, `~/.lcars/run/tmux-sock/<pod>/pod.sock`), donc aucun
   # `tmux kill-server` ne les atteint tous. Le seul predicat qui les couvre est l'uid.
   pkill -u "$login" 2>/dev/null || true
   sleep 1
@@ -448,7 +448,7 @@ converge_once() {
       # libre au-dessus du siege » sont trois histoires differentes le jour ou un uid surprend.
       say "user $login cree (membre de $ORG/$TEAM${got_uid:+, uid $got_uid $uid_src})"
       created=$((created + 1))
-      # Le substrat per-humain (~/.lcars, ~/pods, fleet_v2.env seede) appartient a 70-human : on ne
+      # Le substrat per-humain (~/.lcars, ~/pods, fleet.env seede) appartient a 70-human : on ne
       # le recopie pas ici, on l'appelle. Une deuxieme implementation du meme etat-cible derive.
       converge_human "$login" \
         || err "$login : user cree mais le provisioning per-humain a echoue — les modules ont dit leur cause ci-dessus ($HUMAN_MODULES)"

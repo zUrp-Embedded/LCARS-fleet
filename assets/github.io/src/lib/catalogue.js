@@ -106,7 +106,7 @@ export function seats() {
 
 /** Les cinq verdicts, lus dans l'enum du schema de decision. */
 export function verdicts() {
-  const p = join(PRIV, 'workflow', 'schema', 'gate-decision-v1.json');
+  const p = join(PRIV, 'workflow', 'schema', 'gate-decision.json');
   return JSON.parse(readFileSync(p, 'utf8')).properties.decision.enum;
 }
 

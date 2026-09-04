@@ -16,8 +16,8 @@ defmodule Fleet.Project.OnboardPreflightTest do
   pas.
 
   L'admission d'un humain n'est plus vérifiée par verbe : elle est tenue UNE FOIS, au lancement, par
-  Guard B (`bin/fleet_v2`), qui refuse de démarrer sous un uid système ou sous l'admiral. Ses témoins
-  vivent dans `fleet_v2.bats`, pas ici.
+  Guard B (`bin/fleet`), qui refuse de démarrer sous un uid système ou sous l'admiral. Ses témoins
+  vivent dans `fleet.bats`, pas ici.
 
   ## Et une discrimination qui a disparu avec sa cause
 

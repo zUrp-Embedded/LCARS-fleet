@@ -104,8 +104,8 @@ const LCARS = {
 
 // LA GARDE. Un verbe sans prose, ou une prose sans verbe, arrete le build.
 const missing = [
-  ...verbs.filter((v) => !(v in FLEET)).map((v) => `fleet_v2 « ${v} » n'a pas de prose`),
-  ...Object.keys(FLEET).filter((k) => !verbs.includes(k)).map((k) => `la prose « ${k} » ne correspond à aucun verbe de fleet_v2`),
+  ...verbs.filter((v) => !(v in FLEET)).map((v) => `fleet « ${v} » n'a pas de prose`),
+  ...Object.keys(FLEET).filter((k) => !verbs.includes(k)).map((k) => `la prose « ${k} » ne correspond à aucun verbe de fleet`),
   ...entries.filter((e) => !(e.verb in LCARS)).map((e) => `lcars « ${e.verb} » n'a pas de prose`),
   ...Object.keys(LCARS).filter((k) => !entries.some((e) => e.verb === k)).map((k) => `la prose « ${k} » ne correspond à aucune entrée de lcars`)
 ];
@@ -114,7 +114,7 @@ if (missing.length > 0) {
 }
 
 const sections = [
-  { id: 'fleet', label: 'fleet_v2' },
+  { id: 'fleet', label: 'fleet' },
   { id: 'lcars', label: 'lcars' },
   { id: 'env', label: 'Environnement' },
   { id: 'pas-des-commandes', label: 'Ce qui n’en est pas' }
@@ -129,7 +129,7 @@ const sections = [
       <p class="eyebrow">Manuel · console</p>
       <h1>Deux binaires,<br><em>{verbs.length + entries.length} gestes</em></h1>
       <p class="lede">Toute la conduite de la boîte tient dans deux commandes.
-      <b>fleet_v2</b> tient la vie de la fleet — la démarrer, l'arrêter, savoir ce qui tourne.
+      <b>fleet</b> tient la vie de la fleet — la démarrer, l'arrêter, savoir ce qui tourne.
       <b>lcars</b> tient ce qui vit dedans : les pods, les catalogues, les projets.</p>
       <p class="lede">Elles sont installées dans <code>/usr/local/bin</code>. Tout le reste —
       ouvrir un ticket, cadrer un projet, lancer un chantier — se demande à <b>starfleet</b>, dans
@@ -141,13 +141,13 @@ const sections = [
   </header>
 
   <section id="fleet">
-    <SectionHead id="fleet" title="fleet_v2" cap={`la vie de la boîte — ${verbs.length} verbes`} />
+    <SectionHead id="fleet" title="fleet" cap={`la vie de la boîte — ${verbs.length} verbes`} />
     <p class="intro">Un daemon dans une session tmux. Il tourne sous <b>votre</b> UID : chaque
     humain lance sa fleet, et n'attache que ses propres pods.</p>
 
     <div class="entries">
       {verbs.map((v) => v === 'start' ? (
-        <Cmd syn={`fleet_v2 ${v}`} args={startOpts.map((o) => `[${o.flag}]`)} blurb={FLEET[v]} tint="var(--blue)">
+        <Cmd syn={`fleet ${v}`} args={startOpts.map((o) => `[${o.flag}]`)} blurb={FLEET[v]} tint="var(--blue)">
           <dl class="kv">
             {startOpts.map((o) => (<Fragment><dt>{o.flag}</dt><dd>{o.text}</dd></Fragment>))}
           </dl>
@@ -156,7 +156,7 @@ const sections = [
           pire qu'un refus.</div>
         </Cmd>
       ) : (
-        <Cmd syn={`fleet_v2 ${v}`} blurb={FLEET[v]} tint="var(--blue)" />
+        <Cmd syn={`fleet ${v}`} blurb={FLEET[v]} tint="var(--blue)" />
       ))}
     </div>
   </section>

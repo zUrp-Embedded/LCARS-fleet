@@ -2,10 +2,10 @@
 
 **Date**: 2026-07-13
 **Last revised**: 2026-09-04
-**Status**: active — cap-profile composer/loader/validator (substrate, schema v2.5)
+**Status**: active — cap-profile composer/loader/validator (substrate)
 **Referenced by**: —
 
-Capability Profile composer/loader/validator (substrate, LCARS schema v2.5):
+Capability Profile composer/loader/validator (substrate, LCARS cap-profile schema):
 a pure data transformer, YAML on disk → composed `%Fleet.CapProfile{}` struct, no
 process/state.
 

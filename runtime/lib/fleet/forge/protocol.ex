@@ -483,7 +483,7 @@ defmodule Fleet.Forge.Protocol do
   pret si la question se rouvre.
 
   Ce qu'il ne faut PAS en conclure : ni que le champ `outputs` d'une carte alimente ce bloc (il est
-  DOCUMENTAIRE, cf. la description du schema v2.5), ni qu'un juge recoit une charge — il recoit une
+  DOCUMENTAIRE, cf. la description du schema), ni qu'un juge recoit une charge — il recoit une
   branche.
   """
   @spec result_block(map() | nil) :: String.t()

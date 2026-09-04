@@ -51,19 +51,19 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
     })
   end
 
-  # The Loader must unwrap the v2.5 ENVELOPE (kind/metadata/spec.steps) into the single internal
-  # FLAT form. There is NO v1: a flat/envelope-less YAML fails the v2.5 schema before `normalize`.
-  # "v1/v2.5" = external envelope vs internal flat (same version, two shapes), NOT two versions.
+  # The Loader must unwrap the ENVELOPE (kind/metadata/spec.steps) into the single internal
+  # FLAT form. There is no flat form: an envelope-less YAML fails the schema before `normalize`.
+  # "envelope/flat" = external envelope vs internal flat (one contract, two shapes).
   # Without the unwrap, a consumer reads `workflow_map["steps"]=nil` (steps live under spec.steps).
   @doc false
-  @spec check_pipeline_v25_normalized(String.t()) :: Support.result()
-  def check_pipeline_v25_normalized(root) do
+  @spec check_pipeline_envelope_normalized(String.t()) :: Support.result()
+  def check_pipeline_envelope_normalized(root) do
     rel = "lib/fleet/workflow/loader.ex"
     loader = Path.join(root, rel)
 
     # Anti-hollow-green: matching `~r/normalize/i` over the WHOLE source would turn the rail green as soon as a
     # mere COMMENT contains "normalize", even without the code. So we match the real CODE CLAUSE
-    # that unwraps `spec.steps` (the v2.5 normalization) AND its call, STRIPPING the comment from each
+    # that unwraps `spec.steps` (the envelope normalization) AND its call, STRIPPING the comment from each
     # line (a commented-out `# defp normalize(...)` does not count).
     unwrap_clause? =
       loader
@@ -78,25 +78,25 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
     ok? = unwrap_clause? and called?
 
     %{
-      id: "pipeline.v25.normalized",
+      id: "pipeline.envelope.normalized",
       remediation:
-        "add the v2.5 `normalize` unwrap clause for spec.steps so a workflow_map consumer does not read steps=nil",
+        "add the `normalize` unwrap clause for spec.steps so a workflow_map consumer does not read steps=nil",
       status: if(ok?, do: :pass, else: :fail),
       evidence:
         cond do
           not unwrap_clause? ->
             [
-              "#{rel}: `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` clause (v2.5 unwrap) missing → a workflow_map consumer reads steps=nil"
+              "#{rel}: `defp normalize(%{\"spec\" => %{\"steps\" => ...}})` clause (envelope unwrap) missing → a workflow_map consumer reads steps=nil"
             ]
 
           not called? ->
-            ["#{rel}: `normalize(yaml)` never called at load → v2.5 envelope not unwrapped"]
+            ["#{rel}: `normalize(yaml)` never called at load → envelope not unwrapped"]
 
           true ->
             []
         end,
       note:
-        "Loader UNWRAPS spec.steps via the v2.5 CODE CLAUSE (`defp normalize(%{\"spec\"…})`) AND calls it at load — matches the code, not a comment (hardened anti-hollow-green)"
+        "Loader UNWRAPS spec.steps via the CODE CLAUSE (`defp normalize(%{\"spec\"…})`) AND calls it at load — matches the code, not a comment (hardened anti-hollow-green)"
     }
   end
 
@@ -241,7 +241,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
   @spec check_findings_severities_aligned(String.t()) :: Support.result()
   def check_findings_severities_aligned(root) do
     rel_ex = "lib/fleet/findings_wire.ex"
-    rel_json = "priv/workflow/schema/findings-v1.json"
+    rel_json = "priv/workflow/schema/findings.json"
 
     from_code =
       root
@@ -312,7 +312,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Events do
               Enum.map(max_missing, &"absente de l'enum severity_max: #{inspect(&1)}") ++
               Enum.map(max_extra, &"en trop dans severity_max: #{inspect(&1)}"),
           note:
-            "findings-v1 severity vocabulary: severities/0 == enum severity, " <>
+            "findings severity vocabulary: severities/0 == enum severity, " <>
               "et == enum severity_max prive de #{inspect(@severity_max_empty)}"
         }
     end

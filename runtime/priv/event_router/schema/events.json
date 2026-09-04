@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:lcars:events-v1",
-  "title": "LCARS Events Catalogue v1",
+  "$id": "urn:lcars:events",
+  "title": "LCARS Events Catalogue",
   "description": "Structural schema for priv/event_router/events.yaml (parsed YAML map). Exercised BOTH by events_schema_test.exs (build-time structural gate) AND by the runtime loader (Fleet.EventRouter.Catalog.load!/0) since the registry became load-bearing for ROUTING: an entry's value is either [] (unrouted - consumed by direct subscribers, documented per consumer moduledoc) or a routing object driving the incident classification (IncidentConsumer). The old tolerance for a non-empty handler-module list is GONE (audit B-05).",
   "type": "object",
   "required": [

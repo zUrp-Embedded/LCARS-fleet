@@ -44,7 +44,7 @@ defmodule Fleet.CapProfileReservedSeatTest do
     :ok
   end
 
-  describe "reserved-seat-v1.json (Schema.validate :reserved_seat)" do
+  describe "reserved-seat.json (Schema.validate :reserved_seat)" do
     test "a bare seat (kind + metadata.name) is valid" do
       raw = %{"kind" => "ReservedSeat", "metadata" => %{"name" => "vulcan", "role_index" => 8}}
       assert :ok = Schema.validate(raw, :reserved_seat)

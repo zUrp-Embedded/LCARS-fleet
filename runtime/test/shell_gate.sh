@@ -338,7 +338,7 @@ elif command -v bats >/dev/null 2>&1; then
   #   · 2026-08-27 — un `LCARS_SEAT_UID_FILE` pose a la main : huit temoins rouges, dont les deux
   #     GUARD A, sur du code juste.
   #   · 2026-08-27 (fuzz) — `PROV_FLEET_GROUP` retune six temoins. Et cette variable-la VOYAGE :
-  #     `64-services` l'ECRIT dans `services.env`, que `fleet_v2` et le convergeur chargent en
+  #     `64-services` l'ECRIT dans `services.env`, que `fleet` et le convergeur chargent en
   #     `set -a`. Elle est donc dans l'environnement de tout ce qui tourne sur une machine
   #     provisionnee. `LCARS_CONSOLE_GROUP` en retune vingt-huit ; personne ne l'exporte
   #     aujourd'hui, ce qui rend la panne latente et pas moins reelle.

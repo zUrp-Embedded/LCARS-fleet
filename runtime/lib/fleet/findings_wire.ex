@@ -11,7 +11,7 @@ defmodule Fleet.FindingsWire do
 
   ## Why the review body, and not a fetch
 
-  C1 engraved `findings_v1` as an ops object (`verdicts/issue-N-<role>.json`) -- the durable
+  C1 engraved `findings` as an ops object (`verdicts/issue-N-<role>.json`) -- the durable
   archive. It is the wrong TRANSPORT for a gate: `Fleet.Workflow.OpsObjectSync` is write-only, so
   consuming it at gate time meant building a read path and paying a git read per tick.
 
@@ -23,7 +23,7 @@ defmodule Fleet.FindingsWire do
 
   ## The block
 
-      [findings-v1]
+      [findings]
       ```json
       {"findings":[...]}
       ```
@@ -38,12 +38,12 @@ defmodule Fleet.FindingsWire do
 
   ## What this module does NOT do
 
-  It does not validate. `parse/1` decodes and hands over a map; the schema (`findings-v1.json`)
+  It does not validate. `parse/1` decodes and hands over a map; the schema (`findings.json`)
   lives with the consumer, and a body is EDITABLE by a human on the forge -- so the payload is
   re-checked where it is used, never trusted because it was valid when written.
   """
 
-  @marker "[findings-v1]"
+  @marker "[findings]"
   @unreadable_key "findings_unreadable"
   @fence "```json"
 
@@ -88,7 +88,7 @@ defmodule Fleet.FindingsWire do
   def parse(_), do: :none
 
   @doc """
-  The severities the findings-v1 scale defines, weakest first. The ONLY place this order is
+  The severities the findings scale defines, weakest first. The ONLY place this order is
   written: a card's `block_at` is compared against it, and a second copy would be a second scale.
   """
   @spec severities() :: [String.t()]

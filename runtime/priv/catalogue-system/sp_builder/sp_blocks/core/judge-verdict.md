@@ -1,4 +1,4 @@
-<!-- Date: 2026-07-08 — bloc SP v2 (composé dans le SP LLM ; le générateur retire ce header à la composition). -->
+<!-- Date: 2026-07-08 — bloc SP (composé dans le SP LLM ; le générateur retire ce header à la composition). -->
 
 ## Ton verdict
 
@@ -18,8 +18,8 @@ l'architecte ET par l'humain : c'est du **markdown structuré**, jamais un parag
 - Une **puce par finding**, réfs en `backticks` (fichier, sha, clause citée). Pas de section
   vide : si rien ne tient ou rien ne bloque, la section n'existe pas.
 
-**Charge machine (`details.findings_v1`)** — tes findings partent AUSSI en machine-lisible : dans le
-`details` de ton verdict, sous la clé versionnée `findings_v1`. Le motif est lu par des humains ; cette
+**Charge machine (`details.findings`)** — tes findings partent AUSSI en machine-lisible : dans le
+`details` de ton verdict, sous la clé versionnée `findings`. Le motif est lu par des humains ; cette
 clé est lue par le rail — même matière, jamais une divergence : un lecteur du motif et un lecteur du
 JSON doivent conclure pareil. La forme :
 
@@ -45,8 +45,8 @@ bloque une livraison saine ; une sévérité tiède laisse passer ce que la cart
 
 ⚠ CETTE GRILLE VIVAIT DANS UN FRAGMENT IMPORTÉ (`subagent-spec-reviewer` / `-code-quality-reviewer`,
 dérivés de superpowers), débranché des juges le 2026-08-19 sur décision user. Elle est rapatriée
-telle quelle — c'était la seule définition des trois mots que `findings_v1` exige, et la perdre
+telle quelle — c'était la seule définition des trois mots que `findings` exige, et la perdre
 aurait laissé les juges gradueur sans échelle.
 
-Un `findings_v1` invalide ne casse PAS ton verdict (l'enveloppe fait foi) — mais il est écarté avec un
+Un `findings` invalide ne casse PAS ton verdict (l'enveloppe fait foi) — mais il est écarté avec un
 log fort et ta mesure est perdue pour le rail : respecte la forme exactement.

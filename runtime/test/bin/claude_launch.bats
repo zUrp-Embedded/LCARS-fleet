@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/bin/claude_launch.bats
 # AUTHOR: engineer
 # STARDATE: 2026-06-01
-# STATUS: bats tests for bin/claude_launch.sh v2 (ADR-G, interactive RC)
+# STATUS: bats tests for bin/claude_launch.sh (ADR-G, interactive RC)
 #
 # Integration tests for bin/claude_launch.sh (the N1 vendor frontier) against the CURRENT ADR-G
 # contract: 3 positional args <role> <pod_id> <pod_dir>. The SP is NOT an arg any more — it was pulled

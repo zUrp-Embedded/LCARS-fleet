@@ -731,7 +731,7 @@ exit 2'
 # Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer. Le
 # garde demenage avec le geste ; ses temoins demenagent avec le garde.
 #
-# La regle mesuree est celle de `is_fleet_human` et de GUARD B (`bin/fleet_v2`), les DEUX bornes :
+# La regle mesuree est celle de `is_fleet_human` et de GUARD B (`bin/fleet`), les DEUX bornes :
 # `uid >= UID_MIN` ET `uid != LCARS_SYSADMIN_UID`.
 floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   run bash -c "set -euo pipefail

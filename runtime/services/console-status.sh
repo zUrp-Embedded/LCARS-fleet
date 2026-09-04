@@ -7,7 +7,7 @@
 # CONTRAT : sort TOUJOURS 0 et TOUJOURS une ligne. tmux n'affiche rien d'un hook en echec, et
 # l'operateur lirait cette absence de barre comme une absence de probleme.
 #
-# ⚠ LA DETECTION EST DUPLIQUEE DEPUIS `fleet_v2 cmd_status`, ET C'EST DELIBERE : `cmd_status`
+# ⚠ LA DETECTION EST DUPLIQUEE DEPUIS `fleet cmd_status`, ET C'EST DELIBERE : `cmd_status`
 # commence par `cmd_version`, qui retombe sur `git status --porcelain` du runtime quand
 # build_info.txt manque. Appeler la commande au lieu de refaire ses deux tests poserait un
 # `git status` toutes les 15 s pour afficher deux mots.
@@ -15,8 +15,8 @@
 set -uo pipefail          # PAS -e : aucune commande de cette sonde n'a le droit de la tuer
 
 TMUX_BIN="${LCARS_TMUX_BIN:-tmux}"
-SESSION="${LCARS_FLEET_V2_SESSION:-fleet_v2}"
-DAEMON_SOCK="${LCARS_FLEET_V2_SOCK:-$HOME/.lcars/run/fleet_v2.sock}"
+SESSION="${LCARS_FLEET_SESSION:-fleet}"
+DAEMON_SOCK="${LCARS_FLEET_SOCK:-$HOME/.lcars/run/fleet.sock}"
 SOCK_BASE="${LCARS_TMUX_SOCK_BASE:-$HOME/.lcars/run/tmux-sock}"
 
 if ! "$TMUX_BIN" -S "$DAEMON_SOCK" has-session -t "$SESSION" 2>/dev/null; then

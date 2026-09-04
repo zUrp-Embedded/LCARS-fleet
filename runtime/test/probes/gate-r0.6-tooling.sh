@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SOURCE: runtime/test/probes/gate-r0.6-tooling.sh
 # AUTHOR: starfleet (consolidation salvage cow-boy)
-# STARDATE: 2026.146
-# STATUS: MANUAL PROBE v2 — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
+# STARDATE: 2026.247
+# STATUS: MANUAL PROBE — standalone, outside `mix gate` (non-CI). The gate's chain is declared in
 #         mix.exs (alias `gate:`); do not re-list it here, it drifts — this line has been wrong twice.
 # gate-r0.6-tooling.sh — R0.6. exit 0 iff the static tooling is usable from the runtime root.
 #

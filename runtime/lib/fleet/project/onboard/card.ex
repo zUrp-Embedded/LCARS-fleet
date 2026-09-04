@@ -201,7 +201,7 @@ defmodule Fleet.Project.Onboard.Card do
   #
   # ⚠ RESIDUE, NAMED: `declared_by` ends up as the reviser for the WHOLE record, including a
   # `max_fan` a human chose and this revision merely carried. It names the last writer, not the
-  # origin of every field, and the schema (`lcars/declaration-v1`) has no per-field provenance. It is
+  # origin of every field, and the schema (`lcars/declaration`) has no per-field provenance. It is
   # the smaller lie: the alternative is deleting the human's declaration outright.
   defp revision_write_opts(opts, previous) do
     [

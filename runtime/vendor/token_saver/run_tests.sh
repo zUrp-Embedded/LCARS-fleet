@@ -6,7 +6,7 @@
 #     |  |  2026  |  | SOURCE: run_tests.sh
 #     |  |________|  | AUTHOR: STARFLEET
 #     |   ________   | SYSTEM: LCARS-FLEET
-#     |  |  v1.0  |  | STATUS: OPERATIONAL
+#     |  |  v0.9  |  | STATUS: OPERATIONAL
 #     |  |________|  |__________________________________________
 #     |              \__________________________________________\
 #      \    "To boldly go where no code has gone before..."     /
@@ -14,7 +14,7 @@
 #
 #     +-----------------------------------------------------------+
 #     | MODULE: TOKEN-SAVER     | SUBSYSTEM: RUNTIME / COMPRESSION |
-#     | LICENSE: AGPL-3         | STARDATE: 2026.216               |
+#     | LICENSE: AGPL-3         | STARDATE: 2026.247               |
 #     +-------------------------+---------------------------------+
 #     |                                                           |
 #     |  Gate de la brique vendoree token_saver.                  |

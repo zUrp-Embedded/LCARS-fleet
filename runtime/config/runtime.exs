@@ -1,10 +1,10 @@
-# LCARS Fleet runtime config (per-human launch via bin/fleet_v2)
+# LCARS Fleet runtime config (per-human launch via bin/fleet)
 #
 # Evaluated at every release start (post-Mix release build, runtime)
 # AND by `mix test` (Mix loads config/runtime.exs in ALL envs).
 #
 # The `config_env() != :test` guard is MANDATORY: this file is boot
-# config (it reads env vars of the human run `~/.lcars/fleet_v2.env`,
+# config (it reads env vars of the human run `~/.lcars/fleet.env`,
 # nonexistent in test) and it is evaluated AFTER `config/test.exs`. Without the
 # guard, `config :lcars_fleet, api_start_listener: true` (below) overrides the
 # hermetic `start_listener: false` of test.exs → fleet_api starts the
@@ -72,7 +72,7 @@ end
 # celle du systeme ; sans lui, c'est le compte systeme de la boite.
 #
 # ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
-# `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet_v2.env`,
+# `70-human.sh:301-302` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet.env`,
 # derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
 # BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
@@ -179,7 +179,7 @@ if config_env() != :test and not tool_mode? do
   # catches dev/manual launches as root, where `~/.gitea_token` resolves to `/root/.gitea_token` =
   # the admin token). Hygiene, not an anti-adversary defense (cooperative threat model).
   #
-  # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet_v2:363`)
+  # ET LE SIEGE NON PLUS (`00` §6.1, l'ecart qui « monte en tete ») : GUARD B (`bin/fleet:363`)
   # refuse une fleet sous l'uid du sysadmin — le BEAM herite de l'uid de son lanceur, ses pods
   # avec : une fleet sous le siege donnerait des pods sudo-capables, l'exact inverse de la
   # sandbox. Mais la release elle-meme (`rel/.../lcars_fleet start`) est sur le PATH d'admiral, et
@@ -210,10 +210,10 @@ if config_env() != :test and not tool_mode? do
 
   # ─── LA CLEF DE LA GARDE NE VIENT PLUS DE L'ENVIRONNEMENT DU GARDE ─────────────────────────────
   #
-  # ⚠ MESURE : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` DESARME CETTE GARDE des qu'elle lit sa
+  # ⚠ MESURE : `LCARS_SYSADMIN_UID=99999 fleet start` DESARME CETTE GARDE des qu'elle lit sa
   # politique dans l'environnement du processus qu'elle garde — or cet environnement
   # appartient au garde, qui n'a qu'a le poser en prefixe de commande. Et le BEAM, lance APRES
-  # `setup_env`, heritait en plus de `~/.lcars/fleet_v2.env`, un fichier que le template invite
+  # `setup_env`, heritait en plus de `~/.lcars/fleet.env`, un fichier que le template invite
   # explicitement l'humain a editer : la dispense y devenait persistante.
   #
   # L'uid du siege est un FAIT DE MACHINE, pas un reglage. Il vit donc dans un fichier `root:root`
@@ -224,7 +224,7 @@ if config_env() != :test and not tool_mode? do
   # `LCARS_SEAT_UID_FILE` est une couture de TEMOIN — elle deplace le CHEMIN, jamais la valeur, donc
   # elle ne rend pas au garde le pouvoir qu'on vient de lui retirer.
   #
-  # AUCUN REPLI, et c'est le meme refus que `bin/fleet_v2`. Le siege est l'uid de qui a installe
+  # AUCUN REPLI, et c'est le meme refus que `bin/fleet`. Le siege est l'uid de qui a installe
   # LCARS : sur une machine provisionnee cette valeur ne peut pas etre vide, donc un defaut y
   # repondrait par un nombre a la place d'un fait. Fichier absent ou illisible = machine NON
   # PROVISIONNEE — un etat qu'on nomme, pas une valeur qu'on invente. `LCARS_SYSADMIN_UID` a quitte
@@ -243,7 +243,7 @@ if config_env() != :test and not tool_mode? do
                 "provisioned: run `sudo deploy/provision apply`."
     end
 
-  # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet_v2 porte DEUX regles — la reservation du siege
+  # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet porte DEUX regles — la reservation du siege
   # ET la frontiere systeme/humain (`uid >= UID_MIN`). Sans ce miroir, un compte SYSTEME
   # (uid < 1000) lancant la release directement passe le BEAM et n'est refuse que par le launcher.
   #
@@ -255,9 +255,9 @@ if config_env() != :test and not tool_mode? do
   # franchit.
   #
   # C'est le meme trou que celui ferme quinze lignes plus haut sur l'autre moitie de GUARD B
-  # (`LCARS_SYSADMIN_UID=99999 fleet_v2 start`), et la reponse est la meme : LA BORNE EST UN FAIT DE
+  # (`LCARS_SYSADMIN_UID=99999 fleet start`), et la reponse est la meme : LA BORNE EST UN FAIT DE
   # MACHINE. `/etc/login.defs` la DECLARE, `useradd` la lit pour creer les comptes, et QUATRE autres
-  # lecteurs de ce depot la lisent la (`bin/fleet_v2`, `services/console-humans.sh`,
+  # lecteurs de ce depot la lisent la (`bin/fleet`, `services/console-humans.sh`,
   # `services/human-converger.sh`, `deploy/lib/provision-lib.sh`). Le BEAM est le cinquieme, et ne
   # pas la lire ferait de lui le seul dont la frontiere puisse etre autre chose que celle du systeme
   # qu'il garde.
@@ -285,24 +285,24 @@ if config_env() != :test and not tool_mode? do
   case uid_reading do
     "0" ->
       raise "R-no-root-runtime: the fleet daemon refuses to run as root " <>
-              "(launch under your human UID via bin/fleet_v2, never as root)"
+              "(launch under your human UID via bin/fleet, never as root)"
 
     uid when uid == sysadmin_uid ->
       raise "R-no-root-runtime: the fleet daemon refuses to run under the SYSADMIN seat " <>
               "(uid #{sysadmin_uid}) — GUARD B: a fleet under the seat would run sudo-capable " <>
               "pods, the exact inverse of the sandbox. The seat fixes the box; a fleet human " <>
-              "runs the fleet (bin/fleet_v2 under a worker account)."
+              "runs the fleet (bin/fleet under a worker account)."
 
     {:unreadable, why} ->
       raise "R-no-root-runtime: the runtime UID could not be established (#{why}) — the anti-root " <>
-              "guard refuses a boot it cannot verify (launch via bin/fleet_v2)"
+              "guard refuses a boot it cannot verify (launch via bin/fleet)"
 
     uid when is_binary(uid) ->
       case Integer.parse(uid) do
         {n, ""} when n < uid_min ->
           raise "R-no-root-runtime: the fleet daemon refuses to run under a SYSTEM account " <>
                   "(uid #{n} < UID_MIN #{uid_min}) — the fleet runs under a HUMAN uid " <>
-                  "(launch via bin/fleet_v2 under a worker account)"
+                  "(launch via bin/fleet under a worker account)"
 
         _human_or_unparseable ->
           :ok
@@ -321,12 +321,12 @@ if config_env() != :test and not tool_mode? do
   # omission"; a declaration made by the file itself means the omission cannot happen, and the guard
   # vouches for a fact nobody checked.
   #
-  # `LCARS_HOST_BOOT` is exported by `bin/fleet_v2` at daemon start. A pod's projected environment is
+  # `LCARS_HOST_BOOT` is exported by `bin/fleet` at daemon start. A pod's projected environment is
   # a WHITELIST built by `LaunchEnv` (`LCARS_POD_*`, `LCARS_PROJECT_OPS`, …) and carries no such
   # variable, so a BEAM launched in that world falls to the fail-closed `:pod` and the MCP
   # supervisor refuses to boot.
   #
-  # COST, written next to the switch: a boot that bypasses `bin/fleet_v2` — a developer's
+  # COST, written next to the switch: a boot that bypasses `bin/fleet` — a developer's
   # `iex -S mix` starting the whole app — must say so: `LCARS_HOST_BOOT=1 iex -S mix`. That is
   # the point rather than a side effect; the alternative is a declaration that declares nothing.
   # (`mix test` is unaffected: `config/test.exs` declares `:host` on its own.)
@@ -489,7 +489,7 @@ if config_env() != :test and not tool_mode? do
   # pour la latence, jamais.
   #
   # ⚠ ET UNE DEUXIEME RAISON, DE FORME : deriver le port du bloc par-humain (`base+3`, pose par
-  # `bin/fleet_v2`) est faux — le Poller sonde l'ORG, partagee, et ne
+  # `bin/fleet`) est faux — le Poller sonde l'ORG, partagee, et ne
   # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE : un port
   # par humain demanderait a la forge de notifier N adresses du meme evenement. Le lanceur ne pose
   # pas ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
@@ -539,7 +539,7 @@ if config_env() != :test and not tool_mode? do
       )
 
   # ============================================================
-  # fleet_spawner — debug visibility (`fleet_v2 start --debug`)
+  # fleet_spawner — debug visibility (`fleet start --debug`)
   # Posted by the start door for THIS fleet life. It widens ONE thing:
   # `Pod.LaunchSpec.remote_control?/1` answers true whatever the cap-profile declares, so a pod
   # nobody planned to look at is attachable. Read here rather than at the vendor launcher because
@@ -565,7 +565,7 @@ if config_env() != :test and not tool_mode? do
 
   # tmux sock-dir base — the Elixir-side default is home-relative `~/.lcars/run/tmux-sock`
   # (`Fleet.Spawner.PodTmux.sock_base`, fleet launched by a human: a path writable without privilege).
-  # This env (set by bin/fleet_v2) overrides it explicitly so that ALL sides compute the same
+  # This env (set by bin/fleet) overrides it explicitly so that ALL sides compute the same
   # path. Sets both the runtime side (`:tmux_sock_base`) and, via do_launch, the
   # `LCARS_TMUX_SOCK_BASE` env the launchers read.
   if sock_base = System.get_env("LCARS_TMUX_SOCK_BASE") do
@@ -594,7 +594,7 @@ if config_env() != :test and not tool_mode? do
       mcp_sock_base: Fleet.EnvParse.path("LCARS_FLEET_MCP_SOCK_BASE", sock_base)
   end
 
-  # EGRESS base — same override, same reason, same ONE source as the MCP socket above: `bin/fleet_v2`
+  # EGRESS base — same override, same reason, same ONE source as the MCP socket above: `bin/fleet`
   # exports it, this reads it, and `bwrap_launch.sh` binds the per-pod dir at the same absolute path.
   # Without this the code kept its `/run/lcars/egress` default while the fleet runs home-native, so
   # the directory never existed and every pod launched with no way to reach its vendor. Found on a
@@ -669,7 +669,7 @@ if config_env() != :test and not tool_mode? do
   # activates quiescence). Outside `:test` (this file is guarded) →
   # tests keep the `NoOpDispatcher` default (hermeticity). User decision:
   # no Fleet.Dispatcher god-module, the seam IS the abstraction.
-  # LA MEME VALEUR QUE `bin/fleet_v2` LIT POUR SA MARGE D'ATTENTE (BL-6-52). Un seul nombre, deux
+  # LA MEME VALEUR QUE `bin/fleet` LIT POUR SA MARGE D'ATTENTE (BL-6-52). Un seul nombre, deux
   # lecteurs : le BEAM draine pendant ce delai, le launcher attend ce delai PLUS une marge avant de
   # conclure. Sans ca, les deux derivaient — 45 s cote BEAM, 90 s en dur cote shell.
   config :lcars_fleet,
@@ -710,7 +710,7 @@ if config_env() != :test and not tool_mode? do
 
   # AF_UNIX control socket for the write door (POST /api/admin/spawn, ControlRouter) —
   # off the network the pod shares. Default: ~/.lcars/run/api.sock (per-human, real
-  # home never bound into the pod → unreachable). Override LCARS_API_SOCK (set by bin/fleet_v2).
+  # home never bound into the pod → unreachable). Override LCARS_API_SOCK (set by bin/fleet).
   config :lcars_fleet,
     api_control_socket:
       System.get_env("LCARS_API_SOCK") ||
@@ -795,7 +795,7 @@ if config_env() != :test and not tool_mode? do
   end
 
   # ============================================================
-  # fleet_pilot — `max_fan`: workflow_runs ONE project holds in flight (`fleet_v2 --max-fan N`).
+  # fleet_pilot — `max_fan`: workflow_runs ONE project holds in flight (`fleet --max-fan N`).
   # Posted only when the operator typed it: an unconditional put would clobber a value set in
   # `config.exs` with the reader's own default, and the two would then disagree about which one is
   # the default (F6).
@@ -872,7 +872,7 @@ if config_env() != :test and not tool_mode? do
   end
 
   # Pod launchers (N0/N1): absolute path read by the spawner (default `/usr/local/bin`, pod.ex). The
-  # `fleet_v2` launcher sets them from `$INSTALL_DIR/bin` (everything under the install, nothing
+  # `fleet` launcher sets them from `$INSTALL_DIR/bin` (everything under the install, nothing
   # scattered). The parent dir is bind-mounted RO in the sandbox (pod.ex `system_mounts`,
   # derived from `claude_launch_path`). An install param → a future rename touches no code.
   if path = System.get_env("LCARS_BWRAP_LAUNCH_PATH"),

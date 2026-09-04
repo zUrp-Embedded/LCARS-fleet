@@ -203,7 +203,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         # intacte la cle `:brief` posee par l'appelant, avec le TEXTE INTEGRAL. Ce texte finit dans
         # `~/issues/<id>.md` — et `maybe_spawn/…` ne respawne pas un pod vivant, donc la copie n'est
         # JAMAIS reecrite : sur un engineer qui traverse trois rounds de rework, le fichier porte
-        # l'ordre v1 pendant que le pointeur avance de sha en sha. Son contenu depend de la LIVENESS
+        # l'ordre d'origine pendant que le pointeur avance de sha en sha. Son contenu depend de la LIVENESS
         # du pod, pas de l'etat du ticket.
         #
         # ⚖ user : le dedoublonnage vaut sur les DEUX rails, pas seulement sur celui de la queue. On

@@ -1,7 +1,7 @@
 defmodule Fleet.Spawner.SessionIdTest do
   @moduledoc """
   Deterministic hexspeak encoder (`Fleet.Spawner.SessionId.encode/5`) — pure, async.
-  Locks the v2 scheme `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>` (class + uid). This is a
+  Locks the scheme `<X>badcafe-<UID>-4dad-babe-<REPO4>dec0de<P><R>` (class + uid). This is a
   PURE encoder: the class is an ARGUMENT, so these cases name a class, never a role — which role
   carries which class is `CapProfile.kill_class/1`, and citing it here is how a title goes stale. The role→slot
   catalog + the kill-class derivation live in the cap-profile (tested in `Fleet.CapProfileTest`);
@@ -13,7 +13,7 @@ defmodule Fleet.Spawner.SessionIdTest do
 
   @uid 1017
 
-  describe "encode/5 — deterministic hexspeak UUID (v2: class + uid)" do
+  describe "encode/5 — deterministic hexspeak UUID (class + uid)" do
     test "class 1 (costs a live conversation), role 1, fleet repo 0 → 1badcafe-<uid>-…01" do
       assert SessionId.encode(1, 1, @uid, 0) == "1badcafe-1017-4dad-babe-0000dec0de01"
     end

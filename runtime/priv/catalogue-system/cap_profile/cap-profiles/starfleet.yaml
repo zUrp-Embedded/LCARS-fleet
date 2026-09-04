@@ -1,6 +1,6 @@
 # Cap-profile: starfleet
 # Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
-# Schema: ../../schema/cap-profile-v2.5.json
+# Schema: ../../schema/cap-profile.json
 #
 # starfleet = the GLOBAL fleet orchestrator (front-desk + project organizer) — the user-facing
 # FLEET-LEVEL controller. SANDBOXED (bwrap) like a briefing role: it reads project code to frame and

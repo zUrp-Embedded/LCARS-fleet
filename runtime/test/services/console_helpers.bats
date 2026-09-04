@@ -34,7 +34,7 @@ setup() {
   export PATH="$BIN:$PATH"
   export HOME="$BATS_TEST_TMPDIR/home"
   export LCARS_TMUX_SOCK_BASE="$BATS_TEST_TMPDIR/socks"
-  export LCARS_FLEET_V2_SOCK="$BATS_TEST_TMPDIR/fleet.sock"
+  export LCARS_FLEET_SOCK="$BATS_TEST_TMPDIR/fleet.sock"
   mkdir -p "$HOME" "$LCARS_TMUX_SOCK_BASE"
   export TRACE="$BATS_TEST_TMPDIR/trace"; : > "$TRACE"
 }
@@ -75,7 +75,7 @@ PY
 }
 
 @test "status: fleet vivante sans pod -> le dit sans compter faux" {
-  stub_tmux fleet_v2
+  stub_tmux fleet
   run bash "$STATUS"
   [ "$status" -eq 0 ]
   [[ "$output" == "fleet vivante · aucun pod" ]]
@@ -85,7 +85,7 @@ PY
   # ⚠ C'EST LA PROPRIETE QUI PORTE. Une socket sur le disque ne prouve pas qu'un pod tourne — un
   # pod mort laisse la sienne. Compter les FICHIERS afficherait des pods qui n'existent plus, et
   # l'operateur lirait « 3 pods » sur une fleet vide.
-  stub_tmux fleet_v2 lcars-pod-alpha
+  stub_tmux fleet lcars-pod-alpha
   pod_socket alpha
   pod_socket zombie
   run bash "$STATUS"
@@ -94,7 +94,7 @@ PY
 }
 
 @test "status: le pluriel suit le compte" {
-  stub_tmux fleet_v2 lcars-pod-alpha lcars-pod-beta
+  stub_tmux fleet lcars-pod-alpha lcars-pod-beta
   pod_socket alpha; pod_socket beta
   run bash "$STATUS"
   [[ "$output" == "fleet vivante · 2 pods" ]]
@@ -103,7 +103,7 @@ PY
 @test "status: un repertoire de sockets ABSENT n'est pas une erreur" {
   # Une fleet qui vient de demarrer n'a pas encore de pods : l'absence du repertoire est l'etat
   # nominal du premier instant, pas une panne.
-  stub_tmux fleet_v2
+  stub_tmux fleet
   export LCARS_TMUX_SOCK_BASE="$BATS_TEST_TMPDIR/jamais-cree"
   run bash "$STATUS"
   [ "$status" -eq 0 ]

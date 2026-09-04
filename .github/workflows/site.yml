@@ -21,7 +21,7 @@ on:
     # changement qui ne redeclenche RIEN. Le mode de panne est muet dans la mauvaise direction — le
     # site reste en ligne et decrit la version d'avant, ce que l'en-tete ci-dessus dit precisement
     # vouloir empecher. Il manquait huit entrees sur dix (mesure du 2026-08-20) : renommer un outil
-    # MCP, changer un defaut `LCARS_*` de `fleet_v2` ou ajouter un cap-profile systeme ne publiait
+    # MCP, changer un defaut `LCARS_*` de `fleet` ou ajouter un cap-profile systeme ne publiait
     # rien.
     #
     # AU GRAIN DU FICHIER LU, PAS DU REPERTOIRE QUI LE CONTIENT. `runtime/lib/fleet/**` couvrirait,
@@ -36,7 +36,7 @@ on:
       # catalogue.js — le catalogue metier, le schema de verdict, et les DEUX sources Elixir dont il
       # tire le layout et les regles d'un catalogue.
       - 'runtime/priv/catalogue/**'
-      - 'runtime/priv/workflow/schema/gate-decision-v1.json'
+      - 'runtime/priv/workflow/schema/gate-decision.json'
       - 'runtime/lib/fleet/catalogue.ex'
       - 'runtime/lib/fleet/layout.ex'
       # catalogue.js + tools.js — les cap-profiles SYSTEME (le compte des sieges livres par defaut).

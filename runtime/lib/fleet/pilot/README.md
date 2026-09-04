@@ -51,6 +51,6 @@ restated, only pointed at.
 
 ## Config & deps
 
-- Boot: `:pilot_step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet_v2.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
+- Boot: `:pilot_step_dispatch?` (default `false`; `LCARS_PILOT_STEP=true` starts the step rail — fail-loud on the forge `base_url`, the single required config). The full knob catalogue lives in `config/runtime.exs` + `etc/fleet.env.template` (the SSoT); each knob is read by the module named in its own `@moduledoc`.
 - Deps (all descending): the truth is the `use Boundary` of `lib/fleet/pilot.ex` — notably workflow (workflow-map nav + gate briefs), spawner, credentials, cap_profile, task_queue, event_router. Upward runtime seams (config-injected, NOT compile deps): `:mcp_pod_reaper` (mcp → `Fleet.Pilot.PodReaper`), and readiness probed by api. `:mcp_forge_client` / `:mcp_project_onboard` are not upward: their targets `Fleet.Forge` and `Fleet.Project` sit below mcp.
 - Not core: the core can be driven manually OR by pilot afterwards — decoupled by design.

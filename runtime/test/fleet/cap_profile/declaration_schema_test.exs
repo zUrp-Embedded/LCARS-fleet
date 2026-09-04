@@ -1,7 +1,7 @@
 defmodule Fleet.CapProfile.DeclarationSchemaTest do
   @moduledoc """
   Proves that the canon template `priv/catalogue/cap_profile/config/declaration-template.json`
-  validates against `priv/schema/declaration-v1.json`, and that an invalid config is rejected.
+  validates against `priv/schema/declaration.json`, and that an invalid config is rejected.
   """
   use ExUnit.Case, async: true
 
@@ -13,7 +13,7 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
                  "priv",
                  "cap_profile",
                  "schema",
-                 "declaration-v1.json"
+                 "declaration.json"
                ])
   @canon_path Path.join([
                 __DIR__,
@@ -41,7 +41,7 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
     {:ok, schema: schema, canon: canon}
   end
 
-  test "the canon declaration-template.json validates against declaration-v1.json", %{
+  test "the canon declaration-template.json validates against declaration.json", %{
     schema: schema,
     canon: canon
   } do
@@ -75,7 +75,7 @@ defmodule Fleet.CapProfile.DeclarationSchemaTest do
 
   test "accepts — the minimal declaration (required fields + card, no level)", %{schema: schema} do
     minimal = %{
-      "_schema" => "lcars/declaration-v1",
+      "_schema" => "lcars/declaration",
       "declared_at" => "2026-08-23",
       "declared_by" => "architect",
       "justification" => "PoC jetable — carte c0-poc.",

@@ -20,8 +20,7 @@ variable "seed_password" {
 }
 
 # ⚠ PAS `human_username`, ET PAS DE DÉFAUT DÉRIVÉ DE `LCARS_HUMAN` : cette variable de boîte n'existe
-# pas depuis identity-v2 (cf. `console.sh` : « Pas de defaut : identite-v2 a retire l'humain
-# unique »), et un nom qui en tomberait (`${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`) serait un
+# pas (cf. `console.sh` : « Pas de defaut : il n'y a pas d'humain unique »), et un nom qui en tomberait (`${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`) serait un
 # résidu, pas un choix — alors que le compte que cette variable désigne a une raison d'être précise.
 #
 # CE COMPTE N'EST PAS UNE PERSONNE : il tient le siège du compte que l'admin d'une forge crée à son

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "LCARS Reserved Seat v1",
+  "title": "LCARS Reserved Seat",
   "description": "A RESERVED seat in the role catalogue (BL-6-45): the seat claims the provisioning identity (forge account + token, via the four-list equality check) and its role_index slot, but is NOT spawnable — kind discriminates at every consumer (Image branches validation, list/ filters, load refuses {:role_reserved, name}). STRICT like the profile schema: a seat carrying a `spec` is REJECTED — a spec for a role that cannot spawn would be an invented inventory.",
   "type": "object",
   "required": [

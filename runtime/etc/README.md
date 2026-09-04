@@ -2,38 +2,38 @@
 
 **Date**: 2026-05-10
 **Last revised**: 2026-09-04
-**Status**: active — the launch (`bin/fleet_v2`) and release substrate of `runtime/`
+**Status**: active — the launch (`bin/fleet`) and release substrate of `runtime/`
 **Referenced by**: `runtime/CLAUDE.md`
 
 Ce dossier porte ce qui lance la fleet et ce qui la livre. Il ne porte aucun contrat de module :
 le contrat d'une variable d'environnement est le commentaire de `config/runtime.exs` qui la lit,
-et `fleet_v2.env.template` en est le catalogue.
+et `fleet.env.template` en est le catalogue.
 
 ## Le modèle : chaque humain lance SA fleet
 
-Pas de service système. `bin/fleet_v2 start` démarre le BEAM **sous l'humain qui lance**, détaché
+Pas de service système. `bin/fleet start` démarre le BEAM **sous l'humain qui lance**, détaché
 dans une session tmux dédiée ; les pods héritent son UID, ses credentials Claude (`~/.claude`) et
 son identité git. Tout l'état per-humain vit sous `~/.lcars/*`. Le launcher refuse un compte
 système (uid sous `UID_MIN`) et le siège sysadmin (`/etc/lcars/seat.uid`).
 
 ```bash
-cp etc/fleet_v2.env.template ~/.lcars/fleet_v2.env   # éditer : FORGE_BASE_URL au minimum
-fleet_v2 start [--debug] [--max-fan N]                # démarre le BEAM ; les permanents (starfleet) montent seuls
-fleet_v2 status                                       # build, BEAM vivant, pods vivants
-fleet_v2 stop                                         # SIGTERM → drain (Fleet.Admiral.Shutdown) → teardown
-fleet_v2 forge [nom]                                  # le profil de forge actif (~/.lcars/forge.d/<nom>.env)
+cp etc/fleet.env.template ~/.lcars/fleet.env   # éditer : FORGE_BASE_URL au minimum
+fleet start [--debug] [--max-fan N]                # démarre le BEAM ; les permanents (starfleet) montent seuls
+fleet status                                       # build, BEAM vivant, pods vivants
+fleet stop                                         # SIGTERM → drain (Fleet.Admiral.Shutdown) → teardown
+fleet forge [nom]                                  # le profil de forge actif (~/.lcars/forge.d/<nom>.env)
 ```
 
 Aucun port : la porte d'écriture (`lcars spawn`) est une socket AF_UNIX par humain, le deck
 d'observation aussi. La découverte des projets se fait par appartenance aux orgs des catalogues
 installés : rien à configurer. L'architecte est par projet, lancé à l'ouverture du projet ; il n'y a
-pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars/run/fleet_v2.sock attach`.
+pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars/run/fleet.sock attach`.
 
 ## Les fichiers
 
 | fichier | ce que c'est |
 |---|---|
-| `fleet_v2.env.template` | le catalogue des env vars de la boîte, à copier en `~/.lcars/fleet_v2.env` |
+| `fleet.env.template` | le catalogue des env vars de la boîte, à copier en `~/.lcars/fleet.env` |
 | `release.manifest` | ce qui part de `bin/` dans l'install (fichier, exec/noexec, `link`) — des données, pas du code |
 | `deploy-release.sh` | gate → `mix release` → pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
 | `enroll-catalogue.sh` | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |
@@ -44,7 +44,7 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 Une install partagée entre humains, en lecture seule (`root`, groupe `fleet` r-x) : `rel/` (la
 release, ERTS embarqué) **et** `bin/` (les launchers N0/N1 des pods) côte à côte. Le BEAM résout ses
 launchers depuis `$BIN_DIR` de l'install, et seuls des symlinks vivent dans `/usr/local/bin`
-(`fleet_v2`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc
+(`fleet`, `lcars`, les entrées `link` du manifest). Le PATH de l'humain et le deploy visent donc
 le même endroit.
 
 `etc/deploy-release.sh` fait la procédure entière et s'arrête sur un gate rouge : `mix gate` sur

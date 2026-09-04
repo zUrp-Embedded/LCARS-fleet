@@ -6,7 +6,7 @@
 #     |  |  2026  |  | SOURCE: update_vendor.sh
 #     |  |________|  | AUTHOR: STARFLEET
 #     |   ________   | SYSTEM: LCARS-FLEET
-#     |  |  v1.0  |  | STATUS: OPERATIONAL
+#     |  |  v0.9  |  | STATUS: OPERATIONAL
 #     |  |________|  |__________________________________________
 #     |              \__________________________________________\
 #      \    "To boldly go where no code has gone before..."     /

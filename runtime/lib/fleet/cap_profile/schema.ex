@@ -7,11 +7,11 @@ defmodule Fleet.CapProfile.Schema do
   HERE the RAW map is validated against the JSON-schemas pinned in
   `priv/cap_profile/schema/` —
 
-    * `cap-profile-v2.5.json` — strict schema of the composed profile.
+    * `cap-profile.json` — strict schema of the composed profile.
     * `modop-profile.json` — strict schema of the modop fragment (reserved keys
       forbidden: `kind`, `metadata.containment`, `metadata.name` — so a modop
       cannot override the base profile's containment/name/kind).
-    * `reserved-seat-v1.json` — strict schema of a `kind: ReservedSeat` catalogue entry
+    * `reserved-seat.json` — strict schema of a `kind: ReservedSeat` catalogue entry
       (BL-6-45): a kept, non-spawnable seat — a seat carrying a `spec` is rejected.
 
   Single dependency direction (no cycle): this module is UPSTREAM of the core — it
@@ -124,9 +124,9 @@ defmodule Fleet.CapProfile.Schema do
   # Schema loading (private — I/O + cache)
   # ============================================================
 
-  defp load_schema(:cap_profile), do: load_schema_file("cap-profile-v2.5.json")
+  defp load_schema(:cap_profile), do: load_schema_file("cap-profile.json")
   defp load_schema(:modop), do: load_schema_file("modop-profile.json")
-  defp load_schema(:reserved_seat), do: load_schema_file("reserved-seat-v1.json")
+  defp load_schema(:reserved_seat), do: load_schema_file("reserved-seat.json")
 
   # IMMUTABLE priv schema: read+decode+resolve once, cached in `:persistent_term`
   # keyed by the RESOLVED path (the `schema_dir/0` test overrides get their entry). Lazy-init,
