@@ -131,13 +131,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
     end
   end
 
-  # Triplet de provenance a l'EXTRACTION : le brief, l'entree, le livrable. Emis UNIQUEMENT pour un
-  # vrai livrable git.
-  #
-  # ⚠ UN BRIEF ABSENT DONNE UNE PROVENANCE PARTIELLE — entree vers sortie — JAMAIS UN DIGEST INVENTE.
-  #
-  # La racine d'ops est une COUTURE parce que la vraie est un chemin global en dur : sans
-  # l'injecter, le vert ne marche jamais sur le chemin reel.
   # The project's ops worktree, or `nil` when there is none — a project that was never onboarded
   # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:ops_root` seam as
   # the provenance emission below, for the same reason: the real root is a hardcoded global path.
@@ -151,6 +144,14 @@ defmodule Fleet.Pilot.StepRunCompleter do
     if File.dir?(dir), do: dir
   end
 
+  # Triplet de provenance a l'EXTRACTION : le brief, l'entree, le livrable. Emis UNIQUEMENT pour un
+  # vrai livrable git.
+  #
+  # ⚠ UN BRIEF ABSENT DONNE UNE PROVENANCE PARTIELLE — entree vers sortie — JAMAIS UN DIGEST INVENTE.
+  #
+  # La racine d'ops est une COUTURE parce que la vraie est un chemin global en dur : sans
+  # l'injecter, le vert ne marche jamais sur le chemin reel.
+  #
   # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE. Un `else` fourre-tout rendant `:ok` laisse une brique
   # etre publiee, mergee et scellee sans qu'une ligne n'ait dit que sa preuve n'avait pas ete
   # ECRITE — et vu du sceau, ce silence est indiscernable d'une gravure RATEE, qui elle loggue. La
@@ -385,7 +386,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   @doc """
-  **PR-native** — judge verdict → **native review** on the PR. Replaces the in-house
+  **PR-native** — judge verdict → **native review** on the PR, not an in-house
   `[step_run:role:sha]` comment: the gate verdict lives as a Gitea review (APPROVED / REQUEST_CHANGES),
   traceable, readable without a custom query. It is the durable HOME of the verdict.
 
@@ -556,11 +557,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
       # LOOKING like it is weighing severities. A rail that silently stops being fed is worse than
       # one that was never built. So: loud, per verdict, naming the judge.
       {nil, _} ->
-        # DEUX PHRASES, PARCE QUE CE SONT DEUX FAITS. Ce log n'en disait qu'une — « ce juge n'a
-        # rien envoyé » — et il l'a dite à tort pendant toute une campagne de mesure : les juges
-        # émettaient, le schéma refusait en amont (`take_findings`), et l'accusation d'ici
-        # m'envoyait chercher pourquoi ils se taisaient. Un rail qui nomme mal la panne qu'il
-        # observe coûte plus cher qu'un rail muet.
+        # DEUX PHRASES, PARCE QUE CE SONT DEUX FAITS : « ce juge n'a rien envoyé » et « ce juge a
+        # envoyé, le schéma a refusé en amont (`take_findings`) ». Une seule phrase accuse le juge
+        # à tort dès que le schéma refuse, et envoie chercher pourquoi il se tait (mesuré sur une
+        # campagne entière). Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un
+        # rail muet.
         if Map.get(step_run, :review_findings_refused) do
           Logger.warning(
             "StepRunCompleter: judge #{role} DID submit details.findings_v1 on " <>
@@ -1130,9 +1131,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
     case ForgeClient.as_role(forge_opts, role) do
       {:ok, role_opts} ->
         # LA DEDUP DOIT VOIR CE QUE L'ECRIVAIN A POSE. Le marqueur est signe sous le compte du ROLE
-        # (F-E6 l'exige), et `comment_signed?` filtre par defaut sur l'auteur SYSTEME : elle ne
-        # voyait donc jamais le marqueur precedent, rendait `false`, et le reposait a chaque rejeu —
-        # sous un moduledoc qui promet `replay-safe` deux cents lignes plus haut. On ne desactive
+        # (F-E6 l'exige), et `comment_signed?` filtre par defaut sur l'auteur SYSTEME : sans
+        # `dedup_role`, elle ne voit jamais le marqueur precedent, rend `false`, et le repose a
+        # chaque rejeu — contre le `replay-safe` que le moduledoc promet. On ne desactive
         # PAS le filtre (ce serait offrir a un tiers de SUPPRIMER un marqueur legitime en postant
         # la signature en premier) : on dit sous quel role il a ete pose, et la dedup fait confiance
         # a ce compte-la EN PLUS du systeme.
@@ -1154,16 +1155,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
   defp step4_route(forge, repo, n, step_run, forge_opts) do
     case Map.get(step_run, :next_assignee) do
       nil ->
-        # DEUX TERMINAUX, PAS UN. `next_assignee: nil` couvrait aussi bien « la derniere etape s'est
-        # achevee » que « le brief a ete ABANDONNE », et les fermait tous deux en `:delivered` :
-        # `stage/merged`, donc `outcome/3` rendait `"merged"` — la valeur exacte que la description
+        # DEUX TERMINAUX, PAS UN. `next_assignee: nil` couvre aussi bien « la derniere etape s'est
+        # achevee » que « le brief a ete ABANDONNE » ; fermes tous deux en `:delivered`
+        # (`stage/merged`), `outcome/3` rendrait `"merged"` — la valeur exacte que la description
         # de l'outil presente a l'architecte comme *« the delivery proof; only chain issue N+1 on
-        # this »*. Un abandon invitait donc a chainer dessus.
+        # this »* — et un abandon inviterait a chainer dessus.
         #
         # `Labels.stage_retired/0` existe pour ca et le dit : « fermeture SANS livraison (supersede,
-        # abandon) ». L'intention est ecrite la ; encore faut-il que le cablage la lise. L'appelant
-        # declare donc sa fermeture, le defaut restant `:delivered` — le cas nominal de tous les
-        # autres.
+        # abandon) ». L'appelant declare donc sa fermeture, le defaut restant `:delivered` — le cas
+        # nominal de tous les autres.
         closure = Map.get(step_run, :closure, :delivered)
 
         case forge.close_issue(repo, n, Keyword.put(forge_opts, :closure, closure)) do

@@ -211,8 +211,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # 6-127 — CE QUI RESTE DANS LE JOURNAL AU DEMARRAGE EST, PAR CONSTRUCTION, UNE COMPLETION DUE :
   # l'entree est posee avant que la chaine ne tourne et retiree quand elle a fini. On la rejoue par
   # le MEME chemin que la premiere fois (`maybe_complete/2`), ce qui est exactement ce que le
-  # `@moduledoc` de `StepRunCompleter` promet depuis toujours — « recovery replays the sequence,
-  # the done steps skip » — et que personne n'executait.
+  # `@moduledoc` de `StepRunCompleter` promet : « recovery replays the sequence, the done steps
+  # skip ».
   @impl GenServer
   def handle_info(:replay_completion_outbox, state) do
     case CompletionOutbox.pending() do
@@ -325,8 +325,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # 6-127 — LE RESULTAT EST POSE AVANT QUE LA CHAINE NE TOURNE, ET RETIRE QUAND ELLE A FINI.
   #
   # `TaskQueue` a deja marque l'item `completed` quand on arrive ici : la charge utile est la SEULE
-  # copie du travail de l'agent. Une Task de completion qui meurt l'emportait, et le poller
-  # reclamait l'orphelin puis faisait REFAIRE le travail. Le journal la rend reprenable.
+  # copie du travail de l'agent. Sans journal, une Task de completion qui meurt l'emporte, et le
+  # poller reclame l'orphelin puis fait REFAIRE le travail. Le journal la rend reprenable.
   #
   # ⚠ UNE ERREUR DE JOURNALISATION N'EST PAS FATALE, ET C'EST DELIBERE : la completion se deroule de
   # toute facon, elle ne sera simplement pas reprenable — l'etat d'avant cette fiche. Refuser de
@@ -344,7 +344,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
         {:error, reason} ->
           Logger.warning(
             "StepRunConsumer: completion NON journalisee #{p["issue_id"]} (#{inspect(reason)}) — " <>
-              "elle se deroule, mais une mort de la Task la perdrait comme avant 6-127"
+              "elle se deroule, mais une mort de la Task la perdrait (6-127)"
           )
       end
 
@@ -448,9 +448,9 @@ defmodule Fleet.Pilot.StepRunConsumer do
           )
 
         {:error, reason} ->
-          # « poller may re-offer (no loss) » — CE QUI ETAIT ECRIT ICI, ET LE CODE LE CONTREDIT.
-          # L'etiquette reste posee, et `StepDispatcher.decide/1` SAUTE toute issue qui la porte :
-          # le poller ne re-offre rien, il passe. Le ticket quitte le pipeline pour de bon.
+          # LE POLLER NE RE-OFFRE RIEN, IL PASSE : l'etiquette reste posee, et
+          # `StepDispatcher.decide/1` SAUTE toute issue qui la porte. Le ticket quitte le pipeline
+          # pour de bon.
           drain_failed(repo, number, {:remove_label_failed, reason}, state)
       end
     else
@@ -731,8 +731,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
   # would resolve every role in the FIRST active catalogue's image: a `dev` of `web` looked up
   # among `fleet`'s roles, absent there, and the step fails loud on a role that exists — the wedge
-  # the
-  # boot validators cannot catch, because it only happens when a step of a second catalogue's
+  # the boot validators cannot catch, because it only happens when a step of a second catalogue's
   # project runs. `nil` keeps the default image, which is what a single-catalogue deployment and
   # every test fixture want.
   @spec default_deliverable_mode(String.t(), Path.t() | nil) ::

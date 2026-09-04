@@ -217,8 +217,8 @@ defmodule Fleet.Pilot.ConflictProbe do
       {:error, reason} ->
         Logger.warning(
           "ConflictProbe: marqueurs de conflit NON REFERMES (#{inspect(reason)}) — traite en " <>
-            "residuel conservateur, jamais comme un fichier propre (le parseur rendait pour ce cas " <>
-            "un rapport identique a celui d'un fichier sans conflit)"
+            "residuel conservateur, jamais comme un fichier propre (sans quoi ce cas rendrait un " <>
+            "rapport identique a celui d'un fichier sans conflit)"
         )
 
         residual_report()
