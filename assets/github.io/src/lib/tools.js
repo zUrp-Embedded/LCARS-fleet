@@ -217,14 +217,6 @@ function delegationSources() {
  * dans `delegation/**`. Lire le seul fichier de tete rendait zero gate, zero route et « delete
  * arme » — trois reponses fausses sur la page qui dit qui peut appeler quoi.
  */
-function delegationSources() {
-  const dir = join(MCP, 'pod_tools', 'delegation');
-  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? walk(join(d, e.name)) : e.name.endsWith('.ex') ? [join(d, e.name)] : []);
-  return [join(MCP, 'pod_tools', 'delegation.ex'), ...walk(dir).sort()]
-    .map((f) => readFileSync(f, 'utf8')).join('\n');
-}
-
 export function deleteDisarmed() {
   const src = delegationSources();
   return /defp delete_armed\?, do: Application\.get_env\([^)]*,\s*false\)/.test(src);
