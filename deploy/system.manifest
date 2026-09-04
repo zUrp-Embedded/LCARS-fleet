@@ -60,7 +60,7 @@
 # `apt_already` — et il est genere par machine, pas declare ici.
 
 # ─── LA RACINE ──────────────────────────────────────────────────────────────────────────────────
-prefix    /opt/lcars/runtime                              0750  root:fleet          wsl+linux
+prefix    /opt/lcars/runtime                              0750  root:fleet          any      
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
 # ⚠ `any` DEPUIS LE LOT 14 (2026-09-05) : l'image le POSE (`install -d 0755 root:root`, stage
