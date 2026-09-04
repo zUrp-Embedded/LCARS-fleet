@@ -126,8 +126,8 @@ defmodule Fleet.Application.CatalogueDeposits do
     end
   end
 
-  # ⚠ `into: %{}` GARDAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous deux
-  # declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
+  # ⚠ UN `into: %{}` GARDERAIT LE DERNIER VU, EN SILENCE. Deux depots d'une meme org peuvent tous
+  # deux declarer le nom de cette org — un magasin et sa copie oubliee, par exemple — et le magasin
   # effectif serait alors celui que l'ordre de `/repos/search` designe.
   #
   # ON NE REFUSE PAS LA LISTE, contrairement au doublon de DEPOTS, et l'asymetrie est voulue : un
@@ -206,8 +206,8 @@ defmodule Fleet.Application.CatalogueDeposits do
 
   # ⚠ LE STORE SE RECONNAIT ICI, ET NULLE PART AILLEURS. C'est le seul point du code ou l'identite
   # declaree et le proprietaire sont tous les deux connus, donc le seul ou la question puisse etre
-  # posee. La poser une seconde fois ailleurs — ce que faisait `CatalogueLifecycle.stores/3` sur le
-  # NOM du depot — donne deux reponses qui divergent le jour ou une seule est corrigee.
+  # posee. La poser une seconde fois ailleurs (sur le NOM du depot, par exemple) donne deux
+  # reponses qui divergent le jour ou une seule est corrigee.
   #
   # Un store ne coute PAS de `branch_head` : l'identite tranche avant. La tete d'un store est lue
   # plus tard, et seulement par l'appelant qui la compare.

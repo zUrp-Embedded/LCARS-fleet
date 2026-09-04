@@ -76,12 +76,12 @@ defmodule Fleet.Shutdown.Quiesce do
     end
   end
 
-  # ⚠ `max(0, …)` SEUL RENDAIT L'ANOMALIE INDETECTABLE, et c'est le `signed: true` qui le prouve :
-  # on a deliberement choisi un compteur capable de descendre sous zero, puis on a efface la seule
-  # observation qui en tirait quelque chose. Le clamp est la BONNE reponse cote sortie — un solde
-  # negatif veut dire « rien en vol », ce que le drain doit conclure — mais il ne doit pas etre la
-  # SEULE. Un desequilibre `add`/`sub` (un `after` joue deux fois, un `sub` sur une ref recreee)
-  # faisait mentir ce compteur durablement, sans jamais rien signaler.
+  # ⚠ `max(0, …)` SEUL RENDRAIT L'ANOMALIE INDETECTABLE : `signed: true` choisit deliberement un
+  # compteur capable de descendre sous zero, et un clamp muet effacerait la seule observation qui
+  # en tire quelque chose. Le clamp est la BONNE reponse cote sortie — un solde negatif veut dire
+  # « rien en vol », ce que le drain doit conclure — mais il ne doit pas etre la SEULE. Un
+  # desequilibre `add`/`sub` (un `after` joue deux fois, un `sub` sur une ref recreee) ferait mentir
+  # ce compteur durablement, sans jamais rien signaler.
   #
   # UNE LIGNE PAR NOUVEAU PLANCHER, jamais une par appel : `busy_count/0` alimente la somme d'en-vol
   # du drain, sur une boucle de POLL. Journaliser a chaque lecture noierait le drain sous une

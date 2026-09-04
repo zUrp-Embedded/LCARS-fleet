@@ -20,20 +20,11 @@
 # It is a FACT, not a verdict — a caller that wires the links itself is right to accept it, and
 # `deploy/modules.d/60-deploy.sh` does exactly that: it runs this script AS THE HUMAN (who cannot
 # write /usr/local/bin) and re-posts the symlinks as root right after. Standalone, 3 is a refusal.
-# Deliberately hardcoded: the `fleet` group and the `lcars_fleet` release name (kept at the
-# app collapse, cf. mix.exs). WHAT ships into bin/ is NOT code anymore: the list lives in
-# etc/release.manifest (data — file, exec/noexec, optional `link`). The installer is blind to
-# content; add or remove a shipped file THERE. (The old in-code list existed twice — here and in
-# etc/README.md — and the copies had started to drift.)
 #
-# ⚠ THE 3 IS A FACT, NOT A VERDICT. Without it the script answered `OK` and returned 0 while its
-# PATH commands were absent or still pointed at a PREVIOUS version — `ln -sf` had failed, the old
-# link survived, and the operator ran a release he believed was new. A caller that wires the links
-# itself is right to accept a 3; standalone, it is a refusal.
-#
-# WHAT ships into bin/ is NOT code: the list lives in etc/install.manifest (file, exec/noexec,
-# optional `link`), and the installer is blind to its content. Deliberately hardcoded, in contrast:
-# the `fleet` group and the `lcars_fleet` release name.
+# WHAT ships into bin/ is NOT code: the list lives in etc/release.manifest (data — file,
+# exec/noexec, optional `link`), and the installer is blind to its content; add or remove a
+# shipped file THERE. Deliberately hardcoded, in contrast: the `fleet` group and the `lcars_fleet`
+# release name (cf. mix.exs).
 #
 # ATOMICITY: every replacement stages a sibling on the SAME filesystem, verifies it, then `mv`s it
 # into place — an atomic rename at the directory-entry level, keeping the previous generation as
@@ -152,9 +143,9 @@ build_release() {
 refuse_root() {
   # `$1` is the WITNESS SEAM (both branches are exercised in test/etc/install.bats); the default
   # is `$EUID`, and it has no fallback of its own because bash sets EUID before the first line of
-  # this file runs. The line read `${1:-${EUID:-$(id -u)}}` until 2026-08-27: the `$(id -u)` was
-  # unreachable code, and the cost was not the fork nobody saved -- it was that the line ASSERTED
-  # the effective uid can be missing, which the next reader copies into their own guard.
+  # this file runs. A `${EUID:-$(id -u)}` here would be unreachable code, and its cost is not the
+  # fork nobody saves -- it is that the line would ASSERT the effective uid can be missing, which
+  # the next reader copies into their own guard.
   local uid="${1:-$EUID}"
   [[ "$uid" -ne 0 ]] || die "lance en root — le gate n'est pas valide sous root (il outrepasse les permissions que des tests verifient) et le build laisserait des artefacts root dans l'arbre source. Lance-le sous le compte proprietaire de l'install ; seule la POSE demande des droits (cf. etc/README.md)"
 }

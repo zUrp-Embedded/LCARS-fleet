@@ -96,14 +96,10 @@ elif [[ -n "$RELEASE" ]]; then
   # `"$RELEASE_BIN" eval "Fleet.Roster.eval_tfvars(...)"`. Docker n'y sert qu'a transporter la
   # release. Quand la release est DEJA POSEE sur la machine, le detour n'a plus d'objet.
   #
-  # POURQUOI IL MANQUAIT : les deux portes existantes couvrent la boite (`--image`, docker) et le
+  # POURQUOI ELLE EXISTE : les deux autres portes couvrent la boite (`--image`, docker) et le
   # poste en livraison SOURCE (`--repo`, mix). Un poste en livraison BINAIRE n'a ni l'un ni
   # l'autre — pas de mix, c'est le geste R5 qui le veut ; pas d'image, c'est un poste. Il a la
-  # release, et personne ne savait la lire.
-  #
-  # Le mur etait connu et ecrit plus haut : « le banc est mort dessus sur la premiere machine
-  # neuve (2026-08-18, `mix: ABSENT`) ». La reponse donnee alors etait « prefere --image » ; elle
-  # ne vaut que pour qui a docker.
+  # release (mesure 2026-08-18 : `mix: ABSENT` sur une machine neuve).
   #
   # ⚠ MEME FONCTION, MEME AUTORITE : `Fleet.Roster.eval_tfvars`. La regle de placement (siege /
   # juge / ecrivain) reste en Elixir, testee — elle n'est reecrite ni ici, ni en jq, ni ailleurs.
@@ -176,8 +172,8 @@ say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""
 
-# ⚠ « celui de l image » ETAIT VRAI QUAND IL N'Y AVAIT QUE DEUX PORTES. Une release posee porte le
-# sien tout autant, et nommer le mauvais porteur envoie chercher un objet qui n'existe pas ici.
+# ⚠ « celui de la livraison », pas « de l'image » : une release posee porte le sien tout autant,
+# et nommer le mauvais porteur envoie chercher un objet qui n'existe pas ici.
 say "catalogue : ${CATALOGUE:-<celui de la livraison>} (lu via $SRC)"
 say "ecrit     : $DEST"
 say "roles     : $ROLES_LINE"

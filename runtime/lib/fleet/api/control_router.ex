@@ -163,9 +163,8 @@ defmodule Fleet.API.ControlRouter do
   # ⚠ CE QUI RESTE OUVERT, et c'est une seule chose : la COURSE entre la garde et le traitement. Le
   # statut dit `:operational`, la diffusion part, et le consommateur meurt avant d'avoir traite ce
   # message-la. Aucun evenement, aucune issue, et le 202 est deja parti. Fermer ca demande de
-  # PERSISTER la commande avant de repondre — un outbox durable, exactement le mecanisme absent que
-  # deux autres arbitrages attendent deja. En construire un tiers ici en ferait un demi-mecanisme de
-  # plus au lieu d'une decision.
+  # PERSISTER la commande avant de repondre — un outbox durable des commandes admises ; il
+  # n'existe pas, et ce site ne le simule pas.
   defp do_broadcast_spawn(conn, payload) do
     case dispatch_status_fun().() do
       {:degraded, info} ->

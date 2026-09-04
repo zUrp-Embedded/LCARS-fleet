@@ -127,9 +127,9 @@ defmodule Fleet.Admiral.AuditConsumer do
     )
   end
 
-  # (Pas de clause `:"state.corrupt"` : le rail de persistance du broker n'existe plus (BL-6-113),
-  # rien ne peut emettre ce type et le registre d'evenements ne l'autorise pas. UNE CLAUSE QUI NE
-  # PEUT PLUS FILTRER DECRIT UN FLUX.)
+  # (Pas de clause `:"state.corrupt"` : le broker n'a pas de rail de persistance (BL-6-113), rien
+  # ne peut emettre ce type et le registre d'evenements ne l'autorise pas. UNE CLAUSE QUE RIEN
+  # N'ATTEINT DECRIT UN FLUX.)
   defp log_task_queue_event(_other, _event), do: :ok
 
   defp log_boot_event(:"fleet.boot_complete", payload) do

@@ -45,8 +45,7 @@ USAGE
       Liste les pods VIVANTS (socks tmux par-pod) + le statut de leur session tmux.
 
   $PROG ls
-      Alias de « $PROG list ». Le dispatcher accepte les deux depuis toujours ; seul
-      l'usage l'ignorait, ce qui en faisait une commande que personne n'instruisait.
+      Alias de « $PROG list ».
 
   $PROG attach <pod_id>
       Attache ce terminal sur la session tmux du pod (Ctrl-b d rend la main sans
@@ -304,9 +303,9 @@ cat_states() {
 
 cmd_catalogue_list() {
   # ⚠ `out="$(...)"; rc=$?` NE MARCHE PAS SOUS `set -e` : une substitution de commande qui echoue
-  # dans une affectation tue le script AVANT la ligne suivante — donc `rc` n'etait jamais lu et
-  # aucun des refus ci-dessous n'etait atteint. Le `||` fait de l'affectation une condition, ce qui
-  # est exactement l'exception que `set -e` prevoit.
+  # dans une affectation tue le script AVANT la ligne suivante — `rc` ne serait jamais lu et aucun
+  # des refus ci-dessous ne serait atteint. Le `||` fait de l'affectation une condition, ce qui est
+  # exactement l'exception que `set -e` prevoit.
   local out rc=0
   out="$(cat_states 2>&1)" || rc=$?
 
@@ -796,9 +795,9 @@ cmd_approve() {
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"
 
   # ⚠ PAS `local`, ET LE TRAP EST LA RAISON. Un trap EXIT se declenche a la fin du SCRIPT, donc apres
-  # le retour de cette fonction : un `local` a disparu a ce moment-la. Sous `set -u` le trap mourait
-  # alors sur « work_base: unbound variable », ce qui coutait deux fois — `approve` sortait 1 EN CAS
-  # DE SUCCES, et le clone n'etait JAMAIS retire, la fuite meme que ce trap doit empecher.
+  # le retour de cette fonction : un `local` a disparu a ce moment-la. Sous `set -u` le trap mourrait
+  # sur « work_base: unbound variable », ce qui couterait deux fois — `approve` sortirait 1 EN CAS
+  # DE SUCCES, et le clone ne serait JAMAIS retire, la fuite meme que ce trap doit empecher.
   work_base="$(mktemp -d)"
   trap 'rm -rf "$work_base"' EXIT
   local work="$work_base/clone"

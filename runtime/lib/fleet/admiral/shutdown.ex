@@ -57,8 +57,8 @@ defmodule Fleet.Admiral.Shutdown.AggregateDispatcher do
       stop times out. An arch mid-arbitration DOES have a work-item and IS counted, correctly.
     * the **completion offloads** via the `:completion_inflight_fun` seam — after `pod.completed`, the
       business completion (push + PR + forge writes, ≤30s) runs in `Fleet.Pilot.StepRunConsumer`'s
-      `Task.Supervisor`: neither a pod nor a work-item (the item is already `:completed`), so the
-      old count cut it mid-push. See `## Boundary` for why it is a seam and not a call.
+      `Task.Supervisor`: neither a pod nor a work-item (the item is already `:completed`), so a
+      count without it cuts it mid-push. See `## Boundary` for why it is a seam and not a call.
 
   **Fail-CLOSED on the broker**: broker PRESENT but unreachable (restart mid-quiesce) → sentinel
   `> 0` (`@count_unavailable`) → the drain waits its timeout, never concludes "empty" on an unknown
@@ -188,12 +188,10 @@ defmodule Fleet.Admiral.Shutdown do
   use GenServer
   require Logger
 
-  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE, ET IL NE L'ETAIT PAS. `bin/fleet_v2` attend la
-  # disparition de la session tmux avec son propre litteral (`FLEET_V2_STOP_WAIT:-90`), pose la et
-  # jamais derive de CETTE deadline — son commentaire l'avoue et nomme BL-6-52. Deux nombres pour un
-  # seul fait : si le drain passe a 120 s, le launcher rend la main a 90 et l'operateur voit un stop
-  # « fini » sur une fleet qui draine encore.
-  # Le BEAM possede la deadline ; le shell la LIT (meme variable, meme defaut) et y ajoute sa marge.
+  # LE DELAI DE DRAIN EST UNE SOURCE UNIQUE (BL-6-52) : le BEAM possede la deadline, `bin/fleet_v2`
+  # la LIT (`LCARS_SHUTDOWN_GRACE_MS`, meme defaut) et y ajoute sa marge. Un litteral pose la-bas
+  # ferait deux nombres pour un seul fait : le drain passe a 120 s, le launcher rend la main a 90,
+  # et l'operateur voit un stop « fini » sur une fleet qui draine encore.
   @default_grace_ms 45_000
 
   @doc "Le delai de drain effectif, en ms — source unique, partagee avec `bin/fleet_v2`."
@@ -236,9 +234,9 @@ defmodule Fleet.Admiral.Shutdown do
   @default_drain_confirmations 3
 
   # Canonical default of the dispatcher backend: NoOp (inert drain) for the case where the real
-  # prod backend `AggregateDispatcher` is NOT wired — it IS wired in `runtime.exs` hors `:test`,
-  # donc ce defaut ne sert qu'aux tests et aux boots sans config runtime. Set HERE once
-  # only — see `configured_dispatcher/0`.
+  # prod backend `AggregateDispatcher` is NOT wired — it IS wired in `runtime.exs` outside `:test`,
+  # so this default only serves tests and boots without runtime config. Set HERE once only — see
+  # `configured_dispatcher/0`.
   @default_dispatcher Fleet.Admiral.Shutdown.NoOpDispatcher
 
   # --- API ---

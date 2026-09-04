@@ -200,8 +200,8 @@ defmodule Fleet.API.SpawnAdmission do
               # (`host_native_ack: true`, posé par `lcars admiral`, jamais par un chemin auto : le
               # dispatcher ne passe pas par cette porte et n'a pas le champ). C'est la doctrine de
               # la fiche : *« une décision de posture, qui se rouvre en la nommant »* — on nomme le
-              # GESTE (l'acquittement), jamais un nom de rôle (`00` §5 : rien ne se key sur une
-              # chaîne de rôle).
+              # GESTE (l'acquittement), jamais un nom de rôle (rien ne se key sur une chaîne de
+              # rôle).
               ack? ->
                 {:ok, cap}
 

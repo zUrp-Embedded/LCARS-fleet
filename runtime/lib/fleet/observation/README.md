@@ -28,5 +28,5 @@ restated, only pointed at.
   `:observation_http_port`, pas même en option : une variable obligatoire dont la valeur ne sert à
   rien bloque un démarrage sans rien configurer.
 - Knobs `:lcars_fleet, :observation_start_listener` / `:observation_start_readmodel` (default `true`; `false` in `:test`) — hermetic-test gates.
-- Env `LCARS_BIND_HOST` (default `127.0.0.1`) — deck bind IP; local-only by default (frontier = network isolation, same as the API domain).
+- No bind address: the deck has no IP to bind (`LCARS_BIND_HOST` concerns the event router's webhook listener, not this domain).
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/observation.ex`) — this card points at it and does not copy it. A dependency list transcribed here goes stale the day an edge moves, and nothing goes red: boundary compiles the real one.

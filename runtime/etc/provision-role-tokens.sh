@@ -33,8 +33,7 @@
 #   provision-role-tokens.sh --help                          # cette aide
 # Options : --tokens-dir DIR (defaut /opt/lcars/var/tokens) · --roles "a b c" (defaut : les 6) ·
 #           --extra-token COMPTE:FICHIER (repetable — pour un token dont le compte n'est pas le nom de
-#             fichier. Le compte systeme en etait le seul usager ; il suit le contrat de role depuis
-#             qu'il s'appelle `system_starfleet`) · --owner USER (defaut lcars-authority) ·
+#             fichier ; aucun usager dans la recette) · --owner USER (defaut lcars-authority) ·
 #           --token-name NAME (defaut lcars-fleet) · -h|--help
 # passwords-file : JSON {"engineer":"pwd",...} OU {"engineer":{"password":"pwd"},...} (le compte systeme
 #   y a sa cle, ex. "system_starfleet"). Cle insensible a la casse (Gitea resout les comptes
@@ -61,8 +60,8 @@ TOKENS_DIR="${PROV_TOKENS_DIR:-/opt/lcars/var/tokens}"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
-# role rename or a dropped role goes RED at the gate with the delta named (the old
-# one-direction subset check missed exactly that, twice).
+# role rename or a dropped role goes RED at the gate with the delta named (a one-direction subset
+# check misses exactly that).
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
 OWNER="${PROV_AUTHORITY_USER:-lcars-authority}"
@@ -160,8 +159,8 @@ CURL_AUTH_CFG=""
 # appel.
 #
 # ⚠ LE JETON MASTER NE MINTE JAMAIS, IL NE FAIT QUE POSER UN PASSWORD, et la distinction porte le nom
-# de l'option. Un mode qui MINTAIT par jeton admin a existe et a ete retire : Gitea rend « auth
-# required » sur cette voie quel que soit le privilege. Ici le jeton sert a un `PATCH
+# de l'option. Un mint par jeton admin n'existe pas : Gitea rend « auth required » sur cette voie
+# quel que soit le privilege. Ici le jeton sert a un `PATCH
 # /admin/users/<u>` ; le mint qui suit est une basic-auth de la CIBLE, seule forme jamais acceptee.
 force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
   local account="$1" admin_tok pw
@@ -198,7 +197,7 @@ set_auth_for() { # $1=role
 
 # ONE entry to provision = one `account:file` pair (the mapping is DATA). Roles produce
 # `<role>:<role>.gitea_token`; `--extra-token` adds the pairs where account is not file. The system
-# account WAS that pair and is not any more — it derives like the rest. One mint mechanism for all.
+# account derives like the rest. One mint mechanism for all.
 declare -a ENTRIES
 #
 # Le runtime lit par la MEME projection (`Fleet.Credentials.RoleIdentity.token_path/1`) : les deux
@@ -269,7 +268,7 @@ for entry in "${ENTRIES[@]}"; do
   # Atomic write (tmp+mv) + POSIX rights: 0600, owned by the authority service — nobody else opens
   # it, and no group traverses to it. LOCAL READABILITY is a postcondition on a par with forge
   # validity: a token valid on the forge but owned by the wrong account is UNREADABLE by the service
-  # — announcing POSE and exiting 0 there hid a broken deploy behind a WARN. So ownership is VERIFIED
+  # — announcing POSE and exiting 0 there would hide a broken deploy behind a WARN. So ownership is VERIFIED
   # (stat, not just the chown exit code), and a mismatch FAILS the account: the file stays written
   # (the mint cost was real, --check will confirm it), but it is not counted as posed and the run
   # exits non-zero.

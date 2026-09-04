@@ -36,7 +36,7 @@ defmodule Fleet.Observation.Application do
   end
 
   @doc """
-  Child specs of the deck's Cowboy listener. Returns `[]` if `:start_listener` is `false`.
+  Child specs of the deck's listener. Returns `[]` if `:observation_start_listener` is `false`.
 
   ## The deck has no port, and that is the contract
 

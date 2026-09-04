@@ -46,7 +46,7 @@ surface de LECTURE. Le remettre sous un `if api_start_listener` recréerait ce c
 - `Fleet.API.ControlRouter` — the admin write door, on the AF_UNIX socket. **La seule surface.**
 - `Fleet.API.SpawnAdmission` — the spawn-admission pipeline (pure functions)
 - `Fleet.API.BuildInfo` — observable build stamp (lu par le log de boot et par `fleet_v2 version`)
-- `Fleet.API.Readiness` — live operational read-model: MCP pod-facing status, pilot rail liveness (no route serves it; consumers call it)
+- `Fleet.API.Readiness` — live operational read-model: MCP pod-facing status, pilot rail liveness (served by the observation deck's `/api/readiness/deep`; this domain has no route for it)
 - `Fleet.API.Application` — the domain supervisor + control-listener wiring
 
 ## Config & deps

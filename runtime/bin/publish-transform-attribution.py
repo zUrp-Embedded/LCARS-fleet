@@ -10,7 +10,7 @@
 # is free here, supplied by filter-repo.
 #
 # The 4 values cross through the ENVIRONMENT and not through the caller's string: an author name is
-# UNCONTROLLED data (git log %cn), and interpolating one that holds an apostrophe used to produce
+# UNCONTROLLED data (git log %cn), and interpolating one that holds an apostrophe would produce
 # invalid Python and an opaque filter-repo SyntaxError. `os.environb` also yields the exact bytes,
 # so non-UTF-8 names survive.
 import re

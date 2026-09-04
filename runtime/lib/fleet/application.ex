@@ -54,12 +54,10 @@ defmodule Fleet.Application do
   OTP root of the single app `:lcars_fleet` — the ONE `Application` callback of the
   runtime.
 
-  Starts the domain supervisors in topological order. Five domains are PURE
-  libraries with no supervision tree (cap_profile, credentials, sp_builder,
-  workflow, project_bootstrap) — nothing to start for them (they have NO process;
-  their modules are loaded in the app, the pure functions work without a
-  supervisor). Only the domains that actually start something remain in the
-  children below.
+  Starts the domain supervisors in topological order. The pure-library domains (cap_profile,
+  credentials, sp_builder, workflow, project_bootstrap, among others) have nothing to start: their
+  modules are loaded with the app and their functions run without a process. Only the domains that
+  actually start something appear in the children below.
 
   ## The children ORDER IS the boot invariant (F8 scar)
 
@@ -82,12 +80,11 @@ defmodule Fleet.Application do
     * `api` second-to-last (readiness probes pilot/mcp/spawner/admiral),
       `observation` LAST (read-only, nothing in the core depends on it).
 
-  ## Failure semantics (D-17 — faithful umbrella transposition)
+  ## Failure semantics (D-17)
 
   `max_restarts: 0`: each domain carries its own restart intensity (3/60 in
   general); a domain that exhausts it DIES, and its death kills the node
-  (`start_permanent` in prod) — exactly the behavior of the umbrella's
-  `:permanent` apps. We do NOT give the domain a second life here: a domain
+  (`start_permanent` in prod). We do NOT give the domain a second life here: a domain
   resurrected alone (state lost, Bus subscriptions dead) would be a
   success-shaped failure. Any softening (a graceful `:rest_for_one`) is a USER
   arbitration (A-01), NOT a default.

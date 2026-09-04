@@ -71,9 +71,9 @@ defmodule Fleet.API.Readiness do
     probe("spawn.dispatch", state, detail)
   end
 
-  # ⚠ LE CONTRAT, PAS L'IDENTITE D'UN MODULE. Cette sonde a compare le backend au NoOp : tout ce
-  # qui n'etait pas le NoOp passait pour operationnel — un module INEXISTANT compris. « Ce n'est pas
-  # le repli degrade » ne dit rien sur ce que la chose sait faire, et une sonde de readiness qui se
+  # ⚠ LE CONTRAT, PAS L'IDENTITE D'UN MODULE. Comparer le backend au NoOp ferait passer pour
+  # operationnel tout ce qui n'est pas le NoOp — un module INEXISTANT compris. « Ce n'est pas le
+  # repli degrade » ne dit rien sur ce que la chose sait faire, et une sonde de readiness qui se
   # trompe dans ce sens-la fait exactement ce qu'elle existe pour empecher.
   defp shutdown_dispatcher do
     case Fleet.Admiral.Shutdown.resolved_conforming() do

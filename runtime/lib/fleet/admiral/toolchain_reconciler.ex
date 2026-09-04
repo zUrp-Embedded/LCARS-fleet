@@ -38,7 +38,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   ## Configuration
 
     * `:lcars_fleet, :admiral_toolchain_reconcile_interval_ms` — défaut `60_000`
-    * `:lcars_fleet, :forge_client` — seam de lecture (`branch_head/3`)
+    * `:lcars_fleet, :admiral_forge_client` — seam de lecture (`branch_head/3`)
     * `:lcars_fleet, :toolchain_converger` — seam du geste (défaut : une demande sur
       `toolchain.sock`, servie par `lcars-privileged`). Rend `{:ok, sha_appliqué}` ou
       `{:error, cause}` ; `:ok` nu reste accepté pour les doublures de témoins.
@@ -194,8 +194,8 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # LOSSY : un échec de liste ou de drain se dit et n'altère pas le résultat de branche — le tick
   # suivant retentera (le verrou est toujours là).
   defp drain_pass(repo, branch, branch_result) do
-    # UNE passe paginee, filtree `base=` COTE SERVEUR (`/pulls?state=all&base=`) — la v1 passait
-    # par list_pulls/2 : toutes les PR de la boite + un GET par PR, toutes les 60 s (audit).
+    # UNE passe paginee, filtree `base=` COTE SERVEUR (`/pulls?state=all&base=`) — et non
+    # `list_pulls/2` : toutes les PR de la boite plus un GET par PR, toutes les 60 s.
     case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
         Enum.each(prs, &maybe_drain(&1, branch, branch_result))
@@ -350,16 +350,15 @@ defmodule Fleet.Admiral.ToolchainReconciler do
     end
   end
 
-  # L'UNIQUE GESTE PRIVILÉGIÉ DU RAIL. `sudo` sur UN binaire nommé (cf. le sudoers étroit,
-  # `45-sudoers-toolchain`), jamais un shell : la ligne de commande ne porte que le SHA, et le
-  # convergeur lit le manifeste à ce SHA depuis la forge.
+  # L'UNIQUE GESTE PRIVILÉGIÉ DU RAIL : ouvrir la socket du service privilégié. Aucun binaire
+  # nommé ici, aucun shell, rien sur le fil — le service résout lui-même la tête de `tool_request`
+  # et joue le convergeur.
   #
-  # ⚠ « SON ARGUMENT A ÉTÉ SIGNÉ » N'EST PAS UNE PROPRIÉTÉ DE CET APPEL, et l'avoir écrit ici comme
-  # telle a masqué un chemin `groupe → root` aussi longtemps que la phrase est restée. Le sudoers
-  # ouvre ce binaire à TOUT `%fleet` — que `human-converger` peuple depuis la team `humans` de la
-  # forge, toutes les 30 s — donc n'importe lequel de ses membres l'appelle sans passer par ici.
-  # La propriété est tenue EN AVAL : le convergeur refuse désormais tout SHA qui n'est pas la tête
-  # de `tool_request`. C'est là qu'elle vit, et là qu'elle se casse si on la retire.
+  # ⚠ « SON ARGUMENT A ÉTÉ SIGNÉ » N'EST PAS UNE PROPRIÉTÉ DE CET APPEL : le convergeur est
+  # atteignable par d'autres chemins que celui-ci (tout `%fleet`, que `human-converger` peuple
+  # depuis la team `humans` de la forge). La propriété est tenue EN AVAL : le convergeur refuse
+  # tout SHA qui n'est pas la tête de `tool_request`. C'est là qu'elle vit, et là qu'elle se casse
+  # si on la retire.
   defp default_converger(_head, _opts) do
     path =
       Application.get_env(:lcars_fleet, :toolchain_socket) ||
@@ -463,11 +462,10 @@ defmodule Fleet.Admiral.ToolchainReconciler do
         @default_interval_ms
       )
 
-  # ⚖ RENOMMEE : `:forge_client` -> `:admiral_forge_client`. Sa voisine juste
-  # au-dessus porte deja le prefixe (`:admiral_toolchain_reconcile_interval_ms`) ; celle-ci etait
-  # l'une des deux SEULES clefs de module du projet sans proprietaire, et le meme nom designait
-  # ailleurs un mecanisme de portee differente (22 `Keyword.get(opts, :forge_client, …)` dans
-  # `Pilot`, injection par appel). Motif complet dans `Fleet.MCP.PodTools.Probe`, section Coutures.
+  # `:admiral_forge_client`, prefixe comme sa voisine (`:admiral_toolchain_reconcile_interval_ms`) :
+  # un `:forge_client` nu designerait le meme nom qu'un mecanisme de portee differente ailleurs
+  # (l'injection par appel `Keyword.get(opts, :forge_client, …)` du Pilot). Motif complet dans
+  # `Fleet.MCP.PodTools.Probe`, section Coutures.
   defp forge, do: Application.get_env(:lcars_fleet, :admiral_forge_client, Fleet.Forge.Client)
 
   defp converger,

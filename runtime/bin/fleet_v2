@@ -4,8 +4,7 @@
 # STARDATE: 2026-06-15
 # STATUS: PROTO-V2 — human launcher. `fleet_v2 start` runs the fleet AS the human, detached;
 #         starfleet (front-desk) comes up permanent and is reachable through Claude Desktop, NOT a
-#         terminal (reorg 2026-07-19: no arch attach any more — the arch is per-project, spawned
-#         when a project is opened).
+#         terminal. No arch attach: the arch is per-project, spawned when a project is opened.
 
 set -euo pipefail
 
@@ -256,7 +255,7 @@ cmd_start() {
 
   echo "fleet_v2: lancement du BEAM sous $(id -un) (uid $(id -u)) — $mode" >&2
   echo "fleet_v2: aucun port — API et deck sur socket, webhook eteint (decision)" >&2
-  echo "fleet_v2: scan multi-projet — tout depot de l'org (F-037, plus de repo fixe)" >&2
+  echo "fleet_v2: scan multi-projet — tout depot des orgs de catalogue (F-037, aucun repo fixe)" >&2
 
   # Socket tmux DEDIEE : un serveur frais capture l'env exporte ci-dessus.
   MIX_ENV="$mix_env" dtmux new-session -d -s "$SESSION" "$launch_cmd"
@@ -287,7 +286,7 @@ cmd_stop() {
     kill -TERM "$beam_pid" 2>/dev/null || true
 
     # DERIVE de `LCARS_SHUTDOWN_GRACE_MS`, jamais un litteral pose ici (BL-6-52) : deux nombres pour
-    # un seul fait laissaient le launcher rendre la main sur une fleet qui drainait encore.
+    # un seul fait laisseraient le launcher rendre la main sur une fleet qui draine encore.
     local _grace_s=$(( ${LCARS_SHUTDOWN_GRACE_MS:-45000} / 1000 ))
     local i=0 max_wait="${FLEET_V2_STOP_WAIT:-$(( _grace_s + 45 ))}"
     while dtmux has-session -t "$SESSION" 2>/dev/null && (( i < max_wait )); do

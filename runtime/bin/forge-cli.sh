@@ -85,7 +85,7 @@ cmd_auth_ok() {
 cmd_repo_exists() {
   need_cli
   # ⚠ `out="$(cmd)" ; rc=$?` EST FAUX SOUS `set -e` : l'affectation dont la substitution echoue
-  # declenche errexit AVANT que `rc=$?` ne tourne. Le cas « absent » passait vert PAR ACCIDENT, en
+  # declenche errexit AVANT que `rc=$?` ne tourne. Le cas « absent » passerait vert PAR ACCIDENT, en
   # recevant d'errexit le code que sa propre logique aurait rendu. `|| rc=$?` met la commande en
   # contexte de condition, ou errexit ne s'applique pas.
   local out rc=0
