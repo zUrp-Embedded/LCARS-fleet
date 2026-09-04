@@ -456,7 +456,7 @@ apply() {
   else
     enroll_src=(--repo "$tree" --catalogue "$ref_catalogue")
   fi
-  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$tree/etc/enroll-catalogue.sh" --tofu-dir "$enroll" "${enroll_src[@]}" \
+  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" "${enroll_src[@]}" \
     || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
   [[ -s "$enroll/roles.auto.tfvars.json" ]] \
     || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }

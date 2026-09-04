@@ -105,7 +105,7 @@ code() {
   grep -hvE '^\s*#' \
     "$BATS_TEST_DIRNAME"/../../modules.d/*.sh \
     "$ROOT"/install.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/etc/deploy-release.sh \
+    "$BATS_TEST_DIRNAME"/../../lib/deploy-release.sh \
     "$BATS_TEST_DIRNAME"/../../docker/*.sh \
     "$BATS_TEST_DIRNAME"/../../../fleet/services/*.sh \
     "$BATS_TEST_DIRNAME"/../../../fleet/services/*.py \
@@ -468,7 +468,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # ⚠ TROUVE PAR LE CYCLE DU RANG D, PAS PAR CE FICHIER, et l'angle mort merite d'etre nomme :
   # ISO 2/2 cherche un RADICAL du chemin dans le code. « runtime » apparait partout, donc
   # `/opt/lcars/runtime` etait declare « couvert » alors qu'aucun module ne le CREAIT — c'est
-  # `etc/deploy-release.sh` qui le faisait apparaitre par `mkdir -p`, sous `runuser -u bob`.
+  # `deploy/lib/deploy-release.sh` qui le faisait apparaitre par `mkdir -p`, sous `runuser -u bob`.
   #
   # Consequence mesuree (banc 2001, 2026-09-01) : apres `uninstall --yes` puis re-apply, le prefixe
   # renaissait en `bob:fleet` au lieu de `root:fleet`. Invisible sur une machine ou il existe deja,

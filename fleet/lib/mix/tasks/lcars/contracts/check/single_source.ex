@@ -629,7 +629,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the human converger's fallback"},
         {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the forge gesture's fallback"},
-        {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"../deploy/lib/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
         {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},

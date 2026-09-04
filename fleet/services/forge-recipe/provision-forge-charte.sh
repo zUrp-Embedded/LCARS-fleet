@@ -173,7 +173,7 @@ fi
 # SITE-ADMIN : avec `Sudo:`, il agit au nom de n'importe quel compte.
 #
 # `curl -K -` lit sa configuration sur STDIN : ni argv, ni fichier a creer/chmoder/supprimer. Meme
-# geste que `etc/provision-role-tokens.sh` (6-141), applique ici a un credential plus puissant.
+# geste que `deploy/lib/provision-role-tokens.sh` (6-141), applique ici a un credential plus puissant.
 # La valeur est ECHAPPEE, pas esperee propre : la config de curl est un format cite.
 curl_cfg_escape() { # $1=valeur
   local v="$1"

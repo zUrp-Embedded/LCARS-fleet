@@ -1,19 +1,19 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/etc/install.bats
+# SOURCE: deploy/tests/lib/deploy_release.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
-# STATUS: bats tests for etc/deploy-release.sh atomic-swap helpers (crash-safe deploy)
+# STATUS: bats tests for deploy/lib/deploy-release.sh atomic-swap helpers (crash-safe deploy)
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
 # a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the
 # extracted atomic_swap_dir / atomic_swap_file directly (source guard = no mix build) and prove the
 # live target is never destroyed before the new one is verified, and the previous is kept.
 
-load ../support/refute
+load ../refute
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../etc/deploy-release.sh"
-  # shellcheck source=../../etc/deploy-release.sh
+  SCRIPT="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
+  # shellcheck source=../../lib/deploy-release.sh
   source "$SCRIPT"
   TMP="$(mktemp -d)"
 }

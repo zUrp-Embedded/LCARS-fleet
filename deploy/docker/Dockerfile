@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — image LCARS fleet v2 : build multi-stage (mix release) + runtime slim (sshd login-manager)
-# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/deploy-release.sh (l'autorité
+# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME deploy/lib/deploy-release.sh (l'autorité
 # build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/opt/lcars/runtime RO
 # root:fleet, /usr/local/bin câblé) que le module 60-deploy pose sur WSL. Ce qui converge au
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
@@ -22,7 +22,7 @@ ARG TARGETARCH
 # install.sh fait un chgrp fleet best-effort sur le prefix : le groupe doit exister au build
 # (le runtime stage le recrée avec le MÊME gid — contrat entre stages).
 # (Contrat entre stages : uid 1000 = l'uid par défaut de l'humain du conteneur ; gid 2000 = fleet.)
-# Outillage du GATE : etc/deploy-release.sh lance `mix gate`, dont shell_gate exige python3 (test du
+# Outillage du GATE : deploy/lib/deploy-release.sh lance `mix gate`, dont shell_gate exige python3 (test du
 # bridge MCP), bats + git (tests hors-mix) — et REFUSE de les sauter en silence
 # (BATS_MISSING_FATAL=1 posé par mix.exs). S'y ajoute LE MONDE QUE CES TESTS EXERCENT : les bats
 # des launchers vérifient les refus de bwrap_launch dans l'ordre (bwrap → tmux → vendor → …), donc
@@ -85,6 +85,12 @@ WORKDIR /src/fleet
 # d'iteration ne l'est pas.
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
      fleet /src/fleet
+# L'outil qui pose la release est de l'INSTALLEUR (Q3, 2026-09-04) : `deploy/` reste exclu de ce
+# stage, seul ce script entre — et HORS de `/src/deploy` : les contrats lisent la presence de cet
+# arbre comme « deploy/ est la, ses miroirs sont exigibles » (`tree_scope`), et un arbre reduit a
+# un fichier les rendait tous rouges (mesure bob_2, premier build du lot 1). L'arbre source lui est
+# passe explicitement (`LCARS_RUNTIME_DIR`), il n'a rien a deviner de sa position.
+COPY --chown=builder:fleet deploy/lib/deploy-release.sh /opt/lcars-build/deploy-release.sh
 
 # LE PATTERN EST OPTIONNEL, ET LA FORME EST L'IDIOME, PAS UNE COQUETTERIE. `.source-revisio[n]` est
 # un glob : depuis un checkout ordinaire il ne matche RIEN, et un `COPY` dont aucun terme ne matche
@@ -125,8 +131,8 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
       echo "image: CHECKOUT NU — aucun .source-revision : la release est COMPILEE dans ce stage, et le gate n'est PAS rejoue (l'attestation vient du paquet, ce build n'en a pas)"; \
     fi \
     && mix local.hex --force && mix local.rebar --force \
-    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/deploy-release.sh \
-         || [ "$?" -eq 3 ]; }
+    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime LCARS_RUNTIME_DIR=/src/fleet \
+         bash /opt/lcars-build/deploy-release.sh || [ "$?" -eq 3 ]; }
 
 # La plaquette (`assets/github.io`) se genere DEPUIS le code du produit : les cartes, les sieges,
 # les verbes de la console, les arbres d'un catalogue. Sur GitHub elle est publiee par Pages ; ici
@@ -344,7 +350,8 @@ RUN set -eu; \
     ls -l "$d"
 
 # Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
-# les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
+# les chemins inter-arbre. `fleet/etc` ne porte plus que des DONNÉES du produit (le manifeste de
+# la release, le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
 COPY deploy /opt/lcars/deploy
 COPY fleet/etc     /opt/lcars/fleet/etc
 # ⚠ LA RECETTE ARRIVE ICI, ET PAS AVEC LE RESTE DE `fleet/services` — parce que le bloc `tofu` juste
@@ -522,7 +529,9 @@ RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/deploy/provision \
                /opt/lcars/deploy/modules.d/*.sh \
-               /opt/lcars/fleet/etc/provision-role-tokens.sh
+               /opt/lcars/deploy/lib/provision-role-tokens.sh \
+               /opt/lcars/deploy/lib/enroll-catalogue.sh \
+               /opt/lcars/deploy/lib/deploy-release.sh
 
 # L'ESTAMPILLE DES AUXILIAIRES POSES — le pendant de ce que `62-runtime-helpers` ecrit sur un poste
 # apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que

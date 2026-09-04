@@ -611,7 +611,9 @@ STUB
   # et les deux appels de ce module qui evaluent la config le portent
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   code | grep -q 'LCARS_TOOL_EVAL=1 mix run --no-start'
-  code | grep -q 'LCARS_TOOL_EVAL=1 "\$tree/etc/enroll-catalogue.sh"'
+  # Q3 (2026-09-04) : le deriveur est de l'installeur, il vit a cote de la lib — le module l'y
+  # atteint par `PROVISION_LIB`, plus par l'arbre source du runtime.
+  code | grep -q 'LCARS_TOOL_EVAL=1 "\$(dirname "\$PROVISION_LIB")/enroll-catalogue.sh"'
 }
 
 @test "le PORT est sonde avant le montage, et le verdict NOMME l'occupant" {

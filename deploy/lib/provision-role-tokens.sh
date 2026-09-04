@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: etc/provision-role-tokens.sh
+# SOURCE: deploy/lib/provision-role-tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — pose idempotente des role-tokens forge (A4) : mint + ecriture <dir>/<role>.gitea_token + sonde
@@ -167,7 +167,9 @@ force_password_for() { # $1=compte — pose un password neuf, le rend sur stdout
   local account="$1" admin_tok pw
   admin_tok="$(tr -d '[:space:]' < "$MASTER_TOKEN_FILE" 2>/dev/null)" || return 1
   [[ -n "$admin_tok" ]] || return 1
-  pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
+  # MUR I4 (deploy/tests/idiom_walls) : la source est bornee EN TETE, la longueur par `cut`, qui
+  # lit tout et ne ferme rien — un `head -c` en aval peut fermer le tuyau avant le dernier write.
+  pw="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
   printf 'header = "Authorization: token %s"\nheader = "Content-Type: application/json"\nrequest = "PATCH"\ndata = "{\\"login_name\\":\\"%s\\",\\"source_id\\":0,\\"password\\":\\"%s\\",\\"must_change_password\\":false}"\n' \
     "$admin_tok" "$account" "$pw" \
     | curl -K - -s -o /dev/null -m 15 -w '%{http_code}' "$FORGE/api/v1/admin/users/$account" \

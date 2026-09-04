@@ -46,7 +46,7 @@ provider "gitea" {
 # ne change pour un déploiement qui n'apporte pas le sien.
 #
 # Un déploiement qui apporte un autre catalogue pose un `roles.auto.tfvars.json` DÉRIVÉ de ce
-# catalogue (`etc/enroll-catalogue.sh`) — tofu le lit nativement. Le roster cesse alors d'être tenu
+# catalogue (`deploy/lib/enroll-catalogue.sh`) — tofu le lit nativement. Le roster cesse alors d'être tenu
 # à la main, ce qui est la cause racine connue de BL-6-34 : un rôle ajouté au catalogue sans son
 # compte boucle en `role_token_unavailable`, vécu deux fois (eng_doc, puis son rename scribe).
 #

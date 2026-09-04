@@ -35,7 +35,10 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
   # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, pour que le garde du perimetre la CONSOMME au lieu de
   # la recopier. Deux listes a maintenir, c'est une liste qui derive et un garde qui ne garde plus.
-  ARBRES=("$REPO/deploy" "$REPO/fleet/services" "$REPO/fleet/bin" "$REPO/fleet/etc")
+  # ⚠ `fleet/etc` N'EST PLUS UN ARBRE DE CODE (Q3, 2026-09-04) : ses trois outils d'install vivent
+  # dans `deploy/lib`, il ne porte plus que des donnees (manifeste de release, gabarit d'env). Le
+  # garder ici ferait rougir MUR 0 sur un arbre qui n'a rien a contribuer — et rien a cacher.
+  ARBRES=("$REPO/deploy" "$REPO/fleet/services" "$REPO/fleet/bin")
   mapfile -t CODE < <(
     find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'box' \
@@ -88,7 +91,7 @@ absent() { # absent <motif etendu> <fichier>
   done
   [ "${#CODE[@]}" -gt 55 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
   printf '%s\n' "${CODE[@]}" | grep -q 'services/forge-gestures.sh'
-  printf '%s\n' "${CODE[@]}" | grep -q 'etc/provision-role-tokens.sh'
+  printf '%s\n' "${CODE[@]}" | grep -q 'deploy/lib/provision-role-tokens.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'modules.d/25-directories.sh'
 }
 
@@ -176,12 +179,12 @@ absent() { # absent <motif etendu> <fichier>
   # enumerait les ecrivains du repertoire — c'etait la liste exacte des sites a changer, et je l'ai
   # lue comme un test qui passe. Ce qui manquait n'etait pas la mesure : elle etait ecrite ici.
   #
-  # ⚠ ET ILS SONT QUATRE, PAS TROIS. `etc/provision-role-tokens.sh` en fait partie et n'etait nomme
+  # ⚠ ET ILS SONT QUATRE, PAS TROIS. `deploy/lib/provision-role-tokens.sh` en fait partie et n'etait nomme
   # nulle part dans la prose du chantier. Il suffit qu'UN pose un autre mode pour que le premier
   # passage suivant defasse les trois autres, EN SILENCE — le gate ne le voit pas, il n'execute
   # aucun de ces gestes contre une vraie table.
   local f
-  for f in "$REPO/fleet/etc/provision-role-tokens.sh" "$REPO/fleet/services/forge-gestures.sh"; do
+  for f in "$REPO/deploy/lib/provision-role-tokens.sh" "$REPO/fleet/services/forge-gestures.sh"; do
     grep -qE 'install -d -m 0710' "$f" \
       || { echo "$f ne pose plus le repertoire des secrets en 0710" >&2; return 1; }
     # Et il ne reste AUCUN 0700 sur cet objet : deux modes dans un meme fichier, c'est celui qu'on
@@ -221,7 +224,7 @@ absent() { # absent <motif etendu> <fichier>
 # sujet du mur est donc une liste d'ecrivains, et `MUR 2 ter` garde cette liste non vide.
 secret_writers() {
   printf '%s\n' \
-    "$REPO/fleet/etc/provision-role-tokens.sh" \
+    "$REPO/deploy/lib/provision-role-tokens.sh" \
     "$REPO/fleet/services/forge-gestures.sh" \
     "$REPO/deploy/modules.d/48-forge-host.sh" \
     "$REPO/deploy/modules.d/50-forge.sh" \
@@ -432,7 +435,7 @@ secret_writers() {
   # posait `chgrp` puis verifiait `stat -c %G`. Passe au proprietaire sans changer le controle, il
   # aurait compare un groupe qui n'est plus pose — donc un `FAIL` par compte, sur des jetons
   # parfaitement valides. C'est une paire, elle se lit comme une paire.
-  local src="$REPO/fleet/etc/provision-role-tokens.sh"
+  local src="$REPO/deploy/lib/provision-role-tokens.sh"
   grep -qE 'chown "\$OWNER:\$OWNER"' "$src"
   grep -qE 'stat -c %U' "$src"
   absent 'stat -c %G' "$src"

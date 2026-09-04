@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/etc/enroll-catalogue.sh
+# SOURCE: deploy/lib/enroll-catalogue.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-10
 # STATUS: actif — derive les entrees de la recette forge depuis un catalogue
@@ -75,8 +75,9 @@ done
 # sur l'hote, c'est le seul cas ou ce chemin n'est pas un chemin d'hote.
 [[ -n "$CATALOGUE" && -d "$CATALOGUE" ]] && CATALOGUE="$(cd "$CATALOGUE" && pwd)"
 
-# Le depot par defaut : ce script vit dans fleet/etc/, donc fleet/ est un cran au-dessus.
-[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/.." && pwd)"
+# Le depot par defaut : ce script vit dans deploy/lib/ (Q3, 2026-09-04 : joue a l'install
+# seulement), donc le runtime source est le fleet/ a cote de deploy/ dans un checkout.
+[[ -n "$REPO" || -n "$IMAGE" || -n "$RELEASE" ]] || REPO="$(cd "$HERE/../../fleet" && pwd)"
 
 # ─── 1. lire le catalogue ────────────────────────────────────────────────────────────────────────
 # Une seule autorite de lecture des deux cotes : `Fleet.Roster.tfvars/1`. Le
