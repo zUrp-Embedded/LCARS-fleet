@@ -162,10 +162,11 @@ apply() {
   # ou dans la copie que le rail a lui-meme posee ? ».
   #
   # VU : un apply rejoue depuis
-  # `/opt/lcars/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
+  # `/opt/lcars/deploy/provision` — le rejeu depuis la copie posee, sur un poste sans checkout
+  # (le convergeur, lui, ne rejoue plus `provision` : il source `services/human.d/*.sh`) — rend « FAIL 60-deploy:
   # source runtime introuvable: /opt/lcars/services ». Sur les DEUX, en livraison binaire comme en
   # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
-  # `fleet/{deploy,etc,services,bin}`, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
+  # `{deploy,etc,services,bin}` a plat sous /opt/lcars, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
   # pas — la release est POSEE.
   #
   # La copie sert a REJOUER le rail, pas a le RECONSTRUIRE. Le module n'a donc rien a faire, et le

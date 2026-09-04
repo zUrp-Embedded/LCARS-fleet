@@ -20,7 +20,7 @@ set -euo pipefail
 # cree — une derive permanente des que le premier inscrit s'appelle autrement.
 #
 # ⚠ ET IL NE POSE PLUS RIEN : le convergeur cree le compte (`useradd -m`) ET l'ajoute au groupe
-# (`usermod -aG`, human-converger.sh:722 et :727). Le `usermod` qui vivait ici doublait ce geste.
+# (`usermod -aG "$GROUP"`, deux sites dans human-converger.sh). Le `usermod` qui vivait ici doublait ce geste.
 #
 # CE QUI LUI RESTE EN PROPRE, et que personne d'autre ne verifie : L'APPARTENANCE AU GROUPE.
 # `is_fleet_human` ne juge que l'uid (>= UID_MIN, pas le siege) ; un humain hors de `fleet` passe

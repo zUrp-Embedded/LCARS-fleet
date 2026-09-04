@@ -303,7 +303,7 @@ I3_AWK='
 #     FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
 #     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
-# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# `62-runtime-helpers` embarque `{deploy,etc,services,bin}` a plat et `{assets,catalogues}` pour que
 # le rail se REJOUE, pas pour qu il se RECONSTRUISE : il n y a la ni `mix.exs`, ni `deps/`, ni
 # `node_modules`. Un module qui l ignore n echoue pas seulement — `npm ci` a INSTALLE 176 Mo sous
 # /opt/lcars avant de rater son build.

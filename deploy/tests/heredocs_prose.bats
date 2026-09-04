@@ -27,7 +27,7 @@
 load refute
 
 setup() {
-  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   SCAN="$BATS_TEST_TMPDIR/scan.awk"
   cat > "$SCAN" <<'AWK'
 # Sortie : "<fichier>:<ligne>: <texte>" pour tout accent grave dans un heredoc NON quote.

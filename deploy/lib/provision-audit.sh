@@ -51,13 +51,17 @@ audit_run() {
     done
   fi
 
+  # ⚠ ON COMPARE DES CHEMINS, PAS DES LIGNES (M5, relecture hostile du 2026-09-04). La ligne du
+  # releve porte `<type> <mode> <uid>:<gid> <chemin>` : comparee entiere, un simple chmod sur un
+  # chemin PREEXISTANT en faisait un objet « apparu ». Les trois premieres colonnes sont coupees
+  # des deux cotes avant le `comm` ; ce qui reste est le chemin, espaces compris.
   local n_apparu=0 n_nu=0 n_apt=0 p
-  while read -r _t _m _o p; do
+  while read -r p; do
     [[ -n "$p" ]] || continue
     n_apparu=$((n_apparu + 1))
     [[ -n "${_apt[$p]:-}" ]] && { n_apt=$((n_apt + 1)); continue; }
     couvert "$p" || { n_nu=$((n_nu + 1)); printf '  %s\n' "$p"; }
-  done < <(comm -13 <(sort "$avant") <(sort "$apres"))
+  done < <(comm -13 <(cut -d' ' -f4- "$avant" | sort) <(cut -d' ' -f4- "$apres" | sort))
 
   echo ""
   printf '  %d objet(s) apparu(s), %d appartenant a un paquet apt journalise, %d NON couvert(s) par la table.\n' \

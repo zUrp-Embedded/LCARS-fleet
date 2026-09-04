@@ -1066,8 +1066,9 @@ PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 #
 # LA COLLISION : `62-runtime-helpers` écrivait le SECOND sous le nom du PREMIER, en `/opt/lcars/
 # .source-revision`. Or `repo_root()` remonte trois crans depuis `<racine>/deploy/lib` — donc
-# rejouer `/opt/lcars/deploy/provision`, qui EST le geste nominal du convergeur
-# (`runtime/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
+# rejouer `/opt/lcars/deploy/provision` — la copie posée, sur un poste sans checkout ; le
+# convergeur, lui, ne rejoue plus `provision`, il source `services/human.d/*.sh` — rend
+# `root == /opt/lcars` : le tampon des auxiliaires
 # devenait le discriminant de livraison. Un poste installé depuis un clone se déclarait BINAIRE au
 # rejeu, `15-toolchain` rendait « toolchain non requise » sans jamais évaluer son plancher OTP, et
 # `16-node` ne mesurait plus rien. Sur une machine qui COMPILE, le doctor rendait vert sur des
@@ -1360,7 +1361,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
 #
 # ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Vu sur un apply rejoué depuis
-# `/opt/lcars/deploy/provision` — le geste NOMINAL du convergeur :
+# `/opt/lcars/deploy/provision` — le rejeu depuis la copie posée, sur un poste sans checkout :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
 #   FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
@@ -1376,7 +1377,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # poste en livraison SOURCE rejoué depuis la copie n'a ni `mix.exs` ni `node_modules`, et il n'en a
 # pas besoin — la release et le `dist/` sont déjà posés.
 #
-# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# `62-runtime-helpers` embarque `{deploy,etc,services,bin}` a plat et `{assets,catalogues}` pour que
 # le rail puisse se REJOUER, pas pour qu'il puisse se RECONSTRUIRE. La distinction est le contrat
 # de cette copie.
 prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la copie posée

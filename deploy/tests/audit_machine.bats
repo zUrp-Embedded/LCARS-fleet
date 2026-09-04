@@ -165,3 +165,26 @@ STUB
   [[ "$output" == *"/srv/nimportequoi"* ]]
   [[ "$output" != *"ne porte rien"* ]]
 }
+
+# ─── M5 : UN CHEMIN DEJA LA DONT SEUL LE MODE CHANGE N'EST PAS « APPARU » ───────────────────────
+#
+# Relecture hostile du 2026-09-04 : le `comm` comparait la LIGNE entiere (`<type> <mode> <uid:gid>
+# <chemin>`). Un chmod sur un objet preexistant — ce que `ensure_mode` fait a chaque apply sur des
+# arbres qui ne sont pas a nous — ressortait comme un objet apparu, donc NON couvert, donc un DEFAUT.
+@test "M5 : un chmod sur un chemin preexistant ne fait pas un objet apparu" {
+  printf 'f -rw-r--r-- 0:0 /etc/pas-a-nous.conf\n' > "$AVANT"
+  printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
+  audit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0 objet(s) apparu(s)"* ]]
+  refute grep -q '/etc/pas-a-nous.conf' <<<"$output"
+}
+
+@test "M5 : TEMOIN DU TEMOIN — le meme chemin ABSENT de l'avant est bien apparu (et non couvert)" {
+  : > "$AVANT"
+  printf 'f -rw-rw-r-- 0:0 /etc/pas-a-nous.conf\n' > "$APRES"
+  audit
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 objet(s) apparu(s)"* ]]
+  [[ "$output" == *"/etc/pas-a-nous.conf"* ]]
+}

@@ -25,7 +25,7 @@
 load refute
 
 setup() {
-  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   LIB="$R/deploy/lib/provision-lib.sh"
 
   # ⚠ ON SOURCE, ON N'EXTRAIT PAS LE TEXTE. Un `sed` sur `${PROV_PREFIX:=…}` mesure une SYNTAXE :
@@ -135,4 +135,22 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # ⚠ AUCUN CLIQUET SUR L'ANCIENNE VALEUR ICI, ET C'EST DELIBERE. L'interdit du retour appartient
   # a `racines_ssot.bats`, qui porte deja `/opt/lcars/runtime` dans sa liste. Un cliquet ecrit AVANT
   # le deplacement interdit la valeur qui est encore la bonne : il rougirait sur un depot sain.
+}
+
+# ─── M4 : LA PROSE SUIT LE LAYOUT, ET NE JUSTIFIE PAS DU CODE PAR UN APPELANT DISPARU ───────────
+#
+# Relecture hostile du 2026-09-04 : cinq commentaires disaient encore `fleet/` pour l'arbre frere
+# de `deploy/` (renomme `runtime/`), et trois justifiaient d'embarquer `deploy/` sous /opt/lcars
+# par « LE GESTE NOMINAL DU CONVERGEUR », en citant `human-converger.sh:132` — une ligne qui est
+# `first_free_uid`, dans un convergeur qui ne rejoue plus `provision` (il source `human.d/*.sh`).
+# Une prose qui cite un appelant par son numero de ligne perime a la premiere edition de l'appelant.
+@test "M4 : aucune prose de deploy/ ne nomme plus fleet/ comme arbre frere, ni un convergeur qui rejouerait provision" {
+  local hits
+  hits="$(grep -rnE 'deploy/. et .fleet/. y sont FRERES|GESTE NOMINAL DU CONVERGEUR|human-converger\.sh:[0-9]+|fleet/\{deploy' \
+            "$BATS_TEST_DIRNAME/.." --include='*.sh' --include='*.bats' --include='*.md' --include=provision --include=gate.sh \
+          | grep -v 'racine_prefixe.bats' || true)"
+  [ -z "$hits" ] || { echo "prose perimee :" >&2; printf '%s\n' "$hits" >&2; return 1; }
+  # GARDE D INSTRUMENT : le motif voit bien la forme qu il interdit
+  grep -qE 'deploy/. et .fleet/. y sont FRERES' <<<'  R="$(pwd)"  # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES'
+  grep -qE 'human-converger\.sh:[0-9]+' <<<'# (`runtime/services/human-converger.sh:132`), rend'
 }

@@ -114,7 +114,7 @@ Codes retour : `apply` 0=convergé 1=échec · `doctor` 0=conforme 1=drift 2=err
 `doctor --porcelain` → `MODULE=OK|DRIFT|ERROR`, une ligne par module (machine-lisible).
 
 Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seule définition) :
-`PROV_PREFIX` (/opt/lcars/runtime — le défaut d'deploy/lib/deploy-release.sh, SSoT etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
+`PROV_PREFIX` (/opt/lcars/runtime — le défaut de deploy/lib/deploy-release.sh, SSoT runtime/etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
 `PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
 planchers toolchain (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN` — la distro sert, le rail vérifie).

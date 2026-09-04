@@ -65,7 +65,8 @@ EMBEDDED_FLEET="$HELPERS_DIR"   # a plat : /opt/lcars/{etc,services,bin} — cf.
 # ⚠ ET CE TAMPON A PORTÉ LE NOM D'UN AUTRE FAIT. Il valait `$PROV_SOURCE_STAMP`, c'est-à-dire le
 # discriminant que `prov_delivery` lit à la racine d'un arbre pour dire BINAIRE ou SOURCE. Comme la
 # coïncidence arithmétique ci-dessus fait tomber les deux sur `/opt/lcars`, un apply rejoué depuis
-# la copie — LE GESTE NOMINAL DU CONVERGEUR — lisait ce tampon comme « paquet ». La SSoT des deux
+# la copie — le rejeu depuis la copie posee, sur un poste sans checkout — lisait ce tampon comme
+# « paquet ». La SSoT des deux
 # noms vit dans la lib, avec le récit complet.
 helpers_stamp() { echo "$EMBEDDED_FLEET/${PROV_HELPERS_STAMP:-.helpers-revision}"; }   # a plat : le tampon est A LA RACINE posee, avec les arbres
 # Le discriminant de livraison, tel qu'il doit exister DANS la copie — voir `propage_livraison`.
@@ -256,13 +257,13 @@ check() {
     if [[ -d "$HELPERS_DIR/$_r" ]]; then
       p_ok "arbre embarqué $HELPERS_DIR/$_r"
     else
-      p_drift "arbre embarqué ABSENT ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/deploy/provision échouera : c'est le geste du convergeur"
+      p_drift "arbre embarqué ABSENT ($HELPERS_DIR/$_r) — un apply rejoué depuis $HELPERS_DIR/deploy/provision échouera : c'est le rejeu sur un poste sans checkout"
     fi
   done
 
   # ⚠ LA FORME DE LA LIVRAISON DANS LA COPIE SE SONDE, PARCE QUE PERSONNE D'AUTRE NE LA VOIT. Ce
-  # discriminant ne se lit QUE depuis `$HELPERS_DIR/deploy/provision` — le geste du
-  # convergeur. Un doctor lancé depuis l'arbre de travail, lui, lit celui de l'arbre de travail :
+  # discriminant ne se lit QUE depuis `$HELPERS_DIR/deploy/provision` — le rejeu depuis la
+  # copie posée. Un doctor lancé depuis l'arbre de travail, lui, lit celui de l'arbre de travail :
   # il peut donc être vert sur une machine dont la copie ment sur ce qu'elle est.
   local _veut _a
   _veut="$(prov_delivery)"; _a="source"; [[ -f "$(copie_delivery_stamp)" ]] && _a="binary"
@@ -385,7 +386,7 @@ BLOC
   # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
   #
   # VU : un apply rejoue depuis `/opt/lcars/deploy/provision` —
-  # LE GESTE NOMINAL DU CONVERGEUR, celui que l'en-tete de ce module decrit — echouait sur trois
+  # le rejeu depuis la copie posee (un poste sans checkout) — echouait sur trois
   # modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
   # /opt/lcars/services ». Le rail pose ne pouvait pas se rejouer entierement.
   #
