@@ -277,7 +277,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # `setpriv` dans le conteneur — qui n'a pas systemd et dont l'entrypoint est PID 1. En verifier un
   # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
   local unit="$REPO/deploy/modules.d/64-services.sh"
-  local entry="$REPO/deploy/docker/entrypoint.sh"
+  local entry="$REPO/fleet/services/box/boot.sh"
   local dockerfile="$REPO/deploy/docker/Dockerfile"
 
   # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
@@ -328,10 +328,10 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
       return 1
     }
 
-  code_of "$REPO/deploy/docker/entrypoint.sh" \
+  code_of "$REPO/fleet/services/box/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
       echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
-      code_of "$REPO/deploy/docker/entrypoint.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      code_of "$REPO/fleet/services/box/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
       return 1
     }
 }

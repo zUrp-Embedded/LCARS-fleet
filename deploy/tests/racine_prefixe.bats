@@ -78,7 +78,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
   # comparaison seule ne dirait rien d un huitieme qui apparait.
   local f n=0 nb=0 b
-  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/deploy/docker/entrypoint.sh"; do
+  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/fleet/services/box/boot.sh"; do
     while read -r b; do
       [ -n "$b" ] || continue
       case "$b" in

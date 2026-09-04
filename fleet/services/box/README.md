@@ -2,7 +2,7 @@
 
 **Date** : 2026-09-04
 **Statut** : actif — lot 6 du chantier deploy-independance
-**Référencé par** : `fleet/services/README.md`, `deploy/docker/entrypoint.sh`
+**Référencé par** : `fleet/services/README.md`, `deploy/docker/Dockerfile` (`ENTRYPOINT`)
 
 ⚖ user 2026-09-04 (Q1) : « pour docker, pourquoi on pourrait pas build l'image, et qu'elle reste
 alive entre 2 démarrages ? … dans docker, le deploy semble n'avoir aucun intérêt à partir dans le
@@ -12,6 +12,7 @@ d'elle-même, sans l'installeur.
 
 | geste | ce qu'il fait |
 |---|---|
+| `boot.sh` | le BOOT de la boîte, PID 1 sous `tini` (`ENTRYPOINT` du Dockerfile) : joue `init.sh apply`, les quatre gestes de `../forge.d/` (`tokens`, `catalogues`, `ops-branch`, `deck-oidc`), le convergeur d'humains, la console et le deck, les deux exécuteurs, puis `exec sshd`. Ses mots (`verify`, `roles`, `roles-tfvars`, `catalogue-root`, `catalogue-source`) sont l'API de l'image et délèguent à `lcars tool` ; `forge-apply` joue `forge-gestures apply` dans la boîte |
 | `init.sh` | l'init de l'INSTANCE : le siège (résolu puis créé), les zones de face, la source et le corpus ops, les clés d'hôte SSH, le layout du volume et du magasin, la skill du siège, `pilot.assignee` — idempotent, ce qu'une instance neuve doit avoir sur son volume |
 
 ## Le protocole
@@ -32,11 +33,8 @@ Ce qu'il lit : `LCARS_UID`, `LCARS_ADMIRAL`, `LCARS_SSH_AUTHORIZED_KEYS`, `FORGE
 compose donne au conteneur — et les défauts du protocole pour le reste.
 
 Ce qu'il ne fait pas : les gestes de forge (`../forge.d/`, le minteur `../provision-role-tokens.sh`),
-joués par l'entrypoint après lui ; les humains (le convergeur) ; les services (l'entrypoint).
+joués par `boot.sh` après lui ; les humains (le convergeur) ; les services (`boot.sh`).
 
-## Ce qui reste à l'entrypoint, et pour combien de temps
-
-`deploy/docker/entrypoint.sh` appelle `init.sh apply`, puis les quatre gestes de `forge.d`
-(`tokens`, `catalogues`, `ops-branch`, `deck-oidc`), puis démarre les services et sshd. Il ne
-joue plus AUCUN module de l'installeur ; ses portes outil délèguent à `lcars tool`. Le boot
-entier deviendra `boot.sh` ici, et `deploy/` quittera l'image (lot 7).
+`boot.sh` ne joue AUCUN module de l'installeur, et ne lit rien sous `deploy/` : l'image le porte
+encore (stage `verify`, `box doctor`), et c'est le lot 7 qui l'en sort. Ses verdicts vont dans
+`/run/lcars-boot.state`, `/run/lcars-provision.rc`, `/run/lcars-humans.rc` (le healthcheck les lit).

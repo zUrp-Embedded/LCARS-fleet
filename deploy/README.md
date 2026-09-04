@@ -8,8 +8,9 @@ ce code hardcodé LCARS — c'est une direction de conception, pas une interdict
 ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 
 ⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
-CHAQUE DÉMARRAGE** — `entrypoint.sh` lance `provision apply --substrate docker` au boot, et le banc
-entier repose dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
+CHAQUE DÉMARRAGE** — l'entrypoint lançait `provision apply --substrate docker` au boot (jusqu'au
+lot 6 du chantier deploy-independance : le boot est `fleet/services/box/boot.sh`, il ne joue plus
+aucun module de l'installeur), et le banc entier reposait dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
 contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
 FERMÉS et épinglés :
 - *verdict-sur-échec-apt* — `apt_ensure` propage l'échec (`|| return 1`) **et re-sonde chaque paquet
@@ -39,8 +40,8 @@ Ils vivent en **`fleet/services/`**, nomme comme le module qui les pose et les d
 frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxiliaire, et tout
 fichier de `services/` est pose quelque part.
 
-Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile`, `entrypoint.sh`
-(PID 1 du conteneur, il n'existe que la), les cinq compose, le seccomp, `forge-runner.sh`
+Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
+est le boot du produit, `fleet/services/box/boot.sh`), les cinq compose, le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
 
 un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
@@ -157,7 +158,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge à l'entrypoint. L'ISO WSL↔Docker n'est plus seulement la liste
+install.sh) et le reste converge au boot de la boîte (`fleet/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.

@@ -620,7 +620,7 @@ EOF
   refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
   refute grep -q -- "forge-apply" "$code"
   # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
-  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../fleet/services/box/boot.sh"
 }
 
 @test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {

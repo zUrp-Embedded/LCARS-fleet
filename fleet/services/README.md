@@ -32,7 +32,7 @@ Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
 | `human-converger.sh` | `/opt/lcars/` | systemd `lcars-converger` |
 | `console-landing.sh` + `console-deck.py` | `/opt/lcars/` | systemd `lcars-landing` |
 | `console.sh` · `console-humans.sh` · `console-status.sh` · `console-pod.sh` | `/opt/lcars/` | piloté par `lcars-converger` |
-| `forge-gestures.sh` | `/opt/lcars/` | l'entrypoint **et** l'exécuteur |
+| `forge-gestures.sh` | `/opt/lcars/` | le boot de la boîte **et** l'exécuteur |
 | `provision-role-tokens.sh` | `/opt/lcars/` | le minteur de jetons de rôle — `63-forge-tokens` sur un poste, l'init de la boîte |
 | `forge.d/` · `human.d/` · `lib/` | `/opt/lcars/fleet/services/` | les MODULES du produit et leur protocole (voir ci-dessous) |
 | `console.tmux.conf` · `skel.bashrc` | données du même rail | — |

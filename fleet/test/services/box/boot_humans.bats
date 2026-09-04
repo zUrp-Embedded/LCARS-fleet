@@ -24,14 +24,14 @@
 # l'orthographe d'un appel ; ce qui compte est ce que le bloc FAIT quand le convergeur echoue,
 # quand la sonde derive, et ce qu'il ECRIT pour son lecteur.
 
-load ../refute
+load ../../support/refute
 
 setup() {
   # ⚠ LE SIEGE SE LIT DANS UN FICHIER AVANT LA VARIABLE (`prov_seat_uid`), et ce fichier existe sur toute
   # machine provisionnee : sans decor, un temoin qui attend que celui qui joue passe GUARD B rougit des
   # le second run du gate — le siege, c'est lui (banc .63, 2026-08-30). Le decor nomme un fichier absent.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  SRC="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
   [ -f "$SRC" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"

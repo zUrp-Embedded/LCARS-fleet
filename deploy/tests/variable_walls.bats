@@ -279,7 +279,7 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   check fleet/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
   check fleet/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check deploy/docker/entrypoint.sh   "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
+  check fleet/services/box/boot.sh    "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
@@ -313,7 +313,7 @@ code_of() { sed 's/#.*//' "$1"; }
     "fleet/config/runtime.exs"
     "fleet/services/human-converger.sh"
     "deploy/modules.d/64-services.sh"
-    "deploy/docker/entrypoint.sh"
+    "fleet/services/box/boot.sh"
     "deploy/lib/provision-lib.sh"
   )
   # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la

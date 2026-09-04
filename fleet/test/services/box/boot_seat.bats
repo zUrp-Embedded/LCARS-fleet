@@ -30,10 +30,10 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
-load ../refute
+load ../../support/refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
   [ -f "$SRC" ]
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT. Ce fichier lit `LCARS_ADMIRAL` et `FORGE_BASE_URL` : un
   # temoin qui les herite mesure la machine qui le lance, pas la regle.
@@ -96,7 +96,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # s'executait JAMAIS. Un temoin vert sur un chemin que le produit n'atteint pas.
   #
   # La semence n'a pas de defaut : elle vient d'un appelant qui la POSE, jamais d'un `:-`.
-  local d="$BATS_TEST_DIRNAME/../../docker"
+  local d="$BATS_TEST_DIRNAME/../../../../deploy/docker"
   for f in "$d/docker-compose.yml" "$d/docker-compose.install.yml"; do
     [ -f "$f" ]
     run grep -c 'LCARS_ADMIRAL:-[^}]' "$f"
@@ -118,7 +118,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # Le refus n'a pas bouge — un siege inventable ne s'invente toujours pas. Ce qui change, c'est
   # qu'il n'emporte plus le conteneur avec lui : meme arbitrage que pour l'echec de convergence,
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
-  local src="$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  local src="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
   # Lot 6 : la derivation est dans `box/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
   # code et reste debout.

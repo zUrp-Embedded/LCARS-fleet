@@ -222,7 +222,7 @@ runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fle
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any
-# L'etat du boot de la BOITE, ecrit par l'entrypoint (`ready`, `awaiting-config`) : c'est ce que
+# L'etat du boot de la BOITE, ecrit par le boot (`fleet/services/box/boot.sh` : `ready`, `awaiting-config`) : c'est ce que
 # `box up` lit pour sortir tout de suite sur une boite qui attend `box config`, au lieu d'attendre
 # un verdict qui ne viendra pas.
 runtime   /run/lcars-boot.state                        0644  root:root           docker

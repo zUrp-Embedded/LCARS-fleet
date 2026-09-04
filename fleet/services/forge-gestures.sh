@@ -99,7 +99,7 @@ _lcars_cli() {
 LCARS_CLI="$(_lcars_cli)"
 tool() { bash "$LCARS_CLI" tool "$@"; }
 
-need_entrypoint() {
+need_cli() {
   [[ -r "$LCARS_CLI" ]] && return 0
   die "portes outil du release introuvables ($LCARS_CLI).
   Ce script les appelle pour resoudre, verifier et enroler un catalogue (« lcars tool … »). Sur un
@@ -511,7 +511,7 @@ cmd_install() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "install: nom de catalogue requis"
   need_forge_url
-  need_entrypoint
+  need_cli
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"

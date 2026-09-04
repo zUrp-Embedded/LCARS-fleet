@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/docker/entrypoint.sh
+# SOURCE: fleet/services/box/boot.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — entrypoint conteneur : converge le volume d'état puis exec sshd (login-manager)
+# STATUS: PROTO-V2 — le boot de la boite (PID 1 sous tini) : init de l'instance, gestes de forge, services, puis exec sshd
 #
 # USAGE — les portes de l'image (« docker run --rm IMAGE <porte> … »), deleguees a « lcars tool » :
-#   entrypoint.sh verify <root>
-#   entrypoint.sh roles [root]
-#   entrypoint.sh roles-tfvars [root]
-#   entrypoint.sh catalogue-root
-#   entrypoint.sh catalogue-source <nom>
-#   entrypoint.sh forge-apply              (root : joue forge-gestures apply DANS la boite)
+#   boot.sh verify <root>
+#   boot.sh roles [root]
+#   boot.sh roles-tfvars [root]
+#   boot.sh catalogue-root
+#   boot.sh catalogue-source <nom>
+#   boot.sh forge-apply              (root : joue forge-gestures apply DANS la boite)
 # Sans porte : le boot de la boite (PID 1 sous tini).
 #
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
@@ -67,9 +67,9 @@ export LCARS_SYSADMIN_UID="$LCARS_UID"
 BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/fleet/services/box/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/fleet/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
-say() { echo "[lcars-entrypoint] $*"; }
+say() { echo "[box-boot] $*"; }
 [[ -r "$BOX_INIT" && -r "$MODULE_PROTOCOL" ]] || {
-  echo "[lcars-entrypoint] init de l'instance introuvable ($BOX_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
+  echo "[box-boot] init de l'instance introuvable ($BOX_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
 }
 init_rc=0

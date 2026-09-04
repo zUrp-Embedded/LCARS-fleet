@@ -434,7 +434,6 @@ COPY catalogues /opt/lcars/catalogues
 # Les COPY unitaires plus bas restent : ce sont les auxiliaires POSES, que l'apply du rail poste
 # installerait lui-meme et que l'image doit fournir deja en place.
 COPY fleet/services /opt/lcars/fleet/services
-COPY deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/services/console.sh         /opt/lcars/console.sh
 COPY fleet/services/console-humans.sh  /opt/lcars/console-humans.sh
 COPY fleet/services/console-status.sh  /opt/lcars/console-status.sh
@@ -579,7 +578,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).
-ENTRYPOINT ["/usr/bin/tini", "--", "/opt/lcars/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/fleet/services/box/boot.sh"]
 
 # ─── verify : L'ISO DES RAILS SE MESURE AU BUILD, PAS CHEZ L'OPÉRATEUR ─────────────────────────
 #

@@ -14,10 +14,11 @@ de son jumeau, et `tests.dirs_mirror_source` (`mix lcars.contracts.check`) le re
 sur plusieurs modules à la fois, ou sujet hors de `deploy/`. Elle est nommée dans `@test_zones`, pas
 déduite d'un tiret bas.
 
-Quand une cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>` : `docker/entrypoint.sh`
-a `docker/entrypoint_seat.bats` et `docker/entrypoint_humans.bats`. Un témoin suit sa cible quand
-elle change de logiciel : ceux de `63-forge-tokens` sont partis avec le geste dans
-`fleet/test/services/forge.d/` (lot 6), et l'appelant mince qui reste n'a pas de témoin propre.
+Quand une cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>` : `docker/bench/`
+a `docker/bench_down_scope.bats`, `bench_runner_labels.bats` et `bench_swap_creds.bats`. Un témoin
+suit sa cible quand elle change de logiciel : ceux de `63-forge-tokens` et de l'entrypoint (devenu
+`fleet/services/box/boot.sh`) sont partis dans `fleet/test/services/` au lot 6, et l'appelant
+mince qui reste n'a pas de témoin propre.
 
 Joué par `deploy/gate.sh`, la porte de l'installeur (⚖ user 2026-09-04, Q4 : « chacun joue son
 gate, on les split »), qui découvre récursivement tous les `.bats` d'ici ; `fleet/test/shell_gate.sh`
