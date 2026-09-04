@@ -330,7 +330,11 @@ COPY assets/favicon  /opt/lcars/assets/favicon
 # Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
 # (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
 # n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.
-RUN chmod -R a+rX /opt/lcars/share
+# ⚠ `g-s,go-w` EN PLUS DE `a+rX` (lot 15) : `44-media` relit au build le mode de `share` et de ses
+# trois sous-arbres contre la table (`0755 root:root`), comme il les pose sur un poste (`a-s`,
+# `go=rx`). Un `COPY` PRESERVE les modes du contexte de build, et un clone a umask 002 est en
+# 2775/664 : `a+rX` seul laissait le setgid et l'ecriture de groupe, et personne ne le mesurait.
+RUN chmod -R a+rX,g-s,go-w /opt/lcars/share
 
 # MEME RANG QUE ttyd, ET C'EST DELIBERE : recupere au BUILD et epingle par sha256, pas commite. Le
 # depot garde zero fichier JS tiers ; ce qu'il porte est une reference verifiee, exactement comme le

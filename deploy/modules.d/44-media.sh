@@ -14,8 +14,33 @@ set -euo pipefail
 
 # Le seam est celui du PRODUIT : `runtime.exs` lit `LCARS_MEDIA_ROOT` avec ce même défaut, et
 # `deck.ex` le documente. On n'en invente pas un second.
-MEDIA_ROOT="${LCARS_MEDIA_ROOT:-$PROV_ROOT/share}"
-MEDIA_OWNER="${LCARS_MEDIA_OWNER:-root:root}"
+MEDIA_ROOT_CANON="$PROV_ROOT/share"   # le chemin que deploy/system.manifest declare (dir share, share/*)
+MEDIA_ROOT="${LCARS_MEDIA_ROOT:-$MEDIA_ROOT_CANON}"
+# ⚠ LE MODE ET LE PROPRIETAIRE VIENNENT DE LA TABLE, PLUS D'UN LITTERAL (lot 15). Ce module POSE
+# `share` et ses trois sous-arbres ; il est donc le seul a pouvoir relire leur mode — les ajouter a
+# la table de `25-directories` en ferait un second poseur (mur POSEUR). La table les declarait
+# `0755 root:root` et AUCUN module ne les mesurait : un `share/avatars` en 2775 (setgid herite
+# d'un checkout, ou d'un COPY depuis un contexte a umask 002) passait un doctor vert.
+# Le proprietaire garde sa couture de decor (un temoin ne chown pas vers root) ; repli sur les
+# valeurs historiques si la table ne dit rien.
+MEDIA_OWNER="${LCARS_MEDIA_OWNER:-$(prov_manifest_owner "$MEDIA_ROOT_CANON")}"
+: "${MEDIA_OWNER:=root:root}"
+media_mode() { # media_mode [sous-arbre] -> le mode que la table declare pour share[/<sous-arbre>], sinon 0755
+  local m; m="$(prov_manifest_mode "$MEDIA_ROOT_CANON${1:+/$1}")"; printf '%s\n' "${m:-0755}"
+}
+# media_check_perms [sous-arbre] — le mode et le proprietaire RELUS (stat), contre la table. Un objet
+# absent n'est pas juge ici : son absence se dit une fois, la ou elle a une consequence.
+media_check_perms() {
+  local path="$MEDIA_ROOT${1:+/$1}" cur want
+  [[ -d "$path" ]] || return 0
+  cur="$(stat -c '%a %U:%G' "$path")"
+  want="$(media_mode "${1:-}") $MEDIA_OWNER"; want="${want#0}"
+  if [[ "$cur" == "$want" ]]; then
+    p_ok "$path $cur (table)"
+  else
+    p_drift "$path : $cur ≠ $want (deploy/system.manifest) — l'apply le repose"
+  fi
+}
 
 MEDIA_TREES=(avatars favicon)
 
@@ -45,6 +70,7 @@ check() {
     else
       p_ok "$MEDIA_ROOT/$t posé ($n fichiers)"
     fi
+    media_check_perms "$t"
   done
 
   # ⚠ ON SONDE `index.html`, PAS LE RÉPERTOIRE. Un build interrompu laisse un `doc/` qui existe et
@@ -55,6 +81,8 @@ check() {
   else
     p_drift "$(doc_dir) absente — l'onglet Doc du deck rendra 404 (16-node la bâtit, ce module la pose)"
   fi
+  media_check_perms doc
+  media_check_perms   # la racine `share` elle-meme, declaree comme les trois autres
 
   verdict_check
 }
@@ -125,7 +153,7 @@ poser_doc() {
   # Pose atomique : un `doc/` à moitié recopié se sert en 404 silencieux.
   local partial; partial="$(doc_dir).partial"
   rm -rf "$partial"
-  prov_scaffold_dir "$partial" 0755 "$MEDIA_OWNER" || verdict_apply   # hors journal (M8)
+  prov_scaffold_dir "$partial" "$(media_mode doc)" "$MEDIA_OWNER" || verdict_apply   # hors journal (M8)
   cp -a "$SITE_SRC/dist/." "$partial/" \
     || { p_fail "doc non copiable ($SITE_SRC/dist → $(doc_dir))"; rm -rf "$partial"; verdict_apply; }
   prov_promote_dir "$partial" "$(doc_dir)" || verdict_apply   # journalise le nom FINAL
@@ -137,7 +165,7 @@ apply() {
   for t in "${MEDIA_TREES[@]}"; do
     src="$(media_src "$t")"
     [[ -d "$src" ]] || { p_fail "source absente : $src — l'arbre livre-t-il encore ses médias ?"; verdict_apply; }
-    ensure_dir "$MEDIA_ROOT/$t" 0755 "$MEDIA_OWNER" || verdict_apply
+    ensure_dir "$MEDIA_ROOT/$t" "$(media_mode "$t")" "$MEDIA_OWNER" || verdict_apply
     # `cp -a … /.` : le CONTENU, pas le répertoire — sinon un second passage imbrique
     # `avatars/avatars`. Idempotent : on récrit par-dessus, ces fichiers n'ont pas d'état.
     cp -a "$src/." "$MEDIA_ROOT/$t/" \
@@ -148,12 +176,15 @@ apply() {
   # ⚠ LE SYMBOLIQUE EST OBLIGATOIRE. `chmod` NUMÉRIQUE ne retire pas le setgid d'un dossier (mesuré :
   # `chmod 0755` sur un dossier setgid laisse `2755`, avec ou sans ACL) — seul `a-s`/`g-s` l'adresse.
   # Sans lui, un checkout fleet (setgid) fait hériter la cible du setgid, et `ensure_dir … 0755`
-  # échoue au 2e apply (`2755 ≠ 755`, `ensure_mode` ne converge jamais) : le rail cesse d'être
-  # idempotent. Le `go=rx` ramène en plus le mask ACL à `r-x`, donc `stat %a` lit bien `755`.
+  # échouait au 2e apply (`2755 ≠ 755`) : le rail cessait d'être idempotent. Le `go=rx` ramène en
+  # plus le mask ACL à `r-x`, donc `stat %a` lit bien `755`.
+  # `-mindepth 2` : l'arbre PROFOND seulement — les quatre objets que la table declare (share et ses
+  # trois sous-arbres) convergent plus bas par `ensure_mode`, au mode de LEUR ligne, et
+  # `ensure_mode` efface lui-meme les bits speciaux avant de poser le mode numerique.
   if command -v setfacl >/dev/null 2>&1; then
     setfacl -bR "$MEDIA_ROOT" || p_warn "ACL héritées non nettoyées sous $MEDIA_ROOT"
   fi
-  find "$MEDIA_ROOT" -type d -exec chmod a-s,u=rwx,go=rx {} + || p_warn "mode dossiers non posé sous $MEDIA_ROOT"
+  find "$MEDIA_ROOT" -mindepth 2 -type d -exec chmod a-s,u=rwx,go=rx {} + || p_warn "mode dossiers non posé sous $MEDIA_ROOT"
   find "$MEDIA_ROOT" -type f -exec chmod a+rX {} + || p_warn "lecture fichiers non posée sous $MEDIA_ROOT"
   # ⚠ LE PROPRIETAIRE SUIT LE MEME RAISONNEMENT QUE LE MODE, ET IL MANQUAIT. `cp -a` PRESERVE le
   # proprietaire de la SOURCE : le contenu de `/usr/share/lcars/*` appartenait donc a qui possedait
@@ -162,6 +193,14 @@ apply() {
   # avait lance l'install, et changeait de proprietaire selon QUI deployait. `root:root` est ce que
   # la table declare pour cet arbre ; c'est ici qu'on le tient.
   chown -R root:root "$MEDIA_ROOT" || p_warn "propriétaire non posé sous $MEDIA_ROOT — le contenu garde celui de la source (« cp -a » le préserve)"
+  # ⚠ LA TABLE A LE DERNIER MOT SUR CE QU'ELLE DECLARE (lot 15). Les deux `find` posent le mode de
+  # l'arbre profond ; les quatre objets que `deploy/system.manifest` nomme convergent ICI, par
+  # `ensure_mode`, au mode de leur ligne — et c'est exactement ce que `check` relit.
+  local d
+  for d in "" "${MEDIA_TREES[@]}" doc; do
+    [[ -d "$MEDIA_ROOT${d:+/$d}" ]] || continue
+    ensure_mode "$MEDIA_ROOT${d:+/$d}" "$(media_mode "$d")" "$MEDIA_OWNER" || verdict_apply
+  done
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "médias posés ($MEDIA_ROOT : ${MEDIA_TREES[*]} doc)"
   verdict_apply

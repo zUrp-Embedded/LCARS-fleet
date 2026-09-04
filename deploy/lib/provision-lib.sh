@@ -663,6 +663,27 @@ prov_manifest_substrate() {
   awk -v p="$path" '$1 !~ /^#/ && $2==p { print $5; exit }' "$f"
 }
 
+# prov_manifest_mode <chemin>  -> la colonne mode que la TABLE declare pour cet objet, ou vide
+# prov_manifest_owner <chemin> -> la colonne proprietaire (`user:group`) qu'elle declare, ou vide
+# Lus par les POSEURS (`44-media` pour share/*, `46-tofu` pour tofu/*) : un objet declare se
+# mesure par le module qui le pose, jamais par une seconde table dans `25-directories` — le mur
+# POSEUR veut un seul poseur par chemin. La table est la source du mode ; le module n'en porte
+# plus de litteral, il y lit ce qu'il doit poser ET ce qu'il doit relire.
+# ⚠ `mode` REND VIDE SUR LE TRAIT `unset` : la table le dit elle-meme, « MODE OBSERVE, PAS
+# AFFIRME — un doctor qui compare ce mode compare a une valeur que personne ne garantit ». Vide
+# aussi sur `-`, comme le GID : un tiret est une colonne absente, pas une valeur.
+# ⚠ MEME FICHIER, MEME REPLI que `prov_manifest_gid`, et PAS de fonction commune (voir ci-dessus).
+prov_manifest_mode() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $1 !~ /(^|:)unset(:|$)/ && $2==p && $3!="-" { print $3; exit }' "$f"
+}
+prov_manifest_owner() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $2==p && $4!="-" { print $4; exit }' "$f"
+}
+
 ensure_group() {
   local grp="$1" gid="${2:-}"
   [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"

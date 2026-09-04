@@ -392,6 +392,44 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ "$output" = "2000" ]
 }
 
+@test "LA TABLE A DEUX LECTEURS DE PLUS — mode et proprietaire — et ce sont les POSEURS qui les lisent (lot 15)" {
+  # `share/*` et `tofu/*` etaient declares `0755 root:root` et mesures par PERSONNE : 44 et 46 les
+  # posaient sans `stat`, et les ajouter a la table de 25 en aurait fait un second poseur (le mur
+  # POSEUR ci-dessous veut un poseur par chemin). Le mode d'un objet declare se relit par qui le
+  # pose, contre la ligne de la table — une source, plus de litteral dans le module.
+  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  eval "$(sed -n '/^prov_manifest_mode()/,/^}$/p' "$lib")"
+  eval "$(sed -n '/^prov_manifest_owner()/,/^}$/p' "$lib")"
+  # shellcheck disable=SC2034 # lu a l'interieur de l'`eval`, invisible a l'analyse statique
+  PROVISION_LIB="$lib"
+  run prov_manifest_mode /opt/lcars/share/avatars
+  [ "$output" = "0755" ]
+  run prov_manifest_owner /opt/lcars/share/avatars
+  [ "$output" = "root:root" ]
+  run prov_manifest_mode /opt/lcars/tofu/providers
+  [ "$output" = "0755" ]
+  run prov_manifest_owner /opt/lcars/var/tokens
+  [ "$output" = "lcars-authority:fleet" ]
+  run prov_manifest_mode /chemin/que/la/table/ne/nomme/pas
+  [ -z "$output" ]
+  # `unset` : MODE OBSERVE, jamais affirme — le lecteur rend VIDE, donc aucun poseur ne compare
+  run prov_manifest_mode '/home/<human>/.claude'
+  [ -z "$output" ]
+  # `-` est une colonne absente, pas une valeur : un lien n'a ni mode ni proprietaire
+  run prov_manifest_mode /usr/local/bin/lcars
+  [ -z "$output" ]
+  run prov_manifest_owner /usr/local/bin/lcars
+  [ -z "$output" ]
+  # et les deux poseurs les lisent — sur le code, pas sur la prose
+  local m
+  for m in 44-media 46-tofu; do
+    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_mode' \
+      || { echo "$m ne lit pas le mode dans la table"; return 1; }
+    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_owner' \
+      || { echo "$m ne lit pas le proprietaire dans la table"; return 1; }
+  done
+}
+
 # ⚠ L'ANGLE MORT QUE NI ISO 1/2 NI ISO 2/2 NE PEUVENT VOIR, ET IL A COUTE QUATRE LIENS MORTS.
 #
 # `unit_path()` compose `"$1.service"` a l'execution : aucun des quatre noms n'existe LITTERALEMENT
