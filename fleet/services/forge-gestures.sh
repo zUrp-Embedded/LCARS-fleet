@@ -46,18 +46,13 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # token) et les personnes s'enrolent par la page d'inscription, sous leur nom. Le commentaire
 # ci-dessous le disait deja sans en tirer la consequence : « le siege BUILT-IN de DEMONSTRATION ».
 #
-# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
-# ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
-#
-# ⚠ ET `LCARS_DISPOSABLE` LE DEMANDE SANS LE NOMMER (40-RAILS.md § 13). C'est l'axe DESTINATION :
-# un appelant qui sait que son deploiement est jetable — `--disposable` sur la porte, le drapeau
-# traverse jusqu'a `48-forge-host` — demande les annexes de demonstration sans avoir a decider QUI
-# elles sont. Ce fichier reste le seul declarant du nom ; deux temoins de `forge_host_reach.bats` le
-# gardent, et ils ont attrape une premiere version qui ecrivait ce defaut dans le module appelant.
-#
-# L'ORDRE EST LOAD-BEARING : un nom EXPLICITE l'emporte toujours sur le defaut de la destination.
-# L'inverse ferait ignorer en silence ce que l'operateur a tape.
-BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${LCARS_DISPOSABLE:+lcars}}"
+# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs.
+# C'est la SEULE voie. Un `LCARS_DISPOSABLE` a vecu ici, qui demandait un humain de demonstration
+# sans le nommer (« lcars » par defaut) depuis un `--disposable` de la porte, quatre etages plus
+# haut : ⚖ user 2026-09-04, « un vieux reliquat a virer » — un axe entier pour un defaut que plus
+# personne ne demandait. Ce fichier reste le seul declarant du nom ; deux temoins de
+# `forge_host_reach.bats` le gardent.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le

@@ -1124,30 +1124,28 @@ STUB
   [ "$(grep -c 'FORGE_BASE_URL="\$FORGE_URL"' <<<"$code")" -eq 1 ]
 }
 
-@test "§ 13 : la DESTINATION a son porteur, et l humain de demo le suit" {
-  # ⚠ TROIS AXES, PAS DEUX : substrat, forge (montee / fournie), DESTINATION (travail / jetable). Le
-  # troisieme n'avait aucun porteur, et `--bench` en faisait DEUX — monter la forge ET poser les
-  # annexes de demonstration — parce que sur la BOITE les deux coincidaient. Ouvrir `--bench` au
-  # poste sans les separer aurait rendu tous les postes semeurs, ce qui annule le canon du 30/08
-  # (« le rail pose les autorites, il ne fabrique pas d'humains »).
+@test "§ 13 : il n y a PAS d axe destination — seul le banc seme un humain, et il le NOMME" {
+  # ⚠ UN « AXE DESTINATION » A VECU ICI (travail / jetable), porte par `--disposable` sur la porte,
+  # `PROV_DISPOSABLE` dans le runner, `LCARS_DISPOSABLE=1` dans ce module, et un defaut « lcars »
+  # dans `forge-gestures.sh`. ⚖ user 2026-09-04 : « un vieux reliquat a virer » — quatre etages
+  # pour un nom par defaut que plus personne ne demandait : le banc nomme le sien
+  # (`bench-forge-bootstrap.sh`, `LCARS_BUILTIN_HUMAN`), un deploiement de travail ne seme
+  # personne (canon du 30/08). Ce temoin garde l'ABSENCE de l'axe a chaque etage, et l'unique voie.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  # Le semis est CONDITIONNE par la destination, jamais par la forge.
-  grep -q 'PROV_DISPOSABLE:+LCARS_DISPOSABLE=1' <<<"$code"
+  refute grep -qi 'DISPOSABLE' <<<"$code"
   refute grep -qE 'WITH_BENCH|BENCH.*BUILTIN_HUMAN' <<<"$code"
-  # ⚠ ET CE MODULE NE NOMME PERSONNE : il dit « ce deploiement est jetable », pas « appelle-le
-  # lcars ». Deux temoins de ce fichier gardent l'autorite unique du nom, et ils ont attrape la
-  # premiere version de cette ligne — elle ecrivait un defaut ici, donc une seconde autorite.
+  # ⚠ ET CE MODULE NE NOMME PERSONNE. Deux temoins de ce fichier gardent l'autorite unique du nom.
   refute grep -q 'LCARS_BUILTIN_HUMAN' <<<"$code"
-  # Le drapeau traverse le runner.
+  # Ni le runner, ni la porte ne portent plus le drapeau — la porte le REFUSE, en se nommant.
   local runner; runner="$BATS_TEST_DIRNAME/../../provision"
-  grep -q -- '--disposable) export PROV_DISPOSABLE=1' "$runner"
-  # Et l'AUTORITE du nom en tire les trois etats : rien, le defaut de la destination, l'explicite.
+  refute grep -qi 'DISPOSABLE' <<<"$(grep -vE '^\s*#' "$runner")"
+  local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
+  grep -qE '^\s*--disposable\) echo .*retire' "$door"
+  # Et l'AUTORITE du nom n'a plus que DEUX etats : rien, ou l'explicite.
   local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
   [ -z "$(bash "$g" builtin-human)" ]
-  [ "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" = "lcars" ]
-  # ⚠ L'ORDRE EST LOAD-BEARING : un nom explicite l'emporte sur le defaut de la destination.
-  # L'inverse ferait ignorer en silence ce que l'operateur a tape.
-  [ "$(LCARS_DISPOSABLE=1 LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]
+  [ -z "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" ]
+  [ "$(LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]
 }
 
 @test "§ 13 : la porte OUVRE --bench au poste, et le refus a disparu" {
@@ -1156,9 +1154,8 @@ STUB
   local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
   local code; code="$(grep -vE '^\s*#' "$door")"
   refute grep -q "bench n'a pas d'objet sur le rail poste" <<<"$code"
-  # Et le nouveau porteur traverse la porte jusqu'au runner.
-  grep -q -- '--disposable) *DISPOSABLE=1' <<<"$code"
-  grep -q 'PASSTHRU+=("$1")' <<<"$code"
+  # Le transport vers le runner existe — par PAIRES : il n'y a plus de drapeau solo.
+  grep -q 'PASSTHRU+=("$1" "' <<<"$code"
 }
 
 # ─── LA DERIVATION DE LA RELEASE — LE SEUL FRAGMENT D `apply()` QUE CE FICHIER JOUE ─────────────

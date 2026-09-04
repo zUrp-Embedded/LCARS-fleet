@@ -609,32 +609,22 @@ SPY
 
 # ─── L ARITE : UN SEUL DRAPEAU IMPAIR, ET IL DECALAIT TOUT CE QUI SUIT ──────────────────────────
 #
-# ⚠ LA BOUCLE DE TRADUCTION AVANCAIT DE DEUX EN DEUX. `--disposable` pousse UN seul jeton dans
-# `PASSTHRU` — c est le seul —, donc des qu il est present, tous les drapeaux suivants tombent sur
-# des index impairs et AUCUN `case` ne les voit. Mesure du 2026-09-01 : `--box --bench --disposable
-# --port-ssh 2223 --forge-project alice4` faisait partir `bench-up` avec ZERO argument.
-#
-# ⚠ ET LE SECOND EFFET EST PIRE QUE LE PREMIER : `--box --disposable --human alice` sortait 0.
-# `--human` est un drapeau du rail POSTE que cette boucle doit REFUSER ; decale, il etait avale sans
-# un mot. Un drapeau non traduit fait tourner le delegue sur ses defauts ; un drapeau non REFUSE
-# fait croire a un geste qui ne se produit pas.
+# ⚠ LA BOUCLE DE TRADUCTION AVANCAIT DE DEUX EN DEUX, et le seul drapeau solo de `PASSTHRU`
+# decalait tout ce qui le suivait : valeurs sur les defauts, drapeau du rail POSTE avale sans un
+# mot (mesure du 2026-09-01). L'arite est declaree depuis, et ce solo-la — `--disposable` — est
+# RETIRE (⚖ user 2026-09-04 : un reliquat, quatre etages pour un nom par defaut que personne ne
+# demandait). Il n'y a plus AUCUN solo ; le temoin d'arite non declaree ci-dessous garde la regle
+# pour le prochain, et celui-ci garde le verrou : un drapeau retire RATE, il ne revient pas en
+# passe-plat muet.
 
-@test "ARITE : \`--disposable\` est IMPAIR, et ce qui le suit est traduit quand meme" {
+@test "VERROU : « --disposable » est REFUSE, il ne revient pas en passe-plat muet" {
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 --forge-project alice4 < /dev/null
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"--ssh-port 2223"* ]] \
-    || { echo "le port SSH n a pas ete traduit — la boucle est decalee : $output"; return 1; }
-  [[ "$output" == *"--project alice4"* ]] \
-    || { echo "le projet n a pas ete traduit — la boucle est decalee : $output"; return 1; }
-}
-
-@test "ARITE : un drapeau du rail POSTE reste REFUSE meme derriere \`--disposable\`" {
-  local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --disposable --human alice < /dev/null
-  [ "$status" -ne 0 ] \
-    || { echo "un drapeau du rail POSTE a ete avale en silence : $output"; return 1; }
-  [[ "$output" == *"--human"* ]]
+  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 < /dev/null
+  [ "$status" -ne 0 ] || { echo "--disposable a ete accepte : $output"; return 1; }
+  [[ "$output" == *"--disposable"* ]]
+  [[ "$output" == *"retire"* ]]
+  # Et rien n'est parti vers le delegue.
+  [[ "$output" != *"--ssh-port"* ]]
 }
 
 @test "ARITE : un drapeau dont l arite n est pas declaree fait RATER la porte, il ne se devine pas" {
