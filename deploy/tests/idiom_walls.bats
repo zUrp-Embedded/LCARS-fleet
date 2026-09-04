@@ -170,6 +170,27 @@ I3_AWK='
   [ "$bad" -eq 0 ]
 }
 
+@test "MUR I18: un temoin qui pose une population (PASSWD_FILE) ou nomme un lecteur des bornes pose aussi PASSWD_DEFS — il ne lit jamais le login.defs de la machine" {
+  # `prov_uid_bounds` lit `/etc/login.defs` ; `is_fleet_human` et `fleet_humans` en dependent, et
+  # `64-services` les joue a chaque check (`probe_fleet_humans`). Un decor qui pose un /etc/passwd
+  # sans poser ses bornes decrit une machine a moitie : sur un poste dont UID_MIN vaut 5000, ou dont
+  # login.defs est illisible, ses humains de decor changent de nature — vert ici, rouge ailleurs,
+  # pour un code identique. Vu : 64-services.bats (lot 15). Perimetre : le CODE des temoins, a tous
+  # les etages (I9 ne lit que le premier) ; 22-fleet-human.bats est le modele.
+  local f bad=0 vus=0
+  for f in "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/*/*.bats; do
+    [[ "$f" == */idiom_walls.bats ]] && continue
+    # capture puis test (DI-12) : aucun `grep -q` ne ferme un tuyau. `LCARS_PASSWD_FILE` (le seam
+    # de 21-service-accounts) n'est pas une population d'humains : il ne compte pas.
+    [[ -n "$(grep -vE '^[[:space:]]*#' "$f" | grep -E '(^|[^A-Z_])PASSWD_FILE=|is_fleet_human|fleet_humans|prov_uid_bounds')" ]] || continue
+    vus=$((vus + 1))
+    grep -qE '^[[:space:]]*export PASSWD_DEFS=' "$f" \
+      || { echo "${f##*/} pose une population ou nomme un lecteur des bornes sans poser PASSWD_DEFS"; bad=1; }
+  done
+  [ "$vus" -ge 3 ] || { echo "seulement $vus temoin(s) dans le perimetre — l'instrument ne lit plus le corpus"; return 1; }
+  [ "$bad" -eq 0 ]
+}
+
 @test "MUR I10: qui LIT PROV_DOCKER_BIN joue la sonde — sinon il passe une CLI VIDE a son delegue" {
   # `PROV_DOCKER_BIN` vaut la CHAINE VIDE tant que `docker_endpoint` n'a pas tourne
   # (`docker-endpoint.sh` la declare ainsi). Un module qui la lit sans sonder passe `DOCKER_BIN=""`,

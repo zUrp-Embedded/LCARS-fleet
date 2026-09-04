@@ -72,6 +72,14 @@ setup() {
   export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
   printf 'root:x:0:0:root:/root:/bin/bash\n%s:x:%s:%s::%s:/bin/bash\nzoe:x:4242:4242::/home/zoe:/bin/bash\n' \
     "$(id -un)" "$(id -u)" "$(id -g)" "$HOME" > "$PASSWD_FILE"
+  # ⚠ ET SES BORNES AVEC ELLE (lot 15). `fleet_humans` lit `login.defs` par `prov_uid_bounds` : une
+  # population de decor sans ses bornes decrit une machine a moitie — ce decor lisait le
+  # `/etc/login.defs` de la machine qui joue le test. Sur un poste dont UID_MIN vaut 5000, ou dont
+  # login.defs est illisible, `zoe` cesse d'etre un humain de fleet et « check CONFORME » rougit
+  # pour un code identique. Le plancher est une DONNEE du systeme, donc il se pose ici (modele :
+  # 22-fleet-human.bats) ; MUR I18 (idiom_walls) tient la regle pour tout temoin qui pose une population.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$PASSWD_DEFS"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   mkdir -p "$LCARS_SYSTEMD_DIR" "$PROV_TOKENS_DIR"
