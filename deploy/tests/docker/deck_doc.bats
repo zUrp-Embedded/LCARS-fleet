@@ -67,7 +67,10 @@ setup() {
 @test "l'arbre servi est rendu lisible EXPLICITEMENT, jamais par heritage du COPY" {
   # `COPY` conserve les modes de l'etage source (`node:<majeure>-slim`), qui ne nous doit rien. Un arbre
   # servi doit dire lui-meme qu'il est lisible ; l'heritage est une hypothese sur une image amont.
-  grep -qE "^RUN chmod -R a\+rX ${DOC_DEST%/doc}\$" "$DOCKERFILE"
+  # Depuis le lot 15 la meme ligne retire aussi le setgid et l'ecriture de groupe (`44 check` relit
+  # share/* au build contre la table) : ce temoin epinglait la forme exacte, il epingle le FAIT —
+  # `a+rX` en tete, sur cet arbre, et rien d'autre que des clauses symboliques derriere.
+  grep -qE "^RUN chmod -R a\+rX(,[ugoa]*[-+=][rwxXst]*)* ${DOC_DEST%/doc}\$" "$DOCKERFILE"
 }
 
 @test "l'image pose les MEDIAS a cote de la doc — une source installee, lue par tous" {
