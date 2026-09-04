@@ -165,7 +165,7 @@ defmodule Fleet.Workflow.PayloadGuard do
   #      compris (`symlink_in_chain?`). Ca ne supprime pas la course, ca la reduit d'un « toute la
   #      passe » a un « ce fichier-ci ».
   #
-  #   2. ON N'ECRIT PLUS SUR LA CIBLE, ON LA REMPLACE. `rename(2)` opere sur le LIEN, jamais sur ce
+  #   2. ON N'ECRIT PAS SUR LA CIBLE, ON LA REMPLACE. `rename(2)` opere sur le LIEN, jamais sur ce
   #      qu'il designe : un lien pose au DERNIER composant est ECRASE par le fichier, et sa victime
   #      n'est pas touchee. Mesure faite avant d'y adosser quoi que ce soit. C'est ce qui ferme
   #      STRUCTURELLEMENT le residu que le point 1 laisse sur le dernier composant — entre son

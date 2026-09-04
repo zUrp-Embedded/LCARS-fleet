@@ -1,32 +1,35 @@
 defmodule Fleet.Forge.Client do
   @moduledoc """
-  `fleet_pilot`'s Gitea REST API client — the DOMAIN layer of the forge-state-machine
-  (the forge IS the state machine). Carries the ops on issues/PRs (idempotent read/write),
-  PR jury state, repo onboarding, and the credential→wire adapter
-  `as_role/2`. It is the module injected by the `:forge_client` seam (StepDispatcher/Poller).
+  The Gitea REST API client — the DOMAIN layer of the forge-state-machine (the forge IS the state
+  machine). Carries the ops on issues/PRs (idempotent read/write), PR jury state, repo onboarding,
+  and the credential→wire adapter `as_role/2`. It is the module injected by the `:forge_client`
+  seam (StepDispatcher/Poller/MCP).
 
-  Two layers live BELOW it (re-exported here to preserve the historical contract):
+  Two layers live BELOW it, and a few of their functions are re-exported here because a seam
+  names THIS module:
 
     * `Fleet.Forge.Client.Transport` — HTTP/config/encoding/pagination engine + system login.
-      No knowledge of the forge protocol. `ForgeClient` `import`s it (`http_get`, `paginate`, …).
-    * `Fleet.Forge.Protocol` — PURE vocabulary of the wire-protocol (feature-branches,
-      route/step_run/onboard markers, result blocks, `system_authored?`), build+parse co-located. Callers
+      No knowledge of the forge protocol. This module `import`s it (`http_get`, `paginate`, …).
+    * `Fleet.Forge.Protocol` — PURE vocabulary of the wire-protocol (feature-branches, comment
+      markers, the parked title, result blocks, `system_authored?`), build+parse co-located. Callers
       call it DIRECTLY. Only `parse_feature_branch/1` is re-exported here (`defdelegate`) because
-      `fleet_mcp` reaches it via the `:forge_client` seam (avoids a compile-time dep on fleet_pilot).
+      `Fleet.MCP` reaches it through the `:forge_client` seam.
 
-  ⚠ CROSS CONTRACT (`fleet_mcp` seam): this module is the REAL (default) impl of the behaviour
-  `Fleet.MCP.PodTools.Delegation.ForgeClient` (callbacks = `create_issue/4`, `add_label/4`,
-  `get_issue/3`, `list_pulls/2`, `parse_feature_branch/1`, `pr_review_state/3`,
-  `post_comment/4`, `close_issue/3`, `merged_pr_of_issue/3`). It CANNOT
-  be adopted as a `@behaviour`: `Fleet.Pilot` does not depend on `Fleet.MCP` and the compile reference
-  would be a Boundary violation (`Fleet.MCP` is absent from `Fleet.Pilot`'s `use Boundary` deps →
-  compile error). Duck-typed impl — any evolution of
-  these 9 signatures MUST be mirrored onto the behaviour's `@callback`s (and vice versa).
+  ⚠ CROSS CONTRACT (`Fleet.MCP` seam): this module is the REAL (default) impl of the behaviour
+  `Fleet.MCP.PodTools.Delegation.ForgeClient` (13 callbacks: `create_issue`, `add_label`,
+  `repo_label_id`, `get_issue`, `list_pulls`, `list_open_issues`, `parse_feature_branch`,
+  `pr_review_state`, `get_route`, `post_comment`, `close_issue`, `close_pr`,
+  `merged_pr_of_issue`). It CANNOT be adopted as a `@behaviour`: `Fleet.Forge` does not depend on
+  `Fleet.MCP` (MCP sits above it) and the compile reference would be a Boundary violation.
+  Duck-typed impl — any evolution of these signatures MUST be mirrored onto the behaviour's
+  `@callback`s (and vice versa); `Delegation.conforming/2` is the witness that holds it.
 
   ## Configuration
 
-  Resolved at call time by `Transport.resolve_config/1` (see its moduledoc): `:base_url`, `:token`
-  (or `:token_file`, default `~/.gitea_token`), `:req_options` passed to `Req`.
+  Resolved at call time by `Transport.resolve_config/1` (see its moduledoc): `:base_url`, then
+  ONE token source — `:token`, `:token_file`, or `:account` (asked of the authority service);
+  none is a named refusal, never a fallback to a personal file — and `:req_options` passed to
+  `Req`.
 
   ## Idempotence
 
@@ -123,7 +126,8 @@ defmodule Fleet.Forge.Client do
     list_scoped_issues(repo, "issues", opts)
   end
 
-  # (`assigned_by` — Gitea 1.26.1 works on /issues for both types) → the poller sees
+  # `assigned_by` is honoured on `/issues` for BOTH types (Gitea 1.26.1), so the poller sees only
+  # what the forge itself scoped — no client-side filtering of a wider list.
   defp list_scoped_issues(repo, type, opts) when type in ["issues", "pulls"] do
     state = Keyword.get(opts, :state, "open")
 
@@ -776,9 +780,9 @@ defmodule Fleet.Forge.Client do
   @doc """
   Lists full open PR records under the optional forge-side assignee scope.
 
-  Hybrid (Gitea 1.26.1): `/pulls` does NOT have `assigned_by`, but `/issues?type=pulls&assigned_by`
-  Gitea exposes that filter only on the issue-shaped PR list, so each filtered number is expanded
-  with `get_pull/3`. Any failed expansion fails the whole read.
+  Hybrid (Gitea 1.26.1): `/pulls` has NO `assigned_by` filter; only the issue-shaped list
+  `/issues?type=pulls&assigned_by=…` carries it, so each filtered number is expanded with
+  `get_pull/3`. Any failed expansion fails the whole read.
   """
   @spec list_open_pulls(String.t(), Keyword.t()) :: {:ok, [map()]} | {:error, term()}
   def list_open_pulls(repo, opts \\ []) when is_binary(repo) do
@@ -1032,8 +1036,6 @@ defmodule Fleet.Forge.Client do
   def pr_rerequested_reviewers(repo, index, opts \\ []),
     do: Jury.pr_rerequested_reviewers(repo, index, opts)
 
-  # Le doute ne change pas le GESTE (on poste), il change ce qu'on en SAIT. `false` ici veut dire
-  # « poste » dans les deux cas, mais un seul des deux est une mesure.
   @stage_prefix Fleet.Labels.stage_prefix()
   @wfmap_prefix Fleet.Labels.wfmap_prefix()
 

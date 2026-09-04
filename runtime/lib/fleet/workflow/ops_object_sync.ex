@@ -43,8 +43,8 @@ defmodule Fleet.Workflow.OpsObjectSync do
   serialization is skipped. Not a masked failure — an optional serialization layer, exactly like
   WorktreeSync's cast being dropped when it is not started.
 
-  **In `:test` the singleton is NOT started** (`start_ops_object_sync: false`): the whole suite takes
-  the direct fallback, so `OpsObject`'s logs stay in the CALLER's process (pre-CI-11 behavior) — routing
+  **In `:test` the singleton is NOT started** (`pilot_start_ops_object_sync: false`): the whole suite
+  takes the direct fallback, so `OpsObject`'s logs stay in the CALLER's process — routing
   every async test's write through one shared process would serialize + relocate those logs and worsen
   `capture_log` bleed.
   """

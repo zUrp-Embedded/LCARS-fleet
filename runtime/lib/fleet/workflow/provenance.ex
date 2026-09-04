@@ -1,7 +1,6 @@
 defmodule Fleet.Workflow.Provenance do
   @moduledoc """
-  The doctrine's **SHA triplet**: SLSA/in-toto provenance of a deliverable (design:
-  `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md`).
+  The doctrine's **SHA triplet**: SLSA/in-toto provenance of a deliverable.
 
   Assembles an in-toto Statement `(brief_sha, input_sha, livrable_sha)` — WHAT was asked (the brief),
   WHAT we started from (the base state), WHAT came out (the deliverable) — and commits it into

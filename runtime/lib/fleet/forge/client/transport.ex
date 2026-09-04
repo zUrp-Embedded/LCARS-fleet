@@ -8,8 +8,8 @@ defmodule Fleet.Forge.Client.Transport do
   No knowledge of the forge *protocol* (branches, labels, markers): that's
   `Fleet.Forge.Client` (domain) + `Fleet.Forge.Protocol` (vocab).
 
-  INTERNAL surface (`@doc false`): everything is public so that `ForgeClient` can call it,
-  but it is not an app contract — no caller outside `fleet_pilot`.
+  INTERNAL surface (`@doc false`): everything is public so that `Fleet.Forge.Client` and its
+  sub-modules can call it, but it is not an app contract — no caller outside this domain.
 
   ## Configuration
 
@@ -21,19 +21,13 @@ defmodule Fleet.Forge.Client.Transport do
     * `:account` — a forge ACCOUNT name. The token is ASKED of the authority service, at call time.
     * `:req_options` — options passed as-is to `Req.new/1` (for tests: `[plug: ...]` to intercept HTTP).
 
-  ## `~/.gitea_token` a disparu de cette resolution, et c'etait un REPLI SILENCIEUX VERS LA MAUVAISE
-  ## IDENTITE
+  ## Aucun repli vers `~/.gitea_token`, et c'est une regle d'IDENTITE
 
-  Sans `:token` ni `:token_file`, ce module lisait `~/.gitea_token`. Le BEAM tourne sous l'uid de
-  l'humain de fleet : ce chemin resout donc vers le jeton PERSONNEL de cette personne. Une boite dont
-  le cablage systeme manquait ne tombait pas en panne — elle agissait sur la forge sous l'identite
-  d'un humain, avec ses droits, et sans qu'une ligne le dise. La forge voyait cette personne faire ce
-  que le systeme faisait.
-
-  Ce repli tenait une vraie situation (un deploiement qui n'avait pose que le fichier), et il la
-  tenait en substituant une identite. Il n'a plus d'objet : le nom du compte suffit, et le jeton se
-  demande. En son absence, la resolution rend `{:config, :no_token_source}` — un refus nomme, la ou
-  il y avait un succes faux.
+  Le BEAM tourne sous l'uid de l'humain de fleet : un repli vers son `~/.gitea_token` resoudrait
+  vers le jeton PERSONNEL de cette personne. Une boite dont le cablage systeme manque ne tomberait
+  pas en panne — elle agirait sur la forge sous l'identite d'un humain, avec ses droits, sans
+  qu'une ligne le dise. Sans source de jeton, la resolution rend `{:config, :no_token_source}` :
+  un refus nomme, jamais un succes sous une autre identite.
   """
 
   require Logger
@@ -165,16 +159,16 @@ defmodule Fleet.Forge.Client.Transport do
              :bot_login_unresolved | {:transport, term()} | {:http, pos_integer(), term()}}
   def login_of(config), do: derive_bot_login(config)
 
-  # L'EMPREINTE DU JETON EST UNE VALEUR, PLUS UNE CLE — et c'est tout le correctif. Elle etait DANS
-  # la cle, donc chaque rotation creait une entree de plus et l'ancienne n'etait jamais rendue : sur
-  # un noeud de longue duree, le nombre d'entrees `:persistent_term` croissait lineairement avec le
-  # nombre de jetons successifs, et chaque `put` declenche un GC global.
+  # L'EMPREINTE DU JETON EST UNE VALEUR, PAS UNE CLE. Dans la cle, chaque rotation creerait une
+  # entree de plus, jamais rendue : sur un noeud de longue duree, le nombre d'entrees
+  # `:persistent_term` croitrait avec le nombre de jetons successifs, et chaque `put` declenche un
+  # GC global.
   #
   # UNE entree par `base_url`, dont la valeur porte l'empreinte : une rotation ECRASE la precedente
-  # au lieu de s'y ajouter. La propriete de correction est inchangee et c'est elle qui exigeait
-  # l'empreinte quelque part — un login memorise pour un jeton ne doit jamais etre servi pour un
-  # autre (le jeton du SYSTEME et celui d'un ROLE ne repondent pas le meme `/user`) : la comparaison
-  # se fait maintenant sur la valeur lue, ce qui est le meme test, au meme moment, sans accumuler.
+  # au lieu de s'y ajouter. La propriete de correction est la meme — un login memorise pour un jeton
+  # ne doit jamais etre servi pour un autre (le jeton du SYSTEME et celui d'un ROLE ne repondent pas
+  # le meme `/user`) — et la comparaison sur la valeur lue est le meme test, au meme moment, sans
+  # accumuler.
   defp derive_bot_login(config) do
     key = {__MODULE__, :bot_login, config.base_url}
     fingerprint = :crypto.hash(:sha256, config.token)
@@ -213,9 +207,9 @@ defmodule Fleet.Forge.Client.Transport do
   #                 ne sert ne nous fait pas marcher) ; sans en-tete, l'heuristique `< @page_limit`
   #                 reprend la main.
   #
-  # `@max_pages` n'est donc plus la borne effective : c'est le filet du cas ou tout le reste ment
-  # simultanement — et c'est exactement l'etat qu'il a attrape avant que le total soit lu (une forge
-  # qui ignore `page` rendait tout, a chaque tour, 200 fois). Les quatre tests de
+  # `@max_pages` n'est donc pas la borne effective : c'est le filet du cas ou tout le reste ment
+  # simultanement — une forge qui ignore `page` rend tout, a chaque tour, et sans total lu tourne
+  # 200 fois (mesure). Les quatre tests de
   # `forge_client_pagination_test.exs` tiennent les deux gardes.
   #
   # PAS de deadline murale sur la boucle, et c'est un choix : elle transformerait une lecture LENTE
@@ -381,15 +375,15 @@ defmodule Fleet.Forge.Client.Transport do
 
   # DEUX ECHECS QUI NE REVIENDRONT PAS, ET QUI PORTAIENT LE VISAGE D'UN ECHEC PASSAGER.
   #
-  # `423` est declare par 31 operations du contrat, `412` par 3, et rien dans ce depot ne les
-  # distinguait d'un `500` : tous ressortaient en `{:http, status, body}`. Or un depot ARCHIVE ou une
+  # `423` est declare par 31 operations du contrat, `412` par 3, et seule cette ligne de journal les
+  # distingue d'un `500` : tous ressortent en `{:http, status, body}`. Or un depot ARCHIVE ou une
   # conversation VERROUILLEE rend 423 a chaque tentative, pour toujours — un poller qui re-dispatche
-  # a chaque tour produit alors la meme panne indefiniment, sans que rien ne dise qu'aucun tour ne la
+  # a chaque tour produit la meme panne indefiniment, et rien d'autre ne dit qu'aucun tour ne la
   # resoudra.
   #
-  # La FORME du retour ne change pas, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
+  # La FORME du retour est la meme, et c'est delibere : vingt sites filtrent sur `{:http, ...}`, et
   # un tuple different ferait tomber ces deux codes dans leurs catch-all — en silence, c'est-a-dire
-  # exactement le contraire du but. Ce qui manquait n'etait pas un type, c'etait de le DIRE.
+  # exactement le contraire du but. Ce qui compte n'est pas un type, c'est de le DIRE.
   defp name_permanent(status, method, path, body) when status in [412, 423] do
     Logger.warning(
       "Transport: #{method} #{path} -> HTTP #{status} " <>
@@ -398,15 +392,14 @@ defmodule Fleet.Forge.Client.Transport do
     )
   end
 
-  # LE SYMETRIQUE, ET IL MANQUAIT. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai
-  # ne les levera. Le `429` est l'inverse exact — il dit « reessaie plus tard » — et le depot ne le
-  # connaissait pas : zero occurrence de `429`, `Retry-After` ou `too many` dans `lib/`, verifie par
-  # deux moyens independants. Il ressortait donc en `{:http, 429, body}` indistinct d'un `500`, et un
-  # appelant qui abandonne sur erreur abandonnait une condition qui se serait levee seule.
+  # LE SYMETRIQUE. `412` et `423` sont nommes PERMANENTS parce qu'aucun nouvel essai ne les levera.
+  # Le `429` est l'inverse exact — il dit « reessaie plus tard » — et sans cette ligne il ressort en
+  # `{:http, 429, body}` indistinct d'un `500` : un appelant qui abandonne sur erreur abandonne une
+  # condition qui se serait levee seule.
   #
-  # La FORME du retour ne change pas, pour la meme raison que ci-dessus : vingt sites filtrent sur
-  # `{:http, ...}`. Ce qui manquait n'etait pas un type, c'etait de le DIRE — et de dire COMBIEN de
-  # temps, quand la forge le dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
+  # La FORME du retour est la meme, pour la meme raison que ci-dessus : vingt sites filtrent sur
+  # `{:http, ...}`. Ce qui compte est de le DIRE — et de dire COMBIEN de temps, quand la forge le
+  # dit. `Retry-After` est lu ici et journalise ; le faire consommer par une
   # boucle de reessai metier est un geste d'appelant (le motif existe, `do_merge/6`), pas de ce
   # transport, qui a `retry: false` par construction.
   defp name_permanent(429, method, path, body) do

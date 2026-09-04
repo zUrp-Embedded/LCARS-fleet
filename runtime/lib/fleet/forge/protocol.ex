@@ -6,16 +6,16 @@ defmodule Fleet.Forge.Protocol do
   *post*/*read* them live in `Fleet.Forge.Client`).
 
   Counterpart of `Fleet.Labels` (both carry the wire-protocol): `Labels` = the
-  **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches,
-  route/step_run/onboard markers, result blocks** and the **trust primitive** `system_authored?/2`.
+  **lock-labels** (`lcars-in-flight`/`lcars-awaits-arch`); here = **branches, comment markers
+  (step_run, publish-fail, ci-rework, merge, escalation), the parked title, result blocks** and the
+  **trust primitive** `system_authored?/2`.
 
   **Co-located build+parse invariant**: each format has its BUILDER and its PARSER in
   THIS module, glued to each other — a format change happens HERE, both together,
   never one without the other (no drift between what is written and what is re-read).
   The consumers (`StepDispatcher`, `StepRunConsumer`, `StepRunCompleter`, `Poller`) call these
-  functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `ForgeClient`
-  (`defdelegate`): `fleet_mcp` reaches it via the `:forge_client` seam to avoid a compile-time
-  dependency on fleet_pilot.
+  functions DIRECTLY. Only `parse_feature_branch/1` is also re-exported by `Fleet.Forge.Client`
+  (`defdelegate`): `Fleet.MCP` reaches it through the `:forge_client` seam.
   """
 
   # ============================================================
@@ -60,8 +60,8 @@ defmodule Fleet.Forge.Protocol do
   feature-branch (`lcars/issue-N-<role>`) yields `{issue_number, pull}` — the SINGLE loop behind the
   in-Pilot issue↔PR correlations (C-05). Callers keep their LOCAL
   projection: `Poller` → the set of issue numbers; `StepRunBuild` → the head.ref of issue N's PR. The
-  MCP `Delegation` correlation is NOT wired here (a `fleet_mcp` compile dep on Pilot is forbidden, and
-  extending the forge seam with the selector would force every forge stub to implement it) — it keeps a
+  MCP `Delegation` correlation is NOT wired here (extending the forge seam with the selector would
+  force every forge stub to implement it) — it keeps a
   local loop over the SAME single-authority parse (`forge.parse_feature_branch` seam → this module).
   """
   @spec fleet_prs_by_issue([map()]) :: [{integer(), map()}]
