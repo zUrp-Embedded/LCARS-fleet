@@ -133,9 +133,18 @@ publier_verdicts() {
 # shell est REMPLACÉ, donc toute boucle qu'il porterait disparaîtrait à cet instant. D'où un
 # processus à part, lancé en `setsid` exactement comme les services l'étaient.
 SUPERVISE="${LCARS_SUPERVISE_BIN:-/opt/lcars/supervise.sh}"
-launch() { # launch <nom> <log> -- <cmd...>
+launch() { # launch <nom> <log> -- <cmd...> — rend 1 si la commande n'est pas lancable, et le dit
   local name="$1" log="$2"; shift 2
   [[ "${1:-}" == "--" ]] && shift
+  # ⚠ L'ECHEC SE MESURE ICI OU NULLE PART. `setsid … &` rend la main sans savoir si la commande a pu
+  # s'executer : un `|| say` derriere `launch` etait une branche inatteignable, et le message qu'elle
+  # portait (« AUCUNE console n'est joignable ») n'etait jamais dit (relecture hostile 2026-09-04, M7).
+  # Ce qui SE mesure avant de lancer : que la commande existe et soit executable. Ce qui meurt APRES
+  # est l'affaire du superviseur, qui le journalise et borne la relance.
+  if [[ -z "${1:-}" ]] || ! command -v -- "$1" >/dev/null 2>&1; then
+    say "$name NON lancé — commande introuvable ou non exécutable : ${1:-<vide>}"
+    return 1
+  fi
   if [[ -x "$SUPERVISE" ]]; then
     # SC2094 : `--log "$log"` et `>>"$log"` visent bien le meme fichier, et c'est voulu — les deux
     # AJOUTENT (`O_APPEND`), pour que les messages du superviseur et la sortie du service tiennent
@@ -222,7 +231,8 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
     say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
 
-  launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN"
+  launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN" \
+    || say "convergence des humains NON lancée — la boîte reste joignable, mais personne ne sera matérialisé sans redémarrage"
   say "un ajout à la team « humans » suffit désormais, sans redémarrage"
 else
   say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
@@ -301,7 +311,8 @@ if [[ "${LCARS_CATALOGUE_EXECUTOR:-1}" == "1" && -r /opt/lcars/catalogue-executo
     || say "ATTENTION : /run/lcars/authority non pose — l'executeur de catalogue ne pourra pas ouvrir sa socket"
   launch "executeur de catalogue" /var/log/lcars-catalogue.log -- \
     setpriv --reuid "$LCARS_AUTHORITY_USER" --regid "$LCARS_AUTHORITY_USER" --init-groups \
-    python3 /opt/lcars/catalogue-executor.py
+    python3 /opt/lcars/catalogue-executor.py \
+    || say "executeur de catalogue NON lancé — « lcars catalogue install » refusera, en nommant ce service"
   say "« lcars catalogue install » passe par lui"
 else
   say "executeur de catalogue ABSENT — « lcars catalogue install » refusera, en nommant ce service"
@@ -318,7 +329,8 @@ fi
 # geste privilégié) et ne détient rien. Les deux règles sont la même règle, lue des deux côtés.
 if [[ "${LCARS_PRIVILEGED_EXECUTOR:-1}" == "1" && -r /opt/lcars/privileged-executor.py ]]; then
   launch "service privilégié" /var/log/lcars-privileged.log -- \
-    python3 /opt/lcars/privileged-executor.py
+    python3 /opt/lcars/privileged-executor.py \
+    || say "service privilégié NON lancé — la convergence d'outillage refusera, en nommant sa socket"
   say "la convergence d'outillage passe par sa socket, plus par sudo"
 else
   say "service privilégié ABSENT — la convergence d'outillage refusera, en nommant sa socket"
