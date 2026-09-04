@@ -234,10 +234,9 @@ defmodule Fleet.Credentials.Shell do
                 os_pid = os_pid(port)
 
                 # ABSOLUTE deadline computed ONCE: the `receive` loop waits only for the REMAINING time, so a
-                # dripping output never pushes the deadline back (wall, not idle-gap). The group to kill needs
-                # no discovery and therefore no timing: it IS `os_pid` (6-031). The race this comment used to
-                # describe — "wait for the timeout, the wrapper has forked by then" — was a property of the
-                # `setsid` wrapper, and it left with it.
+                # dripping output never pushes the deadline back (wall, not idle-gap). The group to kill is
+                # resolved at KILL time by `kill_scope/1`, which covers both `setsid` states (6-031) — nothing
+                # here depends on when the wrapper forks.
                 deadline = System.monotonic_time(:millisecond) + timeout_ms
                 collect(port, os_pid, timeout_ms, deadline, [], 0, max_output_bytes)
             end

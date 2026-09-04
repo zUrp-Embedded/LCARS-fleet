@@ -114,12 +114,9 @@ defmodule Fleet.TaskQueue.Server do
           )
     }
 
-    # UN BROKER NEUF EST VIDE, SANS ALTERNATIVE. Il y avait ici un `case load_state(...)` a trois
-    # branches, et les deux autres emportaient chacune un `handle_continue` : `:reschedule_deadlines`
-    # (rearmer les echeances d'items restaures) et `{:corrupt, found}` (diffuser `state.corrupt`).
-    # Aucune n'avait d'autre declencheur que la relecture d'un `state.json`. Sans rail de
-    # persistance, elles ne sont pas « rarement atteintes », elles sont INATTEIGNABLES — et un
-    # `handle_continue` mort est pire qu'absent : il decrit un demarrage que la machine n'a pas.
+    # UN BROKER NEUF EST VIDE, SANS ALTERNATIVE : pas de relecture d'etat, donc pas de
+    # `handle_continue` de restauration. Un chemin de demarrage que rien ne declenche decrirait un
+    # demarrage que la machine n'a pas (BL-6-113).
     {:ok, base}
   end
 

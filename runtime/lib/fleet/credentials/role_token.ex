@@ -141,27 +141,12 @@ defmodule Fleet.Credentials.RoleToken do
     nil
   end
 
-  # ⚠ 6-030 VIVAIT ICI, ET SA DISPARITION EST UN GAIN, PAS UNE PERTE. Ce helper regardait si le
-  # REPERTOIRE des jetons existait, pour qu'un deploiement mal pointe ne produise pas une ligne par
-  # role sans jamais dire la seule chose utile : aucun role ne peut signer.
-  #
-  # Le BEAM ne lit plus ce repertoire — il demande au service d'autorite, qui le possede. Le
-  # diagnostic a donc change de cote : c'est le service qui voit un repertoire absent, et il le dit
-  # (`no_role_token`). Garder ce stat ici produirait un diagnostic sur un objet dont ce process n'est
-  # plus responsable — et apres la fermeture des modes, il ne pourrait meme plus le traverser.
-
-  # ⚠ `dir/0` EST PRIVE, PAS SUPPRIME — ET LA NUANCE EST UNE MESURE. « Aucun appelant dans `lib/`
-  # ni `bin/` » est vrai des appels EXTERNES seulement : `path_for/1` l'appelle, dans ce module
-  # meme, et le supprimer casserait la construction du chemin. Un compte d'appelants qui ne
-  # distingue pas l'interne de l'externe conclut a mort sur du vivant.
-  #
-  # Ce qui n'existe pas est l'ACCESSEUR PUBLIC : personne hors d'ici ne demande « ou vivent les
-  # jetons », parce que personne hors d'ici n'a de raison d'y aller. Le BEAM ne lit aucun de ces
-  # fichiers ; il demande au service d'autorite, qui possede le repertoire et resout le chemin de
-  # son cote.
-  #
-  # Le knob `:credentials_role_tokens_dir` reste — il steere `runtime.exs` et le double d'autorite de
-  # la suite — et le README ne pretend plus qu'un lecteur de runtime s'en sert.
+  # ⚠ LE BEAM NE LIT AUCUN FICHIER DE JETON, ET NE SONDE PAS LEUR REPERTOIRE. Il demande au service
+  # d'autorite, qui possede le repertoire et resout le chemin de son cote ; un repertoire absent est
+  # SON diagnostic (`no_role_token`), pas le notre. `dir/0` est prive et n'a qu'un appelant,
+  # `path_for/1`, qui NOMME le fichier sans l'ouvrir — pour les fixtures de la suite, qui posent un
+  # jeton la ou le double d'autorite le lira. Le knob `:credentials_role_tokens_dir` steere
+  # `runtime.exs` et ce double ; aucun lecteur de runtime ne s'en sert.
   @spec dir() :: String.t()
   defp dir, do: Application.get_env(:lcars_fleet, :credentials_role_tokens_dir) || @default_dir
 end

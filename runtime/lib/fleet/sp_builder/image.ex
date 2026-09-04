@@ -219,20 +219,13 @@ defmodule Fleet.SPBuilder.Image do
     |> Map.new(&{&1, &1 |> read_artifact!("fingerprinted source") |> sha_of()})
   end
 
-  # 6-029 — LE REFUS ETAIT BON, SON MESSAGE NON, ET LE DEFAUT VIVAIT A TROIS ENDROITS.
-  #
-  # Chacun des trois lisait en `File.read!` un chemin obtenu d'un INSTANTANE : un `Path.wildcard`
-  # pour les deux lecteurs de repertoire, un `File.regular?` pour les protocoles. Entre l'instantane
-  # et la lecture, l'artefact peut disparaitre ou devenir illisible — et le lecteur rendait alors un
-  # `File.Error` brut, remonte par `publish!/0` jusqu'au refus de boot. La POSTURE est juste
-  # (proven-good ou pas de boot) ; ce qui manquait est le nom de la condition.
-  #
-  # L'asymetrie a eviter : `read_dir_map/3` leve une erreur NOMMEE pour le fichier VIDE et une
-  # erreur de bibliotheque pour le fichier illisible. Meme fonction, meme artefact, deux
-  # traitements. Le jumeau plus loin est `drift/0`, qui lit les MEMES chemins et classe deja le cas
-  # en
-  # `:vanished`. Ici on ne peut pas degrader (une epoque qui ne couvre pas la matiere qu'elle gele
-  # n'est pas une epoque), donc on leve — mais en nommant.
+  # THE ONE READER OF A LISTED PATH (6-029). Every path read here comes from a SNAPSHOT — a
+  # `Path.wildcard` for the directory readers, a `find_in` for the protocols — and between the
+  # snapshot and the read an artifact can vanish or turn unreadable. The posture stays (proven-good
+  # or no boot), and the refusal NAMES the condition instead of surfacing a raw `File.Error`: an
+  # empty file and an unreadable one are two named refusals of the same reader, never one named and
+  # one from the library. `drift/0` reads the same paths and classes the case as `:vanished`; here
+  # nothing degrades, because an epoch that does not cover what it freezes is not an epoch.
   defp read_artifact!(path, what) do
     case File.read(path) do
       {:ok, content} ->
@@ -425,9 +418,9 @@ defmodule Fleet.SPBuilder.Image do
 
   # SAME resolution as `Pod.Assets`' machine half (override first, bundled worker default
   # otherwise) — the image must freeze what the consumer would have read, or it freezes the wrong
-  # file and the override silently escapes the epoch. Reading another domain's config ATOM creates
-  # no module edge (the `:fleet_<dom>` atoms are legacy-valid, D-07); the alternative is a second
-  # resolution of the same asset, one edit away from diverging with no gate to catch it.
+  # file and the override silently escapes the epoch. Reading the spawner's config KEY creates no
+  # module edge (a key is not a call); the alternative is a second resolution of the same asset,
+  # one edit away from diverging with no gate to catch it.
   defp worker_protocol_path(root) do
     Application.get_env(:lcars_fleet, :spawner_protocole_user_path) ||
       Catalogue.find_in(
@@ -447,11 +440,9 @@ defmodule Fleet.SPBuilder.Image do
         "protocole-user-human.md"
       )
 
-  # The SAME roots the disk fallback reads (SPBuilder modop_root/subagent_template_root). The drafts
-  # root is NOT resolved here: it has a reader in ANOTHER domain (`Spawner.Pod.Assets`, the
-  # unpublished path), so it lives on the facade as the single authority — see `drafts_root/0` below.
-  # Single authority on the facade — the image and the spawn's disk fallback MUST read one root.
-  # THE search path, resolved by `Fleet.Catalogue` like every other reader. A fine override moves
+  # The SAME roots the disk fallback reads (`SPBuilder.sp_draft_path/2`, `Spawner.Pod.Assets` on
+  # the unpublished path): the image and the spawn's disk fallback MUST read one search path, and it
+  # is `Fleet.Catalogue.tree_scope/2` for both. A fine override moves
   # the business root only; the system root is never dropped, and an absent directory is — which is
   # what lets the system catalogue ship only what its roles need (it has no subagent template and
   # must not fake one).

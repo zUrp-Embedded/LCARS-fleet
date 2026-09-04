@@ -84,13 +84,10 @@ defmodule Fleet.Credentials.ForgeIdentity do
   #
   # ⚠ IT IS NAMED AFTER THE ROLE WHOSE HAND IT IS, and that is not decoration. `starfleet` carries
   # `forge_identity: false` in the canon: it has no forge account of its own, and the catalogue says
-  # why — every write of its goes through the system account. So this account already WAS starfleet's
-  # writing hand; it simply did not say so, and wore the product favicon instead of the role's face.
-  #
-  # It was `lcars-system`, which broke the naming rule twice over: every other system role reads
-  # `system_<role>` (architect, chief, gatekeeper), and it was the only account whose token file was
-  # mapped by hand instead of derived from its login. A single account carrying two exceptions is
-  # what a wrong name costs — not the ugliness, the special cases it drags behind it.
+  # why — every write of its goes through the system account. So this account IS starfleet's writing
+  # hand, and its name says so. It follows the rule every other system role follows,
+  # `system_<role>` (architect, chief, gatekeeper), and its token file derives from its login like
+  # theirs: one account, zero special cases.
   @system_email "#{@system_name}@#{@role_email_domain}"
 
   @type identity :: %{
