@@ -63,7 +63,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   # C'est ce defaut-la qui est tenu ici, a la place des deux litteraux.
   local bad=0
   declare -A sites=(
-    ["$R/fleet/services/lib/module-protocol.sh|PROV_TOKENS_DIR"]='PROV_TOKENS_DIR:=[^}]*'
+    ["$R/fleet/services/lib/module-protocol.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:=[^}]*'
     ["$R/fleet/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
     ["$R/fleet/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
     ["$R/fleet/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'

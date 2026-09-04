@@ -16,7 +16,8 @@ setup() {
   export LCARS_SECRETS_DIR="$BATS_TEST_TMPDIR/run-secrets"; mkdir -p "$LCARS_SECRETS_DIR"
   export LCARS_MODULE_TAG=box-init
   # hors root, le proprietaire demande ne peut pas etre pose : le protocole le dit et continue
-  export LCARS_AUTHORITY_USER="$(id -un)" LCARS_FLEET_GROUP="$(id -gn)"
+  LCARS_AUTHORITY_USER="$(id -un)"; LCARS_FLEET_GROUP="$(id -gn)"
+  export LCARS_AUTHORITY_USER LCARS_FLEET_GROUP
 }
 
 @test "secrets : un montage VIDE ne pose rien et ne se plaint pas" {
@@ -40,7 +41,6 @@ setup() {
 @test "secrets : deja en place = OK, pas de reecriture ; un secret CHANGE se reimporte (rotation)" {
   printf 'tok-1\n' > "$LCARS_SECRETS_DIR/forge_master_token"
   bash "$SUT" secrets >/dev/null
-  local before; before="$(stat -c %Y "$LCARS_PRIVATE_DIR/forge-master.token")"
   run bash "$SUT" secrets
   [ "$status" -eq 0 ]
   [[ "$output" == *"deja en place"* ]]
