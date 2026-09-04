@@ -32,7 +32,8 @@ d'elle-même, sans l'installeur.
   `3` en attente de configuration.
 
 Ce qu'il lit : `LCARS_UID`, `LCARS_ADMIRAL`, `LCARS_SSH_AUTHORIZED_KEYS`, `FORGE_BASE_URL`,
-`LCARS_STORE_ROOT`, `LCARS_SOURCE_DIR`/`LCARS_SOURCE_REMOTE`/`LCARS_SOURCE_REF` — ce que le
+`LCARS_STORE_ROOT`, `LCARS_DECK_OIDC_FILE` (sous le volume `var` : l'état du client OAuth2 survit
+à un conteneur recréé, DI-11), `LCARS_SOURCE_DIR`/`LCARS_SOURCE_REMOTE`/`LCARS_SOURCE_REF` — ce que le
 compose donne au conteneur — et les défauts du protocole pour le reste.
 
 Ce qu'il ne fait pas : les gestes de forge (`../forge.d/`, le minteur `../provision-role-tokens.sh`),

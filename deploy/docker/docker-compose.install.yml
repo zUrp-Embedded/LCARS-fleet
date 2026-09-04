@@ -94,6 +94,12 @@ services:
       # ne s'ouvre pas.
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      # MEME VALEUR QUE `docker-compose.yml` (l'etat dans le volume, DI-11) : Le client OAuth2 du deck (id + secret,
+      # pose par le geste `forge.d/deck-oidc` au boot) vivait sous /etc/lcars, dans le systeme de
+      # fichiers du CONTENEUR : chaque conteneur recree (rebuild, `up` apres un pull) le perdait, et
+      # le geste retirait puis reposait le client à chaque fois. Il vit sous le volume `var`, avec
+      # les jetons. Le poste garde /etc/lcars (le defaut du protocole) : là, /etc persiste.
+      LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une

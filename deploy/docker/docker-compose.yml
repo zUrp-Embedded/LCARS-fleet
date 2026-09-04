@@ -101,6 +101,12 @@ services:
       # par le module ; ce qui se déclare ici, c'est le reste (l'adresse de bind, le nom d'hôte).
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
       LCARS_STORE_ROOT: /var/lib/lcars
+      # ⚖ user 2026-09-04 (Q1, DI-11) : L'ÉTAT DANS LE VOLUME. Le client OAuth2 du deck (id + secret,
+      # posé par le geste `forge.d/deck-oidc` au boot) vivait sous /etc/lcars, dans le système de
+      # fichiers du CONTENEUR : chaque conteneur recréé (rebuild, `up` après un pull) le perdait, et
+      # le geste retirait puis reposait le client à chaque fois. Il vit sous le volume `var`, avec
+      # les jetons. Le poste garde /etc/lcars (le défaut du protocole) : là, /etc persiste.
+      LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
     ports:
       # SSH = la porte d'ADMIN (login-manager). Les listeners fleet restent en loopback DANS le
       # conteneur (frontière = isolation réseau) : on y accède par tunnel SSH.
