@@ -259,7 +259,7 @@ defmodule Fleet.Spawner.Pod do
 
     if first_entry? do
       # 6-041 — SON sujet, pas le global. Le pod ne consomme que des evenements qui portent son
-      # `pod_id` ; s'abonner au sujet principal le faisait reveiller par tout ce qui traverse la
+      # `pod_id` ; s'abonner au sujet principal le ferait reveiller par tout ce qui traverse la
       # fleet pour le jeter aussitot. Le bus adresse (cf. `Bus.pod_topic/1`), le pod ecoute son
       # adresse. Consequence a lire avec : tout `%Fleet.Event{}` qui arrive ici EST pour ce pod.
       :ok = Bus.subscribe(Bus.pod_topic(data.pod_id))

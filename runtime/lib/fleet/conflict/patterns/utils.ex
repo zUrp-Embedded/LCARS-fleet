@@ -2,7 +2,7 @@ defmodule Fleet.Conflict.Patterns.Utils do
   @moduledoc """
   Shared whitespace, quote-aware tokenization, volatile detection, and ordering
   helpers. Quoted whitespace remains data; quote-aware value tokens coexist with
-  the legacy token granularity used to calibrate diff thresholds.
+  the coarse token granularity that calibrates the diff thresholds.
   """
   alias Fleet.Conflict.Score
 

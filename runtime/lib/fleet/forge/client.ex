@@ -800,7 +800,7 @@ defmodule Fleet.Forge.Client do
   # retire tant que la forge ne rend pas le champ.
   #
   # Ce qui EST retirable est la SEQUENTIALITE : ces requetes sont independantes et sans effet de
-  # bord, et les enchainer faisait payer au tick la SOMME des latences la ou le maximum suffit. La
+  # bord, et les enchainer ferait payer au tick la SOMME des latences la ou le maximum suffit. La
   # concurrence est BORNEE parce qu'elles partagent le meme pool de connexions — en ouvrir N
   # echangerait de la lenteur contre de la saturation.
   #

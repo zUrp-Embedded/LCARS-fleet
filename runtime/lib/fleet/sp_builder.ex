@@ -328,7 +328,7 @@ defmodule Fleet.SPBuilder do
        when is_binary(name) and name != "" do
     if Fleet.Slug.valid?(name) do
       # La racine vient du PROFIL : le template de sous-agent d'un role est livre par le catalogue
-      # qui declare ce role. Le chercher dans l'image du premier catalogue rendait
+      # qui declare ce role. Le chercher dans l'image du premier catalogue rendrait
       # `subagent_template_missing` sur un fichier bien present, dans l'autre.
       case fetch_subagent_content(name, cap.catalogue_root) do
         {:ok, content} -> {:ok, "\n<!-- subagent-template:#{name} -->\n" <> content}

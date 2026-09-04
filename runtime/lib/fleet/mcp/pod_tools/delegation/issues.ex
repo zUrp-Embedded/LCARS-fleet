@@ -449,7 +449,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Issues do
   # `:none` VEUT DIRE « MESURE ABSENT », ET UNE FORGE MUETTE NE MESURE RIEN. Rendre `:none` pour les
   # deux — marqueur absent d'un tableau LU, et tableau ILLISIBLE — laisse la creation avoir lieu dans
   # les deux cas, ce qui est le bon arbitrage (poster bat perdre la reponse), mais rend le retour MCP
-  # identique : l'agent ne peut alors pas savoir que son doublon etait possible. Or c'est lui qui
+  # identique : l'agent ne peut alors pas savoir que son doublon est possible. Or c'est lui qui
   # reessaie, et la relecture echoue precisement quand la forge va mal — au moment ou il va rejouer
   # l'appel.
   #

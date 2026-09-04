@@ -11,7 +11,7 @@ defmodule Fleet.SPBuilder.MonkTest do
   # (`cap-profiles/monks/alpha.yaml`…), ARCHIVED in `priv/catalogue/cap_profile/canon/_frozen-monks/` (Memory-X out
   # of the boot loop: must be per-project + system-wide under lcars, not per-fleet). The
   # `resolve_monk_injection/2` code stays in place; re-enable these tests (and re-point the
-  # fixtures) when Memory-X is re-homed. cf. work/backlog.md.
+  # fixtures) when Memory-X is re-homed.
   @moduletag skip:
                "Memory-X frozen (BL) — monk cap-profiles archived; re-enable at the per-project re-home"
 

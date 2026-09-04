@@ -78,9 +78,9 @@ defmodule Fleet.MCP.PodTools.Delegation.ForgeWriter do
   # LE CONTRAT EST CELUI DU CLIENT CANONIQUE, ET IL EST ETROIT : `Fleet.Forge.Client.open_pr/5`
   # rend `{:ok, integer}` — le NUMERO de la PR — dans ses DEUX branches, y compris le 409 (une PR
   # existe deja pour ce couple head→base : le client la retrouve et rend son numero). Un `{:ok,
-  # term()}` laissait un double rendre une map, le double etait vert, et `pr_number/1` en prod
-  # recevait un entier qu'il ne savait pas lire — la reponse MCP portait `"pr" => nil` a chaque
-  # appel. Trouve par la relecture du 2026-08-19.
+  # term()}` laisserait un double rendre une map — double vert, `pr_number/1` en prod recevant un
+  # entier qu'il ne sait pas lire, et une reponse MCP portant `"pr" => nil` a chaque appel (mesure
+  # 2026-08-19).
   @callback open_pr(
               repo :: String.t(),
               head :: String.t(),

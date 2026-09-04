@@ -14,10 +14,8 @@ runtime human, the forge git identity/tokens, and the bounded system-side git wr
 **This file is a map, not the contract.** Each module owns its contract in its own
 `@moduledoc` — read those (`h Fleet.Credentials.Gate` in IEx, or `lib/`). Nothing here is
 restated, only pointed at. The auth-model doctrine (why native claudeDir, the Anthropic
-credential precedence, the `NEVER` invariants) is canonical in the doc lineage
-(`beyond_#4/01_architecture/adr-f-credentials-anthropic-natif.md` and
-`adr-g-launch-subscription.md`) and applied by the spawner's `Fleet.Spawner.Pod.LaunchEnv`
-— this domain does not re-own it.
+credential precedence, the `NEVER` invariants) is applied by the spawner's
+`Fleet.Spawner.Pod.LaunchEnv`, whose `@moduledoc` states it — this domain does not re-own it.
 
 ## Modules
 - `Fleet.Credentials.Gate` — the single spawn-boundary entry point (`validate/1` = login-validity check: is the human logged in to Claude Code? `{:credentials_invalid, _}` on no login); where the claudeDir read physically lives; consumed by `Fleet.Spawner.Pod` (`LaunchEnv`)

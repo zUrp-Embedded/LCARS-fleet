@@ -73,7 +73,7 @@ MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-$PRIVATE_DIR/forge-master.token}"
 SEED_FILE="${LCARS_FORGE_SEED_FILE:-$PRIVATE_DIR/forge-seed.pass}"
 RECIPE_DIR="${LCARS_RECIPE_DIR:-/opt/lcars/services/forge-recipe}"
 # Le repertoire de travail des gestes de structure. Il remonte ICI, avec les autres chemins, parce
-# que le verrou d'apply y vit desormais — et une variable definie plus bas que sa premiere lecture
+# que le verrou d'apply y vit — et une variable definie plus bas que sa premiere lecture
 # ne tient que par l'ordre d'execution.
 CATALOGUE_WORK="${LCARS_CATALOGUE_WORK:-/var/lib/lcars/tofu}"
 # Le nom vit ici parce que ce fichier est ce qui ECRIT le magasin : une adresse appartient a celui
@@ -729,8 +729,8 @@ case "${1:-}" in
   # ⚠ CE VERBE EXISTE POUR QU'AUCUN APPELANT N'AIT A RECOPIER LE DEFAUT. Le nom du compte integre a
   # UN auteur — la ligne `TF_VAR_builtin_human` ci-dessus — et un second litteral ailleurs ne reste
   # d'accord avec elle que jusqu'au jour ou l'un des deux bouge. `48-forge-host` doit poser un mot de
-  # passe sur ce compte : sans porte pour DEMANDER son nom, il ne pouvait le faire que quand
-  # l'operateur l'avait nomme lui-meme, c'est-a-dire jamais dans le cas nominal.
+  # passe sur ce compte : sans porte pour DEMANDER son nom, il ne pourrait le faire que quand
+  # l'operateur l'a nomme lui-meme, c'est-a-dire jamais dans le cas nominal.
   builtin-human) printf "%s\n" "$BUILTIN_HUMAN" ;;
   *) echo "forge-gestures: geste requis (config-token|config-seed|apply|install|runner-token|toolchain-protection|builtin-human)" >&2; exit 1 ;;
 esac

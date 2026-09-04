@@ -195,15 +195,14 @@ resource "gitea_org" "fleet" {
 # privilège suffit à ce que cette recette doit faire. La branch-protection n'est PAS de son
 # ressort — elle se pose PAR DÉPÔT, au moment où le dépôt existe, donc hors provisioning.
 #
-# ⚠ CE CHOIX A UNE CONSÉQUENCE QU'IL N'AVAIT PAS QUAND IL A ÉTÉ ÉCRIT, et elle est mesurée
-# (2026-08-11) : `lcars project migrate` transfère un dépôt d'une org à l'autre, et Gitea exige pour
+# ⚠ CE CHOIX A UNE CONSÉQUENCE MESURÉE (2026-08-11) : `lcars project migrate` transfère un dépôt d'une org à l'autre, et Gitea exige pour
 # ça le PROPRIÉTAIRE de l'org SOURCE — pas l'admin, pas le write.
 #
 #   token système (membre, write)                    -> 403 "user should be the owner of the repo"
 #   même token, ajouté aux Owners de l'org SOURCE    -> 202
 #   Owners de la CIBLE seulement                     -> 403   (seule la source compte)
 #
-# Le moindre privilège ne suffit donc plus à ce que la fleet doit faire, et la recette ne peut pas
+# Le moindre privilège ne suffit donc pas à ce que la fleet doit faire, et la recette ne peut pas
 # le corriger elle-même : `50-forge` n'écrit qu'avec le jeton système ou en basic-auth machine, et
 # le jeton système ne peut gérer une team qu'une fois DÉJÀ propriétaire. La seule identité de classe
 # propriétaire est celle qui lance cet apply. Le provider n'a pas de champ propriétaire sur
@@ -257,12 +256,12 @@ locals {
   # lot, et la team n'a plus de lecteur : mesuré, `web-demo/humans` ne contenait que le compte
   # built-in et `system_starfleet`, jamais un humain réel.
   #
-  # ⚠ ET CE RETRAIT DÉPEND D'UN AUTRE : tant que la forge naissait avec
-  # `DEFAULT_USER_IS_RESTRICTED=true`, l'adhésion à `<catalogue>:humans` était la SEULE chose qui
-  # rendait un catalogue visible à un humain — un compte restreint ne voit que ce qui lui est
-  # explicitement accordé, et mesuré le 2026-08-17 il recevait 404 sur l'org d'un catalogue en étant
-  # connecté, 200 en anonyme. Le drapeau est parti d'abord (`dev/forge-compose.yml`) ; retirer la
-  # team avant lui aurait aveuglé tous les humains sur tous les catalogues.
+  # ⚠ ET CETTE ABSENCE DÉPEND D'UN RÉGLAGE D'INSTANCE : sous `DEFAULT_USER_IS_RESTRICTED=true`,
+  # l'adhésion à `<catalogue>:humans` serait la SEULE chose qui rend un catalogue visible à un
+  # humain — un compte restreint ne voit que ce qui lui est explicitement accordé (mesuré le
+  # 2026-08-17 : 404 sur l'org d'un catalogue en étant connecté, 200 en anonyme). La forge naît sans
+  # ce drapeau, et `50-forge` signale en drift un compte restreint ; le remettre aveuglerait tous les
+  # humains sur tous les catalogues.
   #
   # LA FORME EST UN CONDITIONNEL ET PAS UN MODULE SÉPARÉ, mesuré : un module neuf n'hérite pas de la
   # couche sonde+`import` d'`existing.tf`, donc son premier apply meurt en 409 sur toute forge déjà
@@ -308,7 +307,7 @@ resource "gitea_team" "this" {
 # juge est une propriete du catalogue, pas de cette recette. Les defauts sont ceux du catalogue de
 # reference — un deploiement qui n'apporte rien ne change pas d'un pouce.
 #
-# La REGLE de placement, elle, reste ici et se derive (`Fleet.Application.CatalogueRoles.tfvars/1`) :
+# La REGLE de placement, elle, reste ici et se derive (`Fleet.Roster.tfvars/1`) :
 # un siege reserve va en `externals`, un role qui ne fait que juger (`brief_kind: judge` sans
 # capacite) en `judges`, tout le reste en `writers`. Un role peut n'etre dans AUCUNE des trois et
 # garder son compte : `roles` est le roster des comptes, ces trois-ci sont des placements.
@@ -382,8 +381,8 @@ resource "gitea_team_membership" "human" {
 # ⚠ LE COMPTE SYSTÈME N'EST MEMBRE D'AUCUNE TEAM, ET IL NE DOIT PAS LE DEVENIR.
 #
 # `fleet:humans` répond « qui est une personne de cette fleet ». Une liste qui contient son propre
-# lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple. L'adhésion qui
-# vivait ici (le système dans `humans`) faisait exactement ça, pour un droit qu'il a déjà.
+# lecteur n'est plus un filtre d'enrôlement — c'est une liste que le système peuple. Une adhésion du
+# système à `humans` ferait exactement ça, pour un droit qu'il a déjà.
 #
 # LA PROPRIÉTÉ DE L'ORG SUFFIT À LIRE LES TEAMS, et c'est ce qu'il faut savoir avant de « réparer »
 # une lecture en ajoutant une adhésion : `gitea_team_membership.owner` (plus bas) met le compte

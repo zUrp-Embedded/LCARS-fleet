@@ -77,16 +77,11 @@ defmodule Fleet.API.ReadinessTest do
     end
 
     test "operational when real backend wired" do
-      # ⚠ CE TEST CABLAIT `Fleet.Coord`, SUPPRIME LE 2026-08-19 — et il passait quand meme, parce que
-      # la sonde ne teste qu'une INEGALITE (`backend == NoOpDispatcher`, `readiness.ex:77`).
-      # N'importe quel atome le rendait vert. Un test dont le nom promet « real backend wired » et
-      # qui accepte un module inexistant ne prouve pas ce qu'il annonce.
-      #
-      # Le fichier le SAVAIT : il ecrit trente lignes plus haut « coord.backend est parti avec
-      # Fleet.Coord — brouette 2026-08-19 », puis continuait de le cabler ici.
-      #
-      # Cable sur le vrai backend, et on assert le NOM en plus de l'etat : la sonde doit rapporter
-      # CE QUI TOURNE, pas seulement « pas le NoOp ».
+      # ⚠ CABLE SUR LE VRAI BACKEND, ET LE NOM EST ASSERTE EN PLUS DE L'ETAT : la sonde doit
+      # rapporter CE QUI TOURNE, pas seulement « pas le NoOp ». Une sonde qui ne testerait qu'une
+      # INEGALITE (`backend != NoOpDispatcher`) passerait sur n'importe quel atome — un module
+      # inexistant compris (mesure 2026-08-19 sur un `Fleet.Coord` supprime) — et un test dont le
+      # nom promet « real backend wired » ne prouverait pas ce qu'il annonce.
       Application.put_env(
         :lcars_fleet,
         :admiral_shutdown_dispatcher,

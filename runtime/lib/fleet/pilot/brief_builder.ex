@@ -142,7 +142,7 @@ defmodule Fleet.Pilot.BriefBuilder do
   # ⚠ ET LE REMEDE N'EST PAS LE FAIL-CLOSED, l'asymetrie avec le juge etant le point : un juge a qui
   # l'on donne la mauvaise matiere rend un VERDICT FAUX, donc il ne doit pas tourner ; un producteur
   # prive de son retour travaille seulement MOINS BIEN. On avance, et on rend le trou VISIBLE des
-  # deux cotes — le pod ne lit pas nos logs, et c'est l'absence inexpliquee qui rendait ce defaut muet.
+  # deux cotes — le pod ne lit pas nos logs, et c'est l'absence inexpliquee qui rend ce defaut muet.
   defp render_rework_feedback(forge, repo, pr, forge_opts) do
     case forge.change_request_feedback(repo, pr, forge_opts) do
       {:ok, [_ | _] = feedbacks} ->

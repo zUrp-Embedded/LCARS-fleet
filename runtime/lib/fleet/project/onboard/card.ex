@@ -49,8 +49,8 @@ defmodule Fleet.Project.Onboard.Card do
   quelqu'un, il ne se joue pas par accident.
 
   ⚠ **SUR `main`, PAS SUR UNE BRANCHE DE PR.** Le rail de `main` est ce dont héritent les branches
-  suivantes ; une PR déjà ouverte se répare par son producteur, à qui le brief de rework nomme
-  désormais le job en échec. Pousser sur la branche d'un pod vivant courserait avec lui.
+  suivantes ; une PR déjà ouverte se répare par son producteur, à qui le brief de rework nomme le
+  job en échec. Pousser sur la branche d'un pod vivant courserait avec lui.
 
   `opts` : `:justification` (requise), `:reset_by` (le rôle qui agit).
   Rend `%{repo:, outcome: :reset | :unchanged, files:}`.

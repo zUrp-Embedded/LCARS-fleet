@@ -177,8 +177,8 @@ defmodule Fleet.MCP.PodTools do
     # indépendants (probe-rails PR#34 puis PR#37) : trois verdicts rendus, trois gravures en prose,
     # ZÉRO `details.findings_v1`. La consigne existe pourtant — `core/judge-verdict` la compose
     # dans le SP de chaque juge — mais elle vit dans un bloc de prose lu au démarrage, à des
-    # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en agissant, c'est ce schéma, et il
-    # disait « un objet ». Un objet, c'est tout ce qu'il rendait.
+    # centaines de lignes du moment où l'agent remplit CET appel. Ce que l'agent a sous les yeux en
+    # agissant, c'est ce schéma : un `object` nu dit « un objet », et un objet est tout ce qu'il rend.
     #
     # Le schéma reste PERMISSIF (aucun `required` ajouté, aucun `additionalProperties: false`) :
     # `submit_result` sert tous les rôles, et la forme d'un livrable de producteur n'est pas celle

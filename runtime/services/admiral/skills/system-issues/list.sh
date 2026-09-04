@@ -34,8 +34,8 @@ SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}
 AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
-# `toolchain.branch_single_source`. Reglable a moitie, il faisait relever une boite aux lettres
-# pendant que les demandes atterrissaient dans une autre.
+# `toolchain.branch_single_source`. Reglable a moitie, il ferait relever une boite aux lettres
+# pendant que les demandes atterrissent dans une autre.
 BRANCH="tool_request"
 
 [[ -n "$FORGE_URL" ]] || { echo "system-issues: URL de forge inconnue (LCARS_FORGE_URL ou tokens/forge.url)" >&2; exit 1; }

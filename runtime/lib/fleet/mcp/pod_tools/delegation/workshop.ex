@@ -4,9 +4,9 @@ defmodule Fleet.MCP.PodTools.Delegation.Workshop do
   workspace inside it.
 
   UNE clef pour la racine, tous ses lecteurs. Deux clefs seraient deux facons de brancher une
-  moitie du rail et pas l'autre. Le chemin d'un lot etait recalcule a l'identique dans le rail
-  scratchpad (`Path.join(workshop_root(), Layout.project_name(repo))`) : deux copies d'un meme
-  chemin, dont une seule aurait suivi un changement de layout.
+  moitie du rail et pas l'autre ; un chemin de lot recalcule dans le rail scratchpad
+  (`Path.join(workshop_root(), Layout.project_name(repo))`) serait une seconde copie du meme chemin,
+  dont une seule suivrait un changement de layout.
   """
 
   # The lot is sourced from the WORKSHOP face — a layout fact, not a privilege of the calling role:

@@ -355,8 +355,9 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # et joue le convergeur.
   #
   # ⚠ « SON ARGUMENT A ÉTÉ SIGNÉ » N'EST PAS UNE PROPRIÉTÉ DE CET APPEL : le convergeur est
-  # atteignable par d'autres chemins que celui-ci (tout `%fleet`, que `human-converger` peuple
-  # depuis la team `humans` de la forge). La propriété est tenue EN AVAL : le convergeur refuse
+  # atteignable par d'autres chemins que celui-ci (`toolchain.sock` est en `0660` pour le groupe
+  # `fleet`, que `human-converger` peuple depuis la team `humans` de la forge). La propriété est
+  # tenue EN AVAL : le convergeur refuse
   # tout SHA qui n'est pas la tête de `tool_request`. C'est là qu'elle vit, et là qu'elle se casse
   # si on la retire.
   defp default_converger(_head, _opts) do

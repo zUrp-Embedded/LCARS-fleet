@@ -140,8 +140,8 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
     end
   end
 
-  # On compte les TITRES, c'est-a-dire les notes. Compter les lignes rendait le meme nombre tant
-  # qu'une note valait une ligne ; en blocs, il rendrait cinq fois trop.
+  # On compte les TITRES, c'est-a-dire les notes. Compter les lignes rend le meme nombre tant
+  # qu'une note vaut une ligne ; en blocs, cinq fois trop.
   defp scratch_receipt(path) do
     notes =
       case File.read(path) do

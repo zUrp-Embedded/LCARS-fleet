@@ -30,7 +30,7 @@ defmodule Fleet.Application do
       # concern for the same reason, on the foundation that resolves it.
       Fleet.Catalogue,
       # L'arete carte->role est verifiee au boot (cf. `start/2`) : la carte appartient a Workflow,
-      # le role a CapProfile, et le lien entre les deux n'avait pas de proprietaire. Le boot est
+      # le role a CapProfile, et le lien entre les deux n'a pas d'autre proprietaire. Le boot est
       # l'endroit ou les deux plans se rencontrent, comme pour les deux gels d'images.
       Fleet.Workflow,
       # DELIBERATE WIDENING, and it must be declared rather than left implicit: the catalogue

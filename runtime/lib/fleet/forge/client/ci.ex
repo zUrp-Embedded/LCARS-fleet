@@ -83,9 +83,9 @@ defmodule Fleet.Forge.Client.CI do
   #
   # Mesure du 2026-08-08 sur Gitea 1.26.1 : l'ordre par defaut de `/commits/{ref}/statuses` est
   # OLDEST-first, et des cinq valeurs contractuelles de `sort` seule `leastindex` rend le plus
-  # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui gardait la
-  # PREMIERE occurrence par contexte gardait donc la plus ANCIENNE : sur un contexte pose
-  # `success` puis `failure`, `commit_ci_state` rendait `{:ok, :success}` — la porte de merge
+  # recent en premier — son nom dit le contraire de ce qu'elle fait. Une reduction qui garderait la
+  # PREMIERE occurrence par contexte garderait donc la plus ANCIENNE : sur un contexte pose
+  # `success` puis `failure`, `commit_ci_state` rendrait `{:ok, :success}` — la porte de merge
   # lisant vert sur un commit rouge.
   #
   # `status`, jamais `state` : le contrat porte `state` sur CombinedStatus (l'agregat), `status`

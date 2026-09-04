@@ -782,7 +782,7 @@ cmd_approve() {
 
   local cli; cli="$(_dest_cli "$host")"
   # ⚠ LA SONDE N'EST DELIBEREMENT PAS PRISE ICI : entre ce point et son usage il y a un clone et une
-  # reecriture d'historique complete, 2 a 10 minutes. Un jeton qui expire dans cette fenetre faisait
+  # reecriture d'historique complete, 2 a 10 minutes. Un jeton qui expire dans cette fenetre ferait
   # echouer la creation sur un 401 brut. `have_cli` est lu au moment ou il decide quelque chose.
   local have_cli
   export GIT_TERMINAL_PROMPT=0

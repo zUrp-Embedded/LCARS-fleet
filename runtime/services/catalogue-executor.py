@@ -173,7 +173,7 @@ def forge_is_admin(login):
         # ⚠ 401/403 EST UNE REPONSE, ET ELLE PARLE DE NOUS. La forge a repondu, clairement : le
         # jeton qu'on lui presente ne vaut rien -- revoque, expire, ou jamais valide. Le ranger dans
         # « pas de reponse » ferait reessayer l'operateur sur une forge qui vient de refuser, et
-        # `HTTPError` DERIVE de `URLError`, donc c'est exactement ce qui se passait.
+        # `HTTPError` DERIVE de `URLError` : un `except URLError` seul l'y rangerait.
         if exc.code in (401, 403):
             raise NoAuthority(f"la forge REFUSE le jeton de cette boite (HTTP {exc.code})") from exc
         raise
@@ -435,7 +435,7 @@ def serve_forever(srv, handler=None):
 
 def main():
     # ⚠ LE GARDE NOMME L'EXIGENCE, PAS LE MECANISME : elle est « je peux OUVRIR le jeton », jamais
-    # « je suis root » — root n'etait que le moyen le moins cher d'y arriver. Enonce ainsi, le garde
+    # « je suis root » — root n'est que le moyen le moins cher d'y arriver. Enonce ainsi, le garde
     # refuse tot et juste sous n'importe quel uid, et ne devient pas faux le jour ou le service
     # descend de root.
     try:

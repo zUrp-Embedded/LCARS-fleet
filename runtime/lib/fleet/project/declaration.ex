@@ -176,10 +176,10 @@ defmodule Fleet.Project.Declaration do
     # refus enumerait alors les cartes de `fleet`, ou celle demandee ne figure evidemment pas :
     # un message qui accuse le NOM alors que ce qui manque est l'ARGUMENT VOISIN.
     #
-    # L'agent a bien travaille — il a verifie qu'aucun depot n'avait ete cree a moitie, il a
-    # refuse de contourner, et il a rendu la main en nommant deux sorties. Il a seulement conclu
-    # « la creation ne sait resoudre que les cartes de fleet », ce qui est faux : elle resout dans
-    # le catalogue du PROJET, et le projet avait atterri dans le mauvais.
+    # L'agent qui lit ce refus conclut « la creation ne sait resoudre que les cartes de fleet »,
+    # ce qui est faux : elle resout dans le catalogue du PROJET, et c'est le projet qui a atterri
+    # dans le mauvais. Le meme agent a bien travaille par ailleurs (aucun depot cree a moitie, pas
+    # de contournement, deux sorties nommees) — c'est le message qui l'a egare.
     #
     # On ne devine PAS a sa place — le catalogue fixe l'org du projet POUR SA VIE, donc choisir
     # pour lui serait le pire des services. On NOMME : la carte existe la-bas, voici l'argument.
