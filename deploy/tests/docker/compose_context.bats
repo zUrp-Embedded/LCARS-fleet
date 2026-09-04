@@ -34,6 +34,6 @@ setup() {
     [[ -e "$ROOT/$src" ]] || { echo "COPY $src : absent sous $ROOT" >&2; bad=1; }
   done < <(grep -vE '^\s*#' "$DOCKER/Dockerfile" | grep -E '^COPY ' | grep -v -- '--from=' \
            | sed -E 's/^COPY\s+//; s/--[a-z-]+(=\S+)?\s+//g' | awk '{ for (i = 1; i < NF; i++) print $i }' \
-           | sed 's/\[n\]$//' | sort -u)
+           | sort -u)
   [ "$bad" -eq 0 ]
 }
