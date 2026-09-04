@@ -195,7 +195,7 @@ def instructed(cmd, path, text):
                        r"[A-Za-z0-9_|\- \[\]]*\}")
 
     # Une citation doit etre une INVOCATION, pas une mention, et la regle vaut PARTOUT — dans le
-    # README comme dans l'aide du script. `` `fleet` `` designe un groupe unix, `` `50-forge` `` un
+    # README comme dans l'aide du script. `` `fleet` `` designe un groupe unix, `` `63-forge-tokens` `` un
     # fichier : les accepter laissait passer des sous-commandes `fleet` et `forge` non documentees
     # (mesure : 2 des 4 injectees, puis 1 apres avoir resserre le seul README). Une invocation a un
     # token DEVANT elle — `` `<module> check|apply` ``, `` `fleet_v2 start` `` — donc la commande ne

@@ -164,7 +164,7 @@ check() {
     # `docker_endpoint` rend 1 dans les DEUX cas). Séparer les faits sans séparer les verdicts est
     # tout l'objet de ce module : mesurer plus finement n'autorise pas à refuser autrement.
     if [[ "$PROV_SUBSTRATE" == "wsl" ]]; then
-      p_fail "$PROV_DOCKER_WHY — et sans docker la forge de LCARS n'a AUCUNE autre forme (c'est un conteneur) : 50-forge et 55-deck-oidc ne convergeront JAMAIS sur cette machine, le poste aurait un runtime qui ne peut pas travailler"
+      p_fail "$PROV_DOCKER_WHY — et sans docker la forge de LCARS n'a AUCUNE autre forme (c'est un conteneur) : 63-forge-tokens et 66-deck-oidc ne convergeront JAMAIS sur cette machine, le poste aurait un runtime qui ne peut pas travailler"
     else
       # Hors WSL le refus n'a jamais existé : le rail poste POSE docker sur un linux déclaré, et sur
       # docker on est déjà dedans. Le fait suffit, la porte en tire ce qu'elle doit.

@@ -14,7 +14,7 @@
 # cran plus haut. Ici, la sequence complete.
 #
 # ─── LES QUATRE PIEGES QUE CE SCRIPT DESAMORCE, ET QU'UN LECTEUR NE DEVINE PAS ──────────────────
-# 2. LE SEMIS EXIGE UN SECOND PASSAGE. `50-forge` minte les role-tokens au boot, a partir du seed
+# 2. LE SEMIS EXIGE UN SECOND PASSAGE. `63-forge-tokens` minte les role-tokens au boot, a partir du seed
 #    que bootstrap vient de poser — donc APRES ce boot-la. Le premier passage pose la structure et
 #    saute le semis en le DISANT ; on relance la boite ; le second passage seme. Deux passages, pas
 #    une boucle de retry : chacun est idempotent et le deuxieme dit la verite sur le premier.
@@ -324,7 +324,7 @@ env LCARS_IMAGE="$IMAGE" \
     `# L'ENTREE ANNONCEE. Le deck derive son redirect_uri du Host de la requete (console-deck.py) et` \
     `# OAuth2 compare EXACTEMENT : une entree non declaree finit sur un refus APRES identification.` \
     `# Les deux ecritures de la loopback (127.0.0.1 ET localhost — deux ORIGINES pour un meme point` \
-    `# d'ecoute) sont semees par 55-deck-oidc ; ici on ne nomme que celle qu'on annonce.` \
+    `# d'ecoute) sont semees par 66-deck-oidc ; ici on ne nomme que celle qu'on annonce.` \
     LCARS_DECK_ORIGINS="http://${ADVERTISE}:${DECK_PORT}" \
     LCARS_DEVFORGE_NETWORK="$FORGE_NET" \
     "$DOCKER_BIN" compose "${COMPOSE_ARGS[@]}" create lcars \
@@ -369,7 +369,7 @@ DOCKER_BIN="$DOCKER_BIN" "$HERE/bench-forge-bootstrap.sh" \
     ${BOOTSTRAP_EXTRA[@]+"${BOOTSTRAP_EXTRA[@]}"} || BOOT_RC=$?
 [[ "$BOOT_RC" -eq 0 ]] || die "amorcage passe 1 en echec (bench-forge-bootstrap.sh rend $BOOT_RC — sa derniere ligne ci-dessus nomme l'etape)" 4
 
-say "relance de la boite pour que 50-forge minte les role-tokens"
+say "relance de la boite pour que 63-forge-tokens minte les role-tokens"
 "$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
 for _ in $(seq 1 90); do
   [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] && break

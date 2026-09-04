@@ -56,7 +56,7 @@ PROVISION_LIB_LOADED=1
 # Le reseau que compose cree pour un projet sans `networks:` explicite. Le runner le REJOINT : depuis
 # un conteneur, l'adresse publiee de la forge (`127.0.0.1:<port>`) designe ce conteneur-la.
 : "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
-# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `50-forge` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
+# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `63-forge-tokens` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
 # le defaut du `.sh`. Un role absent ICI = pas de token sur une fleet fraiche = rail ops en
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
@@ -74,7 +74,7 @@ PROVISION_LIB_LOADED=1
 # La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck.
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
 # LE FICHIER EST LE SEUL CANAL ENTRE MODULES : ils sont des PROCESSUS, donc `48-forge-host` ne peut
-# rien exporter vers `50-forge`. Il écrit son adresse, on la relit ici.
+# rien exporter vers `63-forge-tokens`. Il écrit son adresse, on la relit ici.
 # En conteneur ce fichier n'existe pas : l'environnement du compose gagne.
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
@@ -1120,7 +1120,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   unmeasurable  on ne peut meme pas conclure : un ancetre n'est pas traversable d'ici
 #
 # ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Mesure du 2026-09-01 sur le banc
-# 2004 : `55-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
+# 2004 : `66-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
 # parfaitement present — `0640 root:lcars-system`, que l'appelant ne peut pas OUVRIR mais peut
 # parfaitement CONSTATER. Le test de lisibilite tenait lieu de test d'existence, et le doctor
 # declarait non conforme une machine qui l'etait.
@@ -1364,15 +1364,6 @@ prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la cop
   [[ "$(repo_root)" == "${PROV_ROOT}" ]]
 }
 
-prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE, ou rien (rc 1)
-  local c
-  for c in "${PROV_RELEASE_BIN:-}" \
-           "$(repo_root)/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-           "${PROV_PREFIX:-}/rel/lcars_fleet/bin/lcars_fleet"; do
-    [[ -n "$c" && -x "$c" ]] && { printf '%s\n' "$c"; return 0; }
-  done
-  return 1
-}
 
 prov_roles() {
   local out="$PROV_ROLES" root
@@ -1380,7 +1371,7 @@ prov_roles() {
   # ⚠ LES PORTES OUTIL VIVENT DANS L'ENTRYPOINT, ET IL N'EST PAS AU MEME ENDROIT SUR LES DEUX RAILS :
   # `/opt/lcars/entrypoint.sh` dans l'image, `<racine>/deploy/docker/entrypoint.sh` sur un poste
   # (62-runtime-helpers l'exclut de ses auxiliaires et embarque `deploy/` entier). Un seul chemin
-  # ici rendait le roster des catalogues installes VIDE sur tout poste : `50-forge` ne mintait que
+  # ici rendait le roster des catalogues installes VIDE sur tout poste : `63-forge-tokens` ne mintait que
   # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
   # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
   # copie posee est 0644.

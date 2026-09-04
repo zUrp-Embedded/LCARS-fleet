@@ -223,9 +223,9 @@ ensure_ops_repo() { # $1=org  $2=jeton master
   if [[ "$code" == "200" ]]; then
     echo "forge-gestures: depot ops $repo cree (auto_init, branche main)"
   else
-    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `52-ops-branch` le
+    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `65-ops-branch` le
     # dira en derive au passage suivant — ce qui est exactement son travail.
-    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 52-ops-branch le dira en derive" >&2
+    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 65-ops-branch le dira en derive" >&2
   fi
   return 0
 }

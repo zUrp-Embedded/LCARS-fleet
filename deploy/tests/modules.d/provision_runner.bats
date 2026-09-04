@@ -203,7 +203,7 @@ EOF
 # ⚠ CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort 1
 # sur drift, et le runner mappe tout non-zero d'un `apply:apply` en echec — ce chemin etait deja
 # juste, MESURE. Le defaut vit un cran a cote : dans les modules qui rendent un verdict d'APPLY,
-# c'est-a-dire `50-forge` et `55-deck-oidc`.
+# c'est-a-dire `63-forge-tokens` et `66-deck-oidc`.
 
 # Un module qui utilise la VRAIE lib (p_drift/p_ok + les verdicts), pas un `exit` code en dur :
 # c'est la chaine module→lib→runner qui est sous test, pas une constante.
@@ -512,7 +512,7 @@ EOF
 @test "cible : sous WSL, docker qui ne repond pas est un REFUS — pas une derive" {
   # ⚖ ARBITRAGE USER 2026-08-18 : « ça, on refuse. docker-desktop c'est un clic. »
   # Une DERIVE dit « pas tenu, et ce rail peut le tenir ». Ici il ne peut pas : la forge est un
-  # conteneur, il n'en existe aucune autre forme, donc 50-forge et 55-deck-oidc ne convergeront
+  # conteneur, il n'en existe aucune autre forme, donc 63-forge-tokens et 66-deck-oidc ne convergeront
   # JAMAIS. Installer un runtime qui ne peut pas travailler, c'est livrer un objet qui a l'air pose.
   #
   # ⚠ CE TEMOIN EPINGLAIT LE MOT « docker absent », ET CE MOT ETAIT LE DEFAUT. La sonde testait
@@ -596,14 +596,14 @@ EOF
   [[ "$output" == *"aucune autre forme"* ]]
 }
 
-@test "48-forge-host : il tourne AVANT 50-forge — l'ordre est le prefixe, et il porte le sens" {
-  # 50-forge SONDE une forge et minte contre elle ; 48 la fait exister. L'inverse rendrait la
+@test "48-forge-host : il tourne AVANT 63-forge-tokens — l'ordre est le prefixe, et il porte le sens" {
+  # 63-forge-tokens SONDE une forge et minte contre elle ; 48 la fait exister. L'inverse rendrait la
   # premiere passe systematiquement en derive sur une machine neuve.
-  ls "$BATS_TEST_DIRNAME/../../modules.d/" | grep -E "^(48-forge-host|50-forge)\.sh$" | sort > "$BATS_TEST_TMPDIR/ordre"
+  ls "$BATS_TEST_DIRNAME/../../modules.d/" | grep -E "^(48-forge-host|63-forge-tokens)\.sh$" | sort > "$BATS_TEST_TMPDIR/ordre"
   [ "$(head -n1 "$BATS_TEST_TMPDIR/ordre")" = "48-forge-host.sh" ]
 }
 
-@test "48-forge-host : la structure ne passe JAMAIS par une boite LCARS vivante" {
+@test "61-forge-structure : la structure ne passe JAMAIS par une boite LCARS vivante" {
   # ⚖ « reconstruire et relancer un LCARS en conteneur pour tester celui qu'on vient d'installer
   # nativement » — c'est ce que ce module evite, et cette regle-la n'a pas bouge.
   #
@@ -611,8 +611,8 @@ EOF
   # c'est-a-dire un run TRANSITOIRE d'une image de 1,18 Go batie pour ce seul appel (⚖ user
   # 2026-08-22). Le conteneur jetable etait une facon d'eviter la boite vivante ; en appeler le geste
   # directement en est une autre, plus courte. La regle survit, son implementation non.
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  local code; code="$BATS_TEST_TMPDIR/48-code.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
+  local code; code="$BATS_TEST_TMPDIR/61-code.sh"
   grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
   # la structure vient du GESTE, joue sur la machine
   grep -q -- 'forge-gestures.sh" apply' "$code"
@@ -623,7 +623,7 @@ EOF
   grep -q '"forge-apply"' "$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
 }
 
-@test "48-forge-host : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
+@test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
   # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens` a donne au conteneur
   # un dossier VIDE, et le geste a repondu « la boite ne detient pas ce qu'il faut » en nommant des
   # fichiers qui existaient a trente centimetres. Le daemon vit dans une autre VM : un chemin de
@@ -633,8 +633,8 @@ EOF
   # gravait la forme d'un remede au lieu du mal. Or ce mal n'existait QUE parce qu'on avait choisi le
   # conteneur : sur la machine, les fichiers sont deja la et rien ne traverse. La mesure reste
   # inscrite ici parce qu'elle redeviendrait vraie le jour ou quelqu'un remet un conteneur.
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  local code; code="$BATS_TEST_TMPDIR/48-code2.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
+  local code; code="$BATS_TEST_TMPDIR/61-code2.sh"
   grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
   # aucun montage, d'aucune sorte : ni chemin d'hote, ni volume nomme
   refute grep -qE -- '\-v "' "$code"
@@ -647,7 +647,7 @@ EOF
 
 @test "48-forge-host : la forge ANNONCE son adresse — les modules sont des processus" {
   # Mesure du 2026-08-18 : une install qui venait de monter une forge parfaitement vivante rendait
-  # « FORGE_BASE_URL/PROV_FORGE_URL non pose » sur 50-forge ET 55-deck-oidc. `48` ne peut rien
+  # « FORGE_BASE_URL/PROV_FORGE_URL non pose » sur 63-forge-tokens ET 66-deck-oidc. `48` ne peut rien
   # exporter vers `50` : ce sont deux shells. Il ecrit donc l'adresse, et la lib la relit.
   MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
   LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"

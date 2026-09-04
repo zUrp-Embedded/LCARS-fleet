@@ -85,7 +85,7 @@ check_ci() {
   # l'operateur d'une install par ailleurs saine etait un diagnostic FAUX sur une forge qui porte
   # trois runners.
   #
-  # Le rail sait deja faire, a trois rangs d'ici : `50-forge.sh:250-259` sonde le MEME endpoint et
+  # Le rail sait deja faire, a trois rangs d'ici : `63-forge-tokens.sh:250-259` sonde le MEME endpoint et
   # separe les deux cas — `-fsS`, puis `[[ -n "$body" ]] || p_warn "… rien n'est conclu"`. Et
   # `accept` possede deja le troisieme etat qu'il fallait emettre : `skip`, en tete de ce fichier.
   local code

@@ -37,6 +37,10 @@ PACKAGES=(
   # en a besoin pour provisionner ce systeme »), et `workstation` s'escalade par `exec sudo`. Une
   # ligne sans raison finit par etre retiree par quelqu'un qui cherche a alleger.
   util-linux-extra sudo less bash-completion
+  # procps : `pgrep`/`pkill` — lus par 60-deploy (fleet debout ?), le convergeur d'humains (revocation)
+  # et les sondes de 64. Il vivait dans l'outillage du GATE de 60 ; le gate ne se joue plus a
+  # l'install (DI-07), le besoin runtime, lui, reste.
+  procps
   # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
   # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.
   ttyd

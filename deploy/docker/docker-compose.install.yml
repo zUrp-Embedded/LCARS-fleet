@@ -90,7 +90,7 @@ services:
       # celle que le SERVEUR compose ; dans un conteneur c'est un nom de service, qu'aucune machine
       # ne resout depuis l'exterieur. La porte du deck envoie le navigateur ICI pour s'identifier,
       # donc une valeur interne rend l'identification impossible depuis tout autre poste. Vide = on
-      # retombe sur l'interne, et `55-deck-oidc` le DIT en drift plutot que de poser une porte qui
+      # retombe sur l'interne, et `66-deck-oidc` le DIT en drift plutot que de poser une porte qui
       # ne s'ouvre pas.
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"

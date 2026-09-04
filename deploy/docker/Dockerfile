@@ -22,13 +22,12 @@ ARG TARGETARCH
 # install.sh fait un chgrp fleet best-effort sur le prefix : le groupe doit exister au build
 # (le runtime stage le recrée avec le MÊME gid — contrat entre stages).
 # (Contrat entre stages : uid 1000 = l'uid par défaut de l'humain du conteneur ; gid 2000 = fleet.)
-# Outillage du GATE : deploy/lib/deploy-release.sh lance `mix gate`, dont shell_gate exige python3 (test du
-# bridge MCP), bats + git (tests hors-mix) — et REFUSE de les sauter en silence
-# (BATS_MISSING_FATAL=1 posé par mix.exs). S'y ajoute LE MONDE QUE CES TESTS EXERCENT : les bats
-# des launchers vérifient les refus de bwrap_launch dans l'ordre (bwrap → tmux → vendor → …), donc
-# un stage sans tmux/bubblewrap fait échouer le script trop TÔT et rougit 62 cas qui n'ont rien à
-# voir. Un stage build qui ne peut pas jouer le gate entier ne doit pas produire d'image : on
-# outille le stage plutôt que d'affaiblir le gate. (Liste = celle de 10-packages + les 2 du gate.)
+# ⚠ CE STAGE NE JOUE PAS LE GATE, ET NE L'A PLUS JOUÉ DEPUIS LONGTEMPS : `deploy-release.sh` y est
+# appelé avec `LCARS_INSTALL_SKIP_GATE=1` (plus bas), l'attestation vient du paquet ou de la CI.
+# Le commentaire qui vivait ici décrivait un stage « outillé pour jouer le gate entier » — faux
+# depuis que le gate a quitté le build. Les paquets restent ceux de 10-packages (le socle des pods,
+# tmux/bubblewrap compris) plus ce que la compilation exige ; `bats` et `python3-pytest` n'y ont
+# plus d'objet et sont retirés (⚖ user 2026-09-04, DI-07 : l'install ne re-atteste pas la source).
 # ⚠ LA TOOLCHAIN ENTRE ICI PAR APT, ET C'EST LE MÊME GESTE QUE `15-toolchain` SUR UN POSTE.
 # ⚠ ET L'UID 1000 EST DÉJÀ PRIS DANS LA BASE : `ubuntu:26.04` y pose un humain « ubuntu ». Cet uid
 # est le contrat déclaré au-dessus, et les caches BuildKit du stage suivant le montent EN DUR
@@ -39,7 +38,7 @@ ARG TARGETARCH
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        erlang elixir \
-       tmux bubblewrap git curl jq unzip ca-certificates python3 python3-pytest bats procps \
+       tmux bubblewrap git curl jq unzip ca-certificates python3 procps \
     && rm -rf /var/lib/apt/lists/* \
     && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \

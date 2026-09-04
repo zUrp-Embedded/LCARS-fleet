@@ -148,7 +148,7 @@ printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-g
     "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
   || die "apply de la structure en echec dans $BOX (rejoue-le : docker exec -u root $BOX /opt/lcars/forge-gestures.sh apply)" 4
 say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"
-say "→ relance la boite (docker restart $BOX) pour que 50-forge minte les role-tokens"
+say "→ relance la boite (docker restart $BOX) pour que 63-forge-tokens minte les role-tokens"
 
 # APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
 if [[ -n "$ADMIN_TOKEN" ]]; then

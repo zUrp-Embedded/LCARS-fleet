@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/50-forge.sh
+# SOURCE: deploy/modules.d/63-forge-tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — forge : SONDE de la structure (territoire OpenTofu) + jambe tokens (A4)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 45-catalogues 48-forge-host
+# AFTER: 45-catalogues 48-forge-host 61-forge-structure
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -408,7 +408,7 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 50-forge.sh <check|apply>}" in
+case "${1:?usage: 63-forge-tokens.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

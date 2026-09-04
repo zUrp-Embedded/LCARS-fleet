@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/modules.d/52-ops-branch.bats
+# SOURCE: deploy/tests/modules.d/65-ops-branch.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
-# STATUS: bats tests for 52-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »
+# STATUS: bats tests for 65-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »
 #
 # CE QUE CE MODULE POSE. Une branche ORPHELINE sur le depot ops : la boite aux lettres ou un pod
 # depose sa demande d'outillage et ou un humain signe. Aucune API Gitea ne sait creer un commit sans
@@ -32,7 +32,7 @@
 load ../refute
 
 setup() {
-  MODULE="$BATS_TEST_DIRNAME/../../modules.d/52-ops-branch.sh"
+  MODULE="$BATS_TEST_DIRNAME/../../modules.d/65-ops-branch.sh"
   [ -f "$MODULE" ]
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
@@ -67,7 +67,7 @@ EOF
   [[ "$output" == *"DRIFT"* ]]
   [[ "$output" == *"pas encore"* ]]
   # Le message dit QUI le posera et QUAND ca se fermera — sans ca, « pas encore » est une excuse.
-  [[ "$output" == *"50-forge"* ]]
+  [[ "$output" == *"63-forge-tokens"* ]]
   [[ "$output" == *"convergence suivante"* ]]
 }
 
@@ -129,10 +129,10 @@ EOF
   # vert. C'est rc 2, il s'imprime DRIFT, il remonte dans le bilan, et la porte le nomme desormais
   # (« APPLIQUE, avec DRIFT RESIDUEL »). Ce que l'ancien verdict produisait, en revanche, etait
   # concret : sur une machine dediee a froid la forge n'existe PAS encore — `48-forge-host` la
-  # monte — et ses deux voisins immediats, `50-forge` et `55-deck-oidc`, derivent sur cette cause
+  # monte — et ses deux voisins immediats, `63-forge-tokens` et `66-deck-oidc`, derivent sur cette cause
   # exacte. Ce module seul rendait 1, donc l'apply entier rendait 1, donc l'installation etait
   # declaree EN ECHEC alors qu'il manquait un geste. Mesure du 2026-08-21 :
-  #   DRIFT 48-forge-host · DRIFT 50-forge · **FAIL 52-ops-branch** · DRIFT 55-deck-oidc
+  #   DRIFT 48-forge-host · DRIFT 63-forge-tokens · **FAIL 65-ops-branch** · DRIFT 66-deck-oidc
   cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 exit 7
@@ -179,7 +179,7 @@ EOF
   code | grep -q 'ensure_ops_repo()'
   # il est APPELE dans la passe d'apply, pas seulement defini
   code | sed -n '/^cmd_apply()/,/^}/p' | grep -q 'ensure_ops_repo'
-  # `auto_init` : un depot vide n'a pas de branche, et 52-ops-branch pousse SUR une branche
+  # `auto_init` : un depot vide n'a pas de branche, et 65-ops-branch pousse SUR une branche
   code | grep -q '\\"auto_init\\":true'
 }
 
@@ -195,6 +195,6 @@ EOF
 @test "le message de derive n'affirme plus une propriete d'un AUTRE artefact" {
   # « l'amorcage de la forge le cree » etait une affirmation sur un voisin, et elle etait fausse. Un
   # commentaire perime est un mensonge ; un MESSAGE perime en est un que l'operateur lit.
-  local m="$BATS_TEST_DIRNAME/../../modules.d/52-ops-branch.sh"
+  local m="$BATS_TEST_DIRNAME/../../modules.d/65-ops-branch.sh"
   grep -q 'forge-gestures apply' "$m"
 }

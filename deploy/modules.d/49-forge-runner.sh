@@ -76,7 +76,7 @@ converge_ci_runner() {
 
   sed 's/^/     /' "$out" >&2
   rm -f "$out"
-  # PAS un échec du module : la forge est debout et utilisable, et le verdict de `50-forge` dira
+  # PAS un échec du module : la forge est debout et utilisable, et le verdict de `63-forge-tokens` dira
   # que la CI n'a pas de machine. Un apply qui MEURT ici rendrait une forge saine inatteignable.
   p_drift "runner CI NON enrôlé (rc=$rc — le refus du délégué est au-dessus) — la CI restera en attente"
 }

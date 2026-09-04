@@ -115,9 +115,9 @@ account() { # account <full_name> <email>
   [[ "$output" == *"moi@ailleurs.net"* ]]
 }
 
-@test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 50-forge" {
+@test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 63-forge-tokens" {
   # Le cas de `root` sur une vraie boite. Deux voix sur un meme fait divergent le jour ou l'une
-  # des deux change ; `50-forge` rapporte deja « compte forge absent pour l'humain X ».
+  # des deux change ; `63-forge-tokens` rapporte deja « compte forge absent pour l'humain X ».
   echo '{"errors":["user does not exist"]}' > "$FORGE_PAYLOAD"
   run_fn 'check_git_identity'
   [ -z "$output" ]
