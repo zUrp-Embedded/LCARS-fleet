@@ -31,7 +31,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   ## Two doors, and what each may claim
 
   - `merge_and_promote/7` — the nominal path, shared by the two merge points so they cannot diverge:
-    `StepDispatcher.promote_pr` (judges approved) and `StepRunCompleter.promote` (terminal
+    `ReviewLifecycle.promote_pr` (judges approved) and `StepRunCompleter.promote` (terminal
     `:promote`). It receives the RAW `forge_opts` and resolves both rails' identities itself: a
     caller can neither forget a signature nor fork it.
   - `converge_out_of_band_merge/6` — a PR found already merged. It converges the terminal guards but
@@ -189,12 +189,11 @@ defmodule Fleet.Pilot.MergeAndPromote do
       {:error, {:provenance_incoherent, reason}} ->
         {:error, {:provenance_incoherent, reason}}
 
-      # ⚠ IL N'Y A PAS DE CLAUSE `:provenance_stale` ICI, ET C'EST LE RESULTAT DU FIX (BL-6-43).
-      # Elle a existe une heure : une preuve gravee pour un sha, puis une tete qui bouge, et le
-      # sceau cherchait un nom de fichier que personne n'avait ecrit. Depuis que l'attestation
-      # vit sur `refs/lcars/provenance/<sha>` et voyage dans le meme `git push` que la brique,
-      # « perimee » n'est plus un etat atteignable — le dialyzer l'a dit avant moi, en refusant
-      # la clause comme inatteignable. Un cas qui cesse d'exister ne se detecte plus.
+      # ⚠ PAS DE CLAUSE `:provenance_stale` ICI (BL-6-43) : l'attestation vit sur
+      # `refs/lcars/provenance/<sha>` et voyage dans le meme `git push` que la brique, donc
+      # « perimee » — une preuve gravee pour un sha, puis une tete qui bouge — n'est pas un etat
+      # atteignable. Dialyzer refuse la clause comme inatteignable ; un cas qui n'existe pas ne se
+      # detecte pas.
 
       wall ->
         # `wall` is `:ok` (the wall ran and the triplet is coherent) or `{:skipped, why}`. It
@@ -262,8 +261,8 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # faked".
     approvers = approving_judges(forge, repo, pr_number, forge_opts)
 
-    # `wall` VOYAGE JUSQU'AU COMMENTAIRE. Il ne le faisait pas, et la ligne de validation affirmait
-    # « le mur a été franchi » sur le chemin zéro-juge sans rien savoir de lui.
+    # `wall` VOYAGE JUSQU'AU COMMENTAIRE : sans lui, la ligne de validation affirmerait « le mur a
+    # été franchi » sur le chemin zéro-juge sans rien savoir de lui.
     # LA VERIFICATION POST-HOC DE LA SONDE (Q1/①′). Le juge DOIT sonder — son brief l'exige — mais
     # rien dans le protocole ne l'y force au moment ou il rend son verdict. Ce qui est mecanisable,
     # c'est le CONSTAT : la forge tient le registre des runs par `head_sha`, donc « personne n'a
@@ -661,18 +660,17 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # deduplicate a real refusal, or the reverse. Best-effort by obligation — a note that cannot be
   # posted must not block a merge the jury approved.
   #
-  # ⚠ POSTED AFTER THE REAL MERGE, never during the wall. The first version of this fix commented
-  # from `verify_provenance_wall`, i.e. BEFORE `do_merge` — and an existing test refused it,
-  # correctly: on a failing merge the note would have landed on an UNMERGED PR, stating the exact
-  # opposite of what it exists to state. That is this file's own doctrine, written thirty lines
-  # above: "MERGE FIRST, only comment IF the merge REALLY succeeded". A note about the provenance of
-  # a merge that never happened belongs to the same family as a lying "merged".
+  # ⚠ POSTED AFTER THE REAL MERGE, never during the wall: posted from `verify_provenance_wall`,
+  # i.e. BEFORE `do_merge`, the note would land on an UNMERGED PR when the merge fails, stating the
+  # exact opposite of what it exists to state (a test holds this). Same doctrine as the seal:
+  # "MERGE FIRST, only comment IF the merge REALLY succeeded" — a note about the provenance of a
+  # merge that never happened belongs to the same family as a lying "merged".
   defp note_wall_not_run(_forge, _repo, _pr_number, :ok, _forge_opts), do: :ok
 
   defp note_wall_not_run(forge, repo, pr_number, {:skipped, why}, forge_opts) do
-    # LE RÉSULTAT N'EST PLUS JETÉ. La note est le SECOND porteur du fait (le premier est la ligne de
-    # validation ci-dessus, qui voyage maintenant avec `wall`) : si elle ne part pas, il en reste un,
-    # et c'est pourquoi cet échec ne bloque pas. Mais il ne se tait plus — la forge est le support
+    # LE RÉSULTAT N'EST PAS JETÉ. La note est le SECOND porteur du fait (le premier est la ligne de
+    # validation ci-dessus, qui voyage avec `wall`) : si elle ne part pas, il en reste un, et c'est
+    # pourquoi cet échec ne bloque pas. Mais il ne se tait pas — la forge est le support
     # d'audit qu'un humain relit, et une note absente y est indistinguable d'une note jamais due.
     posted =
       comment(
@@ -713,7 +711,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # `ForgeClient.merge_pr/3` returns `:ok` (not `{:ok, _}`) on success — match both.
   # `method` comes from the conflict signal (merge_and_promote): "rebase" on a clean PR (linear
   # history preserved), "merge" on a conflict-resolved one (the resolution IS a merge commit;
-  # rebase would drop it — measured, doc 07 of the chantier).
+  # rebase would drop it — measured on Gitea 1.26.1).
   defp do_merge(forge, repo, pr_number, opts, method) do
     case forge.merge_pr(repo, pr_number, Keyword.put(opts, :method, method)) do
       :ok -> :ok
@@ -722,11 +720,6 @@ defmodule Fleet.Pilot.MergeAndPromote do
     end
   end
 
-  # F-C066 — BOUNDED retry of the EXPLICIT close (a merged brick MUST leave `list_open_issues`, else it
-  # re-appears as an open issue → re-dispatch → double-delivery). A transient blip (HTTP 500 / lock
-  # contention / GenServer timeout) self-heals on retry; a PERSISTENT failure returns `{:error, reason}` →
-  # `merge_and_promote` surfaces `{:close_after_merge, _}` (no swallowed `:ok`). Immediate retries (no sleep):
-  # this runs in the offloaded completion task, the dominant cause is a MOMENTARY forge/GenServer hiccup.
   # CI-06 — BOUNDED retry of the load-bearing `stage/merged` projection (mirror of `close_with_retry`).
   # This label proves the merge to `decide/1` (F-C066 anti-redispatch guard when the close fails) AND
   # historically to `Delegation.issue_status` (delivery detection). A transient blip (HTTP 500 / lock
@@ -760,6 +753,11 @@ defmodule Fleet.Pilot.MergeAndPromote do
     end
   end
 
+  # F-C066 — BOUNDED retry of the EXPLICIT close (a merged brick MUST leave `list_open_issues`, else it
+  # re-appears as an open issue → re-dispatch → double-delivery). A transient blip (HTTP 500 / lock
+  # contention / GenServer timeout) self-heals on retry; a PERSISTENT failure returns `{:error, reason}` →
+  # `merge_and_promote` surfaces `{:close_after_merge, _}` (no swallowed `:ok`). Immediate retries (no sleep):
+  # this runs in the offloaded completion task, the dominant cause is a MOMENTARY forge/GenServer hiccup.
   @close_attempts 3
   defp close_with_retry(forge, repo, issue_n, decision_opts, pr_number, attempt \\ 1) do
     # `closure: :delivered` — la PR est mergee juste au-dessus : cette fermeture EST la livraison.

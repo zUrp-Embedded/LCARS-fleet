@@ -25,10 +25,9 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
 
   ## Family
 
-  One of FOUR escalation exits. The family register — the four exits, the overlap under watch and
-  its COUNT — lives once, in `Fleet.Pilot`'s moduledoc. Read it before adding a fifth: the standing
-  decision is to merge the two overlapping ones when a fifth appears, and that threshold only works
-  if the count is kept in one place.
+  One link of the escalation FAMILY. The register — the links ordered by the DEPTH they reach —
+  lives once, in `Fleet.Pilot`'s moduledoc; a new link is placed there by depth, never counted
+  (no count-based merge threshold).
 
   ## Armored boundary
 
@@ -125,10 +124,11 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   @doc """
   Commits the await-architect state, then offers and wakes the architect only after success.
   """
-  # `decision` est HETEROGENE, et l'ecrire l'a montre : `:blocked_dep` et `:terminal_error` sur
-  # les deux chemins nommes, mais une BINAIRE sur le troisieme (`step_run_consumer.ex:857`, la
-  # branche `other` du verdict). `label/2` l'absorbe par sa clause fourre-tout et la valeur part
-  # telle quelle dans le `step_run` durable. Le spec dit l'etat, il ne le corrige pas.
+  # `decision` est HETEROGENE : `:blocked_dep` et `:terminal_error` sur les deux chemins nommes,
+  # une BINAIRE sur les autres (la branche `other` de `StepRunConsumer.apply_verdict`, et
+  # `VerdictCorrection.freeze/5` qui passe `"halt_invalid"`). `label/2` l'absorbe par sa clause
+  # fourre-tout et la valeur part telle quelle dans le `step_run` durable. Le spec dit l'etat, il
+  # ne le corrige pas.
   @spec freeze_to_arch(pos_integer(), String.t(), atom() | String.t(), String.t(), Seams.t()) ::
           term()
   def freeze_to_arch(n, role, decision, comment_body, %Seams{} = seams) do

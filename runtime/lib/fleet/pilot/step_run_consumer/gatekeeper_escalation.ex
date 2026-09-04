@@ -93,11 +93,10 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
     # C'est la meme reprise que pour un wake perdu, et elle est epinglee : « a gate-eval stuck
     # `:pending` (never pulled — no executor) does NOT hold the lock: reclaimed at the 2nd tick ».
     #
-    # Ce qui suit du coup de l'action « prouver/spawn le pod AVANT l'enqueue » : elle deplacerait la
-    # fenetre sans la fermer (le pod peut mourir entre la preuve et l'enqueue) et couterait un spawn
-    # sur chaque eval, y compris ceux qu'un gatekeeper deja vivant aurait servis. L'outbox
-    # `gate_eval_pending`, elle, est le mecanisme absent que trois autres fiches attendent deja :
-    # une seule question, pas un quatrieme demi-mecanisme.
+    # Spawner le pod AVANT l'enqueue ne fermerait rien : la fenetre se deplace (le pod peut mourir
+    # entre la preuve et l'enqueue) et chaque eval couterait un spawn, y compris ceux qu'un
+    # gatekeeper deja vivant aurait servis. Le mecanisme qui la fermerait est une outbox durable
+    # des evals en attente (`gate_eval_pending`) ; il n'existe pas, et ce site ne le simule pas.
     case seams.task_queue.enqueue(pod_id, attrs) do
       {:ok, %{id: corr}} ->
         case spawn_gatekeeper(seams, pod_id, brief) do
