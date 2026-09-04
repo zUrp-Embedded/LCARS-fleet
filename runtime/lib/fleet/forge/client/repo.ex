@@ -237,14 +237,10 @@ defmodule Fleet.Forge.Client.Repo do
   @doc """
   Distingue une branche PROUVEE absente (`{:ok, false}`) d'une forge qu'on n'a pas su lire.
 
-  ⚠ **CETTE FONCTION RENDAIT `false` DANS LES DEUX CAS**, et son ancien `@doc` l'assumait (« Any
-  error returns `false` »). Or ses trois appelants en tirent trois decisions DIFFERENTES, et aucune
-  n'est sure sous cette confusion : une protection de branche silencieusement sautee, un import
-  declare satisfait, une face republiee par-dessus une existante.
-
-  **La reponse etait huit lignes plus bas** : `user_exists?/2` distingue deja un 404 PROUVE
-  (`{:ok, false}`) d'une panne (`{:error, _}`), et son `@doc` le dit. Meme module, fonction suivante.
-  Le 404 est une REPONSE de la forge ; tout le reste est une absence de reponse.
+  ⚠ JAMAIS `false` DANS LES DEUX CAS : ses trois appelants en tirent trois decisions DIFFERENTES,
+  et aucune n'est sure sous cette confusion — une protection de branche silencieusement sautee, un
+  import declare satisfait, une face republiee par-dessus une existante. Meme distinction que
+  `user_exists?/2` : le 404 est une REPONSE de la forge, tout le reste est une absence de reponse.
   """
   @spec branch_exists?(String.t(), String.t(), Keyword.t()) ::
           {:ok, boolean()} | {:error, term()}
@@ -455,9 +451,8 @@ defmodule Fleet.Forge.Client.Repo do
   # ONLY by the card-revision lift (`ProjectOnboard.revise_card` — scoped lift-push-restore);
   # the canonical `protect_main` rule does not name them, so an operator whitelist stays
   # untouched outside that one deliberate gesture.
-  # `enable_status_check`/`status_check_contexts` ARE projected (2026-08-03). The comment above used
-  # to name status checks as the example of an "operator enrichment" the runtime must not clobber —
-  # a posture that assumed an operator who never came: measured on a live bench, every repo had
+  # `enable_status_check`/`status_check_contexts` ARE projected, and are NOT an "operator
+  # enrichment" to leave alone: measured on a live bench (2026-08-03), every repo had
   # `enable_status_check: false` and a red CI merged. An enrichment nobody applies is not an
   # enrichment, it is a hole with a polite name.
   @protectable_fields ~w(required_approvals dismiss_stale_approvals block_on_rejected_reviews enable_push enable_push_whitelist push_whitelist_usernames enable_status_check status_check_contexts)

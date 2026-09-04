@@ -11,9 +11,9 @@ defmodule Fleet.Forge.Client.Signing do
   cycle d'appel entre deux modules d'une meme boundary, prefere a un deplacement qui toucherait la
   surface publique.
 
-  ⚠ CES FONCTIONS ETAIENT PRIVEES DANS `Fleet.Forge.Client`, ET AUCUNE N'EST DANS LA COUTURE.
-  L'API atteinte par `forge().x` reste entierement sur le client — celui-ci ne recoit que de la
-  machinerie. Publiques parce qu'elles traversent une frontiere de module, `@doc false` le dit.
+  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
+  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
+  qu'elles traversent une frontiere de module, `@doc false` le dit.
   """
 
   alias Fleet.Forge.Client.Transport

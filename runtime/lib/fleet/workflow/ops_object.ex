@@ -63,23 +63,19 @@ defmodule Fleet.Workflow.OpsObject do
       # `OpsObjectSync` : la levee tue le SERIALISEUR de `work/ops` et tous les appels en attente
       # recoivent un `:exit`.
       File.read(abs) == {:ok, content} ->
-        # ⚠ LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE (6-048). Cette branche rendait
-        # `Git.last_commit_sha/2` — le dernier commit ayant TOUCHE ce chemin — sans verifier que le
-        # contenu A CE COMMIT est celui qu'on annonce. Un fichier ecrit puis non commite (le commit
-        # a echoue, `materialize/5` laisse l'ecriture) suffit : le second appel empruntait le
-        # raccourci et rendait le sha d'une version PRECEDENTE.
+        # ⚠ LE DISQUE NE PROUVE RIEN SUR L'HISTOIRE (6-048). Rendre ici `Git.last_commit_sha/2` —
+        # le dernier commit ayant TOUCHE ce chemin — sans verifier que le contenu A CE COMMIT est
+        # celui qu'on annonce rend le sha d'une version PRECEDENTE des qu'un fichier a ete ecrit
+        # puis non commite (le commit a echoue, `materialize/5` laisse l'ecriture).
         #
         # Ce sha remonte jusqu'aux pointeurs d'epinglage — `Brief: <ref> @ <sha>` dans le corps du
         # ticket, avec la phrase « ce qui fait foi est le doc ci-dessous, A CE COMMIT EXACT ». Un
-        # juge qui resout le pointeur lit alors autre chose que ce qu'on lui a promis, sans qu'aucune
-        # erreur ne se leve.
-        #
-        # `committed_sha/3`, douze lignes plus bas, fait exactement la bonne chose : il cherche dans
-        # l'historique un commit dont le contenu A CE CHEMIN vaut `content`. La parade existait deja
-        # dans ce module, en lecture seule, a cote de la branche qui s'en passait.
+        # juge qui resout le pointeur lirait alors autre chose que ce qu'on lui a promis, sans
+        # qu'aucune erreur ne se leve. D'ou `committed_sha/3` : un commit de l'historique dont le
+        # contenu A CE CHEMIN vaut `content`, ou rien.
         #
         # `:not_committed` = residu de crash (ecrit, jamais commite) → on materialise pour lui
-        # donner une identite, ce que faisait deja l'ancien garde `sha != ""`.
+        # donner une identite.
         #
         # Aucun push n'est tente ici et aucun n'est revendique : le hit idempotent ne dit rien de
         # l'endroit ou l'objet a ete publie, et `:not_requested` est la reponse honnete a une
@@ -137,7 +133,7 @@ defmodule Fleet.Workflow.OpsObject do
 
   # A racing identical write recovers its introducing commit.
   #
-  # ⚠ LE MEME APPEL QU'AU RACCOURCI CORRIGE PLUS HAUT, ET ICI IL EST SAIN — ne pas « harmoniser »
+  # ⚠ LE MEME APPEL QUE LE RACCOURCI PLUS HAUT REFUSE, ET ICI IL EST SAIN — ne pas « harmoniser »
   # les deux. `:nothing_to_commit` PROUVE que l'arbre egale HEAD pour ce chemin ; le dernier commit
   # touchant `ref` est donc celui qui l'a mis a sa valeur courante, et cette valeur est `content`.
   # Le raccourci, lui, ne savait que l'ARBRE DE TRAVAIL, ce qui ne dit rien de HEAD : c'est toute la

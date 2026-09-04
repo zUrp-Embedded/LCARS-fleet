@@ -3,10 +3,9 @@ defmodule Fleet.Forge.Client.Actions do
   Triggers a workflow OUTSIDE a push, and reads back what it did — sub-domain of
   `Fleet.Forge.Client`, on the pattern of `Fleet.Forge.Client.Jury`.
 
-  Self-contained concern: it touches only `/repos/{o}/{r}/actions/…` and calls no other forge op.
-  Before this module, **nothing in the whole client touched `/actions/`** — `files.ex`, `jury.ex`,
-  `repo.ex`, `transport.ex` and `url_safe.ex` were checked one by one. The rail could observe a CI
-  run that a push had started, and could not ASK for one.
+  Self-contained concern: it touches only `/repos/{o}/{r}/actions/…` and calls no other forge op,
+  and it is the ONLY module of the client that does — without it the rail can observe a CI run that
+  a push started, and cannot ASK for one.
 
   ## Why the rail needs to ask
 
@@ -270,8 +269,8 @@ defmodule Fleet.Forge.Client.Actions do
 
   Each job carries `status` (`waiting` while nothing has claimed it), `labels` — the `runs-on:` it
   asks for — and `runner_id`/`runner_name`, zero and empty while unassigned. Those three answer, in
-  ONE read, the question the CI gate used to take forty-five minutes to ask: has anything picked
-  this job up, and what did it ask for?
+  ONE read, the question a CI gate otherwise waits forty-five minutes to have answered: has
+  anything picked this job up, and what did it ask for?
   """
   @spec jobs(String.t(), pos_integer(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def jobs(repo, run_id, opts \\ []) when is_binary(repo) and is_integer(run_id) do

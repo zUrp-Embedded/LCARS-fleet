@@ -2,10 +2,10 @@ defmodule Fleet.Forge.Payload do
   @moduledoc """
   La lecture des charges de la forge : UN chemin par fait, declare ici et nulle part ailleurs.
 
-  `Fleet.Forge.Client` rend les reponses Gitea telles quelles — des maps JSON decodees. Jusqu'ici
-  quatorze modules hors du domaine forge indexaient ces maps par clef string : la forme de l'API
-  d'un tiers etait connue de `pilot`, `mcp`, `admiral` et `application`. Une montee de version de la
-  forge se traitait au `grep`, et rien ne repondait a « de quels champs dependons-nous ».
+  `Fleet.Forge.Client` rend les reponses Gitea telles quelles — des maps JSON decodees. Sans ce
+  module, chaque lecteur de `pilot`, `mcp`, `admiral` ou `application` indexe ces maps par clef
+  string : la forme de l'API d'un tiers est connue hors du domaine, une montee de version de la
+  forge se traite au `grep`, et rien ne repond a « de quels champs dependons-nous ».
 
   Ce module est le pendant, cote CHARGE, de ce que `Fleet.Forge.Protocol` fait cote CHAINES. Son
   invariant est le meme, exprime autrement : le chemin d'un champ est ecrit UNE fois, dans
@@ -24,8 +24,8 @@ defmodule Fleet.Forge.Payload do
     * `repository.full_name` existe sur une ISSUE et pas sur une PR — l'asymetrie est reelle, elle
       n'est pas une erreur de capture ;
     * la meme forge rend DEUX HOTES differents selon l'endpoint (`127.0.0.1:23101` sur la PR,
-      `gitea:3000` sur l'issue). C'est le motif pour lequel `html_url` n'est lu nulle part, et il
-      est desormais adosse a une mesure et non a un raisonnement.
+      `gitea:3000` sur l'issue). C'est le motif pour lequel `html_url` n'est lu nulle part, adosse
+      a une mesure et non a un raisonnement.
 
   ⚠ CE MODULE NE FABRIQUE PAS DE CHARGE, et c'est deliberе : la production n'en construit jamais.
   La co-location build/parse de `Protocol` n'a donc pas de sens litteral ici. Ce qui la remplace est

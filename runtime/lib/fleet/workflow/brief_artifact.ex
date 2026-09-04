@@ -1,7 +1,6 @@
 defmodule Fleet.Workflow.BriefArtifact do
   @moduledoc """
-  The brief as a FIRST-CLASS object (design:
-  `beyond_#6/DESIGN-brief-physique-dispatch-unique-triplet-sha.md` + `DESIGN-vie-du-brief.md`).
+  The brief as a FIRST-CLASS object.
 
   BUSINESS layer over `Fleet.Workflow.OpsObject` (the one commit-an-object mechanic): this
   module only knows brief NAMING and the dispatch degradation semantics. It materializes a

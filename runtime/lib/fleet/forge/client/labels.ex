@@ -7,10 +7,10 @@ defmodule Fleet.Forge.Client.Labels do
   decoration : la description est ce qu'un humain lit dans l'interface de la forge quand il se
   demande ce que le runtime a voulu dire, et c'est le seul endroit ou il peut le lire.
 
-  ⚠ CES FONCTIONS ETAIENT PRIVEES DANS `Fleet.Forge.Client`, ET AUCUNE N'EST DANS LA COUTURE.
-  L'API atteinte par `forge().x` reste entierement sur le client : ce module ne recoit que de la
-  machinerie. Elles deviennent publiques parce qu'elles traversent une frontiere de module — un
-  fait de decoupage, pas une surface d'API, et `@doc false` le dit.
+  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
+  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
+  qu'elles traversent une frontiere de module — un fait de decoupage, pas une surface d'API, et
+  `@doc false` le dit.
 
   `card_description/1` appelle `Fleet.Forge.Client.as_role/2`, qui reste sur le client parce qu'une
   dizaine d'appelants de `pilot` le nomment directement. C'est un cycle d'APPEL entre deux modules
@@ -121,8 +121,8 @@ defmodule Fleet.Forge.Client.Labels do
   # Cree le label du depot s'il manque, reconcilie sa couleur s'il existe.
   # Best-effort ASSUME : un echec de listing fait CREER le label, un echec de creation est
   # rattrape a la demande par `add_issue_label/4`. Le semis ne peut donc pas echouer au sens de
-  # l'appelant — dialyzer l'a dit avant moi, mon premier spec annoncait un `{:error, _}` que
-  # cette chaine ne produit jamais.
+  # l'appelant, et le spec dit `:ok` seul — un `{:error, _}` annonce ici serait un retour que la
+  # chaine ne produit jamais (dialyzer le voit).
   @spec ensure_repo_label(Transport.config(), String.t(), String.t()) :: :ok
   def ensure_repo_label(config, repo, label_name) do
     case paginate(config, "/repos/#{encode_repo(repo)}/labels", "") do
@@ -253,10 +253,9 @@ defmodule Fleet.Forge.Client.Labels do
     end
   end
 
-  # Ce texte est lu par un HUMAIN sur la forge, et il a nommé la mauvaise branche pendant tout le
-  # chantier des trois faces : il disait « la voie ops (branche ops) » alors que le livrable
-  # documentaire part sur `workshop`. `ops` est le registre que le runtime écrit, qu'aucun
-  # producteur ne touche — donc la description envoyait le lecteur vers l'arbre exactement inverse.
+  # Ce texte est lu par un HUMAIN sur la forge, et il nomme la face `workshop` : c'est la que part
+  # le livrable documentaire. `ops` est le registre que le runtime ecrit, qu'aucun producteur ne
+  # touche — une description qui nommerait `ops` enverrait le lecteur vers l'arbre exactement inverse.
   def label_description(@lbl_destination_workshop),
     do:
       "Ticket DOCUMENTAIRE : le système l'aiguille vers la voie doc (branche workshop, rédigée par le scribe) au lieu de la voie code. Posé à la création, lu une fois — c'est lui qui route, pas le `type:`."

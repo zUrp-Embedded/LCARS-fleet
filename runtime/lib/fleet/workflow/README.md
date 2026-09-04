@@ -39,6 +39,7 @@ Related, NOT this domain: `Fleet.GitRef` (`valid?/1`, git ref-name validation) �
 boundary at `lib/fleet/git_ref.ex`, reachable from any domain.
 
 ## Config & deps
-- Knobs `:workflow_maps_root`, `:schema_path` — read by `Loader` (opts override for async tests), set by `runtime.exs` from `LCARS_WORKFLOW_MAPS_ROOT`.
-- Knobs `:git_push_timeout_ms`, `:git_local_timeout_ms` — read by `Git`.
+- Knobs `:workflow_workflow_maps_root`, `:workflow_schema_path` — read by `Loader` (opts override for async tests); the first is set by `runtime.exs` from `LCARS_WORKFLOW_MAPS_ROOT`.
+- Knobs `:workflow_git_push_timeout_ms`, `:workflow_git_local_timeout_ms` — read by `Git`.
+- Test seams: `:workflow_git_push_runner` (`Git`), `:workflow_deliverable_gate_git_runner` (`DeliverableGate`), `:workflow_ops_sync_call_timeout` / `:workflow_ops_sync_drain_timeout` (`OpsObjectSync`). `OpsObjectSync` is started by `Fleet.Pilot.Application` under `:pilot_start_ops_object_sync`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/workflow.ex`).

@@ -13,20 +13,14 @@ read those (`h Fleet.Forge.Client` in IEx). Nothing here is restated, only point
 
 ## Why it is a domain and not a corner of `Fleet.Pilot`
 
-It lived under the pilot, and the cost was visible in one line of the pilot's boundary: `Req` and
-`Req.Response` were declared there. The business domain imported the HTTP library, so *"a single
-forge HTTP exit"* was a **convention** — true only as long as nobody added a call somewhere else in
-2 400 lines of driver. Here that invariant is **compiled**: the wire libraries are fenced to this
+`Req` and `Req.Response` are declared by THIS boundary and by no other. Declared by a business
+domain, *"a single forge HTTP exit"* is a **convention** — true only as long as nobody adds a call
+somewhere in the driver. Here the invariant is **compiled**: the wire libraries are fenced to this
 boundary and a reference from anywhere else does not build.
 
-It was never derived from the pilot either, only placed there. Outside its own modules it touched
-the pilot three times (`WriteSpacing`, `Opts`, and prose about `ProjectOnboard`); what it actually
-depends on is `Fleet.Labels`, `Fleet.Workflow` and `Fleet.Credentials`. The extraction moved the
-two real attachments to where they belong rather than dragging them along:
-
-- `Fleet.Forge.WriteSpacing` — the gap between distinct forge writes. Its subject IS the forge; the
-  pilot called it exactly where the pilot writes to the forge.
-- `Fleet.Opts` — two pure keyword helpers, no deps, no subject: foundation.
+What the domain depends on is `Fleet.Labels`, `Fleet.Workflow` and `Fleet.Credentials`, plus the
+foundation. `Fleet.Forge.WriteSpacing` lives here because its subject IS the forge: the pilot calls
+it exactly where the pilot writes to the forge.
 
 ## Modules
 
@@ -48,8 +42,8 @@ two real attachments to where they belong rather than dragging them along:
 
 ## Seam
 
-`:forge_client` (an OPTS keyword, `Keyword.get(opts, :forge_client, …)`) injects the client module — test stubs, and
-the upward `mcp → pilot` runtime seam this extraction is expected to retire (MCP can now declare a
-plain compile dep on this domain). **Not retired yet**: the behaviour and its 12 callbacks still
-live in `Fleet.MCP.PodTools.Delegation.ForgeClient`, and removing them is a separate gesture with
-its own test consequences.
+`:forge_client` (an OPTS keyword, `Keyword.get(opts, :forge_client, …)`) injects the client module.
+It is a TEST seam: `Fleet.MCP` declares a plain compile dep on this domain (`lib/fleet/mcp.ex`),
+so the seam buys stub injection, not a boundary crossing. The behaviour the stubs implement is
+`Fleet.MCP.PodTools.Delegation.ForgeClient` (13 callbacks), whose default is this client and
+whose `conforming/2` check is what keeps a stub honest.

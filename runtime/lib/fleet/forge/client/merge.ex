@@ -9,9 +9,9 @@ defmodule Fleet.Forge.Client.Merge do
   jamais. Confondre les deux, c'est soit abandonner une fusion possible, soit marteler une fusion
   impossible.
 
-  ⚠ CES FONCTIONS ETAIENT PRIVEES DANS `Fleet.Forge.Client`, ET AUCUNE N'EST DANS LA COUTURE.
-  L'API atteinte par `forge().x` reste entierement sur le client — celui-ci ne recoit que de la
-  machinerie. Publiques parce qu'elles traversent une frontiere de module, `@doc false` le dit.
+  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
+  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
+  qu'elles traversent une frontiere de module, `@doc false` le dit.
   """
 
   alias Fleet.Forge.Client.Transport
@@ -136,10 +136,10 @@ defmodule Fleet.Forge.Client.Merge do
       _ =
         if merge_checking?(body) do
           Logger.warning(
-            # ⚠ CE MESSAGE CITAIT `@merge_checking_retries`, l'attribut du CLIENT, alors que le
-            # budget arrive ICI en PARAMETRE. Les deux valaient 3, donc rien ne se voyait — mais
-            # changer le budget au site d'appel aurait fait mentir le message. Il nomme desormais
-            # ce qu'il sait ; le compte exact vit dans les `info` de reprise ci-dessus.
+            # ⚠ PAS DE COMPTE DANS CE MESSAGE : le budget arrive ICI en PARAMETRE, et citer
+            # l'attribut du client (`@merge_checking_retries`) ferait mentir le message le jour ou
+            # un site d'appel change le budget. Le compte exact vit dans les `info` de reprise
+            # ci-dessus.
             "ForgeClient: merge_pr ##{index} — mergeability still computing after the configured " <>
               "retry budget, giving up: #{inspect(body)}"
           )

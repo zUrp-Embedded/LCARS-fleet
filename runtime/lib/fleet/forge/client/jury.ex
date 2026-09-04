@@ -114,8 +114,7 @@ defmodule Fleet.Forge.Client.Jury do
   # courbe de la carte qui refuse. Rien d'autre n'est gris. Un refus de juge est net (plancher), une
   # PR propre est nette ; ici la machine s'apprête à renverser une approbation humaine-de-forme sur
   # la foi de mesures que ce même juge a écrites. C'est exactement le cas que le SP du gatekeeper
-  # décrit depuis dix mois — « tu es invoqué quand le runtime ne peut pas trancher seul » — et qui
-  # n'avait jamais eu de code.
+  # décrit — « tu es invoqué quand le runtime ne peut pas trancher seul ».
   #
   # L'arbitre n'est PAS un juré de plus : sa voix n'est lue QUE dans cette zone. Hors d'elle il ne
   # peut ni sauver un livrable qu'un juge refuse (le plancher est au-dessus de lui), ni bloquer une
@@ -184,9 +183,8 @@ defmodule Fleet.Forge.Client.Jury do
   routing would then act on one answer while the human read the other.
 
   Why it matters, and it is measured: a rubber stamp and a real review are indistinguishable in
-  `verdicts` — both are `:approved`. On the forge they never were: two `submitted_at` seconds apart
-  versus a minute, and two incomparable bodies. The architect's first blind spot was FALSE at the
-  level of the data and TRUE at the level of its tools; this is the half that was missing.
+  `verdicts` — both are `:approved`. On the forge they never are: two `submitted_at` seconds apart
+  versus a minute, and two incomparable bodies. `records` is what lets a reader tell them apart.
   """
   @spec pr_review_state(String.t(), integer(), Keyword.t()) ::
           {:ok,
@@ -200,19 +198,19 @@ defmodule Fleet.Forge.Client.Jury do
            }}
           | {:error, term()}
   def pr_review_state(repo, index, opts \\ []) when is_binary(repo) and is_integer(index) do
-    # NO IMPLICIT UNSCOPED MODE. `head_sha` used to be a `Keyword.get/2`, so an ABSENT key and a
-    # `nil` VALUE both landed on "count every review ever placed on this PR" — and `nil` is exactly
-    # what the production caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR
-    # object omits `head.sha` (a lighter listing shape, a Gitea version, a partial response).
+    # NO IMPLICIT UNSCOPED MODE. A `Keyword.get/2` here would send an ABSENT key and a `nil` VALUE
+    # alike to "count every review ever placed on this PR" — and `nil` is exactly what the
+    # production caller produces: `get_in(pr, ["head", "sha"])` on a forge answer whose PR object
+    # omits `head.sha` (a lighter listing shape, a Gitea version, a partial response).
     #
-    # WHAT THAT COST, and it is the whole severity of the finding: a PR approved on commit A and
-    # then completed by commit B reads as still approved, `review_outcome/2` yields `:approved`,
-    # the routing promotes, and `MergeAndPromote` merges. Code no judge ever saw lands on the main
-    # branch, under a seal that attests the opposite.
+    # WHAT THAT COSTS: a PR approved on commit A and then completed by commit B reads as still
+    # approved, `review_outcome/2` yields `:approved`, the routing promotes, and `MergeAndPromote`
+    # merges. Code no judge ever saw lands on the main branch, under a seal that attests the
+    # opposite.
     #
-    # The unscoped mode still exists — some callers legitimately want every review — but it is now
-    # ASKED FOR (`head_sha: :unscoped`), never inherited from a missing key. That is the whole
-    # difference between a default and a decision.
+    # The unscoped mode exists — some callers legitimately want every review — but it is ASKED FOR
+    # (`head_sha: :unscoped`), never inherited from a missing key. That is the whole difference
+    # between a default and a decision.
     case Keyword.fetch(opts, :head_sha) do
       {:ok, :unscoped} -> do_review_state(repo, index, opts, nil)
       {:ok, sha} when is_binary(sha) and sha != "" -> do_review_state(repo, index, opts, sha)
@@ -278,12 +276,12 @@ defmodule Fleet.Forge.Client.Jury do
         {:ok, findings} ->
           Map.put(acc, RoleIdentity.role_or_login(login), findings)
 
-        # A block that is present and broken is NOT the same fact as no block -- and this used to
-        # DROP it, which spent the difference the moment it mattered. Under a card that declares a
-        # floor, a dropped payload is read downstream as "this judge measured nothing", so an
-        # unreadable measurement REMOVED a block instead of raising one: a gray zone that owed an
-        # arbitration got sealed as `:approved`, with a log line as its only witness. Measured
-        # 2026-08-19 on the two shipped cards that declare `block_at: critical`.
+        # A block that is present and broken is NOT the same fact as no block -- and DROPPING it
+        # spends the difference the moment it matters. Under a card that declares a floor, a
+        # dropped payload is read downstream as "this judge measured nothing", so an unreadable
+        # measurement REMOVES a block instead of raising one: a gray zone that owes an arbitration
+        # gets sealed as `:approved`, with a log line as its only witness. Measured 2026-08-19 on
+        # the two shipped cards that declare `block_at: critical`.
         #
         # So it is RECORDED, as a fact of its own kind. Not as a fabricated finding -- inventing a
         # `critical` nobody measured would put a defect in the record -- but as the honest one:
@@ -420,9 +418,10 @@ defmodule Fleet.Forge.Client.Jury do
   @doc """
   Returns downcased judges with an unanswered re-request after a prior review.
 
-  review-records (Gitea does NOT dismiss them on re-request — verified live) nor `requested_reviewers`
-  The paginated timeline is counted rather than timestamp-ordered because forge timestamps have
-  second granularity. Removals cancel requests; truncated or malformed timelines fail.
+  Read from the TIMELINE, because neither source above answers it: the review-records are not
+  dismissed on re-request (verified live) and `requested_reviewers` is volatile. The paginated
+  timeline is counted rather than timestamp-ordered because forge timestamps have second
+  granularity. Removals cancel requests; truncated or malformed timelines fail.
   """
   @spec pr_rerequested_reviewers(String.t(), integer(), Keyword.t()) ::
           {:ok, [String.t()]} | {:error, term()}

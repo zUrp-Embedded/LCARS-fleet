@@ -9,17 +9,16 @@ defmodule Fleet.Forge.Client.CI do
   ⚠ L'ORDRE DE LA LISTE N'EST PAS CELUI QU'ON CROIT, ET CE CODE NE S'Y FIE PAS. Mesure du
   2026-09-02 contre une forge reelle (`gitea/gitea:1.26.1-rootless`, digest epingle par
   `forge-compose.yml`) : deux statuts postes sur le MEME contexte reviennent du plus ANCIEN au plus
-  recent — `id=1` puis `id=2`. Une premiere redaction de ce texte affirmait l'inverse, sur la foi
-  d'un commentaire, sans jamais avoir interroge l'API.
+  recent — `id=1` puis `id=2`.
 
   C'est sans consequence ICI parce que le courant se prend par `Enum.max_by(& &1["id"])`, qui ne
   depend d'aucun ordre — mais un lecteur qui aurait cru la phrase et pris `List.first/1` aurait
   rendu le verdict du PREMIER job, pas du dernier. La capture qui l'etablit est versee au depot :
   `test/fixtures/forge/`.
 
-  ⚠ CES FONCTIONS ETAIENT PRIVEES DANS `Fleet.Forge.Client`, ET AUCUNE N'EST DANS LA COUTURE.
-  L'API atteinte par `forge().x` reste entierement sur le client — celui-ci ne recoit que de la
-  machinerie. Publiques parce qu'elles traversent une frontiere de module, `@doc false` le dit.
+  ⚠ AUCUNE DE CES FONCTIONS N'EST DANS LA COUTURE : l'API atteinte par `forge().x` reste
+  entierement sur `Fleet.Forge.Client`, ce module ne porte que de la machinerie. Publiques parce
+  qu'elles traversent une frontiere de module, `@doc false` le dit.
   """
 
   @typedoc """

@@ -72,8 +72,8 @@ defmodule Fleet.Workflow.Loader do
   #
   # `fetch!` ET PAS `get`, comme `jury` et `max_rework_rounds` : `spec.ci` est OBLIGATOIRE au schema.
   # Un `get` rendrait `nil` pour une carte qui n'a pas ete validee (schema surcharge en test, appel
-  # hors `load!`), et ce `nil` redeviendrait une politique par defaut choisie par accident — le
-  # defaut meme qu'on vient de supprimer. Ici, une carte sans `ci` explose au lieu de se voir
+  # hors `load!`), et ce `nil` deviendrait une politique par defaut choisie par accident. Ici, une
+  # carte sans `ci` explose au lieu de se voir
   # attribuer un avis.
   defp normalize(%{"spec" => %{"steps" => steps} = spec} = yaml) when is_map(steps) do
     %{

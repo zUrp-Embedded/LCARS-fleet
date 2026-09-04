@@ -53,10 +53,10 @@ defmodule Fleet.Forge do
       Protocol,
       # LA LECTURE DES CHARGES, EXPORTEE A DESSEIN — et `boundary` a exige que ce soit dit.
       #
-      # Ce domaine rend les reponses de la forge telles quelles : des maps JSON. Quatorze modules
-      # de `pilot`, `mcp`, `admiral` et `application` les indexaient par clef string, donc la forme
-      # de l'API d'un tiers etait connue hors d'ici — une montee de version se traitait au `grep`.
-      # `Payload` est la couche qui ferme ca : UN chemin par fait, declare une fois, verifie contre
+      # Ce domaine rend les reponses de la forge telles quelles : des maps JSON. Indexees par clef
+      # string chez `pilot`, `mcp`, `admiral` et `application`, la forme de l'API d'un tiers serait
+      # connue hors d'ici et une montee de version se traiterait au `grep`. `Payload` est la
+      # couche qui ferme ca : UN chemin par fait, declare une fois, verifie contre
       # une capture REELLE (`test/fixtures/forge/`).
       #
       # L'exporter est le geste inverse d'une fuite : au lieu que chacun connaisse la forme, un
