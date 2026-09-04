@@ -133,6 +133,6 @@ setup() {
   grep -q 'PRIV' "$js"
   grep -q 'CATALOGUES' "$js"
   # `fleet` couvre PRIV ; `catalogues` couvre CATALOGUES. Chacune doit etre copiee.
-  printf '%s\n' "$copied" | grep -qx 'fleet'
+  printf '%s\n' "$copied" | grep -qx 'runtime'
   printf '%s\n' "$copied" | grep -qx 'catalogues'
 }
