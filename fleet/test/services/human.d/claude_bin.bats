@@ -39,6 +39,7 @@ setup() {
   # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur : le module la sourcait
   # et son hote reel ne la posait pas. Le decor recopie le protocole pour y surcharger `human_home`.
   cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
   cat >> "$SANDBOX/lib/human-protocol.sh" <<EOF
 
 human_home() { echo "$HOMEDIR"; }

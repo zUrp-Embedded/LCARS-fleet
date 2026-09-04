@@ -48,7 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "../deploy/modules.d/65-ops-branch.sh",
+      "services/forge.d/ops-branch.sh",
       "services/forge-gestures.sh",
       "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur

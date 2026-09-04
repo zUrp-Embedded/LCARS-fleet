@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/modules.d/65-ops-branch.bats
+# SOURCE: fleet/test/services/forge.d/ops-branch.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
 # STATUS: bats tests for 65-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »
@@ -29,12 +29,13 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2016,SC2030,SC2031
 
-load ../refute
+load ../../support/refute
 
 setup() {
-  MODULE="$BATS_TEST_DIRNAME/../../modules.d/65-ops-branch.sh"
+  MODULE="$BATS_TEST_DIRNAME/../../../services/forge.d/ops-branch.sh"
   [ -f "$MODULE" ]
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
+  export PROV_MODULE_TAG=65-ops-branch
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"; export PATH="$BIN:$PATH"
   export PROV_FORGE_URL="http://forge.test"
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"; mkdir -p "$PROV_TOKENS_DIR"
@@ -174,7 +175,7 @@ EOF
   # `pod_tools/delegation.ex` visent tous `fleet/lcars` ; le seul `create_repo` du runtime sert aux
   # depots de PROJET, et la recette tofu ne cree AUCUN depot. Resultat : derive a chaque passage sur
   # les deux substrats, et un 404 sur ce depot lu comme une panne de l'IncidentRegistry.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../services/forge-gestures.sh"
   code() { grep -vE '^\s*#' "$g"; }
   code | grep -q 'ensure_ops_repo()'
   # il est APPELE dans la passe d'apply, pas seulement defini
@@ -186,7 +187,7 @@ EOF
 @test "la creation RELIT au lieu de croire le code du POST" {
   # Meme regle que la protection de branche : une v1 concluait « deja present » sur un 409/422 alors
   # que Gitea rend d'autres codes selon la version.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../services/forge-gestures.sh"
   local body; body="$(grep -vE '^\s*#' "$g" | sed -n '/^ensure_ops_repo()/,/^}/p')"
   [ "$(grep -c 'api/v1/repos/\$repo' <<<"$body")" -ge 2 ]
   grep -q 'NON cree (HTTP \$code)' <<<"$body"
@@ -195,6 +196,6 @@ EOF
 @test "le message de derive n'affirme plus une propriete d'un AUTRE artefact" {
   # « l'amorcage de la forge le cree » etait une affirmation sur un voisin, et elle etait fausse. Un
   # commentaire perime est un mensonge ; un MESSAGE perime en est un que l'operateur lit.
-  local m="$BATS_TEST_DIRNAME/../../modules.d/65-ops-branch.sh"
+  local m="$MODULE"
   grep -q 'forge-gestures apply' "$m"
 }

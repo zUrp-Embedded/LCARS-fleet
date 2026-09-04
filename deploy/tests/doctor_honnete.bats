@@ -108,11 +108,11 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 # ─── LES MODULES QUI MENTAIENT ──────────────────────────────────────────────────────────────────
 
 @test "66-deck-oidc : un fichier PRESENT et illisible n'est plus annonce « absent »" {
-  local mod="$DEPLOY/modules.d/66-deck-oidc.sh"
+  local mod="$DEPLOY/../fleet/services/forge.d/deck-oidc.sh"
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   echo '{}' > "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   chmod 0000 "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
-  run env PROVISION_LIB="$LIB" \
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" PROV_MODULE_TAG=66-deck-oidc \
           PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json" \
           PROV_FORGE_URL="http://forge.invalid" \
       bash "$mod" check
@@ -124,8 +124,8 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 @test "66-deck-oidc : un fichier VRAIMENT absent reste un DRIFT" {
   # Le sens qui manquait : sans lui, un module qui repondrait « non mesurable » a tout passerait le
   # temoin ci-dessus en ayant cesse de signaler quoi que ce soit.
-  local mod="$DEPLOY/modules.d/66-deck-oidc.sh"
-  run env PROVISION_LIB="$LIB" \
+  local mod="$DEPLOY/../fleet/services/forge.d/deck-oidc.sh"
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" PROV_MODULE_TAG=66-deck-oidc \
           PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/pas-la.json" \
           PROV_FORGE_URL="http://forge.invalid" \
       bash "$mod" check

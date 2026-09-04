@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/modules.d/45-catalogues.bats
+# SOURCE: fleet/test/services/forge.d/catalogues.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for modules.d/45-catalogues.sh + prov_roles — le materiel suit la FORGE
+# STATUS: bats tests for fleet/services/forge.d/catalogues.sh — le materiel suit la FORGE (geste du produit, lot 6)
 #
 # CE QUE CES TEMOINS TIENNENT, ET POURQUOI CE MODULE EST LE PLUS DANGEREUX DE LA SERIE : il
 # SUPPRIME. C'est legitime — le materiel local est un cache re-clonable — mais exactement une
@@ -24,12 +24,13 @@
 # shellcheck disable=SC2086
 
 setup() {
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/45-catalogues.sh"
-  LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  MOD="$BATS_TEST_DIRNAME/../../../services/forge.d/catalogues.sh"
+  LIB="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   # `-f`, pas `-x` : un module est joue par `bash`, jamais lance directement — il refuse meme de
   # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
   [ -f "$MOD" ]
-  export PROVISION_LIB="$LIB"
+  export LCARS_MODULE_PROTOCOL="$LIB"
+  export PROV_MODULE_TAG=45-catalogues
   export PROV_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export PROV_FORGE_URL="http://forge.invalid"
   mkdir -p "$PROV_CATALOGUES_DIR" "$BATS_TEST_TMPDIR/bin"
@@ -368,63 +369,6 @@ json_one() {
 }
 
 # ─── LE ROSTER DERIVE ───────────────────────────────────────────────────────────────────────────
-
-@test "prov_roles sans release : le plancher tenu a la main, et rien de plus" {
-  # Chemin WSL avant `60-deploy`, ou boite sans release pose. Une boite doit pouvoir minter de quoi
-  # demarrer meme quand la derivation est impossible.
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT=/inexistant; source '$LIB'; prov_roles"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"system_architect"* ]]
-  [[ "$output" == *"fleet_engineer"* ]]
-}
-
-@test "prov_roles avec un catalogue installe : ses roles ENTRENT, dedupliques et tries" {
-  # LA QUATRIEME LISTE TENUE A LA MAIN MEURT ICI. Un catalogue installe apporte ses comptes sans
-  # qu'aucun fichier de deploiement ne le sache — c'est tout l'interet de la derivation.
-  seed_local "web"
-  cat > "$BATS_TEST_TMPDIR/bin/entrypoint" <<'SH'
-#!/usr/bin/env bash
-# ⚠ LA PORTE EST `roles-tfvars`, PAS `roles`. La premiere rend des COMPTES (`web_dev`), la seconde
-# des noms de ROLE (`dev`) — et `PROV_ROLES` est une liste de comptes. La doublure REFUSE `roles`
-# pour que le temoin tombe si la derivation y revenait : mesure sur banc du 2026-08-16, branchee sur
-# `roles`, elle faisait entrer `dev` et `writer` dans le roster a minter.
-[[ "$1" == "roles-tfvars" ]] || exit 1
-printf '{"roles":["web_dev","web_writer","fleet_engineer"],"system_roles":["system_architect"]}\n'
-SH
-  chmod +x "$BATS_TEST_TMPDIR/bin/entrypoint"
-  : > "$BATS_TEST_TMPDIR/bin/release"; chmod +x "$BATS_TEST_TMPDIR/bin/release"
-
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"web_dev"* ]]
-  [[ "$output" == *"web_writer"* ]]
-  # `fleet_engineer` est dans le plancher ET dans la sortie du catalogue : il ne sort qu'une fois.
-  [ "$(printf '%s\n' $output | grep -c '^fleet_engineer$')" -eq 1 ]
-}
-
-@test "prov_roles : un catalogue dont la porte REFUSE n'ajoute rien, et ne casse pas le mint" {
-  # Un catalogue incoherent est un catalogue que le boot refusera. Ce n'est pas au mint de trancher,
-  # et faire echouer la derivation entiere priverait de jetons les catalogues sains.
-  seed_local "casse"
-  printf '#!/usr/bin/env bash\nexit 3\n' > "$BATS_TEST_TMPDIR/bin/entrypoint"
-  chmod +x "$BATS_TEST_TMPDIR/bin/entrypoint"
-  : > "$BATS_TEST_TMPDIR/bin/release"; chmod +x "$BATS_TEST_TMPDIR/bin/release"
-
-  run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_ENTRYPOINT='$BATS_TEST_TMPDIR/bin/entrypoint' PROV_RELEASE_BIN='$BATS_TEST_TMPDIR/bin/release'; source '$LIB'; prov_roles"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"fleet_engineer"* ]]
-}
-
-# ─── FORGE INCONNUE : LE VERBE DEPEND DE CE QUE LA MACHINE PORTE — ET IL DISAIT TOUJOURS WARN ───
-#
-# ⚠ AUCUN TEMOIN NE COUVRAIT CETTE BRANCHE : le setup exporte `PROV_FORGE_URL` dans TOUS les tests.
-# La cause du trou est une inversion de rang non declarable — l adresse se derive de
-# `$PROV_TOKENS_DIR/forge.url`, dont le seul poseur est `48-forge-host`, TROIS RANGS PLUS LOIN, et
-# `provision:327` refuse un `AFTER` qui ne precede pas.
-#
-# Le module rendait `p_warn` dans les deux cas. Or `p_warn` n incremente ni PROV_DRIFT ni
-# PROV_FAILED : sur une re-provision dont les jetons ont disparu alors que le volume de la forge a
-# survecu, la passe etait INERTE et le bilan restait vert.
 
 @test "FORGE INCONNUE : sans catalogue installe, c est un WARN — l ordre des rangs est normal" {
   PROV_FORGE_URL="" run bash "$MOD" check

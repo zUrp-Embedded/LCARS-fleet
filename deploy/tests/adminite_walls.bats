@@ -236,7 +236,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # l'ecrit et le manifeste qui declare l'empreinte machine. Rien ne les comparait, et ils ont
   # diverge — `nogroup` d'un cote, `fleet` de l'autre. Un manifeste qui ment sur un secret est pire
   # qu'un manifeste absent : on le lit pour savoir qui peut lire.
-  local mod="$REPO/deploy/modules.d/66-deck-oidc.sh"
+  local mod="$REPO/fleet/services/forge.d/deck-oidc.sh"
   local manifest="$REPO/deploy/system.manifest"
   local row group
 

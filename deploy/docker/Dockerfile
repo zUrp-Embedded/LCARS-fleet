@@ -453,6 +453,9 @@ COPY fleet/services/admiral/skills /opt/lcars/fleet/services/admiral/skills
 # d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
 # couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
+# Le minteur de jetons de rôle : un geste de forge du produit (lot 6), posé à côté du geste de
+# structure — la boîte le joue à l'init de son instance.
+COPY fleet/services/provision-role-tokens.sh /opt/lcars/provision-role-tokens.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
