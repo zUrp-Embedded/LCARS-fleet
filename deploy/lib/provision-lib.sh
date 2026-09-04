@@ -593,6 +593,38 @@ ensure_dir() {
   ensure_mode "$path" "$mode" "$owner"
 }
 
+# ─── prov_scaffold_dir / prov_promote_dir — L'ECHAFAUDAGE NE SE JOURNALISE PAS (M8) ─────────────
+#
+# ⚠ LE JOURNAL ACCUMULAIT DES CHEMINS D'ECHAFAUDAGE (relecture hostile du 2026-09-04). Les poseurs
+# atomiques (`16-node`, `44-media`, `62-runtime-helpers`) creaient leur `.partial` / `.new` par
+# `ensure_dir`, qui note `posed_dir` : le journal du banc portait `/opt/node-24.20.0.partial`,
+# `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin,…}.new` — des repertoires qui
+# n'existent plus une seconde apres la bascule. Ceux qu'aucun ancetre declare n'absorbe remontent
+# dans la ligne « hors table » du plan d'uninstall : du bruit sur la seule ligne dont tout
+# l'interet est que l'operateur ne peut PAS en deviner le contenu.
+#
+# Un repertoire d'echafaudage se note APRES la bascule, SOUS SON NOM FINAL — et c'est la primitive
+# qui bascule qui le note, pour que « ce qu'une primitive pose, elle le note » reste vrai (le
+# temoin du journal interdit `prov_journal_note posed_dir` dans un module). Ni compteur ni « POSÉ »
+# ici : la bascule est le geste que le module annonce lui-meme.
+prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
+  local path="$1" mode="$2" owner="${3:-}"
+  prov_refuse_symlink_path "$path" || return 1
+  [[ -d "$path" ]] || mkdir -p "$path" || { p_fail "prov_scaffold_dir: mkdir refusé: $path"; return 1; }
+  chmod "$mode" "$path" || { p_fail "prov_scaffold_dir: chmod $mode refusé: $path"; return 1; }
+  [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
+  return 0
+}
+prov_promote_dir() { # prov_promote_dir <echafaudage> <final> — bascule (rm -rf du final, mv), puis note le nom FINAL
+  local from="$1" to="$2"
+  [[ -d "$from" ]] || { p_fail "prov_promote_dir: échafaudage absent: $from"; return 1; }
+  [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir: destination vide ou racine"; return 1; }
+  rm -rf -- "$to"
+  mv -- "$from" "$to" || { p_fail "prov_promote_dir: bascule refusée: $from → $to"; return 1; }
+  prov_journal_note posed_dir "$to"
+  return 0
+}
+
 # ─── ensure_group / ensure_member — création idempotente ─────────────────────────────────────────
 # prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
 # `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le

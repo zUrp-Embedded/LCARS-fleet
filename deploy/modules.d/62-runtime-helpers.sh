@@ -353,7 +353,7 @@ BLOC
   for n in "${EMBEDDED[@]}"; do
     [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente: $(product_tree)/$n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n.new"
-    ensure_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    prov_scaffold_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply   # hors journal (M8)
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc les 73 Mo de cache tofu ne sont jamais
     # ecrits — pas ecrits puis retires, JAMAIS ecrits. Meme forme que la boucle de la racine.
     ( cd "$(product_tree)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
@@ -364,8 +364,7 @@ BLOC
     # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
     chown -R "$HELPERS_OWNER" "$EMBEDDED_FLEET/$n.new" 2>/dev/null || true
     chmod -R g-s,go-w "$EMBEDDED_FLEET/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
-    rm -rf "${EMBEDDED_FLEET:?}/$n"
-    mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
+    prov_promote_dir "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }
   done
   # ⚠ CE MESSAGE DISAIT « provisionnement embarque », ET IL NE POSE PLUS LE PROVISIONNEMENT. Depuis
@@ -406,7 +405,7 @@ BLOC
   for n in "${EMBEDDED_ROOT[@]}"; do
     [[ -d "$(repo_root)/$n" ]] || { p_fail "source absente: $(repo_root)/$n"; verdict_apply; }
     rm -rf "${HELPERS_DIR:?}/$n.new"
-    ensure_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
+    prov_scaffold_dir "$HELPERS_DIR/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply   # hors journal (M8)
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc on ne copie jamais les 179 Mo qu'il
     # faudrait ensuite retirer. Meme outil que celui qui pose node, deja un pre-requis du rail.
     _only=(); [[ "$n" == deploy ]] && _only=(--exclude=./tests)
@@ -418,8 +417,7 @@ BLOC
     # L'arbre pose appartient a HELPERS_OWNER, sans bit setgid, sans ecriture pour le groupe.
     chown -R "$HELPERS_OWNER" "$HELPERS_DIR/$n.new" 2>/dev/null || true
     chmod -R g-s,go-w "$HELPERS_DIR/$n.new" || { p_fail "modes de la copie non poses: $n"; verdict_apply; }
-    rm -rf "${HELPERS_DIR:?}/$n"
-    mv "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
+    prov_promote_dir "$HELPERS_DIR/$n.new" "$HELPERS_DIR/$n" \
       || { p_fail "bascule ratée: $n"; verdict_apply; }
   done
   p_chg "arbres de la racine embarqués ($HELPERS_DIR/{${EMBEDDED_ROOT[*]}}, sans node_modules)"
