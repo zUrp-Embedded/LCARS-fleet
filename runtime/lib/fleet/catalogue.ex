@@ -254,13 +254,13 @@ defmodule Fleet.Catalogue do
     |> Enum.filter(&File.dir?/1)
   end
 
-  # ⚠ `find/2` ET `glob/2` (les portes par ARBRE, aplaties sur tous les installes) ONT ETE TUEES
-  # ICI, et l'absence est le point : elles resolvaient un nom au premier catalogue qui l'avait,
-  # TOUS catalogues confondus — la dette `search/1` des trois audits. Leur dernier appelant (les
-  # protocoles de pod) resout desormais par `tree_scope/2` + `find_in/2`, le scope d'UN catalogue
-  # plus le systeme. Un nouveau lecteur qui croit avoir besoin d'une recherche tous-catalogues a en
-  # main un appelant qui ne sait pas a quel catalogue il appartient — c'est CE probleme-la qu'il
-  # faut resoudre, pas celui du chemin. `merge/3` (meme famille, zero appelant) est parti avec.
+  # ⚠ PAS DE PORTE PAR ARBRE APLATIE SUR TOUS LES INSTALLES — pas de `find(tree, name)` qui
+  # resoudrait un nom au premier catalogue qui l'a, TOUS catalogues confondus. Un lecteur qui croit
+  # avoir besoin d'une recherche tous-catalogues a en main un appelant qui ne sait pas a quel
+  # catalogue il appartient : c'est CE probleme-la qu'il faut resoudre, pas celui du chemin. Les
+  # protocoles de pod resolvent par `tree_scope/2` + `find_in/2`, le scope d'UN catalogue plus le
+  # systeme. Ce qui prend une racine explicite, `search/2` et `find/3`, a exactement deux
+  # appelants : le composeur des blocs SP et la resolution des skills au spawn.
 
   # The name of the business catalogue shipped inside the release. `fleet` and not `lcars`: the
   # name is destined to become an identifier OUTSIDE this code (the forge org that carries a
@@ -391,25 +391,6 @@ defmodule Fleet.Catalogue do
     Enum.find(paths, Path.join(business, name), &File.regular?/1)
   end
 
-  @doc "Every path matching `glob` on the search path, in precedence order."
-  @spec glob(Path.t(), String.t(), String.t()) :: [Path.t()]
-  def glob(business, rel, pattern) when is_binary(pattern) do
-    Enum.flat_map(search(business, rel), &Path.wildcard(Path.join(&1, pattern)))
-  end
-
-  @doc """
-  `pattern` merged across the search path into `%{key => path}` — the FIRST root wins.
-
-  `Map.put_new` and not `Map.merge`: precedence must survive the fold, and a later root silently
-  overwriting an earlier one is the inversion this module exists to prevent.
-  """
-  @spec merge(Path.t(), String.t(), String.t(), (Path.t() -> term())) :: %{term() => Path.t()}
-  def merge(business, rel, pattern, key_fun) when is_function(key_fun, 1) do
-    business
-    |> glob(rel, pattern)
-    |> Enum.reduce(%{}, fn path, acc -> Map.put_new(acc, key_fun.(path), path) end)
-  end
-
   @doc "Relative path of a shared tree inside a catalogue — the ONE literal each, for `search/2`."
   @spec rel(atom()) :: String.t()
   def rel(:avatars), do: @rel_avatars
@@ -434,7 +415,7 @@ defmodule Fleet.Catalogue do
   #
   # ⚠ ONE TREE IS STILL `root/0`-ONLY, and it is measured rather than assumed: `brief_templates`
   # (read by `Workflow.BriefTemplate`). Same latent skew — a catalogue's own would never be read —
-  # not closed here because no caller holds the catalogue in hand today. (Its former twin,)
+  # not closed here because no caller holds the catalogue in hand today.
   def rel(:project_template), do: @rel_project_template
 
   @doc """

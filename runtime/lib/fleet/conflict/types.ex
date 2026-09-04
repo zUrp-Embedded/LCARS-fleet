@@ -94,12 +94,16 @@ defmodule Fleet.Conflict.Report do
   """
   alias Fleet.Conflict.Hunk
 
+  # `writable` counts the hunks whose TYPE the engine may write back (`Fleet.Conflict`'s
+  # `@writable_types`); `trivial` counts every non-complex classification. The two differ on
+  # purpose: a hunk can be trivially diagnosed and still never be written by the machine.
   @type stats :: %{
           trivial: non_neg_integer(),
           complex: non_neg_integer(),
-          total: non_neg_integer()
+          total: non_neg_integer(),
+          writable: non_neg_integer()
         }
   @type t :: %__MODULE__{merged: String.t() | nil, hunks: [Hunk.t()], stats: stats()}
   @enforce_keys [:hunks, :stats]
-  defstruct merged: nil, hunks: [], stats: %{trivial: 0, complex: 0, total: 0}
+  defstruct merged: nil, hunks: [], stats: %{trivial: 0, complex: 0, total: 0, writable: 0}
 end

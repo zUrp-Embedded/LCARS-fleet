@@ -51,20 +51,12 @@ defmodule Fleet.Layout do
   # The INSTALLED cache. It sits under `/opt/lcars/var` — the named volume that already carries the
   # forge tokens, and that survives an image swap.
   #
-  # ⚠ IT LIVED UNDER `/home` UNTIL 2026-09-01, ON A REASON THAT A DOCTRINE KILLED. The reason was
-  # « operator-facing material belongs where the operator already looks », and the placement was
-  # paid for by a promise written right here: `dir` in `system.manifest` and not `preserve`, so an
-  # uninstall removes it.
-  #
-  # That promise can no longer be kept. `/home` is now OUT of the uninstall perimeter ENTIRELY — no
-  # `rm`, no `userdel -r`, no exception and no motive to resolve — because a deploy that can reach
-  # under `/home` can destroy work that was never ours. A cache placed there would be created by
-  # every install and removed by none: it would accumulate, forever, on a path the operator was
-  # told the product manages.
-  #
-  # The material is still operator-facing, and that has not stopped being true — it stopped being
-  # DECISIVE. Where a tree that we create and must be able to remove can sit is settled before the
-  # question of who reads it is even asked.
+  # ⚠ NOT UNDER `/home`, even though the material is operator-facing. `/home` is OUT of the
+  # uninstall perimeter ENTIRELY — no `rm`, no `userdel -r`, no exception — because a deploy that
+  # can reach under `/home` can destroy work that was never ours. A cache placed there would be
+  # created by every install and removed by none: it would accumulate, forever, on a path the
+  # operator was told the product manages. Where a tree that we create and must be able to remove
+  # can sit is settled before the question of who reads it is even asked.
   @installed_catalogues_root "/opt/lcars/var/catalogues"
 
   # L'ETAT RUNTIME DE LA BOITE — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
