@@ -161,7 +161,9 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain, 1 = personne>
   local fn; fn="$(sed -n '/^publier_verdicts() {/,/^}/p' "$SRC")"
   local l_h l_p
   l_h="$(grep -n 'HUMANS_RC_FILE' <<<"$fn" | head -1 | cut -d: -f1)"
-  l_p="$(grep -n 'RC_FILE'   <<<"$fn" | head -1 | cut -d: -f1)"
+  # `RC_FILE` seul : `HUMANS_RC_FILE` le contient — un grep nu prendrait la ligne des humains pour
+  # celle du provisionnement et lirait l'ordre a l'envers (vu au lot 8, apres le renommage)
+  l_p="$(grep -nE '(^|[^A-Z_])RC_FILE' <<<"$fn" | head -1 | cut -d: -f1)"
   [ -n "$l_h" ] && [ -n "$l_p" ] || { echo "publier_verdicts n'ecrit plus les deux"; return 1; }
   [ "$l_h" -lt "$l_p" ] || { echo "provision.rc ecrit AVANT humans.rc — la course est rouverte"; return 1; }
 }

@@ -555,7 +555,8 @@ EOF
 # deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
 @test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
   lib="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
-  for v in LCARS_FORGE_ORG:ORG LCARS_HUMANS_TEAM:TEAM LCARS_FLEET_GROUP:GROUP; do
+  # la lib de l'INSTALLEUR declare en PROV_* ; le convergeur (produit) lit en LCARS_* — meme valeur
+  for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
     # Meme garde qu'ailleurs : `env -i` pour lire le DEFAUT et pas une surcharge de temoin.
     declared="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\${$prov}\"")"
