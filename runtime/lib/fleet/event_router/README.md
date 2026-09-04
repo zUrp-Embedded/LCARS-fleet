@@ -30,10 +30,12 @@ boundary, `lib/fleet/event.ex`); `Fleet.Shutdown.Quiesce` and `Fleet.SchemaCache
 zero-dep foundation boundaries, reachable from any domain because they depend on nothing).
 
 ## Config & deps
-- Knob `:start_webhooks` — read by `Application`, runtime on-switch `LCARS_FLEET_WEBHOOKS`.
-- Knob `:load_event_registry` — read by `Catalog` (default `true`; `false` in `:test`).
-- Knob `:permit_when_registry_empty` — read by `Bus` (regime when the registry is empty).
-- Knob `:start_signals` — read by `Application` (gated off, no on-switch).
-- Knobs `:webhook_port`, `:webhook_secret_path`, `:events_yaml_path` — read by `WebhooksGitea` / `Catalog`, set by `runtime.exs`.
+- Knobs, all under `:lcars_fleet` and prefixed `event_router_`:
+  - `:event_router_start_webhooks` — read by `Application`, runtime on-switch `LCARS_FLEET_WEBHOOKS`.
+  - `:event_router_load_event_registry` — read by `Catalog` (default `true`; `false` in `:test`).
+  - `:event_router_permit_when_registry_empty` — read by `Bus` (regime when the registry is empty).
+  - `:event_router_start_signals` — read by `Application` (gated off, no on-switch).
+  - `:event_router_webhook_port`, `:event_router_webhook_secret_path`, `:event_router_events_yaml_path` — read by `WebhooksGitea` / `Catalog`, set by `runtime.exs`.
+  - `:event_router_broadcast_fun`, `:event_router_webhook_emit_fun` — TEST seams (injected functions); `Application` logs at boot if the first one is declared in config.
 - Env `LCARS_BIND_HOST` / `LCARS_WEBHOOK_BIND_HOST` — read by `BindAddress`.
 - Deps: the facade's `use Boundary` declaration (`lib/fleet/event_router.ex`).
