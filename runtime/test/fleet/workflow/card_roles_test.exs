@@ -5,7 +5,7 @@ defmodule Fleet.Workflow.CardRolesTest do
   # `on_exit`. `Application.put_env` est GLOBAL au node : pendant cette fenetre, tout test
   # concurrent qui resout une carte lit la racine temporaire de CELUI-CI. C'est ce qui est arrive —
   # `Fleet.Pilot.ApplicationTest` est mort sur
-  # `/tmp/cr-19589/workflow/canon/workflow_maps/c0-poc.yaml: no such file`, une racine qui ne lui
+  # `/tmp/cr-19589/workflow/workflow_maps/c0-poc.yaml: no such file`, une racine qui ne lui
   # appartient pas et qui n'existait deja plus.
   #
   # LE VERT DE LA MACHINE DE DEV NE PROUVE RIEN ICI : la collision demande que les deux modules

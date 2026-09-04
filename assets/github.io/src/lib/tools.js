@@ -25,8 +25,8 @@ const PRIV = join(ROOT, 'runtime', 'priv');
 // le metier porte les roles du produit — parce que la question « qui peut appeler quoi » n'a de
 // reponse qu'en regardant l'ensemble de ce que la boite embarque.
 const PROFILE_DIRS = [
-  ['système', join(PRIV, 'catalogue-system', 'cap_profile', 'canon', 'cap-profiles')],
-  ['métier', join(PRIV, 'catalogue', 'cap_profile', 'canon', 'cap-profiles')]
+  ['système', join(PRIV, 'catalogue-system', 'cap_profile', 'cap-profiles')],
+  ['métier', join(PRIV, 'catalogue', 'cap_profile', 'cap-profiles')]
 ];
 
 /** Les outils declares, dans l'ordre du fichier — nom, description agent, schema d'entree. */

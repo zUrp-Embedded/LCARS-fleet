@@ -218,12 +218,12 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
   describe "skills_paths_env/1 — the skills delivery rail (BL-6-22)" do
     test "newline-delimited name:path entries — the LCARS_POD_MOUNTS pattern, space-safe" do
       # A root WITH a space is the exact case a space-separated format would shatter on.
-      paths = ["/opt/my catalogue/skills/canon/card-revision", "/opt/skills/deep-dive"]
+      paths = ["/opt/my catalogue/skills/card-revision", "/opt/skills/deep-dive"]
 
       assert %{"LCARS_SKILLS_PATHS" => env} = LaunchSpec.skills_paths_env(paths)
 
       assert env ==
-               "card-revision:/opt/my catalogue/skills/canon/card-revision\n" <>
+               "card-revision:/opt/my catalogue/skills/card-revision\n" <>
                  "deep-dive:/opt/skills/deep-dive"
     end
 

@@ -126,7 +126,7 @@ defmodule Fleet.SPBuilderTest do
 
     test "modop_root has a DEFAULT (fleet_cap_profile/modop-bundles): modop without explicit config → composed (F-C146/PORT)" do
       # EXERCISES the runtime DEFAULT: remove the override → modop_root unconfigured → default
-      # app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/modop-bundles") (where the bundles live).
+      # app_dir(:lcars_fleet, "priv/catalogue/cap_profile/modop-bundles") (where the bundles live).
       # `fire-mode` exists there → composed. No :modop_root_unconfigured: the PORT wired the
       # default.
       #

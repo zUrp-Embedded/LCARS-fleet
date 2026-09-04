@@ -650,7 +650,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   defp catalogue_profiles(root) do
     root
     |> catalogue_roots()
-    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/cap-profiles/*.yaml")))
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/cap-profiles/*.yaml")))
     |> Enum.map(fn path ->
       spec = path |> YamlElixir.read_from_file!() |> Map.get("spec", %{})
       scope = Map.get(spec, "scope", %{})
@@ -666,7 +666,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tools do
   defp catalogue_modop_bundles(root) do
     root
     |> catalogue_roots()
-    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/canon/modop-bundles/*/sp.md")))
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "cap_profile/modop-bundles/*/sp.md")))
     |> Enum.map(fn path ->
       cited = @tool_cite_re |> Regex.scan(File.read!(path)) |> List.flatten() |> Enum.uniq()
       {path |> Path.dirname() |> Path.basename(), Path.relative_to(path, root), cited}

@@ -470,7 +470,6 @@ defmodule Fleet.API.ControlRouterTest do
           :code.priv_dir(:lcars_fleet),
           "catalogue",
           "cap_profile",
-          "canon",
           "cap-profiles",
           "engineer.yaml"
         ]

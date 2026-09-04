@@ -80,7 +80,7 @@ defmodule Fleet.Application.CatalogueVerifyTest do
     # the header comments, and a mutated comment is invisible to the image (it hashes the PARSED
     # map), the very trap `Fleet.CatalogueTest` documents. The manifest and both images still publish
     # (the profiles are intact); the break surfaces exactly where the boot would hit it.
-    map = Path.join(copy, "workflow/canon/workflow_maps/c0-poc.yaml")
+    map = Path.join(copy, "workflow/workflow_maps/c0-poc.yaml")
 
     content =
       map
@@ -125,7 +125,7 @@ defmodule Fleet.Application.CatalogueVerifyTest do
     # (le fichier manque) — exactement la classe que la validation de schéma ne peut pas voir. Et
     # c'est un test qui ne peut plus être désarmé par une décision de catalogue.
     copy = catalogue_copy(tmp)
-    profile = Path.join(copy, "cap_profile/canon/cap-profiles/qualifier.yaml")
+    profile = Path.join(copy, "cap_profile/cap-profiles/qualifier.yaml")
 
     File.write!(
       profile,
@@ -186,12 +186,12 @@ defmodule Fleet.Application.CatalogueVerifyTest do
 
     override =
       Fleet.Catalogue.system_root()
-      |> Path.join("cap_profile/canon/cap-profiles/architect.yaml")
+      |> Path.join("cap_profile/cap-profiles/architect.yaml")
       |> File.read!()
 
     # Kept byte-identical on purpose: the point under test is that the SUPERPOSITION is admitted,
     # and any edit would move the failure to whatever the edit broke.
-    File.write!(Path.join(copy, "cap_profile/canon/cap-profiles/architect.yaml"), override)
+    File.write!(Path.join(copy, "cap_profile/cap-profiles/architect.yaml"), override)
 
     assert {:ok, _} = CatalogueVerify.verify(copy)
   end

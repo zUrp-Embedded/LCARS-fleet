@@ -32,7 +32,7 @@ seule. Le bus (`Phoenix.PubSub`) est un fast-path lossy, jamais une source de v�
 | `config/` | `config.exs` défauts, `test.exs` baseline hermétique, `runtime.exs` lecture des env vars |
 | `priv/catalogue/`, `priv/catalogue-system/` | les deux catalogues embarqués : métier et mécanique système |
 | `priv/*/schema/`, `priv/cap_profile/baseline/` | matériel runtime, hors catalogue : contrats et planchers |
-| `priv/canon/` | legacy gelé, lu par rien |
+| `priv/memory-x/` | Memory-X, feature gelée (prototype v1.5 + profils v2.5), lue par rien |
 | `services/` | ce qui tourne sur la machine après l'install, souvent root : convergeurs, consoles, deck, exécuteur de catalogue |
 | `vendor/token_saver/` | brique tierce vendorée, contrat dans son `VENDOR.md` |
 | `test/` | ExUnit (284 fichiers), bats des launchers et services (31), `shell_gate.sh`, `fixtures/forge/` (captures Gitea réelles) |
@@ -97,11 +97,13 @@ seule autorité de son layout : une racine (`LCARS_CATALOGUE_ROOT`, défaut `pri
 manifeste `catalogue.yaml` dont l'`api_version` est vérifiée au boot avant que les images ne
 gèlent quoi que ce soit, et des clés par arbre qui restent des surcharges fines.
 
-Le discriminant tient partout dans `priv/` : `canon/`, `config/`, `templates/` sont du catalogue,
-et eux seuls passent par `Fleet.Catalogue`. Tout le reste est runtime, résolu par
+Le discriminant est un répertoire : tout ce qui est sous une racine de catalogue
+(`priv/catalogue/`, `priv/catalogue-system/`, ou celle qu'un opérateur apporte) est du catalogue,
+et cela seul passe par `Fleet.Catalogue`. Tout le reste de `priv/` est runtime, résolu par
 `:code.priv_dir` sans molette. **Ce qu'un opérateur ne doit pas pouvoir remplacer est un contrat,
-et un contrat qu'on peut remplacer ne contraint pas.** Un plancher posé sous `canon/` part avec
-le catalogue exporté et ne contraint plus rien, sans qu'aucun message ne le dise.
+et un contrat qu'on peut remplacer ne contraint pas.** Un plancher posé dans un catalogue part avec
+l'export et ne contraint plus rien, sans qu'aucun message ne le dise. Aucun étage intermédiaire
+dans un catalogue ne porte ce discriminant : la racine le porte.
 
 `Fleet.Layout` est la même autorité pour la machine : trois faces par projet, `code`, `workshop`,
 `ops`, et `~/.lcars` par humain. Ces chemins sont fixés par design, pas configurables.

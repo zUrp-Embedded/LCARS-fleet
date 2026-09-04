@@ -1,4 +1,4 @@
-# _frozen-monks — Memory-X GELÉ (sorti de la boucle de boot)
+# monks — les profils v2.5 de Memory-X (feature gelée, hors de la boucle de boot)
 
 **Date** : 2026-06-19
 **Dernière révision** : 2026-07-04
@@ -25,5 +25,5 @@ reste en place, juste non sollicité. Tests monk gelés (`@moduletag skip`) : `s
 
 ## Restaurer (au re-home)
 
-`git mv _frozen-monks <cible per-project/system-wide>` + re-pointer les fixtures de test + retirer les
+`git mv priv/memory-x/monks <cible per-project/system-wide>` + re-pointer les fixtures de test + retirer les
 `@moduletag skip`. Ne PAS juste remettre dans `cap-profiles/monks/` (ça re-introduit le bug per-fleet).

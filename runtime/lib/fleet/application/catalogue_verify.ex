@@ -172,7 +172,7 @@ defmodule Fleet.Application.CatalogueVerify do
   # first: this reads ONE root where the image reads the union, and a guard that relies on another
   # stage running before it is a guard with a hidden precondition.
   defp advise_business!(root) do
-    cap_root = Path.join(root, "cap_profile/canon/cap-profiles")
+    cap_root = Path.join(root, "cap_profile/cap-profiles")
 
     case Fleet.CapProfile.index_of(cap_root) do
       {:error, :enoent} ->

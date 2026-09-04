@@ -1038,7 +1038,7 @@ defmodule Fleet.CapProfileTest do
         path =
           Application.app_dir(
             :lcars_fleet,
-            "priv/#{catalogue}/cap_profile/canon/cap-profiles/#{name}.yaml"
+            "priv/#{catalogue}/cap_profile/cap-profiles/#{name}.yaml"
           )
 
         {:ok, raw} = YamlElixir.read_from_file(path)
@@ -1117,7 +1117,7 @@ defmodule Fleet.CapProfileTest do
     end
 
     test "the floor lives OUTSIDE every catalogue tree — a catalogue cannot carry it" do
-      # THE point of `priv/cap_profile/baseline/` sitting outside `canon/`, asserted on the LAYOUT
+      # THE point of `priv/cap_profile/baseline/` sitting outside the catalogue, asserted on the LAYOUT
       # and not on a read: the resolver caches its parse in `:persistent_term` for the life of the
       # VM, so a test that repoints the root and re-reads would pass on a warm cache without
       # exercising a single path. What can be checked, and is what actually protects the floor:

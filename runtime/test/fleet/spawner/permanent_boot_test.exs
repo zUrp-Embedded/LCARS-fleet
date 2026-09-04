@@ -358,14 +358,14 @@ defmodule Fleet.Spawner.PermanentBootTest do
 
   describe "REAL canon conformance — boot_at_start? on in-repo cap-profiles" do
     # R0.8-brick5: canon lives in-repo (R0.7) at `priv/cap_profile/
-    # canon/cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
+    # cap-profiles/`. No hardcoded doctrine path `05_data-canon/...`
     # (nonexistent in a standard install). Same pattern as brick1
     # MonkTest (resolve via Application.app_dir).
     # Les deux racines : starfleet et architect sont de la mecanique et vivent dans le catalogue
     # systeme ; ce bloc mesure le canon REEL, donc il doit voir le deploiement entier.
     @canon_dirs [
-      Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/canon/cap-profiles"),
-      Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon/cap-profiles")
+      Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/cap-profiles"),
+      Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/cap-profiles")
     ]
 
     defp canon_spec(name) do

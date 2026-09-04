@@ -16,16 +16,16 @@ defmodule Fleet.Workflow.ModopsConsumptionTest do
   use ExUnit.Case, async: true
 
   # R0.8-brick6: canon reabsorbed in-repo. The `workflow_maps` live in
-  # `priv/catalogue/workflow/canon/`; the modop-bundles + subagent-templates live
-  # (F-C146/PORT) in `priv/catalogue/cap_profile/canon/` (co-located with the overlay profiles +
+  # `priv/catalogue/workflow/`; the modop-bundles + subagent-templates live
+  # (F-C146/PORT) in `priv/catalogue/cap_profile/` (co-located with the overlay profiles +
   # reachable by SPBuilder); cap-profiles in
-  # `priv/catalogue/cap_profile/canon/cap-profiles/` (R0.7). app_dir pattern (brick1/brick5).
+  # `priv/catalogue/cap_profile/cap-profiles/` (R0.7). app_dir pattern (brick1/brick5).
   # LES DEUX racines depuis le decoupage systeme/metier : un modop declare par un role mecanique
   # vit avec lui. Enumerer la seule racine metier compterait les bundles systeme comme absents et
   # les modops systeme comme des references pendantes — le test mesurerait une moitie de fleet.
   @modop_canons [
-    Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile/canon"),
-    Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile/canon")
+    Application.app_dir(:lcars_fleet, "priv/catalogue-system/cap_profile"),
+    Application.app_dir(:lcars_fleet, "priv/catalogue/cap_profile")
   ]
 
   # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS : les trois templates (spec-reviewer,
