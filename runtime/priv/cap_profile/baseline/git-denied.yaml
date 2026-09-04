@@ -1,0 +1,30 @@
+# Universal baseline of git operations denied to ALL workers.
+#
+# RUNTIME SIDE, not catalogue — and that is the point of this directory. A catalogue an operator
+# brings may name its own roles and widen their tools; it may not lower this floor. The file sits
+# outside the catalogue for the same reason the schemas do: what an operator must not be able to replace
+# is a contract. It is resolved from the BUNDLED priv (`:code.priv_dir`), never through
+# `Fleet.Catalogue` — a copy of this file inside someone's catalogue is read by nobody.
+#
+# Read by `Fleet.CapProfile.with_resolved_disallowed_tools/1` and unioned (uniq) with the worker
+# cap-profile's `spec.scope.git_ops_denied`. No silent override: removing a pattern from this list
+# is an explicit architecture decision — it ships with the runtime and changes with it.
+#
+# This is NOT a cap-profile (no kind/metadata/spec): it is consumed by the generic claude CLI
+# `disallowedTools` resolution mechanism.
+#
+# Policy: patterns that are universally destructive for the shared git
+# history (main/master) or lose local work without recovery. Outside this
+# baseline, git operations are legitimate: a worker MAY commit, push
+# (plain), and rebase its own feature branch.
+
+git_ops_denied:
+  - push --force            # destructive remote (rewrites shared history)
+  - push -f                 # short alias of push --force
+  - push --force-with-lease # same but conditional (denied by default, override = a decision)
+  - reset --hard            # local work lost without recovery
+  - branch -D               # force branch delete (lost if never pushed)
+  - rebase main             # rewrites shared main history
+  - rebase master           # same, master variant
+  - checkout main           # leaves the worker branch, WIP at risk
+  - checkout master         # same, master variant

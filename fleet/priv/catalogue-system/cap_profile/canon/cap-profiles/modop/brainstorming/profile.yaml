@@ -1,4 +1,0 @@
-# Deliberate empty identity overlay: composing this modop leaves the role's cap-profile
-# unchanged. Its behavioral effect is carried by the matching SP bundle
-# (`canon/modop-bundles/<name>/sp.md`, composed by SPBuilder), not by a cap-profile mutation.
-{}

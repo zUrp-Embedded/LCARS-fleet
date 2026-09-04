@@ -1,0 +1,39 @@
+# Pipeline — gk-smoke (smoke-test escalade gatekeeper, pattern B)
+#
+# Date: 2026-06-08 — 2026-06-29 rev3 (enveloppe unique)
+# Statut: SMOKE — workflow_map minimale 2 steps pour valider la chaîne forge-driven AVEC
+#         une ESCALADE gatekeeper (pattern B) sur de vrais pods.
+#         build(engineer, livrable git) -> review(reviewer, gate soft -> escalade).
+#
+# review n'est PAS un step gatekeeper : c'est un step metier reviewer avec une
+# gate `soft`. A l'evaluation, une gate soft retourne une decision d'escalade vers
+# le gatekeeper (juge one-shot par-projet, spawne pour cette eval — reorg 2026-07-19)
+# qui tranche, et le rail reprend sur son
+# verdict (continue -> avance ; abandon -> close ; humain -> await_arch). Smoke-test
+# du chemin d'escalade de bout en bout.
+
+kind: WorkflowMap
+metadata:
+  name: gk-smoke
+  status: smoke
+  description: "Smoke-test escalade gatekeeper (pattern B) : build engineer -> review reviewer (gate soft)"
+  presentation: "Carte TECHNIQUE — smoke-test du chemin d'escalade : un engineer livre (profil noop), un reviewer pose une gate SOFT qui escalade au gatekeeper, et le rail reprend sur son verdict (continue/abandon/humain). Sert à valider la chaîne d'escalade sur de vrais pods — pas à livrer un projet."
+spec:
+  # Jury de PR (source UNIQUE — la carte gouverne le jugement). Valeur = l'ex-config globale.
+  jury: [qualifier, reviewer]
+  # CI IGNORÉE — cette carte teste le chemin d'ESCALADE, pas le rail machine. Sous `required` elle
+  # dépendrait en plus d'un runner vivant servant le label `shell` : un banc sans runner rendrait
+  # `:none`, puis une escalade CI, et le smoke-test du gatekeeper échouerait en NOMMANT autre chose
+  # que ce qu'il mesure. Un instrument ne doit pas pouvoir rougir pour une raison hors de sa portée.
+  ci: ignore
+  # Budget anti-emballement (obligatoire, donnée map-level) : nb de restarts complets tolérés avant escalade.
+  max_rework_rounds: 2
+  steps:
+    build:
+      role: engineer
+      needs: []
+    review:
+      role: reviewer
+      needs: [build]
+      gate:
+        type: soft

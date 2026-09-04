@@ -16,30 +16,30 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const BIN = join(here, '..', '..', '..', '..', 'fleet', 'bin');
+const BIN = join(here, '..', '..', '..', '..', 'runtime', 'bin');
 
 const read = (name) => readFileSync(join(BIN, name), 'utf8');
 
 /**
- * Les verbes de `fleet_v2`, lus dans la ligne `usage: fleet_v2 {a|b|c}` de son bloc d'aide.
+ * Les verbes de `fleet`, lus dans la ligne `usage: fleet {a|b|c}` de son bloc d'aide.
  * C'est la SEULE enumeration du fichier qui soit destinee a etre lue — le `case` du dispatch
  * dirait la meme chose, mais il est du code, et un jour il portera un alias non documente.
  */
 export function fleetVerbs() {
-  const src = read('fleet_v2');
-  const m = src.match(/^usage: fleet_v2 \{([^}]+)\}/m);
-  if (!m) throw new Error('cli.js: fleet_v2 n’expose plus de ligne `usage: fleet_v2 {…}`');
+  const src = read('fleet');
+  const m = src.match(/^usage: fleet \{([^}]+)\}/m);
+  if (!m) throw new Error('cli.js: fleet n’expose plus de ligne `usage: fleet {…}`');
   return m[1].split('|').map((v) => v.trim()).filter(Boolean);
 }
 
 /**
- * Les options de `fleet_v2 start`, avec leur explication — le seul verbe qui en porte.
+ * Les options de `fleet start`, avec leur explication — le seul verbe qui en porte.
  * Forme lue : une ligne `    --nom …` puis ses lignes de continuation, plus indentees.
  */
 export function fleetStartOptions() {
-  const src = read('fleet_v2');
-  const block = src.match(/^usage: fleet_v2[\s\S]*?^USAGE$/m);
-  if (!block) throw new Error('cli.js: bloc d’aide de fleet_v2 introuvable');
+  const src = read('fleet');
+  const block = src.match(/^usage: fleet[\s\S]*?^USAGE$/m);
+  if (!block) throw new Error('cli.js: bloc d’aide de fleet introuvable');
 
   const opts = [];
   let cur = null;
@@ -55,7 +55,7 @@ export function fleetStartOptions() {
     }
   }
   if (cur) opts.push(cur);
-  if (opts.length === 0) throw new Error('cli.js: aucune option lue dans fleet_v2 start');
+  if (opts.length === 0) throw new Error('cli.js: aucune option lue dans fleet start');
   return opts;
 }
 
@@ -130,7 +130,7 @@ function splitSynopsis(synopsis) {
  */
 export function envVars() {
   const out = new Map();
-  for (const [file, scope] of [['fleet_v2', 'fleet_v2'], ['lcars', 'lcars']]) {
+  for (const [file, scope] of [['fleet', 'fleet'], ['lcars', 'lcars']]) {
     for (const m of read(file).matchAll(/\$\{(LCARS_[A-Z0-9_]+):-([^}]*)\}/g)) {
       const [, name, fallback] = m;
       if (out.has(name)) { out.get(name).scope = 'les deux'; continue; }

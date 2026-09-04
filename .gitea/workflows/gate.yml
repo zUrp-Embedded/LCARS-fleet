@@ -16,7 +16,7 @@ name: Gate runtime (I-CBC)
 on:
   push:
     paths:
-      - 'fleet/**'
+      - 'runtime/**'
       # `shell_gate` audite le shell SUIVI du dépôt entier, hooks et skills compris : sans ce
       # chemin, une édition de `.claude/` casse le gate sans le déclencher, et la rougeur tombe
       # sur le commit suivant, qui n'y est pour rien.
@@ -24,7 +24,7 @@ on:
       - '.gitea/workflows/gate.yml'
   pull_request:
     paths:
-      - 'fleet/**'
+      - 'runtime/**'
       - '.claude/**'
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: fleet
+        working-directory: runtime
     steps:
       # ⚠ LE JOB JUGE **SON** SHA, JAMAIS LA TÊTE COURANTE. Un run qui a attendu son tour dans la
       # file obtiendrait sinon un arbre plus récent que celui qu'il annonce juger. `checkout` vise
@@ -123,9 +123,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            fleet/deps
-            fleet/_build
-          key: mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-${{ hashFiles('fleet/mix.lock') }}
+            runtime/deps
+            runtime/_build
+          key: mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-${{ hashFiles('runtime/mix.lock') }}
           restore-keys: |
             mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-
 
@@ -133,7 +133,7 @@ jobs:
         run: mix deps.get
 
       # `MIX_ENV=test` N'EST PAS UN DETAIL D'ENVIRONNEMENT : `config/runtime.exs` est un fichier de
-      # BOOT, et hors test il exige les ports que `bin/fleet_v2` calcule par humain — d'ou
+      # BOOT, et hors test il exige les ports que `bin/fleet` calcule par humain — d'ou
       # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien. C'est
       # exactement la ligne que joue `etc/deploy-release.sh` avant de poser la release : le gate de la CI
       # et le gate du build ne doivent pas etre deux gates.

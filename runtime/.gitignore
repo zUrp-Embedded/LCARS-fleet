@@ -1,0 +1,37 @@
+# LCARS V2 runtime — umbrella Elixir .gitignore
+# Beyond_#4 encodage DN. Empêche pollution build/deps dans le triangle
+# (artefacts régénérables : _build, deps, *.beam ; pas de secret versionné).
+# Statut : actif. Référencé par : commit Lot 1/2 (run beyond_#4-engineer).
+
+# Build artifacts
+/_build/
+/cover/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+*.beam
+/config/*.secret.exs
+
+# Dependencies (régénérés par mix deps.get)
+/deps/
+
+# Outils agent (hors livrable runtime)
+/.claude/
+
+# OS / éditeur
+.DS_Store
+*~
+
+# ExUnit scratch dirs (per-app)
+tmp/
+
+# Version du build embarquée au `mix release` (générée par le step
+# write_build_info/1 — JAMAIS dans le source ; le runtime source la dérive de git)
+priv/api/build_info.txt
+
+# Release installée (artefact de build, posée par le deploy ; cf. etc/README.md + bin/fleet)
+/rel/
+
+# Généré par `mix boundary.visualize` (graphe de deps régénérable)
+/boundary/

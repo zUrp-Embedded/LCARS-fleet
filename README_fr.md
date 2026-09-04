@@ -129,8 +129,8 @@ Un Gitea complet. Tes projets, leurs pull requests, leurs runs de CI. Connexion 
 La même boîte, dans un vrai terminal. De là :
 
 ```bash
-fleet_v2 start        # démarrer la flotte
-fleet_v2 status       # ce qu'elle fait
+fleet start        # démarrer la flotte
+fleet status       # ce qu'elle fait
 lcars catalogue list  # quels catalogues métier cette boîte porte
 ```
 
@@ -158,7 +158,7 @@ t'est posée au lieu d'être devinée.
 Tout passe par une conversation avec un agent — tu ne remplis pas de formulaire.
 
 1. Ouvre le tableau de bord et démarre ta console.
-2. Lance `fleet_v2 start`, puis `claude` — tu parles au guichet de la flotte.
+2. Lance `fleet start`, puis `claude` — tu parles au guichet de la flotte.
 3. Demande-lui un projet. Il te montre les **cartes** que portent les catalogues installés (une
    carte est un workflow : qui écrit, qui relit, si la CI doit être verte avant de merger), te
    laisse en choisir une, et crée le dépôt, les branches et les dossiers de travail.

@@ -1,0 +1,4 @@
+# noop modop — empty identity overlay: `compose(role, ["noop"])` leaves the role's cap-profile
+# unchanged. Must live under the root `<cap-profiles>/modop/` (root_dir does not resolve the
+# `modop/noop` sibling); referenced by gk-smoke steps that carry no overlay.
+{}

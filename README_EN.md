@@ -126,8 +126,8 @@ A full Gitea. Your projects, their pull requests, their CI runs. Log in as `lcar
 The same box, in a real terminal. From there:
 
 ```bash
-fleet_v2 start        # start the fleet
-fleet_v2 status       # what it is doing
+fleet start        # start the fleet
+fleet status       # what it is doing
 lcars catalogue list  # which business catalogues this box carries
 ```
 
@@ -154,7 +154,7 @@ project — and a project's catalogue is fixed for its life, so you are asked ra
 Everything happens through a conversation with an agent — you do not fill in forms.
 
 1. Open the dashboard and start your console.
-2. Run `fleet_v2 start`, then `claude` — you are talking to the fleet's front desk.
+2. Run `fleet start`, then `claude` — you are talking to the fleet's front desk.
 3. Ask it for a project. It will show you the **cards** the installed catalogues carry (a card is a
    workflow: who writes, who reviews, whether CI must be green before merge), let you pick one, and
    create the repository, the branches and the working folders.

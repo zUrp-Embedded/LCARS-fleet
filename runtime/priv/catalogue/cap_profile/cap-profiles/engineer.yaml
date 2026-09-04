@@ -1,0 +1,156 @@
+# Cap-profile: engineer
+# Contract: this file + Fleet.CapProfile (@moduledoc, current SSoT).
+# Schema: ../../schema/cap-profile.json
+kind: CapabilityProfile
+metadata:
+  name: engineer
+  # vitrine: Il produit le code | Reçoit un brief, implémente, livre. Un pod par ticket : son contexte suit la mission du début à la fin.
+  containment: bwrap
+  # LE PREMIER PRODUCTEUR QUI LE DIT, et `architect.yaml` avait ecrit d'avance la regle :
+  # « tous les autres roles restent au defaut vendor-only [...] c'est une DECLARATION, pas une
+  # derivation : le jour ou un producteur en a besoin, il le dit ». Ce jour est arrive, et le
+  # besoin est mecanique : ce role construit (`Bash` generique = mix/npm/cargo/pytest, cf. le
+  # commentaire de scope.allowedTools). Un build qui doit resoudre ses dependances et qui ne
+  # joint aucun registre echoue a la premiere dep externe.
+  #
+  # DEUX CLEFS, ET AUCUNE NE SUFFIT : `network` dit QUI a le droit de sortir, `scope.egress_hosts`
+  # dit OU. Le fail-closed est preserve a chaque couche — un role sans cette ligne ne recoit
+  # RIEN de plus que les hotes de son vendor, meme si un fichier d'hotes existe pour lui.
+  network: egress
+  # Role identity coordinates, read by the session_id builder (single source of the WHAT):
+  # role_index = role slot in the hexspeak UUID.
+  role_index: 3
+spec:
+  # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
+  capabilities: [producer]
+  scope:
+    allowedTools:
+      - Read
+      - Glob
+      - Grep
+      - Edit
+      - Write
+      # Wake rail (Monitor loaded via ToolSearch) — required in --permission-mode default.
+      - Monitor
+      - ToolSearch
+      # GENERIC Bash (shell + local git + build: mix/npm/cargo/make/pytest...). A SCOPED Bash
+      # (allow-as-restriction) is incompatible with --permission-mode default: any off-pattern
+      # command (printf/cat/pwd...) PROMPTS -> hang. Real enforcement = the MOUNT (RO/RW, shaped
+      # zones) + `git_ops_denied` (`push` -> `Bash(git push:*)` hard-denied = forge-blind;
+      # the SYSTEM pushes via the DeliverableGate).
+      - Bash
+      - TaskCreate
+      - TaskUpdate
+      - TaskList
+      - TaskGet
+      - TaskStop
+      # Rail toolchain (chantier admiral 2026-08-19) : le producer qui compile est le premier a
+      # buter sur un outil systeme absent. L'appel ouvre une PR vers `tool_request` et verrouille son
+      # work-item (`lcars-awaits-toolchain`) — rien ne s'installe sans la signature d'un admin.
+      # Depuis 6-099 la liste servie au pod est decouverte ET autorisation : sans cette ligne,
+      # l'outil existe cote serveur mais aucun pod ne peut l'atteindre.
+      - mcp__fleet__toolchain_request
+    disallowedTools:
+      - web_search
+      - web_fetch
+      - code_execution
+      - bash_code_execution
+      - text_editor_code_execution
+      - tool_search_python
+      - tool_search_bash
+      # CLIENT twins of the two above: `web_search`/`web_fetch` deny Anthropic's SERVER-SIDE
+      # tools, `WebSearch`/`WebFetch` are the Claude Code tools running INSIDE the pod. Denying
+      # one face leaves the other open. This role does not browse: both faces are closed.
+      - WebSearch
+      - WebFetch
+    # LES REGISTRES DE PAQUETS, ET RIEN D'AUTRE. Ce role ne navigue pas : `WebSearch`/`WebFetch`
+    # et leurs jumeaux serveur sont refuses juste au-dessus, et cette liste ne les rouvre pas —
+    # le proxy ne decide que du HOTE d'un CONNECT, il ne rend pas un navigateur.
+    #
+    # ⚠ PYTHON SEUL, ET C'EST DELIBERE. L'image porte pip et venv depuis la baseline d'outillage ;
+    # elle NE PORTE NI node/npm NI cargo. Declarer `registry.npmjs.org` ou `crates.io` aujourd'hui
+    # ouvrirait des hotes pour des gestionnaires absents — une permission sans capacite, qui se lit
+    # comme un acquis et ne sert rien. Ces registres arrivent AVEC leur gestionnaire, dans le lot
+    # qui le pose.
+    #
+    # `files.pythonhosted.org` n'est pas un doublon de `pypi.org` : le premier sert l'INDEX, le
+    # second les ARCHIVES. Sans les deux, pip resout et ne telecharge pas.
+    egress_hosts:
+      - pypi.org
+      - files.pythonhosted.org
+    # Destructive patterns come from the universal baseline (`baseline/git-denied.yaml`,
+    # intangible) — not duplicated here. `push` added here = the MECHANICAL forge-blind
+    # barrier: `Bash(git push:*)` becomes disallowed (disallow > allow), not merely absent
+    # from the allowlist. The pod CANNOT push.
+    git_ops_denied: [push]
+  knowledge:
+    skills: []  # modops are listed in modop_set
+    monk_registry: null
+    monk_instance: null
+  invocation:
+    # `pipe`: ONE resident engineer process per project, re-briefed between tickets.
+    # A Claude Desktop slot attests a live PROCESS: a one-shot respawning N times burns
+    # N slots; a pipe holds 1. Cold-per-ticket (clean workspace + /clear) is achieved
+    # WITHOUT rm_rf (the bwrap bind mount stays alive) by the idle-aware re-brief
+    # pipeline: do_extract sets :publishing -> deliverable.published (POST-push) raises
+    # :ready -> the StepDispatcher gate reprovisions in-place (reset_in_place + /clear)
+    # when re-briefing a :ready pipe. The engineer submits via MCP `submit_result`; the
+    # SYSTEM publishes to the forge (forge-blind). State lives on the forge, not in RAM:
+    # a rework re-brief re-reads its context from the forge (PR + findings). The judges
+    # (qualifier, reviewer, scoper) are one-shot. Reversible: set `one-shot` back
+    # here — the gate's one-shot path is UNCHANGED.
+    lifetime_scope: pipe
+    # TICKET-LIVE — one pod per TICKET, surviving its rework rounds without outliving its ticket.
+    # `pipe` alone derived `slot_scope: project`: ONE pod for the whole repo, re-briefed by a
+    # workspace reset plus `/clear` — the process survived and the CONTEXT died. Yet the context is
+    # what matters when a deliverable comes back for correction. Declaring `instance` keys the pod
+    # on (repo, issue, role): a re-dispatch of the SAME ticket lands on the SAME pod and re-briefs
+    # it without erasing anything.
+    slot_scope: instance
+    model: opus        # catalogue -> --model (alias or full name; tunable)
+    effort: high       # catalogue -> --effort {low,medium,high,xhigh,max}; tunable
+    boot_at_start: false
+    # null: the engineer executes its brief DIRECTLY (get_work_item -> work ->
+    # submit_result over MCP tools), not via a dispatched subagent. NB: with
+    # `lifetime_scope: pipe`, reintroducing a subagent_template would VIOLATE G24-11
+    # (subagent_template implies one-shot) — direct execution stays. A subagent
+    # pattern belongs in a separate cap-profile.
+    subagent_template: null
+    # No forge write channel — forge-blind barrier: the engineer reads its brief and
+    # returns its deliverable through the universal work-item channel (the runtime does
+    # commit/comment/PATCH system-side). fleet-control = Memory-X/coord.
+    host_native: false
+    bridge_enabled: false
+  modop_set:
+    # `adresser-un-agent` est dans le default de TOUS les roles (contrat `sp.adresser_un_agent`).
+    # Un producteur ecrit aussi : corps de PR, resultat rendu au rail, commentaires que d'autres
+    # agents liront. Jamais dans un `incompatible:` — ce n'est pas un mode commutable.
+    default: [adresser-un-agent]
+    # ⚖ USER 2026-08-19 — SORTIE DE SUPERPOWERS. Les bundles retirés de cette liste (tdd, subagent-driven)
+    # étaient dérivés de superpowers et INERTES : aucun appelant de production n'active un
+    # bundle `optional` (`CapProfile.resolve/4` est toujours appelé à deux arguments), donc
+    # ils étaient livrés et jamais composés. Le tri n'a rien trouvé à rapatrier — leur
+    # doctrine était soit importée telle quelle, soit déjà couverte par nos propres blocs.
+    optional: [rubber-duck]
+    incompatible: []
+    # (fire-mode REMOVED — codex audit F-05 2026-07-19: its v1.5 output model — JSON on stdout,
+    # self-exit one-shot — predates MCP submit_result and contradicted the runtime protocol; the
+    # anti-conversation discipline lives in the base worker SP blocks.)
+  project: null
+  # The engineer IS a dev: it commits its code in its own workspace (git-native). The
+  # system verifies (I-CBC gate: identity/secrets/base) then pushes on the branch IT
+  # chose (forge-blind). Judges stay on `payload` (default): their deliverable is a
+  # structured verdict, not a git patch.
+  # Producer watchdog (BL debug scribe 2026-08-02): 300 s default killed a producer mid-way
+  # through ONE long generation (the jsonl only grows at message boundaries; the pane-hash
+  # probe now carries in-generation liveness, this raises the true-idle budget too — real
+  # producer sessions run hours).
+  timeouts:
+    response_sec: 1800
+  deliverable_mode: git_native
+  # Entry dual of deliverable_mode: brief = executable instruction (the issue body), the
+  # role ACTS. REQUIRED (schema) — judge-ness is never inferred.
+  brief_kind: worker
+  # The fleet alone: no human at this REPL. `engage` opens a work-item cycle and there is nobody
+  # to answer. REQUIRED (schema) — never inferred.
+  interlocutor: fleet
