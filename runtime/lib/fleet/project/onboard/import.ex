@@ -376,7 +376,7 @@ defmodule Fleet.Project.Onboard.Import do
 
     # Auth is the WIRED git credential helper — gh/glab (Tier 1) or the operator's own helper (Tier 2),
     # reached via the inherited HOME, the SAME tiered model as publish. No external token is read,
-    # stored, or passed: LCARS_EXTERNAL_GIT_TOKEN is retired. Shell.git's default env is
+    # stored, or passed. Shell.git's default env is
     # ForgeAuth.git_env/0 — GIT_TERMINAL_PROMPT=0 (a missing helper fails LOUD, never hangs a headless
     # clone) plus the INTERNAL forge extraheader, scoped to the internal host and so inert for an
     # external clone (a private external repo needs gh/glab authed, or a wired helper — Tier 2).

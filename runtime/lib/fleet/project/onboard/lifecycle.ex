@@ -113,7 +113,7 @@ defmodule Fleet.Project.Onboard.Lifecycle do
       no separate level field. An undeclared
       project falls back to the fleet default at burn time, and that fallback is deliberately NOT
       applied here: reporting the effective card would make an undeclared project indistinguishable
-      from one that declared the default on purpose, and `ProjectDeclaration.pipeline_default/2`
+      from one that declared the default on purpose, and `Declaration.pipeline_default/2`
       records an INCIDENT on the invalid path — a listing must not have side effects.
     * the STATE, read from the forge: an open parked-marker issue is the state machine
       (`project_close`'s own truth, not a second reading of it).
@@ -456,9 +456,9 @@ defmodule Fleet.Project.Onboard.Lifecycle do
       :error
   end
 
-  # ALL THREE faces, and the doc one is not optional here: `open` is what hands a project to the
-  # architect, whose producer path is on `doc`. Opening a project whose doc face never landed would
-  # succeed and then fail at the first documentary ticket, far from the cause.
+  # ALL THREE faces, and the workshop one is not optional here: `open` is what hands a project to
+  # the architect, whose producer path is on `workshop`. Opening a project whose workshop face never
+  # landed would succeed and then fail at the first documentary ticket, far from the cause.
   defp require_all_faces_on_machine(full_name, dirs) do
     if Enum.all?([dirs.code, dirs.ops, dirs.workshop], &File.dir?/1),
       do: :ok,

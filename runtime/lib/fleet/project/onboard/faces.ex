@@ -245,9 +245,9 @@ defmodule Fleet.Project.Onboard.Faces do
   # shape for both writer faces: every per-face input travels in ONE map (branch, template subtree,
   # host mode), so a third face costs a call site and no new logic.
   #
-  # ⚠ SITE 3 SUR 3 — ET C'EST LUI QUI ECRIT. Sur une forge illisible, l'ancien `false` envoyait dans
-  # le `else` : init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une
-  # face distante ECRASEE sur un simple timeout. L'inverse (traiter l'erreur comme « existe ») ferait
+  # ⚠ LE SITE QUI ECRIT. Sur une forge illisible, lire `false` enverrait dans la branche
+  # init + scaffold + **publication** d'une branche qui existe peut-etre deja, donc une face distante
+  # ECRASEE sur un simple timeout. L'inverse (traiter l'erreur comme « existe ») ferait
   # cloner une branche peut-etre absente : moins destructeur, mais toujours une decision prise sans
   # savoir. On ne devine pas : on REFUSE, et l'import s'arrete avec la raison — l'appelant garde son
   # « repo untouched, a clean retry is possible ».

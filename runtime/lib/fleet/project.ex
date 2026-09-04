@@ -31,17 +31,12 @@ defmodule Fleet.Project do
   lives. `Roles`/`Declaration` calling each other is fine INSIDE one boundary — it is only a problem
   with a line drawn between them.
 
-  ## What it MAKES POSSIBLE — and what is not done yet
+  ## The `:project_onboard` seam is a TEST seam
 
-  The `:project_onboard` seam exists for ONE reason: `fleet_pilot` sits above `fleet_mcp`, so
-  `mcp → pilot` is an upward edge boundary refuses, and the module has to be resolved at runtime
-  through app-env. This domain sits below both, so that edge could be an ordinary compile dep the
-  compiler checks — where a seam is only checked by a test that remembered to.
-
-  ⚠ **The seam is still there.** Removing it is a gesture of its own: the behaviour carries ten
-  callbacks and eight call sites, and its `conforming/2` wrapper is what keeps a test stub from
-  lying about the contract. Deleting it without replacing that check would trade a real guarantee
-  for a tidier graph. The extraction is the precondition, not the removal.
+  `Fleet.MCP` declares `Fleet.Project` in its boundary deps (`lib/fleet/mcp.ex`), so the call is
+  an ordinary compile-checked edge. The seam stays because it is how a test injects a stub: the
+  behaviour `Fleet.MCP.PodTools.Delegation.ProjectOnboard` carries 13 callbacks, and its
+  `conforming/2` wrapper is what keeps a stub from lying about the contract.
   """
 
   # COMPILED domain boundary. `deps` is the measured graph: everything here is what a project's

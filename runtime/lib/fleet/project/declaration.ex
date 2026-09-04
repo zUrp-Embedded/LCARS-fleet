@@ -105,10 +105,10 @@ defmodule Fleet.Project.Declaration do
   seal. Leaving it off a listing closes nothing and reads exactly like closing it — only a refusal
   refuses.
 
-  It lived as `Onboard.require_loadable_card/1`, private, and guarded the card REVISION alone: the
-  verb that changes a project's card refused a typo while the verbs that DECLARE it accepted one.
-  The refusal names the cards the project's catalogue ships, because one that does not say what to
-  write instead sends the operator back through the same call.
+  It guards every verb that names a card, not the REVISION alone: otherwise the verb that changes a
+  project's card refuses a typo while the verbs that DECLARE it accept one. The refusal names the
+  cards the project's catalogue ships, because one that does not say what to write instead sends
+  the operator back through the same call.
   """
   @spec declarable_card(String.t(), String.t() | nil, keyword()) :: :ok | {:error, term()}
   def declarable_card(name, repo, opts \\ []) when is_binary(name) do
@@ -227,9 +227,9 @@ defmodule Fleet.Project.Declaration do
   # Deux niveaux, dans cet ordre :
   #   * l'override FIN `:workflow_maps_root` gagne — « the fixture's own door », dit le loader, et
   #     `Roles.load_project_card/2` le respecte deja de la meme facon ;
-  #   * sinon le catalogue du PROJET, par son org. La version privee d'ou vient cette regle
-  #     chargeait sans options du tout, donc dans l'image du catalogue par DEFAUT : un projet d'une
-  #     autre org se voyait refuser une carte que son propre catalogue publie.
+  #   * sinon le catalogue du PROJET, par son org. Charger sans options du tout resoudrait dans
+  #     l'image du catalogue par DEFAUT : un projet d'une autre org se verrait refuser une carte que
+  #     son propre catalogue publie.
   defp loader_opts(repo, opts) do
     case Keyword.take(opts, [:workflow_maps_root]) do
       [] -> Loader.card_opts_for_repo(repo)

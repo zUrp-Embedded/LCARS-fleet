@@ -4,7 +4,7 @@ defmodule Fleet.Project.Onboard.Scaffold do
   @moduledoc """
   Filesystem projection of the project template used by `Fleet.Project.Onboard`.
 
-  `main/3` and `work/3` read their respective faces from
+  `main/3` and `face/4` read their respective faces from
   `priv/catalogue/project_template`, expand the supported Gitea `${VAR}` placeholders, omit the
   `.gitea/template` control file, and fail with a typed `:scaffold_write` error at the first file
   that cannot be created.

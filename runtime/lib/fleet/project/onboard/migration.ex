@@ -347,21 +347,19 @@ defmodule Fleet.Project.Onboard.Migration do
     end
   end
 
-  # ⚠ SITE 1 SUR 3 — ET C'EST CELUI OU LA CONFUSION NE PASSAIT MEME PAS PAR UN CHEMIN D'ERREUR.
-  # `branch_exists?` rendait `false` sur une forge illisible, donc `reconcile_main_protection/2`
-  # partait dans son `else` et rendait **`:ok`** : « rien a faire ici », mot pour mot ce que rend un
-  # depot legitimement non seede. Aucune trace, et le Poller horodatait le depot comme reconcilie.
-  # La protection de `main` n'etait jamais posee, et rien au monde ne le disait.
+  # ⚠ TROIS ETATS, TROIS REPONSES : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
+  # illisible (on ne sait pas — on le DIT et l'appelant retentera). Un `false` sur une forge
+  # illisible enverrait `reconcile_main_protection/2` dans son `else` rendre **`:ok`** : « rien a
+  # faire ici », mot pour mot ce que rend un depot legitimement non seede — aucune trace, le Poller
+  # horodate le depot comme reconcilie, et la protection de `main` n'est jamais posee.
   #
-  # Trois etats, trois reponses : seede (protege), prouve non seede (rien a faire, vrai `:ok`),
-  # illisible (on ne sait pas — on le DIT et l'appelant retentera).
-  # ⚠ PAS DE CAS PARTICULIER POUR UN DEPOT TEMPLATE : rien ne cree plus
-  # `<catalogue>/project-template`, donc rien n'a besoin d'etre exclu pour que la reconciliation ne
-  # lui pose pas une protection de `main` dimensionnee sur un jury qui ne le concerne pas.
+  # ⚠ PAS DE CAS PARTICULIER POUR UN DEPOT TEMPLATE : rien ne cree `<catalogue>/project-template`,
+  # donc rien n'a besoin d'etre exclu pour que la reconciliation ne lui pose pas une protection de
+  # `main` dimensionnee sur un jury qui ne le concerne pas.
   #
-  # Ce qui reste est un garde par PROPRIETE, et il est meilleur que le nom qu'il remplace : un depot
-  # qui ne porte pas de branche `ops` n'est pas un projet, quel que soit son nom. Le magasin d'un
-  # catalogue n'en porte pas — il est donc deja hors de portee, sans que rien n'ait a le nommer.
+  # Un garde par PROPRIETE, pas par nom : un depot qui ne porte pas de branche `ops` n'est pas un
+  # projet, quel que soit son nom. Le magasin d'un catalogue n'en porte pas — il est donc hors de
+  # portee, sans que rien n'ait a le nommer.
   defp seeded_project?(repo, opts) do
     Repo.repo_mod(opts).branch_exists?(repo, "ops", Repo.fc_opts(opts))
   end
