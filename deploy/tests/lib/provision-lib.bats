@@ -1397,3 +1397,19 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
+
+# ─── ensure_mode : un bit special en trop se RETIRE (DI-09, lot 11) ────────────────────────────
+# Le mode numerique demande est le mode ENTIER : un setgid herite d'un `mkdir` sous un parent 2775
+# n'est pas « presque 0755 », c'est un autre mode, et chmod ne le retire que si on le lui dit.
+@test "ensure_mode : un setgid herite est RETIRE quand le mode demande ne le porte pas — et POSE quand il le porte" {
+  local d="$BATS_TEST_TMPDIR/parent"
+  mkdir -p "$d/enfant"; chmod 2775 "$d/enfant"
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 0755"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 755 ]
+  [[ "$output" == *"POSÉ"* ]]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 2775"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
+}
