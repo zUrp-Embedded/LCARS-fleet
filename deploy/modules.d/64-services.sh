@@ -175,6 +175,16 @@ services_env_body() {
   # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
   # personne n'écoute — la panne tombe au RETOUR du login, là où elle est le moins lisible.
   echo "LCARS_LANDING_PORT=$PROV_DECK_PORT"
+  # ⚠ MUR 7 (variable_walls.bats) : tout ce qu'un daemon LIT et que l'installeur DECIDE (jumeau
+  # PROV_) voyage par ici — sinon le daemon vit sur son defaut code en dur et ne suit pas une
+  # installation qui a deplace le magasin des jetons, renomme le compte systeme ou le groupe de
+  # traversee. Les cinq ci-dessous etaient lus (catalogue-executor, console-landing, human-converger)
+  # avec un defaut chacun, et absents d'ici : cinq copies d'une decision, aucune qui la suive.
+  echo "LCARS_MASTER_TOKEN_FILE=$PROV_MASTER_TOKEN_FILE"
+  echo "LCARS_UID_MAP_FILE=$PROV_UID_MAP_FILE"
+  echo "LCARS_CONSOLE_GROUP=$PROV_CONSOLE_GROUP"
+  echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"
+  echo "LCARS_ROLES=\"$PROV_ROLES\""   # espaces : cite pour systemd (EnvironmentFile) ET pour un `. services.env`
 }
 
 unit_body() { # unit_body <nom sans .service>

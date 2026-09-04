@@ -122,9 +122,15 @@ check() {
   verdict_check
 }
 
+# ⚠ PAS DE `prov_runtime_dirs | grep -q .` ICI — DI-12. Sous `pipefail`, `grep -q` sort au premier
+# match et ferme le tuyau ; si le producteur ecrit encore, il prend SIGPIPE et le pipeline rend 141 :
+# la table « n'existait plus » une fois sur dix sous charge (trois temoins differents, meme cause).
+# Capturer, puis tester la capture : aucun lecteur ne ferme rien avant la fin.
+runtime_dirs_declared() { [[ -n "$(prov_runtime_dirs)" ]]; }
+
 check_tmpfiles() {
   local conf; conf="$(prov_tmpfiles_conf)"
-  if ! prov_runtime_dirs | grep -q .; then
+  if ! runtime_dirs_declared; then
     [[ -e "$conf" ]] && p_drift "tmpfiles: $conf present alors que ce substrat ne le porte pas"
     return 0
   fi
@@ -151,7 +157,7 @@ apply_tmpfiles() {
   local conf; conf="$(prov_tmpfiles_conf)"
   local body; body="$(prov_tmpfiles_body)"
 
-  if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! prov_runtime_dirs | grep -q .; then
+  if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! runtime_dirs_declared; then
     if [[ -e "$conf" ]]; then
       if rm -f "$conf"; then p_ok "tmpfiles: declaration retiree ($conf) — ce substrat ne la porte pas"
       else p_fail "tmpfiles: declaration perimee ($conf) impossible a retirer — le boot suivant obeira encore a un ordre que ce module a desavoue"
