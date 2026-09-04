@@ -139,304 +139,67 @@ fi
 # admiral = le master/sysadmin (uid 1000 reserve, sudo root). Bench: `admiral`. Prod: le login que
 # l'installeur a cree sur SA forge. Ce n'est PAS un worker de la fleet — Guard B refuse de lancer une
 # fleet sous cet uid, et les workers viennent du convergeur (forge fleet:humans, uid >= 1001).
+# ─── 1. L'INIT DE L'INSTANCE — COTE PRODUIT ─────────────────────────────────────────────────────
+#
+# ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : le modele est celui de Docker — l'image
+# est le produit, le conteneur une instance, l'etat dans le volume. Ce bloc rejouait ici, en shell
+# d'entrypoint, le siege, les zones, les clones et les cles ; puis `provision apply` rejouait
+# l'installeur entier a chaque boot. Tout cela est `fleet/services/box/init.sh`, un geste du
+# PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
+# la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
+# substrat docker. Il rend 3 quand la boite n'a rien pour determiner son siege : c'est l'etat « en
+# attente de configuration », et la boite reste debout pour que « box config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
-
-# Un fait, un nom : `LCARS_UID` reste l'ENTREE de ce rail (c'est par elle qu'un operateur choisit),
-# `LCARS_SYSADMIN_UID` est le NOM DU FAIT que tout le reste lit. Le second derive du premier ici,
-# une fois, avant que quoi que ce soit ne le lise.
 export LCARS_SYSADMIN_UID="$LCARS_UID"
-
-# ⚠ ET L'EXPORT NE SUFFIT PAS, PARCE QU'IL NE TRAVERSE PAS `exec sshd`. Une session ssh part d'un
-# environnement NEUF — l'image ne pose ni `AcceptEnv` ni `PermitUserEnvironment` — donc l'humain qui
-# tape `fleet_v2 start` n'a jamais vu cette variable, et GUARD B y retombait sur son litteral `1000`.
-#
-# ⚠ ET MEME ACHEMINEE, UNE VARIABLE NE PEUT PAS PORTER CETTE CLEF : mesure du 2026-08-27,
-# `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait la garde. L'environnement d'un processus
-# appartient a ce processus ; une garde ne peut pas y prendre sa politique.
-#
-# D'ou un FICHIER, `root:root`, que le garde ne peut pas reecrire et qui GAGNE sur la variable chez
-# ses deux lecteurs (`bin/fleet_v2` et son miroir `config/runtime.exs`). `64-services` le pose au
-# poste ; ce module-la est `APPLY-ON: wsl linux`, donc en boite c'est ici, et nulle part ailleurs.
-SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
-if mkdir -p "$(dirname "$SEAT_UID_FILE")" 2>/dev/null \
-   && printf '%s\n' "$LCARS_UID" > "$SEAT_UID_FILE" 2>/dev/null; then
-  chmod 0644 "$SEAT_UID_FILE" 2>/dev/null || true
-  chown root:root "$SEAT_UID_FILE" 2>/dev/null || true
-else
-  echo "[lcars-entrypoint] $SEAT_UID_FILE NON pose — GUARD B refusera tout « fleet_v2 start » : sans ce fichier il ne peut pas etablir le siege (uid $LCARS_UID)" >&2
-fi
 PROVISION=/opt/lcars/deploy/provision
-HOST_KEYS_DIR=/home/.lcars-container/ssh
-# ⚠ LA MEME TABLE QUE LE CONVERGEUR, ET C'EST TOUT L'INTERET. Le siege est le #1 de la forge : son
-# enregistrement est donc la LIGNE `forge_id = 1` de `forge-uid.map`, pas un fichier a lui. Une
-# seconde table pour tenir une ligne de la premiere aurait fait deux verites d'un meme fait — celle
-# qu'on ne lit pas finit toujours par mentir — et deux formats a maintenir la ou le convergeur en a
-# deja un (`<forge_id>\t<uid>\t<login>`, keye sur l'id parce que Gitea le conserve au renommage).
-UID_MAP_FILE="${LCARS_UID_MAP_FILE:-/opt/lcars/var/tokens/forge-uid.map}"
-MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-/opt/lcars/var/tokens/forge-master.token}"
-
+BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/fleet/services/box/init.sh}"
+MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/fleet/services/lib/module-protocol.sh}"
+SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 say() { echo "[lcars-entrypoint] $*"; }
-
-# ─── LE SIEGE EST LE #1 DE LA FORGE ─────────────────────────────────────────────────────────────
-#
-# LA REGLE : celui des deux qui existe nomme l'autre, et le lien est enregistre.
-#
-# ⚠ AUCUN RAIL NE PART DE RIEN, et c'est ce qui rend la regle suffisante. Le poste a son systeme
-# avant LCARS ; la boite vise une forge qui tourne deja. Le SEUL cas ou rien ne preexiste est
-# `--bench`, qui cree tout — et le bench PASSE le nom lui-meme (`bench-up.sh:353`). Il n'y a donc
-# aucun cas ou ce fichier aurait a inventer un nom, et il ne doit pas en inventer : un nom invente
-# est la coincidence que ce code existe pour retirer.
-#
-# `LCARS_ADMIRAL` A DONC UN SEUL SENS : la SEMENCE du cas from-scratch. Elle court-circuite la
-# derivation parce que dans ce cas-la il n'y a rien a deriver. Ce n'est pas une surcharge qui
-# contredirait la forge — il n'y a pas de forge a contredire quand le bench la cree.
-#
-# ⚠ LA LIB EST SOURCEE ICI, ET C'EST MESURE. Hors du runner elle n'imprime rien, ne pose aucun trap
-# (sa garde de sortie n'est armee que sous `PROVISION_RUN`) et n'ecrase aucune fonction de ce
-# fichier — zero collision sur les 57 qu'elle definit. Ce qu'on y gagne : UNE derivation du siege
-# pour les deux rails, au lieu de deux copies qui divergent le jour ou l'une est corrigee.
-PROVISION_LIB_FILE="${LCARS_PROVISION_LIB:-/opt/lcars/deploy/lib/provision-lib.sh}"
-if [[ ! -r "$PROVISION_LIB_FILE" ]]; then
-  echo "[lcars-entrypoint] provision-lib introuvable ($PROVISION_LIB_FILE) — le siege ne peut pas se deriver, et le provisionnement de l'etape 3 vient du meme arbre. Image incomplete." >&2
+[[ -r "$BOX_INIT" && -r "$MODULE_PROTOCOL" ]] || {
+  echo "[lcars-entrypoint] init de l'instance introuvable ($BOX_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
-fi
-# shellcheck source=../lib/provision-lib.sh
-. "$PROVISION_LIB_FILE"
-
-resolve_admiral() {
-  # Les noms de ce fichier sont ceux du conteneur, ceux de la lib ceux du provisionnement : on les
-  # accorde ICI, une fois, plutot que de faire porter a la lib un second jeu de noms.
-  PROV_UID_MAP_FILE="$UID_MAP_FILE"
-  PROV_MASTER_TOKEN_FILE="$MASTER_TOKEN_FILE"
-  PROV_FORGE_URL="${FORGE_BASE_URL:-}"
-
-  prov_seat_binding "${LCARS_ADMIRAL:-}"
-
-  case "$PROV_SEAT_BINDING" in
-    seeded)
-      say "siege : « $PROV_SEAT_LOGIN » seme par l'appelant (LCARS_ADMIRAL) — cas from-scratch, rien a deriver"
-      ;;
-    derived)
-      say "siege : « $PROV_SEAT_LOGIN » ($PROV_SEAT_SOURCE)"
-      ;;
-    agree)
-      say "siege : « $PROV_SEAT_LOGIN » — la semence et $PROV_SEAT_SOURCE nomment le meme acteur"
-      ;;
-    diverge)
-      say "siege : DIVERGENCE — la semence dit « ${LCARS_ADMIRAL:-} », $PROV_SEAT_SOURCE dit « $PROV_SEAT_LOGIN ». Le home du siege vit sous UN de ces noms : retire la semence pour suivre $PROV_SEAT_SOURCE, ou corrige la table ($UID_MAP_FILE)."
-      return 1
-      ;;
-    *)
-      # ⚠ DEUX CAUSES, DEUX REPARATIONS. « Pas de jeton » et « forge muette » ne s'arrangent pas de
-      # la meme facon, et les fondre renvoie l'operateur regarder le mauvais objet. On teste la
-      # PRESENCE du fichier (`-s`), jamais son contenu : classer un refus ne demande pas de lire
-      # un secret.
-      local pourquoi
-      if [[ -s "$MASTER_TOKEN_FILE" ]]; then pourquoi="forge muette"
-      else pourquoi="jeton master illisible : $MASTER_TOKEN_FILE"; fi
-      say "siege : IMPOSSIBLE a determiner — ni semence (LCARS_ADMIRAL), ni ligne forge_id=1 dans $UID_MAP_FILE, ni #1 lisible sur ${FORGE_BASE_URL:-<aucune forge configuree>} ($pourquoi). « box config » pose la forge et son jeton ; le bench, lui, seme le nom."
-      return 1
-      ;;
-  esac
-
-  LCARS_ADMIRAL="$PROV_SEAT_LOGIN"
-  # `LCARS_UID` est pose sans condition en tete de ce fichier : le re-defauter ici en ferait une
-  # seconde verite, et c'est celle qu'on ne relit pas qui finit par mentir.
-  prov_seat_record "$LCARS_ADMIRAL" "$LCARS_UID" \
-    || say "siege : nom NON enregistre dans $UID_MAP_FILE — le boot suivant le re-derivera"
-  return 0
 }
+init_rc=0
+LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$BOX_INIT" apply 2>&1 | sed 's/^/[box-init] /' || init_rc=${PIPESTATUS[0]}
+case "$init_rc" in
+  0) say "init de l'instance : converge" ;;
+  2) say "init de l'instance : APPLIQUE, DRIFT RESIDUEL — un geste manque, rien n'est casse" ;;
+  3) say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « box config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+     printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+     exec sleep infinity ;;
+  *) say "init de l'instance : ECHEC (rc=$init_rc) — la boite reste debout pour etre lue, aucun service n'est demarre"
+     printf 'init-failed\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
+     exec sleep infinity ;;
+esac
+LCARS_ADMIRAL="$(tr -d '[:space:]' < "$SEAT_LOGIN_FILE" 2>/dev/null || true)"
+[[ -n "$LCARS_ADMIRAL" ]] || { say "siege NON lu ($SEAT_LOGIN_FILE) apres un init converge — incoherent, rien ne demarre" >&2; exit 1; }
 
-# ─── 1. L'humain (idempotent — le home vit dans le volume, le user est recréé à l'identique) ─────
+# ─── 2. LES GESTES DE FORGE ──────────────────────────────────────────────────────────────────────
 #
-# Le nom se résout ICI et pas au chargement : c'est le premier geste qui en a besoin, et une
-# résolution jouée au `source` rendrait la fonction non rejouable — elle verrait sa propre sortie
-# comme un `LCARS_ADMIRAL` imposé par l'opérateur.
-# ⚠ LE REFUS EST EXPLICITE, PAS UN EFFET DE `set -e`. Un `resolve_admiral` nu mourrait aussi, mais
-# sur le code de retour d'une fonction — et le lecteur suivant ne saurait pas si c'est voulu. Ici le
-# boot S'IMMOBILISE parce qu'on a decide qu'un siege inventable ne s'invente pas. Il s'ARRETAIT ;
-# le refus n'a pas change, sa forme si — cf. le bloc ci-dessous.
-if ! resolve_admiral; then
-  # ⚠ ON REFUSE SANS SORTIR, ET C'EST LA DIFFERENCE ENTRE UN DIAGNOSTIC ET UN DIAGNOSTIC UTILE.
-  # `exit 1` sous `restart: unless-stopped` faisait BOUCLER la boite — 25 redemarrages mesures sur
-  # la 4e forme (boite + forge FOURNIE, .63, 2026-08-30). Or le geste que le message ci-dessus
-  # propose, « box config », passe par un `docker exec`, et docker le REFUSE sur un conteneur qui
-  # redemarre : « Container … is restarting, wait until the container is running ». Le diagnostic
-  # etait juste, le remede nomme, et l'etat de la boite le rendait injouable.
-  #
-  # Elle reste donc debout, EN ATTENTE DE CONFIGURATION — le meme arbitrage que pour un echec de
-  # convergence, plus bas : « elle tourne et reste joignable POUR ETRE REPAREE ». Un siege
-  # indeterminable est un etat incomplet qu'un geste repare, pas une image cassee.
-  #
-  # ⚠ ET ELLE NE MENT PAS EN RESTANT DEBOUT : aucun service n'est demarre, donc le healthcheck (qui
-  # sonde ssh et le deck) la declare `unhealthy`. « Up » sans « healthy » est exactement son etat.
-  # `tini` est PID 1 et relaie SIGTERM : un `docker stop` la couche proprement.
-  say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « box config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
-  # ⚠ L'ETAT SE PUBLIE, COMME LE VERDICT DE PROVISIONNEMENT PLUS BAS. Sans cette ligne, `box up`
-  # attendait `/run/lcars-provision.rc` jusqu'a son timeout (300 a 900 s) pour rendre « verdict
-  # NON LU » — sur une boite qui SAIT qu'elle attend et vient de l'ecrire dans ses logs. Mesure du
-  # 2026-09-04, banc bob_2, premiere boite contre une forge fournie. `/run`, donc ce boot-ci.
-  printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
-  exec sleep infinity
-fi
-if ! getent passwd "$LCARS_ADMIRAL" >/dev/null; then
-  useradd -m -u "$LCARS_UID" -s /bin/bash "$LCARS_ADMIRAL"
-  say "sysadmin $LCARS_ADMIRAL cree (uid $LCARS_UID)"
-fi
-# Le mot de passe est POSE HORS d'ici (bench: fixe, pour tester ; prod: l'installeur) — l'entrypoint
-# cree le siege, il ne choisit pas le secret.
-if getent group sudo >/dev/null 2>&1; then
-  usermod -aG sudo "$LCARS_ADMIRAL" || say "ATTENTION: « $LCARS_ADMIRAL » n'a PAS ete ajoute au groupe sudo — il n'aura pas d'elevation"
-fi
+# Les jetons de role d'abord (`63-forge-tokens`, encore un module de l'installeur : il depend de
+# `prov_roles`, donc des portes outil de ce fichier — il suivra quand elles vivront dans `bin/lcars`),
+# puis les trois gestes du produit (`forge.d/`) : cache des catalogues, branche ops, client OAuth2 du
+# deck. Chacun rend le code du protocole ; on n'invente rien, on relaie.
 
-if [[ -n "${LCARS_SSH_AUTHORIZED_KEYS:-}" ]]; then
-  HOME_DIR="$(getent passwd "$LCARS_ADMIRAL" | cut -d: -f6)"
-  install -d -m 0700 -o "$LCARS_ADMIRAL" -g "$LCARS_ADMIRAL" "$HOME_DIR/.ssh"
-  # Écriture atomique tmp+mv (doctrine lib) — un crash ne laisse pas un authorized_keys tronqué.
-  tmp="$(mktemp "$HOME_DIR/.ssh/.authk.XXXXXX")"
-  printf '%s\n' "$LCARS_SSH_AUTHORIZED_KEYS" > "$tmp"
-  chmod 0600 "$tmp" && chown "$LCARS_ADMIRAL:$LCARS_ADMIRAL" "$tmp"
-  mv -f "$tmp" "$HOME_DIR/.ssh/authorized_keys"
-  say "authorized_keys posé pour $LCARS_ADMIRAL"
-else
-  say "pas de LCARS_SSH_AUTHORIZED_KEYS — accès par « docker exec -it -u $LCARS_ADMIRAL <ctr> bash » seulement"
-fi
-
-# ─── 1bis. Les zones de FACE : une racine par face, groupe fleet ─────────────────────────────────
-# Le sanctuaire bwrap des pods monte ces zones (cap-profile starfleet : les deux en rw) —
-# ABSENTE, le spawn meurt (« catalogue mount path missing host-side », vu au premier E2E,
-# une zone par crash). Sur WSL elles existent (histoire du substrat) ; ICI, l'entrypoint est
-# le créateur de zones du conteneur (comme pour l'humain). setgid fleet : chaque humain du
-# groupe y crée ses projets/worktrees.
-#
-# CETTE LIGNE EST LE MIROIR DE `Fleet.Layout.face_root/1`, ET UNE FACE MANQUANTE NE SE VOIT PAS.
-# `layout.face_roots_provisioned` de `mix lcars.contracts.check` : ajouter une face sans l'ajouter
-# ici fait rougir le gate, en la NOMMANT.
-install -d -m 2775 -g fleet /home/projects /home/projects.ops /home/projects.workshop
-say "zones de face : /home/projects /home/projects.ops /home/projects.workshop (2775 root:fleet)"
-
-# La SOURCE — l'auto-maintenance en dépend : c'est le checkout que la fleet lit, met à jour
-# (`provision update`) et sur lequel ses agents travaillent.
-#
-# DEUX CHEMINS, ET UN SEUL EST CELUI D'UNE INSTALLATION. Le geste de dév est `deploy/box
-# source-push` : un `docker cp` depuis le clone de l'humain. Qui INSTALLE depuis une image tirée
-# d'une registry n'a aucun clone à pousser — il a une URL. Le chemin nominal est donc un CLONE,
-# fait ici, et il est possible sans credential : le dépôt est public en lecture (`git ls-remote`
-# anonyme mesuré vivant sur la forge).
-#
-# LA RÈGLE QUI COMPTE : on ne clone que si le dossier est ABSENT. Une source déjà là n'est JAMAIS
-# écrasée ni remise à niveau — un redémarrage du conteneur détruirait le travail en cours d'un
-# agent, et ce serait le genre de perte qu'on ne remarque qu'après. Mettre à jour est un geste
-# explicite (`provision update`), pas un effet de bord du boot.
-LCARS_SOURCE_DIR="${LCARS_SOURCE_DIR:-/home/projects/LCARS}"
-
-if [[ ! -d "$LCARS_SOURCE_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
-  # `--branch` accepte une branche OU un tag, pas un sha nu : c'est la forme d'une ref publiée,
-  # et un sha arbitraire exigerait `allowReachableSHA1InWant` côté serveur — dépendance qu'on ne
-  # présume pas. Ref vide = branche par défaut du dépôt.
-  clone_args=(--depth 1)
-  [[ -n "${LCARS_SOURCE_REF:-}" ]] && clone_args+=(--branch "$LCARS_SOURCE_REF")
-  say "clonage de la source : $LCARS_SOURCE_REMOTE${LCARS_SOURCE_REF:+ (ref $LCARS_SOURCE_REF)} → $LCARS_SOURCE_DIR"
-  # ATOMIQUE (clone en .part puis mv) : un boot tué EN PLEIN clone laisserait un .git partiel
-  # que la règle de non-écrasement protégerait ensuite comme du travail — la boîte vivrait sur
-  # un cadavre de repo. Le .part orphelin d'un boot précédent se nettoie, lui : il n'est jamais
-  # du travail, par construction.
-  rm -rf "${LCARS_SOURCE_DIR}.part"
-  if git clone "${clone_args[@]}" "$LCARS_SOURCE_REMOTE" "${LCARS_SOURCE_DIR}.part" 2>&1 | sed 's/^/[git] /' \
-     && mv "${LCARS_SOURCE_DIR}.part" "$LCARS_SOURCE_DIR"; then
-    # Le clone est fait par root ; la source appartient à l'humain qui travaillera dedans. Le
-    # groupe `fleet` parce que c'est celui des zones catalogue posées juste au-dessus.
-    chown -R "$LCARS_ADMIRAL:fleet" "$LCARS_SOURCE_DIR"
-    say "source clonée"
-  else
-    rm -rf "${LCARS_SOURCE_DIR}.part"
-    say "CLONAGE ÉCHOUÉ — la boîte démarre sans source (la fleet ne pourra pas se maintenir)"
-  fi
-fi
-
-# LE CORPUS ops — même contrat que les projets nés ici : un projet canon a DEUX arbres,
-# `main` (le code, ci-dessus) et `ops` (plans, journaux, gate-briefs), checkouté dans le
-# dual-dir /home/projects.ops/<nom>. Si le remote porte la branche, on la pose ; sinon on le
-# dit et la boîte vit sans (une source sans corpus reste maintenable, elle est juste amnésique).
-# Même règle de non-écrasement : un dual-dir déjà là n'est jamais touché.
-LCARS_WORK_DIR="/home/projects.ops/$(basename "$LCARS_SOURCE_DIR")"
-if [[ ! -d "$LCARS_WORK_DIR/.git" && -n "${LCARS_SOURCE_REMOTE:-}" ]]; then
-  if git ls-remote --exit-code --heads "$LCARS_SOURCE_REMOTE" ops >/dev/null 2>&1; then
-    say "clonage du corpus ops → $LCARS_WORK_DIR"
-    rm -rf "${LCARS_WORK_DIR}.part"
-    if git clone --depth 1 --branch ops "$LCARS_SOURCE_REMOTE" "${LCARS_WORK_DIR}.part" 2>&1 | sed 's/^/[git] /' \
-       && mv "${LCARS_WORK_DIR}.part" "$LCARS_WORK_DIR"; then
-      chown -R "$LCARS_ADMIRAL:fleet" "$LCARS_WORK_DIR"
-      say "corpus ops posé"
-    else
-      rm -rf "${LCARS_WORK_DIR}.part"
-      say "CLONAGE ops ÉCHOUÉ — dual-dir absent (adoptable plus tard, rien de fatal)"
-    fi
-  else
-    say "pas de branche ops sur le remote — dual-dir non posé (le corpus arrive par l'adopt)"
-  fi
-fi
-
-# ⚠ L'IDENTITÉ GIT NE SE POSE PLUS ICI, ET LA VARIABLE `LCARS_ADMIRAL_EMAIL` N'EXISTE PLUS.
-# C'est `70-human` qui la porte désormais, per-humain, DÉRIVÉE DU COMPTE FORGE — la seule adresse
-# qui mappe un commit sur un compte (avatar compris). Une variable d'install n'en était qu'une copie.
-
-if [[ -d "$LCARS_SOURCE_DIR/.git" ]]; then
-  # git refuse un repo d'un autre owner (« dubious ownership ») : le clone vient de l'hôte,
-  # son uid n'a aucune raison d'être celui du conteneur. Déclaré safe pour TOUS les humains.
-  git config --system --replace-all safe.directory "$LCARS_SOURCE_DIR" 2>/dev/null || true
-  src_rev="$(git -C "$LCARS_SOURCE_DIR" rev-parse --short=8 HEAD 2>/dev/null || echo '?')"
-  say "source LCARS : $LCARS_SOURCE_DIR ($src_rev) — auto-maintenance possible"
-
-  img_rev="${LCARS_IMAGE_REVISION:-unknown}"
-  if [[ "$img_rev" == "unknown" ]]; then
-    say "  révision de l'image INCONNUE — écart image/source invérifiable (image bâtie sans GIT_SHA)"
-  elif [[ "$src_rev" != "$img_rev" ]]; then
-    say "  ÉCART image/source : le runtime qui tourne est bâti sur $img_rev, la source est sur $src_rev"
-    say "  (ce n'est pas une panne : lire la source ne renseigne pas sur le binaire, et inversement)"
-  else
-    say "  image et source sur la même révision ($img_rev)"
-  fi
-else
-  say "PAS de source LCARS sous $LCARS_SOURCE_DIR — la fleet ne peut PAS se maintenir elle-même"
-  say "  install : LCARS_SOURCE_REMOTE=<url> [LCARS_SOURCE_REF=<branche|tag>] au démarrage"
-  say "  dév     : deploy/box source-push (docker cp depuis ton clone)"
-fi
-
-# ─── 2. Identité SSH du conteneur : clés d'hôte PERSISTANTES dans le volume ──────────────────────
-# (Un conteneur recréé qui change de clés d'hôte = « WARNING: REMOTE HOST IDENTIFICATION HAS
-# CHANGED » chez chaque humain — l'identité vit avec l'état, pas avec l'éphémère.)
-install -d -m 0700 "$HOST_KEYS_DIR"
-if ls "$HOST_KEYS_DIR"/ssh_host_*_key >/dev/null 2>&1; then
-  cp "$HOST_KEYS_DIR"/ssh_host_* /etc/ssh/
-  chmod 0600 /etc/ssh/ssh_host_*_key
-  say "clés d'hôte SSH restaurées depuis le volume"
-else
-  ssh-keygen -A >/dev/null            # génère dans /etc/ssh les types manquants
-  cp /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub "$HOST_KEYS_DIR/"
-  chmod 0600 "$HOST_KEYS_DIR"/ssh_host_*_key
-  say "clés d'hôte SSH générées → $HOST_KEYS_DIR (persistantes)"
-fi
-
-# ─── 3. Convergence de l'état — LE MÊME provision que le chemin WSL, substrat docker ─────────────
-#
-# ⚠ ET LE VERDICT SE PUBLIE, parce que « jamais fatal » n'a jamais voulu dire « jamais dit ». Il ne
-# vivait que dans les logs du conteneur, donc `deploy/box up` rendait la main sur une boîte qui
-# annonce « fleet up », se déclare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck) et ne peut démarrer
-# AUCUN pod. Un opérateur n'a aucune raison d'aller lire des logs après une commande qui a dit oui.
-#
-# `/run` et pas un volume : c'est un tmpfs, donc le fichier meurt avec le conteneur et décrit
-# TOUJOURS ce boot-ci. Même emplacement et même motif que `/run/lcars-converger.refused` — un
-# composant sait pourquoi, il l'écrit là où un autre peut le lire.
 PROV_RC_FILE="${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}"
 prov_rc=0
-"$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" || prov_rc=$?
+"$PROVISION" apply --substrate docker --human "$LCARS_ADMIRAL" --only 63-forge-tokens || prov_rc=$?
 case "$prov_rc" in
-  0) say "provision apply : convergé" ;;
-  2) say "provision apply : APPLIQUÉ, DRIFT RÉSIDUEL — rien n'est cassé, un geste manque (forge,
-credentials, réseau). Détail : $PROVISION doctor" ;;
-  *) say "provision apply : AU MOINS UN ÉCHEC (rc=$prov_rc) — la boîte démarre quand même ; diagnose : $PROVISION doctor" ;;
+  0) say "jetons de role : converges" ;;
+  2) say "jetons de role : APPLIQUE, DRIFT RESIDUEL — un geste manque (forge, autorite). Detail : $PROVISION doctor --only 63-forge-tokens" ;;
+  *) say "jetons de role : ECHEC (rc=$prov_rc) — la boite demarre quand meme ; diagnose : $PROVISION doctor --only 63-forge-tokens" ;;
 esac
+for gesture in catalogues ops-branch deck-oidc; do
+  g_rc=0
+  LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" PROV_MODULE_TAG="$gesture" \
+    bash "/opt/lcars/fleet/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+  case "$g_rc" in
+    0) : ;;
+    2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant" ;;
+    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — la boite demarre quand meme" ; prov_rc=$g_rc ;;
+  esac
+done
 
 # La publication descend donc APRÈS les deux mesures, et `lcars-provision.rc` s'écrit EN DERNIER :
 # sa présence devient la garantie que l'autre fichier est là. Un lecteur qui attend un seul des deux
@@ -522,11 +285,14 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
   # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et la boite l'annoncait.
   # Le module DEPOSE le fait (`p_fact fleet_humans`), on le relit — le canal de la porte.
-  humans_facts="$(mktemp "${TMPDIR:-/tmp}/lcars-facts.XXXXXX")" || humans_facts=""
-  PROV_FACTS_FILE="$humans_facts" "$PROVISION" doctor --substrate docker --only 64-services >/dev/null 2>&1 || true
+  # LE FAIT SE LIT SUR LA MACHINE, PAS PAR LE DOCTOR DE L'INSTALLEUR : un humain de fleet est un
+  # membre du groupe `fleet` dont l'uid est au-dessus du plancher et qui n'est pas le siege.
   humans_rc=1
-  [[ -n "$humans_facts" ]] && [[ -n "$(sed -n 's/^fleet_humans=//p' "$humans_facts" 2>/dev/null | tail -1 | tr -d '[:space:]')" ]] && humans_rc=0
-  rm -f "$humans_facts"
+  while IFS= read -r _m; do
+    [[ -n "$_m" ]] || continue
+    _u="$(id -u -- "$_m" 2>/dev/null || true)"
+    [[ "$_u" =~ ^[0-9]+$ ]] && (( _u >= 1000 )) && [[ "$_u" != "$LCARS_UID" ]] && { humans_rc=0; break; }
+  done < <(getent group "${PROV_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
   if [[ "$humans_rc" -eq 0 ]]; then
     say "humain(s) de fleet : présent(s) — « fleet_v2 start » a quelqu'un pour le lancer"
   else

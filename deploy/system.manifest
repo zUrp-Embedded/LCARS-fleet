@@ -226,6 +226,9 @@ runtime   /run/lcars-converger.refused                 0644  root:root          
 # `box up` lit pour sortir tout de suite sur une boite qui attend `box config`, au lieu d'attendre
 # un verdict qui ne viendra pas.
 runtime   /run/lcars-boot.state                        0644  root:root           docker
+# Le login du siege, ecrit par l'init de l'instance (box/init.sh) et lu par le boot — l'init est un
+# processus, le boot un autre : le fait traverse par un fichier, pas par l'environnement.
+runtime   /run/lcars-seat.login                        0644  root:root           docker
 
 runtime   /run/lock/lcars                              0700  root:root           any
 
