@@ -23,9 +23,9 @@
 #     paie en travail, et elle n'avait de temoin que par la bande.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../../../deploy"
-  # ⚠ DEUX RACINES DEPUIS LA SEPARATION : la LIB vient de l installeur (`$SRC`), le MODULE du
-  # runtime. Ce temoin joue un module per-humain, qui a suivi le convergeur hors de `deploy/`.
+  # UNE SEULE RACINE (Q3, 2026-09-04) : le module ET son protocole sont du runtime — le temoin ne
+  # lit plus rien dans `deploy/`. Il en lisait la lib, que le module sourcait et que son hote
+  # reel ne posait pas.
   MOD="$BATS_TEST_DIRNAME/../../../services/human.d/40-claude-bin.sh"
   SANDBOX="$BATS_TEST_TMPDIR/box"
   HOMEDIR="$SANDBOX/home"
@@ -36,9 +36,10 @@ setup() {
   # the shipped code, and the diff between it and what runs here is these three lines.
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
-  cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
-  cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
-  cat >> "$SANDBOX/lib/provision-lib.sh" <<EOF
+  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur : le module la sourcait
+  # et son hote reel ne la posait pas. Le decor recopie le protocole pour y surcharger `human_home`.
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
+  cat >> "$SANDBOX/lib/human-protocol.sh" <<EOF
 
 human_home() { echo "$HOMEDIR"; }
 EOF
@@ -46,7 +47,7 @@ EOF
   CURL_LOG="$BATS_TEST_TMPDIR/curl.calls"
   : > "$CURL_LOG"
 
-  export PROVISION_LIB="$SANDBOX/lib/provision-lib.sh"
+  export LCARS_HUMAN_PROTOCOL="$SANDBOX/lib/human-protocol.sh"
   export PROV_HUMAN
   PROV_HUMAN="$(id -un)"
   export PATH="$BINDIR:$PATH"
