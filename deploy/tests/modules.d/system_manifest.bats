@@ -277,6 +277,8 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     base="$(basename "$p")"
     [[ "$base" == "<human>" ]] && continue
     # ⚠ POSE PAR UN TIERS QU'ON INVOQUE — exemption NOMMEE, une ligne par objet, jamais une regex.
+    # `/opt/lcars/.verified` : pose par le Dockerfile (stage `final`), que ce corpus ne lit pas — il lit le
+    # rail et le runtime. Le declarer dit ce que l'image porte ; l'exemption dit ou est le poseur.
     # `/root/.terraform.d` est le cache de plugins que le binaire `tofu` ecrit sous le HOME de root
     # quand `46-tofu` l'invoque : aucun module ne l'ecrit, donc ISO 2/2 le refuse a juste titre. On
     # le declare parce qu'on le PROVOQUE — c'est ce que l'uninstall doit pouvoir retirer — et
@@ -285,14 +287,15 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     # declare que personne ne pose est, par defaut, une ligne qui ment.
     #
     # ⚠ `~/.hex` NE PASSAIT QUE PAR COINCIDENCE, et c'est pourquoi il est nomme ici avec `~/.mix`.
-    # Les deux sont ecrits par `mix` quand `48-forge-host` et `60-deploy` invoquent `mix local.hex`
+    # Les deux sont ecrits par `mix` quand `60-deploy` invoque `mix local.hex`
     # et `mix local.rebar`. Le radical `.hex` trouvait cette invocation — la sous-chaine « local.hex »
     # le contient — et le temoin le declarait couvert. `.mix`, lui, n'apparait nulle part : meme
     # objet, meme poseur, meme nature, et un verdict oppose selon l'orthographe d'une commande.
     case "$p" in
       /root/.terraform.d)      continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
-      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   48-forge-host + 60-deploy
-      /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 48-forge-host + 60-deploy
+      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   60-deploy (48 ne compile plus, lot 4)
+      /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 60-deploy
+      /opt/lcars/.verified)    continue ;;   # pose par le DOCKERFILE (stage final, tampon de verify) — hors du corpus de ce mur, qui lit le rail et le runtime, pas l'image
     esac
     stem="$(sed -e 's#-<version>$##' -e 's#\.service$##' <<<"$base")"
     grep -qF "$stem" <<<"$CODE" || { echo "DECLARE, aucun poseur : $p (radical « $stem »)"; bad=1; }

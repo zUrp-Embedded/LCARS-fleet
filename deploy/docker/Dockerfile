@@ -577,3 +577,43 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/lcars/entrypoint.sh"]
+
+# ─── verify : L'ISO DES RAILS SE MESURE AU BUILD, PAS CHEZ L'OPÉRATEUR ─────────────────────────
+#
+# Le stage `runtime` refait à la main sept modules du rail poste (paquets, node, médias, tofu,
+# release, auxiliaires, services) ; le doctor commun (`CHECK-ON any`) est la seule chose qui tienne
+# les deux implémentations d'accord — et il ne se jouait QU'AU BOOT, chez l'opérateur. Mesure du
+# 2026-09-04 (banc bob_2) : trois dérives de l'image (groupe de `lcars-authority`, tampon
+# `.helpers-revision`, arbre `assets/`) ont été vues au premier `box up`, jamais au build.
+#
+# Ce stage joue le doctor sur le système de fichiers que `runtime` vient de produire, et fait
+# ÉCHOUER LE BUILD sur tout drift (`doctor` rend 1 sur un drift, 2 sur un échec). Il ne mesure que
+# ce que l'image POSE : ce qui dépend d'un volume (`26-store`), d'une forge (`63`, `65`, `66`) ou
+# d'un boot n'a pas de vérité ici et n'y est pas demandé.
+#
+# ⚠ `deploy/` ENTRE DANS CE STAGE, ET DANS CE STAGE SEULEMENT (⚖ user 2026-09-04, Q1 : l'installeur
+# n'a rien à faire dans le conteneur livré). Il est copié à la place que le doctor connaît, puis
+# jeté avec le stage. Tant que `runtime` embarque encore `/opt/lcars/deploy` (lot 7 le retire), ce
+# `COPY` est un doublon exact ; le jour où il ne l'embarque plus, c'est cette ligne qui le fournit.
+# `PROV_SOURCE_REV` : la même révision que le LABEL et le tampon, pour que `62` compare deux fois la
+# même vérité (une image n'a pas de `.git`).
+FROM runtime AS verify
+ARG GIT_SHA=unknown
+COPY deploy /opt/lcars/deploy
+# ⚠ DEUX MESURES N'ONT PAS DE VÉRITÉ AU BUILD, ET LE PREMIER BUILD LES A NOMMÉES (2026-09-04) :
+# la sonde bwrap de `10-packages` mesure le NOYAU (celui de BuildKit, sans userns — pas celui de la
+# boîte), `PROV_KERNEL_PROBES=0` la fait dire « non jouée ici » ; `20-groups` mesure l'appartenance
+# du SIÈGE à `fleet`, et le siège n'existe qu'au boot — il n'est pas demandé (les GID de l'image,
+# eux, sont tenus par la table et son témoin).
+RUN PROV_SOURCE_REV="${GIT_SHA}" PROV_KERNEL_PROBES=0 /opt/lcars/deploy/provision doctor --substrate docker \
+      --only 10-packages --only 16-node --only 21-service-accounts \
+      --only 44-media --only 46-tofu --only 60-deploy --only 62-runtime-helpers --only 64-services \
+    && printf '%s\n' "${GIT_SHA}" > /verified
+
+# ─── final : L'IMAGE LIVRÉE, ET ELLE DÉPEND DE verify ──────────────────────────────────────────
+# Un stage dont personne ne dépend n'est pas bâti : `final` COPIE le marqueur que `verify` écrit,
+# donc `verify` se joue à chaque build de l'image livrée — c'est le seul lien, et il est exact.
+# Le marqueur reste dans l'image (`/opt/lcars/.verified`, déclaré à la table) : il dit quelle
+# révision a été mesurée, et une image sans lui n'est pas passée par ici.
+FROM runtime AS final
+COPY --from=verify /verified /opt/lcars/.verified
