@@ -274,12 +274,26 @@ team_id() {
 # l'a au premier tour de ce service, trente secondes plus tard. Une install qui se dit finie avant
 # que son convergeur ait tourne une fois n'a jamais decrit la machine reelle.
 #
-# LE VOCABULAIRE EST DEFINI ICI, PAS DANS UNE LIB DE PLUS. Les modules attendent sept fonctions
-# d'impression et deux de verdict ; ce sont des `printf` et deux compteurs. Une lib runtime en
-# regard de celle de l'installeur ferait DEUX copies d'un meme contrat, et c'est celle qu'on ne
-# relit pas qui ment. Les modules sont SOURCES dans un sous-shell : leur `case "$1"` final les
-# dispatche, et le sous-shell garantit qu'aucun n'empoisonne le suivant.
+# LE VOCABULAIRE DES MODULES VIT DANS `lib/human-protocol.sh`, COTE PRODUIT, ET C'EST LE SEUL
+# ENDROIT. Ce bloc le definissait inline, au motif qu'une lib runtime « ferait deux copies d'un
+# meme contrat » avec celle de l'installeur — et pendant ce temps les modules, eux, sourcaient la
+# lib de l'INSTALLEUR par une garde `${PROVISION_LIB:?}` que ce convergeur ne posait pas. Mesure
+# du 2026-09-04 sur les deux bancs : chaque humain cree mourait a la ligne 1 de ses trois modules,
+# rc=1, sans `~/.lcars`, sans `claude`, sans projets — et `--once` rendait 0. Les deux copies
+# existaient bel et bien, et aucune des deux ne servait.
+#
+# ⚖ user 2026-09-04 (Q3) : ce qui est joue en prod est du produit. Le protocole est donc ICI, dans
+# `fleet/services/lib/`, source par le module lui-meme (`LCARS_HUMAN_PROTOCOL`) et par ses
+# temoins — une copie, un contrat, et l'installeur garde sa lib pour SES modules : deux contrats,
+# chacun chez celui qui le joue. Les modules sont SOURCES dans un sous-shell : leur `case "$1"`
+# final les dispatche, et le sous-shell garantit qu'aucun n'empoisonne le suivant.
 HUMAN_MODULES="${LCARS_HUMAN_MODULES:-/opt/lcars/fleet/services/human.d}"
+HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fleet/services/lib/human-protocol.sh}"
+# Sur une boite, ce script est copie a `/opt/lcars/human-converger.sh` et l'arbre des services a
+# `/opt/lcars/fleet/services/` ; sur un poste, les deux vivent sous `/opt/lcars/fleet/services/`.
+# Le defaut ci-dessus couvre la boite ; le poste passe `LCARS_HUMAN_PROTOCOL` par `services.env`,
+# ou tombe sur le voisin de ce fichier.
+[[ -r "$HUMAN_PROTOCOL" ]] || HUMAN_PROTOCOL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/human-protocol.sh"
 
 converge_human() { # converge_human <login>
   local login=$1
@@ -288,34 +302,47 @@ converge_human() { # converge_human <login>
   local m rc_all=0 out
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
 
+  # ⚠ LES MODULES SE JOUENT SOUS L'IDENTITE DE L'HUMAIN, PAS SOUS CELLE DE CE SERVICE. Ils
+  # portent `NEEDS: human` et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
+  # dans son home, HOME/USER/LOGNAME poses. Ce service les sourcait en ROOT — mesure du 2026-09-04,
+  # banc bob_1, la premiere fois qu'ils ont tourne ici : `~/.lcars` de l'humain cree root:root,
+  # son `fleet_v2.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur
+  # « HOME: unbound ». Un module per-humain joue en root ecrit chez l'humain ce que l'humain ne
+  # peut pas lire.
+  #
+  # Hors root, le module joue sous l'identite courante : ce n'est un cas que pour un decor de
+  # temoin — en prod ce service est root, sinon il n'aurait pas cree l'humain.
+  local home="" tag
+  if [[ "$EUID" -eq 0 && "$(id -un)" != "$login" ]]; then
+    home="$(getent passwd "$login" | cut -d: -f6 || true)"
+    [[ -n "$home" ]] || { err "$login : pas de home dans passwd — les modules per-humain ne se jouent pas"; return 1; }
+  fi
+
   # L'ORDRE EST CELUI DU PREFIXE NUMERIQUE, lisible dans un `ls` — meme regle que `modules.d`.
   for m in "$HUMAN_MODULES"/[0-9][0-9]-*.sh; do
     [[ -f "$m" ]] || continue
     local rc=0
-    (
-      set -euo pipefail
-      PROV_HUMAN="$login"; export PROV_HUMAN
-      PROV_MODULE_TAG="$(basename "$m" .sh)"
-      PROV_DRIFT=0; PROV_FAILED=0
-      p_ok()   { echo "[lcars-converger] OK    $PROV_MODULE_TAG: $*"; return 0; }
-      p_chg()  { echo "[lcars-converger] POSÉ  $PROV_MODULE_TAG: $*"; return 0; }
-      p_drift(){ echo "[lcars-converger] DRIFT $PROV_MODULE_TAG: $*" >&2; PROV_DRIFT=$((PROV_DRIFT+1)); }
-      p_warn() { echo "[lcars-converger] WARN  $PROV_MODULE_TAG: $*" >&2; }
-      p_fail() { echo "[lcars-converger] FAIL  $PROV_MODULE_TAG: $*" >&2; PROV_FAILED=$((PROV_FAILED+1)); }
-      p_step() { echo "[lcars-converger] >>    $PROV_MODULE_TAG: $*"; }
-      p_die()  { echo "[lcars-converger] FATAL $PROV_MODULE_TAG: $*" >&2; exit 1; }
-      # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel, qui est le cas
-      # NOMINAL d'un humain frais (il lui manque ses credentials `claude`, geste d'identite).
-      verdict_apply() { [[ "$PROV_FAILED" -gt 0 ]] && exit 1; [[ "$PROV_DRIFT" -gt 0 ]] && exit 2; exit 0; }
-      verdict_check() { verdict_apply; }
-      human_home()    { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
-      repo_root()     { printf '%s\n' "${LCARS_HELPERS_DIR:-/opt/lcars}"; }
-      is_fleet_human() { local u; u="$(id -u -- "${1:-$PROV_HUMAN}" 2>/dev/null)" || return 1
-                         [[ "$u" -ge "$(awk '/^UID_MIN/{print $2}' /etc/login.defs 2>/dev/null || echo 1000)" ]]; }
-      run_quiet()     { local o; if ! o="$("$@" 2>&1)"; then printf "%s\n" "$o" >&2; return 1; fi; }
-      # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
-      . "$m" apply
-    ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    tag="$(basename "$m" .sh)"
+    # LE MODULE CHARGE LE PROTOCOLE LUI-MEME, par la variable que l'hote lui donne — la meme
+    # forme que ses temoins. Ce service ne definit plus rien : il nomme l'humain, le module, et
+    # le fichier. Vide si l'hote n'en a pas (un decor qui ne joue que cette fonction) : c'est
+    # alors la garde du module qui parle, et elle nomme sa cause.
+    if [[ -n "$home" ]]; then
+      ( cd "$home" && runuser -u "$login" -- \
+          env HOME="$home" USER="$login" LOGNAME="$login" \
+              PROV_HUMAN="$login" PROV_MODULE_TAG="$tag" \
+              LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}" \
+              bash -c 'set -euo pipefail; . "$1" apply' _ "$m"
+      ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    else
+      (
+        set -euo pipefail
+        export PROV_HUMAN="$login" PROV_MODULE_TAG="$tag"
+        export LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}"
+        # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
+        . "$m" apply
+      ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    fi
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
       rc_all=1
       err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"

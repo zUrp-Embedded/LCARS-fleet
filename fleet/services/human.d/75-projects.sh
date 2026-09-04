@@ -12,8 +12,11 @@
 # C'est aussi son `~/.lcars/fleet_v2.env` qui porte l'adresse de la forge et le jeton.
 
 set -euo pipefail
-# shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
+# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
+# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# shellcheck source=../lib/human-protocol.sh
+. "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 
 LCARS_CLI="$PROV_LINK_DIR/lcars"
 

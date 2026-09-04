@@ -40,7 +40,8 @@ cat "$FORGE_PAYLOAD"
 SH
   chmod +x "$BIN/curl"
 
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
+  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur.
+  export LCARS_HUMAN_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh"
   export PROVISION_MODULE=70-human
   export PROV_HUMAN
   PROV_HUMAN="$(id -un)"
