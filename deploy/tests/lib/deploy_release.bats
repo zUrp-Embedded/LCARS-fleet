@@ -1,15 +1,8 @@
 #!/usr/bin/env bats
-<<<<<<<< HEAD:deploy/tests/lib/deploy_release.bats
 # SOURCE: deploy/tests/lib/deploy_release.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
 # STARDATE: 2026.239
 # STATUS: bats tests for deploy/lib/deploy-release.sh atomic-swap helpers (crash-safe deploy)
-========
-# SOURCE: runtime/test/etc/install.bats
-# AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.247
-# STATUS: bats tests for etc/deploy-release.sh atomic-swap helpers (crash-safe deploy)
->>>>>>>> origin/main:runtime/test/etc/install.bats
 #
 # The old install did `rm -rf $PREFIX/rel` then a slow `cp -a`, and overwrote each launcher in place:
 # a failure mid-copy lost the last good build, a reader mid-copy saw a mixed assembly. These drive the

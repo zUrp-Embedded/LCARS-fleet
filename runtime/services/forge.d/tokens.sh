@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/forge.d/tokens.sh
+# SOURCE: runtime/services/forge.d/tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — forge : SONDE de la structure (territoire OpenTofu) + jambe tokens (A4)

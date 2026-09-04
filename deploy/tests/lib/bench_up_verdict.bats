@@ -27,12 +27,12 @@ setup() {
   # sur « Aucun fichier ou dossier de ce nom » (mesure .63, 2026-08-30). Un decor qui recopie le
   # defaut le rend indetectable, et c'est la seule espece de test qui coute plus qu'elle ne rapporte.
   DOCKER_D="$ROOT/deploy/docker"
-  mkdir -p "$BENCH" "$ROOT/fleet/services/forge-recipe" "$ROOT/deploy/lib"
+  mkdir -p "$BENCH" "$ROOT/runtime/services/forge-recipe" "$ROOT/deploy/lib"
   cp "$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   SRC="$BENCH/bench-up.sh"
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
-  : > "$ROOT/fleet/services/forge-recipe/.keep"
+  : > "$ROOT/runtime/services/forge-recipe/.keep"
   # ⚠ LA LIB EST LA VRAIE, ET PLUS UNE DOUBLURE VIDE (2026-08-18). `bench-up` la source de nouveau :
   # la derivation de l'adresse ANNONCEE (`advertise_addr`) y vit, parce qu'elle depend du substrat et
   # que la recopier ici la ferait diverger. Un stub vide rendrait `advertise_addr` introuvable et le

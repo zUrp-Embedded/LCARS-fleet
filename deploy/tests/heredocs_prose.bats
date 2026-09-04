@@ -65,7 +65,7 @@ in_hd {
 END { printf "HD %d\n", nu + 0 }
 AWK
   mapfile -t FILES < <(
-    find "$R/deploy" "$R/fleet/services" -type f \( -name '*.sh' -o -name '*.bats' \
+    find "$R/deploy" "$R/runtime/services" -type f \( -name '*.sh' -o -name '*.bats' \
          -o -name 'provision' -o -name 'box' -o -name 'accept' \) 2>/dev/null | sort
     echo "$R/install.sh"
   )

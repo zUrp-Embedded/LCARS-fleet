@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/lib/human-protocol.sh
+# SOURCE: runtime/services/lib/human-protocol.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: actif — le protocole des modules per-humain (`human.d`) : le protocole des modules du produit, plus la PERSONNE

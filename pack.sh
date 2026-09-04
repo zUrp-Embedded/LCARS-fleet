@@ -99,7 +99,7 @@ OUT="$PACK_DIR/${NAME}.tar.gz"
 # C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
 # passés. Le sauter ici rendrait le paquet indistinguable d'un `mix release` à la main.
 say "gate du RUNTIME (compile strict + suite + bats + contrats + topologie + dialyzer)…"
-( cd fleet && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
+( cd runtime && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
 
 # ─── ET LA PORTE DE L'INSTALLEUR — LE PAQUET PORTE LES DEUX LOGICIELS ────────────────────────────
 #
@@ -116,7 +116,7 @@ say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
 bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
 say "release prod…"
-( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
 
 # ─── LA DOC — LA SECONDE MOITIÉ DE LA LIVRAISON, ET ELLE MANQUAIT ───────────────────────────────
 #
@@ -198,8 +198,8 @@ _rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
 printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
 say "révision estampillée : $_rev"
 
-mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
-cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
+mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
+cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
 
 # ⚠ LA DOC VOYAGE AU CHEMIN QUE `44-media` LIT DÉJÀ, et c'est ce qui évite d'inventer une convention.
 # Ce module copie `$SITE_SRC/dist/.` vers `/opt/lcars/share/doc` ; en posant le `dist/` bâti là où il

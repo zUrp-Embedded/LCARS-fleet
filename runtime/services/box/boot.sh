@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/box/boot.sh
+# SOURCE: runtime/services/box/boot.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — le boot de la boite (PID 1 sous tini) : init de l'instance, gestes de forge, services, puis exec sshd
@@ -14,7 +14,7 @@
 # Sans porte : le boot de la boite (PID 1 sous tini).
 #
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
-# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet_v2 start`. Ce
+# login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. Ce
 # script est la transposition Docker du « re-run convergent » : l'image est immutable (build),
 # le VOLUME /home converge ICI à chaque boot via LE MÊME `provision` que le chemin WSL.
 #
@@ -57,15 +57,15 @@ esac
 # ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : le modele est celui de Docker — l'image
 # est le produit, le conteneur une instance, l'etat dans le volume. Ce bloc rejouait ici, en shell
 # d'entrypoint, le siege, les zones, les clones et les cles ; puis `provision apply` rejouait
-# l'installeur entier a chaque boot. Tout cela est `fleet/services/box/init.sh`, un geste du
+# l'installeur entier a chaque boot. Tout cela est `runtime/services/box/init.sh`, un geste du
 # PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
 # la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
 # substrat docker. Il rend 3 quand la boite n'a rien pour determiner son siege : c'est l'etat « en
 # attente de configuration », et la boite reste debout pour que « box config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
-BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/fleet/services/box/init.sh}"
-MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/fleet/services/lib/module-protocol.sh}"
+BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/services/box/init.sh}"
+MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 say() { echo "[box-boot] $*"; }
 [[ -r "$BOX_INIT" && -r "$MODULE_PROTOCOL" ]] || {
@@ -99,7 +99,7 @@ prov_rc=0
 for gesture in tokens catalogues ops-branch deck-oidc; do
   g_rc=0
   LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" LCARS_MODULE_TAG="$gesture" LCARS_LOGIN="$LCARS_ADMIRAL" \
-    bash "/opt/lcars/fleet/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
+    bash "/opt/lcars/services/forge.d/$gesture.sh" apply 2>&1 | sed "s/^/[forge.d] /" || g_rc=${PIPESTATUS[0]}
   case "$g_rc" in
     0) : ;;
     2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant" ;;
@@ -200,9 +200,9 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
     [[ "$_u" =~ ^[0-9]+$ ]] && (( _u >= 1000 )) && [[ "$_u" != "$LCARS_UID" ]] && { humans_rc=0; break; }
   done < <(getent group "${LCARS_FLEET_GROUP:-fleet}" | cut -d: -f4 | tr ',' '\n')
   if [[ "$humans_rc" -eq 0 ]]; then
-    say "humain(s) de fleet : présent(s) — « fleet_v2 start » a quelqu'un pour le lancer"
+    say "humain(s) de fleet : présent(s) — « fleet start » a quelqu'un pour le lancer"
   else
-    say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet_v2 start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
+    say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
 
   launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN"
@@ -308,5 +308,5 @@ else
 fi
 
 # ─── 4. sshd au premier plan (tini est PID 1 : reap + signaux ; exec = sshd reçoit les signaux) ──
-say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> : c'est la porte d'ADMIN. « fleet_v2 start » veut un humain de fleet, depuis sa console — GUARD B refuse le siège"
+say "sshd prêt — ssh $LCARS_ADMIRAL@<hôte> -p <port mappé> : c'est la porte d'ADMIN. « fleet start » veut un humain de fleet, depuis sa console — GUARD B refuse le siège"
 exec /usr/sbin/sshd -D -e

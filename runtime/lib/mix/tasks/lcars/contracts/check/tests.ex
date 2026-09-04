@@ -592,7 +592,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Tests do
                "site-packages",
                "-o",
                "-path",
-               "*/fleet/tmp",
+               "*/runtime/tmp",
                ")",
                "-prune",
                "-o",

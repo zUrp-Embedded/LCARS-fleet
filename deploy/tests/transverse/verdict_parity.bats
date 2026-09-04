@@ -14,7 +14,7 @@ load ../refute
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   INSTALLER="$REPO/deploy/lib/provision-lib.sh"
-  PRODUCT="$REPO/fleet/services/lib/module-protocol.sh"
+  PRODUCT="$REPO/runtime/services/lib/module-protocol.sh"
   [ -f "$INSTALLER" ] && [ -f "$PRODUCT" ]
 }
 

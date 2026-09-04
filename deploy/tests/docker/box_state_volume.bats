@@ -14,7 +14,7 @@ load ../refute
 setup() {
   DOCKER="$(cd "$BATS_TEST_DIRNAME/../../docker" && pwd)"
   DEV="$DOCKER/docker-compose.yml"; PULL="$DOCKER/docker-compose.install.yml"
-  PROTO="$DOCKER/../../fleet/services/lib/module-protocol.sh"
+  PROTO="$DOCKER/../../runtime/services/lib/module-protocol.sh"
 }
 env_of() { sed 's/#.*//' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*\"?([^\"]*)\"?[[:space:]]*$/\1/p" | head -1; }
 mounts_of() { sed 's/#.*//' "$1" | sed -nE 's/^[[:space:]]+-[[:space:]]+[a-z-]+:(\/[^:]+).*$/\1/p'; }
@@ -34,9 +34,9 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m"/* ]] && return 0; d
 }
 
 @test "le deck LIT le fichier sous le MEME nom que le geste qui l'ecrit — un seul nom" {
-  grep -q 'os.environ.get("LCARS_DECK_OIDC_FILE"' "$DOCKER/../../fleet/services/console-deck.py"
-  refute grep -q '"LCARS_DECK_OIDC"' "$DOCKER/../../fleet/services/console-deck.py"
-  grep -q 'LCARS_DECK_OIDC_FILE' "$DOCKER/../../fleet/services/forge.d/deck-oidc.sh"
+  grep -q 'os.environ.get("LCARS_DECK_OIDC_FILE"' "$DOCKER/../../runtime/services/console-deck.py"
+  refute grep -q '"LCARS_DECK_OIDC"' "$DOCKER/../../runtime/services/console-deck.py"
+  grep -q 'LCARS_DECK_OIDC_FILE' "$DOCKER/../../runtime/services/forge.d/deck-oidc.sh"
 }
 
 @test "le repertoire prive (jetons) est aussi sous le volume var — l'etat ne se separe pas" {

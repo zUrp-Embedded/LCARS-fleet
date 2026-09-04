@@ -28,7 +28,7 @@ setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
   [ -f "$SRC" ]
   SRC48="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  G="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  G="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
   export PROVISION_MODULE=61-forge-structure
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/private"
@@ -88,7 +88,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   # outil. Le dossier de sortie est cede a l'humain, sinon il ne peut pas y ecrire.
   code | grep -q 'as_human env LCARS_TOOL_EVAL=1 "\$(dirname "\$PROVISION_LIB")/enroll-catalogue.sh"'
   code | grep -q 'chown "\$PROV_HUMAN" "\$enroll"'
-  local rt="$BATS_TEST_DIRNAME/../../../fleet/config/runtime.exs"
+  local rt="$BATS_TEST_DIRNAME/../../../runtime/config/runtime.exs"
   grep -q 'tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"' "$rt"
 }
 

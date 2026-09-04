@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/services/box/init_secrets.bats
+# SOURCE: runtime/test/services/box/init_secrets.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for box/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive de la boite

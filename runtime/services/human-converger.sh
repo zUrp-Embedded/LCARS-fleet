@@ -303,7 +303,7 @@ converge_human() { # converge_human <login>
   # portent `NEEDS: human` et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
   # dans son home, HOME/USER/LOGNAME poses. Ce service les sourcait en ROOT — mesure du 2026-09-04,
   # banc bob_1, la premiere fois qu'ils ont tourne ici : `~/.lcars` de l'humain cree root:root,
-  # son `fleet_v2.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur
+  # son `fleet.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur
   # « HOME: unbound ». Un module per-humain joue en root ecrit chez l'humain ce que l'humain ne
   # peut pas lire.
   #

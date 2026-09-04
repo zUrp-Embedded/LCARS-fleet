@@ -26,7 +26,7 @@
 #    pas lieu d'etre. C'est toute la difference entre monter un banc et remettre sa boite a jour.
 #
 # ⚠ CE QUE CE SCRIPT NE FAIT PAS : demarrer la fleet. Comme apres un `bench-up.sh`, l'entrypoint
-# s'arrete a « puis `fleet_v2 start` » — le daemon se lance a la main, et le verdict final ci-dessous
+# s'arrete a « puis `fleet start` » — le daemon se lance a la main, et le verdict final ci-dessous
 # le rappelle plutot que de laisser croire a un banc qui travaille.
 #
 # USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 0.0.0.0]
@@ -221,5 +221,5 @@ say "  image     : $IMAGE   (revision $REVISION)"
 say "  forge     : $FORGE_URL   (PRESERVEE — ni resemee ni redemarree)"
 say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
 say "  creds     : $CREDS_OK"
-say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet_v2 start'"
+say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet start'"
 say "─────────────────────────────────────────────────────────"

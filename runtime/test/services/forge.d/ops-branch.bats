@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/services/forge.d/ops-branch.bats
+# SOURCE: runtime/test/services/forge.d/ops-branch.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-20
 # STATUS: bats tests for 65-ops-branch — la boite aux lettres, et la difference entre « pas encore » et « en panne »

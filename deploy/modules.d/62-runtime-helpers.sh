@@ -14,8 +14,8 @@ HELPERS_DIR="${LCARS_HELPERS_DIR:-$PROV_ROOT}"
 TOOLCHAIN_BIN="${LCARS_TOOLCHAIN_CONVERGE_BIN:-/usr/local/bin/lcars-toolchain-converge}"
 AUTHORITY_ASK_BIN="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 HELPERS_OWNER="${LCARS_HELPERS_OWNER:-root:root}"
-SRC_DIR="$(repo_root)/fleet/services"
-BIN_SRC_DIR="$(repo_root)/fleet/bin"
+SRC_DIR="$(product_tree)/services"
+BIN_SRC_DIR="$(product_tree)/bin"
 TTYD_BIN="${LCARS_TTYD_BIN:-ttyd}"
 
 owner_args() { printf '%s\n%s\n%s\n%s\n' -o "${HELPERS_OWNER%%:*}" -g "${HELPERS_OWNER##*:}"; }
@@ -60,16 +60,16 @@ deck_static_dir() { echo "$HELPERS_DIR/deck-static"; }
 
 # ⚠ LE TAMPON SE DÉRIVE DE L'EMPLACEMENT DE LA COPIE, PAS DE LA RACINE DES AUXILIAIRES. Les deux
 # coïncident aujourd'hui — `repo_root()` remonte trois crans depuis `<copie>/deploy/lib`, et la
-# copie est posée en `$HELPERS_DIR/fleet` — mais c'est une COÏNCIDENCE ARITHMÉTIQUE, pas une règle.
-EMBEDDED_FLEET="$HELPERS_DIR/fleet"
+# copie est posée en `$HELPERS_DIR` (a plat) — mais c'est une COÏNCIDENCE ARITHMÉTIQUE, pas une règle.
+EMBEDDED_FLEET="$HELPERS_DIR"   # a plat : /opt/lcars/{etc,services,bin} — cf. product_tree() de la lib
 # ⚠ ET CE TAMPON A PORTÉ LE NOM D'UN AUTRE FAIT. Il valait `$PROV_SOURCE_STAMP`, c'est-à-dire le
 # discriminant que `prov_delivery` lit à la racine d'un arbre pour dire BINAIRE ou SOURCE. Comme la
 # coïncidence arithmétique ci-dessus fait tomber les deux sur `/opt/lcars`, un apply rejoué depuis
 # la copie — LE GESTE NOMINAL DU CONVERGEUR — lisait ce tampon comme « paquet ». La SSoT des deux
 # noms vit dans la lib, avec le récit complet.
-helpers_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_HELPERS_STAMP:-.helpers-revision}"; }
+helpers_stamp() { echo "$EMBEDDED_FLEET/${PROV_HELPERS_STAMP:-.helpers-revision}"; }   # a plat : le tampon est A LA RACINE posee, avec les arbres
 # Le discriminant de livraison, tel qu'il doit exister DANS la copie — voir `propage_livraison`.
-copie_delivery_stamp() { echo "$(dirname "$EMBEDDED_FLEET")/${PROV_SOURCE_STAMP:-.source-revision}"; }
+copie_delivery_stamp() { echo "$EMBEDDED_FLEET/${PROV_SOURCE_STAMP:-.source-revision}"; }   # a plat : a la racine posee
 
 posed_rev() { # la révision d'où sort ce qui est actuellement posé, ou « inconnue »
   local f; f="$(helpers_stamp)"
@@ -85,19 +85,19 @@ deck_static_table() {
 
 # LE PROVISIONNEMENT EN FORME DE REPO, comme dans l'image : `repo_root()` de la lib résout ses
 # chemins inter-arbre depuis `<racine>/deploy/lib/`, donc le convergeur qui appelle
-# `/opt/lcars/deploy/provision` retrouve `fleet/etc` sans rien savoir de la machine.
+# `/opt/lcars/deploy/provision` retrouve `runtime/etc` sans rien savoir de la machine.
 # ⚠ `services` MANQUAIT, ET LE MEME MODULE EN DEPENDAIT. Il pose onze auxiliaires depuis
-# `$(repo_root)/fleet/services` (`SRC_DIR`) et n'emportait pas ce repertoire dans la copie : sur une
+# `$(product_tree)/services` (`SRC_DIR`) et n'emportait pas ce repertoire dans la copie : sur une
 # machine provisionnee, `repo_root()` resout `/opt/lcars`, et le comparateur n'avait donc JAMAIS sa
-# source. Sans lui, `/opt/lcars/fleet/services` n'existe pas, et le doctor rend onze drifts
+# source. Sans lui, `/opt/lcars/services` n'existe pas, et le doctor rend onze drifts
 # « diverge de la source » a chaque passage — tous faux.
 #
 # Second lecteur, plus discret : `25-directories` invoque
-# `$(repo_root)/fleet/services/forge-gestures.sh builtin-human` pour connaitre l'humain integre. Sans
+# `$(product_tree)/services/forge-gestures.sh builtin-human` pour connaitre l'humain integre. Sans
 # l'arbre, la sonde echoue derriere un `|| true` et rend une chaine vide — le repertoire de console
 # de cet humain n'etait simplement pas pose, sans un mot.
 # ⚠ `bin` EST DU MEME LOT, ET SON ABSENCE ETAIT LE MEME DEFAUT QUE C6, SUR UN QUATRIEME
-# REPERTOIRE. `BIN_SRC_DIR="$(repo_root)/fleet/bin"` (l. 18) est lu par ce module meme pour poser
+# REPERTOIRE. `BIN_SRC_DIR="$(product_tree)/bin"` (l. 18) est lu par ce module meme pour poser
 # `lcars-toolchain-converge` et `lcars-authority-ask` — mais `bin` ne figurait pas dans cette liste.
 # Au rejeu depuis la copie, `repo_root()` rend `/opt/lcars`, `BIN_SRC_DIR` pointe donc sur un
 # repertoire qui n'a jamais ete embarque, et la pose rate.
@@ -193,7 +193,7 @@ check() {
     elif [[ ! -r "$SRC_DIR/$n" ]]; then
       # ⚠ « DIVERGE » EST UNE CONCLUSION, ET ELLE EXIGE DEUX COTES. `helper_current` est un `cmp -s
       # src dst` : source absente, `cmp` echoue, et l'appelant lisait cet echec comme une
-      # divergence. Vu : ONZE drifts « diverge de la source » alors que `/opt/lcars/fleet/services` n'existait pas du tout. Onze verdicts faux par
+      # divergence. Vu : ONZE drifts « diverge de la source » alors que `/opt/lcars/services` n'existait pas du tout. Onze verdicts faux par
       # passage, dont aucun ne portait sur l'auxiliaire qu'il nommait.
       p_warn "$HELPERS_DIR/$n : rien n'est conclu — la SOURCE est absente ou illisible ici ($SRC_DIR/$n). « diverge » demande deux côtés"
     elif ! helper_current "$n"; then
@@ -225,7 +225,7 @@ check() {
   fi
 
   # ⚠ LE PROVISIONNEMENT NE VIT PLUS SOUS `fleet/`, ET CETTE SONDE POINTAIT ENCORE LA-BAS. Elle
-  # testait `$EMBEDDED_FLEET/deploy/provision`, c'est-a-dire `/opt/lcars/fleet/deploy/provision` — un
+  # testait `$EMBEDDED_FLEET/deploy/provision`, c'est-a-dire `/opt/lcars/deploy/provision` — un
   # chemin que la separation installeur/runtime a rendu IMPOSSIBLE : `deploy` est passe dans
   # `EMBEDDED_ROOT`, donc pose en `/opt/lcars/deploy`. Le doctor aurait rendu un DRIFT permanent sur
   # chaque machine, et son `p_ok` ne se serait plus jamais affiche : un mur qui accuse toujours
@@ -233,7 +233,7 @@ check() {
   #
   # ⚠ ET LA BOUCLE SUR `EMBEDDED` N'AVAIT PLUS D'OBJET : elle iterait sur les arbres de `fleet/` pour
   # juger un binaire de l'installeur, qui n'en fait plus partie — d'ou un message qui nommait
-  # `/opt/lcars/fleet/etc` pour se plaindre d'un `provision` absent. Le sujet est UN fichier, il se
+  # `/opt/lcars/etc` pour se plaindre d'un `provision` absent. Le sujet est UN fichier, il se
   # nomme une fois.
   if [[ -x "$HELPERS_DIR/deploy/provision" ]]; then
     p_ok "provisionnement embarqué posé ($HELPERS_DIR/deploy/provision)"
@@ -344,35 +344,35 @@ BLOC
 
   ensure_dir "$EMBEDDED_FLEET" 0755 "$HELPERS_OWNER" || verdict_apply
   for n in "${EMBEDDED[@]}"; do
-    [[ -d "$(repo_root)/fleet/$n" ]] || { p_fail "source absente: $(repo_root)/fleet/$n"; verdict_apply; }
+    [[ -d "$(product_tree)/$n" ]] || { p_fail "source absente: $(product_tree)/$n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n.new"
     ensure_dir "$EMBEDDED_FLEET/$n.new" 0755 "$HELPERS_OWNER" || verdict_apply
     # `tar` plutot que `cp -a` : il EXCLUT a la source, donc les 73 Mo de cache tofu ne sont jamais
     # ecrits — pas ecrits puis retires, JAMAIS ecrits. Meme forme que la boucle de la racine.
-    ( cd "$(repo_root)/fleet/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
+    ( cd "$(product_tree)/$n" && tar -cf - "${EMBEDDED_EXCLUDE[@]}" . ) \
       | ( cd "$EMBEDDED_FLEET/$n.new" && tar -xf - ) \
-      || { p_fail "copie ratée: fleet/$n"; verdict_apply; }
+      || { p_fail "copie ratée: $n"; verdict_apply; }
     rm -rf "${EMBEDDED_FLEET:?}/$n"
     mv "$EMBEDDED_FLEET/$n.new" "$EMBEDDED_FLEET/$n" \
-      || { p_fail "bascule ratée: fleet/$n"; verdict_apply; }
+      || { p_fail "bascule ratée: $n"; verdict_apply; }
   done
   # ⚠ CE MESSAGE DISAIT « provisionnement embarque », ET IL NE POSE PLUS LE PROVISIONNEMENT. Depuis
   # la separation, cette boucle porte les arbres de `fleet/` ; l installeur, lui, part avec
   # `EMBEDDED_ROOT` et s annonce plus bas. Un geste qui annonce ce qu il ne fait pas est la moitie
   # d une trace fausse — l autre moitie etant le mur qui la lit.
-  p_chg "arbres du runtime embarqués ($HELPERS_DIR/fleet/{${EMBEDDED[*]}})"
+  p_chg "arbres du runtime embarqués ($HELPERS_DIR/{${EMBEDDED[*]}})"
 
   # ─── CE QUI VIT A LA RACINE DU DEPOT, ET QUE `EMBEDDED` NE POUVAIT PAS ATTEINDRE ──────────────
   #
   # ⚠ TROIS LECTURES SORTENT DE `fleet/`, ET AUCUNE N'ETAIT EMBARQUEE. `44-media` lit
   # `$(repo_root)/assets` (les medias, ET les sources de la doc) ; `48-forge-host` lit
-  # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus part de `$(repo_root)/fleet/$n` :
+  # `$(repo_root)/catalogues/web-demo`. La boucle ci-dessus part de `$(product_tree)/$n` :
   # aucune valeur de sa liste ne peut designer un repertoire de la RACINE.
   #
   # VU : un apply rejoue depuis `/opt/lcars/deploy/provision` —
   # LE GESTE NOMINAL DU CONVERGEUR, celui que l'en-tete de ce module decrit — echouait sur trois
   # modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
-  # /opt/lcars/fleet ». Le rail pose ne pouvait pas se rejouer entierement.
+  # /opt/lcars/services ». Le rail pose ne pouvait pas se rejouer entierement.
   #
   # C'est le meme defaut que `services` (C6), sur deux repertoires de plus. `services` avait ete
   # trouve parce qu'il produisait onze faux drifts VISIBLES ; ceux-ci ne se voient qu'en rejouant un

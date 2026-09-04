@@ -168,7 +168,7 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "l'uid du siege est POSE dans un fichier que le garde ne peut pas reecrire" {
   # ⚠ POURQUOI UN FICHIER ET PAS LA VARIABLE : mesure du 2026-08-27,
-  # `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait GUARD B. L'environnement d'un processus
+  # `LCARS_SYSADMIN_UID=99999 fleet start` desarmait GUARD B. L'environnement d'un processus
   # appartient a ce processus ; une garde ne peut pas y prendre sa politique. `0644` parce que le
   # lecteur est le shell d'un humain quelconque, `root:root` parce que c'est ce qui l'empeche de le
   # reecrire — les deux moities du mode portent chacune la moitie du contrat.
@@ -662,7 +662,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 # et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont meme pas SELECTIONNES.
 # Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait AVANT toute sonde des
 # l'absence de systemd. Un `provision doctor` sur une boite annoncait donc 0 faute pendant que
-# GUARD B aurait refuse tout `fleet_v2 start`, faute de compte. La sonde a ete ajoutee pour ca.
+# GUARD B aurait refuse tout `fleet start`, faute de compte. La sonde a ete ajoutee pour ca.
 #
 # ⚠ ELLE A D'ABORD DERIVE, ET C'ETAIT L'ERREUR SYMETRIQUE (⚖ arbitrage user 2026-08-30). Aucun
 # deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES, les personnes s'enrolent
@@ -680,7 +680,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   box_services_present
   mod check
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
-  [[ "$output" == *"fleet_v2 start"* ]]
+  [[ "$output" == *"fleet start"* ]]
 }
 
 @test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {

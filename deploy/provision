@@ -4,7 +4,7 @@
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — LE point d'entrée provisioning : apply (converge), doctor (sonde nuke-drill), list
 #
-# Machine nue → `fleet_v2 start` fonctionnel, en UN geste rejouable à l'infini :
+# Machine nue → `fleet start` fonctionnel, en UN geste rejouable à l'infini :
 #     sudo deploy/provision apply
 #     deploy/provision doctor        # sonde read-only — LA sonde du nuke-drill
 #
@@ -148,7 +148,7 @@ while [[ $# -gt 0 ]]; do
     --only)      ONLY+=("${2:?--only attend un module}"); shift 2 ;;
     --human)     export PROV_HUMAN="${2:?--human attend un user}"; shift 2 ;;
     # ⚠ IL N'Y A PAS DE `--fleet-human`, ET IL NE SE RÉINTRODUIT PAS : le nom de l'humain de fleet a
-    # UNE source, « fleet/services/forge-gestures.sh builtin-human ». Un drapeau en poserait une
+    # UNE source, « runtime/services/forge-gestures.sh builtin-human ». Un drapeau en poserait une
     # seconde, en concurrence avec elle.
     #
     # Les deux ports que la machine PUBLIE. Des DRAPEAUX et non des variables d'environnement :
@@ -222,14 +222,14 @@ _journal_params
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
 # ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
-# bâtit par le Dockerfile, l'instance s'initialise côté produit (fleet/services/box/), et rien ne
+# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/box/), et rien ne
 # se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
 # l'image (doctor au build) et de `list` — jamais un substrat qu'on converge ou qu'on désinstalle.
 case "$CMD" in
   apply|uninstall) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
   L'image se bâtit (deploy/docker/Dockerfile, « deploy/box build »), se vérifie au build (stage verify,
   « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
-  (fleet/services/box/init.sh). Pour l'instance : « deploy/box status » · « deploy/box down »." ;;
+  (runtime/services/box/init.sh). Pour l'instance : « deploy/box status » · « deploy/box down »." ;;
 esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 

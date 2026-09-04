@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/services/box/init_layout.bats
+# SOURCE: runtime/test/services/box/init_layout.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests for box/init.sh layout — le magasin de l'instance est celui que l'hote monte

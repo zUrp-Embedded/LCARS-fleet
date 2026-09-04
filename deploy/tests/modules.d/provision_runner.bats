@@ -422,7 +422,7 @@ stub_impersonation() {
 #
 # Mesure du 2026-08-18, banc lcars-l8 : `provision doctor` rendait « modules: 11 · drift: 4 ·
 # échecs: 1 » sans une seule ligne pour dire QUEL module. Le coupable etait `70-human`, tue par
-# `pipefail` sur un `sed` d'un `fleet_v2.env` absent — donc mort AVANT `verdict_check`, sans rien
+# `pipefail` sur un `sed` d'un `fleet.env` absent — donc mort AVANT `verdict_check`, sans rien
 # imprimer. Cote apply c'etait pire : `set -e` rendait 2, et 2 y signifie « appliqué, drift
 # résiduel » — le bilan disait « rien n'est cassé » d'un module qui n'avait pas fini de tourner.
 #
@@ -637,7 +637,7 @@ EOF
   refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
   refute grep -q -- "forge-apply" "$code"
   # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
-  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../fleet/services/box/boot.sh"
+  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/box/boot.sh"
 }
 
 @test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
@@ -723,7 +723,7 @@ EOF
 }
 
 @test "hors checkout git, la revision se lit dans le TAMPON — c'est ce qui rend une COPIE nommable" {
-  # `/opt/lcars/fleet` est un `cp -a` : git n'y repond rien. Sans ce repli, un `provision` lance
+  # `/opt/lcars/services` est un `cp -a` : git n'y repond rien. Sans ce repli, un `provision` lance
   # depuis la copie — le cas du convergeur — ne pourrait pas nommer sa propre origine.
   # Le tampon se pose la ou `repo_root()` le cherchera : trois crans au-dessus de `lib/`, ce qui,
   # pour ce decor, tombe au-dessus du tmpdir du test. On calcule le chemin comme la lib le fait,

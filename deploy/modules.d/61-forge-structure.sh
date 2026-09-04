@@ -113,8 +113,8 @@ apply() {
   # s'initialise hors-ligne (le miroir de providers de 46-tofu), se joue, s'efface.
   p_step "forge : pose de la structure (orgs, comptes de rôle, teams, dépôt modèle)"
   local recipe; recipe="$(mktemp -d "${TMPDIR:-/tmp}/prov-recipe.XXXXXX")"
-  cp -a "$(repo_root)/fleet/services/forge-recipe/." "$recipe/" \
-    || { p_fail "recette non copiable ($(repo_root)/fleet/services/forge-recipe)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
+  cp -a "$(product_tree)/services/forge-recipe/." "$recipe/" \
+    || { p_fail "recette non copiable ($(product_tree)/services/forge-recipe)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
   cp "$enroll/roles.auto.tfvars.json" "$recipe/roles.auto.tfvars.json" \
     || { p_fail "roster non déposé dans la recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
   # Le `.terraform` de l'arbre NE VOYAGE PAS : un état décrit un chemin, pas une recette.
@@ -139,7 +139,7 @@ apply() {
     LCARS_RECIPE_DIR="$recipe" \
     LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
     TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-    bash "$(repo_root)/fleet/services/forge-gestures.sh" apply >"$tf_out" 2>&1 || rc=$?
+    bash "$(product_tree)/services/forge-gestures.sh" apply >"$tf_out" 2>&1 || rc=$?
   rm -rf "$recipe" "$enroll"
   if [[ "$rc" -ne 0 ]]; then
     p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"

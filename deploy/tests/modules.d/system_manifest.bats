@@ -107,21 +107,21 @@ code() {
     "$ROOT"/install.sh \
     "$BATS_TEST_DIRNAME"/../../lib/deploy-release.sh \
     "$BATS_TEST_DIRNAME"/../../docker/*.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/*.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/*.py \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/human.d/*.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/forge.d/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/*.py \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/human.d/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/forge.d/*.sh \
     ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
     "$BATS_TEST_DIRNAME"/../../lib/*.sh 2>/dev/null
 }
 
 # ⚠ LES BINAIRES QUE LE RAIL INSTALLE SONT DU CODE DU RAIL, ET ILS MANQUAIENT AU CORPUS.
 # `62-runtime-helpers.sh` les `install` sous /usr/local/bin depuis `BIN_SRC_DIR="$(repo_root)/
-# fleet/bin"` : un objet que l'un d'eux cree a donc bien un poseur dans ce depot. Mesure du
+# runtime/bin"` : un objet que l'un d'eux cree a donc bien un poseur dans ce depot. Mesure du
 # 2026-09-01 : `/var/tmp/lcars/toolchain-work`, cree par `bin/lcars-toolchain-converge:50`, etait
 # refuse par ISO 2/2 au moment meme ou on le declarait — alors que son poseur existe.
 #
-# ⚠ ET LA LISTE SE DERIVE DU MODULE, ELLE NE SE GLOBBE PAS. `fleet/bin/*` fait entrer les launchers
+# ⚠ ET LA LISTE SE DERIVE DU MODULE, ELLE NE SE GLOBBE PAS. `runtime/bin/*` fait entrer les launchers
 # de pods (`bwrap_launch.sh`, `host_launch.sh`, `claude_launch.sh`), qui appartiennent au RUNTIME :
 # mesure faite, ISO 1/2 rougit alors sur `/run/lcars/egress`, `/run/lcars/mcp` et
 # `/run/lcars/tmux-sock` — des chemins de POD, que la table du deploiement n'a pas a declarer. Le
@@ -132,8 +132,8 @@ code() {
 # corriger la seconde en ouvre un.
 _bins_du_rail=()
 while read -r _n; do
-  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../../fleet/bin/$_n" ] \
-    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../../fleet/bin/$_n")
+  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../../runtime/bin/$_n" ] \
+    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../../runtime/bin/$_n")
 done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
            "$BATS_TEST_DIRNAME"/../../modules.d/62-runtime-helpers.sh 2>/dev/null \
          | sed 's|.*/||; s|"$||' | sort -u)
@@ -322,7 +322,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # pas. Ni la mesure machine ni la table du corpus ne l'avaient : c'est la lecture du RUNTIME qui
   # l'a rendu visible.
   grep -qE '^runtime +/run/lcars-converger\.refused ' "$MANIFEST"
-  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../fleet/services/human-converger.sh"
+  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
 }
 
 @test "preserve = POSE mais JAMAIS RETIRE — pas « non pose »" {
@@ -492,7 +492,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 #
 # ⚠ MESURE DU 2026-09-01, BANC 2007 — un POSTE : `/var/lib/lcars/tofu/.apply.lock` y survivait a la
 # desinstallation. La table declarait `/var/lib/lcars` en « docker », alors que
-# `fleet/services/forge-gestures.sh:102` derive `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction
+# `runtime/services/forge-gestures.sh:102` derive `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction
 # de rail — et ce fichier part sur les deux (EMBEDDED de 62-runtime-helpers d un cote, COPY du
 # Dockerfile de l autre).
 #

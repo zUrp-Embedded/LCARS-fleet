@@ -63,7 +63,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
 #
 # ⚠ IL Y AVAIT DEUX NOMS ET UN SEUL POSEUR. `LCARS_UID` est l'uid AUQUEL cet entrypoint cree le
 # siege (`useradd -u`) ; `LCARS_SYSADMIN_UID` est celui que les gardes RESERVENT — GUARD B dans
-# `bin/fleet_v2`, son miroir dans `config/runtime.exs`, `is_fleet_human`, et le plancher `uid_floor`
+# `bin/fleet`, son miroir dans `config/runtime.exs`, `is_fleet_human`, et le plancher `uid_floor`
 # du convergeur. Rien ne posait le second dans la boite : ni le compose, ni ce fichier.
 #
 # LES DEUX DEFAUTS VALANT 1000, ILS S'ACCORDAIENT PAR COINCIDENCE — et le second temoin ci-dessous
@@ -86,7 +86,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   [[ "$output" == *"UID=1005 SYSADMIN=1005"* ]]
 }
 
-# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `fleet/test/services/box/init_seat.bats` ───
+# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `runtime/test/services/box/init_seat.bats` ───
 
 @test "VERROU : aucun compose ne pose de defaut sur LCARS_ADMIRAL" {
   # ⚠ LE SEUL TEMOIN QUI AURAIT ATTRAPE LE DEFAUT REEL, et les huit ci-dessus ne le pouvaient pas :

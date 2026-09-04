@@ -290,7 +290,7 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
 # Ce que la sonde doit continuer de faire, et qui est son unique raison d'exister : le DIRE. En
 # docker, `22-fleet-human` et `48-forge-host` ne sont meme pas selectionnes (`CHECK-ON: wsl linux`) ;
 # sans cette ligne, un `doctor` de boite annonce « 0 faute » pendant que GUARD B refuse tout
-# « fleet_v2 start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
+# « fleet start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
   # LE FAIT, pour qui doit decider : l'entrypoint de la boite publie « quelqu'un peut lancer une
@@ -301,7 +301,7 @@ probe_fleet_humans() {
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
   else
-    p_warn "aucun humain de fleet sur cette machine — « fleet_v2 start » n'aura personne pour le lancer tant que quelqu'un ne s'est pas enrolé sur la forge (team « $PROV_HUMANS_TEAM », le convergeur le matérialise au tour suivant). Ce n'est pas une dérive : un déploiement neuf attend son premier inscrit"
+    p_warn "aucun humain de fleet sur cette machine — « fleet start » n'aura personne pour le lancer tant que quelqu'un ne s'est pas enrolé sur la forge (team « $PROV_HUMANS_TEAM », le convergeur le matérialise au tour suivant). Ce n'est pas une dérive : un déploiement neuf attend son premier inscrit"
   fi
 }
 
@@ -341,7 +341,7 @@ probe_seat_uid() {
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
-    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
     return 0
   fi
   v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -369,7 +369,7 @@ check() {
   # ⚠ LA SONDE D'HUMAINS PASSE AVANT LA PORTE DE SORTIE, ET C'EST UN ACQUIS : `22-fleet-human` et
   # `48-forge-host` sont `CHECK-ON: wsl linux`, donc en docker ils ne sont meme pas SELECTIONNES.
   # Ce module est le seul a y tourner. Sortir avant de sonder faisait annoncer « 0 faute » a un
-  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet_v2 start`, faute de compte.
+  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet start`, faute de compte.
   # Trois temoins de `services_units.bats` tiennent ce contrat — ne pas le deplacer sous pretexte
   # qu'un humain manque forcement au premier boot : c'est un DRIFT, et un drift se dit.
   probe_fleet_humans
@@ -419,9 +419,9 @@ apply() {
   local u
 
   # ⚠ LE SIEGE ET L'ENVIRONNEMENT SE POSENT AVANT LA PORTE SYSTEMD, ET L'ORDRE EST LE CORRECTIF.
-  # `seat.uid` est ce que lit GUARD B (`bin/fleet_v2`, `runtime.exs`) ; il ne depend d'aucune
+  # `seat.uid` est ce que lit GUARD B (`bin/fleet`, `runtime.exs`) ; il ne depend d'aucune
   # unite. Pose apres le test de systemd, il manquait sur un WSL vierge au premier apply — `30-wsl`
-  # vient d'ecrire `systemd=true`, qui n'agit qu'apres `wsl --shutdown` — et `fleet_v2 start`
+  # vient d'ecrire `systemd=true`, qui n'agit qu'apres `wsl --shutdown` — et `fleet start`
   # refusait entre les deux passes pendant que le verdict de ce module etait vert (« rien a poser »).
   # `services.env` suit pour la meme raison : les unites le liront quand elles existeront.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
@@ -532,7 +532,7 @@ converge_humans_now() {
   [[ "$rc" -eq 0 ]] || return 0   # rc non toléré : `run_step` a déjà compté l'échec et dit pourquoi
   case "$PROV_LAST_RC" in
     0) ;;
-    2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet_v2 start » n'aura personne à lancer"
+    2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet start » n'aura personne à lancer"
        return 0 ;;
     *) p_drift "convergeur d'humains : passe en échec (rc=$PROV_LAST_RC) — « journalctl -u lcars-converger » dit pourquoi"
        return 0 ;;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/services/forge.d/deck-oidc.bats
+# SOURCE: runtime/test/services/forge.d/deck-oidc.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for modules.d/66-deck-oidc — la LISTE DES ENTREES doit converger

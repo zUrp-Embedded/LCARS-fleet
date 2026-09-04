@@ -138,8 +138,8 @@ check_fleet_start() {
   # n'existe pas de `/usr/bin/command`, donc un `env … command -v` rend 127 sur toute machine. Et
   # `-l` charge le profil de l'humain — c'est le PATH qu'il aura vraiment qu'on mesure, pas celui
   # que le provisionnement traine.
-  "${as[@]}" bash -lc 'command -v fleet_v2' >/dev/null 2>&1 \
-    || { no "fleet : « fleet_v2 » n'est pas dans le PATH de « $login »"; return; }
+  "${as[@]}" bash -lc 'command -v fleet' >/dev/null 2>&1 \
+    || { no "fleet : « fleet » n'est pas dans le PATH de « $login »"; return; }
 
   # ⚠ PAS DE TUYAU ICI : `… | grep -q` SOUS `pipefail` REND FAUX QUAND GREP TROUVE. `grep -q` sort
   # au premier match et ferme le tuyau ; le producteur meurt sur SIGPIPE (141), et `pipefail` retient
@@ -148,17 +148,17 @@ check_fleet_start() {
   # Le `|| true` dit qu'un « status » en echec est une REPONSE (la fleet n'est pas la), pas une
   # panne de ce script.
   fleet_up() { # fleet_up -> 0 si le BEAM de $login est vivant
-    local out; out="$("${as[@]}" fleet_v2 status 2>/dev/null || true)"
+    local out; out="$("${as[@]}" fleet status 2>/dev/null || true)"
     [[ "$out" == *"BEAM vivant"* ]]
   }
 
   if fleet_up; then
-    skip "fleet : deja demarree sous « $login » (laissee telle quelle) — « elle demarre » n'est PAS etabli par cette passe : ce verdict ne se mesure que fleet arretee, donc sur un deploiement jetable (P4) ou apres un « fleet_v2 stop » volontaire"
+    skip "fleet : deja demarree sous « $login » (laissee telle quelle) — « elle demarre » n'est PAS etabli par cette passe : ce verdict ne se mesure que fleet arretee, donc sur un deploiement jetable (P4) ou apres un « fleet stop » volontaire"
     return
   fi
 
-  if ! "${as[@]}" fleet_v2 start >/dev/null 2>&1; then
-    no "fleet : « fleet_v2 start » a echoue sous « $login » — rejoue-le a la main pour voir sa plainte"
+  if ! "${as[@]}" fleet start >/dev/null 2>&1; then
+    no "fleet : « fleet start » a echoue sous « $login » — rejoue-le a la main pour voir sa plainte"
     return
   fi
   local alive=0
@@ -166,11 +166,11 @@ check_fleet_start() {
     if fleet_up; then alive=1; break; fi
     sleep 2
   done
-  "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true
+  "${as[@]}" fleet stop >/dev/null 2>&1 || true
   if [[ "$alive" -eq 1 ]]; then
     ok "fleet : demarre et vivante sous « $login » (arretee apres mesure) — verdict de DEMARRAGE etabli sur cette installation (P4 : il vaut pour elle telle qu'elle est, jetable ou non)"
   else
-    no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet_v2 status » sous « $login »"
+    no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet status » sous « $login »"
   fi
 }
 

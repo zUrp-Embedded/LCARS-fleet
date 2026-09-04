@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/forge.d/catalogues.sh
+# SOURCE: runtime/services/forge.d/catalogues.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — le materiel des catalogues INSTALLES, converge depuis la forge

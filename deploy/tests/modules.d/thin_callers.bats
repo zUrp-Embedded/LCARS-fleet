@@ -16,12 +16,12 @@ setup() {
   CALLERS=(45-catalogues 63-forge-tokens 65-ops-branch 66-deck-oidc)
 }
 
-@test "les quatre appelants sont MINCES : un exec env vers fleet/services/forge.d, et rien d'autre a executer" {
+@test "les quatre appelants sont MINCES : un exec env vers services/forge.d, et rien d'autre a executer" {
   local m code
   for m in "${CALLERS[@]}"; do
     code="$(grep -vE '^\s*#|^\s*$' "$MODS/$m.sh")"
     grep -qE '^exec env' <<<"$code" || { echo "$m : pas d'exec env" >&2; return 1; }
-    grep -qE 'fleet/services/forge\.d/[a-z-]+\.sh" "\$\{?1' <<<"$code" || { echo "$m : n'appelle pas un geste de forge.d" >&2; return 1; }
+    grep -qE 'services/forge\.d/[a-z-]+\.sh" "\$\{?1' <<<"$code" || { echo "$m : n'appelle pas un geste de forge.d" >&2; return 1; }
     # aucune sonde, aucun verdict, aucun p_* : le geste rend le verdict, l'appelant relaie
     refute grep -qE '\bp_(ok|drift|fail|chg|warn)\b|verdict_(apply|check)' <<<"$code"
   done
@@ -43,11 +43,11 @@ setup() {
 @test "la garde est MESUREE, pas supposee : un appelant joue sans AUCUN PROV_ pose et meurt sur le geste, pas sur lui-meme" {
   # decor : une lib minimale (repo_root) et un geste doublure qui dit ce qu'il a recu
   local lib="$BATS_TEST_TMPDIR/lib.sh" root="$BATS_TEST_TMPDIR/root" m
-  mkdir -p "$root/fleet/services/forge.d" "$root/fleet/services/lib"
-  printf '%s\n' "repo_root() { printf '%s' '$root'; }" "advertise_addr() { :; }" > "$lib"
-  : > "$root/fleet/services/lib/module-protocol.sh"
+  mkdir -p "$root/runtime/services/forge.d" "$root/runtime/services/lib"
+  printf '%s\n' "repo_root() { printf '%s' '$root'; }" "product_tree() { printf '%s' '$root/runtime'; }" "advertise_addr() { :; }" > "$lib"
+  : > "$root/runtime/services/lib/module-protocol.sh"
   for g in catalogues tokens ops-branch deck-oidc; do
-    printf '%s\n' '#!/usr/bin/env bash' 'echo "geste:$(basename "$0") verbe:${1:-} login:${LCARS_LOGIN-<absent>}"' > "$root/fleet/services/forge.d/$g.sh"
+    printf '%s\n' '#!/usr/bin/env bash' 'echo "geste:$(basename "$0") verbe:${1:-} login:${LCARS_LOGIN-<absent>}"' > "$root/runtime/services/forge.d/$g.sh"
   done
   for m in "${CALLERS[@]}"; do
     run env -i PATH="$PATH" PROVISION_LIB="$lib" PROV_MODULE_TAG="$m" bash "$MODS/$m.sh" check

@@ -6,7 +6,7 @@
 # ⚠ L'AIDE SE DÉLIMITE PAR SON CONTENU, JAMAIS PAR DES NUMÉROS DE LIGNE : `sed -n '6,35p'` tronque
 # en silence dès qu'on insère une ligne en tête, et une aide amputée ne se signale pas.
 # LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
-# comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet_v2 start`.
+# comme login-manager ; l'humain SSH dans le conteneur EN TANT QUE LUI puis `fleet start`.
 # Le fichier compose vit dans deploy/docker/ — l'humain ne le touche pas.
 #
 # USAGE : deploy/box [-p <projet>] <commande>
@@ -260,7 +260,7 @@ cmd_up() {
   compose up -d --no-build "$@"
   echo ""
   echo "LCARS fleet up (projet $PROJECT). Accès :"
-  echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet_v2 start"
+  echo "  ssh ${LCARS_HUMAN:-lcars}@127.0.0.1 -p ${LCARS_SSH_PORT##*:}    # puis : fleet start"
   echo "  deploy/box status                                   # l'état de l'instance, vu de l'hôte"
   await_provision_verdict
 }
@@ -306,7 +306,7 @@ await_provision_verdict() {
   local hrc
   hrc="$(compose exec -T lcars cat /run/lcars-humans.rc 2>/dev/null | tr -d '[:space:]')" || hrc=""
   case "$hrc" in
-    0)  echo "box up: humain(s) de fleet PRÉSENT(S) — « fleet_v2 start » a quelqu'un." ;;
+    0)  echo "box up: humain(s) de fleet PRÉSENT(S) — « fleet start » a quelqu'un." ;;
     "") echo "box up: population d'humains NON MESURÉE (pas de /run/lcars-humans.rc)." ;;
     *)  echo "box up: AUCUN humain de fleet — la boîte tourne, et personne ne peut lancer de fleet."
         echo "              Enrôle quelqu'un sur la forge, ajoute-le à la team « humans » :"
@@ -440,7 +440,7 @@ cmd_status() {
     *) echo "  forge       : ÉCHEC d'un geste (rc=$prov) — « deploy/box logs »" ;;
   esac
   case "$hum" in
-    0) echo "  humains     : présents — « fleet_v2 start » a quelqu'un" ;;
+    0) echo "  humains     : présents — « fleet start » a quelqu'un" ;;
     "") : ;;
     *) echo "  humains     : AUCUN humain de fleet — enrôle sur la forge, team « humans »" ;;
   esac

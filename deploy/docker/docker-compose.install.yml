@@ -81,7 +81,7 @@ services:
       #
       # QUI LIT QUOI : le provisioning lit l'environnement du conteneur (cette variable, reprise
       # en PROV_FORGE_URL par provision-lib). Le runtime ne la lit pas : il lit
-      # `~/.lcars/fleet_v2.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
+      # `~/.lcars/fleet.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
       # valeur si elle est posee a ce moment-la ; ensuite ce fichier appartient a l'humain et
       # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
       # jamais pour une boite deja seedee.

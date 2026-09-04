@@ -1,9 +1,5 @@
 #!/usr/bin/env bats
-<<<<<<<< HEAD:deploy/tests/lib/deploy_release_guards.bats
 # SOURCE: deploy/tests/lib/deploy_release_guards.bats
-========
-# SOURCE: runtime/test/etc/install_guards.bats
->>>>>>>> origin/main:runtime/test/etc/install_guards.bats
 # AUTHOR: consultant
 # STARDATE: 2026-07-30
 # STATUS: bats tests for deploy/lib/deploy-release.sh config guards — prefix depth + manifest validation
@@ -20,7 +16,7 @@ setup() {
   SANDBOX="$BATS_TEST_TMPDIR/rt"
   mkdir -p "$SANDBOX/etc"
   cp "$BATS_TEST_DIRNAME/../../lib/deploy-release.sh" "$SANDBOX/etc/deploy-release.sh"
-  cp "$BATS_TEST_DIRNAME/../../../fleet/etc/release.manifest" "$SANDBOX/etc/release.manifest"
+  cp "$BATS_TEST_DIRNAME/../../../runtime/etc/release.manifest" "$SANDBOX/etc/release.manifest"
   # Q3 (2026-09-04) : le script ne deduit plus l'arbre du runtime de sa position, on le lui DONNE —
   # le decor est cet arbre (son `etc/release.manifest` est ce que les temoins mutilent).
   export LCARS_RUNTIME_DIR="$SANDBOX"

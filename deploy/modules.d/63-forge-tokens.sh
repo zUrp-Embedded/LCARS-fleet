@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/63-forge-tokens.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — les jetons de rôle : un APPELANT du geste de forge du produit (fleet/services/forge.d/tokens.sh)
+# STATUS: PROTO-V2 — les jetons de rôle : un APPELANT du geste de forge du produit (runtime/services/forge.d/tokens.sh)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -17,7 +17,7 @@ set -euo pipefail
 # PRODUIT ; ce module l'appelle avec ce que l'installeur sait : la forge, le siège, le plancher de
 # rôles de la lib (`PROV_ROLES`, que le geste fusionne avec ce que le release déclare), et la CLI.
 exec env \
-  LCARS_MODULE_PROTOCOL="$(repo_root)/fleet/services/lib/module-protocol.sh" \
+  LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \
   LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \
   FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
   LCARS_FORGE_ORG="${PROV_FORGE_ORG:-}" \
@@ -32,4 +32,4 @@ exec env \
   LCARS_ROLES="${PROV_ROLES:-}" \
   LCARS_LOGIN="${PROV_HUMAN:-}" \
   LCARS_CLI="${PROV_LCARS_CLI:-${PROV_LINK_DIR:+$PROV_LINK_DIR/lcars}}" \
-  bash "$(repo_root)/fleet/services/forge.d/tokens.sh" "${1:?usage: 63-forge-tokens.sh <check|apply>}"
+  bash "$(product_tree)/services/forge.d/tokens.sh" "${1:?usage: 63-forge-tokens.sh <check|apply>}"

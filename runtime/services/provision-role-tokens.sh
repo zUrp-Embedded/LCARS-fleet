@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/provision-role-tokens.sh
+# SOURCE: runtime/services/provision-role-tokens.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — pose idempotente des role-tokens forge (A4) : mint + ecriture <dir>/<role>.gitea_token + sonde
@@ -59,15 +59,9 @@ FORGE="${FORGE_BASE_URL:-}"
 TOKENS_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 #
 # This list is locked FOUR ways by `roles.provisioning_locked` (strict equality: canon
-<<<<<<<< HEAD:runtime/services/provision-role-tokens.sh
 # catalogue == forge.tf local.roles == this ROLES == provision-lib.sh LCARS_ROLES) — a partial
 # role rename or a dropped role goes RED at the gate with the delta named (the old
 # one-direction subset check missed exactly that, twice).
-========
-# catalogue == forge.tf local.roles == this ROLES == provision-lib.sh PROV_ROLES) — a partial
-# role rename or a dropped role goes RED at the gate with the delta named (a one-direction subset
-# check misses exactly that).
->>>>>>>> origin/main:runtime/etc/provision-role-tokens.sh
 ROLES="system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan"
 #
 OWNER="${LCARS_AUTHORITY_USER:-lcars-authority}"

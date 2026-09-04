@@ -66,7 +66,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   # desinstalle.
   refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
   refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"
-  grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../fleet/services/box/README.md"
+  grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../runtime/services/box/README.md"
 }
 @test "la CI bâtit l'image sur dood, et se declenche sur deploy/ et install.sh (DI-08)" {
   [ -f "$WF" ]

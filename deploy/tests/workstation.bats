@@ -238,7 +238,7 @@ setup() {
   # propriete. Un temoin se classe sur ce qu'il LIT, pas sur ce qu'il dit.
   #
   # Ce qu'il ferme : le bandeau disait « WSL : wsl --shutdown » sur une machine dediee sans WSL, et
-  # « fleet_v2 start — ta fleet, sous ton uid » alors que ce rail fait tourner la fleet sous l'humain
+  # « fleet start — ta fleet, sous ton uid » alors que ce rail fait tourner la fleet sous l'humain
   # de fleet que la forge seme (48) et que le convergeur materialise (64), pas sous l'operateur :
   # GUARD B refuse l'uid du siege, qui est justement le sien sur une machine standard. Un operateur
   # qui suit cette ligne se fait refuser par un garde, sans savoir pourquoi.
@@ -247,7 +247,7 @@ setup() {
   # (paquets, /opt/lcars, une forge), ce qu'un temoin ne joue pas. Ce qui se garde est que les deux
   # formes EXISTENT et sont choisies par le terrain — un bandeau qui redeviendrait inconditionnel les
   # perdrait sans que rien ne rougisse.
-  run grep -c 'sudo -u <ton humain> fleet_v2 start' "$SRC"
+  run grep -c 'sudo -u <ton humain> fleet start' "$SRC"
   [ "$output" = "1" ]
   run grep -c "Rien à redémarrer : ce terrain n'a pas de WSL" "$SRC"
   [ "$output" = "1" ]

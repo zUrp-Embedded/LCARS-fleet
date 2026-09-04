@@ -97,7 +97,7 @@ EOF
   # chaque provider. `60-deploy` porte déjà la règle pour l'autre outil (« un build root polluerait
   # le `_build` du checkout ») ; elle vaut pour tout ce qui écrit, pas pour mix seul.
   local src work
-  src="$(repo_root)/fleet/services/forge-recipe"
+  src="$(product_tree)/services/forge-recipe"
   [[ -d "$src" ]] || { p_fail "recette absente : $src"; verdict_apply; }
   work="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" \
     || { p_fail "tofu : tmp impossible"; verdict_apply; }

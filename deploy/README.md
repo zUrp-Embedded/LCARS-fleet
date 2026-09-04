@@ -1,4 +1,4 @@
-# deploy — machine nue → `fleet_v2 start`
+# deploy — machine nue → `fleet start`
 
 **Date** : 2026-07-05
 **Dernière révision** : 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
@@ -9,7 +9,7 @@ ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 
 ⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
 CHAQUE DÉMARRAGE** — l'entrypoint lançait `provision apply --substrate docker` au boot (jusqu'au
-lot 6 du chantier deploy-independance : le boot est `fleet/services/box/boot.sh`, il ne joue plus
+lot 6 du chantier deploy-independance : le boot est `runtime/services/box/boot.sh`, il ne joue plus
 aucun module de l'installeur), et le banc entier reposait dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
 contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
 FERMÉS et épinglés :
@@ -35,18 +35,18 @@ le sudoers etroit), les consoles et le deck. Sur le rail poste il n'y a PAS de d
 un module les copie, systemd les tient, ils tournent nativement. Un lecteur qui cherchait le code
 privilegie de cette machine ne regardait pas dans un dossier appele `docker`.
 
-Ils vivent en **`fleet/services/`**, nomme comme le module qui les pose et les demarre
+Ils vivent en **`runtime/services/`**, nomme comme le module qui les pose et les demarre
 (`modules.d/64-services.sh`) : qui trouve l'un trouve l'autre. Deux temoins tiennent la
 frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxiliaire, et tout
 fichier de `services/` est pose quelque part.
 
 Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
-est le boot du produit, `fleet/services/box/boot.sh`), les cinq compose et l'override des
+est le boot du produit, `runtime/services/box/boot.sh`), les cinq compose et l'override des
 secrets (`docker-compose.secrets.yml`, que `box` ajoute à chaque appel : les secrets posés par
 `box config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
 
-un humain lance `fleet_v2 start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
+un humain lance `fleet start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
 (v1, archivée dans ses feuilles `v1/` — elle provisionnait la fleet bash v1, users-par-rôle,
 morte avec le modèle).
 
@@ -143,7 +143,7 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 30-wsl | wsl | wsl | lockdown C: (`/etc/wsl.conf` possédé entier, écrit EN DERNIER), purge snapd, masque gpg-agent |
 | 40-claude-bin | any | any | binaire claude PER-HUMAIN (~/.local/bin) via l'installeur officiel joué TEL QUEL — deux gestes (download, puis run), aucune machinerie qui double la sienne — frontière vendor N1 |
 | 44-media | wsl linux | any | les médias partagés (avatars, favicon) — le jumeau FICHIER du trou ISO des paquets |
-| 45-catalogues | any | any | le matériel des catalogues INSTALLÉS, convergé depuis la forge — « installé » est un fait de forge. Un APPELANT mince du geste du produit `fleet/services/forge.d/catalogues.sh` (lot 6) : il passe ce que l'installeur sait (forge, répertoires), le geste rend le verdict |
+| 45-catalogues | any | any | le matériel des catalogues INSTALLÉS, convergé depuis la forge — « installé » est un fait de forge. Un APPELANT mince du geste du produit `runtime/services/forge.d/catalogues.sh` (lot 6) : il passe ce que l'installeur sait (forge, répertoires), le geste rend le verdict |
 | 45-sudoers-toolchain | any | any | les quatre ancrages système du domaine admiral (sudoers étroit, état conteneur, projection du login du siège, skill du siège). Rang 45 et pas moins : un NOPASSWD posé avant 20-groups viserait un groupe inexistant |
 | 46-tofu | wsl linux | any | OpenTofu + son miroir de providers SUR LA MACHINE — la structure de forge n'a plus besoin d'une image (1,18 Go et dix minutes bâtis pour 124 Mo d'outil jamais démarré) |
 | 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 63-forge-tokens et 66-deck-oidc restent en dérive et leurs consignes nomment la boîte |
@@ -151,15 +151,15 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 60-deploy | wsl linux | any | orchestre `deploy/lib/deploy-release.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 61-forge-structure | wsl linux | wsl linux | **la STRUCTURE de la forge** : roster du catalogue dérivé de la release POSÉE par 60 (`enroll-catalogue.sh --release`, plus aucun `mix`), recette tofu copiée/initialisée/jouée par `forge-gestures.sh apply`. Sorti de 48 le 2026-09-04 (point 1) : la structure exigeait la release que 60 pose douze rangs plus loin |
 | 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
-| 63-forge-tokens | any | any | les jetons de rôle : un APPELANT du geste de forge du produit `fleet/services/forge.d/tokens.sh` (sondes de la forge, modes de l'autorité, roster dérivé du release, mint par `provision-role-tokens.sh`) — lot 6, 2026-09-04 |
-| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`fleet/services/box/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
-| 65-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul. Un APPELANT mince de `fleet/services/forge.d/ops-branch.sh` (lot 6) |
-| 66-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json` ; les ENTRÉES (`PROV_DECK_ORIGINS`) convergent, la loopback y est semée dans ses deux écritures. Un APPELANT mince de `fleet/services/forge.d/deck-oidc.sh` (lot 6) : il passe l'adresse annoncée, le port et les origines |
-| 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet_v2.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
+| 63-forge-tokens | any | any | les jetons de rôle : un APPELANT du geste de forge du produit `runtime/services/forge.d/tokens.sh` (sondes de la forge, modes de l'autorité, roster dérivé du release, mint par `provision-role-tokens.sh`) — lot 6, 2026-09-04 |
+| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`runtime/services/box/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
+| 65-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul. Un APPELANT mince de `runtime/services/forge.d/ops-branch.sh` (lot 6) |
+| 66-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json` ; les ENTRÉES (`PROV_DECK_ORIGINS`) convergent, la loopback y est semée dans ses deux écritures. Un APPELANT mince de `runtime/services/forge.d/deck-oidc.sh` (lot 6) : il passe l'adresse annoncée, le port et les origines |
+| 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge au boot de la boîte (`fleet/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
+install.sh) et le reste converge au boot de la boîte (`runtime/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.

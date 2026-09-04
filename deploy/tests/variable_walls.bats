@@ -21,7 +21,7 @@ setup() {
   # ⚠ LE PERIMETRE SE DIT PAR SHEBANG, ET C'EST L'INVARIANT LUI-MEME QUI L'EXIGE. `EUID` n'est pose
   # que par bash : dans un fichier `#!/bin/sh`, `${EUID:-...}` est un repli LEGITIME, et un mur qui
   # balaierait `*.sh` l'accuserait a tort. Dans l'autre sens, balayer par extension raterait
-  # `bin/fleet_v2`, `bin/lcars`, `deploy/box`, `deploy/provision`, `deploy/accept` — des programmes
+  # `bin/fleet`, `bin/lcars`, `deploy/box`, `deploy/provision`, `deploy/accept` — des programmes
   # bash sans suffixe. La question n'est pas « quel nom porte le fichier » mais « quel interprete
   # le lit », et la seule reponse est sur sa premiere ligne.
   #
@@ -61,8 +61,8 @@ code_of() { sed 's/#.*//' "$1"; }
   # les cinq arbres stables, un par voie d'entree du bash dans ce depot : recette, temoins,
   # programmes de PATH, demons, outils d'install. Perdre l'un d'eux se voit ici.
   local t
-  # `fleet/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
-  for t in deploy fleet/test fleet/bin fleet/services; do
+  # `runtime/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
+  for t in deploy runtime/test runtime/bin runtime/services; do
     printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
       echo "MUR 0 rompu — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre" >&2
       return 1
@@ -72,7 +72,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
   # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/deploy-release.sh$'
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet_v2$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/provision-lib.sh$'
 }
 
@@ -151,7 +151,7 @@ code_of() { sed 's/#.*//' "$1"; }
 
   # La portee : les fichiers qui sourcent la lib, PLUS le runner qui la source lui-meme.
   local portee
-  portee="$(grep -rl '\. "\${PROVISION_LIB' "$REPO/deploy" "$REPO/fleet/etc" 2>/dev/null; echo "$REPO/deploy/provision")"
+  portee="$(grep -rl '\. "\${PROVISION_LIB' "$REPO/deploy" "$REPO/runtime/etc" 2>/dev/null; echo "$REPO/deploy/provision")"
   [ "$(printf '%s\n' "$portee" | wc -l)" -ge 20 ] || {
     echo "portee a $(printf '%s\n' "$portee" | wc -l) fichiers — le balayage est casse" >&2; return 1; }
 
@@ -277,10 +277,10 @@ code_of() { sed 's/#.*//' "$1"; }
       rompu=1
     }
   }
-  check fleet/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
-  check fleet/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check fleet/services/box/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail boite"
-  check fleet/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
+  check runtime/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
+  check runtime/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
+  check runtime/services/box/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail boite"
+  check runtime/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
@@ -310,11 +310,11 @@ code_of() { sed 's/#.*//' "$1"; }
   # n'est donc pas la fermeture d'un trou muet, c'est qu'un renommage devienne un geste VISIBLE de
   # huit fichiers au lieu d'une panne totale decouverte au boot suivant.
   local sites=(
-    "fleet/bin/fleet_v2"
-    "fleet/config/runtime.exs"
-    "fleet/services/human-converger.sh"
+    "runtime/bin/fleet"
+    "runtime/config/runtime.exs"
+    "runtime/services/human-converger.sh"
     "deploy/modules.d/64-services.sh"
-    "fleet/services/box/boot.sh"
+    "runtime/services/box/boot.sh"
     "deploy/lib/provision-lib.sh"
   )
   # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la
@@ -377,8 +377,8 @@ code_of() { sed 's/#.*//' "$1"; }
     sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {
       echo "MUR 6 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }
   }
-  need fleet/services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
-  need fleet/services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
+  need runtime/services/console.sh          "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de console"
+  need runtime/services/console-landing.sh  "LCARS_CONSOLE_GROUP:-$nom\}"          "la lecture du lanceur de deck"
   # Les DEUX createurs, un par rail, et ils doivent s'accorder sur le gid : un groupe de meme nom
   # et de gid different sur les deux rails, c'est un `chown` qui reussit et une traversee qui non.
   #
@@ -405,7 +405,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # derive — et c'est exactement le defaut que ce chantier poursuit.
   #
   # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `fleet/services/provision-role-tokens.sh`
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `runtime/services/provision-role-tokens.sh`
   # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
   # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
   # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
@@ -443,7 +443,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # n'est pas une lecture.
   local d lus="" f src v
   for d in $daemons; do
-    f="$REPO/fleet/services/$d"
+    f="$REPO/runtime/services/$d"
     [ -r "$f" ] || { echo "MUR 7 — daemon introuvable : services/$d" >&2; return 1; }
     src="$(sed 's/#.*//' "$f")"
     for v in $(grep -oE '(LCARS|FORGE)_[A-Z_]+' <<<"$src" | sort -u); do
@@ -805,7 +805,7 @@ for m in re.finditer(re.escape(sys.argv[2]) + r'/([A-Za-z0-9_.$-]+)', s):
         continue
     print(nom)
 PYX
-  # ⚠ `test` AU SINGULIER AUSSI. `--exclude-dir=tests` ne couvre pas `fleet/test/`, et ce mur
+  # ⚠ `test` AU SINGULIER AUSSI. `--exclude-dir=tests` ne couvre pas `runtime/test/`, et ce mur
   # accusait `test_catalogue_executor.py`, dont un fixture porte « ../../home/private/forge-master »
   # — une tentative de traversee que le temoin REFUSE. Accuser un temoin pour la chaine qu'il
   # interdit est la meme faute que lire la prose : on punit celui qui documente le defaut.
@@ -845,7 +845,7 @@ PYX
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
     | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/fleet/services/forge.d/deck-oidc.sh" \
+  sed 's/#.*//' "$REPO/runtime/services/forge.d/deck-oidc.sh" \
     | grep -qE 'LCARS_SYSTEM_GROUP:-\$\{LCARS_SYSTEM_USER:-'"$nom"'\}' || {
       echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
 
@@ -854,7 +854,7 @@ PYX
       echo "MUR 13 rompu — $1 ne porte pas « $nom » pour $3" >&2; rompu=1; }; }
   need13 deploy/docker/Dockerfile   "useradd .*-g $nom $nom([[:space:]]|\\\\|$)" "la creation dans l'image"
   need13 deploy/docker/Dockerfile   "groupadd --system $nom([[:space:]]|\\\\|$)"  "le groupe dans l'image"
-  need13 fleet/services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
+  need13 runtime/services/console-landing.sh "LCARS_DECK_USER:-$nom\}"                    "l'identite sous laquelle le deck tourne"
   need13 deploy/system.manifest      "^anchor[[:space:]]+/etc/lcars/deck-oidc.json[[:space:]]+0640[[:space:]]+root:$nom" \
                                      "le proprietaire du secret OIDC"
   [ "$rompu" -eq 0 ] || return 1
@@ -961,7 +961,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
     echo "MUR 14 — moins de deux services lus dans les compose : l'instrument est casse" >&2; return 1; }
 
   local segs
-  segs="$(grep -rhoE '\$\{?[A-Z_]*PROJECT\}?-(runner-)?[a-z]+-1' "$REPO/deploy" "$REPO/fleet/bin" "$REPO/fleet/services" \
+  segs="$(grep -rhoE '\$\{?[A-Z_]*PROJECT\}?-(runner-)?[a-z]+-1' "$REPO/deploy" "$REPO/runtime/bin" "$REPO/runtime/services" \
             --exclude-dir=tests 2>/dev/null \
           | sed -E 's@.*-([a-z]+)-1$@\1@' | sort -u || true)"
   [ -n "$segs" ] || { echo "MUR 14 — aucune reference de conteneur lue : le balayage est casse" >&2; return 1; }
@@ -992,7 +992,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   #
   # Une valeur DERIVEE (`$VAR`) passe : c'est la forme qu'on veut. Seul un litteral est confronte.
   local filtres
-  filtres="$(grep -rhE 'com\.docker\.compose\.service=' "$REPO/deploy" "$REPO/fleet/bin" "$REPO/fleet/services" \
+  filtres="$(grep -rhE 'com\.docker\.compose\.service=' "$REPO/deploy" "$REPO/runtime/bin" "$REPO/runtime/services" \
                --exclude-dir=tests 2>/dev/null \
              | sed 's/#.*//' | grep -oE 'com\.docker\.compose\.service=[A-Za-z0-9_${}-]+' \
              | sed -E 's/^com\.docker\.compose\.service=//' | sort -u || true)"
@@ -1031,7 +1031,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 
   local trouvees
   trouvees="$(grep -rhE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
-                "$REPO/deploy" "$REPO/fleet/services" "$REPO/fleet/bin" "$REPO/fleet/etc" \
+                "$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/etc" \
                 --exclude-dir=tests 2>/dev/null \
               | sed 's/#.*//' \
               | grep -oE '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)' \
@@ -1056,13 +1056,13 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 }
 
 @test "MUR 16: le fichier d'environnement de l'humain — un chemin, deux ecrivains, un lecteur" {
-  # ⚠ QUATORZE PORTEURS, AUCUNE AUTORITE. `bin/fleet_v2` LIT `$HOME/.lcars/fleet_v2.env` (deux
+  # ⚠ QUATORZE PORTEURS, AUCUNE AUTORITE. `bin/fleet` LIT `$HOME/.lcars/fleet.env` (deux
   # fois), `70-human` l'ECRIT depuis un template, et le template lui-meme porte le nom. Le
   # repertoire d'etat a une autorite — `Fleet.Layout` `@state_dirname` — le NOM DU FICHIER n'en a
-  # aucune, et c'est lui qui porte `FORGE_BASE_URL` : sans ce fichier, `fleet_v2 start` refuse.
+  # aucune, et c'est lui qui porte `FORGE_BASE_URL` : sans ce fichier, `fleet start` refuse.
   #
   # UNE DIVERGENCE ICI EST MUETTE DANS LE PIRE SENS : `70-human` ecrirait un fichier que personne
-  # ne lit, `fleet_v2` lirait un fichier que personne n'ecrit, et le module RAPPORTERAIT « posé »
+  # ne lit, `fleet` lirait un fichier que personne n'ecrit, et le module RAPPORTERAIT « posé »
   # pendant que le lanceur dit « FORGE_BASE_URL manquant — édite <un autre chemin> ». L'operateur
   # editerait le fichier que le module nomme, sans effet.
   #
@@ -1072,31 +1072,31 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   # ⚠ DELIMITEUR `,` : `@` separe le `sed` ET ouvre `@state_dirname`. Troisieme fois aujourd'hui
   # qu'un delimiteur mange son propre motif — apres `~r|…|` en Elixir et `s|(anchor|file)|` plus
   # haut dans ce fichier. Le choix du delimiteur n'est pas cosmetique : c'est une partie du motif.
-  dir_etat="$(sed -nE 's,^[[:space:]]*@state_dirname[[:space:]]+"([^"]+)".*,\1,p' "$REPO/fleet/lib/fleet/layout.ex" | head -n1)"
+  dir_etat="$(sed -nE 's,^[[:space:]]*@state_dirname[[:space:]]+"([^"]+)".*,\1,p' "$REPO/runtime/lib/fleet/layout.ex" | head -n1)"
   [ -n "$dir_etat" ] || { echo "MUR 16 — @state_dirname ne se lit plus dans Fleet.Layout" >&2; return 1; }
 
-  # Le nom, lu chez le LECTEUR (`bin/fleet_v2`), puis compare chez les ecrivains.
+  # Le nom, lu chez le LECTEUR (`bin/fleet`), puis compare chez les ecrivains.
   local nom
-  nom="$(sed 's/#.*//' "$REPO/fleet/bin/fleet_v2" \
-         | sed -nE "s@.*LCARS_FLEET_V2_ENV:-\\\$HOME/$dir_etat/([A-Za-z0-9_.-]+)\\}.*@\1@p" | head -n1)"
+  nom="$(sed 's/#.*//' "$REPO/runtime/bin/fleet" \
+         | sed -nE "s@.*LCARS_FLEET_ENV:-\\\$HOME/$dir_etat/([A-Za-z0-9_.-]+)\\}.*@\1@p" | head -n1)"
   [ -n "$nom" ] || {
-    echo "MUR 16 — le lecteur ne compose plus son chemin depuis « $dir_etat » : bin/fleet_v2 a change de forme" >&2
+    echo "MUR 16 — le lecteur ne compose plus son chemin depuis « $dir_etat » : bin/fleet a change de forme" >&2
     return 1
   }
 
   local rompu=0
   need16() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qF -- "$2" || {
       echo "MUR 16 rompu — $1 ne porte pas « $2 » ($3)" >&2; rompu=1; }; }
-  need16 fleet/services/human.d/70-human.sh "$dir_etat/$nom" "l'ecrivain du rail poste"
-  need16 fleet/services/human.d/70-human.sh "$nom.template"  "le template dont il derive le fichier"
-  [ -r "$REPO/fleet/etc/$nom.template" ] || {
+  need16 runtime/services/human.d/70-human.sh "$dir_etat/$nom" "l'ecrivain du rail poste"
+  need16 runtime/services/human.d/70-human.sh "$nom.template"  "le template dont il derive le fichier"
+  [ -r "$REPO/runtime/etc/$nom.template" ] || {
     echo "MUR 16 rompu — etc/$nom.template n'existe pas : l'ecrivain derive d'un fichier absent" >&2
     rompu=1
   }
-  # Les DEUX lectures de `bin/fleet_v2` doivent viser le meme fichier — une seule corrigee serait
+  # Les DEUX lectures de `bin/fleet` doivent viser le meme fichier — une seule corrigee serait
   # un demarrage qui lit un fichier et un arret qui en lit un autre.
-  [ "$(sed 's/#.*//' "$REPO/fleet/bin/fleet_v2" | grep -cF "$dir_etat/$nom")" -ge 2 ] || {
-    echo "MUR 16 rompu — bin/fleet_v2 ne vise plus le meme fichier a ses deux lectures" >&2
+  [ "$(sed 's/#.*//' "$REPO/runtime/bin/fleet" | grep -cF "$dir_etat/$nom")" -ge 2 ] || {
+    echo "MUR 16 rompu — bin/fleet ne vise plus le meme fichier a ses deux lectures" >&2
     rompu=1
   }
   [ "$rompu" -eq 0 ] || return 1

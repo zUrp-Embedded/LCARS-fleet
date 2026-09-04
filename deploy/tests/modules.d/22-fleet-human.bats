@@ -12,7 +12,7 @@
 #     POSÉ  70-human:    ~/.lcars, ~/pods, env  →  pour lordzurp
 #     OK    75-projects: lordzurp n'est pas un humain de fleet (compte systeme ou sysadmin)
 #
-# GUARD B (`bin/fleet_v2`) et `is_fleet_human` appliquent la meme regle : `uid >= UID_MIN` ET
+# GUARD B (`bin/fleet`) et `is_fleet_human` appliquent la meme regle : `uid >= UID_MIN` ET
 # `uid != LCARS_SYSADMIN_UID`. Or le premier utilisateur d'une Linux ou d'une WSL standard EST uid
 # 1000. La regle « uid >= 1001 » n'etait ecrite que pour la BOITE.
 #
@@ -228,7 +228,7 @@ nu() { # nu <check|apply>
   # et qui vaut aussi pour la sonde depuis que plus rien ne cree ce compte.
   #
   # Ce que la sonde DOIT continuer de faire : le dire, et dire qui s'en occupera. Muette, elle
-  # laisserait un operateur devant un « fleet_v2 start » qui refuse sans une ligne pour l'expliquer.
+  # laisserait un operateur devant un « fleet start » qui refuse sans une ligne pour l'expliquer.
   passwd_with
   nu check
   [ "$status" -eq 0 ]

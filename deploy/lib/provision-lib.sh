@@ -508,7 +508,7 @@ write_atomic() {
   #
   # VU : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
   # « POSE », rc 0, et un fichier de ZERO octet. Tout ce que le rail pose sous /etc passe par ici —
-  # `seat.uid` vide fait refuser tout `fleet_v2 start` par le GUARD B ; `services.env` vide demarre
+  # `seat.uid` vide fait refuser tout `fleet start` par le GUARD B ; `services.env` vide demarre
   # les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide laisse l'interop Windows OUVERTE sur
   # une machine dont le bilan annonce la frontiere armee. Le pire des trois est le dernier : il est
   # SILENCIEUX et il ment sur une frontiere de securite.
@@ -961,13 +961,13 @@ human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
 # DEUX CONDITIONS, PARCE QU'IL Y A DEUX RÈGLES, et c'est le même couple que le GUARD B de
-# `bin/fleet_v2` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
+# `bin/fleet` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
 #   1. `uid >= UID_MIN` — la frontière système/humain. Elle n'est pas à inventer : `/etc/login.defs`
 #      la déclare et `useradd` la lit.
 #   2. `uid != SYSADMIN_UID` — la réservation du siège, que `login.defs` ne peut PAS exprimer :
 #      UID_MIN vaut 1000 et le sysadmin EST 1000, donc le système le classe utilisateur régulier.
 #
-# La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet_v2` parce que le provisioning ne peut
+# La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet` parce que le provisioning ne peut
 # pas dépendre de l'artefact qu'il INSTALLE : une machine vierge n'a pas ce binaire quand le cycle
 # démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
 #
@@ -1030,6 +1030,13 @@ fleet_humans() {
 }
 
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
+# L'ARBRE DU PRODUIT — `runtime/` dans un checkout, la racine `/opt/lcars` une fois pose. Le
+# ponçage d'alice a renomme `fleet/` en `runtime/`, et `/opt/lcars/runtime` est deja le PREFIX de
+# la release : l'arbre embarque (services, etc, bin) vit donc A PLAT sous `/opt/lcars/`, comme le
+# convergeur du produit le suppose (`/opt/lcars/services/human.d`). Le discriminant est la RELEASE :
+# `<racine>/runtime/rel` n'existe que sous le PREFIX pose (`rel/lcars_fleet`), jamais dans un arbre
+# source ; tout lecteur d'un fichier du produit passe par ici, jamais par `$(repo_root)/runtime/…`.
+product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -d "$r/runtime/rel" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
 PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
@@ -1046,7 +1053,7 @@ PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 # LA COLLISION : `62-runtime-helpers` écrivait le SECOND sous le nom du PREMIER, en `/opt/lcars/
 # .source-revision`. Or `repo_root()` remonte trois crans depuis `<racine>/deploy/lib` — donc
 # rejouer `/opt/lcars/deploy/provision`, qui EST le geste nominal du convergeur
-# (`fleet/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
+# (`runtime/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
 # devenait le discriminant de livraison. Un poste installé depuis un clone se déclarait BINAIRE au
 # rejeu, `15-toolchain` rendait « toolchain non requise » sans jamais évaluer son plancher OTP, et
 # `16-node` ne mesurait plus rien. Sur une machine qui COMPILE, le doctor rendait vert sur des
@@ -1330,7 +1337,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # second apply passait : defaut intermittent, donc invisible a toute campagne qui rejoue.
 #
 # ⚠ LE PAQUET D'ABORD, ET C'EST UN ORDRE, PAS UNE PREFERENCE. `pack.sh` embarque la release en
-# `fleet/_build/prod/rel/lcars_fleet` : elle est LA avant d'etre posee, et elle EST celle que
+# `runtime/_build/prod/rel/lcars_fleet` : elle est LA avant d'etre posee, et elle EST celle que
 # `60-deploy` posera. La release deja posee peut, elle, sortir d'un paquet PLUS ANCIEN — rejouer un
 # paquet neuf sur une machine installee deriverait alors le roster d'une release perimee.
 #
@@ -1342,8 +1349,8 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # `/opt/lcars/deploy/provision` — le geste NOMINAL du convergeur :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#   FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
-#   FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#   FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
+#   FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
 # Et le premier ne faisait pas qu'échouer : `npm ci` a INSTALLÉ 176 Mo d'arbre npm SOUS /opt/lcars
 # avant de rater son build. La copie n'est pas seulement incapable de bâtir — la laisser essayer la
@@ -1378,7 +1385,7 @@ prov_roles() {
   # posee par 60 (`$PROV_LINK_DIR/lcars`) ; avant, ou depuis une copie, celle de l'arbre.
   local entry="${PROV_LCARS_CLI:-}" c
   if [[ -z "$entry" ]]; then
-    for c in "$PROV_LINK_DIR/lcars" "$(repo_root)/fleet/bin/lcars"; do
+    for c in "$PROV_LINK_DIR/lcars" "$(product_tree)/bin/lcars"; do
       [[ -r "$c" ]] && { entry="$c"; break; }
     done
   fi

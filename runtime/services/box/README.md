@@ -2,7 +2,7 @@
 
 **Date** : 2026-09-04
 **Statut** : actif — lot 6 du chantier deploy-independance
-**Référencé par** : `fleet/services/README.md`, `deploy/docker/Dockerfile` (`ENTRYPOINT`)
+**Référencé par** : `runtime/services/README.md`, `deploy/docker/Dockerfile` (`ENTRYPOINT`)
 
 ⚖ user 2026-09-04 (Q1) : « pour docker, pourquoi on pourrait pas build l'image, et qu'elle reste
 alive entre 2 démarrages ? … dans docker, le deploy semble n'avoir aucun intérêt à partir dans le

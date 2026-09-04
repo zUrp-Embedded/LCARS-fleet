@@ -12,7 +12,7 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-RUNTIME_DIR="$(repo_root)/fleet"
+RUNTIME_DIR="$(product_tree)"
 MANIFEST="$RUNTIME_DIR/etc/release.manifest"
 mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/vides sautés
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
@@ -94,7 +94,7 @@ apply() {
   #
   # VU : un apply rejoue depuis
   # `/opt/lcars/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
-  # source runtime introuvable: /opt/lcars/fleet ». Sur les DEUX, en livraison binaire comme en
+  # source runtime introuvable: /opt/lcars/services ». Sur les DEUX, en livraison binaire comme en
   # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
   # `fleet/{deploy,etc,services,bin}`, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
   # pas — la release est POSEE.
@@ -136,7 +136,7 @@ apply() {
   fi
 
   if pgrep -f "$PREFIX_REL" >/dev/null 2>&1; then
-    p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet_v2 stop && fleet_v2 start » pour prendre le nouveau build"
+    p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet stop && fleet start » pour prendre le nouveau build"
   fi
 
   ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply

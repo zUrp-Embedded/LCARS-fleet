@@ -29,8 +29,8 @@ setup() {
 
   MOD="$BATS_TEST_DIRNAME/../../modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  SRC_DIR="$BATS_TEST_DIRNAME/../../../fleet/services"
-  BIN_SRC_DIR="$BATS_TEST_DIRNAME/../../../fleet/bin"
+  SRC_DIR="$BATS_TEST_DIRNAME/../../../runtime/services"
+  BIN_SRC_DIR="$BATS_TEST_DIRNAME/../../../runtime/bin"
   [ -f "$MOD" ] && [ -f "$DOCKERFILE" ]
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
@@ -177,7 +177,7 @@ helpers() {
   mod apply
   [ -x "$LCARS_HELPERS_DIR/deploy/provision" ]
   [ -d "$LCARS_HELPERS_DIR/deploy/modules.d" ]
-  [ -d "$LCARS_HELPERS_DIR/fleet/etc" ]
+  [ -d "$LCARS_HELPERS_DIR/etc" ]
 }
 
 @test "un client de terminal NON CONFORME a son pin est REFUSE — rien n'est pose" {
@@ -219,7 +219,7 @@ helpers() {
   # sont derives, maintenant, et c'est ce qui rend la phrase vraie.
   local n
   while read -r n; do
-    grep -q "COPY fleet/services/$n */opt/lcars/$n" "$DOCKERFILE"
+    grep -q "COPY runtime/services/$n */opt/lcars/$n" "$DOCKERFILE"
   done < <(helpers)
 
   # ⚠ LE SENS INVERSE A DEMENAGE, IL N'A PAS DISPARU. Il vivait ici avec deux exemptions nommees, et
@@ -240,28 +240,28 @@ data_srcs() {
 # fichiers passaient ici : ils allaient sur le PATH sous un AUTRE nom que leur source
 # (`toolchain-converger.sh` → `lcars-toolchain-converge`), donc chacun avait son propre `install`.
 # Le renommage n'encodait rien — il traduisait un rangement faux : ce sont des BINAIRES, pas des
-# services, et rien ne les demarre. Ils vivent sous `fleet/bin/` avec leur nom definitif, comme
-# `lcars` et `fleet_v2`.
+# services, et rien ne les demarre. Ils vivent sous `runtime/bin/` avec leur nom definitif, comme
+# `lcars` et `fleet`.
 # Ce filet RESTE : il attrape le jour ou quelqu'un pose un fichier de `services/` par un `install`
 # nu au lieu d'une table. Il rend vide aujourd'hui, et c'est le bon etat.
 sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' | sort -u; }
 
 @test "TOUTE destination de l'image a un poseur sur le rail poste — pas seulement /opt/lcars" {
-  # ⚠ LE MUR PRECEDENT NE VOYAIT QU'UN MOTIF : `COPY fleet/services/X /opt/lcars/X`. Ce que le
+  # ⚠ LE MUR PRECEDENT NE VOYAIT QU'UN MOTIF : `COPY runtime/services/X /opt/lcars/X`. Ce que le
   # Dockerfile pose AILLEURS lui echappait par CONSTRUCTION — pas par exemption, par angle mort.
-  # Un fichier y vivait deja : `COPY fleet/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
+  # Un fichier y vivait deja : `COPY runtime/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
   # et par RIEN sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
   # `/etc/skel` : en boite un humain recevait le prompt LCARS et ses alias, sur un poste le
   # `.bashrc` de la distribution. Deux environnements pour un meme role, silencieux des deux cotes.
   #
-  # Ce temoin lit TOUTES les lignes `COPY fleet/services/...` quelle que soit leur destination, et
+  # Ce temoin lit TOUTES les lignes `COPY runtime/services/...` quelle que soit leur destination, et
   # exige que chaque source soit posee par le module — en executable (`HELPERS`) ou en donnee
   # (`DATA`). L'exemption se reduit a `entrypoint.sh`, qui n'a aucun sens hors conteneur.
   # ⚠ IL Y A UNE TROISIEME VOIE, ET ELLE N'EST PAS UNE EXEMPTION. `HELPERS` et `DATA` existent parce
   # que l'image pose ces fichiers AILLEURS que la ou la copie embarquee les met — `console.sh` va en
-  # `/opt/lcars/console.sh`, pas en `/opt/lcars/fleet/services/console.sh` — donc le module doit les
+  # `/opt/lcars/console.sh`, pas en `/opt/lcars/services/console.sh` — donc le module doit les
   # y poser explicitement. Une source dont le `COPY` vise EXACTEMENT la destination de la boucle
-  # `EMBEDDED` n'a, elle, rien a poser en plus : `EMBEDDED` copie `fleet/services` EN ENTIER, donc
+  # `EMBEDDED` n'a, elle, rien a poser en plus : `EMBEDDED` copie `runtime/services` EN ENTIER, donc
   # elle y est deja. C'est le cas de la recette de la charte forge depuis qu'elle a quitte
   # `deploy/deps` — un repertoire, pas un fichier, qu'aucune des deux tables ne peut nommer.
   #
@@ -276,11 +276,11 @@ sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' |
     helpers        | grep -qx "$n" && continue
     data_srcs      | grep -qx "$n" && continue
     sources_citees | grep -qx "$n" && continue
-    if [ "$dest" = "/opt/lcars/fleet/services/$n" ] \
+    if [ "$dest" = "/opt/lcars/services/$n" ] \
        && grep -qE '^EMBEDDED=\(.*\bservices\b' "$MOD"; then continue; fi
-    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : fleet/services/$n (destination $dest)"
+    echo "POSE PAR L'IMAGE, PAR PERSONNE SUR LE POSTE : runtime/services/$n (destination $dest)"
     return 1
-  done < <(sed -n 's|^COPY fleet/services/\([^ ]*\) \{1,\}\([^ ]*\).*|\1 \2|p' "$DOCKERFILE")
+  done < <(sed -n 's|^COPY runtime/services/\([^ ]*\) \{1,\}\([^ ]*\).*|\1 \2|p' "$DOCKERFILE")
 
   # ⚠ GARDE D'INSTRUMENT : un `sed` casse rend zero ligne, et zero ligne examinee se lit comme un
   # accord parfait. C'est la forme exacte du defaut que ce temoin vient fermer.
@@ -382,7 +382,7 @@ need_git_checkout() {
 #
 # `readlink -f` canonicalise AVANT de remonter les `..` : un `deploy/lib` en lien symbolique
 # ferait donc retomber `repo_root()` sur le vrai depot. Les deux repertoires que la remontee
-# traverse sont COPIES (116 Ko + 316 Ko) ; tout le reste est lie — `fleet/deps` seul pese 74 Mo et
+# traverse sont COPIES (116 Ko + 316 Ko) ; tout le reste est lie — `runtime/deps` seul pese 74 Mo et
 # `assets/` 180 Mo, un decor qui les copierait ne serait pas un decor.
 racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declare « paquet »
   local src="$BATS_TEST_TMPDIR/paquet"
@@ -391,12 +391,12 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
   # `$src/fleet` inexistant, et les trois `ln -s` ci-dessous meurent sur « No such file or
   # directory » — un decor qui ne se construit pas, donc des temoins rouges sur leur harnais et non
   # sur leur sujet.
-  mkdir -p "$src/deploy" "$src/fleet"
+  mkdir -p "$src/deploy" "$src/runtime"
   cp -a "$BATS_TEST_DIRNAME/../../lib"       "$src/deploy/lib"
   cp -a "$BATS_TEST_DIRNAME/../../modules.d" "$src/deploy/modules.d"
-  ln -s "$BATS_TEST_DIRNAME/../../../fleet/etc"      "$src/fleet/etc"
-  ln -s "$BATS_TEST_DIRNAME/../../../fleet/services" "$src/fleet/services"
-  ln -s "$BATS_TEST_DIRNAME/../../../fleet/bin"      "$src/fleet/bin"
+  ln -s "$BATS_TEST_DIRNAME/../../../runtime/etc"      "$src/runtime/etc"
+  ln -s "$BATS_TEST_DIRNAME/../../../runtime/services" "$src/runtime/services"
+  ln -s "$BATS_TEST_DIRNAME/../../../runtime/bin"      "$src/runtime/bin"
   ln -s "$BATS_TEST_DIRNAME/../../../assets"     "$src/assets"
   ln -s "$BATS_TEST_DIRNAME/../../../catalogues" "$src/catalogues"
   echo "cafe1234" > "$src/.source-revision"
@@ -446,11 +446,11 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 # verts sur un module qui ne copie plus RIEN — le seul echec qu'une liste d'exclusions puisse
 # produire en silence.
 #
-# ⚠ ET LE DECOR DOIT POSSEDER L ARBRE OU IL ECRIT. `racine_paquet` LIE `fleet/services` au vrai
+# ⚠ ET LE DECOR DOIT POSSEDER L ARBRE OU IL ECRIT. `racine_paquet` LIE `runtime/services` au vrai
 # depot (il ne COPIE que `lib/` et `modules.d/`, les deux repertoires que la remontee de
 # `repo_root()` traverse). Ce temoin-ci, lui, ECRIT dans l arbre qu il vise : sans la substitution
 # ci-dessous, le `mkdir` traverserait le lien et poserait un `.terraform`, un `terraform.tfstate` et
-# un `secrets.tfvars` DANS `fleet/services/forge-recipe/` — c est-a-dire dans le depot, sous des noms
+# un `secrets.tfvars` DANS `runtime/services/forge-recipe/` — c est-a-dire dans le depot, sous des noms
 # que le `.gitignore` de la recette rend invisibles a `git status`. Un temoin qui salit son sujet
 # est pire qu un temoin absent : le suivant mesure la salissure.
 #
@@ -458,19 +458,19 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 # gardent le lien.
 racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locaux de la recette tofu
   local src; src="$(racine_paquet)"
-  rm -f "$src/fleet/services"
-  cp -a "$BATS_TEST_DIRNAME/../../../fleet/services" "$src/fleet/services" \
+  rm -f "$src/runtime/services"
+  cp -a "$BATS_TEST_DIRNAME/../../../runtime/services" "$src/runtime/services" \
     || { echo "decor : services non copiable"; return 1; }
   # ⚠ ET ON VERIFIE QUE CE N EST PLUS UN LIEN. Si la ligne du dessus changeait de forme, l ecriture
   # repartirait en silence vers le depot — le defaut exact que cette garde existe pour rendre
   # impossible.
-  [ ! -L "$src/fleet/services" ] || { echo "decor : services est encore un LIEN vers le depot"; return 1; }
-  mkdir -p "$src/fleet/services/forge-recipe/.terraform/providers"
-  head -c 4096 /dev/zero > "$src/fleet/services/forge-recipe/.terraform/providers/gros.bin"
+  [ ! -L "$src/runtime/services" ] || { echo "decor : services est encore un LIEN vers le depot"; return 1; }
+  mkdir -p "$src/runtime/services/forge-recipe/.terraform/providers"
+  head -c 4096 /dev/zero > "$src/runtime/services/forge-recipe/.terraform/providers/gros.bin"
   printf '{"outputs":{"admin_token":{"value":"JETON-DE-FORGE"}}}\n' \
-    > "$src/fleet/services/forge-recipe/terraform.tfstate"
-  printf 'admin_token = "JETON-DE-FORGE"\n' > "$src/fleet/services/forge-recipe/secrets.tfvars"
-  printf 'resource "gitea_org" "x" {}\n'    > "$src/fleet/services/forge-recipe/charte.tf"
+    > "$src/runtime/services/forge-recipe/terraform.tfstate"
+  printf 'admin_token = "JETON-DE-FORGE"\n' > "$src/runtime/services/forge-recipe/secrets.tfvars"
+  printf 'resource "gitea_org" "x" {}\n'    > "$src/runtime/services/forge-recipe/charte.tf"
   printf '%s\n' "$src"
 }
 
@@ -479,7 +479,7 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   local src; src="$(racine_avec_artefacts)"
   run env PROVISION_LIB="$src/deploy/lib/provision-lib.sh" \
     bash "$src/deploy/modules.d/62-runtime-helpers.sh" apply
-  local pose="$LCARS_HELPERS_DIR/fleet/services/forge-recipe"
+  local pose="$LCARS_HELPERS_DIR/services/forge-recipe"
   # LE TEMOIN DU TEMOIN D'ABORD : la recette elle-meme est bien arrivee. Sans cette ligne, un module
   # qui ne copie plus rien passerait les trois assertions suivantes.
   [ -s "$pose/charte.tf" ] \
@@ -493,7 +493,7 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   local src; src="$(racine_avec_artefacts)"
   run env PROVISION_LIB="$src/deploy/lib/provision-lib.sh" \
     bash "$src/deploy/modules.d/62-runtime-helpers.sh" apply
-  local pose="$LCARS_HELPERS_DIR/fleet/services/forge-recipe"
+  local pose="$LCARS_HELPERS_DIR/services/forge-recipe"
   [ -s "$pose/charte.tf" ] || { echo "decor casse : la recette n'est pas arrivee"; echo "$output"; return 1; }
   [ ! -e "$pose/terraform.tfstate" ] \
     || { echo "l'etat tofu — donc les jetons — a ete pose sous le prefix"; return 1; }
@@ -514,7 +514,7 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   grep -qE '^\s*--exclude=\.terraform$' "$MOD"
   grep -qE '^\s*--exclude=node_modules$' "$MOD"
   # ⚠ ET PLUS AUCUN `cp -a` DANS LA POSE : c'est lui qui ne pouvait pas exclure a la source.
-  ! grep -q 'cp -a "$(repo_root)/fleet/\$n"' "$MOD" \
+  ! grep -q 'cp -a "$(product_tree)/\$n"' "$MOD" \
     || { echo "la boucle EMBEDDED copie encore par cp -a, qui n'exclut rien"; return 1; }
 }
 
@@ -631,5 +631,5 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   refute grep -qE 'write_atomic +"?\$SKEL_FILE' <<<"$corps"
   grep -q 'ensure_managed_block "$SKEL_FILE"' <<<"$corps"
   [ ! -e "$SRC_DIR/skel.bashrc" ] \
-    || { echo "fleet/services/skel.bashrc est revenu — la copie de 117 lignes avec lui"; return 1; }
+    || { echo "runtime/services/skel.bashrc est revenu — la copie de 117 lignes avec lui"; return 1; }
 }

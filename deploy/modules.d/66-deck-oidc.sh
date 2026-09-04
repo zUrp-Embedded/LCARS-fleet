@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/66-deck-oidc.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: PROTO-V2 — le client OAuth2 du deck : un APPELANT du geste de forge du produit (fleet/services/forge.d/deck-oidc.sh)
+# STATUS: PROTO-V2 — le client OAuth2 du deck : un APPELANT du geste de forge du produit (runtime/services/forge.d/deck-oidc.sh)
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -18,7 +18,7 @@ set -euo pipefail
 # adresses de la forge, le port et les entrées du deck, le fichier de config et son groupe.
 advertise_addr "${PROV_DECK_BIND:-0.0.0.0}"
 exec env \
-  LCARS_MODULE_PROTOCOL="$(repo_root)/fleet/services/lib/module-protocol.sh" \
+  LCARS_MODULE_PROTOCOL="$(product_tree)/services/lib/module-protocol.sh" \
   LCARS_MODULE_TAG="${PROV_MODULE_TAG:-}" \
   FORGE_BASE_URL="${PROV_FORGE_URL:-}" \
   FORGE_PUBLIC_URL="${PROV_FORGE_PUBLIC_URL:-}" \
@@ -31,4 +31,4 @@ exec env \
   LCARS_DECK_OIDC_FILE="${PROV_DECK_OIDC_FILE:-}" \
   LCARS_ADVERTISE="${PROV_ADVERTISE:-}" \
   LCARS_ADVERTISE_WHY="${PROV_ADVERTISE_WHY:-}" \
-  bash "$(repo_root)/fleet/services/forge.d/deck-oidc.sh" "${1:?usage: 66-deck-oidc.sh <check|apply>}"
+  bash "$(product_tree)/services/forge.d/deck-oidc.sh" "${1:?usage: 66-deck-oidc.sh <check|apply>}"

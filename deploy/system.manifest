@@ -108,7 +108,7 @@ dir       /opt/lcars/var/tokens                       0710  lcars-authority:flee
 # par chaque install et retire par aucune. La SSoT est `Fleet.Layout.@installed_catalogues_root`.
 dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
 # ⚠ `any`, ET C'ETAIT `docker` — MESURE DU 2026-09-01, BANC 2007 (un POSTE) : /var/lib/lcars/tofu/
-# .apply.lock y survit a la desinstallation. `fleet/services/forge-gestures.sh:102` derive
+# .apply.lock y survit a la desinstallation. `runtime/services/forge-gestures.sh:102` derive
 # `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction de rail, et ce fichier part sur les deux
 # (il est dans `EMBEDDED` de 62-runtime-helpers). Le poste creait donc un repertoire que la table
 # disait propre a la boite : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
@@ -119,7 +119,7 @@ dir       /var/lib/lcars                               0755  root:root          
 # ─── LES REPERTOIRES DE TRAVAIL DES GESTES ROOT ─────────────────────────────────────────────────
 #
 # ⚠ ILS N'ETAIENT PAS DECLARES, ET LE SCRIPT CROYAIT QU'ILS L'ETAIENT.
-# `fleet/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
+# `runtime/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
 # RECOPIE ICI : deploy/system.manifest en est la source unique » — puis derive
 # `WORK=/var/tmp/lcars/toolchain-work` (l. 34) que cette table ne nommait nulle part. Le commentaire
 # decrivait une regle que la table n'appliquait pas.
@@ -166,7 +166,7 @@ link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   
 link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
 link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
 
-link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
+link      /usr/local/bin/fleet                      -     -                   wsl+linux
 link      /usr/local/bin/lcars                         -     -                   wsl+linux
 link      /usr/local/bin/node                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
@@ -224,7 +224,7 @@ runtime   /run/lcars-converger.refused                 0644  root:root          
 # ⚖ user 2026-09-04 (Q1, lot 7) : cette table N'A PLUS DE COLONNE `docker`. Les fichiers de boot de
 # la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
 # `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
-# `fleet/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `fleet/services/box/README.md`.
+# `runtime/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/box/README.md`.
 # L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas.
 
 runtime   /run/lock/lcars                              0700  root:root           any
@@ -238,7 +238,7 @@ dir       /root/.terraform.d                           0755  root:root          
 # ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
 human     /home/<human>/.lcars                         0700  <human>:-           any
 human     /home/<human>/.lcars/log                     0700  <human>:-           any
-human     /home/<human>/.lcars/fleet_v2.env            0600  <human>:-           any
+human     /home/<human>/.lcars/fleet.env            0600  <human>:-           any
 human     /home/<human>/pods                           0700  <human>:-           any
 human     /home/<human>/.local/bin/claude              0755  <human>:-           any
 

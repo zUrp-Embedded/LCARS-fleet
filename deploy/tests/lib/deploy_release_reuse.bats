@@ -1,9 +1,5 @@
 #!/usr/bin/env bats
-<<<<<<<< HEAD:deploy/tests/lib/deploy_release_reuse.bats
 # SOURCE: deploy/tests/lib/deploy_release_reuse.bats
-========
-# SOURCE: runtime/test/etc/install_release_reuse.bats
->>>>>>>> origin/main:runtime/test/etc/install_release_reuse.bats
 # AUTHOR: alice
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for deploy/lib/deploy-release.sh — une release n'est reutilisee que si elle ATTESTE la source

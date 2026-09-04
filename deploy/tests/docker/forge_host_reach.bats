@@ -294,7 +294,7 @@ STUB
   # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
   # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
   # propre sens. Ce qui compte est la direction — le nom vient de forge-gestures, pas du module.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne grave aucun nom de compte humain, sous aucune forme
@@ -482,7 +482,7 @@ STUB
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   [ -f "$g" ]
   run bash "$g" builtin-human
   [ "$status" -eq 0 ]
@@ -827,7 +827,7 @@ STUB
   local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
   grep -qE '^\s*--disposable\) echo .*retire' "$door"
   # Et l'AUTORITE du nom n'a plus que DEUX etats : rien, ou l'explicite.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   [ -z "$(bash "$g" builtin-human)" ]
   [ -z "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" ]
   [ "$(LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]

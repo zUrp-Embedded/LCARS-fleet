@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/forge.d/deck-oidc.sh
+# SOURCE: runtime/services/forge.d/deck-oidc.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — pose le client OAuth2 du deck de la boîte + son fichier de config

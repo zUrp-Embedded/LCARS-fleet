@@ -17,7 +17,7 @@ _PROV_CONSOLE_HUMAN=""
 prov_console_human() {
   [[ -n "$_PROV_CONSOLE_HUMAN" ]] && { echo "$_PROV_CONSOLE_HUMAN"; return 0; }
   local h
-  h="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  h="$(bash "$(product_tree)/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   if [[ -z "$h" ]] || ! id -u -- "$h" >/dev/null 2>&1; then
     h="$PROV_HUMAN"
   fi

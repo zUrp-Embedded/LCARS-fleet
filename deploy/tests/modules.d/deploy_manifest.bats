@@ -26,16 +26,16 @@ load ../refute
 setup() {
   SRC="$BATS_TEST_DIRNAME/../.."
   ROOT="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$ROOT/deploy/lib" "$ROOT/fleet/etc"
+  mkdir -p "$ROOT/deploy/lib" "$ROOT/runtime/etc"
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$ROOT/deploy/lib/"
   cp "$SRC/lib/docker-endpoint.sh" "$ROOT/deploy/lib/"
   cp "$SRC/modules.d/60-deploy.sh" "$BATS_TEST_TMPDIR/60-deploy.sh"
 
-  cat > "$ROOT/fleet/etc/release.manifest" <<'EOF'
+  cat > "$ROOT/runtime/etc/release.manifest" <<'EOF'
 # test manifest
-fleet_v2         exec   link
+fleet         exec   link
 bwrap_launch.sh  exec
 bridge.py        noexec
 EOF
@@ -49,19 +49,19 @@ EOF
   mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
   printf '#!/bin/sh\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
   chmod +x "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"
-  printf 'x\n' > "$PROV_PREFIX/bin/fleet_v2";        chmod +x "$PROV_PREFIX/bin/fleet_v2"
+  printf 'x\n' > "$PROV_PREFIX/bin/fleet";        chmod +x "$PROV_PREFIX/bin/fleet"
   printf 'x\n' > "$PROV_PREFIX/bin/bwrap_launch.sh"; chmod +x "$PROV_PREFIX/bin/bwrap_launch.sh"
   printf 'x\n' > "$PROV_PREFIX/bin/bridge.py"
-  ln -s "$PROV_PREFIX/bin/fleet_v2" "$PROV_LINK_DIR/fleet_v2"
+  ln -s "$PROV_PREFIX/bin/fleet" "$PROV_LINK_DIR/fleet"
 }
 
 run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 
 @test "manifest-driven check: fully posed prefix has zero bin/link drift" {
   run_check
-  [[ "$output" == *"bin/fleet_v2"* ]]
+  [[ "$output" == *"bin/fleet"* ]]
   [[ "$output" == *"bin/bridge.py"* ]]
-  [[ "$output" == *"symlink $PROV_LINK_DIR/fleet_v2"* ]]
+  [[ "$output" == *"symlink $PROV_LINK_DIR/fleet"* ]]
   [[ "$output" != *"DRIFT 60-deploy: bin/"* ]]
   [[ "$output" != *"symlink vers"* ]]
 }
@@ -80,9 +80,9 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 @test "manifest-driven check: a wrong link target drifts" {
-  ln -sfn /somewhere/else "$PROV_LINK_DIR/fleet_v2"
+  ln -sfn /somewhere/else "$PROV_LINK_DIR/fleet"
   run_check
-  [[ "$output" == *"$PROV_LINK_DIR/fleet_v2 ≠ symlink vers"* ]]
+  [[ "$output" == *"$PROV_LINK_DIR/fleet ≠ symlink vers"* ]]
 }
 
 @test "manifest-driven check: a dead copy of a non-link entry warns (D3)" {
@@ -98,7 +98,7 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 }
 
 @test "missing manifest is a probe ERROR (rc 2), not a silent pass" {
-  rm "$BATS_TEST_TMPDIR/repo/fleet/etc/release.manifest"
+  rm "$BATS_TEST_TMPDIR/repo/runtime/etc/release.manifest"
   run_check
   [ "$status" -eq 2 ]
   [[ "$output" == *"manifest introuvable"* ]]

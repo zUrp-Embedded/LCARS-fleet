@@ -104,7 +104,7 @@ apply() {
   ensure_group "$AUTHORITY_GROUP" || { p_fail "groupe $AUTHORITY_GROUP non posé — le compte de service n'aura pas de groupe à lui, et tout chown sur les secrets échouera"; verdict_apply; }
 
   if ! account_exists "$AUTHORITY_USER"; then
-    # `--system` : pas de home, uid sous UID_MIN, donc `bin/fleet_v2` refusera de lancer une fleet
+    # `--system` : pas de home, uid sous UID_MIN, donc `bin/fleet` refusera de lancer une fleet
     # sous ce compte — le garde qui protege les pods vaut aussi pour lui, et gratuitement.
     if run_quiet "$USERADD" --system --no-create-home --shell "$NOLOGIN" \
                  -g "$AUTHORITY_GROUP" -- "$AUTHORITY_USER"; then

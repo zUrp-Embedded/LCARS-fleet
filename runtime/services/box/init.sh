@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/box/init.sh
+# SOURCE: runtime/services/box/init.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: actif — l'INIT DE L'INSTANCE de la boite, cote produit : le siege, les zones, le layout du volume
@@ -97,7 +97,7 @@ seat_uid_file() {
     chmod 0644 "$SEAT_UID_FILE" 2>/dev/null || true
     chown root:root "$SEAT_UID_FILE" 2>/dev/null || true   # hors root (un temoin), le fichier suffit
   else
-    p_fail "$SEAT_UID_FILE NON pose — GUARD B refusera tout « fleet_v2 start »"
+    p_fail "$SEAT_UID_FILE NON pose — GUARD B refusera tout « fleet start »"
   fi
 }
 seat_create() {

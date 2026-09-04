@@ -4,7 +4,7 @@
 # STARDATE: 2026-08-19
 # STATUS: bats tests for R-no-root-runtime — la reservation du siege cote BEAM (B9)
 #
-# `00` §6.1 : GUARD B (bin/fleet_v2) refuse une fleet sous l'uid du siege, mais la release est sur
+# `00` §6.1 : GUARD B (bin/fleet) refuse une fleet sous l'uid du siege, mais la release est sur
 # le PATH d'admiral et `config/runtime.exs` ne refusait que "0" — le contournement etait a une
 # commande. Ces temoins rejouent la VRAIE config (mix run, pas un grep) : la garde doit lever pour
 # l'uid du siege, et laisser passer un uid worker. `LCARS_SYSADMIN_UID` est la couture — la meme
@@ -46,7 +46,7 @@ setup() {
 }
 
 @test "R-no-root: un compte SYSTEME (uid < UID_MIN) est refuse — le miroir de GUARD B est ENTIER" {
-  # fleet_v2 porte DEUX regles (siege + frontiere systeme/humain) ; la v1 du miroir n'en portait
+  # fleet porte DEUX regles (siege + frontiere systeme/humain) ; la v1 du miroir n'en portait
   # qu'une et demie (audit). `id` est double en tete de PATH : la config lit uid=999.
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
@@ -71,7 +71,7 @@ setup() {
 
 # ─── LA CLEF DE LA GARDE N'EST PLUS DANS L'ENVIRONNEMENT DU GARDE ──────────────────────────────
 #
-# ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait GUARD B, des DEUX
+# ⚠ MESURE DU 2026-08-27 : `LCARS_SYSADMIN_UID=99999 fleet start` desarmait GUARD B, des DEUX
 # cotes. Une garde qui lit sa politique dans l'environnement du processus qu'elle garde ne garde
 # rien : cet environnement appartient au garde. Le fichier `root:root` la lui retire — encore
 # faut-il qu'il GAGNE, sinon il suffit de reposer la variable.
@@ -113,7 +113,7 @@ setup() {
 # molette qui n'existe que pour etre tournee contre la garde.
 #
 # C'est exactement le trou ferme le matin meme sur l'autre moitie (`LCARS_SYSADMIN_UID=99999
-# fleet_v2 start` desarmait la reservation du siege), et la reponse est la meme : la borne est un
+# fleet start` desarmait la reservation du siege), et la reponse est la meme : la borne est un
 # FAIT DE MACHINE — `/etc/login.defs` la DECLARE, `useradd` la lit, et quatre autres lecteurs de ce
 # depot la lisent la. Le BEAM etait le cinquieme, et le seul a ne pas la lire.
 #

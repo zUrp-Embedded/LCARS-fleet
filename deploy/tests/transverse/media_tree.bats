@@ -109,7 +109,7 @@ mod() { run bash "$MOD" "$1"; }
   #
   # ⚠ CE TEMOIN EPINGLAIT LA DECISION INVERSE (« doc n'est PAS pose, et son absence est MOTIVEE »).
   # C'etait une omission deguisee en decision : la doc est la doc UTILISATEUR du produit, batie du
-  # MEME arbre — le site lit `fleet/priv/catalogue` et `pod_tools.ex`. Le laisser dehors rendait un
+  # MEME arbre — le site lit `runtime/priv/catalogue` et `pod_tools.ex`. Le laisser dehors rendait un
   # `404 not found` nu sur l'onglet Doc du deck.
   mod apply
   [ -s "$LCARS_MEDIA_ROOT/doc/index.html" ]
@@ -150,7 +150,7 @@ mod() { run bash "$MOD" "$1"; }
 @test "le seam est celui du PRODUIT, pas un second defaut" {
   # `runtime.exs` et `deck.ex` lisent `/usr/share/lcars`. Un module qui inventerait son propre chemin
   # servirait des avatars que personne ne regarde.
-  local rt="$BATS_TEST_DIRNAME/../../../fleet/config/runtime.exs" deck="$BATS_TEST_DIRNAME/../../../fleet/lib/fleet/observation/deck.ex"
+  local rt="$BATS_TEST_DIRNAME/../../../runtime/config/runtime.exs" deck="$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/observation/deck.ex"
   # ⚠ LES TROIS DEFAUTS S'ACCORDENT, ET C'EST CE TEMOIN QUI L'EXIGE — il a rougi au demenagement
   # sous la racine unique, ce qui est exactement son metier : un seul des trois oublie, et le deck
   # sert des avatars que personne ne regarde.

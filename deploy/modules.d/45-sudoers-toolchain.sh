@@ -27,17 +27,17 @@ SUDOERS_FILE="$SUDOERS_DIR/lcars-toolchain"
 RUN_STATE="${LCARS_TOOLCHAIN_RUN_STATE:-/run/lcars/toolchain}"
 SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 # ⚠ UN SEUL CHEMIN, ET C'EST LE DEMENAGEMENT DU SKILL QUI L'A RENDU POSSIBLE. Ces lignes portaient
-# un repli a deux branches — `/opt/lcars/admiral-skills` s'il existe, sinon `$(repo_root)/fleet/
+# un repli a deux branches — `/opt/lcars/admiral-skills` s'il existe, sinon `$(product_tree)/
 # deploy/admiral/skills` — parce que l'image posait le skill A UN CHEMIN et le depot le portait A UN
 # AUTRE. Le repli ne corrigeait pas cette divergence, il la contournait : sur le rail poste le module
 # derivait en accusant l'image (« image sans les sources admiral ? ») sur une machine qui n'est pas
 # une image, et le siege n'y recevait jamais son skill (vu a une install a froid).
 #
-# Le skill vit desormais dans `fleet/services/admiral/skills`, et l'image l'y pose AUSSI — c'est
-# exactement ce que `EMBEDDED` copie sous `/opt/lcars/fleet/services`. Les deux rails nomment donc le
+# Le skill vit desormais dans `runtime/services/admiral/skills`, et l'image l'y pose AUSSI — c'est
+# exactement ce que `EMBEDDED` copie sous `/opt/lcars/services`. Les deux rails nomment donc le
 # meme chemin, et `repo_root()` suffit a le dire : `/opt/lcars` dans la boite, le checkout ailleurs.
 # Deux branches qui existaient pour reconcilier deux verites n'ont plus rien a reconcilier.
-SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(repo_root)/fleet/services/admiral/skills}"
+SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 
 check() {
   if [[ -e "$SUDOERS_FILE" ]]; then

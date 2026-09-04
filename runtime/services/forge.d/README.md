@@ -2,7 +2,7 @@
 
 **Date** : 2026-09-04
 **Statut** : actif — lot 6 du chantier deploy-independance
-**Référencé par** : `fleet/services/README.md`, `deploy/modules.d/{45-catalogues,65-ops-branch,66-deck-oidc}.sh`
+**Référencé par** : `runtime/services/README.md`, `deploy/modules.d/{45-catalogues,65-ops-branch,66-deck-oidc}.sh`
 
 ⚖ user 2026-09-04 : « la frontière, c'est : joué uniquement à l'install, ou utilisé en prod ? ».
 Ces trois gestes sont joués par la **boîte** à l'init de son instance et à chaque boot pour

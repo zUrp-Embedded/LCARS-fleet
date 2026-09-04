@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/forge.d/ops-branch.sh
+# SOURCE: runtime/services/forge.d/ops-branch.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — la boite aux lettres du rail d'outillage : UNE branche, sur LE depot ops
@@ -92,7 +92,7 @@ commune avec `main`, et elle ne porte que des manifestes d'outillage sous `ops/t
 ## Ce que tu approuves en signant une PR ici
 
 Le manifeste qui entre par cette PR sera appliqué **par root, sur la boite**, par
-`fleet/bin/lcars-toolchain-converge`. Il n'est pas interprété : le convergeur lit des champs typés et joue des
+`runtime/bin/lcars-toolchain-converge`. Il n'est pas interprété : le convergeur lit des champs typés et joue des
 gabarits de commande fixes, au SHA que tu viens d'approuver. Ce que tu lis dans le diff est donc
 exactement ce qui sera fait — c'est la propriété que toute cette mécanique existe pour tenir.
 

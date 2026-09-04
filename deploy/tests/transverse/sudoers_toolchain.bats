@@ -22,7 +22,7 @@ load ../refute
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/45-sudoers-toolchain.sh"
   [ -f "$SRC" ]
-  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../../../fleet/services/admiral/skills"
+  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../../../runtime/services/admiral/skills"
   # ⚠ SANS cette couture, la branche skill ecrirait dans le VRAI ~/.claude de qui joue les tests.
   export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$LCARS_SIEGE_HOME"
 
@@ -241,7 +241,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   # (mesure du 2026-08-21, install a froid sur machine dediee). Le message envoyait chercher la
   # faute dans un artefact absent.
   #
-  # Le skill vit maintenant sous `fleet/services/admiral/skills`, ou `EMBEDDED` et le `COPY` de
+  # Le skill vit maintenant sous `runtime/services/admiral/skills`, ou `EMBEDDED` et le `COPY` de
   # l'image le posent au MEME endroit. Ce qui se mesure ici n'est donc plus « il existe un repli »
   # mais « il n'y a plus rien entre quoi choisir » : un chemin, derive de `repo_root()`, et il
   # porte reellement le skill — sinon ce temoin ne prouverait qu'une chaine bien formee.
@@ -250,7 +250,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [ "$status" -eq 0 ]
   # Sur la machine qui joue ce test, /opt/lcars n'existe pas : la source est donc celle du DEPOT,
   # et elle porte reellement le skill (sinon ce temoin ne prouverait qu'un chemin bien forme).
-  [[ "$output" == */fleet/services/admiral/skills ]]
+  [[ "$output" == */runtime/services/admiral/skills ]]
   [ -f "$output/system-issues/SKILL.md" ]
 }
 

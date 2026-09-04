@@ -68,7 +68,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # change ailleurs, et une comparaison seule ne dirait rien d'un huitieme qui apparait.
   # ⚠ ET IL Y A DEUX NATURES, PAS UNE — CE MUR N EN CONNAISSAIT QU UNE, ET IL A EU RAISON DE
   # ROUGIR QUAND LA SECONDE EST APPARUE. La release POSEE vit sous `$PROV_PREFIX` ; la release
-  # BATIE vit dans l arbre, en `fleet/_build/prod/rel/…`, la ou `mix release` la depose et ou
+  # BATIE vit dans l arbre, en `runtime/_build/prod/rel/…`, la ou `mix release` la depose et ou
   # `pack.sh:188` la prend pour l embarquer. Ce sont deux objets distincts au meme nom de binaire :
   # `prov_release_bin` cherche la seconde AVANT la premiere, precisement parce qu elle est celle que
   # la passe en cours apporte et que `60-deploy` posera.
@@ -78,7 +78,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
   # comparaison seule ne dirait rien d un huitieme qui apparait.
   local f n=0 nb=0 b
-  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/fleet/services/box/boot.sh"; do
+  for f in "$R/deploy/lib/provision-lib.sh" "$R/runtime/bin/lcars" "$R/runtime/services/box/boot.sh"; do
     while read -r b; do
       [ -n "$b" ] || continue
       case "$b" in
@@ -86,7 +86,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
           nb=$(( nb + 1 ))
           # La release BATIE se derive de la racine de l arbre, jamais du prefixe d install : un
           # chemin absolu en dur ici designerait la machine de celui qui a ecrit la ligne.
-          [ "$b" = "/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
+          [ "$b" = "/runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
             || { echo "$f : chemin de release BATIE non derive de la racine : « $b »" >&2; return 1; } ;;
         *)
           n=$(( n + 1 ))

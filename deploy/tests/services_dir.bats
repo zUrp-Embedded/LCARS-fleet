@@ -2,7 +2,7 @@
 # SOURCE: deploy/tests/services_dir.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for fleet/services — un repertoire par ROLE, et il doit le rester
+# STATUS: bats tests for runtime/services — un repertoire par ROLE, et il doit le rester
 #
 # ⚠ CE QUE CES TEMOINS TIENNENT, ET QU'UN MIROIR DE LISTES NE PEUT PAS TENIR.
 #
@@ -21,7 +21,7 @@ setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
   MOD="$REPO/deploy/modules.d/62-runtime-helpers.sh"
   DOCKERFILE="$REPO/deploy/docker/Dockerfile"
-  SERVICES="$REPO/fleet/services"
+  SERVICES="$REPO/runtime/services"
   [ -f "$MOD" ] && [ -f "$DOCKERFILE" ] && [ -d "$SERVICES" ]
 }
 
@@ -33,13 +33,13 @@ helpers() {
 
 # Ce que le Dockerfile pose a plat dans /opt/lcars depuis `services/`, plus le convergeur qui va
 # ailleurs (`/usr/local/bin`) — il est pose, donc il compte.
-# ⚠ `COPY` PORTE DES OPTIONS, ET LE MOTIF LES IGNORAIT. `COPY --chmod=0644 fleet/services/x /y` ne
-# matchait pas « ^COPY fleet/services/ » : le fichier etait declare « pose NULLE PART » alors qu'il
+# ⚠ `COPY` PORTE DES OPTIONS, ET LE MOTIF LES IGNORAIT. `COPY --chmod=0644 runtime/services/x /y` ne
+# matchait pas « ^COPY runtime/services/ » : le fichier etait declare « pose NULLE PART » alors qu'il
 # etait copie juste devant. Le premier `--chmod` du Dockerfile (2026-09-01, ecart de mode
 # poste/boite) a fait rougir ce temoin — et un mur qui rougit sur la CORRECTION du defaut qu'il
 # existe pour attraper est un mur qui apprend a etre contourne.
 copied() {
-  sed -n 's|^COPY \(--[^ ]* \)*fleet/services/\([^ ]*\) .*|\2|p' "$DOCKERFILE"
+  sed -n 's|^COPY \(--[^ ]* \)*runtime/services/\([^ ]*\) .*|\2|p' "$DOCKERFILE"
 }
 
 @test "GARDE D'INSTRUMENT : les trois listes sont NON VIDES" {

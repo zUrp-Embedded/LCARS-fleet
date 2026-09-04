@@ -1,12 +1,8 @@
 #!/usr/bin/env bats
-<<<<<<<< HEAD:runtime/test/services/provision-role-tokens.bats
-# SOURCE: fleet/test/services/provision-role-tokens.bats
-========
-# SOURCE: runtime/test/etc/provision-role-tokens.bats
->>>>>>>> origin/main:runtime/test/etc/provision-role-tokens.bats
+# SOURCE: runtime/test/services/provision-role-tokens.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: bats tests for fleet/services/provision-role-tokens.sh (A4) — usage, check, idempotent provisioning, failures
+# STATUS: bats tests for runtime/services/provision-role-tokens.sh (A4) — usage, check, idempotent provisioning, failures
 #
 # The forge is stubbed by a curl SHIM (prepended to PATH): the validity probe (`-w %{http_code}`) reads
 # $MOCK/probe_code; the mint POST returns $MOCK/post_response and is COUNTED in $MOCK/calls.log — so
@@ -53,7 +49,7 @@ SHIM
 teardown() { rm -rf "$TMP"; }
 
 @test "LCARS header present (SOURCE/AUTHOR/STARDATE/STATUS)" {
-  head -5 "$SCRIPT" | grep -q "SOURCE: fleet/services/provision-role-tokens.sh"
+  head -5 "$SCRIPT" | grep -q "SOURCE: runtime/services/provision-role-tokens.sh"
   head -5 "$SCRIPT" | grep -q "STATUS:"
 }
 

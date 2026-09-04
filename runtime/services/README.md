@@ -35,7 +35,7 @@ Fleet.Admiral.ToolchainReconciler       le BEAM, sous l'humain
 |---|---|---|
 | `catalogue-executor.py` (+ `lcars_socket.py`) | `/opt/lcars/` | systemd `lcars-catalogue` (compte `lcars-authority`) |
 | `privileged-executor.py` (+ `lcars_socket.py`) | `/opt/lcars/` | systemd `lcars-privileged` (root) |
-| `human-converger.sh` · `human.d/` · `agent/` | `/opt/lcars/` ; les sous-arbres à côté (cible `/opt/lcars/services/`, le rail pose encore `/opt/lcars/fleet/services/`) | systemd `lcars-converger` |
+| `human-converger.sh` · `human.d/` · `agent/` | `/opt/lcars/` ; les sous-arbres à côté (cible `/opt/lcars/services/`, le rail pose encore `/opt/lcars/services/`) | systemd `lcars-converger` |
 | `console-landing.sh` + `console-deck.py` | `/opt/lcars/` | systemd `lcars-landing` |
 | `console.sh` · `console-humans.sh` · `console-status.sh` · `console-pod.sh` | `/opt/lcars/` | piloté par `lcars-converger` |
 | `forge-gestures.sh` · `forge-recipe/` | `/opt/lcars/` ; la recette à côté (même cible que ci-dessus) | le boot de la boîte **et** l'exécuteur |

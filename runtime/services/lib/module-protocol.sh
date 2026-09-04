@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: fleet/services/lib/module-protocol.sh
+# SOURCE: runtime/services/lib/module-protocol.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: actif — le protocole des MODULES DU PRODUIT : gestes de forge (`forge.d`) et modules per-humain (`human.d`)

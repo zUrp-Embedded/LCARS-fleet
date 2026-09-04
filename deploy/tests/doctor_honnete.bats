@@ -108,11 +108,11 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 # ─── LES MODULES QUI MENTAIENT ──────────────────────────────────────────────────────────────────
 
 @test "66-deck-oidc : un fichier PRESENT et illisible n'est plus annonce « absent »" {
-  local mod="$DEPLOY/../fleet/services/forge.d/deck-oidc.sh"
+  local mod="$DEPLOY/../runtime/services/forge.d/deck-oidc.sh"
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   echo '{}' > "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   chmod 0000 "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
-  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../runtime/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
           LCARS_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/etc/deck-oidc.json" \
           FORGE_BASE_URL="http://forge.invalid" \
       bash "$mod" check
@@ -124,8 +124,8 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 @test "66-deck-oidc : un fichier VRAIMENT absent reste un DRIFT" {
   # Le sens qui manquait : sans lui, un module qui repondrait « non mesurable » a tout passerait le
   # temoin ci-dessus en ayant cesse de signaler quoi que ce soit.
-  local mod="$DEPLOY/../fleet/services/forge.d/deck-oidc.sh"
-  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../fleet/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
+  local mod="$DEPLOY/../runtime/services/forge.d/deck-oidc.sh"
+  run env LCARS_MODULE_PROTOCOL="$DEPLOY/../runtime/services/lib/module-protocol.sh" LCARS_MODULE_TAG=66-deck-oidc \
           LCARS_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/pas-la.json" \
           FORGE_BASE_URL="http://forge.invalid" \
       bash "$mod" check
@@ -215,7 +215,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   #
   # Le mot engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN faire — il n'a pas
   # les credentials de la personne, et les avoir serait le contraire du canon.
-  local mod="$BATS_TEST_DIRNAME/../../fleet/services/forge.d/tokens.sh"
+  local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
   local bloc; bloc="$(sed -n '/case "\$(member_state "\$LCARS_LOGIN")"/,/esac/p' "$mod")"
   [ -n "$bloc" ]
   refute grep -q 'p_drift' <<<"$bloc"
@@ -228,7 +228,7 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 @test "63-forge-tokens : ce que le rail PEUT converger reste un drift" {
   # Le sens qui manquait. `63-forge-tokens` porte de vrais drifts — structure absente, tokens a re-minter —
   # et les passer tous en warn aurait rendu le module incapable de signaler quoi que ce soit.
-  local mod="$BATS_TEST_DIRNAME/../../fleet/services/forge.d/tokens.sh"
+  local mod="$BATS_TEST_DIRNAME/../../runtime/services/forge.d/tokens.sh"
   [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
 }
 

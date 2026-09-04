@@ -314,7 +314,7 @@ STUB
 # POSE, et le verbe rendait 0. Mesure du 2026-09-01 : sous `ulimit -f 0`, un fichier de ZERO octet
 # annonce POSE.
 #
-# Ce que ca coute la ou le rail ecrit : `seat.uid` vide fait refuser tout `fleet_v2 start` par le
+# Ce que ca coute la ou le rail ecrit : `seat.uid` vide fait refuser tout `fleet start` par le
 # GUARD B ; `services.env` vide demarre les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide
 # laisse l interop Windows OUVERTE sur une machine dont le bilan annonce la frontiere armee.
 #
@@ -1356,8 +1356,8 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
 # 2007), sur un apply rejoue depuis `/opt/lcars/deploy/provision` — le geste NOMINAL du
 # convergeur :
 #     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
-#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
 # Et le premier ne faisait pas qu echouer : `npm ci` a INSTALLE 176 Mo sous /opt/lcars avant de
 # rater son build. La copie n est pas seulement incapable de batir — la laisser essayer la pollue.

@@ -42,7 +42,7 @@ node_version_posee() {
 
 # ─── DANS LA BOITE, L'ETAT-CIBLE EST LA DOC, PAS L'OUTIL QUI LA PRODUIT ──────────────────────────
 # node n'existe ici que le temps du stage « site » de l'image : il y fait `npm run build` sur la
-# source du runtime (`COPY fleet /src/fleet`), et seul le RESULTAT est copie dans le runtime. La doc
+# source du runtime (`COPY fleet /src/runtime`), et seul le RESULTAT est copie dans le runtime. La doc
 # est donc bâtie a partir de la revision exacte que la boite servira, et node n'a rien a y faire
 # ensuite. Verifier node ici mesurait un moyen absent PAR CONSTRUCTION, et rendait un echec que nul
 # `apply` ne pouvait reparer (APPLY-ON=wsl linux).

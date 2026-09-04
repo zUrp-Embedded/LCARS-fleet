@@ -19,7 +19,7 @@ load refute
 setup() {
   PORTE_SRC="$BATS_TEST_DIRNAME/../gate.sh"
   [ -f "$PORTE_SRC" ]
-  SHELL_GATE="$BATS_TEST_DIRNAME/../../fleet/test/shell_gate.sh"
+  SHELL_GATE="$BATS_TEST_DIRNAME/../../runtime/test/shell_gate.sh"
 
   DECOR="$BATS_TEST_TMPDIR/decor"
   mkdir -p "$DECOR/tests"

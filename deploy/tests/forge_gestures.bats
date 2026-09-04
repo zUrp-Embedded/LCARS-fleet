@@ -38,7 +38,7 @@
 load refute
 
 setup() {
-  SCRIPT="$BATS_TEST_DIRNAME/../../fleet/services/forge-gestures.sh"
+  SCRIPT="$BATS_TEST_DIRNAME/../../runtime/services/forge-gestures.sh"
   [ -f "$SCRIPT" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"

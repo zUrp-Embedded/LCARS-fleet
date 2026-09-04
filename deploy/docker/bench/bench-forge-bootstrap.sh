@@ -132,7 +132,7 @@ ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
 ORG="${ORG:-fleet}"
 say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
 say "org du catalogue : $ORG"
-"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/fleet/services/forge-recipe/roles.auto.tfvars.json" \
+"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" \
   || die "roster non depose dans la recette de $BOX" 4
 rm -rf "$ENROLL_DIR"
 
@@ -234,7 +234,7 @@ fi
 # quotes ferait resoudre les deux ici, et l'URL de la forge y est vide.
 # shellcheck disable=SC2016
 charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
-    'cd /opt/lcars/fleet/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
+    'cd /opt/lcars/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
 # `fleet/lcars` = la source que la boite clone au boot (LCARS_SOURCE_REMOTE, la jambe runtime du

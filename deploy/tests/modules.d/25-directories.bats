@@ -7,7 +7,7 @@
 # CE QUE CES TEMOINS FERMENT. `Fleet.Observation` fait ecouter le deck sur
 # `/run/lcars/console/<humain>/deck.sock`. Ce dossier n'etait cree que par `console.sh`, artefact de
 # CONTENEUR, jamais joue par une install native. Sur le poste natif du 2026-08-20 : `provision
-# apply` vert sur ses 14 modules, release posee, `fleet_v2 start` annoncant « fleet up » — et zero
+# apply` vert sur ses 14 modules, release posee, `fleet start` annoncant « fleet up » — et zero
 # `beam.smp` une seconde plus tard, parce que Ranch n'avait pas pu binder :
 #
 #   [error] Failed to start Ranch listener … ip: {:local, "/run/lcars/console/lcars/deck.sock"}

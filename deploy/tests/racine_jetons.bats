@@ -63,10 +63,10 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
   # C'est ce defaut-la qui est tenu ici, a la place des deux litteraux.
   local bad=0
   declare -A sites=(
-    ["$R/fleet/services/lib/module-protocol.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:=[^}]*'
-    ["$R/fleet/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
-    ["$R/fleet/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
-    ["$R/fleet/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'
+    ["$R/runtime/services/lib/module-protocol.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:=[^}]*'
+    ["$R/runtime/services/human-converger.sh|FORGE_TOKEN_FILE"]='FORGE_TOKEN_FILE:-[^}]*'
+    ["$R/runtime/services/human-converger.sh|LCARS_UID_MAP_FILE"]='LCARS_UID_MAP_FILE:-[^}]*'
+    ["$R/runtime/services/forge-gestures.sh|LCARS_PRIVATE_DIR"]='LCARS_PRIVATE_DIR:-[^}]*'
   )
   local cle f vu
   for cle in "${!sites[@]}"; do
@@ -85,7 +85,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
 @test "PYTHON : les deux defauts de l'executeur de catalogue s'accordent" {
   # Ce service DETIENT l'autorite de la forge. Un repli qui pointe ailleurs, et il demarre en
   # refusant chaque geste sur un fichier absent.
-  local f="$R/fleet/services/catalogue-executor.py" vu
+  local f="$R/runtime/services/catalogue-executor.py" vu
   vu="$(racine_de "$f" 'FORGE_ROLE_TOKENS_DIR", "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
   vu="$(racine_de "$f" 'LCARS_MASTER_TOKEN_FILE", "[^"]*')"
@@ -95,7 +95,7 @@ racine_de() { # racine_de <fichier> <motif ERE capturant le chemin>
 @test "ELIXIR : le defaut de \`RoleToken\` s'accorde avec le rail" {
   # Le runtime lit ces jetons par `Fleet.Credentials.RoleToken`. Son `@default_dir` est le huitieme
   # decideur, et le seul que ni bash ni python ne verraient diverger.
-  local vu; vu="$(racine_de "$R/fleet/lib/fleet/credentials/role_token.ex" '@default_dir "[^"]*')"
+  local vu; vu="$(racine_de "$R/runtime/lib/fleet/credentials/role_token.ex" '@default_dir "[^"]*')"
   [ "$vu" = "$ATTENDU" ]
 }
 

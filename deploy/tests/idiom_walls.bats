@@ -234,8 +234,8 @@ I3_AWK='
   # le reduit a « l'image ne rend pas le roster ». Mesure du 2026-08-30 : `CatalogueRoles` etait
   # devenu `Fleet.Roster` et le rail boite mourait a l'amorcage de la forge, sans nommer la cause.
   local lib f ref mod bad=0
-  lib="$(cd "$BATS_TEST_DIRNAME/../../fleet/lib" && pwd)"
-  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../../fleet/etc/*.sh; do
+  lib="$(cd "$BATS_TEST_DIRNAME/../../runtime/lib" && pwd)"
+  for f in "$BATS_TEST_DIRNAME"/../docker/*.sh "$BATS_TEST_DIRNAME"/../../runtime/etc/*.sh; do
     [[ -f "$f" ]] || continue
     while read -r ref; do
       mod="${ref%.*}"                       # le dernier segment est la fonction (snake_case)
@@ -271,7 +271,7 @@ I3_AWK='
   # premiere version mettait `|` dans la classe des debuts d instruction et denoncait les quatre
   # appels corrects du corpus — un mur qui accuse l idiome qu il defend.
   nus="$(grep -rn --exclude=idiom_walls.bats -E "(^|;|&) *${helper} " \
-           "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../fleet/test/*/*.bats 2>/dev/null \
+           "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../runtime/test/*/*.bats 2>/dev/null \
          | grep -vE '<<<|< *"' || true)"
   [ -z "$nus" ] || {
     echo "appel sans tube ni redirection — son grep attendra stdin, et le test PENDRA :" >&2
@@ -282,7 +282,7 @@ I3_AWK='
   # — exactement la faute qu il existe pour attraper ailleurs.
   # Le compte porte sur TOUS les appels, tube compris : c est la population que le mur surveille.
   total="$(grep -rho --exclude=idiom_walls.bats -E "${helper} " \
-             "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../fleet/test/*/*.bats 2>/dev/null | wc -l)"
+             "$BATS_TEST_DIRNAME"/*.bats "$BATS_TEST_DIRNAME"/../../runtime/test/*/*.bats 2>/dev/null | wc -l)"
   [ "${total:-0}" -ge 5 ] \
     || { echo "instrument casse : $total appel(s) trouve(s), 5 au moins attendus" >&2; return 1; }
 }
@@ -292,8 +292,8 @@ I3_AWK='
 # ⚠ TROIS MODULES ONT BATI DANS LA COPIE POSEE, ET LES TROIS ONT ECHOUE — mesure du 2026-09-02 sur
 # les bancs 2006 ET 2007, apply rejoue depuis `/opt/lcars/deploy/provision` :
 #     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
-#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
 # `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
 # le rail se REJOUE, pas pour qu il se RECONSTRUISE : il n y a la ni `mix.exs`, ni `deps/`, ni

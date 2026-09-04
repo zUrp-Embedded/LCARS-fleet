@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: fleet/test/services/forge.d/catalogues.bats
+# SOURCE: runtime/test/services/forge.d/catalogues.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for fleet/services/forge.d/catalogues.sh — le materiel suit la FORGE (geste du produit, lot 6)
+# STATUS: bats tests for runtime/services/forge.d/catalogues.sh — le materiel suit la FORGE (geste du produit, lot 6)
 #
 # CE QUE CES TEMOINS TIENNENT, ET POURQUOI CE MODULE EST LE PLUS DANGEREUX DE LA SERIE : il
 # SUPPRIME. C'est legitime — le materiel local est un cache re-clonable — mais exactement une

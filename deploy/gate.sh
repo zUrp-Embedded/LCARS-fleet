@@ -29,7 +29,7 @@
 #      refuse bats absent, et son verdict suit celui de bats.
 #
 # ⚠ LA NEUTRALISATION D'ENVIRONNEMENT CI-DESSOUS EST UNE SECONDE COPIE, ASSUMEE ET GARDEE. Le
-# raisonnement complet vit dans `fleet/test/shell_gate.sh` (trois pannes datees : `FORGE_BASE_URL`
+# raisonnement complet vit dans `runtime/test/shell_gate.sh` (trois pannes datees : `FORGE_BASE_URL`
 # exporte par `provision --env`, un `LCARS_SEAT_UID_FILE` pose a la main, `PROV_FLEET_GROUP` qui
 # VOYAGE par `services.env`). Le recopier ici serait un mensonge par redondance ; l'omettre ferait
 # de cette porte un instrument que l'environnement du lanceur peut retuner. Un temoin garde donc que
@@ -75,7 +75,7 @@ fi
 
 # ─── LA FORME ET LE PLANCHER DU SHELL DE L'INSTALLEUR SE JOUENT ICI ───────────────────────────
 # ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « l'installeur est independant, chacun
-# joue son gate, on les split ». Jusque-la `fleet/test/shell_gate.sh` tenait le plancher shellcheck
+# joue son gate, on les split ». Jusque-la `runtime/test/shell_gate.sh` tenait le plancher shellcheck
 # et les en-tetes declaratifs (GO-7) de deploy/ ; il ne lit plus que fleet/. Un arbre qui a sa
 # porte et dont la forme est tenue par la porte d'un autre arbre n'est pas independant.
 #
@@ -153,7 +153,7 @@ if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
 fi
 echo "--- GO-7 : en-tetes declaratifs ($GO7_N fichier(s) .md/.sh/.py de l'installeur) : OK ---"
 
-# Voir l'avertissement en tete : seconde copie assumee du bloc de `fleet/test/shell_gate.sh`.
+# Voir l'avertissement en tete : seconde copie assumee du bloc de `runtime/test/shell_gate.sh`.
 BATS_ENV=()
 while read -r v; do [[ -n "$v" ]] && BATS_ENV+=(-u "$v"); done < <(
   compgen -v | grep -E '^(LCARS_|PROV_|FORGE_)' | sort

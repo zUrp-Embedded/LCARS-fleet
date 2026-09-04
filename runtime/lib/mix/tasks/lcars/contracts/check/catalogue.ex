@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
   # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
   # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
-  # fleet/services/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
+  # runtime/services/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
   # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
   # a fresh deploy; measured: eng_doc missing there while present in the three others = the
   # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
@@ -365,7 +365,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
-      "add the face root to the `install -d` line of fleet/services/box/init.sh — a face declared " <>
+      "add the face root to the `install -d` line of runtime/services/box/init.sh — a face declared " <>
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
