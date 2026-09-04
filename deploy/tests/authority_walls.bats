@@ -216,7 +216,7 @@ absent() { # absent <motif etendu> <fichier>
 # garde FONCTIONNELLEMENT, par `test/provision_role_tokens` qui `stat` le fichier reellement pose.
 # Ce mur-ci garde ce qui EST visible : le geste de DONNER un secret a un groupe.
 # ⚠ ET IL EST SCOPE AUX ECRIVAINS DE SECRETS, PAS AU DEPOT ENTIER. Premiere ecriture : un `chgrp`
-# interdit PARTOUT dans le perimetre. C'etait rouge des le premier passage, sur `55-deck-oidc.sh` —
+# interdit PARTOUT dans le perimetre. C'etait rouge des le premier passage, sur `66-deck-oidc.sh` —
 # qui `chgrp` legitimement son fichier OIDC pour que le deck (`lcars-system`) puisse le lire. Un
 # mur qui accuse un geste sain n'est pas severe, il est FAUX, et un mur faux se fait desarmer.
 #
@@ -227,7 +227,7 @@ secret_writers() {
     "$REPO/deploy/lib/provision-role-tokens.sh" \
     "$REPO/fleet/services/forge-gestures.sh" \
     "$REPO/deploy/modules.d/48-forge-host.sh" \
-    "$REPO/deploy/modules.d/50-forge.sh" \
+    "$REPO/deploy/modules.d/63-forge-tokens.sh" \
     "$REPO/deploy/modules.d/25-directories.sh"
 }
 

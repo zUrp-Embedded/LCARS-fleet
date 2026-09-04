@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/modules.d/55-deck-oidc.bats
+# SOURCE: deploy/tests/modules.d/66-deck-oidc.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for modules.d/55-deck-oidc — la LISTE DES ENTREES doit converger
+# STATUS: bats tests for modules.d/66-deck-oidc — la LISTE DES ENTREES doit converger
 #
 # CE QUE CES TEMOINS TIENNENT. La porte du deck refuse une entree non declaree et imprime le geste
 # qui repare : « ajouter celle-ci a LCARS_DECK_ORIGINS et rejouer le provisioning ». Mesure du
@@ -22,7 +22,7 @@
 load ../refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../modules.d/55-deck-oidc.sh"
+  SUT="$BATS_TEST_DIRNAME/../../modules.d/66-deck-oidc.sh"
   [ -f "$SUT" ]
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   export PATH="$BIN:$PATH"
@@ -46,7 +46,7 @@ SH
   chmod +x "$BIN/curl"
 
   export PROVISION_LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  export PROVISION_MODULE=55-deck-oidc
+  export PROVISION_MODULE=66-deck-oidc
   export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
   echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"
   export PROV_FORGE_URL="http://forge.test"

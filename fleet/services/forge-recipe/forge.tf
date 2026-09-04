@@ -204,7 +204,7 @@ resource "gitea_org" "fleet" {
 #   Owners de la CIBLE seulement                     -> 403   (seule la source compte)
 #
 # Le moindre privilège ne suffit donc plus à ce que la fleet doit faire, et la recette ne peut pas
-# le corriger elle-même : `50-forge` n'écrit qu'avec le jeton système ou en basic-auth machine, et
+# le corriger elle-même : `63-forge-tokens` n'écrit qu'avec le jeton système ou en basic-auth machine, et
 # le jeton système ne peut gérer une team qu'une fois DÉJÀ propriétaire. La seule identité de classe
 # propriétaire est celle qui lance cet apply. Le provider n'a pas de champ propriétaire sur
 # `gitea_org` — le créateur d'une org en est le propriétaire, un point c'est tout.

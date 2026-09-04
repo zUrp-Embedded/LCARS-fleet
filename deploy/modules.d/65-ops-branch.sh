@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/52-ops-branch.sh
+# SOURCE: deploy/modules.d/65-ops-branch.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — la boite aux lettres du rail d'outillage : UNE branche, sur LE depot ops
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 48-forge-host
+# AFTER: 48-forge-host 63-forge-tokens
 #
 # ─── ORPHELINE, ET AUCUNE API NE SAIT LA FAIRE ─────────────────────────────────────────────────
 # `POST /repos/<r>/branches` exige `old_ref_name` : il rend une branche FILLE de ce qu'on lui
@@ -62,7 +62,7 @@ create_branch() {
   local tokfile="$PROV_SYSTEM_TOKEN_FILE" tok
   tok="$(read_token "$tokfile")"
   [[ -n "$tok" ]] || {
-    p_drift "jeton systeme pas encore la ($tokfile) — 50-forge le minte quand la forge est semee ; la branche se posera a la convergence suivante"
+    p_drift "jeton systeme pas encore la ($tokfile) — 63-forge-tokens le minte quand la forge est semee ; la branche se posera a la convergence suivante"
     return 0; }
 
   # La distinction ne se lit PAS sur la sonde de branche : sur un depot absent, l'API rend 404 sur la
@@ -152,8 +152,8 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 52-ops-branch.sh <check|apply>}" in
+case "${1:?usage: 65-ops-branch.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
-  *) echo "52-ops-branch.sh: verbe inconnu: $1" >&2; exit 2 ;;
+  *) echo "65-ops-branch.sh: verbe inconnu: $1" >&2; exit 2 ;;
 esac

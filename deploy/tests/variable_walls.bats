@@ -248,7 +248,7 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 4: le port du deck a UNE declaration, et les copies s'accordent" {
-  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `55-deck-oidc` batit les
+  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `66-deck-oidc` batit les
   # `redirect_uris` OAuth2 du deck avec `PROV_DECK_PORT` ; le daemon lit `LCARS_LANDING_PORT`. Au
   # poste, `64-services` relie les deux et `services_units.bats` le garde depuis le 2026-08-23. Sur
   # le rail BOITE, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
@@ -819,7 +819,7 @@ PYX
   # `0640 root:nogroup`, donc un demon reseau le lisait. C'est MON compte, propage sans verrou.
   #
   # ⚠ ET SES DEUX REPLIS NE DISAIENT PAS LA MEME CHOSE. `21-service-accounts` (qui CREE le compte)
-  # derive le groupe du user ; `55-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
+  # derive le groupe du user ; `66-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
   # seul faisait creer un groupe d'un cote et chown vers un autre — un groupe inexistant, un deck
   # qui sert 503, et la cause dans un autre module.
   local nom
@@ -832,9 +832,9 @@ PYX
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
     | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/deploy/modules.d/55-deck-oidc.sh" \
+  sed 's/#.*//' "$REPO/deploy/modules.d/66-deck-oidc.sh" \
     | grep -qE 'PROV_SYSTEM_GROUP:-\$\{PROV_SYSTEM_USER:-'"$nom"'\}' || {
-      echo "MUR 13 rompu — 55-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
+      echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
 
   # (2) Les autres porteurs nomment le MEME compte, chacun sur son geste.
   need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {

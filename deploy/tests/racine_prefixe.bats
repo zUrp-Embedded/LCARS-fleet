@@ -95,7 +95,10 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
     done < <(bins_de "$f")
   done
   [ "$n" -eq 2 ] || { echo "deux chemins de release POSEE attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
-  [ "$nb" -eq 1 ] || { echo "un seul chemin de release BATIE attendu, $nb trouve(s)" >&2; return 1; }
+  # ⚠ ZERO CHEMIN BATI DEPUIS LE 2026-09-04 (lot 4) : `prov_release_bin` est mort avec la coupe de
+  # 48 — la structure se derive de la release POSEE (61-forge-structure), plus jamais de celle du
+  # paquet. Un chemin `_build/prod/rel` qui reapparaitrait ici serait la devinette qui revient.
+  [ "$nb" -eq 0 ] || { echo "AUCUN chemin de release BATIE attendu, $nb trouve(s) — la devinette entre paquet et prefixe est revenue" >&2; return 1; }
 }
 
 @test "LE DOCKERFILE construit, copie et cable sous le MEME prefixe" {

@@ -21,7 +21,7 @@
 # 2. LES CREDS ANTHROPIC PARTENT AVEC L'ANCIEN CONTENEUR. Sans `~/.claude/.credentials.json`,
 #    `Credentials.Gate.validate` refuse au spawn-boundary : la fleet a l'air saine et ne produit
 #    aucun pod. Elles sont reposees ici, sinon le banc est mort sans le dire.
-# 3. `50-forge` MINTE LES ROLE-TOKENS AU BOOT, depuis le seed de la forge. Sur un banc deja seme le
+# 3. `63-forge-tokens` MINTE LES ROLE-TOKENS AU BOOT, depuis le seed de la forge. Sur un banc deja seme le
 #    seed EXISTE, donc une seule relance suffit — la seconde passe d'amorcage de `bench-up.sh` n'a
 #    pas lieu d'etre. C'est toute la difference entre monter un banc et remettre sa boite a jour.
 #
@@ -183,7 +183,7 @@ else
 fi
 
 # ─── 4. une relance, pas deux passes : le seed existe deja (piege 3) ─────────────────────────────
-say "relance pour que 50-forge minte les role-tokens sur le seed EXISTANT"
+say "relance pour que 63-forge-tokens minte les role-tokens sur le seed EXISTANT"
 "$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
 wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 

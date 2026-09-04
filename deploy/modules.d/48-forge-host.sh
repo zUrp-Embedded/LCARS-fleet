@@ -2,11 +2,11 @@
 # SOURCE: deploy/modules.d/48-forge-host.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
-# STATUS: PROTO-V2 — la forge du POSTE DE TRAVAIL : un conteneur Gitea, amorcé et structuré
+# STATUS: PROTO-V2 — la forge du POSTE DE TRAVAIL : un conteneur Gitea, monté et AMORCÉ (61 la structure)
 # APPLY-ON: wsl linux
 # CHECK-ON: wsl linux
 # NEEDS: root
-# AFTER: 44-media 46-tofu
+# AFTER: 44-media
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -236,7 +236,7 @@ check() {
       *)       p_warn "adminité de « $PROV_FORGE_ADMIN » non mesurable (jeton absent ou forge muette)" ;;
     esac
   else
-    p_drift "aucune forge sur $FORGE_URL — l'apply monte le conteneur, l'amorce et pose sa structure"
+    p_drift "aucune forge sur $FORGE_URL — l'apply monte le conteneur et l'amorce — 61-forge-structure pose la structure"
   fi
   verdict_check
 }
@@ -254,10 +254,6 @@ apply() {
     # chose. Constater qu'une adresse est muette n'est pas une panne ; s'engager à structurer une
     # forge qu'on ne joint pas en est une, et tout ce qui suit échouerait un geste plus loin.
     p_fail "forge FOURNIE muette ($FORGE_URL) — ce rail la consomme, il ne la monte pas ; c'est à qui la tient de la relever"
-    verdict_apply
-  fi
-  if [[ ! -x "${LCARS_TOFU_BIN:-/usr/local/bin/tofu}" ]]; then
-    p_drift "tofu absent — la structure de la forge est son territoire : joue « 46-tofu » d'abord, puis relance"
     verdict_apply
   fi
   local was_up=0; forge_up && was_up=1
@@ -301,7 +297,7 @@ apply() {
   fi
 
   if [[ "$FORGE_MONTEE" -eq 0 ]]; then
-    p_ok "forge FOURNIE ($FORGE_URL) — rien à monter ; ce rail y pose sa structure"
+    p_ok "forge FOURNIE ($FORGE_URL) — rien à monter ; ce rail l'amorce, 61-forge-structure y pose la structure"
   elif [[ "$was_up" -eq 1 ]]; then
     p_ok "forge du poste vivante et convergée ($FORGE_URL)$(forge_reach_note)"
   else
@@ -387,142 +383,6 @@ apply() {
     p_ok "seed des comptes déjà posé ($SEED_FILE)"
   fi
 
-  local tree; tree="$(repo_root)/fleet"
-  local ref_catalogue="" refout
-
-  # ⚠ DEUX FACONS DE LIRE LE MEME CATALOGUE, ET C'EST LA LIVRAISON QUI CHOISIT. En BINAIRE il n'y a
-  # ni mix ni image : la release est posee, et elle porte son catalogue. Tout ce bloc `mix` était
-  # donc impossible — mesure du 2026-09-01, banc 2006 : `FAIL 48-forge-host: commande en échec
-  # (rc=127) : … mix local.hex`, sur une machine ou le roster etait parfaitement lisible autrement.
-  #
-  # ⚠ ET CE N'EST PAS UN SECOND MECANISME. `enroll-catalogue.sh` appelle
-  # `Fleet.Roster.eval_tfvars` par les trois portes ; l'entrypoint docker ne fait rien d'autre que
-  # ça depuis toujours. Docker et mix ne sont que des moyens d'ATTEINDRE la fonction — quand la
-  # release est deja la, le detour n'a plus d'objet.
-  # ⚠ ET LA COPIE POSEE COMPTE AUTANT QUE LA LIVRAISON — c'est la seconde moitie du discriminant, et
-  # son absence a fait echouer ce module sur le rail SOURCE. Un poste installe depuis un clone puis
-  # rejoue depuis `/opt/lcars` arrivait dans la branche `mix` et lancait `mix deps.get` dans
-  # `/opt/lcars/fleet`, ou il n'y a ni `mix.exs` ni `deps/`.
-  #
-  # MESURE DU 2026-09-02, BANC 2007 : « FAIL 48-forge-host: dépendances Elixir non récupérables
-  # (/opt/lcars/fleet) ». La release, elle, etait posee et parfaitement lisible — le detour par mix
-  # n'avait pas plus d'objet ici qu'en livraison binaire.
-  if prov_delivery_is_binary || prov_dans_la_copie; then
-    p_ok "roster lu dans la release posée — ni mix ni docker (pas de source de build ici)"
-  else
-    p_step "outillage mix pour dériver le roster ($PROV_HUMAN)"
-    run_quiet as_human env -C "$tree" mix local.hex --force \
-      || { p_fail "hex non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
-    run_quiet as_human env -C "$tree" mix local.rebar --force \
-      || { p_fail "rebar non installable pour $PROV_HUMAN — le roster ne peut pas se dériver"; verdict_apply; }
-    run_step "dépendances Elixir" -- as_human env -C "$tree" mix deps.get \
-      || { p_fail "dépendances Elixir non récupérables ($tree) — sans elles l'arbre ne compile pas"; verdict_apply; }
-
-    refout="$(mktemp "${TMPDIR:-/tmp}/prov-catroot.XXXXXX")" \
-      || { p_fail "tmp impossible pour la dérivation du catalogue"; verdict_apply; }
-    as_human env -C "$tree" LCARS_TOOL_EVAL=1 mix run --no-start \
-      -e 'IO.puts("LCARS_CATALOGUE_ROOT=" <> Fleet.Catalogue.root())' >"$refout" 2>&1 || true
-    ref_catalogue="$(grep -m1 '^LCARS_CATALOGUE_ROOT=' "$refout" | cut -d= -f2- || true)"
-    if [[ ! -d "$ref_catalogue" ]]; then
-      p_fail "catalogue de référence introuvable dans $tree (rendu : « ${ref_catalogue:-<rien>} »)"
-      p_fail "dernières lignes de mix : $(tail -n3 "$refout" | tr '\n' '·')"
-      rm -f "$refout"; verdict_apply
-    fi
-    rm -f "$refout"
-  fi
-
-  local enroll; enroll="$(mktemp -d "${TMPDIR:-/tmp}/prov-enroll.XXXXXX")"
-  chown "$PROV_HUMAN" "$enroll" \
-    || { p_fail "dossier de roster non cédé à $PROV_HUMAN ($enroll)"; rm -rf "$enroll"; verdict_apply; }
-  # La porte suit la livraison : `--release` en binaire (elle porte son catalogue, donc pas de
-  # `--catalogue`), `--repo` + le catalogue derive en source. Une seule ligne d'appel, deux jeux
-  # d'arguments — le script, lui, appelle la MEME fonction dans les deux cas.
-  local -a enroll_src
-  # Meme discriminant que le bloc `mix` plus haut, et pour la meme raison : dans la copie posee il
-  # n y a pas d arbre a lire, seulement une release a interroger.
-  if prov_delivery_is_binary || prov_dans_la_copie; then
-    # ⚠ ON DEMANDE A LA LIB, ON NE COMPOSE PAS LE CHEMIN ICI — et c'est la cicatrice. Ce site
-    # designait la release POSEE, que `60-deploy` pose DOUZE RANGS PLUS LOIN : sur la premiere
-    # install d'un paquet elle n'existe pas encore, et le rang interdit de declarer la dependance
-    # (`provision:327` refuse un `AFTER` qui ne precede pas). `prov_release_bin` prend d'abord celle
-    # que le PAQUET transporte — elle est la, et c'est elle que 60-deploy posera.
-    local rel
-    rel="$(prov_release_bin)" || {
-      p_fail "aucune release exécutable : ni dans ce paquet ($(repo_root)/fleet/_build/prod/rel/…), ni posée ($PROV_PREFIX/rel/…)"
-      p_fail "  le roster du catalogue s'en dérive — sans elle, la structure de la forge serait posée sans comptes"
-      rm -rf "$enroll"; verdict_apply
-    }
-    enroll_src=(--release "$rel")
-  else
-    enroll_src=(--repo "$tree" --catalogue "$ref_catalogue")
-  fi
-  run_step "roster du catalogue" -- as_human env LCARS_TOOL_EVAL=1 "$(dirname "$PROVISION_LIB")/enroll-catalogue.sh" --tofu-dir "$enroll" "${enroll_src[@]}" \
-    || { p_fail "roster non dérivable de l'arbre ($tree) — relis la sortie, elle nomme l'étape"; rm -rf "$enroll"; verdict_apply; }
-  [[ -s "$enroll/roles.auto.tfvars.json" ]] \
-    || { p_fail "roster vide — la recette serait appliquée sans comptes"; rm -rf "$enroll"; verdict_apply; }
-  p_step "forge du poste : pose de la structure (orgs, comptes de rôle, teams, dépôt modèle)"
-
-  local recipe; recipe="$(mktemp -d "${TMPDIR:-/tmp}/prov-recipe.XXXXXX")"
-  cp -a "$(repo_root)/fleet/services/forge-recipe/." "$recipe/" \
-    || { p_fail "recette non copiable ($(repo_root)/fleet/services/forge-recipe)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
-  cp "$enroll/roles.auto.tfvars.json" "$recipe/roles.auto.tfvars.json" \
-    || { p_fail "roster non déposé dans la recette"; rm -rf "$recipe" "$enroll"; verdict_apply; }
-
-  rm -rf "$recipe/.terraform" "$recipe/instance/.terraform"
-  local m
-  for m in instance .; do
-    TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-      run_quiet env -C "$recipe/$m" tofu init -input=false -no-color \
-      || { p_fail "recette non initialisable ($m) — le miroir de providers couvre-t-il cette recette ? (46-tofu)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
-  done
-
-
-  local rc=0 tf_out
-  tf_out="$(mktemp "${TMPDIR:-/tmp}/prov-tofu.XXXXXX")"
-  # ⚠ PAS `run_step … | tee`, ET LE COMPTEUR PLUS BAS EN DEPEND. `run_step` capture la sortie de
-  # la commande dans SON fichier et n'emet que ses lignes de phase : le `tee` ne voyait jamais
-  # « Apply complete! », `moved` valait 0, et une forge NEUVE etait annoncee « deja conforme — rien
-  # a poser » pendant que `50-forge` trouvait tous les comptes que tofu venait de creer. Mesure
-  # du 2026-09-04, banc bob_1. La commande s'execute nue, sa sortie est le fichier qu'on compte.
-  p_step "structure de la forge"
-  env \
-    LCARS_PRIVATE_DIR="$PROV_TOKENS_DIR" \
-    `# ⚠ LE DÉTENTEUR VOYAGE AVEC LE CHEMIN, ET LES SÉPARER LES FAIT DIVERGER. « put_secret » pose` \
-    `# désormais un PROPRIÉTAIRE sur ce qu'il écrit ; sans cette ligne il retomberait sur son défaut` \
-    `# compilé pendant que ce module, lui, suivrait PROV_AUTHORITY_USER. Sur une boîte dont le compte` \
-    `# de service porte un autre nom, le secret naîtrait détenu par un compte qui n'existe pas — et` \
-    `# le service refuserait de démarrer sur un fichier que la boîte vient d'écrire.` \
-    LCARS_AUTHORITY_USER="$PROV_AUTHORITY_USER" \
-    FORGE_BASE_URL="$FORGE_URL" \
-    `# ⚠ CE MODULE NE NOMME AUCUN HUMAIN, ET NE DIT PLUS RIEN D'UNE « DESTINATION » : un poste ne` \
-    `# sème personne, le banc de la boîte nomme le sien. Le seul déclarant du nom est` \
-    `# « forge-gestures.sh » — deux témoins de ce fichier le gardent.` \
-    LCARS_RECIPE_DIR="$recipe" \
-    LCARS_DEMO_CATALOGUE="$(repo_root)/catalogues/web-demo" \
-    LCARS_REFERENCE_CATALOGUE="$ref_catalogue" \
-    TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-    bash "$(repo_root)/fleet/services/forge-gestures.sh" apply >"$tf_out" 2>&1 || rc=$?
-  rm -rf "$recipe" "$enroll"
-  if [[ "$rc" -ne 0 ]]; then
-    p_fail "structure NON posée (rc=$rc) — relis la sortie, rien n'est supposé"
-    { printf '───── sortie : %s dernières lignes ─────\n' "$PROV_DUMP_LINES"; tail -n "$PROV_DUMP_LINES" "$tf_out"; printf '───── sortie COMPLÈTE conservée : %s ─────\n' "$tf_out"; } >&2
-    verdict_apply
-  fi
-
-  # ⚠ « APPLIQUÉ » N'EST PAS « CHANGÉ », ET LE CODE DE SORTIE NE LES DISTINGUE PAS. La recette est
-  # idempotente : elle rend 0 aussi bien après avoir tout posé qu'après n'avoir rien eu à faire.
-  # `tofu` le DIT, et c'est la seule source qui le sache : « Apply complete! Resources: N added,
-  # M changed, K destroyed », une ligne par module de la recette. Illisible (format changé, sortie
-  # tronquée) → on n'invente pas : on ne compte rien et on le nomme.
-  local moved
-  moved="$(grep -c -E 'Apply complete!.*Resources: [1-9][0-9]* (added|changed|destroyed)|, [1-9][0-9]* (changed|destroyed)' "$tf_out" 2>/dev/null || true)"
-  rm -f "$tf_out"
-  if [[ "${moved:-0}" -gt 0 ]]; then
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "structure de la forge posée — 50-forge peut minter les jetons de rôle"
-  else
-    p_ok "structure de la forge déjà conforme — rien à poser"
-  fi
 
   seat_binding_report apply
   verdict_apply

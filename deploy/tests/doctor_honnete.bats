@@ -8,7 +8,7 @@
 #
 # Un doctor a DEUX facons de mentir, et les deux ont ete mesurees sur le banc 2004 le 2026-09-01 :
 #
-#   1. confondre « je ne peux pas le lire » avec « ce n'est pas la ». `55-deck-oidc` annoncait
+#   1. confondre « je ne peux pas le lire » avec « ce n'est pas la ». `66-deck-oidc` annoncait
 #      « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets present, en `0640
 #      root:lcars-system` : un doctor sans sudo ne peut pas l'OUVRIR, il peut parfaitement
 #      CONSTATER qu'il est la.
@@ -107,8 +107,8 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
 
 # ─── LES MODULES QUI MENTAIENT ──────────────────────────────────────────────────────────────────
 
-@test "55-deck-oidc : un fichier PRESENT et illisible n'est plus annonce « absent »" {
-  local mod="$DEPLOY/modules.d/55-deck-oidc.sh"
+@test "66-deck-oidc : un fichier PRESENT et illisible n'est plus annonce « absent »" {
+  local mod="$DEPLOY/modules.d/66-deck-oidc.sh"
   mkdir -p "$BATS_TEST_TMPDIR/etc"
   echo '{}' > "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
   chmod 0000 "$BATS_TEST_TMPDIR/etc/deck-oidc.json"
@@ -121,10 +121,10 @@ teardown() { [ -d "$FERME" ] && chmod 0755 "$FERME" 2>/dev/null || true; }
   [[ "$output" == *"illisible"* ]]
 }
 
-@test "55-deck-oidc : un fichier VRAIMENT absent reste un DRIFT" {
+@test "66-deck-oidc : un fichier VRAIMENT absent reste un DRIFT" {
   # Le sens qui manquait : sans lui, un module qui repondrait « non mesurable » a tout passerait le
   # temoin ci-dessus en ayant cesse de signaler quoi que ce soit.
-  local mod="$DEPLOY/modules.d/55-deck-oidc.sh"
+  local mod="$DEPLOY/modules.d/66-deck-oidc.sh"
   run env PROVISION_LIB="$LIB" \
           PROV_DECK_OIDC_FILE="$BATS_TEST_TMPDIR/pas-la.json" \
           PROV_FORGE_URL="http://forge.invalid" \
@@ -208,14 +208,14 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
 
 # ─── UN ETAT NORMAL N'EST PAS UN DRIFT ──────────────────────────────────────────────────────────
 
-@test "50-forge : un humain pas encore membre de l'org n'est pas un DRIFT" {
+@test "63-forge-tokens : un humain pas encore membre de l'org n'est pas un DRIFT" {
   # ⚠ LE CANON DU 2026-08-30 : le rail pose les AUTORITES — siege, admin de forge, master token,
   # comptes de service ; les PERSONNES s'inscrivent sur la forge et un proprietaire d'org les
   # ajoute. Un humain pas encore membre est donc l'etat NORMAL d'une machine fraiche.
   #
   # Le mot engage : un drift promet qu'`apply` converge. Ici `apply` ne peut RIEN faire — il n'a pas
   # les credentials de la personne, et les avoir serait le contraire du canon.
-  local mod="$BATS_TEST_DIRNAME/../modules.d/50-forge.sh"
+  local mod="$BATS_TEST_DIRNAME/../modules.d/63-forge-tokens.sh"
   local bloc; bloc="$(sed -n '/case "\$(member_state "\$PROV_HUMAN")"/,/esac/p' "$mod")"
   [ -n "$bloc" ]
   refute grep -q 'p_drift' <<<"$bloc"
@@ -225,10 +225,10 @@ journal() { printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/journal"; }
   grep -q 'proprietaire d.org\|propriétaire d.org' <<<"$bloc"
 }
 
-@test "50-forge : ce que le rail PEUT converger reste un drift" {
-  # Le sens qui manquait. `50-forge` porte de vrais drifts — structure absente, tokens a re-minter —
+@test "63-forge-tokens : ce que le rail PEUT converger reste un drift" {
+  # Le sens qui manquait. `63-forge-tokens` porte de vrais drifts — structure absente, tokens a re-minter —
   # et les passer tous en warn aurait rendu le module incapable de signaler quoi que ce soit.
-  local mod="$BATS_TEST_DIRNAME/../modules.d/50-forge.sh"
+  local mod="$BATS_TEST_DIRNAME/../modules.d/63-forge-tokens.sh"
   [ "$(grep -c 'p_drift' "$mod")" -ge 5 ]
 }
 

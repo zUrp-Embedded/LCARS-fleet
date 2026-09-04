@@ -140,7 +140,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
 # ⚠ CE MODULE CREUSAIT EN `install -d` NU, ET `install -d` SUIT LES LIENS. La garde
 # `prov_refuse_symlink_path` vit dans `ensure_dir` pour exactement ca : quelqu'un pose un lien dans
 # un composant du chemin, et le prochain apply en ROOT chmode/chowne la CIBLE. Trois sites de ce
-# module et un de `55-deck-oidc` contournaient la garde en n'appelant pas la lib.
+# module et un de `66-deck-oidc` contournaient la garde en n'appelant pas la lib.
 #
 # UN TEMOIN DE TEXTE NE SUFFIT PAS ICI — il epinglerait l'orthographe d'un appel. On pose un vrai
 # lien vers une vraie cible, on joue l'apply, et on regarde si la cible a bouge.

@@ -2,9 +2,9 @@
 # SOURCE: deploy/tests/modules.d/50-forge_probes.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-17
-# STATUS: bats tests for 50-forge — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat
+# STATUS: bats tests for 63-forge-tokens — les deux sondes de REGLAGE D'INSTANCE, et leur troisieme etat
 #
-# POURQUOI CE FICHIER. `50-forge` porte deux sondes qui ne mutent rien : elles lisent un reglage que
+# POURQUOI CE FICHIER. `63-forge-tokens` porte deux sondes qui ne mutent rien : elles lisent un reglage que
 # LCARS livre par defaut, qu'un admin peut changer chez lui, et elles lui disent ce que son choix
 # coute. Aucune n'etait sous test — et l'une d'elles porte un piege jq qui a DEJA mordu ailleurs.
 #
@@ -23,7 +23,7 @@
 # fonction isolee de son cablage.
 
 setup() {
-  MODULE="$BATS_TEST_DIRNAME/../../modules.d/50-forge.sh"
+  MODULE="$BATS_TEST_DIRNAME/../../modules.d/63-forge-tokens.sh"
   [ -f "$MODULE" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"

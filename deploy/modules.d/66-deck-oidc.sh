@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# SOURCE: deploy/modules.d/55-deck-oidc.sh
+# SOURCE: deploy/modules.d/66-deck-oidc.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
 # STATUS: PROTO-V2 — pose le client OAuth2 du deck de la boîte + son fichier de config
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
-# AFTER: 21-service-accounts 50-forge
+# AFTER: 21-service-accounts 63-forge-tokens
 
 set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
@@ -173,7 +173,7 @@ apply() {
     verdict_apply
   fi
   if [[ ! -r "$TOKEN_FILE" ]]; then
-    p_drift "$TOKEN_FILE absent — 50-forge n'a pas encore minté le token système ; client OAuth2 NON posé"
+    p_drift "$TOKEN_FILE absent — 63-forge-tokens n'a pas encore minté le token système ; client OAuth2 NON posé"
     verdict_apply
   fi
 
@@ -241,7 +241,7 @@ apply() {
   verdict_apply
 }
 
-case "${1:?usage: 55-deck-oidc.sh <check|apply>}" in
+case "${1:?usage: 66-deck-oidc.sh <check|apply>}" in
   check) check ;;
   apply) apply ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;

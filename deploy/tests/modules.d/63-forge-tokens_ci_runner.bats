@@ -2,7 +2,7 @@
 # SOURCE: deploy/tests/modules.d/50-forge_ci_runner.bats
 # AUTHOR: bob
 # STARDATE: 2026-08-22
-# STATUS: bats tests for 50-forge — la sonde du runner CI, et sa distinction entre ZERO et INCONNU
+# STATUS: bats tests for 63-forge-tokens — la sonde du runner CI, et sa distinction entre ZERO et INCONNU
 #
 # POURQUOI CE FICHIER. Une boite peut sortir sans aucun runner CI. La fleet accepte alors un ticket,
 # depense un producteur, ouvre une PR, et la CI attend une machine qui n'existe pas. MESURE DU
@@ -23,7 +23,7 @@
 # ON EXECUTE LE MODULE, on ne le source pas : patron des autres temoins de `deploy/`.
 
 setup() {
-  MODULE="$BATS_TEST_DIRNAME/../../modules.d/50-forge.sh"
+  MODULE="$BATS_TEST_DIRNAME/../../modules.d/63-forge-tokens.sh"
   [ -f "$MODULE" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"
@@ -57,7 +57,7 @@ EOF
 }
 
 # ⚠ CE TEMOIN EPINGLAIT `48-forge-host`, ET CE N'EST PLUS LUI QUI ENROLE. Le decoupage
-# `48 -> 49` (534a46ce3) a sorti le runner CI dans `49-forge-runner` ; le message de `50-forge` a
+# `48 -> 49` (534a46ce3) a sorti le runner CI dans `49-forge-runner` ; le message de `63-forge-tokens` a
 # garde l'ancien nom, et ce temoin l'a VERROUILLE — il exigeait precisement le mauvais diagnostic.
 # Un operateur qui suit la phrase rejoue le module qui ne fait plus le geste, et conclut que le rail
 # est casse. Le sens de la ligne se derive maintenant du module qui porte l'enrolement.

@@ -84,7 +84,7 @@ forge_account() {
 }
 
 # La sonde ne PARLE que si cette personne a un compte forge. « Pas de compte » est un fait que
-# `50-forge` possède déjà et rapporte ; le redire ici en ferait deux, et deux voix sur un même fait
+# `63-forge-tokens` possède déjà et rapporte ; le redire ici en ferait deux, et deux voix sur un même fait
 # divergent le jour où l'une des deux change.
 check_git_identity() {
   local mail; mail="$(GITCONFIG_EMAIL)"
@@ -125,7 +125,7 @@ probe_identity() {
   local tokfile code
   tokfile="$(env_field "$ENV_FILE" FORGE_TOKEN_FILE)"
   if [[ -z "$tokfile" ]]; then
-    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (50-forge puis re-apply)"
+    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (63-forge-tokens puis re-apply)"
   elif [[ ! -r "$tokfile" ]]; then
     p_warn "FORGE_TOKEN_FILE=$tokfile illisible par $PROV_HUMAN — la fleet ne pourra pas parler à la forge (groupe $PROV_FLEET_GROUP ?)"
   elif [[ -z "$PROV_FORGE_URL" ]]; then
@@ -135,7 +135,7 @@ probe_identity() {
     if [[ "$code" == "200" ]]; then
       p_ok "credential forge de la fleet valide ($tokfile)"
     else
-      p_warn "$tokfile présent mais la forge répond $code — token mort ; re-mint par 50-forge (jamais un geste de $PROV_HUMAN)"
+      p_warn "$tokfile présent mais la forge répond $code — token mort ; re-mint par 63-forge-tokens (jamais un geste de $PROV_HUMAN)"
     fi
   fi
 }
