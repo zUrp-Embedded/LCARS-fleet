@@ -70,9 +70,11 @@ docker_denied_geste() { # docker_denied_geste <socket>
   grp="$(stat -Lc '%G' "$sock" 2>/dev/null)"
   me="$(id -un)"
   [[ -n "$grp" ]] || { echo "socket illisible — qui la possede ?"; return 0; }
-  if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
+  # Capturer puis tester (DI-13) : `… | grep -qx` sous `pipefail` est une race, pas un test —
+  # cette lib est sourcee dans des shells sous `pipefail` (provision, box, les modules).
+  if [[ " $(id -nG 2>/dev/null) " == *" $grp "* ]]; then
     echo "tu ES dans « $grp » pour cette session et l'acces est refuse quand meme — la socket porte-t-elle le bit d'ecriture pour son groupe ?"
-  elif getent group "$grp" 2>/dev/null | cut -d: -f4 | tr ',' '\n' | grep -qx "$me"; then
+  elif [[ ",$(getent group "$grp" 2>/dev/null | cut -d: -f4)," == *",$me,"* ]]; then
     echo "tu es dans « $grp » DANS /etc/group mais PAS dans cette session — les groupes sont fixes a l'ouverture : rouvre-la, ou joue « sg $grp -c '<commande>' »"
   else
     echo "ajoute-toi au groupe : « sudo usermod -aG $grp $me », puis ROUVRE ta session (un shell deja ouvert ne les recharge pas)"

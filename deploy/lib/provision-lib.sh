@@ -637,12 +637,23 @@ ensure_group() {
 }
 
 
+# ─── prov_in_group <user> <groupe> — l'appartenance EFFECTIVE, capturee puis testee ─────────────
+# ⚠ PAS `id -nG | tr | grep -qx` (DI-13, la classe de DI-12). Sous `pipefail`, `grep -q` sort au
+# premier match et ferme le tuyau ; un producteur qui ecrit encore prend SIGPIPE et le pipeline
+# rend 141 — « pas membre » alors qu'il l'est, une fois sur dix sous charge. Six sites portaient la
+# forme (20, 21, 22 x2, cette lib x2). Capturer, puis tester la capture : aucun lecteur ne ferme
+# rien avant la fin. MUR I16 (idiom_walls) interdit le retour de la forme.
+prov_in_group() { # prov_in_group <user> <groupe> -> 0 si <user> est membre de <groupe> (session : id -nG)
+  local groups; groups="$(id -nG "$1" 2>/dev/null)" || return 1
+  [[ " $groups " == *" $2 "* ]]
+}
+
 ensure_member() {
   local user="$1" grp="$2"
   id "$user" >/dev/null 2>&1 || { p_fail "ensure_member: user inconnu: $user"; return 1; }
-  if ! id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
+  if ! prov_in_group "$user" "$grp"; then
     run_quiet usermod -aG "$grp" "$user" || return 1
-    id -nG "$user" | tr ' ' '\n' | grep -qx "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
+    prov_in_group "$user" "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi

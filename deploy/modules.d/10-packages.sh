@@ -214,7 +214,9 @@ check() {
 
 apply() {
   local -a pkgs; mapfile -t pkgs < <(effective_packages)
-  if printf '%s\n' "${pkgs[@]}" | grep -qx 'docker-ce'; then
+  # Capturer puis tester, pas `printf | grep -qx` (DI-13) : sous `pipefail`, `grep -q` ferme le
+  # tuyau au premier match et le producteur rend 141.
+  if [[ " ${pkgs[*]} " == *" docker-ce "* ]]; then
     ensure_docker_repo || verdict_apply
   fi
   apt_ensure "${pkgs[@]}" || verdict_apply

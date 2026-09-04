@@ -242,7 +242,11 @@ PROBE="$("$DOCKER_BIN" run --rm --entrypoint sh "$IMAGE" -c 'echo flux-ok' 2>/de
      sudo chmod 660  /mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock" 1
 
 # Refus net plutot qu'un ecrasement silencieux : ce script MONTE, il ne remplace pas.
-if "$DOCKER_BIN" ps -a --format '{{.Names}}' | grep -qx "$BOX"; then
+# Capturer puis tester (DI-13) : `docker ps | grep -qx` sous `pipefail` est une race — `grep -q`
+# ferme le tuyau au premier match, et un `docker ps` qui liste encore rend 141 : « absent » sur
+# un banc qui existe, donc un ecrasement.
+_noms="$("$DOCKER_BIN" ps -a --format '{{.Names}}')"
+if grep -qx -- "$BOX" <<<"$_noms"; then
   die "le projet $PROJECT existe deja ($BOX) — detruis-le d'abord (bench-down.sh) ou change --project" 1
 fi
 

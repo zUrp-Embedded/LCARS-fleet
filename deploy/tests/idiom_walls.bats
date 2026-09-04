@@ -328,3 +328,56 @@ I3_AWK='
   [ "$batisseurs" -ge 3 ] \
     || { echo "instrument casse : $batisseurs module(s) batisseur(s) trouve(s), 3 au moins attendus" >&2; return 1; }
 }
+
+# ─── MUR I16 : `… | grep -q` SOUS `pipefail` EST UNE RACE, PAS UN TEST (DI-12, DI-13) ──────────
+#
+# `grep -q` sort au PREMIER match et ferme le tuyau. Si le producteur ecrit encore, il prend
+# SIGPIPE et, sous `set -o pipefail`, le pipeline rend 141 : « rien trouve » alors que tout y
+# etait. Ca rougit une fois sur dix sous charge, sur des temoins differents a chaque fois, et
+# JAMAIS seul — la signature d'un « temoin instable » qu'on finit par ignorer. DI-12 etait
+# `prov_runtime_dirs | grep -q .` dans 25-directories ; DI-13 en comptait onze autres, tous de la
+# forme `id -nG | tr | grep -qx` — producteurs d'une ligne, jamais vus rouges, meme race.
+#
+# La forme sure CAPTURE puis TESTE (`[[ -n "$(…)" ]]`, `[[ " $(…) " == *" x "* ]]`, `case`,
+# `grep -c`) : aucun lecteur ne ferme rien avant la fin. `prov_in_group` (lib) porte le cas
+# du groupe ; `runtime_dirs_declared` (25) celui de la table.
+#
+# LE PERIMETRE : tout script de `deploy/` (hors tests) qui pose `pipefail`, PLUS `deploy/lib/*.sh`
+# — une lib n'a pas de `set` a elle, elle s'execute dans le shell de qui la source, et tous ses
+# appelants (provision, box, les modules) sont sous `pipefail`.
+I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
+
+@test "MUR I16: aucun pipeline ne finit sur grep -q dans un script sous pipefail — capturer, puis tester" {
+  # `$DEPLOY` vaut `<tests>/..` : un `find` dessus rend des chemins qui portent tous `/tests/`, et
+  # l exclusion viderait le corpus. On normalise d abord — mesure : pop=0 a la premiere version.
+  local root f hits=0 pop=0 first
+  root="$(cd "$DEPLOY" && pwd)"
+  while IFS= read -r f; do
+    IFS= read -r first < "$f" || true
+    case "$f" in
+      *.sh) ;;
+      *) [[ "$first" =~ ^#!.*bash ]] || continue ;;
+    esac
+    if [[ "$f" != "$root"/lib/* ]]; then
+      code "$f" | grep -qE 'set -[a-zA-Z]*o pipefail|set -o pipefail' || continue
+    fi
+    pop=$((pop + 1))
+    if code "$f" | grep -qE "$I16_RE"; then
+      echo "MUR I16 rompu — ${f#"$root"/} :" >&2
+      code "$f" | grep -nE "$I16_RE" >&2
+      hits=$((hits + 1))
+    fi
+  done < <(find "$root" -type f -not -path '*/tests/*' | sort)
+  [ "$hits" -eq 0 ]
+  # GARDE D INSTRUMENT : un `find` qui ne trouve plus rien rendrait ce mur vert a vide.
+  [ "$pop" -ge 25 ] || { echo "instrument casse : $pop script(s) sous pipefail trouve(s), 25 au moins attendus" >&2; return 1; }
+  # le mur mord : la forme interdite, presentee au meme grep, est vue — dans ses trois graphies
+  grep -qE "$I16_RE" <<<'  if id -nG "$u" | tr " " "\n" | grep -qx "$g"; then'
+  grep -qE "$I16_RE" <<<'  head -20 "$1" 2>/dev/null | grep -qEi "SOURCE:"'
+  grep -qE "$I16_RE" <<<'  printf "%s\n" "${pkgs[@]}"|grep -q x'
+  # et les formes sures ne sont pas prises pour la fragile : un `||` n est pas un tuyau, une
+  # capture n en est pas un, un `grep -c` non plus
+  refute grep -qE "$I16_RE" <<<'  ensure_x || grep -q y "$f"'
+  refute grep -qE "$I16_RE" <<<'  [[ -n "$(head -20 "$1" | grep -Ei "SOURCE:")" ]]'
+  refute grep -qE "$I16_RE" <<<'  n="$(printf "%s\n" "${a[@]}" | grep -c x)"'
+}

@@ -31,7 +31,7 @@ observe() {
   while read -r h; do
     [[ -n "$h" ]] || continue
     found=1
-    if id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+    if prov_in_group "$h" "$PROV_FLEET_GROUP"; then
       p_ok "« $h » (uid $(id -u -- "$h")) ∈ $PROV_FLEET_GROUP — il peut lancer la fleet"
     else
       p_drift "« $h » hors du groupe $PROV_FLEET_GROUP — il ne lira ni $PROV_TOKENS_DIR ni les zones de face"
@@ -61,7 +61,7 @@ apply() {
   local h
   while read -r h; do
     [[ -n "$h" ]] || continue
-    id -nG "$h" 2>/dev/null | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP" && continue
+    prov_in_group "$h" "$PROV_FLEET_GROUP" && continue
     if usermod -aG "$PROV_FLEET_GROUP" -- "$h" 2>/dev/null; then
       PROV_CHANGED=$((PROV_CHANGED + 1))
       p_chg "« $h » ajouté au groupe $PROV_FLEET_GROUP"

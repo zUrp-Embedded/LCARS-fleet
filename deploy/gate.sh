@@ -132,8 +132,8 @@ go7_md_header() { # copie de check_md_header (pre-commit)
   grep -qE '<!--\s*Date\s*:' <<<"$h" && return 0
   return 1
 }
-go7_source_header() { # copie de check_source_header (pre-commit)
-  head -20 "$1" 2>/dev/null | grep -qEi 'SOURCE:|AUTHOR:|STARDATE:'
+go7_source_header() { # copie de check_source_header (pre-commit) — capture puis test (DI-13)
+  [[ -n "$(head -20 "$1" 2>/dev/null | grep -Ei 'SOURCE:|AUTHOR:|STARDATE:')" ]]
 }
 GO7_BAD=()
 GO7_N=0

@@ -1438,3 +1438,26 @@ pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee s
   local got; got="$(pt_root "$r")"; chmod 0755 "$r/runtime"
   [ "$got" = "$r" ]
 }
+
+# ─── DI-13 : l'appartenance a un groupe se capture puis se teste — jamais `| grep -qx` ─────────
+
+@test "prov_in_group : membre de son groupe primaire → 0 ; d'un groupe qui n'existe pas → 1" {
+  module_sh 'prov_in_group "$(id -un)" "$(id -gn)" && echo DEDANS'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DEDANS"* ]]
+  module_sh 'prov_in_group "$(id -un)" "groupe-decor-inexistant-di13" || echo DEHORS'
+  [[ "$output" == *"DEHORS"* ]]
+}
+
+@test "prov_in_group : un groupe dont le nom est un PREFIXE d'un autre n'est pas pris pour lui" {
+  # `[[ " $groups " == *" $grp "* ]]` : les espaces de bordure font le mot entier, comme `grep -x`.
+  module_sh 'id() { echo "fleet-console fleet_bis"; }; prov_in_group x fleet || echo DEHORS; prov_in_group x fleet_bis && echo DEDANS'
+  [[ "$output" == *"DEHORS"* ]]
+  [[ "$output" == *"DEDANS"* ]]
+}
+
+@test "prov_in_group : un compte inconnu → 1, sans bruit sur stderr" {
+  # `run` capture stdout ET stderr : une sortie reduite au seul mot prouve le silence.
+  module_sh 'if prov_in_group compte-decor-inexistant-di13 fleet; then echo DEDANS; else echo DEHORS; fi'
+  [ "$output" = "DEHORS" ]
+}
