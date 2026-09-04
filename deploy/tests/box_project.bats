@@ -83,6 +83,8 @@ EOF
   # copie que quelqu'un a posée. Un test qui compte sur l'ordre du PATH mesurait donc la machine.
   # `PROV_DOCKER_BIN` est le choix de l'appelant, et il l'emporte sur tout — c'est la couture.
   export PROV_DOCKER_BIN="$BINDIR/docker"
+  # la conf par projet vit sous $HOME : un temoin ne touche pas le vrai
+  export LCARS_BOX_CONF_DIR="$BATS_TEST_TMPDIR/conf"
 }
 
 # A project holding one container, created from the files given as arguments.

@@ -78,7 +78,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
   # comparaison seule ne dirait rien d un huitieme qui apparait.
   local f n=0 nb=0 b
-  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/deploy/docker/entrypoint.sh"; do
+  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/fleet/services/box/boot.sh"; do
     while read -r b; do
       [ -n "$b" ] || continue
       case "$b" in
@@ -94,7 +94,10 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
       esac
     done < <(bins_de "$f")
   done
-  [ "$n" -eq 2 ] || { echo "deux chemins de release POSEE attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  # Lot 6 (2026-09-04) : l'entrypoint n'evalue plus rien lui-meme — ses portes deleguent a
+  # « lcars tool » — donc son RELEASE_BIN est parti avec elles. Reste UN chemin litteral de release
+  # posee : `_release_bin` de bin/lcars (la lib DERIVE le sien de $PROV_PREFIX).
+  [ "$n" -eq 1 ] || { echo "UN chemin de release POSEE attendu (bin/lcars), $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
   # ⚠ ZERO CHEMIN BATI DEPUIS LE 2026-09-04 (lot 4) : `prov_release_bin` est mort avec la coupe de
   # 48 — la structure se derive de la release POSEE (61-forge-structure), plus jamais de celle du
   # paquet. Un chemin `_build/prod/rel` qui reapparaitrait ici serait la devinette qui revient.

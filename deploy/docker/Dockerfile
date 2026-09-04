@@ -434,7 +434,6 @@ COPY catalogues /opt/lcars/catalogues
 # Les COPY unitaires plus bas restent : ce sont les auxiliaires POSES, que l'apply du rail poste
 # installerait lui-meme et que l'image doit fournir deja en place.
 COPY fleet/services /opt/lcars/fleet/services
-COPY deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
 COPY fleet/services/console.sh         /opt/lcars/console.sh
 COPY fleet/services/console-humans.sh  /opt/lcars/console-humans.sh
 COPY fleet/services/console-status.sh  /opt/lcars/console-status.sh
@@ -453,6 +452,9 @@ COPY fleet/services/admiral/skills /opt/lcars/fleet/services/admiral/skills
 # d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
 # couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
+# Le minteur de jetons de rôle : un geste de forge du produit (lot 6), posé à côté du geste de
+# structure — la boîte le joue à l'init de son instance.
+COPY fleet/services/provision-role-tokens.sh /opt/lcars/provision-role-tokens.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
 COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
@@ -528,7 +530,7 @@ RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-authority-ask \
                /opt/lcars/deploy/provision \
                /opt/lcars/deploy/modules.d/*.sh \
-               /opt/lcars/deploy/lib/provision-role-tokens.sh \
+               /opt/lcars/fleet/services/provision-role-tokens.sh \
                /opt/lcars/deploy/lib/enroll-catalogue.sh \
                /opt/lcars/deploy/lib/deploy-release.sh
 
@@ -576,7 +578,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).
-ENTRYPOINT ["/usr/bin/tini", "--", "/opt/lcars/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/fleet/services/box/boot.sh"]
 
 # ─── verify : L'ISO DES RAILS SE MESURE AU BUILD, PAS CHEZ L'OPÉRATEUR ─────────────────────────
 #

@@ -48,7 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "../deploy/modules.d/65-ops-branch.sh",
+      "services/forge.d/ops-branch.sh",
       "services/forge-gestures.sh",
       "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
@@ -403,13 +403,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the provisioning default"},
       {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
-      # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
-      # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
-      # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's uid-map path"},
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's master-token path"}
+      # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
+      # entrypoint as literals; they are now DERIVED from the product module protocol's
+      # `PROV_TOKENS_DIR` (box/init.sh composes `$PROV_TOKENS_DIR/forge-uid.map`). That default is
+      # the holder that counts on the product side — the same shape as the provisioning default.
+      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{PROV_TOKENS_DIR:=([^}]+)\}"/,
+       "the product module protocol's default"}
     ]
 
     # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
@@ -629,7 +628,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the human converger's fallback"},
         {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the forge gesture's fallback"},
-        {"../deploy/lib/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
         {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},

@@ -279,7 +279,7 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   check fleet/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
   check fleet/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check deploy/docker/entrypoint.sh   "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
+  check fleet/services/box/boot.sh    "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
@@ -313,7 +313,7 @@ code_of() { sed 's/#.*//' "$1"; }
     "fleet/config/runtime.exs"
     "fleet/services/human-converger.sh"
     "deploy/modules.d/64-services.sh"
-    "deploy/docker/entrypoint.sh"
+    "fleet/services/box/boot.sh"
     "deploy/lib/provision-lib.sh"
   )
   # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la
@@ -404,7 +404,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # derive — et c'est exactement le defaut que ce chantier poursuit.
   #
   # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `deploy/lib/provision-role-tokens.sh`
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `fleet/services/provision-role-tokens.sh`
   # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
   # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
   # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
@@ -832,7 +832,7 @@ PYX
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
     | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/deploy/modules.d/66-deck-oidc.sh" \
+  sed 's/#.*//' "$REPO/fleet/services/forge.d/deck-oidc.sh" \
     | grep -qE 'PROV_SYSTEM_GROUP:-\$\{PROV_SYSTEM_USER:-'"$nom"'\}' || {
       echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
 

@@ -52,6 +52,13 @@ USAGE
       Attache ce terminal sur la session tmux du pod (Ctrl-b d rend la main sans
       tuer le pod).
 
+  $PROG tool {verify|roles|roles-tfvars|catalogue-root|catalogue-source} [arguments]
+      Les PORTES OUTIL du release — des evaluations d'une ligne, sous un uid sans pouvoir quand
+      l'appelant est root : verify <root> · roles [root] · roles-tfvars [root] · catalogue-root ·
+      catalogue-source <nom>. \`forge-gestures.sh\` et l'installeur (\`prov_roles\`) les appellent
+      ici ; le boot de l'image (box/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
+      la fleet.
+
   $PROG catalogue list
       Ce que la FORGE porte : installes, disponibles, et ceux dont la source a bouge.
 
@@ -524,6 +531,54 @@ cmd_project() {
   esac
 }
 
+# ─── LES PORTES OUTIL DU RELEASE ────────────────────────────────────────────────────────────────
+#
+# ⚖ user 2026-09-04 (chantier deploy-independance, A7 / lot 6). Quatre `lcars_fleet eval` d'une
+# ligne vivaient dans le PID 1 du conteneur (`deploy/docker/entrypoint.sh verify|roles-tfvars|
+# catalogue-root|catalogue-source`), et `forge-gestures.sh` — un service du produit, sur les DEUX
+# rails — allait les chercher la-bas, en devinant le chemin de l'entrypoint (`_entrypoint_path`).
+# Un geste du produit qui execute le PID 1 de l'image pour evaluer une fonction du release : la
+# porte etait au mauvais endroit. Elle est ici, dans la CLI du produit, posee sur les deux rails
+# (`/usr/local/bin/lcars`). Le boot de la boite (`services/box/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
+# de l'image, le banc s'en sert) et delegue ici.
+#
+# ⚠ SOUS UN UID SANS POUVOIR quand on est root. Ces evaluations chargent le release et son
+# catalogue — du code — et un appelant root (le boot, un geste de forge) ne doit pas les executer
+# comme root : `nobody:fleet`, comme l'entrypoint le faisait. Sous un humain, l'uid courant.
+# `LCARS_TOOL_EVAL=1` est le seam du release pour un OUTIL : `runtime.exs` ne monte pas de fleet.
+_tool_run() { # _tool_run <expression elixir>
+  local bin; bin="$(_release_bin)"
+  [[ -x "$bin" ]] || die "tool: release introuvable ($bin) — « provision apply » (poste) ou l'image la pose"
+  if [[ "$(id -u)" -eq 0 ]]; then
+    exec setpriv --reuid 65534 --regid 2000 --clear-groups \
+      env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+      FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" FORGE_TOKEN="${FORGE_TOKEN:-}" \
+      "$bin" eval "$1"
+  else
+    exec env HOME=/tmp RELEASE_TMP=/tmp LCARS_TOOL_EVAL=1 \
+      FORGE_BASE_URL="${FORGE_BASE_URL:-}" FORGE_TOKEN_FILE="${FORGE_TOKEN_FILE:-}" FORGE_TOKEN="${FORGE_TOKEN:-}" \
+      "$bin" eval "$1"
+  fi
+}
+cmd_tool() {
+  case "${1:-}" in
+    verify)
+      local root="${2:?tool verify: chemin de racine catalogue requis}"
+      _tool_run "Fleet.Application.CatalogueVerify.eval_main(\"${root}\")" ;;
+    roles|roles-tfvars)
+      local fun="Fleet.Roster.eval_main" arg
+      [[ "$1" == "roles-tfvars" ]] && fun="Fleet.Roster.eval_tfvars"
+      if [[ -n "${2:-}" ]]; then arg="\"${2}\""; else arg="Fleet.Catalogue.root()"; fi
+      _tool_run "${fun}(${arg})" ;;
+    catalogue-root)
+      _tool_run 'IO.puts(Fleet.Catalogue.root())' ;;
+    catalogue-source)
+      local name="${2:?tool catalogue-source: nom de catalogue requis}"
+      _tool_run "Fleet.Application.CatalogueLifecycle.eval_source(\"${name}\")" ;;
+    *) die "tool: porte inconnue '${1:-}' (verify <root>|roles [root]|roles-tfvars [root]|catalogue-root|catalogue-source <nom>)" ;;
+  esac
+}
+
 cmd_catalogue() {
   case "${1:-list}" in
     list|ls)  shift; cmd_catalogue_list "$@" ;;
@@ -893,6 +948,7 @@ case "${1:-help}" in
   publish) shift; cmd_publish "$@" ;;
   approve) shift; cmd_approve "$@" ;;
   admiral) shift; cmd_admiral "$@" ;;
+  tool)   shift; cmd_tool "$@" ;;
   help|-h|--help) usage ;;
   *) echo "lcars: commande inconnue '${1}'" >&2; echo >&2; usage; exit 1 ;;
 esac
