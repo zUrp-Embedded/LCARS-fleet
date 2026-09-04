@@ -47,7 +47,9 @@ HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh
 # validating an RS256 signature needs a crypto library this image does not carry, and an UNVERIFIED
 # id_token is an attacker-supplied blob. `userinfo` is a direct server-to-forge call authenticated
 # by the access token we just obtained: nothing to verify, because nothing untrusted carried it.
-OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC", "/etc/lcars/deck-oidc.json")
+# ONE name for the file, the one the gesture that writes it uses (forge.d/deck-oidc.sh):
+# the box points it under its state volume, the workstation keeps the protocol default.
+OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json")
 # Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
 # registration is deliberate — an account is inert on its own, and the single admin gesture that
 # enrolls somebody is adding them here. A member gets `["<org>", "<org>:humans"]`; a self-registered
