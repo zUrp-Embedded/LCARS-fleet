@@ -4,8 +4,8 @@
 # STARDATE: 2026-08-09
 # STATUS: bats tests for bench-down.sh — WHAT a bench is made of, and the order it comes apart in
 #
-# WHY THIS EXISTS. A bench is THREE compose projects — the box (`<project>`), the forge
-# (`<project>forge`) and the runner (`<project>-runner`, started by bench-up through
+# WHY THIS EXISTS. A bench is THREE compose projects — the box (`<project>-fleet`), the forge
+# (`<project>-forge`) and the runner (`<project>-runner`, started by bench-up through
 # forge-runner.sh) — and this script tore down two. Measured 2026-08-09 on a real teardown:
 # `lcars-faces-runner-runner-1` was still running afterwards and the forge's `down` ended on
 # "Network ... Resource is still in use". The runner sits on the forge's network, so while it
@@ -64,18 +64,18 @@ idx_of() {
 }
 
 @test "a full bench: the three compose projects are torn down, none forgotten" {
-  PRESENT="bt-lcars-1 bt-runner-runner-1" run_down
+  PRESENT="bt-fleet-lcars-1 bt-runner-runner-1" run_down
 
   grep -q -- "-p bt-runner down -v" "$CALLS"
-  grep -q -- "-p bt down -v" "$CALLS"
-  grep -q -- "-p btforge down -v" "$CALLS"
+  grep -q -- "-p bt-fleet down -v" "$CALLS"
+  grep -q -- "-p bt-forge down -v" "$CALLS"
 }
 
 @test "the runner goes FIRST — it holds the forge network, so a later teardown leaves it standing" {
-  PRESENT="bt-lcars-1 bt-runner-runner-1" run_down
+  PRESENT="bt-fleet-lcars-1 bt-runner-runner-1" run_down
 
   runner="$(idx_of '\-p bt-runner down')"
-  forge="$(idx_of '\-p btforge down')"
+  forge="$(idx_of '\-p bt-forge down')"
   [ -n "$runner" ]
   [ -n "$forge" ]
   [ "$runner" -lt "$forge" ]
@@ -97,20 +97,20 @@ idx_of() {
 # that still held the bind, the port and the project name. The next bench-up then mounted itself on
 # the previous one's remains.
 @test "only the FORGE survives (bench-up died before creating the box) → still destroyed" {
-  PRESENT="btforge-gitea-1" run_down
+  PRESENT="bt-forge-gitea-1" run_down
 
   [ "$status" -eq 0 ]
-  grep -q -- "-p btforge down -v" "$CALLS"
+  grep -q -- "-p bt-forge down -v" "$CALLS"
 }
 
 # Volumes alone are the harder half, and the one that matters most: they carry the STATE — the
 # seeded forge, the box's /home. `compose down -v` removes them even when no container mounts them,
 # so a guard that only reads `ps -a` refuses to clean exactly the residue that poisons the next run.
 @test "no container left but the volumes remain → still destroyed" {
-  PRESENT="someone-elses-box" VOLUMES="btforge_data btforge_config" run_down
+  PRESENT="someone-elses-box" VOLUMES="bt-forge_data bt-forge_config" run_down
 
   [ "$status" -eq 0 ]
-  grep -q -- "-p btforge down -v" "$CALLS"
+  grep -q -- "-p bt-forge down -v" "$CALLS"
 }
 
 @test "nothing of this bench exists → exit 2, and NOT one destructive call" {
@@ -123,7 +123,7 @@ idx_of() {
 }
 
 @test "--yes is still required, and its absence destroys nothing" {
-  PRESENT="bt-lcars-1 bt-runner-runner-1"
+  PRESENT="bt-fleet-lcars-1 bt-runner-runner-1"
   run bash "$SRC" --project bt
 
   [ "$status" -eq 1 ]

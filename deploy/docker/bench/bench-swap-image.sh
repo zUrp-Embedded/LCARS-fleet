@@ -71,11 +71,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-FORGE_PROJECT="${PROJECT}forge"
+# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
+# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# le poste (48/49) et le banc derivent les memes noms de la meme base.
+BOX_PROJECT="${PROJECT}-fleet"
+FORGE_PROJECT="${PROJECT}-forge"
 FORGE_NET="${FORGE_PROJECT}_default"
-BOX="${PROJECT}-lcars-1"
+BOX="${BOX_PROJECT}-lcars-1"
 
-export LCARS_STORE_PREFIX="$PROJECT"
+export LCARS_STORE_PREFIX="$BOX_PROJECT"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
 # ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
 # la derivation depend du SUBSTRAT (WSL en NAT n'a pas d'adresse annoncable). Une seule definition,
@@ -145,14 +149,14 @@ LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
 ENVEOF
 trap 'rm -f "$SWAP_ENV"' EXIT
 
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
+"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$BOX_PROJECT" create \
   || die "la boite ne se cree pas" 3
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
   || die "la boite ne se branche pas sur $FORGE_NET" 3
 say "boite branchee sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
 
-"$DOCKER_BIN" compose -p "$PROJECT" start || die "la boite ne demarre pas" 3
+"$DOCKER_BIN" compose -p "$BOX_PROJECT" start || die "la boite ne demarre pas" 3
 
 wait_healthy() {
   for _ in $(seq 1 90); do

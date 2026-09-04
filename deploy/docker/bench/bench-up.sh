@@ -121,11 +121,15 @@ done
 # d'amorcage quand la boite ne coute qu'un build, et `bench-swap-image.sh` existe pour exploiter
 # cette asymetrie. Une fusion des projets rendait un `down -v` capable d'emporter la forge semee
 # avec la boite — mesure et corrigee le 2026-08-07.
-FORGE_PROJECT="${PROJECT}forge"
+# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
+# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# le poste (48/49) et le banc derivent les memes noms de la meme base.
+BOX_PROJECT="${PROJECT}-fleet"
+FORGE_PROJECT="${PROJECT}-forge"
 FORGE_CONTAINER="${FORGE_PROJECT}-gitea-1"
 FORGE_NET="${FORGE_PROJECT}_default"
-BOX="${PROJECT}-lcars-1"
-COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$PROJECT")
+BOX="${BOX_PROJECT}-lcars-1"
+COMPOSE_ARGS=(-f "$DOCKER_DIR/docker-compose.install.yml" -f "$DOCKER_DIR/docker-compose.bench.yml" -p "$BOX_PROJECT")
 # ─── LES DEUX ADRESSES, ET ELLES NE SE CONFONDENT PAS ────────────────────────────────────────────
 #
 #   FORGE_LOCAL_URL  celle que CE script compose pour parler a la forge (sondes, amorcage, API).
@@ -202,9 +206,11 @@ if [[ -z "${DOCKER_HOST:-}" ]]; then
   if [[ -S "$DD_SOCK" && -w "$DD_SOCK" ]]; then
     export DOCKER_HOST="unix://$DD_SOCK"
     say "daemon : socket Docker Desktop directe"
-  elif [[ -S /run/docker-fleet.sock ]]; then
-    export DOCKER_HOST="unix:///run/docker-fleet.sock"
-    say "daemon : relais fleet (la sonde de flux dira s'il est ampute)"
+  elif [[ -n "${LCARS_DOCKER_RELAY_SOCK:-}" && -S "$LCARS_DOCKER_RELAY_SOCK" ]]; then
+    # Un relais est un objet de LA machine qui l'a pose, pas du produit : il se nomme, il ne se
+    # devine pas (⚖ user 2026-09-04, point 9 : l'atelier hors des defauts).
+    export DOCKER_HOST="unix://$LCARS_DOCKER_RELAY_SOCK"
+    say "daemon : relais $LCARS_DOCKER_RELAY_SOCK (la sonde de flux dira s'il est ampute)"
   fi
 fi
 
@@ -256,7 +262,7 @@ port_holder() { # <port> -> "<nom> (projet <p>)" du conteneur qui le publie, hor
   while read -r name; do
     [[ -n "$name" ]] || continue
     proj="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$name" 2>/dev/null || true)"
-    [[ "$proj" == "$PROJECT" || "$proj" == "$FORGE_PROJECT" || "$proj" == "${PROJECT}-runner" ]] && continue
+    [[ "$proj" == "$BOX_PROJECT" || "$proj" == "$FORGE_PROJECT" || "$proj" == "${PROJECT}-runner" ]] && continue
     printf '%s (projet %s)\n' "$name" "${proj:-<hors compose>}"
     return 0
   done < <("$DOCKER_BIN" ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null)
@@ -298,9 +304,9 @@ say "forge up"
 # mecanique marche, pas pour garder l'artefact. Et le partage rendait la destruction menteuse —
 # `bench-down` epargnait les quatre en dictant la ligne pour finir le menage, laquelle vidait le
 # magasin de l'autre banc, en marche. Le prefixe est le projet ; `bench-down` les detruit desormais.
-export LCARS_STORE_PREFIX="$PROJECT"
+export LCARS_STORE_PREFIX="$BOX_PROJECT"
 store_ensure_volumes "$DOCKER_BIN" || die "magasin non pose — la boite ne peut pas se creer" 3
-say "boite : projet $PROJECT, image $IMAGE, bind $BIND"
+say "boite : projet $BOX_PROJECT, image $IMAGE, bind $BIND"
 # ⚠ « gitea » ET PAS « forge » DANS LES DEUX URL INTERNES CI-DESSOUS. C'est le nom du SERVICE
 # compose, donc l'entree DNS que le reseau publie. « forge » etait le nom interne qu'on s'etait
 # donne ; b01fe3164 a renomme le service et les URL internes sont restees sur l'ancien. Le
