@@ -50,7 +50,7 @@ setup() {
   chmod 0700 "$XDG_RUNTIME_DIR"
 
   # ⚠ MEME LECON, DEUXIEME VARIABLE, ET CELLE-CI EST ARRIVEE PAR LE HAUT. Ces temoins tournent
-  # AUSSI depuis `provision` — `60-deploy` appelle `etc/deploy-release.sh`, qui joue le gate — et le runner
+  # AUSSI depuis `provision` — `60-deploy` appelle `deploy/lib/deploy-release.sh`, qui joue le gate — et le runner
   # exporte `PROV_SUBSTRATE` (`provision:128`). Un temoin qui declare son substrat sans effacer
   # celui-la mesure donc la machine qui le lance : vert sur un poste WSL, rouge le 2026-08-23 sur
   # `.63` (Linux natif) sur du code identique. Le decor POSSEDE ces deux valeurs ; un test qui en
@@ -291,75 +291,6 @@ STUB
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"toujours hors de"* ]]
-}
-
-# ─── prov_release_bin — UN MODULE LISAIT LA RELEASE DOUZE RANGS AVANT SON POSEUR ────────────────
-#
-# ⚠ `48-forge-host` derivait le roster du catalogue par `--release "$PROV_PREFIX/rel/…"`, chemin
-# ecrit par `60-deploy` SEUL. `provision:315` ordonne les modules par leur rang et `provision:327`
-# refuse un `AFTER` qui ne precede pas : 48 ne PEUT donc pas declarer la dependance. Sur la premiere
-# install d un paquet, `enroll-catalogue.sh` mourait sur « release non executable », le module
-# rendait « roster non derivable de l arbre » — message qui accuse l ARBRE alors que le paquet est
-# complet — et `workstation` sortait 1. Le second apply passait : intermittent, donc invisible a
-# toute campagne qui rejoue.
-#
-# ⚠ `repo_root` EST REDEFINI DANS CHAQUE DECOR, et il le faut : sans ca, la fonction irait chercher
-# le `_build` du vrai depot et ces temoins mesureraient si la machine qui les joue a compile.
-
-@test "prov_release_bin : le PAQUET d abord — la posee peut sortir d un paquet plus ancien" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/pose/rel/lcars_fleet/bin"
-    printf "#!/bin/sh\n" > "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
-    printf "#!/bin/sh\n" > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    chmod 0755 "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-               "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_PREFIX="$D/pose"
-    [ "$(prov_release_bin)" = "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : sans paquet, la release POSEE — le rejeu depuis /opt/lcars n en a pas d autre" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/copie" "$D/pose/rel/lcars_fleet/bin"
-    printf "#!/bin/sh\n" > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    chmod 0755 "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/copie"; }
-    PROV_PREFIX="$D/pose"
-    [ "$(prov_release_bin)" = "$D/pose/rel/lcars_fleet/bin/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : un chemin NON executable ne compte pas — c est la garde qui manquait" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/pose/rel/lcars_fleet/bin"
-    # present mais PAS executable : exactement ce que 48 ne verifiait pas
-    : > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_PREFIX="$D/pose"
-    rc=0; prov_release_bin >/dev/null || rc=$?
-    [ "$rc" -eq 1 ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : PROV_RELEASE_BIN prime sur les deux — le seam garde son dernier mot" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/ailleurs"
-    printf "#!/bin/sh\n" > "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
-    printf "#!/bin/sh\n" > "$D/ailleurs/lcars_fleet"
-    chmod 0755 "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" "$D/ailleurs/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_RELEASE_BIN="$D/ailleurs/lcars_fleet"
-    [ "$(prov_release_bin)" = "$D/ailleurs/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
 }
 
 # ─── write_atomic — regression guards on the primitive itself ────────────────────────────────────
@@ -957,7 +888,7 @@ STUB
 }
 
 @test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
-  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `etc/deploy-release.sh` rend 3
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `deploy/lib/deploy-release.sh` rend 3
   # quand la release est posee mais le cablage PATH incomplet — le cas NOMINAL des qu'il tourne en
   # tant qu'humain. 60-deploy portait la tolerance juste sous l'appel... et sous `set -euo pipefail`
   # une commande nue qui rend 3 tue le module AVANT la ligne qui lit `$?`. Le commentaire decrivait
@@ -988,7 +919,7 @@ STUB
 @test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
   # ⚠ LE DEFAUT PRECEDENT AVAIT UNE SECONDE MOITIE, ET ELLE A SURVECU AU CORRECTIF. La branche
   # `PROV_VERBOSE=1` de `run_step` deleguait a `run_quiet`, qui ne connait AUCUNE tolerance et
-  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/deploy-release.sh` redevenait un echec des que
+  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `deploy/lib/deploy-release.sh` redevenait un echec des que
   # quelqu'un lancait `provision --verbose` — c'est-a-dire exactement quand ca va mal et qu'on
   # regarde. Et `PROV_LAST_RC` n'etait pas pose du tout : l'appelant qui le relit lisait le code d'un
   # appel PRECEDENT, donc prenait une decision sur la mesure d'autre chose.
@@ -1465,4 +1396,20 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
     [ "$rc" -eq 1 ]
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# ─── ensure_mode : un bit special en trop se RETIRE (DI-09, lot 11) ────────────────────────────
+# Le mode numerique demande est le mode ENTIER : un setgid herite d'un `mkdir` sous un parent 2775
+# n'est pas « presque 0755 », c'est un autre mode, et chmod ne le retire que si on le lui dit.
+@test "ensure_mode : un setgid herite est RETIRE quand le mode demande ne le porte pas — et POSE quand il le porte" {
+  local d="$BATS_TEST_TMPDIR/parent"
+  mkdir -p "$d/enfant"; chmod 2775 "$d/enfant"
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 0755"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 755 ]
+  [[ "$output" == *"POSÉ"* ]]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 2775"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
 }

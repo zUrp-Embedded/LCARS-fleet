@@ -206,7 +206,10 @@ fi
 
 if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
 
-  echo "--- GO-7 : en-tetes declaratifs sous fleet/ et deploy/ ---"
+  # ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « chacun joue son gate, on les
+  # split ». deploy/ tient ses en-tetes dans `deploy/gate.sh`, avec une copie assumee de ces
+  # predicats — cette porte ne lit plus que fleet/.
+  echo "--- GO-7 : en-tetes declaratifs sous fleet/ ---"
   eval "$(sed -n '/^is_ipc_exception()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^is_evidence_dir()/,/^}/p' "$GO7_HOOK")"
   eval "$(sed -n '/^check_md_header()/,/^}/p' "$GO7_HOOK")"
@@ -235,10 +238,10 @@ if [[ "${GO7_SKIPPED:-0}" != "1" ]]; then
       # donc tout marqueur de presence serait vert par construction. Le motif complet est dans
       # l'en-tete du hook, qui reste l'autorite de cette regle.
     esac
-  done < <(git -C "$REPO_ROOT" ls-files fleet deploy)
+  done < <(git -C "$REPO_ROOT" ls-files fleet)
 
   if [[ ${#GO7_BAD[@]} -gt 0 ]]; then
-    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/ ou deploy/ :" >&2
+    echo "ECHEC: GO-7 — ${#GO7_BAD[@]} fichier(s) sans en-tete declaratif sous fleet/ :" >&2
     printf '   %s
 ' "${GO7_BAD[@]}" >&2
     echo "   (le hook pre-commit dit la forme attendue par extension)" >&2
@@ -408,6 +411,7 @@ mapfile -t SHELL_FILES < <(
   git -C "$REPO_ROOT" ls-files -z 2>/dev/null | while IFS= read -r -d $'\0' f; do
     [[ -f "$REPO_ROOT/$f" ]] || continue
     case "$f" in
+      deploy/*) continue ;;
       *.sh|*.bash|*.bats) printf '%s\n' "$REPO_ROOT/$f"; continue ;;
     esac
     IFS= read -r first < "$REPO_ROOT/$f" || true
@@ -423,18 +427,20 @@ SHELL_FILE_COUNT="${#SHELL_FILES[@]}"
 SC_VERSION=""
 command -v shellcheck >/dev/null 2>&1 && SC_VERSION="$(shellcheck --version | sed -n 's/^version: //p')"
 
-# LE PLANCHER PORTE SUR TOUT LE SHELL SUIVI, deploy/ COMPRIS. Une exclusion nommee vivait ici : elle
-# soustrayait deploy/ au plancher parce que l installeur etait « en chantier ailleurs », et elle
-# ecrivait elle-meme sa condition de sortie — la fermeture de ce chantier. Il est ferme.
+# LE PLANCHER PORTE SUR LE SHELL SUIVI HORS deploy/ — ET CE N EST PAS L EXCLUSION D AVANT. Une
+# exclusion nommee a vecu ici, qui soustrayait deploy/ au plancher « le temps d un chantier » ; elle
+# a ete retiree quand ce chantier a ferme, parce qu un arbre soustrait a un plancher sans que
+# personne d autre ne le lise n est pas protege, il est oublie.
 #
-# La mesure qui l accompagnait tient encore, prise avec l INSTRUMENT DU GATE et non un shellcheck nu :
-# `-x --source-path=SCRIPTDIR` suit les `source`, donc il voit les lectures qu un shellcheck seul ne
-# relie pas — sans `-x`, trois SC2034 apparaissent dans docker/entrypoint.sh sur des PROV_* que
-# provision-lib lit apres le `.`, et ces trois-la n existent pas. Avec l instrument juste : 36
-# fichiers shell sous deploy/, ZERO signalement de severite >= warning.
+# ⚖ user 2026-09-04 (Q4 du chantier deploy-independance) : « l installeur est independant, chacun
+# joue son gate, on les split ». deploy/ sort d ici parce que `deploy/gate.sh` joue DESORMAIS le
+# meme plancher (-x --source-path=SCRIPTDIR -S warning) sur son propre arbre, et ses en-tetes GO-7
+# avec. La difference avec l exclusion d avant est la seule qui compte : quelqu un lit cet arbre, et
+# le compte affiche ci-dessous nomme ce qu il ne lit pas.
 #
-# Une exclusion gardee au-dela de sa condition de sortie ne protege plus un chantier : elle soustrait
-# un arbre au plancher, et le compte affiche continue de dire « OK » sans nommer ce qu il n a pas lu.
+# L instrument reste `-x --source-path=SCRIPTDIR` : il suit les `source`, donc il voit les lectures
+# qu un shellcheck nu ne relie pas (sans `-x`, trois SC2034 apparaissent dans deploy/docker/
+# entrypoint.sh sur des PROV_* que provision-lib lit apres le `.`, et ces trois-la n existent pas).
 SHELL_FILES_FLOOR=("${SHELL_FILES[@]}")
 FLOOR_COUNT="${#SHELL_FILES_FLOOR[@]}"
 
@@ -487,7 +493,7 @@ else
     echo "ECHEC: shellcheck plancher — $(printf '%s\n' "$SC_FLOOR" | grep -c ':') signalement(s) de severite >= warning sur $(printf '%s\n' "$SC_FLOOR" | cut -d: -f1 | sort -u | grep -c .) fichier(s)." >&2
     GATE_FAIL=1
   else
-    echo "--- shellcheck plancher (-S warning, $FLOOR_COUNT fichier(s), tout le shell suivi) : OK ---"
+    echo "--- shellcheck plancher (-S warning, $FLOOR_COUNT fichier(s), le shell suivi hors deploy/ — deploy/gate.sh tient le sien) : OK ---"
   fi
 fi
 
@@ -523,7 +529,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# L'AUDIT COMPLET, opt-in : toutes severites, deploy compris, informatif.
+# L'AUDIT COMPLET, opt-in : toutes severites, meme perimetre que le plancher (hors deploy/), informatif.
 # ---------------------------------------------------------------------------
 if [[ -n "${LCARS_SHELL_LINT:-}" ]]; then
   if [[ -z "$SC_VERSION" ]]; then

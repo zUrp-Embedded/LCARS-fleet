@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/60-deploy.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — deploy du runtime : orchestre etc/deploy-release.sh (l'autorité build+pose) puis verrouille RO
+# STATUS: PROTO-V2 — deploy du runtime : orchestre deploy/lib/deploy-release.sh (l'autorité build+pose) puis verrouille RO
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
@@ -34,9 +34,8 @@ check() {
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
   # « absente » de tout ce qui s'y trouve, y compris d'une release parfaitement posee.
   #
-  # MESURE DU 2026-09-01, banc 2007 : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
-  # meme machine et a la meme seconde. Le banc 2001 ne le montrait pas — le groupe y etait deja
-  # effectif. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
+  # VU : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
+  # meme machine et a la meme seconde ; un poste ou le groupe est deja effectif ne le montre pas. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
@@ -93,7 +92,7 @@ apply() {
   # Le bloc `mix` ci-dessous lit la LIVRAISON ; celui-ci demande « suis-je dans l'arbre de travail,
   # ou dans la copie que le rail a lui-meme posee ? ».
   #
-  # MESURE DU 2026-09-02, BANCS 2006 ET 2007 : un apply rejoue depuis
+  # VU : un apply rejoue depuis
   # `/opt/lcars/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
   # source runtime introuvable: /opt/lcars/fleet ». Sur les DEUX, en livraison binaire comme en
   # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
@@ -113,7 +112,7 @@ apply() {
   # discriminant. Exiger `mix` avant de le lire renvoyait vers `15-toolchain`, dont l'etat-cible en
   # binaire est justement de ne rien poser : le rail s'envoyait une instruction impossible.
   #
-  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : `FAIL 60-deploy: mix absent
+  # VU sur une premiere install binaire : `FAIL 60-deploy: mix absent
   # — lance d'abord 15-toolchain`, sur une machine ou la release etait deja dans le paquet.
   if ! prov_delivery_is_binary; then
     command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
@@ -143,22 +142,19 @@ apply() {
   ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
   chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
 
-  # 1-bis. L'OUTILLAGE DU GATE, ET C'EST CE MODULE QUI LE DOIT — pas 10-packages.
-  #
-  # `etc/deploy-release.sh` joue `mix gate`, et le gate REFUSE de sauter ses moitiés hors-mix en silence :
-  # `shell_gate` exige `pytest` (les lcars_tests de token-saver) et `bats` (BATS_MISSING_FATAL=1
-  # posé par mix.exs), et plusieurs sondes lisent `pgrep` (procps). Aucun de ces trois n'est un
-  # paquet de RUNTIME : les mettre dans 10-packages alourdirait toute installation pour un besoin
-  # qui n'existe qu'ici, à la minute du build.
-  GATE_PACKAGES=(python3-pytest bats procps)
-  apt_ensure "${GATE_PACKAGES[@]}" || { p_fail "outillage du gate non installé (${GATE_PACKAGES[*]})"; verdict_apply; }
+  # ⚖ user 2026-09-04 (DI-07, defaut pris) : L'INSTALL NE RE-ATTESTE PAS LA SOURCE. `deploy-release.sh`
+  # jouait `mix gate` avant de batir, et le gate exigeait sur la CIBLE toute une chaine d'outillage
+  # de test — pytest, bats, procps, shellcheck, ruff, et le binaire vendor `claude` du siege pour
+  # 67 temoins du spawner. Deux jours de banc perdus le 04/09 sur des outils absents d'un poste
+  # neuf, pour attester une source que la CI et `pack.sh` attestent deja. Ce module COMPILE et
+  # POSE ; l'attestation vient d'ailleurs, et `deploy-release.sh` le dit (« gate saute »).
 
   # ⚠ L'OUTILLAGE `mix` NE SERT QU'AU BUILD, et en livraison binaire il n'y a pas de build. Le
   # raisonnement est déjà écrit trois lignes plus haut pour les paquets du gate — « un besoin qui
   # n'existe qu'ici, à la minute du build » — et il vaut a fortiori pour `hex` et `rebar` : la
   # release est faite, `deploy-release.sh` la voit et ne compile pas.
   #
-  # MESURE DU 2026-09-01, banc 2006 : `FAIL 60-deploy: commande en échec (rc=127) : … mix
+  # VU sur une cible binaire : `FAIL 60-deploy: commande en échec (rc=127) : … mix
   # local.hex` — `mix` n'existe pas sur une cible binaire, c'est le geste R5 qui le veut. Le module
   # mourait ici, donc `deploy-release.sh` n'était jamais appelé, donc la release du PAQUET n'était
   # jamais posée. Un paquet complet, refusé par un outil de compilation absent.
@@ -173,13 +169,17 @@ apply() {
     p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
+
   fi
 
+  # Q3 : le script est de l'installeur, il vit a cote de la lib ; l'arbre source du
+  # runtime lui est DONNE, il ne le devine plus a sa position.
   run_step --ok 3 "build de la release" -- \
-    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/deploy-release.sh"
+    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \
+      LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh"
   local install_rc="$PROV_LAST_RC"
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
-    p_fail "etc/deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
+    p_fail "deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply
   fi
   release_present || { p_fail "install.sh vert mais release absente ($PREFIX_REL) — incohérence, inspecte"; verdict_apply; }

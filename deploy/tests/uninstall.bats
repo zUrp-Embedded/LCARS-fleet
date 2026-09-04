@@ -62,7 +62,7 @@ carte() { printf '%s\n' "$@" > "$PROV_UID_MAP_FILE"; }
 
 journal() { printf 'apt_installed %s\n' "$*" > "$LCARS_JOURNAL_FILE"; }
 plan()    { run bash "$RUNNER" uninstall; }
-code()    { grep -vE '^\s*#' "$RUNNER"; }
+code()    { grep -vhE '^\s*#' "$RUNNER" "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh"; }
 
 @test "AUCUNE LISTE dans le code — il lit les tables, il ne les recopie pas" {
   # La regle de `etc/release.manifest`, etendue a la machine. Une liste en dur ici serait un SECOND
@@ -259,17 +259,17 @@ code()    { grep -vE '^\s*#' "$RUNNER"; }
   # EXPORTE par le runner (`:163`), il n'est jamais LU : le poser n'a aucun effet. Premiere version
   # de ce temoin faite comme ca — elle mesurait le substrat detecte de la machine qui joue la suite.
   nfic() { sed -n 's/^  fichiers *\([0-9]*\) objet.*/\1/p' <<<"$output"; }
-  local n_avant n_wsl n_docker
+  local n_avant n_wsl n_linux
   run bash "$RUNNER" uninstall --substrate wsl; n_avant="$(nfic)"
 
-  : > "$FAKE/etc/lcars/objet-docker-seulement"
-  printf 'anchor    %s/etc/lcars/objet-docker-seulement  0644 root:root docker\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
+  : > "$FAKE/etc/lcars/objet-linux-seulement"
+  printf 'anchor    %s/etc/lcars/objet-linux-seulement  0644 root:root linux\n' "$FAKE" >> "$LCARS_SYSTEM_MANIFEST"
 
   run bash "$RUNNER" uninstall --substrate wsl;    n_wsl="$(nfic)"
-  run bash "$RUNNER" uninstall --substrate docker; n_docker="$(nfic)"
+  run bash "$RUNNER" uninstall --substrate linux;  n_linux="$(nfic)"
 
-  [ "$n_wsl" -eq "$n_avant" ]                # `docker` ne concerne pas un poste wsl
-  [ "$n_docker" -eq "$((n_avant + 1))" ]     # et il le concerne sur le substrat qui le declare
+  [ "$n_wsl" -eq "$n_avant" ]                # `linux` ne concerne pas un poste wsl
+  [ "$n_linux" -eq "$((n_avant + 1))" ]      # et il le concerne sur le substrat qui le declare
 }
 
 @test "ORDRE : les paquets partent AVANT les repertoires — le journal vit dans l'un d'eux" {

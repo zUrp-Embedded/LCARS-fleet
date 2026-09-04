@@ -161,18 +161,21 @@ nu() { # nu <check|apply>
   [ "$(grep -c '^vu ' "$mouchard")" -eq 2 ]
 }
 
-@test "le geste manuel reste PROPOSE dans le verdict — on retire le createur, pas la sortie de secours" {
+@test "le verdict PROPOSE un geste — et ce n'est plus un useradd : le convergeur est le seul createur" {
   # Sans ce pendant, supprimer purement le mot `useradd` du fichier passerait le temoin precedent
-  # tout en privant l'operateur du seul geste qu'il puisse taper lui-meme (P-40). Le rail est le
-  # chemin ; ce geste est ce qui reste a celui pour qui le rail n'a pas abouti.
-  # ⚠ LA CIBLE A CHANGE AVEC LE CANON (⚖ user 2026-08-30) : le chemin nominal n'est plus « creer le
-  # compte integre » — plus aucun deploiement de travail ne fabrique d'humain — mais « s'enroler sur
-  # la forge ». Les DEUX doivent etre dits : le chemin, et le recours.
+  # tout en privant l'operateur de quelque chose a taper (P-40). Le rail est le chemin ; le
+  # verdict dit ce qui reste a celui pour qui il n'a pas abouti.
+  # ⚠ LA CIBLE A CHANGE DEUX FOIS. Canon du 2026-08-30 : le chemin nominal est « s'enroler sur la
+  # forge », plus aucun deploiement de travail ne fabrique d'humain. ⚖ user 2026-09-04 (DI-02) :
+  # UN SEUL createur d'humains, le convergeur — le verdict proposait encore un `useradd -m -G fleet`
+  # « en dernier recours », c'est-a-dire un compte sans uid derive de la forge ni modules
+  # per-humain, que le convergeur verrait comme un inconnu. Le recours est de regarder POURQUOI le
+  # convergeur ne materialise pas, pas de le contourner.
   passwd_with
   mod 'observe'
-  [[ "$output" == *"useradd"* ]]
-  [[ "$output" == *"$PROV_FLEET_GROUP"* ]]
+  refute grep -q 'useradd' <<<"$output"
   [[ "$output" == *"inscription"* ]]
+  [[ "$output" == *"lcars-converger"* ]]
 }
 
 # ─── AUCUN HUMAIN N'EST NOMME ICI ───────────────────────────────────────────────────────────────

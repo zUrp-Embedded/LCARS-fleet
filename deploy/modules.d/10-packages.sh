@@ -37,6 +37,10 @@ PACKAGES=(
   # en a besoin pour provisionner ce systeme »), et `workstation` s'escalade par `exec sudo`. Une
   # ligne sans raison finit par etre retiree par quelqu'un qui cherche a alleger.
   util-linux-extra sudo less bash-completion
+  # procps : `pgrep`/`pkill` — lus par 60-deploy (fleet debout ?), le convergeur d'humains (revocation)
+  # et les sondes de 64. Il vivait dans l'outillage du GATE de 60 ; le gate ne se joue plus a
+  # l'install (DI-07), le besoin runtime, lui, reste.
+  procps
   # ⚠ `universe`, pas `main` : sur une image serveur où ce composant serait fermé, `apt_ensure`
   # échoue en le disant. C'est le bon endroit pour l'apprendre — avant la console noire.
   ttyd
@@ -192,7 +196,14 @@ check() {
     fi
   done < <(effective_packages)
   if [[ "$pkg_absent" -eq 0 ]]; then
-    if probe_bwrap; then
+    # ⚠ LA SONDE bwrap MESURE LE NOYAU, PAS L'IMAGE. Dans le stage `verify` du Dockerfile (le doctor
+    # joué au BUILD sur le système de fichiers de l'image), le noyau est celui de BuildKit, sans
+    # userns : la sonde échoue là où la boîte, une fois bootée, réussit. Vu au premier build avec verify.
+    # `PROV_KERNEL_PROBES=0` dit « pas de vérité ici » ; le check le DIT au lieu
+    # de rendre un drift qui n'en est pas un — et au boot, sans la variable, la sonde se joue.
+    if [[ "${PROV_KERNEL_PROBES:-1}" == "0" ]]; then
+      p_warn "sonde bwrap NON jouée (PROV_KERNEL_PROBES=0 : ce noyau n'est pas celui de la cible) — elle se joue au boot"
+    elif probe_bwrap; then
       p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
     else
       p_drift "bwrap installé mais un sandbox minimal ÉCHOUE (user $PROV_HUMAN) — userns restreints ? (sysctl kernel.apparmor_restrict_unprivileged_userns, profil AppArmor bwrap) ; sans ça, AUCUN pod ne spawnera"

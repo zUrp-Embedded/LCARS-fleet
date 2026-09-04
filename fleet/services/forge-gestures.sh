@@ -46,27 +46,22 @@ PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # token) et les personnes s'enrolent par la page d'inscription, sous leur nom. Le commentaire
 # ci-dessous le disait deja sans en tirer la consequence : « le siege BUILT-IN de DEMONSTRATION ».
 #
-# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs,
-# ou c'est du confort assume sur une machine jetable qui ne verra jamais de vraie personne.
-#
-# ⚠ ET `LCARS_DISPOSABLE` LE DEMANDE SANS LE NOMMER (40-RAILS.md § 13). C'est l'axe DESTINATION :
-# un appelant qui sait que son deploiement est jetable — `--disposable` sur la porte, le drapeau
-# traverse jusqu'a `48-forge-host` — demande les annexes de demonstration sans avoir a decider QUI
-# elles sont. Ce fichier reste le seul declarant du nom ; deux temoins de `forge_host_reach.bats` le
-# gardent, et ils ont attrape une premiere version qui ecrivait ce defaut dans le module appelant.
-#
-# L'ORDRE EST LOAD-BEARING : un nom EXPLICITE l'emporte toujours sur le defaut de la destination.
-# L'inverse ferait ignorer en silence ce que l'operateur a tape.
-BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-${LCARS_DISPOSABLE:+lcars}}"
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+# Qui en veut un le NOMME : `bench-forge-bootstrap.sh` pose `LCARS_BUILTIN_HUMAN` pour ses bancs.
+# C'est la SEULE voie. Un `LCARS_DISPOSABLE` a vecu ici, qui demandait un humain de demonstration
+# sans le nommer (« lcars » par defaut) depuis un `--disposable` de la porte, quatre etages plus
+# haut : ⚖ user 2026-09-04, « un vieux reliquat a virer » — un axe entier pour un defaut que plus
+# personne ne demandait. Ce fichier reste le seul declarant du nom ; deux temoins de
+# `forge_host_reach.bats` le gardent.
+BUILTIN_HUMAN="${LCARS_BUILTIN_HUMAN:-}"
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 # LE DETENTEUR DES SECRETS DE FORGE. Meme defaut que `provision-lib.sh` et que `21-service-accounts`,
 # et meme raison qu'au-dessus : une recopie par runtime, surchargee ensemble ou pas du tout. C'est le
 # compte que `put_secret` pose sur ce qu'il ecrit — le seul qui ouvrira ces fichiers.
-AUTHORITY_USER="${LCARS_AUTHORITY_USER:-${PROV_AUTHORITY_USER:-lcars-authority}}"
+AUTHORITY_USER="${LCARS_AUTHORITY_USER:-lcars-authority}"
 # Le groupe qui TRAVERSE `/opt/lcars/var/tokens` — jamais celui qui lit. Meme defaut que partout ailleurs
 # dans l'arbre, et il est ici parce que `put_secret` pose ce repertoire lui-meme : sans lui, ce geste
 # et la table diraient deux choses differentes du meme objet.
-FLEET_GROUP="${LCARS_FLEET_GROUP:-${PROV_FLEET_GROUP:-fleet}}"
+FLEET_GROUP="${LCARS_FLEET_GROUP:-fleet}"
 SYSTEM_EMAIL="${LCARS_SYSTEM_EMAIL:-${SYSTEM_ACCOUNT}@lcars.local}"
 # ⚠ NE FINIT PAS PAR `.gitea_token`, ET C'EST VOULU : ce suffixe est celui des jetons de ROLE
 # (`<login>.gitea_token`, plus bas). Le premier lecteur qui globbera ce repertoire ne doit pas
@@ -89,23 +84,26 @@ STORE_REPO="${LCARS_STORE_REPO:-_catalogue}"
 # ⚠ `-r` ET PAS `-x`, ET `bash` PLUTOT QUE L'EXECUTION DIRECTE : `entrypoint.sh` est `100644` dans le
 # depot, seule l'image le passe en `0755`. Un test sur `-x` echouerait APRES avoir trouve le bon
 # chemin — un garde qui rejette exactement ce qu'il cherchait.
-_entrypoint_path() {
-  local here c
+# LES PORTES OUTIL DU RELEASE SONT DANS LA CLI DU PRODUIT (`lcars tool …`, lot 6 — 2026-09-04).
+# Elles vivaient dans le PID 1 de l'image, et ce script devinait le chemin de l'entrypoint pour les
+# atteindre — un geste du produit qui execute l'entrypoint de l'image pour evaluer une fonction du
+# release. `lcars` est pose sur les deux rails (`/usr/local/bin`) ; a defaut, le voisin de ce
+# fichier dans l'arbre (`../bin/lcars`). « LCARS_CLI=<chemin> » force la resolution.
+_lcars_cli() {
+  local here
+  [[ -n "${LCARS_CLI:-}" ]] && { printf '%s' "$LCARS_CLI"; return 0; }
+  if command -v lcars >/dev/null 2>&1; then command -v lcars; return 0; fi
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for c in "$here/entrypoint.sh" "$here/deploy/docker/entrypoint.sh"; do
-    [[ -r "$c" ]] && { printf '%s' "$c"; return 0; }
-  done
-  # Aucun candidat lisible : on rend le premier quand meme, pour qu'un refus NOMME un chemin.
-  printf '%s' "$here/entrypoint.sh"
+  printf '%s' "$here/../bin/lcars"
 }
-ENTRYPOINT="${LCARS_ENTRYPOINT:-$(_entrypoint_path)}"
+LCARS_CLI="$(_lcars_cli)"
+tool() { bash "$LCARS_CLI" tool "$@"; }
 
-need_entrypoint() {
-  [[ -r "$ENTRYPOINT" ]] && return 0
-  die "portes outil du release introuvables ($ENTRYPOINT).
-  Ce script les appelle pour resoudre, verifier et enroler un catalogue. Sur un poste elles vivent
-  dans l'arbre embarque (<prefixe>/deploy/docker/entrypoint.sh), pose par « provision apply ».
-  « LCARS_ENTRYPOINT=<chemin> » force la resolution."
+need_cli() {
+  [[ -r "$LCARS_CLI" ]] && return 0
+  die "portes outil du release introuvables ($LCARS_CLI).
+  Ce script les appelle pour resoudre, verifier et enroler un catalogue (« lcars tool … »). Sur un
+  poste, 60-deploy pose la CLI ; l'image la porte. « LCARS_CLI=<chemin> » force la resolution."
 }
 
 die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
@@ -228,9 +226,9 @@ ensure_ops_repo() { # $1=org  $2=jeton master
   if [[ "$code" == "200" ]]; then
     echo "forge-gestures: depot ops $repo cree (auto_init, branche main)"
   else
-    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `52-ops-branch` le
+    # NON FATAL, ET C'EST DELIBERE : une forge sans depot ops reste une forge. `65-ops-branch` le
     # dira en derive au passage suivant — ce qui est exactement son travail.
-    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 52-ops-branch le dira en derive" >&2
+    echo "forge-gestures: depot ops $repo NON cree (HTTP $code) — 65-ops-branch le dira en derive" >&2
   fi
   return 0
 }
@@ -334,11 +332,11 @@ cmd_apply() {
       || die "apply $m en echec — rien n'est suppose, relis la sortie ci-dessus"
   done
 
-  ensure_ops_repo "${PROV_FORGE_ORG:-fleet}" "$tok"
+  ensure_ops_repo "${LCARS_FORGE_ORG:-fleet}" "$tok"
 
-  publicize_org_members "${PROV_FORGE_ORG:-fleet}" "$tok" "$seed"
+  publicize_org_members "${LCARS_FORGE_ORG:-fleet}" "$tok" "$seed"
 
-  demote_creator_from_owners "${PROV_FORGE_ORG:-fleet}" "$tok"
+  demote_creator_from_owners "${LCARS_FORGE_ORG:-fleet}" "$tok"
 
   seed_catalogue_deposit "$tok" "$(reference_catalogue_root)" "catalogue de reference"
   seed_catalogue_deposit "$tok" "$DEMO_CATALOGUE" "catalogue de demonstration"
@@ -373,7 +371,7 @@ reference_catalogue_root() {
   [[ -n "$REFERENCE_CATALOGUE" ]] && { printf '%s' "$REFERENCE_CATALOGUE"; return 0; }
 
   local root
-  root="$(bash "$ENTRYPOINT" catalogue-root 2>/dev/null | tail -n1)" || root=""
+  root="$(tool catalogue-root 2>/dev/null | tail -n1)" || root=""
   if [[ -z "$root" || ! -d "$root" ]]; then
     # Un refus MUET ferait croire a une image sans reference — or elle en porte toujours une.
     echo "forge-gestures: le release ne dit pas ou vit son catalogue de reference — NON depose" >&2
@@ -513,7 +511,7 @@ cmd_install() {
   local name="${1:-}"
   [[ -n "$name" ]] || die "install: nom de catalogue requis"
   need_forge_url
-  need_entrypoint
+  need_cli
 
   local tok; tok="$(cat "$MASTER_TOKEN_FILE" 2>/dev/null || true)"
   [[ -n "$tok" ]] || die "install: pas d'autorite — « FORGE_ADMIN_TOKEN=<token master> deploy/box config »"
@@ -540,7 +538,7 @@ cmd_install() {
 
   local src rc=0
   src="$(FORGE_BASE_URL="$FORGE_BASE_URL" FORGE_TOKEN="$sys_tok_value" \
-         bash "$ENTRYPOINT" catalogue-source "$name" 2>&1)" || rc=$?
+         tool catalogue-source "$name" 2>&1)" || rc=$?
   if [[ "$rc" -ne 0 ]]; then
     printf '%s\n' "$src" >&2
     die "install: $name — pas de source installable (cf. ci-dessus)" "$rc"
@@ -558,8 +556,8 @@ cmd_install() {
   Attendu sur stdout : « <owner>/<depot> <branche> <sha> ». Recu : $(
     [[ -z "$src" ]] && printf 'RIEN' || printf '%s' "«$src»")
   Ce n'est pas un refus de la forge : un refus porte un code de sortie et une phrase. Un zero muet
-  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « \$ENTRYPOINT » designe
-  ($ENTRYPOINT) et ce que « bash \"\$ENTRYPOINT\" catalogue-source $name » imprime a la main."
+  vient de ce qui a repondu A LA PLACE de la porte — verifier ce que « lcars » designe
+  ($LCARS_CLI) et ce que « lcars tool catalogue-source $name » imprime a la main."
   fi
 
   echo "forge-gestures: $name <- $repo ($branch@${sha:0:8})"
@@ -585,7 +583,7 @@ cmd_install() {
   # 3. LE MEME CONTROLE QUE LE BOOT, avant de toucher la forge. Un catalogue incoherent refuse ici
   #    coute un message ; installe, il coute un boot qui refuse ou un dispatch qui boucle, loin de
   #    sa cause.
-  bash "$ENTRYPOINT" verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
+  tool verify "$work/src" || die "install: $name ne passe pas la verification — RIEN n'a ete pose"
 
   # 4. Le roster, derive du materiel du candidat — jamais tenu a la main.
   local dir="$CATALOGUE_WORK/$name"
@@ -621,7 +619,7 @@ cmd_install() {
   # tiers. Facultatif : sans eux, les comptes restent en identicon.
   rm -rf "$dir/catalogue-avatars"
   [[ -d "$work/src/avatars" ]] && cp -r "$work/src/avatars" "$dir/catalogue-avatars"
-  bash "$ENTRYPOINT" roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
+  tool roles-tfvars "$work/src" > "$dir/roles.auto.tfvars.json" \
     || die "install: roster non derive depuis $name"
 
   # 5. La structure : org, comptes de role, teams, adhesions, propriete, charte. LA RECETTE, pas une

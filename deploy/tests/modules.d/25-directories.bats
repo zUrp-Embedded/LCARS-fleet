@@ -124,29 +124,6 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [[ "$output" != *"temoin:temoin"* ]]
 }
 
-@test "substrat docker: la table n'en porte AUCUN — console.sh les possede la-bas" {
-  # Deux createurs pour un meme dossier donneraient un
-  # dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose PAS le mode
-  # d'un dossier existant, donc le desaccord serait SILENCIEUX.
-  PROV_SUBSTRATE=docker mod 'prov_runtime_dirs | wc -l'
-  [ "$status" -eq 0 ]
-  [ "$output" = "0" ]
-}
-
-# ─── LA TABLE ET LE MANIFESTE DISENT-ILS LA MEME CHOSE DU MEME OBJET ? ──────────────────────────
-#
-# ⚠ RIEN NE LES COMPARAIT, ET ILS AVAIENT DIVERGE. Mesure du 2026-08-26 :
-#
-#     system.manifest   /run/lcars/toolchain   0755  root:root
-#     le seul poseur    /run/lcars/toolchain   2775  root:fleet   (45-sudoers-toolchain, install -d nu)
-#
-# Faux sur le MODE et sur le GROUPE, dans le sens qui SOUS-ESTIME qui peut ecrire — un lecteur du
-# manifeste croyait le repertoire ferme au groupe alors que le BEAM y ecrit son marqueur. Et le
-# chemin vivait hors de cette table, donc hors du `tmpfiles.d` : il ne revenait pas au boot.
-#
-# LES DEUX MURS ISO NE POUVAIENT PAS LE VOIR : ils comparent la PRESENCE d'un chemin (« pose mais
-# non declare », « declare mais sans poseur »), jamais son mode ni son proprietaire. C'est un axe
-# entier de la table qui n'avait aucun lecteur. Ce temoin est cet axe.
 @test "MANIFESTE vs TABLE : mode et proprietaire s'accordent sur chaque repertoire runtime" {
   local manifest="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$manifest" ]
@@ -218,45 +195,6 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"ne correspond plus"* ]]
 }
-
-@test "substrat docker: une declaration qui traine est RETIREE, pas laissee vivre" {
-  # Un fichier tmpfiles qui decrit des dossiers dont ce module ne repond plus est un ordre donne au
-  # boot par un composant qui a change d'avis. Cas reel : une boite provisionnee en natif puis
-  # rebasculee en conteneur.
-  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
-  PROV_SUBSTRATE=docker mod 'apply_tmpfiles'
-  [ "$status" -eq 0 ]
-  [ ! -e "$LCARS_TMPFILES_CONF" ]
-  [[ "$output" == *"retiree"* ]]
-}
-
-@test "substrat docker: une declaration qui NE PEUT PAS etre retiree est un ECHEC, jamais un rc 0 muet" {
-  # `[[ -e ]] && { rm -f && p_ok; }` : quand `rm` echoue, ni p_ok ni p_fail — le module rend 0
-  # avec la declaration perimee toujours en place, et le boot suivant obeit a un ordre que ce
-  # module a desavoue. Un retrait qui echoue se compte comme un echec.
-  [ "$(id -u)" -ne 0 ] || skip "root retire tout, la faute n'est pas observable"
-  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
-  chmod 0555 "$(dirname "$LCARS_TMPFILES_CONF")"
-  PROV_SUBSTRATE=docker mod 'PROV_FAILED=0; apply_tmpfiles; echo "failed=$PROV_FAILED"'
-  chmod 0755 "$(dirname "$LCARS_TMPFILES_CONF")"
-  [ "$status" -eq 0 ]
-  [ -e "$LCARS_TMPFILES_CONF" ]
-  [[ "$output" == *"failed=1"* ]]
-  [[ "$output" != *"retiree"* ]]
-}
-
-# ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
-#
-# ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,
-# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/opt/lcars/var/tokens` a donc
-# coute SEPT objets sans aucun rapport avec lui : les trois racines de face, la racine des consoles,
-# l'etat tofu, et la declaration tmpfiles — celle-la meme dont le temoin d'au-dessus dit qu'elle
-# porte « la fleet ne demarrera pas ». La machine a fini avec `lcars-landing` debout et aucune
-# racine de console.
-#
-# LES DEUX MOITIES VONT PAR PAIRE, d'ou deux temoins : la boucle doit CONTINUER, et le module doit
-# quand meme SORTIR NON NUL. Tenir la premiere seule transformerait un echec en succes silencieux —
-# l'inverse exact du defaut qu'on repare.
 
 @test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
   # `/proc/...` ne peut pas etre cree, a coup sur et sans droits speciaux : la premiere entree

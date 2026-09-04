@@ -90,11 +90,10 @@ EOF
   # ⚠ CETTE SONDE N'EST PAS `run_quiet`, ET LA CONFONDRE REND UN FAUX ROUGE. `run_quiet` a pour
   # contrat que l'échec COMPTE : il appelle `p_fail` et incrémente `PROV_FAILED`. Or l'échec est
   # ATTENDU ici — au premier passage le miroir n'existe pas encore, c'est tout ce que cet init
-  # mesure. Mesuré à froid le 2026-08-22 : deux FAIL et un verdict rouge sur un module dont le
+  # mesure. Vu à froid : deux FAIL et un verdict rouge sur un module dont le
   # miroir venait d'être posé correctement.
   # ⚠ ET L'INIT NE SE JOUE PAS DANS L'ARBRE DE L'OPÉRATEUR. `tofu init` ÉCRIT — il pose un
-  # `.terraform/` à côté de la recette — et ce module tourne en root. Mesuré au nettoyage de .63 le
-  # 2026-08-22 : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
+  # `.terraform/` à côté de la recette — et ce module tourne en root. Vu au nettoyage d'un banc : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
   # chaque provider. `60-deploy` porte déjà la règle pour l'autre outil (« un build root polluerait
   # le `_build` du checkout ») ; elle vaut pour tout ce qui écrit, pas pour mix seul.
   local src work

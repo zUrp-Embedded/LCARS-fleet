@@ -9,19 +9,22 @@
 # AFTER: 20-groups
 
 set -euo pipefail
-# shellcheck source=../lib/provision-lib.sh
-. "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
+# Le protocole des modules per-humain, cote PRODUIT (Q3, 2026-09-04) : l'hote — le convergeur, ou
+# un temoin — nomme le fichier. Ce module sourcait la lib de l'INSTALLEUR, que son hote reel ne
+# posait pas : il mourait ici, a chaque humain, sur les deux rails.
+# shellcheck source=../lib/human-protocol.sh
+. "${LCARS_HUMAN_PROTOCOL:?LCARS_HUMAN_PROTOCOL non posé — lance via human-converger, pas le module nu}"
 
 HOME_DIR="$(human_home)"
 ENV_FILE="$HOME_DIR/.lcars/fleet_v2.env"
-TEMPLATE="$PROV_PREFIX/etc/fleet_v2.env.template"
+TEMPLATE="$LCARS_PREFIX/etc/fleet_v2.env.template"
 
 #
 # ⚠ ET IL CONVERGE, il ne se seed PAS une fois. C'est l'inverse de `fleet_v2.env` juste en dessous,
 # et la différence est le SUJET : l'env est la configuration d'un humain, ce bloc est une limite
 # posée sur ce qu'un agent a le droit de faire. Une limite qu'un premier passage pose et qu'aucun
 # suivant ne rétablit n'est pas une limite.
-# La source vit dans le provisionnement lui-même — pas sous `$PROV_PREFIX/etc` comme le template
+# La source vit dans le provisionnement lui-même — pas sous `$LCARS_PREFIX/etc` comme le template
 # d'env : celui-là dépend de `60-deploy`, et un garde-fou qui n'existe que si un autre module a
 # réussi avant lui est absent précisément les jours où il compte.
 # ⚠ RELATIF AU MODULE, PLUS `repo_root()`. Ce fichier a suivi le module hors de l installeur : il
@@ -63,35 +66,35 @@ apply_automode() {
   fi
   chmod 0644 "$tmp"
   mv -f "$tmp" "$CLAUDE_SETTINGS" || { rm -f "$tmp"; p_fail "écriture de $CLAUDE_SETTINGS"; return 1; }
-  PROV_CHANGED=$((PROV_CHANGED + 1))
+  LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "garde-fou d'écriture fusionné dans $CLAUDE_SETTINGS (les autres clefs sont intactes)"
 }
 
 GITCONFIG_EMAIL() { git config --global --get user.email 2>/dev/null || true; }
 
-# Le compte forge de PROV_HUMAN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
+# Le compte forge de LCARS_LOGIN, en « full_name<TAB>email ». Vide si la forge ne répond pas, si le
 # jeton système n'est pas là, ou si ce login n'a pas de compte — trois absences qu'on ne comble pas.
 forge_account() {
-  [[ -n "$PROV_FORGE_URL" ]] || return 0
-  [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] || return 0
-  forge_curl "$PROV_SYSTEM_TOKEN_FILE" -s -m 10 \
-       "$PROV_FORGE_URL/api/v1/users/$PROV_HUMAN" 2>/dev/null \
+  [[ -n "$FORGE_BASE_URL" ]] || return 0
+  [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] || return 0
+  forge_curl "$LCARS_SYSTEM_TOKEN_FILE" -s -m 10 \
+       "$FORGE_BASE_URL/api/v1/users/$LCARS_LOGIN" 2>/dev/null \
     | jq -r 'if type=="object" and ((.email // "") != "") then "\(.full_name // "")\t\(.email)" else empty end' \
        2>/dev/null || true
 }
 
 # La sonde ne PARLE que si cette personne a un compte forge. « Pas de compte » est un fait que
-# `50-forge` possède déjà et rapporte ; le redire ici en ferait deux, et deux voix sur un même fait
+# `63-forge-tokens` possède déjà et rapporte ; le redire ici en ferait deux, et deux voix sur un même fait
 # divergent le jour où l'une des deux change.
 check_git_identity() {
   local mail; mail="$(GITCONFIG_EMAIL)"
   if [[ -n "$mail" ]]; then
-    p_ok "identité git posée pour $PROV_HUMAN <$mail> (le fichier lui appartient — on n'y revient pas)"
+    p_ok "identité git posée pour $LCARS_LOGIN <$mail> (le fichier lui appartient — on n'y revient pas)"
     return 0
   fi
   local acct; acct="$(forge_account)"
   [[ -n "$acct" ]] || return 0
-  p_drift "identité git absente pour $PROV_HUMAN — ses commits signeront <login>@<hostname>, que la forge ne mappe sur aucun compte (ni attribution ni avatar) ; l'apply la pose depuis son compte forge"
+  p_drift "identité git absente pour $LCARS_LOGIN — ses commits signeront <login>@<hostname>, que la forge ne mappe sur aucun compte (ni attribution ni avatar) ; l'apply la pose depuis son compte forge"
 }
 
 apply_git_identity() {
@@ -104,10 +107,10 @@ apply_git_identity() {
   fi
   name="${acct%%$'\t'*}"
   email="${acct#*$'\t'}"
-  [[ -n "$name" ]] || name="$PROV_HUMAN"
-  git config --global user.name  "$name"  || { p_fail "git config user.name pour $PROV_HUMAN"; return 1; }
-  git config --global user.email "$email" || { p_fail "git config user.email pour $PROV_HUMAN"; return 1; }
-  PROV_CHANGED=$((PROV_CHANGED + 1))
+  [[ -n "$name" ]] || name="$LCARS_LOGIN"
+  git config --global user.name  "$name"  || { p_fail "git config user.name pour $LCARS_LOGIN"; return 1; }
+  git config --global user.email "$email" || { p_fail "git config user.email pour $LCARS_LOGIN"; return 1; }
+  LCARS_CHANGED=$((LCARS_CHANGED + 1))
   p_chg "identité git posée : $name <$email> (depuis son compte forge — c'est elle qui mappe ses commits, avatar compris)"
 }
 
@@ -122,23 +125,23 @@ probe_identity() {
   local tokfile code
   tokfile="$(env_field "$ENV_FILE" FORGE_TOKEN_FILE)"
   if [[ -z "$tokfile" ]]; then
-    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (50-forge puis re-apply)"
+    p_warn "aucun FORGE_TOKEN_FILE dans $ENV_FILE — la fleet retomberait sur ~/.gitea_token ; c'est le token système qui doit être câblé (63-forge-tokens puis re-apply)"
   elif [[ ! -r "$tokfile" ]]; then
-    p_warn "FORGE_TOKEN_FILE=$tokfile illisible par $PROV_HUMAN — la fleet ne pourra pas parler à la forge (groupe $PROV_FLEET_GROUP ?)"
-  elif [[ -z "$PROV_FORGE_URL" ]]; then
+    p_warn "FORGE_TOKEN_FILE=$tokfile illisible par $LCARS_LOGIN — la fleet ne pourra pas parler à la forge (groupe $LCARS_FLEET_GROUP ?)"
+  elif [[ -z "$FORGE_BASE_URL" ]]; then
     p_ok "credential forge de la fleet câblé et lisible ($tokfile ; forge non sondable : URL absente)"
   else
-    code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$PROV_FORGE_URL/api/v1/user" 2>/dev/null || echo 000)"
+    code="$(forge_curl "$tokfile" -s -o /dev/null -w '%{http_code}' -m 10 "$FORGE_BASE_URL/api/v1/user" 2>/dev/null || echo 000)"
     if [[ "$code" == "200" ]]; then
       p_ok "credential forge de la fleet valide ($tokfile)"
     else
-      p_warn "$tokfile présent mais la forge répond $code — token mort ; re-mint par 50-forge (jamais un geste de $PROV_HUMAN)"
+      p_warn "$tokfile présent mais la forge répond $code — token mort ; re-mint par 63-forge-tokens (jamais un geste de $LCARS_LOGIN)"
     fi
   fi
 }
 
 check() {
-  [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $PROV_HUMAN introuvable"; verdict_check; }
+  [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $LCARS_LOGIN introuvable"; verdict_check; }
 
   local d
   # ⚠ `.lcars/log` EST DANS LA BOUCLE, et son absence y etait un angle mort DOUBLE. L'apply le cree
@@ -147,10 +150,10 @@ check() {
   # non plus : le doctor serait donc reste aveugle APRES le correctif, sur un repertoire qui porte les
   # journaux d'un humain.
   for d in "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods"; do
-    if [[ -d "$d" && "$(stat -c '%a %U' "$d")" == "700 $PROV_HUMAN" ]]; then
-      p_ok "$d (0700 $PROV_HUMAN)"
+    if [[ -d "$d" && "$(stat -c '%a %U' "$d")" == "700 $LCARS_LOGIN" ]]; then
+      p_ok "$d (0700 $LCARS_LOGIN)"
     else
-      p_drift "$d absent ou pas 0700 $PROV_HUMAN"
+      p_drift "$d absent ou pas 0700 $LCARS_LOGIN"
     fi
   done
 
@@ -160,7 +163,7 @@ check() {
     else
       p_drift "fleet_v2.env présent mais FORGE_BASE_URL manquant — fleet_v2 start refusera ; édite $ENV_FILE"
     fi
-    if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
+    if [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
       p_drift "token système minté mais non câblé dans $ENV_FILE — l'apply le câble (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN), puis « fleet_v2 stop && start »"
     fi
   else
@@ -181,7 +184,7 @@ check() {
 }
 
 apply() {
-  [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $PROV_HUMAN introuvable"; verdict_apply; }
+  [[ -n "$HOME_DIR" && -d "$HOME_DIR" ]] || { p_fail "home de $LCARS_LOGIN introuvable"; verdict_apply; }
 
   mkdir -p "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods" || { p_fail "mkdir ~/.lcars ~/pods"; verdict_apply; }
   chmod 0700 "$HOME_DIR/.lcars" "$HOME_DIR/.lcars/log" "$HOME_DIR/pods" || { p_fail "chmod 0700"; verdict_apply; }
@@ -192,11 +195,11 @@ apply() {
     if [[ -r "$TEMPLATE" ]]; then
       local tmp
       tmp="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env"; verdict_apply; }
-      if [[ -n "$PROV_FORGE_URL" ]]; then
+      if [[ -n "$FORGE_BASE_URL" ]]; then
         # Le template ne porte AUCUN FORGE_BASE_URL actif (une valeur en dur viserait une forge
         # réelle pour toute boîte seedée) : l'URL connue du provisioning s'APPEND. Un sed sur la
         # ligne du template réécrirait du commentaire et n'injecterait rien.
-        { cat "$TEMPLATE"; echo ""; echo "FORGE_BASE_URL=$PROV_FORGE_URL"; } > "$tmp"
+        { cat "$TEMPLATE"; echo ""; echo "FORGE_BASE_URL=$FORGE_BASE_URL"; } > "$tmp"
       else
         cat "$TEMPLATE" > "$tmp"
       fi
@@ -208,24 +211,24 @@ apply() {
       if [[ -n "${LCARS_BIND_HOST:-}" ]]; then
         { echo ""; echo "LCARS_BIND_HOST=$LCARS_BIND_HOST"; } >> "$tmp"
       fi
-      if [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]]; then
+      if [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]]; then
         {
           echo ""
           echo "# — posé par le seed 70-human (D4) : les marqueurs système sont signés system_starfleet —"
-          echo "FORGE_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
-          echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
+          echo "FORGE_TOKEN_FILE=$LCARS_SYSTEM_TOKEN_FILE"
+          echo "FORGE_BOT_LOGIN=$LCARS_SYSTEM_ACCOUNT"
         } >> "$tmp"
       fi
       chmod 0600 "$tmp"
       mv -f "$tmp" "$ENV_FILE"
-      PROV_CHANGED=$((PROV_CHANGED + 1))
-      p_chg "fleet_v2.env seedé depuis le template${PROV_FORGE_URL:+ (FORGE_BASE_URL=$PROV_FORGE_URL)} — désormais À L'HUMAIN, plus jamais réécrit ici"
+      LCARS_CHANGED=$((LCARS_CHANGED + 1))
+      p_chg "fleet_v2.env seedé depuis le template${FORGE_BASE_URL:+ (FORGE_BASE_URL=$FORGE_BASE_URL)} — désormais À L'HUMAIN, plus jamais réécrit ici"
     else
       p_fail "template absent ($TEMPLATE) — lance d'abord 60-deploy"
     fi
   fi
 
-  if [[ -f "$ENV_FILE" ]] && [[ -n "$PROV_FORGE_URL" ]] \
+  if [[ -f "$ENV_FILE" ]] && [[ -n "$FORGE_BASE_URL" ]] \
      && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
     local tmpu
     tmpu="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (adresse forge)"; verdict_apply; }
@@ -233,12 +236,12 @@ apply() {
       cat "$ENV_FILE"
       echo ""
       echo "# — posé par 70-human : l'adresse de la forge, connue du provisionnement —"
-      echo "FORGE_BASE_URL=$PROV_FORGE_URL"
+      echo "FORGE_BASE_URL=$FORGE_BASE_URL"
     } > "$tmpu"
     chmod 0600 "$tmpu"
     mv -f "$tmpu" "$ENV_FILE"
-    PROV_CHANGED=$((PROV_CHANGED + 1))
-    p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$PROV_FORGE_URL)"
+    LCARS_CHANGED=$((LCARS_CHANGED + 1))
+    p_chg "adresse de la forge câblée dans $ENV_FILE (FORGE_BASE_URL=$FORGE_BASE_URL)"
   elif [[ -f "$ENV_FILE" ]] && ! grep -q '^FORGE_BASE_URL=' "$ENV_FILE"; then
     p_drift "fleet_v2.env sans FORGE_BASE_URL et aucune forge connue — fleet_v2 start refusera ; monte la forge (48-forge-host) ou édite $ENV_FILE"
   fi
@@ -248,7 +251,7 @@ apply() {
   # Une clé PRÉSENTE est un choix, et celui-là on n'y touche jamais — l'humain qui veut un autre
   # jeton écrit une valeur, il n'efface pas une ligne. La convergence porte donc sur le trou, pas
   # sur la décision, et elle ne demande aucune sentinelle pour savoir où elle en est.
-  if [[ -f "$ENV_FILE" ]] && [[ -r "$PROV_SYSTEM_TOKEN_FILE" ]] \
+  if [[ -f "$ENV_FILE" ]] && [[ -r "$LCARS_SYSTEM_TOKEN_FILE" ]] \
      && ! grep -q '^FORGE_TOKEN_FILE=' "$ENV_FILE"; then
     local tmp2
     tmp2="$(mktemp "$HOME_DIR/.lcars/.env.XXXXXX")" || { p_fail "tmp env (câblage)"; verdict_apply; }
@@ -256,12 +259,12 @@ apply() {
       cat "$ENV_FILE"
       echo ""
       echo "# — posé par 70-human (D4) : les marqueurs système sont signés system_starfleet —"
-      echo "FORGE_TOKEN_FILE=$PROV_SYSTEM_TOKEN_FILE"
-      echo "FORGE_BOT_LOGIN=$PROV_SYSTEM_ACCOUNT"
+      echo "FORGE_TOKEN_FILE=$LCARS_SYSTEM_TOKEN_FILE"
+      echo "FORGE_BOT_LOGIN=$LCARS_SYSTEM_ACCOUNT"
     } > "$tmp2"
     chmod 0600 "$tmp2"
     mv -f "$tmp2" "$ENV_FILE"
-    PROV_CHANGED=$((PROV_CHANGED + 1))
+    LCARS_CHANGED=$((LCARS_CHANGED + 1))
     p_chg "jeton système câblé dans $ENV_FILE (FORGE_TOKEN_FILE + FORGE_BOT_LOGIN) — « fleet_v2 stop && start » pour l'appliquer"
   fi
 

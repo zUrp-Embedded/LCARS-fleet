@@ -61,7 +61,8 @@ code_of() { sed 's/#.*//' "$1"; }
   # les cinq arbres stables, un par voie d'entree du bash dans ce depot : recette, temoins,
   # programmes de PATH, demons, outils d'install. Perdre l'un d'eux se voit ici.
   local t
-  for t in deploy fleet/test fleet/bin fleet/services fleet/etc; do
+  # `fleet/etc` ne contribue plus (Q3, 2026-09-04) : ses outils d'install sont dans `deploy/lib`.
+  for t in deploy fleet/test fleet/bin fleet/services; do
     printf '%s\n' "${BASH_CODE[@]}" | grep -q "^$REPO/$t/" || {
       echo "MUR 0 rompu — l'arbre « $t » ne contribue AUCUN fichier bash au perimetre" >&2
       return 1
@@ -70,7 +71,7 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "${#BASH_CODE[@]}" -ge 85 ]
   # Trois membres NOMMES, un par forme de nom : suffixe, sans suffixe, et le fichier meme pour
   # lequel ce mur a ete ecrit. Si `install.sh` sort du perimetre, c'est ici que ca rougit.
-  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/etc/deploy-release.sh$'
+  printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/deploy-release.sh$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/bin/fleet_v2$'
   printf '%s\n' "${BASH_CODE[@]}" | grep -q '/deploy/lib/provision-lib.sh$'
 }
@@ -247,7 +248,7 @@ code_of() { sed 's/#.*//' "$1"; }
 }
 
 @test "MUR 4: le port du deck a UNE declaration, et les copies s'accordent" {
-  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `55-deck-oidc` batit les
+  # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `66-deck-oidc` batit les
   # `redirect_uris` OAuth2 du deck avec `PROV_DECK_PORT` ; le daemon lit `LCARS_LANDING_PORT`. Au
   # poste, `64-services` relie les deux et `services_units.bats` le garde depuis le 2026-08-23. Sur
   # le rail BOITE, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
@@ -278,7 +279,8 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   check fleet/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
   check fleet/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check deploy/docker/entrypoint.sh   "PROV_DECK_PORT:-$attendu\}"            "le pont du rail boite"
+  check fleet/services/box/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail boite"
+  check fleet/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/Dockerfile      "LCARS_LANDING_PORT:-$attendu\}"        "la sonde de sante"
@@ -312,7 +314,7 @@ code_of() { sed 's/#.*//' "$1"; }
     "fleet/config/runtime.exs"
     "fleet/services/human-converger.sh"
     "deploy/modules.d/64-services.sh"
-    "deploy/docker/entrypoint.sh"
+    "fleet/services/box/boot.sh"
     "deploy/lib/provision-lib.sh"
   )
   # Les chemins DECLARES, captures a la source : la forme shell `${LCARS_SEAT_UID_FILE:-<X>}` et la
@@ -396,14 +398,14 @@ code_of() { sed 's/#.*//' "$1"; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est PROV_CONSOLE_GROUP dans provision-lib.sh." >&2; return 1; }
 }
 
-@test "MUR 7: tout PROV_* qu'un daemon lit figure dans la table de transport" {
+@test "MUR 7: tout LCARS_*/FORGE_* qu'un daemon lit SANS defaut figure dans la table de transport" {
   # ⚠ CE MUR SE CONSTRUIT DEPUIS LES DEUX LISTES ET N'EN RECOPIE AUCUNE. La table de transport est
   # `services_env_body` de `64-services.sh` ; la population des daemons se lit dans les `ExecStart`
   # des unites que ce meme fichier ecrit. Recopier l'une ou l'autre ici en ferait une troisieme, qui
   # derive — et c'est exactement le defaut que ce chantier poursuit.
   #
   # ⚠ ET LE PERIMETRE EST « CE QUI RECOIT LE FICHIER », PAS « CE QUI EST DANS services/ ». La
-  # distinction a coute une demi-mesure : `forge-gestures.sh` et `etc/provision-role-tokens.sh`
+  # distinction a coute une demi-mesure : `forge-gestures.sh` et `fleet/services/provision-role-tokens.sh`
   # lisent des `PROV_*` eux aussi, mais ce sont des processus ENFANTS de modules — ils ne recoivent
   # pas `services.env` (mesure : zero `set -a`, zero mention du fichier), et rien ne leur exporte
   # ces noms (`provision-lib` n'exporte RIEN ; `deploy/provision` n'exporte que ses drapeaux CLI).
@@ -413,7 +415,7 @@ code_of() { sed 's/#.*//' "$1"; }
 
   # (1) La TABLE : ce que `services_env_body` ecrit.
   local table; table="$(sed 's/#.*//' "$svc" | sed -n '/services_env_body/,/^}/p' \
-                        | sed -nE 's/.*echo "(PROV_[A-Z_]+)=.*/\1/p' | sort -u)"
+                        | sed -nE 's/.*echo "((LCARS|FORGE)_[A-Z_]+)=.*/\1/p' | sort -u)"
   [ -n "$table" ] || { echo "MUR 7 — la table de transport ne se lit plus dans services_env_body" >&2; return 1; }
 
   # (2) LES DAEMONS : les fichiers que les `ExecStart` des unites lancent.
@@ -432,19 +434,27 @@ code_of() { sed 's/#.*//' "$1"; }
   # l'install, pour une boucle qui les visite tous. Exiger ces noms dans la table ferait ecrire
   # une ligne fausse a seule fin de taire un mur : le mur aurait cause l'erreur qu'il cherche.
   #
-  # Le critere est mecanique et ne se negocie pas au cas par cas : la variable est POSEE ici s'il
-  # existe une assignation dont la partie DROITE ne se relit pas elle-meme. `PROV_X="${PROV_X:-d}"`
-  # SE relit — c'est un defaut sur une valeur transportee, donc une lecture, donc toujours attrapee.
+  # Le critere est mecanique et ne se negocie pas au cas par cas. Lot 8 : le produit ne parle plus
+  # qu'un vocabulaire (`LCARS_*`, `FORGE_*`), le sien — un nom ne dit donc plus s'il vient de
+  # l'installeur. Ce qui survit est la regle de transport elle-meme : une variable qu'un daemon lit
+  # SANS DEFAUT (`$X`, `${X}`, `${X:?}`) n'a que `services.env` pour exister sous systemd, donc elle
+  # doit y etre. Une lecture A DEFAUT (`${X:-d}`, `${X:=d}`) est un reglage du produit : il vit sans
+  # transport. Une variable que le daemon POSE lui-meme (assignation dont la droite ne le relit pas)
+  # n'est pas une lecture.
   local d lus="" f src v
   for d in $daemons; do
     f="$REPO/fleet/services/$d"
     [ -r "$f" ] || { echo "MUR 7 — daemon introuvable : services/$d" >&2; return 1; }
     src="$(sed 's/#.*//' "$f")"
-    for v in $(grep -oE 'PROV_[A-Z_]+' <<<"$src" | sort -u); do
+    for v in $(grep -oE '(LCARS|FORGE)_[A-Z_]+' <<<"$src" | sort -u); do
       # `… | grep -q … && continue` rendrait le rc du grep en fin de corps : la forme `if` est
       # obligatoire ici, c'est ce que MUR I3 de idiom_walls mesure sur le code de production.
       if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" <<<"$src" \
            | sed "s/.*$v=//" | grep -qv "$v"; then
+        continue
+      fi
+      # lue quelque part SANS defaut ? (`$V`, `${V}`, `${V:?…}` — jamais `${V:-…}` ni `${V:=…}`)
+      if ! grep -qE "\\\$$v([^A-Z_]|\$)|\\\$\\{$v(\\}|:\\?)" <<<"$src"; then
         continue
       fi
       lus="$lus$v
@@ -457,16 +467,20 @@ code_of() { sed 's/#.*//' "$1"; }
   # c'est la panne la plus chere : elle se lit comme un succes. Les trois formes sur une sonde
   # synthetique — la POSEE doit sortir, la LUE et celle A DEFAUT doivent rester.
   local probe="$BATS_TEST_TMPDIR/prov_probe.sh" retenus=""
-  printf '%s\n' 'PROV_POSEE=1' 'echo "$PROV_POSEE $PROV_LUE"' 'PROV_DEFAUT="${PROV_DEFAUT:-x}"' > "$probe"
-  for v in $(grep -oE 'PROV_[A-Z_]+' "$probe" | sort -u); do
+  printf '%s\n' 'LCARS_POSEE=1' 'echo "$LCARS_POSEE $LCARS_LUE ${LCARS_EXIGEE:?}"' 'LCARS_DEFAUT="${LCARS_DEFAUT:-x}"' > "$probe"
+  local psrc; psrc="$(cat "$probe")"
+  for v in $(grep -oE '(LCARS|FORGE)_[A-Z_]+' "$probe" | sort -u); do
     if grep -oE "(^|[;&|[:space:]])(export[[:space:]]+)?$v=[^;]*" "$probe" \
          | sed "s/.*$v=//" | grep -qv "$v"; then
       continue
     fi
+    if ! grep -qE "\\\$$v([^A-Z_]|\$)|\\\$\\{$v(\\}|:\\?)" <<<"$psrc"; then
+      continue
+    fi
     retenus="$retenus $v"
   done
-  [ "$retenus" = " PROV_DEFAUT PROV_LUE" ] || {
-    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$retenus », attendu « PROV_DEFAUT PROV_LUE »" >&2
+  [ "$retenus" = " LCARS_EXIGEE LCARS_LUE" ] || {
+    echo "MUR 7 — le filtre posee/lue ne mord plus : retenu «$retenus », attendu « LCARS_EXIGEE LCARS_LUE »" >&2
     return 1
   }
 
@@ -603,7 +617,7 @@ PYX
 }
 
 @test "MUR 10: le prefixe d'install s'accorde — y compris dans la garde qui le protege" {
-  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `etc/deploy-release.sh` et `provision-lib.sh`
+  # ⚠ TROIS PORTEURS, ET LE TROISIEME EST UNE GARDE. `deploy/lib/deploy-release.sh` et `provision-lib.sh`
   # declarent le prefixe chacun de leur cote ; `.claude/hooks/runtime-guard.sh` REFUSE les ecritures
   # dans l'arbre d'install, en le nommant. Si le prefixe bougeait sans que le hook suive, la garde
   # cesserait de proteger l'install reelle — sans un mot, et c'est le pire mode : elle continuerait
@@ -613,7 +627,7 @@ PYX
   # `install.sh`, donc `provision-lib` est en amont — mais `install.sh` joue aussi SEUL, avec son
   # propre repli. Ce qui se verifie est donc l'ACCORD, comme pour `/home/private`. Une designation
   # pourra s'ajouter ; l'inventer ici serait une decision que personne n'a prise.
-  local inst="$REPO/fleet/etc/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
+  local inst="$REPO/deploy/lib/deploy-release.sh" lib="$REPO/deploy/lib/provision-lib.sh"
   local guard="$REPO/../.claude/hooks/runtime-guard.sh"
   [ -r "$inst" ] && [ -r "$lib" ] || { echo "MUR 10 — install.sh ou provision-lib.sh illisible" >&2; return 1; }
 
@@ -818,7 +832,7 @@ PYX
   # `0640 root:nogroup`, donc un demon reseau le lisait. C'est MON compte, propage sans verrou.
   #
   # ⚠ ET SES DEUX REPLIS NE DISAIENT PAS LA MEME CHOSE. `21-service-accounts` (qui CREE le compte)
-  # derive le groupe du user ; `55-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
+  # derive le groupe du user ; `66-deck-oidc` gravait `lcars-system`. Regler `PROV_SYSTEM_USER`
   # seul faisait creer un groupe d'un cote et chown vers un autre — un groupe inexistant, un deck
   # qui sert 503, et la cause dans un autre module.
   local nom
@@ -831,9 +845,9 @@ PYX
   sed 's/#.*//' "$REPO/deploy/modules.d/21-service-accounts.sh" \
     | grep -qE 'SYSTEM_GROUP="\$\{PROV_SYSTEM_GROUP:-\$SYSTEM_USER\}"' || {
       echo "MUR 13 rompu — 21-service-accounts ne derive plus le groupe du compte" >&2; rompu=1; }
-  sed 's/#.*//' "$REPO/deploy/modules.d/55-deck-oidc.sh" \
-    | grep -qE 'PROV_SYSTEM_GROUP:-\$\{PROV_SYSTEM_USER:-'"$nom"'\}' || {
-      echo "MUR 13 rompu — 55-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
+  sed 's/#.*//' "$REPO/fleet/services/forge.d/deck-oidc.sh" \
+    | grep -qE 'LCARS_SYSTEM_GROUP:-\$\{LCARS_SYSTEM_USER:-'"$nom"'\}' || {
+      echo "MUR 13 rompu — 66-deck-oidc grave un groupe au lieu de le deriver du compte" >&2; rompu=1; }
 
   # (2) Les autres porteurs nomment le MEME compte, chacun sur son geste.
   need13() { sed 's/#.*//' "$REPO/$1" 2>/dev/null | grep -qE -- "$2" || {

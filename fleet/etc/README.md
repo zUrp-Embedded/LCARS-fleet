@@ -1,5 +1,15 @@
 # etc/ — run & déploiement de la fleet (chantier 16)
 
+> ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontière, c'est : joué uniquement
+> à l'install, ou utilisé en prod ? ». `etc/` ne porte plus que des **données** du produit —
+> `release.manifest` (ce que la release livre) et `fleet_v2.env.template` (le gabarit d'env de
+> chaque humain). Ses deux outils joués à l'install seulement vivent dans `deploy/lib/` :
+> `deploy-release.sh` (bâtit et pose la release), `enroll-catalogue.sh` (dérive le roster de la
+> recette forge) — témoins dans `deploy/tests/lib/`, joués par `deploy/gate.sh`. Le troisième,
+> `provision-role-tokens.sh` (minte les jetons de rôle), est un GESTE DE FORGE du produit — la boîte
+> le joue à l'init de son instance — et vit dans `services/`, à côté de `forge-gestures.sh`
+> (lot 6, 2026-09-04) ; le poste l'appelle depuis `63-forge-tokens`.
+
 **Date**: 2026-05-10
 **Last revised**: 2026-08-09
 **Status**: human-launched model (systemd removed 2026-06-16)
@@ -62,7 +72,7 @@ sudo chgrp -R fleet /opt/lcars/runtime && sudo chmod g+rx /opt/lcars/runtime/bin
 oublie `bin/` fait tourner le nouveau BEAM avec les vieux sandboxes.
 
 **La liste des fichiers livrés vit dans `etc/release.manifest`** (données : fichier, exec/noexec,
-flag `link`) — consommée par `etc/deploy-release.sh` (qui automatise cette procédure) ET par le doctor
+flag `link`) — consommée par `deploy/lib/deploy-release.sh` (qui automatise cette procédure) ET par le doctor
 du provisioning (`60-deploy check`). Avant le manifest, la liste existait ici ET dans install.sh,
 et les deux copies avaient commencé à dériver.
 
@@ -123,9 +133,9 @@ N0 (substrat pur). La frontière vendor N1 isolée = `bin/claude_launch.sh` (pos
 Les comptes de rôle (architect, consultant, engineer, gatekeeper, qualifier, reviewer)
 postent EN LEUR NOM via `<FORGE_ROLE_TOKENS_DIR>/<role>.gitea_token`. La pose est mécanisée :
 
-    etc/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json> \
+    fleet/services/provision-role-tokens.sh --forge <URL> --passwords-file <secrets.json> \
                                                                 # les 6 rôles + le système = A4 complet
-    etc/provision-role-tokens.sh --forge <URL> --check                          # sonde (nuke-drill)
+    fleet/services/provision-role-tokens.sh --forge <URL> --check                          # sonde (nuke-drill)
 
 Le `passwords-file` (JSON `{"compte":"pwd"}`, clé insensible à la casse) EST le livrable A4 durable :
 un fichier opérateur-only, rejouable. Chaque token = une paire `compte:fichier` : les rôles produisent
@@ -137,4 +147,4 @@ rien, donc une table `--extra-token` pour lui seul. Le drapeau existe toujours p
 décalage compte↔fichier ; il n'a plus d'usager dans la recette.) Gitea n'accepte QUE la basic auth pour créer un token (même un token site-admin ne peut
 pas minter — vérifié 2026-07-05). Exécution PRIVILÉGIÉE, une fois par forge, idempotente. Sans ces
 tokens, un humain neuf bloque au premier geste signé par un rôle (create_issue → 401, vécu 2026-07-05).
-Tests : `test/etc/` (bats, couvert par `mix gate`).
+Tests : `fleet/test/services/provision-role-tokens.bats` (bats, joué par `shell_gate`, donc `mix gate`).

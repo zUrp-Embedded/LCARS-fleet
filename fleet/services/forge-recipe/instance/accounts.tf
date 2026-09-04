@@ -104,7 +104,7 @@ resource "gitea_user" "system_role" {
 # compte : rien ne pouvait s'authentifier sous lui, et il etait site-admin.
 #
 # POURQUOI IL A SURVECU SI LONGTEMPS. Le verrou a quatre listes (`roles.provisioning_locked`) impose
-# l'egalite canon == forge.tf == ROLES == PROV_ROLES, et il EXCLUT starfleet sur `forge_identity`
+# l'egalite canon == forge.tf == ROLES == LCARS_ROLES, et il EXCLUT starfleet sur `forge_identity`
 # — l'asymetrie vit dans la donnee, volontairement. Mais cette ressource-ci etait AUTONOME, hors de
 # la boucle des roles, comme `system` et `human` : elle echappait donc au verrou. Le canon pouvait
 # dire « pas de compte forge » pendant que le provisionnement en creait un, indefiniment, sans

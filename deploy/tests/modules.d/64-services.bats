@@ -147,9 +147,10 @@ mod() { run bash "$MOD" "$1"; }
   # Un service n'a ni le shell de l'operateur ni les PROV_* que `provision` exporte le temps d'un
   # apply. Le convergeur lit ces noms-la : s'ils manquent, il converge une autre org, en silence.
   mod apply
-  grep -q "^PROV_FORGE_ORG=" "$LCARS_SERVICES_ENV"
-  grep -q "^PROV_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$LCARS_SERVICES_ENV"
+  # lot 8 : les daemons sont le PRODUIT, leur env parle LCARS_*
+  grep -q "^LCARS_FORGE_ORG=" "$LCARS_SERVICES_ENV"
+  grep -q "^LCARS_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
+  refute grep -q "^PROV_" "$LCARS_SERVICES_ENV"
 }
 
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
@@ -321,9 +322,9 @@ mod() { run bash "$MOD" "$1"; }
   # Mutation du 2026-08-26 : un `PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}` reinjecte laissait ce
   # temoin VERT — les deux `!` s'executaient, echouaient, et bash les exempte d'`errexit`. Seule la
   # ligne `grep -q 'echo …'` comptait, et elle ne verifie pas ce que le titre promet.
-  refute grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
-  refute grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
-  grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
+  refute grep -qE 'LCARS_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
+  refute grep -qE 'LCARS_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
+  grep -q 'echo "LCARS_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
 }
 
 # ─── LE PORT DU DECK — une valeur, les deux bouts ───────────────────────────────────────────────
@@ -540,9 +541,8 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   mod apply
   [ "$status" -eq 0 ]
   # CE QUI VIENT DU FICHIER — donc ce que le daemon aura aussi.
-  grep -q '^PROV_HUMANS_TEAM=' "$CONV_ENV"
+  grep -q '^LCARS_HUMANS_TEAM=' "$CONV_ENV"
   grep -q '^FORGE_BASE_URL=http://127.0.0.1:3000$' "$CONV_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$CONV_ENV"
   # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
   # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.
   absent_de_l_env '^PROV_TOKENS_DIR='
@@ -834,4 +834,20 @@ box_services_present() {
   # ⚠ UN JOURNAL ABSENT EST UNE REPONSE, PAS UNE PANNE : le module tourne aussi dans un conteneur
   # sans systemd persistant. La lecture ne doit pas pouvoir tuer le verdict qu'elle decrit.
   grep -q '|| true' <<<"$corps"
+}
+
+# ─── DI-09 (lot 11) : le siege se GRAVE meme sans systemd ─────────────────────────────────────
+# `seat.uid` et `services.env` sont des FAITS de la machine (qui est le siege, ce que les daemons
+# lisent) ; les unites systemd sont une MECANIQUE. Sans init, la mecanique s'abstient et le dit —
+# les faits se posent quand meme, sinon GUARD B refuse tout lancement sur une machine sans systemd
+# pour une raison qui n'a rien a voir avec systemd.
+@test "sans systemd, seat.uid et services.env sont POSES quand meme — seules les unites s'abstiennent" {
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pas de systemd"* ]]
+  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
+  grep -q '^LCARS_SYSADMIN_UID=1007$' "$LCARS_SERVICES_ENV"
+  [ ! -e "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
 }

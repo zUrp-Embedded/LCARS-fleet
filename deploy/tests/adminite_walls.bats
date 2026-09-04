@@ -98,7 +98,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 @test "MUR 1: le jeton master et le seed ne sont poses QUE pour leur detenteur, sans groupe" {
   # ⚠ CE MUR NE PEUT PAS SE DERIVER DU MANIFESTE, et le croire etait une erreur d'ecriture du plan.
   # `system.manifest` porte les REPERTOIRES ; le mode des deux secrets est pose ailleurs, par TROIS
-  # ecrivains — `48-forge-host` au mint, `50-forge converge_authority_modes()` a chaque apply, et
+  # ecrivains — `48-forge-host` au mint, `63-forge-tokens converge_authority_modes()` a chaque apply, et
   # `put_secret()` a l'ecriture. Un mur bati sur le manifeste serait VERT avec le jeton en 0640.
   # ⚠ ET CE MUR AVAIT LE DEFAUT QU'IL EXISTE POUR ATTRAPER. Il parcourt les lignes qui posent un
   # mode sur l'un des deux secrets — et si ces lignes DISPARAISSENT (un refactor amont, un rebase
@@ -236,11 +236,11 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # l'ecrit et le manifeste qui declare l'empreinte machine. Rien ne les comparait, et ils ont
   # diverge — `nogroup` d'un cote, `fleet` de l'autre. Un manifeste qui ment sur un secret est pire
   # qu'un manifeste absent : on le lit pour savoir qui peut lire.
-  local mod="$REPO/deploy/modules.d/55-deck-oidc.sh"
+  local mod="$REPO/fleet/services/forge.d/deck-oidc.sh"
   local manifest="$REPO/deploy/system.manifest"
   local row group
 
-  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `55-deck-oidc`
+  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `66-deck-oidc`
   # gravait `${PROV_SYSTEM_GROUP:-lcars-system}` pendant que `21-service-accounts`, qui CREE le
   # compte, derive `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}` : deux replis pour une variable, qui
   # divergent des qu'on regle `PROV_SYSTEM_USER` seul. Le module derive desormais lui aussi
@@ -277,7 +277,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # `setpriv` dans le conteneur — qui n'a pas systemd et dont l'entrypoint est PID 1. En verifier un
   # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
   local unit="$REPO/deploy/modules.d/64-services.sh"
-  local entry="$REPO/deploy/docker/entrypoint.sh"
+  local entry="$REPO/fleet/services/box/boot.sh"
   local dockerfile="$REPO/deploy/docker/Dockerfile"
 
   # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
@@ -328,10 +328,10 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
       return 1
     }
 
-  code_of "$REPO/deploy/docker/entrypoint.sh" \
+  code_of "$REPO/fleet/services/box/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
       echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
-      code_of "$REPO/deploy/docker/entrypoint.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      code_of "$REPO/fleet/services/box/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
       return 1
     }
 }

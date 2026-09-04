@@ -76,7 +76,7 @@ check_ci() {
   # ⚠ « AUCUN RUNNER » EST UN FAIT, PAS UN DEFAUT DE MESURE — ET LES DEUX SORTAIENT PAR LA MEME
   # PORTE. Le sondage etait `curl -s` sans `-f` et sans code HTTP, suivi de `jq '.total_count // 0'`
   # avec `|| echo 0` : les QUATRE echecs possibles tombaient dans la branche « AUCUN runner
-  # enregistre ». Mesure du 2026-09-01 sur les quatre corps reels — corps vide (reseau coupe,
+  # enregistre ». Les quatre corps reels — corps vide (reseau coupe,
   # curl 6/7/28), `<html>404…` (jq echoue), `{"message":"token does not have … required scope(s)"}`
   # (403), `{"message":"user should be the site admin"}` — tous rendaient n=0.
   #
@@ -85,7 +85,7 @@ check_ci() {
   # l'operateur d'une install par ailleurs saine etait un diagnostic FAUX sur une forge qui porte
   # trois runners.
   #
-  # Le rail sait deja faire, a trois rangs d'ici : `50-forge.sh:250-259` sonde le MEME endpoint et
+  # Le rail sait deja faire, a trois rangs d'ici : `63-forge-tokens.sh:250-259` sonde le MEME endpoint et
   # separe les deux cas — `-fsS`, puis `[[ -n "$body" ]] || p_warn "… rien n'est conclu"`. Et
   # `accept` possede deja le troisieme etat qu'il fallait emettre : `skip`, en tete de ce fichier.
   local code
@@ -153,7 +153,7 @@ check_fleet_start() {
   }
 
   if fleet_up; then
-    ok "fleet : deja demarree sous « $login » (laissee telle quelle)"
+    skip "fleet : deja demarree sous « $login » (laissee telle quelle) — « elle demarre » n'est PAS etabli par cette passe : ce verdict ne se mesure que fleet arretee, donc sur un deploiement jetable (P4) ou apres un « fleet_v2 stop » volontaire"
     return
   fi
 
@@ -168,7 +168,7 @@ check_fleet_start() {
   done
   "${as[@]}" fleet_v2 stop >/dev/null 2>&1 || true
   if [[ "$alive" -eq 1 ]]; then
-    ok "fleet : demarre et vivante sous « $login » (arretee apres mesure)"
+    ok "fleet : demarre et vivante sous « $login » (arretee apres mesure) — verdict de DEMARRAGE etabli sur cette installation (P4 : il vaut pour elle telle qu'elle est, jetable ou non)"
   else
     no "fleet : demarree sans erreur mais le BEAM n'est jamais apparu — « fleet_v2 status » sous « $login »"
   fi

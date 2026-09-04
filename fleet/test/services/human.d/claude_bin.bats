@@ -5,7 +5,7 @@
 # STATUS: bats tests for 40-claude-bin — UNE seule source, l'installeur officiel
 #
 # ⚠ CE FICHIER REMPLACE `claude_bin_seed.bats`, ET IL EPINGLE L'INVERSE DE CE QUE CELUI-LA PROUVAIT.
-# L'ancien tenait qu'une GRAINE (`$PROV_CLAUDE_SEED`, un binaire pose sur la machine par un geste
+# L'ancien tenait qu'une GRAINE (`$LCARS_CLAUDE_SEED`, un binaire pose sur la machine par un geste
 # exterieur) court-circuitait le reseau ; son stub `curl` echouait si le reseau etait appele.
 #
 # ⚖ ARBITRAGE USER 2026-08-17 : « on ne cache pas un binaire anthropic, on fait UNIQUEMENT l'install
@@ -23,9 +23,9 @@
 #     paie en travail, et elle n'avait de temoin que par la bande.
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../../../deploy"
-  # ⚠ DEUX RACINES DEPUIS LA SEPARATION : la LIB vient de l installeur (`$SRC`), le MODULE du
-  # runtime. Ce temoin joue un module per-humain, qui a suivi le convergeur hors de `deploy/`.
+  # UNE SEULE RACINE (Q3, 2026-09-04) : le module ET son protocole sont du runtime — le temoin ne
+  # lit plus rien dans `deploy/`. Il en lisait la lib, que le module sourcait et que son hote
+  # reel ne posait pas.
   MOD="$BATS_TEST_DIRNAME/../../../services/human.d/40-claude-bin.sh"
   SANDBOX="$BATS_TEST_TMPDIR/box"
   HOMEDIR="$SANDBOX/home"
@@ -36,9 +36,11 @@ setup() {
   # the shipped code, and the diff between it and what runs here is these three lines.
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
-  cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
-  cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
-  cat >> "$SANDBOX/lib/provision-lib.sh" <<EOF
+  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur : le module la sourcait
+  # et son hote reel ne la posait pas. Le decor recopie le protocole pour y surcharger `human_home`.
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh" "$SANDBOX/lib/human-protocol.sh"
+  cp "$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh" "$SANDBOX/lib/module-protocol.sh"
+  cat >> "$SANDBOX/lib/human-protocol.sh" <<EOF
 
 human_home() { echo "$HOMEDIR"; }
 EOF
@@ -46,9 +48,9 @@ EOF
   CURL_LOG="$BATS_TEST_TMPDIR/curl.calls"
   : > "$CURL_LOG"
 
-  export PROVISION_LIB="$SANDBOX/lib/provision-lib.sh"
-  export PROV_HUMAN
-  PROV_HUMAN="$(id -un)"
+  export LCARS_HUMAN_PROTOCOL="$SANDBOX/lib/human-protocol.sh"
+  export LCARS_LOGIN
+  LCARS_LOGIN="$(id -un)"
   export PATH="$BINDIR:$PATH"
 
   # ⚠ `HOME` EST DU DECOR ICI, ET SON ABSENCE COUTE LE BINAIRE DU DEVELOPPEUR. Le module ne
@@ -145,6 +147,6 @@ EOF
 @test "aucune SOURCE alternative ne subsiste dans le module" {
   # Epingle la FORME, pas le comportement : ce qui a produit le defaut est une seconde source
   # preferee au reseau. Qu'elle ne puisse pas revenir par une variable oubliee se verifie ici.
-  run grep -c "PROV_CLAUDE_SEED" "$MOD"
+  run grep -c "LCARS_CLAUDE_SEED" "$MOD"
   [ "$output" -eq 1 ]   # la seule occurrence restante est l'avertissement « ne pas la remettre »
 }

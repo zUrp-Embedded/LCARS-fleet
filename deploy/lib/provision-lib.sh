@@ -56,14 +56,14 @@ PROVISION_LIB_LOADED=1
 # Le reseau que compose cree pour un projet sans `networks:` explicite. Le runner le REJOINT : depuis
 # un conteneur, l'adresse publiee de la forge (`127.0.0.1:<port>`) designe ce conteneur-la.
 : "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
-# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `50-forge` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
+# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `63-forge-tokens` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
 # le defaut du `.sh`. Un role absent ICI = pas de token sur une fleet fraiche = rail ops en
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 : "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
-# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache vivait
-# sous `/home` jusqu'au 2026-09-01 ; deux gestes la nomment encore — `45-catalogues` pour DIRE que le
+# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache a vecu
+# sous `/home` ; deux gestes nomment encore cette adresse — `45-catalogues` pour DIRE que le
 # reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
 # (`${VAR:-/home/catalogues}`) auraient fait deux sources d'un meme fait, ce que le mur des racines
 # refuse a juste titre : celle qu'on lit n'est jamais celle qu'on a corrigee.
@@ -74,7 +74,7 @@ PROVISION_LIB_LOADED=1
 # La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck.
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
 # LE FICHIER EST LE SEUL CANAL ENTRE MODULES : ils sont des PROCESSUS, donc `48-forge-host` ne peut
-# rien exporter vers `50-forge`. Il écrit son adresse, on la relit ici.
+# rien exporter vers `63-forge-tokens`. Il écrit son adresse, on la relit ici.
 # En conteneur ce fichier n'existe pas : l'environnement du compose gagne.
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
@@ -506,7 +506,7 @@ write_atomic() {
   # (chmod, chown, mv) REUSSISSENT tous sur un tampon tronque : le fichier bascule, PROV_CHANGED
   # s'incremente, et `p_chg` imprime POSE. Un echec d'ecriture ressortait donc en SUCCES.
   #
-  # MESURE DU 2026-09-01 : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
+  # VU : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
   # « POSE », rc 0, et un fichier de ZERO octet. Tout ce que le rail pose sous /etc passe par ici —
   # `seat.uid` vide fait refuser tout `fleet_v2 start` par le GUARD B ; `services.env` vide demarre
   # les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide laisse l'interop Windows OUVERTE sur
@@ -542,6 +542,16 @@ ensure_mode() {
   # stat rend le mode SANS zéro de tête ; on normalise la cible pareil (0750 → 750).
   local want_mode="${mode#0}"
   if [[ "$cur_mode" != "$want_mode" ]]; then
+    # ⚠ UN MODE NUMERIQUE NE RETIRE JAMAIS LE SETGID D'UN REPERTOIRE — c'est GNU chmod, pas une
+    # option : « you can set (but not clear) the bits with a numeric mode ». Un repertoire arrive
+    # en 2755 des qu'il herite d'un parent setgid ou qu'un `cp -a src/. dst/` lui recopie celui
+    # de sa source (tout checkout pose dans un arbre `fleet` setgid). Le `chmod 0755` passait, la
+    # relecture lisait 2755, et la primitive rendait « mode 2755 ≠ 755 après chmod » : le module
+    # echouait sur un etat qu'il venait de poser, et le rail cessait d'etre rejouable.
+    # Cas vu : un second apply de `44-media` sur `/opt/lcars/share/avatars`.
+    # On efface d'abord les bits speciaux ; le mode numerique REPOSE ensuite ceux qu'il demande
+    # (2775 remet son setgid), donc rien n'est perdu pour un objet qui les veut.
+    chmod u-s,g-s,o-t "$path" 2>/dev/null || true
     chmod "$mode" "$path" || { p_fail "ensure_mode: chmod $mode refusé: $path"; return 1; }
     changed=1
   fi
@@ -802,7 +812,7 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
 # ─── apt_ensure <pkg…> — install par liste des MANQUANTS, verdict réel paquet par paquet ─────────
 # ⚠ `dpkg -s` REUSSIT SUR UN PAQUET RETIRE. Un `apt-get remove` laisse le paquet en etat `rc`
 # (removed, config-files) : sa base de donnees existe toujours, donc `dpkg -s` sort 0 et une sonde
-# batie dessus le croit pose. Mesure du 2026-08-30, banc .63 : apres `provision uninstall --yes`,
+# batie dessus le croit pose. Vu : apres `provision uninstall --yes`,
 # l'`apply` suivant n'a REINSTALLE ni `docker-ce` ni `ttyd` — les deux etaient en `rc` — et trois
 # modules sont tombes en cascade (la forge non montee, la console sans serveur, quatre unites
 # mortes). Le rail ne savait pas reinstaller ce qu'il venait de desinstaller.
@@ -1092,7 +1102,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   p_warn   ON NE SAIT PAS, ou la question est HORS DU PERIMETRE du rail. Un objet qu'on ne peut pas
 #            lire d'ici ; une adhesion d'org qu'une personne pose elle-meme sur la forge.
 #
-# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS, le 2026-09-01. D'abord en laissant
+# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS. D'abord en laissant
 # `p_drift` sur des sondes qui DISAIENT ne pas savoir — « non mesurable », « NON SONDABLE »,
 # « illisible » — ce qui produisait cinq drifts sans sudo qui disparaissaient avec, sur une machine
 # identique. Puis, en corrigeant, en passant a `p_warn` une forge muette et un manifeste illisible :
@@ -1109,8 +1119,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   absent        il n'est pas la, et on est en position de l'affirmer
 #   unmeasurable  on ne peut meme pas conclure : un ancetre n'est pas traversable d'ici
 #
-# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Mesure du 2026-09-01 sur le banc
-# 2004 : `55-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
+# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Vu : `66-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
 # parfaitement present — `0640 root:lcars-system`, que l'appelant ne peut pas OUVRIR mais peut
 # parfaitement CONSTATER. Le test de lisibilite tenait lieu de test d'existence, et le doctor
 # declarait non conforme une machine qui l'etait.
@@ -1329,9 +1338,8 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # son geste en fait, et les deux appelants n'en font pas la meme chose.
 # ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
 #
-# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Mesure du
-# 2026-09-02, bancs 2006 ET 2007, sur un apply rejoué depuis `/opt/lcars/deploy/provision` —
-# le geste NOMINAL du convergeur :
+# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Vu sur un apply rejoué depuis
+# `/opt/lcars/deploy/provision` — le geste NOMINAL du convergeur :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
 #   FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
@@ -1354,20 +1362,26 @@ prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la cop
   [[ "$(repo_root)" == "${PROV_ROOT}" ]]
 }
 
-prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE, ou rien (rc 1)
-  local c
-  for c in "${PROV_RELEASE_BIN:-}" \
-           "$(repo_root)/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-           "${PROV_PREFIX:-}/rel/lcars_fleet/bin/lcars_fleet"; do
-    [[ -n "$c" && -x "$c" ]] && { printf '%s\n' "$c"; return 0; }
-  done
-  return 1
-}
 
 prov_roles() {
   local out="$PROV_ROLES" root
   local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
-  local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
+  # ⚠ LES PORTES OUTIL VIVENT DANS L'ENTRYPOINT, ET IL N'EST PAS AU MEME ENDROIT SUR LES DEUX RAILS :
+  # `/opt/lcars/entrypoint.sh` dans l'image, `<racine>/deploy/docker/entrypoint.sh` sur un poste
+  # (62-runtime-helpers l'exclut de ses auxiliaires et embarque `deploy/` entier). Un seul chemin
+  # ici rendait le roster des catalogues installes VIDE sur tout poste : `63-forge-tokens` ne mintait que
+  # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
+  # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
+  # copie posee est 0644.
+  # La porte outil est « lcars tool roles-tfvars », dans la CLI du PRODUIT —
+  # elle vivait dans l'entrypoint de l'image, que ce fichier devinait a deux adresses. La CLI est
+  # posee par 60 (`$PROV_LINK_DIR/lcars`) ; avant, ou depuis une copie, celle de l'arbre.
+  local entry="${PROV_LCARS_CLI:-}" c
+  if [[ -z "$entry" ]]; then
+    for c in "$PROV_LINK_DIR/lcars" "$(repo_root)/fleet/bin/lcars"; do
+      [[ -r "$c" ]] && { entry="$c"; break; }
+    done
+  fi
 
   # ⚠ `roles-tfvars` ET NON `roles` : les deux portes ne rendent pas la meme chose. `roles` rend des
   # noms de ROLE (`dev`, `writer`) quand `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`) —
@@ -1376,12 +1390,12 @@ prov_roles() {
   #
   # `.roles` porte les comptes du catalogue, `.system_roles` ceux du substrat partage. Le canon ne
   # connait pas cette coupure — il connait des comptes — donc on recolle ici.
-  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
+  if [[ -n "$entry" && -r "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
     for root in "$PROV_CATALOGUES_DIR"/*/; do
       [[ -f "${root}catalogue.yaml" ]] || continue
       # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
       # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
-      out="$out $("$entry" roles-tfvars "${root%/}" 2>/dev/null \
+      out="$out $(LCARS_FLEET_BIN="$bin" bash "$entry" tool roles-tfvars "${root%/}" 2>/dev/null \
                   | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     done
   fi

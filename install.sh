@@ -28,8 +28,8 @@
 #                                 humain de démonstration — en un geste.
 #                         --workstation  la forge est montée ICI même si
 #                                 FORGE_BASE_URL est posée. Rien d'autre : le
-#                                 runner et l'humain de démo sont l'axe
-#                                 DESTINATION, porté par --disposable.
+#                                 runner et l'humain de démo n'existent que sur
+#                                 un banc, et le banc nomme le sien.
 #                       L'humain EST une annexe : un déploiement de travail n'en
 #                       sème aucun, les personnes s'inscrivent sur la forge.
 #       --check         sonde read-only, rien n'est modifié.
@@ -38,8 +38,9 @@
 #       --port-ssh N    le port SSH du banc (défaut 2222) — avec --bench uniquement.
 #                       Les trois sont les ports que « bench-up » publie : un banc par port, et
 #                       les WSL d une même machine partagent un daemon docker.
-#       --forge-project N  nomme l'instance de forge (défaut lcars-forge) —
-#                       conteneur, réseau, volumes et runner en dérivent. C'est
+#       --forge-project N  la BASE des projets compose (défaut lcars) : <N>-forge,
+#                       <N>-runner sur le poste, <N>-fleet pour la boîte, et le banc
+#                       en dérive les trois. UN sens (DI-05). C'est
 #                       le geste qui en monte une SECONDE au lieu de déplacer
 #                       celle qui tourne.
 #
@@ -87,7 +88,7 @@ fi
 #
 # ⚠ ET LE REFUS DE STDIN A DISPARU (⚖ user 2026-08-31 : « c'est une question technique, pas un choix
 # dogmatique »). Il n'achetait que deux des cinq griefs du pipe, et les deux ont un meilleur remède :
-# la troncature par `{ main "$@"; }` en dernière ligne — mesuré, 0 fuite sur 162 troncatures contre
+# la troncature par `{ main "$@"; }` en dernière ligne — au banc de troncature, 0 fuite sur 162 contre
 # 67 pour la forme sans `main` — et la localisation par cette branche-ci.
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -106,7 +107,10 @@ DOCTOR_MODE=0
 RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 WITH_BENCH=0           # axe FORGE      : monte-la-moi
-DISPOSABLE=0           # axe DESTINATION : ce deploiement est jetable, il peut porter des annexes de demo
+# ⚠ `DISPOSABLE` A DISPARU D'ICI, ET SON DRAPEAU EST REFUSÉ PLUS BAS (⚖ user 2026-09-04 : « le
+# --disposable semble être un vieux reliquat à virer »). Il portait un « axe DESTINATION » dont le
+# seul effet, au bout de quatre étages, était un nom d'humain par défaut dans `forge-gestures.sh`
+# — que plus personne ne demandait : seul le banc sème un humain, et il le NOMME.
 # ⚠ `CONSENTED` A DISPARU D'ICI, ET SON DRAPEAU EST REFUSÉ PLUS BAS. Il valait « la 2ᵉ instance
 # saute l'accueil et la pause » — une notion qui n'existe QUE si la porte se rejoue elle-même sous
 # sudo. Elle ne le fait plus : le rail poste a son propre script, et l'escalade de celui-là n'a rien
@@ -115,24 +119,21 @@ declare -a PASSTHRU=()
 declare -a DELEGATE_ARGS=()   # ce qui suit `--` : pour le delegue de la branche, verbatim
 
 while [[ $# -gt 0 ]]; do
-  # shellcheck disable=SC2034  # DISPOSABLE est un marqueur d axe DESTINATION, epingle par
-  # forge_host_reach.bats:1158 (`--disposable) *DISPOSABLE=1`) : le drapeau lui-meme voyage par
-  # PASSTHRU, la variable dit dans le code ce que la boucle transmet. La retirer casse le temoin.
   case "$1" in
     --check|--doctor) DOCTOR_MODE=1; shift ;;
     --workstation)    RAIL=workstation; shift ;;
     --box)            RAIL=box; shift ;;
-    # ─── LES DEUX AXES, ET ILS SONT SÉPARÉS (§ 13) ──────────────────────────
+    # ─── UN SEUL AXE (§ 13) ─────────────────────────────────────────────────
     #
-    # `--bench`      axe FORGE       : montée par nous, ou fournie (FORGE_BASE_URL)
-    # `--disposable` axe DESTINATION : travail, ou jetable
-    #
-    # ⚠ ILS ÉTAIENT UN SEUL DRAPEAU, ET LE RACCOURCI TENAIT PAR ACCIDENT. `--bench` portait les deux
-    # — monter la forge ET poser les annexes de démonstration — parce que sur la boîte ils
-    # coïncidaient : « bench » y valait « jetable ». Ils ne coïncident pas en général, et le
-    # contre-exemple est le rail poste lui-même : **forge montée + destination travail**.
+    # `--bench`  axe FORGE : montée par nous, ou fournie (FORGE_BASE_URL). Sur la boîte, `--bench`
+    # monte aussi le banc — runner CI et humain de démo — et c'est le banc qui NOMME cet humain
+    # (`bench-forge-bootstrap.sh`, `LCARS_BUILTIN_HUMAN`). Un déploiement de travail n'en sème
+    # aucun : les personnes s'inscrivent sur la forge, le convergeur les matérialise.
     --bench)          WITH_BENCH=1; shift ;;
-    --disposable)     DISPOSABLE=1; PASSTHRU+=("$1"); shift ;;
+    # ⚠ REFUSE, PAS IGNORE — même règle que `--consented` : un drapeau retiré doit RATER.
+    --disposable) echo "  --disposable est retire : un deploiement ne seme pas d'humain de demonstration." >&2
+                  echo "  Le banc (--box --bench) nomme le sien ; les personnes s'inscrivent sur la forge." >&2
+                  exit 1 ;;
     # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
     # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
     --consented) echo "  --consented est retire : la porte ne se rejoue plus sous sudo." >&2
@@ -352,8 +353,7 @@ elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
   :
 elif [[ "$SUBSTRATE" == "linux" ]]; then
   # ⚠ « N'A PAS DE DESINSTALLEUR » ETAIT FAUX, ET LE MEME FICHIER DISAIT L'INVERSE 98 LIGNES PLUS
-  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe depuis le
-  # 2026-08-22, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
+  # BAS (« provision uninstall retire ce que le journal a noté »). Le verbe existe, avec son plan sans mutation, son `--yes`, son journal et son bilan de sortie.
   #
   # Ce que ce refus doit dire est plus precis, et c'est ce qui aide a decider : le rail POSSEDE la
   # machine, il sait REPRENDRE ce qu'il a pose, et il ne sait pas RESTAURER ce qu'il a modifie
@@ -425,7 +425,7 @@ else
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box doctor"
+    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box status"
     exit 0
   fi
   ans=""
@@ -479,8 +479,8 @@ if [[ "$RAIL" == "workstation" ]]; then
   # ⚠ ET IL NE SÈME PLUS D'HUMAIN. C'était le raccourci que le § 13 nomme : `--bench` portait DEUX
   # choses — monter la forge (axe forge) et poser les annexes de démonstration (axe destination) —
   # parce que sur la boîte les deux coïncidaient. Ouvrir `--bench` au poste sans séparer les deux
-  # aurait rendu tous les postes semeurs, ce qui annulerait le canon du 30/08. La destination a son
-  # porteur : `--disposable`.
+  # aurait rendu tous les postes semeurs, ce qui annulerait le canon du 30/08. Depuis, il n'y a
+  # plus d'axe destination du tout : seul le banc sème un humain, et il le nomme.
 
   # `fait sudo` vaut `root` quand on y est déjà, `oui` quand la commande est là, `absent` sinon —
   # trois états mesurés par le module, pas re-sondés ici.
@@ -573,8 +573,8 @@ if [[ "$RAIL" == "workstation" ]]; then
     "  Pire cas = nuke + re-provision (minutes)."
   )
   # ⚠ CE QUE `--bench` FAIT SUR **CE** RAIL, et rien de plus. La bannière boîte annonce « forge
-  # jetable + runner CI + humain de démo » — les deux derniers sont l'axe DESTINATION, que
-  # `--disposable` porte. Reprendre cette phrase ici promettrait ce que ce rail ne fait pas.
+  # jetable + runner CI + humain de démo » — les deux derniers sont le BANC, qui n'existe que sur
+  # la boîte. Reprendre cette phrase ici promettrait ce que ce rail ne fait pas.
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : la forge est MONTÉE ici, même si FORGE_BASE_URL est posée.${N}")
   fi
@@ -585,12 +585,6 @@ else
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
     "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
   )
-  if [[ -n "${PROV_DOCKER_SUDO:-}" ]]; then
-    _banner_body+=(
-      "  ${W}⚠ sudo sera demandé pour PARLER au daemon docker —${N}"
-      "    sa socket appartient à root. Aucune modification."
-    )
-  fi
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
   else
@@ -630,25 +624,17 @@ if [[ "$RAIL" == "box" ]]; then
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
   # ─── L'ARITÉ SE DÉCLARE, ELLE NE SE SUPPOSE PAS ────────────────────────────────────────────────
   #
-  # ⚠ CETTE BOUCLE AVANÇAIT DE DEUX EN DEUX, ET UN DRAPEAU DE `PASSTHRU` EST IMPAIR. `--disposable`
-  # y pousse UN seul jeton (l. 132) — c'est le seul —, donc dès qu'il est présent, tout ce qui suit
-  # tombe sur des index décalés d'un cran et AUCUN `case` ne le voit.
-  #
-  # MESURE DU 2026-09-01 : `--box --bench --disposable --port-ssh 2223 --forge-project alice4` fait
-  # partir `bench-up` avec ZÉRO argument traduit — il repart sur ses défauts et se fait refuser par
-  # son propre pré-vol des ports. Et `--box --disposable --human alice` sort 0 : `--human`, drapeau
-  # du rail POSTE que la ligne du dessous doit REFUSER, est avalé sans un mot.
+  # ⚠ CETTE BOUCLE AVANÇAIT DE DEUX EN DEUX, ET UN DRAPEAU DE `PASSTHRU` PEUT ÊTRE IMPAIR. Un
+  # drapeau solo poussé dans `PASSTHRU` décale d'un cran tout ce qui le suit, et AUCUN `case` ne
+  # le voit : les valeurs partent sur les défauts, et un drapeau du rail POSTE qui devrait être
+  # REFUSÉ est avalé sans un mot (vu avec un drapeau solo, retiré depuis).
   #
   # ⚠ L'ARITÉ EST DÉCLARÉE, ET UN DRAPEAU INCONNU EST REFUSÉ. Deviner « c'est sûrement une paire »
   # est exactement ce qui a produit le défaut : le prochain drapeau solo ajouté à `PASSTHRU` le
-  # reproduirait en silence. Ici il fait rater la porte, en se nommant.
-  #
-  # ⚠ ET `--disposable` N'EST PAS TRADUIT POUR LA BOÎTE — c'est un FAIT, pas un oubli de ce
-  # correctif : la destination jetable n'a aujourd'hui aucun geste côté boîte, et son transport
-  # passe par `PASSTHRU` vers `provision` (l. 151), que ce rail-ci n'appelle pas.
+  # reproduirait en silence. Ici il fait rater la porte, en se nommant. Il n'y a AUCUN solo
+  # aujourd'hui ; la branche `1` reste pour que le prochain se déclare au lieu de se deviner.
   passthru_arite() { # passthru_arite <drapeau> -> 2 (drapeau + valeur) · 1 (solo) · 0 (inconnu)
     case "$1" in
-      --disposable) echo 1 ;;
       --substrate|--port-forge|--port-deck|--port-ssh|--forge-project|--env|--human|--only) echo 2 ;;
       *) echo 0 ;;
     esac
@@ -667,14 +653,14 @@ if [[ "$RAIL" == "box" ]]; then
           # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          export LCARS_PROJECT="${PASSTHRU[$((_i + 1))]}"
+          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # la boite s'appelle <N>-fleet (deploy/box)
         fi ;;
       # ⚠ TROIS PORTS, PAS DEUX, ET LE TROISIEME MANQUAIT. `bench-up.sh` en publie trois — forge,
       # deck et SSH — et refuse net si l'un d'eux est tenu. La porte n'en traduisait que deux : un
       # operateur pouvait donc deplacer la forge et le deck, et se faire refuser sur un port SSH
       # qu'aucun drapeau ne savait bouger.
       #
-      # MESURE DU 2026-09-01, banc 2008 : « REFUS : un autre conteneur tient deja un des ports de ce
+      # VU : « REFUS : un autre conteneur tient deja un des ports de ce
       # banc · 2222 -> lcars-nuit-lcars-1 ». Le refus est JUSTE — les bancs WSL partagent un meme
       # daemon docker, donc un seul banc par port — mais la sortie qu'il propose (« --ssh-port »)
       # n'existait pas a l'entree. Un refus qui nomme un geste que la porte ne sait pas passer
@@ -765,8 +751,8 @@ WORKSTATION="$SCRIPT_DIR/deploy/workstation"
 #
 # CE QU'IL FAIT ICI, ET C'EST TOUT CE QUE LE § 13 LUI DONNE : l'axe FORGE, « monte-la-moi ». Sur ce
 # rail la montée est déjà le défaut quand `FORGE_BASE_URL` est absente ; l'apport du drapeau est donc
-# de monter QUAND MÊME si elle est posée. Le runner CI et l'humain de démo sont l'axe DESTINATION,
-# et il a son porteur : `--disposable`.
+# de monter QUAND MÊME si elle est posée. Le runner CI et l'humain de démo sont le BANC, qui
+# n'existe que sur la boîte, et qui nomme son humain lui-même.
 if [[ "$WITH_BENCH" -eq 1 ]]; then
   export PROV_FORGE_MONTEE=1
 fi
@@ -787,7 +773,7 @@ exec "$WORKSTATION" up "${PASSTHRU[@]}"
 # arguments, et il APPELLE la fonction. Deux octets, et tout s'execute.
 #
 # L'accolade ferme ce reste : `{ main` non fermee est une erreur de syntaxe, jamais une commande.
-# Banc a toutes les troncatures possibles (`work/…/chantier-porte-install-2026-08-30/bancs/`) :
+# Banc a toutes les troncatures possibles (joue hors du depot, non embarque) :
 #
 #     sans main()      41 fuites / 97
 #     main "$@"         2 vraies / 118

@@ -40,15 +40,16 @@ cat "$FORGE_PAYLOAD"
 SH
   chmod +x "$BIN/curl"
 
-  export PROVISION_LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
+  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur.
+  export LCARS_HUMAN_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh"
   export PROVISION_MODULE=70-human
-  export PROV_HUMAN
-  PROV_HUMAN="$(id -un)"
-  export PROV_FORGE_URL="http://forge.test"
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$PROV_TOKENS_DIR"
-  echo "tok" > "$PROV_TOKENS_DIR/system_starfleet.gitea_token"
+  export LCARS_LOGIN
+  LCARS_LOGIN="$(id -un)"
+  export FORGE_BASE_URL="http://forge.test"
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"; mkdir -p "$LCARS_PRIVATE_DIR"
+  echo "tok" > "$LCARS_PRIVATE_DIR/system_starfleet.gitea_token"
 
-  # HOME jetable : `as_human` s'execute DIRECTEMENT quand PROV_HUMAN est deja l'utilisateur courant,
+  # HOME jetable : `as_human` s'execute DIRECTEMENT quand LCARS_LOGIN est deja l'utilisateur courant,
   # donc `git config --global` ecrit dans CE home et nulle part ailleurs.
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
 
@@ -114,9 +115,9 @@ account() { # account <full_name> <email>
   [[ "$output" == *"moi@ailleurs.net"* ]]
 }
 
-@test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 50-forge" {
+@test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 63-forge-tokens" {
   # Le cas de `root` sur une vraie boite. Deux voix sur un meme fait divergent le jour ou l'une
-  # des deux change ; `50-forge` rapporte deja « compte forge absent pour l'humain X ».
+  # des deux change ; `63-forge-tokens` rapporte deja « compte forge absent pour l'humain X ».
   echo '{"errors":["user does not exist"]}' > "$FORGE_PAYLOAD"
   run_fn 'check_git_identity'
   [ -z "$output" ]
@@ -128,7 +129,7 @@ account() { # account <full_name> <email>
 
 @test "forge injoignable : rien n'est invente, le passage suivant la trouvera" {
   account "Lord Zurp" "lord@zurp.xyz"
-  run_fn 'PROV_FORGE_URL=""; apply_git_identity'
+  run_fn 'FORGE_BASE_URL=""; apply_git_identity'
   [ "$status" -eq 0 ]
   run git config --global --get user.email
   [ "$status" -ne 0 ]
@@ -137,7 +138,7 @@ account() { # account <full_name> <email>
 @test "TEMOIN STRUCTUREL : l'entrypoint ne pose plus d'identite git" {
   # La regression exacte : un bloc d'identite dans l'entrypoint vise UN compte — celui de l'entree
   # du conteneur — et rate par construction tout humain enrole apres le boot.
-  EP="$BATS_TEST_DIRNAME/../../../../deploy/docker/entrypoint.sh"
+  EP="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
   refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   refute grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }
@@ -157,10 +158,10 @@ account() { # account <full_name> <email>
 
 @test "l'adresse de la forge se CABLE quand elle est connue et absente du fichier" {
   code() { grep -vE '^\s*#' "$SRC"; }
-  code | grep -q 'FORGE_BASE_URL=\$PROV_FORGE_URL'
+  code | grep -q 'FORGE_BASE_URL=\$FORGE_BASE_URL'
   # la garde est bien « absente ET connue », jamais « ecrase »
   code | grep -q "! grep -q '\^FORGE_BASE_URL=' \"\$ENV_FILE\""
-  code | grep -q 'PROV_FORGE_URL" \]\]'
+  code | grep -q 'FORGE_BASE_URL" \]\]'
 }
 
 @test "une cle PRESENTE n'est jamais reecrite — c'est un choix de l'humain" {
@@ -182,8 +183,8 @@ account() { # account <full_name> <email>
   # Elles vivent dans le meme fichier, viennent toutes deux du provisionnement, et sont toutes deux
   # inutilisables si absentes. Une seule des deux convergeait.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  grep -q 'FORGE_TOKEN_FILE=\$PROV_SYSTEM_TOKEN_FILE' <<<"$code"
-  grep -q 'FORGE_BASE_URL=\$PROV_FORGE_URL' <<<"$code"
+  grep -q 'FORGE_TOKEN_FILE=\$LCARS_SYSTEM_TOKEN_FILE' <<<"$code"
+  grep -q 'FORGE_BASE_URL=\$FORGE_BASE_URL' <<<"$code"
 }
 
 # ─── LE GARDE-FOU D'ECRITURE DES AGENTS ─────────────────────────────────────────────────────────

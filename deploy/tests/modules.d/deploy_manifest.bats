@@ -114,26 +114,21 @@ run_check() { run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check; }
 # token-saver ne peuvent pas tourner (pas de skip silencieux) ». Gate rouge, release non posee,
 # install natif mort. La liste vivait a un seul endroit, et c'etait le Dockerfile.
 
-@test "tout paquet exige par le gate est installe DES DEUX COTES (image et rail natif)" {
-  DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
+@test "le rail natif n'installe PLUS d'outillage de gate — l'install ne re-atteste pas la source (DI-07)" {
+  # ⚖ user 2026-09-04 (defaut pris, chantier deploy-independance) : `60-deploy` COMPILE et POSE, il ne
+  # joue plus `mix gate` sur la cible. Le gate exigeait sur un poste neuf pytest, bats, procps,
+  # les planchers shellcheck et ruff, et le binaire vendor `claude` du siege — deux jours de banc perdus le 04/09
+  # pour attester une source que la CI et `pack.sh` attestent deja. Ce temoin garde l'ABSENCE :
+  # aucune liste de paquets de gate dans 60, et la pose passe `LCARS_INSTALL_SKIP_GATE=1`.
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
+  [ -f "$MOD" ]
+  local code; code="$(grep -vE '^\s*#' "$MOD")"
+  refute grep -q 'GATE_PACKAGES' <<<"$code"
+  refute grep -qE 'shellcheck|ruff' <<<"$code"
+  grep -q 'LCARS_INSTALL_SKIP_GATE=1' <<<"$code"
+  # et `procps`, qui vivait dans cette liste pour le gate, est un besoin RUNTIME : il a rejoint 10-packages
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
-  [ -f "$DOCKERFILE" ] && [ -f "$MOD" ] && [ -f "$PKG" ]
-
-  # ce que le rail natif installe : les paquets runtime + l'outillage du gate.
-  # ⚠ L'EXTRACTION SUIT LE TABLEAU SUR PLUSIEURS LIGNES. Elle lisait `^PACKAGES=(…)$` — donc une
-  # seule ligne — et rendait du VIDE des que la liste s'aerait. Un temoin qui rend du vide ne
-  # compare rien, et `[ -n ]` etait la seule chose qui l'empechait de passer sur une liste absente.
-  runtime="$(native_list 'PACKAGES' "$PKG")"
-  gate="$(native_list 'GATE_PACKAGES' "$MOD")"
-  [ -n "$runtime" ]
-  [ -n "$gate" ]
-
-  # le stage build de l'image DOIT contenir chacun d'eux
-  for p in $runtime $gate; do
-    grep -q -- " $p " "$DOCKERFILE" || grep -q -- " $p\\\\" "$DOCKERFILE" || {
-      echo "paquet '$p' absent du stage build du Dockerfile" >&2; false; }
-  done
+  [[ " $(native_list 'PACKAGES' "$PKG") " == *" procps "* ]]
 }
 
 # ─── ET DANS L'AUTRE SENS, QUI EST CELUI QUI A COUTE ────────────────────────────────────────────
@@ -183,7 +178,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
     | sort -u)"
   [ -n "$image" ]
 
-  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") $(native_list 'GATE_PACKAGES' "$MOD") "
+  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") "
 
   # Ce que l'image seule a le droit de porter, et POURQUOI :
   #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
@@ -207,13 +202,6 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   grep -q 'openssh-server *— la porte' "$f"
 }
 
-@test "le gate a bien ses trois outils nommes — un ajout silencieux ne passe pas" {
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
-  gate="$(sed -n 's/^  GATE_PACKAGES=(\(.*\))$/\1/p' "$MOD")"
-  [[ "$gate" == *"python3-pytest"* ]]   # shell_gate: les lcars_tests de token-saver
-  [[ "$gate" == *"bats"* ]]             # BATS_MISSING_FATAL=1 pose par mix.exs
-  [[ "$gate" == *"procps"* ]]           # les sondes qui lisent pgrep
-}
 
 @test "le rail POSTE fait TRAVERSER ses reglages a l'escalade sudo" {
   # `sudo` remet l'environnement a zero. Un reglage pose avant l'escalade (PROV_COLOR, PROV_VERBOSE)
@@ -311,12 +299,12 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 
 @test "UN FAIT, DEUX RENDUS : le prefixe de la lib EGALE celui de l'installeur de release" {
   # ⚠ CE COUPLAGE ETAIT ECRIT ET NON TENU. `provision-lib.sh` le dit en toutes lettres — « DOIT
-  # egaler le defaut d'etc/deploy-release.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
+  # egaler le defaut d'deploy/lib/deploy-release.sh (SSoT du layout) […] Un fait, deux rendus : sync a la main » —
   # et RIEN ne le verifiait. Une prose qui demande une synchronisation manuelle est une derive
   # programmee : celui qui deplace l'un des deux ne lit pas forcement le commentaire de l'autre.
   #
   # Ce temoin existe pour le chantier EMPREINTE, qui va precisement deplacer ce prefixe. Sans lui,
-  # la phase B pouvait bouger la lib, laisser `etc/deploy-release.sh` derriere, et produire une machine ou
+  # la phase B pouvait bouger la lib, laisser `deploy/lib/deploy-release.sh` derriere, et produire une machine ou
   # le provisionnement cherche la release a un endroit ou l'installeur ne l'a pas posee.
   # ⚠ ON SOURCE LA LIB, ON N'EXTRAIT PLUS SON TEXTE — ET C'EST CE TEMOIN QUI A EXIGE LE CHANGEMENT.
   # Il a rougi au deplacement du prefixe, comme prevu, mais pour la MAUVAISE raison : la lib s'etait
@@ -324,7 +312,7 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
   # instrument qui lit une valeur doit la faire calculer par celui qui la definit, sinon il mesure
   # une syntaxe. Troisieme occurrence de cette lecon dans ce chantier ; celle-ci est la derniere.
   local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../../fleet/etc/deploy-release.sh"
+  local inst="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
   local from_lib from_inst
   # ⚠ `env -i`, ET C'EST ICI QUE CA S'EST DECOUVERT. Le `setup()` de ce fichier EXPORTE
   # `PROV_PREFIX` et `PROV_LINK_DIR` vers des tmpdirs, pour les tests de `60-deploy`. Sourcer la lib
@@ -345,7 +333,7 @@ pkg_mod() { echo "$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"; }
 @test "UN FAIT, DEUX RENDUS : le repertoire de liens aussi" {
   # Meme classe, meme piege : `PROV_LINK_DIR` se dit « miroir de LCARS_INSTALL_LINK_DIR ».
   local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
-  local inst="$BATS_TEST_DIRNAME/../../../fleet/etc/deploy-release.sh"
+  local inst="$BATS_TEST_DIRNAME/../../lib/deploy-release.sh"
   local from_lib from_inst
   from_lib="$(env -i PATH="$PATH" bash -c ". '$lib' >/dev/null 2>&1; printf '%s' \"\$PROV_LINK_DIR\"")"
   from_inst="$(grep -oE '\$\{LCARS_INSTALL_LINK_DIR:-[^}]+\}' "$inst" | head -1 | sed 's/.*:-//; s/}$//')"

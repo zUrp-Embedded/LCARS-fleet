@@ -28,7 +28,6 @@ detect_substrate() {
 #   PROV_DOCKER_HOST    l'endpoint retenu, vide s'il vient déjà de l'environnement
 #   PROV_DOCKER_WHY     vide si docker répond ; sinon la phrase qui dit ce qui manque
 #   PROV_DOCKER_DENIED  1 quand le daemon répond mais REFUSE cet utilisateur
-#   PROV_DOCKER_SUDO    le préfixe d'escalade retenu, vide s'il n'en a pas fallu
 #   PROV_DOCKER_SOCK    la PREMIÈRE socket qui a refusé — interne au diagnostic
 # Rend 0 si un daemon a répondu, 1 sinon.
 # ⚠ ELLE MUTE AUSSI L'ENVIRONNEMENT DE L'APPELANT, ce qu'aucune globale ci-dessus ne dit : `unset
@@ -50,9 +49,6 @@ PROV_DOCKER_HOST=""
 PROV_DOCKER_WHY=""
 PROV_DOCKER_DENIED=0
 PROV_DOCKER_SOCK=""
-# ⚠ L'ESCALADE EST PAR COMMANDE, JAMAIS UN RE-EXEC GLOBAL : celui-ci ferait tourner `git` en root
-# sur le clone de l'humain (« dubious ownership ») et estamperait l'image `unknown`.
-PROV_DOCKER_SUDO=""
 
 # ─── docker_denied_geste <socket> — LE GESTE, PAS SEULEMENT LE CONSTAT ──────────────────────────
 #
@@ -66,7 +62,7 @@ PROV_DOCKER_SUDO=""
 # opposes — « ajoute-toi au groupe » a quelqu'un qui y est deja l'envoie refaire ce qui est fait, et
 # chercher la panne ailleurs.
 #
-# MESURE DU 2026-08-31, SUR CE DEPOT MEME : ce cas exact s'est presente. `getent group docker`
+# CE CAS EXACT S'EST PRESENTE SUR CE DEPOT MEME. `getent group docker`
 # listait bien le compte, `id -nG` non, et le message d'alors ne distinguait pas les deux — il a
 # fallu le trouver a la main.
 docker_denied_geste() { # docker_denied_geste <socket>
@@ -146,9 +142,9 @@ _docker_sockets() {
   # clic dans Docker Desktop ; offrir un contournement à `sudo` là où un clic suffit apprend le
   # mauvais réflexe, et contredit le canon de la boîte (« elle ne demande jamais sudo »).
   #
-  # ⚠ ET IL A COÛTÉ DEUX FOIS. Le 2026-08-30, le refus accusait la proxy au lieu de
+  # ⚠ ET IL A COÛTÉ DEUX FOIS. D'abord le refus accusait la proxy au lieu de
   # `/var/run/docker.sock` et envoyait chercher des droits qui ne bloquaient personne — correctif
-  # « la PREMIÈRE socket refusée » plus bas. Le 2026-08-31, il m'a fait bâtir un diagnostic entier
+  # « la PREMIÈRE socket refusée » plus bas. Puis il a fait bâtir un diagnostic entier
   # sur une socket hors sujet pendant que celle qui comptait répondait.
   #
   # L'intégration WSL est donc un PRÉ-REQUIS, pas une commodité : elle expose
@@ -160,7 +156,6 @@ _docker_sockets() {
 docker_endpoint() {
   local want="${PROV_DOCKER_BIN:-}"
   PROV_DOCKER_BIN=""; PROV_DOCKER_HOST=""; PROV_DOCKER_WHY=""; PROV_DOCKER_DENIED=0; PROV_DOCKER_SOCK=""
-  PROV_DOCKER_SUDO=""
   local cli sock
 
   # 1. La CLI.
@@ -200,7 +195,7 @@ docker_endpoint() {
   # pourtant PARFAITEMENT NU. On fabriquait donc un `DOCKER_CONFIG` inutile, et il n'est pas neutre :
   # il remplace le config de l'humain, donc ses CONTEXTS.
   #
-  # Mesure du 2026-08-30, banc WSL a integration activee, avant/apres un simple appel a cette
+  # Vu sur un banc WSL a integration activee, avant/apres un simple appel a cette
   # fonction :
   #     contexts AVANT : default desktop-linux
   #     contexts APRES : default          ← `desktop-linux` disparu
@@ -233,7 +228,7 @@ docker_endpoint() {
   fi
   # ⚠ ET ON LIT LE DROIT SUR LA SOCKET, JAMAIS UN MESSAGE. Un libelle d'erreur est une convention de
   # version, et le code de sortie ne discrimine pas : `docker version` rend 1 aussi bien sur une
-  # socket qui refuse que sur un daemon absent (mesure du 2026-08-19). `-w` repond a la question
+  # socket qui refuse que sur un daemon absent. `-w` repond a la question
   # exacte — « puis-je m'en servir » — sans dependre de qui la formule.
   while read -r sock; do
     [[ -S "$sock" ]] || continue
@@ -250,62 +245,17 @@ docker_endpoint() {
     # celui qui porte la cause ; les suivants sont des replis.
     #
     # Un diagnostic qui accuse le mauvais objet coute plus cher qu'un diagnostic absent : il fait
-    # chercher la panne la ou elle n'est pas. Mesure d'un banc WSL a integration activee, 2026-08-30.
+    # chercher la panne la ou elle n'est pas.
     [[ -w "$sock" ]] || { PROV_DOCKER_DENIED=1; : "${PROV_DOCKER_SOCK:=$sock}"; }
   done < <(_docker_sockets)
 
   if [[ "${PROV_DOCKER_DENIED:-0}" == "1" ]]; then
-    # ⚠ `sudo -n` : une sonde ne bloque JAMAIS sur une invite de mot de passe. Sans NOPASSWD, on
-    # rend le fait tel quel et l'appelant decide d'escalader lui-meme.
-    # ⚠ CHEMIN ABSOLU : `sudo` impose `secure_path`, ou une CLI hors des repertoires systeme — celle
-    # du montage Docker Desktop, par exemple — devient introuvable.
+    # ⚖ lot 10 (point 10) : PLUS D'ESCALADE. Le shim sudo (une CLI fabriquee qui passait chaque
+    # commande sous sudo avec un environnement filtre) couvrait le poste ou la socket appartient a
+    # root:docker sans que l'humain soit du groupe — un cas que l'integration WSL obligatoire et la
+    # loi 5 (docker_denied_geste : le geste, pas seulement le constat) ont rendu marginal, pour trente
+    # lignes qui faisaient tourner compose en root sur le clone de l'humain. Le refus nomme le geste.
     local abs; abs="$(command -v "$PROV_DOCKER_BIN" 2>/dev/null || echo "$PROV_DOCKER_BIN")"
-    if [[ "$EUID" -ne 0 ]] && command -v sudo >/dev/null 2>&1 \
-       && sudo -n DOCKER_HOST="unix://$PROV_DOCKER_SOCK" "$abs" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
-      PROV_DOCKER_HOST="unix://$PROV_DOCKER_SOCK"
-      PROV_DOCKER_SUDO="sudo DOCKER_HOST=unix://$PROV_DOCKER_SOCK"
-      # L'ESCALADE PREND LA FORME D'UN SHIM, ET C'EST CE QUI PRESERVE TOUS LES CONTRATS : les
-      # appelants recoivent un BINAIRE et composent `"$DOCKER_BIN" <verbe>`. Rendre ici une LIGNE DE
-      # COMMANDE ferait chercher un executable dont le nom contient des espaces, avec un diagnostic
-      # qui accuserait docker. Le shim est un fichier, et tout le rail ne manipule qu'un chemin.
-      local shim_dir; shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/lcars-docker.XXXXXX")" || return 1
-      chmod 0700 "$shim_dir"
-
-      # ET LE SHIM PORTE SON PROPRE `DOCKER_CONFIG` — cf. `_docker_plugin_config`. Sous `sudo`,
-      # `HOME` devient celui de root : meme les plugins ranges chez l'humain cessent d'etre
-      # regardes, et `docker compose` n'existe plus.
-      local cfg; cfg="$(_docker_plugin_config "$shim_dir/config")" || cfg="$shim_dir/config"
-
-      # ⚠ `sudo` REMET L'ENVIRONNEMENT A ZERO, et le rail conduit compose PAR DES VARIABLES : un
-      # port demande en tete de commande se perd, le compose monte son DEFAUT, et le banc meurt en
-      # accusant la forge. `-E` exigerait un `SETENV` que personne n'a pose dans le sudoers.
-      #
-      # ⚠ JAMAIS UN SECRET : `sudo VAR=valeur` vit dans la LIGNE DE COMMANDE, que
-      # `/proc/<pid>/cmdline` expose a tout l'hote pendant l'appel — cicatrice 6-141. Denylist large
-      # a dessein : un faux positif coute une variable, un faux negatif un secret. Valeur a saut de
-      # ligne SAUTEE — `sudo VAR=val` ne sait pas la representer.
-      cat > "$shim_dir/docker" <<'SHIM'
-#!/usr/bin/env bash
-declare -a keep=()
-while IFS= read -r -d '' kv; do
-  k="${kv%%=*}"; v="${kv#*=}"
-  case "$k" in
-    *TOKEN*|*PASSWORD*|*SECRET*|*CREDENTIAL*|*PASSWD*|*_PW|*_KEY|*_AUTH) continue ;;
-    LCARS_*|FORGE_*|COMPOSE_*|PROV_*) [[ "$v" == *$'\n'* ]] || keep+=("$k=$v") ;;
-  esac
-done < <(env -0)
-exec sudo "${keep[@]+"${keep[@]}"}" DOCKER_HOST=__SOCK__ DOCKER_CONFIG=__CFG__ __CLI__ "$@"
-SHIM
-      sed -i "s|__SOCK__|unix://$PROV_DOCKER_SOCK|; s|__CFG__|$cfg|; s|__CLI__|$abs|" "$shim_dir/docker"
-      chmod 0700 "$shim_dir/docker"
-      PROV_DOCKER_BIN="$shim_dir/docker"
-
-      if ! "$PROV_DOCKER_BIN" compose version >/dev/null 2>&1; then
-        PROV_DOCKER_WHY="le daemon repond via sudo, mais « docker compose » reste introuvable (plugins cherches dans $(_docker_mount_plugins))"
-        return 1
-      fi
-      return 0
-    fi
     PROV_DOCKER_WHY="le daemon docker REPOND, mais pas a « $(id -un) » : la socket $PROV_DOCKER_SOCK est $(stat -Lc '%U:%G %a' "$PROV_DOCKER_SOCK" 2>/dev/null) · $(docker_denied_geste "$PROV_DOCKER_SOCK") · CLI retenue : $abs"
     return 1
   fi

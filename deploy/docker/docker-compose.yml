@@ -60,7 +60,7 @@ name: lcars
 services:
   lcars:
     build:
-      context: ../../..
+      context: ../..
       dockerfile: deploy/docker/Dockerfile
       args:
         GIT_SHA: "${LCARS_GIT_SHA:-unknown}"
@@ -93,7 +93,7 @@ services:
       # dans un conteneur c'est le nom du service, que la machine d'une personne ne résout pas. La
       # porte du deck envoie le navigateur ICI pour s'identifier, donc une valeur interne rend
       # l'identification impossible depuis n'importe quel autre poste. Vide = on retombe sur
-      # l'interne, et `55-deck-oidc` le DIT en drift plutôt que de poser une porte qui ne s'ouvre pas.
+      # l'interne, et `66-deck-oidc` le DIT en drift plutôt que de poser une porte qui ne s'ouvre pas.
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
       # Les adresses par lesquelles on entre VRAIMENT sur le deck (séparées par des virgules).
       # OAuth2 compare le `redirect_uri` EXACTEMENT : une entrée non déclarée échoue au RETOUR,

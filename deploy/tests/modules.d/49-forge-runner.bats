@@ -5,7 +5,7 @@
 # STATUS: bats tests for 49-forge-runner — l'APPLY, que rien ne tenait
 #
 # POURQUOI CE FICHIER. Le decoupage `48 -> 49` a sorti l'enrolement du runner CI dans un module neuf,
-# et ce module est arrive SANS SUITE. `forge_ci_runner.bats` tient la SONDE de `50-forge` — « zero
+# et ce module est arrive SANS SUITE. `forge_ci_runner.bats` tient la SONDE de `63-forge-tokens` — « zero
 # runner » contre « je ne peux pas savoir » — pas le geste qui enrole.
 #
 # CE QUE L'APPLY DOIT TENIR, et chacun est un chemin distinct :

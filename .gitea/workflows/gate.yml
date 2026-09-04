@@ -17,6 +17,15 @@ on:
   push:
     paths:
       - 'fleet/**'
+      # ⚠ `deploy/**` ET `install.sh` MANQUAIENT (DI-08, ⚖ user 2026-09-04) : ce workflow joue
+      # `deploy/gate.sh`, mais un commit qui ne touchait que l'installeur ne le déclenchait pas —
+      # la porte de l'installeur ne se jouait en CI que par accident, quand `fleet/` bougeait aussi.
+      # `catalogues/**` et `assets/github.io/**` entrent dans l'image (stage `site`, catalogue
+      # runtime) : le job `image` ci-dessous les bâtit.
+      - 'deploy/**'
+      - 'install.sh'
+      - 'catalogues/**'
+      - 'assets/github.io/**'
       # `shell_gate` audite le shell SUIVI du dépôt entier, hooks et skills compris : sans ce
       # chemin, une édition de `.claude/` casse le gate sans le déclencher, et la rougeur tombe
       # sur le commit suivant, qui n'y est pour rien.
@@ -25,6 +34,10 @@ on:
   pull_request:
     paths:
       - 'fleet/**'
+      - 'deploy/**'
+      - 'install.sh'
+      - 'catalogues/**'
+      - 'assets/github.io/**'
       - '.claude/**'
 
 jobs:
@@ -135,7 +148,7 @@ jobs:
       # `MIX_ENV=test` N'EST PAS UN DETAIL D'ENVIRONNEMENT : `config/runtime.exs` est un fichier de
       # BOOT, et hors test il exige les ports que `bin/fleet_v2` calcule par humain — d'ou
       # « FLEET_API_PORT missing », fail-loud correct, sur un runner qui ne boote rien. C'est
-      # exactement la ligne que joue `etc/deploy-release.sh` avant de poser la release : le gate de la CI
+      # exactement la ligne que joue `deploy/lib/deploy-release.sh` avant de poser la release : le gate de la CI
       # et le gate du build ne doivent pas etre deux gates.
       #
       # SANS BORNE, LE JUGE SE TAIT AU LIEU D'ECHOUER. Deux runs ont calé A L'INTERIEUR de ce pas, a
@@ -166,3 +179,44 @@ jobs:
       # rend aucun. Mesure du 2026-09-03 sur ce poste : 1302 cas en ~7 min.
       - name: Gate de l'installeur (la chaîne d'install, bats)
         run: timeout --signal=TERM --kill-after=60s 20m bash deploy/gate.sh
+  # ─── L'IMAGE ET LA DOC SE BÂTISSENT EN CI (DI-08, ⚖ user 2026-09-04) ────────────────────────
+  #
+  # Trois défauts du 03/09 (contexte du compose, lecteur du site, portée des contrats) sont passés
+  # VERTS au gate et rouges au premier `box build` : 1247 témoins, et pas un ne bâtissait l'image.
+  # Ce job la bâtit jusqu'à son stage final — donc `verify` (le doctor sur le système de fichiers de
+  # l'image, qui échoue le build sur un drift) et `site` (la doc du deck, `npm run build`). Il tourne
+  # sur le runner `dood` (docker de l'hôte), comme `publish.yml`, et clone la ref lui-même : ce
+  # runner est une alpine nue, sans les actions.
+  image:
+    runs-on: dood
+    defaults:
+      run:
+        shell: sh
+    steps:
+      - name: Outillage du job
+        run: apk add --no-cache git >/dev/null
+      - name: Clone de la ref
+        run: |
+          git clone --no-checkout "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" src
+          git -C src checkout -q "${GITHUB_SHA}"
+      - name: Le verdict porte sur l'arbre annoncé
+        run: |
+          got="$(git -C src rev-parse HEAD)"
+          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA"; exit 1; }
+      - name: Image (stages build, site, runtime, verify, final)
+        run: |
+          GIT_SHA="$(git -C src rev-parse --short=8 HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          docker build \
+            -f src/deploy/docker/Dockerfile \
+            --build-arg GIT_SHA="$GIT_SHA" \
+            --build-arg BUILD_DATE="$BUILD_DATE" \
+            -t "lcars-fleet:ci-${GIT_SHA}" src
+      - name: Preuve — l'image porte le tampon de verify, à la révision de la ref
+        run: |
+          GIT_SHA="$(git -C src rev-parse --short=8 HEAD)"
+          got="$(docker run --rm --entrypoint cat "lcars-fleet:ci-${GIT_SHA}" /opt/lcars/.verified)"
+          [ "$got" = "$GIT_SHA" ] || { echo "tampon verify=$got attendu $GIT_SHA"; exit 1; }
+      - name: Ménage — une image de CI ne reste pas sur le runner
+        if: always()
+        run: docker image rm -f "lcars-fleet:ci-$(git -C src rev-parse --short=8 HEAD)" >/dev/null 2>&1 || true

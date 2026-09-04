@@ -150,7 +150,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
 
       assert is_binary(org)
       # LE GESTE NOMME EST CELUI QUI REPARE, ET C'EST LE MEME QUI A POSE. Ce refus renvoyait vers
-      # `etc/enroll-catalogue.sh` + un `tofu apply` a la main : trois pas, dont deux hors de la
+      # `deploy/lib/enroll-catalogue.sh` + un `tofu apply` a la main : trois pas, dont deux hors de la
       # boite, pour un etat qu'un seul verbe convergent retablit.
       assert gestures =~ "lcars catalogue install"
       assert gestures =~ "convergent"

@@ -458,7 +458,7 @@ run_bench() {
   # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. Il y a
   # donc au moins TROIS entrees vraies : `127.0.0.1`, `localhost` (deux ORIGINES distinctes pour un
   # meme point d'ecoute — et c'est `localhost` que tape un humain) et l'adresse annoncee.
-  # Les deux premieres sont invariantes : 55-deck-oidc les seme, une fois, pour toutes les boites.
+  # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour toutes les boites.
   # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
   grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/box.env"

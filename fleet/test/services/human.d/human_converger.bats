@@ -546,7 +546,7 @@ EOF
 # `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_FLEET_GROUP` pendant que `provision-lib.sh`
 # declarait `PROV_*` pour les memes faits — mesure du 2026-08-17 : 59 occurrences
 # `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Personne ne posait ni l'un ni
-# l'autre, donc les DEFAUTS portaient seuls l'accord : poser `PROV_FORGE_ORG=starfleet` provisionnait
+# l'autre, donc les DEFAUTS portaient seuls l'accord : poser `LCARS_FORGE_ORG=starfleet` provisionnait
 # une org que ce convergeur n'interrogeait jamais, en silence.
 #
 # CE QUE CE TEMOIN NE PEUT PAS FAIRE, et il faut le dire : ce script ne source pas
@@ -555,6 +555,7 @@ EOF
 # deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
 @test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
   lib="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
+  # la lib de l'INSTALLEUR declare en PROV_* ; le convergeur (produit) lit en LCARS_* — meme valeur
   for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
     # Meme garde qu'ailleurs : `env -i` pour lire le DEFAUT et pas une surcharge de temoin.
