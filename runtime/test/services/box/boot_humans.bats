@@ -277,13 +277,15 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'protocole des humains introuvable' "$JOURNAL"
 }
 
-@test "console-humans.sh, le convergeur et le protocole lisent la MEME source pour le plancher (PASSWD_DEFS → login.defs)" {
-  # Trois lecteurs, une source : `console-humans.sh` decide qui recoit une console, le protocole qui
-  # est humain de fleet, le convergeur qui il cree. Chacun garde sa politique (la console refuse
-  # sans bornes lisibles, les deux autres retombent sur 1000), mais le fichier lu — et le nom qui
-  # le deplace — est le meme.
+@test "console-humans.sh et le protocole lisent la MEME source pour les bornes (PASSWD_DEFS → login.defs) ; le convergeur ne lit RIEN lui-meme, il source le protocole" {
+  # Une source, une politique (2026-09-05, fail-closed partout) : `console-humans.sh` decide qui
+  # recoit une console, le protocole qui est humain de fleet — les deux lisent login.defs par le
+  # meme nom et refusent sans bornes lisibles. Le convergeur, qui devinait 1000 dans une copie
+  # privee, n'a plus de lecture a lui : il source le protocole et l'appelle.
   local services="$BATS_TEST_DIRNAME/../../../services"
   grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/console-humans.sh"
   grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/lib/human-protocol.sh"
-  grep -q 'PASSWD_DEFS:-/etc/login.defs' "$services/human-converger.sh"
+  grep -qE '^\. "\$HUMAN_PROTOCOL"' "$services/human-converger.sh"
+  grep -vE '^[[:space:]]*#' "$services/human-converger.sh" | grep -q 'uid_bounds'
+  refute grep -qE '^[^#]*PASSWD_DEFS' "$services/human-converger.sh"
 }
