@@ -4,6 +4,8 @@
 # STARDATE: 2026-08-30
 # STATUS: temoins de 30-wsl.sh — le module n'avait aucune suite
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
