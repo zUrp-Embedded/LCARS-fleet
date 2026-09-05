@@ -112,20 +112,9 @@ poser_canal() { # poser_canal — le canal de CETTE pose : kit si la release ven
   prov_channel_write "$c"
 }
 
-mesure_dpkg() { # mesure_dpkg — sous `deb` : ce que dpkg dit de SA release sous le prefixe
-  local alt rc=0
-  alt="$(prov_dpkg_verify "$PROV_DEB_PACKAGE" "$PROV_PREFIX")" || rc=$?
-  case "$rc" in
-    0) p_ok "dpkg -V $PROV_DEB_PACKAGE : rien à redire sous $PROV_PREFIX — la release est celle du paquet" ;;
-    1) p_drift "dpkg -V $PROV_DEB_PACKAGE : $(grep -c . <<<"$alt") fichier(s) altéré(s) ou manquant(s) sous $PROV_PREFIX (premier : ${alt%%$'\n'*}) — réinstalle le paquet : apt install --reinstall $PROV_DEB_PACKAGE" ;;
-    2) p_warn "canal deb, mais dpkg est absent d'ici — rien ne peut vérifier la release contre son paquet" ;;
-    *) p_drift "canal deb, mais le paquet $PROV_DEB_PACKAGE est inconnu de dpkg — apt install $PROV_DEB_PACKAGE, ou retire $PROV_CHANNEL_FILE si cette machine n'a pas été posée par un paquet" ;;
-  esac
-}
-
 check() { # check [--dpkg] — les mesures d'aujourd'hui ; avec --dpkg (canal deb), celle du paquet en tete
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
-  [[ "${1:-}" != "--dpkg" ]] || mesure_dpkg
+  [[ "${1:-}" != "--dpkg" ]] || prov_dpkg_report "sous $PROV_PREFIX" "$PROV_PREFIX"
 
   # ⚠ « ABSENTE » SE DIT D'UN PREFIXE QU'ON PEUT TRAVERSER. `$PROV_PREFIX` est `0750 root:fleet` :
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit

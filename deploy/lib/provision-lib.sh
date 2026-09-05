@@ -1403,22 +1403,44 @@ poseur_is_dpkg() { [[ "$PROV_CHANNEL" == "deb" ]]; }
 # Le nom du paquet qui porte le produit — celui que le lot 3 bâtit.
 PROV_DEB_PACKAGE="${LCARS_DEB_PACKAGE:-lcars}"
 
-# prov_dpkg_verify <paquet> [racine] -> stdout : les chemins que `dpkg -V` declare alteres ou
-# manquants (sous <racine> seulement, si donnee), un par ligne.
+# prov_dpkg_verify <paquet> [racine…] -> stdout : les chemins que `dpkg -V` declare alteres ou
+# manquants (sous l'une des racines seulement, si donnees), un par ligne.
 #   rc 0  rien a redire · 1  des lignes (drift) · 2  dpkg absent d'ici · 3  paquet inconnu de dpkg
 # ⚠ LE RC DE `dpkg -V` NE DIT RIEN : mesure sur cette machine, un conffile modifie rend une ligne ET
 # rc 0. Ce sont les LIGNES qui parlent, et le chemin en est la derniere colonne (« ??5?????? c
 # /etc/x » ou « missing   /opt/x »).
 prov_dpkg_verify() {
-  local pkg="$1" root="${2:-}" st out
+  local pkg="$1"; shift
+  local roots st out
+  roots="$(printf '%s\n' "$@")"   # sans racine : une ligne vide, donc « tout »
   command -v dpkg >/dev/null 2>&1 || return 2
   st="$(dpkg -s "$pkg" 2>/dev/null | sed -n 's/^Status: //p' || true)"
   [[ "$st" == *" installed" ]] || return 3
   out="$(dpkg -V "$pkg" 2>/dev/null \
-         | awk -v r="$root" '{ p=$NF } r=="" || p==r || index(p, r "/")==1 { print p }' || true)"
+         | awk -v roots="$roots" 'BEGIN { n = split(roots, r, "\n") }
+              { p = $NF; if (roots == "") { print p; next }
+                for (i = 1; i <= n; i++) if (r[i] != "" && (p == r[i] || index(p, r[i] "/") == 1)) { print p; next } }' \
+         || true)"
   [[ -n "$out" ]] || return 0
   printf '%s\n' "$out"
   return 1
+}
+
+# prov_dpkg_report <perimetre> [racine…] — LE verdict de dpkg sur ce que le module relit, rendu une
+# fois pour 60 et 62 : OK, DRIFT (« reinstalle le paquet »), WARN sans dpkg, DRIFT paquet inconnu.
+# `<perimetre>` est la phrase qui nomme ce qu'on a mesure (« sous /opt/lcars/runtime »). Rend 0 :
+# une fonction qui RAPPORTE ne renverse pas le verdict qu'elle rapporte (meme regle que p_ok).
+prov_dpkg_report() {
+  local ou="$1"; shift
+  local alt rc=0
+  alt="$(prov_dpkg_verify "$PROV_DEB_PACKAGE" "$@")" || rc=$?
+  case "$rc" in
+    0) p_ok "dpkg -V $PROV_DEB_PACKAGE : rien à redire $ou — c'est bien ce que le paquet a posé" ;;
+    1) p_drift "dpkg -V $PROV_DEB_PACKAGE : $(grep -c . <<<"$alt") fichier(s) altéré(s) ou manquant(s) $ou (premier : ${alt%%$'\n'*}) — réinstalle le paquet : apt install --reinstall $PROV_DEB_PACKAGE" ;;
+    2) p_warn "canal deb, mais dpkg est absent d'ici — rien ne peut vérifier $ou contre le paquet" ;;
+    *) p_drift "canal deb, mais le paquet $PROV_DEB_PACKAGE est inconnu de dpkg — apt install $PROV_DEB_PACKAGE, ou retire $PROV_CHANNEL_FILE si cette machine n'a pas été posée par un paquet" ;;
+  esac
+  return 0
 }
 
 # `A est-il un ANCÊTRE de B ?` — donc « la source est-elle EN RETARD sur ce qui est déjà posé ? ».

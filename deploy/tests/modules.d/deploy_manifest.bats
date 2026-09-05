@@ -44,6 +44,9 @@ EOF
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/linkdir"
   export PROVISION_LIB="$ROOT/deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=60-deploy
+  # Le CANAL est a nous : ce decor EXECUTE 60-deploy, dont le dispatch lit /etc/lcars/channel.
+  # Absent = « aucun », le module mesure comme aujourd'hui (MUR I21).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
 
   # a "deployed" prefix: release marker + every manifest entry posed correctly
   mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"

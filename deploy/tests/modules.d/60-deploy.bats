@@ -41,6 +41,8 @@ decor() {
   export PROV_FLEET_GROUP; PROV_FLEET_GROUP="$(id -gn)"
   export PROV_PREFIX="$BATS_TEST_TMPDIR/prefix"
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/path"
+  # Le CANAL est a nous : absent = « aucun », le module pose comme aujourd'hui (voir runtime_helpers.bats).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
   mkdir -p "$PROV_PREFIX/bin" "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_LINK_DIR"
   printf '#!/bin/sh\nexit 0\n' > "$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet"

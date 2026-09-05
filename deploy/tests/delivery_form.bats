@@ -37,6 +37,9 @@ setup() {
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
 
   STAMP="$RACINE/.source-revision"
+  # Le CANAL est a nous, meme quand on ne le lit pas : un temoin qui joue un module lecteur du
+  # canal ne lit jamais celui de la machine (MUR I21).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"
   export PROV_ROOT="$BATS_TEST_TMPDIR/opt-lcars"
   mkdir -p "$PROV_ROOT"
 
@@ -325,7 +328,6 @@ canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la r
   [ "$(grep -c 'prov_channel_write' <<<"$code")" -eq 1 ]                 # dans poser_canal seul
   sed -n '/^poser_canal()/,/^}/p' "$mod" | grep -q 'prov_channel_write'
   sed -n '/^check()/,/^}/p' "$mod" | grep -vE '^\s*#' | refute_out 'poser_canal|prov_channel_write'
-  sed -n '/^mesure_dpkg()/,/^}/p' "$mod" | refute_out 'poser_canal|prov_channel_write'
   local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$mod" | grep -vE '^\s*#')"
   grep -q 'if poseur_is_dpkg; then check --dpkg' <<<"$disp"
 }

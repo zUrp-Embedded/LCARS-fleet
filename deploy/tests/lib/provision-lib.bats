@@ -1780,3 +1780,23 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
   LCARS_DEB_PACKAGE=lcars-autre canal 'echo "$PROV_DEB_PACKAGE"'
   [ "$output" = "lcars-autre" ]
 }
+
+@test "prov_dpkg_report : le verdict de dpkg, rendu UNE fois pour 60 et 62 — OK, DRIFT « réinstalle », WARN sans dpkg, DRIFT paquet inconnu ; et il rend toujours 0" {
+  dpkg_double 'install ok installed'
+  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
+  [[ "$output" == *"OK"*"dpkg -V lcars : rien à redire sous /x"*"rc=0 drift=0"* ]]
+  dpkg_double 'install ok installed' 'missing   /x/a' '??5?????? c /y/b'
+  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
+  [[ "$output" == *"DRIFT"*"1 fichier(s) altéré(s) ou manquant(s) sous /x (premier : /x/a)"*"apt install --reinstall lcars"*"rc=0 drift=1"* ]]
+  # N racines : les deux comptent
+  canal 'prov_dpkg_report "ici" /x /y; echo "rc=$? drift=$PROV_DRIFT"'
+  [[ "$output" == *"2 fichier(s)"*"rc=0 drift=1"* ]]
+  # sans racine : tout
+  canal 'prov_dpkg_report "partout"; echo "rc=$?"'
+  [[ "$output" == *"2 fichier(s)"*"partout"* ]]
+  dpkg_double ''
+  canal 'prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
+  [[ "$output" == *"DRIFT"*"paquet lcars est inconnu de dpkg"*"apt install lcars"*"rc=0 drift=1"* ]]
+  canal 'PATH=/nonexistent prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
+  [[ "$output" == *"WARN"*"dpkg est absent d'ici"*"rc=0 drift=0"* ]]
+}
