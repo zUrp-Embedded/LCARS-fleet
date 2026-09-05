@@ -65,7 +65,7 @@ sans aucun choix, présentée au moment précis où on demande de choisir, n'est
 c'est un rail sans entrée. Trois refus, et le geste n'est pas le même :
 
 - `{:workflow_no_card_scope, _}` — **fait de déploiement**, pas de catalogue : aucun catalogue
-  installé ne porte de cartes. Appelle `catalogue_list` et dis à l'humain ce que cette boîte sert
+  installé ne porte de cartes. Appelle `catalogue_list` et dis à l'humain ce que ce conteneur sert
   réellement — le catalogue qu'il attend n'est pas installé ici, et le geste est côté admin
   (`lcars catalogue install`).
 - `{:workflow_offer_empty, illisibles, _}` — **fait de catalogue** : il a été balayé et n'offre rien.

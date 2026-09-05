@@ -14,8 +14,8 @@ Ce qu'il faut poser **dans le home d'un humain** pour qu'il puisse travailler : 
 Ils ne sont pas dans `deploy/modules.d/`, malgré la forme commune. Le critère est le **moment
 d'exécution**, pas la ressemblance de forme : un module de `deploy/` converge la MACHINE une fois,
 depuis le checkout, et le checkout peut disparaître ensuite. Ceux-ci convergent un HUMAIN — à
-chaque nouveau login, longtemps après l'install, sans checkout. Ils doivent donc partir avec la
-boîte, et c'est ce que `runtime/services/` veut dire.
+chaque nouveau login, longtemps après l'install, sans checkout. Ils doivent donc partir avec le
+conteneur, et c'est ce que `runtime/services/` veut dire.
 
 ## Le protocole
 

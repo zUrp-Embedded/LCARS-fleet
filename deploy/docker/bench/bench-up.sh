@@ -592,7 +592,7 @@ say "─────────────────────────
 say "$VERDICT"
 say "  forge     : $FORGE_URL   (humain $HUMAN / toto32toto32)"
 say "  deck      : http://${ADVERTISE}:${DECK_PORT}"
-say "  conteneur     : $CONTAINER   ssh ${ADVERTISE}:${SSH_PORT}"
+say "  conteneur : $CONTAINER   ssh ${ADVERTISE}:${SSH_PORT}"
 # LE RECAP DIT L'ADRESSE QU'ON COMPOSE, PAS CELLE SUR LAQUELLE ON ECOUTE. Il imprimait `$BIND`, ce
 # qui donnait « deck 0.0.0.0:20999 » — une ligne qu'on ne peut pas taper. L'ecoute reste dite, a
 # part, parce qu'elle porte la consequence : ouvert sur le reseau ou ferme sur la machine.

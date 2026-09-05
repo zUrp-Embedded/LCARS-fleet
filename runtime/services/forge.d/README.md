@@ -5,7 +5,7 @@
 **Référencé par** : `runtime/services/README.md`, `deploy/modules.d/{45-catalogues,65-ops-branch,66-deck-oidc}.sh`
 
 ⚖ user 2026-09-04 : « la frontière, c'est : joué uniquement à l'install, ou utilisé en prod ? ».
-Ces trois gestes sont joués par la **boîte** à l'init de son instance et à chaque boot pour
+Ces trois gestes sont joués par le **conteneur** à l'init de son instance et à chaque boot pour
 reconverger — donc en prod — et par le **poste** à l'install. Ils étaient des modules de
 l'installeur ; ils sont ici, dans le même dialecte, sur le protocole des modules du produit
 (`../lib/module-protocol.sh`), et l'installeur les **appelle** (le sens permis : `60` appelle
@@ -32,5 +32,5 @@ nommant sa cause — un geste nu n'a pas d'hôte.
 
 Les hôtes : `deploy/modules.d/45-catalogues.sh`, `63-forge-tokens.sh`, `65-ops-branch.sh`,
 `66-deck-oidc.sh` sur un poste (ils passent ce que l'installeur sait de mieux — l'adresse
-annoncée, le plancher de rôles) ; le boot de la boîte (`../container/boot.sh`), à chaque démarrage, dans cet ordre :
+annoncée, le plancher de rôles) ; le boot du conteneur (`../container/boot.sh`), à chaque démarrage, dans cet ordre :
 `tokens`, `catalogues`, `ops-branch`, `deck-oidc`.

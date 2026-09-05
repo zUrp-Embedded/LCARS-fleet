@@ -47,7 +47,7 @@
 
 api_version: 1
 
-# Le NOM du catalogue, porte par le catalogue et non par son dossier — il l'adresse hors de cette
-# boite. Celui-ci est reserve : c'est la mecanique, elle est membre de tous les metiers et n'a pas
+# Le NOM du catalogue, porte par le catalogue et non par son dossier — il l'adresse hors de ce
+# conteneur. Celui-ci est reserve : c'est la mecanique, elle est membre de tous les metiers et n'a pas
 # d'org a elle. Kebab-case, sans `_` (le souligne separe les moities d'un login de role).
 name: system

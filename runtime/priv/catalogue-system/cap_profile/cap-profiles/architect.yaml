@@ -27,7 +27,7 @@ metadata:
   # PER-PROJECT (reorg 2026-07-19): the architect is a project-bound worker, ONE per active project,
   # spawned on-open by starfleet (repo in its UUID → a stable Desktop slot per repo).
   # No fleet-wide mount: like the engineer, its project dir is bound from the spawn's `opts[:project]`
-  # (effective_project). Narrow focal length = the box it cannot reach out of.
+  # (effective_project). Narrow focal length = the container it cannot reach out of.
 spec:
   # Business responsibilities (catalogue L3, B-03) — the gates resolve a CAPABILITY, not a name.
   # `onboarder` was here and is GONE: onboarding means enrolling a project into the fleet, and this

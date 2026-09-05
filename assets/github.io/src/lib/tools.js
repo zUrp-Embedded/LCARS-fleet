@@ -23,7 +23,7 @@ const PRIV = join(ROOT, 'runtime', 'priv');
 
 // Les cap-profiles vivent dans les catalogues. On lit les DEUX — le systeme porte la mecanique,
 // le metier porte les roles du produit — parce que la question « qui peut appeler quoi » n'a de
-// reponse qu'en regardant l'ensemble de ce que la boite embarque.
+// reponse qu'en regardant l'ensemble de ce que le conteneur embarque.
 const PROFILE_DIRS = [
   ['système', join(PRIV, 'catalogue-system', 'cap_profile', 'cap-profiles')],
   ['métier', join(PRIV, 'catalogue', 'cap_profile', 'cap-profiles')]

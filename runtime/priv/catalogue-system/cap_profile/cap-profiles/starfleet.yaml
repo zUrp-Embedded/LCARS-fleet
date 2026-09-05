@@ -50,7 +50,7 @@ metadata:
   # role needs is the upstream of tickets, so the mount follows the intent, not the old path.
   #
   # Consequence, deliberate: NO pod reads the ops tree any more. What was asked, what was judged
-  # and what was proven are readable by the runtime and by a human on the box — by nothing else.
+  # and what was proven are readable by the runtime and by a human on the container — by nothing else.
   # The face enum already made that tree unwritable by any producer; this makes it unread too.
   mounts:
     - path: /home/projects        # RO: read any project, act on it only through the runtime verbs
@@ -91,7 +91,7 @@ spec:
       - TodoWrite
       # Fleet MCP tools of the FLEET-MASTER: ONLY the portfolio head (create/adopt a project + card
       # framing). NOT the delegation head (create_issue/status/escalations/comment) — that stays the
-      # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the box from outside,
+      # per-project architect (cf. DESIGN-carte-des-roles §5/§13: starfleet manages the container from outside,
       # it does not do a project's métier). The universal work-item pair comes from the launcher.
       # L'OFFRE, PUIS LES CARTES — dans cet ordre, parce qu'une carte appartient a un catalogue et
       # que `project_create` refuse un catalogue qui n'est pas installe ici. Sans ce premier verbe,
