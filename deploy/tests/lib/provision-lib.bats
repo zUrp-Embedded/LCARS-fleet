@@ -1596,7 +1596,7 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
   # le delai et les reprises sont sur la ligne d'apt-get update
   grep -qE 'Acquire::http::Timeout=30' "$b/argv"
   grep -qE 'Acquire::Retries=2' "$b/argv"
-  grep -qE '^-o .*update' "$b/argv"
+  grep -qE '^update .*-o Acquire' "$b/argv"   # le verbe d abord : les doublures lisent \$1
   # le diagnostic nomme le miroir ET le remede — http mort, https vivant
   [[ "$output" == *"archive.ubuntu.com INJOIGNABLE en http"* ]]
   [[ "$output" == *"passe tes sources apt en https"* ]]

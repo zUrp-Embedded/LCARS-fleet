@@ -952,9 +952,10 @@ apt_ensure() {
   [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
   p_chg "apt: install ${missing[*]}"
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get "${APT_ACQUIRE_OPTS[@]}" update -qq \
+  # les options APRES le verbe : apt les accepte partout, et les doublures des temoins lisent $1
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update "${APT_ACQUIRE_OPTS[@]}" -qq \
     || { apt_mirror_diag; return 1; }
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get "${APT_ACQUIRE_OPTS[@]}" install -y --no-install-recommends "${missing[@]}" \
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install "${APT_ACQUIRE_OPTS[@]}" -y --no-install-recommends "${missing[@]}" \
     || { apt_mirror_diag; return 1; }
   # ⚠ ON NOTE CE QUI RÉPOND, PAS CE QU'ON A DEMANDÉ. `apt-get install` peut rendre 0 en ayant servi
   # moins que la liste ; c'est `dpkg -s`, paquet par paquet, qui dit ce qui est là. Le journal ne
