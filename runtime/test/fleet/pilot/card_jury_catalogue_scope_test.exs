@@ -18,63 +18,19 @@ defmodule Fleet.Pilot.CardJuryCatalogueScopeTest do
 
   @judge "code-reviewer"
 
+  # The catalogue itself is a shared fixture (`Fleet.Test.BizCatalogueFixture`): the same second
+  # catalogue serves the rails' witnesses that a PR reads the card of ITS catalogue.
   setup %{tmp_dir: tmp} do
-    home = Path.join(tmp, "operator")
-    biz = Path.join([home, "catalogues", "biz"])
-
-    profiles = Path.join(biz, Fleet.Catalogue.rel(:cap_profiles))
-    cards = Path.join(biz, Fleet.Catalogue.rel(:workflow_maps))
-    File.mkdir_p!(profiles)
-    File.mkdir_p!(cards)
-
-    # A real canon judge, renamed: same schema, a name the bundled catalogue does not carry.
-    canon =
-      Path.join([
-        :code.priv_dir(:lcars_fleet),
-        "catalogue",
-        "cap_profile",
-        "cap-profiles"
-      ])
-
-    File.read!(Path.join(canon, "reviewer.yaml"))
-    |> String.replace("name: reviewer", "name: #{@judge}")
-    |> then(&File.write!(Path.join(profiles, "#{@judge}.yaml"), &1))
-
-    # And a worker for the step role — same treatment, same reason.
-    File.read!(Path.join(canon, "engineer.yaml"))
-    |> String.replace("name: engineer", "name: biz-dev")
-    |> then(&File.write!(Path.join(profiles, "biz-dev.yaml"), &1))
-
-    File.write!(Path.join(cards, "standard.yaml"), """
-    kind: WorkflowMap
-    metadata:
-      name: standard
-      description: "carte du catalogue metier"
-    spec:
-      jury: [#{@judge}]
-      ci: ignore
-      max_rework_rounds: 1
-      steps:
-        build:
-          role: biz-dev
-          needs: []
-          inputs:
-            - ticket.body
-    """)
-
-    File.write!(
-      Path.join(biz, "catalogue.yaml"),
-      "api_version: 1\nname: biz\ndefault_card: standard\n"
-    )
-
-    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [
-      Path.join(home, "catalogues")
-    ])
-
+    %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+    Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
     # The image IS the catalogue at runtime — validating against the disk would not be the boot.
     :ok = Fleet.CapProfile.Image.publish!()
     :ok = Fleet.Workflow.Loader.publish_image!()
-    on_exit(&Fleet.CapProfile.Image.unpublish/0)
+
+    on_exit(fn ->
+      Fleet.CapProfile.Image.unpublish()
+      Fleet.Workflow.Loader.unpublish_all_images()
+    end)
 
     :ok
   end

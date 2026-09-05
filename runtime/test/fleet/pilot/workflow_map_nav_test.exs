@@ -105,4 +105,45 @@ defmodule Fleet.Pilot.WorkflowMapNavTest do
   # B (§L441) — the `validate_explicit_step/1` tests are REMOVED with the function: a soft gate on
   # a business step is legitimate (gatekeeper escalation), not a malformed workflow_map.
   # cf. step_run_consumer_gate_test (escalation B).
+
+  describe "safe_load/3 — the opts say WHICH catalogue answers (characterisation)" do
+    # The seam's three arity branches, pinned. The rule that every PRODUCTION default is binary
+    # is a wall (`workflow.loader_arity`, `mix lcars.contracts.check`), read at the AST; the
+    # witnesses that a PR reads its OWN catalogue's card live with the rails
+    # (`step_dispatcher_test`, `step_run_completer_test`, « catalogue de la carte »).
+    defmodule BinaryLoader do
+      def load!(name, opts), do: %{"name" => name, "opts" => opts}
+    end
+
+    defmodule UnaryLoader do
+      def load!(name), do: %{"name" => name}
+    end
+
+    test "a binary FUNCTION receives the opts" do
+      loader = fn name, opts -> %{"name" => name, "opts" => opts} end
+
+      assert {:ok, %{"name" => "wfmap/standard", "opts" => [catalogue_root: "/c"]}} =
+               WorkflowMapNav.safe_load(loader, "wfmap/standard", catalogue_root: "/c")
+    end
+
+    test "a unary FUNCTION is honoured (every stub), the opts are dropped" do
+      assert {:ok, %{"name" => "wfmap/standard"}} =
+               WorkflowMapNav.safe_load(fn name -> %{"name" => name} end, "wfmap/standard",
+                 catalogue_root: "/c"
+               )
+    end
+
+    test "a MODULE exporting load!/2 receives the opts; one exporting load!/1 only is honoured" do
+      assert {:ok, %{"opts" => [catalogue_root: "/c"]}} =
+               WorkflowMapNav.safe_load(BinaryLoader, "x", catalogue_root: "/c")
+
+      assert {:ok, %{"name" => "x"}} =
+               WorkflowMapNav.safe_load(UnaryLoader, "x", catalogue_root: "/c")
+    end
+
+    test "a raising loader is normalized, never a crash on the rail" do
+      assert {:error, {:workflow_map_load_failed, "x", "boom"}} =
+               WorkflowMapNav.safe_load(fn _n, _o -> raise "boom" end, "x", [])
+    end
+  end
 end

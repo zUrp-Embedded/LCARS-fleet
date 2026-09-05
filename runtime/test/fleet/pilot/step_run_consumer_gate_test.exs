@@ -207,6 +207,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     end
   end
 
+  # A completer whose close FAILS on the forge — the abandon witness proves nobody is kicked then.
+  defmodule FailingCloseCompleter do
+    def complete(_step_run, _opts), do: {:error, :close_boom}
+  end
+
   defp dmode,
     do: fn
       "engineer", _root -> {:ok, "git_native"}
@@ -576,6 +581,51 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:wake, "architect-r"}
     assert_received {:comment, abody}
     assert abody =~ "Architecte"
+  end
+
+  test "abandon under OFFLOAD: the arch is kicked AFTER the close reached the forge, never before" do
+    # 2026-09-05 — the kick used to follow `close_with_trace` in the caller; under a runner the
+    # closure is handed over and `{:ok, :offloaded}` returns at once, so the architect heard of an
+    # abandon the forge had not recorded — and heard of it even when the close failed. Pinned here
+    # with a runner that HOLDS the closure: nothing may reach the arch until it runs.
+    deferring = fn exec, _meta ->
+      send(self(), {:deferred, exec})
+      {:ok, :offloaded}
+    end
+
+    assert {:ok, :offloaded} =
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "abandon", "reason" => "unrecoverable work"}},
+               %{hc() | step_run_runner: deferring}
+             )
+
+    refute_received {:notify, "architect-r", _}
+    refute_received {:closed, _}
+
+    assert_received {:deferred, exec}
+    assert {:ok, :completed} = exec.()
+    assert_received {:closed, :retired}
+    assert_received {:notify, "architect-r", notice}
+    assert notice =~ "ABANDONNÉ"
+  end
+
+  test "abandon under OFFLOAD: a close that FAILS kicks nobody — the forge holds no such fact" do
+    deferring = fn exec, _meta ->
+      send(self(), {:deferred, exec})
+      {:ok, :offloaded}
+    end
+
+    assert {:ok, :offloaded} =
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "abandon", "reason" => "unrecoverable work"}},
+               %{hc() | step_run_runner: deferring, step_run_completer: FailingCloseCompleter}
+             )
+
+    assert_received {:deferred, exec}
+    assert {:error, :close_boom} = exec.()
+    refute_received {:notify, "architect-r", _}
   end
 
   test "escalate_user verdict -> await_arch (lcars-awaits-arch + unlock, no close/reassign) + arch KICK" do

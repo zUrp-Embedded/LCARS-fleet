@@ -255,6 +255,17 @@ defmodule Fleet.Pilot.StepRunCompleter do
 
   @awaits_arch_label Labels.awaits_arch()
 
+  defp await_gesture(:provenance_incoherent),
+    do:
+      "Reprends : fais re-livrer la brique avec une attestation cohérente, ou re-cadre le ticket " <>
+        "(`issue_create` avec `supersedes: <n° de CE ticket>`)."
+
+  defp await_gesture(_judge_decision),
+    do:
+      "Reprends ce brief : corrige-le puis re-soumets via `issue_create` avec " <>
+        "`supersedes: <n° de CE ticket>` — la fleet retire alors l'ancien ticket elle-même " <>
+        "(jamais deux tickets vivants pour la même brique)."
+
   @doc """
   Records a role-signed verdict that requires the architect, marks the issue
   `lcars-awaits-arch`, then removes `lcars-in-flight`.
@@ -277,14 +288,15 @@ defmodule Fleet.Pilot.StepRunCompleter do
       Map.get(step_run, :comment_body) ||
         "Verdict du juge **#{role}** : `#{inspect(decision)}`."
 
+    # The gesture follows the cause: a brief a judge refused is re-framed and re-submitted; a
+    # brick whose provenance lies is re-delivered or re-framed, never « superseded » as a brief.
     body =
       "**Architecte** (auteur du brief) — " <>
         lead <>
-        "\n\nReprends ce brief : corrige-le puis re-soumets via `issue_create` avec " <>
-        "`supersedes: <n° de CE ticket>` — la fleet retire alors l'ancien ticket elle-même " <>
-        "(jamais deux tickets vivants pour la même brique). Ou tranche avec ton humain " <>
-        "(il n'a pas d'autre canal vers la fleet que toi). L'issue reste hors-dispatch tant que " <>
-        "`lcars-awaits-arch` est posé.\n\n" <> signature
+        "\n\n" <>
+        await_gesture(decision) <>
+        " Ou tranche avec ton humain (il n'a pas d'autre canal vers la fleet que toi). L'issue " <>
+        "reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
     with {:ok, role_opts} <- ForgeClient.as_role(forge_opts, role),
          comment_opts = Keyword.put(role_opts, :dedup_signature, signature),
@@ -617,9 +629,18 @@ defmodule Fleet.Pilot.StepRunCompleter do
   @doc """
   Seals and rebases the PR, then closes its issue through `MergeAndPromote`.
 
-  Merge, close and role-token failures propagate without unlocking the brick.
+  Merge, close and role-token failures propagate without unlocking the brick, and so do the two
+  refusals the seal pronounces BEFORE any write (`conflict_signal_unreadable`,
+  `provenance_incoherent`).
   """
-  @spec promote(map(), keyword()) :: {:ok, :promoted} | {:error, {:merge, term()}}
+  @spec promote(map(), keyword()) ::
+          {:ok, :promoted}
+          | {:error,
+             {:merge, term()}
+             | {:close_after_merge, term()}
+             | {:conflict_signal_unreadable, term()}
+             | {:provenance_incoherent, term()}
+             | :role_token_unavailable}
   def promote(step_run, opts \\ []) when is_map(step_run) do
     forge = Keyword.get(opts, :forge_client, ForgeClient)
     forge_opts = Keyword.get(opts, :forge_opts, [])
@@ -647,6 +668,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
       # F-C066
       {:error, {:close_after_merge, _}} = err -> err
       {:error, :role_token_unavailable} = err -> err
+      # The seal's two pre-write refusals, NAMED and not caught by a `_`: Dialyzer says nothing
+      # about a non-exhaustive `case`, so a sixth form the seal learns to return must fail here
+      # with its shape in the log rather than pass as a generic error (2026-09-05).
+      {:error, {:conflict_signal_unreadable, _}} = err -> err
+      {:error, {:provenance_incoherent, _}} = err -> err
     end
   end
 
@@ -780,20 +806,57 @@ defmodule Fleet.Pilot.StepRunCompleter do
       base_branch: Map.fetch!(step_run, :base_branch)
     }
 
-    with {:ok, :promoted} <- promote(promote_step_run, opts),
-         :ok <- space_writes(opts),
-         {:ok, _} <-
-           unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role),
-         {:ok, _} <-
-           unlock(
-             forge,
-             step_run.repo,
-             step_run.issue_number,
-             forge_opts,
-             producer_stop_role(step_run, opts),
-             :delivered
-           ) do
-      {:ok, :promoted}
+    case promote(promote_step_run, opts) do
+      {:ok, :promoted} ->
+        with :ok <- space_writes(opts),
+             {:ok, _} <-
+               unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role),
+             {:ok, _} <-
+               unlock(
+                 forge,
+                 step_run.repo,
+                 step_run.issue_number,
+                 forge_opts,
+                 producer_stop_role(step_run, opts),
+                 :delivered
+               ) do
+          {:ok, :promoted}
+        end
+
+      # A TERMINAL refusal: the deterministic wall found the statement lying about the brick, and
+      # no tick will change that. On this rail the work item is already completed, so an error
+      # here would be a log line and nothing else — the same fact `ReviewLifecycle` escalates on
+      # the PR rail. The judge's PR lock lifts (its brick is done) and the ISSUE goes to the
+      # architect through `await_arch/2`, the rail's own airlock (2026-09-05).
+      {:error, {:provenance_incoherent, reason}} ->
+        # The escalation is the load-bearing gesture and the judge's PR unlock the accessory
+        # one: a PR lock left behind is reclaimed by the reconciliation, an issue left without
+        # `lcars-awaits-arch` is the silent loop. So the unlock is best-effort and named, and
+        # `await_arch/2` runs whatever it returned.
+        case unlock(forge, step_run.repo, lock_number(step_run, pr), forge_opts, step_run.role) do
+          {:ok, _} ->
+            :ok
+
+          {:error, why} ->
+            Logger.warning(
+              "StepRunCompleter: #{step_run.repo}##{pr} judge PR-lock NOT lifted on provenance " <>
+                "escalation (#{inspect(why)}) — the reconciliation reclaims it; escalating anyway"
+            )
+        end
+
+        step_run
+        |> Map.merge(%{
+          decision: :provenance_incoherent,
+          comment_body:
+            "la PROVENANCE de la brique est INCOHÉRENTE (`#{inspect(reason)}`) : le mur " <>
+              "déterministe refuse le merge tant que l'attestation ment sur la brique. Aucun " <>
+              "conflit git — relis le statement `refs/lcars/provenance/<sha>` et la base du " <>
+              "livrable."
+        })
+        |> await_arch(opts)
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -868,7 +931,9 @@ defmodule Fleet.Pilot.StepRunCompleter do
   end
 
   defp step_run_jury(step_run, opts) do
-    loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1)
+    # Arity 2 so `safe_load/3` can hand over WHICH catalogue answers (wall
+    # `workflow.loader_arity`, 2026-09-05).
+    loader = Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2)
 
     with name when is_binary(name) and name != "" <- Map.get(step_run, :workflow_map),
          {:ok, %{"jury" => jury} = map} when is_list(jury) <-

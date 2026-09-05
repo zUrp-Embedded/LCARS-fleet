@@ -41,7 +41,7 @@ defmodule Fleet.Pilot.RemediationOutOfBandTest do
     %Ctx{
       forge: forge,
       loader: Fleet.CapProfile,
-      workflow_map_loader: &Fleet.Workflow.Loader.load!/1,
+      workflow_map_loader: &Fleet.Workflow.Loader.load!/2,
       spawner: Fleet.Spawner,
       task_queue: Fleet.TaskQueue,
       resolver: nil,

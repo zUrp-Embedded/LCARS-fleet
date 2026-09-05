@@ -845,13 +845,10 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
       "StepDispatcher: PR #{ctx.repo}##{pr_number} CI #{inspect(class)} — #{message}"
     )
 
-    ArchEscalation.escalate_merge_blocked(
-      arch_seams(ctx),
-      pr_number,
-      head,
-      :ci,
-      {class, message}
-    )
+    # THE CLASS, NOT A LITERAL `:ci`: `merge_blocked_cause/2` has a clause per CI class, and the
+    # architect must read « no runner serves this label » or « no workflow can render a verdict »,
+    # never the catch-all (2026-09-05).
+    ArchEscalation.escalate_merge_blocked(arch_seams(ctx), pr_number, head, class, message)
   end
 
   defp count_ci_red(bodies, pr_number) do
@@ -966,8 +963,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
           arch_seams(ctx),
           pr_number,
           head,
-          :unknown,
-          {:rerequest_read_failed, reason}
+          :rerequest_read_failed,
+          reason
         )
     end
   end

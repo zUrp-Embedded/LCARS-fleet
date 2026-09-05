@@ -47,6 +47,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
   # SINGLE-AUTHORITY spawn leaf: `safe_kill/2` (die-on-promote) — same authority as the
   # judge/rework spawn (via RoleDispatch), never a fork.
+  alias Fleet.Pilot.StepDispatcher.ArchEscalation
   alias Fleet.Pilot.StepDispatcher.Spawn
   alias Fleet.Project.Roles
 
@@ -86,9 +87,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
             forge: module(),
             # Injected cap-profile loader (seam `:loader`, prod default `Fleet.CapProfile`).
             loader: module(),
-            # Injected workflow_map loader (seam `:workflow_map_loader`, default `&Fleet.Workflow.Loader.load!/1`) —
+            # Injected workflow_map loader (seam `:workflow_map_loader`, default `&Fleet.Workflow.Loader.load!/2`) —
             # reads the map-level rework budget (`spec.max_rework_rounds`) on the PR rework path.
-            workflow_map_loader: (String.t() -> map()),
+            # The four forms `WorkflowMapNav.safe_load/3` serves: the rail's default is the binary
+            # capture, the Poller threads a MODULE, the stubs are unary.
+            workflow_map_loader:
+              (String.t(), keyword() -> map()) | (String.t() -> map()) | module(),
             # Injected spawner (seam `:spawner`, prod default `Fleet.Spawner`).
             spawner: module(),
             # Injected brief broker (seam `:task_queue`, prod default `Fleet.TaskQueue`).
@@ -240,6 +244,20 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       {:error, {:merge, reason}} ->
         Remediation.route_merge_failure(pr_number, head, reason, ctx)
 
+      # A TERMINAL state, not a transient one: the deterministic wall found the statement lying
+      # about the brick, and no tick will change that. A bare `{:error, _}` reaches the poller as
+      # `:keep` (no label, the same seal every tick, the ⛔ comment deduplicated), so it is
+      # escalated: `lcars-awaits-arch`, which `dispatch_review` skips on, and the cause named to
+      # the one person who can act (2026-09-05).
+      {:error, {:provenance_incoherent, reason}} ->
+        ArchEscalation.escalate_merge_blocked(
+          %ArchEscalation.Seams{forge: ctx.forge, repo: ctx.repo, forge_opts: ctx.forge_opts},
+          pr_number,
+          head,
+          :provenance_incoherent,
+          reason
+        )
+
       other ->
         other
     end
@@ -380,10 +398,15 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              issue_n,
              producer,
              ctx.forge_opts,
-             head_branch: head,
-             # The PR's own base, read at the dispatch_review single site (face-projet):
-             # the seal aligns the FACE worktree the merge landed on.
-             base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
+             [
+               head_branch: head,
+               # The PR's own base, read at the dispatch_review single site (face-projet):
+               # the seal aligns the FACE worktree the merge landed on.
+               base_branch: Keyword.fetch!(ctx.opts, :pr_base_branch)
+               # The faces the provenance wall reads are the ones this dispatch reads
+               # (`Roles.project_*` take `:code_root` from the same opts): absent, the seal's
+               # own defaults apply, exactly as before.
+             ] ++ Keyword.take(ctx.opts, [:code_root, :ops_root])
            ) do
         :ok ->
           # Die-on-promote (return discarded — honestly: the producer is `one-shot`, ALREADY dead at

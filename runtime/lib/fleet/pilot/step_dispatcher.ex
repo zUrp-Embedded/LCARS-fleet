@@ -346,8 +346,13 @@ defmodule Fleet.Pilot.StepDispatcher do
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Forge.Client),
       loader: Keyword.get(opts, :loader, CapProfile),
+      # ARITY 2, LIKE THE ISSUE RAIL ABOVE. `WorkflowMapNav.safe_load/3` hands `opts` (which
+      # catalogue answers) to a binary loader and DROPS them for a unary one: the jury, the CI
+      # policy and the rework budget of a PR are read under the card of the PR's OWN catalogue
+      # only through a binary default (wall `workflow.loader_arity`, 2026-09-05). A unary seam is
+      # still honoured — every stub is one.
       workflow_map_loader:
-        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
+        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),

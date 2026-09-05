@@ -96,7 +96,12 @@ defmodule Fleet.Pilot.MergeAndPromote do
           keyword()
         ) ::
           :ok
-          | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
+          | {:error,
+             {:merge, term()}
+             | {:close_after_merge, term()}
+             | {:conflict_signal_unreadable, term()}
+             | {:provenance_incoherent, term()}
+             | :role_token_unavailable}
   def merge_and_promote(forge, repo, pr_number, issue_n, producer, forge_opts, opts \\ []) do
     # A0 (rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
     # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
