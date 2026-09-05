@@ -123,7 +123,7 @@ setup() {
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\necho 999\n' > "$BIN/id"; chmod +x "$BIN/id"
   echo "1000" > "$LCARS_SEAT_UID_FILE"
-  printf 'UID_MIN\t1000\n' > "$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"
   # uid 999 = compte SYSTEME. `LCARS_UID_MIN=0` etait la dispense : elle ne doit plus rien pouvoir.
   run env PATH="$BIN:$PATH" LCARS_UID_MIN=0 PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" \
     bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
@@ -137,7 +137,7 @@ setup() {
   echo "1000" > "$LCARS_SEAT_UID_FILE"
   # Un administrateur qui pose la frontiere a 2000 fait de l'uid 1500 un compte SYSTEME. La garde
   # doit suivre le systeme, pas une convention gravee.
-  printf 'UID_MIN\t2000\n' > "$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"
   run env PATH="$BIN:$PATH" PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" \
     bash -c "cd '$FLEET_DIR' && MIX_ENV=dev mix run --no-start -e ':ok' 2>&1"
   [[ "$status" -ne 0 ]]
