@@ -202,7 +202,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   # Minimal forge seams without the optional publish counter read zero failures.
   defp count_publish_failures(%Ctx{} = ctx, issue_n) do
-    if function_exported?(ctx.forge, :count_publish_failures, 3) do
+    if Fleet.Opts.exported?(ctx.forge, :count_publish_failures, 3) do
       ctx.forge.count_publish_failures(ctx.repo, issue_n, ctx.forge_opts)
     else
       {:ok, 0}

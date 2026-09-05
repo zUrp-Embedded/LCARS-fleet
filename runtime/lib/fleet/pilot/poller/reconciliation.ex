@@ -439,7 +439,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # decision. Une fonction absente est une CAPACITE du module, decidee a la compilation et identique
   # a chaque tick — un stub de test, jamais une panne d'execution.
   defp gate_eval_owned_refs(tq, repo) do
-    if function_exported?(tq, :list_active, 0) do
+    if Fleet.Opts.exported?(tq, :list_active, 0) do
       for %{metadata: meta, state: item_state} <- tq.list_active(),
           item_state in @pulled_states,
           meta["gate_eval"] == true,
@@ -476,7 +476,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # cycle `:error` under such a stub, i.e. a reconciliation that never reclaims anything.
   defp project_pod_owned_refs(pod_id, repo, tq) do
     with true <- String.starts_with?(pod_id, Fleet.PodId.scope_prefix(repo)),
-         true <- function_exported?(tq, :pod_active_issue_id, 1),
+         true <- Fleet.Opts.exported?(tq, :pod_active_issue_id, 1),
          {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
          {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
       {:ok, [{repo, :issue, n}]}

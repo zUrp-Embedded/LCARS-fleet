@@ -765,7 +765,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
 
       assert_received {:review, 7, :request_changes, "il manque un test de la branche d'erreur"}
     end
+  end
 
+  describe "record_review/2 — the machine verdict engraved beside the prose" do
     # C1 2026-08-18 — the MACHINE verdict: a build-validated `details.findings` rides the
     # step_run as `:review_findings` and lands as `verdicts/issue-<n>-<role>.json`, committed in
     # the ops worktree next to the prose pin. Best-effort like the provenance triplet: every
@@ -1010,7 +1012,9 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
              "et surtout PAS le message d'échec de gravure : ne rien avoir à écrire n'est pas " <>
                "avoir échoué à écrire, et confondre les deux enverrait chercher une panne d'ops"
     end
+  end
 
+  describe "record_review/2 — the forge error, and promote/2" do
     test "record_review propagates the forge error" do
       step_run = %{
         repo: "fleet/proj",

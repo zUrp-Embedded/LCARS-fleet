@@ -529,7 +529,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # vocabulary. Seam stubs without `get_pull/3`, an unreadable PR, or any non-merged state
   # read as `false` (the ambiguous error then propagates, fail-closed).
   defp merged_on_server?(forge, repo, pr_number, forge_opts) do
-    with true <- Code.ensure_loaded?(forge) and function_exported?(forge, :get_pull, 3),
+    with true <- Fleet.Opts.exported?(forge, :get_pull, 3),
          {:ok, pull} <- forge.get_pull(repo, pr_number, forge_opts) do
       Fleet.Pilot.MergeOutcome.classify(pull) == :merged
     else
@@ -611,7 +611,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
     with true <- is_binary(head_branch) || {:skip, :no_head_branch},
          true <-
-           (Code.ensure_loaded?(forge) and function_exported?(forge, :branch_head, 3)) ||
+           Fleet.Opts.exported?(forge, :branch_head, 3) ||
              {:skip, :seam_without_branch_head},
          {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
          true <- File.dir?(project_dir) || {:skip, :no_local_clone},
@@ -886,7 +886,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # tout le reste : cette fonction s'execute APRES un merge reussi, et aucune de ses reponses ne
   # doit pouvoir empecher la promotion d'une brique deja fusionnee.
   defp probe_state(forge, repo, pr_number, forge_opts) do
-    with true <- function_exported?(forge, :pr_refs, 3),
+    with true <- Fleet.Opts.exported?(forge, :pr_refs, 3),
          {:ok, %{head_sha: sha}} <- forge.pr_refs(repo, pr_number, forge_opts),
          {:ok, probed?} <- forge_actions().probed?(repo, sha, forge_opts) do
       if probed?, do: :probed, else: :unprobed

@@ -841,7 +841,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     with true <- Map.get(d_opts, :push?, true),
          branch when is_binary(branch) <- Map.get(d_opts, :target_branch),
          base when is_binary(base) <- Map.get(d_opts, :base_sha),
-         true <- Code.ensure_loaded?(forge) and function_exported?(forge, :create_branch, 4) do
+         true <- Fleet.Opts.exported?(forge, :create_branch, 4) do
       case forge.create_branch(repo, branch, base, forge_opts) do
         :ok ->
           space_writes(opts)

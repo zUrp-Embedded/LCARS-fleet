@@ -514,7 +514,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   defp safe_wake(spawner, pod_id) do
-    if function_exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
+    if Fleet.Opts.exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
   rescue
     e ->
       # A RAISE from wake_pod is NOT a successful wake — returning `:ok` would report a woken pod that never
@@ -549,7 +549,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # lu le jour ou quelqu'un le veut.
   @spec safe_kill(module(), String.t()) :: :ok | :unsupported | {:error, term()}
   def safe_kill(spawner, pod_id) do
-    if function_exported?(spawner, :kill_pod, 1) do
+    if Fleet.Opts.exported?(spawner, :kill_pod, 1) do
       case spawner.kill_pod(pod_id) do
         :ok -> :ok
         {:error, _} = err -> err
@@ -580,7 +580,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # The `slot_scope` comes from the cap-profile via its single accessor — a second derivation of
   # "is this role project-keyed" is how a pre-flight ends up asking a bucket nobody enforces.
   defp has_free_slot?(spawner, role, profile, spawn_opts) do
-    not function_exported?(spawner, :has_free_slot?, 3) or
+    not Fleet.Opts.exported?(spawner, :has_free_slot?, 3) or
       spawner.has_free_slot?(
         role,
         Keyword.get(spawn_opts, :repo_id),
@@ -601,7 +601,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # `pod_alive?` defaults to `false` if the spawner does not expose `pod_info/1` (test stubs) → spawn
   # path unchanged.
   defp pod_alive?(spawner, pod_id) do
-    function_exported?(spawner, :pod_info, 1) and
+    Fleet.Opts.exported?(spawner, :pod_info, 1) and
       case spawner.pod_info(pod_id) do
         {:ok, _} -> true
         # UNREACHABLE (info call timed out): may be ALIVE and slow — same fail-closed
@@ -764,7 +764,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   defp safe_pod_info(spawner, pod_id) do
-    if function_exported?(spawner, :pod_info, 1) do
+    if Fleet.Opts.exported?(spawner, :pod_info, 1) do
       case spawner.pod_info(pod_id) do
         {:ok, info} -> {:ok, info}
         {:error, :unreachable} -> :unknown
@@ -808,7 +808,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   def refresh_conflict_base(:ready_needs_reprovision, _spawner, _pod_id, _project), do: :ok
 
   def refresh_conflict_base(:proceed, spawner, pod_id, project) do
-    if is_map(project) and function_exported?(spawner, :refresh_work_base, 2) do
+    if is_map(project) and Fleet.Opts.exported?(spawner, :refresh_work_base, 2) do
       case spawner.refresh_work_base(pod_id, project) do
         :ok -> :ok
         # Not registered = fresh spawn ahead: it pins its own base at clone.
@@ -821,7 +821,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   end
 
   defp reprovision_then_proceed(spawner, pod_id, project, slug) do
-    if is_map(project) and function_exported?(spawner, :reprovision_pipe_workspace, 3) do
+    if is_map(project) and Fleet.Opts.exported?(spawner, :reprovision_pipe_workspace, 3) do
       case spawner.reprovision_pipe_workspace(pod_id, project, slug: slug) do
         :ok -> :ok
         {:error, _} -> {:skipped, :role_busy}
