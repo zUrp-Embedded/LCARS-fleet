@@ -57,7 +57,7 @@ defmodule Fleet.Pilot.Poller.Admission do
     {account(result, acc), started?(result)}
   end
 
-  # How many workflow_runs one PROJECT may have in flight at once. Per project and not fleet-wide:
+  # How many workflow_runs one human may have in flight on one repo. Per repo and not fleet-wide:
   # the thing being protected is a repo's merge surface, and two projects do not race each other's
   # base. Ceiling 15 = the pool slots a role actually has (`PoolSlot`, seats 1..15, seat 0 reserved)
   # — asking for a 16th producer is asking for a slot that does not exist.

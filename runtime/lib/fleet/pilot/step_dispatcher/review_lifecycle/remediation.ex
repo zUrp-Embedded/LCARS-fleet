@@ -24,13 +24,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation do
 
   The DECISION lives here; the EXECUTION of the re-spawn descends to `RoleDispatch` (leaf shared with the
   judge spawn — no fork of the mechanics); the WRITING of the human escalation descends to
-  `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`).
+  `ArchEscalation` (narrow seams rebuilt HERE, never the whole `Ctx`). What this module writes on
+  the forge ITSELF is its own protocol, not an escalation: the rung markers that bound each pass
+  (`[ci-red:`, `[conflict-rework:`, `[conflict-chief:`) and the tier-0 conflict report
+  (private `post_conflict_report/4`, signed chief).
   """
 
   require Logger
 
-  # Writing the human escalation (IMPURE cluster): Remediation DECIDES (rework budget /
-  # merge-failure classification), ArchEscalation WRITES (deduplicated gatekeeper comment + `awaits-arch` lock).
+  # Writing the HUMAN escalation (IMPURE cluster): Remediation DECIDES (rework budget /
+  # merge-failure classification), ArchEscalation WRITES it (deduplicated gatekeeper comment +
+  # `awaits-arch` lock). The rung markers and the conflict report are this module's own writes.
   alias Fleet.Forge.Payload
   alias Fleet.Forge.Protocol
   alias Fleet.Layout

@@ -9,10 +9,11 @@ defmodule Fleet.Pilot.PodReaper do
   every later ticket of that role is deferred on `wait/capacity` — a fleet that looks busy while
   it is only un-harvested.
 
-  Two callers, two ends of a ticket:
+  Two reapers, two ends of a ticket:
 
-    * the MERGE — `Fleet.Pilot.MergeAndPromote` reaps the producer it just sealed (it knows the
-      role, so it kills one precise id);
+    * the MERGE — `Fleet.Pilot.MergeAndPromote` kills the one precise id it just sealed (it knows
+      the role; private `reap_ticket_producer/3`), through the same `:pilot_spawner` seam, without
+      passing through this module;
     * the SUPERSEDE — `Fleet.MCP`'s delegation retires an issue and calls THIS module through the
       `:mcp_pod_reaper` upward seam (MCP cannot reference `Fleet.Pilot` at compile time), because
       it does NOT know which roles were live on that ticket.
@@ -54,8 +55,8 @@ defmodule Fleet.Pilot.PodReaper do
   # ⚠ `Fleet.Spawner.list_pods/0` ENUMERE LES MAPS `:info` DES PODS, PAS LEURS IDS. Les lire comme
   # des ids fait tomber chaque map dans la clause fourre-tout `:error` de `PodId.parse_ref/2`, qui
   # garde sur `is_binary` : la comprehension filtre alors TOUT, `reap_issue/2` rend `[]` a chaque
-  # appel, et comme ses deux appelants (le sceau et le supersede) sont best-effort par conception,
-  # RIEN NE SE PLAINT. Un faucheur qui ne fauche rien, en silence, aux deux bouts de chaque ticket —
+  # appel, et comme son appelant (le supersede MCP) est best-effort par conception, RIEN NE SE
+  # PLAINT. Un faucheur qui ne fauche rien, en silence, a la retraite de chaque ticket —
   # le producteur d'un ticket retire continue de travailler et merge sa PR dedans.
   #
   # The extraction is EXPLICIT rather than a pattern-match in the comprehension head: a seam whose

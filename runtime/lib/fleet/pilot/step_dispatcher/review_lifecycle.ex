@@ -4,7 +4,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
 
   `StepDispatcher.dispatch_review/2` (PUBLIC — the poller's contract) stays at the core: it does the PR
   gate (`in-flight`/`awaits-arch`), reads `pr_review_state` (commit-scoped verdicts + stable jury) THEN
-  DELEGATES all routing here. This module carries the ROUTING (`dispatch_by_verdicts/5`) + the sealed
+  DELEGATES all routing here. This module carries the ROUTING (`dispatch_by_verdicts/6`) + the sealed
   PROMOTION (`promote_pr`); the flow's two other clusters descend into sub-modules:
 
     * `RoleDispatch` — shared EXECUTION leaf: prepares and spawns ONE role on the PR

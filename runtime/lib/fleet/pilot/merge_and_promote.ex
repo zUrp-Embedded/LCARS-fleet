@@ -286,21 +286,28 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
     # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
     # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
+    # ONE suite after a merge that HOLDS, whatever proved it (the `:ok` of the POST, or the server
+    # read back after an errored POST): a change to the post-merge gestures cannot land on one
+    # proof only. A closure, not a function: the ten values are all in scope here.
+    after_merge = fn ->
+      note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
+
+      converge_postconditions(
+        forge,
+        repo,
+        pr_number,
+        issue_n,
+        body,
+        signature,
+        forge_opts,
+        opts,
+        producer
+      )
+    end
+
     case do_merge(forge, repo, pr_number, merge_opts, method) do
       :ok ->
-        note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
-
-        converge_postconditions(
-          forge,
-          repo,
-          pr_number,
-          issue_n,
-          body,
-          signature,
-          forge_opts,
-          opts,
-          producer
-        )
+        after_merge.()
 
       {:error, _} = err ->
         # A merge POST that errors does NOT prove the merge did not happen: a timeout can
@@ -319,19 +326,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
               "verdict was a lie of the wire, not of the merge)"
           )
 
-          note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
-
-          converge_postconditions(
-            forge,
-            repo,
-            pr_number,
-            issue_n,
-            body,
-            signature,
-            forge_opts,
-            opts,
-            producer
-          )
+          after_merge.()
         else
           err
         end

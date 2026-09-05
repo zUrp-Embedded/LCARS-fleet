@@ -93,6 +93,11 @@ defmodule Fleet.Pilot.StepRunCompleter do
     * `:comment_body` — human-readable body of the comment (the machine signature is
       always appended); default generated
   """
+  # The issue-level contract of `complete/2`, plus what the other two doors read: `complete_pr/2`
+  # takes the PR-native keys (built by `StepRunConsumer.StepRunBuild`), `await_arch/2` takes
+  # `:decision` (posed by `TerminalEscalation`); `:closure` is posed by
+  # `StepRunConsumer.close_with_trace` and read by `complete/2`. Listed so the type describes
+  # the THREE doors.
   @type step_run :: %{
           required(:repo) => String.t(),
           required(:issue_number) => integer(),
@@ -100,7 +105,21 @@ defmodule Fleet.Pilot.StepRunCompleter do
           optional(:deliverable_opts) => map() | nil,
           optional(:step_run_sha) => String.t(),
           optional(:next_assignee) => String.t() | nil,
-          optional(:comment_body) => String.t()
+          optional(:comment_body) => String.t(),
+          optional(:pr_role) => :producer | :judge,
+          optional(:intent) => atom(),
+          optional(:producer_branch) => String.t() | nil,
+          optional(:base_branch) => String.t(),
+          optional(:review_event) => atom(),
+          optional(:review_findings) => map() | nil,
+          optional(:review_findings_refused) => boolean(),
+          optional(:judge_target) => String.t() | nil,
+          optional(:workflow_map) => String.t() | nil,
+          optional(:next_step) => String.t() | nil,
+          optional(:eng_summary) => String.t(),
+          optional(:closure) => atom(),
+          optional(:decision) => term(),
+          optional(:pod_id) => String.t() | nil
         }
 
   @doc """
