@@ -30,7 +30,9 @@ setup_file() {
   export GEN="$REPO/deploy/pkg/gen-contents.sh"
   export DECOR="$BATS_FILE_TMPDIR/decor"
   export STAGE="$DECOR/lcars_install" TOOLS="$DECOR/tools" OUT="$DECOR/out" DEBS="$DECOR/debs"
-  mkdir -p "$STAGE" "$TOOLS/tofu/providers/registry.opentofu.org/decor" "$OUT" "$DEBS"
+  mkdir -p "$STAGE" "$TOOLS/tofu/providers/registry.opentofu.org/decor" "$TOOLS/deck-static" "$OUT" "$DEBS"
+  # le client de console, tel que prep-deck-static.sh le prepare (trois fichiers aux pins de 62)
+  printf 'js' > "$TOOLS/deck-static/xterm.js"; printf 'css' > "$TOOLS/deck-static/xterm.css"; printf 'fit' > "$TOOLS/deck-static/addon-fit.js"
 
   # le tampon, la release, la doc — ce que pack.sh ajoute au `git archive`
   printf 'decor123\n' > "$STAGE/.source-revision"
@@ -336,4 +338,18 @@ tar_line() { dpkg-deb --fsys-tarfile "$(deb_of "$1")" | tar -tv | grep -E " \./$
   command -v lintian >/dev/null 2>&1 || skip "lintian absent sur ce poste — la mesure se fera au banc (apt install lintian)"
   run lintian --suppress-tags dir-or-file-in-opt --no-tag-display-limit "$(deb_of lcars)"
   refute grep -qE '^E:' <<<"$output"
+}
+
+@test "deck-static : le client de console (pins de 62) est EMBARQUE par lcars — sans le tiroir prepare, le manque est DIT" {
+  # le decor de ce fichier pose TOOLS/deck-static (trois fichiers) : lcars les porte
+  grep -q '/opt/lcars/deck-static/xterm.js' "$OUT/lcars.paths"
+  grep -q '/opt/lcars/deck-static/addon-fit.js' "$OUT/lcars.paths"
+  grep -qE '^if \[\[ -n "\$TOOLS" && -d "\$TOOLS/deck-static" \]\]; then' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
+  grep -q 'client de console ABSENT du tiroir' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
+  grep -q 'emit_dir "$ROOT/deck-static" 0755' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
+  grep -q 'deck-static/\$(basename "\$_f")" 0644' "$BATS_TEST_DIRNAME/../../pkg/gen-contents.sh"
+  # pack.sh prepare le tiroir AVANT gen-contents
+  local pk="$BATS_TEST_DIRNAME/../../../pack.sh"
+  local l_prep l_gen; l_prep="$(grep -n 'prep-deck-static.sh --tools' "$pk" | head -1 | cut -d: -f1)"; l_gen="$(grep -n 'gen-contents.sh --stage' "$pk" | head -1 | cut -d: -f1)"
+  [ -n "$l_prep" ] && [ -n "$l_gen" ] && [ "$l_prep" -lt "$l_gen" ]
 }

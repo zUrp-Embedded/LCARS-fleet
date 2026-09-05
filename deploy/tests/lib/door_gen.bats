@@ -120,3 +120,15 @@ sums_of() { # sums_of <porte> -> la table, telle que la porte la rend
   [ "$status" -eq 0 ]
   grep -qF 'DOOR_BASE="https://f/x?a=1&b=2"' "$DIST/install.sh"
 }
+
+@test "pack.sh : la porte de la version est generee APRES les artefacts, dans un tiroir PAR VERSION (dist/<tag>) par liens durs" {
+  local pk="$BATS_TEST_DIRNAME/../../../pack.sh"
+  local body; body="$(grep -vE '^\s*#' "$pk")"
+  grep -qE '^DIST="\$PACK_DIR/dist/\$TAG"' <<<"$body"
+  grep -qE 'ln -f "\$_f" "\$DIST/' <<<"$body"
+  grep -qE 'door-gen.sh "\$TAG" "\$DOOR_BASE" "\$DIST"' <<<"$body"
+  local l_deb l_door; l_deb="$(grep -nE '"\$NFPM" package' <<<"$body" | head -1 | cut -d: -f1)"; l_door="$(grep -nE 'door-gen.sh "\$TAG"' <<<"$body" | cut -d: -f1)"
+  [ "$l_deb" -lt "$l_door" ]
+  # LCARS_DOOR_BASE surcharge la base (les bancs servent en local)
+  grep -qE 'DOOR_BASE="\$\{LCARS_DOOR_BASE:-' <<<"$body"
+}

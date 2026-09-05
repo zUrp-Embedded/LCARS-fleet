@@ -173,3 +173,18 @@ HARNAIS
   [ "$status" -eq 0 ]
   [[ "$output" == *'<pas de fichier>'* ]] || { echo "un config.json a ete invente : $output"; return 1; }
 }
+
+@test "canal deb : snapd present se DIT avec le geste, apt n'est JAMAIS appele (le postinst tourne sous le verrou)" {
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"
+  local bin="$BATS_TEST_TMPDIR/bin-deb"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\n[[ "$1" == -s && "$2" == snapd ]] && exit 0\nexit 1\n' > "$bin/dpkg"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\nexit 0\n' "$BATS_TEST_TMPDIR/apt-deb.trace" > "$bin/apt-get"
+  chmod 0755 "$bin"/*
+  local mod_sans_case="$BATS_TEST_TMPDIR/30-sans-case.sh"; sed '/^case "${1:?usage/,$d' "$MOD" > "$mod_sans_case"
+  run bash -c "set -uo pipefail; export PATH=\"$bin:$PATH\" PROV_HUMAN=temoin; source '$mod_sans_case' >/dev/null 2>&1; prov_channel_or_verdict apply; PROV_CHANGED=0; dpkg -s snapd >/dev/null 2>&1 && poseur_is_dpkg && echo DEB-SNAPD"
+  [[ "$output" == *"DEB-SNAPD"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/apt-deb.trace" ]
+  # et la branche du module dit le geste
+  grep -q 'sous canal deb ce module ne l.enl' "$MOD"
+  grep -q 'apt remove --purge snapd' "$MOD"
+}

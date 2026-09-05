@@ -38,6 +38,7 @@ depends:
   - util-linux-extra
   - sudo
   - ttyd
+  - procps
 recommends:
   - lcars-workstation | lcars-container
 scripts:

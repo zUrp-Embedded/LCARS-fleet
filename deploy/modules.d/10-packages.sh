@@ -29,14 +29,17 @@ PACKAGES=(
   # paquets python populaires livrent des wheels manylinux et ne compilent rien ; ceux qui restent
   # compilent des extensions C, les modules npm natifs veulent node-gyp, et les crates rust en
   # `-sys` veulent cc + pkg-config + le `-dev` de la lib C visée.
-  build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip
+  # ⚠ LE SOCLE DE COMPILATION (build-essential…) N'EST PLUS ICI : il vit dans BUILD_PACKAGES, demande
+  # sur une livraison SOURCE seulement — un kit ou un paquet arrivent compiles (mesure 2004, 2026-09-05 :
+  # six drifts « absent » sur un poste installe par paquet). Ce que ce tableau porte est EXACTEMENT le
+  # Depends: de deploy/pkg/lcars.yaml — une liste, deux lecteurs, un temoin les tient egales.
   # ⚠ `sudo` A PERDU SA JUSTIFICATION ECRITE AVEC LA REGLE QU'ELLE CITAIT. Elle disait que ce paquet
   # est « ce que la regle etroite de 45-sudoers-toolchain designe » — cette regle est retiree, et la
   # phrase est partie avec elle. Ce qui reste vrai, et qui n'etait ecrit nulle part : c'est le RAIL
   # lui-meme qui en depend. `install.sh` refuse de continuer sans lui (« sudo est absent, et ce rail
   # en a besoin pour provisionner ce systeme »), et `workstation` s'escalade par `exec sudo`. Une
   # ligne sans raison finit par etre retiree par quelqu'un qui cherche a alleger.
-  util-linux-extra sudo less bash-completion
+  util-linux-extra sudo
   # procps : `pgrep`/`pkill` — lus par 60-deploy (fleet debout ?), le convergeur d'humains (revocation)
   # et les sondes de 64. Il vivait dans l'outillage du GATE de 60 ; le gate ne se joue plus a
   # l'install (DI-07), le besoin runtime, lui, reste.
@@ -51,6 +54,8 @@ PACKAGES=(
 #                `docker-endpoint.sh` le trouve sans qu'aucun paquet ne soit installé ici ; poser
 #                un paquet docker dans la distro y fabriquerait un SECOND daemon, concurrent du premier.
 #   · `docker` — on est DANS le conteneur ; il n'y a rien à installer et rien à monter.
+# La queue de compilation (extensions C, node-gyp, crates -sys) : livraison SOURCE seulement.
+BUILD_PACKAGES=(build-essential pkg-config python3-dev libssl-dev python3-venv python3-pip)
 LINUX_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
 DOCKER_KEYRING="${LCARS_DOCKER_KEYRING:-/etc/apt/keyrings/docker.asc}"
@@ -166,6 +171,8 @@ EOF
 # empêcher, et ce n'est pas à cette fonction de la commettre.
 effective_packages() {
   printf '%s\n' "${PACKAGES[@]}"
+  # le socle de compilation : livraison SOURCE seulement (kit et paquet arrivent compiles)
+  prov_delivery_is_binary || printf '%s\n' "${BUILD_PACKAGES[@]}"
   if [[ "${PROV_SUBSTRATE:-}" == "linux" ]] && ! docker_endpoint >/dev/null 2>&1; then
     printf '%s\n' "${LINUX_PACKAGES[@]}"
   fi
@@ -212,6 +219,20 @@ check() {
   verdict_check
 }
 
+# Sous PAQUET (canal deb), ce module n'appelle JAMAIS apt : il tourne dans un postinst, apt tient le
+# verrou dpkg (mesure 2004 : rc 100), et ses paquets sont le Depends: — deja resolus par apt. Ce qui
+# manque quand meme (un Depends retire a la main) se DIT avec le geste, il ne se pose pas d'ici.
+apply_dpkg() {
+  local pkg missing=()
+  while IFS= read -r pkg; do dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg"); done < <(effective_packages)
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    p_drift "paquet(s) absent(s) sous canal deb : ${missing[*]} — apt tient le verrou, ce module ne pose rien ici : « sudo apt install ${missing[*]} »"
+  fi
+  if probe_bwrap; then p_ok "bwrap sandbox opérationnel (sonde réelle, user $PROV_HUMAN)"
+  else p_fail "bwrap installé mais le sandbox minimal ÉCHOUE (user $PROV_HUMAN)"; fi
+  verdict_apply
+}
+
 apply() {
   local -a pkgs; mapfile -t pkgs < <(effective_packages)
   # Capturer puis tester, pas `printf | grep -qx` (DI-13) : sous `pipefail`, `grep -q` ferme le
@@ -229,7 +250,9 @@ apply() {
 }
 
 case "${1:?usage: 10-packages.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
+  check|apply)
+    # une seule lecture du canal, nue, au dispatch (prov_channel_or_verdict) — comme 60 et 62
+    prov_channel_or_verdict "$1"
+    if [[ "$1" == "apply" ]]; then if poseur_is_dpkg; then apply_dpkg; else apply; fi; else check; fi ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

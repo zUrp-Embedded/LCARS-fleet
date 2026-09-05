@@ -273,6 +273,9 @@ if [[ "$DEB" -eq 1 ]]; then
   say "lcars-tofu : binaire et miroir de providers → $TOOLS/tofu…"
   bash deploy/pkg/prep-tofu.sh --tools "$TOOLS" --stage "$STAGE/$ROOT" --arch "$DEB_ARCH" >/dev/null \
     || die "outillage tofu non préparé — le tar est là ; « --no-deb » pour s'en passer"
+  say "client de console (xterm.js, pins de 62) → $TOOLS/deck-static…"
+  bash deploy/pkg/prep-deck-static.sh --tools "$TOOLS" >/dev/null \
+    || die "client de console non préparé — le tar est là ; « --no-deb » pour s'en passer"
   say "contents dérivés de la table et du stage…"
   bash deploy/pkg/gen-contents.sh --stage "$STAGE/$ROOT" --out "$STAGE/.pkg" --tools "$TOOLS" \
     || die "génération des contents en échec — le tar est là"
@@ -290,6 +293,28 @@ if [[ "$DEB" -eq 1 ]]; then
 else
   say "--no-deb : pas de paquets Debian (ni nfpm ni tofu téléchargés) — le tar seul"
 fi
+
+# ─── LE TIROIR DE LA VERSION, ET LA PORTE QUI LA CONNAIT ────────────────────────────────────────
+# La porte d'UNE version porte les sha256 de SES artefacts en dur (curl_bash_2026 § 07, lot 4) :
+# door-gen.sh les lit dans un tiroir qui ne contient que cette version. Le tiroir partagé
+# `lcars-packs` reste (les bancs y prennent par nom) ; `dist/<tag>/` en est la vue par version,
+# par liens durs — un fichier, deux noms, zéro copie. Le tag est celui du paquet generic d'avant
+# (`<VERSION>-<SHA>`) : il ordonne, il se lit, il porte le commit. BASE est la forme d'URL commune
+# à gitea et github ; sans forge dérivable (origin local), une base visiblement fausse — la porte
+# accepte LCARS_DOOR_BASE au banc et refuse tout http:// non déclaré.
+TAG="${VERSION}-${SHA}"
+DIST="$PACK_DIR/dist/$TAG"
+mkdir -p "$DIST"
+for _f in "$OUT" "${OUT}.sha256" "$PACK_DIR"/*"+g${SHA}"_*.deb "$PACK_DIR"/*"+g${SHA}"_*.deb.sha256; do
+  [[ -f "$_f" ]] || continue
+  ln -f "$_f" "$DIST/$(basename "$_f")"
+done
+_FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
+_OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
+DOOR_BASE="${LCARS_DOOR_BASE:-${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/lcars-fleet/releases/download/$TAG}"
+say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
+bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
+say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
 
 # ─── LA POUSSE ──────────────────────────────────────────────────────────────────────────────────
 # API paquets `generic` de Gitea — la même que `publish.yml` emploie pour les images `container`.

@@ -291,6 +291,23 @@ while read -r n; do
   emit_dir "$ROOT/$n" 0755 "$ROOT_OWNER"
   emit_tree "$STAGE/runtime/$n" "$ROOT/$n" 0755 0644 0755 "$ROOT_OWNER" "${EXCL[@]}"
 done < <(array_of "$MOD62" EMBEDDED)
+# Le client de la console web (xterm.js, addon-fit) : 62 le TELECHARGE a l'apply aux pins qu'il porte ;
+# sous paquet il mesure sans poser, donc le paquet l'embarque — prepare par prep-deck-static.sh dans
+# le tiroir des outils, aux memes pins (lus dans 62), verifie. Sans le tiroir : le paquet serait une
+# console noire, on refuse.
+if [[ -n "$TOOLS" && -d "$TOOLS/deck-static" ]]; then
+  emit_dir "$ROOT/deck-static" 0755 "$ROOT_OWNER"
+  _ds_n=0
+  for _f in "$TOOLS"/deck-static/*; do
+    [[ -f "$_f" ]] || continue
+    emit_file "$_f" "$ROOT/deck-static/$(basename "$_f")" 0644 "$ROOT_OWNER"; _ds_n=$((_ds_n + 1))
+  done
+  [[ "$_ds_n" -ge 3 ]] || die "le client de console compte $_ds_n fichier(s), trois attendus"
+else
+  # meme regime que l'outillage tofu : sans tiroir prepare, le paquet se genere et le manque est DIT —
+  # pack.sh prepare toujours le tiroir avant d'arriver ici ; un decor sans outillage ne le fait pas.
+  say "client de console ABSENT du tiroir (${TOOLS:-aucun}/deck-static) — lcars n'aura pas de console : prep-deck-static.sh d'abord"
+fi
 while read -r n; do
   [[ -n "$n" ]] || continue
   emit_dir "$ROOT/$n" 0755 "$ROOT_OWNER"

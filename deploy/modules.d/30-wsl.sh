@@ -84,7 +84,11 @@ check() {
 }
 
 apply() {
-  if dpkg -s snapd >/dev/null 2>&1; then
+  if dpkg -s snapd >/dev/null 2>&1 && poseur_is_dpkg; then
+    # sous PAQUET, apt tient le verrou dpkg : purger snapd d'ici est un rc 100 (mesure 2004). On DIT
+    # le geste ; le reste du module (wsl.conf, socket gpg, credsStore) sont des fichiers, ils se posent.
+    p_drift "snapd présent (casse systemd --user sous WSL) — sous canal deb ce module ne l'enlève pas : « sudo apt remove --purge snapd », puis « sudo dpkg --configure -a »"
+  elif dpkg -s snapd >/dev/null 2>&1; then
     run_quiet env DEBIAN_FRONTEND=noninteractive apt-get purge -y snapd || verdict_apply
     rm -rf /snap /var/snap /var/lib/snapd
     if dpkg -s snapd >/dev/null 2>&1; then
@@ -179,7 +183,9 @@ apply() {
 }
 
 case "${1:?usage: 30-wsl.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
+  check|apply)
+    # une seule lecture du canal, nue, au dispatch (prov_channel_or_verdict) — comme 60 et 62
+    prov_channel_or_verdict "$1"
+    if [[ "$1" == "apply" ]]; then apply; else check; fi ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac
