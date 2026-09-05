@@ -1613,3 +1613,170 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
   [[ "$output" == *"le miroir http://archive.ubuntu.com repond"* ]]
   refute_out 'INJOIGNABLE' <<<"$output"
 }
+
+# ─── LE CANAL — QUI A POSE LE PRODUIT (lot 2 du chantier release, 2026-09-05) ───────────────────
+#
+# `/etc/lcars/channel` dit `source`, `kit` ou `deb` ; `prov_channel` le lit, `prov_channel_write`
+# l'ecrit, `poseur_is_dpkg` est le predicat que 60/62/44/46 branchent. Le decor possede le fichier
+# (`LCARS_CHANNEL_FILE`) et le proprietaire (`LCARS_CHANNEL_OWNER`) : un temoin ne lit jamais le
+# canal de la machine qui le joue, et ne chown pas vers root.
+
+canal_decor() {
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
+  export LCARS_CHANNEL_OWNER; LCARS_CHANNEL_OWNER="$(id -un):$(id -gn)"
+  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"
+}
+canal() { # canal <code bash> — la lib sourcee, verdicts a zero, sous le decor du canal
+  run bash -c "set -euo pipefail; export PROVISION_MODULE=test-mod; . \"\$LIB\" >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0 PROV_DRIFT=0; $1"
+}
+
+@test "prov_channel : les trois valeurs se lisent, et l absence du fichier dit « aucun »" {
+  canal_decor
+  local v
+  for v in source kit deb; do
+    printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
+    canal 'prov_channel; echo "global=$PROV_CHANNEL"'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "$v" ]
+    [ "${lines[1]}" = "global=$v" ]
+  done
+  rm -f "$LCARS_CHANNEL_FILE"
+  canal 'prov_channel; echo "global=$PROV_CHANNEL"'
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "aucun" ]
+  [ "${lines[1]}" = "global=aucun" ]
+}
+
+@test "prov_channel : une valeur hors vocabulaire est un FAIL NOMME — rien sur stdout, rc 1, et il COMPTE en appel nu" {
+  canal_decor
+  printf 'snap\n' > "$LCARS_CHANNEL_FILE"
+  canal 'prov_channel >/dev/null || echo "rc=$?"; echo "failed=$PROV_FAILED global=[$PROV_CHANNEL]"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"*"source, kit ou deb"* ]]
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"failed=1 global=[]"* ]]
+  # et le chemin du fichier fautif est nomme : c'est lui qu'on corrige
+  [[ "$output" == *"$LCARS_CHANNEL_FILE"* ]]
+  # la valeur ne sort JAMAIS sur stdout, meme fausse — un lecteur en `$( )` recoit vide, pas « snap »
+  canal 'v="$(prov_channel 2>/dev/null)" || true; echo "v=[$v]"'
+  [[ "$output" == *"v=[]"* ]]
+}
+
+@test "prov_channel : le nom du fichier a UNE source, et elle se surcharge — sinon un decor lirait la machine" {
+  canal_decor
+  # ⚠ ON MESURE LA COUTURE, PAS LE CHEMIN : sans `LCARS_CHANNEL_FILE`, le canon est bien /etc/lcars/channel
+  canal 'echo "$PROV_CHANNEL_FILE_CANON"'
+  [ "$output" = "/etc/lcars/channel" ]
+  run env -u LCARS_CHANNEL_FILE bash -c ". \"$LIB\" >/dev/null 2>&1; echo \"\$PROV_CHANNEL_FILE\""
+  [ "$output" = "/etc/lcars/channel" ]
+  # et le manifeste le declare — c'est lui qui donne le mode et le proprietaire a l'ecriture
+  grep -qE '^anchor[[:space:]]+/etc/lcars/channel[[:space:]]+0644[[:space:]]+root:root[[:space:]]+any' \
+    "$BATS_TEST_DIRNAME/../../system.manifest"
+}
+
+@test "prov_channel_write : pose la valeur, au mode de la table, atomique et idempotent — et refuse hors vocabulaire" {
+  canal_decor
+  canal 'prov_channel_write kit; echo "changed=$PROV_CHANGED"'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = "kit" ]
+  [ "$(stat -c '%a' "$LCARS_CHANNEL_FILE")" = "644" ]
+  [[ "$output" == *"POSÉ"*"changed=1"* ]]
+  # idempotent : la meme valeur n'est pas re-posee
+  canal 'prov_channel_write kit; echo "changed=$PROV_CHANGED"'
+  [[ "$output" == *"changed=0"* ]]
+  # une autre valeur remplace — c'est la mise a jour par le meme rail, ou la migration d'un canal
+  canal 'prov_channel_write source'
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
+  # aucun tampon ne survit a cote : l'ecriture est atomique
+  [ -z "$(find "$(dirname "$LCARS_CHANNEL_FILE")" -name '.prov.*')" ]
+  # et un canal invente est REFUSE, le fichier ne bouge pas
+  canal 'prov_channel_write snap || echo "rc=$?"; echo "failed=$PROV_FAILED"'
+  [[ "$output" == *"FAIL"*"n'est pas un canal"*"rc=1"*"failed=1"* ]]
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = "source" ]
+}
+
+@test "poseur_is_dpkg : vrai sous deb, faux sous source/kit/aucun — et il EXIGE la lecture prealable" {
+  canal_decor
+  local v attendu
+  for v in source kit deb aucun; do
+    if [[ "$v" == aucun ]]; then rm -f "$LCARS_CHANNEL_FILE"; else printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"; fi
+    [[ "$v" == deb ]] && attendu=oui || attendu=non
+    canal 'prov_channel >/dev/null; if poseur_is_dpkg; then echo oui; else echo non; fi'
+    [ "$output" = "$attendu" ] || { echo "canal $v : poseur_is_dpkg dit $output, attendu $attendu"; return 1; }
+  done
+  # sans lecture, `set -u` le dit — un module qui branche sans avoir lu ne rend pas « non » en silence
+  canal 'poseur_is_dpkg && echo oui || echo non'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PROV_CHANNEL"* ]]
+}
+
+@test "prov_channel_or_verdict : un canal illisible rend le verdict ROUGE du verbe, avant tout geste" {
+  canal_decor
+  printf 'snap\n' > "$LCARS_CHANNEL_FILE"
+  canal 'prov_channel_or_verdict apply; echo "PAS ATTEINT"'
+  [ "$status" -eq 1 ]                       # verdict_apply : 1 = echec
+  refute_out 'PAS ATTEINT' <<<"$output"
+  [[ "$output" == *"FAIL"*"illisible"* ]]
+  canal 'prov_channel_or_verdict check; echo "PAS ATTEINT"'
+  [ "$status" -eq 2 ]                       # verdict_check : 2 = echec de sonde
+  refute_out 'PAS ATTEINT' <<<"$output"
+  # et un canal lisible laisse passer, en posant la globale que le predicat lit
+  printf 'deb\n' > "$LCARS_CHANNEL_FILE"
+  canal 'prov_channel_or_verdict apply; echo "canal=$PROV_CHANNEL"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "canal=deb" ]
+}
+
+# ─── CE QUE DPKG DIT — une doublure, jamais le dpkg de la machine ───────────────────────────────
+dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PATH qui repond ce qu'on lui dit
+  local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
+  local st="$1"; shift
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'case "$1" in'
+    echo "  -s) [[ -n '$st' ]] || exit 1; echo 'Package: lcars'; echo 'Status: $st'; exit 0 ;;"
+    echo '  -V)'
+    local l; for l in "$@"; do printf "    printf '%%s\\\\n' '%s'\n" "$l"; done
+    echo '    exit 0 ;;'
+    echo 'esac; exit 2'
+  } > "$d/dpkg"
+  chmod 0755 "$d/dpkg"
+  export PATH="$d:$PATH"
+}
+
+@test "prov_dpkg_verify : les LIGNES de dpkg -V font le drift, pas son rc — et la racine filtre" {
+  dpkg_double 'install ok installed' '??5?????? c /etc/lcars/lcars.bashrc' 'missing   /opt/lcars/runtime/bin/lcars' '??5??????   /opt/lcars/services/console.sh'
+  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"/etc/lcars/lcars.bashrc"* ]]
+  [[ "$output" == *"/opt/lcars/runtime/bin/lcars"* ]]
+  [[ "$output" == *"/opt/lcars/services/console.sh"* ]]
+  # sous une racine : seuls ses chemins — et /opt/lcars/runtime ne couvre pas /opt/lcars/runtimex
+  canal 'prov_dpkg_verify lcars /opt/lcars/runtime || echo "rc=$?"'
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"/opt/lcars/runtime/bin/lcars"* ]]
+  refute_out 'bashrc|console\.sh' <<<"$output"
+  canal 'prov_dpkg_verify lcars /opt/lcars/runtim || echo "rc=$?"'
+  [[ "$output" == *"rc=0"* ]] || [ -z "$output" ]
+  refute_out '/opt/lcars' <<<"$output"
+}
+
+@test "prov_dpkg_verify : rien a redire = rc 0 et silence ; dpkg absent = 2 ; paquet inconnu = 3" {
+  dpkg_double 'install ok installed'
+  canal 'prov_dpkg_verify lcars; echo "rc=$?"'
+  [ "$output" = "rc=0" ]
+  dpkg_double ''
+  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
+  [ "$output" = "rc=3" ]
+  dpkg_double 'deinstall ok config-files'
+  canal 'prov_dpkg_verify lcars || echo "rc=$?"'
+  [ "$output" = "rc=3" ]
+  # dpkg absent du PATH : 2, et aucune ligne — la lib ne devine pas ce qu'elle ne peut pas mesurer
+  canal 'PATH=/nonexistent prov_dpkg_verify lcars || echo "rc=$?"'
+  [ "$output" = "rc=2" ]
+  # le nom du paquet a UNE source dans la lib, et elle se surcharge
+  canal 'echo "$PROV_DEB_PACKAGE"'
+  [ "$output" = "lcars" ]
+  LCARS_DEB_PACKAGE=lcars-autre canal 'echo "$PROV_DEB_PACKAGE"'
+  [ "$output" = "lcars-autre" ]
+}
