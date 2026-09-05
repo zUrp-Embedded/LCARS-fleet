@@ -731,7 +731,7 @@ SPY
   local p c out
   for p in 10 25 50 75 90 95 98 99; do
     c=$(( n * p / 100 ))
-    out="$(head -c "$c" "$SRC" | bash -s -- --container 2>&1 | grep -c 'Préflight\|RAIL CONTENEUR\|Provisionnement' || true)"
+    out="$(head -c "$c" "$SRC" | bash -s -- --container 2>&1 | grep -c 'Préflight\|RAIL CONTENEUR\|Provisionnement\|provenance :\|téléchargé' || true)"
     [ "$out" -eq 0 ] || { echo "FUITE a $p% : $out ligne(s) executee(s)" >&2; return 1; }
   done
 }
@@ -889,7 +889,7 @@ SPY
   # ⚠ PAS DE `< /dev/null` : il ecraserait le pipe, et bash lirait /dev/null comme script. Le `read`
   # de la pause va chercher /dev/tty tout seul, et retombe sur le refus sans TTY.
   local dest="$BATS_TEST_TMPDIR/clone-pipe"
-  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --branch \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
+  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --source \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
   [[ "$output" == *"source"* ]]
   [ -x "$dest/deploy/provision" ]
   # Le clone appartient a CELUI QUI A LANCE, jamais a root.
@@ -919,11 +919,17 @@ SPY
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   refute grep -q 'docker_endpoint' <<<"$code"
   refute grep -q 'detect_substrate' <<<"$code"
-  # `command -v` survit pour UNE chose : verifier que `git` existe avant de cloner. Ce n'est pas une
-  # sonde de l'etat de la machine, c'est la garde d'un appel — et la source precede le preflight,
-  # donc aucun fait n'est encore disponible a cet instant.
-  [ "$(grep -c 'command -v' <<<"$code")" -eq 1 ]
+  # `command -v` survit pour la GARDE D'UN APPEL, jamais pour une sonde de l'etat de la machine : la
+  # source precede le preflight, donc aucun fait n'est disponible a cet instant. Trois gardes, une par
+  # outil du mouvement SOURCE (lot 4) : `git` avant de cloner, `curl` avant de telecharger, `minisign`
+  # avant de verifier une signature — et l'absence de ce dernier se DIT, elle ne refuse pas.
+  [ "$(grep -c 'command -v' <<<"$code")" -eq 3 ]
   grep -q 'command -v git' <<<"$code"
+  grep -q 'command -v curl' <<<"$code"
+  grep -q 'command -v minisign' <<<"$code"
+  # ET RIEN D'AUTRE : os/arch se lisent une fois, pour NOMMER des fichiers, dans la provenance release
+  # (`door_os`, `uname -m`) — le preflight les re-mesure ensuite, et c'est lui qui juge.
+  [ "$(grep -c 'uname -m' <<<"$code")" -eq 1 ]
   # Et l'appel au module existe bien, sinon ce mur serait vert a vide.
   grep -q 'doctor --only 00-preflight' <<<"$code"
 }
@@ -950,12 +956,18 @@ SPY
   # cicatrice vit inline, autonome, et un plafond de lignes brutes ferait choisir entre expliquer et
   # tenir sous la barre. C'est le code qui mesure ce que la porte FAIT.
   #
-  # 460 : la mesure du jour est 441 (E4 vient d'en retirer 29 avec le build d'image). La marge est
-  # etroite DELIBEREMENT — ce fichier a grossi jusqu'a porter deux rails entiers, et chaque etape du
-  # chantier lui en retire. Un plafond large ne garderait rien.
+  # 460 : la mesure du 2026-08-31 etait 441 (E4 venait d'en retirer 29 avec le build d'image). La
+  # marge est etroite DELIBEREMENT — ce fichier a grossi jusqu'a porter deux rails entiers, et chaque
+  # etape du chantier lui en retire. Un plafond large ne garderait rien.
+  #
+  # ⚠ RECALIBRE AU LOT 4 DU CHANTIER RELEASE (2026-09-05), et ce n'est pas un rail qui est revenu :
+  # c'est le MOUVEMENT SOURCE qui a appris deux provenances (40-PORTE § 2) — telecharger l'artefact
+  # de SA version, le verifier contre une table EN DUR, dire la signature — et les drapeaux du § 07
+  # (--dry-run, --uninstall). Pipee, la porte n'a pas d'arbre : ce code ne peut vivre que dans le
+  # fichier qui est pipe. La mesure du jour est 598 ; la marge reste de quelques lignes.
   local n; n="$(grep -vcE '^\s*#|^\s*$' "$SRC")"
-  [ "$n" -le 460 ] || {
-    echo "la porte a $n lignes de code (plafond 460) — qu'est-ce qui est revenu dedans ?" >&2
+  [ "$n" -le 604 ] || {
+    echo "la porte a $n lignes de code (plafond 604) — qu'est-ce qui est revenu dedans ?" >&2
     return 1
   }
 }
@@ -1056,4 +1068,404 @@ _porte_canal() { # _porte_canal <channel> <channel_tree> <args de la porte…>
   local fake; fake="$(_fake_tree 0 0)"          # les faits sains, sans channel
   run bash "$fake/install.sh" --workstation < /dev/null
   [[ "$output" == *"RAIL POSTE"* ]]
+}
+
+# ─── LE MOUVEMENT SOURCE, TROIS PROVENANCES (lot 4 du chantier release, 40-PORTE § 2) ───────────
+#
+# Un checkout → source ; la racine d'un kit → kit ; pipee (ou --from-release) → release : la porte
+# telecharge l'artefact de SA version depuis BASE, le verifie contre sa table EN DUR (sha256, puis
+# minisign si l'outil est la — dit sinon), detare le kit (c'est l'arbre : le preflight vit dedans)
+# et tend au rail les .deb sous Debian, le kit ailleurs ou sous --tar.
+#
+# LE DECOR D'UNE RELEASE : un tiroir dist/ (un kit factice dont `provision` REND les faits et dont
+# `workstation` ESPIONNE son argv ; deux .deb factices), servi en http local par python — son journal
+# d'acces est la preuve de ce qui a ete touche — et la porte de la VERSION, generee par door-gen.sh
+# depuis $SRC (constantes remplies, table des sha256). HOME est a nous : ~/.lcars/kits/<tag>/ ne
+# doit jamais etre le vrai. os/arch sont DICTES (LCARS_OS_RELEASE, un `uname` double) : le temoin ne
+# mesure pas la machine qui le joue.
+#
+# ⚠ AUCUN TEMOIN NE POSE QUOI QUE CE SOIT : le rail est un espion. Ce qui se mesure est tout ce qui
+# le precede — le telechargement, la verification, le refus, l'argv tendu.
+TAG=0.9.0
+_dist() { # _dist [nom=valeur…] -> le tiroir dist/ de la version $TAG ; le kit rend les faits sains, PLUS ceux-ci (le dernier gagne)
+  local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
+  rm -rf "$d" "$st"; mkdir -p "$d" "$st/lcars_install/deploy"
+  printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
+  _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$st/lcars_install/deploy/workstation"
+  chmod 0755 "$st/lcars_install/deploy/workstation"
+  tar -czf "$d/lcars-fleet-$TAG-otp27-x86_64.tar.gz" -C "$st" lcars_install
+  printf 'paquet lcars\n' > "$d/lcars_${TAG}_amd64.deb"
+  printf 'paquet workstation\n' > "$d/lcars-workstation_${TAG}_amd64.deb"
+  printf '%s' "$d"
+}
+_machine() { # la machine du temoin : Debian/Ubuntu, x86_64, un HOME a nous — DICTES, pas mesures
+  # ⚠ PAS DANS `_dist` : elle s'appelle en `$( )`, et un export y meurt avec le sous-shell.
+  printf 'ID=ubuntu\nID_LIKE=debian\n' > "$BATS_TEST_TMPDIR/os-release"
+  export LCARS_OS_RELEASE="$BATS_TEST_TMPDIR/os-release"
+  printf '#!/usr/bin/env bash\necho x86_64\n' > "$BINDIR/uname"; chmod 0755 "$BINDIR/uname"
+  export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
+  export LCARS_DOOR_INSECURE_HTTP=1     # le serveur de decor est en http local — et la porte le DIT
+}
+_serveur() { # _serveur <dir> — sert <dir> en http sur 127.0.0.1 ; pose SERVEUR_URL, SERVEUR_PID, SERVEUR_LOG
+  local port
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  SERVEUR_LOG="$BATS_TEST_TMPDIR/http.log"
+  # `3>&-` : bats attend la fermeture du fd 3 ; un serveur qui l'heriterait ferait PENDRE le temoin
+  python3 -m http.server --bind 127.0.0.1 "$port" --directory "$1" > "$SERVEUR_LOG" 2>&1 3>&- &
+  SERVEUR_PID=$!
+  SERVEUR_URL="http://127.0.0.1:$port"
+  for _ in $(seq 1 50); do
+    if curl -fs "$SERVEUR_URL/" >/dev/null 2>&1; then : > "$SERVEUR_LOG"; return 0; fi
+    sleep 0.1
+  done
+  echo "le serveur de decor ne repond pas sur $SERVEUR_URL" >&2; return 1
+}
+teardown() { [[ -z "${SERVEUR_PID:-}" ]] || kill "$SERVEUR_PID" 2>/dev/null || true; }
+_porte() { # _porte <dist> [cle publique] -> la porte de la version $TAG, generee depuis $SRC, BASE = le serveur
+  LCARS_DOOR_TEMPLATE="$SRC" LCARS_MINISIGN_PUBKEY="${2:-}" \
+    bash "$REPO/deploy/lib/door-gen.sh" "$TAG" "$SERVEUR_URL" "$1" >/dev/null 2>&1 || { echo "door-gen a echoue" >&2; return 1; }
+  printf '%s' "$1/install.sh"
+}
+_release() { # _release [faits…] -> $PORTE, $DIST prets : machine dictee, tiroir, serveur, porte generee (sans cle)
+  _machine; DIST="$(_dist "$@")"; _serveur "$DIST"; PORTE="$(_porte "$DIST")"
+}
+pipee() { run bash -c "cat '$PORTE' | bash -s -- $*"; }   # BASH_SOURCE non lie : la forme de curl | bash
+KITS="$BATS_TEST_TMPDIR/home/.lcars/kits/$TAG"
+
+@test "PROVENANCE source : dans un checkout, on continue dedans et HEAD est dit ; kit : la racine d'un kit" {
+  run bash "$SRC" --substrate docker --check < /dev/null
+  [[ "$output" == *"provenance : source — $REPO, HEAD $(git -C "$REPO" rev-parse --short HEAD)"* ]]
+  # un arbre sans .git qui porte deploy/provision est un kit : on continue dedans, sans rien telecharger
+  local fake; fake="$(_fake_tree 0 0)"
+  run bash "$fake/install.sh" --check < /dev/null
+  [[ "$output" == *"provenance : kit — $fake"* ]]
+  refute_out 'provenance : (source|release)' <<<"$output"
+}
+
+@test "PROVENANCE release, PIPEE sous Debian : telecharge kit + .deb depuis BASE, verifie les sha256 (table EN DUR), detare, et tend les .deb au rail" {
+  _release
+  pipee --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"source : release $TAG — $SERVEUR_URL → $KITS/"* ]]
+  [[ "$output" == *"(os debian, arch x86_64)"* ]]
+  local a; for a in "lcars-fleet-$TAG-otp27-x86_64.tar.gz" "lcars_${TAG}_amd64.deb" "lcars-workstation_${TAG}_amd64.deb"; do
+    [[ "$output" == *"$a : téléchargé, sha256 vérifié"* ]] || { echo "$a non verifie :"; echo "$output"; return 1; }
+    [ -f "$KITS/$a" ]; ( cd "$KITS" && sha256sum -c --quiet "$a.sha256" )   # le .sha256 ecrit a cote relit juste
+    grep -q "GET /$a " "$SERVEUR_LOG"
+  done
+  # le kit est l'arbre : le preflight a tourne DEDANS, et la provenance est dite
+  [ -x "$KITS/lcars_install/deploy/provision" ]
+  [[ "$output" == *"provenance : release $TAG — le kit dans $KITS/lcars_install, paquets : lcars_${TAG}_amd64.deb lcars-workstation_${TAG}_amd64.deb"* ]]
+  [[ "$output" == *"RAIL POSTE"* ]]
+  # la sortie : le workstation DU KIT, avec les .deb — le sudo est la-bas, jamais ici
+  [[ "$output" == *"WORKSTATION:up --from $KITS/lcars_${TAG}_amd64.deb --from $KITS/lcars-workstation_${TAG}_amd64.deb"* ]]
+  refute_out 'sudo apt|exec sudo' <<<"$output"
+  # http local : la porte l'a DIT (LCARS_DOOR_INSECURE_HTTP=1), et le transport en clair est nomme
+  [[ "$output" == *"LCARS_DOOR_INSECURE_HTTP=1"*"transport en clair"* ]]
+  # relancee : tout est deja la et verifie, rien n'est retelecharge
+  : > "$SERVEUR_LOG"
+  pipee --workstation
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lcars_${TAG}_amd64.deb : déjà là, sha256 vérifié"* ]]
+  refute_out 'GET /lcars' < "$SERVEUR_LOG"
+}
+
+@test "--tar force le kit sous Debian ; hors Debian c'est le kit d'office — workstation up SANS --from, aucun .deb telecharge" {
+  _release
+  pipee --workstation --tar
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up"* ]]; refute_out 'WORKSTATION:up --from|\.deb : t' <<<"$output"
+  refute_out 'GET /lcars_|GET /lcars-workstation_' < "$SERVEUR_LOG"
+  [ ! -f "$KITS/lcars_${TAG}_amd64.deb" ]
+  printf 'ID=fedora\n' > "$LCARS_OS_RELEASE"
+  pipee --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"(os autre, arch x86_64)"* ]]
+  [[ "$output" == *"WORKSTATION:up"* ]]; refute_out 'WORKSTATION:up --from' <<<"$output"
+}
+
+@test "SHA FAUX plante dans la table -> refus qui nomme attendu/obtenu, le fichier est efface, RIEN n'est detare ni tendu" {
+  _release
+  sed -i "s/^\([0-9a-f]\{32\}\)[0-9a-f]\{32\}\(  lcars-fleet-\)/\1$(printf '0%.0s' {1..32})\2/" "$PORTE"
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sha256 de lcars-fleet-$TAG-otp27-x86_64.tar.gz : attendu "*"00000000"*", obtenu "*"rien n'est posé"* ]]
+  [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ]
+  [ ! -d "$KITS/lcars_install" ]
+  refute_out 'WORKSTATION:|Préflight' <<<"$output"
+  # et un artefact ABSENT de la table est un refus AVANT tout telechargement — pas un aveugle
+  PORTE="$(_porte "$DIST")"; : > "$SERVEUR_LOG"
+  sed -i "/  lcars_${TAG}_amd64.deb\$/d" "$PORTE"
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"lcars_${TAG}_amd64.deb "*"ABSENT DE LA TABLE"*"rien n'est téléchargé"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+}
+
+@test "SIGNATURE : minisign ABSENT -> « provenance NON vérifiée (sha256 seul) » sur stderr, et on continue ; sans cle dans la porte -> dit aussi" {
+  _release
+  # sans cle : la porte le dit, meme avec l'outil present
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
+  pipee --workstation
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"provenance NON vérifiée (sha256 seul) : cette porte ne porte pas de clé publique"* ]]
+  rm -f "$BINDIR/minisign"
+  # avec une cle mais sans l'outil : dit, et la porte continue jusqu'au rail — jamais un succes muet
+  rm -rf "$HOME/.lcars"; PORTE="$(_porte "$DIST" RWQclepublique)"
+  run bash -c "cat '$PORTE' | PATH='$BATS_TEST_TMPDIR/sans-minisign:$PATH' bash -s -- --workstation 2>&1"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"minisign absent : provenance NON vérifiée (sha256 seul)"* ]]
+  [[ "$output" == *"WORKSTATION:up"* ]]
+}
+
+@test "SIGNATURE : minisign DOUBLE qui refuse -> refus, fichier efface, rien de tendu ; qui accepte -> « signature vérifiée » ; .minisig introuvable -> refus" {
+  _release; PORTE="$(_porte "$DIST" RWQclepublique)"
+  printf 'sig\n' > "$DIST/lcars-fleet-$TAG-otp27-x86_64.tar.gz.minisig"
+  printf 'sig\n' > "$DIST/lcars_${TAG}_amd64.deb.minisig"
+  printf 'sig\n' > "$DIST/lcars-workstation_${TAG}_amd64.deb.minisig"
+  printf '#!/usr/bin/env bash\necho "MINISIGN:$*" >> "%s/minisign.trace"\nexit 1\n' "$BATS_TEST_TMPDIR" > "$BINDIR/minisign"; chmod 0755 "$BINDIR/minisign"
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"signature de lcars-fleet-$TAG-otp27-x86_64.tar.gz INVALIDE"*"rien n'est posé"* ]]
+  grep -q "MINISIGN:-Vq -P RWQclepublique -m $KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" "$BATS_TEST_TMPDIR/minisign.trace"
+  [ ! -f "$KITS/lcars-fleet-$TAG-otp27-x86_64.tar.gz" ]; [ ! -d "$KITS/lcars_install" ]
+  refute_out 'WORKSTATION:' <<<"$output"
+  # l'outil accepte : dit, et on continue
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$BINDIR/minisign"
+  pipee --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"lcars-fleet-$TAG-otp27-x86_64.tar.gz : signature vérifiée (minisign)"* ]]
+  [[ "$output" == *"WORKSTATION:up"* ]]
+  refute_out 'NON vérifiée' <<<"$output"
+  # une porte qui attend une signature et n'en trouve pas : refus — pas un repli sur le sha
+  rm -rf "$HOME/.lcars" "$DIST"/*.minisig
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *".minisig introuvable, et cette porte attend une signature"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+}
+
+@test "http:// est REFUSE sans LCARS_DOOR_INSECURE_HTTP=1 — le serveur n'est pas touche ; et curl porte --proto '=https' --tlsv1.2 -fsSL" {
+  _release
+  unset LCARS_DOOR_INSECURE_HTTP
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"$SERVEUR_URL n'est pas https"*"LCARS_DOOR_INSECURE_HTTP=1"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -d "$KITS" ]
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -qF "curl --proto \"\$proto\" --tlsv1.2 -fsSL" <<<"$code"
+  grep -qF "proto='=https'" <<<"$code"
+}
+
+@test "le GABARIT du depot ne telecharge rien : sa table est vide, et pipe il le dit — rien n'est touche" {
+  _machine; DIST="$(_dist)"
+  run bash -c "cat '$SRC' | bash -s -- --workstation"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aucun kit"*"dans la table de cette porte"*"gabarit"* ]]
+  [ ! -d "$HOME/.lcars" ]
+}
+
+@test "TRONCATURE d'une porte de VERSION pipee : a toute coupure, rien n'est telecharge, rien n'est pose" {
+  _release
+  local n c p
+  n="$(wc -c < "$PORTE")"
+  for p in 5 15 30 45 60 70 80 90 95 98 99; do
+    c=$(( n * p / 100 ))
+    head -c "$c" "$PORTE" | bash -s -- --workstation >/dev/null 2>&1 || true
+    [ ! -s "$SERVEUR_LOG" ] || { echo "FUITE a $p% : le serveur a ete touche"; cat "$SERVEUR_LOG"; return 1; }
+    [ ! -d "$KITS" ] || { echo "FUITE a $p% : $KITS existe"; return 1; }
+  done
+}
+
+@test "FORME : la porte GENEREE est le gabarit, hors les lignes marquees @@DOOR_…@@ — diff vide apres normalisation" {
+  _release; PORTE="$(_porte "$DIST" RWQclepublique)"
+  normalise() { awk '/@@DOOR_SUMS_BEGIN@@/ { s = 1; next } /@@DOOR_SUMS_END@@/ { s = 0; next } s { next } /# @@DOOR_/ { next } { print }' "$1"; }
+  diff <(normalise "$SRC") <(normalise "$PORTE")
+  # et la normalisation n'est pas aveugle : les deux differaient bien AVANT
+  refute diff -q "$SRC" "$PORTE" >/dev/null
+  # ce qui differe est EXACTEMENT : la version, la base, la cle, et la table
+  local d; d="$(diff "$SRC" "$PORTE" | grep -E '^[<>]' | grep -vE '^[<>] (LCARS_DOOR_VERSION=|DOOR_BASE=|MINISIGN_PUBKEY=|SUMS$|[0-9a-f]{64}  )' || true)"
+  [ -z "$d" ] || { echo "la porte generee differe du gabarit ailleurs que sur ses constantes :"; echo "$d"; return 1; }
+}
+
+# ─── --source : LA PROVENANCE SOURCE CLONE AU TAG DE LA PORTE, JAMAIS main SANS LE DIRE (D7) ─────
+#
+# `git` est DOUBLE : il trace son argv et, sur `clone`, pose un arbre prepare (provision qui rend les
+# faits, un .git). Ce qui se mesure est la ref demandee — pas un clone reel.
+_git_double() { # pose un git qui trace dans $GIT_TRACE et clone un arbre factice
+  local arbre="$BATS_TEST_TMPDIR/arbre-source"; rm -rf "$arbre"; mkdir -p "$arbre/.git"
+  _faux_provision "$arbre" "${_faits_sains[@]}"
+  export GIT_TRACE_FILE="$BATS_TEST_TMPDIR/git.trace"; : > "$GIT_TRACE_FILE"
+  cat > "$BINDIR/git" <<DOUBLE
+#!/usr/bin/env bash
+echo "GIT:\$*" >> "\$GIT_TRACE_FILE"
+case "\$1" in
+  clone) cp -a "$arbre" "\${@: -1}" ;;
+  -C) [[ "\$3" == rev-parse ]] && echo deadbee ;;
+esac
+exit 0
+DOUBLE
+  chmod 0755 "$BINDIR/git"
+  export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
+}
+
+@test "--source sans ref : git clone --branch <LCARS_DOOR_VERSION> — le TAG de la porte, pas main ; avec une ref : cette ref" {
+  _git_double
+  local v; v="$(bash "$SRC" --version)"
+  run bash -c "cat '$SRC' | bash -s -- --check"   # pipee sans --source : ce n'est PAS git (release)
+  refute_out 'GIT:clone' < "$GIT_TRACE_FILE"
+  run bash -c "cat '$SRC' | bash -s -- --source --check"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF "GIT:clone --quiet --branch $v https://github.com/lordzurp/LCARS-fleet.git $HOME/LCARS-fleet" "$GIT_TRACE_FILE"
+  [[ "$output" == *"clone de https://github.com/lordzurp/LCARS-fleet.git ($v)"* ]]
+  [[ "$output" == *"provenance : source — $HOME/LCARS-fleet, HEAD deadbee"* ]]
+  refute_out 'branch main' < "$GIT_TRACE_FILE"
+  # une ref explicite, et --repo : les deux atteignent git tels quels
+  rm -rf "$HOME/LCARS-fleet"; : > "$GIT_TRACE_FILE"
+  run bash -c "cat '$SRC' | bash -s -- --source passe7/x --repo https://forge.test/o/r.git --check"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF "GIT:clone --quiet --branch passe7/x https://forge.test/o/r.git" "$GIT_TRACE_FILE"
+  # depuis un checkout, --source va quand meme chercher la source par git : c'est ce qu'on a demande
+  rm -rf "$HOME/LCARS-fleet"; : > "$GIT_TRACE_FILE"
+  run bash "$SRC" --source --check < /dev/null
+  grep -qF "GIT:clone --quiet --branch $v " "$GIT_TRACE_FILE"
+}
+
+@test "VERROU : « --branch » est REFUSE, il ne revient pas en passe-plat muet — le refus nomme --source" {
+  _git_double
+  run bash "$SRC" --branch main --check < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--branch est retire"*"--source"* ]]
+  refute_out 'GIT:' < "$GIT_TRACE_FILE"
+  # et la constante par defaut est la VERSION de la porte, pas un mot ecrit ici
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'SOURCE_REF="$LCARS_DOOR_VERSION"' <<<"$code"
+  refute grep -qE 'BRANCH=|"main"' <<<"$code"
+}
+
+# ─── LE CANAL, PROVENANCE release : un .deb telecharge POSE « deb », un kit POSE « kit » ─────────
+#
+# `channel_tree` (le preflight, joue DANS le kit detare) dit toujours « kit » : c'est l'arbre qui
+# parle. Ce que la porte va POSER est autre chose quand la release a rendu des .deb — et c'est ce
+# canal-la, « deb », qu'elle compare a celui de la machine. Sans quoi une machine kit accepterait
+# les paquets comme « une mise a jour par le meme canal », et les deux desinstalleurs divergeraient.
+
+@test "CANAL release : sur une machine installee par kit, les .deb sont REFUSES (poserait « deb ») et le geste est nomme ; --tar est le meme canal, et continue" {
+  _release channel=kit channel_tree=kit
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"installée par « kit »"*"poserait « deb »"* ]]
+  [[ "$output" == *"provision uninstall --yes"*"--tar"* ]]
+  refute_out 'WORKSTATION:|RAIL POSTE' <<<"$output"
+  pipee --workstation --tar
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up"* ]]; refute_out 'installée par' <<<"$output"
+}
+
+@test "CANAL release : sur une machine deb, les .deb sont une mise a jour (le kit detare ne trompe pas) ; le kit seul (--tar) y est REFUSE ; --check l'EXPOSE" {
+  _release channel=deb channel_tree=kit
+  pipee --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up --from"* ]]; refute_out 'installée par' <<<"$output"
+  pipee --workstation --tar
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"installée par « deb »"*"poserait « kit »"*"--from <paquet>.deb"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+  pipee --check --tar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IMPOSSIBLE"*"installée par « deb »"* ]]
+}
+
+# ─── --dry-run : TOUT JUSQU'AU BILAN, PLUS CE QUE LA SORTIE FERAIT — sans rien telecharger ni poser ─
+#
+# curl_bash_2026 § 07.7 : le drapeau qui desamorce « je ne sais pas ce que ca va faire a mon
+# systeme ». Ce qui se mesure : le serveur de decor n'est PAS touche, rien n'existe sous ~/.lcars,
+# les noms ET les sha attendus sont dits, la commande du rail est dite mot a mot, et l'espion du
+# rail n'est JAMAIS appele.
+
+@test "--dry-run PIPEE : nomme les artefacts et leurs sha256 ATTENDUS, ne telecharge RIEN (serveur intact), et dit la sortie" {
+  _release
+  pipee --workstation --dry-run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local a; for a in "lcars-fleet-$TAG-otp27-x86_64.tar.gz" "lcars_${TAG}_amd64.deb" "lcars-workstation_${TAG}_amd64.deb"; do
+    [[ "$output" == *"$a "*"sha256 $(sha256sum "$DIST/$a" | cut -d' ' -f1)"* ]] || { echo "$a ou son sha manque :"; echo "$output"; return 1; }
+  done
+  [[ "$output" == *"--dry-run : rien n'est téléchargé"* ]]
+  [[ "$output" == *"La sortie serait :"*"deploy/workstation up --from $KITS/lcars_${TAG}_amd64.deb --from $KITS/lcars-workstation_${TAG}_amd64.deb"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -d "$HOME/.lcars" ]
+  refute_out 'WORKSTATION:|téléchargé,' <<<"$output"
+  # un kit de cette version deja detare : le preflight joue dedans, le bilan sort, et la sortie est dite mot a mot
+  pipee --workstation
+  [ "$status" -eq 0 ]; : > "$SERVEUR_LOG"
+  pipee --workstation --dry-run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Préflight"*"RAIL POSTE"*"le rail ferait : sudo apt install lcars_${TAG}_amd64.deb lcars-workstation_${TAG}_amd64.deb"* ]]
+  [[ "$output" == *"La sortie serait :"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_${TAG}_amd64.deb"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+  refute_out 'WORKSTATION:' <<<"$output"
+}
+
+@test "--dry-run dans un arbre : le poste dit « provision apply » et l'argv de workstation ; le conteneur dit deploy/container up, et le banc bench-up — aucun espion appele ; sans rail, le bilan et c'est tout" {
+  local fake; fake="$(_fake_tree 0 0)"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$fake/deploy/workstation"; chmod 0755 "$fake/deploy/workstation"
+  run bash "$fake/install.sh" --workstation --dry-run --port-forge 21090 < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"RAIL POSTE"*"le rail ferait : sudo provision apply"*"La sortie serait :"*"$fake/deploy/workstation up --port-forge 21090"* ]]
+  refute_out 'WORKSTATION:|Pas de TTY' <<<"$output"
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --dry-run < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"La sortie serait :"*"$fake/deploy/container up"* ]]
+  refute_out 'DOCKERSH:' <<<"$output"
+  run bash "$fake/install.sh" --container --bench --dry-run -- --project bt < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"La sortie serait :"*"bench-up.sh --project bt"* ]]
+  refute_out 'BENCHUP:' <<<"$output"
+  run bash "$fake/install.sh" --dry-run < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bilan"*"--dry-run sans rail"* ]]
+}
+
+# ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT ────────────────────────────────────
+#
+# La porte n'a pas de sudo, et le desinstalleur en a besoin : elle DIT quel desinstalleur est celui
+# de cette machine (deb → apt purge ; kit/source → provision uninstall), et relaie a
+# `deploy/workstation uninstall`, qui lit le meme fait et escalade. L'espion mesure l'argv.
+
+_porte_uninstall() { # _porte_uninstall <channel> <args…> -> run la porte sur un arbre dont workstation est un espion
+  local ch="$1"; shift
+  local fake; fake="$(_fake_tree 0 0)"
+  _faux_provision "$fake" "${_faits_sains[@]}" "channel=$ch" "channel_tree=source"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$fake/deploy/workstation"; chmod 0755 "$fake/deploy/workstation"
+  run bash "$fake/install.sh" "$@" < /dev/null
+}
+
+@test "--uninstall relaie a « deploy/workstation uninstall » selon le canal : deb → apt purge dit, kit/source → provision uninstall dit ; ce qui suit -- lui part" {
+  _porte_uninstall deb --uninstall
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"--uninstall : canal « deb » → apt purge"* ]]
+  [[ "$output" == *"WORKSTATION:uninstall"* ]]
+  refute_out 'Bilan|RAIL POSTE|1 ou 2' <<<"$output"       # pas de menu : on ne pose rien
+  _porte_uninstall kit --uninstall -- --yes --humans
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canal « kit » → provision uninstall"*"sans --yes"* ]]
+  [[ "$output" == *"WORKSTATION:uninstall --yes --humans"* ]]
+  _porte_uninstall aucun --uninstall
+  [[ "$output" == *"canal « aucun » → provision uninstall"*"WORKSTATION:uninstall"* ]]
+  # la porte ne fait pas le sudo elle-meme : aucun apt, aucun provision, aucun sudo dans son code
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -qE 'exec (sudo|apt|"\$PROVISION" uninstall)' <<<"$code"
+}
+
+@test "--uninstall sur un canal ILLISIBLE refuse ; avec --dry-run, il nomme le relais et ne l'appelle pas" {
+  _porte_uninstall invalide --uninstall
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ILLISIBLE"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+  _porte_uninstall deb --uninstall --dry-run -- --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canal « deb »"*"La sortie serait :"*"deploy/workstation uninstall --yes"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
 }

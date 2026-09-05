@@ -4,8 +4,9 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
 #
-#     deploy/workstation {up|doctor}
+#     deploy/workstation {up|doctor|uninstall}
 #     deploy/workstation up [--from <artefact>…]
+#     deploy/workstation uninstall [--yes] [--humans] [--annexes]
 #
 #       --from <kit.tar.gz>     pose DEPUIS un kit : « <kit>.sha256 » vérifié s'il est à côté (dit
 #                               sinon), détaré sous l'humain dans ~/.lcars/kits/<nom>/, puis
@@ -17,6 +18,11 @@
 #
 #     Un canal ne se pose pas sur un autre : une machine « installée par kit » refuse un checkout
 #     et un .deb — « provision uninstall » d'abord, ou une mise à jour par le même canal.
+#
+#     uninstall : le désinstalleur du canal en place (lu au préflight, jamais deviné) — sous « deb »,
+#     « sudo apt purge » des paquets (le postrm joue le désinstalleur ; seul --yes a un sens pour
+#     apt) ; sinon « provision uninstall » avec les mêmes options, escaladé seulement sous --yes
+#     (sans lui il n'imprime que son plan, sans root). C'est le relais de « install.sh --uninstall ».
 #
 # Jumeau de `deploy/container` : celui-là pilote un CONTENEUR, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
@@ -345,6 +351,47 @@ cmd_up() {
   exit "$accept_rc"
 }
 
+# ─── uninstall — LE DESINSTALLEUR DU CANAL EN PLACE, ET LE SUDO EST ICI, PAS DANS LA PORTE ──────
+#
+# Deux desinstalleurs pour deux poseurs, jamais le mauvais : sous « deb » c'est dpkg qui possede les
+# arbres, et « provision uninstall » retirerait ce qu'il croit sien ; sous kit/source c'est le
+# journal et le manifeste. Le canal vient du preflight (`channel=`), la meme lecture que `up`.
+#   deb   : `apt purge "<paquet>*"` (PROV_DEB_PACKAGE, la lib) — seul `--yes` (→ -y) a un sens pour
+#           apt ; les classes (--humans, --annexes) sont celles du postrm, et se jouent apres, par
+#           le desinstalleur du produit. Un autre drapeau est REFUSE, pas avale.
+#   sinon : `provision uninstall <options>` — escalade SEULEMENT sous --yes (`uninstall --yes`
+#           demande root, provision:436) ; sans lui, le plan s'imprime sans un mot de passe.
+cmd_uninstall() {
+  [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce rail exige le checkout complet"
+  mesurer
+  local machine a; machine="$(fait channel)"
+  case "$machine" in
+    invalide)
+      fail "le canal d'installation de cette machine est ILLISIBLE ($PROV_CHANNEL_FILE) — rien n'a été fait" \
+           "corrige-le, ou retire-le si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
+    deb)
+      local -a yes=()
+      for a in "$@"; do
+        case "$a" in
+          --yes|-y) yes=(-y) ;;
+          *) fail "uninstall sous « deb » ne prend que --yes : « $a » n'a pas de sens pour apt — rien n'a été fait" \
+                  "les classes (--humans, --annexes) se retirent APRÈS, par le désinstalleur du produit" ;;
+        esac
+      done
+      rm -f "$FACTS_FILE"
+      echo ""
+      echo "  canal « deb » : « apt purge ${PROV_DEB_PACKAGE}* » retire les paquets — le postrm joue le désinstalleur."
+      [[ "$EUID" -ne 0 ]] || exec apt purge "${yes[@]}" "${PROV_DEB_PACKAGE}*"
+      exec sudo apt purge "${yes[@]}" "${PROV_DEB_PACKAGE}*" ;;
+    *)
+      echo ""
+      echo "  canal « ${machine:-aucun} » : « provision uninstall $* » — sans --yes, il n'imprime que son plan."
+      for a in "$@"; do [[ "$a" != "--yes" ]] || escalade_si_besoin uninstall "$@"; done
+      rm -f "$FACTS_FILE"
+      exec "$PROVISION" uninstall "$@" ;;
+  esac
+}
+
 # ─── doctor ─────────────────────────────────────────────────────────────────────────────────────
 #
 # ⚠ AUCUNE ESCALADE ICI, ET C'EST LE CONTRAT. `doctor` est read-only : `NEEDS: root` n'est contrôlé
@@ -356,7 +403,8 @@ cmd_doctor() {
 }
 
 case "${1:-help}" in
-  up)     shift; cmd_up "$@" ;;
-  doctor) shift; cmd_doctor "$@" ;;
-  *)      fail "verbe inconnu : $1" "workstation up | doctor  (--help pour l'aide)" ;;
+  up)        shift; cmd_up "$@" ;;
+  doctor)    shift; cmd_doctor "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
+  *)         fail "verbe inconnu : $1" "workstation up | doctor | uninstall  (--help pour l'aide)" ;;
 esac
