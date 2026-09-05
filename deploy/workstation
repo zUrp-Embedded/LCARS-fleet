@@ -4,7 +4,18 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
 #
-#     deploy/workstation {up|doctor}
+#     deploy/workstation {up [--from <artefact>…]|doctor}
+#
+#       --from <kit.tar.gz>     pose DEPUIS un kit : « <kit>.sha256 » vérifié s'il est à côté (dit
+#                               sinon), détaré sous l'humain dans ~/.lcars/kits/<nom>/, puis
+#                               « provision apply » DEPUIS ce kit — canal « kit »
+#       --from <x.deb> [--from <y.deb>…]
+#                               « sudo apt install ./x.deb … », le seul sudo — canal « deb », le
+#                               postinst du paquet écrit le canal et joue provision apply
+#       sans --from             ce checkout — canal « source » (« kit » s'il est un kit détaré)
+#
+#     Un canal ne se pose pas sur un autre : une machine « installée par kit » refuse un checkout
+#     et un .deb — « provision uninstall » d'abord, ou une mise à jour par le même canal.
 #
 # Jumeau de `deploy/container` : celui-là pilote un CONTENEUR, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
@@ -84,6 +95,9 @@ escalade_si_besoin() {
   done
   # ⚠ AUCUN DRAPEAU DE PASSAGE. La seconde instance se reconnaît à `EUID`, qui est un FAIT ; un
   # marqueur passé en argument est une CROYANCE, que n'importe qui peut poser à la main.
+  # Les faits mesurés AVANT l'escalade (le refus de mélange) meurent avec ce process : `exec` ne
+  # joue aucun trap EXIT, donc le fichier se retire ici, et la seconde instance re-mesure.
+  [[ -z "${FACTS_FILE:-}" ]] || rm -f "$FACTS_FILE"
   exec sudo "${env_args[@]}" bash "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
 }
 
@@ -105,6 +119,75 @@ mesurer() {
   [[ -n "$FACTS_FILE" ]] || return 0
   : > "$FACTS_FILE"
   env PROV_FACTS_FILE="$FACTS_FILE" "$PROVISION" doctor --only 00-preflight >/dev/null 2>&1 || true
+}
+
+# ─── --from : D'OÙ VIENT CE QU'ON POSE, ET LE REFUS DE MÉLANGE ──────────────────────────────────
+#
+# Trois formes, un canal chacune (`prov_channel`, lib — lot 2 du chantier release) :
+#   sans --from           ce checkout — `prov_channel_here` : source, ou kit si c'est un kit détaré
+#   --from <kit.tar.gz>   kit — vérifié par son `.sha256` s'il est à côté, détaré SOUS L'HUMAIN, puis
+#                         `provision apply` DEPUIS le kit. La seconde instance (root) reçoit le
+#                         RÉPERTOIRE, pas le tar : elle ne détare rien en root dans un home.
+#   --from <x.deb>…       deb — `apt install ./x.deb …`, et c'est le seul sudo : le postinst du
+#                         paquet écrit le canal et joue `provision apply` lui-même.
+#
+# ⚠ UN CANAL NE SE POSE PAS SUR UN AUTRE, ET LE REFUS PRÉCÈDE L'ESCALADE : il ne coûte pas un mot
+# de passe. Le fait vient du préflight (`channel=`), jamais d'une sonde à nous — la même règle que
+# docker. Le même canal est une mise à jour ; `aucun`, une première pose ; un préflight d'avant ce
+# lot ne rend pas le fait, et une absence de mesure n'est pas un refus.
+canal_voulu() { # canal_voulu <artefact…> -> deb | kit | source ; un mélange ou un inconnu est un refus
+  [[ $# -gt 0 ]] || { prov_channel_here; return 0; }
+  local a c=""
+  for a in "$@"; do
+    case "$a" in
+      *.deb)    [[ -z "$c" || "$c" == "deb" ]] || fail "--from : on ne mélange pas un .deb et un kit ($a)"; c=deb ;;
+      *.tar.gz) [[ -z "$c" ]] || fail "--from : un seul kit à la fois, et pas de .deb avec ($a)"; c=kit ;;
+      *)        [[ -z "$c" && -x "$a/deploy/provision" ]] \
+                  || fail "--from : « $a » n'est ni un .deb, ni un kit.tar.gz, ni un kit détaré (pas de deploy/provision)"; c=kit ;;
+    esac
+  done
+  printf '%s\n' "$c"
+}
+
+refuser_melange() { # refuser_melange <voulu> — lit le fait « channel » ; un autre canal possède la machine = refus nommé
+  local machine; machine="$(fait channel)"
+  case "$machine" in
+    ""|aucun|"$1") return 0 ;;
+    invalide) fail "le canal d'installation de cette machine est ILLISIBLE ($PROV_CHANNEL_FILE) — rien n'a été fait" \
+                   "corrige-le, ou retire-le si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
+  esac
+  local geste
+  case "$machine" in
+    kit) geste="deploy/workstation up --from <kit.tar.gz>" ;;
+    deb) geste="deploy/workstation up --from <paquet>.deb  (apt install)" ;;
+    *)   geste="deploy/workstation up, depuis un checkout" ;;
+  esac
+  fail "cette machine est installée par « $machine », et ce geste poserait « $1 » — un canal ne se pose pas sur un autre. Rien n'a été fait" \
+       "« sudo $HERE/provision uninstall --yes » d'abord, ou mets à jour par le même canal : $geste"
+}
+
+# kit_deballer <kit.tar.gz> -> la racine du kit détaré (celle qui porte deploy/provision), sous
+# ~/.lcars/kits/<nom>/ de CET humain. Se joue AVANT l'escalade, donc sous son compte et dans son
+# HOME — ce qui interdit de l'appeler en root : le kit d'un humain ne se détare pas sous /root.
+kit_deballer() {
+  local tar="$1" nom dest
+  [[ "$EUID" -ne 0 ]] || fail "--from <kit.tar.gz> se lance SANS sudo : le kit se détare sous ton compte, l'escalade vient après"
+  [[ -f "$tar" ]] || fail "--from : kit introuvable : $tar"
+  tar="$(readlink -f "$tar")"
+  if [[ -f "$tar.sha256" ]]; then
+    ( cd "$(dirname "$tar")" && sha256sum -c --quiet "$(basename "$tar").sha256" >/dev/null 2>&1 ) \
+      || fail "--from : la somme sha256 de $tar ne correspond pas à $tar.sha256 — kit altéré ou incomplet, rien n'a été détaré" \
+              "re-télécharge le tar ET son .sha256, puis relance"
+    echo "  kit : sha256 vérifié ($tar.sha256)" >&2
+  else
+    echo "  kit : AUCUN $tar.sha256 à côté — le kit n'est PAS vérifié ; je continue, tu es prévenu" >&2
+  fi
+  nom="$(basename "$tar" .tar.gz)"; dest="$HOME/.lcars/kits/$nom"
+  mkdir -p "$dest" && tar -xzf "$tar" -C "$dest" || fail "--from : détarage de $tar dans $dest en échec"
+  local -a racines=("$dest"/*/deploy/provision)
+  [[ "${#racines[@]}" -eq 1 && -x "${racines[0]}" ]] \
+    || fail "--from : $dest ne porte pas UN deploy/provision — ce tar n'est pas un kit LCARS (${#racines[@]} trouvé(s))"
+  printf '%s\n' "${racines[0]%/deploy/provision}"
 }
 
 # ─── LES IDENTIFIANTS — IMPRIMER PUIS DÉTRUIRE, DANS LE MÊME GESTE ──────────────────────────────
@@ -151,9 +234,53 @@ bandeau_final() {
 
 # ─── up ─────────────────────────────────────────────────────────────────────────────────────────
 cmd_up() {
-  escalade_si_besoin up "$@"
-  # À partir d'ici : root, SUDO_USER = l'humain.
+  # ─── --from : les artefacts, séparés de ce qui va à provision ────────────────────────────────
+  local -a from=() args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from) from+=("${2:?--from attend un artefact : kit.tar.gz, .deb, ou un kit détaré}"); shift 2 ;;
+      *)      args+=("$1"); shift ;;
+    esac
+  done
   [[ -x "$PROVISION" ]] || fail "provision introuvable : $PROVISION" "ce rail exige le checkout complet"
+  local voulu; voulu="$(canal_voulu "${from[@]}")" || exit 1
+
+  # ─── LE REFUS DE MÉLANGE, AVANT L'ESCALADE ────────────────────────────────────────────────────
+  mesurer
+  refuser_melange "$voulu"
+
+  # ─── DEB : apt pose, et c'est le seul sudo — le postinst fait le reste ────────────────────────
+  local a
+  if [[ "$voulu" == "deb" ]]; then
+    local -a debs=()
+    for a in "${from[@]}"; do [[ -f "$a" ]] || fail "--from : paquet introuvable : $a"; debs+=("$(readlink -f "$a")"); done
+    rm -f "$FACTS_FILE"
+    echo ""
+    echo "  paquet(s) : ${debs[*]}"
+    echo "  « apt install » les pose ; le postinst écrit le canal « deb » et joue provision apply."
+    [[ "$EUID" -ne 0 ]] || exec apt install "${debs[@]}"
+    exec sudo apt install "${debs[@]}"
+  fi
+
+  # ─── KIT : vérifié et détaré SOUS L'HUMAIN, avant l'escalade ; root reçoit le répertoire ──────
+  local kit_dir=""
+  if [[ "${#from[@]}" -gt 0 ]]; then
+    case "${from[0]}" in
+      *.tar.gz) kit_dir="$(kit_deballer "${from[0]}")" || exit 1 ;;
+      *)        kit_dir="$(readlink -f "${from[0]}")" ;;
+    esac
+    prov_delivery_is_binary "$kit_dir" \
+      || fail "--from : $kit_dir ne se déclare pas paquet (pas de tampon à sa racine) — un kit se déclare ; un checkout se pose sans --from"
+    PROVISION="$kit_dir/deploy/provision"
+    echo "  kit : $kit_dir — « provision apply » se joue DEPUIS ce kit"
+  fi
+
+  # La seconde instance reçoit le RÉPERTOIRE du kit (elle ne détare rien en root) ; `args`, lui,
+  # reste ce qui va à provision.
+  local -a relance=("${args[@]}")
+  [[ -z "$kit_dir" ]] || relance+=(--from "$kit_dir")
+  escalade_si_besoin up "${relance[@]}"
+  # À partir d'ici : root, SUDO_USER = l'humain.
 
   PROV_ANNOUNCE_FILE="$(mktemp "${TMPDIR:-/tmp}/lcars-creds.XXXXXX")" \
     && chmod 0600 "$PROV_ANNOUNCE_FILE" || PROV_ANNOUNCE_FILE=""
@@ -170,7 +297,7 @@ cmd_up() {
      && [[ "$(fait consent)" == "env" || "$(fait consent)" == "fichier" ]]; then
     echo ""
     echo "  docker n'est pas là et c'est le rail qui le pose — je joue d'abord les paquets."
-    "$PROVISION" apply "$@" --only 00-preflight --only 05-host-consent --only 10-packages \
+    "$PROVISION" apply "${args[@]}" --only 00-preflight --only 05-host-consent --only 10-packages \
       || echo "  la tranche paquets n'a pas tout convergé — 48-forge-host dira ce qui manque."
     # LA MESURE SE REJOUE : le fait valait « absent » il y a trente secondes, et la suite du rail
     # travaillerait sinon sur une photographie prise avant l'installation.
@@ -183,7 +310,7 @@ cmd_up() {
   # que `deploy/container` (`await_provision_verdict`) — deux délégués qui en tirent deux verdicts, c'est
   # un code de retour qui ne veut plus rien dire.
   local rc=0
-  "$PROVISION" apply "$@" || rc=$?
+  "$PROVISION" apply "${args[@]}" || rc=$?
   case "$rc" in
     0) ;;
     2)
