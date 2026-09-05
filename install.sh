@@ -38,6 +38,10 @@
 #                       dur dans cette porte, signature minisign si l'outil est là (dit sinon).
 #                       C'est le mouvement SOURCE d'une porte pipée (curl … | bash).
 #       --tar           sous Debian/Ubuntu, le kit plutôt que les .deb de la version.
+#       --source [REF]  la provenance « source », pour qui veut compiler : git clone AU TAG de cette
+#                       porte, ou REF (une branche, un tag) — jamais main sans le dire. Remplace
+#                       --branch, qui est REFUSÉ.
+#       --repo URL      le dépôt de --source (défaut : le dépôt public, la cible).
 #       --port-forge N  le port que publie la forge du poste (défaut 21000).
 #       --port-deck N   le port du deck (défaut 20999).
 #       --port-ssh N    le port SSH du banc (défaut 2222) — avec --bench uniquement.
@@ -118,7 +122,8 @@ MINISIGN_PUBKEY=""                 # @@DOOR_PUBKEY@@ la cle publique minisign de
 sums() { cat <<'SUMS'              # @@DOOR_SUMS_BEGIN@@ « <sha256>  <artefact> », un par ligne
 SUMS
 }                                  # @@DOOR_SUMS_END@@
-BRANCH="main"; WANT_SOURCE=0; FROM_RELEASE=0; WANT_TAR=0
+SOURCE_REF="$LCARS_DOOR_VERSION"   # --source : git clone AU TAG de cette porte, jamais main sans le dire
+WANT_SOURCE=0; FROM_RELEASE=0; WANT_TAR=0
 DOCTOR_MODE=0
 RAIL=""              # workstation | container — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
@@ -156,7 +161,12 @@ while [[ $# -gt 0 ]]; do
                  echo "  Le rail poste vit dans deploy/workstation, et son escalade n'a rien a sauter." >&2
                  exit 1 ;;
     --repo)   REPO_URL="${2:?--repo attend une URL}"; shift 2 ;;
-    --branch) WANT_SOURCE=1; BRANCH="${2:?--branch attend un nom}"; shift 2 ;;
+    --source) WANT_SOURCE=1; shift
+              if [[ $# -gt 0 && "${1:0:1}" != "-" ]]; then SOURCE_REF="$1"; shift; fi ;;
+    # ⚠ REFUSE, PAS IGNORE — meme regle que `--consented`. `--branch` clonait `main` par defaut : une
+    # porte de version qui l'accepterait encore enverrait compiler autre chose que ce qu'elle EST.
+    --branch) echo "  --branch est retire : --source [<tag|branche>] clone AU TAG de cette porte ($LCARS_DOOR_VERSION), jamais main sans le dire." >&2
+              exit 1 ;;
     --from-release) FROM_RELEASE=1; shift ;;
     --tar)          WANT_TAR=1; shift ;;
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
@@ -180,6 +190,7 @@ while [[ $# -gt 0 ]]; do
         echo "  --workstation | --container   le rail · --bench  les annexes · --check  sonde read-only"
         echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
         echo "  --from-release  l'artefact de CETTE version, vérifié · --tar  le kit plutôt que les .deb"
+        echo "  --source [REF]  git clone AU TAG de cette porte (ou REF) · --repo URL  son dépôt"
       fi
       exit 0 ;;
     *) echo "Option inconnue : $1 — --help" >&2; exit 1 ;;
@@ -333,11 +344,11 @@ EOF
 #   · un checkout (BASH_SOURCE lie, .git present)      → source  : on continue dedans, HEAD est dit
 #   · la racine d'un kit (BASH_SOURCE lie, sans .git)  → kit     : on continue dedans
 #   · pipee (BASH_SOURCE non lie), ou --from-release   → release : l'artefact de SA version, verifie
-#   · --branch <ref>                                   → source  : git clone, pour qui veut compiler
+#   · --source [REF]                                   → source  : git clone AU TAG, pour qui compile
 #
 # ⚠ SOUS L'HUMAIN, SANS SUDO. L'ancienne porte clonait EN ROOT (`runuser`) apres son escalade : le
 # clone appartenait a root, et `git` le lisait ensuite en « dubious ownership ». Ici il n'y a pas
-# d'escalade du tout — git (--branch) ou curl (release) est le seul prerequis de cette etape.
+# d'escalade du tout — git (--source) ou curl (release) est le seul prerequis de cette etape.
 BASE="${LCARS_DOOR_BASE:-${DOOR_BASE:-${REPO_URL%.git}/releases/download/$LCARS_DOOR_VERSION}}"
 KITS_DIR=""; PROVENANCE=""; declare -a DEBS=() FROM=()
 if [[ "$WANT_SOURCE" -eq 1 ]]; then
@@ -348,14 +359,14 @@ if [[ "$WANT_SOURCE" -eq 1 ]]; then
   }
   SRC_DIR="${LCARS_SRC:-$HOME/LCARS-fleet}"
   if [[ -d "$SRC_DIR/.git" ]]; then
-    echo "  ${W}source${N} : $SRC_DIR existe — synchronisation sur ${W}$BRANCH${N}"
+    echo "  ${W}source${N} : $SRC_DIR existe — synchronisation sur ${W}$SOURCE_REF${N}"
     git -C "$SRC_DIR" fetch --quiet origin \
-      && git -C "$SRC_DIR" checkout --quiet "$BRANCH" \
-      && git -C "$SRC_DIR" pull --quiet --ff-only origin "$BRANCH" \
+      && git -C "$SRC_DIR" checkout --quiet "$SOURCE_REF" \
+      && git -C "$SRC_DIR" pull --quiet --ff-only origin "$SOURCE_REF" \
       || { echo "  ${R}la synchronisation a échoué — règle-la, puis relance.${N}"; exit 1; }
   else
-    echo "  ${W}source${N} : clone de $REPO_URL (${W}$BRANCH${N}) → $SRC_DIR"
-    git clone --quiet --branch "$BRANCH" "$REPO_URL" "$SRC_DIR" \
+    echo "  ${W}source${N} : clone de $REPO_URL (${W}$SOURCE_REF${N}) → $SRC_DIR"
+    git clone --quiet --branch "$SOURCE_REF" "$REPO_URL" "$SRC_DIR" \
       || { echo "  ${R}le clone a échoué — règle-le, puis relance.${N}"; exit 1; }
   fi
   SCRIPT_DIR="$SRC_DIR"; PROVENANCE=source

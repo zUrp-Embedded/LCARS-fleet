@@ -889,7 +889,7 @@ SPY
   # ⚠ PAS DE `< /dev/null` : il ecraserait le pipe, et bash lirait /dev/null comme script. Le `read`
   # de la pause va chercher /dev/tty tout seul, et retombe sur le refus sans TTY.
   local dest="$BATS_TEST_TMPDIR/clone-pipe"
-  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --branch \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
+  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --source \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
   [[ "$output" == *"source"* ]]
   [ -x "$dest/deploy/provision" ]
   # Le clone appartient a CELUI QUI A LANCE, jamais a root.
@@ -964,10 +964,10 @@ SPY
   # c'est le MOUVEMENT SOURCE qui a appris deux provenances (40-PORTE § 2) — telecharger l'artefact
   # de SA version, le verifier contre une table EN DUR, dire la signature — et les drapeaux du § 07
   # (--dry-run, --uninstall). Pipee, la porte n'a pas d'arbre : ce code ne peut vivre que dans le
-  # fichier qui est pipe. La mesure du jour est 548 ; la marge reste de quelques lignes.
+  # fichier qui est pipe. La mesure du jour est 558 ; la marge reste de quelques lignes.
   local n; n="$(grep -vcE '^\s*#|^\s*$' "$SRC")"
-  [ "$n" -le 556 ] || {
-    echo "la porte a $n lignes de code (plafond 556) — qu'est-ce qui est revenu dedans ?" >&2
+  [ "$n" -le 562 ] || {
+    echo "la porte a $n lignes de code (plafond 562) — qu'est-ce qui est revenu dedans ?" >&2
     return 1
   }
 }
@@ -1288,4 +1288,59 @@ KITS="$BATS_TEST_TMPDIR/home/.lcars/kits/$TAG"
   # ce qui differe est EXACTEMENT : la version, la base, la cle, et la table
   local d; d="$(diff "$SRC" "$PORTE" | grep -E '^[<>]' | grep -vE '^[<>] (LCARS_DOOR_VERSION=|DOOR_BASE=|MINISIGN_PUBKEY=|SUMS$|[0-9a-f]{64}  )' || true)"
   [ -z "$d" ] || { echo "la porte generee differe du gabarit ailleurs que sur ses constantes :"; echo "$d"; return 1; }
+}
+
+# ─── --source : LA PROVENANCE SOURCE CLONE AU TAG DE LA PORTE, JAMAIS main SANS LE DIRE (D7) ─────
+#
+# `git` est DOUBLE : il trace son argv et, sur `clone`, pose un arbre prepare (provision qui rend les
+# faits, un .git). Ce qui se mesure est la ref demandee — pas un clone reel.
+_git_double() { # pose un git qui trace dans $GIT_TRACE et clone un arbre factice
+  local arbre="$BATS_TEST_TMPDIR/arbre-source"; rm -rf "$arbre"; mkdir -p "$arbre/.git"
+  _faux_provision "$arbre" "${_faits_sains[@]}"
+  export GIT_TRACE_FILE="$BATS_TEST_TMPDIR/git.trace"; : > "$GIT_TRACE_FILE"
+  cat > "$BINDIR/git" <<DOUBLE
+#!/usr/bin/env bash
+echo "GIT:\$*" >> "\$GIT_TRACE_FILE"
+case "\$1" in
+  clone) cp -a "$arbre" "\${@: -1}" ;;
+  -C) [[ "\$3" == rev-parse ]] && echo deadbee ;;
+esac
+exit 0
+DOUBLE
+  chmod 0755 "$BINDIR/git"
+  export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
+}
+
+@test "--source sans ref : git clone --branch <LCARS_DOOR_VERSION> — le TAG de la porte, pas main ; avec une ref : cette ref" {
+  _git_double
+  local v; v="$(bash "$SRC" --version)"
+  run bash -c "cat '$SRC' | bash -s -- --check"   # pipee sans --source : ce n'est PAS git (release)
+  refute_out 'GIT:clone' < "$GIT_TRACE_FILE"
+  run bash -c "cat '$SRC' | bash -s -- --source --check"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF "GIT:clone --quiet --branch $v https://github.com/lordzurp/LCARS-fleet.git $HOME/LCARS-fleet" "$GIT_TRACE_FILE"
+  [[ "$output" == *"clone de https://github.com/lordzurp/LCARS-fleet.git ($v)"* ]]
+  [[ "$output" == *"provenance : source — $HOME/LCARS-fleet, HEAD deadbee"* ]]
+  refute_out 'branch main' < "$GIT_TRACE_FILE"
+  # une ref explicite, et --repo : les deux atteignent git tels quels
+  rm -rf "$HOME/LCARS-fleet"; : > "$GIT_TRACE_FILE"
+  run bash -c "cat '$SRC' | bash -s -- --source passe7/x --repo https://forge.test/o/r.git --check"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF "GIT:clone --quiet --branch passe7/x https://forge.test/o/r.git" "$GIT_TRACE_FILE"
+  # depuis un checkout, --source va quand meme chercher la source par git : c'est ce qu'on a demande
+  rm -rf "$HOME/LCARS-fleet"; : > "$GIT_TRACE_FILE"
+  run bash "$SRC" --source --check < /dev/null
+  grep -qF "GIT:clone --quiet --branch $v " "$GIT_TRACE_FILE"
+}
+
+@test "VERROU : « --branch » est REFUSE, il ne revient pas en passe-plat muet — le refus nomme --source" {
+  _git_double
+  run bash "$SRC" --branch main --check < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--branch est retire"*"--source"* ]]
+  refute_out 'GIT:' < "$GIT_TRACE_FILE"
+  # et la constante par defaut est la VERSION de la porte, pas un mot ecrit ici
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'SOURCE_REF="$LCARS_DOOR_VERSION"' <<<"$code"
+  refute grep -qE 'BRANCH=|"main"' <<<"$code"
 }
