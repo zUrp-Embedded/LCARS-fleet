@@ -101,6 +101,20 @@ PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et dél�
 vers `provision apply`, `--container` vers `container`, `--bench` vers le fournisseur de banc. Ce qui suit
 `--` part verbatim au délégué de la branche.
 
+**Son mouvement SOURCE a trois provenances** (lot 4 du chantier release) : lancée dans un checkout
+→ `source`, on continue dedans (HEAD est dit) ; à la racine d'un kit → `kit` ; pipée (`curl … | bash`)
+ou `--from-release` → `release` : elle télécharge l'artefact de SA version dans `~/.lcars/kits/<tag>/`
+depuis `BASE` (`LCARS_DOOR_BASE` la surcharge pour un banc ; `http://` n'entre que par
+`LCARS_DOOR_INSECURE_HTTP=1`, dit), le vérifie contre la table `sums()` EN DUR dans la porte
+(obligatoire, jamais silencieux : un écart efface le fichier et rien n'est posé), puis la signature
+minisign si l'outil est là — sinon « provenance NON vérifiée (sha256 seul) » sur stderr, jamais tu.
+Le kit est TOUJOURS pris (c'est l'arbre : le préflight vit dedans) ; sous Debian/Ubuntu les `.deb`
+du rail poste en plus (`--tar` force le kit), tendus à `workstation up --from …`. Les noms d'assets
+vivent dans UNE fonction, `assets_for <os> <arch>`. `install.sh` du dépôt est le GABARIT (constantes
+`@@DOOR_…@@` vides) ; `deploy/lib/door-gen.sh <tag> <base> <dist-dir>` produit la porte de la
+version et son `install.sh.sha256` — un témoin tient que la porte générée est le gabarit hors ces
+lignes.
+
 **Le canal** (lot 2 du chantier release) : `/etc/lcars/channel` dit QUI a posé le produit — `source`
 (un checkout, par `60-deploy`), `kit` (un paquet `pack.sh`, par `60-deploy`), `deb` (le paquet, par
 son postinst). `deploy/workstation up --from <kit.tar.gz>` vérifie le `.sha256` s'il est à côté (le
