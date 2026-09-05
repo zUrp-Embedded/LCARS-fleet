@@ -1,7 +1,7 @@
 # Fleet.Pilot — domain card
 
 **Date**: 2026-05-26
-**Last revised**: 2026-09-04
+**Last revised**: 2026-09-05
 **Status**: active — forge driver (client of the core)
 **Referenced by**: —
 
@@ -18,7 +18,7 @@ restated, only pointed at.
 ## Modules
 
 **Reactor & dispatch**
-- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / per-repo admission ceiling (`max_fan`, ENGAGED/QUEUED) / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
+- `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / the admission ceiling, per human on each repo (`max_fan`, ENGAGED/QUEUED) / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
 - `Fleet.Pilot.PollerTelemetry` — the poller's telemetry, attached (BL-6-40).
 - `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .Ctx, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `Ctx` = the review context struct built once in `dispatch_review/2`; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
 - `Fleet.Pilot.BriefBuilder` — the authority on brief FORMAT (worker / judge / rework / conflict).
@@ -37,7 +37,7 @@ restated, only pointed at.
 - `Fleet.Pilot.MergeOutcome` — pure structural classification of a merge failure. Stays: it reads a forge failure to decide what the PILOT does next.
 
 **Incidents & wake**
-- `Fleet.Pilot.IncidentConsumer` — Bus consumer of pod-failure events (`pod.failed` / `wake.failed`) → `IncidentRegistry`.
+- `Fleet.Pilot.IncidentConsumer` — Bus consumer of every `action: incident` event of the routing table (seven types, four sources) → `IncidentRegistry`.
 - `Fleet.Pilot.IncidentRegistry` — persistent cross-session incident memory (GenServer + WAL + forge sync). Sub-module `Escalation` (the sysadmin issue).
 - `Fleet.Pilot.ArchWake` — SINGLE authority for waking a project's architect on an `lcars-awaits-arch` escalation: the ordered offer-then-wake pair, shared by both rails.
 - `Fleet.Pilot.ArchFeed` — Bus consumer appending one short line per fleet milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`).

@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
+  alias Fleet.Pilot.ForgeStubs.{CloseFailForge, MergeFailForge, OkForge}
   alias Fleet.Pilot.MergeAndPromote
   alias Fleet.TestEnv
 
@@ -52,26 +52,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
     def close_issue(_r, _n, _o), do: {:ok, :closed}
-  end
-
-  # F-C066 — merge/comment/stage OK, close ALWAYS failing: proves the honest return (no lying :ok).
-  defmodule CloseFailForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
-    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
-
-    def pr_review_state(_repo, _n, _opts),
-      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
-
-    def merge_pr(_r, _pr, _o), do: :ok
-    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
-    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
-
-    def close_issue(_r, n, _o) do
-      send(self(), {:close_attempt, n})
-      {:error, {:http, 500, "close boom"}}
-    end
   end
 
   # F-C066 — FLAKY close: fails 2×, succeeds the 3rd (process-dict counter) → proves self-heal via retry.

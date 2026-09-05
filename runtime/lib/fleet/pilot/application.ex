@@ -21,8 +21,8 @@ defmodule Fleet.Pilot.Application do
       does not advance past the producer spawn.
     * `Task.Supervisor` (`StepRunConsumer.task_supervisor/0`) — offload of the step_run completion: the
       `git push` ≤30s does not block the `StepRunConsumer` singleton. Started BEFORE the StepRunConsumer (which refers to it).
-    * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer SEPARATE from the pod FAILURE
-      events (`pod.failed`/`wake.failed`) → `IncidentRegistry`. Concern distinct from the end-of-step-run
+    * `Fleet.Pilot.IncidentConsumer` (+ its `Task.Supervisor`) — Bus consumer of the `action: incident`
+      events of the routing table (seven types, four sources) → `IncidentRegistry`. Concern distinct from the end-of-step-run
       (isolated blast-radius: a burst of failures does not share the StepRunConsumer's mailbox).
     * `Fleet.Pilot.PollerTelemetry` — the attachment of `[:lcars_fleet, :pilot_poller, :poll]`. First child
       of the rail because it measures the rail: without it every duration the poller emits is
@@ -301,7 +301,7 @@ defmodule Fleet.Pilot.Application do
       # backing-store. Forge unreachable at boot → WAL only, no crash: the sync re-schedules itself
       # (`:sync_forge` retry, error logged at threshold) and catches up when the forge returns.
       Fleet.Pilot.IncidentRegistry,
-      # Bus consumer SEPARATE from the pod FAILURE events (`pod.failed`/`wake.failed`) → IncidentRegistry.
+      # Bus consumer of the `action: incident` events of the routing table → IncidentRegistry.
       # Its Task.Supervisor (offload of the registry's forge writes) started BEFORE it (it refers to it). Separate from
       # the StepRunConsumer: distinct concern, the failure burst does not share the completion's mailbox.
       {Task.Supervisor, name: IncidentConsumer.task_supervisor(), max_children: 16},
@@ -347,9 +347,11 @@ defmodule Fleet.Pilot.Application do
   @doc """
   The catalogue's card + structural-role checks, off the supervision path — for the standalone
   verifier. Runs EXACTLY what `start_link/1` runs at rail boot, in the same order and through the
-  same functions: publish the workflow image, then the jury/step/structural guards. It lives HERE
-  and not in the verifier because these read `Fleet.Workflow` (a dep of Pilot, not of the OTP root)
-  — the boundary is what keeps the workflow catalogue on this side.
+  same functions: publish the workflow image, then the jury/step/structural guards. It lives HERE,
+  beside `step_children!/0`, so the boot and the verifier share ONE sequence — the wall
+  `boot.verifier_covers_rail` reads both bodies and refuses a guard the boot plays that the
+  verifier does not (the reverse is tolerated: an extra guard in the verifier is conservative).
+  Nothing in the boundary pins it here (`Fleet.Workflow` is a dep of the OTP root too).
 
   Raises on the first broken card or unresolvable structural role, same as boot; the verifier wraps
   the raise into a finding.

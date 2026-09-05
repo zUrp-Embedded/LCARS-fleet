@@ -6,8 +6,9 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   ## Decision (`decide/1`) — pure GATE
 
-  From a Gitea issue payload: `:engage` (proceed) | `{:skip, reason}` (`:in_flight` lock set,
-  `:awaits_arch` human lock). decide does ONLY the gate — no ownership (forge-side scoping upstream),
+  From a Gitea issue payload: `:engage` (proceed) | `{:skip, reason}` — four locks: `:in_flight`
+  (a pod works the brick), `:merged` (`stage/merged`, F-C066: a sealed brick whose close failed is
+  never re-engaged), `:awaits_arch` (human lock), `:awaits_toolchain`. decide does ONLY the gate — no ownership (forge-side scoping upstream),
   no role, no load (the ROLE comes from the workflow_map POSITION, via `workflow_map_role`; see Effects).
 
   ## Effects (`dispatch_issue/2`)
@@ -41,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # REVIEW (PR) lifecycle extracted: `dispatch_review/2` (below, poller contract) does the PR gate +
   # reads `pr_review_state`, THEN delegates all the routing (verdicts / rework / conflict / promotion) to
-  # `ReviewLifecycle.dispatch_by_verdicts/5`. Uni-directional dependency (core → ReviewLifecycle →
+  # `ReviewLifecycle.dispatch_by_verdicts/6`. Uni-directional dependency (core → ReviewLifecycle →
   # Spawn/ArchEscalation → ø). `route_for/4` + `tag_err/2` stay HERE (shared with `dispatch_issue`) and
   # are threaded to ReviewLifecycle by CAPTURE in the `%ReviewLifecycle.Ctx{}` — no fork, no cycle.
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle
@@ -66,7 +67,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   @doc """
   PURE decision (gate): issue payload → `:engage` | `{:skip, reason}`. decide does ONLY the
-  gate: `lcars-in-flight` / `lcars-awaits-arch` / `lcars-awaits-toolchain` lock → skip; else → `:engage` (proceed). The role AND
+  gate: `lcars-in-flight` / `stage/merged` / `lcars-awaits-arch` / `lcars-awaits-toolchain` lock → skip; else → `:engage` (proceed). The role AND
   the action (spawn vs onboard) are decided DOWNSTREAM (`dispatch_issue`) — hence `:engage` and not `:spawn`. The SCOPING
   (forge-side, upstream) and the ROUTING (route → role, via `workflow_map_role`/onboard in `dispatch_issue`) are
   NOT here — decide loads nothing and does not decide the role.
@@ -317,18 +318,27 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   The PR gate (in-flight / awaits-arch) + the construction of `ctx` + the read of `pr_review_state`
   live HERE; the routing (verdicts / rework / conflict / promotion) is DELEGATED to
-  `ReviewLifecycle.dispatch_by_verdicts/5`.
+  `ReviewLifecycle.dispatch_by_verdicts/6`.
 
   `pr`: Gitea map (`number`, `head.ref`, `requested_reviewers`, `labels`). `opts` as
-  `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:skipped, reason}` | `{:error, _}`.
+  `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:ok, {:merged, pr}}` |
+  `{:ok, {:adopted, pr, reviewers}}` | `{:ok, {:auto_resolved, pr}}` | `{:skipped, reason}` |
+  `{:error, _}`.
   """
-  # `{:merged, _}` is NOT a variant of `{:spawned, _, _}`: the seal path closes a PR without ever
-  # opening a pod, so the spec must name it. A contract that does not say what it returns sends
-  # its caller to write a mapping against a shape it will not always get.
+  # `{:merged, _}`, `{:adopted, _, _}` and `{:auto_resolved, _}` are NOT variants of
+  # `{:spawned, _, _}`: the seal path closes a PR without ever opening a pod, the adoption lays a
+  # jury without spawning it, the tier-0 conflict engine writes the branch and re-summons the jury
+  # (behind `:pilot_conflict_diagnosis?`, a flag a spec does not read through), so the spec must
+  # name all three. A `skipped` reason is an atom OR a tuple (`{:merge_blocked_escalated, pr}`,
+  # `{:ci_unreadable, why}`, …): the `wait/*` table (`Fleet.Labels.wait_for/1`) reads them all.
+  # A contract that does not say what it returns sends its caller to write a mapping against a
+  # shape it will not always get.
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}}
           | {:ok, {:merged, integer()}}
-          | {:skipped, atom()}
+          | {:ok, {:adopted, integer(), [String.t()]}}
+          | {:ok, {:auto_resolved, integer()}}
+          | {:skipped, atom() | tuple()}
           | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
     # The PR's OWN base (face-projet): the face the deliverable merges into, read off the

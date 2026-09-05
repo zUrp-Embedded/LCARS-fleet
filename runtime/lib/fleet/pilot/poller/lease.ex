@@ -1,7 +1,8 @@
 defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
-  Repo-scoped ADMISSION of the step rail: at most `Admission.max_fan/2` active workflow_runs per
-  repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
+  ADMISSION of the step rail, per human on each repo: at most `Admission.max_fan/2` active
+  workflow_runs of this human on the repo — the project's declaration if it made one, else the
+  fleet default (**5**, clamped 1..15).
   Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
 
   ⚠ **CE N'EST PAS « at most ONE active workflow_run per repo », ET LE DEFAUT LIVRE LE DIT.** Le
@@ -140,13 +141,13 @@ defmodule Fleet.Pilot.Poller.Lease do
       end)
       |> Enum.sort_by(fn {issue, _pr?, _engaged, _pf} -> Map.get(issue, "number") end)
 
-    # THE CEILING — `max_fan`: how many workflow_runs this project may hold in flight at once. A
+    # THE CEILING — `max_fan`: how many workflow_runs this human may hold in flight on this repo. A
     # boolean would be the same parameter at a coarser resolution (**serial IS this ceiling at 1**),
     # and it could only say "one" or "as many as there are" — the second being genuinely unbounded:
     # a repo with forty queued tickets starts forty runs.
     #
     # A repo holds several runs without the operator flipping anything, which is why the default
-    # ceiling is LOW (5). PER PROJECT, not per box: the count is per project, and a fleet-wide knob
+    # ceiling is LOW (5). PER REPO (and per human), not per box: the count is per repo, and a fleet-wide knob
     # would make serializing one project to watch its pipeline end to end serialize every other
     # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)
