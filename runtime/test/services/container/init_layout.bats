@@ -24,7 +24,7 @@ setup() {
   STORE_LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/store.sh"
   [ -f "$SUT" ] && [ -f "$STORE_LIB" ]
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export LCARS_MODULE_TAG=box-init
+  export LCARS_MODULE_TAG=container-init
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
   # hors root, le groupe demande doit etre le notre pour que le setgid se pose
   LCARS_FLEET_GROUP="$(id -gn)"; export LCARS_FLEET_GROUP

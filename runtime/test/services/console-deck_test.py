@@ -1043,7 +1043,7 @@ const mkEl = () => ({ dataset: {}, style: {}, hidden: false, textContent: '', in
 globalThis.document = { getElementById: () => mkEl(), createElement: () => mkEl(),
   createTextNode: (t) => ({ nodeValue: String(t) }),
   querySelectorAll: () => [], title: '' };
-globalThis.location = { protocol: 'http:', host: 'box:20999' };
+globalThis.location = { protocol: 'http:', host: 'container:20999' };
 globalThis.CSS = { escape: (s) => s };
 globalThis.ResizeObserver = class { observe() {} disconnect() {} };
 globalThis.addEventListener = () => {};
@@ -1125,13 +1125,13 @@ try {
   const rail = mkEl(); rail.appendChild = (c) => { railKids.push(c); };
   document.getElementById = (id) => (id === 'rail' ? rail : mkEl());
 
-  build({ hostname: 'box', admin: true, humans: [] });
+  build({ hostname: 'container', admin: true, humans: [] });
   const tab = railKids.find((k) => k.dataset && k.dataset.key === 'admin');
   out.adm.present = Boolean(tab);
   if (tab) { tab.onclick(); out.adm.clicked = true; }
 
   railKids.length = 0;
-  build({ hostname: 'box', admin: false, humans: [] });
+  build({ hostname: 'container', admin: false, humans: [] });
   out.adm.absent = !railKids.some((k) => k.dataset && k.dataset.key === 'admin');
   out.adm.ok = true;
 } catch (e) { out.adm.ok = false; out.adm.err = String(e); }
@@ -1154,7 +1154,7 @@ console.log(JSON.stringify(out));
           % (_r.stderr.strip().splitlines() or [""])[-1:] or "")
     if _r.returncode == 0:
         _o = json.loads(_r.stdout.strip().splitlines()[-1])
-        check(_o["url"] == "ws://box:20999/console/zoe/ws",
+        check(_o["url"] == "ws://container:20999/console/zoe/ws",
               "le WS vise la MEME origine, chemin relatif (vu: %s)" % _o["url"])
         check(_o["proto"] == ["tty"],
               "et annonce le sous-protocole que ttyd attend (vu: %s)" % _o["proto"])

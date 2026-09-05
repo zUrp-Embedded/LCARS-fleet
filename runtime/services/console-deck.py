@@ -48,7 +48,7 @@ HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh
 # id_token is an attacker-supplied blob. `userinfo` is a direct server-to-forge call authenticated
 # by the access token we just obtained: nothing to verify, because nothing untrusted carried it.
 # ONE name for the file, the one the gesture that writes it uses (forge.d/deck-oidc.sh):
-# the box points it under its state volume, the workstation keeps the protocol default.
+# the container points it under its state volume, the workstation keeps the protocol default.
 OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json")
 # Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
 # registration is deliberate — an account is inert on its own, and the single admin gesture that
@@ -514,7 +514,7 @@ def claude_credentials(home):
 
 def state(only=None, admin=False, people=None):
     """
-    The box's state, RESTRICTED to `only` when a session names a human.
+    The container's state, RESTRICTED to `only` when a session names a human.
 
     The filter is applied at the SOURCE, not in the page: an index that renders one human while
     `/api/state` still serves everybody has not made anything personal, it has hidden a list that
@@ -1283,7 +1283,7 @@ class Deck(BaseHTTPRequestHandler):
         """
         Where the forge sends the person back -- DERIVED FROM THE REQUEST, not from config.
 
-        The same deck is reached as `127.0.0.1:20999` from the box's own host and as
+        The same deck is reached as `127.0.0.1:20999` from the container's own host and as
         `<lan-addr>:20999` from anyone else's machine, and OAuth2 matches the redirect URI
         EXACTLY against the registered list. Echoing the Host we were actually asked on is the
         only value that can be right for both; the registration must carry every entrance in use,

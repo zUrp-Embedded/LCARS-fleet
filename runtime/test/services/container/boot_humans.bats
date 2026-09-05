@@ -7,7 +7,7 @@
 # CE QUE CES TEMOINS FERMENT. La boite rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le
 # `exec sshd` et sa premiere passe, la boite se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
-# — et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
+# — et n'a personne. `container up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
 # MODULES, pas la population. Il n'avait aucune raison de douter.
 #
 # ⚠ LE RAIL POSTE AVAIT FERME EXACTEMENT CA LE 2026-08-25, ET PAS CELUI-CI. `64-services` tire le
@@ -62,7 +62,7 @@ setup() {
 
   # ⚠ DEUX MORCEAUX REELS, ET C'EST LEUR CONTRAT QU'ON MESURE. Le bloc de convergence POSE
   # `humans_rc` ; `publier_verdicts` l'ECRIT. Les deux vivaient ensemble jusqu'au 2026-08-26, ou la
-  # publication est descendue apres le bloc pour fermer une course avec `box up`. Extraire le seul
+  # publication est descendue apres le bloc pour fermer une course avec `container up`. Extraire le seul
   # bloc laisserait le temoin vert sur une publication cassee — et c'est justement la moitie qui
   # avait un defaut.
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
@@ -159,9 +159,9 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 }
 
 @test "L'ORDRE DE PUBLICATION FERME LA COURSE : provision.rc est ecrit APRES humans.rc" {
-  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `box up` poll `lcars-provision.rc`
+  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `container up` poll `lcars-provision.rc`
   # toutes les 5 s, le trouve, puis lit `lcars-humans.rc` UNE SEULE FOIS. Tant que `provision.rc`
-  # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `box up` lisait
+  # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `container up` lisait
   # un fichier pas encore ecrit, et affichait « population NON MESUREE » A TOUS LES COUPS, quelle
   # que soit la population reelle. Le lot precedent avait donc ajoute une mesure que son unique
   # lecteur ne pouvait jamais voir.
@@ -214,7 +214,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 @test "le convergeur ABSENT : rien n'est publie, et le bloc le dit — pas de verdict invente" {
   # Sans convergeur, la question « qui peut lancer une fleet » n'a pas ete posee. Ecrire 0 ferait
   # dire au fichier « tout va bien » pour une mesure qui n'a pas eu lieu — et son lecteur
-  # (`box up`) distingue justement « absent » de « zero ».
+  # (`container up`) distingue justement « absent » de « zero ».
   rm -f "$LCARS_HUMAN_CONVERGER"
   run bash -c "
     set -euo pipefail

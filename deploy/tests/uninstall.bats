@@ -561,7 +561,7 @@ code()    { grep -vhE '^\s*#' "$RUNNER" "$BATS_TEST_DIRNAME/../lib/provision-uni
   refute grep -qE '(^|[^_A-Z"])docker (rm|ps|network|volume) ' <<<"$(grep -v 'echo ' <<<"$bloc")"
   # ⚠ HORS LIGNES D'AFFICHAGE : le message SUGGERE la commande a l'operateur (« docker volume rm
   # <vol> si tu en es sur »). Un refute qui lit la prose interdirait de nommer le geste qu'on epargne
-  # — meme piege que le temoin anti-litteral de `box`, deux commits plus tot.
+  # — meme piege que le temoin anti-litteral de `container`, deux commits plus tot.
   refute grep -qE '^[^e]*docker (volume rm|volume prune)' <<<"$(grep -v 'echo ' <<<"$bloc")"
   # et il DIT ce qu'il epargne
   grep -q 'GARDÉ' <<<"$bloc"

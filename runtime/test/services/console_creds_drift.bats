@@ -7,7 +7,7 @@
 # WHY THIS EXISTS. `usermod -aG` writes /etc/group and touches no running process. The console's
 # ttyd froze its supplementary groups at launch (`setpriv --init-groups`), and the only idempotence
 # predicate used to be "does the socket answer" -- so a promotion NEVER reached the one surface
-# where a human types commands. Measured 2026-08-20/21 on the live box: the operator was promoted
+# where a human types commands. Measured 2026-08-20/21 on the live container: the operator was promoted
 # on the forge, the converger projected the group, and `lcars catalogue install` kept refusing.
 #
 # WHAT IS PINNED HERE is the pair that makes the repair honest: the DB/process COMPARISON, and the
@@ -19,7 +19,7 @@
 #
 # WHAT A STUB CANNOT PROVE, and it must be said: that `newgrp` really re-reads the group database
 # and hands back a shell carrying it. That is the tool's behaviour, measured by the operator on the
-# live box on 2026-08-20 -- it is what unblocked `catalogue install` when nothing else did.
+# live container on 2026-08-20 -- it is what unblocked `catalogue install` when nothing else did.
 
 # ⚠ SIGNALEMENTS VERIFIES UN PAR UN, AUCUN N'EST UN DEFAUT :
 #   SC2015 — le `|| C` est le contrat de tolerance, pas une branche d'echec

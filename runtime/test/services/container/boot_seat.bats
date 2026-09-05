@@ -50,7 +50,7 @@ setup() {
   # `useradd`, qui exige root et n'est pas ce qu'on mesure.
   HEAD="$BATS_TEST_TMPDIR/head.sh"
   # La tete : les portes outil et la garde du siege — tout ce qui precede l'init de l'instance.
-  sed '/^BOX_INIT=/,$d' "$SRC" > "$HEAD"
+  sed '/^CONTAINER_INIT=/,$d' "$SRC" > "$HEAD"
 }
 
 seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
@@ -110,7 +110,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # ⚠ MESURE DE LA 4e FORME — boite + forge FOURNIE, sans `--bench` (.63, 2026-08-30). Le refus
   # etait `resolve_admiral || exit 1`, et sous `restart: unless-stopped` la boite BOUCLAIT :
   #     politique : unless-stopped (max 0) · redemarrages: 25
-  # Or le geste que ce refus NOMME lui-meme — « box config » — passe par un `docker exec`, et
+  # Or le geste que ce refus NOMME lui-meme — « container config » — passe par un `docker exec`, et
   # docker le refuse sur un conteneur qui redemarre :
   #     Container … is restarting, wait until the container is running
   # Le diagnostic etait juste, le remede nomme, et l'etat de la boite le rendait INJOUABLE.

@@ -140,7 +140,7 @@ EOF
   [ "$status" -eq 1 ] || { echo "status=$status"; echo "$output"; false; }
   [[ "$output" == *"drift: 1"* ]]
   # le remede n'est PAS « provision apply » (refuse sur docker) : c'est le rebuild de l'image
-  [[ "$output" == *"box build"* ]] || { echo "$output"; false; }
+  [[ "$output" == *"container build"* ]] || { echo "$output"; false; }
   refute grep -q 'converger : sudo' <<<"$output"
   grep -q "60-deploystub:check" "$RUN_LOG"
 }

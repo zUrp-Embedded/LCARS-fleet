@@ -685,7 +685,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   # Le decor coupe systemd : c'est le chemin de la boite, et c'est celui ou la sonde manquait.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
   [[ "$output" == *"fleet start"* ]]
@@ -698,7 +698,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   # Une regression d'un cote OU de l'autre rougit ici.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
@@ -707,7 +707,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 # LE DECOR DE LA MECANIQUE DE BOITE — sans systemd, le module ne verifie plus des unites mais
 # `supervise.sh` et les programmes que nomme STARTERS. Un temoin qui mesure AUTRE CHOSE doit les
 # poser, sinon il derive sur une cause etrangere a son sujet et son echec accuse la mauvaise ligne.
-box_services_present() {
+container_services_present() {
   local d="$BATS_TEST_TMPDIR/helpers" p
   mkdir -p "$d"
   for p in supervise.sh console-landing.sh human-converger.sh catalogue-executor.py privileged-executor.py; do
@@ -722,7 +722,7 @@ box_services_present() {
   # systemd : si elle rougissait sur une machine saine, tout doctor de boite deviendrait rouge.
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars'

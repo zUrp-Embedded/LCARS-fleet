@@ -36,7 +36,7 @@
 # n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
-: "${LCARS_MODULE_TAG:=box-init}"
+: "${LCARS_MODULE_TAG:=container-init}"
 # shellcheck source=../lib/module-protocol.sh
 . "${LCARS_MODULE_PROTOCOL:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/module-protocol.sh}"
 
@@ -252,7 +252,7 @@ cmd_seat() {
   [[ "$rc" -eq 0 ]] && seat_uid_file
   exit "$rc"
 }
-# ⚖ user 2026-09-04 (Q1) : « box config » pose les secrets COTE HOTE ; le compose les monte sous
+# ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets COTE HOTE ; le compose les monte sous
 # /run/secrets ; l'instance les IMPORTE dans son repertoire prive au boot — une fois, et a nouveau
 # seulement s'ils changent (rotation). Le siege se derive ensuite du jeton master, donc l'import
 # precede tout. Un secret absent du montage n'est pas une faute : la voie d'avant (le geste

@@ -7,8 +7,8 @@
 # ⚖ user 2026-09-04 (point 2 du chantier deploy-independance, DI-08). Le stage `runtime` refait a la
 # main sept modules du rail poste, et le doctor commun ne se jouait qu'au boot : trois derives de
 # l'image (groupe de `lcars-authority`, tampon `.helpers-revision`, arbre `assets/`) ont ete vues au
-# premier `box up` du 04/09, jamais au build. Ces temoins tiennent la FORME du dispositif ; sa
-# mesure, c'est le build lui-meme (job `image` de la CI, `box build` sur un banc).
+# premier `container up` du 04/09, jamais au build. Ces temoins tiennent la FORME du dispositif ; sa
+# mesure, c'est le build lui-meme (job `image` de la CI, `container build` sur un banc).
 #
 # ⚠ CES TEMOINS NE BATISSENT AUCUNE IMAGE.
 
@@ -73,13 +73,13 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
 @test "final DEPEND de verify par le marqueur — un stage dont personne ne depend n'est pas bati" {
   code | grep -qE '^FROM runtime AS final$'
   code | grep -qE '^COPY --from=verify /verified /opt/lcars/.verified$'
-  # et final est le DERNIER stage : c'est lui que compose et `box build` produisent sans --target
+  # et final est le DERNIER stage : c'est lui que compose et `container build` produisent sans --target
   [ "$(code | grep -E '^FROM ' | tail -n1)" = "FROM runtime AS final" ]
 }
 
 @test "le marqueur est un objet du PRODUIT — hors de la table de l'installeur, nomme par container/README" {
   # ⚖ user 2026-09-04 (Q1, lot 7) : la table n'a plus de colonne docker. Le tampon est pose par le
-  # Dockerfile (stage final), lu par « box status » : l'installeur ne le pose, ne le sonde, ni ne le
+  # Dockerfile (stage final), lu par « container status » : l'installeur ne le pose, ne le sonde, ni ne le
   # desinstalle.
   refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
   refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"

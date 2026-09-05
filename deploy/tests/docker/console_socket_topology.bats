@@ -16,7 +16,7 @@
 # not what the code says about itself.
 #
 # WHAT IS NOT PROVEN HERE, and cannot be by a stub: that the kernel refuses a `connect(2)` to a
-# directory the caller cannot traverse. That is the kernel's behaviour, measured on a live box on
+# directory the caller cannot traverse. That is the kernel's behaviour, measured on a live container on
 # 2026-08-14 (`nobody` without the group -> connection refused; with `--groups` -> 200) and recorded
 # in the chantier design. A stub can only prove we ASK for the right mode.
 
@@ -349,7 +349,7 @@ ports_of() {
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
   # And it REPLACES --init-groups: setpriv refuses both together -- measured IN THE IMAGE
-  # (util-linux 2.38.1), not on a dev box, because a tool's argument handling is a property of the
+  # (util-linux 2.38.1), not on a dev container, because a tool's argument handling is a property of the
   # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
   # and names the flag, and a grep over the whole file would fail on the prose that documents it.
   # `refute_out` porte son propre `--` devant le motif : ne pas le repasser ici, il serait pris

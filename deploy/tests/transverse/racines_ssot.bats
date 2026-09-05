@@ -19,7 +19,7 @@
 # est toujours celui qu'on ne relit pas.
 #
 # Un temoin qui interdirait le litteral partout interdirait d'expliquer — c'est le piege que ce lot
-# a rencontre deux fois (l'anti-litteral de `box`, le refute anti-`docker volume rm`), et il est
+# a rencontre deux fois (l'anti-litteral de `container`, le refute anti-`docker volume rm`), et il est
 # ecrit ici pour qu'on ne le refasse pas une troisieme.
 
 # ⚠ SC2016 : ce temoin LIT DU CODE, ses motifs doivent atteindre `grep` tels quels.

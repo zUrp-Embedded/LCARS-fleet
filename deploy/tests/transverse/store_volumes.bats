@@ -185,7 +185,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   [[ "$output" == *"refusera de demarrer"* ]]
 }
 
-@test "LA CONTREPARTIE — ce que \`box reset\` epargne, il le NOMME" {
+@test "LA CONTREPARTIE — ce que \`container reset\` epargne, il le NOMME" {
   # Sans ca, « reset » se lit comme « la machine est propre » alors que des heures de toolchain
   # restent. Un effacement silencieux sur ce qu'il LAISSE est un mensonge par omission, et il ne se
   # decouvre qu'au moment ou quelqu'un purge un cache.
@@ -201,7 +201,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 
 @test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
   # ⚠ LA DISTINCTION EST LE FOND DU LOT, pas un detail d'implementation. Reinitialiser une BOITE
-  # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `box reset`
+  # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `container reset`
   # epargne et le dit. Un BANC est jetable : le sien part avec lui, sinon le mot est faux.
   #
   # ⚠ ET LE TEMOIN GREPPE LE PORTEUR DU GESTE, PAS LA PORTE : un temoin reste sur un relais
@@ -217,14 +217,14 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
   local f
-  # lot 9 (DI-05) : chez `box` le projet EST celui de la boite ; sur le banc c'est `<N>-fleet`,
+  # lot 9 (DI-05) : chez `container` le projet EST celui de la boite ; sur le banc c'est `<N>-fleet`,
   # derive de la base — le prefixe suit le projet de la boite dans les deux cas
   grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
     || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
   for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$f" \
+    grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$f" \
       || { echo "n'exporte pas le prefixe au nom du projet de la boite : $f"; return 1; }
-    grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
+    grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
       || { echo "ne derive pas le projet de la boite de la base : $f"; return 1; }
   done
 }

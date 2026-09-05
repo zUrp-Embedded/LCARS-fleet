@@ -43,7 +43,7 @@ import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'
 # est un tmpfs, ce qui n'y est pas declare ne se refait pas au reboot.
 SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
 # THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- it only bounds who may KNOCK. Opening it to the world
-# would grant nobody anything, but it would offer this process to every account on the box for no gain.
+# would grant nobody anything, but it would offer this process to every account on the container for no gain.
 SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
 SOCKET_MODE = 0o660
 # ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL : le service sait quel code lancer par la socket
@@ -115,7 +115,7 @@ def login_of(uid):
 
 class NoAuthority(Exception):
     """
-    This box has no usable site-admin credential.
+    This container has no usable site-admin credential.
 
     ⚠ IT IS A CAUSE OF ITS OWN, NEVER MERGED INTO `OSError`. A bare `open()` whose caller catches
     `OSError` -- which `FileNotFoundError` and `PermissionError` both inherit from -- turns an
@@ -134,7 +134,7 @@ def master_token():
     The site-admin credential, read fresh at each request.
 
     Read at each request and not cached at startup, so a rotated token is picked up without a
-    restart. Raises NoAuthority when this box cannot produce one -- never a bare OSError, which the
+    restart. Raises NoAuthority when this container cannot produce one -- never a bare OSError, which the
     caller would read as "the forge did not answer".
     """
     try:

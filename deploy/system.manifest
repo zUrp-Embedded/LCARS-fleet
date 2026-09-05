@@ -228,7 +228,7 @@ runtime   /run/lcars/authority                         0750  lcars-authority:fle
 # ⚠ `cond`, ET LE RELEVE CROISE DU RANG D EN A DONNE LA PREUVE. Ces deux sockets n'existent que si
 # le service d'autorite TOURNE, et il refuse de demarrer sans `forge-master.token` — ce qu'il dit
 # lui-meme : « ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans
-# elle ». Une boite montee sans `box config` ne les a donc pas, et c'est un de ses deux etats
+# elle ». Une boite montee sans `container config` ne les a donc pas, et c'est un de ses deux etats
 # NORMAUX, pas une derive.
 #
 # Mesure du 2026-09-01, bancs 2001 (poste) et 2002 (boite) : elles etaient presentes d'un cote,

@@ -38,7 +38,7 @@ exit \${LCARS_TEST_RAIL_EXIT:-0}
 EOF
   chmod +x "$BIN/publish-rail.sh"
 
-  # The box env the verb needs before it will call anything.
+  # The container env the verb needs before it will call anything.
   #
   # ⚠ `FORGE_TOKEN_FILE` A QUITTE CE FICHIER D'ENV, ET C'EST LE CHANTIER, PAS LA FIXTURE. Le jeton
   # systeme vivait en `0640 root:fleet`, lisible par l'humain a travers un groupe qui n'etait qu'une

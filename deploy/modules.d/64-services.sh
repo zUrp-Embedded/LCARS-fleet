@@ -79,7 +79,7 @@ consequence_of() {
 # superviseur qui le porte dans son argv. La promesse verifiee est donc « ce service est TENU »,
 # pas « il repond a cette seconde » — c'est le pendant exact de `is-active` sur une unite
 # `Restart=`, qui rend vrai pendant un RestartSec.
-check_box_services() {
+check_container_services() {
   local dir="${LCARS_HELPERS_DIR:-$PROV_ROOT}" sup
   local e prog rel unit sup_vivant=0
   sup="${LCARS_SUPERVISE_BIN:-$dir/supervise.sh}"
@@ -392,7 +392,7 @@ check() {
   # ou il n'y en a pas. La boite tient ses services par un superviseur ; le poste, par systemd,
   # meme quand systemd n'est pas encore la.
   if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
-    check_box_services
+    check_container_services
     verdict_check
   fi
 

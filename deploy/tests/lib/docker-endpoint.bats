@@ -75,10 +75,10 @@ compose_lib() { # compose_lib <script> — joue la fonction dans un shell decore
   # rien ne soit casse. Ce qui se tient est la REGLE : celui qui sonde pose `PROV_COMPOSE_CMD`, et
   # celui qui lance compose le LIT — sans repli, parce qu'un repli est la seconde reponse qu'on
   # vient de supprimer.
-  local box="$BATS_TEST_DIRNAME/../../container"
-  grep -q 'docker_compose_cmd || fail' "$box"
-  grep -q 'COMPOSE=(\$PROV_COMPOSE_CMD)' "$box"
-  refute grep -q 'LCARS_COMPOSE_CMD:-' "$box"
+  local container="$BATS_TEST_DIRNAME/../../container"
+  grep -q 'docker_compose_cmd || fail' "$container"
+  grep -q 'COMPOSE=(\$PROV_COMPOSE_CMD)' "$container"
+  refute grep -q 'LCARS_COMPOSE_CMD:-' "$container"
   # Et personne ne redecouvre : une seconde detection dans l'arbre rendrait deux verdicts possibles.
   [ "$(grep -rl 'compose version >/dev/null' "$BATS_TEST_DIRNAME/../../.." --include='*.sh' --include=container --include=provision 2>/dev/null | wc -l)" -le 1 ]
 }

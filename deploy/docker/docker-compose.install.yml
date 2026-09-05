@@ -101,7 +101,7 @@ services:
       # les jetons. Le poste garde /etc/lcars (le defaut du protocole) : là, /etc persiste.
       LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
-      # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
+      # Le geste de dev (`container source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une
       # URL. Le defaut vise la meme forge que l'image, pour la meme raison (c'est la seule ou le
       # depot existe reellement), et le clone est ANONYME — le depot est public en lecture.

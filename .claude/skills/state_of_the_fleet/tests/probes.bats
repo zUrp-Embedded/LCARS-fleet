@@ -384,7 +384,7 @@ JSONL
 }
 
 # ── 30-pods / 40-forge : sondes HTTP, testees contre un serveur bouchon ───────────────────────────
-# Hermetic on purpose: the gate must be green on a box with no fleet and no forge. A stub answering
+# Hermetic on purpose: the gate must be green on a container with no fleet and no forge. A stub answering
 # chosen codes exercises the REAL curl path — stubbing `http_probe` would test the harness instead.
 
 stub_server() {

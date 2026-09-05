@@ -95,8 +95,8 @@ sotf_uid() { id -u; }
 
 # The runtime dir a started fleet leaves behind. Its EXISTENCE is the discriminator between "no
 # fleet was ever started here" and "a fleet is started and unwell" — measured on two specimens: a
-# live box has `~/.lcars/run/{api.sock,api_url,fleet_v2.sock,mcp,tmux-sock}`, a fresh container has
-# no `run/` at all. Without it, a box that was never started reports `degraded` on every endpoint,
+# live container has `~/.lcars/run/{api.sock,api_url,fleet_v2.sock,mcp,tmux-sock}`, a fresh container has
+# no `run/` at all. Without it, a container that was never started reports `degraded` on every endpoint,
 # which is a false alarm dressed as a finding.
 sotf_run_dir() { echo "${LCARS_RUN_DIR:-$HOME/.lcars/run}"; }
 sotf_fleet_ever_started() { [[ -d "$(sotf_run_dir)" ]]; }

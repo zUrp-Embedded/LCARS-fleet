@@ -5,7 +5,7 @@
 # STATUS: bats tests for services/forge-gestures.sh — LA porte des gestes forge de la boite
 #
 # CE SCRIPT PORTE LE JETON SITE-ADMIN, celui qui peut tout creer et tout detruire sur la forge, et
-# il est joue par DEUX appelants (`box` et le banc). Une regression ici ne se voit ni dans
+# il est joue par DEUX appelants (`container` et le banc). Une regression ici ne se voit ni dans
 # l'un ni dans l'autre : elle se voit sur la forge de quelqu'un.
 #
 # Dispositif identique a `forge_charte.bats` et `forge_existing.bats` : un faux `curl` en tete de
@@ -23,9 +23,9 @@
 # shellcheck disable=SC2030,SC2031
 
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand la boite n'est pas la" {
-  local box="$BATS_TEST_DIRNAME/../container"
-  [ -f "$box" ]
-  local body; body="$(grep -vE '^\s*#' "$box" | sed -n '/^gesture()/,/^}/p')"
+  local container="$BATS_TEST_DIRNAME/../container"
+  [ -f "$container" ]
+  local body; body="$(grep -vE '^\s*#' "$container" | sed -n '/^gesture()/,/^}/p')"
   [ -n "$body" ]
   # Les deux chemins, et la condition qui les separe.
   grep -q 'compose ps -q lcars' <<<"$body"
@@ -345,7 +345,7 @@ FAKE
 @test "install: sans autorite, il REFUSE avant de toucher quoi que ce soit" {
   run bash -c "'$SCRIPT' install cat < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"box config"* ]]
+  [[ "$output" == *"container config"* ]]
   [ ! -s "$ENTRY_LOG" ]
 }
 
@@ -590,7 +590,7 @@ FAKE
 @test "runner-token: sans autorite, il refuse au lieu de rendre une chaine vide" {
   run bash -c "'$SCRIPT' runner-token < /dev/null"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"box config"* ]]
+  [[ "$output" == *"container config"* ]]
 }
 
 @test "un geste inconnu est refuse, et les gestes sont NOMMES" {

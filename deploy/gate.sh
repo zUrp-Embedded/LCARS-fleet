@@ -84,7 +84,7 @@ fi
 # precisement ce qu'elle garantit — donc elle ne peut pas les lui emprunter.
 #
 # La liste vient d'un `find`, pas de git : cette porte doit jouer sur un kit detare sans `.git`.
-# Les entrees sans extension (`provision`, `box`, `workstation`, `accept`) se reconnaissent a leur
+# Les entrees sans extension (`provision`, `container`, `workstation`, `accept`) se reconnaissent a leur
 # shebang, comme dans `shell_gate`. Un `.bats` n'entre au plancher qu'avec le shebang `bats` — sans
 # lui shellcheck le lirait comme du sh et mourrait sur `@test`, ce qui n'est pas une mesure.
 mapfile -t SHELL_FILES < <(

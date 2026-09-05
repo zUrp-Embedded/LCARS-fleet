@@ -183,7 +183,7 @@ jobs:
   # ─── L'IMAGE ET LA DOC SE BÂTISSENT EN CI (DI-08, ⚖ user 2026-09-04) ────────────────────────
   #
   # Trois défauts du 03/09 (contexte du compose, lecteur du site, portée des contrats) sont passés
-  # VERTS au gate et rouges au premier `box build` : 1247 témoins, et pas un ne bâtissait l'image.
+  # VERTS au gate et rouges au premier `container build` : 1247 témoins, et pas un ne bâtissait l'image.
   # Ce job la bâtit jusqu'à son stage final — donc `verify` (le doctor sur le système de fichiers de
   # l'image, qui échoue le build sur un drift) et `site` (la doc du deck, `npm run build`). Il tourne
   # sur le runner `dood` (docker de l'hôte), comme `publish.yml`, et clone la ref lui-même : ce

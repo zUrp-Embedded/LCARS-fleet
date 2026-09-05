@@ -80,7 +80,7 @@ setup() {
   run env -i PATH=/usr/bin:/bin bash "$SRC" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"--workstation"* ]]
-  [[ "$output" == *"--box"* ]]
+  [[ "$output" == *"--container"* ]]
   [[ "$output" == *"--bench"* ]]
 }
 
@@ -99,7 +99,7 @@ setup() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"pas de défaut sûr"* ]]
   [[ "$output" == *"--workstation"* ]]
-  [[ "$output" == *"--box"* ]]
+  [[ "$output" == *"--container"* ]]
 }
 
 @test "la question DIT ce que chaque branche PREND — le cout est dans la question, pas apres" {
@@ -123,7 +123,7 @@ setup() {
 @test "hors WSL : aucune question — une seule option est permise, et on le DIT" {
   # Le rail poste ecrit sous /opt/lcars : le garde de cible du provisionnement l'interdit
   # hors WSL. Poser la question la-bas offrirait un choix qui n'existe pas.
-  run env LCARS_DOCKER=1 bash "$SRC" --box < /dev/null
+  run env LCARS_DOCKER=1 bash "$SRC" --container < /dev/null
   [[ "$output" == *"une seule option"* ]] || [[ "$output" != *"1 ou 2"* ]]
   [[ "$output" != *"pas de défaut sûr"* ]]
 }
@@ -132,7 +132,7 @@ setup() {
   run env LCARS_DOCKER=1 bash "$SRC" --workstation < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"réservé à WSL2"* ]]
-  [[ "$output" == *"--box"* ]]
+  [[ "$output" == *"--container"* ]]
 }
 
 # ─── LA MACHINE DÉDIÉE — LE REFUS EST UN GARDE-FOU, PAS UNE INCAPACITÉ ──────────────────────────
@@ -250,7 +250,7 @@ setup() {
 
 # ⚠ CE TEMOIN S'APPELAIT « REFUS avant tout build » ET NE FORCAIT JAMAIS L'ABSENCE D'IMAGE.
 #
-# Il lancait `install.sh --box` sur la machine qui joue la suite. Si `lcars-fleet:2` y est presente
+# Il lancait `install.sh --container` sur la machine qui joue la suite. Si `lcars-fleet:2` y est presente
 # — le cas sur tout poste de dev — la branche de build n'est jamais prise, et le temoin passait sans
 # exercer la propriete qu'il nomme. Mesure du corpus : le controle `FORGE_BASE_URL` etait APRES
 # l'`image inspect`, donc sur une machine NEUVE sans image et sans forge, la porte construisait
@@ -259,9 +259,9 @@ setup() {
 # L'arbre factice existait deja dans ce fichier (`_fake_tree <rc-inspect> <rc-delegue>`), et le
 # premier argument est exactement ce qu'il fallait : image ABSENTE. Le temoin le prend maintenant.
 
-@test "--box sans forge : REFUS avant tout build, IMAGE ABSENTE — les deux voies sont nommees" {
+@test "--container sans forge : REFUS avant tout build, IMAGE ABSENTE — les deux voies sont nommees" {
   local fake; fake="$(_fake_tree 1 0)"
-  run bash "$fake/install.sh" --box < /dev/null
+  run bash "$fake/install.sh" --container < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"FORGE_BASE_URL"* ]]
   [[ "$output" == *"--bench"* ]]
@@ -269,10 +269,10 @@ setup() {
   refute_out 'DOCKERSH:build' <<<"$output"
 }
 
-@test "--box --bench sans forge : PAS de refus — le drapeau dit « fabrique-la moi »" {
+@test "--container --bench sans forge : PAS de refus — le drapeau dit « fabrique-la moi »" {
   # La seule exception, et elle doit rester : sans elle, `--bench` deviendrait inutilisable.
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench -- --project bt < /dev/null
+  run bash "$fake/install.sh" --container --bench -- --project bt < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"BENCHUP:"* ]]
   refute_out 'FORGE_BASE_URL' <<<"$output"
@@ -292,10 +292,10 @@ setup() {
   #
   # Ce qui est epingle desormais est ce qui est reellement promis, et c'est verifiable : aucune
   # commande de pose systeme sur le chemin boite.
-  local box_start ws_start branche
-  box_start="$(grep -n 'RAIL" == "box"' "$SRC" | head -1 | cut -d: -f1)"
+  local container_start ws_start branche
+  container_start="$(grep -n 'RAIL" == "container"' "$SRC" | head -1 | cut -d: -f1)"
   ws_start="$(grep -n 'LA BRANCHE POSTE' "$SRC" | head -1 | cut -d: -f1)"
-  branche="$(sed -n "${box_start},${ws_start}p" "$SRC")"
+  branche="$(sed -n "${container_start},${ws_start}p" "$SRC")"
   # Ni paquet, ni utilisateur, ni groupe, ni ecriture dans /etc ou /usr.
   refute grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
   # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
@@ -325,7 +325,7 @@ SPY
   mkdir -p "$fake/deploy"; touch "$fake/deploy/container"; chmod 0755 "$fake/deploy/container"
   _faux_provision "$fake" "${_faits_sains[@]}"
 
-  run bash "$fake/install.sh" --box --bench -- --project bt --ssh-port 2299 < /dev/null
+  run bash "$fake/install.sh" --container --bench -- --project bt --ssh-port 2299 < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"4"* ]]
   [[ "$output" == *'[--project][bt][--ssh-port][2299]'* ]]
@@ -405,7 +405,7 @@ SPY
 @test "sans « -- », une option inconnue est REFUSEE — jamais avalee en silence" {
   # Le pendant du temoin precedent : la porte ne doit pas gober une option qu'elle ne comprend pas
   # en esperant qu'un delegue s'en arrange. Un drapeau mal orthographie doit se voir tout de suite.
-  run bash "$SRC" --box --projet-avec-une-faute < /dev/null
+  run bash "$SRC" --container --projet-avec-une-faute < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"Option inconnue"* ]]
 }
@@ -477,7 +477,7 @@ SPY
   # La boite est invitee, et aucun drapeau ne change ca.
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1
-    RAIL=box
+    RAIL=container
     SUBSTRATE=linux
     $(sed -n '/^docker_installable_here()/,/^}/p' "$SRC")
     docker_installable_here && echo oui || echo non"
@@ -568,10 +568,10 @@ SPY
 #
 # ⚠ CES TEMOINS FERMENT UN AVALEMENT SILENCIEUX, MESURE SUR UNE INSTALL REELLE (2026-08-28).
 # `--forge-project`, `--port-forge` et `--port-deck` partent dans `PASSTHRU`, qui n'est lu QUE par
-# le rail POSTE — le re-exec sudo et les appels a `provision`. Sur `--box` ils n'atteignaient
+# le rail POSTE — le re-exec sudo et les appels a `provision`. Sur `--container` ils n'atteignaient
 # personne : la porte les acceptait, n'imprimait rien, et le delegue tournait sur ses defauts.
 #
-# `--box --bench --forge-project alice4 --port-forge 21090` a monte un banc sur le projet
+# `--container --bench --forge-project alice4 --port-forge 21090` a monte un banc sur le projet
 # `lcars-nuit` et le port 21000, puis a refuse sur une collision avec un banc de la veille.
 # L'operateur decouvre cinq minutes plus tard qu'aucune de ses trois valeurs n'a ete lue.
 #
@@ -583,14 +583,14 @@ SPY
 
 @test "PORTE->BANC : \`--forge-project\` devient le \`--project\` du delegue" {
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --forge-project alice4 < /dev/null
+  run bash "$fake/install.sh" --container --bench --forge-project alice4 < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"BENCHUP:--project alice4"* ]]
 }
 
 @test "PORTE->BANC : les deux ports aussi, sous les noms du delegue" {
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --port-forge 21090 --port-deck 21091 < /dev/null
+  run bash "$fake/install.sh" --container --bench --port-forge 21090 --port-deck 21091 < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"--forge-port 21090"* ]]
   [[ "$output" == *"--deck-port 21091"* ]]
@@ -608,7 +608,7 @@ SPY
 
 @test "VERROU : « --disposable » est REFUSE, il ne revient pas en passe-plat muet" {
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 < /dev/null
+  run bash "$fake/install.sh" --container --bench --disposable --port-ssh 2223 < /dev/null
   [ "$status" -ne 0 ] || { echo "--disposable a ete accepte : $output"; return 1; }
   [[ "$output" == *"--disposable"* ]]
   [[ "$output" == *"retire"* ]]
@@ -623,7 +623,7 @@ SPY
   local fake; fake="$(_fake_tree 0 0)"
   # `--substrate` a une arite declaree ; on la retire de la table pour jouer l oubli.
   sed -i 's/    --substrate|--port-forge/    --port-forge/' "$fake/install.sh"
-  run bash "$fake/install.sh" --box --bench --substrate docker --forge-project alice4 < /dev/null
+  run bash "$fake/install.sh" --container --bench --substrate docker --forge-project alice4 < /dev/null
   [ "$status" -ne 0 ] \
     || { echo "un drapeau d arite inconnue a ete traverse en silence : $output"; return 1; }
   [[ "$output" == *"arité non déclarée"* ]]
@@ -633,7 +633,7 @@ SPY
   # Le delegue lit en dernier-gagne ; la traduction est donc PREPOSEE. Celui qui nomme les deux
   # obtient celui qu'il a ecrit pour le delegue — sinon la porte deciderait a sa place.
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --forge-project traduit -- --project explicite < /dev/null
+  run bash "$fake/install.sh" --container --bench --forge-project traduit -- --project explicite < /dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *"--project traduit"* ]]
   [[ "$output" == *"--project explicite"* ]]
@@ -647,7 +647,7 @@ SPY
 echo "DOCKERSH:$* LCARS_BASE=${LCARS_BASE:-<vide>}"
 SPY
   chmod 0755 "$fake/deploy/container"
-  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --forge-project alice4 < /dev/null
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --forge-project alice4 < /dev/null
   # lot 9 (DI-05) : N est la BASE — deploy/container en fait <N>-fleet
   [[ "$output" == *"LCARS_BASE=alice4"* ]]
 }
@@ -656,7 +656,7 @@ SPY
   # Sans `--bench`, les ports de la boite sont ceux du compose : il n'y a rien a fixer. Le refus
   # coute une seconde ; l'avalement coutait cinq minutes et une collision.
   local fake; fake="$(_fake_tree 0 0)"
-  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --port-forge 21090 < /dev/null
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --port-forge 21090 < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"--port-forge"* ]]
   [[ "$output" == *"compose"* ]]
@@ -667,7 +667,7 @@ SPY
 
 @test "REFUS : un drapeau du rail POSTE est REFUSE sur la boite, en le nommant" {
   local fake; fake="$(_fake_tree 0 0)"
-  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --only 60-deploy < /dev/null
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --only 60-deploy < /dev/null
   [ "$status" -ne 0 ]
   [[ "$output" == *"--only"* ]]
   [[ "$output" == *"provision"* ]]
@@ -731,7 +731,7 @@ SPY
   local p c out
   for p in 10 25 50 75 90 95 98 99; do
     c=$(( n * p / 100 ))
-    out="$(head -c "$c" "$SRC" | bash -s -- --box 2>&1 | grep -c 'Préflight\|RAIL BOÎTE\|Provisionnement' || true)"
+    out="$(head -c "$c" "$SRC" | bash -s -- --container 2>&1 | grep -c 'Préflight\|RAIL BOÎTE\|Provisionnement' || true)"
     [ "$out" -eq 0 ] || { echo "FUITE a $p% : $out ligne(s) executee(s)" >&2; return 1; }
   done
 }
@@ -766,7 +766,7 @@ SPY
   run bash -c "cat '$SRC' | bash -s -- --help"
   [ "$status" -eq 0 ]
   [[ "$output" == *"--workstation"* ]]
-  [[ "$output" == *"--box"* ]]
+  [[ "$output" == *"--container"* ]]
 }
 
 @test "LA PORTE REFUSE ROOT — « curl | sudo bash » ne peut pas exister" {
@@ -849,7 +849,7 @@ SPY
 }
 
 @test "LE BILAN EXPOSE l option impossible, il ne la CACHE pas" {
-  # ⚠ LA VERSION D'AVANT CHOISISSAIT EN SILENCE. Sur un linux natif elle posait `RAIL=box` sans rien
+  # ⚠ LA VERSION D'AVANT CHOISISSAIT EN SILENCE. Sur un linux natif elle posait `RAIL=container` sans rien
   # demander, et elle masquait l'option 2 quand docker manquait : l'ecran ne portait plus la trace de
   # ce qui n'etait pas offert, ni pourquoi. Un menu qui cache une option fait croire qu'elle n'existe
   # pas ; un menu qui la barre EN NOMMANT SON FAIT apprend la machine a celui qui la lit.
@@ -878,7 +878,7 @@ SPY
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bilan"* ]]
   [[ "$output" == *"workstation doctor"* ]]
-  [[ "$output" == *"box status"* ]]
+  [[ "$output" == *"container status"* ]]
 }
 
 @test "PIPEE : la porte fait sa SOURCE elle-meme, sous l humain, sans sudo" {
@@ -889,7 +889,7 @@ SPY
   # ⚠ PAS DE `< /dev/null` : il ecraserait le pipe, et bash lirait /dev/null comme script. Le `read`
   # de la pause va chercher /dev/tty tout seul, et retombe sur le refus sans TTY.
   local dest="$BATS_TEST_TMPDIR/clone-pipe"
-  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --box --repo '$REPO' --branch \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
+  run bash -c "cat '$SRC' | LCARS_SRC='$dest' bash -s -- --container --repo '$REPO' --branch \$(git -C '$REPO' rev-parse --abbrev-ref HEAD)"
   [[ "$output" == *"source"* ]]
   [ -x "$dest/deploy/provision" ]
   # Le clone appartient a CELUI QUI A LANCE, jamais a root.

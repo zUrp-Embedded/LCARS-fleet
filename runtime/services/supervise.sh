@@ -87,7 +87,7 @@ while true; do
   starts=(${kept[@]+"${kept[@]}"})
 
   if (( ${#starts[@]} >= BURST )); then
-    say "ABANDON — ${#starts[@]} demarrages en moins de ${INTERVAL}s (borne : $BURST). Le service ne sera PAS relance : une boucle d'echec instantane brule un coeur et remplit le disque. Repare la cause, puis « box restart »."
+    say "ABANDON — ${#starts[@]} demarrages en moins de ${INTERVAL}s (borne : $BURST). Le service ne sera PAS relance : une boucle d'echec instantane brule un coeur et remplit le disque. Repare la cause, puis « container restart »."
     exit 1
   fi
 

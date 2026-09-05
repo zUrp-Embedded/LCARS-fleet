@@ -74,12 +74,12 @@ done
 # ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
 # est <N>-fleet (le defaut de « deploy/container », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
 # le poste (48/49) et le banc derivent les memes noms de la meme base.
-BOX_PROJECT="${PROJECT}-fleet"
+CONTAINER_PROJECT="${PROJECT}-fleet"
 FORGE_PROJECT="${PROJECT}-forge"
 FORGE_NET="${FORGE_PROJECT}_default"
-BOX="${BOX_PROJECT}-lcars-1"
+CONTAINER="${CONTAINER_PROJECT}-lcars-1"
 
-export LCARS_STORE_PREFIX="$BOX_PROJECT"
+export LCARS_STORE_PREFIX="$CONTAINER_PROJECT"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
 # ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
 # la derivation depend du SUBSTRAT (WSL en NAT n'a pas d'adresse annoncable). Une seule definition,
@@ -108,7 +108,7 @@ fi
 say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserves)"
 
 # ─── 1. la boite s'en va, et elle SEULE ──────────────────────────────────────────────────────────
-"$DOCKER_BIN" rm -f "$BOX" >/dev/null 2>&1 || true
+"$DOCKER_BIN" rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
 # ─── 2. create → connect → start (piege 1) ───────────────────────────────────────────────────────
 # ⚠ `LCARS_ADMIRAL_EMAIL` N'EST PAS ICI, ET SON ABSENCE EST LE CORRECTIF. L'identite git ne se
@@ -120,7 +120,7 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # prefixees ici n'existent plus de l'autre cote. Consequences mesurees : l'image DEFAUTAIT (le tag
 # de la liste rouge a ete ecrase, puis un pull du registre NAS), le port ssh DEFAUTAIT (bind sur le
 # 2222 d'un autre banc). Un fichier d'env est lu du DISQUE par compose, apres l'escalade — il ne
-# peut pas etre strippe. `identite-v2` : le box materialise admiral (master/sysadmin, uid 1000) ;
+# peut pas etre strippe. `identite-v2` : le container materialise admiral (master/sysadmin, uid 1000) ;
 # le worker "$HUMAN" (lcars) vient de la forge (fleet:humans) via le convergeur. Miroir bench-up.sh.
 # ⚠ PAS DE FICHIER TEMPORAIRE ANONYME, ET PAS DANS `/tmp` — le temoin `bench_swap_creds.bats`
 # l'interdit, pour une raison mesuree : sur un poste ou le daemon passe par sudo, `docker cp` ecrit
@@ -148,36 +148,36 @@ LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
 ENVEOF
 trap 'rm -f "$SWAP_ENV"' EXIT
 
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$BOX_PROJECT" create \
+"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$CONTAINER_PROJECT" create \
   || die "la boite ne se cree pas" 3
 
-"$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
+"$DOCKER_BIN" network connect "$FORGE_NET" "$CONTAINER" \
   || die "la boite ne se branche pas sur $FORGE_NET" 3
 say "boite branchee sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
 
-"$DOCKER_BIN" compose -p "$BOX_PROJECT" start || die "la boite ne demarre pas" 3
+"$DOCKER_BIN" compose -p "$CONTAINER_PROJECT" start || die "la boite ne demarre pas" 3
 
 wait_healthy() {
   for _ in $(seq 1 90); do
-    [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$BOX" 2>/dev/null)" == "healthy" ]] && return 0
+    [[ "$("$DOCKER_BIN" inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null)" == "healthy" ]] && return 0
     sleep 2
   done
   return 1
 }
-wait_healthy || die "la boite ne devient pas healthy (docker logs $BOX)" 3
+wait_healthy || die "la boite ne devient pas healthy (docker logs $CONTAINER)" 3
 say "boite healthy"
 
 # ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
 # ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
-if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$BOX" chpasswd 2>/dev/null; then
+if printf 'admiral:%s\n' "${LCARS_BENCH_ADMIRAL_PW:-toto1234}" | "$DOCKER_BIN" exec -i "$CONTAINER" chpasswd 2>/dev/null; then
   say "mot de passe de banc pose sur admiral (ssh/sudo)"
 else
-  say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $BOX bash'"
+  say "admiral : mot de passe non pose — ssh par cle, ou 'docker exec -u admiral $CONTAINER bash'"
 fi
 
 # ─── 3. les creds repartent avec l'ancien conteneur (piege 2) ────────────────────────────────────
 if [[ "$WITH_CREDS" -eq 1 ]]; then
-  "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+  "$DOCKER_BIN" exec -i -u "$HUMAN" "$CONTAINER" bash -c \
       'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
     < "$CREDS_FROM" || die "creds non posees dans la boite" 5
   say "creds anthropic reposees chez $HUMAN"
@@ -187,7 +187,7 @@ fi
 
 # ─── 4. une relance, pas deux passes : le seed existe deja (piege 3) ─────────────────────────────
 say "relance pour que 63-forge-tokens minte les role-tokens sur le seed EXISTANT"
-"$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
+"$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance de la boite impossible" 3
 wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 
 # ─── 5. verdict MESURE ───────────────────────────────────────────────────────────────────────────
@@ -197,13 +197,13 @@ wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 # l'absence. Vecu : ce script a tue un swap avec « la boite ne voit pas le seed » sur une boite dont
 # les dix jetons etaient en place, et l'operateur a passe l'heure suivante a chercher une panne de
 # forge. `cp`, `logs` et `inspect` traversent, eux — donc la mesure passe par eux.
-ROLE_TOKENS="$("$DOCKER_BIN" cp "$BOX:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
+ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
 [[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
 
 # Or on ne veut pas le CONTENU, on veut « present et non vide ». Le flux tar de `docker cp … -` le
 # dit dans son en-tete : rien ne touche le disque. (Et on ne repasse pas par `exec`, mute a travers
 # ce relais — c'est la raison qui avait fait choisir `cp` au depart, elle tient toujours.)
-CREDS_SIZE="$("$DOCKER_BIN" cp "$BOX:/home/$HUMAN/.claude/.credentials.json" - 2>/dev/null \
+CREDS_SIZE="$("$DOCKER_BIN" cp "$CONTAINER:/home/$HUMAN/.claude/.credentials.json" - 2>/dev/null \
               | tar -tv 2>/dev/null | awk 'NR==1 {print $3}' || true)"
 if [[ "${CREDS_SIZE:-}" =~ ^[0-9]+$ ]] && [[ "$CREDS_SIZE" -gt 0 ]]; then
   CREDS_OK=oui
@@ -211,7 +211,7 @@ else
   CREDS_OK=non
 fi
 
-REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$BOX" 2>/dev/null \
+REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" 2>/dev/null \
             | sed -n 's/^LCARS_IMAGE_REVISION=//p' | head -1)"
 REVISION="${REVISION:-inconnue}"
 
@@ -221,5 +221,5 @@ say "  image     : $IMAGE   (revision $REVISION)"
 say "  forge     : $FORGE_URL   (PRESERVEE — ni resemee ni redemarree)"
 say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
 say "  creds     : $CREDS_OK"
-say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet start'"
+say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $CONTAINER bash -lc 'fleet start'"
 say "─────────────────────────────────────────────────────────"

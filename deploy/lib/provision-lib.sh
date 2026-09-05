@@ -43,7 +43,7 @@ PROVISION_LIB_LOADED=1
 : "${PROV_CATALOGUES_WORK:=$PROV_ROOT/var/tofu}"  # recettes tofu par catalogue (etat = SENSIBLE)
 : "${PROV_TOKENS_DIR:=$PROV_ROOT/var/tokens}"  # role-tokens forge (contrat FORGE_ROLE_TOKENS_DIR)
 : "${PROV_FORGE_SEED_FILE:=$PROV_TOKENS_DIR/forge-seed.pass}"  # seed bootstrap tofu (handoff → A4)
-# L'AUTORITE DE CREATION, posee par `box config`. ⚠ SON SUFFIXE N'EST PAS `.gitea_token`, celui des
+# L'AUTORITE DE CREATION, posee par `container config`. ⚠ SON SUFFIXE N'EST PAS `.gitea_token`, celui des
 # jetons de ROLE (`<login>.gitea_token`, contrat FORGE_ROLE_TOKENS_DIR) : qui globbe ce repertoire ne
 # doit pas ramasser un site-admin en croyant lire un role.
 : "${PROV_MASTER_TOKEN_FILE:=$PROV_TOKENS_DIR/forge-master.token}"

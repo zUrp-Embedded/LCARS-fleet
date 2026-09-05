@@ -184,7 +184,7 @@ EOF
 
 @test "sans forge : ce n'est pas une derive, c'est une absence d'autorite" {
   # Une boite hors ligne rend conforme. La compter en drift ferait crier le doctor sur toutes les
-  # boites qui n'ont jamais recu « box config ».
+  # boites qui n'ont jamais recu « container config ».
   export FORGE_BASE_URL=""
   fake_door 0 <<< "RIEN rien"
   run bash "$MOD" check

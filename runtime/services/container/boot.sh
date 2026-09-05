@@ -39,7 +39,7 @@ set -euo pipefail
 # pour demander a une image son roster sans rien installer. Les quatre evaluations vivaient ICI,
 # dans le PID 1 ; elles sont dans `lcars tool …` (lot 6, 2026-09-04), posees sur les deux rails, et
 # ce fichier ne fait plus que deleguer. `forge-apply` reste : c'est le geste de structure joue
-# DANS la boite par `box forge-apply`, et il exige root (il lit et ecrit `/opt/lcars/var/tokens`).
+# DANS la boite par `container forge-apply`, et il exige root (il lit et ecrit `/opt/lcars/var/tokens`).
 case "${1:-}" in
   verify|roles|roles-tfvars|catalogue-root|catalogue-source)
     exec /usr/local/bin/lcars tool "$@" ;;
@@ -61,27 +61,27 @@ esac
 # PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
 # la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
 # substrat docker. Il rend 3 quand la boite n'a rien pour determiner son siege : c'est l'etat « en
-# attente de configuration », et la boite reste debout pour que « box config » soit jouable.
+# attente de configuration », et la boite reste debout pour que « container config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
-BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/services/container/init.sh}"
+CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 # ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot
-# precedent, et « box status » lirait un `awaiting-config` ou un `provision.rc` d'hier comme
+# precedent, et « container status » lirait un `awaiting-config` ou un `provision.rc` d'hier comme
 # l'etat de maintenant (relecture hostile 2026-09-04). Chaque boot part d'un /run vide de ses verdicts.
 rm -f "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" "${LCARS_PROV_RC_FILE:-/run/lcars-provision.rc}" "${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}" 2>/dev/null || true
-say() { echo "[box-boot] $*"; }
-[[ -r "$BOX_INIT" && -r "$MODULE_PROTOCOL" ]] || {
-  echo "[box-boot] init de l'instance introuvable ($BOX_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
+say() { echo "[container-boot] $*"; }
+[[ -r "$CONTAINER_INIT" && -r "$MODULE_PROTOCOL" ]] || {
+  echo "[container-boot] init de l'instance introuvable ($CONTAINER_INIT, $MODULE_PROTOCOL) — cette image n'est pas complete, rien ne demarre" >&2
   exit 1
 }
 init_rc=0
-LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$BOX_INIT" apply 2>&1 | sed 's/^/[box-init] /' || init_rc=${PIPESTATUS[0]}
+LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$CONTAINER_INIT" apply 2>&1 | sed 's/^/[container-init] /' || init_rc=${PIPESTATUS[0]}
 case "$init_rc" in
   0) say "init de l'instance : converge" ;;
   2) say "init de l'instance : APPLIQUE, DRIFT RESIDUEL — un geste manque, rien n'est casse" ;;
-  3) say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « box config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+  3) say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
      printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
      exec sleep infinity ;;
   *) say "init de l'instance : ECHEC (rc=$init_rc) — la boite reste debout pour etre lue, aucun service n'est demarre"
@@ -256,7 +256,7 @@ else
 fi
 
 # LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
-# tourné ; sans elle, seul `provision.rc` est publié et `box up` dit « NON MESURÉE » — ce qui est
+# tourné ; sans elle, seul `provision.rc` est publié et `container up` dit « NON MESURÉE » — ce qui est
 # exactement vrai. La présence de `provision.rc` garantit que l'autre est là quand il doit l'être.
 publier_verdicts
 
@@ -286,7 +286,7 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
     # Le port du deck a UNE déclaration (`PROV_DECK_PORT`, MUR 4 de variable_walls) et ses copies la
     # suivent : ici le défaut que le daemon lit, EXPORTÉ pour que le geste `deck-oidc` (les
     # `redirect_uris` OAuth2) et le deck lisent la même valeur dans cette boîte. L'ENTRÉE publiée
-    # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « box up » la traduit en
+    # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « container up » la traduit en
     # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
     export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
     launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \

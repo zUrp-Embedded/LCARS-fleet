@@ -115,7 +115,7 @@ prov_dirs() {
 # Une entree que le manifeste NE CONNAIT PAS se mesure partout : au build, un absent NOMME vaut
 # mieux qu'un silence, et le remede est de la declarer. Sur un poste, rien ne change : toutes les
 # entrees de la table y sont declarees `any` ou `wsl+linux`, et il n'y a pas de volume.
-prov_box_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
+prov_container_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
 
 # prov_dir_scope <chemin> -> here | substrate | volume
 prov_dir_scope() {
@@ -128,7 +128,7 @@ prov_dir_scope() {
   if [[ "$sub" == docker ]]; then
     while read -r v; do
       if [[ "$path" == "$v" || "$path" == "$v"/* ]]; then echo volume; return 0; fi
-    done < <(prov_box_volumes)
+    done < <(prov_container_volumes)
   fi
   echo here
 }

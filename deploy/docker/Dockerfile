@@ -271,7 +271,7 @@ RUN apt-get update -qq \
     `# ⚠ SON PROPRE GROUPE D'ABORD, ET fleet EN GROUPE SECONDAIRE — c'est ce que 21-service-accounts` \
     `# pose et ce que la table declare (group:unset lcars-authority). L'image le creait avec -g fleet` \
     `# et AUCUN groupe a son nom : put_secret (chown lcars-authority:lcars-authority) mourait sur` \
-    `# « invalid group », donc box config etait injouable sur une image neuve, et le` \
+    `# « invalid group », donc container config etait injouable sur une image neuve, et le` \
     `# setpriv --regid lcars-authority de l'entrypoint ne pouvait pas demarrer l'executeur de` \
     `# catalogue. Mesure du 2026-09-04, banc bob_2, premiere boite contre une forge fournie.` \
     && groupadd --system lcars-authority \
@@ -362,7 +362,7 @@ RUN set -eu; \
     ls -l "$d"
 
 # ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans la boîte ne
-# le lit — le boot est le produit (runtime/services/container/), la sonde de l'instance est « box status »
+# le lit — le boot est le produit (runtime/services/container/), la sonde de l'instance est « container status »
 # côté hôte. Le stage `verify` plus bas le copie POUR LUI SEUL, joue le doctor, et meurt : `final`
 # repart de `runtime`. `runtime/etc` ne porte que des DONNÉES du produit (le manifeste de la release,
 # le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
@@ -462,9 +462,9 @@ COPY runtime/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converg
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
 COPY runtime/services/admiral/skills /opt/lcars/services/admiral/skills
-# Les gestes forge, DANS l'image : `box` et le banc les jouent par la meme porte, au lieu
-# d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
-# couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
+# Les gestes forge, DANS l'image : `container` et le banc les jouent par la meme porte, au lieu
+# d'en porter chacun une copie (le banc ne peut pas appeler `container` — sa boite vient d'un autre
+# couple de fichiers compose, et `container` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY runtime/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # Le minteur de jetons de rôle : un geste de forge du produit (lot 6), posé à côté du geste de
 # structure — la boîte le joue à l'init de son instance.
@@ -617,7 +617,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.s
 # release, auxiliaires, services) ; le doctor commun (`CHECK-ON any`) est la seule chose qui tienne
 # les deux implémentations d'accord — et il ne se jouait QU'AU BOOT, chez l'opérateur. Mesure du
 # 2026-09-04 (banc bob_2) : trois dérives de l'image (groupe de `lcars-authority`, tampon
-# `.helpers-revision`, arbre `assets/`) ont été vues au premier `box up`, jamais au build.
+# `.helpers-revision`, arbre `assets/`) ont été vues au premier `container up`, jamais au build.
 #
 # Ce stage joue le doctor sur le système de fichiers que `runtime` vient de produire, et fait
 # ÉCHOUER LE BUILD sur tout drift (`doctor` rend 1 sur un drift, 2 sur un échec). Il ne mesure que

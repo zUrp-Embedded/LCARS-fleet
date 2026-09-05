@@ -5,7 +5,7 @@
 # STATUS: bats tests — le contexte de build du compose est la RACINE du depot, et le Dockerfile s'y lit
 #
 # DI-09 (lot 11), DI-08 : un contexte de compose faux passe vert au gate (rien ne le joue) et rouge au
-# premier `box build`. Le Dockerfile fait `COPY fleet …`, `COPY deploy …`, `COPY catalogues …`,
+# premier `container build`. Le Dockerfile fait `COPY fleet …`, `COPY deploy …`, `COPY catalogues …`,
 # `COPY assets …` : son contexte est la racine du depot, deux niveaux au-dessus de `deploy/docker/`.
 
 load ../refute

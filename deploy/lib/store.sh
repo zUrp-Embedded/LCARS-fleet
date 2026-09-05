@@ -80,7 +80,7 @@ store_destroy_volumes() {
 }
 
 # store_spared_line — CE QUE LA DESTRUCTION EPARGNE, dit par celui qui sait.
-# NE S'APPELLE QUE D'UN GESTE AUQUEL LE MAGASIN SURVIT — `box reset` reinitialise une boite, il ne
+# NE S'APPELLE QUE D'UN GESTE AUQUEL LE MAGASIN SURVIT — `container reset` reinitialise une boite, il ne
 # jette pas l'installation. Un geste qui JETTE detruit (`store_destroy_volumes`) : y annoncer une
 # epargne serait un mensonge sur le mot.
 store_spared_line() {

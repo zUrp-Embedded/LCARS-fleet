@@ -3,8 +3,8 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-08-02
 # STATUS: geste de BANC — amene une forge jetable NEUVE a l'etat "la fleet peut travailler dessus"
-# USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--container lcars-ticketforge-gitea-1]
-#                                  [--box lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
+# USAGE : bench-forge-bootstrap.sh [--forge-url http://127.0.0.1:3600] [--forge-container lcars-ticketforge-gitea-1]
+#                                  [--container lcars-ticket-lcars-1] [--human lcars] [--human-password toto32toto32]
 #                                  [--tofu-dir <ignore>] [--no-seed-repos]
 #                                  [--human-admin] [--admin-token TOK]
 # EXIT  : 0 forge prete · 1 arguments/dependance · 2 la forge ne repond pas · 3 admiral admin/token
@@ -17,16 +17,16 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../../.." && pwd)"
 
 FORGE_URL="http://127.0.0.1:3600"
-CONTAINER="lcars-ticketforge-gitea-1"
+FORGE_CONTAINER="lcars-ticketforge-gitea-1"
 # `--admin-token` DIT UNE SEULE CHOSE, et elle commande tout le reste : « la forge preexiste et je
 # n'en suis pas l'administrateur, je suis un client qui detient un jeton » — le cas de la PRODUCTION.
 # Sans lui, la forge est a moi et je la fabrique : le cas du BANC.
 ADMIN_TOKEN=""
-BOX="lcars-ticket-lcars-1"
+CONTAINER="lcars-ticket-lcars-1"
 HUMAN="lcars"
 HUMAN_EMAIL="lcars@lcars.local"
 HUMAN_PASSWORD="toto32toto32"
-WITH_BOX=1
+WITH_CONTAINER=1
 SEED_REPOS=1
 HUMAN_ADMIN=0
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -35,14 +35,14 @@ ADMIN="admiral"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --forge-url)      FORGE_URL="${2:?}"; shift 2 ;;
-    --container)      CONTAINER="${2:?}"; shift 2 ;;
+    --forge-container)      FORGE_CONTAINER="${2:?}"; shift 2 ;;
     --admin-token)    ADMIN_TOKEN="${2:?}"; shift 2 ;;
-    --box)            BOX="${2:?}"; shift 2 ;;
+    --container)            CONTAINER="${2:?}"; shift 2 ;;
     --human)          HUMAN="${2:?}"; shift 2 ;;
     --human-email)    HUMAN_EMAIL="${2:?}"; shift 2 ;;
     --human-password) HUMAN_PASSWORD="${2:?}"; shift 2 ;;
     --tofu-dir)       shift 2 ;;
-    --no-box)         WITH_BOX=0; shift ;;
+    --no-container)         WITH_CONTAINER=0; shift ;;
     --no-seed-repos)  SEED_REPOS=0; shift ;;
     --human-admin)    HUMAN_ADMIN=1; shift ;;
     --no-human-admin) HUMAN_ADMIN=0; shift ;;
@@ -76,13 +76,13 @@ if [[ -n "$ADMIN_TOKEN" ]]; then
   say "admin fourni (--admin-token) — creation et mint SAUTES, la forge preexiste"
 elif ! curl -sf -m 5 "$(api)/users/$ADMIN" >/dev/null 2>&1; then
   say "creation du compte admiral (master forge, $ADMIN)"
-  "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user create \
+  "$DOCKER_BIN" exec -u git "$FORGE_CONTAINER" gitea admin user create \
       --username "$ADMIN" --password "$ADMIN_PW" --email "admiral@lcars.local" \
       --admin --must-change-password=false >/dev/null 2>&1 \
     || die "creation du compte admiral impossible" 3
 else
   say "compte admiral deja present — rotation de son mot de passe pour cette passe"
-  "$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user change-password \
+  "$DOCKER_BIN" exec -u git "$FORGE_CONTAINER" gitea admin user change-password \
       --username "$ADMIN" --password "$ADMIN_PW" --must-change-password=false >/dev/null 2>&1 \
     || die "rotation du mot de passe admin impossible" 3
 fi
@@ -91,7 +91,7 @@ fi
 # de gerer une revocation (le compte entier meurt au prochain nuke).
 if [[ -z "$ADMIN_TOKEN" ]]; then
   TOKEN_NAME="bench-tofu-$(date +%s)"
-  MASTER_TOKEN="$("$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user generate-access-token \
+  MASTER_TOKEN="$("$DOCKER_BIN" exec -u git "$FORGE_CONTAINER" gitea admin user generate-access-token \
                     --username "$ADMIN" --token-name "$TOKEN_NAME" --scopes all --raw 2>/dev/null | tail -1)"
   [[ -n "$MASTER_TOKEN" ]] || die "la forge n'a pas rendu de master token" 3
   curl -sf -m 5 -H "Authorization: token $MASTER_TOKEN" "$(api)/user" >/dev/null \
@@ -100,24 +100,24 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
 fi
 
 # La boite porte desormais tofu, ses providers, la recette et les gestes (`/opt/lcars/
-# forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `box`, et
+# forge-gestures.sh`, pose par l'image). Ce banc entre donc par LA MEME PORTE que `container`, et
 # ce qu'il exerce est ce que l'admin jouera.
-[[ "$WITH_BOX" -eq 1 ]] || die "--no-box n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
+[[ "$WITH_CONTAINER" -eq 1 ]] || die "--no-container n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
 
 # LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (vu sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
 # correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
 # manque. On relit celui que la boite garde ; on n'en fabrique un que s'il n'y en a pas.
-SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
+SEED_PW="$("$DOCKER_BIN" exec "$CONTAINER" cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
 if [[ -z "$SEED_PW" ]]; then
   SEED_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)"
-  say "seed de banc genere (aucun dans $BOX)"
+  say "seed de banc genere (aucun dans $CONTAINER)"
 else
-  say "seed relu depuis $BOX (celui des comptes existants)"
+  say "seed relu depuis $CONTAINER (celui des comptes existants)"
 fi
 
 ENROLL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bench-enroll.XXXXXX")"
-BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || true)"
-[[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
+CONTAINER_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || true)"
+[[ -n "$CONTAINER_IMAGE" ]] || die "image de $CONTAINER illisible -- roster non derivable" 4
 # ⚠ AUCUN `--catalogue`, ET C'EST LE POINT. Nommer l'arbre de l'HOTE le fait monter dans le
 # conteneur, ou la porte tourne en `nobody` : un parent en `drwxrws---` ou un `/home/<user>` en 0700
 # lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Vu : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
@@ -125,34 +125,34 @@ BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || 
 # la boite SERVIRA — l'arbre de l'hote peut avoir bouge depuis le build.
 ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" \
                 --tofu-dir "$ENROLL_DIR" \
-                --image "$BOX_IMAGE" 2>/dev/null)" \
-  || die "derivation du roster en echec (enroll-catalogue.sh, image $BOX_IMAGE) -- recette non enrolee" 4
+                --image "$CONTAINER_IMAGE" 2>/dev/null)" \
+  || die "derivation du roster en echec (enroll-catalogue.sh, image $CONTAINER_IMAGE) -- recette non enrolee" 4
 ROSTER_LINE="$(printf '%s\n' "$ENROLL_OUT" | grep '^PROV_ROLES=')"
 ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
 ORG="${ORG:-fleet}"
 say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
 say "org du catalogue : $ORG"
-"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" \
-  || die "roster non depose dans la recette de $BOX" 4
+"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$CONTAINER:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" \
+  || die "roster non depose dans la recette de $CONTAINER" 4
 rm -rf "$ENROLL_DIR"
 
-printf '%s' "$MASTER_TOKEN" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-token \
+printf '%s' "$MASTER_TOKEN" | "$DOCKER_BIN" exec -i -u root "$CONTAINER" /opt/lcars/forge-gestures.sh config-token \
   || die "jeton master refuse par la boite" 4
-printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh config-seed \
+printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$CONTAINER" /opt/lcars/forge-gestures.sh config-seed \
   || die "seed non pose dans la boite" 5
 
 "$DOCKER_BIN" exec -i -u root \
     -e LCARS_BUILTIN_HUMAN="$HUMAN" -e LCARS_BUILTIN_EMAIL="$HUMAN_EMAIL" \
-    "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
-  || die "apply de la structure en echec dans $BOX (rejoue-le : docker exec -u root $BOX /opt/lcars/forge-gestures.sh apply)" 4
+    "$CONTAINER" /opt/lcars/forge-gestures.sh apply < /dev/null \
+  || die "apply de la structure en echec dans $CONTAINER (rejoue-le : docker exec -u root $CONTAINER /opt/lcars/forge-gestures.sh apply)" 4
 say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"
-say "→ relance la boite (docker restart $BOX) pour que 63-forge-tokens minte les role-tokens"
+say "→ relance la boite (docker restart $CONTAINER) pour que 63-forge-tokens minte les role-tokens"
 
 # APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
 if [[ -n "$ADMIN_TOKEN" ]]; then
   say "humain $HUMAN : identite NON fabriquee (--admin-token) — Gitea la regle a son onboarding"
 else
-"$DOCKER_BIN" exec -u git "$CONTAINER" gitea admin user change-password \
+"$DOCKER_BIN" exec -u git "$FORGE_CONTAINER" gitea admin user change-password \
     --username "$HUMAN" --password "$HUMAN_PASSWORD" --must-change-password=false >/dev/null 2>&1 \
   || die "mot de passe de banc non pose pour $HUMAN" 6
 say "humain $HUMAN : mot de passe de banc pose, changement force leve"
@@ -188,7 +188,7 @@ fi
 # que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
 # Un nom horodate, comme le master token, pour la meme raison : un token survivant d'une passe
 # precedente n'est plus une hypothese a formuler, c'est un cas qu'on ne peut plus rencontrer.
-if [[ "$WITH_BOX" -eq 1 ]]; then
+if [[ "$WITH_CONTAINER" -eq 1 ]]; then
   OP_TOKEN_NAME="bench-operateur-$(date +%s)"
   OP_RESP="$(curl -s -m 10 -u "$HUMAN:$HUMAN_PASSWORD" -H "Content-Type: application/json" \
       -X POST -d "{\"name\":\"$OP_TOKEN_NAME\",\"scopes\":[\"write:repository\",\"write:issue\",\"read:organization\",\"read:user\"]}" \
@@ -209,15 +209,15 @@ except Exception: print("")' 2>/dev/null || true)"
   # autre : vu, `unable to find user lcars` en sortie de passe 1.
   # Meme forme que le semis : on saute en le DISANT, la passe 2 pose. Ce qui garde l'oubli impossible
   # n'est pas ce message, c'est le verdict de `bench-up.sh`, qui EXIGE ce fichier apres deux passes.
-  if ! "$DOCKER_BIN" exec "$BOX" id -u "$HUMAN" >/dev/null 2>&1; then
-    say "token operateur minte, pas encore pose : le worker '$HUMAN' n'existe pas dans $BOX (il vient
+  if ! "$DOCKER_BIN" exec "$CONTAINER" id -u "$HUMAN" >/dev/null 2>&1; then
+    say "token operateur minte, pas encore pose : le worker '$HUMAN' n'existe pas dans $CONTAINER (il vient
    de la forge, materialise par le convergeur a la relance). La passe 2 le posera."
   else
-    printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$BOX" bash -c \
+    printf '%s\n' "$HUMAN_TOKEN" | "$DOCKER_BIN" exec -i -u "$HUMAN" "$CONTAINER" bash -c \
         'cat > ~/.gitea_token && chmod 600 ~/.gitea_token' \
-      || die "token operateur minte mais NON pose dans $BOX — la boite ne pourra pas parler a la forge" 6
+      || die "token operateur minte mais NON pose dans $CONTAINER — la boite ne pourra pas parler a la forge" 6
   fi
-  say "token operateur pose dans $BOX:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
+  say "token operateur pose dans $CONTAINER:~$HUMAN/.gitea_token ($OP_TOKEN_NAME)"
 
 fi
 
@@ -233,7 +233,7 @@ fi
 # ou il est defini ; `$ADMIN` vient de l'hote et est episse par la sortie de quotes. Doubler les
 # quotes ferait resoudre les deux ici, et l'URL de la forge y est vide.
 # shellcheck disable=SC2016
-charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
+charte_out="$("$DOCKER_BIN" exec "$CONTAINER" bash -c \
     'cd /opt/lcars/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
@@ -243,7 +243,7 @@ printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "cha
 # Un projet neuf se peuple depuis le catalogue sur DISQUE, que la boite porte deja : il n'y a plus
 # rien a semer pour qu'un onboard aboutisse.
 if [[ "$SEED_REPOS" -eq 1 ]]; then
-  SYS_TOKEN="$("$DOCKER_BIN" exec "$BOX" cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
+  SYS_TOKEN="$("$DOCKER_BIN" exec "$CONTAINER" cat "/opt/lcars/var/tokens/${LCARS_SYSTEM_ACCOUNT:-system_starfleet}.gitea_token" 2>/dev/null | tr -d '[:space:]' || true)"
 
   if [[ -z "$SYS_TOKEN" ]]; then
     say "token systeme absent de la boite — semis SAUTE (relance la boite puis rejoue ce script)"
@@ -258,15 +258,15 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     # l'a batie — jamais le HEAD du clone hote, qui peut avoir avance (ou recule) depuis le build.
     # Une revision absente du clone se REFUSE : semer autre chose, c'est un banc qui teste un code
     # que la boite ne fait pas tourner.
-    BOX_REV="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BOX_IMAGE" 2>/dev/null || true)"
-    [[ -n "$BOX_REV" && "$BOX_REV" != "unknown" ]] \
-      || die "fleet/lcars : l'image $BOX_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/container build la pose)" 7
-    git -C "$REPO_ROOT" rev-parse -q --verify "${BOX_REV}^{commit}" >/dev/null 2>&1 \
-      || die "fleet/lcars : la revision de l'image ($BOX_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code de la BOITE ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
-    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${BOX_REV}:refs/heads/main" 2>&1)" \
+    CONTAINER_REV="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CONTAINER_IMAGE" 2>/dev/null || true)"
+    [[ -n "$CONTAINER_REV" && "$CONTAINER_REV" != "unknown" ]] \
+      || die "fleet/lcars : l'image $CONTAINER_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/container build la pose)" 7
+    git -C "$REPO_ROOT" rev-parse -q --verify "${CONTAINER_REV}^{commit}" >/dev/null 2>&1 \
+      || die "fleet/lcars : la revision de l'image ($CONTAINER_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code de la BOITE ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
+    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${CONTAINER_REV}:refs/heads/main" 2>&1)" \
       || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code
   git a dit : ${PUSH_ERR//"$SYS_TOKEN"/<JETON>}" 7
-    say "fleet/lcars : main pousse (revision de l'image : $BOX_REV)"
+    say "fleet/lcars : main pousse (revision de l'image : $CONTAINER_REV)"
     # Le corpus ops est un CHOIX de l'operateur, pas un chemin de cette machine : sans LCARS_WORK_TREE,
     # rien n'est pousse et le recapitulatif le dit (⚖ user 2026-09-04, point 9 : l'atelier hors des defauts).
     WORK_TREE="${LCARS_WORK_TREE:-}"

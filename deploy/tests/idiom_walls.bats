@@ -365,7 +365,7 @@ I3_AWK='
 #
 # LE PERIMETRE : tout script de `deploy/` (hors tests) qui pose `pipefail`, PLUS `deploy/lib/*.sh`
 # — une lib n'a pas de `set` a elle, elle s'execute dans le shell de qui la source, et tous ses
-# appelants (provision, box, les modules) sont sous `pipefail`.
+# appelants (provision, container, les modules) sont sous `pipefail`.
 I16_RE='(^|[^|])\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q'
 
 @test "MUR I16: aucun pipeline ne finit sur grep -q dans un script sous pipefail — capturer, puis tester" {

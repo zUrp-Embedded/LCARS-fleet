@@ -71,7 +71,7 @@ docker_denied_geste() { # docker_denied_geste <socket>
   me="$(id -un)"
   [[ -n "$grp" ]] || { echo "socket illisible — qui la possede ?"; return 0; }
   # Capturer puis tester (DI-13) : `… | grep -qx` sous `pipefail` est une race, pas un test —
-  # cette lib est sourcee dans des shells sous `pipefail` (provision, box, les modules).
+  # cette lib est sourcee dans des shells sous `pipefail` (provision, container, les modules).
   if [[ " $(id -nG 2>/dev/null) " == *" $grp "* ]]; then
     echo "tu ES dans « $grp » pour cette session et l'acces est refuse quand meme — la socket porte-t-elle le bit d'ecriture pour son groupe ?"
   elif [[ ",$(getent group "$grp" 2>/dev/null | cut -d: -f4)," == *",$me,"* ]]; then

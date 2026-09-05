@@ -883,13 +883,13 @@ STUB
 # Le decor POSSEDE desormais son TMPDIR, comme le reste du corpus. Le fait garde est le meme, et il
 # devient vrai quoi qu'il arrive a cote.
 @test "run_step: un succes ne laisse AUCUN fichier derriere lui" {
-  local box="$BATS_TEST_TMPDIR/tmp-run-step"; mkdir -p "$box"
-  before="$(find "$box" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
-  TMPDIR="$box" module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
+  local container="$BATS_TEST_TMPDIR/tmp-run-step"; mkdir -p "$container"
+  before="$(find "$container" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  TMPDIR="$container" module_sh 'run_step "ok" -- bash -c "echo rien; sleep 1.1"'
   [ "$status" -eq 0 ]
-  after="$(find "$box" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
+  after="$(find "$container" -maxdepth 1 -name 'prov-out.*' 2>/dev/null | wc -l)"
   [ "$after" -eq "$before" ] \
-    || { echo "run_step a laisse $((after - before)) fichier(s) dans son propre TMPDIR :"; find "$box" -maxdepth 1 -name 'prov-out.*'; return 1; }
+    || { echo "run_step a laisse $((after - before)) fichier(s) dans son propre TMPDIR :"; find "$container" -maxdepth 1 -name 'prov-out.*'; return 1; }
 }
 
 @test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {

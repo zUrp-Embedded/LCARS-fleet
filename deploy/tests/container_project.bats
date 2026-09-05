@@ -2,17 +2,17 @@
 # SOURCE: deploy/tests/container_project.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
-# STATUS: bats tests for deploy/container — a project NAME is not proof you are talking about the same box
+# STATUS: bats tests for deploy/container — a project NAME is not proof you are talking about the same container
 #
-# WHY THIS EXISTS. The box rail targeted the compose project `lcars` as a hardcoded constant. Compose
+# WHY THIS EXISTS. The container rail targeted the compose project `lcars` as a hardcoded constant. Compose
 # will happily apply a file to a project it never created: it computes the desired state from THAT
 # file and recreates, republishes ports, drops what is absent — with no error, because from its own
 # point of view nothing is wrong. The name is enough to address the project; it is not enough to
 # prove both parties mean the same object.
 #
-# Measured on this workstation on 2026-08-07: `lcars` was a 47-hour-old working box created from
+# Measured on this workstation on 2026-08-07: `lcars` was a 47-hour-old working container created from
 # `fleet/provisioning_v2/docker/docker-compose.install.yml` — a path DELETED by the 2026-08-04 move.
-# `box down` stopped it, `box reset` took its /home volume, and neither said a word.
+# `container down` stopped it, `container reset` took its /home volume, and neither said a word.
 # That is the dominant defect family here: a defect that breaks gets killed by whoever meets it; a
 # defect that returns GREEN survives indefinitely.
 #
@@ -84,7 +84,7 @@ EOF
   # `PROV_DOCKER_BIN` est le choix de l'appelant, et il l'emporte sur tout — c'est la couture.
   export PROV_DOCKER_BIN="$BINDIR/docker"
   # la conf par projet vit sous $HOME : un temoin ne touche pas le vrai
-  export LCARS_BOX_CONF_DIR="$BATS_TEST_TMPDIR/conf"
+  export LCARS_CONTAINER_CONF_DIR="$BATS_TEST_TMPDIR/conf"
 }
 
 # A project holding one container, created from the files given as arguments.
@@ -114,7 +114,7 @@ seed_project() {
 }
 
 @test "a project created by ANOTHER compose file is refused, and the refusal names both" {
-  # The real case: the box predating the move, whose creating file no longer exists on disk.
+  # The real case: the container predating the move, whose creating file no longer exists on disk.
   seed_project "/home/projects/LCARS/fleet/provisioning_v2/docker/docker-compose.install.yml"
 
   run bash "$SRC" down
@@ -131,7 +131,7 @@ seed_project() {
 
 @test "the file must match a WHOLE list element, never a prefix of one" {
   # `<file>` is a strict prefix of `<file>.bak`. Substring matching would call this project ours
-  # and hand a live box to `down`.
+  # and hand a live container to `down`.
   seed_project "$CF.bak"
 
   run bash "$SRC" down
@@ -151,7 +151,7 @@ seed_project() {
 
 @test "reset refuses BEFORE asking for confirmation" {
   # Order is the contract. A confirmation prompt shown first teaches the operator to type `yes` at
-  # a question about the wrong box, and destruction follows their own answer.
+  # a question about the wrong container, and destruction follows their own answer.
   seed_project "/elsewhere/docker-compose.install.yml"
 
   run bash "$SRC" -p lcars-valid reset
@@ -170,7 +170,7 @@ seed_project() {
   seed_project "$CF"
 
   # The empty answer takes the abort path. What is pinned is the QUESTION — a destruction prompt
-  # that does not say which box is not a question, it is a reflex to type `yes` into.
+  # that does not say which container is not a question, it is a reflex to type `yes` into.
   run setsid --wait bash "$SRC" -p lcars-a-moi reset
 
   [ "$status" -eq 1 ]
@@ -180,8 +180,8 @@ seed_project() {
 
 # ⚠ CE TEMOIN ASSERAIT `lcars-a-moi_lcars-home`, ET CE VOLUME N'EXISTE PAS.
 #
-# `box` n'ouvre QUE `docker-compose.yml`, qui declare `home:` — donc docker cree `<projet>_home`.
-# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `box` ne lit
+# `container` n'ouvre QUE `docker-compose.yml`, qui declare `home:` — donc docker cree `<projet>_home`.
+# `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `container` ne lit
 # jamais. Le temoin epinglait donc le nom recopie depuis le mauvais fichier, et il verrouillait le
 # defaut : `reset` annoncait la destruction du /home de la boite, retirait un fantome, et laissait
 # le vrai volume intact — a chaque fois. `compose down` sans `-v` n'y touche pas non plus.
@@ -227,7 +227,7 @@ seed_project() {
 }
 
 @test "-p without a value is refused rather than swallowing the command" {
-  # `box -p down` must not silently target a project named "down" and run no command.
+  # `container -p down` must not silently target a project named "down" and run no command.
   run bash "$SRC" -p
 
   [ "$status" -eq 1 ]
@@ -328,7 +328,7 @@ seed_project() {
   # Un wrapper qui reconstruit la ligne de commande perd toujours quelque chose — le plus souvent
   # un argument a espaces, et on ne s'en apercoit que le jour ou quelqu'un en passe un.
   #
-  # ARBRE FACTICE plutot qu'une couture dans le script : un `LCARS_BOX_OVERRIDE` dont le seul
+  # ARBRE FACTICE plutot qu'une couture dans le script : un `LCARS_CONTAINER_OVERRIDE` dont le seul
   # client serait ce temoin ferait porter au code une variable qui ne sert a personne. Ici on
   # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/deploy/container`).
   local root="$BATS_TEST_TMPDIR/arbre"
@@ -355,29 +355,29 @@ FAKE
 # faisait que le passer. Ces temoins tiennent le sens de la fleche.
 
 @test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
-  local box="$BATS_TEST_DIRNAME/../container"
+  local container="$BATS_TEST_DIRNAME/../container"
   # ⚠ LES CONTROLES STATIQUES D'ABORD, ET CE N'EST PAS UN DETAIL DE STYLE. Si le delegue redemande
   # son aide a la porte pendant que la porte la lui demande, les deux `exec` s'appellent sans fond
   # de pile : rien ne compte les tours, rien ne sort. Un temoin qui LANCE avant de LIRE PEND au lieu
   # de rougir — et un temoin qui pend est un temoin que le prochain desactive.
-  grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$box"
-  refute grep -q '^usage() { exec ' "$box"
+  grep -q 'usage() { sed -n .*BASH_SOURCE\[0\]' "$container"
+  refute grep -q '^usage() { exec ' "$container"
 
   # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
   # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
-  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
   [ "$status" -eq 0 ]
   [[ "$output" == *"LCARS fleet v2 en conteneur"* ]]
   [[ "$output" == *"EXIT :"* ]]
 }
 
 @test "les DEUX portes rendent le MEME texte — une aide recopiee derive" {
-  local box="$BATS_TEST_DIRNAME/../container"
+  local container="$BATS_TEST_DIRNAME/../container"
   run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
   local par_la_porte="$output"
   # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
   # bats ne rend rien du tout, et le prochain qui le voit pendre le desactive.
-  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
   [[ "$par_la_porte" == "$output" ]]
 }
 
@@ -395,13 +395,13 @@ FAKE
   # Sa carte annoncait « l'aide de la porte, qui reste la source unique de l'aide. Elle n'est pas
   # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
   # sessions suivantes sans date ni signature.
-  local box="$BATS_TEST_DIRNAME/../container"
-  refute grep -q 'qui reste la source unique de l' "$box"
+  local container="$BATS_TEST_DIRNAME/../container"
+  refute grep -q 'qui reste la source unique de l' "$container"
 }
 
 # ─── LE DELEGUE EST SA PROPRE PORTE ─────────────────────────────────────────────────────────────
 #
-# ⚠ TANT QU'IL LISAIT CE QU'UNE PORTE LUI POSAIT, `box` PORTAIT DEUX DEFAUTS :
+# ⚠ TANT QU'IL LISAIT CE QU'UNE PORTE LUI POSAIT, `container` PORTAIT DEUX DEFAUTS :
 # `${LCARS_DOCKER_BIN:-docker}` et `${LCARS_COMPOSE_CMD:-docker compose}`. Sur une socket
 # appartenant a root, `PROV_DOCKER_BIN` est un SHIM qui escalade — un `docker` nu le contournerait
 # EN SILENCE pour echouer plus loin sur une permission. Les deux defauts n'ont plus d'objet
@@ -409,28 +409,28 @@ FAKE
 
 # shellcheck disable=SC2016 # motifs `grep` : `$PROV_DOCKER_BIN` doit atteindre grep tel quel
 @test "le delegue SONDE, il ne lit plus ce qu'une porte lui pose" {
-  local box="$BATS_TEST_DIRNAME/../container"
-  grep -q 'docker_endpoint || fail' "$box"
-  grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$box"
-  # ⚠ LE CODE, PAS LE FICHIER. Rendue mordante, la premiere de ces deux lignes a accuse `box:137` —
+  local container="$BATS_TEST_DIRNAME/../container"
+  grep -q 'docker_endpoint || fail' "$container"
+  grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$container"
+  # ⚠ LE CODE, PAS LE FICHIER. Rendue mordante, la premiere de ces deux lignes a accuse `container:137` —
   # une CICATRICE qui cite `${LCARS_DOCKER_BIN:-docker}` pour expliquer le defaut qu'elle a ferme.
   # La seconde etait derniere de son bloc, donc vivante, et verte : son motif n'existe nulle part,
   # pas meme en prose. Les deux lisent desormais ce qui S'EXECUTE — sinon la premiere cicatrice
   # ecrite pour `LCARS_COMPOSE_CMD` ferait rougir un fichier sain.
-  grep -vE '^[[:space:]]*#' "$box" | refute_out 'LCARS_DOCKER_BIN:-'
-  grep -vE '^[[:space:]]*#' "$box" | refute_out 'LCARS_COMPOSE_CMD:-'
+  grep -vE '^[[:space:]]*#' "$container" | refute_out 'LCARS_DOCKER_BIN:-'
+  grep -vE '^[[:space:]]*#' "$container" | refute_out 'LCARS_COMPOSE_CMD:-'
 }
 
 @test "le delegue rend l'aide SANS docker — elle passe avant la sonde" {
   # ⚠ L'ORDRE EST LA PROPRIETE. Un `--help` qui exige l'outil qu'il documente est une porte fermee,
   # et c'est le seul geste du rail qui n'a aucune condition.
-  local box="$BATS_TEST_DIRNAME/../container"
+  local container="$BATS_TEST_DIRNAME/../container"
   local l_help l_sonde
-  l_help="$(grep -n 'help|-h|--help) usage; exit 0' "$box" | head -1 | cut -d: -f1)"
-  l_sonde="$(grep -n 'docker-endpoint.sh"$' "$box" | head -1 | cut -d: -f1)"
+  l_help="$(grep -n 'help|-h|--help) usage; exit 0' "$container" | head -1 | cut -d: -f1)"
+  l_sonde="$(grep -n 'docker-endpoint.sh"$' "$container" | head -1 | cut -d: -f1)"
   [ -n "$l_help" ] && [ -n "$l_sonde" ]
   [ "$l_help" -lt "$l_sonde" ]
-  run env PATH=/usr/bin:/bin timeout 15 bash "$box" help
+  run env PATH=/usr/bin:/bin timeout 15 bash "$container" help
   [ "$status" -eq 0 ]
 }
 
@@ -438,18 +438,18 @@ FAKE
 #
 # ⚠ CES TROIS TEMOINS VIENNENT D'`install_door.bats`, ET LEUR SUJET A CHANGE DE MAISON AVEC LEUR
 # CODE (E4 du chantier porte, D4). La PORTE batissait l'image : elle sondait `image inspect` et
-# lancait `box build` avant de deleguer. Une boite de production TIRE son image — epinglee par
+# lancait `container build` avant de deleguer. Une boite de production TIRE son image — epinglee par
 # digest, avec le gate joue UNE FOIS par le rail qui la construit ; un client ne compile pas chez son
 # hote. Le build reste un geste de DEV, et c'est CE script qui sait s'il a une image.
 
 @test "MIGRE : image ABSENTE — un up ne la fabrique pas, et il le DIT" {
   # ⚠ LE REFUS DOIT NOMMER LES DEUX VOIES. `compose up --no-build` echoue deja sur une image absente,
   # mais avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
-  # `box build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat —
+  # `container build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat —
   # il a coute la 4e forme du rail boite le 2026-08-30 (chemin publie inexistant, rc 127).
   local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
   grep -q 'image inspect' <<<"$bloc"
-  grep -q 'box build' <<<"$bloc"
+  grep -q 'container build' <<<"$bloc"
   grep -qE 'pull' <<<"$bloc"
   # Et il SORT : un up qui continue sans image laisserait compose parler a sa place.
   grep -q 'exit 1' <<<"$bloc"
@@ -468,6 +468,6 @@ FAKE
   [ -f "$door" ]
   local code; code="$(grep -vE '^\s*#' "$door")"
   refute grep -q 'image inspect' <<<"$code"
-  refute grep -qE 'box" build|box build' <<<"$code"
+  refute grep -qE 'container" build|container build' <<<"$code"
   refute grep -q 'PROV_DOCKER_BIN' <<<"$code"
 }

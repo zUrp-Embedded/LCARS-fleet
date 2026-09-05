@@ -1057,35 +1057,35 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
 
 @test "MUR 17: l'image et le port SSH de la boite ont UNE declaration (deploy/container), et le compose qu'il pilote lit SANS repli" {
   # Relecture hostile 2026-09-04 (M12). `lcars-fleet:2` etait ecrit trois fois dans deploy/container et
-  # une fois dans chaque compose ; `127.0.0.1:2222` dans box et les deux composes. Ces defauts
+  # une fois dans chaque compose ; `127.0.0.1:2222` dans container et les deux composes. Ces defauts
   # s'accordaient par coincidence — exactement comme les deux 20999 de B1, et B1 est ce qui arrive
   # quand la coincidence cesse. L'AUTORITE est deploy/container : il pose et EXPORTE (compose est un
   # processus fils), apres la lecture de la conf du projet ; docker-compose.yml, qu'il est seul a
-  # piloter, lit `${…:?}`. Le compose d'installation se joue sans box (le banc, un pull a la main) :
-  # il garde un repli pour le port, et ce repli DOIT etre celui de box.
-  local box="$REPO/deploy/container" dev="$REPO/deploy/docker/docker-compose.yml" pull="$REPO/deploy/docker/docker-compose.install.yml"
+  # piloter, lit `${…:?}`. Le compose d'installation se joue sans container (le banc, un pull a la main) :
+  # il garde un repli pour le port, et ce repli DOIT etre celui de container.
+  local container="$REPO/deploy/container" dev="$REPO/deploy/docker/docker-compose.yml" pull="$REPO/deploy/docker/docker-compose.install.yml"
   local port img
-  port="$(sed 's/#.*//' "$box" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_SSH_PORT:=([^}]+)\}".*$/\1/p' | head -n1)"
-  img="$(sed 's/#.*//' "$box"  | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_IMAGE:=([^}]+)\}".*$/\1/p' | head -n1)"
+  port="$(sed 's/#.*//' "$container" | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_SSH_PORT:=([^}]+)\}".*$/\1/p' | head -n1)"
+  img="$(sed 's/#.*//' "$container"  | sed -nE 's/^[[:space:]]*:[[:space:]]*"\$\{LCARS_IMAGE:=([^}]+)\}".*$/\1/p' | head -n1)"
   [ -n "$port" ] && [ -n "$img" ] || { echo "MUR 17 — LCARS_SSH_PORT ou LCARS_IMAGE sans declaration \`: \"\${X:=…}\"\` dans deploy/container : l'autorite ne se lit plus" >&2; return 1; }
 
   local rompu=0 code
-  code="$(sed 's/#.*//' "$box")"
+  code="$(sed 's/#.*//' "$container")"
   # une seule declaration : aucun autre repli, et le litteral n'apparait qu'une fois dans le code
   grep -qE '\$\{LCARS_(IMAGE|SSH_PORT):-' <<<"$code" && { echo "MUR 17 rompu — deploy/container porte un repli \${LCARS_IMAGE:-…} ou \${LCARS_SSH_PORT:-…} a cote de sa declaration" >&2; rompu=1; }
   [ "$(grep -cF -- "$img" <<<"$code")" -eq 1 ]  || { echo "MUR 17 rompu — « $img » ecrit plus d'une fois dans deploy/container" >&2; rompu=1; }
   [ "$(grep -cF -- "$port" <<<"$code")" -eq 1 ] || { echo "MUR 17 rompu — « $port » ecrit plus d'une fois dans deploy/container" >&2; rompu=1; }
   # exportees : le lecteur est compose, un fils
-  grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$box" && grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$box" \
+  grep -qE '^export( +[A-Z_]+)* +LCARS_SSH_PORT( |$)' "$container" && grep -qE '^export( +[A-Z_]+)* +LCARS_IMAGE( |$)' "$container" \
     || { echo "MUR 17 rompu — LCARS_SSH_PORT / LCARS_IMAGE non exportees par deploy/container : compose ne les verra pas" >&2; rompu=1; }
   # le compose pilote lit SANS repli — un defaut de son cote serait une seconde autorite
   local devc; devc="$(sed 's/#.*//' "$dev")"
   grep -qE 'image: "\$\{LCARS_IMAGE:\?' <<<"$devc"        || { echo "MUR 17 rompu — docker-compose.yml ne lit pas LCARS_IMAGE en \${…:?}" >&2; rompu=1; }
   grep -qE '"\$\{LCARS_SSH_PORT:\?[^}]*\}:22"' <<<"$devc" || { echo "MUR 17 rompu — docker-compose.yml ne lit pas LCARS_SSH_PORT en \${…:?}" >&2; rompu=1; }
   grep -qE '\$\{LCARS_(IMAGE|SSH_PORT):-' <<<"$devc"        && { echo "MUR 17 rompu — docker-compose.yml garde un repli sur LCARS_IMAGE ou LCARS_SSH_PORT" >&2; rompu=1; }
-  # le compose d'installation garde son repli pour le port, et c'est celui de box
+  # le compose d'installation garde son repli pour le port, et c'est celui de container
   grep -qF -- "\${LCARS_SSH_PORT:-$port}:22" "$pull" || { echo "MUR 17 rompu — docker-compose.install.yml ne replie pas LCARS_SSH_PORT sur « $port »" >&2; rompu=1; }
   # et l'aide dit le meme defaut que le code
-  grep -qE "^#   LCARS_SSH_PORT .*défaut $port\)" "$box" || { echo "MUR 17 rompu — l'aide de box n'annonce pas « $port » pour LCARS_SSH_PORT" >&2; rompu=1; }
+  grep -qE "^#   LCARS_SSH_PORT .*défaut $port\)" "$container" || { echo "MUR 17 rompu — l'aide de container n'annonce pas « $port » pour LCARS_SSH_PORT" >&2; rompu=1; }
   [ "$rompu" -eq 0 ] || { echo "L'autorite est deploy/container (\`: \"\${LCARS_IMAGE:=…}\"\`, \`: \"\${LCARS_SSH_PORT:=…}\"\`) — les composes la lisent." >&2; return 1; }
 }

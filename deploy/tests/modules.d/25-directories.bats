@@ -395,7 +395,7 @@ check_on() {
   local df="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   local declares; declares="$(grep -E '^VOLUME ' "$df" | tr -d '[]",' | sed 's/^VOLUME //' | tr ' ' '\n' | sort)"
   [ -n "$declares" ]
-  run env -u PROV_ROOT bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_box_volumes | sort"
+  run env -u PROV_ROOT bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_container_volumes | sort"
   [ "$status" -eq 0 ]
   [ "$output" = "$declares" ]
 }

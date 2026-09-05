@@ -5,7 +5,7 @@
 # STATUS: bats walls — les idiomes qui coutent cher, coté PRODUIT (le jumeau de deploy/tests/idiom_walls.bats)
 #
 # ⚖ user 2026-09-04 (Q4) : chaque logiciel joue son gate. Le mur I2 de l'installeur ne lit que
-# deploy/ ; les gestes que le lot 6 a ramenes cote produit (forge.d, box, le convergeur, forge-gestures)
+# deploy/ ; les gestes que le lot 6 a ramenes cote produit (forge.d, container, le convergeur, forge-gestures)
 # parlent a la forge avec un jeton, et un `-H "Authorization: token …"` en argv est lisible par tout
 # compte de la boite dans /proc/<pid>/cmdline. Relecture hostile du 2026-09-04 : le convergeur le
 # faisait toutes les 30 s, a vie.

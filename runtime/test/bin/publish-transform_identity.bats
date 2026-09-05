@@ -135,7 +135,7 @@ refute_internal() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"identite humaine DECLAREE"* ]]
 
-  # That commit had NO human anywhere: the only honest source is the box's declared identity.
+  # That commit had NO human anywhere: the only honest source is the container's declared identity.
   local line
   line="$(git -C "$OUT" log --format='%ae|%ce|%s' | grep 'chore(chief)')"
   [[ "$line" == "declared@example.com|declared@example.com|"* ]]
@@ -201,7 +201,7 @@ refute_internal() {
   local gc="$TMP/gitconfig"
   printf '[user]\n\tname = system_chief\n\temail = system_chief@lcars.local\n' > "$gc"
 
-  # A pod, or a box whose global git carries a role account, would otherwise substitute the very
+  # A pod, or a container whose global git carries a role account, would otherwise substitute the very
   # thing this pass exists to remove — and the certification would refuse afterwards, blaming the
   # history for a choice the script made.
   GIT_CONFIG_GLOBAL="$gc" run_transform

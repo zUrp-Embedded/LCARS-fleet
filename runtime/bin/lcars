@@ -264,7 +264,7 @@ cat_dir_of() {
 
 # Le fichier porte AUSSI des ports d'ecoute : `LCARS_TOOL_EVAL=1`, pose par chaque appelant,
 # neutralise le bloc qui les ouvrirait. Ce CLI ne fait aucun appel forge, il transmet la config.
-_load_box_env() {
+_load_container_env() {
   local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
   [[ -f "$env_file" ]] || return 0
   set -a
@@ -302,7 +302,7 @@ _authority_token_file() { # <compte> <dir>
 cat_states() {
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || return 127
-  _load_box_env
+  _load_container_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Application.CatalogueLifecycle.eval_main()"
@@ -501,7 +501,7 @@ cmd_project_migrate() {
   [[ "$repo" == */* ]] || die "project migrate: « $repo » n'est pas un owner/nom"
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "project migrate: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
-  _load_box_env
+  _load_container_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Project.Onboard.eval_migrate(\"$repo\", \"$cat\")"
@@ -515,7 +515,7 @@ cmd_project_reconcile() {
   esac
   local bin; bin="$(_release_bin)"
   [[ -x "$bin" ]] || die "project reconcile: binaire de release introuvable ($bin) — poser LCARS_FLEET_BIN"
-  _load_box_env
+  _load_container_env
 
   HOME="${HOME}" RELEASE_TMP="${RELEASE_TMP:-/tmp}" LCARS_TOOL_EVAL=1 \
     "$bin" eval "Fleet.Project.Onboard.eval_reconcile(:$mode)"
@@ -723,7 +723,7 @@ cmd_publish_run() {
     [[ -n "${!k}" ]] || die "publish run: la liaison $binding ne declare pas « $k » — relie a nouveau"
   done
 
-  _load_box_env
+  _load_container_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "publish run: FORGE_BASE_URL absent — boite non configuree"
 
   local rail; rail="$(dirname "$(readlink -f "$0")")/publish-rail.sh"
@@ -843,7 +843,7 @@ cmd_approve() {
   export GIT_TERMINAL_PROMPT=0
 
   local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
-  _load_box_env
+  _load_container_env
   [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
 
   local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"

@@ -83,8 +83,8 @@ setup() {
 
 @test "bench-swap-image EXPORTE LCARS_STORE_PREFIX — sinon compose ne parse meme pas" {
   # lot 9 (DI-05) : le prefixe est celui de la BOITE, <N>-fleet, derive de la base
-  grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$SUT"
-  grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$SUT"
+  grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$SUT"
+  grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$SUT"
 }
 
 @test "les TROIS scripts de banc derivent le prefixe du MEME endroit — le projet" {
@@ -93,9 +93,9 @@ setup() {
   local d="$BATS_TEST_DIRNAME/../../docker/bench"
   local f
   for f in bench-up.sh bench-down.sh bench-swap-image.sh; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$d/$f" \
-      || { echo "$f ne derive pas le prefixe de \$BOX_PROJECT" >&2; false; }
-    grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$d/$f" \
-      || { echo "$f ne derive pas BOX_PROJECT de la base \$PROJECT" >&2; false; }
+    grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$d/$f" \
+      || { echo "$f ne derive pas le prefixe de \$CONTAINER_PROJECT" >&2; false; }
+    grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$d/$f" \
+      || { echo "$f ne derive pas CONTAINER_PROJECT de la base \$PROJECT" >&2; false; }
   done
 }

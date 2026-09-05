@@ -29,7 +29,7 @@ setup() {
   # The forge pool entry the verb resolves its destination from.
   printf '{"host":"github","dest_host":"github.com","owner":"acme"}' > "$HOMEDIR/.lcars/forges/gh.json"
 
-  # The box env `approve` refuses to run without.
+  # The container env `approve` refuses to run without.
   #
   # ⚠ `FORGE_TOKEN_FILE` A QUITTE CE FICHIER D'ENV, ET C'EST LE CHANTIER, PAS LA FIXTURE. Le jeton
   # systeme vivait en `0640 root:fleet`, lisible par l'humain a travers un groupe qui n'etait qu'une

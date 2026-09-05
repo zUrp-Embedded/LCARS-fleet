@@ -61,7 +61,7 @@ setup() {
 #!/usr/bin/env bash
 for a in "$@"; do
   case "$a" in
-    --forge|--forge-url|--box|--human|--human-admin|--no-human-admin|--tofu-dir|--seed|--*=*) ;;
+    --forge|--forge-url|--container|--human|--human-admin|--no-human-admin|--tofu-dir|--seed|--*=*) ;;
     -*) ;;                       # les options a valeur passent, leur valeur suit
     "") echo "stub bootstrap: argument VIDE recu — argv malforme" >&2; exit 1 ;;
   esac
@@ -117,16 +117,16 @@ FAKE
   # Absent, le script conclut « NON MESUREE » — ce qui n'est PAS un echec, donc les 24 temoins
   # resteraient verts en mesurant l'etat non-mesure au lieu de l'etat convergé. Un decor qui laisse
   # tout passer ne teste rien : il faut que le nominal soit le NOMINAL.
-  BOX_PROV_RC_OUT="$BATS_TEST_TMPDIR/box_prov_rc.out"
-  echo "0" > "$BOX_PROV_RC_OUT"
+  CONTAINER_PROV_RC_OUT="$BATS_TEST_TMPDIR/container_prov_rc.out"
+  echo "0" > "$CONTAINER_PROV_RC_OUT"
   # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
-  # boite en second argument (`exec <box> cat …`), donc un motif sur les deux premiers mots rate
+  # boite en second argument (`exec <container> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
   # c'est-a-dire avant ce que ces tests mesurent.
   cat > "$BINDIR/dockerstub" <<FAKE
 #!/usr/bin/env bash
 argv="\$*"
-# Les variables du box traversent en ENVIRONNEMENT, pas en argv : la doublure les depose quand elle
+# Les variables du container traversent en ENVIRONNEMENT, pas en argv : la doublure les depose quand elle
 # voit le 'create', sinon aucun temoin ne peut lire ce que la boite recoit.
 # (guillemets simples et pas d'accents graves : ce heredoc n'est PAS quote, donc bash y fait de la
 #  SUBSTITUTION DE COMMANDE — un mot entre accents graves y est EXECUTE, meme dans un commentaire.)
@@ -162,7 +162,7 @@ case "\$argv" in
   # la forge, et 'bench-up.sh' l'EXIGE depuis 2026-08-15 (saute par les deux passes, sinon).
   *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;
   *credentials.json*)     echo oui ;;
-  *lcars-provision.rc*)   cat "$BOX_PROV_RC_OUT" ;;
+  *lcars-provision.rc*)   cat "$CONTAINER_PROV_RC_OUT" ;;
 esac
 exit 0
 FAKE
@@ -213,7 +213,7 @@ run_bench() {
 # lisent le meme fichier doivent en tirer le MEME verdict, sinon le fichier ne veut plus rien dire.
 
 @test "la boite publie un ECHEC de convergence → PAS PRET, exit 6, meme si tout le reste est vert" {
-  echo "1" > "$BOX_PROV_RC_OUT"
+  echo "1" > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 6 ]
   [[ "$output" == *"PAS PRET"* ]]
@@ -227,7 +227,7 @@ run_bench() {
   # Un runner qui sert impeccablement une boite qui ne produit rien est un banc qui ne produit rien.
   # Ce temoin garde l'ORDRE des branches : intervertir ferait annoncer « banc PRET » a une boite
   # morte, exactement l'etat que ce correctif ferme.
-  echo "3" > "$BOX_PROV_RC_OUT"
+  echo "3" > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 6 ]
   [[ "$output" == *"la BOITE s'est declaree en echec"* ]]
@@ -238,7 +238,7 @@ run_bench() {
   # 2 = applique, etat-cible non tenu : un geste manque (forge, credentials, reseau), rien n'est
   # casse. Le confondre avec un echec rendrait rouge la moitie des bancs pour un etat que
   # l'entrypoint ET le geste operateur qualifient tous deux de non-fatal.
-  echo "2" > "$BOX_PROV_RC_OUT"
+  echo "2" > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRET"* ]]
@@ -252,7 +252,7 @@ run_bench() {
   #
   # ⚠ ET LE CAS EST REEL, pas theorique : ce fichier vit sur un tmpfs et n'existe qu'apres que
   # l'entrypoint a fini son apply. Une boite qui vient de repartir n'en a pas encore.
-  printf 'cat: /run/lcars-provision.rc: No such file or directory\n' > "$BOX_PROV_RC_OUT"
+  printf 'cat: /run/lcars-provision.rc: No such file or directory\n' > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRET"* ]]
