@@ -593,16 +593,21 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       assert to_string(r.note) =~ "NOT CHECKED"
     end
 
-    test "layout.face_roots_provisioned : pass, et la note dit que deploy/ est absent", %{root: root} do
+    test "layout.face_roots_provisioned : pass, et la note dit que deploy/ est absent", %{
+      root: root
+    } do
       r = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
       assert r.status == :pass, "status=#{r.status} note=#{inspect(r.note)}"
       assert to_string(r.note) =~ "NOT CHECKED"
     end
 
-    test "layout.private_dir_single_source et catalogue roots : pass sans le miroir installeur", %{root: root} do
+    test "layout.private_dir_single_source et catalogue roots : pass sans le miroir installeur",
+         %{root: root} do
       for fun <- [:check_private_dir_single_source, :check_catalogue_roots_single_source] do
         r = apply(Mix.Tasks.Lcars.Contracts.Check.SingleSource, fun, [root])
-        assert r.status == :pass, "#{fun}: status=#{r.status} note=#{inspect(r.note)} evidence=#{inspect(r.evidence)}"
+
+        assert r.status == :pass,
+               "#{fun}: status=#{r.status} note=#{inspect(r.note)} evidence=#{inspect(r.evidence)}"
       end
     end
   end
