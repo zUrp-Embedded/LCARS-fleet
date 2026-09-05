@@ -1583,3 +1583,33 @@ proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du p
   printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
   [ "$(lib_verdict zoe)" = "0|" ]
 }
+
+@test "apt_ensure : apt-get recoit un DELAI et des reprises — un miroir mort se dit, il ne suspend pas l'installeur (banc 2003, 2026-09-05)" {
+  local b="$BATS_TEST_TMPDIR/apt"; mkdir -p "$b"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "'"$b"'/argv"' \
+    'case " $* " in *" indextargets "*) echo "http://archive.ubuntu.com/ubuntu/dists/x/InRelease"; exit 0;; esac' 'exit 100' > "$b/apt-get"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *https://archive.ubuntu.com*) exit 0;; *) exit 28;; esac' > "$b/curl"
+  chmod 0755 "$b"/*
+  run bash -c "set -uo pipefail; export PATH=\"$b:$PATH\"; . '$LIB' >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0; apt_ensure jq; echo rc=\$?"
+  [[ "$output" == *"rc=1"* ]]
+  # le delai et les reprises sont sur la ligne d'apt-get update
+  grep -qE 'Acquire::http::Timeout=30' "$b/argv"
+  grep -qE 'Acquire::Retries=2' "$b/argv"
+  grep -qE '^-o .*update' "$b/argv"
+  # le diagnostic nomme le miroir ET le remede — http mort, https vivant
+  [[ "$output" == *"archive.ubuntu.com INJOIGNABLE en http"* ]]
+  [[ "$output" == *"passe tes sources apt en https"* ]]
+}
+
+@test "apt_ensure : miroir vivant mais apt en echec — le diagnostic ne blame pas le reseau" {
+  local b="$BATS_TEST_TMPDIR/apt2"; mkdir -p "$b"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
+  printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" indextargets "*) echo "http://archive.ubuntu.com/ubuntu/dists/x/InRelease"; exit 0;; esac' 'exit 100' > "$b/apt-get"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$b/curl"
+  chmod 0755 "$b"/*
+  run bash -c "set -uo pipefail; export PATH=\"$b:$PATH\"; . '$LIB' >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0; apt_ensure jq; echo rc=\$?"
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"le miroir http://archive.ubuntu.com repond"* ]]
+  refute_out 'INJOIGNABLE' <<<"$output"
+}

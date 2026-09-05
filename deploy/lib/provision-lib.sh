@@ -905,6 +905,35 @@ pkg_installed() { # pkg_installed <paquet> — 0 seulement s'il est REELLEMENT i
   [[ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" == "installed" ]]
 }
 
+# ⚠ APT ATTENDAIT SANS LIMITE. Mesure du 2026-09-05 (banc 2003, install depuis le tar de pack.sh) :
+# le port 80 vers archive.ubuntu.com ne repondait plus sur toute la machine (https repondait), et
+# `apt-get install` est reste UNE HEURE dans select() — l'installeur muet avec lui, aucune ligne,
+# aucun verdict. Un delai par connexion et deux reprises : un miroir mort se dit en deux minutes.
+APT_ACQUIRE_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+
+# Sur echec d'apt : DIRE quel miroir, et si le meme repond en https — c'etait exactement le cas, et
+# le remede (les sources en https) tient en une ligne quand on le connait.
+apt_mirror_diag() {
+  local u h
+  while IFS= read -r u; do
+    [[ -n "$u" ]] || continue
+    if curl -fsI -m 10 -o /dev/null "$u/" 2>/dev/null; then
+      p_warn "apt: le miroir $u repond — l'echec est ailleurs (paquet, signature, espace disque) : relis la sortie d'apt"
+      continue
+    fi
+    case "$u" in
+      http://*)
+        h="https://${u#http://}"
+        if curl -fsI -m 10 -o /dev/null "$h/" 2>/dev/null; then
+          p_fail "apt: $u INJOIGNABLE en http alors que $h repond — passe tes sources apt en https (URIs: de /etc/apt/sources.list.d/*.sources) et relance"
+        else
+          p_fail "apt: $u injoignable, en http comme en https — reseau, proxy ou DNS de cette machine"
+        fi ;;
+      *) p_fail "apt: $u injoignable — reseau, proxy ou DNS de cette machine" ;;
+    esac
+  done < <(apt-get indextargets --format '$(URI)' 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p' | sort -u)
+}
+
 apt_ensure() {
   local missing=() already=() pkg
   for pkg in "$@"; do
@@ -923,8 +952,10 @@ apt_ensure() {
   [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
   p_chg "apt: install ${missing[*]}"
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" || return 1
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get "${APT_ACQUIRE_OPTS[@]}" update -qq \
+    || { apt_mirror_diag; return 1; }
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get "${APT_ACQUIRE_OPTS[@]}" install -y --no-install-recommends "${missing[@]}" \
+    || { apt_mirror_diag; return 1; }
   # ⚠ ON NOTE CE QUI RÉPOND, PAS CE QU'ON A DEMANDÉ. `apt-get install` peut rendre 0 en ayant servi
   # moins que la liste ; c'est `dpkg -s`, paquet par paquet, qui dit ce qui est là. Le journal ne
   # revendique donc que des paquets vérifiés présents.
