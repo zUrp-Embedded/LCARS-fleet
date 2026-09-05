@@ -936,3 +936,197 @@ executer() {
   grep -q '^network rm lcars-essai_default$' "$FAKE_LOG"
   refute grep -q '^volume rm' "$FAKE_LOG"
 }
+
+# ─── LOT 3 (paquets) : `remove` N'EST PAS `purge`, ET DPKG POSSEDE UNE PART DE LA TABLE ──────────
+#
+# Un `.deb` a deux sorties, et la table n'en connait qu'une. `--keep-state` est le `remove` : les
+# racines d'ETAT (`<racine>/var`, `/etc/lcars`) et ce qui vit dessous restent, avec les comptes et
+# groupes de service qui les possedent ; un ancetre d'une racine d'etat n'est retire que vide.
+# `--dpkg <paquet>` dit que ce qu'un AUTRE paquet possede n'est pas a ce script : sans lui,
+# `apt remove lcars` emportait `/usr/local/bin/tofu` pendant que `lcars-tofu` restait « installe ».
+# Les deux se decident A LA LECTURE, comme `/home` et les annexes — donc ils se mesurent au plan.
+
+etat_decor() { # un manifeste de decor ou l'etat est nommable, et un peu de matiere dessous
+  export PROV_ROOT="$FAKE/opt/lcars" LCARS_ETC_DIR="$FAKE/etc/lcars"
+  mkdir -p "$FAKE/opt/lcars/var/tokens" "$FAKE/opt/lcars/tofu"
+  : > "$FAKE/opt/lcars/var/tokens/forge-master.token"
+  cat > "$LCARS_SYSTEM_MANIFEST" <<EOM
+# SOURCE: decor
+# STATUS: data, not code
+dir       $FAKE/opt/lcars                    0755  root:root  any
+dir       $FAKE/opt/lcars/var                0755  root:root  any
+dir       $FAKE/opt/lcars/tofu               0755  root:root  any
+dir       $FAKE/etc/lcars                    0755  root:root  any
+anchor    $FAKE/etc/lcars/host-consent       0644  root:root  any
+anchor    $FAKE/usr/local/bin/tofu           0755  root:root  any
+group     decor-groupe-absent                2000  -          any
+account   decor-compte-absent                -     /usr/sbin/nologin any
+EOM
+}
+
+# Joue `uninstall_run` en EXECUTION sans root ni docker (meme forme que le harnais S3) ; les
+# drapeaux se passent par l'environnement UNINSTALL_*.
+executer_etat() {
+  run bash -c '
+    set -euo pipefail
+    . "$1"
+    die() { echo "die: $*" >&2; exit 1; }
+    run_quiet() { "$@" >/dev/null 2>&1; }
+    prov_seat_from_map() { :; }
+    prov_group_owns_preserved() { return 1; }
+    userdel() { echo "userdel $*" >> "$FAKE_LOG"; }
+    groupdel() { echo "groupdel $*" >> "$FAKE_LOG"; }
+    getent() { return 1; }
+    PROV_LEGACY_CATALOGUES_DIR=/nexistepas
+    _PC="" _PA="" _PN="" SELF=provision SUBSTRATE=linux
+    UNINSTALL_YES=1 UNINSTALL_HUMANS=0 UNINSTALL_ANNEXES=0
+    MANIFEST_FILE="$LCARS_SYSTEM_MANIFEST" JOURNAL_FILE="$LCARS_JOURNAL_FILE"
+    . "$2"
+    uninstall_run
+  ' _ "$BATS_TEST_DIRNAME/../lib/docker-endpoint.sh" "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh"
+}
+
+@test "KEEP-STATE : le plan GARDE les racines d'etat et ce qui vit dessous, et le dit" {
+  etat_decor
+  run bash "$RUNNER" uninstall --keep-state
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"GARDÉ (--keep-state)"* ]]
+  [[ "$output" == *"$FAKE/opt/lcars/var"*"$FAKE/etc/lcars"* ]]
+  # host-consent vit sous /etc/lcars : garde, et NOMME ; tofu part
+  [[ "$output" == *"1 objet(s)"* ]]
+  [[ "$output" == *"$FAKE/etc/lcars/host-consent"* ]]
+  # l'ancetre de var n'est plus un rm -rf : il est nomme a part, « retiré seulement s'il est vide »
+  [[ "$output" == *"ancêtres"*"$FAKE/opt/lcars"*"vides"* ]]
+  # les comptes et groupes de service possedent l'etat : gardes, comptes a zero
+  [[ "$output" == *"0 groupe(s)"* ]]
+  [[ "$output" == *"0 compte(s) de service"* ]]
+  [[ "$output" == *"groupes:decor-groupe-absent"* ]]
+  [[ "$output" == *"comptes:decor-compte-absent"* ]]
+}
+
+@test "KEEP-STATE : sans lui, le meme decor part en entier — c'est le purge" {
+  etat_decor
+  plan
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 objet(s)"* ]]
+  [[ "$output" == *"4 répertoire(s)"* ]]
+  [[ "$output" == *"1 groupe(s)"* ]]
+  refute_out 'keep-state' <<<"$output"
+}
+
+@test "KEEP-STATE en EXECUTION : l'etat reste, l'ancetre qui le porte reste, le reste part" {
+  etat_decor
+  export FAKE_LOG="$BATS_TEST_TMPDIR/ids.log"; : > "$FAKE_LOG"
+  UNINSTALL_KEEP_STATE=1 executer_etat
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [ -f "$FAKE/etc/lcars/host-consent" ]                 # etat
+  [ -f "$FAKE/opt/lcars/var/tokens/forge-master.token" ] # etat
+  [ -d "$FAKE/opt/lcars" ]                              # ancetre PLEIN : garde sans un refus
+  refute test -e "$FAKE/usr/local/bin/tofu"
+  refute test -d "$FAKE/opt/lcars/tofu"
+  [[ "$output" == *"état gardé"* ]]
+  # aucun compte ni groupe retire : ils possedent l'etat
+  refute grep -qE '^(userdel|groupdel)' "$FAKE_LOG"
+}
+
+@test "KEEP-STATE en EXECUTION : un ancetre VIDE part — l'etat n'y etait pas" {
+  etat_decor
+  rm -rf "$FAKE/opt/lcars/var"       # plus d'etat sous la racine : elle n'a rien a porter
+  export FAKE_LOG="$BATS_TEST_TMPDIR/ids.log"; : > "$FAKE_LOG"
+  UNINSTALL_KEEP_STATE=1 executer_etat
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  refute test -d "$FAKE/opt/lcars"
+  [ -d "$FAKE/etc/lcars" ]
+}
+
+@test "PURGE en EXECUTION : sans --keep-state, l'etat part avec le reste" {
+  etat_decor
+  export FAKE_LOG="$BATS_TEST_TMPDIR/ids.log"; : > "$FAKE_LOG"
+  UNINSTALL_KEEP_STATE=0 executer_etat
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  refute test -d "$FAKE/opt/lcars"
+  refute test -d "$FAKE/etc/lcars"
+}
+
+dpkg_query_decor() { # une doublure de dpkg-query -S : elle repond pour les chemins que le decor lui dicte
+  local f="$BATS_TEST_TMPDIR/bin/dpkg-query"
+  mkdir -p "$(dirname "$f")"
+  cat > "$f" <<'DQ'
+#!/usr/bin/env bash
+[[ "$1" == "-S" ]] || exit 2
+shift
+echo "$#" >> "${FAKE_DQ_LOG:-/dev/null}"
+for p in "$@"; do
+  case "$p" in
+    */usr/local/bin/tofu) echo "lcars-tofu: $p" ;;
+    */opt/lcars)          echo "lcars, lcars-tofu: $p" ;;
+    */opt/lcars/tofu)     echo "lcars-tofu:amd64: $p" ;;
+    */etc/lcars)          echo "lcars: $p" ;;
+  esac
+done
+DQ
+  chmod +x "$f"; export LCARS_DPKG_QUERY="$f"
+}
+
+@test "DPKG : ce qu'un AUTRE paquet possede est laisse a dpkg, nomme avec son paquet — le sien reste planifie" {
+  etat_decor; dpkg_query_decor
+  export FAKE_DQ_LOG="$BATS_TEST_TMPDIR/dq.log"; : > "$FAKE_DQ_LOG"
+  run bash "$RUNNER" uninstall --dpkg lcars
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [[ "$output" == *"3 objet(s) possédé(s) par un AUTRE paquet que « lcars »"* ]]
+  [[ "$output" == *"$FAKE/usr/local/bin/tofu (lcars-tofu)"* ]]
+  [[ "$output" == *"$FAKE/opt/lcars (lcars,lcars-tofu)"* ]]
+  [[ "$output" == *"$FAKE/opt/lcars/tofu (lcars-tofu)"* ]]     # l'arch est tombee
+  # ce que `lcars` possede SEUL reste dans le plan : /etc/lcars et son ancre
+  [[ "$output" == *"1 objet(s)"* ]]
+  [[ "$output" == *"2 répertoire(s)"* ]]
+  # UN appel, tous les chemins d'un coup — pas un fork par objet
+  [ "$(wc -l < "$FAKE_DQ_LOG")" -eq 1 ]
+  [ "$(cat "$FAKE_DQ_LOG")" -eq 6 ]
+}
+
+@test "DPKG : sans le drapeau, dpkg-query n'est JAMAIS consulte" {
+  etat_decor; dpkg_query_decor
+  export FAKE_DQ_LOG="$BATS_TEST_TMPDIR/dq.log"; : > "$FAKE_DQ_LOG"
+  plan
+  [ "$status" -eq 0 ]
+  [ ! -s "$FAKE_DQ_LOG" ]
+  refute_out 'dpkg' <<<"$output"
+}
+
+@test "DPKG + KEEP-STATE en EXECUTION : le binaire de lcars-tofu reste, l'ancre de lcars part" {
+  etat_decor; dpkg_query_decor
+  export FAKE_LOG="$BATS_TEST_TMPDIR/ids.log"; : > "$FAKE_LOG"
+  UNINSTALL_KEEP_STATE=0 UNINSTALL_DPKG_PKG=lcars executer_etat
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [ -f "$FAKE/usr/local/bin/tofu" ]      # a lcars-tofu
+  [ -d "$FAKE/opt/lcars/tofu" ]          # a lcars-tofu
+  [ -d "$FAKE/opt/lcars" ]               # partage avec lcars-tofu : pas un rm -rf
+  refute test -d "$FAKE/etc/lcars"       # a lcars seul : part (purge)
+  refute test -d "$FAKE/opt/lcars/var"   # idem
+  [[ "$output" == *"à dpkg"*"3 objet(s) d'un autre paquet"* ]]
+}
+
+@test "dpkg_owners : l'analyse tient l'arch, la diversion et les co-proprietaires" {
+  local f="$BATS_TEST_TMPDIR/bin/dq2"; mkdir -p "$(dirname "$f")"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'echo "libc6:amd64: /x"' 'echo "diversion by dash from: /y"' 'echo "a, b:arm64: /z"' 'echo "no path found matching pattern /w" >&2' > "$f"
+  chmod +x "$f"
+  run bash -c 'PROV_ROOT=/r; . "$1"; LCARS_DPKG_QUERY="$2" dpkg_owners /x /y /z /w' _ "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh" "$f"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = $'/x\tlibc6' ]
+  [ "${lines[1]}" = $'/y\tdash' ]
+  [ "${lines[2]}" = $'/z\ta,b' ]
+  [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "KEEP-STATE et DPKG : les deux drapeaux sont DECLARES dans le dispatch et documentes" {
+  code | grep -qE '\-\-keep-state\)\s+UNINSTALL_KEEP_STATE=1'
+  code | grep -qE '\-\-dpkg\)\s+UNINSTALL_DPKG_PKG='
+  local entete; entete="$(sed -n '/^# USAGE :/,/^$/p' "$RUNNER")"
+  grep -q -- '--keep-state' <<<"$entete"
+  grep -q -- '--dpkg'       <<<"$entete"
+  # et les racines d'etat ne sont PAS ecrites dans le corps de la fonction (« AUCUNE LISTE »)
+  local body; body="$(code | sed -n '/^uninstall_run()/,/^}$/p')"
+  grep -q 'uninstall_state_roots' <<<"$body"
+}

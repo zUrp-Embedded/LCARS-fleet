@@ -8,6 +8,43 @@
 # (SUBSTRATE, JOURNAL_FILE, SELF, les drapeaux) en place. Il n'a pas de garde `PROVISION_LIB:?`
 # parce qu'il n'est lisible que par le runner qui le source.
 
+# ─── L'ETAT — CE QUE `--keep-state` GARDE, ET POURQUOI C'EST NOMME ICI ──────────────────────────
+#
+# Un paquet dpkg a deux sorties : `remove` (le programme part, sa configuration reste) et `purge`
+# (tout part). La table ne connait pas cette difference — `/opt/lcars/var` et `/etc/lcars` y sont
+# des `dir` comme les autres. Ce sont les deux racines que le lot 3 (`30-DEB.md`) nomme comme
+# L'ETAT : les jetons, le journal, les catalogues installes, le siege, le transport des services,
+# le canal. Avec elles restent les comptes et groupes de service qui les POSSEDENT : un `userdel`
+# qui laisse `/opt/lcars/var/tokens` a un uid orphelin est le defaut que `prov_group_owns_preserved`
+# ferme pour les groupes — on ne le rouvre pas pour les comptes.
+#
+# ⚠ HORS DE `uninstall_run`, ET PAR UNE COUTURE : le corps de la fonction ne nomme aucune racine
+# (`uninstall.bats`, « AUCUNE LISTE dans le code »), et `/etc/lcars` n'a pas de nom dans la lib.
+# Les deux drapeaux ont un defaut ici parce que le harnais des temoins source ce fichier sans le
+# runner (S3) : sous `set -u`, une globale que personne n'a posee tue la fonction a la premiere
+# lecture — et c'est aussi pourquoi les racines se calculent A LA DEMANDE (une fonction), pas au
+# chargement : sans la lib, `PROV_ROOT` n'existe pas, et seul `--keep-state` en a besoin.
+: "${UNINSTALL_KEEP_STATE:=0}"
+: "${UNINSTALL_DPKG_PKG:=}"
+uninstall_state_roots() { printf '%s\n' "${PROV_ROOT:?PROV_ROOT non posé — la lib doit être sourcée avant}/var" "${LCARS_ETC_DIR:-/etc/lcars}"; }
+
+# dpkg_owners <chemin>... -> « <chemin>\t<paquet>[,<paquet>] » pour chaque chemin qu'un paquet
+# possede. UN appel pour tout le plan : `dpkg-query -S` relit chaque `.list` a chaque invocation.
+# Le suffixe d'architecture (`libc6:amd64`) tombe ; une diversion nomme le paquet qui la porte.
+dpkg_owners() {
+  local q="${LCARS_DPKG_QUERY:-dpkg-query}"
+  [[ "$#" -gt 0 ]] || return 0
+  command -v "$q" >/dev/null 2>&1 || return 0
+  "$q" -S "$@" 2>/dev/null \
+    | awk -F': ' 'NF >= 2 {
+        p = $1; path = substr($0, length(p) + 3)
+        sub(/^diversion by /, "", p); sub(/ (to|from)$/, "", p)
+        n = split(p, a, /, /); out = ""
+        for (i = 1; i <= n; i++) { sub(/:[^,]*$/, "", a[i]); out = out (i > 1 ? "," : "") a[i] }
+        print path "\t" out
+      }' || true
+}
+
 # ─── uninstall — IL NE CONTIENT AUCUNE LISTE ────────────────────────────────────────────────────
 uninstall_run() {
   [[ -r "$MANIFEST_FILE" ]] || die "manifeste introuvable ($MANIFEST_FILE) — un désinstalleur qui devine est plus dangereux qu'un qui s'arrête"
@@ -185,7 +222,67 @@ uninstall_run() {
     dirs+=(${journal_dirs[@]+"${journal_dirs[@]}"})
   fi
 
-  mapfile -t dirs < <(printf '%s\n' "${dirs[@]}" | awk '{ print gsub(/\//,"/"), $0 }' | sort -rn | cut -d' ' -f2-)
+  # ─── CE QUE DPKG POSSEDE N'EST PAS A MOI (`--dpkg <paquet>`) ─────────────────────────────────
+  # ⚠ A LA LECTURE, COMME LES AUTRES GARDES : ce qui est ecarte n'entre pas dans le plan. Un objet
+  # qu'un AUTRE paquet possede est retire par dpkg avec ce paquet ; le retirer ici ferait mentir
+  # `dpkg -V` et laisserait un paquet « installe » sans ses fichiers. Ce que `--dpkg` nomme est le
+  # paquet qui APPELLE — ses propres chemins (deja retires par dpkg quand le postrm tourne) restent
+  # planifies : il n'y a plus rien a leur adresse, et le `-e` de l'execution le dit.
+  local -a dpkg_gardes=()
+  if [[ -n "$UNINSTALL_DPKG_PKG" ]]; then
+    local _ligne _chemin _owners _o2 _autre
+    local -a _files2=() _dirs2=()
+    declare -A _etranger=()
+    while IFS=$'\t' read -r _chemin _owners; do
+      [[ -n "$_chemin" ]] || continue
+      _autre=0
+      for _o2 in ${_owners//,/ }; do [[ "$_o2" == "$UNINSTALL_DPKG_PKG" ]] || _autre=1; done
+      [[ "$_autre" -eq 1 ]] && _etranger["$_chemin"]="$_owners"
+    done < <(dpkg_owners ${files[@]+"${files[@]}"} ${dirs[@]+"${dirs[@]}"})
+    for _ligne in ${files[@]+"${files[@]}"}; do
+      if [[ -n "${_etranger[$_ligne]:-}" ]]; then dpkg_gardes+=("$_ligne (${_etranger[$_ligne]})"); else _files2+=("$_ligne"); fi
+    done
+    for _ligne in ${dirs[@]+"${dirs[@]}"}; do
+      if [[ -n "${_etranger[$_ligne]:-}" ]]; then dpkg_gardes+=("$_ligne (${_etranger[$_ligne]})"); else _dirs2+=("$_ligne"); fi
+    done
+    files=(${_files2[@]+"${_files2[@]}"}); dirs=(${_dirs2[@]+"${_dirs2[@]}"})
+  fi
+
+  # ─── L'ETAT (`--keep-state`) — LE `remove` D'UN PAQUET, PAS SON `purge` ─────────────────────
+  # Les racines d'etat et ce qu'elles contiennent restent ; leurs ANCETRES ne sont plus un `rm -rf`
+  # mais un `rmdir` — retires s'ils sont vides, gardes sinon, sans un mot de plus : ce qui y reste
+  # est l'etat qu'on vient de dire garde. Les comptes et groupes restent aussi : ils possedent cet
+  # etat. Meme site que les autres gardes, pour la meme raison — la decision se prend a la lecture.
+  local -a etat_gardes=() dirs_rmdir=() state_roots=()
+  etat() { # etat <chemin> -> 0 si l'objet EST une racine d'etat, ou vit dessous
+    local p="$1" r
+    for r in ${state_roots[@]+"${state_roots[@]}"}; do [[ "$p" == "$r" || "$p" == "$r"/* ]] && return 0; done
+    return 1
+  }
+  etat_ancetre() { # etat_ancetre <chemin> -> 0 si une racine d'etat vit STRICTEMENT dessous
+    local p="$1" r
+    for r in ${state_roots[@]+"${state_roots[@]}"}; do [[ "$r" == "$p"/* ]] && return 0; done
+    return 1
+  }
+  if [[ "$UNINSTALL_KEEP_STATE" -eq 1 ]]; then
+    mapfile -t state_roots < <(uninstall_state_roots)
+    local _ligne
+    local -a _files2=() _dirs2=()
+    for _ligne in ${files[@]+"${files[@]}"}; do
+      if etat "$_ligne"; then etat_gardes+=("$_ligne"); else _files2+=("$_ligne"); fi
+    done
+    for _ligne in ${dirs[@]+"${dirs[@]}"}; do
+      if etat "$_ligne"; then etat_gardes+=("$_ligne")
+      elif etat_ancetre "$_ligne"; then dirs_rmdir+=("$_ligne")
+      else _dirs2+=("$_ligne"); fi
+    done
+    files=(${_files2[@]+"${_files2[@]}"}); dirs=(${_dirs2[@]+"${_dirs2[@]}"})
+    [[ "${#accounts[@]}" -eq 0 ]] || etat_gardes+=("comptes:${accounts[*]}")
+    [[ "${#groups[@]}"   -eq 0 ]] || etat_gardes+=("groupes:${groups[*]}")
+    accounts=(); groups=()
+  fi
+
+  mapfile -t dirs < <(printf '%s\n' ${dirs[@]+"${dirs[@]}"} | awk 'NF { print gsub(/\//,"/"), $0 }' | sort -rn | cut -d' ' -f2-)
 
   echo "${_PC}=== provision uninstall — plan lu dans $(basename "$MANIFEST_FILE") ===${_PN}"
   # ⚠ CES DEUX-LA SE NOMMENT, ILS NE SE COMPTENT PAS : venus du journal, l'operateur ne peut pas les
@@ -249,6 +346,19 @@ uninstall_run() {
   [[ "${#jokers[@]}" -eq 0 ]] \
     || printf '  %-10s %s\n' "résolus" "${jokers[*]}"
   printf '  %-10s %s\n' "préservé" "${preserve_roots[*]}"
+  if [[ "$UNINSTALL_KEEP_STATE" -eq 1 ]]; then
+    printf '  %-10s %s\n' "état" "${_PC}GARDÉ (--keep-state) : ${state_roots[*]}${_PN} — c'est le « remove » d'un paquet ; « purge » (sans --keep-state) l'emporte"
+    [[ "${#etat_gardes[@]}" -eq 0 ]] || printf '             %s\n' "${etat_gardes[@]}"
+    [[ "${#dirs_rmdir[@]}"  -eq 0 ]] || printf '  %-10s %s\n' "ancêtres" "${dirs_rmdir[*]} — retirés seulement s'ils sont vides"
+  fi
+  if [[ -n "$UNINSTALL_DPKG_PKG" ]]; then
+    if [[ "${#dpkg_gardes[@]}" -gt 0 ]]; then
+      printf '  %-10s %s\n' "dpkg" "${_PC}${#dpkg_gardes[@]} objet(s) possédé(s) par un AUTRE paquet que « $UNINSTALL_DPKG_PKG » — laissés à dpkg :${_PN}"
+      printf '             %s\n' "${dpkg_gardes[@]}"
+    else
+      printf '  %-10s %s\n' "dpkg" "aucun objet du plan n'appartient à un autre paquet que « $UNINSTALL_DPKG_PKG »"
+    fi
+  fi
 
   if [[ "$UNINSTALL_YES" -ne 1 ]]; then
     echo ""
@@ -312,6 +422,12 @@ uninstall_run() {
   for o in "${dirs[@]}"; do
     [[ -d "$o" ]] || continue
     rm -rf "$o" && removed=$((removed + 1)) || echo "  ${_PA}non retiré : $o${_PN}"
+  done
+  # Les ancetres d'une racine d'etat (`--keep-state`) : vides, ils partent ; sinon ils PORTENT
+  # l'etat qu'on garde, et ce n'est pas un refus — c'est le plan.
+  for o in ${dirs_rmdir[@]+"${dirs_rmdir[@]}"}; do
+    [[ -d "$o" ]] || continue
+    if rmdir "$o" 2>/dev/null; then removed=$((removed + 1)); else kept=$((kept + 1)); fi
   done
   # ─── LES OBJETS DOCKER — GARDÉS PAR DÉFAUT, DÉTRUITS SUR DEMANDE ──────────────────────────────
   #
@@ -455,6 +571,10 @@ uninstall_run() {
   echo ""
   echo "  ${_PC}── CE QUI RESTE SUR CETTE MACHINE ─────────────────────────────${_PN}"
   echo "  ${_PC}travail préservé${_PN}      ${preserve_roots[*]}"
+  [[ "$UNINSTALL_KEEP_STATE" -ne 1 ]] \
+    || echo "  ${_PC}état gardé${_PN}           ${state_roots[*]} — et les comptes/groupes de service qui le possèdent (--keep-state)"
+  [[ "${#dpkg_gardes[@]}" -eq 0 ]] \
+    || echo "  ${_PC}à dpkg${_PN}               ${#dpkg_gardes[@]} objet(s) d'un autre paquet — « apt remove » de ce paquet-là les emporte"
   echo "  ${_PC}sous /home${_PN}           tout — ni un « rm », ni un « userdel -r ». Les homes, leur contenu,"
   echo "                       et les ${#humans[@]} objet(s) que LCARS y a posés."
   # ⚠ LE JOURNAL N'EXISTE PLUS QUAND CETTE LIGNE S'IMPRIME, et c'est pourquoi la question se pose
