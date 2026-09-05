@@ -131,7 +131,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   duration is readable against the size of the org that produced it — the single figure that made
   `stats/0` unreadable as a cycle cost.
 
-      %{count: 96, window: 96, last_ms: 164, last_repos: 12, p50_ms: 158, p95_ms: 402,
+      %{count: 96, window: 96, last_ms: 164, last_repos: 12, last_served: 12, p50_ms: 158, p95_ms: 402,
         max_ms: 1_204, errors: 0}
 
   This is the figure to use when asking whether a value frozen at the start of a pass (a
@@ -153,8 +153,17 @@ defmodule Fleet.Pilot.PollerTelemetry do
   def handle_event(@cycle_event, measurements, metadata, _config) do
     GenServer.cast(
       __MODULE__,
-      {:cycle, Map.get(measurements, :duration_ms, 0), Map.get(measurements, :repos, 0),
-       Map.get(metadata, :status, :ok), Map.get(metadata, :mode)}
+      {
+        :cycle,
+        Map.get(measurements, :duration_ms, 0),
+        Map.get(measurements, :repos, 0),
+        # ABSENT N'EST PAS ZERO, et la distinction porte un verdict : `serving?/1` degrade sur un
+        # compte de servis a ZERO, donc un defaut a 0 ferait accuser tout emetteur qui ne
+        # renseigne pas la mesure. `nil` = « pas mesure », et aucune sonde ne conclut dessus.
+        Map.get(measurements, :served),
+        Map.get(metadata, :status, :ok),
+        Map.get(metadata, :mode)
+      }
     )
   rescue
     _ -> :ok
@@ -226,7 +235,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
   end
 
   @impl GenServer
-  def handle_cast({:cycle, duration_ms, repos, status, mode}, state) do
+  def handle_cast({:cycle, duration_ms, repos, served, status, mode}, state) do
     # No warn here: the `slow_tick_ms` threshold is calibrated on ONE REPO. A cycle over R repos
     # legitimately exceeds it R times over, so reusing that number would fire on every pass as soon
     # as the org grows — noise that teaches an operator to ignore the instrument. The cycle's
@@ -236,7 +245,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
      %{
        state
        | cycle_count: state.cycle_count + 1,
-         cycles: Enum.take([{duration_ms, repos, status, mode} | state.cycles], @window)
+         cycles: Enum.take([{duration_ms, repos, served, status, mode} | state.cycles], @window)
      }}
   end
 
@@ -245,7 +254,7 @@ defmodule Fleet.Pilot.PollerTelemetry do
 
   def handle_call(:cycle_stats, _from, state) do
     durations = state.cycles |> Enum.map(&elem(&1, 0)) |> Enum.sort()
-    {last_ms, last_repos, _, _} = hd(state.cycles)
+    {last_ms, last_repos, last_served, _, _} = hd(state.cycles)
 
     {:reply,
      %{
@@ -253,10 +262,11 @@ defmodule Fleet.Pilot.PollerTelemetry do
        window: length(durations),
        last_ms: last_ms,
        last_repos: last_repos,
+       last_served: last_served,
        p50_ms: percentile(durations, 50),
        p95_ms: percentile(durations, 95),
        max_ms: List.last(durations),
-       errors: Enum.count(state.cycles, fn {_d, _r, status, _m} -> status == :error end)
+       errors: Enum.count(state.cycles, fn {_d, _r, _s, status, _m} -> status == :error end)
      }, state}
   end
 

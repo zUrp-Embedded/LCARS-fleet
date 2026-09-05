@@ -510,9 +510,23 @@ defmodule Fleet.Pilot.Poller do
         # `started` is captured BEFORE `list_org_repos`, so the measurement covers everything a
         # pass does: discovery, the pod snapshot, the SERIAL fold of the R repos, and the two
         # fleet-global passes (arch net, protection recheck). Not just its visible part.
+        # DECOUVERTS ET SERVIS SONT DEUX COMPTES, et l'ecart entre les deux est le seul etat que
+        # cette boucle ne savait pas dire. Un depot ecarte rend `Lease.zero_tally()`, exactement
+        # comme un depot servi qui n'avait rien a faire : une flotte qui ne PEUT rien produire est
+        # donc indiscernable d'une flotte au repos, et c'est ce qu'un banc a montre — deux heures,
+        # 268 cycles, readiness verte, un seul depot, jamais servi.
+        #
+        # `onboarded?/1` est le predicat qui decide DEJA du skip, appele ici plutot que recopie :
+        # deux definitions de « servi » divergeraient, et c'est la divergence qui rendrait le
+        # compte faux sans que personne ne le voie. Le cout est un `File.dir?` par depot et par
+        # cycle, sur une passe mesuree a 33 ms.
         :telemetry.execute(
           [:lcars_fleet, :pilot_poller, :cycle],
-          %{duration_ms: elapsed_ms(started), repos: length(repos)},
+          %{
+            duration_ms: elapsed_ms(started),
+            repos: length(repos),
+            served: Enum.count(repos, &onboarded?/1)
+          },
           %{status: :ok, mode: mode, orgs: state.orgs}
         )
 
@@ -525,7 +539,7 @@ defmodule Fleet.Pilot.Poller do
         # filler: no repo was folded.
         :telemetry.execute(
           [:lcars_fleet, :pilot_poller, :cycle],
-          %{duration_ms: elapsed_ms(started), repos: 0},
+          %{duration_ms: elapsed_ms(started), repos: 0, served: 0},
           %{status: :error, mode: mode, orgs: state.orgs}
         )
 
