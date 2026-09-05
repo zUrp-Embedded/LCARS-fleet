@@ -108,6 +108,47 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
             # The raw dispatch `opts` keyword (base of `review_opts`; source of the `:reviewer_roles` override).
             opts: keyword()
           }
+
+    @doc false
+    # Boundary contract of the escalation writing: every decider (Remediation, the conflict
+    # ladder, VerdictException, the promotion) hands `ArchEscalation` ONLY its three forge seams
+    # (`@enforce_keys` → an out-of-3-seams access does not compile), never the whole context —
+    # and builds them HERE, the one site.
+    @spec arch_seams(t()) :: Fleet.Pilot.StepDispatcher.ArchEscalation.Seams.t()
+    def arch_seams(%__MODULE__{} = ctx) do
+      %Fleet.Pilot.StepDispatcher.ArchEscalation.Seams{
+        forge: ctx.forge,
+        repo: ctx.repo,
+        forge_opts: ctx.forge_opts
+      }
+    end
+
+    @doc false
+    # The rework budget of the issue's ENGRAVED card (`spec.max_rework_rounds`), read under the
+    # repo's own catalogue — the same number bounds the judge rework and the conflict rework.
+    @spec rework_budget(t(), integer()) :: {:ok, integer()} | {:error, term()}
+    def rework_budget(%__MODULE__{} = ctx, issue_n) do
+      with {:ok, {map_name, _step}} when is_binary(map_name) <-
+             Fleet.Pilot.StepDispatcher.Spawn.route_for(
+               ctx.forge,
+               ctx.repo,
+               issue_n,
+               ctx.forge_opts
+             ),
+           {:ok, workflow_map} <-
+             Fleet.Pilot.WorkflowMapNav.safe_load(
+               ctx.workflow_map_loader,
+               map_name,
+               Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
+             ) do
+        {:ok, Map.fetch!(workflow_map, "max_rework_rounds")}
+      else
+        # The specs of route_for/4 (typed direct call) and safe_load cover every shape —
+        # a catch-all `other ->` clause here would be dead-by-spec (dialyzer-provable).
+        {:ok, nil} -> {:error, :routeless}
+        {:error, _} = err -> err
+      end
+    end
   end
 
   # ============================================================
@@ -251,7 +292,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       # the one person who can act (2026-09-05).
       {:error, {:provenance_incoherent, reason}} ->
         ArchEscalation.escalate_merge_blocked(
-          %ArchEscalation.Seams{forge: ctx.forge, repo: ctx.repo, forge_opts: ctx.forge_opts},
+          Ctx.arch_seams(ctx),
           pr_number,
           head,
           :provenance_incoherent,

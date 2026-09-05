@@ -20,13 +20,13 @@ restated, only pointed at.
 **Reactor & dispatch**
 - `Fleet.Pilot.Poller` — the reactor: discovers org repos each tick, reads the route, dispatches the step's role. Sub-modules `Poller.{Backoff, Lease, Reconciliation, Admission}` = tick timing / the admission ceiling, per human on each repo (`max_fan`, ENGAGED/QUEUED) / orphan-lock reconciliation / THE passage point of the two dispatch rails (issues and pulls).
 - `Fleet.Pilot.PollerTelemetry` — the poller's telemetry, attached (BL-6-40).
-- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .Ctx, .RoleDispatch, .Remediation, .CiGate, .VerdictException}` (the PR review lifecycle; `Ctx` = the review context struct built once in `dispatch_review/2`; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human).
+- `Fleet.Pilot.StepDispatcher` — `decide/1` (pure gate) + `dispatch_issue/2` / `dispatch_review/2`. Sub-modules `{ProjectResolver, ArchEscalation, Spawn}` + `ReviewLifecycle{, .Ctx, .RoleDispatch, .Remediation, .Remediation.ConflictLadder, .CiGate, .VerdictException}` (the PR review lifecycle; `Ctx` = the review context struct built once in `dispatch_review/2`; `CiGate` = the CI verdict as a PRE-CONDITION of summoning the jury; `VerdictException` = one gatekeeper arbitration pass on a gray zone, before a human; `ConflictLadder` = the four rungs of a merge conflict, engine → producer → chief → arch, entered from `Remediation.route_merge_failure/4` only).
 - `Fleet.Pilot.BriefBuilder` — the authority on brief FORMAT (worker / judge / rework / conflict).
-- `Fleet.Pilot.PodReaper` — reaps the pods bound to a DEAD ticket (the `:mcp_pod_reaper` seam MCP injects).
+- `Fleet.Pilot.PodReaper` — the one reader of `:pilot_spawner` for a pod's end: the sealed producer (from `MergeAndPromote`), the ingested judge (from `StepRunCompleter`), every pod of a DEAD ticket (the `:mcp_pod_reaper` seam MCP injects).
 
 **Step-run completion**
 - `Fleet.Pilot.StepRunConsumer` — Bus consumer of step-run end (`pod.completed`). Sub-modules `{Verdict, GateEngine, GatekeeperEscalation, TerminalEscalation, TerminalEscalation.Seams, StepRunBuild, VerdictCorrection}` (`Seams` = the completer and notification dependencies an escalation carries; `VerdictCorrection` = ONE correction pass for a judge whose ENVELOPE is invalid, before freezing the ticket).
-- `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions}`.
+- `Fleet.Pilot.StepRunCompleter` — PR-native completion orchestrator (`complete_pr/2`). Sub-modules `{Texts, Emissions, Attestations}` (`Attestations` = the proofs engraved in git beside the forge writes: provenance triplet, machine verdict — pushed to the ops face, never through the forge API; the engravers return `:ok` by contract).
 - `Fleet.Pilot.CompletionOutbox` — durable journal of the step_run completions still owed to the forge (6-127).
 - `Fleet.Pilot.MergeAndPromote` — the SINGLE merge seal (`merge_and_promote/7`), shared by both merge points.
 - `Fleet.Pilot.ConflictProbe` / `ConflictApply` / `ConflictReport` — the tier-0 conflict rail: impure probe preserving raw blob bytes, write path re-checking every file in an isolated worktree, and the diagnosis rendered for a human on the PR.
@@ -38,14 +38,14 @@ restated, only pointed at.
 
 **Incidents & wake**
 - `Fleet.Pilot.IncidentConsumer` — Bus consumer of every `action: incident` event of the routing table (seven types, four sources) → `IncidentRegistry`.
-- `Fleet.Pilot.IncidentRegistry` — persistent cross-session incident memory (GenServer + WAL + forge sync). Sub-module `Escalation` (the sysadmin issue).
+- `Fleet.Pilot.IncidentRegistry` — persistent cross-session incident memory (GenServer + WAL + forge sync). Sub-modules `Store` (the durable magasin: WAL + forge file, one encoder, one merge) and `Escalation` (the sysadmin issue).
 - `Fleet.Pilot.ArchWake` — SINGLE authority for waking a project's architect on an `lcars-awaits-arch` escalation: the ordered offer-then-wake pair, shared by both rails.
 - `Fleet.Pilot.ArchFeed` — Bus consumer appending one short line per fleet milestone into the PROJECT's architect pod (`<arch pod_dir>/fleet.feed`).
 - `Fleet.Pilot.PodFeed` — the feed FILE primitive shared by both (name, `HH:MM` stamp, 200-line bound). The format has one owner; the log prefix stays with each facade's rail.
 - `Fleet.Pilot.WakeRecovery` — hardening of `Spawner.wake_pod/1` (re-roll / escalate).
 
 **Primitives (single-authority utils)**
-- `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness).
+- `Fleet.Pilot.Application` — supervisor; `step_status/0` exposes rail liveness (consumed by the api domain's readiness). The catalogue guards it plays at rail boot are `Fleet.Workflow.CatalogueGuards` (+ `Fleet.Project.Roles.validate_structural_roles!/0`), re-exported here so the wall `boot.verifier_covers_rail` reads one sequence.
 - `Fleet.PodId` — FOUNDATION, not this domain: the pod_id format is read by Spawner and Project, which sit below Pilot
 - `Fleet.Pilot.Offload` / `IssueId` / `WorkflowMapNav` — supervised Bus offload, id formats, workflow-map nav (`Fleet.Forge.WriteSpacing`, the inter-write spacing, is the forge's). `Fleet.Opts` (foundation) — the opt idioms.
 

@@ -102,6 +102,16 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
+  The boot guard: every structural role resolves, or the rail does not start. `:ok`, or the raise
+  `resolve_structural_roles!/1` carries.
+  """
+  @spec validate_structural_roles!() :: :ok
+  def validate_structural_roles! do
+    _ = resolve_structural_roles!()
+    :ok
+  end
+
+  @doc """
   Boot check of the capabilities the fleet cannot work without. Called at rail boot
   (`Fleet.Pilot.Application`), and the demands DIFFER because the concepts do:
 
