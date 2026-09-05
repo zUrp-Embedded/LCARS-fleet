@@ -58,8 +58,18 @@ fp_publish_dist() {
     *) echo "fp: REFUS — la forge ne répond pas sur $api/releases/tags/$tag (code ${code:-vide}) : une garde qui ne peut pas mesurer ne laisse pas passer" >&2; return 1 ;;
   esac
 
-  # 2. la release, en brouillon, sur LE commit du pack (target_commitish) — s'il n'est pas sur la forge,
-  #    elle le dit : on publie un commit poussé, pas un arbre local
+  # 1b. LE COMMIT EST-IL SUR LA FORGE ? Mesuré sur Gitea 1.26 (banc bob_1, 2026-09-05) : un brouillon
+  #     sur un commit inconnu est CRÉÉ (201) et c'est sa publication qui casse (500 « object does not
+  #     exist ») — le brouillon reste. On demande donc le commit AVANT d'écrire quoi que ce soit : on
+  #     publie un commit poussé, pas un arbre local.
+  code="$(fp_curl "$body" "$api/git/commits/$target")"
+  case "$code" in
+    200) ;;
+    404) echo "fp: REFUS — le commit $target n'est pas sur $forge/$owner/$repo : on publie un commit POUSSÉ, pas un arbre local (git push, puis rejoue)" >&2; return 1 ;;
+    *) echo "fp: REFUS (${code:-vide}) — la forge ne dit pas si le commit $target est là ($(fp_err "$body"))" >&2; return 1 ;;
+  esac
+
+  # 2. la release, en brouillon, sur LE commit du pack (target_commitish)
   local json; json="$(jq -cn --arg t "$tag" --arg n "lcars $tag" --arg b "$(fp_release_body "$dist" "$target")" --arg c "$target" \
                       '{tag_name:$t, name:$n, body:$b, draft:true, prerelease:false, target_commitish:$c}')"
   code="$(fp_curl "$body" -X POST -H 'Content-Type: application/json' --data-binary "$json" "$api/releases")"

@@ -7,7 +7,7 @@
 # La doublure lit la config `-K -` sur stdin (c'est LÀ que le jeton passe) et note argv ; elle répond
 # par route : GET releases/tags → FAKE_TAG (404), POST releases → 201 {"id":42}, POST assets → 201
 # (FAKE_ASSET_KO nomme celui qui rend 500), PUT debian → 201 (FAKE_DEB_409 nomme celui qui existe),
-# PATCH → 200. FAKE_DOWN=1 : curl « ne répond pas » (000 sur stdout comme le vrai, rc 7).
+# PATCH → 200, GET git/commits → FAKE_COMMIT (200). FAKE_DOWN=1 : curl « ne répond pas » (000 sur stdout comme le vrai, rc 7).
 
 setup() {
   LIB="$BATS_TEST_DIRNAME/../../lib/forge-publish.sh"
@@ -24,6 +24,7 @@ echo "$method $url" >> "${FAKE_TRACE:?}"
 [[ "${FAKE_DOWN:-0}" == 1 ]] && { printf 000; exit 7; }   # le vrai curl rend 000 avec -w quand rien ne répond
 case "$method $url" in
   "GET "*/releases/tags/*) printf '{"id":7,"draft":%s}' "${FAKE_TAG_DRAFT:-false}" > "$out"; printf '%s' "${FAKE_TAG:-404}" ;;
+  "GET "*/git/commits/*) : > "$out"; printf '%s' "${FAKE_COMMIT:-200}" ;;
   "POST "*/releases) printf '{"id":42}' > "$out"; printf 201 ;;
   "POST "*/assets?name=*) n="${url##*name=}"; if [[ "$n" == "${FAKE_ASSET_KO:-}" ]]; then printf '{"message":"disque plein"}' > "$out"; printf 500; else : > "$out"; printf 201; fi ;;
   "PUT "*/debian/pool/*) f=""; prev=""; for a in "$@"; do [[ "$prev" == --upload-file ]] && f="$(basename "$a")"; prev="$a"; done
@@ -49,11 +50,12 @@ _pub() { run bash -c ". '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0
   [ "$(grep -c 'Authorization' "$STDIN")" -eq "$(wc -l < "$TRACE")" ]
 }
 
-@test "l'ordre du geste : immutabilité, brouillon sur LE commit, tous les assets, les .deb au registre, publication" {
+@test "l'ordre du geste : immutabilité, le commit est là, brouillon sur LE commit, tous les assets, les .deb au registre, publication" {
   _pub; [ "$status" -eq 0 ]
   local t; t="$(cat "$TRACE")"
   [ "$(sed -n 1p "$TRACE")" = "GET http://forge.test/api/v1/repos/fleet/lcars/releases/tags/0.1-abc" ]
-  [ "$(sed -n 2p "$TRACE")" = "POST http://forge.test/api/v1/repos/fleet/lcars/releases" ]
+  [ "$(sed -n 2p "$TRACE")" = "GET http://forge.test/api/v1/repos/fleet/lcars/git/commits/deadbeefcafe" ]
+  [ "$(sed -n 3p "$TRACE")" = "POST http://forge.test/api/v1/repos/fleet/lcars/releases" ]
   [ "$(grep -c 'POST http://forge.test/api/v1/repos/fleet/lcars/releases/42/assets?name=' "$TRACE")" -eq 6 ]
   grep -q 'assets?name=install.sh$' "$TRACE"; grep -q 'assets?name=lcars_0.1_amd64.deb$' "$TRACE"
   [ "$(grep -c 'PUT http://forge.test/api/packages/fleet/debian/pool/resolute/main/upload' "$TRACE")" -eq 2 ]
@@ -69,7 +71,7 @@ _pub() { run bash -c ". '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0
   cat > "$BIN/curl" <<'SH'
 #!/usr/bin/env bash
 cat >/dev/null; prev=""; for a in "$@"; do [[ "$prev" == --data-binary ]] && printf '%s\n' "$a" >> "${FAKE_TRACE}.json"; [[ "$prev" == -o ]] && out="$a"; prev="$a"; done
-case "$*" in *"-X POST"*"/releases"*) printf '{"id":42}' > "$out"; printf 201 ;; *"-X PATCH"*) printf 200 ;; *"/releases/tags/"*) printf 404 ;; *) printf 201 ;; esac
+case "$*" in *"-X POST"*"/releases"*) printf '{"id":42}' > "$out"; printf 201 ;; *"-X PATCH"*) printf 200 ;; *"/releases/tags/"*) printf 404 ;; *"/git/commits/"*) printf 200 ;; *) printf 201 ;; esac
 SH
   _pub; [ "$status" -eq 0 ]
   local j; j="$(sed -n 1p "$TRACE.json")"
@@ -94,6 +96,13 @@ SH
   [ "$(wc -l < "$TRACE")" -eq 1 ]
   : > "$TRACE"; FAKE_TAG=403 _pub; [ "$status" -ne 0 ]
   [[ "$output" == *"REFUS (403)"*"write:repository"* ]]
+}
+
+@test "un commit que la forge ne connait pas : refus AVANT le brouillon (Gitea creerait le brouillon et casserait a la publication)" {
+  FAKE_COMMIT=404 _pub; [ "$status" -ne 0 ]
+  [[ "$output" == *"le commit deadbeefcafe n'est pas sur http://forge.test/fleet/lcars"*"commit POUSSÉ"* ]]
+  [ "$(wc -l < "$TRACE")" -eq 2 ]
+  ! grep -q '^POST' "$TRACE"
 }
 
 @test "un asset qui échoue : refus qui nomme l'asset, le message de la forge et le BROUILLON à supprimer — pas de publication" {
