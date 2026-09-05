@@ -1,0 +1,20 @@
+# SOURCE: deploy/pkg/lcars-docker-desktop.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars-docker-desktop` : un paquet VIDE. Sous WSL le daemon est celui de Docker
+#         Desktop, hors apt ; ce paquet satisfait la dependance docker de lcars-container et
+#         lcars-forge sans installer un second docker.
+name: lcars-docker-desktop
+arch: all
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: admin
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - la dependance docker satisfaite par l'integration Docker Desktop (WSL)
+  Paquet vide. Sous WSL, la CLI et le daemon docker viennent de Docker Desktop, hors apt : ce
+  paquet dit a apt que docker EST la, et lcars-container / lcars-forge s'installent sans qu'apt
+  double le daemon. Le poser sur une machine sans Docker Desktop ne fait rien apparaitre.

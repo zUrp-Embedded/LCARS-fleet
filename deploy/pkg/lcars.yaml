@@ -1,0 +1,47 @@
+# SOURCE: deploy/pkg/lcars.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars`, LE PRODUIT : release ERTS bundlee, auxiliaires, doc, catalogues et
+#         provisionnement. Le `contents:` n'est PAS ici : gen-contents.sh le derive de la table
+#         et du stage, et pack.sh joue nfpm sur le YAML genere.
+name: lcars
+arch: ${LCARS_ARCH}
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: admin
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - le produit : release Elixir (ERTS bundle), auxiliaires, doc, provisionnement
+  Pose sous /opt/lcars - hors policy Debian, et assume : LCARS est un logiciel hors
+  distribution, comme GitLab. Ce paquet ne choisit aucun rail ; lcars-workstation (natif,
+  systemd) ou lcars-container (conteneur, docker) le font. postinst = provision apply du socle
+  (groupes, comptes de service, repertoires), et il ecrit le canal (/etc/lcars/channel = deb).
+  apt remove = provision uninstall --keep-state (l'etat reste : /opt/lcars/var, /etc/lcars) ;
+  apt purge l'emporte. Aucun humain n'est cree ni retire par ce paquet.
+# Le socle (00-OBJECTIF § 3bis) : ce qui venait d'apt_ensure vient d'ici, resolu et journalise
+# par apt. Ni erlang (ERTS bundle), ni node (la doc est batie), ni les compilateurs.
+depends:
+  - tmux
+  - bubblewrap
+  - git
+  - curl
+  - jq
+  - unzip
+  - ca-certificates
+  - python3
+  - socat
+  - git-filter-repo
+  - gh
+  - util-linux-extra
+  - sudo
+  - ttyd
+recommends:
+  - lcars-workstation | lcars-container
+scripts:
+  preinstall: ./lcars/preinst
+  postinstall: ./lcars/postinst
+  preremove: ./lcars/prerm
+  postremove: ./lcars/postrm
