@@ -1,7 +1,7 @@
 # deploy — machine nue → `fleet start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
+**Dernière révision** : 2026-09-05 (§ paquets Debian, lot 3) — 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
 quatre gestes qui lui obéissaient déjà, et la soustraction assumée qui en découle)
 **Statut** : **EN SERVICE**, et le nord voulu reste un déployeur GÉNÉRIQUE catalogue-driven plutôt que
 ce code hardcodé LCARS — c'est une direction de conception, pas une interdiction d'usage. Analyse et
@@ -163,6 +163,52 @@ install.sh) et le reste converge au boot du conteneur (`runtime/services/contain
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.
+
+## Les paquets Debian (`deploy/pkg/`) — sept `.deb` qui se composent
+
+**Depuis le 2026-09-05 (lot 3 du chantier release)**, `pack.sh` produit, à côté du tar et depuis le
+MÊME arbre assemblé, des paquets Debian bâtis par nFPM (un binaire Go, épinglé par sha256, posé dans
+`$LCARS_PACK_DIR/.tools` — jamais dans l'arbre). Un YAML par paquet sous `deploy/pkg/`, les
+maintainer scripts sous `deploy/pkg/<paquet>/`, et un générateur, `gen-contents.sh`, qui DÉRIVE le
+`contents:` de `lcars` depuis `system.manifest` (modes, propriétaires, substrat) et depuis le stage
+du pack — une source pour les modes, jamais deux. Le témoin : `dpkg-deb -c` du `.deb` = exactement
+la liste que le générateur attend (`deploy/tests/pkg/gen_contents.bats`).
+
+| paquet | c'est | `Depends:` | maintainer scripts |
+|---|---|---|---|
+| `lcars` | le produit : release ERTS bundlée sous `/opt/lcars/runtime` (0750 root:fleet), les arbres que 62 embarque (`etc services bin assets catalogues deploy` — sans `deploy/tests`), les auxiliaires à plat, `share/{avatars,favicon,doc}`, `.source-revision`, `/usr/local/bin/{fleet,lcars}` (liens), `/etc/lcars/lcars.bashrc` (conffile) | le socle : `tmux bubblewrap git curl jq unzip ca-certificates python3 socat git-filter-repo gh util-linux-extra sudo ttyd` ; `Recommends: lcars-workstation \| lcars-container` | `preinst` : refuse un autre canal, crée le groupe `fleet` (le tar le nomme) · `postinst` : écrit `/etc/lcars/channel = deb` PUIS `provision apply --only 00 05 20 21 22 25 30` · `prerm` : le PLAN, et une copie du désinstalleur · `postrm remove` : `uninstall --yes --keep-state --dpkg lcars` · `postrm purge` : sans `--keep-state` |
+| `lcars-workstation` | le rail natif — un paquet de gestes | `lcars`, `systemd` | `postinst` : `apply --only 44 45 46 60 61 62 63 64 65 66` (+ `48 49` si `lcars-forge` est voulu par dpkg ; sinon `FORGE_BASE_URL`, env ou `/etc/lcars/forge.conf`, ou REFUS nommé) · `postrm` : les unités de la table, arrêtées puis retirées |
+| `lcars-container` | le rail conteneur : `deploy/container`, `deploy/docker/**` (Dockerfile, composes, secrets) | `lcars`, `docker.io (>= 26) \| docker-ce \| lcars-docker-desktop`, `docker-compose-v2 \| docker-compose-plugin` | `postrm` : dit si une instance tourne ; au purge LISTE ses volumes et refuse de les détruire |
+| `lcars-forge` | la forge du poste : `forge-compose.yml`, `runner-compose.yml`, `forge-runner.sh` | `lcars`, `lcars-tofu`, docker (idem) | `postinst` : `apply --only 48 49 61` · `postrm remove` : `compose down` de la forge et du runner, VOLUMES GARDÉS · `purge` : volumes retirés, dits |
+| `lcars-bench` | le jetable : rien de posé | `lcars-forge`, `lcars-workstation \| lcars-container` | `postinst` : sème l'humain de démo — `PROV_DEMO_HUMAN` (défaut `lcars`) → `LCARS_BUILTIN_HUMAN` pour la recette, `apply --only 61 63 64`, le nom noté dans `/opt/lcars/var/demo-human` · `postrm` : `userdel -r` de CE compte — le SEUL humain qu'apt retire, parce qu'il l'a créé |
+| `lcars-demo` | méta, vide | `lcars-workstation`, `lcars-forge`, `lcars-bench` | — |
+| `lcars-tofu` | `/usr/local/bin/tofu` (la version et les sha256 de `46-tofu`, LUS dans le module) et `/opt/lcars/tofu/{tofurc,providers/}` (le miroir, bâti au pack par `prep-tofu.sh`) | — (`Provides: opentofu`) | — |
+| `lcars-docker-desktop` | vide : satisfait la dépendance docker sous WSL (Docker Desktop, hors apt) | — | — |
+
+**La composition** : `sudo apt install ./lcars-demo_… ./lcars_… ./lcars-workstation_… ./lcars-forge_…
+./lcars-bench_… ./lcars-tofu_…` = le banc (un poste natif, sa forge, un humain de démo).
+`lcars-workstation` seul = un poste de travail qui CONSOMME une forge ; `+ lcars-forge` = un poste
+qui monte la sienne et ne sème personne. `apt remove lcars-bench` retire le jetable sans toucher au
+reste. Sous WSL, `lcars-docker-desktop` prend la place de `docker.io`.
+
+**remove / purge** — c'est la carte des classes d'`uninstall`, et deux drapeaux nouveaux du verbe :
+`apt remove lcars` = `provision uninstall --yes --keep-state --dpkg lcars` (l'état reste :
+`/opt/lcars/var`, `/etc/lcars`, et les comptes et groupes de service qui le possèdent ; ce qu'un
+AUTRE paquet possède est laissé à dpkg) ; `apt purge lcars` = sans `--keep-state`. Les humains et
+leurs homes ne sont JAMAIS retirés par apt — sauf l'humain de démo de `lcars-bench`. Le désinstalleur
+tourne depuis une COPIE que le `prerm` fait sous `/var/tmp/lcars-uninstall-lcars` : quand le
+`postrm` tourne, dpkg a déjà retiré `/opt/lcars/deploy/provision`.
+
+**Ce que le `.deb` ne fait PAS** (30-DEB.md § 3) : il ne crée ni ne retire d'humain (sauf celui de
+`lcars-bench`) — les personnes s'inscrivent sur la forge, le convergeur les matérialise ; il ne pose
+pas docker (une dépendance NOMMÉE, satisfaite par la distro ou par Docker Desktop) ; il ne bâtit rien
+(ni erlang, ni elixir, ni node : la release est bundlée, la doc est bâtie) ; il pose sous `/opt`,
+hors policy Debian, et l'assume dans son `control`. Une machine, un canal : le `preinst` refuse un
+`.deb` par-dessus une install kit ou source (`/etc/lcars/channel`), et dit le geste.
+
+**Ce qu'il faut sur le poste qui packe** : le réseau (nFPM et tofu se téléchargent, épinglés ; le
+miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en passe. La version des
+`.deb` est celle de `runtime/mix.exs` ; la révision (`AAAAMMJJ.HHMM+g<sha>`) est le tampon du tiroir.
 
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
