@@ -30,8 +30,8 @@
         },
         "network": {
           "type": "string",
-          "enum": ["vendor-only", "egress"],
-          "description": "Ce que le pod peut joindre. Absent = `vendor-only` (fail-closed) : la sortie passe par le proxy CONNECT du pod, dont l'allowlist est la declaration d'endpoints du vendor et rien d'autre. `egress` ajoute les hotes declares par le role. Un pod n'a JAMAIS de namespace reseau : le choix porte sur l'allowlist, pas sur l'ouverture."
+          "enum": ["vendor-only", "egress", "open"],
+          "description": "Ce que le pod peut joindre. Absent = `vendor-only` (fail-closed) : la sortie passe par le proxy CONNECT du pod, dont l'allowlist est la declaration d'endpoints du vendor et rien d'autre. `egress` ajoute les hotes declares par le role. `open` retire le mur d'hotes pour CE role : `Egress.allowlist/2` rend `:open` — une valeur typee, jamais un nom d'hote, donc aucun fichier de donnees ne peut ouvrir un pod en ecrivant `*`. Un pod n'a JAMAIS de namespace reseau, quelle que soit cette valeur : il reste scelle, sort par son proxy, ne resout aucun nom lui-meme, et une requete qui n'est pas un tunnel CONNECT reste refusee. Ce que `open` retire est le mur d'hotes, et rien d'autre ; `provision/3` en trace une ligne par vie de pod."
         },
         "role_index": {
           "type": "integer",

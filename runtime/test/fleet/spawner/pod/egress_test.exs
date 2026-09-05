@@ -322,6 +322,74 @@ defmodule Fleet.Spawner.Pod.EgressTest do
     end
   end
 
+  describe "network: open — the host wall goes, the seal stays" do
+    setup do
+      # Same short base as the `provision/3` describe, same reason (AF_UNIX path cap).
+      base = Path.join(System.tmp_dir!(), "lcars-egopen-#{System.pid()}")
+      File.mkdir_p!(base)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_egress_sock_base, base)
+      on_exit(fn -> File.rm_rf(base) end)
+      :ok
+    end
+
+    test "allowlist/2 yields the :open POLICY, and reads no data source", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+
+      # A store IS mounted and carries hosts for this role: under `open` neither it nor the vendor
+      # file is read, because `:open` is the policy itself and not a list something contributes to.
+      dir = Path.join([tmp, "state", "egress.d"])
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "r.hosts"), "from.the.store\n")
+      System.put_env("LCARS_STORE_ROOT", tmp)
+      on_exit(fn -> System.delete_env("LCARS_STORE_ROOT") end)
+
+      assert Egress.allowlist(profile("open"), launcher) == :open
+    end
+
+    test "decide/2 accepts ANY host under :open" do
+      for host <- ["github.com", "evil.example", "x.y.z.whatever.test"] do
+        assert {:ok, ^host, 443} = Egress.decide("CONNECT #{host}:443 HTTP/1.1\r\n", :open)
+      end
+    end
+
+    test "under :open a NON-CONNECT request is STILL refused — the tunnel rule is not the host rule" do
+      assert {:refused, {:not_a_connect_request, _}} =
+               Egress.decide("GET http://anything.test/ HTTP/1.1\r\n", :open)
+    end
+
+    test "`*` in a DATA source stays an ordinary name — no file can open a pod", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "*\n")
+
+      # The vendor file says `*`; the policy is still a list, and that list matches nothing but the
+      # literal host `*`. This is the property that makes `:open` a TYPE rather than a magic name.
+      assert Egress.allowlist(profile("vendor-only"), launcher) == ["*"]
+
+      assert {:refused, {:host_not_allowed, "github.com"}} =
+               Egress.decide("CONNECT github.com:443 HTTP/1.1\r\n", ["*"])
+    end
+
+    test "provision/3 under :open starts the proxy and SAYS so once", %{tmp_dir: tmp} do
+      launcher = Path.join(tmp, "claude_launch.sh")
+      File.write!(Path.join(tmp, "claude_launch.egress"), "api.vendor.test\n")
+      pod = "p#{System.unique_integer([:positive])}"
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          # The proxy is still STARTED: `open` changes the decision, not the plumbing.
+          assert {:ok, path} = Egress.provision(pod, profile("open"), launcher)
+          assert path =~ pod
+          Egress.release(pod)
+        end)
+
+      # Under `open` no refusal is ever logged, so the ONLY readable trace of "this role has no host
+      # wall" is this line. Its absence would make the state visible as a silence.
+      assert log =~ "OPEN allowlist"
+      assert log =~ "role r"
+    end
+  end
+
   describe "allowlist/2 — vendor-only is the floor, egress adds the role's own" do
     test "vendor-only gets the vendor's hosts and nothing else", %{tmp_dir: tmp} do
       launcher = Path.join(tmp, "claude_launch.sh")
