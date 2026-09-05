@@ -1350,7 +1350,7 @@ prov_delivery_is_binary() { [[ "$(prov_delivery "$@")" == "binary" ]]; }
 #
 # LE CONTRAT AVEC LE PAQUET (lot 3) tient en trois faits, qui ne bougent pas : le nom du fichier
 # `/etc/lcars/channel`, la valeur `deb`, et le fait que sous `deb` 60/62/44/46 ne posent pas.
-PROV_CHANNEL_FILE_CANON=/etc/lcars/channel   # le chemin que deploy/system.manifest declare (anchor)
+: "${PROV_CHANNEL_FILE_CANON:=/etc/lcars/channel}"  # le chemin que deploy/system.manifest declare (anchor)
 PROV_CHANNEL_FILE="${LCARS_CHANNEL_FILE:-$PROV_CHANNEL_FILE_CANON}"
 
 # prov_channel -> stdout : `source` | `kit` | `deb` | `aucun`, et POSE `PROV_CHANNEL` a la meme valeur.
