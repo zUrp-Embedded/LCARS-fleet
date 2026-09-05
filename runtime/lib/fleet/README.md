@@ -47,9 +47,11 @@ compile-invisible) are NOT in this table — see the "Seams runtime" section of 
 | foundation | `Fleet.Event` | 0 |
 | foundation | `Fleet.FindingsWire` | 0 |
 | foundation | `Fleet.GitRef` | 0 |
+| foundation | `Fleet.Grace` | 0 |
 | foundation | `Fleet.Labels` | 0 |
 | foundation | `Fleet.Layout` | 0 |
 | foundation | `Fleet.Opts` | 0 |
+| foundation | `Fleet.PeriodicCheck` | 0 |
 | foundation | `Fleet.PodId` | 0 |
 | foundation | `Fleet.Publish.InFlight` | 0 |
 | foundation | `Fleet.ReceptionFilter` | 0 |

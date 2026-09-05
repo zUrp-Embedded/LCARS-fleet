@@ -49,7 +49,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   require Logger
 
-  alias Fleet.Admiral.PeriodicCheck
+  alias Fleet.PeriodicCheck
   alias Fleet.Forge.Payload
 
   @default_interval_ms 60_000
@@ -120,10 +120,12 @@ defmodule Fleet.Admiral.ToolchainReconciler do
 
   # ── la passe ────────────────────────────────────────────────────────────────────────────────
 
-  # LOSSY PAR CONSTRUCTION : une passe qui lève ne doit pas tuer le rail — mais le re-arm de
-  # `PeriodicCheck.tick` est EN DERNIER, donc une passe qui lève arrêterait le timer. D'où le
-  # rescue ICI, dans le do_check : la forge tombe, un disque est plein, le binaire root sort
-  # non-zéro — le tick suivant réessaiera.
+  # LOSSY PAR CONSTRUCTION : une passe qui lève ne doit pas tuer le rail. Le filet de
+  # `PeriodicCheck.tick` garderait le timer vivant, mais il JETTERAIT le résultat : `check_now`
+  # doit rendre l'échec comme une VALEUR (`{:error, {:raised, _}}`) et `rejected_sha` doit survivre
+  # à la passe. D'où le rescue ICI, dans le do_check : la forge tombe, un disque est plein, le
+  # binaire root sort non-zéro — le tick suivant réessaiera, et l'appelant de `check_now` voit
+  # pourquoi.
   defp do_check(state) do
     result =
       try do
