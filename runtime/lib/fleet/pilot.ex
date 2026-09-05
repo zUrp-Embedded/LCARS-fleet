@@ -121,6 +121,7 @@ defmodule Fleet.Pilot do
       # daemon quiesces. Every gesture that STARTS work reads it, each on its own side — this is
       # this domain's.
       Fleet.Shutdown.Quiesce,
+      Fleet.Grace,
       Fleet.Publish.InFlight,
       # BL-6-31: the adoption gate of import_external scans instruction material through the
       # reception filter — foundation, shared with SPBuilder's RepoSections door.

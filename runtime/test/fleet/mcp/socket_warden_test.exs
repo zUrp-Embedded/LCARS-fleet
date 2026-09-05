@@ -13,7 +13,7 @@ defmodule Fleet.MCP.SocketWardenTest do
   alias Fleet.MCP.SocketWarden
 
   defp start_warden(opts) do
-    start_supervised!({SocketWarden, [name: nil, tick_ms: 10] ++ opts})
+    start_supervised!({SocketWarden, [name: nil, interval_ms: 10] ++ opts})
   end
 
   test "socket whose pod has VANISHED → reclaimed, but only at the 2nd tick (grace)" do
