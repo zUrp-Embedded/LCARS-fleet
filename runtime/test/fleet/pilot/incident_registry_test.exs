@@ -24,13 +24,18 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     defp start_reg(tmp, extra) do
       name = :"reg_#{System.unique_integer([:positive])}"
 
+      # `merge`, not `++`: a keyword read takes the FIRST occurrence, so an appended override of
+      # the clocks would be silently ignored.
       opts =
-        [
-          name: name,
-          wal_path: Path.join(tmp, "incidents.json"),
-          sync_debounce_ms: 5,
-          retry_ms: 50
-        ] ++ extra
+        Keyword.merge(
+          [
+            name: name,
+            wal_path: Path.join(tmp, "incidents.json"),
+            sync_debounce_ms: 5,
+            retry_ms: 50
+          ],
+          extra
+        )
 
       start_supervised!({Reg, opts})
       name
@@ -72,6 +77,61 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       # forge sync triggered async (5ms debounce)
       assert_receive {:put, _}, 1000
+    end
+
+    # The window is the ops-commit budget: a durable failure is noted at EVERY tick, and each
+    # sync is one commit on the ops branch. Notes inside one window must land as ONE put that
+    # carries the LAST count — the timeline is not lost, only its intermediate commits. The
+    # first put carrying count 3 is the whole proof; the refute behind it only guards a sync
+    # that would re-arm itself.
+    test "sync window: three notes inside one window → ONE put, carrying count 3", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          sync_debounce_ms: 150,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+        )
+
+      for i <- 1..3 do
+        assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:0#{i}:00Z")
+      end
+
+      assert_receive {:put, content}, 1_000
+      assert {:ok, %{"wake:p:dead" => %{"count" => 3}}} = JSON.decode(content)
+      refute_receive {:put, _}, 200
+    end
+
+    # The window is a budget for a memory the WAL holds. A note whose WAL write FAILED has the
+    # forge as its only durability: it must sync on the catch-up clock, not wait the window.
+    test "WAL write FAILS → the forge sync runs on the catch-up clock, not on the window", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+      blocker = Path.join(tmp, "blocker")
+      File.write!(blocker, "i am a file, not a dir")
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join([blocker, "nested", "incidents.json"]),
+           sync_debounce_ms: 60_000,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+           put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+         ]}
+      )
+
+      assert {:error, {:wal_write_failed, _}} =
+               Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
+
+      assert_receive {:put, content}, 1_000
+      assert content =~ "wake:p:dead"
     end
 
     # The registry sync is a commit the RUNTIME makes — no human initiated it, no pod produced it,

@@ -78,4 +78,82 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
              "escalated_issue" => 9
            }
   end
+
+  describe "sync_forge/2 — the put that would change nothing" do
+    setup %{tmp_dir: tmp} do
+      # The forge's bytes are produced by the same encoder as the WAL's: the file IS the text a
+      # sync would push for this registry. The transport is octet-exact (`Files.get_file/3`
+      # decodes the base64 it received); a divergence there is that client's to witness.
+      reg = %{
+        "wake:p:dead" => %{
+          "count" => 2,
+          "first_seen" => "a",
+          "last_seen" => "b",
+          "last_reason" => ":dead"
+        }
+      }
+
+      path = Path.join(tmp, "forge.json")
+      :ok = Store.write_wal(path, reg)
+      {:ok, reg: reg, forge_content: File.read!(path)}
+    end
+
+    test "the merge equals what the forge holds → {:ok, merged} and NO put", %{
+      reg: reg,
+      forge_content: content
+    } do
+      pid = self()
+
+      assert {:ok, ^reg} =
+               Store.sync_forge(reg,
+                 get_file_fun: fn _r, _p, _o -> {:ok, %{content: content, sha: "s"}} end,
+                 put_file_fun: fn _r, _p, c, _o -> send(pid, {:put, c}) && {:ok, "c"} end
+               )
+
+      refute_receive {:put, _}, 50
+    end
+
+    test "counter-witness: one more occurrence locally → the merge differs and IS pushed", %{
+      reg: reg,
+      forge_content: content
+    } do
+      pid = self()
+      local = put_in(reg, ["wake:p:dead", "count"], 3)
+
+      assert {:ok, %{"wake:p:dead" => %{"count" => 3}}} =
+               Store.sync_forge(local,
+                 get_file_fun: fn _r, _p, _o -> {:ok, %{content: content, sha: "s"}} end,
+                 put_file_fun: fn _r, _p, c, o -> send(pid, {:put, c, o[:sha]}) && {:ok, "c"} end
+               )
+
+      assert_receive {:put, pushed, "s"}
+      assert pushed =~ ~s("count":3) or pushed =~ ~s("count": 3)
+    end
+
+    test "no file on the forge and nothing to remember → NO file is created", _ do
+      pid = self()
+
+      assert {:ok, %{}} =
+               Store.sync_forge(%{},
+                 get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+                 put_file_fun: fn _r, _p, c, _o -> send(pid, {:put, c}) && {:ok, "c"} end
+               )
+
+      refute_receive {:put, _}, 50
+    end
+
+    test "counter-witness: no file on the forge and one incident → the file is CREATED (nil sha)",
+         %{reg: reg} do
+      pid = self()
+
+      assert {:ok, ^reg} =
+               Store.sync_forge(reg,
+                 get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+                 put_file_fun: fn _r, _p, c, o -> send(pid, {:put, c, o[:sha]}) && {:ok, "c"} end
+               )
+
+      assert_receive {:put, pushed, nil}
+      assert pushed =~ "wake:p:dead"
+    end
+  end
 end
