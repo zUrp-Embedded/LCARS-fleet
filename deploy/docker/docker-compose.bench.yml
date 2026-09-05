@@ -1,7 +1,7 @@
 # SOURCE: deploy/docker/docker-compose.bench.yml
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
-# STATUS: SURCOUCHE de banc — la boite parle a une forge JETABLE, qui vit sa vie a cote
+# STATUS: SURCOUCHE de banc — le conteneur parle a une forge JETABLE, qui vit sa vie a cote
 #
 # ─── CE QUE CE FICHIER NE FAIT PAS ─────────────────────────────────────────────────────────────
 # AMORCER. Creer un admin, minter un token, promouvoir un site-admin, semer deux depots sont des
@@ -13,7 +13,7 @@
 
 services:
   lcars:
-    # La boite garde son reseau de projet ET rejoint celui de la forge. Le nom de service `gitea`
+    # Le conteneur garde son reseau de projet ET rejoint celui de la forge. Le nom de service `gitea`
     # resout des la creation, donc AVANT le premier boot — ce qui etait toute la contrainte.
     networks:
       - lcars
@@ -21,7 +21,7 @@ services:
 
 networks:
   # `external: true` = compose ne la cree pas et ne la detruit pas. Elle appartient au projet de la
-  # forge, elle lui survit et elle survit a la boite. C'est la frontiere qu'on voulait garder.
+  # forge, elle lui survit et elle survit au conteneur. C'est la frontiere qu'on voulait garder.
   # Le nom par defaut suit la convention compose `<projet-forge>_default` ; bench-up.sh le passe.
   devforge:
     external: true

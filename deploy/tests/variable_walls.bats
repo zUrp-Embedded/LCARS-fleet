@@ -251,7 +251,7 @@ code_of() { sed 's/#.*//' "$1"; }
   # ⚠ CE N'EST PAS UN RANGEMENT, C'EST UN PONT QUI MANQUAIT SUR UN RAIL. `66-deck-oidc` batit les
   # `redirect_uris` OAuth2 du deck avec `PROV_DECK_PORT` ; le daemon lit `LCARS_LANDING_PORT`. Au
   # poste, `64-services` relie les deux et `services_units.bats` le garde depuis le 2026-08-23. Sur
-  # le rail BOITE, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
+  # le rail CONTENEUR, rien ne les reliait : ils s'accordaient parce que leurs deux defauts independants
   # valent tous les deux 20999. La cicatrice du rail poste decrit la panne mot pour mot —
   # « la panne tombait au RETOUR du login, la ou elle se lit comme un probleme d'identite ».
   #
@@ -279,7 +279,7 @@ code_of() { sed 's/#.*//' "$1"; }
   }
   check runtime/services/console-landing.sh   "LCARS_LANDING_PORT:-$attendu\}"        "le port d'ecoute du lanceur"
   check runtime/services/console-deck.py      "LCARS_LANDING_PORT\", \"$attendu\"\)"  "le port d'ecoute du serveur"
-  check runtime/services/container/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail boite"
+  check runtime/services/container/boot.sh    "LCARS_LANDING_PORT:-$attendu\}"        "le pont du rail conteneur"
   check runtime/services/lib/module-protocol.sh "LCARS_LANDING_PORT:=$attendu\}" "le defaut du protocole des modules du produit"
   check deploy/docker/docker-compose.yml         ":$attendu\}:$attendu\""     "la publication du port"
   check deploy/docker/docker-compose.install.yml ":$attendu\}:$attendu\""     "la publication du port"
@@ -779,7 +779,7 @@ PYX
 }
 
 @test "MUR 13: le compte de service du deck — un nom, et les replis qui le nomment derivent" {
-  # `lcars-system` est le compte SANS shell et SANS home sous lequel tourne le deck de la boite. Il
+  # `lcars-system` est le compte SANS shell et SANS home sous lequel tourne le deck du conteneur. Il
   # a ete cree le 2026-08-26 pour sortir le deck de `nobody`, dont le groupe `nogroup` est partage
   # par `sync`, `_apt` et `dhcpcd` — le fichier d'identification OIDC du deck s'y posait en
   # `0640 root:nogroup`, donc un demon reseau le lisait. C'est MON compte, propage sans verrou.
@@ -895,10 +895,10 @@ print(next(iter((d.get('services') or {}).keys()), ''))" 2>/dev/null)"
 
   # (2) LE RUNNER : le service que `runner-compose.yml` definit EST le segment du nom de conteneur.
   # (2) LES NOMS DE CONTENEUR : `<projet>-<service>-1`. Le segment doit etre un service qu'UN des
-  # compose definit — pas forcement celui du runner : ce depot en a trois (`lcars` pour la boite,
+  # compose definit — pas forcement celui du runner : ce depot en a trois (`lcars` pour le conteneur,
   # `gitea` pour la forge, `act` pour le runner) et les references les nomment tous les trois.
   # Ma premiere ecriture comparait tout au service du RUNNER et accusait `${PROJECT}-lcars-1`, une
-  # reference parfaitement juste vers la boite. Comparer a l'ENSEMBLE evite d'avoir a deviner quel
+  # reference parfaitement juste vers le conteneur. Comparer a l'ENSEMBLE evite d'avoir a deviner quel
   # compose une variable de projet designe — et c'est aussi ce qui rend le mur juste quand un
   # quatrieme compose arrive.
   local services
@@ -917,7 +917,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   segs="$(grep -rhoE '\$\{?[A-Z_]*PROJECT\}?-(runner-)?[a-z]+-1' "$REPO/deploy" "$REPO/runtime/bin" "$REPO/runtime/services" \
             --exclude-dir=tests 2>/dev/null \
           | sed -E 's@.*-([a-z]+)-1$@\1@' | sort -u || true)"
-  [ -n "$segs" ] || { echo "MUR 14 — aucune reference de conteneur lue : le balayage est casse" >&2; return 1; }
+  [ -n "$segs" ] || { echo "MUR 14 — aucune reference de conteneur lu : le balayage est casse" >&2; return 1; }
   local sg
   for sg in $segs; do
     printf '%s\n' "$services" | grep -qx "$sg" && continue
@@ -1055,7 +1055,7 @@ print('\n'.join(sorted(noms)))" 2>/dev/null)"
   [ "$rompu" -eq 0 ] || return 1
 }
 
-@test "MUR 17: l'image et le port SSH de la boite ont UNE declaration (deploy/container), et le compose qu'il pilote lit SANS repli" {
+@test "MUR 17: l'image et le port SSH du conteneur ont UNE declaration (deploy/container), et le compose qu'il pilote lit SANS repli" {
   # Relecture hostile 2026-09-04 (M12). `lcars-fleet:2` etait ecrit trois fois dans deploy/container et
   # une fois dans chaque compose ; `127.0.0.1:2222` dans container et les deux composes. Ces defauts
   # s'accordaient par coincidence — exactement comme les deux 20999 de B1, et B1 est ce qui arrive

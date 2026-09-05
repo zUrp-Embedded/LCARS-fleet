@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/supervise.sh
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
-# STATUS: PROTO-V2 — le superviseur de la BOITE : ce que `Restart=` fait sur le rail poste
+# STATUS: PROTO-V2 — le superviseur du CONTENEUR : ce que `Restart=` fait sur le rail poste
 # N'essaie PAS de copier les dependances entre unites, les sockets d'activation, les cgroups ni le
 # `Type=notify` : ce fichier relance un processus, c'est tout. Un demi-systemd serait un objet dont
 # personne ne connaitrait les limites.

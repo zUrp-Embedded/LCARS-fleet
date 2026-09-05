@@ -41,7 +41,7 @@
 # n'est PAS ce qui bloquait. Cette ligne garde sa raison d'etre et n'a plus a etre reverifiee.
 #
 # ⚠ `systempaths=unconfined` — LA LIGNE SANS LAQUELLE AUCUN POD NE NAIT SUR UN LINUX ORDINAIRE.
-# Meme jour, meme machine : la boite montait, la fleet demarrait, et le pod permanent `starfleet`
+# Meme jour, meme machine : le conteneur montait, la fleet demarrait, et le pod permanent `starfleet`
 # mourait en boucle sur `bwrap: Can't mount proc on /newroot/proc: Operation not permitted` —
 # jusqu'a l'escalade d'incident. Docker MASQUE des chemins sous `/proc` (mknod par-dessus) ; dans un
 # user-namespace le noyau refuse alors de monter un `/proc` neuf, parce que ce montage cacherait des
@@ -127,8 +127,8 @@ services:
       # UID non contigu la manquait en silence. `lcars` = id forge 3 → uid 1003 → bloc 21030, hors
       # de toute plage devinée ici. Ne PAS re-publier par bloc : ce fichier ne peut pas savoir.
       #
-      # La HOME de la boîte, hors de l'espace des blocs parce qu'elle n'appartient à aucun humain :
-      # c'est la porte de la boîte, et désormais la SEULE avec ssh.
+      # La HOME du conteneur, hors de l'espace des blocs parce qu'elle n'appartient à aucun humain :
+      # c'est la porte du conteneur, et désormais la SEULE avec ssh.
       - "${LCARS_LANDING_PORT_BIND:-127.0.0.1:20999}:20999"
     volumes:
       - home:/home
@@ -178,7 +178,7 @@ services:
     networks: [default]
 
 volumes:
-  # Ceux-ci appartiennent au PROJET : ses humains et son etat sont ceux de CETTE boite, et ils
+  # Ceux-ci appartiennent au PROJET : ses humains et son etat sont ceux de CE conteneur, et ils
   # meurent avec elle.
   home:
   var:

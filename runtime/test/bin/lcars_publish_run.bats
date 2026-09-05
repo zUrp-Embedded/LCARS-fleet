@@ -43,7 +43,7 @@ EOF
   # ⚠ `FORGE_TOKEN_FILE` A QUITTE CE FICHIER D'ENV, ET C'EST LE CHANTIER, PAS LA FIXTURE. Le jeton
   # systeme vivait en `0640 root:fleet`, lisible par l'humain a travers un groupe qui n'etait qu'une
   # projection de l'equipe `humans` de la forge. `publish run` le DEMANDE maintenant au service
-  # d'autorite. Ce que la boite ecrit encore ici est le nom du COMPTE, pas un chemin vers un secret.
+  # d'autorite. Ce que le conteneur ecrit encore ici est le nom du COMPTE, pas un chemin vers un secret.
   printf 'FORGE_BASE_URL=http://forge.invalid\nFORGE_BOT_LOGIN=system_starfleet\n' \
     > "$HOMEDIR/fleet.env"
   export LCARS_FLEET_ENV="$HOMEDIR/fleet.env"

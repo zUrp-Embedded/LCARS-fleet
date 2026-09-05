@@ -14,7 +14,7 @@
 #
 # GUARD B (`bin/fleet`) et `is_fleet_human` appliquent la meme regle : `uid >= UID_MIN` ET
 # `uid != LCARS_SYSADMIN_UID`. Or le premier utilisateur d'une Linux ou d'une WSL standard EST uid
-# 1000. La regle « uid >= 1001 » n'etait ecrite que pour la BOITE.
+# 1000. La regle « uid >= 1001 » n'etait ecrite que pour le CONTENEUR.
 #
 # ⚠ CE MODULE NE CREE PLUS (2026-08-25) ET NE NOMME PLUS (retrait de `--fleet-human`). Il ATTESTE.
 # La moitie de ces temoins portait la dichotomie « humain nomme / pas nomme » — un etat qui n'existe

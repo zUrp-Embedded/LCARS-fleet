@@ -32,18 +32,18 @@ node_arch() { arch_tag node; }
 # precisement ce que `check` sait traiter (« node absent »).
 #
 # ⚠ ET CE MODULE EST « APPLY-ON: wsl linux · CHECK-ON: any » : il VERIFIE sur un substrat ou il ne
-# POSE jamais. Dans la boite, node n'est donc jamais la — l'etat nominal du check y est l'absence.
+# POSE jamais. Dans le conteneur, node n'est donc jamais la — l'etat nominal du check y est l'absence.
 # Vu : « ERREUR 16-node: MORT avant de rendre son verdict (rc=127) », seul echec
-# des 20 modules, et il suffisait a rendre la boite non convergee.
+# des 20 modules, et il suffisait a rendre le conteneur non converge.
 node_version_posee() {
   [[ -x "$NODE_LINK_DIR/node" ]] || return 0
   "$NODE_LINK_DIR/node" --version 2>/dev/null | sed 's/^v//'
 }
 
-# ─── DANS LA BOITE, L'ETAT-CIBLE EST LA DOC, PAS L'OUTIL QUI LA PRODUIT ──────────────────────────
+# ─── DANS LE CONTENEUR, L'ETAT-CIBLE EST LA DOC, PAS L'OUTIL QUI LA PRODUIT ──────────────────────────
 # node n'existe ici que le temps du stage « site » de l'image : il y fait `npm run build` sur la
 # source du runtime (`COPY fleet /src/runtime`), et seul le RESULTAT est copie dans le runtime. La doc
-# est donc bâtie a partir de la revision exacte que la boite servira, et node n'a rien a y faire
+# est donc bâtie a partir de la revision exacte que le conteneur servira, et node n'a rien a y faire
 # ensuite. Verifier node ici mesurait un moyen absent PAR CONSTRUCTION, et rendait un echec que nul
 # `apply` ne pouvait reparer (APPLY-ON=wsl linux).
 #

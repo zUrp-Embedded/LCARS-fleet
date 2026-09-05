@@ -12,8 +12,8 @@
 # n'honorait pas : un mensonge operationnel, pas une lacune de confort.
 #
 # Second fait tenu ici : NOTRE PROPRE CLIENT N'EST PAS UN ETRANGER. L'appartenance se prouvait par
-# les `redirect_uris` — or ce sont precisement eux qui changent. Une boite qui change ses entrees
-# voyait donc son ancien client comme celui d'une autre boite : elle le laissait vivre en le
+# les `redirect_uris` — or ce sont precisement eux qui changent. Un conteneur qui change ses entrees
+# voyait donc son ancien client comme celui d'un autre conteneur : il le laissait vivre en le
 # denoncant, et en creait un second. L'ancrage est le `client_id` de NOTRE fichier.
 #
 # Aucune socket : `curl` est une doublure en tete de PATH, et ce qui est mesure est la decision du

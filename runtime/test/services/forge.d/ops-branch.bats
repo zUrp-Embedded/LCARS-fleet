@@ -12,8 +12,8 @@
 #
 # ⚠ CE QUE CES TEMOINS TIENNENT VRAIMENT, c'est la difference entre deux silences. Le module tourne
 # en 52 ; le jeton systeme est minte par 50 — mais au PREMIER boot la forge n'est pas encore semee,
-# donc 50 n'a rien pu frapper et le fichier n'existe pas. Rendre ECHEC faisait publier `rc=1` a une
-# boite dont le seul tort etait d'etre neuve, et le vrai etat — « ca se posera a la convergence
+# donc 50 n'a rien pu frapper et le fichier n'existe pas. Rendre ECHEC faisait publier `rc=1` a un
+# conteneur dont le seul tort etait d'etre neuf, et le vrai etat — « ca se posera a la convergence
 # suivante » — n'etait dit nulle part. Un DRIFT dit exactement ca, et un jeton qui ne viendrait
 # JAMAIS reste visible a chaque passage au lieu de disparaitre dans un echec de boot que personne
 # ne relit.
@@ -60,7 +60,7 @@ EOF
   chmod +x "$BIN/curl"
 }
 
-@test "jeton PAS ENCORE la : drift (rc 2), jamais un echec — une boite neuve n'est pas en panne" {
+@test "jeton PAS ENCORE la : drift (rc 2), jamais un echec — un conteneur neuf n'est pas en panne" {
   stub_curl 404
   export LCARS_SYSTEM_TOKEN_FILE="$LCARS_PRIVATE_DIR/absent.gitea_token"
   run bash "$MODULE" apply

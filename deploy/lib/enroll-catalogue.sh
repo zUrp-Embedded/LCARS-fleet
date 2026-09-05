@@ -20,7 +20,7 @@
 # USAGE
 #   enroll-catalogue.sh --tofu-dir <dir> [--catalogue <root>]
 #                       [--image <img>] [--repo <fleet-dir>] [--release <bin>]
-#                       [--served "<roles deja servis par cette boite>"]
+#                       [--served "<roles deja servis par ce conteneur>"]
 #
 #   TROIS chemins de lecture, selon ce qu'on a sous la main :
 #     --image <img>    une image livree   -> docker run --rm IMG roles-tfvars [<root>]
@@ -50,9 +50,9 @@ while [[ $# -gt 0 ]]; do
     --image)     IMAGE="${2:?}";     shift 2 ;;
     --repo)      REPO="${2:?}";      shift 2 ;;
     --release)   RELEASE="${2:?}";   shift 2 ;;
-    # Les roles DEJA servis par cette boite (sortie d'un enrolement precedent, ou le defaut de
+    # Les roles DEJA servis par ce conteneur (sortie d'un enrolement precedent, ou le defaut de
     # provision-lib). Sans eux, le PROV_ROLES rendu ici est complet pour CE catalogue et faux pour
-    # la boite : le mint ne verrait plus les autres.
+    # le conteneur : le mint ne verrait plus les autres.
     --served)    SERVED="${2:?}";    shift 2 ;;
     # Borne RELATIVE, ligne terminale EXCLUE : une plage a numeros absolus fait glisser la fenetre
     # sur le code des qu'une ligne de l'en-tete bouge. `^[^#]` ne matche pas une ligne vide, donc la
@@ -97,7 +97,7 @@ elif [[ -n "$RELEASE" ]]; then
   # `"$RELEASE_BIN" eval "Fleet.Roster.eval_tfvars(...)"`. Docker n'y sert qu'a transporter la
   # release. Quand la release est DEJA POSEE sur la machine, le detour n'a plus d'objet.
   #
-  # POURQUOI ELLE EXISTE : les deux autres portes couvrent la boite (`--image`, docker) et le
+  # POURQUOI ELLE EXISTE : les deux autres portes couvrent le conteneur (`--image`, docker) et le
   # poste en livraison SOURCE (`--repo`, mix). Un poste en livraison BINAIRE n'a ni l'un ni
   # l'autre — pas de mix, c'est le geste R5 qui le veut ; pas d'image, c'est un poste. Il a la
   # release (vu : `mix: ABSENT` sur une machine neuve).
@@ -157,7 +157,7 @@ ORG_LINE="$(printf '%s' "$TFVARS" | python3 -c 'import json,sys; print(json.load
 
 if [[ -z "$SERVED" ]]; then
   say "⚠ --served absent : PROV_ROLES ci-dessous couvre CE catalogue et les comptes systeme, PAS"
-  say "  les roles des autres catalogues deja servis par la boite. Si elle en sert d'autres, unir"
+  say "  les roles des autres catalogues deja servis par le conteneur. S'il en sert d'autres, unir"
   say "  les listes avant le mint (un role sans token bloque au premier dispatch, pas a l'enrolement)."
 fi
 
@@ -167,9 +167,9 @@ if [[ -d "$TOFU_DIR/instance" ]]; then
   say "  instance existante), le rejouer rend « user already exists » et fait echouer l'apply."
   say "  Retire-le du dossier de travail si la forge porte deja ses comptes systeme."
 fi
-say '⚠ PIEGE 2 — le mot de passe. tofu cree les comptes avec UN seul seed_password ; la boite,' 
-say "  elle, tient une carte PAR ROLE (/opt/lcars/var/tokens/forge-role-passwords.json). Les deux ne se"
-say "  parlent pas : passe a tofu le seed que la boite attend, sinon le mint des jetons rend"
+say '⚠ PIEGE 2 — le mot de passe. tofu cree les comptes avec UN seul seed_password ; le conteneur,' 
+say "  lui, tient une carte PAR ROLE (/opt/lcars/var/tokens/forge-role-passwords.json). Les deux ne se"
+say "  parlent pas : passe a tofu le seed que le conteneur attend, sinon le mint des jetons rend"
 say "  « invalid username, password or token » sur les comptes neufs, et seulement sur eux."
 say ""
 

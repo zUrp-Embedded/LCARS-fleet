@@ -189,7 +189,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   code_of "$REPO/runtime/services/lcars_socket.py" | grep -q 'getgrnam'
 }
 
-@test "MUR 3: le convergeur ne lit plus l'autorite de la boite" {
+@test "MUR 3: le convergeur ne lit plus l'autorite du conteneur" {
   # Il PROVISIONNE — un compte unix ne se cree pas au moment ou quelqu'un tape. Il n'AUTORISE pas :
   # ca se demande a l'instant ou ca compte. Son unique usage du jeton master etait la projection.
   local c="$REPO/runtime/services/human-converger.sh"
@@ -203,8 +203,8 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 # ─── MUR 5 — LE DECK A UNE IDENTITE A LUI, ET LE FICHIER DE SON SECRET LA NOMME ─────────────────
 #
 # ⚠ `nobody` N'EST PAS UNE IDENTITE, c'est la convention de ceux qui n'en ont pas choisi. Le prix ne
-# se lisait pas sur l'uid mais sur le GROUPE : `deck-oidc.json` porte le `client_secret` OAuth2 de la
-# boite et se posait `0640 root:nogroup`, avec pour motif « le mode le plus etroit qui marche ».
+# se lisait pas sur l'uid mais sur le GROUPE : `deck-oidc.json` porte le `client_secret` OAuth2 du
+# conteneur et se posait `0640 root:nogroup`, avec pour motif « le mode le plus etroit qui marche ».
 # Releve sur une Debian/Ubuntu ordinaire le 2026-08-27 : `nogroup` (gid 65534) est le groupe PRIMAIRE
 # de `sync`, `_apt`, `nobody` et `dhcpcd`. Un demon reseau lisait le secret.
 #
@@ -297,7 +297,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 }
 
 @test "MUR 4 bis: le nom du compte est une COPIE, et les copies s'accordent" {
-  # DEUX fichiers le copient, et deux seulement : le rail BOITE. `entrypoint.sh` et le `Dockerfile`
+  # DEUX fichiers le copient, et deux seulement : le rail CONTENEUR. `entrypoint.sh` et le `Dockerfile`
   # ne sourcent pas `provision-lib.sh` — ils ne peuvent pas LIRE le nom, donc ils l'ecrivent. Les
   # deux modules du rail POSTE le lisaient en `${PROV_AUTHORITY_USER:-lcars-authority}` : une copie
   # sur une branche morte, retiree le 2026-08-27 (`MUR 2` de `variable_walls` la refuse desormais).

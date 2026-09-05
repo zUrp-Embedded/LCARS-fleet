@@ -2,7 +2,7 @@
 # SOURCE: deploy/container
 # AUTHOR: DrDree
 # STARDATE: 2026-08-19
-# STATUS: PROTO-V2 — LE délégué de la BOÎTE : les douze verbes, jumeau de `deploy/provision`
+# STATUS: PROTO-V2 — LE délégué du CONTENEUR : les douze verbes, jumeau de `deploy/provision`
 # ⚠ L'AIDE SE DÉLIMITE PAR SON CONTENU, JAMAIS PAR DES NUMÉROS DE LIGNE : `sed -n '6,35p'` tronque
 # en silence dès qu'on insère une ligne en tête, et une aide amputée ne se signale pas.
 # LCARS fleet v2 en conteneur. Modèle : l'image embarque le runtime déployé (release RO) + sshd
@@ -14,7 +14,7 @@
 #   pull             tire l'image LCARS_IMAGE depuis son registre — le geste PROD. « up » ne fait
 #                    ni l'un ni l'autre : une mise à jour est TOUJOURS un geste de l'admin
 #   up               démarre le conteneur fleet (détaché). La forge est à TOI, ou LCARS te la
-#                    fabrique : « install.sh --container --bench » monte forge jetable + boîte + runner
+#                    fabrique : « install.sh --container --bench » monte forge jetable + conteneur + runner
 #                    CI en un geste. Sans ça, apporte la tienne (FORGE_BASE_URL + un token master)
 #   status           l'état de l'INSTANCE vu de l'hôte : conteneur, santé, verdicts du boot et des
 #                    gestes de forge, humains, tampon de l'image. Sortie 0 sain · 1 dégradé · 2 panne
@@ -23,21 +23,21 @@
 #   down             arrête et retire lcars (les volumes restent)
 #   reset            détruit lcars : conteneur + image + volume /home. La forge n'est PAS
 #                    dans ce projet : aucune commande d'ici ne peut l'atteindre
-#   source-push [DIR] copie TON clone LCARS dans la boîte (/home/projects/LCARS) — la jambe
+#   source-push [DIR] copie TON clone LCARS dans le conteneur (/home/projects/LCARS) — la jambe
 #                     source du triangle, sans laquelle la fleet ne peut pas se maintenir
 #   config           pose CÔTÉ HÔTE (~/.lcars/container/<projet>.env, <projet>.secrets/) l'env et les
 #                    secrets de l'instance : URL de forge, siège, ports, token master, seed. Sans
 #                    variable : montre ce qui est posé. « container up » les donne au conteneur (env →
-#                    compose, secrets → /run/secrets), le produit les importe au boot. Si la boîte
+#                    compose, secrets → /run/secrets), le produit les importe au boot. Si le conteneur
 #                    tourne, un secret y va tout de suite (rotation) ; l'env attend un « up »
 #   forge-check      le contrat que TA forge doit tenir + les gestes pour l'y amener
-#   forge-apply      pose la structure sur TA forge (OpenTofu tourne DANS la boîte — rien à
+#   forge-apply      pose la structure sur TA forge (OpenTofu tourne DANS le conteneur — rien à
 #                    installer chez toi). Rejouable : un second passage importe ce qui existe
 #   runner-token     imprime un jeton d'enregistrement pour TON runner CI (usage unique)
 #   help             cette aide
 #
 # -p <projet> (ou LCARS_PROJECT) : QUEL déploiement on vise. Défaut « lcars ». Un poste de dev en
-#   porte plusieurs à la fois (un banc de validation, une boîte de travail, un rail) et le nom du
+#   porte plusieurs à la fois (un banc de validation, un conteneur de travail, un rail) et le nom du
 #   projet est la SEULE chose qui les distingue. Les commandes qui créent ou détruisent refusent
 #   d'agir sur un projet que ce compose n'a pas créé — cf. la garde plus bas, elle mesure.
 #
@@ -45,7 +45,7 @@
 #   LCARS_PROJECT              projet compose visé (défaut lcars) — équivalent de -p
 #   LCARS_CONTAINER_CONF_DIR         où vit la conf par projet (défaut ~/.lcars/container) — cf. « config »
 #   LCARS_HUMAN                login WORKER cible par shell/hint (defaut lcars) — PAS le
-#                              sysadmin de la boite (celui-la est `admiral`, cf. LCARS_ADMIRAL, entrypoint)
+#                              sysadmin du conteneur (celui-la est `admiral`, cf. LCARS_ADMIRAL, entrypoint)
 #   LCARS_UID                  uid de l'humain (défaut 1000)
 #   LCARS_SSH_AUTHORIZED_KEYS  clés publiques SSH (contenu authorized_keys)
 #   LCARS_SSH_PORT             bind du port SSH (défaut 127.0.0.1:2222)
@@ -53,7 +53,7 @@
 #   FORGE_BASE_URL             URL de TA forge VUE DU CONTENEUR (Docker Desktop :
 #                              http://host.docker.internal:3300 · docker natif : le nom de service
 #                              sur un réseau partagé, http://gitea:3000). « localhost » y désigne
-#                              la BOÎTE — vide = modules forge en instruct-only, le doctor le dit
+#                              le CONTENEUR — vide = modules forge en instruct-only, le doctor le dit
 #   FORGE_PUBLIC_URL           la MÊME forge VUE DU NAVIGATEUR (ce que TU tapes). Défaute sur
 #                              FORGE_BASE_URL, et ce défaut n'est juste que si les deux
 #                              observateurs voient la même adresse — sinon le login OAuth2 part
@@ -119,7 +119,7 @@ COMPOSE=($PROV_COMPOSE_CMD)
 SECRETS_FILE="$SCRIPT_DIR/deploy/docker/docker-compose.secrets.yml"
 compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" -f "$SECRETS_FILE" -p "$PROJECT" "$@"; }
 
-# ⚠ APRES LE PARSING DE `-p` : pose avant, une boite lancee avec `-p autre` recevrait le magasin du
+# ⚠ APRES LE PARSING DE `-p` : pose avant, un conteneur lance avec `-p autre` recevrait le magasin du
 # projet par defaut, sans erreur. Exporte parce que le lecteur est compose, un PROCESSUS FILS —
 # une variable de shell ne l'atteint pas.
 export LCARS_STORE_PREFIX="$PROJECT"
@@ -128,7 +128,7 @@ export LCARS_STORE_PREFIX="$PROJECT"
 # ⚖ user 2026-09-04 (Q1) : le modèle Docker — « container config » pose l'env et les secrets SUR L'HÔTE,
 # par projet, et « container up » les donne au conteneur (env → compose, secrets → /run/secrets par
 # l'override). Le produit importe les secrets au premier boot (init de l'instance) ; rien n'est
-# demandé à une boîte qui tourne. L'env EXPLICITE de l'appelant PRIME sur le fichier — c'est le
+# demandé à un conteneur qui tourne. L'env EXPLICITE de l'appelant PRIME sur le fichier — c'est le
 # modèle compose, et c'est ce qui permet un « FORGE_BASE_URL=… deploy/container up » ponctuel sans
 # réécrire la conf.
 CONTAINER_CONF_DIR="${LCARS_CONTAINER_CONF_DIR:-$HOME/.lcars/container}"
@@ -238,7 +238,7 @@ cmd_up() {
   # C'est ce que l'externalite achete : `down -v` ne PEUT pas emporter trois heures de toolchain.
   store_ensure_volumes "$DOCKER" || { echo "container: magasin non pose — up annule" >&2; exit 1; }
   # ⚠ L'IMAGE EST UNE PRECONDITION, ET C'EST ICI QU'ELLE SE VERIFIE DEPUIS E4 (D4). La PORTE la
-  # batissait : elle sondait `image inspect` et lancait `container build` avant de deleguer. Une boite de
+  # batissait : elle sondait `image inspect` et lancait `container build` avant de deleguer. Un conteneur de
   # production TIRE son image — epinglee par digest, avec le gate joue UNE FOIS par le rail qui la
   # construit ; un client ne compile pas chez son hote. Le build reste un geste de DEV, et c'est ce
   # script qui sait s'il a une image, pas la porte.
@@ -283,12 +283,12 @@ await_provision_verdict() {
     rc="$(compose exec -T lcars cat /run/lcars-provision.rc 2>/dev/null | tr -d '[:space:]')" || rc=""
     [[ "$rc" =~ ^[0-9]+$ ]] && break
     rc=""
-    # ⚠ UNE BOITE QUI ATTEND SA CONFIGURATION NE RENDRA JAMAIS DE VERDICT, et l'entrypoint le dit
+    # ⚠ UN CONTENEUR QUI ATTEND SA CONFIGURATION NE RENDRA JAMAIS DE VERDICT, et l'entrypoint le dit
     # (`/run/lcars-boot.state`). Attendre le timeout ici, c'est faire patienter l'operateur cinq
     # a quinze minutes pour lui annoncer « NON LU » — alors que le geste qui debloque est connu.
     if [[ "$(compose exec -T lcars cat /run/lcars-boot.state 2>/dev/null | tr -d '[:space:]')" == "awaiting-config" ]]; then
       echo ""
-      echo "container up: boîte EN ATTENTE DE CONFIGURATION — le siège ne peut pas se dériver sans l'autorité de la forge."
+      echo "container up: conteneur EN ATTENTE DE CONFIGURATION — le siège ne peut pas se dériver sans l'autorité de la forge."
       echo "              FORGE_ADMIN_TOKEN=… FORGE_SEED_PASSWORD=… deploy/container -p $PROJECT config, puis « docker restart »."
       return 0
     fi
@@ -298,14 +298,14 @@ await_provision_verdict() {
   case "$rc" in
     "")
       echo "container up: verdict de provisionnement NON LU après $((${LCARS_UP_VERDICT_TIMEOUT:-900}))s."
-      echo "              La boîte tourne ; son état n'est PAS mesuré. « deploy/container status »." ;;
+      echo "              Le conteneur tourne ; son état n'est PAS mesuré. « deploy/container status »." ;;
     0)
       echo "container up: provisionnement CONVERGÉ." ;;
     2)
       echo "container up: provisionnement APPLIQUÉ avec DRIFT RÉSIDUEL — un geste manque."
       echo "              « deploy/container status » le dit ; « deploy/container logs » nomme lequel." ;;
     *)
-      echo "container up: provisionnement EN ÉCHEC (rc=$rc) — la boîte tourne et ne produira RIEN."
+      echo "container up: provisionnement EN ÉCHEC (rc=$rc) — le conteneur tourne et ne produira RIEN."
       echo "              « deploy/container logs » nomme ce qui manque." >&2
       return 1 ;;
   esac
@@ -316,7 +316,7 @@ await_provision_verdict() {
   case "$hrc" in
     0)  echo "container up: humain(s) de fleet PRÉSENT(S) — « fleet start » a quelqu'un." ;;
     "") echo "container up: population d'humains NON MESURÉE (pas de /run/lcars-humans.rc)." ;;
-    *)  echo "container up: AUCUN humain de fleet — la boîte tourne, et personne ne peut lancer de fleet."
+    *)  echo "container up: AUCUN humain de fleet — le conteneur tourne, et personne ne peut lancer de fleet."
         echo "              Enrôle quelqu'un sur la forge, ajoute-le à la team « humans » :"
         echo "              le convergeur le matérialise au tour suivant (30 s)." ;;
   esac
@@ -326,7 +326,7 @@ cmd_shell() { compose exec -it -u "${LCARS_HUMAN:-lcars}" lcars bash; }
 
 # ─── CE QUE L'OPÉRATEUR FOURNIT, ET QUI RESTE ───────────────────────────────────────────────────
 
-# Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans la boîte.
+# Le secret voyage par STDIN, de bout en bout : ni argv du client docker, ni argv dans le conteneur.
 #
 gesture() { # $1=geste  (le secret, s'il y en a un, arrive sur NOTRE stdin)
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
@@ -355,7 +355,7 @@ cmd_config() {
       echo "    FORGE_ADMIN_TOKEN=<token master site-admin>   l'autorité qui CRÉE sur ta forge"
       echo "       Dans Gitea : Settings → Applications → Generate New Token, scope « all »."
       echo "    FORGE_SEED_PASSWORD=<mot de passe>            posé sur les comptes À LEUR CRÉATION"
-      echo "       c'est lui que la boîte relit pour minter les tokens de rôle — le changer ne"
+      echo "       c'est lui que le conteneur relit pour minter les tokens de rôle — le changer ne"
       echo "       change rien sur la forge et casserait le mint."
       echo "  Ce qui n'est pas donné n'est pas touché. Puis :  deploy/container up"
     } >&2
@@ -391,13 +391,13 @@ cmd_config() {
   for f in forge-master.token:"$token" forge-seed.pass:"$seed"; do
     v="${f#*:}"; [[ -n "$v" ]] || continue
     ( umask 077; printf '%s\n' "$v" > "$CONF_SECRETS/${f%%:*}.tmp" ) && mv -f "$CONF_SECRETS/${f%%:*}.tmp" "$CONF_SECRETS/${f%%:*}"
-    echo "container config: ${f%%:*} posé ($CONF_SECRETS, toi seul) — la boîte l'importe et le VÉRIFIE au boot"
+    echo "container config: ${f%%:*} posé ($CONF_SECRETS, toi seul) — le conteneur l'importe et le VÉRIFIE au boot"
   done
-  # une boîte qui tourne déjà : le secret y va TOUT DE SUITE (rotation au jour 400), l'env attend un up
+  # un conteneur qui tourne déjà : le secret y va TOUT DE SUITE (rotation au jour 400), l'env attend un up
   if [[ -n "$(compose ps -q lcars 2>/dev/null)" ]]; then
     [[ -n "$token" ]] && { printf '%s' "$token" | gesture config-token || exit 1; }
     [[ -n "$seed" ]]  && { printf '%s' "$seed"  | gesture config-seed  || exit 1; }
-    [[ "${#CONF_GIVEN[@]}" -gt 0 ]] && echo "container config: la boîte tourne — l'env ne la touche qu'au prochain « deploy/container up » (conteneur recréé)"
+    [[ "${#CONF_GIVEN[@]}" -gt 0 ]] && echo "container config: le conteneur tourne — l'env ne le touche qu'au prochain « deploy/container up » (conteneur recréé)"
   else
     echo "container config: posé. Puis :  deploy/container up"
   fi
@@ -411,7 +411,7 @@ cmd_forge_apply() {
     || { echo "container forge-apply: échec — rien n'est supposé, relis la sortie ci-dessus" >&2; exit 1; }
   echo ""
   echo "container forge-apply: structure posée. Rejouable — un second passage IMPORTE ce qui existe."
-  echo "  deploy/container forge-check    # ce que la boîte voit de sa forge maintenant"
+  echo "  deploy/container forge-check    # ce que le conteneur voit de sa forge maintenant"
 }
 
 cmd_runner_token() {
@@ -473,7 +473,7 @@ cmd_status() {
   fi
   [[ "$state" == running ]] || rc=2
   [[ "$boot" == init-failed || "$health" == unhealthy ]] && rc=2
-  # en attente de configuration : la boite est DEBOUT pour etre configuree, son healthcheck echoue
+  # en attente de configuration : le conteneur est DEBOUT pour etre configure, son healthcheck echoue
   # par construction (rien n'ecoute) — c'est un etat degrade (1), pas une panne (2)
   [[ "$boot" == awaiting-config && "$state" == running ]] && rc=1
   if [[ "$rc" -eq 0 ]]; then
@@ -545,7 +545,7 @@ cmd_source_push() {
     git config --system --replace-all safe.directory /home/projects/LCARS
     test -d /home/projects/LCARS/.git
     git -C /home/projects/LCARS rev-parse --short HEAD"
-  echo "container: source posée (/home/projects/LCARS dans la boîte) ; la fleet peut se maintenir."
+  echo "container: source posée (/home/projects/LCARS dans le conteneur) ; la fleet peut se maintenir."
 }
 
 cmd_forge_check() {
@@ -563,11 +563,11 @@ deux observateurs. Les confondre casse la porte du deck ; la règle est écrite 
 dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
 
   1. SON ADRESSE VUE DU CONTENEUR  → FORGE_BASE_URL=http://<hôte-ou-service>:<port>
-     C'est le RUNTIME qui l'ouvre, depuis l'intérieur : « localhost » y désigne la BOÎTE,
+     C'est le RUNTIME qui l'ouvre, depuis l'intérieur : « localhost » y désigne le CONTENEUR,
      jamais ta machine. Le bon chemin dépend du daemon, et il n'y en a pas d'universel :
        · Docker Desktop (WSL2, macOS) → http://host.docker.internal:<port publié>
        · Docker natif (Linux)         → host.docker.internal N'EXISTE PAS sans un
-         « extra_hosts: host-gateway » que ce compose ne déclare pas. Attache la boîte au
+         « extra_hosts: host-gateway » que ce compose ne déclare pas. Attache le conteneur au
          réseau de ta forge et vise le NOM DE SERVICE avec son port INTERNE :
          http://gitea:3000 — surtout pas le port publié.
          (deploy/docker/forge-compose.yml porte cette règle et son motif)
@@ -581,7 +581,7 @@ dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
 
   3. UN TOKEN MASTER (site-admin) ET UN SEED. Dans Gitea : Settings → Applications →
      Generate New Token, scope « all ». Le seed est le mot de passe que les comptes de rôle
-     recevront à leur création. Tu les poses UNE FOIS, ils restent dans la boîte :
+     recevront à leur création. Tu les poses UNE FOIS, ils restent dans le conteneur :
 
          FORGE_ADMIN_TOKEN=<token-master> FORGE_SEED_PASSWORD=<seed> deploy/container config
 
@@ -594,10 +594,10 @@ dans lib/provision-lib.sh, à la déclaration de PROV_FORGE_PUBLIC_URL.
      POURQUOI LE TOKEN RESTE : la structure d'une forge change pendant toute la vie du
      système — enrôler un catalogue crée un compte par rôle. Au jour 400, ce geste a le même
      besoin qu'au premier jour. Un credential à re-fournir rendrait chacun d'eux manuel.
-     Le prix, dit et non découvert : la boîte détient de quoi tout créer et tout détruire
+     Le prix, dit et non découvert : le conteneur détient de quoi tout créer et tout détruire
      sur ta forge. Le boot nominal, lui, n'en a pas besoin — l'apply converge en lisant.
 
-     POURQUOI LE SEED RESTE : c'est lui que la boîte relit pour minter les tokens de rôle,
+     POURQUOI LE SEED RESTE : c'est lui que le conteneur relit pour minter les tokens de rôle,
      et tofu ne le REMPLACE PAS sur un compte existant (mesuré). En changer casserait le
      mint sans rien changer sur la forge.
 

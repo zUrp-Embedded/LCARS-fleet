@@ -2,18 +2,18 @@
 # SOURCE: runtime/services/container/init.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: actif — l'INIT DE L'INSTANCE de la boite, cote produit : le siege, les zones, le layout du volume
+# STATUS: actif — l'INIT DE L'INSTANCE du conteneur, cote produit : le siege, les zones, le layout du volume
 #
 # ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : « pour docker, pourquoi on pourrait pas
 # build l'image, et qu'elle reste alive entre 2 demarrages ? … dans docker, le deploy semble n'avoir
 # aucun interet a partir dans le container ». Le modele est celui de Docker : l'image est le
-# produit, le conteneur une instance, l'etat dans le volume. Ce que le boot de la boite faisait par
+# produit, le conteneur une instance, l'etat dans le volume. Ce que le boot du conteneur faisait par
 # `provision apply --substrate docker` — rejouer l'INSTALLEUR a chaque demarrage — est ici, cote
 # produit, en un geste idempotent : ce qu'une instance neuve doit avoir sur son volume, et rien
 # de plus. Pas de `mix`, pas de table de l'installeur, pas de `deploy/`.
 #
 # CE QUE CE GESTE POSE (et d'ou chaque ligne vient) :
-#   - le SIEGE : le sysadmin de la boite — resolu (table `forge-uid.map`, sinon le #1 de la forge
+#   - le SIEGE : le sysadmin du conteneur — resolu (table `forge-uid.map`, sinon le #1 de la forge
 #     par le jeton master, sinon la semence `LCARS_ADMIRAL`), cree a l'uid `LCARS_UID`, sudoer,
 #     `authorized_keys` s'il y en a une. C'etait le §1 de l'entrypoint.
 #   - `/etc/lcars/seat.uid` : ce que GUARD B lit pour refuser une fleet sous le siege.
@@ -32,7 +32,7 @@
 #
 # VERDICT : le protocole des modules. `apply` rend 0 converge, 2 drift residuel, 1 echec ; `secrets`
 # et `store` rejouent une seule de ses parts (l'import des secrets, le magasin) avec le meme verdict.
-# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 3 quand la boite
+# `seat` seul resout et enregistre le siege, ecrit `/run/lcars-seat.login`, et rend 3 quand le conteneur
 # n'a rien pour le determiner — l'etat « en attente de configuration ».
 
 set -euo pipefail
@@ -64,7 +64,7 @@ seat_record() { # seat_record <login> <uid>
   printf '1\t%s\t%s\n' "$2" "$1" >> "$UID_MAP_FILE" 2>/dev/null || return 1
   chmod 0640 "$UID_MAP_FILE" 2>/dev/null || true
 }
-# Trois sources, dans l'ordre de leur durabilite : la table (ce que cette boite a deja enregistre),
+# Trois sources, dans l'ordre de leur durabilite : la table (ce que ce conteneur a deja enregistre),
 # la forge (le #1, celui qui l'a installee), la semence de l'appelant (`LCARS_ADMIRAL`, le cas
 # from-scratch). Une semence qui CONTREDIT une source durable est une divergence, pas un choix :
 # le home du siege vit sous UN nom, et on ne le renomme pas en silence.
@@ -145,7 +145,7 @@ source_trees() {
     if git clone "${args[@]}" "$remote" "${src}.part" 2>&1 | sed 's/^/[git] /' && mv "${src}.part" "$src"; then
       chown -R "$SEAT_LOGIN:$LCARS_FLEET_GROUP" "$src"; p_chg "source clonee : $remote${ref:+ ($ref)} → $src"
     else
-      rm -rf "${src}.part"; p_drift "CLONAGE ECHOUE ($remote) — la boite demarre sans source (la fleet ne pourra pas se maintenir)"
+      rm -rf "${src}.part"; p_drift "CLONAGE ECHOUE ($remote) — le conteneur demarre sans source (la fleet ne pourra pas se maintenir)"
     fi
   fi
   local work; work="/home/projects.ops/$(basename "$src")"
@@ -256,9 +256,9 @@ cmd_seat() {
 # /run/secrets ; l'instance les IMPORTE dans son repertoire prive au boot — une fois, et a nouveau
 # seulement s'ils changent (rotation). Le siege se derive ensuite du jeton master, donc l'import
 # precede tout. Un secret absent du montage n'est pas une faute : la voie d'avant (le geste
-# `config-token` dans la boite) reste jouable, et le drift se dit plus loin (tokens, seat).
+# `config-token` dans le conteneur) reste jouable, et le drift se dit plus loin (tokens, seat).
 # Le montage compose est en LECTURE SEULE (chmod y echoue) et arrive avec l'uid de l'hote — souvent
-# celui du siege. Une fois importe, on le DEMONTE (la boite a SYS_ADMIN pour bwrap) : il ne reste
+# celui du siege. Une fois importe, on le DEMONTE (le conteneur a SYS_ADMIN pour bwrap) : il ne reste
 # qu'un fichier vide ; hors conteneur (les temoins), on le ferme par le mode.
 close_secret_mount() { umount "$1" 2>/dev/null || chmod 0000 "$1" 2>/dev/null || true; }
 

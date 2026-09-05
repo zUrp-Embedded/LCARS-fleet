@@ -19,7 +19,7 @@ variable "seed_password" {
   description = "Mot de passe initial des comptes. Bots : simple formalité API (ils s'authentifient par token). Humain : change au 1er login."
 }
 
-# ⚠ PAS `human_username`, ET PAS DE DÉFAUT DÉRIVÉ DE `LCARS_HUMAN` : cette variable de boîte n'existe
+# ⚠ PAS `human_username`, ET PAS DE DÉFAUT DÉRIVÉ DE `LCARS_HUMAN` : cette variable de conteneur n'existe
 # pas (cf. `console.sh` : « Pas de defaut : il n'y a pas d'humain unique »), et un nom qui en tomberait (`${LCARS_FORGE_HUMAN:-${LCARS_HUMAN:-lcars}}`) serait un
 # résidu, pas un choix — alors que le compte que cette variable désigne a une raison d'être précise.
 #

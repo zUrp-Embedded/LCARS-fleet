@@ -84,11 +84,11 @@ EOS
   # le secret ne va PAS dans le fichier d'env, ni dans la sortie
   [ ! -e "$ENV_FILE" ] || refute grep -q 'tok-master' "$ENV_FILE"
   [[ "$output" != *"tok-master"* ]]
-  # boite eteinte : rien n'est pousse dans un conteneur
+  # conteneur eteint : rien n'est pousse dans un conteneur
   [ ! -e "$BATS_TEST_TMPDIR/pushed.token" ]
 }
 
-@test "config : la boite qui TOURNE recoit le secret tout de suite (rotation), l'env attend un up" {
+@test "config : le conteneur qui TOURNE recoit le secret tout de suite (rotation), l'env attend un up" {
   export STUB_IDS=c0ffee
   FORGE_ADMIN_TOKEN=tok-2 LCARS_ADMIRAL=zoe run bash "$SRC" config
   [ "$status" -eq 0 ]

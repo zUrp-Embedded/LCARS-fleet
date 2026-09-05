@@ -981,7 +981,7 @@ STUB
 # meme toolchain par deux mecanismes, avec deux versions ecrites a deux endroits :
 #
 #   rail poste   `provision-lib.sh` : PROV_ELIXIR_VERSION + PROV_ELIXIR_OTP_MAJOR, zip verifie sha256
-#   rail boite   `Dockerfile`       : ARG BUILD_IMAGE=hexpm/elixir:<ver>-erlang-<otp>...@sha256:...
+#   rail conteneur   `Dockerfile`       : ARG BUILD_IMAGE=hexpm/elixir:<ver>-erlang-<otp>...@sha256:...
 #
 # Ce temoin comparait les deux chiffres. Il etait juste, et il a tenu — mais surveiller l'accord de
 # deux autorites est le second choix : les DEUX rails demandent maintenant `erlang` et `elixir` a

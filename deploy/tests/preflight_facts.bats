@@ -100,7 +100,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 # ─── DOCKER : MESURE PARTOUT, REFUS LA OU IL ETAIT DEJA ─────────────────────────────────────────
 
 @test "docker est mesure sur TOUT substrat — c'etait le trou du preflight" {
-  # Le rail BOITE tourne sur n'importe quel substrat et docker y est sa seule condition d'existence.
+  # Le rail CONTENEUR tourne sur n'importe quel substrat et docker y est sa seule condition d'existence.
   # Ne le mesurer que sous WSL laissait la porte deviner — ou refaire la sonde, ce qu'elle faisait.
   local s
   for s in wsl linux docker; do
@@ -139,7 +139,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 # ─── LES FAITS NEUFS ────────────────────────────────────────────────────────────────────────────
 
 @test "forge FOURNIE : l'URL est un fait, et sa joignabilite en est un autre" {
-  # `FORGE_BASE_URL` posee = « j'ai deja une forge, consomme-la ». Le rail boite s'y raccroche : si
+  # `FORGE_BASE_URL` posee = « j'ai deja une forge, consomme-la ». Le rail conteneur s'y raccroche : si
   # elle ne repond pas, il echouera au premier geste — et la porte doit le dire AVANT la validation,
   # pas apres.
   preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-qui-n-existe-pas"
@@ -156,7 +156,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 }
 
 @test "wsl.conf ETRANGER est un avertissement, jamais un refus" {
-  # Le rail poste le REMPLACE en entier — c'est la frontiere de securite de la boite. L'operateur
+  # Le rail poste le REMPLACE en entier — c'est la frontiere de securite du conteneur. L'operateur
   # doit le voir avant de valider ; refuser pour autant bloquerait une machine parfaitement saine.
   run grep -n 'p_fact wslconf etranger' "$MOD"
   [ "$status" -eq 0 ]

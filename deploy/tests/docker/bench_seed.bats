@@ -63,7 +63,7 @@ code() { grep -vE '^\s*#' "$1"; }
   done
 }
 
-@test "DI-05 : sur le rail boite, --forge-project N est la BASE (LCARS_BASE) — la boite s'appelle N-fleet comme chez deploy/container" {
+@test "DI-05 : sur le rail conteneur, --forge-project N est la BASE (LCARS_BASE) — le conteneur s'appelle N-fleet comme chez deploy/container" {
   code "$INSTALL" | grep -qE 'export LCARS_BASE="\$\{PASSTHRU\[\$\(\(_i \+ 1\)\)\]\}"'
   refute grep -qE 'export LCARS_PROJECT="\$\{PASSTHRU' <(code "$INSTALL")
   grep -qE 'PROJECT="\$\{LCARS_PROJECT:-\$\{LCARS_BASE:-lcars\}-fleet\}"' "$BATS_TEST_DIRNAME/../../container"

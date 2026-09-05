@@ -99,7 +99,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
 }
 
 @test "le stage RUNTIME ne porte plus deploy/ — seul verify le copie, et final repart de runtime" {
-  # ⚖ user 2026-09-04 (Q1, lot 7) : rien dans la boite ne lit /opt/lcars/deploy.
+  # ⚖ user 2026-09-04 (Q1, lot 7) : rien dans le conteneur ne lit /opt/lcars/deploy.
   local r; r="$(sed -n '/^FROM .* AS runtime$/,/^FROM runtime AS verify$/p' "$DF" | grep -vE '^\s*#|`#')"
   refute grep -qE '^COPY deploy ' <<<"$r"
   refute grep -q '/opt/lcars/deploy' <<<"$r"

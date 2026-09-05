@@ -24,7 +24,7 @@ seed_local() {
 }
 
 @test "prov_roles sans release : le plancher tenu a la main, et rien de plus" {
-  # Chemin WSL avant `60-deploy`, ou boite sans release pose. Une boite doit pouvoir minter de quoi
+  # Chemin WSL avant `60-deploy`, ou conteneur sans release pose. Un conteneur doit pouvoir minter de quoi
   # demarrer meme quand la derivation est impossible.
   run bash -c "set -euo pipefail; export PROVISION_LIB='$LIB' PROV_CATALOGUES_DIR='$PROV_CATALOGUES_DIR' PROV_LCARS_CLI=/inexistant; source '$LIB'; prov_roles"
   [ "$status" -eq 0 ]

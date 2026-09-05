@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/container/init_secrets.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for container/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive de la boite
+# STATUS: bats tests for container/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive du conteneur
 #
 # ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets cote hote ; l'instance les importe au
 # boot. Une fois — et a nouveau seulement s'ils changent. Un montage vide n'est pas une faute.

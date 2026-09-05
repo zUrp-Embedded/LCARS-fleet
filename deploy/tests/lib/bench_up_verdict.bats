@@ -23,7 +23,7 @@ setup() {
   BENCH="$ROOT/deploy/docker/bench"
   # ⚠ LE DECOR RANGE UNE DOUBLURE LA OU LE CODE LA CHERCHE, jamais la ou il est commode de la poser.
   # `forge-runner.sh` vit dans `docker/`, pas dans `bench/` — et ce decor le posait dans `bench/`,
-  # donc il VALIDAIT le chemin faux : les temoins etaient verts pendant que le rail boite mourait
+  # donc il VALIDAIT le chemin faux : les temoins etaient verts pendant que le rail conteneur mourait
   # sur « Aucun fichier ou dossier de ce nom » (mesure .63, 2026-08-30). Un decor qui recopie le
   # defaut le rend indetectable, et c'est la seule espece de test qui coute plus qu'elle ne rapporte.
   DOCKER_D="$ROOT/deploy/docker"
@@ -48,7 +48,7 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../lib/store.sh" "$ROOT/deploy/lib/store.sh"
 
   # L'amorçage forge : il REUSSIT, point. ⚠ IL NE POSE PLUS LE MASTER TOKEN SUR L'HOTE : depuis le
-  # 2026-08-16 l'autorite vit DANS la boite (`/opt/lcars/var/tokens/forge-master.token`, pose par
+  # 2026-08-16 l'autorite vit DANS le conteneur (`/opt/lcars/var/tokens/forge-master.token`, pose par
   # `forge-gestures.sh config-token`), et `bench-up` l'y lit. Cette doublure ecrivait dans le
   # `--tofu-dir` que le banc n'a plus.
   # ⚠ LA DOUBLURE REFUSE CE QU'ELLE NE COMPREND PAS, comme le vrai script. Elle etait `exit 0` nu :
@@ -108,10 +108,10 @@ FAKE
   # Etat nominal « oui » ; le temoin de son absence l'ecrase.
   OP_TOKEN_OUT="$BATS_TEST_TMPDIR/op_token.out"
   echo "oui" > "$OP_TOKEN_OUT"
-  # Le MASTER token, desormais lu dans la boite et plus sur l'hote. Nominal : present.
+  # Le MASTER token, desormais lu dans le conteneur et plus sur l'hote. Nominal : present.
   MASTER_TOKEN_OUT="$BATS_TEST_TMPDIR/master_token.out"
   echo "MASTER" > "$MASTER_TOKEN_OUT"
-  # LE VERDICT QUE LA BOITE PUBLIE SUR ELLE-MEME (`/run/lcars-provision.rc`, pose par l'entrypoint a
+  # LE VERDICT QUE LE CONTENEUR PUBLIE SUR LUI-MEME (`/run/lcars-provision.rc`, pose par l'entrypoint a
   # chaque boot). Nominal : 0, convergee. Un temoin l'ecrase pour mesurer le refus.
   # ⚠ CE FICHIER DOIT AVOIR UNE VALEUR NOMINALE, et pas rester absent « puisque ca passe quand meme ».
   # Absent, le script conclut « NON MESUREE » — ce qui n'est PAS un echec, donc les 24 temoins
@@ -119,15 +119,15 @@ FAKE
   # tout passer ne teste rien : il faut que le nominal soit le NOMINAL.
   CONTAINER_PROV_RC_OUT="$BATS_TEST_TMPDIR/container_prov_rc.out"
   echo "0" > "$CONTAINER_PROV_RC_OUT"
-  # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom de la
-  # boite en second argument (`exec <container> cat …`), donc un motif sur les deux premiers mots rate
+  # ⚠ La doublure decide sur l'ARGV COMPLET, jamais sur `$1 $2` : les `exec` portent le nom du
+  # conteneur en second argument (`exec <container> cat …`), donc un motif sur les deux premiers mots rate
   # tous les `exec` — et le script meurt sur « token systeme absent » avant d'atteindre le verdict,
   # c'est-a-dire avant ce que ces tests mesurent.
   cat > "$BINDIR/dockerstub" <<FAKE
 #!/usr/bin/env bash
 argv="\$*"
 # Les variables du container traversent en ENVIRONNEMENT, pas en argv : la doublure les depose quand elle
-# voit le 'create', sinon aucun temoin ne peut lire ce que la boite recoit.
+# voit le 'create', sinon aucun temoin ne peut lire ce que le conteneur recoit.
 # (guillemets simples et pas d'accents graves : ce heredoc n'est PAS quote, donc bash y fait de la
 #  SUBSTITUTION DE COMMANDE — un mot entre accents graves y est EXECUTE, meme dans un commentaire.)
 case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/container.env" ;; esac
@@ -146,7 +146,7 @@ case "\$1 \$2" in
      esac ;;
 esac
 case "\$argv" in
-  # L'AUTORITE, LUE DANS LA BOITE. Etat nominal : elle y est. Le temoin de son absence l'efface —
+  # L'AUTORITE, LUE DANS LE CONTENEUR. Etat nominal : elle y est. Le temoin de son absence l'efface —
   # c'est ce que le verdict « pas de master token » mesure desormais.
   *forge-master.token*)   cat "$MASTER_TOKEN_OUT" ;;
   *forge-gestures.sh\ runner-token*) echo REG-TOKEN-TEMOIN ;;
@@ -158,7 +158,7 @@ case "\$argv" in
   *system_starfleet.gitea_token*) echo TOKEN-SYSTEME ;;
   *"*.gitea_token"*)      echo 9 ;;
   # Le token OPERATEUR, dans le home du worker — distinct du glob /opt/lcars/var/tokens ci-dessus, qui vise
-  # les tokens de ROLE. Deux fichiers homonymes, deux rails : celui-ci est la voie de la boite vers
+  # les tokens de ROLE. Deux fichiers homonymes, deux rails : celui-ci est la voie du conteneur vers
   # la forge, et 'bench-up.sh' l'EXIGE depuis 2026-08-15 (saute par les deux passes, sinon).
   *"~/.gitea_token"*)     cat "$OP_TOKEN_OUT" ;;
   *credentials.json*)     echo oui ;;
@@ -198,39 +198,39 @@ run_bench() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"banc PRET"* ]]
   [[ "$output" != *"PAS PRET"* ]]
-  # La boite a publie 0 : le verdict le DIT, il ne se contente pas de ne pas refuser.
+  # Le conteneur a publie 0 : le verdict le DIT, il ne se contente pas de ne pas refuser.
   [[ "$output" == *"converge  : convergee"* ]]
 }
 
-# ─── LA BOITE PUBLIE SON PROPRE VERDICT, ET IL COMPTE ────────────────────────────────────────────
-# MEME FAUTE QUE 6-133, AU SITE D'A COTE. L'entrypoint mesure la convergence de la boite et l'ecrit
+# ─── LE CONTENEUR PUBLIE SON PROPRE VERDICT, ET IL COMPTE ────────────────────────────────────────────
+# MEME FAUTE QUE 6-133, AU SITE D'A COTE. L'entrypoint mesure la convergence du conteneur et l'ecrit
 # dans `/run/lcars-provision.rc` — precisement parce qu'un echec de convergence NE TUE PAS le
-# conteneur : la boite doit rester joignable pour etre reparee. Elle survit donc a son propre echec,
+# conteneur : le conteneur doit rester joignable pour etre repare. Il survit donc a son propre echec,
 # se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck), et `bench-up` ne lisait pas le fichier.
-# Un banc dont la boite ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
+# Un banc dont le conteneur ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
 #
 # Le geste operateur (`deploy/container`, `await_provision_verdict`) le lisait deja. Deux chemins qui
 # lisent le meme fichier doivent en tirer le MEME verdict, sinon le fichier ne veut plus rien dire.
 
-@test "la boite publie un ECHEC de convergence → PAS PRET, exit 6, meme si tout le reste est vert" {
+@test "le conteneur publie un ECHEC de convergence → PAS PRET, exit 6, meme si tout le reste est vert" {
   echo "1" > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 6 ]
   [[ "$output" == *"PAS PRET"* ]]
-  [[ "$output" == *"BOITE"* ]]
+  [[ "$output" == *"CONTENEUR"* ]]
   [[ "$output" == *"rc=1"* ]]
   # Le refus nomme le geste de diagnostic, pas seulement l'echec : on repare avec, pas sans.
   [[ "$output" == *"provision doctor"* ]]
 }
 
-@test "un ECHEC de la boite prime sur un runner parfaitement servi — l'ordre est celui de la gravite" {
-  # Un runner qui sert impeccablement une boite qui ne produit rien est un banc qui ne produit rien.
-  # Ce temoin garde l'ORDRE des branches : intervertir ferait annoncer « banc PRET » a une boite
+@test "un ECHEC du conteneur prime sur un runner parfaitement servi — l'ordre est celui de la gravite" {
+  # Un runner qui sert impeccablement un conteneur qui ne produit rien est un banc qui ne produit rien.
+  # Ce temoin garde l'ORDRE des branches : intervertir ferait annoncer « banc PRET » a un conteneur
   # morte, exactement l'etat que ce correctif ferme.
   echo "3" > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 6 ]
-  [[ "$output" == *"la BOITE s'est declaree en echec"* ]]
+  [[ "$output" == *"le CONTENEUR s'est declare en echec"* ]]
   [[ "$output" != *"le runner etait DEMANDE"* ]]
 }
 
@@ -245,13 +245,13 @@ run_bench() {
   [[ "$output" == *"DRIFT RESIDUEL"* ]]
 }
 
-@test "un verdict de boite ILLISIBLE est une NON-MESURE, pas un echec — et il se dit" {
+@test "un verdict de conteneur ILLISIBLE est une NON-MESURE, pas un echec — et il se dit" {
   # Ne pas avoir lu le verdict n'est pas l'avoir lu mauvais. Sortir non nul sur une non-mesure
   # apprend a ignorer le code de sortie, ce qui coute exactement le jour ou il est vrai. Meme
   # arbitrage que `deploy/container` sur l'expiration de son attente.
   #
   # ⚠ ET LE CAS EST REEL, pas theorique : ce fichier vit sur un tmpfs et n'existe qu'apres que
-  # l'entrypoint a fini son apply. Une boite qui vient de repartir n'en a pas encore.
+  # l'entrypoint a fini son apply. Un conteneur qui vient de repartir n'en a pas encore.
   printf 'cat: /run/lcars-provision.rc: No such file or directory\n' > "$CONTAINER_PROV_RC_OUT"
   run_bench
   [ "$status" -eq 0 ]
@@ -266,7 +266,7 @@ run_bench() {
   # saut, la passe 1 MOURAIT sur « unable to find user lcars » et le banc ne montait pas.
   #
   # Ce qui rend ce saut sur n'est PAS son message, c'est cette exigence : deux passes qui sautent
-  # toutes les deux donneraient un banc vert dont la boite ne parle pas a la forge, sans un mot.
+  # toutes les deux donneraient un banc vert dont le conteneur ne parle pas a la forge, sans un mot.
   # Le refus doit nommer la CAUSE (le worker manque) et pas seulement le symptome (le fichier manque).
   echo "non" > "$OP_TOKEN_OUT"
   run_bench
@@ -361,7 +361,7 @@ run_bench() {
   #
   # ⚠ LA FACON DE PROVOQUER L'ABSENCE A CHANGE AVEC LA SOURCE. Ce test vidait le sous-script
   # d'amorcage, parce que c'etait LUI qui persistait le master token sur l'hote. Depuis le
-  # 2026-08-16 l'autorite vit dans la boite : ce qu'il faut vider est la reponse de la doublure
+  # 2026-08-16 l'autorite vit dans le conteneur : ce qu'il faut vider est la reponse de la doublure
   # docker, pas le sous-script. Un test qui aurait garde l'ancien geste serait passe au VERT sur un
   # banc dont le token est bien la — il aurait mesure un chemin que plus personne ne prend.
   : > "$MASTER_TOKEN_OUT"
@@ -458,7 +458,7 @@ run_bench() {
   # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. Il y a
   # donc au moins TROIS entrees vraies : `127.0.0.1`, `localhost` (deux ORIGINES distinctes pour un
   # meme point d'ecoute — et c'est `localhost` que tape un humain) et l'adresse annoncee.
-  # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour toutes les boites.
+  # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour tous les conteneurs.
   # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
   grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/container.env"
@@ -472,7 +472,7 @@ run_bench() {
 
 @test "ouvert sur le reseau, le banc DIT ce que ca coute" {
   # Les mots de passe de ce banc sont des defauts de test, publics dans le README. Ouvrir sans le
-  # dire, c'est livrer une porte ouverte a quelqu'un qui croit avoir une boite fermee.
+  # dire, c'est livrer une porte ouverte a quelqu'un qui croit avoir un conteneur ferme.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
   [[ "$output" == *"OUVERT SUR LE RESEAU"* ]]
   [[ "$output" == *"--bind 127.0.0.1"* ]]
@@ -481,8 +481,8 @@ run_bench() {
 @test "un port deja tenu par un AUTRE banc est refuse AVANT de creer quoi que ce soit" {
   # LE DEFAUT MESURE (2026-08-18) : sur un bind joker, docker refuse en nommant l'adresse de
   # l'AUTRE banc — « Bind for 127.0.0.6:2222 failed » sur une machine ou personne n'a tape
-  # 127.0.0.6 — et le script mourait en « la boite ne demarre pas », c'est-a-dire en accusant la
-  # boite d'un conflit qui ne lui appartient pas.
+  # 127.0.0.6 — et le script mourait en « le conteneur ne demarre pas », c'est-a-dire en accusant le
+  # conteneur d'un conflit qui ne lui appartient pas.
   echo "un-autre-banc" > "$BATS_TEST_TMPDIR/port_holder"
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds
 

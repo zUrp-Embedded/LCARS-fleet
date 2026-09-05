@@ -101,8 +101,8 @@ dir       /opt/lcars/share/favicon                     0755  root:root          
 dir       /opt/lcars/share/doc                         0755  root:root           any
 # ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
 # HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
-# du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la
-# boite en silence : le noeud demarre vert et le premier push meurt sur une auth vide.
+# du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait le
+# conteneur en silence : le noeud demarre vert et le premier push meurt sur une auth vide.
 # `lcars-authority` traverse par le groupe `fleet`, dont il est membre.
 # ⚠ CE REPERTOIRE NE CONTIENT PAS QUE DES SECRETS, et c'est ce qui a impose le `0710`. `forge.url`
 # et `forge.public.url` y vivent en `0644` : ce sont des ADRESSES, pas des secrets.
@@ -120,7 +120,7 @@ dir       /opt/lcars/var/catalogues                    0750  root:fleet         
 # .apply.lock y survit a la desinstallation. `runtime/services/forge-gestures.sh:102` derive
 # `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction de rail, et ce fichier part sur les deux
 # (il est dans `EMBEDDED` de 62-runtime-helpers). Le poste creait donc un repertoire que la table
-# disait propre a la boite : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
+# disait propre au conteneur : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
 # jamais. Une colonne de substrat trop etroite ne protege rien — elle rend l'objet INVISIBLE au
 # rail qui le cree quand meme.
 dir       /var/lib/lcars                               0755  root:root           any
@@ -139,7 +139,7 @@ dir       /var/lib/lcars                               0755  root:root          
 # ici, le rail les POSE et `ensure_mode` re-stat leur proprietaire a chaque passe : la fenetre se
 # ferme au provisionnement, et le doctor la rouvrirait a voix haute.
 # ⚠ ET L'IMAGE LES POSE AUSSI, depuis le lot 14 : declares `any` (voir TRAVAIL dans
-# `system_manifest.bats`), ils n'etaient crees dans la boite que par l'init de l'instance, au boot.
+# `system_manifest.bats`), ils n'etaient crees dans le conteneur que par l'init de l'instance, au boot.
 # Mesures au build par `25-directories` sous `verify`, ils y auraient rendu trois absents.
 dir       /var/tmp/lcars                               0755  root:root           any
 dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
@@ -227,11 +227,11 @@ runtime   /run/lcars/authority                         0750  lcars-authority:fle
 # defaut que ce chantier retire — une decision prise en lisant une projection de groupe.
 # ⚠ `cond`, ET LE RELEVE CROISE DU RANG D EN A DONNE LA PREUVE. Ces deux sockets n'existent que si
 # le service d'autorite TOURNE, et il refuse de demarrer sans `forge-master.token` — ce qu'il dit
-# lui-meme : « ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans
-# elle ». Une boite montee sans `container config` ne les a donc pas, et c'est un de ses deux etats
+# lui-meme : « ce service EST le detenteur de l'autorite de ce conteneur, il ne demarre pas sans
+# elle ». Un conteneur monte sans `container config` ne les a donc pas, et c'est un de ses deux etats
 # NORMAUX, pas une derive.
 #
-# Mesure du 2026-09-01, bancs 2001 (poste) et 2002 (boite) : elles etaient presentes d'un cote,
+# Mesure du 2026-09-01, bancs 2001 (poste) et 2002 (conteneur) : elles etaient presentes d'un cote,
 # absentes de l'autre, et la table les declarait sans condition — donc l'un des deux substrats
 # mentait forcement. Sans le trait, il n'y avait aucune facon d'ecrire ce qui est vrai.
 runtime:cond /run/lcars/authority/catalogue.sock       0660  lcars-authority:fleet  any
@@ -241,7 +241,7 @@ runtime   /run/lcars/privileged                        0750  root:fleet         
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any
 # ⚖ user 2026-09-04 (Q1, lot 7) : cette table N'A PLUS DE COLONNE `docker`. Les fichiers de boot de
-# la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
+# le conteneur (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
 # `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
 # `runtime/services/container/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/container/README.md`.
 # L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas. `/run/sshd` (le repertoire

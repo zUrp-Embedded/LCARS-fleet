@@ -253,7 +253,7 @@ I3_AWK='
   # une CHAINE, que ni le compilateur ni boundary ne voient. Un module extrait ou renomme laisse
   # l'appelant intact, et le defaut ne parait qu'au runtime, DANS l'image, sous un `2>/dev/null` qui
   # le reduit a « l'image ne rend pas le roster ». Mesure du 2026-08-30 : `CatalogueRoles` etait
-  # devenu `Fleet.Roster` et le rail boite mourait a l'amorcage de la forge, sans nommer la cause.
+  # devenu `Fleet.Roster` et le rail conteneur mourait a l'amorcage de la forge, sans nommer la cause.
   local lib f ref mod bad=0
   lib="$(cd "$BATS_TEST_DIRNAME/../../runtime/lib" && pwd)"
   # LE CORPUS : tout script livre qui peut nommer un module Elixir — l'installeur, les portes outil

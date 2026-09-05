@@ -9,11 +9,11 @@
 # ⚖ USER 2026-08-22 : « les 2 rails posent le meme code, le meme LCARS, les memes scripts. une fois
 # l'install terminee, on a le meme FS. pourquoi alors il y aurait des comportements differents ? »
 #
-# La reponse mesuree : le FS est le meme, le CONTRAT DE DEMARRAGE ne l'est pas. La boite a UN
+# La reponse mesuree : le FS est le meme, le CONTRAT DE DEMARRAGE ne l'est pas. Le conteneur a UN
 # entrypoint qui lance trois composants ; le rail natif RE-DERIVE ce contrat en unites systemd, et
 # il n'en avait re-derive que deux.
 #
-#   entrypoint (boite)        rail natif
+#   entrypoint (conteneur)        rail natif
 #   human-converger.sh        lcars-converger        ✓
 #   console-landing.sh        lcars-landing          ✓
 #   console.sh --all          AUCUN                  ← le trou
@@ -66,12 +66,12 @@ starters() { code "$SERVICES" | sed -n '/^STARTERS=(/,/^)/p' | grep -oE '"[^"]+"
 #
 # Le temoin ci-dessus mesure qu'un composant est LANCE. Il ne dit rien de ce qui arrive quand il
 # MEURT — et c'est la que les deux rails ont diverge une seconde fois. Le rail poste pose
-# `Restart=always` sur chaque unite ; la boite lancait `setsid <cmd> &` et tini recoltait sans
+# `Restart=always` sur chaque unite ; le conteneur lancait `setsid <cmd> &` et tini recoltait sans
 # relancer. `supervise.sh` a ferme l'ecart pour trois composants sur quatre : la landing appelait
 # encore le script nu, qui se met lui-meme en arriere-plan et rend la main.
 #
 # LA SYMETRIE EST DANS LA TABLE, et c'est ce qui la rend verifiable : une ligne `unit:` dit que le
-# rail poste donne un superviseur a ce composant ; la boite lui en doit un aussi, et son superviseur
+# rail poste donne un superviseur a ce composant ; le conteneur lui en doit un aussi, et son superviseur
 # s'appelle `launch`. Une ligne `driven-by:` dit l'inverse — `console.sh` est rejoue par le
 # convergeur a chaque tour, il n'a pas de superviseur et n'en veut pas.
 joined() { code "$1" | sed -e :a -e '/\\$/N; s/\\\n//; ta'; }
@@ -83,7 +83,7 @@ launch_body() { code "$ENTRY" | sed -n '/^launch() {/,/^}/p'; }
   sites="$(joined "$ENTRY" | grep -cE '^[[:space:]]*launch ')"
   [ "$units" -ge 4 ]
   [ "$units" -eq "$sites" ] || {
-    echo "$units composants ont une unite sur le rail poste, mais $sites passent par launch dans la boite"
+    echo "$units composants ont une unite sur le rail poste, mais $sites passent par launch dans le conteneur"
     joined "$ENTRY" | grep -E '^[[:space:]]*launch ' | cut -c1-80
     return 1
   }

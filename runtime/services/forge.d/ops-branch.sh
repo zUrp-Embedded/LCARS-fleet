@@ -28,10 +28,10 @@
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par la boite en prod
+# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
 # et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
 # shellcheck source=../lib/module-protocol.sh
-. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
+. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
 # Nue, pas `readonly` : les temoins sourcent la tete d'un module pour epingler une fonction, et un
 # second `source` dans le meme shell mourrait en « readonly variable ». Le gel du nom est tenu par
@@ -94,7 +94,7 @@ commune avec `main`, et elle ne porte que des manifestes d'outillage sous `ops/t
 
 ## Ce que tu approuves en signant une PR ici
 
-Le manifeste qui entre par cette PR sera appliqué **par root, sur la boite**, par
+Le manifeste qui entre par cette PR sera appliqué **par root, sur le conteneur**, par
 `runtime/bin/lcars-toolchain-converge`. Il n'est pas interprété : le convergeur lit des champs typés et joue des
 gabarits de commande fixes, au SHA que tu viens d'approuver. Ce que tu lis dans le diff est donc
 exactement ce qui sera fait — c'est la propriété que toute cette mécanique existe pour tenir.
@@ -153,7 +153,7 @@ apply() {
        p_ok "$LCARS_OPS_REPO:$OPS_BRANCH déjà présente — rien à faire"
        ;;
     1) create_branch || verdict_apply ;;
-    *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par la boîte) ; la branche se posera a la convergence suivante" ;;
+    *) p_drift "forge injoignable — la branche n'est pas posée. Elle est montée par 48-forge-host (ou par le conteneur) ; la branche se posera a la convergence suivante" ;;
   esac
   verdict_apply
 }

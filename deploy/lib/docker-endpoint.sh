@@ -166,7 +166,7 @@ _docker_sockets() {
   #
   # Ce repli n'avait qu'un cas : une distro dont l'intégration WSL est DÉSACTIVÉE. L'activer est un
   # clic dans Docker Desktop ; offrir un contournement à `sudo` là où un clic suffit apprend le
-  # mauvais réflexe, et contredit le canon de la boîte (« elle ne demande jamais sudo »).
+  # mauvais réflexe, et contredit le canon du conteneur (« il ne demande jamais sudo »).
   #
   # ⚠ ET IL A COÛTÉ DEUX FOIS. D'abord le refus accusait la proxy au lieu de
   # `/var/run/docker.sock` et envoyait chercher des droits qui ne bloquaient personne — correctif

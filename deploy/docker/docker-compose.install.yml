@@ -38,7 +38,7 @@
 #
 # ─── CE QUI EST COPIE A L'IDENTIQUE DEPUIS LE COMPOSE DE DEV, ET POURQUOI ───────────────────────
 # ports, volumes, cap_add, security_opt, logging, restart : une install qui divergerait du dev sur
-# ces points ne testerait pas la meme boite. Les raisons de chaque ligne vivent dans l'en-tete et
+# ces points ne testerait pas le meme conteneur. Les raisons de chaque ligne vivent dans l'en-tete et
 # les commentaires de `docker-compose.yml` — elles ne sont pas recopiees ici : deux copies d'une
 # meme justification derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
 #
@@ -61,19 +61,19 @@ services:
       LCARS_ADMIRAL: "${LCARS_ADMIRAL:-}"
       LCARS_UID: "${LCARS_UID:-1000}"
       # Le magasin. MEME VALEUR QUE `docker-compose.yml`, et ces deux fichiers sont les SEULS a
-      # l'ecrire : tout ce qui vit dans la boite la lit ici, aucun script ne la redefault.
+      # l'ecrire : tout ce qui vit dans le conteneur la lit ici, aucun script ne la redefault.
       LCARS_STORE_ROOT: /var/lib/lcars
       # LES LISTENERS DE LA FLEET ECOUTENT DANS LE CONTENEUR, PAS SUR LE RESEAU. Le runtime lie
-      # ses listeners (API, deck d'observation) en loopback par defaut : dans une boite, cette
+      # ses listeners (API, deck d'observation) en loopback par defaut : dans un conteneur, cette
       # loopback est celle du CONTENEUR — le deck repond a l'interieur et reste injoignable depuis
-      # un navigateur, alors que le deck de la boite en propose l'onglet. La frontiere reelle
+      # un navigateur, alors que le deck du conteneur en propose l'onglet. La frontiere reelle
       # d'une install docker n'est pas le bind mais la PUBLICATION compose ci-dessous, qui n'expose
       # que sur la loopback de l'hote. Meme raisonnement que ttyd (cf. console.sh).
       LCARS_BIND_HOST: "${LCARS_BIND_HOST:-0.0.0.0}"
       LCARS_SSH_AUTHORIZED_KEYS: "${LCARS_SSH_AUTHORIZED_KEYS:-}"
       # LA FORGE — ET POURQUOI ELLE N'A PAS DE DEFAUT, CONTRAIREMENT A L'IMAGE ET A LA SOURCE.
       # L'image se TIRE et la source se CLONE : deux lectures, sans effet sur la forge. Celle-ci
-      # est la seule variable par laquelle la boite ECRIT sur une forge (comptes, org, depots,
+      # est la seule variable par laquelle le conteneur ECRIT sur une forge (comptes, org, depots,
       # PR, issues). Un defaut qui vise une forge de production ferait qu'une install de test
       # l'ecrit sans que personne l'ait demande. Vide = les modules forge du provisioning passent
       # en instruct-only et le declarent en drift.
@@ -84,7 +84,7 @@ services:
       # `~/.lcars/fleet.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
       # valeur si elle est posee a ce moment-la ; ensuite ce fichier appartient a l'humain et
       # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
-      # jamais pour une boite deja seedee.
+      # jamais pour un conteneur deja seede.
       FORGE_BASE_URL: "${FORGE_BASE_URL:-}"
       # LA MEME FORGE, VUE D'UN NAVIGATEUR — et ce n'est pas la meme valeur. Celle du dessus est
       # celle que le SERVEUR compose ; dans un conteneur c'est un nom de service, qu'aucune machine
@@ -150,7 +150,7 @@ services:
     networks: [lcars]
 
 volumes:
-  # Au PROJET : ses humains et son etat sont ceux de cette boite, ils meurent avec elle.
+  # Au PROJET : ses humains et son etat sont ceux de ce conteneur, ils meurent avec lui.
   lcars-home:
   lcars-var:
   # Hors projet : compose ne les cree pas et ne les detruit pas — mais il ne les prefixe pas non

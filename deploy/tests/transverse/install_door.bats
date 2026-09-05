@@ -6,11 +6,11 @@
 #
 # CE QUI EST EN JEU. Cette porte choisit entre deux rails dont les erreurs sont GRAVES ET
 # ASYMETRIQUES : deviner « poste », c'est posseder `/etc` de quelqu'un sans son accord ; deviner
-# « boite », c'est batir 3 Go que personne n'a demandes. Une question dont aucune reponse n'est
+# « conteneur », c'est batir 3 Go que personne n'a demandes. Une question dont aucune reponse n'est
 # sure ne doit donc pas avoir de defaut — et c'est exactement ce que ces temoins epinglent.
 #
 # ⚠ AUCUN TEMOIN ICI NE DECLENCHE UNE MUTATION. Tous s'arretent sur un refus ou une question. Le
-# chemin poste finit par `provision apply` en root et le chemin boite par un build de 15 min : un
+# chemin poste finit par `provision apply` en root et le chemin conteneur par un build de 15 min : un
 # temoin qui les traverserait provisionnerait la machine qui joue la suite. Ce qui est mesure est
 # la DECISION, jamais son execution.
 #
@@ -115,7 +115,7 @@ setup() {
   # Le rail poste annonce ce qu'il possede, et que la convergence ne sait pas le retirer.
   [[ "$output" == *"la convergence ajoute et ne retire pas"* ]]
   [[ "$output" == *"/etc/wsl.conf"* ]]
-  # Le rail boite annonce son prix et sa reversibilite.
+  # Le rail conteneur annonce son prix et sa reversibilite.
   [[ "$output" == *"rien dans /etc ni /usr"* ]]
   [[ "$output" == *"reset"* ]]
 }
@@ -168,7 +168,7 @@ setup() {
 
 
 @test "machine dédiée: le drapeau n'ouvre PAS le rail poste dans un conteneur" {
-  # Installer le rail poste DANS une boîte n'a pas de sens : c'est le rail boîte qui fait ça, au
+  # Installer le rail poste DANS un conteneur n'a pas de sens : c'est le rail conteneur qui fait ça, au
   # build de l'image. Aucun drapeau ne rend ça vrai, et un drapeau qui ouvrirait tout serait un
   # interrupteur général déguisé en garde-fou.
   run env LCARS_ALLOW_ANY_HOST=1 LCARS_DOCKER=1 bash "$SRC" --workstation < /dev/null
@@ -222,7 +222,7 @@ setup() {
 }
 
 @test "VERROU : « --fleet-human » est REFUSE, il ne revient pas en passe-plat muet" {
-  # Un drapeau retire doit RATER, pas etre accepte et ignore. La branche BOITE de cette porte le
+  # Un drapeau retire doit RATER, pas etre accepte et ignore. La branche CONTENEUR de cette porte le
   # montrait deja : elle parsait `--fleet-human` et n'utilisait jamais `PASSTHRU`, donc l'operateur
   # nommait un compte et repartait sans un mot. Un drapeau mort qu'on accepte est pire que pas de
   # drapeau du tout — il documente une capacite qui n'existe pas.
@@ -279,7 +279,7 @@ setup() {
 }
 
 
-@test "la branche BOITE ne POSE rien sur le systeme — c'est ca, la promesse auditee" {
+@test "la branche CONTENEUR ne POSE rien sur le systeme — c'est ca, la promesse auditee" {
   # ⚠ CE TEMOIN EPINGLAIT « n'escalade JAMAIS en root », ET C'ETAIT LE MAUVAIS INVARIANT. L'audit de
   # Mintie (11 h) porte sur ce que le rail MODIFIE — « rien hors de ton clone et de docker » — pas
   # sur l'uid qui appelle. Les confondre a fait pire que de se tromper de mot : le rail ne pouvait
@@ -291,18 +291,18 @@ setup() {
   # sudo, la seule conclusion logique c'est que l'installeur a besoin de sudo. »
   #
   # Ce qui est epingle desormais est ce qui est reellement promis, et c'est verifiable : aucune
-  # commande de pose systeme sur le chemin boite.
+  # commande de pose systeme sur le chemin conteneur.
   local container_start ws_start branche
   container_start="$(grep -n 'RAIL" == "container"' "$SRC" | head -1 | cut -d: -f1)"
   ws_start="$(grep -n 'LA BRANCHE POSTE' "$SRC" | head -1 | cut -d: -f1)"
   branche="$(sed -n "${container_start},${ws_start}p" "$SRC")"
   # Ni paquet, ni utilisateur, ni groupe, ni ecriture dans /etc ou /usr.
   refute grep -qE 'apt-get|apt |useradd|usermod|groupadd|chgrp|>[[:space:]]*/etc/|>[[:space:]]*/usr/' <<< "$branche"
-  # Et le chemin boite se termine par un exec : il ne retombe pas dans la branche poste.
+  # Et le chemin conteneur se termine par un exec : il ne retombe pas dans la branche poste.
   # ⚠ CE TEMOIN EPINGLAIT UN NOM DE FICHIER, PAS UNE PROPRIETE. Il cherchait le litteral
   # un litteral d'exec vers un chemin precis — donc il rougissait au renommage du delegue sans qu'aucune
   # regle ne soit cassee, et il serait passe au vert sur un `exec` vers n'importe quoi d'autre. Ce
-  # qui se tient est : LA BRANCHE BOITE SE TERMINE PAR UN EXEC VERS LE DELEGUE DU RAIL, donc elle
+  # qui se tient est : LA BRANCHE CONTENEUR SE TERMINE PAR UN EXEC VERS LE DELEGUE DU RAIL, donc elle
   # ne retombe jamais dans la branche poste.
   grep -qE 'exec "\$SCRIPT_DIR/deploy/container" up' "$SRC"
 }
@@ -334,7 +334,7 @@ SPY
 # ============ L'IMAGE : LA PRECONDITION QUE LA PORTE FOURNIT, ET QUI N'ETAIT PAS COUVERTE ========
 #
 # ⚠ CES TROIS TEMOINS EXISTENT PARCE QUE LEUR ABSENCE A COUTE UNE JOURNEE. L'en-tete de ce fichier
-# dit qu'aucun temoin ne traverse, « le chemin boite par un build de 15 min » — vrai, et c'est
+# dit qu'aucun temoin ne traverse, « le chemin conteneur par un build de 15 min » — vrai, et c'est
 # justement pour ca que le chemin `--bench` n'a jamais ete joue SANS IMAGE. Il `exec`utait son
 # delegue avant d'atteindre le build, qui ne vivait que sur l'autre chemin ; sur une machine sans
 # image, le seul rail qui promet « en un geste » mourait en dictant `deploy/container build`.
@@ -411,7 +411,7 @@ SPY
 }
 
 @test "un drapeau sans objet sur sa branche est REFUSE, jamais avale en silence" {
-  # ⚠ `--bench` FOURNIT les annexes a une BOITE. Le rail poste monte sa propre forge par
+  # ⚠ `--bench` FOURNIT les annexes a un CONTENEUR. Le rail poste monte sa propre forge par
   # `48-forge-host`, dans son cycle de convergence : le drapeau n'y a aucun objet. Il etait accepte
   # par le parseur et lu NULLE PART sur cette branche — donc silencieusement avale, ce qui laisse
   # quelqu'un croire qu'il a demande quelque chose. C'est la meme classe que tout ce que ce fichier
@@ -472,9 +472,9 @@ SPY
   [ "$output" = "oui" ]
 }
 
-@test "le rail BOITE ne pose JAMAIS docker, meme sur une machine declaree (loi 5)" {
+@test "le rail CONTENEUR ne pose JAMAIS docker, meme sur une machine declaree (loi 5)" {
   # Loi 5 (deploy/README.md) : poser un paquet est reserve au rail qui a RECU la machine.
-  # La boite est invitee, et aucun drapeau ne change ca.
+  # Le conteneur est invite, et aucun drapeau ne change ca.
   run bash -c "
     export LCARS_ALLOW_ANY_HOST=1
     RAIL=container
@@ -508,14 +508,14 @@ SPY
 
 
 
-# ─── LE DELEGUE DU RAIL BOITE FAIT PARTIE DU CHECKOUT ───────────────────────────────────────────
+# ─── LE DELEGUE DU RAIL CONTENEUR FAIT PARTIE DU CHECKOUT ───────────────────────────────────────────
 #
 # ⚠ CETTE PROPRIETE A CHANGE DE MAISON, PAS DE VALEUR. Elle etait tenue par le shim racine, qui
 # refusait en nommant le CHECKOUT plutot que docker — « un arbre incomplet, et le dire evite une
 # enquete sur docker qui n'y est pour rien ». Le shim a disparu ; la porte porte la garde, donc le
 # temoin vit ici. Sans ce deplacement, la propriete serait morte avec le fichier qui la portait.
 
-@test "rail boite : un delegue absent nomme le CHECKOUT, jamais docker" {
+@test "rail conteneur : un delegue absent nomme le CHECKOUT, jamais docker" {
   local l_garde l_exec
   l_garde="$(grep -n 'deploy/container" \]\] ||' "$SRC" | head -1 | cut -d: -f1)"
   l_exec="$(grep -n 'exec "\$SCRIPT_DIR/deploy/container" doctor' "$SRC" | head -1 | cut -d: -f1)"
@@ -564,7 +564,7 @@ SPY
   [[ "$output" != *"la fleet sous TON uid"* ]]
 }
 
-# ============ LES DRAPEAUX DE LA PORTE ATTEIGNENT LE RAIL BOITE, OU SONT REFUSES ================
+# ============ LES DRAPEAUX DE LA PORTE ATTEIGNENT LE RAIL CONTENEUR, OU SONT REFUSES ================
 #
 # ⚠ CES TEMOINS FERMENT UN AVALEMENT SILENCIEUX, MESURE SUR UNE INSTALL REELLE (2026-08-28).
 # `--forge-project`, `--port-forge` et `--port-deck` partent dans `PASSTHRU`, qui n'est lu QUE par
@@ -653,7 +653,7 @@ SPY
 }
 
 @test "REFUS : un port sans banc est REFUSE, il n'est pas avale" {
-  # Sans `--bench`, les ports de la boite sont ceux du compose : il n'y a rien a fixer. Le refus
+  # Sans `--bench`, les ports du conteneur sont ceux du compose : il n'y a rien a fixer. Le refus
   # coute une seconde ; l'avalement coutait cinq minutes et une collision.
   local fake; fake="$(_fake_tree 0 0)"
   run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --port-forge 21090 < /dev/null
@@ -665,7 +665,7 @@ SPY
   refute_out 'DOCKERSH' <<<"$output"
 }
 
-@test "REFUS : un drapeau du rail POSTE est REFUSE sur la boite, en le nommant" {
+@test "REFUS : un drapeau du rail POSTE est REFUSE sur le conteneur, en le nommant" {
   local fake; fake="$(_fake_tree 0 0)"
   run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --only 60-deploy < /dev/null
   [ "$status" -ne 0 ]
@@ -704,7 +704,7 @@ SPY
 }
 
 @test "le delegue du rail POSTE fait partie du checkout — un absent nomme le CHECKOUT" {
-  # Meme propriete que pour la boite : l'erreur nomme sa cause. Un « workstation: command not found »
+  # Meme propriete que pour le conteneur : l'erreur nomme sa cause. Un « workstation: command not found »
   # enverrait chercher un binaire, alors que c'est l'arbre qui est incomplet.
   local fake="$BATS_TEST_TMPDIR/sans-delegue"
   rm -rf "$fake"; mkdir -p "$fake/deploy"
@@ -731,7 +731,7 @@ SPY
   local p c out
   for p in 10 25 50 75 90 95 98 99; do
     c=$(( n * p / 100 ))
-    out="$(head -c "$c" "$SRC" | bash -s -- --container 2>&1 | grep -c 'Préflight\|RAIL BOÎTE\|Provisionnement' || true)"
+    out="$(head -c "$c" "$SRC" | bash -s -- --container 2>&1 | grep -c 'Préflight\|RAIL CONTENEUR\|Provisionnement' || true)"
     [ "$out" -eq 0 ] || { echo "FUITE a $p% : $out ligne(s) executee(s)" >&2; return 1; }
   done
 }
@@ -828,7 +828,7 @@ SPY
   l_source="$( grep -n "1b. LA SOURCE" "$SRC" | head -1 | cut -d: -f1)"
   l_pf="$(     grep -n '2. PRÉFLIGHT — UNE SEULE MESURE' "$SRC" | head -1 | cut -d: -f1)"
   l_bilan="$(  grep -n 'LE BILAN — CE QUE LA MACHINE PERMET' "$SRC" | head -1 | cut -d: -f1)"
-  l_sortie="$( grep -n 'LA BRANCHE BOÎTE' "$SRC" | head -1 | cut -d: -f1)"
+  l_sortie="$( grep -n 'LA BRANCHE CONTENEUR' "$SRC" | head -1 | cut -d: -f1)"
   [ -n "$l_accueil" ] && [ -n "$l_source" ] && [ -n "$l_pf" ] && [ -n "$l_bilan" ] && [ -n "$l_sortie" ]
   [ "$l_accueil" -lt "$l_source" ]
   [ "$l_source"  -lt "$l_pf" ]

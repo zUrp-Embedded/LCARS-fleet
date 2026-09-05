@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/forge.d/deck-oidc.sh
 # AUTHOR: DrDree
 # STARDATE: (posée par /push-github)
-# STATUS: PROTO-V2 — pose le client OAuth2 du deck de la boîte + son fichier de config
+# STATUS: PROTO-V2 — pose le client OAuth2 du deck du conteneur + son fichier de config
 # APPLY-ON: any
 # CHECK-ON: any
 # NEEDS: root
@@ -10,10 +10,10 @@
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par la boite en prod
+# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
 # et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
 # shellcheck source=../lib/module-protocol.sh
-. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
+. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
 APP_NAME="lcars-deck"
 TOKEN_FILE="$LCARS_SYSTEM_TOKEN_FILE"
@@ -68,9 +68,9 @@ forge_up() { curl -fsS -m 10 -o /dev/null "$FORGE_BASE_URL/api/v1/version" 2>/de
 
 # L'app QUI EST LA NOTRE — et le nom ne suffit pas a le prouver. Mesure du 2026-08-12 : Gitea
 # accepte DEUX applications du meme nom sous le meme compte (201). Or le compte systeme est partage
-# par toutes les boites qui parlent a une meme forge : chercher « lcars-deck » y rend une app
+# par tous les conteneurs qui parlent a une meme forge : chercher « lcars-deck » y rend une app
 # Le discriminant est donc le RETOUR : nos `redirect_uris` sont, par construction, l'adresse de
-# CETTE boite. On ne reconnait comme notre qu'une app qui porte exactement les notres.
+# CE conteneur. On ne reconnait comme notre qu'une app qui porte exactement les notres.
 app_id() { # app_id <uris-attendues, separees par espace>
   forge_api GET "/user/applications/oauth2" \
     | jq -r --arg n "$APP_NAME" --arg u "$1" \
@@ -83,8 +83,8 @@ app_id() { # app_id <uris-attendues, separees par espace>
 
 # Les homonymes qui ne sont PAS a nous — a NOMMER, jamais a toucher.
 foreign_apps() { # foreign_apps <uris-attendues>
-  # ⚠ NOTRE PROPRE CLIENT EST EXCLU PAR SON client_id. Sans ce filtre, une boîte qui change ses
-  # entrées voit son ANCIEN client (retours différents, même nom) comme celui d'une autre boîte :
+  # ⚠ NOTRE PROPRE CLIENT EST EXCLU PAR SON client_id. Sans ce filtre, un conteneur qui change ses
+  # entrées voit son ANCIEN client (retours différents, même nom) comme celui d'un autre conteneur :
   # elle le laisse en place en le dénonçant, et en crée un second. Deux clients homonymes vivants
   # sous le même compte, dont un mort — l'inventaire devient illisible en deux passages.
   local ours; ours="$(our_client_id)"
@@ -226,7 +226,7 @@ apply() {
   local foreign
   foreign="$(foreign_apps "$uris")"
   if [[ -n "$foreign" ]]; then
-    p_warn "app(s) OAuth2 homonyme(s) sur cette forge, visant d'autres retours — INTACTES (une autre boîte les possède) : $(echo "$foreign" | tr '\n' ' ')"
+    p_warn "app(s) OAuth2 homonyme(s) sur cette forge, visant d'autres retours — INTACTES (un autre conteneur les possède) : $(echo "$foreign" | tr '\n' ' ')"
   fi
   body="$(jq -nc --arg n "$APP_NAME" --arg u "$uris" \
             '{name:$n, redirect_uris:($u|split(" ")), confidential_client:true}')"

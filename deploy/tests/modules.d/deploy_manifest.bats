@@ -168,7 +168,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
 
-  # Le stage RUNTIME seul : celui qui decrit la boite livree, pas l'atelier de build.
+  # Le stage RUNTIME seul : celui qui decrit le conteneur livre, pas l'atelier de build.
   local image
   image="$(sed -n '/^FROM ${RUNTIME_IMAGE} AS runtime/,/^COPY --from=build/p' "$DOCKERFILE" \
     | sed -n '/apt-get install/,/rm -rf \/var\/lib\/apt/p' \
@@ -182,7 +182,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
 
   # Ce que l'image seule a le droit de porter, et POURQUOI :
   #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
-  #   openssh-server  — la porte d'admin de la BOITE. Sur un poste, l'acces reseau appartient a son
+  #   openssh-server  — la porte d'admin du CONTENEUR. Sur un poste, l'acces reseau appartient a son
   #                     proprietaire : l'operateur est deja connecte quand ce rail tourne, et lui
   #                     ouvrir un sshd serait decider de son exposition a sa place.
   local exempt=" tini openssh-server "

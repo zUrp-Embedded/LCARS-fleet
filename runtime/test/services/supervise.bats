@@ -8,9 +8,9 @@
 #
 #   rail poste   `64-services` pose des unites systemd : `Restart=always`, `RestartSec=10`,
 #                `StartLimitBurst=5`, `StartLimitIntervalSec=60`. Un service qui tombe revient.
-#   rail boite   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
+#   rail conteneur   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
 #                il n'en relance aucun. Un convergeur mort restait mort jusqu'au prochain
-#                `container restart`, sur une boite qui reste *healthy* (healthcheck = des ports, ssh + le deck).
+#                `container restart`, sur un conteneur qui reste *healthy* (healthcheck = des ports, ssh + le deck).
 #
 # Le rail poste testait donc des politiques de redemarrage que la PRODUCTION n'avait pas, et la
 # production avait un mode de panne que rien ne testait.
@@ -54,7 +54,7 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-@test "IL RELANCE — c'est le fait que le rail boite n'avait pas" {
+@test "IL RELANCE — c'est le fait que le rail conteneur n'avait pas" {
   # La commande compte ses propres passages. Trois lignes = elle a bien ete rejouee.
   run timeout 20 "$SUT" --name essai --log "$LOG" --burst 3 --interval 60 --delay 0 -- \
     bash -c "echo passage >> '$MARQUE'; exit 1"

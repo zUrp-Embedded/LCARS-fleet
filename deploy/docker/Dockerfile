@@ -135,7 +135,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 
 # La plaquette (`assets/github.io`) se genere DEPUIS le code du produit : les cartes, les sieges,
 # les verbes de la console, les arbres d'un catalogue. Sur GitHub elle est publiee par Pages ; ici
-# elle part dans l'image pour que la boite serve sa PROPRE doc — celle de la version qu'elle fait
+# elle part dans l'image pour que le conteneur serve sa PROPRE doc — celle de la version qu'il fait
 # tourner, pas la derniere en ligne, pas une copie a resynchroniser.
 # ⚠ L'ARBORESCENCE EST LE CONTRAT. Les lecteurs du site remontent quatre crans depuis
 # `src/lib/` pour trouver la racine du depot (`fleet/`, `assets/`), et `collect-assets.mjs` remonte
@@ -202,7 +202,7 @@ RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        tmux bubblewrap git curl jq unzip ca-certificates openssh-server tini procps util-linux-extra python3 \
        `# sudo = le root du sysadmin (admiral, uid 1000). Modele identite-v2 : la forge fait autorite` \
-       `# sur les personnes, le proprietaire de la boite (le master, materialise en admiral) a root sur` \
+       `# sur les personnes, le proprietaire du conteneur (le master, materialise en admiral) a root sur` \
        `# SA machine via le groupe sudo. Threat model homelab/LAN sur : on protege la fleet, pas la` \
        `# machine contre son proprietaire. Absent jusqu'ici (aucun humain n'avait de sudo).` \
        sudo \
@@ -237,7 +237,7 @@ RUN apt-get update -qq \
        `#  - les modules npm natifs (node-gyp) veulent python3 + make + g++ -> build-essential.` \
        `#  - les crates rust en -sys veulent cc + pkg-config + le -dev de la lib C visee.` \
        `# Une baseline unique fait tomber les trois. Cout mesure : +119 paquets sur la liste` \
-       `# ci-dessus, dont 60 pour build-essential seul. C'est le prix d'un compilateur, et une boite` \
+       `# ci-dessus, dont 60 pour build-essential seul. C'est le prix d'un compilateur, et un conteneur` \
        `# qui n'en a pas envoie CHAQUE build natif par la garde humaine.` \
        build-essential pkg-config python3-dev libssl-dev \
        `# ─── LA CONSOLE WEB, ET ELLE ARRIVE ENFIN PAR LE MEME CHEMIN QUE SUR UN POSTE ──────────` \
@@ -248,7 +248,7 @@ RUN apt-get update -qq \
     `# ⚠ L'UID 1000 EST PRIS DANS LA BASE, ET C'EST CELUI QUE L'ENTRYPOINT DONNE AU SIEGE (LCARS_UID) :` \
     `# ubuntu:26.04 y pose un humain « ubuntu ». Le stage build fait le meme geste pour builder — meme` \
     `# base, meme piege aux deux etages, et le corriger a un seul ne corrige rien. Sans ca l'entrypoint` \
-    `# BOUCLE sur « useradd: UID 1000 is not unique » et la boite ne devient jamais healthy : elle` \
+    `# BOUCLE sur « useradd: UID 1000 is not unique » et le conteneur ne devient jamais healthy : il` \
     `# demarre, elle repond, elle ne converge pas — le mode de defaillance le plus cher a lire.` \
     && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \
@@ -263,7 +263,7 @@ RUN apt-get update -qq \
     `# reste par la meme occasion. Un pouvoir qu'on ne sait pas dire en une phrase est trop large.` \
     && groupadd -g 2001 lcars-console \
     `# LE COMPTE DU SERVICE D'AUTORITE, MIROIR DE 21-service-accounts DU RAIL POSTE. Sans lui,` \
-    `# l'entrypoint ne peut pas deposer le service et le geste catalogue est injouable dans la boite.` \
+    `# l'entrypoint ne peut pas deposer le service et le geste catalogue est injouable dans le conteneur.` \
     `#` \
     `# ⚠ MEMBRE DE fleet POUR TRAVERSER /opt/lcars/runtime (0750 root:fleet), JAMAIS POUR DECIDER.` \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
@@ -273,7 +273,7 @@ RUN apt-get update -qq \
     `# et AUCUN groupe a son nom : put_secret (chown lcars-authority:lcars-authority) mourait sur` \
     `# « invalid group », donc container config etait injouable sur une image neuve, et le` \
     `# setpriv --regid lcars-authority de l'entrypoint ne pouvait pas demarrer l'executeur de` \
-    `# catalogue. Mesure du 2026-09-04, banc bob_2, premiere boite contre une forge fournie.` \
+    `# catalogue. Mesure du 2026-09-04, banc bob_2, premier conteneur contre une forge fournie.` \
     && groupadd --system lcars-authority \
     && useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-authority -G fleet lcars-authority \
     `# LE COMPTE DE LA LANDING, MIROIR DE 21-service-accounts DU RAIL POSTE. Il N'EST QUE quelqu'un :` \
@@ -361,7 +361,7 @@ RUN set -eu; \
     chmod 0644 "$d"/*; \
     ls -l "$d"
 
-# ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans la boîte ne
+# ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans le conteneur ne
 # le lit — le boot est le produit (runtime/services/container/), la sonde de l'instance est « container status »
 # côté hôte. Le stage `verify` plus bas le copie POUR LUI SEUL, joue le doctor, et meurt : `final`
 # repart de `runtime`. `runtime/etc` ne porte que des DONNÉES du produit (le manifeste de la release,
@@ -400,14 +400,14 @@ RUN set -eu; \
 
 # LES PROVIDERS SONT VENDORES AU BUILD, et c'est un choix, pas une contrainte : `tofu init` au
 # runtime FONCTIONNERAIT (le dossier est inscriptible), mais il ferait dependre le premier apply du
-# reseau et du registre OpenTofu — au moment precis ou l'operateur monte sa boite. Le miroir de
+# reseau et du registre OpenTofu — au moment precis ou l'operateur monte son conteneur. Le miroir de
 # fichiers supprime cette dependance, comme le pin sha256 la supprime pour ttyd et Elixir.
 # `direct { exclude = ["*/*"] }` FERME la porte reseau, et ce n'est pas de la ceinture : sans lui,
 # un provider absent du miroir serait telecharge en silence au premier init, et l'image cesserait
 # d'etre reproductible sans que personne ne le voie. Avec, elle echoue en nommant ce qui manque.
 # LE TEMOIN DU LOT est le `tofu init` en fin de RUN : il ne peut PAS atteindre le reseau. S'il
 # passe, le miroir est complet et les deux lock files sont satisfaits par lui. S'il echoue, l'image
-# NE SE BATIT PAS — plutot que de livrer une boite qui decouvre le manque chez l'operateur.
+# NE SE BATIT PAS — plutot que de livrer un conteneur qui decouvre le manque chez l'operateur.
 # ⚠ AUCUN COMMENTAIRE EN BACKTICKS ENTRE DEUX INSTRUCTIONS de ce RUN. La forme `# … ` marche dans
 # une LISTE D'ARGUMENTS (cf. le apt-get plus haut) et casse ici : la substitution vide precede
 # `for … ; do`, le shell lit `for` comme un nom de commande et rend « Syntax error: do unexpected ».
@@ -444,7 +444,7 @@ COPY catalogues /opt/lcars/catalogues
 # `/opt/lcars/<helper>` a `$(product_tree)/services/<helper>` — soit `/opt/lcars/services/`
 # ici. Sans ce repertoire, `cmp` echoue sur une source ABSENTE et le module rend « diverge de la
 # source » pour chaque auxiliaire : sur docker il ne peut pas s'appliquer (APPLY-ON=wsl linux),
-# donc ce drift devenait un ECHEC PERMANENT et la boite ne convergeait jamais.
+# donc ce drift devenait un ECHEC PERMANENT et le conteneur ne convergeait jamais.
 # Les COPY unitaires plus bas restent : ce sont les auxiliaires POSES, que l'apply du rail poste
 # installerait lui-meme et que l'image doit fournir deja en place.
 COPY runtime/services /opt/lcars/services
@@ -463,11 +463,11 @@ COPY runtime/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converg
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
 COPY runtime/services/admiral/skills /opt/lcars/services/admiral/skills
 # Les gestes forge, DANS l'image : `container` et le banc les jouent par la meme porte, au lieu
-# d'en porter chacun une copie (le banc ne peut pas appeler `container` — sa boite vient d'un autre
+# d'en porter chacun une copie (le banc ne peut pas appeler `container` — son conteneur vient d'un autre
 # couple de fichiers compose, et `container` refuse a raison d'agir sur un projet qu'il n'a pas cree).
 COPY runtime/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
 # Le minteur de jetons de rôle : un geste de forge du produit (lot 6), posé à côté du geste de
-# structure — la boîte le joue à l'init de son instance.
+# structure — le conteneur le joue à l'init de son instance.
 COPY runtime/services/provision-role-tokens.sh /opt/lcars/provision-role-tokens.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
@@ -487,12 +487,12 @@ COPY runtime/services/supervise.sh          /opt/lcars/supervise.sh
 COPY runtime/bin/lcars-authority-ask /usr/local/bin/lcars-authority-ask
 COPY runtime/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
-# donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
+# donc l'humain reste maitre de SON .bashrc, le conteneur ne le rattrape pas au boot suivant. Contenu :
 # le bashrc etendu (ll/la/l, couleurs, completion, lesspipe) qu'une base ubuntu minimale n'a PAS, plus le
 # prompt maison de l'humain. `less` et `bash-completion` sont installes plus haut POUR LUI :
 # sans eux, deux blocs de ce fichier seraient des no-op silencieux.
 #
-# ⚠ `--chmod` EST OBLIGATOIRE, ET SON ABSENCE ETAIT UN ECART POSTE/BOITE. Un `COPY` nu PRESERVE le
+# ⚠ `--chmod` EST OBLIGATOIRE, ET SON ABSENCE ETAIT UN ECART POSTE/CONTENEUR. Un `COPY` nu PRESERVE le
 # mode du fichier dans le contexte de build : `skel.bashrc` est `0664` dans le depot, donc l'image
 # le portait en 664 quand la table declare `0644` et que `62-runtime-helpers` le pose bien en 0644
 # sur un poste. Le meme objet, deux modes, selon le rail — trouve par le releve croise du rang D
@@ -519,13 +519,13 @@ RUN printf "%s\n%s\n%s\n" \
       "# <<< lcars:skel <<<" >> /etc/skel/.bashrc
 
 # ─── ~/.local/bin SUR LE PATH DE TOUT SHELL INTERACTIF, PAS SEULEMENT DES SHELLS DE LOGIN ───────
-# `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or la
-# boite a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console web en
+# `~/.profile` (Debian) pose deja cette regle, mais il n'est lu QUE par un shell de login. Or le
+# conteneur a PLUSIEURS PORTES et elles ne sont pas toutes des logins : sshd et la console web en
 # ouvrent un ; `su <humain>` (sans tiret) et `docker exec` n'en ouvrent pas. Sans cette ligne, ce
 # qui est installe sous ~/.local/bin est visible ou non SELON LA PORTE empruntee.
 #
 # ICI ET PAS DANS skel.bashrc : le squelette n'est copie qu'a la CREATION de l'humain
-# (`useradd -m`), jamais ensuite — une boite deja installee ne le verrait jamais. `/etc/bash.bashrc`
+# (`useradd -m`), jamais ensuite — un conteneur deja installe ne le verrait jamais. `/etc/bash.bashrc`
 # est lu par tout bash interactif, vit dans l'IMAGE (donc suit les mises a jour) et ne touche pas
 # au `.bashrc` de l'humain, qui reste le sien.
 #
@@ -601,7 +601,7 @@ EXPOSE 22
 # ABSENTS par defaut — et presents exactement quand quelqu'un les pose, c'est-a-dire lisibles ici
 # par la meme lecture que celle de l'entrypoint. Les deux cotes lisent la meme chose ou rien.
 # ⚠ LE CAS DESACTIVE SORT VERT, ET CE N'EST PAS UNE COMPLAISANCE. `LCARS_LANDING=0` est une
-# configuration supportee ; sonder son port quand meme rendrait une boite volontairement sans deck
+# configuration supportee ; sonder son port quand meme rendrait un conteneur volontairement sans deck
 # definitivement *unhealthy* — un reglage transforme en panne. Ce qui reste sonde alors est ce qui
 # reste promis : sshd.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
@@ -644,8 +644,8 @@ COPY deploy /opt/lcars/deploy
 # modes du contexte — sans cette ligne, verify rougit sur tout clone a umask 002.
 RUN chmod -R g-s,go-w /opt/lcars/deploy
 # ⚠ DEUX MESURES N'ONT PAS DE VÉRITÉ AU BUILD, ET LE PREMIER BUILD LES A NOMMÉES (2026-09-04) :
-# la sonde bwrap de `10-packages` mesure le NOYAU (celui de BuildKit, sans userns — pas celui de la
-# boîte), `PROV_KERNEL_PROBES=0` la fait dire « non jouée ici » ; `20-groups` mesure l'appartenance
+# la sonde bwrap de `10-packages` mesure le NOYAU (celui de BuildKit, sans userns — pas celui du
+# conteneur), `PROV_KERNEL_PROBES=0` la fait dire « non jouée ici » ; `20-groups` mesure l'appartenance
 # du SIÈGE à `fleet`, et le siège n'existe qu'au boot — il n'est pas demandé (les GID de l'image,
 # eux, sont tenus par la table et son témoin).
 RUN PROV_SOURCE_REV="${GIT_SHA}" PROV_KERNEL_PROBES=0 /opt/lcars/deploy/provision doctor --substrate docker \

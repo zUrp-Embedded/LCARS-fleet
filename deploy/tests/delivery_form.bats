@@ -11,7 +11,7 @@
 #   source  on bâtit les deux. Les compilateurs vivent le temps du build.
 #
 # ⚠ ON N'EN FAIT JAMAIS LA MOITIE, et c'est la moitie qui est le vrai risque. Une machine qui porte
-# node mais pas la toolchain Elixir — ou l'inverse — n'est ni une boite de prod ni un poste de dev :
+# node mais pas la toolchain Elixir — ou l'inverse — n'est ni un conteneur de prod ni un poste de dev :
 # c'est un etat que personne n'a decrit, et sur lequel aucun diagnostic ne se prononce. Les deux
 # modules lisent donc LE MEME discriminant, et ces temoins mesurent qu'ils le lisent pareil.
 #

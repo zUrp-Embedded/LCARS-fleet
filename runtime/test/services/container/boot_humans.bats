@@ -4,14 +4,14 @@
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population
 #
-# CE QUE CES TEMOINS FERMENT. La boite rendait la main sans savoir si quelqu'un pouvait lancer une
+# CE QUE CES TEMOINS FERMENT. Le conteneur rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le
-# `exec sshd` et sa premiere passe, la boite se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
+# `exec sshd` et sa premiere passe, le conteneur se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
 # — et n'a personne. `container up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
 # MODULES, pas la population. Il n'avait aucune raison de douter.
 #
 # ⚠ LE RAIL POSTE AVAIT FERME EXACTEMENT CA LE 2026-08-25, ET PAS CELUI-CI. `64-services` tire le
-# convergeur en `--once` synchrone puis mesure la population avant/apres. La boite, elle, lancait la
+# convergeur en `--once` synchrone puis mesure la population avant/apres. Le conteneur, lui, lancait la
 # boucle et passait a la suite. Le rail qui compte le moins etait donc le mieux verifie des deux.
 #
 # ⚠ LE FAIT SE LIT SUR LA MACHINE (lot 6, 2026-09-04). L'entrypoint appelait
@@ -136,10 +136,10 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 }
 
 @test "doctor VERT et PERSONNE : le verdict publie non-zero, et il nomme GUARD B" {
-  # Le cas d'une boite de production ou personne ne s'est encore enrole. Ce n'est pas une panne —
+  # Le cas d'un conteneur de production ou personne ne s'est encore enrole. Ce n'est pas une panne —
   # mais ca doit se LIRE, sinon l'operateur cherche pourquoi `fleet start` refuse.
   # Mesure du 2026-09-04, banc bob_2 : le doctor rendait 0 (l'absence est un WARN), le bloc lisait
-  # ce 0 comme « present(s) », et la boite l'annoncait avec le seul siege a bord.
+  # ce 0 comme « present(s) », et le conteneur l'annoncait avec le seul siege a bord.
   bloc 0 1
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = "1" ]
@@ -148,9 +148,9 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'humans' "$JOURNAL"
 }
 
-@test "un premier tour EN ECHEC ne tue pas le boot — la boite doit rester joignable" {
-  # Meme regle que tout ce fichier : un echec de convergence n'est jamais fatal, sinon une boite
-  # cassee devient une boite qu'on ne peut pas reparer.
+@test "un premier tour EN ECHEC ne tue pas le boot — le conteneur doit rester joignable" {
+  # Meme regle que tout ce fichier : un echec de convergence n'est jamais fatal, sinon un conteneur
+  # casse devient un conteneur qu'on ne peut pas reparer.
   bloc 3 1
   [ "$status" -eq 0 ]
   grep -q 'NON CONCLUANT (rc=3)' "$JOURNAL"

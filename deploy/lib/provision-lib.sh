@@ -1208,7 +1208,7 @@ PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 #
 # ⚠ ET RENOMMER NE SUFFIT PAS : il faut PROPAGER. Sans le second geste, le rejeu depuis
 # `/opt/lcars` d'une machine installée par PAQUET ne trouverait plus rien et se déclarerait SOURCE
-# — le défaut symétrique, qui exigerait un toolchain sur une boîte qui n'en a pas. `62-runtime-
+# — le défaut symétrique, qui exigerait un toolchain sur un conteneur qui n'en a pas. `62-runtime-
 # helpers` pose donc le discriminant sous `$PROV_ROOT` quand la livraison courante est binaire, et
 # le RETIRE quand elle est source : la copie porte la vraie forme, dans les deux sens.
 PROV_HELPERS_STAMP="${LCARS_HELPERS_STAMP:-.helpers-revision}"
@@ -1313,7 +1313,7 @@ prov_state_why() { # prov_state_why <etat> <chemin>
 #
 # ⚠ ON N'EN FAIT JAMAIS LA MOITIE. Poser le toolchain Elixir « au cas ou » sur une livraison binaire,
 # ou n'y poser que node parce que la doc se bâtit, produirait une machine dont personne ne sait ce
-# qu'elle est : ni une boite de prod (elle porte des compilateurs), ni un poste de dev (il lui en
+# qu'elle est : ni un conteneur de prod (elle porte des compilateurs), ni un poste de dev (il lui en
 # manque). La question se pose UNE fois, ici, et les modules la lisent.
 #
 # ⚠ LE DISCRIMINANT EST EXPLICITE, PAS DEDUIT — meme raison que dans `etc/deploy-release.sh`, et
@@ -1344,7 +1344,7 @@ prov_rev_is_behind() { # prov_rev_is_behind <rev_source> <rev_posee> [racine]
 
 # ─── prov_roles — LE ROSTER FORGE, DERIVE DU MATERIEL ─────────────────────────────────────────────
 # `PROV_ROLES` SURVIT COMME PLANCHER, et pas par prudence : les comptes `system_*` vivent dans le
-# catalogue SYSTEME, qui n'est pas installe — il est le substrat. Et une boite dont le release n'est
+# catalogue SYSTEME, qui n'est pas installe — il est le substrat. Et un conteneur dont le release n'est
 # pas encore pose doit quand meme minter de quoi demarrer.
 # ─── LE SIEGE : le #1 de la forge et le compte unix sont le MEME acteur ─────────────────────────
 #

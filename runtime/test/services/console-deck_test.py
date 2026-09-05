@@ -2,7 +2,7 @@
 # SOURCE: runtime/test/services/console-deck_test.py
 # AUTHOR: DrDree
 # STARDATE: 2026-08-08
-# STATUS: actif — la sonde du deck de la boite, et sa distinction a trois etats
+# STATUS: actif — la sonde du deck du conteneur, et sa distinction a trois etats
 #
 # POURQUOI CE FICHIER. `console-deck.py` interrogeait le deck d'un humain avec `timeout=2` et
 # rendait `None` sur n'importe quelle exception ; l'appelant en faisait `fleet=False` et la page
@@ -304,7 +304,7 @@ check([h["human"] for h in _parsed] == ["zoe", "max"],
 check(_parsed[0]["uid"] == 1015 and _parsed[0]["home"] == "/home/zoe",
       "et il en prend l'uid ET le home — le home est deja VALIDE par le script, on ne le re-derive pas")
 
-# ⚠ LA DISTINCTION QUI PORTE TOUT : un script qui echoue n'est pas une boite sans humains. Repondre
+# ⚠ LA DISTINCTION QUI PORTE TOUT : un script qui echoue n'est pas un conteneur sans humains. Repondre
 # `[]` ferait dire a la porte « tu n'as pas de siege » a tout le monde, ce qui accuse le convergeur
 # d'un tort qui n'est pas le sien, aupres de gens qui n'ont rien a corriger.
 deck.HUMANS_SH = _fake_humans_sh("bad.sh", "echo boom >&2\nexit 3\n")
@@ -611,7 +611,7 @@ check(fetch(dport, "/api/state", cookie)[0] == 409,
       "sans fichier de refus, on retombe sur « pas encore converge » — l'absence n'accuse rien")
 os.unlink(refused_path)   # il vit dans `_cfg_dir` : `atexit` ramasserait le reste de toute facon
 
-# (6) LE FILTRE EST A LA SOURCE. Deux humains sur la boite, une seule ligne servie.
+# (6) LE FILTRE EST A LA SOURCE. Deux humains sur le conteneur, une seule ligne servie.
 deck.humans = lambda: [
     {"human": "zoe", "uid": 1001, "home": "/home/zoe", "ports": deck.block(1001)},
     {"human": "autre", "uid": 1002, "home": "/home/autre", "ports": deck.block(1002)},
@@ -1263,7 +1263,7 @@ finally:
 # La plaquette part dans l'image (Dockerfile, stage `site`) et le deck la sert sous `/doc/`. Deux
 # choses seulement sont a tenir, et ce sont les deux qui coutent si elles lachent :
 #
-#   1. `..` NE SORT PAS DE LA RACINE. Le prefixe voisin porte les jetons de la boite ; une
+#   1. `..` NE SORT PAS DE LA RACINE. Le prefixe voisin porte les jetons du conteneur ; une
 #      traversee servirait un fichier que ce serveur n'a aucun droit de lire a un navigateur.
 #   2. LES TYPES SERVIS SONT UNE LISTE, pas une deduction : ce qui n'y est pas ne sort pas.
 _deck = load_deck()
@@ -1303,7 +1303,7 @@ def _resolve(rel):
 check(_resolve("index.html") is not None and _resolve("manuel/index.html") is not None,
       "doc: une page de la doc se resout dans sa racine")
 check(_resolve("../hors-doc.html") is None,
-      "doc: `..` sort de la racine et est REFUSE — le prefixe voisin porte les jetons de la boite")
+      "doc: `..` sort de la racine et est REFUSE — le prefixe voisin porte les jetons du conteneur")
 check(_resolve("manuel/../../hors-doc.html") is None,
       "doc: une traversee cachee au milieu du chemin est refusee comme les autres")
 

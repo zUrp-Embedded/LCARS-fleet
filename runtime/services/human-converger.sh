@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/human-converger.sh
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: PROTO-V2 — boucle root : la team `humans` de la forge -> les users Linux de la boite
+# STATUS: PROTO-V2 — boucle root : la team `humans` de la forge -> les users Linux du conteneur
 #
 # ⚠ POURQUOI LA REVOCATION TUE, ET NE PEUT PAS FAIRE AUTREMENT : un serveur tmux distribue son jeu
 # de groupes a TOUS les shells qu'il fork ensuite, et il survit a ttyd comme au navigateur ferme —
@@ -215,7 +215,7 @@ login_shell_of() { # login_shell_of <login>
   awk -F: -v n="$1" '$1==n {print $7}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
-# Les humains que CETTE boite a converges : membres du groupe fleet, uid dans la plage des humains
+# Les humains que CE conteneur a converges : membres du groupe fleet, uid dans la plage des humains
 # (UID_MIN <= uid <= UID_MAX). C'est la seule trace qu'un enrollment a eu lieu, et elle se CALCULE
 # — aucune liste tenue a la main ne resterait vraie. L'humain de bootstrap en est ecarte : il
 # n'est pas venu de la team. Bornes illisibles : PERSONNE n'est designe — une liste vide n'est
@@ -273,7 +273,7 @@ command -v jq   >/dev/null || { err "jq absent de l'image"; exit 1; }
 [[ "$(id -u)" -eq 0 ]] || { err "doit tourner en root (c'est lui qui cree les users)"; exit 1; }
 
 api() { # api <path> — le jeton passe par un fichier de config sur STDIN, jamais en argv :
-  # `/proc/<pid>/cmdline` est lisible par tout compte de la boite, toutes les 30 s, a vie.
+  # `/proc/<pid>/cmdline` est lisible par tout compte du conteneur, toutes les 30 s, a vie.
   printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$TOKEN_FILE")" \
     | curl -s -m 15 -K - "$FORGE/api/v1$1" 2>/dev/null || true
 }
@@ -456,7 +456,7 @@ converge_once() {
       if reserved "$login"; then
         already_refused "$login" || {
           err "REFUS $login — compte EXISTANT reserve (uid hors [UID_MIN..UID_MAX], compte systeme ou de service) ; ni reintegre, ni console"
-          mark_refused "$login" "ce login existe deja sur cette boite comme compte systeme ou de service : il ne devient pas un humain de fleet"; }
+          mark_refused "$login" "ce login existe deja sur ce conteneur comme compte systeme ou de service : il ne devient pas un humain de fleet"; }
         continue
       fi
       # GUARD A : jamais restaurer (ni toucher) l'uid reserve du sysadmin (admiral).
@@ -470,7 +470,7 @@ converge_once() {
     if reserved "$login"; then
       already_refused "$login" || {
         err "REFUS $login — nom reserve (compte systeme ou compte de service de la fleet) ; AUCUN user cree"
-        mark_refused "$login" "ce login est reserve sur cette boite (compte systeme, ou compte de service de la fleet)"; }
+        mark_refused "$login" "ce login est reserve sur ce conteneur (compte systeme, ou compte de service de la fleet)"; }
       continue
     fi
     if ! valid_login "$login"; then

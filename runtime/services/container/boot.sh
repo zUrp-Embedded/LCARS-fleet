@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/container/boot.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — le boot de la boite (PID 1 sous tini) : init de l'instance, gestes de forge, services, puis exec sshd
+# STATUS: PROTO-V2 — le boot du conteneur (PID 1 sous tini) : init de l'instance, gestes de forge, services, puis exec sshd
 #
 # USAGE — les portes de l'image (« docker run --rm IMAGE <porte> … »), deleguees a « lcars tool » :
 #   boot.sh verify <root>
@@ -10,15 +10,15 @@
 #   boot.sh roles-tfvars [root]
 #   boot.sh catalogue-root
 #   boot.sh catalogue-source <nom>
-#   boot.sh forge-apply              (root : joue forge-gestures apply DANS la boite)
-# Sans porte : le boot de la boite (PID 1 sous tini).
+#   boot.sh forge-apply              (root : joue forge-gestures apply DANS le conteneur)
+# Sans porte : le boot du conteneur (PID 1 sous tini).
 #
 # Modèle (etc/README.md du runtime) : l'humain SSH dans le conteneur EN TANT QUE LUI (sshd = le
 # login-manager : auth + drop d'UID, zéro privilège custom) puis lance `fleet start`. Ce
 # script est la transposition Docker du « re-run convergent » : l'image est immutable (build),
 # le VOLUME /home converge ICI à chaque boot via LE MÊME `provision` que le chemin WSL.
 #
-# Un échec de convergence NE TUE PAS le conteneur : la boîte doit rester joignable pour être
+# Un échec de convergence NE TUE PAS le conteneur : le conteneur doit rester joignable pour être
 # réparée (fail-loud dans les logs, pas fail-dead) — sshd démarre quoi qu'il arrive.
 #
 # Env d'entrée (compose/docker run) :
@@ -39,7 +39,7 @@ set -euo pipefail
 # pour demander a une image son roster sans rien installer. Les quatre evaluations vivaient ICI,
 # dans le PID 1 ; elles sont dans `lcars tool …` (lot 6, 2026-09-04), posees sur les deux rails, et
 # ce fichier ne fait plus que deleguer. `forge-apply` reste : c'est le geste de structure joue
-# DANS la boite par `container forge-apply`, et il exige root (il lit et ecrit `/opt/lcars/var/tokens`).
+# DANS le conteneur par `container forge-apply`, et il exige root (il lit et ecrit `/opt/lcars/var/tokens`).
 case "${1:-}" in
   verify|roles|roles-tfvars|catalogue-root|catalogue-source)
     exec /usr/local/bin/lcars tool "$@" ;;
@@ -60,8 +60,8 @@ esac
 # l'installeur entier a chaque boot. Tout cela est `runtime/services/container/init.sh`, un geste du
 # PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
 # la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
-# substrat docker. Il rend 3 quand la boite n'a rien pour determiner son siege : c'est l'etat « en
-# attente de configuration », et la boite reste debout pour que « container config » soit jouable.
+# substrat docker. Il rend 3 quand le conteneur n'a rien pour determiner son siege : c'est l'etat « en
+# attente de configuration », et le conteneur reste debout pour que « container config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
 CONTAINER_INIT="${LCARS_CONTAINER_INIT:-/opt/lcars/services/container/init.sh}"
@@ -81,10 +81,10 @@ LCARS_MODULE_PROTOCOL="$MODULE_PROTOCOL" bash "$CONTAINER_INIT" apply 2>&1 | sed
 case "$init_rc" in
   0) say "init de l'instance : converge" ;;
   2) say "init de l'instance : APPLIQUE, DRIFT RESIDUEL — un geste manque, rien n'est casse" ;;
-  3) say "boite EN ATTENTE DE CONFIGURATION — elle reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
+  3) say "conteneur EN ATTENTE DE CONFIGURATION — il reste debout pour que « container config » soit jouable. Aucun service n'est demarre, et le healthcheck le dira."
      printf 'awaiting-config\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
      exec sleep infinity ;;
-  *) say "init de l'instance : ECHEC (rc=$init_rc) — la boite reste debout pour etre lue, aucun service n'est demarre"
+  *) say "init de l'instance : ECHEC (rc=$init_rc) — le conteneur reste debout pour etre lu, aucun service n'est demarre"
      printf 'init-failed\n' > "${LCARS_BOOT_STATE_FILE:-/run/lcars-boot.state}" 2>/dev/null || true
      exec sleep infinity ;;
 esac
@@ -107,7 +107,7 @@ for gesture in tokens catalogues ops-branch deck-oidc; do
   case "$g_rc" in
     0) : ;;
     2) say "geste de forge « $gesture » : drift residuel — il se reposera au boot suivant" ;;
-    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — la boite demarre quand meme" ; prov_rc=$g_rc ;;
+    *) say "geste de forge « $gesture » : ECHEC (rc=$g_rc) — le conteneur demarre quand meme" ; prov_rc=$g_rc ;;
   esac
 done
 
@@ -160,8 +160,8 @@ launch() { # launch <nom> <log> -- <cmd...> — rend 1 si la commande n'est pas 
 
 # ─── 3ter. Convergence CONTINUE des humains (forge `humans` → users Linux) ───────────────────────
 # L'étape 3 converge un état FIGÉ, au boot. Enrôler quelqu'un demandait donc un redémarrage — ce qui
-# était défendable en 1976. Cette boucle poursuit le même état-cible pendant toute la vie de la
-# boîte : elle lit la team `humans` au token système et crée les users manquants. Elle tourne en
+# était défendable en 1976. Cette boucle poursuit le même état-cible pendant toute la vie du
+# conteneur : elle lit la team `humans` au token système et crée les users manquants. Elle tourne en
 # root parce que root tourne DÉJÀ ici en permanence (sshd juste dessous) — pas de `sudo` à
 # installer, pas de droit à accorder à quiconque.
 # Elle ne SUPPRIME jamais : la révocation est un retrait côté forge, et ce qui reste sur la machine
@@ -173,14 +173,14 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   #
   # ⚠ ET LA RÈGLE D'UID N'EST PAS RÉÉCRITE ICI, C'EST TOUT LE SUJET. Le dispositif que ce
   # commentaire décrivait (`64-services`, `probe_fleet_humans`, un `doctor --only` au boot) est mort
-  # au lot 6 : l'installeur ne joue plus dans la boîte. Ce qui reste est le PRÉDICAT du protocole,
+  # au lot 6 : l'installeur ne joue plus dans le conteneur. Ce qui reste est le PRÉDICAT du protocole,
   # `is_fleet_human` (`lib/human-protocol.sh`) — celui du convergeur et des modules per-humain — et
   # c'est lui que le verdict ci-dessous appelle. Recopier la règle ici en ferait un troisième
   # exemplaire, et c'est toujours celui qu'on ne relit pas qui ment (relecture hostile 2026-09-04 :
   # ce bloc en portait un, plancher 1000 en dur, sous ce même commentaire).
   #
   # `timeout` : ce premier tour parle à la forge et provisionne chaque humain. Il est BORNÉ parce
-  # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que la boîte doit rester
+  # qu'un boot ne peut pas dépendre d'un réseau, et NON FATAL parce que le conteneur doit rester
   # joignable pour être réparée — même règle que tout le reste de ce fichier.
   # ⚠ 240 s ETAIT TROP LONG POUR UN BOOT, et ce n'etait pas mesure — c'etait un chiffre pose au
   # jugé. Le port 22 n'ouvre qu'apres cette passe : chaque seconde ici est une seconde ou personne ne
@@ -198,13 +198,13 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   fi
 
   # LE FAIT, PAS LE CODE DE RETOUR. Le convergeur peut rendre 0 sans avoir converti personne (une
-  # team vide EST un résultat valide, et sur une boîte de production c'est même le cas nominal tant
+  # team vide EST un résultat valide, et sur un conteneur de production c'est même le cas nominal tant
   # que personne ne s'est enrôlé). Ce qui se publie est ce que la SONDE constate.
   HUMANS_RC_FILE="${LCARS_HUMANS_RC_FILE:-/run/lcars-humans.rc}"
-  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur une boite conforme SANS
+  # ⚠ LE FAIT, PAS LE CODE DE RETOUR DU DOCTOR. `64-services` rendait 0 sur un conteneur conforme SANS
   # humain — l'absence y est un WARN, par doctrine (un deploiement neuf attend son premier inscrit).
   # Ce bloc lisait ce 0 comme « quelqu'un peut lancer une fleet » : toujours vrai, donc jamais une
-  # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et la boite l'annoncait.
+  # information. Mesure du 2026-09-04, banc bob_2 : seul le siege existait, et le conteneur l'annoncait.
   # LE FAIT SE LIT SUR LA MACHINE, PAR LE PREDICAT DU PROTOCOLE : un humain de fleet est un membre
   # du groupe `fleet` que `is_fleet_human` reconnait — uid au-dessus du plancher de la machine
   # (`UID_MIN` de login.defs, la meme lecture que le convergeur et `console-humans.sh`), et pas le
@@ -245,14 +245,14 @@ if [[ "${LCARS_CONVERGE_HUMANS:-1}" == "1" && -x "$CONVERGER_BIN" ]]; then
   elif [[ "$pop_rc" -eq 2 ]]; then
     say "population des humains NON mesuree — la frontiere systeme/humain n'est pas etablie (bornes d'uid illisibles dans ${PASSWD_DEFS:-/etc/login.defs}, le remede est ci-dessus) : GUARD B refusera tout « fleet start » tant qu'elle ne l'est pas"
   else
-    say "AUCUN humain de fleet dans cette boîte — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
+    say "AUCUN humain de fleet dans ce conteneur — GUARD B refusera tout « fleet start ». Enrôle quelqu'un sur la forge et ajoute-le à la team « humans » : la boucle le matérialise au tour suivant"
   fi
 
   launch "convergence des humains" "$CONVERGER_LOG" -- "$CONVERGER_BIN" \
-    || say "convergence des humains NON lancée — la boîte reste joignable, mais personne ne sera matérialisé sans redémarrage"
+    || say "convergence des humains NON lancée — le conteneur reste joignable, mais personne ne sera matérialisé sans redémarrage"
   say "un ajout à la team « humans » suffit désormais, sans redémarrage"
 else
-  say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans la boîte"
+  say "convergence des humains DÉSACTIVÉE — enrôler quelqu'un exige un geste manuel dans le conteneur"
 fi
 
 # LES DEUX VERDICTS, ENSEMBLE ET DANS CET ORDRE. `humans_rc` n'existe que si la convergence a
@@ -262,7 +262,7 @@ publier_verdicts
 
 # ─── 3bis. La console web (ttyd sous l'humain, sur SA socket AF_UNIX) ───────────────────────────
 # Lancée APRÈS la convergence (elle a besoin de l'humain et de son home) et AVANT sshd (qui prend
-# le premier plan). Son échec n'est pas fatal — même règle que la convergence : la boîte doit
+# le premier plan). Son échec n'est pas fatal — même règle que la convergence : le conteneur doit
 # rester joignable pour être réparée. La console est un CONFORT, ssh reste la porte d'admin.
 if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # `--all` : UNE console par humain éligible, chacune sur SA socket
@@ -271,8 +271,8 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   # garde anti-système vivent dans console-humans.sh, source unique.
   /opt/lcars/console.sh --all || say "console web NON lancée (rc=$?) — ssh reste la porte"
 
-  # La home de la boîte, sur un port HORS de l'espace des blocs humains. Elle n'appartient à aucun
-  # humain — c'est la porte de la boîte. Échec non fatal comme le reste.
+  # La home du conteneur, sur un port HORS de l'espace des blocs humains. Elle n'appartient à aucun
+  # humain — c'est la porte du conteneur. Échec non fatal comme le reste.
   #
   # ⚠ PAR `launch`, ET AVEC `--foreground` : LES DEUX MOITIÉS COMPTENT. Ce bloc appelait le script
   # nu, qui se met lui-même en arrière-plan (`console-landing.sh`, dernière ligne) et rend la main.
@@ -285,11 +285,11 @@ if [[ "${LCARS_CONSOLE:-1}" == "1" ]]; then
   if [[ "${LCARS_LANDING:-1}" == "1" ]]; then
     # Le port du deck a UNE déclaration (`PROV_DECK_PORT`, MUR 4 de variable_walls) et ses copies la
     # suivent : ici le défaut que le daemon lit, EXPORTÉ pour que le geste `deck-oidc` (les
-    # `redirect_uris` OAuth2) et le deck lisent la même valeur dans cette boîte. L'ENTRÉE publiée
+    # `redirect_uris` OAuth2) et le deck lisent la même valeur dans ce conteneur. L'ENTRÉE publiée
     # sur l'hôte (`LCARS_LANDING_PORT_BIND`) est un autre fait : « container up » la traduit en
     # `LCARS_DECK_ORIGINS` (B1). Le nom est unique depuis le lot 8 — plus de pont entre deux noms.
     export LCARS_LANDING_PORT="${LCARS_LANDING_PORT:-20999}"
-    launch "home de la boîte (deck)" /var/log/lcars-landing.log -- \
+    launch "home du conteneur (deck)" /var/log/lcars-landing.log -- \
       /opt/lcars/console-landing.sh --foreground \
       || say "home NON lancée (rc=$?) — AUCUNE console n'est joignable (elles n'ont plus de port, le landing est le seul chemin) ; ssh reste la porte"
   fi

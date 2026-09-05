@@ -2,7 +2,7 @@
 # SOURCE: deploy/tests/forge_gestures.bats
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
-# STATUS: bats tests for services/forge-gestures.sh — LA porte des gestes forge de la boite
+# STATUS: bats tests for services/forge-gestures.sh — LA porte des gestes forge du conteneur
 #
 # CE SCRIPT PORTE LE JETON SITE-ADMIN, celui qui peut tout creer et tout detruire sur la forge, et
 # il est joue par DEUX appelants (`container` et le banc). Une regression ici ne se voit ni dans
@@ -22,7 +22,7 @@
 # l'isolation, pas une fuite.
 # shellcheck disable=SC2030,SC2031
 
-@test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand la boite n'est pas la" {
+@test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand le conteneur n'est pas la" {
   local container="$BATS_TEST_DIRNAME/../container"
   [ -f "$container" ]
   local body; body="$(grep -vE '^\s*#' "$container" | sed -n '/^gesture()/,/^}/p')"
@@ -92,7 +92,7 @@ FAKE
   export LCARS_APPLY_LOCK="$BATS_TEST_TMPDIR/apply.lock"
   export LCARS_CATALOGUE_WORK="$BATS_TEST_TMPDIR/tofu"
   # Le CACHE local du materiel. Pointe dans le tmpdir : sans ca le temoin ecrirait dans
-  # `/home/catalogues`, c'est-a-dire dans la boite de celui qui lance la suite.
+  # `/home/catalogues`, c'est-a-dire dans le conteneur de celui qui lance la suite.
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
 
   # La porte outil du release, doublee : elle journalise SON verbe et rend ce que le cas veut.
@@ -167,7 +167,7 @@ FAKE
 }
 
 @test "config-token: un jeton qui ne s'authentifie pas n'est PAS ecrit" {
-  # LE MENSONGE QUE CE TEMOIN INTERDIT : une boite qui croit tenir son autorite et le decouvre au
+  # LE MENSONGE QUE CE TEMOIN INTERDIT : un conteneur qui croit tenir son autorite et le decouvre au
   # premier geste structurel, des mois plus tard, sur une forge de production.
   FAKE_AUTH_CODE=401 run bash -c "printf '%s' 'JETON-MORT' | '$SCRIPT' config-token"
   [ "$status" -eq 3 ]
@@ -231,13 +231,13 @@ FAKE
   [[ "$output" == *"instance"* ]]
 }
 
-@test "apply: un jeton sur stdin l'emporte sur celui que la boite garde" {
-  printf 'TOK-BOITE\n' > "$PRIV/forge-master.token"
+@test "apply: un jeton sur stdin l'emporte sur celui que le conteneur garde" {
+  printf 'TOK-CONTENEUR\n' > "$PRIV/forge-master.token"
   printf 'SEED\n' > "$PRIV/forge-seed.pass"
   run bash -c "printf '%s' 'TOK-APPELANT' | '$SCRIPT' apply"
   [ "$status" -eq 0 ]
-  # Le fichier de la boite n'est PAS reecrit : `apply` consomme, il ne pose pas.
-  [ "$(cat "$PRIV/forge-master.token")" = "TOK-BOITE" ]
+  # Le fichier du conteneur n'est PAS reecrit : `apply` consomme, il ne pose pas.
+  [ "$(cat "$PRIV/forge-master.token")" = "TOK-CONTENEUR" ]
 }
 
 @test "apply: DEUX applys concurrents — le second REFUSE, il n'attend pas" {
@@ -292,7 +292,7 @@ setup_install() {
   # proprietaire du process ; un argv l'est de tout le monde).
   #
   # L'EXIGENCE, ELLE, N'A PAS BOUGE D'UN MOT : la lecture se fait sous l'identite SYSTEME, jamais
-  # sous l'autorite totale de la boite. C'est elle qui est epinglee ici, la ou elle se lit
+  # sous l'autorite totale du conteneur. C'est elle qui est epinglee ici, la ou elle se lit
   # maintenant.
   setup_install
   cat > "$BIN/entrypoint" <<FAKE
@@ -384,7 +384,7 @@ FAKE
 }
 
 @test "install: le MATERIEL local est pose dans le meme geste, clone depuis le store" {
-  # Sans ca, la commande rend la main sur une boite qui n'a pas encore le catalogue qu'elle vient
+  # Sans ca, la commande rend la main sur un conteneur qui n'a pas encore le catalogue qu'il vient
   # d'installer, et rien ne dit a l'admin qu'il doit redemarrer. Le clone vient du STORE et non de
   # l'arbre en main : le convergeur compare des shas, et une copie sans `.git` n'en a pas.
   setup_install
@@ -608,7 +608,7 @@ FAKE
   # en `0644 root:root` — et l'humain qui jouait `lcars catalogue install` ensuite ouvrait en
   # ecriture un fichier qui n'etait pas le sien. « Permission denied », puis « verrou d'apply
   # inouvrable » : un refus qui accuse le verrou pour un probleme de proprietaire, et un geste
-  # injouable par un humain sur toute boite ayant demarre une fois.
+  # injouable par un humain sur tout conteneur ayant demarre une fois.
   #
   # ⚠ LE PARTAGE ENTRE DEUX IDENTITES N'A PLUS D'OBJET, ET LE MODE N'EST PLUS EPINGLE. Les deux
   # appelants sont ROOT desormais — le boot, et `catalogue-executor.py`. Ce qui reste vrai, et ce

@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/forge-gestures.sh
 # AUTHOR: drdree
 # STARDATE: 2026-08-16
-# STATUS: les gestes forge de la boite — poses UNE fois, joues par tout appelant
+# STATUS: les gestes forge du conteneur — poses UNE fois, joues par tout appelant
 # ⚠ LES SECRETS ENTRENT PAR STDIN, JAMAIS PAR argv : `/proc/<pid>/cmdline` est lisible par tout le
 # monde pendant l'appel, et un `--token X` l'aurait mis dans la ligne de commande de CE script ET
 # dans celle du client docker.
@@ -12,7 +12,7 @@
 #   config-seed    lit le seed sur STDIN, meme mode (handoff tofu -> mint A4).
 #   builtin-human  imprime le nom du compte integre. Ce fichier en est l'AUTORITE ; le verbe existe
 #                  pour que ses appelants le DEMANDENT au lieu d'en recopier le defaut.
-#   apply          joue la recette. Ne prend RIEN — il lit ce que la boite detient.
+#   apply          joue la recette. Ne prend RIEN — il lit ce que le conteneur detient.
 #   toolchain-protection <login-du-siege> [admins...]
 #                  pose la protection de branche du depot ops. Le login du siege est VARIABLE,
 #                  jamais en dur. SANS status check : l'allumage se fait en deux temps.
@@ -33,7 +33,7 @@ set -euo pipefail
 PRIVATE_DIR="${LCARS_PRIVATE_DIR:-/opt/lcars/var/tokens}"
 # LE COMPTE SYSTEME EN UN SEUL ENDROIT DE CE FICHIER (les deux projections de catalogue le lisent
 # ici, jamais en dur). Le defaut suit celui de `provision-lib.sh` et de `forge.tf` — trois recopies d'un meme nom, mais
-# chacune est un DEFAUT dans un runtime different (bash de boite, bash de provisioning, HCL), pas
+# chacune est un DEFAUT dans un runtime different (bash de conteneur, bash de provisioning, HCL), pas
 # une seconde autorite : l'appelant les surcharge ensemble ou pas du tout.
 # Le compte integre, resolu UNE fois : le `TF_VAR_builtin_human` plus bas et le verbe
 # `builtin-human` lisent celui-ci. Trois `${LCARS_BUILTIN_HUMAN:-…}` dans le meme fichier seraient
@@ -108,7 +108,7 @@ die() { echo "forge-gestures: $*" >&2; exit "${2:-1}"; }
 
 need_forge_url() {
   [[ -n "${FORGE_BASE_URL:-}" ]] || {
-    echo "forge-gestures: cette boite n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
+    echo "forge-gestures: ce conteneur n'a pas de FORGE_BASE_URL — un jeton sans forge ne veut rien dire." >&2
     echo "                FORGE_BASE_URL=<url> deploy/container up, puis rejoue." >&2
     exit 2; }
 }
@@ -121,7 +121,7 @@ curl_cfg_escape() { local v="$1"; v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; printf '
 # pour le vrai.
 put_secret() { # $1=chemin  $2=valeur
   # `chown` n'est tente QUE si on est root : tout appelant reel l'est, un temoin ne l'est pas, et
-  # conditionner ici evite un `|| true` qui avalerait un vrai echec de propriete sur une boite.
+  # conditionner ici evite un `|| true` qui avalerait un vrai echec de propriete sur un conteneur.
   if [[ "$(id -u)" -eq 0 ]]; then
     install -d -m 0710 -o "$AUTHORITY_USER" -g "$FLEET_GROUP" "$PRIVATE_DIR"
   else
@@ -150,7 +150,7 @@ read_stdin_secret() {
 }
 
 # ─── hcurl <jeton> <args curl…> — le jeton passe par stdin (-K -), JAMAIS en argv ─────────────
-# `/proc/<pid>/cmdline` est lisible par tout compte de la boite ; un `-H "Authorization: token …"`
+# `/proc/<pid>/cmdline` est lisible par tout compte du conteneur ; un `-H "Authorization: token …"`
 # y expose le jeton le temps de l'appel. MUR I2 (idiom_walls, cote installeur ET cote produit).
 hcurl() { local tok="$1"; shift; printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" | curl -K - "$@"; }
 
@@ -159,7 +159,7 @@ cmd_config_token() {
   local tok; tok="$(read_stdin_secret)"
   [[ -n "$tok" ]] || die "jeton vide sur stdin"
 
-  # VERIFIER AVANT D'ECRIRE : un jeton pose sans l'etre produirait une boite qui croit tenir son
+  # VERIFIER AVANT D'ECRIRE : un jeton pose sans l'etre produirait un conteneur qui croit tenir son
   # autorite et le decouvre au premier geste structurel, des mois plus tard.
   local code
   code="$(printf 'header = "Authorization: token %s"\n' "$(curl_cfg_escape "$tok")" \
@@ -302,7 +302,7 @@ demote_creator_from_owners() { # $1=org  $2=jeton master
 
 cmd_apply() {
   local tok seed
-  # Le jeton donne a la main l'emporte sur celui que la boite garde ; le SEED, lui, n'a pas de
+  # Le jeton donne a la main l'emporte sur celui que le conteneur garde ; le SEED, lui, n'a pas de
   # variante : il doit etre celui des comptes existants, et rien d'autre. Le provider n'ecrit pas
   # le password d'un compte existant (mesure 2026-08-16), donc un autre seed ne changerait rien
   # sur la forge et casserait le mint.
@@ -315,7 +315,7 @@ cmd_apply() {
   [[ -n "$tok" ]]                || manque="$manque\n  l'autorite          -> FORGE_ADMIN_TOKEN=<token master> deploy/container config"
   [[ -n "$seed" ]]               || manque="$manque\n  le seed des comptes -> FORGE_SEED_PASSWORD=<mot de passe> deploy/container config"
   if [[ -n "$manque" ]]; then
-    printf 'forge-gestures: la boite ne detient pas ce qu il faut :%b\n' "$manque" >&2
+    printf 'forge-gestures: le conteneur ne detient pas ce qu il faut :%b\n' "$manque" >&2
     exit 1
   fi
 
@@ -534,7 +534,7 @@ cmd_install() {
   # proprietaire et root, un argv l'est par tout le monde.
   local sys_token="$PRIVATE_DIR/$SYSTEM_ACCOUNT.gitea_token"
   [[ -r "$sys_token" ]] \
-    || die "install: $sys_token illisible — la boite n'a pas encore de jeton systeme (« provision apply » le minte)"
+    || die "install: $sys_token illisible — le conteneur n'a pas encore de jeton systeme (« provision apply » le minte)"
   local sys_tok_value; sys_tok_value="$(tr -d '[:space:]' < "$sys_token")"
   [[ -n "$sys_tok_value" ]] \
     || die "install: $sys_token est VIDE — un jeton vide part en 401, et la forge accuserait la source"
@@ -637,12 +637,12 @@ cmd_install() {
   publicize_org_members "$name" "$tok" "$seed"
 
   # 6. Le STORE : la source dans l'org du catalogue. C'est LUI qui signe l'installation — une org
-  #    sans sa source est un install interrompu, et aucune boite ne peut servir un catalogue dont le
+  #    sans sa source est un install interrompu, et aucun conteneur ne peut servir un catalogue dont le
   #    materiel n'est nulle part.
   push_store "$name" "$work/src" "$tok" "$sha"
 
   # 7. LE MATERIEL LOCAL, POSE TOUT DE SUITE. Le boot suivant le reposerait de toute facon, mais la
-  #    commande rendrait alors la main sur une boite qui ne sert pas encore ce qu'elle vient
+  #    commande rendrait alors la main sur un conteneur qui ne sert pas encore ce qu'il vient
   #    d'installer, sans que l'admin sache qu'il doit redemarrer.
   #
   #    Un echec ici n'annule RIEN : la forge porte l'org et la source, l'installation a eu lieu.
@@ -658,14 +658,14 @@ cmd_install() {
     echo "forge-gestures: $name installe (org, comptes, teams, sa source dans $name/$STORE_REPO, materiel pose)"
   else
     echo "forge-gestures: $name INSTALLE sur la forge, mais le materiel local n'a pas pu etre pose" >&2
-    echo "  la boite ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
+    echo "  le conteneur ne le servira qu'apres un redemarrage (provision apply le reconverge)" >&2
     echo "  son squelette de projet n'est donc pas lisible : ses projets naitront de celui du catalogue livre" >&2
   fi
 }
 
 # ⚠ CLONE DEPUIS LE STORE, JAMAIS COPIE DEPUIS L'ARBRE : le boot compare le sha local a celui du
 # store, et un repertoire copie n'a pas de `.git`, donc pas de sha. Il ferait mentir le premier
-# `check` (« materiel absent ») sur une boite qui vient d'installer.
+# `check` (« materiel absent ») sur un conteneur qui vient d'installer.
 #
 # ⚠ DEUX `local`, PAS UN : bash expanse TOUS les arguments du builtin AVANT de l'executer, donc dans
 # `local a="$1" b="/base/$a"` le `$a` n'est pas celui qu'on vient d'ecrire — `b` vaut `/base/`.

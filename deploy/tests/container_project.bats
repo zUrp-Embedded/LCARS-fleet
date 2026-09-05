@@ -51,7 +51,7 @@ case "\$1 \$2" in
   "volume ls")       printf '%s' "\${STUB_VOLUMES:-}"; [[ -n "\${STUB_VOLUMES:-}" ]] && echo; exit 0 ;;
   "inspect \${STUB_IDS:-__none__}") echo "\${STUB_CONFIG_FILES:-}"; exit 0 ;;
 esac
-# Le verdict de provisionnement, lu par 'up' DANS la boite. STUB_PROV_RC vide = le fichier n'est
+# Le verdict de provisionnement, lu par 'up' DANS le conteneur. STUB_PROV_RC vide = le fichier n'est
 # pas encore la, ce qui est l'etat normal pendant tout le provisionnement.
 # ⚠ PAS D'ACCENTS GRAVES ICI : ce heredoc n'est PAS quote, donc bash y fait de la SUBSTITUTION DE
 # COMMANDE — un mot entre accents graves est EXECUTE a l'ecriture du fichier, meme dans un
@@ -183,7 +183,7 @@ seed_project() {
 # `container` n'ouvre QUE `docker-compose.yml`, qui declare `home:` — donc docker cree `<projet>_home`.
 # `lcars-home` est le nom de l'AUTRE compose (`docker-compose.install.yml`), que `container` ne lit
 # jamais. Le temoin epinglait donc le nom recopie depuis le mauvais fichier, et il verrouillait le
-# defaut : `reset` annoncait la destruction du /home de la boite, retirait un fantome, et laissait
+# defaut : `reset` annoncait la destruction du /home du conteneur, retirait un fantome, et laissait
 # le vrai volume intact — a chaque fois. `compose down` sans `-v` n'y touche pas non plus.
 #
 # Ce qui est epingle maintenant : le nom se DERIVE de docker (meme filtre par label que les
@@ -251,7 +251,7 @@ seed_project() {
 # ─── `up` REND LE VERDICT DE PROVISIONNEMENT ────────────────────────────────────────────────────
 #
 # ⚠ CES TEMOINS EXISTENT PARCE QUE `up` RENDAIT LA MAIN AVANT DE SAVOIR. `compose up -d` sort des
-# que le conteneur demarre ; le provisionnement tourne DANS l'entrypoint et dure. Une boite qui n'a
+# que le conteneur demarre ; le provisionnement tourne DANS l'entrypoint et dure. Un conteneur qui n'a
 # rien pu provisionner annoncait « fleet up », se declarait *healthy* (son healthcheck ne sonde que
 # des ports : ssh + le deck) et ne pouvait demarrer AUCUN pod — le seul endroit ou ca se lisait etant les logs, qu'on ne va
 # pas lire apres une commande qui a dit oui.
@@ -278,9 +278,9 @@ seed_project() {
   STUB_PROV_RC=1 run "$SRC" -p lcars up
   [ "$status" -eq 1 ]
   [[ "$output" == *"EN ÉCHEC"* ]]
-  # « la boite tourne » ET « ne produira rien » : les deux moities, sinon le lecteur croit que
+  # « le conteneur tourne » ET « ne produira rien » : les deux moities, sinon le lecteur croit que
   # le conteneur est mort et va le relancer au lieu de diagnostiquer.
-  [[ "$output" == *"la boîte tourne"* ]]
+  [[ "$output" == *"le conteneur tourne"* ]]
   [[ "$output" == *"ne produira RIEN"* ]]
 }
 
@@ -296,7 +296,7 @@ seed_project() {
 
 @test "build etiquette le jumeau lcars-build — le toolchain que le runner CI sert" {
   # LE DEFAUT MESURE (2026-08-18, install sur une Debian vierge, chemin exact du README) : forge,
-  # boite, tokens, creds, admin tous verts, puis `bench-up` **exit 6** — « pas d'image lcars-build:2
+  # conteneur, tokens, creds, admin tous verts, puis `bench-up` **exit 6** — « pas d'image lcars-build:2
   # pour le label elixir ». Aucun script du depot ne construisait ce jumeau : chaque mention en
   # etait une CONSIGNE adressee a l'operateur. Sur une machine de dev les deux existaient parce
   # qu'un jour on avait joue la consigne ; sur une machine neuve, jamais. Et ce n'est pas une
@@ -383,8 +383,8 @@ FAKE
 
 @test "l'aide ne promet plus une forge que l'operateur devrait apporter" {
   # ⚠ « La forge est a TOI : LCARS ne la fabrique pas » etait vrai le 2026-07-05 et faux depuis
-  # `--bench`, qui monte forge jetable + boite + runner CI en un geste (`install.sh:588`). C'etait
-  # le SEUL texte d'aide du rail boite, et il disait d'apporter ce que le produit sait fabriquer.
+  # `--bench`, qui monte forge jetable + conteneur + runner CI en un geste (`install.sh:588`). C'etait
+  # le SEUL texte d'aide du rail conteneur, et il disait d'apporter ce que le produit sait fabriquer.
   run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
   [[ "$output" == *"--bench"* ]]
   [[ "$output" != *"LCARS ne la"$'\n'*"fabrique pas"* ]]
@@ -438,7 +438,7 @@ FAKE
 #
 # ⚠ CES TROIS TEMOINS VIENNENT D'`install_door.bats`, ET LEUR SUJET A CHANGE DE MAISON AVEC LEUR
 # CODE (E4 du chantier porte, D4). La PORTE batissait l'image : elle sondait `image inspect` et
-# lancait `container build` avant de deleguer. Une boite de production TIRE son image — epinglee par
+# lancait `container build` avant de deleguer. Un conteneur de production TIRE son image — epinglee par
 # digest, avec le gate joue UNE FOIS par le rail qui la construit ; un client ne compile pas chez son
 # hote. Le build reste un geste de DEV, et c'est CE script qui sait s'il a une image.
 
@@ -446,7 +446,7 @@ FAKE
   # ⚠ LE REFUS DOIT NOMMER LES DEUX VOIES. `compose up --no-build` echoue deja sur une image absente,
   # mais avec le message de docker : un « manifest unknown » n'apprend a personne qu'il existe un
   # `container build`. Un diagnostic juste dont l'action est introuvable est le motif que ce rail combat —
-  # il a coute la 4e forme du rail boite le 2026-08-30 (chemin publie inexistant, rc 127).
+  # il a coute la 4e forme du rail conteneur le 2026-08-30 (chemin publie inexistant, rc 127).
   local bloc; bloc="$(sed -n '/^cmd_up()/,/^}/p' "$SRC")"
   grep -q 'image inspect' <<<"$bloc"
   grep -q 'container build' <<<"$bloc"

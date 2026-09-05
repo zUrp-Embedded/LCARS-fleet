@@ -7,7 +7,7 @@
 # ⚖ user 2026-09-04 (Q4) : chaque logiciel joue son gate. Le mur I2 de l'installeur ne lit que
 # deploy/ ; les gestes que le lot 6 a ramenes cote produit (forge.d, container, le convergeur, forge-gestures)
 # parlent a la forge avec un jeton, et un `-H "Authorization: token …"` en argv est lisible par tout
-# compte de la boite dans /proc/<pid>/cmdline. Relecture hostile du 2026-09-04 : le convergeur le
+# compte du conteneur dans /proc/<pid>/cmdline. Relecture hostile du 2026-09-04 : le convergeur le
 # faisait toutes les 30 s, a vie.
 
 load ../support/refute
@@ -53,7 +53,7 @@ code() { grep -vE '^\s*#' "$1"; }
 #
 # La forme mordue : une ligne de CODE qui porte le nombre 1000 ou 60000 ET parle d'uid. Hors mur,
 # et c'est dit ici pour que personne ne l'y ajoute : `LCARS_UID="${LCARS_UID:-1000}"` dans `container/
-# init.sh` et `container/boot.sh` est l'uid du SIEGE dans la boite (pose par le compose), pas une borne
+# init.sh` et `container/boot.sh` est l'uid du SIEGE dans le conteneur (pose par le compose), pas une borne
 # de la frontiere ; et `… / 1000` dans `bin/fleet` convertit des millisecondes.
 I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 

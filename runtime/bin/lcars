@@ -86,8 +86,8 @@ USAGE
       via la redirection 301. REFUSE un catalogue qui n'est pas installe ici.
 
   $PROG project reconcile [check|apply]
-      La forge dit quels projets existent, le disque suit. Sur un /home neuf — boite
-      reinstallee, second humain qui arrive sur une fleet deja peuplee — les faces
+      La forge dit quels projets existent, le disque suit. Sur un /home neuf — conteneur
+      reinstalle, second humain qui arrive sur une fleet deja peuplee — les faces
       locales n'existent pas alors que les projets, eux, sont intacts. « check » ne
       touche rien et liste ce qui manque ; « apply » importe. Un projet en echec
       n'arrete pas les autres.
@@ -409,7 +409,7 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   SUIVANTE — il n'y a plus rien a projeter, ni session a rouvrir. Ce n'est PAS une histoire de
   sudo : personne n'est root ici." ;;
     no_authority)
-      die "catalogue install: cette BOITE n'a pas d'autorite utilisable sur sa forge.
+      die "catalogue install: ce CONTENEUR n'a pas d'autorite utilisable sur sa forge.
   Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
   machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
   quantite de reessais ne le repose — c'est un geste d'admin, une fois :
@@ -425,7 +425,7 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   (« web-demo »). La liste de ce que cette forge sert : « $PROG catalogue list »." ;;
     unknown_peer)
       die "catalogue install: le service ne sait pas qui tu es.
-  Ton uid n'a pas de compte unix sur cette boite — donc aucun login a demander a la forge. C'est le
+  Ton uid n'a pas de compte unix sur ce conteneur — donc aucun login a demander a la forge. C'est le
   convergeur qui enrole les humains de l'equipe « humans » de l'org ; un proprietaire t'y ajoute, et
   le tour suivant (30 s) cree ton compte." ;;
     gesture_signalled)
@@ -460,7 +460,7 @@ cmd_catalogue_install() {
 
   [[ -S "$_CATALOGUE_SOCKET" ]] || _die_executor_absent
   _catalogue_transport >/dev/null \
-    || die "catalogue install: ni « socat » ni « nc » sur cette boite — aucun des deux ne peut donc
+    || die "catalogue install: ni « socat » ni « nc » sur ce conteneur — aucun des deux ne peut donc
   parler a « $_CATALOGUE_SOCKET », et bash n'ouvre pas de socket unix tout seul. « provision apply »
   les pose ; c'est un geste systeme."
 
@@ -478,7 +478,7 @@ cmd_catalogue_install() {
 
   [[ -n "$vu" ]] || die "catalogue install: le service n'a rendu AUCUN verdict.
   La demande est partie sur « $_CATALOGUE_SOCKET » et rien n'est revenu — ni accord, ni refus. On ne
-  lit pas ce silence comme un succes : l'etat de « $name » sur cette boite est INCONNU.
+  lit pas ce silence comme un succes : l'etat de « $name » sur ce conteneur est INCONNU.
   « journalctl -u lcars-catalogue » dit ce que le service a vu."
 
   if [[ -n "$cause" ]]; then
@@ -538,7 +538,7 @@ cmd_project() {
 # rails — allait les chercher la-bas, en devinant le chemin de l'entrypoint (`_entrypoint_path`).
 # Un geste du produit qui execute le PID 1 de l'image pour evaluer une fonction du release : la
 # porte etait au mauvais endroit. Elle est ici, dans la CLI du produit, posee sur les deux rails
-# (`/usr/local/bin/lcars`). Le boot de la boite (`services/container/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
+# (`/usr/local/bin/lcars`). Le boot du conteneur (`services/container/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
 # de l'image, le banc s'en sert) et delegue ici.
 #
 # ⚠ SOUS UN UID SANS POUVOIR quand on est root. Ces evaluations chargent le release et son
@@ -724,7 +724,7 @@ cmd_publish_run() {
   done
 
   _load_container_env
-  [[ -n "${FORGE_BASE_URL:-}" ]] || die "publish run: FORGE_BASE_URL absent — boite non configuree"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || die "publish run: FORGE_BASE_URL absent — conteneur non configure"
 
   local rail; rail="$(dirname "$(readlink -f "$0")")/publish-rail.sh"
   [[ -x "$rail" ]] || die "publish run: rail introuvable a cote: $rail"
@@ -844,7 +844,7 @@ cmd_approve() {
 
   local env_file="${LCARS_FLEET_ENV:-$HOME/.lcars/fleet.env}"
   _load_container_env
-  [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — boite non configuree"
+  [[ -n "${FORGE_BASE_URL:-}" ]] || die "approve: FORGE_BASE_URL absent ($env_file) — conteneur non configure"
 
   local dest_url; dest_url="$(_dest_url "$dest_host" "$dest_repo")"
   mkdir -p "$PUBLISH_DIR"; chmod 700 "$PUBLISH_DIR"

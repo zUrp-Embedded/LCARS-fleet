@@ -12,7 +12,7 @@
 # l'affaire du superviseur (supervise.bats).
 #
 # ⚠ ET LA BRANCHE DOIT EXISTER A CHAQUE SITE. Le boot est sous `set -e` : un `launch` qui rend 1
-# sur une ligne nue TUE le boot — l'inverse de la doctrine du fichier (la boite reste joignable
+# sur une ligne nue TUE le boot — l'inverse de la doctrine du fichier (le conteneur reste joignable
 # pour etre reparee). Rendre l'echec mesurable sans garder chaque site serait pire qu'avant.
 #
 # ⚠ CES TEMOINS EXECUTENT LA FONCTION REELLE, extraite du fichier, avec un `setsid` double qui ne

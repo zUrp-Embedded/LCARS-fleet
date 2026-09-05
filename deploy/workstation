@@ -6,7 +6,7 @@
 #
 #     deploy/workstation {up|doctor}
 #
-# Jumeau de `deploy/container` : celui-là pilote une BOÎTE, celui-ci provisionne CE SYSTÈME. Mêmes
+# Jumeau de `deploy/container` : celui-là pilote un CONTENEUR, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
 # reste l'autorité : `deploy/provision`, que ces deux-là appellent sans jamais le doubler.
 #

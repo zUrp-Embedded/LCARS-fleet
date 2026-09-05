@@ -15,12 +15,12 @@ WSL_CONF=/etc/wsl.conf
 
 # L'état-cible ENTIER de wsl.conf. [automount] enabled=false = C: fermé (seul le fstab géré
 # monte quelque chose). [interop] enabled=false = pas de lancement d'exécutables Windows depuis
-# la boîte (canal d'évasion) — posture v1 courante, conservée. [boot] systemd=true : le substrat
+# le conteneur (canal d'évasion) — posture v1 courante, conservée. [boot] systemd=true : le substrat
 # OS peut en avoir besoin (runner CI, lingering) — la FLEET, elle, n'a pas d'unit (l'humain lance).
 desired_wsl_conf() {
   cat <<'EOF'
 # /etc/wsl.conf — géré par deploy (modules.d/30-wsl.sh). Édition manuelle = drift.
-# Frontière de sécurité de la boîte : C: fermé, interop coupé. Appliqué après `wsl --shutdown`.
+# Frontière de sécurité du conteneur : C: fermé, interop coupé. Appliqué après `wsl --shutdown`.
 [boot]
 systemd=true
 
@@ -160,7 +160,7 @@ apply() {
   # ⚠ LA SECONDE COUCHE SE LIT AUSSI. `write_atomic` garde desormais le rc de son `cat`, mais elle
   # ne peut rien dire d'un tampon qu'un AUTRE geste a tronque avant elle : un contenu vide est un
   # contenu valide de son point de vue. Le rc de la redirection ET la non-vacuite du tampon, parce
-  # que ce fichier-ci est la frontiere de securite de la boite — un `wsl.conf` vide laisse l'interop
+  # que ce fichier-ci est la frontiere de securite du conteneur — un `wsl.conf` vide laisse l'interop
   # Windows OUVERTE, et c'est le seul objet du rail dont l'echec silencieux ROUVRE une porte au lieu
   # d'en fermer une.
   desired_wsl_conf > "$wsl_tmp" \

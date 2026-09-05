@@ -189,7 +189,7 @@ probe_fleet_ever_started() {
   else
     emit "instruments.fleet_started" "$PLANE" "inactive" "local" "test -d $d" \
       "aucun repertoire de run ($d) — aucune fleet n'a jamais demarre sous cet humain" \
-      "N'est PAS une panne : une boite ou personne n'a lance la fleet est un etat legitime. Explique les endpoints muets qui suivent ; ne prejuge pas d'une fleet lancee ailleurs (autre humain, autre uid)."
+      "N'est PAS une panne : un conteneur ou personne n'a lance la fleet est un etat legitime. Explique les endpoints muets qui suivent ; ne prejuge pas d'une fleet lancee ailleurs (autre humain, autre uid)."
   fi
 }
 

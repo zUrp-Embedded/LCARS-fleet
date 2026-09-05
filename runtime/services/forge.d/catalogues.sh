@@ -9,15 +9,15 @@
 # AFTER: 25-directories
 # AUCUNE AUTORITE N'EST REQUISE, et c'est deliberé. Un depot de catalogue est PUBLIC par
 # construction (⚖ user : un depot prive est simplement invisible, on ne fait pas de tuto forge), donc
-# la lecture et le clone se font en anonyme. Une boite qui n'a jamais recu `container config`
+# la lecture et le clone se font en anonyme. Un conteneur qui n'a jamais recu `container config`
 # converge quand meme son materiel — elle ne peut simplement pas en installer de nouveau.
 
 set -euo pipefail
 
-# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par la boite en prod
+# Le protocole des modules du PRODUIT (Q3, lot 6, 2026-09-04) : ce geste est joue par le conteneur en prod
 # et par l'installeur a l'install ; l'hote — l'un ou l'autre, ou un temoin — nomme le fichier.
 # shellcheck source=../lib/module-protocol.sh
-. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot de la boite, pas le geste nu}"
+. "${LCARS_MODULE_PROTOCOL:?LCARS_MODULE_PROTOCOL non pose — lance via un module de l installeur ou le boot du conteneur, pas le geste nu}"
 
 STORE_REPO="_catalogue"
 MANIFEST="catalogue.yaml"
@@ -27,7 +27,7 @@ MANIFEST="catalogue.yaml"
 # deux. L'inverse n'est pas garanti : personne n'a mesure ce que le moteur de la forge fait d'un `_`
 # initial (tokenisation, troncature), et ce module SUPPRIME sur une liste vide. Interroger sur un
 # token dont le comportement EST mesure, puis trancher exactement ici, coute quelques entrees de
-# plus dans la reponse et ne parie jamais le materiel de la boite sur une supposition.
+# plus dans la reponse et ne parie jamais le materiel du conteneur sur une supposition.
 STORE_QUERY="catalogue"
 
 #   * l'IDENTITE — `manifest.name == owner`. C'est ce qui decide. Un depot pose a l'adresse d'un

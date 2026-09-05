@@ -2,28 +2,28 @@
 # SOURCE: deploy/docker/bench/bench-swap-image.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-08-03
-# STATUS: geste de BANC — remplace l'IMAGE de la boite d'un banc deja seme, forge intacte
+# STATUS: geste de BANC — remplace l'IMAGE du conteneur d'un banc deja seme, forge intacte
 #
 # ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
 # Un banc coute deux choses tres inegales : une IMAGE (un build, reproductible a la commande) et une
-# FORGE SEMEE (org, comptes, role-tokens, depots — deux passes d'amorcage et une relance de boite).
+# FORGE SEMEE (org, comptes, role-tokens, depots — deux passes d'amorcage et une relance de conteneur).
 # Quand seul le code a bouge, `bench-down.sh` + `bench-up.sh` rejoue la partie chere pour rien.
 #
 # ─── CE QUE CE SCRIPT PRESERVE, ET CE QU'IL DETRUIT ─────────────────────────────────────────────
 # PRESERVE : le projet compose de la forge, son volume, son semis, ses tokens ; le runner.
-# DETRUIT  : le conteneur de la boite, et LUI SEUL. Tout ce qui vivait dans son systeme de fichiers
+# DETRUIT  : le conteneur LCARS, et LUI SEUL. Tout ce qui vivait dans son systeme de fichiers
 #            part avec — pods en vol, worktrees, logs BEAM. C'est un geste de banc, pas de prod.
 #
 # ─── LES TROIS PIEGES REPRIS DE bench-up.sh — ILS NE DISPARAISSENT PAS AVEC LE SWAP ─────────────
-# 1. LA BOITE DOIT JOINDRE LE RESEAU DE LA FORGE AVANT SON PREMIER BOOT. `create` → `network
+# 1. LE CONTENEUR DOIT JOINDRE LE RESEAU DE LA FORGE AVANT SON PREMIER BOOT. `create` → `network
 #    connect` → `start`, jamais un `up` : sinon `gitea` ne resout pas au boot et le provisioning
-#    part en drift. Le swap recree une boite NEUVE — le piege est donc entier, pas amorti.
+#    part en drift. Le swap recree un conteneur NEUVE — le piege est donc entier, pas amorti.
 # 2. LES CREDS ANTHROPIC PARTENT AVEC L'ANCIEN CONTENEUR. Sans `~/.claude/.credentials.json`,
 #    `Credentials.Gate.validate` refuse au spawn-boundary : la fleet a l'air saine et ne produit
 #    aucun pod. Elles sont reposees ici, sinon le banc est mort sans le dire.
 # 3. `63-forge-tokens` MINTE LES ROLE-TOKENS AU BOOT, depuis le seed de la forge. Sur un banc deja seme le
 #    seed EXISTE, donc une seule relance suffit — la seconde passe d'amorcage de `bench-up.sh` n'a
-#    pas lieu d'etre. C'est toute la difference entre monter un banc et remettre sa boite a jour.
+#    pas lieu d'etre. C'est toute la difference entre monter un banc et remettre son conteneur a jour.
 #
 # ⚠ CE QUE CE SCRIPT NE FAIT PAS : demarrer la fleet. Comme apres un `bench-up.sh`, l'entrypoint
 # s'arrete a « puis `fleet start` » — le daemon se lance a la main, et le verdict final ci-dessous
@@ -32,7 +32,7 @@
 # USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 0.0.0.0]
 #                             [--forge-port 21000] [--deck-port 20999] [--ssh-port 2222]
 #                             [--creds-from ~/.claude/.credentials.json] [--no-creds] [--human lcars]
-# EXIT  : 0 boite remplacee · 1 arguments/dependance · 3 la boite ne monte pas · 5 creds
+# EXIT  : 0 conteneur remplace · 1 arguments/dependance · 3 le conteneur ne monte pas · 5 creds
 #         6 le verdict final ne passe pas
 
 set -euo pipefail
@@ -41,8 +41,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="$(cd "$HERE/.." && pwd)"
 
 PROJECT="lcars-nuit"
-# MEMES DEFAUTS QUE `bench-up.sh`, et ils doivent le rester : ce script RECREE la boite d'un banc
-# existant. Des ports differents ici republieraient la boite ailleurs que sa forge ne l'annonce.
+# MEMES DEFAUTS QUE `bench-up.sh`, et ils doivent le rester : ce script RECREE le conteneur d'un banc
+# existant. Des ports differents ici republieraient le conteneur ailleurs que sa forge ne l'annonce.
 FORGE_PORT="21000"
 DECK_PORT="20999"
 SSH_PORT="2222"
@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
+# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. Le conteneur
 # est <N>-fleet (le defaut de « deploy/container », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
 # le poste (48/49) et le banc derivent les memes noms de la meme base.
 CONTAINER_PROJECT="${PROJECT}-fleet"
@@ -94,20 +94,20 @@ die() { echo "bench-swap-image: $1" >&2; exit "${2:-1}"; }
 
 [[ -n "$IMAGE" ]] || die "--image est obligatoire : ce script n'a pas de defaut, se tromper d'image est le seul degat qu'il puisse faire" 1
 
-# Le banc doit exister : swapper la boite d'un banc absent monterait une boite orpheline, sans
+# Le banc doit exister : swapper le conteneur d'un banc absent monterait un conteneur orphelin, sans
 # reseau de forge et sans seed — un objet qui a l'air d'un banc et n'en est pas.
 "$DOCKER_BIN" network inspect "$FORGE_NET" >/dev/null 2>&1 \
   || die "reseau $FORGE_NET absent — il n'y a pas de banc '$PROJECT' a mettre a jour (bench-up.sh d'abord)" 1
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
-  || die "image $IMAGE inconnue du daemon — elle doit exister AVANT qu'on detruise la boite" 1
+  || die "image $IMAGE inconnue du daemon — elle doit exister AVANT qu'on detruise le conteneur" 1
 
 if [[ "$WITH_CREDS" -eq 1 ]]; then
   [[ -r "$CREDS_FROM" ]] || die "creds illisibles: $CREDS_FROM (--no-creds pour un banc sans pods)" 5
 fi
 
-say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserves)"
+say "banc $PROJECT — le conteneur passe sur $IMAGE (forge, semis et tokens preserves)"
 
-# ─── 1. la boite s'en va, et elle SEULE ──────────────────────────────────────────────────────────
+# ─── 1. le conteneur s'en va, et lui SEUL ──────────────────────────────────────────────────────────
 "$DOCKER_BIN" rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
 # ─── 2. create → connect → start (piege 1) ───────────────────────────────────────────────────────
@@ -149,13 +149,13 @@ ENVEOF
 trap 'rm -f "$SWAP_ENV"' EXIT
 
 "$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$CONTAINER_PROJECT" create \
-  || die "la boite ne se cree pas" 3
+  || die "le conteneur ne se cree pas" 3
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$CONTAINER" \
-  || die "la boite ne se branche pas sur $FORGE_NET" 3
-say "boite branchee sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
+  || die "le conteneur ne se branche pas sur $FORGE_NET" 3
+say "conteneur branche sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
 
-"$DOCKER_BIN" compose -p "$CONTAINER_PROJECT" start || die "la boite ne demarre pas" 3
+"$DOCKER_BIN" compose -p "$CONTAINER_PROJECT" start || die "le conteneur ne demarre pas" 3
 
 wait_healthy() {
   for _ in $(seq 1 90); do
@@ -164,8 +164,8 @@ wait_healthy() {
   done
   return 1
 }
-wait_healthy || die "la boite ne devient pas healthy (docker logs $CONTAINER)" 3
-say "boite healthy"
+wait_healthy || die "le conteneur ne devient pas healthy (docker logs $CONTAINER)" 3
+say "conteneur healthy"
 
 # ⚠ PAS DE `&& say … || say …` ICI : `say` rend le statut de son `printf`, donc un tube ferme
 # ferait annoncer l'echec sur un mot de passe pose. Le statut de `chpasswd` se lit une fois.
@@ -179,7 +179,7 @@ fi
 if [[ "$WITH_CREDS" -eq 1 ]]; then
   "$DOCKER_BIN" exec -i -u "$HUMAN" "$CONTAINER" bash -c \
       'mkdir -p ~/.claude && cat > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json' \
-    < "$CREDS_FROM" || die "creds non posees dans la boite" 5
+    < "$CREDS_FROM" || die "creds non posees dans le conteneur" 5
   say "creds anthropic reposees chez $HUMAN"
 else
   say "creds NON posees (--no-creds) — aucun pod ne pourra demarrer, par choix"
@@ -187,18 +187,18 @@ fi
 
 # ─── 4. une relance, pas deux passes : le seed existe deja (piege 3) ─────────────────────────────
 say "relance pour que 63-forge-tokens minte les role-tokens sur le seed EXISTANT"
-"$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance de la boite impossible" 3
-wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
+"$DOCKER_BIN" restart "$CONTAINER" >/dev/null || die "relance du conteneur impossible" 3
+wait_healthy || die "le conteneur ne redevient pas healthy apres relance" 3
 
 # ─── 5. verdict MESURE ───────────────────────────────────────────────────────────────────────────
 # MESURE PAR `cp` ET `inspect`, JAMAIS PAR `exec`. Quand le daemon est joint a travers un proxy de
 # socket, `exec` LANCE la commande — les effets de bord ont lieu — mais ne rend ni sa sortie ni son
 # code : il rend 0 et zero octet. Une mesure batie sur `exec` y lit donc le vide et conclut
-# l'absence. Vecu : ce script a tue un swap avec « la boite ne voit pas le seed » sur une boite dont
+# l'absence. Vecu : ce script a tue un swap avec « le conteneur ne voit pas le seed » sur un conteneur dont
 # les dix jetons etaient en place, et l'operateur a passe l'heure suivante a chercher une panne de
 # forge. `cp`, `logs` et `inspect` traversent, eux — donc la mesure passe par eux.
 ROLE_TOKENS="$("$DOCKER_BIN" cp "$CONTAINER:/opt/lcars/var/tokens" - 2>/dev/null | tar -t 2>/dev/null | grep -c '\.gitea_token$' || true)"
-[[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — la boite ne voit pas le seed de la forge" 6
+[[ "${ROLE_TOKENS:-0}" -gt 0 ]] || die "aucun role-token apres relance — le conteneur ne voit pas le seed de la forge" 6
 
 # Or on ne veut pas le CONTENU, on veut « present et non vide ». Le flux tar de `docker cp … -` le
 # dit dans son en-tete : rien ne touche le disque. (Et on ne repasse pas par `exec`, mute a travers
@@ -216,7 +216,7 @@ REVISION="$("$DOCKER_BIN" inspect -f '{{range .Config.Env}}{{println .}}{{end}}'
 REVISION="${REVISION:-inconnue}"
 
 say "─────────────────────────────────────────────────────────"
-say "boite remplacee"
+say "conteneur remplace"
 say "  image     : $IMAGE   (revision $REVISION)"
 say "  forge     : $FORGE_URL   (PRESERVEE — ni resemee ni redemarree)"
 say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"

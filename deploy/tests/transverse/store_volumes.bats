@@ -129,8 +129,8 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   done < <(store_mounts "$COMPOSE")
 }
 
-@test "les deux compose qui portent la boite montent EXACTEMENT le meme magasin" {
-  # `docker-compose.install.yml` porte la meme boite que `docker-compose.yml` (le banc l'utilise).
+@test "les deux compose qui portent le conteneur montent EXACTEMENT le meme magasin" {
+  # `docker-compose.install.yml` porte le meme conteneur que `docker-compose.yml` (le banc l'utilise).
   # Un magasin present d'un cote et pas de l'autre donnerait une install ou un banc qui perd ses
   # artefacts sans que rien ne le dise — et c'est le banc qui les fabrique.
   [ "$(store_mounts "$COMPOSE" | sort)" = "$(store_mounts "$COMPOSE_INSTALL" | sort)" ]
@@ -200,7 +200,7 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
 }
 
 @test "les DEUX gestes de destruction, et ils ne font PAS la meme chose" {
-  # ⚠ LA DISTINCTION EST LE FOND DU LOT, pas un detail d'implementation. Reinitialiser une BOITE
+  # ⚠ LA DISTINCTION EST LE FOND DU LOT, pas un detail d'implementation. Reinitialiser un CONTENEUR
   # n'est pas jeter une INSTALLATION : le magasin lui survit, c'est tout son interet — `container reset`
   # epargne et le dit. Un BANC est jetable : le sien part avec lui, sinon le mot est faux.
   #
@@ -217,19 +217,19 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
   local f
-  # lot 9 (DI-05) : chez `container` le projet EST celui de la boite ; sur le banc c'est `<N>-fleet`,
-  # derive de la base — le prefixe suit le projet de la boite dans les deux cas
+  # lot 9 (DI-05) : chez `container` le projet EST celui du conteneur ; sur le banc c'est `<N>-fleet`,
+  # derive de la base — le prefixe suit le projet du conteneur dans les deux cas
   grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
     || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
   for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
     grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$f" \
-      || { echo "n'exporte pas le prefixe au nom du projet de la boite : $f"; return 1; }
+      || { echo "n'exporte pas le prefixe au nom du projet du conteneur : $f"; return 1; }
     grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
-      || { echo "ne derive pas le projet de la boite de la base : $f"; return 1; }
+      || { echo "ne derive pas le projet du conteneur de la base : $f"; return 1; }
   done
 }
 
-@test "les deux gestes qui montent la boite posent le magasin AVANT" {
+@test "les deux gestes qui montent le conteneur posent le magasin AVANT" {
   # `external: true` = compose refuse de demarrer sur un volume absent. L'appel doit donc preceder
   # le up/create, et ces deux scripts sont les seuls a s'executer avant.
   grep -q "store_ensure_volumes" "$DEPLOY/docker/bench/bench-up.sh"

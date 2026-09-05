@@ -251,7 +251,7 @@ sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' |
   # Dockerfile pose AILLEURS lui echappait par CONSTRUCTION — pas par exemption, par angle mort.
   # Un fichier y vivait deja : `COPY runtime/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
   # et par RIEN sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
-  # `/etc/skel` : en boite un humain recevait le prompt LCARS et ses alias, sur un poste le
+  # `/etc/skel` : en conteneur un humain recevait le prompt LCARS et ses alias, sur un poste le
   # `.bashrc` de la distribution. Deux environnements pour un meme role, silencieux des deux cotes.
   #
   # Ce temoin lit TOUTES les lignes `COPY runtime/services/...` quelle que soit leur destination, et
@@ -405,8 +405,8 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 
 @test "la copie d une livraison BINAIRE porte le discriminant — sinon le rejeu reclame un toolchain" {
   # Le defaut symetrique, et il serait pire : sans propagation, un apply rejoue depuis la copie
-  # d une machine installee PAR PAQUET se declarerait SOURCE et exigerait des compilateurs sur une
-  # boite dont c est justement le contraire qui a ete decide.
+  # d une machine installee PAR PAQUET se declarerait SOURCE et exigerait des compilateurs sur un
+  # conteneur dont c est justement le contraire qui a ete decide.
   stub_curl "peu importe"
   local src; src="$(racine_paquet)"
   run env PROVISION_LIB="$src/deploy/lib/provision-lib.sh" \

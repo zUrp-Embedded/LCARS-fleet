@@ -36,7 +36,7 @@ helpers() {
 # ⚠ `COPY` PORTE DES OPTIONS, ET LE MOTIF LES IGNORAIT. `COPY --chmod=0644 runtime/services/x /y` ne
 # matchait pas « ^COPY runtime/services/ » : le fichier etait declare « pose NULLE PART » alors qu'il
 # etait copie juste devant. Le premier `--chmod` du Dockerfile (2026-09-01, ecart de mode
-# poste/boite) a fait rougir ce temoin — et un mur qui rougit sur la CORRECTION du defaut qu'il
+# poste/conteneur) a fait rougir ce temoin — et un mur qui rougit sur la CORRECTION du defaut qu'il
 # existe pour attraper est un mur qui apprend a etre contourne.
 copied() {
   sed -n 's|^COPY \(--[^ ]* \)*runtime/services/\([^ ]*\) .*|\2|p' "$DOCKERFILE"

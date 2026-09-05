@@ -110,8 +110,8 @@ absent() { # absent <motif etendu> <fichier>
 # ⚠ POURQUOI `x` EST ACCORDE, ET POURQUOI `r` NE DOIT JAMAIS L'ETRE. Ce repertoire ne contient pas
 # que des secrets : `forge.url` et `forge.public.url` y vivent en `0644` — des ADRESSES — et trois
 # modules `NEEDS: human` les lisent sous l'uid de l'humain. En `0700` ils prenaient « Permission
-# denied » et la boite finissait sans `FORGE_BASE_URL` (mesure du 2026-08-25, install reelle).
-# Le `r`, lui, donnerait l'enumeration des comptes de forge de la boite — et c'est une information
+# denied » et le conteneur finissait sans `FORGE_BASE_URL` (mesure du 2026-08-25, install reelle).
+# Le `r`, lui, donnerait l'enumeration des comptes de forge du conteneur — et c'est une information
 # en soi, meme sans le contenu des fichiers.
 #
 # ⚠ CE QUE LE `0710` DEPLACE, ET QUI SE TIENT ICI DESORMAIS : en `0700`, un secret qui perdait son

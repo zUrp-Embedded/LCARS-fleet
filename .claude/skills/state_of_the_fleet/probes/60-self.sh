@@ -53,12 +53,12 @@ CTX="$(sotf_self_context)"
 # Il confrontait `.spec.scope.allowedTools` a la liste que `claude_launch.dbg` disait avoir passee au
 # binaire vendor : la divergence A-8 rendue mecanique. Sa source a disparu — le launcher n'ecrit plus
 # aucune trace dans le pod, parce qu'il tourne DANS le bwrap et que tout ce qu'il ecrit, l'agent
-# confine le lit. Une trace de boot lui tendait la recette de sa propre boite.
+# confine le lit. Une trace de boot lui tendait la recette de son propre conteneur.
 #
 # Le pod est donc AVEUGLE sur ce point, exprès : il ne verifie plus l'accord entre sa liste declaree
 # et celle qui a ete posee. Une empreinte (sha de la liste triee) aurait rendu la detection sans
-# reveler le contenu ; ecartee — arbitrage user 2026-08-15 : on ne laisse pas au pod la recette de sa
-# boite, et une remediation exige de toute facon de toucher la source et de rebuilder, ce n'est pas
+# reveler le contenu ; ecartee — arbitrage user 2026-08-15 : on ne laisse pas au pod la recette de son
+# conteneur, et une remediation exige de toute facon de toucher la source et de rebuilder, ce n'est pas
 # un flag a remettre.
 #
 # Ne pas le "reparer" en re-introduisant une trace cote pod. La divergence declaration/launcher se
