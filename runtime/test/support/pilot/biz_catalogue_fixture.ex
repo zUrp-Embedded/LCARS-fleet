@@ -103,6 +103,26 @@ defmodule Fleet.Test.BizCatalogueFixture do
             - ticket.body
     """)
 
+    # A third card, `strict`: the same judge AND `ci: required` — the one card whose two readings
+    # (jury, CI policy) both differ from `no-jury`'s, so a witness can prove the two come from ONE
+    # resolution.
+    File.write!(Path.join(cards, "strict.yaml"), """
+    kind: WorkflowMap
+    metadata:
+      name: strict
+      description: "carte metier stricte"
+    spec:
+      jury: [#{@judge}]
+      ci: required
+      max_rework_rounds: 1
+      steps:
+        build:
+          role: biz-dev
+          needs: []
+          inputs:
+            - ticket.body
+    """)
+
     File.write!(
       Path.join(biz, "catalogue.yaml"),
       "api_version: 1\nname: biz\ndefault_card: standard\n"

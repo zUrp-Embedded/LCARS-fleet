@@ -304,9 +304,13 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # The issue's engraved card jury, when the head parses and a route is engraved; the project's
-  # declared card otherwise. Same fallback shape as the completer's `step_run_jury` twin.
-  defp issue_card_jury(head, %Ctx{} = ctx) do
+  # THE ISSUE'S ENGRAVED CARD, resolved ONCE for every reader of it (the jury and the CI policy):
+  # the head names the issue, the issue's route names the card, the repo names the catalogue the
+  # card is read in. `:project` when any link is missing — a human PR, an adopted orphan, a route
+  # not yet engraved — and every reader then falls back to the PROJECT's declared card, the same
+  # one. Two readers with two resolutions is how a PR came to be judged under the project's jury
+  # and under NO CI policy (the divergence is invisible: each fallback is coherent alone).
+  defp issue_card(head, %Ctx{} = ctx) do
     with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
          {:ok, {map_name, _step}} <-
            Spawn.route_for(
@@ -315,15 +319,24 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
              issue_n,
              ctx.forge_opts
            ),
-         {:ok, %{"jury" => jury} = map} when is_list(jury) <-
+         {:ok, map} when is_map(map) <-
            Fleet.Pilot.WorkflowMapNav.safe_load(
              ctx.workflow_map_loader,
              map_name,
              Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
            ) do
-      # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
-      Roles.jury(map, ctx.opts)
+      {:ok, map}
     else
+      _ -> :project
+    end
+  end
+
+  # The engraved card's jury, else the project card's. Same fallback shape as the completer's
+  # `step_run_jury` twin.
+  defp issue_card_jury(head, %Ctx{} = ctx) do
+    case issue_card(head, ctx) do
+      # Through Roles.jury/2 (not the raw key): the reviewer_roles injection seam keeps priority.
+      {:ok, %{"jury" => jury} = map} when is_list(jury) -> Roles.jury(map, ctx.opts)
       _ -> Roles.project_jury(ctx.repo, ctx.opts)
     end
   end
@@ -352,13 +365,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
     end
   end
 
-  # La politique CI de la carte, lue exactement comme son jury et par le MEME repli : la carte
-  # gravee de l'issue quand une route existe, la carte declaree du projet sinon.
-  #
-  # ⚠ LES DEUX REPLIS DOIVENT LIRE LA MEME CARTE. Celui du jury lit la carte declaree du projet ;
-  # que celui-ci rende une constante et la divergence est INVISIBLE — la phrase ci-dessus la
-  # couvre. Une PR sans route gravee serait alors jugee sous le jury du projet et sous AUCUNE
-  # politique CI, sur des projets dont la carte en exige une.
+  # The card's CI policy, read off the SAME resolution as its jury (`issue_card/2`): the engraved
+  # card when a route exists, the project's declared card otherwise — one card for the trio.
   #
   # PUBLIC exprès : la propriete qui compte n'est ni « le champ traverse le loader » ni « la porte
   # gate sur la valeur », toutes deux tenues ailleurs — c'est leur JOINTURE, et elle n'est
@@ -367,25 +375,17 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
   @doc false
   @spec issue_card_ci(String.t(), Ctx.t()) :: :required | :ignore
   def issue_card_ci(head, %Ctx{} = ctx) do
-    with {:ok, {issue_n, _producer}} <- RoleDispatch.parse_feature_branch_or_skip(head),
-         {:ok, {map_name, _step}} <-
-           Spawn.route_for(
-             ctx.forge,
-             ctx.repo,
-             issue_n,
-             ctx.forge_opts
-           ),
-         {:ok, map} when is_map(map) <-
-           Fleet.Pilot.WorkflowMapNav.safe_load(
-             ctx.workflow_map_loader,
-             map_name,
-             Fleet.Workflow.Loader.card_opts_for_repo(ctx.repo)
-           ) do
-      Roles.ci(map)
-    else
-      _ -> Roles.project_ci(ctx.repo, ctx.opts)
+    case issue_card(head, ctx) do
+      {:ok, map} -> Roles.ci(map)
+      :project -> Roles.project_ci(ctx.repo, ctx.opts)
     end
   end
+
+  @doc false
+  # The jury the same way, PUBLIC for the witness that proves the two readers AGREE — on the
+  # engraved card and on the fallback.
+  @spec issue_card_jury_of(String.t(), Ctx.t()) :: [String.t()]
+  def issue_card_jury_of(head, %Ctx{} = ctx), do: issue_card_jury(head, ctx)
 
   # The measured fact travels in the dispatch opts (`review_opts` -> `BriefBuilder`), never as a
   # second forge read: one dispatch, one CI truth.

@@ -542,46 +542,8 @@ defmodule Fleet.Pilot.MergeAndPromote do
     do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
 
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
-    head_branch = Keyword.get(opts, :head_branch)
-    # Roots injectable (tests) — defaults = the container layout authority.
-    project_dir =
-      Path.join(
-        Keyword.get(opts, :code_root, Fleet.Layout.code_root()),
-        Fleet.Layout.project_name(repo)
-      )
-
-    work_dir =
-      Path.join(
-        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
-        Fleet.Layout.project_name(repo)
-      )
-
-    with true <- is_binary(head_branch) || {:skip, :no_head_branch},
-         true <-
-           (Code.ensure_loaded?(forge) and function_exported?(forge, :branch_head, 3)) ||
-             {:skip, :seam_without_branch_head},
-         {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
-         true <- File.dir?(project_dir) || {:skip, :no_local_clone},
-         true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
-         # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch the head
-         # branch AND the attestation ref of that exact head — both are objects the wall needs and
-         # neither is in the clone yet. Le ref d'attestation est NOMME PAR LE SHA (BL-6-43) : on ne
-         # calcule plus un nom de fichier depuis la tete, on demande la preuve DE cette tete.
-         prov_ref = Fleet.Workflow.Git.provenance_ref(head_sha),
-         _ =
-           Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
-             auth: true
-           ),
-         _ =
-           Fleet.Project.GitOps.run(
-             ["-C", project_dir, "fetch", "-q", "origin", "#{prov_ref}:#{prov_ref}"],
-             auth: true
-           ),
-         {:ok, statement} <-
-           (case Fleet.Workflow.Git.read_provenance(project_dir, head_sha) do
-              {:ok, json} -> {:ok, json}
-              {:error, _} -> {:skip, {:no_statement, prov_ref}}
-            end) do
+    with {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: ref}} <-
+           wall_inputs(forge, repo, forge_opts, opts) do
       case Fleet.Workflow.Provenance.Verifier.verify_content(statement,
              work_dir: work_dir,
              project_dir: project_dir
@@ -602,7 +564,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
               repo,
               pr_number,
               "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
-                "Le statement `#{prov_ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
+                "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
                 "Rien n'est mergé tant que la traçabilité ment.",
               Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
             )
@@ -625,6 +587,66 @@ defmodule Fleet.Pilot.MergeAndPromote do
         )
 
         {:skipped, {:head_read_failed, why}}
+    end
+  end
+
+  # WHAT THE WALL NEEDS IN HAND before it can judge — six availability conditions and two
+  # fetches, apart from the decision so the decision reads as its contract: statement in hand →
+  # verify → refuse or pass. `{:skip, why}` is every absence (the wall does not run, the seal says
+  # so on the PR); `{:error, why}` is a forge head that could not be read.
+  defp wall_inputs(forge, repo, forge_opts, opts) do
+    head_branch = Keyword.get(opts, :head_branch)
+    # Roots injectable (tests) — defaults = the container layout authority.
+    project_dir =
+      Path.join(
+        Keyword.get(opts, :code_root, Fleet.Layout.code_root()),
+        Fleet.Layout.project_name(repo)
+      )
+
+    work_dir =
+      Path.join(
+        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
+        Fleet.Layout.project_name(repo)
+      )
+
+    with true <- is_binary(head_branch) || {:skip, :no_head_branch},
+         true <-
+           (Code.ensure_loaded?(forge) and function_exported?(forge, :branch_head, 3)) ||
+             {:skip, :seam_without_branch_head},
+         {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
+         true <- File.dir?(project_dir) || {:skip, :no_local_clone},
+         true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
+         prov_ref = Fleet.Workflow.Git.provenance_ref(head_sha),
+         :ok <- fetch_head_and_proof(project_dir, head_branch, prov_ref),
+         {:ok, statement} <- read_statement(project_dir, head_sha, prov_ref) do
+      {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: prov_ref}}
+    end
+  end
+
+  # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch the head
+  # branch AND the attestation ref of that exact head — both are objects the wall needs and
+  # neither is in the clone yet. Le ref d'attestation est NOMME PAR LE SHA (BL-6-43) : on ne
+  # calcule plus un nom de fichier depuis la tete, on demande la preuve DE cette tete. Two effects,
+  # both best-effort: what they failed to bring is read as absent one step later.
+  defp fetch_head_and_proof(project_dir, head_branch, prov_ref) do
+    _ =
+      Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
+        auth: true
+      )
+
+    _ =
+      Fleet.Project.GitOps.run(
+        ["-C", project_dir, "fetch", "-q", "origin", "#{prov_ref}:#{prov_ref}"],
+        auth: true
+      )
+
+    :ok
+  end
+
+  defp read_statement(project_dir, head_sha, prov_ref) do
+    case Fleet.Workflow.Git.read_provenance(project_dir, head_sha) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> {:skip, {:no_statement, prov_ref}}
     end
   end
 

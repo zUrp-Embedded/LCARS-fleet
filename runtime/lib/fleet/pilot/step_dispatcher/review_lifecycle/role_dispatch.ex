@@ -148,13 +148,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
 
   defp do_dispatch_review(pr_number, issue_n, head, role, profile, kind, %Ctx{} = ctx) do
     # Spawner/task_queue are not read here directly: they transit via `ctx` to `spawn_step`.
-    %Ctx{
-      repo: repo,
-      forge: forge,
-      resolver: resolver,
-      forge_opts: forge_opts,
-      opts: opts
-    } = ctx
+    %Ctx{repo: repo, forge: forge, forge_opts: forge_opts, opts: opts} = ctx
 
     # The review pod (judge) OR rework pod (producer) clones the FEATURE-BRANCH (`head.ref`), NOT
     # `main`: the judge must see the producer's DIFF (otherwise it judges `main`, i.e. nothing real);
@@ -164,44 +158,8 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
     # bounded, cf. `Remediation.conflict_rework`; the arch only receives the exhausted case.)
     review_opts = Keyword.put(opts, :base_branch, head)
 
-    # Read-only pre-lock phase, CHEAP GATES FIRST (SAME rule/order as dispatch_issue,
-    # lockstep): route (light forge GET on the issue) → pod identity → LOCAL scope gate → project
-    # resolver (the heavy network call, 1-2× ls-remote) on the passing path only → reprovision
-    # action. The forge LOCK (spawn_step) still comes after everything — no orphan lock on a
-    # transient failure (invariant unchanged).
-    # No captures — Spawn.route_for/Opts.tag_err taken at the source (shared with the issue flow).
-    with {:ok, route} <-
-           Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution),
-         # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
-         # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
-         # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
-         # changing the pod identity loses no context.
-         pod_id =
-           (case kind do
-              k when k in [:rework, :conflict_rework, :conflict_rework_exception] ->
-                Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
-
-              _ ->
-                Fleet.PodId.for_pr(repo, pr_number, role)
-            end),
-         # Scope DECISION (SAME rule as dispatch_issue): a project-scoped producer already alive
-         # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
-         # instance rework → `:proceed` (never gated). `{:skipped, :role_busy}` bubbles up to the
-         # poller (which handles `{:skipped, _}` → retry on the next tick).
-         decision =
-           Spawn.project_scope_decision(
-             Fleet.CapProfile.lifetime_scope(profile),
-             ctx.spawner,
-             pod_id,
-             Fleet.CapProfile.slot_scope(profile)
-           ),
-         :ok <- Spawn.gate_scope_decision(decision),
-         {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution),
-         # The PR's own base rides the project map to `pod.completed` (face-projet): a
-         # review/rework pod clones the FEATURE branch, so its `base_branch` cannot say which face
-         # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
-         # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).
-         project = stamp_pr_base(project, review_opts),
+    with {:ok, %{route: route, pod_id: pod_id, decision: decision, project: project}} <-
+           prepare_dispatch(kind, pr_number, issue_n, role, profile, ctx, review_opts),
          :ok <- Spawn.maybe_reprovision(decision, ctx.spawner, pod_id, project, "work"),
          # A0.5 — conflict kinds only: the base MOVED (that is what a conflict is), and a live
          # re-briefed-in-place pod keeps everything from its last provisioning, its stale
@@ -291,6 +249,56 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RoleDispatch do
         )
 
         {:error, {phase, reason}}
+    end
+  end
+
+  # THE READ-ONLY PRE-LOCK PHASE, a function so that « every resolution BEFORE any forge write »
+  # is a frontier and not an order of clauses an addition can break. CHEAP GATES FIRST (SAME
+  # rule/order as dispatch_issue, lockstep): route (light forge GET on the issue) → pod identity →
+  # LOCAL scope gate → project resolver (the heavy network call, 1-2× ls-remote) on the passing
+  # path only. Nothing here writes; the forge LOCK comes after, in `spawn_step`.
+  # No captures — Spawn.route_for/Opts.tag_err taken at the source (shared with the issue flow).
+  defp prepare_dispatch(kind, pr_number, issue_n, role, profile, %Ctx{} = ctx, review_opts) do
+    %Ctx{repo: repo, forge: forge, resolver: resolver, forge_opts: forge_opts} = ctx
+
+    with {:ok, route} <-
+           Opts.tag_err(Spawn.route_for(forge, repo, issue_n, forge_opts), :route_resolution),
+         # pod_id: rework/conflict = the PRODUCER, routed by `slot_scope` (project → for_repo = SAME
+         # identity as dispatch_issue, ONE per project; instance → for_issue). The JUDGE keys on the PR
+         # (for_pr, fan-out by review). The rework re-reads its state FROM THE FORGE (PR + findings) →
+         # changing the pod identity loses no context.
+         pod_id =
+           (case kind do
+              k when k in [:rework, :conflict_rework, :conflict_rework_exception] ->
+                Spawn.pod_id_for_scope(Fleet.CapProfile.slot_scope(profile), repo, issue_n, role)
+
+              _ ->
+                Fleet.PodId.for_pr(repo, pr_number, role)
+            end),
+         # Scope DECISION (SAME rule as dispatch_issue): a project-scoped producer already alive
+         # (busy with another issue) → we DEFER, never re-brief-while-busy. Judges (instance) and
+         # instance rework → `:proceed` (never gated). `{:skipped, :role_busy}` bubbles up to the
+         # poller (which handles `{:skipped, _}` → retry on the next tick).
+         decision =
+           Spawn.project_scope_decision(
+             Fleet.CapProfile.lifetime_scope(profile),
+             ctx.spawner,
+             pod_id,
+             Fleet.CapProfile.slot_scope(profile)
+           ),
+         :ok <- Spawn.gate_scope_decision(decision),
+         {:ok, project} <- Opts.tag_err(resolver.(repo, review_opts), :project_resolution) do
+      # The PR's own base rides the project map to `pod.completed` (face-projet): a
+      # review/rework pod clones the FEATURE branch, so its `base_branch` cannot say which face
+      # the PR merges into — `dispatch_review` read it off the PR, the map carries it, the
+      # completer consumes `pr_base_branch || base_branch` (PR wins when one exists).
+      {:ok,
+       %{
+         route: route,
+         pod_id: pod_id,
+         decision: decision,
+         project: stamp_pr_base(project, review_opts)
+       }}
     end
   end
 

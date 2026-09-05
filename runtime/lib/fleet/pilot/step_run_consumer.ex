@@ -74,6 +74,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `:task_queue` — brief broker for the gatekeeper escalation (default `Fleet.TaskQueue`)
     * `:spawner` — wake of the gatekeeper after enqueue (default `Fleet.Spawner`)
     * `:subscribe` — bool default `true` (tests: `false` + manual send)
+    * `:ops_root` — root of the ops faces (default `Fleet.Layout.ops_root/0`), where a gate verdict
+      is pinned; a seam because the real root is a hardcoded global path
+    * `:escalate_fun` — the incident rail (default `IncidentRegistry.escalate_gated/5`)
+    * `:gate_eval_ttl_ms` / `:gate_eval_sweep_ms` — the bound on the in-RAM gate contexts
     * `:step_run_runner` — completion offload seam. Default `nil` → **SYNC** (the outcome bubbles up,
       seams/tests unchanged). Prod (`application.ex`) injects `&offload_async/2` → the completion (git push
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
@@ -86,7 +90,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   alias Fleet.Event
   alias Fleet.EventRouter.Bus
-  alias Fleet.Forge.Payload
   alias Fleet.Opts
   alias Fleet.Pilot.CompletionOutbox
 
@@ -113,6 +116,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # Seam d'escalade — meme forme que `:wake_recovery` : injecte par un test pour observer
     # l'incident sans ouvrir d'issue, resolu vers `IncidentRegistry.escalate_gated/5` en prod.
     :escalate_fun,
+    # Seam of the ops root (default `Fleet.Layout.ops_root/0`), an init option here where the
+    # completer takes it per call — same reason: the real root is a hardcoded global path, and
+    # without it no test can watch a gate verdict get pinned.
+    ops_root: nil,
     gate_evals: %{},
     gate_eval_ttl_ms: nil,
     gate_eval_sweep_ms: nil,
@@ -185,7 +192,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       gate_evals: %{},
       gate_eval_ttl_ms: Keyword.get(opts, :gate_eval_ttl_ms, @gate_eval_ttl_ms),
       gate_eval_sweep_ms: Keyword.get(opts, :gate_eval_sweep_ms, @gate_eval_sweep_ms),
-      step_run_runner: Keyword.get(opts, :step_run_runner)
+      step_run_runner: Keyword.get(opts, :step_run_runner),
+      ops_root: Keyword.get(opts, :ops_root)
     }
 
     Logger.info(
@@ -544,7 +552,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # F-037
   defp step_run_state(payload, state) do
-    case payload_repo(payload) do
+    case GateEngine.payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->
         %{state | repo: repo, remote: payload["remote"] || state.remote}
 
@@ -552,9 +560,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
         state
     end
   end
-
-  defp payload_repo(payload),
-    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp run_step_run(payload, n, state) do
     role = payload["role"]
@@ -718,14 +723,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
         role,
         state.deliverable_mode_fun,
         payload["deliverable_mode"],
-        catalogue_root(payload)
+        GateEngine.catalogue_root(payload)
       )
-
-  # A project lives in the org of ITS catalogue, so the repo names the catalogue (lot 4 of the
-  # org-par-catalogue). This rail is a SINGLETON serving every project of every installed
-  # catalogue: the root cannot be bound at init, and it does not need to be — the work item already
-  # carries the repo, so it carries the catalogue. The split itself lives in `Fleet.Catalogue`.
-  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   @doc false
   # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
@@ -917,11 +916,21 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # The project's ops worktree, or nil when there is none. A project never onboarded has
   # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
   # brief materialization already takes on that path.
-  defp verdict_work_dir(state) do
-    dir =
-      Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(Map.get(state, :repo, "")))
-
+  # `nil` when the project has no ops face (nowhere to pin; `Pinning.render/2` leaves the body
+  # inline) or when this event carries no repo — `Layout.project_name/1` refuses a nil rather than
+  # naming a directory that is nobody's.
+  defp verdict_work_dir(%{repo: repo, ops_root: ops_root}) when is_binary(repo) do
+    dir = Path.join(ops_root || Fleet.Layout.ops_root(), Fleet.Layout.project_name(repo))
     if File.dir?(dir), do: dir
+  end
+
+  defp verdict_work_dir(_state) do
+    Logger.warning(
+      "StepRunConsumer: verdict NOT pinned — this event names no repo, so no ops face can be " <>
+        "addressed (a producer defect, not a missing face); the trace posts inline"
+    )
+
+    nil
   end
 
   # `on_closed` runs inside the completion closure, only on `{:ok, _}` — whatever the runner.
