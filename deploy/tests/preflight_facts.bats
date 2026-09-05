@@ -225,7 +225,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 
 @test "CANAL : un produit POSE sans tampon rend « inconnu », dit en WARN — ni « aucun », ni un canal" {
   mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
-  run env PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime" bash "$MOD" check
+  preflight linux PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime"
   [ "$(fact channel)" = "inconnu" ] || { echo "channel=$(fact channel), attendu inconnu"; echo "$output" | tail -5; return 1; }
   [[ "$output" == *"INCONNU"*"sans tampon"* ]]
 }
