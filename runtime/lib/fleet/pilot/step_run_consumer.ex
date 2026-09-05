@@ -581,7 +581,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
          ) do
       TerminalEscalation.escalate_blocked_producer(payload, n, role, terminal_seams(state))
     else
-      case GateEngine.resolve_next(payload, n, gate_seams(state)) do
+      case GateEngine.resolve_next(payload, n, gate_seams(state), is_producer?) do
         {:error, reason} ->
           emit_workflow_map_failed_draft(reason, n, role)
 
@@ -602,7 +602,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
           apply_verdict(decision, trace, ctx, state)
 
         {:ok, intent, {next_assignee, next_step}} ->
-          complete_business_step_run(payload, n, role, intent, next_assignee, next_step, state)
+          complete_business_step_run(
+            payload,
+            n,
+            role,
+            intent,
+            next_assignee,
+            next_step,
+            state,
+            is_producer?
+          )
       end
     end
   end
@@ -683,6 +692,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
          next_assignee,
          next_step,
          state,
+         producer?,
          comment_body \\ nil,
          judge_target \\ nil
        ) do
@@ -695,7 +705,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     run_completion(state, "##{n}", %{pod_id: payload["pod_id"], issue: n}, fn ->
-      case StepRunBuild.build(payload, n, role, route, build_seams(state)) do
+      case StepRunBuild.build(payload, n, role, route, build_seams(state), producer?) do
         {:error, _} = err ->
           err
 
@@ -818,6 +828,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # a next step → `:advance`. A single source of truth for the terminal intent.
         # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
         # cap-profile fails-loud, never a blind terminal intent under an unknown property.
+        # RESOLVED HERE, NOT RECEIVED: `apply_verdict/4` is shared with `resume_gate/3` (a verdict
+        # resumed from the broker after a consumer restart), where no step-run fact is in scope.
+        # The one site of the rail that derives the producer fact twice, and the reason is the
+        # second door.
         with {:ok, is_producer?} <- producer?(role, payload, state),
              {:ok, intent, {next_assignee, next_step}} <-
                GateEngine.advance_intent(workflow_map, step, is_producer?) do
@@ -829,6 +843,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
             next_assignee,
             next_step,
             state,
+            is_producer?,
             trace,
             Map.get(ctx, :judge_target)
           )

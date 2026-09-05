@@ -194,7 +194,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def kick_architect(spawner, repo, message) do
     pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
-    if function_exported?(spawner, :notify_pod, 2) do
+    if Fleet.Opts.exported?(spawner, :notify_pod, 2) do
       # ⚠ CETTE BRANCHE NE JETTE PAS SON RESULTAT, sans quoi le `@doc` juste au-dessus — « Failures
       # are logged » — ne serait vrai que de l'AUTRE branche. C'est le chemin d'escalade TERMINALE :
       # le moment ou un step_run a echoue definitivement et ou l'architecte du projet doit etre
