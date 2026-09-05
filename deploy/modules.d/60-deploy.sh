@@ -72,11 +72,25 @@ prune_intrus() { # prune_intrus — retire les intrus (root), une ligne par retr
   return 0
 }
 
-build_sha() {
-  local matches=("$PREFIX_REL"/lib/lcars_fleet-*/priv/api/build_info.txt)
-  [[ -f "${matches[0]}" ]] || return 0
-  sed -n 's/^sha=//p' "${matches[0]}" 2>/dev/null | head -1 || true
+release_app_dir() { # release_app_dir <racine de release> -> lib/lcars_fleet-<vsn> de la version qui DEMARRE
+  # ⚠ PAS « la premiere du glob ». `mix release --overwrite` ne retire pas une lib/lcars_fleet-<ancienne>
+  # laissee par une assemblee precedente : une release en portait deux (0.1.0 de passe5 a cote de la
+  # 0.9.0 vivante, banc 2003, 2026-09-05) et trois lecteurs annoncaient le build de la morte. La
+  # version qui demarre est dans releases/start_erl.data ; sans lui, une seule lib est acceptable.
+  local root="$1" vsn d
+  vsn="$(awk '{print $2; exit}' "$root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$vsn" && -d "$root/lib/lcars_fleet-$vsn" ]]; then printf '%s\n' "$root/lib/lcars_fleet-$vsn"; return 0; fi
+  d=("$root"/lib/lcars_fleet-*)
+  [[ "${#d[@]}" -eq 1 && -d "${d[0]}" ]] && { printf '%s\n' "${d[0]}"; return 0; }
+  return 1
 }
+
+build_sha() {
+  local d; d="$(release_app_dir "$PREFIX_REL" || true)"
+  [[ -n "$d" && -f "$d/priv/api/build_info.txt" ]] || return 0
+  sed -n 's/^sha=//p' "$d/priv/api/build_info.txt" 2>/dev/null | head -1 || true
+}
+release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}" ]] && printf '%s\n' "${#d[@]}" || printf '0\n'; }
 
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
@@ -90,6 +104,8 @@ check() {
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
+    local _nl; _nl="$(release_libs_count)"
+    [[ "$_nl" -le 1 ]] || p_drift "la release posée porte $_nl lib/lcars_fleet-* — une assemblée n'en a qu'une ; celle qui démarre est $(release_app_dir "$PREFIX_REL" 2>/dev/null | sed 's|.*/||' || echo '?'), les autres sont mortes (mix release --overwrite sans nettoyage) : repose depuis un paquet propre"
   elif [[ "$_pfx" != "present" && "$_pfx" != "absent" ]]; then
     p_warn "release NON MESURABLE — $PROV_PREFIX $(prov_state_why "$_pfx" "$PROV_PREFIX")"
     verdict_check

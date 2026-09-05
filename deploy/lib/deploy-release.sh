@@ -77,6 +77,19 @@ atomic_swap_file() {
 # runs `mix gate` FIRST, a direct gate→build continuation: the bits installed are the bits the gate
 # passed. LCARS_INSTALL_SKIP_GATE=1 is an explicit escape (an operator who just ran the gate) — it
 # must be a stated choice, never the default. Runs in `runtime_dir`; dies on a red gate or build.
+release_app_dir() { # release_app_dir <racine de release> -> lib/lcars_fleet-<vsn> de la version qui DEMARRE
+  # ⚠ PAS « la premiere du glob ». `mix release --overwrite` ne retire pas une lib/lcars_fleet-<ancienne>
+  # laissee par une assemblee precedente : une release en portait deux (0.1.0 de passe5 a cote de la
+  # 0.9.0 vivante, banc 2003, 2026-09-05) et trois lecteurs annoncaient le build de la morte. La
+  # version qui demarre est dans releases/start_erl.data ; sans lui, une seule lib est acceptable.
+  local root="$1" vsn d
+  vsn="$(awk '{print $2; exit}' "$root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$vsn" && -d "$root/lib/lcars_fleet-$vsn" ]]; then printf '%s\n' "$root/lib/lcars_fleet-$vsn"; return 0; fi
+  d=("$root"/lib/lcars_fleet-*)
+  [[ "${#d[@]}" -eq 1 && -d "${d[0]}" ]] && { printf '%s\n' "${d[0]}"; return 0; }
+  return 1
+}
+
 build_release() {
   local runtime_dir="$1"
 
@@ -92,8 +105,8 @@ build_release() {
     fi
     local src_sha built_sha m
     src_sha="$(git -C "$runtime_dir" rev-parse --short HEAD 2>/dev/null || true)"
-    m=("$rel"/lib/lcars_fleet-*/priv/api/build_info.txt)
-    [[ -f "${m[0]}" ]] && built_sha="$(sed -n 's/^sha=//p' "${m[0]}" 2>/dev/null | head -1)"
+    m="$(release_app_dir "$rel" || true)"
+    [[ -n "$m" && -f "$m/priv/api/build_info.txt" ]] && built_sha="$(sed -n 's/^sha=//p' "$m/priv/api/build_info.txt" 2>/dev/null | head -1)"
     if [[ -n "$src_sha" && "$src_sha" == "${built_sha:-}" ]] \
        && git -C "$runtime_dir" diff --quiet HEAD -- . 2>/dev/null; then
       echo "install: release deja batie et ATTESTEE ($src_sha, arbre propre) — ni gate ni compilation" >&2
@@ -127,6 +140,8 @@ build_release() {
       MIX_ENV="test" mix gate || exit 1
     fi
 
+    # assemblee PROPRE : --overwrite ne retire pas une lib/lcars_fleet-<ancienne> (cf. release_app_dir)
+    rm -rf "_build/prod/rel/lcars_fleet"
     MIX_ENV=prod mix release --overwrite || exit 1
   )
 }

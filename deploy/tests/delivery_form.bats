@@ -275,3 +275,20 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   n_mix="$(grep -n 'mix absent' <<<"$bloc" | head -1 | cut -d: -f1)"
   [ "$n_bin" -lt "$n_mix" ]
 }
+
+@test "PACK : la release est assemblee dans un repertoire VIDE, et le paquet est refuse si elle porte plus d'une lib ou un tampon qui n'est pas HEAD" {
+  # 2026-09-05, banc 2003 : le tar portait une lib/lcars_fleet-0.1.0 de passe5 a cote de la 0.9.0 —
+  # `mix release --overwrite` ne nettoie pas. Le pack vide d'abord, puis atteste : une lib, sha = HEAD.
+  local pack="$BATS_TEST_DIRNAME/../../pack.sh"
+  [ -f "$pack" ]
+  local body; body="$(grep -vE '^\s*#' "$pack")"
+  grep -qE '^rm -rf runtime/_build/prod/rel/lcars_fleet$' <<<"$body"
+  # le rm vient AVANT mix release
+  local l_rm l_rel
+  l_rm="$(grep -nE '^rm -rf runtime/_build/prod/rel/lcars_fleet$' <<<"$body" | cut -d: -f1)"
+  l_rel="$(grep -nE 'mix release --overwrite' <<<"$body" | head -1 | cut -d: -f1)"
+  [ "$l_rm" -lt "$l_rel" ]
+  grep -qE 'lib/lcars_fleet-\*' <<<"$body"
+  grep -qE 'eq 1 .*die' <<<"$body" || grep -qE '"\$\{#_libs\[@\]\}" -eq 1' <<<"$body"
+  grep -qE '"\$_built" == "\$SHA"' <<<"$body"
+}

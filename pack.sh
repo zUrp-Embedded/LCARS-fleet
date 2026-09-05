@@ -117,7 +117,20 @@ say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
 bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
 say "release prod…"
+# ⚠ ASSEMBLEE PROPRE, ET C'EST UNE MESURE. `mix release --overwrite` reecrit ce qu'il assemble mais ne
+# retire PAS une `lib/lcars_fleet-<ancienne version>` laissee par une assemblee precedente : le tar
+# du 2026-09-05 portait la 0.1.0 de passe5 (sha 9ee4a4bcd) a cote de la 0.9.0 vivante, et le doctor
+# du banc 2003 annoncait le build de la morte. On repart d'un repertoire vide, puis on VERIFIE : une
+# seule lib, et son tampon porte le sha de HEAD — sinon le paquet ne vaut rien et ne sort pas.
+rm -rf runtime/_build/prod/rel/lcars_fleet
 ( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+_libs=(runtime/_build/prod/rel/lcars_fleet/lib/lcars_fleet-*)
+[[ "${#_libs[@]}" -eq 1 && -d "${_libs[0]}" ]] \
+  || die "la release porte ${#_libs[@]} lib/lcars_fleet-* (${_libs[*]##*/}) — une assemblee n'en a qu'UNE ; rien n'est empaquete"
+_built="$(sed -n 's/^sha=//p' "${_libs[0]}/priv/api/build_info.txt" 2>/dev/null | head -1)"
+[[ "$_built" == "$SHA" ]] \
+  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $SHA — les bits assembles ne sont pas ceux du commit ; rien n'est empaquete"
+say "release attestée : ${_libs[0]##*/}, build $_built"
 
 # ─── LA DOC — LA SECONDE MOITIÉ DE LA LIVRAISON, ET ELLE MANQUAIT ───────────────────────────────
 #

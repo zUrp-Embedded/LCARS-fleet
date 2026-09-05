@@ -95,3 +95,19 @@ mod() { run bash -c "set -euo pipefail; source '$DECOR_MOD' >/dev/null 2>&1; $1"
   [ ! -e "$PROV_PREFIX/bin/fleet_v2" ] && [ ! -L "$PROV_LINK_DIR/fleet_v2" ]
   [ -e "$PROV_PREFIX/bin/fleet" ] && [ -L "$PROV_LINK_DIR/fleet" ] && [ -L "$PROV_LINK_DIR/quelconque" ]
 }
+
+@test "RELEASE A DEUX LIBS : le build annonce est celui qui DEMARRE, et la lib morte est un DRIFT nomme" {
+  decor
+  local rel="$PROV_PREFIX/rel/lcars_fleet"
+  mkdir -p "$rel/lib/lcars_fleet-0.1.0/priv/api" "$rel/lib/lcars_fleet-0.9.0/priv/api" "$rel/releases"
+  printf 'sha=9ee4a4bcd\n' > "$rel/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
+  printf 'sha=d4d23d792\n' > "$rel/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
+  printf '15.2.7.4 0.9.0\n' > "$rel/releases/start_erl.data"
+  mod 'build_sha; release_libs_count'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"d4d23d792"* ]]
+  refute_out '9ee4a4bcd' <<<"$output"
+  [[ "$output" == *"2"* ]]
+  mod check
+  [[ "$output" == *"DRIFT"*"porte 2 lib/lcars_fleet-*"*"lcars_fleet-0.9.0"* ]]
+}

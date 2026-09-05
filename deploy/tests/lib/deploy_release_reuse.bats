@@ -90,3 +90,21 @@ appel() { run bash -c ". '$SUT' >/dev/null 2>&1; build_release '$RT' 2>&1"; }
   appel
   [[ "$output" == *"n'atteste pas cette source"* ]]
 }
+
+@test "DEUX LIBS dans la release : le sha lu est celui de la version qui DEMARRE (start_erl.data), jamais la premiere du glob" {
+  # banc 2003, 2026-09-05 : une lib/lcars_fleet-0.1.0 morte (passe5) a cote de la 0.9.0 vivante, et
+  # `${m[0]}` prenait la morte — le doctor annoncait un build vieux de trois jours.
+  local sha; sha="$(depot)"
+  mkdir -p "$REL/lib/lcars_fleet-0.1.0/priv/api" "$REL/releases"
+  printf 'sha=deadbeef1\n' > "$REL/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
+  atteste "$sha"
+  printf '15.2 1.0.0\n' > "$REL/releases/start_erl.data"
+  run bash -c "source '$SUT' >/dev/null 2>&1 || true; release_app_dir '$REL'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$REL/lib/lcars_fleet-1.0.0" ]]
+  # et sans start_erl.data, DEUX libs = on ne devine pas
+  rm -f "$REL/releases/start_erl.data"
+  run bash -c "source '$SUT' >/dev/null 2>&1 || true; release_app_dir '$REL'"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}

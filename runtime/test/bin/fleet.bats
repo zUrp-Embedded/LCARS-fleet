@@ -552,3 +552,15 @@ start_fake_beam() {
   [[ "$output" == *"ref=<illisible : git muet>"* ]]
   [[ "$output" != *"bati depuis un commit"* ]]
 }
+
+@test "version : DEUX libs dans la release — le lanceur lit la version qui DEMARRE (start_erl.data), pas la premiere du glob" {
+  local root="$TMP_BASE/rt2/rel/lcars_fleet"
+  mkdir -p "$root/lib/lcars_fleet-0.1.0/priv/api" "$root/lib/lcars_fleet-0.9.0/priv/api" "$root/releases"
+  printf 'sha=9ee4a4bcd\ndirty=false\nref=\n' > "$root/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
+  printf 'sha=d4d23d792\ndirty=false\nref=\n' > "$root/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
+  printf '15.2.7.4 0.9.0\n' > "$root/releases/start_erl.data"
+  run bash -c "source '$SCRIPT'; RUNTIME_DIR='$TMP_BASE/rt2'; cmd_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"d4d23d792"* ]]
+  [[ "$output" != *"9ee4a4bcd"* ]]
+}

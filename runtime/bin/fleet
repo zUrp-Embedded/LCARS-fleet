@@ -357,7 +357,15 @@ cmd_version() {
   local build_file
   # CE chemin doit suivre l'ecrivain BEAM (`Application.app_dir(:lcars_fleet, "priv/api/...")`) : sinon
   # le glob rate, on retombe sur git — absent au runtime release — et le status MENT « build unknown ».
-  build_file="$(ls -1 "$rel_root"/lib/lcars_fleet-*/priv/api/build_info.txt 2>/dev/null | head -1 || true)"
+  # ⚠ ET PAS « la premiere du glob » : une release peut porter une lib/lcars_fleet-<ancienne> que
+  # `mix release --overwrite` n'a pas retiree (banc 2003, 2026-09-05 : la 0.1.0 de passe5 a cote de la
+  # 0.9.0 vivante). La version qui DEMARRE est dans releases/start_erl.data — meme lecture que
+  # `release_app_dir` de l'installeur (deploy-release.sh, 60-deploy).
+  local _vsn _app=""
+  _vsn="$(awk '{print $2; exit}' "$rel_root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$_vsn" && -d "$rel_root/lib/lcars_fleet-$_vsn" ]]; then _app="$rel_root/lib/lcars_fleet-$_vsn"
+  else local _d=("$rel_root"/lib/lcars_fleet-*); [[ "${#_d[@]}" -eq 1 && -d "${_d[0]}" ]] && _app="${_d[0]}"; fi
+  build_file=""; [[ -n "$_app" && -f "$_app/priv/api/build_info.txt" ]] && build_file="$_app/priv/api/build_info.txt"
 
   if [[ -n "$build_file" && -f "$build_file" ]]; then
     # RELEASE: read the embedded file (key=value, written by write_build_info/1).
