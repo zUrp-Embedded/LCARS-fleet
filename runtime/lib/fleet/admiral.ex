@@ -8,6 +8,7 @@ defmodule Fleet.Admiral do
       Fleet.Event,
       Fleet.SchemaCache,
       Fleet.Shutdown.Quiesce,
+      Fleet.PeriodicCheck,
       Fleet.EventRouter,
       Fleet.CapProfile,
       Fleet.Spawner,
