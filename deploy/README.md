@@ -271,6 +271,11 @@ plus (`deploy/lib/forge-publish.sh`) :
    `deb [signed-by=/etc/apt/keyrings/lcars-<owner>.asc] <forge>/api/packages/<owner>/debian <distribution> main`
    (la clé : `<forge>/api/packages/<owner>/debian/repository.key`).
 
+**Sous WSL avec Docker Desktop** : `sudo apt install lcars-docker-desktop lcars-demo` — les DEUX.
+Seul, `lcars-demo` laisse apt prendre `docker.io` (première alternative du `Depends` de lcars) : un
+second daemon, et le socket de Desktop écrasé ; `30-wsl` le refuse en nommant le geste (mesuré sur
+un banc, 2026-09-05).
+
 **Immutabilité (ADR 012)** : une release du tag qui existe, brouillon compris, est un refus nommé ;
 un `.deb` déjà au registre aussi. Rien ne se réécrit — pour refaire, on supprime sur la forge, à la
 main. **Le tag** est celui de git quand HEAD en porte un (la CI sur tag, un `1.2.3` d'opérateur),
