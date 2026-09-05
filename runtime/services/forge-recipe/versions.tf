@@ -1,7 +1,7 @@
 terraform {
   # `for_each` on `import` blocks lands in 1.7 — the existence source of this recipe imports what
   # the forge already carries instead of failing with 409, and it cannot enumerate that set
-  # statically. This is the floor of the FEATURE, not the version measured on any given box:
+  # statically. This is the floor of the FEATURE, not the version measured on any given container:
   # pinning an exact release here would lock an operator out for no reason.
   required_version = ">= 1.7"
 

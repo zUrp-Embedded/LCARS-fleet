@@ -4,7 +4,7 @@
 # STARDATE: 2026-08-09
 # STATUS: bats tests for bench-down.sh — WHAT a bench is made of, and the order it comes apart in
 #
-# WHY THIS EXISTS. A bench is THREE compose projects — the box (`<project>-fleet`), the forge
+# WHY THIS EXISTS. A bench is THREE compose projects — the container (`<project>-fleet`), the forge
 # (`<project>-forge`) and the runner (`<project>-runner`, started by bench-up through
 # forge-runner.sh) — and this script tore down two. Measured 2026-08-09 on a real teardown:
 # `lcars-faces-runner-runner-1` was still running afterwards and the forge's `down` ended on
@@ -18,7 +18,7 @@
 # on a script that does it last and leaves the network behind.
 #
 # WHAT IS PROVEN HERE: the three projects are named, the order between them, and that a
-# half-destroyed bench (box gone, runner up) can still be finished. WHAT IS NOT: that `compose
+# half-destroyed bench (container gone, runner up) can still be finished. WHAT IS NOT: that `compose
 # down -v` actually removes a volume, or that the network is released — those are docker's
 # behaviour, and a stub cannot answer for them. Assertions read the CALL LOG, never the exit
 # status: the stub does not fake compose's output.
@@ -81,8 +81,8 @@ idx_of() {
   [ "$runner" -lt "$forge" ]
 }
 
-@test "a HALF-destroyed bench (box gone, runner up) can still be finished" {
-  # The old discriminant was the box alone: this state exited 2 before reaching the runner, and
+@test "a HALF-destroyed bench (container gone, runner up) can still be finished" {
+  # The old discriminant was the container alone: this state exited 2 before reaching the runner, and
   # clearing it took a docker rm by hand. That is the state a first, incomplete teardown leaves.
   PRESENT="bt-runner-act-1" run_down
 
@@ -90,13 +90,13 @@ idx_of() {
   grep -q -- "-p bt-runner down -v" "$CALLS"
 }
 
-# 2026-08-14 — THE DISCRIMINANT GREW ONE MEMBER AT A TIME AND NEVER CLOSED THE CLASS. First the box,
-# then box-or-runner (the test above). The member it still missed showed up on a real teardown: when
-# bench-up dies BEFORE creating the box — its forge never answered — the only leftovers are
+# 2026-08-14 — THE DISCRIMINANT GREW ONE MEMBER AT A TIME AND NEVER CLOSED THE CLASS. First the container,
+# then container-or-runner (the test above). The member it still missed showed up on a real teardown: when
+# bench-up dies BEFORE creating the container — its forge never answered — the only leftovers are
 # `<project>forge-gitea-1` and two volumes, and this script answered "rien a detruire" on a bench
 # that still held the bind, the port and the project name. The next bench-up then mounted itself on
 # the previous one's remains.
-@test "only the FORGE survives (bench-up died before creating the box) → still destroyed" {
+@test "only the FORGE survives (bench-up died before creating the container) → still destroyed" {
   PRESENT="bt-forge-gitea-1" run_down
 
   [ "$status" -eq 0 ]
@@ -104,10 +104,10 @@ idx_of() {
 }
 
 # Volumes alone are the harder half, and the one that matters most: they carry the STATE — the
-# seeded forge, the box's /home. `compose down -v` removes them even when no container mounts them,
+# seeded forge, the container's /home. `compose down -v` removes them even when no container mounts them,
 # so a guard that only reads `ps -a` refuses to clean exactly the residue that poisons the next run.
 @test "no container left but the volumes remain → still destroyed" {
-  PRESENT="someone-elses-box" VOLUMES="bt-forge_data bt-forge_config" run_down
+  PRESENT="someone-elses-container" VOLUMES="bt-forge_data bt-forge_config" run_down
 
   [ "$status" -eq 0 ]
   grep -q -- "-p bt-forge down -v" "$CALLS"
@@ -116,7 +116,7 @@ idx_of() {
 @test "nothing of this bench exists → exit 2, and NOT one destructive call" {
   # TEMOIN of the two above: the residue test must still be able to say NO. A guard that answers
   # "there is something" on an empty daemon would make the two tests above pass vacuously.
-  PRESENT="someone-elses-box" VOLUMES="someoneelses_data" run_down
+  PRESENT="someone-elses-container" VOLUMES="someoneelses_data" run_down
 
   [ "$status" -eq 2 ]
   refute grep -q -- "down -v" "$CALLS"

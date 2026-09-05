@@ -80,7 +80,7 @@ resolve_declarations() {
 }
 
 # S'EMET APRES L'INVENTAIRE, et le verdict en depend. Une declaration manquante n'est un angle mort
-# que s'il y a quelque chose a confronter : sur une boite sans projet, crier `unreachable` faisait
+# que s'il y a quelque chose a confronter : sur un conteneur sans projet, crier `unreachable` faisait
 # basculer tout le run en AVEUGLE pour une question que personne ne posait. Meme faute que les cinq
 # lignes rouges decrivant un daemon jamais demande — et meme correctif : l'absence de CIBLE rend la
 # sonde sans objet, pas cassee. Quand l'inventaire est lui-meme aveugle, il le dit deja ; le repeter
@@ -177,8 +177,8 @@ probe_inventory() {
     fi
   done <<< "$seen"
 
-  # Zero projet est un etat LEGITIME (fleet neuve) : le compter comme panne rendrait rouge toute
-  # boite fraiche, exactement la fausse alarme que la trichotomie existe pour eviter.
+  # Zero projet est un etat LEGITIME (fleet neuve) : le compter comme panne rendrait rouge tout
+  # conteneur frais, exactement la fausse alarme que la trichotomie existe pour eviter.
   emit "projects.inventory" "$PLANE" "operational" "local" "ls $PROJ_ROOT $WORK_ROOT" \
     "${#PROJECTS[@]} nom(s) occupe(s) — $both complet(s), $main_only livrable seul, $work_only work seul :$listing" \
     "Enumere les NOMS PRIS SUR CE DISQUE. Un depot present sur la forge sans clone local n'y figure pas : avant de creer un projet, la forge tranche, pas cette liste."

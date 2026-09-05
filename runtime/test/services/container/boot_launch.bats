@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/boot_launch.bats
+# SOURCE: runtime/test/services/container/boot_launch.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for box/boot.sh — `launch` : l'echec d'un lancement se MESURE, et chaque site d'appel porte sa branche
+# STATUS: bats tests for container/boot.sh — `launch` : l'echec d'un lancement se MESURE, et chaque site d'appel porte sa branche
 #
 # Relecture hostile 2026-09-04 (M7). `launch` finissait sur `say` dans ses deux branches, donc
 # rendait toujours 0 : le `|| say "home NON lancée … AUCUNE console n'est joignable"` du deck etait
@@ -12,7 +12,7 @@
 # l'affaire du superviseur (supervise.bats).
 #
 # ⚠ ET LA BRANCHE DOIT EXISTER A CHAQUE SITE. Le boot est sous `set -e` : un `launch` qui rend 1
-# sur une ligne nue TUE le boot — l'inverse de la doctrine du fichier (la boite reste joignable
+# sur une ligne nue TUE le boot — l'inverse de la doctrine du fichier (le conteneur reste joignable
 # pour etre reparee). Rendre l'echec mesurable sans garder chaque site serait pire qu'avant.
 #
 # ⚠ CES TEMOINS EXECUTENT LA FONCTION REELLE, extraite du fichier, avec un `setsid` double qui ne
@@ -21,7 +21,7 @@
 load ../../support/refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
   FN="$BATS_TEST_TMPDIR/launch.sh"
   sed -n '/^SUPERVISE=/p; /^launch() {/,/^}/p' "$SRC" > "$FN"

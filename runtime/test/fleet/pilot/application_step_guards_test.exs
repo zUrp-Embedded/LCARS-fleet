@@ -231,7 +231,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   # ─── LE GARDE DES SIGNATAIRES A CHANGE DE NATURE SANS CHANGER DE LIGNE ─────────────────────────
   #
   # « pas de jeton de signataire » voulait dire UNE chose tant que le jeton etait un fichier local :
-  # le provisionnement n'a pas tourne, la boite est mal deployee, elle ne demarre pas.
+  # le provisionnement n'a pas tourne, le conteneur est mal deploye, il ne demarre pas.
   #
   # Depuis que le jeton se DEMANDE au service d'autorite, la meme absence recouvre aussi « le
   # service ne repond pas encore » et « la forge est injoignable » — deux etats TRANSITOIRES. Le
@@ -241,7 +241,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
   # premier, un garde qui ne leve jamais passe ; sans le second, un garde qui leve toujours passe.
   describe "signataires de merge : la cause decide, pas l'absence" do
     @tag :tmp_dir
-    test "provisionnement manquant (no_role_token) → RAISE : la boite ne doit pas demarrer", %{
+    test "provisionnement manquant (no_role_token) → RAISE : le conteneur ne demarre pas", %{
       tmp_dir: tmp
     } do
       Application.put_env(:lcars_fleet, :pilot_step_dispatch?, true)
@@ -269,7 +269,7 @@ defmodule Fleet.Pilot.ApplicationStepGuardsTest do
         end)
 
       # ⚠ « PAS DE RAISE » NE SUFFIT PAS, ET C'EST LA MOITIE QUI COMPTE. Un rail qui demarre vert
-      # sur une boite structurellement incapable de sceller est exactement le succes muet que ce
+      # sur un conteneur structurellement incapable de sceller est exactement le succes muet que ce
       # chantier retire ailleurs. Le journal doit dire QUELLE porte ne repond pas, et dire que ce
       # n'est PAS un defaut de provisionnement — sinon l'operateur relance un `provision apply` qui
       # n'a aucune chance d'y changer quoi que ce soit.

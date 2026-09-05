@@ -1,6 +1,6 @@
 defmodule Fleet.Project.Onboard.Migration do
   @moduledoc """
-  Deplacer un projet d'un catalogue a un autre, et faire reconverger une boite sur ce que la forge
+  Deplacer un projet d'un catalogue a un autre, et faire reconverger un conteneur sur ce que la forge
   porte vraiment.
 
   Deux rails, une seule question : « l'etat sur disque et l'etat sur la forge disent-ils la meme
@@ -74,7 +74,7 @@ defmodule Fleet.Project.Onboard.Migration do
     end
   end
 
-  # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que cette boite n'a
+  # Meme refus que l'import, et pour la meme raison : migrer vers un catalogue que ce conteneur n'a
   # pas produirait un projet dont personne ne sait lire le metier — et le poller ne decouvre que sur
   # les orgs des catalogues INSTALLES, donc le projet deviendrait invisible, pas casse.
   #
@@ -91,7 +91,7 @@ defmodule Fleet.Project.Onboard.Migration do
   defp require_target_installed(target), do: Onboard.require_installed(target)
 
   # Rend les faces REELLEMENT repointees, pas celles qu'on visait. La difference n'est pas
-  # cosmetique : sur un banc, ce geste annonce « trois faces repointees » sur une boite ou les
+  # cosmetique : sur un banc, ce geste annonce « trois faces repointees » sur un conteneur ou les
   # trois sont absentes — la moitie forge est juste, et le rapport ment. Un appelant qui
   # affiche la liste visee affirme un travail qu'il n'a pas fait.
   defp repoint_faces(dirs, url) do
@@ -116,7 +116,7 @@ defmodule Fleet.Project.Onboard.Migration do
       bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_migrate("fleet/vitrine", "web")'
 
   Meme forme que `CatalogueVerify.eval_main/1`, et pour la meme raison : `bin/lcars` n'a aucun acces
-  forge, et lui en donner un ferait d'une commande locale un acteur distant. La boite, elle, porte
+  forge, et lui en donner un ferait d'une commande locale un acteur distant. Le conteneur, lui, porte
   deja les jetons et la config.
   """
   @spec eval_migrate(String.t(), String.t()) :: no_return()
@@ -145,7 +145,7 @@ defmodule Fleet.Project.Onboard.Migration do
       {:error, {:catalogue_not_installed, cat, gestures}} ->
         IO.puts(
           :stderr,
-          "REFUSE : le catalogue #{inspect(cat)} n'est pas installe sur cette boite."
+          "REFUSE : le catalogue #{inspect(cat)} n'est pas installe sur ce conteneur."
         )
 
         IO.puts(:stderr, "  #{gestures}")
@@ -185,13 +185,13 @@ defmodule Fleet.Project.Onboard.Migration do
       bin/lcars_fleet eval 'Fleet.Project.Onboard.eval_reconcile(:apply)'
 
   L'INVENTAIRE N'EXISTE QUE SUR LA FORGE, et c'est ce qui rend cette porte necessaire.
-  `list_projects/1` enumere le DISQUE (`code_root`) : sur une boite neuve — ou apres un nuke, ou
+  `list_projects/1` enumere le DISQUE (`code_root`) : sur un conteneur neuf — ou apres un nuke, ou
   pour un second humain qui arrive sur une fleet deja peuplee — il n'y a rien a enumerer, alors que
   les projets, eux, sont intacts. Aucun verbe n'est ecrit ici : `import/2` est deja le rail
-  forge→boite et deja idempotent. Ce qui n'existe nulle part ailleurs, c'est la LISTE.
+  forge→conteneur et deja idempotent. Ce qui n'existe nulle part ailleurs, c'est la LISTE.
 
   Sortie : un mot par projet, sur une ligne. `check` ne touche rien (`DEJA` / `MANQUE`), `apply`
-  importe (`DEJA` / `IMPORTE`). Un projet en echec n'arrete pas les autres — une boite a laquelle il
+  importe (`DEJA` / `IMPORTE`). Un projet en echec n'arrete pas les autres — un conteneur auquel il
   manque neuf projets sur dix doit en recuperer neuf, pas zero.
 
   Codes de sortie : `0` tout converge · `1` au moins un `ECHEC` · `2` au moins un `MANQUE` et aucun

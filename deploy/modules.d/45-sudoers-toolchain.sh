@@ -11,7 +11,7 @@
 #   2. l'ETAT CONTENEUR du reconciliateur (`/run/lcars/toolchain` — un TMPFS : il meurt avec le
 #      conteneur PAR CONSTRUCTION, et aucun volume ne peut le recouvrir ; 2775 root:fleet) : le
 #      marqueur `toolchain.applied` decrit L'ETAT DE /usr, qui meurt avec le conteneur. Le poser
-#      sur le magasin (volume externe, survit au rebuild) faisait dire « a jour » a une boite
+#      sur le magasin (volume externe, survit au rebuild) faisait dire « a jour » a un conteneur
 #      reconstruite dont /usr etait revenu a la baseline — l'exact mensonge que `01` §4.5 refuse.
 #
 #   4. le SKILL `system-issues` dans le `~/.claude` du SIEGE (`05` §7) : la boite de reception
@@ -35,7 +35,7 @@ SYSADMIN_UID="${LCARS_SYSADMIN_UID:-1000}"
 #
 # Le skill vit desormais dans `runtime/services/admiral/skills`, et l'image l'y pose AUSSI — c'est
 # exactement ce que `EMBEDDED` copie sous `/opt/lcars/services`. Les deux rails nomment donc le
-# meme chemin, et `repo_root()` suffit a le dire : `/opt/lcars` dans la boite, le checkout ailleurs.
+# meme chemin, et `repo_root()` suffit a le dire : `/opt/lcars` dans le conteneur, le checkout ailleurs.
 # Deux branches qui existaient pour reconcilier deux verites n'ont plus rien a reconcilier.
 SKILL_SRC="${LCARS_ADMIRAL_SKILLS_SRC:-$(product_tree)/services/admiral/skills}"
 

@@ -9,7 +9,7 @@ ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 
 ⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
 CHAQUE DÉMARRAGE** — l'entrypoint lançait `provision apply --substrate docker` au boot (jusqu'au
-lot 6 du chantier deploy-independance : le boot est `runtime/services/box/boot.sh`, il ne joue plus
+lot 6 du chantier deploy-independance : le boot est `runtime/services/container/boot.sh`, il ne joue plus
 aucun module de l'installeur), et le banc entier reposait dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
 contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
 FERMÉS et épinglés :
@@ -41,9 +41,9 @@ frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxi
 fichier de `services/` est pose quelque part.
 
 Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
-est le boot du produit, `runtime/services/box/boot.sh`), les cinq compose et l'override des
-secrets (`docker-compose.secrets.yml`, que `box` ajoute à chaque appel : les secrets posés par
-`box config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
+est le boot du produit, `runtime/services/container/boot.sh`), les cinq compose et l'override des
+secrets (`docker-compose.secrets.yml`, que `container` ajoute à chaque appel : les secrets posés par
+`container config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
 
 un humain lance `fleet start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
@@ -69,7 +69,7 @@ morte avec le modèle).
    lui seul.
 
    Quatre gestes la portent, et c'est d'eux qu'elle se lit :
-   - le bandeau du rail boîte promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
+   - le bandeau du rail conteneur promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
      /etc ni /usr » — `docker-ce` le contredirait mot pour mot (dépôt tiers, `/etc/apt/keyrings`,
      `sources.list.d`, unité systemd, groupe) ;
    - la même branche s'interdit l'`exec sudo`, sans quoi l'image sort bâtie en root : elle ne peut
@@ -89,16 +89,16 @@ deploy/provision list                  # les modules retenus pour ce substrat
 sudo deploy/provision apply --only 60  # un seul module
 ```
 
-**Le jumeau : `deploy/box`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
-`wsl.conf`) ; `box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes verbes
+**Le jumeau : `deploy/container`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
+`wsl.conf`) ; `container` pilote un CONTENEUR (image, instance, volumes, forge de l'opérateur). Mêmes verbes
 documentés en tête, mêmes codes retour, même place dans l'arbre — qui sait lire l'un sait lire
 l'autre. Les douze verbes (`build up doctor shell logs down reset source-push config forge-check
-forge-apply runner-token`) s'appellent par `deploy/box <verbe>` à la racine, qui détecte, refuse en
+forge-apply runner-token`) s'appellent par `deploy/container <verbe>` à la racine, qui détecte, refuse en
 nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
 
 **La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
 PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et délègue — `--workstation`
-vers `provision apply`, `--box` vers `box`, `--bench` vers le fournisseur de banc. Ce qui suit
+vers `provision apply`, `--container` vers `container`, `--bench` vers le fournisseur de banc. Ce qui suit
 `--` part verbatim au délégué de la branche.
 
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
@@ -146,20 +146,20 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 45-catalogues | any | any | le matériel des catalogues INSTALLÉS, convergé depuis la forge — « installé » est un fait de forge. Un APPELANT mince du geste du produit `runtime/services/forge.d/catalogues.sh` (lot 6) : il passe ce que l'installeur sait (forge, répertoires), le geste rend le verdict |
 | 45-sudoers-toolchain | any | any | les quatre ancrages système du domaine admiral (sudoers étroit, état conteneur, projection du login du siège, skill du siège). Rang 45 et pas moins : un NOPASSWD posé avant 20-groups viserait un groupe inexistant |
 | 46-tofu | wsl linux | any | OpenTofu + son miroir de providers SUR LA MACHINE — la structure de forge n'a plus besoin d'une image (1,18 Go et dix minutes bâtis pour 124 Mo d'outil jamais démarré) |
-| 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 63-forge-tokens et 66-deck-oidc restent en dérive et leurs consignes nomment la boîte |
+| 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 63-forge-tokens et 66-deck-oidc restent en dérive et leurs consignes nomment le conteneur |
 | 49-forge-runner | wsl linux | wsl linux | **le runner CI de la forge du poste** : enrôle un runner sur le réseau de la forge via `docker/forge-runner.sh`. Sorti de 48 le 2026-08-27 — son état était noyé dans le verdict de la forge, et « ma CI a-t-elle une machine ? » n'avait pas de réponse propre. Une forge sans lui accepte un ticket, dépense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas |
 | 60-deploy | wsl linux | any | orchestre `deploy/lib/deploy-release.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 61-forge-structure | wsl linux | wsl linux | **la STRUCTURE de la forge** : roster du catalogue dérivé de la release POSÉE par 60 (`enroll-catalogue.sh --release`, plus aucun `mix`), recette tofu copiée/initialisée/jouée par `forge-gestures.sh apply`. Sorti de 48 le 2026-09-04 (point 1) : la structure exigeait la release que 60 pose douze rangs plus loin |
 | 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
 | 63-forge-tokens | any | any | les jetons de rôle : un APPELANT du geste de forge du produit `runtime/services/forge.d/tokens.sh` (sondes de la forge, modes de l'autorité, roster dérivé du release, mint par `provision-role-tokens.sh`) — lot 6, 2026-09-04 |
-| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`runtime/services/box/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
+| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans le conteneur le boot (`runtime/services/container/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
 | 65-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul. Un APPELANT mince de `runtime/services/forge.d/ops-branch.sh` (lot 6) |
 | 66-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json` ; les ENTRÉES (`PROV_DECK_ORIGINS`) convergent, la loopback y est semée dans ses deux écritures. Un APPELANT mince de `runtime/services/forge.d/deck-oidc.sh` (lot 6) : il passe l'adresse annoncée, le port et les origines |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge au boot de la boîte (`runtime/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
+install.sh) et le reste converge au boot du conteneur (`runtime/services/container/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.
@@ -173,19 +173,19 @@ côtés.
   sondés et instruits, jamais exécutés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
-- **Pas de docker auto-installé sur le rail boîte** (loi 5) : ce rail installe LCARS DANS un
+- **Pas de docker auto-installé sur le rail conteneur** (loi 5) : ce rail installe LCARS DANS un
   conteneur, sur une machine que l'admin sys définit et maintient comme il l'entend, avec ses
   contraintes. Le daemon y est un PRÉREQUIS qu'on NOMME, jamais un manque qu'on comble — le
   combler exigerait un dépôt tiers, `/etc/apt`, une unité systemd et une escalade, c'est-à-dire
   tout ce que le bandeau de ce rail promet de ne pas faire. Le rail POSTE le pose, lui, parce
   qu'il a reçu la machine.
-  ⚖ USER 2026-08-26 : « le rail boîte, c'est pour un système destiné à la production, dans un
+  ⚖ USER 2026-08-26 : « le rail conteneur, c'est pour un système destiné à la production, dans un
   environnement contrôlé, défini et maintenu par l'admin sys — de la façon qu'il souhaite, avec
   les contraintes qu'il a. Notre job, c'est pas de provisionner un serveur de prod complet en le
   promettant résilient. On demande docker pour installer LCARS dans un conteneur ; la couche
   bare-metal, c'est pas notre scope. »
   `docker_installable_here` (`install.sh`) lit donc le rail autant que le substrat : tant que
-  personne n'a choisi, le préflight annonce les deux moitiés, et l'option boîte se barre quand le
+  personne n'a choisi, le préflight annonce les deux moitiés, et l'option conteneur se barre quand le
   daemon manque au lieu de s'offrir.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
   le profil `forge` : runner Gitea officiel, label `elixir` = la même image que le stage

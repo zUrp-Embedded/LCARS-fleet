@@ -82,7 +82,7 @@ EOF
 }
 
 @test "auth-ok: a missing CLI answers 4 — NOT INSTALLED, distinct from logged out" {
-  # TWO REASONS TO ANSWER NO, AND THEY NEED DIFFERENT GESTURES. The box installs neither `gh` nor
+  # TWO REASONS TO ANSWER NO, AND THEY NEED DIFFERENT GESTURES. The container installs neither `gh` nor
   # `glab` (`10-packages.sh`), so "absent" is the majority case on a fresh machine — and telling
   # that operator to run `gh auth login` sends them looking for a setting on a binary they do not
   # have. `glab` is genuinely absent from this test's PATH, which is exactly the state under test.

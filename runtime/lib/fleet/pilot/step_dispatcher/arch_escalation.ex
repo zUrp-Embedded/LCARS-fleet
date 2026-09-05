@@ -178,7 +178,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   # WHY, and the architect reads that rather than a cause that claims more than the rail knows.
   # `detail` is the chief rung's own verdict (`:exception_pass_disabled`, `:exception_pass_spent`,
   # `{:exception_pass_undispatchable, why, _}`): the architect must tell « the pass failed » from
-  # « the pass is not armed on this box ».
+  # « the pass is not armed on this container ».
   defp merge_blocked_cause(:conflict, {:conflict_rework_exhausted, rounds, detail}),
     do:
       "conflit git, et le producteur a dépensé ses #{rounds} passe(s) de rework-conflit sans " <>
@@ -285,7 +285,7 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   defp merge_blocked_gesture(_other), do: " Le système n'y touche PAS."
 
   defp gray_zone_detail(:verdict_pass_disabled),
-    do: "la passe d'arbitrage du gatekeeper n'est PAS armée sur cette boîte."
+    do: "la passe d'arbitrage du gatekeeper n'est PAS armée sur ce conteneur."
 
   defp gray_zone_detail(:verdict_pass_spent),
     do: "la passe d'arbitrage unique du gatekeeper a déjà été dépensée sans convergence."

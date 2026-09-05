@@ -1,7 +1,7 @@
 ---
 import Site from '../layouts/Site.astro';
 import SectionHead from '../components/SectionHead.astro';
-const sections = [{ id: 'poser', label: 'Poser la boîte' }, { id: 'projet', label: 'Faire entrer un projet' }, { id: 'etendre', label: 'Étendre le catalogue' }];
+const sections = [{ id: 'poser', label: 'Poser le conteneur' }, { id: 'projet', label: 'Faire entrer un projet' }, { id: 'etendre', label: 'Étendre le catalogue' }];
 ---
 <Site title="LCARS — Mettre en route" current="/mettre-en-route/" sections={sections}>
 
@@ -10,7 +10,7 @@ const sections = [{ id: 'poser', label: 'Poser la boîte' }, { id: 'projet', lab
       <div>
         <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
         <p class="eyebrow">Mettre en route</p>
-        <h1>Une boîte, votre forge,<br>et <em>rien à confier à personne</em>.</h1>
+        <h1>Un conteneur, votre forge,<br>et <em>rien à confier à personne</em>.</h1>
         <p class="lede">LCARS tourne chez vous, dans un conteneur, contre une forge qui vous
         appartient. Il n'y a pas de service à souscrire, pas de dépôt à téléverser, pas de compte à
         créer ailleurs. Ce qui sort de votre machine, c'est ce que <b>vous</b> décidez de publier —
@@ -21,12 +21,12 @@ const sections = [{ id: 'poser', label: 'Poser la boîte' }, { id: 'projet', lab
     </header>
 
     <section id="poser">
-      <SectionHead id="poser" title="Poser la boîte" cap="deux choses, dans cet ordre" />
+      <SectionHead id="poser" title="Poser le conteneur" cap="deux choses, dans cet ordre" />
       <p class="intro">L'installation est un conteneur à construire et à démarrer. Le vrai geste,
       c'est le second : lui donner l'adresse de votre forge et un jeton. Sans forge, LCARS démarre
       et vous le dit franchement — il ne simule rien.</p>
       <div class="ladder">
-        <div class="step"><div class="k" style="background:var(--amber)"><b>1</b><i>la boîte</i></div>
+        <div class="step"><div class="k" style="background:var(--amber)"><b>1</b><i>le conteneur</i></div>
           <div class="t"><b>Vous construisez et vous démarrez</b>
             <span>Un conteneur, deux commandes. Dedans : le moteur, les consoles, et les
             outils dont les agents ont besoin. Vous y entrez en SSH <b>en tant que vous</b> — les
@@ -42,7 +42,7 @@ const sections = [{ id: 'poser', label: 'Poser la boîte' }, { id: 'projet', lab
             « tout va bien » globalement : elle nomme ce qu'elle a mesuré, et ce qu'elle n'a
             <b>pas pu</b> mesurer.</span></div></div>
       </div>
-      <p class="note">Rien n'est irréversible : la boîte se détruit et se reconstruit sans toucher
+      <p class="note">Rien n'est irréversible : le conteneur se détruit et se reconstruit sans toucher
       à votre forge, qui vit à côté et garde tout.</p>
     </section>
 

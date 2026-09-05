@@ -102,7 +102,7 @@ SH
   # ne se voit sur aucune machine de dev.
   SRC="$BATS_TEST_DIRNAME/../../docker/bench/bench-forge-bootstrap.sh"
   [ -f "$SRC" ]
-  grep -q -- "--image \"\$BOX_IMAGE\"" "$SRC"
+  grep -q -- "--image \"\$CONTAINER_IMAGE\"" "$SRC"
   refute grep -q -- "--repo \"\$REPO_ROOT/fleet\"" "$SRC"
   # ET SANS `--catalogue` : nommer l'arbre de l'hote le fait monter dans le conteneur, ou la porte
   # tourne en `nobody`. Ca passe la ou le clone est world-readable et ca echoue ailleurs — une

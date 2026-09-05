@@ -107,7 +107,7 @@ defmodule Fleet.MCP.PodSocketAcceptor do
   # ferme. Sans ce chmod, c'est la seule porte de la famille sans serrure posee ici — le socket de
   # controle fait du `chmod 0600` une CONDITION DE READINESS, le sock-dir tmux est cree
   # `install -d -m 0700` — et celle-ci s'en remet aux permissions du home. Un home lisible par le
-  # groupe suffit alors a rendre la socket MCP d'un pod joignable par un autre humain de la boite,
+  # groupe suffit alors a rendre la socket MCP d'un pod joignable par un autre humain du conteneur,
   # et cette socket EST le canal d'identite du pod (`pod_id` = etat de l'acceptor, jamais lu sur le
   # fil).
   #

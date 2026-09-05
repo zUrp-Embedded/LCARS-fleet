@@ -10,10 +10,10 @@
 #
 # TROIS PIEGES, UN PAR TEMOIN DE REFUS :
 #   * une porte qui MEURT n'ecrit rien sur stdout. Sans garde, le module lit zero ligne et rend
-#     « aucun projet » — le mot d'une boite convergee, sur une panne franche.
+#     « aucun projet » — le mot d'un conteneur converge, sur une panne franche.
 #   * une porte dont le FORMAT derive (un mot nouveau) doit se voir au premier run. Un `case` sans
 #     branche par defaut la lirait comme un silence.
-#   * une boite SANS forge n'est pas une boite en derive. Il n'y a pas d'autorite a suivre : on le
+#   * un conteneur SANS forge n'est pas un conteneur en derive. Il n'y a pas d'autorite a suivre : on le
 #     dit, et on sort conforme.
 #
 # La porte est simulee par un `lcars` pose dans le LCARS_LINK_DIR du test : aucun release n'est
@@ -128,7 +128,7 @@ SH
 }
 
 @test "apply: un projet en echec N'ARRETE PAS les autres" {
-  # LE POINT DU LOT. Une boite a laquelle il manque neuf projets sur dix doit en recuperer neuf.
+  # LE POINT DU LOT. Un conteneur auquel il manque neuf projets sur dix doit en recuperer neuf.
   # Le module rend un echec (exit 1) ET porte les deux lignes : le verdict global ne mange pas le
   # detail de ce qui a marche.
   fake_door 1 <<'EOF'
@@ -183,8 +183,8 @@ EOF
 }
 
 @test "sans forge : ce n'est pas une derive, c'est une absence d'autorite" {
-  # Une boite hors ligne rend conforme. La compter en drift ferait crier le doctor sur toutes les
-  # boites qui n'ont jamais recu « box config ».
+  # Un conteneur hors ligne rend conforme. Le compter en drift ferait crier le doctor sur toutes les
+  # conteneurs qui n'ont jamais recu « container config ».
   export FORGE_BASE_URL=""
   fake_door 0 <<< "RIEN rien"
   run bash "$MOD" check

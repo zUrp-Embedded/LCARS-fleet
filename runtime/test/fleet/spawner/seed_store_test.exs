@@ -91,8 +91,8 @@ defmodule Fleet.Spawner.SeedStoreTest do
   end
 
   test "slugify: RE-CONFRONTE au binaire vendor 2.1.220 (temoins mesures, pas rejoues)" do
-    # Le contrat etait gele contre la v2.1.183 et jamais re-confronte depuis. Le binaire d'une
-    # boite est en 2.1.220 — trois versions plus loin — et une derive ici ne casse RIEN
+    # Le contrat etait gele contre la v2.1.183 et jamais re-confronte depuis. Le binaire d'un
+    # conteneur est en 2.1.220 — trois versions plus loin — et une derive ici ne casse RIEN
     # visiblement : le resume pointe vers un repertoire vide, donc un pod repart sans sa memoire
     # au lieu d'echouer. C'est la moitie muette du contrat vendor (BL-6-44).
     #

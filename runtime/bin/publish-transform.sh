@@ -137,7 +137,7 @@ GIT_CONFIG_COUNT=1 \
   git clone "$FORGE/$REPO.git" "$OUT_DIR"
 
 # ⚠ `--global`, ET PAS `--get` NU : sans lui git resout local > global, et lance depuis un depot qui
-# porte un `[user]` local le script prendrait CETTE identite au lieu de celle de la boite.
+# porte un `[user]` local le script prendrait CETTE identite au lieu de celle du conteneur.
 HUMAN_NAME="$(git config --global --get user.name 2>/dev/null || true)"
 HUMAN_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
 

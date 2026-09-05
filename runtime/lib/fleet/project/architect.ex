@@ -103,7 +103,7 @@ defmodule Fleet.Project.Architect do
 
   A keeper that also creates is not a keeper, it is a second onboarding path with no human in it.
   Its only caller is the poller, which iterates the ORG SCAN: every repo of the fleet org, whether
-  or not the human running this fleet ever asked for it. On a box with two humans, one who created
+  or not the human running this fleet ever asked for it. On a container with two humans, one who created
   a single project ends up running a delegate for a project SOMEBODY ELSE created and that he never
   opened — as many architects as the org has repos, most of them wanted by nobody.
 
@@ -112,7 +112,7 @@ defmodule Fleet.Project.Architect do
   presence proves *someone* onboarded, never *this* human. The test was only ever valid one way:
   absence proves nobody asked, presence proves nothing.
 
-  So the record consulted here is the one the box already keeps, per human, on disk: the pod
+  So the record consulted here is the one the container already keeps, per human, on disk: the pod
   snapshot written at spawn, under the running human's own home. It exists because `ensure/2` ran
   for THIS human — which happens on the four deliberate verbs (`create`, `import`, `open`,
   `project_adopt`) and nowhere else. A fleet restart or a crash leaves it in place, which is
@@ -136,7 +136,7 @@ defmodule Fleet.Project.Architect do
   end
 
   @doc """
-  Whether THIS box holds an architect on record for `repo` — the durable pod snapshot the spawner
+  Whether THIS container holds an architect on record for `repo` — the durable pod snapshot the spawner
   writes under the running human's home. Per-human by construction: the BEAM runs as the human, so
   the state root resolves in their own `~/.lcars`, and no other human's record is reachable from it.
 

@@ -147,7 +147,7 @@ EOF
 }
 
 @test "AUCUN SECRET: quand un jeton EST fourni, il ne passe pas en argv de curl" {
-  # La contrepartie du precedent. `FORGE_TOKEN` reste accepte pour une boite dont la forge exige une
+  # La contrepartie du precedent. `FORGE_TOKEN` reste accepte pour un conteneur dont la forge exige une
   # session en lecture — mais un en-tete construit en `-H` se lit dans `/proc/<pid>/cmdline`, par
   # tout le monde, pendant toute la duree de l'appel, dans le process le plus privilegie qui soit.
   local n
@@ -170,7 +170,7 @@ EOF
 
 @test "IDEMPOTENCE: marqueur au MEME SHA — les verbes MAGASIN sont sautes, APT REJOUE" {
   # LE CAS DU REBUILD : le marqueur (magasin, volume externe) survit au conteneur, /usr non. Une
-  # v1 sautait le manifeste ENTIER sur marqueur courant — apres rebuild, la boite se disait
+  # v1 sautait le manifeste ENTIER sur marqueur courant — apres rebuild, le conteneur se disait
   # convergee avec un /usr nu. Deux temoins en un : apt est INVOQUE malgre le marqueur courant,
   # et l'installeur (verbe magasin) ne l'est PAS.
   # ⚠ l'eco vient du CHEMIN servi par stub_forge (python.yaml), et list_under attend des entrees
@@ -286,7 +286,7 @@ EOS
 }
 
 @test "EGRESS: le marqueur .applied est pose MEME SANS egress_hosts — le silence nominal est estampille" {
-  # Une v1 posait le marqueur dans apply_egress : une boite qui n'a jamais rien ouvert (le cas
+  # Une v1 posait le marqueur dans apply_egress : un conteneur qui n'a jamais rien ouvert (le cas
   # NOMINAL) ne l'avait donc jamais, et « aucun hote » recouvrait de nouveau les pannes que le
   # marqueur separe. Ce temoin epingle : convergence verte SANS hotes => marqueur pose quand meme.
   stub_forge "$(printf 'kind: ecosystem_enable\necosystem: python\n' | base64 -w0)"

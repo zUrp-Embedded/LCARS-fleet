@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/console-landing.sh
 # AUTHOR: consultant
 # STARDATE: 2026-07-31
-# STATUS: lance le DECK de la boite (page unique, onglets verticaux, etat sonde) — identifie par la forge
+# STATUS: lance le DECK du conteneur (page unique, onglets verticaux, etat sonde) — identifie par la forge
 #
 # ⚠ SURTOUT PAS `ttyd -I` POUR SERVIR CETTE PAGE : `-I` REMPLACE l'index.html de ttyd, or cet index
 # EST le client xterm.js. La page ne s'ajouterait pas a la console, elle la DETRUIRAIT. Le deck a
@@ -32,7 +32,7 @@ getent group "$CONSOLE_GROUP" >/dev/null 2>&1 || {
 DECK_USER="${LCARS_DECK_USER:-lcars-system}"
 DECK_GROUP="${LCARS_DECK_GROUP:-$DECK_USER}"
 getent passwd "$DECK_USER" >/dev/null 2>&1 || {
-  echo "console-landing.sh: compte $DECK_USER absent — le deck n'a pas d'identite a lui (« provision apply --only 21-service-accounts » le pose ; dans la boite, c'est l'image qui le porte)" >&2
+  echo "console-landing.sh: compte $DECK_USER absent — le deck n'a pas d'identite a lui (« provision apply --only 21-service-accounts » le pose ; dans le conteneur, c'est l'image qui le porte)" >&2
   exit 1
 }
 getent group "$DECK_GROUP" >/dev/null 2>&1 || {

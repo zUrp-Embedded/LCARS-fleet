@@ -491,7 +491,7 @@ BLOC
   # rejoué depuis `$HELPERS_DIR/deploy/provision` fait tomber `repo_root()` sur `$HELPERS_DIR`
   # — c'est là que `prov_delivery` cherche son discriminant. Sans ce bloc, une machine installée
   # par PAQUET s'y déclarerait SOURCE au rejeu : `15-toolchain` et `16-node` exigeraient des
-  # compilateurs sur une boîte dont c'est justement le contraire qui a été décidé.
+  # compilateurs sur un conteneur dont c'est justement le contraire qui a été décidé.
   #
   # LES DEUX SENS, PARCE QU'UN TAMPON QUI SURVIT À SA CAUSE MENT. Une machine réinstallée depuis un
   # clone après l'avoir été depuis un paquet garderait sinon un discriminant « binaire » que plus

@@ -8,7 +8,7 @@
 # CLASSE DE CONFIANCE : c'est le CYCLE DE VIE qui se partage, pas le process.
 #
 # ⚠ LE PIEGE, ET IL EST MUET. Une socket residuelle laissee par un process tue fait echouer `bind`
-# en EADDRINUSE — et la boite se retrouve sans porte, sans qu'une ligne dise pourquoi. On delie AVANT.
+# en EADDRINUSE — et le conteneur se retrouve sans porte, sans qu'une ligne dise pourquoi. On delie AVANT.
 
 import grp
 import os

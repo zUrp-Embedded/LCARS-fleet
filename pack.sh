@@ -140,8 +140,8 @@ say "release attestée : ${_libs[0]##*/}, build $_built"
 # `16-node` lit ce discriminant, une cible qui installe un paquet ne pose PLUS node : elle n'a donc
 # aucun moyen de bâtir la doc, et `44-media` échouerait sur « npm absent ».
 #
-# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni une
-# boîte de prod (elle a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
+# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni un
+# conteneur de prod (il a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
 # bâtir) — un troisième état que personne n'a décrit, avec un DRIFT que l'apply ne peut pas
 # converger.
 #

@@ -43,7 +43,7 @@ forge_service_known() {
 # ─── MONTER, OU CONSOMMER — L'AXE FORGE (40-RAILS.md § 13) ──────────────────────────────────────
 #
 # ⚠ CE MODULE MONTAIT EN DUR, et c'était le raccourci que le § 13 nomme : « forge montée » et
-# « déploiement jetable » coïncidaient parce que `--bench` était boîte-seulement. Ils ne coïncident
+# « déploiement jetable » coïncidaient parce que `--bench` était conteneur-seulement. Ils ne coïncident
 # pas en général, et le contre-exemple est ce rail-ci — un POSTE DE TRAVAIL qui monte sa forge est un
 # déploiement de travail, pas un banc.
 #

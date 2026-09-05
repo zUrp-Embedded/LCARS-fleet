@@ -8,7 +8,7 @@
 # SUPPRIME. C'est legitime — le materiel local est un cache re-clonable — mais exactement une
 # condition rend la suppression sure, et c'est que la lecture de la forge ait REUSSI. Une forge
 # injoignable rend une liste vide, et une liste vide se lit « plus rien n'est installe ». Le module
-# effacerait alors tous les catalogues de la boite en annoncant qu'il converge.
+# effacerait alors tous les catalogues du conteneur en annoncant qu'il converge.
 #
 # La forge est simulee par un `curl` et un `git` poses en tete de PATH : ces temoins n'ouvrent aucune
 # socket et ne clonent rien de reel. Ce qui est mesure est la DECISION du module, qui est tout ce

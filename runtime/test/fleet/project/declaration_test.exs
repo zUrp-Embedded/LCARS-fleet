@@ -147,7 +147,7 @@ defmodule Fleet.Project.DeclarationTest do
 
   test "6-125: no card declared at all → the catalogue default, never a refusal", %{tmp_dir: tmp} do
     # La contre-partie du refus, et elle porte : la regle ne mord QUE sur un override explicite.
-    # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur une boite dont le
+    # Etendue au defaut du catalogue, elle bloquerait tout onboarding sur un conteneur dont le
     # catalogue ne tient pas ensemble — un catalogue casse se repare la, pas dans chaque projet.
     assert :ok = ProjectDeclaration.write(tmp, justification: "x")
 

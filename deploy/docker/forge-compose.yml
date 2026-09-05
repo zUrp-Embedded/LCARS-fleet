@@ -12,7 +12,7 @@
 #
 # Elle se monte en une commande et se jette sans regret. Elle vit dans son PROPRE projet compose
 # (`-p lcars-devforge` en autonome, `-p <projet>forge` sous `bench-up.sh`), donc ses volumes lui
-# appartiennent et AUCUNE commande de `box` ne peut les atteindre — c'est tout l'intérêt.
+# appartiennent et AUCUNE commande de `container` ne peut les atteindre — c'est tout l'intérêt.
 #
 # LANCER :   docker compose -f deploy/docker/forge-compose.yml -p lcars-devforge up -d
 # DÉTRUIRE : docker compose -f deploy/docker/forge-compose.yml -p lcars-devforge down -v

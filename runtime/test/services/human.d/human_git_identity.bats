@@ -9,7 +9,7 @@
 # attribue a un fantome. L'adresse qui mappe est celle du compte forge, et c'est la SEULE.
 #
 # CE QU'ILS ONT COUTE. Le bloc vivait dans l'entrypoint et posait l'identite de `LCARS_HUMAN` —
-# l'unique humain de la boite a l'epoque. `identity-v2` (b99d035f2) a fait de l'entree du conteneur
+# l'unique humain du conteneur a l'epoque. `identity-v2` (b99d035f2) a fait de l'entree du conteneur
 # le SYSADMIN : la substitution `LCARS_HUMAN` -> `LCARS_ADMIRAL` a suivi mecaniquement, et l'identite
 # a atterri sur le seul compte qui ne commite jamais. Le commentaire au-dessus continuait de dire
 # « l'email du compte forge de l'humain » — vrai, a cote d'un code qui ne le faisait plus, et le boot
@@ -116,7 +116,7 @@ account() { # account <full_name> <email>
 }
 
 @test "PAS de compte forge : MUET des deux cotes — ce fait appartient a 63-forge-tokens" {
-  # Le cas de `root` sur une vraie boite. Deux voix sur un meme fait divergent le jour ou l'une
+  # Le cas de `root` sur un vrai conteneur. Deux voix sur un meme fait divergent le jour ou l'une
   # des deux change ; `63-forge-tokens` rapporte deja « compte forge absent pour l'humain X ».
   echo '{"errors":["user does not exist"]}' > "$FORGE_PAYLOAD"
   run_fn 'check_git_identity'
@@ -138,7 +138,7 @@ account() { # account <full_name> <email>
 @test "TEMOIN STRUCTUREL : l'entrypoint ne pose plus d'identite git" {
   # La regression exacte : un bloc d'identite dans l'entrypoint vise UN compte — celui de l'entree
   # du conteneur — et rate par construction tout humain enrole apres le boot.
-  EP="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  EP="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   refute grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }

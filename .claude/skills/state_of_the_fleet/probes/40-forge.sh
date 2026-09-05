@@ -37,7 +37,7 @@ probe_configured() {
   if [[ -z "$FORGE" ]]; then
     # `inactive`, NOT `unreachable`, et la distinction a ete apprise sur deux specimens : mon
     # instrument n'est pas casse, il n'y a simplement RIEN de declare a atteindre. Marquer ce cas
-    # aveugle faisait basculer tout le rapport en AVEUGLE sur une boite parfaitement saine dont
+    # aveugle faisait basculer tout le rapport en AVEUGLE sur un conteneur parfaitement sain dont
     # personne n'a configure de forge — une fausse alarme deguisee en constat.
     emit "forge.configured" "$PLANE" "inactive" "local" 'test -n "$FORGE_BASE_URL"' \
       "aucune forge declaree (FORGE_BASE_URL vide ou absente)" \
@@ -152,7 +152,7 @@ probe_human_account() {
 # `*.gitea_token` d'un repertoire : deux lectures qui ne repondent plus a la question posee. Le BEAM
 # ne lit plus ces fichiers, il DEMANDE a `roles.sock` ; et apres la fermeture des modes, un uid
 # humain ne pourra meme plus traverser le repertoire. La sonde aurait donc rendu « aucun credential
-# accessible » sur une boite parfaitement capable de pousser — un rouge faux, dans un rapport dont
+# accessible » sur un conteneur parfaitement capable de pousser — un rouge faux, dans un rapport dont
 # tout l'objet est de dire l'etat exact.
 #
 # CE QUI SE MESURE MAINTENANT EST LA PORTE, ET C'EST LA MEME CLASSE DE MESURE QU'AVANT : une

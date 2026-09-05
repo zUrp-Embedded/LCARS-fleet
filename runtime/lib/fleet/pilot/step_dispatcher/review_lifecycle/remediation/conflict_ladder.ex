@@ -288,7 +288,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.Remediation.ConflictLadder 
     # Self-gated (A1): BOTH callers land here — budget exhausted, and tier-0's all-semantic
     # shortcut — so the flag is read at ONE point. Off → the honest immediate escalation, with a
     # reason that NAMES the disabled rung: an arch reading the freeze must be able to tell "the
-    # pass failed" from "the pass is not armed on this box".
+    # pass failed" from "the pass is not armed on this container".
     if exception_pass_enabled?() do
       do_exception_stage(pr_number, head, reason, ctx, producer_rounds)
     else

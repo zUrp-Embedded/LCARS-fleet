@@ -25,7 +25,7 @@ Quatre choses, et ta distribution a presque certainement les trois premières :
 
 | | pourquoi |
 |---|---|
-| **docker** | tout tourne en conteneurs — la boîte, la forge, le runner |
+| **docker** | tout tourne en conteneurs — le conteneur LCARS, la forge, le runner |
 | **curl** | l'amorçage parle à la forge en HTTP |
 | **python3** | il lit les réponses JSON de la forge |
 | **WSL 2** | sous Windows seulement — WSL 1 n'a pas de namespaces, donc pas de pods |
@@ -39,7 +39,7 @@ déjà `claude` sur cette machine, tes credentials sont repris automatiquement d
 
 **Pendant le build il faut du réseau**, sur trois fronts : Docker Hub (images de base), hex.pm
 (dépendances Elixir) et `claude.ai` (le binaire de l'agent). Un hoquet sur l'un des trois fait
-échouer le build — bruyamment, sans laisser de boîte à moitié installée.
+échouer le build — bruyamment, sans laisser de conteneur à moitié installé.
 
 ---
 
@@ -49,11 +49,11 @@ déjà `claude` sur cette machine, tes credentials sont repris automatiquement d
 tar xzf lcars-fleet-beta.tar.gz
 cd lcars-fleet
 
-bash install.sh --box --bench                 # forge + boîte + runner, un seul geste
+bash install.sh --container --bench                 # forge + conteneur + runner, un seul geste
 ```
 
 `install.sh` est **la** porte, et la seule. Elle regarde ce que ta machine permet, te demande ce que
-tu veux quand les deux sont possibles, annonce ce que ça prend, puis délègue. `--box` dit « LCARS
+tu veux quand les deux sont possibles, annonce ce que ça prend, puis délègue. `--container` dit « LCARS
 tourne dans un conteneur », `--bench` dit « et fabrique-moi les annexes au lieu d'exiger que je les
 aie déjà ».
 
@@ -61,12 +61,12 @@ aie déjà ».
 n'est pas une installation système : rien n'est posé hors de ton clone et de docker. Tout ce que
 `sudo` sert ici, c'est à joindre le daemon.
 
-`build` produit **deux** images : la boîte que tu vas faire tourner, et le jumeau toolchain que son
+`build` produit **deux** images : le conteneur que tu vas faire tourner, et le jumeau toolchain que son
 runner CI sert. Les deux sortent du même Dockerfile, donc la seconde coûte une étiquette, pas un
 build.
 
 La seconde commande, c'est toute l'installation. Elle crée une forge git, l'attend, provisionne les
-comptes et les teams, minte les jetons, démarre la boîte, enregistre un runner CI, et imprime ce
+comptes et les teams, minte les jetons, démarre le conteneur, enregistre un runner CI, et imprime ce
 qu'elle a monté. Elle est **rejouable** : relancée, elle converge au lieu de dupliquer.
 
 Quand c'est fini, elle imprime un bloc de ce genre — ce sont tes points d'entrée :
@@ -75,7 +75,7 @@ Quand c'est fini, elle imprime un bloc de ce genre — ce sont tes points d'entr
 banc PRET
   forge     : http://192.168.1.42:21000   (humain lcars / toto32toto32)
   deck      : http://192.168.1.42:20999
-  boite     : lcars-nuit-lcars-1   ssh 192.168.1.42:2222
+  conteneur : lcars-nuit-lcars-1   ssh 192.168.1.42:2222
   runner    : ENREGISTRE (1 vu(s) par la forge)
   ecoute    : 0.0.0.0 — OUVERT SUR LE RESEAU. …
   destruire : bench-down.sh --project lcars-nuit
@@ -96,7 +96,7 @@ Deux comptes existent, et ils ne sont **pas** interchangeables.
 | compte | mot de passe | ce que c'est |
 |---|---|---|
 | **`lcars`** | `toto32toto32` | **l'humain de la flotte.** C'est celui que tu utilises. Il possède les projets, parle aux agents, et a une console sur le tableau de bord. |
-| **`admiral`** | `toto1234` | **l'administrateur système.** Il possède la boîte (sudo) et a fondé la forge. Il fait tourner la machine ; il ne fait pas tourner la flotte — démarrer une flotte sous lui est refusé par construction. |
+| **`admiral`** | `toto1234` | **l'administrateur système.** Il possède le conteneur (sudo) et a fondé la forge. Il fait tourner la machine ; il ne fait pas tourner la flotte — démarrer une flotte sous lui est refusé par construction. |
 
 ⚠ **Ces mots de passe sont des défauts de test, écrits en clair dans ce README — et le banc écoute
 sur `0.0.0.0`, donc tout ce qui atteint ta machine l'atteint.** C'est délibéré : l'intérêt de cette
@@ -104,7 +104,7 @@ beta, c'est qu'un ami sur le même réseau ouvre le tableau de bord depuis son p
 un choix pour un réseau de confiance, et rien d'autre. Pour le refermer sur cette machine seule :
 
 ```bash
-bash install.sh --box --bench -- --bind 127.0.0.1
+bash install.sh --container --bench -- --bind 127.0.0.1
 ```
 
 ⚠ Ce qui suit `--` part **verbatim** au fournisseur de banc : c'est là que vivent `--bind`,
@@ -126,25 +126,25 @@ Un Gitea complet. Tes projets, leurs pull requests, leurs runs de CI. Connexion 
 
 **SSH** — `ssh lcars@<ton-ip> -p 2222`
 
-La même boîte, dans un vrai terminal. De là :
+Le même conteneur, dans un vrai terminal. De là :
 
 ```bash
 fleet start        # démarrer la flotte
 fleet status       # ce qu'elle fait
-lcars catalogue list  # quels catalogues métier cette boîte porte
+lcars catalogue list  # quels catalogues métier ce conteneur porte
 ```
 
 ### Installer le catalogue de démo
 
-À la sortie de la boîte tu as un catalogue, `fleet`. Un second, `web-demo`, attend sur la forge sous
+À la sortie du conteneur tu as un catalogue, `fleet`. Un second, `web-demo`, attend sur la forge sous
 forme de dépôt — `catalogue list` l'affiche en `disponible`. L'installer tient en une commande :
 
 ```bash
 lcars catalogue install web-demo
 ```
 
-Ça crée son organisation sur la forge, ses comptes de rôle, ses teams, et pose son matériel sur la
-boîte. C'est un geste **admin** : `lcars` peut le jouer parce que ce banc en fait un admin de la
+Ça crée son organisation sur la forge, ses comptes de rôle, ses teams, et pose son matériel sur le
+conteneur. C'est un geste **admin** : `lcars` peut le jouer parce que ce banc en fait un admin de la
 forge, et le runtime lit ce fait sur la forge plutôt que dans un drapeau local.
 
 Une fois installé, ses cartes apparaissent à côté de celles de `fleet` quand un agent te propose le
@@ -175,7 +175,7 @@ Le runner est déjà enregistré, donc un projet dont la carte exige une CI vert
 deploy/docker/bench/bench-down.sh --project lcars-nuit
 ```
 
-Retire la boîte, la forge, le runner et leurs volumes. Puis, pour récupérer l'espace de build :
+Retire le conteneur, la forge, le runner et leurs volumes. Puis, pour récupérer l'espace de build :
 
 ```bash
 docker builder prune -af
@@ -208,13 +208,13 @@ Dit franchement, parce qu'un outil qui cache ses bords fait perdre du temps :
 La pile est faite pour dire ce qui manque plutôt que pour avoir l'air en bonne santé :
 
 ```bash
-deploy/box -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
-deploy/box -p lcars-nuit logs     # le récit que la boîte fait de son propre boot
+deploy/container -p lcars-nuit doctor   # ce qui est provisionné, ce qui a dérivé, et le geste qui répare
+deploy/container -p lcars-nuit logs     # le récit que le conteneur fait de son propre boot
 ```
 
-⚠ `-p lcars-nuit` n'est pas optionnel ici. `deploy/box` vise par défaut un projet appelé `lcars`, et
+⚠ `-p lcars-nuit` n'est pas optionnel ici. `deploy/container` vise par défaut un projet appelé `lcars`, et
 le banc ci-dessus en crée un appelé `lcars-nuit` — sans le drapeau, tu interrogerais un déploiement
-qui n'existe pas. (`install.sh --box --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
+qui n'existe pas. (`install.sh --container --bench -- --project <nom>` le change ; la ligne de destruction qu'il imprime
 porte toujours le bon.)
 
 **Une PR bloquée par sa CI se répare depuis la PR.** Le runner joue le `ci.yml` du commit testé —
@@ -228,7 +228,7 @@ pour réparer, donc il ne les avale jamais.
 
 ## Ce qu'il y a dedans
 
-- **Une boîte** — Debian, un conteneur, qui fait tourner le runtime de la flotte (Elixir/OTP) et un
+- **Un conteneur** — Debian, qui fait tourner le runtime de la flotte (Elixir/OTP) et un
   tableau de bord web.
 - **Une forge** — Gitea, dans son propre conteneur, avec les organisations, teams et comptes machine
   dont la flotte a besoin.

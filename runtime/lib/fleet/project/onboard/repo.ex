@@ -118,7 +118,7 @@ defmodule Fleet.Project.Onboard.Repo do
         :ok
 
       # LE MEME FAIT QUE `catalogue_not_installed`, MESURE A SA SOURCE. Le refus local lit le
-      # materiel present sur la boite ; celui-ci demande a la forge si l'org existe. Les deux ne
+      # materiel present sur le conteneur ; celui-ci demande a la forge si l'org existe. Les deux ne
       # peuvent diverger qu'entre les deux moities d'un install interrompu, et c'est precisement ce
       # cas-la qu'il faut nommer : sans lui l'appelant recevrait, deux gestes plus tard, un « user
       # redirect does not exist [name: web] / GetOrgByName » dont personne ne remonte jusqu'a « le
@@ -136,10 +136,10 @@ defmodule Fleet.Project.Onboard.Repo do
   @doc false
   @spec half_install_gesture(String.t()) :: String.t()
   def half_install_gesture(org) do
-    "the catalogue '#{org}' has its material on this box but its org does NOT exist on the forge — " <>
+    "the catalogue '#{org}' has its material on this container but its org does NOT exist on the forge — " <>
       "half an install. Nothing can be onboarded into it until the forge carries the org and its " <>
       "role accounts, and ONE gesture lays both: `lcars catalogue install #{org}`, played by an " <>
-      "admin inside the box. Replaying it is the fix — it is convergent, and it is also how the " <>
+      "admin inside the container. Replaying it is the fix — it is convergent, and it is also how the " <>
       "material got here. `lcars catalogue list` shows what the forge actually carries."
   end
 

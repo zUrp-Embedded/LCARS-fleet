@@ -12,12 +12,12 @@ Lance `~/.claude/skills/system-issues/list.sh`. Deux lectures, dans l'ordre :
 2. **les PR ouvertes vers `sysadmin`** — les demandes d'outillage des pods qui attendent la
    signature d'un admin (l'approbation se fait sur la forge, pas ici).
 
-Le script fait **deux lectures d'un dépôt public**, avec le **jeton système** de la boîte
+Le script fait **deux lectures d'un dépôt public**, avec le **jeton système** du conteneur
 (`/opt/lcars/var/tokens/<compte-système>.gitea_token`) — jamais le master. Mesuré : `fleet/lcars` est
 public, et ses deux points d'entrée répondent même en anonyme. Aucune de ces lectures n'est
 site-admin, donc aucune n'a besoin d'une autorité.
 
 Ce skill ne vit QUE dans le `~/.claude` du siège (posé par le provisioning, jamais par le
-catalogue). Ce n'est pas un privilège : **aucun siège n'en a**. La seule autorité de cette boîte est
+catalogue). Ce n'est pas un privilège : **aucun siège n'en a**. La seule autorité de ce conteneur est
 le drapeau `is_admin` de la forge, demandé à l'instant du geste — et lire une boîte de réception
 n'est pas un geste d'autorité.

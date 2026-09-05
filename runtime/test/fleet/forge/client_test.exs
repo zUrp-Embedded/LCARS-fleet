@@ -940,7 +940,7 @@ defmodule Fleet.Forge.ClientTest do
     # ⚠ CE TEMOIN GARDE UNE SUPPRESSION, ET C'EST LE SEUL A LE FAIRE.
     #
     # Sans `:token`, `:token_file` ni `:account`, ce module lisait `~/.gitea_token`. Le BEAM tourne
-    # sous l'uid de l'humain de fleet : ce chemin resout vers son jeton PERSONNEL. Une boite dont le
+    # sous l'uid de l'humain de fleet : ce chemin resout vers son jeton PERSONNEL. Un conteneur dont le
     # cablage systeme manquait ne tombait donc pas en panne — elle agissait sur la forge sous
     # l'identite d'une personne, avec ses droits, et la forge voyait cette personne faire ce que le
     # systeme faisait.

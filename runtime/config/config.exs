@@ -22,7 +22,7 @@ end
 # GitWand kill-switch (tier 0 ONLY: deterministic conflict diagnosis + trivial auto-resolution —
 # the jury still re-judges the pushed head). OFF by default and stated HERE rather than left to a
 # `get_env` default: a capability whose only trace is the absence of a line is one an operator
-# cannot discover, and cannot audit as deliberately off. This is an ADMIN setting: the box-wide
+# cannot discover, and cannot audit as deliberately off. This is an ADMIN setting: the container-wide
 # file `/etc/lcars/fleet.json` (`{"conflict_engine": true}`, root-owned, read once at boot by
 # `runtime.exs`) is how it turns on — inherited from the engine's origin project: off at install,
 # the admin opts in. Seams: `:conflict_diagnoser`, `:conflict_applier`.

@@ -104,7 +104,7 @@ defmodule Fleet.Pilot.Poller.Admission do
   @doc """
   The ceiling for THIS project: its declaration if it made one, the fleet default otherwise.
 
-  Per PROJECT, because the counter is: a per-box knob would make `--max-fan 1`, used to watch one
+  Per PROJECT, because the counter is: a per-container knob would make `--max-fan 1`, used to watch one
   pipeline end to end, serialize every other project in the fleet — a brake laid on unrelated work.
   The declaration lives in `<project>/.lcars.json` (see
   `Fleet.Project.Declaration`) because a project can route its tickets through several cards, and a

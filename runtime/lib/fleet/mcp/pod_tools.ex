@@ -413,7 +413,7 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_open" do
-    # vitrine: Relance un projet déjà sur la boîte : remet son architecte debout (idempotent), sans écrire forge ni disque.
+    # vitrine: Relance un projet déjà sur le conteneur : remet son architecte debout (idempotent), sans écrire forge ni disque.
     meta do
       name("Open Project")
 
@@ -878,21 +878,21 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "toolchain_request" do
-    # vitrine: Demande un outil que la boîte n'a pas (compilateur, runtime, cross) ; un humain admin approuve — pas pour une dépendance de projet.
+    # vitrine: Demande un outil que le conteneur n'a pas (compilateur, runtime, cross) ; un humain admin approuve — pas pour une dépendance de projet.
     meta do
       name("Request a Toolchain")
 
       description(
-        "ASK FOR A TOOL THE BOX DOES NOT HAVE — a compiler, a language runtime, a cross " <>
+        "ASK FOR A TOOL THE CONTAINER DOES NOT HAVE — a compiler, a language runtime, a cross " <>
           "toolchain, a system library your build needs. Use it ONLY when you are BLOCKED: you " <>
           "tried, and the tool is absent. Not to tidy an environment you find sparse.\n" <>
           "⚠ THIS IS NOT HOW YOU INSTALL A PROJECT DEPENDENCY. A python module, an npm package, a " <>
           "crate belong to your project's OWN manifest (`pyproject.toml`, `package.json`, " <>
           "`Cargo.toml`): you commit them there and they install in your workspace, with no " <>
           "privilege and no approval. This tool is for what lives OUTSIDE your project and is " <>
-          "shared by EVERY pod on this box — which is exactly why a human has to say yes.\n" <>
+          "shared by EVERY pod on this container — which is exactly why a human has to say yes.\n" <>
           "WHAT HAPPENS: the fleet renders your fields as a declaration, opens a pull request on " <>
-          "the box's manifest, and A HUMAN ADMIN APPROVES OR REFUSES IT. Nothing installs until " <>
+          "the container's manifest, and A HUMAN ADMIN APPROVES OR REFUSES IT. Nothing installs until " <>
           "they do. If you are working a WORK ITEM, it is put on hold and RE-DISPATCHED once the " <>
           "tool is there — you do not wait for it: you stop, and a later pod picks the item up " <>
           "with the tool in place. If you have NO work item (you are anticipating a need rather " <>
@@ -916,13 +916,13 @@ defmodule Fleet.MCP.PodTools do
           "pattern" => "^[a-z][a-z0-9-]{1,31}$",
           "description" =>
             "What this enables, in one token — `python`, `node`, `rust`, `cross-arm64`. It names " <>
-              "the FAMILY, not the package: it is the key the box converges on, and the word the " <>
+              "the FAMILY, not the package: it is the key the container converges on, and the word the " <>
               "human reads first."
         },
         "apt" => %{
           "type" => "object",
           "description" =>
-            "HOST packages, native architecture, into the box's /usr. Monotone: adding one never " <>
+            "HOST packages, native architecture, into the container's /usr. Monotone: adding one never " <>
               "breaks what worked.",
           "properties" => %{
             "packages" => %{
@@ -948,7 +948,7 @@ defmodule Fleet.MCP.PodTools do
               "type" => "string",
               "description" =>
                 "Path, RELATIVE to the installed tree, of the script the SDK ships to set its " <>
-                  "environment. Your pod never runs it: the box plays it once and freezes the " <>
+                  "environment. Your pod never runs it: the container plays it once and freezes the " <>
                   "result. Without it the SDK installs and no pod can use it."
             }
           },
@@ -977,7 +977,7 @@ defmodule Fleet.MCP.PodTools do
           "type" => "array",
           "items" => %{"type" => "string", "pattern" => "^[*a-zA-Z0-9._-]+$"},
           "description" =>
-            "The registry hosts this ecosystem needs — a package manager the box has installed " <>
+            "The registry hosts this ecosystem needs — a package manager the container has installed " <>
               "but cannot reach is a tool you still do not have. Hostnames only: no scheme, no " <>
               "port, no path."
         },
@@ -1008,7 +1008,7 @@ defmodule Fleet.MCP.PodTools do
           "to the human VERBATIM — it states the card's positioning and judges), " <>
           "`jury` (the PR judges the card convenes) and `steps`. Cards marked TECHNIQUE are fleet tooling, " <>
           "not for real projects. It REFUSES rather than hand back an empty offer: no installed " <>
-          "catalogue carries cards (a DEPLOYMENT fact — ask `catalogue_list` what this box serves), " <>
+          "catalogue carries cards (a DEPLOYMENT fact — ask `catalogue_list` what this container serves), " <>
           "or the catalogue was scanned and offers nothing declarable. Never work around a refusal " <>
           "with a card of your own: naming a card IS declaring criticality. No arguments."
       )
@@ -1018,12 +1018,12 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "catalogue_list" do
-    # vitrine: Liste les catalogues que cette boîte sert — l'offre dans laquelle un projet est enrôlé, en amont du choix de la carte.
+    # vitrine: Liste les catalogues que ce conteneur sert — l'offre dans laquelle un projet est enrôlé, en amont du choix de la carte.
     meta do
       name("List Catalogues")
 
       description(
-        "The catalogues this box SERVES — the offer a project is enrolled INTO. Present it BEFORE " <>
+        "The catalogues this container SERVES — the offer a project is enrolled INTO. Present it BEFORE " <>
           "`card_list` during framing: a card belongs to a catalogue, and `project_create` REFUSES a " <>
           "catalogue that is not installed here. Each entry carries `name` (the catalogue's DECLARED " <>
           "identity — pass it as project_create's `catalogue`; it is also its forge org), `bundled` " <>
@@ -1033,7 +1033,7 @@ defmodule Fleet.MCP.PodTools do
           "absent, unparseable or without one: it is served by nothing, the cause is `lcars " <>
           "catalogue verify`'s to name. Do NOT derive this list from " <>
           "`card_list` — a catalogue shipping no card is invisible there. It REFUSES rather than " <>
-          "hand back an empty offer: this box always serves at least the catalogue carried by the " <>
+          "hand back an empty offer: this container always serves at least the catalogue carried by the " <>
           "release, so an empty one means its material is broken, not absent. The result is " <>
           "DISPLAYED as it stands: do not repeat it, answer what was asked of it. No arguments."
       )
@@ -1192,12 +1192,12 @@ defmodule Fleet.MCP.PodTools do
   end
 
   deftool "project_list" do
-    # vitrine: Liste les projets de la boîte : nom, dépôt, carte, état.
+    # vitrine: Liste les projets du conteneur : nom, dépôt, carte, état.
     meta do
       name("List Projects")
 
       description(
-        "LIST the projects on this box — the counterpart of the project gestures you already " <>
+        "LIST the projects on this container — the counterpart of the project gestures you already " <>
           "have. Takes no argument. Returns {\"count\":N,\"projects\":[{\"name\",\"repo\"," <>
           "\"card\",\"card_source\",\"state\"}]}. `card_source` says whether the " <>
           "validation card was DECLARED by a human (`declared`), never declared (`undeclared` — " <>

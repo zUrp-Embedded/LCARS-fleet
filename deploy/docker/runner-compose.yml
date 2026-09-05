@@ -8,7 +8,7 @@
 # │ Le runner CI, comme la forge, appartient à l'OPÉRATEUR et se pose AVANT l'install.       │
 # │ LCARS ne fabrique ni l'un ni l'autre : il consomme une forge (URL + token) et suppose    │
 # │ qu'un runner répond aux labels que ses workflows demandent. Ceci est la recette qui      │
-# │ marche, pas une dépendance de la boîte.                                                  │
+# │ marche, pas une dépendance du conteneur.                                                  │
 # └──────────────────────────────────────────────────────────────────────────────────────────┘
 #
 # POURQUOI SÉPARÉ DE L'INSTANCE — la raison est un mode de défaillance, pas du rangement :

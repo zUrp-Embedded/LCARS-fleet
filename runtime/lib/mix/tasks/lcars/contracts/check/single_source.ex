@@ -362,7 +362,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   Its four siblings in this section read ONE declaration and compare copies against it. This fact
   has no such declaration to read: it is named by `@default_dir` in `Fleet.Credentials.RoleToken`,
   by `PROV_TOKENS_DIR` in `provision-lib.sh`, by `LCARS_PRIVATE_DIR` in `deploy/accept`, and twice
-  more inside the box entrypoint's file paths. **Nobody has said which one prevails**, and choosing
+  more inside the container entrypoint's file paths. **Nobody has said which one prevails**, and choosing
   here would be inventing an arbitration rather than checking one.
 
   The manifest cannot serve as the authority either, and the reason is worth writing down: its row
@@ -401,9 +401,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the provisioning default"},
       {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
-      # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
+      # Lot 6 (2026-09-04) : the container's uid-map and master-token paths used to be carved into the
       # entrypoint as literals; they are now DERIVED from the product module protocol's
-      # `LCARS_PRIVATE_DIR` (box/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
+      # `LCARS_PRIVATE_DIR` (container/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
       # the holder that counts on the product side — the same shape as the provisioning default.
       {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
        "the product module protocol's default"}
@@ -518,7 +518,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
               evidence: [manifest_rel],
               note:
                 "every declaration says #{inspect(expected)} but the manifest creates no such " <>
-                  "directory — the box would come up without it" <> skipped_note(skipped)
+                  "directory — the container would come up without it" <> skipped_note(skipped)
             }
 
           true ->
@@ -704,7 +704,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
     remediation =
       "every `/opt/...` path of LCARS derives from `Fleet.Layout` `@platform_root` — a second " <>
-        "root means half the box installs somewhere the other half never looks"
+        "root means half the container installs somewhere the other half never looks"
 
     # ⚠ CHAQUE ENTREE EST UNE DECISION ECRITE, PAS UN MOTIF. Ce sont les racines de `/opt` qui
     # n'appartiennent PAS a LCARS et vivent dans la meme image.

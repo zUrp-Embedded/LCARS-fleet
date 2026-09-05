@@ -71,7 +71,7 @@ docker_denied_geste() { # docker_denied_geste <socket>
   me="$(id -un)"
   [[ -n "$grp" ]] || { echo "socket illisible — qui la possede ?"; return 0; }
   # Capturer puis tester (DI-13) : `… | grep -qx` sous `pipefail` est une race, pas un test —
-  # cette lib est sourcee dans des shells sous `pipefail` (provision, box, les modules).
+  # cette lib est sourcee dans des shells sous `pipefail` (provision, container, les modules).
   if [[ " $(id -nG 2>/dev/null) " == *" $grp "* ]]; then
     echo "tu ES dans « $grp » pour cette session et l'acces est refuse quand meme — la socket porte-t-elle le bit d'ecriture pour son groupe ?"
   elif [[ ",$(getent group "$grp" 2>/dev/null | cut -d: -f4)," == *",$me,"* ]]; then
@@ -166,7 +166,7 @@ _docker_sockets() {
   #
   # Ce repli n'avait qu'un cas : une distro dont l'intégration WSL est DÉSACTIVÉE. L'activer est un
   # clic dans Docker Desktop ; offrir un contournement à `sudo` là où un clic suffit apprend le
-  # mauvais réflexe, et contredit le canon de la boîte (« elle ne demande jamais sudo »).
+  # mauvais réflexe, et contredit le canon du conteneur (« il ne demande jamais sudo »).
   #
   # ⚠ ET IL A COÛTÉ DEUX FOIS. D'abord le refus accusait la proxy au lieu de
   # `/var/run/docker.sock` et envoyait chercher des droits qui ne bloquaient personne — correctif

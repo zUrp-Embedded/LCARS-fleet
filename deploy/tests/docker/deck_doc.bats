@@ -102,7 +102,7 @@ setup() {
 }
 
 @test "la route /doc/ refuse de sortir de sa racine — \`..\` reste la plus vieille faute du web" {
-  # Le prefixe voisin porte les jetons de la boite : une remontee ici ne serait pas un defaut de
+  # Le prefixe voisin porte les jetons du conteneur : une remontee ici ne serait pas un defaut de
   # confort. La garde est `realpath` + comparaison de prefixe, pas un filtrage de la chaine.
   grep -q 'os.path.realpath(os.path.join(DECK_DOC, rel))' "$DECK"
   grep -q 'full == root or full.startswith(root + os.sep)' "$DECK"

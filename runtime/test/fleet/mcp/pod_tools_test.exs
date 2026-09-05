@@ -1915,8 +1915,8 @@ defmodule Fleet.MCP.PodToolsTest do
   end
 
   # Le materiel converge sous `catalogue_install_dirs` : un PARENT qui contient des repertoires de
-  # catalogue, chacun porteur de son manifeste. C'est la forme exacte de `/home/catalogues` sur une
-  # boite, et `installed_dirs/0` la balaie en `<parent>/*/catalogue.yaml`.
+  # catalogue, chacun porteur de son manifeste. C'est la forme exacte de `/home/catalogues` sur un
+  # conteneur, et `installed_dirs/0` la balaie en `<parent>/*/catalogue.yaml`.
   defp install_catalogue!(parent, dir_name, manifest) do
     dir = Path.join(parent, dir_name)
     File.mkdir_p!(dir)
@@ -2034,7 +2034,7 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @tag :tmp_dir
     test "une offre VIDE est une ERREUR, et le refus PORTE les racines ecartees", %{tmp_dir: tmp} do
-      # « Aucun catalogue n'existe » est le mensonge vide : cette boite en sert toujours au moins un.
+      # « Aucun catalogue n'existe » est le mensonge vide : ce conteneur en sert toujours au moins un.
       #
       # ⚠ LE REFUS EMPORTE CE QU'IL A VU, et la premiere version le jetait (relecture independante du
       # 2026-08-22). « Rien d'installe » et « tout installe, tout casse » appellent deux gestes
@@ -3114,7 +3114,7 @@ defmodule Fleet.MCP.PodToolsTest do
       assert "aaa" in orgs and "fleet" in orgs
     end
 
-    test "meme sur une boite ou UN SEUL catalogue pourrait repondre — pas de rail d'exception" do
+    test "meme sur un conteneur ou UN SEUL catalogue peut repondre — pas de rail d'exception" do
       # Le piege des deux versions precedentes : une branche qui ne s'execute que dans une certaine
       # POPULATION est une branche que personne n'exerce jamais dans l'autre. Ici il n'y en a plus
       # qu'une, donc elle est prise partout.

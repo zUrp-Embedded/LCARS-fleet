@@ -492,7 +492,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpec do
         # DROPPED, NOT REFUSED, and the asymmetry is deliberate: a malformed file is a bug in the
         # producer and must stop the line; a universal build var is a POLICY breach whose blast
         # radius is other pods. Refusing the spawn would let one bad env.d file kill every pod on
-        # the box — a worse failure than the one being prevented. The converger refuses it at
+        # the container — a worse failure than the one being prevented. The converger refuses it at
         # write time; this is the belt at read time.
         Logger.error(
           "LaunchSpec: #{key} DROPPED from #{path} — universal build variables are refused. " <>

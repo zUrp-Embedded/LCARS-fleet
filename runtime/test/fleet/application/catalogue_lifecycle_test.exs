@@ -295,9 +295,9 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       assert "AVAILABLE mobile bob/mob" in CatalogueLifecycle.lines(s)
     end
 
-    test "INSTALLED ne porte PAS le depot — ce n'est plus la source que la boite suit" do
+    test "INSTALLED ne porte PAS le depot — ce n'est plus la source que le conteneur suit" do
       # ⚖ user : « une fois installe, osef de l'origine ». Et ce n'est pas qu'une question de bruit :
-      # ce que la boite suit desormais est `<nom>/_catalogue`, le store. Imprimer le depot la nomme
+      # ce que le conteneur suit desormais est `<nom>/_catalogue`, le store. Imprimer le depot la nomme
       # quelque chose qui n'est plus la source, dans la colonne qu'un operateur lit COMME la source.
       assert {:ok, s} =
                states(

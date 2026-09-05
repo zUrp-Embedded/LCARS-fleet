@@ -16,7 +16,7 @@
 # not what the code says about itself.
 #
 # WHAT IS NOT PROVEN HERE, and cannot be by a stub: that the kernel refuses a `connect(2)` to a
-# directory the caller cannot traverse. That is the kernel's behaviour, measured on a live box on
+# directory the caller cannot traverse. That is the kernel's behaviour, measured on a live container on
 # 2026-08-14 (`nobody` without the group -> connection refused; with `--groups` -> 200) and recorded
 # in the chantier design. A stub can only prove we ASK for the right mode.
 
@@ -291,7 +291,7 @@ EOF
 # survit a l'UID tire de la forge, qui rend les blocs NON CONTIGUS (`lcars` = id 3 -> uid 1003 ->
 # bloc 21030) et donc indevinables depuis un fichier qui ne connait pas les humains.
 #
-# Ce qui reste publie se dit en une ligne : ssh, et la porte de la boite.
+# Ce qui reste publie se dit en une ligne : ssh, et la porte du conteneur.
 # ⚠ ON LIT LE PORT DE FIN DE LIGNE, PAS UN MOTIF `hote:port:port`. La forme reelle du compose est
 # `- "${VAR:-127.0.0.1:2222}:22"` : une accolade separe les deux nombres, donc tout motif
 # `:[0-9]+:[0-9]+` rate TOUTES les publications a variable — c'est-a-dire toutes. Premiere version de
@@ -327,7 +327,7 @@ ports_of() {
   local dir="$BATS_TEST_DIRNAME/../../docker" pub
   pub="$(ports_of "$dir/docker-compose.yml")"
   [ -n "$pub" ]
-  grep -qx "20999" <<< "$pub"   # la porte de la boite
+  grep -qx "20999" <<< "$pub"   # la porte du conteneur
   grep -qx "22"    <<< "$pub"   # ssh, la porte d'admin
 }
 
@@ -349,7 +349,7 @@ ports_of() {
   grep -q -- '--groups "$CONSOLE_GROUP"' "$LANDING"
   refute grep -qE -- '--groups .*fleet' "$LANDING"
   # And it REPLACES --init-groups: setpriv refuses both together -- measured IN THE IMAGE
-  # (util-linux 2.38.1), not on a dev box, because a tool's argument handling is a property of the
+  # (util-linux 2.38.1), not on a dev container, because a tool's argument handling is a property of the
   # system that runs it. Scoped to the setpriv INVOCATIONS: the comment above them explains the swap
   # and names the flag, and a grep over the whole file would fail on the prose that documents it.
   # `refute_out` porte son propre `--` devant le motif : ne pas le repasser ici, il serait pris
@@ -478,7 +478,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
 # rien : ce qui le remplace est sa CONTREPARTIE, et elle est la moitie qu'aucun temoin ne tenait.
 #
 # Sans elle, un `console-humans.sh` qui rejetterait TOUT passerait les trois temoins du siege
-# ci-dessus — ils cherchent tous une ABSENCE — et la boite n'ouvrirait plus une seule console, en
+# ci-dessus — ils cherchent tous une ABSENCE — et le conteneur n'ouvrirait plus une seule console, en
 # affichant « 0 pod », c'est-a-dire exactement ce qu'affiche une fleet vide.
 @test "un humain ORDINAIRE est servi quels que soient ses groupes — le gid ne decide plus rien" {
   local pw="$BATS_TEST_TMPDIR/passwd" home="$BATS_TEST_TMPDIR/h"
@@ -565,17 +565,17 @@ s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$LCARS_CONSOLE_SOCK_ROOT/
 #
 # Tout ce fichier etablit un fait : le terminal n'a plus de port, la landing est le SEUL chemin vers
 # lui. Le healthcheck de l'image, lui, etait reste sur `:22` — vrai du temps ou chaque console
-# publiait son port, faux depuis. Une boite dont le deck etait mort se declarait donc SAINE parce
+# publiait son port, faux depuis. Un conteneur dont le deck etait mort se declarait donc SAIN parce
 # que sshd repondait, alors que plus personne ne pouvait entrer.
 #
-# ⚠ CES TEMOINS LISENT LE `Dockerfile`, PAS UNE BOITE. Ce qui se mesure est la SONDE DEMANDEE — un
+# ⚠ CES TEMOINS LISENT LE `Dockerfile`, PAS UN CONTENEUR. Ce qui se mesure est la SONDE DEMANDEE — un
 # conteneur vivant serait une autre suite, et une autre machine.
 
 hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 
 @test "la sonde de l'image teste le DECK, pas seulement sshd" {
-  # Sans cette moitie, le healthcheck mesure une porte d'admin et la presente comme la sante de la
-  # boite. Les deux ports sont testes : sshd reste la porte de secours, le deck est l'entree.
+  # Sans cette moitie, le healthcheck mesure une porte d'admin et la presente comme la sante du
+  # conteneur. Les deux ports sont testes : sshd reste la porte de secours, le deck est l'entree.
   hc_cmd | grep -q '/dev/tcp/127.0.0.1/22'
   hc_cmd | grep -q 'LCARS_LANDING_PORT'
 }
@@ -583,13 +583,13 @@ hc_cmd() { grep -A1 '^HEALTHCHECK ' "$DOCKERFILE" | tail -n1; }
 @test "la sonde lit le PORT depuis l'environnement, jamais un littéral" {
   # `20999` est un defaut, pas une valeur : `LCARS_LANDING_PORT` le deplace. Une sonde qui grave le
   # nombre testerait un port ou personne n'ecoute des qu'un operateur le change — et elle rendrait
-  # rouge une boite parfaitement saine.
+  # rouge un conteneur parfaitement sain.
   hc_cmd | grep -q '${LCARS_LANDING_PORT:-20999}'
 }
 
-@test "une landing DESACTIVEE ne rend pas la boite malade — c'est un reglage, pas une panne" {
+@test "une landing DESACTIVEE ne rend pas le conteneur malade — c'est un reglage, pas une panne" {
   # `LCARS_LANDING=0` est supporte par l'entrypoint. Sonder son port quand meme transformerait un
-  # reglage en panne definitive : la boite serait *unhealthy* a vie, sans que rien ne soit casse.
+  # reglage en panne definitive : le conteneur serait *unhealthy* a vie, sans que rien ne soit casse.
   hc_cmd | grep -q '${LCARS_LANDING:-1}'
 }
 

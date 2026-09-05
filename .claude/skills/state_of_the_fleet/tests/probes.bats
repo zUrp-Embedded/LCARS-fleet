@@ -278,7 +278,7 @@ SH
   done
   # LCARS_RUN_DIR EXPLICITE, et il doit EXISTER : sans lui la sonde d'endpoint dit « aucune fleet
   # demarree » et sort en 1, pas en 2. Le test passait alors sur le poste du developpeur — dont le
-  # ~/.lcars/run existe — et rougissait dans toute boite neuve, ce que le corpus interdit deux tests
+  # ~/.lcars/run existe — et rougissait dans tout conteneur neuf, ce que le corpus interdit deux tests
   # plus haut : « sinon le test mesure ce que la machine du DEVELOPPEUR a ».
   mkdir -p "$TMP/run"
   run env PATH="$fake" LCARS_RUN_DIR="$TMP/run" "$PROBES/10-instruments.sh"
@@ -384,7 +384,7 @@ JSONL
 }
 
 # ── 30-pods / 40-forge : sondes HTTP, testees contre un serveur bouchon ───────────────────────────
-# Hermetic on purpose: the gate must be green on a box with no fleet and no forge. A stub answering
+# Hermetic on purpose: the gate must be green on a container with no fleet and no forge. A stub answering
 # chosen codes exercises the REAL curl path — stubbing `http_probe` would test the harness instead.
 
 stub_server() {
@@ -472,7 +472,7 @@ PY
 }
 
 @test "40-forge : sans FORGE_BASE_URL c'est inactive — rien de declare n'est pas un angle mort" {
-  # Corrige apres mesure : `unreachable` faisait basculer tout le rapport en AVEUGLE sur une boite
+  # Corrige apres mesure : `unreachable` faisait basculer tout le rapport en AVEUGLE sur un conteneur
   # saine dont personne n'avait configure de forge. Mon instrument n'est pas casse, il n'y a
   # simplement rien a atteindre. Et `degraded` serait pire : une affirmation sur une forge jamais
   # contactee.
@@ -510,7 +510,7 @@ PY
 
 @test "40-forge : aucun credential dans un pod est ATTENDU (inactive), pas une faute" {
   # ⚠ `LCARS_ROLES_SOCKET` POINTE SUR UN CHEMIN QUI N'EXISTE PAS, ET C'EST DELIBERE : c'est la
-  # situation d'un pod, ou aucune socket de la boite n'est montee. Laisser le defaut
+  # situation d'un pod, ou aucune socket du conteneur n'est montee. Laisser le defaut
   # (`/run/lcars/authority/roles.sock`) ferait passer ce temoin au ROUGE sur toute machine de dev
   # qui fait tourner le service — et au vert ailleurs, pour une raison qui n'est pas la sienne.
   run env LCARS_ROLES_SOCKET="$TMP/pas-de-socket" HOME="$TMP" "$PROBES/40-forge.sh"
@@ -650,7 +650,7 @@ mk_tracking() { git -C "$1" update-ref "refs/remotes/origin/$2" "${3:-$(git -C "
 
 sotf50() { env SOTF_PROJECTS_ROOT="$TMP/p" SOTF_WORK_ROOT="$TMP/w" LCARS_POD_HOME="$TMP/nohome" "$PROBES/50-projects.sh"; }
 
-@test "50-projects : boite fraiche — 0 projet et aucune source n'est PAS un angle mort" {
+@test "50-projects : conteneur frais — 0 projet et aucune source n'est PAS un angle mort" {
   # La faute d'origine, refaite ici sous une autre forme : declarer `unreachable` sur une declaration
   # dont personne n'a besoin faisait basculer tout le run en AVEUGLE pour une question non posee.
   mkdir -p "$TMP/p" "$TMP/w"

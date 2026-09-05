@@ -56,12 +56,12 @@ const LCARS = {
                    et sans cas particulier.`,
   'lcars catalogue list': `L'état vient de la FORGE, pas des dossiers présents : « installé » veut
                            dire que la forge porte l'organisation du catalogue et sa source. Sans
-                           release joignable, la liste dit qu'elle ne sait pas — une boîte a déjà
+                           release joignable, la liste dit qu'elle ne sait pas — un conteneur a déjà
                            affiché « installé » pour un catalogue dont la forge n'avait jamais
                            porté l'org.`,
   'lcars catalogue install': `Le seul verbe, et il provisionne : l'organisation, les comptes de
                               rôle, les teams, la source dans « <nom>/catalogue », le matériel sur
-                              la boîte. Geste d'admin de forge — le runtime lit ce droit sur la
+                              le conteneur. Geste d'admin de forge — le runtime lit ce droit sur la
                               forge, jamais dans un drapeau local.`,
   'lcars catalogue verify': `Sans lui, un catalogue cassé se découvre au redémarrage suivant, par
                              quelqu'un qui ne fera pas le lien.`,
@@ -69,7 +69,7 @@ const LCARS = {
                             marche par accident, par la redirection que la forge laisse derrière
                             elle — jusqu'au jour où elle disparaît.`,
   'lcars project reconcile': `La forge dit quels projets existent, le disque suit. Sur un /home neuf
-                              — boîte réinstallée, second humain sur une fleet déjà peuplée — les
+                              — conteneur réinstallé, second humain sur une fleet déjà peuplée — les
                               faces locales n'existent pas alors que les projets, eux, sont
                               intacts. Un projet en échec n'arrête pas les autres.`,
   'lcars admiral': `Le seul pod qui vit hors du bac à sable, et il ne s'obtient que par ce geste :
@@ -80,7 +80,7 @@ const LCARS = {
                       stockée ici : c'est le CLI officiel (« gh auth login », « glab auth login »),
                       déjà credential helper de git. Aucun jeton ne transite par LCARS.`,
   'lcars forge list': `Le pool de CET humain, sous son propre espace. Chacun le sien : publier est
-                       un geste signé, pas une capacité de la boîte.`,
+                       un geste signé, pas une capacité du conteneur.`,
   'lcars forge status': `Le doctor du pool : chaque forge déclarée, et si son CLI est authentifié.
                          Une forge listée dont personne n'est connecté est exactement ce qu'on
                          découvre au moment de publier, sinon.`,
@@ -99,7 +99,7 @@ const LCARS = {
                         côté pod, exposé ici pour pouvoir le rejouer et diagnostiquer. Une sortie 6
                         dit que la réécriture a cessé d'être déterministe : le clone est CONSERVÉ et
                         son chemin imprimé, parce qu'à ce moment-là c'est la seule pièce à charge.`,
-  'lcars tool': `Les portes outil du release, en un seul endroit : ce qu'un service de la boîte, un
+  'lcars tool': `Les portes outil du release, en un seul endroit : ce qu'un service du conteneur, un
                  module de l'installeur ou l'image elle-même (« docker run IMAGE roles-tfvars »)
                  demande au release sans monter de fleet. Elles vivaient dans l'entrypoint du
                  conteneur ; un geste du produit qui exécute le PID 1 de l'image pour évaluer une
@@ -134,7 +134,7 @@ const sections = [
       <div class="caps" aria-hidden="true"><i></i><i></i><i></i></div>
       <p class="eyebrow">Manuel · console</p>
       <h1>Deux binaires,<br><em>{verbs.length + entries.length} gestes</em></h1>
-      <p class="lede">Toute la conduite de la boîte tient dans deux commandes.
+      <p class="lede">Toute la conduite du conteneur tient dans deux commandes.
       <b>fleet</b> tient la vie de la fleet — la démarrer, l'arrêter, savoir ce qui tourne.
       <b>lcars</b> tient ce qui vit dedans : les pods, les catalogues, les projets.</p>
       <p class="lede">Elles sont installées dans <code>/usr/local/bin</code>. Tout le reste se
@@ -148,7 +148,7 @@ const sections = [
   </header>
 
   <section id="fleet">
-    <SectionHead id="fleet" title="fleet" cap={`la vie de la boîte — ${verbs.length} verbes`} />
+    <SectionHead id="fleet" title="fleet" cap={`la vie du conteneur — ${verbs.length} verbes`} />
     <p class="intro">Un daemon dans une session tmux. Il tourne sous <b>votre</b> UID : chaque
     humain lance sa fleet, et n'attache que ses propres pods.</p>
 
@@ -170,7 +170,7 @@ const sections = [
 
   <section id="lcars">
     <SectionHead id="lcars" title="lcars" cap={`pods · catalogues · projets — ${entries.length} entrées`} />
-    <p class="intro">Ce qui vit dans la boîte. <code>lcars</code> ne parle jamais à la forge
+    <p class="intro">Ce qui vit dans le conteneur. <code>lcars</code> ne parle jamais à la forge
     lui-même : quand un geste en a besoin, il le passe au runtime et rend son verdict.</p>
 
     <div class="entries">

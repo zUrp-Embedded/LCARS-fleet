@@ -215,15 +215,15 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [ "$output" = "[]" ]
 }
 
-# ─── L'UID VIENT DE LA FORGE SUR UNE BOITE NEUVE ──────────────────────
-# `uid_of_home` repare APRES COUP : il relit l'uid sur un home qui a survecu. Sur une boite neuve il
+# ─── L'UID VIENT DE LA FORGE SUR UN CONTENEUR NEUF ──────────────────────
+# `uid_of_home` repare APRES COUP : il relit l'uid sur un home qui a survecu. Sur un conteneur neuf il
 # n'y a aucun home, et `useradd` distribuait alors les uid libres dans l'ordre ou la team les rend —
 # un ordre qui n'a aucune raison d'etre stable d'un boot a l'autre. L'identifiant de la forge, lui,
 # est un auto-increment SQL : lineaire, dense, JAMAIS reutilise apres suppression.
 
 @test "D8: sans home ET sans table, RIEN n'est derive de l'id de forge — le premier libre, pas un calcul" {
-  # ⚖ USER 2026-08-21 (D8). La derivation `id_forge + 1000` tenait sur une hypothese vraie dans une
-  # boite fabriquee pour LCARS et fausse ailleurs : que l'espace d'uid soit libre. Mesure du meme
+  # ⚖ USER 2026-08-21 (D8). La derivation `id_forge + 1000` tenait sur une hypothese vraie dans un
+  # conteneur fabrique pour LCARS et fausse ailleurs : que l'espace d'uid soit libre. Mesure du meme
   # jour, poste natif : `admiral` (id 1) revendiquait 1001, deja porte par `lcars` — refus sans
   # recours sur une machine ou rien n'etait casse.
   #
@@ -253,7 +253,7 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 }
 
 @test "D8: la TABLE remplace la formule — un id deja vu rend SON uid, pas un calcul" {
-  # Ce que la derivation achetait — « deux boites reconstruites donnent le meme uid a la meme
+  # Ce que la derivation achetait — « deux conteneurs reconstruits donnent le meme uid a la meme
   # personne » — n'a jamais eu besoin d'etre une formule. La table le rend, et elle est keyee sur
   # l'ID de forge, pas sur le nom : Gitea conserve l'id au renommage.
   run bash -c "
@@ -591,7 +591,7 @@ EOF
   [[ "$output" == *"carol"* ]]
 }
 
-@test "un membre de la team qui n'est PAS sur cette boite ne fait rien revoquer" {
+@test "un membre de la team qui n'est PAS sur ce conteneur ne fait rien revoquer" {
   passwd_fixture; group_fixture "alice"
   absent alice dave erin
   [ "$status" -eq 0 ]
@@ -677,7 +677,7 @@ EOF
 # terminal qui n'existe pas et le navigateur ecrit « [connexion impossible] ».
 #
 # ⚠ ET UN REDEMARRAGE LE MASQUE : `console.sh --all` tourne a l'entrypoint, donc au boot suivant tout
-# le monde a sa console. Le defaut ne se voit que sur une boite VIVANTE — c'est-a-dire exactement au
+# le monde a sa console. Le defaut ne se voit que sur un conteneur VIVANT — c'est-a-dire exactement au
 # moment ou un admin enrole quelqu'un. C'est ce qui l'a rendu invisible aussi longtemps.
 #
 # Le stub de `console.sh` JOURNALISE ses arguments : ce qu'on mesure est « le geste a ete demande

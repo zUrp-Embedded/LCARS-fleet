@@ -37,7 +37,7 @@ un pair, et un rôle ou une carte d'un autre catalogue ne s'y résout jamais.
 Ce que l'image transporte ici est déposé sur la forge à chaque apply et **installé par personne**.
 Un catalogue devient installé quand un admin joue `lcars catalogue install <nom>` : le geste crée
 son org et ses comptes de rôle, et pousse sa source dans `<nom>/catalogue`. **C'est ce dépôt-là qui
-signe l'installation** — le matériel présent sur une boîte n'en est qu'un cache, reconvergé à chaque
+signe l'installation** — le matériel présent sur un conteneur n'en est qu'un cache, reconvergé à chaque
 démarrage.
 
 Un seul verbe : réinstaller, c'est mettre à jour. Et jamais de mise à jour automatique.

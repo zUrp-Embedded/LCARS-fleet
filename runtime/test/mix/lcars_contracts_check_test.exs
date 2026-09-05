@@ -357,7 +357,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       base = Fleet.TestEnv.tmp_path("jg070")
       root = Path.join(base, "fleet")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
-      File.mkdir_p!(Path.join([root, "services", "box"]))
+      File.mkdir_p!(Path.join([root, "services", "container"]))
       File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
 
       File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
@@ -374,10 +374,10 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
-      # Lot 6 : la boite cree ses zones dans `services/box/init.sh` (l'init de l'instance, produit),
+      # Lot 6 : le conteneur cree ses zones dans `services/container/init.sh` (l'init de l'instance, produit),
       # plus dans l'entrypoint docker — la meme ancre, au nouvel endroit.
       File.write!(
-        Path.join([root, "services", "box", "init.sh"]),
+        Path.join([root, "services", "container", "init.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
@@ -414,13 +414,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              ]
     end
 
-    test "face absente de box/init.sh → fail, l'ancien mur tient toujours", %{root: root} do
+    test "face absente de container/init.sh → fail, l'ancien mur tient toujours", %{root: root} do
       write_mirrors!(root, ["/home/projects"], ["/home/projects", "/home/projects.ops"])
 
       result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
-      assert result.evidence == ["/home/projects.ops: absent de box/init.sh (la boite)"]
+      assert result.evidence == ["/home/projects.ops: absent de container/init.sh (conteneur)"]
     end
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do

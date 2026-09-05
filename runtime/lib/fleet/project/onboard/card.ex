@@ -4,7 +4,7 @@ defmodule Fleet.Project.Onboard.Card do
 
   Une carte decide comment un projet est traite — quel jury, quelle exigence de CI. La changer sur
   un projet vivant demande donc d'ecrire la declaration ET de faire converger ce qui en depend,
-  sans quoi la boite juge selon l'ancienne carte en affichant la nouvelle.
+  sans quoi le conteneur juge selon l'ancienne carte en affichant la nouvelle.
   """
 
   alias Fleet.Project.GitOps

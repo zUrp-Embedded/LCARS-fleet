@@ -62,7 +62,7 @@ runtime/services/forge-recipe/**/crash.log
 !.source-revision
 
 # ⚖ user 2026-09-04 (Q2 du chantier deploy-independance) : « on copie deploy, sans les tests ».
-# `COPY deploy /opt/lcars/deploy` embarque l'installeur pour le doctor et l'uninstall de la boite ;
+# `COPY deploy /opt/lcars/deploy` embarque l'installeur pour le doctor et l'uninstall du conteneur ;
 # ses 1188 cas bats n'y servent a rien, et aucun stage ne les joue (le gate de l'installeur est
 # `deploy/gate.sh`, chez le batisseur). Meme trait que la copie du poste par `62-runtime-helpers`.
 deploy/tests

@@ -8,9 +8,9 @@
 #
 #   rail poste   `64-services` pose des unites systemd : `Restart=always`, `RestartSec=10`,
 #                `StartLimitBurst=5`, `StartLimitIntervalSec=60`. Un service qui tombe revient.
-#   rail boite   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
+#   rail conteneur   `entrypoint.sh` lancait `setsid <cmd> &`. tini est PID 1 et RECOLTE les orphelins ;
 #                il n'en relance aucun. Un convergeur mort restait mort jusqu'au prochain
-#                `box restart`, sur une boite qui reste *healthy* (healthcheck = des ports, ssh + le deck).
+#                `container restart`, sur un conteneur qui reste *healthy* (healthcheck = des ports, ssh + le deck).
 #
 # Le rail poste testait donc des politiques de redemarrage que la PRODUCTION n'avait pas, et la
 # production avait un mode de panne que rien ne testait.
@@ -54,7 +54,7 @@ setup() {
   [ "$status" -eq 2 ]
 }
 
-@test "IL RELANCE — c'est le fait que le rail boite n'avait pas" {
+@test "IL RELANCE — c'est le fait que le rail conteneur n'avait pas" {
   # La commande compte ses propres passages. Trois lignes = elle a bien ete rejouee.
   run timeout 20 "$SUT" --name essai --log "$LOG" --burst 3 --interval 60 --delay 0 -- \
     bash -c "echo passage >> '$MARQUE'; exit 1"
@@ -142,7 +142,7 @@ setup() {
   grep -q 'ignore TERM' "$LOG"
 }
 
-@test "TERM se propage a l'enfant — sinon un « box down » laisse un orphelin" {
+@test "TERM se propage a l'enfant — sinon un « container down » laisse un orphelin" {
   # Le superviseur est le PARENT. Sans propagation, il meurt et son enfant reste, rattache a PID 1,
   # hors de portee de tout ce qui pourrait l'arreter ensuite.
   "$SUT" --name essai --log "$LOG" --burst 9 --interval 60 --delay 0 -- \
@@ -160,17 +160,17 @@ setup() {
   refute kill -0 "$enfant"
   # ⚠ ET LE CODE DE SORTIE COMPTE. Ce temoin finissait sur `wait "$sup" || true` : le `|| true`
   # avalait N'IMPORTE QUEL code, et une mutation `exit 0` → `exit 99` sur l'arret propre le laissait
-  # VERT. Un arret demande qui rend non-zero fait echouer l'appelant (`box down` sous `set -e`) sur
+  # VERT. Un arret demande qui rend non-zero fait echouer l'appelant (`container down` sous `set -e`) sur
   # un geste parfaitement reussi.
   local rc=0; wait "$sup" 2>/dev/null || rc=$?
   [ "$rc" -eq 0 ] || { echo "arret PROPRE rendu en $rc — un TERM demande n'est pas une panne"; return 1; }
 }
 
-@test "l'attente entre deux relances est INTERRUPTIBLE — un box down ne paie pas le delai" {
+@test "l'attente entre deux relances est INTERRUPTIBLE — un container down ne paie pas le delai" {
   # ⚠ `sleep "$DELAY"` NU RETARDE LE SIGNAL DE TOUT SON DELAI : bash n'execute une trap qu'entre
   # deux commandes, donc un TERM recu pendant un `sleep` externe attend sa fin naturelle. Mesure :
   # `--delay 5` faisait mourir le superviseur en 4 s. Avec le defaut de 10 s et trois services
-  # supervises, chaque `box down` payait ca.
+  # supervises, chaque `container down` payait ca.
   "$SUT" --name essai --log "$LOG" --burst 9 --interval 60 --delay 8 -- bash -c 'exit 1' &
   local sup=$! i
   # On attend d'etre DANS l'attente : la premiere ligne « relance dans » le dit.

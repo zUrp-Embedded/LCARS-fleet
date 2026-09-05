@@ -32,7 +32,7 @@ __pycache__/
 coverage/
 fleet-audit-report/
 
-# Le seed de banc ecrit par bench-forge-bootstrap.sh --no-box : un SECRET en clair, 0600, depose
+# Le seed de banc ecrit par bench-forge-bootstrap.sh --no-container : un SECRET en clair, 0600, depose
 # DANS l'arbre suivi. Il n'etait ignore par rien — un `git add -A` de distance, et le depot est
 # public a terme. Ignore par MOTIF plutot que par chemin : le script le pose a cote de lui-meme, et
 # un jour il pourra etre appele d'ailleurs.

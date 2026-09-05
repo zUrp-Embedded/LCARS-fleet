@@ -13,7 +13,7 @@
 # ABSENCE, pas d'un drapeau qu'il faut penser a mettre a `false`.
 
 # The in-tree `tmp/` @tmp_dir root is SHARED across runners of the
-# `fleet` group (multi-human box). A test interrupted (kill -9) or run by another UID could leave a
+# `fleet` group (multi-human container). A test interrupted (kill -9) or run by another UID could leave a
 # non-group-writable dir under the STABLE @tmp_dir path → the next runner's `create_tmp_dir!` fails
 # to `rm_rf` it before the test body. Pre-run best-effort sweep: make every leftover under `tmp/`
 # group-writable so ANY fleet-group runner can always erase it. Silent on failure (not-owner dirs

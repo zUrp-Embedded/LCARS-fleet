@@ -493,7 +493,7 @@ defmodule Fleet.Pilot.PollerTest do
       # `ops_root` so the positive case could go through, then removed it — on whatever machine ran
       # `mix test`. Two things were wrong with that, and only the second is about tidiness.
       #
-      # It was a GREEN WITH TWO DIFFERENT CAUSES. On a box the root exists because the entrypoint
+      # It was a GREEN WITH TWO DIFFERENT CAUSES. On a container the root exists because the entrypoint
       # provisioned it; on a workstation it existed because that machine happened to have one from
       # an older layout. The same line passed for reasons that have nothing to do with each other,
       # and the day the layout was renamed it failed here for a reason that was not a defect — the

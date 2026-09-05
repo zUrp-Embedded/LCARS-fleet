@@ -20,7 +20,7 @@ FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || 
 # ANONYME. Aucune de ces lectures n'est site-admin.
 #
 # Tenir le master parce qu'il est la imposerait que son fichier reste lisible par un humain — l'ACL
-# que la boite refuse. Le compte systeme est l'identite juste : c'est avec lui que la boite lit sa
+# que le conteneur refuse. Le compte systeme est l'identite juste : c'est avec lui que le conteneur lit sa
 # forge. Donner un site-admin a une lecture serait lui accorder un pouvoir dont elle n'a aucun usage
 # — meme argument, et meme formulation, que `cmd_install` dans `forge-gestures.sh`.
 #
@@ -49,7 +49,7 @@ TOKEN="$("$AUTHORITY_ASK" "$SYSTEM_ACCOUNT")" \
 api="$FORGE_URL/api/v1"
 
 # ⚠ `-K -` ET PAS `-H` : un en-tete construit en ARGV met le jeton systeme dans
-# `/proc/<pid>/cmdline`, lisible par n'importe quel process de la boite pendant toute la duree de
+# `/proc/<pid>/cmdline`, lisible par n'importe quel process du conteneur pendant toute la duree de
 # l'appel — demander le jeton a un service pour le laisser ensuite dans une ligne de commande
 # annulerait le geste au moment meme ou il s'exerce.
 #

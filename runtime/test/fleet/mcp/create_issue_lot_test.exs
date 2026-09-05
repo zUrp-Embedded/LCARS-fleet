@@ -66,7 +66,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
 
   # A bare origin carrying the workshop face, plus the local clone the human and the architect
   # write in. Identity = the RUNTIME human's, resolved the same way the publication gate resolves
-  # it — a fixture that hardcoded an address would pass on this box and nowhere else.
+  # it — a fixture that hardcoded an address would pass on this container and nowhere else.
   defp workshop_fixture(tmp, human) do
     origin = Path.join(tmp, "origin.git")
     clone = Path.join([tmp, "workshop", "demo"])

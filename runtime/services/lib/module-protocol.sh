@@ -6,7 +6,7 @@
 #
 # ⚖ user 2026-09-04 (Q3 du chantier deploy-independance) : « la frontiere, c'est : joue uniquement
 # a l'install, ou utilise en prod ? ». Les gestes de forge — le cache des catalogues, la branche
-# ops, le client OAuth2 du deck — sont joues par la BOITE a l'init de son instance et a chaque boot
+# ops, le client OAuth2 du deck — sont joues par le CONTENEUR a l'init de son instance et a chaque boot
 # pour reconverger, donc en prod ; le poste les joue a l'install. Ils etaient des modules de
 # l'installeur, ecrits dans son dialecte (`p_*`, `verdict_*`, `PROV_*` — devenus `LCARS_*` au lot 8 : un seul vocabulaire cote produit, l'installeur traduit) et sources sur sa lib. Ils
 # sont ici, dans le meme dialecte, sur CE protocole — et l'installeur les APPELLE (le sens permis).
@@ -67,7 +67,7 @@ p_die()  { printf 'FATAL %s: %s\n' "$LCARS_MODULE_TAG" "$*" >&2; exit 1; }
 
 # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel (un geste manque, pas
 # une panne). `check` rend 2 sur un echec et 1 sur un drift — le code du doctor, lu comme tel par
-# celui qui appelle (l'installeur, ou le boot de la boite).
+# celui qui appelle (l'installeur, ou le boot du conteneur).
 verdict_apply() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 1; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 2; exit 0; }
 verdict_check() { [[ "$LCARS_FAILED" -gt 0 ]] && exit 2; [[ "$LCARS_DRIFT" -gt 0 ]] && exit 1; exit 0; }
 

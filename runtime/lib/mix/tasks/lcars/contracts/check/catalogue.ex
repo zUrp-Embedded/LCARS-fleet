@@ -108,7 +108,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       |> Enum.map(&role_login(root, &1.name))
       |> Enum.sort()
 
-    # Lot 6 (2026-09-04), correcting lot 1: the minter is a FORGE GESTURE of the product — the box
+    # Lot 6 (2026-09-04), correcting lot 1: the minter is a FORGE GESTURE of the product — the container
     # plays it at instance init — so it lives in `services/`, in this tree, always present.
     sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
@@ -348,7 +348,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # on the path a single-site check does not cover.
   #
   # Measured on a fresh bench: the `doc` face was in the code AND in the image's `build`
-  # stage (added so the gate could run), and NOT in the entrypoint. The box came up healthy, the
+  # stage (added so the gate could run), and NOT in the entrypoint. The container came up healthy, the
   # fleet started, and the first `project_create` died on `could not make directory (with -p)
   # "/home/projects.workshop": permission denied`. Nothing before that moment could have said it.
   #
@@ -358,15 +358,15 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    # Lot 6 (2026-09-04) : the box creates its zones in `box/init.sh` (the product's instance init),
+    # Lot 6 (2026-09-04) : the container creates its zones in `container/init.sh` (the product's instance init),
     # no longer in the docker entrypoint — the anchor line kept its exact shape.
-    entrypoint = Path.expand("services/box/init.sh", root)
+    entrypoint = Path.expand("services/container/init.sh", root)
     module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
-      "add the face root to the `install -d` line of runtime/services/box/init.sh — a face declared " <>
-        "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
+      "add the face root to the `install -d` line of runtime/services/container/init.sh — a face declared " <>
+        "in Fleet.Layout with no zone on the machine makes the container look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
     case tree_scope(Path.expand("../deploy", root)) do
@@ -412,7 +412,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
           {expected, at_boot, on_every_substrate} ->
             missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de box/init.sh (la boite)") ++
+              Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (conteneur)") ++
                 Enum.map(
                   expected -- on_every_substrate,
                   &"#{&1}: absent du module provision (donc absent sur wsl et linux)"

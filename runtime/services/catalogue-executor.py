@@ -43,7 +43,7 @@ import lcars_socket  # noqa: E402 -- apres le sys.path, c'est la condition de l'
 # est un tmpfs, ce qui n'y est pas declare ne se refait pas au reboot.
 SOCKET_PATH = os.environ.get("LCARS_CATALOGUE_SOCKET", "/run/lcars/authority/catalogue.sock")
 # THE SOCKET'S ACL CARRIES NO AUTHORIZATION -- it only bounds who may KNOCK. Opening it to the world
-# would grant nobody anything, but it would offer this process to every account on the box for no gain.
+# would grant nobody anything, but it would offer this process to every account on the container for no gain.
 SOCKET_GROUP = os.environ.get("LCARS_FLEET_GROUP", "fleet")
 SOCKET_MODE = 0o660
 # ⚠ UNE SOCKET PAR VERBE, ET LE VERBE EST LE CANAL : le service sait quel code lancer par la socket
@@ -115,7 +115,7 @@ def login_of(uid):
 
 class NoAuthority(Exception):
     """
-    This box has no usable site-admin credential.
+    This container has no usable site-admin credential.
 
     ⚠ IT IS A CAUSE OF ITS OWN, NEVER MERGED INTO `OSError`. A bare `open()` whose caller catches
     `OSError` -- which `FileNotFoundError` and `PermissionError` both inherit from -- turns an
@@ -134,7 +134,7 @@ def master_token():
     The site-admin credential, read fresh at each request.
 
     Read at each request and not cached at startup, so a rotated token is picked up without a
-    restart. Raises NoAuthority when this box cannot produce one -- never a bare OSError, which the
+    restart. Raises NoAuthority when this container cannot produce one -- never a bare OSError, which the
     caller would read as "the forge did not answer".
     """
     try:
@@ -175,7 +175,7 @@ def forge_is_admin(login):
         # « pas de reponse » ferait reessayer l'operateur sur une forge qui vient de refuser, et
         # `HTTPError` DERIVE de `URLError` : un `except URLError` seul l'y rangerait.
         if exc.code in (401, 403):
-            raise NoAuthority(f"la forge REFUSE le jeton de cette boite (HTTP {exc.code})") from exc
+            raise NoAuthority(f"la forge REFUSE le jeton de ce conteneur (HTTP {exc.code})") from exc
         raise
 
 
@@ -209,7 +209,7 @@ def is_fleet_human(login):
         if exc.code == 404:
             return False
         if exc.code in (401, 403):
-            raise NoAuthority(f"la forge REFUSE le jeton de cette boite (HTTP {exc.code})") from exc
+            raise NoAuthority(f"la forge REFUSE le jeton de ce conteneur (HTTP {exc.code})") from exc
         raise
 
 
@@ -221,7 +221,7 @@ def _forge_json(path):
             return json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
-            raise NoAuthority(f"la forge REFUSE le jeton de cette boite (HTTP {exc.code})") from exc
+            raise NoAuthority(f"la forge REFUSE le jeton de ce conteneur (HTTP {exc.code})") from exc
         raise
 
 
@@ -235,8 +235,8 @@ def serve_role_token(conn):
 
     ⚠ CE QU'ON REND EST UN CREDENTIAL, ET C'EST UN RECUL ASSUME PAR RAPPORT A `catalogue.sock`.
     La, le service AGIT et rien ne sort ; ici il DONNE. Ce qui le rend defendable est le point de
-    depart, pas une propriete absolue : aujourd'hui le fichier est lisible par tout humain de la
-    boite. Une socket qui demande a la forge et sait QUI a demande est strictement meilleure — mais
+    depart, pas une propriete absolue : aujourd'hui le fichier est lisible par tout humain du
+    conteneur. Une socket qui demande a la forge et sait QUI a demande est strictement meilleure — mais
     le jeton s'exerce encore hors du chemin audite, et pretendre l'inverse serait une survente.
     """
     wire = conn.makefile("rw", encoding="utf-8", newline="\n")
@@ -265,7 +265,7 @@ def serve_role_token(conn):
             log(f"refus roles: la forge dit que {login} n'est pas de l'equipe {HUMANS_TEAM}")
             return done("FAIL:not_a_worker")
     except NoAuthority as exc:
-        log(f"refus roles: cette boite n'a pas d'autorite utilisable — {exc}")
+        log(f"refus roles: ce conteneur n'a pas d'autorite utilisable — {exc}")
         return done("FAIL:no_authority")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
         log(f"refus roles: appartenance de {login} non lue ({exc})")
@@ -376,7 +376,7 @@ def serve_one(conn):
     except NoAuthority as exc:
         # ⚠ AVANT le filet large ci-dessous : c'est l'ORDRE des `except` qui rend la distinction
         # reelle, pas l'existence d'une classe a part.
-        log(f"refus: cette boite n'a pas d'autorite utilisable — {exc}")
+        log(f"refus: ce conteneur n'a pas d'autorite utilisable — {exc}")
         return done("FAIL:no_authority")
     except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError, OSError) as exc:
         log(f"refus: adminite de {login} non lue ({exc})")
@@ -443,7 +443,7 @@ def main():
             pass
     except OSError as exc:
         log(f"je ne peux pas ouvrir {MASTER_TOKEN_FILE} ({exc.strerror}) — "
-            f"ce service EST le detenteur de l'autorite de cette boite, il ne demarre pas sans elle")
+            f"ce service EST le detenteur de l'autorite de ce conteneur, il ne demarre pas sans elle")
         return 1
     if not FORGE_BASE_URL:
         log("aucun FORGE_BASE_URL — un jeton sans forge ne veut rien dire")

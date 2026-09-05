@@ -20,11 +20,11 @@
 #       --workstation   LCARS s'installe DANS ce système (WSL2 seulement).
 #                       Modèle 3 zones : SOURCE (ce checkout) → INSTALL
 #                       (/opt/lcars/runtime, RO) → STATE (~/.lcars per-humain).
-#       --box           LCARS tourne dans un conteneur. Rien hors de ton
+#       --container           LCARS tourne dans un conteneur. Rien hors de ton
 #                       clone et de docker.
 #       --bench         axe FORGE : « monte-la-moi ». Il ne dit PAS la même chose
 #                       sur les deux rails, et c'est le § 13 qui les sépare :
-#                         --box   fournit les annexes — forge jetable, runner CI,
+#                         --container   fournit les annexes — forge jetable, runner CI,
 #                                 humain de démonstration — en un geste.
 #                         --workstation  la forge est montée ICI même si
 #                                 FORGE_BASE_URL est posée. Rien d'autre : le
@@ -39,7 +39,7 @@
 #                       Les trois sont les ports que « bench-up » publie : un banc par port, et
 #                       les WSL d une même machine partagent un daemon docker.
 #       --forge-project N  la BASE des projets compose (défaut lcars) : <N>-forge,
-#                       <N>-runner sur le poste, <N>-fleet pour la boîte, et le banc
+#                       <N>-runner sur le poste, <N>-fleet pour le conteneur, et le banc
 #                       en dérive les trois. UN sens (DI-05). C'est
 #                       le geste qui en monte une SECONDE au lieu de déplacer
 #                       celle qui tourne.
@@ -104,7 +104,7 @@ fi
 REPO_URL="https://github.com/lordzurp/LCARS-fleet.git"
 BRANCH="main"
 DOCTOR_MODE=0
-RAIL=""              # workstation | box — VIDE tant que personne n'a choisi
+RAIL=""              # workstation | container — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
 WITH_BENCH=0           # axe FORGE      : monte-la-moi
 # ⚠ `DISPOSABLE` A DISPARU D'ICI, ET SON DRAPEAU EST REFUSÉ PLUS BAS (⚖ user 2026-09-04 : « le
@@ -122,17 +122,17 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --check|--doctor) DOCTOR_MODE=1; shift ;;
     --workstation)    RAIL=workstation; shift ;;
-    --box)            RAIL=box; shift ;;
+    --container)            RAIL=container; shift ;;
     # ─── UN SEUL AXE (§ 13) ─────────────────────────────────────────────────
     #
-    # `--bench`  axe FORGE : montée par nous, ou fournie (FORGE_BASE_URL). Sur la boîte, `--bench`
+    # `--bench`  axe FORGE : montée par nous, ou fournie (FORGE_BASE_URL). Sur le conteneur, `--bench`
     # monte aussi le banc — runner CI et humain de démo — et c'est le banc qui NOMME cet humain
     # (`bench-forge-bootstrap.sh`, `LCARS_BUILTIN_HUMAN`). Un déploiement de travail n'en sème
     # aucun : les personnes s'inscrivent sur la forge, le convergeur les matérialise.
     --bench)          WITH_BENCH=1; shift ;;
     # ⚠ REFUSE, PAS IGNORE — même règle que `--consented` : un drapeau retiré doit RATER.
     --disposable) echo "  --disposable est retire : un deploiement ne seme pas d'humain de demonstration." >&2
-                  echo "  Le banc (--box --bench) nomme le sien ; les personnes s'inscrivent sur la forge." >&2
+                  echo "  Le banc (--container --bench) nomme le sien ; les personnes s'inscrivent sur la forge." >&2
                   exit 1 ;;
     # ⚠ REFUSE, PAS IGNORE. Un drapeau retire doit RATER : accepte et sans effet, il ferait
     # croire a un geste qui ne se produit plus. Meme regle que `--fleet-human`, meme verrou.
@@ -159,7 +159,7 @@ while [[ $# -gt 0 ]]; do
         sed -n '/^#     install.sh — LA porte/,/^#     système/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,5\}//'
       else
         echo "install.sh $LCARS_DOOR_VERSION — LA porte d'entrée."
-        echo "  --workstation | --box   le rail · --bench  les annexes · --check  sonde read-only"
+        echo "  --workstation | --container   le rail · --bench  les annexes · --check  sonde read-only"
         echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
       fi
       exit 0 ;;
@@ -204,7 +204,7 @@ cat <<EOF
   Le déroulé : ${W}source${N} → ${W}préflight${N} → ${W}bilan${N} → ${W}ton choix${N} → le rail.
   Rien n'est modifié avant ton choix, et cette porte ne demande jamais sudo.
 
-  Les grands prérequis : ${W}git${N} pour la source · ${W}docker${N} pour la boîte ·
+  Les grands prérequis : ${W}git${N} pour la source · ${W}docker${N} pour le conteneur ·
   ${W}sudo${N} pour le poste (demandé par le rail lui-même, une fois, après ton choix).
 
 EOF
@@ -287,16 +287,16 @@ done
 DOCKER_OK=0
 case "$(fait docker)" in
   oui)    DOCKER_OK=1; say_ok "docker répond ($(fait docker_bin))" ;;
-  refuse) # Même fait, deux conclusions : le poste escalade et s'en moque, la boîte tourne sous
+  refuse) # Même fait, deux conclusions : le poste escalade et s'en moque, le conteneur tourne sous
           # l'humain et ne peut pas travailler. La branche tranche, pas le préflight.
           echo "  ${W}[à voir]${N} $(fait docker_why)" ;;
   absent) if [[ "$(fait consent)" == "env" || "$(fait consent)" == "fichier" ]] \
-             && [[ "$(fait substrat)" == "linux" && "${RAIL:-}" != "box" ]]; then
+             && [[ "$(fait substrat)" == "linux" && "${RAIL:-}" != "container" ]]; then
             echo "  ${W}[à voir]${N} docker absent — le rail POSTE le posera (docker-ce, dépôt upstream download.docker.com)"
-            [[ -n "$RAIL" ]] || echo "           la BOÎTE, elle, exige un daemon DÉJÀ debout : elle n'installe rien (loi 5)."
-          elif [[ "$RAIL" == "box" ]]; then
+            [[ -n "$RAIL" ]] || echo "           le CONTENEUR, lui, exige un daemon DÉJÀ debout : il n'installe rien (loi 5)."
+          elif [[ "$RAIL" == "container" ]]; then
             say_miss "$(fait docker_why)"
-            echo "           La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
+            echo "           Le conteneur n'installe pas docker (loi 5) : pose-le comme tu l'entends,"
             echo "           ou donne cette machine au rail poste — LCARS_ALLOW_ANY_HOST=1 bash $0 --workstation"
           else
             say_miss "$(fait docker_why)"
@@ -319,7 +319,7 @@ SUBSTRATE="$(fait substrat)"
 [[ -n "$SUBSTRATE" ]] || SUBSTRATE="${FORCED_SUBSTRATE:-linux}"
 
 docker_installable_here() {   # 0 si le rail POSTE peut poser docker sur cette machine-ci
-  [[ "${RAIL:-}" != "box" ]] || return 1
+  [[ "${RAIL:-}" != "container" ]] || return 1
   [[ -n "${LCARS_ALLOW_ANY_HOST:-}" ]] || return 1
   [[ "$SUBSTRATE" == "linux" ]]
 }
@@ -338,7 +338,7 @@ fi
 # ─── LE BILAN — CE QUE LA MACHINE PERMET, DIT AVANT TOUTE QUESTION ──────────
 #
 # ⚠ UNE OPTION IMPOSSIBLE S'AFFICHE, ELLE NE SE SUPPRIME PAS. La version d'avant choisissait
-# `RAIL=box` en silence sur un linux natif, et masquait l'option 2 quand docker manquait : l'écran
+# `RAIL=container` en silence sur un linux natif, et masquait l'option 2 quand docker manquait : l'écran
 # ne portait plus la trace de ce qui n'était pas offert, ni pourquoi. Un menu qui cache une option
 # fait croire qu'elle n'existe pas ; un menu qui la barre EN NOMMANT SON FAIT apprend la machine à
 # celui qui la lit — et c'est exactement ce que le canon demande (« l'option IMPOSSIBLE affichée,
@@ -346,7 +346,7 @@ fi
 #
 # Les faits viennent tous du même endroit : `00-preflight`, mesuré une fois plus haut.
 POSTE_POURQUOI=""
-BOITE_POURQUOI=""
+CONTENEUR_POURQUOI=""
 if [[ "$SUBSTRATE" == "wsl" ]]; then
   :
 elif [[ "$SUBSTRATE" == "linux" && "$(fait consent)" != "none" ]]; then
@@ -362,7 +362,7 @@ elif [[ "$SUBSTRATE" == "linux" ]]; then
 else
   POSTE_POURQUOI="substrat « $SUBSTRATE ». Ce rail est réservé à WSL2, ou à une machine DÉDIÉE déclarée telle par LCARS_ALLOW_ANY_HOST=1"
 fi
-[[ "$DOCKER_OK" -eq 1 ]] || BOITE_POURQUOI="$(fait docker_why)"
+[[ "$DOCKER_OK" -eq 1 ]] || CONTENEUR_POURQUOI="$(fait docker_why)"
 
 bilan_menu() {
   local etat1 etat2
@@ -372,8 +372,8 @@ bilan_menu() {
     etat1="${R}Ça prend${N} : sudo · un groupe système · /opt/lcars · des paquets"
     [[ "$SUBSTRATE" == "wsl" ]] && etat1="${R}Ça prend${N} : sudo · /etc/wsl.conf possédé entier · un groupe système · /opt/lcars"
   fi
-  if [[ -n "$BOITE_POURQUOI" ]]; then
-    etat2="${R}IMPOSSIBLE${N} — $BOITE_POURQUOI"
+  if [[ -n "$CONTENEUR_POURQUOI" ]]; then
+    etat2="${R}IMPOSSIBLE${N} — $CONTENEUR_POURQUOI"
   else
     etat2="${R}Ça prend${N} : ~3 Go · ~15 min de build · deux ports · un volume qui survit. Pour tout défaire : reset, 30 s."
   fi
@@ -386,7 +386,7 @@ bilan_menu() {
      l'humain de fleet, le gate en 40 s. la convergence ajoute et ne retire pas.
      $etat1
 
-  ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — une boîte, et rien hors de ton clone et de docker :
+  ${BA}2)${N} ${W}LE FAIRE TOURNER${N} — un conteneur, et rien hors de ton clone et de docker :
      pas de paquet, pas d'utilisateur, pas de groupe, rien dans /etc ni /usr.
      $etat2
 
@@ -397,17 +397,17 @@ EOF
 # EXPOSE tout, et on ne refuse qu'au moment où quelqu'un demande ce qui n'est pas possible. Refuser
 # plus tôt, c'est refuser une machine qui voulait peut-être l'AUTRE rail.
 # ⚠ UN REFUS DONNE LA VOIE QUI MARCHE, sinon il laisse quelqu'un devant un mur. Les deux rails sont
-# des sorties l'un pour l'autre : ce qui bloque le poste ne bloque pas la boîte, et réciproquement.
+# des sorties l'un pour l'autre : ce qui bloque le poste ne bloque pas le conteneur, et réciproquement.
 refuser_rail() { # refuser_rail <1|2> <raison>
   echo ""
   echo "  ${R}Ce rail n'est pas possible ici.${N}"
   echo "  $2"
   if [[ "$1" == "1" ]]; then
     echo "  Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici."
-    [[ -z "$BOITE_POURQUOI" ]] \
-      && echo "  Ou prends l'autre rail, qui est possible ici :  bash $0 --box"
+    [[ -z "$CONTENEUR_POURQUOI" ]] \
+      && echo "  Ou prends l'autre rail, qui est possible ici :  bash $0 --container"
   else
-    echo "  La boîte n'installe pas docker (loi 5) : pose-le comme tu l'entends, puis relance."
+    echo "  Le conteneur n'installe pas docker (loi 5) : pose-le comme tu l'entends, puis relance."
     [[ -z "$POSTE_POURQUOI" ]] \
       && echo "  Ou donne cette machine au rail poste :  bash $0 --workstation"
   fi
@@ -418,35 +418,35 @@ if [[ -n "$RAIL" ]]; then
   # Un drapeau de rail est une PRÉ-VALIDATION : l'opérateur a déjà dit ce qu'il veut, on ne le lui
   # redemande pas. Mais il ne dispense pas du refus — ce qui est impossible l'est aussi par drapeau.
   [[ "$RAIL" == "workstation" && -n "$POSTE_POURQUOI" ]] && refuser_rail 1 "$POSTE_POURQUOI"
-  [[ "$RAIL" == "box"         && -n "$BOITE_POURQUOI" ]] && refuser_rail 2 "$BOITE_POURQUOI"
+  [[ "$RAIL" == "container"         && -n "$CONTENEUR_POURQUOI" ]] && refuser_rail 2 "$CONTENEUR_POURQUOI"
 else
   bilan_menu
   # `--check` s'arrête ici : il a mesuré et il a dit. Aller plus loin demanderait un rail, donc un
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box status"
+    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/container status"
     exit 0
   fi
   ans=""
   { read -r -p "  ${G}1 ou 2 ?${N} " ans < /dev/tty; } 2>/dev/null || ans="__NO_TTY__"
   case "$ans" in
     1) [[ -n "$POSTE_POURQUOI" ]] && refuser_rail 1 "$POSTE_POURQUOI"; RAIL=workstation ;;
-    2) [[ -n "$BOITE_POURQUOI" ]] && refuser_rail 2 "$BOITE_POURQUOI"; RAIL=box ;;
+    2) [[ -n "$CONTENEUR_POURQUOI" ]] && refuser_rail 2 "$CONTENEUR_POURQUOI"; RAIL=container ;;
     __NO_TTY__)
       echo ""
       echo "  ${R}Pas de TTY : impossible de demander, et il n'y a pas de défaut sûr.${N}"
       echo "  Redis-le dans la ligne :"
       echo "    bash $0 --workstation    # LCARS s'installe dans ce système"
-      echo "    bash $0 --box            # LCARS tourne dans un conteneur"
+      echo "    bash $0 --container            # LCARS tourne dans un conteneur"
       exit 1 ;;
     *) echo "  ${R}Réponse « $ans » non comprise — rien n'a été fait.${N}"; exit 1 ;;
   esac
 fi
 
 # ─── PRÉFLIGHT DE LA BRANCHE ────────────────────────────────────────────────
-# Après la question, jamais avant : la boîte ne prend pas la distro pour cible, et exiger une
-# distro vierge plus haut refuserait une machine de travail qui voulait juste lancer une boîte.
+# Après la question, jamais avant : le conteneur ne prend pas la distro pour cible, et exiger une
+# distro vierge plus haut refuserait une machine de travail qui voulait juste lancer un conteneur.
 if [[ "$RAIL" == "workstation" ]]; then
   # Le substrat AVANT sudo : hors WSL ce rail est refusé quoi qu'il arrive, et « sudo manque »
   # enverrait installer sudo pour se faire refuser ensuite. `LCARS_ALLOW_ANY_HOST` est lu ici ET
@@ -460,8 +460,8 @@ if [[ "$RAIL" == "workstation" ]]; then
       echo "  ne sait pas le retirer. Et rien de LCARS n'est mesuré sur ce substrat."
     else
       echo ""
-      echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en boîte :"
-      echo "    bash $0 --box"
+      echo "  ${R}--workstation est réservé à WSL2.${N} Sur un Linux ordinaire, LCARS s'installe en conteneur :"
+      echo "    bash $0 --container"
       [[ "$SUBSTRATE" == "linux" ]] && {
         echo ""
         echo "  Si cette machine est DÉDIÉE à LCARS et que tu acceptes qu'il la possède :"
@@ -471,14 +471,14 @@ if [[ "$RAIL" == "workstation" ]]; then
     fi
   fi
   # ⚠ LE REFUS DE `--bench` SUR CE RAIL A DISPARU (§ 13 de `40-RAILS.md`). Il disait « il fournit les
-  # annexes à une BOÎTE ; ici la forge est montée par le provisionnement lui-même, sans drapeau » —
+  # annexes à un CONTENEUR ; ici la forge est montée par le provisionnement lui-même, sans drapeau » —
   # et il constatait une CAPACITÉ ABSENTE, pas un choix : `48-forge-host` montait en dur. Il consomme
   # désormais une forge fournie (`FORGE_BASE_URL`), donc les deux rails ont les deux états de l'axe
   # forge, et le drapeau a le même sens des deux côtés : « monte-la-moi ».
   #
   # ⚠ ET IL NE SÈME PLUS D'HUMAIN. C'était le raccourci que le § 13 nomme : `--bench` portait DEUX
   # choses — monter la forge (axe forge) et poser les annexes de démonstration (axe destination) —
-  # parce que sur la boîte les deux coïncidaient. Ouvrir `--bench` au poste sans séparer les deux
+  # parce que sur le conteneur les deux coïncidaient. Ouvrir `--bench` au poste sans séparer les deux
   # aurait rendu tous les postes semeurs, ce qui annulerait le canon du 30/08. Depuis, il n'y a
   # plus d'axe destination du tout : seul le banc sème un humain, et il le nomme.
 
@@ -487,19 +487,19 @@ if [[ "$RAIL" == "workstation" ]]; then
   if [[ "$(fait sudo)" == "absent" ]]; then
     echo ""
     echo "  ${R}sudo est absent, et ce rail en a besoin pour provisionner ce système.${N}"
-    echo "  La boîte, elle, ne modifie rien :  bash $0 --box"
+    echo "  Le conteneur, lui, ne modifie rien :  bash $0 --container"
     exit 1
   fi
 
   if [[ "$SUBSTRATE" == "wsl" ]] && [[ -f /etc/wsl.conf ]] && ! grep -q "LCARS" /etc/wsl.conf 2>/dev/null; then
     echo ""
     echo "  ${R}/etc/wsl.conf existe et n'est pas le nôtre — ce rail le REMPLACE en entier.${N}"
-    echo "  C'est la frontière de sécurité de la boîte (C: fermé, interop coupé), donc il n'est pas"
+    echo "  C'est la frontière de sécurité du conteneur (C: fermé, interop coupé), donc il n'est pas"
     echo "  fusionné : tout ce qui suit disparaît, sauvegarde ce qui compte."
     echo ""
     sed 's/^/      /' /etc/wsl.conf
     echo ""
-    echo "  Si tu ne veux pas de ça : la boîte ne touche à rien —  bash $0 --box"
+    echo "  Si tu ne veux pas de ça : le conteneur ne touche à rien —  bash $0 --container"
   fi
 fi
 
@@ -572,9 +572,9 @@ if [[ "$RAIL" == "workstation" ]]; then
     "  sous l'humain de fleet : le siège a sudo, ses pods aussi."
     "  Pire cas = nuke + re-provision (minutes)."
   )
-  # ⚠ CE QUE `--bench` FAIT SUR **CE** RAIL, et rien de plus. La bannière boîte annonce « forge
+  # ⚠ CE QUE `--bench` FAIT SUR **CE** RAIL, et rien de plus. La bannière conteneur annonce « forge
   # jetable + runner CI + humain de démo » — les deux derniers sont le BANC, qui n'existe que sur
-  # la boîte. Reprendre cette phrase ici promettrait ce que ce rail ne fait pas.
+  # le conteneur. Reprendre cette phrase ici promettrait ce que ce rail ne fait pas.
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : la forge est MONTÉE ici, même si FORGE_BASE_URL est posée.${N}")
   fi
@@ -583,14 +583,14 @@ else
   _banner_body=(
     "  Pas de paquet, pas d'utilisateur, pas de groupe, rien"
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
-    "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
+    "  Pour tout défaire : ${W}deploy/container reset${N} — 30 s."
   )
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
   else
     _banner_body+=("  Il te faut une forge : FORGE_BASE_URL + un token.")
   fi
-  _box_emit "  RAIL BOÎTE — rien hors de ton clone et de docker." "${_banner_body[@]}"
+  _box_emit "  RAIL CONTENEUR — rien hors de ton clone et de docker." "${_banner_body[@]}"
 fi
 
 echo ""
@@ -605,23 +605,23 @@ echo ""
 }
 fi
 
-# ─── LA BRANCHE BOÎTE : aucune escalade, on délègue à la porte docker ───────
-if [[ "$RAIL" == "box" ]]; then
+# ─── LA BRANCHE CONTENEUR : aucune escalade, on délègue à la porte docker ───────
+if [[ "$RAIL" == "container" ]]; then
   # ⚠ L'AMORÇAGE `sudo -v` A QUITTÉ CETTE PORTE (D5). Il vivait ici pour amorcer le cache que le shim
-  # de `box` consomme commande par commande — mais la porte n'a pas de sudo, par canon. Le fait est
-  # EXPOSÉ dans le bilan ; c'est `box` qui demande l'invite, à SON début, s'il en a besoin.
+  # de `container` consomme commande par commande — mais la porte n'a pas de sudo, par canon. Le fait est
+  # EXPOSÉ dans le bilan ; c'est `container` qui demande l'invite, à SON début, s'il en a besoin.
   #
   # Ce que ce bloc lisait était de toute façon MORT depuis E1 : `PROV_DOCKER_DENIED`,
   # `PROV_DOCKER_WHY`, `docker_endpoint`. Trois variables d'une lib que cette porte ne source plus.
-  [[ -x "$SCRIPT_DIR/deploy/box" ]] || {
-    echo "  ${R}deploy/box introuvable — ce rail exige le checkout complet.${N}"
-    echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"
+  [[ -x "$SCRIPT_DIR/deploy/container" ]] || {
+    echo "  ${R}deploy/container introuvable — ce rail exige le checkout complet.${N}"
+    echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --container"
     exit 1
   }
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    exec "$SCRIPT_DIR/deploy/box" doctor
+    exec "$SCRIPT_DIR/deploy/container" doctor
   fi
-  # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
+  # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS CONTENEUR, ET C'EST LA PORTE QUI LA FOURNIT ──────
   # ─── L'ARITÉ SE DÉCLARE, ELLE NE SE SUPPOSE PAS ────────────────────────────────────────────────
   #
   # ⚠ CETTE BOUCLE AVANÇAIT DE DEUX EN DEUX, ET UN DRAPEAU DE `PASSTHRU` PEUT ÊTRE IMPAIR. Un
@@ -639,12 +639,12 @@ if [[ "$RAIL" == "box" ]]; then
       *) echo 0 ;;
     esac
   }
-  _box_reject=()
+  _container_reject=()
   _i=0
   while [[ "$_i" -lt "${#PASSTHRU[@]}" ]]; do
     _arite="$(passthru_arite "${PASSTHRU[$_i]}")"
     if [[ "$_arite" -eq 0 ]]; then
-      _box_reject+=("${PASSTHRU[$_i]} (arité non déclarée dans la traduction de la boîte — la deviner décalerait tout ce qui suit, en silence)")
+      _container_reject+=("${PASSTHRU[$_i]} (arité non déclarée dans la traduction du conteneur — la deviner décalerait tout ce qui suit, en silence)")
       break
     fi
     case "${PASSTHRU[$_i]}" in
@@ -653,7 +653,7 @@ if [[ "$RAIL" == "box" ]]; then
           # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # la boite s'appelle <N>-fleet (deploy/box)
+          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # le conteneur s'appelle <N>-fleet (deploy/container)
         fi ;;
       # ⚠ TROIS PORTS, PAS DEUX, ET LE TROISIEME MANQUAIT. `bench-up.sh` en publie trois — forge,
       # deck et SSH — et refuse net si l'un d'eux est tenu. La porte n'en traduisait que deux : un
@@ -674,56 +674,56 @@ if [[ "$RAIL" == "box" ]]; then
           esac
           DELEGATE_ARGS=("$_d" "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          _box_reject+=("${PASSTHRU[$_i]} (les ports de la boite sont ceux du compose — ajoute --bench, ou edite le compose)")
+          _container_reject+=("${PASSTHRU[$_i]} (les ports du conteneur sont ceux du compose — ajoute --bench, ou edite le compose)")
         fi ;;
       --env|--human|--only)
-        _box_reject+=("${PASSTHRU[$_i]} (drapeau du rail POSTE : il pilote « provision », que la boite n'appelle pas)") ;;
+        _container_reject+=("${PASSTHRU[$_i]} (drapeau du rail POSTE : il pilote « provision », que le conteneur n'appelle pas)") ;;
     esac
     _i=$((_i + _arite))
   done
-  if [[ "${#_box_reject[@]}" -gt 0 ]]; then
+  if [[ "${#_container_reject[@]}" -gt 0 ]]; then
     echo ""
     echo "  ${R}Ce rail ne peut pas honorer ces options :${N}"
-    printf '    %s\n' "${_box_reject[@]}"
+    printf '    %s\n' "${_container_reject[@]}"
     echo "  Rien n'a ete fait. Les accepter sans les lire serait pire que les refuser."
     exit 1
   fi
 
   if [[ "$WITH_BENCH" -ne 1 && -z "${FORGE_BASE_URL:-}" ]]; then
     echo ""
-    echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
+    echo "  ${R}FORGE_BASE_URL n'est pas posée — le conteneur ne fabrique pas ta forge, il la consomme.${N}"
     echo "  Deux voies :"
     echo "    ${W}--bench${N}                     LCARS monte une forge jetable, un runner et un humain de démo"
-    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« deploy/box forge-check »)"
+    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« deploy/container forge-check »)"
     exit 1
   fi
 
   # ⚠ LE BUILD D'IMAGE A QUITTÉ CETTE PORTE (D4, `40-RAILS.md` §§ 3 et 6), ET IL N'A PAS DÉMÉNAGÉ :
-  # il est MORT ici. Une boîte de production TIRE son image — épinglée par digest, avec le gate joué
+  # il est MORT ici. Un conteneur de production TIRE son image — épinglée par digest, avec le gate joué
   # UNE FOIS par le rail qui la construit. Un client ne compile pas chez son hôte : il hériterait
   # d'un binaire que personne d'autre n'a vu, sur une machine dont ce n'est pas le métier.
   #
-  # `box build` reste, comme geste de DEV, et c'est `box` qui décide s'il en a besoin — il connaît
+  # `container build` reste, comme geste de DEV, et c'est `container` qui décide s'il en a besoin — il connaît
   # son image, ses tags et son compose. La porte, elle, n'a jamais eu de raison de le savoir : elle
   # sondait `image inspect` avec `PROV_DOCKER_BIN`, une variable morte depuis que le préflight a
   # quitté ce fichier.
   #
   # Les trois témoins qui gardaient ce chemin (image absente / présente / build en échec) suivent
-  # dans `box_project.bats` — ce sont des déplacements, pas des suppressions.
+  # dans `container_project.bats` — ce sont des déplacements, pas des suppressions.
 
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     echo ""
-    echo "  ${W}--bench${N} : forge jetable + boîte + runner CI + humain de démo, en un geste."
+    echo "  ${W}--bench${N} : forge jetable + conteneur + runner CI + humain de démo, en un geste."
     # Le délégué reçoit la résolution du daemon, il ne la refait pas — le fait vient du module.
     DOCKER_BIN="$(fait docker_bin)"; export DOCKER_BIN
     exec "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""
-  echo "  ${W}up${N} — la sortie qui suit est celle de deploy/box"
-  exec "$SCRIPT_DIR/deploy/box" up
+  echo "  ${W}up${N} — la sortie qui suit est celle de deploy/container"
+  exec "$SCRIPT_DIR/deploy/container" up
 fi
 
-# ─── LA BRANCHE POSTE : on délègue, comme pour la boîte ─────────────────────
+# ─── LA BRANCHE POSTE : on délègue, comme pour le conteneur ─────────────────────
 #
 # ⚠ CE BLOC FAISAIT CENT QUARANTE LIGNES, ET C'ÉTAIT LE RAIL ENTIER. Escalade sudo, clone sous
 # l'humain, tranche paquets, `provision apply`, lecture du verdict, acceptation, identifiants,
@@ -735,7 +735,7 @@ fi
 # un problème qu'elle s'était créé en voulant tout porter. `workstation` n'a ni accueil ni pause :
 # son escalade n'a rien à sauter, et `EUID` — un FAIT — lui suffit à reconnaître son second passage.
 #
-# Le rail poste et le rail boîte sortent maintenant par la même forme : un `exec` vers un délégué du
+# Le rail poste et le rail conteneur sortent maintenant par la même forme : un `exec` vers un délégué du
 # clone, et le code de retour est le sien.
 WORKSTATION="$SCRIPT_DIR/deploy/workstation"
 [[ -x "$WORKSTATION" ]] || {
@@ -744,7 +744,7 @@ WORKSTATION="$SCRIPT_DIR/deploy/workstation"
   exit 1
 }
 # ⚠ `--bench` ÉTAIT AVALÉ SUR CE RAIL, ET IL AFFICHAIT UNE PROMESSE. Mesure : les trois usages de
-# `WITH_BENCH` en zone de sortie sont tous dans la branche BOÎTE, et le drapeau n'entre pas dans
+# `WITH_BENCH` en zone de sortie sont tous dans la branche CONTENEUR, et le drapeau n'entre pas dans
 # `PASSTHRU` — sur le poste il posait une variable que personne ne lisait, après avoir annoncé
 # « forge jetable + runner CI + humain de démo ». Un drapeau accepté qui ne fait rien est pire qu'un
 # drapeau refusé : le refus laisse l'opérateur chercher, le silence le laisse croire.
@@ -752,7 +752,7 @@ WORKSTATION="$SCRIPT_DIR/deploy/workstation"
 # CE QU'IL FAIT ICI, ET C'EST TOUT CE QUE LE § 13 LUI DONNE : l'axe FORGE, « monte-la-moi ». Sur ce
 # rail la montée est déjà le défaut quand `FORGE_BASE_URL` est absente ; l'apport du drapeau est donc
 # de monter QUAND MÊME si elle est posée. Le runner CI et l'humain de démo sont le BANC, qui
-# n'existe que sur la boîte, et qui nomme son humain lui-même.
+# n'existe que sur le conteneur, et qui nomme son humain lui-même.
 if [[ "$WITH_BENCH" -eq 1 ]]; then
   export PROV_FORGE_MONTEE=1
 fi

@@ -178,12 +178,12 @@ non circulaire.
   l'opérateur greppe : un sous-module extrait loggue sous la façade de son rail.
 - **En-têtes shell** au format `SOURCE: / AUTHOR: / STARDATE: / STATUS:`. La stardate est posée
   par le pre-commit de `git-hooks/` sur les fichiers stagés ; ne pas l'éditer à la main.
-- **Langue.** Ce qui part avec la boîte est en anglais : prose source, `@moduledoc`, noms, logs,
-  messages de commit. Ce que la boîte énonce à un opérateur suit sa langue : sortie CLI, dashboard,
+- **Langue.** Ce qui part avec le conteneur est en anglais : prose source, `@moduledoc`, noms, logs,
+  messages de commit. Ce que le conteneur énonce à un opérateur suit sa langue : sortie CLI, dashboard,
   corps d'issues et de PR. Le package SP (`<catalogue>/sp_builder/**`, modop-bundles, texte des
   cap-profiles) est hors périmètre et ne se traduit jamais. Un log reste en anglais même lu par
   l'opérateur. Pas d'accents dans la prose source, parce qu'on la greppe. **Aucun mur ne tient
   cette règle, par arbitrage : un bon commentaire en français vaut mieux qu'un mauvais en
   anglais**, et l'état réel du dépôt, log de commits compris, est majoritairement en français.
-  Ne pas introduire de français dans la boîte ; ne pas lancer de passe de traduction en vrac.
+  Ne pas introduire de français dans le conteneur ; ne pas lancer de passe de traduction en vrac.
 - `tmp/` = artefacts ExUnit `@tag :tmp_dir`, gitignoré, jamais commité.

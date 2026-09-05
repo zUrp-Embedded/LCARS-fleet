@@ -31,7 +31,7 @@ SOCK="$(sotf_obs_sock)"
 # NOTHING about wiring. Kept because its ABSENCE is informative — no health means no daemon, and
 # every probe below is then explained rather than mysterious.
 probe_health() {
-  # A box where nobody ran `fleet_v2 start` is NOT a degraded fleet — it is a box without a fleet.
+  # A container where nobody ran `fleet_v2 start` is NOT a degraded fleet — it is a container without a fleet.
   # Measured on a fresh container: no `~/.lcars/run/` at all, and without this branch the run
   # produced five red lines describing a daemon that was never asked to exist. `inactive` is the
   # honest verdict, and it deliberately does not degrade the run.

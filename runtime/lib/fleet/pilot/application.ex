@@ -364,7 +364,7 @@ defmodule Fleet.Pilot.Application do
   # `boot.verifier_covers_rail` de `mix lcars.contracts.check`, qui lit les DEUX listes a l'AST et
   # refuse la divergence. Ajouter une garde d'un cote sans l'ajouter de l'autre fait rougir le
   # gate, au lieu de rendre la phrase du `@doc` fausse en silence.
-  # (Perimetre : les gardes de CATALOGUE, la famille `validate_*!`. Une garde de BOITE —
+  # (Perimetre : les gardes de CATALOGUE, la famille `validate_*!`. Une garde de CONTENEUR —
   # `require_signer_tokens!`, credentials sur disque — reste au boot seul : ce verificateur est
   # tokenless par construction, cf. son commentaire.)
   @spec verify_cards_and_roles!(keyword()) :: :ok
@@ -399,7 +399,7 @@ defmodule Fleet.Pilot.Application do
   @spec validate_structural_roles!() :: :ok
   defdelegate validate_structural_roles!(), to: Fleet.Project.Roles
 
-  # ⚠ UNE BOITE QUI NE PEUT PAS SIGNER COMME SES SIGNATAIRES REFUSE LA READINESS — elle ne demarre
+  # ⚠ UN CONTENEUR QUI NE PEUT PAS SIGNER COMME SES SIGNATAIRES REFUSE LA READINESS — il ne demarre
   # pas verte pour mourir des mois plus tard. Le signataire suivant la FONCTION, un jeton manquant
   # se manifesterait sinon a l'acte le plus terminal du chemin le plus rare : le defaut qui attend
   # le pire moment.
@@ -407,11 +407,11 @@ defmodule Fleet.Pilot.Application do
   # `require_`, ET PAS `validate_` : le nom EST la declaration. La famille `validate_*!` est la
   # sequence de garde d'un CATALOGUE, rejouee par un verificateur autonome qui est SANS JETON par
   # design — y jouer ce garde-ci refuserait des catalogues valides pour une question de credential.
-  # Un garde de BOITE ne porte donc pas le nom de la famille.
+  # Un garde de CONTENEUR ne porte donc pas le nom de la famille.
   # ⚠ CE GARDE N'A PAS LA MEME PORTEE QUE SA LIGNE LE SUGGERE.
   #
   # Tant qu'un jeton est un fichier local, « pas de jeton » veut dire UNE chose : le
-  # provisionnement n'a pas tourne, la boite est mal deployee, elle ne doit pas demarrer — une
+  # provisionnement n'a pas tourne, le conteneur est mal deploye, il ne doit pas demarrer — une
   # absence purement locale, definitive, qu'aucune attente ne repare.
   #
   # Ce jeton-ci se DEMANDE au service d'autorite, et la meme absence recouvre alors trois etats :
@@ -420,13 +420,13 @@ defmodule Fleet.Pilot.Application do
   #   service d'autorite muet     LOCAL, TRANSITOIRE -> une unite qui n'a pas fini de demarrer
   #   forge injoignable           DISTANT, TRANSITOIRE
   #
-  # Refuser le boot sur les deux derniers echangerait une panne rattrapable contre une boite morte —
+  # Refuser le boot sur les deux derniers echangerait une panne rattrapable contre un conteneur mort —
   # et le message accuserait `provision-role-tokens.sh` pour un hoquet de reseau. C'est exactement
   # l'arbitrage ecrit dans l'etat cible : une panne partielle de forge est un comportement CORRECT,
   # le label reste, le poller reessaie, rien n'est perdu.
   #
   # ⚠ ET CE N'EST PAS « ON LAISSE PASSER » : les deux causes transitoires demarrent BRUYAMMENT. Un
-  # boot vert sur une boite structurellement incapable de sceller est precisement le succes muet que
+  # boot vert sur un conteneur structurellement incapable de sceller est precisement le succes muet que
   # cette regle retire ailleurs ; on ne l'introduit pas ici.
   @signer_causes_fatales [:no_role_token, :no_forge_login, :bad_role, :not_a_worker]
 

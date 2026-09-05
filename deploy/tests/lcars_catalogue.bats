@@ -11,7 +11,7 @@
 #
 # Ce qui les rendait necessaires est ce qui condamne l'objet qu'ils gardaient : quatre commandes ont
 # menti EN MEME TEMPS parce que la CLI lisait le fichier pendant que le runtime appliquait « pas de
-# declaration = le catalogue livre, seul ». Mesure du 2026-08-12 sur une boite dont tout tournait
+# declaration = le catalogue livre, seul ». Mesure du 2026-08-12 sur un conteneur dont tout tournait
 # sur `fleet` : `list` l'affichait « inactif », `enable web` le faisait sortir sans un mot, et
 # `disable fleet` repondait « n'est pas actif ». Trois sens du meme modele faux.
 #
@@ -133,7 +133,7 @@ FAKE
 }
 
 @test "list: SANS fichier env, la porte part quand meme — le fichier est un apport, pas un prerequis" {
-  # Une boite dont l'env est deja cable (le conteneur exporte FORGE_BASE_URL) n'a pas ce fichier
+  # Un conteneur dont l'env est deja cable (le conteneur exporte FORGE_BASE_URL) n'a pas ce fichier
   # sous ce HOME ; la porte ne doit pas refuser pour autant.
   bin="$BATS_TEST_TMPDIR/fake_noenv_release"
   printf '#!/usr/bin/env bash

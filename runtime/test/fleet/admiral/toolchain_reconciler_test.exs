@@ -3,7 +3,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   Le déclencheur est une COMPARAISON, et ces cas défendent les endroits où elle peut mentir.
 
   Trois mensonges possibles, tous silencieux : conclure « à jour » quand la forge est injoignable,
-  conclure « à jour » sur une boîte qui n'a jamais rien appliqué (LE CAS DU REBUILD — le marqueur
+  conclure « à jour » sur un conteneur qui n'a jamais rien appliqué (LE CAS DU REBUILD — le marqueur
   meurt avec le conteneur, c'est voulu), et noter un SHA que le convergeur n'a pas réussi à poser.
   Les trois rendraient un état approuvé mais non appliqué — précisément ce que le rail entier
   existe pour supprimer.
@@ -105,7 +105,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   defp converger_result(v), do: :persistent_term.put({__MODULE__, :converger_result}, v)
 
   describe "la comparaison" do
-    test "boîte neuve (ou REBUILDÉE) : AUCUN SHA appliqué ⇒ elle converge, même si la branche n'a pas bougé",
+    test "conteneur neuf (ou REBUILDÉ) : AUCUN SHA appliqué ⇒ il converge, même si la branche n'a pas bougé",
          %{server: server} do
       # LE CAS DU REBUILD, et c'est pour lui que `nil` ≠ « à jour » ET que le marqueur vit avec le
       # conteneur : /usr est revenu à la baseline de l'image pendant que la branche, elle, n'a pas
@@ -140,7 +140,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
       Application.put_env(:lcars_fleet, :admiral_forge_client, ForgeDown)
 
       # Rendre `:up_to_date` ici ferait qu'une panne réseau se lise comme « rien à faire » — et sur
-      # un rebuild la boîte resterait sans outillage en annonçant que tout va bien.
+      # un rebuild le conteneur resterait sans outillage en annonçant que tout va bien.
       assert {:error, {:branch_unreadable, :econnrefused}} = R.check_now(server)
       assert R.applied_sha() == nil
       refute_received {:converged, _}
@@ -151,7 +151,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
 
       assert {:error, :boom} = R.check_now(server)
 
-      # Noter avant d'appliquer ferait d'un convergeur mort en route une boîte qui se croit à jour :
+      # Noter avant d'appliquer ferait d'un convergeur mort en route un conteneur qui se croit à jour :
       # la passe suivante verrait « pas d'écart » et l'état approuvé resterait non appliqué.
       assert R.applied_sha() == nil
 
@@ -352,7 +352,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
   describe "le SHA noté est celui qui a été APPLIQUÉ" do
     # ⚠ SANS CE TÉMOIN, LA PANNE EST MUETTE ET DÉFINITIVE. Entre notre lecture de la tête et la
     # résolution que le service fait de son côté, la branche peut avancer — le rail EXISTE pour que
-    # des PR y atterrissent. Noter NOTRE tête ferait croire la boîte à jour sur un état qu'elle n'a
+    # des PR y atterrissent. Noter NOTRE tête ferait croire le conteneur à jour sur un état qu'il n'a
     # pas appliqué, et le tick suivant ne verrait AUCUN écart : plus jamais de convergence, et rien
     # ne le dirait.
     test "la branche a avancé pendant la convergence → c'est l'état APPLIQUÉ qui est noté", %{
@@ -420,7 +420,7 @@ defmodule Fleet.Admiral.ToolchainReconcilerTest do
     # réponse inintelligible ne faisait rougir personne.
     #
     # C'est exactement le succès muet que ce rail refuse ailleurs : un service d'un autre lot, ou un
-    # relais qui s'intercale, répondrait autre chose — et la boîte noterait un SHA jamais appliqué.
+    # relais qui s'intercale, répondrait autre chose — et le conteneur noterait un SHA jamais appliqué.
     test "une réponse INCOMPRÉHENSIBLE n'est pas un succès", %{server: server} do
       path = fake_privileged("bonjour")
 

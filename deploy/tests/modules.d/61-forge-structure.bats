@@ -161,7 +161,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
 @test "le pre-requis manquant est NOMME avec le module qui le pose" {
   grep -q '46-tofu' "$SRC"
   code | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  refute grep -q 'box build' "$SRC"
+  refute grep -q 'container build' "$SRC"
 }
 
 @test "le depot de demo est recable, la REFERENCE se demande a son autorite — ce module ne la nomme pas" {

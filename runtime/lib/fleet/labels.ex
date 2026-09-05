@@ -70,7 +70,7 @@ defmodule Fleet.Labels do
   def awaits_arch, do: @awaits_arch
 
   @doc """
-  HUMAN lock, SECOND SHAPE: the work-item asked for a tool the box does not have, and waits on an
+  HUMAN lock, SECOND SHAPE: the work-item asked for a tool the container does not have, and waits on an
   ADMIN — not on the arch.
 
   ⚠ DISTINCT FROM `awaits_arch/0`, AND IT IS NOT COSMETIC. The arch can do nothing with a toolchain

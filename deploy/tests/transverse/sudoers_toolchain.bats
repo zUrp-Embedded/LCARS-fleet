@@ -71,9 +71,9 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
 # les trente secondes.
 #
 # Le geste passe par `toolchain.sock`. Ce qui se garde ici est desormais l'ABSENCE — et c'est un
-# contrat plus dur que la pose, parce qu'il porte sur les boites DEJA provisionnees.
+# contrat plus dur que la pose, parce qu'il porte sur les conteneurs DEJA provisionnees.
 
-@test "sudoers: l'apply RETIRE la regle sur une boite qui la porte encore" {
+@test "sudoers: l'apply RETIRE la regle sur un conteneur qui la porte encore" {
   # ⚠ LE TEMOIN QUI COMPTE LE PLUS DE CETTE PHASE. Cesser de POSER ne retire rien : le NOPASSWD
   # survivrait au chantier qui le supprime, sur chaque machine deja convergee, indefiniment et sans
   # qu'une ligne le dise. C'est mot pour mot la maladie que ce module cite a son point 3 — « sans
@@ -96,9 +96,9 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [[ "$output" == *"toolchain.sock"* ]]
 }
 
-@test "sudoers: sur une boite propre, l'apply ne pose RIEN et reste vert" {
+@test "sudoers: sur un conteneur propre, l'apply ne pose RIEN et reste vert" {
   # LE TEMOIN DU TEMOIN : sans lui, un module qui echouerait sur l'absence du fichier passerait le
-  # premier test (qui, lui, en pose un) et casserait chaque apply d'une boite deja saine.
+  # premier test (qui, lui, en pose un) et casserait chaque apply d'un conteneur deja sain.
   [[ ! -e "$LCARS_SUDOERS_DIR/lcars-toolchain" ]]
   run_apply
   [[ "$status" -eq 0 ]]
@@ -368,7 +368,7 @@ EOS
 
 # ⚠ LE TEMOIN QUI GARDE LA CORRECTION AU PASSAGE. L'en-tete d'authentification etait construit dans
 # un tableau passe a `curl` en ARGV : le jeton systeme etait donc lisible dans `/proc/<pid>/cmdline`
-# par n'importe quel process de la boite, pendant toute la duree de l'appel. Fermer un fichier
+# par n'importe quel process du conteneur, pendant toute la duree de l'appel. Fermer un fichier
 # `0640` et laisser le secret dans une ligne de commande annulerait le geste au moment ou il
 # s'exerce. `-K -` le fait passer par un tube.
 @test "list.sh: le jeton ne passe JAMAIS en argv de curl" {

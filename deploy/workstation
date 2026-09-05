@@ -6,7 +6,7 @@
 #
 #     deploy/workstation {up|doctor}
 #
-# Jumeau de `deploy/box` : celui-là pilote une BOÎTE, celui-ci provisionne CE SYSTÈME. Mêmes
+# Jumeau de `deploy/container` : celui-là pilote un CONTENEUR, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
 # reste l'autorité : `deploy/provision`, que ces deux-là appellent sans jamais le doubler.
 #
@@ -180,7 +180,7 @@ cmd_up() {
   # ─── L'AUTORITÉ ──────────────────────────────────────────────────────────────────────────────
   # `provision apply` rend 0 (convergé), 2 (appliqué, drift résiduel — rien n'est cassé) ou 1
   # (échec) : sous `set -e`, une ligne nue tuerait ce script sur 1 ET 2, sans un mot. Même lecture
-  # que `deploy/box` (`await_provision_verdict`) — deux délégués qui en tirent deux verdicts, c'est
+  # que `deploy/container` (`await_provision_verdict`) — deux délégués qui en tirent deux verdicts, c'est
   # un code de retour qui ne veut plus rien dire.
   local rc=0
   "$PROVISION" apply "$@" || rc=$?

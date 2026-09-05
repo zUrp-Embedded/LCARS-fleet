@@ -176,7 +176,7 @@ probe_mcp_bridge() {
 
 # ── A-t-on jamais demarre une fleet ici ───────────────────────────────────────────────────────────
 # Learned from a second specimen, and it is the difference between a finding and a false alarm. A
-# fresh container has no `~/.lcars/run/` AT ALL; a box where `fleet_v2 start` ran leaves `api.sock`,
+# fresh container has no `~/.lcars/run/` AT ALL; a container where `fleet_v2 start` ran leaves `api.sock`,
 # `api_url`, `fleet_v2.sock`, `mcp/`, `tmux-sock/` there. Without this, a machine that never started
 # a fleet reports `degraded` on every endpoint — five red lines describing a fleet that was never
 # asked to exist. `inactive` is the honest verdict for that, and it does not degrade the run.
@@ -189,7 +189,7 @@ probe_fleet_ever_started() {
   else
     emit "instruments.fleet_started" "$PLANE" "inactive" "local" "test -d $d" \
       "aucun repertoire de run ($d) — aucune fleet n'a jamais demarre sous cet humain" \
-      "N'est PAS une panne : une boite ou personne n'a lance la fleet est un etat legitime. Explique les endpoints muets qui suivent ; ne prejuge pas d'une fleet lancee ailleurs (autre humain, autre uid)."
+      "N'est PAS une panne : un conteneur ou personne n'a lance la fleet est un etat legitime. Explique les endpoints muets qui suivent ; ne prejuge pas d'une fleet lancee ailleurs (autre humain, autre uid)."
   fi
 }
 

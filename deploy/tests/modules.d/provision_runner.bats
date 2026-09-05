@@ -119,7 +119,7 @@ EOF
   [[ "$output" == *"docker n'est pas un rail"* ]]
   [[ "$output" == *"Dockerfile"* ]]
   [[ "$output" == *"verify"* ]]
-  [[ "$output" == *"box/init.sh"* ]]
+  [[ "$output" == *"container/init.sh"* ]]
   refute grep -q "60-deploystub" "$RUN_LOG"
 }
 @test "docker n'est PAS un rail : uninstall y est refuse aussi — doctor et list restent" {
@@ -140,7 +140,7 @@ EOF
   [ "$status" -eq 1 ] || { echo "status=$status"; echo "$output"; false; }
   [[ "$output" == *"drift: 1"* ]]
   # le remede n'est PAS « provision apply » (refuse sur docker) : c'est le rebuild de l'image
-  [[ "$output" == *"box build"* ]] || { echo "$output"; false; }
+  [[ "$output" == *"container build"* ]] || { echo "$output"; false; }
   refute grep -q 'converger : sudo' <<<"$output"
   grep -q "60-deploystub:check" "$RUN_LOG"
 }
@@ -620,13 +620,13 @@ EOF
   [ "$(head -n1 "$BATS_TEST_TMPDIR/ordre")" = "48-forge-host.sh" ]
 }
 
-@test "61-forge-structure : la structure ne passe JAMAIS par une boite LCARS vivante" {
+@test "61-forge-structure : la structure ne passe JAMAIS par un conteneur LCARS vivant" {
   # ⚖ « reconstruire et relancer un LCARS en conteneur pour tester celui qu'on vient d'installer
   # nativement » — c'est ce que ce module evite, et cette regle-la n'a pas bouge.
   #
   # ⚠ CE TEMOIN A GRAVE UN MOYEN, PAS LA REGLE, et il est reecrit pour ca. Il exigeait `forge-apply`,
   # c'est-a-dire un run TRANSITOIRE d'une image de 1,18 Go batie pour ce seul appel (⚖ user
-  # 2026-08-22). Le conteneur jetable etait une facon d'eviter la boite vivante ; en appeler le geste
+  # 2026-08-22). Le conteneur jetable etait une facon d'eviter le conteneur vivant ; en appeler le geste
   # directement en est une autre, plus courte. La regle survit, son implementation non.
   MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
   local code; code="$BATS_TEST_TMPDIR/61-code.sh"
@@ -636,13 +636,13 @@ EOF
   # et jamais d'un LCARS qui tourne
   refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
   refute grep -q -- "forge-apply" "$code"
-  # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
-  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/box/boot.sh"
+  # la porte `forge-apply` de l'image RESTE — c'est le rail CONTENEUR qui l'emprunte, et il est vivant
+  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/container/boot.sh"
 }
 
 @test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
   # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens` a donne au conteneur
-  # un dossier VIDE, et le geste a repondu « la boite ne detient pas ce qu'il faut » en nommant des
+  # un dossier VIDE, et le geste a repondu « le conteneur ne detient pas ce qu'il faut » en nommant des
   # fichiers qui existaient a trente centimetres. Le daemon vit dans une autre VM : un chemin de
   # cette distro lui est invisible, et il cree un repertoire vide a la place, EN SILENCE.
   #
@@ -783,7 +783,7 @@ EOF
   [ "$output" = "http://127.0.0.1:3000|http://10.42.0.63:3000" ]
 }
 
-@test "sans fichier public, le defaut reste l'interne — une boite ou les deux coincident" {
+@test "sans fichier public, le defaut reste l'interne — un conteneur ou les deux coincident" {
   local priv="$BATS_TEST_TMPDIR/private2"; mkdir -p "$priv"
   echo "http://forge:3000" > "$priv/forge.url"
 

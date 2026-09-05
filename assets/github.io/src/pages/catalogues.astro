@@ -192,7 +192,7 @@ const sections = [
     <p class="intro">Le nom vient du catalogue lui-même — ni de la source, ni du dossier où on l'a
     déballé, ni de la personne qui l'installe. C'était l'inverse, et c'était sans conséquence tant
     que le nom n'était qu'une poignée locale. Ça cesse de l'être au moment où il <b>adresse quelque
-    chose hors de la boîte</b> :</p>
+    chose hors du conteneur</b> :</p>
 
     <div class="grid">
       <div class="cell" style="--k:var(--salmon)"><b>L’org de la forge</b><i>où vivent ses projets</i>
@@ -212,7 +212,7 @@ const sections = [
   <section id="declaration">
     <SectionHead id="declaration" title="Installé, ou disponible" cap="l’état est un fait de forge" />
     <p class="intro">Un catalogue est <b>installé</b> quand la forge porte son organisation et sa
-    source — et il l'est alors <b>pour tout le monde</b>, pas pour la boîte qui l'a posé. Sinon il
+    source — et il l'est alors <b>pour tout le monde</b>, pas pour le conteneur qui l'a posé. Sinon il
     est <b>disponible</b> : quelqu'un l'a déposé, personne ne l'a installé. Il n'y a pas de
     troisième état, pas de fichier d'activation à tenir, pas d'ordre de précédence à arbitrer.</p>
 
@@ -227,7 +227,7 @@ const sections = [
     <div class="warn"><b>Ce que ce modèle remplace, et pourquoi.</b> Il y a eu un troisième état,
     « actif », déclaré dans un fichier local dont l'ordre faisait la précédence. Un fait tenu à deux
     endroits dérive : la CLI lisait le fichier pendant que le runtime appliquait « pas de
-    déclaration = le catalogue livré, seul ». Mesuré sur une boîte où tout tournait sur le catalogue
+    déclaration = le catalogue livré, seul ». Mesuré sur un conteneur où tout tournait sur le catalogue
     livré — <code>list</code> l'affichait « inactif », <code>enable</code> le faisait sortir sans un
     mot, <code>disable</code> répondait « n'est pas actif ». Trois sens du même modèle faux. La
     réparation n'était pas de synchroniser les deux copies : c'était d'en supprimer une.</div>
@@ -240,7 +240,7 @@ const sections = [
         <div class="v">install</div>
         <div class="x">Un seul geste, et il <b>provisionne</b> : l'organisation sur la forge, les
         comptes de rôle, les teams, la source du catalogue dans <code>&lt;nom&gt;/catalogue</code>,
-        et le matériel posé sur la boîte. C'est un geste d'<b>admin de forge</b> — le runtime lit ce
+        et le matériel posé sur le conteneur. C'est un geste d'<b>admin de forge</b> — le runtime lit ce
         fait sur la forge, jamais dans un drapeau local.</div>
       </div>
       <div class="stp" style="--k:var(--yellow)">
