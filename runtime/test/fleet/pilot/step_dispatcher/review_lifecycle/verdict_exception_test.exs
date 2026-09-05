@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.VerdictExceptionTest do
+defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx

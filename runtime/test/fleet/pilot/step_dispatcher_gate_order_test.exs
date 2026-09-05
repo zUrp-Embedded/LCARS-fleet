@@ -232,8 +232,9 @@ defmodule Fleet.Pilot.StepDispatcherGateOrderTest do
     assert_received {:reprovisioned, "pod-pipe", "abc123", "slug-x"}
   end
 
-  # (5) lockstep of BOTH sites: the review flow (RoleDispatch) ALSO gates before its resolver.
-  # F-C059: a pipe of UNKNOWN state (pod_info raises) → :role_busy (defers), never a destructive reset.
+  # (5) the decision BOTH rails gate on before their resolver (`RoleDispatch` calls this same
+  # function for the review flow). F-C059: a pipe of UNKNOWN state (pod_info raises) → :role_busy
+  # (defers), never a destructive reset.
   test "A-09 (5): F-C059 preserved — uncertain pipe (pod_info RAISES) → :role_busy, no reset" do
     defmodule RaisingSpawnerA09 do
       def pod_info(_pod_id), do: raise("broker down")

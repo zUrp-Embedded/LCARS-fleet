@@ -1,4 +1,4 @@
-defmodule ListPodsCountTest do
+defmodule Fleet.Pilot.Poller.ListPodsCountTest do
   use ExUnit.Case, async: false
   alias Fleet.Pilot.Poller.Reconciliation
   alias Fleet.Pilot.Poller.Reconciliation.Seams

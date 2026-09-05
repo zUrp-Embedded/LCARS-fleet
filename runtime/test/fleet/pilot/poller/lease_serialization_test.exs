@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.PollerLeaseSerializationTest do
+defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   @moduledoc """
   `max_fan` — how many workflow_runs one PROJECT holds in flight at once.
 
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     end
   end
 
-  describe "max_fan/0 — the reader clamps, it does not report" do
+  describe "max_fan/0 — the default, and the shell door's ceiling (the clamp is admission_test's)" do
     test "absent → the default 5" do
       TestEnv.restore_env_on_exit(:lcars_fleet, :pilot_max_fan)
       Application.delete_env(:lcars_fleet, :pilot_max_fan)
@@ -204,20 +204,6 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       assert String.to_integer(n) == Admission.max_fan_ceiling(),
              "the shell door bounds --max-fan at #{n} while the rail clamps at " <>
                "#{Admission.max_fan_ceiling()} — one of the two is lying to the operator"
-    end
-
-    test "below 1 or above the ceiling → clamped, never zero and never a slot that does not exist" do
-      # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
-      # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read
-      # on every dispatch decision: a bad value must fail at a DOOR, once, not every thirty seconds.
-      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 0)
-      assert Admission.max_fan() == 1
-
-      Application.put_env(:lcars_fleet, :pilot_max_fan, 999)
-      assert Admission.max_fan() == Admission.max_fan_ceiling()
-
-      Application.put_env(:lcars_fleet, :pilot_max_fan, "trois")
-      assert Admission.max_fan() == 5
     end
   end
 
@@ -253,6 +239,8 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
 
       assert tally.dispatched == 3
+      # Three tickets saturate at any ceiling ≥ 3: the tally alone cannot tell « 99 clamped to
+      # 15 » from « 99 granted ». The reader's answer is what makes the name of this test true.
       assert Admission.max_fan("fleet/p", code_root: root) == Admission.max_fan_ceiling()
     end
 

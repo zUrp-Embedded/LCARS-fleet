@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.CloseIssueKindTest do
+defmodule Fleet.Forge.ClientCloseIssueKindTest do
   @moduledoc """
   A closure says what it IS, and refuses to happen otherwise.
 

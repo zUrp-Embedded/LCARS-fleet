@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ForgeBotLoginCacheTest do
+defmodule Fleet.Forge.Client.BotLoginCacheTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Forge.Client, as: ForgeClient

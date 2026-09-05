@@ -1,4 +1,4 @@
-defmodule ReconciliationUnreachableTqTest do
+defmodule Fleet.Pilot.Poller.ReconciliationUnreachableTqTest do
   use ExUnit.Case, async: false
   alias Fleet.Forge.PayloadFixture
   alias Fleet.Pilot.Poller.Reconciliation
