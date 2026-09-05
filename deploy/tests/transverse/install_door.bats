@@ -1108,14 +1108,14 @@ _machine() { # la machine du temoin : Debian/Ubuntu, x86_64, un HOME a nous — 
   export LCARS_DOOR_INSECURE_HTTP=1     # le serveur de decor est en http local — et la porte le DIT
 }
 _serveur() { # _serveur <dir> — sert <dir> en http sur 127.0.0.1 ; pose SERVEUR_URL, SERVEUR_PID, SERVEUR_LOG
-  local port i
+  local port
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
   SERVEUR_LOG="$BATS_TEST_TMPDIR/http.log"
   # `3>&-` : bats attend la fermeture du fd 3 ; un serveur qui l'heriterait ferait PENDRE le temoin
   python3 -m http.server --bind 127.0.0.1 "$port" --directory "$1" > "$SERVEUR_LOG" 2>&1 3>&- &
   SERVEUR_PID=$!
   SERVEUR_URL="http://127.0.0.1:$port"
-  for i in $(seq 1 50); do
+  for _ in $(seq 1 50); do
     if curl -fs "$SERVEUR_URL/" >/dev/null 2>&1; then : > "$SERVEUR_LOG"; return 0; fi
     sleep 0.1
   done
