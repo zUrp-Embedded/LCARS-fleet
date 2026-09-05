@@ -32,14 +32,14 @@ setup() {
   # garde `deploy/tests/` dans la chaine, donc l'exclusion `-not -path '*/tests/*'` plus bas
   # eliminait TOUT le perimetre — les quatre murs passaient au vert sur une liste vide. C'est le
   # garde d'instrument juste en dessous qui l'a attrape, pas la relecture.
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   # Le perimetre : ce qui S'EXECUTE. Les temoins (`deploy/tests`, `test/`) nomment legitimement ce
   # qu'ils epinglent, et les documents de chantier ne tournent nulle part.
   # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, ET C'EST CE QUI REND LE GARDE DERIVABLE. Ecrite en
   # dur dans le `find`, elle ne pouvait etre comparee a rien : le garde plus bas devait la RECOPIER,
   # donc il aurait fallu maintenir deux listes pour qu'un arbre perdu se voie. Une seule source, et
   # le garde la consomme.
-  ARBRES=("$REPO/deploy" "$REPO/fleet/services" "$REPO/fleet/bin" "$REPO/fleet/priv")
+  ARBRES=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin" "$REPO/runtime/priv")
   mapfile -t CODE < <(
     # ⚠ `services` EST DANS LE PERIMETRE, ET C EST LA MOITIE QUI COMPTE : c'est la que vivent
     # l'executeur de catalogue, le convergeur d'humains et le convergeur d'outillage — le code
@@ -98,7 +98,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 @test "MUR 1: le jeton master et le seed ne sont poses QUE pour leur detenteur, sans groupe" {
   # ⚠ CE MUR NE PEUT PAS SE DERIVER DU MANIFESTE, et le croire etait une erreur d'ecriture du plan.
   # `system.manifest` porte les REPERTOIRES ; le mode des deux secrets est pose ailleurs, par TROIS
-  # ecrivains — `48-forge-host` au mint, `50-forge converge_authority_modes()` a chaque apply, et
+  # ecrivains — `48-forge-host` au mint, `63-forge-tokens converge_authority_modes()` a chaque apply, et
   # `put_secret()` a l'ecriture. Un mur bati sur le manifeste serait VERT avec le jeton en 0640.
   # ⚠ ET CE MUR AVAIT LE DEFAUT QU'IL EXISTE POUR ATTRAPER. Il parcourt les lignes qui posent un
   # mode sur l'un des deux secrets — et si ces lignes DISPARAISSENT (un refactor amont, un rebase
@@ -155,7 +155,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # deux fichiers qui decident si un geste de catalogue a lieu ne consultent pas la base des
   # groupes. `bin/lcars` ne decide plus rien (il demande), et l'executeur demande a la forge.
   local porte
-  for porte in "$REPO/fleet/bin/lcars" "$REPO/fleet/services/catalogue-executor.py"; do
+  for porte in "$REPO/runtime/bin/lcars" "$REPO/runtime/services/catalogue-executor.py"; do
     [ -r "$porte" ]
     absent 'id -nG|getent group|os\.getgroups|grp\.getgrall' "$porte"
   done
@@ -173,7 +173,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # services importent. Le mur suit l'objet, sinon il garde une adresse vide — c'est exactement le
   # perimetre mort qu'un garde d'instrument existe pour attraper.
   local cible hors_bind
-  for cible in "$REPO/fleet/services/catalogue-executor.py" "$REPO/fleet/services/lcars_socket.py"; do
+  for cible in "$REPO/runtime/services/catalogue-executor.py" "$REPO/runtime/services/lcars_socket.py"; do
     [ -r "$cible" ]
     hors_bind="$(code_of "$cible" | sed '/^def bind(/,/^def /d' \
                   | grep -cE 'grp\.|getgrnam|getgrall' || true)"
@@ -184,15 +184,15 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   done
   # Garde d'instrument : si `bind()` cesse d'exister ou change de nom, la coupe ci-dessus ne
   # retirerait plus rien et le mur passerait au vert sur un fichier qu'il n'a pas lu.
-  code_of "$REPO/fleet/services/lcars_socket.py" | grep -q '^def bind('
+  code_of "$REPO/runtime/services/lcars_socket.py" | grep -q '^def bind('
   # Et la consultation existe QUELQUE PART : un mur vert sur zero occurrence ne mesure rien.
-  code_of "$REPO/fleet/services/lcars_socket.py" | grep -q 'getgrnam'
+  code_of "$REPO/runtime/services/lcars_socket.py" | grep -q 'getgrnam'
 }
 
 @test "MUR 3: le convergeur ne lit plus l'autorite de la boite" {
   # Il PROVISIONNE — un compte unix ne se cree pas au moment ou quelqu'un tape. Il n'AUTORISE pas :
   # ca se demande a l'instant ou ca compte. Son unique usage du jeton master etait la projection.
-  local c="$REPO/fleet/services/human-converger.sh"
+  local c="$REPO/runtime/services/human-converger.sh"
   [ -r "$c" ]
   absent 'MASTER_TOKEN' "$c"
   absent 'forge-master' "$c"
@@ -214,7 +214,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
 # second test ci-dessous est ce temoin, et il vaut independamment du compte qu'on choisit.
 
 @test "MUR 5: le deck ne se depose plus sur une identite partagee, et son compte existe des DEUX cotes" {
-  local landing="$REPO/fleet/services/console-landing.sh"
+  local landing="$REPO/runtime/services/console-landing.sh"
   local dockerfile="$REPO/deploy/docker/Dockerfile"
   local mod="$REPO/deploy/modules.d/21-service-accounts.sh"
 
@@ -236,11 +236,11 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # l'ecrit et le manifeste qui declare l'empreinte machine. Rien ne les comparait, et ils ont
   # diverge — `nogroup` d'un cote, `fleet` de l'autre. Un manifeste qui ment sur un secret est pire
   # qu'un manifeste absent : on le lit pour savoir qui peut lire.
-  local mod="$REPO/deploy/modules.d/55-deck-oidc.sh"
+  local mod="$REPO/runtime/services/forge.d/deck-oidc.sh"
   local manifest="$REPO/deploy/system.manifest"
   local row group
 
-  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `55-deck-oidc`
+  # ⚠ LE REPLI EST IMBRIQUE DEPUIS LE 2026-08-28, ET CE MOTIF NE LE LISAIT PLUS. `66-deck-oidc`
   # gravait `${PROV_SYSTEM_GROUP:-lcars-system}` pendant que `21-service-accounts`, qui CREE le
   # compte, derive `${PROV_SYSTEM_GROUP:-$SYSTEM_USER}` : deux replis pour une variable, qui
   # divergent des qu'on regle `PROV_SYSTEM_USER` seul. Le module derive desormais lui aussi
@@ -277,7 +277,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # `setpriv` dans le conteneur — qui n'a pas systemd et dont l'entrypoint est PID 1. En verifier un
   # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
   local unit="$REPO/deploy/modules.d/64-services.sh"
-  local entry="$REPO/deploy/docker/entrypoint.sh"
+  local entry="$REPO/runtime/services/box/boot.sh"
   local dockerfile="$REPO/deploy/docker/Dockerfile"
 
   # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
@@ -328,10 +328,10 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
       return 1
     }
 
-  code_of "$REPO/deploy/docker/entrypoint.sh" \
+  code_of "$REPO/runtime/services/box/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
       echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
-      code_of "$REPO/deploy/docker/entrypoint.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      code_of "$REPO/runtime/services/box/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
       return 1
     }
 }

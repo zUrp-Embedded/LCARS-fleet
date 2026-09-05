@@ -284,7 +284,7 @@ STUB
   [ "$output" = "0" ]
   # GARDE D'INSTRUMENT : le depouillement laisse le reste de la commande, sinon deux zeros pourraient
   # venir d'un `sed` casse plutot que du code.
-  grep -qE 'TF_CLI_CONFIG_FILE=' <<<"$code"
+  grep -qE 'PROV_MASTER_TOKEN_FILE' <<<"$code"
 }
 
 @test "le defaut de l'humain integre vit dans forge-gestures, et LUI SEUL le declare" {
@@ -294,324 +294,11 @@ STUB
   # citait le litteral `"${LCARS_BUILTIN_HUMAN:-lcars}"` : le jour ou ce fichier a resolu son defaut
   # UNE fois pour ses trois lecteurs, le temoin est tombe sur un changement qui allait dans son
   # propre sens. Ce qui compte est la direction — le nom vient de forge-gestures, pas du module.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   grep -qE '^\s*export TF_VAR_builtin_human=' "$g"
   grep -qE '^\s*BUILTIN_HUMAN="\$\{LCARS_BUILTIN_HUMAN:-' "$g"
   # et le module ne grave aucun nom de compte humain, sous aucune forme
   refute grep -qE '"lcars"|:-lcars\}' <<<"$(sed 's/#.*//' "$SRC")"
-}
-
-# ─── LA STRUCTURE SE POSE SUR LA MACHINE, PLUS DANS UN CONTENEUR ────────────────────────────────
-#
-# ⚖ USER 2026-08-22 : « tu build une image complete de 1,2 Go juste pour executer 100 ko de recette
-# tofu ? » puis « pourquoi tofu ne peut pas tourner directement ? ».
-#
-# Ce module montait un conteneur TRANSITOIRE de `lcars-fleet:2` pour jouer `forge-apply`, avec un
-# volume nomme et trois `docker cp` — le tout pour contourner un probleme (« le daemon peut vivre
-# ailleurs, un chemin d'hote lui est INVISIBLE ») qui n'existe QUE parce qu'on tourne en conteneur.
-# Un contournement etait devenu sa propre justification.
-#
-# ⚠ CES TEMOINS NE LANCENT NI DOCKER NI TOFU. Ce qui se mesure est la FORME de l'appel.
-
-@test "la structure est jouee par le GESTE, pas par un conteneur transitoire" {
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'forge-gestures.sh" apply'
-  # et plus rien du dispositif de contournement
-  #
-  # ⚠ `refute_out`, PAS `! code | grep`. Bash exempte d'`errexit` toute commande niee par `!` : ces
-  # quatre lignes s'executaient, echouaient, et le test continuait — seule la DERNIERE d'un bloc
-  # compte. Les TROIS premieres etaient donc inertes : le dispositif de contournement pouvait
-  # revenir par trois de ses quatre portes sans que rien ne rougisse. Detail : `refute.bash`.
-  code | refute_out 'd create --network'
-  code | refute_out 'd cp '
-  code | refute_out 'volume create'
-  code | refute_out 'forge-apply'
-}
-
-@test "ce module n'UTILISE plus aucune image — elle n'etait batie que pour lui" {
-  # ⚠ SUR LE CODE, PAS SUR LA PROSE. Le module CITE `lcars-fleet:2` dans la cicatrice qui explique
-  # pourquoi il ne la reclame plus ; un grep nu attrape cette phrase et fait echouer le temoin sur
-  # ce qu'il voulait justement saluer. Troisieme fois en deux jours (`uname -m`, `providers mirror`).
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | refute_out 'PROV_FORGE_IMAGE'
-  code | refute_out 'lcars-fleet:2'
-  code | refute_out 'image inspect'
-  # et la cicatrice, elle, RESTE : sans elle un lecteur re-ajoute le build
-}
-
-@test "l'AUTORITE est lue la ou 48 l'a ECRITE — les trois \`docker cp\` deviennent zero geste" {
-  # Le conteneur recevait le jeton master et le seed par `docker cp` dans un volume. Sur la machine,
-  # `LCARS_PRIVATE_DIR` suffit : le geste y cherche exactement les deux noms que ce module pose.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
-  grep -q 'LCARS_PRIVATE_DIR="\$PROV_TOKENS_DIR"' "$SRC"
-  # ⚠ LE NOM VIENT DE LA LIB DEPUIS LE 2026-08-27. `48` le derivait lui-meme — une SECONDE copie de
-  # `PROV_MASTER_TOKEN_FILE`, que `provision-lib` posait deja. Ce qui compte n'a pas bouge :
-  # l'autorite est LUE la ou elle a ete ecrite, jamais recomposee.
-  grep -q 'PROV_MASTER_TOKEN_FILE' "$SRC"
-  grep -q 'SEED_FILE="\$PROV_TOKENS_DIR/forge-seed.pass"' "$SRC"
-  grep -q 'MASTER_TOKEN_FILE="${LCARS_MASTER_TOKEN_FILE:-\$PRIVATE_DIR/forge-master.token}"' "$g"
-  grep -q 'SEED_FILE="${LCARS_FORGE_SEED_FILE:-\$PRIVATE_DIR/forge-seed.pass}"' "$g"
-}
-
-@test "l'URL passee est la LOOPBACK de l'hote, plus le nom de service du reseau compose" {
-  # Le conteneur parlait a `http://forge:3000`, resolu par le reseau `${projet}_default`. Depuis la
-  # machine, ce nom ne resout pas : c'est le port PUBLIE qu'on compose.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'FORGE_BASE_URL="\$FORGE_URL"'
-  code | refute_out 'FORGE_BASE_URL="http://forge:3000"'
-}
-
-@test "la recette est une COPIE — le checkout de l'operateur ne recoit pas le roster genere" {
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'recipe="\$(mktemp -d'
-  code | grep -q 'LCARS_RECIPE_DIR="\$recipe"'
-  # le roster atterrit DANS la copie, jamais dans l'arbre
-  code | grep -q 'cp "\$enroll/roles.auto.tfvars.json" "\$recipe/roles.auto.tfvars.json"'
-  code | refute_out 'deps/roles\.auto\.tfvars\.json'
-  # et la copie est effacee, dans les deux sorties
-  code | grep -q 'rm -rf "\$recipe" "\$enroll"'
-}
-
-@test "la copie est INITIALISEE hors-ligne — le geste appelle \`tofu apply\` NU" {
-  # Dans l'image, le Dockerfile jouait `tofu init` AU BUILD. En sortant du conteneur on herite de
-  # cette dette : sans init, l'apply echoue sur des providers non installes.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  # le geste n'init PAS avant son apply de recette — c'est le fait dont depend le temoin suivant
-  sed -n '/^  for m in instance \.; do/,/^  done/p' "$g" | refute_out 'tofu init'
-  # donc 48 le fait, avec la tofurc du miroir
-  code | grep -q 'tofu init -input=false -no-color'
-  code | grep -q 'TF_CLI_CONFIG_FILE='
-}
-
-@test "le \`.terraform\` de l'arbre NE VOYAGE PAS — un etat decrit un chemin, pas une recette" {
-  # `46-tofu` en laisse un dans le depot (gitignore, c'est son temoin de miroir complet). Le
-  # recopier ailleurs, c'est heriter d'un etat dont on ne sait pas ce qu'il pointe.
-  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'rm -rf "\$recipe/.terraform" "\$recipe/instance/.terraform"'
-}
-
-@test "le pre-requis manquant est NOMME avec le module qui le pose" {
-  # L'ancienne dérive nommait « deploy/box build ». La nouvelle nomme `46-tofu`, et rejuge PAS la
-  # version : `46-tofu` est l'autorite du pin, un second avis ici en ferait un second defaut.
-  grep -q '46-tofu' "$SRC"
-  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  refute grep -q 'box build' "$SRC"
-}
-
-@test "le roster se derive de l'ARBRE sur ce rail — Elixir y est pose 33 crans plus tot" {
-  # `enroll-catalogue.sh` PREFERE `--image`, et le dit : `--repo` exige un toolchain Elixir sur la
-  # machine qui appelle, que le chemin de LIVRAISON n'a pas. Le rail poste, lui, l'a pose au module
-  # 15 — il batit le runtime. La contrainte qui justifiait l'image n'existe pas ici.
-  #
-  # ⚠ CE TEMOIN EPINGLAIT UNE LIGNE D'APPEL, ET LA LIVRAISON EN A FAIT DEUX. En SOURCE le rail
-  # derive de l'arbre — Elixir est la, c'est ce que dit ce temoin depuis le debut. En BINAIRE il n'y
-  # a ni mix ni image : la RELEASE est posee et porte la meme fonction, donc `--release`. Ce qui
-  # reste vrai des deux cotes, et que ce temoin garde : ce rail ne passe JAMAIS par `--image`, parce
-  # que la contrainte qui justifie l'image (« pas de toolchain sur la cible ») se resout ici
-  # autrement — par l'arbre, ou par la release deja installee.
-  local d="$BATS_TEST_DIRNAME/../../modules.d"
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'enroll_src=(--repo "\$tree" --catalogue "\$ref_catalogue")'
-  code | grep -q 'enroll_src=(--release'
-  code | grep -q 'enroll-catalogue.sh" --tofu-dir "\$enroll" "\${enroll_src\[@\]}"'
-  # et le choix se fait sur le DISCRIMINANT, pas sur autre chose
-  code | grep -q 'prov_delivery_is_binary'
-  # Pas de `--` a passer : `refute_out` porte le sien devant son motif, donc un motif qui commence
-  # par un tiret arrive entier. Le lui donner ici en ferait le MOTIF, et le temoin chercherait « -- ».
-  code | refute_out '--image "\$PROV_FORGE_IMAGE"'
-  # et le toolchain vient AVANT — l'ordre est le prefixe
-  [ -f "$d/15-toolchain.sh" ]
-  # ⚠ CETTE LIGNE COMPARAIT DEUX LITTERAUX. `[[ "15-toolchain" < "48-forge-host" ]]` prouve que « 15 »
-  # trie avant « 48 » — de l'arithmetique, pas une propriete de ce depot. Elle serait restee
-  # verte apres un renommage de l'un ou l'autre, c'est-a-dire au moment precis ou l'ordre casse.
-  # Ce qui est vrai : les deux modules EXISTENT, et le glob du runner met le premier avant.
-  local _mods _ia _ib
-  _mods="$(cd "$d" && printf '%s\n' *.sh)"
-  _ia="$(grep -nx '15-toolchain.sh' <<<"$_mods" | cut -d: -f1)"
-  _ib="$(grep -nx '48-forge-host.sh' <<<"$_mods" | cut -d: -f1)"
-  [ -n "$_ia" ] && [ -n "$_ib" ] && [ "$_ia" -lt "$_ib" ]
-}
-
-# ─── LES TROIS TROUS DE LA BASCULE, TROUVES EN REVUE (2026-08-22) ───────────────────────────────
-
-@test "le roster REND l'arbre compilable — sinon la premiere passe meurt sur \`deps/\`" {
-  # ⚠ « ELIXIR EST POSE » NE SUFFIT PAS. `enroll-catalogue.sh --repo` fait `mix compile`, qui exige
-  # `deps/` — GITIGNORE, donc absent d'un clone neuf. Hex, rebar et `deps.get` arrivaient au module
-  # 60, DOUZE CRANS plus loin : la premiere passe mourait ici en accusant le module 15.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'mix local.hex --force'
-  code | grep -q 'mix local.rebar --force'
-  code | grep -q 'mix deps.get'
-  # et ils viennent AVANT la derivation, pas apres
-  local b d
-  b="$(code | grep -n 'mix deps.get' | head -1 | cut -d: -f1)"
-  d="$(code | grep -n 'enroll-catalogue.sh' | head -1 | cut -d: -f1)"
-  [ "$b" -lt "$d" ]
-}
-
-@test "tout \`mix\` passe par as_human — un build root pollue le \`_build\` du checkout" {
-  # `60-deploy` porte la raison : « un build root polluerait le _build du checkout ». Un mix en root
-  # ici laisserait un `_build` et un `deps` que l'humain ne peut plus ecrire, et casserait le module
-  # 60 douze crans plus loin — en accusant le module 60.
-  # ⚠ ON COMPTE LE VERBE, PAS LE MOT. Un `p_step "outillage mix pour deriver le roster"` contient
-  # « mix » dans une CHAINE DE MESSAGE : un compte nu le prend pour une invocation et fait echouer
-  # le temoin sur une ligne qui n'execute rien. Meme piege que la prose, un cran plus bas — ici il
-  # est dans le code.
-  # ⚠ ET LES MESSAGES NE SONT PAS DU CODE NON PLUS. Un `p_fail "« mix run -e … » ne rend rien"` cite
-  # la commande DANS SA PHRASE : le compteur la prend pour une invocation et le temoin tombe sur une
-  # ligne qui n'execute rien. Meme piege que `p_step`, corrige une fois, reintroduit par la porte
-  # d'a cote — on retire donc toute la famille `p_*`, pas un libelle a la fois.
-  local n_mix n_as inv='mix (local\.|deps\.|run |compile|release)'
-  code_nomsg() { grep -vE '^\s*#|^\s*`#' "$SRC" | grep -vE 'p_(fail|warn|ok|chg|step|drift|die)\b'; }
-  n_mix="$(code_nomsg | grep -cE "$inv")"
-  n_as="$(code_nomsg | grep -E "$inv" | grep -c 'as_human')"
-  [ "$n_mix" -gt 0 ]
-  [ "$n_mix" -eq "$n_as" ]
-  # et le dossier de sortie lui appartient, sinon il ne peut pas y ecrire
-  grep -vE '^\s*#|^\s*`#' "$SRC" | grep -q 'chown "\$PROV_HUMAN" "\$enroll"'
-}
-
-@test "les DEUX depots de catalogue sont recables — leurs defauts sont des chemins d'image" {
-  # `forge-gestures.sh` publie la demo et la reference APRES la structure, et les deux echecs sont
-  # NON FATAUX. Sans recablage : forge structuree, deux depots absents, aucun verdict qui baisse.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
-  # ⚠ LA RACINE SE DERIVE DU `COPY`, ELLE NE S'EPINGLE PLUS. Cette ligne portait
-  # `/opt/lcars/catalogues/web-demo` en dur, et l'assertion voisine le `COPY` du Dockerfile de meme.
-  # Deux litteraux epingles ne sont pas un accord : ils defendent LA VALEUR, pas l'entente. Mesure
-  # du 2026-08-27 — `@platform_root` de `Fleet.Layout` deplace vers `/opt/lcars2`, ces deux
-  # assertions restaient VERTES sur l'ancienne valeur pendant que le contrat Elixir
-  # `layout.catalogue_roots_single_source` rougissait en nommant les trois porteurs.
-  #
-  # Le partage est net : le contrat tient l'accord BEAM <-> tout le monde ; ce temoin tient l'accord
-  # LOCAL entre le geste de forge et l'image qui depose l'arbre. Deriver ici retire la seule chose
-  # que ce fichier ajoutait de faux — un troisieme exemplaire du litteral.
-  #
-  # ⚠ ET IL Y A DEUX `COPY catalogues` DANS CE DOCKERFILE : `/src/catalogues` pour l'etage `site`
-  # (qui construit la plaquette) et `/opt/lcars/catalogues` pour l'etage `runtime`. La premiere
-  # ecriture de cette derivation les prenait TOUS LES DEUX — `$racine` valait deux lignes, et
-  # `grep` traite un motif multi-ligne comme deux motifs ALTERNATIFS : le test passait par la
-  # seconde, donc par chance. Un instrument qui rend le bon verdict pour la mauvaise raison est un
-  # instrument qui rendra le mauvais des que l'ordre change.
-  #
-  # On ecarte donc l'etage de construction et on EXIGE l'unicite de ce qui reste : deux cibles
-  # runtime, ou zero, sont un Dockerfile que ce temoin ne sait pas lire — il le dit au lieu d'en
-  # choisir une.
-  local racines racine
-  racines="$(sed -nE 's|^COPY[[:space:]]+catalogues[[:space:]]+([^[:space:]]+)[[:space:]]*$|\1|p' \
-               "$BATS_TEST_DIRNAME/../../docker/Dockerfile" | grep -v '^/src/' || true)"
-  [ "$(printf '%s\n' "$racines" | grep -c .)" -eq 1 ] || {
-    echo "le Dockerfile ne depose pas UN arbre de catalogues runtime, il en depose : ${racines:-aucun}" >&2
-    return 1
-  }
-  racine="$racines"
-  # le geste defaute bien sur un chemin d'image, et sur CELUI que l'image depose
-  grep -q "DEMO_CATALOGUE=\"\${LCARS_DEMO_CATALOGUE:-$racine/web-demo}\"" "$g" || {
-    echo "le defaut de DEMO_CATALOGUE ne suit pas « $racine » depose par le Dockerfile :" >&2
-    grep -n 'DEMO_CATALOGUE=' "$g" >&2
-    return 1
-  }
-
-  # ⚠ `ENTRYPOINT` ETAIT LE TROISIEME DE CETTE LISTE, ET IL N'Y EST PLUS — son defaut ne se recable
-  # plus, il se RESOUT. Il etait bien un chemin d'image, et il a coute une install le 2026-08-22 sur
-  # un poste : « /opt/lcars/entrypoint.sh: No such file or directory », rendu a l'operateur comme
-  # « pas de source installable ».
-  #
-  # UNE SURCHARGE DE PLUS ICI N'AURAIT RIEN REPARE, et c'est pour ca que la reponse est ailleurs :
-  # le verbe qui casse est `lcars catalogue install`, un geste HUMAIN que ce module n'appelle
-  # jamais. Recabler dans 48 aurait rendu vert le rail qui ne passe pas par la ligne cassee.
-  #
-  # Et il n'y avait rien a copier : `62-runtime-helpers` pose deja l'arbre `deploy/`
-  # (`EMBEDDED=(deploy etc)`), donc le fichier EST la, sous un autre chemin. Le geste se cherche
-  # donc lui-meme, dans les deux dispositions ou il vit — comportement tenu par quatre temoins de
-  # `forge_gestures.bats`.
-  # LA PROPRIETE, PAS LA LIGNE : aucun defaut ABSOLU. Epingler le texte de la resolution
-  # (`:-$(_entrypoint_path)`) ferait rougir ce temoin au premier renommage, sans qu'aucun
-  # comportement n'ait bouge — et le comportement, lui, est tenu par quatre temoins de
-  # `forge_gestures.bats`. Un chemin absolu en defaut est en revanche exactement ce qui a casse,
-  # quelle que soit sa valeur : `/opt/lcars/entrypoint.sh` hier, un autre demain.
-  # ⚠ PAS `! grep -q`, ET C'EST UNE MESURE : bash EXEMPTE de `set -e` toute commande dont le statut
-  # est inverse par `!` (manuel : « or if the command's return value is being inverted with ! »).
-  # Un `! grep -q` en temoin est donc INERTE — il ne rougit jamais, quoi qu'il trouve. Mesure du
-  # 2026-08-23 : la premiere redaction de cette assertion l'utilisait, et une mutation reintroduisant
-  # un defaut absolu (`/opt/lcars/bin/entrypoint.sh`) passait au VERT. On compte, et on compare.
-  [ "$(grep -cE 'ENTRYPOINT="\$\{LCARS_ENTRYPOINT:-/' "$g")" -eq 0 ]
-  # et 48 les nomme tous les deux
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'LCARS_DEMO_CATALOGUE='
-  code | grep -q 'LCARS_REFERENCE_CATALOGUE='
-  # la demo existe la ou 48 la nomme, et c'est la meme source que le Dockerfile (`COPY catalogues`).
-  # La ligne du `COPY` est deja lue plus haut (`$racine`) : la re-epingler par sa valeur ferait le
-  # troisieme exemplaire du meme litteral dans ce seul test.
-  [ -d "$BATS_TEST_DIRNAME/../../../catalogues/web-demo" ]
-}
-
-@test "la REFERENCE se demande a son autorite, elle ne se recompose pas" {
-  # L'image porte la raison mot pour mot : `catalogue-root` « existe pour que personne ne RECOMPOSE
-  # ce chemin […] un appelant shell qui le globberait marcherait jusqu'au jour ou la disposition du
-  # release change ». Meme autorite ici, autre lieu d'execution.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'Fleet.Catalogue.root()'
-  code | refute_out 'LCARS_REFERENCE_CATALOGUE="[^$]'
-  # ⚠ ON EPINGLE LA REGLE, PAS LA PHRASE. Ce temoin citait le message d'erreur mot pour mot et est
-  # tombe a la premiere reformulation. Ce qui doit tenir : un chemin qui ne repond pas est un ECHEC,
-  # pas un depot silencieusement saute.
-  # ⚠ LA POLARITE DE LA GARDE N'EST PAS LA REGLE. Ce temoin epinglait `[[ -d "$ref_catalogue" ]]`
-  # mot pour mot et est tombe quand la garde est devenue `if [[ ! -d … ]]` — une reecriture qui ne
-  # change RIEN a ce qu'elle protege. On exige donc : le chemin derive est teste comme repertoire, et
-  # la branche d'echec appelle `p_fail`.
-  code | grep -qE '\-d "\$ref_catalogue"'
-  code | grep -A3 -E '\-d "\$ref_catalogue"' | grep -q 'p_fail'
-}
-
-@test "le roster NOMME son catalogue — \`--catalogue\` n'est facultatif qu'avec \`--image\`" {
-  # Mesure a froid du 2026-08-22 : « ERREUR: --catalogue <root> requis (ou --image, qui porte le
-  # sien) ». Le script le dit dans son en-tete ; je l'avais lu et pas applique.
-  #
-  # ⚠ « FACULTATIF QU'AVEC `--image` » EST DEVENU « QU'AVEC UNE LIVRAISON QUI PORTE LE SIEN ». Une
-  # release posee porte son catalogue exactement comme une image — c'est la MEME release dedans.
-  # Ce que ce temoin garde, inchange : avec `--repo`, le catalogue se NOMME, parce qu'un arbre
-  # source en porte plusieurs et que le script refuse net (mesure a froid du 2026-08-22).
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'enroll_src=(--repo "\$tree" --catalogue "\$ref_catalogue")'
-  # et la branche release ne le nomme PAS — elle n'a pas a choisir pour l'operateur
-  code | grep -q 'enroll_src=(--release'
-  # et la racine est derivee AVANT le roster, pas apres — elle sert aux deux usages
-  local d r
-  d="$(code | grep -n 'Fleet.Catalogue.root()' | head -1 | cut -d: -f1)"
-  r="$(code | grep -n 'enroll-catalogue.sh' | head -1 | cut -d: -f1)"
-  [ "$d" -lt "$r" ]
-}
-
-@test "la racine du catalogue est ETIQUETEE, jamais lue a une POSITION" {
-  # `mix` ecrit son avancement sur STDOUT — « Compiling N files », « Generated lcars_fleet app » —
-  # mele a ce que le script imprime. Un `tail -n1` prend la derniere ligne de BAVARDAGE quand il y
-  # en a apres, et rien du tout quand la compilation echoue. Mesure du 2026-08-22, les deux
-  # machines, la meme ligne : .63 rendait « Generated lcars_fleet app », la WSL rendait le vide.
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'LCARS_CATALOGUE_ROOT='
-  code | grep -q "grep -m1 '\^LCARS_CATALOGUE_ROOT='"
-  code | grep -E 'Fleet.Catalogue.root' | refute_out 'tail -n1'
-  # et la sortie de mix n'est PAS jetee : sans elle, un vide n'a pas de cause
-  code | grep -E 'Fleet.Catalogue.root' | refute_out '2>/dev/null'
-  code | grep -q 'dernières lignes de mix'
-}
-
-@test "GUARD B : les appels mix qui EVALUENT la config portent LCARS_TOOL_EVAL" {
-  # `config/runtime.exs` refuse de demarrer sous le siege sysadmin (uid 1000) — « a fleet under the
-  # seat would run sudo-capable pods, the exact inverse of the sandbox ». L'operateur EST l'uid 1000
-  # et `as_human` lance sous lui : tout `mix` qui evalue la config runtime se fait refuser.
-  #
-  # Le seam est celui du PRODUIT : `runtime.exs` le declare, et la porte `catalogue-root` de l'image
-  # l'emploie exactement ainsi. Mesure du 2026-08-22 sur .63 : sans lui, « R-no-root-runtime ».
-  local rt="$BATS_TEST_DIRNAME/../../../fleet/config/runtime.exs"
-  grep -q 'tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"' "$rt"
-  grep -q 'not tool_mode? do' "$rt"
-  # la porte de l'image l'emploie — on ne l'invente pas
-  grep -q 'LCARS_TOOL_EVAL=1' "$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
-  # et les deux appels de ce module qui evaluent la config le portent
-  code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
-  code | grep -q 'LCARS_TOOL_EVAL=1 mix run --no-start'
-  code | grep -q 'LCARS_TOOL_EVAL=1 "\$tree/etc/enroll-catalogue.sh"'
 }
 
 @test "le PORT est sonde avant le montage, et le verdict NOMME l'occupant" {
@@ -672,7 +359,7 @@ STUB
   # compris. Mesure du 2026-08-22 sur une instance fraiche : `forge.public.url` valait
   # `http://172.25.115.129:3000`.
   #
-  # `55-deck-oidc` savait deja : il appelle `advertise_addr`, qui connait le NAT. Deux derivations
+  # `66-deck-oidc` savait deja : il appelle `advertise_addr`, qui connait le NAT. Deux derivations
   # d'un meme fait — « quelle adresse un tiers peut composer » — et c'est celle qui l'ignorait qui
   # ecrivait le fichier que trois modules relisent.
   code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
@@ -795,7 +482,7 @@ STUB
 }
 
 @test "le nom du compte integre a UNE autorite, et elle repond" {
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   [ -f "$g" ]
   run bash "$g" builtin-human
   [ "$status" -eq 0 ]
@@ -1117,35 +804,33 @@ STUB
   # travail est le MEME sur une forge fournie. Ce qui change est de savoir qui possede le conteneur.
   # Un module qui aurait duplique sa seconde moitie aurait deux recettes a tenir d'accord.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  # Le compose n'apparait qu'UNE fois, et la pose de structure aussi.
+  # Le compose n'apparait qu'UNE fois. (La pose de structure vit dans 61-forge-structure depuis
+  # le 2026-09-04, avec son propre temoin d'unicite.)
   [ "$(grep -c 'run_quiet d compose' <<<"$code")" -eq 1 ]
-  [ "$(grep -c 'FORGE_BASE_URL="\$FORGE_URL"' <<<"$code")" -eq 1 ]
 }
 
-@test "§ 13 : la DESTINATION a son porteur, et l humain de demo le suit" {
-  # ⚠ TROIS AXES, PAS DEUX : substrat, forge (montee / fournie), DESTINATION (travail / jetable). Le
-  # troisieme n'avait aucun porteur, et `--bench` en faisait DEUX — monter la forge ET poser les
-  # annexes de demonstration — parce que sur la BOITE les deux coincidaient. Ouvrir `--bench` au
-  # poste sans les separer aurait rendu tous les postes semeurs, ce qui annule le canon du 30/08
-  # (« le rail pose les autorites, il ne fabrique pas d'humains »).
+@test "§ 13 : il n y a PAS d axe destination — seul le banc seme un humain, et il le NOMME" {
+  # ⚠ UN « AXE DESTINATION » A VECU ICI (travail / jetable), porte par `--disposable` sur la porte,
+  # `PROV_DISPOSABLE` dans le runner, `LCARS_DISPOSABLE=1` dans ce module, et un defaut « lcars »
+  # dans `forge-gestures.sh`. ⚖ user 2026-09-04 : « un vieux reliquat a virer » — quatre etages
+  # pour un nom par defaut que plus personne ne demandait : le banc nomme le sien
+  # (`bench-forge-bootstrap.sh`, `LCARS_BUILTIN_HUMAN`), un deploiement de travail ne seme
+  # personne (canon du 30/08). Ce temoin garde l'ABSENCE de l'axe a chaque etage, et l'unique voie.
   local code; code="$(grep -vE '^\s*#' "$SRC")"
-  # Le semis est CONDITIONNE par la destination, jamais par la forge.
-  grep -q 'PROV_DISPOSABLE:+LCARS_DISPOSABLE=1' <<<"$code"
+  refute grep -qi 'DISPOSABLE' <<<"$code"
   refute grep -qE 'WITH_BENCH|BENCH.*BUILTIN_HUMAN' <<<"$code"
-  # ⚠ ET CE MODULE NE NOMME PERSONNE : il dit « ce deploiement est jetable », pas « appelle-le
-  # lcars ». Deux temoins de ce fichier gardent l'autorite unique du nom, et ils ont attrape la
-  # premiere version de cette ligne — elle ecrivait un defaut ici, donc une seconde autorite.
+  # ⚠ ET CE MODULE NE NOMME PERSONNE. Deux temoins de ce fichier gardent l'autorite unique du nom.
   refute grep -q 'LCARS_BUILTIN_HUMAN' <<<"$code"
-  # Le drapeau traverse le runner.
+  # Ni le runner, ni la porte ne portent plus le drapeau — la porte le REFUSE, en se nommant.
   local runner; runner="$BATS_TEST_DIRNAME/../../provision"
-  grep -q -- '--disposable) export PROV_DISPOSABLE=1' "$runner"
-  # Et l'AUTORITE du nom en tire les trois etats : rien, le defaut de la destination, l'explicite.
-  local g="$BATS_TEST_DIRNAME/../../../fleet/services/forge-gestures.sh"
+  refute grep -qi 'DISPOSABLE' <<<"$(grep -vE '^\s*#' "$runner")"
+  local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
+  grep -qE '^\s*--disposable\) echo .*retire' "$door"
+  # Et l'AUTORITE du nom n'a plus que DEUX etats : rien, ou l'explicite.
+  local g="$BATS_TEST_DIRNAME/../../../runtime/services/forge-gestures.sh"
   [ -z "$(bash "$g" builtin-human)" ]
-  [ "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" = "lcars" ]
-  # ⚠ L'ORDRE EST LOAD-BEARING : un nom explicite l'emporte sur le defaut de la destination.
-  # L'inverse ferait ignorer en silence ce que l'operateur a tape.
-  [ "$(LCARS_DISPOSABLE=1 LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]
+  [ -z "$(LCARS_DISPOSABLE=1 bash "$g" builtin-human)" ]
+  [ "$(LCARS_BUILTIN_HUMAN=zoe bash "$g" builtin-human)" = "zoe" ]
 }
 
 @test "§ 13 : la porte OUVRE --bench au poste, et le refus a disparu" {
@@ -1154,74 +839,7 @@ STUB
   local door; door="$BATS_TEST_DIRNAME/../../../install.sh"
   local code; code="$(grep -vE '^\s*#' "$door")"
   refute grep -q "bench n'a pas d'objet sur le rail poste" <<<"$code"
-  # Et le nouveau porteur traverse la porte jusqu'au runner.
-  grep -q -- '--disposable) *DISPOSABLE=1' <<<"$code"
-  grep -q 'PASSTHRU+=("$1")' <<<"$code"
+  # Le transport vers le runner existe — par PAIRES : il n'y a plus de drapeau solo.
+  grep -q 'PASSTHRU+=("$1" "' <<<"$code"
 }
 
-# ─── LA DERIVATION DE LA RELEASE — LE SEUL FRAGMENT D `apply()` QUE CE FICHIER JOUE ─────────────
-#
-# ⚠ LE HARNAIS DE CE FICHIER COUPE A `check()`, DONC `apply()` N EST JOUE NULLE PART. C est un
-# perimetre assume (les gestes d apply parlent a docker), mais il laissait nu le fragment qui a
-# casse : la derivation de la release, qui designait le chemin POSE par `60-deploy` — douze rangs
-# plus loin, et `provision:327` interdit a 48 de declarer la dependance.
-#
-# On extrait donc CE fragment du module et on le joue contre des doublures. Il ne parle a personne :
-# c est du choix de chemin, la seule partie d `apply()` qui se mesure sans daemon.
-harnais_enroll() { # harnais_enroll <racine de source> [PROV_PREFIX]
-  sed -n '/^  local -a enroll_src$/,/^  fi$/p' "$SRC" > "$BATS_TEST_TMPDIR/frag-enroll.sh"
-  [ -s "$BATS_TEST_TMPDIR/frag-enroll.sh" ] || { echo "extraction du fragment ratee"; return 1; }
-  cat > "$BATS_TEST_TMPDIR/h-enroll.sh" <<HARNAIS
-set -euo pipefail
-. "\$PROVISION_LIB"
-p_fail() { echo "FAIL \$*"; }
-verdict_apply() { exit 9; }
-prov_delivery_is_binary() { return 0; }
-repo_root() { echo "$1"; }
-PROV_PREFIX="${2:-/inexistant}"
-enroll="\$BATS_TEST_TMPDIR/enroll-decor"; mkdir -p "\$enroll"
-tree="$1"; ref_catalogue="$1"
-# ⚠ DANS UNE FONCTION, PARCE QUE LE FRAGMENT COMMENCE PAR \`local\` : le sourcer au niveau du
-# script rend « local: can only be used in a function » et le temoin mesure son propre harnais.
-enroll_bloc() {
-  source "\$BATS_TEST_TMPDIR/frag-enroll.sh"
-  printf 'ENROLL_SRC:%s\n' "\${enroll_src[*]}"
-}
-enroll_bloc
-HARNAIS
-  run env BATS_TEST_TMPDIR="$BATS_TEST_TMPDIR" PROVISION_LIB="$PROVISION_LIB" \
-    bash "$BATS_TEST_TMPDIR/h-enroll.sh"
-}
-
-_pose_release() { # _pose_release <chemin complet du binaire>
-  mkdir -p "$(dirname "$1")"; printf '#!/bin/sh\n' > "$1"; chmod 0755 "$1"
-}
-
-@test "ENROLL : la release du PAQUET suffit — 60-deploy ne l a pas encore posee" {
-  # Le cas exact de la premiere install d un paquet : rien sous PROV_PREFIX, tout dans le paquet.
-  local src="$BATS_TEST_TMPDIR/paquet"
-  _pose_release "$src/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
-  harnais_enroll "$src" "$BATS_TEST_TMPDIR/prefix-vide"
-  [ "$status" -eq 0 ] || { echo "le module a refuse alors que le paquet porte sa release : $output"; return 1; }
-  [[ "$output" == *"ENROLL_SRC:--release $src/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"* ]]
-}
-
-@test "ENROLL : sans AUCUNE release, le refus NOMME les deux endroits cherches" {
-  # Avant : `enroll-catalogue.sh` mourait plus loin sur « release non executable » et le module
-  # rendait « roster non derivable de l ARBRE » — un message qui accuse la source alors que le
-  # paquet est complet. Le diagnostic doit designer ce qui manque, pas ce qui est la.
-  harnais_enroll "$BATS_TEST_TMPDIR/vide" "$BATS_TEST_TMPDIR/prefix-vide"
-  [ "$status" -eq 9 ] || { echo "le module a continue sans release (rc=$status) : $output"; return 1; }
-  [[ "$output" == *"_build/prod/rel"* ]]
-  [[ "$output" == *"posée"* ]]
-  # et il n accuse plus l arbre
-  refute grep -q 'roster non dérivable' <<<"$output"
-}
-
-@test "ENROLL : le module ne COMPOSE plus le chemin — il le demande a la lib" {
-  # La forme, et elle compte : recomposer `$PROV_PREFIX/rel/...` ici rendrait la garde de la lib
-  # inoperante sans qu aucun temoin de comportement ne bouge.
-  local corps; corps="$(grep -vE '^\s*#' "$SRC")"
-  grep -q 'prov_release_bin' <<<"$corps"
-  refute grep -q 'enroll_src=(--release "${PROV_RELEASE_BIN:-' <<<"$corps"
-}

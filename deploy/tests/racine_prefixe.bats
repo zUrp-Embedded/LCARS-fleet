@@ -9,7 +9,7 @@
 # moment du geste. Celui de `/home/private` n'avait rien — le mur a ete ecrit d'abord, et il a
 # attrape une perte de volume qu'aucune relecture n'aurait vue. Ici non plus il n'y a rien.
 #
-# ⚠ DEUX SSoT, ET RIEN NE LES CONFRONTE. `etc/deploy-release.sh` (`LCARS_INSTALL_PREFIX`) pose le runtime ;
+# ⚠ DEUX SSoT, ET RIEN NE LES CONFRONTE. `deploy/lib/deploy-release.sh` (`LCARS_INSTALL_PREFIX`) pose le runtime ;
 # `deploy/lib/provision-lib.sh` (`PROV_PREFIX`) le VERIFIE et le reverrouille. Deux defauts
 # separes, dans deux fichiers, jamais compares. Le jour ou l'un bouge, le rail pose a un endroit
 # et verifie a un autre : `60-deploy` annonce « release absente » sur une release parfaitement
@@ -25,7 +25,7 @@
 load refute
 
 setup() {
-  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  R="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   LIB="$R/deploy/lib/provision-lib.sh"
 
   # ⚠ ON SOURCE, ON N'EXTRAIT PAS LE TEXTE. Un `sed` sur `${PROV_PREFIX:=…}` mesure une SYNTAXE :
@@ -40,9 +40,16 @@ setup() {
 
 # Tout chemin absolu du fichier qui se termine par le binaire de release.
 bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2>/dev/null; }
+# Tout fichier des deux arbres qui NOMME le binaire de release — hors temoins, doc, et ce que mix
+# ou node deposent. `runtime/tmp` bouge sous les pieds des suites ExUnit, on ne le lit pas.
+porteurs_de_release() {
+  grep -rlE '/rel/lcars_fleet/bin/lcars_fleet' "$R/deploy" "$R/runtime" \
+    --exclude-dir=tests --exclude-dir=test --exclude-dir=_build --exclude-dir=deps \
+    --exclude-dir=node_modules --exclude-dir=tmp --exclude-dir=.git --exclude='*.md' 2>/dev/null | sort
+}
 
 @test "GARDE D'INSTRUMENT : la SSoT rend un prefixe absolu de profondeur >= 2" {
-  # `etc/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
+  # `deploy/lib/deploy-release.sh` REFUSE lui-meme un prefixe de profondeur 1 (il y effacerait une racine
   # systeme). Un mur qui accepterait moins que ce que le produit exige mesurerait autre chose.
   [[ "$ATTENDU" == /*/* ]] || { echo "prefixe inexploitable : « $ATTENDU »" >&2; return 1; }
   [ -n "$BIN_REL" ]
@@ -68,7 +75,7 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # change ailleurs, et une comparaison seule ne dirait rien d'un huitieme qui apparait.
   # ⚠ ET IL Y A DEUX NATURES, PAS UNE — CE MUR N EN CONNAISSAIT QU UNE, ET IL A EU RAISON DE
   # ROUGIR QUAND LA SECONDE EST APPARUE. La release POSEE vit sous `$PROV_PREFIX` ; la release
-  # BATIE vit dans l arbre, en `fleet/_build/prod/rel/…`, la ou `mix release` la depose et ou
+  # BATIE vit dans l arbre, en `runtime/_build/prod/rel/…`, la ou `mix release` la depose et ou
   # `pack.sh:188` la prend pour l embarquer. Ce sont deux objets distincts au meme nom de binaire :
   # `prov_release_bin` cherche la seconde AVANT la premiere, precisement parce qu elle est celle que
   # la passe en cours apporte et que `60-deploy` posera.
@@ -77,8 +84,12 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # c est-a-dire qu elle y soit AVANT d y etre posee. Le mur classe donc par nature, et compte
   # chacune : un compte seul passerait au vert le jour ou l un d eux change ailleurs, une
   # comparaison seule ne dirait rien d un huitieme qui apparait.
-  local f n=0 nb=0 b
-  for f in "$R/deploy/lib/provision-lib.sh" "$R/fleet/bin/lcars" "$R/deploy/docker/entrypoint.sh"; do
+  # ⚠ UN BALAYAGE, PAS UNE LISTE. Ce mur nommait trois fichiers ; un quatrieme porteur d'un chemin
+  # de release pose n'entrait pas dans le compte, et l'assertion « UN chemin » restait vraie sur
+  # ce qu'elle n'avait pas lu (relecture hostile 2026-09-04, M5). On lit tout ce qui POSE ou JOUE
+  # dans les deux arbres — pas les temoins ni la doc, qui racontent — et on nomme le porteur.
+  local f n=0 nb=0 b porteur=""
+  while IFS= read -r f; do
     while read -r b; do
       [ -n "$b" ] || continue
       case "$b" in
@@ -86,16 +97,23 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
           nb=$(( nb + 1 ))
           # La release BATIE se derive de la racine de l arbre, jamais du prefixe d install : un
           # chemin absolu en dur ici designerait la machine de celui qui a ecrit la ligne.
-          [ "$b" = "/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
+          [ "$b" = "/runtime/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ] \
             || { echo "$f : chemin de release BATIE non derive de la racine : « $b »" >&2; return 1; } ;;
         *)
-          n=$(( n + 1 ))
+          n=$(( n + 1 )); porteur="${f#"$R/"}"
           [ "$b" = "$BIN_REL" ] || { echo "$f : « $b » au lieu de « $BIN_REL »" >&2; return 1; } ;;
       esac
     done < <(bins_de "$f")
-  done
-  [ "$n" -eq 2 ] || { echo "deux chemins de release POSEE attendus, $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
-  [ "$nb" -eq 1 ] || { echo "un seul chemin de release BATIE attendu, $nb trouve(s)" >&2; return 1; }
+  done < <(porteurs_de_release)
+  # Lot 6 (2026-09-04) : l'entrypoint n'evalue plus rien lui-meme — ses portes deleguent a
+  # « lcars tool » — donc son RELEASE_BIN est parti avec elles. Reste UN chemin litteral de release
+  # posee : `_release_bin` de bin/lcars (la lib DERIVE le sien de $PROV_PREFIX).
+  [ "$n" -eq 1 ] || { echo "UN chemin de release POSEE attendu (bin/lcars), $n trouve(s) — le corpus a bouge, ce mur aussi doit bouger" >&2; return 1; }
+  [ "$porteur" = runtime/bin/lcars ] || { echo "le chemin de release POSEE vit dans « $porteur », pas dans runtime/bin/lcars" >&2; return 1; }
+  # ⚠ ZERO CHEMIN BATI DEPUIS LE 2026-09-04 (lot 4) : `prov_release_bin` est mort avec la coupe de
+  # 48 — la structure se derive de la release POSEE (61-forge-structure), plus jamais de celle du
+  # paquet. Un chemin `_build/prod/rel` qui reapparaitrait ici serait la devinette qui revient.
+  [ "$nb" -eq 0 ] || { echo "AUCUN chemin de release BATIE attendu, $nb trouve(s) — la devinette entre paquet et prefixe est revenue" >&2; return 1; }
 }
 
 @test "LE DOCKERFILE construit, copie et cable sous le MEME prefixe" {
@@ -129,4 +147,22 @@ bins_de() { grep -ohE '/[A-Za-z0-9_./-]*/rel/lcars_fleet/bin/lcars_fleet' "$1" 2
   # ⚠ AUCUN CLIQUET SUR L'ANCIENNE VALEUR ICI, ET C'EST DELIBERE. L'interdit du retour appartient
   # a `racines_ssot.bats`, qui porte deja `/opt/lcars/runtime` dans sa liste. Un cliquet ecrit AVANT
   # le deplacement interdit la valeur qui est encore la bonne : il rougirait sur un depot sain.
+}
+
+# ─── M4 : LA PROSE SUIT LE LAYOUT, ET NE JUSTIFIE PAS DU CODE PAR UN APPELANT DISPARU ───────────
+#
+# Relecture hostile du 2026-09-04 : cinq commentaires disaient encore `fleet/` pour l'arbre frere
+# de `deploy/` (renomme `runtime/`), et trois justifiaient d'embarquer `deploy/` sous /opt/lcars
+# par « LE GESTE NOMINAL DU CONVERGEUR », en citant `human-converger.sh:132` — une ligne qui est
+# `first_free_uid`, dans un convergeur qui ne rejoue plus `provision` (il source `human.d/*.sh`).
+# Une prose qui cite un appelant par son numero de ligne perime a la premiere edition de l'appelant.
+@test "M4 : aucune prose de deploy/ ne nomme plus fleet/ comme arbre frere, ni un convergeur qui rejouerait provision" {
+  local hits
+  hits="$(grep -rnE 'deploy/. et .fleet/. y sont FRERES|GESTE NOMINAL DU CONVERGEUR|human-converger\.sh:[0-9]+|fleet/\{deploy' \
+            "$BATS_TEST_DIRNAME/.." --include='*.sh' --include='*.bats' --include='*.md' --include=provision --include=gate.sh \
+          | grep -v 'racine_prefixe.bats' || true)"
+  [ -z "$hits" ] || { echo "prose perimee :" >&2; printf '%s\n' "$hits" >&2; return 1; }
+  # GARDE D INSTRUMENT : le motif voit bien la forme qu il interdit
+  grep -qE 'deploy/. et .fleet/. y sont FRERES' <<<'  R="$(pwd)"  # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES'
+  grep -qE 'human-converger\.sh:[0-9]+' <<<'# (`runtime/services/human-converger.sh:132`), rend'
 }

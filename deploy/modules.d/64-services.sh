@@ -52,7 +52,7 @@ STARTERS=(
 # boite, le check depassait sa propre porte de sortie, ne trouvait aucune unite, rendait un drift —
 # et `apply:check:*` le convertissait en ECHEC que nul `apply` ne pouvait reparer.
 # `/run/systemd/system` est le test canonique (sd_booted(3)) : il n'existe QUE si systemd est
-# l'init. Mesure du 2026-08-30 dans lcars3-lcars-1 : systemctl PRESENT, /etc/systemd/system PRESENT,
+# l'init. Dans la boite : systemctl PRESENT, /etc/systemd/system PRESENT,
 # /run/systemd/system absent, PID 1 = tini.
 have_systemd() { [[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
 
@@ -94,14 +94,14 @@ check_box_services() {
   # un etat que ce moment precis ne peut pas avoir — le check se serait refuse lui-meme a chaque
   # boot. Le superviseur vivant est donc le discriminant : absent, on est DANS le boot et l'etat
   # verifiable est « en place » ; present, on est apres, et un programme muet est un vrai drift.
-  pgrep -f "$sup" >/dev/null 2>&1 && sup_vivant=1
+  pgrep -f "$(prov_pgrep_pattern "$sup")" >/dev/null 2>&1 && sup_vivant=1
 
   for e in "${STARTERS[@]}"; do
     IFS=: read -r prog rel unit <<<"$e"
     [[ "$rel" == "unit" ]] || continue
     if [[ ! -x "$dir/$prog" ]]; then
       p_drift "$unit : « $prog » absent ou pas exécutable ($dir/$prog) — $(consequence_of "$unit")"
-    elif pgrep -f "$prog" >/dev/null 2>&1; then
+    elif pgrep -f "$(prov_pgrep_pattern "$prog")" >/dev/null 2>&1; then
       p_ok "$unit : « $prog » tenu par le superviseur"
     elif [[ "$sup_vivant" -eq 1 ]]; then
       p_drift "$unit : « $prog » en place mais MUET alors que le superviseur tourne — $(consequence_of "$unit")"
@@ -134,7 +134,7 @@ loop_hint() { # loop_hint <unite> — pourquoi elle boucle, dans les termes de l
 #
 # ⚠ ET IL Y AVAIT DEJA `loop_hint`, MAIS SUR UNE SEULE BRANCHE. Un service qui a epuise son plafond
 # de redemarrages n'est plus `is-active` ET son compteur ne monte plus : ni « boucle » ni « debout ».
-# Il tombait donc dans la branche muette. Mesure du banc 2004 (2026-08-31) : le landing ne montait
+# Il tombait donc dans la branche muette. Cas vu : le landing ne montait
 # pas, cause reelle « Address already in use » sur le port du deck — que `loop_hint` savait nommer,
 # et que personne ne lui demandait.
 unit_cause() { # unit_cause <unite> -> " — <cause>", vide si on ne sait rien dire
@@ -166,16 +166,25 @@ services_env_body() {
   # lit comme une décision et n'en est pas une. Pire, il ferait un cinquième littéral `fleet` pour un
   # nom qui en a déjà quatre — et le jour où l'org est renommée, c'est le nombre de copies qui décide
   # combien de lecteurs suivent.
-  echo "PROV_FORGE_ORG=$PROV_FORGE_ORG"
-  echo "PROV_HUMANS_TEAM=$PROV_HUMANS_TEAM"
-  echo "PROV_FLEET_GROUP=$PROV_FLEET_GROUP"
+  echo "LCARS_FORGE_ORG=$PROV_FORGE_ORG"
+  echo "LCARS_HUMANS_TEAM=$PROV_HUMANS_TEAM"
+  echo "LCARS_FLEET_GROUP=$PROV_FLEET_GROUP"
   echo "LCARS_SYSADMIN_UID=$LCARS_SYSADMIN_UID"
   # ⚠ LE PORT DU DECK PASSE PAR ICI, ET C'EST SON SEUL CHEMIN JUSQU'AU DAEMON. `console-landing.sh`
   # lit `LCARS_LANDING_PORT` ; `PROV_DECK_PORT` ne décrivait, lui, que les URL de callback OIDC. Une
   # valeur qui ne déplace QUE les callbacks produit une identification qui revient sur un port où
   # personne n'écoute — la panne tombe au RETOUR du login, là où elle est le moins lisible.
   echo "LCARS_LANDING_PORT=$PROV_DECK_PORT"
-  echo "LCARS_PROVISION=$HELPERS_DIR/deploy/provision"
+  # ⚠ MUR 7 (variable_walls.bats) : tout ce qu'un daemon LIT et que l'installeur DECIDE (jumeau
+  # PROV_) voyage par ici — sinon le daemon vit sur son defaut code en dur et ne suit pas une
+  # installation qui a deplace le magasin des jetons, renomme le compte systeme ou le groupe de
+  # traversee. Les cinq ci-dessous etaient lus (catalogue-executor, console-landing, human-converger)
+  # avec un defaut chacun, et absents d'ici : cinq copies d'une decision, aucune qui la suive.
+  echo "LCARS_MASTER_TOKEN_FILE=$PROV_MASTER_TOKEN_FILE"
+  echo "LCARS_UID_MAP_FILE=$PROV_UID_MAP_FILE"
+  echo "LCARS_CONSOLE_GROUP=$PROV_CONSOLE_GROUP"
+  echo "LCARS_SYSTEM_ACCOUNT=$PROV_SYSTEM_ACCOUNT"
+  echo "LCARS_ROLES=\"$PROV_ROLES\""   # espaces : cite pour systemd (EnvironmentFile) ET pour un `. services.env`
 }
 
 unit_body() { # unit_body <nom sans .service>
@@ -243,8 +252,8 @@ WantedBy=multi-user.target
 EOF
       ;;
     lcars-privileged)
-      # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (mesure du
-      # 2026-08-25 : `/branches/tool_request` et `/contents/ops` repondent 200 en anonyme), et un
+      # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (`/branches/tool_request` et
+      # `/contents/ops` repondent 200 en anonyme), et un
       # service qui saurait ou trouver un secret aurait le droit de le lire. Une boite dont la forge
       # exige une session en lecture l'ajoute a `$SERVICES_ENV`, explicitement.
       cat <<EOF
@@ -286,18 +295,23 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
 # module hors-substrat, `apply:check`), ce qui rendait toute boite non convergee a son premier boot
 # et, sur une boite de production ou personne ne s'est encore inscrit, DEFINITIVEMENT. Le meme
 # entrypoint publiait alors `provision.rc=1` a cote de `humans.rc=0` — deux verdicts contradictoires
-# sur le meme fait, ecrits au meme instant (mesure .63, 2026-08-30).
+# sur le meme fait, ecrits au meme instant.
 #
 # Ce que la sonde doit continuer de faire, et qui est son unique raison d'exister : le DIRE. En
 # docker, `22-fleet-human` et `48-forge-host` ne sont meme pas selectionnes (`CHECK-ON: wsl linux`) ;
 # sans cette ligne, un `doctor` de boite annonce « 0 faute » pendant que GUARD B refuse tout
-# « fleet_v2 start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
+# « fleet start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
+  # LE FAIT, pour qui doit decider : l'entrypoint de la boite publie « quelqu'un peut lancer une
+  # fleet » et lisait pour cela le CODE DE RETOUR de ce module — qui vaut 0 sur une boite conforme
+  # SANS humain, puisque l'absence est un WARN. « humain(s) present(s) » etait donc toujours vrai.
+  # Une boite ou seul le siege existe rendait « present(s) ». Meme canal que `00-preflight`.
+  p_fact fleet_humans "$found"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
   else
-    p_warn "aucun humain de fleet sur cette machine — « fleet_v2 start » n'aura personne pour le lancer tant que quelqu'un ne s'est pas enrolé sur la forge (team « $PROV_HUMANS_TEAM », le convergeur le matérialise au tour suivant). Ce n'est pas une dérive : un déploiement neuf attend son premier inscrit"
+    p_warn "aucun humain de fleet sur cette machine — « fleet start » n'aura personne pour le lancer tant que quelqu'un ne s'est pas enrolé sur la forge (team « $PROV_HUMANS_TEAM », le convergeur le matérialise au tour suivant). Ce n'est pas une dérive : un déploiement neuf attend son premier inscrit"
   fi
 }
 
@@ -312,13 +326,13 @@ probe_seat_uid() {
     # ⚠ « AUCUN » A DEUX CAUSES, ET UNE SEULE EST UN DRIFT. `services.env` est `0640 root:fleet` :
     # un compte hors du groupe rend un champ vide sans avoir lu une ligne du fichier. Le declarer
     # « aucun LCARS_SYSADMIN_UID » est alors un fait sur le LECTEUR, pas sur la machine — et il
-    # disparait sous sudo, sur la meme machine a la meme seconde (mesure du 2026-09-01, banc 2007).
+    # disparait sous sudo, sur la meme machine a la meme seconde.
     local _st; _st="$(prov_file_state "$SERVICES_ENV")"
     if [[ "$_st" != "present" && "$_st" != "absent" ]]; then
       p_warn "LCARS_SYSADMIN_UID non sondable — $SERVICES_ENV $(prov_state_why "$_st" "$SERVICES_ENV")"
       return 0
     fi
-    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — is_fleet_human et uid_floor retomberont sur le litteral 1000, qui n'est le siege que par coincidence (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque)"
+    p_drift "aucun LCARS_SYSADMIN_UID dans $SERVICES_ENV — sans siege declare, is_fleet_human repond non a tout le monde et le convergeur refuse de demarrer (GUARD B, lui, lit $SEAT_UID_FILE et refuse s'il manque) : aucun repli, un refus qui ne se voit qu'au boot"
     return 0
   fi
   # ⚠ `|| true` PARCE QU'UN UID ABSENT EST UNE REPONSE, PAS UNE PANNE. `getent` sort en 2 quand la
@@ -337,7 +351,7 @@ probe_seat_uid() {
 probe_seat_file() {
   local v name
   if [[ ! -r "$SEAT_UID_FILE" ]]; then
-    p_drift "$SEAT_UID_FILE absent — GUARD B (« $HELPERS_DIR/fleet_v2 » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
+    p_drift "$SEAT_UID_FILE absent — GUARD B (« $PROV_LINK_DIR/fleet » et son miroir BEAM) refusera tout lancement : sans ce fichier, aucun des deux ne peut établir le siège"
     return 0
   fi
   v="$(head -n1 -- "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -365,13 +379,13 @@ check() {
   # ⚠ LA SONDE D'HUMAINS PASSE AVANT LA PORTE DE SORTIE, ET C'EST UN ACQUIS : `22-fleet-human` et
   # `48-forge-host` sont `CHECK-ON: wsl linux`, donc en docker ils ne sont meme pas SELECTIONNES.
   # Ce module est le seul a y tourner. Sortir avant de sonder faisait annoncer « 0 faute » a un
-  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet_v2 start`, faute de compte.
+  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet start`, faute de compte.
   # Trois temoins de `services_units.bats` tiennent ce contrat — ne pas le deplacer sous pretexte
   # qu'un humain manque forcement au premier boot : c'est un DRIFT, et un drift se dit.
   probe_fleet_humans
 
   # ⚠ LE SUBSTRAT CHOISIT LA MECANIQUE, `have_systemd` DIT SEULEMENT SI ELLE EST UTILISABLE. Ces
-  # deux questions ont ete confondues le 2026-08-30 et ca visait le rail WSL en plein : `30-wsl`
+  # deux questions se confondent facilement, et la confusion vise le rail WSL en plein : `30-wsl`
   # pose `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown`. Au
   # PREMIER apply d'un WSL vierge, `/run/systemd/system` n'existe donc pas — et une branche
   # conditionnee a la seule absence de systemd aurait fait chercher `supervise.sh` sur un poste,
@@ -414,13 +428,14 @@ check() {
 apply() {
   local u
 
-  if ! have_systemd; then
-    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — rien à poser, et c'est dit plutôt que fait à moitié. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
-    verdict_apply
-  fi
-
+  # ⚠ LE SIEGE ET L'ENVIRONNEMENT SE POSENT AVANT LA PORTE SYSTEMD, ET L'ORDRE EST LE CORRECTIF.
+  # `seat.uid` est ce que lit GUARD B (`bin/fleet`, `runtime.exs`) ; il ne depend d'aucune
+  # unite. Pose apres le test de systemd, il manquait sur un WSL vierge au premier apply — `30-wsl`
+  # vient d'ecrire `systemd=true`, qui n'agit qu'apres `wsl --shutdown` — et `fleet start`
+  # refusait entre les deux passes pendant que le verdict de ce module etait vert (« rien a poser »).
+  # `services.env` suit pour la meme raison : les unites le liront quand elles existeront.
   [[ -n "${LCARS_SYSADMIN_UID:-}" ]] || {
-    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et uid_floor, qui retomberaient sur le littéral 1000"
+    p_fail "LCARS_SYSADMIN_UID non posé — « deploy/provision » le dérive du siège avant tout module. Sans lui, l'environnement des daemons s'écrirait sans la clé que lisent is_fleet_human et le convergeur : le premier répondrait non à tout le monde, le second refuserait de démarrer (aucun repli, par décision)"
     verdict_apply
   }
 
@@ -437,6 +452,11 @@ apply() {
   # difference avec la variable qu'il remplace. Ce n'est pas un secret, c'est un fait de machine.
   write_atomic "$SEAT_UID_FILE" 0644 "$SERVICES_OWNER" <<<"$LCARS_SYSADMIN_UID" \
     || { p_fail "uid du siège non posé ($SEAT_UID_FILE) — GUARD B refusera tout lancement sur cette machine"; verdict_apply; }
+
+  if ! have_systemd; then
+    p_warn "pas de systemd ici ($SYSTEMCTL absent, ou systemd n'est pas l'init : /run/systemd/system) — le siege et l'environnement sont poses, AUCUNE unite ne l'est, et c'est dit plutôt que fait à moitié. Sur WSL, « wsl --shutdown » puis un nouvel onglet l'active (cf. 30-wsl)"
+    verdict_apply
+  fi
 
   local reload=0 body
   for u in "${UNITS[@]}"; do
@@ -476,7 +496,7 @@ apply() {
       # ⚠ LE VERDICT PORTE LA CAUSE, IL NE DÉLÈGUE PAS SA LECTURE. « status dit pourquoi » est un
       # diagnostic juste dont l'action demande un SECOND geste — et sur un rail joué en fond, ou
       # depuis un log qu'on relit le lendemain, ce second geste n'est plus possible : le journal a
-      # tourné. Mesure du banc 2004 (2026-08-31) : le landing ne montait pas, cause réelle
+      # tourné. Cas vu : le landing ne montait pas, cause réelle
       # « Address already in use » sur le port du deck, invisible dans la ligne du rail.
       #
       # C'est le motif que ce rail combat partout ailleurs — un remède nommé qu'on ne peut pas jouer
@@ -522,7 +542,7 @@ converge_humans_now() {
   [[ "$rc" -eq 0 ]] || return 0   # rc non toléré : `run_step` a déjà compté l'échec et dit pourquoi
   case "$PROV_LAST_RC" in
     0) ;;
-    2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet_v2 start » n'aura personne à lancer"
+    2) p_drift "convergeur d'humains : configuration absente (forge ou jeton système) — aucun humain n'est matérialisé, et « fleet start » n'aura personne à lancer"
        return 0 ;;
     *) p_drift "convergeur d'humains : passe en échec (rc=$PROV_LAST_RC) — « journalctl -u lcars-converger » dit pourquoi"
        return 0 ;;

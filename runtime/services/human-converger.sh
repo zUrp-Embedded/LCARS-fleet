@@ -23,8 +23,8 @@ ONCE=0
 FORGE="${FORGE_BASE_URL:-}"
 # Litteraux DUPLIQUES de `provision-lib.sh`, que ce script ne source pas : il tourne en boucle, hors
 # d'un cycle de provisionnement. C'est un temoin qui epingle leur egalite, faute de pouvoir la deriver.
-ORG="${PROV_FORGE_ORG:-fleet}"
-TEAM="${PROV_HUMANS_TEAM:-humans}"
+ORG="${LCARS_FORGE_ORG:-fleet}"
+TEAM="${LCARS_HUMANS_TEAM:-humans}"
 SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 TOKEN_FILE="${FORGE_TOKEN_FILE:-/opt/lcars/var/tokens/$SYSTEM_ACCOUNT.gitea_token}"
 ROLES="${LCARS_ROLES:-system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
@@ -35,7 +35,7 @@ SHELL_="${LCARS_HUMAN_SHELL:-/bin/bash}"
 # Le shell d'un revoque. `console-humans.sh` ecarte `*/nologin` et `*/false` : poser celui-la ferme
 # la console a la source, pour ses deux consommateurs a la fois.
 NOLOGIN="${LCARS_NOLOGIN_SHELL:-/usr/sbin/nologin}"
-GROUP="${PROV_FLEET_GROUP:-fleet}"
+GROUP="${LCARS_FLEET_GROUP:-fleet}"
 HOME_ROOT="${LCARS_HOME_ROOT:-/home}"
 # GUARD A — L'UID DU SIEGE N'EST JAMAIS CONVERGE NI REVOQUE. Garde keye sur l'UID, PAS sur un login :
 # le login du siege est celui de l'installeur, donc variable, et keyer sur l'uid survit a un rename.
@@ -54,27 +54,52 @@ LAST_RECONCILE=0
 say() { echo "[lcars-converger] $*"; }
 err() { echo "[lcars-converger] $*" >&2; }
 
+# ─── LA FRONTIERE SYSTEME/HUMAIN EST CELLE DU PROTOCOLE, ET CE DAEMON L'EMPRUNTE ────────────────
+# Ce fichier portait sa propre copie de la regle (`uid_min`, trois replis sur 1000), a contre-sens
+# du BEAM qui refuse de booter sur un login.defs illisible (runtime.exs, R-no-uid-min) et de
+# `console-humans.sh` qui ne rend aucune liste. La regle vit dans `lib/human-protocol.sh`
+# (`uid_bounds` : UID_MIN et UID_MAX, ou rien et le remede dit une fois) ; `reserved`, `uid_floor`
+# et `converged_humans` l'appellent, ils ne la recopient plus. Bornes illisibles = ce daemon ne
+# converge PERSONNE (cf. `converge_once`) et le dit une fois par tour.
+#
+# Le chemin est celui de boot.sh (`LCARS_HUMAN_PROTOCOL`) : sur une machine posee, le protocole est
+# sous `/opt/lcars/services/lib/` et ce script a `/opt/lcars/` (l'image et 62-runtime-helpers
+# posent le meme layout) ; dans un checkout, c'est le voisin `lib/` de ce fichier. Les modules
+# per-humain le chargent EUX-MEMES par la variable que ce service leur donne (`converge_human`).
+#
+# Le protocole exige un sujet (`LCARS_LOGIN`) pour un MODULE, qui agit sur une personne. Ce daemon
+# est l'HOTE : il n'en a pas, il en nomme un a chaque appel. Il le declare — et ne l'EXPORTE pas :
+# les modules qu'il lance gardent leur garde. Il est source ICI, avant le garde de sourcing, pour
+# que les predicats d'admission restent testables sans lancer ni preflight ni boucle.
+HUMAN_PROTOCOL="${LCARS_HUMAN_PROTOCOL:-/opt/lcars/services/lib/human-protocol.sh}"
+[[ -r "$HUMAN_PROTOCOL" ]] || HUMAN_PROTOCOL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/human-protocol.sh"
+LCARS_HUMAN_PROTOCOL_HOST=1
+LCARS_MODULE_TAG="lcars-converger"
+# shellcheck source=lib/human-protocol.sh
+. "$HUMAN_PROTOCOL"
+unset LCARS_HUMAN_PROTOCOL_HOST
+
 # ─── L'ADMISSION ────────────────────────────────────────────────────────────────────────────────
 # Ces trois predicats decident si un login de la forge devient un user Linux. C'est la seule partie
 # qui, en se trompant, cree un compte que personne ne voulait — donc elle est definie AVANT le
 # garde de sourcing, pour etre testable sans lancer ni preflight ni boucle (meme idiome que
 # publish-transform.sh).
 
-# Les noms qu'on ne creera JAMAIS : tout ce qui est deja pris sous UID_MIN, plus les comptes de
-# service de la fleet (qui vivent dans l'org, et dont l'un est membre de la team).
-uid_min() { awk '/^UID_MIN/ {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || echo 1000; }
-
+# Les noms qu'on ne creera JAMAIS : tout ce qui est deja pris HORS de la plage des humains, plus
+# les comptes de service de la fleet (qui vivent dans l'org, et dont l'un est membre de la team).
 reserved() { # reserved <login> -> 0 si le nom est interdit
-  local login=$1 lo min
-  min="$(uid_min)"; min="${min:-1000}"
+  local login=$1 lo
   lo="${login,,}"
   [[ "$lo" == "${SYSTEM_ACCOUNT,,}" ]] && return 0
   local r
   for r in $ROLES; do [[ "$lo" == "${r,,}" ]] && return 0; done
-  # Un nom deja porte par un compte SOUS UID_MIN est un compte systeme : le convergeur ne
-  # l'adopte pas, il refuse. Adopter reviendrait a donner un home et un shell fleet a `sshd`.
-  awk -F: -v n="$login" -v m="$min" '$1==n && $3<m {found=1} END {exit !found}' \
-      "${PASSWD_FILE:-/etc/passwd}" && return 0
+  # Un nom deja porte par un compte HORS de la plage des humains — sous UID_MIN (`sshd`), au-dessus
+  # de UID_MAX (`nobody`) — est un compte systeme : le convergeur ne l'adopte pas, il refuse.
+  # Adopter reviendrait a donner un home et un shell fleet a `sshd`. Bornes illisibles : TOUT nom
+  # est reserve — on ne cree personne sur une frontiere devinee.
+  uid_bounds || return 0
+  awk -F: -v n="$login" -v m="$UID_MIN" -v M="$UID_MAX" \
+      '$1==n && ($3+0<m || $3+0>M) {found=1} END {exit !found}' "${PASSWD_FILE:-/etc/passwd}" && return 0
   return 1
 }
 
@@ -121,14 +146,13 @@ uid_map_record() { # uid_map_record <forge_id> <uid> <login>
   fi
 }
 
-# ⚠ `:-` NE PROTEGE QUE DU VIDE, PAS DU NON-NUMERIQUE : sous le `set +e` de la boucle, une borne
-# illisible ferait repartir `useradd` de son propre defaut, contournant EN SILENCE le plancher que
-# ce fichier existe pour poser.
+# Le plancher de creation : UID_MIN du protocole, et rien d'autre (le siege est un TROU dans la
+# plage, pas un plancher). Bornes illisibles : RIEN, et 1 — jamais un defaut. Sous le `set +e` de
+# la boucle, un defaut ferait repartir `useradd` de son propre plancher, contournant EN SILENCE
+# celui que ce fichier existe pour poser ; l'appelant refuse (`first_free_uid`, puis `converge_once`).
 uid_floor() {
-  local m
-  m="$(uid_min)"
-  [[ "$m" =~ ^[0-9]+$ ]] || m=1000
-  echo "$m"
+  uid_bounds || return 1
+  echo "$UID_MIN"
 }
 
 # ⚠ `getent`, PAS `PASSWD_FILE` — SEUL ENDROIT DU FICHIER QUI DIVERGE. La question n'est pas « qui
@@ -136,7 +160,7 @@ uid_floor() {
 # repond ce que le fichier ignore. C'est un sur-ensemble : un uid libre pour lui l'est aussi pour
 # `PASSWD_FILE`, donc `uid_taken_by` ne peut pas contredire ce choix a tort.
 first_free_uid() {
-  local uid seat; uid="$(uid_floor)"; seat="$SYSADMIN_UID"
+  local uid seat; uid="$(uid_floor)" || return 1; seat="$SYSADMIN_UID"
   while getent passwd "$uid" >/dev/null 2>&1 || [[ "$uid" == "$seat" ]]; do uid=$(( uid + 1 )); done
   echo "$uid"
 }
@@ -191,17 +215,20 @@ login_shell_of() { # login_shell_of <login>
   awk -F: -v n="$1" '$1==n {print $7}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
-# Les humains que CETTE boite a converges : membres du groupe fleet, uid >= UID_MIN. C'est la seule
-# trace qu'un enrollment a eu lieu, et elle se CALCULE — aucune liste tenue a la main ne resterait
-# vraie. L'humain de bootstrap en est ecarte : il n'est pas venu de la team.
+# Les humains que CETTE boite a converges : membres du groupe fleet, uid dans la plage des humains
+# (UID_MIN <= uid <= UID_MAX). C'est la seule trace qu'un enrollment a eu lieu, et elle se CALCULE
+# — aucune liste tenue a la main ne resterait vraie. L'humain de bootstrap en est ecarte : il
+# n'est pas venu de la team. Bornes illisibles : PERSONNE n'est designe — une liste vide n'est
+# pas une purge, et une liste devinee en serait une.
 converged_humans() {
-  local min login; min="$(uid_min)"; min="${min:-1000}"
+  local login
+  uid_bounds || return 0
   while IFS= read -r login; do
     [[ -n "$login" ]] || continue
     # GUARD A : `$3 != s` exclut l'uid reserve du sysadmin (admiral) — jamais candidat a revocation,
     # meme s'il se retrouvait dans le groupe fleet local.
-    awk -F: -v n="$login" -v m="$min" -v s="$SYSADMIN_UID" \
-      '$1==n && $3>=m && $3!=s {print n}' "${PASSWD_FILE:-/etc/passwd}"
+    awk -F: -v n="$login" -v m="$UID_MIN" -v M="$UID_MAX" -v s="$SYSADMIN_UID" \
+      '$1==n && $3+0>=m && $3+0<=M && $3!=s {print n}' "${PASSWD_FILE:-/etc/passwd}"
   done < <(group_members)
 }
 
@@ -245,9 +272,10 @@ command -v jq   >/dev/null || { err "jq absent de l'image"; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || { err "doit tourner en root (c'est lui qui cree les users)"; exit 1; }
 
-api() { # api <path>
-  curl -s -m 15 -H "Authorization: token $(tr -d '[:space:]' < "$TOKEN_FILE")" \
-       "$FORGE/api/v1$1" 2>/dev/null || true
+api() { # api <path> — le jeton passe par un fichier de config sur STDIN, jamais en argv :
+  # `/proc/<pid>/cmdline` est lisible par tout compte de la boite, toutes les 30 s, a vie.
+  printf 'header = "Authorization: token %s"\n' "$(tr -d '[:space:]' < "$TOKEN_FILE")" \
+    | curl -s -m 15 -K - "$FORGE/api/v1$1" 2>/dev/null || true
 }
 
 team_id() {
@@ -272,11 +300,20 @@ team_id() {
 # l'a au premier tour de ce service, trente secondes plus tard. Une install qui se dit finie avant
 # que son convergeur ait tourne une fois n'a jamais decrit la machine reelle.
 #
-# LE VOCABULAIRE EST DEFINI ICI, PAS DANS UNE LIB DE PLUS. Les modules attendent sept fonctions
-# d'impression et deux de verdict ; ce sont des `printf` et deux compteurs. Une lib runtime en
-# regard de celle de l'installeur ferait DEUX copies d'un meme contrat, et c'est celle qu'on ne
-# relit pas qui ment. Les modules sont SOURCES dans un sous-shell : leur `case "$1"` final les
-# dispatche, et le sous-shell garantit qu'aucun n'empoisonne le suivant.
+# LE VOCABULAIRE DES MODULES VIT DANS `lib/human-protocol.sh`, COTE PRODUIT, ET C'EST LE SEUL
+# ENDROIT. Ce bloc le definissait inline, au motif qu'une lib runtime « ferait deux copies d'un
+# meme contrat » avec celle de l'installeur — et pendant ce temps les modules, eux, sourcaient la
+# lib de l'INSTALLEUR par une garde `${PROVISION_LIB:?}` que ce convergeur ne posait pas. Mesure
+# du 2026-09-04 sur les deux bancs : chaque humain cree mourait a la ligne 1 de ses trois modules,
+# rc=1, sans `~/.lcars`, sans `claude`, sans projets — et `--once` rendait 0. Les deux copies
+# existaient bel et bien, et aucune des deux ne servait.
+#
+# ⚖ user 2026-09-04 (Q3) : ce qui est joue en prod est du produit. Le protocole est donc ICI, dans
+# `services/lib/`, source par le module lui-meme (`LCARS_HUMAN_PROTOCOL`) et par ses
+# temoins — une copie, un contrat, et l'installeur garde sa lib pour SES modules : deux contrats,
+# chacun chez celui qui le joue. Les modules sont SOURCES dans un sous-shell : leur `case "$1"`
+# final les dispatche, et le sous-shell garantit qu'aucun n'empoisonne le suivant. Le chemin du
+# protocole (`HUMAN_PROTOCOL`) est resolu en tete de ce fichier, la ou ce daemon le source lui-meme.
 HUMAN_MODULES="${LCARS_HUMAN_MODULES:-/opt/lcars/services/human.d}"
 
 converge_human() { # converge_human <login>
@@ -286,34 +323,47 @@ converge_human() { # converge_human <login>
   local m rc_all=0 out
   out="$(mktemp "${TMPDIR:-/tmp}/lcars-converge.XXXXXX")" || out=""
 
+  # ⚠ LES MODULES SE JOUENT SOUS L'IDENTITE DE L'HUMAIN, PAS SOUS CELLE DE CE SERVICE. Ils
+  # portent `NEEDS: human` et l'installeur les jouait par `as_human` : `runuser -u <login>`, cwd
+  # dans son home, HOME/USER/LOGNAME poses. Ce service les sourcait en ROOT — mesure du 2026-09-04,
+  # banc bob_1, la premiere fois qu'ils ont tourne ici : `~/.lcars` de l'humain cree root:root,
+  # son `fleet.env` illisible par lui, `git config` mort sur « $HOME not set », `lcars` sur
+  # « HOME: unbound ». Un module per-humain joue en root ecrit chez l'humain ce que l'humain ne
+  # peut pas lire.
+  #
+  # Hors root, le module joue sous l'identite courante : ce n'est un cas que pour un decor de
+  # temoin — en prod ce service est root, sinon il n'aurait pas cree l'humain.
+  local home="" tag
+  if [[ "$EUID" -eq 0 && "$(id -un)" != "$login" ]]; then
+    home="$(getent passwd "$login" | cut -d: -f6 || true)"
+    [[ -n "$home" ]] || { err "$login : pas de home dans passwd — les modules per-humain ne se jouent pas"; return 1; }
+  fi
+
   # L'ORDRE EST CELUI DU PREFIXE NUMERIQUE, lisible dans un `ls` — meme regle que `modules.d`.
   for m in "$HUMAN_MODULES"/[0-9][0-9]-*.sh; do
     [[ -f "$m" ]] || continue
     local rc=0
-    (
-      set -euo pipefail
-      PROV_HUMAN="$login"; export PROV_HUMAN
-      PROV_MODULE_TAG="$(basename "$m" .sh)"
-      PROV_DRIFT=0; PROV_FAILED=0
-      p_ok()   { echo "[lcars-converger] OK    $PROV_MODULE_TAG: $*"; return 0; }
-      p_chg()  { echo "[lcars-converger] POSÉ  $PROV_MODULE_TAG: $*"; return 0; }
-      p_drift(){ echo "[lcars-converger] DRIFT $PROV_MODULE_TAG: $*" >&2; PROV_DRIFT=$((PROV_DRIFT+1)); }
-      p_warn() { echo "[lcars-converger] WARN  $PROV_MODULE_TAG: $*" >&2; }
-      p_fail() { echo "[lcars-converger] FAIL  $PROV_MODULE_TAG: $*" >&2; PROV_FAILED=$((PROV_FAILED+1)); }
-      p_step() { echo "[lcars-converger] >>    $PROV_MODULE_TAG: $*"; }
-      p_die()  { echo "[lcars-converger] FATAL $PROV_MODULE_TAG: $*" >&2; exit 1; }
-      # `apply` rend 1 des qu'un geste a echoue ; 2 = applique avec drift residuel, qui est le cas
-      # NOMINAL d'un humain frais (il lui manque ses credentials `claude`, geste d'identite).
-      verdict_apply() { [[ "$PROV_FAILED" -gt 0 ]] && exit 1; [[ "$PROV_DRIFT" -gt 0 ]] && exit 2; exit 0; }
-      verdict_check() { verdict_apply; }
-      human_home()    { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
-      repo_root()     { printf '%s\n' "${LCARS_HELPERS_DIR:-/opt/lcars}"; }
-      is_fleet_human() { local u; u="$(id -u -- "${1:-$PROV_HUMAN}" 2>/dev/null)" || return 1
-                         [[ "$u" -ge "$(awk '/^UID_MIN/{print $2}' /etc/login.defs 2>/dev/null || echo 1000)" ]]; }
-      run_quiet()     { local o; if ! o="$("$@" 2>&1)"; then printf "%s\n" "$o" >&2; return 1; fi; }
-      # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
-      . "$m" apply
-    ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    tag="$(basename "$m" .sh)"
+    # LE MODULE CHARGE LE PROTOCOLE LUI-MEME, par la variable que l'hote lui donne — la meme
+    # forme que ses temoins. Ce service ne definit plus rien : il nomme l'humain, le module, et
+    # le fichier. Vide si l'hote n'en a pas (un decor qui ne joue que cette fonction) : c'est
+    # alors la garde du module qui parle, et elle nomme sa cause.
+    if [[ -n "$home" ]]; then
+      ( cd "$home" && runuser -u "$login" -- \
+          env HOME="$home" USER="$login" LOGNAME="$login" \
+              LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag" \
+              LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}" \
+              bash -c 'set -euo pipefail; . "$1" apply' _ "$m"
+      ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    else
+      (
+        set -euo pipefail
+        export LCARS_LOGIN="$login" LCARS_MODULE_TAG="$tag"
+        export LCARS_HUMAN_PROTOCOL="${HUMAN_PROTOCOL:-${LCARS_HUMAN_PROTOCOL:-}}"
+        # shellcheck source=/dev/null  # le module est choisi a l execution — chemin non constant par nature
+        . "$m" apply
+      ) >"${out:-/dev/null}" 2>&1 || rc=$?
+    fi
     if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
       rc_all=1
       err "$login : $(basename "$m" .sh) rc=$rc — les 15 dernieres lignes :"
@@ -380,6 +430,14 @@ reconcile_humans() { # reconcile_humans <login…>
 
 converge_once() {
   local tid members login created=0
+  # LA FRONTIERE D'ABORD, UNE FOIS PAR TOUR. Sans bornes lisibles, ce daemon ne sait ni qui est
+  # reserve, ni ou creer, ni qui il a converge : il ne cree, ne restaure ni ne revoque PERSONNE ce
+  # tour. Le protocole dit le remede une fois par processus ; ce daemon le redit une fois par
+  # tour — pas une fois par membre, et pas trente fois par minute en silence.
+  if ! uid_bounds; then
+    err "$UID_BOUNDS_WHY — rien converge ce tour (aucun compte cree, restaure ni revoque)"
+    return 0
+  fi
   tid="$(team_id)"
   if [[ -z "$tid" ]]; then
     err "team $ORG/$TEAM introuvable (ou forge injoignable) — rien converge ce tour"
@@ -392,6 +450,15 @@ converge_once() {
   while IFS=$'\t' read -r forge_id login; do
     [[ -n "$login" ]] || continue
     if id "$login" >/dev/null 2>&1; then
+      # UN COMPTE QUI EXISTE N'EST PAS UN HUMAIN POUR AUTANT. `sshd`, `nobody`, un compte de service
+      # inscrit sur la forge par erreur passaient ici SANS `reserved` et se retrouvaient dans le
+      # groupe fleet — le meme refus que pour un compte a creer, prononce une fois.
+      if reserved "$login"; then
+        already_refused "$login" || {
+          err "REFUS $login — compte EXISTANT reserve (uid hors [UID_MIN..UID_MAX], compte systeme ou de service) ; ni reintegre, ni console"
+          mark_refused "$login" "ce login existe deja sur cette boite comme compte systeme ou de service : il ne devient pas un humain de fleet"; }
+        continue
+      fi
       # GUARD A : jamais restaurer (ni toucher) l'uid reserve du sysadmin (admiral).
       if [[ "$(uid_of "$login")" != "$SYSADMIN_UID" ]] &&
            { ! in_group "$login" || [[ "$(login_shell_of "$login")" == "$NOLOGIN" ]]; }; then
@@ -422,17 +489,21 @@ converge_once() {
     else
       uid_src="premier libre au-dessus du siege"
     fi
-    want_uid="$(uid_wanted "$login" "$forge_id")"
-    if [[ -n "$want_uid" ]]; then
-      holder="$(uid_taken_by "$want_uid" "$login")"
-      if [[ -n "$holder" ]]; then
-        already_refused "$login" || {
-          err "REFUS $login — uid $want_uid ($uid_src), deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
-          mark_refused "$login" "l'uid $want_uid ($uid_src) est deja porte par un autre compte ($holder) — un humain doit demeler"; }
-        continue
-      fi
-      uid_args=(-u "$want_uid")
+    want_uid="$(uid_wanted "$login" "$forge_id")" || want_uid=""
+    # Un uid VIDE n'est plus « useradd choisira » : `uid_wanted` rend toujours un uid quand le
+    # plancher se lit (D8), donc vide = plancher illisible = on ne cree pas sur le defaut de useradd.
+    if [[ -z "$want_uid" ]]; then
+      err "$login : aucun uid a poser (plancher illisible) — AUCUN user cree ce tour"
+      continue
     fi
+    holder="$(uid_taken_by "$want_uid" "$login")"
+    if [[ -n "$holder" ]]; then
+      already_refused "$login" || {
+        err "REFUS $login — uid $want_uid ($uid_src), deja porte par '$holder' ; AUCUN user cree (croisement a demeler a la main)"
+        mark_refused "$login" "l'uid $want_uid ($uid_src) est deja porte par un autre compte ($holder) — un humain doit demeler"; }
+      continue
+    fi
+    uid_args=(-u "$want_uid")
     # `--` ferme la liste d'options : meme si un jour un login commencait par `-`, il arriverait
     # ici comme un NOM et pas comme un drapeau. La validation l'interdit deja ; ceci est la
     # ceinture qui ne coute rien.

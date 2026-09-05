@@ -60,10 +60,15 @@
 # `apt_already` — et il est genere par machine, pas declare ici.
 
 # ─── LA RACINE ──────────────────────────────────────────────────────────────────────────────────
-prefix    /opt/lcars/runtime                              0750  root:fleet          wsl+linux
+prefix    /opt/lcars/runtime                              0750  root:fleet          any      
 
 # ─── REPERTOIRES DURABLES ───────────────────────────────────────────────────────────────────────
-dir       /opt/lcars                                   0755  root:root           wsl+linux
+# ⚠ `any` DEPUIS LE LOT 14 (2026-09-05) : l'image le POSE (`install -d 0755 root:root`, stage
+# runtime), la ou le premier `COPY` le creait « en passant » au mode que BuildKit choisit. Le stage
+# `verify` le mesure au build par `25-directories`, qui lit CETTE colonne pour savoir ou une entree
+# de sa table se mesure : `wsl+linux` ici, c'etait « n'existe pas sur docker » d'un repertoire que
+# l'image livre — et une mesure de moins au build.
+dir       /opt/lcars                                   0755  root:root           any
 # ⚠ COUVERTS PAR LEUR ANCETRE, ET DECLARES QUAND MEME. La regle « un chemin est couvert par ses
 # ancetres » evite une table de cent lignes ; elle n'a jamais dit qu'un objet FONCTIONNEL devait
 # rester anonyme. Un objet dont depend ce que la machine PORTE se nomme dans la table qui dit ce
@@ -82,12 +87,18 @@ dir       /opt/lcars                                   0755  root:root          
 # est ici sur les deux rails, et il dit vrai dans les deux sens.
 anchor:cond /opt/lcars/.source-revision                0644  root:root           any
 anchor    /opt/lcars/.helpers-revision                 0644  root:root           any
-dir       /opt/lcars/tofu                              0755  root:root           wsl+linux
-dir       /opt/lcars/tofu/providers                    0755  root:root           wsl+linux
-dir       /opt/lcars/share                                  0755  root:root           wsl+linux
-dir       /opt/lcars/share/avatars                     0755  root:root           wsl+linux
-dir       /opt/lcars/share/favicon                     0755  root:root           wsl+linux
-dir       /opt/lcars/share/doc                         0755  root:root           wsl+linux
+# ⚠ POSES PAR L'IMAGE, DONC VRAIS SUR DOCKER — `any`, et c'etait `wsl+linux` (lot 14, 2026-09-05).
+# Le stage runtime du Dockerfile pose `tofu/providers` (`mkdir -p`, puis `chmod -R a+rX`) et les
+# quatre `share/*` (`COPY`, puis `chmod -R a+rX`) : la table disait « n'existe pas sur docker » de
+# six repertoires que l'image LIVRE, et l'audit comme l'uninstall lisaient ce mensonge.
+# `image_layout.bats` tient la liste de ce que l'image pose ET que cette table connait : chaque
+# ligne en est declaree pour docker.
+dir       /opt/lcars/tofu                              0755  root:root           any
+dir       /opt/lcars/tofu/providers                    0755  root:root           any
+dir       /opt/lcars/share                                  0755  root:root           any
+dir       /opt/lcars/share/avatars                     0755  root:root           any
+dir       /opt/lcars/share/favicon                     0755  root:root           any
+dir       /opt/lcars/share/doc                         0755  root:root           any
 # ⚠ LE REPERTOIRE NE SE FERME PAS ICI, ET C'EST UN CONTRAT D'ORDRE. Quatre lecteurs sous uid
 # HUMAIN vivent encore dessous — le BEAM au boot (`runtime.exs`), `publish run`/`approve`, le skill
 # du siege, et l'outil de pod `project_publish`. Les fermer avant de les avoir migres casserait la
@@ -106,7 +117,7 @@ dir       /opt/lcars/var/tokens                       0710  lcars-authority:flee
 # par chaque install et retire par aucune. La SSoT est `Fleet.Layout.@installed_catalogues_root`.
 dir       /opt/lcars/var/catalogues                    0750  root:fleet          any
 # ⚠ `any`, ET C'ETAIT `docker` — MESURE DU 2026-09-01, BANC 2007 (un POSTE) : /var/lib/lcars/tofu/
-# .apply.lock y survit a la desinstallation. `fleet/services/forge-gestures.sh:102` derive
+# .apply.lock y survit a la desinstallation. `runtime/services/forge-gestures.sh:102` derive
 # `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction de rail, et ce fichier part sur les deux
 # (il est dans `EMBEDDED` de 62-runtime-helpers). Le poste creait donc un repertoire que la table
 # disait propre a la boite : `applies_here` l'ecartait du plan de desinstallation, et il ne partait
@@ -117,7 +128,7 @@ dir       /var/lib/lcars                               0755  root:root          
 # ─── LES REPERTOIRES DE TRAVAIL DES GESTES ROOT ─────────────────────────────────────────────────
 #
 # ⚠ ILS N'ETAIENT PAS DECLARES, ET LE SCRIPT CROYAIT QU'ILS L'ETAIENT.
-# `fleet/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
+# `runtime/bin/lcars-toolchain-converge:29` porte en toutes lettres « AUCUN MODE NI PROPRIETAIRE
 # RECOPIE ICI : deploy/system.manifest en est la source unique » — puis derive
 # `WORK=/var/tmp/lcars/toolchain-work` (l. 34) que cette table ne nommait nulle part. Le commentaire
 # decrivait une regle que la table n'appliquait pas.
@@ -127,12 +138,16 @@ dir       /var/lib/lcars                               0755  root:root          
 # execution sont deux gestes separes sur un chemin dont le proprietaire du parent decide. Declares
 # ici, le rail les POSE et `ensure_mode` re-stat leur proprietaire a chaque passe : la fenetre se
 # ferme au provisionnement, et le doctor la rouvrirait a voix haute.
+# ⚠ ET L'IMAGE LES POSE AUSSI, depuis le lot 14 : declares `any` (voir TRAVAIL dans
+# `system_manifest.bats`), ils n'etaient crees dans la boite que par l'init de l'instance, au boot.
+# Mesures au build par `25-directories` sous `verify`, ils y auraient rendu trois absents.
 dir       /var/tmp/lcars                               0755  root:root           any
 dir       /var/tmp/lcars/toolchain-work                0700  root:root           any
 
 dir       /opt/lcars/var                               0755  root:root           any
 dir       /opt/lcars/var/tofu                          0700  lcars-authority:lcars-authority  wsl+linux
-dir       /etc/lcars                                   0755  root:root           wsl+linux
+# ⚠ `any` : pose par l'image (`install -d 0755 root:root`, lot 13b) — mesure au build depuis le lot 14.
+dir       /etc/lcars                                   0755  root:root           any
 
 # ─── TOOLCHAINS PRECOMPILES ─────────────────────────────────────────────────────────────────────
 dir       /opt/node-<version>                          0755  root:root           wsl+linux
@@ -147,7 +162,10 @@ anchor    /etc/lcars/host-consent                      0644  root:root          
 anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any
 anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
-anchor    /usr/local/bin/tofu                          0755  root:root           wsl+linux
+# ⚠ POSEE PAR L'IMAGE (stage runtime, `install -m 0755 … /usr/local/bin/tofu`) et RELUE au build par
+# `46-tofu` sous `verify` : `any`, et c'etait `wsl+linux` (lot 15). `image_layout.bats` tient la
+# liste des ancres et liens que l'image pose ET que cette table connait.
+anchor    /usr/local/bin/tofu                          0755  root:root           any
 anchor    /usr/local/bin/lcars-toolchain-converge      0755  root:root           any
 anchor    /usr/local/bin/lcars-authority-ask           0755  root:root           any
 
@@ -164,8 +182,11 @@ link      /etc/systemd/system/multi-user.target.wants/lcars-converger.service   
 link      /etc/systemd/system/multi-user.target.wants/lcars-catalogue.service   -  -  wsl+linux
 link      /etc/systemd/system/multi-user.target.wants/lcars-privileged.service  -  -  wsl+linux
 
-link      /usr/local/bin/fleet_v2                      -     -                   wsl+linux
-link      /usr/local/bin/lcars                         -     -                   wsl+linux
+# ⚠ POSES PAR L'IMAGE (`ln -sf`, stage runtime) et RELUS au build par `60-deploy` (release.manifest)
+# sous `verify` : `any`, et c'etait `wsl+linux` (lot 15). `node`/`npm`/`npx` restent `wsl+linux` :
+# l'image n'a pas de node (le stage `site` batit la doc et meurt).
+link      /usr/local/bin/fleet                      -     -                   any
+link      /usr/local/bin/lcars                         -     -                   any
 link      /usr/local/bin/node                          -     -                   wsl+linux
 link      /usr/local/bin/npm                           -     -                   wsl+linux
 link      /usr/local/bin/npx                           -     -                   wsl+linux
@@ -219,6 +240,15 @@ runtime:cond /run/lcars/authority/roles.sock           0660  lcars-authority:fle
 runtime   /run/lcars/privileged                        0750  root:fleet          any
 runtime   /run/lcars/privileged/toolchain.sock         0660  root:fleet          any
 runtime   /run/lcars-converger.refused                 0644  root:root           any
+# ⚖ user 2026-09-04 (Q1, lot 7) : cette table N'A PLUS DE COLONNE `docker`. Les fichiers de boot de
+# la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
+# `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
+# `runtime/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/box/README.md`.
+# L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas. `/run/sshd` (le repertoire
+# de separation de privileges d'openssh, `mkdir -p` du Dockerfile) est du meme cote : un objet du
+# PRODUIT dans l'image, qu'aucun rail de l'installeur ne pose — une ligne `docker` ici rouvrirait la
+# colonne que cette decision a fermee, et `25` ne le mesurerait au build qu'en le declarant hors
+# substrat sur chaque poste (lot 15).
 
 runtime   /run/lock/lcars                              0700  root:root           any
 
@@ -227,13 +257,11 @@ runtime   /run/lock/lcars                              0700  root:root          
 # l'uninstall, et dans aucune liste — ni la mienne, ni celle du plan. C'est le cas « pose par un
 # tiers » : on le declare parce qu'on le PROVOQUE, pas parce qu'on l'ecrit.
 dir       /root/.terraform.d                           0755  root:root           wsl+linux
-runtime   /run/lcars-provision.rc                      0644  root:root           docker
-runtime   /run/lcars-humans.rc                         0644  root:root           docker
 
 # ─── DANS LE HOME DES PERSONNES — POSE, jamais preserve ─────────────────────────────────────────
 human     /home/<human>/.lcars                         0700  <human>:-           any
 human     /home/<human>/.lcars/log                     0700  <human>:-           any
-human     /home/<human>/.lcars/fleet_v2.env            0600  <human>:-           any
+human     /home/<human>/.lcars/fleet.env            0600  <human>:-           any
 human     /home/<human>/pods                           0700  <human>:-           any
 human     /home/<human>/.local/bin/claude              0755  <human>:-           any
 

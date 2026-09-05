@@ -40,7 +40,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # (`forge:` -> `gitea:`) et les URL internes sont restees sur l'ancien. Le renommage ne se voit
 # QUE sur une forge fraiche — le rail ne reapplique pas un compose a une forge debout — d'ou
 # quinze jours sans rien casser, puis un runner qui boucle sur « lookup forge : no such host »
-# a la premiere install neuve (mesure du 2026-08-28, banc).
+# a la premiere install neuve.
 FORGE_API="" ; TOKEN="" ; INSTANCE_URL="http://gitea:3000" ; NETWORK=""
 PROJECT="" ; VERIFY_REPO="" ; DOCKER_BIN="${DOCKER_BIN:-docker}"
 # Vide = le defaut de runner-compose.yml (qui ne sait PAS jouer `mix gate`, cf. son commentaire).
@@ -96,8 +96,7 @@ EOM
 
   # ⚠ UNE IMAGE ABSENTE SE TIRE AVANT DE SE REFUSER. La garde ci-dessous est juste — un runner qui
   # annonce un label qu'il ne sait pas servir rate chaque job qui le demande — mais elle refusait
-  # AUSSI les images publiques que personne n'avait jamais demande a personne de tirer. Mesure du
-  # 2026-08-18, machine Debian neuve, chemin de livraison : `REFUS : docker:cli`, banc exit 6. Sur
+  # AUSSI les images publiques que personne n'avait jamais demande a personne de tirer. Vu sur une machine neuve, chemin de livraison : `REFUS : docker:cli`, banc exit 6. Sur
   # la machine de dev les memes images etaient la depuis des mois, donc invisible.
   local missing=()
   local entry image
@@ -124,7 +123,7 @@ check_labels
 
 # ─── 1. Token d'enregistrement, minte par la forge (site-admin, portee instance) ────────────────
 # `--reg-token` court-circuite l'appel API, et ce n'est pas une commodite : le endpoint exige une
-# PORTEE de token que le token operateur d'un banc n'a pas forcement (mesure du 2026-08-09 : 403
+# PORTEE de token que le token operateur d'un banc n'a pas forcement (vu : 403
 # « token does not have at least one of required scope » avec un token pourtant is_admin=True). La
 # forge sait toujours en minter un elle-meme, depuis son propre conteneur :
 #     docker exec <forge> gitea actions generate-runner-token
@@ -144,7 +143,7 @@ fi
 say "token d'enregistrement minte (${#REG} car)"
 
 # ─── 2. Config jobs + override reseau, generes a cote de rien (tmpdir) ──────────────────────────
-# CE TMPDIR N'EST PAS NETTOYE, ET C'EST DELIBERE (revu le 2026-08-18, en fermant la fuite de
+# CE TMPDIR N'EST PAS NETTOYE, ET C'EST DELIBERE (revu en fermant la fuite de
 # credentials de `bench-swap-image`). Il ne porte AUCUN secret — un nom de reseau et un chemin de
 # config — et `override.yml` est un `-f` de compose : compose l'inscrit dans le label
 # `config_files` du projet, donc l'effacer casserait un `compose` ultérieur sur ce meme projet.
@@ -159,10 +158,10 @@ cat > "$GEN/config.yaml" <<'EOF'
 # tourne en dind ce reseau N'EXISTE PLUS DE LEUR POINT DE VUE. Il appartient au daemon de la
 # MACHINE ; le daemon embarque du runner n'a que `bridge`, `host`, `none`. Un job nomme donc un
 # reseau introuvable et son conteneur meurt a la creation, sans une ligne d'erreur exploitable —
-# mesure du 2026-08-18 : « shim disconnected » deux dixiemes de seconde apres « Running job ».
+# vu : « shim disconnected » deux dixiemes de seconde apres « Running job ».
 #
 # Et le forçage n'est plus necessaire, ce qui est le point : le runner, LUI, est sur le reseau de
-# la forge, et ses conteneurs de job heritent de son resolveur. Mesure du meme jour, depuis le
+# la forge, et ses conteneurs de job heritent de son resolveur. Vu depuis le
 # bridge interne : `getent hosts gitea` -> 172.18.0.2, `wget http://gitea:3000/api/v1/version` ->
 # {"version":"1.26.1"}, et `git ls-remote http://gitea:3000/fleet/lcars.git` rend le sha. Le clone
 # — la seule chose que ce forçage protegeait — passe sans lui.
@@ -208,7 +207,7 @@ EOF
 # passe alors par un shim qui `sudo`, et `sudo` remet l'environnement a zero. Ces assignations en
 # tete de commande mouraient donc en le traversant, compose retombait sur ses defauts, et le runner
 # bouclait sur « token is empty » — un runner qui tourne, qui seme son magasin d'images, et qui ne
-# s'enregistre jamais. Mesure sur instance vierge le 2026-08-19.
+# s'enregistre jamais. Vu sur instance vierge.
 #
 # ET LE JETON NE PASSE PAS EN ARGV POUR AUTANT. Le shim NE transmet PAS les noms qui portent la
 # marque d'un secret, precisement pour ne pas les mettre dans une ligne de commande que /proc
@@ -312,7 +311,7 @@ fi
 if [[ -n "$VERIFY_REPO" ]]; then
   say "verification de bout en bout sur $VERIFY_REPO…"
   ok=""
-  # 40 x 6 s = 4 min, et c'etait trop court : mesure du 2026-08-12, le runner venait d'etre
+  # 40 x 6 s = 4 min, et c'etait trop court : vu, le runner venait d'etre
   # enregistre et la forge lui a d'abord servi le GATE COMPLET du depot lcars (plusieurs minutes).
   # La sonde a rendu 4 sur un runner qui allait tres bien. 20 min couvre un vrai gate.
   for _ in $(seq 1 200); do

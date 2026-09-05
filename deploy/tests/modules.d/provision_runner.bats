@@ -60,6 +60,8 @@ setup() {
   # ⚠ `provision-lib.sh` SOURCE `docker-endpoint.sh` : le decor doit porter les DEUX, sinon
   # toute la suite tombe sur un « No such file » dont la cause est cette ligne de setup.
   cp "$SRC/lib/provision-lib.sh" "$SANDBOX/lib/provision-lib.sh"
+  # lot 10 : uninstall et audit vivent a cote du runner, sources par lui
+  cp "$SRC/lib/provision-uninstall.sh" "$SRC/lib/provision-audit.sh" "$SANDBOX/lib/"
   cp "$SRC/lib/docker-endpoint.sh" "$SANDBOX/lib/docker-endpoint.sh"
   export RUN_LOG="$BATS_TEST_TMPDIR/run.log"
   : > "$RUN_LOG"
@@ -108,24 +110,40 @@ EOF
   grep -q "10-pkgstub:check" "$RUN_LOG"
 }
 
-@test "D6: apply on docker runs CHECK (not apply) for an image-built module" {
+@test "docker n'est PAS un rail : apply y est REFUSE en nommant le build, verify et l'init produit" {
+  # ⚖ user 2026-09-04 (Q1, lot 7). La doctrine D6 (« apply sur docker = check ») est morte avec le
+  # boot qui rejouait l'installeur : rien ne se converge dans une image, elle se BATIT.
   stub_module 60-deploystub "wsl linux" any human
   run "$SANDBOX/provision" apply --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker n'est pas un rail"* ]]
+  [[ "$output" == *"Dockerfile"* ]]
+  [[ "$output" == *"verify"* ]]
+  [[ "$output" == *"box/init.sh"* ]]
+  refute grep -q "60-deploystub" "$RUN_LOG"
+}
+@test "docker n'est PAS un rail : uninstall y est refuse aussi — doctor et list restent" {
+  stub_module 60-deploystub "wsl linux" any human
+  run "$SANDBOX/provision" uninstall --substrate docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"docker n'est pas un rail"* ]]
+  run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-deploystub:check" "$RUN_LOG"
-  refute grep -q "60-deploystub:apply" "$RUN_LOG"
-  [[ "$output" == *"APPLY-ON=wsl linux"* ]]
+  run "$SANDBOX/provision" list --substrate docker
+  [ "$status" -eq 0 ]
 }
-
-@test "D6: image-built module DRIFT during apply is a FAILURE, not a silent skip" {
+@test "D6: image-built module DRIFT during DOCTOR on docker is a FAILURE, not a silent skip" {
   stub_module 60-deploystub "wsl linux" any human STUB_RC_DRIFT
   export STUB_RC_DRIFT=1
-  run "$SANDBOX/provision" apply --substrate docker
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"inapplicable"* ]]
-  [[ "$output" == *"rebuild"* ]]
+  run "$SANDBOX/provision" doctor --substrate docker
+  [ "$status" -eq 1 ] || { echo "status=$status"; echo "$output"; false; }
+  [[ "$output" == *"drift: 1"* ]]
+  # le remede n'est PAS « provision apply » (refuse sur docker) : c'est le rebuild de l'image
+  [[ "$output" == *"box build"* ]] || { echo "$output"; false; }
+  refute grep -q 'converger : sudo' <<<"$output"
+  grep -q "60-deploystub:check" "$RUN_LOG"
 }
-
 @test "D6: apply on a matching substrate runs the real apply" {
   stub_module 60-deploystub "wsl linux" any human
   run "$SANDBOX/provision" apply --substrate wsl
@@ -161,14 +179,13 @@ EOF
   [[ "$output" == *"hors de CHECK-ON"* ]]
 }
 
-@test "D6: non-root apply is allowed when every NEEDS:root module is check-only here" {
+@test "D6: non-root DOCTOR is allowed when every NEEDS:root module is check-only here" {
   [ "$(id -u)" -ne 0 ] || skip "must run unprivileged"
   stub_module 60-rootstub "wsl linux" any root
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" doctor --substrate docker
   [ "$status" -eq 0 ]
   grep -q "60-rootstub:check" "$RUN_LOG"
 }
-
 @test "D6: non-root apply still dies when a NEEDS:root module would really apply" {
   [ "$(id -u)" -ne 0 ] || skip "must run unprivileged"
   stub_module 60-rootstub "wsl linux" any root
@@ -203,7 +220,7 @@ EOF
 # ⚠ CE N'EST PAS LE SITE QUE LA FICHE NOMME. `00-preflight` termine par `verdict_check`, qui sort 1
 # sur drift, et le runner mappe tout non-zero d'un `apply:apply` en echec — ce chemin etait deja
 # juste, MESURE. Le defaut vit un cran a cote : dans les modules qui rendent un verdict d'APPLY,
-# c'est-a-dire `50-forge` et `55-deck-oidc`.
+# c'est-a-dire `63-forge-tokens` et `66-deck-oidc`.
 
 # Un module qui utilise la VRAIE lib (p_drift/p_ok + les verdicts), pas un `exit` code en dur :
 # c'est la chaine module→lib→runner qui est sous test, pas une constante.
@@ -231,7 +248,7 @@ EOF
 
 @test "6-101: un DRIFT dans l'apply rend 2 — plus jamais « tout convergé »" {
   lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"drift: 1"* ]]
@@ -243,7 +260,7 @@ EOF
   # qui lisait « conformes/convergés: 1 · drift: 0 » n'avait aucune raison d'aller chercher la ligne
   # DRIFT au-dessus.
   lib_module 50-forgestub 'p_drift "adhesion org non convergee"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [[ "$output" == *"conformes/convergés: 0"* ]]
   [[ "$output" != *"drift: 0"* ]]
@@ -253,7 +270,7 @@ EOF
   # Confondre les deux serait l'autre facon de mentir : « j'ai casse » et « je n'ai pas pu
   # converger » demandent des gestes opposes de l'operateur.
   lib_module 50-forgestub 'p_drift "forge injoignable"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -ne 1 ]
   [[ "$output" == *"échecs: 0"* ]]
@@ -261,7 +278,7 @@ EOF
 
 @test "6-101: un p_fail rend toujours 1, le drift ne l'ecrase pas" {
   lib_module 50-forgestub 'p_fail "chown refuse"; p_drift "et un drift par-dessus"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"échecs: 1"* ]]
@@ -357,7 +374,7 @@ stub_impersonation() {
   # derniere ligne lue est celle qui reste.
   lib_module 40-failstub  'p_fail "quelque chose est casse"'
   lib_module 50-driftstub 'p_drift "et un geste manque"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"échecs: 1"* ]]
@@ -370,7 +387,7 @@ stub_impersonation() {
   # Sans ce pendant, un correctif qui supprimerait la phrase en toutes circonstances passerait le
   # temoin ci-dessus (P-40), et un drift pur perdrait le seul message qui dit ce qu'il faut faire.
   lib_module 50-driftstub 'p_drift "un geste manque"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"Rien n'est cassé"* ]]
@@ -381,7 +398,7 @@ stub_impersonation() {
   # Sans lui, un runner qui rendrait 2 en toutes circonstances passerait les tests ci-dessus, et
   # chaque boot de conteneur annoncerait un drift qui n'existe pas.
   lib_module 20-okstub 'p_ok "converge"'
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"conformes/convergés: 1"* ]]
@@ -405,7 +422,7 @@ stub_impersonation() {
 #
 # Mesure du 2026-08-18, banc lcars-l8 : `provision doctor` rendait « modules: 11 · drift: 4 ·
 # échecs: 1 » sans une seule ligne pour dire QUEL module. Le coupable etait `70-human`, tue par
-# `pipefail` sur un `sed` d'un `fleet_v2.env` absent — donc mort AVANT `verdict_check`, sans rien
+# `pipefail` sur un `sed` d'un `fleet.env` absent — donc mort AVANT `verdict_check`, sans rien
 # imprimer. Cote apply c'etait pire : `set -e` rendait 2, et 2 y signifie « appliqué, drift
 # résiduel » — le bilan disait « rien n'est cassé » d'un module qui n'avait pas fini de tourner.
 #
@@ -436,7 +453,7 @@ mort_module() { # mort_module <NN-nom> <source-la-lib: 0|1>
 
 @test "apply : un module mort n'est PAS un drift residuel — le message rassurant serait faux" {
   mort_module 91-mort 1
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 1 ]
   [[ "$output" == *"ERREUR 91-mort"* ]]
   [[ "$output" != *"Rien n'est cassé"* ]]
@@ -478,7 +495,7 @@ echo "PETIT-FILS-RC=\$rc"
 p_ok "le module, lui, rend bien son verdict"
 verdict_apply
 EOF
-  run "$SANDBOX/provision" apply --substrate docker
+  run "$SANDBOX/provision" apply --substrate wsl
   [ "$status" -eq 0 ]
   [[ "$output" == *"PETIT-FILS-OK"* ]]
   [[ "$output" == *"PETIT-FILS-RC=0"* ]]
@@ -512,7 +529,7 @@ EOF
 @test "cible : sous WSL, docker qui ne repond pas est un REFUS — pas une derive" {
   # ⚖ ARBITRAGE USER 2026-08-18 : « ça, on refuse. docker-desktop c'est un clic. »
   # Une DERIVE dit « pas tenu, et ce rail peut le tenir ». Ici il ne peut pas : la forge est un
-  # conteneur, il n'en existe aucune autre forme, donc 50-forge et 55-deck-oidc ne convergeront
+  # conteneur, il n'en existe aucune autre forme, donc 63-forge-tokens et 66-deck-oidc ne convergeront
   # JAMAIS. Installer un runtime qui ne peut pas travailler, c'est livrer un objet qui a l'air pose.
   #
   # ⚠ CE TEMOIN EPINGLAIT LE MOT « docker absent », ET CE MOT ETAIT LE DEFAUT. La sonde testait
@@ -596,14 +613,14 @@ EOF
   [[ "$output" == *"aucune autre forme"* ]]
 }
 
-@test "48-forge-host : il tourne AVANT 50-forge — l'ordre est le prefixe, et il porte le sens" {
-  # 50-forge SONDE une forge et minte contre elle ; 48 la fait exister. L'inverse rendrait la
+@test "48-forge-host : il tourne AVANT 63-forge-tokens — l'ordre est le prefixe, et il porte le sens" {
+  # 63-forge-tokens SONDE une forge et minte contre elle ; 48 la fait exister. L'inverse rendrait la
   # premiere passe systematiquement en derive sur une machine neuve.
-  ls "$BATS_TEST_DIRNAME/../../modules.d/" | grep -E "^(48-forge-host|50-forge)\.sh$" | sort > "$BATS_TEST_TMPDIR/ordre"
+  ls "$BATS_TEST_DIRNAME/../../modules.d/" | grep -E "^(48-forge-host|63-forge-tokens)\.sh$" | sort > "$BATS_TEST_TMPDIR/ordre"
   [ "$(head -n1 "$BATS_TEST_TMPDIR/ordre")" = "48-forge-host.sh" ]
 }
 
-@test "48-forge-host : la structure ne passe JAMAIS par une boite LCARS vivante" {
+@test "61-forge-structure : la structure ne passe JAMAIS par une boite LCARS vivante" {
   # ⚖ « reconstruire et relancer un LCARS en conteneur pour tester celui qu'on vient d'installer
   # nativement » — c'est ce que ce module evite, et cette regle-la n'a pas bouge.
   #
@@ -611,8 +628,8 @@ EOF
   # c'est-a-dire un run TRANSITOIRE d'une image de 1,18 Go batie pour ce seul appel (⚖ user
   # 2026-08-22). Le conteneur jetable etait une facon d'eviter la boite vivante ; en appeler le geste
   # directement en est une autre, plus courte. La regle survit, son implementation non.
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  local code; code="$BATS_TEST_TMPDIR/48-code.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
+  local code; code="$BATS_TEST_TMPDIR/61-code.sh"
   grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
   # la structure vient du GESTE, joue sur la machine
   grep -q -- 'forge-gestures.sh" apply' "$code"
@@ -620,10 +637,10 @@ EOF
   refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
   refute grep -q -- "forge-apply" "$code"
   # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
-  grep -q '"forge-apply"' "$BATS_TEST_DIRNAME/../../docker/entrypoint.sh"
+  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/box/boot.sh"
 }
 
-@test "48-forge-host : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
+@test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {
   # ⚠ MESURE DU 2026-08-18, Docker Desktop : `-v /opt/lcars/var/tokens:/opt/lcars/var/tokens` a donne au conteneur
   # un dossier VIDE, et le geste a repondu « la boite ne detient pas ce qu'il faut » en nommant des
   # fichiers qui existaient a trente centimetres. Le daemon vit dans une autre VM : un chemin de
@@ -633,8 +650,8 @@ EOF
   # gravait la forme d'un remede au lieu du mal. Or ce mal n'existait QUE parce qu'on avait choisi le
   # conteneur : sur la machine, les fichiers sont deja la et rien ne traverse. La mesure reste
   # inscrite ici parce qu'elle redeviendrait vraie le jour ou quelqu'un remet un conteneur.
-  MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
-  local code; code="$BATS_TEST_TMPDIR/48-code2.sh"
+  MOD="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
+  local code; code="$BATS_TEST_TMPDIR/61-code2.sh"
   grep -vE '^\s*#|^\s*`#' "$MOD" > "$code"
   # aucun montage, d'aucune sorte : ni chemin d'hote, ni volume nomme
   refute grep -qE -- '\-v "' "$code"
@@ -647,7 +664,7 @@ EOF
 
 @test "48-forge-host : la forge ANNONCE son adresse — les modules sont des processus" {
   # Mesure du 2026-08-18 : une install qui venait de monter une forge parfaitement vivante rendait
-  # « FORGE_BASE_URL/PROV_FORGE_URL non pose » sur 50-forge ET 55-deck-oidc. `48` ne peut rien
+  # « FORGE_BASE_URL/PROV_FORGE_URL non pose » sur 63-forge-tokens ET 66-deck-oidc. `48` ne peut rien
   # exporter vers `50` : ce sont deux shells. Il ecrit donc l'adresse, et la lib la relit.
   MOD="$BATS_TEST_DIRNAME/../../modules.d/48-forge-host.sh"
   LIB="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
@@ -706,7 +723,7 @@ EOF
 }
 
 @test "hors checkout git, la revision se lit dans le TAMPON — c'est ce qui rend une COPIE nommable" {
-  # `/opt/lcars/fleet` est un `cp -a` : git n'y repond rien. Sans ce repli, un `provision` lance
+  # `/opt/lcars/services` est un `cp -a` : git n'y repond rien. Sans ce repli, un `provision` lance
   # depuis la copie — le cas du convergeur — ne pourrait pas nommer sa propre origine.
   # Le tampon se pose la ou `repo_root()` le cherchera : trois crans au-dessus de `lib/`, ce qui,
   # pour ce decor, tombe au-dessus du tmpdir du test. On calcule le chemin comme la lib le fait,

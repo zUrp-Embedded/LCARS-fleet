@@ -7,7 +7,7 @@
 # ─── POURQUOI CE FICHIER EXISTE ─────────────────────────────────────────────────────────────────
 #
 # Le gate tournait DEUX FOIS sur le même commit : une fois ici (ou en CI), une fois chez celui qui
-# installe — `etc/deploy-release.sh` le rejoue avant `mix release`. Sept minutes payées deux fois, et la
+# installe — `deploy/lib/deploy-release.sh` le rejoue avant `mix release`. Sept minutes payées deux fois, et la
 # première ne produisait rien : `gate.yml` n'a aucun `upload`, ses produits de build sont jetés.
 #
 # ⚖ USER 2026-08-23 : « on fait le minimum pour pas jeter le boulot fait ici à chaque fois. »
@@ -45,6 +45,9 @@ cd "$(dirname "$(readlink -f "$0")")"
 PUSH=1
 [[ "${1:-}" == "--no-push" ]] && PUSH=0
 
+say() { echo "pack: $*" >&2; }
+die() { echo "pack: ERREUR — $*" >&2; exit 1; }
+
 # ─── L'ARBRE DOIT ÊTRE PROPRE, ET CE REFUS A ÉTÉ PAYÉ ───────────────────────────────────────────
 #
 # ⚠ CE SCRIPT S'EXÉCUTE DEPUIS L'ARBRE DE TRAVAIL ET ARCHIVE `HEAD`. Les deux divergent dès qu'une
@@ -65,8 +68,6 @@ PUSH=1
 # reproductible depuis un commit. « Mieux vaut un echec explicite qu'un succes ambigu. »
 git diff --quiet HEAD -- 2>/dev/null || die "arbre modifie — le gate lirait l'arbre et le tar contiendrait HEAD : deux codes differents dans un meme paquet. Commite (ou remise) d'abord."
 
-say() { echo "pack: $*" >&2; }
-die() { echo "pack: ERREUR — $*" >&2; exit 1; }
 
 # ─── LA VERSION ─────────────────────────────────────────────────────────────────────────────────
 # ⚖ USER : un timestamp `MM-DD_HH-MM`. Il ordonne, il se lit, et il ne prétend rien sur le contenu —
@@ -99,7 +100,7 @@ OUT="$PACK_DIR/${NAME}.tar.gz"
 # C'est ce qui fait qu'un tar VAUT quelque chose : les bits empaquetés sont les bits que le gate a
 # passés. Le sauter ici rendrait le paquet indistinguable d'un `mix release` à la main.
 say "gate du RUNTIME (compile strict + suite + bats + contrats + topologie + dialyzer)…"
-( cd fleet && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
+( cd runtime && MIX_ENV=prod mix deps.get >/dev/null && MIX_ENV="test" mix gate ) || die "gate rouge — rien n'est empaqueté"
 
 # ─── ET LA PORTE DE L'INSTALLEUR — LE PAQUET PORTE LES DEUX LOGICIELS ────────────────────────────
 #
@@ -116,7 +117,20 @@ say "gate de l'INSTALLEUR (la chaine d'install, 69 fichiers bats)…"
 bash deploy/gate.sh || die "gate de l'installeur rouge — rien n'est empaqueté"
 
 say "release prod…"
-( cd fleet && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+# ⚠ ASSEMBLEE PROPRE, ET C'EST UNE MESURE. `mix release --overwrite` reecrit ce qu'il assemble mais ne
+# retire PAS une `lib/lcars_fleet-<ancienne version>` laissee par une assemblee precedente : le tar
+# du 2026-09-05 portait la 0.1.0 de passe5 (sha 9ee4a4bcd) a cote de la 0.9.0 vivante, et le doctor
+# du banc 2003 annoncait le build de la morte. On repart d'un repertoire vide, puis on VERIFIE : une
+# seule lib, et son tampon porte le sha de HEAD — sinon le paquet ne vaut rien et ne sort pas.
+rm -rf runtime/_build/prod/rel/lcars_fleet
+( cd runtime && MIX_ENV=prod mix release --overwrite >/dev/null ) || die "mix release KO"
+_libs=(runtime/_build/prod/rel/lcars_fleet/lib/lcars_fleet-*)
+[[ "${#_libs[@]}" -eq 1 && -d "${_libs[0]}" ]] \
+  || die "la release porte ${#_libs[@]} lib/lcars_fleet-* (${_libs[*]##*/}) — une assemblee n'en a qu'UNE ; rien n'est empaquete"
+_built="$(sed -n 's/^sha=//p' "${_libs[0]}/priv/api/build_info.txt" 2>/dev/null | head -1)"
+[[ "$_built" == "$SHA" ]] \
+  || die "le tampon de la release dit « ${_built:-aucun} », HEAD est $SHA — les bits assembles ne sont pas ceux du commit ; rien n'est empaquete"
+say "release attestée : ${_libs[0]##*/}, build $_built"
 
 # ─── LA DOC — LA SECONDE MOITIÉ DE LA LIVRAISON, ET ELLE MANQUAIT ───────────────────────────────
 #
@@ -198,8 +212,8 @@ _rev="$(git rev-parse --short=8 HEAD 2>/dev/null)" \
 printf '%s\n' "$_rev" > "$STAGE/$ROOT/.source-revision"
 say "révision estampillée : $_rev"
 
-mkdir -p "$STAGE/$ROOT/fleet/_build/prod/rel"
-cp -a fleet/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/fleet/_build/prod/rel/" || die "release introuvable après le build"
+mkdir -p "$STAGE/$ROOT/runtime/_build/prod/rel"
+cp -a runtime/_build/prod/rel/lcars_fleet "$STAGE/$ROOT/runtime/_build/prod/rel/" || die "release introuvable après le build"
 
 # ⚠ LA DOC VOYAGE AU CHEMIN QUE `44-media` LIT DÉJÀ, et c'est ce qui évite d'inventer une convention.
 # Ce module copie `$SITE_SRC/dist/.` vers `/opt/lcars/share/doc` ; en posant le `dist/` bâti là où il

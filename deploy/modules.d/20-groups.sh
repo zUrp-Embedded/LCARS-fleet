@@ -18,7 +18,7 @@ check() {
     p_drift "groupe $PROV_FLEET_GROUP absent"
   fi
   if id "$PROV_HUMAN" >/dev/null 2>&1; then
-    if id -nG "$PROV_HUMAN" | tr ' ' '\n' | grep -qx "$PROV_FLEET_GROUP"; then
+    if prov_in_group "$PROV_HUMAN" "$PROV_FLEET_GROUP"; then
       p_ok "$PROV_HUMAN ∈ $PROV_FLEET_GROUP"
     else
       p_drift "$PROV_HUMAN ∉ $PROV_FLEET_GROUP"

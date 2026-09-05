@@ -12,7 +12,7 @@
 #     POSÉ  70-human:    ~/.lcars, ~/pods, env  →  pour lordzurp
 #     OK    75-projects: lordzurp n'est pas un humain de fleet (compte systeme ou sysadmin)
 #
-# GUARD B (`bin/fleet_v2`) et `is_fleet_human` appliquent la meme regle : `uid >= UID_MIN` ET
+# GUARD B (`bin/fleet`) et `is_fleet_human` appliquent la meme regle : `uid >= UID_MIN` ET
 # `uid != LCARS_SYSADMIN_UID`. Or le premier utilisateur d'une Linux ou d'une WSL standard EST uid
 # 1000. La regle « uid >= 1001 » n'etait ecrite que pour la BOITE.
 #
@@ -161,18 +161,21 @@ nu() { # nu <check|apply>
   [ "$(grep -c '^vu ' "$mouchard")" -eq 2 ]
 }
 
-@test "le geste manuel reste PROPOSE dans le verdict — on retire le createur, pas la sortie de secours" {
+@test "le verdict PROPOSE un geste — et ce n'est plus un useradd : le convergeur est le seul createur" {
   # Sans ce pendant, supprimer purement le mot `useradd` du fichier passerait le temoin precedent
-  # tout en privant l'operateur du seul geste qu'il puisse taper lui-meme (P-40). Le rail est le
-  # chemin ; ce geste est ce qui reste a celui pour qui le rail n'a pas abouti.
-  # ⚠ LA CIBLE A CHANGE AVEC LE CANON (⚖ user 2026-08-30) : le chemin nominal n'est plus « creer le
-  # compte integre » — plus aucun deploiement de travail ne fabrique d'humain — mais « s'enroler sur
-  # la forge ». Les DEUX doivent etre dits : le chemin, et le recours.
+  # tout en privant l'operateur de quelque chose a taper (P-40). Le rail est le chemin ; le
+  # verdict dit ce qui reste a celui pour qui il n'a pas abouti.
+  # ⚠ LA CIBLE A CHANGE DEUX FOIS. Canon du 2026-08-30 : le chemin nominal est « s'enroler sur la
+  # forge », plus aucun deploiement de travail ne fabrique d'humain. ⚖ user 2026-09-04 (DI-02) :
+  # UN SEUL createur d'humains, le convergeur — le verdict proposait encore un `useradd -m -G fleet`
+  # « en dernier recours », c'est-a-dire un compte sans uid derive de la forge ni modules
+  # per-humain, que le convergeur verrait comme un inconnu. Le recours est de regarder POURQUOI le
+  # convergeur ne materialise pas, pas de le contourner.
   passwd_with
   mod 'observe'
-  [[ "$output" == *"useradd"* ]]
-  [[ "$output" == *"$PROV_FLEET_GROUP"* ]]
+  refute grep -q 'useradd' <<<"$output"
   [[ "$output" == *"inscription"* ]]
+  [[ "$output" == *"lcars-converger"* ]]
 }
 
 # ─── AUCUN HUMAIN N'EST NOMME ICI ───────────────────────────────────────────────────────────────
@@ -225,7 +228,7 @@ nu() { # nu <check|apply>
   # et qui vaut aussi pour la sonde depuis que plus rien ne cree ce compte.
   #
   # Ce que la sonde DOIT continuer de faire : le dire, et dire qui s'en occupera. Muette, elle
-  # laisserait un operateur devant un « fleet_v2 start » qui refuse sans une ligne pour l'expliquer.
+  # laisserait un operateur devant un « fleet start » qui refuse sans une ligne pour l'expliquer.
   passwd_with
   nu check
   [ "$status" -eq 0 ]
@@ -321,6 +324,26 @@ passwd_with() { # passwd_with <ligne>...  → pose le fichier passwd du decor
   passwd_with
   LCARS_SYSADMIN_UID=1000 mod 'fleet_humans'
   [ -z "$output" ]
+}
+
+@test "bornes ILLISIBLES : le check DERIVE et nomme la frontiere — il ne dit pas « aucun humain », et le remede est dit UNE FOIS" {
+  # ⚖ user 2026-09-05 (solution A) : la lib devinait 1000/60000 ; un UID_MIN reel a 2000 devine a
+  # 1000 faisait « humain de fleet » de tout ce qui vit entre les deux. Illisible = personne n'est
+  # reconnu — et ce n'est PAS l'etat d'une machine neuve (« personne ne s'est enrole »), c'est une
+  # machine qui ne SAIT PAS : une derive, dont le remede est le fichier.
+  passwd_with "zoe:x:1001:1001::/home/zoe:/bin/bash"
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  LCARS_SYSADMIN_UID=1000 nu check
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qE "^DRIFT .*frontiere systeme/humain n'est pas etablie"
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 2 ]   # le WARN de la lib (une fois) + le DRIFT du module
+  refute grep -q 'aucun humain de fleet sur cette machine' <<<"$output"
+  refute grep -q 'zoe' <<<"$output"
+  # Et l'apply ne pose rien sur une frontiere devinee : il derive de la meme facon, sans usermod.
+  LCARS_SYSADMIN_UID=1000 nu apply
+  [ "$status" -eq 2 ]
+  printf '%s\n' "$output" | grep -qE "^DRIFT .*frontiere systeme/humain n'est pas etablie"
 }
 
 @test "un compte ABSENT : DRIFT dans la sonde, JAMAIS un echec dans l'apply — chaque verbe son code" {

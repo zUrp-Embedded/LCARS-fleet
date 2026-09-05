@@ -42,7 +42,7 @@
 load ../refute
 
 setup() {
-  SUT="${BATS_TEST_DIRNAME}/../../../fleet/bin/lcars-toolchain-converge"
+  SUT="${BATS_TEST_DIRNAME}/../../../runtime/bin/lcars-toolchain-converge"
   # ⚠ RESOLU, PAS GRAVE — et ce mur-ci est de ceux qui ne PEUVENT pas se permettre un litteral. Il
   # cherche une ABSENCE : le jour ou la racine des jetons a demenage, un motif grave aurait cesse de
   # pouvoir matcher quoi que ce soit et serait reste vert en ne gardant plus rien. Un mur de presence
@@ -465,5 +465,5 @@ EOF
   refute grep -qE '\$\{[A-Za-z_]*BRANCH[A-Za-z_]*[}:]' "$SUT"
   # Et l'autorite dit bien ce nom-la : sans cette ligne, le temoin epinglerait un litteral que le
   # runtime aurait pu changer sans lui.
-  grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../../fleet/lib/fleet/toolchain.ex"
+  grep -q 'def branch, do: "tool_request"' "$BATS_TEST_DIRNAME/../../../runtime/lib/fleet/toolchain.ex"
 }

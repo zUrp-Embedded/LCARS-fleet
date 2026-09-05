@@ -81,7 +81,7 @@ services:
       #
       # QUI LIT QUOI : le provisioning lit l'environnement du conteneur (cette variable, reprise
       # en PROV_FORGE_URL par provision-lib). Le runtime ne la lit pas : il lit
-      # `~/.lcars/fleet_v2.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
+      # `~/.lcars/fleet.env`, seede UNE FOIS par le module 70-human — qui y injecte cette
       # valeur si elle est posee a ce moment-la ; ensuite ce fichier appartient a l'humain et
       # fait foi. Poser la variable ici vaut donc pour le provisioning et pour le seed initial,
       # jamais pour une boite deja seedee.
@@ -90,10 +90,16 @@ services:
       # celle que le SERVEUR compose ; dans un conteneur c'est un nom de service, qu'aucune machine
       # ne resout depuis l'exterieur. La porte du deck envoie le navigateur ICI pour s'identifier,
       # donc une valeur interne rend l'identification impossible depuis tout autre poste. Vide = on
-      # retombe sur l'interne, et `55-deck-oidc` le DIT en drift plutot que de poser une porte qui
+      # retombe sur l'interne, et `66-deck-oidc` le DIT en drift plutot que de poser une porte qui
       # ne s'ouvre pas.
       FORGE_PUBLIC_URL: "${FORGE_PUBLIC_URL:-}"
       LCARS_DECK_ORIGINS: "${LCARS_DECK_ORIGINS:-}"
+      # MEME VALEUR QUE `docker-compose.yml` (l'etat dans le volume, DI-11) : Le client OAuth2 du deck (id + secret,
+      # pose par le geste `forge.d/deck-oidc` au boot) vivait sous /etc/lcars, dans le systeme de
+      # fichiers du CONTENEUR : chaque conteneur recree (rebuild, `up` apres un pull) le perdait, et
+      # le geste retirait puis reposait le client à chaque fois. Il vit sous le volume `var`, avec
+      # les jetons. Le poste garde /etc/lcars (le defaut du protocole) : là, /etc persiste.
+      LCARS_DECK_OIDC_FILE: /opt/lcars/var/deck-oidc.json
       # LA SOURCE, sans laquelle « le conteneur demarre » n'est pas « LCARS est installe ».
       # Le geste de dev (`box source-push`, un `docker cp` depuis le clone de l'humain)
       # n'existe pas ici : qui installe depuis une image tiree n'a pas de clone a pousser, il a une

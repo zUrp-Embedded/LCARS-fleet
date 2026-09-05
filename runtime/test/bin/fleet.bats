@@ -174,7 +174,7 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
 
 @test "GUARD B: un uid SOUS le plancher systeme est refuse — c'est le trou par lequel root passait" {
   local defs="$BATS_TEST_TMPDIR/login.defs"
-  echo "UID_MIN			 65000" > "$defs"          # tout uid reel est desormais « systeme »
+  printf 'UID_MIN\t\t\t 65000\nUID_MAX\t\t\t 65535\n' > "$defs"          # tout uid reel est desormais « systeme » — les DEUX bornes, comme tout login.defs reel
   run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
   [ "$status" -ne 0 ]
   [[ "$output" == *"compte SYSTEME"* ]]
@@ -188,20 +188,98 @@ NEUTRALISED_START='export LCARS_SYSADMIN_UID=$(( $(id -u) + 1 )); dtmux() { [[ "
   # chaines refuserait ici. En arithmetique 1017 < 999 est faux, donc on passe. Ce temoin devient
   # rouge le jour ou quelqu'un reecrit la condition avec `<` dans un `[[ ]]`.
   local defs="$BATS_TEST_TMPDIR/login.defs"
-  echo "UID_MIN			 999" > "$defs"
+  printf 'UID_MIN\t\t\t 999\nUID_MAX\t\t\t 60000\n' > "$defs"
   run bash -c "export PASSWD_DEFS='$defs'; export LCARS_SYSADMIN_UID=\$(( \$(id -u) + 1 )); source '$SCRIPT'; $NEUTRALISED_START"
   [[ "$output" != *"compte SYSTEME"* ]]
   [[ "$output" == *"credentials claude absentes"* ]]   # on a bien atteint la porte suivante
 }
 
-@test "GUARD B: un login.defs illisible retombe sur 1000, il ne desarme pas le garde" {
-  # Fail-closed : `awk` sur un fichier absent rend une chaine vide, et `(( _uid < "" ))` aurait
-  # laisse passer tout le monde en silence. Le defaut est repose explicitement.
-  # Le siege vient du FICHIER : ce temoin mesure le plancher UID_MIN, pas la source du siege.
-  echo "$(id -u)" > "$LCARS_SEAT_UID_FILE"
-  run bash -c "export PASSWD_DEFS='/nulle/part/login.defs'; source '$SCRIPT'; cmd_start"
-  [[ "$output" == *"admiral/sysadmin"* ]]
+@test "GUARD B: un login.defs illisible REFUSE — la frontiere n'est pas etablie, et le lanceur le dit avec le mot du BEAM" {
+  # ⚠ CE TEMOIN AFFIRMAIT L'INVERSE (« retombe sur 1000 ») jusqu'au 2026-09-05. Un defaut repond par
+  # un NOMBRE la ou le garde a besoin d'un FAIT : un UID_MIN reel a 2000 devine a 1000 laisse lancer
+  # une fleet — donc des pods — a tout ce qui vit entre les deux. Le BEAM refuse de booter dans ce
+  # cas (R-no-uid-min) ; le lanceur refuse AVANT lui, avec la meme phrase, et nomme le fichier.
+  local defs="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"UID_MIN illisible dans $defs"* ]]
+  [[ "$output" == *"repare $defs"* ]]
+  [[ "$output" != *"1000"* ]]
+  [[ "$output" != *"reached-launch"* ]]
+  [[ "$output" != *"credentials claude absentes"* ]]   # la porte suivante n'est PAS atteinte
+}
+
+@test "GUARD B: la phrase du refus est CELLE du protocole des humains — un temoin tient l'egalite, pas un commentaire" {
+  # `bin/fleet` ne source pas `lib/human-protocol.sh` (un vocabulaire de module, pas de lanceur) :
+  # il en porte cinq lignes. Ce qui garantit que les deux disent la MEME chose au meme moment est
+  # ce temoin : le remede du protocole (`UID_BOUNDS_WHY`), sur le meme fichier — absent, puis
+  # sans UID_MAX — doit se lire tel quel dans le refus du lanceur, borne manquante comprise.
+  local lib="$BATS_TEST_DIRNAME/../../services/lib"
+  local variant defs expected
+  for variant in absent sans-max; do
+    case "$variant" in
+      absent)   defs="$BATS_TEST_TMPDIR/nulle-part/login.defs" ;;
+      sans-max) defs="$BATS_TEST_TMPDIR/login.defs"; printf 'UID_MIN\t1000\n' > "$defs" ;;
+    esac
+    expected="$(LCARS_HUMAN_PROTOCOL_HOST=1 LCARS_MODULE_PROTOCOL="$lib/module-protocol.sh" \
+      LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR" PASSWD_DEFS="$defs" \
+      bash -c '. "$1"; uid_bounds 2>/dev/null || true; printf "%s" "$UID_BOUNDS_WHY"' _ "$lib/human-protocol.sh")"
+    [ -n "$expected" ] || { echo "$variant : le protocole n'a pas rendu de remede — instrument casse" >&2; return 1; }
+    run bash -c "export PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$expected"* ]] || { echo "$variant — lanceur : $output"; echo "protocole : $expected"; return 1; }
+  done
+  # GARDE D'INSTRUMENT : les deux remedes nomment des bornes DIFFERENTES — sinon la boucle a
+  # mesure deux fois le meme cas.
+  [[ "$expected" == *"UID_MAX illisible"* ]]
+}
+
+# --- GUARD B, troisieme volet : le PLAFOND (nobody, 65534) ---
+# La frontiere a DEUX bornes (protocole `uid_bounds`, `console-humans.sh`, le BEAM) : au-dessus de
+# UID_MAX vivent `nobody` et les comptes de service hauts. Jusqu'au lot 15 le lanceur ne lisait
+# qu'UID_MIN — nobody le passait, et le BEAM derriere ne lisait pas UID_MAX non plus. L'uid qui
+# lance est ce que `id -u` repond : un `id` de decor sur le PATH le fait nobody (ou un humain de
+# fleet), quel que soit celui qui joue la suite — un temoin qui lit l'uid reel mesure la machine.
+
+id_decor() { # id_decor <uid> — un `id` sur le PATH du temoin qui repond <uid> (et `nobody` a -un)
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *-un*) echo nobody ;; *) echo '"$1"' ;; esac' > "$BATS_TEST_TMPDIR/bin/id"
+  chmod 0755 "$BATS_TEST_TMPDIR/bin/id"
+}
+
+@test "GUARD B: nobody (65534) est AU-DESSUS du plafond — refuse, et le refus nomme UID_MAX" {
+  local defs="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$defs"
+  id_decor 65534
+  run bash -c "export PATH='$BATS_TEST_TMPDIR/bin:$PATH' PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"uid 65534"* ]]
+  [[ "$output" == *"UID_MAX=60000"* ]]     # le refus NOMME sa source, il ne dit pas juste non
+  [[ "$output" != *"reached-launch"* ]]
+  [[ "$output" != *"credentials claude absentes"* ]]   # la porte suivante n'est PAS atteinte
+  # Et c'est bien la BORNE qui l'ecarte, pas son nom : un UID_MAX au-dessus de lui laisse passer
+  # jusqu'a la porte suivante.
+  printf 'UID_MIN\t1000\nUID_MAX\t70000\n' > "$defs"
+  run bash -c "export PATH='$BATS_TEST_TMPDIR/bin:$PATH' PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+  [[ "$output" != *"UID_MAX"* ]]
+  [[ "$output" == *"credentials claude absentes"* ]]
+}
+
+@test "GUARD B: UID_MAX ABSENT du login.defs REFUSE — une seule borne n'etablit pas la frontiere, et le refus nomme UID_MAX" {
+  # Sans plafond, `nobody` serait un humain de fleet ; le lanceur ne devine pas 60000, il refuse
+  # avec le mot du protocole et nomme la borne qui manque — le remede est le fichier.
+  local defs="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\n' > "$defs"
+  id_decor 1001
+  run bash -c "export PATH='$BATS_TEST_TMPDIR/bin:$PATH' PASSWD_DEFS='$defs'; source '$SCRIPT'; $NEUTRALISED_START"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"UID_MAX illisible dans $defs"* ]]
+  [[ "$output" == *"repare $defs"* ]]
+  [[ "$output" != *"60000"* ]]
+  [[ "$output" != *"reached-launch"* ]]
+  [[ "$output" != *"credentials claude absentes"* ]]
 }
 
 # --- option parsing ---
@@ -473,4 +551,16 @@ start_fake_beam() {
   [[ "$output" == *"source=working_tree"* ]]
   [[ "$output" == *"ref=<illisible : git muet>"* ]]
   [[ "$output" != *"bati depuis un commit"* ]]
+}
+
+@test "version : DEUX libs dans la release — le lanceur lit la version qui DEMARRE (start_erl.data), pas la premiere du glob" {
+  local root="$TMP_BASE/rt2/rel/lcars_fleet"
+  mkdir -p "$root/lib/lcars_fleet-0.1.0/priv/api" "$root/lib/lcars_fleet-0.9.0/priv/api" "$root/releases"
+  printf 'sha=9ee4a4bcd\ndirty=false\nref=\n' > "$root/lib/lcars_fleet-0.1.0/priv/api/build_info.txt"
+  printf 'sha=d4d23d792\ndirty=false\nref=\n' > "$root/lib/lcars_fleet-0.9.0/priv/api/build_info.txt"
+  printf '15.2.7.4 0.9.0\n' > "$root/releases/start_erl.data"
+  run bash -c "source '$SCRIPT'; RUNTIME_DIR='$TMP_BASE/rt2'; cmd_version"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"d4d23d792"* ]]
+  [[ "$output" != *"9ee4a4bcd"* ]]
 }

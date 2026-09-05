@@ -7,7 +7,7 @@
 # CE QUE CES TEMOINS FERMENT. `Fleet.Observation` fait ecouter le deck sur
 # `/run/lcars/console/<humain>/deck.sock`. Ce dossier n'etait cree que par `console.sh`, artefact de
 # CONTENEUR, jamais joue par une install native. Sur le poste natif du 2026-08-20 : `provision
-# apply` vert sur ses 14 modules, release posee, `fleet_v2 start` annoncant « fleet up » — et zero
+# apply` vert sur ses 14 modules, release posee, `fleet start` annoncant « fleet up » — et zero
 # `beam.smp` une seconde plus tard, parce que Ranch n'avait pas pu binder :
 #
 #   [error] Failed to start Ranch listener … ip: {:local, "/run/lcars/console/lcars/deck.sock"}
@@ -21,6 +21,13 @@
 # de vrais dossiers sous `/run`, ce qui demande root et sortirait du bac a sable. Ce qui se mesure
 # ici est la TABLE (la donnee dont les deux modes derivent) et le poseur de la declaration
 # tmpfiles — les seules parties ou une faute serait silencieuse.
+#
+# LOT 14 (⚖ user 2026-09-04, 17-DEUX-OUVERTS, solution A) : le stage `verify` de l'image joue ce
+# module AU BUILD, sur `--substrate docker`. La table y est filtree par le substrat que le
+# MANIFESTE declare (une seule source), et par les volumes de la boite ; /run et tmpfiles n'y
+# existent pas. Les temoins « docker : » ci-dessous jouent `check` pour de vrai, dans un decor.
+
+load ../refute
 
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/25-directories.sh"
@@ -30,6 +37,10 @@ setup() {
   export PROVISION_MODULE=25-directories
   export PROV_HUMAN=temoin
   export PROV_FLEET_GROUP=fleet
+  # ⚠ LE DECOR FIXE LE SUBSTRAT. Sans lui, le module retombe sur la sonde (`detect_substrate`), qui
+  # repond `docker` dans le conteneur de la CI : la table runtime y serait VIDE et les temoins du
+  # poste changeraient de forme selon la machine qui les joue. Les temoins docker le surchargent.
+  export PROV_SUBSTRATE=linux
   # ⚠ LE DECOR POSSEDE L'HUMAIN DE FLEET, SINON IL MESURE LE /etc/passwd DE LA MACHINE. Le dossier
   # de console appartient a qui LANCE la fleet, et le module retombe sur `--human` seulement quand
   # cet humain n'existe pas encore. Sans cette ligne, le resultat depend de la presence d'un compte
@@ -124,29 +135,6 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [[ "$output" != *"temoin:temoin"* ]]
 }
 
-@test "substrat docker: la table n'en porte AUCUN — console.sh les possede la-bas" {
-  # Deux createurs pour un meme dossier donneraient un
-  # dossier dont le mode depend de qui a couru le premier — et `install -d` ne repose PAS le mode
-  # d'un dossier existant, donc le desaccord serait SILENCIEUX.
-  PROV_SUBSTRATE=docker mod 'prov_runtime_dirs | wc -l'
-  [ "$status" -eq 0 ]
-  [ "$output" = "0" ]
-}
-
-# ─── LA TABLE ET LE MANIFESTE DISENT-ILS LA MEME CHOSE DU MEME OBJET ? ──────────────────────────
-#
-# ⚠ RIEN NE LES COMPARAIT, ET ILS AVAIENT DIVERGE. Mesure du 2026-08-26 :
-#
-#     system.manifest   /run/lcars/toolchain   0755  root:root
-#     le seul poseur    /run/lcars/toolchain   2775  root:fleet   (45-sudoers-toolchain, install -d nu)
-#
-# Faux sur le MODE et sur le GROUPE, dans le sens qui SOUS-ESTIME qui peut ecrire — un lecteur du
-# manifeste croyait le repertoire ferme au groupe alors que le BEAM y ecrit son marqueur. Et le
-# chemin vivait hors de cette table, donc hors du `tmpfiles.d` : il ne revenait pas au boot.
-#
-# LES DEUX MURS ISO NE POUVAIENT PAS LE VOIR : ils comparent la PRESENCE d'un chemin (« pose mais
-# non declare », « declare mais sans poseur »), jamais son mode ni son proprietaire. C'est un axe
-# entier de la table qui n'avait aucun lecteur. Ce temoin est cet axe.
 @test "MANIFESTE vs TABLE : mode et proprietaire s'accordent sur chaque repertoire runtime" {
   local manifest="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$manifest" ]
@@ -219,45 +207,6 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   [[ "$output" == *"ne correspond plus"* ]]
 }
 
-@test "substrat docker: une declaration qui traine est RETIREE, pas laissee vivre" {
-  # Un fichier tmpfiles qui decrit des dossiers dont ce module ne repond plus est un ordre donne au
-  # boot par un composant qui a change d'avis. Cas reel : une boite provisionnee en natif puis
-  # rebasculee en conteneur.
-  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
-  PROV_SUBSTRATE=docker mod 'apply_tmpfiles'
-  [ "$status" -eq 0 ]
-  [ ! -e "$LCARS_TMPFILES_CONF" ]
-  [[ "$output" == *"retiree"* ]]
-}
-
-@test "substrat docker: une declaration qui NE PEUT PAS etre retiree est un ECHEC, jamais un rc 0 muet" {
-  # `[[ -e ]] && { rm -f && p_ok; }` : quand `rm` echoue, ni p_ok ni p_fail — le module rend 0
-  # avec la declaration perimee toujours en place, et le boot suivant obeit a un ordre que ce
-  # module a desavoue. Un retrait qui echoue se compte comme un echec.
-  [ "$(id -u)" -ne 0 ] || skip "root retire tout, la faute n'est pas observable"
-  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
-  chmod 0555 "$(dirname "$LCARS_TMPFILES_CONF")"
-  PROV_SUBSTRATE=docker mod 'PROV_FAILED=0; apply_tmpfiles; echo "failed=$PROV_FAILED"'
-  chmod 0755 "$(dirname "$LCARS_TMPFILES_CONF")"
-  [ "$status" -eq 0 ]
-  [ -e "$LCARS_TMPFILES_CONF" ]
-  [[ "$output" == *"failed=1"* ]]
-  [[ "$output" != *"retiree"* ]]
-}
-
-# ─── UNE ENTREE MAUVAISE NE DOIT PAS EMPORTER LA TABLE ──────────────────────────────────────────
-#
-# ⚠ MESURE DU 2026-08-25, INSTALL REELLE. `ensure_dir … || verdict_apply` etait ecrit DANS la boucle,
-# et `verdict_apply` fait `exit` (provision-lib:282). Un groupe manquant sur `/opt/lcars/var/tokens` a donc
-# coute SEPT objets sans aucun rapport avec lui : les trois racines de face, la racine des consoles,
-# l'etat tofu, et la declaration tmpfiles — celle-la meme dont le temoin d'au-dessus dit qu'elle
-# porte « la fleet ne demarrera pas ». La machine a fini avec `lcars-landing` debout et aucune
-# racine de console.
-#
-# LES DEUX MOITIES VONT PAR PAIRE, d'ou deux temoins : la boucle doit CONTINUER, et le module doit
-# quand meme SORTIR NON NUL. Tenir la premiere seule transformerait un echec en succes silencieux —
-# l'inverse exact du defaut qu'on repare.
-
 @test "une entree en echec n'arrete pas la table : les suivantes sont posees quand meme" {
   # `/proc/...` ne peut pas etre cree, a coup sur et sans droits speciaux : la premiere entree
   # echoue pour de vrai, pas par un stub.
@@ -295,4 +244,158 @@ mod() { run bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; $1"; }
   PROV_SUBSTRATE=linux mod 'PROV_CHANGED=0; apply_tmpfiles; echo "changed=$PROV_CHANGED"'
   [ "$status" -eq 0 ]
   [[ "$output" == *"changed=1"* ]]
+}
+
+# ─── LOT 14 : SUR DOCKER, LE MODULE MESURE CE QUE L'IMAGE POSE — ET RIEN D'AUTRE ────────────────
+#
+# Le decor : un manifeste de DECOR (la seule source du substrat), une racine `PROV_ROOT` sous le bac
+# a sable (donc un « volume » `$PROV_ROOT/var` de decor), et une table de quatre entrees qui portent
+# chacune un cas — declaree `any`, declaree `wsl+linux`, sur un volume, inconnue du manifeste.
+# `check` est joue POUR DE VRAI : il ne fait que des `stat`, aucun droit n'est requis.
+
+docker_decor() {
+  export LCARS_SYSTEM_MANIFEST="$BATS_TEST_TMPDIR/system.manifest"
+  export PROV_ROOT="$BATS_TEST_TMPDIR/root"
+  ME="$(id -un):$(id -gn)"
+  D_ANY="$PROV_ROOT/pose-par-l-image"
+  D_POSTE="$PROV_ROOT/poste-seulement"
+  D_VOL="$PROV_ROOT/var/tokens"
+  D_INCONNU="$PROV_ROOT/inconnu-du-manifeste"
+  cat > "$LCARS_SYSTEM_MANIFEST" <<EOF
+# un manifeste de decor : classe, objet, mode, proprietaire, substrat
+dir  $D_ANY    0755  $ME  any
+dir  $D_POSTE  0755  $ME  wsl+linux
+dir  $D_VOL    0710  $ME  any
+EOF
+  mkdir -p "$D_ANY" "$D_POSTE" "$D_VOL" "$D_INCONNU"
+  chmod 0755 "$D_ANY" "$D_POSTE" "$D_INCONNU"; chmod 0710 "$D_VOL"
+  TABLE="printf '%s\n' '$D_ANY 0755 $ME' '$D_POSTE 0755 $ME' '$D_VOL 0710 $ME' '$D_INCONNU 0755 $ME'"
+}
+
+# check_on <substrat> : joue `check` sur la table de decor, sous ce substrat
+check_on() {
+  run env PROV_SUBSTRATE="$1" bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_dirs() { $TABLE; }; check"
+}
+
+@test "docker : la table runtime est VIDE — /run est un fait de boot, et il n'y a pas de tmpfiles a declarer" {
+  PROV_SUBSTRATE=docker mod 'prov_runtime_dirs'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  PROV_SUBSTRATE=docker mod 'prov_dirs'
+  [ "$status" -eq 0 ]
+  refute_out '^/run/' <<<"$output"
+  # et `runtime_dirs_declared` le dit a `check_tmpfiles` : « ce substrat ne le porte pas »
+  PROV_SUBSTRATE=docker mod 'runtime_dirs_declared'
+  [ "$status" -ne 0 ]
+  # ⚠ GARDE DU TEMOIN : la meme table, sur le poste, n'est PAS vide — un `return 0` inconditionnel
+  # passerait les trois lignes du dessus.
+  PROV_SUBSTRATE=linux mod 'prov_runtime_dirs | grep -c "^/run/"'
+  [ "$output" -ge 5 ]
+}
+
+@test "docker : sans declaration tmpfiles, check_tmpfiles ne dit RIEN ; avec une, c'est un drift nomme" {
+  PROV_SUBSTRATE=docker mod 'check_tmpfiles'
+  [ "$status" -eq 0 ]
+  refute_out -i 'drift' <<<"$output"
+  printf 'd /run/lcars/console 0711 root root -\n' > "$LCARS_TMPFILES_CONF"
+  PROV_SUBSTRATE=docker mod 'check_tmpfiles; echo "drift=$PROV_DRIFT"'
+  [[ "$output" == *"ne le porte pas"* ]]
+  [[ "$output" == *"drift=1"* ]]
+}
+
+@test "docker : une entree any avec un mauvais mode est un DRIFT NOMME — l'instrument est stat, pas -r" {
+  docker_decor
+  chmod 0700 "$D_ANY"
+  check_on docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$D_ANY : 700 $ME ≠ 755 $ME"* ]]
+  # repare, le verdict revient a 0 : le drift etait celui-la et pas un autre
+  chmod 0755 "$D_ANY"
+  check_on docker
+  [ "$status" -eq 0 ]
+}
+
+@test "docker : une entree wsl+linux n est PAS mesuree — meme absente, meme fausse — et le module le DIT" {
+  docker_decor
+  chmod 0700 "$D_POSTE"
+  check_on docker
+  [ "$status" -eq 0 ]
+  refute_out -- "$D_POSTE : " <<<"$output"
+  rm -rf "$D_POSTE"
+  check_on docker
+  [ "$status" -eq 0 ]
+  refute_out -- "$D_POSTE absent" <<<"$output"
+  [[ "$output" == *"hors substrat docker"*"$D_POSTE"* ]]
+}
+
+@test "docker : une entree sur un VOLUME de la boite n'a pas de verite au build — non mesuree, et DITE" {
+  docker_decor
+  rm -rf "$D_VOL"
+  check_on docker
+  [ "$status" -eq 0 ]
+  refute_out -- "$D_VOL absent" <<<"$output"
+  [[ "$output" == *"volume de la boite"*"$D_VOL"* ]]
+}
+
+@test "docker : une entree que le manifeste NE CONNAIT PAS se mesure quand meme — un absent nomme au build vaut mieux qu'un silence" {
+  docker_decor
+  rm -rf "$D_INCONNU"
+  check_on docker
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$D_INCONNU absent"* ]]
+}
+
+@test "poste : le meme decor, tout se mesure — l'entree wsl+linux ET celle du volume, et rien n'est dit hors mesure" {
+  # Le filtre docker ne fuit pas sur le poste : `wsl+linux` y est chez lui, et un volume n'y existe pas.
+  docker_decor
+  chmod 0700 "$D_POSTE"; rm -rf "$D_VOL"
+  check_on linux
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$D_POSTE : 700 $ME ≠ 755 $ME"* ]]
+  [[ "$output" == *"$D_VOL absent"* ]]
+  refute_out 'hors substrat|volume de la boite' <<<"$output"
+}
+
+@test "le substrat d'une entree vient du MANIFESTE, et de lui seul — la table du module n'en porte aucune colonne" {
+  local code; code="$(sed 's/#.*//' "$SRC")"
+  grep -q 'prov_manifest_substrate' <<<"$code"
+  grep -q '^prov_manifest_substrate()' "$PROVISION_LIB"
+  # aucune colonne substrat dans la table : chaque entree de prov_dirs a exactement trois champs
+  local liste n_lignes n_trois
+  liste="$(sed -n '/^prov_dirs()/,/^}$/p' "$SRC" | grep -E '^\s+"[^"]+" *\\?$' | tr -d '"\\')"
+  n_lignes="$(grep -c . <<<"$liste")"
+  n_trois="$(awk 'NF==3' <<<"$liste" | grep -c .)"
+  [ "$n_lignes" -ge 10 ]
+  [ "$n_lignes" -eq "$n_trois" ]
+  refute grep -qE 'wsl\+linux|wsl linux' <<<"$code"
+}
+
+@test "MANIFESTE vs TABLE : les repertoires DURABLES aussi — chaque entree de prov_dirs est declaree, meme mode, meme proprietaire" {
+  # Le pendant du temoin runtime ci-dessus, et ce qui rend sur le filtre par le manifeste : une entree
+  # que la table ne connait pas se mesure partout (au build, un absent nomme). Ce temoin garantit que
+  # ce cas ne se produit sur AUCUNE entree reelle. Les defauts de la lib sont ceux du poste — le decor
+  # de `setup` deplace trois racines dans le bac a sable, on les rend ici.
+  local manifest="$BATS_TEST_DIRNAME/../../system.manifest"
+  run env -u PROV_TOKENS_DIR -u PROV_CATALOGUES_DIR -u PROV_CATALOGUES_WORK PROV_SUBSTRATE=linux \
+    bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_dirs"
+  [ "$status" -eq 0 ]
+  local path mode owner row bad=0 n=0
+  while read -r path mode owner; do
+    [[ -n "$path" && "$path" != /run/* ]] || continue
+    row="$(awk -v p="$path" '{c=$1;sub(/:.*/,"",c)} (c=="dir"||c=="prefix"||c=="preserve") && $2==p {print $3, $4; exit}' "$manifest")"
+    [[ -n "$row" ]] || { echo "DANS LA TABLE, PAS AU MANIFESTE : $path"; bad=1; continue; }
+    n=$((n + 1))
+    [ "$row" = "$mode $owner" ] || { echo "$path — manifeste « $row », table « $mode $owner »"; bad=1; }
+  done <<<"$output"
+  [ "$n" -ge 12 ] || { echo "seulement $n lignes comparees — le decor ne rend pas la table"; return 1; }
+  [ "$bad" -eq 0 ]
+}
+
+@test "les volumes que le module ecarte au build sont ceux que le Dockerfile declare VOLUME — deux ecritures, une valeur" {
+  local df="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
+  local declares; declares="$(grep -E '^VOLUME ' "$df" | tr -d '[]",' | sed 's/^VOLUME //' | tr ' ' '\n' | sort)"
+  [ -n "$declares" ]
+  run env -u PROV_ROOT bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_box_volumes | sort"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$declares" ]
 }

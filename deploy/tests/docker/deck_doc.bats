@@ -26,7 +26,7 @@
 
 setup() {
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  DECK="$BATS_TEST_DIRNAME/../../../fleet/services/console-deck.py"
+  DECK="$BATS_TEST_DIRNAME/../../../runtime/services/console-deck.py"
   [ -f "$DOCKERFILE" ]
   [ -f "$DECK" ]
   # La destination du `COPY --from=site`, telle qu'ecrite dans l'image.
@@ -67,13 +67,16 @@ setup() {
 @test "l'arbre servi est rendu lisible EXPLICITEMENT, jamais par heritage du COPY" {
   # `COPY` conserve les modes de l'etage source (`node:<majeure>-slim`), qui ne nous doit rien. Un arbre
   # servi doit dire lui-meme qu'il est lisible ; l'heritage est une hypothese sur une image amont.
-  grep -qE "^RUN chmod -R a\+rX ${DOC_DEST%/doc}\$" "$DOCKERFILE"
+  # Depuis le lot 15 la meme ligne retire aussi le setgid et l'ecriture de groupe (`44 check` relit
+  # share/* au build contre la table) : ce temoin epinglait la forme exacte, il epingle le FAIT —
+  # `a+rX` en tete, sur cet arbre, et rien d'autre que des clauses symboliques derriere.
+  grep -qE "^RUN chmod -R a\+rX(,[ugoa]*[-+=][rwxXst]*)* ${DOC_DEST%/doc}\$" "$DOCKERFILE"
 }
 
 @test "l'image pose les MEDIAS a cote de la doc — une source installee, lue par tous" {
   # ⚠ TROIS EXEMPLAIRES AVAIENT DERIVE. Les memes avatars vivaient dans `assets/avatars/` (la
   # marque), `fleet/deploy/deps/avatars/` (les png de la charte forge) et
-  # `fleet/priv/observation/static/assets/` (les svg du deck) : sept des neuf roles communs
+  # `runtime/priv/observation/static/assets/` (les svg du deck) : sept des neuf roles communs
   # differaient, parce qu'une mise a jour touchait un dossier et pas les autres. La source est
   # `assets/`, l'installation la pose ici, et les deux lecteurs — le deck d'observation et
   # `provision-forge-charte.sh` — visent cette racine.
@@ -81,8 +84,8 @@ setup() {
   grep -qE "^COPY assets/avatars +${root}/avatars\$" "$DOCKERFILE"
   grep -qE "^COPY assets/favicon +${root}/favicon\$" "$DOCKERFILE"
   # Les deux dossiers qui portaient les copies ont disparu, sinon elles repousseraient.
-  [ ! -d "$BATS_TEST_DIRNAME/../../../fleet/services/forge-recipe/avatars" ]
-  [ ! -d "$BATS_TEST_DIRNAME/../../../fleet/priv/observation/static/assets" ]
+  [ ! -d "$BATS_TEST_DIRNAME/../../../runtime/services/forge-recipe/avatars" ]
+  [ ! -d "$BATS_TEST_DIRNAME/../../../runtime/priv/observation/static/assets" ]
 }
 
 @test "la source porte les DEUX formats — le png n'est pas un derive du svg" {
@@ -107,7 +110,7 @@ setup() {
 
 @test "VERROU : toute racine de catalogue que le SITE nomme est copiee dans son stage" {
   # ⚠ MESURE DU 2026-08-23 : l'image etait INCONSTRUCTIBLE depuis la veille. `catalogue.js` nomme
-  # trois catalogues — deux sous `fleet/priv/`, et `web-demo` a la RACINE du depot. Le stage `site`
+  # trois catalogues — deux sous `runtime/priv/`, et `web-demo` a la RACINE du depot. Le stage `site`
   # copiait `assets/` et `fleet/`, jamais `catalogues/`. Donc `existsSync` faux, `throw`,
   # `npm run build` exit 1, et le build de l'IMAGE meurt — pas seulement celui de la doc.
   #
@@ -128,11 +131,11 @@ setup() {
   local copied; copied="$(sed -n '/AS site/,/^RUN npm run build/p' "$df" | sed -n 's/^COPY \([^ ]*\).*/\1/p')"
   [ -n "$copied" ]
 
-  # Les racines que le site nomme, cote depot : `PRIV` -> fleet/priv, `CATALOGUES` -> catalogues.
+  # Les racines que le site nomme, cote depot : `PRIV` -> runtime/priv, `CATALOGUES` -> catalogues.
   # On ne lit pas les noms de catalogues (ils bougent), on lit les RACINES (elles sont deux).
   grep -q 'PRIV' "$js"
   grep -q 'CATALOGUES' "$js"
   # `fleet` couvre PRIV ; `catalogues` couvre CATALOGUES. Chacune doit etre copiee.
-  printf '%s\n' "$copied" | grep -qx 'fleet'
+  printf '%s\n' "$copied" | grep -qx 'runtime'
   printf '%s\n' "$copied" | grep -qx 'catalogues'
 }

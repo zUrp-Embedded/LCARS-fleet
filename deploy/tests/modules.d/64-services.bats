@@ -72,6 +72,14 @@ setup() {
   export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
   printf 'root:x:0:0:root:/root:/bin/bash\n%s:x:%s:%s::%s:/bin/bash\nzoe:x:4242:4242::/home/zoe:/bin/bash\n' \
     "$(id -un)" "$(id -u)" "$(id -g)" "$HOME" > "$PASSWD_FILE"
+  # ⚠ ET SES BORNES AVEC ELLE (lot 15). `fleet_humans` lit `login.defs` par `prov_uid_bounds` : une
+  # population de decor sans ses bornes decrit une machine a moitie — ce decor lisait le
+  # `/etc/login.defs` de la machine qui joue le test. Sur un poste dont UID_MIN vaut 5000, ou dont
+  # login.defs est illisible, `zoe` cesse d'etre un humain de fleet et « check CONFORME » rougit
+  # pour un code identique. Le plancher est une DONNEE du systeme, donc il se pose ici (modele :
+  # 22-fleet-human.bats) ; MUR I18 (idiom_walls) tient la regle pour tout temoin qui pose une population.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$PASSWD_DEFS"
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   mkdir -p "$LCARS_SYSTEMD_DIR" "$PROV_TOKENS_DIR"
@@ -147,9 +155,10 @@ mod() { run bash "$MOD" "$1"; }
   # Un service n'a ni le shell de l'operateur ni les PROV_* que `provision` exporte le temps d'un
   # apply. Le convergeur lit ces noms-la : s'ils manquent, il converge une autre org, en silence.
   mod apply
-  grep -q "^PROV_FORGE_ORG=" "$LCARS_SERVICES_ENV"
-  grep -q "^PROV_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$LCARS_SERVICES_ENV"
+  # lot 8 : les daemons sont le PRODUIT, leur env parle LCARS_*
+  grep -q "^LCARS_FORGE_ORG=" "$LCARS_SERVICES_ENV"
+  grep -q "^LCARS_HUMANS_TEAM=" "$LCARS_SERVICES_ENV"
+  refute grep -q "^PROV_" "$LCARS_SERVICES_ENV"
 }
 
 @test "l'uid du SIEGE traverse jusqu'a l'environnement des daemons" {
@@ -167,7 +176,7 @@ mod() { run bash "$MOD" "$1"; }
 
 @test "l'uid du siege est POSE dans un fichier que le garde ne peut pas reecrire" {
   # ⚠ POURQUOI UN FICHIER ET PAS LA VARIABLE : mesure du 2026-08-27,
-  # `LCARS_SYSADMIN_UID=99999 fleet_v2 start` desarmait GUARD B. L'environnement d'un processus
+  # `LCARS_SYSADMIN_UID=99999 fleet start` desarmait GUARD B. L'environnement d'un processus
   # appartient a ce processus ; une garde ne peut pas y prendre sa politique. `0644` parce que le
   # lecteur est le shell d'un humain quelconque, `root:root` parce que c'est ce qui l'empeche de le
   # reecrire — les deux moities du mode portent chacune la moitie du contrat.
@@ -321,9 +330,9 @@ mod() { run bash "$MOD" "$1"; }
   # Mutation du 2026-08-26 : un `PROV_FORGE_ORG=${PROV_FORGE_ORG:-fleet}` reinjecte laissait ce
   # temoin VERT — les deux `!` s'executaient, echouaient, et bash les exempte d'`errexit`. Seule la
   # ligne `grep -q 'echo …'` comptait, et elle ne verifie pas ce que le titre promet.
-  refute grep -qE 'PROV_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
-  refute grep -qE 'PROV_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
-  grep -q 'echo "PROV_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
+  refute grep -qE 'LCARS_FORGE_ORG=\$\{PROV_FORGE_ORG:-' "$MOD"
+  refute grep -qE 'LCARS_HUMANS_TEAM=\$\{PROV_HUMANS_TEAM:-' "$MOD"
+  grep -q 'echo "LCARS_FORGE_ORG=\$PROV_FORGE_ORG"' "$MOD"
 }
 
 # ─── LE PORT DU DECK — une valeur, les deux bouts ───────────────────────────────────────────────
@@ -540,9 +549,8 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   mod apply
   [ "$status" -eq 0 ]
   # CE QUI VIENT DU FICHIER — donc ce que le daemon aura aussi.
-  grep -q '^PROV_HUMANS_TEAM=' "$CONV_ENV"
+  grep -q '^LCARS_HUMANS_TEAM=' "$CONV_ENV"
   grep -q '^FORGE_BASE_URL=http://127.0.0.1:3000$' "$CONV_ENV"
-  grep -q "^LCARS_PROVISION=$LCARS_HELPERS_DIR/deploy/provision$" "$CONV_ENV"
   # CE QUI N'EN VIENT PAS — et que le daemon n'aura jamais. `PROV_TOKENS_DIR` n'existe que le temps
   # d'un apply ; s'il fuit ici, la passe reussit pour une raison que le boot n'aura pas.
   absent_de_l_env '^PROV_TOKENS_DIR='
@@ -662,7 +670,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 # et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont meme pas SELECTIONNES.
 # Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait AVANT toute sonde des
 # l'absence de systemd. Un `provision doctor` sur une boite annoncait donc 0 faute pendant que
-# GUARD B aurait refuse tout `fleet_v2 start`, faute de compte. La sonde a ete ajoutee pour ca.
+# GUARD B aurait refuse tout `fleet start`, faute de compte. La sonde a ete ajoutee pour ca.
 #
 # ⚠ ELLE A D'ABORD DERIVE, ET C'ETAIT L'ERREUR SYMETRIQUE (⚖ arbitrage user 2026-08-30). Aucun
 # deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES, les personnes s'enrolent
@@ -680,7 +688,7 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   box_services_present
   mod check
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
-  [[ "$output" == *"fleet_v2 start"* ]]
+  [[ "$output" == *"fleet start"* ]]
 }
 
 @test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {
@@ -834,4 +842,20 @@ box_services_present() {
   # ⚠ UN JOURNAL ABSENT EST UNE REPONSE, PAS UNE PANNE : le module tourne aussi dans un conteneur
   # sans systemd persistant. La lecture ne doit pas pouvoir tuer le verdict qu'elle decrit.
   grep -q '|| true' <<<"$corps"
+}
+
+# ─── DI-09 (lot 11) : le siege se GRAVE meme sans systemd ─────────────────────────────────────
+# `seat.uid` et `services.env` sont des FAITS de la machine (qui est le siege, ce que les daemons
+# lisent) ; les unites systemd sont une MECANIQUE. Sans init, la mecanique s'abstient et le dit —
+# les faits se posent quand meme, sinon GUARD B refuse tout lancement sur une machine sans systemd
+# pour une raison qui n'a rien a voir avec systemd.
+@test "sans systemd, seat.uid et services.env sont POSES quand meme — seules les unites s'abstiennent" {
+  export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
+  export LCARS_SYSADMIN_UID=1007
+  mod apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pas de systemd"* ]]
+  [ "$(cat "$LCARS_SEAT_UID_FILE")" = "1007" ]
+  grep -q '^LCARS_SYSADMIN_UID=1007$' "$LCARS_SERVICES_ENV"
+  [ ! -e "$LCARS_SYSTEMD_DIR/lcars-landing.service" ]
 }

@@ -30,7 +30,7 @@ FORGE_URL="${LCARS_FORGE_URL:-$(cat /home/lcars/tokens/forge.url 2>/dev/null || 
 # l'equipe `humans` de la forge, avec trente secondes de peremption — et un refus qui dirait « il
 # est lisible par le groupe fleet » enverrait chercher une adhesion. La question se pose a
 # `roles.sock` : le service la porte a la forge A L'INSTANT du geste.
-SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-${PROV_SYSTEM_ACCOUNT:-system_starfleet}}"
+SYSTEM_ACCOUNT="${LCARS_SYSTEM_ACCOUNT:-system_starfleet}"
 AUTHORITY_ASK="${LCARS_AUTHORITY_ASK_BIN:-/usr/local/bin/lcars-authority-ask}"
 OPS_REPO="${LCARS_OPS_REPO:-fleet/lcars}"
 # Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat

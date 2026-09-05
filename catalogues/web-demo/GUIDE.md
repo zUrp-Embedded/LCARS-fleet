@@ -413,7 +413,7 @@ compte et d'un jeton sur la forge, sinon rien n'est commité à leur nom. La lis
 au démarrage — elle se lit depuis votre catalogue, une fois, au provisionnement :
 
 ```bash
-etc/enroll-catalogue.sh --catalogue /chemin/vers/mon-catalogue --tofu-dir <recette-forge>
+deploy/lib/enroll-catalogue.sh --catalogue /chemin/vers/mon-catalogue --tofu-dir <recette-forge>
 ```
 
 Le script écrit les entrées de la recette forge (`roles.auto.tfvars.json`) et vous rend la ligne

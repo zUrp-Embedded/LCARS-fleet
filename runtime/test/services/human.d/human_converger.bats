@@ -36,9 +36,15 @@ root:x:0:0:root:/root:/bin/bash
 daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
 sshd:x:100:65534::/run/sshd:/usr/sbin/nologin
 lcars:x:1000:1000::/home/lcars:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
 EOF
-  echo "UID_MIN			 1000" > "$PASSWD_DEFS"
+  # Les DEUX bornes, comme tout login.defs reel : la regle du protocole les exige toutes deux
+  # (2026-09-05), et un fichier qui n'en porte qu'une n'etablit pas la frontiere — rien n'est admis.
+  printf 'UID_MIN\t\t\t 1000\nUID_MAX\t\t\t 60000\n' > "$PASSWD_DEFS"
   export PASSWD_FILE PASSWD_DEFS
+  # Le protocole de module (source par le protocole des humains) lit `forge.url` sous
+  # LCARS_PRIVATE_DIR : celui du decor, jamais celui de la machine.
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
 
   # ⚠ LE TROISIEME SEAM, ET SANS LUI LA PREMISSE DE CE FICHIER APPARTIENT A LA MACHINE. Le SUT
   # resout le siege par FICHIER D'ABORD (`/etc/lcars/seat.uid`), `LCARS_SYSADMIN_UID` seulement en
@@ -144,6 +150,23 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
 @test "un humain deja present (uid >= UID_MIN) n'est PAS reserve — il est juste deja converge" {
   admits "lcars"
   [ "$status" -eq 0 ]
+}
+
+@test "nobody (uid 65534, AU-DESSUS de UID_MAX) est reserve — la regle a deux bornes, pas une" {
+  # Il est sur toute machine, superieur a UID_MIN et different du siege : la regle basse seule
+  # l'adopterait, et un `nobody` inscrit sur la forge recevrait un home et un shell fleet.
+  admits "nobody"
+  [ "$status" -eq 1 ]
+}
+
+@test "bornes ILLISIBLES : TOUT nom est reserve — on ne cree personne sur une frontiere devinee" {
+  # Fail-closed (⚖ user 2026-09-05) : le convergeur devinait 1000 (`uid_min() … || echo 1000`), a
+  # contre-sens du BEAM qui refuse de booter dans ce cas. Le remede est dit, et il nomme le fichier.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  admits "zoe"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
 }
 
 @test "le compte SYSTEME de la fleet est refuse — il EST membre de la team humans (mesure)" {
@@ -344,6 +367,56 @@ admits() { # admits <login>  -> exit 0 if the converger would create that user
   [[ "$output" == *"/nope/nothing"* ]]
 }
 
+# ─── le tour entier, sur une frontiere illisible ────────────────────────────────────────────────
+#
+# `converge_once` est definie APRES le garde de sourcing : on l'EXTRAIT (meme idiome que
+# `converge_with`), avec une team {zoe} et des doublures pour tout ce qui touche la machine. Ce qui
+# se mesure est la DECISION du tour : cree-t-il, et que dit-il.
+once_with() { # once_with <script> — source le convergeur + converge_once extrait, joue <script>
+  local fn="$BATS_TEST_TMPDIR/once.sh"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  [ -s "$fn" ] || { echo "converge_once introuvable dans $SUT" >&2; return 1; }
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":3,\"login\":\"zoe\"}]'; }
+    id() { return 1; }
+    getent() { case \"\$1\" in passwd) [[ \"\$2\" == 1000 ]] ;; group) echo 'fleet:x:2000:' ;; esac; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    usermod() { :; }
+    converge_human() { echo \"CONVERGE \$1\" >> '$GESTES'; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    $1"
+}
+
+@test "TEMOIN : un tour nominal CREE zoe au premier uid libre au-dessus du siege — le harnais atteint useradd" {
+  # Sans ce temoin, celui d'a cote pourrait etre vert parce que le decor n'atteint jamais useradd.
+  once_with 'converge_once'
+  [ "$status" -eq 0 ]
+  grep -q '^USERADD -u 1001 -m -s /bin/bash -- zoe$' "$GESTES"
+  grep -q '^CONVERGE zoe$' "$GESTES"
+}
+
+@test "bornes ILLISIBLES : le tour ne converge PERSONNE, et le dit UNE FOIS PAR TOUR — pas une fois par membre, pas en silence" {
+  # ⚖ user 2026-09-05 : le convergeur « s'en tamponnait » — trois replis sur 1000 dans sa copie
+  # privee de la regle. Il applique maintenant celle du protocole : sans frontiere etablie, rien
+  # n'est cree, restaure ni revoque, et chaque tour le dit une fois, avec le remede.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  once_with 'converge_once; converge_once'
+  [ "$status" -eq 0 ]
+  [ ! -s "$GESTES" ]
+  [ "$(grep -c 'rien converge ce tour' <<<"$output")" -eq 2 ]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+}
+
 # ─── la revocation : QUI, jamais COMMENT ────────────────────────────────────────────────────────
 #
 # Seule la DECISION est epinglee ici (`converged_humans`, `absent_humans`). Le geste
@@ -425,6 +498,28 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" != *"svc"* ]]
   [[ "$output" == *"alice"* ]]
+}
+
+@test "un compte AU-DESSUS de UID_MAX infiltre dans le groupe n'est pas un humain converge non plus" {
+  passwd_fixture
+  printf 'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n' >> "$PASSWD_FILE"
+  group_fixture "alice,nobody"
+  converged
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"nobody"* ]]
+  [[ "$output" == *"alice"* ]]
+}
+
+@test "bornes ILLISIBLES : converged_humans ne designe PERSONNE — une liste devinee serait une purge" {
+  # `absent_humans` revoque ce que `converged_humans` designe et que la team ne nomme plus. Sur une
+  # frontiere devinee, la liste serait une purge de comptes qu'on ne sait pas classer.
+  passwd_fixture; group_fixture "alice,bob"
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  converged
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"alice"* ]]
+  [[ "$output" != *"bob"* ]]
+  [[ "$output" == *"n'est pas etablie"* ]]
 }
 
 @test "SANS ARGUMENT, absent_humans ne designe PERSONNE — une liste vide n'est pas une purge" {
@@ -546,7 +641,7 @@ EOF
 # `LCARS_FORGE_ORG` / `LCARS_HUMANS_TEAM` / `LCARS_FLEET_GROUP` pendant que `provision-lib.sh`
 # declarait `PROV_*` pour les memes faits — mesure du 2026-08-17 : 59 occurrences
 # `PROV_*` sur 13 fichiers contre 5 definitions `LCARS_*` sur 2. Personne ne posait ni l'un ni
-# l'autre, donc les DEFAUTS portaient seuls l'accord : poser `PROV_FORGE_ORG=starfleet` provisionnait
+# l'autre, donc les DEFAUTS portaient seuls l'accord : poser `LCARS_FORGE_ORG=starfleet` provisionnait
 # une org que ce convergeur n'interrogeait jamais, en silence.
 #
 # CE QUE CE TEMOIN NE PEUT PAS FAIRE, et il faut le dire : ce script ne source pas
@@ -555,6 +650,7 @@ EOF
 # deriver — un test qui compare deux litteraux vaut mieux que deux litteraux que rien ne compare.
 @test "les defauts du convergeur sont EXACTEMENT ceux que provision-lib declare" {
   lib="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
+  # la lib de l'INSTALLEUR declare en PROV_* ; le convergeur (produit) lit en LCARS_* — meme valeur
   for v in PROV_FORGE_ORG:ORG PROV_HUMANS_TEAM:TEAM PROV_FLEET_GROUP:GROUP; do
     prov="${v%%:*}"; local_var="${v##*:}"
     # Meme garde qu'ailleurs : `env -i` pour lire le DEFAUT et pas une surcharge de temoin.
@@ -731,8 +827,9 @@ exit 2'
 # Retirer le createur GARDE en laissant le non-garde aurait elargi le trou au lieu de le fermer. Le
 # garde demenage avec le geste ; ses temoins demenagent avec le garde.
 #
-# La regle mesuree est celle de `is_fleet_human` et de GUARD B (`bin/fleet`), les DEUX bornes :
-# `uid >= UID_MIN` ET `uid != LCARS_SYSADMIN_UID`.
+# La regle mesuree est celle de `is_fleet_human` (le protocole, que ce convergeur source) et de
+# GUARD B (`bin/fleet`) : `UID_MIN <= uid <= UID_MAX` ET `uid != LCARS_SYSADMIN_UID` — et sans
+# bornes lisibles, RIEN (2026-09-05), jamais un defaut.
 floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
   run bash -c "set -euo pipefail
     export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS'
@@ -757,19 +854,28 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
 }
 
 @test "plancher: un UID_MIN plus haut que le siege l'emporte — les deux regles valent, pas une" {
-  printf 'UID_MIN 5000\n' > "$PASSWD_DEFS"
+  printf 'UID_MIN 5000\nUID_MAX 60000\n' > "$PASSWD_DEFS"
   LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
   [ "$status" -eq 0 ]
   [ "$output" = "5000" ]
 }
 
-@test "plancher: login.defs ILLISIBLE ne tue pas le service — retombe sur le defaut, en silence sur" {
-  # Une garde qui s'evanouit sur une lecture ratee est pire que pas de garde : ici l'effet serait un
-  # convergeur MORT (`set -e`) au lieu d'un uid prudent.
+@test "plancher: login.defs ILLISIBLE ne tue pas le service, et ne rend RIEN — jamais un defaut" {
+  # Fail-closed (⚖ user 2026-09-05, la politique du BEAM). Une garde qui s'evanouit sur une lecture
+  # ratee est pire que pas de garde : ici l'effet serait un convergeur MORT (`set -e`). Mais un
+  # defaut est pire encore : 1000 devine sur une machine dont le plancher reel est ailleurs cree
+  # des humains sur des uid systeme. `uid_floor` rend 1 et rien ; l'appelant refuse.
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/absent.defs"
-  LCARS_SYSADMIN_UID=1000 floor 'uid_floor'
+  LCARS_SYSADMIN_UID=1000 floor 'uid_floor && echo "RENDU=[$?]"; echo "RC=$?"'
   [ "$status" -eq 0 ]
-  [ "$output" = "1000" ]
+  [[ "$output" != *"RENDU"* ]]
+  [[ "$output" == *"RC=1"* ]]
+  [[ "$output" != *"1000"* ]]
+  # Et `first_free_uid` ne part pas de 1 (un plancher vide + 1) : il refuse aussi.
+  LCARS_SYSADMIN_UID=1000 floor 'first_free_uid || echo "REFUS=$?"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REFUS=1"* ]]
+  [[ "$output" != *"1001"* ]]
 }
 
 @test "plancher: un SYSADMIN_UID non numerique ne fait pas DISPARAITRE le plancher" {
@@ -817,4 +923,35 @@ floor() { # floor <expr>  → source le convergeur avec le decor, evalue <expr>
     floor 'uid_wanted inconnu-du-parc ""'
   [ "$status" -eq 0 ]
   [ "$output" = "1002" ]
+}
+
+@test "un compte EXISTANT reserve (sshd, uid 100) inscrit sur la forge n'est PAS reintegre — refus nomme, une fois, pas de console" {
+  # Trou nomme par le lot 14b : la branche « le compte existe » restaurait sans consulter `reserved`.
+  local fn="$BATS_TEST_TMPDIR/once.sh"
+  sed -n '/^converge_once() {/,/^}/p' "$SUT" > "$fn"
+  GESTES="$BATS_TEST_TMPDIR/gestes.log"; : > "$GESTES"
+  mkdir -p "$BATS_TEST_TMPDIR/homes"
+  run bash -c "
+    set -uo pipefail
+    export PASSWD_FILE='$PASSWD_FILE' PASSWD_DEFS='$PASSWD_DEFS' LCARS_SYSADMIN_UID=1000
+    export LCARS_HOME_ROOT='$BATS_TEST_TMPDIR/homes' LCARS_UID_MAP_FILE='$BATS_TEST_TMPDIR/uid.map'
+    export LCARS_CONVERGER_REFUSED='$BATS_TEST_TMPDIR/refused' LCARS_CONSOLE=0
+    source '$SUT'
+    team_id() { echo 7; }
+    api() { printf '[{\"id\":4,\"login\":\"sshd\"}]'; }
+    id() { [[ \"\$*\" == *sshd* ]]; }
+    getent() { case \"\$1\" in passwd) [[ \"\$2\" == 1000 ]] ;; group) echo 'fleet:x:2000:' ;; esac; }
+    useradd() { echo \"USERADD \$*\" >> '$GESTES'; }
+    usermod() { echo \"USERMOD \$*\" >> '$GESTES'; }
+    restore_human() { echo \"RESTORE \$1\" >> '$GESTES'; }
+    ensure_console() { echo \"CONSOLE \$1\" >> '$GESTES'; }
+    converge_human() { echo \"CONVERGE \$1\" >> '$GESTES'; }
+    revoke_absent() { :; }; reconcile_humans() { :; }; ensure_all_consoles() { :; }
+    source '$fn'
+    converge_once; converge_once"
+  [ "$status" -eq 0 ]
+  [ ! -s "$GESTES" ] || { echo "un geste a ete joue sur sshd :"; cat "$GESTES"; return 1; }
+  [ "$(grep -c 'REFUS sshd' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"compte EXISTANT reserve"* ]]
+  grep -q '^sshd	' "$BATS_TEST_TMPDIR/refused"
 }

@@ -21,12 +21,12 @@
 # 2. LES CREDS ANTHROPIC PARTENT AVEC L'ANCIEN CONTENEUR. Sans `~/.claude/.credentials.json`,
 #    `Credentials.Gate.validate` refuse au spawn-boundary : la fleet a l'air saine et ne produit
 #    aucun pod. Elles sont reposees ici, sinon le banc est mort sans le dire.
-# 3. `50-forge` MINTE LES ROLE-TOKENS AU BOOT, depuis le seed de la forge. Sur un banc deja seme le
+# 3. `63-forge-tokens` MINTE LES ROLE-TOKENS AU BOOT, depuis le seed de la forge. Sur un banc deja seme le
 #    seed EXISTE, donc une seule relance suffit — la seconde passe d'amorcage de `bench-up.sh` n'a
 #    pas lieu d'etre. C'est toute la difference entre monter un banc et remettre sa boite a jour.
 #
 # ⚠ CE QUE CE SCRIPT NE FAIT PAS : demarrer la fleet. Comme apres un `bench-up.sh`, l'entrypoint
-# s'arrete a « puis `fleet_v2 start` » — le daemon se lance a la main, et le verdict final ci-dessous
+# s'arrete a « puis `fleet start` » — le daemon se lance a la main, et le verdict final ci-dessous
 # le rappelle plutot que de laisser croire a un banc qui travaille.
 #
 # USAGE : bench-swap-image.sh --image lcars-fleet:xyz [--project lcars-nuit] [--bind 0.0.0.0]
@@ -71,11 +71,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-FORGE_PROJECT="${PROJECT}forge"
+# ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
+# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# le poste (48/49) et le banc derivent les memes noms de la meme base.
+BOX_PROJECT="${PROJECT}-fleet"
+FORGE_PROJECT="${PROJECT}-forge"
 FORGE_NET="${FORGE_PROJECT}_default"
-BOX="${PROJECT}-lcars-1"
+BOX="${BOX_PROJECT}-lcars-1"
 
-export LCARS_STORE_PREFIX="$PROJECT"
+export LCARS_STORE_PREFIX="$BOX_PROJECT"
 # MEME SEPARATION QUE `bench-up.sh` : `0.0.0.0` est un joker d'ecoute, pas une adresse. Ce qu'on
 # ANNONCE (FORGE_PUBLIC_URL, les entrees du deck) doit etre composable depuis une autre machine — et
 # la derivation depend du SUBSTRAT (WSL en NAT n'a pas d'adresse annoncable). Une seule definition,
@@ -111,8 +115,7 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # seme plus sur `admiral` : c'est le siege machine, il ne commite jamais, et lui donner l'adresse
 # faisait signer les commits des humains par un compte fantome que la forge ne relie a personne.
 # L'adresse qui compte est celle du compte forge de l'humain, posee par le convergeur.
-# ⚠ PAR --env-file, PLUS JAMAIS PAR L'ENVIRONNEMENT (mesuré 2026-08-18, trois morsures le meme
-# jour) : la substitution `${VAR}` d'un compose file se fait dans le PROCESS compose — et quand
+# ⚠ PAR --env-file, PLUS JAMAIS PAR L'ENVIRONNEMENT (trois morsures en un jour) : la substitution `${VAR}` d'un compose file se fait dans le PROCESS compose — et quand
 # `DOCKER_BIN` est un wrapper qui s'escalade (sudo interne, env remis a zero), les variables
 # prefixees ici n'existent plus de l'autre cote. Consequences mesurees : l'image DEFAUTAIT (le tag
 # de la liste rouge a ete ecrase, puis un pull du registre NAS), le port ssh DEFAUTAIT (bind sur le
@@ -122,7 +125,7 @@ say "banc $PROJECT — la boite passe sur $IMAGE (forge, semis et tokens preserv
 # ⚠ PAS DE FICHIER TEMPORAIRE ANONYME, ET PAS DANS `/tmp` — le temoin `bench_swap_creds.bats`
 # l'interdit, pour une raison mesuree : sur un poste ou le daemon passe par sudo, `docker cp` ecrit
 # en ROOT, `/tmp` est sticky, donc celui qui a cree le fichier ne peut plus l'effacer. Deux copies
-# de credentials VIVANTS y etaient restees le 2026-08-18, pendant que le script se croyait propre.
+# de credentials VIVANTS y sont restees, pendant que le script se croyait propre.
 # Ce fichier-ci ne porte que de la CONFIGURATION (image, ports, URLs — le mot de passe admiral part
 # par un tube vers `chpasswd`, jamais par ici), mais le piege de propriete est le meme.
 #
@@ -145,14 +148,14 @@ LCARS_DECK_ORIGINS=http://${ADVERTISE}:${DECK_PORT}
 ENVEOF
 trap 'rm -f "$SWAP_ENV"' EXIT
 
-"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$PROJECT" create \
+"$DOCKER_BIN" compose --env-file "$SWAP_ENV" -f "$DOCKER_DIR/docker-compose.install.yml" -p "$BOX_PROJECT" create \
   || die "la boite ne se cree pas" 3
 
 "$DOCKER_BIN" network connect "$FORGE_NET" "$BOX" \
   || die "la boite ne se branche pas sur $FORGE_NET" 3
 say "boite branchee sur $FORGE_NET — 'gitea' resout AVANT le premier boot"
 
-"$DOCKER_BIN" compose -p "$PROJECT" start || die "la boite ne demarre pas" 3
+"$DOCKER_BIN" compose -p "$BOX_PROJECT" start || die "la boite ne demarre pas" 3
 
 wait_healthy() {
   for _ in $(seq 1 90); do
@@ -183,7 +186,7 @@ else
 fi
 
 # ─── 4. une relance, pas deux passes : le seed existe deja (piege 3) ─────────────────────────────
-say "relance pour que 50-forge minte les role-tokens sur le seed EXISTANT"
+say "relance pour que 63-forge-tokens minte les role-tokens sur le seed EXISTANT"
 "$DOCKER_BIN" restart "$BOX" >/dev/null || die "relance de la boite impossible" 3
 wait_healthy || die "la boite ne redevient pas healthy apres relance" 3
 
@@ -218,5 +221,5 @@ say "  image     : $IMAGE   (revision $REVISION)"
 say "  forge     : $FORGE_URL   (PRESERVEE — ni resemee ni redemarree)"
 say "  tokens    : $ROLE_TOKENS fichiers dans /opt/lcars/var/tokens"
 say "  creds     : $CREDS_OK"
-say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet_v2 start'"
+say "  la fleet n'est PAS demarree : docker exec -u $HUMAN $BOX bash -lc 'fleet start'"
 say "─────────────────────────────────────────────────────────"

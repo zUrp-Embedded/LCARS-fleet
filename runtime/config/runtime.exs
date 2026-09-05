@@ -73,7 +73,7 @@ end
 #
 # ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
 # `services/human.d/70-human.sh` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet.env`,
-# derivees toutes deux de `$PROV_SYSTEM_ACCOUNT`. Mais `PROV_SYSTEM_ACCOUNT` est une variable de
+# derivees toutes deux de `$LCARS_SYSTEM_ACCOUNT`. Mais `LCARS_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
 # BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
 # en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte un
@@ -245,8 +245,9 @@ if config_env() != :test and not tool_mode? do
     end
 
   # LE MIROIR DE GUARD B EST ENTIER (audit) : fleet porte DEUX regles — la reservation du siege
-  # ET la frontiere systeme/humain (`uid >= UID_MIN`). Sans ce miroir, un compte SYSTEME
-  # (uid < 1000) lancant la release directement passe le BEAM et n'est refuse que par le launcher.
+  # ET la frontiere systeme/humain (`UID_MIN <= uid <= UID_MAX`). Sans ce miroir, un compte
+  # SYSTEME (uid < UID_MIN) ou HORS PLAGE (`nobody`, uid > UID_MAX) lancant la release directement
+  # passe le BEAM et n'est refuse que par le launcher.
   #
   # ⚠ ET LA SECONDE REGLE NE LIT PAS SA BORNE DANS L'ENVIRONNEMENT DU PROCESSUS QU'ELLE GARDE. Un
   # `System.get_env("LCARS_UID_MIN", "1000")` ferait de cette variable une molette dont le seul site
@@ -266,22 +267,42 @@ if config_env() != :test and not tool_mode? do
   # `PASSWD_DEFS` est la couture des quatre autres, reprise telle quelle : elle deplace le CHEMIN,
   # jamais la valeur. Un jeu de noms, un fait.
   #
-  # AUCUN REPLI SUR 1000, et c'est delibere. Un `login.defs` illisible n'est pas « la frontiere est a
-  # 1000 », c'est « la frontiere n'est pas etablie » — et une garde qui ne peut pas mesurer ne doit
-  # pas laisser passer le boot. Meme phrase que le fichier de siege, deux clauses plus haut.
-  uid_min_path = System.get_env("PASSWD_DEFS", "/etc/login.defs")
+  # AUCUN REPLI SUR 1000 NI SUR 60000, et c'est delibere. Un `login.defs` illisible n'est pas « la
+  # frontiere est a 1000 », c'est « la frontiere n'est pas etablie » — et une garde qui ne peut pas
+  # mesurer ne doit pas laisser passer le boot. Meme phrase que le fichier de siege, deux clauses
+  # plus haut.
+  #
+  # DEUX BORNES, comme le protocole des humains (`uid_bounds`), `bin/fleet` et la console (lot 15) :
+  # au-dessus de UID_MAX vivent `nobody` (65534, sur toute machine) et les comptes de service
+  # hauts — un BEAM qui ne lit que le plancher les laisse booter. Et une seule borne lisible
+  # n'etablit pas la frontiere : UID_MAX absent refuse, sous le meme mot que UID_MIN — le remede
+  # est le fichier, pas un defaut. `R-no-uid-min` nomme la REGLE (la frontiere), quelle que soit la
+  # borne qui manque ; le message dit laquelle.
+  uid_bounds_path = System.get_env("PASSWD_DEFS", "/etc/login.defs")
 
-  uid_min =
-    with {:ok, body} <- File.read(uid_min_path),
-         [_, raw] <- Regex.run(~r/^UID_MIN\s+(\d+)/m, body),
+  no_uid_bound = fn name ->
+    raise "R-no-uid-min: the system/human boundary could not be established (#{name} " <>
+            "unreadable in #{uid_bounds_path}) — GUARD B refuses a boot it cannot verify. The " <>
+            "bound is declared by the system, not by this process: fix #{uid_bounds_path}."
+  end
+
+  login_defs =
+    case File.read(uid_bounds_path) do
+      {:ok, body} -> body
+      _ -> no_uid_bound.("UID_MIN")
+    end
+
+  uid_bound = fn name ->
+    with [_, raw] <- Regex.run(~r/^#{name}\s+(\d+)/m, login_defs),
          {n, ""} <- Integer.parse(raw) do
       n
     else
-      _ ->
-        raise "R-no-uid-min: the system/human boundary could not be established (UID_MIN " <>
-                "unreadable in #{uid_min_path}) — GUARD B refuses a boot it cannot verify. The " <>
-                "bound is declared by the system, not by this process: fix #{uid_min_path}."
+      _ -> no_uid_bound.(name)
     end
+  end
+
+  uid_min = uid_bound.("UID_MIN")
+  uid_max = uid_bound.("UID_MAX")
 
   case uid_reading do
     "0" ->
@@ -304,6 +325,12 @@ if config_env() != :test and not tool_mode? do
           raise "R-no-root-runtime: the fleet daemon refuses to run under a SYSTEM account " <>
                   "(uid #{n} < UID_MIN #{uid_min}) — the fleet runs under a HUMAN uid " <>
                   "(launch via bin/fleet under a worker account)"
+
+        {n, ""} when n > uid_max ->
+          raise "R-no-root-runtime: the fleet daemon refuses to run under an account ABOVE the " <>
+                  "human range (uid #{n} > UID_MAX #{uid_max}) — `nobody` and the high service " <>
+                  "uids are not fleet humans; the fleet runs under a HUMAN uid (launch via " <>
+                  "bin/fleet under a worker account)"
 
         _human_or_unparseable ->
           :ok

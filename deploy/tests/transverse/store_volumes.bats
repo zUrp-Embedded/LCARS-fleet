@@ -217,9 +217,15 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # Le prefixe n'a pas de defaut : un appelant qui l'oublie ne partage pas — il ECHOUE. Ce temoin
   # garde la moitie qu'un `:?` ne peut pas garder : qu'il soit pose, et pose au PROJET.
   local f
-  for f in "$DEPLOY/box" "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$f" \
-      || { echo "n'exporte pas le prefixe au nom du projet : $f"; return 1; }
+  # lot 9 (DI-05) : chez `box` le projet EST celui de la boite ; sur le banc c'est `<N>-fleet`,
+  # derive de la base — le prefixe suit le projet de la boite dans les deux cas
+  grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/box" \
+    || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/box"; return 1; }
+  for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
+    grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$f" \
+      || { echo "n'exporte pas le prefixe au nom du projet de la boite : $f"; return 1; }
+    grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$f" \
+      || { echo "ne derive pas le projet de la boite de la base : $f"; return 1; }
   done
 }
 

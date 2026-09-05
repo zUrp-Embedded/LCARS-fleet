@@ -336,7 +336,8 @@ SH
 @test "FUSION : seuls les INVENTAIRES s'additionnent, les metadonnees s'ecrasent" {
   # `posed_at`, `source_rev`, `substrate`, `prefix`, `modules` decrivent LA passe : les cumuler
   # ferait un fichier qui raconte deux dates a la fois.
-  local body; body="$(code "$RUNNER")"
+  # lot 10 : la desinstallation vit dans lib/provision-uninstall.sh, sourcee par le runner
+  local body; body="$(code "$RUNNER"; code "$BATS_TEST_DIRNAME/../lib/provision-uninstall.sh")"
   # ⚠ LES CLEFS SE NOMMENT. `^posed_` attraperait `posed_at`, qui est la METADONNEE de la passe :
   # elle se ferait fusionner, et le journal porterait deux dates. Mesure du 2026-08-28 sur banc.
   # ⚠ LA LISTE DES CLEFS CUMULATIVES GRANDIT, ET LE MOTIF DOIT SUIVRE SANS SE RELACHER.
@@ -369,4 +370,38 @@ SH
   [ "$status" -eq 0 ]
   grep -q 'apt-get install.*docker-ce' "$APT_TRACE"
   refute grep -qE 'apt-get install.*\btmux\b' "$APT_TRACE"
+}
+
+# ─── M8 : L'ECHAFAUDAGE NE SE JOURNALISE PAS — LE NOM FINAL, APRES LA BASCULE ──────────────────
+#
+# ⚠ RELECTURE HOSTILE DU 2026-09-04, journal d'un banc : `posed_dir` portait
+# `/opt/node-24.20.0.partial`, `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin}.new`
+# — les repertoires de travail des poseurs atomiques, crees par `ensure_dir` (qui note) et disparus
+# a la bascule. Ceux qu'aucun ancetre declare n'absorbe remontaient dans la ligne « hors table »
+# du plan d'uninstall, la seule dont l'operateur ne peut pas deviner le contenu.
+
+@test "M8 : prov_scaffold_dir ne note RIEN ; prov_promote_dir note le nom FINAL, jamais l'echafaudage" {
+  lib "PROV_JOURNAL_ACC='$ACC'; prov_scaffold_dir '$BATS_TEST_TMPDIR/final.partial' 0755 >/dev/null; : > '$BATS_TEST_TMPDIR/final.partial/x'; prov_promote_dir '$BATS_TEST_TMPDIR/final.partial' '$BATS_TEST_TMPDIR/final'"
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  [ -f "$BATS_TEST_TMPDIR/final/x" ] && [ ! -e "$BATS_TEST_TMPDIR/final.partial" ]
+  grep -qE "^posed_dir $BATS_TEST_TMPDIR/final\$" "$ACC"
+  refute grep -q 'partial' "$ACC"
+}
+
+@test "M8 : prov_promote_dir REMPLACE un final existant (la bascule est un rm -rf + mv, comme avant)" {
+  mkdir -p "$BATS_TEST_TMPDIR/final/vieux"
+  lib "prov_scaffold_dir '$BATS_TEST_TMPDIR/final.new' 0755 >/dev/null; prov_promote_dir '$BATS_TEST_TMPDIR/final.new' '$BATS_TEST_TMPDIR/final'"
+  [ "$status" -eq 0 ]
+  [ -d "$BATS_TEST_TMPDIR/final" ] && [ ! -e "$BATS_TEST_TMPDIR/final/vieux" ]
+}
+
+@test "M8 : aucun module ne cree son echafaudage par ensure_dir — et trois au moins passent par la primitive" {
+  local hits n_scaffold n_promote
+  hits="$(grep -nE 'ensure_dir "[^"]*\.(partial|new)"' "$BATS_TEST_DIRNAME"/../modules.d/*.sh || true)"
+  [ -z "$hits" ] || { echo "echafaudage journalise :" >&2; printf '%s\n' "$hits" >&2; return 1; }
+  n_scaffold="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_scaffold_dir ')"
+  n_promote="$(cat "$BATS_TEST_DIRNAME"/../modules.d/*.sh | grep -vE '^\s*#' | grep -c 'prov_promote_dir ')"
+  [ "$n_scaffold" -ge 3 ] && [ "$n_promote" -ge 3 ]
+  # le motif voit bien la forme interdite
+  grep -qE 'ensure_dir "[^"]*\.(partial|new)"' <<<'  ensure_dir "${NODE_HOME}.partial" 0755 root:root || verdict_apply'
 }

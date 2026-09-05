@@ -3,7 +3,7 @@
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — image LCARS fleet v2 : build multi-stage (mix release) + runtime slim (sshd login-manager)
-# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME etc/deploy-release.sh (l'autorité
+# ISO structurelle avec le chemin WSL : le stage build exécute LE MÊME deploy/lib/deploy-release.sh (l'autorité
 # build+pose, modèle 3 zones), le stage runtime reçoit LE MÊME layout (/opt/lcars/runtime RO
 # root:fleet, /usr/local/bin câblé) que le module 60-deploy pose sur WSL. Ce qui converge au
 # runtime (humain, forge, claude per-humain) est fait par LE MÊME `provision` à l'entrypoint —
@@ -22,13 +22,12 @@ ARG TARGETARCH
 # install.sh fait un chgrp fleet best-effort sur le prefix : le groupe doit exister au build
 # (le runtime stage le recrée avec le MÊME gid — contrat entre stages).
 # (Contrat entre stages : uid 1000 = l'uid par défaut de l'humain du conteneur ; gid 2000 = fleet.)
-# Outillage du GATE : etc/deploy-release.sh lance `mix gate`, dont shell_gate exige python3 (test du
-# bridge MCP), bats + git (tests hors-mix) — et REFUSE de les sauter en silence
-# (BATS_MISSING_FATAL=1 posé par mix.exs). S'y ajoute LE MONDE QUE CES TESTS EXERCENT : les bats
-# des launchers vérifient les refus de bwrap_launch dans l'ordre (bwrap → tmux → vendor → …), donc
-# un stage sans tmux/bubblewrap fait échouer le script trop TÔT et rougit 62 cas qui n'ont rien à
-# voir. Un stage build qui ne peut pas jouer le gate entier ne doit pas produire d'image : on
-# outille le stage plutôt que d'affaiblir le gate. (Liste = celle de 10-packages + les 2 du gate.)
+# ⚠ CE STAGE NE JOUE PAS LE GATE, ET NE L'A PLUS JOUÉ DEPUIS LONGTEMPS : `deploy-release.sh` y est
+# appelé avec `LCARS_INSTALL_SKIP_GATE=1` (plus bas), l'attestation vient du paquet ou de la CI.
+# Le commentaire qui vivait ici décrivait un stage « outillé pour jouer le gate entier » — faux
+# depuis que le gate a quitté le build. Les paquets restent ceux de 10-packages (le socle des pods,
+# tmux/bubblewrap compris) plus ce que la compilation exige ; `bats` et `python3-pytest` n'y ont
+# plus d'objet et sont retirés (⚖ user 2026-09-04, DI-07 : l'install ne re-atteste pas la source).
 # ⚠ LA TOOLCHAIN ENTRE ICI PAR APT, ET C'EST LE MÊME GESTE QUE `15-toolchain` SUR UN POSTE.
 # ⚠ ET L'UID 1000 EST DÉJÀ PRIS DANS LA BASE : `ubuntu:26.04` y pose un humain « ubuntu ». Cet uid
 # est le contrat déclaré au-dessus, et les caches BuildKit du stage suivant le montent EN DUR
@@ -39,12 +38,12 @@ ARG TARGETARCH
 RUN apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        erlang elixir \
-       tmux bubblewrap git curl jq unzip ca-certificates python3 python3-pytest bats procps \
+       tmux bubblewrap git curl jq unzip ca-certificates python3 procps \
     && rm -rf /var/lib/apt/lists/* \
     && { userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true; } \
     && groupadd -g 2000 fleet \
     && useradd -m -u 1000 -g fleet builder \
-    && install -d -o builder -g fleet /opt/lcars /src /src/fleet /src/fleet \
+    && install -d -o builder -g fleet /opt/lcars /src /src/runtime /src/runtime \
     && install -d -o builder -g fleet /home/projects.ops /home/projects.workshop \
     && install -d -m 0755 /run/user \
     && install -d -m 0700 -o builder -g fleet /run/user/1000
@@ -64,7 +63,7 @@ RUN curl -fsSL --proto '=https' -m 300 -o /tmp/claude-install.sh https://claude.
     && rm -f /tmp/claude-install.sh \
     && "$HOME/.local/bin/claude" --version
 
-WORKDIR /src/fleet
+WORKDIR /src/runtime
 # Le source runtime seul (contexte = racine repo, taillé par .dockerignore). Pas de .git : depuis
 # un worktree c'est un pointeur mort — build_info.txt dégrade proprement (sha=unknown) et la
 # vérité de révision est portée par le label OCI org.opencontainers.image.revision (build-arg).
@@ -84,7 +83,13 @@ WORKDIR /src/fleet
 # les payait en entier pour rien. La correction (inclure par defaut) est conservee, son cout
 # d'iteration ne l'est pas.
 COPY --chown=builder:fleet --exclude=deploy --exclude=git-hooks --exclude=system-prompt \
-     fleet /src/fleet
+     runtime /src/runtime
+# L'outil qui pose la release est de l'INSTALLEUR (Q3, 2026-09-04) : `deploy/` reste exclu de ce
+# stage, seul ce script entre — et HORS de `/src/deploy` : les contrats lisent la presence de cet
+# arbre comme « deploy/ est la, ses miroirs sont exigibles » (`tree_scope`), et un arbre reduit a
+# un fichier les rendait tous rouges (mesure bob_2, premier build du lot 1). L'arbre source lui est
+# passe explicitement (`LCARS_RUNTIME_DIR`), il n'a rien a deviner de sa position.
+COPY --chown=builder:fleet deploy/lib/deploy-release.sh /opt/lcars-build/deploy-release.sh
 
 # LE PATTERN EST OPTIONNEL, ET LA FORME EST L'IDIOME, PAS UNE COQUETTERIE. `.source-revisio[n]` est
 # un glob : depuis un checkout ordinaire il ne matche RIEN, et un `COPY` dont aucun terme ne matche
@@ -125,8 +130,8 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
       echo "image: CHECKOUT NU — aucun .source-revision : la release est COMPILEE dans ce stage, et le gate n'est PAS rejoue (l'attestation vient du paquet, ce build n'en a pas)"; \
     fi \
     && mix local.hex --force && mix local.rebar --force \
-    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime bash etc/deploy-release.sh \
-         || [ "$?" -eq 3 ]; }
+    && { LCARS_INSTALL_SKIP_GATE=1 LCARS_INSTALL_PREFIX=/opt/lcars/runtime LCARS_RUNTIME_DIR=/src/runtime \
+         bash /opt/lcars-build/deploy-release.sh || [ "$?" -eq 3 ]; }
 
 # La plaquette (`assets/github.io`) se genere DEPUIS le code du produit : les cartes, les sieges,
 # les verbes de la console, les arbres d'un catalogue. Sur GitHub elle est publiee par Pages ; ici
@@ -135,7 +140,7 @@ RUN --mount=type=cache,id=lcars-hex-$TARGETARCH,target=/home/builder/.hex,uid=10
 # ⚠ L'ARBORESCENCE EST LE CONTRAT. Les lecteurs du site remontent quatre crans depuis
 # `src/lib/` pour trouver la racine du depot (`fleet/`, `assets/`), et `collect-assets.mjs` remonte
 # deux crans pour trouver `assets/`. Le stage reproduit donc la MEME forme : `/src/assets/github.io`
-# avec `/src/fleet` et `/src/assets/*` a cote. Un raccourci de chemin ici ferait echouer le build
+# avec `/src/runtime` et `/src/assets/*` a cote. Un raccourci de chemin ici ferait echouer le build
 # sur un `illisible` qui accuserait le code.
 # `LCARS_SITE_BASE=/doc/` : le deck la sert sous ce chemin, et tout lien interne se compose depuis
 # cette base (`src/lib/href.js`). Batie a la racine, la copie locale s'afficherait et tous ses liens
@@ -151,7 +156,7 @@ RUN npm ci --no-audit --no-fund
 COPY assets/github.io ./
 COPY assets/avatars ../avatars
 COPY assets/favicon ../favicon
-COPY fleet /src/fleet
+COPY runtime /src/runtime
 # ⚠ LE SITE DÉRIVE SES SIÈGES DE TROIS CATALOGUES, ET LE TROISIÈME N'EST PAS SOUS `fleet/`.
 COPY catalogues /src/catalogues
 ENV LCARS_SITE_BASE=/doc/
@@ -171,7 +176,7 @@ ARG VERSION=2.0
 # origine pour les deux, sinon elles divergent — c'est exactement ce que ce module mesure.
 ENV PROV_SOURCE_REV=${GIT_SHA}
 LABEL org.opencontainers.image.title="LCARS fleet v2" \
-      org.opencontainers.image.description="Control plane pour workloads agentiques faillibles — runtime Elixir/OTP, pods bwrap, forge-state-machine. L'humain SSH dans le conteneur et lance sa fleet (bin/fleet_v2 start)." \
+      org.opencontainers.image.description="Control plane pour workloads agentiques faillibles — runtime Elixir/OTP, pods bwrap, forge-state-machine. L'humain SSH dans le conteneur et lance sa fleet (bin/fleet start)." \
       org.opencontainers.image.source="https://github.com/lordzurp/LCARS-fleet" \
       org.opencontainers.image.licenses="AGPL-3.0" \
       org.opencontainers.image.version="${VERSION}" \
@@ -263,7 +268,14 @@ RUN apt-get update -qq \
     `# ⚠ MEMBRE DE fleet POUR TRAVERSER /opt/lcars/runtime (0750 root:fleet), JAMAIS POUR DECIDER.` \
     `# Il DETIENT les secrets de la forge et n'a AUCUN privilege noyau — l'inverse exact du` \
     `# convergeur d'humains, qui a useradd et ne detient rien.` \
-    && useradd --system --no-create-home --shell /usr/sbin/nologin -g fleet lcars-authority \
+    `# ⚠ SON PROPRE GROUPE D'ABORD, ET fleet EN GROUPE SECONDAIRE — c'est ce que 21-service-accounts` \
+    `# pose et ce que la table declare (group:unset lcars-authority). L'image le creait avec -g fleet` \
+    `# et AUCUN groupe a son nom : put_secret (chown lcars-authority:lcars-authority) mourait sur` \
+    `# « invalid group », donc box config etait injouable sur une image neuve, et le` \
+    `# setpriv --regid lcars-authority de l'entrypoint ne pouvait pas demarrer l'executeur de` \
+    `# catalogue. Mesure du 2026-09-04, banc bob_2, premiere boite contre une forge fournie.` \
+    && groupadd --system lcars-authority \
+    && useradd --system --no-create-home --shell /usr/sbin/nologin -g lcars-authority -G fleet lcars-authority \
     `# LE COMPTE DE LA LANDING, MIROIR DE 21-service-accounts DU RAIL POSTE. Il N'EST QUE quelqu'un :` \
     `# le deck ne detient rien de durable et n'a aucun privilege, il a seulement besoin de ne PAS` \
     `# etre nobody. Le prix de nobody se lit sur son GROUPE : deck-oidc.json porte le client_secret` \
@@ -285,11 +297,20 @@ RUN apt-get update -qq \
 # Le runtime déployé, tel que bâti par install.sh — puis le verrou RO du module 60-deploy :
 # owner root (personne ne remplace un runtime déployé), groupe fleet r-x, autres rien.
 # /usr/local/bin ne reçoit QUE les 2 symlinks-pointeurs (D3) : les launchers pod vivent dans
-# $PREFIX/bin, fleet_v2 pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
+# $PREFIX/bin, fleet pose LCARS_*_LAUNCH_PATH dessus — une copie serait une seconde vérité.
+# ⚠ LES RACINES DURABLES SE POSENT AVANT LE PREMIER COPY QUI ECRIT DESSOUS, AVEC LEUR MODE — la
+# lecon de `/etc/lcars` (plus bas, lot 13b) etendue a ce que la table declare `any` (lot 14).
+# BuildKit cree un parent manquant « en passant », au mode qu'il choisit : `/opt/lcars` naissait du
+# `COPY --from=build` ci-dessous. Et `/var/lib/lcars`, `/var/tmp/lcars` n'etaient poses par PERSONNE
+# dans l'image — l'init de l'instance les creait au boot, dans la couche d'ecriture. Le stage
+# `verify` mesure ces cinq repertoires (`25-directories`, un `stat` par entree) aux modes que
+# `deploy/system.manifest` declare ; `image_layout.bats` tient les deux ecritures d'accord.
+RUN install -d -m 0755 -o root -g root /opt/lcars /var/lib/lcars /var/tmp/lcars \
+    && install -d -m 0700 -o root -g root /var/tmp/lcars/toolchain-work
 COPY --from=build /opt/lcars/runtime /opt/lcars/runtime
 RUN chown -R root:fleet /opt/lcars/runtime \
     && chmod -R u=rwX,g=rX,o= /opt/lcars/runtime \
-    && ln -sf /opt/lcars/runtime/bin/fleet_v2 /usr/local/bin/fleet_v2 \
+    && ln -sf /opt/lcars/runtime/bin/fleet /usr/local/bin/fleet \
     && ln -sf /opt/lcars/runtime/bin/lcars    /usr/local/bin/lcars
 
 COPY --from=site /src/assets/github.io/dist /opt/lcars/share/doc
@@ -299,11 +320,21 @@ COPY --from=site /src/assets/github.io/dist /opt/lcars/share/doc
 # sont de la matiere, pas un derive l'un de l'autre, et aucun rasteriseur n'a a exister ici.
 COPY assets/avatars  /opt/lcars/share/avatars
 COPY assets/favicon  /opt/lcars/share/favicon
+# La SOURCE des medias, a cote de leur copie posee — le miroir de ce que \`62-runtime-helpers\`
+# embarque sur un poste (\`EMBEDDED_ROOT\` porte \`assets\`) et de ce que \`44 check\` compare
+# (\`$(repo_root)/assets/<arbre>\` contre \`share/<arbre>\`). Sans elle, \`62 check\` rendait « arbre
+# embarque ABSENT (/opt/lcars/assets) » et \`44 check\` comparait a une source absente.
+COPY assets/avatars  /opt/lcars/assets/avatars
+COPY assets/favicon  /opt/lcars/assets/favicon
 
 # Lisible par tous, delibere : la porte n'est pas ici. Le deck sert `/doc/` DERRIERE sa session OIDC
 # (`console-deck.py`), et c'est la seule frontiere qui compte. Un mode restrictif de plus ici
 # n'ajouterait aucune protection — il rendrait juste le 404 d'un utilisateur non prevu.
-RUN chmod -R a+rX /opt/lcars/share
+# ⚠ `g-s,go-w` EN PLUS DE `a+rX` (lot 15) : `44-media` relit au build le mode de `share` et de ses
+# trois sous-arbres contre la table (`0755 root:root`), comme il les pose sur un poste (`a-s`,
+# `go=rx`). Un `COPY` PRESERVE les modes du contexte de build, et un clone a umask 002 est en
+# 2775/664 : `a+rX` seul laissait le setgid et l'ecriture de groupe, et personne ne le mesurait.
+RUN chmod -R a+rX,g-s,go-w /opt/lcars/share
 
 # MEME RANG QUE ttyd, ET C'EST DELIBERE : recupere au BUILD et epingle par sha256, pas commite. Le
 # depot garde zero fichier JS tiers ; ce qu'il porte est une reference verifiee, exactement comme le
@@ -330,19 +361,21 @@ RUN set -eu; \
     chmod 0644 "$d"/*; \
     ls -l "$d"
 
-# Le provisioning embarqué EN FORME DE REPO (/opt/lcars/fleet/…) : repo_root() de la lib résout
-# les chemins inter-arbre (le module 50-forge délègue à fleet/etc/provision-role-tokens.sh).
-COPY deploy /opt/lcars/deploy
-COPY fleet/etc     /opt/lcars/fleet/etc
-# ⚠ LA RECETTE ARRIVE ICI, ET PAS AVEC LE RESTE DE `fleet/services` — parce que le bloc `tofu` juste
-# en dessous JOUE dedans (`providers mirror` puis `init`), et que `COPY fleet/services` vit 70 lignes
-# plus bas. Le jour ou la recette a quitte `deploy/deps` pour `fleet/services/forge-recipe`,
+# ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans la boîte ne
+# le lit — le boot est le produit (runtime/services/box/), la sonde de l'instance est « box status »
+# côté hôte. Le stage `verify` plus bas le copie POUR LUI SEUL, joue le doctor, et meurt : `final`
+# repart de `runtime`. `runtime/etc` ne porte que des DONNÉES du produit (le manifeste de la release,
+# le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
+COPY runtime/etc     /opt/lcars/etc
+# ⚠ LA RECETTE ARRIVE ICI, ET PAS AVEC LE RESTE DE `runtime/services` — parce que le bloc `tofu` juste
+# en dessous JOUE dedans (`providers mirror` puis `init`), et que `COPY runtime/services` vit 70 lignes
+# plus bas. Le jour ou la recette a quitte `deploy/deps` pour `runtime/services/forge-recipe`,
 # elle est passee du COPY d'au-dessus a celui d'en-dessous sans que le bloc tofu bouge : l'image
 # mourait sur « No such file or directory » a un endroit dont le chemin venait d'etre corrige
 # partout. Un renommage textuel deplace des chemins, jamais des ORDRES.
-# Le `COPY fleet/services` plus bas repasse dessus sans dommage : il porte les memes octets, et le
+# Le `COPY runtime/services` plus bas repasse dessus sans dommage : il porte les memes octets, et le
 # `.terraform` que `tofu init` cree ici ne figure pas dans le contexte de build (`.dockerignore`).
-COPY fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe
+COPY runtime/services/forge-recipe /opt/lcars/services/forge-recipe
 
 # Meme discipline que ttyd et le precompile Elixir : version + sha256 epingles ICI, nulle part
 # ailleurs, et l'arch vient de `TARGETARCH` (BuildKit) et jamais d'un `uname -m`, qui repondrait
@@ -381,7 +414,7 @@ RUN set -eu; \
 ENV TF_CLI_CONFIG_FILE=/opt/lcars/tofu/tofurc
 RUN set -eu; \
     mkdir -p /opt/lcars/tofu/providers; \
-    for m in /opt/lcars/fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe/instance; do \
+    for m in /opt/lcars/services/forge-recipe /opt/lcars/services/forge-recipe/instance; do \
       (cd "$m" && tofu providers mirror -platform="linux_${TARGETARCH}" /opt/lcars/tofu/providers); \
     done; \
     { echo 'provider_installation {'; \
@@ -394,63 +427,65 @@ RUN set -eu; \
       echo '  }'; \
       echo '}'; } > /opt/lcars/tofu/tofurc; \
     chmod -R a+rX /opt/lcars/tofu; \
-    for m in /opt/lcars/fleet/services/forge-recipe /opt/lcars/fleet/services/forge-recipe/instance; do \
+    for m in /opt/lcars/services/forge-recipe /opt/lcars/services/forge-recipe/instance; do \
       (cd "$m" && tofu init -input=false -no-color >/dev/null) || { echo "tofu: init hors-ligne en echec dans $m" >&2; exit 1; }; \
     done; \
     echo "tofu: miroir de providers complet, init hors-ligne OK"
 # P11 — LA BRIQUE token-saver DOIT ETRE DANS L'IMAGE. Sans ce COPY le shim la cherche, ne la trouve
 # pas et s'efface : fail-open, AUCUN symptome, et la compression annoncee ne tourne jamais. C'est le
 # seul defaut du lot dont personne ne peut s'apercevoir en regardant tourner la fleet.
-COPY fleet/vendor/token_saver /opt/lcars/fleet/vendor/token_saver
+COPY runtime/vendor/token_saver /opt/lcars/vendor/token_saver
 # Les catalogues METIER autres que la reference. Le release embarque `priv/catalogue` et lui seul
 # (mix release ne prend que priv/), donc un catalogue alternatif n'atteint l'image que par ici. Il
 # n'est LU par personne tant qu'aucun LCARS_CATALOGUE_ROOT ne le designe : le poser dans l'image ne
 # change pas quel metier tourne, ca rend seulement le choix possible sans remonter une image.
 COPY catalogues /opt/lcars/catalogues
 # ⚠ LA SOURCE DES AUXILIAIRES, ET PAS SEULEMENT LEUR COPIE POSEE. `62-runtime-helpers` compare
-# `/opt/lcars/<helper>` a `$(repo_root)/fleet/services/<helper>` — soit `/opt/lcars/fleet/services/`
+# `/opt/lcars/<helper>` a `$(product_tree)/services/<helper>` — soit `/opt/lcars/services/`
 # ici. Sans ce repertoire, `cmp` echoue sur une source ABSENTE et le module rend « diverge de la
 # source » pour chaque auxiliaire : sur docker il ne peut pas s'appliquer (APPLY-ON=wsl linux),
 # donc ce drift devenait un ECHEC PERMANENT et la boite ne convergeait jamais.
 # Les COPY unitaires plus bas restent : ce sont les auxiliaires POSES, que l'apply du rail poste
 # installerait lui-meme et que l'image doit fournir deja en place.
-COPY fleet/services /opt/lcars/fleet/services
-COPY deploy/docker/entrypoint.sh /opt/lcars/entrypoint.sh
-COPY fleet/services/console.sh         /opt/lcars/console.sh
-COPY fleet/services/console-humans.sh  /opt/lcars/console-humans.sh
-COPY fleet/services/console-status.sh  /opt/lcars/console-status.sh
-COPY fleet/services/console-landing.sh /opt/lcars/console-landing.sh
-COPY fleet/services/console-deck.py    /opt/lcars/console-deck.py
-COPY fleet/services/console-pod.sh     /opt/lcars/console-pod.sh
-COPY fleet/services/human-converger.sh /opt/lcars/human-converger.sh
+COPY runtime/services /opt/lcars/services
+COPY runtime/services/console.sh         /opt/lcars/console.sh
+COPY runtime/services/console-humans.sh  /opt/lcars/console-humans.sh
+COPY runtime/services/console-status.sh  /opt/lcars/console-status.sh
+COPY runtime/services/console-landing.sh /opt/lcars/console-landing.sh
+COPY runtime/services/console-deck.py    /opt/lcars/console-deck.py
+COPY runtime/services/console-pod.sh     /opt/lcars/console-pod.sh
+COPY runtime/services/human-converger.sh /opt/lcars/human-converger.sh
 # L'UNIQUE GESTE PRIVILEGIE DU RAIL TOOLCHAIN — au chemin que le sudoers etroit (45-sudoers) et le
 # reconciliateur (`toolchain_reconciler.ex` : `sudo -n <bin> <sha>`) attendent. Dans /usr/local/bin
 # et pas /opt : c'est un binaire d'exploitation, pas un composant de boot.
-COPY fleet/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converge
+COPY runtime/bin/lcars-toolchain-converge /usr/local/bin/lcars-toolchain-converge
 # Le skill du SIEGE (05 §7) — pose par 45-sudoers-toolchain dans le ~/.claude d'admiral, JAMAIS
 # par le catalogue : il ne doit pouvoir atteindre aucun pod.
-COPY fleet/services/admiral/skills /opt/lcars/fleet/services/admiral/skills
+COPY runtime/services/admiral/skills /opt/lcars/services/admiral/skills
 # Les gestes forge, DANS l'image : `box` et le banc les jouent par la meme porte, au lieu
 # d'en porter chacun une copie (le banc ne peut pas appeler `box` — sa boite vient d'un autre
 # couple de fichiers compose, et `box` refuse a raison d'agir sur un projet qu'il n'a pas cree).
-COPY fleet/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
+COPY runtime/services/forge-gestures.sh /opt/lcars/forge-gestures.sh
+# Le minteur de jetons de rôle : un geste de forge du produit (lot 6), posé à côté du geste de
+# structure — la boîte le joue à l'init de son instance.
+COPY runtime/services/provision-role-tokens.sh /opt/lcars/provision-role-tokens.sh
 # L'executeur de catalogue, a cote du geste qu'il appelle : les deux atterrissent ENSEMBLE, ou le
 # service demarre et refuse chaque demande sur un fichier absent.
-COPY fleet/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
+COPY runtime/services/catalogue-executor.py /opt/lcars/catalogue-executor.py
 # Le module de socket voisin : `catalogue-executor.py` l'importe depuis son repertoire.
-COPY fleet/services/lcars_socket.py /opt/lcars/lcars_socket.py
+COPY runtime/services/lcars_socket.py /opt/lcars/lcars_socket.py
 # L'UNIQUE SERVICE ROOT DE LA MACHINE, ET IL NE DETIENT RIEN. Il remplace la regle sudoers
 # `%fleet ALL=(root) NOPASSWD:` — le seul chemin `groupe -> root` qui restait, sur un groupe que le
 # convergeur repeuple depuis la forge toutes les 30 s. A cote du convergeur qu'il appelle.
-COPY fleet/services/privileged-executor.py /opt/lcars/privileged-executor.py
-COPY fleet/services/supervise.sh          /opt/lcars/supervise.sh
+COPY runtime/services/privileged-executor.py /opt/lcars/privileged-executor.py
+COPY runtime/services/supervise.sh          /opt/lcars/supervise.sh
 # LE CLIENT SHELL DE `roles.sock`, DANS /usr/local/bin ET PAS /opt — meme raison que le convergeur
 # de toolchain : c'est un outil d'EXPLOITATION, appele par des gestes d'operateur qui vivent dans
-# trois arbres qui ne se voient pas (`fleet/bin`, le skill du siege, le release). Un nom sur le PATH
+# trois arbres qui ne se voient pas (`runtime/bin`, le skill du siege, le release). Un nom sur le PATH
 # est le seul rendez-vous qu'aucun des trois n'a a deviner. Il ne DETIENT rien : il demande, et
 # c'est la socket qui decide, sur un uid atteste par le noyau.
-COPY fleet/bin/lcars-authority-ask /usr/local/bin/lcars-authority-ask
-COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
+COPY runtime/bin/lcars-authority-ask /usr/local/bin/lcars-authority-ask
+COPY runtime/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # Le SQUELETTE de home : `useradd -m` le copie A LA CREATION de chaque humain, jamais ensuite —
 # donc l'humain reste maitre de SON .bashrc, la boite ne le rattrape pas au boot suivant. Contenu :
 # le bashrc etendu (ll/la/l, couleurs, completion, lesspipe) qu'une base ubuntu minimale n'a PAS, plus le
@@ -466,7 +501,18 @@ COPY fleet/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # L image ecrasait `/etc/skel/.bashrc` par une copie de 117 lignes de la distribution dont trois
 # etaient a nous. Elle pose desormais le seul reglage LCARS, et raccorde le squelette de la
 # distribution par un bloc qui teste avant de sourcer.
-COPY --chmod=0644 fleet/services/lcars.bashrc /etc/lcars/lcars.bashrc
+#
+# ⚠ LE PARENT SE POSE AVANT LA COPIE, AVEC SON MODE. BuildKit cree les repertoires manquants d'un
+# `COPY --chmod` avec ce meme `--chmod` : `/etc/lcars` sortait de l'image en 0644 — non traversable
+# par tout non-root, donc `seat.uid` et ce bashrc invisibles a l'humain — et `init.sh` le reparait a
+# chaque instance (journal du banc bob_2, 2026-09-04 : « POSÉ perms 0755 root:root /etc/lcars »).
+# Le stage `verify` le VOIT depuis le lot 14 : `25-directories` fait un `stat -c '%a %U:%G'`, qui
+# rend le mode declare quel que soit le lecteur — root traverse un repertoire sans bit x, mais un
+# `stat` ne traverse pas, il lit. Le mode et le proprietaire sont ceux que `init.sh` (layout) et la
+# table de l'installeur declarent ; le temoin `image_layout.bats` tient les trois d'accord et
+# l'ORDRE de ces deux lignes — un fait de Dockerfile que `stat` ne dit pas.
+RUN install -d -m 0755 -o root -g root /etc/lcars
+COPY --chmod=0644 runtime/services/lcars.bashrc /etc/lcars/lcars.bashrc
 RUN printf "%s\n%s\n%s\n" \
       "# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)" \
       "if [ -r /etc/lcars/lcars.bashrc ]; then . /etc/lcars/lcars.bashrc; fi" \
@@ -504,18 +550,33 @@ RUN printf '%s\n' \
 # Le glob supprime la possibilite meme de la divergence : tout auxiliaire depose a la racine de
 # `/opt/lcars` est executable, qu'on ait pense a l'ajouter ou non. Ajouter un helper redevient un
 # seul geste — le `COPY` — au lieu de deux dont le second ne se signale jamais.
+#
+# ⚠ ET LES ARBRES SE NORMALISENT COMME 62 LES POSE (lot 15) : `62 check` relit au build les arbres
+# qu'il embarque sur un poste (`EMBEDDED`, `EMBEDDED_ROOT`) — proprietaire root:root, ni setgid
+# ni ecriture groupe/autres, exactement le `chown -R` + `chmod -R g-s,go-w` de son apply. Un `COPY`
+# PRESERVE les modes du contexte de build : un clone a umask 002 est en 2775/664, et root execute
+# ensuite ce contenu. Meme raison pour `console.tmux.conf` : une DONNEE de 62 (`write_atomic 0644`)
+# que le `COPY` nu laissait au mode du contexte. Apres la derniere ecriture dans ces arbres (le
+# `tofu init` de la recette compris) — `image_layout.bats` tient l'ordre.
 RUN chmod 0755 /opt/lcars/*.sh /opt/lcars/*.py \
                /usr/local/bin/lcars-toolchain-converge \
                /usr/local/bin/lcars-authority-ask \
-               /opt/lcars/deploy/provision \
-               /opt/lcars/deploy/modules.d/*.sh \
-               /opt/lcars/fleet/etc/provision-role-tokens.sh
+               /opt/lcars/services/provision-role-tokens.sh \
+    && chmod 0644 /opt/lcars/console.tmux.conf \
+    && chmod -R g-s,go-w /opt/lcars/etc /opt/lcars/services /opt/lcars/assets /opt/lcars/catalogues
 
 # L'ESTAMPILLE DES AUXILIAIRES POSES — le pendant de ce que `62-runtime-helpers` ecrit sur un poste
 # apres les avoir installes. Elle vient du MEME `ARG GIT_SHA` que le LABEL OCI et que
 # `PROV_SOURCE_REV` (declare plus haut) : les trois ne peuvent donc pas diverger, et le module
 # compare deux valeurs qui ont une seule origine.
-RUN printf '%s\n' "${GIT_SHA}" > /opt/lcars/.source-revision
+# ⚠ DEUX TAMPONS, DEUX FAITS — la lib les a separes (\`PROV_HELPERS_STAMP\`, \`PROV_SOURCE_STAMP\`)
+# et cette ligne n'en ecrivait qu'un, sous l'ancien nom. \`62 check\` en docker rendait
+# « .helpers-revision absent — impossible de dire de quelle revision sortent les auxiliaires »,
+# donc un ECHEC permanent (APPLY-ON=wsl linux). Mesure du 2026-09-04, banc bob_2.
+#   .helpers-revision  d'ou sortent les auxiliaires poses ici (lu par 62)
+#   .source-revision   « cet arbre est une LIVRAISON BINAIRE » (lu par prov_delivery) — vrai d'une image
+RUN printf '%s\n' "${GIT_SHA}" > /opt/lcars/.helpers-revision \
+    && printf '%s\n' "${GIT_SHA}" > /opt/lcars/.source-revision
 
 # DEUX volumes d'état, et ils portent deux choses différentes.
 #
@@ -548,4 +609,54 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).
-ENTRYPOINT ["/usr/bin/tini", "--", "/opt/lcars/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/box/boot.sh"]
+
+# ─── verify : L'ISO DES RAILS SE MESURE AU BUILD, PAS CHEZ L'OPÉRATEUR ─────────────────────────
+#
+# Le stage `runtime` refait à la main sept modules du rail poste (paquets, node, médias, tofu,
+# release, auxiliaires, services) ; le doctor commun (`CHECK-ON any`) est la seule chose qui tienne
+# les deux implémentations d'accord — et il ne se jouait QU'AU BOOT, chez l'opérateur. Mesure du
+# 2026-09-04 (banc bob_2) : trois dérives de l'image (groupe de `lcars-authority`, tampon
+# `.helpers-revision`, arbre `assets/`) ont été vues au premier `box up`, jamais au build.
+#
+# Ce stage joue le doctor sur le système de fichiers que `runtime` vient de produire, et fait
+# ÉCHOUER LE BUILD sur tout drift (`doctor` rend 1 sur un drift, 2 sur un échec). Il ne mesure que
+# ce que l'image POSE : ce qui dépend d'un volume (l'init de l'instance), d'une forge (`63`, `65`, `66`) ou
+# d'un boot n'a pas de vérité ici et n'y est pas demandé.
+# ⚠ `25-directories` MESURE LES MODES (lot 14, ⚖ user 2026-09-04) : un `stat` par répertoire que
+# l'image pose — `/opt/lcars`, `/etc/lcars`, `/var/lib/lcars`, `/var/tmp/lcars{,/toolchain-work}` —
+# aux modes que `deploy/system.manifest` déclare pour docker. Sa table est filtrée par le substrat
+# du manifeste ; ce qui vit sur un volume (`/home`, `/opt/lcars/var`) ou sous `/run` n'y est pas
+# mesuré, et le module le dit. Les autres modules de ce stage mesurent présence et version : sans
+# lui, un `COPY --chmod` qui crée un parent « en passant » ressortait de l'image sans un mot (S5).
+#
+# ⚠ `deploy/` ENTRE DANS CE STAGE, ET DANS CE STAGE SEULEMENT (⚖ user 2026-09-04, Q1 : l'installeur
+# n'a rien à faire dans le conteneur livré). Il est copié à la place que le doctor connaît, puis
+# jeté avec le stage. Tant que `runtime` embarque encore `/opt/lcars/deploy` (lot 7 le retire), ce
+# `COPY` est un doublon exact ; le jour où il ne l'embarque plus, c'est cette ligne qui le fournit.
+# `PROV_SOURCE_REV` : la même révision que le LABEL et le tampon, pour que `62` compare deux fois la
+# même vérité (une image n'a pas de `.git`).
+FROM runtime AS verify
+ARG GIT_SHA=unknown
+COPY deploy /opt/lcars/deploy
+# Meme normalisation que les arbres du stage runtime (lot 15) : `62 check` relit /opt/lcars/deploy
+# comme l'apply le pose (root:root, ni setgid ni ecriture groupe/autres), et un COPY garde les
+# modes du contexte — sans cette ligne, verify rougit sur tout clone a umask 002.
+RUN chmod -R g-s,go-w /opt/lcars/deploy
+# ⚠ DEUX MESURES N'ONT PAS DE VÉRITÉ AU BUILD, ET LE PREMIER BUILD LES A NOMMÉES (2026-09-04) :
+# la sonde bwrap de `10-packages` mesure le NOYAU (celui de BuildKit, sans userns — pas celui de la
+# boîte), `PROV_KERNEL_PROBES=0` la fait dire « non jouée ici » ; `20-groups` mesure l'appartenance
+# du SIÈGE à `fleet`, et le siège n'existe qu'au boot — il n'est pas demandé (les GID de l'image,
+# eux, sont tenus par la table et son témoin).
+RUN PROV_SOURCE_REV="${GIT_SHA}" PROV_KERNEL_PROBES=0 /opt/lcars/deploy/provision doctor --substrate docker \
+      --only 10-packages --only 16-node --only 21-service-accounts --only 25-directories \
+      --only 44-media --only 46-tofu --only 60-deploy --only 62-runtime-helpers --only 64-services \
+    && printf '%s\n' "${GIT_SHA}" > /verified
+
+# ─── final : L'IMAGE LIVRÉE, ET ELLE DÉPEND DE verify ──────────────────────────────────────────
+# Un stage dont personne ne dépend n'est pas bâti : `final` COPIE le marqueur que `verify` écrit,
+# donc `verify` se joue à chaque build de l'image livrée — c'est le seul lien, et il est exact.
+# Le marqueur reste dans l'image (`/opt/lcars/.verified`, déclaré à la table) : il dit quelle
+# révision a été mesurée, et une image sans lui n'est pas passée par ici.
+FROM runtime AS final
+COPY --from=verify /verified /opt/lcars/.verified

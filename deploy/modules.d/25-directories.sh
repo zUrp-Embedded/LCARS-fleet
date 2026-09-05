@@ -17,7 +17,7 @@ _PROV_CONSOLE_HUMAN=""
 prov_console_human() {
   [[ -n "$_PROV_CONSOLE_HUMAN" ]] && { echo "$_PROV_CONSOLE_HUMAN"; return 0; }
   local h
-  h="$(bash "$(repo_root)/fleet/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
+  h="$(bash "$(product_tree)/services/forge-gestures.sh" builtin-human 2>/dev/null || true)"
   if [[ -z "$h" ]] || ! id -u -- "$h" >/dev/null 2>&1; then
     h="$PROV_HUMAN"
   fi
@@ -26,7 +26,15 @@ prov_console_human() {
 }
 
 prov_runtime_dirs() {
-  [[ "${PROV_SUBSTRATE:-}" == "docker" ]] && return 0
+  # ⚠ RIEN SUR DOCKER, ET C'EST LA TABLE QUI LE DIT, PAS UN DRIFT. /run est un tmpfs : VIDE au build
+  # de l'image, pose par `runtime/services/box/init.sh` au boot de l'instance — un fait de BOOT, pas
+  # de l'image. Et sans systemd dans la boite, aucune declaration tmpfiles n'y a de sens. Une table
+  # vide est exactement ce que `check_tmpfiles` lit comme « ce substrat ne le porte pas ». Sur la
+  # boite, le stage `verify` joue ce module AU BUILD (lot 14) : ces six entrees y rendraient six
+  # absents, et la sonde de l'humain integre interrogerait une forge qui n'existe pas encore.
+  # Le substrat est celui que le runner a tranche (`provision --substrate`, exporte) ; la sonde
+  # n'est qu'un repli — meme regle que `advertise_addr` dans la lib.
+  [[ "${PROV_SUBSTRATE:-$(detect_substrate)}" != docker ]] || return 0
   local h; h="$(prov_console_human)"
   printf '%s\n' \
     "/run/lcars 0755 root:root" \
@@ -44,13 +52,13 @@ prov_runtime_dirs() {
 prov_dirs() {
   # ⚠ LE PREFIXE MANQUAIT A CETTE LISTE, ET PERSONNE NE LE POSAIT. La table le declare
   # `prefix /opt/lcars/runtime 0750 root:fleet` — mais aucun module ne le creait : c'est
-  # `etc/deploy-release.sh:270` qui le faisait apparaitre par `mkdir -p "$PREFIX/bin" …`, et ce
+  # `deploy/lib/deploy-release.sh:270` qui le faisait apparaitre par `mkdir -p "$PREFIX/bin" …`, et ce
   # script tourne sous `runuser -u bob`. Le prefixe naissait donc a l'identite de l'OPERATEUR.
   #
   # ⚠ INVISIBLE TANT QU'ON NE DESINSTALLE PAS, et c'est le cycle du rang D qui l'a trouve : sur une
   # machine ou le repertoire existe deja — pose une fois, correctement, par un geste ancien —
   # `mkdir -p` ne touche pas a ses droits. Il faut l'avoir RETIRE pour le voir renaitre en
-  # `bob:fleet` : mesure du 2026-09-01, banc 2001, apres `uninstall --yes` puis re-apply.
+  # `bob:fleet` : vu apres `uninstall --yes` puis re-apply.
   #
   # Une install qui reussit ne prouve rien de ce qu'elle laisse.
   printf '%s\n' \
@@ -90,6 +98,51 @@ prov_dirs() {
   prov_runtime_dirs
 }
 
+# ─── OU UNE ENTREE SE MESURE : LE MANIFESTE, ET LUI SEUL, DIT LE SUBSTRAT ─────────────────────
+#
+# ⚠ CE MODULE N'A PAS DE COLONNE SUBSTRAT, ET C'EST VOULU. `deploy/system.manifest` en porte une
+# (cinquieme colonne) ; en recopier une ici ferait deux tables qui disent le meme fait, et deux
+# tables divergent. `prov_manifest_substrate` (lib) la lit — meme geste que `prov_manifest_gid`.
+# `prov_dirs` reste la table BRUTE (le mur POSEUR de `system_manifest.bats` l'enumere hors
+# substrat) ; c'est ICI qu'une entree est retenue ou ecartee.
+#
+# Sur docker, ou le stage `verify` joue ce module au BUILD de l'image, deux familles d'entrees
+# n'ont aucune verite :
+#   substrate  le manifeste ne la declare pas pour docker (`prefix`, `/opt/lcars/var/tofu`) ;
+#   volume     elle vit sur un VOLUME de la boite — `/home`, `/opt/lcars/var` (Dockerfile :
+#              `VOLUME`) — que l'init de l'instance pose au boot, sur le volume monte. Au build
+#              rien n'est monte : la mesurer rendrait un absent qui n'en est pas.
+# Une entree que le manifeste NE CONNAIT PAS se mesure partout : au build, un absent NOMME vaut
+# mieux qu'un silence, et le remede est de la declarer. Sur un poste, rien ne change : toutes les
+# entrees de la table y sont declarees `any` ou `wsl+linux`, et il n'y a pas de volume.
+prov_box_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
+
+# prov_dir_scope <chemin> -> here | substrate | volume
+prov_dir_scope() {
+  local path="$1" sub col v
+  sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
+  col="$(prov_manifest_substrate "$path")"
+  if [[ -n "$col" && "$col" != any ]]; then
+    case "+$col+" in *"+$sub+"*) ;; *) echo substrate; return 0 ;; esac
+  fi
+  if [[ "$sub" == docker ]]; then
+    while read -r v; do
+      if [[ "$path" == "$v" || "$path" == "$v"/* ]]; then echo volume; return 0; fi
+    done < <(prov_box_volumes)
+  fi
+  echo here
+}
+
+# Ce qui n'est PAS mesure se DIT — on debranche nommement, jamais en baissant le verdict (la regle
+# de la sonde bwrap de 10-packages sous PROV_KERNEL_PROBES=0). `p_warn` ne compte rien : c'est la
+# voix de « non joue ici ». Sur un poste les deux listes sont vides et rien ne s'imprime.
+say_unmeasured() { # say_unmeasured <hors substrat> <sur volume>
+  local sub; sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
+  if [[ -n "$1" ]]; then p_warn "hors substrat $sub selon le manifeste — non mesure :$1"; fi
+  if [[ -n "$2" ]]; then p_warn "sur un volume de la boite — pas de verite au build, l'init de l'instance les pose :$2"; fi
+  return 0
+}
+
 prov_tmpfiles_conf() { echo "${LCARS_TMPFILES_CONF:-/etc/tmpfiles.d/lcars-console.conf}"; }
 
 prov_tmpfiles_body() {
@@ -102,12 +155,16 @@ prov_tmpfiles_body() {
 }
 
 check() {
-  local spec path mode owner cur
+  local spec path mode owner cur hors_substrat="" hors_build=""
   # `done < <(...)` et non `prov_dirs | while` : un pipe met la boucle dans un SOUS-SHELL, et les
   # compteurs de drift qu'y posent `p_drift`/`p_ok` meurent avec lui — le module rendrait « aucun
   # drift » en ayant vu tous les siens.
   while read -r spec; do
     read -r path mode owner <<< "$spec"
+    case "$(prov_dir_scope "$path")" in
+      substrate) hors_substrat="$hors_substrat $path"; continue ;;
+      volume)    hors_build="$hors_build $path"; continue ;;
+    esac
     if [[ ! -d "$path" ]]; then
       p_drift "$path absent"
       continue
@@ -119,13 +176,20 @@ check() {
       p_drift "$path : $cur ≠ ${mode#0} $owner"
     fi
   done < <(prov_dirs)
+  say_unmeasured "$hors_substrat" "$hors_build"
   check_tmpfiles
   verdict_check
 }
 
+# ⚠ PAS DE `prov_runtime_dirs | grep -q .` ICI — DI-12. Sous `pipefail`, `grep -q` sort au premier
+# match et ferme le tuyau ; si le producteur ecrit encore, il prend SIGPIPE et le pipeline rend 141 :
+# la table « n'existait plus » une fois sur dix sous charge (trois temoins differents, meme cause).
+# Capturer, puis tester la capture : aucun lecteur ne ferme rien avant la fin.
+runtime_dirs_declared() { [[ -n "$(prov_runtime_dirs)" ]]; }
+
 check_tmpfiles() {
   local conf; conf="$(prov_tmpfiles_conf)"
-  if ! prov_runtime_dirs | grep -q .; then
+  if ! runtime_dirs_declared; then
     [[ -e "$conf" ]] && p_drift "tmpfiles: $conf present alors que ce substrat ne le porte pas"
     return 0
   fi
@@ -139,11 +203,16 @@ check_tmpfiles() {
 }
 
 apply() {
-  local spec path mode owner
+  local spec path mode owner hors_substrat="" hors_build=""
   while read -r spec; do
     read -r path mode owner <<< "$spec"
+    case "$(prov_dir_scope "$path")" in
+      substrate) hors_substrat="$hors_substrat $path"; continue ;;
+      volume)    hors_build="$hors_build $path"; continue ;;
+    esac
     ensure_dir "$path" "$mode" "$owner" || true
   done < <(prov_dirs)
+  say_unmeasured "$hors_substrat" "$hors_build"
   apply_tmpfiles
   verdict_apply
 }
@@ -152,7 +221,7 @@ apply_tmpfiles() {
   local conf; conf="$(prov_tmpfiles_conf)"
   local body; body="$(prov_tmpfiles_body)"
 
-  if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! prov_runtime_dirs | grep -q .; then
+  if [[ -z "${body//[$'\n'[:space:]#]/}" ]] || ! runtime_dirs_declared; then
     if [[ -e "$conf" ]]; then
       if rm -f "$conf"; then p_ok "tmpfiles: declaration retiree ($conf) — ce substrat ne la porte pas"
       else p_fail "tmpfiles: declaration perimee ($conf) impossible a retirer — le boot suivant obeira encore a un ordre que ce module a desavoue"

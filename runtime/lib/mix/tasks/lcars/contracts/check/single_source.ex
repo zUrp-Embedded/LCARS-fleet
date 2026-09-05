@@ -48,7 +48,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
   @spec check_toolchain_branch_single_source(String.t()) :: Support.result()
   def check_toolchain_branch_single_source(root) do
     mirrors = [
-      "../deploy/modules.d/52-ops-branch.sh",
+      "services/forge.d/ops-branch.sh",
       "services/forge-gestures.sh",
       "services/admiral/skills/system-issues/list.sh",
       # ⚠ QUATRIEME MIROIR, et il est le seul qui porte une BORNE DE SECURITE : le convergeur
@@ -72,7 +72,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
     # holding.
     {checked, skipped} =
       Enum.split_with(mirrors, fn rel ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        mirror_scope(rel, root) == :required
       end)
 
     id = "toolchain.branch_single_source"
@@ -321,7 +321,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       # « NOT CHECKED » sur quatre fichiers presents — meme regle que les deux verrous voisins.
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _rx, _what} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad = Enum.flat_map(checked, &mirror_gap(&1, root))
@@ -401,13 +401,12 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the provisioning default"},
       {"../deploy/accept", ~r/PRIVATE_DIR="\$\{LCARS_PRIVATE_DIR:-([^}]+)\}"/,
        "the acceptance gate's default"},
-      # ⚠ CES DEUX-LA GRAVENT LE REPERTOIRE DANS UN CHEMIN DE FICHIER au lieu de le composer depuis
-      # une variable. C'est pour ca qu'ils comptent : ils ne suivraient AUCUN renommage, et rien
-      # d'autre ne les regarde. Le repertoire se capture en retirant le dernier segment.
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_UID_MAP_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's uid-map path"},
-      {"../deploy/docker/entrypoint.sh", ~r/LCARS_MASTER_TOKEN_FILE:-([^}]+)\/[^}\/]+\}/,
-       "the box's master-token path"}
+      # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
+      # entrypoint as literals; they are now DERIVED from the product module protocol's
+      # `LCARS_PRIVATE_DIR` (box/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
+      # the holder that counts on the product side — the same shape as the provisioning default.
+      {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
+       "the product module protocol's default"}
     ]
 
     # ⚠ UNE DECLARATION DERIVEE EST UNE DECLARATION, PAS UN DESACCORD. Le shell nomme sa
@@ -455,7 +454,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
     {in_scope, out} =
       Enum.split_with(holders, fn {rel, _, _} ->
-        tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+        mirror_scope(rel, root) == :required
       end)
 
     results = Enum.map(in_scope, read_holder)
@@ -622,11 +621,11 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
          "the avatar map key"},
         {"services/human-converger.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the human converger's fallback"},
-        {"services/forge-gestures.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/forge-gestures.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the forge gesture's fallback"},
-        {"etc/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/provision-role-tokens.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the token minter's fallback"},
-        {"services/admiral/skills/system-issues/list.sh", ~r/PROV_SYSTEM_ACCOUNT:-#{e}\}/,
+        {"services/admiral/skills/system-issues/list.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}/,
          "the admiral skill's fallback"},
         {"bin/lcars", ~r/FORGE_BOT_LOGIN:-#{e}\}/, "the CLI's push-account fallback"},
         {"bin/publish-transform.sh", ~r/LCARS_SYSTEM_ACCOUNT:-#{e}\}@/,
@@ -638,7 +637,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
       {checked, skipped} =
         Enum.split_with(mirrors, fn m ->
           rel = elem(m, 0)
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad =
@@ -1112,7 +1111,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
 
       {checked, skipped} =
         Enum.split_with(mirrors, fn {rel, _, _} ->
-          tree_scope(Path.expand(hd(Path.split(rel)), root)) == :required
+          mirror_scope(rel, root) == :required
         end)
 
       bad = Enum.flat_map(checked, &mirror_gap(&1, root))

@@ -2,7 +2,7 @@
 # SOURCE: deploy/tests/docker/enroll_catalogue.bats
 # AUTHOR: DrDree
 # STARDATE: (posee par /push-github)
-# STATUS: bats tests for etc/enroll-catalogue.sh — la derivation du roster ne demande pas de
+# STATUS: bats tests for deploy/lib/enroll-catalogue.sh — la derivation du roster ne demande pas de
 #         toolchain a la machine qui l'appelle
 #
 # CE QUE CES TEMOINS TIENNENT, ET CE QU'ILS ONT COUTE. `enroll-catalogue.sh` a deux chemins de
@@ -20,7 +20,7 @@
 load ../refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../fleet/etc/enroll-catalogue.sh"
+  SUT="$BATS_TEST_DIRNAME/../../lib/enroll-catalogue.sh"
   [ -x "$SUT" ]
   BIN="$BATS_TEST_TMPDIR/bin"
   OUT="$BATS_TEST_TMPDIR/tofu"

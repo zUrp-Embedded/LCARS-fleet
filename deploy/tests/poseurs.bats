@@ -81,7 +81,7 @@ setup() {
   # La table affirme 0700 ; l'apply creait le repertoire par `mkdir -p` et ne chmodait que `.lcars`
   # et `pods`. Mesure : 0755 chez les deux humains de la machine — l'ecart etait constant, pas
   # accidentel.
-  local mod="$BATS_TEST_DIRNAME/../../fleet/services/human.d/70-human.sh"
+  local mod="$BATS_TEST_DIRNAME/../../runtime/services/human.d/70-human.sh"
   local ligne; ligne="$(grep -n 'chmod 0700' "$mod" | head -1)"
   [ -n "$ligne" ]
   grep -q 'chmod 0700 .*\.lcars/log' "$mod"
@@ -90,7 +90,7 @@ setup() {
 @test "C2 : et le CHECK le regarde — sinon le doctor reste aveugle apres le correctif" {
   # L'angle mort etait double, et la seconde moitie est la plus sournoise : corriger l'apply sans
   # toucher au check aurait rendu le defaut invisible au lieu de le fermer.
-  local mod="$BATS_TEST_DIRNAME/../../fleet/services/human.d/70-human.sh"
+  local mod="$BATS_TEST_DIRNAME/../../runtime/services/human.d/70-human.sh"
   local bloc; bloc="$(sed -n '/^check()/,/^}$/p' "$mod")"
   grep -q '\.lcars/log' <<<"$bloc"
 }
@@ -129,7 +129,7 @@ setup() {
 
 @test "C6 : la copie embarquee emporte services/ — le module en depend LUI-MEME" {
   # ⚠ LE DEFAUT LE PLUS CHER DU RANG, ET IL TENAIT EN UN MOT. `62-runtime-helpers` pose onze
-  # auxiliaires depuis `$(repo_root)/fleet/services` et n'emportait pas ce repertoire : sur une
+  # auxiliaires depuis `$(product_tree)/services` et n'emportait pas ce repertoire : sur une
   # machine provisionnee `repo_root()` resout `/opt/lcars`, et le comparateur n'avait jamais sa
   # source. Onze drifts « diverge de la source » par passage, tous faux.
   local mod="$MODS/62-runtime-helpers.sh"
@@ -139,24 +139,24 @@ setup() {
 }
 
 @test "C6 : le second lecteur de l'arbre est servi lui aussi" {
-  # `25-directories` invoque `fleet/services/forge-gestures.sh builtin-human` pour connaitre
+  # `25-directories` invoque `runtime/services/forge-gestures.sh builtin-human` pour connaitre
   # l'humain integre. Sans l'arbre, la sonde echouait derriere un `|| true` et rendait vide — le
   # repertoire de console de cet humain n'etait pas pose, sans un mot. Le meme correctif le sert.
-  grep -q 'fleet/services/forge-gestures.sh' "$MODS/25-directories.sh"
+  grep -q 'product_tree)/services/forge-gestures.sh' "$MODS/25-directories.sh"
   grep -qE '^EMBEDDED=\(.*services' "$MODS/62-runtime-helpers.sh"
 }
 
 # ─── C6, LA SUITE : LE RAIL POSE DOIT POUVOIR SE REJOUER ────────────────────────────────────────
 #
 # ⚠ MESURE DU 2026-09-01, BANC 2007. Un apply rejoue depuis `/opt/lcars/deploy/provision` —
-# LE GESTE NOMINAL DU CONVERGEUR, celui que l en-tete de `62-runtime-helpers` decrit — echouait sur
+# le rejeu depuis la copie posee, sur un poste sans checkout — echouait sur
 # trois modules : « source absente : /opt/lcars/assets/avatars », « source runtime introuvable:
-# /opt/lcars/fleet ». Le rail pose ne pouvait pas se rejouer entierement.
+# /opt/lcars/services ». Le rail pose ne pouvait pas se rejouer entierement.
 #
 # `services` (C6) avait ete trouve parce qu il produisait ONZE FAUX DRIFTS visibles. Ceux-ci ne se
 # voient qu en REJOUANT un apply depuis la copie — ce qu aucun geste de la suite ne faisait.
 
-@test "C6+ : les arbres de la RACINE sont embarques, pas seulement ceux de fleet/" {
+@test "C6+ : les arbres de la RACINE sont embarques, pas seulement ceux du produit" {
   local mod="$MODS/62-runtime-helpers.sh"
   grep -qE '^EMBEDDED_ROOT=\(.*assets' "$mod"
   grep -qE '^EMBEDDED_ROOT=\(.*catalogues' "$mod"
@@ -170,16 +170,16 @@ setup() {
   # dire. Le jour ou la boucle de `fleet/` est passee a `tar` elle aussi (pour cesser d emporter
   # 73 Mo de cache tofu), ce temoin a rougi sur un CORRECTIF — en accusant la seule chose qu il ne
   # mesurait pas. Ce qui distingue les deux listes est le chemin d ou elles partent, et lui seul.
-  grep -q 'cd "$(repo_root)/fleet/$n"' "$mod"
+  grep -q 'cd "$(product_tree)/$n"' "$mod"
   grep -q 'cd "$(repo_root)/$n"' "$mod"
 }
 
-@test "C6+ : ce que les modules LISENT hors de fleet/ est ce qui est embarque" {
+@test "C6+ : ce que les modules LISENT a la RACINE (repo_root) est ce qui est embarque" {
   # Le sens qui ferme la boucle : si un module se met a lire un troisieme arbre de la racine, ce
   # temoin le dit. C est la moitie qui manquait a C6 — on avait ajoute `services` sans verifier
   # qu il ne restait rien d autre.
   local lus; lus="$(grep -rhoE 'repo_root\)/[a-z]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
-    | sed 's|repo_root)/||' | sort -u | grep -v '^fleet$')"
+    | sed 's|repo_root)/||' | sort -u | grep -vE '^(fleet|runtime)$')"
   local n
   for n in $lus; do
     grep -qE "^EMBEDDED_ROOT=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" \
@@ -192,17 +192,17 @@ setup() {
 # `catalogues`). Les SOUS-ARBRES de `fleet/` relevent d une autre liste — `EMBEDDED` — et personne
 # ne verifiait qu elle etait complete.
 #
-# MESURE DU 2026-09-02, BANC 2006 : `BIN_SRC_DIR="$(repo_root)/fleet/bin"` est lu par
-# `62-runtime-helpers` lui-meme, `fleet/bin` n etait pas dans `EMBEDDED`, et un apply rejoue depuis
+# MESURE DU 2026-09-02, BANC 2006 : `BIN_SRC_DIR="$(product_tree)/bin"` est lu par
+# `62-runtime-helpers` lui-meme, `runtime/bin` n etait pas dans `EMBEDDED`, et un apply rejoue depuis
 # /opt/lcars rendait « pose ratée: /usr/local/bin/lcars-toolchain-converge ». Le module echouait a
 # poser un binaire dont il est l unique poseur, faute d avoir embarque sa propre source.
 #
 # Les deux temoins couvrent donc les deux niveaux, et ils sont distincts parce que les deux listes
 # le sont : `EMBEDDED` va sous `fleet/`, `EMBEDDED_ROOT` a cote.
-@test "C6+ : ce que les modules LISENT sous fleet/ est dans EMBEDDED" {
-  local lus; lus="$(grep -rhoE 'repo_root\)/fleet/[a-z_]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
-    | sed 's|repo_root)/fleet/||' | sort -u)"
-  [ -n "$lus" ] || { echo "extraction ratee : aucune lecture sous fleet/ trouvee"; return 1; }
+@test "C6+ : ce que les modules LISENT dans l ARBRE PRODUIT (product_tree) est dans EMBEDDED" {
+  local lus; lus="$(grep -rhoE 'product_tree\)/[a-z_]+' "$MODS"/*.sh "$DEPLOY"/lib/*.sh 2>/dev/null \
+    | sed 's|product_tree)/||' | sort -u)"
+  [ -n "$lus" ] || { echo "extraction ratee : aucune lecture sous product_tree trouvee"; return 1; }
   local n manquants=""
   for n in $lus; do
     # `_build` est l arbre de BUILD : il ne s embarque pas, il se consomme la ou il est bati.
@@ -211,7 +211,7 @@ setup() {
     grep -qE "^EMBEDDED=\(.*\b$n\b" "$MODS/62-runtime-helpers.sh" || manquants="$manquants $n"
   done
   [ -z "$manquants" ] \
-    || { echo "lu sous repo_root/fleet mais PAS dans EMBEDDED :$manquants"; return 1; }
+    || { echo "lu sous product_tree mais PAS dans EMBEDDED :$manquants"; return 1; }
 }
 
 @test "C6+ : node_modules est EXCLU — 179 Mo sur 180" {

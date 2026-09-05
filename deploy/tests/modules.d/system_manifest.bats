@@ -105,22 +105,23 @@ code() {
   grep -hvE '^\s*#' \
     "$BATS_TEST_DIRNAME"/../../modules.d/*.sh \
     "$ROOT"/install.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/etc/deploy-release.sh \
+    "$BATS_TEST_DIRNAME"/../../lib/deploy-release.sh \
     "$BATS_TEST_DIRNAME"/../../docker/*.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/*.sh \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/*.py \
-    "$BATS_TEST_DIRNAME"/../../../fleet/services/human.d/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/*.py \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/human.d/*.sh \
+    "$BATS_TEST_DIRNAME"/../../../runtime/services/forge.d/*.sh \
     ${_bins_du_rail[@]+"${_bins_du_rail[@]}"} \
     "$BATS_TEST_DIRNAME"/../../lib/*.sh 2>/dev/null
 }
 
 # ⚠ LES BINAIRES QUE LE RAIL INSTALLE SONT DU CODE DU RAIL, ET ILS MANQUAIENT AU CORPUS.
 # `62-runtime-helpers.sh` les `install` sous /usr/local/bin depuis `BIN_SRC_DIR="$(repo_root)/
-# fleet/bin"` : un objet que l'un d'eux cree a donc bien un poseur dans ce depot. Mesure du
+# runtime/bin"` : un objet que l'un d'eux cree a donc bien un poseur dans ce depot. Mesure du
 # 2026-09-01 : `/var/tmp/lcars/toolchain-work`, cree par `bin/lcars-toolchain-converge:50`, etait
 # refuse par ISO 2/2 au moment meme ou on le declarait — alors que son poseur existe.
 #
-# ⚠ ET LA LISTE SE DERIVE DU MODULE, ELLE NE SE GLOBBE PAS. `fleet/bin/*` fait entrer les launchers
+# ⚠ ET LA LISTE SE DERIVE DU MODULE, ELLE NE SE GLOBBE PAS. `runtime/bin/*` fait entrer les launchers
 # de pods (`bwrap_launch.sh`, `host_launch.sh`, `claude_launch.sh`), qui appartiennent au RUNTIME :
 # mesure faite, ISO 1/2 rougit alors sur `/run/lcars/egress`, `/run/lcars/mcp` et
 # `/run/lcars/tmux-sock` — des chemins de POD, que la table du deploiement n'a pas a declarer. Le
@@ -131,8 +132,8 @@ code() {
 # corriger la seconde en ouvre un.
 _bins_du_rail=()
 while read -r _n; do
-  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../../fleet/bin/$_n" ] \
-    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../../fleet/bin/$_n")
+  [ -n "$_n" ] && [ -f "$BATS_TEST_DIRNAME/../../../runtime/bin/$_n" ] \
+    && _bins_du_rail+=("$BATS_TEST_DIRNAME/../../../runtime/bin/$_n")
 done < <(grep -oE '"\$BIN_SRC_DIR/[a-zA-Z0-9._-]+"' \
            "$BATS_TEST_DIRNAME"/../../modules.d/62-runtime-helpers.sh 2>/dev/null \
          | sed 's|.*/||; s|"$||' | sort -u)
@@ -277,6 +278,8 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     base="$(basename "$p")"
     [[ "$base" == "<human>" ]] && continue
     # ⚠ POSE PAR UN TIERS QU'ON INVOQUE — exemption NOMMEE, une ligne par objet, jamais une regex.
+    # `/opt/lcars/.verified` : pose par le Dockerfile (stage `final`), que ce corpus ne lit pas — il lit le
+    # rail et le runtime. Le declarer dit ce que l'image porte ; l'exemption dit ou est le poseur.
     # `/root/.terraform.d` est le cache de plugins que le binaire `tofu` ecrit sous le HOME de root
     # quand `46-tofu` l'invoque : aucun module ne l'ecrit, donc ISO 2/2 le refuse a juste titre. On
     # le declare parce qu'on le PROVOQUE — c'est ce que l'uninstall doit pouvoir retirer — et
@@ -285,14 +288,15 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
     # declare que personne ne pose est, par defaut, une ligne qui ment.
     #
     # ⚠ `~/.hex` NE PASSAIT QUE PAR COINCIDENCE, et c'est pourquoi il est nomme ici avec `~/.mix`.
-    # Les deux sont ecrits par `mix` quand `48-forge-host` et `60-deploy` invoquent `mix local.hex`
+    # Les deux sont ecrits par `mix` quand `60-deploy` invoque `mix local.hex`
     # et `mix local.rebar`. Le radical `.hex` trouvait cette invocation — la sous-chaine « local.hex »
     # le contient — et le temoin le declarait couvert. `.mix`, lui, n'apparait nulle part : meme
     # objet, meme poseur, meme nature, et un verdict oppose selon l'orthographe d'une commande.
     case "$p" in
       /root/.terraform.d)      continue ;;   # tiers : le binaire `tofu`, invoque par 46-tofu
-      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   48-forge-host + 60-deploy
-      /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 48-forge-host + 60-deploy
+      /home/\<human\>/.hex)    continue ;;   # tiers : `mix local.hex`,   60-deploy (48 ne compile plus, lot 4)
+      /home/\<human\>/.mix)    continue ;;   # tiers : `mix local.rebar`, 60-deploy
+      /opt/lcars/.verified)    continue ;;   # pose par le DOCKERFILE (stage final, tampon de verify) — hors du corpus de ce mur, qui lit le rail et le runtime, pas l'image
     esac
     stem="$(sed -e 's#-<version>$##' -e 's#\.service$##' <<<"$base")"
     grep -qF "$stem" <<<"$CODE" || { echo "DECLARE, aucun poseur : $p (radical « $stem »)"; bad=1; }
@@ -318,7 +322,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # pas. Ni la mesure machine ni la table du corpus ne l'avaient : c'est la lecture du RUNTIME qui
   # l'a rendu visible.
   grep -qE '^runtime +/run/lcars-converger\.refused ' "$MANIFEST"
-  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../fleet/services/human-converger.sh"
+  grep -q 'lcars-converger.refused' "$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
 }
 
 @test "preserve = POSE mais JAMAIS RETIRE — pas « non pose »" {
@@ -386,6 +390,44 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   [ -z "$output" ]
   run prov_manifest_gid "fleet"
   [ "$output" = "2000" ]
+}
+
+@test "LA TABLE A DEUX LECTEURS DE PLUS — mode et proprietaire — et ce sont les POSEURS qui les lisent (lot 15)" {
+  # `share/*` et `tofu/*` etaient declares `0755 root:root` et mesures par PERSONNE : 44 et 46 les
+  # posaient sans `stat`, et les ajouter a la table de 25 en aurait fait un second poseur (le mur
+  # POSEUR ci-dessous veut un poseur par chemin). Le mode d'un objet declare se relit par qui le
+  # pose, contre la ligne de la table — une source, plus de litteral dans le module.
+  local lib="$BATS_TEST_DIRNAME/../../lib/provision-lib.sh"
+  eval "$(sed -n '/^prov_manifest_mode()/,/^}$/p' "$lib")"
+  eval "$(sed -n '/^prov_manifest_owner()/,/^}$/p' "$lib")"
+  # shellcheck disable=SC2034 # lu a l'interieur de l'`eval`, invisible a l'analyse statique
+  PROVISION_LIB="$lib"
+  run prov_manifest_mode /opt/lcars/share/avatars
+  [ "$output" = "0755" ]
+  run prov_manifest_owner /opt/lcars/share/avatars
+  [ "$output" = "root:root" ]
+  run prov_manifest_mode /opt/lcars/tofu/providers
+  [ "$output" = "0755" ]
+  run prov_manifest_owner /opt/lcars/var/tokens
+  [ "$output" = "lcars-authority:fleet" ]
+  run prov_manifest_mode /chemin/que/la/table/ne/nomme/pas
+  [ -z "$output" ]
+  # `unset` : MODE OBSERVE, jamais affirme — le lecteur rend VIDE, donc aucun poseur ne compare
+  run prov_manifest_mode '/home/<human>/.claude'
+  [ -z "$output" ]
+  # `-` est une colonne absente, pas une valeur : un lien n'a ni mode ni proprietaire
+  run prov_manifest_mode /usr/local/bin/lcars
+  [ -z "$output" ]
+  run prov_manifest_owner /usr/local/bin/lcars
+  [ -z "$output" ]
+  # et les deux poseurs les lisent — sur le code, pas sur la prose
+  local m
+  for m in 44-media 46-tofu; do
+    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_mode' \
+      || { echo "$m ne lit pas le mode dans la table"; return 1; }
+    sed 's/#.*//' "$BATS_TEST_DIRNAME/../../modules.d/$m.sh" | grep -q 'prov_manifest_owner' \
+      || { echo "$m ne lit pas le proprietaire dans la table"; return 1; }
+  done
 }
 
 # ⚠ L'ANGLE MORT QUE NI ISO 1/2 NI ISO 2/2 NE PEUVENT VOIR, ET IL A COUTE QUATRE LIENS MORTS.
@@ -468,7 +510,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
   # ⚠ TROUVE PAR LE CYCLE DU RANG D, PAS PAR CE FICHIER, et l'angle mort merite d'etre nomme :
   # ISO 2/2 cherche un RADICAL du chemin dans le code. « runtime » apparait partout, donc
   # `/opt/lcars/runtime` etait declare « couvert » alors qu'aucun module ne le CREAIT — c'est
-  # `etc/deploy-release.sh` qui le faisait apparaitre par `mkdir -p`, sous `runuser -u bob`.
+  # `deploy/lib/deploy-release.sh` qui le faisait apparaitre par `mkdir -p`, sous `runuser -u bob`.
   #
   # Consequence mesuree (banc 2001, 2026-09-01) : apres `uninstall --yes` puis re-apply, le prefixe
   # renaissait en `bob:fleet` au lieu de `root:fleet`. Invisible sur une machine ou il existe deja,
@@ -488,7 +530,7 @@ covered() { # covered <chemin> -> 0 si lui-meme ou un ancetre est declare, ou s'
 #
 # ⚠ MESURE DU 2026-09-01, BANC 2007 — un POSTE : `/var/lib/lcars/tofu/.apply.lock` y survivait a la
 # desinstallation. La table declarait `/var/lib/lcars` en « docker », alors que
-# `fleet/services/forge-gestures.sh:102` derive `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction
+# `runtime/services/forge-gestures.sh:102` derive `CATALOGUE_WORK=/var/lib/lcars/tofu` SANS distinction
 # de rail — et ce fichier part sur les deux (EMBEDDED de 62-runtime-helpers d un cote, COPY du
 # Dockerfile de l autre).
 #

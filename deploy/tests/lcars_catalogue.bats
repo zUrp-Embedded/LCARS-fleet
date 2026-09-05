@@ -30,7 +30,7 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../fleet/bin/lcars"
+  SUT="$BATS_TEST_DIRNAME/../../runtime/bin/lcars"
   [ -x "$SUT" ]
   export LCARS_CATALOGUES_DIR="$BATS_TEST_TMPDIR/catalogues"
   export LCARS_CATALOGUES_SHIPPED="$BATS_TEST_TMPDIR/shipped"
@@ -109,9 +109,9 @@ FAKE
   [[ "$output" == *"Aucun des deux n'est choisi"* ]]
 }
 
-@test "list: la porte CHARGE fleet_v2.env — l'adresse forge ne vit que la (D3)" {
+@test "list: la porte CHARGE fleet.env — l'adresse forge ne vit que la (D3)" {
   # ⚠ Mesure du 2026-08-11, payee une premiere fois par `project migrate` : l'environ d'un login
-  # humain ne porte AUCUN FORGE_*, et rien ne source ce fichier hors fleet_v2. Sans ce chargement,
+  # humain ne porte AUCUN FORGE_*, et rien ne source ce fichier hors fleet. Sans ce chargement,
   # la porte rendait `{:config, {:missing, :base_url}}` sous « la forge n'a pas repondu » — une
   # panne de config habillee en panne reseau, sur la commande qu'un operateur lit en premier.
   bin="$BATS_TEST_TMPDIR/fake_env_release"
@@ -125,9 +125,9 @@ FAKE
   chmod +x "$bin"
 
   printf 'FORGE_BASE_URL=http://forge-du-fichier:3000
-' > "$BATS_TEST_TMPDIR/fleet_v2.env"
+' > "$BATS_TEST_TMPDIR/fleet.env"
 
-  run env LCARS_FLEET_BIN="$bin" ENV_PROBE="$BATS_TEST_TMPDIR/env.probe"     LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/fleet_v2.env" "$SUT" catalogue list
+  run env LCARS_FLEET_BIN="$bin" ENV_PROBE="$BATS_TEST_TMPDIR/env.probe"     LCARS_FLEET_ENV="$BATS_TEST_TMPDIR/fleet.env" "$SUT" catalogue list
   [ "$status" -eq 0 ]
   grep -q 'ENV http://forge-du-fichier:3000' "$BATS_TEST_TMPDIR/env.probe"
 }
@@ -141,7 +141,7 @@ printf "INSTALLED fleet -\n"
 ' > "$bin"
   chmod +x "$bin"
 
-  run env LCARS_FLEET_BIN="$bin" LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/inexistant.env"     "$SUT" catalogue list
+  run env LCARS_FLEET_BIN="$bin" LCARS_FLEET_ENV="$BATS_TEST_TMPDIR/inexistant.env"     "$SUT" catalogue list
   [ "$status" -eq 0 ]
   [[ "$output" == *"fleet"*"installe"* ]]
 }
@@ -173,7 +173,7 @@ printf "INSTALLED fleet -\n"
   printf '#!/usr/bin/env bash\nprintf "INSTALLED fleet -\\n"\n' > "$bin"
   chmod +x "$bin"
 
-  run -0 env LCARS_FLEET_BIN="$bin" LCARS_FLEET_V2_ENV="$BATS_TEST_TMPDIR/inexistant.env" \
+  run -0 env LCARS_FLEET_BIN="$bin" LCARS_FLEET_ENV="$BATS_TEST_TMPDIR/inexistant.env" \
     "$SUT" catalogue list
   [ ! -e "$HOME/.lcars/catalogues.active" ]
   [ ! -e "$BATS_TEST_TMPDIR/catalogues.active" ]
@@ -206,7 +206,7 @@ printf "INSTALLED fleet -\n"
 #
 # CE QUI EST EPINGLE ICI EST LE CLIENT, PAS L'AUTORITE. La decision — « la forge dit-elle que ce
 # pair est admin ? » — vit dans `catalogue-executor.py`, dont le banc est
-# `fleet/test/services/catalogue-executor_test.py`. Ce fichier-ci tient l'autre moitie du contrat : que
+# `runtime/test/services/catalogue-executor_test.py`. Ce fichier-ci tient l'autre moitie du contrat : que
 # CHAQUE cause rendue par le service devienne la BONNE phrase, et qu'aucune ne se traduise en une
 # autre.
 #

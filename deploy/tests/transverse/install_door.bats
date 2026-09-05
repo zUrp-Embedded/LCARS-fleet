@@ -307,17 +307,6 @@ setup() {
   grep -qE 'exec "\$SCRIPT_DIR/deploy/box" up' "$SRC"
 }
 
-@test "l'escalade pour JOINDRE le daemon est ANNONCEE avant la pause, jamais decouverte" {
-  # Le cout s'annonce, il ne se decouvre pas — meme regle que le reste du bandeau. Un sudo qui
-  # surgit apres le consentement transforme une promesse bornee en surprise.
-  grep -q 'sudo sera demandé pour PARLER au daemon docker' "$SRC"
-  local annonce pause
-  annonce="$(grep -n 'sudo sera demandé' "$SRC" | head -1 | cut -d: -f1)"
-  pause="$(grep -n 'read -r _ < /dev/tty' "$SRC" | head -1 | cut -d: -f1)"
-  [ "$annonce" -lt "$pause" ]
-}
-
-
 @test "REGRESSION — tout ce qui suit « -- » atteint le delegue, VERBATIM" {
   # ⚠ SANS CA, `--bench` ETAIT UNE IMPASSE. Il delegue a `bench-up.sh`, qui a ses propres options
   # (`--project`, `--ssh-port`, `--image`), et le parseur de cette porte refuse ce qu'il ne connait
@@ -566,7 +555,7 @@ SPY
 }
 
 @test "le bandeau ne promet pas la fleet sous l'uid de l'operateur — GUARD B la lui refuse" {
-  # GUARD B (`config/runtime.exs`, miroir de `bin/fleet_v2`) refuse uid 0, l'uid du siege
+  # GUARD B (`config/runtime.exs`, miroir de `bin/fleet`) refuse uid 0, l'uid du siege
   # (`LCARS_SYSADMIN_UID`, defaut 1000) et les comptes systeme : une fleet sous le siege donnerait
   # des pods sudo-capables. Le siege pose la machine, l'humain de fleet fait tourner la fleet.
   run env LCARS_ALLOW_ANY_HOST=1 bash "$SRC" --substrate linux --workstation --check < /dev/null
@@ -609,32 +598,22 @@ SPY
 
 # ─── L ARITE : UN SEUL DRAPEAU IMPAIR, ET IL DECALAIT TOUT CE QUI SUIT ──────────────────────────
 #
-# ⚠ LA BOUCLE DE TRADUCTION AVANCAIT DE DEUX EN DEUX. `--disposable` pousse UN seul jeton dans
-# `PASSTHRU` — c est le seul —, donc des qu il est present, tous les drapeaux suivants tombent sur
-# des index impairs et AUCUN `case` ne les voit. Mesure du 2026-09-01 : `--box --bench --disposable
-# --port-ssh 2223 --forge-project alice4` faisait partir `bench-up` avec ZERO argument.
-#
-# ⚠ ET LE SECOND EFFET EST PIRE QUE LE PREMIER : `--box --disposable --human alice` sortait 0.
-# `--human` est un drapeau du rail POSTE que cette boucle doit REFUSER ; decale, il etait avale sans
-# un mot. Un drapeau non traduit fait tourner le delegue sur ses defauts ; un drapeau non REFUSE
-# fait croire a un geste qui ne se produit pas.
+# ⚠ LA BOUCLE DE TRADUCTION AVANCAIT DE DEUX EN DEUX, et le seul drapeau solo de `PASSTHRU`
+# decalait tout ce qui le suivait : valeurs sur les defauts, drapeau du rail POSTE avale sans un
+# mot (mesure du 2026-09-01). L'arite est declaree depuis, et ce solo-la — `--disposable` — est
+# RETIRE (⚖ user 2026-09-04 : un reliquat, quatre etages pour un nom par defaut que personne ne
+# demandait). Il n'y a plus AUCUN solo ; le temoin d'arite non declaree ci-dessous garde la regle
+# pour le prochain, et celui-ci garde le verrou : un drapeau retire RATE, il ne revient pas en
+# passe-plat muet.
 
-@test "ARITE : \`--disposable\` est IMPAIR, et ce qui le suit est traduit quand meme" {
+@test "VERROU : « --disposable » est REFUSE, il ne revient pas en passe-plat muet" {
   local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 --forge-project alice4 < /dev/null
-  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"--ssh-port 2223"* ]] \
-    || { echo "le port SSH n a pas ete traduit — la boucle est decalee : $output"; return 1; }
-  [[ "$output" == *"--project alice4"* ]] \
-    || { echo "le projet n a pas ete traduit — la boucle est decalee : $output"; return 1; }
-}
-
-@test "ARITE : un drapeau du rail POSTE reste REFUSE meme derriere \`--disposable\`" {
-  local fake; fake="$(_fake_tree 0 0)"
-  run bash "$fake/install.sh" --box --disposable --human alice < /dev/null
-  [ "$status" -ne 0 ] \
-    || { echo "un drapeau du rail POSTE a ete avale en silence : $output"; return 1; }
-  [[ "$output" == *"--human"* ]]
+  run bash "$fake/install.sh" --box --bench --disposable --port-ssh 2223 < /dev/null
+  [ "$status" -ne 0 ] || { echo "--disposable a ete accepte : $output"; return 1; }
+  [[ "$output" == *"--disposable"* ]]
+  [[ "$output" == *"retire"* ]]
+  # Et rien n'est parti vers le delegue.
+  [[ "$output" != *"--ssh-port"* ]]
 }
 
 @test "ARITE : un drapeau dont l arite n est pas declaree fait RATER la porte, il ne se devine pas" {
@@ -665,11 +644,12 @@ SPY
   local fake; fake="$(_fake_tree 0 0)"
   cat > "$fake/deploy/box" <<'SPY'
 #!/usr/bin/env bash
-echo "DOCKERSH:$* LCARS_PROJECT=${LCARS_PROJECT:-<vide>}"
+echo "DOCKERSH:$* LCARS_BASE=${LCARS_BASE:-<vide>}"
 SPY
   chmod 0755 "$fake/deploy/box"
   run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --forge-project alice4 < /dev/null
-  [[ "$output" == *"LCARS_PROJECT=alice4"* ]]
+  # lot 9 (DI-05) : N est la BASE — deploy/box en fait <N>-fleet
+  [[ "$output" == *"LCARS_BASE=alice4"* ]]
 }
 
 @test "REFUS : un port sans banc est REFUSE, il n'est pas avale" {
@@ -898,7 +878,7 @@ SPY
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bilan"* ]]
   [[ "$output" == *"workstation doctor"* ]]
-  [[ "$output" == *"box doctor"* ]]
+  [[ "$output" == *"box status"* ]]
 }
 
 @test "PIPEE : la porte fait sa SOURCE elle-meme, sous l humain, sans sudo" {

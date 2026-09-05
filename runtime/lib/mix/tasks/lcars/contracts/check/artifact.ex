@@ -684,11 +684,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Artifact do
     # perimetre decide sur `deploy/` seul declarerait « NOT CHECKED » dans l'artefact sur deux
     # fichiers qu'il tient dans la main.
     #
-    # Meme geste que `toolchain.branch_single_source` : on mesure ce qui est la, et on NOMME ce
-    # qu'on ne voit pas.
+    # Meme geste que `toolchain.branch_single_source` le meme jour : le perimetre se dit PAR RACINE,
+    # on mesure ce qui est la, et on NOMME ce qu'on ne voit pas.
+    # Q3 (2026-09-04) : `etc/` no longer carries a sourcer — its two install-time tools moved to
+    # `deploy/lib`, next to the library they were (only) COMMENTING on: neither sources it. The
+    # population is the installer's modules alone. NOT `deploy/lib`: the library itself lives
+    # there, names itself, and correctly sets no flags — it would be the one offender.
     roots = [
-      {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")},
-      {"etc", Path.join(root, "etc")}
+      {"../deploy/modules.d", Path.join(Path.expand("../deploy", root), "modules.d")}
     ]
 
     {present, skipped} = Enum.split_with(roots, fn {_label, d} -> File.dir?(d) end)

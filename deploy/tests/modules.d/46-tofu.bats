@@ -176,7 +176,7 @@ mod() { run bash "$MOD" "$1"; }
 @test "la liste des modules de recette se DERIVE de l'arbre, pas d'un tableau en dur" {
   # C'est la recette que la machine jouera qui decide quels providers il lui faut. Un tableau en dur
   # ici serait un second exemplaire de ce que le Dockerfile enumere.
-  grep -q 'repo_root)/fleet/services/forge-recipe' "$MOD"
+  grep -q 'product_tree)/services/forge-recipe' "$MOD"
 }
 
 @test "la SONDE hors-ligne ne passe pas par run_quiet — son echec est ATTENDU" {
@@ -212,4 +212,55 @@ mod() { run bash "$MOD" "$1"; }
   n_exit="$(grep -c 'verdict_apply' "$body")"
   n_rm="$(grep -c 'rm -rf "\$work"' "$body")"
   [ "$n_rm" -ge 6 ]
+}
+
+# ─── LOT 15 : LES MODES DE tofu/* SONT MESURES PAR LEUR POSEUR ──────────────────────────────────
+#
+# La table declare `tofu`, `tofu/providers` (0755 root:root) et l'ancre `/usr/local/bin/tofu`, et
+# AUCUN module ne les mesurait : ce module testait `-d` et `-x`. Les ajouter a la table de
+# `25-directories` en aurait fait un second poseur (mur POSEUR) — le mode se relit par qui le pose.
+
+stub_tofu() { # une doublure a la version epinglee : aucun reseau, et `init` repond oui
+  mkdir -p "$(dirname "$LCARS_TOFU_BIN")"
+  printf '#!/usr/bin/env bash\ncase "${1:-}" in version) echo "OpenTofu v1.12.3" ;; *) exit 0 ;; esac\n' > "$LCARS_TOFU_BIN"
+  chmod 0755 "$LCARS_TOFU_BIN"
+}
+
+@test "MODE : tofu/ et tofu/providers se relisent contre la table — 0700 est un DRIFT NOMME, 0755 est OK" {
+  local me; me="$(id -un):$(id -gn)"
+  stub_tofu
+  mkdir -p "$LCARS_TOFU_DIR/providers"; printf 'x\n' > "$LCARS_TOFU_DIR/tofurc"
+  chmod 0755 "$LCARS_TOFU_DIR"; chmod 0700 "$LCARS_TOFU_DIR/providers"
+  mod check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$LCARS_TOFU_DIR/providers : 700 $me ≠ 755 $me"* ]] || { echo "$output"; return 1; }
+  [[ "$output" == *"system.manifest"* ]]
+  [[ "$output" == *"$LCARS_TOFU_DIR 755 $me (table)"* ]]
+  chmod 0755 "$LCARS_TOFU_DIR/providers"
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"$LCARS_TOFU_DIR/providers 755 $me (table)"* ]]
+}
+
+@test "MODE : l'ancre /usr/local/bin/tofu se relit aussi — un binaire 0700 est un drift, meme a la bonne version" {
+  local me; me="$(id -un):$(id -gn)"
+  stub_tofu; chmod 0700 "$LCARS_TOFU_BIN"
+  mod check
+  [[ "$output" == *"tofu 1.12.3 posé"* ]]
+  [[ "$output" == *"$LCARS_TOFU_BIN : 700 $me ≠ 755 $me"* ]] || { echo "$output"; return 1; }
+}
+
+@test "MODE : l'apply CONVERGE le miroir et l'ancre par ensure_mode — sans reseau, avec une doublure a la version epinglee" {
+  # Le miroir se refait sur le verdict d'un `init` hors-ligne (la doublure dit oui) : rien ne part
+  # sur le reseau, et le module ne pose que ce qui manque — ici le MODE de ce qui est deja la.
+  stub_tofu; chmod 0700 "$LCARS_TOFU_BIN"
+  mkdir -p "$LCARS_TOFU_DIR/providers"; chmod 0700 "$LCARS_TOFU_DIR" "$LCARS_TOFU_DIR/providers"
+  mod apply
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(stat -c '%a' "$LCARS_TOFU_BIN")" = "755" ]
+  [ "$(stat -c '%a' "$LCARS_TOFU_DIR")" = "755" ]
+  [ "$(stat -c '%a' "$LCARS_TOFU_DIR/providers")" = "755" ]
+  [[ "$output" == *"miroir de providers complet"* ]]
+  mod check
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }

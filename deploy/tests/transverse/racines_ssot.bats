@@ -41,7 +41,7 @@ setup() {
   # forme `${VAR:-defaut}` est une couture, que `code_seul` exempte deja.
   RACINES='/opt/lcars/runtime|/home/private|/var/lib/lcars|/usr/share/lcars|/etc/lcars|/home/catalogues|/opt/lcars/var/catalogues'
   # ⚠ `/opt/lcars` N'EST PAS DANS LA LISTE, ET C'EST DELIBERE : c'est la racine de l'IMAGE, que le
-  # Dockerfile pose litteralement (`COPY fleet/services/X /opt/lcars/X`). Un `COPY` derive serait un
+  # Dockerfile pose litteralement (`COPY runtime/services/X /opt/lcars/X`). Un `COPY` derive serait un
   # Dockerfile qui ne se lit plus. Elle entrera ici le jour ou la phase B en fait un prefixe unique.
 }
 

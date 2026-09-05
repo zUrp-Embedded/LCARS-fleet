@@ -22,7 +22,7 @@ load ../refute
 setup() {
   SRC="$BATS_TEST_DIRNAME/../../modules.d/45-sudoers-toolchain.sh"
   [ -f "$SRC" ]
-  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../../../fleet/services/admiral/skills"
+  export LCARS_ADMIRAL_SKILLS_SRC="$BATS_TEST_DIRNAME/../../../runtime/services/admiral/skills"
   # ⚠ SANS cette couture, la branche skill ecrirait dans le VRAI ~/.claude de qui joue les tests.
   export LCARS_SIEGE_HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$LCARS_SIEGE_HOME"
 
@@ -140,7 +140,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
 # ⚠ CE MODULE CREUSAIT EN `install -d` NU, ET `install -d` SUIT LES LIENS. La garde
 # `prov_refuse_symlink_path` vit dans `ensure_dir` pour exactement ca : quelqu'un pose un lien dans
 # un composant du chemin, et le prochain apply en ROOT chmode/chowne la CIBLE. Trois sites de ce
-# module et un de `55-deck-oidc` contournaient la garde en n'appelant pas la lib.
+# module et un de `66-deck-oidc` contournaient la garde en n'appelant pas la lib.
 #
 # UN TEMOIN DE TEXTE NE SUFFIT PAS ICI — il epinglerait l'orthographe d'un appel. On pose un vrai
 # lien vers une vraie cible, on joue l'apply, et on regarde si la cible a bouge.
@@ -241,7 +241,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   # (mesure du 2026-08-21, install a froid sur machine dediee). Le message envoyait chercher la
   # faute dans un artefact absent.
   #
-  # Le skill vit maintenant sous `fleet/services/admiral/skills`, ou `EMBEDDED` et le `COPY` de
+  # Le skill vit maintenant sous `runtime/services/admiral/skills`, ou `EMBEDDED` et le `COPY` de
   # l'image le posent au MEME endroit. Ce qui se mesure ici n'est donc plus « il existe un repli »
   # mais « il n'y a plus rien entre quoi choisir » : un chemin, derive de `repo_root()`, et il
   # porte reellement le skill — sinon ce temoin ne prouverait qu'une chaine bien formee.
@@ -250,7 +250,7 @@ run_apply() { run bash -c ". '$MOD'; apply"; }
   [ "$status" -eq 0 ]
   # Sur la machine qui joue ce test, /opt/lcars n'existe pas : la source est donc celle du DEPOT,
   # et elle porte reellement le skill (sinon ce temoin ne prouverait qu'un chemin bien forme).
-  [[ "$output" == */fleet/services/admiral/skills ]]
+  [[ "$output" == */runtime/services/admiral/skills ]]
   [ -f "$output/system-issues/SKILL.md" ]
 }
 

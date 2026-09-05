@@ -4,7 +4,7 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
 #
-#     deploy/workstation  up | doctor
+#     deploy/workstation {up|doctor}
 #
 # Jumeau de `deploy/box` : celui-là pilote une BOÎTE, celui-ci provisionne CE SYSTÈME. Mêmes
 # verbes en tête, mêmes codes retour — qui sait lire l'un sait lire l'autre. Et le troisième larron
@@ -63,7 +63,7 @@ fail() { printf 'workstation: %s\n' "$1" >&2; [[ -n "${2:-}" ]] && printf '   %s
 # navigateur doit resoudre (`lib/provision-lib.sh:88`). Mesure : `FORGE_BASE_URL=http://forge.lan:3000
 # bash install.sh --workstation` affichait « forge fournie » au preflight — qui tourne NON-ROOT,
 # donc avant l'escalade — puis montait un conteneur Gitea sur 127.0.0.1, et `70-human.sh:195`
-# ecrivait ensuite cette adresse locale dans le `fleet_v2.env` de chaque humain. La fleet visait la
+# ecrivait ensuite cette adresse locale dans le `fleet.env` de chaque humain. La fleet visait la
 # mauvaise forge, sans qu'une seule ligne ait dit non. Sur ce rail, l'axe « forge fournie » du § 13
 # n'existait donc pas : la porte refuse root, `workstation up` escalade TOUJOURS.
 #
@@ -138,7 +138,7 @@ bandeau_final() {
   fi
   # ⚠ AUCUN NOM ICI : ce rail n'en crée plus, et à cette seconde il n'y a peut-être encore personne.
   # Nommer un compte que l'opérateur n'a pas serait lui faire taper une commande qui échoue.
-  step3="3. « sudo -u <ton humain> fleet_v2 start » — la fleet tourne sous un"
+  step3="3. « sudo -u <ton humain> fleet start » — la fleet tourne sous un"
   step3b="   humain de fleet ; toi tu l'atteins par le groupe fleet. Personne encore ? Inscris-toi sur la forge, team « humans »."
 
   local corps=("  Suite (les verdicts ci-dessus font foi) :" "  $step1")

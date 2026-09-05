@@ -16,13 +16,13 @@
 #   * une boite SANS forge n'est pas une boite en derive. Il n'y a pas d'autorite a suivre : on le
 #     dit, et on sort conforme.
 #
-# La porte est simulee par un `lcars` pose dans le PROV_LINK_DIR du test : aucun release n'est
+# La porte est simulee par un `lcars` pose dans le LCARS_LINK_DIR du test : aucun release n'est
 # construit, aucune socket n'est ouverte.
 
 # ⚠ L'IDENTITE DU LANCEUR EST POSEE, JAMAIS HERITEE — ET CE N'EST PAS DE LA PRUDENCE : ce fichier
 # a ete VERT sur la machine de dev et ROUGE dans la CI du banc, au premier tour. Le module
-# court-circuite pour qui n'est pas un humain de fleet (`is_fleet_human` : uid >= UID_MIN et
-# uid != SYSADMIN_UID), le job de CI tourne en ROOT (uid 0), et les neuf temoins de traduction
+# court-circuite pour qui n'est pas un humain de fleet (`is_fleet_human` : UID_MIN <= uid <= UID_MAX
+# et uid != SYSADMIN_UID), le job de CI tourne en ROOT (uid 0), et les neuf temoins de traduction
 # recevaient donc « n'est pas un humain de fleet » a la place du verdict qu'ils mesurent.
 #
 # Un test qui lit l'uid de sa machine mesure la machine. Les deux entrees de la regle sont des
@@ -37,27 +37,30 @@ setup() {
   # installation parfaitement saine, et verts joues a la main.
   unset FORGE_BASE_URL FORGE_PUBLIC_URL FORGE_TOKEN_FILE FORGE_ADMIN_TOKEN
   # ⚠ ET LE FICHIER, QUI EST UNE SECONDE PORTE VERS LA MEME VARIABLE. Depuis que `48-forge-host`
-  # ecrit `$PROV_TOKENS_DIR/forge.url`, la lib le lit en dernier repli — et l'idiome `:=` traite une
-  # chaine VIDE comme « non pose ». Un test qui dit « pas de forge » par `PROV_FORGE_URL=""` se
+  # ecrit `$LCARS_PRIVATE_DIR/forge.url`, la lib le lit en dernier repli — et l'idiome `:=` traite une
+  # chaine VIDE comme « non pose ». Un test qui dit « pas de forge » par `FORGE_BASE_URL=""` se
   # voyait donc rendre celle de la machine. Mesure du 2026-08-18 sur un poste ou la forge venait
   # d'etre montee : rouge la-bas, vert ici, et la seule difference etait un fichier.
-  # On pose donc un PROV_TOKENS_DIR a nous : le repli ne trouve rien, comme sur une machine nue.
-  export PROV_TOKENS_DIR="$BATS_TEST_TMPDIR/tokens"
-  mkdir -p "$PROV_TOKENS_DIR"
+  # On pose donc un LCARS_PRIVATE_DIR a nous : le repli ne trouve rien, comme sur une machine nue.
+  export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
+  mkdir -p "$LCARS_PRIVATE_DIR"
   MOD="$BATS_TEST_DIRNAME/../../../services/human.d/75-projects.sh"
-  LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/provision-lib.sh"
+  # Le protocole cote PRODUIT (Q3, 2026-09-04), plus la lib de l'installeur.
+  LIB="$BATS_TEST_DIRNAME/../../../services/lib/human-protocol.sh"
   # `-f`, pas `-x` : un module est joue par `bash`, jamais lance directement — il refuse meme de
   # l'etre. Epingler `-x` ici a rendu la derive des modes invisible pendant cinq commits.
   [ -f "$MOD" ]
-  export PROVISION_LIB="$LIB"
-  export PROV_FORGE_URL="http://forge.invalid"
-  export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin"
-  export PROV_HUMAN
-  PROV_HUMAN="$(id -un)"
-  mkdir -p "$PROV_LINK_DIR"
+  export LCARS_HUMAN_PROTOCOL="$LIB"
+  export FORGE_BASE_URL="http://forge.invalid"
+  export LCARS_LINK_DIR="$BATS_TEST_TMPDIR/bin"
+  export LCARS_LOGIN
+  LCARS_LOGIN="$(id -un)"
+  mkdir -p "$LCARS_LINK_DIR"
 
-  # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris.
-  echo "UID_MIN 0" > "$BATS_TEST_TMPDIR/login.defs"
+  # UID_MIN 0 : tout uid franchit la frontiere systeme/humain, root compris. UID_MAX au plafond
+  # des uid : la regle a DEUX bornes (2026-09-05), et un login.defs qui n'en porte qu'une n'etablit
+  # pas la frontiere — le module passerait son tour pour tout le monde.
+  printf 'UID_MIN 0\nUID_MAX 4294967294\n' > "$BATS_TEST_TMPDIR/login.defs"
   export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
   # Le siege du sysadmin est un uid que personne ici ne porte.
   export LCARS_SYSADMIN_UID="$(( $(id -u) + 1 ))"
@@ -76,24 +79,24 @@ setup() {
 fake_door() { # <rc> ; verdicts sur stdin
   local rc="$1"
   cat > "$BATS_TEST_TMPDIR/verdicts"
-  cat > "$PROV_LINK_DIR/lcars" <<SH
+  cat > "$LCARS_LINK_DIR/lcars" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$BATS_TEST_TMPDIR/argv"
 cat "$BATS_TEST_TMPDIR/verdicts"
 exit $rc
 SH
-  chmod +x "$PROV_LINK_DIR/lcars"
+  chmod +x "$LCARS_LINK_DIR/lcars"
 }
 
 # Une porte qui meurt : rien sur stdout, tout sur stderr — la forme exacte d'un release absent ou
 # d'une config incomplete.
 fake_dead_door() { # <rc> <message stderr>
-  cat > "$PROV_LINK_DIR/lcars" <<SH
+  cat > "$LCARS_LINK_DIR/lcars" <<SH
 #!/usr/bin/env bash
 echo "$2" >&2
 exit $1
 SH
-  chmod +x "$PROV_LINK_DIR/lcars"
+  chmod +x "$LCARS_LINK_DIR/lcars"
 }
 
 # ─── la traduction des mots ──────────────────────────────────────────────────────────────────────
@@ -182,7 +185,7 @@ EOF
 @test "sans forge : ce n'est pas une derive, c'est une absence d'autorite" {
   # Une boite hors ligne rend conforme. La compter en drift ferait crier le doctor sur toutes les
   # boites qui n'ont jamais recu « box config ».
-  export PROV_FORGE_URL=""
+  export FORGE_BASE_URL=""
   fake_door 0 <<< "RIEN rien"
   run bash "$MOD" check
   [ "$status" -eq 0 ]
@@ -190,7 +193,7 @@ EOF
 }
 
 @test "sans release : on ne redit pas l'alarme de 60-deploy" {
-  rm -f "$PROV_LINK_DIR/lcars"
+  rm -f "$LCARS_LINK_DIR/lcars"
   run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"60-deploy"* ]]
@@ -219,9 +222,36 @@ EOF
   # par login.defs, et la reservation du siege du sysadmin, que login.defs ne peut PAS exprimer.
   # Un UID_MIN au-dessus de l'uid courant simule le compte systeme sans en creer un — il ECRASE le
   # `UID_MIN 0` du setup, qui existe pour que les autres temoins ne dependent pas de l'uid reel.
-  echo "UID_MIN $(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN %s\nUID_MAX 4294967294\n' "$(( $(id -u) + 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
   fake_door 0 <<< "MANQUE  fleet/vitrine"
   run bash "$MOD" check
   [ "$status" -eq 0 ]
   [[ "$output" == *"n'est pas un humain de fleet"* ]]
+}
+
+@test "un uid AU-DESSUS de UID_MAX (la place de nobody) est ecarte par la meme garde" {
+  # La regle a deux bornes (⚖ user 2026-09-05, solution E) : `nobody` (65534) est sur toute machine,
+  # au-dessus de UID_MIN et different du siege — la regle basse seule le compte. Un UID_MAX sous
+  # l'uid courant simule ce cas sans creer de compte.
+  printf 'UID_MIN 0\nUID_MAX %s\n' "$(( $(id -u) - 1 ))" > "$BATS_TEST_TMPDIR/login.defs"
+  fake_door 0 <<< "MANQUE  fleet/vitrine"
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n'est pas un humain de fleet"* ]]
+  [ ! -f "$BATS_TEST_TMPDIR/argv" ]
+}
+
+@test "bornes ILLISIBLES : le module passe son tour — et le protocole nomme le fichier a reparer, UNE FOIS" {
+  # Fail-closed (⚖ user 2026-09-05, solution A) : un login.defs illisible n'est pas « la frontiere
+  # est a 1000 », c'est « la frontiere n'est pas etablie » — la politique que le BEAM applique a
+  # son boot (R-no-uid-min). Le module ne joue pas la porte, et le lecteur sait QUOI reparer.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  fake_door 0 <<< "MANQUE  fleet/vitrine"
+  run bash "$MOD" check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"n'est pas un humain de fleet"* ]]
+  [[ "$output" == *"n'est pas etablie"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
+  [ ! -f "$BATS_TEST_TMPDIR/argv" ]
 }

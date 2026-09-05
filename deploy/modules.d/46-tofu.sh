@@ -14,9 +14,33 @@ set -euo pipefail
 TOFU_VERSION="${LCARS_TOFU_VERSION:-1.12.3}"
 TOFU_SHA256_AMD64=46b48c3438c65cf479fc076c9281422ffa2f493548d1e813d154c835c5986a08
 TOFU_SHA256_ARM64=b2110d1ce46e366ce861b7f53d293dad99080075629aed7fb50d7328916d91c2
-TOFU_BIN="${LCARS_TOFU_BIN:-/usr/local/bin/tofu}"
-TOFU_DIR="${LCARS_TOFU_DIR:-$PROV_ROOT/tofu}"
-TOFU_OWNER="${LCARS_TOFU_OWNER:-root:root}"
+TOFU_BIN_CANON=/usr/local/bin/tofu    # le chemin que deploy/system.manifest declare (anchor)
+TOFU_BIN="${LCARS_TOFU_BIN:-$TOFU_BIN_CANON}"
+TOFU_DIR_CANON="$PROV_ROOT/tofu"      # idem (dir tofu, dir tofu/providers)
+TOFU_DIR="${LCARS_TOFU_DIR:-$TOFU_DIR_CANON}"
+# ⚠ LE MODE ET LE PROPRIETAIRE VIENNENT DE LA TABLE, PLUS D'UN LITTERAL (lot 15). Ce module POSE
+# `tofu`, `tofu/providers` et l'ancre : il est le seul a pouvoir relire leur mode — les ajouter a
+# la table de `25-directories` en ferait un second poseur (mur POSEUR). La table les declarait
+# `0755 root:root` et aucun module ne les mesurait. Couture de decor sur le proprietaire (un
+# temoin ne chown pas vers root), repli historique si la table ne dit rien.
+TOFU_OWNER="${LCARS_TOFU_OWNER:-$(prov_manifest_owner "$TOFU_DIR_CANON")}"
+: "${TOFU_OWNER:=root:root}"
+tofu_mode() { # tofu_mode <objet canonique> -> le mode que la table declare, sinon 0755
+  local m; m="$(prov_manifest_mode "$1")"; printf '%s\n' "${m:-0755}"
+}
+# tofu_check_perms <chemin pose> <objet canonique> — mode et proprietaire RELUS (stat), contre la
+# table. Un objet absent n'est pas juge ici : son absence se dit une fois, avec sa consequence.
+tofu_check_perms() {
+  local path="$1" cur want
+  [[ -e "$path" ]] || return 0
+  cur="$(stat -c '%a %U:%G' "$path")"
+  want="$(tofu_mode "$2") $TOFU_OWNER"; want="${want#0}"
+  if [[ "$cur" == "$want" ]]; then
+    p_ok "$path $cur (table)"
+  else
+    p_drift "$path : $cur ≠ $want (deploy/system.manifest) — l'apply le repose"
+  fi
+}
 
 tofu_rc() { echo "$TOFU_DIR/tofurc"; }
 
@@ -36,6 +60,7 @@ check() {
     else
       p_drift "tofu $v ≠ version épinglée $TOFU_VERSION ($TOFU_BIN) — la recette tournerait avec d'autres providers"
     fi
+    tofu_check_perms "$TOFU_BIN" "$TOFU_BIN_CANON"
   fi
 
   if [[ -s "$(tofu_rc)" && -d "$TOFU_DIR/providers" ]]; then
@@ -43,6 +68,8 @@ check() {
   else
     p_drift "miroir de providers absent ($TOFU_DIR) — tofu irait les chercher sur le réseau, ou échouerait"
   fi
+  tofu_check_perms "$TOFU_DIR" "$TOFU_DIR_CANON"
+  tofu_check_perms "$TOFU_DIR/providers" "$TOFU_DIR_CANON/providers"
 
   verdict_check
 }
@@ -63,13 +90,16 @@ apply() {
     unzip -q -o -d "$tmpd/x" "$tmpd/tofu.zip" \
       || { p_fail "tofu : archive illisible"; rm -rf "$tmpd"; verdict_apply; }
     ensure_dir "$(dirname "$TOFU_BIN")" 0755 "$TOFU_OWNER" || { rm -rf "$tmpd"; verdict_apply; }
-    install -m 0755 -o "${TOFU_OWNER%%:*}" -g "${TOFU_OWNER##*:}" "$tmpd/x/tofu" "$TOFU_BIN" \
+    install -m "$(tofu_mode "$TOFU_BIN_CANON")" -o "${TOFU_OWNER%%:*}" -g "${TOFU_OWNER##*:}" "$tmpd/x/tofu" "$TOFU_BIN" \
       || { p_fail "tofu : pose ratée ($TOFU_BIN)"; rm -rf "$tmpd"; verdict_apply; }
     rm -rf "$tmpd"
     PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "tofu $TOFU_VERSION ($TOFU_BIN)"
   fi
+  # Un binaire deja a la bonne version n'est pas re-pose : son mode converge a part, comme le reste.
+  ensure_mode "$TOFU_BIN" "$(tofu_mode "$TOFU_BIN_CANON")" "$TOFU_OWNER" || verdict_apply
 
-  ensure_dir "$TOFU_DIR/providers" 0755 "$TOFU_OWNER" || verdict_apply
+  ensure_dir "$TOFU_DIR" "$(tofu_mode "$TOFU_DIR_CANON")" "$TOFU_OWNER" || verdict_apply
+  ensure_dir "$TOFU_DIR/providers" "$(tofu_mode "$TOFU_DIR_CANON/providers")" "$TOFU_OWNER" || verdict_apply
   write_atomic "$(tofu_rc)" 0644 "$TOFU_OWNER" <<EOF || { p_fail "tofurc non posé ($(tofu_rc))"; verdict_apply; }
 provider_installation {
   filesystem_mirror {
@@ -90,15 +120,14 @@ EOF
   # ⚠ CETTE SONDE N'EST PAS `run_quiet`, ET LA CONFONDRE REND UN FAUX ROUGE. `run_quiet` a pour
   # contrat que l'échec COMPTE : il appelle `p_fail` et incrémente `PROV_FAILED`. Or l'échec est
   # ATTENDU ici — au premier passage le miroir n'existe pas encore, c'est tout ce que cet init
-  # mesure. Mesuré à froid le 2026-08-22 : deux FAIL et un verdict rouge sur un module dont le
+  # mesure. Vu à froid : deux FAIL et un verdict rouge sur un module dont le
   # miroir venait d'être posé correctement.
   # ⚠ ET L'INIT NE SE JOUE PAS DANS L'ARBRE DE L'OPÉRATEUR. `tofu init` ÉCRIT — il pose un
-  # `.terraform/` à côté de la recette — et ce module tourne en root. Mesuré au nettoyage de .63 le
-  # 2026-08-22 : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
+  # `.terraform/` à côté de la recette — et ce module tourne en root. Vu au nettoyage d'un banc : l'opérateur ne pouvait plus effacer son propre checkout, `Permission denied` sur
   # chaque provider. `60-deploy` porte déjà la règle pour l'autre outil (« un build root polluerait
   # le `_build` du checkout ») ; elle vaut pour tout ce qui écrit, pas pour mix seul.
   local src work
-  src="$(repo_root)/fleet/services/forge-recipe"
+  src="$(product_tree)/services/forge-recipe"
   [[ -d "$src" ]] || { p_fail "recette absente : $src"; verdict_apply; }
   work="$(mktemp -d "${TMPDIR:-/tmp}/lcars-tofu-recipe.XXXXXX")" \
     || { p_fail "tofu : tmp impossible"; verdict_apply; }

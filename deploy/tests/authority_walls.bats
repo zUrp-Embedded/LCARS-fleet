@@ -32,10 +32,13 @@ setup() {
   # ⚠ LE CHEMIN EST RESOLU. `$BATS_TEST_DIRNAME/../..` garderait `deploy/tests/` dans la chaine, et
   # l'exclusion `-not -path '*/tests/*'` viderait alors TOUT le perimetre — les murs passeraient au
   # vert sur une liste vide. Le voisin a paye exactement ce defaut ; on ne le rejoue pas.
-  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `fleet/` y sont FRERES
+  REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"          # la RACINE du depot — `deploy/` et `runtime/` y sont FRERES
   # ⚠ LA LISTE DES ARBRES EST UNE VARIABLE, pour que le garde du perimetre la CONSOMME au lieu de
   # la recopier. Deux listes a maintenir, c'est une liste qui derive et un garde qui ne garde plus.
-  ARBRES=("$REPO/deploy" "$REPO/fleet/services" "$REPO/fleet/bin" "$REPO/fleet/etc")
+  # ⚠ `runtime/etc` N'EST PLUS UN ARBRE DE CODE (Q3, 2026-09-04) : ses trois outils d'install vivent
+  # dans `deploy/lib`, il ne porte plus que des donnees (manifeste de release, gabarit d'env). Le
+  # garder ici ferait rougir MUR 0 sur un arbre qui n'a rien a contribuer — et rien a cacher.
+  ARBRES=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin")
   mapfile -t CODE < <(
     find "${ARBRES[@]}" -type f \
       \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'box' \
@@ -88,7 +91,7 @@ absent() { # absent <motif etendu> <fichier>
   done
   [ "${#CODE[@]}" -gt 55 ] || { echo "perimetre a ${#CODE[@]} fichiers — le balayage est casse" >&2; return 1; }
   printf '%s\n' "${CODE[@]}" | grep -q 'services/forge-gestures.sh'
-  printf '%s\n' "${CODE[@]}" | grep -q 'etc/provision-role-tokens.sh'
+  printf '%s\n' "${CODE[@]}" | grep -q 'runtime/services/provision-role-tokens.sh'
   printf '%s\n' "${CODE[@]}" | grep -q 'modules.d/25-directories.sh'
 }
 
@@ -176,12 +179,12 @@ absent() { # absent <motif etendu> <fichier>
   # enumerait les ecrivains du repertoire — c'etait la liste exacte des sites a changer, et je l'ai
   # lue comme un test qui passe. Ce qui manquait n'etait pas la mesure : elle etait ecrite ici.
   #
-  # ⚠ ET ILS SONT QUATRE, PAS TROIS. `etc/provision-role-tokens.sh` en fait partie et n'etait nomme
+  # ⚠ ET ILS SONT QUATRE, PAS TROIS. `runtime/services/provision-role-tokens.sh` en fait partie et n'etait nomme
   # nulle part dans la prose du chantier. Il suffit qu'UN pose un autre mode pour que le premier
   # passage suivant defasse les trois autres, EN SILENCE — le gate ne le voit pas, il n'execute
   # aucun de ces gestes contre une vraie table.
   local f
-  for f in "$REPO/fleet/etc/provision-role-tokens.sh" "$REPO/fleet/services/forge-gestures.sh"; do
+  for f in "$REPO/runtime/services/provision-role-tokens.sh" "$REPO/runtime/services/forge-gestures.sh"; do
     grep -qE 'install -d -m 0710' "$f" \
       || { echo "$f ne pose plus le repertoire des secrets en 0710" >&2; return 1; }
     # Et il ne reste AUCUN 0700 sur cet objet : deux modes dans un meme fichier, c'est celui qu'on
@@ -213,7 +216,7 @@ absent() { # absent <motif etendu> <fichier>
 # garde FONCTIONNELLEMENT, par `test/provision_role_tokens` qui `stat` le fichier reellement pose.
 # Ce mur-ci garde ce qui EST visible : le geste de DONNER un secret a un groupe.
 # ⚠ ET IL EST SCOPE AUX ECRIVAINS DE SECRETS, PAS AU DEPOT ENTIER. Premiere ecriture : un `chgrp`
-# interdit PARTOUT dans le perimetre. C'etait rouge des le premier passage, sur `55-deck-oidc.sh` —
+# interdit PARTOUT dans le perimetre. C'etait rouge des le premier passage, sur `66-deck-oidc.sh` —
 # qui `chgrp` legitimement son fichier OIDC pour que le deck (`lcars-system`) puisse le lire. Un
 # mur qui accuse un geste sain n'est pas severe, il est FAUX, et un mur faux se fait desarmer.
 #
@@ -221,10 +224,10 @@ absent() { # absent <motif etendu> <fichier>
 # sujet du mur est donc une liste d'ecrivains, et `MUR 2 ter` garde cette liste non vide.
 secret_writers() {
   printf '%s\n' \
-    "$REPO/fleet/etc/provision-role-tokens.sh" \
-    "$REPO/fleet/services/forge-gestures.sh" \
+    "$REPO/runtime/services/provision-role-tokens.sh" \
+    "$REPO/runtime/services/forge-gestures.sh" \
     "$REPO/deploy/modules.d/48-forge-host.sh" \
-    "$REPO/deploy/modules.d/50-forge.sh" \
+    "$REPO/runtime/services/forge.d/tokens.sh" \
     "$REPO/deploy/modules.d/25-directories.sh"
 }
 
@@ -287,8 +290,10 @@ secret_writers() {
   # GARDE D'INSTRUMENT du mur 3 : il interdit de passer un CHEMIN. Ce qui rend le geste possible est
   # que la valeur, elle, traverse. `env` ne propage que ce qu'on lui NOMME : la variable oubliee ici
   # rendrait une porte sans credential, et son echec accuserait la source du catalogue.
-  grep -qE 'FORGE_TOKEN="\$\{FORGE_TOKEN:-\}"' "$REPO/deploy/docker/entrypoint.sh"
-  grep -qE 'FORGE_TOKEN="\$sys_tok_value"' "$REPO/fleet/services/forge-gestures.sh"
+  # Lot 6 (2026-09-04) : la porte est « lcars tool catalogue-source » (bin/lcars) — l'entrypoint ne
+  # fait plus que deleguer. C'est la CLI qui doit relayer la VALEUR.
+  grep -qE 'FORGE_TOKEN="\$\{FORGE_TOKEN:-\}"' "$REPO/runtime/bin/lcars"
+  grep -qE 'FORGE_TOKEN="\$sys_tok_value"' "$REPO/runtime/services/forge-gestures.sh"
 }
 
 # ─── MUR 4 — LA POSTCONDITION MESURE LE DETENTEUR, PAS LE GROUPE ────────────────────────────────
@@ -317,7 +322,7 @@ secret_writers() {
   # GARDE D'INSTRUMENT ET DE SUBSTANCE A LA FOIS. Le mur 5 interdit d'ECRIRE la regle ; celui-ci
   # verifie que l'APPELANT ne la cherche plus. Les deux moities vont par paire : une regle absente
   # avec un appelant qui fait encore `sudo -n` donne un rail mort, pas un rail sur.
-  local recon="$REPO/fleet/lib/fleet/admiral/toolchain_reconciler.ex"
+  local recon="$REPO/runtime/lib/fleet/admiral/toolchain_reconciler.ex"
   [ -f "$recon" ] || { echo "reconciliateur introuvable : $recon" >&2; return 1; }
   local n
   n="$(grep -cE 'System.cmd\("sudo"' "$recon" || true)"
@@ -330,7 +335,7 @@ secret_writers() {
   # que si le process qui le porte ne detient rien : sinon on a juste change la porte du meme
   # cumul — privilege ET secrets dans le meme espace d'adressage, ou un defaut escalade ce qu'il
   # vole. C'est la regle qui donne sa forme a tout ce chantier, lue de l'autre cote.
-  local svc="$REPO/fleet/services/privileged-executor.py"
+  local svc="$REPO/runtime/services/privileged-executor.py"
   [ -f "$svc" ] || { echo "service privilegie introuvable : $svc" >&2; return 1; }
   absent "$TOKENS_DIR" "$svc"
   absent '(MASTER_TOKEN|gitea_token|forge-master|forge-seed)' "$svc"
@@ -348,7 +353,7 @@ secret_writers() {
 # voie — d'ou le second mur, qui verifie que la condition est ECRITE et keyee sur l'uid.
 
 @test "MUR 6: la regle d'eligibilite ne lit AUCUN groupe" {
-  local hum="$REPO/fleet/services/console-humans.sh"
+  local hum="$REPO/runtime/services/console-humans.sh"
   [ -f "$hum" ] || { echo "regle d'eligibilite introuvable : $hum" >&2; return 1; }
   absent '(getent group|LCARS_CONSOLE_GROUP|FLEET_MEMBERS|/etc/group)' "$hum"
 }
@@ -357,7 +362,7 @@ secret_writers() {
   # La contrepartie du mur 6. Ce qui decide est sur la ligne de `passwd` : uid dans la plage, home,
   # shell. Aucun groupe (une projection que le convergeur reecrit), aucun uid de siege (le siege a
   # une console comme tout humain ; ce qui lui reste ferme est la fleet, et GUARD B la tient).
-  local hum="$REPO/fleet/services/console-humans.sh"
+  local hum="$REPO/runtime/services/console-humans.sh"
   absent 'LCARS_SYSADMIN_UID|SEAT_UID_FILE' "$hum"
   sed 's/#.*//' "$hum" | grep -qE 'uid.*-lt.*UID_MIN'
   sed 's/#.*//' "$hum" | grep -qE '\-d "\$home"'
@@ -376,7 +381,7 @@ secret_writers() {
 # memoisation ajoutee fait rougir ses trois temoins. Ce mur-ci attrape les formes EXPLICITES, celles
 # qu'on ecrit en croyant optimiser.
 @test "MUR 7: le jeton master n'est ni memoise ni lu au chargement du module" {
-  local svc="$REPO/fleet/services/catalogue-executor.py"
+  local svc="$REPO/runtime/services/catalogue-executor.py"
   [ -f "$svc" ] || { echo "executeur introuvable : $svc" >&2; return 1; }
   # Les formes explicites de cache.
   absent '(lru_cache|functools\.cache|@cache)' "$svc"
@@ -398,7 +403,7 @@ secret_writers() {
   # chargement ; il ne voit PAS une valeur gardee dans un attribut ou une fermeture. Ce qui tient
   # vraiment la propriete est le banc python. Le supprimer laisserait le mur au vert et l'arbitrage
   # sans preuve — exactement la situation que ce fichier existe pour rendre impossible.
-  local banc="$REPO/fleet/test/services/catalogue-executor_test.py"
+  local banc="$REPO/runtime/test/services/catalogue-executor_test.py"
   [ -f "$banc" ] || { echo "banc de l'executeur introuvable : $banc" >&2; return 1; }
   grep -q 'jeton-rotatif' "$banc"
   grep -q '6d: RELU a chaque appel' "$banc"
@@ -432,7 +437,7 @@ secret_writers() {
   # posait `chgrp` puis verifiait `stat -c %G`. Passe au proprietaire sans changer le controle, il
   # aurait compare un groupe qui n'est plus pose — donc un `FAIL` par compte, sur des jetons
   # parfaitement valides. C'est une paire, elle se lit comme une paire.
-  local src="$REPO/fleet/etc/provision-role-tokens.sh"
+  local src="$REPO/runtime/services/provision-role-tokens.sh"
   grep -qE 'chown "\$OWNER:\$OWNER"' "$src"
   grep -qE 'stat -c %U' "$src"
   absent 'stat -c %G' "$src"

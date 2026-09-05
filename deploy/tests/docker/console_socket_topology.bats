@@ -32,8 +32,8 @@ setup() {
   # machine provisionnee : sans decor, un temoin qui attend que celui qui joue passe GUARD B rougit des
   # le second run du gate — le siege, c'est lui (banc .63, 2026-08-30). Le decor nomme un fichier absent.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  SRC="$BATS_TEST_DIRNAME/../../../fleet/services/console.sh"
-  LANDING="$BATS_TEST_DIRNAME/../../../fleet/services/console-landing.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../runtime/services/console.sh"
+  LANDING="$BATS_TEST_DIRNAME/../../../runtime/services/console-landing.sh"
   DOCKERFILE="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   BINDIR="$BATS_TEST_TMPDIR/bin"
   CALLS="$BATS_TEST_TMPDIR/calls"
@@ -375,7 +375,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   local defs="$BATS_TEST_TMPDIR/login.defs"
   printf 'UID_MIN 1000\nUID_MAX 60000\n' > "$defs"
   LCARS_CONSOLE_PASSWD="$pw" PASSWD_DEFS="$defs" \
-    run bash "$BATS_TEST_DIRNAME/../../../fleet/services/console-humans.sh" "$@"
+    run bash "$BATS_TEST_DIRNAME/../../../runtime/services/console-humans.sh" "$@"
 }
 
 @test "bornes d'uid illisibles : AUCUNE liste, et le motif est dit" {
@@ -386,7 +386,7 @@ humans_sh() { # humans_sh <passwd-file> <ignore> [--verbose]
   printf 'zoe:x:1015:1015::%s/zoe:/bin/bash\n' "$home" > "$pw"
 
   LCARS_CONSOLE_PASSWD="$pw" PASSWD_DEFS="$BATS_TEST_TMPDIR/nexistepas" \
-    run bash "$BATS_TEST_DIRNAME/../../../fleet/services/console-humans.sh"
+    run bash "$BATS_TEST_DIRNAME/../../../runtime/services/console-humans.sh"
   [ "$status" -eq 0 ]
   [[ "$output" != *"zoe"* ]]
   [[ "$output" == *"bornes d'uid illisibles"* ]]

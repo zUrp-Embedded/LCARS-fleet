@@ -31,7 +31,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   # supprime. Ce sont les deux seuls fichiers qui portent l'adresse hors du BEAM.
   @mirrors [
     "services/forge-gestures.sh",
-    "../deploy/modules.d/45-catalogues.sh"
+    "services/forge.d/catalogues.sh"
   ]
 
   test "l'autorite est un litteral GELE — sinon il n'y a rien a comparer" do

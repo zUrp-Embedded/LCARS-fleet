@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
   # Z7 (F-C165 → BL-6-45) — FOUR lists declare which roles exist, and every pairwise drift has
   # bitten or nearly bitten: the canon catalogue (the SOURCE), forge.tf `local.roles` (accounts),
-  # etc/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
+  # runtime/services/provision-role-tokens.sh `ROLES` (token mint default), and deploy's
   # `PROV_ROLES` (which OVERRIDES the .sh default via --roles — the list that actually wins on
   # a fresh deploy; measured: eng_doc missing there while present in the three others = the
   # BL-6-34 root-cause class resurrected). The old check covered ONE direction (.sh ⊆ canon);
@@ -108,7 +108,9 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
       |> Enum.map(&role_login(root, &1.name))
       |> Enum.sort()
 
-    sh_path = Path.join(root, "etc/provision-role-tokens.sh")
+    # Lot 6 (2026-09-04), correcting lot 1: the minter is a FORGE GESTURE of the product — the box
+    # plays it at instance init — so it lives in `services/`, in this tree, always present.
+    sh_path = Path.join(root, "services/provision-role-tokens.sh")
 
     # The tofu recipe lives under `services/forge-recipe/`, the provisioning lib in the SIBLING
     # tree `deploy/` — this check reads across trees, so a move of either is what it catches first.
@@ -121,7 +123,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
     # ship. So absence is read at the TREE level: no sibling tree at all = out of scope, SKIPPED
     # and named in the note (never a silent pass on unmeasured ground); tree present but file or
     # pattern unreadable = the real defect (partial checkout, renamed variable) = FAIL. The
-    # `.sh` lives inside `etc/` and is always present.
+    # `.sh` lives inside `services/` and is always present (lot 6 brought it back in-tree).
     lists =
       [
         {"provision-role-tokens.sh ROLES", :required,
@@ -356,12 +358,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    entrypoint = Path.expand("../deploy/docker/entrypoint.sh", root)
+    # Lot 6 (2026-09-04) : the box creates its zones in `box/init.sh` (the product's instance init),
+    # no longer in the docker entrypoint — the anchor line kept its exact shape.
+    entrypoint = Path.expand("services/box/init.sh", root)
     module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
-      "add the face root to the `install -d` line of deploy/docker/entrypoint.sh — a face declared " <>
+      "add the face root to the `install -d` line of runtime/services/box/init.sh — a face declared " <>
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
@@ -408,7 +412,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
           {expected, at_boot, on_every_substrate} ->
             missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de l'entrypoint docker") ++
+              Enum.map(expected -- at_boot, &"#{&1}: absent de box/init.sh (la boite)") ++
                 Enum.map(
                   expected -- on_every_substrate,
                   &"#{&1}: absent du module provision (donc absent sur wsl et linux)"
@@ -474,7 +478,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   # indistinguishable from a changed mode.
   defp read_install_zone_paths(path) do
     with {:ok, content} <- File.read(path),
-         [_, tail] <- Regex.run(~r/^install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
+         [_, tail] <- Regex.run(~r/^\s*install\s+-d\s+-m\s+2775\s+-g\s+fleet\s+(.+)$/m, content) do
       tail |> String.split() |> Enum.filter(&String.starts_with?(&1, "/"))
     else
       _ -> nil

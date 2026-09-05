@@ -630,7 +630,7 @@ JSON
 
 mk_decl() { # <projects_root> <depot> <branche livrable> <branche work> [<work_root declare>]
   local root="$1" name="$2" mb="$3" wb="$4" wr="${5:-$TMP/w}" d
-  d="$root/$name/fleet/lib/fleet"; mkdir -p "$d/pilot"
+  d="$root/$name/runtime/lib/fleet"; mkdir -p "$d/pilot"
   printf '%s\n' \
     "    GitOps.run([\"clone\", \"--branch\", \"$mb\", url, proj_dir], auth: true)" \
     "    with :ok <- GitOps.run([\"init\", \"-q\", \"-b\", \"$wb\", work_dir], auth: false) do" \
@@ -1040,7 +1040,7 @@ $(jl c.d unreachable)"
 # DERIVE DE L'AUTORITE : `deftool` declare, cette table copie. Un outil renomme demain deplace ce
 # temoin tout seul.
 @test "sotf : chaque capacite de CHAINS est un outil MCP qui existe" {
-  local tools_ex="$SKILL_DIR/../../../fleet/lib/fleet/mcp/pod_tools.ex"
+  local tools_ex="$SKILL_DIR/../../../runtime/lib/fleet/mcp/pod_tools.ex"
   [ -f "$tools_ex" ] || skip "hors du depot (skill copie seul) — rien a confronter"
 
   local declared

@@ -61,7 +61,7 @@ DECL_MAIN_BRANCH="" DECL_WORK_BRANCH="" DECL_PROJ_ROOT="" DECL_WORK_ROOT=""
 
 resolve_declarations() {
   local f
-  for f in "$PROJ_ROOT"/*/fleet/lib/fleet/pilot/project_onboard.ex; do
+  for f in "$PROJ_ROOT"/*/runtime/lib/fleet/pilot/project_onboard.ex; do
     [[ -r "$f" ]] || continue
     SRC_ONBOARD="$f"
     SRC_LAYOUT="${f%/pilot/project_onboard.ex}/layout.ex"
@@ -90,7 +90,7 @@ probe_declaration() {
   [[ "${#PROJECTS[@]}" -eq 0 ]] && nothing_to_confront=1
   if [[ -z "$SRC_ONBOARD" ]]; then
     emit "projects.declaration" "$PLANE" "$([[ -n "$nothing_to_confront" ]] && echo inactive || echo unreachable)" "local" \
-      "ls $PROJ_ROOT/*/fleet/lib/fleet/pilot/project_onboard.ex" \
+      "ls $PROJ_ROOT/*/runtime/lib/fleet/pilot/project_onboard.ex" \
       "source du runtime introuvable sous $PROJ_ROOT${nothing_to_confront:+ — et aucun projet a confronter}" \
       "Sans declaration, AUCUNE attente n'est opposable : les etats git eventuels sont rapportes bruts, en 'unknown'. Ne pas lire leur absence de rouge comme une conformite."
     return 1

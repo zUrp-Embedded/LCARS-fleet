@@ -2,7 +2,7 @@
 # SOURCE: deploy/modules.d/60-deploy.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
-# STATUS: PROTO-V2 — deploy du runtime : orchestre etc/deploy-release.sh (l'autorité build+pose) puis verrouille RO
+# STATUS: PROTO-V2 — deploy du runtime : orchestre deploy/lib/deploy-release.sh (l'autorité build+pose) puis verrouille RO
 # APPLY-ON: wsl linux
 # CHECK-ON: any
 # NEEDS: root
@@ -12,20 +12,85 @@ set -euo pipefail
 # shellcheck source=../lib/provision-lib.sh
 . "${PROVISION_LIB:?PROVISION_LIB non posé — lance via ./provision, pas le module nu}"
 
-RUNTIME_DIR="$(repo_root)/fleet"
+RUNTIME_DIR="$(product_tree)"
 MANIFEST="$RUNTIME_DIR/etc/release.manifest"
 mf_entries() { # « <nom> <exec|noexec> <link:0|1> » par entrée, commentaires/vides sautés
   awk 'NF && $1 !~ /^#/ { print $1, $2, ($3 == "link" ? 1 : 0) }' "$MANIFEST"
 }
 
+mf_names_has() { # mf_names_has <nom> -> 0 si le manifeste nomme ce fichier
+  local n
+  while read -r n _ _; do [[ "$n" == "$1" ]] && return 0; done < <(mf_entries)
+  return 1
+}
+
 release_present() { [[ -x "$PREFIX_REL/bin/lcars_fleet" ]]; }
 PREFIX_REL="$PROV_PREFIX/rel/lcars_fleet"
 
-build_sha() {
-  local matches=("$PREFIX_REL"/lib/lcars_fleet-*/priv/api/build_info.txt)
-  [[ -f "${matches[0]}" ]] || return 0
-  sed -n 's/^sha=//p' "${matches[0]}" 2>/dev/null | head -1 || true
+# ─── LE SENS INVERSE DU MANIFESTE (S4, relecture hostile du 2026-09-04) ─────────────────────────
+#
+# ⚠ LA POSE ET LA SONDE ITERAIENT TOUTES DEUX SUR LES ENTREES DU MANIFESTE, donc ni l'une ni
+# l'autre ne voyait ce qui est la EN TROP. Mesure au banc apres le renommage `fleet_v2` -> `fleet` :
+# `/opt/lcars/runtime/bin/fleet_v2` et `/usr/local/bin/fleet_v2` toujours en place, et
+# `60-deploy=OK`. Un humain qui tape `fleet_v2` obtient le lanceur d'avant sur une machine que le
+# doctor declare conforme. `deploy-release.sh` elague desormais `$PREFIX/bin` a la pose ; ce
+# module elague le PATH en root (le script de pose tourne en humain et ne peut pas y ecrire), et
+# le doctor rend un drift par intrus, des deux cotes.
+#
+# Un symlink du PATH n'est un intrus que s'il pointe DANS `$PROV_PREFIX/bin` sur un nom que le
+# manifeste ne porte pas : un lien qui vise ailleurs appartient a quelqu'un d'autre.
+intrus_bin() { # intrus_bin -> les entrees de $PROV_PREFIX/bin que le manifeste ne nomme pas
+  local e
+  [[ -d "$PROV_PREFIX/bin" && -x "$PROV_PREFIX/bin" ]] || return 0
+  for e in "$PROV_PREFIX"/bin/*; do
+    [[ -e "$e" || -L "$e" ]] || continue
+    mf_names_has "${e##*/}" || printf '%s\n' "$e"
+  done
 }
+intrus_links() { # intrus_links -> les symlinks de $PROV_LINK_DIR qui visent un intrus de $PROV_PREFIX/bin
+  local e t
+  [[ -d "$PROV_LINK_DIR" && -x "$PROV_LINK_DIR" ]] || return 0
+  for e in "$PROV_LINK_DIR"/*; do
+    [[ -L "$e" ]] || continue
+    t="$(readlink "$e")"
+    [[ "$t" == "$PROV_PREFIX/bin/"* ]] || continue
+    mf_names_has "${t##*/}" || printf '%s\n' "$e"
+  done
+}
+prune_intrus() { # prune_intrus — retire les intrus (root), une ligne par retrait
+  local e
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    rm -rf -- "$e" || { p_fail "intrus non retiré : $e"; return 1; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "retiré $e (absent de release.manifest)"
+  done < <(intrus_bin)
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    rm -f -- "$e" || { p_fail "symlink intrus non retiré : $e"; return 1; }
+    PROV_CHANGED=$((PROV_CHANGED + 1)); p_chg "retiré symlink $e (sa cible n'est pas dans release.manifest)"
+  done < <(intrus_links)
+  return 0
+}
+
+release_app_dir() { # release_app_dir <racine de release> -> lib/lcars_fleet-<vsn> de la version qui DEMARRE
+  # ⚠ PAS « la premiere du glob ». `mix release --overwrite` ne retire pas une lib/lcars_fleet-<ancienne>
+  # laissee par une assemblee precedente : une release en portait deux (0.1.0 de passe5 a cote de la
+  # 0.9.0 vivante, banc 2003, 2026-09-05) et trois lecteurs annoncaient le build de la morte. La
+  # version qui demarre est dans releases/start_erl.data ; sans lui, une seule lib est acceptable.
+  local root="$1" vsn d
+  vsn="$(awk '{print $2; exit}' "$root/releases/start_erl.data" 2>/dev/null || true)"
+  if [[ -n "$vsn" && -d "$root/lib/lcars_fleet-$vsn" ]]; then printf '%s\n' "$root/lib/lcars_fleet-$vsn"; return 0; fi
+  d=("$root"/lib/lcars_fleet-*)
+  [[ "${#d[@]}" -eq 1 && -d "${d[0]}" ]] && { printf '%s\n' "${d[0]}"; return 0; }
+  return 1
+}
+
+build_sha() {
+  local d; d="$(release_app_dir "$PREFIX_REL" || true)"
+  [[ -n "$d" && -f "$d/priv/api/build_info.txt" ]] || return 0
+  sed -n 's/^sha=//p' "$d/priv/api/build_info.txt" 2>/dev/null | head -1 || true
+}
+release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}" ]] && printf '%s\n' "${#d[@]}" || printf '0\n'; }
 
 check() {
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
@@ -34,12 +99,13 @@ check() {
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
   # « absente » de tout ce qui s'y trouve, y compris d'une release parfaitement posee.
   #
-  # MESURE DU 2026-09-01, banc 2007 : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
-  # meme machine et a la meme seconde. Le banc 2001 ne le montrait pas — le groupe y etait deja
-  # effectif. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
+  # VU : ce drift apparaissait SANS sudo et disparaissait AVEC, sur la
+  # meme machine et a la meme seconde ; un poste ou le groupe est deja effectif ne le montre pas. C'est la session FRAICHE qui est le cas juste, pas l'inverse.
   local _pfx; _pfx="$(prov_file_state "$PROV_PREFIX")"
   if release_present; then
     p_ok "release posée ($PROV_PREFIX, build $(build_sha))"
+    local _nl; _nl="$(release_libs_count)"
+    [[ "$_nl" -le 1 ]] || p_drift "la release posée porte $_nl lib/lcars_fleet-* — une assemblée n'en a qu'une ; celle qui démarre est $(release_app_dir "$PREFIX_REL" 2>/dev/null | sed 's|.*/||' || echo '?'), les autres sont mortes (mix release --overwrite sans nettoyage) : repose depuis un paquet propre"
   elif [[ "$_pfx" != "present" && "$_pfx" != "absent" ]]; then
     p_warn "release NON MESURABLE — $PROV_PREFIX $(prov_state_why "$_pfx" "$PROV_PREFIX")"
     verdict_check
@@ -82,6 +148,24 @@ check() {
       [[ -f "$PROV_LINK_DIR/$name" ]] && p_warn "copie morte $PROV_LINK_DIR/$name (invention D3, plus aucun lecteur) — nettoyage manuel : sudo rm $PROV_LINK_DIR/$name"
     fi
   done < <(mf_entries)
+
+  # Le sens inverse : un drift par intrus, des deux cotes (S4).
+  local e
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    p_drift "intrus $e — absent de release.manifest : l'apply le retire"
+  done < <(intrus_bin)
+  while read -r e; do
+    [[ -n "$e" ]] || continue
+    p_drift "symlink intrus $e → $(readlink "$e") — sa cible n'est pas dans release.manifest : l'apply le retire"
+  done < <(intrus_links)
+
+  # ⚠ LA GENERATION PRECEDENTE SE NOMME, AVEC SA TAILLE. `atomic_swap_dir` garde `<rel>.prev` comme
+  # creneau de rollback — 31 Mo mesures au banc, permanents, declares nulle part : un doctor qui ne
+  # les nomme pas laisse l'operateur decouvrir l'espace disque a la main.
+  if [[ -d "$PREFIX_REL.prev" ]]; then
+    p_ok "génération précédente gardée : $PREFIX_REL.prev ($(du -sh "$PREFIX_REL.prev" 2>/dev/null | cut -f1 || echo '?')) — rollback de deploy-release.sh ; « sudo rm -rf $PREFIX_REL.prev » si tu n'en veux plus"
+  fi
   verdict_check
 }
 
@@ -93,11 +177,12 @@ apply() {
   # Le bloc `mix` ci-dessous lit la LIVRAISON ; celui-ci demande « suis-je dans l'arbre de travail,
   # ou dans la copie que le rail a lui-meme posee ? ».
   #
-  # MESURE DU 2026-09-02, BANCS 2006 ET 2007 : un apply rejoue depuis
-  # `/opt/lcars/deploy/provision` — LE GESTE NOMINAL DU CONVERGEUR — rend « FAIL 60-deploy:
-  # source runtime introuvable: /opt/lcars/fleet ». Sur les DEUX, en livraison binaire comme en
+  # VU : un apply rejoue depuis
+  # `/opt/lcars/deploy/provision` — le rejeu depuis la copie posee, sur un poste sans checkout
+  # (le convergeur, lui, ne rejoue plus `provision` : il source `services/human.d/*.sh`) — rend « FAIL 60-deploy:
+  # source runtime introuvable: /opt/lcars/services ». Sur les DEUX, en livraison binaire comme en
   # livraison source. C'est vrai, et ce n'est pas un defaut : `62-runtime-helpers` embarque
-  # `fleet/{deploy,etc,services,bin}`, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
+  # `{deploy,etc,services,bin}` a plat sous /opt/lcars, jamais `mix.exs`. Il n'y a pas de source la, et il n'en faut
   # pas — la release est POSEE.
   #
   # La copie sert a REJOUER le rail, pas a le RECONSTRUIRE. Le module n'a donc rien a faire, et le
@@ -113,7 +198,7 @@ apply() {
   # discriminant. Exiger `mix` avant de le lire renvoyait vers `15-toolchain`, dont l'etat-cible en
   # binaire est justement de ne rien poser : le rail s'envoyait une instruction impossible.
   #
-  # MESURE DU 2026-09-01, premiere install binaire reelle (banc 2006) : `FAIL 60-deploy: mix absent
+  # VU sur une premiere install binaire : `FAIL 60-deploy: mix absent
   # — lance d'abord 15-toolchain`, sur une machine ou la release etait deja dans le paquet.
   if ! prov_delivery_is_binary; then
     command -v mix >/dev/null || { p_fail "mix absent — lance d'abord 15-toolchain"; verdict_apply; }
@@ -126,39 +211,37 @@ apply() {
   src_sha="$(git -C "$(repo_root)" rev-parse --short HEAD 2>/dev/null || true)"
   deployed_sha="$(build_sha)"
   if [[ -n "$src_sha" && "$src_sha" == "$deployed_sha" ]] \
-      && git -C "$(repo_root)" diff --quiet HEAD -- fleet 2>/dev/null && release_present; then
-    p_ok "build déployé $deployed_sha == HEAD source (fleet propre) — rien à bâtir"
+      && git -C "$(repo_root)" diff --quiet HEAD -- runtime 2>/dev/null && release_present; then
+    p_ok "build déployé $deployed_sha == HEAD source (runtime/ propre) — rien à bâtir"
     local name _mode is_link
     while read -r name _mode is_link; do
       [[ "$is_link" -eq 1 ]] || continue
       ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
     done < <(mf_entries)
+    prune_intrus || verdict_apply   # le raccourci ne rejoue pas la pose : l'elagage se fait ici
     verdict_apply
   fi
 
-  if pgrep -f "$PREFIX_REL" >/dev/null 2>&1; then
-    p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet_v2 stop && fleet_v2 start » pour prendre le nouveau build"
+  if pgrep -f "$(prov_pgrep_pattern "$PREFIX_REL")" >/dev/null 2>&1; then
+    p_warn "une fleet tourne depuis $PROV_PREFIX — le swap est sûr, mais « fleet stop && fleet start » pour prendre le nouveau build"
   fi
 
   ensure_dir "$PROV_PREFIX" 0750 "$PROV_HUMAN:$PROV_FLEET_GROUP" || verdict_apply
   chown -R "$PROV_HUMAN:$PROV_FLEET_GROUP" "$PROV_PREFIX" || { p_fail "déverrouillage du prefix"; verdict_apply; }
 
-  # 1-bis. L'OUTILLAGE DU GATE, ET C'EST CE MODULE QUI LE DOIT — pas 10-packages.
-  #
-  # `etc/deploy-release.sh` joue `mix gate`, et le gate REFUSE de sauter ses moitiés hors-mix en silence :
-  # `shell_gate` exige `pytest` (les lcars_tests de token-saver) et `bats` (BATS_MISSING_FATAL=1
-  # posé par mix.exs), et plusieurs sondes lisent `pgrep` (procps). Aucun de ces trois n'est un
-  # paquet de RUNTIME : les mettre dans 10-packages alourdirait toute installation pour un besoin
-  # qui n'existe qu'ici, à la minute du build.
-  GATE_PACKAGES=(python3-pytest bats procps)
-  apt_ensure "${GATE_PACKAGES[@]}" || { p_fail "outillage du gate non installé (${GATE_PACKAGES[*]})"; verdict_apply; }
+  # ⚖ user 2026-09-04 (DI-07, defaut pris) : L'INSTALL NE RE-ATTESTE PAS LA SOURCE. `deploy-release.sh`
+  # jouait `mix gate` avant de batir, et le gate exigeait sur la CIBLE toute une chaine d'outillage
+  # de test — pytest, bats, procps, shellcheck, ruff, et le binaire vendor `claude` du siege pour
+  # 67 temoins du spawner. Deux jours de banc perdus le 04/09 sur des outils absents d'un poste
+  # neuf, pour attester une source que la CI et `pack.sh` attestent deja. Ce module COMPILE et
+  # POSE ; l'attestation vient d'ailleurs, et `deploy-release.sh` le dit (« gate saute »).
 
   # ⚠ L'OUTILLAGE `mix` NE SERT QU'AU BUILD, et en livraison binaire il n'y a pas de build. Le
   # raisonnement est déjà écrit trois lignes plus haut pour les paquets du gate — « un besoin qui
   # n'existe qu'ici, à la minute du build » — et il vaut a fortiori pour `hex` et `rebar` : la
   # release est faite, `deploy-release.sh` la voit et ne compile pas.
   #
-  # MESURE DU 2026-09-01, banc 2006 : `FAIL 60-deploy: commande en échec (rc=127) : … mix
+  # VU sur une cible binaire : `FAIL 60-deploy: commande en échec (rc=127) : … mix
   # local.hex` — `mix` n'existe pas sur une cible binaire, c'est le geste R5 qui le veut. Le module
   # mourait ici, donc `deploy-release.sh` n'était jamais appelé, donc la release du PAQUET n'était
   # jamais posée. Un paquet complet, refusé par un outil de compilation absent.
@@ -173,13 +256,17 @@ apply() {
     p_step "outillage mix (hex + rebar) pour $PROV_HUMAN"
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.hex --force  || verdict_apply
     run_quiet as_human env -C "$RUNTIME_DIR" mix local.rebar --force || verdict_apply
+
   fi
 
+  # Q3 : le script est de l'installeur, il vit a cote de la lib ; l'arbre source du
+  # runtime lui est DONNE, il ne le devine plus a sa position.
   run_step --ok 3 "build de la release" -- \
-    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" bash "$RUNTIME_DIR/etc/deploy-release.sh"
+    as_human env LCARS_INSTALL_PREFIX="$PROV_PREFIX" LCARS_INSTALL_LINK_DIR="$PROV_LINK_DIR" LCARS_RUNTIME_DIR="$RUNTIME_DIR" \
+      LCARS_INSTALL_SKIP_GATE=1 bash "$(dirname "$PROVISION_LIB")/deploy-release.sh"
   local install_rc="$PROV_LAST_RC"
   if [[ "$install_rc" -ne 0 && "$install_rc" -ne 3 ]]; then
-    p_fail "etc/deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
+    p_fail "deploy-release.sh en échec (rc=$install_rc — verrou contracts rouge ? warnings-as-errors ?) — le prefix reste déverrouillé pour inspection"
     verdict_apply
   fi
   release_present || { p_fail "install.sh vert mais release absente ($PREFIX_REL) — incohérence, inspecte"; verdict_apply; }
@@ -192,6 +279,7 @@ apply() {
     [[ "$is_link" -eq 1 ]] || continue
     ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
   done < <(mf_entries)
+  prune_intrus || verdict_apply   # en root : le symlink du PATH que la pose (humaine) n'a pas pu retirer
 
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + /usr/local/bin câblé"

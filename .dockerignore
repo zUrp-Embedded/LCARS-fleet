@@ -43,7 +43,7 @@ runtime/services/forge-recipe/**/*.tfvars
 runtime/services/forge-recipe/**/crash.log
 
 # ─── LE KIT DE `pack.sh`, ET C'EST CE FICHIER QUI EMPÊCHAIT L'IMAGE DE S'EN SERVIR ──────────────
-# `etc/deploy-release.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
+# `deploy/lib/deploy-release.sh:103` sait depuis toujours ne PAS recompiler : un `.source-revision` à la racine
 # plus une release dans `_build/prod/rel` disent « paquet », et il rend 0 sans gate ni compilation.
 # `pack.sh` produit exactement cette forme. Le rail poste en profite, l'install y roule en trente
 # secondes — et l'image, elle, rebâtissait, parce que les deux lignes qui le lui permettent
@@ -60,3 +60,9 @@ runtime/services/forge-recipe/**/crash.log
 # détaré l'image pose, depuis un clone elle compile, et rien à changer entre les deux.
 !runtime/_build/prod/rel
 !.source-revision
+
+# ⚖ user 2026-09-04 (Q2 du chantier deploy-independance) : « on copie deploy, sans les tests ».
+# `COPY deploy /opt/lcars/deploy` embarque l'installeur pour le doctor et l'uninstall de la boite ;
+# ses 1188 cas bats n'y servent a rien, et aucun stage ne les joue (le gate de l'installeur est
+# `deploy/gate.sh`, chez le batisseur). Meme trait que la copie du poste par `62-runtime-helpers`.
+deploy/tests

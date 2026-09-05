@@ -357,7 +357,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       base = Fleet.TestEnv.tmp_path("jg070")
       root = Path.join(base, "fleet")
       File.mkdir_p!(Path.join([root, "lib", "fleet"]))
-      File.mkdir_p!(Path.join([base, "deploy", "docker"]))
+      File.mkdir_p!(Path.join([root, "services", "box"]))
       File.mkdir_p!(Path.join([base, "deploy", "modules.d"]))
 
       File.write!(Path.join([root, "lib", "fleet", "layout.ex"]), """
@@ -374,8 +374,10 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
+      # Lot 6 : la boite cree ses zones dans `services/box/init.sh` (l'init de l'instance, produit),
+      # plus dans l'entrypoint docker — la meme ancre, au nouvel endroit.
       File.write!(
-        Path.join([root, "..", "deploy", "docker", "entrypoint.sh"]),
+        Path.join([root, "services", "box", "init.sh"]),
         "install -d -m 2775 -g fleet #{Enum.join(entrypoint_zones, " ")}\n"
       )
 
@@ -412,13 +414,13 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
              ]
     end
 
-    test "face absente de l'ENTRYPOINT → fail, l'ancien mur tient toujours", %{root: root} do
+    test "face absente de box/init.sh → fail, l'ancien mur tient toujours", %{root: root} do
       write_mirrors!(root, ["/home/projects"], ["/home/projects", "/home/projects.ops"])
 
       result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
-      assert result.evidence == ["/home/projects.ops: absent de l'entrypoint docker"]
+      assert result.evidence == ["/home/projects.ops: absent de box/init.sh (la boite)"]
     end
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do
@@ -564,6 +566,49 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     else
       assert lock.note =~ "NOT CHECKED"
       assert lock.note =~ "forge.tf"
+    end
+  end
+
+  # DI-09 (lot 11, chantier deploy-independance) — LA BRANCHE « SANS deploy/ » SE JOUE ICI, PAS
+  # SEULEMENT DANS L'IMAGE. Le temoin ci-dessus ne l'exerce que si le checkout n'a pas de `deploy/`,
+  # donc jamais sur un poste de dev : la branche qui protege le build de l'image restait une
+  # promesse. Le decor : un faux parent qui porte `fleet` (un lien vers le vrai runtime — les
+  # fichiers lus sont les vrais) et AUCUN `deploy` a cote. Chaque contrat a portee `../deploy`
+  # doit alors PASSER en NOMMANT ce qu'il n'a pas vu, jamais rougir, jamais passer en silence.
+  describe "tree_scope — un arbre SANS deploy/ passe en NOMMANT ce qu'il ne verifie pas (DI-09)" do
+    setup do
+      base = Fleet.TestEnv.tmp_path("di09-sans-deploy")
+      File.rm_rf(base)
+      File.mkdir_p!(base)
+      root = Path.join(base, "fleet")
+      File.ln_s!(Path.expand("../..", __DIR__), root)
+      on_exit(fn -> File.rm_rf(base) end)
+      refute File.dir?(Path.join(base, "deploy"))
+      {:ok, root: root}
+    end
+
+    test "roles.provisioning_locked : pass, et la note nomme la liste non lue", %{root: root} do
+      r = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_roles_provisioning_locked(root)
+      assert r.status == :pass, "status=#{r.status} note=#{inspect(r.note)}"
+      assert to_string(r.note) =~ "NOT CHECKED"
+    end
+
+    test "layout.face_roots_provisioned : pass, et la note dit que deploy/ est absent", %{
+      root: root
+    } do
+      r = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
+      assert r.status == :pass, "status=#{r.status} note=#{inspect(r.note)}"
+      assert to_string(r.note) =~ "NOT CHECKED"
+    end
+
+    test "layout.private_dir_single_source et catalogue roots : pass sans le miroir installeur",
+         %{root: root} do
+      for fun <- [:check_private_dir_single_source, :check_catalogue_roots_single_source] do
+        r = apply(Mix.Tasks.Lcars.Contracts.Check.SingleSource, fun, [root])
+
+        assert r.status == :pass,
+               "#{fun}: status=#{r.status} note=#{inspect(r.note)} evidence=#{inspect(r.evidence)}"
+      end
     end
   end
 

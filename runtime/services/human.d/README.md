@@ -29,7 +29,7 @@ Ce qui change, c'est **comment on l'invoque**, et l'écart est réel :
 |---|---|---|
 | invocation | `bash <module> <geste>` — un processus | `. <module> apply` — sourcé dans un sous-shell |
 | helpers | fournis par `provision-lib.sh` | redéfinis par le convergeur |
-| cible | la machine, ou un humain via `as_human` | l'humain de `PROV_HUMAN`, sous root |
+| cible | la machine, ou un humain via `as_human` | l'humain de `LCARS_LOGIN`, sous root |
 
 Un module ne sait donc **pas** lequel des deux le lance, et ne doit pas chercher à le savoir : il
 n'appelle que les helpers du protocole, jamais un chemin de `deploy/`. Le corollaire est

@@ -104,8 +104,7 @@ fi
 # ce qu'il exerce est ce que l'admin jouera.
 [[ "$WITH_BOX" -eq 1 ]] || die "--no-box n'a plus de sens : la structure se pose DANS la boite (gestes de l'image)" 1
 
-# LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (mesure
-# 2026-08-16 sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
+# LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (vu sur 0.8), donc un seed neuf a la passe 2 donnerait a la boite un fichier qui ne
 # correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
 # manque. On relit celui que la boite garde ; on n'en fabrique un que s'il n'y en a pas.
 SEED_PW="$("$DOCKER_BIN" exec "$BOX" cat /opt/lcars/var/tokens/forge-seed.pass 2>/dev/null | tr -d '\r\n' || true)"
@@ -121,11 +120,10 @@ BOX_IMAGE="$("$DOCKER_BIN" inspect -f '{{.Config.Image}}' "$BOX" 2>/dev/null || 
 [[ -n "$BOX_IMAGE" ]] || die "image de $BOX illisible -- roster non derivable" 4
 # ⚠ AUCUN `--catalogue`, ET C'EST LE POINT. Nommer l'arbre de l'HOTE le fait monter dans le
 # conteneur, ou la porte tourne en `nobody` : un parent en `drwxrws---` ou un `/home/<user>` en 0700
-# lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Mesure du
-# 2026-08-18 : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
+# lui reste ferme, et le refus ne peut dire que « l'image ne rend pas le roster ». Vu : la meme commande passe sur une machine ou le clone est world-readable et echoue ici.
 # L'image PORTE son catalogue ; c'est aussi le plus juste, les comptes doivent correspondre a ce que
 # la boite SERVIRA — l'arbre de l'hote peut avoir bouge depuis le build.
-ENROLL_OUT="$("$REPO_ROOT/fleet/etc/enroll-catalogue.sh" \
+ENROLL_OUT="$("$REPO_ROOT/deploy/lib/enroll-catalogue.sh" \
                 --tofu-dir "$ENROLL_DIR" \
                 --image "$BOX_IMAGE" 2>/dev/null)" \
   || die "derivation du roster en echec (enroll-catalogue.sh, image $BOX_IMAGE) -- recette non enrolee" 4
@@ -134,7 +132,7 @@ ORG="$(printf '%s\n' "$ENROLL_OUT" | sed -n 's/^PROV_FORGE_ORG="\(.*\)"$/\1/p')"
 ORG="${ORG:-fleet}"
 say "roster derive du catalogue ${ROSTER_LINE#PROV_ROLES=}"
 say "org du catalogue : $ORG"
-"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/fleet/services/forge-recipe/roles.auto.tfvars.json" \
+"$DOCKER_BIN" cp "$ENROLL_DIR/roles.auto.tfvars.json" "$BOX:/opt/lcars/services/forge-recipe/roles.auto.tfvars.json" \
   || die "roster non depose dans la recette de $BOX" 4
 rm -rf "$ENROLL_DIR"
 
@@ -148,7 +146,7 @@ printf '%s' "$SEED_PW" | "$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-g
     "$BOX" /opt/lcars/forge-gestures.sh apply < /dev/null \
   || die "apply de la structure en echec dans $BOX (rejoue-le : docker exec -u root $BOX /opt/lcars/forge-gestures.sh apply)" 4
 say "structure posee par la boite (org $ORG, teams, comptes, adhesions, propriete, depot modele)"
-say "→ relance la boite (docker restart $BOX) pour que 50-forge minte les role-tokens"
+say "→ relance la boite (docker restart $BOX) pour que 63-forge-tokens minte les role-tokens"
 
 # APRES l'apply (tofu vient de (re)poser le seed sur ce compte).
 if [[ -n "$ADMIN_TOKEN" ]]; then
@@ -186,8 +184,7 @@ fi
 # Token OPERATEUR de l'humain (~/.gitea_token) — mint par basic-auth avec le mot de passe de banc
 # qu'on vient de poser. `read:organization` est LOAD-BEARING et non evident : sans lui le token
 # rend 403 sur /orgs/.../members ET /teams/... — donc la sonde d'appartenance humaine (le
-# prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Mesure
-# le 2026-08-02 : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
+# prealable de tout onboarding projet) echoue en « NON VERIFIABLE » au lieu de repondre. Vu : minte sans ce scope, il a fait echouer un create_project UNE MARCHE plus loin
 # que le token absent, avec un message qui ressemblait a un droit manquant cote forge.
 # Un nom horodate, comme le master token, pour la meme raison : un token survivant d'une passe
 # precedente n'est plus une hypothese a formuler, c'est un cas qu'on ne peut plus rencontrer.
@@ -209,7 +206,7 @@ except Exception: print("")' 2>/dev/null || true)"
   # l'entrypoint materialise `admiral` (uid 1000) et RIEN d'autre : `$HUMAN` vient de la FORGE, et le
   # convergeur ne le fabrique qu'au boot SUIVANT le seed — precisement la relance que cette passe
   # demande deux lignes plus haut. Un `die` ici tuait l'amorcage sur un ordre qui ne peut pas etre
-  # autre : mesure du 2026-08-15, `unable to find user lcars` en sortie de passe 1.
+  # autre : vu, `unable to find user lcars` en sortie de passe 1.
   # Meme forme que le semis : on saute en le DISANT, la passe 2 pose. Ce qui garde l'oubli impossible
   # n'est pas ce message, c'est le verdict de `bench-up.sh`, qui EXIGE ce fichier apres deux passes.
   if ! "$DOCKER_BIN" exec "$BOX" id -u "$HUMAN" >/dev/null 2>&1; then
@@ -237,7 +234,7 @@ fi
 # quotes ferait resoudre les deux ici, et l'URL de la forge y est vide.
 # shellcheck disable=SC2016
 charte_out="$("$DOCKER_BIN" exec "$BOX" bash -c \
-    'cd /opt/lcars/fleet/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
+    'cd /opt/lcars/services/forge-recipe && ./provision-forge-charte.sh --forge "$FORGE_BASE_URL" --admiral "'"$ADMIN"'" --check' 2>&1)" || true
 printf '%s\n' "$charte_out" | while IFS= read -r l; do [[ -n "$l" ]] && say "charte: $l"; done
 
 # `fleet/lcars` = la source que la boite clone au boot (LCARS_SOURCE_REMOTE, la jambe runtime du
@@ -256,26 +253,30 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
     LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
-    # ⚠ `--force`, ET C'EST L'INTENTION, PAS UNE COMMODITE : la BOITE a deja pose ce depot a son
-    # boot — un « Initial commit » et une branche `tool_request` — et cet historique n'a AUCUN
-    # ancetre commun avec celui qu'on seme. Un push ordinaire est donc rejete « fetch first » sur
-    # une forge PARFAITEMENT NEUVE, ce qui se lit comme un accident et n'en est pas un : deux gestes
-    # du meme rail ecrivent le meme ref. Ce script amorce une forge DE BANC, jetable par
-    # construction, et n'ecrase que `main` — `tool_request` n'est pas touchee.
-    #
-    # ⚠ ET STDERR SE CAPTURE AU LIEU DE DISPARAITRE. La cause du rejet est dans le message de git,
-    # jamais dans le notre : un `2>/dev/null` ici a coute trois rejeux pour relire une ligne que git
-    # disait des la premiere. Il se REDACTE avant d'etre rendu — l'URL porte le jeton, et un
-    # diagnostic n'a pas le droit de le publier.
-    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" main:main 2>&1)" \
+    # ⚖ user 2026-09-04 (DI-06, lot 9) : la forge du banc porte LE CODE DE LA BOITE, pas celui de la
+    # machine. Ce qui se seme est la REVISION DE L'IMAGE (label OCI), poussee depuis le clone qui
+    # l'a batie — jamais le HEAD du clone hote, qui peut avoir avance (ou recule) depuis le build.
+    # Une revision absente du clone se REFUSE : semer autre chose, c'est un banc qui teste un code
+    # que la boite ne fait pas tourner.
+    BOX_REV="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BOX_IMAGE" 2>/dev/null || true)"
+    [[ -n "$BOX_REV" && "$BOX_REV" != "unknown" ]] \
+      || die "fleet/lcars : l'image $BOX_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/box build la pose)" 7
+    git -C "$REPO_ROOT" rev-parse -q --verify "${BOX_REV}^{commit}" >/dev/null 2>&1 \
+      || die "fleet/lcars : la revision de l'image ($BOX_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code de la BOITE ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
+    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${BOX_REV}:refs/heads/main" 2>&1)" \
       || die "fleet/lcars : main NON pousse — la boite clone cette source au boot ; sans elle le banc n'a pas de code
   git a dit : ${PUSH_ERR//"$SYS_TOKEN"/<JETON>}" 7
-    say "fleet/lcars : main pousse"
-
-    WORK_TREE="${LCARS_WORK_TREE:-/home/projects.ops/LCARS/work}"
-    [[ -d "$WORK_TREE/.git" ]] && { git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null \
-      && _ops_ok=1 || _ops_ok=0
-    if [[ "$_ops_ok" -eq 1 ]]; then say "fleet/lcars : ops pousse"; else say "fleet/lcars : ops NON pousse"; fi ; }
+    say "fleet/lcars : main pousse (revision de l'image : $BOX_REV)"
+    # Le corpus ops est un CHOIX de l'operateur, pas un chemin de cette machine : sans LCARS_WORK_TREE,
+    # rien n'est pousse et le recapitulatif le dit (⚖ user 2026-09-04, point 9 : l'atelier hors des defauts).
+    WORK_TREE="${LCARS_WORK_TREE:-}"
+    if [[ -z "$WORK_TREE" ]]; then
+      say "fleet/lcars : ops NON pousse (LCARS_WORK_TREE non pose — donne le clone qui porte la branche ops si le banc doit l'avoir)"
+    elif [[ -d "$WORK_TREE/.git" ]]; then
+      if git -C "$WORK_TREE" push -q "$LCARS_REMOTE" ops:ops 2>/dev/null; then say "fleet/lcars : ops pousse"; else say "fleet/lcars : ops NON pousse (push refuse depuis $WORK_TREE)"; fi
+    else
+      say "fleet/lcars : ops NON pousse (LCARS_WORK_TREE=$WORK_TREE n'est pas un clone)"
+    fi
 
   fi
 fi

@@ -27,12 +27,12 @@ setup() {
   # sur « Aucun fichier ou dossier de ce nom » (mesure .63, 2026-08-30). Un decor qui recopie le
   # defaut le rend indetectable, et c'est la seule espece de test qui coute plus qu'elle ne rapporte.
   DOCKER_D="$ROOT/deploy/docker"
-  mkdir -p "$BENCH" "$ROOT/fleet/services/forge-recipe" "$ROOT/deploy/lib"
+  mkdir -p "$BENCH" "$ROOT/runtime/services/forge-recipe" "$ROOT/deploy/lib"
   cp "$BATS_TEST_DIRNAME/../../docker/bench/bench-up.sh" "$BENCH/bench-up.sh"
   SRC="$BENCH/bench-up.sh"
 
   # Les composes ne sont jamais lus : docker est une doublure, et `-f <chemin>` lui est opaque.
-  : > "$ROOT/fleet/services/forge-recipe/.keep"
+  : > "$ROOT/runtime/services/forge-recipe/.keep"
   # ⚠ LA LIB EST LA VRAIE, ET PLUS UNE DOUBLURE VIDE (2026-08-18). `bench-up` la source de nouveau :
   # la derivation de l'adresse ANNONCEE (`advertise_addr`) y vit, parce qu'elle depend du substrat et
   # que la recopier ici la ferait diverger. Un stub vide rendrait `advertise_addr` introuvable et le
@@ -458,7 +458,7 @@ run_bench() {
   # Le deck derive son `redirect_uri` du `Host` de la requete et OAuth2 compare EXACTEMENT. Il y a
   # donc au moins TROIS entrees vraies : `127.0.0.1`, `localhost` (deux ORIGINES distinctes pour un
   # meme point d'ecoute — et c'est `localhost` que tape un humain) et l'adresse annoncee.
-  # Les deux premieres sont invariantes : 55-deck-oidc les seme, une fois, pour toutes les boites.
+  # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour toutes les boites.
   # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
   grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/box.env"

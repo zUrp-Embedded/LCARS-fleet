@@ -7,7 +7,7 @@
 # CE QUE CE GESTE FAIT, ET POURQUOI IL EST ICI ET PAS DANS LA BOUCLE DE BOOT. Une adhesion d'org
 # creee par API est PRIVEE : elle n'est visible que des membres. Un humain qui ouvre l'org ne voit
 # donc pas quels workers y travaillent — c'est de l'UX, pas de la surete (⚖ user 2026-08-17), et
-# rien dans le depot ne LIT cette visibilite. Le geste vivait dans `50-forge.sh`, rejoue a CHAQUE
+# rien dans le depot ne LIT cette visibilite. Le geste vivait dans `63-forge-tokens.sh`, rejoue a CHAQUE
 # `provision apply` : une convergence a chaque demarrage pour un fait qui ne peut changer qu'au
 # moment ou des comptes sont crees. Il vit desormais dans les deux gestes qui les creent.
 #

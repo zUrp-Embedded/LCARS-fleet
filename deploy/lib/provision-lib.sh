@@ -56,14 +56,14 @@ PROVISION_LIB_LOADED=1
 # Le reseau que compose cree pour un projet sans `networks:` explicite. Le runner le REJOINT : depuis
 # un conteneur, l'adresse publiee de la forge (`127.0.0.1:<port>`) designe ce conteneur-la.
 : "${PROV_FORGE_NET:=${PROV_FORGE_PROJECT}_default}"
-# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `50-forge` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
+# ⚠ CETTE LISTE GAGNE SUR LES AUTRES : `63-forge-tokens` passe `--roles "$PROV_ROLES"` au mint A4, ecrasant
 # le defaut du `.sh`. Un role absent ICI = pas de token sur une fleet fraiche = rail ops en
 # `role_token_unavailable` (BL-6-34). Son egalite avec les autres listes n'est pas derivee (BL-6-45) :
 # elle se tient a la main.
 : "${PROV_ROLES:=system_architect system_chief system_gatekeeper fleet_engineer fleet_scribe fleet_qualifier fleet_reviewer fleet_scoper fleet_vulcan}"
 : "${PROV_CATALOGUES_DIR:=/opt/lcars/var/catalogues}"
-# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache vivait
-# sous `/home` jusqu'au 2026-09-01 ; deux gestes la nomment encore — `45-catalogues` pour DIRE que le
+# ⚠ L'ANCIENNE ADRESSE DU CACHE, ET ELLE A BESOIN D'UNE SOURCE COMME LA NOUVELLE. Le cache a vecu
+# sous `/home` ; deux gestes nomment encore cette adresse — `45-catalogues` pour DIRE que le
 # reliquat subsiste, `provision uninstall` pour le porter a son bilan de sortie. Deux repli nommes
 # (`${VAR:-/home/catalogues}`) auraient fait deux sources d'un meme fait, ce que le mur des racines
 # refuse a juste titre : celle qu'on lit n'est jamais celle qu'on a corrigee.
@@ -74,7 +74,7 @@ PROVISION_LIB_LOADED=1
 # La team d'ENROLEMENT, lue par le convergeur d'humains et par le deck.
 : "${PROV_HUMANS_TEAM:=humans}"                # team forge dont l'adhesion vaut enrolement
 # LE FICHIER EST LE SEUL CANAL ENTRE MODULES : ils sont des PROCESSUS, donc `48-forge-host` ne peut
-# rien exporter vers `50-forge`. Il écrit son adresse, on la relit ici.
+# rien exporter vers `63-forge-tokens`. Il écrit son adresse, on la relit ici.
 # En conteneur ce fichier n'existe pas : l'environnement du compose gagne.
 : "${PROV_FORGE_URL:=${FORGE_BASE_URL:-$(cat "$PROV_TOKENS_DIR/forge.url" 2>/dev/null || true)}}"
 # LA FORGE A DEUX ADRESSES, ET LES CONFONDRE CASSE LA PORTE DU DECK. Celle du dessus est celle que
@@ -506,9 +506,9 @@ write_atomic() {
   # (chmod, chown, mv) REUSSISSENT tous sur un tampon tronque : le fichier bascule, PROV_CHANGED
   # s'incremente, et `p_chg` imprime POSE. Un echec d'ecriture ressortait donc en SUCCES.
   #
-  # MESURE DU 2026-09-01 : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
+  # VU : `( ulimit -f 0; printf x | write_atomic "$D/cible" 0644 )` rendait
   # « POSE », rc 0, et un fichier de ZERO octet. Tout ce que le rail pose sous /etc passe par ici —
-  # `seat.uid` vide fait refuser tout `fleet_v2 start` par le GUARD B ; `services.env` vide demarre
+  # `seat.uid` vide fait refuser tout `fleet start` par le GUARD B ; `services.env` vide demarre
   # les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide laisse l'interop Windows OUVERTE sur
   # une machine dont le bilan annonce la frontiere armee. Le pire des trois est le dernier : il est
   # SILENCIEUX et il ment sur une frontiere de securite.
@@ -542,6 +542,16 @@ ensure_mode() {
   # stat rend le mode SANS zéro de tête ; on normalise la cible pareil (0750 → 750).
   local want_mode="${mode#0}"
   if [[ "$cur_mode" != "$want_mode" ]]; then
+    # ⚠ UN MODE NUMERIQUE NE RETIRE JAMAIS LE SETGID D'UN REPERTOIRE — c'est GNU chmod, pas une
+    # option : « you can set (but not clear) the bits with a numeric mode ». Un repertoire arrive
+    # en 2755 des qu'il herite d'un parent setgid ou qu'un `cp -a src/. dst/` lui recopie celui
+    # de sa source (tout checkout pose dans un arbre `fleet` setgid). Le `chmod 0755` passait, la
+    # relecture lisait 2755, et la primitive rendait « mode 2755 ≠ 755 après chmod » : le module
+    # echouait sur un etat qu'il venait de poser, et le rail cessait d'etre rejouable.
+    # Cas vu : un second apply de `44-media` sur `/opt/lcars/share/avatars`.
+    # On efface d'abord les bits speciaux ; le mode numerique REPOSE ensuite ceux qu'il demande
+    # (2775 remet son setgid), donc rien n'est perdu pour un objet qui les veut.
+    chmod u-s,g-s,o-t "$path" 2>/dev/null || true
     chmod "$mode" "$path" || { p_fail "ensure_mode: chmod $mode refusé: $path"; return 1; }
     changed=1
   fi
@@ -583,6 +593,38 @@ ensure_dir() {
   ensure_mode "$path" "$mode" "$owner"
 }
 
+# ─── prov_scaffold_dir / prov_promote_dir — L'ECHAFAUDAGE NE SE JOURNALISE PAS (M8) ─────────────
+#
+# ⚠ LE JOURNAL ACCUMULAIT DES CHEMINS D'ECHAFAUDAGE (relecture hostile du 2026-09-04). Les poseurs
+# atomiques (`16-node`, `44-media`, `62-runtime-helpers`) creaient leur `.partial` / `.new` par
+# `ensure_dir`, qui note `posed_dir` : le journal du banc portait `/opt/node-24.20.0.partial`,
+# `/opt/lcars/share/doc.partial`, `/opt/lcars/{etc,services,bin,…}.new` — des repertoires qui
+# n'existent plus une seconde apres la bascule. Ceux qu'aucun ancetre declare n'absorbe remontent
+# dans la ligne « hors table » du plan d'uninstall : du bruit sur la seule ligne dont tout
+# l'interet est que l'operateur ne peut PAS en deviner le contenu.
+#
+# Un repertoire d'echafaudage se note APRES la bascule, SOUS SON NOM FINAL — et c'est la primitive
+# qui bascule qui le note, pour que « ce qu'une primitive pose, elle le note » reste vrai (le
+# temoin du journal interdit `prov_journal_note posed_dir` dans un module). Ni compteur ni « POSÉ »
+# ici : la bascule est le geste que le module annonce lui-meme.
+prov_scaffold_dir() { # prov_scaffold_dir <chemin> <mode> [owner] — un repertoire de travail, hors journal
+  local path="$1" mode="$2" owner="${3:-}"
+  prov_refuse_symlink_path "$path" || return 1
+  [[ -d "$path" ]] || mkdir -p "$path" || { p_fail "prov_scaffold_dir: mkdir refusé: $path"; return 1; }
+  chmod "$mode" "$path" || { p_fail "prov_scaffold_dir: chmod $mode refusé: $path"; return 1; }
+  [[ -z "$owner" ]] || chown "$owner" "$path" || { p_fail "prov_scaffold_dir: chown $owner refusé: $path"; return 1; }
+  return 0
+}
+prov_promote_dir() { # prov_promote_dir <echafaudage> <final> — bascule (rm -rf du final, mv), puis note le nom FINAL
+  local from="$1" to="$2"
+  [[ -d "$from" ]] || { p_fail "prov_promote_dir: échafaudage absent: $from"; return 1; }
+  [[ -n "$to" && "$to" != / ]] || { p_fail "prov_promote_dir: destination vide ou racine"; return 1; }
+  rm -rf -- "$to"
+  mv -- "$from" "$to" || { p_fail "prov_promote_dir: bascule refusée: $from → $to"; return 1; }
+  prov_journal_note posed_dir "$to"
+  return 0
+}
+
 # ─── ensure_group / ensure_member — création idempotente ─────────────────────────────────────────
 # prov_group_owns_preserved <groupe> <racine preservee…> -> 0 si un objet PRESERVE porte ce groupe
 # `-print -quit` : on cherche l'EXISTENCE d'un porteur, pas la liste. Le premier suffit et le
@@ -609,6 +651,39 @@ prov_manifest_gid() {
   awk -v g="$grp" '{ c=$1; sub(/:.*/, "", c) } c=="group" && $2==g && $3!="-" { print $3; exit }' "$f"
 }
 
+# prov_manifest_substrate <chemin> -> la colonne substrat que la TABLE declare pour cet objet, ou vide
+# Lu par `25-directories` (`prov_dir_scope`) pour savoir OU une entree de sa table se mesure : le
+# module n'a AUCUNE colonne substrat a lui — la table est la seule source de ce fait, et deux
+# tables qui disent le meme fait divergent.
+# ⚠ MEME FICHIER, MEME REPLI que `prov_manifest_gid`, et PAS de fonction commune : un temoin de
+# `system_manifest.bats` eval-ue `prov_manifest_gid` SEULE, son corps doit rester autonome.
+prov_manifest_substrate() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $2==p { print $5; exit }' "$f"
+}
+
+# prov_manifest_mode <chemin>  -> la colonne mode que la TABLE declare pour cet objet, ou vide
+# prov_manifest_owner <chemin> -> la colonne proprietaire (`user:group`) qu'elle declare, ou vide
+# Lus par les POSEURS (`44-media` pour share/*, `46-tofu` pour tofu/*) : un objet declare se
+# mesure par le module qui le pose, jamais par une seconde table dans `25-directories` — le mur
+# POSEUR veut un seul poseur par chemin. La table est la source du mode ; le module n'en porte
+# plus de litteral, il y lit ce qu'il doit poser ET ce qu'il doit relire.
+# ⚠ `mode` REND VIDE SUR LE TRAIT `unset` : la table le dit elle-meme, « MODE OBSERVE, PAS
+# AFFIRME — un doctor qui compare ce mode compare a une valeur que personne ne garantit ». Vide
+# aussi sur `-`, comme le GID : un tiret est une colonne absente, pas une valeur.
+# ⚠ MEME FICHIER, MEME REPLI que `prov_manifest_gid`, et PAS de fonction commune (voir ci-dessus).
+prov_manifest_mode() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $1 !~ /(^|:)unset(:|$)/ && $2==p && $3!="-" { print $3; exit }' "$f"
+}
+prov_manifest_owner() {
+  local path="$1" f="${LCARS_SYSTEM_MANIFEST:-$(dirname "$PROVISION_LIB")/../system.manifest}"
+  [[ -r "$f" ]] || return 0
+  awk -v p="$path" '$1 !~ /^#/ && $2==p && $4!="-" { print $4; exit }' "$f"
+}
+
 ensure_group() {
   local grp="$1" gid="${2:-}"
   [[ -n "$gid" ]] || gid="$(prov_manifest_gid "$grp")"
@@ -627,12 +702,31 @@ ensure_group() {
 }
 
 
+# ─── prov_in_group <user> <groupe> — l'appartenance EFFECTIVE, capturee puis testee ─────────────
+# ⚠ PAS `id -nG | tr | grep -qx` (DI-13, la classe de DI-12). Sous `pipefail`, `grep -q` sort au
+# premier match et ferme le tuyau ; un producteur qui ecrit encore prend SIGPIPE et le pipeline
+# rend 141 — « pas membre » alors qu'il l'est, une fois sur dix sous charge. Six sites portaient la
+# forme (20, 21, 22 x2, cette lib x2). Capturer, puis tester la capture : aucun lecteur ne ferme
+# rien avant la fin. MUR I16 (idiom_walls) interdit le retour de la forme.
+# `pgrep -f "$x"` VOIT SON PROPRE APPELANT des que l'argv de celui-ci contient `x` (un `bash -c
+# '... pgrep -f x ...'`, un `ssh host 'pgrep -f x'`, un temoin qui cite le chemin) — trois fois
+# mordu dans ce chantier, une fois en tuant la commande qui mesurait. Le motif `[x]yz` matche
+# `xyz` mais pas la chaine `[x]yz` qui le porte : c'est LA forme, et le MUR I17 l'exige partout.
+prov_pgrep_pattern() { # prov_pgrep_pattern <chaine> -> le motif ERE qui ne matche pas son porteur
+  local s="$1"; printf '[%s]%s\n' "${s:0:1}" "${s:1}"
+}
+
+prov_in_group() { # prov_in_group <user> <groupe> -> 0 si <user> est membre de <groupe> (session : id -nG)
+  local groups; groups="$(id -nG "$1" 2>/dev/null)" || return 1
+  [[ " $groups " == *" $2 "* ]]
+}
+
 ensure_member() {
   local user="$1" grp="$2"
   id "$user" >/dev/null 2>&1 || { p_fail "ensure_member: user inconnu: $user"; return 1; }
-  if ! id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
+  if ! prov_in_group "$user" "$grp"; then
     run_quiet usermod -aG "$grp" "$user" || return 1
-    id -nG "$user" | tr ' ' '\n' | grep -qx "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
+    prov_in_group "$user" "$grp" || { p_fail "$user toujours hors de $grp après usermod"; return 1; }
     PROV_CHANGED=$((PROV_CHANGED + 1))
     p_chg "$user ∈ $grp (effectif au prochain login — ou « sg $grp -c '<cmd>' » dans cette session)"
   fi
@@ -802,13 +896,42 @@ prov_print_credentials() { # lit des lignes « libellé<TAB>login<TAB>secret » 
 # ─── apt_ensure <pkg…> — install par liste des MANQUANTS, verdict réel paquet par paquet ─────────
 # ⚠ `dpkg -s` REUSSIT SUR UN PAQUET RETIRE. Un `apt-get remove` laisse le paquet en etat `rc`
 # (removed, config-files) : sa base de donnees existe toujours, donc `dpkg -s` sort 0 et une sonde
-# batie dessus le croit pose. Mesure du 2026-08-30, banc .63 : apres `provision uninstall --yes`,
+# batie dessus le croit pose. Vu : apres `provision uninstall --yes`,
 # l'`apply` suivant n'a REINSTALLE ni `docker-ce` ni `ttyd` — les deux etaient en `rc` — et trois
 # modules sont tombes en cascade (la forge non montee, la console sans serveur, quatre unites
 # mortes). Le rail ne savait pas reinstaller ce qu'il venait de desinstaller.
 # `db:Status-Status` rend l'etat REEL : `installed`, `config-files`, `not-installed`.
 pkg_installed() { # pkg_installed <paquet> — 0 seulement s'il est REELLEMENT installe
   [[ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" == "installed" ]]
+}
+
+# ⚠ APT ATTENDAIT SANS LIMITE. Mesure du 2026-09-05 (banc 2003, install depuis le tar de pack.sh) :
+# le port 80 vers archive.ubuntu.com ne repondait plus sur toute la machine (https repondait), et
+# `apt-get install` est reste UNE HEURE dans select() — l'installeur muet avec lui, aucune ligne,
+# aucun verdict. Un delai par connexion et deux reprises : un miroir mort se dit en deux minutes.
+APT_ACQUIRE_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+
+# Sur echec d'apt : DIRE quel miroir, et si le meme repond en https — c'etait exactement le cas, et
+# le remede (les sources en https) tient en une ligne quand on le connait.
+apt_mirror_diag() {
+  local u h
+  while IFS= read -r u; do
+    [[ -n "$u" ]] || continue
+    if curl -fsI -m 10 -o /dev/null "$u/" 2>/dev/null; then
+      p_warn "apt: le miroir $u repond — l'echec est ailleurs (paquet, signature, espace disque) : relis la sortie d'apt"
+      continue
+    fi
+    case "$u" in
+      http://*)
+        h="https://${u#http://}"
+        if curl -fsI -m 10 -o /dev/null "$h/" 2>/dev/null; then
+          p_fail "apt: $u INJOIGNABLE en http alors que $h repond — passe tes sources apt en https (URIs: de /etc/apt/sources.list.d/*.sources) et relance"
+        else
+          p_fail "apt: $u injoignable, en http comme en https — reseau, proxy ou DNS de cette machine"
+        fi ;;
+      *) p_fail "apt: $u injoignable — reseau, proxy ou DNS de cette machine" ;;
+    esac
+  done < <(apt-get indextargets --format '$(URI)' 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p' | sort -u)
 }
 
 apt_ensure() {
@@ -829,8 +952,11 @@ apt_ensure() {
   [[ "${#already[@]}" -gt 0 ]] && prov_journal_note apt_already "${already[@]}"
   [[ "${#missing[@]}" -eq 0 ]] && return 0
   p_chg "apt: install ${missing[*]}"
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1
-  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}" || return 1
+  # les options APRES le verbe : apt les accepte partout, et les doublures des temoins lisent $1
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get update "${APT_ACQUIRE_OPTS[@]}" -qq \
+    || { apt_mirror_diag; return 1; }
+  run_quiet env DEBIAN_FRONTEND=noninteractive apt-get install "${APT_ACQUIRE_OPTS[@]}" -y --no-install-recommends "${missing[@]}" \
+    || { apt_mirror_diag; return 1; }
   # ⚠ ON NOTE CE QUI RÉPOND, PAS CE QU'ON A DEMANDÉ. `apt-get install` peut rendre 0 en ayant servi
   # moins que la liste ; c'est `dpkg -s`, paquet par paquet, qui dit ce qui est là. Le journal ne
   # revendique donc que des paquets vérifiés présents.
@@ -950,25 +1076,50 @@ as_human() {
 human_home() { getent passwd "$PROV_HUMAN" | cut -d: -f6 || true; }
 
 # ─── is_fleet_human [login] — celui-ci peut-il faire tourner une fleet ? ───────────────────────────
-# DEUX CONDITIONS, PARCE QU'IL Y A DEUX RÈGLES, et c'est le même couple que le GUARD B de
-# `bin/fleet_v2` (le BEAM hérite de l'uid de son lanceur, ses pods avec) :
-#   1. `uid >= UID_MIN` — la frontière système/humain. Elle n'est pas à inventer : `/etc/login.defs`
-#      la déclare et `useradd` la lit.
-#   2. `uid != SYSADMIN_UID` — la réservation du siège, que `login.defs` ne peut PAS exprimer :
-#      UID_MIN vaut 1000 et le sysadmin EST 1000, donc le système le classe utilisateur régulier.
+# DEUX CONDITIONS, PARCE QU'IL Y A DEUX REGLES, et c'est le meme couple que le GUARD B de
+# `bin/fleet` (le BEAM herite de l'uid de son lanceur, ses pods avec) :
+#   1. `UID_MIN <= uid <= UID_MAX` — la frontiere systeme/humain. Elle n'est pas a inventer :
+#      `/etc/login.defs` la declare et `useradd` la lit. Les comptes systeme sont en dessous,
+#      `nobody` (65534, sur toute machine) au-dessus.
+#   2. `uid != SYSADMIN_UID` — la reservation du siege, que `login.defs` ne peut PAS exprimer :
+#      le sysadmin est souvent le premier uid humain, donc le systeme le classe utilisateur regulier.
 #
-# La règle est ré-écrite ici plutôt qu'appelée chez `bin/fleet_v2` parce que le provisioning ne peut
-# pas dépendre de l'artefact qu'il INSTALLE : une machine vierge n'a pas ce binaire quand le cycle
-# démarre. Le nombre, lui, n'est pas recopié — il vient de login.defs.
+# LA REGLE EST CELLE DE `runtime/services/lib/human-protocol.sh` (`uid_bounds`, `is_fleet_human`),
+# la seule ecriture cote produit. Elle est RE-ECRITE ici plutot qu'appelee : l'installeur ne source
+# pas de code du produit (PLAYBOOK, grille de nature : un partage est interdit dans les deux sens),
+# le protocole exige un sujet de module et pose un vocabulaire fait pour lui, et `22-fleet-human`
+# joue AVANT `62-runtime-helpers` — la decision d'installer ne peut pas dependre d'un fichier que
+# l'install pose. Le nombre, lui, n'est pas recopie — il vient de login.defs. Ce qui tient les deux
+# corps d'accord est un temoin (`provision-lib.bats`, « meme matrice, memes verdicts, meme phrase »),
+# pas ce commentaire.
 #
-# ⚠ ARITHMÉTIQUE, jamais des chaînes : en comparaison lexicographique `"999" < "1000"` est FAUX, et
-# un compte système à uid 999 passerait la garde.
-# Les bornes se LISENT dans login.defs, elles ne s'écrivent pas ici. `|| true` LOAD-BEARING : sous
-# `set -euo pipefail`, un login.defs absent tuerait le module AVANT la garde, et une garde qui
-# s'évanouit sur une lecture ratée est pire que pas de garde.
-_uid_bound() { # <UID_MIN|UID_MAX> <défaut>
-  local v; v="$(awk -v k="^$1" '$0 ~ k {print $2}' "${PASSWD_DEFS:-/etc/login.defs}" 2>/dev/null | head -n1 || true)"
-  if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '%s' "$2"; fi
+# ⚠ AUCUN REPLI SUR 1000 NI 60000, et c'est delibere (⚖ user 2026-09-05, solution A) — la politique
+# que le BEAM applique a son boot (runtime.exs, R-no-uid-min) et `console-humans.sh` a sa liste.
+# Un login.defs illisible n'est pas « la frontiere est a 1000 », c'est « la frontiere n'est pas
+# etablie » : `is_fleet_human` rend non pour tout le monde, `fleet_humans` ne rend personne, et le
+# remede — le fichier — est dit UNE FOIS par processus (un `$( )` herite de la trace ; dit D'ABORD
+# dans un `$( )`, elle ne remonte pas, et le processus le redira une fois — jamais plus).
+#
+# ⚠ ARITHMETIQUE, jamais des chaines : en comparaison lexicographique `"999" < "1000"` est FAUX, et
+# un compte systeme a uid 999 passerait la garde. `|| true` LOAD-BEARING : sous `set -euo pipefail`,
+# un login.defs absent tuerait le module AVANT la garde, et une garde qui s'evanouit sur une
+# lecture ratee est pire que pas de garde.
+PROV_UID_MIN="" PROV_UID_MAX="" PROV_UID_BOUNDS_WHY=""
+_PROV_UID_BOUNDS_SAID=""
+prov_uid_bounds() { # pose PROV_UID_MIN et PROV_UID_MAX depuis login.defs — 0 si les deux se lisent ; 1 sinon, remede dans PROV_UID_BOUNDS_WHY, dit une fois
+  local defs="${PASSWD_DEFS:-/etc/login.defs}" manque=""
+  PROV_UID_MIN="$(awk '$1 == "UID_MIN" {print $2; exit}' "$defs" 2>/dev/null || true)"
+  PROV_UID_MAX="$(awk '$1 == "UID_MAX" {print $2; exit}' "$defs" 2>/dev/null || true)"
+  [[ "$PROV_UID_MIN" =~ ^[0-9]+$ ]] || manque=UID_MIN
+  [[ -n "$manque" || "$PROV_UID_MAX" =~ ^[0-9]+$ ]] || manque=UID_MAX
+  if [[ -z "$manque" ]]; then PROV_UID_BOUNDS_WHY=""; return 0; fi
+  PROV_UID_MIN="" PROV_UID_MAX=""
+  PROV_UID_BOUNDS_WHY="la frontiere systeme/humain n'est pas etablie ($manque illisible dans $defs) — la borne est declaree par le systeme, pas par ce processus : repare $defs"
+  if [[ -z "$_PROV_UID_BOUNDS_SAID" ]]; then
+    _PROV_UID_BOUNDS_SAID=1
+    p_warn "$PROV_UID_BOUNDS_WHY"
+  fi
+  return 1
 }
 
 # ─── LE SIÈGE EST UN FAIT, ET IL N'A PAS DE DÉFAUT ──────────────────────────────────────────────
@@ -994,12 +1145,12 @@ prov_seat_uid() { # rend l'uid du siège, ou 1 si aucune source ne l'établit
 # pas 1000 — donc au siège lui-même dès qu'il est ailleurs, c'est-à-dire exactement le compte que
 # cette fonction existe pour écarter. Se fermer est la seule direction sûre quand la borne manque.
 is_fleet_human() { # [login] (défaut: PROV_HUMAN) — 0 si oui
-  local login="${1:-$PROV_HUMAN}" uid uid_min seat
+  local login="${1:-$PROV_HUMAN}" uid seat
   uid="$(id -u -- "$login" 2>/dev/null || true)"
   [[ "$uid" =~ ^[0-9]+$ ]] || return 1
   seat="$(prov_seat_uid)" || return 1
-  uid_min="$(_uid_bound UID_MIN 1000)"
-  (( uid >= uid_min )) && (( uid != seat ))
+  prov_uid_bounds || return 1
+  (( uid >= PROV_UID_MIN && uid <= PROV_UID_MAX )) && (( uid != seat ))
 }
 
 # ─── fleet_humans — CEUX QUI EXISTENT DÉJÀ SUR CETTE MACHINE ────────────────────────────────────
@@ -1014,12 +1165,24 @@ fleet_humans() {
     echo "fleet_humans: siège non établi (ni ${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}, ni LCARS_SYSADMIN_UID) — population non mesurable" >&2
     return 1
   }
-  awk -F: -v m="$(_uid_bound UID_MIN 1000)" -v M="$(_uid_bound UID_MAX 60000)" \
-      -v s="$seat" \
+  # Bornes illisibles : PERSONNE — une population devinee compterait `nobody` ou des comptes
+  # systeme, et `64-services` l'annoncerait comme des humains de fleet.
+  prov_uid_bounds || return 1
+  awk -F: -v m="$PROV_UID_MIN" -v M="$PROV_UID_MAX" -v s="$seat" \
       '$3+0 >= m && $3+0 <= M && $3+0 != s {print $1}' "${PASSWD_FILE:-/etc/passwd}"
 }
 
 repo_root() { readlink -f "$(dirname "$PROVISION_LIB")/../.."; }
+# L'ARBRE DU PRODUIT — `runtime/` dans un checkout, la racine `/opt/lcars` une fois pose. Le
+# ponçage d'alice a renomme `fleet/` en `runtime/`, et `/opt/lcars/runtime` est deja le PREFIX de
+# la release : l'arbre embarque (services, etc, bin) vit donc A PLAT sous `/opt/lcars/`, comme le
+# convergeur du produit le suppose (`/opt/lcars/services/human.d`). Le discriminant est l'arbre A PLAT
+# lui-meme : une racine posee porte `services/` ; un checkout ne porte `services/` nulle part a sa
+# racine. Il se lit par un `stat` sur un ENFANT DIRECT de la racine — jamais en descendant dans
+# `runtime/` : le PREFIX de la release y est `0750 root:fleet`, et un lecteur hors du groupe
+# (un daemon) verrait « pas de rel/ » et prendrait la release pour l'arbre source (relecture
+# hostile du 2026-09-04 : `FAIL 60-deploy: manifest introuvable: /opt/lcars/runtime/etc/…`).
+product_tree() { local r; r="$(repo_root)"; if [[ -d "$r/runtime" && ! -e "$r/services" ]]; then printf '%s' "$r/runtime"; else printf '%s' "$r"; fi; }
 
 # ─── LA RÉVISION DE LA SOURCE, ET POURQUOI ELLE DOIT VOYAGER AVEC LA COPIE ───────────────────────
 PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
@@ -1035,8 +1198,9 @@ PROV_SOURCE_STAMP="${LCARS_SOURCE_STAMP:-.source-revision}"
 #
 # LA COLLISION : `62-runtime-helpers` écrivait le SECOND sous le nom du PREMIER, en `/opt/lcars/
 # .source-revision`. Or `repo_root()` remonte trois crans depuis `<racine>/deploy/lib` — donc
-# rejouer `/opt/lcars/deploy/provision`, qui EST le geste nominal du convergeur
-# (`fleet/services/human-converger.sh:132`), rend `root == /opt/lcars` : le tampon des auxiliaires
+# rejouer `/opt/lcars/deploy/provision` — la copie posée, sur un poste sans checkout ; le
+# convergeur, lui, ne rejoue plus `provision`, il source `services/human.d/*.sh` — rend
+# `root == /opt/lcars` : le tampon des auxiliaires
 # devenait le discriminant de livraison. Un poste installé depuis un clone se déclarait BINAIRE au
 # rejeu, `15-toolchain` rendait « toolchain non requise » sans jamais évaluer son plancher OTP, et
 # `16-node` ne mesurait plus rien. Sur une machine qui COMPILE, le doctor rendait vert sur des
@@ -1092,7 +1256,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   p_warn   ON NE SAIT PAS, ou la question est HORS DU PERIMETRE du rail. Un objet qu'on ne peut pas
 #            lire d'ici ; une adhesion d'org qu'une personne pose elle-meme sur la forge.
 #
-# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS, le 2026-09-01. D'abord en laissant
+# ⚠ CE CRITERE A ETE POSE APRES S'ETRE TROMPE DANS LES DEUX SENS. D'abord en laissant
 # `p_drift` sur des sondes qui DISAIENT ne pas savoir — « non mesurable », « NON SONDABLE »,
 # « illisible » — ce qui produisait cinq drifts sans sudo qui disparaissaient avec, sur une machine
 # identique. Puis, en corrigeant, en passant a `p_warn` une forge muette et un manifeste illisible :
@@ -1109,8 +1273,7 @@ prov_params_line() { # la ligne `params` du journal : `NOM=valeur …`, seulemen
 #   absent        il n'est pas la, et on est en position de l'affirmer
 #   unmeasurable  on ne peut meme pas conclure : un ancetre n'est pas traversable d'ici
 #
-# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Mesure du 2026-09-01 sur le banc
-# 2004 : `55-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
+# ⚠ POURQUOI QUATRE MOTS POUR CE QUI S'ECRIVAIT `[[ -r "$f" ]]`. Vu : `66-deck-oidc` annoncait « /etc/lcars/deck-oidc.json absent » d'un fichier de 336 octets
 # parfaitement present — `0640 root:lcars-system`, que l'appelant ne peut pas OUVRIR mais peut
 # parfaitement CONSTATER. Le test de lisibilite tenait lieu de test d'existence, et le doctor
 # declarait non conforme une machine qui l'etait.
@@ -1321,7 +1484,7 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # second apply passait : defaut intermittent, donc invisible a toute campagne qui rejoue.
 #
 # ⚠ LE PAQUET D'ABORD, ET C'EST UN ORDRE, PAS UNE PREFERENCE. `pack.sh` embarque la release en
-# `fleet/_build/prod/rel/lcars_fleet` : elle est LA avant d'etre posee, et elle EST celle que
+# `runtime/_build/prod/rel/lcars_fleet` : elle est LA avant d'etre posee, et elle EST celle que
 # `60-deploy` posera. La release deja posee peut, elle, sortir d'un paquet PLUS ANCIEN — rejouer un
 # paquet neuf sur une machine installee deriverait alors le roster d'une release perimee.
 #
@@ -1329,13 +1492,12 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # son geste en fait, et les deux appelants n'en font pas la meme chose.
 # ─── LA COPIE POSÉE N'EST PAS UN ARBRE DE BUILD ─────────────────────────────────────────────────
 #
-# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Mesure du
-# 2026-09-02, bancs 2006 ET 2007, sur un apply rejoué depuis `/opt/lcars/deploy/provision` —
-# le geste NOMINAL du convergeur :
+# ⚠ TROIS MODULES ONT TENTÉ D'Y BÂTIR, ET LES TROIS ONT ÉCHOUÉ AU MÊME ENDROIT. Vu sur un apply rejoué depuis
+# `/opt/lcars/deploy/provision` — le rejeu depuis la copie posée, sur un poste sans checkout :
 #
 #   FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#   FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
-#   FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#   FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
+#   FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
 # Et le premier ne faisait pas qu'échouer : `npm ci` a INSTALLÉ 176 Mo d'arbre npm SOUS /opt/lcars
 # avant de rater son build. La copie n'est pas seulement incapable de bâtir — la laisser essayer la
@@ -1347,27 +1509,33 @@ prov_seat_binding() { # prov_seat_binding [candidat_unix]
 # poste en livraison SOURCE rejoué depuis la copie n'a ni `mix.exs` ni `node_modules`, et il n'en a
 # pas besoin — la release et le `dist/` sont déjà posés.
 #
-# `62-runtime-helpers` embarque `fleet/{deploy,etc,services,bin}` et `{assets,catalogues}` pour que
+# `62-runtime-helpers` embarque `{deploy,etc,services,bin}` a plat et `{assets,catalogues}` pour que
 # le rail puisse se REJOUER, pas pour qu'il puisse se RECONSTRUIRE. La distinction est le contrat
 # de cette copie.
 prov_dans_la_copie() { # prov_dans_la_copie -> 0 si ce rail tourne depuis la copie posée
   [[ "$(repo_root)" == "${PROV_ROOT}" ]]
 }
 
-prov_release_bin() { # prov_release_bin -> chemin d'un `lcars_fleet` EXECUTABLE, ou rien (rc 1)
-  local c
-  for c in "${PROV_RELEASE_BIN:-}" \
-           "$(repo_root)/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-           "${PROV_PREFIX:-}/rel/lcars_fleet/bin/lcars_fleet"; do
-    [[ -n "$c" && -x "$c" ]] && { printf '%s\n' "$c"; return 0; }
-  done
-  return 1
-}
 
 prov_roles() {
   local out="$PROV_ROLES" root
   local bin="${PROV_RELEASE_BIN:-$PROV_PREFIX/rel/lcars_fleet/bin/lcars_fleet}"
-  local entry="${PROV_ENTRYPOINT:-/opt/lcars/entrypoint.sh}"
+  # ⚠ LES PORTES OUTIL VIVENT DANS L'ENTRYPOINT, ET IL N'EST PAS AU MEME ENDROIT SUR LES DEUX RAILS :
+  # `/opt/lcars/entrypoint.sh` dans l'image, `<racine>/deploy/docker/entrypoint.sh` sur un poste
+  # (62-runtime-helpers l'exclut de ses auxiliaires et embarque `deploy/` entier). Un seul chemin
+  # ici rendait le roster des catalogues installes VIDE sur tout poste : `63-forge-tokens` ne mintait que
+  # le plancher, et les roles d'un catalogue installe n'avaient jamais de jeton. Meme resolution
+  # que `forge-gestures.sh` (`_entrypoint_path`), et `-r` plutot que `-x` pour la meme raison : la
+  # copie posee est 0644.
+  # La porte outil est « lcars tool roles-tfvars », dans la CLI du PRODUIT —
+  # elle vivait dans l'entrypoint de l'image, que ce fichier devinait a deux adresses. La CLI est
+  # posee par 60 (`$PROV_LINK_DIR/lcars`) ; avant, ou depuis une copie, celle de l'arbre.
+  local entry="${PROV_LCARS_CLI:-}" c
+  if [[ -z "$entry" ]]; then
+    for c in "$PROV_LINK_DIR/lcars" "$(product_tree)/bin/lcars"; do
+      [[ -r "$c" ]] && { entry="$c"; break; }
+    done
+  fi
 
   # ⚠ `roles-tfvars` ET NON `roles` : les deux portes ne rendent pas la meme chose. `roles` rend des
   # noms de ROLE (`dev`, `writer`) quand `PROV_ROLES` est une liste de COMPTES (`web-demo_dev`) —
@@ -1376,12 +1544,12 @@ prov_roles() {
   #
   # `.roles` porte les comptes du catalogue, `.system_roles` ceux du substrat partage. Le canon ne
   # connait pas cette coupure — il connait des comptes — donc on recolle ici.
-  if [[ -x "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
+  if [[ -n "$entry" && -r "$entry" && -x "$bin" && -d "$PROV_CATALOGUES_DIR" ]] && command -v jq >/dev/null; then
     for root in "$PROV_CATALOGUES_DIR"/*/; do
       [[ -f "${root}catalogue.yaml" ]] || continue
       # `|| true` : un catalogue dont la porte refuse est un catalogue que le boot refusera aussi,
       # et ce n'est pas au mint de trancher. On n'ajoute simplement rien pour lui.
-      out="$out $("$entry" roles-tfvars "${root%/}" 2>/dev/null \
+      out="$out $(LCARS_FLEET_BIN="$bin" bash "$entry" tool roles-tfvars "${root%/}" 2>/dev/null \
                   | jq -r '(.roles[]?, .system_roles[]?)' 2>/dev/null | tr '\n' ' ' || true)"
     done
   fi

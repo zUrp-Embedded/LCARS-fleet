@@ -50,12 +50,17 @@ setup() {
   chmod 0700 "$XDG_RUNTIME_DIR"
 
   # ⚠ MEME LECON, DEUXIEME VARIABLE, ET CELLE-CI EST ARRIVEE PAR LE HAUT. Ces temoins tournent
-  # AUSSI depuis `provision` — `60-deploy` appelle `etc/deploy-release.sh`, qui joue le gate — et le runner
+  # AUSSI depuis `provision` — `60-deploy` appelle `deploy/lib/deploy-release.sh`, qui joue le gate — et le runner
   # exporte `PROV_SUBSTRATE` (`provision:128`). Un temoin qui declare son substrat sans effacer
   # celui-la mesure donc la machine qui le lance : vert sur un poste WSL, rouge le 2026-08-23 sur
   # `.63` (Linux natif) sur du code identique. Le decor POSSEDE ces deux valeurs ; un test qui en
   # veut une la pose lui-meme, sur la ligne qui la concerne.
   unset PROV_SUBSTRATE LCARS_WSL_NETWORKING_MODE
+
+  # ⚠ LE SIEGE SE LIT DANS UN FICHIER AVANT LA VARIABLE (`prov_seat_uid`), et ce fichier existe sur
+  # toute machine provisionnee (MUR I9) : les temoins de la regle d'uid, en bas de ce fichier, posent
+  # leur siege par la variable — le canal fichier est ferme ici pour que leur declaration s'applique.
+  export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/aucun-siege-pose/seat.uid"
 }
 
 # Helper: run a module-like snippet (fresh bash, module shell options, lib sourced).
@@ -293,75 +298,6 @@ STUB
   [[ "$output" == *"toujours hors de"* ]]
 }
 
-# ─── prov_release_bin — UN MODULE LISAIT LA RELEASE DOUZE RANGS AVANT SON POSEUR ────────────────
-#
-# ⚠ `48-forge-host` derivait le roster du catalogue par `--release "$PROV_PREFIX/rel/…"`, chemin
-# ecrit par `60-deploy` SEUL. `provision:315` ordonne les modules par leur rang et `provision:327`
-# refuse un `AFTER` qui ne precede pas : 48 ne PEUT donc pas declarer la dependance. Sur la premiere
-# install d un paquet, `enroll-catalogue.sh` mourait sur « release non executable », le module
-# rendait « roster non derivable de l arbre » — message qui accuse l ARBRE alors que le paquet est
-# complet — et `workstation` sortait 1. Le second apply passait : intermittent, donc invisible a
-# toute campagne qui rejoue.
-#
-# ⚠ `repo_root` EST REDEFINI DANS CHAQUE DECOR, et il le faut : sans ca, la fonction irait chercher
-# le `_build` du vrai depot et ces temoins mesureraient si la machine qui les joue a compile.
-
-@test "prov_release_bin : le PAQUET d abord — la posee peut sortir d un paquet plus ancien" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/pose/rel/lcars_fleet/bin"
-    printf "#!/bin/sh\n" > "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
-    printf "#!/bin/sh\n" > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    chmod 0755 "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" \
-               "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_PREFIX="$D/pose"
-    [ "$(prov_release_bin)" = "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : sans paquet, la release POSEE — le rejeu depuis /opt/lcars n en a pas d autre" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/copie" "$D/pose/rel/lcars_fleet/bin"
-    printf "#!/bin/sh\n" > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    chmod 0755 "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/copie"; }
-    PROV_PREFIX="$D/pose"
-    [ "$(prov_release_bin)" = "$D/pose/rel/lcars_fleet/bin/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : un chemin NON executable ne compte pas — c est la garde qui manquait" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/pose/rel/lcars_fleet/bin"
-    # present mais PAS executable : exactement ce que 48 ne verifiait pas
-    : > "$D/pose/rel/lcars_fleet/bin/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_PREFIX="$D/pose"
-    rc=0; prov_release_bin >/dev/null || rc=$?
-    [ "$rc" -eq 1 ]
-  '
-  [ "$status" -eq 0 ]
-}
-
-@test "prov_release_bin : PROV_RELEASE_BIN prime sur les deux — le seam garde son dernier mot" {
-  module_sh '
-    D="$BATS_TEST_TMPDIR/rel"
-    mkdir -p "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin" "$D/ailleurs"
-    printf "#!/bin/sh\n" > "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet"
-    printf "#!/bin/sh\n" > "$D/ailleurs/lcars_fleet"
-    chmod 0755 "$D/paquet/fleet/_build/prod/rel/lcars_fleet/bin/lcars_fleet" "$D/ailleurs/lcars_fleet"
-    repo_root() { echo "$D/paquet"; }
-    PROV_RELEASE_BIN="$D/ailleurs/lcars_fleet"
-    [ "$(prov_release_bin)" = "$D/ailleurs/lcars_fleet" ]
-  '
-  [ "$status" -eq 0 ]
-}
-
 # ─── write_atomic — regression guards on the primitive itself ────────────────────────────────────
 
 @test "write_atomic: identical content is a no-op (no change counted, mtime preserved)" {
@@ -383,7 +319,7 @@ STUB
 # POSE, et le verbe rendait 0. Mesure du 2026-09-01 : sous `ulimit -f 0`, un fichier de ZERO octet
 # annonce POSE.
 #
-# Ce que ca coute la ou le rail ecrit : `seat.uid` vide fait refuser tout `fleet_v2 start` par le
+# Ce que ca coute la ou le rail ecrit : `seat.uid` vide fait refuser tout `fleet start` par le
 # GUARD B ; `services.env` vide demarre les quatre daemons sans FORGE_BASE_URL ; `wsl.conf` vide
 # laisse l interop Windows OUVERTE sur une machine dont le bilan annonce la frontiere armee.
 #
@@ -957,7 +893,7 @@ STUB
 }
 
 @test "run_step --ok N : un code tolere n'est pas un echec, et il NE TUE PAS l'appelant" {
-  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `etc/deploy-release.sh` rend 3
+  # ⚠ LE DEFAUT QUE CE TEMOIN GARDE ETAIT ECRIT, COMMENTE, ET INATTEIGNABLE. `deploy/lib/deploy-release.sh` rend 3
   # quand la release est posee mais le cablage PATH incomplet — le cas NOMINAL des qu'il tourne en
   # tant qu'humain. 60-deploy portait la tolerance juste sous l'appel... et sous `set -euo pipefail`
   # une commande nue qui rend 3 tue le module AVANT la ligne qui lit `$?`. Le commentaire decrivait
@@ -988,7 +924,7 @@ STUB
 @test "run_step --ok N : la tolerance survit a --verbose — un mode d'affichage ne change pas un verdict" {
   # ⚠ LE DEFAUT PRECEDENT AVAIT UNE SECONDE MOITIE, ET ELLE A SURVECU AU CORRECTIF. La branche
   # `PROV_VERBOSE=1` de `run_step` deleguait a `run_quiet`, qui ne connait AUCUNE tolerance et
-  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `etc/deploy-release.sh` redevenait un echec des que
+  # `p_fail`-e sur tout rc non nul : le meme rc 3 de `deploy/lib/deploy-release.sh` redevenait un echec des que
   # quelqu'un lancait `provision --verbose` — c'est-a-dire exactement quand ca va mal et qu'on
   # regarde. Et `PROV_LAST_RC` n'etait pas pose du tout : l'appelant qui le relit lisait le code d'un
   # appel PRECEDENT, donc prenait une decision sur la mesure d'autre chose.
@@ -1425,8 +1361,8 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
 # 2007), sur un apply rejoue depuis `/opt/lcars/deploy/provision` — le geste NOMINAL du
 # convergeur :
 #     FAIL 44-media:      npm run build (/opt/lcars/assets/github.io)
-#     FAIL 48-forge-host: mix deps.get (/opt/lcars/fleet)
-#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/fleet
+#     FAIL 48-forge-host: mix deps.get (/opt/lcars/services)
+#     FAIL 60-deploy:     source runtime introuvable: /opt/lcars/services
 #
 # Et le premier ne faisait pas qu echouer : `npm ci` a INSTALLE 176 Mo sous /opt/lcars avant de
 # rater son build. La copie n est pas seulement incapable de batir — la laisser essayer la pollue.
@@ -1465,4 +1401,215 @@ stub_dpkg() { # stub_dpkg <arch> — un dpkg qui repond <arch> ; vide = pas de d
     [ "$rc" -eq 1 ]
   '
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# ─── ensure_mode : un bit special en trop se RETIRE (DI-09, lot 11) ────────────────────────────
+# Le mode numerique demande est le mode ENTIER : un setgid herite d'un `mkdir` sous un parent 2775
+# n'est pas « presque 0755 », c'est un autre mode, et chmod ne le retire que si on le lui dit.
+@test "ensure_mode : un setgid herite est RETIRE quand le mode demande ne le porte pas — et POSE quand il le porte" {
+  local d="$BATS_TEST_TMPDIR/parent"
+  mkdir -p "$d/enfant"; chmod 2775 "$d/enfant"
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 0755"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 755 ]
+  [[ "$output" == *"POSÉ"* ]]
+  run bash -c ". '$LIB'; PROV_MODULE_TAG=t; ensure_mode '$d/enfant' 2775"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$d/enfant")" = 2775 ]
+}
+
+# ─── product_tree : l'arbre du produit, lisible par TOUT LE MONDE (relecture hostile 2026-09-04) ─
+# Un checkout porte `runtime/` et rien nomme `services/` a sa racine ; une machine posee porte
+# `services/` a plat (et `runtime/` est le PREFIX de la release, 0750 root:fleet). Le discriminant
+# se lit par un stat sur un ENFANT DIRECT de la racine, jamais en descendant dans `runtime/`, qu'un
+# daemon hors du groupe fleet ne peut pas ouvrir.
+pt_root() { # pt_root <racine> -> ce que product_tree rend avec une lib copiee sous <racine>/deploy/lib
+  mkdir -p "$1/deploy/lib"; cp "$LIB" "$1/deploy/lib/provision-lib.sh"; cp "$BATS_TEST_DIRNAME/../../lib/docker-endpoint.sh" "$1/deploy/lib/"
+  PROVISION_LIB="$1/deploy/lib/provision-lib.sh" bash -c '. "$PROVISION_LIB" >/dev/null 2>&1; product_tree'
+}
+@test "product_tree : un checkout (runtime/ present, pas de services/ a la racine) → runtime/" {
+  local r="$BATS_TEST_TMPDIR/co"; mkdir -p "$r/runtime/etc"
+  [ "$(pt_root "$r")" = "$r/runtime" ]
+}
+@test "product_tree : une machine posee (services/ a plat, runtime/ = la release) → la racine" {
+  local r="$BATS_TEST_TMPDIR/posee"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d" "$r/etc"
+  [ "$(pt_root "$r")" = "$r" ]
+}
+@test "product_tree : la release ILLISIBLE (0750 root:fleet, lecteur hors du groupe) ne change pas la reponse" {
+  [ "$(id -u)" -ne 0 ] || skip "root lit tout"
+  local r="$BATS_TEST_TMPDIR/posee2"; mkdir -p "$r/runtime/rel/lcars_fleet" "$r/services/human.d"
+  chmod 0000 "$r/runtime"
+  local got; got="$(pt_root "$r")"; chmod 0755 "$r/runtime"
+  [ "$got" = "$r" ]
+}
+
+# ─── DI-13 : l'appartenance a un groupe se capture puis se teste — jamais `| grep -qx` ─────────
+
+@test "prov_in_group : membre de son groupe primaire → 0 ; d'un groupe qui n'existe pas → 1" {
+  module_sh 'prov_in_group "$(id -un)" "$(id -gn)" && echo DEDANS'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"DEDANS"* ]]
+  module_sh 'prov_in_group "$(id -un)" "groupe-decor-inexistant-di13" || echo DEHORS'
+  [[ "$output" == *"DEHORS"* ]]
+}
+
+@test "prov_in_group : un groupe dont le nom est un PREFIXE d'un autre n'est pas pris pour lui" {
+  # `[[ " $groups " == *" $grp "* ]]` : les espaces de bordure font le mot entier, comme `grep -x`.
+  module_sh 'id() { echo "fleet-console fleet_bis"; }; prov_in_group x fleet || echo DEHORS; prov_in_group x fleet_bis && echo DEDANS'
+  [[ "$output" == *"DEHORS"* ]]
+  [[ "$output" == *"DEDANS"* ]]
+}
+
+@test "prov_in_group : un compte inconnu → 1, sans bruit sur stderr" {
+  # `run` capture stdout ET stderr : une sortie reduite au seul mot prouve le silence.
+  module_sh 'if prov_in_group compte-decor-inexistant-di13 fleet; then echo DEDANS; else echo DEHORS; fi'
+  [ "$output" = "DEHORS" ]
+}
+
+@test "prov_pgrep_pattern : le motif matche la cible et JAMAIS la commande qui le porte" {
+  local m; m="$(bash -c "source '$LIB' >/dev/null 2>&1; prov_pgrep_pattern zorglub-$$")"
+  [ "$m" = "[z]orglub-$$" ]
+  # le porteur est le `bash -c` lui-meme : son argv contient le motif. Avec le crochet, pgrep ne
+  # le voit pas ; avec la chaine nue, il SE voit — c est le piege que le motif ferme.
+  run bash -c "pgrep -f '$m' >/dev/null && echo VU || echo PAS-VU"
+  [[ "$output" == *"PAS-VU"* ]]
+  run bash -c "pgrep -f 'zorglub-$$' >/dev/null && echo VU || echo PAS-VU"
+  [[ "$output" == "VU" ]]
+}
+
+# ─── LA FRONTIERE SYSTEME/HUMAIN : FAIL-CLOSED, ET LA MEME REGLE QUE LE PROTOCOLE DU PRODUIT ────
+#
+# ⚖ user 2026-09-05 (lot 14, solution A + C + E de `17-DEUX-OUVERTS.md`). La lib devinait
+# `1000`/`60000` (`_uid_bound … <defaut>`) quand login.defs etait illisible ; le BEAM refuse de
+# booter dans ce cas, et `console-humans.sh` ne rend aucune liste. La regle est desormais celle de
+# `runtime/services/lib/human-protocol.sh` — RE-ECRITE ici (la lib ne source pas de code du produit,
+# et 22 joue avant 62), donc tenue egale par CE temoin : meme matrice, memes verdicts, meme phrase.
+#
+# Un `id` de decor (zoe 1001, admiral 1000 = le siege, svc 999, nobody 65534) : aucun compte de la
+# machine n'est lu. Le siege est pose par la variable, le fichier est absent (MUR I9).
+uid_rule_decor() {
+  export LCARS_SYSADMIN_UID=1000
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$PASSWD_DEFS"
+  export PASSWD_FILE="$BATS_TEST_TMPDIR/passwd"
+  printf '%s\n' 'root:x:0:0:root:/root:/bin/bash' 'svc:x:999:999::/nonexistent:/usr/sbin/nologin' \
+    'admiral:x:1000:1000::/home/admiral:/bin/bash' 'zoe:x:1001:1001::/home/zoe:/bin/bash' \
+    'nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin' > "$PASSWD_FILE"
+  UBIN="$BATS_TEST_TMPDIR/ubin"; mkdir -p "$UBIN"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'case "$*" in *zoe*) echo 1001 ;; *admiral*) echo 1000 ;; *svc*) echo 999 ;; *nobody*) echo 65534 ;; *) exit 1 ;; esac' \
+    > "$UBIN/id"
+  chmod 0755 "$UBIN/id"
+  PROTO="$BATS_TEST_DIRNAME/../../../runtime/services/lib/human-protocol.sh"
+  [ -f "$PROTO" ] || { echo "protocole du produit introuvable : $PROTO" >&2; return 1; }
+}
+
+lib_verdict() { # lib_verdict <login> -> "rc|remede" selon la lib de l'installeur
+  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
+    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$PROV_UID_BOUNDS_WHY\""
+}
+
+proto_verdict() { # proto_verdict <login> -> "rc|remede" selon le protocole du produit
+  bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' LCARS_HUMAN_PROTOCOL_HOST=1
+    export LCARS_MODULE_PROTOCOL='$(dirname "$PROTO")/module-protocol.sh' LCARS_PRIVATE_DIR='$BATS_TEST_TMPDIR'
+    . '$PROTO'
+    is_fleet_human '$1' 2>/dev/null; rc=\$?; printf '%s|%s' \"\$rc\" \"\$UID_BOUNDS_WHY\""
+}
+
+@test "uid: zoe est un humain ; svc (sous UID_MIN), nobody (au-dessus de UID_MAX) et le siege ne le sont pas" {
+  uid_rule_decor
+  [ "$(lib_verdict zoe)" = "0|" ]
+  [ "$(lib_verdict svc)" = "1|" ]
+  [ "$(lib_verdict nobody)" = "1|" ]
+  [ "$(lib_verdict admiral)" = "1|" ]
+}
+
+@test "uid: bornes ILLISIBLES — is_fleet_human rend non a tout le monde, fleet_humans ne rend personne, le remede est dit UNE FOIS" {
+  uid_rule_decor
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  run bash -c "set -uo pipefail; export PATH='$UBIN:$PATH' PROVISION_MODULE=test-mod; source '$LIB' >/dev/null 2>&1
+    is_fleet_human zoe && echo ZOE_OUI
+    echo \"pop=[\$(fleet_humans | paste -sd, -)]\"
+    fleet_humans; fleet_humans
+    echo FIN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ZOE_OUI"* ]]
+  [[ "$output" == *"pop=[]"* ]]
+  [[ "$output" == *"FIN"* ]]
+  [[ "$output" == *"UID_MIN illisible dans $PASSWD_DEFS"* ]]
+  [[ "$output" == *"repare $PASSWD_DEFS"* ]]
+  # UNE fois : dit par `is_fleet_human` dans le processus, la trace est heritee par le `$( )` de
+  # `pop=` comme par les deux appels suivants — quatre lectures, un remede.
+  [ "$(grep -c "n'est pas etablie" <<<"$output")" -eq 1 ]
+  refute grep -qE '(^|[^0-9])1000([^0-9]|$)' <<<"$output"
+}
+
+@test "uid: UID_MAX absent du fichier n'etablit pas la frontiere non plus — nobody ne passe jamais par un defaut" {
+  uid_rule_decor
+  printf 'UID_MIN\t1000\n' > "$PASSWD_DEFS"
+  [ "$(lib_verdict nobody)" = "1|la frontiere systeme/humain n'est pas etablie (UID_MAX illisible dans $PASSWD_DEFS) — la borne est declaree par le systeme, pas par ce processus : repare $PASSWD_DEFS" ]
+}
+
+@test "uid: LA REGLE EST CELLE DU PROTOCOLE DU PRODUIT — meme matrice, memes verdicts, meme phrase" {
+  # Le temoin d'egalite des deux corps. Quatre fichiers login.defs (lisible ; absent ; sans UID_MAX ;
+  # plancher a 2000) × quatre logins : la lib et le protocole doivent repondre pareil, remede compris.
+  #
+  # LECTURE A TRAVERS LA COUTURE deploy→runtime, ASSUMEE (lot 15). Ce temoin compare DEUX CORPS par
+  # nature — la copie de la lib et sa source, `runtime/services/lib/human-protocol.sh` — donc il ne
+  # peut pas vivre d'un seul cote. C'est une LECTURE au sens de la grille du chantier
+  # deploy-independance (jamais un `source`, jamais un appel : la lib ne charge rien du produit), et
+  # c'est la seule qui reste ici : les murs I18 sont scindes, chaque cote grep ses propres fichiers.
+  # Hors matrice, deliberement : le siege INCONNU — la lib repond non a tout le monde, le protocole
+  # ne garde pas ce cas ; c'est un ecart connu, nomme au rapport du lot 14, pas mesure ici.
+  uid_rule_decor
+  local variant login lib proto bad=0
+  for variant in lisible absent sans-max plancher-2000; do
+    case "$variant" in
+      lisible)       printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+      absent)        export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs" ;;
+      sans-max)      printf 'UID_MIN\t1000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+      plancher-2000) printf 'UID_MIN\t2000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs" ;;
+    esac
+    for login in zoe svc nobody admiral; do
+      lib="$(lib_verdict "$login")"; proto="$(proto_verdict "$login")"
+      [ "$lib" = "$proto" ] || { echo "$variant/$login : lib=« $lib » protocole=« $proto »" >&2; bad=1; }
+    done
+  done
+  [ "$bad" -eq 0 ]
+  # GARDE D'INSTRUMENT : la matrice a bien parle — le cas absent porte un remede, le cas lisible aucun.
+  export PASSWD_DEFS="$BATS_TEST_TMPDIR/nulle-part/login.defs"
+  [[ "$(lib_verdict zoe)" == "1|la frontiere"* ]]
+  printf 'UID_MIN\t1000\nUID_MAX\t60000\n' > "$BATS_TEST_TMPDIR/login.defs"; export PASSWD_DEFS="$BATS_TEST_TMPDIR/login.defs"
+  [ "$(lib_verdict zoe)" = "0|" ]
+}
+
+@test "apt_ensure : apt-get recoit un DELAI et des reprises — un miroir mort se dit, il ne suspend pas l'installeur (banc 2003, 2026-09-05)" {
+  local b="$BATS_TEST_TMPDIR/apt"; mkdir -p "$b"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "'"$b"'/argv"' \
+    'case " $* " in *" indextargets "*) echo "http://archive.ubuntu.com/ubuntu/dists/x/InRelease"; exit 0;; esac' 'exit 100' > "$b/apt-get"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *https://archive.ubuntu.com*) exit 0;; *) exit 28;; esac' > "$b/curl"
+  chmod 0755 "$b"/*
+  run bash -c "set -uo pipefail; export PATH=\"$b:$PATH\"; . '$LIB' >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0; apt_ensure jq; echo rc=\$?"
+  [[ "$output" == *"rc=1"* ]]
+  # le delai et les reprises sont sur la ligne d'apt-get update
+  grep -qE 'Acquire::http::Timeout=30' "$b/argv"
+  grep -qE 'Acquire::Retries=2' "$b/argv"
+  grep -qE '^update .*-o Acquire' "$b/argv"   # le verbe d abord : les doublures lisent \$1
+  # le diagnostic nomme le miroir ET le remede — http mort, https vivant
+  [[ "$output" == *"archive.ubuntu.com INJOIGNABLE en http"* ]]
+  [[ "$output" == *"passe tes sources apt en https"* ]]
+}
+
+@test "apt_ensure : miroir vivant mais apt en echec — le diagnostic ne blame pas le reseau" {
+  local b="$BATS_TEST_TMPDIR/apt2"; mkdir -p "$b"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "not-installed"' > "$b/dpkg-query"
+  printf '%s\n' '#!/usr/bin/env bash' 'case " $* " in *" indextargets "*) echo "http://archive.ubuntu.com/ubuntu/dists/x/InRelease"; exit 0;; esac' 'exit 100' > "$b/apt-get"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$b/curl"
+  chmod 0755 "$b"/*
+  run bash -c "set -uo pipefail; export PATH=\"$b:$PATH\"; . '$LIB' >/dev/null 2>&1; PROV_CHANGED=0 PROV_FAILED=0; apt_ensure jq; echo rc=\$?"
+  [[ "$output" == *"rc=1"* ]]
+  [[ "$output" == *"le miroir http://archive.ubuntu.com repond"* ]]
+  refute_out 'INJOIGNABLE' <<<"$output"
 }

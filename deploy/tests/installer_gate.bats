@@ -19,7 +19,7 @@ load refute
 setup() {
   PORTE_SRC="$BATS_TEST_DIRNAME/../gate.sh"
   [ -f "$PORTE_SRC" ]
-  SHELL_GATE="$BATS_TEST_DIRNAME/../../fleet/test/shell_gate.sh"
+  SHELL_GATE="$BATS_TEST_DIRNAME/../../runtime/test/shell_gate.sh"
 
   DECOR="$BATS_TEST_TMPDIR/decor"
   mkdir -p "$DECOR/tests"
@@ -137,4 +137,100 @@ stub_bats() { # stub_bats <rc rendu>
   [ -n "$a" ] || { echo "motif de neutralisation introuvable dans la porte"; return 1; }
   [ -n "$b" ] || { echo "motif de neutralisation introuvable dans shell_gate.sh"; return 1; }
   [ "$a" = "$b" ] || { echo "les deux copies ont DERIVE : porte=$a  shell_gate=$b"; return 1; }
+}
+
+go7_shape() { # go7_shape <fichier> <fonction> — la FORME d'un predicat : fenetre lue, drapeaux, motifs
+  # `echo "$h" | grep`, `grep <<<"$h"` et `[[ -n "$(… | grep …)" ]]` (capture puis test, DI-13)
+  # sont une ecriture, pas un sens : on ne garde que ce qui decide — chaque `head -N` et chaque
+  # `grep -<drapeaux> <motif>`, drapeaux tries, `q` retire (c est la forme du test, pas le motif).
+  local line flags pat
+  sed -n "/^$2()/,/^}/p" "$1" \
+    | grep -oE "head -[0-9]+|grep -[A-Za-z]+[[:space:]]+('[^']*'|\"[^\"]*\")" \
+    | while IFS= read -r line; do
+        case "$line" in
+          head*) printf '%s\n' "$line" ;;
+          *) flags="${line#grep -}"; flags="${flags%%[[:space:]]*}"; flags="${flags//q/}"
+             pat="${line#grep -*[[:space:]]}"; pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat:1:${#pat}-2}"
+             printf 'grep -%s %s\n' "$(printf '%s' "$flags" | fold -w1 | sort | tr -d '\n')" "$pat" ;;
+        esac
+      done
+}
+
+@test "LES DEUX PREDICATS GO-7 S'ACCORDENT avec leurs originaux du pre-commit — deux copies derivent (bis)" {
+  # `go7_md_header` et `go7_source_header` sont des copies de `check_md_header` et
+  # `check_source_header` (`runtime/git-hooks/pre-commit`), commentees comme telles et gardees par
+  # rien (relecture hostile 2026-09-04, S4). Meme motif que le bloc BATS_ENV juste au-dessus : ce
+  # qui doit rester egal est la fenetre lue (`head -15`, `head -20`), les drapeaux (`-F`, `-E`, `-i`)
+  # et chaque motif. Un motif appris d'un seul cote ferait passer au pre-commit un fichier que la
+  # porte refuse, ou l'inverse.
+  local hook="$BATS_TEST_DIRNAME/../../runtime/git-hooks/pre-commit"
+  [ -f "$hook" ] || skip "pre-commit absent de cet arbre (contexte installeur seul)"
+  local pair a b
+  for pair in go7_md_header:check_md_header go7_source_header:check_source_header; do
+    a="$(go7_shape "$PORTE_SRC" "${pair%%:*}")"
+    b="$(go7_shape "$hook" "${pair##*:}")"
+    [ -n "$a" ] || { echo "${pair%%:*} : aucun motif lu dans la porte"; return 1; }
+    [ -n "$b" ] || { echo "${pair##*:} : aucun motif lu dans le hook"; return 1; }
+    [ "$a" = "$b" ] || { echo "les deux copies ont DERIVE (${pair%%:*} / ${pair##*:}) :"; echo "porte: $a"; echo "hook : $b"; return 1; }
+  done
+  # TEMOIN DU TEMOIN : le lecteur voit bien les quatre motifs et les deux fenetres — une extraction
+  # morte des deux cotes rendrait deux vides egaux.
+  a="$(go7_shape "$PORTE_SRC" go7_md_header)"
+  [[ "$a" == *'head -15'* && "$a" == *'**Date**'* && "$a" == *'^\s+date:'* && "$a" == *'<!--\s*Date\s*:'* ]] || { echo "md : $a"; return 1; }
+  a="$(go7_shape "$PORTE_SRC" go7_source_header)"
+  [[ "$a" == *'head -20'* && "$a" == *'SOURCE:|AUTHOR:|STARDATE:'* ]] || { echo "source : $a"; return 1; }
+}
+
+# ─── LES DEUX MOITIES AJOUTEES PAR Q4 (plancher shellcheck, en-tetes GO-7) — relecture 2026-09-04 ──
+# La porte de l'installeur est le SEUL porteur de ces deux proprietes pour deploy/ (shell_gate.sh
+# exclut deploy/). Sans ces temoins, les neutraliser laissait ce fichier vert sur ses huit cas.
+@test "shellcheck ABSENT = ECHEC nomme — la porte ne joue pas un plancher qu'elle ne peut pas mesurer" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  local nosc="$BATS_TEST_TMPDIR/nosc"; mkdir -p "$nosc"
+  local d f n; local -a dirs; IFS=: read -ra dirs <<< "$PATH"
+  for d in "${dirs[@]}"; do [ -d "$d" ] || continue; for f in "$d"/*; do [ -x "$f" ] || continue; n="$(basename "$f")"; [ "$n" = shellcheck ] && continue; [ -e "$nosc/$n" ] || ln -sf "$f" "$nosc/$n"; done; done
+  [ ! -e "$nosc/shellcheck" ]
+  run env PATH="$nosc" "$nosc/bash" "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shellcheck absent"* ]] || { echo "rc=$status : $output"; return 1; }
+}
+
+@test "decor sans AUCUN fichier shell = ECHEC nomme — la decouverte est cassee, pas l'installeur (B1, quatrieme cas)" {
+  # Les trois autres refus (shellcheck absent, plancher, GO-7) supposent qu'il y a quelque chose a
+  # auditer. Zero fichier shell sous la porte n'est pas « rien a redire » : c'est le `find`, ou la
+  # reconnaissance par shebang, qui ne rend plus rien — et un plancher joue sur une liste vide
+  # rendrait un verdict (shellcheck sans fichier sort en usage) qui parlerait d'autre chose.
+  # ⚠ LA COPIE DE LA PORTE EST ELLE-MEME UN FICHIER SHELL par les regles de sa decouverte (`.sh`, ou
+  # un shebang bash) : pour un decor SANS fichier shell, la copie perd les deux. Elle se joue par
+  # `bash <fichier>`, le shebang ne decide de rien ici — on mesure la garde, pas le shebang.
+  stub_bats 0
+  printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"   # un cas sans shebang : un corpus, pas un shell
+  tail -n +2 "$PORTE_SRC" > "$DECOR/porte"; chmod 0755 "$DECOR/porte"
+  rm -f "$DECOR/gate.sh"
+  # TEMOIN DU TEMOIN : le decor ne porte bien AUCUN fichier shell au sens de la porte
+  refute grep -qE '^#!' "$DECOR/porte"
+  run bash "$DECOR/porte"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aucun fichier shell"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"decouverte est cassee"* ]]
+  [[ "$output" != *"BATS APPELE"* ]] || { echo "bats a ete lance sur un corpus que la porte n'a pas pu auditer"; return 1; }
+  [[ "$output" != *"shellcheck plancher"* ]] || { echo "le plancher a ete joue sur une liste vide"; return 1; }
+}
+
+@test "le plancher shellcheck REFUSE un avertissement dans un script du corpus" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  printf '%s\n' '#!/usr/bin/env bash' '# SOURCE: deploy/tests/warn.sh' 'echo $(ls)' > "$DECOR/tests/warn.sh"
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shellcheck plancher"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"warn.sh"* ]]
+}
+
+@test "GO-7 REFUSE un script sans en-tete declaratif, et le nomme" {
+  stub_bats 0; printf '@test "un" { true; }\n' > "$DECOR/tests/un.bats"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo ok' > "$DECOR/tests/nohead.sh"
+  run bash "$DECOR/gate.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GO-7"* ]] || { echo "rc=$status : $output"; return 1; }
+  [[ "$output" == *"nohead.sh"* ]]
 }
