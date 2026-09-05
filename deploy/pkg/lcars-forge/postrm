@@ -1,0 +1,69 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-forge/postrm
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-forge` apres le retrait : les conteneurs de la forge et
+#         du runner descendent (remove : volumes GARDES ; purge : volumes retires, dit)
+#
+# dpkg l'appelle : postrm remove · postrm purge · postrm upgrade · …
+#
+# ⚠ LA PORTE EST LA SONDE DE LA LIB, pas `command -v docker` : sous WSL la CLI vit dans un montage
+# hors PATH (docker-endpoint.sh). La lib de `lcars` est encore la — dpkg retire les dependants
+# avant leurs dependances — et elle derive les noms des projets (`PROV_FORGE_PROJECT`,
+# `PROV_RUNNER_PROJECT`) de la base que le journal a retenue (`params PROV_FORGE_BASE=…`), comme le
+# runner le fait. Les compose sont deja partis avec le paquet : `compose -p <projet> down` travaille
+# par les labels, sans fichier.
+#
+# Un daemon injoignable n'est pas un echec de ce script : il DIT ce qui reste et comment l'enlever.
+set -euo pipefail
+
+say() { echo "lcars-forge/postrm: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
+ROOT="${PROV_ROOT:-/opt/lcars}"
+JOURNAL="${LCARS_JOURNAL_FILE:-$ROOT/var/install.journal}"
+
+case "${1:-}" in
+  remove) volumes=0 ;;
+  purge)  volumes=1 ;;
+  *) exit 0 ;;
+esac
+
+if [[ ! -r "$LIB" ]]; then
+  say "lib introuvable ($LIB) — lcars est deja parti ; la forge, si elle tourne encore, se descend par « docker compose -p <base>-forge down »"
+  exit 0
+fi
+
+# La base des projets, telle que le journal l'a retenue (sinon le defaut de la lib).
+base="$(sed -n 's/^params  *//p' "$JOURNAL" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PROV_FORGE_BASE=//p' | head -1 || true)"
+[[ -z "$base" ]] || export PROV_FORGE_BASE="$base"
+
+rc=0
+bash -c '
+  set -euo pipefail
+  . "$1"; volumes="$2"
+  if ! docker_endpoint; then
+    echo "lcars-forge/postrm: docker injoignable — $PROV_DOCKER_WHY" >&2
+    echo "lcars-forge/postrm:   la forge et le runner ($PROV_FORGE_PROJECT, $PROV_RUNNER_PROJECT) restent tels quels" >&2
+    exit 3
+  fi
+  for p in "$PROV_FORGE_PROJECT" "$PROV_RUNNER_PROJECT"; do
+    if "$PROV_DOCKER_BIN" compose -p "$p" down >/dev/null 2>&1; then
+      echo "lcars-forge/postrm: projet $p : conteneurs et reseau retires" >&2
+    else
+      echo "lcars-forge/postrm: projet $p : « compose down » a refuse (projet absent ?) — rien de plus" >&2
+    fi
+    vols="$("$PROV_DOCKER_BIN" volume ls -q --filter "label=com.docker.compose.project=$p" 2>/dev/null || true)"
+    [[ -n "$vols" ]] || continue
+    if [[ "$volumes" -eq 1 ]]; then
+      for v in $vols; do
+        if "$PROV_DOCKER_BIN" volume rm "$v" >/dev/null 2>&1; then echo "lcars-forge/postrm: volume $v RETIRE (purge)" >&2
+        else echo "lcars-forge/postrm: volume $v non retire — « docker volume rm $v »" >&2; fi
+      done
+    else
+      for v in $vols; do echo "lcars-forge/postrm: volume $v GARDE — il porte les depots ; « apt purge lcars-forge » ou « docker volume rm $v »" >&2; done
+    fi
+  done
+' _ "$LIB" "$volumes" || rc=$?
+[[ "$rc" -eq 0 || "$rc" -eq 3 ]] || say "descente en echec (rc=$rc) — relis la sortie ; rien n'est suppose"
+exit 0
