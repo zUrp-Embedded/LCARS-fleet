@@ -1362,7 +1362,15 @@ PROV_CHANNEL_FILE="${LCARS_CHANNEL_FILE:-$PROV_CHANNEL_FILE_CANON}"
 prov_channel() {
   local v
   PROV_CHANNEL=""
-  [[ -e "$PROV_CHANNEL_FILE" ]] || { PROV_CHANNEL=aucun; printf 'aucun\n'; return 0; }
+  if [[ ! -e "$PROV_CHANNEL_FILE" ]]; then
+    # ⚠ SANS TAMPON, IL Y A DEUX MACHINES : jamais posee (aucun), ou posee AVANT le tampon (un kit ou une
+    # source d'avant le lot 2 — mesure 2003, 2026-09-05 : la porte y a pose des .deb par-dessus un kit).
+    # Un produit present sans tampon est « inconnu » : un kit ou une source le reprend et ecrit le
+    # tampon ; un .deb ne se pose pas dessus (dpkg possederait des fichiers qu'un autre a poses).
+    if [[ -d "$PROV_PREFIX" || -e "$PROV_ROOT/.source-revision" ]]; then PROV_CHANNEL=inconnu; printf 'inconnu\n'
+    else PROV_CHANNEL=aucun; printf 'aucun\n'; fi
+    return 0
+  fi
   v="$(head -n1 "$PROV_CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
   case "$v" in
     source|kit|deb) PROV_CHANNEL="$v"; printf '%s\n' "$v"; return 0 ;;

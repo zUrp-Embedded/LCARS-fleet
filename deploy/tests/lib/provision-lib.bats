@@ -1800,3 +1800,17 @@ dpkg_double() { # dpkg_double <statut> <lignes de -V…> — un `dpkg` sur le PA
   canal 'PATH=/nonexistent prov_dpkg_report "sous /x" /x; echo "rc=$? drift=$PROV_DRIFT"'
   [[ "$output" == *"WARN"*"dpkg est absent d'ici"*"rc=0 drift=0"* ]]
 }
+
+@test "prov_channel : un produit POSE sans tampon = « inconnu » (pose avant le tampon) — ni aucun, ni un canal" {
+  local etc="$BATS_TEST_TMPDIR/etc"; mkdir -p "$etc" "$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel; echo \"var=\$PROV_CHANNEL\""
+  [[ "$output" == *"inconnu"*"var=inconnu"* ]]
+  # sans produit pose : aucun
+  rmdir "$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel"
+  [[ "$output" == "aucun" ]]
+  # un tampon present gagne sur la presence du produit
+  printf 'kit\n' > "$etc/channel"; mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  run bash -c "set -uo pipefail; export LCARS_CHANNEL_FILE='$etc/channel' PROV_ROOT='$BATS_TEST_TMPDIR/opt/lcars' PROV_PREFIX='$BATS_TEST_TMPDIR/opt/lcars/runtime'; . '$LIB' >/dev/null 2>&1; prov_channel"
+  [[ "$output" == "kit" ]]
+}

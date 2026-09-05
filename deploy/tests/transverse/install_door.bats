@@ -965,9 +965,13 @@ SPY
   # de SA version, le verifier contre une table EN DUR, dire la signature — et les drapeaux du § 07
   # (--dry-run, --uninstall). Pipee, la porte n'a pas d'arbre : ce code ne peut vivre que dans le
   # fichier qui est pipe. La mesure du jour est 598 ; la marge reste de quelques lignes.
+  #
+  # 606 (2026-09-05, mesure 2003 du lot 4b) : le canal a appris un TROISIEME etat — « inconnu », un
+  # produit pose avant le tampon — et la porte refuse d'y poser un .deb en nommant le geste (une
+  # ligne). Ce n'est pas un rail : c'est le refus juste sur les machines posees avant le lot 2.
   local n; n="$(grep -vcE '^\s*#|^\s*$' "$SRC")"
-  [ "$n" -le 604 ] || {
-    echo "la porte a $n lignes de code (plafond 604) — qu'est-ce qui est revenu dedans ?" >&2
+  [ "$n" -le 606 ] || {
+    echo "la porte a $n lignes de code (plafond 606) — qu'est-ce qui est revenu dedans ?" >&2
     return 1
   }
 }
@@ -1402,7 +1406,7 @@ DOUBLE
   [ "$status" -eq 0 ]; : > "$SERVEUR_LOG"
   pipee --workstation --dry-run
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"Préflight"*"RAIL POSTE"*"le rail ferait : sudo apt install lcars_${TAG}_amd64.deb lcars-workstation_${TAG}_amd64.deb"* ]]
+  [[ "$output" == *"Préflight"*"RAIL POSTE"*"le rail ferait : sudo apt-get install -y --no-install-recommends lcars_${TAG}_amd64.deb lcars-workstation_${TAG}_amd64.deb"* ]]
   [[ "$output" == *"La sortie serait :"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_${TAG}_amd64.deb"* ]]
   [ ! -s "$SERVEUR_LOG" ]
   refute_out 'WORKSTATION:' <<<"$output"
@@ -1468,4 +1472,17 @@ _porte_uninstall() { # _porte_uninstall <channel> <args…> -> run la porte sur 
   [ "$status" -eq 0 ]
   [[ "$output" == *"canal « deb »"*"La sortie serait :"*"deploy/workstation uninstall --yes"* ]]
   refute_out 'WORKSTATION:' <<<"$output"
+}
+
+@test "CANAL inconnu (produit pose SANS tampon, avant le tampon) : un kit ou une source continuent, un .deb est REFUSE avec le geste" {
+  # mesure 2003, 2026-09-05 : un ancien kit sans tampon rendait « aucun », la porte y a pose des .deb par-dessus
+  _porte_canal inconnu source --workstation
+  refute_out "Ce rail n'est pas possible ici" <<<"$output"
+  _porte_canal inconnu kit --workstation
+  refute_out "Ce rail n'est pas possible ici" <<<"$output"
+  # la branche deb du refus existe et nomme les deux gestes (le kit qui ecrit le tampon, ou uninstall)
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -qE 'inconnu\) \[\[ "\$VOULU" == deb \]\] && POSTE_POURQUOI=' <<<"$code"
+  grep -q 'SANS tampon de canal' <<<"$code"
+  grep -qE 'inconnu\).*--tar.*provision uninstall --yes' <<<"$code"
 }

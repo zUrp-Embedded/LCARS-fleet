@@ -339,7 +339,7 @@ ws() { run bash "$WS" up "$@"; }
   # le MEME canal est une mise a jour : deb sur deb passe a apt
   ws --from "$BATS_TEST_TMPDIR/x.deb"
   [ "$status" -eq 0 ]
-  grep -q '^SUDO:apt install ' "$TRACE"
+  grep -q '^SUDO:apt-get install -y --no-install-recommends ' "$TRACE"
 }
 
 @test "REFUS : un canal ILLISIBLE est un refus qui nomme le fichier — jamais « source par defaut »" {
@@ -350,12 +350,12 @@ ws() { run bash "$WS" up "$@"; }
   refute_out 'SUDO:' < "$TRACE"
 }
 
-@test "DEB : --from <x.deb> [<y.deb>] = « sudo apt install <chemins absolus> », le seul sudo — provision n'est PAS appele par ce script" {
+@test "DEB : --from <x.deb> [<y.deb>] = « sudo apt-get install -y --no-install-recommends <chemins absolus> », le seul sudo — provision n'est PAS appele par ce script" {
   arbre channel=aucun channel_tree=source
   mkdir -p "$BATS_TEST_TMPDIR/paquets"; : > "$BATS_TEST_TMPDIR/paquets/lcars_1.deb"; : > "$BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb"
   ( cd "$BATS_TEST_TMPDIR/paquets" && bash "$WS" up --from lcars_1.deb --from lcars-tofu_1.deb ) > "$BATS_TEST_TMPDIR/out" 2>&1
   [ "$?" -eq 0 ]
-  grep -qx "SUDO:apt install $BATS_TEST_TMPDIR/paquets/lcars_1.deb $BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb" "$TRACE"
+  grep -qx "SUDO:apt-get install -y --no-install-recommends $BATS_TEST_TMPDIR/paquets/lcars_1.deb $BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb" "$TRACE"
   refute grep -qE '^(SUDO:.*workstation|PROVISION:apply)' "$TRACE"
   [[ "$(cat "$BATS_TEST_TMPDIR/out")" == *"postinst écrit le canal « deb »"* ]]
   # un .deb introuvable est un refus, avant apt
@@ -503,4 +503,13 @@ ws() { run bash "$WS" up "$@"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"ILLISIBLE"*"/channel"* ]]
   refute_out 'SUDO:|APT:|PROVISION:uninstall' < "$TRACE"
+}
+
+@test "CANAL inconnu (produit pose sans tampon) : un .deb est REFUSE avec le geste (kit ou uninstall), un kit passe" {
+  local f="$BATS_TEST_TMPDIR/facts-inconnu"; printf 'channel=inconnu\nchannel_tree=kit\n' > "$f"
+  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange deb; echo PASSE"
+  [[ "$output" == *"FAIL:"*"SANS tampon"* ]]
+  refute_out 'PASSE' <<<"$output"
+  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange kit; echo PASSE"
+  [[ "$output" == *"PASSE"* ]]
 }

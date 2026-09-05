@@ -261,8 +261,12 @@ assets_for() {
   # (amd64, ou all pour un meta-paquet) : la porte ne compose pas ces noms, elle les LIT dans sa
   # table — un paquet par prefixe, celui de cette arch ou `all`. Mesure 2003 (2026-09-05) : la porte
   # composait `lcars_<tag>_amd64.deb`, la table portait `lcars_0.9.0-…_amd64.deb` — refus juste, nom faux.
-  local -a pk=(lcars_ lcars-workstation_ lcars-tofu_); [[ "$WITH_BENCH" -eq 0 ]] || pk+=(lcars-forge_ lcars-bench_)
-  grep -qi microsoft /proc/version 2>/dev/null && pk+=(lcars-docker-desktop_)
+  # L'ORDRE EST CELUI DES DEPENDANCES (mesure 2003) : apt lit la ligne dans l'ordre, et pour
+  # `docker.io | docker-ce | lcars-docker-desktop` il prend docker.io si le paquet vide n'est pas
+  # ENCORE dans la transaction — sous WSL il tirait 23 paquets pour un daemon deja la. Docker Desktop
+  # d'abord, tofu avant la forge, le socle avant le rail.
+  local -a pk=(); grep -qi microsoft /proc/version 2>/dev/null && pk+=(lcars-docker-desktop_)
+  pk+=(lcars-tofu_ lcars_ lcars-workstation_); [[ "$WITH_BENCH" -eq 0 ]] || pk+=(lcars-forge_ lcars-bench_)
   for p in "${pk[@]}"; do
     n=""; while read -r s m; do case "$m" in "$p"*"_${da}.deb"|"$p"*"_all.deb") n="$m"; break ;; esac; done < <(sums)
     if [[ -n "$n" ]]; then echo "$n"; elif [[ "$p" != lcars-tofu_ && "$p" != lcars-docker-desktop_ ]]; then echo "${p}?_${da}.deb"; fi
@@ -565,6 +569,7 @@ fi
 VOULU="$(fait channel_tree)"; [[ "${#DEBS[@]}" -eq 0 ]] || VOULU=deb
 case "$(fait channel)" in
   ""|aucun|"$VOULU") ;;
+  inconnu) [[ "$VOULU" == deb ]] && POSTE_POURQUOI="cette machine porte un LCARS posé SANS tampon de canal (avant le tampon) — un paquet .deb ne se pose pas dessus : mets-la à jour par un kit (« --tar », qui écrit le tampon), ou « sudo deploy/provision uninstall --yes » d'abord" ;;
   invalide) POSTE_POURQUOI="le canal d'installation de cette machine est ILLISIBLE (le préflight nomme le fichier) — corrige-le avant de poser quoi que ce soit" ;;
   *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord (bash install.sh --uninstall le relaie), ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte avec --tar · deb : deploy/workstation up --from <paquet>.deb, ou cette porte pipée sous Debian)" ;;
 esac
@@ -978,7 +983,7 @@ if [[ "$DOCTOR_MODE" -eq 1 ]]; then
 fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
   # ce que le RAIL ferait, dit ici parce que c'est la question du drapeau — le sudo est la-bas
-  if [[ "${#FROM[@]}" -gt 0 ]]; then echo "  le rail ferait : sudo apt install ${DEBS[*]}  (canal deb — le postinst joue provision apply)"
+  if [[ "${#FROM[@]}" -gt 0 ]]; then echo "  le rail ferait : sudo apt-get install -y --no-install-recommends ${DEBS[*]}  (canal deb — le postinst joue provision apply)"
   else echo "  le rail ferait : sudo provision apply  (canal $VOULU)"; fi
   sortie_dite "$WORKSTATION" up "${PASSTHRU[@]}" "${FROM[@]}"
 fi

@@ -160,6 +160,9 @@ refuser_melange() { # refuser_melange <voulu> — lit le fait « channel » ; un
   local machine; machine="$(fait channel)"
   case "$machine" in
     ""|aucun|"$1") return 0 ;;
+    inconnu) [[ "$1" == deb ]] || return 0
+             fail "cette machine porte un LCARS posé SANS tampon de canal (avant le tampon) — un paquet .deb ne se pose pas dessus" \
+                  "mets-la à jour par un kit (deploy/workstation up --from <kit.tar.gz>, qui écrit le tampon), ou « provision uninstall --yes » d'abord" ;;
     invalide) fail "le canal d'installation de cette machine est ILLISIBLE ($PROV_CHANNEL_FILE) — rien n'a été fait" \
                    "corrige-le, ou retire-le si cette machine n'a jamais été posée ; « workstation doctor » le nomme" ;;
   esac
@@ -265,8 +268,11 @@ cmd_up() {
     echo ""
     echo "  paquet(s) : ${debs[*]}"
     echo "  « apt install » les pose ; le postinst écrit le canal « deb » et joue provision apply."
-    [[ "$EUID" -ne 0 ]] || exec apt install "${debs[@]}"
-    exec sudo apt install "${debs[@]}"
+    # ⚠ `-y` : le consentement a ete donne au bilan de la porte ; sans TTY (porte pipee), un apt
+    # interactif abandonne a « Continue? [Y/n] » (mesure 2003, 2026-09-05). --no-install-recommends :
+    # le Depends: est le socle, les Recommends ne s'installent pas a l'insu de l'operateur.
+    [[ "$EUID" -ne 0 ]] || exec apt-get install -y --no-install-recommends "${debs[@]}"
+    exec sudo apt-get install -y --no-install-recommends "${debs[@]}"
   fi
 
   # ─── KIT : vérifié et détaré SOUS L'HUMAIN, avant l'escalade ; root reçoit le répertoire ──────

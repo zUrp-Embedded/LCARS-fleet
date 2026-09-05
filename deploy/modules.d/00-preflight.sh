@@ -230,6 +230,8 @@ check() {
     p_fact channel "$PROV_CHANNEL"
     if [[ "$PROV_CHANNEL" == "aucun" ]]; then
       p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — cette machine n'a jamais été posée ; cet arbre poserait « $(prov_channel_here) »"
+    elif [[ "$PROV_CHANNEL" == "inconnu" ]]; then
+      p_warn "canal d'installation INCONNU : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) — posé avant le tampon ; un kit ou une source le reprend et l'écrit, un paquet .deb ne se pose PAS dessus"
     else
       p_ok "canal d'installation : $PROV_CHANNEL ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
     fi
