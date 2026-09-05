@@ -1292,6 +1292,53 @@ defmodule Fleet.Pilot.StepDispatcherTest do
       assert_received {:requested_review, 6, [^judge]}
     end
 
+    @tag :tmp_dir
+    test "the jury and the CI policy of a PR are read off ONE card: the engraved one, else the project's",
+         %{tmp_dir: tmp} do
+      # The engraved route names `strict` (jury `[code-reviewer]`, `ci: required`); the project
+      # declares `no-jury` (jury `[]`, `ci: ignore`). Two readers, one resolution: both answers come
+      # from `strict` when a route is engraved, both from `no-jury` when none is.
+      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
+      :ok = Fleet.CapProfile.Image.publish!()
+      :ok = Fleet.Workflow.Loader.publish_image!()
+
+      on_exit(fn ->
+        Fleet.CapProfile.Image.unpublish()
+        Fleet.Workflow.Loader.unpublish_all_images()
+      end)
+
+      judge = Fleet.Test.BizCatalogueFixture.judge()
+      code_root = Path.join(tmp, "projects")
+      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+
+      ctx = fn route ->
+        %Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx{
+          forge: StubForge,
+          loader: StubLoader,
+          workflow_map_loader: &Fleet.Workflow.Loader.load!/2,
+          spawner: StubSpawner,
+          task_queue: StubTaskQueue,
+          resolver: fn _r, _o -> {:ok, nil} end,
+          repo: "biz/boutique",
+          forge_opts: [_test_route: route],
+          wake_recovery: &Fleet.Pilot.WakeRecovery.wake/3,
+          opts: [code_root: code_root, repo: "biz/boutique"]
+        }
+      end
+
+      alias Fleet.Pilot.StepDispatcher.ReviewLifecycle
+      head = "lcars/issue-42-engineer"
+
+      engraved = ctx.({:ok, {"strict", "build"}})
+      assert ReviewLifecycle.issue_card_ci(head, engraved) == :required
+      assert ReviewLifecycle.issue_card_jury_of(head, engraved) == [judge]
+
+      routeless = ctx.(:none)
+      assert ReviewLifecycle.issue_card_ci(head, routeless) == :ignore
+      assert ReviewLifecycle.issue_card_jury_of(head, routeless) == []
+    end
+
     test "PR with review requested -> spawns the judge (issue=ISSUE, lock on the PR)" do
       opts =
         dispatch_opts(
@@ -1804,6 +1851,35 @@ defmodule Fleet.Pilot.StepDispatcherTest do
 
       refute_received {:spawned, _issue, _opts}
       refute_received {:ci_rework_marked, 42}
+    end
+
+    test "A-09 (1) on the REVIEW rail: :role_busy short-circuits WITHOUT calling the resolver" do
+      # The twin of `step_dispatcher_gate_order_test`'s A-09 (1): `prepare_dispatch` gates on the
+      # scope decision BEFORE the network resolver, on the rework path (a project-scoped producer
+      # already alive). Zero network on a busy tick, and no lock.
+      me = self()
+
+      opts =
+        dispatch_opts(
+          spawner: StubSpawnerAlive,
+          project_resolver: fn _repo, _opts ->
+            send(me, :resolver_called)
+            {:ok, nil}
+          end,
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :changes_requested},
+            _test_route: {:ok, {"g", "build"}}
+          ]
+        )
+
+      assert {:skipped, :role_busy} =
+               StepDispatcher.dispatch_review(
+                 pr(%{"requested_reviewers" => [%{"login" => "Qualifier"}], "number" => 6}),
+                 opts
+               )
+
+      refute_received :resolver_called
+      refute_received {:spawned, _, _}
     end
 
     test "CI rouge AU-DELA du budget : l'architecte est saisi, et aucun pod de plus" do

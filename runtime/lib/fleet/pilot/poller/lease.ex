@@ -206,7 +206,7 @@ defmodule Fleet.Pilot.Poller.Lease do
             # second step rather than at its second ticket.
             engaged ->
               {acc2, _started?} =
-                dispatch_engaged(payload, item_opts, acc, seams.dispatcher)
+                step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
 
               {acc2, fan}
 
@@ -309,12 +309,6 @@ defmodule Fleet.Pilot.Poller.Lease do
       Admission.current_wait(payload),
       acc
     )
-  end
-
-  # Dispatch of an ENGAGED workflow_run: the seat is already taken (the engagement comes from the
-  # classification, not from this step_run), so `started?` says nothing the counter needs.
-  defp dispatch_engaged(payload, opts, acc, dispatcher) do
-    step_do_dispatch(payload, opts, acc, dispatcher)
   end
 
   # Classifies an issue (lease) AND pre-resolves what `dispatch_issue` would otherwise re-read. Returns

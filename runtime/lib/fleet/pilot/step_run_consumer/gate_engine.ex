@@ -145,11 +145,17 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
+  @doc false
   # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
-  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes.
-  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
+  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes. ONE reader
+  # for the whole rail (the consumer and the builder ask here).
+  @spec catalogue_root(map()) :: Path.t() | nil
+  def catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
-  defp payload_repo(payload),
+  @doc false
+  # The repo of the EVENT — the `repository` object the spawner echoes, else the bare `repo` key.
+  @spec payload_repo(map()) :: String.t() | nil
+  def payload_repo(payload),
     do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp judge_kind?(payload, spec) do

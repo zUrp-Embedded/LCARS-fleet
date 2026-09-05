@@ -153,14 +153,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
 
   # The lock→spawn→enqueue→wake sequence + compensation, reached only past the pre-flight gates.
   defp locked_spawn_step(
-         %Seams{
-           forge: forge,
-           spawner: spawner,
-           task_queue: task_queue,
-           repo: repo,
-           forge_opts: forge_opts,
-           wake_recovery: wake_recovery
-         },
+         %Seams{repo: repo} = seams,
          pod_id,
          role,
          profile,
@@ -218,7 +211,7 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           |> drop_duplicated_order(extra_opts)
 
         locked_spawn_step_run(
-          {forge, spawner, task_queue, repo, forge_opts, wake_recovery},
+          seams,
           pod_id,
           role,
           profile,
@@ -325,8 +318,17 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
       brief
   end
 
+  # `%Seams{}` all the way down — the armored boundary is only as deep as the last struct: a
+  # positional tuple here would have no key and no `@enforce_keys` to refuse a typo.
   defp locked_spawn_step_run(
-         {forge, spawner, task_queue, repo, forge_opts, wake_recovery},
+         %Seams{
+           forge: forge,
+           spawner: spawner,
+           task_queue: task_queue,
+           repo: repo,
+           forge_opts: forge_opts,
+           wake_recovery: wake_recovery
+         },
          pod_id,
          role,
          profile,
@@ -338,37 +340,9 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
          log_ctx
        ) do
     with {:ok, _} <- forge.add_label(repo, lock_target, @in_flight_label, forge_opts),
-         # Chronometre natif, metrique pure : un demarrage rate est avale ici, le temps n'est
-         # simplement pas suivi pour ce run.
-         #
-         # ⚠ SIGNE AU NOM DU TRAVAILLEUR, pas du systeme comme le label : la forge attribue le temps
-         # a l'utilisateur AUTHENTIFIE, donc un chronometre systeme compterait tout sous le compte
-         # systeme. Et elle exige la MEME identite au demarrage ET a l'arret — le stop symetrique
-         # doit donc porter le meme role.
-         #
-         # Un role qui ne DECLARE aucune identite de forge n'est pas un trou de provisioning : ses
-         # ecritures passent par le systeme par design, donc il n'y a rien a tenter ni a signaler.
-         _ =
-           (case forge_identity_or_none(profile, forge_opts, role) do
-              {:ok, ro} ->
-                forge.start_stopwatch(repo, lock_target, ro)
-
-              :no_identity ->
-                :ok
-
-              {:error, :role_token_unavailable} ->
-                # Best-effort (a pure Gitea metric never blocks a dispatch) but never MUTE: a
-                # missing role token here is a provisioning defect (the four-list class),
-                # and its only forge-visible symptom is "the worker never shows up on the ticket"
-                # — measured twice (eng_doc bench, scribe bench) at one diagnosis session each.
-                Logger.warning(
-                  "StepDispatcher: no forge token for role #{inspect(role)} — stopwatch NOT " <>
-                    "started on #{repo}##{lock_target} (the ticket will not show the worker " <>
-                    "arriving; check the role account/token provisioning)"
-                )
-            end),
+         _ = start_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role),
          {:ok, _} <- maybe_spawn(spawner, alive_before?, profile, issue_id, spawn_opts),
-         :ok <- enqueue_brief(task_queue, pod_id, role, issue_number, brief, spawn_opts) do
+         :ok <- enqueue_brief(task_queue, pod_id, role, issue_id, issue_number, brief, spawn_opts) do
       # The return of `WakeRecovery.wake` is LOAD-BEARING: `{:error, {:escalated, _}}`
       # (pod unreachable, escalated to starfleet) or `{:error, _}` (re-wake failed) means the pod is
       # NOT woken. Discarding this return (`_ = wake(...)`) would always make `spawn_step` return
@@ -440,13 +414,8 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
           end
 
         # Stopwatch started with the lock → stopped with it (the dispatch never succeeded, the elapsed
-        # time would be noise, not real work). SAME identity as at the start (`as_role`, that
-        # same role) — Gitea accepts the stop ONLY from the user who started it. Pure Gitea metric
-        # (best-effort, NOT load-bearing) → its failure is not surfaced.
-        _ =
-          with {:ok, ro} <- forge_identity_or_none(profile, forge_opts, role) do
-            forge.stop_stopwatch(repo, lock_target, ro)
-          end
+        # time would be noise, not real work).
+        _ = stop_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role)
 
         Logger.warning(
           "StepDispatcher: dispatch role=#{role} pod=#{pod_id} #{log_ctx} → #{inspect(err)} " <>
@@ -454,6 +423,42 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
         )
 
         compensated_verdict(err)
+    end
+  end
+
+  # THE FORGE STOPWATCH, SIGNED AS THE WORKER — one home for the rule the two gestures share.
+  # A pure Gitea metric, never load-bearing: a start that fails is not surfaced (the time is simply
+  # not tracked for this run), and the `with` above reads `_ =` on purpose.
+  #
+  # ⚠ SIGNE AU NOM DU TRAVAILLEUR, pas du systeme comme le label : la forge attribue le temps a
+  # l'utilisateur AUTHENTIFIE, donc un chronometre systeme compterait tout sous le compte systeme.
+  # Et elle exige la MEME identite au demarrage ET a l'arret — le stop porte donc le meme role.
+  #
+  # Un role qui ne DECLARE aucune identite de forge n'est pas un trou de provisioning : ses
+  # ecritures passent par le systeme par design, donc il n'y a rien a tenter ni a signaler. A role
+  # whose token is MISSING is one (the four-list class), and its only forge-visible symptom is
+  # « the worker never shows up on the ticket » — so it is said, once, at the start.
+  defp start_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role) do
+    case forge_identity_or_none(profile, forge_opts, role) do
+      {:ok, ro} ->
+        forge.start_stopwatch(repo, lock_target, ro)
+
+      :no_identity ->
+        :ok
+
+      {:error, :role_token_unavailable} ->
+        Logger.warning(
+          "StepDispatcher: no forge token for role #{inspect(role)} — stopwatch NOT " <>
+            "started on #{repo}##{lock_target} (the ticket will not show the worker " <>
+            "arriving; check the role account/token provisioning)"
+        )
+    end
+  end
+
+  # Same identity as the start — Gitea accepts the stop ONLY from the user who started it.
+  defp stop_stopwatch_as_role(forge, repo, lock_target, profile, forge_opts, role) do
+    with {:ok, ro} <- forge_identity_or_none(profile, forge_opts, role) do
+      forge.stop_stopwatch(repo, lock_target, ro)
     end
   end
 
@@ -487,14 +492,14 @@ defmodule Fleet.Pilot.StepDispatcher.Spawn do
   # The `brief` = the role-aware BRIEF already built (build_brief): disarmed GateBrief for the
   # gatekeeper, issue body for a worker. A raw `issue["body"]` would make
   # the judge pull the executable BUILD brief. `metadata.issue` correlates to the issue.
-  defp enqueue_brief(task_queue, pod_id, role, number, payload, spawn_opts) do
+  defp enqueue_brief(task_queue, pod_id, role, issue_id, number, payload, spawn_opts) do
     # `payload` is ALREADY the final order — the pointer when the brief was materialized, the
     # marked inline text on the one transient degradation. It is decided at `materialize_order/5`
     # and not re-derived here: rebuilding it from `{brief_ref, brief_sha}` would let two places
     # disagree about what the pod receives. The pointer/inline arbitration lives at ONE site
     # (⚖ user — no inline-blob and pointer cohabiting).
     attrs = %{
-      issue_id: Fleet.Pilot.IssueId.compose(number),
+      issue_id: issue_id,
       role: role,
       brief: payload,
       brief_ref: Keyword.get(spawn_opts, :brief_ref),

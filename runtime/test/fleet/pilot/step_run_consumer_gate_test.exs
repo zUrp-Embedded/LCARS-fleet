@@ -654,6 +654,40 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:notify, "architect-r", _}
   end
 
+  @tag :tmp_dir
+  @tag :requires_git
+  test "a verdict is PINNED on the project's ops face (`gate-verdicts/`) when the face exists",
+       %{tmp_dir: tmp} do
+    # `:ops_root` is the consumer's seam: without it the pin can only be watched on the real global
+    # path. The face is a git repo with no remote (the push to `ops` fails, best-effort; the COMMIT
+    # is what makes the object addressable — a file written without a commit is a crash residue,
+    # so the witness reads the git log, not the disk).
+    work_dir = Path.join(tmp, "r")
+    File.mkdir_p!(work_dir)
+    {_, 0} = System.cmd("git", ["init", "-q", work_dir])
+    {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "t@lcars.local"])
+    {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "t"])
+
+    # Long enough to be pinned (`Pinning.pinnable?/1`): a one-line verdict stays inline by design.
+    reason = Enum.map_join(1..40, "\n", &"critère #{&1} tenu, mesuré sur la brique")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, :review_requested} =
+                 StepRunConsumer.resume_gate(
+                   soft_ctx(),
+                   %{"result" => %{"decision" => "continue", "reason" => reason}},
+                   %{hc() | ops_root: tmp}
+                 )
+      end)
+
+    ref = Fleet.Layout.gate_verdict_ref(1, "engineer")
+    refute log =~ "NOT committed", "written but not committed is a residue, not a pin"
+    {sha, 0} = System.cmd("git", ["-C", work_dir, "log", "--format=%H", "-1", "--", ref])
+    refute String.trim(sha) == "", "the verdict must be COMMITTED (addressable) at #{ref}"
+    assert File.read!(Path.join(work_dir, ref)) =~ "critère 40 tenu"
+  end
+
   test "escalate_user verdict -> await_arch (lcars-awaits-arch + unlock, no close/reassign) + arch KICK" do
     assert {:ok, :awaiting_arch} =
              StepRunConsumer.resume_gate(
