@@ -1087,11 +1087,11 @@ _porte_canal() { # _porte_canal <channel> <channel_tree> <args de la porte…>
 # ⚠ AUCUN TEMOIN NE POSE QUOI QUE CE SOIT : le rail est un espion. Ce qui se mesure est tout ce qui
 # le precede — le telechargement, la verification, le refus, l'argv tendu.
 TAG=0.9.0
-_dist() { # _dist [nom=valeur…] -> le tiroir dist/ de la version $TAG ; le kit rend ces faits (sains sans argument)
+_dist() { # _dist [nom=valeur…] -> le tiroir dist/ de la version $TAG ; le kit rend les faits sains, PLUS ceux-ci (le dernier gagne)
   local d="$BATS_TEST_TMPDIR/dist" st="$BATS_TEST_TMPDIR/stage"
   rm -rf "$d" "$st"; mkdir -p "$d" "$st/lcars_install/deploy"
   printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
-  if [[ $# -gt 0 ]]; then _faux_provision "$st/lcars_install" "$@"; else _faux_provision "$st/lcars_install" "${_faits_sains[@]}"; fi
+  _faux_provision "$st/lcars_install" "${_faits_sains[@]}" "$@"
   printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$st/lcars_install/deploy/workstation"
   chmod 0755 "$st/lcars_install/deploy/workstation"
   tar -czf "$d/lcars-fleet-$TAG-otp27-x86_64.tar.gz" -C "$st" lcars_install
@@ -1343,4 +1343,37 @@ DOUBLE
   local code; code="$(grep -vE '^\s*#' "$SRC")"
   grep -q 'SOURCE_REF="$LCARS_DOOR_VERSION"' <<<"$code"
   refute grep -qE 'BRANCH=|"main"' <<<"$code"
+}
+
+# ─── LE CANAL, PROVENANCE release : un .deb telecharge POSE « deb », un kit POSE « kit » ─────────
+#
+# `channel_tree` (le preflight, joue DANS le kit detare) dit toujours « kit » : c'est l'arbre qui
+# parle. Ce que la porte va POSER est autre chose quand la release a rendu des .deb — et c'est ce
+# canal-la, « deb », qu'elle compare a celui de la machine. Sans quoi une machine kit accepterait
+# les paquets comme « une mise a jour par le meme canal », et les deux desinstalleurs divergeraient.
+
+@test "CANAL release : sur une machine installee par kit, les .deb sont REFUSES (poserait « deb ») et le geste est nomme ; --tar est le meme canal, et continue" {
+  _release channel=kit channel_tree=kit
+  pipee --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"installée par « kit »"*"poserait « deb »"* ]]
+  [[ "$output" == *"provision uninstall --yes"*"--tar"* ]]
+  refute_out 'WORKSTATION:|RAIL POSTE' <<<"$output"
+  pipee --workstation --tar
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up"* ]]; refute_out 'installée par' <<<"$output"
+}
+
+@test "CANAL release : sur une machine deb, les .deb sont une mise a jour (le kit detare ne trompe pas) ; le kit seul (--tar) y est REFUSE ; --check l'EXPOSE" {
+  _release channel=deb channel_tree=kit
+  pipee --workstation
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"WORKSTATION:up --from"* ]]; refute_out 'installée par' <<<"$output"
+  pipee --workstation --tar
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"installée par « deb »"*"poserait « kit »"*"--from <paquet>.deb"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+  pipee --check --tar
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IMPOSSIBLE"*"installée par « deb »"* ]]
 }

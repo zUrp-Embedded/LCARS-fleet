@@ -510,13 +510,16 @@ else
 fi
 [[ "$DOCKER_OK" -eq 1 ]] || CONTENEUR_POURQUOI="$(fait docker_why)"
 # ─── LE CANAL : UN CANAL NE SE POSE PAS SUR UN AUTRE — jamais en silence, jamais de conversion ───
-# `channel` = qui a posé cette machine (préflight) ; `channel_tree` = ce que ce checkout poserait.
-# Le même canal est une mise à jour ; « aucun », une première pose. Le rail conteneur ne pose rien
-# sur la machine : le canal ne le concerne pas. Le geste nommé est celui du canal en place.
+# `channel` = qui a posé cette machine (préflight). Ce que CETTE porte poserait est `channel_tree`
+# (ce que l'arbre écrirait : source, ou kit) — sauf quand la release a rendu des .deb : alors c'est
+# « deb », et un kit détaré sous une machine deb est une mise à jour par le même canal SEULEMENT
+# avec --tar. Le même canal est une mise à jour ; « aucun », une première pose. Le rail conteneur
+# ne pose rien sur la machine : le canal ne le concerne pas. Le geste nommé est celui du canal en place.
+VOULU="$(fait channel_tree)"; [[ "${#DEBS[@]}" -eq 0 ]] || VOULU=deb
 case "$(fait channel)" in
-  ""|aucun|"$(fait channel_tree)") ;;
+  ""|aucun|"$VOULU") ;;
   invalide) POSTE_POURQUOI="le canal d'installation de cette machine est ILLISIBLE (le préflight nomme le fichier) — corrige-le avant de poser quoi que ce soit" ;;
-  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et ce checkout poserait « $(fait channel_tree) » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord, ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz> · deb : deploy/workstation up --from <paquet>.deb)" ;;
+  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et cette porte poserait « $VOULU » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord (bash install.sh --uninstall le relaie), ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz>, ou cette porte avec --tar · deb : deploy/workstation up --from <paquet>.deb, ou cette porte pipée sous Debian)" ;;
 esac
 
 bilan_menu() {
