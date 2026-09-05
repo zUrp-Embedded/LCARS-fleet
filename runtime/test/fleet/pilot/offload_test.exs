@@ -20,6 +20,17 @@ defmodule Fleet.Pilot.OffloadTest do
 
   defp sup_name(sup), do: sup |> Process.info(:registered_name) |> elem(1)
 
+  # A supervisor that refuses every child (`max_children: 0`) — the shape of a saturated pool.
+  defp saturated_sup(id) do
+    start_supervised!(
+      Supervisor.child_spec(
+        {Task.Supervisor,
+         name: :"#{id}_sup_#{System.unique_integer([:positive])}", max_children: 0},
+        id: id
+      )
+    )
+  end
+
   test "a task that DIES mid-work → :DOWN routed, LOUD error naming consumer + consequence", %{
     sup: sup
   } do
@@ -226,5 +237,28 @@ defmodule Fleet.Pilot.OffloadTest do
     {pid, ref} = spawn_monitor(fn -> :ok end)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
     assert :not_mine = Offload.handle_down(ref, pid, :normal)
+  end
+
+  describe "async/3 — a refused offload is SAID, typed, and the work is not claimed launched" do
+    test "offload REFUSED (max_children 0) → {:error, {:offload_failed, :max_children}} + LOUD" do
+      sup = saturated_sup(:refuse)
+
+      test = self()
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Offload.async(
+            sup_name(sup),
+            fn -> send(test, :ran) end,
+            {"StepRunConsumer", "completion lost"}
+          )
+        end)
+
+      assert {:error, {:offload_failed, :max_children}} = result
+      assert log =~ "StepRunConsumer: offload Task failed"
+      assert log =~ "completion lost"
+      # The contract: the work was NOT launched — and it shows.
+      refute_received :ran
+    end
   end
 end

@@ -162,6 +162,13 @@ defmodule Fleet.Pilot.Poller.Lease do
     # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
     # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
     # never a union to deduplicate.
+    #
+    # ⚖ A ticket PARKED under `lcars-awaits-arch` is classified like any other (2026-09-05): the
+    # label is not read here, the ROUTE is. Parked with an ADVANCED route, it holds its seat — its
+    # run exists and resumes when the human acts, and a second run started meanwhile would put two
+    # in flight on a serial project when it wakes. Parked at the ROOT (a brief the scoper refused),
+    # it has no advanced run, holds no seat, and competes for one again once unparked — the next
+    # ticket starts. `StepDispatcher.decide/1` is what refuses the parked ticket's own dispatch.
     in_flight =
       Enum.count(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end) +
         MapSet.size(pr_issue_ids)
