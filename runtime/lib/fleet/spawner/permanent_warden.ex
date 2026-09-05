@@ -25,6 +25,10 @@ defmodule Fleet.Spawner.PermanentWarden do
      A-13), which covers this tick for free; the composition below stays as belt over braces — it
      spares a pointless reconcile pass.
 
+  A refusal from the DRAIN (`{:error, {_, :fleet_quiescing}}`, the A-13 chokepoint) is NOT an
+  attempt: logged at info and dropped — no backoff, no HALT. The node is stopping; the next boot
+  relaunches the permanents through `BootOrchestrator`.
+
   ## BOUNDED spend (the failure mode = spend, never a churn)
 
   Each successful respawn boots a claude session: an unbounded crash-loop would burn LLM in a loop.
@@ -134,6 +138,21 @@ defmodule Fleet.Spawner.PermanentWarden do
           Map.update(state.attempts, role, {0, now}, fn {count, _} -> {count, now} end)
 
         {:noreply, %{state | attempts: attempts}}
+
+      {:error, {_role, :fleet_quiescing}} ->
+        # A DRAIN REFUSAL IS NOT A FAILURE OF THE ROLE. The spawn chokepoint refuses every new pod
+        # while the fleet quiesces (A-13), and that refusal used to land here as a failed attempt:
+        # four retries in backoff against a closed door, then HALT with an `error` line demanding
+        # an intervention — for a node that is stopping on purpose. Nothing to retry: a drain ends
+        # with the node's teardown, and the next boot relaunches the permanents through
+        # `BootOrchestrator`. The attempt counter is left as it is; a permanent that dies during a
+        # drain has not looped.
+        Logger.info(
+          "PermanentWarden: respawn #{role} refused by the drain (fleet quiescing) — not an " <>
+            "attempt, nothing to retry: the node is stopping"
+        )
+
+        {:noreply, state}
 
       {:error, reason} ->
         # Spawn failure emits no pod.failed, so re-arm the shared cycle here.
