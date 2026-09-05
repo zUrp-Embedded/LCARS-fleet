@@ -257,10 +257,15 @@ assets_for() {
   [[ -n "$kit" ]] || return 0          # sans kit, rien : il est l'arbre, les .deb ne se tendent pas sans lui
   echo "$kit"
   [[ "$1" == "debian" && "$WANT_TAR" -eq 0 ]] || return 0
-  local -a pk=(lcars_ lcars-workstation_); [[ "$WITH_BENCH" -eq 0 ]] || pk+=(lcars-forge_ lcars-bench_)
-  for p in "${pk[@]}" lcars-tofu_; do
-    n="${p}${v}_${da}.deb"; sum_of "${p}${v}_all.deb" >/dev/null && n="${p}${v}_all.deb"
-    if [[ "$p" != "lcars-tofu_" ]] || sum_of "$n" >/dev/null; then echo "$n"; fi
+  # Les .deb portent la VERSION DEBIAN (mix.exs + revision, deploy/pkg) et l'arch de leur contenu
+  # (amd64, ou all pour un meta-paquet) : la porte ne compose pas ces noms, elle les LIT dans sa
+  # table — un paquet par prefixe, celui de cette arch ou `all`. Mesure 2003 (2026-09-05) : la porte
+  # composait `lcars_<tag>_amd64.deb`, la table portait `lcars_0.9.0-…_amd64.deb` — refus juste, nom faux.
+  local -a pk=(lcars_ lcars-workstation_ lcars-tofu_); [[ "$WITH_BENCH" -eq 0 ]] || pk+=(lcars-forge_ lcars-bench_)
+  grep -qi microsoft /proc/version 2>/dev/null && pk+=(lcars-docker-desktop_)
+  for p in "${pk[@]}"; do
+    n=""; while read -r s m; do case "$m" in "$p"*"_${da}.deb"|"$p"*"_all.deb") n="$m"; break ;; esac; done < <(sums)
+    if [[ -n "$n" ]]; then echo "$n"; elif [[ "$p" != lcars-tofu_ && "$p" != lcars-docker-desktop_ ]]; then echo "${p}?_${da}.deb"; fi
   done
 }
 fetch() { # fetch <url> <fichier> — `--proto '=https' --tlsv1.2 -fsSL` (§ 07.6) ; http n'entre que par LCARS_DOOR_INSECURE_HTTP=1
@@ -641,8 +646,14 @@ else
       echo ""
       echo "  ${R}Pas de TTY : impossible de demander, et il n'y a pas de défaut sûr.${N}"
       echo "  Redis-le dans la ligne :"
-      echo "    bash $0 --workstation    # LCARS s'installe dans ce système"
-      echo "    bash $0 --container            # LCARS tourne dans un conteneur"
+      if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+        echo "    bash $0 --workstation    # LCARS s'installe dans ce système"
+        echo "    bash $0 --container      # LCARS tourne dans un conteneur"
+      else
+        # pipée : $0 est « bash », et la forme qui passe des arguments a un script lu sur stdin est -s --
+        echo "    curl --proto '=https' --tlsv1.2 -fsSL <porte> | bash -s -- --workstation    # dans ce système"
+        echo "    curl --proto '=https' --tlsv1.2 -fsSL <porte> | bash -s -- --container      # dans un conteneur"
+      fi
       exit 1 ;;
     *) echo "  ${R}Réponse « $ans » non comprise — rien n'a été fait.${N}"; exit 1 ;;
   esac

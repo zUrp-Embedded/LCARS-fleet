@@ -1199,7 +1199,7 @@ KITS="$BATS_TEST_TMPDIR/home/.lcars/kits/$TAG"
   sed -i "/  lcars_${TAG}_amd64.deb\$/d" "$PORTE"
   pipee --workstation
   [ "$status" -ne 0 ]
-  [[ "$output" == *"lcars_${TAG}_amd64.deb "*"ABSENT DE LA TABLE"*"rien n'est téléchargé"* ]]
+  [[ "$output" == *"lcars_?_amd64.deb "*"ABSENT DE LA TABLE"*"rien n'est téléchargé"* ]]   # la porte ne compose plus le nom : hors table, elle le dit « ? »
   [ ! -s "$SERVEUR_LOG" ]
 }
 
