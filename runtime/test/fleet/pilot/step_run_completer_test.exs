@@ -1437,6 +1437,46 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
     end
   end
 
+  describe "step_run_jury — an engraved card that does not load falls back to the PROJECT card" do
+    @tag :tmp_dir
+    test "producer :review with an unloadable `workflow_map` → the declared card's jury, said",
+         %{tmp_dir: tmp} do
+      # The project DECLARES `standard` (jury `[code-reviewer]`, a name the delegation card does
+      # not carry): the fallback must read THAT card, not the delegation default the same fallback
+      # would reach through `Roles.jury(nil, _)` — the two replies differ, so the witness can tell.
+      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
+      :ok = Fleet.CapProfile.Image.publish!()
+      :ok = Fleet.Workflow.Loader.publish_image!()
+
+      on_exit(fn ->
+        Fleet.CapProfile.Image.unpublish()
+        Fleet.Workflow.Loader.unpublish_all_images()
+      end)
+
+      judge = Fleet.Test.BizCatalogueFixture.judge()
+      code_root = Path.join(tmp, "projects")
+      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "standard")
+
+      step_run =
+        producer_step_run(:review, %{
+          repo: "biz/boutique",
+          workflow_map: "ghost-card-that-does-not-exist"
+        })
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          StepRunCompleter.complete_pr(step_run, orch_opts(code_root: code_root))
+        end)
+
+      assert {:ok, :review_requested} = result
+      assert log =~ "engraved card unloadable"
+      assert log =~ "falls back"
+      assert_received {:request_review, 7, [reviewer]}
+      assert String.ends_with?(reviewer, judge)
+    end
+  end
+
   describe "promote/2 — the seal's two pre-write refusals cross the completer (2026-09-05)" do
     # `promote/2` listed three of the five error forms `merge_and_promote/7` returns. The two
     # missing ones are pronounced BEFORE any write and were a CaseClauseError on the terminal rail.

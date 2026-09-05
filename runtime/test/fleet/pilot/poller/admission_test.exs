@@ -230,4 +230,24 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       assert Admission.max_fan() == 5
     end
   end
+
+  describe "write_wait — a label that cannot be posted never blocks a dispatch" do
+    defmodule RaisingLabelForge do
+      def add_label(_repo, _n, _label, _opts), do: raise("forge label boom")
+      def remove_label(_repo, _n, _label, _opts), do: raise("forge label boom")
+    end
+
+    test "add_label RAISES → the skip is accounted, the tick stands, the loss is said" do
+      raising = [forge_client: RaisingLabelForge, repo: "o/r", forge_opts: []]
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Admission.admit(fn -> {:skipped, :at_capacity} end, raising, 7, nil, Lease.zero_tally())
+        end)
+
+      assert {%{skipped: 1, dispatched: 0, errors: 0}, false} = result
+      assert log =~ "wait label"
+      assert log =~ "dispatch unaffected"
+    end
+  end
 end

@@ -2182,6 +2182,10 @@ defmodule Fleet.Pilot.PollerTest do
       # the rule projected at onboarding was never compared to the current jury again.
       assert_received {:protection_reconciled, repo}
       refute_received {:protection_reconciled, ^repo}
+
+      # Stamped BECAUSE reconciled — the failure twin (« only what was reconciled is stamped »)
+      # proves the other half.
+      assert Map.has_key?(:sys.get_state(Process.whereis(name)).protection_rechecked, repo)
     end
 
     test "an ENGAGED pipeline (advanced route) holds the lease and blocks a QUEUED issue" do
@@ -2625,6 +2629,149 @@ defmodule Fleet.Pilot.PollerTest do
       refute_received {:spawned, _, _}
 
       GenServer.stop(pid)
+    end
+  end
+
+  describe "main-protection recheck — only what was reconciled is stamped" do
+    defp protection_poller(reconciler) do
+      name = :"P_prot_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: name,
+          repo: "lordzurp/lcars-test",
+          human: "lordzurp",
+          start_tick?: false,
+          step_dispatch?: true,
+          forge_client: StepStubForge,
+          forge_opts: [_test_issues: {:ok, []}],
+          spawner: StepStubSpawner,
+          protection_reconciler: reconciler
+        )
+
+      {name, pid}
+    end
+
+    test "a reconcile that FAILS is not stamped: the next tick retries it" do
+      test = self()
+
+      {name, pid} =
+        protection_poller(fn repo, _opts ->
+          send(test, {:reconcile, repo})
+          {:error, :forge_unreadable}
+        end)
+
+      _ = Poller.force_poll(name)
+      _ = Poller.force_poll(name)
+
+      assert_received {:reconcile, "lordzurp/lcars-test"}
+      assert_received {:reconcile, "lordzurp/lcars-test"}
+      assert :sys.get_state(pid).protection_rechecked == %{}
+
+      GenServer.stop(pid)
+    end
+  end
+
+  describe "an org that comes BACK on the forge is said, once, and discovery resumes" do
+    # The forge's answer for `web` is a switch the test flips between two ticks.
+    defmodule ForgeWebSwitch do
+      def list_org_repos("fleet", _opts), do: {:ok, ["fleet/p"]}
+
+      def list_org_repos("web", _opts) do
+        case Application.get_env(:lcars_fleet, :_test_web_org) do
+          :present -> {:ok, ["web/q"]}
+          _ -> {:error, {:http, 404, %{"message" => "GetOrgByName"}}}
+        end
+      end
+
+      def list_open_issues(repo, _o) do
+        if pid = Application.get_env(:lcars_fleet, :_test_web_pid),
+          do: send(pid, {:scanned, repo})
+
+        {:ok, []}
+      end
+
+      def list_open_pulls(_r, _o), do: {:ok, []}
+    end
+
+    test "absent then present: the return is logged and the org's repos are scanned again" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :_test_web_org, :absent)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :_test_web_pid, self())
+
+      {:ok, pid} =
+        Poller.start_link(
+          name: :"P_orgback_#{System.unique_integer([:positive])}",
+          orgs: ["fleet", "web"],
+          human: "h",
+          interval_ms: 60_000,
+          forge_client: ForgeWebSwitch,
+          loader: fn -> %{} end
+        )
+
+      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+      gone = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      assert gone =~ "does NOT exist on the forge"
+      refute_received {:scanned, "web/q"}
+
+      Application.put_env(:lcars_fleet, :_test_web_org, :present)
+      back = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      assert back =~ "now exists on the forge"
+      assert back =~ "discovery resumes"
+      assert_received {:scanned, "web/q"}
+
+      again = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      refute again =~ "now exists on the forge", "a return is said once, like an absence"
+
+      GenServer.stop(pid)
+    end
+  end
+
+  describe "resolve_orgs — the four ways the poller learns which orgs to scan" do
+    defmodule QuietForge do
+      def list_org_repos(_org, _opts), do: {:ok, []}
+      def list_open_issues(_r, _o), do: {:ok, []}
+      def list_open_pulls(_r, _o), do: {:ok, []}
+    end
+
+    defp orgs_of(opts) do
+      {:ok, pid} =
+        Poller.start_link(
+          [
+            name: :"P_orgs_#{System.unique_integer([:positive])}",
+            human: "h",
+            interval_ms: 60_000,
+            forge_client: QuietForge,
+            loader: fn -> %{} end
+          ] ++ opts
+        )
+
+      orgs = Poller.stats(pid).orgs
+      GenServer.stop(pid)
+      orgs
+    end
+
+    test "`:orgs` (the form) wins" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_fleet_org, "envorg")
+      assert orgs_of(orgs: ["a", "b"], org: "solo") == ["a", "b"]
+    end
+
+    test "`:org` (a singleton) next" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_fleet_org, "envorg")
+      assert orgs_of(org: "solo") == ["solo"]
+    end
+
+    test "then the config knob `:pilot_fleet_org`" do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_fleet_org, "envorg")
+      assert orgs_of([]) == ["envorg"]
+    end
+
+    test "else the installed catalogues — the org IS the catalogue's name" do
+      Fleet.TestEnv.restore_env_on_exit(:lcars_fleet, :pilot_fleet_org)
+      Application.delete_env(:lcars_fleet, :pilot_fleet_org)
+      orgs = orgs_of([])
+      assert orgs == Fleet.Catalogue.installed_names()
+      refute orgs == [], "a catalogue whose manifest lost its name would empty BOTH sides"
     end
   end
 end

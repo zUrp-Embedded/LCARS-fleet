@@ -459,6 +459,32 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received :unlocked
   end
 
+  # ⚖ Pinned as it IS (2026-09-05): on `{:escalate, _, _}` the journal entry is REMOVED — the
+  # broker's queued brief takes over, and its metadata rebuild the context after a consumer restart
+  # (`reconstruct_eval_ctx/2`); the broker itself is ephemeral, so a BEAM restart mid-escalation
+  # loses both, which the code says. A change of that choice must flip this witness knowingly.
+  test "escalation through handle_info: the completion is NOT kept owed in the outbox" do
+    wi = "wi-esc-#{System.unique_integer([:positive])}"
+
+    event =
+      Fleet.Event.new(:spawner, :"pod.completed",
+        payload:
+          build_done("soft", %{"sev" => "high"})
+          |> Map.put("work_item_id", wi)
+          |> Map.put("pod_id", "pod-esc")
+      )
+
+    # The payload IS journalable (a `work_item_id`-less one would make the refute below vacuous).
+    assert {:ok, _} = Fleet.Pilot.CompletionOutbox.put(event.payload)
+    assert Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi))
+
+    assert {:noreply, _} = StepRunConsumer.handle_info(event, hc())
+    assert_received {:enqueued, "o-r-issue-1-gatekeeper", _}
+
+    refute Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi)),
+           "an escalated completion is acknowledged in the journal, by choice"
+  end
+
   test "escalation: gatekeeper already ALIVE (previous eval closing) → enqueue + wake, no double spawn" do
     # {:already_started} from the spawner → the brief is queued, a plain wake nudges the live pod.
     defmodule AliveSpawner do
