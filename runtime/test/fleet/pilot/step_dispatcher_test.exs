@@ -73,6 +73,11 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         _ -> :ok
       end
 
+      # Same discipline for the arch escalation: ONE marker, so a witness can read what the
+      # architect reads without touching the mailbox of every other test.
+      if String.contains?(body, "[merge-blocked-escalation:"),
+        do: send(self(), {:merge_blocked_escalation, n, body})
+
       {:ok, :posted}
     end
 
@@ -199,6 +204,20 @@ defmodule Fleet.Pilot.StepDispatcherTest do
     # what every pre-existing test of this module describes: their policy blocks are re-requests.
     def commit_ci_state(_repo, _sha, opts),
       do: {:ok, Keyword.get(opts, :_test_ci, :none)}
+  end
+
+  # `StubForge` plus an exported `branch_head/3`, so the provenance wall RUNS inside a full
+  # `dispatch_review/2` instead of skipping (the wall only runs when the forge can name the head).
+  # Mirrored by REFLECTION: an inventory kept by hand drifts the day `StubForge` grows a function.
+  defmodule WallStubForge do
+    for {name, arity} <- StubForge.__info__(:functions) do
+      args = Macro.generate_arguments(arity, __MODULE__)
+
+      def unquote(name)(unquote_splicing(args)),
+        do: StubForge.unquote(name)(unquote_splicing(args))
+    end
+
+    def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}
   end
 
   defmodule StubLoader do
@@ -1202,6 +1221,75 @@ defmodule Fleet.Pilot.StepDispatcherTest do
         },
         fields
       )
+    end
+
+    @tag :tmp_dir
+    @tag :requires_git
+    test "provenance INCOHÉRENTE au sceau → escalade à l'architecte, pas une retentative muette à chaque tick",
+         %{tmp_dir: tmp} do
+      # 2026-09-05 — `promote_or_route` only re-routed `{:error, {:merge, _}}`; the wall's refusal
+      # reached the poller as a bare error → `:keep`, no label, the same seal every tick forever.
+      # The seal needs the chief token before it reaches the wall.
+      Fleet.TestEnv.put_role_token!("chief", "CHIEF-TOKEN")
+      %{head: head, alien: alien} = Fleet.Test.ProvenanceWallHarness.harness(tmp, "lcars-test")
+      :ok = Fleet.Test.ProvenanceWallHarness.statement(tmp, 42, head, alien, "lcars-test")
+
+      opts =
+        dispatch_opts(
+          forge_client: WallStubForge,
+          code_root: Path.join(tmp, "p"),
+          ops_root: Path.join(tmp, "w"),
+          forge_opts: [
+            _test_verdicts: %{"qualifier" => :approved},
+            _test_route: {:ok, {"g", "build"}},
+            __head_sha__: head
+          ]
+        )
+
+      assert {:skipped, {:merge_blocked_escalated, 6}} =
+               StepDispatcher.dispatch_review(pr(), opts)
+
+      assert_received {:merge_blocked_escalation, 42, body}
+      assert body =~ "PROVENANCE"
+      refute body =~ "non classifié"
+      refute_received {:merged, _}
+    end
+
+    @tag :tmp_dir
+    test "no_jury : la carte ADOPTÉE sur une PR orpheline est celle du catalogue DU PROJET, lue par le loader par défaut",
+         %{tmp_dir: tmp} do
+      # The engraved name `standard` exists in `biz` (jury `[code-reviewer]`) and not in the
+      # bundled catalogue: a default loader that drops the catalogue cannot load it, falls back to
+      # the project card, and adopts the DEFAULT jury on this PR. No `:workflow_map_loader` here:
+      # the rail's own default is the subject.
+      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
+      :ok = Fleet.CapProfile.Image.publish!()
+      :ok = Fleet.Workflow.Loader.publish_image!()
+
+      on_exit(fn ->
+        Fleet.CapProfile.Image.unpublish()
+        Fleet.Workflow.Loader.unpublish_all_images()
+      end)
+
+      judge = Fleet.Test.BizCatalogueFixture.judge()
+      # The PROJECT declares the jury-less card: the rail's fallback (engraved card unloadable)
+      # would adopt nobody, so `[judge]` can only come from the engraved `standard` read in `biz`.
+      code_root = Path.join(tmp, "projects")
+      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+
+      opts =
+        dispatch_opts(
+          repo: "biz/boutique",
+          code_root: code_root,
+          forge_opts: [_test_route: {:ok, {"standard", "build"}}]
+        )
+        |> Keyword.delete(:workflow_map_loader)
+
+      assert {:ok, {:adopted, 6, [^judge]}} =
+               StepDispatcher.dispatch_review(pr(%{"requested_reviewers" => []}), opts)
+
+      assert_received {:requested_review, 6, [^judge]}
     end
 
     test "PR with review requested -> spawns the judge (issue=ISSUE, lock on the PR)" do

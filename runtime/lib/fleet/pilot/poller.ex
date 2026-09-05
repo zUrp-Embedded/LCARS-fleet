@@ -1132,20 +1132,18 @@ defmodule Fleet.Pilot.Poller do
       forge_opts: state.forge_opts
     ]
     |> Opts.maybe_put(:loader, state.loader)
-    # `workflow_map_role` (dispatch) loads the route's workflow_map → it needs the WORKFLOW_MAP loader (as a
-    # load!/1 function). Live: nil → default `Fleet.Workflow.Loader.load!` (priv). Test: derived from the stub
-    # module. (Distinct from `:loader` = cap-profiles.)
-    |> Opts.maybe_put(:workflow_map_loader, workflow_map_loader_fun(state))
+    # `workflow_map_role` (dispatch) loads the route's workflow_map → it needs the WORKFLOW_MAP
+    # loader, handed over AS A MODULE, the same way `lease_seams/1` hands it: `safe_load/3` asks a
+    # module for `load!/2` and passes it the catalogue. Wrapped in a unary fn it would drop the
+    # catalogue on the dispatch rail while the lease rail keeps it — one `state`, two cards
+    # (2026-09-05). Live: nil → the dispatcher's default `&Loader.load!/2`. (Distinct from
+    # `:loader` = cap-profiles.)
+    |> Opts.maybe_put(:workflow_map_loader, state.workflow_map_loader)
     |> Opts.maybe_put(:spawner, state.spawner)
     |> Opts.maybe_put(:task_queue, state.task_queue)
     # Threaded down to `dispatch_issue`: only nil falls back to the real default (the real `WakeRecovery.wake/3`).
     |> Opts.maybe_put(:wake_recovery, state.wake_recovery)
   end
-
-  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: nil}), do: nil
-
-  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: cl}),
-    do: fn name -> cl.load!(name) end
 
   defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Forge.Client
   defp step_forge_client(%__MODULE__{forge_client_override: fc}), do: fc

@@ -88,4 +88,95 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalationTest do
     assert log =~ "NOT removed"
     assert log =~ "invariant awaits-arch⇒¬in-flight violated"
   end
+
+  describe "escalate_merge_blocked/5 — the architect reads the CAUSE, not the catch-all" do
+    # 2026-09-05: `Remediation.escalate_ci/5` passed the literal `:ci` as class, so every CI
+    # escalation read « échec de merge non classifié » and sent the architect looking for a git
+    # conflict. No witness ever asserted the BODY of a CI escalation.
+    defmodule CaptureForge do
+      def post_comment(_repo, n, body, _opts) do
+        send(self(), {:escalation_body, n, body})
+        {:ok, :posted}
+      end
+
+      def add_label(_repo, _n, _label, _opts), do: {:ok, :added}
+      def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
+    end
+
+    defp body_for(class, reason) do
+      assert {:skipped, {:merge_blocked_escalated, 6}} =
+               ArchEscalation.escalate_merge_blocked(seams(CaptureForge), 6, @head, class, reason)
+
+      assert_received {:escalation_body, 42, body}
+      body
+    end
+
+    test "{:ci_stalled, :unclaimed} → names the runner, never « non classifié »" do
+      body =
+        body_for({:ci_stalled, :unclaimed}, "aucun runner ne réclame le job (label `lcars`).")
+
+      assert body =~ "BLOQUÉE"
+      refute body =~ "non classifié"
+    end
+
+    test "{:ci_stalled, :pending} → the pending clause" do
+      body = body_for({:ci_stalled, :pending}, "plus de 45 min sans verdict")
+      assert body =~ "PENDANTE"
+      refute body =~ "non classifié"
+    end
+
+    test "{:ci_impossible, :no_workflow} → points at the CI rail, not at a rebase" do
+      body = body_for({:ci_impossible, :no_workflow}, "aucun workflow déclaré.")
+      assert body =~ "IMPOSSIBLE"
+      assert body =~ "project_reset_ci_rail"
+      refute body =~ "non classifié"
+    end
+
+    test ":ci_red_loop → the producer cannot turn it green" do
+      body = body_for(:ci_red_loop, "deux têtes rouges.")
+      assert body =~ "ROUGE"
+      refute body =~ "non classifié"
+    end
+
+    test ":provenance_incoherent → the wall's refusal, a terminal state named to a human" do
+      body = body_for(:provenance_incoherent, {:base_not_ancestor, "a", "b"})
+      assert body =~ "PROVENANCE"
+      assert body =~ "base_not_ancestor"
+      refute body =~ "non classifié"
+    end
+
+    test "an unknown class still lands in the catch-all (the floor is kept)" do
+      assert body_for(:something_new, "?") =~ "non classifié"
+    end
+
+    test "the gesture follows the cause: « rien à rebaser » is never followed by « rebase la PR »" do
+      for {class, reason} <- [
+            {{:ci_stalled, :unclaimed}, "m."},
+            {{:ci_impossible, :no_workflow}, "m."},
+            {:ci_red_loop, "m."},
+            {:provenance_incoherent, :x}
+          ] do
+        body = body_for(class, reason)
+
+        # « Rien à rebaser » is the cause's own sentence; what must not follow is an INSTRUCTION
+        # to rebase, or the blind-barrier sentence that only makes sense before one.
+        refute body =~ ~r/rebase la PR|pour rebaser/,
+               "#{inspect(class)}: a cause with nothing to rebase names a rebase"
+      end
+
+      assert body_for(:conflict, :real) =~ "rebase la PR"
+
+      assert body_for(:conflict, {:conflict_rework_exhausted, 1, :exception_pass_disabled}) =~
+               "exception_pass_disabled"
+    end
+
+    test "the conflict ladder's own reasons are read, not replaced by a generic git conflict" do
+      assert body_for(:conflict, {:conflict_rework_exhausted, 2, :x}) =~ "2 passe(s)"
+      assert body_for(:conflict, {:conflict_budget_unreadable, :forge_down}) =~ "ILLISIBLE"
+      assert body_for(:conflict, {:conflict_marker_unpostable, :boom}) =~ "marqueur"
+      assert body_for(:conflict, {:conflict_exception_marker_unpostable, :boom}) =~ "marqueur"
+      assert body_for(:rerequest_read_failed, :forge_down) =~ "re-demandés"
+      refute body_for(:rerequest_read_failed, :forge_down) =~ "non classifié"
+    end
+  end
 end

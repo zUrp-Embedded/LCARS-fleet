@@ -1401,4 +1401,138 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
                )
     end
   end
+
+  describe "step_run_jury — the jury of the PROJECT's catalogue card, through the default loader" do
+    @tag :tmp_dir
+    test "a producer :review on a `biz` project convenes the `biz` card's judge", %{tmp_dir: tmp} do
+      # `standard` lives in `biz` only; a default loader that drops the catalogue falls back to
+      # the project card's jury (the bundled default). No `:workflow_map_loader` in the opts: the
+      # completer's own default is the subject.
+      %{install_dir: dir} = Fleet.Test.BizCatalogueFixture.write!(tmp)
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [dir])
+      :ok = Fleet.CapProfile.Image.publish!()
+      :ok = Fleet.Workflow.Loader.publish_image!()
+
+      on_exit(fn ->
+        Fleet.CapProfile.Image.unpublish()
+        Fleet.Workflow.Loader.unpublish_all_images()
+      end)
+
+      judge = Fleet.Test.BizCatalogueFixture.judge()
+      # The PROJECT declares the jury-less card, so the fallback (engraved card unloadable in the
+      # wrong root) convenes nobody; `[judge]` can only come from `standard` read in `biz`. The
+      # producer signs as `engineer` — the bench holds its token, the step role is not the point.
+      code_root = Path.join(tmp, "projects")
+      Fleet.Test.BizCatalogueFixture.declare_project!(code_root, "boutique", "no-jury")
+
+      step_run = producer_step_run(:review, %{repo: "biz/boutique", workflow_map: "standard"})
+
+      assert {:ok, :review_requested} =
+               StepRunCompleter.complete_pr(step_run, orch_opts(code_root: code_root))
+
+      assert_received {:request_review, 7, reviewers}
+      assert [reviewer] = reviewers
+      assert String.ends_with?(reviewer, judge)
+      refute String.starts_with?(reviewer, "fleet_"), "the default catalogue's login prefix"
+    end
+  end
+
+  describe "promote/2 — the seal's two pre-write refusals cross the completer (2026-09-05)" do
+    # `promote/2` listed three of the five error forms `merge_and_promote/7` returns. The two
+    # missing ones are pronounced BEFORE any write and were a CaseClauseError on the terminal rail.
+    defmodule SignalDownOrchForge do
+      defdelegate pr_review_state(r, n, o), to: OrchForge
+      defdelegate get_pr_for_branch(r, h, b, o), to: OrchForge
+      defdelegate post_review(r, p, e, b, o), to: OrchForge
+      defdelegate merge_pr(r, p, o), to: OrchForge
+      defdelegate remove_label(r, n, l, o), to: OrchForge
+      defdelegate stop_stopwatch(r, n, o), to: OrchForge
+      defdelegate post_comment(r, p, b, o), to: OrchForge
+      # The conflict signal the seal reads FIRST, unreadable: no method can be chosen.
+      def count_comments_marked(_r, _n, _p, _o), do: {:error, :forge_down}
+    end
+
+    alias Fleet.Test.ProvenanceWallHarness, as: Wall
+    alias Fleet.Test.ProvenanceWallHarness.WallForge
+
+    # `OrchForge` plus `branch_head/3` (so the wall RUNS) and `add_label/4` (so `await_arch/2` can
+    # lay `lcars-awaits-arch`) — mirrored by reflection, an inventory by hand drifts.
+    defmodule WallOrchForge do
+      for {name, arity} <- OrchForge.__info__(:functions) do
+        args = Macro.generate_arguments(arity, __MODULE__)
+
+        def unquote(name)(unquote_splicing(args)),
+          do: OrchForge.unquote(name)(unquote_splicing(args))
+      end
+
+      def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}
+
+      def add_label(_repo, n, label, _opts) do
+        send(self(), {:label, n, label})
+        {:ok, :added}
+      end
+    end
+
+    test "conflict signal unreadable → typed error through route(:promote), NO merge, NO unlock" do
+      step_run = judge_step_run(:promote, %{role: "reviewer"})
+
+      assert {:error, {:conflict_signal_unreadable, {_prefix, :forge_down}}} =
+               StepRunCompleter.complete_pr(step_run, forge_client: SignalDownOrchForge)
+
+      refute_received {:merge, _}
+      refute_received {:unlock, _, _}
+    end
+
+    @tag :tmp_dir
+    @tag :requires_git
+    test "provenance INCOHERENT → typed error, NO merge (the wall refuses before any write)",
+         %{tmp_dir: tmp} do
+      %{head: head, alien: alien} = Wall.harness(tmp)
+      :ok = Wall.statement(tmp, 42, head, alien)
+
+      step_run = %{
+        repo: "fleet/demo",
+        pr_number: 4,
+        issue_number: 42,
+        producer_branch: "lcars/issue-42-engineer",
+        base_branch: "main"
+      }
+
+      opts = Wall.opts(tmp, head, 42)
+
+      assert {:error, {:provenance_incoherent, _}} =
+               StepRunCompleter.promote(
+                 step_run,
+                 Keyword.merge(opts, forge_client: WallForge, forge_opts: opts)
+               )
+
+      refute_received {:merge, _}
+    end
+
+    @tag :tmp_dir
+    @tag :requires_git
+    test "through route(:promote): the wall's refusal goes to the ARCHITECT, not to a log line",
+         %{tmp_dir: tmp} do
+      # The work item is already completed on this rail: an error here is a warning and nothing
+      # else. So the judge's PR lock lifts and the ISSUE goes to `await_arch/2`.
+      %{head: head, alien: alien} = Wall.harness(tmp, "proj")
+      :ok = Wall.statement(tmp, 42, head, alien, "proj")
+      opts = Wall.opts(tmp, head, 42)
+
+      assert {:ok, :awaiting_arch} =
+               StepRunCompleter.complete_pr(
+                 judge_step_run(:promote, %{role: "reviewer"}),
+                 Keyword.merge(opts, forge_client: WallOrchForge, forge_opts: opts)
+               )
+
+      refute_received {:merge, _}
+      assert_received {:label, 42, "lcars-awaits-arch"}
+      assert_received {:comment, 42, body}
+      assert body =~ "PROVENANCE"
+      assert body =~ "re-livrer"
+      # The judge's PR lock and the issue lock both lift — the brick is with a human now.
+      assert_received {:unlock, 7, _}
+      assert_received {:unlock, 42, _}
+    end
+  end
 end

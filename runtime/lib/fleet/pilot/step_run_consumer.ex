@@ -840,10 +840,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
           "**Architecte** (auteur du brief) — brief ABANDONNÉ par le juge. " <>
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
-        result = close_with_trace(n, role, arch_trace, state)
-
-        _ = TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
-        result
+        # THE KICK IS INSIDE THE CLOSURE, AFTER THE CLOSE SUCCEEDED — the same order
+        # `TerminalEscalation.freeze_to_arch/5` keeps (« vérifier puis annoncer »). Outside the
+        # closure it would run before the close in offload mode: `run_completion` hands the closure
+        # to the runner and returns `{:ok, :offloaded}` at once, and the architect would hear of
+        # an abandon the forge has not recorded — or never records (2026-09-05, witness with a
+        # runner that holds the closure).
+        close_with_trace(n, role, arch_trace, state, fn ->
+          TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
+        end)
 
       # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
       #
@@ -919,7 +924,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
     if File.dir?(dir), do: dir
   end
 
-  defp close_with_trace(n, role, trace, state) do
+  # `on_closed` runs inside the completion closure, only on `{:ok, _}` — whatever the runner.
+  defp close_with_trace(n, role, trace, state, on_closed) when is_function(on_closed, 0) do
     step_run = %{
       repo: state.repo,
       issue_number: n,
@@ -934,7 +940,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     run_completion(state, "##{n}", fn ->
-      state.step_run_completer.complete(step_run, completer_opts(state))
+      result = state.step_run_completer.complete(step_run, completer_opts(state))
+
+      case result do
+        {:ok, _} -> _ = on_closed.()
+        _ -> :ok
+      end
+
+      result
     end)
   end
 

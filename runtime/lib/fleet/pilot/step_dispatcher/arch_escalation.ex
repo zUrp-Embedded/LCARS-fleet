@@ -150,18 +150,20 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
   → CaseClauseError: a dispatch return MUST be `{:ok|:skipped|:error}`, never a 4th form. Non-fleet
   head → `{:skipped, :not_fleet_branch}`.
   """
-  @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom(), term()) ::
+  @spec escalate_merge_blocked(Seams.t(), integer(), String.t(), atom() | tuple(), term()) ::
           {:skipped, term()} | {:error, term()}
   def escalate_merge_blocked(%Seams{} = seams, pr_number, head, class, reason) do
     with {:ok, issue_n} <- issue_of_branch_or_skip(head) do
       signature = "[merge-blocked-escalation:pr-#{pr_number}]"
 
+      # Cause, then the gesture THAT CAUSE calls for: a CI without a runner or a lying provenance
+      # is not rebased, and a body that ends every cause with « rebase la PR » sends the
+      # architect to the wrong tool.
       body =
         "**Architecte** — ⚠ Merge bloqué sur la PR ##{pr_number} (issue ##{issue_n}) — " <>
           merge_blocked_cause(class, reason) <>
-          " Le système n'y touche PAS (barrière forge-aveugle : le pod n'a pas de credentials pour " <>
-          "rebaser). Reprends : résous/rebase la PR sur `main` (ou re-cadre). L'issue reste hors-dispatch " <>
-          "tant que `lcars-awaits-arch` est posé.\n\n" <> signature
+          merge_blocked_gesture(class) <>
+          " L'issue reste hors-dispatch tant que `lcars-awaits-arch` est posé.\n\n" <> signature
 
       case escalate_to_arch(seams, issue_n, signature, body) do
         :ok -> {:skipped, {:merge_blocked_escalated, pr_number}}
@@ -172,9 +174,37 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
 
   # HONEST cause per the REAL class (MergeOutcome) — never "after a rebase attempt" that we did
   # NOT do (the mechanical resolution is a later increment; here we ESCALATE, we claim nothing).
+  # The conflict ladder's own reasons (`Remediation`): each rung that could not be played says
+  # WHY, and the architect reads that rather than a cause that claims more than the rail knows.
+  # `detail` is the chief rung's own verdict (`:exception_pass_disabled`, `:exception_pass_spent`,
+  # `{:exception_pass_undispatchable, why, _}`): the architect must tell « the pass failed » from
+  # « the pass is not armed on this box ».
+  defp merge_blocked_cause(:conflict, {:conflict_rework_exhausted, rounds, detail}),
+    do:
+      "conflit git, et le producteur a dépensé ses #{rounds} passe(s) de rework-conflit sans " <>
+        "converger ; passe chief : `#{inspect(detail)}` → résolution manuelle requise."
+
+  defp merge_blocked_cause(:conflict, {:conflict_budget_unreadable, why}),
+    do:
+      "conflit git, et le budget de rework-conflit est ILLISIBLE sur la forge " <>
+        "(`#{inspect(why)}`) → le rail ne peut pas borner une passe de plus, résolution manuelle."
+
+  defp merge_blocked_cause(:conflict, {marker, why})
+       when marker in [:conflict_marker_unpostable, :conflict_exception_marker_unpostable],
+       do:
+         "conflit git, et le marqueur qui borne la passe n'a pas pu être posté " <>
+           "(`#{inspect(why)}`) — une passe non enregistrée n'est pas bornée, donc pas jouée : " <>
+           "résolution manuelle."
+
   defp merge_blocked_cause(:conflict, _reason),
     do:
       "conflit git (les deux côtés touchent les mêmes lignes) → le merge automatique est impossible, résolution manuelle requise."
+
+  # A forge read that failed is a NAMED cause, not « non classifié ».
+  defp merge_blocked_cause(:rerequest_read_failed, why),
+    do:
+      "la liste des juges re-demandés est ILLISIBLE sur la forge (`#{inspect(why)}`) → le rail " <>
+        "ne sait pas qui re-convoquer. Relis la PR et re-demande la review toi-même."
 
   defp merge_blocked_cause(:policy, _reason),
     do:
@@ -203,9 +233,56 @@ defmodule Fleet.Pilot.StepDispatcher.ArchEscalation do
         "runner ne sert pas ce label. Rien à rebaser, rien à arbitrer : vérifie le runner et ses " <>
         "labels, ou le `runs-on:` du workflow."
 
+  # The gate's own classes (`CiGate.decide/4` → `Remediation.ci_stalled/5`), each with its gesture.
+  # `message` is the gate's sentence, already naming the label, the delay or the missing workflow.
+  defp merge_blocked_cause({:ci_stalled, :unclaimed}, message),
+    do:
+      "la CI est BLOQUÉE — #{message} Aucun verdict ne viendra tant qu'un runner ne sert pas " <>
+        "ce label. Rien à rebaser, rien à arbitrer : vérifie le runner et ses labels, ou le " <>
+        "`runs-on:` du workflow."
+
+  defp merge_blocked_cause({:ci_stalled, _state}, message),
+    do: merge_blocked_cause(:ci_stalled, message)
+
+  defp merge_blocked_cause({:ci_impossible, :no_workflow}, message),
+    do:
+      "la CI est IMPOSSIBLE sur cette PR — #{message} Aucun workflow ne peut rendre de verdict : " <>
+        "ajoute ou répare le rail CI du projet (`project_reset_ci_rail`). Rien à rebaser."
+
+  defp merge_blocked_cause(:ci_red_loop, message),
+    do:
+      "la CI est ROUGE sur deux têtes successives — #{message} Le producteur n'arrive pas à la " <>
+        "remettre au vert : reprends le rail ou re-cadre le ticket. Rien à rebaser."
+
+  # The deterministic wall's refusal (`MergeAndPromote.verify_provenance_wall`): a TERMINAL state
+  # — the statement lies about the brick and no tick will change that — so it is escalated rather
+  # than retried every tick without a label (2026-09-05).
+  defp merge_blocked_cause(:provenance_incoherent, reason),
+    do:
+      "la PROVENANCE de la brique est INCOHÉRENTE (`#{inspect(reason)}`) → le mur déterministe " <>
+        "refuse le merge tant que l'attestation ment sur la brique. Aucun conflit git : relis le " <>
+        "statement `refs/lcars/provenance/<sha>` et la base du livrable, puis re-cadre ou fais " <>
+        "re-livrer."
+
   defp merge_blocked_cause(_unknown, reason),
     do:
       "échec de merge non classifié par le système (`#{inspect(reason)}`) → à trancher manuellement."
+
+  # Only the two classes where a git gesture is the answer name one; every other cause names its
+  # own gesture above, and « rien à rebaser » must not be followed by « rebase la PR ».
+  # The blind-barrier sentence (« no credentials to rebase ») belongs to the two git causes; on
+  # every other cause the word « rebaser » is the wrong tool named to a human.
+  defp merge_blocked_gesture(:conflict),
+    do:
+      " Le système n'y touche PAS (barrière forge-aveugle : le pod n'a pas de credentials pour " <>
+        "rebaser). Reprends : résous/rebase la PR sur `main` (ou re-cadre)."
+
+  defp merge_blocked_gesture(:policy),
+    do:
+      " Le système n'y touche PAS (barrière forge-aveugle : le pod n'a pas de credentials pour " <>
+        "rebaser). Reprends : lève le blocage de protection ou re-demande la review."
+
+  defp merge_blocked_gesture(_other), do: " Le système n'y touche PAS."
 
   defp gray_zone_detail(:verdict_pass_disabled),
     do: "la passe d'arbitrage du gatekeeper n'est PAS armée sur cette boîte."

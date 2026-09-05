@@ -229,6 +229,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
     e ->
       Logger.warning("StepRunConsumer: notify arch raised #{inspect(e)} (non-blocking)")
       :ok
+  catch
+    # Same net as `safe_offer_then_wake/2`: this runs INSIDE the completion closure after a close
+    # that succeeded; an exit here would report that close as lost.
+    :exit, reason ->
+      Logger.warning("StepRunConsumer: notify arch exited #{inspect(reason)} (non-blocking)")
+      :ok
   end
 
   defp label(n, :blocked_dep), do: "##{n} (blocked)"
