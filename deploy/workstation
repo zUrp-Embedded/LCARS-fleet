@@ -4,7 +4,8 @@
 # STARDATE: (posee par /push-github)
 # STATUS: PROTO-V2 — LE délégué du POSTE DE TRAVAIL : escalade, paquets, provisionnement, acceptation
 #
-#     deploy/workstation {up [--from <artefact>…]|doctor}
+#     deploy/workstation {up|doctor}
+#     deploy/workstation up [--from <artefact>…]
 #
 #       --from <kit.tar.gz>     pose DEPUIS un kit : « <kit>.sha256 » vérifié s'il est à côté (dit
 #                               sinon), détaré sous l'humain dans ~/.lcars/kits/<nom>/, puis
