@@ -238,6 +238,22 @@ hors policy Debian, et l'assume dans son `control`. Une machine, un canal : le `
 miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en passe. La version des
 `.deb` est celle de `runtime/mix.exs` ; la révision (`AAAAMMJJ.HHMM+g<sha>`) est le tampon du tiroir.
 
+### Ce qu'un paquet lit, et ce qu'il laisse
+
+- **`/etc/lcars/provision.conf`** — le fichier de l'administrateur, jamais posé par un paquet :
+  `NOM=valeur` par ligne, seules les clefs `PROV_*` entrent (valeurs sans `$ \` ; | &`), lues par
+  les `postinst` avant `provision apply`. Un paquet ne pose pas de question, il lit ce fichier —
+  le port du deck sur une machine où 20999 est pris (`PROV_DECK_PORT=20990`), le port de la forge
+  du poste (`PROV_FORGE_HOST_PORT`), la forge fournie vit dans `forge.conf` (`FORGE_BASE_URL=`).
+- **Sous apt, le PATH des scripts de paquet est `DPkg::Path`** (`/usr/sbin:/usr/bin:/sbin:/bin`),
+  sans `/usr/local/bin` : les `postinst` le préfixent, et le provisionnement nomme ses outils par
+  leur chemin (`TOFU_BIN`, `LCARS_CLI`). Sous ce canal, `10-packages` et `30-wsl` n'appellent
+  jamais apt (il tient le verrou) : un manque se DIT avec le geste.
+- **`apt remove`** = `provision uninstall --keep-state` : l'état (`/opt/lcars/var`, `/etc/lcars`) et
+  les comptes de service restent ; **`apt purge`** les retire aussi. Ni l'un ni l'autre ne touche
+  aux comptes humains ni à leurs homes (les objets par-humain — skill `system-issues`, masque de
+  socket gpg-agent — y restent : `lcars uninstall --humans`). Les dépendances tierces en état `rc`
+  (conffiles de ttyd, outils d'util-linux-extra) : `apt autoremove --purge`.
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
 - **Pas d'users Linux par rôle** : un pod = un process bwrap sous l'UID de l'humain ; les rôles
