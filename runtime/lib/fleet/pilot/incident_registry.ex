@@ -11,7 +11,25 @@ defmodule Fleet.Pilot.IncidentRegistry do
   alias Fleet.Pilot.IncidentRegistry.Store
 
   @forge_fail_threshold 3
-  @sync_debounce_ms 2_000
+  # THE SYNC WINDOW IS THE REGISTRY'S OPS-COMMIT BUDGET. Every sync rewrites the ops file in full
+  # and lands as one commit on the ops branch, and a durable failure is noted at EVERY tick (see
+  # `IncidentConsumer`: recurrent under cooldown = noted, count/last_seen). Per machine, at the
+  # 30 s default tick, a window shorter than the tick coalesces nothing: one
+  # « ops(incident): sync registre » per tick, ~2 880 a day burying every human commit of the
+  # branch; 300 s caps it at 288, and the file's final state is the same (the merge keeps the
+  # max count and the latest stamps). What the window costs, and to whom:
+  #   * the OTHER machines read this one's memory up to a window later. That delays an
+  #     escalation by at most one occurrence (recurrence is decided against the local memory
+  #     first). A duplicate sysadmin issue is guarded by `Escalation`'s open-issue readback, not
+  #     by this memory: as long as that readback succeeds no duplicate opens; unreadable, it
+  #     creates and says so in the body;
+  #   * durability is NOT traded: the WAL holds every note before the forge does. When the WAL
+  #     write FAILED the forge is the only durability left, and that sync runs on the catch-up
+  #     clock (`retry_ms`, `schedule_sync/2`), not on the window. Same clock for the boot re-read
+  #     of an unreadable forge: a read that pushes nothing has no commit budget to respect.
+  # Knob `:pilot_incident_registry_sync_debounce_ms` (`LCARS_PILOT_INCIDENT_REGISTRY_SYNC_DEBOUNCE_MS`);
+  # the `:sync_debounce_ms` opt is the test seam.
+  @sync_debounce_ms 300_000
   @retry_ms 30_000
 
   @doc """
@@ -232,13 +250,14 @@ defmodule Fleet.Pilot.IncidentRegistry do
         # UNREADABLE forge ≠ empty forge. Boot on the WAL, but say so LOUD (on a fresh node the WAL
         # is empty → this is blind cross-machine memory), and schedule a re-sync so the node catches
         # up when the forge returns — instead of silently believing there is nothing to remember.
+        # On the catch-up clock: blindness is measured in ticks, not in commit windows.
         Logger.error(
           "IncidentRegistry: forge backing UNREADABLE at boot (#{inspect(reason)}) — booting on WAL " <>
             "only (#{map_size(wal)} signature(s)); cross-machine memory is BLIND until a re-read. " <>
             "Scheduling a forge re-sync."
         )
 
-        {:noreply, schedule_sync(%{state | registry: wal})}
+        {:noreply, schedule_catch_up(%{state | registry: wal})}
     end
   end
 
@@ -255,13 +274,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
     # CANNOT be swallowed as `:ok`. Otherwise, memory updated + WAL failed + crash before
     # the async forge sync = incident never durable while the return said "recorded". We propagate
     # the typed failure; `WakeRecovery` handles it (`note OK → recorded`, else LOUD "anchor NOT recorded").
+    wal = Store.write_wal(state.wal_path, registry)
+
     reply =
-      case Store.write_wal(state.wal_path, registry) do
+      case wal do
         :ok -> :ok
         {:error, e} -> {:error, {:wal_write_failed, e}}
       end
 
-    {:reply, reply, schedule_sync(%{state | registry: registry})}
+    {:reply, reply, schedule_sync(%{state | registry: registry}, wal)}
   end
 
   # Memory transaction of `record_or_escalate`/`escalate_gated`: notes the occurrence (count/
@@ -273,7 +294,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
     registry = upsert(state.registry, sig, reason, now)
     wal = Store.write_wal(state.wal_path, registry)
-    state = schedule_sync(%{state | registry: registry})
+    state = schedule_sync(%{state | registry: registry}, wal)
 
     # BND-055 — on a FIRST occurrence (`:recorded_first` → `:recorded`, NO escalation), the WAL is
     # the only durability — a failed write must not come out as `:recorded`. We distinguish
@@ -292,8 +313,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # Engraves the escalation memory (recurrence cooldown): WAL + forge sync — `merge_entry`
-  # carries the two fields cross-machine, otherwise every sync would erase the cooldown ~2s
-  # after each note and the issue storm would resume.
+  # carries the two fields cross-machine, otherwise the sync that follows the next note would
+  # erase the cooldown and the issue storm would resume.
   def handle_call({:mark_escalated, sig, issue_number, now}, _from, state) do
     registry =
       Map.update(
@@ -322,13 +343,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
     # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
     # recurrence suivante — borne, et qui se repare tout seul. Ce qu'il faut n'est pas un nouveau
     # verdict, c'est que le fait EXISTE quelque part.
+    wal = Store.write_wal(state.wal_path, registry)
+
     reply =
-      case Store.write_wal(state.wal_path, registry) do
+      case wal do
         :ok -> :ok
         {:error, e} -> {:error, {:wal_write_failed, e}}
       end
 
-    {:reply, reply, schedule_sync(%{state | registry: registry})}
+    {:reply, reply, schedule_sync(%{state | registry: registry}, wal)}
   end
 
   @impl true
@@ -367,6 +390,18 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   defp schedule_sync(state) do
     Process.send_after(self(), :sync_forge, debounce_ms(state.opts))
+    %{state | sync_pending: true}
+  end
+
+  # The window is a budget for a memory the WAL already holds. A note whose WAL write FAILED has
+  # the forge as its only durability: it syncs on the catch-up clock, whatever is pending. A
+  # window timer may then fire behind it; a registry the forge already holds pushes nothing
+  # (`Store.sync_forge/2`), so the second sync costs one read.
+  defp schedule_sync(state, :ok), do: schedule_sync(state)
+  defp schedule_sync(state, {:error, _}), do: schedule_catch_up(state)
+
+  defp schedule_catch_up(state) do
+    Process.send_after(self(), :sync_forge, retry_ms(state.opts))
     %{state | sync_pending: true}
   end
 
@@ -414,7 +449,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
       )
   end
 
-  defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
+  defp debounce_ms(opts) do
+    opts[:sync_debounce_ms] ||
+      Application.get_env(
+        :lcars_fleet,
+        :pilot_incident_registry_sync_debounce_ms,
+        @sync_debounce_ms
+      )
+  end
+
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")

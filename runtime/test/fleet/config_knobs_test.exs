@@ -42,6 +42,56 @@ defmodule Fleet.ConfigKnobsTest do
     end
   end
 
+  describe ":lcars_fleet, :pilot_incident_registry_sync_debounce_ms — the ops-commit window" do
+    setup do
+      tmp = Fleet.TestEnv.tmp_path("knobs_window")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf(tmp) end)
+      {:ok, wal_path: Path.join(tmp, "wal.json")}
+    end
+
+    # The registry is started WITHOUT the `:sync_debounce_ms` test seam: only the knob can bring
+    # the window below its 300 s default, so a put that arrives proves the knob is read.
+    defp start_without_seam(wal_path, test_pid) do
+      start_supervised!(
+        {IncidentRegistry,
+         name: :"knobs_window_#{System.unique_integer([:positive])}",
+         wal_path: wal_path,
+         get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+         put_file_fun: fn _r, _p, content, _o -> send(test_pid, {:put, content}) && {:ok, "c"} end}
+      )
+    end
+
+    test "the knob sets the window: 5 ms → the note reaches the forge at once", %{
+      wal_path: wal_path
+    } do
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_incident_registry_sync_debounce_ms, 5)
+      registry = start_without_seam(wal_path, self())
+
+      :ok = IncidentRegistry.note("wake:p:dead", :dead, server: registry)
+      assert_receive {:put, content}, 1_000
+      assert content =~ "wake:p:dead"
+    end
+
+    # Discriminating on the VALUE: a put that is absent at 200 ms and present by 1 s is neither
+    # the 5 ms of the seam nor the 300 s default — it is the 400 ms the knob said.
+    test "counter-witness: a 400 ms window holds the note back, then lets it through", %{
+      wal_path: wal_path
+    } do
+      Fleet.TestEnv.put_env_restoring(
+        :lcars_fleet,
+        :pilot_incident_registry_sync_debounce_ms,
+        400
+      )
+
+      registry = start_without_seam(wal_path, self())
+
+      :ok = IncidentRegistry.note("wake:p:dead", :dead, server: registry)
+      refute_receive {:put, _}, 200
+      assert_receive {:put, _}, 1_000
+    end
+  end
+
   describe ":lcars_fleet, :pilot_incident_registry_max_entries — bounds unbounded growth" do
     setup do
       # The knob's reader is private (`prune/1`), so it is exercised through BEHAVIOUR, which is
@@ -58,7 +108,8 @@ defmodule Fleet.ConfigKnobsTest do
           {IncidentRegistry,
            name: :"knobs_registry_#{System.unique_integer([:positive])}",
            wal_path: wal_path,
-           sync_forge: false}
+           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+           put_file_fun: fn _r, _p, _c, _o -> {:ok, "c"} end}
         )
 
       {:ok, registry: pid, wal_path: wal_path}

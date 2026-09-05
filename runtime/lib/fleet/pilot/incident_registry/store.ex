@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
   #   * unreadable (5xx/  → we do NOT know the forge's real content → pushing our LOCAL view would
   #     network/timeout)    OVERWRITE cross-machine incidents we could not read (data loss). Fail-closed:
   #                         `{:error, _}`, no PUT — the handler retries (data stays safe in the WAL).
-  @doc "Read-modify-write MERGE of the registry into the ops file; `{:ok, merged}`, or `{:error, _}` without a PUT when the forge could not be read (fail-closed)."
+  @doc "Read-modify-write MERGE of the registry into the ops file; `{:ok, merged}` (no PUT when the merge equals what the forge holds), or `{:error, _}` without a PUT when the forge could not be read (fail-closed)."
   @spec sync_forge(map(), keyword()) :: {:ok, map()} | {:error, term()}
   def sync_forge(registry, opts) do
     getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
@@ -54,7 +54,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
       {:ok, %{content: content, sha: sha}} ->
         case decode(content) do
           {:ok, forge_reg} ->
-            put_merged(registry, forge_reg, sha, putter, opts)
+            put_merged(registry, forge_reg, content, sha, putter, opts)
 
           # MEME BRANCHE QUE L'ILLISIBLE, ET POUR LA MEME RAISON : on ignore ce que la forge
           # contient. Pousser notre vue locale par-dessus effacerait les incidents des autres
@@ -64,7 +64,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
         end
 
       {:error, :not_found} ->
-        put_merged(registry, %{}, nil, putter, opts)
+        put_merged(registry, %{}, nil, nil, putter, opts)
 
       {:error, reason} ->
         Logger.error(
@@ -79,8 +79,24 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
     end
   end
 
-  defp put_merged(registry, forge_reg, sha, putter, opts) do
+  defp put_merged(registry, forge_reg, forge_content, sha, putter, opts) do
     merged = registry |> merge(forge_reg) |> prune()
+    encoded = encode_registry(merged)
+
+    # A PUT whose bytes equal what was just read is a commit that changes nothing (a re-sync after
+    # an unreadable boot, a window that only absorbed what another machine already pushed, the
+    # same note replayed); so is CREATING the file for a registry with nothing in it (no file yet,
+    # no incident yet — the first note creates it). The ops branch is read by humans: a commit
+    # there says something. The comparison is on the encoded text, so a hand-edited file that
+    # decodes equal is normalised once, then pushes nothing.
+    cond do
+      encoded == forge_content -> {:ok, merged}
+      forge_content == nil and merged == %{} -> {:ok, merged}
+      true -> put(merged, encoded, sha, putter, opts)
+    end
+  end
+
+  defp put(merged, encoded, sha, putter, opts) do
     ident = author(opts)
 
     put_opts = [
@@ -91,7 +107,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Store do
       committer: ident
     ]
 
-    case putter.(repo(opts), path(opts), encode_registry(merged), put_opts) do
+    case putter.(repo(opts), path(opts), encoded, put_opts) do
       {:ok, _} -> {:ok, merged}
       {:error, _} = err -> err
     end
