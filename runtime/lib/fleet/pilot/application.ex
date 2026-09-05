@@ -82,7 +82,8 @@ defmodule Fleet.Pilot.Application do
 
     * `{:inactive, _}`    — `:pilot_step_dispatch?` off (rail deliberately absent, expected outside prod-step).
     * `{:operational, _}` — Poller + StepRunConsumer alive.
-    * `{:degraded, _}`    — step enabled and EITHER ≥1 singleton dead, OR every poll of the observed
+    * `{:degraded, _}`    — step enabled and EITHER ≥1 singleton dead, OR the last cycle discovered
+      repositories and served NONE (`serving?/1` — nothing can advance), OR every poll of the observed
       window failed → **hollow-green caught** (the daemon runs but the forge rail no longer
       advances).
 
@@ -149,10 +150,39 @@ defmodule Fleet.Pilot.Application do
 
   # A process key is a boolean: alive or the rail is degraded. Unchanged, and it still wins — a dead
   # singleton is degraded whatever the polls say.
-  defp key_healthy?({key, health}) when key in [:repo_poll, :poll_cycle],
-    do: polls_healthy?(health)
+  # DEUX QUESTIONS SUR LE MEME CYCLE : est-ce que les passes REUSSISSENT, et est-ce qu'elles ont
+  # quelque chose a servir. La seconde ne se lit sur aucune autre cle — `repo_poll` ignore combien
+  # de depots existent, et un depot ecarte rend le meme tally vide qu'un depot servi qui n'avait
+  # rien a faire.
+  defp key_healthy?({:poll_cycle, health}),
+    do: polls_healthy?(health) and serving?(health)
+
+  defp key_healthy?({:repo_poll, health}), do: polls_healthy?(health)
 
   defp key_healthy?({_key, up?}), do: up?
+
+  @doc """
+  SERVING — `false` quand le poller DECOUVRE des depots et n'en sert AUCUN — le rail ne peut rien faire
+  avancer, quelle que soit la sante de ses passes.
+
+  MESURE, sur un banc : deux heures, 268 cycles, zero erreur, readiness `operational`, et le seul
+  depot de l'org ecarte a chaque tour (`NOT ONBOARDED … step rail skipped`). Une flotte qui ne PEUT
+  rien produire se lisait comme une flotte au repos, et la difference ne vivait que dans un warning
+  emis UNE fois par depot et par vie du process.
+
+  LA BORNE EST « AUCUN », ET C'EST DELIBERE. Un depot non onboarde a cote d'autres qui le sont est
+  un etat NORMAL — l'humain onboarde quand il veut, et crier a chaque depot en attente ferait de
+  cette sonde un bruit qu'on apprend a ignorer. Ce qui est signale est le cas ou le compte des
+  servis tombe a zero alors que des depots existent : la, aucun ticket ne peut avancer.
+
+  Vrai par defaut sur toute forme inattendue, comme `polls_healthy?/1` : une sonde qui ne sait pas
+  n'accuse pas.
+  """
+  @spec serving?(term()) :: boolean()
+  def serving?(%{last_repos: repos, last_served: 0}) when is_integer(repos) and repos > 0,
+    do: false
+
+  def serving?(_other), do: true
 
   @doc false
   # Verdict on ONE health summary. Public for its test: the shapes it must classify come from

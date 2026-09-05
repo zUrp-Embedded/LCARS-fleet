@@ -73,6 +73,40 @@ defmodule Fleet.Pilot.ApplicationStepStatusTest do
   #
   # ⚠ Et retirer la liste n'aurait RIEN change : les trois valeurs possibles (une map, `:no_data`,
   # `:unavailable`) sont toutes truthy. C'est pourquoi ces tests portent sur une CLASSIFICATION.
+  # ─── UNE FLOTTE QUI NE PEUT RIEN PRODUIRE DISAIT `operational` ─────────────────────────────────
+  #
+  # Mesure sur banc, 2026-09-05 : deux heures, 268 cycles, zero erreur, readiness verte, et le seul
+  # depot de l'org ecarte a chaque tour (`NOT ONBOARDED … step rail skipped`). Un depot ecarte rend
+  # le meme tally vide qu'un depot servi sans travail : l'etat « rien ne PEUT avancer » n'existait
+  # nulle part, sauf dans un warning emis une fois par depot et par vie du process.
+  describe "serving? — des depots decouverts et AUCUN servi" do
+    test "des depots, aucun servi → le rail est degrade" do
+      assert PilotApp.serving?(%{last_repos: 1, last_served: 0}) == false
+      assert PilotApp.serving?(%{last_repos: 12, last_served: 0}) == false
+    end
+
+    test "au moins un servi → sain, MEME si les autres ne le sont pas (la borne est « aucun »)" do
+      # Un depot non onboarde a cote d'autres qui le sont est un etat normal : l'humain onboarde
+      # quand il veut. Une sonde qui crierait la ferait un bruit qu'on apprend a ignorer, et c'est
+      # exactement ce que la borne « aucun » evite.
+      assert PilotApp.serving?(%{last_repos: 12, last_served: 1}) == true
+      assert PilotApp.serving?(%{last_repos: 1, last_served: 1}) == true
+    end
+
+    test "AUCUN depot decouvert → sain : une org vide n'est pas une panne" do
+      assert PilotApp.serving?(%{last_repos: 0, last_served: 0}) == true
+    end
+
+    test "NON MESURE n'est pas ZERO — l'inconnu n'accuse pas" do
+      # `served` absent de la mesure vaut `nil`, jamais 0 : un defaut a zero ferait degrader sur
+      # tout emetteur qui ne renseigne pas la cle. Meme posture que `:no_data` juste en dessous.
+      assert PilotApp.serving?(%{last_repos: 3, last_served: nil}) == true
+      assert PilotApp.serving?(%{last_repos: 3}) == true
+      assert PilotApp.serving?(:no_data) == true
+      assert PilotApp.serving?(:unavailable) == true
+    end
+  end
+
   describe "JG-100 — sante des polls : le blackout entre dans le verdict" do
     test "blackout : toute la fenetre en erreur → degrade" do
       assert PilotApp.polls_healthy?(%{errors: %{repo_list: 100}, window: 100}) == false
