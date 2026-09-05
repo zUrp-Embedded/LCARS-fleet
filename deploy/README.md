@@ -254,6 +254,38 @@ miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en pa
   aux comptes humains ni à leurs homes (les objets par-humain — skill `system-issues`, masque de
   socket gpg-agent — y restent : `lcars uninstall --humans`). Les dépendances tierces en état `rc`
   (conffiles de ttyd, outils d'util-linux-extra) : `apt autoremove --purge`.
+### Publier une version — `pack.sh --publish` (lot 5 du chantier release)
+
+`./pack.sh` construit et mesure : le gate, le tar, les `.deb`, la porte de la version — tout dans
+le tiroir `dist/<tag>/`, rien n'en sort. **`./pack.sh --publish`** joue le même run puis un étage de
+plus (`deploy/lib/forge-publish.sh`) :
+
+1. **la Release de la forge**, sur le tag, avec TOUT le tiroir en assets (tar, `.deb`, `.sha256`,
+   `install.sh`, `install.sh.sha256`, `.minisig` quand la clé est là), à la forme d'URL commune à
+   Gitea et GitHub — `<forge>/<owner>/<repo>/releases/download/<tag>/<asset>`. C'est cette base que
+   la porte porte en dur : `curl … <forge>/<owner>/<repo>/releases/download/<tag>/install.sh | bash -s -- --workstation`.
+   Elle naît en **brouillon**, reçoit ses assets, puis est publiée d'un coup : un envoi coupé laisse
+   un brouillon nommé dans le refus, jamais une release à moitié pleine.
+2. **le registre Debian** de l'owner : chaque `.deb` y va (`pool/<distribution>/main`), pour
+   `apt install lcars-demo` depuis une source apt :
+   `deb [signed-by=/etc/apt/keyrings/lcars-<owner>.asc] <forge>/api/packages/<owner>/debian <distribution> main`
+   (la clé : `<forge>/api/packages/<owner>/debian/repository.key`).
+
+**Immutabilité (ADR 012)** : une release du tag qui existe, brouillon compris, est un refus nommé ;
+un `.deb` déjà au registre aussi. Rien ne se réécrit — pour refaire, on supprime sur la forge, à la
+main. **Le tag** est celui de git quand HEAD en porte un (la CI sur tag, un `1.2.3` d'opérateur),
+sinon `<VERSION>-<SHA>` ; `LCARS_PACK_TAG` le pose autrement. **La forge, l'owner et le dépôt** se
+dérivent d'`origin` ; `LCARS_PACK_FORGE`, `LCARS_PACK_OWNER`, `LCARS_PACK_REPO` les posent quand
+origin n'est pas http (un clone local, un banc). **Le jeton** : `LCARS_PACK_TOKEN` dans
+l'environnement (la CI) ou `LCARS_PACK_TOKEN_FILE` (root:fleet 0640), portées `write:package` ET
+`write:repository` — celui des `git push` n'a pas la première ; il ne passe jamais en argv, jamais
+sur une sortie. La distribution Debian est celle du builder (`LCARS_PACK_DEBIAN_DIST` sinon).
+
+**La CI sur tag** (`.gitea/workflows/publish.yml`, job `release`) joue LE MÊME `pack.sh --publish`
+sur `ubuntu-latest` avec la toolchain de `gate.yml` ; « qui appuie » est la seule différence. Son
+secret : `PACK_TOKEN`. Le job-image du même fichier publie l'image à côté, chacun avec sa propre
+immutabilité.
+
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
 - **Pas d'users Linux par rôle** : un pod = un process bwrap sous l'UID de l'humain ; les rôles

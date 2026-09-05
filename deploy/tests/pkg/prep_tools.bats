@@ -115,6 +115,7 @@ TOFU
   local u; u="$(sed -n '/^# USAGE/,/^# EXIT/p' "$REPO/pack.sh")"
   grep -q -- '--no-deb' <<<"$u"
   grep -q -- '--no-push' <<<"$u"
+  grep -q -- '--publish' <<<"$u"
   grep -q 'LCARS_DEB_RELEASE' <<<"$u"
   local code; code="$(grep -vE '^\s*#' "$REPO/pack.sh")"
   local n_tar n_nfpm n_tofu n_gen n_pkg n_push
@@ -123,7 +124,7 @@ TOFU
   n_tofu="$(grep -n 'prep-tofu.sh' <<<"$code" | head -1 | cut -d: -f1)"
   n_gen="$(grep -n 'gen-contents.sh' <<<"$code" | head -1 | cut -d: -f1)"
   n_pkg="$(grep -n 'package -f' <<<"$code" | head -1 | cut -d: -f1)"
-  n_push="$(grep -n 'PUSH" -eq 1' <<<"$code" | head -1 | cut -d: -f1)"
+  n_push="$(grep -n 'PUBLISH" -eq 1' <<<"$code" | head -1 | cut -d: -f1)"
   [ "$n_tar" -lt "$n_nfpm" ] && [ "$n_nfpm" -lt "$n_tofu" ] && [ "$n_tofu" -lt "$n_gen" ] && [ "$n_gen" -lt "$n_pkg" ] && [ "$n_pkg" -lt "$n_push" ]
   # les .deb sortent du STAGE du tar, et les YAML generes vont a cote du stage, pas dedans
   grep -q -- '--stage "\$STAGE/\$ROOT"' <<<"$code"
@@ -133,4 +134,33 @@ TOFU
   grep -q 'DEB_ARCH=amd64' <<<"$code"
   # et --no-deb est cable
   grep -qE '^\s+--no-deb\)\s+DEB=0' <<<"$code"
+}
+
+@test "pack.sh --publish (lot 5) : rien ne sort sans le drapeau, l'etage vient APRES la porte, le geste est celui de forge-publish.sh, le jeton n'est jamais imprime" {
+  local code; code="$(grep -vE '^\s*#' "$REPO/pack.sh")"
+  # le defaut ne publie pas ; --no-push est l'ancien nom du defaut, encore accepte
+  grep -qE '^PUBLISH=0$' <<<"$code"
+  grep -qE '^\s+--publish\)\s+PUBLISH=1' <<<"$code"
+  grep -qE '^\s+--no-push\)\s+PUBLISH=0' <<<"$code"
+  # la porte de la version est generee AVANT l'etage, et l'etage s'arrete la sans --publish
+  local n_door n_gate n_lib n_call
+  n_door="$(grep -n 'door-gen.sh' <<<"$code" | head -1 | cut -d: -f1)"
+  n_gate="$(grep -n 'PUBLISH" -eq 1' <<<"$code" | head -1 | cut -d: -f1)"
+  n_lib="$(grep -n '^\. deploy/lib/forge-publish.sh' <<<"$code" | head -1 | cut -d: -f1)"
+  n_call="$(grep -n 'fp_publish_dist "\$FORGE" "\$OWNER" "\$REPO" "\$TAG" "\$DIST"' <<<"$code" | head -1 | cut -d: -f1)"
+  [ -n "$n_door" ] && [ -n "$n_gate" ] && [ -n "$n_lib" ] && [ -n "$n_call" ]
+  [ "$n_door" -lt "$n_gate" ] && [ "$n_gate" -lt "$n_lib" ] && [ "$n_lib" -lt "$n_call" ]
+  # le jeton : environnement ou fichier, passe a la lib par FP_TOKEN — jamais en argv de curl ici, jamais dans un echo/say
+  grep -q 'FP_TOKEN="\$TOKEN" fp_publish_dist' <<<"$code"
+  ! grep -E '(say|echo|printf) .*\$TOKEN' <<<"$code"
+  ! grep -E 'curl .*\$TOKEN' <<<"$code"
+  # le tag de la version : celui de git a HEAD quand il y en a un, sinon VERSION-SHA ; la base de la porte le porte
+  grep -q 'git describe --tags --exact-match' <<<"$code"
+  grep -qE '^TAG="\$\{LCARS_PACK_TAG:-' <<<"$code"
+  grep -q 'releases/download/\$TAG' <<<"$code"
+  # le depot est derive d origin comme la forge et l owner, et la porte l emploie (plus de lcars-fleet grave seul)
+  grep -qE '^_REPO="\$\{LCARS_PACK_REPO:-' <<<"$code"
+  grep -q '/${_REPO:-lcars-fleet}/releases/download/' <<<"$code"
+  # l ancien paquet generic n existe plus : la Release le remplace
+  ! grep -q 'generic/lcars-fleet' <<<"$code"
 }
