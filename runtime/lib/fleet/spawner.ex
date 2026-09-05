@@ -20,6 +20,8 @@ defmodule Fleet.Spawner do
       # Foundation primitive (:persistent_term flag, deps: []) — readable from any
       # domain. The PermanentWarden consults it so as not to respawn during a drain (A-13).
       Fleet.Shutdown.Quiesce,
+      Fleet.PeriodicCheck,
+      Fleet.Grace,
       # Foundation primitive (:persistent_term per-pod publish-in-flight fact, deps: []) — the pod's
       # :publish_deadline reads it to defer its reset while the Pilot completion is still publishing.
       Fleet.Publish.InFlight

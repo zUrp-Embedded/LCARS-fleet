@@ -143,6 +143,25 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     assert_receive {:respawn_attempt, "architect"}, 1_000
   end
 
+  test "respawn REFUSED by the drain (fleet_quiescing) → dropped: no retry, no HALT, warden alive" do
+    parent = self()
+
+    warden =
+      start_warden(fn role ->
+        send(parent, {:respawn_attempt, role})
+        # The shape `PermanentBoot.spawn_one` gives to `Fleet.Spawner.quiesce_guard`'s refusal.
+        {:error, {role, :fleet_quiescing}}
+      end)
+
+    send(warden, pod_failed("permanent-architect"))
+    assert_receive {:respawn_attempt, "architect"}, 1_000
+
+    # A failing respawn would retry within a few ms here (`backoff_base_ms: 1`) and go on to the
+    # bound; a drain refusal is not a failure: ONE attempt, then silence, and the warden lives.
+    refute_receive {:respawn_attempt, _}, 200
+    assert Process.alive?(warden)
+  end
+
   # ── Rail 2: reconciliation (the event rail is BLIND to silent deaths) ──
 
   test "reconciliation tick: a permanent ABSENT from the Registry (no pod.failed emitted) → respawn" do

@@ -23,7 +23,7 @@ Core lifecycle:
 - `Fleet.Spawner.Supervisor` — DynamicSupervisor ; `:spawner_max_pods` y est le FUSIBLE anti-emballement (pas une politique : le fan est borne par `max_fan` et les sieges de pool)
 - `Fleet.Spawner.PodTmux` — host→pod control-plane over the per-pod tmux socket (kick / `/clear` / has-session; orphan `kill_holder` fallback)
 - `Fleet.Spawner.BootEpoch` — identity of the CURRENT BEAM boot (per-fleet-life nonce): the discriminator that separates a POD-level recovery from a FLEET-level restart.
-- `Fleet.Spawner.PodWarden` — periodic reaper of the substrate (orphan tmux socks + graveyard pod_dir GC, 2-tick grace)
+- `Fleet.Spawner.PodWarden` — periodic reaper of the substrate (orphan tmux socks + graveyard pod_dir GC, 2-tick grace), on `Fleet.PeriodicCheck`
 - `Fleet.Spawner.PoolSlot` — allocates the `pool` nibble of a pod's `session_id`, and CAPS the concurrency of a role
 - `Fleet.Spawner.CanonProof` — boot-time proof that every canon role and each optional modop is spawn-ready
 

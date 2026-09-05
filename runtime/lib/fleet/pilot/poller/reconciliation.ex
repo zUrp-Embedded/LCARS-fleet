@@ -77,6 +77,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   """
 
   alias Fleet.Forge.Payload
+  alias Fleet.Grace
 
   require Logger
 
@@ -253,7 +254,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
         zombie_pods = quiesced_brick_pods(issues, pulls, seams, pods)
 
         orphaned_now = issue_orphans |> MapSet.union(pr_orphans) |> MapSet.union(zombie_pods)
-        to_act = MapSet.intersection(orphaned_now, prior_suspects)
+        {to_act, new_suspects} = Grace.two_tick(orphaned_now, prior_suspects)
 
         # A FAILED reclaim STAYS a suspect: dropping it with the acted set would force a fresh
         # 2-tick re-suspicion before the retry (the label is still there, but the grace restarts) —
@@ -278,7 +279,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
           end)
           |> MapSet.new()
 
-        orphaned_now |> MapSet.difference(to_act) |> MapSet.union(failed_reclaims)
+        MapSet.union(new_suspects, failed_reclaims)
     end
   end
 

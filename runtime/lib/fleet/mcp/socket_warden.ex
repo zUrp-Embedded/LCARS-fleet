@@ -12,30 +12,46 @@ defmodule Fleet.MCP.SocketWarden do
       hide it. This one is a DEAF POD: it keeps writing into a socket nobody listens on, reports
       nothing, and looks exactly like an agent with nothing to say. It is raised as an incident.
 
-  Both carry two-tick grace, because both have a legitimate transient: a pod being torn down passes
-  through "acceptor alive, pod gone", and a release passes through "file present, acceptor gone".
-  Enumeration failure reaps nothing, raises nothing, and preserves suspects — an unreadable
-  directory is not an empty one.
+  Both carry two-tick grace (`Fleet.Grace.two_tick/2`), because both have a legitimate transient:
+  a pod being torn down passes through "acceptor alive, pod gone", and a release passes through
+  "file present, acceptor gone". Enumeration failure reaps nothing, raises nothing, and preserves
+  suspects — an unreadable directory is not an empty one.
+
+  The tick plumbing — arm, re-arm LAST, the net under the check, the `:check_now` hook — is
+  `Fleet.PeriodicCheck`; this module keeps its state, its sources and its two decisions. The net
+  also covers the two calls into `PodSocketSupervisor` (`owned_fun`, `release_fun`) that the
+  per-source rescues below do not: a supervisor mid-cascade no longer takes the warden with it.
+
+  ## Options (`start_link/1`)
+
+    * `:name` — GenServer name (default the module; tests pass `nil` to co-exist).
+    * `:interval_ms` — tick period (default `60_000`).
+    * `:live_pods_fun`, `:owned_fun`, `:release_fun`, `:deaf_fun`, `:emit_fun` — the seams,
+      defaulting to the real sources and effects.
   """
 
   use GenServer
   require Logger
 
   alias Fleet.EventRouter.Bus
+  alias Fleet.Grace
+  alias Fleet.PeriodicCheck
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts \\ []) do
-    {gs_opts, init_opts} = Keyword.split(opts, [:name])
-    name = Keyword.get(gs_opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, init_opts, name: name)
-  end
+  def start_link(opts \\ []), do: PeriodicCheck.start_link(__MODULE__, opts)
+
+  @doc """
+  Replays one tick NOW, synchronously — the `:check_now` hook of `PeriodicCheck`. Replies the two
+  suspect sets after the pass.
+  """
+  @spec check_now(GenServer.server()) ::
+          {:ok, %{suspects: MapSet.t(), deaf_suspects: MapSet.t()}}
+  def check_now(server \\ __MODULE__), do: GenServer.call(server, :check_now)
 
   @impl GenServer
   def init(opts) do
-    tick_ms = Keyword.get(opts, :tick_ms, 60_000)
-
     state = %{
-      tick_ms: tick_ms,
+      interval_ms: Keyword.get(opts, :interval_ms, 60_000),
       live_pods_fun: Keyword.get(opts, :live_pods_fun, &default_live_pods/0),
       owned_fun: Keyword.get(opts, :owned_fun, &Fleet.MCP.PodSocketSupervisor.live_pod_ids/0),
       release_fun:
@@ -51,14 +67,24 @@ defmodule Fleet.MCP.SocketWarden do
       deaf_reported: MapSet.new()
     }
 
-    Process.send_after(self(), :reap, tick_ms)
+    _ = PeriodicCheck.schedule(:reap, state.interval_ms)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info(:reap, state) do
-    Process.send_after(self(), :reap, state.tick_ms)
+  def handle_info(:reap, state), do: PeriodicCheck.tick(state, :reap, &do_check/1)
+  def handle_info(_msg, state), do: {:noreply, state}
 
+  @impl GenServer
+  def handle_call(:check_now, _from, state),
+    do:
+      PeriodicCheck.check_now(
+        state,
+        &do_check/1,
+        &{:ok, %{suspects: &1.suspects, deaf_suspects: &1.deaf_suspects}}
+      )
+
+  defp do_check(state) do
     # LES DEUX RECONCILIATIONS SONT INDEPENDANTES, ET C'EST POUR CA QU'ELLES SONT SEPAREES ICI. La
     # detection des sourds ne lit PAS la liste des pods vivants — elle compare le disque au registre
     # des acceptors. La ranger dans la branche qui reussit aurait fait qu'une panne d'enumeration des
@@ -68,11 +94,11 @@ defmodule Fleet.MCP.SocketWarden do
     case live_pod_ids(state) do
       :error ->
         # Unknown is not an empty live set.
-        {:noreply, state}
+        state
 
       live ->
         orphans = state.owned_fun.() |> MapSet.new() |> MapSet.difference(live)
-        confirmed = MapSet.intersection(orphans, state.suspects)
+        {confirmed, suspects} = Grace.two_tick(orphans, state.suspects)
 
         for pod_id <- confirmed do
           Logger.warning(
@@ -83,11 +109,9 @@ defmodule Fleet.MCP.SocketWarden do
           _ = state.release_fun.(pod_id)
         end
 
-        {:noreply, %{state | suspects: MapSet.difference(orphans, confirmed)}}
+        %{state | suspects: suspects}
     end
   end
-
-  def handle_info(_msg, state), do: {:noreply, state}
 
   # UN POD SOURD NE SE REPARE PAS ICI, ET C'EST DELIBERE. Le fichier appartient a un pod VIVANT qui
   # ecrit dedans ; le supprimer ne rendrait pas l'oreille, ça retirerait la seule trace. Redemarrer
@@ -103,7 +127,7 @@ defmodule Fleet.MCP.SocketWarden do
         state
 
       deaf ->
-        confirmed = MapSet.intersection(deaf, state.deaf_suspects)
+        {confirmed, deaf_suspects} = Grace.two_tick(deaf, state.deaf_suspects)
         fresh = MapSet.difference(confirmed, state.deaf_reported)
 
         for pod_id <- fresh do
@@ -123,7 +147,7 @@ defmodule Fleet.MCP.SocketWarden do
 
         %{
           state
-          | deaf_suspects: MapSet.difference(deaf, confirmed),
+          | deaf_suspects: deaf_suspects,
             # Un pod qui n'est plus sourd sort du registre : s'il le redevient, c'est un fait neuf
             # et il doit se redire. Garder la marque a vie transformerait « signale une fois » en
             # « ne le dira plus jamais ».

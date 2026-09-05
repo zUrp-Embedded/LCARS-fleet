@@ -24,9 +24,9 @@ hors de la boîte. La seule moitié automatisée est le rail d'outillage, parce 
   fatale ; spawn des permanents = vraie dépense claude, donc jamais en mi-boot).
 - `Fleet.Admiral.MCPMonitor` — liveness du substrat MCP pod-facing (`Process.whereis` local,
   zéro réseau), sur `PeriodicCheck`.
-- `Fleet.Admiral.PeriodicCheck` — la plomberie de tick partagée (re-arm EN DERNIER,
-  `:check_now` rejoue le chemin complet sans re-armer). Deux clients : `MCPMonitor`,
-  `ToolchainReconciler`.
+- `Fleet.PeriodicCheck` (foundation, pas ce domaine) — la plomberie de tick des deux clients
+  ci-dessus : re-arm EN DERNIER, filet sous la passe (`rescue` + `catch`, état gardé),
+  `:check_now` rejoue le chemin complet sans re-armer ni filet.
 - `Fleet.Admiral.Shutdown` (+ `Dispatcher`, `NoOpDispatcher`, `AggregateDispatcher`) — quiesce +
   drain borné du BEAM.
 - `Fleet.Admiral.ToolchainReconciler` — le déclencheur du rail d'outillage : compare la tête de
