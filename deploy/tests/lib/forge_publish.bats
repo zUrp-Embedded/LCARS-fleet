@@ -46,7 +46,7 @@ _pub() { run bash -c ". '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0
 @test "le jeton passe par la config -K - sur stdin, JAMAIS en argv — et chaque appel le porte" {
   _pub; [ "$status" -eq 0 ]
   grep -q 'header = "Authorization: token jeton-secret-0123456789"' "$STDIN"
-  ! grep -q 'jeton-secret' "$TRACE"
+  ! grep -q 'jeton-secret' "$TRACE" || { echo "le jeton est passe en argv de curl"; return 1; }
   [ "$(grep -c 'Authorization' "$STDIN")" -eq "$(wc -l < "$TRACE")" ]
 }
 
@@ -108,7 +108,7 @@ SH
 @test "un asset qui échoue : refus qui nomme l'asset, le message de la forge et le BROUILLON à supprimer — pas de publication" {
   FAKE_ASSET_KO=lcars_0.1_amd64.deb _pub; [ "$status" -ne 0 ]
   [[ "$output" == *"REFUS (500) sur l'asset lcars_0.1_amd64.deb"*"disque plein"*"BROUILLON (id 42)"* ]]
-  ! grep -q '^PATCH' "$TRACE"
+  ! grep -q '^PATCH' "$TRACE" || { echo "publie malgre l'asset KO"; return 1; }
   ! grep -q 'debian/pool' "$TRACE"
 }
 

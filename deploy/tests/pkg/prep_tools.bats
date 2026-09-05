@@ -152,8 +152,8 @@ TOFU
   [ "$n_door" -lt "$n_gate" ] && [ "$n_gate" -lt "$n_lib" ] && [ "$n_lib" -lt "$n_call" ]
   # le jeton : environnement ou fichier, passe a la lib par FP_TOKEN — jamais en argv de curl ici, jamais dans un echo/say
   grep -q 'FP_TOKEN="\$TOKEN" fp_publish_dist' <<<"$code"
-  ! grep -E '(say|echo|printf) .*\$TOKEN' <<<"$code"
-  ! grep -E 'curl .*\$TOKEN' <<<"$code"
+  ! grep -E '(say|echo|printf) .*\$TOKEN' <<<"$code" || { echo "le jeton est dit sur une sortie"; return 1; }
+  ! grep -E 'curl .*\$TOKEN' <<<"$code" || { echo "le jeton est en argv de curl"; return 1; }
   # le tag de la version : celui de git a HEAD quand il y en a un, sinon VERSION-SHA ; la base de la porte le porte
   grep -q 'git describe --tags --exact-match' <<<"$code"
   grep -qE '^TAG="\$\{LCARS_PACK_TAG:-' <<<"$code"
