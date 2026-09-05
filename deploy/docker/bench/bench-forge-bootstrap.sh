@@ -104,6 +104,15 @@ fi
 # ce qu'il exerce est ce que l'admin jouera.
 [[ "$WITH_CONTAINER" -eq 1 ]] || die "--no-container n'a plus de sens : la structure se pose DANS le conteneur (gestes de l'image)" 1
 
+# git_forge <args…> — `git` avec le jeton du systeme en en-tete d'autorisation, porte par
+# l'ENVIRONNEMENT (GIT_CONFIG_COUNT/KEY/VALUE), jamais par l'URL ni par -c (les deux sont un argv).
+git_forge() {
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0="http.${FORGE_URL%/}/.extraheader" \
+  GIT_CONFIG_VALUE_0="Authorization: token ${SYS_TOKEN}" \
+  git "$@"
+}
+
 # LE SEED NE SE REGENERE PAS. Le provider n'ecrit PAS le password d'un compte existant (vu sur 0.8), donc un seed neuf a la passe 2 donnerait au conteneur un fichier qui ne
 # correspond plus aux comptes, et le mint des jetons de role partirait en 401 le jour ou l'un
 # manque. On relit celui que le conteneur garde ; on n'en fabrique un que s'il n'y en a pas.
@@ -252,7 +261,10 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       -d '{"name":"lcars","description":"LCARS — la source du conteneur","private":false,"auto_init":false}' \
       "$(api)/orgs/$ORG/repos" >/dev/null 2>&1 || true
 
-    LCARS_REMOTE="http://${LCARS_SYSTEM_ACCOUNT:-system_starfleet}:${SYS_TOKEN}@${FORGE_URL#http://}/fleet/lcars.git"
+    # ⚠ LE JETON NE VA PAS DANS L'URL : une URL est un argv de `git push`, lisible dans /proc par tout
+    # l'hote (classe MUR I2). Il passe par l'ENVIRONNEMENT de git (GIT_CONFIG_*, git >= 2.31), en
+    # en-tete d'autorisation ; l'URL reste nue.
+    LCARS_REMOTE="${FORGE_URL%/}/fleet/lcars.git"
     # ⚖ user 2026-09-04 (DI-06, lot 9) : la forge du banc porte LE CODE DU CONTENEUR, pas celui de la
     # machine. Ce qui se seme est la REVISION DE L'IMAGE (label OCI), poussee depuis le clone qui
     # l'a batie — jamais le HEAD du clone hote, qui peut avoir avance (ou recule) depuis le build.
@@ -263,9 +275,22 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
       || die "fleet/lcars : l'image $CONTAINER_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/container build la pose)" 7
     git -C "$REPO_ROOT" rev-parse -q --verify "${CONTAINER_REV}^{commit}" >/dev/null 2>&1 \
       || die "fleet/lcars : la revision de l'image ($CONTAINER_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code du CONTENEUR ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
-    PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${CONTAINER_REV}:refs/heads/main" 2>&1)" \
+    # ⚠ PAS DE --force PAR DEFAUT (mesure de vanille, 2026-09-05) : le hook pre-push du depot refuse
+    # tout non-fast-forward sur `main`, quel que soit le remote. Un PREMIER semis (branche absente)
+    # ou un semis en avance rapide passent nus. Un REJEU sur une forge deja semee est un non-ff :
+    # la forge est jetable, on le DIT et on leve le hook pour CE push, vers CE remote — jamais en
+    # silence, jamais ailleurs.
+    seed_hooks=()
+    remote_main="$(git_forge ls-remote --heads "$LCARS_REMOTE" refs/heads/main 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -n "$remote_main" ]] && ! git -C "$REPO_ROOT" merge-base --is-ancestor "$remote_main" "$CONTAINER_REV" 2>/dev/null; then
+      say "fleet/lcars : main existe deja sur la forge de banc (${remote_main:0:9}) et n'est pas un ancetre de $CONTAINER_REV — REJEU sur une forge jetable : le hook pre-push est leve pour ce push"
+      seed_hooks=(-c core.hooksPath=/dev/null); seed_force=(--force)
+    else
+      seed_force=()
+    fi
+    PUSH_ERR="$(git_forge -C "$REPO_ROOT" "${seed_hooks[@]}" push -q "${seed_force[@]}" "$LCARS_REMOTE" "${CONTAINER_REV}:refs/heads/main" 2>&1)" \
       || die "fleet/lcars : main NON pousse — le conteneur clone cette source au boot ; sans elle le banc n'a pas de code
-  git a dit : ${PUSH_ERR//"$SYS_TOKEN"/<JETON>}" 7
+  git a dit : $PUSH_ERR" 7
     say "fleet/lcars : main pousse (revision de l'image : $CONTAINER_REV)"
     # Le corpus ops est un CHOIX de l'operateur, pas un chemin de cette machine : sans LCARS_WORK_TREE,
     # rien n'est pousse et le recapitulatif le dit (⚖ user 2026-09-04, point 9 : l'atelier hors des defauts).

@@ -513,6 +513,11 @@ COPY runtime/services/console.tmux.conf  /opt/lcars/console.tmux.conf
 # l'ORDRE de ces deux lignes — un fait de Dockerfile que `stat` ne dit pas.
 RUN install -d -m 0755 -o root -g root /etc/lcars
 COPY --chmod=0644 runtime/services/lcars.bashrc /etc/lcars/lcars.bashrc
+# ⚠ `--chmod` NE SUFFIT PAS : mesure de vanille (banc vanille_1, 2026-09-05) — clone en umask 0002,
+# source en 664, l'image sort en 664 et le stage verify (62 check_perms) rougit. Le mode d'un
+# fichier livre ne depend pas du poste qui bâtit : il se pose ICI, apres le COPY, comme pour
+# /opt/lcars/{etc,services,…} (lot 15a).
+RUN chmod 0644 /etc/lcars/lcars.bashrc
 RUN printf "%s\n%s\n%s\n" \
       "# >>> lcars:skel >>> (bloc géré par deploy — édition manuelle écrasée au prochain apply)" \
       "if [ -r /etc/lcars/lcars.bashrc ]; then . /etc/lcars/lcars.bashrc; fi" \

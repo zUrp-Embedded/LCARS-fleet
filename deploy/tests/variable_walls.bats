@@ -679,7 +679,11 @@ PYX
   # forge.conf      — ADMIN-OWNED, comme fleet.json : l'adresse d'une forge FOURNIE (`FORGE_BASE_URL=`),
   #                   ecrite par l'operateur, lue par `deploy/pkg/lcars-workstation/postinst` quand
   #                   lcars-forge n'est pas la. Aucun paquet ne le pose.
-  local hors_manifeste="fleet.json install.journal channel forge.conf"
+  # provision.conf  — ADMIN-OWNED, meme classe : les clefs PROV_* que l'administrateur veut donner au
+  #                   provisionnement joue par un postinst (un paquet ne pose pas de question, il lit
+  #                   un fichier — lot 3c, banc 2004 : le port du deck sur un reseau WSL partage).
+  #                   Aucun paquet ne le pose.
+  local hors_manifeste="fleet.json install.journal channel forge.conf provision.conf"
 
   : > "$BATS_TEST_TMPDIR/etcl"
   local f
