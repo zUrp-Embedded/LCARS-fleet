@@ -66,6 +66,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # SIDE emissions of the producer delivery (eng voice + slot-freeze) — out of sequence by
   # contract (the completion depends on none of their results: the deliverable truth is the
   # pushed commit + open PR), hence their extraction.
+  alias Fleet.Pilot.StepRunCompleter.Attestations
   alias Fleet.Pilot.StepRunCompleter.Emissions
 
   # Authority for the default WORDING (pr_body/review_body/signed comment) — pure generators;
@@ -147,128 +148,6 @@ defmodule Fleet.Pilot.StepRunCompleter do
       Logger.info("StepRunCompleter: #{repo}##{n} role=#{role} sha=#{sha} → #{routed}")
 
       {:ok, routed}
-    end
-  end
-
-  # The project's ops worktree, or `nil` when there is none — a project that was never onboarded
-  # has nowhere to pin, and `Pinning.render/2` then leaves the body inline. Same `:ops_root` seam as
-  # the provenance emission below, for the same reason: the real root is a hardcoded global path.
-  defp verdict_work_dir(repo, opts) do
-    dir =
-      Path.join(
-        Keyword.get(opts, :ops_root, Layout.ops_root()),
-        Layout.project_name(repo)
-      )
-
-    if File.dir?(dir), do: dir
-  end
-
-  # Triplet de provenance a l'EXTRACTION : le brief, l'entree, le livrable. Emis UNIQUEMENT pour un
-  # vrai livrable git.
-  #
-  # ⚠ UN BRIEF ABSENT DONNE UNE PROVENANCE PARTIELLE — entree vers sortie — JAMAIS UN DIGEST INVENTE.
-  #
-  # La racine d'ops est une COUTURE parce que la vraie est un chemin global en dur : sans
-  # l'injecter, le vert ne marche jamais sur le chemin reel.
-  #
-  # ⚠ AUCUNE DE CES SORTIES N'EST MUETTE. Un `else` fourre-tout rendant `:ok` laisse une brique
-  # etre publiee, mergee et scellee sans qu'une ligne n'ait dit que sa preuve n'avait pas ete
-  # ECRITE — et vu du sceau, ce silence est indiscernable d'une gravure RATEE, qui elle loggue. La
-  # seule question posable en aval devient alors « faut-il bloquer une brique sans preuve ? » quand
-  # la vraie est « pourquoi n'y en a-t-il pas ? », a laquelle plus personne ne peut repondre.
-  #
-  # Les trois sorties ne valent PAS la meme chose, et c'est pour ca qu'elles se NOMMENT :
-  #   - l'absence d'options de livrable ICI est une ANOMALIE, pas le cas nominal — le chemin
-  #     verdict-seul ne passe pas par cette fonction ;
-  #   - l'absence d'ops dit que le projet n'a pas de face atelier : un fait PERMANENT jusqu'a
-  #     l'onboard, qui doit se dire aussi fort ici qu'ailleurs.
-  defp maybe_emit_provenance(step_run, livrable_sha, opts) do
-    ops_root = Keyword.get(opts, :ops_root, Layout.ops_root())
-    repo = Map.get(step_run, :repo)
-
-    case {Map.get(step_run, :deliverable_opts), repo} do
-      {%{} = dopts, repo} when is_binary(repo) ->
-        work_dir = Path.join(ops_root, Layout.project_name(repo))
-
-        if File.dir?(work_dir) do
-          emit_provenance(work_dir, step_run, dopts, livrable_sha)
-        else
-          Logger.warning(
-            "StepRunCompleter: provenance NOT engraved (#{repo}): {:work_dir_missing, " <>
-              "#{inspect(work_dir)}} — the project has no ops face. PERMANENT until it is " <>
-              "onboarded; the brick #{String.slice(livrable_sha, 0, 7)} carries NO attestation"
-          )
-
-          :ok
-        end
-
-      {nil, repo} ->
-        Logger.error(
-          "StepRunCompleter: provenance NOT engraved (#{inspect(repo)}): no :deliverable_opts on " <>
-            "the publication path — a producer deliverable reached open_deliverable_pr without the " <>
-            "shape that names its base. Brick #{String.slice(livrable_sha, 0, 7)} unattested"
-        )
-
-        :ok
-
-      {_dopts, other} ->
-        Logger.error(
-          "StepRunCompleter: provenance NOT engraved: repo is #{inspect(other)}, not a binary — " <>
-            "brick #{String.slice(livrable_sha, 0, 7)} unattested"
-        )
-
-        :ok
-    end
-  end
-
-  defp emit_provenance(work_dir, step_run, dopts, livrable_sha) do
-    attrs = %{
-      livrable_sha: livrable_sha,
-      brief_sha: Map.get(step_run, :brief_sha),
-      brief_ref: Map.get(step_run, :brief_ref),
-      input_sha: Map.get(dopts, :base_sha) || Map.get(dopts, "base_sha"),
-      pod_id: Map.get(step_run, :pod_id),
-      role: Map.get(step_run, :role),
-      issue: Map.get(step_run, :issue_number),
-      # Debug visibility is a property of the BUILDER, not of this deliverable: a pod a human could
-      # attach to and type into is not the same builder as an unattended one, and the triplet only
-      # serves an auditor if it is falsifiable about that. Read from the single authority
-      # (`Fleet.Spawner.debug_visibility?/0`), one value for a whole fleet life — so the mode at
-      # completion IS the mode the pod launched under, with nothing to thread through the step_run.
-      debug_visibility: Fleet.Spawner.debug_visibility?()
-    }
-
-    # Published best-effort (F-15): the statement only serves auditors if it is READABLE from the
-    # forge; a push failure warns inside emit and never fails the completion. `:subject_workspace`
-    # arms the BL-6-34 wall inside Provenance: the subject must be a commit reachable from the
-    # workspace the publish ran in — true by construction today (the sha IS that workspace's
-    # pushed HEAD), pinned against any future claimed-sha threading. A refusal is logged ERROR
-    # (a proof from the wrong viewpoint is a protocol violation, not a degrade), the completion
-    # itself stays unharmed either way (the deliverable is real and pushed).
-    emit_opts = [
-      push: :ops,
-      subject_workspace: Map.get(dopts, :workspace) || Map.get(dopts, "workspace")
-    ]
-
-    case Fleet.Workflow.Provenance.emit(work_dir, attrs, emit_opts) do
-      {:ok, _} ->
-        :ok
-
-      {:error, {:subject_unreachable, workspace}} ->
-        Logger.error(
-          "StepRunCompleter: provenance subject #{livrable_sha} is NOT a commit of the publish " <>
-            "workspace #{workspace} — engrave REFUSED (proof from the wrong viewpoint)"
-        )
-
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "StepRunCompleter: provenance NOT engraved (#{Map.get(step_run, :repo)}): " <>
-            "#{inspect(reason)} — degraded (completion preserved)"
-        )
-
-        :ok
     end
   end
 
@@ -399,7 +278,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
       # (BL-6-34): a completion that stalls between push and PR must never leave a "delivered"
       # attestation with no integration surface. BEST-EFFORT (degrades LOUD) — NOT load-bearing:
       # never a blocked PR over a trace file.
-      _ = maybe_emit_provenance(step_run, sha, opts)
+      _ = Attestations.maybe_emit_provenance(step_run, sha, opts)
 
       # `set_stage(stage_review)` is NOT done here: it lives in `complete_producer`, AFTER the
       # comment (eng voice) — same order "comment THEN stage transition" as `complete/2`
@@ -441,7 +320,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     event = Map.fetch!(step_run, :review_event)
 
     role = Map.get(step_run, :role, "juge")
-    work_dir = verdict_work_dir(repo, opts)
+    work_dir = Attestations.verdict_work_dir(repo, opts)
 
     # C1: the MACHINE verdict (`details.findings`, validated at build) is engraved
     # BEFORE the review posts — same relative order as the prose pin below, and replay-safe for the
@@ -449,7 +328,7 @@ defmodule Fleet.Pilot.StepRunCompleter do
     # it). Best-effort like the provenance triplet (F-15): an engrave failure warns and never
     # blocks the review — the human matter of the findings already lives in the `reason` prose,
     # so the verdict loses its machine copy, not its substance.
-    :ok = maybe_engrave_findings(step_run, work_dir, role)
+    :ok = Attestations.maybe_engrave_findings(step_run, work_dir, role)
 
     # SUMMARY + POINTER above the threshold. A long verdict pasted into a review is unreadable in
     # the UI, unquotable (nothing addresses a version of it) and EDITABLE — a human amending the
@@ -519,130 +398,8 @@ defmodule Fleet.Pilot.StepRunCompleter do
   # corruption. L'inverse — rendre une erreur parce qu'un `kill_pod` a rate — ferait rejouer une
   # revue deja posee.
   defp verdict_ingested(repo, pr, role) do
-    _ = reap_judge(repo, pr, role)
+    _ = Fleet.Pilot.PodReaper.reap_judge(repo, pr, role)
     {:ok, :reviewed}
-  end
-
-  # L'identite se CONSTRUIT comme le dispatcher la construit (`PodId.for_pr/3`), jamais comme une
-  # chaine devinee — meme discipline que le jumeau producteur, qui lit `slot_scope` avant de tuer
-  # pour ne pas faucher un pod partage par tout un projet.
-  #
-  # Un juge est `slot_scope: instance` par derivation (`one-shot`), donc la garde ci-dessous ne
-  # devrait jamais mordre. Elle est la quand meme : le jour ou un role de jugement deviendrait
-  # lie au PROJET, son pod serait partage, et le tuer sur un verdict couperait les autres.
-  defp reap_judge(repo, pr, role) when is_binary(role) and role != "" do
-    with {:ok, profile} <- Fleet.CapProfile.load(role),
-         "judge" <- Fleet.CapProfile.brief_kind(profile),
-         "instance" <- Fleet.CapProfile.slot_scope(profile) do
-      pod_id = Fleet.PodId.for_pr(repo, pr, role)
-
-      case spawner().kill_pod(pod_id) do
-        :ok ->
-          Logger.info(
-            "StepRunCompleter: #{repo}##{pr} verdict INGESTED — judge pod #{pod_id} reaped " <>
-              "(its context lived until its review held, as designed)"
-          )
-
-        {:error, :not_found} ->
-          :ok
-
-        {:error, reason} ->
-          # Un pod qui survit coute une place, il ne corrompt rien. On le DIT et on continue.
-          Logger.warning(
-            "StepRunCompleter: #{repo}##{pr} judge pod #{pod_id} NOT reaped (#{inspect(reason)}) " <>
-              "— the verdict stands; the pod will be swept by its class"
-          )
-      end
-    else
-      _ -> :ok
-    end
-  end
-
-  defp reap_judge(_repo, _pr, _role), do: :ok
-
-  # MEME CLEF QUE LE JUMEAU PRODUCTEUR (`:pilot_spawner`, cf. `MergeAndPromote`) : deux morts au
-  # meme etage du rail se stubbent au meme endroit, sinon un test qui neutralise l'une laisse
-  # l'autre tirer pour de vrai.
-  defp spawner, do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
-
-  # The machine verdict's git write — a SIMPLE ops commit, deliberately NOT `Pinning.render`:
-  # Pinning is comment-oriented (summary + pointer posted on the forge surface), and a JSON object
-  # has no surface to summarize onto — its only home is the file. Same tree and basename as the
-  # prose pin (`verdicts/issue-<n>-<role>.{md,json}`): one act, two renderings, side by side.
-  #
-  # NONE of these exits is mute except the nominal absence (no `:review_findings` = a legacy judge,
-  # today's path). A judge that DID emit machine findings and finds no ops face loses the machine
-  # copy — that fact is recorded loud (same doctrine as the provenance `{:work_dir_missing, _}`:
-  # absence is recorded, never fabricated), and the review posts regardless: a broken or homeless
-  # OPTIONAL payload never blocks a valid verdict.
-  defp maybe_engrave_findings(step_run, work_dir, role) do
-    case {Map.get(step_run, :review_findings), work_dir} do
-      # SILENCE HERE READS "no key = a legacy judge, today's path", and that is only true while
-      # `findings` is new and no SP names it. Every judge's composed SP names it, so an absence
-      # is NOT a judge that never heard of the key: it is a judge that was told and did not.
-      # MEASURED on the bench: a qualifier returns an excellent verdict — it names the planted
-      # faux-vert structurally — and NO machine payload at all, with nothing anywhere saying so.
-      #
-      # That silence is what would make the verdict function of C2 blind: f reads findings, an
-      # absent payload starves it, and a starved f degrades to exactly today's boolean AND while
-      # LOOKING like it is weighing severities. A rail that silently stops being fed is worse than
-      # one that was never built. So: loud, per verdict, naming the judge.
-      {nil, _} ->
-        # DEUX PHRASES, PARCE QUE CE SONT DEUX FAITS : « ce juge n'a rien envoyé » et « ce juge a
-        # envoyé, le schéma a refusé en amont (`take_findings`) ». Une seule phrase accuse le juge
-        # à tort dès que le schéma refuse, et envoie chercher pourquoi il se tait (mesuré sur une
-        # campagne entière). Un rail qui nomme mal la panne qu'il observe coûte plus cher qu'un
-        # rail muet.
-        if Map.get(step_run, :review_findings_refused) do
-          Logger.warning(
-            "StepRunCompleter: judge #{role} DID submit details.findings on " <>
-              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)}, and it was " <>
-              "REFUSED upstream (see the schema error logged by StepRunConsumer just above). " <>
-              "Its measure is lost to the rail — but the judge did its part: fix the form, not " <>
-              "the judge."
-          )
-        else
-          Logger.warning(
-            "StepRunCompleter: judge #{role} submitted NO details.findings on " <>
-              "#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} — its verdict " <>
-              "survives as prose only. The SP asks every judge for the machine payload; without " <>
-              "it no aggregation can weigh this verdict, it can only count it."
-          )
-        end
-
-        :ok
-
-      {findings, nil} ->
-        Logger.warning(
-          "StepRunCompleter: findings NOT engraved (#{Map.get(step_run, :repo)}##{Map.get(step_run, :issue_number)} " <>
-            "role=#{role}): the project has no ops face — the judge's machine verdict " <>
-            "(#{length(Map.get(findings, "findings", []))} finding(s)) survives only as prose"
-        )
-
-        :ok
-
-      {findings, work_dir} ->
-        ref = Layout.verdict_findings_ref(Map.fetch!(step_run, :issue_number), role)
-
-        case Fleet.Workflow.OpsObjectSync.commit_object(
-               work_dir,
-               ref,
-               Jason.encode!(findings, pretty: true) <> "\n",
-               label: "verdict",
-               push: :ops
-             ) do
-          {:ok, _sha, _push_state} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "StepRunCompleter: findings NOT engraved at #{ref} (#{inspect(reason)}) — " <>
-                "the review posts anyway; the machine verdict survives only as prose"
-            )
-
-            :ok
-        end
-    end
   end
 
   @doc """

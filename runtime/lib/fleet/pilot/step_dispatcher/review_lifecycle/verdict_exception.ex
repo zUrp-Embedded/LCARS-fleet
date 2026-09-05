@@ -154,19 +154,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException do
 
   defp escalate(pr_number, head, reason, %Ctx{} = ctx) do
     ArchEscalation.escalate_merge_blocked(
-      arch_seams(ctx),
+      Ctx.arch_seams(ctx),
       pr_number,
       head,
       :verdict_gray_zone,
       reason
     )
-  end
-
-  defp arch_seams(%Ctx{} = ctx) do
-    %ArchEscalation.Seams{
-      forge: ctx.forge,
-      repo: ctx.repo,
-      forge_opts: ctx.forge_opts
-    }
   end
 end

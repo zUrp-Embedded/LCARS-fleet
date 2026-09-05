@@ -779,16 +779,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       _ -> nil
     end)
     |> List.flatten()
+    # Local calls AND qualified ones (`CatalogueGuards.validate_x!()`): the guards live outside
+    # this file, and the natural way to add one is the qualified call — invisible to a matcher
+    # that only reads bare names, which is how the wall would stay green while the two sequences
+    # diverge.
     |> collect(fn
       {name, _, _args} when is_atom(name) ->
-        s = Atom.to_string(name)
-        if String.starts_with?(s, "validate_") and String.ends_with?(s, "!"), do: [s], else: nil
+        if validate_guard?(name), do: [Atom.to_string(name)], else: nil
+
+      {{:., _, [_module, name]}, _, _args} when is_atom(name) ->
+        if validate_guard?(name), do: [Atom.to_string(name)], else: nil
 
       _ ->
         nil
     end)
     |> List.flatten()
     |> MapSet.new()
+  end
+
+  defp validate_guard?(name) do
+    s = Atom.to_string(name)
+    String.starts_with?(s, "validate_") and String.ends_with?(s, "!")
   end
 
   @doc """

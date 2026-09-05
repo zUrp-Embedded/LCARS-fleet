@@ -477,26 +477,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # catalogue the way the dispatcher BUILDS it (`slot_scope` + `PodId`), never a guessed string: a
   # PROJECT-keyed role resolves to a shared id this function must NOT kill. So the scope decides,
   # and `instance` is the only one harvested.
-  defp reap_ticket_producer(repo, issue_n, producer) do
-    with true <- producer != "",
-         {:ok, profile} <- Fleet.CapProfile.load(producer),
-         "instance" <- Fleet.CapProfile.slot_scope(profile) do
-      pod_id = Fleet.PodId.for_issue(repo, issue_n, producer)
-
-      case spawner().kill_pod(pod_id) do
-        :ok ->
-          Logger.info(
-            "MergeAndPromote: #{repo}##{issue_n} sealed — ticket-scoped producer pod " <>
-              "#{pod_id} reaped (its context lived until the merge, as designed)"
-          )
-
-        {:error, :not_found} ->
-          :ok
-      end
-    else
-      _ -> :ok
-    end
-  end
+  # The reaping is `PodReaper`'s — the one reader of the `:pilot_spawner` seam for a ticket's end.
+  defp reap_ticket_producer(repo, issue_n, producer),
+    do: Fleet.Pilot.PodReaper.reap_producer(repo, issue_n, producer)
 
   @doc """
   Converges the ATTRIBUTION-NEUTRAL terminal guards of an issue whose PR turned out merged
@@ -557,10 +540,6 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # Seam (test): the serializer that aligns the local clone after merge. Default = the prod GenServer.
   defp worktree_sync,
     do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
-
-  # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
-  defp spawner,
-    do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
 
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
     head_branch = Keyword.get(opts, :head_branch)
