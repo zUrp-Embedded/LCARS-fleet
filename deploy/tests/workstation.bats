@@ -446,3 +446,61 @@ ws() { run bash "$WS" up "$@"; }
   # detarer en root est refuse : le kit d'un humain ne va pas sous /root
   sed -n '/^kit_deballer()/,/^}/p' "$SRC" | grep -q 'EUID'
 }
+
+# ─── uninstall : LE DESINSTALLEUR DU CANAL EN PLACE, ET LE SUDO EST ICI (lot 4 du chantier release) ─
+#
+# Meme decor que --from : provision REND le canal, sudo et apt TRACENT. Ce qui se mesure est le
+# desinstalleur choisi — jamais le mauvais — et l'argv escalade.
+
+@test "uninstall : l usage l instruit, et le verbe est dans l alternance" {
+  run bash "$SRC" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"{up|doctor|uninstall}"* ]]
+  [[ "$output" == *"uninstall [--yes]"* ]]
+}
+
+@test "uninstall sous « deb » : « sudo apt purge <paquet>* » (le nom vient de la LIB, jamais ecrit ici), --yes devient -y, tout autre drapeau est REFUSE" {
+  arbre channel=deb channel_tree=source
+  run bash "$WS" uninstall
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"canal « deb »"*"apt purge"*"postrm"* ]]
+  grep -qxF 'SUDO:apt purge lcars*' "$TRACE"
+  refute grep -q '^PROVISION:uninstall' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --yes
+  grep -qxF 'SUDO:apt purge -y lcars*' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --humans
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne prend que --yes"*"--humans"* ]]
+  refute_out 'SUDO:|APT:' < "$TRACE"
+  # le nom du paquet est celui de la lib (PROV_DEB_PACKAGE), pas un litteral de ce script
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'apt purge "${yes\[@\]}" "${PROV_DEB_PACKAGE}\*"' <<<"$code"
+}
+
+@test "uninstall sous kit/source/aucun : « provision uninstall <options> » — sans --yes AUCUNE escalade (le plan ne coute pas un mot de passe), avec --yes l escalade porte le verbe" {
+  arbre channel=kit channel_tree=source
+  run bash "$WS" uninstall --humans
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"canal « kit »"*"provision uninstall --humans"* ]]
+  grep -qx 'PROVISION:uninstall --humans' "$TRACE"
+  refute grep -q '^SUDO:' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --yes --annexes
+  grep -qE '^SUDO:.* bash .*/workstation uninstall --yes --annexes$' "$TRACE"
+  refute grep -q '^PROVISION:uninstall' "$TRACE"      # la premiere instance n execute rien : elle escalade
+  arbre channel=aucun channel_tree=source
+  run bash "$WS" uninstall
+  [[ "$output" == *"canal « aucun »"* ]]
+  grep -qx 'PROVISION:uninstall' "$TRACE"
+  refute grep -q '^SUDO:' "$TRACE"
+}
+
+@test "uninstall sur un canal ILLISIBLE est un refus qui nomme le fichier — jamais le mauvais desinstalleur" {
+  arbre channel=invalide channel_tree=source
+  run bash "$WS" uninstall --yes
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ILLISIBLE"*"/channel"* ]]
+  refute_out 'SUDO:|APT:|PROVISION:uninstall' < "$TRACE"
+}

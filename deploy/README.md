@@ -113,7 +113,12 @@ du rail poste en plus (`--tar` force le kit), tendus à `workstation up --from �
 vivent dans UNE fonction, `assets_for <os> <arch>`. `install.sh` du dépôt est le GABARIT (constantes
 `@@DOOR_…@@` vides) ; `deploy/lib/door-gen.sh <tag> <base> <dist-dir>` produit la porte de la
 version et son `install.sh.sha256` — un témoin tient que la porte générée est le gabarit hors ces
-lignes.
+lignes. `--source [REF]` (qui remplace `--branch`, refusé) est la provenance source pour qui veut
+compiler : `git clone --branch <tag de la porte>`, jamais `main` sans le dire. `--dry-run` va
+jusqu'au bilan et DIT la sortie (artefacts et sha256 attendus, l'argv du rail) sans rien
+télécharger ni poser. `--uninstall` relaie à `deploy/workstation uninstall`, le désinstalleur du
+canal lu au préflight : `sudo apt purge` des paquets sous `deb` (seul `--yes` a un sens pour apt),
+`provision uninstall` sinon (escaladé seulement sous `--yes`) — le sudo est là, jamais dans la porte.
 
 **Le canal** (lot 2 du chantier release) : `/etc/lcars/channel` dit QUI a posé le produit — `source`
 (un checkout, par `60-deploy`), `kit` (un paquet `pack.sh`, par `60-deploy`), `deb` (le paquet, par

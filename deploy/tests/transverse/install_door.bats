@@ -964,10 +964,10 @@ SPY
   # c'est le MOUVEMENT SOURCE qui a appris deux provenances (40-PORTE § 2) — telecharger l'artefact
   # de SA version, le verifier contre une table EN DUR, dire la signature — et les drapeaux du § 07
   # (--dry-run, --uninstall). Pipee, la porte n'a pas d'arbre : ce code ne peut vivre que dans le
-  # fichier qui est pipe. La mesure du jour est 558 ; la marge reste de quelques lignes.
+  # fichier qui est pipe. La mesure du jour est 598 ; la marge reste de quelques lignes.
   local n; n="$(grep -vcE '^\s*#|^\s*$' "$SRC")"
-  [ "$n" -le 562 ] || {
-    echo "la porte a $n lignes de code (plafond 562) — qu'est-ce qui est revenu dedans ?" >&2
+  [ "$n" -le 604 ] || {
+    echo "la porte a $n lignes de code (plafond 604) — qu'est-ce qui est revenu dedans ?" >&2
     return 1
   }
 }
@@ -1376,4 +1376,96 @@ DOUBLE
   pipee --check --tar
   [ "$status" -eq 0 ]
   [[ "$output" == *"IMPOSSIBLE"*"installée par « deb »"* ]]
+}
+
+# ─── --dry-run : TOUT JUSQU'AU BILAN, PLUS CE QUE LA SORTIE FERAIT — sans rien telecharger ni poser ─
+#
+# curl_bash_2026 § 07.7 : le drapeau qui desamorce « je ne sais pas ce que ca va faire a mon
+# systeme ». Ce qui se mesure : le serveur de decor n'est PAS touche, rien n'existe sous ~/.lcars,
+# les noms ET les sha attendus sont dits, la commande du rail est dite mot a mot, et l'espion du
+# rail n'est JAMAIS appele.
+
+@test "--dry-run PIPEE : nomme les artefacts et leurs sha256 ATTENDUS, ne telecharge RIEN (serveur intact), et dit la sortie" {
+  _release
+  pipee --workstation --dry-run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  local a; for a in "lcars-fleet-$TAG-otp27-x86_64.tar.gz" "lcars_${TAG}_amd64.deb" "lcars-workstation_${TAG}_amd64.deb"; do
+    [[ "$output" == *"$a "*"sha256 $(sha256sum "$DIST/$a" | cut -d' ' -f1)"* ]] || { echo "$a ou son sha manque :"; echo "$output"; return 1; }
+  done
+  [[ "$output" == *"--dry-run : rien n'est téléchargé"* ]]
+  [[ "$output" == *"La sortie serait :"*"deploy/workstation up --from $KITS/lcars_${TAG}_amd64.deb --from $KITS/lcars-workstation_${TAG}_amd64.deb"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+  [ ! -d "$HOME/.lcars" ]
+  refute_out 'WORKSTATION:|téléchargé,' <<<"$output"
+  # un kit de cette version deja detare : le preflight joue dedans, le bilan sort, et la sortie est dite mot a mot
+  pipee --workstation
+  [ "$status" -eq 0 ]; : > "$SERVEUR_LOG"
+  pipee --workstation --dry-run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Préflight"*"RAIL POSTE"*"le rail ferait : sudo apt install lcars_${TAG}_amd64.deb lcars-workstation_${TAG}_amd64.deb"* ]]
+  [[ "$output" == *"La sortie serait :"*"$KITS/lcars_install/deploy/workstation up --from $KITS/lcars_${TAG}_amd64.deb"* ]]
+  [ ! -s "$SERVEUR_LOG" ]
+  refute_out 'WORKSTATION:' <<<"$output"
+}
+
+@test "--dry-run dans un arbre : le poste dit « provision apply » et l'argv de workstation ; le conteneur dit deploy/container up, et le banc bench-up — aucun espion appele ; sans rail, le bilan et c'est tout" {
+  local fake; fake="$(_fake_tree 0 0)"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$fake/deploy/workstation"; chmod 0755 "$fake/deploy/workstation"
+  run bash "$fake/install.sh" --workstation --dry-run --port-forge 21090 < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"RAIL POSTE"*"le rail ferait : sudo provision apply"*"La sortie serait :"*"$fake/deploy/workstation up --port-forge 21090"* ]]
+  refute_out 'WORKSTATION:|Pas de TTY' <<<"$output"
+  run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --container --dry-run < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"La sortie serait :"*"$fake/deploy/container up"* ]]
+  refute_out 'DOCKERSH:' <<<"$output"
+  run bash "$fake/install.sh" --container --bench --dry-run -- --project bt < /dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"La sortie serait :"*"bench-up.sh --project bt"* ]]
+  refute_out 'BENCHUP:' <<<"$output"
+  run bash "$fake/install.sh" --dry-run < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bilan"*"--dry-run sans rail"* ]]
+}
+
+# ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT ────────────────────────────────────
+#
+# La porte n'a pas de sudo, et le desinstalleur en a besoin : elle DIT quel desinstalleur est celui
+# de cette machine (deb → apt purge ; kit/source → provision uninstall), et relaie a
+# `deploy/workstation uninstall`, qui lit le meme fait et escalade. L'espion mesure l'argv.
+
+_porte_uninstall() { # _porte_uninstall <channel> <args…> -> run la porte sur un arbre dont workstation est un espion
+  local ch="$1"; shift
+  local fake; fake="$(_fake_tree 0 0)"
+  _faux_provision "$fake" "${_faits_sains[@]}" "channel=$ch" "channel_tree=source"
+  printf '#!/usr/bin/env bash\necho "WORKSTATION:$*"\n' > "$fake/deploy/workstation"; chmod 0755 "$fake/deploy/workstation"
+  run bash "$fake/install.sh" "$@" < /dev/null
+}
+
+@test "--uninstall relaie a « deploy/workstation uninstall » selon le canal : deb → apt purge dit, kit/source → provision uninstall dit ; ce qui suit -- lui part" {
+  _porte_uninstall deb --uninstall
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"--uninstall : canal « deb » → apt purge"* ]]
+  [[ "$output" == *"WORKSTATION:uninstall"* ]]
+  refute_out 'Bilan|RAIL POSTE|1 ou 2' <<<"$output"       # pas de menu : on ne pose rien
+  _porte_uninstall kit --uninstall -- --yes --humans
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canal « kit » → provision uninstall"*"sans --yes"* ]]
+  [[ "$output" == *"WORKSTATION:uninstall --yes --humans"* ]]
+  _porte_uninstall aucun --uninstall
+  [[ "$output" == *"canal « aucun » → provision uninstall"*"WORKSTATION:uninstall"* ]]
+  # la porte ne fait pas le sudo elle-meme : aucun apt, aucun provision, aucun sudo dans son code
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  refute grep -qE 'exec (sudo|apt|"\$PROVISION" uninstall)' <<<"$code"
+}
+
+@test "--uninstall sur un canal ILLISIBLE refuse ; avec --dry-run, il nomme le relais et ne l'appelle pas" {
+  _porte_uninstall invalide --uninstall
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ILLISIBLE"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
+  _porte_uninstall deb --uninstall --dry-run -- --yes
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"canal « deb »"*"La sortie serait :"*"deploy/workstation uninstall --yes"* ]]
+  refute_out 'WORKSTATION:' <<<"$output"
 }

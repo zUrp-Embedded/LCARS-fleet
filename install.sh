@@ -33,6 +33,12 @@
 #                       L'humain EST une annexe : un déploiement de travail n'en
 #                       sème aucun, les personnes s'inscrivent sur la forge.
 #       --check         sonde read-only, rien n'est modifié.
+#       --dry-run       tout jusqu'au bilan, PLUS ce que la sortie ferait — les artefacts et leurs
+#                       sha256 attendus, la commande du rail — sans rien télécharger ni poser.
+#       --uninstall     relais au désinstalleur du canal en place (lu au préflight) : apt purge sous
+#                       « deb », « provision uninstall » sinon — par deploy/workstation uninstall,
+#                       qui a le sudo. Ce qui suit « -- » lui part (--yes, --humans, --annexes).
+#                       Le conteneur, lui, se défait par deploy/container reset.
 #       --from-release  la provenance « release » même depuis un checkout : l'artefact de CETTE
 #                       version, téléchargé dans ~/.lcars/kits/<version>/ et VÉRIFIÉ — sha256 en
 #                       dur dans cette porte, signature minisign si l'outil est là (dit sinon).
@@ -123,7 +129,7 @@ sums() { cat <<'SUMS'              # @@DOOR_SUMS_BEGIN@@ « <sha256>  <artefact>
 SUMS
 }                                  # @@DOOR_SUMS_END@@
 SOURCE_REF="$LCARS_DOOR_VERSION"   # --source : git clone AU TAG de cette porte, jamais main sans le dire
-WANT_SOURCE=0; FROM_RELEASE=0; WANT_TAR=0
+WANT_SOURCE=0; FROM_RELEASE=0; WANT_TAR=0; DRY_RUN=0; UNINSTALL=0
 DOCTOR_MODE=0
 RAIL=""              # workstation | container — VIDE tant que personne n'a choisi
 FORCED_SUBSTRATE=""  # posé par --substrate : vaut pour la porte ET pour le rail
@@ -169,6 +175,8 @@ while [[ $# -gt 0 ]]; do
               exit 1 ;;
     --from-release) FROM_RELEASE=1; shift ;;
     --tar)          WANT_TAR=1; shift ;;
+    --dry-run)      DRY_RUN=1; shift ;;
+    --uninstall)    UNINSTALL=1; shift ;;
     --substrate) FORCED_SUBSTRATE="${2:?--substrate attend une valeur}"
                  PASSTHRU+=("$1" "$2"); shift 2 ;;
     # ports et nom d'instance : validés par `provision`, jamais ici
@@ -189,6 +197,7 @@ while [[ $# -gt 0 ]]; do
         echo "install.sh $LCARS_DOOR_VERSION — LA porte d'entrée."
         echo "  --workstation | --container   le rail · --bench  les annexes · --check  sonde read-only"
         echo "  --port-forge N | --port-deck N | --port-ssh N | --forge-project N | --substrate S"
+        echo "  --dry-run  ce que la sortie ferait, sans rien poser · --uninstall  relais au désinstalleur du canal"
         echo "  --from-release  l'artefact de CETTE version, vérifié · --tar  le kit plutôt que les .deb"
         echo "  --source [REF]  git clone AU TAG de cette porte (ou REF) · --repo URL  son dépôt"
       fi
@@ -214,6 +223,13 @@ fait() { # fait <nom> — la valeur mesurée, vide si le fait n'a pas été pos�
   sed -n "s/^$1=//p" "$FACTS_FILE" 2>/dev/null | tail -1
 }
 
+# sortie_dite <argv…> — ce que `--dry-run` rend a la place d'un exec : la commande, mot a mot, et rien
+# n'est fait. Elle vit devant CHAQUE exec qui mute (§ 07.7 : « je ne sais pas ce que ca va faire »).
+sortie_dite() {
+  echo ""; echo "  ${W}--dry-run${N} : rien n'est fait. La sortie serait :"
+  printf '   '; printf ' %q' "$@"; echo ""
+  exit 0
+}
 # ─── LE MOUVEMENT SOURCE, PROVENANCE « release » — des definitions, rien ne s'execute ici ───────
 #
 # Pipee, cette porte n'a pas d'arbre, et le preflight vit dans le kit. Elle va donc chercher
@@ -299,6 +315,16 @@ source_release() {
     if s="$(sum_of "$a")"; then printf '    %-56s sha256 %s\n' "$a" "$s"; else printf '    %-56s sha256 ABSENT DE LA TABLE\n' "$a"; manque=1; fi
   done
   [[ "$manque" -eq 0 ]] || { echo "  ${R}un artefact n'est pas dans la table de cette porte — elle ne l'a jamais vu : rien n'est téléchargé, rien n'est posé.${N}"; exit 1; }
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  ${W}--dry-run${N} : rien n'est téléchargé."
+    # un kit de CETTE version deja detare (une pose precedente) est un arbre : le preflight peut jouer
+    if [[ ! -x "$KITS_DIR/lcars_install/deploy/provision" ]]; then
+      echo "  Pas d'arbre ici — le préflight vit dans le kit. La sortie serait :"
+      printf '    deploy/workstation up'; for a in "${DEBS[@]}"; do printf ' --from %s' "$KITS_DIR/$a"; done; echo ""
+      exit 0
+    fi
+    SCRIPT_DIR="$KITS_DIR/lcars_install"; return 0
+  fi
   if [[ "$BASE" != https://* ]]; then
     [[ -n "${LCARS_DOOR_INSECURE_HTTP:-}" ]] || { echo "  ${R}$BASE n'est pas https — cette porte ne télécharge qu'en https (LCARS_DOOR_INSECURE_HTTP=1 pour un banc local, et rien d'autre).${N}"; exit 1; }
     echo "  ${AMBER}LCARS_DOOR_INSECURE_HTTP=1 : $BASE — transport en clair, banc seulement.${N}" >&2
@@ -425,6 +451,22 @@ remesurer() { # rejoue le préflight et recharge les faits — la SEULE façon d
     "$PROVISION" doctor --only 00-preflight ${FORCED_SUBSTRATE:+--substrate "$FORCED_SUBSTRATE"} 2>&1)" || true
 }
 remesurer
+
+# ─── --uninstall : LE RELAIS, SELON LE CANAL LU AU PREFLIGHT — la porte DIT, le rail FAIT ─────────
+# Le desinstalleur d'une machine est celui de son canal : les paquets sous « deb » (apt purge, le
+# postrm joue le desinstalleur), le journal et le manifeste (provision uninstall) sinon. La porte n'a
+# pas de sudo : `deploy/workstation uninstall` l'a, et lit le MEME fait. Ce qui suit `--` lui part.
+if [[ "$UNINSTALL" -eq 1 ]]; then
+  case "$(fait channel)" in
+    invalide) echo "  ${R}le canal d'installation de cette machine est ILLISIBLE — rien n'est fait ; le préflight nomme le fichier.${N}"; exit 1 ;;
+    deb)      _geste="apt purge des paquets de LCARS (le postrm joue le désinstalleur)" ;;
+    *)        _geste="provision uninstall (journal + manifeste) — sans --yes, il n'imprime que son plan" ;;
+  esac
+  echo "  ${W}--uninstall${N} : canal « $(fait channel) » → $_geste"
+  [[ -x "$SCRIPT_DIR/deploy/workstation" ]] || { echo "  ${R}deploy/workstation introuvable — ce geste exige l'arbre complet.${N}"; exit 1; }
+  [[ "$DRY_RUN" -eq 0 ]] || sortie_dite "$SCRIPT_DIR/deploy/workstation" uninstall "${DELEGATE_ARGS[@]}"
+  exec "$SCRIPT_DIR/deploy/workstation" uninstall "${DELEGATE_ARGS[@]}"
+fi
 
 for t in git curl; do
   if [[ "$(fait "$t")" == "oui" ]]; then say_ok "$t"; else say_miss "$t — apt install $t"; fi
@@ -581,9 +623,13 @@ else
   bilan_menu
   # `--check` s'arrête ici : il a mesuré et il a dit. Aller plus loin demanderait un rail, donc un
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
-  if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/container status"
+  if [[ "$DOCTOR_MODE" -eq 1 || "$DRY_RUN" -eq 1 ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "  ${W}--dry-run${N} sans rail : le bilan est tout. Nomme un rail (--workstation | --container) pour voir la sortie."
+    else
+      echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
+      echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/container status"
+    fi
     exit 0
   fi
   ans=""
@@ -757,7 +803,7 @@ echo ""
 
 # Les accolades portent la redirection d'erreur, pas le `read` : sans elles, l'échec de
 # `< /dev/tty` est signalé par le shell lui-même, avant la phrase calme qui l'explique.
-{ read -r _ < /dev/tty; } 2>/dev/null || {
+[[ "$DRY_RUN" -eq 1 ]] || { read -r _ < /dev/tty; } 2>/dev/null || {
   echo "  [install] Pas de TTY — continue automatiquement (le rail est déjà choisi)."
   [[ -n "${LCARS_COLOR_HINT:-}" ]] && echo "  [install] Sortie non-terminal : couleurs coupées (PROV_COLOR=1 pour les garder dans le log)."
 }
@@ -874,9 +920,11 @@ if [[ "$RAIL" == "container" ]]; then
     echo "  ${W}--bench${N} : forge jetable + conteneur + runner CI + humain de démo, en un geste."
     # Le délégué reçoit la résolution du daemon, il ne la refait pas — le fait vient du module.
     DOCKER_BIN="$(fait docker_bin)"; export DOCKER_BIN
+    [[ "$DRY_RUN" -eq 0 ]] || sortie_dite "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
     exec "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""
+  [[ "$DRY_RUN" -eq 0 ]] || sortie_dite "$SCRIPT_DIR/deploy/container" up
   echo "  ${W}up${N} — la sortie qui suit est celle de deploy/container"
   exec "$SCRIPT_DIR/deploy/container" up
 fi
@@ -916,6 +964,12 @@ if [[ "$WITH_BENCH" -eq 1 ]]; then
 fi
 if [[ "$DOCTOR_MODE" -eq 1 ]]; then
   exec "$WORKSTATION" doctor "${PASSTHRU[@]}"
+fi
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  # ce que le RAIL ferait, dit ici parce que c'est la question du drapeau — le sudo est la-bas
+  if [[ "${#FROM[@]}" -gt 0 ]]; then echo "  le rail ferait : sudo apt install ${DEBS[*]}  (canal deb — le postinst joue provision apply)"
+  else echo "  le rail ferait : sudo provision apply  (canal $VOULU)"; fi
+  sortie_dite "$WORKSTATION" up "${PASSTHRU[@]}" "${FROM[@]}"
 fi
 echo ""
 echo "  ${W}up${N} — la sortie qui suit est celle de deploy/workstation"
