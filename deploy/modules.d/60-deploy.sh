@@ -92,8 +92,40 @@ build_sha() {
 }
 release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}" ]] && printf '%s\n' "${#d[@]}" || printf '0\n'; }
 
-check() {
+# ─── LE CANAL : CE QUE CE MODULE ECRIT APRES AVOIR POSE, ET CE QU'IL NE FAIT PLUS SOUS `deb` ─────
+#
+# Ce module est LE poseur de la release, donc c'est lui qui dit QUI l'a posee (`prov_channel`, lib) :
+# `kit` quand `deploy-release.sh` a reutilise la release d'un paquet — `.source-revision` a la racine
+# de l'arbre, le MEME discriminant que `prov_delivery`, pas un second — et `source` quand il l'a batie
+# depuis un checkout. Le canal s'ecrit APRES la pose, jamais avant : ecrit d'abord, une pose ratee
+# laisserait une machine qui se dit « kit » et n'a rien. Il s'ecrit aussi sur les deux sorties ou la
+# release est DEJA en place (rejeu depuis la copie, raccourci « rien a batir ») : une machine posee
+# avant ce tampon ne le recevrait sinon jamais, et la porte la lirait « jamais posee » a vie.
+#
+# ⚠ SOUS `deb`, CE MODULE NE POSE RIEN — ni `deploy-release.sh`, ni elagage, ni liens : dpkg possede
+# `$PROV_PREFIX` et les liens du PATH. `apply` se reduit a `check`, qui mesure comme aujourd'hui et
+# ajoute ce que `dpkg -V` dit du prefixe ; le drift se converge par le paquet, pas par ce rail. Et le
+# canal ne s'ecrit JAMAIS ici sous `deb` : le postinst du paquet l'a ecrit, il ne se reecrit pas.
+poser_canal() { # poser_canal — le canal de CETTE pose : kit si la release venait d'un paquet, source sinon
+  local c=source
+  if prov_delivery_is_binary; then c=kit; fi
+  prov_channel_write "$c"
+}
+
+mesure_dpkg() { # mesure_dpkg — sous `deb` : ce que dpkg dit de SA release sous le prefixe
+  local alt rc=0
+  alt="$(prov_dpkg_verify "$PROV_DEB_PACKAGE" "$PROV_PREFIX")" || rc=$?
+  case "$rc" in
+    0) p_ok "dpkg -V $PROV_DEB_PACKAGE : rien à redire sous $PROV_PREFIX — la release est celle du paquet" ;;
+    1) p_drift "dpkg -V $PROV_DEB_PACKAGE : $(grep -c . <<<"$alt") fichier(s) altéré(s) ou manquant(s) sous $PROV_PREFIX (premier : ${alt%%$'\n'*}) — réinstalle le paquet : apt install --reinstall $PROV_DEB_PACKAGE" ;;
+    2) p_warn "canal deb, mais dpkg est absent d'ici — rien ne peut vérifier la release contre son paquet" ;;
+    *) p_drift "canal deb, mais le paquet $PROV_DEB_PACKAGE est inconnu de dpkg — apt install $PROV_DEB_PACKAGE, ou retire $PROV_CHANNEL_FILE si cette machine n'a pas été posée par un paquet" ;;
+  esac
+}
+
+check() { # check [--dpkg] — les mesures d'aujourd'hui ; avec --dpkg (canal deb), celle du paquet en tete
   [[ -f "$MANIFEST" ]] || { p_fail "manifest introuvable: $MANIFEST (checkout incomplet)"; verdict_check; }
+  [[ "${1:-}" != "--dpkg" ]] || mesure_dpkg
 
   # ⚠ « ABSENTE » SE DIT D'UN PREFIXE QU'ON PEUT TRAVERSER. `$PROV_PREFIX` est `0750 root:fleet` :
   # un compte hors du groupe — ou dont l'adhesion n'est pas encore effective dans SA session — lit
@@ -189,6 +221,7 @@ apply() {
   # dire est son etat-cible : echouer ici faisait rater tout le rejeu sur une machine convergee.
   if prov_dans_la_copie && [[ ! -f "$RUNTIME_DIR/mix.exs" ]] && release_present; then
     p_ok "rejeu depuis la copie posée : release en place, aucune source ici ($RUNTIME_DIR) — rien à bâtir"
+    poser_canal || verdict_apply
     verdict_apply
   fi
   [[ -f "$RUNTIME_DIR/mix.exs" ]] || { p_fail "source runtime introuvable: $RUNTIME_DIR"; verdict_apply; }
@@ -219,6 +252,7 @@ apply() {
       ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
     done < <(mf_entries)
     prune_intrus || verdict_apply   # le raccourci ne rejoue pas la pose : l'elagage se fait ici
+    poser_canal || verdict_apply
     verdict_apply
   fi
 
@@ -280,6 +314,7 @@ apply() {
     ensure_symlink "$PROV_LINK_DIR/$name" "$PROV_PREFIX/bin/$name" || verdict_apply
   done < <(mf_entries)
   prune_intrus || verdict_apply   # en root : le symlink du PATH que la pose (humaine) n'a pas pu retirer
+  poser_canal || verdict_apply     # APRES la pose et le verrou : le canal dit ce qui EST, pas ce qu'on visait
 
   PROV_CHANGED=$((PROV_CHANGED + 1))
   p_chg "runtime déployé : $PROV_PREFIX (build $(build_sha)) + /usr/local/bin câblé"
@@ -287,7 +322,11 @@ apply() {
 }
 
 case "${1:?usage: 60-deploy.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
+  check|apply)
+    # ⚠ UNE LECTURE DU CANAL, ICI, ET UN SEUL BRANCHEMENT. Sous `deb` dpkg possede la release :
+    # `apply` ne pose rien et se reduit a `check`, qui ajoute ce que dpkg dit. Un canal illisible
+    # est un verdict rouge avant tout geste (prov_channel_or_verdict).
+    prov_channel_or_verdict "$1"
+    if poseur_is_dpkg; then check --dpkg; elif [[ "$1" == "apply" ]]; then apply; else check; fi ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac
