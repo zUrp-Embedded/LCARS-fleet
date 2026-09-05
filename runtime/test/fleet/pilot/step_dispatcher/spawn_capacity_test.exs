@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.StepDispatcherCapacityTest do
+defmodule Fleet.Pilot.StepDispatcher.SpawnCapacityTest do
   @moduledoc """
   Regression acte4 A-11 — PRE-FLIGHT capacity gate (before the forge lock). At saturation
   (`max_pods`), taking the lock first would discover `:max_children` at spawn, then compensate

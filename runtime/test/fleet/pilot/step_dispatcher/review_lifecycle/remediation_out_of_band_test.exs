@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.RemediationOutOfBandTest do
+defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.RemediationOutOfBandTest do
   @moduledoc """
   The `:merged` classification of a merge failure is no longer a bare no-op: an
   out-of-band merged PR engraves its terminal guards (stage/merged + explicit close) so

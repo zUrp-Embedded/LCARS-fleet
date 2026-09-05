@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ConflictBaseRefreshTest do
+defmodule Fleet.Pilot.StepDispatcher.SpawnConflictBaseRefreshTest do
   @moduledoc """
   A0.5 — a conflict rework's `refs/lcars/base` follows the moved base (measured hole, bench
   2026-08-18: a live instance-scoped pod, re-briefed in place BY DESIGN, kept the base of its
