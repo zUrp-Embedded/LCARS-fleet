@@ -314,10 +314,13 @@ canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la r
 @test "CANAL : 60-deploy ecrit KIT d'une livraison binaire, SOURCE d'un checkout — le MEME discriminant, pas un second" {
   paquet;   canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "kit" ]
   checkout; canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "source" ]
-  # et la decision lit prov_delivery_is_binary, jamais le tampon par son nom (meme regle que 15/16)
+  # et la decision vit dans la LIB (prov_channel_here : binaire -> kit, sinon source), lue aussi par
+  # le preflight et workstation — jamais le tampon par son nom (meme regle que 15/16)
   local corps; corps="$(sed -n '/^poser_canal()/,/^}/p' "$DEPLOY/modules.d/60-deploy.sh")"
-  grep -q 'prov_delivery_is_binary' <<<"$corps"
-  grep -vE '^\s*#' <<<"$corps" | refute_out 'source-revision'
+  grep -q 'prov_channel_write "$(prov_channel_here)"' <<<"$corps"
+  grep -vE '^\s*#' <<<"$corps" | refute_out 'source-revision|prov_delivery'
+  paquet;   run lib 'prov_channel_here'; [ "$output" = kit ]
+  checkout; run lib 'prov_channel_here'; [ "$output" = source ]
 }
 
 @test "CANAL : sous deb, 60-deploy n'ecrit JAMAIS le canal — apply est branche sur check avant d'atteindre poser_canal" {

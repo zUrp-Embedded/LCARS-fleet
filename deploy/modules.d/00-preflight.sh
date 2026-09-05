@@ -217,6 +217,26 @@ check() {
     p_fact sudo absent
   fi
 
+  # ─── LE CANAL : QUI A POSÉ LE PRODUIT SUR CETTE MACHINE, ET CE QUE CET ARBRE POSERAIT ────────
+  #
+  # `channel` est le fait de la MACHINE (`prov_channel` : source, kit, deb, aucun) ; `channel_tree`
+  # est ce que CET arbre écrirait s'il posait (kit si c'est un paquet, source sinon — `prov_channel_here`).
+  # La porte et `workstation` les comparent : un canal sur un autre est un REFUS qui nomme le
+  # geste, jamais une conversion. Le même canal est une mise à jour ; `aucun`, une première pose.
+  p_fact channel_tree "$(prov_channel_here)"
+  # ⚠ APPEL NU : le p_fail d'un canal illisible doit COMPTER ici — un `$( )` l'imprimerait sans le
+  # compter, et ce module rendrait vert une machine dont personne ne sait qui la possède.
+  if prov_channel >/dev/null; then
+    p_fact channel "$PROV_CHANNEL"
+    if [[ "$PROV_CHANNEL" == "aucun" ]]; then
+      p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — cette machine n'a jamais été posée ; cet arbre poserait « $(prov_channel_here) »"
+    else
+      p_ok "canal d'installation : $PROV_CHANNEL ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
+    fi
+  else
+    p_fact channel invalide
+  fi
+
   # ─── Outils de bootstrap (avant même 10-packages : il faut de quoi l'exécuter) ───────────────
   local tool
   for tool in curl git; do

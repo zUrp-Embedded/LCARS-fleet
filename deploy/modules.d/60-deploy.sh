@@ -107,9 +107,7 @@ release_libs_count() { local d=("$PREFIX_REL"/lib/lcars_fleet-*); [[ -d "${d[0]}
 # ajoute ce que `dpkg -V` dit du prefixe ; le drift se converge par le paquet, pas par ce rail. Et le
 # canal ne s'ecrit JAMAIS ici sous `deb` : le postinst du paquet l'a ecrit, il ne se reecrit pas.
 poser_canal() { # poser_canal — le canal de CETTE pose : kit si la release venait d'un paquet, source sinon
-  local c=source
-  if prov_delivery_is_binary; then c=kit; fi
-  prov_channel_write "$c"
+  prov_channel_write "$(prov_channel_here)"
 }
 
 check() { # check [--dpkg] — les mesures d'aujourd'hui ; avec --dpkg (canal deb), celle du paquet en tete

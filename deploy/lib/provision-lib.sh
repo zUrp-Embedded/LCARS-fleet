@@ -1386,6 +1386,12 @@ prov_channel_write() {
   write_atomic "$PROV_CHANNEL_FILE" "$mode" "$owner" <<<"$1"
 }
 
+# prov_channel_here [racine] -> le canal que CET arbre poserait s'il posait : `kit` si c'est un paquet
+# (`prov_delivery` binaire), `source` sinon. UNE decision, lue par `60-deploy` (qui l'ecrit apres la
+# pose), par `00-preflight` (fait `channel_tree=`) et par `workstation` (le canal voulu sans `--from`).
+# `deb` n'en sort jamais : seul le postinst du paquet l'ecrit.
+prov_channel_here() { if prov_delivery_is_binary "$@"; then printf 'kit\n'; else printf 'source\n'; fi; }
+
 # prov_channel_or_verdict <check|apply> — LA lecture du canal d'un module qui pose le produit : une
 # seule, NUE, en tete du dispatch. Un canal illisible rend le verdict ROUGE du verbe avant tout
 # geste : on ne sait pas qui possede l'arbre, donc on n'y touche pas — « source par defaut » serait
