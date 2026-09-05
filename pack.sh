@@ -354,6 +354,11 @@ FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
 # un état se calcule AVANT d'être dit (cicatrice du 2026-08-25 : « jeton : trouvé9172f605… »).
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
+# L'ÉTAT DU JETON SE CALCULE AVANT D'ÊTRE DIT (pack_secrets.bats extrait ce bloc et le joue à blanc :
+# un jeton présent se dit « trouvé », jamais sa valeur ; un jeton absent se dit « absent »).
+_tok_state="absent"
+[[ -n "$TOKEN" ]] && _tok_state="trouvé"
+say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
 [[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:package + write:repository)"
 
 # La distribution du registre Debian est celle du BUILDER (les .deb ne dépendent pas d'une version
