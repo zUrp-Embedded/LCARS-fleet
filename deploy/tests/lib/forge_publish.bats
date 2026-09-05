@@ -52,7 +52,6 @@ _pub() { run bash -c ". '$LIB'; fp_publish_dist http://forge.test/ fleet lcars 0
 
 @test "l'ordre du geste : immutabilité, le commit est là, brouillon sur LE commit, tous les assets, les .deb au registre, publication" {
   _pub; [ "$status" -eq 0 ]
-  local t; t="$(cat "$TRACE")"
   [ "$(sed -n 1p "$TRACE")" = "GET http://forge.test/api/v1/repos/fleet/lcars/releases/tags/0.1-abc" ]
   [ "$(sed -n 2p "$TRACE")" = "GET http://forge.test/api/v1/repos/fleet/lcars/git/commits/deadbeefcafe" ]
   [ "$(sed -n 3p "$TRACE")" = "POST http://forge.test/api/v1/repos/fleet/lcars/releases" ]
