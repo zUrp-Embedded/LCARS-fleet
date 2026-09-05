@@ -50,7 +50,7 @@ defmodule Fleet.Project.Onboard.Refute do
           "'#{full_name}' is the STORE of the catalogue '#{owner}' — the source the fleet pushed " <>
             "into its own org, not a project. Laying project faces on it would write a project " <>
             "declaration into a catalogue's source, and every later pass would then read it as a " <>
-            "project. To (re)install that catalogue, inside the box: " <>
+            "project. To (re)install that catalogue, inside the container: " <>
             "`lcars catalogue install #{owner}`."}}
 
       {:ok, _other} ->

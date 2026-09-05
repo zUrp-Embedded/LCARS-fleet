@@ -147,7 +147,7 @@ defmodule Fleet.Pilot.Poller.Lease do
     # a repo with forty queued tickets starts forty runs.
     #
     # A repo holds several runs without the operator flipping anything, which is why the default
-    # ceiling is LOW (5). PER REPO (and per human), not per box: the count is per repo, and a fleet-wide knob
+    # ceiling is LOW (5). PER REPO (and per human), not per container: the count is per repo, and a fleet-wide knob
     # would make serializing one project to watch its pipeline end to end serialize every other
     # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)

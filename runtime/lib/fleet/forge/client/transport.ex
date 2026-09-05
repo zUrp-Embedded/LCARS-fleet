@@ -24,7 +24,7 @@ defmodule Fleet.Forge.Client.Transport do
   ## Aucun repli vers `~/.gitea_token`, et c'est une regle d'IDENTITE
 
   Le BEAM tourne sous l'uid de l'humain de fleet : un repli vers son `~/.gitea_token` resoudrait
-  vers le jeton PERSONNEL de cette personne. Une boite dont le cablage systeme manque ne tomberait
+  vers le jeton PERSONNEL de cette personne. Un conteneur dont le cablage systeme manque ne tomberait
   pas en panne — elle agirait sur la forge sous l'identite d'un humain, avec ses droits, sans
   qu'une ligne le dise. Sans source de jeton, la resolution rend `{:config, :no_token_source}` :
   un refus nomme, jamais un succes sous une autre identite.
@@ -86,7 +86,7 @@ defmodule Fleet.Forge.Client.Transport do
 
   # TROIS SOURCES, ORDONNEES, ET AUCUN REPLI IMPLICITE. Un jeton fourni, un chemin fourni, un compte
   # a demander — et si aucune n'est la, un refus qui le dit. L'ordre est celui du SPECIFIQUE vers le
-  # GENERAL : ce que l'appelant tient de la main gagne sur ce que la boite a configure.
+  # GENERAL : ce que l'appelant tient de la main gagne sur ce que le conteneur a configure.
   defp resolve_token(opts) do
     cond do
       is_binary(token = Keyword.get(opts, :token)) and token != "" ->

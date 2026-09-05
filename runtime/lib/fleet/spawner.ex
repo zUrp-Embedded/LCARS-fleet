@@ -578,7 +578,7 @@ defmodule Fleet.Spawner do
   end
 
   @doc """
-  Whether a durable snapshot exists on disk for `pod_id` — "this box has this pod ON RECORD",
+  Whether a durable snapshot exists on disk for `pod_id` — "this container has this pod ON RECORD",
   independently of whether it is running right now.
 
   This is NOT liveness (`list_pods/0`, `pod_info/2` answer that, and only for what is up). It is

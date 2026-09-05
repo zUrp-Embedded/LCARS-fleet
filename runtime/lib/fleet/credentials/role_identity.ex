@@ -38,8 +38,8 @@ defmodule Fleet.Credentials.RoleIdentity do
 
   Un appelant a pourtant besoin de les séparer, et il est hors du domaine : le garde de BOOT du
   rail. Depuis que le jeton se demande à un service, « pas de jeton » recouvre un défaut de
-  provisionnement (LOCAL, définitif — la boîte ne doit pas démarrer) et une porte qui ne répond pas
-  (TRANSITOIRE — refuser le boot dessus échangerait une panne rattrapable contre une boîte morte).
+  provisionnement (LOCAL, définitif — le conteneur ne doit pas démarrer) et une porte qui ne répond pas
+  (TRANSITOIRE — refuser le boot dessus échangerait une panne rattrapable contre un conteneur mort).
 
   ⚠ CE N'EST PAS UNE PORTE DE REPLI. Elle ne rend jamais de jeton que `for_role/1` aurait refusé —
   elle rend `{:ok, _}` seulement là où `for_role/1` aurait réussi. Ce qui se lit ici est un

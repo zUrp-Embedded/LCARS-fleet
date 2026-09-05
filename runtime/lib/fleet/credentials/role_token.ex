@@ -40,9 +40,9 @@ defmodule Fleet.Credentials.RoleToken do
 
   Un appelant a pourtant besoin de les separer : le garde de BOOT du rail. « Pas de jeton » ne
   designe PAS une seule chose — c'est a la fois « le provisionnement n'a pas tourne » (LOCAL,
-  definitif : la boite est mal deployee et ne doit pas demarrer), « le service d'autorite ne tourne
+  definitif : le conteneur est mal deploye et ne doit pas demarrer), « le service d'autorite ne tourne
   pas encore » et « la forge n'a pas repondu », ces deux-la etant TRANSITOIRES et distants. Refuser
-  le boot dessus echangerait une panne rattrapable contre une boite morte, ET LE MESSAGE ACCUSERAIT
+  le boot dessus echangerait une panne rattrapable contre un conteneur mort, ET LE MESSAGE ACCUSERAIT
   LE PROVISIONNEMENT.
   """
   @spec token_result(String.t() | nil) ::
@@ -106,7 +106,7 @@ defmodule Fleet.Credentials.RoleToken do
   end
 
   # ⚠ LE JETON SE DEMANDE, IL NE SE LIT PAS. Un fichier en `0640 root:fleet` est lisible par TOUT
-  # humain de la boite, et ce groupe est une PROJECTION de l'equipe `humans` de la forge, refaite
+  # humain du conteneur, et ce groupe est une PROJECTION de l'equipe `humans` de la forge, refaite
   # periodiquement : le droit de porter une identite de travail aurait alors LA PEREMPTION D'UN
   # CACHE, et quelqu'un que la forge a retire lirait encore jusqu'au tour suivant.
   #

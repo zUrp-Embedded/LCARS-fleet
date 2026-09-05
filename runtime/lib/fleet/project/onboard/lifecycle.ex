@@ -97,14 +97,14 @@ defmodule Fleet.Project.Onboard.Lifecycle do
   defp forge_issues(opts), do: Keyword.get(opts, :forge_issues, ForgeClient)
 
   @doc """
-  Enumerates the projects on this box, with what governs each one.
+  Enumerates the projects on this container, with what governs each one.
 
   The onboarder can `create`, `open`, `import`, `adopt`, `close`, `revise` and `delete` a project.
   Without this verb it could destroy a project it had no way to name. A pure read — the only
   listing in the delegation surface that writes nothing.
 
   Enumerated from DISK (`code_root`), which is what "this fleet's projects" means: a repo on
-  the forge that was never cloned here is not something this box can act on, and a disk project not
+  the forge that was never cloned here is not something this container can act on, and a disk project not
   yet published is precisely what `project_adopt` exists for.
 
   Per project, three facts and no derivation:

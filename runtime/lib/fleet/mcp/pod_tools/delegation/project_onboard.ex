@@ -157,7 +157,7 @@ defmodule Fleet.MCP.PodTools.Delegation.ProjectOnboard do
               {:ok, Fleet.Project.Onboard.close_result()} | {:error, term()}
 
   @doc """
-  LISTS the projects on this box (pure read). Per project: name, repo, the DECLARED card and level
+  LISTS the projects on this container (pure read). Per project: name, repo, the DECLARED card and level
   (never the effective fallback — an undeclared project must stay distinguishable from one that
   chose the default), and the parked state read from the forge. A state that cannot be read is
   `"unknown"` plus `state_error`, never a silent `"open"`.

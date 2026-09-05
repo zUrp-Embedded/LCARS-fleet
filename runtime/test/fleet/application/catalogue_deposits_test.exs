@@ -205,7 +205,7 @@ defmodule Fleet.Application.CatalogueDepositsTest do
 
   describe "deux depots qui revendiquent le MEME magasin" do
     test "le choix est DETERMINISTE et il est DIT — jamais « le dernier vu »" do
-      # `into: %{}` gardait celui que l'ordre de `/repos/search` designait, en silence : deux boites
+      # `into: %{}` gardait celui que l'ordre de `/repos/search` designait, en silence : deux conteneurs
       # lisant la meme forge pouvaient suivre deux magasins differents. On ne refuse pas la liste
       # (contrairement au doublon de DEPOTS) — le catalogue EST installe, et refuser l'effacerait de
       # la liste pour un depot de trop.
@@ -241,8 +241,8 @@ defmodule Fleet.Application.CatalogueDepositsTest do
     test "⚠ ET SON FORK NON PLUS — sinon le premier fork casse `catalogue list` pour tout le monde" do
       # LE TEMOIN QUI JUSTIFIE LA CLAUSE. Deux depots du meme nom rendent
       # `{:duplicate_catalogues, ...}`, et cette porte-la refuse la liste ENTIERE — pas la ligne
-      # fautive. Publier un objet fait pour etre forke, sans cette clause, arme la casse de toute la
-      # boite au premier fork qui garde son manifeste tel quel.
+      # fautive. Publier un objet fait pour etre forke, sans cette clause, arme la casse de tout le
+      # conteneur au premier fork qui garde son manifeste tel quel.
       assert {:ok, found} =
                list(
                  [repo("admiral/fleet"), repo("bob/fleet-fork"), repo("alice/mob")],

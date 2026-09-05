@@ -1,6 +1,6 @@
 defmodule Fleet.Project.Onboard.Faces do
   @moduledoc """
-  Les TROIS faces d'un projet sur la boite, et les gestes git qui les posent : creer, cloner,
+  Les TROIS faces d'un projet sur le conteneur, et les gestes git qui les posent : creer, cloner,
   committer, pousser, proteger `main`, et defaire ce qu'un geste interrompu a laisse.
 
   Un projet LCARS est un depot sur la forge et trois depots locaux — `code` (branche `main`, le

@@ -374,7 +374,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
     end
 
     defp write_mirrors!(root, entrypoint_zones, module_zones) do
-      # Lot 6 : la boite cree ses zones dans `services/container/init.sh` (l'init de l'instance, produit),
+      # Lot 6 : le conteneur cree ses zones dans `services/container/init.sh` (l'init de l'instance, produit),
       # plus dans l'entrypoint docker — la meme ancre, au nouvel endroit.
       File.write!(
         Path.join([root, "services", "container", "init.sh"]),
@@ -420,7 +420,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CheckTest do
       result = Mix.Tasks.Lcars.Contracts.Check.Catalogue.check_face_roots_provisioned(root)
 
       assert result.status == :fail
-      assert result.evidence == ["/home/projects.ops: absent de container/init.sh (la boite)"]
+      assert result.evidence == ["/home/projects.ops: absent de container/init.sh (conteneur)"]
     end
 
     test "table du module illisible → fail-closed, jamais un vert sur rien", %{root: root} do

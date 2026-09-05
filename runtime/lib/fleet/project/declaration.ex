@@ -21,7 +21,7 @@ defmodule Fleet.Project.Declaration do
   cosmetic — a card serves one workflow_run and a project can carry several, so a per-card ceiling
   could not bound a project whose tickets route through two different cards. Absent = the fleet
   default (`--max-fan` / `LCARS_MAX_FAN`) — which alone cannot serialize ONE project: the counter
-  is per project and that knob is per box.
+  is per project and that knob is per container.
 
   Read side: `pipeline_default/2` at the dispatcher's burn. Absent file (legacy project) →
   the delegation default card, silently. A file that no longer NAMES a card (unreadable, or the

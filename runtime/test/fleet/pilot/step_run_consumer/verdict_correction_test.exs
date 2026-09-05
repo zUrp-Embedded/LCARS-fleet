@@ -205,8 +205,8 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrectionTest do
   describe "le barreau est ÉTEINT par défaut" do
     test "désarmé → gel, et l'escalade NOMME le barreau non armé" do
       # ⚠ CE N'EST PAS UN NO-OP SILENCIEUX, et la distinction sert un humain : un architecte qui lit
-      # le gel doit pouvoir dire « la passe a échoué » de « la passe n'est pas armée sur cette
-      # boîte ». Un mécanisme jamais joué de bout en bout sur un banc est une hypothèse.
+      # le gel doit pouvoir dire « la passe a échoué » de « la passe n'est pas armée sur ce
+      # conteneur ». Un mécanisme jamais joué de bout en bout sur un banc est une hypothèse.
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_correction_pass?, false)
 
       assert {:ok, :awaiting} = request()

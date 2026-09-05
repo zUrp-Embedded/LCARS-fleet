@@ -48,7 +48,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
 
   # ⚠ UN JOB QUE PERSONNE N'A PRIS N'EST PAS UNE CI LENTE, et lui donner la patience d'une CI lente
   # coute des heures a un operateur : le job affiche « Waiting », 0 s, avec un `runs-on:` qu'aucun
-  # runner de la boite ne sert — indiscernable d'un job en cours, et bloquant la fusion sans jamais
+  # runner du conteneur ne sert — indiscernable d'un job en cours, et bloquant la fusion sans jamais
   # rougir. Un rouge dit quelque chose ; une attente ressemble a du travail.
   #
   # CE DELAI EST COURT PARCE QUE LA MESURE EST DIFFERENTE. On n'attend plus « que la CI finisse » :

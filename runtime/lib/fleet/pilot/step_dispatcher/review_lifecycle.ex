@@ -225,7 +225,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle do
       # Elle convoque l'arbitre — passe unique, bornée par un marqueur forge, auto-gatée par son
       # drapeau. Tout ce qui n'aboutit pas là remonte à l'architecte avec le motif qui NOMME le
       # barreau (non armé / dépensé / non convocable), parce qu'un humain qui lit un gel doit
-      # pouvoir distinguer « la passe a échoué » de « la passe n'existe pas sur cette boîte ».
+      # pouvoir distinguer « la passe a échoué » de « la passe n'existe pas sur ce conteneur ».
       :gray_zone ->
         VerdictException.dispatch(
           pr_number,

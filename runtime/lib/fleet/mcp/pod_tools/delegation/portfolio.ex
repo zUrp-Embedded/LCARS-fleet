@@ -87,7 +87,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   defp delete_armed?, do: Application.get_env(:lcars_fleet, @delete_flag, false) === true
 
   @doc """
-  Lists the projects on this box (pure read).
+  Lists the projects on this container (pure read).
 
   The onboarder can create, open, import, adopt, close, revise AND DELETE a project; without a
   listing, the most destructive surface in the fleet is aimed by a name it can only have been told.
@@ -166,7 +166,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
           {:error,
            {:workflow_no_card_scope,
             "no installed catalogue carries a cards directory — nothing was scanned, so this is " <>
-              "not an empty catalogue but a box serving none. `catalogue_list` says what it serves."}}
+              "not an empty catalogue but a container serving none. `catalogue_list` says what it serves."}}
 
         {scanned, [], []} ->
           {:error,
@@ -191,7 +191,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   end
 
   @doc """
-  The catalogues this box SERVES — the mirror of `list_workflow_cards/1`, one level up.
+  The catalogues this container SERVES — the mirror of `list_workflow_cards/1`, one level up.
 
   The listing comes from the pairing the boot already resolves on. Re-deriving "which catalogues
   exist" MCP-side would be a second authority beside it — and deriving it from the CARDS is wrong
@@ -201,7 +201,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
   ## What each entry carries, and what it deliberately does NOT
 
     * `name` — the DECLARED identity, carried by the catalogue and not by the directory it was
-      unpacked into. It is what addresses the catalogue OUTSIDE this box.
+      unpacked into. It is what addresses the catalogue OUTSIDE this container.
     * `bundled` — it ships INSIDE the release, so it cannot be removed. An availability guarantee,
       not an authority: a bundled catalogue is a peer.
 
@@ -232,7 +232,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
 
   ## L'offre VIDE est une erreur, et le refus PORTE ce qu'il a vu
 
-  « Aucun catalogue n'existe » est le mensonge vide : cette boite sert toujours au moins le
+  « Aucun catalogue n'existe » est le mensonge vide : ce conteneur sert toujours au moins le
   catalogue livre. Le refus emporte les racines ecartees, parce que « rien d'installe » et « tout
   installe, tout casse » appellent deux gestes differents.
   """
@@ -271,7 +271,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Portfolio do
         {[], bad} ->
           {:error,
            {:catalogue_offer_unavailable, bad,
-            "no installed catalogue declares a name — this box serves nothing"}}
+            "no installed catalogue declares a name — this container serves nothing"}}
 
         {offer, []} ->
           {:ok, %{"catalogues" => offer}}

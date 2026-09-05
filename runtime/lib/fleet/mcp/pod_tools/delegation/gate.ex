@@ -62,7 +62,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
   # ⚖ ET LE CATALOGUE EST OBLIGATOIRE, JAMAIS INFERE (arbitrage user). L'inference parait gratuite
   # et ne l'est pas : elle achete un comportement qui CHANGE quand un tiers installe un catalogue
   # portant le meme nom de carte, plus deux branches dont laquelle s'execute depend de la
-  # POPULATION de la boite. L'information, elle, n'est pas absente — elle est dans l'objet que
+  # POPULATION du conteneur. L'information, elle, n'est pas absente — elle est dans l'objet que
   # l'appelant vient de lire, qui rend chaque carte AVEC son catalogue.
   #
   # Une decision permanente s'ENONCE ; on ne deduit que ce qui se rattrape.

@@ -14,7 +14,7 @@ defmodule Fleet.Project.Onboard.ReconcileTest do
       autre erreur est une ABSENCE de reponse, et la traiter comme un 404 ferait disparaitre un
       projet bien reel de l'inventaire sur un simple timeout.
     * L'ORG ILLISIBLE. Elle rend un ECHEC nomme, jamais une liste vide — vide se lirait « rien a
-      importer », qui est le mot d'une boite convergee.
+      importer », qui est le mot d'un conteneur converge.
   """
   use ExUnit.Case, async: false
 

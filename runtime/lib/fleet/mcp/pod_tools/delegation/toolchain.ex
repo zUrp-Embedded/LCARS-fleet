@@ -176,7 +176,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Toolchain do
              forge.open_pr(repo, branch, base, "[toolchain] #{eco} (anticipation)",
                body:
                  "Demande d'outillage ANTICIPÉE — rôle `#{role}`, AUCUN ticket en attente.\n\n" <>
-                   "Merger installe l'outil sur les boîtes qui suivent cette branche. " <>
+                   "Merger installe l'outil sur les conteneurs qui suivent cette branche. " <>
                    "Aucun work-item ne sera re-dispatché : il n'y en a pas."
              ) do
         arm_auto_merge(forge, repo, pr)

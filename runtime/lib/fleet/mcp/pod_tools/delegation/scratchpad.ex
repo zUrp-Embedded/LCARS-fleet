@@ -42,7 +42,7 @@ defmodule Fleet.MCP.PodTools.Delegation.Scratchpad do
 
   It PUSHES, and that is a change of contract for this face: `workshop` was declared "nothing
   pushes it on its own". Pushing an orphan branch that is never merged publishes nothing into the
-  product — it makes the notes survive the box, which is the point of writing them.
+  product — it makes the notes survive the container, which is the point of writing them.
   """
   @spec scratch(map(), String.t()) :: {:ok, map()} | {:error, term()}
   def scratch(state, note) when is_binary(note) do

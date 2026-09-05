@@ -7,7 +7,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
   catalogue qu'il attendait, il **supprime** le matériel local.
 
   Renommer d'un seul côté donne la séquence suivante : `push_store` écrit en A, le convergeur
-  cherche en B, la liste signée revient VIDE, et le balayage efface tous les catalogues de la boîte
+  cherche en B, la liste signée revient VIDE, et le balayage efface tous les catalogues du conteneur
   en annonçant qu'il converge. C'est la dérive la plus chère que ce dépôt puisse produire, et elle
   coûte un fichier oublié.
 
@@ -53,7 +53,7 @@ defmodule Fleet.CatalogueStoreAddressTest do
       assert Regex.match?(~r/^STORE_REPO=.*#{Regex.escape(expected)}/m, body),
              "#{rel} : son `STORE_REPO` ne porte pas #{inspect(expected)}. L'ecrivain et le " <>
                "convergeur doivent viser la meme adresse — sinon la liste signee revient vide et " <>
-               "le balayage efface le materiel de TOUS les catalogues de la boite."
+               "le balayage efface le materiel de TOUS les catalogues du conteneur."
     end
   end
 

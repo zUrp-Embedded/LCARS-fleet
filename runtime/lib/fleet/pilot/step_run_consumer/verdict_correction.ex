@@ -78,7 +78,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
     # n'a jamais tourné de bout en bout sur un banc est une hypothèse, pas un rail. Le chemin
     # désactivé n'est PAS un no-op silencieux : il NOMME le barreau non armé dans l'escalade, pour
     # qu'un architecte lisant le gel puisse distinguer « la passe a échoué » de « la passe n'est
-    # pas armée sur cette boîte ».
+    # pas armée sur ce conteneur ».
     if enabled?() do
       do_request(n, role, reason, trace, seams)
     else

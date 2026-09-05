@@ -2,7 +2,7 @@ defmodule Fleet.Layout do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  The single authority for the LCARS platform layout — "where things live" on the box.
+  The single authority for the LCARS platform layout — "where things live" on the container.
 
   ## Why these paths are fixed, not configurable
 
@@ -45,7 +45,7 @@ defmodule Fleet.Layout do
   #
   # These are platform paths and they belong HERE rather than in `Fleet.Catalogue`, which owns the
   # layout INSIDE a catalogue. The split is the same one this module already draws for the project
-  # faces: where things sit on the box is one authority, what is inside them is another.
+  # faces: where things sit on the container is one authority, what is inside them is another.
   @platform_root "/opt/lcars"
   @catalogues_dirname "catalogues"
   # The INSTALLED cache. It sits under `/opt/lcars/var` — the named volume that already carries the
@@ -59,7 +59,7 @@ defmodule Fleet.Layout do
   # can sit is settled before the question of who reads it is even asked.
   @installed_catalogues_root "/opt/lcars/var/catalogues"
 
-  # L'ETAT RUNTIME DE LA BOITE — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
+  # L'ETAT RUNTIME DU CONTENEUR — sockets, marqueurs de boot, verrous de convergence. Il est SOUS
   # `/run` et pas sous `@platform_root` pour la meme raison que le cache des catalogues : ce qui MEURT au
   # redemarrage ne doit pas cohabiter avec ce qui EST l'image. `/run` est un tmpfs ; poser cet etat
   # ailleurs le ferait survivre a un boot, et un marqueur qui survit ment sur le boot qu'il decrit.
@@ -305,7 +305,7 @@ defmodule Fleet.Layout do
   A seed is not an installation. What lives here is pushed to the forge as a DEPOSIT at each apply,
   where it becomes `available` like any catalogue a human deposited from their laptop, and it only
   runs once an admin plays `lcars catalogue install` on it. That is the whole demonstration
-  `web-demo` exists for, and it would be a lie if the box ran it merely because the image carried
+  `web-demo` exists for, and it would be a lie if the container ran it merely because the image carried
   the files.
 
   Rewritten by every update, so an operator who edits one loses the edit at the next deploy — and
@@ -323,17 +323,17 @@ defmodule Fleet.Layout do
   `<name>/_catalogue` on the forge. Deleting a directory here uninstalls nothing; the next boot puts
   it back.
 
-  ## Why it is a BOX path and not `~/.lcars/catalogues`
+  ## Why it is a CONTAINER path and not `~/.lcars/catalogues`
 
   Everything else under `state_dir/0` is per-human, which makes that the obvious family. Three
   things make it the wrong one:
 
-  Which catalogues run is a property of the FORGE, and the forge is shared. Two humans on one box
+  Which catalogues run is a property of the FORGE, and the forge is shared. Two humans on one container
   cannot legitimately serve different ones, so a per-human copy is N copies of one fact — and N
   places for it to drift.
 
   Installing is a ROOT act (it reads a 0600 master token and writes the forge). Root dropping
-  material into one human's home has to pick which human, and a box has several.
+  material into one human's home has to pick which human, and a container has several.
 
   Convergence has to run BEFORE the role tokens are minted, so the roster can be derived from the
   installed catalogues rather than held by hand. The humans are enrolled after that, so at the

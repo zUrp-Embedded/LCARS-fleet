@@ -50,7 +50,7 @@ tool_mode? = System.get_env("LCARS_TOOL_EVAL") == "1"
 # Il dit seulement OU vit le materiel des catalogues installes — un fait de lecture dont TOUTE porte
 # `eval` a besoin. Enferme dans le garde, `LCARS_TOOL_EVAL=1` le sautait avec le reste, et un outil
 # ne verrait que le catalogue livre : `lcars project migrate <projet> web` refuserait « web
-# inconnu » sur une boite ou il tourne. Mesure : `installed_names()` rend ["fleet"] sous eval la ou
+# inconnu » sur un conteneur ou il tourne. Mesure : `installed_names()` rend ["fleet"] sous eval la ou
 # le boot en voit deux.
 #
 # UN SEUL REPERTOIRE, et le second n'est pas parti par simplification. `catalogues_shipped_dir/0`
@@ -69,14 +69,14 @@ end
 # du meme nom derivent, et celle qu'on lit n'est jamais celle qu'on a corrigee.
 #
 # `FORGE_PUSH_ACCOUNT` reste surchargeable pour un deploiement qui agit sous une autre identite que
-# celle du systeme ; sans lui, c'est le compte systeme de la boite.
+# celle du systeme ; sans lui, c'est le compte systeme du conteneur.
 #
-# ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LA BOITE ECRIT.
+# ⚠ `FORGE_BOT_LOGIN` EST LE REPLI PARCE QUE C'EST LA SEULE DES DEUX VALEURS QUE LE CONTENEUR ECRIT.
 # `services/human.d/70-human.sh` pose la PAIRE `FORGE_TOKEN_FILE` + `FORGE_BOT_LOGIN` dans `fleet.env`,
 # derivees toutes deux de `$LCARS_SYSTEM_ACCOUNT`. Mais `LCARS_SYSTEM_ACCOUNT` est une variable de
 # PROVISIONNEMENT : elle vit dans `provision-lib.sh`, et rien ne l'exporte dans l'environnement du
 # BEAM. La lire ici, c'est lire un nom qui n'y est jamais et retomber EN SILENCE sur le defaut code
-# en dur — juste sur la boite de reference, faux sur toute boite dont le compte systeme porte un
+# en dur — juste sur le conteneur de reference, faux sur tout conteneur dont le compte systeme porte un
 # autre nom, et muet dans les deux cas.
 forge_push_account =
   System.get_env("FORGE_PUSH_ACCOUNT") || System.get_env("FORGE_BOT_LOGIN") || "system_starfleet"
@@ -143,7 +143,7 @@ end
 #      VERT et TOUS les push meurent au premier essai sur une auth vide — onboarding, completion de
 #      step, merge. Un boot vert et un produit mort.
 #   2. UNE PEREMPTION INFINIE. Un jeton revoque sur la forge resterait en memoire jusqu'au
-#      redemarrage du noeud ; rien dans la boite ne l'apprendrait.
+#      redemarrage du noeud ; rien dans le conteneur ne l'apprendrait.
 #
 # LA PROPRIETE DE SURFACE QUI RENDRAIT UN SECRET EN ENV TOLERABLE N'A PAS D'OBJET ICI, mais elle
 # reste vraie et vaut d'etre sue : rien dans le runtime ne lit l'application env EN BLOC, et la surface MCP
@@ -219,7 +219,7 @@ if config_env() != :test and not tool_mode? do
   #
   # L'uid du siege est un FAIT DE MACHINE, pas un reglage. Il vit donc dans un fichier `root:root`
   # que le garde ne peut pas reecrire, pose par le provisionnement (`64-services` au poste,
-  # l'entrypoint en boite). Le fichier GAGNE sur la variable : sans cette precedence, il suffirait
+  # l'entrypoint en conteneur). Le fichier GAGNE sur la variable : sans cette precedence, il suffirait
   # de reposer la variable pour revenir a l'etat d'avant.
   #
   # `LCARS_SEAT_UID_FILE` est une couture de TEMOIN — elle deplace le CHEMIN, jamais la valeur, donc
@@ -442,12 +442,12 @@ if config_env() != :test and not tool_mode? do
   # ============================================================
   # fleet_cap_profile — cap-profiles catalogue root
   # ============================================================
-  # ── Box-wide ADMIN settings (/etc/lcars/fleet.json, root-owned) ────────────────────────────────
+  # ── Container-wide ADMIN settings (/etc/lcars/fleet.json, root-owned) ────────────────────────────────
   # The GitWand kill-switch (tier-0 deterministic conflict resolution) is the ADMINISTRATOR's call,
   # not the fleet's and not a human worker's: the path is HARDCODED on purpose — an env-named path
   # would pass through the launcher's per-human env, and any worker could point it at their own
   # file. Read once here → frozen for the fleet's lifetime (this file runs once at boot).
-  # Absent file = every default (off) — the state of every box until its admin opts in.
+  # Absent file = every default (off) — the state of every container until its admin opts in.
   # NB: this arms tier 0 ONLY. The chief exception pass has its own flag (`config.exs`,
   # `:pilot_conflict_exception_pass?`) — fleet design, deliberately NOT an admin knob.
   system_settings = Fleet.SystemConfig.read("/etc/lcars/fleet.json")
@@ -518,16 +518,16 @@ if config_env() != :test and not tool_mode? do
   #
   # ⚠ ET UNE DEUXIEME RAISON, DE FORME : deriver le port du bloc par-humain (`base+3`, pose par
   # `bin/fleet`) est faux — le Poller sonde l'ORG, partagee, et ne
-  # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DE LA BOITE : un port
+  # filtre par humain qu'au niveau de l'issue. Un webhook annonce donc un fait DU CONTENEUR : un port
   # par humain demanderait a la forge de notifier N adresses du meme evenement. Le lanceur ne pose
-  # pas ce port ; le defaut de code (8081) est un port de boite, ce qui est l'axe juste.
+  # pas ce port ; le defaut de code (8081) est un port de conteneur, ce qui est l'axe juste.
   #
   # Mesure : aucun code de ce depot ne DECLARE de webhook sur la forge (`POST /hooks` absent), et
   # une forge de banc n'en porte aucun. Le rail n'est branche que d'un bout : le recepteur existe
   # (`Fleet.EventRouter.WebhooksGitea`, demarre sous `LCARS_FLEET_WEBHOOKS`), rien ne l'alimente.
   #
   # SI IL REVIENT UN JOUR, pour une raison qui n'est PAS la latence : une seule URL, un port de
-  # boite, hors des blocs. Pas `base+3`.
+  # conteneur, hors des blocs. Pas `base+3`.
   if Fleet.EnvParse.bool("LCARS_FLEET_WEBHOOKS", System.get_env("LCARS_FLEET_WEBHOOKS"), false) do
     config :lcars_fleet, event_router_start_webhooks: true
 
@@ -766,13 +766,13 @@ if config_env() != :test and not tool_mode? do
   #
   # ⚠ CETTE CLEF N'A PAS DE PREFIXE DE DOMAINE, ET C'EST VOULU. La regle de prefixage existe parce
   # que `http_port` et `start_listener` COLLISIONNENT entre `api` et `observation` : elle protege des
-  # clefs qu'un domaine possede. Celle-ci n'appartient a aucun domaine — c'est un chemin de BOITE,
+  # clefs qu'un domaine possede. Celle-ci n'appartient a aucun domaine — c'est un chemin de CONTENEUR,
   # lu aussi par le rail shell (`provision-forge-charte.sh`, meme variable d'env), et lui donner un
   # proprietaire fictif rendrait ce partage illisible.
   #
   # Les avatars ont eu TROIS exemplaires — la marque, les png de la charte forge, les svg du deck —
   # et sept des neuf roles communs avaient derive entre eux. `assets/` est la source, l'installation
-  # la pose ici, tout le monde lit ici. AUCUN REPLI sur `priv/` : une boite sans ses medias est une
+  # la pose ici, tout le monde lit ici. AUCUN REPLI sur `priv/` : un conteneur sans ses medias est une
   # installation ratee, et un repli servirait une generation perimee.
   config :lcars_fleet,
          :media_root,

@@ -14,7 +14,7 @@ defmodule Fleet.Admiral.Application do
   map names what each child is for.
 
   ⚠ `Shutdown` is one of them, and its absence is not inert: `bin/fleet stop` RPCs
-  `Shutdown.begin` before `:init.stop()`, so a box that disabled it stops WITHOUT draining.
+  `Shutdown.begin` before `:init.stop()`, so a container that disabled it stops WITHOUT draining.
 
   `BootOrchestrator` is NOT a child here: as a mid-boot Task it could
   spawn permanent pods (real claude spend) BEFORE the later domains (pilot/api) are up —

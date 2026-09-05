@@ -2,7 +2,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   @moduledoc """
   Le déclencheur du rail d'outillage — et ce n'est pas un événement, c'est une COMPARAISON.
 
-  DOMAINE, PAS PILOT : converger la boîte est du system-side, pas de la conduite de projet. La
+  DOMAINE, PAS PILOT : converger le conteneur est du system-side, pas de la conduite de projet. La
   plomberie de tick vit dans `PeriodicCheck` ; ce module garde son état, son `do_check/1` et la
   forme de sa réponse.
 
@@ -25,7 +25,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   conteneur. Il vit donc sous `LCARS_TOOLCHAIN_RUN_STATE` — défaut `/run/lcars/toolchain`, un
   **tmpfs** : il meurt avec le conteneur PAR CONSTRUCTION. JAMAIS sur le magasin ni sous un chemin
   qu'un volume pourrait recouvrir : le convergeur défaute son STORE sur `/var/lib/lcars`, et un
-  marqueur « conteneur » posé là survivrait au rebuild — la boîte se dirait à jour sur un /usr nu
+  marqueur « conteneur » posé là survivrait au rebuild — le conteneur se dirait à jour sur un /usr nu
   (`b341f415f`). Après un rebuild le marqueur est mort ⇒ le premier tick reconverge.
 
   ## Ce qu'il n'est pas
@@ -83,7 +83,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   Le SHA appliqué sur ce CONTENEUR, ou `nil` si le convergeur n'est jamais passé depuis son boot.
 
   ⚠ **`nil` ET « à jour » NE SONT PAS LA MÊME CHOSE**, et les confondre est le piège que ce fichier
-  existe pour éviter : une boîte neuve (ou REBUILDÉE — le marqueur meurt avec le conteneur, c'est
+  existe pour éviter : un conteneur neuf (ou REBUILDÉ — le marqueur meurt avec le conteneur, c'est
   voulu) n'a rien appliqué, donc son premier tick DOIT converger même si la branche n'a pas bougé.
   """
   @spec applied_sha() :: String.t() | nil
@@ -197,7 +197,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   # suivant retentera (le verrou est toujours là).
   defp drain_pass(repo, branch, branch_result) do
     # UNE passe paginee, filtree `base=` COTE SERVEUR (`/pulls?state=all&base=`) — et non
-    # `list_pulls/2` : toutes les PR de la boite plus un GET par PR, toutes les 60 s.
+    # `list_pulls/2` : toutes les PR du conteneur plus un GET par PR, toutes les 60 s.
     case forge().list_pulls_for_base(repo, branch, []) do
       {:ok, prs} ->
         Enum.each(prs, &maybe_drain(&1, branch, branch_result))
@@ -288,7 +288,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   end
 
   defp drain_comment(:merged, pr) do
-    "Outillage APPLIQUÉ : la PR ##{pr["number"]} est mergée et la boîte a convergé. " <>
+    "Outillage APPLIQUÉ : la PR ##{pr["number"]} est mergée et le conteneur a convergé. " <>
       "Ce ticket redevient dispatchable."
   end
 
@@ -313,12 +313,12 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   end
 
   # LE SHA N'EST NOTÉ QU'APRÈS UN SUCCÈS, et jamais avant. L'inverse — noter puis appliquer — ferait
-  # d'un convergeur mort en route une boîte qui se croit à jour : le tick suivant verrait « pas
+  # d'un convergeur mort en route un conteneur qui se croit à jour : le tick suivant verrait « pas
   # d'écart » et l'état approuvé resterait non appliqué, en silence, ce que tout ce rail refuse.
   # ⚠ LE MARQUEUR PORTE LE SHA QUE LE SERVICE A APPLIQUÉ, PAS CELUI QU'ON AVAIT LU.
   #
   # Entre notre lecture de la tête et la résolution que le service fait de son côté, la branche a pu
-  # avancer — le rail EXISTE pour que des PR y atterrissent. Noter notre tête ferait croire la boîte
+  # avancer — le rail EXISTE pour que des PR y atterrissent. Noter notre tête ferait croire le conteneur
   # à jour sur un état qu'elle n'a pas appliqué, et le tick suivant ne verrait AUCUN écart : la
   # panne muette exacte que tout le reste de ce module refuse.
   #
@@ -414,7 +414,7 @@ defmodule Fleet.Admiral.ToolchainReconciler do
   end
 
   # UNE FORGE INJOIGNABLE N'EST PAS UN ÉCART. Rendre `:up_to_date` ici ferait qu'une panne réseau
-  # se lise comme « rien à faire » — et sur un rebuild, la boîte resterait sans outillage en
+  # se lise comme « rien à faire » — et sur un rebuild, le conteneur resterait sans outillage en
   # annonçant que tout va bien.
   defp unreachable(reason) do
     Logger.warning(

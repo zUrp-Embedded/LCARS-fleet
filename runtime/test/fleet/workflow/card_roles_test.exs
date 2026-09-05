@@ -134,9 +134,9 @@ defmodule Fleet.Workflow.CardRolesTest do
     assert_raise RuntimeError, ~r/ma-carte -> mon-role/, fn -> CardRoles.verify!(root) end
   end
 
-  test "verify!/1 passe sur le catalogue REEL — un faux positif empecherait la boite de booter" do
+  test "verify!/1 passe sur le catalogue REEL — un faux positif tuerait le boot du conteneur" do
     # Le controle est joue au boot sur `installed_roots/0`. Ce temoin le joue sur le meme objet : si
-    # la lecture se durcissait au point de refuser le catalogue livre, la boite ne demarrerait plus.
+    # la lecture se durcissait au point de refuser le catalogue livre, le conteneur ne demarrerait plus.
     for root <- Fleet.Catalogue.installed_roots() do
       assert :ok = CardRoles.verify!(root)
     end

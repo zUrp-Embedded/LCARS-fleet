@@ -25,7 +25,7 @@ defmodule Fleet.MCP do
       Fleet.SchemaCache,
       Fleet.PeriodicCheck,
       Fleet.Grace,
-      # LA FONDATION QUI SAIT CE QUE CETTE BOITE SERT (`deps: []`, donc aucun cycle possible). Le
+      # LA FONDATION QUI SAIT CE QUE CE CONTENEUR SERT (`deps: []`, donc aucun cycle possible). Le
       # guichet de cadrage presente les CARTES (`Fleet.Workflow`, plus bas) et les CATALOGUES qui
       # les portent : deux questions, une autorite chacune.
       #

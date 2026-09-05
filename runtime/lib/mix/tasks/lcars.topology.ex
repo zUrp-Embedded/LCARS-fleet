@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Lcars.Topology do
   @layers %{
     "Fleet.Slug" => "foundation",
     "Fleet.EnvParse" => "foundation",
-    # A1 — box-wide admin settings reader (/etc/lcars/fleet.json), pure like its
+    # A1 — container-wide admin settings reader (/etc/lcars/fleet.json), pure like its
     # neighbour EnvParse: deps [], read once by runtime.exs at boot.
     "Fleet.SystemConfig" => "foundation",
     "Fleet.GitRef" => "foundation",

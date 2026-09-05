@@ -10,9 +10,9 @@ defmodule Fleet.Credentials.ForgeAuth do
 
   @git_no_prompt {"GIT_TERMINAL_PROMPT", "0"}
 
-  # ⚠ FAIL-CLOSED, ET DISTINCT D'UNE CONFIGURATION ABSENTE. `nil` en config veut dire « cette boite
+  # ⚠ FAIL-CLOSED, ET DISTINCT D'UNE CONFIGURATION ABSENTE. `nil` en config veut dire « ce conteneur
   # ne pousse pas », et c'est legitime (un banc, un mode outil). Un compte configure dont le service
-  # ne rend pas le jeton est autre chose : la boite CROIT pouvoir pousser et ne le peut pas. Les
+  # ne rend pas le jeton est autre chose : le conteneur CROIT pouvoir pousser et ne le peut pas. Les
   # confondre rendrait un `git` sans auth, dont l'echec accuse git.
   defp resolve(prefix, account) do
     case Fleet.Credentials.Authority.token(account) do
@@ -30,14 +30,14 @@ defmodule Fleet.Credentials.ForgeAuth do
   end
 
   @doc """
-  Le compte de forge SOUS LEQUEL CETTE BOITE AGIT, ou `nil` si elle n'en a pas.
+  Le compte de forge SOUS LEQUEL CE CONTENEUR AGIT, ou `nil` s'il n'en a pas.
 
   Il vit ici et pas dans chaque appelant parce que deux gestes le demandent — `git push` par
   `git_env/0`, et l'outil de POD `project_publish`, qui doit materialiser un jeton pour un rail en
   shell. Deux facons de trouver « le compte du systeme » divergent, et celle qu'on lit n'est jamais
   celle qu'on a corrigee.
 
-  `nil` est un etat LEGITIME : une boite en mode outil, un banc sans forge. L'appelant en fait ce
+  `nil` est un etat LEGITIME : un conteneur en mode outil, un banc sans forge. L'appelant en fait ce
   qu'il veut ; ce module ne devine pas de nom par defaut.
   """
   @spec account() :: String.t() | nil
@@ -132,7 +132,7 @@ defmodule Fleet.Credentials.ForgeAuth do
     #
     # ⚠ ET CE `case` ETAIT EXHAUSTIF SUR UNE SEULE CAUSE. Ajouter la seconde sans l'ajouter ici
     # aurait leve un `CaseClauseError` — un crash a la place d'un echec nomme, sur le chemin exact
-    # ou la boite vient de perdre son identite de forge.
+    # ou le conteneur vient de perdre son identite de forge.
     case git_env_result() do
       {:ok, env} ->
         env

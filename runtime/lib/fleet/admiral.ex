@@ -22,13 +22,13 @@ defmodule Fleet.Admiral do
     exports: [Shutdown]
 
   @moduledoc """
-  Le domaine SYSADMIN de la boîte, côté système : audit, MCP health, boot orchestration,
+  Le domaine SYSADMIN du conteneur, côté système : audit, MCP health, boot orchestration,
   quiesce + drain, et le rail d'outillage. Il porte le nom de sa FONCTION et non celui d'un rôle
   ([BL-6-103]) : un domaine nommé d'après un rôle suit le sens de ce rôle quand il bouge, alors même
   qu'il ne le référence pas une seule fois.
 
   **No pod, no inference, no automatic ACTION in this module** — the system detects, logs and
-  tickets (`error_system`, the admiral inbox); a human treats, off-box.
+  tickets (`error_system`, the admiral inbox); a human treats, outside the container.
   What an incident deserves is declared in `events.yaml` (`gate: immediate | recurrence`).
 
   ## Sub-modules

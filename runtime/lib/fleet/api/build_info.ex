@@ -98,7 +98,7 @@ defmodule Fleet.API.BuildInfo do
   # tell whether it is dirty; an env var carries only what someone chose to pass. But a container
   # build stage has NO `.git` (deliberately: a worktree pointer is dead once the context is copied),
   # so git ALONE makes every image report `sha: "unknown"` — `fleet status` then says
-  # "build unknown ref= (source=release)" on a box where the build is perfectly identified.
+  # "build unknown ref= (source=release)" on a container where the build is perfectly identified.
   #
   # The env fallback is NOT a second source of truth competing with the first: it is what the build
   # passes when the first is unavailable BY CONSTRUCTION. `dirty` stays false there, because a build
