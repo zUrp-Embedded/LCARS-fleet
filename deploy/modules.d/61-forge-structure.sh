@@ -122,7 +122,7 @@ apply() {
   local m
   for m in instance .; do
     TF_CLI_CONFIG_FILE="${LCARS_TOFU_DIR:-/opt/lcars/tofu}/tofurc" \
-      run_quiet env -C "$recipe/$m" tofu init -input=false -no-color \
+      run_quiet env -C "$recipe/$m" "$TOFU_BIN" init -input=false -no-color \
       || { p_fail "recette non initialisable ($m) — le miroir de providers couvre-t-il cette recette ? (46-tofu)"; rm -rf "$recipe" "$enroll"; verdict_apply; }
   done
 

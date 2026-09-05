@@ -35,8 +35,8 @@ setup() {
 {
   printf 'ARGS %s\n' "$*"
   printf 'CHANNEL %s\n' "$(cat "${LCARS_CHANNEL_FILE:-/nonexistent}" 2>/dev/null || echo ABSENT)"
-  printf 'ENV FORGE_BASE_URL=%s LCARS_BUILTIN_HUMAN=%s LCARS_ALLOW_ANY_HOST=%s LCARS_SYSADMIN_UID=%s PROV_FORGE_MONTEE=%s\n' \
-    "${FORGE_BASE_URL:-}" "${LCARS_BUILTIN_HUMAN:-}" "${LCARS_ALLOW_ANY_HOST:-}" "${LCARS_SYSADMIN_UID:-}" "${PROV_FORGE_MONTEE:-}"
+  printf 'ENV FORGE_BASE_URL=%s LCARS_BUILTIN_HUMAN=%s LCARS_ALLOW_ANY_HOST=%s LCARS_SYSADMIN_UID=%s PROV_FORGE_MONTEE=%s PROV_DECK_PORT=%s PROV_FORGE_HOST_PORT=%s PROV_EVIL=%s\n' \
+    "${FORGE_BASE_URL:-}" "${LCARS_BUILTIN_HUMAN:-}" "${LCARS_ALLOW_ANY_HOST:-}" "${LCARS_SYSADMIN_UID:-}" "${PROV_FORGE_MONTEE:-}" "${PROV_DECK_PORT:-}" "${PROV_FORGE_HOST_PORT:-}" "${PROV_EVIL:-}"
 } >> "$TRACE"
 exit "${FAKE_PROVISION_RC:-0}"
 DBL
@@ -507,4 +507,24 @@ GE
   script lcars-forge/prerm remove
   [ "$status" -eq 0 ]; [[ "$output" == *"VOLUMES restent"* ]]
   [ ! -s "$TRACE" ]
+}
+
+@test "postinst : /usr/local/bin entre dans le PATH (apt pose DPkg::Path sans lui — tofu rc 127 au banc 2004)" {
+  local s; for s in lcars lcars-workstation lcars-forge lcars-bench; do
+    grep -qE '^export PATH="/usr/local/sbin:/usr/local/bin:\$PATH"' "$PKG/$s/postinst" || { echo "$s/postinst sans le prefixe"; return 1; }
+  done
+}
+
+@test "postinst : /etc/lcars/provision.conf est LU — clefs PROV_* exportees vers provision, le reste ignore, une valeur dangereuse ignoree" {
+  export LCARS_PROVISION_CONF="$T/etc/lcars/provision.conf"; mkdir -p "$(dirname "$LCARS_PROVISION_CONF")"
+  printf 'PROV_DECK_PORT=20990\nFORGE_BASE_URL=http://x\nPROV_EVIL=$(id)\nPROV_FORGE_HOST_PORT=21010\n' > "$LCARS_PROVISION_CONF"
+  script lcars/postinst configure
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
+  trace_env | grep -q 'PROV_DECK_PORT=20990 '
+  trace_env | grep -q 'PROV_FORGE_HOST_PORT=21010 '
+  trace_env | grep -q 'PROV_EVIL=$'   # la valeur dangereuse n'est PAS entree : vide
+  # un fichier absent : rien ne casse
+  rm -f "$LCARS_PROVISION_CONF"; : > "$TRACE"
+  script lcars/postinst configure
+  [ "$status" -eq 0 ] || { echo "$output" >&2; return 1; }
 }

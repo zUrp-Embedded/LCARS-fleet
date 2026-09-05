@@ -19,6 +19,23 @@
 # forge introuvable, module par module, ce qui est le meme refus en moins lisible.
 set -euo pipefail
 
+# ⚠ SOUS APT, LE PATH DES MAINTAINER SCRIPTS EST `DPkg::Path` = /usr/sbin:/usr/bin:/sbin:/bin — SANS
+# /usr/local/bin. Mesure 2004 (2026-09-05) : `tofu init` rc 127 dans le postinst alors que
+# /usr/local/bin/tofu venait d'etre pose par lcars-tofu. Le provisionnement nomme ses outils par leur
+# chemin (TOFU_BIN, LCARS_CLI…) ; ce prefixe est la ceinture pour ce qu'il appelle encore par le nom.
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+# LA CONF DE L'ADMINISTRATEUR : un paquet ne pose pas de question, il lit un fichier — /etc/lcars/
+# provision.conf, `NOM=valeur` par ligne, jamais pose par un paquet, seules les clefs PROV_* entrent
+# (le port du deck sur un banc dont le reseau est partage, le port de la forge du poste…).
+PROVISION_CONF="${LCARS_PROVISION_CONF:-/etc/lcars/provision.conf}"
+if [[ -r "$PROVISION_CONF" ]]; then
+  while IFS= read -r _l; do
+    [[ "$_l" =~ ^(PROV_[A-Z0-9_]+)=([[:alnum:][:punct:]]*)$ ]] || continue
+    [[ "${BASH_REMATCH[2]}" == *[\`\$\;\|\&]* ]] && continue
+    export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+  done < "$PROVISION_CONF"
+fi
+
 say() { echo "lcars-workstation/postinst: $*" >&2; }
 PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
 LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
