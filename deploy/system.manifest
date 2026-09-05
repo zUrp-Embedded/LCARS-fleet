@@ -161,6 +161,14 @@ anchor    /etc/systemd/system/lcars-privileged.service 0644  root:root          
 anchor    /etc/lcars/host-consent                      0644  root:root           linux
 anchor    /etc/lcars/services.env                      0640  root:fleet          wsl+linux
 anchor    /etc/lcars/seat.uid                          0644  root:root           any
+# ⚠ LE CANAL : QUI A POSE LE PRODUIT (lot 2 du chantier release, 2026-09-05). Une ligne — `source`,
+# `kit` ou `deb`. Ecrit par `60-deploy` apres la pose de la release (source ou kit, selon que
+# `.source-revision` etait a la racine du kit), ou par le `postinst` du paquet `lcars` (deb) ; lu par
+# `prov_channel` (lib), rendu en fait `channel=` par `00-preflight`, et c'est sur lui que la porte
+# REFUSE de poser un canal sur un autre. Sous `deb`, 60/62/44/46 mesurent et ne posent rien.
+# Il n'y a pas ici de distinction remove/purge : `provision uninstall` le retire comme toute ancre
+# (et `/etc/lcars` avec) ; sous `deb`, c'est le `postrm` du paquet qui fait la difference.
+anchor    /etc/lcars/channel                           0644  root:root           any
 anchor    /etc/lcars/deck-oidc.json                    0640  root:lcars-system   wsl+linux
 # ⚠ POSEE PAR L'IMAGE (stage runtime, `install -m 0755 … /usr/local/bin/tofu`) et RELUE au build par
 # `46-tofu` sous `verify` : `any`, et c'etait `wsl+linux` (lot 15). `image_layout.bats` tient la

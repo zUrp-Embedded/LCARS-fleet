@@ -1328,6 +1328,127 @@ prov_delivery() { # prov_delivery [racine] -> `binary` | `source`
 # Le raccourci que les modules lisent : 0 quand la cible n'a RIEN a batir.
 prov_delivery_is_binary() { [[ "$(prov_delivery "$@")" == "binary" ]]; }
 
+# ─── LE CANAL — QUI A POSE LE PRODUIT : `source`, `kit` ou `deb` ─────────────────────────────────
+#
+# `$PROV_SOURCE_STAMP` dit QUELLE revision est posee ; ce fichier dit QUI l'a posee. Une ligne :
+#   source  `60-deploy` a bati la release depuis un checkout
+#   kit     `60-deploy` a reutilise la release d'un paquet (`.source-revision` a la racine du kit)
+#   deb     le `postinst` du paquet `lcars` l'a ecrit AVANT d'appeler `provision apply`
+# et `aucun` quand le fichier n'existe pas : la machine n'a jamais ete posee.
+#
+# ⚠ SOUS `deb`, LE RAIL NE POSE PLUS LE PRODUIT — dpkg le possede. `60-deploy` (la release et les
+# liens du PATH), `62-runtime-helpers` (les arbres a plat sous /opt/lcars), `44-media` (la doc) et
+# `46-tofu` (le binaire et le miroir) MESURENT et ne posent rien : un `apply` sous `deb` se reduit a
+# un `check`, et le drift se converge par `apt install --reinstall`, pas par ce rail. Les autres
+# modules convergent des comptes, des groupes, des unites, une forge — pas des fichiers du produit —
+# et ne lisent pas le canal.
+#
+# ⚠ ET UN CANAL SUR UN AUTRE EST UN REFUS, JAMAIS UNE CONVERSION. Poser un kit sur une machine
+# installee par paquet laisserait deux proprietaires d'un meme arbre ; la porte et `workstation`
+# lisent le fait `channel=` du preflight et refusent en nommant le geste (`provision uninstall`
+# d'abord, ou une mise a jour par le meme canal). Le meme canal est une mise a jour : on continue.
+#
+# LE CONTRAT AVEC LE PAQUET (lot 3) tient en trois faits, qui ne bougent pas : le nom du fichier
+# `/etc/lcars/channel`, la valeur `deb`, et le fait que sous `deb` 60/62/44/46 ne posent pas.
+PROV_CHANNEL_FILE_CANON=/etc/lcars/channel   # le chemin que deploy/system.manifest declare (anchor)
+PROV_CHANNEL_FILE="${LCARS_CHANNEL_FILE:-$PROV_CHANNEL_FILE_CANON}"
+
+# prov_channel -> stdout : `source` | `kit` | `deb` | `aucun`, et POSE `PROV_CHANNEL` a la meme valeur.
+# Une valeur hors des trois est un `p_fail` NOMME : rien sur stdout, `PROV_CHANNEL` vide, rc 1.
+# ⚠ DEUX FORMES D'APPEL, ET ELLES NE COMPTENT PAS PAREIL. `c="$(prov_channel)"` rend la valeur mais
+# ouvre un sous-shell : le `p_fail` d'un canal illisible s'imprime et NE COMPTE PAS dans le verdict
+# de l'appelant. L'appel NU (`prov_channel >/dev/null`, puis `$PROV_CHANNEL`) compte — c'est la forme
+# des modules, tenue par `prov_channel_or_verdict`. Meme piege que `advertise_addr`, meme raison.
+prov_channel() {
+  local v
+  PROV_CHANNEL=""
+  [[ -e "$PROV_CHANNEL_FILE" ]] || { PROV_CHANNEL=aucun; printf 'aucun\n'; return 0; }
+  v="$(head -n1 "$PROV_CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+  case "$v" in
+    source|kit|deb) PROV_CHANNEL="$v"; printf '%s\n' "$v"; return 0 ;;
+  esac
+  p_fail "canal d'installation illisible : $PROV_CHANNEL_FILE porte « $v », attendu source, kit ou deb — corrige-le à la main, ou retire-le si cette machine n'a jamais été posée"
+  return 1
+}
+
+# prov_channel_write <source|kit|deb> — atomique, au mode et au proprietaire que la TABLE declare
+# (0644 root:root), par le SEUL poseur du produit sur ce rail (60-deploy). Le paquet, lui, ecrit
+# `deb` dans son postinst : deux ecrivains, une valeur chacun, jamais la meme.
+prov_channel_write() {
+  case "${1:-}" in
+    source|kit|deb) ;;
+    *) p_fail "prov_channel_write : « ${1:-} » n'est pas un canal (source|kit|deb)"; return 1 ;;
+  esac
+  local mode owner
+  mode="$(prov_manifest_mode "$PROV_CHANNEL_FILE_CANON")"; : "${mode:=0644}"
+  # Couture de decor sur le proprietaire, comme `LCARS_HELPERS_OWNER` : un temoin ne chown pas vers root.
+  owner="${LCARS_CHANNEL_OWNER:-$(prov_manifest_owner "$PROV_CHANNEL_FILE_CANON")}"; : "${owner:=root:root}"
+  write_atomic "$PROV_CHANNEL_FILE" "$mode" "$owner" <<<"$1"
+}
+
+# prov_channel_here [racine] -> le canal que CET arbre poserait s'il posait : `kit` si c'est un paquet
+# (`prov_delivery` binaire), `source` sinon. UNE decision, lue par `60-deploy` (qui l'ecrit apres la
+# pose), par `00-preflight` (fait `channel_tree=`) et par `workstation` (le canal voulu sans `--from`).
+# `deb` n'en sort jamais : seul le postinst du paquet l'ecrit.
+prov_channel_here() { if prov_delivery_is_binary "$@"; then printf 'kit\n'; else printf 'source\n'; fi; }
+
+# prov_channel_or_verdict <check|apply> — LA lecture du canal d'un module qui pose le produit : une
+# seule, NUE, en tete du dispatch. Un canal illisible rend le verdict ROUGE du verbe avant tout
+# geste : on ne sait pas qui possede l'arbre, donc on n'y touche pas — « source par defaut » serait
+# poser un checkout par-dessus un paquet.
+prov_channel_or_verdict() {
+  prov_channel >/dev/null && return 0
+  if [[ "${1:-}" == "apply" ]]; then verdict_apply; else verdict_check; fi
+}
+
+# Le predicat que les modules branchent : 0 si c'est DPKG qui possede le produit. Il lit ce que la
+# lecture unique a pose — sans elle, `set -u` le dit (un module qui branche sans avoir lu).
+poseur_is_dpkg() { [[ "$PROV_CHANNEL" == "deb" ]]; }
+
+# ─── CE QUE DPKG DIT DE CE QU'IL POSSEDE ────────────────────────────────────────────────────────
+# Le nom du paquet qui porte le produit — celui que le lot 3 bâtit.
+PROV_DEB_PACKAGE="${LCARS_DEB_PACKAGE:-lcars}"
+
+# prov_dpkg_verify <paquet> [racine…] -> stdout : les chemins que `dpkg -V` declare alteres ou
+# manquants (sous l'une des racines seulement, si donnees), un par ligne.
+#   rc 0  rien a redire · 1  des lignes (drift) · 2  dpkg absent d'ici · 3  paquet inconnu de dpkg
+# ⚠ LE RC DE `dpkg -V` NE DIT RIEN : mesure sur cette machine, un conffile modifie rend une ligne ET
+# rc 0. Ce sont les LIGNES qui parlent, et le chemin en est la derniere colonne (« ??5?????? c
+# /etc/x » ou « missing   /opt/x »).
+prov_dpkg_verify() {
+  local pkg="$1"; shift
+  local roots st out
+  roots="$(printf '%s\n' "$@")"   # sans racine : une ligne vide, donc « tout »
+  command -v dpkg >/dev/null 2>&1 || return 2
+  st="$(dpkg -s "$pkg" 2>/dev/null | sed -n 's/^Status: //p' || true)"
+  [[ "$st" == *" installed" ]] || return 3
+  out="$(dpkg -V "$pkg" 2>/dev/null \
+         | awk -v roots="$roots" 'BEGIN { n = split(roots, r, "\n") }
+              { p = $NF; if (roots == "") { print p; next }
+                for (i = 1; i <= n; i++) if (r[i] != "" && (p == r[i] || index(p, r[i] "/") == 1)) { print p; next } }' \
+         || true)"
+  [[ -n "$out" ]] || return 0
+  printf '%s\n' "$out"
+  return 1
+}
+
+# prov_dpkg_report <perimetre> [racine…] — LE verdict de dpkg sur ce que le module relit, rendu une
+# fois pour 60 et 62 : OK, DRIFT (« reinstalle le paquet »), WARN sans dpkg, DRIFT paquet inconnu.
+# `<perimetre>` est la phrase qui nomme ce qu'on a mesure (« sous /opt/lcars/runtime »). Rend 0 :
+# une fonction qui RAPPORTE ne renverse pas le verdict qu'elle rapporte (meme regle que p_ok).
+prov_dpkg_report() {
+  local ou="$1"; shift
+  local alt rc=0
+  alt="$(prov_dpkg_verify "$PROV_DEB_PACKAGE" "$@")" || rc=$?
+  case "$rc" in
+    0) p_ok "dpkg -V $PROV_DEB_PACKAGE : rien à redire $ou — c'est bien ce que le paquet a posé" ;;
+    1) p_drift "dpkg -V $PROV_DEB_PACKAGE : $(grep -c . <<<"$alt") fichier(s) altéré(s) ou manquant(s) $ou (premier : ${alt%%$'\n'*}) — réinstalle le paquet : apt install --reinstall $PROV_DEB_PACKAGE" ;;
+    2) p_warn "canal deb, mais dpkg est absent d'ici — rien ne peut vérifier $ou contre le paquet" ;;
+    *) p_drift "canal deb, mais le paquet $PROV_DEB_PACKAGE est inconnu de dpkg — apt install $PROV_DEB_PACKAGE, ou retire $PROV_CHANNEL_FILE si cette machine n'a pas été posée par un paquet" ;;
+  esac
+  return 0
+}
+
 # `A est-il un ANCÊTRE de B ?` — donc « la source est-elle EN RETARD sur ce qui est déjà posé ? ».
 # Rend 0 (oui, en retard), 1 (non) ou 2 (impossible à dire : pas de git, ou l'une des deux révisions
 # est inconnue de cet arbre). Le troisième cas EXISTE et compte : un clone re-cloné ne connaît pas

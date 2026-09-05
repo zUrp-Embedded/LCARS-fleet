@@ -101,6 +101,15 @@ PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et dél�
 vers `provision apply`, `--container` vers `container`, `--bench` vers le fournisseur de banc. Ce qui suit
 `--` part verbatim au délégué de la branche.
 
+**Le canal** (lot 2 du chantier release) : `/etc/lcars/channel` dit QUI a posé le produit — `source`
+(un checkout, par `60-deploy`), `kit` (un paquet `pack.sh`, par `60-deploy`), `deb` (le paquet, par
+son postinst). `deploy/workstation up --from <kit.tar.gz>` vérifie le `.sha256` s'il est à côté (le
+dit sinon), détare sous l'humain dans `~/.lcars/kits/<nom>/` et joue `provision apply` DEPUIS le
+kit ; `--from <x.deb> [--from <y.deb>…]` est `sudo apt install ./x.deb …`, le seul sudo ; sans
+`--from`, ce checkout. `00-preflight` rend le fait `channel=`, et la porte comme `workstation`
+REFUSENT de poser un canal sur un autre, en nommant le geste (`provision uninstall` d'abord, ou une
+mise à jour par le même canal). Sous `deb`, 60/62/44/46 mesurent (`dpkg -V`) et ne posent rien.
+
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
 vérification d'autorité — le remote, normalisé en `host/owner/repo`, doit être **exactement égal** à
 `PROV_EXPECTED_REPO` (déclaré, jamais deviné ; sans lui, aucun pull). ⚠ **L'hôte fait partie de

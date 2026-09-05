@@ -37,6 +37,9 @@ setup() {
   export PROVISION_LIB="$RACINE/deploy/lib/provision-lib.sh"
 
   STAMP="$RACINE/.source-revision"
+  # Le CANAL est a nous, meme quand on ne le lit pas : un temoin qui joue un module lecteur du
+  # canal ne lit jamais celui de la machine (MUR I21).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"
   export PROV_ROOT="$BATS_TEST_TMPDIR/opt-lcars"
   mkdir -p "$PROV_ROOT"
 
@@ -291,4 +294,43 @@ toolchain() { run bash "$DEPLOY/modules.d/15-toolchain.sh" "$1"; }
   grep -qE 'lib/lcars_fleet-\*' <<<"$body"
   grep -qE 'eq 1 .*die' <<<"$body" || grep -qE '"\$\{#_libs\[@\]\}" -eq 1' <<<"$body"
   grep -qE '"\$_built" == "\$SHA"' <<<"$body"
+}
+
+# ─── LE CANAL — QUI A POSE (lot 2 du chantier release, 2026-09-05) ──────────────────────────────
+#
+# `prov_delivery` dit la FORME de ce qu'on pose (binary/source) ; `prov_channel` dit QUI a pose
+# (source/kit/deb). Les deux se rejoignent en un point, et un seul : `60-deploy` ecrit `kit` quand
+# la livraison etait binaire et `source` sinon — et il ne l'ecrit JAMAIS sous `deb`, ou c'est le
+# postinst du paquet qui parle et ou ce module ne pose rien.
+
+canal_60() { # canal_60 <code> — 60-deploy source SANS son dispatch, sous la racine du decor
+  local m="$BATS_TEST_TMPDIR/60.sh"
+  sed '/^case "${1:?usage/,$d' "$DEPLOY/modules.d/60-deploy.sh" > "$m"
+  run env LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel" LCARS_CHANNEL_OWNER="$(id -un):$(id -gn)" \
+      PROVISION_MODULE=60-deploy XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR" \
+      bash -c "set -euo pipefail; mkdir -p '$RACINE/runtime/etc'; . '$m' >/dev/null 2>&1; $1"
+}
+
+@test "CANAL : 60-deploy ecrit KIT d'une livraison binaire, SOURCE d'un checkout — le MEME discriminant, pas un second" {
+  paquet;   canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "kit" ]
+  checkout; canal_60 'poser_canal'; [ "$status" -eq 0 ]; [ "$(cat "$BATS_TEST_TMPDIR/channel")" = "source" ]
+  # et la decision vit dans la LIB (prov_channel_here : binaire -> kit, sinon source), lue aussi par
+  # le preflight et workstation — jamais le tampon par son nom (meme regle que 15/16)
+  local corps; corps="$(sed -n '/^poser_canal()/,/^}/p' "$DEPLOY/modules.d/60-deploy.sh")"
+  grep -q 'prov_channel_write "$(prov_channel_here)"' <<<"$corps"
+  grep -vE '^\s*#' <<<"$corps" | refute_out 'source-revision|prov_delivery'
+  paquet;   run lib 'prov_channel_here'; [ "$output" = kit ]
+  checkout; run lib 'prov_channel_here'; [ "$output" = source ]
+}
+
+@test "CANAL : sous deb, 60-deploy n'ecrit JAMAIS le canal — apply est branche sur check avant d'atteindre poser_canal" {
+  # Le seul ecrivain du canal sur ce rail est `poser_canal`, et il ne vit que dans `apply()` ; sous
+  # `deb` le dispatch ne joue pas `apply`. Deux faits, mesures separement.
+  local mod="$DEPLOY/modules.d/60-deploy.sh" code
+  code="$(grep -vE '^\s*#' "$mod")"
+  [ "$(grep -c 'prov_channel_write' <<<"$code")" -eq 1 ]                 # dans poser_canal seul
+  sed -n '/^poser_canal()/,/^}/p' "$mod" | grep -q 'prov_channel_write'
+  sed -n '/^check()/,/^}/p' "$mod" | grep -vE '^\s*#' | refute_out 'poser_canal|prov_channel_write'
+  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$mod" | grep -vE '^\s*#')"
+  grep -q 'if poseur_is_dpkg; then check --dpkg' <<<"$disp"
 }

@@ -54,6 +54,8 @@ setup() {
   # nommage, « tofu absent » prend la branche « present, verifie la version » et repond sur l'hote.
   # Quatrieme occurrence de ce piege en deux jours, apres `/etc/lcars/host-consent` et `ttyd`.
   export LCARS_TOFU_BIN="$BATS_TEST_TMPDIR/bin/tofu"
+  # Le CANAL est a nous : absent = « aucun », le module pose comme aujourd'hui (voir runtime_helpers.bats).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
   export LCARS_TOFU_DIR="$BATS_TEST_TMPDIR/opt/lcars/tofu"
   export LCARS_TOFU_OWNER
   LCARS_TOFU_OWNER="$(id -un):$(id -gn)"
@@ -263,4 +265,26 @@ stub_tofu() { # une doublure a la version epinglee : aucun reseau, et `init` rep
   [[ "$output" == *"miroir de providers complet"* ]]
   mod check
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# ─── LE CANAL : SOUS `deb`, TOFU EST AU PAQUET lcars-tofu (lot 2, 2026-09-05) ───────────────────
+
+@test "CANAL deb : apply ne telecharge NI ne pose tofu — il MESURE : l'absence est un DRIFT, et curl n'est jamais appele" {
+  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"
+  local b="$BATS_TEST_TMPDIR/curlbin"; mkdir -p "$b"
+  printf '#!/usr/bin/env bash\ntouch "%s"\nexit 1\n' "$BATS_TEST_TMPDIR/CURL-APPELE" > "$b/curl"; chmod 0755 "$b/curl"
+  PATH="$b:$PATH" mod apply
+  [ "$status" -eq 1 ]                                   # le verdict de CHECK : drift, rien n'est pose
+  [ ! -e "$LCARS_TOFU_BIN" ] && [ ! -d "$LCARS_TOFU_DIR" ]
+  [ ! -e "$BATS_TEST_TMPDIR/CURL-APPELE" ] || { echo "curl a ete appele sous deb"; return 1; }
+  [[ "$output" == *"$LCARS_TOFU_BIN absent"* ]]
+  [[ "$output" == *"miroir de providers absent"* ]]
+  refute_out 'POSÉ' <<<"$output"
+}
+
+@test "CANAL : le dispatch de 46 lit le canal UNE fois et branche apply sur check sous deb" {
+  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$MOD" | grep -vE '^\s*#')"
+  [ "$(grep -c 'prov_channel_or_verdict "\$1"' <<<"$disp")" -eq 1 ]
+  grep -q 'if poseur_is_dpkg; then check; elif \[\[ "\$1" == "apply" \]\]; then apply; else check; fi' <<<"$disp"
+  sed '/^case "${1:?usage/,$d' "$MOD" | grep -vE '^\s*#' | refute_out 'prov_channel|poseur_is_dpkg|PROV_CHANNEL'
 }

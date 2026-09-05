@@ -191,6 +191,53 @@ I3_AWK='
   [ "$bad" -eq 0 ]
 }
 
+# ─── MUR I21 : UN TEMOIN QUI EXECUTE UN LECTEUR DU CANAL POSE LCARS_CHANNEL_FILE ─────────────
+#
+# `prov_channel` lit `/etc/lcars/channel` en tete du dispatch de 44, 46, 60 et 62 (lot 2 du chantier
+# release), et ce fichier existe sur toute machine posee. Un temoin sans decor y lit le canal REEL :
+# sur un poste installe par paquet, `apply` ne poserait plus rien, et rien ne dirait pourquoi — le
+# meme defaut que le siege (MUR I9), sur un autre fichier. Perimetre : le CODE des temoins qui
+# EXECUTENT un de ces quatre modules — `bash …/<module>.sh` en clair, ou `bash "$VAR"` quand `VAR=`
+# lui a ete assigne au niveau du fichier (un `local` ne compte pas : `doctor_honnete` assigne `mod`
+# a 62 pour le LIRE et joue `bash "$mod"` sur un autre module deux tests plus loin).
+I21_MODS='(44-media|46-tofu|60-deploy|62-runtime-helpers)\.sh'
+@test "MUR I21: un temoin qui EXECUTE un module lecteur du canal (44, 46, 60, 62) pose LCARS_CHANNEL_FILE — il ne lit jamais le canal de la machine" {
+  local f bad=0 vus=0 c execute v
+  while IFS= read -r f; do
+    [[ "$f" == */idiom_walls.bats ]] && continue
+    c="$(grep -vE '^[[:space:]]*#' "$f")"
+    grep -qE "$I21_MODS" <<<"$c" || continue
+    execute=0
+    grep -qE "bash \"?\\\$?[^\" ]*$I21_MODS\"?( |\$)" <<<"$c" && execute=1
+    for v in $(grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<"$c" | grep -vE '(^|[[:space:]{;])local [A-Za-z_]+=' \
+                 | sed -E "s/.*(^|[[:space:]{;])(export )?([A-Za-z_]+)=[^;]*$I21_MODS.*/\3/" | sort -u); do
+      grep -qE "bash \"?\\\$$v\"?( |\$)" <<<"$c" && execute=1
+    done
+    [ "$execute" -eq 1 ] || continue
+    vus=$((vus + 1))
+    grep -qE '^[[:space:]]*export LCARS_CHANNEL_FILE=' <<<"$c" \
+      || { echo "${f#"$DEPLOY"/} execute un lecteur du canal sans poser LCARS_CHANNEL_FILE"; bad=1; }
+  done < <(find "$DEPLOY/tests" -name '*.bats' | sort)
+  [ "$bad" -eq 0 ]
+  # GARDE D INSTRUMENT : les quatre temoins de module et deploy_manifest au moins
+  [ "$vus" -ge 5 ] || { echo "instrument casse : $vus temoin(s) vu(s), 5 au moins attendus" >&2; return 1; }
+  # le mur mord : un temoin qui execute 60 par sa copie, ou par une variable du fichier, est VU
+  local ech="$BATS_TEST_TMPDIR/ech.bats" seen
+  printf '%s\n' 'MOD="$X/modules.d/62-runtime-helpers.sh"' 'run bash "$MOD" check' > "$ech"
+  seen="$(grep -vE '^[[:space:]]*#' "$ech")"
+  v="$(grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<"$seen" | sed -E "s/.*(^|[[:space:]{;])(export )?([A-Za-z_]+)=[^;]*$I21_MODS.*/\3/")"
+  [ "$v" = MOD ] && grep -qE "bash \"?\\\$$v\"?( |\$)" <<<"$seen"
+  grep -qE "bash \"?\\\$?[^\" ]*$I21_MODS\"?( |\$)" <<<'run bash "$BATS_TEST_TMPDIR/60-deploy.sh" check'
+  # et ne mord pas sur un LECTEUR : `local mod=` puis un grep
+  grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<'  local mod="$DEPLOY/modules.d/62-runtime-helpers.sh"' \
+    | refute_out '(^|[[:space:]{;])local [A-Za-z_]+=' || true
+  grep -qE '(^|[[:space:]{;])local [A-Za-z_]+=' <<<'  local mod="$DEPLOY/modules.d/62-runtime-helpers.sh"'
+  # et une assignation sur la ligne d'un `setup() {` est vue — c'est la forme de 60-deploy.bats
+  v="$(grep -E "(^|[[:space:]{;])(export )?[A-Za-z_]+=[^;]*$I21_MODS" <<<'setup() { MOD="$X/modules.d/60-deploy.sh"; [ -f "$MOD" ]; }' \
+       | sed -E "s/.*(^|[[:space:]{;])(export )?([A-Za-z_]+)=[^;]*$I21_MODS.*/\3/")"
+  [ "$v" = MOD ]
+}
+
 @test "MUR I10: qui LIT PROV_DOCKER_BIN joue la sonde — sinon il passe une CLI VIDE a son delegue" {
   # `PROV_DOCKER_BIN` vaut la CHAINE VIDE tant que `docker_endpoint` n'a pas tourne
   # (`docker-endpoint.sh` la declare ainsi). Un module qui la lit sans sonder passe `DOCKER_BIN=""`,

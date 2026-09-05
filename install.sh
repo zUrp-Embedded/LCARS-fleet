@@ -363,6 +363,15 @@ else
   POSTE_POURQUOI="substrat « $SUBSTRATE ». Ce rail est réservé à WSL2, ou à une machine DÉDIÉE déclarée telle par LCARS_ALLOW_ANY_HOST=1"
 fi
 [[ "$DOCKER_OK" -eq 1 ]] || CONTENEUR_POURQUOI="$(fait docker_why)"
+# ─── LE CANAL : UN CANAL NE SE POSE PAS SUR UN AUTRE — jamais en silence, jamais de conversion ───
+# `channel` = qui a posé cette machine (préflight) ; `channel_tree` = ce que ce checkout poserait.
+# Le même canal est une mise à jour ; « aucun », une première pose. Le rail conteneur ne pose rien
+# sur la machine : le canal ne le concerne pas. Le geste nommé est celui du canal en place.
+case "$(fait channel)" in
+  ""|aucun|"$(fait channel_tree)") ;;
+  invalide) POSTE_POURQUOI="le canal d'installation de cette machine est ILLISIBLE (le préflight nomme le fichier) — corrige-le avant de poser quoi que ce soit" ;;
+  *) POSTE_POURQUOI="cette machine est installée par « $(fait channel) », et ce checkout poserait « $(fait channel_tree) » — un canal ne se pose pas sur un autre : « sudo deploy/provision uninstall --yes » d'abord, ou une mise à jour par le même canal (kit : deploy/workstation up --from <kit.tar.gz> · deb : deploy/workstation up --from <paquet>.deb)" ;;
+esac
 
 bilan_menu() {
   local etat1 etat2

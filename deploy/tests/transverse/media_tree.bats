@@ -19,6 +19,8 @@
 # du texte audite. Les quotes simples sont l'instrument, pas un oubli.
 # shellcheck disable=SC2016
 
+load ../refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -40,6 +42,8 @@ setup() {
   export XDG_RUNTIME_DIR="$BATS_TEST_TMPDIR/xdg"; mkdir -p "$XDG_RUNTIME_DIR"; chmod 0700 "$XDG_RUNTIME_DIR"
 
   export LCARS_MEDIA_ROOT="$BATS_TEST_TMPDIR/share/lcars"
+  # Le CANAL est a nous : absent = « aucun », le module pose comme aujourd'hui (voir runtime_helpers.bats).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
   export LCARS_MEDIA_OWNER
   LCARS_MEDIA_OWNER="$(id -un):$(id -gn)"
 
@@ -279,4 +283,28 @@ mod() { run bash "$MOD" "$1"; }
   # `a+rX` seul les laissait. Au build, `44 check` compare a `0755 root:root` (table) : sans cette
   # ligne, `verify` rougirait sur un contexte ordinaire — ou ne rougirait que sur celui d'un autre.
   grep -qE '^RUN chmod -R a\+rX,g-s,go-w /opt/lcars/share$' "$DOCKERFILE"
+}
+
+# ─── LE CANAL : SOUS `deb`, LA DOC ET LES MEDIAS SONT AU PAQUET (lot 2, 2026-09-05) ────────────
+
+@test "CANAL deb : apply ne pose NI les medias NI la doc — il MESURE, et npm n'est jamais appele" {
+  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"
+  mod apply
+  [ "$status" -eq 1 ]                                   # le verdict de CHECK : drift, rien n'est pose
+  [ ! -d "$LCARS_MEDIA_ROOT" ]
+  [ ! -s "$NPM_TRACE" ] || { echo "npm a ete appele sous deb :"; cat "$NPM_TRACE"; return 1; }
+  [[ "$output" == *"$LCARS_MEDIA_ROOT/avatars absent"* ]]
+  [[ "$output" == *"doc absente"* ]]
+  refute_out 'POSÉ' <<<"$output"
+  # et le meme decor SANS canal pose — la mesure n'a pas remplace la pose, elle ne vaut que sous deb
+  rm -f "$LCARS_CHANNEL_FILE"
+  mod apply
+  [ -d "$LCARS_MEDIA_ROOT/avatars" ]
+}
+
+@test "CANAL : le dispatch de 44 lit le canal UNE fois et branche apply sur check sous deb" {
+  local disp; disp="$(sed -n '/^case "${1:?usage/,$p' "$MOD" | grep -vE '^\s*#')"
+  [ "$(grep -c 'prov_channel_or_verdict "\$1"' <<<"$disp")" -eq 1 ]
+  grep -q 'if poseur_is_dpkg; then check; elif \[\[ "\$1" == "apply" \]\]; then apply; else check; fi' <<<"$disp"
+  sed '/^case "${1:?usage/,$d' "$MOD" | grep -vE '^\s*#' | refute_out 'prov_channel|poseur_is_dpkg|PROV_CHANNEL'
 }

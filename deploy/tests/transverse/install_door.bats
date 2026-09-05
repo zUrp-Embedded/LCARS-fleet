@@ -989,3 +989,71 @@ SPY
   grep -qE '\-\-port-deck\)\s+_d="--deck-port"' <<<"$bloc"
   grep -qE '\-\-port-ssh\)\s+_d="--ssh-port"'   <<<"$bloc"
 }
+
+# ─── LE CANAL : LA PORTE REFUSE DE POSER UN CANAL SUR UN AUTRE (lot 2 du chantier release) ──────
+#
+# `00-preflight` rend `channel=` (qui a pose cette machine) et `channel_tree=` (ce que ce checkout
+# poserait). La porte ne mesure rien elle-meme : elle lit les deux faits et, s'ils different et que
+# la machine est posee, rend le rail POSTE impossible — en nommant le geste. Le decor dicte les faits
+# par `_faux_provision`, comme pour docker.
+
+_porte_canal() { # _porte_canal <channel> <channel_tree> <args de la porte…>
+  local ch="$1" tree="$2"; shift 2
+  local fake; fake="$(_fake_tree 0 0)"
+  _faux_provision "$fake" "${_faits_sains[@]}" "channel=$ch" "channel_tree=$tree"
+  run bash "$fake/install.sh" "$@" < /dev/null
+}
+
+@test "CANAL : --workstation sur une machine installee par kit est REFUSE, et le refus nomme le geste — uninstall, ou le meme canal" {
+  _porte_canal kit source --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Ce rail n'est pas possible ici"* ]]
+  [[ "$output" == *"installée par « kit »"*"poserait « source »"* ]]
+  [[ "$output" == *"provision uninstall --yes"* ]]
+  [[ "$output" == *"--from <kit.tar.gz>"* ]]
+  refute_out 'RAIL POSTE' <<<"$output"          # rien apres le refus : ni banniere, ni delegue
+  _porte_canal deb source --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"installée par « deb »"*"--from <paquet>.deb"* ]]
+}
+
+@test "CANAL : le meme canal est une mise a jour, et « aucun » une premiere pose — la porte continue jusqu'au delegue" {
+  _porte_canal source source --workstation
+  [[ "$output" == *"RAIL POSTE"* ]]
+  refute_out 'installée par' <<<"$output"
+  _porte_canal aucun source --workstation
+  [[ "$output" == *"RAIL POSTE"* ]]
+  refute_out 'installée par' <<<"$output"
+  # un kit detare qui se pose sur une machine kit : meme canal, on continue
+  _porte_canal kit kit --workstation
+  [[ "$output" == *"RAIL POSTE"* ]]
+  refute_out 'installée par' <<<"$output"
+}
+
+@test "CANAL : un canal ILLISIBLE rend le rail poste impossible — jamais « source par defaut »" {
+  _porte_canal invalide source --workstation
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ILLISIBLE"* ]]
+}
+
+@test "CANAL : --check EXPOSE le refus dans le bilan, sans rien faire ; et le rail CONTENEUR ne lit pas le canal" {
+  _porte_canal deb source --check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IMPOSSIBLE"*"installée par « deb »"* ]]
+  # le conteneur ne pose rien sur la machine : un canal en place ne le concerne pas
+  local fake; fake="$(_fake_tree 0 0)"
+  _faux_provision "$fake" "${_faits_sains[@]}" channel=deb channel_tree=source
+  FORGE_BASE_URL=http://forge.invalid run bash "$fake/install.sh" --container < /dev/null
+  [[ "$output" == *"DOCKERSH:up"* ]]
+  refute_out 'installée par' <<<"$output"
+}
+
+@test "CANAL : la porte LIT les deux faits, elle ne mesure pas — et un preflight d'avant ce lot (sans le fait) ne refuse rien" {
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'fait channel_tree' <<<"$code"
+  grep -qE '^case "\$\(fait channel\)" in' <<<"$code"
+  refute grep -qE 'prov_channel|/etc/lcars/channel|\.source-revision' <<<"$code"
+  local fake; fake="$(_fake_tree 0 0)"          # les faits sains, sans channel
+  run bash "$fake/install.sh" --workstation < /dev/null
+  [[ "$output" == *"RAIL POSTE"* ]]
+}
