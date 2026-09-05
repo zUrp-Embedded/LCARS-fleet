@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.StepRunConsumer.GateSystemOutputsTest do
+defmodule Fleet.Pilot.StepRunConsumer.GateEngineSystemOutputsTest do
   @moduledoc """
   BL-6-59 — the gate reads the SYSTEM's facts about a step's declared `outputs`, not the pod's
   claim about its own delivery.

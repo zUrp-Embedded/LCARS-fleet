@@ -207,6 +207,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     end
   end
 
+  # A completer whose close FAILS on the forge — the abandon witness proves nobody is kicked then.
+  defmodule FailingCloseCompleter do
+    def complete(_step_run, _opts), do: {:error, :close_boom}
+  end
+
   defp dmode,
     do: fn
       "engineer", _root -> {:ok, "git_native"}
@@ -454,6 +459,32 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received :unlocked
   end
 
+  # ⚖ Pinned as it IS (2026-09-05): on `{:escalate, _, _}` the journal entry is REMOVED — the
+  # broker's queued brief takes over, and its metadata rebuild the context after a consumer restart
+  # (`reconstruct_eval_ctx/2`); the broker itself is ephemeral, so a BEAM restart mid-escalation
+  # loses both, which the code says. A change of that choice must flip this witness knowingly.
+  test "escalation through handle_info: the completion is NOT kept owed in the outbox" do
+    wi = "wi-esc-#{System.unique_integer([:positive])}"
+
+    event =
+      Fleet.Event.new(:spawner, :"pod.completed",
+        payload:
+          build_done("soft", %{"sev" => "high"})
+          |> Map.put("work_item_id", wi)
+          |> Map.put("pod_id", "pod-esc")
+      )
+
+    # The payload IS journalable (a `work_item_id`-less one would make the refute below vacuous).
+    assert {:ok, _} = Fleet.Pilot.CompletionOutbox.put(event.payload)
+    assert Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi))
+
+    assert {:noreply, _} = StepRunConsumer.handle_info(event, hc())
+    assert_received {:enqueued, "o-r-issue-1-gatekeeper", _}
+
+    refute Enum.any?(Fleet.Pilot.CompletionOutbox.pending(), &(&1["work_item_id"] == wi)),
+           "an escalated completion is acknowledged in the journal, by choice"
+  end
+
   test "escalation: gatekeeper already ALIVE (previous eval closing) → enqueue + wake, no double spawn" do
     # {:already_started} from the spawner → the brief is queued, a plain wake nudges the live pod.
     defmodule AliveSpawner do
@@ -576,6 +607,85 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
     refute_received {:wake, "architect-r"}
     assert_received {:comment, abody}
     assert abody =~ "Architecte"
+  end
+
+  test "abandon under OFFLOAD: the arch is kicked AFTER the close reached the forge, never before" do
+    # 2026-09-05 — the kick used to follow `close_with_trace` in the caller; under a runner the
+    # closure is handed over and `{:ok, :offloaded}` returns at once, so the architect heard of an
+    # abandon the forge had not recorded — and heard of it even when the close failed. Pinned here
+    # with a runner that HOLDS the closure: nothing may reach the arch until it runs.
+    deferring = fn exec, _meta ->
+      send(self(), {:deferred, exec})
+      {:ok, :offloaded}
+    end
+
+    assert {:ok, :offloaded} =
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "abandon", "reason" => "unrecoverable work"}},
+               %{hc() | step_run_runner: deferring}
+             )
+
+    refute_received {:notify, "architect-r", _}
+    refute_received {:closed, _}
+
+    assert_received {:deferred, exec}
+    assert {:ok, :completed} = exec.()
+    assert_received {:closed, :retired}
+    assert_received {:notify, "architect-r", notice}
+    assert notice =~ "ABANDONNÉ"
+  end
+
+  test "abandon under OFFLOAD: a close that FAILS kicks nobody — the forge holds no such fact" do
+    deferring = fn exec, _meta ->
+      send(self(), {:deferred, exec})
+      {:ok, :offloaded}
+    end
+
+    assert {:ok, :offloaded} =
+             StepRunConsumer.resume_gate(
+               soft_ctx(),
+               %{"result" => %{"decision" => "abandon", "reason" => "unrecoverable work"}},
+               %{hc() | step_run_runner: deferring, step_run_completer: FailingCloseCompleter}
+             )
+
+    assert_received {:deferred, exec}
+    assert {:error, :close_boom} = exec.()
+    refute_received {:notify, "architect-r", _}
+  end
+
+  @tag :tmp_dir
+  @tag :requires_git
+  test "a verdict is PINNED on the project's ops face (`gate-verdicts/`) when the face exists",
+       %{tmp_dir: tmp} do
+    # `:ops_root` is the consumer's seam: without it the pin can only be watched on the real global
+    # path. The face is a git repo with no remote (the push to `ops` fails, best-effort; the COMMIT
+    # is what makes the object addressable — a file written without a commit is a crash residue,
+    # so the witness reads the git log, not the disk).
+    work_dir = Path.join(tmp, "r")
+    File.mkdir_p!(work_dir)
+    {_, 0} = System.cmd("git", ["init", "-q", work_dir])
+    {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.email", "t@lcars.local"])
+    {_, 0} = System.cmd("git", ["-C", work_dir, "config", "user.name", "t"])
+
+    # Long enough to be pinned (`Pinning.pinnable?/1`): a one-line verdict stays inline by design.
+    reason = Enum.map_join(1..40, "\n", &"critère #{&1} tenu, mesuré sur la brique")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, :review_requested} =
+                 StepRunConsumer.resume_gate(
+                   soft_ctx(),
+                   %{"result" => %{"decision" => "continue", "reason" => reason}},
+                   %{hc() | ops_root: tmp}
+                 )
+      end)
+
+    ref = Fleet.Layout.gate_verdict_ref(1, "engineer")
+    refute log =~ "NOT committed", "written but not committed is a residue, not a pin"
+    {sha, 0} = System.cmd("git", ["-C", work_dir, "log", "--format=%H", "-1", "--", ref])
+    refute String.trim(sha) == "", "the verdict must be COMMITTED (addressable) at #{ref}"
+    assert File.read!(Path.join(work_dir, ref)) =~ "critère 40 tenu"
   end
 
   test "escalate_user verdict -> await_arch (lcars-awaits-arch + unlock, no close/reassign) + arch KICK" do

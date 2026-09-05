@@ -53,9 +53,9 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
   Builds the map consumed by `StepRunCompleter.complete_pr/2`.
   """
   @spec build(map(), pos_integer(), String.t(), route(), Seams.t()) :: map() | {:error, term()}
-  def build(payload, n, role, route, %Seams{} = seams) do
+  def build(payload, n, role, route, %Seams{} = seams, producer? \\ nil) do
     # DR-013
-    case classify_pr_role(payload, n, role, seams) do
+    case classify_pr_role(payload, n, role, seams, producer?) do
       {:error, _} = err ->
         err
 
@@ -87,13 +87,24 @@ defmodule Fleet.Pilot.StepRunConsumer.StepRunBuild do
     |> maybe_put_eng_summary(pr_role, payload)
   end
 
-  defp classify_pr_role(payload, n, role, seams) do
-    # Meme racine que le rail : le role se resout dans le catalogue du projet, nomme par le `owner`
-    # du depot que le payload porte deja.
-    root =
-      Fleet.Catalogue.root_for_repo(Payload.repository_full_name(payload) || payload["repo"])
+  # `producer?` handed by the consumer (resolved once per step-run) or, for a direct caller, resolved
+  # here in the project's catalogue, named by the `owner` of the repo the payload carries.
+  defp classify_pr_role(payload, n, role, seams, producer?) do
+    fact =
+      case producer? do
+        b when is_boolean(b) ->
+          {:ok, b}
 
-    case GateEngine.producer?(role, seams.deliverable_mode_fun, payload["deliverable_mode"], root) do
+        nil ->
+          GateEngine.producer?(
+            role,
+            seams.deliverable_mode_fun,
+            payload["deliverable_mode"],
+            GateEngine.catalogue_root(payload)
+          )
+      end
+
+    case fact do
       {:ok, true} ->
         {:producer, Fleet.Forge.Protocol.feature_branch(n, role)}
 

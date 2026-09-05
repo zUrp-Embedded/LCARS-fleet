@@ -5,8 +5,8 @@ defmodule Fleet.Project.RolesStructuralTest do
   `async: false` — DELIBERE et load-bearing. Ces tests repointent `:lcars_fleet, :cap_profile_root_dir` et
   depublient l'image : deux etats GLOBAUX. En async ils ont fait tomber trois suites voisines
   (StepDispatcher, StepRunCompleter, StepRunConsumerGate) qui resolvent le producteur pendant ce
-  temps-la. C'est la raison pour laquelle ce fichier est separe de `roles_test.exs`, qui reste async
-  parce qu'il ne touche a rien de partage.
+  temps-la. C'est la raison pour laquelle ce fichier est separe de `roles_test.exs`, qui est
+  `async: false` pour sa propre cle globale (`:pilot_producer_role`) et pour rien d'autre.
   """
   use ExUnit.Case, async: false
 

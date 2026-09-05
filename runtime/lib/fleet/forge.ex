@@ -23,6 +23,7 @@ defmodule Fleet.Forge do
   # the "single HTTP exit" invariant, and it is the reason this domain exists.
   use Boundary,
     deps: [
+      Fleet.Opts,
       Fleet.Slug,
       Fleet.GitRef,
       Fleet.Labels,
@@ -118,15 +119,10 @@ defmodule Fleet.Forge do
   @spec repo_id(module(), String.t(), keyword()) ::
           {:ok, non_neg_integer()} | {:error, term()}
   def repo_id(forge, repo, forge_opts) do
-    # `Code.ensure_loaded?/1` FIRST, and it is load-bearing: `function_exported?/3` does NOT load a
-    # module — it answers about the code table as it stands. On a freshly booted BEAM the forge
-    # client is not loaded yet, so the guard alone reports "this module has no repo_id/2" about a
-    # module that plainly does, and every caller reads that as an absent id.
-    # Measured: on a cold node, `:erlang.module_loaded(Fleet.Forge.Client)` is false and
-    # `function_exported?(_, :repo_id, 2)` is false; after `Code.ensure_loaded?/1`, both are true.
-    # The visible symptom was the FIRST project onboarded after a start losing its architect, with
-    # a log blaming the forge — which was answering the whole time.
-    if Code.ensure_loaded?(forge) and function_exported?(forge, :repo_id, 2) do
+    # Through `Fleet.Opts.exported?/3` (loads first): measured on a cold node, the bare guard read
+    # the not-yet-loaded forge client as a module without `repo_id/2`, and the FIRST project
+    # onboarded after a start lost its architect with a log blaming the forge.
+    if Fleet.Opts.exported?(forge, :repo_id, 2) do
       case forge.repo_id(repo, forge_opts) do
         {:ok, id} when is_integer(id) and id >= 0 -> {:ok, id}
         {:error, reason} -> {:error, reason}

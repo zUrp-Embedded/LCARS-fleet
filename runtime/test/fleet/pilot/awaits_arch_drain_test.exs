@@ -16,12 +16,16 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
 
   alias Fleet.Pilot.StepRunConsumer
 
-  defmodule ForgeOk do
-    def remove_label(_r, _n, _l, _o), do: {:ok, :removed}
-  end
-
   defmodule ForgeDown do
     def remove_label(_r, _n, _l, _o), do: {:error, :forge_write_down}
+  end
+
+  # Spied on the label it removes: the stub runs INSIDE the GenServer, the pid rides in forge_opts.
+  defmodule ForgeSpy do
+    def remove_label(repo, number, label, opts) do
+      send(opts[:test_pid], {:remove_label, repo, number, label})
+      {:ok, :removed}
+    end
   end
 
   defp start_consumer(forge) do
@@ -33,6 +37,7 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
         subscribe: false,
         repo: "o/r",
         forge_client: forge,
+        forge_opts: [test_pid: test],
         escalate_fun: fn kind, subject, cause, sig, _opts ->
           send(test, {:escalated, kind, subject, cause, sig})
           {:ok, 1}
@@ -53,16 +58,29 @@ defmodule Fleet.Pilot.AwaitsArchDrainTest do
   end
 
   test "TEMOIN — metadonnees completes + forge OK : l'etiquette est retiree, aucune escalade" do
-    pid = start_consumer(ForgeOk)
+    pid = start_consumer(ForgeSpy)
 
-    send(pid, resolution_event(%{"awaits_arch" => true, "repo" => "o/r", "number" => 7}))
+    # The repo comes from the EVENT's metadata (the work item has no repo field), never from the
+    # consumer's own `repo:` — hence a repo that is not the consumer's, so the two cannot be confused.
+    send(pid, resolution_event(%{"awaits_arch" => true, "repo" => "fleet/proj", "number" => 7}))
     _ = settle(pid)
 
+    assert_received {:remove_label, "fleet/proj", 7, "lcars-awaits-arch"}
+    refute_received {:escalated, _, _, _, _}
+  end
+
+  test "TEMOIN — une completion qui n'est PAS une escalade d'architecte ne draine rien" do
+    pid = start_consumer(ForgeSpy)
+
+    send(pid, resolution_event(%{"gate_eval" => false}))
+    _ = settle(pid)
+
+    refute_received {:remove_label, _, _, _}
     refute_received {:escalated, _, _, _, _}
   end
 
   test "metadonnees SANS repo/number : incident, pas un warning perdu" do
-    pid = start_consumer(ForgeOk)
+    pid = start_consumer(ForgeSpy)
 
     send(pid, resolution_event(%{"awaits_arch" => true}))
     _ = settle(pid)

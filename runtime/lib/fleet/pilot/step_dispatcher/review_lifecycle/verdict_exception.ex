@@ -51,10 +51,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException do
   @spec dispatch(integer(), String.t(), map(), map() | nil, Ctx.t()) ::
           {:ok, tuple()} | {:skipped, term()} | {:error, term()}
   def dispatch(pr_number, head, findings, policy, %Ctx{} = ctx) do
-    # Self-gated like the chief pass, and OFF for the same reason: an arbitration rung that has
-    # never fired end-to-end on a bench is a hypothesis, not a mechanism. The disabled path is not
-    # a silent no-op — it names the unarmed rung in the escalation, so an arch reading the freeze
-    # can tell "the pass failed" from "the pass is not armed on this box".
+    # Self-gated like the chief pass: `:pilot_verdict_exception_pass?` is armed by the shipped
+    # config (`config/config.exs`) and off by the code default, so a box that drops the config
+    # line loses the rung without a crash. The disabled path is not a silent no-op — it names the
+    # unarmed rung in the escalation, so an arch reading the freeze can tell "the pass failed"
+    # from "the pass is not armed on this box".
     if enabled?() do
       do_dispatch(pr_number, head, findings, policy, ctx)
     else
@@ -153,19 +154,11 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictException do
 
   defp escalate(pr_number, head, reason, %Ctx{} = ctx) do
     ArchEscalation.escalate_merge_blocked(
-      arch_seams(ctx),
+      Ctx.arch_seams(ctx),
       pr_number,
       head,
       :verdict_gray_zone,
       reason
     )
-  end
-
-  defp arch_seams(%Ctx{} = ctx) do
-    %ArchEscalation.Seams{
-      forge: ctx.forge,
-      repo: ctx.repo,
-      forge_opts: ctx.forge_opts
-    }
   end
 end

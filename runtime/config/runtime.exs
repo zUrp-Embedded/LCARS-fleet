@@ -764,6 +764,15 @@ if config_env() != :test and not tool_mode? do
       pilot_poll_interval_ms: Fleet.EnvParse.positive_ms("LCARS_PILOT_POLL_INTERVAL_MS", interval)
   end
 
+  # Sync window of the incident registry onto the ops branch: one commit per window at most while
+  # incidents recur. Read by `Fleet.Pilot.IncidentRegistry` (default 300000 ms — the arithmetic
+  # against the tick is in its module).
+  if ms = System.get_env("LCARS_PILOT_INCIDENT_REGISTRY_SYNC_DEBOUNCE_MS") do
+    config :lcars_fleet,
+      pilot_incident_registry_sync_debounce_ms:
+        Fleet.EnvParse.positive_ms("LCARS_PILOT_INCIDENT_REGISTRY_SYNC_DEBOUNCE_MS", ms)
+  end
+
   # Login of the SYSTEM account (owner of FORGE_TOKEN). The forge markers
   # (route / step_run / result-block) are only trusted when written by this login (a forge
   # user posting a fake one is ignored). Optional: if absent, ForgeClient derives it once

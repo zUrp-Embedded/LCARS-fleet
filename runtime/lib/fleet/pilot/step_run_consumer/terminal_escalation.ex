@@ -14,10 +14,15 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
        label `lcars-awaits-arch` + UNLOCK (`lcars-in-flight` removed). The unlock is
        LOAD-BEARING: the poller no longer re-dispatches (the issue carries `lcars-awaits-arch`,
        skipped) → the churn stops, the human decides.
-    2. `kick_architect/1` — active notification of the arch pod, a latency accelerator
-       only: the truth (label `lcars-awaits-arch` + arch-addressed comment) is already on
-       the forge; a failed kick is logged warning and the Poller (G4) re-kicks the arch
-       every tick as long as an issue carries the label.
+    2. `Fleet.Pilot.ArchWake.offer_then_wake/4`, INSIDE the completion closure and only after
+       step 1 returned `{:ok, _}` — a latency accelerator only: the truth (label
+       `lcars-awaits-arch` + arch-addressed comment) is already on the forge; a failed wake is
+       logged and the Poller (G4) re-offers the arch every tick as long as an issue carries the
+       label.
+
+  `kick_architect/3` is NOT part of this net: it carries CONTENT (the abandon trace) to the arch
+  pod on the `"abandon"` verdict, from `StepRunConsumer`, under the same rule — inside the closure,
+  after the close reached the forge.
 
   Without this net (G2, the funnel), a terminal error bubbled up as log-only would make
   the rail churn: the reaper reclaims the lock 2 ticks later, re-dispatches the SAME step
@@ -189,7 +194,7 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   def kick_architect(spawner, repo, message) do
     pod_id = Fleet.Project.Architect.pod_id_for(repo)
 
-    if function_exported?(spawner, :notify_pod, 2) do
+    if Fleet.Opts.exported?(spawner, :notify_pod, 2) do
       # ⚠ CETTE BRANCHE NE JETTE PAS SON RESULTAT, sans quoi le `@doc` juste au-dessus — « Failures
       # are logged » — ne serait vrai que de l'AUTRE branche. C'est le chemin d'escalade TERMINALE :
       # le moment ou un step_run a echoue definitivement et ou l'architecte du projet doit etre
@@ -228,6 +233,12 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalation do
   rescue
     e ->
       Logger.warning("StepRunConsumer: notify arch raised #{inspect(e)} (non-blocking)")
+      :ok
+  catch
+    # Same net as `safe_offer_then_wake/2`: this runs INSIDE the completion closure after a close
+    # that succeeded; an exit here would report that close as lost.
+    :exit, reason ->
+      Logger.warning("StepRunConsumer: notify arch exited #{inspect(reason)} (non-blocking)")
       :ok
   end
 

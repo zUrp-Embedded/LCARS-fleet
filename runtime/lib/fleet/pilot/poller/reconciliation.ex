@@ -32,10 +32,10 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   ## 2-REGULAR-tick grace + REPO-QUALIFIED refs (load-bearing semantics)
 
-  We only reclaim a CONFIRMED orphan: `reconcile/5` intersects the orphans seen THIS tick with
+  We only reclaim a CONFIRMED orphan: `reconcile/6` intersects the orphans seen THIS tick with
   `prior_suspects` (the orphans seen at the PREVIOUS tick) — never a freshly dispatched pod (not
   yet registered) or one in the process of dying. The grace unit is the REGULAR tick (~30s):
-  webhook kick-polls are dispatch-only and NEVER call `reconcile/5` (counting them would compress
+  webhook kick-polls are dispatch-only and NEVER call `reconcile/6` (counting them would compress
   the ~60s grace to the webhook rate — reclaim mid-publication, double dispatch).
   The lock refs are REPO-QUALIFIED (`{repo, :issue|:pr, n}`): the key carries the repo, so the
   refs of the live pods (`owned`, scoped to the current repo) and the suspects (repo-scoped by
@@ -44,7 +44,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   ## Fail-safe
 
-  If the enumeration of live pods fails (`live_owned_refs/1 → :error`), we reclaim NOTHING and
+  If the enumeration of live pods fails (`live_owned_refs/2 → :error`), we reclaim NOTHING and
   keep `prior_suspects` as is — NEVER unlock blindly.
 
   ## Policy on `unknown`
@@ -118,7 +118,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
 
   defmodule Seams do
     @moduledoc """
-    Reconciliation boundary contract: the 5 seams (and NOTHING else) that `reconcile/5` reads.
+    Reconciliation boundary contract: the 5 seams (and NOTHING else) that `reconcile/6` reads.
     `@enforce_keys` forces the 5 fields at construction; an access `seams.<other_field>` does not compile
     — the cluster never receives the poller's whole `state`. `spawner`/`task_queue` are already
     RESOLVED by the caller (prod defaults `Fleet.Spawner`/`Fleet.TaskQueue` applied at its site).
@@ -162,7 +162,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     # and nothing says so (which is exactly what Phase 0 makes measurable).
     #
     # The snapshot is DATA, not a seam: it travels as an explicit parameter rather than entering
-    # `%Seams{}`, whose contract is "the 5 seams reconcile/5 READS" and not "what it has read".
+    # `%Seams{}`, whose contract is "the 5 seams reconcile/6 READS" and not "what it has read".
     # Adding it there would have made the struct carry a cache.
     #
     # The fail-safe lives here: an impossible enumeration yields `:error` and the whole pass
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   @doc """
   Photo UNIQUE des pods vivants, prise par le TICK et descendue en parametre (BL-6-40).
 
-  Prise dans `reconcile/5`, elle le serait une fois par REPO — R appels `GenServer.call` a 5 s de
+  Prise dans `reconcile/6`, elle le serait une fois par REPO — R appels `GenServer.call` a 5 s de
   timeout pour une donnee qui ne change pas utilement d'un repo a l'autre du meme tick. L'appelant
   la prend une fois avant sa boucle.
 
@@ -439,7 +439,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # decision. Une fonction absente est une CAPACITE du module, decidee a la compilation et identique
   # a chaque tick — un stub de test, jamais une panne d'execution.
   defp gate_eval_owned_refs(tq, repo) do
-    if function_exported?(tq, :list_active, 0) do
+    if Fleet.Opts.exported?(tq, :list_active, 0) do
       for %{metadata: meta, state: item_state} <- tq.list_active(),
           item_state in @pulled_states,
           meta["gate_eval"] == true,
@@ -476,7 +476,7 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
   # cycle `:error` under such a stub, i.e. a reconciliation that never reclaims anything.
   defp project_pod_owned_refs(pod_id, repo, tq) do
     with true <- String.starts_with?(pod_id, Fleet.PodId.scope_prefix(repo)),
-         true <- function_exported?(tq, :pod_active_issue_id, 1),
+         true <- Fleet.Opts.exported?(tq, :pod_active_issue_id, 1),
          {:ok, issue_id} when is_binary(issue_id) <- tq.pod_active_issue_id(pod_id),
          {:ok, n} <- Fleet.Pilot.IssueId.parse(issue_id) do
       {:ok, [{repo, :issue, n}]}

@@ -1,4 +1,4 @@
-defmodule Fleet.Forge.FinchTest do
+defmodule Fleet.Pilot.ForgeFinchTest do
   @moduledoc """
   Dedicated HTTP pool `Fleet.Forge.Finch` — the ForgeClient's anti-stale wiring.
 

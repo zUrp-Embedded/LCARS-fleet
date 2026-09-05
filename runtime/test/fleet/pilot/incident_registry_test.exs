@@ -1,9 +1,8 @@
 defmodule Fleet.Pilot.IncidentRegistryTest do
-  # `async: false` : `with_store/2` ECRIT `LCARS_STORE_ROOT`, globale au NOEUD, et la restaure. En
-  # parallele de `Fleet.Spawner.Pod.LaunchSpecTest` — qui ecrit et lit la meme — cette restauration
-  # tombe au milieu de ses tests et leur fait lire une racine qui n'est pas la leur (mesure du
-  # 2026-08-20, en `mix gate` complet). La regle de `Fleet.TestEnv` vaut pour l'env OS comme pour
-  # l'env d'application : un fichier qui l'ecrit est `async: false`.
+  # `async: false` : ce fichier pilote les horloges REELLES du registre (`sync_debounce_ms`,
+  # `retry_ms`, `escalation_cooldown_ms`, avec des `receive` bornes) ; sous un ordonnanceur charge
+  # par les modules async, ces bornes deviennent des flakes. Aucun etat global n'est ecrit ici :
+  # `with_store/2`, qui ecrit `LCARS_STORE_ROOT`, vit avec les temoins d'`Escalation`.
   use ExUnit.Case, async: false
   import Fleet.Test.Barrier, only: [settle: 1]
 
@@ -25,13 +24,18 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     defp start_reg(tmp, extra) do
       name = :"reg_#{System.unique_integer([:positive])}"
 
+      # `merge`, not `++`: a keyword read takes the FIRST occurrence, so an appended override of
+      # the clocks would be silently ignored.
       opts =
-        [
-          name: name,
-          wal_path: Path.join(tmp, "incidents.json"),
-          sync_debounce_ms: 5,
-          retry_ms: 50
-        ] ++ extra
+        Keyword.merge(
+          [
+            name: name,
+            wal_path: Path.join(tmp, "incidents.json"),
+            sync_debounce_ms: 5,
+            retry_ms: 50
+          ],
+          extra
+        )
 
       start_supervised!({Reg, opts})
       name
@@ -73,6 +77,61 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       # forge sync triggered async (5ms debounce)
       assert_receive {:put, _}, 1000
+    end
+
+    # The window is the ops-commit budget: a durable failure is noted at EVERY tick, and each
+    # sync is one commit on the ops branch. Notes inside one window must land as ONE put that
+    # carries the LAST count — the timeline is not lost, only its intermediate commits. The
+    # first put carrying count 3 is the whole proof; the refute behind it only guards a sync
+    # that would re-arm itself.
+    test "sync window: three notes inside one window → ONE put, carrying count 3", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+
+      name =
+        start_reg(tmp,
+          sync_debounce_ms: 150,
+          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+        )
+
+      for i <- 1..3 do
+        assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:0#{i}:00Z")
+      end
+
+      assert_receive {:put, content}, 1_000
+      assert {:ok, %{"wake:p:dead" => %{"count" => 3}}} = JSON.decode(content)
+      refute_receive {:put, _}, 200
+    end
+
+    # The window is a budget for a memory the WAL holds. A note whose WAL write FAILED has the
+    # forge as its only durability: it must sync on the catch-up clock, not wait the window.
+    test "WAL write FAILS → the forge sync runs on the catch-up clock, not on the window", %{
+      tmp_dir: tmp
+    } do
+      pid = self()
+      blocker = Path.join(tmp, "blocker")
+      File.write!(blocker, "i am a file, not a dir")
+      name = :"reg_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Reg,
+         [
+           name: name,
+           wal_path: Path.join([blocker, "nested", "incidents.json"]),
+           sync_debounce_ms: 60_000,
+           retry_ms: 50,
+           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
+           put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+         ]}
+      )
+
+      assert {:error, {:wal_write_failed, _}} =
+               Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
+
+      assert_receive {:put, content}, 1_000
+      assert content =~ "wake:p:dead"
     end
 
     # The registry sync is a commit the RUNTIME makes — no human initiated it, no pod produced it,
@@ -873,188 +932,6 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       # [5]: the captured screen (deported fallback-ack) is attached to the issue
       assert body =~ "ECRAN-TEST-42"
       assert body =~ "Écran capturé"
-    end
-  end
-
-  describe "Escalation idempotency (create is not idempotent, readback is)" do
-    alias Fleet.Pilot.IncidentRegistry.Escalation
-
-    test "an OPEN issue already carrying this occurrence's marker → reused, NO duplicate create" do
-      me = self()
-      sig = "wake:issue-7-engineer:dead"
-
-      # The forge already holds the issue (a create that timed-out-after-commit, or a concurrent
-      # escalation): the marker in its body is the idempotency key. create_issue must NOT be called.
-      marker = "<!-- lcars-incident:#{sig} -->"
-
-      result =
-        Escalation.escalate(:reroll_failed, "issue-7-engineer", :dead, sig,
-          list_issues_fun: fn _repo, _opts ->
-            {:ok, [%{"number" => 42, "body" => "prior incident\n#{marker}\n"}]}
-          end,
-          create_issue_fun: fn _r, _t, _b, _o ->
-            send(me, :created) && {:ok, 999}
-          end,
-          add_label_fun: fn _r, num, _lbl, _o -> send(me, {:label, num}) && {:ok, :added} end
-        )
-
-      assert {:ok, 42} = result
-      refute_received :created
-      assert_received {:label, 42}
-    end
-
-    test "no open issue carries the marker → create as before" do
-      me = self()
-      sig = "wake:issue-9-engineer:dead"
-
-      result =
-        Escalation.escalate(:reroll_failed, "issue-9-engineer", :dead, sig,
-          list_issues_fun: fn _repo, _opts -> {:ok, [%{"number" => 1, "body" => "unrelated"}]} end,
-          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 7} end,
-          add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
-        )
-
-      assert {:ok, 7} = result
-      assert_received :created
-    end
-
-    test "an UNREADABLE listing does NOT suppress the alarm → create (fail-closed toward escalating)" do
-      me = self()
-
-      result =
-        Escalation.escalate(
-          :reroll_failed,
-          "issue-3-engineer",
-          :dead,
-          "wake:issue-3-engineer:dead",
-          list_issues_fun: fn _repo, _opts -> {:error, :forge_down} end,
-          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 5} end,
-          add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
-        )
-
-      assert {:ok, 5} = result
-      assert_received :created
-    end
-  end
-
-  describe "every kind that fires has a describe clause" do
-    alias Fleet.Pilot.IncidentRegistry.Escalation
-
-    # TROUVE PAR LA RELECTURE 2026-08-19 : `:awaits_arch_stuck` (emis par
-    # `StepRunConsumer.drain_failed/4`) n'avait pas de clause `kind_describe/1` — l'escalade
-    # crashait en FunctionClauseError au lieu d'ouvrir l'issue, exactement sur le chemin
-    # « un ticket sort du pipeline en silence ». Le temoin du drain stubbe `escalate_fun`,
-    # donc SEUL un appel au VRAI `Escalation.escalate/5` peut attraper cette classe de trou.
-    test ":awaits_arch_stuck opens an issue instead of crashing on kind_describe" do
-      pid = self()
-
-      opts = [
-        list_issues_fun: fn _r, _o -> {:ok, []} end,
-        create_issue_fun: fn _r, title, _body, _o -> send(pid, {:title, title}) && {:ok, 91} end,
-        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
-      ]
-
-      assert {:ok, 91} =
-               Escalation.escalate(
-                 :awaits_arch_stuck,
-                 "o/r#7",
-                 {:remove_label_failed, :forge_write_down},
-                 "awaits_arch_stuck:o/r#7",
-                 opts
-               )
-
-      assert_received {:title, title}
-      assert title =~ "awaits-arch"
-    end
-  end
-
-  describe "l'assignee est une PROJECTION — jamais un nom en dur" do
-    alias Fleet.Pilot.IncidentRegistry.Escalation
-
-    defp escalate_opts(pid) do
-      [
-        list_issues_fun: fn _r, _o -> {:ok, []} end,
-        create_issue_fun: fn _r, _t, _b, iopts ->
-          send(pid, {:create, iopts}) && {:ok, 5}
-        end,
-        add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
-      ]
-    end
-
-    defp with_store(root, fun) do
-      prev = System.get_env("LCARS_STORE_ROOT")
-      System.put_env("LCARS_STORE_ROOT", root)
-
-      try do
-        fun.()
-      after
-        if prev,
-          do: System.put_env("LCARS_STORE_ROOT", prev),
-          else: System.delete_env("LCARS_STORE_ROOT")
-      end
-    end
-
-    test "fichier projete present => son login part en assignee" do
-      root = Fleet.TestEnv.tmp_path("lcars-assg")
-      File.mkdir_p!(Path.join(root, "state"))
-      File.write!(Path.join([root, "state", "pilot.assignee"]), "le-login-reel\n")
-      on_exit(fn -> File.rm_rf!(root) end)
-
-      with_store(root, fn ->
-        assert {:ok, 5} =
-                 Escalation.escalate(:recurrence, "s", :r, "sig-a", escalate_opts(self()))
-      end)
-
-      assert_received {:create, iopts}
-      assert iopts[:assignees] == ["le-login-reel"]
-    end
-
-    test "fichier VIDE = ABSENT : UN SEUL appel, l'option OMISE, et un warning" do
-      # Sans la clause vide->nil, `assignees: [""]` partirait, la forge refuserait, et le retry
-      # sans option rattraperait — temoin naif vert, un appel API brule par escalade.
-      root = Fleet.TestEnv.tmp_path("lcars-assg")
-      File.mkdir_p!(Path.join(root, "state"))
-      File.write!(Path.join([root, "state", "pilot.assignee"]), "  \n")
-      on_exit(fn -> File.rm_rf!(root) end)
-      pid = self()
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          with_store(root, fn ->
-            assert {:ok, 5} =
-                     Escalation.escalate(:recurrence, "s", :r, "sig-b", escalate_opts(pid))
-          end)
-        end)
-
-      assert_received {:create, iopts}
-      refute Keyword.has_key?(iopts, :assignees)
-      refute_received {:create, _}
-      assert log =~ "projection du siege"
-    end
-
-    test "store present + fichier absent => nil + warning (panne dite, pas silence)" do
-      root = Fleet.TestEnv.tmp_path("lcars-assg")
-      File.mkdir_p!(Path.join(root, "state"))
-      on_exit(fn -> File.rm_rf!(root) end)
-      pid = self()
-
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          with_store(root, fn ->
-            assert {:ok, 5} =
-                     Escalation.escalate(:recurrence, "s", :r, "sig-c", escalate_opts(pid))
-          end)
-        end)
-
-      assert_received {:create, iopts}
-      refute Keyword.has_key?(iopts, :assignees)
-      assert log =~ "projection du siege"
-    end
-
-    test "aucun login en dur ne survit dans ce module" do
-      src = File.read!("lib/fleet/pilot/incident_registry/escalation.ex")
-      refute src =~ ~s("starfleet")
-      refute src =~ ~s("admiral")
     end
   end
 end

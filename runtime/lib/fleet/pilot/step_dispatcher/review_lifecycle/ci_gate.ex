@@ -137,10 +137,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   # des contextes est un AJOUT, pas un changement de contrat. Un seam qui ne l'expose pas rend un
   # verdict sans contextes — le brief dira alors ce qu'il sait, et rien de plus.
   defp ci_report(sha, %Ctx{} = ctx) do
-    # `Code.ensure_loaded?` DEVANT, comme partout ailleurs dans ce depot : sous chargement paresseux
-    # `function_exported?` seul rend `false` sur un module simplement pas encore charge — et celui
-    # qui passe ici en production est justement le vrai client forge.
-    if Code.ensure_loaded?(ctx.forge) and function_exported?(ctx.forge, :commit_ci_report, 3) do
+    if Fleet.Opts.exported?(ctx.forge, :commit_ci_report, 3) do
       case ctx.forge.commit_ci_report(ctx.repo, sha, ctx.forge_opts) do
         {:ok, {state, contexts}} -> {:ok, state, contexts}
         {:error, _} = err -> err

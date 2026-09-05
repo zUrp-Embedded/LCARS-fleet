@@ -34,7 +34,7 @@ defmodule Fleet.Pilot.StepRunConsumer.Verdict do
   crossing with a silently truncated trace. The compiled enum+reason check stays the
   floor: the module list is the compile-time authority, the schema its wire mirror
   (equality pinned by `GateDecisionTest`). The only side effects in this module are the
-  two refusal warnings (envelope, findings) — no state is carried.
+  three refusal warnings (envelope, findings, a near-miss findings key) — no state is carried.
 
   ## The optional machine payload (`details.findings`)
 

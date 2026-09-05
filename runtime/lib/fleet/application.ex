@@ -57,9 +57,9 @@ defmodule Fleet.Application do
   Starts the domain supervisors in topological order. The pure-library domains (cap_profile,
   credentials, sp_builder, project_bootstrap, conflict) have nothing to start: their modules are
   loaded with the app and their functions run without a process. A domain may also hand its
-  process to another's tree — `Fleet.Workflow.OpsObjectSync` and the forge's Finch pool are
-  started by `Fleet.Pilot.Application`. Only the trees that start something appear in the children
-  below.
+  process to another's tree — `Fleet.Workflow.OpsObjectSync`, `Fleet.Project.WorktreeSync` and the
+  forge's Finch pool are started by `Fleet.Pilot.Application`. Only the trees that start something
+  appear in the children below.
 
   ## The children ORDER IS the boot invariant (F8 scar)
 

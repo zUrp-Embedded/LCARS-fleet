@@ -6,8 +6,9 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   ## Decision (`decide/1`) — pure GATE
 
-  From a Gitea issue payload: `:engage` (proceed) | `{:skip, reason}` (`:in_flight` lock set,
-  `:awaits_arch` human lock). decide does ONLY the gate — no ownership (forge-side scoping upstream),
+  From a Gitea issue payload: `:engage` (proceed) | `{:skip, reason}` — four locks: `:in_flight`
+  (a pod works the brick), `:merged` (`stage/merged`, F-C066: a sealed brick whose close failed is
+  never re-engaged), `:awaits_arch` (human lock), `:awaits_toolchain`. decide does ONLY the gate — no ownership (forge-side scoping upstream),
   no role, no load (the ROLE comes from the workflow_map POSITION, via `workflow_map_role`; see Effects).
 
   ## Effects (`dispatch_issue/2`)
@@ -41,7 +42,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   # REVIEW (PR) lifecycle extracted: `dispatch_review/2` (below, poller contract) does the PR gate +
   # reads `pr_review_state`, THEN delegates all the routing (verdicts / rework / conflict / promotion) to
-  # `ReviewLifecycle.dispatch_by_verdicts/5`. Uni-directional dependency (core → ReviewLifecycle →
+  # `ReviewLifecycle.dispatch_by_verdicts/6`. Uni-directional dependency (core → ReviewLifecycle →
   # Spawn/ArchEscalation → ø). `route_for/4` + `tag_err/2` stay HERE (shared with `dispatch_issue`) and
   # are threaded to ReviewLifecycle by CAPTURE in the `%ReviewLifecycle.Ctx{}` — no fork, no cycle.
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle
@@ -66,7 +67,7 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   @doc """
   PURE decision (gate): issue payload → `:engage` | `{:skip, reason}`. decide does ONLY the
-  gate: `lcars-in-flight` / `lcars-awaits-arch` / `lcars-awaits-toolchain` lock → skip; else → `:engage` (proceed). The role AND
+  gate: `lcars-in-flight` / `stage/merged` / `lcars-awaits-arch` / `lcars-awaits-toolchain` lock → skip; else → `:engage` (proceed). The role AND
   the action (spawn vs onboard) are decided DOWNSTREAM (`dispatch_issue`) — hence `:engage` and not `:spawn`. The SCOPING
   (forge-side, upstream) and the ROUTING (route → role, via `workflow_map_role`/onboard in `dispatch_issue`) are
   NOT here — decide loads nothing and does not decide the role.
@@ -192,15 +193,10 @@ defmodule Fleet.Pilot.StepDispatcher do
              # that bypassed validation must not dispatch onto a guessed branch.
              face = Map.get(step_spec || %{}, "face", "code"),
              face_branch = Fleet.Layout.face_branch(face),
-             # A ticket may carry a LOT: matter (docs, a directory, images) committed by the
-             # delegating role and published as `lcars/lot-<slug>`. It moves the CLONE base — the
-             # producer starts from the matter instead of the head of its face — and, with it, the
-             # PR base, which on every other ticket is the same value and so goes unnamed.
-             {:ok, lot} <- lot_of_issue(issue),
-             face_opts = lot_base_opts(opts, lot, face_branch),
-             {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
-             :ok <- refute_moved_lot(lot, project),
-             project = lot_pr_base(project, lot, face_branch),
+             # Where the producer CLONES from and where its PR LANDS — one question, answered by
+             # the ticket's LOT when it carries one (`resolve_clone_and_pr_base/5`).
+             {:ok, project} <-
+               resolve_clone_and_pr_base(issue, opts, face_branch, resolver, repo),
              :ok <- Spawn.maybe_reprovision(decision, spawner, pod_id, project, slug) do
           # pod_id and branch (`lcars/issue-N-role`) built independently from (n, role); pod_id
           # opaque (never re-parsed). The branch stays repo-LOCAL (no intra-repo collision).
@@ -222,32 +218,23 @@ defmodule Fleet.Pilot.StepDispatcher do
                  step_spec
                ) do
             {:ok, brief, brief_kind, mandate} ->
-              project_slug = Fleet.Layout.project_slug(repo)
-
               spawn_opts =
-                [
-                  brief: brief,
-                  # Effective kind (step override resolved) — routes the physical object
-                  # (briefs/ vs gate-briefs/) at the spawn leaf; popped before the pod spawn.
-                  brief_kind: brief_kind,
-                  pod_id: pod_id,
-                  # The PAIR, built together from one slug: the label for the human, the slug for
-                  # the machine. Never re-derive one from the other (`Fleet.Layout.pod_label/3`).
-                  rc_name: Fleet.Layout.pod_label(project_slug, role, number),
-                  project_slug: project_slug,
-                  # Speaking LOCAL branch name (sanitized issue title), not
-                  # the pod_id. Used by phase.ex → `feature/<slug>`. Computed once (reused by the gate
-                  # for the in-place reprovision of a pipe: same branch at reset as at spawn).
-                  slug: slug
-                ]
-                |> Opts.maybe_put(:project, project)
-                |> Spawn.maybe_put_route(route)
-                |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
-                # THE MANDATE MOUNT: the pinned doc the pod reads its order FROM, surfaced by
-                # `build_brief` from the SAME resolution that rendered the brief (so the file the
-                # order names is the file the spawner materializes). `nil` (inline/degraded) → no
-                # mount, the inline order stands.
-                |> Opts.maybe_put(:mandate, mandate)
+                build_spawn_opts(
+                  %{
+                    brief: brief,
+                    brief_kind: brief_kind,
+                    pod_id: pod_id,
+                    role: role,
+                    number: number,
+                    slug: slug,
+                    project: project,
+                    route: route,
+                    mandate: mandate
+                  },
+                  forge,
+                  repo,
+                  forge_opts
+                )
 
               # Spawn LEAF shared with dispatch_by_verdicts (lock → pod → enqueue → wake +
               # compensation). Producer: lock + issue_id keyed on the ISSUE (number). We build the
@@ -317,18 +304,27 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   The PR gate (in-flight / awaits-arch) + the construction of `ctx` + the read of `pr_review_state`
   live HERE; the routing (verdicts / rework / conflict / promotion) is DELEGATED to
-  `ReviewLifecycle.dispatch_by_verdicts/5`.
+  `ReviewLifecycle.dispatch_by_verdicts/6`.
 
   `pr`: Gitea map (`number`, `head.ref`, `requested_reviewers`, `labels`). `opts` as
-  `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:skipped, reason}` | `{:error, _}`.
+  `dispatch_issue/2`. Returns `{:ok, {:spawned, pod_id, role}}` | `{:ok, {:merged, pr}}` |
+  `{:ok, {:adopted, pr, reviewers}}` | `{:ok, {:auto_resolved, pr}}` | `{:skipped, reason}` |
+  `{:error, _}`.
   """
-  # `{:merged, _}` is NOT a variant of `{:spawned, _, _}`: the seal path closes a PR without ever
-  # opening a pod, so the spec must name it. A contract that does not say what it returns sends
-  # its caller to write a mapping against a shape it will not always get.
+  # `{:merged, _}`, `{:adopted, _, _}` and `{:auto_resolved, _}` are NOT variants of
+  # `{:spawned, _, _}`: the seal path closes a PR without ever opening a pod, the adoption lays a
+  # jury without spawning it, the tier-0 conflict engine writes the branch and re-summons the jury
+  # (behind `:pilot_conflict_diagnosis?`, a flag a spec does not read through), so the spec must
+  # name all three. A `skipped` reason is an atom OR a tuple (`{:merge_blocked_escalated, pr}`,
+  # `{:ci_unreadable, why}`, …): the `wait/*` table (`Fleet.Labels.wait_for/1`) reads them all.
+  # A contract that does not say what it returns sends its caller to write a mapping against a
+  # shape it will not always get.
   @spec dispatch_review(map(), keyword()) ::
           {:ok, {:spawned, String.t(), String.t()}}
           | {:ok, {:merged, integer()}}
-          | {:skipped, atom()}
+          | {:ok, {:adopted, integer(), [String.t()]}}
+          | {:ok, {:auto_resolved, integer()}}
+          | {:skipped, atom() | tuple()}
           | {:error, term()}
   def dispatch_review(pr, opts) when is_map(pr) do
     # The PR's OWN base (face-projet): the face the deliverable merges into, read off the
@@ -346,8 +342,13 @@ defmodule Fleet.Pilot.StepDispatcher do
     ctx = %ReviewLifecycle.Ctx{
       forge: Keyword.get(opts, :forge_client, Fleet.Forge.Client),
       loader: Keyword.get(opts, :loader, CapProfile),
+      # ARITY 2, LIKE THE ISSUE RAIL ABOVE. `WorkflowMapNav.safe_load/3` hands `opts` (which
+      # catalogue answers) to a binary loader and DROPS them for a unary one: the jury, the CI
+      # policy and the rework budget of a PR are read under the card of the PR's OWN catalogue
+      # only through a binary default (wall `workflow.loader_arity`, 2026-09-05). A unary seam is
+      # still honoured — every stub is one.
       workflow_map_loader:
-        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/1),
+        Keyword.get(opts, :workflow_map_loader, &Fleet.Workflow.Loader.load!/2),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       resolver: Keyword.get(opts, :project_resolver, &default_project_resolver/2),
@@ -642,6 +643,53 @@ defmodule Fleet.Pilot.StepDispatcher do
 
   defp refute_missing_rail(nil), do: {:error, :no_doc_rail_in_catalogue}
   defp refute_missing_rail(name) when is_binary(name), do: {:ok, name}
+
+  # THE PACKAGING, apart from the DECISION: the core decides (route, role, identity, face, lot,
+  # project), `Spawn` executes, and what travels between the two is this keyword — assembled in
+  # one place so that the pairs built together (label + slug, brief + its kind) stay together.
+  # `decided` is a bare map with one private caller: a misnamed key fails at the first test
+  # (`KeyError`), where a positional tuple's reorder would not.
+  defp build_spawn_opts(decided, forge, repo, forge_opts) do
+    project_slug = Fleet.Layout.project_slug(repo)
+
+    [
+      brief: decided.brief,
+      # Effective kind (step override resolved) — routes the physical object
+      # (briefs/ vs gate-briefs/) at the spawn leaf; popped before the pod spawn.
+      brief_kind: decided.brief_kind,
+      pod_id: decided.pod_id,
+      # The PAIR, built together from one slug: the label for the human, the slug for
+      # the machine. Never re-derive one from the other (`Fleet.Layout.pod_label/3`).
+      rc_name: Fleet.Layout.pod_label(project_slug, decided.role, decided.number),
+      project_slug: project_slug,
+      # Speaking LOCAL branch name (sanitized issue title), not the pod_id. Used by phase.ex →
+      # `feature/<slug>`. Computed once (reused by the gate for the in-place reprovision of a
+      # pipe: same branch at reset as at spawn).
+      slug: decided.slug
+    ]
+    |> Opts.maybe_put(:project, decided.project)
+    |> Spawn.maybe_put_route(decided.route)
+    |> Opts.maybe_put(:repo_id, Spawn.resolve_repo_id(forge, repo, forge_opts))
+    # THE MANDATE MOUNT: the pinned doc the pod reads its order FROM, surfaced by `build_brief`
+    # from the SAME resolution that rendered the brief (so the file the order names is the file
+    # the spawner materializes). `nil` (inline/degraded) → no mount, the inline order stands.
+    |> Opts.maybe_put(:mandate, decided.mandate)
+  end
+
+  # WHERE THE PRODUCER CLONES FROM, AND WHERE ITS PR LANDS. A ticket may carry a LOT: matter
+  # (docs, a directory, images) committed by the delegating role and published as
+  # `lcars/lot-<slug>`. It moves the CLONE base — the producer starts from the matter instead of
+  # the head of its face — and, with it, the PR base, which on every other ticket is the same
+  # value and so goes unnamed. The five steps below are one rule; refused as `{phase, reason}`
+  # like every other refusal of the dispatch.
+  defp resolve_clone_and_pr_base(issue, opts, face_branch, resolver, repo) do
+    with {:ok, lot} <- lot_of_issue(issue),
+         face_opts = lot_base_opts(opts, lot, face_branch),
+         {:ok, project} <- Opts.tag_err(resolver.(repo, face_opts), :project_resolution),
+         :ok <- refute_moved_lot(lot, project) do
+      {:ok, lot_pr_base(project, lot, face_branch)}
+    end
+  end
 
   # ── the LOT of a ticket ────────────────────────────────────────────────────────────────────
   # `:none` is the ordinary ticket. A malformed pointer STOPS the dispatch instead of falling back

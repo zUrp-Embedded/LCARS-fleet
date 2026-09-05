@@ -114,5 +114,5 @@ defmodule Fleet.Pilot.WorkflowMapNav do
   # rather than assuming is what keeps a fixture from having to grow an option it has no use for —
   # the same tolerance the function branches already give.
   defp module_takes_opts?(mod),
-    do: Code.ensure_loaded?(mod) and function_exported?(mod, :load!, 2)
+    do: Fleet.Opts.exported?(mod, :load!, 2)
 end

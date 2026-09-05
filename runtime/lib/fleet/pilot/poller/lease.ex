@@ -1,7 +1,8 @@
 defmodule Fleet.Pilot.Poller.Lease do
   @moduledoc """
-  Repo-scoped ADMISSION of the step rail: at most `Admission.max_fan/2` active workflow_runs per
-  repo — the project's declaration if it made one, else the fleet default (**5**, clamped 1..15).
+  ADMISSION of the step rail, per human on each repo: at most `Admission.max_fan/2` active
+  workflow_runs of this human on the repo — the project's declaration if it made one, else the
+  fleet default (**5**, clamped 1..15).
   Classifies each issue of the tick (ENGAGED / QUEUED), then dispatches under that ceiling.
 
   ⚠ **CE N'EST PAS « at most ONE active workflow_run per repo », ET LE DEFAUT LIVRE LE DIT.** Le
@@ -140,13 +141,13 @@ defmodule Fleet.Pilot.Poller.Lease do
       end)
       |> Enum.sort_by(fn {issue, _pr?, _engaged, _pf} -> Map.get(issue, "number") end)
 
-    # THE CEILING — `max_fan`: how many workflow_runs this project may hold in flight at once. A
+    # THE CEILING — `max_fan`: how many workflow_runs this human may hold in flight on this repo. A
     # boolean would be the same parameter at a coarser resolution (**serial IS this ceiling at 1**),
     # and it could only say "one" or "as many as there are" — the second being genuinely unbounded:
     # a repo with forty queued tickets starts forty runs.
     #
     # A repo holds several runs without the operator flipping anything, which is why the default
-    # ceiling is LOW (5). PER PROJECT, not per box: the count is per project, and a fleet-wide knob
+    # ceiling is LOW (5). PER REPO (and per human), not per box: the count is per repo, and a fleet-wide knob
     # would make serializing one project to watch its pipeline end to end serialize every other
     # project too. `dispatch_opts` carries the `:code_root` seam tests inject.
     max_fan = Admission.max_fan(seams.repo, dispatch_opts)
@@ -161,6 +162,13 @@ defmodule Fleet.Pilot.Poller.Lease do
     # `pr?` below. They are DISJOINT by construction, not by luck — `classify_issue/3` answers
     # `engaged = false` for every PR-bearing ticket, first clause, no other path. So this is a sum,
     # never a union to deduplicate.
+    #
+    # ⚖ A ticket PARKED under `lcars-awaits-arch` is classified like any other (2026-09-05): the
+    # label is not read here, the ROUTE is. Parked with an ADVANCED route, it holds its seat — its
+    # run exists and resumes when the human acts, and a second run started meanwhile would put two
+    # in flight on a serial project when it wakes. Parked at the ROOT (a brief the scoper refused),
+    # it has no advanced run, holds no seat, and competes for one again once unparked — the next
+    # ticket starts. `StepDispatcher.decide/1` is what refuses the parked ticket's own dispatch.
     in_flight =
       Enum.count(classified, fn {_issue, _pr?, engaged, _pf} -> engaged end) +
         MapSet.size(pr_issue_ids)
@@ -198,7 +206,7 @@ defmodule Fleet.Pilot.Poller.Lease do
             # second step rather than at its second ticket.
             engaged ->
               {acc2, _started?} =
-                dispatch_engaged(payload, item_opts, acc, seams.dispatcher)
+                step_do_dispatch(payload, item_opts, acc, seams.dispatcher)
 
               {acc2, fan}
 
@@ -301,12 +309,6 @@ defmodule Fleet.Pilot.Poller.Lease do
       Admission.current_wait(payload),
       acc
     )
-  end
-
-  # Dispatch of an ENGAGED workflow_run: the seat is already taken (the engagement comes from the
-  # classification, not from this step_run), so `started?` says nothing the counter needs.
-  defp dispatch_engaged(payload, opts, acc, dispatcher) do
-    step_do_dispatch(payload, opts, acc, dispatcher)
   end
 
   # Classifies an issue (lease) AND pre-resolves what `dispatch_issue` would otherwise re-read. Returns

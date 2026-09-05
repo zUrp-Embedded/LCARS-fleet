@@ -46,7 +46,9 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
     assert log =~ "SLOW tick 900ms"
     assert log =~ "fleet/demo"
 
-    # The warning carries the three amplifiers: a slow tick with no lead is a fact nobody can act on.
+    # The warning names the leads that exist TODAY (the resolver's ls-remote, the per-tick
+    # list_pods, the forge listings): a slow tick with no lead is a fact nobody can act on.
+    assert log =~ "ls-remote"
     assert log =~ "list_pods"
   end
 

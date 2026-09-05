@@ -1,7 +1,7 @@
 # test/ — map
 
 **Date**: 2026-07-18
-**Last revised**: 2026-09-04
+**Last revised**: 2026-09-05
 **Status**: active — index of the test tree (a map, not a contract)
 **Referenced by**: —
 
@@ -45,7 +45,7 @@ ci-dessous. Il n'y a pas de troisième cas — et la racine de `test/` ne porte 
 | `test/crosscutting/` | témoins sans cible unique (scan du dépôt entier) | `shell_gate` |
 | `test/integration/` | multi-cible, hors-mix | manuel |
 | `test/probes/` | sondes manuelles (`gate-r*.sh`), hors `mix gate` — leurs en-têtes le disent | manuel |
-| `test/support/` | stubs, doubles, TestEnv — compilés par `elixirc_paths(:test)` | — |
+| `test/support/` | stubs, doubles, TestEnv — compilés par `elixirc_paths(:test)` ; les BANCS d'un rail (`support/<domaine>/*_bench.ex`, module `Fleet.<Domaine>.<Rail>Bench` — absorbé par la boundary du domaine, comme `Fleet.Pilot.ForgeStubs` ; ses stubs et ses starters, partagés par les fichiers qui découpent ce rail par sujet) | — |
 | `test/fixtures/` | données | — |
 
 Les bats et python suivent la même règle de préfixe que l'ExUnit : `bin/publish-transform.sh` →

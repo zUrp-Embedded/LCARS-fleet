@@ -213,7 +213,7 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictCorrection do
   end
 
   defp safe_wake(spawner, pod_id) do
-    if function_exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
+    if Fleet.Opts.exported?(spawner, :wake_pod, 1), do: spawner.wake_pod(pod_id), else: :ok
   rescue
     _ -> :ok
   end

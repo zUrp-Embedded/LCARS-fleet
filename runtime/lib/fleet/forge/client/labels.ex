@@ -12,10 +12,9 @@ defmodule Fleet.Forge.Client.Labels do
   qu'elles traversent une frontiere de module — un fait de decoupage, pas une surface d'API, et
   `@doc false` le dit.
 
-  `card_description/1` appelle `Fleet.Forge.Client.as_role/2`, qui reste sur le client parce qu'une
-  dizaine d'appelants de `pilot` le nomment directement. C'est un cycle d'APPEL entre deux modules
-  d'une meme boundary — legal, sans dependance de compilation, et prefere a un deplacement qui
-  toucherait dix sites hors du domaine forge.
+  `card_description/2` lit la carte par `Fleet.Workflow.Loader.load!/2`, dans le catalogue que
+  le depot nomme (`card_opts_for_repo/1`) : le meme `wfmap/<nom>` existe dans deux catalogues avec
+  deux descriptions.
   """
 
   alias Fleet.Forge.Client.Transport
@@ -181,7 +180,7 @@ defmodule Fleet.Forge.Client.Labels do
       name: label_name,
       exclusive: String.contains?(label_name, "/"),
       color: label_color(label_name),
-      description: label_description(label_name)
+      description: label_description(label_name, repo)
     }
 
     case http_post(config, "/repos/#{encode_repo(repo)}/labels", body) do
@@ -239,19 +238,7 @@ defmodule Fleet.Forge.Client.Labels do
     do:
       "Étape COURANTE de cette issue dans son plan (workflow_map) — bouge à chaque avancée (mutex : une seule à la fois)."
 
-  def label_description("wfmap/" <> map) do
-    case card_description(map) do
-      {:ok, desc} ->
-        String.slice(
-          "Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc,
-          0,
-          240
-        )
-
-      :error ->
-        "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
-    end
-  end
+  def label_description("wfmap/" <> map), do: label_description("wfmap/" <> map, nil)
 
   # Ce texte est lu par un HUMAIN sur la forge, et il nomme la face `workshop` : c'est la que part
   # le livrable documentaire. `ops` est le registre que le runtime ecrit, qu'aucun producteur ne
@@ -267,11 +254,33 @@ defmodule Fleet.Forge.Client.Labels do
   def label_description(_),
     do: "Label protocole LCARS (auto-créé, wire-protocol forge-state-machine)."
 
+  # The card's description comes from the CATALOGUE THAT SERVES THE REPO: the same `wfmap/<name>`
+  # exists in two catalogues with two descriptions, and the repo's org names which one.
   @doc false
-  # La description d'un label de carte de role.
-  @spec card_description(String.t()) :: {:ok, String.t()} | :error
-  def card_description(map) do
-    case Fleet.Workflow.Loader.load!(map)["description"] do
+  @spec label_description(String.t(), String.t() | nil) :: String.t()
+  def label_description("wfmap/" <> map, repo) do
+    case card_description(map, repo) do
+      {:ok, desc} ->
+        String.slice(
+          "Le PLAN (workflow_map) de cette issue — posé à l'onboarding, fixe. Carte : " <> desc,
+          0,
+          240
+        )
+
+      :error ->
+        "Le PLAN (workflow_map) que suit cette issue — posé UNE FOIS à l'onboarding, ne change jamais (fixe, pas un verrou)."
+    end
+  end
+
+  def label_description(name, _repo), do: label_description(name)
+
+  @doc false
+  # La description d'un label de carte de role, lue dans le catalogue du depot.
+  @spec card_description(String.t(), String.t() | nil) :: {:ok, String.t()} | :error
+  def card_description(map, repo) do
+    case Fleet.Workflow.Loader.load!(map, Fleet.Workflow.Loader.card_opts_for_repo(repo))[
+           "description"
+         ] do
       desc when is_binary(desc) and desc != "" -> {:ok, desc}
       _ -> :error
     end

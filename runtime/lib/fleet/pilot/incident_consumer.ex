@@ -1,8 +1,11 @@
 defmodule Fleet.Pilot.IncidentConsumer do
   @moduledoc """
-  Bus consumer of **pod FAILURE** events (`pod.failed` / `wake.failed` / `spawn.failed`, source
-  `:spawner`) → `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). Subscribes
-  `Fleet.EventRouter.Bus` (topic `fleet.events`).
+  Bus consumer of the **incident** events — every type whose route carries `action: incident` in
+  `priv/event_router/events.yaml` (seven types from four sources: `pod.failed`, `wake.failed`,
+  `spawn.failed` from `:spawner`; `pod.deaf` from `:mcp`; `workflow_map.failed` from `:workflow`;
+  `project.card_failed`, `project.declaration_invalid` from `:project`) →
+  `Fleet.Pilot.IncidentRegistry` (note on 1st / escalate on recurrent). The table routes, this
+  module has no clause per type. Subscribes `Fleet.EventRouter.Bus` (topic `fleet.events`).
 
   ## Why a consumer SEPARATE from the StepRunConsumer
 
@@ -15,6 +18,10 @@ defmodule Fleet.Pilot.IncidentConsumer do
   `IncidentRegistry`; this module only **routes the event to it**.
 
   ## Escalation decision (delegated to `IncidentRegistry`)
+
+  The three `:spawner` types, in detail; the four others (`pod.deaf`, `workflow_map.failed`,
+  `project.card_failed`, `project.declaration_invalid`) carry their gate and subject in the table
+  the same way.
 
     * `pod.failed` — a failed pod (`transition_failed`: result_timeout/dead-REPL, allocate/launch/
       auth/project). 1st = noted (tolerated, possibly random); recurrent = escalated (pattern → root-cause).

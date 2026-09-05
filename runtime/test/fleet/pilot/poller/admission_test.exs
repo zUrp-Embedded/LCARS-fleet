@@ -214,4 +214,40 @@ defmodule Fleet.Pilot.Poller.AdmissionTest do
       assert Admission.max_fan("fleet/p", code_root: root_with(body)) == 4
     end
   end
+
+  describe "max_fan/0 — the reader clamps, it does not report" do
+    test "below 1 or above the ceiling → clamped, never zero and never a slot that does not exist" do
+      # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
+      # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read
+      # on every dispatch decision: a bad value must fail at a DOOR, once, not every thirty seconds.
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 0)
+      assert Admission.max_fan() == 1
+
+      Application.put_env(:lcars_fleet, :pilot_max_fan, 999)
+      assert Admission.max_fan() == Admission.max_fan_ceiling()
+
+      Application.put_env(:lcars_fleet, :pilot_max_fan, "trois")
+      assert Admission.max_fan() == 5
+    end
+  end
+
+  describe "write_wait — a label that cannot be posted never blocks a dispatch" do
+    defmodule RaisingLabelForge do
+      def add_label(_repo, _n, _label, _opts), do: raise("forge label boom")
+      def remove_label(_repo, _n, _label, _opts), do: raise("forge label boom")
+    end
+
+    test "add_label RAISES → the skip is accounted, the tick stands, the loss is said" do
+      raising = [forge_client: RaisingLabelForge, repo: "o/r", forge_opts: []]
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Admission.admit(fn -> {:skipped, :at_capacity} end, raising, 7, nil, Lease.zero_tally())
+        end)
+
+      assert {%{skipped: 1, dispatched: 0, errors: 0}, false} = result
+      assert log =~ "wait label"
+      assert log =~ "dispatch unaffected"
+    end
+  end
 end
