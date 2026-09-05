@@ -48,4 +48,4 @@ runtime ne le porte plus (lot 7) — seul le stage `verify` du Dockerfile le cop
 doctor au build, et `final` repart de `runtime` avec le tampon `/opt/lcars/.verified`. Les
 fichiers de boot sont des objets du produit, hors de la table de l'installeur : `/run/lcars-boot.state`
 (`awaiting-config`, `init-failed`), `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
-`/run/lcars-humans.rc`, `/opt/lcars/.verified` — `deploy/box status` les lit de l'hôte.
+`/run/lcars-humans.rc`, `/opt/lcars/.verified` — `deploy/container status` les lit de l'hôte.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: runtime/services/box/init.sh
+# SOURCE: runtime/services/container/init.sh
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: actif — l'INIT DE L'INSTANCE de la boite, cote produit : le siege, les zones, le layout du volume
@@ -169,7 +169,7 @@ source_trees() {
     elif [[ "$src_rev" != "$img_rev" ]]; then p_ok "source LCARS : $src ($src_rev) — l'image tourne sur $img_rev (lire la source ne renseigne pas sur le binaire)"
     else p_ok "source LCARS : $src — image et source sur la meme revision ($img_rev)"; fi
   else
-    p_ok "PAS de source LCARS sous $src — la fleet ne peut pas se maintenir elle-meme (LCARS_SOURCE_REMOTE=<url> au demarrage, ou « deploy/box source-push »)"
+    p_ok "PAS de source LCARS sous $src — la fleet ne peut pas se maintenir elle-meme (LCARS_SOURCE_REMOTE=<url> au demarrage, ou « deploy/container source-push »)"
   fi
 }
 host_keys() {

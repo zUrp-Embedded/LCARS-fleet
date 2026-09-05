@@ -45,7 +45,7 @@ setup() {
     # l'executeur de catalogue, le convergeur d'humains et le convergeur d'outillage — le code
     # privilegie de la machine. L'oublier ferait passer les murs au vert en n'ayant rien lu.
     find "${ARBRES[@]}" -type f \
-      \( -name '*.sh' -o -name '*.py' -o -name '*.yaml' -o -name 'lcars' -o -name 'box' \
+      \( -name '*.sh' -o -name '*.py' -o -name '*.yaml' -o -name 'lcars' -o -name 'container' \
          -o -name 'accept' -o -name 'provision' -o -name 'Dockerfile' -o -name '*.manifest' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
   )
@@ -277,7 +277,7 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
   # `setpriv` dans le conteneur — qui n'a pas systemd et dont l'entrypoint est PID 1. En verifier un
   # seul laisserait l'autre tourner en root sans qu'une ligne le dise.
   local unit="$REPO/deploy/modules.d/64-services.sh"
-  local entry="$REPO/runtime/services/box/boot.sh"
+  local entry="$REPO/runtime/services/container/boot.sh"
   local dockerfile="$REPO/deploy/docker/Dockerfile"
 
   # RAIL POSTE : l'unite du service d'autorite porte un `User=`, celle du convergeur n'en porte PAS.
@@ -328,10 +328,10 @@ absent() { # absent <motif etendu> <fichier> — echoue si le CODE du fichier po
       return 1
     }
 
-  code_of "$REPO/runtime/services/box/boot.sh" \
+  code_of "$REPO/runtime/services/container/boot.sh" \
     | grep -qE "LCARS_AUTHORITY_USER=\"\\\$\{LCARS_AUTHORITY_USER:-${attendu}\}\"" || {
       echo "MUR 4 bis rompu — l'entrypoint ne pose pas « $attendu » dans LCARS_AUTHORITY_USER" >&2
-      code_of "$REPO/runtime/services/box/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
+      code_of "$REPO/runtime/services/container/boot.sh" | grep -nE 'LCARS_AUTHORITY_USER=' >&2
       return 1
     }
 }

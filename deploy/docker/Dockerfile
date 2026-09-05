@@ -362,7 +362,7 @@ RUN set -eu; \
     ls -l "$d"
 
 # ⚖ user 2026-09-04 (Q1, lot 7) : `deploy/` N'ENTRE PLUS dans l'image runtime. Rien dans la boîte ne
-# le lit — le boot est le produit (runtime/services/box/), la sonde de l'instance est « box status »
+# le lit — le boot est le produit (runtime/services/container/), la sonde de l'instance est « box status »
 # côté hôte. Le stage `verify` plus bas le copie POUR LUI SEUL, joue le doctor, et meurt : `final`
 # repart de `runtime`. `runtime/etc` ne porte que des DONNÉES du produit (le manifeste de la release,
 # le gabarit d'env) — ses trois outils d'install vivent dans `deploy/lib` (Q3, 2026-09-04).
@@ -609,7 +609,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
 
 # root : requis par sshd (login-manager qui drop vers l'humain) et par l'entrypoint convergent.
 # Les fleets, elles, tournent sous l'UID de CHAQUE humain (le drop est le métier de sshd).
-ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/box/boot.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "bash", "/opt/lcars/services/container/boot.sh"]
 
 # ─── verify : L'ISO DES RAILS SE MESURE AU BUILD, PAS CHEZ L'OPÉRATEUR ─────────────────────────
 #

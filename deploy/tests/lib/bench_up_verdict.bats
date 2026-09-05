@@ -130,7 +130,7 @@ argv="\$*"
 # voit le 'create', sinon aucun temoin ne peut lire ce que la boite recoit.
 # (guillemets simples et pas d'accents graves : ce heredoc n'est PAS quote, donc bash y fait de la
 #  SUBSTITUTION DE COMMANDE — un mot entre accents graves y est EXECUTE, meme dans un commentaire.)
-case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/box.env" ;; esac
+case "\$argv" in *" create lcars"*) printf 'LCARS_DECK_ORIGINS=%s\n' "\${LCARS_DECK_ORIGINS:-}" > "$BATS_TEST_TMPDIR/container.env" ;; esac
 case "\$argv" in
   *"ps --filter publish="*) [[ -f "$BATS_TEST_TMPDIR/port_holder" ]] && cat "$BATS_TEST_TMPDIR/port_holder"; exit 0 ;;
 esac
@@ -209,7 +209,7 @@ run_bench() {
 # se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck), et `bench-up` ne lisait pas le fichier.
 # Un banc dont la boite ne peut demarrer AUCUN pod sortait « banc PRET » et rendait 0.
 #
-# Le geste operateur (`deploy/box`, `await_provision_verdict`) le lisait deja. Deux chemins qui
+# Le geste operateur (`deploy/container`, `await_provision_verdict`) le lisait deja. Deux chemins qui
 # lisent le meme fichier doivent en tirer le MEME verdict, sinon le fichier ne veut plus rien dire.
 
 @test "la boite publie un ECHEC de convergence → PAS PRET, exit 6, meme si tout le reste est vert" {
@@ -248,7 +248,7 @@ run_bench() {
 @test "un verdict de boite ILLISIBLE est une NON-MESURE, pas un echec — et il se dit" {
   # Ne pas avoir lu le verdict n'est pas l'avoir lu mauvais. Sortir non nul sur une non-mesure
   # apprend a ignorer le code de sortie, ce qui coute exactement le jour ou il est vrai. Meme
-  # arbitrage que `deploy/box` sur l'expiration de son attente.
+  # arbitrage que `deploy/container` sur l'expiration de son attente.
   #
   # ⚠ ET LE CAS EST REEL, pas theorique : ce fichier vit sur un tmpfs et n'existe qu'apres que
   # l'entrypoint a fini son apply. Une boite qui vient de repartir n'en a pas encore.
@@ -461,7 +461,7 @@ run_bench() {
   # Les deux premieres sont invariantes : 66-deck-oidc les seme, une fois, pour toutes les boites.
   # Ce script n'a qu'un seul fait a apporter — celui qu'il est seul a connaitre.
   run env LCARS_BENCH_FAKE=1 bash "$SRC" --no-runner --no-creds --bind 0.0.0.0 --advertise 10.0.0.9
-  grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/box.env"
+  grep -q "LCARS_DECK_ORIGINS=http://10.0.0.9:20999$" "$BATS_TEST_TMPDIR/container.env"
 }
 
 @test "un bind PRECIS rend les deux adresses egales — l'ancien comportement revient" {

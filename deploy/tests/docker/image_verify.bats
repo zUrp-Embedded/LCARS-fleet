@@ -77,13 +77,13 @@ code() { grep -vE '^\s*#|^\s*`#' "$DF"; }
   [ "$(code | grep -E '^FROM ' | tail -n1)" = "FROM runtime AS final" ]
 }
 
-@test "le marqueur est un objet du PRODUIT — hors de la table de l'installeur, nomme par box/README" {
+@test "le marqueur est un objet du PRODUIT — hors de la table de l'installeur, nomme par container/README" {
   # ⚖ user 2026-09-04 (Q1, lot 7) : la table n'a plus de colonne docker. Le tampon est pose par le
   # Dockerfile (stage final), lu par « box status » : l'installeur ne le pose, ne le sonde, ni ne le
   # desinstalle.
   refute grep -qE '^anchor +/opt/lcars/\.verified' "$MANIFEST"
   refute grep -qE '^(anchor|runtime|dir|file|link) +\S+ +\S+ +\S+ +docker$' "$MANIFEST"
-  grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../runtime/services/box/README.md"
+  grep -q '\.verified' "$BATS_TEST_DIRNAME/../../../runtime/services/container/README.md"
 }
 @test "la CI bâtit l'image sur dood, et se declenche sur deploy/ et install.sh (DI-08)" {
   [ -f "$WF" ]

@@ -199,7 +199,7 @@ I3_AWK='
   # PRESENTES sur le daemon, et son propre commentaire promettait « la CLI RESOLUE ». Sur un Linux
   # natif le PATH porte `docker` (pose par le rail) : le defaut y est invisible.
   local f bad=0
-  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh "$BATS_TEST_DIRNAME"/../box "$BATS_TEST_DIRNAME"/../accept; do
+  for f in "$BATS_TEST_DIRNAME"/../modules.d/*.sh "$BATS_TEST_DIRNAME"/../container "$BATS_TEST_DIRNAME"/../accept; do
     [[ -f "$f" ]] || continue
     code "$f" | grep -q 'PROV_DOCKER_BIN' || continue
     code "$f" | grep -qE 'docker_endpoint' \

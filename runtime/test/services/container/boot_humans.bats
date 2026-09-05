@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/boot_humans.bats
+# SOURCE: runtime/test/services/container/boot_humans.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population
@@ -35,7 +35,7 @@ setup() {
   # machine provisionnee : sans decor, un temoin qui attend que celui qui joue passe GUARD B rougit des
   # le second run du gate — le siege, c'est lui (banc .63, 2026-08-30). Le decor nomme un fichier absent.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"

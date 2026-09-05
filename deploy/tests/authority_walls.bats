@@ -41,7 +41,7 @@ setup() {
   ARBRES=("$REPO/deploy" "$REPO/runtime/services" "$REPO/runtime/bin")
   mapfile -t CODE < <(
     find "${ARBRES[@]}" -type f \
-      \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'box' \
+      \( -name '*.sh' -o -name '*.py' -o -name 'lcars' -o -name 'container' \
          -o -name 'provision' -o -name 'Dockerfile' \) \
       -not -path '*/tests/*' 2>/dev/null | sort
   )

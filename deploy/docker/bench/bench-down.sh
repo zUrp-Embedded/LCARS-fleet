@@ -47,7 +47,7 @@ done
 # fichier, et le `down -v` ci-dessous echouerait sur un banc parfaitement destructible. C'est aussi
 # la variable dont `store_destroy_volumes` derive ce qu'il efface.
 # ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
-# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# est <N>-fleet (le defaut de « deploy/container », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
 # le poste (48/49) et le banc derivent les memes noms de la meme base.
 BOX_PROJECT="${PROJECT}-fleet"
 export LCARS_STORE_PREFIX="$BOX_PROJECT"

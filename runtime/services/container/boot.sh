@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SOURCE: runtime/services/box/boot.sh
+# SOURCE: runtime/services/container/boot.sh
 # AUTHOR: DrDree
 # STARDATE: 2026-07-05
 # STATUS: PROTO-V2 — le boot de la boite (PID 1 sous tini) : init de l'instance, gestes de forge, services, puis exec sshd
@@ -57,14 +57,14 @@ esac
 # ⚖ user 2026-09-04 (Q1 du chantier deploy-independance) : le modele est celui de Docker — l'image
 # est le produit, le conteneur une instance, l'etat dans le volume. Ce bloc rejouait ici, en shell
 # d'entrypoint, le siege, les zones, les clones et les cles ; puis `provision apply` rejouait
-# l'installeur entier a chaque boot. Tout cela est `runtime/services/box/init.sh`, un geste du
+# l'installeur entier a chaque boot. Tout cela est `runtime/services/container/init.sh`, un geste du
 # PRODUIT, idempotent, sur le protocole des modules : il resout le siege, le cree, pose les zones,
 # la source, les cles d'hote et le layout du volume — ce que `25`, `26` et `45-sudoers` posaient en
 # substrat docker. Il rend 3 quand la boite n'a rien pour determiner son siege : c'est l'etat « en
 # attente de configuration », et la boite reste debout pour que « box config » soit jouable.
 LCARS_UID="${LCARS_UID:-1000}"
 export LCARS_SYSADMIN_UID="$LCARS_UID"
-BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/services/box/init.sh}"
+BOX_INIT="${LCARS_BOX_INIT:-/opt/lcars/services/container/init.sh}"
 MODULE_PROTOCOL="${LCARS_MODULE_PROTOCOL:-/opt/lcars/services/lib/module-protocol.sh}"
 SEAT_LOGIN_FILE="${LCARS_SEAT_LOGIN_FILE:-/run/lcars-seat.login}"
 # ⚠ /run N'EST PAS UN TMPFS DANS UN CONTENEUR : un `docker restart` garde les fichiers du boot

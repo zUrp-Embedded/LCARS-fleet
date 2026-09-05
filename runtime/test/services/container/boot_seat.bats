@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/boot_seat.bats
+# SOURCE: runtime/test/services/container/boot_seat.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
 # STATUS: bats tests for entrypoint.sh — le SIEGE de la boite est le #1 de la forge, et il le DERIVE
@@ -33,7 +33,7 @@
 load ../../support/refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT. Ce fichier lit `LCARS_ADMIRAL` et `FORGE_BASE_URL` : un
   # temoin qui les herite mesure la machine qui le lance, pas la regle.
@@ -76,7 +76,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
 }
 
 @test "siege : la garde SUIT l'uid du siege — le cas ou les deux defauts se separent" {
-  # ⚠ LE TEMOIN QUI COMPTE. `LCARS_UID` est une molette documentee (`deploy/box`) : la tourner
+  # ⚠ LE TEMOIN QUI COMPTE. `LCARS_UID` est une molette documentee (`deploy/container`) : la tourner
   # creait le siege a 1005 pendant que GUARD B continuait de reserver 1000. admiral pouvait alors
   # lancer une fleet, et ses pods heritent de son uid sudo-capable — l'exact inverse de la sandbox
   # que la garde existe pour tenir.
@@ -86,7 +86,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   [[ "$output" == *"UID=1005 SYSADMIN=1005"* ]]
 }
 
-# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `runtime/test/services/box/init_seat.bats` ───
+# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `runtime/test/services/container/init_seat.bats` ───
 
 @test "VERROU : aucun compose ne pose de defaut sur LCARS_ADMIRAL" {
   # ⚠ LE SEUL TEMOIN QUI AURAIT ATTRAPE LE DEFAUT REEL, et les huit ci-dessus ne le pouvaient pas :
@@ -118,9 +118,9 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   # Le refus n'a pas bouge — un siege inventable ne s'invente toujours pas. Ce qui change, c'est
   # qu'il n'emporte plus le conteneur avec lui : meme arbitrage que pour l'echec de convergence,
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
-  local src="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  local src="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
-  # Lot 6 : la derivation est dans `box/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
+  # Lot 6 : la derivation est dans `container/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
   # code et reste debout.
   grep -qE '^\s*3\) say "boite EN ATTENTE DE CONFIGURATION' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"

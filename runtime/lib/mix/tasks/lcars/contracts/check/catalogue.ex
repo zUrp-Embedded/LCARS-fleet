@@ -358,14 +358,14 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
   @doc false
   @spec check_face_roots_provisioned(String.t()) :: Support.result()
   def check_face_roots_provisioned(root) do
-    # Lot 6 (2026-09-04) : the box creates its zones in `box/init.sh` (the product's instance init),
+    # Lot 6 (2026-09-04) : the box creates its zones in `container/init.sh` (the product's instance init),
     # no longer in the docker entrypoint — the anchor line kept its exact shape.
-    entrypoint = Path.expand("services/box/init.sh", root)
+    entrypoint = Path.expand("services/container/init.sh", root)
     module = Path.expand("../deploy/modules.d/25-directories.sh", root)
     expected = read_face_roots(Path.expand("lib/fleet/layout.ex", root))
 
     remediation =
-      "add the face root to the `install -d` line of runtime/services/box/init.sh — a face declared " <>
+      "add the face root to the `install -d` line of runtime/services/container/init.sh — a face declared " <>
         "in Fleet.Layout with no zone on the machine makes the box look healthy and kills the " <>
         "first onboard that needs it (the runtime runs as the human; /home belongs to root)"
 
@@ -412,7 +412,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Catalogue do
 
           {expected, at_boot, on_every_substrate} ->
             missing =
-              Enum.map(expected -- at_boot, &"#{&1}: absent de box/init.sh (la boite)") ++
+              Enum.map(expected -- at_boot, &"#{&1}: absent de container/init.sh (la boite)") ++
                 Enum.map(
                   expected -- on_every_substrate,
                   &"#{&1}: absent du module provision (donc absent sur wsl et linux)"

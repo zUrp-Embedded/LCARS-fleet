@@ -27,7 +27,7 @@ prov_console_human() {
 
 prov_runtime_dirs() {
   # ⚠ RIEN SUR DOCKER, ET C'EST LA TABLE QUI LE DIT, PAS UN DRIFT. /run est un tmpfs : VIDE au build
-  # de l'image, pose par `runtime/services/box/init.sh` au boot de l'instance — un fait de BOOT, pas
+  # de l'image, pose par `runtime/services/container/init.sh` au boot de l'instance — un fait de BOOT, pas
   # de l'image. Et sans systemd dans la boite, aucune declaration tmpfiles n'y a de sens. Une table
   # vide est exactement ce que `check_tmpfiles` lit comme « ce substrat ne le porte pas ». Sur la
   # boite, le stage `verify` joue ce module AU BUILD (lot 14) : ces six entrees y rendraient six

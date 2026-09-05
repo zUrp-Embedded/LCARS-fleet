@@ -119,7 +119,7 @@ EOF
   [[ "$output" == *"docker n'est pas un rail"* ]]
   [[ "$output" == *"Dockerfile"* ]]
   [[ "$output" == *"verify"* ]]
-  [[ "$output" == *"box/init.sh"* ]]
+  [[ "$output" == *"container/init.sh"* ]]
   refute grep -q "60-deploystub" "$RUN_LOG"
 }
 @test "docker n'est PAS un rail : uninstall y est refuse aussi — doctor et list restent" {
@@ -637,7 +637,7 @@ EOF
   refute grep -qE -- "compose .*create lcars|exec .*lcars-1" "$code"
   refute grep -q -- "forge-apply" "$code"
   # la porte `forge-apply` de l'image RESTE — c'est le rail BOITE qui l'emprunte, et il est vivant
-  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/box/boot.sh"
+  grep -qE '^\s*forge-apply\)' "$BATS_TEST_DIRNAME/../../../runtime/services/container/boot.sh"
 }
 
 @test "61-forge-structure : AUCUN fichier ne traverse vers un daemon — il n'y a plus de frontiere" {

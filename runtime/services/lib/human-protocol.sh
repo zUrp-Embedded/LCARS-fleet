@@ -28,7 +28,7 @@
 # le `source`, retiree (`unset`) juste apres. Un module que l'hote lance ne l'herite donc pas et
 # garde sa garde ; un hote qui l'exporterait, ou qui poserait un `LCARS_LOGIN` d'emprunt a la
 # place, ferait de toute lecture « de la personne » (`human_home`) celle de ce login. Deux hotes
-# (lot 15) : `human-converger.sh` (la boucle) et `box/boot.sh` (la mesure de population au boot) ;
+# (lot 15) : `human-converger.sh` (la boucle) et `container/boot.sh` (la mesure de population au boot) ;
 # les temoins qui sourcent pour la regle la posent de la meme facon. Sans sujet nomme, les
 # lectures de la personne rendent « rien » ou « non » — jamais l'utilisateur courant.
 if [[ -z "${LCARS_HUMAN_PROTOCOL_HOST:-}" ]]; then

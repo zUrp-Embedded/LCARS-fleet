@@ -304,7 +304,7 @@ setup() {
   # regle ne soit cassee, et il serait passe au vert sur un `exec` vers n'importe quoi d'autre. Ce
   # qui se tient est : LA BRANCHE BOITE SE TERMINE PAR UN EXEC VERS LE DELEGUE DU RAIL, donc elle
   # ne retombe jamais dans la branche poste.
-  grep -qE 'exec "\$SCRIPT_DIR/deploy/box" up' "$SRC"
+  grep -qE 'exec "\$SCRIPT_DIR/deploy/container" up' "$SRC"
 }
 
 @test "REGRESSION — tout ce qui suit « -- » atteint le delegue, VERBATIM" {
@@ -322,7 +322,7 @@ setup() {
 printf '%s\n' "$#"; printf '[%s]' "$@"; echo
 SPY
   chmod 0755 "$fake/deploy/docker/bench/bench-up.sh"
-  mkdir -p "$fake/deploy"; touch "$fake/deploy/box"; chmod 0755 "$fake/deploy/box"
+  mkdir -p "$fake/deploy"; touch "$fake/deploy/container"; chmod 0755 "$fake/deploy/container"
   _faux_provision "$fake" "${_faits_sains[@]}"
 
   run bash "$fake/install.sh" --box --bench -- --project bt --ssh-port 2299 < /dev/null
@@ -337,7 +337,7 @@ SPY
 # dit qu'aucun temoin ne traverse, « le chemin boite par un build de 15 min » — vrai, et c'est
 # justement pour ca que le chemin `--bench` n'a jamais ete joue SANS IMAGE. Il `exec`utait son
 # delegue avant d'atteindre le build, qui ne vivait que sur l'autre chemin ; sur une machine sans
-# image, le seul rail qui promet « en un geste » mourait en dictant `deploy/box build`.
+# image, le seul rail qui promet « en un geste » mourait en dictant `deploy/container build`.
 #
 # Le defaut a survecu a quatre rejeux sur trois machines : sous WSL le daemon est partage par toute
 # la VM, donc une distro vierge n'est PAS un docker vierge, et l'image etait toujours deja la.
@@ -380,7 +380,7 @@ _fake_tree() {
   rm -rf "$fake"; mkdir -p "$fake/deploy/docker/bench" "$fake/deploy/lib"
   cp "$SRC" "$fake/install.sh"
   cp "$REPO/deploy/lib/docker-endpoint.sh" "$fake/deploy/lib/"
-  cat > "$fake/deploy/box" <<SPY
+  cat > "$fake/deploy/container" <<SPY
 #!/usr/bin/env bash
 echo "DOCKERSH:\$*"
 exit $dockersh_rc
@@ -395,7 +395,7 @@ SPY
 exit 0
 SPY
   _faux_provision "$fake" "${_faits_sains[@]}"
-  chmod 0755 "$fake/deploy/box" "$fake/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
+  chmod 0755 "$fake/deploy/container" "$fake/deploy/docker/bench/bench-up.sh" "$BINDIR/docker"
   printf '%s' "$fake"
 }
 
@@ -517,8 +517,8 @@ SPY
 
 @test "rail boite : un delegue absent nomme le CHECKOUT, jamais docker" {
   local l_garde l_exec
-  l_garde="$(grep -n 'deploy/box" \]\] ||' "$SRC" | head -1 | cut -d: -f1)"
-  l_exec="$(grep -n 'exec "\$SCRIPT_DIR/deploy/box" doctor' "$SRC" | head -1 | cut -d: -f1)"
+  l_garde="$(grep -n 'deploy/container" \]\] ||' "$SRC" | head -1 | cut -d: -f1)"
+  l_exec="$(grep -n 'exec "\$SCRIPT_DIR/deploy/container" doctor' "$SRC" | head -1 | cut -d: -f1)"
   [ -n "$l_garde" ] && [ -n "$l_exec" ]
   # La garde vient AVANT tout exec : refuser apres avoir tente est un diagnostic sur le mauvais objet.
   [ "$l_garde" -lt "$l_exec" ]
@@ -642,13 +642,13 @@ SPY
 
 @test "SANS BANC : \`--forge-project\` passe par l'environnement — l'autre delegue n'a pas de drapeaux" {
   local fake; fake="$(_fake_tree 0 0)"
-  cat > "$fake/deploy/box" <<'SPY'
+  cat > "$fake/deploy/container" <<'SPY'
 #!/usr/bin/env bash
 echo "DOCKERSH:$* LCARS_BASE=${LCARS_BASE:-<vide>}"
 SPY
-  chmod 0755 "$fake/deploy/box"
+  chmod 0755 "$fake/deploy/container"
   run env FORGE_BASE_URL=http://forge.test bash "$fake/install.sh" --box --forge-project alice4 < /dev/null
-  # lot 9 (DI-05) : N est la BASE — deploy/box en fait <N>-fleet
+  # lot 9 (DI-05) : N est la BASE — deploy/container en fait <N>-fleet
   [[ "$output" == *"LCARS_BASE=alice4"* ]]
 }
 
@@ -700,7 +700,7 @@ SPY
   refute grep -q 'PROV_ANNOUNCE_FILE' <<<"$code"
   # Et les deux sorties ont la MEME forme : un exec vers un delegue du clone.
   grep -q 'exec "$WORKSTATION" up' <<<"$code"
-  grep -qE 'exec "\$SCRIPT_DIR/deploy/box"' <<<"$code"
+  grep -qE 'exec "\$SCRIPT_DIR/deploy/container"' <<<"$code"
 }
 
 @test "le delegue du rail POSTE fait partie du checkout — un absent nomme le CHECKOUT" {

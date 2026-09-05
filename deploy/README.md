@@ -9,7 +9,7 @@ ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 
 ⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
 CHAQUE DÉMARRAGE** — l'entrypoint lançait `provision apply --substrate docker` au boot (jusqu'au
-lot 6 du chantier deploy-independance : le boot est `runtime/services/box/boot.sh`, il ne joue plus
+lot 6 du chantier deploy-independance : le boot est `runtime/services/container/boot.sh`, il ne joue plus
 aucun module de l'installeur), et le banc entier reposait dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
 contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
 FERMÉS et épinglés :
@@ -41,7 +41,7 @@ frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxi
 fichier de `services/` est pose quelque part.
 
 Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
-est le boot du produit, `runtime/services/box/boot.sh`), les cinq compose et l'override des
+est le boot du produit, `runtime/services/container/boot.sh`), les cinq compose et l'override des
 secrets (`docker-compose.secrets.yml`, que `box` ajoute à chaque appel : les secrets posés par
 `box config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
@@ -89,11 +89,11 @@ deploy/provision list                  # les modules retenus pour ce substrat
 sudo deploy/provision apply --only 60  # un seul module
 ```
 
-**Le jumeau : `deploy/box`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
+**Le jumeau : `deploy/container`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
 `wsl.conf`) ; `box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes verbes
 documentés en tête, mêmes codes retour, même place dans l'arbre — qui sait lire l'un sait lire
 l'autre. Les douze verbes (`build up doctor shell logs down reset source-push config forge-check
-forge-apply runner-token`) s'appellent par `deploy/box <verbe>` à la racine, qui détecte, refuse en
+forge-apply runner-token`) s'appellent par `deploy/container <verbe>` à la racine, qui détecte, refuse en
 nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
 
 **La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
@@ -152,14 +152,14 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 61-forge-structure | wsl linux | wsl linux | **la STRUCTURE de la forge** : roster du catalogue dérivé de la release POSÉE par 60 (`enroll-catalogue.sh --release`, plus aucun `mix`), recette tofu copiée/initialisée/jouée par `forge-gestures.sh apply`. Sorti de 48 le 2026-09-04 (point 1) : la structure exigeait la release que 60 pose douze rangs plus loin |
 | 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
 | 63-forge-tokens | any | any | les jetons de rôle : un APPELANT du geste de forge du produit `runtime/services/forge.d/tokens.sh` (sondes de la forge, modes de l'autorité, roster dérivé du release, mint par `provision-role-tokens.sh`) — lot 6, 2026-09-04 |
-| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`runtime/services/box/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
+| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`runtime/services/container/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
 | 65-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul. Un APPELANT mince de `runtime/services/forge.d/ops-branch.sh` (lot 6) |
 | 66-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json` ; les ENTRÉES (`PROV_DECK_ORIGINS`) convergent, la loopback y est semée dans ses deux écritures. Un APPELANT mince de `runtime/services/forge.d/deck-oidc.sh` (lot 6) : il passe l'adresse annoncée, le port et les origines |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge au boot de la boîte (`runtime/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
+install.sh) et le reste converge au boot de la boîte (`runtime/services/container/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.

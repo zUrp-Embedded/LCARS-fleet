@@ -260,7 +260,7 @@ if [[ "$SEED_REPOS" -eq 1 ]]; then
     # que la boite ne fait pas tourner.
     BOX_REV="$("$DOCKER_BIN" inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BOX_IMAGE" 2>/dev/null || true)"
     [[ -n "$BOX_REV" && "$BOX_REV" != "unknown" ]] \
-      || die "fleet/lcars : l'image $BOX_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/box build la pose)" 7
+      || die "fleet/lcars : l'image $BOX_IMAGE ne porte pas de revision (label OCI) — le banc ne seme pas un code qu'il ne peut pas nommer (deploy/container build la pose)" 7
     git -C "$REPO_ROOT" rev-parse -q --verify "${BOX_REV}^{commit}" >/dev/null 2>&1 \
       || die "fleet/lcars : la revision de l'image ($BOX_REV) n'est pas dans ce clone ($REPO_ROOT) — le banc seme le code de la BOITE ; rebatis l'image depuis ce clone, ou fetch cette revision" 7
     PUSH_ERR="$(git -C "$REPO_ROOT" push -q --force "$LCARS_REMOTE" "${BOX_REV}:refs/heads/main" 2>&1)" \

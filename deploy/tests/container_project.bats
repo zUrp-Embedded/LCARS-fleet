@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/box_project.bats
+# SOURCE: deploy/tests/container_project.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-07
-# STATUS: bats tests for deploy/box — a project NAME is not proof you are talking about the same box
+# STATUS: bats tests for deploy/container — a project NAME is not proof you are talking about the same box
 #
 # WHY THIS EXISTS. The box rail targeted the compose project `lcars` as a hardcoded constant. Compose
 # will happily apply a file to a project it never created: it computes the desired state from THAT
@@ -29,7 +29,7 @@ load refute
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  SRC="$REPO/deploy/box"
+  SRC="$REPO/deploy/container"
   CF="$REPO/deploy/docker/docker-compose.yml"
 
   BINDIR="$BATS_TEST_TMPDIR/bin"
@@ -330,18 +330,18 @@ seed_project() {
   #
   # ARBRE FACTICE plutot qu'une couture dans le script : un `LCARS_BOX_OVERRIDE` dont le seul
   # client serait ce temoin ferait porter au code une variable qui ne sert a personne. Ici on
-  # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/deploy/box`).
+  # eprouve EN PLUS la resolution reelle du chemin (`SCRIPT_DIR/deploy/container`).
   local root="$BATS_TEST_TMPDIR/arbre"
   mkdir -p "$root/deploy/lib"
-  mkdir -p "$root/deploy"; cp "$SRC" "$root/deploy/box"
+  mkdir -p "$root/deploy"; cp "$SRC" "$root/deploy/container"
   cp "$REPO/deploy/lib/docker-endpoint.sh" "$root/deploy/lib/"
-  cat > "$root/deploy/box" <<'FAKE'
+  cat > "$root/deploy/container" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$#"; printf '[%s]' "$@"; echo
 FAKE
-  chmod 0755 "$root/deploy/box"
+  chmod 0755 "$root/deploy/container"
 
-  run bash "$root/deploy/box" logs --tail "deux mots" -f
+  run bash "$root/deploy/container" logs --tail "deux mots" -f
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "4" ]]
   [[ "${lines[1]}" == '[logs][--tail][deux mots][-f]' ]]
@@ -355,7 +355,7 @@ FAKE
 # faisait que le passer. Ces temoins tiennent le sens de la fleche.
 
 @test "l'aide vit dans le DELEGUE, et la porte ne fait que la relayer" {
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   # ⚠ LES CONTROLES STATIQUES D'ABORD, ET CE N'EST PAS UN DETAIL DE STYLE. Si le delegue redemande
   # son aide a la porte pendant que la porte la lui demande, les deux `exec` s'appellent sans fond
   # de pile : rien ne compte les tours, rien ne sort. Un temoin qui LANCE avant de LIRE PEND au lieu
@@ -372,7 +372,7 @@ FAKE
 }
 
 @test "les DEUX portes rendent le MEME texte — une aide recopiee derive" {
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   run env PATH=/usr/bin:/bin timeout 15 bash "$SRC" help
   local par_la_porte="$output"
   # ⚠ `timeout` : ce temoin garde contre une BOUCLE D'EXEC. Sans borne, il ne rougit pas — il PEND,
@@ -395,7 +395,7 @@ FAKE
   # Sa carte annoncait « l'aide de la porte, qui reste la source unique de l'aide. Elle n'est pas
   # recopiee ici ». Vrai jusqu'a ce geste, faux apres — et un commentaire perime oriente toutes les
   # sessions suivantes sans date ni signature.
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   refute grep -q 'qui reste la source unique de l' "$box"
 }
 
@@ -409,7 +409,7 @@ FAKE
 
 # shellcheck disable=SC2016 # motifs `grep` : `$PROV_DOCKER_BIN` doit atteindre grep tel quel
 @test "le delegue SONDE, il ne lit plus ce qu'une porte lui pose" {
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   grep -q 'docker_endpoint || fail' "$box"
   grep -q '^DOCKER="\$PROV_DOCKER_BIN"$' "$box"
   # ⚠ LE CODE, PAS LE FICHIER. Rendue mordante, la premiere de ces deux lignes a accuse `box:137` —
@@ -424,7 +424,7 @@ FAKE
 @test "le delegue rend l'aide SANS docker — elle passe avant la sonde" {
   # ⚠ L'ORDRE EST LA PROPRIETE. Un `--help` qui exige l'outil qu'il documente est une porte fermee,
   # et c'est le seul geste du rail qui n'a aucune condition.
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   local l_help l_sonde
   l_help="$(grep -n 'help|-h|--help) usage; exit 0' "$box" | head -1 | cut -d: -f1)"
   l_sonde="$(grep -n 'docker-endpoint.sh"$' "$box" | head -1 | cut -d: -f1)"

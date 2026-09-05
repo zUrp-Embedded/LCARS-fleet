@@ -46,7 +46,7 @@ setup() {
 }
 
 # Le perimetre : ce qui DECIDE. Le Dockerfile et l'entrypoint portent le layout de l'image.
-sources() { printf '%s\n' "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision "$DEPLOY"/box; }
+sources() { printf '%s\n' "$DEPLOY"/modules.d/*.sh "$DEPLOY"/lib/*.sh "$DEPLOY"/provision "$DEPLOY"/container; }
 
 # Une ligne de CODE QUI DECIDE : ni commentaire, ni message, ni la DECLARATION elle-meme.
 #

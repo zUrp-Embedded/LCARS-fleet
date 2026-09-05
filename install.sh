@@ -425,7 +425,7 @@ else
   # choix, donc une mutation — ce qu'une sonde read-only ne fait pas.
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
     echo "  ${W}--check${N} : le bilan ci-dessus est tout ce qu'une sonde peut dire sans rail choisi."
-    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/box status"
+    echo "  Pour sonder un déploiement existant : deploy/workstation doctor · deploy/container status"
     exit 0
   fi
   ans=""
@@ -583,7 +583,7 @@ else
   _banner_body=(
     "  Pas de paquet, pas d'utilisateur, pas de groupe, rien"
     "  dans /etc ni /usr. ~3 Go d'image, ~15 min de build."
-    "  Pour tout défaire : ${W}deploy/box reset${N} — 30 s."
+    "  Pour tout défaire : ${W}deploy/container reset${N} — 30 s."
   )
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     _banner_body+=("  ${W}--bench : forge jetable + runner CI + humain de démo.${N}")
@@ -613,13 +613,13 @@ if [[ "$RAIL" == "box" ]]; then
   #
   # Ce que ce bloc lisait était de toute façon MORT depuis E1 : `PROV_DOCKER_DENIED`,
   # `PROV_DOCKER_WHY`, `docker_endpoint`. Trois variables d'une lib que cette porte ne source plus.
-  [[ -x "$SCRIPT_DIR/deploy/box" ]] || {
-    echo "  ${R}deploy/box introuvable — ce rail exige le checkout complet.${N}"
+  [[ -x "$SCRIPT_DIR/deploy/container" ]] || {
+    echo "  ${R}deploy/container introuvable — ce rail exige le checkout complet.${N}"
     echo "  git clone $REPO_URL && cd LCARS-fleet && bash install.sh --box"
     exit 1
   }
   if [[ "$DOCTOR_MODE" -eq 1 ]]; then
-    exec "$SCRIPT_DIR/deploy/box" doctor
+    exec "$SCRIPT_DIR/deploy/container" doctor
   fi
   # ─── L'IMAGE EST UNE PRÉCONDITION DES DEUX CHEMINS BOÎTE, ET C'EST LA PORTE QUI LA FOURNIT ──────
   # ─── L'ARITÉ SE DÉCLARE, ELLE NE SE SUPPOSE PAS ────────────────────────────────────────────────
@@ -653,7 +653,7 @@ if [[ "$RAIL" == "box" ]]; then
           # PRÉPOSÉ : le délégué lit en dernier-gagne, donc un `-- --project X` explicite l'emporte.
           DELEGATE_ARGS=(--project "${PASSTHRU[$((_i + 1))]}" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"})
         else
-          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # la boite s'appelle <N>-fleet (deploy/box)
+          export LCARS_BASE="${PASSTHRU[$((_i + 1))]}"   # la boite s'appelle <N>-fleet (deploy/container)
         fi ;;
       # ⚠ TROIS PORTS, PAS DEUX, ET LE TROISIEME MANQUAIT. `bench-up.sh` en publie trois — forge,
       # deck et SSH — et refuse net si l'un d'eux est tenu. La porte n'en traduisait que deux : un
@@ -694,7 +694,7 @@ if [[ "$RAIL" == "box" ]]; then
     echo "  ${R}FORGE_BASE_URL n'est pas posée — la boîte ne fabrique pas ta forge, elle la consomme.${N}"
     echo "  Deux voies :"
     echo "    ${W}--bench${N}                     LCARS monte une forge jetable, un runner et un humain de démo"
-    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« deploy/box forge-check »)"
+    echo "    FORGE_BASE_URL=http://…    tu as déjà une forge  (« deploy/container forge-check »)"
     exit 1
   fi
 
@@ -709,7 +709,7 @@ if [[ "$RAIL" == "box" ]]; then
   # quitté ce fichier.
   #
   # Les trois témoins qui gardaient ce chemin (image absente / présente / build en échec) suivent
-  # dans `box_project.bats` — ce sont des déplacements, pas des suppressions.
+  # dans `container_project.bats` — ce sont des déplacements, pas des suppressions.
 
   if [[ "$WITH_BENCH" -eq 1 ]]; then
     echo ""
@@ -719,8 +719,8 @@ if [[ "$RAIL" == "box" ]]; then
     exec "$SCRIPT_DIR/deploy/docker/bench/bench-up.sh" ${DELEGATE_ARGS[@]+"${DELEGATE_ARGS[@]}"}
   fi
   echo ""
-  echo "  ${W}up${N} — la sortie qui suit est celle de deploy/box"
-  exec "$SCRIPT_DIR/deploy/box" up
+  echo "  ${W}up${N} — la sortie qui suit est celle de deploy/container"
+  exec "$SCRIPT_DIR/deploy/container" up
 fi
 
 # ─── LA BRANCHE POSTE : on délègue, comme pour la boîte ─────────────────────

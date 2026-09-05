@@ -203,11 +203,11 @@ Said plainly, because a tool that hides its edges wastes your time:
 The stack is built to say what is missing rather than to look healthy:
 
 ```bash
-deploy/box -p lcars-nuit doctor   # what is provisioned, what drifted, and the gesture that fixes it
-deploy/box -p lcars-nuit logs     # the box's own account of its boot
+deploy/container -p lcars-nuit doctor   # what is provisioned, what drifted, and the gesture that fixes it
+deploy/container -p lcars-nuit logs     # the box's own account of its boot
 ```
 
-⚠ `-p lcars-nuit` is not optional here. `deploy/box` defaults to a project called `lcars`, and the
+⚠ `-p lcars-nuit` is not optional here. `deploy/container` defaults to a project called `lcars`, and the
 bench above creates one called `lcars-nuit` — without the flag you would be asking about a
 deployment that does not exist. (`install.sh --box --bench -- --project <name>` changes it; the teardown line it
 prints always carries the right one.)

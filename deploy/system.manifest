@@ -243,7 +243,7 @@ runtime   /run/lcars-converger.refused                 0644  root:root          
 # ⚖ user 2026-09-04 (Q1, lot 7) : cette table N'A PLUS DE COLONNE `docker`. Les fichiers de boot de
 # la boite (`/run/lcars-boot.state`, `/run/lcars-seat.login`, `/run/lcars-provision.rc`,
 # `/run/lcars-humans.rc`, `/opt/lcars/.verified`) sont des objets du PRODUIT, poses par
-# `runtime/services/box/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/box/README.md`.
+# `runtime/services/container/{boot,init}.sh` et le Dockerfile, nommes dans `runtime/services/container/README.md`.
 # L'installeur ne les pose pas, ne les sonde pas, ne les desinstalle pas. `/run/sshd` (le repertoire
 # de separation de privileges d'openssh, `mkdir -p` du Dockerfile) est du meme cote : un objet du
 # PRODUIT dans l'image, qu'aucun rail de l'installeur ne pose — une ligne `docker` ici rouvrirait la

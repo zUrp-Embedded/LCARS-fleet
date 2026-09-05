@@ -222,14 +222,14 @@ _journal_params
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
 # ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
-# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/box/), et rien ne
+# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/container/), et rien ne
 # se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
 # l'image (doctor au build) et de `list` — jamais un substrat qu'on converge ou qu'on désinstalle.
 case "$CMD" in
   apply|uninstall|update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
-  L'image se bâtit (deploy/docker/Dockerfile, « deploy/box build »), se vérifie au build (stage verify,
+  L'image se bâtit (deploy/docker/Dockerfile, « deploy/container build »), se vérifie au build (stage verify,
   « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
-  (runtime/services/box/init.sh). Pour l'instance : « deploy/box status » · « deploy/box down »." ;;
+  (runtime/services/container/init.sh). Pour l'instance : « deploy/container status » · « deploy/container down »." ;;
 esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
@@ -586,7 +586,7 @@ else
     if [[ "$SUBSTRATE" == "docker" ]]; then
       # docker n'est pas un rail : un drift ici est une IMAGE non conforme a son build, pas un
       # etat a converger — le geste est le rebuild (le stage verify le refuse au build).
-      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/box build) — un drift ici est une image non conforme"
+      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/container build) — un drift ici est une image non conforme"
     else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi

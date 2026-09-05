@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/box_config.bats
+# SOURCE: deploy/tests/container_config.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for deploy/box config|status — la conf de l'instance vit COTE HOTE, le verdict se lit de l'hote
+# STATUS: bats tests for deploy/container config|status — la conf de l'instance vit COTE HOTE, le verdict se lit de l'hote
 #
 # ⚖ user 2026-09-04 (Q1, chantier deploy-independance) : le modele Docker. « box config » ecrit l'env
 # et les secrets de l'instance sur l'hote (par projet) ; « box up » les donne au conteneur ; « box
@@ -12,7 +12,7 @@ load refute
 
 setup() {
   REPO="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  SRC="$REPO/deploy/box"
+  SRC="$REPO/deploy/container"
   BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
   CALLS="$BATS_TEST_TMPDIR/docker.calls"; : > "$CALLS"
   cat > "$BINDIR/docker" <<EOS
@@ -131,7 +131,7 @@ EOS
 @test "status : sans conteneur, rc 2 et le geste nomme" {
   run bash "$SRC" status
   [ "$status" -eq 2 ]
-  [[ "$output" == *"AUCUN conteneur"*"box up"* ]]
+  [[ "$output" == *"AUCUN conteneur"*"container up"* ]]
 }
 
 @test "status : sain — tout converge, le tampon est la revision qui tourne, rc 0" {
@@ -150,7 +150,7 @@ EOS
   export STUB_IDS=c0ffee STUB_BOOT=awaiting-config STUB_HEALTH=starting
   run bash "$SRC" status
   [ "$status" -eq 1 ]
-  [[ "$output" == *"EN ATTENTE DE CONFIGURATION"*"box config"* ]]
+  [[ "$output" == *"EN ATTENTE DE CONFIGURATION"*"container config"* ]]
 }
 
 @test "status : drift de forge ou aucun humain = degrade (1) ; init en echec ou conteneur mort = panne (2)" {
@@ -182,8 +182,8 @@ EOS
   sed -i 's/^exit 0$/[[ "$1 $2" == "image inspect" ]] \&\& exit 1; exit 0/' "$BINDIR/docker"
   run bash "$SRC" up
   [ "$status" -eq 1 ]
-  [[ "$output" == *"box build"* ]]
-  [[ "$output" == *"box pull"* ]]
+  [[ "$output" == *"container build"* ]]
+  [[ "$output" == *"container pull"* ]]
   refute grep -q ' pull ' "$CALLS"
 }
 

@@ -403,7 +403,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.SingleSource do
        "the acceptance gate's default"},
       # Lot 6 (2026-09-04) : the box's uid-map and master-token paths used to be carved into the
       # entrypoint as literals; they are now DERIVED from the product module protocol's
-      # `LCARS_PRIVATE_DIR` (box/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
+      # `LCARS_PRIVATE_DIR` (container/init.sh composes `$LCARS_PRIVATE_DIR/forge-uid.map`). That default is
       # the holder that counts on the product side — the same shape as the provisioning default.
       {"services/lib/module-protocol.sh", ~r/:\s*"\$\{LCARS_PRIVATE_DIR:=([^}]+)\}"/,
        "the product module protocol's default"}

@@ -14,7 +14,7 @@ load ../support/refute
 
 setup() {
   SERVICES="$(cd "$BATS_TEST_DIRNAME/../../services" && pwd)"
-  mapfile -t SOURCES < <(ls "$SERVICES"/*.sh "$SERVICES"/forge.d/*.sh "$SERVICES"/human.d/*.sh "$SERVICES"/box/*.sh "$SERVICES"/lib/*.sh)
+  mapfile -t SOURCES < <(ls "$SERVICES"/*.sh "$SERVICES"/forge.d/*.sh "$SERVICES"/human.d/*.sh "$SERVICES"/container/*.sh "$SERVICES"/lib/*.sh)
   [ "${#SOURCES[@]}" -ge 15 ]
 }
 code() { grep -vE '^\s*#' "$1"; }
@@ -52,8 +52,8 @@ code() { grep -vE '^\s*#' "$1"; }
 # (`deploy/tests/lib/provision-lib.bats`, 4 login.defs × 4 logins), qui lit les deux par nature.
 #
 # La forme mordue : une ligne de CODE qui porte le nombre 1000 ou 60000 ET parle d'uid. Hors mur,
-# et c'est dit ici pour que personne ne l'y ajoute : `LCARS_UID="${LCARS_UID:-1000}"` dans `box/
-# init.sh` et `box/boot.sh` est l'uid du SIEGE dans la boite (pose par le compose), pas une borne
+# et c'est dit ici pour que personne ne l'y ajoute : `LCARS_UID="${LCARS_UID:-1000}"` dans `container/
+# init.sh` et `container/boot.sh` est l'uid du SIEGE dans la boite (pose par le compose), pas une borne
 # de la frontiere ; et `… / 1000` dans `bin/fleet` convertit des millisecondes.
 I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
 

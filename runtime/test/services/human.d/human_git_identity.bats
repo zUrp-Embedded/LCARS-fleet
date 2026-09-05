@@ -138,7 +138,7 @@ account() { # account <full_name> <email>
 @test "TEMOIN STRUCTUREL : l'entrypoint ne pose plus d'identite git" {
   # La regression exacte : un bloc d'identite dans l'entrypoint vise UN compte — celui de l'entree
   # du conteneur — et rate par construction tout humain enrole apres le boot.
-  EP="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  EP="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   refute grep -qE '^\s*su - "\$LCARS_[A-Z]+" -c "git config' "$EP"
   refute grep -q 'LCARS_ADMIRAL_EMAIL' <(grep -v '^#' "$EP")
 }

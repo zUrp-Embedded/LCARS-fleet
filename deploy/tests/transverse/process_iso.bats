@@ -37,7 +37,7 @@
 load ../refute
 
 setup() {
-  ENTRY="$BATS_TEST_DIRNAME/../../../runtime/services/box/boot.sh"
+  ENTRY="$BATS_TEST_DIRNAME/../../../runtime/services/container/boot.sh"
   SERVICES="$BATS_TEST_DIRNAME/../../modules.d/64-services.sh"
   CONVERGER="$BATS_TEST_DIRNAME/../../../runtime/services/human-converger.sh"
   [ -f "$ENTRY" ] && [ -f "$SERVICES" ] && [ -f "$CONVERGER" ]

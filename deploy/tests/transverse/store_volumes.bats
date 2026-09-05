@@ -207,10 +207,10 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # ⚠ ET LE TEMOIN GREPPE LE PORTEUR DU GESTE, PAS LA PORTE : un temoin reste sur un relais
   # passerait au vert sur un `reset` devenu muet — il mesurerait un fichier qui ne porte plus le
   # geste.
-  grep -q "store_spared_line" "$DEPLOY/box"
+  grep -q "store_spared_line" "$DEPLOY/container"
   refute grep -q "store_spared_line" "$DEPLOY/docker/bench/bench-down.sh"
   grep -q "store_destroy_volumes" "$DEPLOY/docker/bench/bench-down.sh"
-  refute grep -q "store_destroy_volumes" "$DEPLOY/box"
+  refute grep -q "store_destroy_volumes" "$DEPLOY/container"
 }
 
 @test "tout appelant du magasin POSE le prefixe avant d'appeler compose ou la lib" {
@@ -219,8 +219,8 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   local f
   # lot 9 (DI-05) : chez `box` le projet EST celui de la boite ; sur le banc c'est `<N>-fleet`,
   # derive de la base — le prefixe suit le projet de la boite dans les deux cas
-  grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/box" \
-    || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/box"; return 1; }
+  grep -qE '^export LCARS_STORE_PREFIX="\$PROJECT"$' "$DEPLOY/container" \
+    || { echo "n'exporte pas le prefixe au nom du projet : $DEPLOY/container"; return 1; }
   for f in "$DEPLOY/docker/bench/bench-up.sh" "$DEPLOY/docker/bench/bench-down.sh"; do
     grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$f" \
       || { echo "n'exporte pas le prefixe au nom du projet de la boite : $f"; return 1; }
@@ -233,10 +233,10 @@ store_mounts() { grep -oE '^\s*- lcars-[a-z]+:/var/lib/lcars/[a-z.]+' "$1" | sed
   # `external: true` = compose refuse de demarrer sur un volume absent. L'appel doit donc preceder
   # le up/create, et ces deux scripts sont les seuls a s'executer avant.
   grep -q "store_ensure_volumes" "$DEPLOY/docker/bench/bench-up.sh"
-  grep -q "store_ensure_volumes" "$DEPLOY/box"
+  grep -q "store_ensure_volumes" "$DEPLOY/container"
 
   local up_line ensure_line
-  ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/box" | head -1 | cut -d: -f1)"
-  up_line="$(grep -n "compose up -d" "$DEPLOY/box" | head -1 | cut -d: -f1)"
+  ensure_line="$(grep -n "store_ensure_volumes" "$DEPLOY/container" | head -1 | cut -d: -f1)"
+  up_line="$(grep -n "compose up -d" "$DEPLOY/container" | head -1 | cut -d: -f1)"
   [ "$ensure_line" -lt "$up_line" ]
 }

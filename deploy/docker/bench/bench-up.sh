@@ -121,7 +121,7 @@ done
 # cette asymetrie. Une fusion des projets rendait un `down -v` capable d'emporter la forge semee
 # avec la boite — vu et corrige.
 # ⚖ user 2026-09-04 (DI-05, lot 9) : UN sens pour le nom — la BASE des projets compose. La boite
-# est <N>-fleet (le defaut de « deploy/box », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
+# est <N>-fleet (le defaut de « deploy/container », LCARS_BASE=N), la forge <N>-forge, le runner <N>-runner :
 # le poste (48/49) et le banc derivent les memes noms de la meme base.
 BOX_PROJECT="${PROJECT}-fleet"
 FORGE_PROJECT="${PROJECT}-forge"
@@ -219,7 +219,7 @@ fi
 "$DOCKER_BIN" image inspect "$IMAGE" >/dev/null 2>&1 \
   || die "image absente localement: $IMAGE
    Construire (depuis la racine du depot) :
-     deploy/box build
+     deploy/container build
    Il pose le sha et la date de build, tous deux OBLIGATOIRES (cf. le bloc revision plus bas)." 1
 
 # LA BOITE DOIT POUVOIR DIRE QUEL CODE ELLE PORTE, ET LE BANC DOIT LE LIRE AVANT DE L'ANNONCER.
@@ -437,7 +437,7 @@ HUMAN_ADMIN_STATE="$(curl -s -m 5 -u "$HUMAN:toto32toto32" "$FORGE_LOCAL_URL/api
 # et se declare *healthy* (son healthcheck ne sonde que des ports : ssh + le deck). Sans cette lecture, un banc dont la
 # boite ne peut demarrer AUCUN pod sortait `banc PRET` et rendait 0.
 #
-# ⚠ LA SEMANTIQUE EST CELLE DU GESTE OPERATEUR (`deploy/box`, `await_provision_verdict`), reprise a
+# ⚠ LA SEMANTIQUE EST CELLE DU GESTE OPERATEUR (`deploy/container`, `await_provision_verdict`), reprise a
 # dessein plutot que reinventee : deux chemins qui lisent le meme fichier et en tirent deux verdicts
 # differents, c'est un fichier qui ne veut plus rien dire.
 #   0         convergee ;
@@ -514,7 +514,7 @@ else
   RUNNER_LOG="$(mktemp "${TMPDIR:-/tmp}/forge-runner-${PROJECT}.XXXXXX")"
   # LE JETON D'ENREGISTREMENT VIENT DE LA PORTE GENERIQUE (`forge-gestures.sh runner-token`), pas
   # d'un appel API refait ici : c'est le meme geste que l'operateur jouera pour SON runner, par
-  # `deploy/box runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
+  # `deploy/container runner-token`. `forge-runner.sh` garde son `--reg-token`, qui existait deja pour
   # le cas ou l'appelant sait le produire mieux que lui — c'est desormais le cas nominal.
   REG_TOKEN="$("$DOCKER_BIN" exec -i -u root "$BOX" /opt/lcars/forge-gestures.sh runner-token < /dev/null 2>/dev/null | tail -1 || true)"
   if DOCKER_BIN="$DOCKER_BIN" "$DOCKER_DIR/forge-runner.sh" \

@@ -111,7 +111,7 @@ check_master_authority() {
   if [[ -r "$LCARS_MASTER_TOKEN_FILE" ]]; then
     p_ok "autorité de création présente ($LCARS_MASTER_TOKEN_FILE) — un catalogue de plus s'enrôle sans geste d'opérateur"
   else
-    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/box config » la pose"
+    p_warn "pas d'autorité de création ($LCARS_MASTER_TOKEN_FILE) — la boîte tourne, mais tout geste STRUCTUREL (enrôler un catalogue, ajouter un rôle) redevient manuel : « deploy/container config » la pose"
   fi
 }
 
@@ -180,7 +180,7 @@ ensure_passwords_entries() {
   done
   [[ "${#absents[@]}" -eq 0 ]] && return 0
   if [[ ! -r "$LCARS_FORGE_SEED_FILE" ]]; then
-    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/box config » le pose (ou complète $LCARS_PASSWORDS_FILE), puis relance"
+    p_drift "entrées passwords manquantes (${absents[*]}) et pas de seed ($LCARS_FORGE_SEED_FILE) — « FORGE_SEED_PASSWORD=<seed> deploy/container config » le pose (ou complète $LCARS_PASSWORDS_FILE), puis relance"
     return 1
   fi
   local seed tmp rc=0
@@ -259,7 +259,7 @@ check_members_visible() {
     p_ok "adhésions org visibles (comptes machine)"
   else
     # shellcheck disable=SC2086 # meme liste, meme rendu
-    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « deploy/box forge-apply » (il les publicise juste après la structure)"
+    p_drift "adhésions org PRIVÉES :$(printf ' %s' $hidden) — invisibles aux non-membres, donc un humain ne voit pas quels workers travaillent ici. Le geste qui les pose est « deploy/container forge-apply » (il les publicise juste après la structure)"
   fi
 
   # ⚠ CES DEUX ETATS NE SONT PAS DES DRIFTS, ET C'EST LE CANON DU 2026-08-30 QUI LE DIT. Le rail pose
@@ -334,7 +334,7 @@ check() {
   local miss acct
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « deploy/box forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — territoire OpenTofu : « deploy/container forge-apply » la pose (tofu est DANS l'image ; « forge-check » enonce le contrat)"
   else
     for acct in $ACCOUNTS; do p_ok "compte $acct"; done
   fi
@@ -376,7 +376,7 @@ check_human_onboardable() {
   local tokfile="$LCARS_SYSTEM_TOKEN_FILE" code
   [[ -n "$LCARS_LOGIN" ]] || { p_ok "aucun humain nomme (LCARS_LOGIN) — l'onboardabilite ne se sonde pas ici"; return 0; }
   if ! account_exists "$LCARS_LOGIN"; then
-    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$LCARS_LOGIN … « deploy/box forge-apply »"
+    p_drift "compte forge absent pour l'humain « $LCARS_LOGIN » — l'onboarding projet échouera (human_not_provisioned) : LCARS_HUMAN=$LCARS_LOGIN … « deploy/container forge-apply »"
     return 0
   fi
   p_ok "compte forge de l'humain ($LCARS_LOGIN)"
@@ -395,7 +395,7 @@ check_human_onboardable() {
     # membre de l'org fleet » en DRIFT — sur une machine fraîchement convergée, sans erreur. Le rail
     # pose les AUTORITES ; une personne entre dans l'org par un propriétaire, et `apply` ne peut pas
     # le faire à sa place (il n'a pas ses credentials, et les avoir serait le contraire du canon).
-    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/box forge-apply »). L'onboarding projet le refusera d'ici là" ;;
+    404) p_warn "$LCARS_LOGIN n'est pas membre de l'org $LCARS_FORGE_ORG — état normal tant qu'un propriétaire ne l'a pas ajouté à la team humans (« deploy/container forge-apply »). L'onboarding projet le refusera d'ici là" ;;
     *)   p_warn "appartenance de $LCARS_LOGIN à l'org $LCARS_FORGE_ORG NON VERIFIABLE (HTTP $code) — rien n'est conclu ; scope du token système ?" ;;
   esac
 }
@@ -429,7 +429,7 @@ apply() {
   local miss
   miss="$(missing_accounts)"
   if [[ -n "$miss" ]]; then
-    p_drift "structure absente (comptes : $miss) — « deploy/box forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
+    p_drift "structure absente (comptes : $miss) — « deploy/container forge-apply » la pose (il faut le token master + le seed ; « forge-check » enonce le contrat)"
     verdict_apply
   fi
 

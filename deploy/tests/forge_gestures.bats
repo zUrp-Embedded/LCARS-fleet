@@ -13,7 +13,7 @@
 
 # ─── LE GESTE VIT DES DEUX COTES, ET LA PORTE DOIT LE SAVOIR ────────────────────────────────────
 #
-# `deploy/box` entrait dans le conteneur `lcars` pour jouer `forge-gestures.sh`. Sur un poste ce
+# `deploy/container` entrait dans le conteneur `lcars` pour jouer `forge-gestures.sh`. Sur un poste ce
 # conteneur n'existe pas — la fleet y tourne nativement et seule la forge est conteneurisee — donc
 # tout verbe qui passe par la mourait sur l'absence d'un objet sans rapport avec la demande. Le meme
 # script est pose sur l'hote par `62-runtime-helpers` : la porte doit chercher les DEUX.
@@ -23,7 +23,7 @@
 # shellcheck disable=SC2030,SC2031
 
 @test "TEMOIN STRUCTUREL : la porte cherche le geste sur l'hote quand la boite n'est pas la" {
-  local box="$BATS_TEST_DIRNAME/../box"
+  local box="$BATS_TEST_DIRNAME/../container"
   [ -f "$box" ]
   local body; body="$(grep -vE '^\s*#' "$box" | sed -n '/^gesture()/,/^}/p')"
   [ -n "$body" ]

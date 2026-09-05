@@ -55,7 +55,7 @@ USAGE
       Les PORTES OUTIL du release — des evaluations d'une ligne, sous un uid sans pouvoir quand
       l'appelant est root : verify <root> · roles [root] · roles-tfvars [root] · catalogue-root ·
       catalogue-source <nom>. \`forge-gestures.sh\` et l'installeur (\`prov_roles\`) les appellent
-      ici ; le boot de l'image (box/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
+      ici ; le boot de l'image (container/boot.sh) delegue ici les memes mots. Elles lisent le catalogue, jamais
       la fleet.
 
   $PROG catalogue list
@@ -413,7 +413,7 @@ _die_catalogue_refus() { # <jeton de cause> [detail]
   Ce n'est ni un refus te concernant, ni une panne de la forge : le jeton d'administration de cette
   machine est absent, illisible, vide, ou la forge vient de le REFUSER (revoque ou expire). Aucune
   quantite de reessais ne le repose — c'est un geste d'admin, une fois :
-    FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/box config
+    FORGE_ADMIN_TOKEN=<jeton site-admin> deploy/container config
   « journalctl -u lcars-catalogue » dit lequel des quatre cas c'est." ;;
     forge_unreachable)
       die "catalogue install: je n'ai pas pu DEMANDER a la forge si tu es admin.
@@ -538,7 +538,7 @@ cmd_project() {
 # rails — allait les chercher la-bas, en devinant le chemin de l'entrypoint (`_entrypoint_path`).
 # Un geste du produit qui execute le PID 1 de l'image pour evaluer une fonction du release : la
 # porte etait au mauvais endroit. Elle est ici, dans la CLI du produit, posee sur les deux rails
-# (`/usr/local/bin/lcars`). Le boot de la boite (`services/box/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
+# (`/usr/local/bin/lcars`). Le boot de la boite (`services/container/boot.sh`) garde le mot (`docker run IMAGE roles-tfvars` est l'API
 # de l'image, le banc s'en sert) et delegue ici.
 #
 # ⚠ SOUS UN UID SANS POUVOIR quand on est root. Ces evaluations chargent le release et son

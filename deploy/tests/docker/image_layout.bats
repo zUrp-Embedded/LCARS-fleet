@@ -22,7 +22,7 @@ load ../refute
 
 setup() {
   DF="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  INIT="$BATS_TEST_DIRNAME/../../../runtime/services/box/init.sh"
+  INIT="$BATS_TEST_DIRNAME/../../../runtime/services/container/init.sh"
   MANIFEST="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$DF" ] && [ -f "$INIT" ] && [ -f "$MANIFEST" ]
   # Le stage runtime seul : c'est lui que `final` livre.

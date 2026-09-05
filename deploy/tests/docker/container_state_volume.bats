@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# SOURCE: deploy/tests/docker/box_state_volume.bats
+# SOURCE: deploy/tests/docker/container_state_volume.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
 # STATUS: bats tests — l'etat de l'instance vit dans un VOLUME, jamais dans le systeme de fichiers du conteneur
@@ -51,7 +51,7 @@ under_mount() { local m; while read -r m; do [[ "$1" == "$m" || "$1" == "$m"/* ]
 }
 
 @test "TOUT chemin d'etat que l'init ou le protocole nomme tombe sous un volume — ou dans la liste d'exceptions ECRITE ici" {
-  local INIT="$DOCKER/../../runtime/services/box/init.sh"
+  local INIT="$DOCKER/../../runtime/services/container/init.sh"
   [ -f "$INIT" ]
   # Les cibles absolues des ensure_dir/write_atomic de l'init, les defauts absolus de ses variables,
   # et les defauts LCARS_*_FILE/_DIR du protocole — la valeur que le compose pose PRIME sur le defaut
