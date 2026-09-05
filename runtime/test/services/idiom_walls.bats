@@ -89,3 +89,52 @@ I18_RE='(^|[^0-9])(1000|60000)([^0-9]|$)'
   refute grep -qiE 'uid' <<<"$(grep -E "$I18_RE" <<<'    local _grace_s=$(( ${LCARS_SHUTDOWN_GRACE_MS:-45000} / 1000 ))')"
   refute grep -qE "$I18_RE" <<<'  export LCARS_SYSADMIN_UID=10001'
 }
+
+# ─── MUR I20 : LE RAIL S'APPELLE `container` — PLUS AUCUN box / boite / boîte COTE PRODUIT ──────
+#
+# ⚖ user 2026-09-05 (chantier release, lot 1) : « workstation est bien nommé pour désigner une
+# install directe sur un système, mais le rail box/boîte n'est pas explicite pour une install
+# docker » → `container`, « un seul mot partout ». Le couple dit OU LCARS vit : `--workstation`
+# (dans ce système) / `--container` (dans un conteneur). `docker` reste le mot du SUBSTRAT et de
+# la dependance : le mur ne le regarde pas.
+#
+# JUMEAU de `deploy/tests/idiom_walls.bats` (MUR I20) : celui-la lit deploy/ et install.sh, celui-ci
+# lit le PRODUIT — runtime/services, runtime/bin, runtime/test/services — code ET prose (un README
+# qui dit « box up » est un manuel faux). Chaque cote grep SES fichiers ; aucun mur ne traverse la
+# couture. Il s'ecarte lui-meme : ses formes de garde portent le mot.
+#
+# Ce qui GARDE le mot, a dessein, et que le mur ecarte par motif :
+#   - « boite de reception » (l'inbox d'admiral, skill system-issues) et « boite aux lettres »
+#     (la branche d'outillage, ops-branch) ;
+#   - `box-sizing` / `border-box` / `box-shadow` (le CSS du deck, dans console-deck.py) ;
+#   - « mail-in-a-box » et « out of the box » (idiomes), et les cadres ASCII `_box_*` de l'installeur.
+# `sandbox`, `bwrap`, `mailbox`, `checkbox`, `toolbox` ne sont pas le mot entier : le grep ne les voit pas.
+I20_RE='(^|[^[:alpha:]])(box|bo[iîÎ]te)([^[:alpha:]]|$)'
+I20_EXCL='box-(sizing|shadow)|border-box|mail-in-a-box|out of the box|bo[iîÎ]tes? de r[éeÉE]ception|bo[iîÎ]tes? aux lettres|_box_(emit|plain|pad)|_prov_box_pad'
+
+i20_hits() { # <chemin>… -> les lignes qui portent encore le mot, hors motifs ecartes (vide = propre)
+  grep -rnIiE --exclude=idiom_walls.bats "$I20_RE" "$@" 2>/dev/null | grep -viE "$I20_EXCL" || true
+}
+
+@test "MUR I20 (produit) : plus aucun box / boite / boîte dans runtime/services, runtime/bin, runtime/test/services — le rail s'appelle container" {
+  local root d trouve
+  root="$(cd "$SERVICES/../.." && pwd)"
+  for d in runtime/services runtime/bin runtime/test/services; do
+    [ -d "$root/$d" ] || { echo "$d absent sous $root — le perimetre du mur n'est plus le bon" >&2; return 1; }
+    case "$d" in deploy/*) echo "MUR I20 (produit) lit deploy/ : $d — c'est l'affaire du jumeau" >&2; return 1 ;; esac
+  done
+  trouve="$(i20_hits "$root/runtime/services" "$root/runtime/bin" "$root/runtime/test/services")"
+  [ -z "$trouve" ] || { echo "MUR I20 rompu — le mot du rail est container, pas box/boîte :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
+  # GARDE D'INSTRUMENT : le mur voit une occurrence plantee dans un decor — un chemin, de la prose
+  # accentuee, une variable, un tag, une majuscule — quatre LIGNES, grep -n compte des lignes.
+  local decor="$BATS_TEST_TMPDIR/i20"; mkdir -p "$decor"
+  printf '#!/usr/bin/env bash\nexec /opt/lcars/services/box/boot.sh\n' > "$decor/a.sh"
+  printf 'la boîte tourne, LA BOÎTE aussi\n' > "$decor/b.md"
+  printf 'BOX_INIT="${LCARS_BOX_INIT:-}"\n' > "$decor/c.sh"
+  printf 'LCARS_MODULE_TAG=box-init ; say "[box-boot]"\n' > "$decor/d"
+  [ "$(i20_hits "$decor" | wc -l)" -eq 4 ] || { echo "instrument casse : le mur ne voit pas le decor" >&2; i20_hits "$decor" >&2; return 1; }
+  # … et ne voit PAS ce qui garde le mot a dessein.
+  printf 'sandbox bwrap mailbox checkbox toolbox SANDBOX\n* { box-sizing:border-box } box-shadow: 0\nla boîte de réception et la boite aux lettres, Boite de reception\nmail-in-a-box\nlivrer out of the box\n_box_emit "x"; _prov_box_pad\n' > "$decor/e.txt"
+  trouve="$(i20_hits "$decor/e.txt")"
+  [ -z "$trouve" ] || { echo "instrument casse : le mur mord sur une exclusion :" >&2; printf '%s\n' "$trouve" >&2; return 1; }
+}
