@@ -6,13 +6,13 @@ defmodule Fleet.Pilot.PollerTelemetry do
   The poller's telemetry, ATTACHED (BL-6-40 Phase 0).
 
   `Fleet.Pilot.Poller` emits `[:lcars_fleet, :pilot_poller, :poll]` from three sites — duration,
-  dispatched/skipped/errors, per-repo status. Emission alone measures nothing: with no
-  `:telemetry.attach` anywhere in `lib/`, every one of those samples is computed and dropped, and
-  nobody, human or agent, can state how long a poll actually took. The amplifiers that make polls
-  slow (three `list_pods` calls per repo at a 5 s timeout, a redundant label GET per issue, a 15 s
-  network `ls-remote` inside the GenServer) can then only be REASONED about. This module is what
-  turns them into something measurable, and it is deliberately the first phase: the rest of BL-6-40
-  is a set of optimisations that cannot be proven without it.
+  dispatched/skipped/errors, per-repo status. Emission alone measures nothing: without an
+  attachment every sample is computed and dropped, and nobody, human or agent, can state how long
+  a poll took. This module IS the attachment (`:telemetry.attach_many`), which is what makes the
+  amplifier of a slow poll (the 15 s network `ls-remote` of `ProjectResolver`, inside the GenServer
+  — `list_pods` is one call per tick and the route is read off the labels in hand) measurable
+  rather than reasoned about. It is deliberately the first phase of BL-6-40: the rest is a set of
+  optimisations that cannot be proven without it.
 
   ## What it does, and what it deliberately does NOT do
 
@@ -299,7 +299,8 @@ defmodule Fleet.Pilot.PollerTelemetry do
   defp maybe_warn(%{slow_tick_ms: slow}, ms, _status, _scope, repo) when ms >= slow do
     Logger.warning(
       "PollerTelemetry: SLOW tick #{ms}ms (>= #{slow}ms) repo=#{inspect(repo)} — " <>
-        "candidates: list_pods x3/repo at 5s timeout, per-issue label GET, synchronous ls-remote"
+        "candidates: the synchronous ls-remote (15 s) of the project resolver, the per-tick " <>
+        "list_pods (5 s timeout), the forge listings"
     )
   end
 

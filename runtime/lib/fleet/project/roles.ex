@@ -102,6 +102,16 @@ defmodule Fleet.Project.Roles do
   end
 
   @doc """
+  The boot guard: every structural role resolves, or the rail does not start. `:ok`, or the raise
+  `resolve_structural_roles!/1` carries.
+  """
+  @spec validate_structural_roles!() :: :ok
+  def validate_structural_roles! do
+    _ = resolve_structural_roles!()
+    :ok
+  end
+
+  @doc """
   Boot check of the capabilities the fleet cannot work without. Called at rail boot
   (`Fleet.Pilot.Application`), and the demands DIFFER because the concepts do:
 
@@ -192,7 +202,14 @@ defmodule Fleet.Project.Roles do
   end
 
   defp jury_of(%{"jury" => jury}, _opts) when is_list(jury), do: jury
-  defp jury_of(nil, opts), do: Loader.load!(delegation_workflow_map(opts))["jury"]
+  # The delegation card of the CALLER's catalogue: the opts carry it (`:catalogue_root`,
+  # `:workflow_maps_root`) exactly as the fallback of `project_card_or_default/2` passes them.
+  defp jury_of(nil, opts),
+    do:
+      Loader.load!(
+        delegation_workflow_map(opts),
+        Keyword.take(opts, [:workflow_maps_root, :catalogue_root])
+      )["jury"]
 
   @doc """
   Returns the jury of the project's declared card, checking `:reviewer_roles` first.

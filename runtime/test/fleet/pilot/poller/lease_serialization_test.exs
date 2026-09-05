@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.PollerLeaseSerializationTest do
+defmodule Fleet.Pilot.Poller.LeaseSerializationTest do
   @moduledoc """
   `max_fan` — how many workflow_runs one PROJECT holds in flight at once.
 
@@ -180,7 +180,7 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
     end
   end
 
-  describe "max_fan/0 — the reader clamps, it does not report" do
+  describe "max_fan/0 — the default, and the shell door's ceiling (the clamp is admission_test's)" do
     test "absent → the default 5" do
       TestEnv.restore_env_on_exit(:lcars_fleet, :pilot_max_fan)
       Application.delete_env(:lcars_fleet, :pilot_max_fan)
@@ -204,20 +204,6 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       assert String.to_integer(n) == Admission.max_fan_ceiling(),
              "the shell door bounds --max-fan at #{n} while the rail clamps at " <>
                "#{Admission.max_fan_ceiling()} — one of the two is lying to the operator"
-    end
-
-    test "below 1 or above the ceiling → clamped, never zero and never a slot that does not exist" do
-      # A ceiling of 0 would be a fleet that dispatches nothing while reporting healthy; above 15 is
-      # a producer asking for a pool seat `PoolSlot` does not have. Clamped HERE because this is read
-      # on every dispatch decision: a bad value must fail at a DOOR, once, not every thirty seconds.
-      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 0)
-      assert Admission.max_fan() == 1
-
-      Application.put_env(:lcars_fleet, :pilot_max_fan, 999)
-      assert Admission.max_fan() == Admission.max_fan_ceiling()
-
-      Application.put_env(:lcars_fleet, :pilot_max_fan, "trois")
-      assert Admission.max_fan() == 5
     end
   end
 
@@ -253,6 +239,8 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
       tally = Lease.process_issues(issues(), MapSet.new(), opts(code_root: root), seams())
 
       assert tally.dispatched == 3
+      # Three tickets saturate at any ceiling ≥ 3: the tally alone cannot tell « 99 clamped to
+      # 15 » from « 99 granted ». The reader's answer is what makes the name of this test true.
       assert Admission.max_fan("fleet/p", code_root: root) == Admission.max_fan_ceiling()
     end
 
@@ -264,6 +252,80 @@ defmodule Fleet.Pilot.PollerLeaseSerializationTest do
 
       # Absent is not zero and not one: the key was never written, so the fleet answers.
       assert tally.dispatched == 2
+    end
+  end
+
+  describe "⚖ a ticket parked under lcars-awaits-arch holds a seat iff its route is advanced (2026-09-05)" do
+    # The route is read off the labels by the REAL parser; `standard-qa`'s root is `brief-review`,
+    # `build` comes after it. The parked ticket carries the HIGHEST number, so that « ENGAGED, seat
+    # already counted » and « QUEUED, takes the first seat » cannot produce the same messages.
+    defmodule RouteForge do
+      def issue_dependencies(_repo, _n, _opts), do: {:ok, []}
+      defdelegate route_from_labels(labels), to: Fleet.Forge.Client
+
+      def add_label(_repo, n, label, _opts) do
+        send(self(), {:add_label, n, label})
+        {:ok, :added}
+      end
+
+      def remove_label(_repo, _n, _label, _opts), do: {:ok, :removed}
+    end
+
+    # Honours `decide/1` for the one label that matters here: a parked ticket is never dispatched.
+    defmodule ParkAwareDispatcher do
+      def dispatch_issue(payload, _opts) do
+        issue = payload["issue"]
+
+        if Enum.any?(issue["labels"] || [], &(&1["name"] == "lcars-awaits-arch")) do
+          {:skipped, :awaits_arch}
+        else
+          send(self(), {:dispatched, issue["number"]})
+          {:ok, {:spawned, "pod", "engineer"}}
+        end
+      end
+    end
+
+    defp parked_at(stage) do
+      %{
+        "number" => 44,
+        "labels" => [
+          %{"name" => "wfmap/standard-qa"},
+          %{"name" => "stage/#{stage}"},
+          %{"name" => "lcars-awaits-arch"}
+        ]
+      }
+    end
+
+    defp run_serial(parked) do
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_max_fan, 1)
+      fresh = for n <- [41, 42], do: %{"number" => n, "labels" => []}
+
+      Lease.process_issues(
+        fresh ++ [parked],
+        MapSet.new(),
+        opts(),
+        %{seams() | forge: RouteForge, dispatcher: ParkAwareDispatcher}
+      )
+    end
+
+    test "parked with an ADVANCED route: the only seat is held, the fresh tickets wait" do
+      tally = run_serial(parked_at("build"))
+
+      assert tally.dispatched == 0
+      assert tally.skipped == 3
+      assert_received {:add_label, 41, "wait/capacity"}
+      assert_received {:add_label, 42, "wait/capacity"}
+      refute_received {:dispatched, _}
+    end
+
+    test "parked at the ROOT (a refused brief): no seat held, the next ticket starts" do
+      tally = run_serial(parked_at("brief-review"))
+
+      assert tally.dispatched == 1
+      assert_received {:dispatched, 41}
+      assert_received {:add_label, 42, "wait/capacity"}
+      # The parked root ticket competes like any queued one: refused at capacity, and told so.
+      assert_received {:add_label, 44, "wait/capacity"}
     end
   end
 end

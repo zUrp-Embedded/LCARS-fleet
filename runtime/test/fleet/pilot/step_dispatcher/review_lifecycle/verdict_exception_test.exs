@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.VerdictExceptionTest do
+defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
@@ -36,7 +36,7 @@ defmodule Fleet.Pilot.VerdictExceptionTest do
     %Ctx{
       forge: Forge,
       loader: Fleet.CapProfile,
-      workflow_map_loader: &Fleet.Workflow.Loader.load!/1,
+      workflow_map_loader: &Fleet.Workflow.Loader.load!/2,
       spawner: Fleet.Spawner,
       task_queue: Fleet.TaskQueue,
       resolver: fn _, _ -> {:ok, nil} end,

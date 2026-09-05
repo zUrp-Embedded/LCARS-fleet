@@ -624,50 +624,6 @@ defmodule Fleet.Pilot.StepRunConsumerTest do
 
       GenServer.stop(pid)
     end
-
-    test "work_item.completed of an arch escalation (metadata awaits_arch) → DRAINS lcars-awaits-arch" do
-      # Serialize-via-forge: the arch resolved its mandate (submit_result) → the system removes the
-      # waiting label so the poller serves the NEXT one. The repo+number travel in the work-item's
-      # metadata (the WorkItem has no repo field). `forge_opts[:test_pid]` carries the pid for the
-      # cross-process assertion (the stub runs INSIDE the GenServer).
-      defmodule DrainForge do
-        def remove_label(repo, number, label, opts) do
-          send(opts[:test_pid], {:remove_label, repo, number, label})
-          {:ok, :removed}
-        end
-      end
-
-      name = :"HC_drain_#{System.unique_integer([:positive])}"
-
-      {:ok, pid} =
-        StepRunConsumer.start_link(
-          name: name,
-          forge_client: DrainForge,
-          forge_opts: [test_pid: self()],
-          subscribe: false
-        )
-
-      arch_done =
-        Fleet.Event.new(:task_queue, :"work_item.completed",
-          correlation_id: "wi-arch-1",
-          payload: %{metadata: %{"awaits_arch" => true, "repo" => "fleet/proj", "number" => 7}}
-        )
-
-      send(pid, arch_done)
-      assert_receive {:remove_label, "fleet/proj", 7, "lcars-awaits-arch"}, 1_000
-
-      # a NON-arch completion (no `awaits_arch`) drains NOTHING (nominal path preserved).
-      other_done =
-        Fleet.Event.new(:task_queue, :"work_item.completed",
-          correlation_id: "wi-other",
-          payload: %{metadata: %{"gate_eval" => false}}
-        )
-
-      send(pid, other_done)
-      refute_receive {:remove_label, _, _, _}, 200
-
-      GenServer.stop(pid)
-    end
   end
 
   describe "default_deliverable_mode/1 (DR-013 — unloadable role ≠ absent)" do

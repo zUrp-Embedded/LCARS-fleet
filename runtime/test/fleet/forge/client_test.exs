@@ -1637,7 +1637,7 @@ defmodule Fleet.Forge.ClientTest do
   end
 
   # ⚠ persistent_term + async (F058 review follow-up #1): `derive_bot_login` caches the login in
-  # `:persistent_term.{Fleet.Forge.Client.Transport, :bot_login}` — a GLOBAL key shared by the
+  # `:persistent_term.{Fleet.Forge.Client.Transport, :bot_login, base_url}` — a GLOBAL key shared by the
   # whole ExUnit VM (the /user derivation lives in the Transport module). ANY test that does NOT
   # inject `:forge_bot_login` in its opts reaches this cache and may pollute/be polluted by a
   # concurrent test. Module invariant: all OTHER tests inject the `forge_bot_login:` seam on
@@ -1652,13 +1652,13 @@ defmodule Fleet.Forge.ClientTest do
       }
 
       # persistent_term cache: erased upfront for a deterministic test.
-      :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login})
+      :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login, "http://fake.test"})
 
       # get_route no longer derives (reads a label): we exercise the /user derivation via
       # count_signed_step_runs (which still filters bot-authored step_runs → needs the bot-login).
       assert {:ok, 1} = ForgeClient.count_signed_step_runs("fleet/lcars", 42, opts(handlers))
     after
-      :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login})
+      :persistent_term.erase({Fleet.Forge.Client.Transport, :bot_login, "http://fake.test"})
     end
   end
 

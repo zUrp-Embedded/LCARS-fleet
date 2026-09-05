@@ -109,4 +109,40 @@ defmodule Fleet.Pilot.PodReaperTest do
       assert log =~ "without :pod_id"
     end
   end
+
+  describe "reap_producer/3 — the sealed producer, one precise id, ticket-scoped only" do
+    test "engineer (slot_scope: instance) → its ticket pod dies, keyed on the ISSUE" do
+      assert :ok = PodReaper.reap_producer("fleet/myproj", 42, "engineer")
+      assert_received {:killed, "fleet-myproj-issue-42-engineer"}
+      refute_received {:killed, _}
+    end
+
+    test "architect (slot_scope: project) → never touched: it outlives the ticket by design" do
+      assert :ok = PodReaper.reap_producer("fleet/myproj", 42, "architect")
+      refute_received {:killed, _}
+    end
+
+    test "an empty producer name reaps nothing, and says :ok" do
+      assert :ok = PodReaper.reap_producer("fleet/myproj", 42, "")
+      refute_received {:killed, _}
+    end
+  end
+
+  describe "reap_judge/3 — the ingested judge, keyed on the PR, judges only" do
+    test "reviewer (judge, instance) → its PR pod dies once its verdict is ingested" do
+      assert :ok = PodReaper.reap_judge("fleet/myproj", 42, "reviewer")
+      assert_received {:killed, "fleet-myproj-pr-42-reviewer"}
+      refute_received {:killed, _}
+    end
+
+    test "a WORKER role is not a judge: nothing dies under a name the seal owns" do
+      assert :ok = PodReaper.reap_judge("fleet/myproj", 42, "engineer")
+      refute_received {:killed, _}
+    end
+
+    test "an already-dead judge is the nominal case: :ok, no error path" do
+      TestEnv.put_env_restoring(:lcars_fleet, :pilot_spawner, AlreadyDeadSpawner)
+      assert :ok = PodReaper.reap_judge("fleet/myproj", 42, "reviewer")
+    end
+  end
 end

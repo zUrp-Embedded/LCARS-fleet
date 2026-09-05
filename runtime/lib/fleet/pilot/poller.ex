@@ -15,9 +15,11 @@ defmodule Fleet.Pilot.Poller do
       never a default producer).
     * **PR** with a requested reviewer → spawn the **judge**; PR `REQUEST_CHANGES` without a reviewer → re-spawn
       the **producer** for the rework (`StepDispatcher.dispatch_review`).
-    * `lcars-in-flight` lock → skip (a pod is already working the brick). **Per-repo ceiling**
-      (`Lease` + `Admission.max_fan/2`): at most `max_fan` active workflow_runs per repo — the
-      project's declaration, else the fleet default (5); a declaration of 1 is the serial project.
+    * `lcars-in-flight` lock → skip (a pod is already working the brick). **Ceiling per HUMAN on
+      each repo** (`Lease` + `Admission.max_fan/2`): at most `max_fan` active workflow_runs of
+      this human on the repo (the listing is `assigned_by=<my human>`) — the project's
+      declaration, else the fleet default (5); a declaration of 1 is the serial project.
+      `Admission.max_fan/0` says why the declaration's location does not say whom it bounds.
 
   ## Robustness
 
@@ -30,7 +32,7 @@ defmodule Fleet.Pilot.Poller do
 
     * `Backoff` — PURE computation of the delay (jitter + exponential backoff); the GenServer keeps
       the effect (`schedule/1`) and the rescue (`safe_poll`).
-    * `Lease` — per-repo admission ceiling (ENGAGED/QUEUED classification + dispatch under
+    * `Lease` — the admission ceiling, per human on each repo (ENGAGED/QUEUED classification + dispatch under
       `max_fan`, issues path); hardened boundary `Lease.Seams`, tally vocabulary.
     * `Reconciliation` — reclaiming of orphaned `lcars-in-flight` locks (the 2-tick
       grace — cross-tick state — stays HERE, `orphan_lock_suspects`).
@@ -66,7 +68,7 @@ defmodule Fleet.Pilot.Poller do
   # the EFFECT (`schedule/1` = Process.send_after) and the rescue (`safe_poll`), Backoff yields the delay.
   alias Fleet.Pilot.Poller.Backoff
 
-  # Per-repo admission ceiling (ENGAGED/QUEUED classification + dispatch under `max_fan`) — the
+  # Admission ceiling, per human on each repo (ENGAGED/QUEUED classification + dispatch under `max_fan`) — the
   # business CORE of the issues path. Hardened boundary: reads a narrow `Lease.Seams`
   # (`lease_seams/1`), prod defaults resolved HERE. Also owns the tally vocabulary
   # (`zero_tally/merge_tally`).
@@ -1106,7 +1108,7 @@ defmodule Fleet.Pilot.Poller do
     end
   end
 
-  # Hardened boundary to `Lease` (per-repo ceiling): the 5 authorized reads, prod defaults
+  # Hardened boundary to `Lease` (the per-human ceiling on each repo): the 5 authorized reads, prod defaults
   # resolved HERE (same rule as `Reconciliation.Seams`: we resolve at the construction site).
   defp lease_seams(state) do
     %Lease.Seams{
@@ -1132,20 +1134,18 @@ defmodule Fleet.Pilot.Poller do
       forge_opts: state.forge_opts
     ]
     |> Opts.maybe_put(:loader, state.loader)
-    # `workflow_map_role` (dispatch) loads the route's workflow_map → it needs the WORKFLOW_MAP loader (as a
-    # load!/1 function). Live: nil → default `Fleet.Workflow.Loader.load!` (priv). Test: derived from the stub
-    # module. (Distinct from `:loader` = cap-profiles.)
-    |> Opts.maybe_put(:workflow_map_loader, workflow_map_loader_fun(state))
+    # `workflow_map_role` (dispatch) loads the route's workflow_map → it needs the WORKFLOW_MAP
+    # loader, handed over AS A MODULE, the same way `lease_seams/1` hands it: `safe_load/3` asks a
+    # module for `load!/2` and passes it the catalogue. Wrapped in a unary fn it would drop the
+    # catalogue on the dispatch rail while the lease rail keeps it — one `state`, two cards
+    # (2026-09-05). Live: nil → the dispatcher's default `&Loader.load!/2`. (Distinct from
+    # `:loader` = cap-profiles.)
+    |> Opts.maybe_put(:workflow_map_loader, state.workflow_map_loader)
     |> Opts.maybe_put(:spawner, state.spawner)
     |> Opts.maybe_put(:task_queue, state.task_queue)
     # Threaded down to `dispatch_issue`: only nil falls back to the real default (the real `WakeRecovery.wake/3`).
     |> Opts.maybe_put(:wake_recovery, state.wake_recovery)
   end
-
-  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: nil}), do: nil
-
-  defp workflow_map_loader_fun(%__MODULE__{workflow_map_loader: cl}),
-    do: fn name -> cl.load!(name) end
 
   defp step_forge_client(%__MODULE__{forge_client_override: nil}), do: Fleet.Forge.Client
   defp step_forge_client(%__MODULE__{forge_client_override: fc}), do: fc

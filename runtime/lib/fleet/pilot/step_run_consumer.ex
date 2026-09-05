@@ -74,6 +74,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
     * `:task_queue` — brief broker for the gatekeeper escalation (default `Fleet.TaskQueue`)
     * `:spawner` — wake of the gatekeeper after enqueue (default `Fleet.Spawner`)
     * `:subscribe` — bool default `true` (tests: `false` + manual send)
+    * `:ops_root` — root of the ops faces (default `Fleet.Layout.ops_root/0`), where a gate verdict
+      is pinned; a seam because the real root is a hardcoded global path
+    * `:escalate_fun` — the incident rail (default `IncidentRegistry.escalate_gated/5`)
+    * `:gate_eval_ttl_ms` / `:gate_eval_sweep_ms` — the bound on the in-RAM gate contexts
     * `:step_run_runner` — completion offload seam. Default `nil` → **SYNC** (the outcome bubbles up,
       seams/tests unchanged). Prod (`application.ex`) injects `&offload_async/2` → the completion (git push
       ≤30s + forge writes) runs in a `Task.Supervisor`: the **singleton StepRunConsumer does not block**
@@ -86,7 +90,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   alias Fleet.Event
   alias Fleet.EventRouter.Bus
-  alias Fleet.Forge.Payload
   alias Fleet.Opts
   alias Fleet.Pilot.CompletionOutbox
 
@@ -113,6 +116,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
     # Seam d'escalade — meme forme que `:wake_recovery` : injecte par un test pour observer
     # l'incident sans ouvrir d'issue, resolu vers `IncidentRegistry.escalate_gated/5` en prod.
     :escalate_fun,
+    # Seam of the ops root (default `Fleet.Layout.ops_root/0`), an init option here where the
+    # completer takes it per call — same reason: the real root is a hardcoded global path, and
+    # without it no test can watch a gate verdict get pinned.
+    ops_root: nil,
     gate_evals: %{},
     gate_eval_ttl_ms: nil,
     gate_eval_sweep_ms: nil,
@@ -185,7 +192,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
       gate_evals: %{},
       gate_eval_ttl_ms: Keyword.get(opts, :gate_eval_ttl_ms, @gate_eval_ttl_ms),
       gate_eval_sweep_ms: Keyword.get(opts, :gate_eval_sweep_ms, @gate_eval_sweep_ms),
-      step_run_runner: Keyword.get(opts, :step_run_runner)
+      step_run_runner: Keyword.get(opts, :step_run_runner),
+      ops_root: Keyword.get(opts, :ops_root)
     }
 
     Logger.info(
@@ -544,7 +552,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
 
   # F-037
   defp step_run_state(payload, state) do
-    case payload_repo(payload) do
+    case GateEngine.payload_repo(payload) do
       repo when is_binary(repo) and repo != "" ->
         %{state | repo: repo, remote: payload["remote"] || state.remote}
 
@@ -552,9 +560,6 @@ defmodule Fleet.Pilot.StepRunConsumer do
         state
     end
   end
-
-  defp payload_repo(payload),
-    do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp run_step_run(payload, n, state) do
     role = payload["role"]
@@ -576,7 +581,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
          ) do
       TerminalEscalation.escalate_blocked_producer(payload, n, role, terminal_seams(state))
     else
-      case GateEngine.resolve_next(payload, n, gate_seams(state)) do
+      case GateEngine.resolve_next(payload, n, gate_seams(state), is_producer?) do
         {:error, reason} ->
           emit_workflow_map_failed_draft(reason, n, role)
 
@@ -597,7 +602,16 @@ defmodule Fleet.Pilot.StepRunConsumer do
           apply_verdict(decision, trace, ctx, state)
 
         {:ok, intent, {next_assignee, next_step}} ->
-          complete_business_step_run(payload, n, role, intent, next_assignee, next_step, state)
+          complete_business_step_run(
+            payload,
+            n,
+            role,
+            intent,
+            next_assignee,
+            next_step,
+            state,
+            is_producer?
+          )
       end
     end
   end
@@ -678,6 +692,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
          next_assignee,
          next_step,
          state,
+         producer?,
          comment_body \\ nil,
          judge_target \\ nil
        ) do
@@ -690,7 +705,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     run_completion(state, "##{n}", %{pod_id: payload["pod_id"], issue: n}, fn ->
-      case StepRunBuild.build(payload, n, role, route, build_seams(state)) do
+      case StepRunBuild.build(payload, n, role, route, build_seams(state), producer?) do
         {:error, _} = err ->
           err
 
@@ -718,14 +733,8 @@ defmodule Fleet.Pilot.StepRunConsumer do
         role,
         state.deliverable_mode_fun,
         payload["deliverable_mode"],
-        catalogue_root(payload)
+        GateEngine.catalogue_root(payload)
       )
-
-  # A project lives in the org of ITS catalogue, so the repo names the catalogue (lot 4 of the
-  # org-par-catalogue). This rail is a SINGLETON serving every project of every installed
-  # catalogue: the root cannot be bound at init, and it does not need to be — the work item already
-  # carries the repo, so it carries the catalogue. The split itself lives in `Fleet.Catalogue`.
-  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
   @doc false
   # The ROOT is the project's catalogue, threaded from the work item's repo. Without it this
@@ -819,6 +828,10 @@ defmodule Fleet.Pilot.StepRunConsumer do
         # a next step → `:advance`. A single source of truth for the terminal intent.
         # DR-013: resolve the producer/judge property (closed result) BEFORE advancing — an unloadable
         # cap-profile fails-loud, never a blind terminal intent under an unknown property.
+        # RESOLVED HERE, NOT RECEIVED: `apply_verdict/4` is shared with `resume_gate/3` (a verdict
+        # resumed from the broker after a consumer restart), where no step-run fact is in scope.
+        # The one site of the rail that derives the producer fact twice, and the reason is the
+        # second door.
         with {:ok, is_producer?} <- producer?(role, payload, state),
              {:ok, intent, {next_assignee, next_step}} <-
                GateEngine.advance_intent(workflow_map, step, is_producer?) do
@@ -830,6 +843,7 @@ defmodule Fleet.Pilot.StepRunConsumer do
             next_assignee,
             next_step,
             state,
+            is_producer?,
             trace,
             Map.get(ctx, :judge_target)
           )
@@ -840,10 +854,15 @@ defmodule Fleet.Pilot.StepRunConsumer do
           "**Architecte** (auteur du brief) — brief ABANDONNÉ par le juge. " <>
             trace <> " (Non récupérable ; re-crée un brief corrigé si besoin.)"
 
-        result = close_with_trace(n, role, arch_trace, state)
-
-        _ = TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
-        result
+        # THE KICK IS INSIDE THE CLOSURE, AFTER THE CLOSE SUCCEEDED — the same order
+        # `TerminalEscalation.freeze_to_arch/5` keeps (« vérifier puis annoncer »). Outside the
+        # closure it would run before the close in offload mode: `run_completion` hands the closure
+        # to the runner and returns `{:ok, :offloaded}` at once, and the architect would hear of
+        # an abandon the forge has not recorded — or never records (2026-09-05, witness with a
+        # runner that holds the closure).
+        close_with_trace(n, role, arch_trace, state, fn ->
+          TerminalEscalation.kick_architect(state.spawner, state.repo, arch_trace)
+        end)
 
       # B4 — UNE ENVELOPPE MALFORMEE N'EST PAS UN VERDICT QU'ON NE PEUT PAS SATISFAIRE.
       #
@@ -912,14 +931,25 @@ defmodule Fleet.Pilot.StepRunConsumer do
   # The project's ops worktree, or nil when there is none. A project never onboarded has
   # nowhere to pin, and `Pinning.render/2` then leaves the trace inline — the same degradation the
   # brief materialization already takes on that path.
-  defp verdict_work_dir(state) do
-    dir =
-      Path.join(Fleet.Layout.ops_root(), Fleet.Layout.project_name(Map.get(state, :repo, "")))
-
+  # `nil` when the project has no ops face (nowhere to pin; `Pinning.render/2` leaves the body
+  # inline) or when this event carries no repo — `Layout.project_name/1` refuses a nil rather than
+  # naming a directory that is nobody's.
+  defp verdict_work_dir(%{repo: repo, ops_root: ops_root}) when is_binary(repo) do
+    dir = Path.join(ops_root || Fleet.Layout.ops_root(), Fleet.Layout.project_name(repo))
     if File.dir?(dir), do: dir
   end
 
-  defp close_with_trace(n, role, trace, state) do
+  defp verdict_work_dir(_state) do
+    Logger.warning(
+      "StepRunConsumer: verdict NOT pinned — this event names no repo, so no ops face can be " <>
+        "addressed (a producer defect, not a missing face); the trace posts inline"
+    )
+
+    nil
+  end
+
+  # `on_closed` runs inside the completion closure, only on `{:ok, _}` — whatever the runner.
+  defp close_with_trace(n, role, trace, state, on_closed) when is_function(on_closed, 0) do
     step_run = %{
       repo: state.repo,
       issue_number: n,
@@ -934,7 +964,14 @@ defmodule Fleet.Pilot.StepRunConsumer do
     }
 
     run_completion(state, "##{n}", fn ->
-      state.step_run_completer.complete(step_run, completer_opts(state))
+      result = state.step_run_completer.complete(step_run, completer_opts(state))
+
+      case result do
+        {:ok, _} -> _ = on_closed.()
+        _ -> :ok
+      end
+
+      result
     end)
   end
 

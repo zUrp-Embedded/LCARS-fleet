@@ -11,6 +11,23 @@ defmodule Fleet.Spawner.PodWardenTest do
 
   defp s(list), do: MapSet.new(list)
 
+  # Le warden observe par ses coutures : `reap_fun` et `gc_fun` rapportent au test, les sources
+  # sont celles que le temoin passe. `opts` gagne sur les defauts.
+  defp start_warden(opts) do
+    parent = self()
+
+    defaults = [
+      name: nil,
+      interval_ms: 10,
+      live_fun: fn -> {:ok, s([])} end,
+      socks_fun: fn -> {:ok, s([])} end,
+      reap_fun: fn pod_id -> send(parent, {:reaped, pod_id}) end,
+      gc_fun: fn _live, prev -> prev end
+    ]
+
+    start_supervised!({R, Keyword.merge(defaults, opts)})
+  end
+
   test "orphan seen for the 1st time → NOT reaped (grace), becomes suspect" do
     # sock "p1" without a live pod; no previous suspect → do not act, take note.
     {to_reap, suspects} = R.reconcile_decision(s([]), s(["p1"]), s([]))
@@ -116,7 +133,11 @@ defmodule Fleet.Spawner.PodWardenTest do
       on_exit(fn -> File.chmod(base, 0o755) end)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_tmux_sock_base, base)
 
-      state = %{suspects: s(["p1"]), gc_suspects: s([])}
+      # `init/1` pose les VRAIES sources (c'est le vrai `sock_pod_ids/0` qu'on veut voir refuser
+      # la base) ; le tick est joue depuis ce processus, et le timer qu'`init` arme atterrit dans
+      # la boite du test, ignore.
+      {:ok, state} = R.init([])
+      state = %{state | suspects: s(["p1"])}
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -139,7 +160,7 @@ defmodule Fleet.Spawner.PodWardenTest do
       File.mkdir_p!(base)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :spawner_tmux_sock_base, base)
 
-      state = %{suspects: s([]), gc_suspects: s([])}
+      {:ok, state} = R.init([])
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -147,6 +168,70 @@ defmodule Fleet.Spawner.PodWardenTest do
         end)
 
       refute log =~ "socket base unavailable"
+    end
+  end
+
+  # ─── LE TICK, SUR `Fleet.PeriodicCheck` ─────────────────────────────────────────────────────
+  #
+  # Les temoins du haut n'exercent que les decisions pures ; ceux-ci demarrent le GenServer et
+  # observent le tick par ses coutures, sans disque ni Registry : la branche nominale, le gel sur
+  # une source indisponible, le filet sur une source qui leve, et le rejeu synchrone.
+  describe "le tick, sur PeriodicCheck" do
+    test "orphelin confirme au 2e tick → reap ; le pod vivant, jamais" do
+      start_warden(
+        live_fun: fn -> {:ok, s(["p-live"])} end,
+        socks_fun: fn -> {:ok, s(["p-live", "p-ghost"])} end
+      )
+
+      assert_receive {:reaped, "p-ghost"}, 1_000
+      refute_received {:reaped, "p-live"}
+    end
+
+    test "source INDISPONIBLE → la grace GELE : le suspect n'est ni oublie ni traite" do
+      parent = self()
+      counter = :counters.new(1, [])
+
+      # tick 1 : orphelin vu, suspect. tick 2 : base illisible, gel. tick 3 : revu → confirme.
+      # Sans gel, le tick 2 lirait « aucun orphelin », le suspect tomberait, et le reap ne
+      # viendrait qu'au tick 4. Le reap rapporte le numero du tick qui l'a decide.
+      start_warden(
+        socks_fun: fn ->
+          :counters.add(counter, 1, 1)
+          if :counters.get(counter, 1) == 2, do: :unavailable, else: {:ok, s(["p-ghost"])}
+        end,
+        reap_fun: fn pod_id -> send(parent, {:reaped, pod_id, :counters.get(counter, 1)}) end
+      )
+
+      assert_receive {:reaped, "p-ghost", 3}, 1_000
+    end
+
+    test "source qui LEVE → rien n'est reap et le warden SURVIT (le filet de PeriodicCheck)" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          warden =
+            start_warden(
+              live_fun: fn -> raise "registry gone" end,
+              socks_fun: fn -> {:ok, s(["p-ghost"])} end
+            )
+
+          refute_receive {:reaped, _}, 100
+          assert Process.alive?(warden)
+        end)
+
+      assert log =~ "RAISED"
+    end
+
+    test "check_now rejoue le tick de maniere synchrone et rend les suspects" do
+      warden = start_warden(interval_ms: 3_600_000, socks_fun: fn -> {:ok, s(["p-ghost"])} end)
+
+      assert {:ok, %{suspects: suspects}} = R.check_now(warden)
+      assert MapSet.equal?(suspects, s(["p-ghost"]))
+      refute_received {:reaped, _}
+
+      # Second rejeu : le suspect est confirme, reap, et sort des suspects.
+      assert {:ok, %{suspects: suspects}} = R.check_now(warden)
+      assert_received {:reaped, "p-ghost"}
+      assert MapSet.size(suspects) == 0
     end
   end
 end

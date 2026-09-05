@@ -162,6 +162,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check do
         Tools.check_modop_tools_granted(root),
         Artifact.check_proven_image_regime(root),
         Runtime.check_verifier_covers_rail(root),
+        Runtime.check_workflow_loader_arity(root),
         Tools.check_capabilities_exercisable(root),
         Catalogue.check_catalogue_paths_locked(root),
         Runtime.check_eval_doors_start_transport(root),

@@ -96,7 +96,12 @@ defmodule Fleet.Pilot.MergeAndPromote do
           keyword()
         ) ::
           :ok
-          | {:error, {:merge, term()} | {:close_after_merge, term()} | :role_token_unavailable}
+          | {:error,
+             {:merge, term()}
+             | {:close_after_merge, term()}
+             | {:conflict_signal_unreadable, term()}
+             | {:provenance_incoherent, term()}
+             | :role_token_unavailable}
   def merge_and_promote(forge, repo, pr_number, issue_n, producer, forge_opts, opts \\ []) do
     # A0 (rails) — WHICH MERGE METHOD, decided by a FACT before anything is written.
     # A PR that went through a conflict resolution carries a MERGE commit on its head branch,
@@ -281,21 +286,28 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # then stage/merged, then EXPLICIT close (the issue is still OPEN when the comment is posted,
     # no more auto-close-before-comment). Merge failed → NO "merged", the error bubbles up (resolution of the
     # conflict between parallel PRs is handled elsewhere, by the re-dispatch).
+    # ONE suite after a merge that HOLDS, whatever proved it (the `:ok` of the POST, or the server
+    # read back after an errored POST): a change to the post-merge gestures cannot land on one
+    # proof only. A closure, not a function: the ten values are all in scope here.
+    after_merge = fn ->
+      note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
+
+      converge_postconditions(
+        forge,
+        repo,
+        pr_number,
+        issue_n,
+        body,
+        signature,
+        forge_opts,
+        opts,
+        producer
+      )
+    end
+
     case do_merge(forge, repo, pr_number, merge_opts, method) do
       :ok ->
-        note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
-
-        converge_postconditions(
-          forge,
-          repo,
-          pr_number,
-          issue_n,
-          body,
-          signature,
-          forge_opts,
-          opts,
-          producer
-        )
+        after_merge.()
 
       {:error, _} = err ->
         # A merge POST that errors does NOT prove the merge did not happen: a timeout can
@@ -314,19 +326,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
               "verdict was a lie of the wire, not of the merge)"
           )
 
-          note_wall_not_run(forge, repo, pr_number, wall, forge_opts)
-
-          converge_postconditions(
-            forge,
-            repo,
-            pr_number,
-            issue_n,
-            body,
-            signature,
-            forge_opts,
-            opts,
-            producer
-          )
+          after_merge.()
         else
           err
         end
@@ -477,26 +477,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # catalogue the way the dispatcher BUILDS it (`slot_scope` + `PodId`), never a guessed string: a
   # PROJECT-keyed role resolves to a shared id this function must NOT kill. So the scope decides,
   # and `instance` is the only one harvested.
-  defp reap_ticket_producer(repo, issue_n, producer) do
-    with true <- producer != "",
-         {:ok, profile} <- Fleet.CapProfile.load(producer),
-         "instance" <- Fleet.CapProfile.slot_scope(profile) do
-      pod_id = Fleet.PodId.for_issue(repo, issue_n, producer)
-
-      case spawner().kill_pod(pod_id) do
-        :ok ->
-          Logger.info(
-            "MergeAndPromote: #{repo}##{issue_n} sealed — ticket-scoped producer pod " <>
-              "#{pod_id} reaped (its context lived until the merge, as designed)"
-          )
-
-        {:error, :not_found} ->
-          :ok
-      end
-    else
-      _ -> :ok
-    end
-  end
+  # The reaping is `PodReaper`'s — the one reader of the `:pilot_spawner` seam for a ticket's end.
+  defp reap_ticket_producer(repo, issue_n, producer),
+    do: Fleet.Pilot.PodReaper.reap_producer(repo, issue_n, producer)
 
   @doc """
   Converges the ATTRIBUTION-NEUTRAL terminal guards of an issue whose PR turned out merged
@@ -546,7 +529,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # vocabulary. Seam stubs without `get_pull/3`, an unreadable PR, or any non-merged state
   # read as `false` (the ambiguous error then propagates, fail-closed).
   defp merged_on_server?(forge, repo, pr_number, forge_opts) do
-    with true <- Code.ensure_loaded?(forge) and function_exported?(forge, :get_pull, 3),
+    with true <- Fleet.Opts.exported?(forge, :get_pull, 3),
          {:ok, pull} <- forge.get_pull(repo, pr_number, forge_opts) do
       Fleet.Pilot.MergeOutcome.classify(pull) == :merged
     else
@@ -558,51 +541,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
   defp worktree_sync,
     do: Application.get_env(:lcars_fleet, :pilot_worktree_sync, Fleet.Project.WorktreeSync)
 
-  # Seam (test): the pod supervisor, for the post-seal reaping. Default = the prod module.
-  defp spawner,
-    do: Application.get_env(:lcars_fleet, :pilot_spawner, Fleet.Spawner)
-
   defp verify_provenance_wall(forge, repo, pr_number, issue_n, forge_opts, opts) do
-    head_branch = Keyword.get(opts, :head_branch)
-    # Roots injectable (tests) — defaults = the container layout authority.
-    project_dir =
-      Path.join(
-        Keyword.get(opts, :code_root, Fleet.Layout.code_root()),
-        Fleet.Layout.project_name(repo)
-      )
-
-    work_dir =
-      Path.join(
-        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
-        Fleet.Layout.project_name(repo)
-      )
-
-    with true <- is_binary(head_branch) || {:skip, :no_head_branch},
-         true <-
-           (Code.ensure_loaded?(forge) and function_exported?(forge, :branch_head, 3)) ||
-             {:skip, :seam_without_branch_head},
-         {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
-         true <- File.dir?(project_dir) || {:skip, :no_local_clone},
-         true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
-         # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch the head
-         # branch AND the attestation ref of that exact head — both are objects the wall needs and
-         # neither is in the clone yet. Le ref d'attestation est NOMME PAR LE SHA (BL-6-43) : on ne
-         # calcule plus un nom de fichier depuis la tete, on demande la preuve DE cette tete.
-         prov_ref = Fleet.Workflow.Git.provenance_ref(head_sha),
-         _ =
-           Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
-             auth: true
-           ),
-         _ =
-           Fleet.Project.GitOps.run(
-             ["-C", project_dir, "fetch", "-q", "origin", "#{prov_ref}:#{prov_ref}"],
-             auth: true
-           ),
-         {:ok, statement} <-
-           (case Fleet.Workflow.Git.read_provenance(project_dir, head_sha) do
-              {:ok, json} -> {:ok, json}
-              {:error, _} -> {:skip, {:no_statement, prov_ref}}
-            end) do
+    with {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: ref}} <-
+           wall_inputs(forge, repo, forge_opts, opts) do
       case Fleet.Workflow.Provenance.Verifier.verify_content(statement,
              work_dir: work_dir,
              project_dir: project_dir
@@ -623,7 +564,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
               repo,
               pr_number,
               "⛔ **Provenance incohérente** — merge refusé par le mur déterministe.\n\n" <>
-                "Le statement `#{prov_ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
+                "Le statement `#{ref}` ne colle pas à la brique : `#{inspect(reason)}`.\n" <>
                 "Rien n'est mergé tant que la traçabilité ment.",
               Keyword.put(forge_opts, :dedup_signature, "[provenance-wall:pr-#{pr_number}]")
             )
@@ -646,6 +587,66 @@ defmodule Fleet.Pilot.MergeAndPromote do
         )
 
         {:skipped, {:head_read_failed, why}}
+    end
+  end
+
+  # WHAT THE WALL NEEDS IN HAND before it can judge — six availability conditions and two
+  # fetches, apart from the decision so the decision reads as its contract: statement in hand →
+  # verify → refuse or pass. `{:skip, why}` is every absence (the wall does not run, the seal says
+  # so on the PR); `{:error, why}` is a forge head that could not be read.
+  defp wall_inputs(forge, repo, forge_opts, opts) do
+    head_branch = Keyword.get(opts, :head_branch)
+    # Roots injectable (tests) — defaults = the container layout authority.
+    project_dir =
+      Path.join(
+        Keyword.get(opts, :code_root, Fleet.Layout.code_root()),
+        Fleet.Layout.project_name(repo)
+      )
+
+    work_dir =
+      Path.join(
+        Keyword.get(opts, :ops_root, Fleet.Layout.ops_root()),
+        Fleet.Layout.project_name(repo)
+      )
+
+    with true <- is_binary(head_branch) || {:skip, :no_head_branch},
+         true <-
+           Fleet.Opts.exported?(forge, :branch_head, 3) ||
+             {:skip, :seam_without_branch_head},
+         {:ok, head_sha} <- forge.branch_head(repo, head_branch, forge_opts),
+         true <- File.dir?(project_dir) || {:skip, :no_local_clone},
+         true <- File.dir?(work_dir) || {:skip, :no_local_work_ops},
+         prov_ref = Fleet.Workflow.Git.provenance_ref(head_sha),
+         :ok <- fetch_head_and_proof(project_dir, head_branch, prov_ref),
+         {:ok, statement} <- read_statement(project_dir, head_sha, prov_ref) do
+      {:ok, %{statement: statement, project_dir: project_dir, work_dir: work_dir, ref: prov_ref}}
+    end
+  end
+
+  # The local clone lags the forge pre-merge (WorktreeSync aligns POST-merge): fetch the head
+  # branch AND the attestation ref of that exact head — both are objects the wall needs and
+  # neither is in the clone yet. Le ref d'attestation est NOMME PAR LE SHA (BL-6-43) : on ne
+  # calcule plus un nom de fichier depuis la tete, on demande la preuve DE cette tete. Two effects,
+  # both best-effort: what they failed to bring is read as absent one step later.
+  defp fetch_head_and_proof(project_dir, head_branch, prov_ref) do
+    _ =
+      Fleet.Project.GitOps.run(["-C", project_dir, "fetch", "-q", "origin", head_branch],
+        auth: true
+      )
+
+    _ =
+      Fleet.Project.GitOps.run(
+        ["-C", project_dir, "fetch", "-q", "origin", "#{prov_ref}:#{prov_ref}"],
+        auth: true
+      )
+
+    :ok
+  end
+
+  defp read_statement(project_dir, head_sha, prov_ref) do
+    case Fleet.Workflow.Git.read_provenance(project_dir, head_sha) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> {:skip, {:no_statement, prov_ref}}
     end
   end
 
@@ -885,7 +886,7 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # tout le reste : cette fonction s'execute APRES un merge reussi, et aucune de ses reponses ne
   # doit pouvoir empecher la promotion d'une brique deja fusionnee.
   defp probe_state(forge, repo, pr_number, forge_opts) do
-    with true <- function_exported?(forge, :pr_refs, 3),
+    with true <- Fleet.Opts.exported?(forge, :pr_refs, 3),
          {:ok, %{head_sha: sha}} <- forge.pr_refs(repo, pr_number, forge_opts),
          {:ok, probed?} <- forge_actions().probed?(repo, sha, forge_opts) do
       if probed?, do: :probed, else: :unprobed

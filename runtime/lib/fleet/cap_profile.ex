@@ -1,6 +1,7 @@
 defmodule Fleet.CapProfile do
   use Boundary,
     deps: [
+      Fleet.Opts,
       Fleet.Slug,
       Fleet.EnvParse,
       Fleet.GitRef,
@@ -108,7 +109,7 @@ defmodule Fleet.CapProfile do
   # — a right card, and a lookup in the wrong library. `nil` keeps the default root, and a loader
   # exporting only `load/1` is a test stub answering for the single catalogue it fabricates.
   defp load_in(loader, role, root) do
-    if root && function_exported?(loader, :load, 2),
+    if root && Fleet.Opts.exported?(loader, :load, 2),
       do: loader.load(role, root),
       else: loader.load(role)
   end
@@ -264,7 +265,7 @@ defmodule Fleet.CapProfile do
          :ok <- validate_extra_modops(base, extra_modops) do
       active = default_modops(base) ++ extra_modops
 
-      if function_exported?(loader, :compose, 2) do
+      if Fleet.Opts.exported?(loader, :compose, 2) do
         with {:ok, composed} <- loader.compose(base, active),
              do: {:ok, %{composed | active_modops: active}}
       else

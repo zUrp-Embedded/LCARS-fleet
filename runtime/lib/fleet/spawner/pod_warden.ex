@@ -2,12 +2,31 @@ defmodule Fleet.Spawner.PodWarden do
   @moduledoc """
   Periodic substrate reaper for orphan tmux holders and terminal pod tombstones.
   Both duties reconcile against the live registry and require two consecutive
-  observations before acting. Unknown liveness skips the entire tick.
+  observations before acting (`Fleet.Grace.two_tick/2`). Unknown liveness skips the entire tick.
+
+  The tick plumbing — arm, re-arm LAST, the net under the check, the `:check_now` hook — is
+  `Fleet.PeriodicCheck`; this module keeps its state, its two sources and its decision.
+
+  ## Options (`start_link/1`)
+
+    * `:name` — GenServer name (default the module; tests pass `nil` or a unique name to co-exist).
+    * `:interval_ms` — tick period (default `60_000`).
+    * `:live_fun` — `() -> {:ok, MapSet.t()} | :unavailable`, the live pod ids (default: the
+      Registry).
+    * `:socks_fun` — same shape, the socket dirs on disk (default: `PodTmux.sock_base/0`).
+    * `:reap_fun` — `(pod_id -> term)`, the reap effect (default `reap/1`).
+    * `:gc_fun` — `(live, prev_suspects -> new_suspects)`, the pod_dir GC sweep (default
+      `sweep_pod_dir_gc/2`).
+
+  The four seams exist so the TICK is testable without a disk or a Registry: the decisions are
+  pure and tested on their own, and the tick's three branches are tested through the seams.
   """
 
   use GenServer
   require Logger
 
+  alias Fleet.Grace
+  alias Fleet.PeriodicCheck
   alias Fleet.Spawner.Pod.{Paths, StateFs}
   alias Fleet.Spawner.PodTmux
 
@@ -16,31 +35,54 @@ defmodule Fleet.Spawner.PodWarden do
   # Unlike pre-respawn cleanup, orphan GC may reclaim failed tombstones after grace.
   @terminal_phases ~w(succeeded released killed failed)
 
-  @spec start_link(term()) :: GenServer.on_start()
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts \\ []), do: PeriodicCheck.start_link(__MODULE__, opts)
+
+  @doc """
+  Replays one tick NOW, synchronously — the `:check_now` hook of `PeriodicCheck`. Replies the two
+  suspect sets after the pass.
+  """
+  @spec check_now(GenServer.server()) :: {:ok, %{suspects: MapSet.t(), gc_suspects: MapSet.t()}}
+  def check_now(server \\ __MODULE__), do: GenServer.call(server, :check_now)
 
   @impl true
-  def init(_opts) do
-    {:ok, %{suspects: MapSet.new(), gc_suspects: MapSet.new()}, {:continue, :schedule}}
+  def init(opts) do
+    state = %{
+      interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
+      live_fun: Keyword.get(opts, :live_fun, &live_pod_ids/0),
+      socks_fun: Keyword.get(opts, :socks_fun, &sock_pod_ids/0),
+      reap_fun: Keyword.get(opts, :reap_fun, &reap/1),
+      gc_fun: Keyword.get(opts, :gc_fun, &sweep_pod_dir_gc/2),
+      suspects: MapSet.new(),
+      gc_suspects: MapSet.new()
+    }
+
+    _ = PeriodicCheck.schedule(:reap_tick, state.interval_ms)
+    {:ok, state}
   end
 
   @impl true
-  def handle_continue(:schedule, state) do
-    schedule_tick()
-    {:noreply, state}
-  end
+  def handle_info(:reap_tick, state), do: PeriodicCheck.tick(state, :reap_tick, &do_check/1)
+  def handle_info(_other, state), do: {:noreply, state}
 
   @impl true
-  def handle_info(:reap_tick, state) do
-    case {live_pod_ids(), sock_pod_ids()} do
+  def handle_call(:check_now, _from, state),
+    do:
+      PeriodicCheck.check_now(
+        state,
+        &do_check/1,
+        &{:ok, %{suspects: &1.suspects, gc_suspects: &1.gc_suspects}}
+      )
+
+  defp do_check(state) do
+    case {state.live_fun.(), state.socks_fun.()} do
       {{:ok, live}, {:ok, socks}} ->
         {to_reap, new_suspects} = reconcile_decision(live, socks, state.suspects)
-        Enum.each(to_reap, &reap/1)
+        Enum.each(to_reap, state.reap_fun)
 
-        new_gc_suspects = sweep_pod_dir_gc(live, state.gc_suspects)
+        new_gc_suspects = state.gc_fun.(live, state.gc_suspects)
 
-        schedule_tick()
-        {:noreply, %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}}
+        %{state | suspects: new_suspects, gc_suspects: new_gc_suspects}
 
       {_, :unavailable} ->
         # Same posture as an unavailable Registry: a reconciliation needs BOTH sides. Freeze the
@@ -50,8 +92,7 @@ defmodule Fleet.Spawner.PodWarden do
             "(no decision without the list of live sockets)"
         )
 
-        schedule_tick()
-        {:noreply, state}
+        state
 
       {:unavailable, _} ->
         # Unknown is not an empty live set: freeze both grace clocks.
@@ -59,12 +100,9 @@ defmodule Fleet.Spawner.PodWarden do
           "PodWarden: Registry unavailable — reap tick SKIPPED (no decision without the list of live pods)"
         )
 
-        schedule_tick()
-        {:noreply, state}
+        state
     end
   end
-
-  def handle_info(_other, state), do: {:noreply, state}
 
   @doc """
   Applies two-tick grace to socket ids absent from the live registry.
@@ -72,7 +110,7 @@ defmodule Fleet.Spawner.PodWarden do
   @spec reconcile_decision(MapSet.t(), MapSet.t(), MapSet.t()) :: {MapSet.t(), MapSet.t()}
   def reconcile_decision(live, socks, prev_suspects) do
     orphans_now = MapSet.difference(socks, live)
-    grace_2tick(orphans_now, prev_suspects)
+    Grace.two_tick(orphans_now, prev_suspects)
   end
 
   @doc """
@@ -82,7 +120,7 @@ defmodule Fleet.Spawner.PodWarden do
   def reconcile_pod_dir_gc(tombstones, live, prev_suspects) do
     candidates = Enum.filter(tombstones, &gc_candidate?(&1, live))
     candidate_ids = candidates |> Enum.map(& &1.pod_id) |> MapSet.new()
-    {confirmed_ids, new_suspects} = grace_2tick(candidate_ids, prev_suspects)
+    {confirmed_ids, new_suspects} = Grace.two_tick(candidate_ids, prev_suspects)
     to_gc = Enum.filter(candidates, &MapSet.member?(confirmed_ids, &1.pod_id))
     {to_gc, new_suspects}
   end
@@ -99,13 +137,6 @@ defmodule Fleet.Spawner.PodWarden do
     {to_gc, new_suspects} = reconcile_pod_dir_gc(scan_tombstones(), live, prev_suspects)
     Enum.each(to_gc, &gc_one/1)
     new_suspects
-  end
-
-  # Act only on candidates observed on two consecutive ticks.
-  defp grace_2tick(candidates, prev_suspects) do
-    to_act = MapSet.intersection(candidates, prev_suspects)
-    new_suspects = MapSet.difference(candidates, to_act)
-    {to_act, new_suspects}
   end
 
   defp reap(pod_id) do
@@ -203,11 +234,4 @@ defmodule Fleet.Spawner.PodWarden do
         :unavailable
     end
   end
-
-  defp schedule_tick do
-    Process.send_after(self(), :reap_tick, interval_ms())
-  end
-
-  defp interval_ms,
-    do: Application.get_env(:lcars_fleet, :spawner_pod_warden_interval_ms, @default_interval_ms)
 end

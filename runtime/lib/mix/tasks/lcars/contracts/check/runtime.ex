@@ -779,16 +779,27 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       _ -> nil
     end)
     |> List.flatten()
+    # Local calls AND qualified ones (`CatalogueGuards.validate_x!()`): the guards live outside
+    # this file, and the natural way to add one is the qualified call — invisible to a matcher
+    # that only reads bare names, which is how the wall would stay green while the two sequences
+    # diverge.
     |> collect(fn
       {name, _, _args} when is_atom(name) ->
-        s = Atom.to_string(name)
-        if String.starts_with?(s, "validate_") and String.ends_with?(s, "!"), do: [s], else: nil
+        if validate_guard?(name), do: [Atom.to_string(name)], else: nil
+
+      {{:., _, [_module, name]}, _, _args} when is_atom(name) ->
+        if validate_guard?(name), do: [Atom.to_string(name)], else: nil
 
       _ ->
         nil
     end)
     |> List.flatten()
     |> MapSet.new()
+  end
+
+  defp validate_guard?(name) do
+    s = Atom.to_string(name)
+    String.starts_with?(s, "validate_") and String.ends_with?(s, "!")
   end
 
   @doc """
@@ -1154,5 +1165,112 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Runtime do
       end)
 
     l
+  end
+
+  # ── workflow.loader_arity ──────────────────────────────────────────────
+  #
+  # `Fleet.Workflow.Loader.load!/2` takes the catalogue in its `opts`; `load!/1` resolves the
+  # engraved NAME in the default image, so a project of another catalogue gets a foreign card of
+  # the same name (`WorkflowMapNav.safe_load/3` says what that costs: a rail that reads as a 403).
+  # A unary CAPTURE (`&Loader.load!/1`) handed to `safe_load/3` drops the opts the same way. Both
+  # forms are refused everywhere in `lib/` but the loader itself, AT THE AST: a comment or a
+  # `@doc` quoting `load!/1` is prose, not a call (BND-111); a pipe (`name |> Loader.load!()`) is
+  # unfolded first, because the AST of a pipe carries the piped value OUTSIDE the call node.
+  #
+  # What it reads: a call whose alias ends in `Loader` — `Fleet.Workflow.Loader.load!`, or `Loader`
+  # after `alias Fleet.Workflow.Loader`. What it does NOT read, by construction: a module held in a
+  # variable (`m.load!(name)`), `apply/3`, and an `as:` alias — none exists for this loader
+  # today, and a wall that claims more than it measures is the false green it exists to refuse.
+  @doc false
+  @spec check_workflow_loader_arity(String.t()) :: Support.result()
+  def check_workflow_loader_arity(root) do
+    id = "workflow.loader_arity"
+    own = "lib/fleet/workflow/loader.ex"
+
+    # The exclusion is checked: a loader that moved would make the exclusion dead and, one day,
+    # the loader's own `load!(name)` default a violation — better an instrument alarm than either.
+    if not File.regular?(Path.join(root, own)),
+      do: throw({:loader_moved, own})
+
+    files =
+      root
+      |> Path.join("lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, root))
+      |> Enum.reject(&(&1 == own))
+      |> Enum.sort()
+
+    {binary, unary} =
+      Enum.reduce(files, {0, []}, fn rel, {n_bin, bad} ->
+        {b, u} = loader_call_sites(quoted!(root, rel))
+        {n_bin + b, bad ++ Enum.map(u, fn {line, form} -> "#{rel}:#{line} — #{form}" end)}
+      end)
+
+    cond do
+      # Population guard: the rails call `load!/2` at a dozen sites; zero means the walker no
+      # longer recognises the call shape, and a wall that sees nothing must not stay green. The
+      # unary sites found so far ride along, so a regression that both removes binary sites and
+      # adds a unary one still names the culprit.
+      binary < 5 ->
+        broken_result(
+          id,
+          "Loader.load!/2 call sites (only #{binary}, expected 5+)" <>
+            if(unary == [], do: "", else: "; unary seen: #{Enum.join(unary, " · ")}")
+        )
+
+      true ->
+        %{
+          id: id,
+          remediation:
+            "pass the catalogue: `Loader.load!(name, Loader.card_opts_for_repo(repo))` (or the " <>
+              "`loader_opts` already in scope), and hand `&Loader.load!/2` to `safe_load/3`",
+          status: if(unary == [], do: :pass, else: :fail),
+          evidence: unary,
+          note: "#{binary} binary site(s) across lib/; #{length(unary)} unary"
+        }
+    end
+  end
+
+  # `{binary_count, [{line, form}]}` — every `<alias>.load!` whose alias is the workflow loader
+  # (`Fleet.Workflow.Loader`, or the bare `Loader` an `alias` leaves): a call with ONE argument,
+  # or a capture `&….load!/1`. Pipes are unfolded first (`unpipe/1`).
+  @loader_aliases [[:Loader], [:Workflow, :Loader], [:Fleet, :Workflow, :Loader]]
+
+  defp loader_call_sites(ast) do
+    {_, acc} =
+      ast
+      |> unpipe()
+      |> Macro.prewalk({0, []}, fn
+        {:&, meta, [{:/, _, [{{:., _, [{:__aliases__, _, parts}, :load!]}, _, []}, 1]}]} = node,
+        {b, u} ->
+          if parts in @loader_aliases,
+            do: {node, {b, u ++ [{meta[:line], "&Loader.load!/1"}]}},
+            else: {node, {b, u}}
+
+        {{:., _, [{:__aliases__, _, parts}, :load!]}, meta, args} = node, {b, u}
+        when is_list(args) ->
+          cond do
+            parts not in @loader_aliases -> {node, {b, u}}
+            length(args) == 1 -> {node, {b, u ++ [{meta[:line], "Loader.load!(_)"}]}}
+            length(args) == 2 -> {node, {b + 1, u}}
+            true -> {node, {b, u}}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc
+  end
+
+  # `lhs |> f(args)` → `f(lhs, args)`, at every depth: the AST of a pipe keeps the piped value in
+  # the `|>` node, so an arity read on the call node alone is off by one in BOTH directions
+  # (`n |> Loader.load!()` reads as zero arguments, `n |> Loader.load!(o)` as one).
+  defp unpipe(ast) do
+    Macro.prewalk(ast, fn
+      {:|>, _, [lhs, {call, meta, args}]} when is_list(args) -> {call, meta, [lhs | args]}
+      {:|>, _, [lhs, {call, meta, nil}]} -> {call, meta, [lhs]}
+      node -> node
+    end)
   end
 end

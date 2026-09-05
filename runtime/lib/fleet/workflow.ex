@@ -6,8 +6,10 @@ defmodule Fleet.Workflow do
   Boundary anchor; the contract lives in each module's @moduledoc:
   `Fleet.Workflow.Loader`, `Fleet.Workflow.Gates`, `Fleet.Workflow.Deliverable`,
   `Fleet.Workflow.DeliverableGate`,
-  `Fleet.Workflow.GateDecision` (decision vocabulary), `Fleet.Workflow.BriefArtifact`
-  and `Fleet.Workflow.Provenance` (physical-brief provenance).
+  `Fleet.Workflow.GateDecision` (decision vocabulary), `Fleet.Workflow.BriefArtifact`,
+  `Fleet.Workflow.Provenance` (physical-brief provenance), and the two catalogue guards
+  `Fleet.Workflow.CardRoles` (card→role edge) and `Fleet.Workflow.CatalogueGuards` (the
+  `validate_*!` family).
   (No resident-singleton gatekeeper here: the gatekeeper is a ONE-SHOT per-project judge, spawned
   per gate eval by the pilot's `GatekeeperEscalation`.)
   """
@@ -38,6 +40,8 @@ defmodule Fleet.Workflow do
       # `catalogue install` avant de toucher la forge. Une seule fonction, deux appelants hors du
       # domaine — donc une surface, declaree.
       CardRoles,
+      # The card guards of a catalogue, played by the pilot's rail boot (and its verifier replay).
+      CatalogueGuards,
       # StepOutputs exported for ONE reason, and it is the reason `Gates` is not the caller:
       # `Gates` is PURE by contract, and deriving these facts reads the filesystem. So the rail
       # merges them in before evaluating, which makes this an API of the domain rather than an

@@ -1,4 +1,4 @@
-defmodule Fleet.Pilot.ListProjectsTest do
+defmodule Fleet.Project.Onboard.ListProjectsTest do
   @moduledoc """
   The onboarder could destroy a project it had no way to name.
 

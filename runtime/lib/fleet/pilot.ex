@@ -16,7 +16,8 @@ defmodule Fleet.Pilot do
   **A — Detection** (`Poller`, tick ~30 s): discovers repos by org-membership,
   lists issues+PRs, reconciles the 3 encodings of "in flight" (label `lcars-in-flight` /
   live pod / TaskQueue mandate — `Poller.Reconciliation`, 2-tick grace), admits under the
-  per-repo ceiling (`Poller.Lease`, `max_fan`) and delegates.
+  per-human ceiling on each repo (`Poller.Admission.max_fan/2`, played by `Poller.Lease`) and
+  delegates.
 
   **B — Dispatch** (`StepDispatcher`): `decide/1` (PURE gate over the labels) →
   project/route resolution (the `stage/*` label carries the workflow_map position) →
@@ -37,7 +38,7 @@ defmodule Fleet.Pilot do
   commit-scoped verdicts → judges/rework → promotion via `MergeAndPromote`
   (SINGLE AUTHORITY of the signed merge) → `WorktreeSync` → unlock.
 
-  Transverse rail: failures (`pod.failed`/`wake.failed`) go to
+  Transverse rail: every `action: incident` event of the routing table (seven types) goes to
   `IncidentConsumer`→`IncidentRegistry` (WAL + forge sync), blast-radius isolated
   from the completion rail. SINGLE forge HTTP exit: `Fleet.Forge.Client` (+ `Transport`).
 
@@ -121,6 +122,7 @@ defmodule Fleet.Pilot do
       # daemon quiesces. Every gesture that STARTS work reads it, each on its own side — this is
       # this domain's.
       Fleet.Shutdown.Quiesce,
+      Fleet.Grace,
       Fleet.Publish.InFlight,
       # BL-6-31: the adoption gate of import_external scans instruction material through the
       # reception filter — foundation, shared with SPBuilder's RepoSections door.

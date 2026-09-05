@@ -1,7 +1,7 @@
 # Fleet.Workflow — domain card
 
 **Date**: 2026-07-11
-**Last revised**: 2026-09-04
+**Last revised**: 2026-09-05
 **Status**: active — domain card (contracts live in the `@moduledoc`s)
 **Referenced by**: —
 
@@ -32,6 +32,7 @@ is restated, only pointed at.
 - `Fleet.Workflow.Provenance` — the provenance triplet assembly (brief_sha + base_sha + deliverable)
 - `Fleet.Workflow.Provenance.Verifier` — deterministic triplet verifier, the non-LLM wall (+ `mix lcars.provenance.verify`)
 - `Fleet.Workflow.CardRoles` — does every role a catalogue's cards NAME exist in that catalogue?
+- `Fleet.Workflow.CatalogueGuards` — the `validate_*!` family: jury roles are judges, step roles resolve in the card's catalogue and never judge themselves, the default card loads, a catalogue without a doc rail is told so. Played at rail boot and by the standalone verifier.
 - `Fleet.Workflow.StepOutputs` — the SYSTEM's own facts about a step's declared `outputs`, checked in the pod workspace
 - `Fleet.Workflow.Pinning` — what an agent EMITS on the forge: a short body on the surface, the full text committed and cited
 

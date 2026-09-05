@@ -1,16 +1,35 @@
 defmodule Fleet.Pilot.IncidentRegistry do
   @moduledoc """
-  Cross-session incident memory with serialized in-memory recurrence lookup,
-  atomic local WAL, and asynchronous bidirectional forge backing. WAL failure is
-  surfaced as volatile state. Sysadmin issue creation lives in `Escalation`.
+  Cross-session incident memory: the POLICY of recurrence and cooldown, serialized in one process.
+  The durable magasin (atomic local WAL + asynchronous bidirectional forge backing, one encoder
+  and one merge for both) is `Store`; the sysadmin issue is `Escalation` — three concerns, three
+  modules. WAL failure is surfaced as volatile state.
   """
   use GenServer
   require Logger
 
-  alias Fleet.Forge.Client, as: ForgeClient
+  alias Fleet.Pilot.IncidentRegistry.Store
 
   @forge_fail_threshold 3
-  @sync_debounce_ms 2_000
+  # THE SYNC WINDOW IS THE REGISTRY'S OPS-COMMIT BUDGET. Every sync rewrites the ops file in full
+  # and lands as one commit on the ops branch, and a durable failure is noted at EVERY tick (see
+  # `IncidentConsumer`: recurrent under cooldown = noted, count/last_seen). Per machine, at the
+  # 30 s default tick, a window shorter than the tick coalesces nothing: one
+  # « ops(incident): sync registre » per tick, ~2 880 a day burying every human commit of the
+  # branch; 300 s caps it at 288, and the file's final state is the same (the merge keeps the
+  # max count and the latest stamps). What the window costs, and to whom:
+  #   * the OTHER machines read this one's memory up to a window later. That delays an
+  #     escalation by at most one occurrence (recurrence is decided against the local memory
+  #     first). A duplicate sysadmin issue is guarded by `Escalation`'s open-issue readback, not
+  #     by this memory: as long as that readback succeeds no duplicate opens; unreadable, it
+  #     creates and says so in the body;
+  #   * durability is NOT traded: the WAL holds every note before the forge does. When the WAL
+  #     write FAILED the forge is the only durability left, and that sync runs on the catch-up
+  #     clock (`retry_ms`, `schedule_sync/2`), not on the window. Same clock for the boot re-read
+  #     of an unreadable forge: a read that pushes nothing has no commit budget to respect.
+  # Knob `:pilot_incident_registry_sync_debounce_ms` (`LCARS_PILOT_INCIDENT_REGISTRY_SYNC_DEBOUNCE_MS`);
+  # the `:sync_debounce_ms` opt is the test seam.
+  @sync_debounce_ms 300_000
   @retry_ms 30_000
 
   @doc """
@@ -203,7 +222,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   @impl true
   def init(opts) do
-    wal = wal_path(opts)
+    wal = Store.wal_path(opts)
     _ = File.mkdir_p(Path.dirname(wal))
 
     state = %{registry: %{}, wal_path: wal, forge_fails: 0, sync_pending: false, opts: opts}
@@ -212,11 +231,11 @@ defmodule Fleet.Pilot.IncidentRegistry do
 
   @impl true
   def handle_continue(:load, state) do
-    wal = read_wal(state.wal_path)
+    wal = Store.read_wal(state.wal_path)
 
-    case load_forge(state.opts) do
+    case Store.load_forge(state.opts) do
       {:ok, forge_reg} ->
-        registry = merge(wal, forge_reg)
+        registry = Store.merge(wal, forge_reg)
         Logger.info("IncidentRegistry: loaded #{map_size(registry)} signature(s) (WAL ∪ forge)")
         {:noreply, %{state | registry: registry}}
 
@@ -231,13 +250,14 @@ defmodule Fleet.Pilot.IncidentRegistry do
         # UNREADABLE forge ≠ empty forge. Boot on the WAL, but say so LOUD (on a fresh node the WAL
         # is empty → this is blind cross-machine memory), and schedule a re-sync so the node catches
         # up when the forge returns — instead of silently believing there is nothing to remember.
+        # On the catch-up clock: blindness is measured in ticks, not in commit windows.
         Logger.error(
           "IncidentRegistry: forge backing UNREADABLE at boot (#{inspect(reason)}) — booting on WAL " <>
             "only (#{map_size(wal)} signature(s)); cross-machine memory is BLIND until a re-read. " <>
             "Scheduling a forge re-sync."
         )
 
-        {:noreply, schedule_sync(%{state | registry: wal})}
+        {:noreply, schedule_catch_up(%{state | registry: wal})}
     end
   end
 
@@ -254,13 +274,15 @@ defmodule Fleet.Pilot.IncidentRegistry do
     # CANNOT be swallowed as `:ok`. Otherwise, memory updated + WAL failed + crash before
     # the async forge sync = incident never durable while the return said "recorded". We propagate
     # the typed failure; `WakeRecovery` handles it (`note OK → recorded`, else LOUD "anchor NOT recorded").
+    wal = Store.write_wal(state.wal_path, registry)
+
     reply =
-      case write_wal(state.wal_path, registry) do
+      case wal do
         :ok -> :ok
         {:error, e} -> {:error, {:wal_write_failed, e}}
       end
 
-    {:reply, reply, schedule_sync(%{state | registry: registry})}
+    {:reply, reply, schedule_sync(%{state | registry: registry}, wal)}
   end
 
   # Memory transaction of `record_or_escalate`/`escalate_gated`: notes the occurrence (count/
@@ -271,8 +293,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
     cooldown = under_cooldown(state.registry[sig], now, cooldown_ms)
 
     registry = upsert(state.registry, sig, reason, now)
-    wal = write_wal(state.wal_path, registry)
-    state = schedule_sync(%{state | registry: registry})
+    wal = Store.write_wal(state.wal_path, registry)
+    state = schedule_sync(%{state | registry: registry}, wal)
 
     # BND-055 — on a FIRST occurrence (`:recorded_first` → `:recorded`, NO escalation), the WAL is
     # the only durability — a failed write must not come out as `:recorded`. We distinguish
@@ -291,8 +313,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
   end
 
   # Engraves the escalation memory (recurrence cooldown): WAL + forge sync — `merge_entry`
-  # carries the two fields cross-machine, otherwise every sync would erase the cooldown ~2s
-  # after each note and the issue storm would resume.
+  # carries the two fields cross-machine, otherwise the sync that follows the next note would
+  # erase the cooldown and the issue storm would resume.
   def handle_call({:mark_escalated, sig, issue_number, now}, _from, state) do
     registry =
       Map.update(
@@ -312,7 +334,7 @@ defmodule Fleet.Pilot.IncidentRegistry do
         end
       )
 
-    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` PLUS HAUT DANS CE MODULE. Un `_ = write_wal(...)`
+    # LE MEME MOTIF TRI-ETAT QUE `{:observe, …}` PLUS HAUT DANS CE MODULE. Un `_ = Store.write_wal(...)`
     # jette le seul fait qui distingue « tampon grave » de « tampon perdu », et aucun appelant ne
     # peut alors le savoir : la reponse est `:ok` dans les deux cas.
     #
@@ -321,22 +343,24 @@ defmodule Fleet.Pilot.IncidentRegistry do
     # ment) ; ici il perd le TAMPON DE COOLDOWN, et le pire cout est une issue redondante a la
     # recurrence suivante — borne, et qui se repare tout seul. Ce qu'il faut n'est pas un nouveau
     # verdict, c'est que le fait EXISTE quelque part.
+    wal = Store.write_wal(state.wal_path, registry)
+
     reply =
-      case write_wal(state.wal_path, registry) do
+      case wal do
         :ok -> :ok
         {:error, e} -> {:error, {:wal_write_failed, e}}
       end
 
-    {:reply, reply, schedule_sync(%{state | registry: registry})}
+    {:reply, reply, schedule_sync(%{state | registry: registry}, wal)}
   end
 
   @impl true
   def handle_info(:sync_forge, state) do
     state = %{state | sync_pending: false}
 
-    case sync_forge(state.registry, state.opts) do
+    case Store.sync_forge(state.registry, state.opts) do
       {:ok, merged} ->
-        _ = write_wal(state.wal_path, merged)
+        _ = Store.write_wal(state.wal_path, merged)
         {:noreply, %{state | registry: merged, forge_fails: 0}}
 
       {:error, reason} ->
@@ -369,6 +393,18 @@ defmodule Fleet.Pilot.IncidentRegistry do
     %{state | sync_pending: true}
   end
 
+  # The window is a budget for a memory the WAL already holds. A note whose WAL write FAILED has
+  # the forge as its only durability: it syncs on the catch-up clock, whatever is pending. A
+  # window timer may then fire behind it; a registry the forge already holds pushes nothing
+  # (`Store.sync_forge/2`), so the second sync costs one read.
+  defp schedule_sync(state, :ok), do: schedule_sync(state)
+  defp schedule_sync(state, {:error, _}), do: schedule_catch_up(state)
+
+  defp schedule_catch_up(state) do
+    Process.send_after(self(), :sync_forge, retry_ms(state.opts))
+    %{state | sync_pending: true}
+  end
+
   defp upsert(registry, sig, reason, now) do
     entry =
       registry
@@ -377,291 +413,8 @@ defmodule Fleet.Pilot.IncidentRegistry do
       |> Map.put("last_seen", now)
       |> Map.put("last_reason", inspect(reason))
 
-    registry |> Map.put(sig, entry) |> prune()
+    registry |> Map.put(sig, entry) |> Store.prune()
   end
-
-  # PRUNE (E4): the registry would otherwise be the runtime's only structurally UNBOUNDED state (no eviction,
-  # merge = monotone union, signatures with open cardinality via stringified reasons) — months
-  # of varied incidents would mean endless growth of the WAL + of the forge file REWRITTEN IN FULL on each note.
-  # Eviction by last_seen (ISO lexicographic = chronological) beyond `:max_entries`
-  # (default 500 — well above nominal; the bound targets the anomaly). Applied to the upsert AND the
-  # forge merge (both growth paths).
-  defp prune(registry) do
-    max = Application.get_env(:lcars_fleet, :pilot_incident_registry_max_entries, 500)
-
-    if map_size(registry) <= max do
-      registry
-    else
-      registry
-      |> Enum.sort_by(fn {_sig, e} -> e["last_seen"] || "" end, :desc)
-      |> Enum.take(max)
-      |> Map.new()
-    end
-  end
-
-  # Read-modify-write with MERGE: absorbs incidents posted by other machines since the last sync
-  # (instead of overwriting). Same 3-case DISCIPLINE as `read_wal/1` below — an unreadable forge is NOT an
-  # empty one:
-  #   * read OK           → merge the real forge content, update it (with its sha);
-  #   * genuine 404       → no file yet → CREATE from the local view (empty merge, nil sha);
-  #   * unreadable (5xx/  → we do NOT know the forge's real content → pushing our LOCAL view would
-  #     network/timeout)    OVERWRITE cross-machine incidents we could not read (data loss). Fail-closed:
-  #                         `{:error, _}`, no PUT — the handler retries (data stays safe in the WAL).
-  defp sync_forge(registry, opts) do
-    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
-    putter = Keyword.get(opts, :put_file_fun, &ForgeClient.Files.put_file/4)
-
-    case getter.(repo(opts), path(opts), ref: branch(opts)) do
-      {:ok, %{content: content, sha: sha}} ->
-        case decode(content) do
-          {:ok, forge_reg} ->
-            put_merged(registry, forge_reg, sha, putter, opts)
-
-          # MEME BRANCHE QUE L'ILLISIBLE, ET POUR LA MEME RAISON : on ignore ce que la forge
-          # contient. Pousser notre vue locale par-dessus effacerait les incidents des autres
-          # machines — dont les recurrences redeviendraient des premieres occurrences.
-          :corrupt ->
-            {:error, {:forge_unreadable, :corrupt_file}}
-        end
-
-      {:error, :not_found} ->
-        put_merged(registry, %{}, nil, putter, opts)
-
-      {:error, reason} ->
-        Logger.error(
-          "IncidentRegistry: sync_forge — forge registry UNREADABLE (#{inspect(reason)}) — NOT pushing " <>
-            "(a push over an unread forge could overwrite cross-machine incidents); the sync will retry"
-        )
-
-        {:error, {:forge_unreadable, reason}}
-
-      other ->
-        {:error, {:forge_unexpected_shape, other}}
-    end
-  end
-
-  defp put_merged(registry, forge_reg, sha, putter, opts) do
-    merged = registry |> merge(forge_reg) |> prune()
-    ident = author(opts)
-
-    put_opts = [
-      branch: branch(opts),
-      message: "ops(incident): sync registre",
-      sha: sha,
-      author: ident,
-      committer: ident
-    ]
-
-    case putter.(repo(opts), path(opts), encode_registry(merged), put_opts) do
-      {:ok, _} -> {:ok, merged}
-      {:error, _} = err -> err
-    end
-  end
-
-  defp read_wal(path) do
-    # DISTINGUISH the 3 cases: a MISSING WAL (`:enoent`) is a fresh install → empty is normal & silent.
-    # A PRESENT-but-unreadable or unparseable WAL is DATA LOSS: the cross-session incident memory is wiped
-    # → recurrences stop being detected → escalations never fire, while boot would otherwise report
-    # "0 signatures" as if nominal. We still return `%{}` (never crash boot) but LOUD, not silent.
-    # NB: `Jason.decode` DIRECTLY, not the local `decode/1` — the latter swallows a parse error into `%{}`
-    # (so a corrupt WAL would look like a valid-empty one). Here we MUST see the `{:error, _}` to log it.
-    case File.read(path) do
-      {:ok, content} ->
-        case Jason.decode(content) do
-          {:ok, reg} when is_map(reg) ->
-            drop_non_map_entries(reg, "WAL #{path}")
-
-          other ->
-            # A present-but-unparseable WAL is CORRUPTED CONTENT, and the next `write_wal` would
-            # rename a fresh registry over it — erasing the only forensic trace of what corrupted the
-            # cross-machine memory. QUARANTINE it aside first (never auto-replaced): the evidence is
-            # kept, the fresh WAL lands on a clean path. Boot proceeds from empty, LOUD.
-            quarantined = quarantine_corrupt_wal(path)
-
-            Logger.error(
-              "IncidentRegistry: WAL #{path} present but UNPARSEABLE (#{inspect(other)}) — cross-session " <>
-                "incident memory LOST (recurrences won't be detected until it is rebuilt). Corrupt file " <>
-                "quarantined at #{inspect(quarantined)}; starting from empty."
-            )
-
-            %{}
-        end
-
-      {:error, :enoent} ->
-        %{}
-
-      {:error, reason} ->
-        Logger.error(
-          "IncidentRegistry: WAL #{path} unreadable (#{inspect(reason)}) — cross-session incident " <>
-            "memory unavailable this boot (recurrences won't be detected). Starting from empty."
-        )
-
-        %{}
-    end
-  end
-
-  # Moves a corrupt WAL aside to `<path>.corrupt-<unix>` so the fresh registry never overwrites it
-  # (the evidence of the corruption is preserved for inspection). `os_time` collides only within the
-  # same second — acceptable for a forensic artifact; a rename failure is itself logged and returns nil
-  # (boot must not crash on a quarantine hiccup — the corruption is already the reported condition).
-  defp quarantine_corrupt_wal(path) do
-    dest = "#{path}.corrupt-#{System.os_time(:second)}"
-
-    case File.rename(path, dest) do
-      :ok ->
-        dest
-
-      {:error, reason} ->
-        Logger.error(
-          "IncidentRegistry: could not quarantine corrupt WAL #{path} (#{inspect(reason)}) — " <>
-            "the next write may overwrite it; move it aside by hand before it is lost"
-        )
-
-        nil
-    end
-  end
-
-  defp write_wal(path, registry) do
-    tmp = path <> ".tmp"
-
-    with :ok <- File.write(tmp, encode_registry(registry)), :ok <- File.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} ->
-        Logger.error("IncidentRegistry: WAL write failed (#{path}): #{inspect(reason)}")
-        {:error, reason}
-    end
-  end
-
-  # `{:ok, map}` on a readable file, `:absent` on a genuine 404 (never written yet — no memory to
-  # lose), `{:error, reason}` on an UNREADABLE forge (down/transport). The caller must not turn an
-  # unreadable backing into a silent empty registry: on a fresh node (no WAL) the forge IS the only
-  # cross-machine memory, and `%{}` there would replay every past recurrence as a first occurrence.
-  defp load_forge(opts) do
-    getter = Keyword.get(opts, :get_file_fun, &ForgeClient.Files.get_file/3)
-
-    case getter.(repo(opts), path(opts), ref: branch(opts)) do
-      {:ok, %{content: content}} ->
-        case decode(content) do
-          {:ok, reg} -> {:ok, reg}
-          # Au BOOT aussi : un fichier corrompu n'est pas un registre vide. Le traiter comme vide
-          # ferait rejouer chaque recurrence connue des autres machines en premiere occurrence.
-          :corrupt -> {:error, :corrupt_file}
-        end
-
-      {:error, :not_found} ->
-        :absent
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # ⚠ UN FICHIER CORROMPU EST LE MEME FAIT QU'UN FICHIER ILLISIBLE : dans les deux cas on ignore ce
-  # que la forge contient, donc rendre un vide et pousser notre vue LOCALE ECRASE des incidents
-  # inter-machines qu'on n'a pas su lire — et le SHA du fichier corrompu fait REUSSIR l'ecrasement.
-  # Fail-closed, comme la lecture d'une forge muette un peu plus haut.
-  #
-  # ⚠ DEUX CORRUPTIONS, DEUX POIDS, ET UNE SEULE EST FAIL-CLOSED. Racine indecodable : on ne sait
-  # RIEN, refus. Entrees individuelles invalides : le reste du fichier est AUTHENTIQUE, et refuser
-  # bloquerait TOUTE synchronisation jusqu'a ce qu'un humain repare un fichier que personne ne
-  # regarde — la sync ne se repare pas toute seule, elle se coince. On trie donc, bruyamment.
-  defp decode(content) do
-    case Jason.decode(content) do
-      {:ok, reg} when is_map(reg) ->
-        {:ok, drop_non_map_entries(reg, "forge file")}
-
-      _ ->
-        Logger.error(
-          "IncidentRegistry: forge registry file CORRUPT (not a JSON map) — REFUSED as a read. " <>
-            "We do not know what the forge holds, so we do not push over it: same fail-closed " <>
-            "posture as an unreadable forge. Repair the file; the sync retries."
-        )
-
-        :corrupt
-    end
-  end
-
-  # The registry file lives on the SHARED forge (ops) and the WAL on local disk — both
-  # hand-editable. A non-map VALUE under a signature ({"sig": "garbage"}) would enter RAM,
-  # contaminate the WAL, then raise in merge_entry during handle_continue(:load) → boot-loop
-  # REPRODUCIBLE at every reboot until the file is repaired by hand. Same doctrine as the
-  # unparseable WAL above: visible memory loss (LOUD drop), never a boot crash.
-  defp drop_non_map_entries(reg, origin) do
-    {maps, bad} = Map.split_with(reg, fn {_sig, v} -> is_map(v) end)
-
-    if map_size(bad) > 0 do
-      Logger.error(
-        "IncidentRegistry: #{map_size(bad)} non-map entrie(s) dropped from #{origin} " <>
-          "(sigs: #{inspect(Map.keys(bad))}) — repair the file; the incident memory of these " <>
-          "signatures is lost (their recurrences will look like first occurrences)."
-      )
-    end
-
-    maps
-  end
-
-  # Encode the registry with ONE incident per line, sorted keys. The git diff of the file (committed on
-  # ops AND the local WAL) then shows an added incident = an added line, instead of a single-line
-  # JSON blob where the slightest addition rewrites everything. Stays valid JSON — `decode/1` reads it as
-  # is; sorting by key guarantees a stable order (otherwise map order would make noise in the diff).
-  defp encode_registry(registry) when map_size(registry) == 0, do: "{}\n"
-
-  defp encode_registry(registry) do
-    body =
-      registry
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map_join(",\n", fn {k, v} -> "  #{Jason.encode!(k)}: #{Jason.encode!(v)}" end)
-
-    "{\n" <> body <> "\n}\n"
-  end
-
-  defp merge(a, b), do: Map.merge(a, b, fn _sig, ea, eb -> merge_entry(ea, eb) end)
-
-  defp merge_entry(a, b) do
-    # Defensive net BEHIND drop_non_map_entries (decode/read_wal filter at both load points):
-    # a non-map can only reach here through a NEW load path — coerce, never raise at boot.
-    a = if is_map(a), do: a, else: %{}
-    b = if is_map(b), do: b, else: %{}
-
-    # Escalation memory: the LATEST escalation wins as a PAIR (stamp + its issue — a max on
-    # each field separately could marry the new stamp with the old issue number). Old entries
-    # (pre-cooldown WAL/forge) have neither field → nils, dropped below (back-compat).
-    {esc_at, esc_issue} =
-      if (a["last_escalated_at"] || "") >= (b["last_escalated_at"] || "") do
-        {a["last_escalated_at"], a["escalated_issue"]}
-      else
-        {b["last_escalated_at"], b["escalated_issue"]}
-      end
-
-    base = %{
-      "count" => max(a["count"] || 0, b["count"] || 0),
-      "first_seen" => min_iso(a["first_seen"], b["first_seen"]),
-      "last_seen" => max_iso(a["last_seen"], b["last_seen"]),
-      "last_reason" => later_reason(a, b)
-    }
-
-    if is_nil(esc_at) do
-      base
-    else
-      Map.merge(base, %{"last_escalated_at" => esc_at, "escalated_issue" => esc_issue})
-    end
-  end
-
-  defp min_iso(nil, b), do: b
-  defp min_iso(a, nil), do: a
-  defp min_iso(a, b), do: min(a, b)
-
-  defp max_iso(nil, b), do: b
-  defp max_iso(a, nil), do: a
-  defp max_iso(a, b), do: max(a, b)
-
-  defp later_reason(a, b),
-    do:
-      if((a["last_seen"] || "") >= (b["last_seen"] || ""),
-        do: a["last_reason"],
-        else: b["last_reason"]
-      )
 
   # --- config (opts > app env > default) ---
   defp server(opts), do: Keyword.get(opts, :server, __MODULE__)
@@ -696,55 +449,16 @@ defmodule Fleet.Pilot.IncidentRegistry do
       )
   end
 
-  defp debounce_ms(opts), do: opts[:sync_debounce_ms] || @sync_debounce_ms
+  defp debounce_ms(opts) do
+    opts[:sync_debounce_ms] ||
+      Application.get_env(
+        :lcars_fleet,
+        :pilot_incident_registry_sync_debounce_ms,
+        @sync_debounce_ms
+      )
+  end
+
   defp retry_ms(opts), do: opts[:retry_ms] || @retry_ms
-
-  # SINGLE ops-repo authority (`:pilot_ops_repo`): the incident REGISTRY (this file, ops branch)
-  # and the sysadmin ISSUES it opens (`Escalation`) must land on the SAME repo — they are two faces
-  # of one incident. Two separate keys with two inline defaults would sit one edit away from a
-  # registry on repo A and its issues on repo B, with nothing to catch it.
-  # `:pilot_incident_registry_repo` is an explicit override for the rare split.
-  defp repo(opts),
-    do:
-      opts[:repo] || Application.get_env(:lcars_fleet, :pilot_incident_registry_repo) ||
-        Fleet.Pilot.IncidentRegistry.Escalation.ops_repo()
-
-  defp branch(opts),
-    do: opts[:branch] || Application.get_env(:lcars_fleet, :pilot_incident_registry_branch, "ops")
-
-  defp path(opts),
-    do:
-      opts[:path] ||
-        Application.get_env(
-          :lcars_fleet,
-          :pilot_incident_registry_path,
-          "work/system-incidents.json"
-        )
-
-  # HOME unresolvable = broken runtime → fail-loud (`System.user_home!()` raises), never a fabricated
-  # path: the .lcars state must not silently scatter (e.g. orphaned under /tmp).
-  defp wal_path(opts),
-    do:
-      opts[:wal_path] || Application.get_env(:lcars_fleet, :pilot_incident_registry_wal_path) ||
-        Path.join(Fleet.Layout.state_dir(), "system-incidents.json")
-
-  # The registry sync is a commit the RUNTIME makes: no human initiated it, no pod produced it, and
-  # no pod could — a pod never holds the forge token. Its identity is therefore the SYSTEM one, like
-  # the other two runtime-generated commits (`Workflow.OpsObject`, `Fleet.Project.Onboard`), through
-  # the single accessor rather than a literal retyped at the caller.
-  #
-  # Never a ROLE here: `ForgeIdentity` splits the three identities on purpose — author = the human,
-  # role = a VERIFIED TRAILER, committer = the system. `role_email/1` builds that trailer (its only
-  # other caller is `coauthor_trailer/1`); as an author email it would sign a system act under a pod
-  # that does not touch the forge at all.
-  defp author(opts),
-    do:
-      opts[:author] ||
-        Application.get_env(
-          :lcars_fleet,
-          :pilot_incident_registry_author,
-          Fleet.Credentials.ForgeIdentity.system_identity()
-        )
 
   defp normalize(subject), do: Regex.replace(~r/\d+/, subject, "N")
 

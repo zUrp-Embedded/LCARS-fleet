@@ -8,7 +8,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   """
   use ExUnit.Case, async: false
 
-  alias Fleet.Pilot.ForgeStubs.{MergeFailForge, OkForge}
+  alias Fleet.Pilot.ForgeStubs.{CloseFailForge, MergeFailForge, OkForge}
   alias Fleet.Pilot.MergeAndPromote
   alias Fleet.TestEnv
 
@@ -52,26 +52,6 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
 
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
     def close_issue(_r, _n, _o), do: {:ok, :closed}
-  end
-
-  # F-C066 — merge/comment/stage OK, close ALWAYS failing: proves the honest return (no lying :ok).
-  defmodule CloseFailForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
-    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
-
-    def pr_review_state(_repo, _n, _opts),
-      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
-
-    def merge_pr(_r, _pr, _o), do: :ok
-    def post_comment(_r, _n, _b, _o), do: {:ok, :posted}
-    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
-
-    def close_issue(_r, n, _o) do
-      send(self(), {:close_attempt, n})
-      {:error, {:http, 500, "close boom"}}
-    end
   end
 
   # F-C066 — FLAKY close: fails 2×, succeeds the 3rd (process-dict counter) → proves self-heal via retry.
@@ -372,93 +352,16 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
   end
 
   # ── Provenance wall (Phase 2) — systematic, card-independent ──────────────
-  defmodule WallForge do
-    # Read by the seal before it names who approved (it must not claim verdicts that do not
-    # exist). No jury in this stub -> empty verdicts.
-    # A0 — clean PR by default: the seal reads the conflict signal, 0 marks -> method "rebase".
-    def count_comments_marked(_repo, _n, _prefix, _opts), do: {:ok, 0}
+  # Harness and forge shared with the completer and dispatcher witnesses
+  # (`Fleet.Test.ProvenanceWallHarness`, test/support/pilot/).
+  alias Fleet.Test.ProvenanceWallHarness, as: Wall
+  alias Fleet.Test.ProvenanceWallHarness.WallForge
 
-    def pr_review_state(_repo, _n, _opts),
-      do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
+  defp wall_harness(tmp), do: Wall.harness(tmp)
+  defp wall_statement(tmp, issue_n, head, input), do: Wall.statement(tmp, issue_n, head, input)
+  defp wall_opts(tmp, head), do: Wall.opts(tmp, head)
 
-    # branch_head exported → the wall RUNS (stubs without it exercise the skip path,
-    # which every other test of this file proves).
-    def branch_head(_repo, _branch, opts), do: {:ok, Keyword.fetch!(opts, :__head_sha__)}
-
-    def post_comment(_r, n, body, o) do
-      send(self(), {:comment, n, body, o[:dedup_signature]})
-      {:ok, :posted}
-    end
-
-    def merge_pr(_r, pr, _o) do
-      send(self(), {:merge, pr})
-      :ok
-    end
-
-    def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
-    def close_issue(_r, _n, _o), do: {:ok, :closed}
-  end
-
-  defp wall_harness(tmp) do
-    proj = Path.join([tmp, "p", "demo"])
-    work = Path.join([tmp, "w", "demo"])
-    File.mkdir_p!(proj)
-    File.mkdir_p!(work)
-
-    g = fn dir, args ->
-      {out, 0} = System.cmd("git", ["-C", dir] ++ args, stderr_to_stdout: true)
-      out
-    end
-
-    for dir <- [proj, work] do
-      {_, 0} = System.cmd("git", ["init", "-q", dir], stderr_to_stdout: true)
-      g.(dir, ["config", "user.email", "t@lcars.local"])
-      g.(dir, ["config", "user.name", "t"])
-    end
-
-    File.write!(Path.join(proj, "f"), "base")
-    g.(proj, ["add", "."])
-    g.(proj, ["commit", "-qm", "base"])
-    base = String.trim(g.(proj, ["rev-parse", "HEAD"]))
-    File.write!(Path.join(proj, "f"), "delivered")
-    g.(proj, ["add", "."])
-    g.(proj, ["commit", "-qm", "deliverable"])
-    head = String.trim(g.(proj, ["rev-parse", "HEAD"]))
-    main = String.trim(g.(proj, ["rev-parse", "--abbrev-ref", "HEAD"]))
-    g.(proj, ["checkout", "-q", "--orphan", "alien"])
-    File.write!(Path.join(proj, "g"), "x")
-    g.(proj, ["add", "."])
-    g.(proj, ["commit", "-qm", "alien"])
-    alien = String.trim(g.(proj, ["rev-parse", "HEAD"]))
-    g.(proj, ["checkout", "-q", main])
-
-    %{tmp: tmp, base: base, head: head, alien: alien}
-  end
-
-  # L'attestation vit sur `refs/lcars/provenance/<sha>` DANS LE CLONE, plus dans un fichier de la
-  # face atelier a un nom derive de la tete (BL-6-43). Le harnais ecrit donc ou le sceau lit.
-  defp wall_statement(tmp, issue_n, head, input) do
-    proj = Path.join([tmp, "p", "demo"])
-
-    {:ok, json} =
-      Fleet.Workflow.Provenance.statement_json(%{
-        livrable_sha: head,
-        input_sha: input,
-        issue: issue_n
-      })
-
-    :ok = Fleet.Workflow.Git.write_provenance(proj, head, json)
-  end
-
-  defp wall_opts(tmp, head) do
-    [
-      head_branch: "lcars/issue-9-engineer",
-      code_root: Path.join(tmp, "p"),
-      ops_root: Path.join(tmp, "w"),
-      __head_sha__: head
-    ]
-  end
-
+  @tag :requires_git
   test "provenance wall: an INCOHERENT statement REFUSES the merge (deterministic, no LLM)",
        %{tmp_dir: tmp} do
     %{head: head, alien: alien} = wall_harness(tmp)
@@ -481,6 +384,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert body =~ "Provenance incohérente"
   end
 
+  @tag :requires_git
   test "provenance wall: a COHERENT statement lets the seal proceed", %{tmp_dir: tmp} do
     %{base: base, head: head} = wall_harness(tmp)
     :ok = wall_statement(tmp, 9, head, base)
@@ -499,6 +403,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert_received {:merge, 4}
   end
 
+  @tag :requires_git
   test "provenance wall: une preuve pour un AUTRE sha ne peut plus etre confondue avec la preuve de la brique (BL-6-43)",
        %{tmp_dir: tmp} do
     # LE CAS 4 NE PEUT PLUS EXISTER, et ce test le prouve par CONSTRUCTION plutot que par detection.
@@ -520,6 +425,7 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     assert {:error, :no_provenance_ref} = Fleet.Workflow.Git.read_provenance(proj, head)
   end
 
+  @tag :requires_git
   test "provenance wall SAUTÉ : le merge passe, ET la PR le DIT (BL-6-47.4)", %{tmp_dir: tmp} do
     # L'asymétrie fermée ici : les deux branches voisines loguaient, une seule écrivait SUR LA
     # FORGE. Une PR mergée avait donc exactement la même apparence, que le mur l'ait vérifiée ou

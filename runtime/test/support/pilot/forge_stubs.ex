@@ -92,7 +92,12 @@ defmodule Fleet.Pilot.ForgeStubs do
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
-    def close_issue(_repo, _n, _opts), do: {:error, {:http, 500, "close boom"}}
+
+    # Spied: the seal's BOUNDED close retry is asserted on the attempts it makes.
+    def close_issue(_repo, n, _opts) do
+      send(self(), {:close_attempt, n})
+      {:error, {:http, 500, "close boom"}}
+    end
   end
 
   defmodule MergeFailForge do

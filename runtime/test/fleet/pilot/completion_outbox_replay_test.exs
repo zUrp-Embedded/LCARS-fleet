@@ -135,4 +135,17 @@ defmodule Fleet.Pilot.CompletionOutboxReplayTest do
 
     refute_received {:complete, _}
   end
+
+  # ⚖ Pinned as it IS (2026-09-05): a completion the consumer SKIPS (no project on the payload) is
+  # not owed to anyone, so its entry leaves the journal at once.
+  test "un pod.completed SANS projet est acquitte : {:skip, _} retire l'entree du journal" do
+    sans_projet =
+      Fleet.Event.new(:spawner, :"pod.completed", payload: Map.delete(payload(), "workspace"))
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:noreply, _} = StepRunConsumer.handle_info(sans_projet, state(CompleterQuiMeurt))
+    end)
+
+    assert CompletionOutbox.pending() == []
+  end
 end

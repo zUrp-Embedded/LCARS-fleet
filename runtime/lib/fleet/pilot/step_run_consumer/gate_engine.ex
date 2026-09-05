@@ -55,25 +55,29 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
   @doc """
   Resolves the next intent from the payload's workflow-map context, or as a single brick when absent.
   """
-  @spec resolve_next(map(), pos_integer(), Seams.t()) :: decision()
-  def resolve_next(payload, n, %Seams{} = seams) do
+  # `producer?` is the fact the consumer already resolved (DR-013, a closed result): handed down
+  # so this engine and the builder read it instead of deriving it again (four derivations per
+  # step-run otherwise, that could disagree). `nil` = not known (a direct caller), resolved here
+  # then. `apply_verdict/4` alone re-derives, on the resume path, and says why.
+  @spec resolve_next(map(), pos_integer(), Seams.t(), boolean() | nil) :: decision()
+  def resolve_next(payload, n, %Seams{} = seams, producer? \\ nil) do
     case {payload["workflow_map"], payload["step"]} do
       {workflow_map_name, step} when is_binary(workflow_map_name) and is_binary(step) ->
         with {:ok, workflow_map} <- load_workflow_map(seams, workflow_map_name, payload) do
           cond do
             lifecycle_stage?(workflow_map, step) ->
-              no_workflow_map_resolve(payload, seams)
+              no_workflow_map_resolve(payload, seams, producer?)
 
             inherited_route?(workflow_map, step, payload["role"]) ->
-              no_workflow_map_resolve(payload, seams)
+              no_workflow_map_resolve(payload, seams, producer?)
 
             true ->
-              gate_decide(workflow_map, step, payload, n, seams)
+              gate_decide(workflow_map, step, payload, n, seams, producer?)
           end
         end
 
       _ ->
-        no_workflow_map_resolve(payload, seams)
+        no_workflow_map_resolve(payload, seams, producer?)
     end
   end
 
@@ -132,24 +136,37 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
       not match?({:ok, _}, WorkflowMapNav.step_spec(workflow_map, step))
   end
 
-  defp no_workflow_map_resolve(payload, seams) do
-    case producer?(
-           payload["role"],
-           seams.deliverable_mode_fun,
-           payload["deliverable_mode"],
-           catalogue_root(payload)
-         ) do
+  # The fact when the consumer handed it, the resolution otherwise.
+  defp producer_fact(producer?, _payload, _seams) when is_boolean(producer?), do: {:ok, producer?}
+
+  defp producer_fact(nil, payload, seams),
+    do:
+      producer?(
+        payload["role"],
+        seams.deliverable_mode_fun,
+        payload["deliverable_mode"],
+        catalogue_root(payload)
+      )
+
+  defp no_workflow_map_resolve(payload, seams, producer?) do
+    case producer_fact(producer?, payload, seams) do
       {:ok, true} -> {:ok, :review, {nil, nil}}
       {:ok, false} -> {:ok, :reviewed, {nil, nil}}
       {:error, _} = err -> err
     end
   end
 
+  @doc false
   # Le depot nomme le catalogue du projet (lot 4) : la racine voyage avec l'evenement, elle n'est pas
-  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes.
-  defp catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
+  # liee au demarrage — ce moteur sert tous les projets de tous les catalogues installes. ONE reader
+  # for the whole rail (the consumer and the builder ask here).
+  @spec catalogue_root(map()) :: Path.t() | nil
+  def catalogue_root(payload), do: Fleet.Catalogue.root_for_repo(payload_repo(payload))
 
-  defp payload_repo(payload),
+  @doc false
+  # The repo of the EVENT — the `repository` object the spawner echoes, else the bare `repo` key.
+  @spec payload_repo(map()) :: String.t() | nil
+  def payload_repo(payload),
     do: Payload.repository_full_name(payload) || payload["repo"]
 
   defp judge_kind?(payload, spec) do
@@ -160,7 +177,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     end
   end
 
-  defp gate_decide(workflow_map, step, payload, n, seams) do
+  defp gate_decide(workflow_map, step, payload, n, seams, producer?) do
     spec =
       case WorkflowMapNav.step_spec(workflow_map, step) do
         {:ok, s} -> s
@@ -192,12 +209,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GateEngine do
     else
       case Fleet.Workflow.Gates.evaluate(spec, system_over_declared(spec, result, payload), %{}) do
         :pass ->
-          case producer?(
-                 payload["role"],
-                 seams.deliverable_mode_fun,
-                 payload["deliverable_mode"],
-                 catalogue_root(payload)
-               ) do
+          case producer_fact(producer?, payload, seams) do
             {:ok, prod?} -> advance_intent(workflow_map, step, prod?)
             {:error, _} = err -> err
           end
