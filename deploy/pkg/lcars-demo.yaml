@@ -1,0 +1,21 @@
+# SOURCE: deploy/pkg/lcars-demo.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars-demo`, LE META-PAQUET : vide. « je veux essayer » en un apt install.
+name: lcars-demo
+arch: all
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: metapackages
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - la composition complete : poste natif + forge montee ici + humain de demo
+  Un meta-paquet, vide : apt install lcars-demo = lcars-workstation + lcars-forge + lcars-bench.
+  apt remove lcars-demo ne retire rien d'autre que lui ; retire les paquets qu'il nomme.
+depends:
+  - lcars-workstation
+  - lcars-forge
+  - lcars-bench

@@ -29,9 +29,23 @@
 # compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
 # personne ne vérifie à ta place.
 #
-# USAGE : ./pack.sh            gate + release + DOC + tar (+ push si une forge est configurée)
-#         ./pack.sh --no-push  s'arrête au tar
-# ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
+# ─── ET LES PAQUETS DEBIAN, DEPUIS LE MÊME ARBRE (lot 3, 2026-09-05) ────────────────────────────
+#
+# Le tar et les `.deb` sont DEUX EMBALLAGES DU MÊME CONTENU, sortis du même run : après le tar, ce
+# script pose nFPM dans le tiroir des outils (téléchargement épinglé par sha256 — `deploy/pkg/
+# prep-nfpm.sh`), prépare `lcars-tofu` (`prep-tofu.sh` : le binaire de 46-tofu et le miroir de
+# providers), fait DÉRIVER les `contents:` du stage et de `deploy/system.manifest` (`gen-contents.sh`
+# — une source pour les modes, jamais deux), puis joue `nfpm package -p deb` sur chaque YAML de
+# `deploy/pkg/`. L'invariant tient pour les deux : les bits du `.deb` sont ceux du stage attesté.
+# `--no-deb` s'en passe (un poste sans réseau : nFPM et tofu se téléchargent).
+#
+# USAGE : ./pack.sh            gate + release + DOC + tar + .deb (+ push si une forge est configurée)
+#         ./pack.sh --no-push  ne pousse rien (le tar et les .deb restent dans le tiroir)
+#         ./pack.sh --no-deb   pas de paquets Debian (ni nFPM ni tofu ne sont téléchargés)
+# ENV   : LCARS_PACK_DIR  où poser le tar et les .deb (défaut : `lcars-packs` à côté du checkout) ;
+#                         les outils du pack vivent dans `$LCARS_PACK_DIR/.tools`, jamais dans l'arbre
+#         LCARS_DEB_RELEASE la révision Debian des .deb (défaut : `AAAAMMJJ.HHMM+g<sha>` — la version
+#                         est celle de `runtime/mix.exs`, la révision est le tampon du tiroir de dev)
 #         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
 #         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
 #                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
@@ -43,7 +57,15 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 PUSH=1
-[[ "${1:-}" == "--no-push" ]] && PUSH=0
+DEB=1
+for _arg in "$@"; do
+  case "$_arg" in
+    --no-push) PUSH=0 ;;
+    --no-deb)  DEB=0 ;;
+    *) echo "pack: option inconnue: $_arg (--no-push | --no-deb)" >&2; exit 1 ;;
+  esac
+done
+unset _arg
 
 say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
@@ -229,11 +251,51 @@ tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
 say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 
+# ─── LES .deb — DEPUIS LE STAGE DU TAR, PAS UN AUTRE ARBRE ───────────────────────────────────────
+# Le stage vit encore (le `trap` ne l'efface qu'à la sortie) : c'est le MÊME arbre assemblé que le
+# tar vient d'emporter, doc et release comprises. Les YAML générés vont à côté du stage, jamais
+# dedans — le tar est déjà fermé, et rien de ce qui suit n'y entre.
+if [[ "$DEB" -eq 1 ]]; then
+  TOOLS="$PACK_DIR/.tools"
+  case "$ARCH" in
+    x86_64)        DEB_ARCH=amd64 ;;
+    aarch64|arm64) DEB_ARCH=arm64 ;;
+    *) die "architecture sans nom Debian : $ARCH — « --no-deb » pour le tar seul" ;;
+  esac
+  # La version est celle du produit (mix.exs) ; la révision Debian porte le tampon du tiroir et le
+  # sha, pour qu'un pack suivant du même 0.9.0 soit une MISE À JOUR aux yeux d'apt.
+  DEB_VERSION="$(awk -F'"' '/^ *version: *"/ && !v { v = $2 } END { print v }' runtime/mix.exs)"
+  [[ -n "$DEB_VERSION" ]] || die "version illisible dans runtime/mix.exs — pas de .deb sans version"
+  DEB_RELEASE="${LCARS_DEB_RELEASE:-$(date +%Y%m%d.%H%M)+g$SHA}"
+
+  say "nfpm (épinglé) → $TOOLS…"
+  NFPM="$(bash deploy/pkg/prep-nfpm.sh --tools "$TOOLS")" || die "nfpm non posé — le tar est là ; « --no-deb » pour s'en passer"
+  say "lcars-tofu : binaire et miroir de providers → $TOOLS/tofu…"
+  bash deploy/pkg/prep-tofu.sh --tools "$TOOLS" --stage "$STAGE/$ROOT" --arch "$DEB_ARCH" >/dev/null \
+    || die "outillage tofu non préparé — le tar est là ; « --no-deb » pour s'en passer"
+  say "contents dérivés de la table et du stage…"
+  bash deploy/pkg/gen-contents.sh --stage "$STAGE/$ROOT" --out "$STAGE/.pkg" --tools "$TOOLS" \
+    || die "génération des contents en échec — le tar est là"
+  export LCARS_ARCH="$DEB_ARCH" LCARS_VERSION="$DEB_VERSION" LCARS_DEB_RELEASE="$DEB_RELEASE"
+  while read -r _pkg; do
+    [[ -n "$_pkg" ]] || continue
+    _nfpm_out="$("$NFPM" package -f "$STAGE/.pkg/$_pkg.yaml" -p deb -t "$PACK_DIR" 2>&1)" \
+      || die "nfpm a refusé $_pkg : $_nfpm_out"
+    _deb="$(sed -n 's/^created package: //p' <<<"$_nfpm_out")"
+    [[ -s "$_deb" ]] || die "nfpm n'a pas dit où est $_pkg ($_nfpm_out)"
+    ( cd "$PACK_DIR" && sha256sum "$(basename "$_deb")" > "$(basename "$_deb").sha256" )
+    say "deb    : $_deb ($(du -h "$_deb" | cut -f1))"
+  done < "$STAGE/.pkg/packages.list"
+  say "version Debian : ${DEB_VERSION}-${DEB_RELEASE} ($DEB_ARCH) — « sudo apt install ./lcars-demo_… » pour le banc"
+else
+  say "--no-deb : pas de paquets Debian (ni nfpm ni tofu téléchargés) — le tar seul"
+fi
+
 # ─── LA POUSSE ──────────────────────────────────────────────────────────────────────────────────
 # API paquets `generic` de Gitea — la même que `publish.yml` emploie pour les images `container`.
 # Le jeton vient de l'environnement ou du fichier que le rail pose ; sans forge configurée on
 # s'arrête sur le tar, qui est déjà utilisable.
-[[ "$PUSH" -eq 1 ]] || { say "--no-push : le tar reste ici"; exit 0; }
+[[ "$PUSH" -eq 1 ]] || { say "--no-push : le tar et les .deb restent ici"; exit 0; }
 
 # LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire `main.tar.gz`, donc le paquet doit
 # atterrir au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour

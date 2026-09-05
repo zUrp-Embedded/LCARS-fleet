@@ -672,7 +672,14 @@ PYX
   # fleet.json      — ADMIN-OWNED. `Fleet.SystemConfig` le LIT au boot ; rien ne le cree, et c'est
   #                   voulu : le provisionnement ne pose pas les reglages de l'administrateur.
   # install.journal — l'artefact de l'INSTALLEUR lui-meme (`deploy/provision`), pas un etat converge.
-  local hors_manifeste="fleet.json install.journal"
+  # channel         — LE CANAL (`source | kit | deb`, 00-OBJECTIF § 6) : ecrit par QUI POSE — le
+  #                   postinst du .deb (lot 3, `deploy/pkg/lcars/postinst`) — et lu par le rail. Sa
+  #                   ligne dans la table arrive avec son lecteur cote lib (lot 2) ; ISO 2/2 refuserait
+  #                   aujourd'hui une declaration dont le poseur vit hors de son corpus (deploy/pkg).
+  # forge.conf      — ADMIN-OWNED, comme fleet.json : l'adresse d'une forge FOURNIE (`FORGE_BASE_URL=`),
+  #                   ecrite par l'operateur, lue par `deploy/pkg/lcars-workstation/postinst` quand
+  #                   lcars-forge n'est pas la. Aucun paquet ne le pose.
+  local hors_manifeste="fleet.json install.journal channel forge.conf"
 
   : > "$BATS_TEST_TMPDIR/etcl"
   local f

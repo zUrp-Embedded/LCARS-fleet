@@ -1,0 +1,54 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-workstation/postrm
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-workstation` apres le retrait : les unites de la table,
+#         arretees PUIS retirees, dans l'ordre que `provision uninstall` tient
+#
+# dpkg l'appelle : postrm remove · postrm purge · postrm upgrade · …
+#
+# ⚠ IL N'Y A PAS DE VERBE POUR CA, ET CE SCRIPT LE DIT PLUTOT QUE DE L'INVENTER A MOITIE.
+# `provision uninstall` est monolithique : il desinstalle un DEPLOIEMENT, pas un rail. Jouer ici
+# `uninstall --yes --keep-state --dpkg lcars-workstation` emporterait aussi ce que le socle de
+# `lcars` (toujours installe) possede — groupes, comptes, repertoires de travail. Ce que ce paquet
+# a en propre, ce sont les unites de 64-services : elles se LISENT dans la table (les `anchor`
+# `/etc/systemd/system/*.service`), aucune liste ici, et elles s'arretent avant de partir — la
+# regle du desinstalleur (« retirer le fichier d'unite n'arrete pas le service »). Un verbe
+# `provision uninstall --only 64` serait la forme juste ; c'est nomme au rapport du lot 3.
+set -euo pipefail
+
+say() { echo "lcars-workstation/postrm: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+MANIFEST="$(dirname "$PROVISION")/system.manifest"
+SYSTEMCTL="${LCARS_SYSTEMCTL:-systemctl}"
+
+case "${1:-}" in
+  remove|purge) ;;
+  *) exit 0 ;;
+esac
+
+if [[ ! -r "$MANIFEST" ]]; then
+  say "table introuvable ($MANIFEST) — lcars est deja parti : son desinstalleur a arrete les unites, ou les arretera"
+  exit 0
+fi
+have_systemd=0
+[[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1 && have_systemd=1
+
+n=0
+while read -r unit; do
+  [[ -n "$unit" ]] || continue
+  if [[ "$have_systemd" -eq 1 ]]; then
+    "$SYSTEMCTL" disable --now "$(basename "$unit")" >/dev/null 2>&1 \
+      || say "$(basename "$unit") : disable --now a refuse (deja absente ?)"
+  fi
+  if [[ -e "$unit" ]]; then rm -f -- "$unit" && n=$((n + 1)); fi
+done < <(awk '$1 !~ /^#/ && $1 ~ /^anchor/ && $2 ~ /\/systemd\/system\/.*\.service$/ { print $2 }' "$MANIFEST")
+[[ "$have_systemd" -eq 0 ]] || "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
+
+if [[ "$have_systemd" -eq 1 ]]; then
+  say "$n unite(s) arretee(s) et retiree(s) (la table)"
+else
+  say "pas de systemd ici : $n fichier(s) d'unite retire(s), aucun service a arreter"
+fi
+say "l'etat (/etc/lcars, /opt/lcars/var), les comptes et les groupes suivent le paquet lcars"
+exit 0
