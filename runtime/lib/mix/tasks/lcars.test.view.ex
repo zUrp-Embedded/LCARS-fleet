@@ -1,6 +1,11 @@
-defmodule Mix.Tasks.Lcars.TestView do
+defmodule Mix.Tasks.Lcars.Test.View do
   # A reading instrument for the test tree, not a domain: classified with the OTP root like the
   # other gate tools (`lcars.topology`, `lcars.contracts.check`).
+  #
+  # The module name IS the command name: `Mix.Tasks.Lcars.Test.View` runs as `mix lcars.test.view`.
+  # A first version named `Lcars.TestView` ran as `mix lcars.test_view` while every doc said
+  # `lcars.test.view` — a command that did not exist, and a witness that called the module directly
+  # could not see it. `test_view_test.exs` now goes through `Mix.Task.run/2` for that reason.
   use Boundary, classify_to: Fleet.Application
   use Mix.Task
 

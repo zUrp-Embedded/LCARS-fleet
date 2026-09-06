@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Lcars.TestViewTest do
+defmodule Mix.Tasks.Lcars.Test.ViewTest do
   @moduledoc """
   The projection must be LOSSLESS, or it is a way to miss something while feeling thorough.
 
@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Lcars.TestViewTest do
   """
   use ExUnit.Case, async: true
 
-  alias Mix.Tasks.Lcars.TestView
+  alias Mix.Tasks.Lcars.Test.View, as: TestView
 
   @fixture ~S'''
   defmodule FixtureTest do
@@ -105,5 +105,34 @@ defmodule Mix.Tasks.Lcars.TestViewTest do
       |> Enum.map(& &1.path)
 
     assert bad == [], "the projection is not lossless on: #{inspect(bad)}"
+  end
+
+  # THE COMMAND NAME IS PART OF THE CONTRACT. Every doc says `mix lcars.test.view`; a module named
+  # `Lcars.TestView` would run as `mix lcars.test_view` and every witness calling the module directly
+  # would stay green. Only a run BY NAME pins it.
+  @tag :tmp_dir
+  test "the task answers to the name the docs give it: `mix lcars.test.view`", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "fixture_test.exs")
+    File.write!(path, @fixture)
+    Mix.shell(Mix.Shell.Process)
+
+    try do
+      Mix.Task.reenable("lcars.test.view")
+      Mix.Task.run("lcars.test.view", ["plan", path])
+    after
+      Mix.shell(Mix.Shell.IO)
+    end
+
+    lines = collect_shell()
+    assert Enum.any?(lines, &String.contains?(&1, ~s(test "plain")))
+    assert Enum.any?(lines, &String.contains?(&1, "[for]"))
+  end
+
+  defp collect_shell(acc \\ []) do
+    receive do
+      {:mix_shell, :info, [msg]} -> collect_shell([msg | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 end
