@@ -284,6 +284,34 @@ cmd_start() {
 
 # F7 : le `kill-server` tmux n'est que le FALLBACK. Un kill-server direct fait qu'AUCUN chemin
 # d'arret n'execute le rail Shutdown — le drain et le teardown ordonne pour lesquels il a ete bati.
+# LE BEAM EST LE PROCESS DU PANE, PAS UN DE SES ENFANTS — et cette ligne a coute le drain entier.
+#
+# `tmux new-session` lance `exec ...` : le shell du pane est REMPLACE, le script de release aussi,
+# jusqu'a `beam.smp`, qui garde donc le pid du pane. MESURE dans les DEUX modes le 2026-09-05 :
+# release (`comm` du pane = `beam.smp`) et `mix run` (le `sh` annonce son pid, le beam porte le
+# meme). Il n'y a pas de cas connu ou le beam soit ailleurs.
+#
+# Ce que le code cherchait — `pgrep -P <pane> | head -1` — est donc le premier ENFANT du beam :
+# `erl_child_setup`, l'auxiliaire qu'OTP fork pour ses ports. Le `SIGTERM` y allait, le BEAM n'en
+# recevait aucun, `Fleet.Application.prep_stop` (le drain) ne tournait JAMAIS, la boucle attendait
+# ses 90 s pour rien et `tmux kill-server` finissait le travail. Le « stop graceful » coupait donc
+# le travail en vol a chaque arret, et le boot suivant le disait sans que personne le lise :
+# « cold-boot sweep of stale socket ... (residue of a previous instance — kill -9?) ».
+#
+# FAIL-CLOSED, et c'est le fond de l'affaire : si le pane n'est pas un beam, on ne signale RIEN et
+# on dit ce qu'on a trouve. Viser un pid au juge est exactement ce qui a produit ce defaut ; un
+# refus nomme est ce qui l'aurait montre le premier jour.
+pane_comm() { # pane_comm <pid> -> le `comm` du process, ou « ? »
+  cat "${LCARS_PROC_DIR:-/proc}/${1:-}/comm" 2>/dev/null || echo "?"
+}
+
+beam_pid_of_pane() { # beam_pid_of_pane <pane_pid> -> le pid du BEAM, ou 1 sans rien imprimer
+  local pane="${1:-}"
+  [[ -n "$pane" ]] || return 1
+  [[ "$(pane_comm "$pane")" == "beam.smp" ]] || return 1
+  printf '%s\n' "$pane"
+}
+
 cmd_stop() {
   load_env
   if ! dtmux has-session -t "$SESSION" 2>/dev/null; then
@@ -292,13 +320,12 @@ cmd_stop() {
   fi
 
   # SIGTERM suffit, sans distribution Erlang : OTP le tourne en `:init.stop` et appelle `prep_stop`
-  # avant qu'un superviseur ne meure. Le BEAM est l'enfant DIRECT du shell du pane (le script de
-  # release exec jusqu'au beam, meme pid) — c'est ce que le `pgrep -P` ci-dessous exploite.
+  # avant qu'un superviseur ne meure. Encore faut-il qu'il l'atteigne — `beam_pid_of_pane` porte
+  # cette question et ce qu'une erreur y coute.
   echo "fleet: stop graceful (drain puis teardown, dans l'ordre)..." >&2
   local pane_pid beam_pid
   pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
-  beam_pid=""
-  [[ -n "$pane_pid" ]] && beam_pid="$(pgrep -P "$pane_pid" 2>/dev/null | head -1 || true)"
+  beam_pid="$(beam_pid_of_pane "$pane_pid" || true)"
 
   if [[ -n "$beam_pid" ]]; then
     kill -TERM "$beam_pid" 2>/dev/null || true
@@ -312,7 +339,8 @@ cmd_stop() {
       i=$((i + 1))
     done
   else
-    echo "fleet: BEAM introuvable sous la session tmux — fallback kill direct." >&2
+    echo "fleet: BEAM introuvable sous la session tmux (pane=${pane_pid:-<aucun>}, " \
+      "comm=$(pane_comm "$pane_pid")) — AUCUN signal envoye, fallback kill direct." >&2
   fi
 
   if dtmux has-session -t "$SESSION" 2>/dev/null; then
@@ -326,9 +354,13 @@ cmd_stop() {
 status_debug_visibility() {
   local pane_pid beam_pid env_file
   pane_pid="$(dtmux display-message -p -t "$SESSION" '#{pane_pid}' 2>/dev/null || true)"
-  beam_pid=""
-  [[ -n "$pane_pid" ]] && beam_pid="$(pgrep -P "$pane_pid" 2>/dev/null | head -1 || true)"
-  env_file="/proc/${beam_pid}/environ"
+  beam_pid="$(beam_pid_of_pane "$pane_pid" || true)"
+
+  # MEME DERIVATION QUE `cmd_stop`, ET ELLE ETAIT FAUSSE ICI AUSSI. Le defaut y etait invisible :
+  # `erl_child_setup` est forke PAR le beam, donc il herite de son environnement et la reponse
+  # tombait juste par accident. Un lecteur qui corrige un des deux sites doit corriger l'autre —
+  # d'ou la fonction partagee plutot que deux copies qui divergeront.
+  env_file="${LCARS_PROC_DIR:-/proc}/${beam_pid}/environ"
 
   if [[ -z "$beam_pid" || ! -r "$env_file" ]]; then
     echo "fleet: visibilite debug : indeterminee (environnement du BEAM illisible)"

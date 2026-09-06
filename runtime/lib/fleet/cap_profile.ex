@@ -412,7 +412,7 @@ defmodule Fleet.CapProfile do
   def containment(%__MODULE__{}), do: @default_containment
 
   @doc """
-  What the pod may REACH — `"vendor-only"` (default) or `"egress"`.
+  What the pod may REACH — `"vendor-only"` (default), `"egress"` or `"open"`.
 
   Absent means vendor-only, and the default is the fail-closed one on purpose: a role whose profile
   forgets to say anything reaches its model and nothing else. The opposite default would make every
@@ -427,6 +427,11 @@ defmodule Fleet.CapProfile do
   pod is sealed and leaves through its own CONNECT proxy. The declaration picks the ALLOWLIST that
   proxy serves, so `"egress"` is not "opened", it is "the vendor's hosts plus the ones this role
   declares".
+
+  `"open"` is the one value that drops the host wall — for a role whose work is answering a human
+  about the open web, where an allowlist is a list nobody can finish. It changes the ALLOWLIST and
+  nothing else: same seal, same proxy, same absence of a resolver in the pod. It is declared, never
+  inherited, and `Fleet.Spawner.Pod.Egress` carries what it costs.
   """
   @spec network(t()) :: String.t()
   def network(%__MODULE__{metadata: meta}) when is_map(meta),

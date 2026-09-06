@@ -44,6 +44,25 @@ defmodule Fleet.Spawner.Pod.Egress do
   everything). A malformed request line is refused. A host that is not an exact match is refused —
   the match is an exact name, or a `*.` SUBDOMAIN rule anchored on the right. Never a `contains`,
   never a bare suffix: the anchor is what stops `sentry.io.attacker.net` from passing `*.sentry.io`.
+
+  ## `network: open` — the third policy, and what it does NOT undo
+
+  A role may declare `open`, and then `allowlist/2` yields `:open` instead of a list: every host is
+  accepted. It is a TYPE, not a magic hostname, and that is the whole point — a host file cannot
+  express it. `*` in a vendor or converged declaration stays an ordinary (never-matching) name, so
+  no data file can silently open a pod.
+
+  What `open` gives up is the host wall, and nothing else. The pod is still sealed with no network
+  namespace, still leaves through this proxy, still cannot resolve a name itself, and still gets a
+  refusal on anything that is not a CONNECT tunnel. `provision/3` logs one warning per pod life
+  naming the role that runs without a host wall, so the state is readable in the durable trace
+  instead of being inferred from an absence of refusals.
+
+  WHY IT EXISTS: a role whose job is to answer a human needs the web the human is asking about, and
+  an allowlist for that role is a list nobody can finish — the human discovers a missing host as a
+  pod that silently fails, and pays a round trip to add it. That cost is the reason, and it is a
+  USER arbitration (self-hosted box, one human): the fail-closed default does not move, `open` is
+  declared per role, and no role gets it by forgetting to say anything.
   """
 
   require Logger
@@ -105,7 +124,9 @@ defmodule Fleet.Spawner.Pod.Egress do
 
   defp provision_socket(pod_id, cap_profile, launcher_path, path) do
     with :ok <- File.mkdir_p(Path.dirname(path)) do
-      case start(path, allowlist(cap_profile, launcher_path), pod_id: pod_id) do
+      case start(path, warn_if_open(allowlist(cap_profile, launcher_path), cap_profile),
+             pod_id: pod_id
+           ) do
         {:ok, listen} ->
           :persistent_term.put({__MODULE__, pod_id}, listen)
           {:ok, path}
@@ -115,6 +136,21 @@ defmodule Fleet.Spawner.Pod.Egress do
       end
     end
   end
+
+  # ONE LINE PER POD LIFE, at warning so the durable trace keeps it. Under `open` no refusal is
+  # ever logged, so without this the state "this role has no host wall" would be readable only as an
+  # ABSENCE — the one shape nobody notices. Says the role, because the decision belongs to a role.
+  defp warn_if_open(:open, cap_profile) do
+    Logger.warning(
+      "Egress: role #{CapProfile.name(cap_profile)} runs with an OPEN allowlist (`network: open`) " <>
+        "— every host is reachable. The pod is still sealed and still leaves through this proxy; " <>
+        "what is gone is the host wall."
+    )
+
+    :open
+  end
+
+  defp warn_if_open(allowed, _cap_profile), do: allowed
 
   @doc """
   Closes this pod's proxy and removes its socket. Idempotent: a pod that never had one is a no-op.
@@ -148,11 +184,17 @@ defmodule Fleet.Spawner.Pod.Egress do
   silently, since a pod that reaches nothing looks exactly like a pod nobody opened. The converged
   file lives on the state volume, which survives, and that is the whole reason it exists.
   """
-  @spec allowlist(CapProfile.t(), Path.t()) :: [String.t()]
+  @spec allowlist(CapProfile.t(), Path.t()) :: [String.t()] | :open
   def allowlist(cap_profile, launcher_path) do
     vendor = Vendor.hosts(launcher_path)
 
     case CapProfile.network(cap_profile) do
+      # NO LIST IS COMPOSED, and none is read: the two data sources are not consulted at all, so a
+      # box whose store is absent or whose converger never ran behaves identically here. `:open` is
+      # the policy itself, not a list that happens to contain everything.
+      "open" ->
+        :open
+
       "egress" ->
         Enum.uniq(vendor ++ role_hosts(cap_profile) ++ converged_hosts(cap_profile))
 
@@ -296,12 +338,16 @@ defmodule Fleet.Spawner.Pod.Egress do
   Split out of the socket handling because it is the WALL, and a wall you cannot call without a
   socket is a wall nobody tests by mutation. `{:ok, host, port}` or `{:refused, reason}`.
   """
-  @spec decide(binary(), [String.t()]) ::
+  @spec decide(binary(), [String.t()] | :open) ::
           {:ok, String.t(), :inet.port_number()} | {:refused, term()}
-  def decide(request_line, allowed) when is_binary(request_line) and is_list(allowed) do
+  def decide(request_line, allowed)
+      when is_binary(request_line) and (is_list(allowed) or allowed == :open) do
     case Regex.run(@connect_re, request_line) do
       [_, host, port] ->
-        if allowed?(host, allowed),
+        # `:open` drops the HOST question and nothing else — the line still had to parse as a
+        # CONNECT to get here, so a non-tunnel request is refused under `open` exactly as it is
+        # under an allowlist.
+        if allowed == :open or allowed?(host, allowed),
           do: {:ok, host, String.to_integer(port)},
           else: {:refused, {:host_not_allowed, host}}
 
@@ -347,8 +393,9 @@ defmodule Fleet.Spawner.Pod.Egress do
   # MCP socket already does); a caller that composes a long one gets told WHICH constraint it hit.
   @sun_path_max 100
 
-  @spec start(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, term()}
-  def start(socket_path, allowed, opts \\ []) when is_binary(socket_path) and is_list(allowed) do
+  @spec start(Path.t(), [String.t()] | :open, keyword()) :: {:ok, port()} | {:error, term()}
+  def start(socket_path, allowed, opts \\ [])
+      when is_binary(socket_path) and (is_list(allowed) or allowed == :open) do
     if byte_size(socket_path) > @sun_path_max do
       {:error, {:egress_socket_path_too_long, byte_size(socket_path), @sun_path_max}}
     else

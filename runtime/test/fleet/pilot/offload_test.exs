@@ -7,6 +7,19 @@ defmodule Fleet.Pilot.OffloadTest do
   """
   use ExUnit.Case, async: true
 
+  # ⚠ LA FENETRE N'EST PAS UNE MESURE DE VITESSE, ET 1 s EN ETAIT DEVENUE UNE. Ces temoins attendent
+  # un message d'un process qui vit sous un `Task.Supervisor` : sous `async: true`, six coeurs et une
+  # douzaine de cas en parallele, la famine d'ordonnancement suffit a depasser la seconde sans que
+  # rien ne soit bloque. C'est le defaut que `Fleet.Test.Barrier` a mesure sur cette suite le
+  # 2026-08-21 — « roughly one full run in three, NEVER in isolation », et `--max-cases 4` l'eteint —
+  # et il y a repondu par le meme raisonnement : assez long pour qu'atteindre la borne signifie
+  # VRAIMENT bloque, et sous la deadline d'ExUnit (60 s), pour que le diagnostic reste celui de
+  # l'instrument qui sait ce qu'il attendait.
+  #
+  # Le cout est nul sur un temoin vert : `assert_receive` rend des que le message arrive. Une borne
+  # a 30 s ne se paie que sur un echec, ou elle remplace un faux negatif par un vrai.
+  @window 30_000
+
   alias Fleet.Pilot.Offload
 
   setup do
@@ -51,9 +64,9 @@ defmodule Fleet.Pilot.OffloadTest do
         {"StepRunConsumer", "completion lost"}
       )
 
-    assert_receive {:task_pid, task_pid}, 1_000
+    assert_receive {:task_pid, task_pid}, @window
     send(task_pid, :go)
-    assert_receive {:DOWN, ref, :process, pid, :boom}, 1_000
+    assert_receive {:DOWN, ref, :process, pid, :boom}, @window
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -85,9 +98,9 @@ defmodule Fleet.Pilot.OffloadTest do
         {"StepRunConsumer", "completion lost", %{pod_id: "pod-x", issue: 7}}
       )
 
-    assert_receive {:task_pid, task_pid}, 1_000
+    assert_receive {:task_pid, task_pid}, @window
     send(task_pid, :go)
-    assert_receive {:DOWN, ref, :process, pid, :boom}, 1_000
+    assert_receive {:DOWN, ref, :process, pid, :boom}, @window
 
     ExUnit.CaptureLog.capture_log(fn ->
       # The consumer gets the business context back — the pod whose confirmation will never come.
@@ -118,21 +131,23 @@ defmodule Fleet.Pilot.OffloadTest do
         send(test, :armed)
       end)
 
-    assert_receive :armed, 1_000
+    assert_receive :armed, @window
     # Find the task pid via the :DOWN after releasing it — release EVERY task child.
     for {_, child, _, _} <-
           Task.Supervisor.children(sup_name(sup)) |> Enum.map(&{nil, &1, nil, nil}),
         is_pid(child),
         do: send(child, :go)
 
-    assert_receive {:DOWN, ref, :process, pid, :normal}, 1_000
+    assert_receive {:DOWN, ref, :process, pid, :normal}, @window
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert {:handled, :nominal} = Offload.handle_down(ref, pid, :normal)
       end)
 
-    refute log =~ "DIED"
+    # Ancree sur la forme que ce module emet : `Spawner.Pod` porte aussi le mot, et la capture est
+    # globale sous `async: true`.
+    refute log =~ "offloaded task DIED"
   end
 
   test "a task faster than the monitor (:noproc) → LOUD mid-work DIED error, never silent", %{
@@ -235,7 +250,7 @@ defmodule Fleet.Pilot.OffloadTest do
 
   test "a :DOWN that is NOT an offloaded task → :not_mine (the consumer's catch-all takes over)" do
     {pid, ref} = spawn_monitor(fn -> :ok end)
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, @window
     assert :not_mine = Offload.handle_down(ref, pid, :normal)
   end
 
