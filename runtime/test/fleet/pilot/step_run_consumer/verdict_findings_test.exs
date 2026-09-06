@@ -1,6 +1,8 @@
 defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
   use ExUnit.Case, async: true
 
+  require Logger
+
   alias Fleet.Pilot.StepRunConsumer.Verdict
 
   # C1 2026-08-18 — the OPTIONAL machine payload `details.findings` (findings.json).
@@ -126,6 +128,34 @@ defmodule Fleet.Pilot.StepRunConsumer.VerdictFindingsTest do
     assert {findings, stripped} = took
     assert findings == valid_findings()
     assert stripped["details"] == %{"findings_v1" => "old"}
-    refute log =~ "ignored"
+    # ⚠ L'AIGUILLE EST ANCREE SUR L'EMETTEUR, ET C'EST LA CORRECTION. `capture_log` capte le
+    # logger GLOBAL : sous `async: true`, tout module qui logge pendant cette fenetre atterrit dans
+    # `log`. Le mot « ignored » seul est emis par 21 modules de `lib/` (mesure du 2026-09-06), et
+    # ce temoin est tombe sur la ligne d'un voisin — `Fleet.SystemConfig: … carries unknown key(s)
+    # … — ignored.` Un refute ne vaut que si son aiguille ne peut venir que du sujet.
+    refute log =~ ~r/StepRunConsumer: details\.\S+ ignored/
+  end
+
+  # CE TEMOIN PROUVE L'ANCRAGE, PAS LE SUJET — et il existe parce que la course, elle, ne se rejoue
+  # pas a la demande. Le refute ci-dessus a ete pris en flagrant delit dans un `mix gate` complet
+  # (drdree, 2026-09-06) sur la ligne d'un VOISIN, reproduite ici mot pour mot. Sept passages de la
+  # suite sur ma machine, dont trois a `--max-cases 24` sur le code d'AVANT, ne l'ont jamais
+  # redeclenchee : une fenetre de quelques microsecondes ne s'invoque pas, elle se ferme.
+  #
+  # Ce qui se prouve donc ici est la PROPRIETE qui la ferme : l'aiguille ne peut venir que du sujet.
+  test "l'aiguille du refute ne peut venir que du sujet — la ligne d'un voisin ne la declenche pas" do
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        Logger.warning(
+          "Fleet.SystemConfig: /x carries unknown key(s) [\"conflict_engin\"] — ignored."
+        )
+      end)
+
+    # Le mot nu EST dans la capture : `capture_log` capte le logger global, et c'est exactement ce
+    # qui faisait tomber un refute qui cherchait ce mot-la.
+    assert log =~ "ignored"
+
+    # L'aiguille ancree sur l'emetteur et sur la forme ne voit que ce que `Verdict` emet.
+    refute log =~ ~r/StepRunConsumer: details\.\S+ ignored/
   end
 end
