@@ -1,0 +1,28 @@
+# SOURCE: deploy/pkg/lcars-container.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars-container`, LE RAIL CONTENEUR : deploy/container, le Dockerfile, les
+#         composes et l'override des secrets sous /opt/lcars/deploy/docker (gen-contents.sh les
+#         y route). Rien a converger au postinst : « container up » est un geste de l'operateur.
+name: lcars-container
+arch: all
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: admin
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - le rail conteneur : deploy/container, le Dockerfile et les composes
+  Le daemon docker est un PREREQUIS que ce paquet NOMME (docker.io, docker-ce, ou l'integration
+  Docker Desktop sous WSL via lcars-docker-desktop) ; il ne le pose pas. Rien ne se converge au
+  postinst : « /opt/lcars/deploy/container up » est le geste de l'operateur. apt remove laisse
+  une instance qui tourne en place et le dit ; apt purge LISTE ses volumes et refuse de les
+  detruire sans qu'on le demande.
+depends:
+  - lcars
+  - docker.io (>= 26) | docker-ce | lcars-docker-desktop
+  - docker-compose-v2 | docker-compose-plugin
+scripts:
+  postremove: ./lcars-container/postrm

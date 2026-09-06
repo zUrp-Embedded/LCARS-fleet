@@ -81,7 +81,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   # architect whose `git fetch` gets it writes a diagnosis concluding the fleet account is not a
   # collaborator of the repo. The permissions are right. The sandbox is talking.
   #
-  # 501 says WHOSE refusal it is and that nothing left the box. Read it as an answer to "should a
+  # 501 says WHOSE refusal it is and that nothing left the container. Read it as an answer to "should a
   # pod reach this over the network at all": its project arrives through its mounts, and the forge
   # through its MCP tools.
   @refuse_method "HTTP/1.1 501 Not Implemented\r\n\r\n" <>
@@ -245,7 +245,7 @@ defmodule Fleet.Spawner.Pod.Egress do
   #
   # ABSENT IS SILENT, AND THAT IS DELIBERATE — but it is not the same silence as the vendor's.
   # There, a missing file is a WIRING HOLE and shouts. Here, a missing file is the NOMINAL state of
-  # a box where nobody has approved anything yet. Two absences, two gravities.
+  # a container where nobody has approved anything yet. Two absences, two gravities.
   #
   # WHICH IS WHY THE MARKER EXISTS. Silence alone would cover five states, four of them faults:
   # nothing approved (nominal) · the converger never ran · the volume is not mounted · the volume
@@ -265,7 +265,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     end
   end
 
-  # The converged directory, or `nil` when this box has no store mounted (DR-023: a disabled
+  # The converged directory, or `nil` when this container has no store mounted (DR-023: a disabled
   # feature is not a precondition — no store means no extra hosts, never a refused spawn).
   defp converged_dir do
     case System.get_env("LCARS_STORE_ROOT") do
@@ -305,7 +305,7 @@ defmodule Fleet.Spawner.Pod.Egress do
     unless File.exists?(marker) do
       Logger.warning(
         "Egress: #{dir} carries no `.applied` marker — the toolchain converger has never run on " <>
-          "this box. An empty egress list here is NOT the nominal 'nothing approved yet': it is " <>
+          "this container. An empty egress list here is NOT the nominal 'nothing approved yet': it is " <>
           "indistinguishable from a converger that never came, a volume never mounted, or a " <>
           "volume purged. The marker is what separates the four."
       )

@@ -24,7 +24,7 @@
 #
 # LOT 14 (⚖ user 2026-09-04, 17-DEUX-OUVERTS, solution A) : le stage `verify` de l'image joue ce
 # module AU BUILD, sur `--substrate docker`. La table y est filtree par le substrat que le
-# MANIFESTE declare (une seule source), et par les volumes de la boite ; /run et tmpfiles n'y
+# MANIFESTE declare (une seule source), et par les volumes du conteneur ; /run et tmpfiles n'y
 # existent pas. Les temoins « docker : » ci-dessous jouent `check` pour de vrai, dans un decor.
 
 load ../refute
@@ -328,13 +328,13 @@ check_on() {
   [[ "$output" == *"hors substrat docker"*"$D_POSTE"* ]]
 }
 
-@test "docker : une entree sur un VOLUME de la boite n'a pas de verite au build — non mesuree, et DITE" {
+@test "docker : une entree sur un VOLUME du conteneur n'a pas de verite au build — non mesuree, et DITE" {
   docker_decor
   rm -rf "$D_VOL"
   check_on docker
   [ "$status" -eq 0 ]
   refute_out -- "$D_VOL absent" <<<"$output"
-  [[ "$output" == *"volume de la boite"*"$D_VOL"* ]]
+  [[ "$output" == *"volume du conteneur"*"$D_VOL"* ]]
 }
 
 @test "docker : une entree que le manifeste NE CONNAIT PAS se mesure quand meme — un absent nomme au build vaut mieux qu'un silence" {
@@ -353,7 +353,7 @@ check_on() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"$D_POSTE : 700 $ME ≠ 755 $ME"* ]]
   [[ "$output" == *"$D_VOL absent"* ]]
-  refute_out 'hors substrat|volume de la boite' <<<"$output"
+  refute_out 'hors substrat|volume du conteneur' <<<"$output"
 }
 
 @test "le substrat d'une entree vient du MANIFESTE, et de lui seul — la table du module n'en porte aucune colonne" {
@@ -395,7 +395,7 @@ check_on() {
   local df="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   local declares; declares="$(grep -E '^VOLUME ' "$df" | tr -d '[]",' | sed 's/^VOLUME //' | tr ' ' '\n' | sort)"
   [ -n "$declares" ]
-  run env -u PROV_ROOT bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_box_volumes | sort"
+  run env -u PROV_ROOT bash -c "set -euo pipefail; source '$MOD' >/dev/null 2>&1; prov_container_volumes | sort"
   [ "$status" -eq 0 ]
   [ "$output" = "$declares" ]
 }

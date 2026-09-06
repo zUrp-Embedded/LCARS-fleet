@@ -9,7 +9,7 @@
 
 Le système **détecte, logge et tickette** (`error_system` — la boîte de réception d'admiral) ;
 **aucune action automatique, aucun spawn, aucune décision** derrière le ticket. Un humain traite,
-hors de la boîte. La seule moitié automatisée est le rail d'outillage, parce que son objet est
+hors du conteneur. La seule moitié automatisée est le rail d'outillage, parce que son objet est
 *déclarable*. Production → arch ; défauts du système → sysadmin ; tout traversant est un bug.
 
 ## Modules

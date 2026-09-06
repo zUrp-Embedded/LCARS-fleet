@@ -134,7 +134,7 @@ defmodule Fleet.Application.CatalogueDeposits do
   # doublon de depots est une question sans reponse (« lequel installer ? ») ; ici le catalogue EST
   # installe, et refuser le ferait disparaitre de la liste — un catalogue vivant efface parce qu'il
   # a un depot de trop. On choisit donc, mais de facon DETERMINISTE (le premier par nom de depot,
-  # trie) et en le DISANT : deux boites lisant la meme forge doivent voir le meme magasin.
+  # trie) et en le DISANT : deux conteneurs lisant la meme forge doivent voir le meme magasin.
   defp pick_stores(pairs) do
     pairs
     |> Enum.group_by(fn {name, _repo} -> name end, fn {_name, repo} -> repo end)
@@ -148,7 +148,7 @@ defmodule Fleet.Application.CatalogueDeposits do
         Logger.warning(
           "CatalogueDeposits: #{length(many)} repos claim to be the store of '#{name}' " <>
             "(#{Enum.map_join(sorted, ", ", &Payload.full_name/1)}). Following " <>
-            "#{Payload.full_name(chosen)} — first by name, so every box reading this forge follows the " <>
+            "#{Payload.full_name(chosen)} — first by name, so every container reading this forge follows the " <>
             "same one. Delete the others: only one of them is what `catalogue install` pushes to."
         )
 
@@ -223,7 +223,7 @@ defmodule Fleet.Application.CatalogueDeposits do
       # soit LISIBLE et FORKABLE. Sans cette clause, ce depot serait un candidat de plus nomme
       # `fleet` — et le premier fork qui garde son manifeste tel quel en ferait DEUX, donc
       # `{:duplicate_catalogues, ...}`, donc `catalogue list` refusant la liste ENTIERE pour tout le
-      # monde. Un objet publie pour etre forke ne doit pas casser la boite au premier fork.
+      # monde. Un objet publie pour etre forke ne doit pas casser le conteneur au premier fork.
       #
       # Ce n'est pas un cas particulier concede : ce nom ne peut structurellement pas etre installe
       # depuis la forge (`CatalogueLifecycle.eval_source/1` rend BUNDLED), donc un depot qui le

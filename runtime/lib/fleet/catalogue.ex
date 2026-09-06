@@ -62,9 +62,9 @@ defmodule Fleet.Catalogue do
   `verify!/0` reads it at boot, BEFORE the images freeze anything from the disk.
 
   The name is a property OF THE CATALOGUE, not of its installation. Assigned at install time — by a
-  CLI argument, or defaulting to the source basename — the same catalogue on two boxes carries two
+  CLI argument, or defaulting to the source basename — the same catalogue on two containers carries two
   names. That is harmless only while the name is a local handle for the declaration file and the
-  verbs; it stops being harmless because the name addresses something OUTSIDE the box, the forge org
+  verbs; it stops being harmless because the name addresses something OUTSIDE the container, the forge org
   that carries a catalogue's projects. A project created in org `web` is unopenable where the same
   catalogue answers to `frontend`.
 
@@ -284,7 +284,7 @@ defmodule Fleet.Catalogue do
 
   @doc """
   The INSTALLED catalogues, as roots — `#{@bundled_name}` first, then the material present on this
-  box, by name.
+  container, by name.
 
   ## Installed is a PRESENCE, not a declaration
 
@@ -411,7 +411,7 @@ defmodule Fleet.Catalogue do
   # publication d'une image par catalogue.
   def rel(:workflow_maps), do: @rel_workflow_maps
   # Meme mecanisme, meme consequence : sans clause ici, le template de projet ne s'adresserait que
-  # sous `root/0`, donc TOUT projet de la boite serait echafaude depuis le catalogue de reference
+  # sous `root/0`, donc TOUT projet du conteneur serait echafaude depuis le catalogue de reference
   # pendant que le sien livre les fichiers que rien ne lit. Pas un chemin de recherche non plus — un
   # template ne se superpose pas, c'est l'arbre dont un nouveau projet part.
   #
@@ -672,7 +672,7 @@ defmodule Fleet.Catalogue do
   # The name is REQUIRED for the same reason the manifest itself is: it can only be made required
   # while every catalogue in existence is in this repository. Optional would mean falling back to
   # the directory name, which is precisely the defect — a name assigned by whoever installed,
-  # differing between two boxes holding the same catalogue.
+  # differing between two containers holding the same catalogue.
   defp validate_name!(manifest, path) do
     case Map.get(manifest, "name") do
       name when is_binary(name) ->
@@ -691,7 +691,7 @@ defmodule Fleet.Catalogue do
         raise """
         LCARS catalogue: #{path} declares no `name` — boot refused.
         The name is a property of the catalogue, not of where it was installed: it addresses the \
-        catalogue outside this box (the forge org carrying its projects), so it cannot be the \
+        catalogue outside this container (the forge org carrying its projects), so it cannot be the \
         directory someone happened to unpack it into.
         """
 
@@ -744,7 +744,7 @@ defmodule Fleet.Catalogue do
   @doc """
   The catalogue's declared NAME. `verify!/0` validates it at boot; this is the reader.
 
-  It addresses the catalogue outside this box — the prefix of its role accounts
+  It addresses the catalogue outside this container — the prefix of its role accounts
   (`<catalogue>_<role>`), and the forge org that will carry its projects.
   """
   @spec name() :: String.t() | nil
@@ -795,7 +795,7 @@ defmodule Fleet.Catalogue do
 
   `nil` for a name no installed catalogue answers to. That is not a defect to guard against: the
   poller only discovers on the orgs of INSTALLED catalogues, so a work item for a catalogue absent
-  from this box does not exist. Callers treat `nil` as "no catalogue named, resolve in the default
+  from this container does not exist. Callers treat `nil` as "no catalogue named, resolve in the default
   image", which is what every pre-catalogue caller already did.
   """
   @spec root_for(String.t() | nil) :: Path.t() | nil

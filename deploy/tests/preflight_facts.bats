@@ -43,6 +43,9 @@ setup() {
   # ce defaut qui rendait `provision_runner.bats:542` vert ici et rouge la-bas.
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   printf '#!/usr/bin/env bash\nexit 1\n' > "$BIN/docker"; chmod 0755 "$BIN/docker"
+  # Le CANAL est a nous : absent = « aucun ». Sans cette ligne, un poste installe par paquet verrait
+  # ce module rendre `channel=deb` de la machine qui joue le temoin (MUR I21, meme raison).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
 }
 
 # preflight <substrat> [VAR=val…] — joue le module et remplit "$FACTS"
@@ -86,7 +89,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
   preflight docker
   local f
   for f in os bash arch ram_mb disque_mb substrat consent wsl2 wslconf userns_knob \
-           docker docker_why compose forge_fournie forge_joignable sudo curl git; do
+           docker docker_why compose forge_fournie forge_joignable sudo curl git channel channel_tree; do
     grep -qE "^$f=" "$FACTS" || { echo "fait ABSENT : $f" >&2; return 1; }
   done
 }
@@ -100,7 +103,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 # ─── DOCKER : MESURE PARTOUT, REFUS LA OU IL ETAIT DEJA ─────────────────────────────────────────
 
 @test "docker est mesure sur TOUT substrat — c'etait le trou du preflight" {
-  # Le rail BOITE tourne sur n'importe quel substrat et docker y est sa seule condition d'existence.
+  # Le rail CONTENEUR tourne sur n'importe quel substrat et docker y est sa seule condition d'existence.
   # Ne le mesurer que sous WSL laissait la porte deviner — ou refaire la sonde, ce qu'elle faisait.
   local s
   for s in wsl linux docker; do
@@ -139,7 +142,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 # ─── LES FAITS NEUFS ────────────────────────────────────────────────────────────────────────────
 
 @test "forge FOURNIE : l'URL est un fait, et sa joignabilite en est un autre" {
-  # `FORGE_BASE_URL` posee = « j'ai deja une forge, consomme-la ». Le rail boite s'y raccroche : si
+  # `FORGE_BASE_URL` posee = « j'ai deja une forge, consomme-la ». Le rail conteneur s'y raccroche : si
   # elle ne repond pas, il echouera au premier geste — et la porte doit le dire AVANT la validation,
   # pas apres.
   preflight docker FORGE_BASE_URL="http://127.0.0.1:1/forge-qui-n-existe-pas"
@@ -156,7 +159,7 @@ fact() { # fact <nom> -> sa valeur, vide si absent
 }
 
 @test "wsl.conf ETRANGER est un avertissement, jamais un refus" {
-  # Le rail poste le REMPLACE en entier — c'est la frontiere de securite de la boite. L'operateur
+  # Le rail poste le REMPLACE en entier — c'est la frontiere de securite du conteneur. L'operateur
   # doit le voir avant de valider ; refuser pour autant bloquerait une machine parfaitement saine.
   run grep -n 'p_fact wslconf etranger' "$MOD"
   [ "$status" -eq 0 ]
@@ -187,4 +190,42 @@ fact() { # fact <nom> -> sa valeur, vide si absent
   dernier_fait="$(grep -nE '^\s*p_fact ' "$MOD" | tail -1 | cut -d: -f1)"
   [ "$dernier_fait" -lt "$dernier_rapport" ] \
     || { echo "un p_fact (l.$dernier_fait) suit le dernier rapport (l.$dernier_rapport) : recapitulatif ?" >&2; return 1; }
+}
+
+# ─── LE CANAL : QUI A POSE, ET CE QUE CET ARBRE POSERAIT (lot 2 du chantier release) ───────────
+
+@test "CANAL : le fait « channel » dit qui a pose (source, kit, deb) ou « aucun », et « channel_tree » ce que cet arbre poserait" {
+  local v
+  for v in source kit deb; do
+    mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf '%s\n' "$v" > "$LCARS_CHANNEL_FILE"
+    preflight linux
+    [ "$(fact channel)" = "$v" ] || { echo "channel=$(fact channel), attendu $v"; return 1; }
+    [[ "$output" == *"canal d'installation : $v"* ]]
+  done
+  rm -f "$LCARS_CHANNEL_FILE"
+  preflight linux
+  [ "$(fact channel)" = "aucun" ]
+  [[ "$output" == *"aucun canal d'installation"*"jamais été posée"* ]]
+  # ce depot est un CHECKOUT : l'arbre poserait « source » — et la valeur vient de la lib, pas d'un litteral
+  [ "$(fact channel_tree)" = "source" ]
+  [[ "$output" == *"cet arbre poserait « source »"* ]]
+  grep -q 'p_fact channel_tree "$(prov_channel_here)"' "$MOD"
+}
+
+@test "CANAL : un canal ILLISIBLE est un FAIL qui COMPTE (appel nu), et le fait dit « invalide » — jamais un vert par defaut" {
+  mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'snap\n' > "$LCARS_CHANNEL_FILE"
+  preflight linux
+  [ "$status" -eq 2 ]                                   # verdict_check : 2 = un p_fail a ete compte
+  [ "$(fact channel)" = "invalide" ]
+  [[ "$output" == *"FAIL"*"canal d'installation illisible"*"« snap »"* ]]
+  # l'appel est NU dans le module : un `$(prov_channel)` perdrait le compte
+  grep -q 'if prov_channel >/dev/null; then' "$MOD"
+  grep -vE '^\s*#' "$MOD" | refute_out '\$\(prov_channel\)'
+}
+
+@test "CANAL : un produit POSE sans tampon rend « inconnu », dit en WARN — ni « aucun », ni un canal" {
+  mkdir -p "$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  preflight linux PROV_ROOT="$BATS_TEST_TMPDIR/opt/lcars" PROV_PREFIX="$BATS_TEST_TMPDIR/opt/lcars/runtime"
+  [ "$(fact channel)" = "inconnu" ] || { echo "channel=$(fact channel), attendu inconnu"; echo "$output" | tail -5; return 1; }
+  [[ "$output" == *"INCONNU"*"sans tampon"* ]]
 }

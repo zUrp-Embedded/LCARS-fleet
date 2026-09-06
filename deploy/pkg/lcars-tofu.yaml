@@ -1,0 +1,22 @@
+# SOURCE: deploy/pkg/lcars-tofu.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars-tofu` : le binaire OpenTofu epingle (la version de 46-tofu) et le miroir
+#         de providers hors-ligne, un VRAI .deb au lieu d'un telechargement au postinst. Ubuntu
+#         n'a pas de paquet opentofu (mesure sur 2004). gen-contents.sh route ses chemins ici.
+name: lcars-tofu
+arch: ${LCARS_ARCH}
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: admin
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - OpenTofu epingle et son miroir de providers hors-ligne
+  /usr/local/bin/tofu (la version que deploy/modules.d/46-tofu.sh epingle par sha256) et
+  /opt/lcars/tofu/{tofurc,providers/} : la structure de la forge se pose sans reseau. Sous le
+  canal deb, 46-tofu ne telecharge plus rien, il mesure.
+provides:
+  - opentofu

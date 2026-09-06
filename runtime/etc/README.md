@@ -11,7 +11,7 @@
 > chaque humain). Ses deux outils joués à l'install seulement vivent dans `deploy/lib/` :
 > `deploy-release.sh` (bâtit et pose la release), `enroll-catalogue.sh` (dérive le roster de la
 > recette forge) — témoins dans `deploy/tests/lib/`, joués par `deploy/gate.sh`. Le troisième,
-> `provision-role-tokens.sh` (minte les jetons de rôle), est un GESTE DE FORGE du produit — la boîte
+> `provision-role-tokens.sh` (minte les jetons de rôle), est un GESTE DE FORGE du produit — le conteneur
 > le joue à l'init de son instance — et vit dans `services/`, à côté de `forge-gestures.sh` ;
 > le poste l'appelle depuis `63-forge-tokens`.
 
@@ -43,7 +43,7 @@ pas d'« attach de l'arch » au démarrage. Les logs du BEAM : `tmux -S ~/.lcars
 
 | fichier | ce que c'est |
 |---|---|
-| `fleet.env.template` | le catalogue des env vars de la boîte, à copier en `~/.lcars/fleet.env` |
+| `fleet.env.template` | le catalogue des env vars du conteneur, à copier en `~/.lcars/fleet.env` |
 | `release.manifest` | ce qui part de `bin/` dans l'install (fichier, exec/noexec, `link`) — des données, pas du code |
 | `deploy-release.sh` (vit dans `deploy/lib/`) | gate → `mix release` → pose atomique sous `/opt/lcars/runtime` → symlinks PATH |
 | `enroll-catalogue.sh` (vit dans `deploy/lib/`) | dérive les entrées de la recette forge (tofu) depuis les rôles d'un catalogue |

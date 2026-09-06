@@ -2,7 +2,7 @@ defmodule Fleet.MCP.ToolchainRequestTest do
   @moduledoc """
   L'IDENTITÉ EST LE CANAL, et c'est tout ce que ces cas défendent.
 
-  Un pod bloqué demande un outil que la boîte n'a pas. Ce que la demande devient — un diff qu'un
+  Un pod bloqué demande un outil que le conteneur n'a pas. Ce que la demande devient — un diff qu'un
   humain signe, puis ce que root applique — rend la question « au nom de qui ? » plus lourde ici que
   partout ailleurs dans la surface MCP. Rien dans les arguments ne nomme un ticket : le work-item
   se DÉDUIT du `pod_id` que l'accepteur de socket a lié. Ces témoins épinglent qu'on ne peut pas

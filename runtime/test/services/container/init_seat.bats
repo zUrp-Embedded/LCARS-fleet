@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/init_seat.bats
+# SOURCE: runtime/test/services/container/init_seat.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for box/init.sh seat — le siege se DERIVE, il ne s'invente pas
+# STATUS: bats tests for container/init.sh seat — le siege se DERIVE, il ne s'invente pas
 #
 # Ces temoins vivaient dans `deploy/tests/docker/entrypoint_seat.bats` et jouaient `resolve_admiral`,
 # une fonction de l'entrypoint qui sourcait la lib de l'installeur. Lot 6 (⚖ user 2026-09-04, Q1) :
-# l'init de l'instance est du PRODUIT, `runtime/services/box/init.sh`, et le siege est son premier
+# l'init de l'instance est du PRODUIT, `runtime/services/container/init.sh`, et le siege est son premier
 # geste. Les regles n'ont pas bouge : la table fait foi, sinon le #1 de la forge par son ID, sinon
 # la semence de l'appelant ; une divergence se REFUSE ; sans rien, on ne fabrique pas de nom.
 #
@@ -15,7 +15,7 @@
 load ../../support/refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../services/box/init.sh"
+  SUT="$BATS_TEST_DIRNAME/../../../services/container/init.sh"
   [ -f "$SUT" ]
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
   export PATH="$BIN:$PATH"

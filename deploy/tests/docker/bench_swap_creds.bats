@@ -5,7 +5,7 @@
 # STATUS: bats tests for bench-swap-image.sh — la sonde des credentials ne fait pas descendre le secret
 #
 # CE QUE CE TEMOIN TIENT, ET CE QU'IL A COUTE. Pour dire « creds : oui/non » dans son recap, ce
-# script copiait `.credentials.json` de la boite dans un `mktemp` de l'hote, testait sa taille, puis
+# script copiait `.credentials.json` du conteneur dans un `mktemp` de l'hote, testait sa taille, puis
 # faisait `rm -f`. Le fichier extrait porte des jetons OAuth Anthropic VIVANTS.
 #
 # Le `rm` echouait, et personne ne regardait son code de retour : sur une machine ou l'acces au
@@ -62,7 +62,7 @@ setup() {
   [ "$output" = "509" ]
 }
 
-@test "un flux VIDE (fichier absent dans la boite) ne rend pas un faux « oui »" {
+@test "un flux VIDE (fichier absent dans le conteneur) ne rend pas un faux « oui »" {
   run bash -c "printf '' | tar -tv 2>/dev/null | awk 'NR==1 {print \$3}'"
   [ -z "$output" ]
   # et la garde du script refuse tout ce qui n'est pas un entier strictement positif
@@ -73,18 +73,18 @@ setup() {
 
 # ─── LE MAGASIN : TROIS SCRIPTS PARTAGENT UN COMPOSE, UN SEUL L'OUBLIAIT ────────────────────────
 #
-# Le compose de la boite nomme ses volumes `${LCARS_STORE_PREFIX}-<nature>` avec un `:?`. Sans la
+# Le compose du conteneur nomme ses volumes `${LCARS_STORE_PREFIX}-<nature>` avec un `:?`. Sans la
 # variable, compose refuse de PARSER le fichier — donc pas « un volume manque » mais « rien ne se
 # cree », sur un banc parfaitement sain.
 #
 # Mesure du 2026-08-21, swap du banc #2 : « required variable LCARS_STORE_PREFIX is missing a
-# value », puis « la boite ne se cree pas ». `bench-up.sh` et `bench-down.sh` l'exportaient chacun ;
+# value », puis « le conteneur ne se cree pas ». `bench-up.sh` et `bench-down.sh` l'exportaient chacun ;
 # ce script utilisait le meme compose et ne l'exportait pas.
 
 @test "bench-swap-image EXPORTE LCARS_STORE_PREFIX — sinon compose ne parse meme pas" {
-  # lot 9 (DI-05) : le prefixe est celui de la BOITE, <N>-fleet, derive de la base
-  grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$SUT"
-  grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$SUT"
+  # lot 9 (DI-05) : le prefixe est celui du CONTENEUR, <N>-fleet, derive de la base
+  grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$SUT"
+  grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$SUT"
 }
 
 @test "les TROIS scripts de banc derivent le prefixe du MEME endroit — le projet" {
@@ -93,9 +93,9 @@ setup() {
   local d="$BATS_TEST_DIRNAME/../../docker/bench"
   local f
   for f in bench-up.sh bench-down.sh bench-swap-image.sh; do
-    grep -qE '^export LCARS_STORE_PREFIX="\$BOX_PROJECT"$' "$d/$f" \
-      || { echo "$f ne derive pas le prefixe de \$BOX_PROJECT" >&2; false; }
-    grep -qE '^BOX_PROJECT="\$\{PROJECT\}-fleet"$' "$d/$f" \
-      || { echo "$f ne derive pas BOX_PROJECT de la base \$PROJECT" >&2; false; }
+    grep -qE '^export LCARS_STORE_PREFIX="\$CONTAINER_PROJECT"$' "$d/$f" \
+      || { echo "$f ne derive pas le prefixe de \$CONTAINER_PROJECT" >&2; false; }
+    grep -qE '^CONTAINER_PROJECT="\$\{PROJECT\}-fleet"$' "$d/$f" \
+      || { echo "$f ne derive pas CONTAINER_PROJECT de la base \$PROJECT" >&2; false; }
   done
 }

@@ -35,7 +35,7 @@ setup() {
 # ─── C1 — UN DRAPEAU FAIT CE QU'IL DIT, OU IL EST REFUSE ────────────────────────────────────────
 
 @test "C1 : --bench est CABLE sur le rail poste — il n'est plus avale" {
-  # Mesure : les usages de `WITH_BENCH` en zone de sortie etaient TOUS dans la branche boite, et le
+  # Mesure : les usages de `WITH_BENCH` en zone de sortie etaient TOUS dans la branche conteneur, et le
   # drapeau n'entre pas dans `PASSTHRU`. Sur le poste il posait une variable que personne ne lisait,
   # apres avoir annonce « forge jetable + runner CI + humain de demo ». Un drapeau accepte qui ne
   # fait rien est pire qu'un drapeau refuse : le refus laisse chercher, le silence laisse croire.
@@ -59,18 +59,18 @@ setup() {
   [ "$n_montee" -lt "$n_url" ]
 }
 
-@test "C1 : la banniere du POSTE ne promet pas ce que fait la BOITE" {
-  # « forge jetable + runner CI + humain de demo » est vrai sur la boite. Le reprendre ici
+@test "C1 : la banniere du POSTE ne promet pas ce que fait le CONTENEUR" {
+  # « forge jetable + runner CI + humain de demo » est vrai sur le conteneur. Le reprendre ici
   # promettrait deux choses que ce rail ne fait pas — elles sont l'axe DESTINATION, et il a son
   # porteur : `--disposable`.
   # ⚠ LE BLOC SE BORNE PAR SON DEBUT, PAS PAR SON NOM. `_box_emit "  RAIL POSTE …"` est la DERNIERE
-  # ligne du bloc : partir de la faisait courir la plage jusqu'au `_box_emit` suivant — celui de la
-  # BOITE — et le temoin rougissait sur la banniere qu'il n'examinait pas. Un intervalle `sed` mal
+  # ligne du bloc : partir de la faisait courir la plage jusqu'au `_box_emit` suivant — celui du
+  # CONTENEUR — et le temoin rougissait sur la banniere qu'il n'examinait pas. Un intervalle `sed` mal
   # borne ne se voit pas, il change juste ce qu'on mesure.
   local bloc; bloc="$(sed -n '/Ce rail ne crée aucun humain/,/RAIL POSTE/p' "$PORTE")"
   [ -n "$bloc" ]
   grep -q 'bench' <<<"$bloc"                    # le bloc contient bien la ligne --bench du POSTE
-  # Hors commentaires : le commentaire qui explique POURQUOI on ne reprend pas la phrase de la boite
+  # Hors commentaires : le commentaire qui explique POURQUOI on ne reprend pas la phrase du conteneur
   # la cite forcement. Un temoin qui lit la prose interdit d'expliquer ce qu'il garde.
   grep -vE '^[[:space:]]*#' <<<"$bloc" | refute_out 'runner CI|humain de d'
 }

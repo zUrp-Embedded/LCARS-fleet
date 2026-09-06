@@ -1,0 +1,48 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-bench/postrm
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-bench` apres le retrait : retire l'humain de demo ET
+#         son home — LE SEUL humain qu'apt a le droit de retirer, parce qu'il l'a cree
+#
+# dpkg l'appelle : postrm remove · postrm purge · …
+#
+# ⚠ `provision uninstall` NE TOUCHE JAMAIS /home, par aucun drapeau — et c'est juste : il ne sait
+# pas quel compte est jetable. Celui-ci le sait : le nom est celui que SON postinst a ecrit dans
+# l'etat. Trois gardes avant `userdel -r` : le compte existe, ce n'est pas le siege (seat.uid) ni
+# l'appelant, ce n'est pas root. Le compte FORGE reste : il vit dans les volumes de lcars-forge,
+# et c'est ce paquet-la qui en decide (purge).
+set -euo pipefail
+
+say() { echo "lcars-bench/postrm: $*" >&2; }
+ROOT="${PROV_ROOT:-/opt/lcars}"
+DEMO_FILE="${LCARS_DEMO_HUMAN_FILE:-$ROOT/var/demo-human}"
+SEAT_UID_FILE="${LCARS_SEAT_UID_FILE:-/etc/lcars/seat.uid}"
+
+case "${1:-}" in
+  remove|purge) ;;
+  *) exit 0 ;;
+esac
+
+[[ -s "$DEMO_FILE" ]] || { say "aucun humain de demo enregistre ($DEMO_FILE) — personne a retirer"; exit 0; }
+h="$(head -n1 "$DEMO_FILE" | tr -d '[:space:]')"
+uid="$(id -u -- "$h" 2>/dev/null || true)"
+if [[ -z "$uid" ]]; then
+  say "« $h » n'existe pas (ou plus) sur cette machine — rien a retirer"
+  rm -f -- "$DEMO_FILE"; exit 0
+fi
+seat_uid="$(head -n1 "$SEAT_UID_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+if [[ "$uid" -eq 0 || "$uid" == "$seat_uid" || "$h" == "${SUDO_USER:-}" ]]; then
+  say "REFUS — « $h » (uid $uid) est root, le siege ou l'appelant : ce n'est pas un humain de demo. Rien n'est retire ; $DEMO_FILE est laisse."
+  exit 0
+fi
+home="$(getent passwd -- "$h" | cut -d: -f6)"
+pkill -u "$h" 2>/dev/null || true
+if userdel -r -- "$h" 2>/dev/null; then
+  say "humain de demo « $h » retire, home compris ($home) — le seul que dpkg avait le droit de retirer"
+  rm -f -- "$DEMO_FILE"
+else
+  say "« userdel -r $h » a refuse (session ouverte ? home sur un autre montage ?) — le compte reste ; « sudo userdel -r $h » a la main"
+fi
+say "son compte FORGE reste : il vit dans les volumes de lcars-forge, dont le purge decide"
+exit 0

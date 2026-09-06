@@ -1,6 +1,6 @@
 defmodule Fleet.Credentials.Authority do
   @moduledoc """
-  The box's forge working credentials, ASKED at the moment they are used.
+  The container's forge working credentials, ASKED at the moment they are used.
 
   ## Why this exists
 

@@ -602,11 +602,11 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 }
 
 @test "AUCUN humain a materialiser : la team vide est DITE, et ce n'est pas une derive" {
-  # ⚖ USER 2026-08-25 : « en prod (le mode boite), on peut se passer de pre-seed un user (…) et
+  # ⚖ USER 2026-08-25 : « en prod (le mode conteneur), on peut se passer de pre-seed un user (…) et
   # l'inscription reste ouverte sur la forge. » Une team `humans` vide est un etat legitime.
   #
   # ⚠ CE TEMOIN EXIGEAIT EN PLUS UNE DERIVE, ET C'EST SON PERIMETRE QUI A CHANGE (⚖ user
-  # 2026-08-30). La phrase de 2026-08-25 disait « en prod (le mode boite) » parce qu'a cette date le
+  # 2026-08-30). La phrase de 2026-08-25 disait « en prod (le mode conteneur) » parce qu'a cette date le
   # POSTE etait pense comme une demo — « le poste/bench c'est pour la demo », meme arbitrage. Le
   # poste est un deploiement de TRAVAIL : la meme doctrine s'y applique, et le rail n'y pre-seme
   # plus rien. Il ne reste donc aucun compte dont l'absence serait un manquement.
@@ -662,30 +662,30 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
   [ ! -f "$BATS_TEST_TMPDIR/conv.env" ]
 }
 
-# ─── LA SONDE D'HUMAINS DU CHECK — LE TROU DE LA BOITE ──────────────────────────────────────────
+# ─── LA SONDE D'HUMAINS DU CHECK — LE TROU DU CONTENEUR ──────────────────────────────────────────
 #
 # ─── LA SONDE D'HUMAINS DU CHECK — ELLE DIT, ELLE NE COMPTE PAS ─────────────────────────────────
 #
-# ⚠ SUR UNE BOITE DE PRODUCTION, AUCUN MODULE NE VERIFIAIT QU'IL EXISTE UN HUMAIN. `22-fleet-human`
+# ⚠ SUR UN CONTENEUR DE PRODUCTION, AUCUN MODULE NE VERIFIAIT QU'IL EXISTE UN HUMAIN. `22-fleet-human`
 # et `48-forge-host` portent `CHECK-ON: wsl linux` : en docker ils ne sont meme pas SELECTIONNES.
 # Ce module-ci est `CHECK-ON: any` — le seul a tourner la-bas — et il sortait AVANT toute sonde des
-# l'absence de systemd. Un `provision doctor` sur une boite annoncait donc 0 faute pendant que
+# l'absence de systemd. Un `provision doctor` sur un conteneur annoncait donc 0 faute pendant que
 # GUARD B aurait refuse tout `fleet start`, faute de compte. La sonde a ete ajoutee pour ca.
 #
 # ⚠ ELLE A D'ABORD DERIVE, ET C'ETAIT L'ERREUR SYMETRIQUE (⚖ arbitrage user 2026-08-30). Aucun
 # deploiement de travail ne fabrique d'humain : le rail pose les AUTORITES, les personnes s'enrolent
 # par la page d'inscription de la forge. Zero humain est donc l'etat NOMINAL d'une machine neuve,
-# poste comme boite — pas une derive. Compte comme drift, il devenait un ECHEC de convergence sur
-# docker (D6, `apply:check`), donc une boite de production jamais convergee tant que personne ne
+# poste comme conteneur — pas une derive. Compte comme drift, il devenait un ECHEC de convergence sur
+# docker (D6, `apply:check`), donc un conteneur de production jamais converge tant que personne ne
 # s'inscrit. Le meme entrypoint publiait `provision.rc=1` a cote de `humans.rc=0`.
 #
 # Les deux temoins ci-dessous tiennent les DEUX moities : la sonde parle, et elle ne compte pas.
 
-@test "check SANS systemd sonde quand meme la population — le cas exact de la boite" {
-  # Le decor coupe systemd : c'est le chemin de la boite, et c'est celui ou la sonde manquait.
+@test "check SANS systemd sonde quand meme la population — le cas exact du conteneur" {
+  # Le decor coupe systemd : c'est le chemin du conteneur, et c'est celui ou la sonde manquait.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [[ "$output" == *"aucun humain de fleet sur cette machine"* ]]
   [[ "$output" == *"fleet start"* ]]
@@ -694,20 +694,20 @@ absent_de_l_env() { # absent_de_l_env <motif ancre>
 @test "check SANS systemd et SANS humain : la sonde DIT l'absence sans la compter comme derive" {
   # ⚠ LES DEUX ASSERTIONS SONT LOAD-BEARING, ET ELLES DISENT DES CHOSES OPPOSEES. Le `grep` interdit
   # qu'on rende la sonde muette « puisqu'elle ne derive plus » — ce serait revenir au trou d'avant.
-  # Le `status -eq 0` interdit qu'on la remette en drift — ce serait re-condamner toute boite neuve.
+  # Le `status -eq 0` interdit qu'on la remette en drift — ce serait re-condamner tout conteneur neuf.
   # Une regression d'un cote OU de l'autre rougit ici.
   humans_are
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^WARN .*aucun humain de fleet sur cette machine'
 }
 
-# LE DECOR DE LA MECANIQUE DE BOITE — sans systemd, le module ne verifie plus des unites mais
+# LE DECOR DE LA MECANIQUE DE CONTENEUR — sans systemd, le module ne verifie plus des unites mais
 # `supervise.sh` et les programmes que nomme STARTERS. Un temoin qui mesure AUTRE CHOSE doit les
 # poser, sinon il derive sur une cause etrangere a son sujet et son echec accuse la mauvaise ligne.
-box_services_present() {
+container_services_present() {
   local d="$BATS_TEST_TMPDIR/helpers" p
   mkdir -p "$d"
   for p in supervise.sh console-landing.sh human-converger.sh catalogue-executor.py privileged-executor.py; do
@@ -719,10 +719,10 @@ box_services_present() {
 
 @test "check SANS systemd et AVEC un humain : la sonde le nomme et ne derive pas" {
   # ⚠ LE PENDANT, ET SANS LUI LA SONDE POURRAIT DERIVER TOUJOURS. Elle sort avant la branche
-  # systemd : si elle rougissait sur une machine saine, tout doctor de boite deviendrait rouge.
+  # systemd : si elle rougissait sur une machine saine, tout doctor de conteneur deviendrait rouge.
   humans_are 'lcars:x:1001:1001::/home/lcars:/bin/bash'
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
-  box_services_present
+  container_services_present
   mod check
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qE '^OK .*humain\(s\) de fleet sur cette machine : lcars'
@@ -797,11 +797,11 @@ box_services_present() {
 
 # ─── LE SUBSTRAT CHOISIT LA MECANIQUE, PAS L'ABSENCE DE SYSTEMD ─────────────────────────────────
 
-@test "WSL sans systemd ACTIF : on ne cherche pas un superviseur de boite" {
+@test "WSL sans systemd ACTIF : on ne cherche pas un superviseur de conteneur" {
   # ⚠ CE CAS EST LE PREMIER APPLY DE TOUT POSTE WSL, ET AUCUN TEMOIN NE LE COUVRAIT. `30-wsl` pose
   # `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown` : a cet
   # instant `/run/systemd/system` n'existe pas encore. Une branche conditionnee a la seule absence
-  # de systemd envoyait donc un POSTE chercher `supervise.sh` — la mecanique de la BOITE, qui n'est
+  # de systemd envoyait donc un POSTE chercher `supervise.sh` — la mecanique du CONTENEUR, qui n'est
   # pas la — et deriver sur son absence.
   #
   # Regression introduite et attrapee le meme jour (2026-08-30), en changeant `have_systemd` pour le
@@ -815,7 +815,7 @@ box_services_present() {
 }
 
 @test "TEMOIN DU TEMOIN : sur DOCKER, c'est bien le superviseur qu'on regarde" {
-  # Sans lui, rendre la branche boite inatteignable passerait le temoin ci-dessus.
+  # Sans lui, rendre la branche conteneur inatteignable passerait le temoin ci-dessus.
   export LCARS_SYSTEMCTL="$BATS_TEST_TMPDIR/bin/pas-de-systemctl"
   PROV_SUBSTRATE=docker mod check
   [[ "$output" == *"superviseur"* ]]

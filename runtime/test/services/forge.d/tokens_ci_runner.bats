@@ -4,11 +4,11 @@
 # STARDATE: 2026-08-22
 # STATUS: bats tests for 63-forge-tokens — la sonde du runner CI, et sa distinction entre ZERO et INCONNU
 #
-# POURQUOI CE FICHIER. Une boite peut sortir sans aucun runner CI. La fleet accepte alors un ticket,
+# POURQUOI CE FICHIER. Un conteneur peut sortir sans aucun runner CI. La fleet accepte alors un ticket,
 # depense un producteur, ouvre une PR, et la CI attend une machine qui n'existe pas. MESURE DU
 # 2026-08-22 sur une forge de deux heures : sept courses `queued`, aucune demarree, zero runner aux
 # trois portees (depot, org, instance) — et pas une ligne pour le dire. L'operateur l'a appris par un
-# ticket bloque, pas par sa boite.
+# ticket bloque, pas par son conteneur.
 #
 # ⚖ L'ARBITRAGE DU 2026-07-30 TIENT : le runner est un sidecar compose, PAS un module. Cette sonde ne
 # le rouvre pas — elle ne pose rien. Elle MESURE une precondition d'instance, exactement comme les
@@ -134,7 +134,7 @@ EOF
 }
 
 @test "jeton master ABSENT -> non sondable, et ce n'est pas un echec" {
-  # Une boite sans ce jeton FONCTIONNE — c'est deja la nuance que porte `check_master_authority`
+  # Un conteneur sans ce jeton FONCTIONNE — c'est deja la nuance que porte `check_master_authority`
   # (`p_warn` et pas `p_drift`). Une sonde qui exigerait le jeton transformerait un deploiement
   # legitime en drift permanent.
   rm -f "$LCARS_MASTER_TOKEN_FILE"

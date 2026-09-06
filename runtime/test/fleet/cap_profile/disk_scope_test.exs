@@ -44,7 +44,7 @@ defmodule Fleet.CapProfile.DiskScopeTest do
     cat_b = seed_catalogue(Path.join(tmp, "installed"), "bbb", "role-b")
 
     # `aaa` par la grosse molette (la tete de `installed_roots/0`), `bbb` par le cache installe —
-    # la forme exacte d'une boite a deux catalogues.
+    # la forme exacte d'un conteneur a deux catalogues.
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_root, cat_a)
 
     Fleet.TestEnv.put_env_restoring(:lcars_fleet, :catalogue_install_dirs, [

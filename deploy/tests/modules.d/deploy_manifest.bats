@@ -44,6 +44,9 @@ EOF
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/linkdir"
   export PROVISION_LIB="$ROOT/deploy/lib/provision-lib.sh"
   export PROVISION_MODULE=60-deploy
+  # Le CANAL est a nous : ce decor EXECUTE 60-deploy, dont le dispatch lit /etc/lcars/channel.
+  # Absent = « aucun », le module mesure comme aujourd'hui (MUR I21).
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
 
   # a "deployed" prefix: release marker + every manifest entry posed correctly
   mkdir -p "$PROV_PREFIX/rel/lcars_fleet/bin" "$PROV_PREFIX/bin" "$PROV_LINK_DIR"
@@ -168,7 +171,7 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
   PKG="$BATS_TEST_DIRNAME/../../modules.d/10-packages.sh"
   MOD="$BATS_TEST_DIRNAME/../../modules.d/60-deploy.sh"
 
-  # Le stage RUNTIME seul : celui qui decrit la boite livree, pas l'atelier de build.
+  # Le stage RUNTIME seul : celui qui decrit le conteneur livre, pas l'atelier de build.
   local image
   image="$(sed -n '/^FROM ${RUNTIME_IMAGE} AS runtime/,/^COPY --from=build/p' "$DOCKERFILE" \
     | sed -n '/apt-get install/,/rm -rf \/var\/lib\/apt/p' \
@@ -178,14 +181,20 @@ native_list() { # native_list <NOM_DU_TABLEAU> <fichier> — le contenu, comment
     | sort -u)"
   [ -n "$image" ]
 
-  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") "
+  # BUILD_PACKAGES en fait partie : le socle de compilation vit sur un poste SOURCE et dans l'image —
+  # « le magasin d'outillage qui absorbe extensions C, node-gyp, crates -sys reste docker »
+  # (cible.md § 6) — mais pas sur un poste installe par kit ou par paquet (lot 3b, 2026-09-05).
+  local native; native=" $(native_list 'PACKAGES' "$PKG") $(native_list 'BUILD_PACKAGES' "$PKG") $(native_list 'LINUX_PACKAGES' "$PKG") "
 
   # Ce que l'image seule a le droit de porter, et POURQUOI :
   #   tini            — PID 1 d'un conteneur. Sur une machine, c'est systemd, et il est deja la.
-  #   openssh-server  — la porte d'admin de la BOITE. Sur un poste, l'acces reseau appartient a son
+  #   openssh-server  — la porte d'admin du CONTENEUR. Sur un poste, l'acces reseau appartient a son
   #                     proprietaire : l'operateur est deja connecte quand ce rail tourne, et lui
   #                     ouvrir un sshd serait decider de son exposition a sa place.
-  local exempt=" tini openssh-server "
+  #   less, bash-completion — le confort de qui vit DANS le conteneur (une console, un shell) ;
+  #                     sur un poste ils sont « absents par decision » (cible.md § 6) : le socle du
+  #                     paquet lcars est le strict necessaire, et 10-packages EST ce Depends.
+  local exempt=" tini openssh-server less bash-completion "
 
   local miss=""
   for p in $image; do

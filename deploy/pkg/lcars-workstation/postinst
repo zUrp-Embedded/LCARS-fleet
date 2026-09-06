@@ -1,0 +1,107 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-workstation/postinst
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-workstation` configure : `provision apply` des modules
+#         du rail POSTE. La forge est montee (lcars-forge : 48 49) ou FOURNIE (FORGE_BASE_URL).
+#
+# dpkg l'appelle : postinst configure [ancienne-version]
+#
+# ⚠ `lcars-forge` SE SONDE PAR SON ETAT DPKG, PAS PAR SES FICHIERS, et « en cours d'installation »
+# compte comme present : dans un `apt install lcars-demo`, dpkg depaquete TOUT puis configure dans
+# un ordre que ce script ne choisit pas — lcars-workstation peut passer avant lcars-forge. Un
+# paquet voulu (`Status-Want = install`) a ses fichiers sur le disque ; 48 et 49 se jouent, et le
+# postinst de lcars-forge les rejouera, idempotents.
+#
+# Sans lcars-forge, le rail CONSOMME une forge : `FORGE_BASE_URL` dans l'environnement, ou dans
+# /etc/lcars/forge.conf (un fichier de l'administrateur, `NOM=valeur`, jamais pose par un paquet).
+# Sans l'un ni l'autre, ce script REFUSE et nomme le remede — 61, 63, 65, 66 echoueraient sur une
+# forge introuvable, module par module, ce qui est le meme refus en moins lisible.
+set -euo pipefail
+
+# ⚠ SOUS APT, LE PATH DES MAINTAINER SCRIPTS EST `DPkg::Path` = /usr/sbin:/usr/bin:/sbin:/bin — SANS
+# /usr/local/bin. Mesure 2004 (2026-09-05) : `tofu init` rc 127 dans le postinst alors que
+# /usr/local/bin/tofu venait d'etre pose par lcars-tofu. Le provisionnement nomme ses outils par leur
+# chemin (TOFU_BIN, LCARS_CLI…) ; ce prefixe est la ceinture pour ce qu'il appelle encore par le nom.
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+# LA CONF DE L'ADMINISTRATEUR : un paquet ne pose pas de question, il lit un fichier — /etc/lcars/
+# provision.conf, `NOM=valeur` par ligne, jamais pose par un paquet, seules les clefs PROV_* entrent
+# (le port du deck sur un banc dont le reseau est partage, le port de la forge du poste…).
+PROVISION_CONF="${LCARS_PROVISION_CONF:-/etc/lcars/provision.conf}"
+if [[ -r "$PROVISION_CONF" ]]; then
+  while IFS= read -r _l; do
+    [[ "$_l" =~ ^(PROV_[A-Z0-9_]+)=([[:alnum:][:punct:]]*)$ ]] || continue
+    [[ "${BASH_REMATCH[2]}" == *[\`\$\;\|\&]* ]] && continue
+    export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+  done < "$PROVISION_CONF"
+fi
+
+say() { echo "lcars-workstation/postinst: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
+CHANNEL_FILE="${LCARS_CHANNEL_FILE:-/etc/lcars/channel}"
+FORGE_CONF="${LCARS_FORGE_CONF:-/etc/lcars/forge.conf}"
+DPKG_QUERY="${LCARS_DPKG_QUERY:-dpkg-query}"
+RAIL=(44 45 46 60 61 62 63 64 65 66)
+FORGE_MODS=(48 49)
+
+case "${1:-}" in
+  configure) ;;
+  *) exit 0 ;;
+esac
+
+[[ -x "$PROVISION" ]] || { say "provisionnement introuvable ($PROVISION) — lcars est-il configure ?"; exit 1; }
+[[ -r "$LIB" ]]       || { say "lib introuvable ($LIB)"; exit 1; }
+[[ "$(head -n1 "$CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]')" == "deb" ]] \
+  || { say "REFUS — le canal n'est pas « deb » ($CHANNEL_FILE) : lcars n'est pas configure. « sudo dpkg --configure lcars » d'abord"; exit 1; }
+
+seat="${SUDO_USER:-}"
+if [[ -z "$seat" || "$seat" == root ]] && [[ -n "${LCARS_SYSADMIN_UID:-}" ]]; then
+  seat="$(getent passwd "$LCARS_SYSADMIN_UID" 2>/dev/null | cut -d: -f1 || true)"
+fi
+if [[ -z "$seat" || "$seat" == root ]]; then
+  say "REFUS — aucun siege : ni SUDO_USER, ni LCARS_SYSADMIN_UID. « sudo apt install … » le porte ; ou"
+  say "  « sudo env LCARS_SYSADMIN_UID=<uid> dpkg --configure lcars-workstation »."
+  exit 1
+fi
+export LCARS_SYSADMIN_UID; LCARS_SYSADMIN_UID="$(id -u -- "$seat")"
+
+sub="$(bash -c '. "$1"; detect_substrate' _ "$LIB")"
+[[ "$sub" != docker ]] || { say "REFUS — pas dans une image : le rail natif se joue sur un poste"; exit 1; }
+
+# ─── la forge : montee ici, ou fournie ───
+forge_want="$("$DPKG_QUERY" -W -f '${db:Status-Want}' lcars-forge 2>/dev/null || true)"
+mods=("${RAIL[@]}")
+if [[ "$forge_want" == "install" ]]; then
+  mods+=("${FORGE_MODS[@]}")
+  say "lcars-forge est la (dpkg : $forge_want) — la forge est MONTEE ici : ${FORGE_MODS[*]} rejoints au rail"
+else
+  if [[ -z "${FORGE_BASE_URL:-}" && -r "$FORGE_CONF" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$FORGE_CONF"
+    set +a
+  fi
+  if [[ -z "${FORGE_BASE_URL:-}" ]]; then
+    say "REFUS — aucune forge : lcars-forge n'est pas installe, et FORGE_BASE_URL n'est ni dans l'environnement"
+    say "  ni dans $FORGE_CONF. Un poste de travail CONSOMME une forge ou la MONTE :"
+    say "    · monter : « sudo apt install lcars-forge » (puis « sudo dpkg --configure lcars-workstation »)"
+    say "    · consommer : « echo FORGE_BASE_URL=https://forge.exemple > $FORGE_CONF » puis « sudo dpkg --configure lcars-workstation »"
+    exit 1
+  fi
+  export FORGE_BASE_URL
+  say "forge FOURNIE : $FORGE_BASE_URL — 48 et 49 ne se jouent pas"
+fi
+
+export LCARS_ALLOW_ANY_HOST=1
+mapfile -t mods < <(printf '%s\n' "${mods[@]}" | sort)
+only=(); for m in "${mods[@]}"; do only+=(--only "$m"); done
+say "provision apply --substrate $sub --human $seat --only ${mods[*]}"
+rc=0
+"$PROVISION" apply --substrate "$sub" --human "$seat" "${only[@]}" || rc=$?
+case "$rc" in
+  0) say "rail natif converge — « provision doctor » pour relire" ;;
+  2) say "rail natif applique, drift residuel — « provision doctor » le nomme ; ce n'est pas un echec" ;;
+  *) say "ECHEC du rail (rc=$rc) — relis la sortie ci-dessus ; « sudo dpkg --configure lcars-workstation » rejoue"; exit 1 ;;
+esac
+exit 0

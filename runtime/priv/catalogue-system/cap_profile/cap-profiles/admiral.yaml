@@ -23,19 +23,19 @@
 kind: CapabilityProfile
 metadata:
   name: admiral
-  # vitrine: Votre poste | Le seul pod hors du bac à sable, sous votre uid — votre siège dans la boîte, obtenu à la main, jamais dispatché comme un agent.
+  # vitrine: Votre poste | Le seul pod hors du bac à sable, sous votre uid — votre siège dans le conteneur, obtenu à la main, jamais dispatché comme un agent.
   containment: none
   # Champ requis par le schema ; pour un pod hors sandbox il DOCUMENTE, il ne confine pas — le
   # mur d'egress est un objet bwrap (socket -> socat -> proxy), et ce pod n'en a aucun. `egress`
   # dit l'intention vraie : cet agent atteint la forge et le monde directement.
   network: egress
   # Pas de compte forge de ROLE : les lectures de son skill `system-issues` passent par le JETON
-  # SYSTEME de la boite (0640 root:fleet) sur deux points d'entree PUBLICS du depot ops. Aucune
+  # SYSTEME du conteneur (0640 root:fleet) sur deux points d'entree PUBLICS du depot ops. Aucune
   # n'est site-admin, donc aucune n'a besoin d'une autorite — et ce siege n'en detient aucune : la
   # seule autorite est le drapeau `is_admin` de la forge, demande a l'instant d'un geste qui en
   # exige une. Meme asymetrie declaree que starfleet, meme champ.
   forge_identity: false
-  # Hors sandbox : AUCUN mount a declarer — bwrap n'existe pas ici, le pod voit la boite.
+  # Hors sandbox : AUCUN mount a declarer — bwrap n'existe pas ici, le pod voit le conteneur.
   mounts: []
 spec:
   capabilities: []
@@ -63,7 +63,7 @@ spec:
       - tool_search_python
       - tool_search_bash
     # La baseline universelle (`baseline/git-denied.yaml`) porte les patterns destructifs ; rien
-    # de plus ici — on ne protege pas la boite contre son admin (modele de menace, `01` §2).
+    # de plus ici — on ne protege pas le conteneur contre son admin (modele de menace, `01` §2).
     git_ops_denied: []
   knowledge:
     # Le skill `system-issues` N'EST PAS ICI, et c'est le dessin (`05` §7) : il vit dans le

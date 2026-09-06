@@ -29,7 +29,7 @@ defmodule Fleet.Spawner.Pod.EgressTest do
   # PID-SUFFIXED, and the two candidate keys were both tried in parallel branches — this records
   # why the pid won, so nobody "improves" it back.
   #
-  # A CONSTANT `/tmp` path belongs to whoever created it first: on a shared box the next runner
+  # A CONSTANT `/tmp` path belongs to whoever created it first: on a shared container the next runner
   # dies on `:eacces`, with a message that accuses the socket instead of naming the directory's
   # owner (measured 2026-08-18: 3 reds with nothing to do with the code under test).
   #

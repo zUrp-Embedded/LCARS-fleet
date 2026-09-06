@@ -2,7 +2,7 @@ defmodule Fleet.Toolchain do
   use Boundary, deps: [Fleet.Labels], exports: []
 
   @moduledoc """
-  A blocked pod asks for a tool the box does not have — and the ask becomes a DIFF a human signs.
+  A blocked pod asks for a tool the container does not have — and the ask becomes a DIFF a human signs.
 
   ## Why the pod never writes the declaration
 
@@ -13,7 +13,7 @@ defmodule Fleet.Toolchain do
   composed, never prose the pod authored.
 
   Two fields are the exception and they are load-bearing in opposite directions: `evidence` is
-  free text read BY THE HUMAN and by nothing else, and `ecosystem` is the key the box converges on.
+  free text read BY THE HUMAN and by nothing else, and `ecosystem` is the key the container converges on.
   Everything between them is a closed enum, a pattern, or a list of patterns.
 
   ## What it produces
@@ -32,7 +32,7 @@ defmodule Fleet.Toolchain do
 
   ## The form is exclusive, and that is not tidiness
 
-  `apt`, `installer` and `sysroot` do different things to different places — the box's `/usr`, an
+  `apt`, `installer` and `sysroot` do different things to different places — the container's `/usr`, an
   SDK tree under the store, a target sysroot. A request carrying two of them would make the human
   approve one diff for two effects, and the executor pick an order nobody declared.
   """
@@ -62,7 +62,7 @@ defmodule Fleet.Toolchain do
     [
       "# Généré par le rail toolchain — NE PAS ÉDITER À LA MAIN.",
       "# Ce que tu approuves en mergeant : le convergeur appliquera EXACTEMENT ce document,",
-      "# au SHA de ce merge, sur toutes les boîtes qui suivent cette branche.",
+      "# au SHA de ce merge, sur tous les conteneurs qui suivent cette branche.",
       "kind: ecosystem_enable",
       "ecosystem: #{yaml_scalar(req["ecosystem"])}",
       form_block(req),
@@ -156,7 +156,7 @@ defmodule Fleet.Toolchain do
 
   ⚠ CETTE FONCTION EST LA SOURCE UNIQUE DU NOM, ET C'EST POUR ÇA QU'ELLE NE LIT PLUS DE CONFIG.
   Quatre composants doivent s'accorder sur ce nom : le module de provisioning qui crée la branche,
-  le geste qui pose sa protection, la skill qui relève la boîte, et ce domaine qui lit son head.
+  le geste qui pose sa protection, la skill qui relève le conteneur, et ce domaine qui lit son head.
   Trois vivent en shell, un dans le BEAM — ils ne peuvent pas partager un littéral, donc le nom est
   déclaré ICI et recopié là-bas, et le contrat `toolchain.branch_single_source` de
   `mix lcars.contracts.check` refuse toute divergence. Un littéral vérifié vaut une source unique ;

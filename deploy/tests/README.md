@@ -17,7 +17,7 @@ déduite d'un tiret bas.
 Quand une cible porte plusieurs témoins, le nom du fichier est `<cible>_<sujet>` : `docker/bench/`
 a `docker/bench_down_scope.bats`, `bench_runner_labels.bats` et `bench_swap_creds.bats`. Un témoin
 suit sa cible quand elle change de logiciel : ceux de `63-forge-tokens` et de l'entrypoint (devenu
-`runtime/services/box/boot.sh`) sont partis dans `runtime/test/services/` au lot 6, et l'appelant
+`runtime/services/container/boot.sh`) sont partis dans `runtime/test/services/` au lot 6, et l'appelant
 mince qui reste n'a pas de témoin propre.
 
 Joué par `deploy/gate.sh`, la porte de l'installeur (⚖ user 2026-09-04, Q4 : « chacun joue son

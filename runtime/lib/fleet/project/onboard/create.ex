@@ -285,9 +285,9 @@ defmodule Fleet.Project.Onboard.Create do
   # ─── UNE SEULE SOURCE : LE CATALOGUE SUR DISQUE ─────────────────────────────────────────────────
   #
   # ⚖ user. PAS de `generate_repo` — la fonction « template » de Gitea, qui recopie un depot
-  # `<catalogue>/project-template` pousse par la boite. Un tel depot est une COPIE du catalogue, et
+  # `<catalogue>/project-template` pousse par le conteneur. Un tel depot est une COPIE du catalogue, et
   # une copie derive : mesure, un banc portait un workflow sur les deux, sans que rien ne le dise,
-  # parce qu'un `sync` ne se joue qu'a la naissance de la boite.
+  # parce qu'un `sync` ne se joue qu'a la naissance du conteneur.
   #
   # POURQUOI PAS « GARDER GITEA ET NE COPIER QU'UNE PARTIE » : `GenerateRepoOption` (swagger de la
   # forge, mesure) n'a AUCUN champ de chemin — `git_content` est un booleen, tout ou rien. Gitea ne

@@ -44,7 +44,7 @@ defmodule Fleet.Credentials.RoleTokenTest do
 
   # ⚠ LE FICHIER VIDE NE SE DISTINGUE PLUS DU FICHIER ABSENT, ET C'EST DELIBERE DU COTE SERVICE.
   # Les deux rendent `no_role_token` : ils ont le meme remede (« provision apply le minte ») et le
-  # meme effet (aucun jeton). Ce qui DOIT rester distinct est ailleurs — une forge muette, une boite
+  # meme effet (aucun jeton). Ce qui DOIT rester distinct est ailleurs — une forge muette, un conteneur
   # sans autorite — parce que ces causes-la ont des remedes opposes. Le temoin garde donc le point
   # qui compte : un fichier vide ne rend JAMAIS une chaine vide qu'un appelant prendrait pour un
   # jeton, et la forge le refuserait en 401 loin d'ici.
@@ -74,7 +74,7 @@ defmodule Fleet.Credentials.RoleTokenTest do
   # defendait ; elle s'applique maintenant a l'autre bout de la socket.
 
   describe "la cause remonte, elle ne se fond pas" do
-    # ⚠ SANS CE TEMOIN, LE CHANTIER PERD SA PROPRIETE CENTRALE. Une forge muette et une boite sans
+    # ⚠ SANS CE TEMOIN, LE CHANTIER PERD SA PROPRIETE CENTRALE. Une forge muette et un conteneur sans
     # jeton ont des remedes OPPOSES : la premiere se reessaie telle quelle, la seconde demande un
     # geste d'admin. Les fondre en « pas de jeton » enverrait la moitie des cas au mauvais geste, et
     # le journal ne permettrait plus de les separer apres coup.

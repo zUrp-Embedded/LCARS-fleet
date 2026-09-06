@@ -236,7 +236,7 @@ defmodule Fleet.CapProfile.Catalog do
     # THE catalogue in hand plus the system half — never the union of every installed catalogue.
     # The zero-arity's one production caller names its target through the big wheel
     # (`:catalogue_root`) before calling, so `disk_scope(nil)` resolves to that root + system, which
-    # is exactly the split its accounts are derived from. On the UNION, a box with a second
+    # is exactly the split its accounts are derived from. On the UNION, a container with a second
     # catalogue installed folds B's roles into A's roster at install time — and the login projection
     # prefixes with the TARGET org, so the recipe mints `A_<role-of-B>` accounts that belong to
     # nobody. Latent only because the install's first pass runs before the cache holds a neighbour.

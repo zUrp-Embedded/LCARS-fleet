@@ -108,7 +108,7 @@ def candidate_files():
                 p = os.path.join(dirpath, fn)
                 if p in seen:
                     continue
-                if not (fn.endswith(".sh") or fn in ("fleet", "lcars", "box", "provision", "accept", "workstation")):
+                if not (fn.endswith(".sh") or fn in ("fleet", "lcars", "container", "provision", "accept", "workstation")):
                     continue
                 seen.add(p)
                 yield p
@@ -179,7 +179,7 @@ def readmes(path):
 #
 # Deux formes admises, et rien d'autre :
 #   1. LIGNE DE SYNOPSIS — la commande est le PREMIER token de la ligne (apres un `#`, des espaces,
-#      ou le nom du script / `$PROG` / `$0`). C'est la forme de `box` et de `lcars`.
+#      ou le nom du script / `$PROG` / `$0`). C'est la forme de `container` et de `lcars`.
 #   2. DOS DE CITATION — la commande est dans un `code span`. C'est la forme de `fleet` dans son
 #      bandeau (`` `fleet forge <n>` ``) et du protocole des modules (`` `<module> check|apply` ``).
 #   3. ALTERNANCE — la commande est un membre d'un `{start|stop|status}`. C'est la forme de l'usage

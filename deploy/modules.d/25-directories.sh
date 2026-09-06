@@ -27,10 +27,10 @@ prov_console_human() {
 
 prov_runtime_dirs() {
   # ⚠ RIEN SUR DOCKER, ET C'EST LA TABLE QUI LE DIT, PAS UN DRIFT. /run est un tmpfs : VIDE au build
-  # de l'image, pose par `runtime/services/box/init.sh` au boot de l'instance — un fait de BOOT, pas
-  # de l'image. Et sans systemd dans la boite, aucune declaration tmpfiles n'y a de sens. Une table
-  # vide est exactement ce que `check_tmpfiles` lit comme « ce substrat ne le porte pas ». Sur la
-  # boite, le stage `verify` joue ce module AU BUILD (lot 14) : ces six entrees y rendraient six
+  # de l'image, pose par `runtime/services/container/init.sh` au boot de l'instance — un fait de BOOT, pas
+  # de l'image. Et sans systemd dans le conteneur, aucune declaration tmpfiles n'y a de sens. Une table
+  # vide est exactement ce que `check_tmpfiles` lit comme « ce substrat ne le porte pas ». Sur le
+  # conteneur, le stage `verify` joue ce module AU BUILD (lot 14) : ces six entrees y rendraient six
   # absents, et la sonde de l'humain integre interrogerait une forge qui n'existe pas encore.
   # Le substrat est celui que le runner a tranche (`provision --substrate`, exporte) ; la sonde
   # n'est qu'un repli — meme regle que `advertise_addr` dans la lib.
@@ -109,13 +109,13 @@ prov_dirs() {
 # Sur docker, ou le stage `verify` joue ce module au BUILD de l'image, deux familles d'entrees
 # n'ont aucune verite :
 #   substrate  le manifeste ne la declare pas pour docker (`prefix`, `/opt/lcars/var/tofu`) ;
-#   volume     elle vit sur un VOLUME de la boite — `/home`, `/opt/lcars/var` (Dockerfile :
+#   volume     elle vit sur un VOLUME du conteneur — `/home`, `/opt/lcars/var` (Dockerfile :
 #              `VOLUME`) — que l'init de l'instance pose au boot, sur le volume monte. Au build
 #              rien n'est monte : la mesurer rendrait un absent qui n'en est pas.
 # Une entree que le manifeste NE CONNAIT PAS se mesure partout : au build, un absent NOMME vaut
 # mieux qu'un silence, et le remede est de la declarer. Sur un poste, rien ne change : toutes les
 # entrees de la table y sont declarees `any` ou `wsl+linux`, et il n'y a pas de volume.
-prov_box_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
+prov_container_volumes() { printf '%s\n' /home "$PROV_ROOT/var"; }
 
 # prov_dir_scope <chemin> -> here | substrate | volume
 prov_dir_scope() {
@@ -128,7 +128,7 @@ prov_dir_scope() {
   if [[ "$sub" == docker ]]; then
     while read -r v; do
       if [[ "$path" == "$v" || "$path" == "$v"/* ]]; then echo volume; return 0; fi
-    done < <(prov_box_volumes)
+    done < <(prov_container_volumes)
   fi
   echo here
 }
@@ -139,7 +139,7 @@ prov_dir_scope() {
 say_unmeasured() { # say_unmeasured <hors substrat> <sur volume>
   local sub; sub="${PROV_SUBSTRATE:-$(detect_substrate)}"
   if [[ -n "$1" ]]; then p_warn "hors substrat $sub selon le manifeste — non mesure :$1"; fi
-  if [[ -n "$2" ]]; then p_warn "sur un volume de la boite — pas de verite au build, l'init de l'instance les pose :$2"; fi
+  if [[ -n "$2" ]]; then p_warn "sur un volume du conteneur — pas de verite au build, l'init de l'instance les pose :$2"; fi
   return 0
 }
 

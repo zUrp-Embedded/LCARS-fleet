@@ -42,7 +42,7 @@
 #   en echec.
 
 # NOTE FOR SOURCE READERS: the header above is French because `usage()` renders it VERBATIM — it IS
-# the --help output, i.e. text the box says to its operator. Everything from here down is source
+# the --help output, i.e. text the container says to its operator. Everything from here down is source
 # prose and follows the English rule.
 #
 # ⚠ THE BLANK LINE ABOVE THIS NOTE IS LOAD-BEARING: `usage()` is `sed -n '2,/^$/p'`, so the range
@@ -75,7 +75,7 @@ SCOPES="write:repository,write:issue"
 #                       must not be able to administer the org.
 #   write:user          NOT `read:user`: the system account owns the deck's OAuth2 client, and
 #                       registering one is a `/user/` WRITE (`required=[write:user]` without it).
-#                       Without the scope the box has no front door at all.
+#                       Without the scope the container has no front door at all.
 #
 # Listing `read:user` too would be noise, not belt-and-braces: Gitea NORMALISES the pair and mints
 # `write:user` alone, which subsumes the read.

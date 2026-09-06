@@ -182,7 +182,7 @@ sock_dir_for() {
   }
 
   # Le parent est traversable par tous (--x) et listable par personne d'autre que root : il ne porte
-  # aucun secret, mais enumerer les humains de la boite n'a a servir personne.
+  # aucun secret, mais enumerer les humains du conteneur n'a a servir personne.
   install -d -m 0711 -o root -g root "$CONSOLE_SOCK_ROOT" || return 1
   install -d -m 2710 -o "$human" -g "$CONSOLE_GROUP" "$dir" || return 1
 
@@ -219,7 +219,7 @@ launch_one() {
   [[ -n "$home_dir" && -d "$home_dir" ]] || { echo "console.sh: home introuvable pour $human" >&2; return 1; }
 
   # SHELL, LU DANS PASSWD COMME LE HOME (champ 7, meme source que le champ 6 juste au-dessus).
-  # Un login-manager pose SHELL — sshd le fait. Sans lui ici, les deux portes de la boite (ssh,
+  # Un login-manager pose SHELL — sshd le fait. Sans lui ici, les deux portes du conteneur (ssh,
   # console web) ne rendent pas le meme environnement.
   login_shell="$(getent passwd "$human" | cut -d: -f7 || true)"
   [[ -n "$login_shell" && -x "$login_shell" ]] || login_shell=/bin/bash

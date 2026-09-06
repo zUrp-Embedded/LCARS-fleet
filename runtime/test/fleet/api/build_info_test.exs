@@ -3,12 +3,12 @@ defmodule Fleet.API.BuildInfoTest do
   The env fallback, and the three values it must REFUSE.
 
   A container build stage has no `.git` by construction, so `git rev-parse` fails there and the
-  release used to be stamped `sha: "unknown"` — measured 2026-08-07 from inside a bench box, whose
+  release used to be stamped `sha: "unknown"` — measured 2026-08-07 from inside a bench container, whose
   `fleet status` reported "build unknown ref= (source=release)". The fallback exists for that one
   path, and it is the ONLY way an image learns which code it runs.
 
   What these cases pin is the refusal side. `LCARS_GIT_SHA` is passed by a build ARG that DEFAULTS
-  to the string "unknown", so an operator who builds without the box rail hands the fallback a
+  to the string "unknown", so an operator who builds without the container rail hands the fallback a
   sentinel rather than a revision. Accepting it would stamp the release with a plausible-looking
   fact that means the opposite of one — worse than the empty answer it replaces.
   """

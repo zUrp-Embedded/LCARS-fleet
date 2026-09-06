@@ -91,7 +91,7 @@ reconverge depuis sa source. Il n'y a pas d'activation à côté — installé v
 le monde. Et il n'y a **jamais de mise à jour automatique** : rien ne bouge sans cette commande.
 
 `install` est réservé aux **admins**, et la porte est une capacité, pas un drapeau : le geste lit le
-jeton master de la boîte (`0600 root`). Déposer un catalogue, en revanche, n'est réservé à personne
+jeton master du conteneur (`0600 root`). Déposer un catalogue, en revanche, n'est réservé à personne
 — c'est un `git push` vers votre espace personnel sur la forge.
 
 `install` **refuse** un catalogue que `verify` ne passe pas, et il refuse **avant** de toucher la
@@ -133,7 +133,7 @@ capacité (§6), la carte d'atelier par la face de son producteur (§5).
 > c'est la leçon la plus rentable de cette page : **une consigne qui survit à ce qu'elle décrivait
 > coûte plus cher que son absence** — elle fait poser un geste inutile et tait le vrai mécanisme.
 
-Avant de démarrer quoi que ce soit — `lcars catalogue verify <nom>` depuis la boîte, ou, depuis le
+Avant de démarrer quoi que ce soit — `lcars catalogue verify <nom>` depuis le conteneur, ou, depuis le
 dépôt, sur un chemin quelconque :
 
 ```bash
@@ -324,7 +324,7 @@ votre métier ; vous ne choisissez pas votre mécanique. C'est aussi ce qui rend
 questions se posent séparément.
 
 **« Ne se remplacent pas » parle des FICHIERS.** Vous ne pouvez pas éditer le catalogue système :
-il part avec la boîte, personne n'y touche, et c'est ce qui fait qu'il contraint. Mais ce que le
+il part avec le conteneur, personne n'y touche, et c'est ce qui fait qu'il contraint. Mais ce que le
 runtime **lit** n'est pas un dossier, c'est un chemin de recherche : le vôtre d'abord, le sien
 ensuite. Un nom porté des deux côtés n'est donc pas un conflit — c'est une **surcharge**, et c'est
 le vôtre qui gagne.
@@ -427,7 +427,7 @@ Ce que le script **n'écrit pas** : la recette elle-même. Ce qu'un compte a le 
 une organisation, poser un hook serveur, les équipes — appartient au runtime. Votre catalogue nomme
 ses gens ; il ne décide pas de ce qu'être l'un d'eux permet.
 
-**Le catalogue de référence part quand même avec la boîte.** Ce qui est **livré** et ce qui est
+**Le catalogue de référence part quand même avec le conteneur.** Ce qui est **livré** et ce qui est
 **lu** sont deux questions distinctes : les deux catalogues coexistent dans l'image, et c'est la
 déclaration d'activité (§3) qui tranche — ou `LCARS_CATALOGUE_ROOT` si vous n'en faites tourner
 qu'un. Retirer la ligne `fleet` de la déclaration cesse de l'utiliser sans rien supprimer.

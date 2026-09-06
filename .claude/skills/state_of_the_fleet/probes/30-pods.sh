@@ -56,7 +56,7 @@ probe_live() {
   fi
 
   # Zero pods is a legitimate state (an idle fleet), NOT a fault — hence `operational` with the count
-  # in the evidence. Calling it `degraded` would make an idle box permanently red.
+  # in the evidence. Calling it `degraded` would make an idle container permanently red.
   emit "pods.live" "$PLANE" "operational" "hote-socket" "curl --unix-socket $SOCK http://localhost/api/pods" \
     "$n pod(s) vivant(s)" \
     "Un pod VIVANT n'est pas un pod qui travaille : cette sonde ne mesure pas le progres, seulement la presence."

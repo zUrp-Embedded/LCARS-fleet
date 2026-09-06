@@ -102,3 +102,89 @@ jobs:
           rev="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
           [ "$rev" = "$GIT_SHA" ] || { echo "REFUS : label revision ($rev) != ref buildée ($GIT_SHA)"; exit 1; }
           echo "publié : $IMAGE (revision $rev)"
+
+  # ─── LA VERSION : tar, .deb, porte — la Release de la forge et le registre Debian (lot 5) ────────
+  # LE MÊME pack.sh que sur le poste ; « qui appuie » est la seule différence. Le job porte la
+  # toolchain de gate.yml (BEAM épinglé par les planchers du provisionnement, bats, shellcheck, ruff)
+  # parce que pack.sh COMMENCE par le gate : une version qui n'a pas passé le gate n'existe pas. Il
+  # tourne à côté du job-image, pas après : les deux publient un objet différent du même tag, et
+  # chacun porte son immutabilité (ADR 012 — le job-image sur le paquet container, pack.sh sur la
+  # Release). Le jeton est un secret du runner (PACK_TOKEN : write:package + write:repository), lu
+  # dans l'environnement par pack.sh — jamais en argv, jamais imprimé.
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout de la ref
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Le verdict porte sur l'arbre annoncé — et le jeton est là
+        run: |
+          set -eu
+          got="$(git rev-parse HEAD)"
+          [ "$got" = "$GITHUB_SHA" ] || { echo "source: HEAD=$got attendu $GITHUB_SHA"; exit 1; }
+          [ -n "${{ secrets.PACK_TOKEN }}" ] || { echo 'REFUS : secrets.PACK_TOKEN absent (write:package + write:repository)'; exit 1; }
+          # le tag est celui de la ref : c'est lui que pack.sh lit (git describe --exact-match)
+          [ "$(git describe --tags --exact-match)" = "${GITHUB_REF_NAME}" ] || { echo "REFUS : HEAD ne porte pas le tag ${GITHUB_REF_NAME}"; exit 1; }
+
+      - name: Planchers de la toolchain (depuis le provisionnement)
+        id: toolchain
+        run: |
+          set -eu
+          lib=deploy/lib/provision-lib.sh
+          ex="$(sed -n 's/^: "${PROV_ELIXIR_MIN:=\([^}]*\)}".*/\1/p' "$lib")"
+          otp="$(sed -n 's/^: "${PROV_ELIXIR_OTP_MAJOR:=\([^}]*\)}".*/\1/p' "$lib")"
+          [ -n "$ex" ] && [ -n "$otp" ] || { echo "planchers illisibles dans $lib"; exit 1; }
+          echo "elixir=$ex" >> "$GITHUB_OUTPUT"
+          echo "otp=$otp"   >> "$GITHUB_OUTPUT"
+
+      - name: Environnement BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ steps.toolchain.outputs.elixir }}
+          otp-version: ${{ steps.toolchain.outputs.otp }}
+
+      - name: Bats (shell_gate)
+        uses: bats-core/bats-action@4.0.0
+
+      - name: ShellCheck, jq (shell_gate ; la release se décrit en JSON) et ruff (plancher python)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck jq
+          pip install --quiet --break-system-packages ruff
+
+      - name: Cache Mix
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/deps
+            runtime/_build
+          key: mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-${{ hashFiles('runtime/mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-${{ steps.toolchain.outputs.elixir }}-
+
+      - name: Deps
+        working-directory: runtime
+        run: mix deps.get
+
+      - name: pack.sh --publish (gate, release, tar, .deb, porte → Release + registre Debian)
+        env:
+          LCARS_PACK_TOKEN: ${{ secrets.PACK_TOKEN }}
+          LCARS_PACK_FORGE: ${{ github.server_url }}
+          LCARS_PACK_OWNER: ${{ github.repository_owner }}
+          LCARS_PACK_REPO: ${{ github.event.repository.name }}
+          LCARS_PACK_DIR: ${{ runner.temp }}/lcars-packs
+        run: timeout --signal=TERM --kill-after=60s 50m ./pack.sh --publish
+
+      - name: Preuve — la release du tag est sur la forge, publiée, avec sa porte
+        env:
+          PACK_TOKEN: ${{ secrets.PACK_TOKEN }}
+        run: |
+          set -eu
+          body="$(mktemp)"
+          code="$(printf 'header = "Authorization: token %s"\n' "$PACK_TOKEN" \
+                  | curl -sS -K - -m 10 -o "$body" -w '%{http_code}' "${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          [ "$code" = 200 ] || { echo "REFUS : pas de release ${GITHUB_REF_NAME} sur la forge (code $code)"; exit 1; }
+          [ "$(jq -r '.draft' "$body")" = false ] || { echo "REFUS : la release ${GITHUB_REF_NAME} est restée en brouillon"; exit 1; }
+          jq -r '.assets[].name' "$body" | grep -qx 'install.sh' || { echo "REFUS : la porte install.sh n'est pas parmi les assets"; exit 1; }
+          echo "publié : ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME} ($(jq '.assets | length' "$body") assets)"

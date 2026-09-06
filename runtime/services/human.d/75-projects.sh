@@ -55,7 +55,7 @@ render() { # <mode> ; lit les verdicts sur stdin
       RIEN)    p_ok "aucun projet declare dans les catalogues installes" ;;
       DEJA)    p_ok "$repo" ;;
       IMPORTE) p_chg "$repo — trois faces posees depuis la forge" ;;
-      MANQUE)  p_drift "$repo est sur la forge et absent de cette boite — « lcars project reconcile apply »" ;;
+      MANQUE)  p_drift "$repo est sur la forge et absent de ce conteneur — « lcars project reconcile apply »" ;;
       ECHEC)   p_fail "$repo : ${rest#— }" ;;
       *)       p_fail "verdict illisible de la porte reconcile ($mode) : $word $repo $rest" ;;
     esac
@@ -65,7 +65,7 @@ render() { # <mode> ; lit les verdicts sur stdin
 
 #
 # Deux absences, deux traitements. Sans forge il n'y a pas d'autorite a comparer : on le DIT et on
-# sort conforme — une boite hors ligne n'est pas une boite en derive. Sans release il n'y a pas de
+# sort conforme — un conteneur hors ligne n'est pas un conteneur en derive. Sans release il n'y a pas de
 # porte du tout, et `60-deploy` a deja drifte dessus : le redire en echec ici ferait deux alarmes
 # pour une panne.
 usable() {
@@ -76,7 +76,7 @@ usable() {
     return 1
   fi
   if [[ -z "$FORGE_BASE_URL" ]]; then
-    p_warn "FORGE_BASE_URL non posé — les projets de cette boite n'ont pas d'autorite a suivre"
+    p_warn "FORGE_BASE_URL non posé — les projets de ce conteneur n'ont pas d'autorite a suivre"
     return 1
   fi
   if [[ ! -x "$LCARS_CLI" ]]; then

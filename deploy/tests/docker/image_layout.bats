@@ -22,7 +22,7 @@ load ../refute
 
 setup() {
   DF="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
-  INIT="$BATS_TEST_DIRNAME/../../../runtime/services/box/init.sh"
+  INIT="$BATS_TEST_DIRNAME/../../../runtime/services/container/init.sh"
   MANIFEST="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$DF" ] && [ -f "$INIT" ] && [ -f "$MANIFEST" ]
   # Le stage runtime seul : c'est lui que `final` livre.
@@ -198,4 +198,12 @@ embedded_trees() { # les deux listes de 62, telles qu'il les porte
       || { echo "$dst : l'image ne fixe pas son mode ($mode) — un COPY nu garde le mode du contexte (664 sous umask 002)" >&2; return 1; }
   done < <(sed -n '/^DATA=(/,/^)/p' "$mod" | sed '1d;$d;s/#.*//' | tr -d '"' | awk 'NF')
   [ "$n" -ge 2 ] || { echo "seulement $n donnee(s) lue(s) dans DATA — l'extraction ne lit plus 62" >&2; return 1; }
+}
+
+@test "/etc/lcars/lcars.bashrc : un chmod 0644 suit le COPY — --chmod ne normalise pas un source en 664 (mesure vanille_1)" {
+  local l_copy l_chmod
+  l_copy="$(grep -nE '^COPY --chmod=0644 runtime/services/lcars.bashrc /etc/lcars/lcars.bashrc$' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
+  l_chmod="$(grep -nE '^RUN chmod 0644 /etc/lcars/lcars.bashrc$' <<<"$RUNTIME" | head -1 | cut -d: -f1)"
+  [ -n "$l_copy" ] && [ -n "$l_chmod" ] || { echo "COPY (l.${l_copy:-?}) ou chmod (l.${l_chmod:-?}) absent" >&2; return 1; }
+  [ "$l_copy" -lt "$l_chmod" ] || { echo "le chmod (l.$l_chmod) precede le COPY (l.$l_copy) — il serait ecrase" >&2; return 1; }
 }

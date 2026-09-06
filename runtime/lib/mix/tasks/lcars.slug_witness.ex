@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
   est notre prediction. Deux sources, une confrontation.
 
       mix lcars.slug_witness                 # sous le home de l'humain courant
-      mix lcars.slug_witness --root /home    # ailleurs (une boite, un banc)
+      mix lcars.slug_witness --root /home    # ailleurs (un conteneur, un banc)
 
   ## Ce qu'un vert signifie EXACTEMENT
 
@@ -78,7 +78,7 @@ defmodule Mix.Tasks.Lcars.SlugWitness do
         Mix.shell().error(
           "slug_witness: AUCUN TEMOIN sous #{root} — cette execution ne mesure RIEN. Le miroir " <>
             "n'est ni confirme ni contredit. Pointe --root sur un arbre ou des pods ont tourne " <>
-            "(le home d'un humain de fleet, ou les pod_dir rapatries d'une boite)."
+            "(le home d'un humain de fleet, ou les pod_dir rapatries d'un conteneur)."
         )
 
       exercising == 0 and disputed == [] ->

@@ -1,0 +1,103 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars/postinst
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars` configure : le CANAL d'abord, puis `provision apply`
+#         du socle. Il n'a aucune logique a lui : il nomme le siege, le substrat, et appelle.
+#
+# dpkg l'appelle : postinst configure [ancienne-version] · postinst abort-* (rien a faire)
+#
+# ─── L'ORDRE EST LE CONTRAT (lot 2) ─────────────────────────────────────────────────────────────
+# `/etc/lcars/channel` = `deb` s'ecrit AVANT `provision apply` : sous ce canal, 60-deploy,
+# 62-runtime-helpers, 44-media et 46-tofu MESURENT sans poser — les arbres sont a dpkg. Ecrit
+# apres, le premier apply reposerait par-dessus ce que dpkg vient de depaqueter.
+#
+# ─── LE SOCLE, ET POURQUOI 10-packages N'Y EST PAS ──────────────────────────────────────────────
+# 00 05 20 21 22 25 30 : preflight, consentement, groupes, comptes de service, humain de fleet,
+# repertoires, substrat WSL — ce qui ne depend d'aucun rail. `10-packages` est absent PAR
+# CONSTRUCTION : ses paquets sont le `Depends:` de ce .deb, apt les a poses ; et un `apt-get`
+# sous un postinst se heurte au verrou de dpkg qui l'execute. Sa sonde bwrap reste au doctor.
+#
+# ─── LE SIEGE ───────────────────────────────────────────────────────────────────────────────────
+# `provision` derive le siege de SUDO_USER, et retombe sur l'appelant — root, sous dpkg. Un
+# siege root reserverait l'uid 0 a GUARD B et poserait le skill d'admiral chez root. Ce script
+# REFUSE plutot : le remede est nomme, et « dpkg --configure lcars » rejoue apres. Ce n'est pas
+# une question (jamais de debconf) — c'est un refus avec sa sortie.
+#
+# ─── LE CONSENTEMENT ────────────────────────────────────────────────────────────────────────────
+# Sur un Linux natif, 00-preflight exige LCARS_ALLOW_ANY_HOST (« on ne lache pas ce rail sur une
+# machine dont on ne sait pas si c'est celle de quelqu'un »). « apt install » EST ce consentement :
+# l'operateur a choisi d'installer un paquet qui dit ce qu'il pose. 05 le rend durable.
+#
+# Codes : provision apply rend 0 (converge), 2 (applique, drift residuel — dit, pas un echec),
+#         1 ou 3 (echec — ce script echoue, dpkg le dit, « dpkg --configure lcars » rejoue).
+set -euo pipefail
+
+# ⚠ SOUS APT, LE PATH DES MAINTAINER SCRIPTS EST `DPkg::Path` = /usr/sbin:/usr/bin:/sbin:/bin — SANS
+# /usr/local/bin. Mesure 2004 (2026-09-05) : `tofu init` rc 127 dans le postinst alors que
+# /usr/local/bin/tofu venait d'etre pose par lcars-tofu. Le provisionnement nomme ses outils par leur
+# chemin (TOFU_BIN, LCARS_CLI…) ; ce prefixe est la ceinture pour ce qu'il appelle encore par le nom.
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+# LA CONF DE L'ADMINISTRATEUR : un paquet ne pose pas de question, il lit un fichier — /etc/lcars/
+# provision.conf, `NOM=valeur` par ligne, jamais pose par un paquet, seules les clefs PROV_* entrent
+# (le port du deck sur un banc dont le reseau est partage, le port de la forge du poste…).
+PROVISION_CONF="${LCARS_PROVISION_CONF:-/etc/lcars/provision.conf}"
+if [[ -r "$PROVISION_CONF" ]]; then
+  while IFS= read -r _l; do
+    [[ "$_l" =~ ^(PROV_[A-Z0-9_]+)=([[:alnum:][:punct:]]*)$ ]] || continue
+    [[ "${BASH_REMATCH[2]}" == *[\`\$\;\|\&]* ]] && continue
+    export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+  done < "$PROVISION_CONF"
+fi
+
+say() { echo "lcars/postinst: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
+CHANNEL_FILE="${LCARS_CHANNEL_FILE:-/etc/lcars/channel}"
+SOCLE=(00 05 20 21 22 25 30)
+
+case "${1:-}" in
+  configure) ;;
+  *) exit 0 ;;
+esac
+
+[[ -x "$PROVISION" ]] || { say "provisionnement introuvable ($PROVISION) — le paquet est-il depaquete ?"; exit 1; }
+[[ -r "$LIB" ]]       || { say "lib introuvable ($LIB)"; exit 1; }
+
+# ─── le siege ───
+seat="${SUDO_USER:-}"
+if [[ -z "$seat" || "$seat" == root ]] && [[ -n "${LCARS_SYSADMIN_UID:-}" ]]; then
+  seat="$(getent passwd "$LCARS_SYSADMIN_UID" 2>/dev/null | cut -d: -f1 || true)"
+fi
+if [[ -z "$seat" || "$seat" == root ]]; then
+  say "REFUS — aucun siege : ni SUDO_USER, ni LCARS_SYSADMIN_UID. Le siege est la personne qui installe ;"
+  say "  root n'en est pas une. Installe par « sudo apt install ./lcars_….deb » (SUDO_USER voyage), ou"
+  say "  « sudo env LCARS_SYSADMIN_UID=<uid> dpkg --configure lcars » pour rejouer cette configuration."
+  exit 1
+fi
+seat_uid="$(id -u -- "$seat")"
+export LCARS_SYSADMIN_UID="$seat_uid"
+
+# ─── le canal, AVANT tout apply ───
+install -d -m 0755 "$(dirname "$CHANNEL_FILE")"
+tmp="$(mktemp "$(dirname "$CHANNEL_FILE")/.channel.XXXXXX")"
+printf 'deb\n' > "$tmp"; chmod 0644 "$tmp"; mv -f "$tmp" "$CHANNEL_FILE"
+say "canal : deb ($CHANNEL_FILE) — 60/62/44/46 mesurent, dpkg possede les arbres"
+
+# ─── le substrat, sonde par la lib ───
+sub="$(bash -c '. "$1"; detect_substrate' _ "$LIB")"
+[[ "$sub" != docker ]] || { say "REFUS — ce paquet ne s'installe pas dans une image : le conteneur se batit par deploy/docker/Dockerfile"; exit 1; }
+
+# ─── le socle ───
+export LCARS_ALLOW_ANY_HOST=1
+only=(); for m in "${SOCLE[@]}"; do only+=(--only "$m"); done
+say "provision apply --substrate $sub --human $seat --only ${SOCLE[*]} (10-packages : le Depends du paquet, apt l'a pose)"
+rc=0
+"$PROVISION" apply --substrate "$sub" --human "$seat" "${only[@]}" || rc=$?
+case "$rc" in
+  0) say "socle converge" ;;
+  2) say "socle applique, drift residuel — « provision doctor » le nomme ; ce n'est pas un echec" ;;
+  *) say "ECHEC du socle (rc=$rc) — relis la sortie ci-dessus ; « sudo dpkg --configure lcars » rejoue une fois la cause levee"; exit 1 ;;
+esac
+say "lcars configure — le rail se choisit par lcars-workstation (natif) ou lcars-container (conteneur)"
+exit 0

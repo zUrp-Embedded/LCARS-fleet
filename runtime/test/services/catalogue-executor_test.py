@@ -246,7 +246,7 @@ check(verdict(r) == "FAIL:not_admin",
 check(mod.login_of(999321) is None,
       "pair inconnu: un uid sans compte unix ne rend aucun login")
 
-# ─── 7 ter. « CETTE BOITE N'A PAS D'AUTORITE » N'EST PAS « LA FORGE N'A PAS REPONDU » ────────────
+# ─── 7 ter. « CE CONTENEUR N'A PAS D'AUTORITE » N'EST PAS « LA FORGE N'A PAS REPONDU » ────────────
 #
 # ⚠ QUATRE ETATS TOMBAIENT DANS `forge_unreachable`, par DEUX chemins distincts : `OSError` (absent,
 # illisible) et `HTTPError`, qui derive de `URLError` (vide -> 401, revoque -> 401). L'operateur
@@ -331,7 +331,7 @@ if _m:
 
 # ─── 7 quater. `roles.sock` — LE GROUPE REMPLACE PAR UNE QUESTION ───────────────────────────────
 #
-# Le jeton d'un role etait lisible par TOUT humain de la boite (`0640 root:fleet`), et le groupe
+# Le jeton d'un role etait lisible par TOUT humain du conteneur (`0640 root:fleet`), et le groupe
 # etait peuple par le convergeur depuis l'equipe `humans` de la forge — donc une projection, avec sa
 # peremption. La question se pose maintenant a l'instant du geste.
 #
@@ -371,7 +371,7 @@ check(demande_role("role_qui_nexiste_pas") == "FAIL:no_role_token",
 
 # ⚠ VIDE N'EST PAS ABSENT, ET C'EST LE MEME MANQUE — trou trouve par mutation, pas par relecture :
 # retirer le garde du vide ne faisait rougir AUCUN temoin. Un fichier vide part sur le fil comme un
-# jeton, la forge rend 401 au premier usage, et la cause devient « la forge refuse » sur une boite
+# jeton, la forge rend 401 au premier usage, et la cause devient « la forge refuse » sur un conteneur
 # dont le provisionnement est incomplet.
 open(os.path.join(WORK, "role_vide.gitea_token"), "w").close()
 check(demande_role("role_vide") == "FAIL:no_role_token",
@@ -386,7 +386,7 @@ mod.FORGE_BASE_URL = _garde
 _tok = open(TOKEN).read()
 open(TOKEN, "w").close()
 check(demande_role("fleet_engineer") == "FAIL:no_authority",
-      "roles: sans autorite, la cause est celle de la BOITE, pas celle de l'appelant")
+      "roles: sans autorite, la cause est celle du CONTENEUR, pas celle de l'appelant")
 open(TOKEN, "w").write(_tok)
 
 # ─── 8. UN GESTE INTERROMPU N'EST PAS UN GESTE QUI ECHOUE ───────────────────────────────────────
@@ -508,8 +508,8 @@ check(_lu2 == "jeton-tourne",
       "memoire entre deux requetes (%r)" % _lu2)
 
 # ⚠ LA MOITIE QUI MANQUERAIT SANS CA : que le fichier redevienne ILLISIBLE doit se voir aussi. Un
-# cache rendrait l'ancienne valeur ici, et le service continuerait d'agir avec une autorite que la
-# boite n'a plus — le pire des deux mondes, puisque rien ne rougirait nulle part.
+# cache rendrait l'ancienne valeur ici, et le service continuerait d'agir avec une autorite que le
+# conteneur n'a plus — le pire des deux mondes, puisque rien ne rougirait nulle part.
 os.unlink(_cache_tok)
 try:
     mod.master_token()
@@ -538,7 +538,7 @@ mod.MASTER_TOKEN_FILE = _garde_mt
 # avec ce gid — le `chown` etait donc un no-op, et retirer le correctif ne faisait rougir personne.
 # Mesure : la mutation « bind() cesse de chowner son repertoire » passait VERTE.
 #
-# C'est exactement l'accident qui a masque le defaut sur la vraie boite : `/run/lcars/authority` y
+# C'est exactement l'accident qui a masque le defaut sur le vrai conteneur : `/run/lcars/authority` y
 # echappait parce que `lcars-authority` avait `fleet` en primaire, pendant que `/run/lcars/privileged`
 # — service root, primaire `root` — tombait. Un temoin qui reproduit l'accident ne mesure rien.
 #

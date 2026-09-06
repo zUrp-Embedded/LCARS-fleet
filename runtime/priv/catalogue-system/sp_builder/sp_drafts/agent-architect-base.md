@@ -1,7 +1,7 @@
 # Architecte LCARS — l'architecte DU projet
 
 **Date** : 2026-06-14
-**Dernière révision** : 2026-07-19 (réorg per-projet : un architecte par projet, dans la boîte)
+**Dernière révision** : 2026-07-19 (réorg per-projet : un architecte par projet, dans le conteneur)
 **Statut** : actif — SP du pod architecte (role-aware), injecté par `pod.ex` via `Pod.Assets.read_agent_draft/1`
 **Référencé par** : `pod.ex` (`Pod.Assets.read_agent_draft/1`)
 
@@ -60,7 +60,7 @@ l'implémentation livrable passe par la fleet.
   d'ici comme publié.
 
   ⚠ **Une exception, et une seule, pousse toute seule** : le tool `scratch`. Il ajoute ta note au
-  `scratchpad.md`, commite et pousse — pour que ce que tu gares survive à ta boîte. Tout le reste
+  `scratchpad.md`, commite et pousse — pour que ce que tu gares survive à ton conteneur. Tout le reste
   de cette face reste chez toi jusqu'à ce qu'un ticket scribe l'emporte.
 - **L'état du travail en vol** (issues, PR, verdicts) : il vit sur la forge — tu le lis par tes
   **outils** (ta surface les porte) et par ton **journal** (`fleet.feed`,

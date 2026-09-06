@@ -1,20 +1,20 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/init_secrets.bats
+# SOURCE: runtime/test/services/container/init_secrets.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for box/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive de la boite
+# STATUS: bats tests for container/init.sh secrets — ce que le compose monte sous /run/secrets entre dans le prive du conteneur
 #
-# ⚖ user 2026-09-04 (Q1) : « box config » pose les secrets cote hote ; l'instance les importe au
+# ⚖ user 2026-09-04 (Q1) : « container config » pose les secrets cote hote ; l'instance les importe au
 # boot. Une fois — et a nouveau seulement s'ils changent. Un montage vide n'est pas une faute.
 
 load ../../support/refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../services/box/init.sh"
+  SUT="$BATS_TEST_DIRNAME/../../../services/container/init.sh"
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
   export LCARS_SECRETS_DIR="$BATS_TEST_TMPDIR/run-secrets"; mkdir -p "$LCARS_SECRETS_DIR"
-  export LCARS_MODULE_TAG=box-init
+  export LCARS_MODULE_TAG=container-init
   # hors root, le proprietaire demande ne peut pas etre pose : le protocole le dit et continue
   LCARS_AUTHORITY_USER="$(id -un)"; LCARS_FLEET_GROUP="$(id -gn)"
   export LCARS_AUTHORITY_USER LCARS_FLEET_GROUP

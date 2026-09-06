@@ -1,0 +1,28 @@
+# SOURCE: deploy/pkg/lcars-forge.yaml
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: nFPM — `lcars-forge`, LA FORGE MONTEE ICI : forge-compose.yml, runner-compose.yml,
+#         forge-runner.sh (routes par gen-contents.sh) ; postinst = 48 49 61.
+name: lcars-forge
+arch: all
+platform: linux
+version: ${LCARS_VERSION}
+release: ${LCARS_DEB_RELEASE}
+section: admin
+priority: optional
+maintainer: LCARS fleet <fleet@lcars.local>
+homepage: https://github.com/lordzurp/LCARS-fleet
+description: |
+  LCARS - la forge du poste : Gitea et son runner CI par compose, la structure par tofu
+  postinst = provision apply --only 48 49 61 (monte la forge, enrole le runner, pose la
+  structure). apt remove arrete les conteneurs de la forge et du runner, VOLUMES GARDES (ils
+  portent les depots) ; apt purge retire aussi les volumes, et le dit.
+depends:
+  - lcars
+  - lcars-tofu
+  - docker.io (>= 26) | docker-ce | lcars-docker-desktop
+  - docker-compose-v2 | docker-compose-plugin
+scripts:
+  postinstall: ./lcars-forge/postinst
+  preremove: ./lcars-forge/prerm
+  postremove: ./lcars-forge/postrm

@@ -30,7 +30,7 @@ setup() {
   # ⚠ LE DECOR EST UNE RACINE DE MEDIAS, PLUS UN DOSSIER D'AVATARS NU. Les avatars ont eu trois
   # exemplaires (la marque, les png de ce script, les svg du deck) dont sept des neuf roles communs
   # avaient derive. Ils vivent maintenant sous une racine INSTALLEE, avec `favicon/` en frere — et le
-  # script lit cette racine, donc le decor doit avoir la meme forme que la boite.
+  # script lit cette racine, donc le decor doit avoir la meme forme que le conteneur.
   MEDIA="$BATS_TEST_TMPDIR/media"
   AVATARS="$MEDIA/avatars"
   mkdir -p "$BIN" "$AVATARS" "$MEDIA/favicon"
@@ -293,7 +293,7 @@ FAKE
 
 # ─── LE NOM DU SIEGE MASTER (2026-08-15) ─────────────────────────────────────────────────────────
 # Le master porte le nom de son SIEGE en `full_name`, pas celui d'une personne : ce compte n'est pas
-# une identite de travail (personne ne travaille sous root), et la boite le barre a tous les etages
+# une identite de travail (personne ne travaille sous root), et le conteneur le barre a tous les etages
 # — Guard B, `console-humans`, la porte admin du deck. Resolution : `--admiral` d'abord, sinon l'id 1
 # (le premier compte cree par Gitea, site-admin par construction).
 

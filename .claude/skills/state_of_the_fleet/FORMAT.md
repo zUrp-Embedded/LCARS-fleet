@@ -35,7 +35,7 @@ peut pas casser le format du rapport qui le cite.
 ## 2. Les cinq verdicts
 
 Le vocabulaire n'a pas été conçu, il a été **forcé** par deux spécimens : la première version sortait
-cinq lignes rouges décrivant un daemon que personne n'avait demandé à exister sur une boîte
+cinq lignes rouges décrivant un daemon que personne n'avait demandé à exister sur un conteneur
 parfaitement saine. Une fausse alarme déguisée en constat — la pire espèce, elle a l'air d'un
 diagnostic.
 
@@ -130,7 +130,7 @@ rendrait silencieusement toutes les capacités vertes.
    silence de sa cible.
 3. **Ne jamais conclure au-delà du `cannot_conclude`.**
 4. **Zéro n'est pas une panne.** Zéro pod, zéro projet, zéro événement : états légitimes d'une fleet
-   au repos ou d'une boîte neuve.
+   au repos ou d'un conteneur neuf.
 5. **Une absence de rouge n'est pas une conformité** quand la déclaration n'a pas pu être lue : les
    lignes concernées sortent en `unknown`, et c'est délibéré.
 

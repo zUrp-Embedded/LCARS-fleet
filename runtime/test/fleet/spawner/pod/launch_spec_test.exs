@@ -551,7 +551,7 @@ defmodule Fleet.Spawner.Pod.LaunchSpecTest do
     test "une variable de build UNIVERSELLE est LARGUEE, pas refusee", %{root: root} do
       # L'asymetrie est deliberee : un fichier malforme est un bug du producteur et arrete la ligne ;
       # une variable universelle est une violation de politique dont le rayon d'action est LES AUTRES
-      # pods. Refuser le spawn laisserait un seul mauvais env.d tuer tous les pods de la boite.
+      # pods. Refuser le spawn laisserait un seul mauvais env.d tuer tous les pods du conteneur.
       envd(root, "a.env", "CC=aarch64-linux-gnu-gcc\nCARGO_HOME=/store/rust\n")
       assert LaunchSpec.toolchain_env() == "CARGO_HOME=/store/rust"
     end

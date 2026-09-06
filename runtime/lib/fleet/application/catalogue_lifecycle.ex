@@ -16,7 +16,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   ## What signs an installation
 
   A repo that DECLARES the name of the org it sits in — the source WE pushed into the catalogue's own
-  org. Not "the org exists": an org without its source is an interrupted install, and no box can
+  org. Not "the org exists": an org without its source is an interrupted install, and no container can
   serve a catalogue whose material is nowhere. Signing on the org alone would report such a catalogue
   as ready and let a boot discover the hole. The store is the narrower signature and it is the one
   that matters.
@@ -28,7 +28,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
 
   ## The reference catalogue is installed by construction
 
-  `fleet` ships inside the release. The box can serve it without asking anybody, so its state
+  `fleet` ships inside the release. The container can serve it without asking anybody, so its state
   is not a forge question — and answering "available" for it, on a forge that carries no
   `fleet/_catalogue`, would be a lie about the only catalogue that always works.
 
@@ -100,7 +100,7 @@ defmodule Fleet.Application.CatalogueLifecycle do
   convention, not a second rendering of the same fact. That is exactly the question an admin has
   before installing: WHOSE material am I about to serve to everyone.
 
-  Once installed it is dropped, and not only because nobody reads it. What the box follows from
+  Once installed it is dropped, and not only because nobody reads it. What the container follows from
   then on is `<name>/_catalogue`, the store — printing the deposit there names something that is no
   longer the source, in the column an operator reads AS the source.
 

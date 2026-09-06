@@ -126,7 +126,7 @@ defmodule Fleet.Pilot.Poller do
     # Makes "durably missing map ⇒ sysadmin escalation" testable without hitting the real registry/forge.
     incident_fun: nil,
     # Escalade du SUBSTRAT (JG-059) — la racine des faces absente n'est pas une propriete d'un depot
-    # mais une panne de la boite. Meme forme de seam que `incident_fun` : nil → `escalate_gated/5`.
+    # mais une panne du conteneur. Meme forme de seam que `incident_fun` : nil → `escalate_gated/5`.
     escalate_fun: nil,
     # Presence du SUBSTRAT (JG-059). `Fleet.Layout.ops_root/0` est un litteral — c'est voulu, un
     # fait une source — donc un test ne peut pas le deplacer, et il ne doit pas ecrire dans `/home`.
@@ -384,7 +384,7 @@ defmodule Fleet.Pilot.Poller do
   end
 
   # Announce a PROVEN-absent org once per transition, and name the gesture that ends it. The message
-  # is the only place the operator learns that a catalogue this box serves is inert: the material is
+  # is the only place the operator learns that a catalogue this container serves is inert: the material is
   # here and the forge never carried its org — half an install, and the half that is missing is the
   # one that mints the accounts every dispatch needs.
   defp note_absent_orgs(state, absent) do
@@ -392,10 +392,10 @@ defmodule Fleet.Pilot.Poller do
 
     for org <- MapSet.difference(now, state.absent_orgs) do
       Logger.warning(
-        "Poller: catalogue #{inspect(org)} has its material on this box but its org does NOT " <>
+        "Poller: catalogue #{inspect(org)} has its material on this container but its org does NOT " <>
           "exist on the forge (404) — DROPPED from discovery. Nothing is hidden by the drop: an " <>
           "org that does not exist carries no repository. Replay `lcars catalogue install " <>
-          "#{org}` (admin, inside the box) — it is convergent and it lays both halves."
+          "#{org}` (admin, inside the container) — it is convergent and it lays both halves."
       )
     end
 
@@ -619,7 +619,7 @@ defmodule Fleet.Pilot.Poller do
           # ⚠ LE SUJET N'EST PAS UNE ORG : il entre dans la CLE DE RECURRENCE, donc en nommer une
           # ferait changer la signature d'une panne identique des qu'un catalogue est active ou
           # reordonne — cooldown remis a zero, meme incident re-escalade comme neuf. Un spawner
-          # injoignable est une panne de la BOITE ; le sujet ne route rien, il NOMME.
+          # injoignable est une panne du CONTENEUR ; le sujet ne route rien, il NOMME.
           incident.("pod_enumeration", "spawner", :spawner_unreachable,
             reason_detail: inspect(reason)
           )
@@ -711,7 +711,7 @@ defmodule Fleet.Pilot.Poller do
   # ⚠ CETTE BOUCLE NE PEUT PAS DIRE A QUI EST LE PROJET. Elle parcourt le SCAN D'ORG, et le garde
   # au-dessus prouve que le projet est installe sur cette MACHINE — jamais que l'humain qui fait
   # tourner cette fleet l'a demande, la racine des projets etant PARTAGEE. La question « est-ce le
-  # notre » se tranche donc la ou vit le registre : `ensure_alive` garde ce que cette boite a EN
+  # notre » se tranche donc la ou vit le registre : `ensure_alive` garde ce que ce conteneur a EN
   # REGISTRE et ne cree rien.
   defp keep_architect(state) do
     keeper = state.architect_keeper || (&Fleet.Project.Architect.ensure_alive/2)
@@ -771,7 +771,7 @@ defmodule Fleet.Pilot.Poller do
   # a chaque tour, et un onboarding se fait souvent dans les minutes qui suivent le message.
   defp not_onboarded_skip(state, repo_prior) do
     # ⚠ « JAMAIS ONBOARDE » ET « LE SUBSTRAT A DISPARU » RENDAIENT LA MEME PHRASE, et le second est
-    # une panne de la boite : la racine absente saute le rail pour TOUS les depots a la fois, la
+    # une panne du conteneur : la racine absente saute le rail pour TOUS les depots a la fois, la
     # flotte tourne a vide, et rien ne distingue « aucun travail » de « le sol a disparu ».
     # Le discriminant est la RACINE, pas le projet, et il ne coute rien sur le chemin du skip.
     present? = state.substrate_present_fun || fn -> File.dir?(Fleet.Layout.ops_root()) end

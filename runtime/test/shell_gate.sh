@@ -399,7 +399,7 @@ fi
 # ne mesure pas, et le reste se lit a la demande.
 #
 # LA LISTE EST CELLE DE GIT, PAS D'UN `find`, et ce n'est pas une commodite : les entrees sans
-# extension (`deploy/provision`, `deploy/box`, `bin/lcars`, les hooks) ne se reconnaissent qu'a
+# extension (`deploy/provision`, `deploy/container`, `bin/lcars`, les hooks) ne se reconnaissent qu'a
 # leur shebang, et `runtime/tmp/` porte des scripts fabriques par les suites ExUnit — les auditer
 # reviendrait a auditer la sortie des tests.
 #

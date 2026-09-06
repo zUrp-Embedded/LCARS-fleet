@@ -364,8 +364,8 @@ defmodule Fleet.MCP.PodSocketTest do
 
   test "un repertoire pre-existant TROP OUVERT est referme, pas accepte tel quel" do
     # Le cas reel : `~/.lcars/run/mcp` mesure a `drwxrwxr-x` sur cette machine. Un `mkdir_p` sur un
-    # repertoire existant ne change aucun mode — sans le chmod, la fenetre restait ouverte sur toute
-    # boite deja en service.
+    # repertoire existant ne change aucun mode — sans le chmod, la fenetre restait ouverte sur tout
+    # conteneur deja en service.
     pod = uniq("preopen")
     path = PodSocketSupervisor.socket_path(pod)
     File.mkdir_p!(Path.dirname(path))

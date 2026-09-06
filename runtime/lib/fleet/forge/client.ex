@@ -835,7 +835,7 @@ defmodule Fleet.Forge.Client do
   Le endpoint `/pulls` (pas `/issues?type=pulls`) rend directement les objets complets
   (`head`/`base`/`merged`) ET filtre `base=` cote serveur. Ecrit pour la passe de drain du
   reconciliateur, qui tourne toutes les 60 s : `list_pulls/2` sur le depot ops y paginerait TOUTES
-  les PR de la boite, puis ferait un GET par PR.
+  les PR du conteneur, puis ferait un GET par PR.
   """
   @spec list_pulls_for_base(String.t(), String.t(), Keyword.t()) ::
           {:ok, [map()]} | {:error, term()}

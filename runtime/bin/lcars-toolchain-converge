@@ -355,7 +355,7 @@ done
 
 #
 # Pose SEULEMENT si la passe est ENTIEREMENT verte : un rc=3 laisse l'etat en arriere d'au moins
-# un manifeste, et estampiller dirait « courant au SHA » sur une boite qui ne l'est pas.
+# un manifeste, et estampiller dirait « courant au SHA » sur un conteneur qui ne l'est pas.
 if [[ "$rc" -eq 0 ]]; then
   mkdir -p "$STORE/state/egress.d"
   printf '%s\n' "$SHA" > "$STORE/state/egress.d/.applied"

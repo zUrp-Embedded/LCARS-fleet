@@ -35,7 +35,7 @@ UNITS=(lcars-landing lcars-converger lcars-catalogue lcars-privileged)
 
 # LA CORRESPONDANCE PROGRAMME -> UNITE, ET ELLE SERT AUX DEUX SUBSTRATS : `UNITS` nomme ce que
 # systemd pose sur un poste, `STARTERS` nomme le PROGRAMME derriere chaque unite — c'est par lui
-# que la boite verifie, puisqu'elle n'a pas d'unites. `driven-by` marque ce qui est lance par un
+# que le conteneur verifie, puisqu'il n'a pas d'unites. `driven-by` marque ce qui est lance par un
 # autre service et n'a donc pas d'existence propre a sonder.
 # (Elle a porte un `shellcheck disable=SC2034` tant qu'elle n'etait lue que par `process_iso.bats`.)
 STARTERS=(
@@ -48,11 +48,11 @@ STARTERS=(
 
 # ⚠ LA PRESENCE DES FICHIERS N'EST PAS LA PRESENCE DU GESTIONNAIRE. `systemctl` s'installe comme
 # dependance de paquet et `/etc/systemd/system` est cree par le paquet : les deux existent dans une
-# image ou PID 1 est `tini` et ou systemd ne pilote rien. Cette sonde repondait donc OUI dans la
-# boite, le check depassait sa propre porte de sortie, ne trouvait aucune unite, rendait un drift —
+# image ou PID 1 est `tini` et ou systemd ne pilote rien. Cette sonde repondait donc OUI dans le
+# conteneur, le check depassait sa propre porte de sortie, ne trouvait aucune unite, rendait un drift —
 # et `apply:check:*` le convertissait en ECHEC que nul `apply` ne pouvait reparer.
 # `/run/systemd/system` est le test canonique (sd_booted(3)) : il n'existe QUE si systemd est
-# l'init. Dans la boite : systemctl PRESENT, /etc/systemd/system PRESENT,
+# l'init. Dans le conteneur : systemctl PRESENT, /etc/systemd/system PRESENT,
 # /run/systemd/system absent, PID 1 = tini.
 have_systemd() { [[ -d /run/systemd/system ]] && command -v "$SYSTEMCTL" >/dev/null 2>&1; }
 
@@ -62,15 +62,15 @@ consequence_of() {
     lcars-landing)    echo "personne ne peut entrer" ;;
     lcars-converger)  echo "personne ne sera enrole" ;;
     lcars-catalogue)  echo "« lcars catalogue install » refusera, en nommant ce service" ;;
-    lcars-privileged) echo "les gestes privilegies de la boite n'ont plus d'executant" ;;
+    lcars-privileged) echo "les gestes privilegies du conteneur n'ont plus d'executant" ;;
     *)                echo "consequence NON DECLAREE pour cette unite — ajoute-la ici" ;;
   esac
 }
 
-# ─── LA BOITE TIENT SES SERVICES AUTREMENT, ET C'EST UN ETAT-CIBLE, PAS UNE ABSENCE ──────────────
-# Le rail poste pose des unites `Restart=always` ; la boite lance `supervise.sh` depuis l'entrypoint.
+# ─── LE CONTENEUR TIENT SES SERVICES AUTREMENT, ET C'EST UN ETAT-CIBLE, PAS UNE ABSENCE ──────────────
+# Le rail poste pose des unites `Restart=always` ; le conteneur lance `supervise.sh` depuis l'entrypoint.
 # Meme promesse — un service qui tombe revient — deux mecaniques. Verifier CELLE DU POSTE sur les
-# deux substrats ne mesurait rien ici et refusait le banc ; verifier celle de la boite mesure
+# deux substrats ne mesurait rien ici et refusait le banc ; verifier celle du conteneur mesure
 # exactement la meme chose.
 #
 # La table STARTERS porte deja la correspondance programme -> unite : elle cesse d'etre decorative.
@@ -79,7 +79,7 @@ consequence_of() {
 # superviseur qui le porte dans son argv. La promesse verifiee est donc « ce service est TENU »,
 # pas « il repond a cette seconde » — c'est le pendant exact de `is-active` sur une unite
 # `Restart=`, qui rend vrai pendant un RestartSec.
-check_box_services() {
+check_container_services() {
   local dir="${LCARS_HELPERS_DIR:-$PROV_ROOT}" sup
   local e prog rel unit sup_vivant=0
   sup="${LCARS_SUPERVISE_BIN:-$dir/supervise.sh}"
@@ -254,7 +254,7 @@ EOF
     lcars-privileged)
       # ⚠ AUCUN `FORGE_TOKEN` N'EST POSE ICI. Le depot d'ops est public par construction (`/branches/tool_request` et
       # `/contents/ops` repondent 200 en anonyme), et un
-      # service qui saurait ou trouver un secret aurait le droit de le lire. Une boite dont la forge
+      # service qui saurait ou trouver un secret aurait le droit de le lire. Un conteneur dont la forge
       # exige une session en lecture l'ajoute a `$SERVICES_ENV`, explicitement.
       cat <<EOF
 [Unit]
@@ -292,21 +292,21 @@ unit_current() { # 0 si l'unite posee est identique a ce qu'on genererait
 # donc AUCUN humain, et c'est son etat nominal jusqu'a la premiere inscription — pas une derive.
 #
 # Compter cette absence comme un drift la transformait en ECHEC de convergence sur docker (D6 :
-# module hors-substrat, `apply:check`), ce qui rendait toute boite non convergee a son premier boot
-# et, sur une boite de production ou personne ne s'est encore inscrit, DEFINITIVEMENT. Le meme
+# module hors-substrat, `apply:check`), ce qui rendait tout conteneur non converge a son premier boot
+# et, sur un conteneur de production ou personne ne s'est encore inscrit, DEFINITIVEMENT. Le meme
 # entrypoint publiait alors `provision.rc=1` a cote de `humans.rc=0` — deux verdicts contradictoires
 # sur le meme fait, ecrits au meme instant.
 #
 # Ce que la sonde doit continuer de faire, et qui est son unique raison d'exister : le DIRE. En
 # docker, `22-fleet-human` et `48-forge-host` ne sont meme pas selectionnes (`CHECK-ON: wsl linux`) ;
-# sans cette ligne, un `doctor` de boite annonce « 0 faute » pendant que GUARD B refuse tout
+# sans cette ligne, un `doctor` de conteneur annonce « 0 faute » pendant que GUARD B refuse tout
 # « fleet start ». Un WARN dit exactement cela sans pretendre que quelque chose a devie.
 probe_fleet_humans() {
   local found; found="$(fleet_humans | paste -sd' ' -)"
-  # LE FAIT, pour qui doit decider : l'entrypoint de la boite publie « quelqu'un peut lancer une
-  # fleet » et lisait pour cela le CODE DE RETOUR de ce module — qui vaut 0 sur une boite conforme
+  # LE FAIT, pour qui doit decider : l'entrypoint du conteneur publie « quelqu'un peut lancer une
+  # fleet » et lisait pour cela le CODE DE RETOUR de ce module — qui vaut 0 sur un conteneur conforme
   # SANS humain, puisque l'absence est un WARN. « humain(s) present(s) » etait donc toujours vrai.
-  # Une boite ou seul le siege existe rendait « present(s) ». Meme canal que `00-preflight`.
+  # Un conteneur ou seul le siege existe rendait « present(s) ». Meme canal que `00-preflight`.
   p_fact fleet_humans "$found"
   if [[ -n "$found" ]]; then
     p_ok "humain(s) de fleet sur cette machine : $found"
@@ -379,7 +379,7 @@ check() {
   # ⚠ LA SONDE D'HUMAINS PASSE AVANT LA PORTE DE SORTIE, ET C'EST UN ACQUIS : `22-fleet-human` et
   # `48-forge-host` sont `CHECK-ON: wsl linux`, donc en docker ils ne sont meme pas SELECTIONNES.
   # Ce module est le seul a y tourner. Sortir avant de sonder faisait annoncer « 0 faute » a un
-  # `doctor` de boite pendant que GUARD B aurait refuse tout `fleet start`, faute de compte.
+  # `doctor` de conteneur pendant que GUARD B aurait refuse tout `fleet start`, faute de compte.
   # Trois temoins de `services_units.bats` tiennent ce contrat — ne pas le deplacer sous pretexte
   # qu'un humain manque forcement au premier boot : c'est un DRIFT, et un drift se dit.
   probe_fleet_humans
@@ -389,10 +389,10 @@ check() {
   # pose `systemd=true` dans `wsl.conf`, mais il ne prend effet qu'apres un `wsl --shutdown`. Au
   # PREMIER apply d'un WSL vierge, `/run/systemd/system` n'existe donc pas — et une branche
   # conditionnee a la seule absence de systemd aurait fait chercher `supervise.sh` sur un poste,
-  # ou il n'y en a pas. La boite tient ses services par un superviseur ; le poste, par systemd,
+  # ou il n'y en a pas. Le conteneur tient ses services par un superviseur ; le poste, par systemd,
   # meme quand systemd n'est pas encore la.
   if [[ "${PROV_SUBSTRATE:-}" == "docker" ]]; then
-    check_box_services
+    check_container_services
     verdict_check
   fi
 

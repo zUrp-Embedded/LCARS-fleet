@@ -48,7 +48,7 @@ setup() {
   # l'OS : LCARS y DEPOSE des fichiers, il ne les CREE pas, et un uninstall qui les retirerait
   # casserait la machine. C'est la meme convention que `deploy_manifest.bats` pour les paquets.
   #
-  # `/home/projects/LCARS` est le CHECKOUT, monte dans la boite par l'operateur
+  # `/home/projects/LCARS` est le CHECKOUT, monte dans le conteneur par l'operateur
   # (`entrypoint.sh:226`, `LCARS_SOURCE_DIR`). LCARS le LIT ; il ne le pose pas, et un uninstall qui
   # y toucherait detruirait le depot de quelqu'un.
   #

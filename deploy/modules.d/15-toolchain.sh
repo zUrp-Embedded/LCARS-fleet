@@ -61,7 +61,7 @@ elixir_meets_floor() { # elixir_meets_floor <version lue> <plancher M.m>
 # ⚠ UNE LIVRAISON BINAIRE N'A PAS BESOIN DE CE MODULE, ET LA RAISON EST DANS LA RELEASE : elle est
 # self-contained, ERTS bundlé. `bin/lcars_fleet` tourne sans un Erlang systeme, et il n'y a rien a
 # compiler puisque `pack.sh` a bati la release ET la doc. Exiger la toolchain la posait donc sur des
-# machines qui ne bâtissent jamais — 400 Mo de compilateurs pour une boite de prod, et une surface
+# machines qui ne bâtissent jamais — 400 Mo de compilateurs pour un conteneur de prod, et une surface
 # d'attaque qui n'a aucune contrepartie.
 #
 # ⚠ CE QUI RESTE VRAI DANS LES DEUX FORMES : le NETTOYAGE des reliquats du precompile d'avant. Un

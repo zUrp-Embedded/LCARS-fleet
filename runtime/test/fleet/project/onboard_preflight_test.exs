@@ -96,7 +96,7 @@ defmodule Fleet.Project.OnboardPreflightTest do
   describe "import : le catalogue nomme par l'org doit etre INSTALLE" do
     test "un catalogue absent est REFUSE, et le refus nomme l'offre reelle" do
       # L'org d'un projet EST le nom de son catalogue, et le lien est fixe pour sa vie. Importer
-      # `web/vitrine` sur une boite qui n'a pas le catalogue `web` ne doit PAS retomber sur le
+      # `web/vitrine` sur un conteneur qui n'a pas le catalogue `web` ne doit PAS retomber sur le
       # catalogue local : le projet tournerait avec les roles, les cartes et les SP d'un autre
       # metier, sans que rien ne le dise. C'est l'etat que le lien fixe existe pour interdire.
       assert {:error, {:catalogue_not_installed, "grominet", gestures}} =
@@ -150,8 +150,8 @@ defmodule Fleet.Project.OnboardPreflightTest do
 
       assert is_binary(org)
       # LE GESTE NOMME EST CELUI QUI REPARE, ET C'EST LE MEME QUI A POSE. Ce refus renvoyait vers
-      # `deploy/lib/enroll-catalogue.sh` + un `tofu apply` a la main : trois pas, dont deux hors de la
-      # boite, pour un etat qu'un seul verbe convergent retablit.
+      # `deploy/lib/enroll-catalogue.sh` + un `tofu apply` a la main : trois pas, dont deux hors du
+      # conteneur, pour un etat qu'un seul verbe convergent retablit.
       assert gestures =~ "lcars catalogue install"
       assert gestures =~ "convergent"
       refute gestures =~ "enroll-catalogue.sh"

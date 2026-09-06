@@ -67,7 +67,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.VerdictExceptionTest do
 
     test "OFF (explicite) : aucune convocation, escalade qui NOMME le barreau non armé" do
       # La distinction que l'arch doit pouvoir faire en lisant le gel : « la passe a échoué » et
-      # « la passe n'existe pas sur cette boîte » demandent deux gestes différents de sa part.
+      # « la passe n'existe pas sur ce conteneur » demandent deux gestes différents de sa part.
       TestEnv.put_env_restoring(:lcars_fleet, :pilot_verdict_exception_pass?, false)
 
       assert {:skipped, {:merge_blocked_escalated, 7}} =

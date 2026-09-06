@@ -371,7 +371,7 @@ defmodule Mix.Tasks.Lcars.Contracts.Check.Support do
   # `hd(Path.split(rel))` answered `..` for every sibling-tree mirror the day `deploy/` left
   # `fleet/` (4583be78a): the PARENT of the runtime is always there, so a mirror the artifact does
   # not carry was demanded, then reported missing. Measured on the image build stage (which
-  # excludes `deploy/` on purpose): four locks red, `mix release` refused, the box unbuildable.
+  # excludes `deploy/` on purpose): four locks red, `mix release` refused, the container unbuildable.
   @doc false
   @spec mirror_scope(String.t(), String.t()) :: :required | :out_of_scope
   def mirror_scope(rel, root), do: tree_scope(Path.expand(mirror_tree(rel), root))

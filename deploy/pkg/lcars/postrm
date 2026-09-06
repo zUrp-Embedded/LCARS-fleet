@@ -1,0 +1,60 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars/postrm
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars` apres le retrait : `provision uninstall --yes`, depuis
+#         la copie que le prerm a faite. remove = --keep-state (l'etat reste) ; purge = tout.
+#
+# dpkg l'appelle : postrm remove · postrm purge · postrm upgrade <nouvelle> · postrm failed-upgrade ·
+#                  postrm abort-install … · postrm abort-upgrade … · postrm disappear …
+#
+# ⚠ LES FICHIERS DU PAQUET SONT DEJA PARTIS quand ce script tourne : dpkg les a retires. Ce qui
+# reste a faire est ce que dpkg ne sait pas — les unites, les comptes et groupes de service, les
+# objets que les modules ont poses hors du paquet (journal), et au purge l'etat. C'est exactement
+# le desinstalleur du rail, `provision uninstall`, lu dans la copie du prerm ; il n'y en a pas deux.
+#
+#   remove   uninstall --yes --keep-state --dpkg lcars : `/opt/lcars/var` et `/etc/lcars` restent,
+#            avec les comptes et groupes de service qui les possedent. Comme un `remove` Debian
+#            garde la configuration. Les humains et leurs homes ne sont JAMAIS touches.
+#   purge    uninstall --yes --dpkg lcars : + l'etat. Sans la copie (un purge longtemps apres un
+#            remove, ou un prerm qui n'a pas tourne), le repli retire les deux racines d'etat lui-
+#            meme et DIT que les comptes et groupes restent — jamais un silence.
+set -euo pipefail
+
+say() { echo "lcars/postrm: $*" >&2; }
+STASH="${LCARS_UNINSTALL_STASH:-/var/tmp/lcars-uninstall-lcars}"
+RUNNER="$STASH/deploy/provision"
+ROOT="${PROV_ROOT:-/opt/lcars}"
+ETC_DIR="${LCARS_ETC_DIR:-/etc/lcars}"
+
+jouer() { # jouer <drapeaux…> — le desinstalleur depuis la copie ; rend son code
+  [[ -x "$RUNNER" ]] || return 127
+  "$RUNNER" uninstall --yes --dpkg lcars "$@"
+}
+
+case "${1:-}" in
+  remove)
+    rc=0; jouer --keep-state || rc=$?
+    case "$rc" in
+      0)   say "retire — l'etat reste ($ROOT/var, $ETC_DIR) ; « apt purge lcars » l'emporte" ;;
+      127) say "aucun desinstalleur sous $STASH (le prerm n'a pas tourne ?) — RIEN n'a ete retire au-dela des fichiers du paquet."
+           say "  Le geste : « sudo provision uninstall --yes --keep-state --dpkg lcars » depuis un checkout de la meme revision." ;;
+      *)   say "le desinstalleur a rendu $rc — relis sa sortie ; l'etat est garde, la copie reste sous $STASH" ;;
+    esac
+    ;;
+  purge)
+    rc=0; jouer || rc=$?
+    case "$rc" in
+      0)   say "purge — tout est retire, humains et homes exceptes (jamais par apt)" ;;
+      127) say "aucun desinstalleur sous $STASH — repli : l'etat part, le reste se dit"
+           rm -rf -- "${ROOT:?}/var" "${ETC_DIR:?}"
+           rmdir -- "$ROOT" 2>/dev/null || true
+           say "  retire : $ROOT/var, $ETC_DIR. RESTENT : les comptes et groupes de service, les unites si elles"
+           say "  existaient — « sudo provision uninstall --yes » depuis un checkout les retire." ;;
+      *)   say "le desinstalleur a rendu $rc — relis sa sortie" ;;
+    esac
+    rm -rf -- "$STASH"
+    ;;
+  *) exit 0 ;;
+esac
+exit 0

@@ -46,7 +46,7 @@
 #   provision update [--substrate S] [--human USER] [--env FILE]
 #   provision list   [--substrate S]
 #   provision audit  --before F --after F  — ce que la MACHINE porte et que la table ne declare pas
-#   provision uninstall [--substrate S] [--humans] [--annexes] [--yes]
+#   provision uninstall [--substrate S] [--humans] [--annexes] [--keep-state] [--dpkg PAQUET] [--yes]
 #
 # ⚠ `uninstall` MANQUAIT A CETTE LISTE, et c'est le seul verbe qui detruit. Un operateur qui lit
 # l'en-tete ne pouvait pas savoir qu'il existe, ni — surtout — que SANS `--yes` il n'execute RIEN :
@@ -61,6 +61,14 @@
 #               depots et le backlog. Un banc se jette par `bench-down.sh`, dont c'est le metier ;
 #               `uninstall` desinstalle un DEPLOIEMENT et n'a pas a emporter ce qui le nourrit.
 #               Les volumes restent dans les deux cas — ce drapeau ne touche que conteneurs+reseau.
+#   `--keep-state` garde l'ETAT de la machine : `<racine>/var` (jetons, journal, catalogues) et
+#               `/etc/lcars` (siege, transport des services, canal), ainsi que les comptes et
+#               groupes de service qui les possedent. C'est le `remove` d'un paquet ; sans lui,
+#               c'est le `purge`. Un ancetre d'une racine d'etat n'est retire que s'il est vide.
+#   `--dpkg P`  sous le canal `deb` : ce qu'un AUTRE paquet que `P` possede (`dpkg-query -S`) n'est
+#               pas a ce script — dpkg le retire avec son paquet. Sans lui, `provision uninstall`
+#               emporterait `/usr/local/bin/tofu` pendant que `lcars-tofu` est encore installe, et
+#               les deux desinstalleurs divergeraient (« une machine, un canal », 00-OBJECTIF § 6).
 #
 # `audit` est la definition de fin du chantier d'empreinte, et le SEUL instrument sans angle mort.
 # Un temoin qui lit le CODE herite des angles morts du code : deux unites systemd actives sont
@@ -119,6 +127,8 @@ AUDIT_BEFORE=""
 AUDIT_AFTER=""
 UNINSTALL_HUMANS=0
 UNINSTALL_ANNEXES=0
+UNINSTALL_KEEP_STATE=0
+UNINSTALL_DPKG_PKG=""
 declare -a ONLY=()
 
 # ⚠ ELLE NE REND RIEN, ET C'EST LOAD-BEARING. Écrite en `export X="$(valid_port …)"`, son `die`
@@ -165,6 +175,8 @@ while [[ $# -gt 0 ]]; do
     --yes)       UNINSTALL_YES=1; shift ;;
     --humans)    UNINSTALL_HUMANS=1; shift ;;
     --annexes)   UNINSTALL_ANNEXES=1; shift ;;
+    --keep-state) UNINSTALL_KEEP_STATE=1; shift ;;
+    --dpkg)      UNINSTALL_DPKG_PKG="${2:?--dpkg attend un nom de paquet}"; shift 2 ;;
     --verbose|-v) export PROV_VERBOSE=1; shift ;;
     # ⚠ DES DRAPEAUX, PAS DES POSITIONNELS : ce parseur consomme tout `$@` avant que le verbe ne
     # tourne, donc un argument positionnel meurt sur « option inconnue » sans jamais l'atteindre.
@@ -222,14 +234,14 @@ _journal_params
 [[ "$SUBSTRATE" == "auto" ]] && SUBSTRATE="$(detect_substrate)"
 case "$SUBSTRATE" in wsl|docker|linux) ;; *) die "substrat inconnu: $SUBSTRATE (wsl|docker|linux)" ;; esac
 # ⚖ user 2026-09-04 (Q1, lot 7 du chantier deploy-independance) : docker N'EST PAS UN RAIL. L'image se
-# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/box/), et rien ne
+# bâtit par le Dockerfile, l'instance s'initialise côté produit (runtime/services/container/), et rien ne
 # se rejoue au boot. `docker` reste un substrat de MESURE — c'est celui du stage `verify` de
 # l'image (doctor au build) et de `list` — jamais un substrat qu'on converge ou qu'on désinstalle.
 case "$CMD" in
   apply|uninstall|update) [[ "$SUBSTRATE" != "docker" ]] || die "docker n'est pas un rail : « $CMD » ne s'y joue pas.
-  L'image se bâtit (deploy/docker/Dockerfile, « deploy/box build »), se vérifie au build (stage verify,
+  L'image se bâtit (deploy/docker/Dockerfile, « deploy/container build »), se vérifie au build (stage verify,
   « provision doctor --substrate docker ») et son instance s'initialise côté produit au boot
-  (runtime/services/box/init.sh). Pour l'instance : « deploy/box status » · « deploy/box down »." ;;
+  (runtime/services/container/init.sh). Pour l'instance : « deploy/container status » · « deploy/container down »." ;;
 esac
 export PROV_SUBSTRATE="$SUBSTRATE"
 
@@ -586,7 +598,7 @@ else
     if [[ "$SUBSTRATE" == "docker" ]]; then
       # docker n'est pas un rail : un drift ici est une IMAGE non conforme a son build, pas un
       # etat a converger — le geste est le rebuild (le stage verify le refuse au build).
-      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/box build) — un drift ici est une image non conforme"
+      echo "  ${_PA}→ l'image ne se converge pas :${_PN} rebuild (deploy/container build) — un drift ici est une image non conforme"
     else
       echo "  ${_PA}→ converger :${_PN} sudo $SELF apply"
     fi

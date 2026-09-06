@@ -67,7 +67,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
     %{tmp: tmp}
   end
 
-  # A face as it exists on a box: a real repo whose `origin` still names the OLD owner.
+  # A face as it exists on a container: a real repo whose `origin` still names the OLD owner.
   defp face(tmp, kind) do
     dir = Path.join([tmp, kind, "vitrine"])
     File.mkdir_p!(dir)
@@ -249,7 +249,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
 
     @tag :tmp_dir
     test "une face jamais ouverte ICI ne fait pas echouer une migration deja faite", %{tmp: tmp} do
-      # Only the code face exists: the two others were never opened on this box.
+      # Only the code face exists: the two others were never opened on this container.
       code = face(tmp, "code")
 
       assert {:ok, %{repo: "web/vitrine", faces: faces, absent: absent}} =
@@ -258,7 +258,7 @@ defmodule Fleet.Project.OnboardMigrateTest do
       assert origin(code) == "http://forge.test/web/vitrine.git"
 
       # Le compte rendu dit ce qui a ETE fait, pas ce qui etait vise. Mesure sur banc le
-      # 2026-08-11 : la porte annoncait trois faces repointees sur une boite ou les trois etaient
+      # 2026-08-11 : la porte annoncait trois faces repointees sur un conteneur ou les trois etaient
       # absentes — la moitie forge etait juste, et le rapport mentait.
       assert faces == [code]
       assert length(absent) == 2

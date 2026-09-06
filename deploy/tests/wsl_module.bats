@@ -4,6 +4,8 @@
 # STARDATE: 2026-08-30
 # STATUS: temoins de 30-wsl.sh — le module n'avait aucune suite
 
+load refute
+
 setup() {
   local _v
   while read -r _v; do unset "$_v" 2>/dev/null || true; done \
@@ -172,4 +174,37 @@ HARNAIS
   harnais_creds ''
   [ "$status" -eq 0 ]
   [[ "$output" == *'<pas de fichier>'* ]] || { echo "un config.json a ete invente : $output"; return 1; }
+}
+
+@test "canal deb : snapd present se DIT avec le geste, apt n'est JAMAIS appele (le postinst tourne sous le verrou)" {
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/channel"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"
+  local bin="$BATS_TEST_TMPDIR/bin-deb"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\n[[ "$1" == -s && "$2" == snapd ]] && exit 0\nexit 1\n' > "$bin/dpkg"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\nexit 0\n' "$BATS_TEST_TMPDIR/apt-deb.trace" > "$bin/apt-get"
+  chmod 0755 "$bin"/*
+  local mod_sans_case="$BATS_TEST_TMPDIR/30-sans-case.sh"; sed '/^case "${1:?usage/,$d' "$MOD" > "$mod_sans_case"
+  run bash -c "set -uo pipefail; export PATH=\"$bin:$PATH\" PROV_HUMAN=temoin; source '$mod_sans_case' >/dev/null 2>&1; prov_channel_or_verdict apply; PROV_CHANGED=0; dpkg -s snapd >/dev/null 2>&1 && poseur_is_dpkg && echo DEB-SNAPD"
+  [[ "$output" == *"DEB-SNAPD"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/apt-deb.trace" ]
+  # et la branche du module dit le geste
+  grep -q 'sous canal deb ce module ne l.enl' "$MOD"
+  grep -q 'apt remove --purge snapd' "$MOD"
+}
+
+@test "docker.io A COTE de Docker Desktop : FAIL au check ET a l'apply, le geste entier est dit, rien n'est enleve (mesure 2004)" {
+  local bin="$BATS_TEST_TMPDIR/bin-dio"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\n[[ "$1" == -s && "$2" == docker.io ]] && exit 0\nexit 1\n' > "$bin/dpkg"
+  printf '#!/usr/bin/env bash\necho "APT $*" >> "%s"\nexit 0\n' "$BATS_TEST_TMPDIR/apt-dio.trace" > "$bin/apt-get"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$bin/docker-desktop-cli"; chmod 0755 "$bin"/*
+  local mod_sans_case="$BATS_TEST_TMPDIR/30-sans-case-dio.sh"; sed '/^case "${1:?usage/,$d' "$MOD" > "$mod_sans_case"
+  # Desktop monte : la CLI que docker-endpoint.sh nomme existe → docker.io a cote = casse
+  run bash -c "set -uo pipefail; export PATH=\"$bin:$PATH\" PROV_HUMAN=temoin; source '$mod_sans_case' >/dev/null 2>&1; _docker_mount_cli() { echo '$bin/docker-desktop-cli'; }; check 2>&1"
+  [[ "$output" == *"FAIL"*"docker.io est posé À CÔTÉ de Docker Desktop"*"apt purge docker.io containerd runc"*"apt install lcars-docker-desktop"*"WSL integration"*"dpkg --configure -a"* ]]
+  run bash -c "set -uo pipefail; export PATH=\"$bin:$PATH\" PROV_HUMAN=temoin; source '$mod_sans_case' >/dev/null 2>&1; _docker_mount_cli() { echo '$bin/docker-desktop-cli'; }; apply 2>&1 | head -3"
+  [[ "$output" == *"FAIL"*"docker.io est posé À CÔTÉ"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/apt-dio.trace" ] || { echo "apt a ete appele : $(cat "$BATS_TEST_TMPDIR/apt-dio.trace")"; return 1; }
+  # sans Desktop monte : docker.io est LE daemon, c'est voulu → OK, pas de FAIL
+  run bash -c "set -uo pipefail; export PATH=\"$bin:$PATH\" PROV_HUMAN=temoin; source '$mod_sans_case' >/dev/null 2>&1; _docker_mount_cli() { echo '$bin/absent'; }; check 2>&1"
+  [[ "$output" == *"docker.io (ou docker-ce) est le daemon, c'est voulu"* ]]
+  refute_out 'docker.io est posé À CÔTÉ' <<<"$output"
 }

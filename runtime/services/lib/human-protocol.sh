@@ -9,7 +9,7 @@
 # que la forge inscrit, par le convergeur — jamais par l'installeur. Ils sourcaient pourtant
 # `deploy/lib/provision-lib.sh`, par une garde `${PROVISION_LIB:?}` que leur seul hote reel ne
 # pose pas : mesure du 2026-09-04 sur les deux bancs, chaque humain cree mourait a la ligne 1 de
-# ses trois modules, rc=1, et la boite annoncait « converge ». Un humain sans `~/.lcars`, sans
+# ses trois modules, rc=1, et le conteneur annoncait « converge ». Un humain sans `~/.lcars`, sans
 # `claude`, sans projets — qui ne peut pas lancer de fleet.
 #
 # Le vocabulaire commun vit dans `module-protocol.sh` (les gestes de forge le partagent). Ici, ce
@@ -28,7 +28,7 @@
 # le `source`, retiree (`unset`) juste apres. Un module que l'hote lance ne l'herite donc pas et
 # garde sa garde ; un hote qui l'exporterait, ou qui poserait un `LCARS_LOGIN` d'emprunt a la
 # place, ferait de toute lecture « de la personne » (`human_home`) celle de ce login. Deux hotes
-# (lot 15) : `human-converger.sh` (la boucle) et `box/boot.sh` (la mesure de population au boot) ;
+# (lot 15) : `human-converger.sh` (la boucle) et `container/boot.sh` (la mesure de population au boot) ;
 # les temoins qui sourcent pour la regle la posent de la meme facon. Sans sujet nomme, les
 # lectures de la personne rendent « rien » ou « non » — jamais l'utilisateur courant.
 if [[ -z "${LCARS_HUMAN_PROTOCOL_HOST:-}" ]]; then

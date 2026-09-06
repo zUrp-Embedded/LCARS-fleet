@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/init_layout.bats
+# SOURCE: runtime/test/services/container/init_layout.bats
 # AUTHOR: bob
 # STARDATE: 2026-09-04
-# STATUS: bats tests for box/init.sh store — le magasin de l'instance est celui que l'hote monte, et l'init le DIT
+# STATUS: bats tests for container/init.sh store — le magasin de l'instance est celui que l'hote monte, et l'init le DIT
 #
 # ⚖ user 2026-09-04 (Q1, lot 7) : `26-store` (le module de l'installeur qui posait les modes du
 # magasin en substrat docker) est mort — l'init de l'instance pose les quatre arbres. Ce mur
@@ -20,11 +20,11 @@
 load ../../support/refute
 
 setup() {
-  SUT="$BATS_TEST_DIRNAME/../../../services/box/init.sh"
+  SUT="$BATS_TEST_DIRNAME/../../../services/container/init.sh"
   STORE_LIB="$BATS_TEST_DIRNAME/../../../../deploy/lib/store.sh"
   [ -f "$SUT" ] && [ -f "$STORE_LIB" ]
   export LCARS_MODULE_PROTOCOL="$BATS_TEST_DIRNAME/../../../services/lib/module-protocol.sh"
-  export LCARS_MODULE_TAG=box-init
+  export LCARS_MODULE_TAG=container-init
   export LCARS_PRIVATE_DIR="$BATS_TEST_TMPDIR/tokens"
   # hors root, le groupe demande doit etre le notre pour que le setgid se pose
   LCARS_FLEET_GROUP="$(id -gn)"; export LCARS_FLEET_GROUP

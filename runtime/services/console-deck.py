@@ -2,7 +2,7 @@
 # SOURCE: runtime/services/console-deck.py
 # AUTHOR: consultant
 # STARDATE: 2026-08-02
-# STATUS: PROTO-V2 — le deck de la boite : UNE page, des onglets verticaux, l'etat sonde en continu
+# STATUS: PROTO-V2 — le deck du conteneur : UNE page, des onglets verticaux, l'etat sonde en continu
 #
 # La coquille RESTE et le contenu change dans un cadre : une page generee une fois au demarrage
 # affiche l'etat du boot, et chaque lien qui quitte la page fait perdre la vue d'ensemble.
@@ -48,7 +48,7 @@ HUMANS_SH = os.environ.get("LCARS_CONSOLE_HUMANS", "/opt/lcars/console-humans.sh
 # id_token is an attacker-supplied blob. `userinfo` is a direct server-to-forge call authenticated
 # by the access token we just obtained: nothing to verify, because nothing untrusted carried it.
 # ONE name for the file, the one the gesture that writes it uses (forge.d/deck-oidc.sh):
-# the box points it under its state volume, the workstation keeps the protocol default.
+# the container points it under its state volume, the workstation keeps the protocol default.
 OIDC_CONFIG = os.environ.get("LCARS_DECK_OIDC_FILE", "/etc/lcars/deck-oidc.json")
 # Membership of THIS team is what separates a human of the fleet from a mere forge account. Free
 # registration is deliberate — an account is inert on its own, and the single admin gesture that
@@ -83,7 +83,7 @@ CONSOLE_SOCK_ROOT = os.environ.get("LCARS_CONSOLE_SOCK_ROOT", "/run/lcars/consol
 # qui le sont. Un serveur de statique generique dans un processus qui relaie des shells est une
 # surface sans raison d'etre ouverte — et un `..` dans un nom n'est meme pas une question qui se pose.
 DECK_STATIC = os.environ.get("LCARS_DECK_STATIC", "/opt/lcars/deck-static")
-# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT : la boite sert SA propre doc, pas la derniere
+# LA DOC DE CETTE VERSION, BATIE PAR LE MEME COMMIT : le conteneur sert SA propre doc, pas la derniere
 # en ligne ni une copie a resynchroniser.
 #
 # ⚠ HORS DU PREFIXE DE RELEASE, ET CE PROCESS EST LA RAISON : il largue ses privileges vers son
@@ -206,7 +206,7 @@ def authorize(sess, target):
         cible systeme    -> sess est admin
 
     ⚠ L'ADMIN N'ATTEINT PAS LA CONSOLE D'UN AUTRE HUMAIN — choix tranche : *ce serait un geste de
-    panoptique, pas un geste d'admin*. Son perimetre est le SYSTEME (faire tourner la boite, ajouter
+    panoptique, pas un geste d'admin*. Son perimetre est le SYSTEME (faire tourner le conteneur, ajouter
     des catalogues, purger des depots morts), jamais les cibles par-humain d'autrui.
 
     C'est pour ca que la premiere branche ne consulte PAS `groups` : une clause absente se relit
@@ -344,7 +344,7 @@ POD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 def block(uid):
     """
-    ⚠ NE REND AUCUN PORT, ET C'EST UNE REPONSE, PAS UN MANQUE : plus une cible de la boite n'a
+    ⚠ NE REND AUCUN PORT, ET C'EST UNE REPONSE, PAS UN MANQUE : plus une cible du conteneur n'a
     d'adresse (API, deck, console, pod — toutes sur socket). Publier un numero ici enverrait un
     consommateur frapper a une porte qui n'existe pas.
 
@@ -358,7 +358,7 @@ def block(uid):
 
 def humans():
     """
-    Les humains servis par cette boite, DEMANDES a `console-humans.sh`.
+    Les humains servis par ce conteneur, DEMANDES a `console-humans.sh`.
 
     ⚠ PAS DE REGLE PROPRE ICI — CE SERAIT UNE SECONDE AUTORITE. Un filtre local sur `/etc/passwd`
     (`uid >= 1000 and uid < 65000`, un shell en `bash|sh|zsh`) divergerait de `console-humans.sh`
@@ -514,7 +514,7 @@ def claude_credentials(home):
 
 def state(only=None, admin=False, people=None):
     """
-    The box's state, RESTRICTED to `only` when a session names a human.
+    The container's state, RESTRICTED to `only` when a session names a human.
 
     The filter is applied at the SOURCE, not in the page: an index that renders one human while
     `/api/state` still serves everybody has not made anything personal, it has hidden a list that
@@ -602,7 +602,7 @@ def page_login(forge=None):
         "title": "identification",
         "body": (
             "<h1>LCARS</h1>"
-            "<p>Cette boite est desservie par la forge : elle sait qui tu es, on ne redemande pas.</p>"
+            "<p>Ce conteneur est desservi par la forge : elle sait qui tu es, on ne redemande pas.</p>"
             '<p><a class="go" href="/auth/login">S\'identifier sur la forge</a></p>'
             '<p class="dim">Pas encore de compte ? La forge accepte les inscriptions. Un compte '
             "seul ne donne acces a rien ici : c'est l'ajout a l'equipe <code>" + html.escape(HUMANS_TEAM) +
@@ -624,7 +624,7 @@ def page_denied(login, groups):
             "<p>Tu es bien <code>" + html.escape(login or "?") + "</code> sur la forge, et c'est tout "
             "ce qui manquait de verifiable : ton compte existe et il fonctionne.</p>"
             "<p>Il n'est pas encore membre de <code>" + html.escape(HUMANS_TEAM) + "</code>. Tant "
-            "qu'il ne l'est pas, tu n'as pas de fleet sur cette boite &mdash; rien n'est casse, il "
+            "qu'il ne l'est pas, tu n'as pas de fleet sur ce conteneur &mdash; rien n'est casse, il "
             "manque <b>un seul geste</b>, cote forge, par un proprietaire de l'organisation.</p>"
             '<p class="dim">Vu de la forge, tu appartiens a : <code>' +
             html.escape(", ".join(groups) if groups else "(aucune equipe)") + "</code></p>"
@@ -641,7 +641,7 @@ def page_no_block(login):
             "<p>Tu es <code>" + html.escape(login) + "</code>, membre de <code>" +
             html.escape(HUMANS_TEAM) + "</code> &mdash; l'enrollment est fait cote forge.</p>"
             "<p>Mais aucun utilisateur systeme <code>" + html.escape(login) + "</code> n'existe "
-            "encore sur cette boite, donc tu n'as ni bloc de ports ni fleet a montrer. C'est le "
+            "encore sur ce conteneur, donc tu n'as ni bloc de ports ni fleet a montrer. C'est le "
             "convergeur qui pose cet utilisateur, et il ne l'a pas encore fait.</p>"
             '<p class="dim">Rien a faire de ton cote : ca converge tout seul. Si ca dure, c\'est '
             "le convergeur qu'il faut regarder, pas ton compte.</p>"
@@ -658,7 +658,7 @@ def page_refused(login, reason):
             "<p>Tu es <code>" + html.escape(login) + "</code>, membre de <code>" +
             html.escape(HUMANS_TEAM) + "</code> : l'enrollment est fait, et il ne suffira pas.</p>"
             "<p><b>" + html.escape(reason) + "</b></p>"
-            "<p>Ce n'est pas une attente : cette boite a REFUSE de creer ton utilisateur systeme, "
+            "<p>Ce n'est pas une attente : ce conteneur a REFUSE de creer ton utilisateur systeme, "
             "et elle le refusera a chaque passage. Rien ne se debloquera tout seul.</p>"
             '<p class="dim">Ce qu\'il faut faire : changer de login sur la forge (ou en creer un '
             "autre), puis se faire ajouter a l'equipe. Tant que ce login reste celui-la, cette page "
@@ -1114,7 +1114,7 @@ function adminPanel() {
   n.innerHTML = "Cet onglet n'est visible que des <b>administrateurs de la forge</b> — " +
     "la forge repond <b>is_admin</b>, le deck le lit a ta connexion, et il n'existe " +
     "<b>aucune autre liste</b> a tenir a jour ici. Un second administrateur, c'est un compte " +
-    "marque admin sur la forge : rien a poser sur la boite.<br><br>" +
+    "marque admin sur la forge : rien a poser sur le conteneur.<br><br>" +
     "Il est <b>vide, et c'est exact</b> : le chemin d'autorisation existe et il est teste, " +
     "aucun pouvoir ne s'y branche encore. Le premier prevu est l'<b>edition des cartes</b>. " +
     "Ce que la forge affirme ne franchit d'ailleurs pas tout : elle fait autorite sur les " +
@@ -1140,9 +1140,9 @@ function build(s) {
     tabs.push(tab);
   };
 
-  add('boite', 'Statut', null, { key: 'status', crumb: 'STATUT', render: () => statusPanel(s) });
+  add('conteneur', 'Statut', null, { key: 'status', crumb: 'STATUT', render: () => statusPanel(s) });
   // LA DOC DE CETTE VERSION, servie par CE serveur. Pas un lien vers le site en ligne : celui-la
-  // decrit la derniere version publiee, celle-ci decrit la boite qu'on regarde. Meme origine, meme
+  // decrit la derniere version publiee, celle-ci decrit le conteneur qu'on regarde. Meme origine, meme
   // porte — le cadre charge une route du deck, derriere la session deja verifiee.
   //
   // INCONDITIONNEL. Un `if (s.doc)` au motif qu'une image batie avant le stage `site` n'aurait rien
@@ -1283,7 +1283,7 @@ class Deck(BaseHTTPRequestHandler):
         """
         Where the forge sends the person back -- DERIVED FROM THE REQUEST, not from config.
 
-        The same deck is reached as `127.0.0.1:20999` from the box's own host and as
+        The same deck is reached as `127.0.0.1:20999` from the container's own host and as
         `<lan-addr>:20999` from anyone else's machine, and OAuth2 matches the redirect URI
         EXACTLY against the registered list. Echoing the Host we were actually asked on is the
         only value that can be right for both; the registration must carry every entrance in use,
@@ -1350,7 +1350,7 @@ class Deck(BaseHTTPRequestHandler):
         login = info.get("preferred_username") or ""
         groups = info.get("groups") or []
         # LU ICI, ET NULLE PART AILLEURS : c'est le seul endroit du deck ou un jeton d'acces existe.
-        # Le lire plus tard couterait un credential de service stocke sur la boite — exactement ce
+        # Le lire plus tard couterait un credential de service stocke sur le conteneur — exactement ce
         # que ce lot passe son temps a retirer. Lu AVANT la porte : admiral (le master/sysadmin) est
         # site-admin mais PAS dans fleet:humans — il entre par la porte ADMIN (is_admin), distincte
         # de la porte worker. Une fois entre, tout est transparent : sa console tourne sous lui (uid
@@ -1467,7 +1467,7 @@ class Deck(BaseHTTPRequestHandler):
                            "application/json; charset=utf-8")
             else:
                 self._send(503, page_unconfigured(
-                    "la liste des humains de cette boite est illisible (console-humans.sh) — "
+                    "la liste des humains de ce conteneur est illisible (console-humans.sh) — "
                     "ce n'est PAS un refus te concernant, et rien ne se debloquera en rechargeant"
                 ), "text/html; charset=utf-8")
             return
@@ -1500,7 +1500,7 @@ class Deck(BaseHTTPRequestHandler):
         # qui n'est pas identifie, et le navigateur porte deja le cookie en le demandant.
         # LA DOC — derriere la porte, meme origine, chemin relatif. Le site est bati avec
         # ⚠ LE CHEMIN EST RESOLU PUIS VERIFIE CONTRE SA RACINE : un `..` sortirait ici du cote d'un
-        # prefixe qui porte les jetons de la boite. `realpath` + prefixe, sinon 404.
+        # prefixe qui porte les jetons du conteneur. `realpath` + prefixe, sinon 404.
         if path == "/doc" or path.startswith("/doc/"):
             rel = path[len("/doc"):].lstrip("/") or "index.html"
             if rel.endswith("/"):

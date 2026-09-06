@@ -68,6 +68,10 @@ setup() {
   # rien apres que `10-packages` a pose /usr/bin/ttyd, donc vert sur un poste de dev et ROUGE dans
   # l'install. Un temoin ne peut pas desinstaller ttyd ; il peut viser un chemin qu'il possede.
   export LCARS_TTYD_BIN="$BINDIR/ttyd"
+  # Le CANAL est a nous : absent = « aucun », donc le rail pose comme aujourd'hui. Sans cette
+  # ligne, un poste installe par paquet (/etc/lcars/channel = deb) verrait tous ces temoins
+  # mesurer sa machine — l'apply ne poserait plus rien, et rien ici ne dirait pourquoi.
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"
 }
 
 mod() { run bash "$MOD" "$1"; }
@@ -251,7 +255,7 @@ sources_citees() { grep -oE '\$SRC_DIR/[A-Za-z0-9_.-]+' "$MOD" | sed 's|.*/||' |
   # Dockerfile pose AILLEURS lui echappait par CONSTRUCTION — pas par exemption, par angle mort.
   # Un fichier y vivait deja : `COPY runtime/services/skel.bashrc /etc/skel/.bashrc`, pose par l'image
   # et par RIEN sur le rail poste. Le convergeur cree les humains avec `useradd -m`, qui recopie
-  # `/etc/skel` : en boite un humain recevait le prompt LCARS et ses alias, sur un poste le
+  # `/etc/skel` : en conteneur un humain recevait le prompt LCARS et ses alias, sur un poste le
   # `.bashrc` de la distribution. Deux environnements pour un meme role, silencieux des deux cotes.
   #
   # Ce temoin lit TOUTES les lignes `COPY runtime/services/...` quelle que soit leur destination, et
@@ -405,8 +409,8 @@ racine_paquet() { # racine_paquet -> chemin d une racine de SOURCE qui se declar
 
 @test "la copie d une livraison BINAIRE porte le discriminant — sinon le rejeu reclame un toolchain" {
   # Le defaut symetrique, et il serait pire : sans propagation, un apply rejoue depuis la copie
-  # d une machine installee PAR PAQUET se declarerait SOURCE et exigerait des compilateurs sur une
-  # boite dont c est justement le contraire qui a ete decide.
+  # d une machine installee PAR PAQUET se declarerait SOURCE et exigerait des compilateurs sur un
+  # conteneur dont c est justement le contraire qui a ete decide.
   stub_curl "peu importe"
   local src; src="$(racine_paquet)"
   run env PROVISION_LIB="$src/deploy/lib/provision-lib.sh" \
@@ -729,4 +733,76 @@ racine_avec_artefacts() { # racine_avec_artefacts -> decor + les artefacts locau
   mod check
   refute grep -qF "$LCARS_HELPERS_DIR/deploy : " <<<"$output"
   refute grep -qF "$LCARS_HELPERS_DIR/assets : " <<<"$output"
+}
+
+# ─── LE CANAL : SOUS `deb`, CE MODULE NE POSE RIEN — dpkg possede ses arbres (lot 2, 2026-09-05) ──
+#
+# Le decor possede le canal (`LCARS_CHANNEL_FILE`, pose dans setup) et `dpkg` (une doublure du PATH
+# qui dit ce qu'on lui dit). `curl` est une doublure a MARQUEUR : sous `deb`, `fetch_verify` ne doit
+# jamais etre atteint.
+
+canal_deb() { mkdir -p "$(dirname "$LCARS_CHANNEL_FILE")"; printf 'deb\n' > "$LCARS_CHANNEL_FILE"; }
+dpkg_double() { # dpkg_double <lignes de dpkg -V…> — le paquet est installe, et -V rend ces lignes
+  local d="$BATS_TEST_TMPDIR/dpkgbin"; mkdir -p "$d"
+  { echo '#!/usr/bin/env bash'
+    echo 'case "$1" in -s) echo "Status: install ok installed"; exit 0 ;; -V) : ;; *) exit 2 ;; esac'
+    local l; for l in "$@"; do printf "printf '%%s\\\\n' '%s'\n" "$l"; done
+    echo 'exit 0'
+  } > "$d/dpkg"; chmod 0755 "$d/dpkg"
+  export PATH="$d:$PATH"
+}
+curl_marqueur() { printf '#!/usr/bin/env bash\ntouch "%s"\nexit 1\n' "$BATS_TEST_TMPDIR/CURL-APPELE" > "$BINDIR/curl"; chmod 0755 "$BINDIR/curl"; }
+
+@test "CANAL deb : apply ne pose RIEN — ni auxiliaire, ni binaire du PATH, ni arbre — il MESURE, et dit ce que dpkg dit" {
+  canal_deb; dpkg_double; curl_marqueur
+  mod apply
+  [ "$status" -eq 1 ]                                   # le verdict de CHECK (drift), pas celui d'apply
+  [ ! -e "$LCARS_HELPERS_DIR/console.sh" ]
+  [ ! -e "$LCARS_TOOLCHAIN_CONVERGE_BIN" ]
+  [ ! -e "$LCARS_AUTHORITY_ASK_BIN" ]
+  [ ! -d "$LCARS_HELPERS_DIR/services" ] && [ ! -d "$LCARS_HELPERS_DIR/deploy" ]
+  [ ! -e "$LCARS_SKEL_FILE" ]
+  [ ! -e "$BATS_TEST_TMPDIR/CURL-APPELE" ] || { echo "fetch_verify a ete ATTEINT sous deb"; return 1; }
+  [[ "$output" == *"console.sh absent"* ]]
+  [[ "$output" == *"dpkg -V lcars : rien à redire parmi ce que ce module relit sous $LCARS_HELPERS_DIR"* ]]
+  refute_out 'POSÉ' <<<"$output"
+  [ "$(cat "$LCARS_CHANNEL_FILE")" = "deb" ]
+}
+
+@test "CANAL deb : dpkg -V parle sur SES racines — « réinstalle le paquet » — et la release (territoire de 60) n'est pas comptee ici" {
+  canal_deb
+  dpkg_double "missing   $LCARS_HELPERS_DIR/services/console.sh" \
+              "??5??????   $LCARS_TOOLCHAIN_CONVERGE_BIN" \
+              "missing   $LCARS_HELPERS_DIR/runtime/bin/lcars" \
+              "??5?????? c $LCARS_HELPERS_DIR/deck-static/xterm.js"
+  mod check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"DRIFT"*"dpkg -V lcars : 3 fichier(s) altéré(s) ou manquant(s) parmi ce que ce module relit"*"(premier : $LCARS_HELPERS_DIR/services/console.sh)"* ]]
+  [[ "$output" == *"apt install --reinstall lcars"* ]]
+  refute_out 'runtime/bin/lcars' <<<"$output"
+  # sous source (canal absent), dpkg n'est pas consulte
+  rm -f "$LCARS_CHANNEL_FILE"
+  mod check
+  refute_out 'dpkg' <<<"$output"
+}
+
+@test "CANAL : les racines que 62 donne a dpkg sont DERIVEES des tableaux de check_perms — pas une seconde liste" {
+  local m="$BATS_TEST_TMPDIR/62.sh"
+  sed '/^case "${1:?usage/,$d' "$MOD" > "$m"
+  run bash -c "set -euo pipefail; . '$m' >/dev/null 2>&1; dpkg_roots"
+  [ "$status" -eq 0 ]
+  local n; while read -r n; do grep -qx "$LCARS_HELPERS_DIR/$n" <<<"$output"; done < <(helpers)   # chaque auxiliaire
+  grep -qx "$LCARS_TOOLCHAIN_CONVERGE_BIN" <<<"$output"
+  grep -qx "$LCARS_AUTHORITY_ASK_BIN" <<<"$output"
+  grep -qx "$LCARS_BASHRC_FILE" <<<"$output"                                        # une DONNEE
+  grep -qx "$LCARS_HELPERS_DIR/services" <<<"$output"                               # EMBEDDED
+  grep -qx "$LCARS_HELPERS_DIR/deploy" <<<"$output"                                 # EMBEDDED_ROOT
+  grep -qx "$LCARS_HELPERS_DIR/deck-static" <<<"$output"
+  refute_out '/runtime' <<<"$output"                                                # jamais la release
+  # et la fonction lit les MEMES noms que check_perms — aucun chemin en dur
+  local corps; corps="$(sed -n '/^dpkg_roots()/,/^}/p' "$MOD")"
+  local v; for v in 'HELPERS\[@\]' 'DATA\[@\]' TOOLCHAIN_BIN AUTHORITY_ASK_BIN helpers_stamp copie_delivery_stamp deck_static_dir 'EMBEDDED\[@\]' 'EMBEDDED_ROOT\[@\]'; do
+    grep -qE "$v" <<<"$corps" || { echo "dpkg_roots ne lit pas $v"; return 1; }
+  done
+  grep -vE '^\s*#' <<<"$corps" | refute_out '/opt/lcars|/usr/local'
 }

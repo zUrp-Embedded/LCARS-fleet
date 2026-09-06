@@ -199,8 +199,29 @@ check_perms() {
   return 0
 }
 
-check() {
+# ─── SOUS `deb`, CE MODULE NE POSE RIEN — dpkg possede ses arbres ─────────────────────────────
+#
+# Les auxiliaires, les donnees, les deux binaires du PATH, les tampons, le client de terminal et
+# les six arbres embarques sortent du paquet `lcars` : `apply` se reduit a `check`, qui mesure comme
+# aujourd'hui (revision, modes, presence) et ajoute en tete ce que `dpkg -V` dit de CE que ce module
+# relit — jamais de la release (`$PROV_PREFIX`), qui est le territoire de `60-deploy` et qu'il
+# mesure lui-meme : un meme fichier ne se compte pas deux fois. La liste des racines est celle de
+# `check_perms`, derivee des memes tableaux — pas une seconde liste qui deriverait.
+dpkg_roots() { # dpkg_roots -> tout ce que ce module pose, un chemin par ligne
+  local n spec d_src d_dst d_mode
+  for n in "${HELPERS[@]}"; do printf '%s\n' "$HELPERS_DIR/$n"; done
+  for spec in "${DATA[@]}"; do read -r d_src d_dst d_mode <<<"$spec"; printf '%s\n' "$d_dst"; done
+  printf '%s\n' "$TOOLCHAIN_BIN" "$AUTHORITY_ASK_BIN" "$(helpers_stamp)" "$(copie_delivery_stamp)" "$(deck_static_dir)"
+  for n in "${EMBEDDED[@]}"; do printf '%s\n' "$EMBEDDED_FLEET/$n"; done
+  for n in "${EMBEDDED_ROOT[@]}"; do printf '%s\n' "$HELPERS_DIR/$n"; done
+}
+
+check() { # check [--dpkg] — les mesures d'aujourd'hui ; avec --dpkg (canal deb), celle du paquet en tete
   local n f name url sha stale=0
+  if [[ "${1:-}" == "--dpkg" ]]; then
+    local -a _roots; mapfile -t _roots < <(dpkg_roots)
+    prov_dpkg_report "parmi ce que ce module relit sous $HELPERS_DIR (et les deux binaires du PATH)" "${_roots[@]}"
+  fi
 
   local src posed
   # shellcheck disable=SC2119 # argument OPTIONNEL : les args de fonction masquent ceux du script
@@ -491,7 +512,7 @@ BLOC
   # rejoué depuis `$HELPERS_DIR/deploy/provision` fait tomber `repo_root()` sur `$HELPERS_DIR`
   # — c'est là que `prov_delivery` cherche son discriminant. Sans ce bloc, une machine installée
   # par PAQUET s'y déclarerait SOURCE au rejeu : `15-toolchain` et `16-node` exigeraient des
-  # compilateurs sur une boîte dont c'est justement le contraire qui a été décidé.
+  # compilateurs sur un conteneur dont c'est justement le contraire qui a été décidé.
   #
   # LES DEUX SENS, PARCE QU'UN TAMPON QUI SURVIT À SA CAUSE MENT. Une machine réinstallée depuis un
   # clone après l'avoir été depuis un paquet garderait sinon un discriminant « binaire » que plus
@@ -526,7 +547,11 @@ BLOC
 }
 
 case "${1:?usage: 62-runtime-helpers.sh <check|apply>}" in
-  check) check ;;
-  apply) apply ;;
+  check|apply)
+    # ⚠ UNE LECTURE DU CANAL, ICI, ET UN SEUL BRANCHEMENT. Sous `deb` dpkg possede ces arbres :
+    # `apply` ne pose rien et se reduit a `check`, qui ajoute ce que dpkg dit. Un canal illisible
+    # est un verdict rouge avant tout geste (prov_channel_or_verdict).
+    prov_channel_or_verdict "$1"
+    if poseur_is_dpkg; then check --dpkg; elif [[ "$1" == "apply" ]]; then apply; else check; fi ;;
   *) p_die "mode inconnu: $1 (check|apply)" ;;
 esac

@@ -12,7 +12,7 @@
 #
 # ⚠ COMMENT UN PROCESS SANS SECRET LIT-IL LA FORGE ? EN ANONYME, ET C'EST MESURE : le depot d'ops
 # est public par construction — c'est celui que tout le monde doit pouvoir lire pour savoir ce que
-# la boite declare. Une forge qui exigerait une session se configure par `FORGE_TOKEN` sur l'unite,
+# le conteneur declare. Une forge qui exigerait une session se configure par `FORGE_TOKEN` sur l'unite,
 # entree EXPLICITE et jamais un repli : sans elle la lecture part en anonyme et echoue bruyamment.
 #
 # ─── L'APPELANT N'ECRIT RIEN, ET C'EST TOUT LE GARDE ────────────────────────────────────────────
@@ -54,7 +54,7 @@ CONVERGE_BIN = os.environ.get(
 )
 OPS_REPO = os.environ.get("LCARS_OPS_REPO", "fleet/lcars")
 # ⚠ Nom GELE, autorite `Fleet.Toolchain.branch/0`, recopie tenue par le contrat
-# `toolchain.branch_single_source` : reglable ici seulement, il ferait converger la boite sur une
+# `toolchain.branch_single_source` : reglable ici seulement, il ferait converger le conteneur sur une
 # branche pendant que les demandes atterrissent dans une autre.
 BRANCH = "tool_request"
 FORGE_BASE_URL = os.environ.get("FORGE_BASE_URL", "")
@@ -136,7 +136,7 @@ def serve_converge(conn):
     login = login_of(uid) or f"uid:{uid}"
 
     if not FORGE_BASE_URL:
-        log("aucun FORGE_BASE_URL — impossible de savoir ce que la boite declare")
+        log("aucun FORGE_BASE_URL — impossible de savoir ce que le conteneur declare")
         return done("FAIL:no_forge")
 
     try:
@@ -204,7 +204,7 @@ def main():
             "de cette machine, il n'a rien a offrir sans lui")
         return 1
     if not FORGE_BASE_URL:
-        log("aucun FORGE_BASE_URL — ce service ne saurait pas ce que la boite declare")
+        log("aucun FORGE_BASE_URL — ce service ne saurait pas ce que le conteneur declare")
         return 2
 
     srv = lcars_socket.bind(SOCKET_PATH, SOCKET_GROUP, SOCKET_MODE, prefix="lcars-privileged")

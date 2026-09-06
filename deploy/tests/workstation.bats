@@ -257,3 +257,259 @@ setup() {
   run bash -c "grep -c 'bandeau_final \"\$(fait substrat)\"' '$SRC'"
   [ "$output" = "1" ]
 }
+
+# ─── --from : LES TROIS FORMES, LE REFUS DE MELANGE, LE SHA256 (lot 2 du chantier release) ──────
+#
+# ⚠ CES TEMOINS EXECUTENT `workstation up`, ET AUCUN NE PROVISIONNE. Le decor est un `deploy/` a
+# nous : `workstation` copie, la lib copiee (c'est elle qui donne `repo_root()` et `prov_channel_here`),
+# `provision` doublé (il REND les faits qu'on lui dicte et TRACE ce qu'on lui demande), `sudo` et
+# `apt` doubles qui tracent et n'executent rien — donc l'escalade s'arrete a la trace, et ce qui se
+# mesure est tout ce qui la precede : le refus, la verification, le detarage, l'argv escalade.
+# `HOME` est a nous : le kit se detare sous `~/.lcars/kits/`, et « ~ » ne doit jamais etre le vrai.
+
+arbre() { # arbre <faits…> -> le deploy/ factice ; les faits sont ceux que provision doctor rendra
+  local d="$BATS_TEST_TMPDIR/arbre/deploy"; rm -rf "$BATS_TEST_TMPDIR/arbre"; mkdir -p "$d"
+  cp "$SRC" "$d/workstation"; cp -a "$BATS_TEST_DIRNAME/../lib" "$d/lib"
+  { echo '#!/usr/bin/env bash'
+    echo 'echo "PROVISION:$*" >> "${TRACE:?}"'
+    echo '[[ -n "${PROV_FACTS_FILE:-}" ]] || exit 0'
+    echo 'cat > "$PROV_FACTS_FILE" <<FACTS'; printf '%s\n' "$@"; echo 'FACTS'
+  } > "$d/provision"
+  BINDIR="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BINDIR"
+  printf '#!/usr/bin/env bash\necho "SUDO:$*" >> "${TRACE:?}"\nexit 0\n' > "$BINDIR/sudo"
+  printf '#!/usr/bin/env bash\necho "APT:$*" >> "${TRACE:?}"\nexit 0\n' > "$BINDIR/apt"
+  chmod 0755 "$d/provision" "$d/workstation" "$BINDIR/sudo" "$BINDIR/apt"
+  export TRACE="$BATS_TEST_TMPDIR/trace"; : > "$TRACE"
+  export PATH="$BINDIR:$PATH"
+  export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"
+  export LCARS_CHANNEL_FILE="$BATS_TEST_TMPDIR/etc/lcars/channel"   # le decor dicte le fait ; la lib ne lit jamais la machine
+  WS="$d/workstation"
+}
+kit() { # kit <nom> [--sans-sha256|--sha256-faux] -> un kit.tar.gz (racine lcars_install/, tampon, deploy/provision) et son .sha256
+  local nom="$1" mode="${2:-}"
+  local st="$BATS_TEST_TMPDIR/stage-$nom"
+  mkdir -p "$st/lcars_install/deploy"
+  printf 'cafe1234\n' > "$st/lcars_install/.source-revision"
+  printf '#!/usr/bin/env bash\necho "KIT-PROVISION:$*" >> "${TRACE:?}"\n' > "$st/lcars_install/deploy/provision"
+  chmod 0755 "$st/lcars_install/deploy/provision"
+  mkdir -p "$BATS_TEST_TMPDIR/kits"
+  tar -czf "$BATS_TEST_TMPDIR/kits/$nom.tar.gz" -C "$st" lcars_install
+  case "$mode" in
+    --sans-sha256) ;;
+    --sha256-faux) printf '%s  %s\n' "$(printf 'x%.0s' {1..64})" "$nom.tar.gz" > "$BATS_TEST_TMPDIR/kits/$nom.tar.gz.sha256" ;;
+    *) ( cd "$BATS_TEST_TMPDIR/kits" && sha256sum "$nom.tar.gz" > "$nom.tar.gz.sha256" ) ;;
+  esac
+  printf '%s\n' "$BATS_TEST_TMPDIR/kits/$nom.tar.gz"
+}
+ws() { run bash "$WS" up "$@"; }
+
+@test "--from : l usage l instruit — les trois formes, et le refus de melange" {
+  run bash "$SRC" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--from <kit.tar.gz>"* ]]
+  [[ "$output" == *".deb"* ]]
+  [[ "$output" == *"sans --from"* ]]
+  [[ "$output" == *"ne se pose pas sur un autre"* ]]
+}
+
+@test "REFUS : sans --from, un checkout ne se pose PAS sur une machine installee par kit — et le geste est nomme, AVANT tout sudo" {
+  arbre channel=kit channel_tree=source
+  ws
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"installée par « kit »"*"poserait « source »"* ]]
+  [[ "$output" == *"provision uninstall --yes"* ]]
+  [[ "$output" == *"--from <kit.tar.gz>"* ]]
+  refute_out 'SUDO:|APT:' < "$TRACE"
+  grep -q '^PROVISION:doctor --only 00-preflight' "$TRACE"    # le fait vient du preflight, pas d'une sonde a nous
+}
+
+@test "REFUS : un .deb ne se pose pas sur une machine installee par kit, ni un kit sur une machine deb — le meme canal, lui, continue" {
+  arbre channel=kit channel_tree=source
+  : > "$BATS_TEST_TMPDIR/x.deb"
+  ws --from "$BATS_TEST_TMPDIR/x.deb"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"installée par « kit »"*"poserait « deb »"* ]]
+  refute_out 'SUDO:|APT:' < "$TRACE"
+  arbre channel=deb channel_tree=source
+  local k; k="$(kit k1)"
+  ws --from "$k"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"installée par « deb »"*"poserait « kit »"*"apt install"* ]]
+  [ ! -d "$HOME/.lcars/kits" ]                                  # rien n'a ete detare
+  # le MEME canal est une mise a jour : deb sur deb passe a apt
+  ws --from "$BATS_TEST_TMPDIR/x.deb"
+  [ "$status" -eq 0 ]
+  grep -q '^SUDO:apt-get install -y --no-install-recommends ' "$TRACE"
+}
+
+@test "REFUS : un canal ILLISIBLE est un refus qui nomme le fichier — jamais « source par defaut »" {
+  arbre channel=invalide channel_tree=source
+  ws
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ILLISIBLE"*"/channel"* ]]
+  refute_out 'SUDO:' < "$TRACE"
+}
+
+@test "DEB : --from <x.deb> [<y.deb>] = « sudo apt-get install -y --no-install-recommends <chemins absolus> », le seul sudo — provision n'est PAS appele par ce script" {
+  arbre channel=aucun channel_tree=source
+  mkdir -p "$BATS_TEST_TMPDIR/paquets"; : > "$BATS_TEST_TMPDIR/paquets/lcars_1.deb"; : > "$BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb"
+  ( cd "$BATS_TEST_TMPDIR/paquets" && bash "$WS" up --from lcars_1.deb --from lcars-tofu_1.deb ) > "$BATS_TEST_TMPDIR/out" 2>&1
+  [ "$?" -eq 0 ]
+  grep -qx "SUDO:apt-get install -y --no-install-recommends $BATS_TEST_TMPDIR/paquets/lcars_1.deb $BATS_TEST_TMPDIR/paquets/lcars-tofu_1.deb" "$TRACE"
+  refute grep -qE '^(SUDO:.*workstation|PROVISION:apply)' "$TRACE"
+  [[ "$(cat "$BATS_TEST_TMPDIR/out")" == *"postinst écrit le canal « deb »"* ]]
+  # un .deb introuvable est un refus, avant apt
+  ws --from "$BATS_TEST_TMPDIR/absent.deb"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"paquet introuvable"* ]]
+}
+
+@test "KIT : --from <kit.tar.gz> verifie le .sha256, detare SOUS L'HUMAIN dans ~/.lcars/kits/<nom>/, et escalade avec le REPERTOIRE du kit" {
+  arbre channel=aucun channel_tree=source
+  local k; k="$(kit lcars-fleet-1.0-abc)"
+  ws --from "$k"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"sha256 vérifié"* ]]
+  local racine="$HOME/.lcars/kits/lcars-fleet-1.0-abc/lcars_install"
+  [ -x "$racine/deploy/provision" ] && [ -f "$racine/.source-revision" ]
+  [[ "$output" == *"kit : $racine"*"DEPUIS ce kit"* ]]
+  # l'escalade porte le REPERTOIRE, pas le tar — et rien d'autre du kit
+  grep -qE "^SUDO:.* bash .*/workstation up --from $racine$" "$TRACE"
+  refute grep -qE "^SUDO:.*\.tar\.gz" "$TRACE"
+  refute grep -q '^PROVISION:apply' "$TRACE"                   # rien n'est pose avant l'escalade
+}
+
+@test "KIT : sans .sha256 a cote, il le DIT et continue ; avec un .sha256 FAUX, il refuse et ne detare rien" {
+  arbre channel=aucun channel_tree=source
+  local k; k="$(kit sans --sans-sha256)"
+  ws --from "$k"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AUCUN $k.sha256 à côté"*"PAS vérifié"* ]]
+  [ -d "$HOME/.lcars/kits/sans/lcars_install" ]
+  grep -q '^SUDO:' "$TRACE"
+  : > "$TRACE"
+  k="$(kit faux --sha256-faux)"
+  ws --from "$k"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne correspond pas"*"$k.sha256"* ]]
+  [ ! -d "$HOME/.lcars/kits/faux" ]
+  refute grep -q '^SUDO:' "$TRACE"
+}
+
+@test "KIT : un repertoire detare vaut aussi — s'il porte deploy/provision ET se declare paquet ; un tar qui n'est pas un kit est refuse" {
+  arbre channel=aucun channel_tree=source
+  local k; k="$(kit k2)"; mkdir -p "$BATS_TEST_TMPDIR/detare"; tar -xzf "$k" -C "$BATS_TEST_TMPDIR/detare"
+  local racine="$BATS_TEST_TMPDIR/detare/lcars_install"
+  ws --from "$racine"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qE "^SUDO:.*workstation up --from $racine$" "$TRACE"
+  # sans tampon a la racine : un checkout, pas un kit — refuse
+  rm -f "$racine/.source-revision"
+  ws --from "$racine"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne se déclare pas paquet"* ]]
+  # un repertoire sans deploy/provision n'est rien de connu
+  ws --from "$BATS_TEST_TMPDIR/detare"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ni un .deb, ni un kit.tar.gz, ni un kit détaré"* ]]
+  # et un tar sans deploy/provision dedans
+  mkdir -p "$BATS_TEST_TMPDIR/vide/x"; tar -czf "$BATS_TEST_TMPDIR/kits/vide.tar.gz" -C "$BATS_TEST_TMPDIR/vide" x
+  ws --from "$BATS_TEST_TMPDIR/kits/vide.tar.gz"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"n'est pas un kit LCARS"* ]]
+}
+
+@test "MELANGE : un .deb et un kit dans le meme --from est un refus ; deux kits aussi" {
+  arbre channel=aucun channel_tree=source
+  : > "$BATS_TEST_TMPDIR/x.deb"; local k; k="$(kit k3)"
+  ws --from "$BATS_TEST_TMPDIR/x.deb" --from "$k"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"un seul kit à la fois, et pas de .deb avec"* ]]
+  ws --from "$k" --from "$BATS_TEST_TMPDIR/x.deb"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"on ne mélange pas un .deb et un kit"* ]]
+  refute_out 'SUDO:|APT:' < "$TRACE"
+}
+
+@test "ORDRE : le refus de melange vient AVANT l'escalade, et la seconde instance ne detare rien (elle recoit un repertoire)" {
+  local corps; corps="$(sed -n '/^cmd_up()/,/^}/p' "$SRC" | grep -vE '^\s*#')"
+  local n_refus n_esc n_kit
+  n_refus="$(grep -n 'refuser_melange "\$voulu"' <<<"$corps" | head -1 | cut -d: -f1)"
+  n_kit="$(grep -n 'kit_deballer' <<<"$corps" | head -1 | cut -d: -f1)"
+  n_esc="$(grep -n 'escalade_si_besoin up' <<<"$corps" | head -1 | cut -d: -f1)"
+  [ -n "$n_refus" ] && [ -n "$n_kit" ] && [ -n "$n_esc" ]
+  [ "$n_refus" -lt "$n_kit" ] && [ "$n_kit" -lt "$n_esc" ]
+  # provision apply se joue DEPUIS le kit : PROVISION est reassigne a la racine du kit
+  grep -q 'PROVISION="$kit_dir/deploy/provision"' <<<"$corps"
+  # et le canal voulu sans --from vient de la LIB, pas d'un litteral
+  grep -q 'prov_channel_here' "$SRC"
+  # detarer en root est refuse : le kit d'un humain ne va pas sous /root
+  sed -n '/^kit_deballer()/,/^}/p' "$SRC" | grep -q 'EUID'
+}
+
+# ─── uninstall : LE DESINSTALLEUR DU CANAL EN PLACE, ET LE SUDO EST ICI (lot 4 du chantier release) ─
+#
+# Meme decor que --from : provision REND le canal, sudo et apt TRACENT. Ce qui se mesure est le
+# desinstalleur choisi — jamais le mauvais — et l'argv escalade.
+
+@test "uninstall : l usage l instruit, et le verbe est dans l alternance" {
+  run bash "$SRC" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"{up|doctor|uninstall}"* ]]
+  [[ "$output" == *"uninstall [--yes]"* ]]
+}
+
+@test "uninstall sous « deb » : « sudo apt purge <paquet>* » (le nom vient de la LIB, jamais ecrit ici), --yes devient -y, tout autre drapeau est REFUSE" {
+  arbre channel=deb channel_tree=source
+  run bash "$WS" uninstall
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"canal « deb »"*"apt purge"*"postrm"* ]]
+  grep -qxF 'SUDO:apt purge lcars*' "$TRACE"
+  refute grep -q '^PROVISION:uninstall' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --yes
+  grep -qxF 'SUDO:apt purge -y lcars*' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --humans
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ne prend que --yes"*"--humans"* ]]
+  refute_out 'SUDO:|APT:' < "$TRACE"
+  # le nom du paquet est celui de la lib (PROV_DEB_PACKAGE), pas un litteral de ce script
+  local code; code="$(grep -vE '^\s*#' "$SRC")"
+  grep -q 'apt purge "${yes\[@\]}" "${PROV_DEB_PACKAGE}\*"' <<<"$code"
+}
+
+@test "uninstall sous kit/source/aucun : « provision uninstall <options> » — sans --yes AUCUNE escalade (le plan ne coute pas un mot de passe), avec --yes l escalade porte le verbe" {
+  arbre channel=kit channel_tree=source
+  run bash "$WS" uninstall --humans
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"canal « kit »"*"provision uninstall --humans"* ]]
+  grep -qx 'PROVISION:uninstall --humans' "$TRACE"
+  refute grep -q '^SUDO:' "$TRACE"
+  : > "$TRACE"
+  run bash "$WS" uninstall --yes --annexes
+  grep -qE '^SUDO:.* bash .*/workstation uninstall --yes --annexes$' "$TRACE"
+  refute grep -q '^PROVISION:uninstall' "$TRACE"      # la premiere instance n execute rien : elle escalade
+  arbre channel=aucun channel_tree=source
+  run bash "$WS" uninstall
+  [[ "$output" == *"canal « aucun »"* ]]
+  grep -qx 'PROVISION:uninstall' "$TRACE"
+  refute grep -q '^SUDO:' "$TRACE"
+}
+
+@test "uninstall sur un canal ILLISIBLE est un refus qui nomme le fichier — jamais le mauvais desinstalleur" {
+  arbre channel=invalide channel_tree=source
+  run bash "$WS" uninstall --yes
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ILLISIBLE"*"/channel"* ]]
+  refute_out 'SUDO:|APT:|PROVISION:uninstall' < "$TRACE"
+}
+
+@test "CANAL inconnu (produit pose sans tampon) : un .deb est REFUSE avec le geste (kit ou uninstall), un kit passe" {
+  local f="$BATS_TEST_TMPDIR/facts-inconnu"; printf 'channel=inconnu\nchannel_tree=kit\n' > "$f"
+  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange deb; echo PASSE"
+  [[ "$output" == *"FAIL:"*"SANS tampon"* ]]
+  refute_out 'PASSE' <<<"$output"
+  run bash -c "fait() { sed -n \"s/^\$1=//p\" '$f'; }; $(sed -n '/^refuser_melange()/,/^}/p' "$SRC"); fail() { echo \"FAIL:\$1\"; exit 1; }; refuser_melange kit; echo PASSE"
+  [[ "$output" == *"PASSE"* ]]
+}

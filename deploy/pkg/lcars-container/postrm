@@ -1,0 +1,54 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-container/postrm
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-container` apres le retrait : l'instance, si elle
+#         existe, N'EST PAS touchee ; au purge ses volumes sont LISTES, jamais detruits en silence
+#
+# dpkg l'appelle : postrm remove · postrm purge · …
+#
+# ⚠ UN PURGE NE DETRUIT PAS DES VOLUMES SANS LE DIRE — il liste et refuse, comme `provision
+# uninstall` sans `--annexes` (30-DEB § 1). Le geste qui detruit un conteneur et ses volumes a un
+# nom, `container reset`, et il n'est plus la : ses fichiers viennent de partir avec ce paquet. Ce
+# script nomme donc ce qui reste et comment l'enlever, avec la sonde de la lib (docker-endpoint).
+set -euo pipefail
+
+say() { echo "lcars-container/postrm: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
+ROOT="${PROV_ROOT:-/opt/lcars}"
+JOURNAL="${LCARS_JOURNAL_FILE:-$ROOT/var/install.journal}"
+
+case "${1:-}" in
+  remove|purge) ;;
+  *) exit 0 ;;
+esac
+
+base="$(sed -n 's/^params  *//p' "$JOURNAL" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PROV_FORGE_BASE=//p' | head -1 || true)"
+[[ -z "$base" ]] || export PROV_FORGE_BASE="$base"
+
+if [[ ! -r "$LIB" ]]; then
+  say "lib introuvable ($LIB) — une instance qui tourne encore se descend par « docker compose -p <base>-fleet down »"
+  exit 0
+fi
+bash -c '
+  set -euo pipefail
+  . "$1"; mode="$2"
+  proj="${PROV_FORGE_BASE}-fleet"
+  if ! docker_endpoint; then
+    echo "lcars-container/postrm: docker injoignable — $PROV_DOCKER_WHY ; l instance ($proj), si elle existe, reste telle quelle" >&2
+    exit 0
+  fi
+  ctrs="$("$PROV_DOCKER_BIN" ps -aq --filter "label=com.docker.compose.project=$proj" 2>/dev/null || true)"
+  vols="$("$PROV_DOCKER_BIN" volume ls -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null || true)"
+  if [[ -z "$ctrs" && -z "$vols" ]]; then
+    echo "lcars-container/postrm: aucune instance ($proj) sur ce daemon — rien a dire" >&2
+    exit 0
+  fi
+  [[ -z "$ctrs" ]] || echo "lcars-container/postrm: l instance $proj TOURNE ENCORE ($(wc -w <<<"$ctrs") conteneur(s)) — « docker compose -p $proj down » l arrete" >&2
+  if [[ -n "$vols" ]]; then
+    echo "lcars-container/postrm: volumes de $proj GARDES ($mode : on liste, on ne detruit pas sans le dire) :" >&2
+    for v in $vols; do echo "lcars-container/postrm:   $v — « docker volume rm $v » si tu en es sur" >&2; done
+  fi
+' _ "$LIB" "$1" || say "sonde en echec — rien n'est suppose"
+exit 0

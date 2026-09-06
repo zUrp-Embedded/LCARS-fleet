@@ -122,7 +122,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   # full_name, on n'assigne pas une issue a un full_name). Le provisioning le PROJETTE a chaque
   # boot dans `<store>/state/pilot.assignee` (module `45-sudoers-toolchain`, keye sur l'uid du
   # siege) ; ce module le LIT. Aucun defaut litteral : une chaine en dur ici serait fausse sur
-  # toute boite dont l'installeur n'a pas ce login, et nommer un ROLE plutot que le siege assigne
+  # tout conteneur dont l'installeur n'a pas ce login, et nommer un ROLE plutot que le siege assigne
   # l'issue a quelqu'un qui ne peut pas l'ouvrir.
   #
   # Etats, et qui les dit :
@@ -131,7 +131,7 @@ defmodule Fleet.Pilot.IncidentRegistry.Escalation do
   #     n'est pas passe, ou LCARS_ADMIRAL n'est pas pose — panne dite, patron `egress.ex`) ;
   #     ⚠ VIDE = ABSENT, jamais `""` : un `assignees: [""]` partirait sur la forge, echouerait,
   #     et le retry de `create_system_issue/5` rattraperait en brulant un appel — panne invisible ;
-  #   * store absent (pas de LCARS_STORE_ROOT) -> nil, silencieux : le nominal d'une boite sans
+  #   * store absent (pas de LCARS_STORE_ROOT) -> nil, silencieux : le nominal d'un conteneur sans
   #     magasin (avant le lot F). L'issue s'ouvre SANS assignee — le label reste le chemin durable.
   defp resolve_assignee(opts) do
     case opts[:assignee] || Application.get_env(:lcars_fleet, :pilot_system_issue_assignee) do

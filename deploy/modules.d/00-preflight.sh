@@ -19,7 +19,7 @@
 #     son menu selon ce que la machine permet.
 #
 # ⚠ MESURER N'EST PAS REFUSER, et c'est ce qui rend les deux lectures compatibles. Un fait défavorable
-# ne devient un refus que là où il en était déjà un : le rail boîte a besoin de savoir que docker
+# ne devient un refus que là où il en était déjà un : le rail conteneur a besoin de savoir que docker
 # manque, il n'a pas besoin qu'on abatte le provisionnement pour autant. Les verdicts de ce module
 # n'ont pas bougé d'un cran ; ce qui est neuf, ce sont les faits POSÉS à côté.
 
@@ -97,7 +97,7 @@ check() {
       # ⚠ CE `p_fail` NE BOUGE PAS, et c'est lui qui fait les deux lectures. À l'`apply`, il refuse
       # une machine dont personne n'a dit qu'elle était dédiée. Au `doctor` que la porte joue, il
       # rend le verdict du module non conforme — mais la porte ne lit pas le verdict, elle lit le
-      # fait `consent=none`, qui rend le rail POSTE impossible sans toucher au rail BOÎTE.
+      # fait `consent=none`, qui rend le rail POSTE impossible sans toucher au rail CONTENEUR.
       p_fact consent none
       p_fail "HORS CIBLE : le poste de travail LCARS, c'est WSL2 (substrat mesuré : linux). Ce provisionnement possède /etc, crée un groupe système, pose /opt/lcars, et n'a aucun désinstalleur — on ne le lâche pas sur une machine dont on ne sait pas si c'est celle de quelqu'un. Sous Windows : « wsl --install -d Ubuntu-24.04 », puis relance ici. Sur du Linux natif, clone le dépôt et sers-toi de ce que tu veux — ou LCARS_ALLOW_ANY_HOST=1 si tu sais ce que tu fais"
     fi
@@ -114,8 +114,8 @@ check() {
       p_drift "WSL1 détecté ($(uname -r)) — bwrap exige WSL2 : « wsl --set-version <distro> 2 » côté Windows"
     fi
 
-    # `/etc/wsl.conf` : le rail poste le REMPLACE en entier (c'est la frontière de sécurité de la
-    # boîte). Un fichier étranger n'est pas un refus — c'est un avertissement que la porte doit
+    # `/etc/wsl.conf` : le rail poste le REMPLACE en entier (c'est la frontière de sécurité du
+    # conteneur). Un fichier étranger n'est pas un refus — c'est un avertissement que la porte doit
     # pouvoir afficher AVANT que quiconque valide, pas découvrir après.
     if [[ ! -f /etc/wsl.conf ]]; then
       p_fact wslconf absent
@@ -141,7 +141,7 @@ check() {
 
   # ─── DOCKER, SUR TOUT SUBSTRAT ────────────────────────────────────────────────────────────────
   #
-  # ⚠ IL N'ÉTAIT MESURÉ QUE SOUS WSL, et c'était le trou du préflight. Le rail BOÎTE tourne sur
+  # ⚠ IL N'ÉTAIT MESURÉ QUE SOUS WSL, et c'était le trou du préflight. Le rail CONTENEUR tourne sur
   # n'importe quel substrat et docker y est sa seule condition d'existence : ne pas le mesurer
   # ailleurs, c'était laisser la porte deviner — ou reproduire la sonde de son côté, ce qu'elle
   # faisait. Mesurer partout ne coûte rien et ferme les deux.
@@ -172,7 +172,7 @@ check() {
     fi
   fi
 
-  # `compose` : le rail boîte monte un compose, le poste monte sa forge avec. Sans daemon la
+  # `compose` : le rail conteneur monte un compose, le poste monte sa forge avec. Sans daemon la
   # question n'a pas d'objet — on ne la pose donc pas plutôt que d'inventer une réponse.
   if [[ "$docker_repond" -eq 0 ]]; then
     p_fact compose sans-objet
@@ -188,7 +188,7 @@ check() {
   # ─── LA FORGE : MONTÉE PAR LE RAIL, OU FOURNIE ────────────────────────────────────────────────
   #
   # `FORGE_BASE_URL` posée = « j'ai déjà une forge, consomme-la ». C'est l'axe forge du § 13 de
-  # `40-RAILS.md`, et le rail boîte l'exige aujourd'hui hors `--bench`. Le fait sert à la porte pour
+  # `40-RAILS.md`, et le rail conteneur l'exige aujourd'hui hors `--bench`. Le fait sert à la porte pour
   # dire, AVANT la validation, si ce qu'on lui a donné répond.
   if [[ -n "${FORGE_BASE_URL:-}" ]]; then
     p_fact forge_fournie "$FORGE_BASE_URL"
@@ -197,7 +197,7 @@ check() {
       p_ok "forge fournie et joignable ($FORGE_BASE_URL)"
     else
       p_fact forge_joignable non
-      p_warn "FORGE_BASE_URL est posée ($FORGE_BASE_URL) mais l'API ne répond pas — le rail boîte s'y raccrochera et échouera au premier geste"
+      p_warn "FORGE_BASE_URL est posée ($FORGE_BASE_URL) mais l'API ne répond pas — le rail conteneur s'y raccrochera et échouera au premier geste"
     fi
   else
     p_fact forge_fournie ""
@@ -206,7 +206,7 @@ check() {
 
   # ─── SUDO ─────────────────────────────────────────────────────────────────────────────────────
   #
-  # Le rail poste en a besoin ; la boîte, jamais. Ce n'est PAS un refus ici : ce module tourne déjà
+  # Le rail poste en a besoin ; le conteneur, jamais. Ce n'est PAS un refus ici : ce module tourne déjà
   # sous root à l'`apply`. C'est un fait pour la porte, qui doit pouvoir dire « ce rail te demandera
   # un mot de passe » avant qu'on choisisse, et refuser proprement si sudo manque.
   if [[ "$EUID" -eq 0 ]]; then
@@ -215,6 +215,28 @@ check() {
     p_fact sudo oui
   else
     p_fact sudo absent
+  fi
+
+  # ─── LE CANAL : QUI A POSÉ LE PRODUIT SUR CETTE MACHINE, ET CE QUE CET ARBRE POSERAIT ────────
+  #
+  # `channel` est le fait de la MACHINE (`prov_channel` : source, kit, deb, aucun) ; `channel_tree`
+  # est ce que CET arbre écrirait s'il posait (kit si c'est un paquet, source sinon — `prov_channel_here`).
+  # La porte et `workstation` les comparent : un canal sur un autre est un REFUS qui nomme le
+  # geste, jamais une conversion. Le même canal est une mise à jour ; `aucun`, une première pose.
+  p_fact channel_tree "$(prov_channel_here)"
+  # ⚠ APPEL NU : le p_fail d'un canal illisible doit COMPTER ici — un `$( )` l'imprimerait sans le
+  # compter, et ce module rendrait vert une machine dont personne ne sait qui la possède.
+  if prov_channel >/dev/null; then
+    p_fact channel "$PROV_CHANNEL"
+    if [[ "$PROV_CHANNEL" == "aucun" ]]; then
+      p_ok "aucun canal d'installation ($PROV_CHANNEL_FILE absent) — cette machine n'a jamais été posée ; cet arbre poserait « $(prov_channel_here) »"
+    elif [[ "$PROV_CHANNEL" == "inconnu" ]]; then
+      p_warn "canal d'installation INCONNU : un produit est posé ($PROV_PREFIX) sans tampon ($PROV_CHANNEL_FILE) — posé avant le tampon ; un kit ou une source le reprend et l'écrit, un paquet .deb ne se pose PAS dessus"
+    else
+      p_ok "canal d'installation : $PROV_CHANNEL ($PROV_CHANNEL_FILE) — cet arbre poserait « $(prov_channel_here) »"
+    fi
+  else
+    p_fact channel invalide
   fi
 
   # ─── Outils de bootstrap (avant même 10-packages : il faut de quoi l'exécuter) ───────────────

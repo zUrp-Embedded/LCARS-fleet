@@ -2,12 +2,12 @@ defmodule Fleet.SystemConfig do
   use Boundary, deps: [], exports: []
 
   @moduledoc """
-  Reader of the box-wide, ADMIN-OWNED settings file (`/etc/lcars/fleet.json`) — a pure, testable
+  Reader of the container-wide, ADMIN-OWNED settings file (`/etc/lcars/fleet.json`) — a pure, testable
   primitive for `config/runtime.exs`, same family as `Fleet.EnvParse`.
 
   WHY A FILE AND NOT AN ENV VAR — the env passes through the HUMAN's hands: `fleet` sources
   `~/.lcars/fleet.env` and any worker can export a variable in their shell. A setting that
-  belongs to the box's administrator (admiral) alone must come from a path only root writes —
+  belongs to the container's administrator (admiral) alone must come from a path only root writes —
   same idiom as `/etc/lcars/deck-oidc.json` (posed by provisioning, read by the deck at boot).
   `runtime.exs` runs ONCE at BEAM boot, so the value is frozen for the fleet's lifetime by
   construction: a fleet starts WITH or WITHOUT, never flips mid-flight.
@@ -41,7 +41,7 @@ defmodule Fleet.SystemConfig do
       {:error, reason} ->
         Logger.warning(
           "Fleet.SystemConfig: #{path} exists but cannot be read (#{inspect(reason)}) — " <>
-            "every box-wide setting falls back to its default"
+            "every container-wide setting falls back to its default"
         )
 
         defaults()
@@ -54,7 +54,7 @@ defmodule Fleet.SystemConfig do
 
           _ ->
             Logger.warning(
-              "Fleet.SystemConfig: #{path} is not a JSON object — every box-wide setting " <>
+              "Fleet.SystemConfig: #{path} is not a JSON object — every container-wide setting " <>
                 "falls back to its default (fix the file, then restart the fleet)"
             )
 

@@ -202,7 +202,7 @@ teardown() { rm -rf "$TMP_BASE"; }
 }
 
 @test "outillage: LCARS_POD_TOOLCHAIN_ENV absent -> INERT, aucun --setenv de plus (DR-023)" {
-  # Le pendant exact du miroir git ci-dessus : une boite sans magasin doit produire la ligne de
+  # Le pendant exact du miroir git ci-dessus : un conteneur sans magasin doit produire la ligne de
   # commande d'hier, pas une ligne degradee. Un outillage manquant ralentit un pod, il ne le tue pas.
   unset LCARS_POD_TOOLCHAIN_ENV
   run "$SCRIPT" engineer pod-1 "$POD_DIR" /bin/true

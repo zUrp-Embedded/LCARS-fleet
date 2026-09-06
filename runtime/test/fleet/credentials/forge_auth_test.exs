@@ -89,7 +89,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
 
     # ⚠ LE TEMOIN DE LA NOUVELLE CAUSE, ET IL EST STRUCTUREL. Un compte CONFIGURE dont le service ne
-    # rend pas le jeton n'est PAS la meme chose qu'une boite sans config : la premiere croit pouvoir
+    # rend pas le jeton n'est PAS la meme chose qu'un conteneur sans config : la premiere croit pouvoir
     # pousser et ne le peut pas. `git_env/0` degrade pareil dans les deux cas — c'est le bon repli,
     # git echoue bruyamment — mais le journal doit dire laquelle des deux, sinon l'operateur cherche
     # une config cassee alors qu'il lui manque une unite qui tourne.
@@ -103,16 +103,16 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
   end
 
-  describe "account/0 — la source unique du compte de la boite" do
+  describe "account/0 — la source unique du compte du conteneur" do
     test "configure → le nom du compte" do
       configure("https://forge.example/")
       assert ForgeAuth.account() == @account
     end
 
-    # `nil` EST UN ETAT LEGITIME, PAS UNE PANNE : une boite en mode outil, un banc sans forge. Ce
+    # `nil` EST UN ETAT LEGITIME, PAS UNE PANNE : un conteneur en mode outil, un banc sans forge. Ce
     # module ne devine aucun nom par defaut — devine-le ici, et deux endroits sauraient « le compte
-    # du systeme », dont un se tromperait en silence sur toute boite qui ne s'appelle pas comme la
-    # boite de reference.
+    # du systeme », dont un se tromperait en silence sur tout conteneur qui ne s'appelle pas comme le
+    # conteneur de reference.
     test "absent → nil, jamais un nom devine" do
       Application.delete_env(:lcars_fleet, :credentials_forge_auth)
       assert ForgeAuth.account() == nil
@@ -145,7 +145,7 @@ defmodule Fleet.Credentials.ForgeAuthTest do
     end
 
     # ⚠ LES DEUX REFUS NE SE CONFONDENT PAS, ET LEURS REMEDES SONT OPPOSES : `malformed` se corrige
-    # dans la config de la boite, `unavailable` demande si le service d'autorite repond. Les fondre
+    # dans la config du conteneur, `unavailable` demande si le service d'autorite repond. Les fondre
     # enverrait la moitie des pannes au mauvais geste — c'est exactement la separation que DR-024 a
     # posee entre « absent » et « malforme », etendue au troisieme etat que ce chantier introduit.
     test "compte configure, jeton indisponible → {:error, :forge_auth_unavailable}, PAS malformed" do

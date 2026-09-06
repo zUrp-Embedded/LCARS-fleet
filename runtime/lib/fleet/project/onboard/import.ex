@@ -1,6 +1,6 @@
 defmodule Fleet.Project.Onboard.Import do
   @moduledoc """
-  Faire entrer sur la boite ce qui vient d'AILLEURS : une forge externe (`import_external/3`) ou le
+  Faire entrer sur le conteneur ce qui vient d'AILLEURS : une forge externe (`import_external/3`) ou le
   magasin d'un catalogue (`import_deposit/3`), plus l'inventaire de ce qu'un humain peut deposer
   (`deposit_candidates/2`).
 
@@ -16,7 +16,7 @@ defmodule Fleet.Project.Onboard.Import do
   require Logger
 
   # LE TROISIEME REFUS, et c'est celui qui empeche le mensonge silencieux. L'org d'un projet EST le
-  # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur une boite qui
+  # nom de son catalogue, et ce lien est fixe pour sa vie : importer `web/vitrine` sur un conteneur qui
   # n'a pas le catalogue `web` ne doit PAS retomber sur le catalogue local. Le projet tournerait avec
   # les roles, les cartes et les SP d'un autre metier, sans que rien ne le dise — c'est exactement
   # l'etat que le lien fixe existe pour interdire.

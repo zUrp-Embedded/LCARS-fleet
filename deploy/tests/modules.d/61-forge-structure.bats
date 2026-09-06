@@ -150,7 +150,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
 
 @test "la copie est INITIALISEE hors-ligne — le geste appelle \`tofu apply\` NU" {
   sed -n '/^  for m in instance \.; do/,/^  done/p' "$G" | refute_out 'tofu init'
-  code | grep -q 'tofu init -input=false -no-color'
+  code | grep -q '"$TOFU_BIN" init -input=false -no-color'
   code | grep -q 'TF_CLI_CONFIG_FILE='
 }
 
@@ -161,7 +161,7 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
 @test "le pre-requis manquant est NOMME avec le module qui le pose" {
   grep -q '46-tofu' "$SRC"
   code | grep -q 'LCARS_TOFU_BIN:-/usr/local/bin/tofu'
-  refute grep -q 'box build' "$SRC"
+  refute grep -q 'container build' "$SRC"
 }
 
 @test "le depot de demo est recable, la REFERENCE se demande a son autorite — ce module ne la nomme pas" {
@@ -200,4 +200,10 @@ code() { grep -vE '^\s*#|^\s*`#' "$SRC"; }
   grep -q '63-forge-tokens' <<<"$c_check"
   refute grep -q 'tofu plan' <<<"$c_check"
   refute grep -q 'forge-gestures' <<<"$c_check"
+}
+
+@test "tofu est appele par SON chemin (TOFU_BIN), jamais par le PATH — sous apt, DPkg::Path n'a pas /usr/local/bin (banc 2004 : rc 127)" {
+  local src="$BATS_TEST_DIRNAME/../../modules.d/61-forge-structure.sh"
+  grep -qE 'env -C "\$recipe/\$m" "\$TOFU_BIN" init' "$src"
+  refute grep -qE 'env -C "\$recipe/\$m" tofu init' "$src"
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/boot_seat.bats
+# SOURCE: runtime/test/services/container/boot_seat.bats
 # AUTHOR: DrDree
 # STARDATE: 2026-08-23
-# STATUS: bats tests for entrypoint.sh — le SIEGE de la boite est le #1 de la forge, et il le DERIVE
+# STATUS: bats tests for entrypoint.sh — le SIEGE du conteneur est le #1 de la forge, et il le DERIVE
 #
 # ─── LA REGLE QUE CES TEMOINS GARDENT ───────────────────────────────────────────────────────────
 #
@@ -11,7 +11,7 @@
 # de fleet.
 #
 # ⚠ AUCUN RAIL NE PART DE RIEN, et c'est ce qui interdit d'inventer un nom. Le poste a son systeme
-# avant LCARS, la boite vise une forge qui tourne deja. Le seul cas from-scratch est `--bench`, qui
+# avant LCARS, le conteneur vise une forge qui tourne deja. Le seul cas from-scratch est `--bench`, qui
 # cree tout — et il PASSE le nom lui-meme (`bench-up.sh:353`). Un defaut `admiral` ne sert donc aucun
 # appelant, et il nuit : c'est exactement la coincidence que ce code retire. D'ou le REFUS en
 # derniere branche, la ou l'ancienne ecriture nommait.
@@ -19,7 +19,7 @@
 # ⚠ ET LE DEFAUT NE DOIT PAS VIVRE PLUS HAUT NON PLUS. Les composes posaient
 # `LCARS_ADMIRAL: "${LCARS_ADMIRAL:-admiral}"` : la variable etait alors TOUJOURS definie dans le
 # conteneur, la premiere branche court-circuitait tout, et la derivation ne s'executait JAMAIS sur
-# une boite composee. Le dernier temoin de ce fichier garde ca, et c'est le seul qui aurait attrape
+# un conteneur compose. Le dernier temoin de ce fichier garde ca, et c'est le seul qui aurait attrape
 # le defaut — les autres appellent la fonction avec un decor qui efface la variable.
 
 # ⚠ SC2016 : CE TEMOIN LIT DU CODE. Ses motifs `grep`/`sed` portent des `${VAR:-defaut}` qui
@@ -33,7 +33,7 @@
 load ../../support/refute
 
 setup() {
-  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
   # ⚠ LE DECOR POSSEDE L'ENVIRONNEMENT. Ce fichier lit `LCARS_ADMIRAL` et `FORGE_BASE_URL` : un
   # temoin qui les herite mesure la machine qui le lance, pas la regle.
@@ -50,7 +50,7 @@ setup() {
   # `useradd`, qui exige root et n'est pas ce qu'on mesure.
   HEAD="$BATS_TEST_TMPDIR/head.sh"
   # La tete : les portes outil et la garde du siege — tout ce qui precede l'init de l'instance.
-  sed '/^BOX_INIT=/,$d' "$SRC" > "$HEAD"
+  sed '/^CONTAINER_INIT=/,$d' "$SRC" > "$HEAD"
 }
 
 seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
@@ -64,7 +64,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
 # ⚠ IL Y AVAIT DEUX NOMS ET UN SEUL POSEUR. `LCARS_UID` est l'uid AUQUEL cet entrypoint cree le
 # siege (`useradd -u`) ; `LCARS_SYSADMIN_UID` est celui que les gardes RESERVENT — GUARD B dans
 # `bin/fleet`, son miroir dans `config/runtime.exs`, `is_fleet_human`, et le plancher `uid_floor`
-# du convergeur. Rien ne posait le second dans la boite : ni le compose, ni ce fichier.
+# du convergeur. Rien ne posait le second dans le conteneur : ni le compose, ni ce fichier.
 #
 # LES DEUX DEFAUTS VALANT 1000, ILS S'ACCORDAIENT PAR COINCIDENCE — et le second temoin ci-dessous
 # est le seul des deux qui aurait attrape le defaut : le premier passe aussi bien avant qu'apres.
@@ -76,7 +76,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
 }
 
 @test "siege : la garde SUIT l'uid du siege — le cas ou les deux defauts se separent" {
-  # ⚠ LE TEMOIN QUI COMPTE. `LCARS_UID` est une molette documentee (`deploy/box`) : la tourner
+  # ⚠ LE TEMOIN QUI COMPTE. `LCARS_UID` est une molette documentee (`deploy/container`) : la tourner
   # creait le siege a 1005 pendant que GUARD B continuait de reserver 1000. admiral pouvait alors
   # lancer une fleet, et ses pods heritent de son uid sudo-capable — l'exact inverse de la sandbox
   # que la garde existe pour tenir.
@@ -86,7 +86,7 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
   [[ "$output" == *"UID=1005 SYSADMIN=1005"* ]]
 }
 
-# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `runtime/test/services/box/init_seat.bats` ───
+# ─── LA DERIVATION DU SIEGE EST DU PRODUIT (lot 6) : `runtime/test/services/container/init_seat.bats` ───
 
 @test "VERROU : aucun compose ne pose de defaut sur LCARS_ADMIRAL" {
   # ⚠ LE SEUL TEMOIN QUI AURAIT ATTRAPE LE DEFAUT REEL, et les huit ci-dessus ne le pouvaient pas :
@@ -106,29 +106,29 @@ seat_sh() { # seat_sh <corps> — joue la tete puis le corps, decor complet
 
 # ─── LE REFUS N'EMPORTE PLUS LE CONTENEUR ───────────────────────────────────────────────────────
 
-@test "siege indeterminable : la boite RESTE DEBOUT — le remede qu'elle nomme exige un docker exec" {
-  # ⚠ MESURE DE LA 4e FORME — boite + forge FOURNIE, sans `--bench` (.63, 2026-08-30). Le refus
-  # etait `resolve_admiral || exit 1`, et sous `restart: unless-stopped` la boite BOUCLAIT :
+@test "siege indeterminable : le conteneur RESTE DEBOUT — le remede qu'il nomme exige un docker exec" {
+  # ⚠ MESURE DE LA 4e FORME — conteneur + forge FOURNIE, sans `--bench` (.63, 2026-08-30). Le refus
+  # etait `resolve_admiral || exit 1`, et sous `restart: unless-stopped` le conteneur BOUCLAIT :
   #     politique : unless-stopped (max 0) · redemarrages: 25
-  # Or le geste que ce refus NOMME lui-meme — « box config » — passe par un `docker exec`, et
+  # Or le geste que ce refus NOMME lui-meme — « container config » — passe par un `docker exec`, et
   # docker le refuse sur un conteneur qui redemarre :
   #     Container … is restarting, wait until the container is running
-  # Le diagnostic etait juste, le remede nomme, et l'etat de la boite le rendait INJOUABLE.
+  # Le diagnostic etait juste, le remede nomme, et l'etat du conteneur le rendait INJOUABLE.
   #
   # Le refus n'a pas bouge — un siege inventable ne s'invente toujours pas. Ce qui change, c'est
   # qu'il n'emporte plus le conteneur avec lui : meme arbitrage que pour l'echec de convergence,
   # « elle tourne et reste joignable POUR ETRE REPAREE ».
-  local src="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  local src="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   local code; code="$(grep -vE '^\s*#' "$src")"
-  # Lot 6 : la derivation est dans `box/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
+  # Lot 6 : la derivation est dans `container/init.sh seat` (rc 3 = indeterminable) ; l'entrypoint lit ce
   # code et reste debout.
-  grep -qE '^\s*3\) say "boite EN ATTENTE DE CONFIGURATION' <<<"$code"
+  grep -qE '^\s*3\) say "conteneur EN ATTENTE DE CONFIGURATION' <<<"$code"
   grep -q 'exec sleep infinity' <<<"$code"
   # ⚠ CE COMMENTAIRE DISAIT « la negation s'ecrit `!`, terminale sous `set -e` », ET IL ETAIT FAUX
   # DEUX FOIS : cette ligne n'est pas terminale (une assertion la suit), et `!` est de toute facon
   # exempte d'`errexit` par POSIX. L'assertion s'executait, rendait 1, et bats passait a la suite —
   # verte au moment precis ou le `|| exit 1` qu'elle interdit serait revenu.
   refute grep -qE 'init\.sh" apply \|\| exit' <<<"$code"
-  # ET ELLE DIT POURQUOI ELLE ATTEND : une boite muette debout serait pire qu'une boite qui boucle.
+  # ET IL DIT POURQUOI IL ATTEND : un conteneur muet debout serait pire qu'un conteneur qui boucle.
   grep -q 'EN ATTENTE DE CONFIGURATION' <<<"$code"
 }

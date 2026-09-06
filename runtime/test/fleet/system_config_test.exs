@@ -1,7 +1,7 @@
 defmodule Fleet.SystemConfigTest do
   @moduledoc """
-  A1 — the box-wide admin settings file (`/etc/lcars/fleet.json`). Both failure directions are
-  deliberate and PINNED: absent = defaults in silence (the nominal state of a fresh box);
+  A1 — the container-wide admin settings file (`/etc/lcars/fleet.json`). Both failure directions are
+  deliberate and PINNED: absent = defaults in silence (the nominal state of a fresh container);
   present-but-broken = defaults OUT LOUD (an admin who wrote a file expects it to act).
   """
   use ExUnit.Case, async: true
@@ -19,8 +19,8 @@ defmodule Fleet.SystemConfigTest do
   # fenetre sans fermer la course, et paierait en temps de suite ce qui reste faux).
   #
   # Toutes les sorties de ce module portent son prefixe : le nier est exactement le contrat annonce
-  # — « une boite neuve n'est pas un evenement » — et c'est vrai quoi qu'il tourne a cote.
-  test "absent file → defaults, in SILENCE (a fresh box is not an event)", %{tmp_dir: dir} do
+  # — « un conteneur neuf n'est pas un evenement » — et c'est vrai quoi qu'il tourne a cote.
+  test "absent file → defaults, in SILENCE (a fresh container is no event)", %{tmp_dir: dir} do
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         assert %{conflict_engine: false} = SystemConfig.read(Path.join(dir, "nope.json"))

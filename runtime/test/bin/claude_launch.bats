@@ -157,7 +157,7 @@ teardown() {
 # No trace in the pod — user arbitration 2026-08-15.
 #
 # This launcher runs INSIDE bwrap: every path it can write is a path the confined agent can read.
-# A boot trace therefore handed the agent the recipe of its own box (permission mode and flags,
+# A boot trace therefore handed the agent the recipe of its own container (permission mode and flags,
 # model, effort, setting-sources, the vendor surface that was cut, whether creds are present).
 # Redacting it field by field was tried and is the wrong shape — one forgotten field re-opens it
 # silently. The witness is written on the DIRECTORY, not on a filename: a trace under a new name

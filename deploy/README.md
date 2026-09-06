@@ -1,7 +1,7 @@
 # deploy — machine nue → `fleet start`
 
 **Date** : 2026-07-05
-**Dernière révision** : 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
+**Dernière révision** : 2026-09-05 (§ paquets Debian, lot 3) — 2026-08-26 (5ᵉ loi : la frontière est l'API docker — reconstituée depuis
 quatre gestes qui lui obéissaient déjà, et la soustraction assumée qui en découle)
 **Statut** : **EN SERVICE**, et le nord voulu reste un déployeur GÉNÉRIQUE catalogue-driven plutôt que
 ce code hardcodé LCARS — c'est une direction de conception, pas une interdiction d'usage. Analyse et
@@ -9,7 +9,7 @@ ADR : `work/beyond_#5/#5.3/drdree/ADR-install-compile-release-v2.md`.
 
 ⚠ **CETTE LIGNE DISAIT « PROTO PARKÉ … NE PAS s'en servir en l'état », et le conteneur s'en sert à
 CHAQUE DÉMARRAGE** — l'entrypoint lançait `provision apply --substrate docker` au boot (jusqu'au
-lot 6 du chantier deploy-independance : le boot est `runtime/services/box/boot.sh`, il ne joue plus
+lot 6 du chantier deploy-independance : le boot est `runtime/services/container/boot.sh`, il ne joue plus
 aucun module de l'installeur), et le banc entier reposait dessus. Un lecteur avait donc, avec les seules sources qu'on lui donnait, une
 contradiction insoluble : le README interdit, le runtime exécute. Les deux bugs qu'il nommait sont
 FERMÉS et épinglés :
@@ -41,9 +41,9 @@ frontiere (`tests/services_dir.bats`) — `deploy/docker/` ne reprend aucun auxi
 fichier de `services/` est pose quelque part.
 
 Ce qui reste sous `deploy/docker/` est du packaging conteneur : `Dockerfile` (dont l'`ENTRYPOINT`
-est le boot du produit, `runtime/services/box/boot.sh`), les cinq compose et l'override des
-secrets (`docker-compose.secrets.yml`, que `box` ajoute à chaque appel : les secrets posés par
-`box config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
+est le boot du produit, `runtime/services/container/boot.sh`), les cinq compose et l'override des
+secrets (`docker-compose.secrets.yml`, que `container` ajoute à chaque appel : les secrets posés par
+`container config` côté hôte montent sous `/run/secrets`), le seccomp, `forge-runner.sh`
 (appele pendant l'apply, jamais apres) et `bench/`.
 
 un humain lance `fleet start` et la chaîne complète fonctionne. A remplacé l'arbre v1 `fleet/provisioning/`, retiré le 2026-08-06 (récupérable par `git show v1-excommunication-base:`)
@@ -69,7 +69,7 @@ morte avec le modèle).
    lui seul.
 
    Quatre gestes la portent, et c'est d'eux qu'elle se lit :
-   - le bandeau du rail boîte promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
+   - le bandeau du rail conteneur promet « pas de paquet, pas d'utilisateur, pas de groupe, rien dans
      /etc ni /usr » — `docker-ce` le contredirait mot pour mot (dépôt tiers, `/etc/apt/keyrings`,
      `sources.list.d`, unité systemd, groupe) ;
    - la même branche s'interdit l'`exec sudo`, sans quoi l'image sort bâtie en root : elle ne peut
@@ -89,17 +89,45 @@ deploy/provision list                  # les modules retenus pour ce substrat
 sudo deploy/provision apply --only 60  # un seul module
 ```
 
-**Le jumeau : `deploy/box`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
-`wsl.conf`) ; `box` pilote une BOÎTE (image, conteneur, volumes, forge de l'opérateur). Mêmes verbes
+**Le jumeau : `deploy/container`.** `provision` provisionne un HÔTE (paquets, groupes, `/opt/lcars`,
+`wsl.conf`) ; `container` pilote un CONTENEUR (image, instance, volumes, forge de l'opérateur). Mêmes verbes
 documentés en tête, mêmes codes retour, même place dans l'arbre — qui sait lire l'un sait lire
 l'autre. Les douze verbes (`build up doctor shell logs down reset source-push config forge-check
-forge-apply runner-token`) s'appellent par `deploy/box <verbe>` à la racine, qui détecte, refuse en
+forge-apply runner-token`) s'appellent par `deploy/container <verbe>` à la racine, qui détecte, refuse en
 nommant ce qui manque, et `exec` le délégué avec l'argv verbatim.
 
 **La porte publique des deux rails est `install.sh`** (racine) : elle détecte ce que la machine
 PERMET, demande ce que l'opérateur VEUT quand les deux sont possibles, et délègue — `--workstation`
-vers `provision apply`, `--box` vers `box`, `--bench` vers le fournisseur de banc. Ce qui suit
+vers `provision apply`, `--container` vers `container`, `--bench` vers le fournisseur de banc. Ce qui suit
 `--` part verbatim au délégué de la branche.
+
+**Son mouvement SOURCE a trois provenances** (lot 4 du chantier release) : lancée dans un checkout
+→ `source`, on continue dedans (HEAD est dit) ; à la racine d'un kit → `kit` ; pipée (`curl … | bash`)
+ou `--from-release` → `release` : elle télécharge l'artefact de SA version dans `~/.lcars/kits/<tag>/`
+depuis `BASE` (`LCARS_DOOR_BASE` la surcharge pour un banc ; `http://` n'entre que par
+`LCARS_DOOR_INSECURE_HTTP=1`, dit), le vérifie contre la table `sums()` EN DUR dans la porte
+(obligatoire, jamais silencieux : un écart efface le fichier et rien n'est posé), puis la signature
+minisign si l'outil est là — sinon « provenance NON vérifiée (sha256 seul) » sur stderr, jamais tu.
+Le kit est TOUJOURS pris (c'est l'arbre : le préflight vit dedans) ; sous Debian/Ubuntu les `.deb`
+du rail poste en plus (`--tar` force le kit), tendus à `workstation up --from …`. Les noms d'assets
+vivent dans UNE fonction, `assets_for <os> <arch>`. `install.sh` du dépôt est le GABARIT (constantes
+`@@DOOR_…@@` vides) ; `deploy/lib/door-gen.sh <tag> <base> <dist-dir>` produit la porte de la
+version et son `install.sh.sha256` — un témoin tient que la porte générée est le gabarit hors ces
+lignes. `--source [REF]` (qui remplace `--branch`, refusé) est la provenance source pour qui veut
+compiler : `git clone --branch <tag de la porte>`, jamais `main` sans le dire. `--dry-run` va
+jusqu'au bilan et DIT la sortie (artefacts et sha256 attendus, l'argv du rail) sans rien
+télécharger ni poser. `--uninstall` relaie à `deploy/workstation uninstall`, le désinstalleur du
+canal lu au préflight : `sudo apt purge` des paquets sous `deb` (seul `--yes` a un sens pour apt),
+`provision uninstall` sinon (escaladé seulement sous `--yes`) — le sudo est là, jamais dans la porte.
+
+**Le canal** (lot 2 du chantier release) : `/etc/lcars/channel` dit QUI a posé le produit — `source`
+(un checkout, par `60-deploy`), `kit` (un paquet `pack.sh`, par `60-deploy`), `deb` (le paquet, par
+son postinst). `deploy/workstation up --from <kit.tar.gz>` vérifie le `.sha256` s'il est à côté (le
+dit sinon), détare sous l'humain dans `~/.lcars/kits/<nom>/` et joue `provision apply` DEPUIS le
+kit ; `--from <x.deb> [--from <y.deb>…]` est `sudo apt install ./x.deb …`, le seul sudo ; sans
+`--from`, ce checkout. `00-preflight` rend le fait `channel=`, et la porte comme `workstation`
+REFUSENT de poser un canal sur un autre, en nommant le geste (`provision uninstall` d'abord, ou une
+mise à jour par le même canal). Sous `deb`, 60/62/44/46 mesurent (`dpkg -V`) et ne posent rien.
 
 **`update`** (héritier de `fleet-update.sh` v1) : pull `--ff-only` du checkout source, APRÈS
 vérification d'autorité — le remote, normalisé en `host/owner/repo`, doit être **exactement égal** à
@@ -146,23 +174,122 @@ tourne en check : son drift est un ÉCHEC (rien sur place ne peut converger — 
 | 45-catalogues | any | any | le matériel des catalogues INSTALLÉS, convergé depuis la forge — « installé » est un fait de forge. Un APPELANT mince du geste du produit `runtime/services/forge.d/catalogues.sh` (lot 6) : il passe ce que l'installeur sait (forge, répertoires), le geste rend le verdict |
 | 45-sudoers-toolchain | any | any | les quatre ancrages système du domaine admiral (sudoers étroit, état conteneur, projection du login du siège, skill du siège). Rang 45 et pas moins : un NOPASSWD posé avant 20-groups viserait un groupe inexistant |
 | 46-tofu | wsl linux | any | OpenTofu + son miroir de providers SUR LA MACHINE — la structure de forge n'a plus besoin d'une image (1,18 Go et dix minutes bâtis pour 124 Mo d'outil jamais démarré) |
-| 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 63-forge-tokens et 66-deck-oidc restent en dérive et leurs consignes nomment la boîte |
+| 48-forge-host | wsl linux | wsl linux | **la forge du POSTE DE TRAVAIL** : conteneur Gitea + admin + jeton master + seed + structure (run transitoire de l'image, porte `forge-apply`). Un LCARS installé nativement a besoin d'une forge ; sans ce module, 63-forge-tokens et 66-deck-oidc restent en dérive et leurs consignes nomment le conteneur |
 | 49-forge-runner | wsl linux | wsl linux | **le runner CI de la forge du poste** : enrôle un runner sur le réseau de la forge via `docker/forge-runner.sh`. Sorti de 48 le 2026-08-27 — son état était noyé dans le verdict de la forge, et « ma CI a-t-elle une machine ? » n'avait pas de réponse propre. Une forge sans lui accepte un ticket, dépense un producteur, ouvre une PR — et la CI attend une machine qui n'existe pas |
 | 60-deploy | wsl linux | any | orchestre `deploy/lib/deploy-release.sh` (l'autorité) : unlock → build as-humain → verrou RO root:fleet → câblage `/usr/local/bin` |
 | 61-forge-structure | wsl linux | wsl linux | **la STRUCTURE de la forge** : roster du catalogue dérivé de la release POSÉE par 60 (`enroll-catalogue.sh --release`, plus aucun `mix`), recette tofu copiée/initialisée/jouée par `forge-gestures.sh apply`. Sorti de 48 le 2026-09-04 (point 1) : la structure exigeait la release que 60 pose douze rangs plus loin |
 | 62-runtime-helpers | wsl linux | any | les auxiliaires runtime du rail poste : ce que le `COPY` du Dockerfile pose côté image (console web, landing, convergeur d'humains, convergeur de toolchain) — sur une machine native ils n'existaient nulle part, et rien ne le disait |
 | 63-forge-tokens | any | any | les jetons de rôle : un APPELANT du geste de forge du produit `runtime/services/forge.d/tokens.sh` (sondes de la forge, modes de l'autorité, roster dérivé du release, mint par `provision-role-tokens.sh`) — lot 6, 2026-09-04 |
-| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans la boîte le boot (`runtime/services/box/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
+| 64-services | wsl linux | any | ce qui doit être DEBOUT sur un poste natif : la landing et le convergeur d'humains. Dans le conteneur le boot (`runtime/services/container/boot.sh`) les lance et `tini` les tient ; nativement, c'est systemd |
 | 65-ops-branch | any | any | la boîte aux lettres du rail d'outillage : UNE branche, sur LE dépôt ops (`LCARS_OPS_REPO`, défaut `fleet/lcars`) et sur lui seul. Un APPELANT mince de `runtime/services/forge.d/ops-branch.sh` (lot 6) |
 | 66-deck-oidc | any | any | client OAuth2 du deck + `/etc/lcars/deck-oidc.json` ; les ENTRÉES (`PROV_DECK_ORIGINS`) convergent, la loopback y est semée dans ses deux écritures. Un APPELANT mince de `runtime/services/forge.d/deck-oidc.sh` (lot 6) : il passe l'adresse annoncée, le port et les origines |
 | 70-human | any | any | ~/.lcars + ~/pods 0700, `fleet.env` SEED-ONCE, sondes credentials (instruct-only, jamais posées) |
 | 75-projects | any | any | reconvergence des projets déclarés (`Fleet.Project.Onboard`) — porte du release, architecte différé quand aucune fleet ne tourne |
 
 En **Docker**, `10/15/60` appliquent dans l'image (`docker/Dockerfile`, mêmes pins, même
-install.sh) et le reste converge au boot de la boîte (`runtime/services/box/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
+install.sh) et le reste converge au boot du conteneur (`runtime/services/container/boot.sh`). L'ISO WSL↔Docker n'est plus seulement la liste
 filtrée : le doctor conteneur sonde AUSSI l'état-cible bâti par l'image (paquets + bwrap réel via
 `10`, verrou RO/release/câblage via `60`) — deux substrats, une seule vérité, vérifiée des deux
 côtés.
+
+## Les paquets Debian (`deploy/pkg/`) — sept `.deb` qui se composent
+
+**Depuis le 2026-09-05 (lot 3 du chantier release)**, `pack.sh` produit, à côté du tar et depuis le
+MÊME arbre assemblé, des paquets Debian bâtis par nFPM (un binaire Go, épinglé par sha256, posé dans
+`$LCARS_PACK_DIR/.tools` — jamais dans l'arbre). Un YAML par paquet sous `deploy/pkg/`, les
+maintainer scripts sous `deploy/pkg/<paquet>/`, et un générateur, `gen-contents.sh`, qui DÉRIVE le
+`contents:` de `lcars` depuis `system.manifest` (modes, propriétaires, substrat) et depuis le stage
+du pack — une source pour les modes, jamais deux. Le témoin : `dpkg-deb -c` du `.deb` = exactement
+la liste que le générateur attend (`deploy/tests/pkg/gen_contents.bats`).
+
+| paquet | c'est | `Depends:` | maintainer scripts |
+|---|---|---|---|
+| `lcars` | le produit : release ERTS bundlée sous `/opt/lcars/runtime` (0750 root:fleet), les arbres que 62 embarque (`etc services bin assets catalogues deploy` — sans `deploy/tests`), les auxiliaires à plat, `share/{avatars,favicon,doc}`, `.source-revision`, `/usr/local/bin/{fleet,lcars}` (liens), `/etc/lcars/lcars.bashrc` (conffile) | le socle : `tmux bubblewrap git curl jq unzip ca-certificates python3 socat git-filter-repo gh util-linux-extra sudo ttyd` ; `Recommends: lcars-workstation \| lcars-container` | `preinst` : refuse un autre canal, crée le groupe `fleet` (le tar le nomme) · `postinst` : écrit `/etc/lcars/channel = deb` PUIS `provision apply --only 00 05 20 21 22 25 30` · `prerm` : le PLAN, et une copie du désinstalleur · `postrm remove` : `uninstall --yes --keep-state --dpkg lcars` · `postrm purge` : sans `--keep-state` |
+| `lcars-workstation` | le rail natif — un paquet de gestes | `lcars`, `systemd` | `postinst` : `apply --only 44 45 46 60 61 62 63 64 65 66` (+ `48 49` si `lcars-forge` est voulu par dpkg ; sinon `FORGE_BASE_URL`, env ou `/etc/lcars/forge.conf`, ou REFUS nommé) · `postrm` : les unités de la table, arrêtées puis retirées |
+| `lcars-container` | le rail conteneur : `deploy/container`, `deploy/docker/**` (Dockerfile, composes, secrets) | `lcars`, `docker.io (>= 26) \| docker-ce \| lcars-docker-desktop`, `docker-compose-v2 \| docker-compose-plugin` | `postrm` : dit si une instance tourne ; au purge LISTE ses volumes et refuse de les détruire |
+| `lcars-forge` | la forge du poste : `forge-compose.yml`, `runner-compose.yml`, `forge-runner.sh` | `lcars`, `lcars-tofu`, docker (idem) | `postinst` : `apply --only 48 49 61` · `postrm remove` : `compose down` de la forge et du runner, VOLUMES GARDÉS · `purge` : volumes retirés, dits |
+| `lcars-bench` | le jetable : rien de posé | `lcars-forge`, `lcars-workstation \| lcars-container` | `postinst` : sème l'humain de démo — `PROV_DEMO_HUMAN` (défaut `lcars`) → `LCARS_BUILTIN_HUMAN` pour la recette, `apply --only 61 63 64`, le nom noté dans `/opt/lcars/var/demo-human` · `postrm` : `userdel -r` de CE compte — le SEUL humain qu'apt retire, parce qu'il l'a créé |
+| `lcars-demo` | méta, vide | `lcars-workstation`, `lcars-forge`, `lcars-bench` | — |
+| `lcars-tofu` | `/usr/local/bin/tofu` (la version et les sha256 de `46-tofu`, LUS dans le module) et `/opt/lcars/tofu/{tofurc,providers/}` (le miroir, bâti au pack par `prep-tofu.sh`) | — (`Provides: opentofu`) | — |
+| `lcars-docker-desktop` | vide : satisfait la dépendance docker sous WSL (Docker Desktop, hors apt) | — | — |
+
+**La composition** : `sudo apt install ./lcars-demo_… ./lcars_… ./lcars-workstation_… ./lcars-forge_…
+./lcars-bench_… ./lcars-tofu_…` = le banc (un poste natif, sa forge, un humain de démo).
+`lcars-workstation` seul = un poste de travail qui CONSOMME une forge ; `+ lcars-forge` = un poste
+qui monte la sienne et ne sème personne. `apt remove lcars-bench` retire le jetable sans toucher au
+reste. Sous WSL, `lcars-docker-desktop` prend la place de `docker.io`.
+
+**remove / purge** — c'est la carte des classes d'`uninstall`, et deux drapeaux nouveaux du verbe :
+`apt remove lcars` = `provision uninstall --yes --keep-state --dpkg lcars` (l'état reste :
+`/opt/lcars/var`, `/etc/lcars`, et les comptes et groupes de service qui le possèdent ; ce qu'un
+AUTRE paquet possède est laissé à dpkg) ; `apt purge lcars` = sans `--keep-state`. Les humains et
+leurs homes ne sont JAMAIS retirés par apt — sauf l'humain de démo de `lcars-bench`. Le désinstalleur
+tourne depuis une COPIE que le `prerm` fait sous `/var/tmp/lcars-uninstall-lcars` : quand le
+`postrm` tourne, dpkg a déjà retiré `/opt/lcars/deploy/provision`.
+
+**Ce que le `.deb` ne fait PAS** (30-DEB.md § 3) : il ne crée ni ne retire d'humain (sauf celui de
+`lcars-bench`) — les personnes s'inscrivent sur la forge, le convergeur les matérialise ; il ne pose
+pas docker (une dépendance NOMMÉE, satisfaite par la distro ou par Docker Desktop) ; il ne bâtit rien
+(ni erlang, ni elixir, ni node : la release est bundlée, la doc est bâtie) ; il pose sous `/opt`,
+hors policy Debian, et l'assume dans son `control`. Une machine, un canal : le `preinst` refuse un
+`.deb` par-dessus une install kit ou source (`/etc/lcars/channel`), et dit le geste.
+
+**Ce qu'il faut sur le poste qui packe** : le réseau (nFPM et tofu se téléchargent, épinglés ; le
+miroir de providers se bâtit), et rien d'autre — `./pack.sh --no-deb` s'en passe. La version des
+`.deb` est celle de `runtime/mix.exs` ; la révision (`AAAAMMJJ.HHMM+g<sha>`) est le tampon du tiroir.
+
+### Ce qu'un paquet lit, et ce qu'il laisse
+
+- **`/etc/lcars/provision.conf`** — le fichier de l'administrateur, jamais posé par un paquet :
+  `NOM=valeur` par ligne, seules les clefs `PROV_*` entrent (valeurs sans `$ \` ; | &`), lues par
+  les `postinst` avant `provision apply`. Un paquet ne pose pas de question, il lit ce fichier —
+  le port du deck sur une machine où 20999 est pris (`PROV_DECK_PORT=20990`), le port de la forge
+  du poste (`PROV_FORGE_HOST_PORT`), la forge fournie vit dans `forge.conf` (`FORGE_BASE_URL=`).
+- **Sous apt, le PATH des scripts de paquet est `DPkg::Path`** (`/usr/sbin:/usr/bin:/sbin:/bin`),
+  sans `/usr/local/bin` : les `postinst` le préfixent, et le provisionnement nomme ses outils par
+  leur chemin (`TOFU_BIN`, `LCARS_CLI`). Sous ce canal, `10-packages` et `30-wsl` n'appellent
+  jamais apt (il tient le verrou) : un manque se DIT avec le geste.
+- **`apt remove`** = `provision uninstall --keep-state` : l'état (`/opt/lcars/var`, `/etc/lcars`) et
+  les comptes de service restent ; **`apt purge`** les retire aussi. Ni l'un ni l'autre ne touche
+  aux comptes humains ni à leurs homes (les objets par-humain — skill `system-issues`, masque de
+  socket gpg-agent — y restent : `lcars uninstall --humans`). Les dépendances tierces en état `rc`
+  (conffiles de ttyd, outils d'util-linux-extra) : `apt autoremove --purge`.
+### Publier une version — `pack.sh --publish` (lot 5 du chantier release)
+
+`./pack.sh` construit et mesure : le gate, le tar, les `.deb`, la porte de la version — tout dans
+le tiroir `dist/<tag>/`, rien n'en sort. **`./pack.sh --publish`** joue le même run puis un étage de
+plus (`deploy/lib/forge-publish.sh`) :
+
+1. **la Release de la forge**, sur le tag, avec TOUT le tiroir en assets (tar, `.deb`, `.sha256`,
+   `install.sh`, `install.sh.sha256`, `.minisig` quand la clé est là), à la forme d'URL commune à
+   Gitea et GitHub — `<forge>/<owner>/<repo>/releases/download/<tag>/<asset>`. C'est cette base que
+   la porte porte en dur : `curl … <forge>/<owner>/<repo>/releases/download/<tag>/install.sh | bash -s -- --workstation`.
+   Elle naît en **brouillon**, reçoit ses assets, puis est publiée d'un coup : un envoi coupé laisse
+   un brouillon nommé dans le refus, jamais une release à moitié pleine.
+2. **le registre Debian** de l'owner : chaque `.deb` y va (`pool/<distribution>/main`), pour
+   `apt install lcars-demo` depuis une source apt :
+   `deb [signed-by=/etc/apt/keyrings/lcars-<owner>.asc] <forge>/api/packages/<owner>/debian <distribution> main`
+   (la clé : `<forge>/api/packages/<owner>/debian/repository.key`).
+
+**Sous WSL avec Docker Desktop** : `sudo apt install lcars-docker-desktop lcars-demo` — les DEUX.
+Seul, `lcars-demo` laisse apt prendre `docker.io` (première alternative du `Depends` de lcars) : un
+second daemon, et le socket de Desktop écrasé ; `30-wsl` le refuse en nommant le geste (mesuré sur
+un banc, 2026-09-05).
+
+**Immutabilité (ADR 012)** : une release du tag qui existe, brouillon compris, est un refus nommé ;
+un `.deb` déjà au registre aussi. Rien ne se réécrit — pour refaire, on supprime sur la forge, à la
+main. **Le tag** est celui de git quand HEAD en porte un (la CI sur tag, un `1.2.3` d'opérateur),
+sinon `<VERSION>-<SHA>` ; `LCARS_PACK_TAG` le pose autrement. **La forge, l'owner et le dépôt** se
+dérivent d'`origin` ; `LCARS_PACK_FORGE`, `LCARS_PACK_OWNER`, `LCARS_PACK_REPO` les posent quand
+origin n'est pas http (un clone local, un banc). **Le jeton** : `LCARS_PACK_TOKEN` dans
+l'environnement (la CI) ou `LCARS_PACK_TOKEN_FILE` (root:fleet 0640), portées `write:package` ET
+`write:repository` — celui des `git push` n'a pas la première ; il ne passe jamais en argv, jamais
+sur une sortie. La distribution Debian est celle du builder (`LCARS_PACK_DEBIAN_DIST` sinon).
+
+**La CI sur tag** (`.gitea/workflows/publish.yml`, job `release`) joue LE MÊME `pack.sh --publish`
+sur `ubuntu-latest` avec la toolchain de `gate.yml` ; « qui appuie » est la seule différence. Son
+secret : `PACK_TOKEN`. Le job-image du même fichier publie l'image à côté, chacun avec sa propre
+immutabilité.
 
 ## Ce que la v2 ne fait PAS (soustractions assumées)
 
@@ -173,19 +300,19 @@ côtés.
   sondés et instruits, jamais exécutés.
 - **Pas de forge auto-installée** : elle vit à côté (sidecar compose en Docker, service externe
   sinon) ; on provisionne ce que le runtime attend d'ELLE (comptes, tokens) via son API.
-- **Pas de docker auto-installé sur le rail boîte** (loi 5) : ce rail installe LCARS DANS un
+- **Pas de docker auto-installé sur le rail conteneur** (loi 5) : ce rail installe LCARS DANS un
   conteneur, sur une machine que l'admin sys définit et maintient comme il l'entend, avec ses
   contraintes. Le daemon y est un PRÉREQUIS qu'on NOMME, jamais un manque qu'on comble — le
   combler exigerait un dépôt tiers, `/etc/apt`, une unité systemd et une escalade, c'est-à-dire
   tout ce que le bandeau de ce rail promet de ne pas faire. Le rail POSTE le pose, lui, parce
   qu'il a reçu la machine.
-  ⚖ USER 2026-08-26 : « le rail boîte, c'est pour un système destiné à la production, dans un
+  ⚖ USER 2026-08-26 : « le rail conteneur, c'est pour un système destiné à la production, dans un
   environnement contrôlé, défini et maintenu par l'admin sys — de la façon qu'il souhaite, avec
   les contraintes qu'il a. Notre job, c'est pas de provisionner un serveur de prod complet en le
   promettant résilient. On demande docker pour installer LCARS dans un conteneur ; la couche
   bare-metal, c'est pas notre scope. »
   `docker_installable_here` (`install.sh`) lit donc le rail autant que le substrat : tant que
-  personne n'a choisi, le préflight annonce les deux moitiés, et l'option boîte se barre quand le
+  personne n'a choisi, le préflight annonce les deux moitiés, et l'option conteneur se barre quand le
   daemon manque au lieu de s'offrir.
 - **Runner CI : sidecar compose, pas un module** (arbitrage user 2026-07-30 — embarqué avec
   le profil `forge` : runner Gitea officiel, label `elixir` = la même image que le stage

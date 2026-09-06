@@ -27,7 +27,7 @@ setup() {
   # lit plus rien dans `deploy/`. Il en lisait la lib, que le module sourcait et que son hote
   # reel ne posait pas.
   MOD="$BATS_TEST_DIRNAME/../../../services/human.d/40-claude-bin.sh"
-  SANDBOX="$BATS_TEST_TMPDIR/box"
+  SANDBOX="$BATS_TEST_TMPDIR/sandbox"
   HOMEDIR="$SANDBOX/home"
   BINDIR="$BATS_TEST_TMPDIR/stubbin"
   mkdir -p "$SANDBOX/lib" "$HOMEDIR/.local/bin" "$BINDIR"

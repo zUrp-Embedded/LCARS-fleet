@@ -29,9 +29,25 @@
 # compilée pour un OTP et une architecture, et rien ne la rend portable. Le nom le dit, c'est tout —
 # personne ne vérifie à ta place.
 #
-# USAGE : ./pack.sh            gate + release + DOC + tar (+ push si une forge est configurée)
-#         ./pack.sh --no-push  s'arrête au tar
-# ENV   : LCARS_PACK_DIR  où poser le tar (défaut : `lcars-packs` à côté du checkout)
+# ─── ET LES PAQUETS DEBIAN, DEPUIS LE MÊME ARBRE (lot 3, 2026-09-05) ────────────────────────────
+#
+# Le tar et les `.deb` sont DEUX EMBALLAGES DU MÊME CONTENU, sortis du même run : après le tar, ce
+# script pose nFPM dans le tiroir des outils (téléchargement épinglé par sha256 — `deploy/pkg/
+# prep-nfpm.sh`), prépare `lcars-tofu` (`prep-tofu.sh` : le binaire de 46-tofu et le miroir de
+# providers), fait DÉRIVER les `contents:` du stage et de `deploy/system.manifest` (`gen-contents.sh`
+# — une source pour les modes, jamais deux), puis joue `nfpm package -p deb` sur chaque YAML de
+# `deploy/pkg/`. L'invariant tient pour les deux : les bits du `.deb` sont ceux du stage attesté.
+# `--no-deb` s'en passe (un poste sans réseau : nFPM et tofu se téléchargent).
+#
+# USAGE : ./pack.sh            gate + release + DOC + tar + .deb (+ push si une forge est configurée)
+#         ./pack.sh            construit et mesure : le tar, les .deb, la porte — dans le tiroir, rien n'en sort
+#         ./pack.sh --publish  … puis la Release de la forge (tout le tiroir) et le registre Debian (les .deb)
+#         ./pack.sh --no-push  l'ancien nom du défaut — accepté, ne change rien
+#         ./pack.sh --no-deb   pas de paquets Debian (ni nFPM ni tofu ne sont téléchargés)
+# ENV   : LCARS_PACK_DIR  où poser le tar et les .deb (défaut : `lcars-packs` à côté du checkout) ;
+#                         les outils du pack vivent dans `$LCARS_PACK_DIR/.tools`, jamais dans l'arbre
+#         LCARS_DEB_RELEASE la révision Debian des .deb (défaut : `AAAAMMJJ.HHMM+g<sha>` — la version
+#                         est celle de `runtime/mix.exs`, la révision est le tampon du tiroir de dev)
 #         LCARS_SITE_SRC  sources de la doc (défaut : `assets/github.io`)
 #         LCARS_SITE_BASE base d'URL du site (défaut : `/doc/`) — la MÊME que `44-media` et le
 #                         Dockerfile ; servi ailleurs, chaque URL d'asset serait fausse
@@ -42,8 +58,17 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-PUSH=1
-[[ "${1:-}" == "--no-push" ]] && PUSH=0
+PUBLISH=0
+DEB=1
+for _arg in "$@"; do
+  case "$_arg" in
+    --publish) PUBLISH=1 ;;
+    --no-push) PUBLISH=0 ;;   # l'ancien nom du défaut (les bancs et les journaux le portent)
+    --no-deb)  DEB=0 ;;
+    *) echo "pack: option inconnue: $_arg (--publish | --no-push | --no-deb)" >&2; exit 1 ;;
+  esac
+done
+unset _arg
 
 say() { echo "pack: $*" >&2; }
 die() { echo "pack: ERREUR — $*" >&2; exit 1; }
@@ -140,8 +165,8 @@ say "release attestée : ${_libs[0]##*/}, build $_built"
 # `16-node` lit ce discriminant, une cible qui installe un paquet ne pose PLUS node : elle n'a donc
 # aucun moyen de bâtir la doc, et `44-media` échouerait sur « npm absent ».
 #
-# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni une
-# boîte de prod (elle a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
+# Un paquet sans sa doc produit exactement la moitié de forme que la doctrine interdit : ni un
+# conteneur de prod (il a sa doc, bâtie au stage `site`), ni un poste de dev (il a node pour la
 # bâtir) — un troisième état que personne n'a décrit, avec un DRIFT que l'apply ne peut pas
 # converger.
 #
@@ -229,72 +254,120 @@ tar -czf "$OUT" -C "$STAGE" "$ROOT" || die "tar KO"
 say "paquet : $OUT ($(du -h "$OUT" | cut -f1))"
 say "sha256 : $(cut -d' ' -f1 < "${OUT}.sha256")"
 
-# ─── LA POUSSE ──────────────────────────────────────────────────────────────────────────────────
-# API paquets `generic` de Gitea — la même que `publish.yml` emploie pour les images `container`.
-# Le jeton vient de l'environnement ou du fichier que le rail pose ; sans forge configurée on
-# s'arrête sur le tar, qui est déjà utilisable.
-[[ "$PUSH" -eq 1 ]] || { say "--no-push : le tar reste ici"; exit 0; }
+# ─── LES .deb — DEPUIS LE STAGE DU TAR, PAS UN AUTRE ARBRE ───────────────────────────────────────
+# Le stage vit encore (le `trap` ne l'efface qu'à la sortie) : c'est le MÊME arbre assemblé que le
+# tar vient d'emporter, doc et release comprises. Les YAML générés vont à côté du stage, jamais
+# dedans — le tar est déjà fermé, et rien de ce qui suit n'y entre.
+if [[ "$DEB" -eq 1 ]]; then
+  TOOLS="$PACK_DIR/.tools"
+  case "$ARCH" in
+    x86_64)        DEB_ARCH=amd64 ;;
+    aarch64|arm64) DEB_ARCH=arm64 ;;
+    *) die "architecture sans nom Debian : $ARCH — « --no-deb » pour le tar seul" ;;
+  esac
+  # La version est celle du produit (mix.exs) ; la révision Debian porte le tampon du tiroir et le
+  # sha, pour qu'un pack suivant du même 0.9.0 soit une MISE À JOUR aux yeux d'apt.
+  DEB_VERSION="$(awk -F'"' '/^ *version: *"/ && !v { v = $2 } END { print v }' runtime/mix.exs)"
+  [[ -n "$DEB_VERSION" ]] || die "version illisible dans runtime/mix.exs — pas de .deb sans version"
+  DEB_RELEASE="${LCARS_DEB_RELEASE:-$(date +%Y%m%d.%H%M)+g$SHA}"
 
-# LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire `main.tar.gz`, donc le paquet doit
-# atterrir au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour
-# une forge, c'est celle qu'on ne lit pas qui finit par être la bonne.
-FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
-OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
+  say "nfpm (épinglé) → $TOOLS…"
+  NFPM="$(bash deploy/pkg/prep-nfpm.sh --tools "$TOOLS")" || die "nfpm non posé — le tar est là ; « --no-deb » pour s'en passer"
+  say "lcars-tofu : binaire et miroir de providers → $TOOLS/tofu…"
+  bash deploy/pkg/prep-tofu.sh --tools "$TOOLS" --stage "$STAGE/$ROOT" --arch "$DEB_ARCH" >/dev/null \
+    || die "outillage tofu non préparé — le tar est là ; « --no-deb » pour s'en passer"
+  say "client de console (xterm.js, pins de 62) → $TOOLS/deck-static…"
+  bash deploy/pkg/prep-deck-static.sh --tools "$TOOLS" >/dev/null \
+    || die "client de console non préparé — le tar est là ; « --no-deb » pour s'en passer"
+  say "contents dérivés de la table et du stage…"
+  bash deploy/pkg/gen-contents.sh --stage "$STAGE/$ROOT" --out "$STAGE/.pkg" --tools "$TOOLS" \
+    || die "génération des contents en échec — le tar est là"
+  export LCARS_ARCH="$DEB_ARCH" LCARS_VERSION="$DEB_VERSION" LCARS_DEB_RELEASE="$DEB_RELEASE"
+  while read -r _pkg; do
+    [[ -n "$_pkg" ]] || continue
+    _nfpm_out="$("$NFPM" package -f "$STAGE/.pkg/$_pkg.yaml" -p deb -t "$PACK_DIR" 2>&1)" \
+      || die "nfpm a refusé $_pkg : $_nfpm_out"
+    _deb="$(sed -n 's/^created package: //p' <<<"$_nfpm_out")"
+    [[ -s "$_deb" ]] || die "nfpm n'a pas dit où est $_pkg ($_nfpm_out)"
+    ( cd "$PACK_DIR" && sha256sum "$(basename "$_deb")" > "$(basename "$_deb").sha256" )
+    say "deb    : $_deb ($(du -h "$_deb" | cut -f1))"
+  done < "$STAGE/.pkg/packages.list"
+  say "version Debian : ${DEB_VERSION}-${DEB_RELEASE} ($DEB_ARCH) — « sudo apt install ./lcars-demo_… » pour le banc"
+else
+  say "--no-deb : pas de paquets Debian (ni nfpm ni tofu téléchargés) — le tar seul"
+fi
+
+# ─── LE TIROIR DE LA VERSION, ET LA PORTE QUI LA CONNAIT ────────────────────────────────────────
+# La porte d'UNE version porte les sha256 de SES artefacts en dur (curl_bash_2026 § 07, lot 4) :
+# door-gen.sh les lit dans un tiroir qui ne contient que cette version. Le tiroir partagé
+# `lcars-packs` reste (les bancs y prennent par nom) ; `dist/<tag>/` en est la vue par version,
+# par liens durs — un fichier, deux noms, zéro copie. Le tag est celui du paquet generic d'avant
+# (`<VERSION>-<SHA>`) : il ordonne, il se lit, il porte le commit. BASE est la forme d'URL commune
+# à gitea et github ; sans forge dérivable (origin local), une base visiblement fausse — la porte
+# accepte LCARS_DOOR_BASE au banc et refuse tout http:// non déclaré.
+# LE TAG DE LA VERSION : celui de git quand HEAD en porte un (la CI sur tag, un opérateur qui
+# publie un `1.2.3` : la release s'appelle comme le tag, à la GitHub) ; sinon `<VERSION>-<SHA>`, qui
+# ordonne, se lit, et porte le commit. LCARS_PACK_TAG le pose autrement (un banc).
+TAG="${LCARS_PACK_TAG:-$(git describe --tags --exact-match 2>/dev/null || echo "${VERSION}-${SHA}")}"
+DIST="$PACK_DIR/dist/$TAG"
+mkdir -p "$DIST"
+for _f in "$OUT" "${OUT}.sha256" "$PACK_DIR"/*"+g${SHA}"_*.deb "$PACK_DIR"/*"+g${SHA}"_*.deb.sha256; do
+  [[ -f "$_f" ]] || continue
+  ln -f "$_f" "$DIST/$(basename "$_f")"
+done
+_FORGE="${LCARS_PACK_FORGE:-$(git remote get-url origin 2>/dev/null | sed -n 's|^\(https\?://[^/]*\)/.*|\1|p')}"
+_OWNER="${LCARS_PACK_OWNER:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/\([^/]*\)/.*|\1|p')}"
+_REPO="${LCARS_PACK_REPO:-$(git remote get-url origin 2>/dev/null | sed -n 's|^https\?://[^/]*/[^/]*/\([^/]*\)\(\.git\)\?$|\1|p')}"
+DOOR_BASE="${LCARS_DOOR_BASE:-${_FORGE:-https://forge.invalid}/${_OWNER:-lcars}/${_REPO:-lcars-fleet}/releases/download/$TAG}"
+say "porte de la version → $DIST/install.sh (base $DOOR_BASE)…"
+bash deploy/lib/door-gen.sh "$TAG" "$DOOR_BASE" "$DIST" >/dev/null || die "porte de la version non générée"
+say "tiroir de la version : $DIST ($(find "$DIST" -maxdepth 1 -type f | wc -l) fichiers, porte comprise)"
+
+# ─── LA PUBLICATION (--publish) : LA RELEASE DE LA FORGE ET LE REGISTRE DEBIAN ─────────────────
+# (50-PUBLISH § 1) La Release porte TOUT le tiroir de la version — tar, .deb, sha256, la porte et sa
+# somme, les .minisig quand la clé est là — à la forme d'URL commune à Gitea et GitHub :
+# <forge>/<owner>/<repo>/releases/download/<tag>/<asset>. C'est CETTE base que la porte de la version
+# porte en dur (DOOR_BASE, ci-dessus) : publier ailleurs, c'est publier une porte qui ne trouve pas
+# ses artefacts. Les .deb vont AUSSI au registre Debian de l'owner (`apt install lcars-demo` depuis
+# une source apt). L'immutabilité est la nôtre : une release du tag qui existe = refus nommé, rien
+# réécrit (ADR 012). Le geste vit dans deploy/lib/forge-publish.sh — à blanc dans ses témoins, le
+# même sur le poste et dans la CI sur tag (publish.yml), qui joue CE script.
+#
+# L'ancien étage poussait le tar seul au paquet `generic` de la forge : la Release le remplace — un
+# seul endroit, la forme d'URL que la porte connaît, et les .deb avec.
+[[ "$PUBLISH" -eq 1 ]] || { say "sans --publish : le tar, les .deb et la porte restent dans $DIST"; exit 0; }
+
+# LA FORGE EST CELLE D'`origin` — c'est déjà d'elle qu'on tire le code, donc la version doit atterrir
+# au même endroit. Elle se DÉRIVE du remote plutôt que d'être écrite : deux adresses pour une forge,
+# c'est celle qu'on ne lit pas qui finit par être la bonne. LCARS_PACK_FORGE/OWNER/REPO la posent
+# quand origin n'est pas http (un clone local, un banc).
+FORGE="$_FORGE"; OWNER="$_OWNER"; REPO="${_REPO:-lcars-fleet}"
+[[ -n "$FORGE" && -n "$OWNER" ]] || die "--publish : forge ou owner indéterminables (origin n'est pas http) — LCARS_PACK_FORGE et LCARS_PACK_OWNER les posent"
 
 # ⚠ LE JETON N'EST PAS ÉCRIT ICI, ET CE N'EST PAS UN OUBLI DE CONFORT. Ce fichier est suivi par git :
-# un littéral partirait sur la forge, sur le remote github, ET dans chaque tar que ce script produit
-# — le paquet livrerait la clé de la forge qui le sert. On lit donc celui qui authentifie déjà les
-# `git push` de ce dépôt (`http.<forge>.extraheader`), posé une fois par l'opérateur. Même machine,
-# même credential, aucune configuration à faire : le script « tourne tout seul » sans qu'un secret
-# entre dans l'arbre.
-#
-# ⚠ ET CELUI DES `git push` NE SUFFIT PAS. Mesuré au premier run : la forge rend
-# `token scope=write:issue,write:repository`, requis `write:package`. Les deux portées sont
-# distinctes chez Gitea et aucune ne se déduit de l'autre. Le jeton de publication est donc un AUTRE
-# objet, posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
-# dépôt.
+# un littéral partirait sur la forge ET dans chaque tar que ce script produit — le paquet livrerait
+# la clé de la forge qui le sert. Il vient de l'environnement (la CI : un secret du runner) ou d'un
+# fichier posé une fois par l'opérateur en `root:fleet 0640` — lisible par le groupe, jamais par le
+# dépôt. Portées : write:package (le registre) ET write:repository (la release est un objet du
+# dépôt) — distinctes chez Gitea, aucune ne se déduit de l'autre ; celui des `git push` n'a pas la
+# première. Il ne passe jamais en argv (`curl -K -`, cicatrice 6-141), et il n'est jamais imprimé :
+# un état se calcule AVANT d'être dit (cicatrice du 2026-08-25 : « jeton : trouvé9172f605… »).
 TOKEN="${LCARS_PACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(cat "${LCARS_PACK_TOKEN_FILE:-/home/private/full.nas.token}" 2>/dev/null || true)"
-if [[ -z "$TOKEN" && -n "$FORGE" ]]; then
-  TOKEN="$(git config --get "http.${FORGE}/.extraheader" 2>/dev/null | sed -n 's/^Authorization: *token *//p')"
-fi
+# L'ÉTAT DU JETON SE CALCULE AVANT D'ÊTRE DIT (pack_secrets.bats extrait ce bloc et le joue à blanc :
+# un jeton présent se dit « trouvé », jamais sa valeur ; un jeton absent se dit « absent »).
+_tok_state="absent"
+[[ -n "$TOKEN" ]] && _tok_state="trouvé"
+say "publication : forge ${FORGE:-<aucune>} · jeton : $_tok_state"
+[[ -n "$TOKEN" ]] || die "--publish : aucun jeton — LCARS_PACK_TOKEN dans l'environnement, ou LCARS_PACK_TOKEN_FILE (root:fleet 0640 ; portées write:package + write:repository)"
 
-if [[ -z "$FORGE" || -z "$TOKEN" ]]; then
-  # ⚠ CETTE LIGNE A IMPRIMÉ LE JETON EN CLAIR, ET ELLE CROYAIT DIRE « trouvé ». La forme était
-  # `${TOKEN:+trouvé}${TOKEN:-absent}` : la première moitié rend bien `trouvé` quand le jeton
-  # existe — mais `:-` ne substitue QUE sur vide ou non défini, donc la seconde rend LA VALEUR.
-  # Sortie réelle du 2026-08-25 : « jeton : trouvé9172f605… », quarante caractères de secret dans
-  # le terminal, dans le scrollback, et dans tout journal qui capture ce script.
-  #
-  # LA BRANCHE MENTEUSE EST CELLE QUI RÉUSSIT. Sur un jeton absent la ligne était correcte, donc
-  # elle se relisait comme juste : `${TOKEN:-absent}` ne se déclenche que là où il n'y a rien à
-  # fuiter. Un état se calcule AVANT d'être dit ; deux expansions collées ne sont pas une condition.
-  _tok_state="absent"
-  [[ -n "$TOKEN" ]] && _tok_state="trouvé"
-  say "forge ou jeton indéterminables — le tar est dans $PACK_DIR, pousse-le à la main si tu veux"
-  say "  forge : ${FORGE:-<aucun remote origin http>} · jeton : $_tok_state"
-  exit 0
-fi
+# La distribution du registre Debian est celle du BUILDER (les .deb ne dépendent pas d'une version
+# d'Ubuntu : le socle est un Depends, pas une ABI) — LCARS_PACK_DEBIAN_DIST la pose autrement.
+DEBIAN_DIST="${LCARS_PACK_DEBIAN_DIST:-$( . /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-stable}")}"
 
-# ⚠ `/api/packages/`, SANS `v1` — DEUX API POUR DEUX CHOSES. `/api/v1/packages/` est celle de
-# CONSULTATION (lister, supprimer — c'est elle que `publish.yml` interroge pour l'immutabilité) ; le
-# registre lui-même vit sur `/api/packages/`. Se tromper rend un 404 qui ressemble à « ce paquet
-# n'existe pas » alors qu'il veut dire « cette route n'existe pas ».
-#
-# `-K -` : le jeton ne passe pas par argv, lisible dans /proc de tout l'hôte (cicatrice 6-141).
-url="${FORGE%/}/api/packages/${OWNER}/generic/lcars-fleet/${VERSION}-${SHA}"
-for f in "$OUT" "${OUT}.sha256"; do
-  code="$(printf 'header = "Authorization: token %s"\n' "$TOKEN" \
-          | curl -sS -K - -X PUT --upload-file "$f" -o /dev/null -w '%{http_code}' \
-                 "${url}/$(basename "$f")" 2>/dev/null || true)"
-  case "$code" in
-    201|200) say "poussé : $(basename "$f")" ;;
-    # ⚠ UN REFUS D'AUTORISATION SE NOMME, sinon on cherche la route. Le jeton des `git push` porte
-    # `write:repository` et PAS `write:package` : les deux portées sont distinctes chez Gitea, et
-    # aucune des deux ne se déduit de l'autre. Le tar, lui, est bon — il reste dans `$PACK_DIR`.
-    401|403) die "push refusé ($code) : le jeton n'a pas la portée « write:package ». Celui des git push ne l'a pas. Crée-en un sur ${FORGE%/}/user/settings/applications et pose-le dans LCARS_PACK_TOKEN. Le paquet est prêt dans $PACK_DIR." ;;
-    *) die "push refusé ($code) pour $(basename "$f") — $url" ;;
-  esac
-done
-
-say "→ ${FORGE%/}/${OWNER}/-/packages/generic/lcars-fleet/${VERSION}-${SHA}"
+say "publication → $FORGE/$OWNER/$REPO, release $TAG, registre Debian $DEBIAN_DIST/main…"
+# shellcheck source=deploy/lib/forge-publish.sh
+. deploy/lib/forge-publish.sh
+FP_TOKEN="$TOKEN" fp_publish_dist "$FORGE" "$OWNER" "$REPO" "$TAG" "$DIST" "$(git rev-parse HEAD)" "$DEBIAN_DIST" main \
+  || die "publication interrompue — voir ci-dessus"
+say "→ ${FORGE%/}/${OWNER}/${REPO}/releases/tag/${TAG}"

@@ -334,9 +334,9 @@ defmodule Fleet.Project.Onboard do
 
     {:error,
      {:catalogue_not_installed, name,
-      "the catalogue '#{name}' is not installed on this box (installed: " <>
+      "the catalogue '#{name}' is not installed on this container (installed: " <>
         "#{Enum.join(installed, ", ")}). A project outside an installed catalogue is INVISIBLE — " <>
-        "the poller only discovers on installed orgs. An admin installs it, inside the box: " <>
+        "the poller only discovers on installed orgs. An admin installs it, inside the container: " <>
         "`lcars catalogue install #{name}`."}}
   end
 

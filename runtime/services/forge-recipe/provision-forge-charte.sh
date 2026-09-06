@@ -147,7 +147,7 @@ FORGE="${FORGE%/}"
 # les autres).
 #
 # `assets/` est la source, et l'installation la pose en `/opt/lcars/share/avatars` a cote de la doc.
-# Ce script lit donc ce que la boite a INSTALLE, pas ce qui traine a cote de lui.
+# Ce script lit donc ce que le conteneur a INSTALLE, pas ce qui traine a cote de lui.
 : "${LCARS_MEDIA_ROOT:=/opt/lcars/share}"
 [[ -n "$AVATARS_DIR" ]] || AVATARS_DIR="$LCARS_MEDIA_ROOT/avatars"
 # AUCUN REPLI. Une installation qui n'a pas pose ses medias est une installation RATEE, pas une
@@ -293,7 +293,7 @@ done
 # comptes de role : `fleet_engineer` s'affiche « engineer » (cf. `instance/accounts.tf`).
 #
 # CE COMPTE N'EST PAS UNE IDENTITE DE TRAVAIL, et c'est ce qui rend le geste sans victime. Personne
-# ne travaille sous root ; l'administrateur se fait un compte a lui pour le quotidien. La boite dit
+# ne travaille sous root ; l'administrateur se fait un compte a lui pour le quotidien. Le conteneur dit
 # la meme chose a tous les etages : Guard B refuse de lancer une fleet sous l'uid 1000,
 # `console-humans` exclut admiral des consoles worker, et le deck ne lui ouvre qu'une porte admin
 # distincte de la porte worker. Il n'y a donc aucun nom de personne a ecraser ici — c'est un siege,

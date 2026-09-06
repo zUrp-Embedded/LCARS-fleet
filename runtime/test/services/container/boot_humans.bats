@@ -1,17 +1,17 @@
 #!/usr/bin/env bats
-# SOURCE: runtime/test/services/box/boot_humans.bats
+# SOURCE: runtime/test/services/container/boot_humans.bats
 # AUTHOR: bob
 # STARDATE: (posee par /push-github)
 # STATUS: bats tests for entrypoint.sh — le premier tour synchrone, et le verdict de population
 #
-# CE QUE CES TEMOINS FERMENT. La boite rendait la main sans savoir si quelqu'un pouvait lancer une
+# CE QUE CES TEMOINS FERMENT. Le conteneur rendait la main sans savoir si quelqu'un pouvait lancer une
 # fleet. Le convergeur d'humains tourne en boucle detachee (`setsid`, poll 30 s) : entre le
-# `exec sshd` et sa premiere passe, la boite se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
-# — et n'a personne. `box up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
+# `exec sshd` et sa premiere passe, le conteneur se declare *healthy* — son healthcheck ne sonde que des ports : ssh + le deck
+# — et n'a personne. `container up` lit `/run/lcars-provision.rc`, qui vaut 0 parce qu'il mesure les
 # MODULES, pas la population. Il n'avait aucune raison de douter.
 #
 # ⚠ LE RAIL POSTE AVAIT FERME EXACTEMENT CA LE 2026-08-25, ET PAS CELUI-CI. `64-services` tire le
-# convergeur en `--once` synchrone puis mesure la population avant/apres. La boite, elle, lancait la
+# convergeur en `--once` synchrone puis mesure la population avant/apres. Le conteneur, lui, lancait la
 # boucle et passait a la suite. Le rail qui compte le moins etait donc le mieux verifie des deux.
 #
 # ⚠ LE FAIT SE LIT SUR LA MACHINE (lot 6, 2026-09-04). L'entrypoint appelait
@@ -35,7 +35,7 @@ setup() {
   # machine provisionnee : sans decor, un temoin qui attend que celui qui joue passe GUARD B rougit des
   # le second run du gate — le siege, c'est lui (banc .63, 2026-08-30). Le decor nomme un fichier absent.
   export LCARS_SEAT_UID_FILE="$BATS_TEST_TMPDIR/etc/lcars/seat.uid"
-  SRC="$BATS_TEST_DIRNAME/../../../services/box/boot.sh"
+  SRC="$BATS_TEST_DIRNAME/../../../services/container/boot.sh"
   [ -f "$SRC" ]
 
   BIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$BIN"
@@ -62,7 +62,7 @@ setup() {
 
   # ⚠ DEUX MORCEAUX REELS, ET C'EST LEUR CONTRAT QU'ON MESURE. Le bloc de convergence POSE
   # `humans_rc` ; `publier_verdicts` l'ECRIT. Les deux vivaient ensemble jusqu'au 2026-08-26, ou la
-  # publication est descendue apres le bloc pour fermer une course avec `box up`. Extraire le seul
+  # publication est descendue apres le bloc pour fermer une course avec `container up`. Extraire le seul
   # bloc laisserait le temoin vert sur une publication cassee — et c'est justement la moitie qui
   # avait un defaut.
   BLOC="$BATS_TEST_TMPDIR/bloc.sh"
@@ -136,10 +136,10 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 }
 
 @test "doctor VERT et PERSONNE : le verdict publie non-zero, et il nomme GUARD B" {
-  # Le cas d'une boite de production ou personne ne s'est encore enrole. Ce n'est pas une panne —
+  # Le cas d'un conteneur de production ou personne ne s'est encore enrole. Ce n'est pas une panne —
   # mais ca doit se LIRE, sinon l'operateur cherche pourquoi `fleet start` refuse.
   # Mesure du 2026-09-04, banc bob_2 : le doctor rendait 0 (l'absence est un WARN), le bloc lisait
-  # ce 0 comme « present(s) », et la boite l'annoncait avec le seul siege a bord.
+  # ce 0 comme « present(s) », et le conteneur l'annoncait avec le seul siege a bord.
   bloc 0 1
   [ "$status" -eq 0 ]
   [ "$(cat "$LCARS_HUMANS_RC_FILE")" = "1" ]
@@ -148,9 +148,9 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
   grep -q 'humans' "$JOURNAL"
 }
 
-@test "un premier tour EN ECHEC ne tue pas le boot — la boite doit rester joignable" {
-  # Meme regle que tout ce fichier : un echec de convergence n'est jamais fatal, sinon une boite
-  # cassee devient une boite qu'on ne peut pas reparer.
+@test "un premier tour EN ECHEC ne tue pas le boot — le conteneur doit rester joignable" {
+  # Meme regle que tout ce fichier : un echec de convergence n'est jamais fatal, sinon un conteneur
+  # casse devient un conteneur qu'on ne peut pas reparer.
   bloc 3 1
   [ "$status" -eq 0 ]
   grep -q 'NON CONCLUANT (rc=3)' "$JOURNAL"
@@ -159,9 +159,9 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 }
 
 @test "L'ORDRE DE PUBLICATION FERME LA COURSE : provision.rc est ecrit APRES humans.rc" {
-  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `box up` poll `lcars-provision.rc`
+  # ⚠ LA VERIFICATION ETAIT INERTE DE L'AUTRE COTE DU TUYAU. `container up` poll `lcars-provision.rc`
   # toutes les 5 s, le trouve, puis lit `lcars-humans.rc` UNE SEULE FOIS. Tant que `provision.rc`
-  # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `box up` lisait
+  # s'ecrivait AVANT la passe de convergence — qui dure des dizaines de secondes — `container up` lisait
   # un fichier pas encore ecrit, et affichait « population NON MESUREE » A TOUS LES COUPS, quelle
   # que soit la population reelle. Le lot precedent avait donc ajoute une mesure que son unique
   # lecteur ne pouvait jamais voir.
@@ -214,7 +214,7 @@ bloc() { # bloc <rc du convergeur> <sonde : 0 = un humain (zoe, 1001), 1 = perso
 @test "le convergeur ABSENT : rien n'est publie, et le bloc le dit — pas de verdict invente" {
   # Sans convergeur, la question « qui peut lancer une fleet » n'a pas ete posee. Ecrire 0 ferait
   # dire au fichier « tout va bien » pour une mesure qui n'a pas eu lieu — et son lecteur
-  # (`box up`) distingue justement « absent » de « zero ».
+  # (`container up`) distingue justement « absent » de « zero ».
   rm -f "$LCARS_HUMAN_CONVERGER"
   run bash -c "
     set -euo pipefail

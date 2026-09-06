@@ -1,0 +1,106 @@
+#!/bin/bash
+# SOURCE: deploy/pkg/lcars-bench/postinst
+# AUTHOR: bob
+# STARDATE: 2026-09-05
+# STATUS: maintainer script dpkg — `lcars-bench` configure : seme l'humain de demonstration.
+#         L'axe DESTINATION (40-RAILS § 13) a enfin un porteur : ce paquet.
+#
+# dpkg l'appelle : postinst configure [ancienne-version]
+#
+# ─── PROV_DEMO_HUMAN — la variable qui manquait ─────────────────────────────────────────────────
+# Aucun deploiement de travail ne fabrique d'humain (⚖ user 2026-08-30) ; le banc, si. Le nom se
+# donnait jusqu'ici a `forge-gestures.sh` par `LCARS_BUILTIN_HUMAN`, pose par le SEUL banc
+# conteneur (`bench-forge-bootstrap.sh --human`). `PROV_DEMO_HUMAN` est le nom cote INSTALLEUR
+# (defaut « lcars », comme le banc), et ce script le traduit en `LCARS_BUILTIN_HUMAN` pour la
+# recette : 61-forge-structure la joue, la recette CREE le compte forge (`instance/`, seed comme
+# mot de passe) et l'inscrit a la team `humans` ; 63 minte ; 64 fait converger — le convergeur
+# materialise le compte unix. Trois modules deja la, aucune logique ici.
+#
+# ⚠ SUR LE RAIL CONTENEUR, CE PAQUET NE SEME PAS : le banc conteneur se monte par `bench-up.sh`,
+# qui NOMME son humain lui-meme. Ce script le dit et sort a zero — un postinst qui echoue sur une
+# composition permise (lcars-container + lcars-bench) serait un refus deguise.
+#
+# Le nom seme est ecrit dans /opt/lcars/var (l'etat) : le postrm le relit pour retirer CE compte-la
+# et aucun autre — le seul humain que dpkg a le droit de retirer, parce qu'il l'a cree.
+set -euo pipefail
+
+# ⚠ SOUS APT, LE PATH DES MAINTAINER SCRIPTS EST `DPkg::Path` = /usr/sbin:/usr/bin:/sbin:/bin — SANS
+# /usr/local/bin. Mesure 2004 (2026-09-05) : `tofu init` rc 127 dans le postinst alors que
+# /usr/local/bin/tofu venait d'etre pose par lcars-tofu. Le provisionnement nomme ses outils par leur
+# chemin (TOFU_BIN, LCARS_CLI…) ; ce prefixe est la ceinture pour ce qu'il appelle encore par le nom.
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+# LA CONF DE L'ADMINISTRATEUR : un paquet ne pose pas de question, il lit un fichier — /etc/lcars/
+# provision.conf, `NOM=valeur` par ligne, jamais pose par un paquet, seules les clefs PROV_* entrent
+# (le port du deck sur un banc dont le reseau est partage, le port de la forge du poste…).
+PROVISION_CONF="${LCARS_PROVISION_CONF:-/etc/lcars/provision.conf}"
+if [[ -r "$PROVISION_CONF" ]]; then
+  while IFS= read -r _l; do
+    [[ "$_l" =~ ^(PROV_[A-Z0-9_]+)=([[:alnum:][:punct:]]*)$ ]] || continue
+    [[ "${BASH_REMATCH[2]}" == *[\`\$\;\|\&]* ]] && continue
+    export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+  done < "$PROVISION_CONF"
+fi
+
+say() { echo "lcars-bench/postinst: $*" >&2; }
+PROVISION="${LCARS_PROVISION_BIN:-/opt/lcars/deploy/provision}"
+LIB="$(dirname "$PROVISION")/lib/provision-lib.sh"
+CHANNEL_FILE="${LCARS_CHANNEL_FILE:-/etc/lcars/channel}"
+DPKG_QUERY="${LCARS_DPKG_QUERY:-dpkg-query}"
+ROOT="${PROV_ROOT:-/opt/lcars}"
+DEMO_FILE="${LCARS_DEMO_HUMAN_FILE:-$ROOT/var/demo-human}"
+PROV_DEMO_HUMAN="${PROV_DEMO_HUMAN:-lcars}"
+MODS=(61 63 64)
+
+case "${1:-}" in
+  configure) ;;
+  *) exit 0 ;;
+esac
+
+[[ "$PROV_DEMO_HUMAN" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] \
+  || { say "REFUS — PROV_DEMO_HUMAN=« $PROV_DEMO_HUMAN » n'est pas un login unix"; exit 1; }
+
+ws_want="$("$DPKG_QUERY" -W -f '${db:Status-Want}' lcars-workstation 2>/dev/null || true)"
+if [[ "$ws_want" != "install" ]]; then
+  say "rail conteneur (lcars-workstation absent) : ce paquet ne seme rien ici — le banc conteneur se monte par"
+  say "  deploy/docker/bench/bench-up.sh (--human nomme son humain de demo). Rien a faire, rien d'ecrit."
+  exit 0
+fi
+
+[[ -x "$PROVISION" ]] || { say "provisionnement introuvable ($PROVISION)"; exit 1; }
+[[ -r "$LIB" ]]       || { say "lib introuvable ($LIB)"; exit 1; }
+[[ "$(head -n1 "$CHANNEL_FILE" 2>/dev/null | tr -d '[:space:]')" == "deb" ]] \
+  || { say "REFUS — le canal n'est pas « deb » ($CHANNEL_FILE) : « sudo dpkg --configure lcars » d'abord"; exit 1; }
+
+seat="${SUDO_USER:-}"
+if [[ -z "$seat" || "$seat" == root ]] && [[ -n "${LCARS_SYSADMIN_UID:-}" ]]; then
+  seat="$(getent passwd "$LCARS_SYSADMIN_UID" 2>/dev/null | cut -d: -f1 || true)"
+fi
+if [[ -z "$seat" || "$seat" == root ]]; then
+  say "REFUS — aucun siege : ni SUDO_USER, ni LCARS_SYSADMIN_UID (« sudo env LCARS_SYSADMIN_UID=<uid> dpkg --configure lcars-bench »)"
+  exit 1
+fi
+[[ "$seat" != "$PROV_DEMO_HUMAN" ]] \
+  || { say "REFUS — l'humain de demo (« $PROV_DEMO_HUMAN ») ne peut pas etre le siege : le postrm le retirerait avec son home"; exit 1; }
+export LCARS_SYSADMIN_UID; LCARS_SYSADMIN_UID="$(id -u -- "$seat")"
+
+sub="$(bash -c '. "$1"; detect_substrate' _ "$LIB")"
+[[ "$sub" != docker ]] || { say "REFUS — pas dans une image"; exit 1; }
+
+export LCARS_ALLOW_ANY_HOST=1 PROV_FORGE_MONTEE=1
+export LCARS_BUILTIN_HUMAN="$PROV_DEMO_HUMAN"
+only=(); for m in "${MODS[@]}"; do only+=(--only "$m"); done
+say "humain de demo : « $PROV_DEMO_HUMAN » (PROV_DEMO_HUMAN) → LCARS_BUILTIN_HUMAN pour la recette"
+say "provision apply --substrate $sub --human $seat --only ${MODS[*]}"
+rc=0
+"$PROVISION" apply --substrate "$sub" --human "$seat" "${only[@]}" || rc=$?
+case "$rc" in
+  0|2) ;;
+  *) say "ECHEC (rc=$rc) — relis la sortie ci-dessus ; « sudo dpkg --configure lcars-bench » rejoue"; exit 1 ;;
+esac
+install -d -m 0755 "$(dirname "$DEMO_FILE")"
+tmp="$(mktemp "$(dirname "$DEMO_FILE")/.demo-human.XXXXXX")"
+printf '%s\n' "$PROV_DEMO_HUMAN" > "$tmp"; chmod 0644 "$tmp"; mv -f "$tmp" "$DEMO_FILE"
+[[ "$rc" -ne 2 ]] || say "applique avec un drift residuel — « provision doctor » le nomme"
+say "humain de demo seme : « $PROV_DEMO_HUMAN » — compte forge (mot de passe : le seed des comptes de la recette),"
+say "  team humans, compte unix par le convergeur. Note dans $DEMO_FILE : c'est lui que « apt remove lcars-bench » retire."
+exit 0
