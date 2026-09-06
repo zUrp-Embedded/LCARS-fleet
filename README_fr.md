@@ -27,15 +27,10 @@ installer sur ton système.
 | curl | téléchargement de la version, échanges HTTP avec la forge |
 | python3 | lecture des réponses JSON de la forge |
 | WSL 2 | sous Windows uniquement ; WSL 1 ne fournit pas de namespaces |
+| Compte Anthropic | les agents sont des processus Claude Code ; les credentials de `~/.claude/.credentials.json` sont réutilisés |
 
 Les versions publiées sont pré-compilées : un kit, des paquets Debian, une image. Aucun toolchain
 Elixir/Erlang n'est requis, sauf pour une installation depuis les sources sur le rail poste.
-
-Un compte Anthropic est nécessaire : les agents sont des processus Claude Code. Les credentials
-présents dans `~/.claude/.credentials.json` sont réutilisés.
-
-L'installation requiert un accès réseau à la forge qui publie la version, à Docker Hub et à
-`claude.ai`. En cas d'échec, l'installation s'interrompt sans laisser d'état partiel.
 
 ---
 
