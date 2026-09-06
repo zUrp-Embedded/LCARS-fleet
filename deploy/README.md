@@ -145,7 +145,7 @@ Données (env ou `--env FILE`, défauts dans `lib/provision-lib.sh` — une seul
 `PROV_PREFIX` (/opt/lcars/runtime — le défaut de deploy/lib/deploy-release.sh, SSoT runtime/etc/README.md) · `PROV_FLEET_GROUP` (fleet) · `PROV_TOKENS_DIR` (/opt/lcars/var/tokens) ·
 `PROV_FORGE_URL` (=FORGE_BASE_URL) · `PROV_FORGE_SEED_FILE` (seed bootstrap tofu → handoff A4) ·
 `PROV_PASSWORDS_FILE` (livrable A4, 0600 opérateur) · `PROV_HUMAN` (défaut : l'appelant) ·
-planchers toolchain (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN` — la distro sert, le rail vérifie).
+planchers toolchain (`PROV_ELIXIR_OTP_MAJOR`, `PROV_ELIXIR_MIN`) et pin d'Elixir (`PROV_ELIXIR_PIN`, `PROV_ELIXIR_PIN_SHA256` — erlang par la distro, Elixir par le zip officiel épinglé : la cible LTS sert 1.18, le plancher est 1.20).
 
 ## Modules (`modules.d/NN-*.sh`)
 

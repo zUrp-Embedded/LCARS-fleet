@@ -2,11 +2,12 @@
 # SOURCE: deploy/tests/transverse/toolchain_legacy.bats
 # AUTHOR: alice
 # STARDATE: 2026-08-28
-# STATUS: bats tests for 15-toolchain — le SEUL geste destructif du module, et ce qu'il refuse de toucher
+# STATUS: bats tests for 15-toolchain — le geste destructif du module (la SELECTION), et ce qu'il refuse de toucher
 #
-# `15-toolchain` posait un precompile Elixir telecharge (`/opt/elixir-<version>` + quatre symlinks
-# dans `PROV_LINK_DIR`). La cible sert la paire par apt, donc le module ne pose plus rien de tout
-# ca — et `system.manifest` a perdu les cinq lignes correspondantes.
+# `15-toolchain` pose le precompile Elixir OFFICIEL du pin (`/opt/elixir-<pin>` + quatre symlinks
+# dans `PROV_LINK_DIR`) — le cliquet du 2026-08-28 (« la distro sert la paire ») est inverse le
+# 2026-09-06 : la cible LTS sert 1.18 jusqu'en 2028 et le plancher est 1.20. Ce qui se detruit :
+# les arbres d'une AUTRE version que le pin, et les liens qui pointent ailleurs que sur le pin.
 #
 # ⚠ RETIRER UNE LIGNE DE LA TABLE N'A JAMAIS RETIRE UN OBJET D'UNE MACHINE, et c'est ce trou que ces
 # temoins gardent. La ou l'ancien mecanisme a tourne les cinq objets sont toujours la ; le symlink
@@ -39,7 +40,7 @@ setup() {
 
   # LES DEUX COUTURES, ET SANS ELLES CE FICHIER MESURERAIT LE POSTE QUI LE JOUE.
   export PROV_LINK_DIR="$BATS_TEST_TMPDIR/bin"
-  export LCARS_LEGACY_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
+  export LCARS_ELIXIR_PREFIX="$BATS_TEST_TMPDIR/opt/elixir-"
   mkdir -p "$PROV_LINK_DIR" "$BATS_TEST_TMPDIR/opt"
 }
 
@@ -52,20 +53,20 @@ sourced() { # sourced <code bash>
     check() { :; }; apply() { :; }
     # shellcheck disable=SC1090
     . '$PROVISION_LIB'
-    LEGACY_ELIXIR_BINS=(elixir elixirc mix iex)
-    : \"\${LCARS_LEGACY_ELIXIR_PREFIX:=/opt/elixir-}\"
-    $(sed -n '/^legacy_elixir_links()/,/^}/p' "$MOD")
-    $(sed -n '/^legacy_elixir_trees()/,/^}/p' "$MOD")
+    ELIXIR_BINS=(elixir elixirc mix iex)
+    : \"\${LCARS_ELIXIR_PREFIX:=/opt/elixir-}\"
+    $(sed -n '/^elixir_links_ours()/,/^}/p' "$MOD")
+    $(sed -n '/^elixir_trees()/,/^}/p' "$MOD")
     $1
   "
 }
 
 @test "un symlink vers NOTRE ancien arbre est selectionne" {
-  mkdir -p "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin"
-  : > "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin/elixir"
-  ln -s "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin/elixir" "$PROV_LINK_DIR/elixir"
+  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4/bin"
+  : > "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
+  ln -s "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir" "$PROV_LINK_DIR/elixir"
 
-  run sourced 'legacy_elixir_links'
+  run sourced 'elixir_links_ours'
   [ "$status" -eq 0 ]
   [[ "$output" == *"$PROV_LINK_DIR/elixir"* ]]
 }
@@ -75,7 +76,7 @@ sourced() { # sourced <code bash>
   : > "$BATS_TEST_TMPDIR/ailleurs/bin/elixir"
   ln -s "$BATS_TEST_TMPDIR/ailleurs/bin/elixir" "$PROV_LINK_DIR/elixir"
 
-  run sourced 'legacy_elixir_links'
+  run sourced 'elixir_links_ours'
   [ "$status" -eq 0 ]
   # ⚠ ON EXIGE LE VIDE, pas l'absence d'un nom : le lien PORTE le nom `elixir`, donc un
   # `refute_output --partial elixir` serait vert pour la mauvaise raison.
@@ -84,7 +85,7 @@ sourced() { # sourced <code bash>
 
 @test "un FICHIER ordinaire au nom d'un binaire n'est pas un symlink, et n'entre pas" {
   : > "$PROV_LINK_DIR/mix"
-  run sourced 'legacy_elixir_links'
+  run sourced 'elixir_links_ours'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -92,30 +93,30 @@ sourced() { # sourced <code bash>
 @test "un lien MORT vers notre arbre est selectionne — c'est ce qu'un retrait interrompu laisse" {
   # `readlink -f` rend le VIDE sur un lien casse : un `-f` ici laisserait sur la machine exactement
   # les liens qu'un `rm -rf` a demi joue a produits, et personne ne les nommerait jamais plus.
-  ln -s "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin/iex" "$PROV_LINK_DIR/iex"
+  ln -s "${LCARS_ELIXIR_PREFIX}1.18.4/bin/iex" "$PROV_LINK_DIR/iex"
   [ ! -e "$PROV_LINK_DIR/iex" ]
 
-  run sourced 'legacy_elixir_links'
+  run sourced 'elixir_links_ours'
   [ "$status" -eq 0 ]
   [[ "$output" == *"$PROV_LINK_DIR/iex"* ]]
 }
 
 @test "les quatre noms sont couverts, pas seulement le premier" {
-  mkdir -p "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin"
+  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4/bin"
   local b
   for b in elixir elixirc mix iex; do
-    : > "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin/$b"
-    ln -s "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4/bin/$b" "$PROV_LINK_DIR/$b"
+    : > "${LCARS_ELIXIR_PREFIX}1.18.4/bin/$b"
+    ln -s "${LCARS_ELIXIR_PREFIX}1.18.4/bin/$b" "$PROV_LINK_DIR/$b"
   done
 
-  run sourced 'legacy_elixir_links'
+  run sourced 'elixir_links_ours'
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq 4 ]
 }
 
 @test "un arbre present est selectionne, et deux versions cote a cote le sont toutes les deux" {
-  mkdir -p "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4" "${LCARS_LEGACY_ELIXIR_PREFIX}1.17.3"
-  run sourced 'legacy_elixir_trees'
+  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4" "${LCARS_ELIXIR_PREFIX}1.17.3"
+  run sourced 'elixir_trees'
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c .)" -eq 2 ]
 }
@@ -123,7 +124,7 @@ sourced() { # sourced <code bash>
 @test "AUCUN arbre : la selection est VIDE, elle ne rend pas son propre motif" {
   # Un glob qui ne matche rien rend la chaine litterale `<prefixe>*` ; sans la garde `-d`, c'est
   # elle que l'appelant passerait a `rm -rf`. Le cas nominal d'une machine neuve, donc.
-  run sourced 'legacy_elixir_trees'
+  run sourced 'elixir_trees'
   [ "$status" -eq 0 ]
   [ -z "$output" ] || { echo "selection non vide sur une machine sans ancien arbre : $output" >&2; return 1; }
 }
@@ -131,36 +132,34 @@ sourced() { # sourced <code bash>
 @test "un FICHIER au prefixe de l'arbre n'est pas un arbre" {
   # `pack.sh` et l'ancien module laissaient un `/opt/.elixir-<ver>.zip` ; un motif trop large
   # emporterait des fichiers voisins que personne n'a decide de detruire.
-  : > "${LCARS_LEGACY_ELIXIR_PREFIX}1.18.4.zip"
-  run sourced 'legacy_elixir_trees'
+  : > "${LCARS_ELIXIR_PREFIX}1.18.4.zip"
+  run sourced 'elixir_trees'
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "le module ne pose plus AUCUN precompile — le cliquet du retour au zip" {
-  # ⚠ GARDE D'INSTRUMENT INVERSEE : un temoin d'absence est vert quand le fichier a disparu. On
-  # prouve d'abord qu'on lit le bon module.
-  grep -q 'apt_ensure erlang elixir' "$MOD" \
-    || { echo "ce temoin ne lit pas 15-toolchain, ou le module ne demande plus la paire a apt"; return 1; }
-
-  ! grep -qE 'fetch_verify|unzip|ELIXIR_URL|PROV_ELIXIR_ZIP_SHA256' "$MOD" \
-    || { echo "le precompile telecharge est de retour dans $MOD"; return 1; }
-  ! grep -qE 'ensure_symlink' "$MOD" \
-    || { echo "$MOD repose des symlinks : ils ont quitte system.manifest, les deux doivent s'accorder"; return 1; }
+@test "le module ne demande plus ELIXIR a apt — erlang seul ; le precompile est le pin de la lib, jamais un zip libre" {
+  # Garde d'instrument : on lit le bon module (erlang par apt y est).
+  grep -qE 'apt_ensure erlang( \|\|| *$)' "$MOD" \
+    || { echo "ce temoin ne lit pas 15-toolchain, ou erlang n'entre plus par apt"; return 1; }
+  ! grep -qE 'apt_ensure erlang elixir' "$MOD" \
+    || { echo "elixir est de retour dans la liste apt de $MOD : la distro LTS sert 1.18, le plancher est 1.20"; return 1; }
+  grep -q 'fetch_verify "\$ELIXIR_ZIP_URL" "\$PROV_ELIXIR_PIN_SHA256"' "$MOD" \
+    || { echo "le zip n'est pas telecharge par fetch_verify avec le sha256 du pin"; return 1; }
+  ! grep -qE 'curl .*elixir' "$MOD" \
+    || { echo "un curl a la main dans $MOD : le telechargement passe par fetch_verify"; return 1; }
 }
 
-@test "les cinq objets de l'ancien mecanisme ont quitte la table" {
+@test "les cinq objets sont de RETOUR dans la table, a cote de node" {
   local manifest="$BATS_TEST_DIRNAME/../../system.manifest"
   [ -f "$manifest" ]
-  # Garde d'instrument : la table est bien lue (node, lui, y reste).
   grep -qE '^dir[[:space:]]+/opt/node-<version>' "$manifest" \
-    || { echo "ce temoin ne lit pas la table, ou /opt/node-<version> en a disparu aussi"; return 1; }
-
-  ! grep -qE '^dir[[:space:]]+/opt/elixir-<version>' "$manifest" \
-    || { echo "/opt/elixir-<version> est declare, mais plus aucun module ne le pose"; return 1; }
+    || { echo "ce temoin ne lit pas la table, ou /opt/node-<version> en a disparu"; return 1; }
+  grep -qE '^dir[[:space:]]+/opt/elixir-<version>[[:space:]]+0755[[:space:]]+root:root[[:space:]]+wsl\+linux' "$manifest" \
+    || { echo "/opt/elixir-<version> n'est pas declare (0755 root:root wsl+linux) alors que 15 le pose"; return 1; }
   local b
   for b in elixir elixirc iex mix; do
-    ! grep -qE "^link[[:space:]]+/usr/local/bin/${b}[[:space:]]" "$manifest" \
-      || { echo "link /usr/local/bin/$b est declare, mais plus aucun module ne le pose"; return 1; }
+    grep -qE "^link[[:space:]]+/usr/local/bin/${b}[[:space:]]" "$manifest" \
+      || { echo "link /usr/local/bin/$b n'est pas declare alors que 15 le pose"; return 1; }
   done
 }
