@@ -19,125 +19,126 @@ installer sur ton système.
 
 ---
 
-## Ce qu'il te faut
+## Prérequis
 
-Quatre choses, et ta distribution a presque certainement les trois premières :
-
-| | pourquoi |
+| Composant | Rôle |
 |---|---|
-| **docker** | tout tourne en conteneurs — le conteneur LCARS, la forge, le runner. Sous Windows c'est **Docker Desktop** ; sur un Ubuntu natif, le paquet `lcars` le tire lui-même |
-| **curl** | la porte télécharge la version, et l'amorçage parle à la forge en HTTP |
-| **python3** | il lit les réponses JSON de la forge |
-| **WSL 2** | sous Windows seulement — WSL 1 n'a pas de namespaces, donc pas de pods |
+| Docker | exécute le conteneur LCARS, la forge et le runner CI. Sous Windows : Docker Desktop avec l'intégration WSL 2. Sous Ubuntu natif, le paquet `lcars` installe `docker.io` s'il est absent |
+| curl | téléchargement de la version, échanges HTTP avec la forge |
+| python3 | lecture des réponses JSON de la forge |
+| WSL 2 | sous Windows uniquement ; WSL 1 ne fournit pas de namespaces |
 
-Rien d'autre. **Pas d'Elixir, pas d'Erlang, aucun toolchain sur ta machine** : une version est
-**pré-compilée** — un kit, huit paquets Debian, une image — et la porte pose le résultat. Le
-toolchain n'est nécessaire que si tu choisis de compiler depuis les sources (voir plus bas).
+Les versions publiées sont pré-compilées : un kit, des paquets Debian, une image. Aucun toolchain
+Elixir/Erlang n'est requis, sauf pour une installation depuis les sources sur le rail poste.
 
-Il te faut aussi un **compte Anthropic** : les agents sont des processus Claude Code. Si tu utilises
-déjà `claude` sur cette machine, tes credentials sont repris automatiquement depuis
-`~/.claude/.credentials.json`.
+Un compte Anthropic est nécessaire : les agents sont des processus Claude Code. Les credentials
+présents dans `~/.claude/.credentials.json` sont réutilisés.
 
-**Pendant l'installation il faut du réseau** : la forge qui publie la version (la Release et ses
-artefacts), Docker Hub (images de base) et `claude.ai` (le binaire de l'agent). Un hoquet sur l'un
-des trois fait échouer l'installation — bruyamment, sans laisser une machine à moitié posée.
+L'installation requiert un accès réseau à la forge qui publie la version, à Docker Hub et à
+`claude.ai`. En cas d'échec, l'installation s'interrompt sans laisser d'état partiel.
 
 ---
 
-## Installer
+## Installation
 
-Une version se pose de **trois façons**. Les trois passent par la même porte, `install.sh`, et
-posent le même produit ; ce qui change, c'est d'où il vient.
+`install.sh` est l'unique point d'entrée. Il détecte ce que la machine permet, affiche ce qui sera
+installé, demande confirmation, puis délègue au rail choisi.
 
-### 1. La porte, depuis la Release — le geste normal
+| Option | Effet |
+|---|---|
+| `--workstation` | installe LCARS dans le système (Ubuntu ou WSL 2) : paquets `.deb` sous Debian/Ubuntu, kit sinon |
+| `--container` | exécute LCARS dans un conteneur ; rien n'est installé hors de Docker |
+| `--bench` | crée les annexes : forge Gitea, runner CI, compte de démonstration. Sans cette option, une forge existante doit être indiquée par `FORGE_BASE_URL` |
+| `--dry-run` | affiche les artefacts, leurs sha256 attendus et la commande du rail, sans rien télécharger ni installer |
+| `--check` | sonde en lecture seule |
+| `--tar` | sous Debian/Ubuntu, utilise le kit plutôt que les paquets |
+| `--port-forge N` `--port-deck N` `--port-ssh N` | ports publiés ; défauts 21000, 20999, 2222 |
+
+Les arguments placés après `--` sont transmis tels quels au rail (`--bind`, `--advertise`,
+`--project`).
+
+### Depuis une release
+
+Chaque release publie sa propre porte, liée aux artefacts de cette version :
 
 ```bash
-# LCARS dans ce système (WSL 2 ou Ubuntu), avec sa forge et son runner CI :
 curl --proto '=https' --tlsv1.2 -fsSL https://<forge>/<owner>/lcars-fleet/releases/download/<version>/install.sh | bash -s -- --workstation --bench
+```
 
-# LCARS dans un conteneur, rien hors de ton clone et de docker :
+```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://<forge>/<owner>/lcars-fleet/releases/download/<version>/install.sh | bash -s -- --container --bench
 ```
 
-L'URL est celle de la **Release** de la version, sur la forge qui la publie : chaque version a sa
-porte, et cette porte ne connaît que *ses* artefacts. Elle les télécharge dans
-`~/.lcars/kits/<version>/`, vérifie chacun contre les sha256 **écrits en dur dans la porte** (un
-écart efface le fichier, rien n'est posé), dit l'état de la signature minisign (vérifiée si l'outil
-est là, « NON vérifiée (sha256 seul) » sinon — jamais tue), annonce ce que ça prend, te demande, puis
-délègue :
+Les artefacts sont téléchargés dans `~/.lcars/kits/<version>/` et vérifiés contre les sommes
+sha256 inscrites dans la porte ; un écart supprime le fichier et interrompt l'installation. La
+signature minisign est vérifiée si `minisign` est installé ; sinon, l'absence de vérification est
+signalée.
 
-- **`--workstation`** : sous Debian/Ubuntu, les paquets `.deb` de la version, posés par
-  `sudo apt-get install` — c'est le seul `sudo`, et il te sera demandé. Le paquet provisionne
-  lui-même à l'installation (comptes, groupes, `/opt/lcars`, services). Sous WSL 2 la porte ajoute
-  `lcars-docker-desktop`, le paquet vide qui dit « le daemon, c'est Docker Desktop ». `--tar` prend
-  le kit plutôt que les `.deb`.
-- **`--container`** : l'image de la version, et rien d'autre sur ta machine. ⚠ Sous WSL elle
-  demandera `sudo` pour parler au daemon docker — sa socket appartient à root.
-- **`--bench`** dit « et fabrique-moi les annexes » : forge jetable, runner CI, humain de
-  démonstration. Sans lui, la porte attend une forge existante (`FORGE_BASE_URL`).
+Sur le rail `--workstation`, les paquets sont installés par `sudo apt-get install` ; c'est la seule
+élévation de privilèges. Sous WSL 2, le paquet `lcars-docker-desktop` est ajouté automatiquement.
+Sur le rail `--container` sous WSL, `sudo` est requis pour accéder à la socket Docker.
 
-`--dry-run` va jusqu'au bilan et **dit** ce qui serait fait — artefacts, sha256 attendus, commande
-du rail — sans rien télécharger ni poser. `--check` sonde seulement.
-
-### 2. Les paquets Debian, par apt
-
-La même version est aussi un dépôt apt, sur la forge. Deux lignes pour l'ancrer, une pour poser :
+### Depuis le dépôt apt
 
 ```bash
-sudo curl -fsSL https://<forge>/api/packages/<owner>/debian/repository.key -o /etc/apt/keyrings/lcars-<owner>.asc
-echo "deb [signed-by=/etc/apt/keyrings/lcars-<owner>.asc] https://<forge>/api/packages/<owner>/debian <distribution> main" | sudo tee /etc/apt/sources.list.d/lcars.list
+sudo curl -fsSL https://<forge>/api/packages/<owner>/debian/repository.key -o /etc/apt/keyrings/lcars.asc
+echo "deb [signed-by=/etc/apt/keyrings/lcars.asc] https://<forge>/api/packages/<owner>/debian <distribution> main" | sudo tee /etc/apt/sources.list.d/lcars.list
 sudo apt update
-
-sudo apt install lcars-demo                          # Ubuntu natif : poste + forge + runner + humain de démo
-sudo apt install lcars-docker-desktop lcars-demo     # WSL 2 avec Docker Desktop : LES DEUX, toujours
+sudo apt install lcars-demo                         # Ubuntu natif
+sudo apt install lcars-docker-desktop lcars-demo    # WSL 2 avec Docker Desktop
 ```
 
-⚠ Sous WSL, `lcars-demo` seul laisse apt choisir `docker.io` — un second daemon à côté de Docker
-Desktop, et sa socket écrasée. Le produit le **refuse** en nommant le geste ; épargne-toi le détour.
+Sous WSL 2, `lcars-docker-desktop` doit être installé dans la même transaction que les autres
+paquets. Sans lui, apt sélectionne `docker.io`, ce qui démarre un second daemon et remplace la
+socket de Docker Desktop ; le provisionnement détecte cet état et s'arrête en indiquant la
+correction.
 
-Les paquets se composent : `lcars` (le socle), `lcars-workstation` (LCARS dans ce système),
-`lcars-container` (LCARS en conteneur), `lcars-forge` (une forge sur ce poste), `lcars-bench`
-(le banc : runner CI, humain de démo), `lcars-demo` (tout ce qui précède), `lcars-tofu` (l'outil
-d'infrastructure) et `lcars-docker-desktop` (vide, WSL). Hors ligne, les mêmes `.deb` sont des
-assets de la Release : `sudo apt install ./lcars-tofu_*.deb ./lcars_*.deb ./lcars-workstation_*.deb …`
-dans cet ordre.
+| Paquet | Contenu |
+|---|---|
+| `lcars` | socle : runtime, comptes de service, `/opt/lcars` |
+| `lcars-workstation` | LCARS dans le système hôte |
+| `lcars-container` | LCARS en conteneur |
+| `lcars-forge` | forge Gitea locale |
+| `lcars-bench` | runner CI et compte de démonstration |
+| `lcars-demo` | méta-paquet : `lcars-workstation`, `lcars-forge`, `lcars-bench` |
+| `lcars-tofu` | OpenTofu et son miroir de providers |
+| `lcars-docker-desktop` | paquet vide satisfaisant la dépendance Docker sous WSL 2 |
 
-Après la pose, `deploy/provision doctor` (dans `/opt/lcars`) dit l'état de la machine, module par
-module, sans rien toucher.
-
-### 3. Depuis les sources — pour lire, déboguer, contribuer
+Les paquets sont également publiés comme assets de la release, pour une installation hors ligne :
 
 ```bash
-git clone --branch <version> https://<forge>/<owner>/lcars-fleet.git && cd lcars-fleet
-bash install.sh --workstation --bench          # ou --container --bench
+sudo apt install ./lcars-tofu_*.deb ./lcars_*.deb ./lcars-workstation_*.deb
 ```
 
-La même porte, lancée dans un checkout, continue **dedans** : c'est la provenance « source », et
-elle le dit (HEAD compris). Pipée, `--source [<ref>]` fait le clone au tag de la porte, jamais
-`main` sans le dire. Sur le rail poste, ce chemin **compile** : il te faut Elixir/OTP aux planchers
-que le provisionnement déclare. Sur le rail conteneur, non : le runtime est compilé dans un
-conteneur de build jetable, et seul le résultat est gardé — deux images sortent du même
-Dockerfile, celle que tu fais tourner et le jumeau toolchain que son runner CI sert.
+Le provisionnement s'exécute à l'installation des paquets. `sudo /opt/lcars/deploy/provision
+doctor` affiche l'état de la machine sans la modifier.
 
-### Un canal par machine
+### Depuis les sources
 
-Une machine se souvient de **qui** l'a posée : `source`, `kit` ou `deb` (`/etc/lcars/channel`).
-Une mise à jour se fait par le même canal ; poser un canal sur un autre est **refusé**, et le refus
-nomme le geste — désinstaller d'abord, ou reprendre le même canal. Une machine posée par un kit
-d'avant les canaux est dite « inconnue » : elle se met à jour par un kit, jamais par un `.deb`.
+```bash
+git clone --branch <version> https://<forge>/<owner>/lcars-fleet.git
+cd lcars-fleet
+bash install.sh --workstation --bench     # ou --container --bench
+```
 
-Désinstaller passe par la porte aussi : `bash install.sh --uninstall -- --yes` — `apt purge` des
-paquets sous `deb`, `provision uninstall` sinon ; le conteneur se défait par `deploy/container
-reset`. Sous `deb`, `sudo apt purge 'lcars*'` fait le même travail et ne laisse rien derrière lui
-hors ce qu'un paquet du système garde en propre.
+Lancée depuis un clone, la porte installe depuis ce clone (provenance `source`). Pipée,
+`--source [<ref>]` clone le dépôt au tag de la porte, ou à la référence indiquée. Sur le rail
+`--workstation`, cette provenance compile le runtime et requiert Elixir/OTP aux versions minimales
+déclarées par le provisionnement. Sur le rail `--container`, la compilation a lieu dans un
+conteneur de build ; seule l'image résultante est conservée.
 
-### Ce que l'installation imprime
+### Canal d'installation
 
-L'installation crée une forge git, l'attend, provisionne les comptes et les teams, minte les jetons,
-démarre le conteneur ou les services, enregistre un runner CI, et imprime ce qu'elle a monté. Elle
-est **rejouable** : relancée, elle converge au lieu de dupliquer.
+`/etc/lcars/channel` enregistre le canal utilisé : `source`, `kit` ou `deb`. Les mises à jour se
+font par le même canal. L'installation d'un canal par-dessus un autre est refusée, avec l'indication
+de la procédure : désinstallation préalable, ou mise à jour par le canal en place. Une machine
+installée par un kit antérieur à ce mécanisme est signalée `inconnu` ; elle se met à jour par un kit.
 
-Quand c'est fini, elle imprime un bloc de ce genre — ce sont tes points d'entrée :
+### Fin d'installation
+
+L'installation crée la forge, provisionne comptes et équipes, génère les jetons, démarre les
+services ou le conteneur, enregistre le runner CI, puis affiche les points d'entrée. Elle est
+idempotente : relancée, elle converge vers le même état.
 
 ```
 banc PRET
@@ -149,13 +150,8 @@ banc PRET
   destruire : bench-down.sh --project lcars-nuit
 ```
 
-L'adresse imprimée est **celle de ta machine**, détectée au démarrage : c'est celle-là qu'on tape,
-d'ici ou depuis une autre machine du même réseau. Les ports se choisissent à la porte :
-`--port-forge`, `--port-deck`, `--port-ssh` (un banc par port — les WSL d'une même machine
-partagent un daemon docker).
-
-Si elle dit autre chose que `banc PRET`, elle nomme ce qui manque. Elle n'annonce jamais un succès
-sur une pile qu'elle n'a pas pu vérifier.
+L'adresse affichée est celle de la machine, détectée au démarrage. Tout autre verdict que
+`banc PRET` nomme l'élément manquant.
 
 ---
 
@@ -239,28 +235,24 @@ Le runner est déjà enregistré, donc un projet dont la carte exige une CI vert
 
 ---
 
-## Détruire
+## Désinstallation
 
-**Rail conteneur** — ce que la ligne `destruire :` du bloc `banc PRET` t'a imprimé :
-
-```bash
-deploy/docker/bench/bench-down.sh --project lcars-nuit
-docker builder prune -af          # puis, pour récupérer l'espace de build
-```
-
-Retire le conteneur, la forge, le runner et leurs volumes. Rien n'a jamais été écrit hors de docker.
-
-**Rail poste** — la porte, ou apt, au choix ; les deux font le même travail :
+Rail conteneur, avec la commande affichée sur la ligne `destruire :` :
 
 ```bash
-bash install.sh --uninstall -- --yes            # apt purge sous « deb », provision uninstall sinon
-sudo apt purge 'lcars*' && sudo apt autoremove --purge
+deploy/docker/bench/bench-down.sh --project <projet>
+docker builder prune -af
 ```
 
-Services, comptes de service, `/opt/lcars`, `/etc/lcars`, la forge du poste et son runner s'en
-vont. Restent ce que tu as mis dans ton `~/.lcars` et les humains de la forge (`--humans` les
-retire aussi). Ta machine est revenue là où elle était — c'est mesuré, pas promis : le relevé
-avant/après est la règle du chantier qui a produit ces paquets.
+Rail poste :
+
+```bash
+bash install.sh --uninstall -- --yes          # apt purge sous canal deb, provision uninstall sinon
+sudo apt purge 'lcars*' && sudo apt autoremove --purge    # équivalent, sous canal deb
+```
+
+Sont retirés : services, comptes de service, `/opt/lcars`, `/etc/lcars`, forge locale et runner.
+`~/.lcars` et les comptes humains de la forge sont conservés ; `--humans` les retire.
 
 ---
 
