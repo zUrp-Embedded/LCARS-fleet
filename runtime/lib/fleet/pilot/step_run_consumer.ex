@@ -183,7 +183,11 @@ defmodule Fleet.Pilot.StepRunConsumer do
       forge_client: Keyword.get(opts, :forge_client),
       loader: Keyword.get(opts, :loader, Fleet.Workflow.Loader),
       deliverable: Keyword.get(opts, :deliverable),
-      deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/1),
+      # ⚠ ARITE 2, CELLE DU SEAM. `GateEngine.producer?/4` appelle `fun.(role, root)` ; le defaut etait
+      # `&default_deliverable_mode/1` — un BadArityError des qu'un work item arrive sans
+      # `deliverable_mode` dans son payload (AwaitsArchDrainTest, suite complete du 2026-09-06 : vert
+      # seul, rouge selon l'ordre — le defaut n'etait jamais appele quand le payload portait le mode).
+      deliverable_mode_fun: Keyword.get(opts, :deliverable_mode_fun, &default_deliverable_mode/2),
       task_queue: Keyword.get(opts, :task_queue, Fleet.TaskQueue),
       spawner: Keyword.get(opts, :spawner, Fleet.Spawner),
       wake_recovery: Keyword.get(opts, :wake_recovery, &Fleet.Pilot.WakeRecovery.wake/3),
