@@ -41,21 +41,36 @@ defmodule Fleet.Project.OnboardTest do
   describe "delete_project/2 (general project teardown — FAIL-CLOSED, CI-07)" do
     defmodule OkRepo do
       def default_branch(_repo, _opts), do: {:ok, "main"}
-      def delete_repo(repo, _opts), do: send(self(), {:delete_repo, repo}) && :ok
+
+      def delete_repo(repo, _opts) do
+        send(self(), {:delete_repo, repo})
+        :ok
+      end
     end
 
     defmodule AbsentRepo do
       def default_branch(_repo, _opts), do: {:error, {:http, 404, "no repo"}}
-      def delete_repo(repo, _opts), do: send(self(), {:delete_repo, repo}) && :ok
+
+      def delete_repo(repo, _opts) do
+        send(self(), {:delete_repo, repo})
+        :ok
+      end
     end
 
     defmodule OutageRepo do
       def default_branch(_repo, _opts), do: {:error, {:http, 500, "boom"}}
-      def delete_repo(repo, _opts), do: send(self(), {:delete_repo, repo}) && :ok
+
+      def delete_repo(repo, _opts) do
+        send(self(), {:delete_repo, repo})
+        :ok
+      end
     end
 
     defmodule OkSpawner do
-      def kill_pod(pod_id), do: send(self(), {:kill_pod, pod_id}) && :ok
+      def kill_pod(pod_id) do
+        send(self(), {:kill_pod, pod_id})
+        :ok
+      end
 
       def kill_project_pods(repo) do
         send(self(), {:swept, repo})

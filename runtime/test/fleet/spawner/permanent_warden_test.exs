@@ -95,7 +95,12 @@ defmodule Fleet.Spawner.PermanentWardenTest do
 
   test "pod.failed of a NON-permanent pod (issue-*) → no-op (relaunch = the forge rail's job)" do
     parent = self()
-    warden = start_warden(fn role -> send(parent, {:respawn, role}) && {:ok, role} end)
+
+    warden =
+      start_warden(fn role ->
+        send(parent, {:respawn, role})
+        {:ok, role}
+      end)
 
     send(warden, pod_failed("fleet-poc-issue-3-engineer"))
     refute_receive {:respawn, _}, 100
@@ -193,7 +198,10 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     parent = self()
 
     start_warden(
-      fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+      fn role ->
+        send(parent, {:respawn, role})
+        {:ok, "permanent-#{role}"}
+      end,
       reconcile_ms: 10,
       expected_roles_fun: fn -> ["architect"] end,
       live_roles_fun: fn -> [] end,
@@ -214,7 +222,10 @@ defmodule Fleet.Spawner.PermanentWardenTest do
     on_exit(&Fleet.Shutdown.Quiesce.resume!/0)
 
     start_warden(
-      fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+      fn role ->
+        send(parent, {:respawn, role})
+        {:ok, "permanent-#{role}"}
+      end,
       reconcile_ms: 10,
       expected_roles_fun: fn -> ["architect"] end,
       live_roles_fun: fn -> [] end
@@ -238,7 +249,10 @@ defmodule Fleet.Spawner.PermanentWardenTest do
 
     warden =
       start_warden(
-        fn role -> send(parent, {:respawn, role}) && {:ok, "permanent-#{role}"} end,
+        fn role ->
+          send(parent, {:respawn, role})
+          {:ok, "permanent-#{role}"}
+        end,
         reconcile_ms: 10,
         expected_roles_fun: fn -> raise "unreadable catalog" end,
         live_roles_fun: fn -> [] end

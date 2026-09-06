@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Lcars.Contracts.ToolDescriptionsCheckTest do
 
   # Le plancher d'instrument est de 12 outils. Les douze porteurs sont neutres ; l'appelant ajoute
   # ceux dont il veut parler.
-  defp pod_tools(extra_tools \\ "") do
+  defp pod_tools(extra_tools) do
     filler =
       Enum.map_join(1..12, "\n", fn i ->
         "  deftool \"filler#{i}_get\" do\n    meta do\n      description(\"rien\")\n    end\n  end\n"

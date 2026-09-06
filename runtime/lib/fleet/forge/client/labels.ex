@@ -19,8 +19,6 @@ defmodule Fleet.Forge.Client.Labels do
 
   alias Fleet.Forge.Client.Transport
 
-  require Logger
-
   # Les memes primitives que le client : ce module appelle la forge, il n'en reimplemente aucune.
   # `only:` restreint a ce qui sert ici — un import large rendrait invisible le jour ou l'une
   # d'elles cesse d'etre utilisee.

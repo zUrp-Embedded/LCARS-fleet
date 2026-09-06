@@ -242,7 +242,11 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
     def get_pull(_r, _pr, _o),
       do: {:ok, %{"merged" => false, "state" => "open", "mergeable" => true}}
 
-    def post_comment(r, n, b, o), do: send(self(), {:comment, r, n, b, o}) && {:ok, :posted}
+    def post_comment(r, n, b, o) do
+      send(self(), {:comment, r, n, b, o})
+      {:ok, :posted}
+    end
+
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
     def close_issue(_r, _n, _o), do: {:ok, :closed}
   end

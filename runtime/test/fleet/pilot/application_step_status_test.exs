@@ -1,7 +1,6 @@
 defmodule Fleet.Pilot.ApplicationStepStatusTest do
   # async: false — mutates the global :step_dispatch? + registers processes under the singleton names.
   use ExUnit.Case, async: false
-  import Fleet.Test.Barrier, only: [settle: 1]
 
   alias Fleet.Pilot.Application, as: PilotApp
 

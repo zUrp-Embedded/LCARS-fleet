@@ -36,8 +36,6 @@ defmodule Fleet.MCP.PodTools.Probe do
   un vert. Le juge lit et tranche.
   """
 
-  require Logger
-
   # LE CATALOGUE DE SONDES EST UNE DONNÉE, ET IL EST VOLONTAIREMENT MINUSCULE.
   #
   # Une entrée = un nom public → le fichier de workflow que le projet porte. C'est le seul endroit

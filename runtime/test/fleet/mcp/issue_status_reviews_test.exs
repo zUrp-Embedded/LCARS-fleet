@@ -39,7 +39,6 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -68,6 +67,7 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
     # projet, et le rendu arch exerce le repli plutôt que la branche carte-de-l'issue.
     def get_route(_repo, _number, _opts), do: :none
 
+    @impl true
     def pr_review_state(_repo, _index, opts) do
       send(self(), {:review_state_opts, opts})
       Process.get(:review_state)

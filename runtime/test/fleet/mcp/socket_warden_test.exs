@@ -22,7 +22,10 @@ defmodule Fleet.MCP.SocketWardenTest do
     start_warden(
       owned_fun: fn -> ["pod-ghost", "pod-live"] end,
       live_pods_fun: fn -> ["pod-live"] end,
-      release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
+      release_fun: fn pod_id ->
+        send(parent, {:released, pod_id})
+        :ok
+      end
     )
 
     # 1st tick: suspect. 2nd tick: orphan CONFIRMED → release. The grace exists because
@@ -40,7 +43,10 @@ defmodule Fleet.MCP.SocketWardenTest do
       start_warden(
         owned_fun: fn -> ["pod-a", "pod-b"] end,
         live_pods_fun: fn -> raise "spawner unavailable" end,
-        release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
+        release_fun: fn pod_id ->
+          send(parent, {:released, pod_id})
+          :ok
+        end
       )
 
     # An empty live-set would make ALL sockets look orphaned: the fail-safe returns
@@ -55,7 +61,10 @@ defmodule Fleet.MCP.SocketWardenTest do
     start_warden(
       owned_fun: fn -> ["pod-a", "pod-b"] end,
       live_pods_fun: fn -> ["pod-a", "pod-b"] end,
-      release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
+      release_fun: fn pod_id ->
+        send(parent, {:released, pod_id})
+        :ok
+      end
     )
 
     refute_receive {:released, _}, 200
@@ -73,7 +82,10 @@ defmodule Fleet.MCP.SocketWardenTest do
         :counters.add(counter, 1, 1)
         if :counters.get(counter, 1) == 1, do: [], else: ["pod-slow"]
       end,
-      release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end
+      release_fun: fn pod_id ->
+        send(parent, {:released, pod_id})
+        :ok
+      end
     )
 
     refute_receive {:released, "pod-slow"}, 300
@@ -95,7 +107,10 @@ defmodule Fleet.MCP.SocketWardenTest do
       [
         owned_fun: fn -> [] end,
         live_pods_fun: fn -> [] end,
-        release_fun: fn pod_id -> send(parent, {:released, pod_id}) && :ok end,
+        release_fun: fn pod_id ->
+          send(parent, {:released, pod_id})
+          :ok
+        end,
         emit_fun: fn source, type, ev_opts, _safe ->
           send(parent, {:emitted, source, type, ev_opts[:payload]})
           :ok

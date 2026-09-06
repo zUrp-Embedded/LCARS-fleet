@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Lcars.Contracts.CatalogueEnumerationsCheckTest do
 
   # `content` atterrit dans le catalogue METIER ; le catalogue SYSTEME existe et reste muet, pour
   # que les deux arbres soient la (le mur refuse d'en scanner un seul).
-  defp tree(content, opts \\ []) do
+  defp tree(content, opts) do
     root = Fleet.TestEnv.tmp_path("cat_enum")
     File.mkdir_p!(Path.join(root, "lib/fleet/mcp"))
     File.write!(Path.join(root, @tools_rel), Keyword.get(opts, :tools, pod_tools()))

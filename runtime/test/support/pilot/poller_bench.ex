@@ -107,13 +107,23 @@ defmodule Fleet.Pilot.PollerBench do
     def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
     # Adoption: sets judges on an orphan PR (human/fork, or an agent that lost its reviewers).
-    def request_review(_repo, index, reviewers, _opts),
-      do: send(self(), {:requested_review, index, reviewers}) && :ok
+    def request_review(_repo, index, reviewers, _opts) do
+      send(self(), {:requested_review, index, reviewers})
+      :ok
+    end
 
     # MA-06: forge-native counter of rework rounds (the poller tests do not cover bounded rework).
     def count_change_request_rounds(_repo, _index, _opts), do: {:ok, 0}
-    def post_route(_repo, _n, p, s, _opts), do: send(self(), {:route, p, s}) && {:ok, :posted}
-    def set_assignee(_repo, _n, login, _opts), do: send(self(), {:assignee, login}) && {:ok, :set}
+
+    def post_route(_repo, _n, p, s, _opts) do
+      send(self(), {:route, p, s})
+      {:ok, :posted}
+    end
+
+    def set_assignee(_repo, _n, login, _opts) do
+      send(self(), {:assignee, login})
+      {:ok, :set}
+    end
 
     # Reconciliation (B): the reclaim runs INSIDE the Poller GenServer → we route the signal to
     # the test pid (`:_test_pid` of the forge_opts), not `self()` (the Poller's mailbox).

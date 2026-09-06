@@ -5,8 +5,6 @@ defmodule Fleet.Workflow.Deliverable do
   bounded system-owned push.
   """
 
-  require Logger
-
   alias Fleet.Workflow.{DeliverableGate, Git, PayloadGuard}
 
   @type mode :: :payload | :git_native

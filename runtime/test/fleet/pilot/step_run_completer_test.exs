@@ -193,7 +193,10 @@ defmodule Fleet.Pilot.StepRunCompleterTest do
       {:ok, :removed}
     end
 
-    def stop_stopwatch(_repo, n, _opts), do: send(self(), {:stopwatch_stopped, n}) && :ok
+    def stop_stopwatch(_repo, n, _opts) do
+      send(self(), {:stopwatch_stopped, n})
+      :ok
+    end
 
     # The eng's voice (outgoing info): the producer's summary posted as a PR comment.
     def post_comment(_repo, pr, body, _opts) do

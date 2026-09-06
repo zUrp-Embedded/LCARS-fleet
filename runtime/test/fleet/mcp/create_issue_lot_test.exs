@@ -51,6 +51,7 @@ defmodule Fleet.MCP.CreateIssueLotTest do
     def parse_feature_branch(ref), do: Fleet.Forge.Protocol.parse_feature_branch(ref)
     @impl true
     def get_route(_r, _n, _o), do: :none
+    @impl true
     def pr_review_state(_r, _n, _o), do: {:ok, %{}}
     @impl true
     def post_comment(_r, _n, _b, _o), do: {:ok, %{}}

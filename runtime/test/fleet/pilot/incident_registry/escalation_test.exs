@@ -29,9 +29,13 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
             {:ok, [%{"number" => 42, "body" => "prior incident\n#{marker}\n"}]}
           end,
           create_issue_fun: fn _r, _t, _b, _o ->
-            send(me, :created) && {:ok, 999}
+            send(me, :created)
+            {:ok, 999}
           end,
-          add_label_fun: fn _r, num, _lbl, _o -> send(me, {:label, num}) && {:ok, :added} end
+          add_label_fun: fn _r, num, _lbl, _o ->
+            send(me, {:label, num})
+            {:ok, :added}
+          end
         )
 
       assert {:ok, 42} = result
@@ -46,7 +50,10 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
       result =
         Escalation.escalate(:reroll_failed, "issue-9-engineer", :dead, sig,
           list_issues_fun: fn _repo, _opts -> {:ok, [%{"number" => 1, "body" => "unrelated"}]} end,
-          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 7} end,
+          create_issue_fun: fn _r, _t, _b, _o ->
+            send(me, :created)
+            {:ok, 7}
+          end,
           add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
         )
 
@@ -64,7 +71,10 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
           :dead,
           "wake:issue-3-engineer:dead",
           list_issues_fun: fn _repo, _opts -> {:error, :forge_down} end,
-          create_issue_fun: fn _r, _t, _b, _o -> send(me, :created) && {:ok, 5} end,
+          create_issue_fun: fn _r, _t, _b, _o ->
+            send(me, :created)
+            {:ok, 5}
+          end,
           add_label_fun: fn _r, _num, _lbl, _o -> {:ok, :added} end
         )
 
@@ -86,7 +96,10 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
 
       opts = [
         list_issues_fun: fn _r, _o -> {:ok, []} end,
-        create_issue_fun: fn _r, title, _body, _o -> send(pid, {:title, title}) && {:ok, 91} end,
+        create_issue_fun: fn _r, title, _body, _o ->
+          send(pid, {:title, title})
+          {:ok, 91}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -111,7 +124,8 @@ defmodule Fleet.Pilot.IncidentRegistry.EscalationTest do
       [
         list_issues_fun: fn _r, _o -> {:ok, []} end,
         create_issue_fun: fn _r, _t, _b, iopts ->
-          send(pid, {:create, iopts}) && {:ok, 5}
+          send(pid, {:create, iopts})
+          {:ok, 5}
         end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]

@@ -678,7 +678,8 @@ defmodule Fleet.Pilot.Poller.ReconciliationFactsTest do
         start_entry_poller({:ok, []}, %{},
           spawner: FlakySpawner,
           incident_fun: fn op, subject, reason, _o ->
-            send(parent, {:incident, op, subject, reason}) && :recorded
+            send(parent, {:incident, op, subject, reason})
+            :recorded
           end
         )
 

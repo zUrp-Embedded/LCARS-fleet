@@ -37,8 +37,6 @@ defmodule Fleet.Toolchain do
   approve one diff for two effects, and the executor pick an order nobody declared.
   """
 
-  require Logger
-
   alias Fleet.Labels
 
   @forms ~w(apt installer sysroot)

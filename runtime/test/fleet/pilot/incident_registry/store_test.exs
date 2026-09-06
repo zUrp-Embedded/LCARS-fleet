@@ -107,7 +107,10 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
       assert {:ok, ^reg} =
                Store.sync_forge(reg,
                  get_file_fun: fn _r, _p, _o -> {:ok, %{content: content, sha: "s"}} end,
-                 put_file_fun: fn _r, _p, c, _o -> send(pid, {:put, c}) && {:ok, "c"} end
+                 put_file_fun: fn _r, _p, c, _o ->
+                   send(pid, {:put, c})
+                   {:ok, "c"}
+                 end
                )
 
       refute_receive {:put, _}, 50
@@ -123,7 +126,10 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
       assert {:ok, %{"wake:p:dead" => %{"count" => 3}}} =
                Store.sync_forge(local,
                  get_file_fun: fn _r, _p, _o -> {:ok, %{content: content, sha: "s"}} end,
-                 put_file_fun: fn _r, _p, c, o -> send(pid, {:put, c, o[:sha]}) && {:ok, "c"} end
+                 put_file_fun: fn _r, _p, c, o ->
+                   send(pid, {:put, c, o[:sha]})
+                   {:ok, "c"}
+                 end
                )
 
       assert_receive {:put, pushed, "s"}
@@ -136,7 +142,10 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
       assert {:ok, %{}} =
                Store.sync_forge(%{},
                  get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-                 put_file_fun: fn _r, _p, c, _o -> send(pid, {:put, c}) && {:ok, "c"} end
+                 put_file_fun: fn _r, _p, c, _o ->
+                   send(pid, {:put, c})
+                   {:ok, "c"}
+                 end
                )
 
       refute_receive {:put, _}, 50
@@ -149,7 +158,10 @@ defmodule Fleet.Pilot.IncidentRegistry.StoreTest do
       assert {:ok, ^reg} =
                Store.sync_forge(reg,
                  get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-                 put_file_fun: fn _r, _p, c, o -> send(pid, {:put, c, o[:sha]}) && {:ok, "c"} end
+                 put_file_fun: fn _r, _p, c, o ->
+                   send(pid, {:put, c, o[:sha]})
+                   {:ok, "c"}
+                 end
                )
 
       assert_receive {:put, pushed, nil}

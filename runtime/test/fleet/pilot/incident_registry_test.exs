@@ -62,7 +62,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name =
         start_reg(tmp,
           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       refute Reg.seen_before?("wake:p:dead", server: name)
@@ -93,7 +96,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
         start_reg(tmp,
           sync_debounce_ms: 150,
           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       for i <- 1..3 do
@@ -123,7 +129,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
            sync_debounce_ms: 60_000,
            retry_ms: 50,
            get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-           put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+           put_file_fun: fn _r, _p, content, _o ->
+             send(pid, {:put, content})
+             {:ok, "c"}
+           end
          ]}
       )
 
@@ -145,7 +154,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name =
         start_reg(tmp,
           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-          put_file_fun: fn _r, _p, _c, o -> send(pid, {:put_opts, o}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, _c, o ->
+            send(pid, {:put_opts, o})
+            {:ok, "c"}
+          end
         )
 
       assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
@@ -173,7 +185,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name =
         start_reg(tmp,
           get_file_fun: fn _r, _p, _o -> {:error, {:http, 503, "down"}} end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       assert :ok = Reg.note("wake:p:dead", :dead, server: name, now: "2026-06-20T10:00:00Z")
@@ -252,7 +267,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
         server: name,
         # Le tableau est ILLISIBLE — pas vide.
         list_issues_fun: fn _r, _o -> {:error, {:http, 503, "down"}} end,
-        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 77} end,
+        create_issue_fun: fn _r, _t, body, _o ->
+          send(pid, {:body, body})
+          {:ok, 77}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -288,7 +306,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       opts = [
         server: name,
         list_issues_fun: fn _r, _o -> {:ok, []} end,
-        create_issue_fun: fn _r, _t, body, _o -> send(pid, {:body, body}) && {:ok, 78} end,
+        create_issue_fun: fn _r, _t, body, _o ->
+          send(pid, {:body, body})
+          {:ok, 78}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -610,7 +631,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           get_file_fun: fn _r, _p, _o ->
             {:ok, %{content: JSON.encode!(%{"wake:other:z" => %{"count" => 2}}), sha: "s"}}
           end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       assert :ok = Reg.note("wake:local:q", :q, server: name, now: "2026-06-20T11:00:00Z")
@@ -629,7 +653,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       name =
         start_reg(tmp,
           get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       assert :recorded =
@@ -667,10 +694,12 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                Reg.record_or_escalate("pod", "issue-7-engineer", :result_timeout,
                  server: name,
                  create_issue_fun: fn repo, title, _b, iopts ->
-                   send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+                   send(pid, {:issue, repo, title, iopts})
+                   {:ok, 1}
                  end,
                  add_label_fun: fn repo, num, lbl, _o ->
-                   send(pid, {:label, repo, num, lbl}) && {:ok, :added}
+                   send(pid, {:label, repo, num, lbl})
+                   {:ok, :added}
                  end
                )
 
@@ -703,7 +732,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       opts = [
         server: name,
-        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 41} end,
+        create_issue_fun: fn _r, _t, _b, _o ->
+          send(pid, :issue_created)
+          {:ok, 41}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -735,7 +767,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
       opts = [
         server: name,
         escalation_cooldown_ms: 0,
-        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 42} end,
+        create_issue_fun: fn _r, _t, _b, _o ->
+          send(pid, :issue_created)
+          {:ok, 42}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -760,12 +795,18 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
           get_file_fun: fn _r, _p, _o ->
             {:ok, %{content: JSON.encode!(%{sig => %{"count" => 3}}), sha: "s"}}
           end,
-          put_file_fun: fn _r, _p, content, _o -> send(pid, {:put, content}) && {:ok, "c"} end
+          put_file_fun: fn _r, _p, content, _o ->
+            send(pid, {:put, content})
+            {:ok, "c"}
+          end
         )
 
       opts = [
         server: name,
-        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 43} end,
+        create_issue_fun: fn _r, _t, _b, _o ->
+          send(pid, :issue_created)
+          {:ok, 43}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -800,7 +841,10 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
 
       opts = [
         server: name,
-        create_issue_fun: fn _r, _t, _b, _o -> send(pid, :issue_created) && {:ok, 77} end,
+        create_issue_fun: fn _r, _t, _b, _o ->
+          send(pid, :issue_created)
+          {:ok, 77}
+        end,
         add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
       ]
 
@@ -919,7 +963,8 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
                  escalate_kind: :sp_suspect,
                  pane: "ECRAN-TEST-42 : last REPL line",
                  create_issue_fun: fn _r, title, body, _o ->
-                   send(pid, {:issue, title, body}) && {:ok, 1}
+                   send(pid, {:issue, title, body})
+                   {:ok, 1}
                  end,
                  add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
                )

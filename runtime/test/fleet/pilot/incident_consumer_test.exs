@@ -214,7 +214,12 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   test "a routed incident whose subject key is MISSING → LOUD producer-bug warning, nothing recorded" do
     me = self()
-    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    pid =
+      start(fn _, _, _, _ ->
+        send(me, :rec)
+        :recorded
+      end)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -227,7 +232,12 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   test "failure event without pod_id → ignored (no record)" do
     me = self()
-    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    pid =
+      start(fn _, _, _, _ ->
+        send(me, :rec)
+        :recorded
+      end)
 
     send(pid, failed_event(:"pod.failed", %{"reason" => "boom"}))
 
@@ -236,7 +246,12 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   test "out-of-scope event (other type) → ignored" do
     me = self()
-    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    pid =
+      start(fn _, _, _, _ ->
+        send(me, :rec)
+        :recorded
+      end)
 
     send(pid, failed_event(:"pod.completed", %{"pod_id" => "pod_3"}))
 
@@ -265,7 +280,12 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
   test "spawn.failed without cap_profile_name → ignored (guard)" do
     me = self()
-    pid = start(fn _, _, _, _ -> send(me, :rec) && :recorded end)
+
+    pid =
+      start(fn _, _, _, _ ->
+        send(me, :rec)
+        :recorded
+      end)
 
     send(pid, failed_event(:"spawn.failed", %{"reason" => "boom"}))
 
@@ -279,7 +299,8 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
       consumer =
         start(fn _, _, _, _ -> flunk("gate=immediate ne passe JAMAIS par record_or_escalate") end,
           escalate_fun: fn kind, subject, reason, sig, _opts ->
-            send(pid, {:escalated, kind, subject, reason, sig}) && {:ok, 42}
+            send(pid, {:escalated, kind, subject, reason, sig})
+            {:ok, 42}
           end
         )
 
@@ -300,7 +321,10 @@ defmodule Fleet.Pilot.IncidentConsumerTest do
 
       # La route pod.failed du harnais ne porte PAS :gate — elle doit passer par record_or_escalate.
       consumer =
-        start(fn op, subject, _r, _o -> send(pid, {:recorded, op, subject}) && :recorded end)
+        start(fn op, subject, _r, _o ->
+          send(pid, {:recorded, op, subject})
+          :recorded
+        end)
 
       send(
         consumer,

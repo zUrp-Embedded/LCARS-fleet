@@ -96,7 +96,10 @@ defmodule Fleet.Project.Onboard.AdoptTest do
       forge_repo: AdoptForge,
       forge_users: Humans,
       sleeper: fn _ms -> :ok end,
-      ensure_labels: fn repo, _o -> send(self(), {:labels_seeded, repo}) && :ok end,
+      ensure_labels: fn repo, _o ->
+        send(self(), {:labels_seeded, repo})
+        :ok
+      end,
       ensure_architect: fn repo, _o ->
         send(self(), {:arch_ensured, repo})
         {:ok, "arch-stub"}
