@@ -15,6 +15,7 @@ defmodule Fleet.Pilot.StepRunConsumerDefaultSeamTest do
 
   test "le defaut de deliverable_mode_fun est une fonction d'arite 2 — (role, root), comme le seam" do
     {:ok, state} = StepRunConsumer.init(subscribe: false, repo: "o/r", forge_client: nil)
+
     assert is_function(state.deliverable_mode_fun, 2),
            "le defaut du seam n'a pas l'arite 2 : #{inspect(state.deliverable_mode_fun)}"
   end
