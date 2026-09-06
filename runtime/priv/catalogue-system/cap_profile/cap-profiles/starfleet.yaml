@@ -13,11 +13,23 @@ metadata:
   name: starfleet
   # vitrine: Le standard | Permanent. Il démarre la flotte, tient l'audit et sert de guichet quand aucun projet n'est en cause.
   containment: bwrap
-  # SEUL AVEC starfleet a porter `egress` : ce role parle a un humain, et le priver du web le
-  # castre — il cadre, il arbitre, il va chercher. Tous les autres roles restent au defaut
-  # `vendor-only` : leur matiere de reference arrive par leur brief, leur lot, ou la face montee.
-  # C'est une DECLARATION, pas une derivation : le jour ou un producteur en a besoin, il le dit.
-  network: egress
+  # CE ROLE PARLE A UN HUMAIN, et le priver du web le castre — il cadre, il arbitre, il va
+  # chercher. Il portait `egress` sans declarer un seul hote, donc il n'avait que ceux du vendor :
+  # un refus mesure sur banc (`raw.githubusercontent.com`) pour un guichet cense aller lire le web.
+  #
+  # ⚖ ARBITRAGE USER 2026-09-05, et le critere est nomme : PEU DE FRICTION POUR L'HUMAIN. Une liste
+  # d'hotes ne supprime pas la friction, elle la deplace — un hote manquant fait echouer le pod en
+  # SILENCE, et c'est l'humain qui doit lire un warning pour decouvrir lequel, puis revenir. Sur une
+  # boite auto-hebergee ou ce siege ne sert qu'une personne, l'arbitrage est de retirer le mur
+  # d'hotes plutot que d'entretenir une liste que personne ne peut finir.
+  #
+  # Ce que ca NE retire PAS : le pod reste scelle (aucun namespace reseau), sort par son proxy
+  # CONNECT, ne resout aucun nom lui-meme, et une requete hors tunnel reste refusee. Le proxy passe
+  # de mur a point d'observation, et `Egress.provision/3` en trace une ligne par vie de pod.
+  #
+  # Tous les autres roles restent au defaut `vendor-only` : leur matiere de reference arrive par
+  # leur brief, leur lot, ou la face montee. C'est une DECLARATION, pas une derivation.
+  network: open
   # Role identity (the metadata IS the single source of the WHAT): role_index = role slot in the
   # UUID — and 0 IS starfleet, the ONLY fleet-scoped pod (repo 0000 in its UUID, kill_class 0 →
   # `pkill -f 1badcafe`/`2badcafe` never touch it). The old `protected`/`fleet_level` bits are GONE

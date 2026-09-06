@@ -323,7 +323,12 @@ defmodule Fleet.Application.CatalogueDepositsTest do
       end)
 
     assert log =~ "COLUMN ZERO"
-    refute log =~ "could not be read"
+
+    # ⚠ ANCREE SUR L'EMETTEUR **ET** SUR LA PHRASE. Six modules de `lib/` portent « could not be
+    # read », et `capture_log` capte le logger GLOBAL : sous `async: true`, la ligne d'un voisin
+    # tombe dans `log`. Le prefixe du module SEUL ne suffit pas non plus — ce module emet aussi la
+    # ligne que le temoin ASSERTE deux lignes plus haut, et la refuter entierement se contredirait.
+    refute log =~ ~r/CatalogueDeposits: .*could not be read/
   end
 
   test "une forge ILLISIBLE ne devient PAS une liste vide" do

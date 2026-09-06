@@ -248,17 +248,6 @@ defmodule LcarsFleet.MixProject do
       {:yaml_elixir, "~> 2.12"},
       # — MCP (pod frontier) —
       {:ex_mcp, "~> 0.12.0"},
-      # PINNED, and load-bearing: 1.11.11+ ships `jose_json_otp.erl`, which declares the `dynamic()`
-      # type. OTP 25 (what the Ubuntu LTS serves, cf. the apt-only toolchain posture) does not know
-      # that type, so the dep does not COMPILE — `type dynamic() undefined`, measured by
-      # unpinning it. `override: true` because ex_mcp asks for `~> 1.11` and would otherwise pull the
-      # newest. Nothing here references JOSE directly; the pin exists only to hold the dep on the last
-      # release this Erlang can build. It lifts when OTP does, not before — and the reason is written
-      # HERE because an exact pin with no stated cause reads as gratuitous and gets removed.
-      # ⚠ ITS CONDITION NO LONGER HOLDS: the toolchain floor is OTP 27, which knows
-      # `dynamic()` (EEP-61, OTP 26). The pin is HELD, not required — lifting it is a resolver
-      # change, so it belongs to the pass that purges the PLT and runs the gate, not to the pin bump.
-      {:jose, "1.11.10", override: true},
       # — forge HTTP (Fleet.Forge ; finch aussi demarre seul par les portes `eval`) —
       {:req, "~> 0.7"},
       {:finch, "~> 0.23"},

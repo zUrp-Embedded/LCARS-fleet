@@ -132,6 +132,30 @@ defmodule Fleet.Pilot.PollerTelemetryTest do
       PollerTelemetry.cycle_stats()
     end
 
+    defp emit_cycle_served(duration_ms, repos, served) do
+      :telemetry.execute(
+        @cycle,
+        %{duration_ms: duration_ms, repos: repos, served: served},
+        %{status: :ok, mode: :tick}
+      )
+
+      PollerTelemetry.cycle_stats()
+    end
+
+    test "le compte des SERVIS voyage de l'emission jusqu'a `cycle_stats`" do
+      # C'est l'ecart entre `last_repos` et `last_served` qui porte « la flotte ne peut rien
+      # produire » (cf. `PilotApp.serving?/1`). S'il se perdait dans l'anneau, la sonde en aval
+      # jugerait sur un chiffre qui n'existe plus.
+      assert %{last_repos: 12, last_served: 3} = emit_cycle_served(200, 12, 3)
+      assert %{last_repos: 4, last_served: 0} = emit_cycle_served(200, 4, 0)
+    end
+
+    test "une mesure SANS `served` rend `nil`, jamais 0 — l'inconnu n'accuse pas" do
+      # Un defaut a zero ferait lire « aucun depot servi » sur tout emetteur qui ne renseigne pas
+      # la cle, et `serving?/1` degraderait le rail sur une mesure qui n'a pas ete prise.
+      assert %{last_repos: 12, last_served: nil} = emit_cycle(200, 12)
+    end
+
     test "avant le premier passage, la reponse honnete est :no_data" do
       assert :no_data = PollerTelemetry.cycle_stats()
     end

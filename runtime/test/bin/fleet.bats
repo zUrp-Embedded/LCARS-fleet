@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # SOURCE: runtime/test/bin/fleet.bats
 # AUTHOR: consultant (remediation agent, off-fleet session)
-# STARDATE: 2026.239
+# STARDATE: 2026.248
 # STATUS: bats tests for bin/fleet env semantics (maintenance override)
 #
 # The launcher used to clobber LCARS_BOOT_PERMANENT_AT_START with an unconditional
@@ -41,6 +41,73 @@ teardown() {
   [[ -n "${STUB_HARNESS_PID:-}" ]] && kill -9 -- "-$STUB_HARNESS_PID" 2>/dev/null
   rm -rf "$TMP_BASE"
   return 0
+}
+
+# ─── LE PID DU BEAM, ET LE DRAIN QUI EN DEPEND ────────────────────────────────────────────────
+#
+# Ces temoins existent parce que `cmd_stop` visait `pgrep -P <pane> | head -1`, c'est-a-dire
+# `erl_child_setup` — l'auxiliaire qu'OTP fork — au lieu du BEAM. Consequence mesuree sur banc le
+# 2026-09-05 : le BEAM ne recevait aucun signal, `prep_stop` ne tournait jamais, et chaque `fleet
+# stop` finissait en `tmux kill-server` apres 90 s d'attente. Un TERM au bon pid rend la main en 3 s.
+#
+# La couture est le CHEMIN (`LCARS_PROC_DIR`), jamais la valeur — meme forme que
+# `LCARS_SEAT_UID_FILE` plus haut, et pour la meme raison : sans elle ces temoins mesureraient les
+# process de la machine qui les joue.
+@test "le BEAM est le pane LUI-MEME, jamais son premier enfant" {
+  mkdir -p "$TMP_BASE/proc/4242"
+  echo "beam.smp" > "$TMP_BASE/proc/4242/comm"
+
+  run bash -c "source '$SCRIPT'; LCARS_PROC_DIR='$TMP_BASE/proc'; beam_pid_of_pane 4242"
+  [ "$status" -eq 0 ]
+  [ "$output" = "4242" ]
+}
+
+@test "un pane qui n'est PAS un beam ne rend AUCUN pid — fail-closed, on ne vise pas au juge" {
+  mkdir -p "$TMP_BASE/proc/4243"
+  echo "erl_child_setup" > "$TMP_BASE/proc/4243/comm"
+
+  run bash -c "source '$SCRIPT'; LCARS_PROC_DIR='$TMP_BASE/proc'; beam_pid_of_pane 4243"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "un pane vide ou inconnu ne rend aucun pid" {
+  run bash -c "source '$SCRIPT'; LCARS_PROC_DIR='$TMP_BASE/proc'; beam_pid_of_pane ''"
+  [ "$status" -ne 0 ]
+  run bash -c "source '$SCRIPT'; LCARS_PROC_DIR='$TMP_BASE/proc'; beam_pid_of_pane 999999"
+  [ "$status" -ne 0 ]
+}
+
+# LE TEMOIN QUI TIENT LE DEFAUT : la cible du SIGTERM. `kill` est double pour que le temoin lise
+# QUI aurait ete signale, sans signaler personne.
+@test "stop: le SIGTERM va au pane (le BEAM), pas a son enfant" {
+  mkdir -p "$TMP_BASE/proc/4242"
+  echo "beam.smp" > "$TMP_BASE/proc/4242/comm"
+
+  run bash -c "source '$SCRIPT'
+    LCARS_PROC_DIR='$TMP_BASE/proc'
+    FLEET_STOP_WAIT=1
+    dtmux() { case \"\$1\" in display-message) echo 4242 ;; has-session) return 0 ;; *) : ;; esac; }
+    kill() { echo \"KILL \$*\"; }
+    cmd_stop"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"KILL -TERM 4242"* ]]
+}
+
+@test "stop: un pane qui n'est pas un beam n'est JAMAIS signale, et le refus le nomme" {
+  mkdir -p "$TMP_BASE/proc/4243"
+  echo "erl_child_setup" > "$TMP_BASE/proc/4243/comm"
+
+  run bash -c "source '$SCRIPT'
+    LCARS_PROC_DIR='$TMP_BASE/proc'
+    FLEET_STOP_WAIT=1
+    dtmux() { case \"\$1\" in display-message) echo 4243 ;; has-session) return 0 ;; *) : ;; esac; }
+    kill() { echo \"KILL \$*\"; }
+    cmd_stop"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"KILL -TERM"* ]]
+  [[ "$output" == *"AUCUN signal envoye"* ]]
+  [[ "$output" == *"erl_child_setup"* ]]
 }
 
 @test "maintenance override SURVIVES setup_env (LCARS_BOOT_PERMANENT_AT_START=false)" {
@@ -443,18 +510,43 @@ STUB
 #     ORPHELINE son `sleep`, qu'aucun pid enregistre ne designe plus. D'ou `setsid` : le faux beam
 #     et toute sa descendance vivent dans leur propre groupe, et le teardown tue le GROUPE. Tuer
 #     des pid nommes ne ferme que les cas dont on a devine la forme.
+#
+# (3) ⚠ ET LE PANE **EST** LE BEAM, depuis le 2026-09-05. Ce harnais fabriquait un pane PUIS un
+#     enfant (`$1 & ... wait`), et c'est la forme que le defaut habitait : `cmd_stop` visait le
+#     premier enfant du pane, donc le faux beam ici, donc les temoins etaient verts — sur un arbre
+#     de process que la production n'a JAMAIS. Mesure du 2026-09-05, release et `mix run` : tmux
+#     lance `exec ...`, le shell est remplace jusqu'a `beam.smp`, et le beam PORTE le pid du pane.
+#     Son seul enfant reel est `erl_child_setup`. Un harnais qui invente un enfant prouve donc le
+#     contraire de ce qu'il annonce. D'ou l'`exec` ci-dessous : un seul process, comme en vrai.
 start_fake_beam() {
-  setsid bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; $1 & echo \$! > '$STUB_STATE/beam.pid'; wait" \
+  setsid bash -c "echo \$\$ > '$STUB_STATE/pane.pid'; echo \$\$ > '$STUB_STATE/beam.pid'; exec $1" \
     >/dev/null 2>&1 &
   STUB_HARNESS_PID=$!
   sleep 0.3
+}
+
+# LE FAUX BEAM PORTE LE NOM D'UN BEAM, et ce n'est pas un detail de decor : `comm` est derive du
+# nom de l'EXECUTABLE, donc une copie appelee `beam.smp` fait dire `beam.smp` au vrai
+# `/proc/<pid>/comm`. Le temoin exerce alors la lecture reelle plutot qu'un faux `/proc`, et la
+# couture `LCARS_PROC_DIR` reste ce qu'elle est : un outil pour les cas ou aucun process n'existe.
+# ⚠ UNE COPIE DE `bash`, ET PAS DE `sleep` : sur cette machine `sleep` est un binaire MULTI-APPEL
+# (coreutils dispatche sur `argv[0]`), donc une copie renommee refuse de tourner — « unknown program
+# 'beam' ». `bash` est un binaire ordinaire, il se laisse renommer.
+#
+# ⚠ ET LE `; :` FINAL N'EST PAS DECORATIF : sans lui, bash EXEC sa derniere commande, se fait
+# remplacer par `sleep`, et le `comm` du process redevient `sleep` — le faux beam cesserait d'en
+# etre un au bout de quelques millisecondes.
+make_fake_beam_bin() {
+  cp "$(command -v bash)" "$TMP_BASE/beam.smp"
+  chmod +x "$TMP_BASE/beam.smp"
 }
 
 @test "nominal stop is GRACEFUL: SIGTERM reaches the beam, kill-server never fires" {
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  start_fake_beam "sleep 300"
+  make_fake_beam_bin
+  start_fake_beam "'$TMP_BASE/beam.smp' -c 'sleep 300; :'"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_STOP_WAIT=5; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
@@ -466,7 +558,8 @@ start_fake_beam() {
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  start_fake_beam "bash -c 'trap \\\"\\\" TERM; sleep 300'"
+  make_fake_beam_bin
+  start_fake_beam "'$TMP_BASE/beam.smp' -c 'trap \\\"\\\" TERM; sleep 300'"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE' FLEET_STOP_WAIT=1; source '$SCRIPT'; cmd_stop"
   [ "$status" -eq 0 ]
@@ -483,7 +576,8 @@ start_fake_beam() {
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  start_fake_beam "env -i LCARS_DEBUG_VISIBILITY=1 sleep 300"
+  make_fake_beam_bin
+  start_fake_beam "env -i LCARS_DEBUG_VISIBILITY=1 '$TMP_BASE/beam.smp' -c 'sleep 300; :'"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
   [ "$status" -eq 0 ]
@@ -494,7 +588,8 @@ start_fake_beam() {
   export STUB_STATE="$TMP_BASE/state"; mkdir -p "$STUB_STATE"
   make_tmux_stub
 
-  start_fake_beam "env -i sleep 300"
+  make_fake_beam_bin
+  start_fake_beam "env -i '$TMP_BASE/beam.smp' -c 'sleep 300; :'"
 
   run bash -c "export LCARS_TMUX_BIN='$TMP_BASE/stubs/tmux-stub' STUB_STATE='$STUB_STATE'; source '$SCRIPT'; status_debug_visibility"
   [ "$status" -eq 0 ]
