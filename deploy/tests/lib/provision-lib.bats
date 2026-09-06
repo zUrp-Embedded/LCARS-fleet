@@ -1039,15 +1039,27 @@ STUB
     || { echo "base « $build » sans digest : l'immutabilite ne se declare pas, elle s'epingle"; return 1; }
 }
 
-@test "les deux rails demandent erlang ET elixir a apt — un mecanisme, deux fichiers" {
+@test "les deux rails demandent erlang a apt et Elixir au MEME zip epingle — un mecanisme, deux fichiers" {
+  # 2026-09-06 (passe8/elixir-1.20) : la cible LTS sert Elixir 1.18, le plancher est 1.20. Erlang
+  # reste celui de la distro sur les deux rails ; Elixir vient du precompile officiel, epingle
+  # dans cette lib — le Dockerfile en porte les memes valeurs en ARG (15-toolchain.bats tient
+  # l'egalite des pins, ici on tient la FORME : ni l'un ni l'autre ne redemande elixir a apt).
   local dockerfile="$BATS_TEST_DIRNAME/../../docker/Dockerfile"
   local mod="$BATS_TEST_DIRNAME/../../modules.d/15-toolchain.sh"
   [ -f "$dockerfile" ] && [ -f "$mod" ]
 
-  grep -qE '^\s+erlang elixir \\?$' "$dockerfile" \
-    || { echo "l'etage build du Dockerfile ne demande plus « erlang elixir » a apt"; return 1; }
-  grep -qE 'apt_ensure erlang elixir' "$mod" \
-    || { echo "15-toolchain ne demande plus « erlang elixir » a apt"; return 1; }
+  grep -qE '^\s+erlang \\$' "$dockerfile" \
+    || { echo "l'etage build du Dockerfile ne demande plus « erlang » a apt"; return 1; }
+  ! grep -qE '^\s+erlang elixir \\?$' "$dockerfile" \
+    || { echo "l'etage build du Dockerfile redemande elixir a apt : la distro LTS sert 1.18"; return 1; }
+  grep -q 'elixir-otp-${ELIXIR_OTP_MAJOR}.zip' "$dockerfile" \
+    || { echo "le Dockerfile ne prend plus Elixir au zip officiel epingle"; return 1; }
+  grep -qE 'apt_ensure erlang( \|\|| *$)' "$mod" \
+    || { echo "15-toolchain ne demande plus « erlang » a apt"; return 1; }
+  ! grep -qE 'apt_ensure erlang elixir' "$mod" \
+    || { echo "15-toolchain redemande elixir a apt"; return 1; }
+  grep -q 'fetch_verify "$ELIXIR_ZIP_URL" "$PROV_ELIXIR_PIN_SHA256"' "$mod" \
+    || { echo "15-toolchain ne prend plus Elixir au zip officiel epingle par la lib"; return 1; }
 }
 
 @test "lan_addr tient son contrat « vide si indeterminable » — meme sans \`ip\`" {
