@@ -1609,9 +1609,14 @@ defmodule Fleet.Pilot.PollerTest do
           loader: fn -> %{} end
         )
 
-      # Meme course que dans `pool_slot_test.exs` (2026-09-07) : `Process.alive?/1` ne ferme rien —
-      # le processus peut mourir entre la sonde et le `stop`, qui sort alors en `:noproc` DANS le
-      # on_exit, et le test passe est compte echoue. On attrape la sortie.
+      # No `Process.alive?` probe: this poller is LINKED to the test process, so by the time
+      # `on_exit` runs — in another process, after the test process died — it is already gone and
+      # the probe answers `false`, making the whole teardown a no-op. When the death is still in
+      # flight the probe answers `true` instead and `GenServer.stop` exits `:noproc` IN the
+      # teardown, which marks a PASSED test FAILED (measured 2026-09-07: red in the full suite on
+      # a loaded machine, green alone, same toolchain — an original flake, not a bump regression).
+      # Same race as in `pool_slot_test.exs`. Nothing is bookkept here, so we do not probe: we
+      # stop, and we tolerate a subject that has already left.
       on_exit(fn ->
         try do
           GenServer.stop(pid)

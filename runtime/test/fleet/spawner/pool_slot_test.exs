@@ -19,17 +19,28 @@ defmodule Fleet.Spawner.PoolSlotTest do
   setup do
     # An Agent, not ETS: an ETS table owned by the test process is already gone when `on_exit`
     # runs in its own process — the cleanup would crash on a dead table.
-    {:ok, holders} = Agent.start_link(fn -> [] end)
+    #
+    # ⚠ AND `Agent.start`, NEVER `Agent.start_link`. `on_exit` runs in ANOTHER process, AFTER the
+    # test process has died, so anything LINKED to it is already dead by then — measured on this
+    # very file: `Process.alive?(holders)` was `false` in all 8 teardowns, which means the cleanup
+    # below had NEVER run once. And what it cleans is not optional: `occupy/4` creates its holders
+    # with `spawn`, UNLINKED, so they outlive the test and stay in `Fleet.Spawner.Registry` —
+    # exactly the leak `holder_loop/0` documents the cost of. The bookkeeping must outlive what it
+    # books: unlinked, the agent is still there when `on_exit` needs it.
+    #
+    # The `Process.alive?` guard it replaces was also a lost race in the other direction: when the
+    # death is still in flight the probe says `true` and the next call exits `:noproc` IN the
+    # teardown, which marks a PASSED test FAILED (seen under load, two suites in parallel).
+    {:ok, holders} = Agent.start(fn -> [] end)
 
     on_exit(fn ->
-      # ⚠ `Process.alive?/1` NE FERME PAS LA COURSE, ET C'EST CE QU'ELLE PROMETTAIT. L'Agent est LIE
-      # au processus de test, qu'ExUnit fait mourir quand le test finit : il peut disparaitre ENTRE
-      # la sonde et l'appel qui suit, et `Agent.get/2` comme `Agent.stop/1` sortent alors en
-      # `:noproc` — dans le `on_exit`, donc le test est compte ECHOUE apres etre passe.
-      # Mesure du 2026-09-07 : rouge dans la suite complete (machine chargee), vert seul, MEME
-      # toolchain — un flake d'origine, pas une regression du bump. On ATTRAPE la sortie au lieu de
-      # la predire ; les porteurs sont tues tant qu'on peut encore les lire, et un Agent deja mort
-      # n'a de toute facon plus rien a arreter.
+      # Belt and braces. The agent is unlinked now, so it is normally still alive here — but a
+      # teardown must never be what fails a passed test: `Agent.get/2` and `Agent.stop/1` exit
+      # `:noproc` if it did die, and an exit raised IN `on_exit` marks a PASSED test FAILED
+      # (measured 2026-09-07: red in the full suite on a loaded machine, green alone, same
+      # toolchain — an original flake, not a bump regression). We catch the exit instead of
+      # predicting it with a probe that cannot close the race; a dead agent has nothing left to
+      # stop anyway.
       try do
         holders |> Agent.get(& &1) |> Enum.each(&Process.exit(&1, :kill))
         Agent.stop(holders)
