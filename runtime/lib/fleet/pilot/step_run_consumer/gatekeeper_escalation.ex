@@ -144,7 +144,7 @@ defmodule Fleet.Pilot.StepRunConsumer.GatekeeperEscalation do
           wake_recovery.(
             pod_id,
             fn -> seams.spawner.spawn_pod(cap, pod_id, spawn_opts) end,
-            wake_fun: &seams.spawner.wake_pod/1,
+            wake_fun: fn pod -> seams.spawner.wake_pod(pod) end,
             op: "gatekeeper-wake"
           )
 

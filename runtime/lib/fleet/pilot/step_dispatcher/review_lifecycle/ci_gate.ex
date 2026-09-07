@@ -39,8 +39,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
   alias Fleet.Forge.Payload
   alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.Ctx
 
-  require Logger
-
   # A run that has not finished after this long is not slow, it is orphaned (no runner registered,
   # runner dead, or a workflow nobody can serve). Wide enough for a real Elixir gate (~5 min on the
   # bench), short enough that a dead rail is named the same hour.

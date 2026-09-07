@@ -34,13 +34,21 @@ defmodule Fleet.Pilot.StepRunCompleterAsRoleTest do
     def close_issue(_repo, _n, _opts), do: {:ok, :closed}
     def post_route(_repo, _n, _workflow_map_name, _step, _opts), do: {:ok, :posted}
 
-    def get_pr_for_branch(_repo, head, base, _opts),
-      do: send(self(), {:get_pr, head, base}) && {:ok, 7}
+    def get_pr_for_branch(_repo, head, base, _opts) do
+      send(self(), {:get_pr, head, base})
+      {:ok, 7}
+    end
 
-    def post_review(_repo, pr, event, body, _opts),
-      do: send(self(), {:review, pr, event, body}) && :ok
+    def post_review(_repo, pr, event, body, _opts) do
+      send(self(), {:review, pr, event, body})
+      :ok
+    end
 
-    def merge_pr(_repo, pr, _opts), do: send(self(), {:merge, pr}) && :ok
+    def merge_pr(_repo, pr, _opts) do
+      send(self(), {:merge, pr})
+      :ok
+    end
+
     def set_stage(_repo, _n, _stage, _opts), do: {:ok, :posted}
 
     # Read by the seal to name the accounts that approved before it writes its closing

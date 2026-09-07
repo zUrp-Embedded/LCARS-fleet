@@ -24,7 +24,6 @@ defmodule Fleet.MCP.EmergencyStopTest do
   defmodule Forge do
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -66,6 +65,7 @@ defmodule Fleet.MCP.EmergencyStopTest do
     def merged_pr_of_issue(_r, _n, _o), do: :none
     @impl true
     def get_route(_r, _n, _o), do: :none
+    @impl true
     def pr_review_state(_r, _n, _o), do: {:ok, %{}}
   end
 

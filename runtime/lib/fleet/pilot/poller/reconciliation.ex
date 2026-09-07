@@ -523,8 +523,6 @@ defmodule Fleet.Pilot.Poller.Reconciliation do
     _, _ -> :unknown
   end
 
-  defp pod_task_state(_tq, _), do: :unknown
-
   # Has the pod PULLED its latest task (state `:assigned`)? The PULL (`get_work_item`,
   # which transitions `:pending → :assigned` and records the in-band ACK) is the DURABLE proof that
   # the wake LANDED and the agent activated — the distinction the orphan-lock duty needs to tell a

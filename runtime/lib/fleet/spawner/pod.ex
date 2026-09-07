@@ -1317,9 +1317,10 @@ defmodule Fleet.Spawner.Pod do
 
   defp cap_profile_name(%CapProfile{} = cap), do: CapProfile.name(cap)
 
+  # No fallback clause: `data.cap_profile` is always a `%CapProfile{}` here (proven by the type
+  # checker), and a containment DEFAULT silently applied to a non-profile would be exactly the
+  # sandbox downgrade `SpawnAdmission` exists to refuse.
   defp cap_profile_containment(%CapProfile{} = cap), do: CapProfile.containment(cap)
-
-  defp cap_profile_containment(_), do: CapProfile.default_containment()
 
   # Recovery snapshots need the state name reattached to the callback data.
   defp put_phase(data, phase), do: Map.put(data, :phase, phase)

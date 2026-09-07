@@ -22,6 +22,36 @@ tous par `<y>` :
 nommé d'après le CONTRAT qu'il épingle (`bus_safe_emit`, `application_boot_knob`) porte plus
 d'information qu'un `<module>_test.exs` muet — le préfixe le rend trouvable sans lui coûter ce nom.
 
+## Lire un témoin sans sa prose
+
+Un quart des lignes de la suite est de la prose (commentaires, `@moduledoc`, noms), coupée en
+blocs de une à trois lignes qui interrompent le code toutes les quelques lignes : un `grep` y
+touche autant de commentaires que de code (mesuré : `refute` 130 fois sur 1460, `async: false`
+80 fois sur 218). `mix lcars.test.view` projette un fichier sans perte, numérotation conservée :
+
+    mix lcars.test.view code  test/fleet/layout_test.exs    # le code seul, prose blanchie
+    mix lcars.test.view plan  test/fleet/layout_test.exs    # describe / test / property, boucles `for` marquées
+    mix lcars.test.view prose test/fleet/layout_test.exs    # chaque commentaire, rattaché au témoin le plus proche
+    mix lcars.test.view check test/**/*_test.exs            # la projection est sans perte sur tout l'arbre
+
+L'autorité sur « ceci est un commentaire » est le tokenizer d'Elixir, jamais une regex (un `#`
+dans un heredoc n'est pas un commentaire). `test/mix/test_view_test.exs` tient la perte à zéro sur
+tout l'arbre ; le jour où une forme nouvelle le fait rougir, c'est l'outil qu'on répare, pas le
+témoin qu'on exclut.
+
+## Compter et chronométrer la suite
+
+La ligne de bilan d'ExUnit ne compte pas pareil d'une version à l'autre (1.20 retranche les
+skippés de chaque compteur, 1.18 les laisse) et ne dit rien de qui prend le temps. Le manifeste
+des témoins exécutés est la seule source de vérité pour compter et comparer deux runs :
+
+    TIME_OUT=/tmp/times.tsv mix test --formatter Fleet.Test.TimeFormatter --formatter ExUnit.CLIFormatter
+
+Une ligne par témoin, `module`, `nom`, `état`, `async`, `temps_us`, `fichier`
+(`test/support/time_formatter.ex`). Deux manifestes se diffent sur les deux premières colonnes.
+Mesuré le 2026-09-06 : 138 modules `async: false` font 266 s de mur sur 317, et vingt d'entre eux
+en font 84 %.
+
 Cette forme est **vérifiée à l'échelle du dossier** par `tests.dirs_mirror_source`
 (`mix lcars.contracts.check`) : un témoin sous un dossier qui n'existe pas sous `lib/` fait rougir
 le gate.

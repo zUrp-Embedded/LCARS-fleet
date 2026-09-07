@@ -120,7 +120,10 @@ defmodule Fleet.Project.Onboard.ImportExternalTest do
       sleeper: fn _ms -> :ok end,
       # file:// fixtures through the pure-gate SEAM — the PROD gate is pinned separately below.
       url_gate: fn _url -> :ok end,
-      ensure_labels: fn repo, _o -> send(self(), {:labels_seeded, repo}) && :ok end,
+      ensure_labels: fn repo, _o ->
+        send(self(), {:labels_seeded, repo})
+        :ok
+      end,
       ensure_architect: fn repo, _o ->
         send(self(), {:arch_ensured, repo})
         {:ok, "arch-stub"}

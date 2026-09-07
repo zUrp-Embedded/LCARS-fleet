@@ -21,8 +21,6 @@ defmodule Fleet.MCP.PodTools.Delegation.Gate do
   other domain calls. It is public only because the channels are separate modules.
   """
 
-  require Logger
-
   alias Fleet.MCP.PodTools.Delegation.{EscalationForge, ForgeClient, ProjectOnboard}
 
   # Runtime seams are duck-typed; resolve missing callbacks as a typed error before dispatch.

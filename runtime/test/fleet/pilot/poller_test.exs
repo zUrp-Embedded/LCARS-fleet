@@ -54,7 +54,8 @@ defmodule Fleet.Pilot.PollerTest do
           %{42 => {"ghostmap", "deploy"}},
           workflow_map_loader: RaisingWorkflowMapLoader,
           incident_fun: fn op, subject, reason, _opts ->
-            send(parent, {:incident, op, subject, reason}) && :recorded
+            send(parent, {:incident, op, subject, reason})
+            :recorded
           end
         )
 
@@ -765,7 +766,12 @@ defmodule Fleet.Pilot.PollerTest do
     test "une org ABSENTE (404) est retiree et la passe REUSSIT — l'org saine n'est pas emportee" do
       {:ok, pid} = poller_sans_web()
 
-      _ = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      _ =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
+
       stats = Poller.stats(pid)
 
       # `poll_count` est la preuve que le CORPS de la passe a tourne : la branche d'erreur ne
@@ -779,8 +785,17 @@ defmodule Fleet.Pilot.PollerTest do
     test "l'absence est dite UNE FOIS, pas a chaque tick" do
       {:ok, pid} = poller_sans_web()
 
-      premier = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
-      second = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      premier =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
+
+      second =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
 
       assert premier =~ "does NOT exist on the forge"
 
@@ -1383,8 +1398,10 @@ defmodule Fleet.Pilot.PollerTest do
       def pr_review_state(_repo, _index, _opts), do: {:ok, %{verdicts: %{}, reviewers: []}}
 
       # Adoption: sets judges on an orphan PR (human/fork, or an agent that lost its reviewers).
-      def request_review(_repo, index, reviewers, _opts),
-        do: send(self(), {:requested_review, index, reviewers}) && :ok
+      def request_review(_repo, index, reviewers, _opts) do
+        send(self(), {:requested_review, index, reviewers})
+        :ok
+      end
 
       def post_route(_repo, _n, _p, _s, _opts), do: {:ok, :posted}
 
@@ -1594,17 +1611,33 @@ defmodule Fleet.Pilot.PollerTest do
 
       on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
 
-      gone = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      gone =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
+
       assert gone =~ "does NOT exist on the forge"
       refute_received {:scanned, "web/q"}
 
       Application.put_env(:lcars_fleet, :_test_web_org, :present)
-      back = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+
+      back =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
+
       assert back =~ "now exists on the forge"
       assert back =~ "discovery resumes"
       assert_received {:scanned, "web/q"}
 
-      again = ExUnit.CaptureLog.capture_log(fn -> send(pid, :poll) && Poller.stats(pid) end)
+      again =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :poll)
+          Poller.stats(pid)
+        end)
+
       refute again =~ "now exists on the forge", "a return is said once, like an absence"
 
       GenServer.stop(pid)

@@ -461,12 +461,10 @@ defmodule Fleet.Pilot.StepDispatcher do
           map() | nil,
           String.t()
         ) :: {:ok, {String.t(), CapProfile.t(), map()}} | {:error, term()}
-  # Route nil = ANOMALY: the poller onboards every routeless one BEFORE dispatch (ensure_workflow_map_or_onboard)
-  # → if we arrive here without a route, fail-loud, NEVER a silent eng fallback. The role ALWAYS comes from the
+  # Route nil = ANOMALY: the poller onboards every routeless one BEFORE dispatch (ensure_workflow_map_or_onboard),
+  # and the type checker proves no caller passes `nil` here — a `nil` route raises FunctionClauseError,
+  # which is the fail-loud we want, NEVER a silent eng fallback. The role ALWAYS comes from the
   # workflow_map position (written route).
-  defp workflow_map_role(nil, _loader, _workflow_map_loader, _prefetched_workflow_map, _repo),
-    do: {:error, :unrouted}
-
   defp workflow_map_role(
          {workflow_map_name, step},
          loader,

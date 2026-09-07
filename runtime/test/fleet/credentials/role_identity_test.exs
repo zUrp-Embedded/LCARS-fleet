@@ -12,7 +12,7 @@ defmodule Fleet.Credentials.RoleIdentityTest do
     {:ok, dir: tmp}
   end
 
-  test "token present → {:ok, %RoleIdentity{}} with the verified token", %{dir: dir} do
+  test "token present → {:ok, %RoleIdentity{}} with the verified token" do
     Fleet.TestEnv.put_role_token!("gatekeeper", "  tok-gk  \n")
 
     assert {:ok, %RoleIdentity{role: "gatekeeper", token: "tok-gk"}} =

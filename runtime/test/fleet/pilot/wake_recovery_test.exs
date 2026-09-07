@@ -31,7 +31,10 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
     pid = self()
 
     opts = [
-      wake_fun: fn p -> send(pid, {:wake, p}) && :ok end,
+      wake_fun: fn p ->
+        send(pid, {:wake, p})
+        :ok
+      end,
       seen_before_fun: fn _ -> flunk("seen_before forbidden on :ok") end,
       note_fun: fn _, _ -> flunk("note forbidden on :ok") end
     ]
@@ -53,7 +56,10 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
         if n == 0, do: {:error, :dead}, else: :ok
       end,
       seen_before_fun: fn _ -> false end,
-      note_fun: fn sig, reason -> send(pid, {:note, sig, reason}) && :ok end
+      note_fun: fn sig, reason ->
+        send(pid, {:note, sig, reason})
+        :ok
+      end
     ]
 
     assert :ok = WakeRecovery.wake("issue-7-engineer", fn -> send(pid, :respawn) end, opts)
@@ -111,10 +117,12 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       seen_before_fun: fn _ -> false end,
       note_fun: fn _, _ -> flunk("no note when the re-roll fails") end,
       create_issue_fun: fn repo, title, _body, iopts ->
-        send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+        send(pid, {:issue, repo, title, iopts})
+        {:ok, 1}
       end,
       add_label_fun: fn repo, num, lbl, _o ->
-        send(pid, {:label, repo, num, lbl}) && {:ok, :added}
+        send(pid, {:label, repo, num, lbl})
+        {:ok, :added}
       end
     ]
 
@@ -141,7 +149,8 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       wake_fun: fn _ -> {:error, :dead} end,
       seen_before_fun: fn _ -> true end,
       create_issue_fun: fn repo, title, _b, iopts ->
-        send(pid, {:issue, repo, title, iopts}) && {:ok, 1}
+        send(pid, {:issue, repo, title, iopts})
+        {:ok, 1}
       end,
       add_label_fun: fn _r, _n, _l, _o -> {:ok, :added} end
     ]
@@ -189,13 +198,16 @@ defmodule Fleet.Pilot.WakeRecoveryTest do
       seen_before_fun: fn _ -> true end,
       create_issue_fun: fn repo, _t, _b, iopts ->
         if iopts[:assignees] do
-          send(pid, :with_assignee) && {:error, :bad_assignee}
+          send(pid, :with_assignee)
+          {:error, :bad_assignee}
         else
-          send(pid, {:fallback, repo, iopts}) && {:ok, 7}
+          send(pid, {:fallback, repo, iopts})
+          {:ok, 7}
         end
       end,
       add_label_fun: fn repo, num, lbl, _o ->
-        send(pid, {:label, repo, num, lbl}) && {:ok, :added}
+        send(pid, {:label, repo, num, lbl})
+        {:ok, :added}
       end
     ]
 

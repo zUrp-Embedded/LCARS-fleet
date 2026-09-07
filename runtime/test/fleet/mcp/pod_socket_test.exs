@@ -810,8 +810,13 @@ defmodule Fleet.MCP.PodSocketTest do
       File.ln_s!("/nowhere/absent", broken)
       Fleet.TestEnv.put_env_restoring(:lcars_fleet, :mcp_sock_base, Path.join(broken, "mcp"))
 
-      assert {:error, {:socket_init_failed, {:mkdir, :enoent, blame}}} =
+      # The errno of a broken link is `:enoent` up to Elixir 1.18 and `:enotdir` from 1.20 (measured
+      # on both binaries, absent from the changelog). The blame below does not read the errno, so
+      # neither does this witness: what it pins is the LEVEL, not the OS's word for it.
+      assert {:error, {:socket_init_failed, {:mkdir, errno, blame}}} =
                PodSocketSupervisor.ensure_pod_socket(uniq("p"))
+
+      assert errno in [:enoent, :enotdir]
 
       # What the bare errno could not say: WHICH level is missing, and that its parent is fine —
       # so this is a broken path, not a permission we lack.

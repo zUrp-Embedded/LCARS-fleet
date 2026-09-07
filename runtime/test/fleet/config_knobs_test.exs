@@ -58,7 +58,10 @@ defmodule Fleet.ConfigKnobsTest do
          name: :"knobs_window_#{System.unique_integer([:positive])}",
          wal_path: wal_path,
          get_file_fun: fn _r, _p, _o -> {:error, :not_found} end,
-         put_file_fun: fn _r, _p, content, _o -> send(test_pid, {:put, content}) && {:ok, "c"} end}
+         put_file_fun: fn _r, _p, content, _o ->
+           send(test_pid, {:put, content})
+           {:ok, "c"}
+         end}
       )
     end
 

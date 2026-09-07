@@ -65,7 +65,19 @@ defmodule Fleet.Forge.ProtocolPropertyTest do
   defp json_scalar do
     one_of([
       string(:printable, max_length: 10),
-      member_of(["```", "```result", "\n```", "`", "\n", "\r\n", "\t", " ", "e-aigu", "\"", "\\"]),
+      member_of([
+        "```",
+        "```result",
+        "\n```",
+        "`",
+        "\n",
+        "\r\n",
+        "\t",
+        " ",
+        "e-aigu",
+        "\"",
+        "\\"
+      ]),
       integer(),
       float(),
       boolean(),

@@ -53,8 +53,6 @@ defmodule Fleet.Pilot.Poller.Lease do
   — the observability currency of the tick, produced here and aggregated by the poller.
   """
 
-  require Logger
-
   alias Fleet.Forge.Payload
   alias Fleet.Pilot.Poller.Admission
 

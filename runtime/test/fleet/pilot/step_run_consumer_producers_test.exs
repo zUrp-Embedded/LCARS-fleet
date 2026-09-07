@@ -37,15 +37,22 @@ defmodule Fleet.Pilot.StepRunConsumerProducersTest do
 
   # Completer: captures complete_pr + await_arch (freeze_to_arch → await_arch).
   defmodule CaptureCompleter do
-    def complete_pr(step_run, opts),
-      do: send(self(), {:step_run, step_run, opts}) && {:ok, :captured}
+    def complete_pr(step_run, opts) do
+      send(self(), {:step_run, step_run, opts})
+      {:ok, :captured}
+    end
 
-    def await_arch(step_run, opts),
-      do: send(self(), {:await_arch, step_run, opts}) && {:ok, :awaiting_arch}
+    def await_arch(step_run, opts) do
+      send(self(), {:await_arch, step_run, opts})
+      {:ok, :awaiting_arch}
+    end
   end
 
   defmodule StubSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
   end
 
   defp dmode,

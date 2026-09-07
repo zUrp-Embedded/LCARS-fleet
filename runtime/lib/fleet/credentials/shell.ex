@@ -93,8 +93,6 @@ defmodule Fleet.Credentials.Shell do
   The caller MUST match: an `{:error, {:timeout, _}}` is not a silent success.
   """
 
-  require Logger
-
   @default_timeout_ms 30_000
   # F-04 — the wall deadline bounds TIME, not MEMORY: a 20 MB output is accepted whole (repro'd),
   # and a hostile/verbose producer has the full timeout window to
@@ -316,8 +314,8 @@ defmodule Fleet.Credentials.Shell do
   # lit son `pgrp`. `nil` = pas d'enfant, ce qui est le cas NORMAL quand `setsid` ne forke pas
   # (`os_pid` est alors lui-meme le chef de groupe) et le cas degrade quand `/proc` est illisible.
   # Les deux sont couverts par le tir sur `-os_pid` de `kill_scope/1` — voir son commentaire.
-  defp child_pgid(nil), do: nil
-
+  # `nil` en ENTREE est impossible ici : `kill_scope/1` l'absorbe avant d'appeler (clause prouvee
+  # inatteignable par le type checker).
   defp child_pgid(parent_os_pid) do
     with {:ok, entries} <- File.ls("/proc"),
          child when is_binary(child) <- find_child(entries, parent_os_pid),
@@ -451,9 +449,8 @@ defmodule Fleet.Credentials.Shell do
   end
 
   # SIGKILL to a single PID — the belt behind the group kill, cf. `kill_scope/1`. `--` to stay
-  # homogeneous (a positive PID is not ambiguous, but we keep the same defensive form).
-  defp kill_pid(nil), do: :ok
-
+  # homogeneous (a positive PID is not ambiguous, but we keep the same defensive form). A `nil`
+  # never reaches here: `kill_scope/1` absorbs it first (clause proven unreachable by the type checker).
   defp kill_pid(pid) do
     System.cmd("kill", ["-s", "KILL", "--", to_string(pid)], stderr_to_stdout: true)
   end

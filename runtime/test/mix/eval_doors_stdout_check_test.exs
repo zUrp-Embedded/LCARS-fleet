@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Lcars.Contracts.EvalDoorsStdoutCheckTest do
     end)
   end
 
-  defp tree(extra, kind \\ :conformes) do
+  defp tree(extra, kind) do
     root = Fleet.TestEnv.tmp_path("eval_doors")
     File.mkdir_p!(Path.join(root, "lib/fleet"))
 

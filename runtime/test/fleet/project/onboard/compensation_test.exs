@@ -149,7 +149,10 @@ defmodule Fleet.Project.OnboardCompensationTest do
       forge_users: Humans,
       forge_files: Files,
       sleeper: fn _ms -> :ok end,
-      ensure_labels: fn repo, _o -> send(self(), {:labels_seeded, repo}) && :ok end,
+      ensure_labels: fn repo, _o ->
+        send(self(), {:labels_seeded, repo})
+        :ok
+      end,
       ensure_architect: fn _repo, _o -> {:ok, "arch-stub"} end
     ]
   end

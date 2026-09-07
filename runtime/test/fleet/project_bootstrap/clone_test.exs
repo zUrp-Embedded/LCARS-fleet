@@ -510,7 +510,7 @@ defmodule Fleet.ProjectBootstrap.CloneTest do
     acceptor =
       spawn(fn ->
         case :gen_tcp.accept(listen, 10_000) do
-          {:ok, sock} -> Process.sleep(:infinity) && sock
+          {:ok, _sock} -> Process.sleep(:infinity)
           _ -> :ok
         end
       end)

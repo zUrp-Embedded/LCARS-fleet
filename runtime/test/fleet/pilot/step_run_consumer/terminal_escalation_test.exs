@@ -30,10 +30,16 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
   end
 
   defmodule StubSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
 
     # ProjectArchitect.ensure (default, on-demand) → best-effort spawn; captured, never blocking.
-    def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
+    def spawn_pod(_cap, pod_id, _opts) do
+      send(self(), {:spawned, pod_id})
+      {:ok, self()}
+    end
   end
 
   # SYNC run_completion (prod offloads onto a Task.Supervisor; the sync default runs the closure
@@ -94,15 +100,37 @@ defmodule Fleet.Pilot.StepRunConsumer.TerminalEscalationTest do
   # message perdu, et rien ne le disait — ni dans les journaux, ni dans le retour (`:ok` par
   # contrat, et il le reste : ce chemin est non-bloquant par conception).
   defmodule AbsentArchSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
-    def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
-    def notify_pod(pod_id, _msg), do: send(self(), {:notify, pod_id}) && {:error, :not_found}
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
+
+    def spawn_pod(_cap, pod_id, _opts) do
+      send(self(), {:spawned, pod_id})
+      {:ok, self()}
+    end
+
+    def notify_pod(pod_id, _msg) do
+      send(self(), {:notify, pod_id})
+      {:error, :not_found}
+    end
   end
 
   defmodule LiveArchSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
-    def spawn_pod(_cap, pod_id, _opts), do: send(self(), {:spawned, pod_id}) && {:ok, self()}
-    def notify_pod(pod_id, _msg), do: send(self(), {:notify, pod_id}) && :ok
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
+
+    def spawn_pod(_cap, pod_id, _opts) do
+      send(self(), {:spawned, pod_id})
+      {:ok, self()}
+    end
+
+    def notify_pod(pod_id, _msg) do
+      send(self(), {:notify, pod_id})
+      :ok
+    end
   end
 
   describe "6-084 — un architecte injoignable ne se perd plus en silence" do

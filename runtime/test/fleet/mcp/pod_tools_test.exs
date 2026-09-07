@@ -199,6 +199,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule StubForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -213,7 +214,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -252,6 +252,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def pr_review_state(_repo, _index, _opts),
       do: {:ok, %{verdicts: %{}, reviewers: [], outcome: :no_jury}}
 
@@ -278,6 +279,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule MergedMarkerForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -292,7 +294,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -303,6 +304,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
@@ -392,6 +394,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule MergedNoStageLabelForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -399,7 +402,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -410,6 +412,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(_repo, _n, _opts),
       do:
         {:ok,
@@ -444,6 +447,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule InFlightSupersedeForge do
     # Une PR vivante ne REFUSE plus le retrait : elle se ferme AVEC le ticket (le rail des pulls
     # est independant, une PR laissee ouverte serait jugee puis mergee dans un ticket retire).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -458,7 +462,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -469,6 +472,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
 
     @impl true
@@ -531,6 +535,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule ClosedTargetForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -545,7 +550,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -556,6 +560,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "closed"}}
 
     @impl true
@@ -690,6 +695,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def list_stoppable_issues(_repo, _opts), do: {:ok, []}
 
+    @impl true
     def close_project(full_name, opts) do
       send(self(), {:close_project, full_name, opts})
 
@@ -756,6 +762,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule RecordingForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -770,7 +777,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -781,6 +787,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(repo, number, _opts) do
       send(self(), {:get_issue, repo, number})
 
@@ -835,6 +842,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule IdempotencyForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -849,7 +857,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -888,6 +895,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue(_repo, _n, _opts), do: {:ok, %{"state" => "open"}}
     @impl true
     def list_pulls(_repo, _opts), do: {:ok, []}
@@ -2551,6 +2559,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule EscalationForge do
     # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
     # l'ancien contrat sous le nouveau nom.
+    @impl true
     def escalation_verdict(repo, n, opts) do
       {:ok, cs} = list_comments(repo, n, opts)
 
@@ -2612,6 +2621,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule RecordingEscalationForge do
     # Cherche le MARQUEUR, comme le vrai client : un stub qui rendrait « le dernier » testerait
     # l'ancien contrat sous le nouveau nom.
+    @impl true
     def escalation_verdict(repo, n, opts) do
       {:ok, cs} = list_comments(repo, n, opts)
 
@@ -2650,6 +2660,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule RecordingForgeBlindReadback do
     # Aveugle par ce chemin aussi : ce stub existe pour prouver qu'une relecture impossible
     # n'avale pas la reponse, et il doit l'etre de la meme facon sur les deux fonctions.
+    @impl true
     def escalation_verdict(_repo, _n, _opts), do: {:error, :forge_down}
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
@@ -2671,6 +2682,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule EscalationForgeUnreadable do
     # L'inbox illisible doit le RESTER par ce chemin aussi : c'est la fonction que l'inbox appelle
     # maintenant, et un `{:ok, nil}` ici transformerait une panne en « pas d'escalade ».
+    @impl true
     def escalation_verdict(_repo, _n, _opts), do: {:error, :forge_down}
     @behaviour Fleet.MCP.PodTools.Delegation.EscalationForge
 
@@ -2869,6 +2881,7 @@ defmodule Fleet.MCP.PodToolsTest do
   defmodule ReadChannelForge do
     # Le retrait d'un ticket retire SON TRAVAIL : une PR laissee ouverte serait jugee puis mergee
     # dans un ticket mort (le rail des pulls est independant).
+    @impl true
     def close_pr(repo, index, opts) do
       send(self(), {:close_pr, repo, index, opts})
       {:ok, :closed}
@@ -2883,7 +2896,6 @@ defmodule Fleet.MCP.PodToolsTest do
 
     @behaviour Fleet.MCP.PodTools.Delegation.ForgeClient
 
-    @impl true
     # Pas d'escalade a rendre dans ce stub : `nil` est un resultat, pas une panne.
     def escalation_verdict(_repo, _n, _opts), do: {:ok, nil}
 
@@ -2894,6 +2906,7 @@ defmodule Fleet.MCP.PodToolsTest do
     @impl true
     def get_route(_r, _n, _o), do: :none
 
+    @impl true
     def get_issue("fleet/alpha", 5, _opts) do
       {:ok,
        PayloadFixture.issue(

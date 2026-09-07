@@ -31,35 +31,76 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
       if body =~ "gate-fail" and Keyword.get(o, :_sign_fails, false) do
         {:error, :forge_write_down}
       else
-        send(self(), {:comment, body}) && {:ok, :posted}
+        send(self(), {:comment, body})
+        {:ok, :posted}
       end
     end
 
-    def set_assignee(_r, _n, login, _o), do: send(self(), {:assignee, login}) && {:ok, :set}
-    def remove_label(_r, _n, _l, _o), do: send(self(), :unlocked) && {:ok, :removed}
-    def add_label(_r, _n, label, _o), do: send(self(), {:label, label}) && {:ok, :added}
+    def set_assignee(_r, _n, login, _o) do
+      send(self(), {:assignee, login})
+      {:ok, :set}
+    end
+
+    def remove_label(_r, _n, _l, _o) do
+      send(self(), :unlocked)
+      {:ok, :removed}
+    end
+
+    def add_label(_r, _n, label, _o) do
+      send(self(), {:label, label})
+      {:ok, :added}
+    end
 
     # La CLOTURE voyage dans le message. Le stub la jetait (`_o`), donc aucun test ne pouvait voir la
     # difference entre « livre » et « abandonne » — et l'abandon fermait en `:delivered` depuis
     # toujours, sans que rien ne rougisse.
-    def close_issue(_r, _n, o),
-      do: send(self(), {:closed, Keyword.get(o, :closure)}) && {:ok, :closed}
+    def close_issue(_r, _n, o) do
+      send(self(), {:closed, Keyword.get(o, :closure)})
+      {:ok, :closed}
+    end
 
     # Le chronometre PARLE : c'est le seul geste qui distingue `unlock/6` d'un `remove_label` nu,
     # donc l'observer prouve par quel chemin l'escalade est passee.
-    def stop_stopwatch(_r, _n, _o), do: send(self(), :stopwatch_stopped) && :ok
+    def stop_stopwatch(_r, _n, _o) do
+      send(self(), :stopwatch_stopped)
+      :ok
+    end
+
     def count_signed_step_runs(_r, _n, opts), do: {:ok, Keyword.get(opts, :_step_runs, 0)}
-    def post_route(_r, _n, p, s, _o), do: send(self(), {:route, p, s}) && {:ok, :posted}
 
-    def open_pr(_r, head, base, _t, o),
-      do: send(self(), {:open_pr, head, base, o[:body]}) && {:ok, 7}
+    def post_route(_r, _n, p, s, _o) do
+      send(self(), {:route, p, s})
+      {:ok, :posted}
+    end
 
-    def get_pr_for_branch(_r, head, base, _o), do: send(self(), {:get_pr, head, base}) && {:ok, 7}
+    def open_pr(_r, head, base, _t, o) do
+      send(self(), {:open_pr, head, base, o[:body]})
+      {:ok, 7}
+    end
+
+    def get_pr_for_branch(_r, head, base, _o) do
+      send(self(), {:get_pr, head, base})
+      {:ok, 7}
+    end
+
     # #8.E: a BRIEF judge (brief-review) is PRE-PR → no producer PR open.
     def list_open_pulls(_r, _o), do: {:ok, []}
-    def request_review(_r, pr, revs, _o), do: send(self(), {:request_review, pr, revs}) && :ok
-    def post_review(_r, pr, ev, body, _o), do: send(self(), {:review, pr, ev, body}) && :ok
-    def merge_pr(_r, pr, _o), do: send(self(), {:merge, pr}) && :ok
+
+    def request_review(_r, pr, revs, _o) do
+      send(self(), {:request_review, pr, revs})
+      :ok
+    end
+
+    def post_review(_r, pr, ev, body, _o) do
+      send(self(), {:review, pr, ev, body})
+      :ok
+    end
+
+    def merge_pr(_r, pr, _o) do
+      send(self(), {:merge, pr})
+      :ok
+    end
+
     def set_stage(_r, _n, _s, _o), do: {:ok, :posted}
   end
 
@@ -71,10 +112,16 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
   end
 
   defmodule StubSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
 
     # Content-carrying arch notification (terminal abandon): the message rides the wake.
-    def notify_pod(pod_id, message), do: send(self(), {:notify, pod_id, message}) && :ok
+    def notify_pod(pod_id, message) do
+      send(self(), {:notify, pod_id, message})
+      :ok
+    end
 
     # One-shot gatekeeper spawn (reorg 2026-07-19): captured + succeeds.
     def spawn_pod(_cap, pod_id, opts) do
@@ -85,7 +132,11 @@ defmodule Fleet.Pilot.StepRunConsumerGateTest do
 
   # Spawn failure stub — proves a judge-less eval fails LOUD (never a silent stall).
   defmodule FailSpawner do
-    def wake_pod(pod_id), do: send(self(), {:wake, pod_id}) && :ok
+    def wake_pod(pod_id) do
+      send(self(), {:wake, pod_id})
+      :ok
+    end
+
     def spawn_pod(_cap, _pod_id, _opts), do: {:error, :launch_failed}
   end
 
