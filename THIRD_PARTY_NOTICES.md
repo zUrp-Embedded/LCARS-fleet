@@ -31,7 +31,7 @@ Chaque emprunt est qualifié par sa **forme**, parce que les obligations et les 
 | Projet | Auteur | Licence | Forme | Emplacement |
 |---|---|---|---|---|
 | [token-saver](https://github.com/ppgranger/token-saver) | ppgranger | Apache-2.0 | `import` | `runtime/vendor/token_saver/` |
-| [wshobson/agents](https://github.com/wshobson/agents) | wshobson et contributeurs | MIT | `import` | `knowledge/wshobson-agents/` |
+| [wshobson/agents](https://github.com/wshobson/agents) | wshobson et contributeurs | MIT | `import` — **RETIRÉ le 2026-09-07** | *(plus aucun fichier ; archivé hors dépôt)* |
 | [GitWand](https://github.com/devlint/GitWand) | devlint | MIT | `recode` | `runtime/lib/fleet/conflict.ex` |
 | [superpowers](https://github.com/obra/superpowers) | Jesse Vincent | MIT | `pattern` + `dep` — **RETIRÉ le 2026-08-19** | *(plus aucun fichier ; cf. §4)* |
 
@@ -62,7 +62,11 @@ Chaque emprunt est qualifié par sa **forme**, parce que les obligations et les 
 - **Source** : https://github.com/wshobson/agents
 - **Auteur** : wshobson et contributeurs
 - **Licence** : MIT
-- **Emplacement** : `knowledge/wshobson-agents/` (22 fichiers)
+- **Emplacement** : ~~`knowledge/wshobson-agents/` (22 fichiers)~~ — **RETIRÉ du dépôt le 2026-09-07**
+  avec tout `knowledge/`, qui n'était pas du produit (aucun consommateur dans le code, absent des
+  images). Le matériel et son attribution sont archivés hors dépôt, dans
+  `work/beyond_#6/side-quest_knowledge/`. Cette entrée reste ici parce qu'une notice se retire en
+  le DISANT, comme `superpowers` avant elle.
 
 **Ce qui est repris** : 10 des 74 bibliothèques d'agents publiées par le projet, versées dans la base de connaissance L2 de la fleet.
 
