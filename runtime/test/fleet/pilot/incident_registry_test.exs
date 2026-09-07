@@ -482,17 +482,26 @@ defmodule Fleet.Pilot.IncidentRegistryTest do
     test "boot: forge file CORRUPT (present but not a JSON map) → treated empty, LOUD",
          %{tmp_dir: tmp} do
       # The file EXISTED (≠ 404) but its content is not a JSON map — real amnesia, must be loud.
+      #
+      # ⚠ ET LA POSTURE SE MESURE SUR L'ETAT, PAS SUR LA PHRASE. Ce temoin n'assertait que
+      # `log =~ "CORRUPT"` : rendre `{:ok, %{}}` juste apres le `Logger.error` — donc lire un
+      # registre corrompu comme un registre VIDE, ce que tout le module existe pour refuser — le
+      # laissait vert (mutation jouee le 2026-09-07 ; un temoin voisin l'attrapait, celui-ci non).
+      # Son jumeau ILLISIBLE, juste au-dessus, mesure `sync_pending` : meme posture, meme mesure.
+      name = :"reg_#{System.unique_integer([:positive])}"
+
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          name =
-            start_reg(tmp,
-              get_file_fun: fn _r, _p, _o -> {:ok, %{content: "not json {{{", sha: "s"}} end
-            )
+          start_reg(tmp,
+            name: name,
+            get_file_fun: fn _r, _p, _o -> {:ok, %{content: "not json {{{", sha: "s"}} end
+          )
 
           _ = settle(name)
         end)
 
       assert log =~ "CORRUPT"
+      assert settle(name).sync_pending == true
     end
 
     test "boot: WAL present but CORRUPT → LOUD log (visible amnesia), reg boots empty anyway",

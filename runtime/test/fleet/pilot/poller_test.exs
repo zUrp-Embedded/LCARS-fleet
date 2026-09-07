@@ -75,25 +75,52 @@ defmodule Fleet.Pilot.PollerTest do
   # (reconciliation `list_active`/`pod_active_issue_id`/`pod_status` + my arch-offer
   # `pod_status`/`enqueue`) → avoid touching the REAL broker in test. The arch's `pod_status` =
   # the "free vs busy" lever.
+  #
+  # ⚠ ET `enqueue/2` ANNONCE SON APPEL. Ces doublures etaient MUETTES, donc les temoins ci-dessous
+  # ne pouvaient juger que le LOG : « le mandat a ete mis en file » etait prouve par la phrase qui
+  # le dit, pas par la mise en file. Mutation jouee le 2026-09-07 — sauter `enqueue_mandate` en
+  # gardant le log laissait le temoin FREE vert, et l'ajouter dans la branche BUSY laissait le
+  # temoin BUSY vert. Un stub qui se tait ne peut pas etre pris en flagrant delit.
+  #
+  # Le pid du test voyage par l'env applicatif (`:_test_arch_pid`), comme `:_test_web_pid` le fait
+  # deja : la doublure est appelee DANS le process du Poller, donc `self()` n'y est pas le test.
   defmodule ArchFreeTQ do
     def list_active, do: []
     def pod_active_issue_id(_pod_id), do: {:ok, nil}
     def pod_status(_pod_id), do: {:ok, nil}
-    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+
+    def enqueue(pod_id, attrs) do
+      if p = Application.get_env(:lcars_fleet, :_test_arch_pid),
+        do: send(p, {:arch_enqueue, pod_id, attrs})
+
+      {:ok, %{id: "wi-arch"}}
+    end
   end
 
   defmodule ArchBusyTQ do
     def list_active, do: []
     def pod_active_issue_id(_pod_id), do: {:ok, nil}
     def pod_status(_pod_id), do: {:ok, :assigned}
-    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+
+    def enqueue(pod_id, attrs) do
+      if p = Application.get_env(:lcars_fleet, :_test_arch_pid),
+        do: send(p, {:arch_enqueue, pod_id, attrs})
+
+      {:ok, %{id: "wi-arch"}}
+    end
   end
 
   defmodule ArchPendingTQ do
     def list_active, do: []
     def pod_active_issue_id(_pod_id), do: {:ok, nil}
     def pod_status(_pod_id), do: {:ok, :pending}
-    def enqueue(_pod_id, _attrs), do: {:ok, %{id: "wi-arch"}}
+
+    def enqueue(pod_id, attrs) do
+      if p = Application.get_env(:lcars_fleet, :_test_arch_pid),
+        do: send(p, {:arch_enqueue, pod_id, attrs})
+
+      {:ok, %{id: "wi-arch"}}
+    end
   end
 
   describe "G4 — awaits_rekick?/3 (arch net cooldown)" do
@@ -269,6 +296,7 @@ defmodule Fleet.Pilot.PollerTest do
           assignee_logins: ["lordzurp"]
         )
 
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :_test_arch_pid, self())
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchFreeTQ)
 
       log =
@@ -276,6 +304,10 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
+      # LE MANDAT EST MIS EN FILE, pas seulement annonce. Sauter `enqueue_mandate` en gardant le
+      # log laissait ce temoin vert (mutation jouee le 2026-09-07) : le log disait le geste, rien
+      # ne le mesurait.
+      assert_received {:arch_enqueue, _pod_id, _attrs}
       assert log =~ "mandate lordzurp/lcars-test#42 enqueued (arch was free)"
 
       GenServer.stop(pid)
@@ -293,6 +325,7 @@ defmodule Fleet.Pilot.PollerTest do
           assignee_logins: ["lordzurp"]
         )
 
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :_test_arch_pid, self())
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchPendingTQ)
 
       log =
@@ -300,6 +333,9 @@ defmodule Fleet.Pilot.PollerTest do
           for _ <- 1..2, do: Poller.force_poll(name)
         end)
 
+      # « no new enqueue » se mesure sur la FILE, pas sur l'absence d'une phrase : une mise en file
+      # silencieuse aurait laisse les deux `refute` de log verts.
+      refute_received {:arch_enqueue, _, _}
       assert log =~ "pending mandate never fetched → re-wake only"
       refute log =~ "enqueued (arch was free)"
 
@@ -319,12 +355,18 @@ defmodule Fleet.Pilot.PollerTest do
           assignee_logins: ["lordzurp"]
         )
 
+      Fleet.TestEnv.put_env_restoring(:lcars_fleet, :_test_arch_pid, self())
       {name, pid} = start_entry_poller({:ok, [issue]}, %{}, task_queue: ArchBusyTQ)
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           for _ <- 1..10, do: Poller.force_poll(name)
         end)
+
+      # « NO enqueue » est la moitie du nom, et elle n'etait tenue par rien : ajouter un
+      # `enqueue_mandate` dans la branche BUSY laissait ce temoin vert, les deux `refute` ne
+      # portant que sur des lignes de log que cette branche n'ecrit pas.
+      refute_received {:arch_enqueue, _, _}
 
       # Bleed-proof (`capture_log` is GLOBAL — it catches a CONCURRENT test's ArchWake on ANOTHER repo):
       # scope to an ArchWake line naming THIS test's repo (`lcars-test`), not the bare shared token. A real
