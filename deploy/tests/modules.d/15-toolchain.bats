@@ -146,3 +146,29 @@ _run_apply() {
   [[ "$output" == *"livraison binaire, rien à bâtir ici"* ]]
   [ ! -e "${LCARS_ELIXIR_PREFIX}${PIN}" ] && [ ! -e "$PROV_LINK_DIR/elixir" ]
 }
+
+@test "CHECK : les deux causes d'un « elixir » qui n'est pas le pin se distinguent — notre lien, ou quelqu'un devant nous" {
+  local bin="$BATS_TEST_TMPDIR/doubles"; mkdir -p "$bin"
+  printf '#!/usr/bin/env bash\nprintf "%s"\n' "$OTP" > "$bin/erl"; chmod 0755 "$bin/erl"
+  # le pin est pose
+  mkdir -p "${LCARS_ELIXIR_PREFIX}${PIN}/bin"
+  printf '#!/usr/bin/env bash\necho "%s"\n' "$PIN" > "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
+  chmod 0755 "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir"
+  # CAS 1 : NOTRE lien pointe sur un autre arbre (le poste du 2026-09-07)
+  mkdir -p "${LCARS_ELIXIR_PREFIX}1.18.4/bin"
+  printf '#!/usr/bin/env bash\necho "1.18.4"\n' > "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
+  chmod 0755 "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir"
+  ln -sf "${LCARS_ELIXIR_PREFIX}1.18.4/bin/elixir" "$PROV_LINK_DIR/elixir"
+  run bash -c "set -uo pipefail; export PATH=\"$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
+  [[ "$output" == *"c'est NOTRE lien $PROV_LINK_DIR/elixir qui pointe sur un autre arbre"* ]]
+  refute_out 'est devant .* dans le PATH ; c'"'"'est LUI qui compile' <<<"$output"
+  # et le drift sur l'arbre dit ce que converger ferait
+  [[ "$output" == *"${LCARS_ELIXIR_PREFIX}1.18.4"*"RETIRE (rm -rf)"* ]]
+  # CAS 2 : notre lien est bon, mais un elixir d'ailleurs passe avant
+  ln -sf "${LCARS_ELIXIR_PREFIX}${PIN}/bin/elixir" "$PROV_LINK_DIR/elixir"
+  local devant="$BATS_TEST_TMPDIR/devant"; mkdir -p "$devant"
+  printf '#!/usr/bin/env bash\necho "1.18.3"\n' > "$devant/elixir"; chmod 0755 "$devant/elixir"
+  run bash -c "set -uo pipefail; export PATH=\"$devant:$PROV_LINK_DIR:$bin:\$PATH\"; source <(sed '/^case \"\${1:?usage/,\$d' '$MOD'); prov_delivery_is_binary() { return 1; }; check 2>&1"
+  [[ "$output" == *"$devant/elixir"*"est devant $PROV_LINK_DIR dans le PATH ; c'est LUI qui compile"* ]]
+  refute_out 'NOTRE lien' <<<"$output"
+}

@@ -117,7 +117,11 @@ check_reliquats() {
     p_drift "lien(s) Elixir vers un arbre qui n'est pas le pin, DEVANT apt dans le PATH : ${old_links[*]} — c'est LUI qui compile"
   fi
   if [[ "${#old_trees[@]}" -gt 0 ]]; then
-    p_drift "arbre(s) Elixir d'une autre version que le pin $PROV_ELIXIR_PIN : ${old_trees[*]}"
+    # Le drift DIT ce que converger ferait : `apply` retire ces arbres (rm -rf) une fois le pin
+    # debout. Sur une machine qui garde deux versions a dessein (un poste de dev qui doit encore
+    # batir une branche d'avant le bump), la convergence n'est PAS le geste voulu — et l'operateur
+    # ne peut le savoir que si le drift le nomme.
+    p_drift "arbre(s) Elixir d'une autre version que le pin $PROV_ELIXIR_PIN : ${old_trees[*]} — « provision apply » les RETIRE (rm -rf) une fois le pin debout"
   fi
 }
 
@@ -148,7 +152,16 @@ check() {
   if [[ "$posee" != "$PROV_ELIXIR_PIN" ]]; then
     p_drift "Elixir $PROV_ELIXIR_PIN non posé ($ELIXIR_HOME) — l'apply le télécharge (zip officiel, sha256 épinglé)"
   elif [[ "$ev" != "$PROV_ELIXIR_PIN" ]]; then
-    p_drift "Elixir $PROV_ELIXIR_PIN est posé mais « elixir » répond ${ev} ($(command -v elixir 2>/dev/null || echo 'introuvable')) — un autre elixir est devant $PROV_LINK_DIR dans le PATH"
+    # ⚠ DEUX CAUSES DISTINCTES, ET LE MESSAGE DOIT DIRE LAQUELLE. « un autre elixir devant nous dans
+    # le PATH » et « NOTRE lien pointe sur un autre arbre » demandent deux gestes opposés : retirer
+    # ce qui masque, ou refaire le lien. Dit au hasard, l'operateur cherche du cote ou il n'y a rien
+    # (mesure du 2026-09-07 sur le poste : le lien pointait sur 1.18.4, le message accusait le PATH).
+    local qui; qui="$(command -v elixir 2>/dev/null || true)"
+    if [[ -n "$qui" && "$qui" == "$PROV_LINK_DIR"/* ]]; then
+      p_drift "Elixir $PROV_ELIXIR_PIN est posé mais « elixir » répond ${ev} — c'est NOTRE lien $qui qui pointe sur un autre arbre ($(readlink -f "$qui" 2>/dev/null || echo '?')) ; l'apply le refait pointer sur le pin"
+    else
+      p_drift "Elixir $PROV_ELIXIR_PIN est posé mais « elixir » répond ${ev} (${qui:-introuvable}) — un autre elixir est devant $PROV_LINK_DIR dans le PATH ; c'est LUI qui compile"
+    fi
   else
     local built otp; built="$(elixir_built_for)"; otp="$(otp_release)"
     if [[ "$built" == "$otp" ]]; then
