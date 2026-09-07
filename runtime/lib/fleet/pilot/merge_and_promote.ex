@@ -264,7 +264,19 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # review. A closing comment is the trace an operator reads months later; one that names
     # approvers who do not exist is worse than no comment, under a line that says "nothing is
     # faked".
-    approvers = approving_judges(forge, repo, pr_number, forge_opts)
+    approvers =
+      case approving_judges(forge, repo, pr_number, forge_opts) do
+        {:ok, logins} ->
+          logins
+
+        :unreadable ->
+          Logger.warning(
+            "MergeAndPromote: #{repo}##{pr_number} jury UNREADABLE at seal time — the comment " <>
+              "claims NO advice instead of claiming there was none; read the PR reviews yourself"
+          )
+
+          :unreadable
+      end
 
     # `wall` VOYAGE JUSQU'AU COMMENTAIRE : sans lui, la ligne de validation affirmerait « le mur a
     # été franchi » sur le chemin zéro-juge sans rien savoir de lui.
@@ -273,7 +285,14 @@ defmodule Fleet.Pilot.MergeAndPromote do
     # c'est le CONSTAT : la forge tient le registre des runs par `head_sha`, donc « personne n'a
     # mesure cette tete » se lit sans aucun etat local. Meilleur effort — une lecture ratee rend
     # `:unknown` et n'ecrit rien plutot que d'affirmer une absence qu'on n'a pas etablie.
-    probe = probe_state(forge, repo, pr_number, forge_opts)
+    # La sonde n'est lue QUE si sa reponse peut etre ecrite : `probe_note` n'ecrit ni sur un jury
+    # vide (personne n'a juge, donc personne n'a manque de mesurer) ni sur un jury illisible (il n'y
+    # a pas d'avis au-dessus dont on dirait la base etroite). Deux lectures forge economisees sur
+    # tout sceau sans jury — cinq des huit cartes livrees n'en posent aucun.
+    probe =
+      if approvers in [[], :unreadable],
+        do: :unknown,
+        else: probe_state(forge, repo, pr_number, forge_opts)
 
     body =
       promote_comment(issue_n, pr_number, producer, approvers, wall, method, probe) <>
@@ -790,15 +809,17 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
   `approvers` is the list of accounts whose APPROVED review was actually read on the PR. Empty is a
   legitimate, frequent state — a zero-judge card (`workshop-direct`) makes the direct seal NOMINAL — and
-  it must READ as that state, not as a jury that stayed silent. The two cases print different
-  sentences on purpose: an operator reading this comment months later must be able to tell a
-  verdict from an absence of verdict without opening the PR.
+  it must READ as that state, not as a jury that stayed silent. `:unreadable` is a THIRD state: the
+  forge did not answer, so NOTHING is known about the jury — neither that it approved nor that there
+  was none. The three cases print different sentences on purpose: an operator reading this comment
+  months later must be able to tell a verdict from an absence of verdict, and both from a read that
+  never happened, without opening the PR.
   """
   @spec promote_comment(
           integer(),
           integer(),
           String.t(),
-          [String.t()],
+          [String.t()] | :unreadable,
           :ok | {:skipped, term()},
           String.t(),
           :probed | :unprobed | :unknown
@@ -845,6 +866,22 @@ defmodule Fleet.Pilot.MergeAndPromote do
   #
   # ⚖ « AVIS DE », JAMAIS « VALIDÉE PAR » : un juge rend un AVIS, l'ACCEPTATION appartient au rail
   # qui signe ce commentaire meme. L'autre formule attribuerait l'acte du signataire a ceux qu'il lit.
+  # ⚠ N'AFFIRMER RIEN SUR LE JURY QU'ON N'A PAS PU LIRE. Ces deux clauses existent pour que le repli
+  # d'une lecture forge ne se lise plus « la carte ne pose aucun juge, nominal ». Ce qui EST etabli
+  # — le mur de provenance, lecture independante — est garde ; l'action possible est nommee, parce
+  # que c'est la seule (aller lire les reviews sur la PR).
+  defp validation_line(:unreadable, :ok),
+    do:
+      "**Avis** : NON LU — l'état des reviews de cette PR n'a pas pu être obtenu de la forge au " <>
+        "moment du sceau. Ce merge n'est donc attesté ici par AUCUN avis ; allez les lire sur la " <>
+        "PR. Le mur de provenance, lui, a été franchi."
+
+  defp validation_line(:unreadable, {:skipped, why}),
+    do:
+      "**Avis** : NON LU — l'état des reviews n'a pas pu être obtenu de la forge, et le mur de " <>
+        "provenance **n'a PAS tourné** (`#{inspect(why)}`). Rien n'atteste ce merge dans ce " <>
+        "commentaire."
+
   defp validation_line([], :ok),
     do:
       "**Avis de** : personne — la carte de ce ticket ne pose **aucun juge** (chemin zéro-juge, " <>
@@ -865,7 +902,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
 
   # The interim note is about branch-protection REQUIRING approvals. On a zero-judge path there are
   # none to require: printing it there would contradict the line above it in the same comment.
-  defp interim_note([]), do: ""
+  # Idem pour la note de branch-protection : elle parle d'approbations EXIGEES. Sans avis lu, on ne
+  # sait pas s'il y en avait a exiger.
+  defp interim_note(approvers) when approvers in [[], :unreadable], do: ""
 
   # ⚠ CETTE NOTE NE DOIT NOMMER AUCUNE HABILITATION. Ecrire ici « puis le `gatekeeper` (habilité au
   # merge) scelle » contredit, trois lignes plus bas, le « Fusionnée par : le rail merge (`chief`) »
@@ -914,7 +953,9 @@ defmodule Fleet.Pilot.MergeAndPromote do
   #
   # ZERO JUGE => RIEN NON PLUS. Sur une carte sans jury (`workshop-direct`), l'absence de sonde ne
   # dit rien : personne n'a juge, donc personne n'a manque de mesurer.
-  defp probe_note([], _probe), do: ""
+  # Ni sur un jury vide, ni sur un jury illisible : dans les deux cas il n'y a pas d'avis au-dessus
+  # dont on pourrait dire que la base est plus etroite.
+  defp probe_note(approvers, _probe) when approvers in [[], :unreadable], do: ""
 
   defp probe_note(_approvers, :unprobed),
     do:
@@ -938,16 +979,27 @@ defmodule Fleet.Pilot.MergeAndPromote do
   # properly needs the merged sha threaded down through `merge_and_promote/8` → `do_seal/9`, or a
   # second forge read on a best-effort post-merge path; neither is this fiche's subject, and the
   # decision path it protects is `step_dispatcher`, which is fail-closed.
+  # ⚠ DEUX ETATS, DEUX VALEURS — et c'est tout l'objet de cette fonction. Un repli sur `[]` confond
+  # « la carte ne pose AUCUN juge » avec « je n'ai pas su LIRE le jury », et `validation_line([], …)`
+  # ecrit alors sur le ticket que la carte ne pose aucun juge, « nominal ». Sur un ticket qui en a
+  # un, et dans la seule piece qui atteste pourquoi ce merge etait legitime.
+  #
+  # La sonde, dans ce meme module, se donne trois valeurs (`:probed` / `:unprobed` / `:unknown`) et
+  # n'ecrit que sur la deuxieme. Le jury n'en avait que deux. L'asymetrie etait un oubli, pas une
+  # regle : elle est levee ici.
+  @spec approving_judges(module(), String.t(), integer(), keyword()) ::
+          {:ok, [String.t()]} | :unreadable
   defp approving_judges(forge, repo, pr_number, forge_opts) do
     case forge.pr_review_state(repo, pr_number, Keyword.put(forge_opts, :head_sha, :unscoped)) do
       {:ok, %{verdicts: verdicts}} when is_map(verdicts) ->
-        verdicts
-        |> Enum.filter(fn {_login, verdict} -> verdict == :approved end)
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.sort()
+        {:ok,
+         verdicts
+         |> Enum.filter(fn {_login, verdict} -> verdict == :approved end)
+         |> Enum.map(&elem(&1, 0))
+         |> Enum.sort()}
 
       _ ->
-        []
+        :unreadable
     end
   end
 end

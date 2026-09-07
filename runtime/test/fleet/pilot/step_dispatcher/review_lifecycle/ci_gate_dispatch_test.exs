@@ -11,7 +11,6 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
   use ExUnit.Case, async: false
 
   alias Fleet.Pilot.StepDispatcher
-  alias Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate
 
   import Fleet.Pilot.DispatcherBench
 

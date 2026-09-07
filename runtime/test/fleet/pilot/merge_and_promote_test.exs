@@ -688,14 +688,17 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
       refute body =~ "Aucune sonde"
     end
 
-    test "zéro juge → rien n'est annoté (et la sonde EST tout de même interrogée)" do
-      # ⚠ CE TEST ÉTAIT TAUTOLOGIQUE : il installait `Unprobed` alors que la clause
-      # `probe_note([], _)` court-circuite AVANT de regarder l'état de sonde. L'override n'était
-      # jamais consulté, et le test passait avec n'importe quoi — y compris rien.
+    test "zéro juge → rien n'est annoté, et la lecture de sonde n'est pas dépensée" do
+      # ⚠ CE TEST A ETE TAUTOLOGIQUE, PUIS FAUX, ET C'EST LA MEME LIGNE QUI L'A CORRIGE DEUX FOIS.
+      # Il installait `Unprobed` alors que `probe_note([], _)` court-circuite APRES la lecture : le
+      # remplacant n'etait jamais consulte (tautologie), et la promesse « la sonde n'est meme pas
+      # interrogee » etait fausse contre le code (mesure du 2026-09-07 : `{:probed_asked, …}`
+      # arrivait bel et bien). Le sceau depensait deux lectures forge dont il jetait le resultat.
       #
-      # Il mesure maintenant la propriété qui compte VRAIMENT : sur un dépôt sans jury, aucun
-      # verdict n'a été rendu, donc l'absence de sonde ne dit rien — et le sceau ne dépense même
-      # pas la lecture forge pour s'en assurer.
+      # Depuis la separation des deux etats du jury (`{:ok, logins}` / `:unreadable`), la sonde
+      # n'est lue QUE si sa reponse peut etre ecrite. `Unprobed` reste installe EXPRES : il signale
+      # son appel, donc le `refute` ci-dessous distingue « pas interrogee » de « interrogee et
+      # muette ». Sans ce signal, l'assertion serait vraie pour n'importe quel court-circuit.
       TestEnv.put_env_restoring(:lcars_fleet, :forge_actions, Unprobed)
 
       assert :ok =
@@ -703,19 +706,117 @@ defmodule Fleet.Pilot.MergeAndPromoteTest do
                  base_branch: "main"
                )
 
-      # ⚠ CE TEMOIN PROMETTAIT « la sonde n'est meme pas INTERROGEE » ET C'EST FAUX CONTRE LE CODE.
-      # Mesure du 2026-09-07 : `{:probed_asked, "fleet/p", "deadbeef"}` arrive bel et bien. La
-      # lecture forge EST depensee sur une PR sans jury, et rien ne le voyait — le temoin jugeait
-      # l'absence d'une phrase dans le commentaire produit, jamais l'appel. Son commentaire d'avant
-      # decrivait un court-circuit (`probe_note([], _)`) qui arrive APRES la lecture, pas avant.
-      #
-      # Le code est vrai : ce temoin dit desormais ce que le sceau FAIT, et l'ecart est nomme au
-      # lieu d'etre tu. Ce qui reste vrai et qui compte : sans jury, aucun verdict n'a ete rendu,
-      # donc l'absence de sonde ne dit rien et RIEN n'est annote.
-      assert_received {:probed_asked, "fleet/p", "deadbeef"}
+      refute_received {:probed_asked, _repo, _sha}
 
+      # Ce qui reste vrai et qui compte : sans jury, aucun verdict n'a ete rendu, donc l'absence de
+      # sonde ne dit rien sur ce ticket, et RIEN n'est annote.
       assert_received {:comment, "fleet/p", 42, body, _}
       refute body =~ "Aucune sonde"
+    end
+  end
+
+  # ═══ LE JURY ILLISIBLE N'EST PAS UN ZERO-JURE ═══
+  #
+  # `approving_judges/4` repliait tout echec de lecture sur `[]`, et `[]` a deja un sens ECRIT sur
+  # le ticket : « la carte ne pose aucun juge (chemin zero-juge, nominal) ». Une forge qui tousse
+  # pendant le sceau faisait donc ecrire, dans la seule piece qui atteste la legitimite d'un merge,
+  # une affirmation fausse presentee comme normale — sur un ticket qui a un jury.
+  #
+  # Le defaut etait INVISIBLE depuis le temoin du rendu (`merge_and_promote_comment_test`), qui
+  # appelle `promote_comment(…, [], …)` en dur : les deux etats sont indiscernables A L'ENTREE de la
+  # fonction testee. Il fallait le mesurer d'ici, depuis la lecture forge.
+  describe "jury ILLISIBLE — le sceau ne l'ecrit pas comme un zero-jure" do
+    defmodule BlindJuryForge do
+      @moduledoc false
+      defdelegate count_comments_marked(r, n, p, o), to: OkForge
+      defdelegate post_comment(r, n, b, o), to: OkForge
+      defdelegate merge_pr(r, pr, o), to: OkForge
+      defdelegate set_stage(r, n, s, o), to: OkForge
+      defdelegate close_issue(r, n, o), to: OkForge
+      def get_route(_r, _n, _o), do: :none
+
+      # LA LECTURE DU JURY ECHOUE — tout l'objet de ce temoin. Le reste de la forge repond.
+      def pr_review_state(_repo, _n, _opts), do: {:error, {:http, 503, "forge down"}}
+
+      # Espionne : la sonde commence par lire la tete de la PR. Sans avis lisible au-dessus, cette
+      # lecture n'a plus rien a annoter, et le sceau ne doit pas la depenser.
+      def pr_refs(repo, pr, opts) do
+        send(self(), {:pr_refs_asked, repo, pr, opts})
+        {:ok, %{head_sha: "deadbeef", head_ref: "feat", base_sha: "cafe", base_ref: "main"}}
+      end
+    end
+
+    defp seal_with_blind_jury do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok =
+                   MergeAndPromote.merge_and_promote(
+                     BlindJuryForge,
+                     "fleet/p",
+                     7,
+                     42,
+                     "engineer",
+                     [],
+                     base_branch: "main"
+                   )
+        end)
+
+      assert_received {:comment, "fleet/p", 42, body, _}
+      {body, log}
+    end
+
+    test "le commentaire dit NON LU, et n'affirme NI juge NI zero-jure" do
+      {body, _log} = seal_with_blind_jury()
+
+      assert body =~ "NON LU"
+      assert body =~ "n'a pas pu être obtenu de la forge"
+
+      # LA MOITIE QUI COMPTE : c'est l'affirmation fausse qui etait le defaut, pas l'absence de
+      # phrase. Ces deux refute sont le texte exact que le repli sur `[]` faisait ecrire.
+      refute body =~ "aucun juge"
+      refute body =~ "nominal"
+      refute body =~ "**Avis de**"
+    end
+
+    test "le mur de provenance est rapporte a part, avec sa raison" do
+      # Le mur est une lecture INDEPENDANTE du jury : un operateur doit pouvoir distinguer « je
+      # n'ai pas su lire le jury » de « aucun controle n'a tourne ». Sur ce banc le mur ne tourne
+      # pas (`:no_head_branch` — il lui faut un worktree, cf. `merge_and_promote_worktree_test`),
+      # donc c'est la clause « mur non joue » qui est exercee ici ; la clause « mur franchi » l'est
+      # au niveau du rendu, dans `merge_and_promote_comment_test`.
+      {body, _log} = seal_with_blind_jury()
+
+      assert body =~ "le mur de provenance **n'a PAS tourné**"
+      assert body =~ ":no_head_branch"
+
+      # ⚠ L'ASSERTION QUI DISCRIMINE. Le zero-jure AVEC mur non joue produit une phrase voisine et
+      # de sens oppose — « ni jury, ni provenance » AFFIRME l'absence de jury. C'est exactement ce
+      # que le repli sur `[]` faisait ecrire ici.
+      refute body =~ "ni jury, ni provenance"
+      assert body =~ "Rien n'atteste ce merge dans ce commentaire"
+    end
+
+    test "aucune lecture de sonde n'est depensee — il n'y a pas d'avis au-dessus a annoter" do
+      {body, _log} = seal_with_blind_jury()
+
+      refute_received {:pr_refs_asked, _repo, _pr, _opts}
+      refute body =~ "Aucune sonde"
+    end
+
+    test "le journal porte le degrade — le ticket est pour l'humain, le log pour l'operateur" do
+      {_body, log} = seal_with_blind_jury()
+
+      assert log =~ "jury UNREADABLE at seal time"
+      assert log =~ "fleet/p#42"
+    end
+
+    test "la lecture ratee n'empeche RIEN — la brique est fusionnee et le ticket ferme" do
+      # Aucune reponse de ce chemin post-merge ne doit bloquer la promotion d'une brique deja
+      # fusionnee. Sans ce temoin, un futur durcissement du jury pourrait faire du sceau un mur.
+      {_body, _log} = seal_with_blind_jury()
+
+      assert_received {:merge, "fleet/p", 7, _}
+      assert_received {:close_issue, "fleet/p", 42, _}
     end
   end
 end

@@ -29,6 +29,47 @@ defmodule Fleet.Pilot.MergeAndPromoteCommentTest do
     end
   end
 
+  describe "jury ILLISIBLE — la lecture forge a echoue, et ce n'est PAS un zero-juge" do
+    # LE DEFAUT QUE CES DEUX TEMOINS FERMENT. `approving_judges/4` repliait tout echec de
+    # `pr_review_state/3` sur `[]` — la meme valeur que « la carte ne pose aucun juge ». Une forge
+    # qui tousse pendant le sceau faisait donc ecrire sur un ticket QUI A UN JURY que la carte n'en
+    # pose aucun, et que c'est nominal, dans la seule piece qui atteste pourquoi ce merge etait
+    # legitime.
+    #
+    # Aucun temoin ne pouvait le voir : ceux du zero-juge passent `[]` EN DUR, donc ils mesurent le
+    # rendu, jamais la resolution. Les deux etats etaient indiscernables a l'entree de la fonction
+    # testee.
+    test "n'affirme AUCUN juge, garde ce qui est etabli, et nomme l'action possible" do
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", :unreadable)
+
+      refute body =~ "aucun juge"
+      refute body =~ "nominal"
+      refute body =~ "APPROUVÉ"
+      refute body =~ "APPROVED"
+
+      assert body =~ "NON LU"
+      assert body =~ "n'a pas pu être obtenu de la forge"
+      # Ce qui EST etabli reste dit : le mur est une lecture independante.
+      assert body =~ "provenance"
+      # L'action possible, nommee — c'est la seule.
+      assert body =~ "allez les lire sur la PR"
+    end
+
+    test "mur NON joue : le commentaire dit que RIEN n'atteste ce merge" do
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", :unreadable, {:skipped, :no_head})
+
+      assert body =~ "NON LU"
+      assert body =~ "n'a PAS tourné"
+      assert body =~ "Rien n'atteste ce merge"
+      refute body =~ "aucun juge"
+    end
+
+    test "la note de branch-protection ne s'imprime pas — on ignore s'il y avait des approbations a exiger" do
+      body = MergeAndPromote.promote_comment(4, 5, "scribe", :unreadable)
+      refute body =~ "EXIGE les approbations"
+    end
+  end
+
   describe "judged card" do
     test "names the accounts that actually approved" do
       body = MergeAndPromote.promote_comment(7, 9, "engineer", ["qualifier", "reviewer"])
