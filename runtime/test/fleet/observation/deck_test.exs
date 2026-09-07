@@ -136,12 +136,48 @@ defmodule Fleet.Observation.DeckTest do
     end
   end
 
+  # Un pod qui REPOND. `list_pods/0` enumere le Registry puis appelle chaque entree (`:info`) : une
+  # entree muette n'est pas un stub bon marche, c'est un timeout de cinq secondes pour tout
+  # enumerateur de la suite. `spawn_link` : le porteur meurt avec le processus de test et le
+  # Registry le desinscrit tout seul — pas de teardown, donc pas de teardown qui sonde.
+  defp seme_un_pod(info) do
+    moi = self()
+
+    spawn_link(fn ->
+      {:ok, _} = Registry.register(Fleet.Spawner.Registry, info.pod_id, %{})
+      send(moi, {:inscrit, info.pod_id})
+      boucle_info(info)
+    end)
+
+    assert_receive {:inscrit, _}, 1_000
+  end
+
+  defp boucle_info(info) do
+    receive do
+      {:"$gen_call", from, :info} ->
+        GenServer.reply(from, info)
+        boucle_info(info)
+
+      _ ->
+        boucle_info(info)
+    end
+  end
+
   test "GET /api/pods → 200 JSON {pods, count} (read-only, JSON-safe)" do
+    # UN POD, SINON CE TEMOIN NE MESURE RIEN. Sur une flotte vide, `pods` vaut `[]` et
+    # `count == length(pods)` est vrai sur le vide : remplacer `Fleet.Spawner.list_pods()` par `[]`
+    # laissait ce temoin ET LA SUITE ENTIERE verts — mutation jouee contre les 3576 temoins le
+    # 2026-09-07. Ce qui se pince est que le listing RAPPORTE ce qui tourne, pas sa forme.
+    pod_id = "pod-deck-#{System.unique_integer([:positive])}"
+    seme_un_pod(%{pod_id: pod_id, role: "architect", phase: "running"})
+
     conn = call(:get, "/api/pods")
     assert %Plug.Conn{status: 200} = conn
     assert %{"pods" => pods, "count" => count} = Jason.decode!(conn.resp_body)
-    assert is_list(pods)
     assert count == length(pods)
+
+    assert Enum.any?(pods, &(&1["pod_id"] == pod_id)),
+           "le pod seme n'est pas dans le listing — /api/pods ne rapporte pas ce qui tourne"
   end
 
   test "GET /api/projection → 200 JSON (read-model off → empty projection + _status:unavailable, no crash)" do

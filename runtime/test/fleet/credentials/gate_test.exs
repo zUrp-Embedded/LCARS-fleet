@@ -70,7 +70,12 @@ defmodule Fleet.Credentials.GateTest do
                status = Gate.status(dir)
 
       assert path =~ ".credentials.json"
-      # Dashboard-safe: the status must never carry token material.
+
+      # Dashboard-safe: the status must never carry token material. THE KEY SET, not the absence of
+      # two strings — `refute inspect(status) =~ "tok-abc"` accepts anything the status invents that
+      # is not that literal, a `token_prefix: String.slice(token, 0, 4)` included (mutation played
+      # 2026-09-07: it stayed green). A closed list of keys refuses what nobody thought of.
+      assert status |> Map.keys() |> Enum.sort() == [:expires_at_ms, :path, :status]
       refute inspect(status) =~ "tok-abc"
       refute inspect(status) =~ "ref-x"
     end

@@ -372,7 +372,12 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGate do
     end
   end
 
-  @doc "The deadline, exposed so a test names the same number the code uses."
+  @doc """
+  The deadline, exposed so ONE witness can pin it — `ci_gate_test`, describe "the deadline is the
+  point". NOT for fixtures to borrow: a fixture built on `pending_deadline_sec() + 60` is green for
+  ANY value of the constant, and four of them were (measured 2026-09-07: 45 min → 18 h, whole suite
+  green). Fixtures carry their own number; this reader exists so exactly one place compares.
+  """
   @spec pending_deadline_sec() :: pos_integer()
   def pending_deadline_sec, do: @pending_deadline_sec
 end

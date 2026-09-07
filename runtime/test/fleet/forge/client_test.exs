@@ -2100,6 +2100,14 @@ defmodule Fleet.Forge.ClientTest do
         })
 
       assert :ok = ForgeClient.merge_pr("fleet/proj", 9, merge_opts(handlers))
+
+      # LA METHODE EST LA MOITIE QUI COMPTE, ET ELLE N'ETAIT PINCEE PAR PERSONNE. Le handler ne lit
+      # pas le corps, donc `merge_pr/3` scellant en `merge` au lieu de `rebase` laissait ce temoin
+      # ET LA SUITE ENTIERE verts — mutation jouee contre les 3576 temoins le 2026-09-07. Le
+      # harnais poste deja la charge envoyee (`:fake_forge_body`) : il n'y avait qu'a la lire.
+      # `"do"` et non `"Do"` : la cle du contrat `MergePullRequestOption`, cf. `Merge.do_merge/6`.
+      assert_received {:fake_forge_body, "POST", "/api/v1/repos/fleet/proj/pulls/9/merge", raw}
+      assert %{"do" => "rebase"} = JSON.decode!(raw)
     end
 
     test "transient \"try again later\" (405) THEN 200 → retry → :ok (mergeability being computed, live morse)" do

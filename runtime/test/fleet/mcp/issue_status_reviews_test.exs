@@ -240,17 +240,22 @@ defmodule Fleet.MCP.IssueStatusReviewsTest do
       # et la passe à la lecture d'état au lieu de rendre un verdict de jury nu.
       #
       # Ce banc n'a pas de route gravée (`get_route → :none`) : la politique résolue est celle de
-      # la carte du PROJET. La valeur importe moins que le fait qu'une clé `:verdict_policy` soit
-      # présente — c'est elle qui distingue « la courbe a été consultée » de « personne n'a
-      # demandé », et c'est cette seconde forme qui laissait diverger les deux lecteurs.
+      # la carte du PROJET, et c'est `%{"block_at" => "critical"}` (mesuré).
+      #
+      # ⚠ ET C'EST LA VALEUR QU'ON ÉPINGLE, PAS LA PRÉSENCE DE LA CLÉ. « Une clé `:verdict_policy`
+      # est présente » était la formulation d'avant, et elle ne distinguait pas ce qu'elle
+      # prétendait distinguer : passer `verdict_policy: nil` au lieu de la politique du projet la
+      # laissait verte — et la SUITE ENTIÈRE avec elle (mutation jouée contre les 3576 témoins le
+      # 2026-09-07). Une clé présente ne prouve pas qu'on a demandé ; une clé qui porte la réponse,
+      # si.
       Process.put(:review_state, {:ok, %{verdicts: %{}, reviewers: [], records: []}})
       _ = status()
 
       assert_received {:review_state_opts, opts}
 
-      assert Keyword.has_key?(opts, :verdict_policy),
-             "la surface arch a lu l'état du jury SANS la courbe : elle peut afficher approuvé " <>
-               "pendant que le gate renvoie en rework"
+      assert Keyword.fetch!(opts, :verdict_policy) == %{"block_at" => "critical"},
+             "la surface arch a lu l'état du jury SANS la courbe du projet : elle peut afficher " <>
+               "approuvé pendant que le gate renvoie en rework"
 
       assert Keyword.has_key?(opts, :head_sha),
              "témoin : le scoping par commit voyage toujours par la même porte"

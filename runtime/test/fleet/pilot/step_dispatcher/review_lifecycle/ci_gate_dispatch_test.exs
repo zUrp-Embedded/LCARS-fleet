@@ -252,7 +252,9 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateDispatchTest do
       # deja de son cote. Meme horloge, meme nombre, une seule doctrine.
       vieux =
         DateTime.utc_now()
-        |> DateTime.add(-(CiGate.pending_deadline_sec() + 60), :second)
+        # La borne EN DUR, jamais lue dans le sujet : `ci_gate_test` porte le temoin qui la nomme
+        # (mesure du 2026-09-07 — empruntee, elle rendait vert un passage de 45 min a 18 h).
+        |> DateTime.add(-(45 * 60 + 60), :second)
         |> DateTime.to_iso8601()
 
       opts =

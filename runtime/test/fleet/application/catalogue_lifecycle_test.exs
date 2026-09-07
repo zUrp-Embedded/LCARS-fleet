@@ -369,6 +369,24 @@ defmodule Fleet.Application.CatalogueLifecycleTest do
       assert src =~ "defp with_transport",
              "le demarrage du transport a disparu — les portes eval rendront une ArgumentError"
 
+      # ⚠ LE NOM NE SUFFIT PAS, ET LA MUTATION L'A PROUVE. Vider `with_transport` en `fun.()`
+      # garde le nom, garde les deux appels ci-dessous, et laisse la SUITE ENTIERE verte — le pool
+      # Finch n'existe plus, l'`ArgumentError: unknown registry` revient, et rien ne rougit
+      # (mutation jouee contre les 3576 temoins le 2026-09-07). On epingle donc ce que la fonction
+      # FAIT, pas seulement qu'elle existe : demarrer `:req` et poser le pool de `Fleet.Forge`.
+      corps_transport =
+        src
+        |> String.split("defp with_transport", parts: 2)
+        |> List.last()
+        |> String.split(~r/\n  defp? /, parts: 2)
+        |> hd()
+
+      assert corps_transport =~ "ensure_all_started(:req)",
+             "with_transport ne demarre plus `:req` — le nom reste, le transport non"
+
+      assert corps_transport =~ "finch_spec",
+             "with_transport ne pose plus le pool Finch — `unknown registry` revient"
+
       # ⚠ CE TEMOIN MESURAIT UNE DISTANCE EN CARACTERES (`String.slice(corps, 0, 200)`), et une
       # distance n'est pas une structure : ajouter un commentaire en tete d'une porte — un geste
       # qui ne touche a aucun appel — poussait `with_transport` hors de la fenetre et rendait le

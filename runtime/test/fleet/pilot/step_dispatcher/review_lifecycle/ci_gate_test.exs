@@ -227,8 +227,20 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
   end
 
   describe "the deadline is the point" do
+    # ⚠ LA BORNE EST ECRITE ICI, EN DUR, ET C'EST TOUT L'OBJET DE CE TEMOIN. Les fixtures ci-dessous
+    # la lisaient dans le module qu'elles testent (`CiGate.pending_deadline_sec() + 60`) : vertes
+    # POUR TOUTE VALEUR de la constante. Mesure du 2026-09-07 — la porter de 45 min a 18 h laissait
+    # les deux fichiers de temoins ET la suite entiere verts. Une fixture qui emprunte sa borne au
+    # sujet ne mesure pas la borne, elle mesure la soustraction.
+    @deadline_sec 45 * 60
+
+    test "l'echeance EST de 45 minutes — le seul endroit qui nomme le nombre" do
+      assert CiGate.pending_deadline_sec() == @deadline_sec,
+             "l'echeance a bouge : si c'est voulu, ce temoin est l'endroit ou on le dit"
+    end
+
     test "pending past the deadline escalates instead of waiting one more tick forever" do
-      stale = Forge.iso_ago(CiGate.pending_deadline_sec() + 60)
+      stale = Forge.iso_ago(@deadline_sec + 60)
 
       assert {:escalate, {:ci_stalled, :pending}, message} =
                decide(_ci: {:ok, :pending}, _updated_at: stale)
@@ -237,7 +249,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "an absent rail past the deadline escalates under its OWN name (:none, not :pending)" do
-      stale = Forge.iso_ago(CiGate.pending_deadline_sec() + 60)
+      stale = Forge.iso_ago(@deadline_sec + 60)
 
       assert {:escalate, {:ci_stalled, :none}, _} = decide(_ci: {:ok, :none}, _updated_at: stale)
     end
@@ -295,7 +307,7 @@ defmodule Fleet.Pilot.StepDispatcher.ReviewLifecycle.CiGateTest do
     end
 
     test "just under the deadline still waits — the bound is a threshold, not a mood" do
-      fresh = Forge.iso_ago(CiGate.pending_deadline_sec() - 60)
+      fresh = Forge.iso_ago(@deadline_sec - 60)
       assert {:wait, :ci_pending} = decide(_ci: {:ok, :pending}, _updated_at: fresh)
     end
 
